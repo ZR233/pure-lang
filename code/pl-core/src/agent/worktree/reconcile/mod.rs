@@ -424,11 +424,13 @@ fn pause_after_registration_remove(path: &Path) {
 fn pause_after_registration_remove(_path: &Path) {}
 
 #[cfg(test)]
+type RegistrationRemoveBarrier = (String, std::sync::Arc<std::sync::Barrier>);
+
+#[cfg(test)]
 fn after_registration_remove_barrier()
--> &'static std::sync::Mutex<Option<(String, std::sync::Arc<std::sync::Barrier>)>> {
-    static BARRIER: std::sync::OnceLock<
-        std::sync::Mutex<Option<(String, std::sync::Arc<std::sync::Barrier>)>>,
-    > = std::sync::OnceLock::new();
+-> &'static std::sync::Mutex<Option<RegistrationRemoveBarrier>> {
+    static BARRIER: std::sync::OnceLock<std::sync::Mutex<Option<RegistrationRemoveBarrier>>> =
+        std::sync::OnceLock::new();
     BARRIER.get_or_init(|| std::sync::Mutex::new(None))
 }
 
