@@ -28,20 +28,15 @@ class AgentDetailPanel extends StatelessWidget {
       children: [
         _AgentDetailHeader(count: agents.length, runningCount: runningCount),
         const SizedBox(height: 12),
-        ConstrainedBox(
-          constraints: const BoxConstraints(maxHeight: 360),
-          child: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                for (final agent in agents)
-                  Padding(
-                    padding: EdgeInsets.only(bottom: 6),
-                    child: AgentTreeCard(agent: agent),
-                  ),
-              ],
-            ),
-          ),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (final agent in agents)
+              Padding(
+                padding: EdgeInsets.only(bottom: 6),
+                child: AgentTreeCard(agent: agent),
+              ),
+          ],
         ),
       ],
     );
