@@ -47,7 +47,7 @@ impl AgentLifecycleHook for TaskAgentLifecycleHook {
     ) -> Pin<Box<dyn std::future::Future<Output = PureResult<AgentSpawnPreparation>> + Send + 'a>>
     {
         Box::pin(async move {
-            self.validate_request(request)?;
+            self.validate_owner(request)?;
             match request.role.as_str() {
                 "explorer" => {
                     if !request.owned_paths.is_empty() {
@@ -229,12 +229,9 @@ impl AgentLifecycleHook for TaskAgentLifecycleHook {
 }
 
 impl TaskAgentLifecycleHook {
-    fn validate_request(&self, request: &AgentSpawnLifecycleRequest) -> PureResult<()> {
-        if request.session_id != self.session_id {
-            return Err(spawn_error(
-                "spawn session does not match the task coordinator",
-            ));
-        }
+    fn validate_owner(&self, request: &AgentSpawnLifecycleRequest) -> PureResult<()> {
+        // request.session_id is the tool execution scope (the root turn id).
+        // The Studio session boundary is fixed by this per-session hook.
         if request.owner_path != "/root" {
             return Err(spawn_error(
                 "only the root Task planner may create task agents",
@@ -1067,18 +1064,18 @@ mod tests {
             .unwrap();
         let left_hook = coordinator.lifecycle_hook(&left_session.id);
         let right_hook = coordinator.lifecycle_hook(&right_session.id);
-        let request = |session_id: &str, task_name: &str| AgentSpawnLifecycleRequest {
+        let request = |turn_id: &str, task_name: &str| AgentSpawnLifecycleRequest {
             agent_id: "agent-1".to_string(),
             agent_path: format!("/root/{task_name}"),
             owner_path: "/root".to_string(),
-            session_id: session_id.to_string(),
+            session_id: turn_id.to_string(),
             task_name: task_name.to_string(),
             role: "executor".to_string(),
             owned_paths: vec!["code/**".to_string()],
             requested_by_call_id: format!("call-{task_name}"),
         };
-        let left_request = request(&left_session.id, "left");
-        let right_request = request(&right_session.id, "right");
+        let left_request = request("turn-left", "left");
+        let right_request = request("turn-right", "right");
         let left_preparation = left_hook.prepare_spawn(&left_request).await.unwrap();
         let right_preparation = right_hook.prepare_spawn(&right_request).await.unwrap();
 

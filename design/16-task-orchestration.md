@@ -50,6 +50,10 @@ agent；不同 session 完全隔离。Simple mode 仍使用 turn-local superviso
 generation 在该 session 首次创建 `TaskRun` 时绑定 run id；run 终态且旧 turn 已静止后，
 下一个 root turn 才安全轮换 generation，避免旧 agent path 泄漏到新任务。
 
+Task lifecycle hook 在安装时绑定 Studio session，并通过该 per-session supervisor 边界选择
+持久 TaskRun；通用 `AgentSpawnLifecycleRequest.sessionId` 保持工具执行 turn scope 语义，
+不得被误作 Studio session 身份或与 hook 绑定值比较。
+
 root turn 结束或 UI 仅切换所选 session 不销毁 Task agent runtime。进程 shutdown 先停止
 root turn 与 continuation scheduler，再复制 supervisor 列表、释放 registry 锁，并逐个
 cancel-and-wait/quiesce；该路径保留 durable worktree，不调用会 discard 且吞错的通用
