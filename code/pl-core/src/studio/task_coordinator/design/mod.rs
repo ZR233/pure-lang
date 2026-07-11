@@ -80,6 +80,22 @@ impl TaskCoordinator {
     }
 
     #[cfg(test)]
+    pub(crate) fn set_design_after_head_persist_barrier(&self, barrier: DesignCommitTestBarrier) {
+        *self
+            .design_after_head_persist_barrier
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(barrier);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_design_before_rollback_barrier(&self, barrier: DesignCommitTestBarrier) {
+        *self
+            .design_before_rollback_barrier
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(barrier);
+    }
+
+    #[cfg(test)]
     pub(crate) fn fail_design_compensation_for_test(&self) {
         self.fail_design_compensation
             .store(true, std::sync::atomic::Ordering::SeqCst);
@@ -102,6 +118,32 @@ impl TaskCoordinator {
     async fn wait_before_design_head_persist(&self) {
         let barrier = self
             .design_before_head_persist_barrier
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        if let Some(barrier) = barrier {
+            barrier.committed.wait().await;
+            barrier.release.wait().await;
+        }
+    }
+
+    #[cfg(test)]
+    async fn wait_after_design_head_persist(&self) {
+        let barrier = self
+            .design_after_head_persist_barrier
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        if let Some(barrier) = barrier {
+            barrier.committed.wait().await;
+            barrier.release.wait().await;
+        }
+    }
+
+    #[cfg(test)]
+    async fn wait_before_design_rollback(&self) {
+        let barrier = self
+            .design_before_rollback_barrier
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
@@ -252,11 +294,32 @@ impl TaskCoordinator {
         let validated_tree = match commit_result {
             Ok(validated_tree) => validated_tree,
             Err(operation_error) => {
-                if let Err(cleanup_error) =
+                #[cfg(test)]
+                self.wait_before_design_rollback().await;
+                if let Err(rollback_error) =
                     rollback_paths(workspace, originals, &run.expected_head).await
                 {
+                    self.block_run(
+                        run,
+                        format!(
+                            "design update failed: {operation_error}; rollback could not safely restore the repository: {rollback_error}; Git state was preserved"
+                        ),
+                    )
+                    .await?;
                     bail!(
-                        "design update failed: {operation_error}; rollback also failed: {cleanup_error}"
+                        "design update failed: {operation_error}; rollback could not safely restore the repository and the task run was blocked: {rollback_error}"
+                    );
+                }
+                if let Err(cleanliness_error) = ensure_repository_clean(workspace).await {
+                    self.block_run(
+                        run,
+                        format!(
+                            "design update failed: {operation_error}; repository was not clean after rollback: {cleanliness_error}; residual Git state was preserved"
+                        ),
+                    )
+                    .await?;
+                    bail!(
+                        "design update failed: {operation_error}; repository was not clean after rollback and the task run was blocked: {cleanliness_error}"
                     );
                 }
                 return Err(operation_error);
@@ -312,12 +375,18 @@ impl TaskCoordinator {
             .advance_task_design_head(&run.id, &run.expected_head, &design_commit)
             .await
         {
-            Ok(true) => Ok(DesignUpdateOutput {
-                task_run_id: run.id.clone(),
-                previous_head: run.expected_head.clone(),
-                design_commit,
-                changed_files,
-            }),
+            Ok(true) => {
+                #[cfg(test)]
+                self.wait_after_design_head_persist().await;
+                self.verify_durable_exact_scope(run, &design_commit, "design commit durable CAS")
+                    .await?;
+                Ok(DesignUpdateOutput {
+                    task_run_id: run.id.clone(),
+                    previous_head: run.expected_head.clone(),
+                    design_commit,
+                    changed_files,
+                })
+            }
             Ok(false) => {
                 self.compensate_or_block(run, originals, &design_commit, "design head CAS failed")
                     .await?;
@@ -376,6 +445,32 @@ impl TaskCoordinator {
                 bail!("{reason}; exact commit was compensated")
             }
         }
+    }
+
+    async fn verify_durable_exact_scope(
+        &self,
+        run: &TaskRunRecord,
+        commit: &str,
+        operation: &str,
+    ) -> Result<()> {
+        let failure = match inspect_repository(Path::new(&run.workspace_root), true).await {
+            Ok(snapshot) if exact_run_scope(run, commit).matches(&snapshot) => return Ok(()),
+            Ok(snapshot) => format!(
+                "expected branch {} at {commit}, found branch {} at {}",
+                run.branch, snapshot.branch, snapshot.head
+            ),
+            Err(error) => error.to_string(),
+        };
+        self.block_run(
+            run,
+            format!(
+                "{operation} advanced durable task and lease heads, but final exact repository scope verification failed: {failure}; external Git state was preserved"
+            ),
+        )
+        .await?;
+        bail!(
+            "{operation} advanced durable heads, but final exact repository scope verification failed and the task run was blocked: {failure}"
+        )
     }
 
     async fn compensate_or_block(

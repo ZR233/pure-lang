@@ -129,6 +129,11 @@ focused design commit 成功后，SQLite 在一个事务中以旧 HEAD 为 CAS�
 不得覆盖外部变化。durable CAS 成功前 allocation phase gate 始终关闭，工具成功本身
 不启动 continuation。
 
+durable CAS 成功后、工具返回成功前必须最后一次复验 clean workspace、workspace root、
+Git common dir、named branch 与 exact HEAD。若该窗口出现外部 commit、切分支或 dirty
+workspace，必须 block 精确 run 并保留外部现场；已经原子推进的 TaskRun/BranchLease HEAD
+继续记录本次 exact commit，不回退为旧 durable HEAD，也不得补偿或覆盖外部 Git 状态。
+
 `git commit`（包括受控 revert 的 focused commit）返回成功即进入 post-commit 边界；此后任何 HEAD、branch、
 status 或 diff 检查失败都不得再调用 pre-commit path rollback。coordinator 只接受能证明
 “当前 named branch HEAD 是本次提交”的 commit：它必须以旧 `expectedHead` 为唯一父提交，
@@ -136,6 +141,10 @@ commit diff 必须精确等于预先验证的 design paths，commit tree 必须�
 staged tree，且 index/worktree 没有 hook 或外部注入。
 不能完成该证明，或发现外部 clean commit、branch 变化、dirty workspace 时，必须 block
 精确 run 并保留现场；只有 exact commit 已证明且 HEAD/工作区仍安全时才能补偿。
+pre-commit 阶段失败时，design path rollback 必须在每个写/删动作前重新拒绝 symlink
+ancestor 并证明 canonical path 仍位于 workspace 内；rollback 后还必须证明整个 repository
+恢复 clean。hook 或外部并发留下 source residue、或安全路径证明失败时，必须 block 精确
+run、保留残留现场并报告诊断，不能把它当作普通工具失败。
 
 尚无 accepted source merge 且 base 之后只有本任务 design commit 时，取消操作通过
 创建受控 `git revert` commit 撤销设计（不 hard reset、不改写历史），再以同一事务推进
@@ -151,6 +160,8 @@ staged tree，且 index/worktree 没有 hook 或外部注入。
 `task_stop` 显式持有 branch mutation guard，在同一锁作用域内完成 revert、durable HEAD
 推进和 terminalization；executor allocation 也需经过该锁，因此不会在 revert 与终态
 写入之间基于仍可分配的 phase 创建 work unit。
+显式传入的 branch mutation guard 必须绑定创建它的 coordinator；其他 coordinator 的
+guard 不得授权 locked mutation API。
 
 当前编码轮全部交付合并后，planner 调用 `task_request_review` 间接创建只读 reviewer。
 reviewer 初始上下文包含 plan、任务 diff、代理结果、验证摘要和 design 文件索引，不

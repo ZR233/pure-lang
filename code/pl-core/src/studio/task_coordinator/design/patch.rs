@@ -5,7 +5,7 @@ use anyhow::{Context, Result, bail};
 
 use super::git::{git_path_is_ignored, run_git_checked};
 use super::{OriginalPath, ValidatedDesignPatch};
-use crate::tool::{CodexPatchHunk, parse_codex_patch};
+use crate::tool::{CodexPatchHunk, ToolPathPolicy, parse_codex_patch};
 
 pub(super) async fn validate_design_patch(
     workspace: &Path,
@@ -136,8 +136,9 @@ pub(super) async fn restore_originals(
     workspace: &Path,
     originals: &BTreeMap<String, OriginalPath>,
 ) -> Result<()> {
+    let path_policy = ToolPathPolicy::new(workspace.to_path_buf(), false, "task design rollback")?;
     for (path, original) in originals {
-        let absolute = workspace.join(path);
+        let absolute = resolve_safe_restore_path(&path_policy, path).await?;
         match original {
             OriginalPath::Missing => match tokio::fs::remove_file(&absolute).await {
                 Ok(()) => {}
@@ -155,6 +156,17 @@ pub(super) async fn restore_originals(
         }
     }
     Ok(())
+}
+
+async fn resolve_safe_restore_path(
+    path_policy: &ToolPathPolicy,
+    path: &str,
+) -> Result<std::path::PathBuf> {
+    reject_symlink_ancestors(path_policy.root(), Path::new(path)).await?;
+    path_policy
+        .resolve_for_write(path)
+        .map_err(anyhow::Error::from)
+        .with_context(|| format!("rollback path `{path}` is no longer safely inside the workspace"))
 }
 
 pub(super) fn ensure_only_validated_design_changes(

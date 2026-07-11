@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use anyhow::{Context, Result, bail};
 use tokio::sync::MutexGuard;
@@ -36,10 +36,17 @@ pub(crate) struct TaskCoordinator {
     owned_process_leases: Mutex<HashMap<BranchKey, String>>,
     pub(super) allocation_lock: tokio::sync::Mutex<()>,
     pub(super) branch_mutation_lock: tokio::sync::Mutex<()>,
+    branch_mutation_owner: Arc<()>,
     #[cfg(test)]
     pub(super) design_after_commit_barrier: Mutex<Option<super::design::DesignCommitTestBarrier>>,
     #[cfg(test)]
     pub(super) design_before_head_persist_barrier:
+        Mutex<Option<super::design::DesignCommitTestBarrier>>,
+    #[cfg(test)]
+    pub(super) design_after_head_persist_barrier:
+        Mutex<Option<super::design::DesignCommitTestBarrier>>,
+    #[cfg(test)]
+    pub(super) design_before_rollback_barrier:
         Mutex<Option<super::design::DesignCommitTestBarrier>>,
     #[cfg(test)]
     pub(super) fail_design_compensation: std::sync::atomic::AtomicBool,
@@ -47,6 +54,7 @@ pub(crate) struct TaskCoordinator {
 
 /// 持有期间串行化任务分支变更，并阻止 executor 基于中间 HEAD 分配。
 pub(crate) struct BranchMutationGuard<'a> {
+    owner: &'a Arc<()>,
     _guard: MutexGuard<'a, ()>,
 }
 
@@ -57,10 +65,15 @@ impl TaskCoordinator {
             owned_process_leases: Mutex::new(HashMap::new()),
             allocation_lock: tokio::sync::Mutex::new(()),
             branch_mutation_lock: tokio::sync::Mutex::new(()),
+            branch_mutation_owner: Arc::new(()),
             #[cfg(test)]
             design_after_commit_barrier: Mutex::new(None),
             #[cfg(test)]
             design_before_head_persist_barrier: Mutex::new(None),
+            #[cfg(test)]
+            design_after_head_persist_barrier: Mutex::new(None),
+            #[cfg(test)]
+            design_before_rollback_barrier: Mutex::new(None),
             #[cfg(test)]
             fail_design_compensation: std::sync::atomic::AtomicBool::new(false),
         }
@@ -68,8 +81,19 @@ impl TaskCoordinator {
 
     pub(crate) async fn lock_branch_mutation(&self) -> BranchMutationGuard<'_> {
         BranchMutationGuard {
+            owner: &self.branch_mutation_owner,
             _guard: self.branch_mutation_lock.lock().await,
         }
+    }
+
+    pub(super) fn ensure_branch_mutation_guard(
+        &self,
+        guard: &BranchMutationGuard<'_>,
+    ) -> Result<()> {
+        if Arc::ptr_eq(&self.branch_mutation_owner, guard.owner) {
+            return Ok(());
+        }
+        bail!("branch mutation guard belongs to another coordinator")
     }
 
     pub(crate) async fn start_confirmed_task(

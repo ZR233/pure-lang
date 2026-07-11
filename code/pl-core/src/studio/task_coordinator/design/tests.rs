@@ -602,6 +602,116 @@ async fn commit_hook_cannot_replace_validated_design_content() {
 }
 
 #[tokio::test]
+async fn failed_commit_hook_source_residue_blocks_and_preserves_source() {
+    let fixture = DesignFixture::new("failed-hook-source-residue").await;
+    let hook = fixture.repository.join(".git/hooks/pre-commit");
+    std::fs::write(
+        &hook,
+        "#!/bin/sh\nprintf 'hook-residue\\n' > source.rs\nexit 1\n",
+    )
+    .unwrap();
+    make_executable(&hook);
+
+    assert!(fixture.update(DESIGN_PATCH).await.is_err());
+
+    let run = fixture
+        .store
+        .read_task_run(&fixture.run.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(run.phase, TaskRunPhase::Blocked);
+    assert!(
+        run.status_message
+            .as_deref()
+            .is_some_and(|message| message.contains("repository was not clean after rollback"))
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.repository.join("source.rs")).unwrap(),
+        "hook-residue\n"
+    );
+    fixture.cleanup().await;
+}
+
+#[tokio::test]
+async fn rollback_rejects_symlink_ancestor_race_without_writing_outside_workspace() {
+    let fixture = DesignFixture::new("rollback-symlink-race").await;
+    let outside = fixture.repository.with_extension("rollback-outside");
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::write(outside.join("spec.md"), "outside\n").unwrap();
+    let hook = fixture.repository.join(".git/hooks/pre-commit");
+    std::fs::write(&hook, "#!/bin/sh\nexit 1\n").unwrap();
+    make_executable(&hook);
+    let barrier = DesignCommitTestBarrier::new();
+    fixture
+        .coordinator
+        .set_design_before_rollback_barrier(barrier.clone());
+    let coordinator = fixture.coordinator.clone();
+    let session_id = fixture.session_id.clone();
+    let repository = fixture.repository.clone();
+    let update = tokio::spawn(async move {
+        coordinator
+            .update_design(&session_id, &repository, DESIGN_PATCH)
+            .await
+    });
+    barrier.wait_until_committed().await;
+    let design_backup = fixture.repository.join("design-backup");
+    std::fs::rename(fixture.repository.join("design"), &design_backup).unwrap();
+    create_directory_symlink(&outside, &fixture.repository.join("design"));
+    barrier.release().await;
+
+    assert!(update.await.unwrap().is_err());
+    let run = fixture
+        .store
+        .read_task_run(&fixture.run.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(run.phase, TaskRunPhase::Blocked);
+    assert!(
+        run.status_message
+            .as_deref()
+            .is_some_and(|message| message.contains("rollback could not safely restore"))
+    );
+    assert_eq!(
+        std::fs::read_to_string(outside.join("spec.md")).unwrap(),
+        "outside\n"
+    );
+
+    std::fs::remove_dir(fixture.repository.join("design")).unwrap();
+    std::fs::rename(design_backup, fixture.repository.join("design")).unwrap();
+    fixture.cleanup().await;
+    std::fs::remove_dir_all(outside).unwrap();
+}
+
+#[tokio::test]
+async fn durable_design_cas_then_external_commit_blocks_and_preserves_durable_heads() {
+    assert_durable_design_final_scope_failure(
+        "durable-design-external-commit",
+        FinalScopeDrift::Commit,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn durable_design_cas_then_branch_switch_blocks_and_preserves_durable_heads() {
+    assert_durable_design_final_scope_failure(
+        "durable-design-branch-switch",
+        FinalScopeDrift::Branch,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn durable_design_cas_then_dirty_workspace_blocks_and_preserves_durable_heads() {
+    assert_durable_design_final_scope_failure(
+        "durable-design-dirty-workspace",
+        FinalScopeDrift::Dirty,
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn same_commit_on_another_branch_is_not_safe_to_compensate() {
     let fixture = DesignFixture::new("same-commit-other-branch").await;
     inject_design_transaction_failure(&fixture.store).await;
@@ -734,6 +844,49 @@ async fn revert_unsafe_compensation_blocks_without_rewriting_external_clean_comm
 }
 
 #[tokio::test]
+async fn durable_revert_cas_then_dirty_workspace_blocks_with_advanced_heads() {
+    let fixture = DesignFixture::new("durable-revert-dirty-workspace").await;
+    fixture.update(DESIGN_PATCH).await.unwrap();
+    let barrier = DesignCommitTestBarrier::new();
+    fixture
+        .coordinator
+        .set_design_after_head_persist_barrier(barrier.clone());
+    let coordinator = fixture.coordinator.clone();
+    let run_id = fixture.run.id.clone();
+    let revert = tokio::spawn(async move {
+        coordinator
+            .revert_design_for_no_source_cancel(&run_id)
+            .await
+    });
+    barrier.wait_until_committed().await;
+    let durable_revert_head = fixture.head();
+    std::fs::write(fixture.repository.join("external.rs"), "external-dirty\n").unwrap();
+    barrier.release().await;
+
+    assert!(revert.await.unwrap().is_err());
+    let run = fixture
+        .store
+        .read_task_run(&fixture.run.id)
+        .await
+        .unwrap()
+        .unwrap();
+    let lease = fixture
+        .store
+        .read_branch_lease(&fixture.run.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(run.phase, TaskRunPhase::Blocked);
+    assert_eq!(run.expected_head, durable_revert_head);
+    assert_eq!(lease.expected_head, durable_revert_head);
+    assert_eq!(
+        std::fs::read_to_string(fixture.repository.join("external.rs")).unwrap(),
+        "external-dirty\n"
+    );
+    fixture.cleanup().await;
+}
+
+#[tokio::test]
 async fn no_source_cancel_creates_revert_and_atomically_advances_heads() {
     let fixture = DesignFixture::new("cancel-revert").await;
     let design = fixture.update(DESIGN_PATCH).await.unwrap();
@@ -825,6 +978,26 @@ async fn held_branch_mutation_guard_composes_revert_and_terminalization_without_
         .unwrap();
     assert_eq!(run.phase, TaskRunPhase::Cancelled);
     fixture.cleanup().await;
+}
+
+#[tokio::test]
+async fn branch_mutation_guard_from_another_coordinator_is_rejected() {
+    let guard_owner = DesignFixture::new("guard-owner").await;
+    let target = DesignFixture::new("guard-target").await;
+    let design = target.update(DESIGN_PATCH).await.unwrap();
+    let guard = guard_owner.coordinator.lock_branch_mutation().await;
+
+    let error = target
+        .coordinator
+        .revert_design_for_no_source_cancel_locked(&target.run.id, &guard)
+        .await
+        .expect_err("a guard from another coordinator must not authorize mutation");
+
+    assert!(error.to_string().contains("another coordinator"));
+    assert_eq!(target.head(), design.design_commit);
+    drop(guard);
+    guard_owner.cleanup().await;
+    target.cleanup().await;
 }
 
 #[tokio::test]
@@ -1074,6 +1247,89 @@ async fn inject_design_transaction_failure(store: &StudioStore) {
              BEGIN SELECT RAISE(FAIL, 'injected design transaction failure'); END;",
         )
         .await;
+}
+
+#[derive(Clone, Copy)]
+enum FinalScopeDrift {
+    Commit,
+    Branch,
+    Dirty,
+}
+
+async fn assert_durable_design_final_scope_failure(name: &str, drift: FinalScopeDrift) {
+    let fixture = DesignFixture::new(name).await;
+    let barrier = DesignCommitTestBarrier::new();
+    fixture
+        .coordinator
+        .set_design_after_head_persist_barrier(barrier.clone());
+    let coordinator = fixture.coordinator.clone();
+    let session_id = fixture.session_id.clone();
+    let repository = fixture.repository.clone();
+    let update = tokio::spawn(async move {
+        coordinator
+            .update_design(&session_id, &repository, DESIGN_PATCH)
+            .await
+    });
+    barrier.wait_until_committed().await;
+    let durable_design_head = fixture.head();
+    match drift {
+        FinalScopeDrift::Commit => {
+            std::fs::write(fixture.repository.join("external.rs"), "external-commit\n").unwrap();
+            git(&fixture.repository, &["add", "external.rs"]);
+            git(
+                &fixture.repository,
+                &["commit", "-m", "external after durable design CAS"],
+            );
+        }
+        FinalScopeDrift::Branch => {
+            git(
+                &fixture.repository,
+                &["switch", "-c", "external-after-durable-cas"],
+            );
+        }
+        FinalScopeDrift::Dirty => {
+            std::fs::write(fixture.repository.join("external.rs"), "external-dirty\n").unwrap();
+        }
+    }
+    let external_head = fixture.head();
+    barrier.release().await;
+
+    assert!(update.await.unwrap().is_err());
+    let run = fixture
+        .store
+        .read_task_run(&fixture.run.id)
+        .await
+        .unwrap()
+        .unwrap();
+    let lease = fixture
+        .store
+        .read_branch_lease(&fixture.run.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(run.phase, TaskRunPhase::Blocked);
+    assert_eq!(run.expected_head, durable_design_head);
+    assert_eq!(
+        run.design_commit.as_deref(),
+        Some(durable_design_head.as_str())
+    );
+    assert_eq!(lease.expected_head, durable_design_head);
+    assert_eq!(fixture.head(), external_head);
+    match drift {
+        FinalScopeDrift::Commit => assert_ne!(external_head, durable_design_head),
+        FinalScopeDrift::Branch => assert_eq!(
+            git_output(
+                &fixture.repository,
+                &["symbolic-ref", "--quiet", "--short", "HEAD"]
+            ),
+            "external-after-durable-cas"
+        ),
+        FinalScopeDrift::Dirty => assert_eq!(
+            std::fs::read_to_string(fixture.repository.join("external.rs")).unwrap(),
+            "external-dirty\n"
+        ),
+    }
+    fixture.cleanup().await;
 }
 
 async fn assert_revert_hook_failure(name: &str, hook_name: &str) {
