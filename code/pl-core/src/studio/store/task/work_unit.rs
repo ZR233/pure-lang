@@ -72,7 +72,7 @@ impl StudioStore {
     }
 }
 
-fn work_unit_record(model: entities::work_unit::Model) -> Result<WorkUnitRecord> {
+pub(super) fn work_unit_record(model: entities::work_unit::Model) -> Result<WorkUnitRecord> {
     Ok(WorkUnitRecord {
         id: model.id,
         task_run_id: model.task_run_id,

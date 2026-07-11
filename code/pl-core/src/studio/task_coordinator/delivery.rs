@@ -8,8 +8,8 @@ use serde::Deserialize;
 
 use super::git::{changed_files_between, inspect_repository, is_ancestor};
 use super::{
-    AgentDelivery, AgentOutcomeRecord, AgentOutcomeStatus, AgentWorktreeDelivery, TaskCoordinator,
-    TaskRunRecord, UpdateAgentOutcome, WorkUnitRecord, WorkUnitStatus,
+    AgentDelivery, AgentOutcomeStatus, AgentWorktreeDelivery, DeliveryScope, TaskCoordinator,
+    WorkUnitStatus,
 };
 use crate::tool::{
     RegisteredTool, SubagentContext, ToolExecutionResult, ToolInputSchemaField,
@@ -26,9 +26,7 @@ struct SubmitDeliveryInput {
 }
 
 struct DeliveryValidation<'a> {
-    run: &'a TaskRunRecord,
-    outcome: &'a AgentOutcomeRecord,
-    work_unit: Option<&'a WorkUnitRecord>,
+    scope: &'a DeliveryScope,
     subagent: &'a SubagentContext,
     caller_workspace: &'a Path,
     supplied_head: &'a str,
@@ -73,72 +71,58 @@ impl TaskCoordinator {
 
     pub(crate) async fn submit_delivery(
         &self,
-        session_id: &str,
         subagent: &SubagentContext,
         caller_workspace: impl AsRef<Path>,
         supplied_head: &str,
         verification_summary: &str,
     ) -> Result<AgentDelivery> {
-        let run = self
+        let caller_workspace = caller_workspace.as_ref();
+        let repository = inspect_repository(caller_workspace, false).await?;
+        let canonical_caller = std::fs::canonicalize(caller_workspace)
+            .context("failed to resolve caller workspace path")?;
+        let scope = self
             .store
-            .read_active_task_run_by_session(session_id)
+            .resolve_active_delivery_scope(
+                &subagent.id,
+                &canonical_caller.to_string_lossy(),
+                &repository.branch,
+            )
             .await?
-            .context("active task run not found for this session")?;
-        let outcome = self
-            .store
-            .read_agent_outcome_by_agent(&run.id, &subagent.id)
-            .await?
-            .context("agent outcome not found for this task executor")?;
-        let work_unit = match outcome.work_unit_id.as_deref() {
-            Some(work_unit_id) => self.store.read_work_unit(work_unit_id).await?,
-            None => None,
-        };
+            .context("active delivery scope not found for this executor worktree")?;
+        ensure_delivery_scope_is_open(&scope)?;
 
         let result = self
             .validate_delivery(DeliveryValidation {
-                run: &run,
-                outcome: &outcome,
-                work_unit: work_unit.as_ref(),
+                scope: &scope,
                 subagent,
-                caller_workspace: caller_workspace.as_ref(),
+                caller_workspace,
                 supplied_head,
                 verification_summary,
             })
             .await;
-        let (work_unit, delivery) = match result {
-            Ok(result) => result,
+        let delivery = match result {
+            Ok(delivery) => delivery,
             Err(error) => {
-                self.mark_waiting_for_delivery(&outcome, work_unit.as_ref(), error.to_string())
+                self.store
+                    .mark_agent_delivery_waiting(
+                        &scope.outcome.id,
+                        Some(&scope.work_unit.id),
+                        &error.to_string(),
+                    )
                     .await?;
                 return Err(error);
             }
         };
 
         self.store
-            .update_agent_outcome(
-                &outcome.id,
-                UpdateAgentOutcome {
-                    status: AgentOutcomeStatus::Completed,
-                    summary: Some(delivery.verification_summary.clone()),
-                    error: None,
-                    delivery: Some(delivery.clone()),
-                    review: None,
-                },
-            )
-            .await?;
-        self.store
-            .update_work_unit(
-                &work_unit.id,
-                WorkUnitStatus::Delivered,
-                Some(subagent.id.clone()),
-            )
+            .complete_agent_delivery(&scope.outcome.id, &scope.work_unit.id, delivery.clone())
             .await?;
         Ok(delivery)
     }
 
     pub(crate) fn submit_delivery_tool(self: &Arc<Self>) -> RegisteredTool {
         let coordinator = self.clone();
-        RegisteredTool::from_typed_tool_input_fallible_execution_result(
+        RegisteredTool::from_typed_fallible_execution_result(
             "submit_delivery",
             "Validate and persist a committed executor delivery.",
             strict_tool_input_schema([
@@ -151,7 +135,7 @@ impl TaskCoordinator {
                     serde_json::json!({ "type": "string" }),
                 ),
             ]),
-            move |arguments: SubmitDeliveryInput, input, context| {
+            move |arguments: SubmitDeliveryInput, context| {
                 let coordinator = coordinator.clone();
                 async move {
                     let subagent = context
@@ -160,7 +144,6 @@ impl TaskCoordinator {
                         .context("submit_delivery requires an active executor subagent")?;
                     let delivery = coordinator
                         .submit_delivery(
-                            &input.session_id,
                             subagent,
                             &context.workspace_root,
                             &arguments.head_commit,
@@ -178,16 +161,17 @@ impl TaskCoordinator {
     async fn validate_delivery<'a>(
         &self,
         validation: DeliveryValidation<'a>,
-    ) -> Result<(&'a WorkUnitRecord, AgentDelivery)> {
+    ) -> Result<AgentDelivery> {
         let DeliveryValidation {
-            run,
-            outcome,
-            work_unit,
+            scope,
             subagent,
             caller_workspace,
             supplied_head,
             verification_summary,
         } = validation;
+        let run = &scope.run;
+        let outcome = &scope.outcome;
+        let work_unit = &scope.work_unit;
         if subagent.role != "executor" || outcome.role != "executor" {
             bail!("submit_delivery may only be called by the assigned executor");
         }
@@ -198,7 +182,6 @@ impl TaskCoordinator {
         if outcome.owner_path != owner_path || outcome.task_run_id != run.id {
             bail!("executor does not own this task outcome");
         }
-        let work_unit = work_unit.context("executor outcome has no work unit")?;
         if work_unit.task_run_id != run.id
             || work_unit.agent_id.as_deref() != Some(subagent.id.as_str())
         {
@@ -251,50 +234,35 @@ impl TaskCoordinator {
             changed_files_between(&snapshot.workspace_root, base_commit, &snapshot.head).await?;
         validate_owned_paths(&work_unit.owned_paths, &changed_files)?;
 
-        Ok((
-            work_unit,
-            AgentDelivery {
-                worktree: AgentWorktreeDelivery {
-                    path: snapshot.workspace_root.to_string_lossy().to_string(),
-                    branch: snapshot.branch,
-                },
-                base_commit: base_commit.to_string(),
-                head_commit: snapshot.head,
-                changed_files,
-                verification_summary: verification_summary.to_string(),
+        Ok(AgentDelivery {
+            worktree: AgentWorktreeDelivery {
+                path: snapshot.workspace_root.to_string_lossy().to_string(),
+                branch: snapshot.branch,
             },
-        ))
+            base_commit: base_commit.to_string(),
+            head_commit: snapshot.head,
+            changed_files,
+            verification_summary: verification_summary.to_string(),
+        })
     }
+}
 
-    async fn mark_waiting_for_delivery(
-        &self,
-        outcome: &AgentOutcomeRecord,
-        work_unit: Option<&WorkUnitRecord>,
-        error: String,
-    ) -> Result<()> {
-        self.store
-            .update_agent_outcome(
-                &outcome.id,
-                UpdateAgentOutcome {
-                    status: AgentOutcomeStatus::WaitingForDelivery,
-                    summary: outcome.summary.clone(),
-                    error: Some(error),
-                    delivery: outcome.delivery.clone(),
-                    review: outcome.review.clone(),
-                },
-            )
-            .await?;
-        if let Some(work_unit) = work_unit {
-            self.store
-                .update_work_unit(
-                    &work_unit.id,
-                    WorkUnitStatus::WaitingForDelivery,
-                    work_unit.agent_id.clone(),
-                )
-                .await?;
-        }
-        Ok(())
+fn ensure_delivery_scope_is_open(scope: &DeliveryScope) -> Result<()> {
+    if scope.outcome.status == AgentOutcomeStatus::Completed
+        || scope.work_unit.status == WorkUnitStatus::Delivered
+    {
+        bail!("delivery is already finalized");
     }
+    if !matches!(
+        scope.outcome.status,
+        AgentOutcomeStatus::Running | AgentOutcomeStatus::WaitingForDelivery
+    ) || !matches!(
+        scope.work_unit.status,
+        WorkUnitStatus::Running | WorkUnitStatus::WaitingForDelivery
+    ) {
+        bail!("delivery scope is not accepting a delivery");
+    }
+    Ok(())
 }
 
 fn validate_owned_paths(owned_paths: &[String], changed_files: &[String]) -> Result<()> {

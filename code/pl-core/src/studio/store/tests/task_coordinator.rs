@@ -240,3 +240,147 @@ async fn coordinator_child_records_round_trip_typed_payloads() {
         vec![review]
     );
 }
+
+#[tokio::test]
+async fn completed_delivery_rolls_back_outcome_when_work_unit_update_fails() {
+    let (store, run, work_unit, outcome) = delivery_transition_fixture().await;
+    install_work_unit_transition_failure(&store, "delivered").await;
+
+    let error = store
+        .complete_agent_delivery(&outcome.id, &work_unit.id, delivery_receipt())
+        .await
+        .expect_err("work unit update failure must roll back outcome update");
+
+    assert!(
+        error
+            .to_string()
+            .contains("injected work unit transition failure")
+    );
+    let persisted_outcome = store
+        .list_agent_outcomes(&run.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|record| record.id == outcome.id)
+        .unwrap();
+    let persisted_work_unit = store.read_work_unit(&work_unit.id).await.unwrap().unwrap();
+    assert_eq!(persisted_outcome.status, AgentOutcomeStatus::Running);
+    assert_eq!(persisted_outcome.delivery, None);
+    assert_eq!(persisted_work_unit.status, WorkUnitStatus::Running);
+}
+
+#[tokio::test]
+async fn waiting_delivery_rolls_back_outcome_when_work_unit_update_fails() {
+    let (store, run, work_unit, outcome) = delivery_transition_fixture().await;
+    install_work_unit_transition_failure(&store, "waitingForDelivery").await;
+
+    let error = store
+        .mark_agent_delivery_waiting(
+            &outcome.id,
+            Some(work_unit.id.as_str()),
+            "validation failed",
+        )
+        .await
+        .expect_err("work unit update failure must roll back outcome update");
+
+    assert!(
+        error
+            .to_string()
+            .contains("injected work unit transition failure")
+    );
+    let persisted_outcome = store
+        .list_agent_outcomes(&run.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|record| record.id == outcome.id)
+        .unwrap();
+    let persisted_work_unit = store.read_work_unit(&work_unit.id).await.unwrap().unwrap();
+    assert_eq!(persisted_outcome.status, AgentOutcomeStatus::Running);
+    assert_eq!(persisted_outcome.error, None);
+    assert_eq!(persisted_work_unit.status, WorkUnitStatus::Running);
+}
+
+async fn delivery_transition_fixture() -> (
+    StudioStore,
+    TaskRunRecord,
+    WorkUnitRecord,
+    AgentOutcomeRecord,
+) {
+    let store = StudioStore::open_memory().await.unwrap();
+    let project = store.upsert_project("C:/work/task").await.unwrap();
+    let session = store
+        .create_session(&project.id, "Task", CompileMode::Task)
+        .await
+        .unwrap();
+    let (run, _) = store
+        .create_task_run_with_lease(create_input(&session.id))
+        .await
+        .unwrap();
+    let work_unit = store
+        .create_work_unit(CreateWorkUnit {
+            task_run_id: run.id.clone(),
+            title: "Implement core".to_string(),
+            owned_paths: vec!["code/pl-core/**".to_string()],
+            base_commit: "1111111".to_string(),
+            worktree_path: "C:/work/task/.pure/worktrees/run/agent-1".to_string(),
+            branch: "pure-task-run-agent-1".to_string(),
+            attempt: 1,
+        })
+        .await
+        .unwrap();
+    let work_unit = store
+        .update_work_unit(
+            &work_unit.id,
+            WorkUnitStatus::Running,
+            Some("agent-1".to_string()),
+        )
+        .await
+        .unwrap();
+    let outcome = store
+        .create_agent_outcome(CreateAgentOutcome {
+            task_run_id: run.id.clone(),
+            work_unit_id: Some(work_unit.id.clone()),
+            agent_id: "agent-1".to_string(),
+            owner_path: "root".to_string(),
+            initiated_by: "planner".to_string(),
+            requested_by_call_id: "call-spawn".to_string(),
+            role: "executor".to_string(),
+            status: AgentOutcomeStatus::Running,
+            attempt: 1,
+        })
+        .await
+        .unwrap();
+    (store, run, work_unit, outcome)
+}
+
+fn delivery_receipt() -> AgentDelivery {
+    AgentDelivery {
+        worktree: AgentWorktreeDelivery {
+            path: "C:/work/task/.pure/worktrees/run/agent-1".to_string(),
+            branch: "pure-task-run-agent-1".to_string(),
+        },
+        base_commit: "1111111".to_string(),
+        head_commit: "2222222".to_string(),
+        changed_files: vec!["code/pl-core/src/lib.rs".to_string()],
+        verification_summary: "cargo test passed".to_string(),
+    }
+}
+
+async fn install_work_unit_transition_failure(store: &StudioStore, status: &str) {
+    store
+        .db
+        .execute(Statement::from_string(
+            DatabaseBackend::Sqlite,
+            format!(
+                "CREATE TRIGGER fail_work_unit_transition
+                 BEFORE UPDATE OF status ON work_units
+                 WHEN NEW.status = '{status}'
+                 BEGIN
+                   SELECT RAISE(ABORT, 'injected work unit transition failure');
+                 END;"
+            ),
+        ))
+        .await
+        .unwrap();
+}

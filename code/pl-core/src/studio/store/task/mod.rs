@@ -1,3 +1,4 @@
+mod delivery;
 mod merge;
 mod outcome;
 mod review;
@@ -71,24 +72,6 @@ impl StudioStore {
 
     pub(crate) async fn read_task_run(&self, task_run_id: &str) -> Result<Option<TaskRunRecord>> {
         entities::task_run::Entity::find_by_id(task_run_id.to_string())
-            .one(&self.db)
-            .await?
-            .map(task_run_record)
-            .transpose()
-    }
-
-    pub(crate) async fn read_active_task_run_by_session(
-        &self,
-        session_id: &str,
-    ) -> Result<Option<TaskRunRecord>> {
-        entities::task_run::Entity::find()
-            .filter(entities::task_run::Column::SessionId.eq(session_id.to_string()))
-            .filter(entities::task_run::Column::Phase.is_not_in([
-                TaskRunPhase::Completed.as_str(),
-                TaskRunPhase::Blocked.as_str(),
-                TaskRunPhase::Failed.as_str(),
-                TaskRunPhase::Cancelled.as_str(),
-            ]))
             .one(&self.db)
             .await?
             .map(task_run_record)
@@ -210,7 +193,7 @@ fn validate_create_task_run(input: &CreateTaskRun) -> Result<()> {
     Ok(())
 }
 
-fn task_run_record(model: entities::task_run::Model) -> Result<TaskRunRecord> {
+pub(super) fn task_run_record(model: entities::task_run::Model) -> Result<TaskRunRecord> {
     let phase = TaskRunPhase::from_str(&model.phase)
         .with_context(|| format!("invalid stored task phase: {}", model.phase))?;
     Ok(TaskRunRecord {

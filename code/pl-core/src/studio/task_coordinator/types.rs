@@ -363,6 +363,13 @@ pub(crate) struct AgentOutcomeRecord {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DeliveryScope {
+    pub(crate) run: TaskRunRecord,
+    pub(crate) work_unit: WorkUnitRecord,
+    pub(crate) outcome: AgentOutcomeRecord,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MergeRecord {
     pub(crate) id: String,
     pub(crate) task_run_id: String,
