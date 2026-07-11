@@ -38,7 +38,6 @@ impl AgentEntry {
 pub(super) struct AgentSupervisorState {
     pub(super) agents: HashMap<String, AgentEntry>,
     pub(super) path_to_id: HashMap<String, String>,
-    pub(super) next_id: u64,
     pub(super) max_agents: usize,
     pub(super) max_depth: u32,
     pub(super) activity_seq: u64,
@@ -50,7 +49,6 @@ impl Default for AgentSupervisorState {
         let mut state = Self {
             agents: HashMap::new(),
             path_to_id: HashMap::new(),
-            next_id: 0,
             max_agents: 16,
             max_depth: 3,
             activity_seq: 0,

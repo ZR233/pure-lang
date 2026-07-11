@@ -165,12 +165,12 @@ impl StudioRuntime {
                             summary: summary.clone(),
                             error: error.clone(),
                         };
-                        let projection = match self
+                        let recording = match self
                             .task_coordinator
                             .record_terminal_agent_state(&session_id, &change)
                             .await
                         {
-                            Ok(projection) => projection,
+                            Ok(recording) => recording,
                             Err(error) => {
                                 let diagnostic = format!(
                                     "terminal agent state persistence failed for {id}: {error}"
@@ -195,7 +195,15 @@ impl StudioRuntime {
                                 continue;
                             }
                         };
-                        if let Some(projection) = projection
+                        if matches!(
+                            recording,
+                            crate::studio::task_coordinator::TerminalAgentStateRecording::Suppressed
+                        ) {
+                            continue;
+                        }
+                        if let crate::studio::task_coordinator::TerminalAgentStateRecording::Projected(
+                            projection,
+                        ) = recording
                             && let AgentEvent::AgentStateChanged {
                                 status,
                                 summary,
@@ -205,6 +213,41 @@ impl StudioRuntime {
                         {
                             *status = projection.status;
                             *summary = projection.summary;
+                            *error = projection.error;
+                        }
+                    }
+                    if let AgentEvent::SubAgentActivity {
+                        agent_id: Some(agent_id),
+                        status: Some(_),
+                        ..
+                    } = &event
+                    {
+                        let projection = match self
+                            .task_coordinator
+                            .project_agent_activity(&session_id, agent_id)
+                            .await
+                        {
+                            Ok(projection) => projection,
+                            Err(error) => {
+                                let _ = self
+                                    .events
+                                    .emit_agent_event(
+                                        &session_id,
+                                        AgentEvent::Error {
+                                            message: format!(
+                                                "durable agent activity projection failed for {agent_id}: {error}"
+                                            ),
+                                            severity: ErrorSeverity::Recoverable,
+                                        },
+                                    )
+                                    .await;
+                                continue;
+                            }
+                        };
+                        if let Some(projection) = projection
+                            && let AgentEvent::SubAgentActivity { status, error, .. } = &mut event
+                        {
+                            *status = Some(projection.status);
                             *error = projection.error;
                         }
                     }

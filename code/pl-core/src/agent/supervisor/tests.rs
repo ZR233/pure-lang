@@ -255,6 +255,33 @@ fn test_run_spec(message: &str) -> AgentRunSpec {
     }
 }
 
+#[tokio::test]
+async fn agent_ids_are_process_global_across_supervisors() {
+    let first = AgentSupervisor::default();
+    let second = AgentSupervisor::default();
+    let input = AgentSpawnInput {
+        task_name: "worker".to_string(),
+        message: "inspect".to_string(),
+        role: "explorer".to_string(),
+        parent_path: Some(AgentPath::ROOT.to_string()),
+        session_id: "session".to_string(),
+        owned_paths: Vec::new(),
+    };
+
+    let first_handle = first
+        .spawn_agent(input.clone(), test_run_spec("inspect"))
+        .await
+        .unwrap();
+    let second_handle = second
+        .spawn_agent(input, test_run_spec("inspect"))
+        .await
+        .unwrap();
+
+    assert!(first_handle.id.starts_with("agent-"));
+    assert!(second_handle.id.starts_with("agent-"));
+    assert_ne!(first_handle.id, second_handle.id);
+}
+
 fn normalize_supervisor_source(source: &str) -> String {
     source.replace("\r\n", "\n")
 }
@@ -782,13 +809,16 @@ async fn spawn_start_failure_rolls_back_lifecycle_and_supervisor_entry() {
         .await;
 
     assert!(matches!(result, Err(PureError::AgentLimitReached { .. })));
-    assert!(supervisor.list_agents(None).await.is_empty());
+    assert!(supervisor.list_agents(None).await.unwrap().is_empty());
+    let calls = calls.lock().await.clone();
+    let agent_id = calls[0].strip_prefix("prepare:").unwrap().to_string();
+    assert!(agent_id.starts_with("agent-"));
     assert_eq!(
-        calls.lock().await.clone(),
+        calls,
         vec![
-            "prepare:agent-1".to_string(),
-            "activate:agent-1".to_string(),
-            "rollback:agent-1".to_string(),
+            format!("prepare:{agent_id}"),
+            format!("activate:{agent_id}"),
+            format!("rollback:{agent_id}"),
         ]
     );
 }
@@ -835,17 +865,20 @@ async fn spawn_start_failure_reports_every_rollback_failure() {
         .await
         .expect_err("spawn must surface rollback failures");
 
-    assert!(supervisor.list_agents(None).await.is_empty());
+    assert!(supervisor.list_agents(None).await.unwrap().is_empty());
     assert_eq!(
         backend_calls.lock().await.as_slice(),
         ["create", "remove:true", "delete_branch"]
     );
+    let hook_calls = hook_calls.lock().await.clone();
+    let agent_id = hook_calls[0].strip_prefix("prepare:").unwrap().to_string();
+    assert!(agent_id.starts_with("agent-"));
     assert_eq!(
-        hook_calls.lock().await.as_slice(),
+        hook_calls,
         [
-            "prepare:agent-1",
-            "activate:agent-1",
-            "hook_rollback:agent-1"
+            format!("prepare:{agent_id}"),
+            format!("activate:{agent_id}"),
+            format!("hook_rollback:{agent_id}"),
         ]
     );
     let error = error.to_string();

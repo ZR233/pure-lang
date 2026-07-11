@@ -297,6 +297,9 @@ mod tests {
         AgentLifecycleHook, AgentRunSpec, AgentSpawnInput, AgentSpawnLifecycleRequest,
         AgentSupervisor,
     };
+    use crate::tool::{
+        ListAgentsTool, Tool, ToolContext, ToolInput, WaitAgentTool, WorkspaceAccess,
+    };
     use crate::{CompileMode, PureCoreBuilder, StudioStore, TurnBudget, TurnOptions};
 
     use crate::studio::task_coordinator::{
@@ -654,6 +657,7 @@ mod tests {
             )
             .await
             .unwrap()
+            .into_projection()
             .unwrap();
         assert_eq!(projection.status, crate::AgentStatus::Completed);
         assert_eq!(
@@ -709,7 +713,7 @@ mod tests {
             .expect_err("installed Task hook must reject missing ownedPaths");
 
         assert!(error.to_string().contains("ownedPaths must not be empty"));
-        assert!(supervisor.list_agents(None).await.is_empty());
+        assert!(supervisor.list_agents(None).await.unwrap().is_empty());
         fixture.cleanup();
     }
 
@@ -877,7 +881,7 @@ mod tests {
             .await
             .unwrap();
 
-        let agents = supervisor.list_agents(None).await;
+        let agents = supervisor.list_agents(None).await.unwrap();
         assert_eq!(agents.len(), 1);
         assert_eq!(agents[0].status, crate::AgentStatus::Waiting);
         assert_eq!(agents[0].summary.as_deref(), Some("durable complete"));
@@ -894,6 +898,99 @@ mod tests {
             )
             .await
             .unwrap();
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
+    async fn durable_projection_database_failure_fails_list_and_wait_tools() {
+        let fixture = SpawnFixture::new("durable-projection-failure").await;
+        let supervisor = AgentSupervisor::default();
+        supervisor
+            .enable_worktrees(PathBuf::from(
+                fixture
+                    .store
+                    .read_task_run(&fixture.run_id)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .workspace_root,
+            ))
+            .await;
+        let mut core = PureCoreBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None))
+            .unwrap()
+            .with_agent_supervisor(supervisor.clone())
+            .build();
+        fixture
+            .coordinator
+            .install_tools(&mut core, &fixture.session_id);
+        let handle = supervisor
+            .spawn_agent(
+                AgentSpawnInput {
+                    task_name: "projection_failure".to_string(),
+                    message: "implement".to_string(),
+                    role: "executor".to_string(),
+                    parent_path: Some("/root".to_string()),
+                    session_id: fixture.session_id.clone(),
+                    owned_paths: vec!["code/pl-core/**".to_string()],
+                },
+                test_run_spec("implement"),
+            )
+            .await
+            .unwrap();
+        fixture
+            .store
+            .execute_test_sql("ALTER TABLE agent_outcomes RENAME TO unavailable_agent_outcomes")
+            .await;
+        let context = ToolContext {
+            event_tx: tokio::sync::broadcast::channel(8).0,
+            options: TurnOptions::default(),
+            workspace_access: WorkspaceAccess::WorkspaceOnly,
+            mode: CompileMode::Task,
+            workspace_root: PathBuf::from("."),
+            workspace_instructions: None,
+            instruction_snapshot: None,
+            provider_call_id: None,
+            active_subagent: None,
+            agent_supervisor: supervisor,
+            agent_tool_registrar: None,
+            lsp_runtime: None,
+            parent_session: Arc::new(crate::CoreSession::new()),
+        };
+
+        let list_result = ListAgentsTool
+            .execute(
+                ToolInput {
+                    arguments: serde_json::json!({}),
+                    session_id: fixture.session_id.clone(),
+                    tool_id: "call-list".to_string(),
+                    revision_base: 0,
+                },
+                context.clone(),
+            )
+            .await;
+        let wait_result = WaitAgentTool
+            .execute(
+                ToolInput {
+                    arguments: serde_json::json!({
+                        "target": handle.id,
+                        "timeoutMs": 250,
+                    }),
+                    session_id: fixture.session_id.clone(),
+                    tool_id: "call-wait".to_string(),
+                    revision_base: 0,
+                },
+                context,
+            )
+            .await;
+
+        assert!(
+            list_result.is_err(),
+            "list_agents must surface projection failure"
+        );
+        assert!(
+            wait_result.is_err(),
+            "wait_agent must surface projection failure"
+        );
         fixture.cleanup();
     }
 

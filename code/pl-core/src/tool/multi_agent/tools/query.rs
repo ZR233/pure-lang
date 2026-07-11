@@ -1,5 +1,3 @@
-use std::convert::Infallible;
-
 use pl_protocol::{AgentStatus, PureError, SubAgentActivityKind};
 use tokio::time::Duration;
 
@@ -57,7 +55,11 @@ impl Tool for WaitAgentTool {
                     timeout_ms: None,
                 });
             let sender_path = current_agent_path(&context);
-            let initial = context.agent_supervisor.list_agents(None).await;
+            let initial = context
+                .agent_supervisor
+                .list_agents(None)
+                .await
+                .map_err(wait_projection_error)?;
             let targets =
                 resolve_wait_targets(&args, &context.agent_supervisor, &sender_path, &initial)
                     .await?;
@@ -76,9 +78,12 @@ impl Tool for WaitAgentTool {
                     let supervisor = supervisor.clone();
                     let targets = targets.clone();
                     async move {
-                        let agents = supervisor.list_agents(None).await;
+                        let agents = supervisor
+                            .list_agents(None)
+                            .await
+                            .map_err(wait_projection_error)?;
                         let groups = partition_agents(agents, &targets);
-                        Ok::<_, Infallible>((
+                        Ok::<_, PureError>((
                             AgentWaitSnapshot::from_group_counts(
                                 groups.completed.len(),
                                 groups.pending.len(),
@@ -96,7 +101,7 @@ impl Tool for WaitAgentTool {
                     tool: "wait_agent".to_string(),
                     error: "wait_agent was cancelled".to_string(),
                 },
-                AgentWaitLoopError::Read(never) => match never {},
+                AgentWaitLoopError::Read(error) => error,
             })?;
             let timed_out = outcome.timed_out;
             crate::agent::emit_subagent_activity(
@@ -126,7 +131,7 @@ async fn resolve_wait_targets(
     supervisor: &crate::AgentSupervisor,
     sender_path: &str,
     agents: &[AgentRecord],
-) -> Result<Vec<String>, PureError> {
+) -> Result<Vec<AgentRecord>, PureError> {
     let mut requested = Vec::new();
     for target in args.target.iter().chain(args.targets.iter()) {
         if !requested.contains(target) {
@@ -134,7 +139,7 @@ async fn resolve_wait_targets(
         }
     }
     if requested.is_empty() {
-        return Ok(agents.iter().map(|agent| agent.id.clone()).collect());
+        return Ok(agents.to_vec());
     }
     let mut resolved = Vec::with_capacity(requested.len());
     for target in requested {
@@ -145,20 +150,35 @@ async fn resolve_wait_targets(
                 tool: "wait_agent".to_string(),
                 error: format!("target agent not found: {target}"),
             })?;
-        if !resolved.contains(&agent_id) {
-            resolved.push(agent_id);
+        if !resolved
+            .iter()
+            .any(|agent: &AgentRecord| agent.id == agent_id)
+        {
+            let record = agents
+                .iter()
+                .find(|agent| agent.id == agent_id)
+                .cloned()
+                .ok_or_else(|| PureError::ToolExecutionFailed {
+                    tool: "wait_agent".to_string(),
+                    error: format!("target agent disappeared during resolution: {target}"),
+                })?;
+            resolved.push(record);
         }
     }
     Ok(resolved)
 }
 
-fn partition_agents(agents: Vec<AgentRecord>, targets: &[String]) -> AgentWaitGroups {
+fn partition_agents(agents: Vec<AgentRecord>, targets: &[AgentRecord]) -> AgentWaitGroups {
     let mut completed = Vec::new();
     let mut pending = Vec::new();
-    for agent in agents
+    let mut current = agents
         .into_iter()
-        .filter(|agent| targets.iter().any(|target| target == &agent.id))
-    {
+        .map(|agent| (agent.id.clone(), agent))
+        .collect::<std::collections::HashMap<_, _>>();
+    for target in targets {
+        let agent = current
+            .remove(&target.id)
+            .unwrap_or_else(|| missing_wait_target(target));
         match agent.status {
             AgentStatus::Completed
             | AgentStatus::Errored
@@ -171,6 +191,18 @@ fn partition_agents(agents: Vec<AgentRecord>, targets: &[String]) -> AgentWaitGr
         }
     }
     AgentWaitGroups { completed, pending }
+}
+
+fn missing_wait_target(target: &AgentRecord) -> AgentRecord {
+    AgentRecord {
+        status: AgentStatus::NotFound,
+        summary: None,
+        error: Some("target agent disappeared while waiting".to_string()),
+        reason: None,
+        budget_limit_kind: None,
+        budget_usage: None,
+        ..target.clone()
+    }
 }
 
 impl Tool for ListAgentsTool {
@@ -201,11 +233,22 @@ impl Tool for ListAgentsTool {
             let agents = context
                 .agent_supervisor
                 .list_agents(args.path_prefix.as_deref())
-                .await;
+                .await
+                .map_err(|error| PureError::ToolExecutionFailed {
+                    tool: "list_agents".to_string(),
+                    error: format!("durable agent projection failed: {error}"),
+                })?;
             json_output(ListAgentsResult {
                 agents: agent_tool_records(&agents),
             })
         })
+    }
+}
+
+fn wait_projection_error(error: PureError) -> PureError {
+    PureError::ToolExecutionFailed {
+        tool: "wait_agent".to_string(),
+        error: format!("durable agent projection failed: {error}"),
     }
 }
 
@@ -260,12 +303,35 @@ mod tests {
             ..waiting.clone()
         };
 
-        let groups = partition_agents(
-            vec![waiting, completed],
-            &["waiting".to_string(), "completed".to_string()],
-        );
+        let targets = vec![waiting.clone(), completed.clone()];
+        let groups = partition_agents(vec![waiting, completed], &targets);
 
         assert_eq!(groups.pending[0].id, "waiting");
         assert_eq!(groups.completed[0].id, "completed");
+    }
+
+    #[test]
+    fn resolved_wait_target_missing_from_poll_is_not_an_empty_success() {
+        let target = AgentRecord {
+            id: "agent-closed".to_string(),
+            path: "/root/closed".to_string(),
+            parent_path: Some("/root".to_string()),
+            role: "executor".to_string(),
+            task: "implement".to_string(),
+            status: AgentStatus::Running,
+            summary: None,
+            error: None,
+            reason: None,
+            budget_limit_kind: None,
+            budget_usage: None,
+            depth: 1,
+            updated_at: 1,
+        };
+        let groups = partition_agents(Vec::new(), &[target]);
+
+        assert_eq!(groups.completed.len(), 1);
+        assert_eq!(groups.completed[0].id, "agent-closed");
+        assert_eq!(groups.completed[0].status, AgentStatus::NotFound);
+        assert!(groups.pending.is_empty());
     }
 }

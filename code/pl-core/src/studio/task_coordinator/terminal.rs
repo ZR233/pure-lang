@@ -4,12 +4,39 @@ use crate::agent::{AgentLifecycleProjection, AgentTerminalStateChange};
 
 use super::TaskCoordinator;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum TerminalAgentStateRecording {
+    Unhandled,
+    Projected(AgentLifecycleProjection),
+    Suppressed,
+}
+
+impl TerminalAgentStateRecording {
+    #[cfg(test)]
+    pub(crate) fn into_projection(self) -> Option<AgentLifecycleProjection> {
+        match self {
+            Self::Projected(projection) => Some(projection),
+            Self::Unhandled | Self::Suppressed => None,
+        }
+    }
+}
+
 impl TaskCoordinator {
+    pub(crate) async fn project_agent_activity(
+        &self,
+        session_id: &str,
+        agent_id: &str,
+    ) -> Result<Option<AgentLifecycleProjection>> {
+        self.store
+            .project_agent_activity(session_id, agent_id)
+            .await
+    }
+
     pub(crate) async fn record_terminal_agent_state(
         &self,
         session_id: &str,
         change: &AgentTerminalStateChange,
-    ) -> Result<Option<AgentLifecycleProjection>> {
+    ) -> Result<TerminalAgentStateRecording> {
         self.store
             .record_terminal_agent_state(session_id, change)
             .await
