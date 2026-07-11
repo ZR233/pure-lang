@@ -78,8 +78,10 @@ fn reconcile_blocking(
         }
         ensure_safe_existing_path(repository, &registration.path)?;
         remove_registration(repository, &registration.path)?;
+        pause_after_registration_remove(&registration.path);
         summary.cleaned_registrations += 1;
         if registration.path.exists() {
+            ensure_safe_existing_path(repository, &registration.path)?;
             std::fs::remove_dir_all(&registration.path).with_context(|| {
                 format!(
                     "failed to remove worktree leaf {}",
@@ -384,6 +386,50 @@ fn path_is_below(path: &str, root: &str) -> bool {
 
 fn is_pure_branch(branch: &str) -> bool {
     branch.starts_with("pure-task-") || branch.starts_with("pure-agent-")
+}
+
+#[cfg(test)]
+pub(crate) fn set_after_registration_remove_barrier(
+    path: PathBuf,
+    barrier: std::sync::Arc<std::sync::Barrier>,
+) {
+    *after_registration_remove_barrier()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) =
+        Some((normalize_path(&path), barrier));
+}
+
+#[cfg(test)]
+fn pause_after_registration_remove(path: &Path) {
+    let barrier = {
+        let mut slot = after_registration_remove_barrier()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if slot
+            .as_ref()
+            .is_some_and(|(target, _)| target == &normalize_path(path))
+        {
+            slot.take().map(|(_, barrier)| barrier)
+        } else {
+            None
+        }
+    };
+    if let Some(barrier) = barrier {
+        barrier.wait();
+        barrier.wait();
+    }
+}
+
+#[cfg(not(test))]
+fn pause_after_registration_remove(_path: &Path) {}
+
+#[cfg(test)]
+fn after_registration_remove_barrier()
+-> &'static std::sync::Mutex<Option<(String, std::sync::Arc<std::sync::Barrier>)>> {
+    static BARRIER: std::sync::OnceLock<
+        std::sync::Mutex<Option<(String, std::sync::Arc<std::sync::Barrier>)>>,
+    > = std::sync::OnceLock::new();
+    BARRIER.get_or_init(|| std::sync::Mutex::new(None))
 }
 
 fn ensure_safe_existing_path(repository: &Path, path: &Path) -> Result<()> {
