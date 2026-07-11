@@ -6,8 +6,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use pretty_assertions::assert_eq;
 
 use super::*;
+use crate::agent::AgentSpawnLifecycleRequest;
 use crate::studio::task_coordinator::{
-    AllocateExecutor, CreateMergeRecord, CreateTaskRun, UpdateMergeRecord,
+    AllocateExecutor, CreateMergeRecord, CreateTaskRun, MergeStatus, UpdateMergeRecord,
 };
 use crate::{
     AgentKernel, AgentKernelToolRequest, CompileMode, CoreAgentProfile, PureCoreBuilder,
@@ -466,6 +467,195 @@ async fn failed_safe_compensation_blocks_exact_run() {
 }
 
 #[tokio::test]
+async fn commit_success_then_dirty_inspection_blocks_without_rolling_back_external_content() {
+    let fixture = DesignFixture::new("post-commit-dirty").await;
+    let barrier = DesignCommitTestBarrier::new();
+    fixture
+        .coordinator
+        .set_design_after_commit_barrier(barrier.clone());
+    let coordinator = fixture.coordinator.clone();
+    let session_id = fixture.session_id.clone();
+    let repository = fixture.repository.clone();
+    let update = tokio::spawn(async move {
+        coordinator
+            .update_design(&session_id, &repository, DESIGN_PATCH)
+            .await
+    });
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        barrier.wait_until_committed(),
+    )
+    .await
+    .unwrap();
+    std::fs::write(
+        fixture.repository.join("design/spec.md"),
+        "external-after-focused-commit\n",
+    )
+    .unwrap();
+    barrier.release().await;
+
+    assert!(update.await.unwrap().is_err());
+    let run = fixture
+        .store
+        .read_task_run(&fixture.run.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(run.phase, TaskRunPhase::Blocked);
+    assert_eq!(fixture.design_text(), "external-after-focused-commit\n");
+    fixture.cleanup().await;
+}
+
+#[tokio::test]
+async fn external_clean_commit_after_focused_commit_is_never_persisted_as_design_commit() {
+    let fixture = DesignFixture::new("external-clean-commit").await;
+    let barrier = DesignCommitTestBarrier::new();
+    fixture
+        .coordinator
+        .set_design_after_commit_barrier(barrier.clone());
+    let coordinator = fixture.coordinator.clone();
+    let session_id = fixture.session_id.clone();
+    let repository = fixture.repository.clone();
+    let update = tokio::spawn(async move {
+        coordinator
+            .update_design(&session_id, &repository, DESIGN_PATCH)
+            .await
+    });
+    barrier.wait_until_committed().await;
+    std::fs::write(fixture.repository.join("external.rs"), "external\n").unwrap();
+    git(&fixture.repository, &["add", "external.rs"]);
+    git(
+        &fixture.repository,
+        &["commit", "-m", "external clean commit"],
+    );
+    let external_head = fixture.head();
+    barrier.release().await;
+
+    assert!(update.await.unwrap().is_err());
+    let run = fixture
+        .store
+        .read_task_run(&fixture.run.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(run.phase, TaskRunPhase::Blocked);
+    assert_ne!(run.design_commit.as_deref(), Some(external_head.as_str()));
+    assert_eq!(fixture.head(), external_head);
+    fixture.cleanup().await;
+}
+
+#[tokio::test]
+async fn commit_hook_staged_source_injection_blocks_without_accepting_mixed_commit() {
+    let fixture = DesignFixture::new("hook-source-injection").await;
+    let hook = fixture.repository.join(".git/hooks/pre-commit");
+    std::fs::write(
+        &hook,
+        "#!/bin/sh\nprintf 'injected\\n' > source.rs\ngit add -- source.rs\n",
+    )
+    .unwrap();
+    make_executable(&hook);
+
+    assert!(fixture.update(DESIGN_PATCH).await.is_err());
+
+    let run = fixture
+        .store
+        .read_task_run(&fixture.run.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(run.phase, TaskRunPhase::Blocked);
+    assert_eq!(run.expected_head, fixture.run.expected_head);
+    assert!(run.design_commit.is_none());
+    assert_eq!(
+        git_output(
+            &fixture.repository,
+            &["show", "--format=", "--name-only", "HEAD"]
+        ),
+        "design/spec.md\nsource.rs"
+    );
+    fixture.cleanup().await;
+}
+
+#[tokio::test]
+async fn revert_post_commit_dirty_failure_blocks_and_preserves_external_content() {
+    let fixture = DesignFixture::new("revert-post-commit-dirty").await;
+    fixture.update(DESIGN_PATCH).await.unwrap();
+    let barrier = DesignCommitTestBarrier::new();
+    fixture
+        .coordinator
+        .set_design_after_commit_barrier(barrier.clone());
+    let coordinator = fixture.coordinator.clone();
+    let run_id = fixture.run.id.clone();
+    let revert = tokio::spawn(async move {
+        coordinator
+            .revert_design_for_no_source_cancel(&run_id)
+            .await
+    });
+    barrier.wait_until_committed().await;
+    std::fs::write(
+        fixture.repository.join("design/spec.md"),
+        "external-after-revert\n",
+    )
+    .unwrap();
+    barrier.release().await;
+
+    assert!(revert.await.unwrap().is_err());
+    let run = fixture
+        .store
+        .read_task_run(&fixture.run.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(run.phase, TaskRunPhase::Blocked);
+    assert_eq!(fixture.design_text(), "external-after-revert\n");
+    fixture.cleanup().await;
+}
+
+#[tokio::test]
+async fn revert_unsafe_compensation_blocks_without_rewriting_external_clean_commit() {
+    let fixture = DesignFixture::new("revert-unsafe-compensation").await;
+    fixture.update(DESIGN_PATCH).await.unwrap();
+    fixture
+        .store
+        .execute_test_sql(
+            "CREATE TRIGGER fail_revert_lease_update BEFORE UPDATE OF expected_head ON branch_leases \
+             BEGIN SELECT RAISE(FAIL, 'injected revert transaction failure'); END;",
+        )
+        .await;
+    let barrier = DesignCommitTestBarrier::new();
+    fixture
+        .coordinator
+        .set_design_after_commit_barrier(barrier.clone());
+    let coordinator = fixture.coordinator.clone();
+    let run_id = fixture.run.id.clone();
+    let revert = tokio::spawn(async move {
+        coordinator
+            .revert_design_for_no_source_cancel(&run_id)
+            .await
+    });
+    barrier.wait_until_committed().await;
+    std::fs::write(fixture.repository.join("external.rs"), "external\n").unwrap();
+    git(&fixture.repository, &["add", "external.rs"]);
+    git(
+        &fixture.repository,
+        &["commit", "-m", "external after revert"],
+    );
+    let external_head = fixture.head();
+    barrier.release().await;
+
+    assert!(revert.await.unwrap().is_err());
+    let run = fixture
+        .store
+        .read_task_run(&fixture.run.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(run.phase, TaskRunPhase::Blocked);
+    assert_eq!(fixture.head(), external_head);
+    fixture.cleanup().await;
+}
+
+#[tokio::test]
 async fn no_source_cancel_creates_revert_and_atomically_advances_heads() {
     let fixture = DesignFixture::new("cancel-revert").await;
     let design = fixture.update(DESIGN_PATCH).await.unwrap();
@@ -511,6 +701,51 @@ async fn no_source_cancel_creates_revert_and_atomically_advances_heads() {
         design.design_commit
     );
     assert!(fixture.status().is_empty());
+    fixture.cleanup().await;
+}
+
+#[tokio::test]
+async fn held_branch_mutation_guard_composes_revert_and_terminalization_without_allocation_gap() {
+    let fixture = DesignFixture::new("locked-cancel-composition").await;
+    fixture.update(DESIGN_PATCH).await.unwrap();
+    let guard = fixture.coordinator.lock_branch_mutation().await;
+    let hook = fixture.coordinator.lifecycle_hook(&fixture.session_id);
+    let request = AgentSpawnLifecycleRequest {
+        agent_id: "agent-during-stop".to_string(),
+        agent_path: "/root/during-stop".to_string(),
+        owner_path: "/root".to_string(),
+        session_id: fixture.session_id.clone(),
+        task_name: "during-stop".to_string(),
+        role: "executor".to_string(),
+        owned_paths: vec!["src/during_stop.rs".to_string()],
+        requested_by_call_id: "call-during-stop".to_string(),
+    };
+    let allocation = tokio::spawn(async move { hook.prepare_spawn(&request).await });
+
+    fixture
+        .coordinator
+        .revert_design_for_no_source_cancel_locked(&fixture.run.id, &guard)
+        .await
+        .unwrap();
+    fixture
+        .coordinator
+        .finish_task(&fixture.run.id, TaskRunPhase::Cancelled, None)
+        .await
+        .unwrap();
+    drop(guard);
+
+    let error = allocation
+        .await
+        .unwrap()
+        .expect_err("allocation must wait for terminalization and then reject terminal phase");
+    assert!(error.to_string().contains("active task run not found"));
+    let run = fixture
+        .store
+        .read_task_run(&fixture.run.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(run.phase, TaskRunPhase::Cancelled);
     fixture.cleanup().await;
 }
 

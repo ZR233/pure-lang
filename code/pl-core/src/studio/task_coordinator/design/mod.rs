@@ -1,3 +1,4 @@
+mod cancel;
 mod git;
 mod patch;
 
@@ -11,10 +12,7 @@ use serde::Deserialize;
 use self::git::*;
 use self::patch::*;
 use super::git::inspect_repository;
-use super::{
-    BranchLeaseRecord, DesignCancellationRevert, DesignUpdateOutput, MergeStatus, TaskCoordinator,
-    TaskRunPhase, TaskRunRecord,
-};
+use super::{BranchLeaseRecord, DesignUpdateOutput, TaskCoordinator, TaskRunPhase, TaskRunRecord};
 use crate::tool::{
     LocalWorkspaceFileBackend, RegisteredTool, ToolExecutionResult, ToolInputSchemaField,
     apply_patch_to_backend, strict_tool_input_schema,
@@ -139,7 +137,7 @@ impl TaskCoordinator {
         caller_workspace: &Path,
         patch: &str,
     ) -> Result<DesignUpdateOutput> {
-        let _mutation_guard = self.branch_mutation_lock.lock().await;
+        let _mutation_guard = self.lock_branch_mutation().await;
         let (run, _lease) = self
             .load_mutation_scope(studio_session_id, caller_workspace)
             .await?;
@@ -149,88 +147,6 @@ impl TaskCoordinator {
         self.apply_and_commit_design(&run, validated, &originals)
             .await
     }
-
-    pub(crate) async fn revert_design_for_no_source_cancel(
-        &self,
-        task_run_id: &str,
-    ) -> Result<DesignCancellationRevert> {
-        let _mutation_guard = self.branch_mutation_lock.lock().await;
-        let run = self
-            .store
-            .read_task_run(task_run_id)
-            .await?
-            .context("task run not found")?;
-        if run.phase.is_terminal() {
-            bail!("cannot revert design for a terminal task run");
-        }
-        let design_commit = run
-            .design_commit
-            .as_deref()
-            .context("task run has no accepted design commit")?;
-        if !design_commit_is_current(&run) {
-            bail!("task branch contains commits after the accepted design commit");
-        }
-        if self
-            .store
-            .list_merge_records(&run.id)
-            .await?
-            .iter()
-            .any(|record| record.status == MergeStatus::Merged)
-        {
-            bail!("task run already has an accepted source merge");
-        }
-        let lease = self
-            .store
-            .read_branch_lease(&run.id)
-            .await?
-            .context("task branch lease not found")?;
-        self.validate_mutation_snapshot(&run, &lease, Path::new(&run.workspace_root))
-            .await?;
-        ensure_single_parent(
-            Path::new(&run.workspace_root),
-            design_commit,
-            &run.base_commit,
-        )
-        .await?;
-
-        run_git_checked(
-            Path::new(&run.workspace_root),
-            &["revert", "--no-edit", design_commit],
-        )
-        .await?;
-        let snapshot = inspect_repository(&run.workspace_root, true).await?;
-        let revert_commit = snapshot.head;
-        match self
-            .store
-            .compare_and_set_task_head(&run.id, design_commit, &revert_commit)
-            .await
-        {
-            Ok(true) => Ok(DesignCancellationRevert {
-                task_run_id: run.id,
-                previous_head: design_commit.to_string(),
-                revert_commit,
-            }),
-            Ok(false) => {
-                compensate_commit(
-                    Path::new(&run.workspace_root),
-                    &revert_commit,
-                    design_commit,
-                )
-                .await?;
-                bail!("task head changed while recording the design revert")
-            }
-            Err(error) => {
-                compensate_commit(
-                    Path::new(&run.workspace_root),
-                    &revert_commit,
-                    design_commit,
-                )
-                .await?;
-                Err(error).context("failed to record the design revert")
-            }
-        }
-    }
-
     async fn load_mutation_scope(
         &self,
         studio_session_id: &str,
@@ -308,12 +224,11 @@ impl TaskCoordinator {
             run_git_checked(workspace, &["commit", "-m", "更新任务设计"])
                 .await
                 .context("failed to create focused design commit")?;
-            let committed = inspect_repository(workspace, true).await?;
-            Ok::<_, anyhow::Error>((changed_files, committed.head))
+            Ok::<_, anyhow::Error>(changed_files)
         }
         .await;
-        let (changed_files, design_commit) = match commit_result {
-            Ok(committed) => committed,
+        match commit_result {
+            Ok(_) => {}
             Err(operation_error) => {
                 if let Err(cleanup_error) =
                     rollback_paths(workspace, originals, &run.expected_head).await
@@ -324,10 +239,48 @@ impl TaskCoordinator {
                 }
                 return Err(operation_error);
             }
-        };
+        }
 
+        let design_commit = match read_head(workspace).await {
+            Ok(commit) => commit,
+            Err(error) => {
+                self.block_run(
+                    run,
+                    format!("design commit identity could not be captured: {error}"),
+                )
+                .await?;
+                return Err(error).context("design commit identity could not be captured");
+            }
+        };
         #[cfg(test)]
         self.wait_after_design_commit().await;
+
+        let changed_files = match self
+            .validate_captured_branch_commit(
+                run,
+                &design_commit,
+                &run.expected_head,
+                &validated.paths,
+            )
+            .await
+        {
+            Ok(exact) => exact,
+            Err(error) => {
+                self.block_run(
+                    run,
+                    format!("design commit could not be proven exact: {error}"),
+                )
+                .await?;
+                return Err(error).context("design commit could not be proven exact");
+            }
+        };
+        self.ensure_exact_commit_is_clean(
+            run,
+            originals,
+            &design_commit,
+            "design post-commit inspection failed",
+        )
+        .await?;
 
         match self
             .store
@@ -354,6 +307,54 @@ impl TaskCoordinator {
                 )
                 .await?;
                 Err(error).context("failed to record the design commit")
+            }
+        }
+    }
+
+    async fn validate_captured_branch_commit(
+        &self,
+        run: &TaskRunRecord,
+        commit: &str,
+        previous_head: &str,
+        expected_paths: &[String],
+    ) -> Result<Vec<String>> {
+        let workspace = Path::new(&run.workspace_root);
+        let changed_files =
+            validate_exact_commit(workspace, commit, previous_head, expected_paths).await?;
+        let snapshot = inspect_repository(workspace, false).await?;
+        if normalized_path(&snapshot.workspace_root)
+            != normalized_path(Path::new(&run.workspace_root))
+            || normalized_path(&snapshot.git_common_dir)
+                != normalized_path(Path::new(&run.git_common_dir))
+            || snapshot.branch != run.branch
+            || snapshot.head != commit
+        {
+            bail!("current named branch no longer points to the exact task commit");
+        }
+        Ok(changed_files)
+    }
+
+    async fn ensure_exact_commit_is_clean(
+        &self,
+        run: &TaskRunRecord,
+        originals: &BTreeMap<String, OriginalPath>,
+        commit: &str,
+        reason: &str,
+    ) -> Result<()> {
+        let workspace = Path::new(&run.workspace_root);
+        match inspect_repository(workspace, true).await {
+            Ok(snapshot)
+                if snapshot.head == commit
+                    && snapshot.branch == run.branch
+                    && normalized_path(&snapshot.git_common_dir)
+                        == normalized_path(Path::new(&run.git_common_dir)) =>
+            {
+                Ok(())
+            }
+            Ok(_) | Err(_) => {
+                self.compensate_or_block(run, originals, commit, reason)
+                    .await?;
+                bail!("{reason}; exact commit was compensated")
             }
         }
     }

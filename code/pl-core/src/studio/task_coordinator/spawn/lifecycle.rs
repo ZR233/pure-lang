@@ -89,6 +89,7 @@ impl AgentLifecycleHook for TaskAgentLifecycleHook {
                 "executor" => {
                     let owned_paths = normalize_owned_paths(&request.owned_paths)
                         .map_err(|error| spawn_error(error.to_string()))?;
+                    let _mutation_guard = self.coordinator.lock_branch_mutation().await;
                     let _allocation_guard = self.coordinator.allocation_lock.lock().await;
                     let allocation = self
                         .coordinator
