@@ -177,13 +177,6 @@ impl PureCore {
         self
     }
 
-    /// 返回可向子 agent 重放当前产品工具的 registrar。
-    pub(crate) fn agent_tool_registrar(
-        &self,
-    ) -> Option<std::sync::Arc<dyn crate::AgentToolRegistrar>> {
-        self.agent_tool_registrar.clone()
-    }
-
     pub(crate) fn set_agent_tool_registrar(
         &mut self,
         registrar: std::sync::Arc<dyn crate::AgentToolRegistrar>,

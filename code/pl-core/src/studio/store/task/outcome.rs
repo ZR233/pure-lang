@@ -65,20 +65,6 @@ impl StudioStore {
         agent_outcome_record(active.update(&self.db).await?)
     }
 
-    pub(crate) async fn read_agent_outcome_by_agent(
-        &self,
-        task_run_id: &str,
-        agent_id: &str,
-    ) -> Result<Option<AgentOutcomeRecord>> {
-        entities::agent_outcome::Entity::find()
-            .filter(entities::agent_outcome::Column::TaskRunId.eq(task_run_id.to_string()))
-            .filter(entities::agent_outcome::Column::AgentId.eq(agent_id.to_string()))
-            .one(&self.db)
-            .await?
-            .map(agent_outcome_record)
-            .transpose()
-    }
-
     pub(crate) async fn list_agent_outcomes(
         &self,
         task_run_id: &str,
@@ -95,7 +81,9 @@ impl StudioStore {
     }
 }
 
-fn agent_outcome_record(model: entities::agent_outcome::Model) -> Result<AgentOutcomeRecord> {
+pub(super) fn agent_outcome_record(
+    model: entities::agent_outcome::Model,
+) -> Result<AgentOutcomeRecord> {
     Ok(AgentOutcomeRecord {
         id: model.id,
         task_run_id: model.task_run_id,

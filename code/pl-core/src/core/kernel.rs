@@ -285,6 +285,7 @@ pub struct AgentKernelBuilder<T = NoAgentKernelToolSet> {
     tool_set: T,
     runtime_tools: Vec<Arc<dyn Tool>>,
     registered_tools: Vec<RegisteredTool>,
+    active_subagent: Option<crate::SubagentContext>,
 }
 
 fn default_workspace_root() -> PathBuf {
@@ -299,6 +300,7 @@ impl AgentKernelBuilder<NoAgentKernelToolSet> {
             tool_set: NoAgentKernelToolSet,
             runtime_tools: Vec::new(),
             registered_tools: Vec::new(),
+            active_subagent: None,
         }
     }
 }
@@ -319,11 +321,18 @@ impl<T> AgentKernelBuilder<T> {
             tool_set,
             runtime_tools: self.runtime_tools,
             registered_tools: self.registered_tools,
+            active_subagent: self.active_subagent,
         }
     }
 
     pub fn with_registered_tool(mut self, tool: RegisteredTool) -> Self {
         self.registered_tools.push(tool);
+        self
+    }
+
+    /// 将 kernel 配置为指定 child agent 的执行上下文。
+    pub fn with_subagent_context(mut self, context: crate::SubagentContext) -> Self {
+        self.active_subagent = Some(context);
         self
     }
 
@@ -362,6 +371,9 @@ where
             .core_builder
             .with_runtime_profile(self.profile.clone())
             .build();
+        if let Some(context) = self.active_subagent {
+            core = core.with_subagent_context(context);
+        }
         core.register_profile_tools().await;
         self.tool_set
             .register_tools(&mut core, workspace_root, workspace_instructions)

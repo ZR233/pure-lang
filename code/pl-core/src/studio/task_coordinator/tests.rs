@@ -4,10 +4,10 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::*;
-use crate::tool::{SubagentContext, Tool, ToolContext, ToolInput, ToolRegistry, WorkspaceAccess};
+use crate::tool::{SubagentContext, Tool, ToolRegistry};
 use crate::{
-    AgentSupervisor, CompileMode, CoreSession, PureCore, StudioStore, ToolEffect,
-    TurnExecutionProfile, TurnOptions,
+    AgentKernel, AgentKernelToolRequest, CompileMode, CoreAgentProfile, PureCoreBuilder,
+    StudioStore, ToolEffect, TurnExecutionProfile,
 };
 
 #[tokio::test]
@@ -26,7 +26,6 @@ async fn clean_committed_delivery_persists_exact_receipt_and_completes_records()
     let delivery = fixture
         .coordinator
         .submit_delivery(
-            &fixture.session_id,
             &fixture.subagent,
             &fixture.worktree,
             &head,
@@ -56,6 +55,49 @@ async fn clean_committed_delivery_persists_exact_receipt_and_completes_records()
     assert_eq!(outcome.status, AgentOutcomeStatus::Completed);
     assert_eq!(outcome.delivery, Some(delivery));
     assert_eq!(work_unit.status, WorkUnitStatus::Delivered);
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn repeated_successful_delivery_does_not_reopen_completed_records() {
+    let fixture = DeliveryFixture::new("repeat-success", vec!["src/**"]).await;
+    fixture.commit_file("src/lib.rs");
+    let head = git_output(&fixture.worktree, &["rev-parse", "HEAD"]);
+    let delivered = fixture.submit(&head).await.unwrap();
+
+    let error = fixture
+        .submit(&head)
+        .await
+        .expect_err("completed delivery cannot be submitted again");
+
+    assert!(error.to_string().contains("already finalized"));
+    let outcome = fixture.outcome().await;
+    assert_eq!(outcome.status, AgentOutcomeStatus::Completed);
+    assert_eq!(outcome.error, None);
+    assert_eq!(outcome.delivery, Some(delivered));
+    assert_eq!(fixture.work_unit().await.status, WorkUnitStatus::Delivered);
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn invalid_retry_after_success_does_not_downgrade_or_record_error() {
+    let fixture = DeliveryFixture::new("invalid-retry-after-success", vec!["src/**"]).await;
+    fixture.commit_file("src/lib.rs");
+    let head = git_output(&fixture.worktree, &["rev-parse", "HEAD"]);
+    let delivered = fixture.submit(&head).await.unwrap();
+    std::fs::write(fixture.worktree.join("src/lib.rs"), "dirty retry\n").unwrap();
+
+    let error = fixture
+        .submit(&head)
+        .await
+        .expect_err("completed delivery cannot enter waiting state");
+
+    assert!(error.to_string().contains("already finalized"));
+    let outcome = fixture.outcome().await;
+    assert_eq!(outcome.status, AgentOutcomeStatus::Completed);
+    assert_eq!(outcome.error, None);
+    assert_eq!(outcome.delivery, Some(delivered));
+    assert_eq!(fixture.work_unit().await.status, WorkUnitStatus::Delivered);
     fixture.cleanup();
 }
 
@@ -174,7 +216,6 @@ async fn delivery_rejects_main_workspace_and_other_worktree_from_same_repository
     let error = main_workspace
         .coordinator
         .submit_delivery(
-            &main_workspace.session_id,
             &main_workspace.subagent,
             &main_workspace.repository,
             &main_head,
@@ -208,7 +249,6 @@ async fn delivery_rejects_main_workspace_and_other_worktree_from_same_repository
     let error = other_worktree
         .coordinator
         .submit_delivery(
-            &other_worktree.session_id,
             &other_worktree.subagent,
             &other_path,
             &other_head,
@@ -232,7 +272,6 @@ async fn delivery_rejects_main_workspace_and_other_worktree_from_same_repository
     let error = subdirectory
         .coordinator
         .submit_delivery(
-            &subdirectory.session_id,
             &subdirectory.subagent,
             subdirectory.worktree.join("src"),
             &head,
@@ -291,13 +330,7 @@ async fn invalid_owned_path_wrong_role_and_attempt_four_wait_for_retry() {
     explorer.role = "explorer".to_string();
     let error = wrong_role
         .coordinator
-        .submit_delivery(
-            &wrong_role.session_id,
-            &explorer,
-            &wrong_role.worktree,
-            &head,
-            "cargo test passed",
-        )
+        .submit_delivery(&explorer, &wrong_role.worktree, &head, "cargo test passed")
         .await
         .expect_err("wrong role");
     assert!(error.to_string().contains("executor"));
@@ -323,7 +356,6 @@ async fn wrong_owner_missing_work_unit_and_empty_summary_are_actionable() {
     let error = wrong_owner
         .coordinator
         .submit_delivery(
-            &wrong_owner.session_id,
             &other_owner,
             &wrong_owner.worktree,
             &head,
@@ -340,10 +372,7 @@ async fn wrong_owner_missing_work_unit_and_empty_summary_are_actionable() {
     let head = git_output(&missing.worktree, &["rev-parse", "HEAD"]);
     let error = missing.submit(&head).await.expect_err("missing work unit");
     assert!(error.to_string().contains("no work unit"));
-    assert_eq!(
-        missing.outcome().await.status,
-        AgentOutcomeStatus::WaitingForDelivery
-    );
+    assert_eq!(missing.outcome().await.status, AgentOutcomeStatus::Running);
     missing.cleanup();
 
     let empty_summary = DeliveryFixture::new("empty-summary", vec!["src/**"]).await;
@@ -352,7 +381,6 @@ async fn wrong_owner_missing_work_unit_and_empty_summary_are_actionable() {
     let error = empty_summary
         .coordinator
         .submit_delivery(
-            &empty_summary.session_id,
             &empty_summary.subagent,
             &empty_summary.worktree,
             &head,
@@ -440,59 +468,34 @@ async fn submit_delivery_tool_has_typed_schema_branch_effect_and_role_visibility
 }
 
 #[tokio::test]
-async fn task_tool_registrar_replays_submit_delivery_into_child_core() {
-    let coordinator = Arc::new(TaskCoordinator::new(
-        StudioStore::open_memory().await.unwrap(),
-    ));
-    let mut root_core = PureCore::default_provider().unwrap();
-    coordinator.install_tools(&mut root_core);
-    let registrar = root_core
-        .agent_tool_registrar()
-        .expect("task agent tool registrar");
-    let mut child_core = PureCore::default_provider().unwrap();
-
-    registrar
-        .register_tools(&mut child_core, std::env::temp_dir(), None)
-        .await
-        .unwrap();
-
-    assert!(child_core.has_tool("submit_delivery"));
-}
-
-#[tokio::test]
-async fn submit_delivery_tool_uses_runtime_session_subagent_and_workspace() {
+async fn child_dispatch_resolves_delivery_without_task_session_in_tool_input() {
     let fixture = DeliveryFixture::new("delivery-tool-handler", vec!["src/**"]).await;
     fixture.commit_file("src/lib.rs");
     let head = git_output(&fixture.worktree, &["rev-parse", "HEAD"]);
     let tool = fixture.coordinator.submit_delivery_tool();
     let (event_tx, _) = tokio::sync::broadcast::channel(16);
+    let kernel = AgentKernel::builder(
+        PureCoreBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None)).unwrap(),
+    )
+    .with_profile(CoreAgentProfile::host_provided(fixture.worktree.clone()))
+    .with_registered_tool(tool)
+    .with_subagent_context(fixture.subagent.clone())
+    .build()
+    .await;
 
-    let output = tool
-        .execute(
-            ToolInput {
-                arguments: serde_json::json!({
+    let output = kernel
+        .execute_tool(
+            AgentKernelToolRequest::new(
+                "submit_delivery",
+                serde_json::json!({
                     "headCommit": head,
                     "verificationSummary": "cargo test passed"
                 }),
-                session_id: fixture.session_id.clone(),
-                tool_id: "call-submit".to_string(),
-                revision_base: 0,
-            },
-            ToolContext {
+                "child-turn-not-task-session",
+                "call-submit",
                 event_tx,
-                options: TurnOptions::default(),
-                workspace_access: WorkspaceAccess::WorkspaceOnly,
-                mode: CompileMode::Task,
-                workspace_root: fixture.worktree.clone(),
-                workspace_instructions: None,
-                instruction_snapshot: None,
-                provider_call_id: None,
-                active_subagent: Some(fixture.subagent.clone()),
-                agent_supervisor: AgentSupervisor::default(),
-                agent_tool_registrar: None,
-                lsp_runtime: None,
-                parent_session: Arc::new(CoreSession::new()),
-            },
+            )
+            .with_mode(CompileMode::Task),
         )
         .await
         .unwrap();
@@ -505,7 +508,6 @@ async fn submit_delivery_tool_uses_runtime_session_subagent_and_workspace() {
 struct DeliveryFixture {
     coordinator: Arc<TaskCoordinator>,
     store: StudioStore,
-    session_id: String,
     task_run_id: String,
     work_unit_id: String,
     outcome_id: String,
@@ -606,7 +608,6 @@ impl DeliveryFixture {
         Self {
             coordinator,
             store,
-            session_id: session.id,
             task_run_id,
             work_unit_id: work_unit.id,
             outcome_id: outcome.id,
@@ -628,13 +629,7 @@ impl DeliveryFixture {
 
     async fn submit(&self, head: &str) -> anyhow::Result<AgentDelivery> {
         self.coordinator
-            .submit_delivery(
-                &self.session_id,
-                &self.subagent,
-                &self.worktree,
-                head,
-                "cargo test passed",
-            )
+            .submit_delivery(&self.subagent, &self.worktree, head, "cargo test passed")
             .await
     }
 
