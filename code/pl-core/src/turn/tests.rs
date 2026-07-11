@@ -7,7 +7,7 @@ fn turn_budget_default_matches_codex_style_wall_clock() {
     assert_eq!(TurnBudget::default().wall_clock_ms, 1_800_000);
     assert_eq!(TurnBudget::new(90_000).wall_clock_ms, 90_000);
     assert_eq!(AGENT_MAX_COUNT, 16);
-    assert_eq!(AGENT_MAX_DEPTH, 3);
+    assert_eq!(AGENT_MAX_DEPTH, 1);
 }
 
 #[test]

@@ -183,7 +183,8 @@ pub use trace::TraceRecorder;
 pub use turn::{
     AGENT_MAX_COUNT, AGENT_MAX_DEPTH, CompileMode, DEFAULT_WALL_CLOCK_MS, InteractionCallback,
     InteractionFuture, PermissionMode, ToolApprovalDecision, ToolApprovalPolicy,
-    ToolApprovalRequest, ToolExecutionMode, TurnAbortReason, TurnBudget, TurnOptions, TurnRequest,
-    TurnResult, TurnResultStatus, UserInputMode,
+    ToolApprovalRequest, ToolEffect, ToolExecutionMode, TurnAbortReason, TurnBudget,
+    TurnExecutionProfile, TurnExecutionRole, TurnOptions, TurnRequest, TurnResult,
+    TurnResultStatus, UserInputMode,
 };
 pub use workspace::{load_workspace_instructions, resolve_workspace_root};

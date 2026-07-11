@@ -2,27 +2,28 @@ use super::*;
 use pretty_assertions::assert_eq;
 
 #[test]
-fn plan_mode_tool_allowlist_exposes_only_read_and_agent_tools() {
-    let auto = crate::turn::CompileMode::Simple;
-    let plan = crate::turn::CompileMode::Task;
+fn execution_modes_enforce_root_tool_effect_boundaries() {
+    let simple = crate::turn::CompileMode::Simple;
+    let task = crate::turn::CompileMode::Task;
 
-    assert!(tool_allowed_in_mode(auto, "write_file"));
-    assert!(tool_allowed_in_mode(plan, "read_file"));
-    assert!(tool_allowed_in_mode(plan, "search_files"));
-    assert!(tool_allowed_in_mode(plan, "skills_list"));
-    assert!(tool_allowed_in_mode(plan, "skill_view"));
-    assert!(tool_allowed_in_mode(plan, "spawn_agent"));
-    assert!(tool_allowed_in_mode(plan, "send_input"));
-    assert!(tool_allowed_in_mode(plan, "request_user_input"));
-    assert!(tool_allowed_in_mode(plan, "update_todo_list"));
-    assert!(tool_allowed_in_mode(plan, "bash"));
-    assert!(tool_allowed_in_mode(plan, "lsp_query_rust"));
-    assert!(tool_allowed_in_mode(plan, "mcp__github__search_issues"));
-    assert!(!tool_allowed_in_mode(plan, "subagent"));
-    assert!(!tool_allowed_in_mode(plan, "write_file"));
-    assert!(!tool_allowed_in_mode(plan, "apply_patch"));
-    assert!(!tool_allowed_in_mode(plan, "delete_path"));
-    assert!(!tool_allowed_in_mode(plan, "skill_manage"));
+    assert!(tool_allowed_in_mode(simple, "write_file"));
+    assert!(tool_allowed_in_mode(simple, "mcp__github__search_issues"));
+    assert!(tool_allowed_in_mode(task, "read_file"));
+    assert!(tool_allowed_in_mode(task, "search_files"));
+    assert!(tool_allowed_in_mode(task, "skills_list"));
+    assert!(tool_allowed_in_mode(task, "skill_view"));
+    assert!(tool_allowed_in_mode(task, "spawn_agent"));
+    assert!(tool_allowed_in_mode(task, "send_input"));
+    assert!(tool_allowed_in_mode(task, "request_user_input"));
+    assert!(tool_allowed_in_mode(task, "update_todo_list"));
+    assert!(tool_allowed_in_mode(task, "lsp_query_rust"));
+    assert!(!tool_allowed_in_mode(task, "bash"));
+    assert!(!tool_allowed_in_mode(task, "mcp__github__search_issues"));
+    assert!(!tool_allowed_in_mode(task, "subagent"));
+    assert!(!tool_allowed_in_mode(task, "write_file"));
+    assert!(!tool_allowed_in_mode(task, "apply_patch"));
+    assert!(!tool_allowed_in_mode(task, "delete_path"));
+    assert!(!tool_allowed_in_mode(task, "skill_manage"));
 }
 
 #[test]

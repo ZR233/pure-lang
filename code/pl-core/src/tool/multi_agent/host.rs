@@ -13,7 +13,7 @@ use super::super::{
     BoxFuture, OutputTruncation, Tool, ToolContext, ToolInput, ToolOutput, ToolRuntimeLockPolicy,
 };
 use super::schema::AgentControlToolKind;
-use super::{ForkTurns, fork_session};
+use super::{ForkTurns, fork_session, validate_spawn_authority};
 
 const DEFAULT_AGENT_CONTROL_WAIT_TIMEOUT_MS: i64 = 30_000;
 const MIN_AGENT_CONTROL_WAIT_TIMEOUT_MS: i64 = 100;
@@ -501,6 +501,7 @@ where
             match self.kind {
                 AgentControlToolKind::SpawnAgent => {
                     let mut request: AgentControlSpawnRequest = parse_input(self.name(), input)?;
+                    validate_spawn_authority(&context, request.agent_type_policy().kind.as_str())?;
                     self.policy
                         .check_tool(self.kind)
                         .await

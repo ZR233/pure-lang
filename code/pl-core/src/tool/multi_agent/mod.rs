@@ -53,6 +53,30 @@ fn invalid_spawn_input(error: serde_json::Error) -> PureError {
     }
 }
 
+fn validate_spawn_authority(context: &ToolContext, requested_role: &str) -> Result<(), PureError> {
+    if context.active_subagent.is_some() {
+        return Err(PureError::ToolExecutionFailed {
+            tool: "spawn_agent".to_string(),
+            error: "only the root owner may spawn agents".to_string(),
+        });
+    }
+    match context.mode {
+        crate::CompileMode::Simple if requested_role != "explorer" => {
+            Err(PureError::ToolExecutionFailed {
+                tool: "spawn_agent".to_string(),
+                error: "simple mode may only spawn explorer agents".to_string(),
+            })
+        }
+        crate::CompileMode::Task if requested_role == "planner" => {
+            Err(PureError::ToolExecutionFailed {
+                tool: "spawn_agent".to_string(),
+                error: "task planner cannot spawn another planner".to_string(),
+            })
+        }
+        crate::CompileMode::Simple | crate::CompileMode::Task => Ok(()),
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ForkTurns {
     None,

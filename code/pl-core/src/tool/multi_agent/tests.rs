@@ -784,7 +784,7 @@ async fn host_agent_control_backend_display_error_maps_to_tool_error() {
         event_tx,
         options: crate::TurnOptions::default(),
         workspace_access: WorkspaceAccess::WorkspaceOnly,
-        mode: CompileMode::Simple,
+        mode: CompileMode::Task,
         workspace_root: std::env::temp_dir(),
         workspace_instructions: None,
         instruction_snapshot: None,
@@ -818,6 +818,108 @@ async fn host_agent_control_backend_display_error_maps_to_tool_error() {
         pl_protocol::PureError::ToolExecutionFailed { tool, error }
             if tool == "spawn_agent" && error == "spawn blocked"
     ));
+}
+
+#[tokio::test]
+async fn spawn_agent_enforces_mode_owner_and_depth_one_roles() {
+    let spawn_tool = crate::tool::AgentControlTool::new(
+        crate::tool::AgentControlToolKind::SpawnAgent,
+        Arc::new(FakeHostAgentControlBackend),
+    );
+    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+    let simple_root = ToolContext {
+        event_tx,
+        options: crate::TurnOptions::default(),
+        workspace_access: WorkspaceAccess::WorkspaceOnly,
+        mode: CompileMode::Simple,
+        workspace_root: std::env::temp_dir(),
+        workspace_instructions: None,
+        instruction_snapshot: None,
+        provider_call_id: None,
+        active_subagent: None,
+        agent_supervisor: crate::AgentSupervisor::default(),
+        agent_tool_registrar: None,
+        lsp_runtime: None,
+        parent_session: Arc::new(crate::CoreSession::new()),
+    };
+
+    let executor_error = spawn_tool
+        .execute(
+            crate::tool::ToolInput {
+                arguments: serde_json::json!({
+                    "taskName": "implement",
+                    "message": "implement",
+                    "agentType": "executor",
+                    "skillMentions": ["rust"]
+                }),
+                session_id: "session-1".to_string(),
+                tool_id: "call-simple-executor".to_string(),
+                revision_base: 0,
+            },
+            simple_root.clone(),
+        )
+        .await
+        .expect_err("simple root may only create explorer agents");
+    assert!(executor_error.to_string().contains("only spawn explorer"));
+
+    spawn_tool
+        .execute(
+            crate::tool::ToolInput {
+                arguments: serde_json::json!({
+                    "taskName": "explore",
+                    "message": "inspect",
+                    "agentType": "explorer",
+                    "skillMentions": ["rust"]
+                }),
+                session_id: "session-1".to_string(),
+                tool_id: "call-simple-explorer".to_string(),
+                revision_base: 0,
+            },
+            simple_root,
+        )
+        .await
+        .expect("simple root should create explorer agents");
+
+    let task_child = ToolContext {
+        event_tx: tokio::sync::broadcast::channel(8).0,
+        options: crate::TurnOptions::default(),
+        workspace_access: WorkspaceAccess::WorkspaceOnly,
+        mode: CompileMode::Task,
+        workspace_root: std::env::temp_dir(),
+        workspace_instructions: None,
+        instruction_snapshot: None,
+        provider_call_id: None,
+        active_subagent: Some(crate::tool::SubagentContext {
+            id: "agent-explorer".to_string(),
+            parent_id: Some("root".to_string()),
+            agent_path: Some("root/explorer".to_string()),
+            role: "explorer".to_string(),
+            task: "inspect".to_string(),
+            depth: 1,
+        }),
+        agent_supervisor: crate::AgentSupervisor::default(),
+        agent_tool_registrar: None,
+        lsp_runtime: None,
+        parent_session: Arc::new(crate::CoreSession::new()),
+    };
+    let child_error = spawn_tool
+        .execute(
+            crate::tool::ToolInput {
+                arguments: serde_json::json!({
+                    "taskName": "nested",
+                    "message": "nested",
+                    "agentType": "executor",
+                    "skillMentions": ["rust"]
+                }),
+                session_id: "session-1".to_string(),
+                tool_id: "call-nested".to_string(),
+                revision_base: 0,
+            },
+            task_child,
+        )
+        .await
+        .expect_err("subagents cannot spawn descendants");
+    assert!(child_error.to_string().contains("only the root owner"));
 }
 
 #[tokio::test]
@@ -1050,6 +1152,7 @@ async fn host_spawn_agent_receives_pl_core_filtered_fork_history() {
                 arguments: serde_json::json!({
                     "taskName": "inspect_runtime",
                     "message": "inspect",
+                    "agentType": "explorer",
                     "forkTurns": "1"
                 }),
                 session_id: "session-1".to_string(),

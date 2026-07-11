@@ -7,6 +7,7 @@ use super::super::types::{SpawnAgentArgs, SpawnAgentResult, SpawnAgentTool};
 use super::super::{
     BoxFuture, ForkTurns, Tool, ToolContext, ToolInput, ToolOutput, child_agent_options,
     current_agent_path, fork_session, invalid_spawn_input, json_output, role_key,
+    validate_spawn_authority,
 };
 
 impl Tool for SpawnAgentTool {
@@ -38,6 +39,7 @@ impl Tool for SpawnAgentTool {
             let args: SpawnAgentArgs =
                 serde_json::from_value(input.arguments).map_err(invalid_spawn_input)?;
             let role = role_key(args.agent_type.as_deref())?;
+            validate_spawn_authority(&context, &role)?;
             let fork_turns = ForkTurns::parse(args.fork_turns.as_deref())?;
             let parent_path = current_agent_path(&context);
             let prompt = args.message.clone();
