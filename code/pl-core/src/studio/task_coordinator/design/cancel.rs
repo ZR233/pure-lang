@@ -23,8 +23,9 @@ impl TaskCoordinator {
     pub(crate) async fn revert_design_for_no_source_cancel_locked(
         &self,
         task_run_id: &str,
-        _guard: &BranchMutationGuard<'_>,
+        guard: &BranchMutationGuard<'_>,
     ) -> Result<DesignCancellationRevert> {
+        self.ensure_branch_mutation_guard(guard)?;
         let run = self
             .store
             .read_task_run(task_run_id)
@@ -135,11 +136,17 @@ impl TaskCoordinator {
             .compare_and_set_task_head(&run.id, design_commit, &revert_commit)
             .await
         {
-            Ok(true) => Ok(DesignCancellationRevert {
-                task_run_id: run.id,
-                previous_head: design_commit.to_string(),
-                revert_commit,
-            }),
+            Ok(true) => {
+                #[cfg(test)]
+                self.wait_after_design_head_persist().await;
+                self.verify_durable_exact_scope(&run, &revert_commit, "design revert durable CAS")
+                    .await?;
+                Ok(DesignCancellationRevert {
+                    task_run_id: run.id,
+                    previous_head: design_commit.to_string(),
+                    revert_commit,
+                })
+            }
             Ok(false) => {
                 self.compensate_or_block(
                     &run,
