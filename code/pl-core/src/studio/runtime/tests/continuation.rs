@@ -18,8 +18,9 @@ use crate::studio::runtime::continuation::{
     ContinuationScheduler, ContinuationTestBarrier, SessionTurnState,
 };
 use crate::studio::task_coordinator::{
-    AgentOutcomeStatus, CreateAgentOutcome, CreateTaskRun, CreateWorkUnit, TaskRunPhase,
-    WorkUnitStatus,
+    AgentDelivery, AgentOutcomeStatus, AgentWorktreeDelivery, BeginTaskMerge, ConflictEntry,
+    ConflictKind, ConflictManifest, ConflictTaskMerge, CreateAgentOutcome, CreateTaskRun,
+    CreateWorkUnit, TaskRunPhase, WorkUnitStatus,
 };
 
 #[tokio::test]
@@ -337,6 +338,49 @@ async fn removal_between_active_observation_and_enqueue_still_launches_once() {
 
     assert_eq!(launches.len(), 1);
     assert_eq!(launches[0].request.task_run_id, run.id);
+}
+
+#[tokio::test]
+async fn active_turn_removal_claims_durable_merge_conflict_and_launches_exactly_once() {
+    let (store, run) = merge_conflict_continuation_fixture("merge-conflict-removal").await;
+    let launcher = RecordingLauncher::successful();
+    let runtime = test_runtime(store.clone(), launcher.clone());
+    runtime
+        .active_turns
+        .insert(
+            run.session_id.clone(),
+            "turn-before-conflict".to_string(),
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+
+    assert!(
+        runtime
+            .active_turn_removed(&run.session_id, "turn-before-conflict")
+            .await
+    );
+    let launches = launcher.wait_for_count(1).await;
+    assert_eq!(launches.len(), 1);
+    assert_eq!(launches[0].request.task_run_id, run.id);
+    assert_eq!(
+        launches[0].request.reason,
+        ContinuationReason::MergeConflict
+    );
+    assert_eq!(
+        store
+            .claim_merge_conflict_continuation(&run.session_id)
+            .await
+            .unwrap(),
+        None
+    );
+    assert!(
+        !runtime
+            .active_turn_removed(&run.session_id, "turn-before-conflict")
+            .await
+    );
+    tokio::task::yield_now().await;
+    assert_eq!(launcher.launches.lock().await.len(), 1);
 }
 
 #[tokio::test]
@@ -2558,6 +2602,116 @@ async fn continuation_fixture(
         .await
         .unwrap();
     (store, run, outcome)
+}
+
+async fn merge_conflict_continuation_fixture(
+    name: &str,
+) -> (StudioStore, crate::studio::task_coordinator::TaskRunRecord) {
+    let store = StudioStore::open_memory().await.unwrap();
+    let root = format!("C:/work/{name}");
+    let project = store.upsert_project(&root).await.unwrap();
+    let session = store
+        .create_session(&project.id, name, CompileMode::Task)
+        .await
+        .unwrap();
+    let (run, _) = store
+        .create_task_run_with_lease(CreateTaskRun {
+            session_id: session.id.clone(),
+            phase: TaskRunPhase::Implementing,
+            plan: "Resolve a merge conflict".to_string(),
+            workspace_root: root.clone(),
+            git_common_dir: format!("{root}/.git"),
+            branch: format!("branch-{name}"),
+            head_commit: "1111111".to_string(),
+        })
+        .await
+        .unwrap();
+    let worktree_path = format!("{root}/.pure/worktrees/agent-conflict");
+    let branch = format!("pure-task-{name}-agent-conflict");
+    let work_unit = store
+        .create_work_unit(CreateWorkUnit {
+            task_run_id: run.id.clone(),
+            title: "Create conflict".to_string(),
+            owned_paths: vec!["src/conflict.rs".to_string()],
+            base_commit: run.base_commit.clone(),
+            worktree_path: worktree_path.clone(),
+            branch: branch.clone(),
+            attempt: 1,
+        })
+        .await
+        .unwrap();
+    let work_unit = store
+        .update_work_unit(
+            &work_unit.id,
+            WorkUnitStatus::Running,
+            Some("agent-conflict".to_string()),
+        )
+        .await
+        .unwrap();
+    let outcome = store
+        .create_agent_outcome(CreateAgentOutcome {
+            task_run_id: run.id.clone(),
+            work_unit_id: Some(work_unit.id.clone()),
+            agent_id: "agent-conflict".to_string(),
+            owner_path: "/root".to_string(),
+            initiated_by: "planner".to_string(),
+            requested_by_call_id: "call-agent-conflict".to_string(),
+            role: "executor".to_string(),
+            status: AgentOutcomeStatus::Running,
+            attempt: 1,
+        })
+        .await
+        .unwrap();
+    let delivery_head = "2222222".to_string();
+    store
+        .complete_agent_delivery(
+            &outcome.id,
+            &work_unit.id,
+            AgentDelivery {
+                worktree: AgentWorktreeDelivery {
+                    path: worktree_path,
+                    branch,
+                },
+                base_commit: run.base_commit.clone(),
+                head_commit: delivery_head.clone(),
+                changed_files: vec!["src/conflict.rs".to_string()],
+                verification_summary: "focused checks passed".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    let scope = store
+        .begin_task_merge(BeginTaskMerge {
+            session_id: session.id,
+            agent_id: "agent-conflict".to_string(),
+            expected_head: run.expected_head.clone(),
+            pre_index_tree: "tree-before-merge".to_string(),
+            changed_files: vec!["src/conflict.rs".to_string()],
+        })
+        .await
+        .unwrap();
+    store
+        .conflict_task_merge(ConflictTaskMerge {
+            merge_id: scope.merge.id,
+            manifest: ConflictManifest {
+                merge_head: delivery_head,
+                merge_base: run.base_commit.clone(),
+                pre_index_tree: "tree-before-merge".to_string(),
+                conflicts: vec![ConflictEntry {
+                    path: "src/conflict.rs".to_string(),
+                    kind: ConflictKind::Text,
+                    stages: Vec::new(),
+                    binary: false,
+                    rename_source: None,
+                    rename_destination: None,
+                }],
+                auto_merged_entries: Vec::new(),
+            },
+        })
+        .await
+        .unwrap();
+    let run = store.read_task_run(&run.id).await.unwrap().unwrap();
+    (store, run)
 }
 
 fn terminal_event(agent_id: &str) -> pl_trace::AgentEvent {

@@ -7,7 +7,7 @@ use crate::studio::entities;
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    CreateMergeRecord, MergeRecord, MergeStatus, UpdateMergeRecord,
+    CreateMergeRecord, MergeEvidence, MergeRecord, MergeStatus, UpdateMergeRecord,
 };
 
 impl StudioStore {
@@ -70,7 +70,8 @@ impl StudioStore {
     }
 }
 
-pub(super) fn merge_record(model: entities::merge_record::Model) -> Result<MergeRecord> {
+pub(crate) fn merge_record(model: entities::merge_record::Model) -> Result<MergeRecord> {
+    let (verification, evidence) = parse_merge_evidence(model.verification_json.as_deref())?;
     Ok(MergeRecord {
         id: model.id,
         task_run_id: model.task_run_id,
@@ -81,12 +82,28 @@ pub(super) fn merge_record(model: entities::merge_record::Model) -> Result<Merge
         source_commit: model.source_commit,
         conflict_files: serde_json::from_str(&model.conflict_files_json)?,
         resolution_summary: model.resolution_summary,
-        verification: model
-            .verification_json
-            .map(|json| serde_json::from_str(&json))
-            .transpose()?,
+        verification,
+        evidence,
         attempt: model.attempt as u32,
         created_at: model.created_at,
         updated_at: model.updated_at,
     })
+}
+
+fn parse_merge_evidence(
+    json: Option<&str>,
+) -> Result<(Option<Vec<String>>, Option<MergeEvidence>)> {
+    let Some(json) = json else {
+        return Ok((None, None));
+    };
+    let value: serde_json::Value = serde_json::from_str(json)?;
+    if value.is_array() {
+        return Ok((Some(serde_json::from_value(value)?), None));
+    }
+    Ok((None, Some(serde_json::from_value(value)?)))
+}
+
+pub(crate) fn parse_required_evidence(json: Option<&str>) -> Result<MergeEvidence> {
+    let (_, evidence) = parse_merge_evidence(json)?;
+    evidence.context("merge record has no versioned evidence")
 }

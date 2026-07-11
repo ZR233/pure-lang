@@ -3,6 +3,15 @@ mod coordinator;
 mod delivery;
 mod design;
 mod git;
+mod merge;
+#[cfg(test)]
+pub(crate) use merge::MergeCleanupTestBarrier;
+#[cfg(test)]
+pub(crate) use merge::MergeCommitTestBarrier;
+#[cfg(test)]
+pub(crate) use merge::MergeVerifier;
+#[cfg(test)]
+pub(crate) use merge::{MergeVerificationCommand, select_merge_verification_commands};
 mod owned_path;
 mod recovery;
 mod spawn;

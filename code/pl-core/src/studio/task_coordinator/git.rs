@@ -30,7 +30,6 @@ pub(super) async fn changed_files_between(
     let base_commit = base_commit.to_string();
     let head_commit = head_commit.to_string();
     tokio::task::spawn_blocking(move || {
-        let range = format!("{base_commit}..{head_commit}");
         let output = Command::new("git")
             .arg("-C")
             .arg(&path)
@@ -42,7 +41,9 @@ pub(super) async fn changed_files_between(
                 "--find-copies",
                 "--find-copies-harder",
                 "--diff-filter=ACDMRTUXB",
-                &range,
+                &base_commit,
+                &head_commit,
+                "--",
             ])
             .output()
             .context("failed to run git diff --name-status")?;

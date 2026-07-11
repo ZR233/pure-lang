@@ -435,9 +435,155 @@ pub(crate) struct MergeRecord {
     pub(crate) conflict_files: Vec<String>,
     pub(crate) resolution_summary: Option<String>,
     pub(crate) verification: Option<Vec<String>>,
+    pub(crate) evidence: Option<MergeEvidence>,
     pub(crate) attempt: u32,
     pub(crate) created_at: i64,
     pub(crate) updated_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MergeEvidence {
+    pub(crate) version: u32,
+    pub(crate) origin_phase: TaskRunPhase,
+    pub(crate) work_unit_id: String,
+    pub(crate) outcome_id: String,
+    pub(crate) delivery_head: String,
+    pub(crate) pre_index_tree: String,
+    pub(crate) changed_files: Vec<String>,
+    #[serde(default)]
+    pub(crate) verification_steps: Vec<MergeVerificationStep>,
+    #[serde(default)]
+    pub(crate) merge_commit: Option<String>,
+    #[serde(default)]
+    pub(crate) conflict_manifest: Option<ConflictManifest>,
+    #[serde(default)]
+    pub(crate) conflict_continuation_requested: bool,
+    #[serde(default)]
+    pub(crate) compensation: Option<String>,
+    #[serde(default)]
+    pub(crate) cleanup: Option<MergeCleanupEvidence>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MergeVerificationStep {
+    pub(crate) command: Vec<String>,
+    pub(crate) success: bool,
+    pub(crate) output: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MergeCleanupEvidence {
+    pub(crate) status: String,
+    pub(crate) detail: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ConflictManifest {
+    pub(crate) merge_head: String,
+    pub(crate) merge_base: String,
+    pub(crate) pre_index_tree: String,
+    pub(crate) conflicts: Vec<ConflictEntry>,
+    pub(crate) auto_merged_entries: Vec<MergeIndexEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ConflictEntry {
+    pub(crate) path: String,
+    pub(crate) kind: ConflictKind,
+    pub(crate) stages: Vec<MergeIndexStage>,
+    pub(crate) binary: bool,
+    pub(crate) rename_source: Option<String>,
+    pub(crate) rename_destination: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum ConflictKind {
+    Text,
+    AddAdd,
+    RenameDelete,
+    ModifyDelete,
+    Binary,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MergeIndexStage {
+    pub(crate) stage: u8,
+    pub(crate) mode: String,
+    pub(crate) object_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MergeIndexEntry {
+    pub(crate) path: String,
+    pub(crate) mode: String,
+    pub(crate) object_id: String,
+}
+
+pub(crate) struct BeginTaskMerge {
+    pub(crate) session_id: String,
+    pub(crate) agent_id: String,
+    pub(crate) expected_head: String,
+    pub(crate) pre_index_tree: String,
+    pub(crate) changed_files: Vec<String>,
+}
+
+pub(crate) struct TaskMergeScope {
+    #[cfg(test)]
+    pub(crate) origin_phase: TaskRunPhase,
+    pub(crate) run: TaskRunRecord,
+    pub(crate) lease: BranchLeaseRecord,
+    pub(crate) work_unit: WorkUnitRecord,
+    pub(crate) outcome: AgentOutcomeRecord,
+    pub(crate) delivery: AgentDelivery,
+    pub(crate) merge: MergeRecord,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct MergeVerificationRequest {
+    pub(crate) workspace_root: String,
+    pub(crate) changed_files: Vec<String>,
+}
+
+pub(crate) struct CompleteTaskMerge {
+    pub(crate) merge_id: String,
+    pub(crate) expected_head: String,
+    pub(crate) merge_commit: String,
+    pub(crate) verification_steps: Vec<MergeVerificationStep>,
+}
+
+pub(crate) struct FailTaskMerge {
+    pub(crate) merge_id: String,
+    pub(crate) reason: String,
+    pub(crate) verification_steps: Vec<MergeVerificationStep>,
+    pub(crate) compensation: Option<String>,
+}
+
+pub(crate) struct ConflictTaskMerge {
+    pub(crate) merge_id: String,
+    pub(crate) manifest: ConflictManifest,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TaskMergeAgentOutput {
+    pub(crate) merge_id: String,
+    pub(crate) status: MergeStatus,
+    pub(crate) previous_head: String,
+    pub(crate) new_head: Option<String>,
+    pub(crate) agent_id: String,
+    pub(crate) source_commit: String,
+    pub(crate) changed_files: Vec<String>,
+    pub(crate) verification: Vec<MergeVerificationStep>,
+    pub(crate) cleanup: MergeCleanupEvidence,
+    pub(crate) conflict_files: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

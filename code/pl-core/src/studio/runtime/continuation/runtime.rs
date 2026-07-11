@@ -97,6 +97,32 @@ impl StudioRuntime {
         if let Some(barrier) = &self.active_turn_removal_barrier {
             barrier.pause_once().await;
         }
+        match self
+            .store
+            .claim_merge_conflict_continuation(session_id)
+            .await
+        {
+            Ok(Some(task_run_id)) => {
+                self.request_task_continuation(task_run_id, ContinuationReason::MergeConflict)
+                    .await;
+            }
+            Ok(None) => {}
+            Err(error) => {
+                if let Ok(Some(run)) = self
+                    .store
+                    .find_active_task_run_for_session(session_id)
+                    .await
+                {
+                    let _ = self
+                        .task_coordinator
+                        .block_continuation_failure(
+                            &run.id,
+                            format!("merge conflict continuation claim failed: {error}"),
+                        )
+                        .await;
+                }
+            }
+        }
         if let Some(claim) = self
             .continuation_scheduler
             .turn_removed(session_id, turn_id)
