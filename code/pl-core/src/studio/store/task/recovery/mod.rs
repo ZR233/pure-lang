@@ -20,38 +20,42 @@ const RESTART_BEFORE_CREATE_DIAGNOSTIC: &str =
     "agent interrupted by application restart before worktree creation";
 
 impl StudioStore {
-    pub(crate) async fn list_task_worktree_workspaces(&self) -> Result<Vec<String>> {
-        let mut workspaces = entities::task_run::Entity::find()
+    pub(crate) async fn list_all_task_worktree_owners(
+        &self,
+    ) -> Result<Vec<TaskWorktreeOwnerSnapshot>> {
+        let mut common_dirs = entities::task_run::Entity::find()
             .all(&self.db)
             .await?
             .into_iter()
-            .map(|run| run.workspace_root)
+            .map(|run| run.git_common_dir)
             .collect::<Vec<_>>();
-        workspaces.sort_by_key(|workspace| {
-            if cfg!(windows) {
-                workspace.to_lowercase()
-            } else {
-                workspace.clone()
-            }
-        });
-        workspaces.dedup_by(|left, right| {
-            if cfg!(windows) {
-                left.eq_ignore_ascii_case(right)
-            } else {
-                left == right
-            }
-        });
-        Ok(workspaces)
+        common_dirs.sort();
+        common_dirs.dedup();
+        let mut owners = Vec::new();
+        for common_dir in common_dirs {
+            owners.extend(
+                self.list_task_worktree_owners_by_git_common_dir(&common_dir)
+                    .await?,
+            );
+        }
+        Ok(owners)
     }
 
-    pub(crate) async fn list_task_worktree_owners(
+    pub(crate) async fn list_task_worktree_owners_by_git_common_dir(
         &self,
-        workspace_root: &str,
+        git_common_dir: &str,
     ) -> Result<Vec<TaskWorktreeOwnerSnapshot>> {
         let runs = entities::task_run::Entity::find()
-            .filter(entities::task_run::Column::WorkspaceRoot.eq(workspace_root.to_string()))
+            .filter(entities::task_run::Column::GitCommonDir.eq(git_common_dir.to_string()))
             .all(&self.db)
             .await?;
+        self.task_worktree_owners_for_runs(runs).await
+    }
+
+    async fn task_worktree_owners_for_runs(
+        &self,
+        runs: Vec<entities::task_run::Model>,
+    ) -> Result<Vec<TaskWorktreeOwnerSnapshot>> {
         let mut snapshots = Vec::with_capacity(runs.len());
         for run in runs {
             let work_units = entities::work_unit::Entity::find()

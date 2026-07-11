@@ -8,8 +8,9 @@ use pl_trace::TraceEventKind;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
+use tokio::time::{Duration, timeout};
 
-use super::super::TaskAgentRuntimeRegistry;
+use super::super::task_agent_runtime::{TaskAgentRuntimeRegistry, TaskAgentRuntimeTestBarrier};
 use super::{RunPromptRequest, emitter, test_config};
 use crate::config::{ConfigPaths, ConfigStore};
 use crate::studio::task_coordinator::{AgentOutcomeStatus, TaskRunRecord};
@@ -128,6 +129,195 @@ async fn planning_generation_binds_first_run_then_rotates_after_terminal() {
     assert!(first_run.shares_runtime_with(&same_run));
     assert!(!first_run.shares_runtime_with(&next_planning));
     assert_eq!(registry.len().await, 1);
+}
+
+#[tokio::test]
+async fn generation_rotation_is_single_flight_per_session_without_blocking_other_sessions() {
+    let registry = TaskAgentRuntimeRegistry::new();
+    let repository = Path::new("C:/repo");
+    let original = registry
+        .supervisor_for_task_generation("session-a", repository, 5, Some("run-1"))
+        .await
+        .unwrap();
+    let (original_agent_id, original_server) =
+        seed_running_agent(&original, "session-a", "rotation_worker").await;
+    let barrier = TaskAgentRuntimeTestBarrier::new();
+    registry
+        .pause_next_generation_rotation("session-a", barrier.clone())
+        .await;
+
+    let rotating_registry = registry.clone();
+    let rotation = tokio::spawn(async move {
+        rotating_registry
+            .supervisor_for_task_generation("session-a", Path::new("C:/repo"), 5, Some("run-2"))
+            .await
+    });
+    barrier.wait_until_entered().await;
+
+    let request_barrier = TaskAgentRuntimeTestBarrier::new();
+    registry
+        .pause_next_request_before_cell_lock("session-a", request_barrier.clone())
+        .await;
+    let following_registry = registry.clone();
+    let mut following = tokio::spawn(async move {
+        following_registry
+            .supervisor_for_task_generation("session-a", Path::new("C:/repo"), 5, Some("run-2"))
+            .await
+    });
+    request_barrier.wait_until_entered().await;
+    request_barrier.release().await;
+    assert!(
+        timeout(Duration::from_millis(50), &mut following)
+            .await
+            .is_err()
+    );
+
+    let other = timeout(
+        Duration::from_secs(1),
+        registry.supervisor_for_task_generation("session-b", repository, 5, Some("run-other")),
+    )
+    .await
+    .expect("another session must not wait for session-a rotation")
+    .unwrap();
+
+    barrier.release().await;
+    let rotated = rotation.await.unwrap().unwrap();
+    let followed = following.await.unwrap().unwrap();
+
+    assert!(!original.shares_runtime_with(&rotated));
+    assert!(rotated.shares_runtime_with(&followed));
+    assert!(!rotated.shares_runtime_with(&other));
+    assert_eq!(
+        original.record(&original_agent_id).await.unwrap().status,
+        pl_protocol::AgentStatus::Shutdown
+    );
+    assert_no_active_agents(&original).await;
+    assert_eq!(registry.len().await, 2);
+    original_server.abort();
+}
+
+#[tokio::test]
+async fn failed_generation_rotation_keeps_the_original_cell_reachable() {
+    let registry = TaskAgentRuntimeRegistry::new();
+    let original = registry
+        .supervisor_for_task_generation("session", Path::new("C:/repo"), 5, Some("run-1"))
+        .await
+        .unwrap();
+    let (original_agent_id, original_server) =
+        seed_running_agent(&original, "session", "failure_worker").await;
+    let barrier = TaskAgentRuntimeTestBarrier::new();
+    registry
+        .pause_next_generation_rotation("session", barrier.clone())
+        .await;
+    registry.fail_next_generation_rotation("session").await;
+
+    let rotating_registry = registry.clone();
+    let rotation = tokio::spawn(async move {
+        rotating_registry
+            .supervisor_for_task_generation("session", Path::new("C:/repo"), 5, Some("run-2"))
+            .await
+    });
+    barrier.wait_until_entered().await;
+
+    let request_barrier = TaskAgentRuntimeTestBarrier::new();
+    registry
+        .pause_next_request_before_cell_lock("session", request_barrier.clone())
+        .await;
+    let following_registry = registry.clone();
+    let mut following = tokio::spawn(async move {
+        following_registry
+            .supervisor_for_task_generation("session", Path::new("C:/repo"), 5, Some("run-1"))
+            .await
+    });
+    request_barrier.wait_until_entered().await;
+    request_barrier.release().await;
+    assert!(
+        timeout(Duration::from_millis(50), &mut following)
+            .await
+            .is_err()
+    );
+
+    barrier.release().await;
+    let error = rotation.await.unwrap().unwrap_err();
+    let still_original = following.await.unwrap().unwrap();
+
+    assert!(
+        error
+            .to_string()
+            .contains("injected generation rotation failure")
+    );
+    assert!(original.shares_runtime_with(&still_original));
+    assert_eq!(
+        original.record(&original_agent_id).await.unwrap().status,
+        pl_protocol::AgentStatus::Running
+    );
+    assert_eq!(registry.len().await, 1);
+
+    let retry = registry
+        .supervisor_for_task_generation("session", Path::new("C:/repo"), 5, Some("run-2"))
+        .await
+        .unwrap();
+    assert!(!original.shares_runtime_with(&retry));
+    assert_no_active_agents(&original).await;
+    assert_eq!(registry.len().await, 1);
+    original_server.abort();
+}
+
+#[tokio::test]
+async fn shutdown_cannot_clear_or_be_overwritten_during_generation_rotation() {
+    let registry = TaskAgentRuntimeRegistry::new();
+    let original = registry
+        .supervisor_for_task_generation("session", Path::new("C:/repo"), 9, Some("run-1"))
+        .await
+        .unwrap();
+    let rotation_barrier = TaskAgentRuntimeTestBarrier::new();
+    registry
+        .pause_next_generation_rotation("session", rotation_barrier.clone())
+        .await;
+    let shutdown_barrier = TaskAgentRuntimeTestBarrier::new();
+    registry.pause_next_shutdown(shutdown_barrier.clone()).await;
+
+    let rotating_registry = registry.clone();
+    let rotation = tokio::spawn(async move {
+        rotating_registry
+            .supervisor_for_task_generation("session", Path::new("C:/repo"), 9, None)
+            .await
+    });
+    rotation_barrier.wait_until_entered().await;
+
+    let shutdown_registry = registry.clone();
+    let shutdown = tokio::spawn(async move { shutdown_registry.quiesce_and_clear().await });
+    rotation_barrier.release().await;
+    shutdown_barrier.wait_until_entered().await;
+    let rotated = rotation.await.unwrap().unwrap();
+    let (rotated_agent_id, rotated_server) =
+        seed_running_agent(&rotated, "session", "shutdown_worker").await;
+
+    let next_registry = registry.clone();
+    let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+    let mut next = tokio::spawn(async move {
+        let _ = started_tx.send(());
+        next_registry
+            .supervisor_for_task_generation("session", Path::new("C:/repo"), 9, Some("run-next"))
+            .await
+    });
+    started_rx.await.unwrap();
+    assert!(timeout(Duration::from_millis(50), &mut next).await.is_err());
+
+    shutdown_barrier.release().await;
+    shutdown.await.unwrap().unwrap();
+    let after_shutdown = next.await.unwrap().unwrap();
+
+    assert!(!original.shares_runtime_with(&rotated));
+    assert!(!original.shares_runtime_with(&after_shutdown));
+    assert!(!rotated.shares_runtime_with(&after_shutdown));
+    assert_eq!(
+        rotated.record(&rotated_agent_id).await.unwrap().status,
+        pl_protocol::AgentStatus::Shutdown
+    );
+    assert_no_active_agents(&rotated).await;
+    assert_eq!(registry.len().await, 1);
+    rotated_server.abort();
 }
 
 #[tokio::test]
@@ -591,6 +781,61 @@ fn test_provider_info() -> pl_model::ProviderInfo {
     let mut provider = pl_model::ProviderInfo::openai(Some("http://example.invalid".to_string()));
     provider.default_model = "test-model".to_string();
     provider
+}
+
+async fn seed_running_agent(
+    supervisor: &crate::AgentSupervisor,
+    session_id: &str,
+    task_name: &str,
+) -> (String, tokio::task::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let request_started = Arc::new(tokio::sync::Barrier::new(2));
+    let server_barrier = request_started.clone();
+    let server = tokio::spawn(async move {
+        let (_socket, _) = listener.accept().await.unwrap();
+        server_barrier.wait().await;
+        std::future::pending::<()>().await;
+    });
+    let mut provider_info = pl_model::ProviderInfo::openai(Some(format!("http://{address}")));
+    provider_info.default_model = "test-model".to_string();
+    let provider = pl_model::create_provider(provider_info).unwrap();
+    let spawn = SpawnAgentTool::new(provider, None, None, None, None, None)
+        .execute(
+            tool_input(
+                session_id,
+                &format!("spawn-{task_name}"),
+                serde_json::json!({
+                    "taskName": task_name,
+                    "message": "remain active until the registry stops this generation",
+                    "agentType": "explorer"
+                }),
+            ),
+            tool_context(supervisor.clone(), PathBuf::from("C:/repo")),
+        )
+        .await
+        .unwrap();
+    let agent_id =
+        serde_json::from_str::<serde_json::Value>(&spawn.description).unwrap()["agentId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+    timeout(Duration::from_secs(1), request_started.wait())
+        .await
+        .expect("agent provider request did not start");
+    assert_eq!(
+        supervisor.record(&agent_id).await.unwrap().status,
+        pl_protocol::AgentStatus::Running
+    );
+    (agent_id, server)
+}
+
+async fn assert_no_active_agents(supervisor: &crate::AgentSupervisor) {
+    let agents = supervisor.list_agents(None).await.unwrap();
+    assert!(
+        agents.iter().all(|agent| agent.status.is_final()),
+        "retired supervisor still has active agents: {agents:?}"
+    );
 }
 
 async fn serve_task_agent_sse(

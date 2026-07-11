@@ -46,6 +46,54 @@ async fn task_run_and_branch_lease_are_created_atomically() {
 }
 
 #[tokio::test]
+async fn worktree_owner_queries_aggregate_common_directory_and_all_runs() {
+    let store = StudioStore::open_memory().await.unwrap();
+    let mut runs = Vec::new();
+    for (index, (workspace_root, git_common_dir)) in [
+        ("C:/work/main", "C:/work/main/.git"),
+        ("C:/work/linked", "C:/work/main/.git"),
+        ("C:/other/main", "C:/other/main/.git"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let project = store.upsert_project(workspace_root).await.unwrap();
+        let session = store
+            .create_session(&project.id, &format!("Task {index}"), CompileMode::Task)
+            .await
+            .unwrap();
+        let mut input = create_input(&session.id);
+        input.workspace_root = workspace_root.to_string();
+        input.git_common_dir = git_common_dir.to_string();
+        input.branch = format!("task-{index}");
+        runs.push(store.create_task_run_with_lease(input).await.unwrap().0);
+    }
+
+    let common = store
+        .list_task_worktree_owners_by_git_common_dir("C:/work/main/.git")
+        .await
+        .unwrap();
+    let all = store.list_all_task_worktree_owners().await.unwrap();
+    let mut common_ids = common
+        .into_iter()
+        .map(|owner| owner.run.id)
+        .collect::<Vec<_>>();
+    let mut all_ids = all
+        .into_iter()
+        .map(|owner| owner.run.id)
+        .collect::<Vec<_>>();
+    let mut expected_common = vec![runs[0].id.clone(), runs[1].id.clone()];
+    let mut expected_all = runs.into_iter().map(|run| run.id).collect::<Vec<_>>();
+    common_ids.sort();
+    all_ids.sort();
+    expected_common.sort();
+    expected_all.sort();
+
+    assert_eq!(common_ids, expected_common);
+    assert_eq!(all_ids, expected_all);
+}
+
+#[tokio::test]
 async fn restart_reconciliation_cancels_transient_agents_and_preserves_delivery() {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project("C:/work/task").await.unwrap();

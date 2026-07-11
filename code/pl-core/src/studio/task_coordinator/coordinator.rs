@@ -1,12 +1,12 @@
-use std::collections::HashMap;
-use std::path::Path;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use anyhow::{Context, Result, bail};
 use tokio::sync::MutexGuard;
 
 use super::git::{RepositorySnapshot, inspect_repository};
-use super::{CreateTaskRun, TaskRunPhase, TaskRunRecord};
+use super::{CreateTaskRun, TaskRunPhase, TaskRunRecord, TaskWorktreeOwnerSnapshot};
 use crate::studio::ids::new_id;
 use crate::studio::store::StudioStore;
 
@@ -14,6 +14,11 @@ use crate::studio::store::StudioStore;
 struct BranchKey {
     common_dir: String,
     branch: String,
+}
+
+struct WorktreeRecoveryGroup {
+    repositories: Vec<PathBuf>,
+    owners: Vec<TaskWorktreeOwnerSnapshot>,
 }
 
 impl BranchKey {
@@ -138,9 +143,8 @@ impl TaskCoordinator {
     }
 
     pub(crate) async fn recover_active_tasks(&self) -> Result<Vec<TaskRunRecord>> {
-        let workspaces = self.store.list_task_worktree_workspaces().await?;
         let mut prepared = Vec::new();
-        let mut skipped_workspaces = std::collections::HashSet::new();
+        let mut failed_agent_runs = HashSet::new();
         for run in self.store.list_active_task_runs().await? {
             let key = BranchKey::new(Path::new(&run.git_common_dir), &run.branch);
             if let Err(error) = acquire_process_lease(&key, &run.id) {
@@ -161,28 +165,34 @@ impl TaskCoordinator {
                     format!("agent restart reconciliation failed: {error}"),
                 )
                 .await?;
-                skipped_workspaces.insert(workspace_key(&run.workspace_root));
+                failed_agent_runs.insert(run.id.clone());
                 continue;
             }
             prepared.push(run);
         }
 
-        let mut successful_workspaces = std::collections::HashSet::new();
-        for workspace in workspaces {
-            let key = workspace_key(&workspace);
-            if skipped_workspaces.contains(&key) {
+        let owners = self.store.list_all_task_worktree_owners().await?;
+        let (groups, run_groups) = resolve_worktree_recovery_groups(owners).await?;
+        let skipped_groups = failed_agent_runs
+            .iter()
+            .filter_map(|run_id| run_groups.get(run_id).cloned())
+            .collect::<HashSet<_>>();
+        let mut successful_groups = HashSet::new();
+        for (key, group) in groups {
+            if skipped_groups.contains(&key) {
                 continue;
             }
-            if let Err(error) = self.reconcile_durable_worktrees(&workspace).await {
+            if let Err(error) = self
+                .reconcile_durable_worktrees(&group.repositories, &group.owners)
+                .await
+            {
                 let affected = prepared
                     .iter()
-                    .filter(|run| workspace_key(&run.workspace_root) == key)
+                    .filter(|run| run_groups.get(&run.id) == Some(&key))
                     .cloned()
                     .collect::<Vec<_>>();
                 if affected.is_empty() {
-                    return Err(error).context(format!(
-                        "worktree restart reconciliation failed for {workspace}"
-                    ));
+                    return Err(error).context("worktree restart reconciliation failed");
                 }
                 for run in affected {
                     self.block_run(
@@ -193,12 +203,15 @@ impl TaskCoordinator {
                 }
                 continue;
             }
-            successful_workspaces.insert(key);
+            successful_groups.insert(key);
         }
 
         let mut recovered = Vec::new();
         for run in prepared {
-            if !successful_workspaces.contains(&workspace_key(&run.workspace_root)) {
+            if !run_groups
+                .get(&run.id)
+                .is_some_and(|group| successful_groups.contains(group))
+            {
                 continue;
             }
             let snapshot = match inspect_repository(&run.workspace_root, true).await {
@@ -341,6 +354,57 @@ impl TaskCoordinator {
     }
 }
 
+async fn resolve_worktree_recovery_groups(
+    owners: Vec<TaskWorktreeOwnerSnapshot>,
+) -> Result<(
+    HashMap<String, WorktreeRecoveryGroup>,
+    HashMap<String, String>,
+)> {
+    let mut repositories = HashMap::new();
+    for owner in &owners {
+        let workspace = workspace_key(&owner.run.workspace_root);
+        if repositories.contains_key(&workspace) {
+            continue;
+        }
+        let snapshot = inspect_repository(&owner.run.workspace_root, false)
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to resolve Git common directory for known task workspace {}",
+                    owner.run.workspace_root
+                )
+            })?;
+        repositories.insert(workspace, snapshot);
+    }
+
+    let mut groups = HashMap::<String, WorktreeRecoveryGroup>::new();
+    let mut run_groups = HashMap::new();
+    for owner in owners {
+        let workspace = workspace_key(&owner.run.workspace_root);
+        let snapshot = repositories
+            .get(&workspace)
+            .context("known task workspace inspection disappeared")?;
+        let group_key = canonical_path_key(&snapshot.git_common_dir);
+        let group = groups
+            .entry(group_key.clone())
+            .or_insert_with(|| WorktreeRecoveryGroup {
+                repositories: Vec::new(),
+                owners: Vec::new(),
+            });
+        let repository_key = canonical_path_key(&snapshot.workspace_root);
+        if !group
+            .repositories
+            .iter()
+            .any(|repository| canonical_path_key(repository) == repository_key)
+        {
+            group.repositories.push(snapshot.workspace_root.clone());
+        }
+        run_groups.insert(owner.run.id.clone(), group_key);
+        group.owners.push(owner);
+    }
+    Ok((groups, run_groups))
+}
+
 fn workspace_key(workspace: &str) -> String {
     let workspace = workspace.replace('\\', "/");
     if cfg!(windows) {
@@ -348,6 +412,10 @@ fn workspace_key(workspace: &str) -> String {
     } else {
         workspace
     }
+}
+
+fn canonical_path_key(path: &Path) -> String {
+    workspace_key(&path.to_string_lossy())
 }
 
 impl Drop for TaskCoordinator {

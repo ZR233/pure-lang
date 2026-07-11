@@ -1766,6 +1766,197 @@ async fn recovery_preserves_restart_cancelled_worktree_and_cleans_orphan_leaf() 
 }
 
 #[tokio::test]
+async fn recovery_groups_linked_workspaces_by_canonical_git_common_directory() {
+    let repository = init_repository("recovery-common-directory-group");
+    std::fs::write(repository.join(".gitignore"), ".pure/\n").unwrap();
+    git(&repository, &["add", ".gitignore"]);
+    git(&repository, &["commit", "-m", "ignore runtime"]);
+    let linked_workspace = repository.join(".pure/worktrees/user-workspace/linked");
+    let linked_workspace_arg = linked_workspace.to_string_lossy().to_string();
+    let linked_workspace_branch = "pure-agent-linked-user-workspace";
+    git(
+        &repository,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            linked_workspace_branch,
+            &linked_workspace_arg,
+            "HEAD",
+        ],
+    );
+    let store = task_store(&repository).await;
+    let main_session = task_session(&store, &repository).await;
+    let linked_session = task_session(&store, &linked_workspace).await;
+    let (main_run, linked_run) = {
+        let coordinator = TaskCoordinator::new(store.clone());
+        let main_run = coordinator
+            .start_confirmed_task(&main_session.id, "main plan", &repository)
+            .await
+            .unwrap();
+        let linked_run = coordinator
+            .start_confirmed_task(&linked_session.id, "linked plan", &linked_workspace)
+            .await
+            .unwrap();
+        (main_run, linked_run)
+    };
+    let main_owned =
+        create_running_recovery_worktree(&store, &main_run, "main-owned", &repository).await;
+    let linked_owned =
+        create_running_recovery_worktree(&store, &linked_run, "linked-owned", &repository).await;
+    let orphan_path = linked_workspace.join(".pure/worktrees/orphan-run/orphan-agent");
+    let orphan_path_arg = orphan_path.to_string_lossy().to_string();
+    let orphan_branch = "pure-task-orphan-run-shared-common-dir";
+    git(
+        &repository,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            orphan_branch,
+            &orphan_path_arg,
+            "HEAD",
+        ],
+    );
+
+    let recovered = TaskCoordinator::new(store)
+        .recover_active_tasks()
+        .await
+        .unwrap();
+    let mut recovered_ids = recovered.into_iter().map(|run| run.id).collect::<Vec<_>>();
+    let mut expected_ids = vec![main_run.id, linked_run.id];
+    recovered_ids.sort();
+    expected_ids.sort();
+
+    assert_eq!(recovered_ids, expected_ids);
+    assert!(main_owned.is_dir());
+    assert!(linked_owned.is_dir());
+    assert!(linked_workspace.is_dir());
+    assert!(!orphan_path.exists());
+    assert!(!git_output(&repository, &["branch", "--list", linked_workspace_branch]).is_empty());
+    assert!(git_output(&repository, &["branch", "--list", orphan_branch]).is_empty());
+    remove_repository(linked_workspace);
+    remove_repository(repository);
+}
+
+#[tokio::test]
+async fn recovery_preflight_failure_preserves_all_worktrees_before_group_gc() {
+    let repository = init_repository("recovery-common-directory-preflight");
+    std::fs::write(repository.join(".gitignore"), ".pure/\n").unwrap();
+    git(&repository, &["add", ".gitignore"]);
+    git(&repository, &["commit", "-m", "ignore runtime"]);
+    let store = task_store(&repository).await;
+    let active_session = task_session(&store, &repository).await;
+    let active_run = {
+        let coordinator = TaskCoordinator::new(store.clone());
+        coordinator
+            .start_confirmed_task(&active_session.id, "active plan", &repository)
+            .await
+            .unwrap()
+    };
+    let missing_workspace = repository.with_file_name(format!(
+        "{}-missing",
+        repository.file_name().unwrap().to_string_lossy()
+    ));
+    let missing_project = store.upsert_project(&missing_workspace).await.unwrap();
+    let missing_session = store
+        .create_session(&missing_project.id, "Blocked", CompileMode::Task)
+        .await
+        .unwrap();
+    let git_common_dir = std::fs::canonicalize(repository.join(".git")).unwrap();
+    let blocked_run = store
+        .create_task_run_with_lease(CreateTaskRun {
+            session_id: missing_session.id,
+            phase: TaskRunPhase::Blocked,
+            plan: "blocked plan".to_string(),
+            workspace_root: missing_workspace.to_string_lossy().to_string(),
+            git_common_dir: git_common_dir.to_string_lossy().to_string(),
+            branch: "missing-workspace-branch".to_string(),
+            head_commit: active_run.base_commit.clone(),
+        })
+        .await
+        .unwrap()
+        .0;
+    let protected_path = repository
+        .join(".pure/worktrees")
+        .join(&blocked_run.id)
+        .join("blocked-owned");
+    let protected_path_arg = protected_path.to_string_lossy().to_string();
+    let protected_branch = format!("pure-task-{}-blocked-owned", blocked_run.id);
+    git(
+        &repository,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            &protected_branch,
+            &protected_path_arg,
+            "HEAD",
+        ],
+    );
+    let unit = store
+        .create_work_unit(CreateWorkUnit {
+            task_run_id: blocked_run.id.clone(),
+            title: "blocked owned".to_string(),
+            owned_paths: vec!["code/**".to_string()],
+            base_commit: blocked_run.base_commit.clone(),
+            worktree_path: protected_path_arg,
+            branch: protected_branch.clone(),
+            attempt: 1,
+        })
+        .await
+        .unwrap();
+    store
+        .update_work_unit(
+            &unit.id,
+            WorkUnitStatus::Running,
+            Some("blocked-owned".to_string()),
+        )
+        .await
+        .unwrap();
+    store
+        .create_agent_outcome(CreateAgentOutcome {
+            task_run_id: blocked_run.id,
+            work_unit_id: Some(unit.id),
+            agent_id: "blocked-owned".to_string(),
+            owner_path: "/root".to_string(),
+            initiated_by: "planner".to_string(),
+            requested_by_call_id: "call-blocked-owned".to_string(),
+            role: "executor".to_string(),
+            status: AgentOutcomeStatus::Running,
+            attempt: 1,
+        })
+        .await
+        .unwrap();
+    let orphan_path = repository.join(".pure/worktrees/orphan-run/preflight-orphan");
+    let orphan_path_arg = orphan_path.to_string_lossy().to_string();
+    let orphan_branch = "pure-task-orphan-run-preflight";
+    git(
+        &repository,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            orphan_branch,
+            &orphan_path_arg,
+            "HEAD",
+        ],
+    );
+
+    let error = TaskCoordinator::new(store)
+        .recover_active_tasks()
+        .await
+        .expect_err("an unresolved known workspace must stop reconciliation before GC");
+
+    assert!(error.to_string().contains("known task workspace"));
+    assert!(protected_path.is_dir());
+    assert!(orphan_path.is_dir());
+    assert!(!git_output(&repository, &["branch", "--list", &protected_branch]).is_empty());
+    assert!(!git_output(&repository, &["branch", "--list", orphan_branch]).is_empty());
+    remove_repository(repository);
+}
+
+#[tokio::test]
 async fn recovery_allows_pending_allocation_before_worktree_creation() {
     let repository = init_repository("recovery-pending-before-create");
     let store = task_store(&repository).await;
@@ -1976,6 +2167,61 @@ async fn task_session(store: &StudioStore, repository: &Path) -> crate::studio::
         .create_session(&project.id, "Task", CompileMode::Task)
         .await
         .unwrap()
+}
+
+async fn create_running_recovery_worktree(
+    store: &StudioStore,
+    run: &TaskRunRecord,
+    agent_id: &str,
+    git_repository: &Path,
+) -> PathBuf {
+    let worktree = crate::agent::worktree::git_compatible_path(
+        Path::new(&run.workspace_root)
+            .join(".pure/worktrees")
+            .join(&run.id)
+            .join(agent_id),
+    );
+    let branch = format!("pure-task-{}-{agent_id}", run.id);
+    let worktree_arg = worktree.to_string_lossy().to_string();
+    git(
+        git_repository,
+        &["worktree", "add", "-b", &branch, &worktree_arg, "HEAD"],
+    );
+    let unit = store
+        .create_work_unit(CreateWorkUnit {
+            task_run_id: run.id.clone(),
+            title: agent_id.to_string(),
+            owned_paths: vec![format!("code/{agent_id}/**")],
+            base_commit: run.base_commit.clone(),
+            worktree_path: worktree_arg,
+            branch,
+            attempt: 1,
+        })
+        .await
+        .unwrap();
+    store
+        .update_work_unit(
+            &unit.id,
+            WorkUnitStatus::Running,
+            Some(agent_id.to_string()),
+        )
+        .await
+        .unwrap();
+    store
+        .create_agent_outcome(CreateAgentOutcome {
+            task_run_id: run.id.clone(),
+            work_unit_id: Some(unit.id),
+            agent_id: agent_id.to_string(),
+            owner_path: "/root".to_string(),
+            initiated_by: "planner".to_string(),
+            requested_by_call_id: format!("call-{agent_id}"),
+            role: "executor".to_string(),
+            status: AgentOutcomeStatus::Running,
+            attempt: 1,
+        })
+        .await
+        .unwrap();
+    worktree
 }
 
 fn init_repository(name: &str) -> PathBuf {
