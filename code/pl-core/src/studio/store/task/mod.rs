@@ -98,6 +98,29 @@ impl StudioStore {
         models.into_iter().map(task_run_record).collect()
     }
 
+    pub(crate) async fn read_active_task_run_for_session(
+        &self,
+        session_id: &str,
+    ) -> Result<TaskRunRecord> {
+        let models = entities::task_run::Entity::find()
+            .filter(entities::task_run::Column::SessionId.eq(session_id.to_string()))
+            .filter(entities::task_run::Column::Phase.is_not_in([
+                TaskRunPhase::Completed.as_str(),
+                TaskRunPhase::Blocked.as_str(),
+                TaskRunPhase::Failed.as_str(),
+                TaskRunPhase::Cancelled.as_str(),
+            ]))
+            .order_by_asc(entities::task_run::Column::CreatedAt)
+            .order_by_asc(entities::task_run::Column::Id)
+            .all(&self.db)
+            .await?;
+        match models.as_slice() {
+            [] => bail!("active task run not found for this session"),
+            [model] => task_run_record(model.clone()),
+            _ => bail!("multiple active task runs found for this session"),
+        }
+    }
+
     pub(crate) async fn read_branch_lease(
         &self,
         task_run_id: &str,
@@ -167,6 +190,73 @@ impl StudioStore {
         }
         let mut lease_active: entities::branch_lease::ActiveModel = lease.into();
         lease_active.expected_head = Set(next_head.to_string());
+        lease_active.updated_at = Set(now);
+        lease_active.update(&tx).await?;
+        tx.commit().await?;
+        Ok(true)
+    }
+
+    pub(crate) async fn advance_task_design_head(
+        &self,
+        task_run_id: &str,
+        expected_head: &str,
+        design_commit: &str,
+    ) -> Result<bool> {
+        let tx = self.db.begin().await?;
+        let Some(task) = entities::task_run::Entity::find_by_id(task_run_id.to_string())
+            .one(&tx)
+            .await?
+        else {
+            tx.rollback().await?;
+            return Ok(false);
+        };
+        let phase = TaskRunPhase::from_str(&task.phase)
+            .with_context(|| format!("invalid stored task phase: {}", task.phase))?;
+        let next_phase = match phase {
+            TaskRunPhase::DesignUpdating => TaskRunPhase::Implementing,
+            TaskRunPhase::Implementing | TaskRunPhase::Reworking => phase,
+            TaskRunPhase::Planning
+            | TaskRunPhase::PendingConfirmation
+            | TaskRunPhase::Merging
+            | TaskRunPhase::ResolvingConflict
+            | TaskRunPhase::Reviewing
+            | TaskRunPhase::Completed
+            | TaskRunPhase::Blocked
+            | TaskRunPhase::Failed
+            | TaskRunPhase::Cancelled => {
+                tx.rollback().await?;
+                bail!(
+                    "task_update_design is not allowed during phase {}",
+                    phase.as_str()
+                );
+            }
+        };
+        if task.expected_head != expected_head {
+            tx.rollback().await?;
+            return Ok(false);
+        }
+
+        let lease = entities::branch_lease::Entity::find()
+            .filter(entities::branch_lease::Column::TaskRunId.eq(task_run_id.to_string()))
+            .one(&tx)
+            .await?
+            .context("task branch lease not found")?;
+        if lease.expected_head != expected_head {
+            tx.rollback().await?;
+            return Ok(false);
+        }
+
+        let now = unix_seconds();
+        let mut task_active: entities::task_run::ActiveModel = task.into();
+        task_active.expected_head = Set(design_commit.to_string());
+        task_active.design_commit = Set(Some(design_commit.to_string()));
+        task_active.phase = Set(next_phase.as_str().to_string());
+        task_active.status_message = Set(None);
+        task_active.updated_at = Set(now);
+        task_active.update(&tx).await?;
+
+        let mut lease_active: entities::branch_lease::ActiveModel = lease.into();
+        lease_active.expected_head = Set(design_commit.to_string());
         lease_active.updated_at = Set(now);
         lease_active.update(&tx).await?;
         tx.commit().await?;

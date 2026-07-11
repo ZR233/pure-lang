@@ -1,0 +1,153 @@
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
+use std::process::Output;
+use std::time::Duration;
+
+use anyhow::{Context, Result, bail};
+use tokio::process::Command;
+
+use super::super::git::inspect_repository;
+
+const GIT_TIMEOUT: Duration = Duration::from_secs(30);
+
+pub(super) async fn git_path_is_ignored(workspace: &Path, path: &str) -> Result<bool> {
+    let output = run_git(workspace, &["check-ignore", "--no-index", "-q", "--", path]).await?;
+    match output.status.code() {
+        Some(0) => Ok(true),
+        Some(1) => Ok(false),
+        _ => bail!(
+            "git check-ignore failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ),
+    }
+}
+
+pub(super) async fn stage_paths(workspace: &Path, paths: &[String]) -> Result<()> {
+    let mut args = vec!["add", "--"];
+    args.extend(paths.iter().map(String::as_str));
+    run_git_checked(workspace, &args).await.map(|_| ())
+}
+
+pub(super) async fn collect_worktree_changes(workspace: &Path) -> Result<Vec<String>> {
+    let mut changed = BTreeSet::new();
+    changed.extend(git_paths(workspace, &["diff", "--name-only", "-z"]).await?);
+    changed.extend(git_paths(workspace, &["diff", "--cached", "--name-only", "-z"]).await?);
+    changed.extend(
+        git_paths(
+            workspace,
+            &["ls-files", "--others", "--exclude-standard", "-z"],
+        )
+        .await?,
+    );
+    Ok(changed.into_iter().collect())
+}
+
+pub(super) async fn collect_unstaged_and_untracked(workspace: &Path) -> Result<Vec<String>> {
+    let mut changed = BTreeSet::new();
+    changed.extend(git_paths(workspace, &["diff", "--name-only", "-z"]).await?);
+    changed.extend(
+        git_paths(
+            workspace,
+            &["ls-files", "--others", "--exclude-standard", "-z"],
+        )
+        .await?,
+    );
+    Ok(changed.into_iter().collect())
+}
+
+pub(super) async fn cached_changed_files(workspace: &Path) -> Result<Vec<String>> {
+    git_paths(workspace, &["diff", "--cached", "--name-only", "-z"]).await
+}
+
+pub(super) async fn git_paths(workspace: &Path, args: &[&str]) -> Result<Vec<String>> {
+    let output = run_git_checked(workspace, args).await?;
+    output
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+        .map(|path| {
+            std::str::from_utf8(path)
+                .context("Git returned a non-UTF-8 path")
+                .map(|path| path.replace('\\', "/"))
+        })
+        .collect()
+}
+
+pub(super) async fn ensure_single_parent(
+    workspace: &Path,
+    commit: &str,
+    parent: &str,
+) -> Result<()> {
+    let output = run_git_checked(workspace, &["rev-list", "--parents", "-n", "1", commit]).await?;
+    let line = String::from_utf8(output.stdout)?.trim().to_string();
+    let fields = line.split_whitespace().collect::<Vec<_>>();
+    if fields.as_slice() != [commit, parent] {
+        bail!("design commit is not the only commit after the task base");
+    }
+    Ok(())
+}
+
+pub(super) async fn compensate_commit(
+    workspace: &Path,
+    commit: &str,
+    previous_head: &str,
+) -> Result<()> {
+    let snapshot = inspect_repository(workspace, true).await?;
+    if snapshot.head != commit {
+        bail!("cannot compensate commit because task HEAD changed");
+    }
+    run_git_checked(workspace, &["reset", "--mixed", previous_head]).await?;
+    run_git_checked(
+        workspace,
+        &[
+            "restore",
+            "--source",
+            previous_head,
+            "--worktree",
+            "--",
+            ".",
+        ],
+    )
+    .await
+    .map(|_| ())
+}
+
+pub(super) async fn ensure_repository_clean(workspace: &Path) -> Result<()> {
+    inspect_repository(workspace, true).await.map(|_| ())
+}
+
+pub(super) async fn run_git_checked(workspace: &Path, args: &[&str]) -> Result<Output> {
+    let output = run_git(workspace, args).await?;
+    if !output.status.success() {
+        bail!(
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(output)
+}
+
+pub(super) async fn run_git(workspace: &Path, args: &[&str]) -> Result<Output> {
+    let mut command = Command::new("git");
+    command
+        .kill_on_drop(true)
+        .arg("-C")
+        .arg(workspace)
+        .args(["-c", "commit.gpgSign=false"])
+        .args(args)
+        .env("GIT_TERMINAL_PROMPT", "0");
+    Ok(tokio::time::timeout(GIT_TIMEOUT, command.output())
+        .await
+        .with_context(|| format!("git {} timed out", args.join(" ")))??)
+}
+
+pub(super) fn normalized_path(path: &Path) -> String {
+    let path = std::fs::canonicalize(path).unwrap_or_else(|_| PathBuf::from(path));
+    let path = path.to_string_lossy().replace('\\', "/");
+    if cfg!(windows) {
+        path.to_lowercase()
+    } else {
+        path
+    }
+}

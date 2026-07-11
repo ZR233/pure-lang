@@ -42,6 +42,7 @@ pub use container::{
     ContainerExecRequest, ContainerTool, ContainerToolExecution, ContainerToolKind,
     NoContainerBackend, TOOL_CONTAINER_COPY, TOOL_CONTAINER_EXEC, execute_container_tool,
 };
+pub(crate) use file::apply_patch::{Hunk as CodexPatchHunk, parse_patch as parse_codex_patch};
 pub use file::{
     CopyPathTool, CreateDirectoryTool, DeletePathTool, MovePathTool, StatPathTool, WriteFileTool,
 };
@@ -91,6 +92,7 @@ pub use shell::{ShellCommandTimeout, shell_command_with_timeout, shell_quote_wor
 pub use skill::{SkillManageTool, SkillViewTool, SkillsListTool};
 pub use todo::{TOOL_UPDATE_TODO_LIST, TodoListTool};
 pub use truncation::{OutputTruncation, TruncatedOutput, TruncationStrategy};
+pub(crate) use workspace_file::apply_patch_to_backend;
 pub use workspace_file::{
     ContainerWorkspaceFileBackend, LocalWorkspaceFileBackend, LocalWorkspaceFileTool,
     TOOL_APPLY_PATCH, TOOL_LIST_FILES, TOOL_READ_FILE, TOOL_SEARCH_FILES, WorkspaceFileBackend,

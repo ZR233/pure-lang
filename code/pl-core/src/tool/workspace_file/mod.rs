@@ -24,6 +24,7 @@ pub use backend::{
 pub use container::ContainerWorkspaceFileBackend;
 pub use local::LocalWorkspaceFileBackend;
 pub use ops::{WorkspaceFileToolExecution, execute_workspace_file_tool};
+pub(crate) use patch::apply_patch_to_backend;
 pub use schema::{
     TOOL_APPLY_PATCH, TOOL_LIST_FILES, TOOL_READ_FILE, TOOL_SEARCH_FILES, WorkspaceFileToolKind,
 };
