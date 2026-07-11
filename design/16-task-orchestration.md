@@ -46,6 +46,11 @@ coordinator 后台监控代理。代理终结、merge 冲突或 reviewer 返回�
 同一 Git common directory 与分支只允许一个写入任务。`BranchLease` 是进程内所有权，
 `expectedHead` CAS 和工作区清洁检查负责检测用户或外部进程的变化。
 
+所有会改变任务分支的操作（设计提交、交付合并、冲突继续、完成和取消）共享同一
+branch mutation lock；该锁不与 scheduler 或 supervisor 锁嵌套。持锁后必须重新读取
+精确的 `TaskRun` 与 `BranchLease`，并重新验证进程 lease、named 当前分支、Git common
+directory、干净工作区及两条持久事实的 `expectedHead` 都与当前 HEAD 一致。
+
 通用 agent supervisor 通过生命周期 hook 与精确 worktree spec 接入 Task 编排，
 不依赖 Studio store 或 coordinator 类型。Task coordinator 在 agent id 分配后先以事务
 创建 Pending `WorkUnit` 与 `AgentOutcome`，并返回固定的 repository、path、branch
@@ -111,6 +116,24 @@ planner 只能修改冲突清单中的文件。continue 前必须没有 unmerged
 
 用户确认实施后，planner 先调用 `task_update_design` 修改并提交 `design/**`；成功前
 不得创建 executor。任务取消或部分失败时，design 必须回退或更新到与当前实现一致。
+该工具只对 Task 根 planner 可见，先完整解析并验证 patch 的所有 source 和 move
+destination 都是规范、非 ignored、且不会经 symlink 逃逸的 workspace-relative
+`design/**` 路径，再进行首次写入。应用与提交是 all-or-nothing：失败时精确恢复所有
+已触及的 design 路径和暂存区，不影响其他路径。
+
+focused design commit 成功后，SQLite 在一个事务中以旧 HEAD 为 CAS，同时推进
+`TaskRun.expectedHead` 与 `BranchLease.expectedHead`、记录 `designCommit`，并将初始
+`designUpdating` 推进到 `implementing`。后续一致性更新只允许在没有进行中 merge 且
+可继续实施或返工的 `implementing | reworking`。若事务失败，仅当 HEAD 仍是刚创建的提交且
+工作区干净时补偿回旧 HEAD；无法证明安全时将该精确 run 标记为 `blocked` 并保留诊断，
+不得覆盖外部变化。durable CAS 成功前 allocation phase gate 始终关闭，工具成功本身
+不启动 continuation。
+
+尚无 accepted source merge 且 base 之后只有本任务 design commit 时，取消操作通过
+创建受控 `git revert` commit 撤销设计（不 hard reset、不改写历史），再以同一事务推进
+任务与 lease 的 `expectedHead`，之后才可 terminalize。若已经接受 source merge，只有
+`designCommit == expectedHead` 才表示 planner 已完成最后一次设计一致性更新；部分实施
+失败也必须以最后一次 design consistency commit 收束后才能进入终态。
 
 当前编码轮全部交付合并后，planner 调用 `task_request_review` 间接创建只读 reviewer。
 reviewer 初始上下文包含 plan、任务 diff、代理结果、验证摘要和 design 文件索引，不

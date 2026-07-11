@@ -12,6 +12,47 @@ use crate::{
 };
 
 #[tokio::test]
+async fn task_update_design_tool_has_typed_schema_branch_effect_and_planner_only_visibility() {
+    let coordinator = Arc::new(TaskCoordinator::new(
+        StudioStore::open_memory().await.unwrap(),
+    ));
+    let tool = coordinator.task_update_design_tool("studio-session");
+
+    assert_eq!(tool.name(), "task_update_design");
+    assert_eq!(tool.effect(), Some(ToolEffect::BranchControl));
+    assert_eq!(
+        tool.input_schema(),
+        serde_json::json!({
+            "type": "object",
+            "properties": { "patch": { "type": "string" } },
+            "required": ["patch"],
+            "additionalProperties": false
+        })
+    );
+
+    let mut registry = ToolRegistry::new();
+    registry.register(tool);
+    assert_eq!(
+        registry
+            .schemas_for_profile(TurnExecutionProfile::root(CompileMode::Task))
+            .len(),
+        1
+    );
+    assert!(
+        registry
+            .schemas_for_profile(TurnExecutionProfile::root(CompileMode::Simple))
+            .is_empty()
+    );
+    for role in ["executor", "explorer", "reviewer"] {
+        assert!(
+            registry
+                .schemas_for_profile(TurnExecutionProfile::for_subagent(CompileMode::Task, role,))
+                .is_empty()
+        );
+    }
+}
+
+#[tokio::test]
 async fn clean_committed_delivery_persists_exact_receipt_and_completes_records() {
     let fixture = DeliveryFixture::new("delivery-success", vec!["src/**"]).await;
     std::fs::create_dir_all(fixture.worktree.join("src")).unwrap();

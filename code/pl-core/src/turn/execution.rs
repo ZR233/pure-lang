@@ -198,7 +198,11 @@ impl TurnExecutionProfile {
             TurnExecutionRole::Executor => match effect {
                 Some(ToolEffect::Read | ToolEffect::WorkspaceWrite | ToolEffect::Process) => true,
                 Some(ToolEffect::BranchControl) => {
-                    (self.root_owner && self.mode == CompileMode::Simple)
+                    (self.root_owner
+                        && self.mode == CompileMode::Simple
+                        && !name.starts_with("task_")
+                        && !name.starts_with("merge_")
+                        && name != "submit_delivery")
                         || (!self.root_owner
                             && self.mode == CompileMode::Task
                             && name == "submit_delivery")

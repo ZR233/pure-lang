@@ -133,6 +133,22 @@ pub(crate) struct BranchLeaseRecord {
     pub(crate) updated_at: i64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DesignUpdateOutput {
+    pub(crate) task_run_id: String,
+    pub(crate) previous_head: String,
+    pub(crate) design_commit: String,
+    pub(crate) changed_files: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DesignCancellationRevert {
+    pub(crate) task_run_id: String,
+    pub(crate) previous_head: String,
+    pub(crate) revert_commit: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CreateTaskRun {
     pub(crate) session_id: String,

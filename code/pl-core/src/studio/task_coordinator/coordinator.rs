@@ -34,6 +34,11 @@ pub(crate) struct TaskCoordinator {
     pub(super) store: StudioStore,
     owned_process_leases: Mutex<HashMap<BranchKey, String>>,
     pub(super) allocation_lock: tokio::sync::Mutex<()>,
+    pub(super) branch_mutation_lock: tokio::sync::Mutex<()>,
+    #[cfg(test)]
+    pub(super) design_after_commit_barrier: Mutex<Option<super::design::DesignCommitTestBarrier>>,
+    #[cfg(test)]
+    pub(super) fail_design_compensation: std::sync::atomic::AtomicBool,
 }
 
 impl TaskCoordinator {
@@ -42,6 +47,11 @@ impl TaskCoordinator {
             store,
             owned_process_leases: Mutex::new(HashMap::new()),
             allocation_lock: tokio::sync::Mutex::new(()),
+            branch_mutation_lock: tokio::sync::Mutex::new(()),
+            #[cfg(test)]
+            design_after_commit_barrier: Mutex::new(None),
+            #[cfg(test)]
+            fail_design_compensation: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -192,6 +202,25 @@ impl TaskCoordinator {
             &BranchKey::new(Path::new(&run.git_common_dir), &run.branch),
             &run.id,
         );
+        Ok(())
+    }
+
+    pub(super) fn ensure_process_lease_owned(&self, run: &TaskRunRecord) -> Result<()> {
+        let key = BranchKey::new(Path::new(&run.git_common_dir), &run.branch);
+        let locally_owned = self
+            .owned_process_leases
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&key)
+            .is_some_and(|owner| owner == &run.id);
+        let globally_owned = process_leases()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&key)
+            .is_some_and(|owner| owner == &run.id);
+        if !locally_owned || !globally_owned {
+            bail!("task process branch lease is not owned by this coordinator");
+        }
         Ok(())
     }
 
