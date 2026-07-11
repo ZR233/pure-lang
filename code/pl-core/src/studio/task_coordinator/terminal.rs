@@ -7,6 +7,10 @@ use super::TaskCoordinator;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum TerminalAgentStateRecording {
     Unhandled,
+    Changed {
+        task_run_id: String,
+        projection: AgentLifecycleProjection,
+    },
     Projected(AgentLifecycleProjection),
     Suppressed,
 }
@@ -15,7 +19,7 @@ impl TerminalAgentStateRecording {
     #[cfg(test)]
     pub(crate) fn into_projection(self) -> Option<AgentLifecycleProjection> {
         match self {
-            Self::Projected(projection) => Some(projection),
+            Self::Changed { projection, .. } | Self::Projected(projection) => Some(projection),
             Self::Unhandled | Self::Suppressed => None,
         }
     }

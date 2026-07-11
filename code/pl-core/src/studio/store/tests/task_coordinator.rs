@@ -242,6 +242,151 @@ async fn coordinator_child_records_round_trip_typed_payloads() {
 }
 
 #[tokio::test]
+async fn continuation_snapshot_contains_exact_durable_task_state() {
+    let store = StudioStore::open_memory().await.unwrap();
+    let project = store.upsert_project("C:/work/task").await.unwrap();
+    let session = store
+        .create_session(&project.id, "Task", CompileMode::Task)
+        .await
+        .unwrap();
+    let (run, lease) = store
+        .create_task_run_with_lease(create_input(&session.id))
+        .await
+        .unwrap();
+    let run = store
+        .transition_task_run(
+            &run.id,
+            TaskRunPhase::PendingConfirmation,
+            Some("waiting".into()),
+        )
+        .await
+        .unwrap();
+    let work_unit = store
+        .create_work_unit(CreateWorkUnit {
+            task_run_id: run.id.clone(),
+            title: "Implement continuation".to_string(),
+            owned_paths: vec!["code/pl-core/**".to_string()],
+            base_commit: run.base_commit.clone(),
+            worktree_path: "C:/work/task/.pure/worktrees/run/agent-1".to_string(),
+            branch: "pure-task-run-agent-1".to_string(),
+            attempt: 2,
+        })
+        .await
+        .unwrap();
+    let work_unit = store
+        .update_work_unit(
+            &work_unit.id,
+            WorkUnitStatus::Delivered,
+            Some("agent-1".to_string()),
+        )
+        .await
+        .unwrap();
+    let outcome = store
+        .create_agent_outcome(CreateAgentOutcome {
+            task_run_id: run.id.clone(),
+            work_unit_id: Some(work_unit.id.clone()),
+            agent_id: "agent-1".to_string(),
+            owner_path: "root".to_string(),
+            initiated_by: "planner".to_string(),
+            requested_by_call_id: "call-spawn".to_string(),
+            role: "executor".to_string(),
+            status: AgentOutcomeStatus::Running,
+            attempt: 2,
+        })
+        .await
+        .unwrap();
+    let delivery = AgentDelivery {
+        worktree: AgentWorktreeDelivery {
+            path: work_unit.worktree_path.clone(),
+            branch: work_unit.branch.clone(),
+        },
+        base_commit: run.base_commit.clone(),
+        head_commit: "2222222".to_string(),
+        changed_files: vec!["code/pl-core/src/studio/runtime/mod.rs".to_string()],
+        verification_summary: "cargo test passed".to_string(),
+    };
+    let outcome = store
+        .update_agent_outcome(
+            &outcome.id,
+            UpdateAgentOutcome {
+                status: AgentOutcomeStatus::Completed,
+                summary: Some("implemented continuation".to_string()),
+                error: None,
+                delivery: Some(delivery),
+                review: None,
+            },
+        )
+        .await
+        .unwrap();
+    let merge = store
+        .create_merge_record(CreateMergeRecord {
+            task_run_id: run.id.clone(),
+            agent_id: "agent-1".to_string(),
+            expected_head: run.expected_head.clone(),
+            source_commit: "2222222".to_string(),
+            conflict_files: vec!["code/pl-core/src/studio/runtime/mod.rs".to_string()],
+        })
+        .await
+        .unwrap();
+    let review = store
+        .create_review_round(CreateReviewRound {
+            task_run_id: run.id.clone(),
+            round: 2,
+            head_commit: run.expected_head.clone(),
+            reviewer_agent_id: Some("agent-reviewer".to_string()),
+        })
+        .await
+        .unwrap();
+
+    let snapshot = store
+        .load_task_continuation_snapshot(&run.id)
+        .await
+        .unwrap();
+    let prompt = snapshot.render_prompt().unwrap();
+
+    assert_eq!(snapshot.run, run);
+    assert_eq!(snapshot.branch_lease, lease);
+    assert_eq!(snapshot.work_units, vec![work_unit]);
+    assert_eq!(snapshot.agent_outcomes, vec![outcome]);
+    assert_eq!(snapshot.merge_records, vec![merge]);
+    assert_eq!(snapshot.review_rounds, vec![review]);
+    for child_run_id in snapshot
+        .work_units
+        .iter()
+        .map(|record| record.task_run_id.as_str())
+        .chain(
+            snapshot
+                .agent_outcomes
+                .iter()
+                .map(|record| record.task_run_id.as_str()),
+        )
+        .chain(
+            snapshot
+                .merge_records
+                .iter()
+                .map(|record| record.task_run_id.as_str()),
+        )
+        .chain(
+            snapshot
+                .review_rounds
+                .iter()
+                .map(|record| record.task_run_id.as_str()),
+        )
+    {
+        assert_eq!(child_run_id, run.id);
+    }
+    assert!(prompt.contains("continuation"));
+    assert!(prompt.contains("pendingConfirmation"));
+    assert!(prompt.contains("main"));
+    assert!(prompt.contains("1111111"));
+    assert!(prompt.contains("implemented continuation"));
+    assert!(prompt.contains("pure-task-run-agent-1"));
+    assert!(prompt.contains("mergeRecords"));
+    assert!(prompt.contains("reviewRounds"));
+    assert!(prompt.contains("不要无限等待代理"));
+}
+
+#[tokio::test]
 async fn completed_delivery_rolls_back_outcome_when_work_unit_update_fails() {
     let (store, run, work_unit, outcome) = delivery_transition_fixture().await;
     install_work_unit_transition_failure(&store, "delivered").await;
