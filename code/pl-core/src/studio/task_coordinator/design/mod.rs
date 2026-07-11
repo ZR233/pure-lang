@@ -72,6 +72,14 @@ impl TaskCoordinator {
     }
 
     #[cfg(test)]
+    pub(crate) fn set_design_before_head_persist_barrier(&self, barrier: DesignCommitTestBarrier) {
+        *self
+            .design_before_head_persist_barrier
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(barrier);
+    }
+
+    #[cfg(test)]
     pub(crate) fn fail_design_compensation_for_test(&self) {
         self.fail_design_compensation
             .store(true, std::sync::atomic::Ordering::SeqCst);
@@ -81,6 +89,19 @@ impl TaskCoordinator {
     async fn wait_after_design_commit(&self) {
         let barrier = self
             .design_after_commit_barrier
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        if let Some(barrier) = barrier {
+            barrier.committed.wait().await;
+            barrier.release.wait().await;
+        }
+    }
+
+    #[cfg(test)]
+    async fn wait_before_design_head_persist(&self) {
+        let barrier = self
+            .design_before_head_persist_barrier
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
@@ -220,15 +241,16 @@ impl TaskCoordinator {
             if !remaining.is_empty() {
                 bail!("workspace changed concurrently while committing task design");
             }
+            let validated_tree = write_tree(workspace).await?;
 
             run_git_checked(workspace, &["commit", "-m", "更新任务设计"])
                 .await
                 .context("failed to create focused design commit")?;
-            Ok::<_, anyhow::Error>(changed_files)
+            Ok::<_, anyhow::Error>(validated_tree)
         }
         .await;
-        match commit_result {
-            Ok(_) => {}
+        let validated_tree = match commit_result {
+            Ok(validated_tree) => validated_tree,
             Err(operation_error) => {
                 if let Err(cleanup_error) =
                     rollback_paths(workspace, originals, &run.expected_head).await
@@ -239,7 +261,7 @@ impl TaskCoordinator {
                 }
                 return Err(operation_error);
             }
-        }
+        };
 
         let design_commit = match read_head(workspace).await {
             Ok(commit) => commit,
@@ -261,6 +283,7 @@ impl TaskCoordinator {
                 &design_commit,
                 &run.expected_head,
                 &validated.paths,
+                &validated_tree,
             )
             .await
         {
@@ -281,6 +304,8 @@ impl TaskCoordinator {
             "design post-commit inspection failed",
         )
         .await?;
+        #[cfg(test)]
+        self.wait_before_design_head_persist().await;
 
         match self
             .store
@@ -317,18 +342,19 @@ impl TaskCoordinator {
         commit: &str,
         previous_head: &str,
         expected_paths: &[String],
+        expected_tree: &str,
     ) -> Result<Vec<String>> {
         let workspace = Path::new(&run.workspace_root);
-        let changed_files =
-            validate_exact_commit(workspace, commit, previous_head, expected_paths).await?;
+        let changed_files = validate_exact_commit(
+            workspace,
+            commit,
+            previous_head,
+            expected_paths,
+            expected_tree,
+        )
+        .await?;
         let snapshot = inspect_repository(workspace, false).await?;
-        if normalized_path(&snapshot.workspace_root)
-            != normalized_path(Path::new(&run.workspace_root))
-            || normalized_path(&snapshot.git_common_dir)
-                != normalized_path(Path::new(&run.git_common_dir))
-            || snapshot.branch != run.branch
-            || snapshot.head != commit
-        {
+        if !exact_run_scope(run, commit).matches(&snapshot) {
             bail!("current named branch no longer points to the exact task commit");
         }
         Ok(changed_files)
@@ -343,14 +369,7 @@ impl TaskCoordinator {
     ) -> Result<()> {
         let workspace = Path::new(&run.workspace_root);
         match inspect_repository(workspace, true).await {
-            Ok(snapshot)
-                if snapshot.head == commit
-                    && snapshot.branch == run.branch
-                    && normalized_path(&snapshot.git_common_dir)
-                        == normalized_path(Path::new(&run.git_common_dir)) =>
-            {
-                Ok(())
-            }
+            Ok(snapshot) if exact_run_scope(run, commit).matches(&snapshot) => Ok(()),
             Ok(_) | Err(_) => {
                 self.compensate_or_block(run, originals, commit, reason)
                     .await?;
@@ -367,9 +386,10 @@ impl TaskCoordinator {
         reason: &str,
     ) -> Result<()> {
         let workspace = Path::new(&run.workspace_root);
+        let scope = exact_run_scope(run, commit);
         let safe = inspect_repository(workspace, true)
             .await
-            .is_ok_and(|snapshot| snapshot.head == commit);
+            .is_ok_and(|snapshot| scope.matches(&snapshot));
         if safe {
             #[cfg(test)]
             let compensation = if self
@@ -378,10 +398,10 @@ impl TaskCoordinator {
             {
                 Err(anyhow::anyhow!("injected design compensation failure"))
             } else {
-                compensate_commit(workspace, commit, &run.expected_head).await
+                compensate_commit(scope, &run.expected_head).await
             };
             #[cfg(not(test))]
-            let compensation = compensate_commit(workspace, commit, &run.expected_head).await;
+            let compensation = compensate_commit(scope, &run.expected_head).await;
 
             let cleanup = async {
                 compensation?;
@@ -412,6 +432,15 @@ impl TaskCoordinator {
         )
         .await?;
         bail!("{reason}; task run was blocked because compensation was unsafe")
+    }
+}
+
+fn exact_run_scope<'a>(run: &'a TaskRunRecord, commit: &'a str) -> ExactRepositoryScope<'a> {
+    ExactRepositoryScope {
+        workspace_root: Path::new(&run.workspace_root),
+        git_common_dir: Path::new(&run.git_common_dir),
+        branch: &run.branch,
+        head: commit,
     }
 }
 

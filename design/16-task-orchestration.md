@@ -129,10 +129,11 @@ focused design commit 成功后，SQLite 在一个事务中以旧 HEAD 为 CAS�
 不得覆盖外部变化。durable CAS 成功前 allocation phase gate 始终关闭，工具成功本身
 不启动 continuation。
 
-`git commit` / `git revert` 返回成功即进入 post-commit 边界；此后任何 HEAD、branch、
+`git commit`（包括受控 revert 的 focused commit）返回成功即进入 post-commit 边界；此后任何 HEAD、branch、
 status 或 diff 检查失败都不得再调用 pre-commit path rollback。coordinator 只接受能证明
 “当前 named branch HEAD 是本次提交”的 commit：它必须以旧 `expectedHead` 为唯一父提交，
-commit diff 必须精确等于预先验证的 design paths，且 index/worktree 没有 hook 或外部注入。
+commit diff 必须精确等于预先验证的 design paths，commit tree 必须等于 hook 执行前锁定的
+staged tree，且 index/worktree 没有 hook 或外部注入。
 不能完成该证明，或发现外部 clean commit、branch 变化、dirty workspace 时，必须 block
 精确 run 并保留现场；只有 exact commit 已证明且 HEAD/工作区仍安全时才能补偿。
 
@@ -141,7 +142,12 @@ commit diff 必须精确等于预先验证的 design paths，且 index/worktree 
 任务与 lease 的 `expectedHead`，之后才可 terminalize。若已经接受 source merge，只有
 `designCommit == expectedHead` 才表示 planner 已完成最后一次设计一致性更新；部分实施
 失败也必须以最后一次 design consistency commit 收束后才能进入终态。
-取消 revert 使用同一 exact-commit 证明与 post-commit 补偿规则。内部 API 允许未来
+取消 revert 先把 inverse patch 写入 index/worktree，再通过 focused commit 完成，以便
+`pre-commit`、`commit-msg` 等仓库策略真实参与；任一步失败都必须 block 精确 run 并保留
+`REVERT_HEAD`、index 和 worktree 现场。成功 commit 使用同一 exact-commit 证明与 post-commit
+补偿规则。安全补偿必须再次证明 workspace root、git common dir、named branch、clean 状态
+和 exact HEAD 全部仍属于该 run；即使 HEAD 相同，切换到另一分支也禁止 reset/restore。
+内部 API 允许未来
 `task_stop` 显式持有 branch mutation guard，在同一锁作用域内完成 revert、durable HEAD
 推进和 terminalization；executor allocation 也需经过该锁，因此不会在 revert 与终态
 写入之间基于仍可分配的 phase 创建 work unit。
