@@ -65,6 +65,18 @@ impl AgentKernel {
                 tool: request.name.clone(),
                 error: format!("Unknown tool: {}", request.name),
             })?;
+        let execution_profile = match &self.core.active_subagent {
+            Some(subagent) => {
+                crate::TurnExecutionProfile::for_subagent(request.mode, &subagent.role)
+            }
+            None => crate::TurnExecutionProfile::root(request.mode),
+        };
+        if !execution_profile.allows_tool(&request.name, tool.effect()) {
+            return Err(PureError::ToolExecutionFailed {
+                tool: request.name,
+                error: "tool is not allowed by the turn execution profile".to_string(),
+            });
+        }
         let workspace_root = self
             .core
             .workspace_root

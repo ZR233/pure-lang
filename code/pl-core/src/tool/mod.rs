@@ -30,7 +30,7 @@ use std::sync::{Arc, OnceLock};
 use tokio::sync::{Mutex, OwnedMutexGuard};
 
 use crate::AgentSupervisor;
-use crate::turn::TurnOptions;
+use crate::turn::{ToolEffect, TurnExecutionProfile, TurnOptions};
 
 pub use ask_user::AskUserTool;
 pub(crate) use bash::command_tool_pair;
@@ -225,6 +225,9 @@ pub trait Tool: fmt::Debug + Send + Sync {
     fn supports_parallel_tool_calls(&self) -> bool {
         false
     }
+    fn effect(&self) -> Option<ToolEffect> {
+        ToolEffect::for_builtin_name(self.name())
+    }
     fn runtime_lock_policy(&self) -> ToolRuntimeLockPolicy {
         if self.supports_parallel_tool_calls() {
             ToolRuntimeLockPolicy::Shared
@@ -262,6 +265,10 @@ where
 
     fn supports_parallel_tool_calls(&self) -> bool {
         (**self).supports_parallel_tool_calls()
+    }
+
+    fn effect(&self) -> Option<ToolEffect> {
+        (**self).effect()
     }
 
     fn runtime_lock_policy(&self) -> ToolRuntimeLockPolicy {
@@ -345,6 +352,13 @@ impl fmt::Debug for ToolContext {
 }
 
 impl ToolContext {
+    pub fn execution_profile(&self) -> TurnExecutionProfile {
+        match &self.active_subagent {
+            Some(subagent) => TurnExecutionProfile::for_subagent(self.mode, &subagent.role),
+            None => TurnExecutionProfile::root(self.mode),
+        }
+    }
+
     pub(crate) fn allows_workspace_escape(&self) -> bool {
         self.options.permission_mode.allows_workspace_escape()
             || self.workspace_access.allows_external()
@@ -422,6 +436,14 @@ impl ToolRegistry {
 
     pub fn schemas(&self) -> Vec<ToolSchema> {
         self.tools.iter().map(|t| t.to_schema()).collect()
+    }
+
+    pub fn schemas_for_profile(&self, profile: TurnExecutionProfile) -> Vec<ToolSchema> {
+        self.tools
+            .iter()
+            .filter(|tool| profile.allows_tool(tool.name(), tool.effect()))
+            .map(|tool| tool.to_schema())
+            .collect()
     }
 
     pub fn len(&self) -> usize {
@@ -725,6 +747,7 @@ pub struct RegisteredTool {
     input_schema: serde_json::Value,
     supports_parallel_tool_calls: bool,
     runtime_lock_policy: Option<ToolRuntimeLockPolicy>,
+    effect: Option<ToolEffect>,
     handler: Arc<RegisteredToolHandler>,
 }
 
@@ -760,6 +783,7 @@ impl RegisteredTool {
             input_schema,
             supports_parallel_tool_calls: false,
             runtime_lock_policy: None,
+            effect: None,
             handler: Arc::new(move |input, context| {
                 if context
                     .options
@@ -925,6 +949,11 @@ impl RegisteredTool {
         self.runtime_lock_policy = Some(policy);
         self
     }
+
+    pub fn with_effect(mut self, effect: ToolEffect) -> Self {
+        self.effect = Some(effect);
+        self
+    }
 }
 
 impl Tool for RegisteredTool {
@@ -942,6 +971,10 @@ impl Tool for RegisteredTool {
 
     fn supports_parallel_tool_calls(&self) -> bool {
         self.supports_parallel_tool_calls
+    }
+
+    fn effect(&self) -> Option<ToolEffect> {
+        self.effect
     }
 
     fn runtime_lock_policy(&self) -> ToolRuntimeLockPolicy {
@@ -1028,6 +1061,54 @@ mod tests {
         let schemas = reg.schemas();
         assert_eq!(schemas.len(), 1);
         assert_eq!(schemas[0].name(), "echo");
+    }
+
+    #[test]
+    fn dynamic_tools_require_declared_effect_for_task_planner() {
+        let output = || ToolOutput {
+            description: "ok".to_string(),
+            truncated: OutputTruncation::empty(),
+            output_file: PathBuf::new(),
+            exit_code: Some(0),
+            timed_out: false,
+            runtime_events: Vec::new(),
+        };
+        let mut registry = ToolRegistry::new();
+        registry.register(RegisteredTool::new(
+            "undeclared",
+            "undeclared",
+            serde_json::json!({"type": "object"}),
+            move |_input, _context| {
+                let output = output();
+                async move { Ok(output) }
+            },
+        ));
+        registry.register(
+            RegisteredTool::new(
+                "declared_read",
+                "declared read",
+                serde_json::json!({"type": "object"}),
+                |_input, _context| async {
+                    Ok(ToolOutput {
+                        description: "ok".to_string(),
+                        truncated: OutputTruncation::empty(),
+                        output_file: PathBuf::new(),
+                        exit_code: Some(0),
+                        timed_out: false,
+                        runtime_events: Vec::new(),
+                    })
+                },
+            )
+            .with_effect(ToolEffect::Read),
+        );
+
+        let names = registry
+            .schemas_for_profile(TurnExecutionProfile::root(crate::CompileMode::Task))
+            .into_iter()
+            .map(|schema| schema.name().to_string())
+            .collect::<Vec<_>>();
+
+        assert_eq!(names, vec!["declared_read".to_string()]);
     }
 
     #[test]

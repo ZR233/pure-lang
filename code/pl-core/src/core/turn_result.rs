@@ -8,6 +8,8 @@ use crate::trace::TraceRecorder;
 use crate::turn::{
     CompileMode, ToolExecutionMode, TurnAbortReason, TurnOptions, TurnResult, TurnResultStatus,
 };
+#[cfg(test)]
+use crate::turn::{ToolEffect, TurnExecutionProfile};
 
 pub(super) fn provider_error_severity(
     active_subagent: Option<&crate::tool::SubagentContext>,
@@ -45,37 +47,9 @@ pub(super) fn should_request_parallel_tool_calls(
     }
 }
 
+#[cfg(test)]
 pub(super) fn tool_allowed_in_mode(mode: CompileMode, name: &str) -> bool {
-    if crate::mcp::is_mcp_tool_name(name) {
-        return true;
-    }
-    if name == "plan_exit" {
-        return mode == CompileMode::Task;
-    }
-    match mode {
-        CompileMode::Simple => true,
-        CompileMode::Task => {
-            matches!(
-                name,
-                "bash"
-                    | "write_stdin"
-                    | "read_file"
-                    | "list_files"
-                    | "search_files"
-                    | "stat_path"
-                    | "skills_list"
-                    | "skill_view"
-                    | "spawn_agent"
-                    | "wait_agent"
-                    | "list_agents"
-                    | "send_input"
-                    | "close_agent"
-                    | "request_user_input"
-                    | "update_todo_list"
-                    | "plan_exit"
-            ) || name.starts_with("lsp_query_")
-        }
-    }
+    TurnExecutionProfile::root(mode).allows_tool(name, ToolEffect::for_builtin_name(name))
 }
 
 pub(super) fn is_cancelled(options: &TurnOptions) -> bool {

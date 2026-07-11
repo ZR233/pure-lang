@@ -320,10 +320,7 @@ fn record_enabled_tools_for_core(
 ) -> Vec<TraceEvent> {
     let tool_schemas = core
         .tools
-        .schemas()
-        .into_iter()
-        .filter(|schema| tool_allowed_in_mode(mode, schema.name()))
-        .collect::<Vec<_>>();
+        .schemas_for_profile(crate::TurnExecutionProfile::root(mode));
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
     let mut recorder = TraceRecorder::new(session_id.to_string(), event_tx, 0);
 

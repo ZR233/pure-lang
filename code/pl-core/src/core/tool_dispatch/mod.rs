@@ -20,7 +20,7 @@ use crate::turn::{BudgetTracker, ToolApprovalDecision, ToolExecutionMode, TurnOp
 use super::PureCore;
 use super::permission::{approval_request, request_user_approval, requested_workspace_access};
 use super::progress::{ProgressEmitter, ProgressVerbosity};
-use super::turn_result::{is_cancelled, tool_allowed_in_mode, unix_seconds};
+use super::turn_result::{is_cancelled, unix_seconds};
 
 mod display;
 mod progress_messages;
@@ -142,7 +142,17 @@ pub(super) async fn execute_tool_calls(
         }
         budget_tracker.record_tool_call(&tool_call.name);
 
-        if !tool_allowed_in_mode(context.mode, &tool_call.name) {
+        let registered_tool = context.core.tools.get(&tool_call.name);
+        let execution_profile = match &context.active_subagent {
+            Some(subagent) => {
+                crate::TurnExecutionProfile::for_subagent(context.mode, &subagent.role)
+            }
+            None => crate::TurnExecutionProfile::root(context.mode),
+        };
+        let effect = registered_tool
+            .and_then(crate::tool::Tool::effect)
+            .or_else(|| crate::ToolEffect::for_builtin_name(&tool_call.name));
+        if !execution_profile.allows_tool(&tool_call.name, effect) {
             let mode = context.mode.label();
             let name = &tool_call.name;
             let message = format!("Tool disabled in {mode} mode: {name}");
@@ -163,8 +173,7 @@ pub(super) async fn execute_tool_calls(
             });
             continue;
         }
-
-        let Some(tool) = context.core.tools.get(&tool_call.name) else {
+        let Some(tool) = registered_tool else {
             let available: Vec<&str> = context.core.tools.names();
             eprintln!(
                 "[pl-core] Unknown tool: {:?}, available: {:?}",

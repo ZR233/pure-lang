@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 /// Agent 树结构限制常量。
 pub const AGENT_MAX_COUNT: usize = 16;
-pub const AGENT_MAX_DEPTH: u32 = 3;
+pub const AGENT_MAX_DEPTH: u32 = 1;
 /// 默认 wall-clock 安全上限（30 分钟），参考 Codex 的 agent_job_max_runtime_seconds。
 pub const DEFAULT_WALL_CLOCK_MS: u64 = 1_800_000;
 

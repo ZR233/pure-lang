@@ -1012,7 +1012,7 @@ async fn enabled_tools_snapshot_records_mode_filtered_tools() {
 
     assert_eq!(event.turn_id, "turn-1");
     assert_eq!(event.mode, "task");
-    assert!(event.tools.contains(&"bash".to_string()));
+    assert!(!event.tools.contains(&"bash".to_string()));
     assert!(event.tools.contains(&"read_file".to_string()));
     assert!(event.tools.contains(&"plan_exit".to_string()));
     assert!(!event.tools.contains(&"write_file".to_string()));

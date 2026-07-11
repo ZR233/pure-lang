@@ -37,8 +37,7 @@ use super::turn_result::{
     budget_limited_turn_result, default_workspace_root, failed_turn_result,
     failed_turn_result_with_abort_reason, interrupted_turn_result, is_cancelled,
     looks_like_unexecuted_tool_call_text, normalize_provider_error,
-    prompt_requires_subagent_dispatch, should_request_parallel_tool_calls, tool_allowed_in_mode,
-    unix_seconds,
+    prompt_requires_subagent_dispatch, should_request_parallel_tool_calls, unix_seconds,
 };
 
 pub(super) async fn run_turn_with_trace(
@@ -68,12 +67,11 @@ pub(super) async fn run_turn_with_trace(
         agent_supervisor.enable_worktrees(repo_root).await;
     }
     let cancellation_token = options.cancellation_token.clone();
-    let tool_schemas = core
-        .tools
-        .schemas()
-        .into_iter()
-        .filter(|schema| tool_allowed_in_mode(request.mode, schema.name()))
-        .collect::<Vec<_>>();
+    let execution_profile = match &active_subagent {
+        Some(subagent) => crate::TurnExecutionProfile::for_subagent(request.mode, &subagent.role),
+        None => crate::TurnExecutionProfile::root(request.mode),
+    };
+    let tool_schemas = core.tools.schemas_for_profile(execution_profile);
     let mut budget_tracker = BudgetTracker::new(request.budget);
     let mut budget_limit: Option<BudgetLimit> = None;
 
