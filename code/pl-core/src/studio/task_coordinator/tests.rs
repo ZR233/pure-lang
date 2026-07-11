@@ -245,7 +245,7 @@ async fn delayed_terminal_event_cannot_update_new_task_run_at_reused_path() {
         .await
         .unwrap();
     let old_agent_id = spawned_agent_id(&session.id).await;
-    store
+    let old_outcome = store
         .create_agent_outcome(CreateAgentOutcome {
             task_run_id: old_run.id.clone(),
             work_unit_id: None,
@@ -284,21 +284,63 @@ async fn delayed_terminal_event_cannot_update_new_task_run_at_reused_path() {
         .await
         .unwrap();
 
-    drain_studio_agent_event(
+    drain_studio_agent_events(
         store.clone(),
         &session.id,
-        agent_state_event(&old_agent_id, pl_protocol::AgentStatus::Completed),
+        vec![
+            agent_state_event(&old_agent_id, pl_protocol::AgentStatus::Completed),
+            pl_trace::AgentEvent::SubAgentActivity {
+                call_id: "call-old-terminal".to_string(),
+                occurred_at: 11,
+                agent_id: Some(old_agent_id.clone()),
+                path: Some("/root/worker".to_string()),
+                parent_path: Some("/root".to_string()),
+                kind: pl_protocol::SubAgentActivityKind::Closed,
+                status: Some(pl_protocol::AgentStatus::Completed),
+                message: Some("memory completion".to_string()),
+                timed_out: None,
+                error: None,
+            },
+        ],
     )
     .await;
 
-    let outcome = store
+    let new_outcome = store
         .list_agent_outcomes(&new_run.id)
         .await
         .unwrap()
         .into_iter()
         .find(|outcome| outcome.id == new_outcome.id)
         .unwrap();
-    assert_eq!(outcome.status, AgentOutcomeStatus::Running);
+    let old_outcome = store
+        .list_agent_outcomes(&old_run.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|outcome| outcome.id == old_outcome.id)
+        .unwrap();
+    let agent = store
+        .list_agents(&session.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|agent| agent.id == old_agent_id)
+        .unwrap();
+    let activity: pl_protocol::StudioAgentTimelineEvent =
+        serde_json::from_str(&store.list_agent_events(&session.id).await.unwrap()[0].payload_json)
+            .unwrap();
+    let pl_protocol::StudioAgentTimelineEventKind::SubAgentActivity {
+        status: activity_status,
+        ..
+    } = activity.kind
+    else {
+        panic!("expected delayed subagent activity");
+    };
+
+    assert_eq!(new_outcome.status, AgentOutcomeStatus::Running);
+    assert_eq!(old_outcome.status, AgentOutcomeStatus::Running);
+    assert_eq!(agent.status, pl_protocol::AgentStatus::Running);
+    assert_eq!(activity_status, Some(pl_protocol::AgentStatus::Running));
     coordinator
         .finish_task(&new_run.id, TaskRunPhase::Cancelled, None)
         .await
@@ -345,7 +387,7 @@ async fn agent_changed_and_activity_share_durable_terminal_status() {
         (
             "activity-delivered",
             AgentOutcomeStatus::Completed,
-            pl_protocol::AgentStatus::Completed,
+            pl_protocol::AgentStatus::Errored,
             pl_protocol::AgentStatus::Completed,
         ),
         (
@@ -357,13 +399,13 @@ async fn agent_changed_and_activity_share_durable_terminal_status() {
         (
             "activity-failed",
             AgentOutcomeStatus::Failed,
-            pl_protocol::AgentStatus::Errored,
+            pl_protocol::AgentStatus::Completed,
             pl_protocol::AgentStatus::Errored,
         ),
         (
             "activity-cancelled",
             AgentOutcomeStatus::Cancelled,
-            pl_protocol::AgentStatus::Interrupted,
+            pl_protocol::AgentStatus::Completed,
             pl_protocol::AgentStatus::Interrupted,
         ),
     ] {
