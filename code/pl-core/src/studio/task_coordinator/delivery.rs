@@ -3,13 +3,13 @@ use std::path::{Component, Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use serde::Deserialize;
 
 use super::git::{changed_files_between, inspect_repository, is_ancestor};
 use super::{
-    AgentDelivery, AgentOutcomeStatus, AgentWorktreeDelivery, DeliveryScope, TaskCoordinator,
-    WorkUnitStatus,
+    AgentDelivery, AgentOutcomeStatus, AgentWorktreeDelivery, DeliveryScope,
+    DeliveryScopeResolution, TaskCoordinator, WorkUnitStatus,
 };
 use crate::tool::{
     RegisteredTool, SubagentContext, ToolExecutionResult, ToolInputSchemaField,
@@ -80,7 +80,7 @@ impl TaskCoordinator {
         let repository = inspect_repository(caller_workspace, false).await?;
         let canonical_caller = std::fs::canonicalize(caller_workspace)
             .context("failed to resolve caller workspace path")?;
-        let scope = self
+        let resolution = self
             .store
             .resolve_active_delivery_scope(
                 &subagent.id,
@@ -89,6 +89,16 @@ impl TaskCoordinator {
             )
             .await?
             .context("active delivery scope not found for this executor worktree")?;
+        let scope = match resolution {
+            DeliveryScopeResolution::Resolved(scope) => scope,
+            DeliveryScopeResolution::MissingWorkUnit(outcome) => {
+                let error = anyhow!("executor outcome has no work unit");
+                self.store
+                    .mark_agent_delivery_waiting(&outcome.id, None, &error.to_string())
+                    .await?;
+                return Err(error);
+            }
+        };
         ensure_delivery_scope_is_open(&scope)?;
 
         let result = self

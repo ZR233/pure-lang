@@ -7,7 +7,8 @@ use crate::studio::entities;
 use crate::studio::ids::unix_seconds;
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    AgentDelivery, AgentOutcomeStatus, DeliveryScope, TaskRunPhase, WorkUnitStatus,
+    AgentDelivery, AgentOutcomeStatus, DeliveryScope, DeliveryScopeResolution, TaskRunPhase,
+    WorkUnitStatus,
 };
 
 use super::outcome::agent_outcome_record;
@@ -20,7 +21,7 @@ impl StudioStore {
         agent_id: &str,
         worktree_path: &str,
         branch: &str,
-    ) -> Result<Option<DeliveryScope>> {
+    ) -> Result<Option<DeliveryScopeResolution>> {
         let work_units = entities::work_unit::Entity::find()
             .filter(entities::work_unit::Column::AgentId.eq(agent_id.to_string()))
             .all(&self.db)
@@ -63,36 +64,57 @@ impl StudioStore {
         }
         match matching_scopes.len() {
             0 => {}
-            1 => return Ok(matching_scopes.pop()),
+            1 => {
+                return Ok(matching_scopes.pop().map(DeliveryScopeResolution::Resolved));
+            }
             _ => bail!("ambiguous active delivery scope for executor worktree"),
         }
         match fallback_scopes.len() {
             0 => {}
-            1 => return Ok(fallback_scopes.pop()),
+            1 => {
+                return Ok(fallback_scopes.pop().map(DeliveryScopeResolution::Resolved));
+            }
             _ => bail!("ambiguous active delivery scope for executor worktree"),
         }
 
         let outcomes = entities::agent_outcome::Entity::find()
             .filter(entities::agent_outcome::Column::AgentId.eq(agent_id.to_string()))
-            .filter(entities::agent_outcome::Column::WorkUnitId.is_null())
             .all(&self.db)
             .await?;
+        let mut missing_work_units = Vec::new();
         for outcome in outcomes {
-            let has_active_run = entities::task_run::Entity::find_by_id(outcome.task_run_id)
-                .filter(entities::task_run::Column::Phase.is_not_in([
-                    TaskRunPhase::Completed.as_str(),
-                    TaskRunPhase::Blocked.as_str(),
-                    TaskRunPhase::Failed.as_str(),
-                    TaskRunPhase::Cancelled.as_str(),
-                ]))
-                .one(&self.db)
-                .await?
-                .is_some();
-            if has_active_run {
-                bail!("executor outcome has no work unit");
+            let has_active_run =
+                entities::task_run::Entity::find_by_id(outcome.task_run_id.clone())
+                    .filter(entities::task_run::Column::Phase.is_not_in([
+                        TaskRunPhase::Completed.as_str(),
+                        TaskRunPhase::Blocked.as_str(),
+                        TaskRunPhase::Failed.as_str(),
+                        TaskRunPhase::Cancelled.as_str(),
+                    ]))
+                    .one(&self.db)
+                    .await?
+                    .is_some();
+            if !has_active_run {
+                continue;
+            }
+            let has_work_unit = match outcome.work_unit_id.as_deref() {
+                Some(work_unit_id) => entities::work_unit::Entity::find_by_id(work_unit_id)
+                    .one(&self.db)
+                    .await?
+                    .is_some(),
+                None => false,
+            };
+            if !has_work_unit {
+                missing_work_units.push(agent_outcome_record(outcome)?);
             }
         }
-        Ok(None)
+        match missing_work_units.len() {
+            0 => Ok(None),
+            1 => Ok(missing_work_units
+                .pop()
+                .map(DeliveryScopeResolution::MissingWorkUnit)),
+            _ => bail!("ambiguous active delivery scope for executor worktree"),
+        }
     }
 
     pub(crate) async fn complete_agent_delivery(
