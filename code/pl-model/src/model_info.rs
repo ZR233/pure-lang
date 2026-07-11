@@ -54,6 +54,8 @@ pub struct ModelRequestProfile {
     pub options: Map<String, Value>,
     #[serde(default, skip_serializing_if = "MaxTokensField::is_default")]
     pub max_tokens_field: MaxTokensField,
+    #[serde(default, skip_serializing_if = "ResponsesMaxTokensField::is_default")]
+    pub responses_max_tokens_field: ResponsesMaxTokensField,
 }
 
 impl ModelRequestProfile {
@@ -64,6 +66,7 @@ impl ModelRequestProfile {
             && self.body.is_empty()
             && self.options.is_empty()
             && self.max_tokens_field.is_default()
+            && self.responses_max_tokens_field.is_default()
     }
 
     /// 将 JSON object 合并进请求 body；非 object 值会被忽略。
@@ -92,6 +95,23 @@ pub enum MaxTokensField {
 impl MaxTokensField {
     pub fn is_default(&self) -> bool {
         *self == Self::MaxTokens
+    }
+}
+
+/// Controls how a Responses request serializes [`CompletionRequest::max_tokens`](crate::request::CompletionRequest::max_tokens).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResponsesMaxTokensField {
+    #[default]
+    Omit,
+    MaxOutputTokens,
+    MaxTokens,
+    MaxCompletionTokens,
+}
+
+impl ResponsesMaxTokensField {
+    pub fn is_default(&self) -> bool {
+        *self == Self::Omit
     }
 }
 
