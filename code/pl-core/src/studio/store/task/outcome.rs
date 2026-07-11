@@ -58,6 +58,7 @@ impl StudioStore {
                 error: Set(None),
                 delivery_json: Set(None),
                 review_json: Set(None),
+                terminal_observed: Set(0),
                 created_at: Set(now),
                 updated_at: Set(now),
             }
@@ -109,6 +110,7 @@ impl StudioStore {
                 error: Set(None),
                 delivery_json: Set(None),
                 review_json: Set(None),
+                terminal_observed: Set(0),
                 created_at: Set(now),
                 updated_at: Set(now),
             }

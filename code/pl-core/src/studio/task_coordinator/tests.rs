@@ -170,6 +170,85 @@ async fn completed_event_preserves_successful_delivery_and_studio_snapshot() {
 }
 
 #[tokio::test]
+async fn successful_delivery_terminal_is_changed_once_then_idempotent() {
+    let fixture = DeliveryFixture::new("delivered-terminal-one-shot", vec!["src/**"]).await;
+    fixture.commit_file("src/lib.rs");
+    let head = git_output(&fixture.worktree, &["rev-parse", "HEAD"]);
+    fixture.submit(&head).await.unwrap();
+    let change = crate::agent::AgentTerminalStateChange {
+        agent_id: fixture.subagent.id.clone(),
+        role: "executor".to_string(),
+        status: pl_protocol::AgentStatus::Completed,
+        summary: Some("turn completed".to_string()),
+        error: None,
+    };
+
+    let first = fixture
+        .coordinator
+        .record_terminal_agent_state(&fixture.session_id, &change)
+        .await
+        .unwrap();
+    let duplicate = fixture
+        .coordinator
+        .record_terminal_agent_state(&fixture.session_id, &change)
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        first,
+        TerminalAgentStateRecording::Changed { task_run_id, .. }
+            if task_run_id == fixture.task_run_id
+    ));
+    assert!(matches!(
+        duplicate,
+        TerminalAgentStateRecording::Projected(_)
+    ));
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn successful_delivery_reopens_terminal_observation_after_waiting() {
+    let fixture = DeliveryFixture::new("delivery-after-waiting-terminal", vec!["src/**"]).await;
+    let change = crate::agent::AgentTerminalStateChange {
+        agent_id: fixture.subagent.id.clone(),
+        role: "executor".to_string(),
+        status: pl_protocol::AgentStatus::Completed,
+        summary: Some("turn completed".to_string()),
+        error: None,
+    };
+    fixture
+        .coordinator
+        .record_terminal_agent_state(&fixture.session_id, &change)
+        .await
+        .unwrap();
+    fixture.commit_file("src/lib.rs");
+    let head = git_output(&fixture.worktree, &["rev-parse", "HEAD"]);
+    fixture.submit(&head).await.unwrap();
+
+    let delivered = fixture
+        .coordinator
+        .record_terminal_agent_state(&fixture.session_id, &change)
+        .await
+        .unwrap();
+    let duplicate = fixture
+        .coordinator
+        .record_terminal_agent_state(&fixture.session_id, &change)
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        delivered,
+        TerminalAgentStateRecording::Changed { task_run_id, .. }
+            if task_run_id == fixture.task_run_id
+    ));
+    assert!(matches!(
+        duplicate,
+        TerminalAgentStateRecording::Projected(_)
+    ));
+    fixture.cleanup();
+}
+
+#[tokio::test]
 async fn errored_and_interrupted_events_persist_terminal_task_states() {
     for (name, agent_status, outcome_status, work_unit_status) in [
         (

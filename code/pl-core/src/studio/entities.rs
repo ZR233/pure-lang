@@ -123,6 +123,7 @@ pub mod agent_outcome {
         pub error: Option<String>,
         pub delivery_json: Option<String>,
         pub review_json: Option<String>,
+        pub terminal_observed: i32,
         pub created_at: i64,
         pub updated_at: i64,
     }

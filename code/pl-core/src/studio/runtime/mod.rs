@@ -57,6 +57,14 @@ pub struct StudioSubmitPromptRequest {
 pub struct StudioSubmitPromptOptions {
     pub user_prompt: StudioUserPromptPresentation,
     pub lifecycle: Option<StudioPlanImplementationLifecycle>,
+    pub(crate) history_policy: PromptHistoryPolicy,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum PromptHistoryPolicy {
+    #[default]
+    Persist,
+    Ephemeral,
 }
 
 /// 用户 prompt 在 Studio timeline 中的展示方式。
@@ -140,8 +148,17 @@ pub struct StudioRuntime {
     runtime_state: StudioRuntimeState,
     active_turns: StudioActiveTurns,
     task_coordinator: std::sync::Arc<TaskCoordinator>,
+    lifecycle_lock: std::sync::Arc<tokio::sync::Mutex<()>>,
     continuation_scheduler: ContinuationScheduler,
     continuation_launcher: Option<SharedContinuationLauncher>,
+    #[cfg(test)]
+    continuation_request_barrier: Option<continuation::ContinuationTestBarrier>,
+    #[cfg(test)]
+    continuation_pre_submit_barrier: Option<continuation::ContinuationTestBarrier>,
+    #[cfg(test)]
+    continuation_launch_error_barrier: Option<continuation::ContinuationTestBarrier>,
+    #[cfg(test)]
+    initialization_entry_barrier: Option<std::sync::Arc<tokio::sync::Barrier>>,
 }
 
 impl StudioRuntime {

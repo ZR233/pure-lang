@@ -4,6 +4,7 @@ impl StudioRuntime {
     pub(super) async fn run_prompt_inner(
         &self,
         request: RunPromptRequest,
+        history_policy: PromptHistoryPolicy,
     ) -> Result<StudioPromptOutcome> {
         let RunPromptRequest {
             session_id,
@@ -126,15 +127,23 @@ impl StudioRuntime {
         let _ = event_task.await;
         let result = result?;
         let trace_events = result.trace_events.clone();
-        if session.revision() != previous_revision {
-            self.store
-                .replace_turn_records(session_id, &trace_events, session.messages())
-                .await?;
-        } else {
-            let new_messages = &session.messages()[previous_len..];
-            self.store
-                .append_turn_records(session_id, &trace_events, new_messages)
-                .await?;
+        match history_policy {
+            PromptHistoryPolicy::Persist if session.revision() != previous_revision => {
+                self.store
+                    .replace_turn_records(session_id, &trace_events, session.messages())
+                    .await?;
+            }
+            PromptHistoryPolicy::Persist => {
+                let new_messages = &session.messages()[previous_len..];
+                self.store
+                    .append_turn_records(session_id, &trace_events, new_messages)
+                    .await?;
+            }
+            PromptHistoryPolicy::Ephemeral => {
+                self.store
+                    .append_turn_records(session_id, &trace_events, &[])
+                    .await?;
+            }
         }
         if matches!(mode, CompileMode::Task)
             && matches!(result.status, TurnResultStatus::Completed)
@@ -158,7 +167,9 @@ impl StudioRuntime {
         self.store
             .upsert_session_runtime_for_turn(session_id, &turn_id, &result, model)
             .await?;
-        if should_start_self_learning(&config, &result.status, &trace_events) {
+        if history_policy == PromptHistoryPolicy::Persist
+            && should_start_self_learning(&config, &result.status, &trace_events)
+        {
             let review_messages = session.messages().to_vec();
             spawn_self_learning_review(
                 config.clone(),
@@ -167,7 +178,7 @@ impl StudioRuntime {
                 review_messages,
             );
         }
-        if previous_len == 0 {
+        if history_policy == PromptHistoryPolicy::Persist && previous_len == 0 {
             self.store
                 .rename_session(session_id, &session_title_from_prompt(&prompt))
                 .await?;

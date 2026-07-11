@@ -1,11 +1,22 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
 use crate::studio::StudioRuntimeState;
+
+#[derive(Debug)]
+pub(super) struct SessionAlreadyHasActiveTurn;
+
+impl std::fmt::Display for SessionAlreadyHasActiveTurn {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("session already has an active turn")
+    }
+}
+
+impl std::error::Error for SessionAlreadyHasActiveTurn {}
 
 #[derive(Clone)]
 pub(super) struct StudioActiveTurns {
@@ -29,7 +40,7 @@ impl StudioActiveTurns {
     ) -> Result<()> {
         let mut tokens = self.tokens.lock().await;
         if tokens.contains_key(&session_id) {
-            bail!("session already has an active turn");
+            return Err(SessionAlreadyHasActiveTurn.into());
         }
         tokens.insert(session_id.clone(), token);
         drop(tokens);
