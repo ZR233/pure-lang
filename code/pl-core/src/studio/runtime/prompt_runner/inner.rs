@@ -135,9 +135,15 @@ impl StudioRuntime {
         let event_runtime = self.clone();
         let event_session_id = session_id.to_string();
         let event_turn_id = turn_id.clone();
+        let event_lifecycle_epoch = self.lifecycle_epoch();
         let event_task = tokio::spawn(async move {
             event_runtime
-                .drain_prompt_agent_events(event_session_id, event_turn_id, event_rx)
+                .drain_prompt_agent_events_for_epoch(
+                    event_session_id,
+                    event_turn_id,
+                    event_lifecycle_epoch,
+                    event_rx,
+                )
                 .await;
         });
         let mut recorder = TraceRecorder::new(session_id.to_string(), event_tx.clone(), 0);

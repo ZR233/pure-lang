@@ -196,17 +196,34 @@ impl StudioRuntime {
         session_id: String,
         event_rx: tokio::sync::broadcast::Receiver<AgentEvent>,
     ) {
-        self.drain_agent_events_inner(session_id, None, event_rx)
+        self.drain_agent_events_inner(session_id, None, None, event_rx)
             .await;
     }
 
+    #[cfg(test)]
     async fn drain_prompt_agent_events(
         &self,
         session_id: String,
         turn_id: String,
         event_rx: tokio::sync::broadcast::Receiver<AgentEvent>,
     ) {
-        self.drain_agent_events_inner(session_id, Some(turn_id), event_rx)
+        self.drain_prompt_agent_events_for_epoch(
+            session_id,
+            turn_id,
+            self.lifecycle_epoch(),
+            event_rx,
+        )
+        .await;
+    }
+
+    async fn drain_prompt_agent_events_for_epoch(
+        &self,
+        session_id: String,
+        turn_id: String,
+        lifecycle_epoch: u64,
+        event_rx: tokio::sync::broadcast::Receiver<AgentEvent>,
+    ) {
+        self.drain_agent_events_inner(session_id, Some(turn_id), Some(lifecycle_epoch), event_rx)
             .await;
     }
 
@@ -214,6 +231,7 @@ impl StudioRuntime {
         &self,
         session_id: String,
         turn_id: Option<String>,
+        lifecycle_epoch: Option<u64>,
         mut event_rx: tokio::sync::broadcast::Receiver<AgentEvent>,
     ) {
         loop {
@@ -224,6 +242,9 @@ impl StudioRuntime {
                     } else {
                         None
                     };
+                    if lifecycle_epoch.is_some_and(|epoch| epoch != self.lifecycle_epoch()) {
+                        continue;
+                    }
                     let visible = match turn_id.as_deref() {
                         Some(turn_id) => {
                             matches!(self.runtime_snapshot().status, StudioRuntimeStatus::Ready)
@@ -398,6 +419,9 @@ impl StudioRuntime {
                     } else {
                         None
                     };
+                    if lifecycle_epoch.is_some_and(|epoch| epoch != self.lifecycle_epoch()) {
+                        continue;
+                    }
                     let visible = match turn_id.as_deref() {
                         Some(turn_id) => {
                             matches!(self.runtime_snapshot().status, StudioRuntimeStatus::Ready)

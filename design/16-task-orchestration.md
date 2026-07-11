@@ -54,7 +54,7 @@ root turn 结束或 UI 仅切换所选 session 不销毁 Task agent runtime。�
 root turn 与 continuation scheduler，再复制 supervisor 列表、释放 registry 锁，并逐个
 cancel-and-wait/quiesce；该路径保留 durable worktree，不调用会 discard 且吞错的通用
 `shutdown_descendants`。旧 epoch 的 agent 事件不得跨越 runtime restart 产生 UI 或
-continuation 副作用。
+continuation 副作用，也不得写入新 epoch 的 durable agent outcome 或终结观察事实。
 
 真实进程重启不能恢复内存 task handle、child `CoreSession` 或 mailbox。取得 process lease
 后，store 以 run-scoped 单事务把 `Pending | Running | WaitingForDelivery` WorkUnit 及其
