@@ -17,6 +17,7 @@ pub(super) struct AgentEntry {
     pub(super) task: Option<JoinHandle<()>>,
     /// subagent 专属 worktree 句柄；root agent 为 `None`，随 agent 条目同生共死。
     pub(super) worktree: Option<WorktreeHandle>,
+    pub(super) lifecycle_token: Option<String>,
 }
 
 impl AgentEntry {
@@ -28,6 +29,7 @@ impl AgentEntry {
             cancellation_token: None,
             task: None,
             worktree: None,
+            lifecycle_token: None,
         }
     }
 }
@@ -80,20 +82,23 @@ impl AgentSupervisorState {
         self.activity_seq = self.activity_seq.saturating_add(1);
     }
 
-    pub(super) fn agent_records(&self, path_prefix: Option<&str>) -> Vec<AgentRecord> {
+    pub(super) fn agent_projection_inputs(
+        &self,
+        path_prefix: Option<&str>,
+    ) -> Vec<(AgentRecord, Option<String>)> {
         let prefix = path_prefix
             .map(str::trim)
             .filter(|prefix| !prefix.is_empty());
         let mut agents: Vec<_> = self
             .agents
             .values()
-            .map(|entry| entry.record.clone())
-            .filter(|agent| {
+            .map(|entry| (entry.record.clone(), entry.lifecycle_token.clone()))
+            .filter(|(agent, _)| {
                 !agent.path.as_str().eq(AgentPath::ROOT)
                     && prefix.is_none_or(|prefix| path_matches_prefix(&agent.path, prefix))
             })
             .collect();
-        agents.sort_by(|left, right| left.path.cmp(&right.path));
+        agents.sort_by(|(left, _), (right, _)| left.path.cmp(&right.path));
         agents
     }
 }

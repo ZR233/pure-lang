@@ -5,10 +5,11 @@ use std::sync::Arc;
 use anyhow::{Result, bail};
 use pl_protocol::{PureError, Result as PureResult};
 
-use super::super::{AllocateExecutor, TaskCoordinator};
+use super::super::{AgentOutcomeStatus, AllocateExecutor, CreateAgentOutcome, TaskCoordinator};
 use crate::agent::{
     AgentCloseDispositionKind, AgentCloseLifecycleRequest, AgentLifecycleHook,
-    AgentSpawnLifecycleRequest, AgentSpawnPreparation, WorktreeCreateSpec,
+    AgentLifecycleProjection, AgentLifecycleProjectionRequest, AgentSpawnLifecycleRequest,
+    AgentSpawnPreparation, WorktreeCreateSpec,
 };
 use crate::studio::task_coordinator::owned_path::OwnedPath;
 
@@ -52,7 +53,38 @@ impl AgentLifecycleHook for TaskAgentLifecycleHook {
                     if !request.owned_paths.is_empty() {
                         return Err(spawn_error("explorer must not declare ownedPaths"));
                     }
-                    Ok(AgentSpawnPreparation::without_worktree())
+                    let Some(run) = self
+                        .coordinator
+                        .store
+                        .list_active_task_runs()
+                        .await
+                        .map_err(|error| spawn_error(error.to_string()))?
+                        .into_iter()
+                        .find(|run| run.session_id == self.session_id)
+                    else {
+                        return Ok(AgentSpawnPreparation::without_worktree());
+                    };
+                    let outcome = self
+                        .coordinator
+                        .store
+                        .create_explorer_outcome(
+                            &self.session_id,
+                            CreateAgentOutcome {
+                                task_run_id: run.id,
+                                work_unit_id: None,
+                                agent_id: request.agent_id.clone(),
+                                owner_path: "/root".to_string(),
+                                initiated_by: "planner".to_string(),
+                                requested_by_call_id: request.requested_by_call_id.clone(),
+                                role: "explorer".to_string(),
+                                status: AgentOutcomeStatus::Queued,
+                                attempt: 1,
+                            },
+                        )
+                        .await
+                        .map_err(|error| spawn_error(error.to_string()))?
+                        .ok_or_else(|| spawn_error("active task run disappeared"))?;
+                    Ok(AgentSpawnPreparation::with_token(outcome.id))
                 }
                 "executor" => {
                     let owned_paths = normalize_owned_paths(&request.owned_paths)
@@ -94,15 +126,32 @@ impl AgentLifecycleHook for TaskAgentLifecycleHook {
         preparation: &'a AgentSpawnPreparation,
     ) -> Pin<Box<dyn std::future::Future<Output = PureResult<()>> + Send + 'a>> {
         Box::pin(async move {
-            if request.role == "executor" {
-                let work_unit_id = preparation.lifecycle_token().ok_or_else(|| {
-                    spawn_error("executor spawn preparation has no allocation token")
-                })?;
-                self.coordinator
-                    .store
-                    .activate_executor(work_unit_id, &request.agent_id)
-                    .await
-                    .map_err(|error| spawn_error(error.to_string()))?;
+            match request.role.as_str() {
+                "executor" => {
+                    let work_unit_id = preparation.lifecycle_token().ok_or_else(|| {
+                        spawn_error("executor spawn preparation has no allocation token")
+                    })?;
+                    self.coordinator
+                        .store
+                        .activate_executor(work_unit_id, &request.agent_id)
+                        .await
+                        .map_err(|error| spawn_error(error.to_string()))?;
+                }
+                "explorer" => {
+                    if let Some(outcome_id) = preparation.lifecycle_token() {
+                        self.coordinator
+                            .store
+                            .update_spawned_outcome(
+                                outcome_id,
+                                &request.agent_id,
+                                AgentOutcomeStatus::Running,
+                                None,
+                            )
+                            .await
+                            .map_err(|error| spawn_error(error.to_string()))?;
+                    }
+                }
+                _ => {}
             }
             Ok(())
         })
@@ -115,15 +164,32 @@ impl AgentLifecycleHook for TaskAgentLifecycleHook {
         error: &'a str,
     ) -> Pin<Box<dyn std::future::Future<Output = PureResult<()>> + Send + 'a>> {
         Box::pin(async move {
-            if request.role == "executor" {
-                let work_unit_id = preparation.lifecycle_token().ok_or_else(|| {
-                    spawn_error("executor spawn preparation has no allocation token")
-                })?;
-                self.coordinator
-                    .store
-                    .fail_executor(work_unit_id, &request.agent_id, error)
-                    .await
-                    .map_err(|failure| spawn_error(failure.to_string()))?;
+            match request.role.as_str() {
+                "executor" => {
+                    let work_unit_id = preparation.lifecycle_token().ok_or_else(|| {
+                        spawn_error("executor spawn preparation has no allocation token")
+                    })?;
+                    self.coordinator
+                        .store
+                        .fail_executor(work_unit_id, &request.agent_id, error)
+                        .await
+                        .map_err(|failure| spawn_error(failure.to_string()))?;
+                }
+                "explorer" => {
+                    if let Some(outcome_id) = preparation.lifecycle_token() {
+                        self.coordinator
+                            .store
+                            .update_spawned_outcome(
+                                outcome_id,
+                                &request.agent_id,
+                                AgentOutcomeStatus::Failed,
+                                Some(error.to_string()),
+                            )
+                            .await
+                            .map_err(|failure| spawn_error(failure.to_string()))?;
+                    }
+                }
+                _ => {}
             }
             Ok(())
         })
@@ -142,6 +208,21 @@ impl AgentLifecycleHook for TaskAgentLifecycleHook {
                 });
             }
             Ok(())
+        })
+    }
+
+    fn project_snapshot<'a>(
+        &'a self,
+        request: &'a AgentLifecycleProjectionRequest,
+    ) -> Pin<Box<dyn std::future::Future<Output = PureResult<AgentLifecycleProjection>> + Send + 'a>>
+    {
+        Box::pin(async move {
+            self.coordinator
+                .store
+                .project_agent_lifecycle(&request.lifecycle_token, &request.role)
+                .await
+                .map_err(|error| spawn_error(error.to_string()))
+                .map(|projection| projection.unwrap_or_else(|| request.snapshot.clone()))
         })
     }
 }
@@ -521,10 +602,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn explorer_has_no_durable_allocation_and_task_merge_close_is_rejected() {
+    async fn explorer_has_durable_outcome_without_work_unit_and_task_merge_close_is_rejected() {
         let fixture = SpawnFixture::new("role-guards").await;
         let explorer = fixture.request("agent-explorer", "inspect", "explorer", vec![]);
-        fixture.hook.prepare_spawn(&explorer).await.unwrap();
+        let preparation = fixture.hook.prepare_spawn(&explorer).await.unwrap();
         assert!(
             fixture
                 .store
@@ -532,6 +613,57 @@ mod tests {
                 .await
                 .unwrap()
                 .is_empty()
+        );
+        let outcomes = fixture
+            .store
+            .list_agent_outcomes(&fixture.run_id)
+            .await
+            .unwrap();
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(outcomes[0].work_unit_id, None);
+        assert_eq!(outcomes[0].owner_path, "/root");
+        assert_eq!(outcomes[0].role, "explorer");
+        assert_eq!(outcomes[0].requested_by_call_id, "call-agent-explorer");
+        assert_eq!(outcomes[0].status, AgentOutcomeStatus::Queued);
+
+        fixture
+            .hook
+            .activate_spawn(&explorer, &preparation)
+            .await
+            .unwrap();
+        assert_eq!(
+            fixture
+                .store
+                .list_agent_outcomes(&fixture.run_id)
+                .await
+                .unwrap()[0]
+                .status,
+            AgentOutcomeStatus::Running
+        );
+        let projection = fixture
+            .coordinator
+            .record_terminal_agent_state(
+                &fixture.session_id,
+                &crate::agent::AgentTerminalStateChange {
+                    agent_id: explorer.agent_id.clone(),
+                    role: explorer.role.clone(),
+                    status: crate::AgentStatus::Completed,
+                    summary: Some("exploration complete".to_string()),
+                    error: None,
+                },
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(projection.status, crate::AgentStatus::Completed);
+        assert_eq!(
+            fixture
+                .store
+                .list_agent_outcomes(&fixture.run_id)
+                .await
+                .unwrap()[0]
+                .status,
+            AgentOutcomeStatus::Completed
         );
 
         let merge = crate::agent::AgentCloseLifecycleRequest {
@@ -687,6 +819,85 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn installed_hook_projects_durable_waiting_state_into_supervisor_list() {
+        let fixture = SpawnFixture::new("durable-list-projection").await;
+        let supervisor = AgentSupervisor::default();
+        supervisor
+            .enable_worktrees(PathBuf::from(
+                fixture
+                    .store
+                    .read_task_run(&fixture.run_id)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .workspace_root,
+            ))
+            .await;
+        let mut core = PureCoreBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None))
+            .unwrap()
+            .with_agent_supervisor(supervisor.clone())
+            .build();
+        fixture
+            .coordinator
+            .install_tools(&mut core, &fixture.session_id);
+        let handle = supervisor
+            .spawn_agent(
+                AgentSpawnInput {
+                    task_name: "durable_list".to_string(),
+                    message: "implement".to_string(),
+                    role: "executor".to_string(),
+                    parent_path: Some("/root".to_string()),
+                    session_id: fixture.session_id.clone(),
+                    owned_paths: vec!["code/pl-core/**".to_string()],
+                },
+                test_run_spec("implement"),
+            )
+            .await
+            .unwrap();
+        supervisor
+            .update_status(
+                &handle.id,
+                crate::AgentStatus::Completed,
+                Some("memory complete".to_string()),
+                None,
+            )
+            .await;
+        fixture
+            .coordinator
+            .record_terminal_agent_state(
+                &fixture.session_id,
+                &crate::agent::AgentTerminalStateChange {
+                    agent_id: handle.id.clone(),
+                    role: "executor".to_string(),
+                    status: crate::AgentStatus::Completed,
+                    summary: Some("durable complete".to_string()),
+                    error: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        let agents = supervisor.list_agents(None).await;
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0].status, crate::AgentStatus::Waiting);
+        assert_eq!(agents[0].summary.as_deref(), Some("durable complete"));
+
+        let (event_tx, _) = tokio::sync::broadcast::channel(8);
+        supervisor
+            .close_agent(
+                "/root",
+                &handle.id,
+                "discard",
+                &event_tx,
+                "call-close".to_string(),
+                crate::agent::CloseDisposition::Discard,
+            )
+            .await
+            .unwrap();
+        fixture.cleanup();
+    }
+
+    #[tokio::test]
     async fn design_updating_phase_rejects_executor_allocation() {
         let repository = init_repository("phase-guard");
         let store = StudioStore::open_memory().await.unwrap();
@@ -778,13 +989,38 @@ mod tests {
             .await
             .unwrap();
         right_hook
+            .activate_spawn(&right_request, &right_preparation)
+            .await
+            .unwrap();
+        coordinator
+            .record_terminal_agent_state(
+                &left_session.id,
+                &crate::agent::AgentTerminalStateChange {
+                    agent_id: "agent-1".to_string(),
+                    role: "executor".to_string(),
+                    status: crate::AgentStatus::Completed,
+                    summary: Some("left complete".to_string()),
+                    error: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            store.list_work_units(&left_run.id).await.unwrap()[0].status,
+            WorkUnitStatus::WaitingForDelivery
+        );
+        assert_eq!(
+            store.list_work_units(&right_run.id).await.unwrap()[0].status,
+            WorkUnitStatus::Running
+        );
+        right_hook
             .rollback_spawn(&right_request, &right_preparation, "right failed")
             .await
             .unwrap();
 
         assert_eq!(
             store.list_work_units(&left_run.id).await.unwrap()[0].status,
-            WorkUnitStatus::Running
+            WorkUnitStatus::WaitingForDelivery
         );
         assert_eq!(
             store.list_work_units(&right_run.id).await.unwrap()[0].status,
@@ -792,7 +1028,7 @@ mod tests {
         );
         assert_eq!(
             store.list_agent_outcomes(&left_run.id).await.unwrap()[0].status,
-            AgentOutcomeStatus::Running
+            AgentOutcomeStatus::WaitingForDelivery
         );
         assert_eq!(
             store.list_agent_outcomes(&right_run.id).await.unwrap()[0]

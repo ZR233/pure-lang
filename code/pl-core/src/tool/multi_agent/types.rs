@@ -78,10 +78,9 @@ pub(super) struct SpawnAgentArgs {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct WaitAgentArgs {
-    #[serde(rename = "target")]
-    pub _target: Option<String>,
-    #[serde(default, rename = "targets")]
-    pub _targets: Vec<String>,
+    pub target: Option<String>,
+    #[serde(default)]
+    pub targets: Vec<String>,
     pub timeout_ms: Option<i64>,
 }
 
@@ -126,17 +125,18 @@ pub(super) struct SpawnAgentResult {
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct WaitAgentResult {
-    pub message: String,
+    pub completed: Vec<AgentToolRecord>,
+    pub pending: Vec<AgentToolRecord>,
     pub timed_out: bool,
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct ListAgentsResult {
     pub agents: Vec<AgentToolRecord>,
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct CompactAgentRecord {
     pub path: String,

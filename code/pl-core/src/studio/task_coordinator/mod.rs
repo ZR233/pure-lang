@@ -3,6 +3,7 @@ mod delivery;
 mod git;
 mod owned_path;
 mod spawn;
+mod terminal;
 mod types;
 
 pub(crate) use coordinator::*;

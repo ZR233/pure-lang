@@ -69,9 +69,12 @@ fn agent_control_status_kind_maps_to_protocol_status() {
 }
 
 #[test]
-fn wait_agent_result_serializes_activity_message() {
+fn wait_agent_result_serializes_completed_and_pending_snapshots() {
+    let completed = agent_tool_records(&[agent_record("done", AgentStatus::Completed, None)]);
+    let pending = agent_tool_records(&[agent_record("delivery", AgentStatus::Waiting, None)]);
     let output = json_output(WaitAgentResult {
-        message: "wait_agent observed agent activity.".to_string(),
+        completed: completed.clone(),
+        pending: pending.clone(),
         timed_out: false,
     })
     .unwrap();
@@ -80,7 +83,8 @@ fn wait_agent_result_serializes_activity_message() {
     assert_eq!(
         result,
         WaitAgentResult {
-            message: "wait_agent observed agent activity.".to_string(),
+            completed,
+            pending,
             timed_out: false,
         }
     );

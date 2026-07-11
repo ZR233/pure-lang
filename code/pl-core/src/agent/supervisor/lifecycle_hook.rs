@@ -1,6 +1,6 @@
 use std::pin::Pin;
 
-use pl_protocol::PureError;
+use pl_protocol::{AgentStatus, PureError};
 
 use crate::agent::worktree::WorktreeCreateSpec;
 
@@ -39,6 +39,13 @@ impl AgentSpawnPreparation {
         }
     }
 
+    pub fn with_token(lifecycle_token: impl Into<String>) -> Self {
+        Self {
+            worktree: None,
+            lifecycle_token: Some(lifecycle_token.into()),
+        }
+    }
+
     pub fn with_worktree_and_token(
         worktree: WorktreeCreateSpec,
         lifecycle_token: impl Into<String>,
@@ -74,6 +81,42 @@ pub struct AgentCloseLifecycleRequest {
     pub disposition: AgentCloseDispositionKind,
 }
 
+/// 宿主无关的 agent 状态投影，用于让持久化生命周期覆盖内存快照。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentLifecycleProjection {
+    pub status: AgentStatus,
+    pub summary: Option<String>,
+    pub error: Option<String>,
+}
+
+impl AgentLifecycleProjection {
+    pub fn new(status: AgentStatus, summary: Option<String>, error: Option<String>) -> Self {
+        Self {
+            status,
+            summary,
+            error,
+        }
+    }
+}
+
+/// coordinator 消费终态事实所需的宿主无关输入。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentTerminalStateChange {
+    pub agent_id: String,
+    pub role: String,
+    pub status: AgentStatus,
+    pub summary: Option<String>,
+    pub error: Option<String>,
+}
+
+/// 生命周期 hook 投影单个 supervisor 快照所需的通用输入。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentLifecycleProjectionRequest {
+    pub lifecycle_token: String,
+    pub role: String,
+    pub snapshot: AgentLifecycleProjection,
+}
+
 /// 宿主围绕 supervisor spawn/close 原子边界实现的生命周期 hook。
 ///
 /// `prepare_spawn` 应预留并持久化资源，`activate_spawn` 在 child turn 启动前提交
@@ -103,4 +146,17 @@ pub trait AgentLifecycleHook: std::fmt::Debug + Send + Sync {
         &'a self,
         request: &'a AgentCloseLifecycleRequest,
     ) -> Pin<Box<dyn std::future::Future<Output = Result<(), PureError>> + Send + 'a>>;
+
+    fn project_snapshot<'a>(
+        &'a self,
+        request: &'a AgentLifecycleProjectionRequest,
+    ) -> Pin<
+        Box<
+            dyn std::future::Future<Output = Result<AgentLifecycleProjection, PureError>>
+                + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async move { Ok(request.snapshot.clone()) })
+    }
 }

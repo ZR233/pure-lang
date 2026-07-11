@@ -3,6 +3,7 @@ mod delivery;
 mod merge;
 mod outcome;
 mod review;
+mod terminal;
 mod work_unit;
 
 use anyhow::{Context, Result, bail};

@@ -170,6 +170,15 @@ impl AgentSupervisor {
                 )
                 .await);
         }
+        if let Some(lifecycle_token) = preparation
+            .as_ref()
+            .and_then(super::AgentSpawnPreparation::lifecycle_token)
+        {
+            let mut state = self.state.lock().await;
+            if let Some(entry) = state.agents.get_mut(&handle.id) {
+                entry.lifecycle_token = Some(lifecycle_token.to_string());
+            }
+        }
 
         if let Err(error) = self.start_agent_turn(handle.id.clone(), run_spec).await {
             return Err(self
@@ -244,8 +253,39 @@ impl AgentSupervisor {
     }
 
     pub async fn list_agents(&self, path_prefix: Option<&str>) -> Vec<AgentRecord> {
-        let state = self.state.lock().await;
-        state.agent_records(path_prefix)
+        let inputs = self.state.lock().await.agent_projection_inputs(path_prefix);
+        let Some(hook) = self.lifecycle_hook() else {
+            return inputs.into_iter().map(|(record, _)| record).collect();
+        };
+        let mut records = Vec::with_capacity(inputs.len());
+        for (mut record, lifecycle_token) in inputs {
+            let Some(lifecycle_token) = lifecycle_token else {
+                records.push(record);
+                continue;
+            };
+            let request = super::AgentLifecycleProjectionRequest {
+                lifecycle_token,
+                role: record.role.clone(),
+                snapshot: super::AgentLifecycleProjection::new(
+                    record.status,
+                    record.summary.clone(),
+                    record.error.clone(),
+                ),
+            };
+            match hook.project_snapshot(&request).await {
+                Ok(projection) => {
+                    record.status = projection.status;
+                    record.summary = projection.summary;
+                    record.error = projection.error;
+                }
+                Err(error) => {
+                    record.status = AgentStatus::Errored;
+                    record.error = Some(format!("durable agent projection failed: {error}"));
+                }
+            }
+            records.push(record);
+        }
+        records
     }
 
     pub async fn resolve_agent(

@@ -1,8 +1,11 @@
 use anyhow::Result;
-use pl_protocol::{InteractionRequest, StudioAgentSnapshot, StudioEventKind, StudioSessionRuntime};
+use pl_protocol::{
+    ErrorSeverity, InteractionRequest, StudioAgentSnapshot, StudioEventKind, StudioSessionRuntime,
+};
 use pl_trace::AgentEvent;
 use tokio::sync::broadcast::error::RecvError;
 
+use crate::agent::AgentTerminalStateChange;
 use crate::config::ConfigStore;
 use crate::mcp::McpRuntimeRegistry;
 use crate::studio::StudioStore;
@@ -145,7 +148,66 @@ impl StudioRuntime {
     ) {
         loop {
             match event_rx.recv().await {
-                Ok(event) => {
+                Ok(mut event) => {
+                    if let AgentEvent::AgentStateChanged {
+                        id,
+                        role,
+                        status,
+                        summary,
+                        error,
+                        ..
+                    } = &event
+                    {
+                        let change = AgentTerminalStateChange {
+                            agent_id: id.clone(),
+                            role: role.clone(),
+                            status: *status,
+                            summary: summary.clone(),
+                            error: error.clone(),
+                        };
+                        let projection = match self
+                            .task_coordinator
+                            .record_terminal_agent_state(&session_id, &change)
+                            .await
+                        {
+                            Ok(projection) => projection,
+                            Err(error) => {
+                                let diagnostic = format!(
+                                    "terminal agent state persistence failed for {id}: {error}"
+                                );
+                                let _ = self
+                                    .task_coordinator
+                                    .block_terminal_persistence_failure(
+                                        &session_id,
+                                        &error.to_string(),
+                                    )
+                                    .await;
+                                let _ = self
+                                    .events
+                                    .emit_agent_event(
+                                        &session_id,
+                                        AgentEvent::Error {
+                                            message: diagnostic,
+                                            severity: ErrorSeverity::Recoverable,
+                                        },
+                                    )
+                                    .await;
+                                continue;
+                            }
+                        };
+                        if let Some(projection) = projection
+                            && let AgentEvent::AgentStateChanged {
+                                status,
+                                summary,
+                                error,
+                                ..
+                            } = &mut event
+                        {
+                            *status = projection.status;
+                            *summary = projection.summary;
+                            *error = projection.error;
+                        }
+                    }
                     if let AgentEvent::AgentRuntimeUpdated { delta } = &event {
                         let _ = self
                             .store
