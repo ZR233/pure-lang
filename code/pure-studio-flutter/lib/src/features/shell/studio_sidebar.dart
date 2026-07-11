@@ -469,55 +469,52 @@ class _SidebarActions extends ConsumerWidget {
       ),
       child: compact
           ? Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                IconButton(
+                _SidebarActionButton(
                   tooltip: context.l10n.sidebarNewSession,
-                  icon: const Icon(Icons.add_comment_outlined),
+                  icon: Icons.add_comment_outlined,
                   onPressed: state.selectedProjectId == null || state.isBusy
                       ? null
                       : ref
                             .read(studioControllerProvider.notifier)
                             .createSession,
                 ),
-                IconButton(
+                const SizedBox(height: 4),
+                _SidebarActionButton(
                   tooltip: context.l10n.sidebarOpenProject,
-                  icon: const Icon(Icons.create_new_folder),
+                  icon: Icons.create_new_folder,
                   onPressed: () => _openProject(ref),
                 ),
-                IconButton(
+                const SizedBox(height: 4),
+                _SidebarActionButton(
                   tooltip: context.l10n.sidebarSettings,
-                  icon: const Icon(Icons.settings),
+                  icon: Icons.settings,
                   onPressed: () => context.go('/settings'),
                 ),
               ],
             )
           : Row(
               children: [
-                Expanded(
-                  child: _SidebarActionButton(
-                    icon: Icons.add_comment_outlined,
-                    label: context.l10n.sidebarNew,
-                    tooltip: context.l10n.sidebarNewSession,
-                    onPressed: state.selectedProjectId == null || state.isBusy
-                        ? null
-                        : ref
-                              .read(studioControllerProvider.notifier)
-                              .createSession,
-                  ),
+                _SidebarActionButton(
+                  icon: Icons.add_comment_outlined,
+                  tooltip: context.l10n.sidebarNewSession,
+                  onPressed: state.selectedProjectId == null || state.isBusy
+                      ? null
+                      : ref
+                            .read(studioControllerProvider.notifier)
+                            .createSession,
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: _SidebarActionButton(
-                    icon: Icons.create_new_folder,
-                    label: context.l10n.sidebarOpen,
-                    tooltip: context.l10n.sidebarOpenProject,
-                    onPressed: () => _openProject(ref),
-                  ),
+                const SizedBox(width: 4),
+                _SidebarActionButton(
+                  icon: Icons.create_new_folder,
+                  tooltip: context.l10n.sidebarOpenProject,
+                  onPressed: () => _openProject(ref),
                 ),
-                const SizedBox(width: 8),
-                IconButton(
+                const Spacer(),
+                _SidebarActionButton(
                   tooltip: context.l10n.sidebarSettings,
-                  icon: const Icon(Icons.settings),
+                  icon: Icons.settings,
                   onPressed: () => context.go('/settings'),
                 ),
               ],
@@ -537,32 +534,35 @@ class _SidebarActions extends ConsumerWidget {
 class _SidebarActionButton extends StatelessWidget {
   const _SidebarActionButton({
     required this.icon,
-    required this.label,
     required this.tooltip,
     required this.onPressed,
   });
 
   final IconData icon;
-  final String label;
   final String tooltip;
   final VoidCallback? onPressed;
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    return Tooltip(
-      message: tooltip,
-      child: OutlinedButton.icon(
-        icon: Icon(icon, size: 18),
-        label: Text(label),
-        style: OutlinedButton.styleFrom(
-          foregroundColor: colors.onSurfaceVariant,
-          backgroundColor: colors.surfaceContainerLowest,
-          side: BorderSide(color: context.studioLine),
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+    return IconButton(
+      tooltip: tooltip,
+      icon: Icon(icon),
+      style: IconButton.styleFrom(
+        fixedSize: const Size.square(40),
+        iconSize: 18,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        foregroundColor: colors.onSurfaceVariant,
+        disabledForegroundColor: colors.onSurfaceVariant.withValues(
+          alpha: 0.38,
         ),
-        onPressed: onPressed,
+        hoverColor: context.studioPaper.withValues(alpha: 0.76),
+        focusColor: context.studioPaper.withValues(alpha: 0.76),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(StudioRadii.sm),
+        ),
       ),
+      onPressed: onPressed,
     );
   }
 }

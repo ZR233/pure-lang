@@ -25,6 +25,58 @@ void registerShellSettingsTests() {
     expect(api.archivedSessionId, 'session-1');
   });
 
+  testWidgets('sidebar footer uses aligned icon actions in zh Hans', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(900, 700);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _FakeStudioApi(_emptyState());
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(
+          locale: const Locale('zh', 'Hans'),
+          home: const StudioShell(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final sidebar = find.byKey(const ValueKey('studio-sidebar'));
+    final newSession = find.widgetWithIcon(
+      IconButton,
+      Icons.add_comment_outlined,
+    );
+    final openProject = find.widgetWithIcon(
+      IconButton,
+      Icons.create_new_folder,
+    );
+    final settings = find.widgetWithIcon(IconButton, Icons.settings);
+
+    expect(sidebar, findsOneWidget);
+    expect(find.byTooltip('新建会话'), findsOneWidget);
+    expect(find.byTooltip('打开项目'), findsOneWidget);
+    expect(find.byTooltip('设置'), findsOneWidget);
+    expect(newSession, findsOneWidget);
+    expect(openProject, findsOneWidget);
+    expect(settings, findsOneWidget);
+    expect(tester.getSize(newSession), const Size.square(40));
+    expect(tester.getSize(openProject), const Size.square(40));
+    expect(tester.getSize(settings), const Size.square(40));
+    expect(tester.getCenter(newSession).dy, tester.getCenter(openProject).dy);
+    expect(tester.getCenter(openProject).dy, tester.getCenter(settings).dy);
+    expect(
+      find.descendant(of: sidebar, matching: find.byType(OutlinedButton)),
+      findsNothing,
+    );
+    expect(find.text('新建'), findsNothing);
+    expect(find.text('打开'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('project close buttons respect current session busy state', (
     tester,
   ) async {
