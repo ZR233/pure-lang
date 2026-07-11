@@ -548,7 +548,7 @@ mod tests {
         let snapshot = InstructionAssembler::assemble(InstructionAssemblyRequest {
             config: Some(&config),
             model: &ModelInfo::fallback("test-model"),
-            mode: CompileMode::Plan,
+            mode: CompileMode::Task,
             workspace_root: &dir,
             current_dir: &dir,
             workspace_instructions: None,
@@ -594,7 +594,7 @@ mod tests {
         let snapshot = InstructionAssembler::assemble(InstructionAssemblyRequest {
             config: Some(&config),
             model: &ModelInfo::fallback("test-model"),
-            mode: CompileMode::Auto,
+            mode: CompileMode::Simple,
             workspace_root: &dir,
             current_dir: &dir,
             workspace_instructions: None,
@@ -654,7 +654,7 @@ mod tests {
         let snapshot = InstructionAssembler::assemble(InstructionAssemblyRequest {
             config: None,
             model: &model,
-            mode: CompileMode::Auto,
+            mode: CompileMode::Simple,
             workspace_root: &dir,
             current_dir: &dir,
             workspace_instructions: Some(""),
@@ -681,7 +681,7 @@ mod tests {
             InstructionAssemblyRequest {
                 config: None,
                 model: &ModelInfo::fallback("test-model"),
-                mode: CompileMode::Auto,
+                mode: CompileMode::Simple,
                 workspace_root: &dir,
                 current_dir: &dir,
                 workspace_instructions: None,
@@ -760,7 +760,7 @@ mod tests {
         let snapshot = InstructionAssembler::assemble(InstructionAssemblyRequest {
             config: Some(&config),
             model: &model,
-            mode: CompileMode::Auto,
+            mode: CompileMode::Simple,
             workspace_root: &dir,
             current_dir: &dir,
             workspace_instructions: None,
@@ -784,7 +784,7 @@ mod tests {
         let snapshot = InstructionAssembler::assemble(InstructionAssemblyRequest {
             config: None,
             model: &ModelInfo::fallback("test-model"),
-            mode: CompileMode::Auto,
+            mode: CompileMode::Simple,
             workspace_root: &dir,
             current_dir: &dir,
             workspace_instructions: None,

@@ -45,7 +45,7 @@ pub(crate) fn decide_tool_permission(
     }
 
     if matches!(options.tool_approval_policy, ToolApprovalPolicy::Manual)
-        || (mode == CompileMode::Plan && request.name == "bash")
+        || (mode == CompileMode::Task && request.name == "bash")
     {
         return PermissionDecision::NeedsUserApproval {
             workspace_access: requested_access,
@@ -123,7 +123,7 @@ mod tests {
         assert_eq!(
             decide_tool_permission(
                 &request_approval,
-                CompileMode::Auto,
+                CompileMode::Simple,
                 &write,
                 WorkspaceAccess::WorkspaceOnly,
             ),
@@ -134,7 +134,7 @@ mod tests {
         assert_eq!(
             decide_tool_permission(
                 &request_approval,
-                CompileMode::Auto,
+                CompileMode::Simple,
                 &read,
                 WorkspaceAccess::ExternalAllowed,
             ),
@@ -147,7 +147,7 @@ mod tests {
         assert_eq!(
             decide_tool_permission(
                 &auto_review,
-                CompileMode::Auto,
+                CompileMode::Simple,
                 &bash,
                 WorkspaceAccess::ExternalAllowed,
             ),
@@ -160,7 +160,7 @@ mod tests {
         assert_eq!(
             decide_tool_permission(
                 &full_access,
-                CompileMode::Auto,
+                CompileMode::Simple,
                 &bash,
                 WorkspaceAccess::WorkspaceOnly,
             ),
@@ -181,7 +181,7 @@ mod tests {
         assert_eq!(
             decide_tool_permission(
                 &manual,
-                CompileMode::Auto,
+                CompileMode::Simple,
                 &read,
                 WorkspaceAccess::WorkspaceOnly,
             ),
@@ -192,7 +192,7 @@ mod tests {
         assert_eq!(
             decide_tool_permission(
                 &manual,
-                CompileMode::Auto,
+                CompileMode::Simple,
                 &write_stdin,
                 WorkspaceAccess::WorkspaceOnly,
             ),
@@ -204,7 +204,7 @@ mod tests {
         assert_eq!(
             decide_tool_permission(
                 &TurnOptions::deny_all(),
-                CompileMode::Auto,
+                CompileMode::Simple,
                 &read,
                 WorkspaceAccess::WorkspaceOnly,
             ),
@@ -220,7 +220,7 @@ mod tests {
         assert_eq!(
             decide_tool_permission(
                 &options,
-                CompileMode::Plan,
+                CompileMode::Task,
                 &request("bash"),
                 WorkspaceAccess::WorkspaceOnly,
             ),
@@ -240,7 +240,7 @@ mod tests {
         assert_eq!(
             decide_tool_permission(
                 &manual,
-                CompileMode::Plan,
+                CompileMode::Task,
                 &request("mcp__github__search_issues"),
                 WorkspaceAccess::ExternalAllowed,
             ),
@@ -256,7 +256,7 @@ mod tests {
         assert_eq!(
             decide_tool_permission(
                 &options,
-                CompileMode::Plan,
+                CompileMode::Task,
                 &request("bash"),
                 WorkspaceAccess::WorkspaceOnly,
             ),

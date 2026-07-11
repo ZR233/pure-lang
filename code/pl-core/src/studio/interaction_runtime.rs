@@ -252,7 +252,7 @@ mod tests {
         let store = StudioStore::open_memory().await.unwrap();
         let project = store.upsert_project("C:/work/interactions").await.unwrap();
         let session = store
-            .create_session(&project.id, "Interaction test", CompileMode::Auto)
+            .create_session(&project.id, "Interaction test", CompileMode::Simple)
             .await
             .unwrap();
         (store, session.id)

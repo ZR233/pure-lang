@@ -6,7 +6,7 @@ async fn message_part_snapshot_projection_preserves_first_order() {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project("C:/work/alpha").await.unwrap();
     let session = store
-        .create_session(&project.id, "Conversation", CompileMode::Auto)
+        .create_session(&project.id, "Conversation", CompileMode::Simple)
         .await
         .unwrap();
     let message = StudioMessage {
@@ -139,7 +139,7 @@ async fn message_part_snapshot_round_trip_preserves_activity_group_id() {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project("C:/work/alpha").await.unwrap();
     let session = store
-        .create_session(&project.id, "Conversation", CompileMode::Auto)
+        .create_session(&project.id, "Conversation", CompileMode::Simple)
         .await
         .unwrap();
     let message = StudioMessage {
@@ -245,7 +245,7 @@ async fn message_part_delta_is_not_durable() {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project("C:/work/beta").await.unwrap();
     let session = store
-        .create_session(&project.id, "Live", CompileMode::Auto)
+        .create_session(&project.id, "Live", CompileMode::Simple)
         .await
         .unwrap();
     let err = store
@@ -279,7 +279,7 @@ async fn invalid_message_part_projection_updates_are_rejected() {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project("C:/work/beta").await.unwrap();
     let session = store
-        .create_session(&project.id, "Terminal", CompileMode::Auto)
+        .create_session(&project.id, "Terminal", CompileMode::Simple)
         .await
         .unwrap();
     let part = StudioPart {

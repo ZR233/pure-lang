@@ -360,7 +360,7 @@ class StudioController extends AsyncNotifier<StudioState> {
             ? [
                 for (final session in latest.sessions)
                   session.id == interaction.sessionId
-                      ? session.copyWith(mode: CompileMode.auto)
+                      ? session.copyWith(mode: CompileMode.task)
                       : session,
               ]
             : latest.sessions,

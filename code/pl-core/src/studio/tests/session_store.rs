@@ -6,7 +6,7 @@ async fn session_crud_and_message_restore() {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project("C:/work/alpha").await.unwrap();
     let session = store
-        .create_session(&project.id, "Build app", CompileMode::Auto)
+        .create_session(&project.id, "Build app", CompileMode::Simple)
         .await
         .unwrap();
     let message = Message {
@@ -32,7 +32,7 @@ async fn message_storage_round_trips_image_attachment_parts() {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project("C:/work/alpha").await.unwrap();
     let session = store
-        .create_session(&project.id, "Vision", CompileMode::Auto)
+        .create_session(&project.id, "Vision", CompileMode::Simple)
         .await
         .unwrap();
     let message = Message {
@@ -66,7 +66,7 @@ async fn archive_session_hides_it_from_session_list() {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project("C:/work/alpha").await.unwrap();
     let session = store
-        .create_session(&project.id, "Build app", CompileMode::Auto)
+        .create_session(&project.id, "Build app", CompileMode::Simple)
         .await
         .unwrap();
     let message = Message {
@@ -91,7 +91,7 @@ async fn replace_session_messages_rewrites_history() {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project("C:/work/alpha").await.unwrap();
     let session = store
-        .create_session(&project.id, "Build app", CompileMode::Auto)
+        .create_session(&project.id, "Build app", CompileMode::Simple)
         .await
         .unwrap();
     let first = Message {
@@ -123,17 +123,17 @@ async fn set_session_mode_persists_mode_label() {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project("C:/work/alpha").await.unwrap();
     let session = store
-        .create_session(&project.id, "Plan work", CompileMode::Auto)
+        .create_session(&project.id, "Plan work", CompileMode::Simple)
         .await
         .unwrap();
 
     store
-        .set_session_mode(&session.id, CompileMode::Plan)
+        .set_session_mode(&session.id, CompileMode::Task)
         .await
         .unwrap();
     let updated = store.read_session(&session.id).await.unwrap().unwrap();
 
-    assert_eq!(updated.mode, "plan");
+    assert_eq!(updated.mode, "task");
 }
 
 #[tokio::test]
@@ -141,7 +141,7 @@ async fn instruction_snapshot_round_trips_with_session() {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project("C:/work/alpha").await.unwrap();
     let session = store
-        .create_session(&project.id, "Build app", CompileMode::Auto)
+        .create_session(&project.id, "Build app", CompileMode::Simple)
         .await
         .unwrap();
     let snapshot = InstructionSnapshot {

@@ -6,7 +6,7 @@ async fn trace_part_order_is_allocated_by_runtime_not_trace_sequence() {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project("C:/work/studio").await.unwrap();
     let session = store
-        .create_session(&project.id, "Part order", CompileMode::Auto)
+        .create_session(&project.id, "Part order", CompileMode::Simple)
         .await
         .unwrap();
     let runtime = StudioEventRuntime::new(store.clone());
@@ -59,7 +59,7 @@ async fn trace_part_identity_is_allocated_by_runtime_actor() {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project("C:/work/studio").await.unwrap();
     let session = store
-        .create_session(&project.id, "Part identity", CompileMode::Auto)
+        .create_session(&project.id, "Part identity", CompileMode::Simple)
         .await
         .unwrap();
     let runtime = StudioEventRuntime::new(store.clone());
@@ -149,7 +149,7 @@ async fn trace_part_order_spans_inference_ids_and_tool_boundary() {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project("C:/work/studio").await.unwrap();
     let session = store
-        .create_session(&project.id, "Inference boundary", CompileMode::Auto)
+        .create_session(&project.id, "Inference boundary", CompileMode::Simple)
         .await
         .unwrap();
     let runtime = StudioEventRuntime::new(store.clone());
@@ -244,7 +244,7 @@ async fn runtime_commentary_is_projected_as_synthetic() {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project("C:/work/studio").await.unwrap();
     let session = store
-        .create_session(&project.id, "Runtime commentary", CompileMode::Auto)
+        .create_session(&project.id, "Runtime commentary", CompileMode::Simple)
         .await
         .unwrap();
     let runtime = StudioEventRuntime::new(store.clone());

@@ -50,11 +50,11 @@ pub(super) fn tool_allowed_in_mode(mode: CompileMode, name: &str) -> bool {
         return true;
     }
     if name == "plan_exit" {
-        return mode == CompileMode::Plan;
+        return mode == CompileMode::Task;
     }
     match mode {
-        CompileMode::Auto => true,
-        CompileMode::Plan => {
+        CompileMode::Simple => true,
+        CompileMode::Task => {
             matches!(
                 name,
                 "bash"

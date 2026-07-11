@@ -15,3 +15,4 @@ mod event_guards;
 mod message_part_projection;
 mod message_projection;
 mod migration;
+mod session_mode_visibility;

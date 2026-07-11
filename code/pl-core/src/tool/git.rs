@@ -1208,7 +1208,7 @@ mod tests {
             event_tx,
             options: crate::turn::TurnOptions::default(),
             workspace_access: crate::tool::WorkspaceAccess::WorkspaceOnly,
-            mode: crate::turn::CompileMode::Auto,
+            mode: crate::turn::CompileMode::Simple,
             workspace_root: std::env::temp_dir(),
             workspace_instructions: None,
             instruction_snapshot: None,

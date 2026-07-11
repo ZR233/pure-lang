@@ -6,7 +6,7 @@ async fn trace_part_delta_requires_existing_part() {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project("C:/work/studio").await.unwrap();
     let session = store
-        .create_session(&project.id, "Delta guard", CompileMode::Auto)
+        .create_session(&project.id, "Delta guard", CompileMode::Simple)
         .await
         .unwrap();
     let runtime = StudioEventRuntime::new(store);
@@ -35,7 +35,7 @@ async fn trace_part_delta_requires_contiguous_revision() {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project("C:/work/studio").await.unwrap();
     let session = store
-        .create_session(&project.id, "Delta revision", CompileMode::Auto)
+        .create_session(&project.id, "Delta revision", CompileMode::Simple)
         .await
         .unwrap();
     let runtime = StudioEventRuntime::new(store);
@@ -89,7 +89,7 @@ async fn trace_part_delta_rejects_mismatched_message_or_field() {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project("C:/work/studio").await.unwrap();
     let session = store
-        .create_session(&project.id, "Delta identity guard", CompileMode::Auto)
+        .create_session(&project.id, "Delta identity guard", CompileMode::Simple)
         .await
         .unwrap();
     let runtime = StudioEventRuntime::new(store.clone());
@@ -140,7 +140,7 @@ async fn trace_part_delta_routes_by_session_turn_scoped_identity() {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project("C:/work/studio").await.unwrap();
     let session = store
-        .create_session(&project.id, "Scoped delta", CompileMode::Auto)
+        .create_session(&project.id, "Scoped delta", CompileMode::Simple)
         .await
         .unwrap();
     let runtime = StudioEventRuntime::new(store);
@@ -195,7 +195,7 @@ async fn trace_part_delta_after_terminal_snapshot_emits_stale() {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project("C:/work/studio").await.unwrap();
     let session = store
-        .create_session(&project.id, "Terminal delta", CompileMode::Auto)
+        .create_session(&project.id, "Terminal delta", CompileMode::Simple)
         .await
         .unwrap();
     let runtime = StudioEventRuntime::new(store);

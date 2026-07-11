@@ -1,6 +1,6 @@
 enum PermissionMode { requestApproval, autoReview, fullAccess }
 
-enum CompileMode { auto, plan }
+enum CompileMode { simple, task }
 
 enum TurnPhase {
   idle,

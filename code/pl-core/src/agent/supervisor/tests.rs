@@ -57,7 +57,7 @@ fn test_run_spec(message: &str) -> AgentRunSpec {
         event_tx: tokio::sync::broadcast::channel(8).0,
         call_id: "call-1".to_string(),
         message: message.to_string(),
-        mode: CompileMode::Auto,
+        mode: CompileMode::Simple,
         budget: TurnBudget::default(),
         initial_session: crate::CoreSession::new(),
     }

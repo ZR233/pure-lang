@@ -8,8 +8,8 @@ extension StudioLocalizationsX on BuildContext {
 
   String compileModeLabel(CompileMode mode) {
     return switch (mode) {
-      CompileMode.auto => l10n.compileModeAuto,
-      CompileMode.plan => l10n.compileModePlan,
+      CompileMode.simple => l10n.compileModeSimple,
+      CompileMode.task => l10n.compileModeTask,
     };
   }
 

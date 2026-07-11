@@ -28,7 +28,7 @@ impl Tool for PlanExitTool {
     }
 
     fn description(&self) -> &str {
-        "Submit the final Plan Mode Markdown plan for user confirmation. \
+        "Submit the final Task Mode Markdown plan for user confirmation. \
          Use only after the plan is complete; this tool does not execute the plan."
     }
 
@@ -52,10 +52,10 @@ impl Tool for PlanExitTool {
         context: ToolContext,
     ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
         Box::pin(async move {
-            if context.mode != crate::turn::CompileMode::Plan {
+            if context.mode != crate::turn::CompileMode::Task {
                 return Err(PureError::ToolExecutionFailed {
                     tool: self.name().to_string(),
-                    error: "plan_exit is only available in Plan mode".to_string(),
+                    error: "plan_exit is only available in Task mode".to_string(),
                 });
             }
 
@@ -129,7 +129,7 @@ mod tests {
     #[tokio::test]
     async fn submits_completed_plan() {
         let output = PlanExitTool
-            .execute(input("# Plan\n\n- Do it"), context(CompileMode::Plan))
+            .execute(input("# Plan\n\n- Do it"), context(CompileMode::Task))
             .await
             .unwrap();
 
@@ -145,17 +145,17 @@ mod tests {
     #[tokio::test]
     async fn rejects_auto_mode() {
         let error = PlanExitTool
-            .execute(input("# Plan"), context(CompileMode::Auto))
+            .execute(input("# Plan"), context(CompileMode::Simple))
             .await
             .unwrap_err();
 
-        assert!(error.to_string().contains("Plan mode"));
+        assert!(error.to_string().contains("Task mode"));
     }
 
     #[tokio::test]
     async fn rejects_empty_content() {
         let error = PlanExitTool
-            .execute(input("  "), context(CompileMode::Plan))
+            .execute(input("  "), context(CompileMode::Task))
             .await
             .unwrap_err();
 

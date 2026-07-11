@@ -58,7 +58,7 @@ fn failed_turn_result_preserves_error_message() {
     let result = failed_turn_result(
         &mut recorder,
         "turn-1",
-        crate::turn::CompileMode::Auto,
+        crate::turn::CompileMode::Simple,
         "partial summary".to_string(),
         None,
         "model-a".to_string(),

@@ -32,6 +32,7 @@ impl StudioRuntime {
         let previous_revision = session.revision();
         let previous_len = session.len();
         let mode = CompileMode::from_label(&session_record.mode);
+        let root_role = root_model_role(mode);
         options = options.with_permission_mode(config.runtime.permission_mode);
         let selected_attachments = self
             .store
@@ -94,14 +95,14 @@ impl StudioRuntime {
             .await;
         self.lsp_runtime.reconcile_workspace(&workspace_root).await;
 
-        let mut core = PureCore::from_config(&config, ModelRole::Planner)?
+        let mut core = PureCore::from_config(&config, root_role)?
             .with_mcp_runtime(self.mcp_runtime.clone())
             .with_lsp_runtime(self.lsp_runtime.clone());
         core.register_default_tools(workspace_root.clone(), Some(workspace_instructions.clone()))
             .await;
         core.register_available_mcp_tools().await?;
         if options.interaction_callback.is_none()
-            && (options.requires_user_approval_callback() || mode == CompileMode::Plan)
+            && (options.requires_user_approval_callback() || mode == CompileMode::Task)
         {
             options.interaction_callback = Some(interaction_callback.clone());
         }
@@ -132,14 +133,14 @@ impl StudioRuntime {
                 .append_turn_records(session_id, &trace_events, new_messages)
                 .await?;
         }
-        if matches!(mode, CompileMode::Plan)
+        if matches!(mode, CompileMode::Task)
             && matches!(result.status, TurnResultStatus::Completed)
             && let Some(plan) = completed_plan_item(&trace_events)
         {
             self.create_plan_confirmation(session_id, &plan, interaction_emitter)
                 .await?;
         }
-        let resolved = config.resolve_role(ModelRole::Planner)?;
+        let resolved = config.resolve_role(root_role)?;
         let model = resolved
             .models
             .iter()
@@ -185,7 +186,7 @@ impl StudioRuntime {
         project_path: &Path,
         mode: CompileMode,
     ) -> Result<InstructionSnapshot> {
-        let resolved = config.resolve_role(ModelRole::Planner)?;
+        let resolved = config.resolve_role(root_model_role(mode))?;
         let model = resolved
             .models
             .iter()
@@ -219,6 +220,13 @@ impl StudioRuntime {
             .await?
             .context("selected session disappeared while saving instruction snapshot")?;
         Ok(snapshot)
+    }
+}
+
+fn root_model_role(mode: CompileMode) -> ModelRole {
+    match mode {
+        CompileMode::Simple => ModelRole::Executor,
+        CompileMode::Task => ModelRole::Planner,
     }
 }
 
@@ -266,4 +274,15 @@ fn session_title_from_prompt(prompt: &str) -> String {
         return "新会话".to_string();
     }
     prompt.chars().take(42).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn execution_modes_route_to_their_root_roles() {
+        assert_eq!(root_model_role(CompileMode::Simple), ModelRole::Executor);
+        assert_eq!(root_model_role(CompileMode::Task), ModelRole::Planner);
+    }
 }

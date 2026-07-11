@@ -25,7 +25,7 @@ class DemoStudioApi implements StudioApi {
       id: 'session-main',
       projectId: project.id,
       title: 'Flutter + FRB 重构',
-      mode: CompileMode.auto,
+      mode: CompileMode.simple,
       updatedAt: now,
     );
     final userCreatedAt = now.subtract(const Duration(minutes: 9));

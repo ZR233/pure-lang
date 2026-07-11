@@ -61,7 +61,7 @@ impl StudioRuntime {
 
         match decision {
             PlanConfirmationResolution::ImplementFreshContext => {
-                self.set_session_mode(&session_id, CompileMode::Auto)
+                self.set_session_mode(&session_id, CompileMode::Task)
                     .await?;
                 self.append_plan_lifecycle_event(
                     &session_id,

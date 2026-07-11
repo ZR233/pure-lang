@@ -1007,11 +1007,11 @@ async fn enabled_tools_snapshot_records_mode_filtered_tools() {
     core.register_default_tools(std::env::temp_dir(), Some("rules".to_string()))
         .await;
 
-    let events = record_enabled_tools_for_core(&core, "session-1", "turn-1", CompileMode::Plan);
+    let events = record_enabled_tools_for_core(&core, "session-1", "turn-1", CompileMode::Task);
     let event = enabled_tools_event(&events);
 
     assert_eq!(event.turn_id, "turn-1");
-    assert_eq!(event.mode, "plan");
+    assert_eq!(event.mode, "task");
     assert!(event.tools.contains(&"bash".to_string()));
     assert!(event.tools.contains(&"read_file".to_string()));
     assert!(event.tools.contains(&"plan_exit".to_string()));
@@ -1028,7 +1028,7 @@ async fn enabled_tools_snapshot_includes_lsp_query_when_runtime_is_shared() {
     core.register_default_tools(std::env::temp_dir(), Some("rules".to_string()))
         .await;
 
-    let events = record_enabled_tools_for_core(&core, "session-1", "turn-1", CompileMode::Auto);
+    let events = record_enabled_tools_for_core(&core, "session-1", "turn-1", CompileMode::Simple);
     let event = enabled_tools_event(&events);
 
     // 空注册表没有可用语言，不应出现任何 LSP 工具。

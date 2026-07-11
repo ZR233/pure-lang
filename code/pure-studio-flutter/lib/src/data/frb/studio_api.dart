@@ -21,13 +21,13 @@ bool _isIgnoredTimelinePartType(Object? value) {
 }
 
 CompileMode _compileMode(Object? value) {
-  return _string(value) == 'plan' ? CompileMode.plan : CompileMode.auto;
+  return _string(value) == 'task' ? CompileMode.task : CompileMode.simple;
 }
 
 String _compileModeLabel(CompileMode mode) {
   return switch (mode) {
-    CompileMode.auto => 'auto',
-    CompileMode.plan => 'plan',
+    CompileMode.simple => 'simple',
+    CompileMode.task => 'task',
   };
 }
 

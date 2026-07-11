@@ -261,17 +261,17 @@ abstract class AppLocalizations {
   /// **'Permission mode'**
   String get permissionModeTooltip;
 
-  /// No description provided for @compileModeAuto.
+  /// No description provided for @compileModeSimple.
   ///
   /// In en, this message translates to:
-  /// **'Auto'**
-  String get compileModeAuto;
+  /// **'Simple'**
+  String get compileModeSimple;
 
-  /// No description provided for @compileModePlan.
+  /// No description provided for @compileModeTask.
   ///
   /// In en, this message translates to:
-  /// **'Plan'**
-  String get compileModePlan;
+  /// **'Task'**
+  String get compileModeTask;
 
   /// No description provided for @permissionModeRequestApproval.
   ///
@@ -332,6 +332,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Planner model'**
   String get statusPlannerModel;
+
+  /// No description provided for @statusExecutorModel.
+  ///
+  /// In en, this message translates to:
+  /// **'Executor model'**
+  String get statusExecutorModel;
 
   /// No description provided for @statusReasoningEffort.
   ///

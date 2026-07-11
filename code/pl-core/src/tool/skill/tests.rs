@@ -24,7 +24,7 @@ fn tool_context(workspace_root: PathBuf) -> ToolContext {
         event_tx,
         options: TurnOptions::default(),
         workspace_access: super::super::WorkspaceAccess::WorkspaceOnly,
-        mode: CompileMode::Auto,
+        mode: CompileMode::Simple,
         workspace_root,
         workspace_instructions: None,
         instruction_snapshot: None,

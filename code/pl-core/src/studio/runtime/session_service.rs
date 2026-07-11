@@ -24,7 +24,7 @@ impl StudioRuntime {
         if sessions.is_empty() {
             sessions.push(
                 self.store
-                    .create_session(project_id, "新会话", CompileMode::Auto)
+                    .create_session(project_id, "新会话", CompileMode::Simple)
                     .await?,
             );
         }
@@ -34,7 +34,7 @@ impl StudioRuntime {
     pub async fn create_session(&self, project_id: &str, title: &str) -> Result<SessionRecord> {
         let session = self
             .store
-            .create_session(project_id, title, CompileMode::Auto)
+            .create_session(project_id, title, CompileMode::Simple)
             .await?;
         self.events.emit_session_list(project_id).await?;
         Ok(session)
@@ -153,7 +153,17 @@ impl StudioRuntime {
             return Ok(snapshot);
         }
         let config = self.config_store.load_or_default()?;
-        let resolved = config.resolve_role(ModelRole::Planner)?;
+        let mode = self
+            .store
+            .read_session(session_id)
+            .await?
+            .map(|session| CompileMode::from_label(&session.mode))
+            .unwrap_or_default();
+        let role = match mode {
+            CompileMode::Simple => ModelRole::Executor,
+            CompileMode::Task => ModelRole::Planner,
+        };
+        let resolved = config.resolve_role(role)?;
         let model = resolved
             .models
             .iter()

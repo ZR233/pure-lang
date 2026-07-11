@@ -6,7 +6,7 @@ async fn initialize_runtime_cancels_recovered_transient_interactions() {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project("C:/work/recovered").await.unwrap();
     let session = store
-        .create_session(&project.id, "Recovered", CompileMode::Auto)
+        .create_session(&project.id, "Recovered", CompileMode::Simple)
         .await
         .unwrap();
     store

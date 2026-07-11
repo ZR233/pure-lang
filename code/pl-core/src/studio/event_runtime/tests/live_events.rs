@@ -6,7 +6,7 @@ async fn emit_live_rejects_durable_event_kinds() {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project("C:/work/studio").await.unwrap();
     let session = store
-        .create_session(&project.id, "Live guard", CompileMode::Auto)
+        .create_session(&project.id, "Live guard", CompileMode::Simple)
         .await
         .unwrap();
     let runtime = StudioEventRuntime::new(store);
@@ -43,7 +43,7 @@ async fn terminal_snapshot_carries_latest_live_revision() {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project("C:/work/studio").await.unwrap();
     let session = store
-        .create_session(&project.id, "Terminal revision", CompileMode::Auto)
+        .create_session(&project.id, "Terminal revision", CompileMode::Simple)
         .await
         .unwrap();
     let runtime = StudioEventRuntime::new(store.clone());

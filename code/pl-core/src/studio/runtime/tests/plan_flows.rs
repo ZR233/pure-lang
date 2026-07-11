@@ -25,7 +25,7 @@ async fn proposed_plan_tag_does_not_create_pending_confirmation_interaction() {
     let runtime = StudioRuntime::new(store.clone(), config_store);
     let project = runtime.open_project(&workspace).await.unwrap();
     let session = store
-        .create_session(&project.id, "Plan test", CompileMode::Plan)
+        .create_session(&project.id, "Plan test", CompileMode::Task)
         .await
         .unwrap();
     let interaction_events = std::sync::Arc::new(Mutex::new(Vec::new()));
@@ -121,7 +121,7 @@ async fn plan_exit_tool_creates_pending_confirmation_interaction() {
     let runtime = StudioRuntime::new(store.clone(), config_store);
     let project = runtime.open_project(&workspace).await.unwrap();
     let session = store
-        .create_session(&project.id, "Plan exit test", CompileMode::Plan)
+        .create_session(&project.id, "Plan exit test", CompileMode::Task)
         .await
         .unwrap();
     let interaction_events = std::sync::Arc::new(Mutex::new(Vec::new()));

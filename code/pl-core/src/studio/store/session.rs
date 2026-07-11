@@ -47,6 +47,7 @@ impl StudioStore {
         use entities::session;
         let sessions = session::Entity::find()
             .filter(session::Column::ProjectId.eq(project_id.to_string()))
+            .filter(session::Column::Mode.is_in(["simple", "task"]))
             .filter(session::Column::Archived.eq(0))
             .filter(session::Column::Visibility.eq(SessionVisibility::Active.as_str()))
             .filter(session::Column::ParentSessionId.is_null())
@@ -69,6 +70,7 @@ impl StudioStore {
     pub async fn read_session(&self, session_id: &str) -> Result<Option<SessionRecord>> {
         use entities::session;
         Ok(session::Entity::find_by_id(session_id.to_string())
+            .filter(session::Column::Mode.is_in(["simple", "task"]))
             .one(&self.db)
             .await?
             .map(session_record))

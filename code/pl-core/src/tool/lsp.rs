@@ -284,7 +284,7 @@ mod tests {
             event_tx,
             options: TurnOptions::default(),
             workspace_access,
-            mode: CompileMode::Auto,
+            mode: CompileMode::Simple,
             workspace_root,
             workspace_instructions: None,
             instruction_snapshot: None,

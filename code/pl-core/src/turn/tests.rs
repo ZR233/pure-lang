@@ -12,24 +12,21 @@ fn turn_budget_default_matches_codex_style_wall_clock() {
 
 #[test]
 fn turn_request_uses_default_budget() {
-    let request = TurnRequest::new("hello", CompileMode::Auto);
+    let request = TurnRequest::new("hello", CompileMode::Simple);
 
     assert_eq!(request.budget, TurnBudget::default());
     assert_eq!(request.prompt, "hello");
-    assert_eq!(request.mode, CompileMode::Auto);
+    assert_eq!(request.mode, CompileMode::Simple);
 }
 
 #[test]
-fn compile_mode_from_label_keeps_old_values_auto_compatible() {
-    assert_eq!(CompileMode::from_label("plan"), CompileMode::Plan);
-    assert_eq!(CompileMode::from_label("auto"), CompileMode::Auto);
-    assert_eq!(CompileMode::from_label("manual"), CompileMode::Auto);
-    assert_eq!(CompileMode::from_label(""), CompileMode::Auto);
-}
-
-#[test]
-fn compile_mode_default_is_auto() {
-    assert_eq!(CompileMode::default(), CompileMode::Auto);
+fn compile_mode_uses_only_simple_and_task_wire_labels() {
+    assert_eq!(CompileMode::default().label(), "simple");
+    assert_eq!(CompileMode::from_label("simple").label(), "simple");
+    assert_eq!(CompileMode::from_label("task").label(), "task");
+    assert_eq!(CompileMode::from_label("auto").label(), "simple");
+    assert_eq!(CompileMode::from_label("plan").label(), "simple");
+    assert_eq!(CompileMode::from_label("").label(), "simple");
 }
 
 #[test]

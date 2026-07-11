@@ -219,7 +219,7 @@ async fn live_deepseek_applies_patch_with_prompt() {
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(256);
     let mut recorder = pl_core::TraceRecorder::new("live-apply-patch".to_string(), event_tx, 0);
     let request =
-        TurnRequest::new(live_prompt(), CompileMode::Auto).with_budget(TurnBudget::new(180_000));
+        TurnRequest::new(live_prompt(), CompileMode::Simple).with_budget(TurnBudget::new(180_000));
     let result = core
         .run_turn_with_trace(
             &mut session,
