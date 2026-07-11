@@ -57,6 +57,7 @@ impl StudioRuntime {
             runtime_state: runtime_state.clone(),
             active_turns: StudioActiveTurns::new(runtime_state),
             task_coordinator,
+            task_agent_runtimes: super::TaskAgentRuntimeRegistry::new(),
             lifecycle_lock: std::sync::Arc::new(tokio::sync::Mutex::new(())),
             lifecycle_epoch: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(
                 lifecycle_epoch,
@@ -208,6 +209,7 @@ impl StudioRuntime {
         drop(post_turn_guard);
         self.active_turns.wait_until_empty().await;
         let _post_turn_guard = self.post_turn_lock.lock().await;
+        self.task_agent_runtimes.quiesce_and_clear().await?;
         self.task_coordinator.suspend();
         self.stop_mcp_health_watcher().await;
         self.mcp_runtime.shutdown().await;

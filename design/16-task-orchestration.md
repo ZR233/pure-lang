@@ -43,6 +43,30 @@ coordinator 后台监控代理。代理终结、merge 冲突或 reviewer 返回�
 并启动 planner continuation turn；planner 不依靠单个长 turn 持续 wait。应用重启后
 从持久事实恢复，Git 状态与 `expectedHead` 不一致时进入 `blocked`。
 
+Studio 为每个 Task session 持有一个私有 agent runtime（supervisor、repository identity、
+task generation 与 lifecycle epoch）。同一 session 的用户 root turn 与 continuation
+复用该 supervisor，因此后续 planner 能继续 list、wait、send 和 close 先前 turn 创建的
+agent；不同 session 完全隔离。Simple mode 仍使用 turn-local supervisor。planning
+generation 在该 session 首次创建 `TaskRun` 时绑定 run id；run 终态且旧 turn 已静止后，
+下一个 root turn 才安全轮换 generation，避免旧 agent path 泄漏到新任务。
+
+root turn 结束或 UI 仅切换所选 session 不销毁 Task agent runtime。进程 shutdown 先停止
+root turn 与 continuation scheduler，再复制 supervisor 列表、释放 registry 锁，并逐个
+cancel-and-wait/quiesce；该路径保留 durable worktree，不调用会 discard 且吞错的通用
+`shutdown_descendants`。旧 epoch 的 agent 事件不得跨越 runtime restart 产生 UI 或
+continuation 副作用。
+
+真实进程重启不能恢复内存 task handle、child `CoreSession` 或 mailbox。取得 process lease
+后，store 以 run-scoped 单事务把 `Pending | Running | WaitingForDelivery` WorkUnit 及其
+精确配对 Outcome 原子收束为 `Cancelled`；explorer 的 `Queued | Running` Outcome 同样
+收束。`Delivered | Merged | Failed | Cancelled` 及 delivery 保持不变，所有旧 terminal
+事实标记为已观察，保留 worktree/path/branch 供审计。run、workUnitId、agentId、attempt 或
+状态配对错位时事务整体回滚并 block 精确 run，禁止伪恢复 agent 或产生第二次 continuation。
+
+启动恢复顺序固定为 process lease、agent 事务收束、durable-aware worktree 对账、主仓库
+校验，最后才允许 Recovery continuation。对账未完成或出现部分缺失资源的 run 不得进入
+continuation。
+
 同一 Git common directory 与分支只允许一个写入任务。`BranchLease` 是进程内所有权，
 `expectedHead` CAS 和工作区清洁检查负责检测用户或外部进程的变化。
 
