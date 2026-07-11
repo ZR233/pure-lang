@@ -142,8 +142,20 @@ pub(crate) struct RestartAgentReconciliation {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TaskWorktreeOwnerSnapshot {
     pub(crate) run: TaskRunRecord,
-    pub(crate) work_units: Vec<WorkUnitRecord>,
-    pub(crate) outcomes: Vec<AgentOutcomeRecord>,
+    pub(crate) resources: Vec<TaskWorktreeOwnerResource>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TaskWorktreeCreationState {
+    MustExist,
+    UncreatedBeforeRestart,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TaskWorktreeOwnerResource {
+    pub(crate) work_unit: WorkUnitRecord,
+    pub(crate) outcome: Option<AgentOutcomeRecord>,
+    pub(crate) creation_state: TaskWorktreeCreationState,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

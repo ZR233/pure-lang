@@ -138,7 +138,9 @@ impl TaskCoordinator {
     }
 
     pub(crate) async fn recover_active_tasks(&self) -> Result<Vec<TaskRunRecord>> {
-        let mut recovered = Vec::new();
+        let workspaces = self.store.list_task_worktree_workspaces().await?;
+        let mut prepared = Vec::new();
+        let mut skipped_workspaces = std::collections::HashSet::new();
         for run in self.store.list_active_task_runs().await? {
             let key = BranchKey::new(Path::new(&run.git_common_dir), &run.branch);
             if let Err(error) = acquire_process_lease(&key, &run.id) {
@@ -159,14 +161,44 @@ impl TaskCoordinator {
                     format!("agent restart reconciliation failed: {error}"),
                 )
                 .await?;
+                skipped_workspaces.insert(workspace_key(&run.workspace_root));
                 continue;
             }
-            if let Err(error) = self.reconcile_durable_worktrees(&run).await {
-                self.block_run(
-                    &run,
-                    format!("worktree restart reconciliation failed: {error}"),
-                )
-                .await?;
+            prepared.push(run);
+        }
+
+        let mut successful_workspaces = std::collections::HashSet::new();
+        for workspace in workspaces {
+            let key = workspace_key(&workspace);
+            if skipped_workspaces.contains(&key) {
+                continue;
+            }
+            if let Err(error) = self.reconcile_durable_worktrees(&workspace).await {
+                let affected = prepared
+                    .iter()
+                    .filter(|run| workspace_key(&run.workspace_root) == key)
+                    .cloned()
+                    .collect::<Vec<_>>();
+                if affected.is_empty() {
+                    return Err(error).context(format!(
+                        "worktree restart reconciliation failed for {workspace}"
+                    ));
+                }
+                for run in affected {
+                    self.block_run(
+                        &run,
+                        format!("worktree restart reconciliation failed: {error}"),
+                    )
+                    .await?;
+                }
+                continue;
+            }
+            successful_workspaces.insert(key);
+        }
+
+        let mut recovered = Vec::new();
+        for run in prepared {
+            if !successful_workspaces.contains(&workspace_key(&run.workspace_root)) {
                 continue;
             }
             let snapshot = match inspect_repository(&run.workspace_root, true).await {
@@ -306,6 +338,15 @@ impl TaskCoordinator {
             owned.remove(&key);
             release_process_lease(&key, task_run_id);
         }
+    }
+}
+
+fn workspace_key(workspace: &str) -> String {
+    let workspace = workspace.replace('\\', "/");
+    if cfg!(windows) {
+        workspace.to_lowercase()
+    } else {
+        workspace
     }
 }
 

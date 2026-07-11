@@ -1,28 +1,25 @@
 use anyhow::Result;
 
-use super::{AgentOutcomeRecord, TaskCoordinator, TaskRunPhase, TaskRunRecord, WorkUnitStatus};
+use super::{
+    AgentOutcomeRecord, TaskCoordinator, TaskRunPhase, TaskWorktreeCreationState, WorkUnitStatus,
+};
 use crate::agent::worktree::{
-    DurableWorktreeDisposition, DurableWorktreeResource, WorktreeReconciliation,
-    reconcile_task_worktrees,
+    DurableWorktreeDisposition, DurableWorktreePresence, DurableWorktreeResource,
+    WorktreeReconciliation, reconcile_task_worktrees,
 };
 
 impl TaskCoordinator {
-    pub(super) async fn reconcile_durable_worktrees(&self, run: &TaskRunRecord) -> Result<()> {
-        let owners = self
-            .store
-            .list_task_worktree_owners(&run.workspace_root)
-            .await?;
+    pub(super) async fn reconcile_durable_worktrees(&self, workspace_root: &str) -> Result<()> {
+        let owners = self.store.list_task_worktree_owners(workspace_root).await?;
         let mut resources = Vec::new();
         for owner in owners {
             let terminal_cleanup = matches!(
                 owner.run.phase,
                 TaskRunPhase::Completed | TaskRunPhase::Failed | TaskRunPhase::Cancelled
             );
-            for unit in owner.work_units {
-                let outcome = owner.outcomes.iter().find(|outcome| {
-                    outcome.work_unit_id.as_deref() == Some(unit.id.as_str())
-                        && outcome.agent_id == unit.agent_id.as_deref().unwrap_or_default()
-                });
+            for resource in owner.resources {
+                let unit = resource.work_unit;
+                let outcome = resource.outcome.as_ref();
                 let disposition = if terminal_cleanup || unit.status == WorkUnitStatus::Merged {
                     DurableWorktreeDisposition::Cleanup
                 } else {
@@ -33,12 +30,18 @@ impl TaskCoordinator {
                     path: unit.worktree_path.into(),
                     branch: unit.branch,
                     expected_head: protected_expected_head(disposition, outcome),
+                    presence: match resource.creation_state {
+                        TaskWorktreeCreationState::MustExist => DurableWorktreePresence::MustExist,
+                        TaskWorktreeCreationState::UncreatedBeforeRestart => {
+                            DurableWorktreePresence::MayBeUncreated
+                        }
+                    },
                     disposition,
                 });
             }
         }
         let _summary: WorktreeReconciliation =
-            reconcile_task_worktrees(&run.workspace_root, &resources).await?;
+            reconcile_task_worktrees(workspace_root, &resources).await?;
         Ok(())
     }
 }

@@ -19,6 +19,6 @@ pub use manager::{
     WorktreeRef,
 };
 pub(crate) use reconcile::{
-    DurableWorktreeDisposition, DurableWorktreeResource, WorktreeReconciliation,
-    reconcile_task_worktrees,
+    DurableWorktreeDisposition, DurableWorktreePresence, DurableWorktreeResource,
+    WorktreeReconciliation, reconcile_task_worktrees,
 };

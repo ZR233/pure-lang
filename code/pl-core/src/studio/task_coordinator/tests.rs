@@ -1765,6 +1765,205 @@ async fn recovery_preserves_restart_cancelled_worktree_and_cleans_orphan_leaf() 
     remove_repository(repository);
 }
 
+#[tokio::test]
+async fn recovery_allows_pending_allocation_before_worktree_creation() {
+    let repository = init_repository("recovery-pending-before-create");
+    let store = task_store(&repository).await;
+    let session = task_session(&store, &repository).await;
+    let run = {
+        let coordinator = TaskCoordinator::new(store.clone());
+        coordinator
+            .start_confirmed_task(&session.id, "plan", &repository)
+            .await
+            .unwrap()
+    };
+    let path = Path::new(&run.workspace_root)
+        .join(".pure/worktrees")
+        .join(&run.id)
+        .join("agent-pending");
+    let unit = store
+        .create_work_unit(CreateWorkUnit {
+            task_run_id: run.id.clone(),
+            title: "pending".to_string(),
+            owned_paths: vec!["code/**".to_string()],
+            base_commit: run.base_commit.clone(),
+            worktree_path: path.to_string_lossy().to_string(),
+            branch: format!("pure-task-{}-agent-pending", run.id),
+            attempt: 1,
+        })
+        .await
+        .unwrap();
+    store
+        .update_work_unit(
+            &unit.id,
+            WorkUnitStatus::Pending,
+            Some("agent-pending".to_string()),
+        )
+        .await
+        .unwrap();
+    store
+        .create_agent_outcome(CreateAgentOutcome {
+            task_run_id: run.id.clone(),
+            work_unit_id: Some(unit.id.clone()),
+            agent_id: "agent-pending".to_string(),
+            owner_path: "/root".to_string(),
+            initiated_by: "planner".to_string(),
+            requested_by_call_id: "call-pending".to_string(),
+            role: "executor".to_string(),
+            status: AgentOutcomeStatus::Queued,
+            attempt: 1,
+        })
+        .await
+        .unwrap();
+
+    let recovered = TaskCoordinator::new(store.clone())
+        .recover_active_tasks()
+        .await
+        .unwrap();
+
+    let current = store.read_task_run(&run.id).await.unwrap().unwrap();
+    assert_eq!(recovered.len(), 1, "{current:?}");
+    assert!(!path.exists());
+    assert_eq!(
+        store
+            .read_work_unit(&unit.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .status,
+        WorkUnitStatus::Cancelled
+    );
+    remove_repository(repository);
+}
+
+#[tokio::test]
+async fn recovery_reconciles_terminal_workspace_without_active_run_once() {
+    let repository = init_repository("recovery-terminal-workspace");
+    std::fs::write(repository.join(".gitignore"), ".pure/\n").unwrap();
+    git(&repository, &["add", ".gitignore"]);
+    git(&repository, &["commit", "-m", "ignore runtime"]);
+    let store = task_store(&repository).await;
+    let session = task_session(&store, &repository).await;
+    let coordinator = TaskCoordinator::new(store.clone());
+    let run = coordinator
+        .start_confirmed_task(&session.id, "plan", &repository)
+        .await
+        .unwrap();
+    let merged_path = crate::agent::worktree::git_compatible_path(
+        Path::new(&run.workspace_root)
+            .join(".pure/worktrees")
+            .join(&run.id)
+            .join("agent-merged"),
+    );
+    let merged_branch = format!("pure-task-{}-agent-merged", run.id);
+    let merged_path_arg = merged_path.to_string_lossy().to_string();
+    git(
+        &repository,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            &merged_branch,
+            &merged_path_arg,
+            "HEAD",
+        ],
+    );
+    let unit = store
+        .create_work_unit(CreateWorkUnit {
+            task_run_id: run.id.clone(),
+            title: "merged".to_string(),
+            owned_paths: vec!["code/**".to_string()],
+            base_commit: run.base_commit.clone(),
+            worktree_path: merged_path_arg.clone(),
+            branch: merged_branch.clone(),
+            attempt: 1,
+        })
+        .await
+        .unwrap();
+    store
+        .update_work_unit(
+            &unit.id,
+            WorkUnitStatus::Merged,
+            Some("agent-merged".to_string()),
+        )
+        .await
+        .unwrap();
+    let outcome = store
+        .create_agent_outcome(CreateAgentOutcome {
+            task_run_id: run.id.clone(),
+            work_unit_id: Some(unit.id),
+            agent_id: "agent-merged".to_string(),
+            owner_path: "/root".to_string(),
+            initiated_by: "planner".to_string(),
+            requested_by_call_id: "call-merged".to_string(),
+            role: "executor".to_string(),
+            status: AgentOutcomeStatus::Completed,
+            attempt: 1,
+        })
+        .await
+        .unwrap();
+    store
+        .update_agent_outcome(
+            &outcome.id,
+            UpdateAgentOutcome {
+                status: AgentOutcomeStatus::Completed,
+                summary: Some("merged".to_string()),
+                error: None,
+                delivery: Some(AgentDelivery {
+                    worktree: AgentWorktreeDelivery {
+                        path: merged_path_arg,
+                        branch: merged_branch.clone(),
+                    },
+                    base_commit: run.base_commit.clone(),
+                    head_commit: run.base_commit.clone(),
+                    changed_files: Vec::new(),
+                    verification_summary: "passed".to_string(),
+                }),
+                review: None,
+            },
+        )
+        .await
+        .unwrap();
+    coordinator
+        .finish_task(&run.id, TaskRunPhase::Cancelled, None)
+        .await
+        .unwrap();
+
+    let orphan_path = crate::agent::worktree::git_compatible_path(
+        Path::new(&run.workspace_root).join(".pure/worktrees/orphan-run/orphan-agent"),
+    );
+    let orphan_path_arg = orphan_path.to_string_lossy().to_string();
+    let orphan_branch = "pure-task-orphan-run-orphan-agent";
+    git(
+        &repository,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            orphan_branch,
+            &orphan_path_arg,
+            "HEAD",
+        ],
+    );
+
+    let recovered = TaskCoordinator::new(store.clone())
+        .recover_active_tasks()
+        .await
+        .unwrap();
+    let repeated = TaskCoordinator::new(store)
+        .recover_active_tasks()
+        .await
+        .unwrap();
+
+    assert!(recovered.is_empty());
+    assert!(repeated.is_empty());
+    assert!(!merged_path.exists());
+    assert!(!orphan_path.exists());
+    assert!(git_output(&repository, &["branch", "--list", &merged_branch]).is_empty());
+    assert!(git_output(&repository, &["branch", "--list", orphan_branch]).is_empty());
+    remove_repository(repository);
+}
+
 async fn task_store(repository: &Path) -> StudioStore {
     let store = StudioStore::open_memory().await.unwrap();
     store.upsert_project(repository).await.unwrap();
