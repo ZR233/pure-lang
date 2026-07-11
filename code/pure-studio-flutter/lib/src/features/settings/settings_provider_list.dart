@@ -399,7 +399,9 @@ class _ProviderQuotaRow extends StatelessWidget {
             ),
             const SizedBox(width: 10),
             Text(
-              _formatPercent(percent),
+              context.l10n.settingsUsagePercentRemaining(
+                _formatPercent(percent),
+              ),
               style: context.text.labelMedium?.copyWith(
                 color: context.studioInk,
                 fontWeight: FontWeight.w600,

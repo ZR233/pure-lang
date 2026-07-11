@@ -195,12 +195,13 @@ class _StatusBarItemState extends State<StatusBarItem> {
     final maxLeft = math.max(8.0, overlaySize.width - widget.detailWidth - 8);
     final left = targetTopLeft.dx.clamp(8.0, maxLeft).toDouble();
     final bottom = math.max(8.0, overlaySize.height - targetTopLeft.dy + 8);
+    final maxDetailHeight = math.max(0.0, targetTopLeft.dy - 16);
     final theme = Theme.of(context);
     final detailBuilder = widget.detailBuilder!;
     final interactive = widget.interactive;
     _entry = OverlayEntry(
       builder: (context) {
-        final card = _detailCard(theme, detailBuilder);
+        final card = _detailCard(theme, detailBuilder, maxDetailHeight);
         final positioned = Positioned(
           left: left,
           bottom: bottom,
@@ -241,19 +242,26 @@ class _StatusBarItemState extends State<StatusBarItem> {
     _entry = null;
   }
 
-  Widget _detailCard(ThemeData theme, WidgetBuilder detailBuilder) {
-    return Material(
-      color: Colors.transparent,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: theme.colorScheme.surfaceContainerLowest,
-          border: Border.all(color: theme.colorScheme.outlineVariant),
-          borderRadius: BorderRadius.circular(StudioRadii.md),
-          boxShadow: StudioShadows.lifted(theme.colorScheme.shadow),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: detailBuilder(context),
+  Widget _detailCard(
+    ThemeData theme,
+    WidgetBuilder detailBuilder,
+    double maxHeight,
+  ) {
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxHeight: maxHeight),
+      child: Material(
+        color: Colors.transparent,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surfaceContainerLowest,
+            border: Border.all(color: theme.colorScheme.outlineVariant),
+            borderRadius: BorderRadius.circular(StudioRadii.md),
+            boxShadow: StudioShadows.lifted(theme.colorScheme.shadow),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: SingleChildScrollView(child: detailBuilder(context)),
+          ),
         ),
       ),
     );

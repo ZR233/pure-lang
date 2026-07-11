@@ -175,7 +175,7 @@ class _SettingsNav extends StatelessWidget {
         return Material(
           color: context.studioPaper2,
           child: SizedBox(
-            width: 212,
+            width: StudioLayout.settingsNavigationWidth,
             child: ListView(
               padding: const EdgeInsets.fromLTRB(12, 18, 12, 16),
               children: [

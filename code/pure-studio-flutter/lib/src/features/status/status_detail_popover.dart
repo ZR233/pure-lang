@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../app/theme/studio_tokens.dart';
 
@@ -9,12 +10,18 @@ class StatusDetailPopover extends StatefulWidget {
   const StatusDetailPopover({
     required this.child,
     required this.detailBuilder,
+    required this.semanticsLabel,
+    required this.semanticsValue,
+    this.onFocusChange,
     this.width = 300,
     super.key,
   });
 
   final Widget child;
   final WidgetBuilder detailBuilder;
+  final String semanticsLabel;
+  final String semanticsValue;
+  final ValueChanged<bool>? onFocusChange;
   final double width;
 
   @override
@@ -25,6 +32,7 @@ class _StatusDetailPopoverState extends State<StatusDetailPopover> {
   final GlobalKey _targetKey = GlobalKey();
   OverlayEntry? _entry;
   Timer? _hideTimer;
+  bool _focused = false;
 
   @override
   void dispose() {
@@ -35,19 +43,60 @@ class _StatusDetailPopoverState extends State<StatusDetailPopover> {
 
   @override
   Widget build(BuildContext context) {
-    return KeyedSubtree(
-      key: _targetKey,
-      child: Listener(
-        behavior: HitTestBehavior.translucent,
-        onPointerDown: (_) => _toggle(),
-        onPointerHover: (_) => _show(),
-        child: MouseRegion(
-          onEnter: (_) => _show(),
-          onExit: (_) => _scheduleHide(),
-          child: widget.child,
+    return Semantics(
+      container: true,
+      label: widget.semanticsLabel,
+      value: widget.semanticsValue,
+      button: true,
+      focusable: true,
+      focused: _focused,
+      onTap: _toggle,
+      child: FocusableActionDetector(
+        onFocusChange: _handleFocusChange,
+        shortcuts: const {
+          SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
+          SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
+          SingleActivator(LogicalKeyboardKey.escape):
+              _DismissStatusDetailIntent(),
+        },
+        actions: {
+          ActivateIntent: CallbackAction<ActivateIntent>(
+            onInvoke: (_) {
+              _toggle();
+              return null;
+            },
+          ),
+          _DismissStatusDetailIntent:
+              CallbackAction<_DismissStatusDetailIntent>(
+                onInvoke: (_) {
+                  _hide();
+                  return null;
+                },
+              ),
+        },
+        child: KeyedSubtree(
+          key: _targetKey,
+          child: Listener(
+            behavior: HitTestBehavior.translucent,
+            onPointerDown: (_) => _toggle(),
+            onPointerHover: (_) => _show(),
+            child: MouseRegion(
+              onEnter: (_) => _show(),
+              onExit: (_) => _scheduleHide(),
+              child: widget.child,
+            ),
+          ),
         ),
       ),
     );
+  }
+
+  void _handleFocusChange(bool focused) {
+    setState(() => _focused = focused);
+    widget.onFocusChange?.call(focused);
+    if (!focused) {
+      _scheduleHide();
+    }
   }
 
   void _toggle() {
@@ -98,7 +147,7 @@ class _StatusDetailPopoverState extends State<StatusDetailPopover> {
                           border: Border.all(
                             color: theme.colorScheme.outlineVariant,
                           ),
-                          borderRadius: BorderRadius.circular(11),
+                          borderRadius: BorderRadius.circular(StudioRadii.md),
                           boxShadow: StudioShadows.lifted(
                             theme.colorScheme.shadow,
                           ),
@@ -129,6 +178,10 @@ class _StatusDetailPopoverState extends State<StatusDetailPopover> {
     _entry?.remove();
     _entry = null;
   }
+}
+
+class _DismissStatusDetailIntent extends Intent {
+  const _DismissStatusDetailIntent();
 }
 
 class StatusDetailPanel extends StatelessWidget {

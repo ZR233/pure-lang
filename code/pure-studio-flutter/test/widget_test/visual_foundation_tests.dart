@@ -18,5 +18,6 @@ void registerVisualFoundationTests() {
         [232.0, 60.0, 860.0, 196.0, 900.0],
       );
     });
+
   });
 }
