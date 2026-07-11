@@ -99,9 +99,33 @@ async fn restart_reconciliation_cancels_transient_agents_and_preserves_delivery(
     create_recovery_executor(
         &store,
         &run,
+        "merged",
+        WorkUnitStatus::Merged,
+        AgentOutcomeStatus::Completed,
+        Some(AgentDelivery {
+            worktree: AgentWorktreeDelivery {
+                path: "C:/work/task/.pure/worktrees/run/merged".to_string(),
+                branch: "pure-task-run-merged".to_string(),
+            },
+            ..delivery.clone()
+        }),
+    )
+    .await;
+    create_recovery_executor(
+        &store,
+        &run,
         "failed",
         WorkUnitStatus::Failed,
         AgentOutcomeStatus::Failed,
+        None,
+    )
+    .await;
+    create_recovery_executor(
+        &store,
+        &run,
+        "cancelled",
+        WorkUnitStatus::Cancelled,
+        AgentOutcomeStatus::Cancelled,
         None,
     )
     .await;
@@ -123,6 +147,24 @@ async fn restart_reconciliation_cancels_transient_agents_and_preserves_delivery(
         .await
         .unwrap()
         .unwrap();
+    let queued_explorer = store
+        .create_explorer_outcome(
+            &session.id,
+            CreateAgentOutcome {
+                task_run_id: run.id.clone(),
+                work_unit_id: None,
+                agent_id: "agent-explorer-queued".to_string(),
+                owner_path: "/root".to_string(),
+                initiated_by: "planner".to_string(),
+                requested_by_call_id: "call-explorer-queued".to_string(),
+                role: "explorer".to_string(),
+                status: AgentOutcomeStatus::Queued,
+                attempt: 1,
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
 
     let first = store
         .reconcile_task_agents_after_restart(&run.id)
@@ -136,7 +178,7 @@ async fn restart_reconciliation_cancels_transient_agents_and_preserves_delivery(
     let outcomes = store.list_agent_outcomes(&run.id).await.unwrap();
 
     assert_eq!(first.cancelled_work_units, 3);
-    assert_eq!(first.cancelled_outcomes, 4);
+    assert_eq!(first.cancelled_outcomes, 5);
     assert_eq!(second.cancelled_work_units, 0);
     assert_eq!(second.cancelled_outcomes, 0);
     assert!(
@@ -148,11 +190,22 @@ async fn restart_reconciliation_cancels_transient_agents_and_preserves_delivery(
     assert_eq!(units[3].status, WorkUnitStatus::Delivered);
     assert_eq!(outcomes[3].delivery, Some(delivery));
     assert_eq!(outcomes[3].status, AgentOutcomeStatus::Completed);
-    assert_eq!(outcomes[4].status, AgentOutcomeStatus::Failed);
+    assert_eq!(units[4].status, WorkUnitStatus::Merged);
+    assert_eq!(outcomes[4].status, AgentOutcomeStatus::Completed);
+    assert_eq!(outcomes[5].status, AgentOutcomeStatus::Failed);
+    assert_eq!(outcomes[6].status, AgentOutcomeStatus::Cancelled);
     assert_eq!(
         outcomes
             .iter()
             .find(|outcome| outcome.id == explorer.id)
+            .unwrap()
+            .status,
+        AgentOutcomeStatus::Cancelled
+    );
+    assert_eq!(
+        outcomes
+            .iter()
+            .find(|outcome| outcome.id == queued_explorer.id)
             .unwrap()
             .status,
         AgentOutcomeStatus::Cancelled
