@@ -158,6 +158,8 @@ pub struct StudioRuntime {
     #[cfg(test)]
     continuation_launch_error_barrier: Option<continuation::ContinuationTestBarrier>,
     #[cfg(test)]
+    prompt_completion_barrier: Option<continuation::PromptCompletionTestBarrier>,
+    #[cfg(test)]
     initialization_entry_barrier: Option<std::sync::Arc<tokio::sync::Barrier>>,
 }
 

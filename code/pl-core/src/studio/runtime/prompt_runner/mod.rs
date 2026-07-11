@@ -79,7 +79,7 @@ impl StudioRuntime {
         let cursor = match submit_result {
             Ok(cursor) => cursor as u64,
             Err(error) => {
-                self.active_turn_removed(&session_id).await;
+                self.active_turn_removed(&session_id, &turn_id).await;
                 return Err(error);
             }
         };
@@ -172,12 +172,12 @@ impl StudioRuntime {
                 .with_cancellation(cancellation_token.clone());
         }
         self.active_turns
-            .insert(session_id.clone(), turn_id, cancellation_token)
+            .insert(session_id.clone(), turn_id.clone(), cancellation_token)
             .await?;
         let outcome = self
             .run_prompt_inner(request, PromptHistoryPolicy::Persist)
             .await;
-        self.active_turn_removed(&session_id).await;
+        self.active_turn_removed(&session_id, &turn_id).await;
         outcome
     }
 
@@ -222,7 +222,18 @@ impl StudioRuntime {
                 history_policy,
             )
             .await;
-        self.active_turn_removed(&session_id).await;
+        #[cfg(test)]
+        let completion_barrier = match &self.prompt_completion_barrier {
+            Some(barrier) if barrier.pause_once().await => Some(barrier.clone()),
+            Some(_) | None => None,
+        };
+        if !self.active_turn_removed(&session_id, &turn_id).await {
+            #[cfg(test)]
+            if let Some(barrier) = completion_barrier {
+                barrier.finish().await;
+            }
+            return;
+        }
         let _ = self
             .interactions
             .cancel_transient_interactions(&session_id, "turn completed", emitter)
@@ -272,6 +283,10 @@ impl StudioRuntime {
                     )
                     .await;
             }
+        }
+        #[cfg(test)]
+        if let Some(barrier) = completion_barrier {
+            barrier.finish().await;
         }
     }
 

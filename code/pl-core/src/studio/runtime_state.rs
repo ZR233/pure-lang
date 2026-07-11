@@ -36,6 +36,7 @@ impl StudioRuntimeStatus {
             | (Self::ShuttingDown, Self::Stopped)
             | (Self::ShuttingDown, Self::Failed)
             | (Self::Stopped, Self::Initializing)
+            | (Self::Failed, Self::ShuttingDown)
             | (Self::Failed, Self::Initializing) => true,
             (Self::Uninitialized, _)
             | (Self::Initializing, _)
@@ -142,9 +143,15 @@ impl StudioRuntimeState {
         snapshot_from_inner(&inner)
     }
 
-    pub fn clear_active_turn(&self, session_id: &str) -> StudioRuntimeSnapshot {
+    pub fn clear_active_turn(&self, session_id: &str, turn_id: &str) -> StudioRuntimeSnapshot {
         let mut inner = self.inner.lock().expect("runtime state mutex poisoned");
-        inner.active_turns.remove(session_id);
+        if inner
+            .active_turns
+            .get(session_id)
+            .is_some_and(|active_turn_id| active_turn_id == turn_id)
+        {
+            inner.active_turns.remove(session_id);
+        }
         inner.updated_at = unix_seconds();
         snapshot_from_inner(&inner)
     }
