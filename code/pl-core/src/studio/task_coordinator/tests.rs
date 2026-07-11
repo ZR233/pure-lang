@@ -372,7 +372,10 @@ async fn wrong_owner_missing_work_unit_and_empty_summary_are_actionable() {
     let head = git_output(&missing.worktree, &["rev-parse", "HEAD"]);
     let error = missing.submit(&head).await.expect_err("missing work unit");
     assert!(error.to_string().contains("no work unit"));
-    assert_eq!(missing.outcome().await.status, AgentOutcomeStatus::Running);
+    assert_eq!(
+        missing.outcome().await.status,
+        AgentOutcomeStatus::WaitingForDelivery
+    );
     missing.cleanup();
 
     let empty_summary = DeliveryFixture::new("empty-summary", vec!["src/**"]).await;

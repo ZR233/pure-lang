@@ -370,6 +370,12 @@ pub(crate) struct DeliveryScope {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum DeliveryScopeResolution {
+    Resolved(DeliveryScope),
+    MissingWorkUnit(AgentOutcomeRecord),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MergeRecord {
     pub(crate) id: String,
     pub(crate) task_run_id: String,
