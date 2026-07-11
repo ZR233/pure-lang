@@ -553,6 +553,7 @@ impl Default for AgentSupervisor {
 }
 
 impl AgentSupervisor {
+    #[cfg(test)]
     pub(crate) fn shares_runtime_with(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.state, &other.state)
     }

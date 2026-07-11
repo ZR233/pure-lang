@@ -7,6 +7,7 @@
 mod backend;
 mod error;
 mod manager;
+mod reconcile;
 #[cfg(test)]
 mod tests;
 
@@ -16,4 +17,8 @@ pub(crate) use manager::git_compatible_path;
 pub use manager::{
     CloseDisposition, CloseOutcome, WorktreeCreateSpec, WorktreeHandle, WorktreeManager,
     WorktreeRef,
+};
+pub(crate) use reconcile::{
+    DurableWorktreeDisposition, DurableWorktreeResource, WorktreeReconciliation,
+    reconcile_task_worktrees,
 };
