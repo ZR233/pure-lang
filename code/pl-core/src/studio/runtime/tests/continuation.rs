@@ -1379,6 +1379,219 @@ async fn spawned_claim_from_previous_lifecycle_cannot_submit_after_restart() {
 }
 
 #[tokio::test]
+async fn old_prompt_agent_event_cannot_cross_shutdown_epoch() {
+    tokio::time::timeout(TEST_RUNTIME_TIMEOUT, async {
+        let repository = init_repository("continuation-old-agent-event");
+        let store = StudioStore::open_memory().await.unwrap();
+        let project = store
+            .upsert_project(repository.to_string_lossy().as_ref())
+            .await
+            .unwrap();
+        let session = store
+            .create_session(&project.id, "old agent event", CompileMode::Task)
+            .await
+            .unwrap();
+        let launcher = RecordingLauncher::successful();
+        let runtime = test_runtime(store.clone(), launcher.clone());
+        let old_epoch = runtime.lifecycle_epoch();
+        let turn_id = "turn-reused-across-epoch";
+        let old_turn_token = tokio_util::sync::CancellationToken::new();
+        runtime
+            .active_turns
+            .insert(
+                session.id.clone(),
+                turn_id.to_string(),
+                old_turn_token.clone(),
+            )
+            .await
+            .unwrap();
+        let (old_event_tx, old_event_rx) = tokio::sync::broadcast::channel(8);
+        let drain_started = Arc::new(tokio::sync::Barrier::new(2));
+        let old_drain = {
+            let runtime = runtime.clone();
+            let session_id = session.id.clone();
+            let drain_started = drain_started.clone();
+            tokio::spawn(async move {
+                drain_started.wait().await;
+                runtime
+                    .drain_prompt_agent_events_for_epoch(
+                        session_id,
+                        turn_id.to_string(),
+                        old_epoch,
+                        old_event_rx,
+                    )
+                    .await;
+            })
+        };
+        drain_started.wait().await;
+
+        let shutdown_runtime = runtime.clone();
+        let shutdown = tokio::spawn(async move { shutdown_runtime.shutdown_runtime().await });
+        old_turn_token.cancelled().await;
+        runtime.active_turn_removed(&session.id, turn_id).await;
+        assert_eq!(
+            shutdown.await.unwrap().unwrap().status,
+            StudioRuntimeStatus::Stopped
+        );
+        assert_eq!(
+            runtime.initialize_runtime().await.unwrap().status,
+            StudioRuntimeStatus::Ready
+        );
+        assert_ne!(runtime.lifecycle_epoch(), old_epoch);
+        assert!(launcher.launches.lock().await.is_empty());
+
+        let head = git_output(&repository, &["rev-parse", "HEAD"]);
+        let branch = git_output(&repository, &["branch", "--show-current"]);
+        let common_dir = git_output(&repository, &["rev-parse", "--git-common-dir"]);
+        let common_dir = std::fs::canonicalize(repository.join(common_dir)).unwrap();
+        let (run, _) = store
+            .create_task_run_with_lease(CreateTaskRun {
+                session_id: session.id.clone(),
+                phase: TaskRunPhase::Implementing,
+                plan: "Guard old agent events".to_string(),
+                workspace_root: std::fs::canonicalize(&repository)
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string(),
+                git_common_dir: common_dir.to_string_lossy().to_string(),
+                branch,
+                head_commit: head,
+            })
+            .await
+            .unwrap();
+        let work_unit = store
+            .create_work_unit(CreateWorkUnit {
+                task_run_id: run.id.clone(),
+                title: "New epoch agent".to_string(),
+                owned_paths: vec!["code/pl-core/**".to_string()],
+                base_commit: run.base_commit.clone(),
+                worktree_path: repository
+                    .join(".pure/worktrees/reused-agent")
+                    .to_string_lossy()
+                    .to_string(),
+                branch: "pure-task-reused-agent".to_string(),
+                attempt: 1,
+            })
+            .await
+            .unwrap();
+        let work_unit = store
+            .update_work_unit(
+                &work_unit.id,
+                WorkUnitStatus::Running,
+                Some("agent-1".to_string()),
+            )
+            .await
+            .unwrap();
+        let outcome = store
+            .create_agent_outcome(CreateAgentOutcome {
+                task_run_id: run.id.clone(),
+                work_unit_id: Some(work_unit.id),
+                agent_id: "agent-1".to_string(),
+                owner_path: "root".to_string(),
+                initiated_by: "planner".to_string(),
+                requested_by_call_id: "call-new-epoch".to_string(),
+                role: "executor".to_string(),
+                status: AgentOutcomeStatus::Running,
+                attempt: 1,
+            })
+            .await
+            .unwrap();
+        runtime
+            .active_turns
+            .insert(
+                session.id.clone(),
+                turn_id.to_string(),
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let mut studio_events = runtime.events().subscribe();
+
+        old_event_tx.send(terminal_event("agent-1")).unwrap();
+        drop(old_event_tx);
+        old_drain.await.unwrap();
+
+        let after_old_event = store
+            .list_agent_outcomes(&run.id)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|record| record.id == outcome.id)
+            .unwrap();
+        assert_eq!(after_old_event, outcome);
+        assert!(launcher.launches.lock().await.is_empty());
+        assert!(
+            !runtime
+                .continuation_scheduler
+                .has_session(&session.id)
+                .await
+        );
+        assert!(matches!(
+            studio_events.try_recv(),
+            Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+        ));
+
+        runtime.active_turn_removed(&session.id, turn_id).await;
+        assert!(launcher.launches.lock().await.is_empty());
+
+        let current_turn_token = tokio_util::sync::CancellationToken::new();
+        runtime
+            .active_turns
+            .insert(session.id.clone(), turn_id.to_string(), current_turn_token)
+            .await
+            .unwrap();
+        let (current_event_tx, current_event_rx) = tokio::sync::broadcast::channel(8);
+        current_event_tx
+            .send(pl_trace::AgentEvent::AgentStateChanged {
+                id: "agent-1".to_string(),
+                path: "/root/agent-1".to_string(),
+                parent_path: Some("/root".to_string()),
+                role: "executor".to_string(),
+                task: "New epoch agent".to_string(),
+                status: AgentStatus::Completed,
+                summary: Some("done".to_string()),
+                depth: 1,
+                error: None,
+                reason: None,
+                budget_limit_kind: None,
+                budget_usage: None,
+                updated_at: 20,
+            })
+            .unwrap();
+        drop(current_event_tx);
+        runtime
+            .drain_prompt_agent_events_for_epoch(
+                session.id.clone(),
+                turn_id.to_string(),
+                runtime.lifecycle_epoch(),
+                current_event_rx,
+            )
+            .await;
+        assert_eq!(
+            store
+                .list_agent_outcomes(&run.id)
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|record| record.id == outcome.id)
+                .unwrap()
+                .status,
+            AgentOutcomeStatus::WaitingForDelivery
+        );
+        runtime.active_turn_removed(&session.id, turn_id).await;
+        let launches = launcher.wait_for_count(1).await;
+        assert_eq!(launches.len(), 1);
+        assert_eq!(
+            launches[0].request.reason,
+            ContinuationReason::AgentTerminal
+        );
+        remove_repository(repository);
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
 async fn failed_runtime_shutdown_clears_turns_scheduler_and_recovers_cleanly() {
     let repository = init_repository("continuation-failed-shutdown");
     let store = StudioStore::open_memory().await.unwrap();
