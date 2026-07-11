@@ -127,6 +127,23 @@ impl StudioRuntime {
         let _ = event_task.await;
         let result = result?;
         let trace_events = result.trace_events.clone();
+        #[cfg(test)]
+        if let Some(barrier) = &self.prompt_completion_barrier {
+            let _ = barrier.pause_once().await;
+        }
+        let _post_turn_guard = self.post_turn_lock.lock().await;
+        if !matches!(
+            self.runtime_snapshot().status,
+            crate::StudioRuntimeStatus::Ready
+        ) || !self.active_turns.contains_exact(session_id, &turn_id).await
+        {
+            let messages = self.store.load_messages(session_id).await?;
+            return Ok(StudioPromptOutcome {
+                result,
+                messages,
+                trace_events,
+            });
+        }
         match history_policy {
             PromptHistoryPolicy::Persist if session.revision() != previous_revision => {
                 self.store

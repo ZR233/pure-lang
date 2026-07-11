@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use tokio::sync::Mutex;
@@ -89,7 +89,7 @@ impl ContinuationScheduler {
                 state.active = None;
             }
             Some(active) => {
-                active.removed_turn_id = Some(turn_id.to_string());
+                active.removed_turn_ids.insert(turn_id.to_string());
                 return None;
             }
             None => {}
@@ -148,7 +148,7 @@ impl ContinuationScheduler {
             return None;
         }
         active.bound_turn_id = Some(turn_id.to_string());
-        if active.removed_turn_id.as_deref() != Some(turn_id) {
+        if !active.removed_turn_ids.contains(turn_id) {
             return None;
         }
         state.active = None;
@@ -215,7 +215,7 @@ struct SessionContinuation {
 struct ActiveClaim {
     claim: ContinuationClaim,
     bound_turn_id: Option<String>,
-    removed_turn_id: Option<String>,
+    removed_turn_ids: HashSet<String>,
 }
 
 fn claim_pending(state: &mut SessionContinuation) -> Option<ContinuationClaim> {
@@ -227,7 +227,7 @@ fn claim_pending(state: &mut SessionContinuation) -> Option<ContinuationClaim> {
     state.active = Some(ActiveClaim {
         claim: claim.clone(),
         bound_turn_id: None,
-        removed_turn_id: None,
+        removed_turn_ids: HashSet::new(),
     });
     Some(claim)
 }

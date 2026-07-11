@@ -52,6 +52,7 @@ impl StudioRuntime {
             active_turns: StudioActiveTurns::new(runtime_state),
             task_coordinator,
             lifecycle_lock: std::sync::Arc::new(tokio::sync::Mutex::new(())),
+            post_turn_lock: std::sync::Arc::new(tokio::sync::Mutex::new(())),
             continuation_scheduler: ContinuationScheduler::new(),
             continuation_launcher: None,
             #[cfg(test)]
@@ -62,6 +63,8 @@ impl StudioRuntime {
             continuation_launch_error_barrier: None,
             #[cfg(test)]
             prompt_completion_barrier: None,
+            #[cfg(test)]
+            prompt_finalization_barrier: None,
             #[cfg(test)]
             initialization_entry_barrier: None,
         }
@@ -171,11 +174,14 @@ impl StudioRuntime {
         if matches!(status, StudioRuntimeStatus::Stopped) {
             return Ok(self.runtime_snapshot());
         }
+        let post_turn_guard = self.post_turn_lock.lock().await;
         let _ = self
             .runtime_state
             .transition(StudioRuntimeStatus::ShuttingDown, None)?;
         self.continuation_scheduler.pause_and_clear().await;
-        self.active_turns.cancel_all_and_clear().await;
+        self.active_turns.cancel_all().await;
+        drop(post_turn_guard);
+        self.active_turns.wait_until_empty().await;
         self.task_coordinator.suspend();
         self.stop_mcp_health_watcher().await;
         self.mcp_runtime.shutdown().await;

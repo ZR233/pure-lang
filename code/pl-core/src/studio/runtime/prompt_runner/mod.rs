@@ -223,66 +223,75 @@ impl StudioRuntime {
             )
             .await;
         #[cfg(test)]
-        let completion_barrier = match &self.prompt_completion_barrier {
-            Some(barrier) if barrier.pause_once().await => Some(barrier.clone()),
-            Some(_) | None => None,
-        };
-        if !self.active_turn_removed(&session_id, &turn_id).await {
-            #[cfg(test)]
-            if let Some(barrier) = completion_barrier {
-                barrier.finish().await;
-            }
-            return;
-        }
-        let _ = self
-            .interactions
-            .cancel_transient_interactions(&session_id, "turn completed", emitter)
-            .await;
-        match result {
-            Ok(outcome) => {
-                self.emit_turn_completion(&session_id, &turn_id, &outcome)
+        let completion_barrier = self.prompt_completion_barrier.clone();
+        let _post_turn_guard = self.post_turn_lock.lock().await;
+        if self
+            .active_turns
+            .contains_exact(&session_id, &turn_id)
+            .await
+        {
+            if matches!(
+                self.runtime_snapshot().status,
+                crate::StudioRuntimeStatus::Ready
+            ) {
+                #[cfg(test)]
+                if let Some(barrier) = &self.prompt_finalization_barrier {
+                    barrier.pause_once().await;
+                }
+                let _ = self
+                    .interactions
+                    .cancel_transient_interactions(&session_id, "turn completed", emitter)
                     .await;
-                if let Some(lifecycle) = lifecycle {
-                    let (state, reason) = match outcome.result.status {
-                        TurnResultStatus::Completed => (PlanLifecycleState::Implemented, None),
-                        TurnResultStatus::Aborted => (
-                            PlanLifecycleState::ImplementationFailed,
-                            outcome
-                                .result
-                                .abort_reason
-                                .map(|reason| reason.as_str().to_string())
-                                .or_else(|| Some("turn aborted".to_string())),
-                        ),
-                        TurnResultStatus::Errored => (
-                            PlanLifecycleState::ImplementationFailed,
-                            outcome
-                                .result
-                                .error
-                                .or_else(|| Some("turn errored".to_string())),
-                        ),
-                    };
-                    let _ = self
-                        .append_plan_lifecycle_event(
-                            &lifecycle.session_id,
-                            &lifecycle.plan_id,
-                            state,
-                            Some(turn_id),
-                            reason,
-                        )
-                        .await;
+                match result {
+                    Ok(outcome) => {
+                        self.emit_turn_completion(&session_id, &turn_id, &outcome)
+                            .await;
+                        if let Some(lifecycle) = lifecycle {
+                            let (state, reason) = match outcome.result.status {
+                                TurnResultStatus::Completed => {
+                                    (PlanLifecycleState::Implemented, None)
+                                }
+                                TurnResultStatus::Aborted => (
+                                    PlanLifecycleState::ImplementationFailed,
+                                    outcome
+                                        .result
+                                        .abort_reason
+                                        .map(|reason| reason.as_str().to_string())
+                                        .or_else(|| Some("turn aborted".to_string())),
+                                ),
+                                TurnResultStatus::Errored => (
+                                    PlanLifecycleState::ImplementationFailed,
+                                    outcome
+                                        .result
+                                        .error
+                                        .or_else(|| Some("turn errored".to_string())),
+                                ),
+                            };
+                            let _ = self
+                                .append_plan_lifecycle_event(
+                                    &lifecycle.session_id,
+                                    &lifecycle.plan_id,
+                                    state,
+                                    Some(turn_id.clone()),
+                                    reason,
+                                )
+                                .await;
+                        }
+                    }
+                    Err(error) => {
+                        let _ = self
+                            .events
+                            .emit_turn(
+                                &session_id,
+                                &turn_id,
+                                StudioTurnStatus::Failed,
+                                Some(format!("{error:#}")),
+                            )
+                            .await;
+                    }
                 }
             }
-            Err(error) => {
-                let _ = self
-                    .events
-                    .emit_turn(
-                        &session_id,
-                        &turn_id,
-                        StudioTurnStatus::Failed,
-                        Some(format!("{error:#}")),
-                    )
-                    .await;
-            }
+            self.active_turn_removed(&session_id, &turn_id).await;
         }
         #[cfg(test)]
         if let Some(barrier) = completion_barrier {

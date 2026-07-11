@@ -149,6 +149,7 @@ pub struct StudioRuntime {
     active_turns: StudioActiveTurns,
     task_coordinator: std::sync::Arc<TaskCoordinator>,
     lifecycle_lock: std::sync::Arc<tokio::sync::Mutex<()>>,
+    post_turn_lock: std::sync::Arc<tokio::sync::Mutex<()>>,
     continuation_scheduler: ContinuationScheduler,
     continuation_launcher: Option<SharedContinuationLauncher>,
     #[cfg(test)]
@@ -159,6 +160,8 @@ pub struct StudioRuntime {
     continuation_launch_error_barrier: Option<continuation::ContinuationTestBarrier>,
     #[cfg(test)]
     prompt_completion_barrier: Option<continuation::PromptCompletionTestBarrier>,
+    #[cfg(test)]
+    prompt_finalization_barrier: Option<continuation::ContinuationTestBarrier>,
     #[cfg(test)]
     initialization_entry_barrier: Option<std::sync::Arc<tokio::sync::Barrier>>,
 }
