@@ -84,8 +84,111 @@ void registerStatusAccessibilityTests() {
       await tester.pump(const Duration(milliseconds: 150));
       expect(detailValue, findsNothing);
     });
+
+    testWidgets('context detail survives quick focus return', (tester) async {
+      final contextButton = await _pumpContextWithNextFocus(tester);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.space);
+      await tester.pump();
+      expect(find.text('42 / 100'), findsOneWidget);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pump(const Duration(milliseconds: 60));
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.pump();
+      expect(
+        tester
+            .getSemantics(contextButton)
+            .getSemanticsData()
+            .flagsCollection
+            .isFocused,
+        Tristate.isTrue,
+      );
+
+      await tester.pump(const Duration(milliseconds: 80));
+      expect(find.text('42 / 100'), findsOneWidget);
+    });
+
+    testWidgets('context detail stays open when focused pointer exits', (
+      tester,
+    ) async {
+      final contextButton = await _pumpContextWithNextFocus(tester);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.space);
+      await tester.pump();
+      expect(find.text('42 / 100'), findsOneWidget);
+
+      final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      addTearDown(gesture.removePointer);
+      await gesture.addPointer();
+      await gesture.moveTo(tester.getCenter(contextButton));
+      await tester.pump();
+      await gesture.moveTo(Offset.zero);
+      await tester.pump(const Duration(milliseconds: 150));
+
+      expect(
+        tester
+            .getSemantics(contextButton)
+            .getSemanticsData()
+            .flagsCollection
+            .isFocused,
+        Tristate.isTrue,
+      );
+      expect(find.text('42 / 100'), findsOneWidget);
+    });
+
+    testWidgets('context detail closes after focus leaves', (tester) async {
+      await _pumpContextWithNextFocus(tester);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.space);
+      await tester.pump();
+      expect(find.text('42 / 100'), findsOneWidget);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pump(const Duration(milliseconds: 150));
+      expect(find.text('42 / 100'), findsNothing);
+    });
   });
 }
+
+Future<Finder> _pumpContextWithNextFocus(WidgetTester tester) async {
+  await tester.pumpWidget(
+    _localizedApp(
+      home: Scaffold(
+        body: Align(
+          alignment: Alignment.bottomLeft,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const ContextUsageReadout(
+                key: _contextFocusTargetKey,
+                runtime: _contextRuntime,
+              ),
+              TextButton(onPressed: () {}, child: const Text('Next focus')),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+  await tester.pumpAndSettle();
+  final contextButton = find.descendant(
+    of: find.byKey(_contextFocusTargetKey),
+    matching: find.bySemanticsLabel('Context'),
+  );
+  expect(contextButton, findsOneWidget);
+  return contextButton;
+}
+
+const _contextFocusTargetKey = ValueKey('context-focus-target');
 
 const _contextRuntime = SessionRuntimeView(
   model: 'planner/local',

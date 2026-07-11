@@ -94,7 +94,9 @@ class _StatusDetailPopoverState extends State<StatusDetailPopover> {
   void _handleFocusChange(bool focused) {
     setState(() => _focused = focused);
     widget.onFocusChange?.call(focused);
-    if (!focused) {
+    if (focused) {
+      _cancelHide();
+    } else {
       _scheduleHide();
     }
   }
@@ -108,7 +110,7 @@ class _StatusDetailPopoverState extends State<StatusDetailPopover> {
   }
 
   void _show() {
-    _hideTimer?.cancel();
+    _cancelHide();
     if (_entry != null) {
       return;
     }
@@ -170,8 +172,17 @@ class _StatusDetailPopoverState extends State<StatusDetailPopover> {
   }
 
   void _scheduleHide() {
-    _hideTimer?.cancel();
+    if (_focused) {
+      _cancelHide();
+      return;
+    }
+    _cancelHide();
     _hideTimer = Timer(const Duration(milliseconds: 120), _hide);
+  }
+
+  void _cancelHide() {
+    _hideTimer?.cancel();
+    _hideTimer = null;
   }
 
   void _hide() {

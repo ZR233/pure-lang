@@ -301,17 +301,29 @@ void registerResponsiveLayoutTests() {
           matching: find.byType(Scrollable),
         );
         expect(wholePopoverScrollable, findsOneWidget);
+        final verticalScrollables = find.descendant(
+          of: detailCard,
+          matching: find.byWidgetPredicate(
+            (widget) =>
+                widget is Scrollable &&
+                (widget.axisDirection == AxisDirection.down ||
+                    widget.axisDirection == AxisDirection.up),
+          ),
+        );
         final position = tester
             .state<ScrollableState>(wholePopoverScrollable)
             .position;
         expect(position.maxScrollExtent, greaterThan(0));
         final initialOffset = position.pixels;
-        await tester.drag(
-          find.text('ACTIVE CAPABILITIES'),
-          const Offset(0, -120),
-        );
+        await tester.drag(find.text('reviewer 1'), const Offset(0, -120));
         await tester.pumpAndSettle();
-        expect(position.pixels, greaterThan(initialOffset));
+        expect(
+          (
+            scrollableCount: verticalScrollables.evaluate().length,
+            outerMoved: position.pixels > initialOffset,
+          ),
+          (scrollableCount: 1, outerMoved: true),
+        );
         expect(tester.takeException(), isNull);
       });
     }
