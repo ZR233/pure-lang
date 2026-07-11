@@ -115,9 +115,12 @@ released = git worktree remove + 删除分支 + 清空 AgentEntry.worktree
   creation state 允许 registration、path、branch 三者全部不存在。三者全部存在仍保护，
   任意部分存在仍 block。`Running`、`WaitingForDelivery`、`Delivered` 不允许 all-absent。
 - 对账幂等；重复启动不得误删已保护资源，也不得重新报告已经观察过的 terminal 事件。
-- 启动按全部已知 Task workspace 去重对账，而不是依附某个 active run；只有 blocked、
-  terminal 或 cleanup-pending 记录时也必须执行。active run 只有在所属 workspace 对账成功
-  后才能进入 Recovery continuation。
+- 启动先解析全部已知 Task workspace 的 canonical Git common directory，再按 common
+  directory 聚合 durable owner；同组只读取一次 Git inventory，并同时覆盖组内所有
+  canonical `.pure/worktrees` root。只有 blocked、terminal 或 cleanup-pending 记录时也必须
+  执行；active run 只有在所属 common-directory group 对账成功后才能进入 Recovery
+  continuation。任何已知 workspace（包括仅有 terminal owner 的 workspace）无法完成 Git
+  identity 预检时，必须在执行任一 group GC 前整体停止，禁止用不完整 owner 集清理。
 - inventory、registration remove、leaf remove 每一步都重新拒绝 symlink、Windows junction
   与 reparse ancestor，并证明 canonical leaf 严格位于 canonical `.pure/worktrees` root。
   `git worktree remove` 返回后、任何 fallback 文件系统删除之前必须再次证明，覆盖 Git

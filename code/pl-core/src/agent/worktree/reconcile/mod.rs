@@ -40,48 +40,80 @@ pub(crate) struct WorktreeReconciliation {
     pub(crate) cleaned_branches: usize,
 }
 
+#[cfg(test)]
 pub(crate) async fn reconcile_task_worktrees(
     repository: impl AsRef<Path>,
     durable: &[DurableWorktreeResource],
 ) -> Result<WorktreeReconciliation> {
-    let repository = repository.as_ref().to_path_buf();
+    reconcile_task_worktree_group(&[repository.as_ref().to_path_buf()], durable).await
+}
+
+pub(crate) async fn reconcile_task_worktree_group(
+    repositories: &[PathBuf],
+    durable: &[DurableWorktreeResource],
+) -> Result<WorktreeReconciliation> {
+    let repositories = repositories.to_vec();
     let durable = durable.to_vec();
-    tokio::task::spawn_blocking(move || reconcile_blocking(&repository, &durable))
+    tokio::task::spawn_blocking(move || reconcile_blocking(&repositories, &durable))
         .await
         .context("worktree reconciliation task failed")?
 }
 
 fn reconcile_blocking(
-    repository: &Path,
+    repositories: &[PathBuf],
     durable: &[DurableWorktreeResource],
 ) -> Result<WorktreeReconciliation> {
-    let inventory = inventory(repository)?;
-    let worktree_root = normalize_path(&repository.join(WORKTREE_ROOT));
-    validate_durable(repository, durable, &inventory, &worktree_root)?;
+    let representative = repositories
+        .first()
+        .context("worktree reconciliation requires a repository")?;
+    let roots = repositories
+        .iter()
+        .map(|repository| WorktreeRoot {
+            repository,
+            normalized: normalize_path(&repository.join(WORKTREE_ROOT)),
+        })
+        .collect::<Vec<_>>();
+    let inventory = inventory(representative)?;
+    validate_durable(representative, durable, &inventory, &roots)?;
 
-    let protected_paths = durable
+    let known_repositories = repositories
+        .iter()
+        .map(|repository| normalize_path(repository))
+        .collect::<HashSet<_>>();
+    let mut protected_paths = durable
         .iter()
         .filter(|resource| resource.disposition == DurableWorktreeDisposition::Protect)
         .map(|resource| normalize_path(&resource.path))
         .collect::<HashSet<_>>();
-    let protected_branches = durable
+    protected_paths.extend(known_repositories.iter().cloned());
+    let mut protected_branches = durable
         .iter()
         .filter(|resource| resource.disposition == DurableWorktreeDisposition::Protect)
         .map(|resource| resource.branch.clone())
         .collect::<HashSet<_>>();
+    protected_branches.extend(
+        inventory
+            .registrations
+            .iter()
+            .filter(|(path, _)| known_repositories.contains(*path))
+            .filter_map(|(_, registration)| registration.branch.clone()),
+    );
     let mut summary = WorktreeReconciliation::default();
 
     for registration in inventory.registrations.values() {
         let path_key = normalize_path(&registration.path);
-        if !path_is_below(&path_key, &worktree_root) || protected_paths.contains(&path_key) {
+        let Some(root) = root_for_path(&path_key, &roots) else {
+            continue;
+        };
+        if protected_paths.contains(&path_key) {
             continue;
         }
-        ensure_safe_existing_path(repository, &registration.path)?;
-        remove_registration(repository, &registration.path)?;
+        ensure_safe_existing_path(root.repository, &registration.path)?;
+        remove_registration(representative, &registration.path)?;
         pause_after_registration_remove(&registration.path);
         summary.cleaned_registrations += 1;
         if registration.path.exists() {
-            ensure_safe_existing_path(repository, &registration.path)?;
+            ensure_safe_existing_path(root.repository, &registration.path)?;
             std::fs::remove_dir_all(&registration.path).with_context(|| {
                 format!(
                     "failed to remove worktree leaf {}",
@@ -92,32 +124,37 @@ fn reconcile_blocking(
         }
     }
 
-    for path in leaf_directories(repository)? {
-        let path_key = normalize_path(&path);
-        if protected_paths.contains(&path_key) || inventory.registrations.contains_key(&path_key) {
-            continue;
+    for root in &roots {
+        for path in leaf_directories(root.repository)? {
+            let path_key = normalize_path(&path);
+            if protected_paths.contains(&path_key)
+                || inventory.registrations.contains_key(&path_key)
+            {
+                continue;
+            }
+            ensure_safe_existing_path(root.repository, &path)?;
+            std::fs::remove_dir_all(&path).with_context(|| {
+                format!("failed to remove orphan worktree leaf {}", path.display())
+            })?;
+            summary.cleaned_paths += 1;
         }
-        ensure_safe_existing_path(repository, &path)?;
-        std::fs::remove_dir_all(&path)
-            .with_context(|| format!("failed to remove orphan worktree leaf {}", path.display()))?;
-        summary.cleaned_paths += 1;
     }
 
     for branch in &inventory.branches {
         if protected_branches.contains(branch) {
             continue;
         }
-        delete_branch(repository, branch)?;
+        delete_branch(representative, branch)?;
         summary.cleaned_branches += 1;
     }
     Ok(summary)
 }
 
 fn validate_durable(
-    repository: &Path,
+    representative: &Path,
     durable: &[DurableWorktreeResource],
     inventory: &Inventory,
-    worktree_root: &str,
+    roots: &[WorktreeRoot<'_>],
 ) -> Result<()> {
     let mut paths = HashSet::new();
     let mut branches = HashSet::new();
@@ -126,17 +163,24 @@ fn validate_durable(
             bail!("invalid durable worktree owner {}", resource.task_run_id);
         }
         let path_key = normalize_path(&resource.path);
-        if !path_is_below(&path_key, worktree_root)
+        let root = root_for_path(&path_key, roots);
+        if root.is_none()
             || !paths.insert(path_key.clone())
             || !branches.insert(resource.branch.clone())
         {
+            let allowed_roots = roots
+                .iter()
+                .map(|root| root.normalized.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
             bail!(
-                "duplicate or unsafe durable worktree for {}: path={}, root={}",
+                "duplicate or unsafe durable worktree for {}: path={}, roots={}",
                 resource.task_run_id,
                 path_key,
-                worktree_root
+                allowed_roots
             );
         }
+        let root = root.context("durable worktree root disappeared during validation")?;
         if resource.disposition == DurableWorktreeDisposition::Cleanup {
             continue;
         }
@@ -159,9 +203,9 @@ fn validate_durable(
                 branch_exists
             );
         }
-        ensure_safe_existing_path(repository, &resource.path)?;
+        ensure_safe_existing_path(root.repository, &resource.path)?;
         if let Some(expected_head) = resource.expected_head.as_deref() {
-            let actual_head = git_output(repository, &["rev-parse", &resource.branch])?;
+            let actual_head = git_output(representative, &["rev-parse", &resource.branch])?;
             if actual_head.trim() != expected_head {
                 bail!(
                     "durable worktree branch tip drifted for task {}: expected {}, actual {}",
@@ -173,6 +217,21 @@ fn validate_durable(
         }
     }
     Ok(())
+}
+
+struct WorktreeRoot<'a> {
+    repository: &'a Path,
+    normalized: String,
+}
+
+fn root_for_path<'a, 'b>(
+    path: &str,
+    roots: &'a [WorktreeRoot<'b>],
+) -> Option<&'a WorktreeRoot<'b>> {
+    roots
+        .iter()
+        .filter(|root| path_is_below(path, &root.normalized))
+        .max_by_key(|root| root.normalized.len())
 }
 
 struct Inventory {

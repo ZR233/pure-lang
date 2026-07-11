@@ -1,24 +1,30 @@
+use std::path::PathBuf;
+
 use anyhow::Result;
 
 use super::{
-    AgentOutcomeRecord, TaskCoordinator, TaskRunPhase, TaskWorktreeCreationState, WorkUnitStatus,
+    AgentOutcomeRecord, TaskCoordinator, TaskRunPhase, TaskWorktreeCreationState,
+    TaskWorktreeOwnerSnapshot, WorkUnitStatus,
 };
 use crate::agent::worktree::{
     DurableWorktreeDisposition, DurableWorktreePresence, DurableWorktreeResource,
-    WorktreeReconciliation, reconcile_task_worktrees,
+    WorktreeReconciliation, reconcile_task_worktree_group,
 };
 
 impl TaskCoordinator {
-    pub(super) async fn reconcile_durable_worktrees(&self, workspace_root: &str) -> Result<()> {
-        let owners = self.store.list_task_worktree_owners(workspace_root).await?;
+    pub(super) async fn reconcile_durable_worktrees(
+        &self,
+        repositories: &[PathBuf],
+        owners: &[TaskWorktreeOwnerSnapshot],
+    ) -> Result<()> {
         let mut resources = Vec::new();
         for owner in owners {
             let terminal_cleanup = matches!(
                 owner.run.phase,
                 TaskRunPhase::Completed | TaskRunPhase::Failed | TaskRunPhase::Cancelled
             );
-            for resource in owner.resources {
-                let unit = resource.work_unit;
+            for resource in &owner.resources {
+                let unit = &resource.work_unit;
                 let outcome = resource.outcome.as_ref();
                 let disposition = if terminal_cleanup || unit.status == WorkUnitStatus::Merged {
                     DurableWorktreeDisposition::Cleanup
@@ -27,8 +33,8 @@ impl TaskCoordinator {
                 };
                 resources.push(DurableWorktreeResource {
                     task_run_id: owner.run.id.clone(),
-                    path: unit.worktree_path.into(),
-                    branch: unit.branch,
+                    path: unit.worktree_path.clone().into(),
+                    branch: unit.branch.clone(),
                     expected_head: protected_expected_head(disposition, outcome),
                     presence: match resource.creation_state {
                         TaskWorktreeCreationState::MustExist => DurableWorktreePresence::MustExist,
@@ -41,7 +47,7 @@ impl TaskCoordinator {
             }
         }
         let _summary: WorktreeReconciliation =
-            reconcile_task_worktrees(workspace_root, &resources).await?;
+            reconcile_task_worktree_group(repositories, &resources).await?;
         Ok(())
     }
 }

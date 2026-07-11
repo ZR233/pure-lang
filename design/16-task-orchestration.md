@@ -49,6 +49,10 @@ task generation 与 lifecycle epoch）。同一 session 的用户 root turn 与 
 agent；不同 session 完全隔离。Simple mode 仍使用 turn-local supervisor。planning
 generation 在该 session 首次创建 `TaskRun` 时绑定 run id；run 终态且旧 turn 已静止后，
 下一个 root turn 才安全轮换 generation，避免旧 agent path 泄漏到新任务。
+同一 session 的 supervisor 获取与 generation 轮换必须在稳定的 per-session cell 内单航班
+执行；停止旧 generation 成功后原子替换该 cell，失败则保留原 entry。全局 registry 锁
+不得跨越停止 supervisor 的异步等待，不同 session 应能并行；shutdown 与获取/轮换通过
+registry 生命周期门禁互斥，避免清空期间漏掉或覆盖 supervisor。
 
 Task lifecycle hook 在安装时绑定 Studio session，并通过该 per-session supervisor 边界选择
 持久 TaskRun；通用 `AgentSpawnLifecycleRequest.sessionId` 保持工具执行 turn scope 语义，
