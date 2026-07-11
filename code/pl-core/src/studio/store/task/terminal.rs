@@ -162,9 +162,10 @@ impl StudioStore {
                     active_work_unit.update(&tx).await?;
                 }
             }
-            Ok(TerminalAgentStateRecording::Projected(
-                projection_from_outcome(outcome)?,
-            ))
+            Ok(TerminalAgentStateRecording::Changed {
+                task_run_id: outcome.task_run_id.clone(),
+                projection: projection_from_outcome(outcome)?,
+            })
         }
         .await;
         match result {

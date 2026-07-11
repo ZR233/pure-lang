@@ -79,7 +79,7 @@ impl StudioRuntime {
         let cursor = match submit_result {
             Ok(cursor) => cursor as u64,
             Err(error) => {
-                self.active_turns.remove(&session_id).await;
+                self.active_turn_removed(&session_id).await;
                 return Err(error);
             }
         };
@@ -175,7 +175,7 @@ impl StudioRuntime {
             .insert(session_id.clone(), turn_id, cancellation_token)
             .await?;
         let outcome = self.run_prompt_inner(request).await;
-        self.active_turns.remove(&session_id).await;
+        self.active_turn_removed(&session_id).await;
         outcome
     }
 
@@ -215,7 +215,7 @@ impl StudioRuntime {
                 options,
             })
             .await;
-        self.active_turns.remove(&session_id).await;
+        self.active_turn_removed(&session_id).await;
         let _ = self
             .interactions
             .cancel_transient_interactions(&session_id, "turn completed", emitter)

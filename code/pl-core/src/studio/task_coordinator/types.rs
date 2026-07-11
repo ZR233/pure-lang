@@ -103,7 +103,8 @@ impl TaskRunPhase {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct TaskRunRecord {
     pub(crate) id: String,
     pub(crate) session_id: String,
@@ -120,7 +121,8 @@ pub(crate) struct TaskRunRecord {
     pub(crate) updated_at: i64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct BranchLeaseRecord {
     pub(crate) id: String,
     pub(crate) task_run_id: String,
@@ -142,7 +144,8 @@ pub(crate) struct CreateTaskRun {
     pub(crate) head_commit: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) enum WorkUnitStatus {
     Pending,
     Running,
@@ -180,7 +183,8 @@ impl WorkUnitStatus {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) enum AgentOutcomeStatus {
     Queued,
     Running,
@@ -215,7 +219,8 @@ impl AgentOutcomeStatus {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) enum MergeStatus {
     Pending,
     Conflicted,
@@ -326,7 +331,8 @@ pub(crate) struct AgentReview {
     pub(crate) findings: Vec<ReviewFinding>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct WorkUnitRecord {
     pub(crate) id: String,
     pub(crate) task_run_id: String,
@@ -342,7 +348,8 @@ pub(crate) struct WorkUnitRecord {
     pub(crate) updated_at: i64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct AgentOutcomeRecord {
     pub(crate) id: String,
     pub(crate) task_run_id: String,
@@ -375,7 +382,8 @@ pub(crate) enum DeliveryScopeResolution {
     MissingWorkUnit(AgentOutcomeRecord),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct MergeRecord {
     pub(crate) id: String,
     pub(crate) task_run_id: String,
@@ -391,7 +399,8 @@ pub(crate) struct MergeRecord {
     pub(crate) updated_at: i64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct ReviewRoundRecord {
     pub(crate) id: String,
     pub(crate) task_run_id: String,

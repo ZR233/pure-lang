@@ -235,6 +235,42 @@ async fn duplicate_terminal_event_does_not_reopen_or_duplicate_outcome() {
 }
 
 #[tokio::test]
+async fn terminal_recording_reports_only_committed_durable_changes() {
+    let fixture = DeliveryFixture::new("terminal-change-signal", vec!["src/**"]).await;
+    let change = crate::agent::AgentTerminalStateChange {
+        agent_id: fixture.subagent.id.clone(),
+        role: "executor".to_string(),
+        status: pl_protocol::AgentStatus::Errored,
+        summary: Some("failed".to_string()),
+        error: Some("boom".to_string()),
+    };
+
+    let changed = fixture
+        .coordinator
+        .record_terminal_agent_state(&fixture.session_id, &change)
+        .await
+        .unwrap();
+    let duplicate = fixture
+        .coordinator
+        .record_terminal_agent_state(&fixture.session_id, &change)
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        changed,
+        TerminalAgentStateRecording::Changed {
+            task_run_id,
+            projection: _
+        } if task_run_id == fixture.task_run_id
+    ));
+    assert!(matches!(
+        duplicate,
+        TerminalAgentStateRecording::Projected(_)
+    ));
+    fixture.cleanup();
+}
+
+#[tokio::test]
 async fn delayed_terminal_event_cannot_update_new_task_run_at_reused_path() {
     let repository = init_repository("delayed-old-terminal");
     let store = task_store(&repository).await;

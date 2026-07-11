@@ -13,6 +13,10 @@ use crate::studio::{
 };
 
 use super::StudioRuntime;
+#[cfg(test)]
+use super::continuation::ContinuationLauncher;
+use super::continuation::ContinuationReason;
+use super::continuation::ContinuationScheduler;
 
 impl StudioRuntime {
     pub async fn default_app() -> Result<Self> {
@@ -47,7 +51,21 @@ impl StudioRuntime {
             runtime_state: runtime_state.clone(),
             active_turns: StudioActiveTurns::new(runtime_state),
             task_coordinator,
+            continuation_scheduler: ContinuationScheduler::new(),
+            continuation_launcher: None,
         }
+    }
+
+    #[cfg(test)]
+    pub(super) fn with_runtime_state_and_continuation_launcher(
+        store: StudioStore,
+        config_store: ConfigStore,
+        runtime_state: StudioRuntimeState,
+        continuation_launcher: std::sync::Arc<dyn ContinuationLauncher>,
+    ) -> Self {
+        let mut runtime = Self::with_runtime_state(store, config_store, runtime_state);
+        runtime.continuation_launcher = Some(continuation_launcher);
+        runtime
     }
 
     pub fn store(&self) -> &StudioStore {
@@ -91,14 +109,20 @@ impl StudioRuntime {
                 .cancel_unfinished_turns("application restarted")
                 .await?;
             self.cancel_recovered_transient_interactions(turns).await?;
-            let _ = self.task_coordinator.recover_active_tasks().await?;
-            Ok::<(), anyhow::Error>(())
+            self.task_coordinator.recover_active_tasks().await
         }
         .await;
         match initialization {
-            Ok(()) => self
-                .runtime_state
-                .transition(StudioRuntimeStatus::Ready, None),
+            Ok(recovered_runs) => {
+                let ready = self
+                    .runtime_state
+                    .transition(StudioRuntimeStatus::Ready, None)?;
+                for run in recovered_runs {
+                    self.request_task_continuation(run.id, ContinuationReason::Recovery)
+                        .await;
+                }
+                Ok(ready)
+            }
             Err(error) => {
                 let message = format!("{error:#}");
                 let _ = self

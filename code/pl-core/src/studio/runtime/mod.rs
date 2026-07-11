@@ -17,6 +17,7 @@ use crate::studio::{
 };
 use crate::{InteractionCallback, TurnOptions};
 
+mod continuation;
 mod lifecycle;
 mod mcp_health;
 mod plan_confirmation;
@@ -25,6 +26,7 @@ mod prompt_runner;
 mod self_learning;
 mod session_service;
 
+use continuation::{ContinuationReason, ContinuationScheduler, SharedContinuationLauncher};
 use projection::{studio_agent_snapshot, studio_session_runtime};
 
 pub struct RunPromptRequest {
@@ -138,6 +140,8 @@ pub struct StudioRuntime {
     runtime_state: StudioRuntimeState,
     active_turns: StudioActiveTurns,
     task_coordinator: std::sync::Arc<TaskCoordinator>,
+    continuation_scheduler: ContinuationScheduler,
+    continuation_launcher: Option<SharedContinuationLauncher>,
 }
 
 impl StudioRuntime {
@@ -201,9 +205,18 @@ impl StudioRuntime {
                         ) {
                             continue;
                         }
-                        if let crate::studio::task_coordinator::TerminalAgentStateRecording::Projected(
-                            projection,
-                        ) = recording
+                        let (projection, continuation_task_run_id) = match recording {
+                            crate::studio::task_coordinator::TerminalAgentStateRecording::Changed {
+                                task_run_id,
+                                projection,
+                            } => (Some(projection), Some(task_run_id)),
+                            crate::studio::task_coordinator::TerminalAgentStateRecording::Projected(
+                                projection,
+                            ) => (Some(projection), None),
+                            crate::studio::task_coordinator::TerminalAgentStateRecording::Unhandled
+                            | crate::studio::task_coordinator::TerminalAgentStateRecording::Suppressed => (None, None),
+                        };
+                        if let Some(projection) = projection
                             && let AgentEvent::AgentStateChanged {
                                 status,
                                 summary,
@@ -214,6 +227,13 @@ impl StudioRuntime {
                             *status = projection.status;
                             *summary = projection.summary;
                             *error = projection.error;
+                        }
+                        if let Some(task_run_id) = continuation_task_run_id {
+                            self.request_task_continuation(
+                                task_run_id,
+                                ContinuationReason::AgentTerminal,
+                            )
+                            .await;
                         }
                     }
                     if let AgentEvent::SubAgentActivity {

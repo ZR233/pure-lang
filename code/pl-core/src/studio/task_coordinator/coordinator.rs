@@ -167,6 +167,22 @@ impl TaskCoordinator {
         }
     }
 
+    pub(crate) async fn block_continuation_failure(
+        &self,
+        task_run_id: &str,
+        reason: String,
+    ) -> Result<()> {
+        let run = self
+            .store
+            .read_task_run(task_run_id)
+            .await?
+            .context("task run not found while blocking continuation failure")?;
+        if !run.phase.is_terminal() {
+            self.block_run(&run, reason).await?;
+        }
+        Ok(())
+    }
+
     pub(super) async fn block_run(&self, run: &TaskRunRecord, reason: String) -> Result<()> {
         self.store
             .transition_task_run(&run.id, TaskRunPhase::Blocked, Some(reason))

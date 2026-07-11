@@ -208,6 +208,7 @@ async fn wait_for_no_active_turn(runtime: &StudioRuntime) {
 }
 
 mod config;
+mod continuation;
 mod lifecycle;
 mod plan_flows;
 mod self_learning;
