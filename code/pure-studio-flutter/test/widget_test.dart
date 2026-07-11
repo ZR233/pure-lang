@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -20,6 +21,8 @@ import 'package:pure_studio_flutter/src/features/timeline/timeline_view.dart';
 import 'package:pure_studio_flutter/src/l10n/app_localizations.dart';
 import 'package:pure_studio_flutter/src/rust/api/studio.dart' as frb;
 import 'package:pure_studio_flutter/src/shared/studio_chrome.dart';
+
+import 'support/responsive_visual_fixture.dart';
 
 part 'widget_test/controller_stream_tests.dart';
 part 'widget_test/reducer_recovery_tests.dart';

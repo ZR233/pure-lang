@@ -1,11 +1,5 @@
 part of '../widget_test.dart';
 
-const _responsiveSessionTitle =
-    'Responsive layout audit for an intentionally long Pure Studio session title';
-const _responsiveProviderName =
-    'DeepSeek Enterprise Provider With An Intentionally Long Display Name';
-const _responsiveProviderSubtitle =
-    'Primary workspace credential for a long-running production environment';
 const _responsiveActivityLabel = '1 skill · 1 MCP · 1 LSP · 2 agents';
 
 const _responsiveViewports = [
@@ -21,7 +15,7 @@ void registerResponsiveLayoutTests() {
         tester,
       ) async {
         _configureResponsiveView(tester, viewport.size);
-        final api = _FakeStudioApi(_responsiveShellState());
+        final api = _FakeStudioApi(responsiveVisualState());
 
         await tester.pumpWidget(
           ProviderScope(
@@ -32,12 +26,20 @@ void registerResponsiveLayoutTests() {
         await tester.pumpAndSettle();
 
         final titles = tester
-            .widgetList<Text>(find.text(_responsiveSessionTitle))
+            .widgetList<Text>(find.text(responsiveVisualSessionTitle))
             .toList();
         expect(titles, isNotEmpty);
         expect(titles.every((title) => title.maxLines == 1), isTrue);
         expect(
           titles.every((title) => title.overflow == TextOverflow.ellipsis),
+          isTrue,
+        );
+        final titleParagraphs = _renderParagraphs(
+          find.text(responsiveVisualSessionTitle),
+        );
+        expect(titleParagraphs, hasLength(titles.length));
+        expect(
+          titleParagraphs.every((paragraph) => paragraph.didExceedMaxLines),
           isTrue,
         );
         expect(
@@ -59,7 +61,7 @@ void registerResponsiveLayoutTests() {
         'activity popover stays clear of its trigger at ${viewport.name}',
         (tester) async {
           _configureResponsiveView(tester, viewport.size);
-          final api = _FakeStudioApi(_responsiveShellState());
+          final api = _FakeStudioApi(responsiveVisualState());
 
           await tester.pumpWidget(
             ProviderScope(
@@ -91,10 +93,14 @@ void registerResponsiveLayoutTests() {
             matching: find.byWidgetPredicate(_isLiftedDetailCard),
           );
           expect(detailCard, findsOneWidget);
+          final stableTriggerRect = tester.getRect(trigger);
           final detailRect = tester.getRect(detailCard);
           expect(_rectFitsViewport(detailRect, inset: 8), isTrue);
-          expect(detailRect.bottom, lessThanOrEqualTo(triggerRect.top - 8));
-          expect(detailRect.overlaps(triggerRect), isFalse);
+          expect(
+            detailRect.bottom,
+            lessThanOrEqualTo(stableTriggerRect.top - 8),
+          );
+          expect(detailRect.overlaps(stableTriggerRect), isFalse);
           expect(tester.takeException(), isNull);
         },
       );
@@ -103,9 +109,10 @@ void registerResponsiveLayoutTests() {
         tester,
       ) async {
         _configureResponsiveView(tester, viewport.size);
+        final providerState = responsiveVisualState();
         final api = _FakeStudioApi(
-          _responsiveProviderState(),
-          providerUsages: _providerListUsages,
+          providerState,
+          providerUsages: responsiveVisualProviderUsages,
         );
 
         await tester.pumpWidget(
@@ -118,27 +125,104 @@ void registerResponsiveLayoutTests() {
 
         expect(find.text('Providers'), findsWidgets);
         expect(find.text('Search providers'), findsOneWidget);
-        expect(find.byTooltip('Provider actions'), findsNWidgets(2));
+        expect(
+          find.byTooltip('Provider actions'),
+          findsNWidgets(providerState.providers.length),
+        );
         final providerTitle = tester.widget<Text>(
-          find.text(_responsiveProviderName),
+          find.text(responsiveVisualProviderName),
         );
         expect(providerTitle.maxLines, 1);
         expect(providerTitle.overflow, TextOverflow.ellipsis);
+        expect(
+          _renderParagraphs(
+            find.text(responsiveVisualProviderName),
+          ).single.didExceedMaxLines,
+          isTrue,
+        );
         final providerSubtitle = tester.widget<Text>(
-          find.text(_responsiveProviderSubtitle),
+          find.text(responsiveVisualProviderSubtitle),
         );
         expect(providerSubtitle.maxLines, 1);
         expect(providerSubtitle.overflow, TextOverflow.ellipsis);
-        final titleRect = tester.getRect(find.text(_responsiveProviderName));
+        expect(
+          _renderParagraphs(
+            find.text(responsiveVisualProviderSubtitle),
+          ).single.didExceedMaxLines,
+          isTrue,
+        );
+        final titleRect = tester.getRect(
+          find.text(responsiveVisualProviderName),
+        );
         final menuRect = tester.getRect(
           find.byTooltip('Provider actions').first,
         );
         expect(titleRect.overlaps(menuRect), isFalse);
+        expect(
+          tester
+              .getRect(find.text(responsiveVisualProviderSubtitle))
+              .overlaps(menuRect),
+          isFalse,
+        );
 
-        final zhipu = find.text('Zhipu Coding Plan');
-        await tester.ensureVisible(zhipu);
+        final providerScrollView = find.byType(SingleChildScrollView);
+        expect(providerScrollView, findsOneWidget);
+        final providerScrollable = find.descendant(
+          of: providerScrollView,
+          matching: find.byType(Scrollable),
+        );
+        expect(providerScrollable, findsOneWidget);
+        final scrollPosition = tester
+            .state<ScrollableState>(providerScrollable)
+            .position;
+        expect(scrollPosition.maxScrollExtent, greaterThan(0));
+        final initialScrollOffset = scrollPosition.pixels;
+
+        final bottomQuota = find.text('MCP quota');
+        await tester.scrollUntilVisible(
+          bottomQuota,
+          180,
+          scrollable: providerScrollable,
+        );
         await tester.pumpAndSettle();
-        expect(_rectFitsViewport(tester.getRect(zhipu)), isTrue);
+        expect(scrollPosition.pixels, greaterThan(initialScrollOffset));
+        final quotaRect = tester.getRect(bottomQuota);
+        final quotaBarRect = tester.getRect(
+          find.byType(LinearProgressIndicator).last,
+        );
+        expect(_rectFitsViewport(quotaRect), isTrue);
+        expect(_rectFitsViewport(quotaBarRect), isTrue);
+        expect(quotaBarRect.top, greaterThan(quotaRect.bottom));
+        expect(quotaBarRect.height, 5);
+
+        final targetMenu = find.byTooltip('Provider actions').last;
+        final targetMenuRect = tester.getRect(targetMenu);
+        expect(_rectFitsViewport(targetMenuRect), isTrue);
+        await tester.tap(targetMenu);
+        await tester.pumpAndSettle();
+
+        final popupScrollView = find.ancestor(
+          of: find.text('Set as default'),
+          matching: find.byType(SingleChildScrollView),
+        );
+        expect(popupScrollView, findsOneWidget);
+        expect(
+          _rectFitsViewport(tester.getRect(popupScrollView), inset: 8),
+          isTrue,
+        );
+        for (final label in const [
+          'Set as default',
+          'Refresh usage',
+          'Edit provider',
+          'Delete provider',
+        ]) {
+          final entry = find.descendant(
+            of: popupScrollView,
+            matching: find.text(label),
+          );
+          expect(entry, findsOneWidget);
+          expect(_rectFitsViewport(tester.getRect(entry), inset: 8), isTrue);
+        }
         expect(tester.takeException(), isNull);
       });
     }
@@ -152,81 +236,6 @@ void _configureResponsiveView(WidgetTester tester, Size size) {
   addTearDown(tester.view.resetDevicePixelRatio);
 }
 
-StudioState _responsiveShellState() {
-  final history = _sessionHistoryState(
-    projectId: 'project-1',
-    sessionId: 'session-1',
-    text:
-        'Responsive viewport checks keep the active conversation readable '
-        'without hiding timeline content.',
-  );
-  final planner = _stateWithPlannerModels();
-  final updatedAt = DateTime.fromMillisecondsSinceEpoch(1);
-  return history.copyWith(
-    projects: const [
-      StudioProject(
-        id: 'project-1',
-        name: 'pure-lang-responsive-workspace',
-        path:
-            r'C:\Users\zhoudongsheng\Documents\opensource\pure-lang\.worktrees\gui-refactor',
-      ),
-    ],
-    sessions: [
-      history.sessions.single.copyWith(title: _responsiveSessionTitle),
-    ],
-    providers: planner.providers,
-    defaultProviderId: 'deepseek',
-    roles: planner.roles,
-    runtime: const SessionRuntimeView(
-      model: 'planner/local',
-      contextTokens: 42000,
-      contextWindow: 100000,
-      totalTokens: 128000,
-      costLabel: 'CNY 12.34',
-      activeSkills: ['flutter-ui'],
-      activeMcpServers: ['dart'],
-      activeLspServers: ['rust-analyzer'],
-      agentCount: 2,
-    ),
-    agentsBySession: {
-      'session-1': {
-        'agent-reviewer': StudioAgentView(
-          id: 'agent-reviewer',
-          sessionId: 'session-1',
-          path: 'root/reviewer',
-          role: 'reviewer',
-          task: 'Audit responsive layout and visual geometry',
-          status: 'running',
-          summary: 'Checking the activity popover against its trigger.',
-          updatedAt: updatedAt,
-        ),
-        'agent-worker': StudioAgentView(
-          id: 'agent-worker',
-          sessionId: 'session-1',
-          path: 'root/worker',
-          role: 'worker',
-          task: 'Capture responsive screenshots',
-          status: 'completed',
-          updatedAt: updatedAt,
-        ),
-      },
-    },
-  );
-}
-
-StudioState _responsiveProviderState() {
-  final state = _providerListState();
-  return state.copyWith(
-    providers: [
-      state.providers.first.copyWith(
-        name: _responsiveProviderName,
-        subtitle: _responsiveProviderSubtitle,
-      ),
-      state.providers.last,
-    ],
-  );
-}
-
 bool _isLiftedDetailCard(Widget widget) {
   if (widget is! DecoratedBox) {
     return false;
@@ -235,6 +244,13 @@ bool _isLiftedDetailCard(Widget widget) {
   return decoration is BoxDecoration &&
       decoration.border != null &&
       (decoration.boxShadow?.isNotEmpty ?? false);
+}
+
+List<RenderParagraph> _renderParagraphs(Finder finder) {
+  return [
+    for (final element in finder.evaluate())
+      if (element.renderObject case final RenderParagraph paragraph) paragraph,
+  ];
 }
 
 bool _rectFitsViewport(Rect rect, {double inset = 0}) {
