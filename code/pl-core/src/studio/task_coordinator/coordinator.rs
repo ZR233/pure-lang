@@ -140,6 +140,27 @@ impl TaskCoordinator {
     pub(crate) async fn recover_active_tasks(&self) -> Result<Vec<TaskRunRecord>> {
         let mut recovered = Vec::new();
         for run in self.store.list_active_task_runs().await? {
+            let key = BranchKey::new(Path::new(&run.git_common_dir), &run.branch);
+            if let Err(error) = acquire_process_lease(&key, &run.id) {
+                self.block_run(&run, error.to_string()).await?;
+                continue;
+            }
+            self.owned_process_leases
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .insert(key, run.id.clone());
+            if let Err(error) = self
+                .store
+                .reconcile_task_agents_after_restart(&run.id)
+                .await
+            {
+                self.block_run(
+                    &run,
+                    format!("agent restart reconciliation failed: {error}"),
+                )
+                .await?;
+                continue;
+            }
             let snapshot = match inspect_repository(&run.workspace_root, true).await {
                 Ok(snapshot) => snapshot,
                 Err(error) => {
@@ -152,15 +173,6 @@ impl TaskCoordinator {
                 self.block_run(&run, reason.to_string()).await?;
                 continue;
             }
-            let key = BranchKey::new(&snapshot.git_common_dir, &snapshot.branch);
-            if let Err(error) = acquire_process_lease(&key, &run.id) {
-                self.block_run(&run, error.to_string()).await?;
-                continue;
-            }
-            self.owned_process_leases
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .insert(key, run.id.clone());
             recovered.push(run);
         }
         Ok(recovered)

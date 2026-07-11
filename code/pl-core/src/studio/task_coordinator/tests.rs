@@ -1583,6 +1583,83 @@ async fn coordinator_recovers_active_task_after_restart() {
     remove_repository(repository);
 }
 
+#[tokio::test]
+async fn recovery_blocks_run_before_continuation_when_agent_pairs_are_invalid() {
+    let repository = init_repository("recovery-agent-mismatch");
+    let store = task_store(&repository).await;
+    let session = task_session(&store, &repository).await;
+    let run = {
+        let coordinator = TaskCoordinator::new(store.clone());
+        coordinator
+            .start_confirmed_task(&session.id, "plan", &repository)
+            .await
+            .unwrap()
+    };
+    let unit = store
+        .create_work_unit(CreateWorkUnit {
+            task_run_id: run.id.clone(),
+            title: "mismatch".to_string(),
+            owned_paths: vec!["code/**".to_string()],
+            base_commit: run.base_commit.clone(),
+            worktree_path: repository
+                .join(".pure/worktrees/run/agent-a")
+                .to_string_lossy()
+                .to_string(),
+            branch: "pure-task-run-agent-a".to_string(),
+            attempt: 1,
+        })
+        .await
+        .unwrap();
+    store
+        .update_work_unit(
+            &unit.id,
+            WorkUnitStatus::Running,
+            Some("agent-a".to_string()),
+        )
+        .await
+        .unwrap();
+    store
+        .create_agent_outcome(CreateAgentOutcome {
+            task_run_id: run.id.clone(),
+            work_unit_id: Some(unit.id.clone()),
+            agent_id: "agent-b".to_string(),
+            owner_path: "/root".to_string(),
+            initiated_by: "planner".to_string(),
+            requested_by_call_id: "call".to_string(),
+            role: "executor".to_string(),
+            status: AgentOutcomeStatus::Running,
+            attempt: 1,
+        })
+        .await
+        .unwrap();
+
+    let recovered = TaskCoordinator::new(store.clone())
+        .recover_active_tasks()
+        .await
+        .unwrap();
+    let blocked = store.read_task_run(&run.id).await.unwrap().unwrap();
+
+    assert!(recovered.is_empty());
+    assert_eq!(blocked.phase, TaskRunPhase::Blocked);
+    assert!(
+        blocked
+            .status_message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("agent restart reconciliation failed")
+    );
+    assert_eq!(
+        store
+            .read_work_unit(&unit.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .status,
+        WorkUnitStatus::Running
+    );
+    remove_repository(repository);
+}
+
 async fn task_store(repository: &Path) -> StudioStore {
     let store = StudioStore::open_memory().await.unwrap();
     store.upsert_project(repository).await.unwrap();

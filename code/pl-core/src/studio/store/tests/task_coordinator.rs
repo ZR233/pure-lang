@@ -46,6 +46,272 @@ async fn task_run_and_branch_lease_are_created_atomically() {
 }
 
 #[tokio::test]
+async fn restart_reconciliation_cancels_transient_agents_and_preserves_delivery() {
+    let store = StudioStore::open_memory().await.unwrap();
+    let project = store.upsert_project("C:/work/task").await.unwrap();
+    let session = store
+        .create_session(&project.id, "Task", CompileMode::Task)
+        .await
+        .unwrap();
+    let (run, _) = store
+        .create_task_run_with_lease(create_input(&session.id))
+        .await
+        .unwrap();
+
+    for (name, unit_status, outcome_status) in [
+        (
+            "pending",
+            WorkUnitStatus::Pending,
+            AgentOutcomeStatus::Queued,
+        ),
+        (
+            "running",
+            WorkUnitStatus::Running,
+            AgentOutcomeStatus::Running,
+        ),
+        (
+            "waiting",
+            WorkUnitStatus::WaitingForDelivery,
+            AgentOutcomeStatus::WaitingForDelivery,
+        ),
+    ] {
+        create_recovery_executor(&store, &run, name, unit_status, outcome_status, None).await;
+    }
+    let delivery = AgentDelivery {
+        worktree: AgentWorktreeDelivery {
+            path: "C:/work/task/.pure/worktrees/run/delivered".to_string(),
+            branch: "pure-task-run-delivered".to_string(),
+        },
+        base_commit: run.base_commit.clone(),
+        head_commit: "2222222".to_string(),
+        changed_files: vec!["code/pl-core/src/lib.rs".to_string()],
+        verification_summary: "passed".to_string(),
+    };
+    create_recovery_executor(
+        &store,
+        &run,
+        "delivered",
+        WorkUnitStatus::Delivered,
+        AgentOutcomeStatus::Completed,
+        Some(delivery.clone()),
+    )
+    .await;
+    create_recovery_executor(
+        &store,
+        &run,
+        "failed",
+        WorkUnitStatus::Failed,
+        AgentOutcomeStatus::Failed,
+        None,
+    )
+    .await;
+    let explorer = store
+        .create_explorer_outcome(
+            &session.id,
+            CreateAgentOutcome {
+                task_run_id: run.id.clone(),
+                work_unit_id: None,
+                agent_id: "agent-explorer".to_string(),
+                owner_path: "/root".to_string(),
+                initiated_by: "planner".to_string(),
+                requested_by_call_id: "call-explorer".to_string(),
+                role: "explorer".to_string(),
+                status: AgentOutcomeStatus::Running,
+                attempt: 1,
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+    let first = store
+        .reconcile_task_agents_after_restart(&run.id)
+        .await
+        .unwrap();
+    let second = store
+        .reconcile_task_agents_after_restart(&run.id)
+        .await
+        .unwrap();
+    let units = store.list_work_units(&run.id).await.unwrap();
+    let outcomes = store.list_agent_outcomes(&run.id).await.unwrap();
+
+    assert_eq!(first.cancelled_work_units, 3);
+    assert_eq!(first.cancelled_outcomes, 4);
+    assert_eq!(second.cancelled_work_units, 0);
+    assert_eq!(second.cancelled_outcomes, 0);
+    assert!(
+        units
+            .iter()
+            .take(3)
+            .all(|unit| unit.status == WorkUnitStatus::Cancelled)
+    );
+    assert_eq!(units[3].status, WorkUnitStatus::Delivered);
+    assert_eq!(outcomes[3].delivery, Some(delivery));
+    assert_eq!(outcomes[3].status, AgentOutcomeStatus::Completed);
+    assert_eq!(outcomes[4].status, AgentOutcomeStatus::Failed);
+    assert_eq!(
+        outcomes
+            .iter()
+            .find(|outcome| outcome.id == explorer.id)
+            .unwrap()
+            .status,
+        AgentOutcomeStatus::Cancelled
+    );
+    assert!(matches!(
+        store
+            .record_terminal_agent_state(
+                &session.id,
+                &crate::agent::AgentTerminalStateChange {
+                    agent_id: "agent-running".to_string(),
+                    role: "executor".to_string(),
+                    status: pl_protocol::AgentStatus::Shutdown,
+                    summary: None,
+                    error: None,
+                },
+            )
+            .await
+            .unwrap(),
+        TerminalAgentStateRecording::Projected(_)
+    ));
+}
+
+#[tokio::test]
+async fn restart_reconciliation_rolls_back_every_change_on_pair_mismatch() {
+    let store = StudioStore::open_memory().await.unwrap();
+    let project = store.upsert_project("C:/work/task").await.unwrap();
+    let session = store
+        .create_session(&project.id, "Task", CompileMode::Task)
+        .await
+        .unwrap();
+    let (run, _) = store
+        .create_task_run_with_lease(create_input(&session.id))
+        .await
+        .unwrap();
+    create_recovery_executor(
+        &store,
+        &run,
+        "valid",
+        WorkUnitStatus::Running,
+        AgentOutcomeStatus::Running,
+        None,
+    )
+    .await;
+    let mismatch = store
+        .create_work_unit(CreateWorkUnit {
+            task_run_id: run.id.clone(),
+            title: "mismatch".to_string(),
+            owned_paths: vec!["code/mismatch/**".to_string()],
+            base_commit: run.base_commit.clone(),
+            worktree_path: "C:/work/task/.pure/worktrees/run/mismatch".to_string(),
+            branch: "pure-task-run-mismatch".to_string(),
+            attempt: 1,
+        })
+        .await
+        .unwrap();
+    store
+        .update_work_unit(
+            &mismatch.id,
+            WorkUnitStatus::Running,
+            Some("agent-mismatch-a".to_string()),
+        )
+        .await
+        .unwrap();
+    store
+        .create_agent_outcome(CreateAgentOutcome {
+            task_run_id: run.id.clone(),
+            work_unit_id: Some(mismatch.id),
+            agent_id: "agent-mismatch-b".to_string(),
+            owner_path: "/root".to_string(),
+            initiated_by: "planner".to_string(),
+            requested_by_call_id: "call-mismatch".to_string(),
+            role: "executor".to_string(),
+            status: AgentOutcomeStatus::Running,
+            attempt: 1,
+        })
+        .await
+        .unwrap();
+
+    let error = store
+        .reconcile_task_agents_after_restart(&run.id)
+        .await
+        .expect_err("mismatch must roll back the run-scoped transaction");
+
+    assert!(error.to_string().contains("do not match"));
+    assert!(
+        store
+            .list_work_units(&run.id)
+            .await
+            .unwrap()
+            .iter()
+            .all(|unit| unit.status == WorkUnitStatus::Running)
+    );
+    assert!(
+        store
+            .list_agent_outcomes(&run.id)
+            .await
+            .unwrap()
+            .iter()
+            .all(|outcome| outcome.status == AgentOutcomeStatus::Running)
+    );
+}
+
+async fn create_recovery_executor(
+    store: &StudioStore,
+    run: &TaskRunRecord,
+    name: &str,
+    unit_status: WorkUnitStatus,
+    outcome_status: AgentOutcomeStatus,
+    delivery: Option<AgentDelivery>,
+) {
+    let agent_id = format!("agent-{name}");
+    let unit = store
+        .create_work_unit(CreateWorkUnit {
+            task_run_id: run.id.clone(),
+            title: name.to_string(),
+            owned_paths: vec![format!("code/{name}/**")],
+            base_commit: run.base_commit.clone(),
+            worktree_path: format!("C:/work/task/.pure/worktrees/run/{name}"),
+            branch: format!("pure-task-run-{name}"),
+            attempt: 1,
+        })
+        .await
+        .unwrap();
+    store
+        .update_work_unit(&unit.id, unit_status, Some(agent_id.clone()))
+        .await
+        .unwrap();
+    let outcome = store
+        .create_agent_outcome(CreateAgentOutcome {
+            task_run_id: run.id.clone(),
+            work_unit_id: Some(unit.id),
+            agent_id,
+            owner_path: "/root".to_string(),
+            initiated_by: "planner".to_string(),
+            requested_by_call_id: format!("call-{name}"),
+            role: "executor".to_string(),
+            status: outcome_status,
+            attempt: 1,
+        })
+        .await
+        .unwrap();
+    if delivery.is_some() {
+        store
+            .update_agent_outcome(
+                &outcome.id,
+                UpdateAgentOutcome {
+                    status: outcome_status,
+                    summary: Some(name.to_string()),
+                    error: None,
+                    delivery,
+                    review: None,
+                },
+            )
+            .await
+            .unwrap();
+    }
+}
+
+#[tokio::test]
 async fn task_phase_and_expected_head_updates_are_guarded() {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project("C:/work/task").await.unwrap();

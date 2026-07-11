@@ -133,6 +133,12 @@ pub(crate) struct BranchLeaseRecord {
     pub(crate) updated_at: i64,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct RestartAgentReconciliation {
+    pub(crate) cancelled_work_units: usize,
+    pub(crate) cancelled_outcomes: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct DesignUpdateOutput {
