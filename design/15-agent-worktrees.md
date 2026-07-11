@@ -40,7 +40,8 @@ merge 在既有文档中零提及（`merge` 一词此前全部指 snapshot / con
   `git_shell_command` 的 `core.hooksPath=/dev/null` / `safe.directory` 安全注入。
   **不引入 `git2` / `tempfile` 依赖**，与仓库现有 git 工具风格一致。
 - `WorktreeManager`：持有 `Arc<dyn WorktreeBackend>` 与 repo_root，负责路径分配、
-  创建 / 提交 / 合并 / 释放编排，以及孤儿 worktree 的启动 GC。
+  创建 / 提交 / 合并 / 释放编排；独立的 typed reconciler 在 Studio 启动恢复阶段根据
+  durable owner inventory 对账孤儿 worktree。
 
 `AgentSupervisor` 持有 `Arc<WorktreeManager>`。默认 `WorktreeManager::disabled()` 为
 no-op，保持既有「subagent 共享 `workspace_root`」行为与全部既有测试不变；显式
