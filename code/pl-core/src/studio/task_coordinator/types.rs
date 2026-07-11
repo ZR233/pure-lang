@@ -428,6 +428,21 @@ pub(crate) struct CreateAgentOutcome {
     pub(crate) attempt: u32,
 }
 
+pub(crate) struct AllocateExecutor {
+    pub(crate) session_id: String,
+    pub(crate) title: String,
+    pub(crate) owned_paths: Vec<String>,
+    pub(crate) agent_id: String,
+    pub(crate) owner_path: String,
+    pub(crate) requested_by_call_id: String,
+}
+
+pub(crate) struct ExecutorAllocation {
+    pub(crate) run: TaskRunRecord,
+    pub(crate) work_unit: WorkUnitRecord,
+    pub(crate) outcome: AgentOutcomeRecord,
+}
+
 pub(crate) struct CreateMergeRecord {
     pub(crate) task_run_id: String,
     pub(crate) agent_id: String,

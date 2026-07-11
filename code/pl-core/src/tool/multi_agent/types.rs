@@ -71,6 +71,8 @@ pub(super) struct SpawnAgentArgs {
     pub fork_turns: Option<String>,
     #[serde(default, rename = "skillMentions")]
     pub _skill_mentions: Vec<String>,
+    #[serde(default)]
+    pub owned_paths: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

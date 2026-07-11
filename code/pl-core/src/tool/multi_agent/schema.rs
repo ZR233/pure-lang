@@ -134,6 +134,15 @@ impl AgentControlToolKind {
                     }),
                     false,
                 ),
+                (
+                    "ownedPaths",
+                    json!({
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Paths exclusively owned by a Task executor. Required for Task executor spawns."
+                    }),
+                    false,
+                ),
             ]),
             Self::SendInput => object_schema(vec![
                 (

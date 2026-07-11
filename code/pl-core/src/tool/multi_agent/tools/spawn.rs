@@ -60,6 +60,8 @@ impl Tool for SpawnAgentTool {
                         message: prompt.clone(),
                         role: role.clone(),
                         parent_path: Some(parent_path.clone()),
+                        session_id: input.session_id.clone(),
+                        owned_paths: args.owned_paths.clone(),
                     },
                     run_spec,
                 )

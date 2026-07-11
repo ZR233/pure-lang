@@ -184,6 +184,13 @@ impl PureCore {
         self.agent_tool_registrar = Some(registrar);
     }
 
+    pub(crate) fn set_agent_lifecycle_hook(
+        &mut self,
+        hook: std::sync::Arc<dyn crate::agent::AgentLifecycleHook>,
+    ) {
+        self.agent_supervisor.set_lifecycle_hook(hook);
+    }
+
     pub fn with_mcp_runtime(mut self, registry: crate::mcp::McpRuntimeRegistry) -> Self {
         self.mcp_runtime = Some(registry);
         self

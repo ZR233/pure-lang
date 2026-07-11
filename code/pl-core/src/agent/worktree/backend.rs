@@ -36,6 +36,7 @@ pub trait WorktreeBackend: fmt::Debug + Send + Sync {
         repo_root: &'a Path,
         branch: &'a str,
         target_path: &'a Path,
+        base_commit: &'a str,
     ) -> BoxFuture<'a, Result<(), WorktreeError>>;
 
     /// 移除 worktree；`force` 为真时忽略未提交改动。
@@ -144,16 +145,24 @@ impl WorktreeBackend for LocalWorktreeBackend {
         repo_root: &'a Path,
         branch: &'a str,
         target_path: &'a Path,
+        base_commit: &'a str,
     ) -> BoxFuture<'a, Result<(), WorktreeError>> {
         Box::pin(async move {
             self.policy
                 .validate_branch(branch)
                 .map_err(|_| WorktreeError::UnsafeBranch(branch.to_string()))?;
             let target = target_path.to_string_lossy().to_string();
-            let args: Vec<String> = ["worktree", "add", "-b", branch, target.as_str(), "HEAD"]
-                .iter()
-                .map(|item| item.to_string())
-                .collect();
+            let args: Vec<String> = [
+                "worktree",
+                "add",
+                "-b",
+                branch,
+                target.as_str(),
+                base_commit,
+            ]
+            .iter()
+            .map(|item| item.to_string())
+            .collect();
             self.run_git(repo_root, &args).await?;
             Ok(())
         })

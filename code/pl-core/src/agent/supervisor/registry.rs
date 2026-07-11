@@ -6,8 +6,8 @@ use crate::agent::worktree::{CloseDisposition, WorktreeRef};
 use pl_protocol::SubAgentActivityKind;
 
 use super::{
-    AgentHandle, AgentPath, AgentRecord, AgentRunSpec, AgentSpawnInput, AgentStatus,
-    AgentSupervisor,
+    AgentHandle, AgentPath, AgentRecord, AgentRunSpec, AgentSpawnInput, AgentSpawnLifecycleRequest,
+    AgentStatus, AgentSupervisor,
 };
 
 impl AgentSupervisor {
@@ -18,6 +18,7 @@ impl AgentSupervisor {
     ) -> Result<AgentHandle, PureError> {
         let parent_path = input
             .parent_path
+            .clone()
             .unwrap_or_else(|| AgentPath::ROOT.to_string());
         let (mut handle, record) = {
             let mut state = self.state.lock().await;
@@ -58,7 +59,7 @@ impl AgentSupervisor {
             let record = AgentRecord {
                 id: id.clone(),
                 path: path.to_string(),
-                parent_path: Some(parent_path),
+                parent_path: Some(parent_path.clone()),
                 role: input.role,
                 task: input.message,
                 status: AgentStatus::Queued,
@@ -89,10 +90,41 @@ impl AgentSupervisor {
         let call_id = run_spec.call_id.clone();
         self.notify_activity();
 
+        let lifecycle_request = AgentSpawnLifecycleRequest {
+            agent_id: handle.id.clone(),
+            agent_path: handle.path.clone(),
+            owner_path: parent_path,
+            session_id: input.session_id,
+            task_name: input.task_name,
+            role: record.role.clone(),
+            owned_paths: input.owned_paths,
+            requested_by_call_id: call_id.clone(),
+        };
+        let lifecycle_hook = self.lifecycle_hook();
+        let preparation = match &lifecycle_hook {
+            Some(hook) => match hook.prepare_spawn(&lifecycle_request).await {
+                Ok(preparation) => Some(preparation),
+                Err(error) => {
+                    self.rollback_registered_spawn(&record.path, &handle.id)
+                        .await;
+                    return Err(error);
+                }
+            },
+            None => None,
+        };
+
         // 为 subagent 分配独立 worktree（启用 worktree 隔离时），并把 subagent 的
         // 工具世界钉到 worktree 路径，实现文件级物理隔离。
-        if self.worktree.is_enabled() {
-            match self.worktree.create(&handle.id).await {
+        let worktree_result = match &preparation {
+            Some(preparation) => match preparation.worktree() {
+                Some(spec) => Some(self.worktree.create_from_spec(spec.clone()).await),
+                None => None,
+            },
+            None if self.worktree.is_enabled() => Some(self.worktree.create(&handle.id).await),
+            None => None,
+        };
+        if let Some(result) = worktree_result {
+            match result {
                 Ok(worktree_handle) => {
                     let workspace_root = worktree_handle.path.clone();
                     let worktree_ref = WorktreeRef::from(&worktree_handle);
@@ -106,14 +138,48 @@ impl AgentSupervisor {
                     handle.worktree = Some(worktree_ref);
                 }
                 Err(error) => {
-                    self.rollback_spawn(&record.path, &handle.id).await;
+                    let lifecycle_error = error.to_string();
+                    self.rollback_spawn_lifecycle(
+                        &record.path,
+                        &handle.id,
+                        lifecycle_hook.as_ref(),
+                        &lifecycle_request,
+                        preparation.as_ref(),
+                        &lifecycle_error,
+                    )
+                    .await;
                     return Err(error.into());
                 }
             }
         }
 
+        if let (Some(hook), Some(preparation)) = (&lifecycle_hook, &preparation)
+            && let Err(error) = hook.activate_spawn(&lifecycle_request, preparation).await
+        {
+            let lifecycle_error = error.to_string();
+            self.rollback_spawn_lifecycle(
+                &record.path,
+                &handle.id,
+                lifecycle_hook.as_ref(),
+                &lifecycle_request,
+                Some(preparation),
+                &lifecycle_error,
+            )
+            .await;
+            return Err(error);
+        }
+
         if let Err(error) = self.start_agent_turn(handle.id.clone(), run_spec).await {
-            self.rollback_spawn(&record.path, &handle.id).await;
+            let lifecycle_error = error.to_string();
+            self.rollback_spawn_lifecycle(
+                &record.path,
+                &handle.id,
+                lifecycle_hook.as_ref(),
+                &lifecycle_request,
+                preparation.as_ref(),
+                &lifecycle_error,
+            )
+            .await;
             return Err(error);
         }
         super::events::emit_agent_record(&event_tx, &record);
@@ -130,7 +196,22 @@ impl AgentSupervisor {
     }
 
     /// spawn 失败回滚：移除已注册 entry，并释放已分配的 worktree。
-    async fn rollback_spawn(&self, path: &str, agent_id: &str) {
+    async fn rollback_spawn_lifecycle(
+        &self,
+        path: &str,
+        agent_id: &str,
+        hook: Option<&std::sync::Arc<dyn super::AgentLifecycleHook>>,
+        request: &AgentSpawnLifecycleRequest,
+        preparation: Option<&super::AgentSpawnPreparation>,
+        error: &str,
+    ) {
+        self.rollback_registered_spawn(path, agent_id).await;
+        if let (Some(hook), Some(preparation)) = (hook, preparation) {
+            let _ = hook.rollback_spawn(request, preparation, error).await;
+        }
+    }
+
+    async fn rollback_registered_spawn(&self, path: &str, agent_id: &str) {
         let worktree = {
             let mut state = self.state.lock().await;
             let worktree = state

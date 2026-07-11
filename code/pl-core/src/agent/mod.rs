@@ -8,15 +8,16 @@ pub use pl_protocol::AgentStatus;
 pub use record::AgentRecord;
 pub(crate) use supervisor::emit_subagent_activity;
 pub use supervisor::{
-    AgentHandle, AgentInputBusyAction, AgentInputInitialAction, AgentInputQueue,
-    AgentInputStartAttempt, AgentInputSubmission, AgentInputTurnMode, AgentLifecycleStatusKind,
-    AgentMessage, AgentMessageMode, AgentMessageRequest, AgentRunSpec, AgentSpawnInput,
-    AgentStatusUpdate, AgentSupervisor, AgentToolRegistrar, AgentTurnPresence,
-    AgentTurnStartReadiness, AgentTurnStartSnapshot, AgentWaitCompletion, AgentWaitLoopError,
-    AgentWaitLoopOptions, AgentWaitLoopResult, AgentWaitOutcome, AgentWaitSnapshot,
-    wait_for_agent_completion,
+    AgentCloseDispositionKind, AgentCloseLifecycleRequest, AgentHandle, AgentInputBusyAction,
+    AgentInputInitialAction, AgentInputQueue, AgentInputStartAttempt, AgentInputSubmission,
+    AgentInputTurnMode, AgentLifecycleHook, AgentLifecycleStatusKind, AgentMessage,
+    AgentMessageMode, AgentMessageRequest, AgentRunSpec, AgentSpawnInput,
+    AgentSpawnLifecycleRequest, AgentSpawnPreparation, AgentStatusUpdate, AgentSupervisor,
+    AgentToolRegistrar, AgentTurnPresence, AgentTurnStartReadiness, AgentTurnStartSnapshot,
+    AgentWaitCompletion, AgentWaitLoopError, AgentWaitLoopOptions, AgentWaitLoopResult,
+    AgentWaitOutcome, AgentWaitSnapshot, wait_for_agent_completion,
 };
 pub use worktree::{
     CloseDisposition, CloseOutcome, LocalWorktreeBackend, MergeOutcome, WorktreeBackend,
-    WorktreeError, WorktreeHandle, WorktreeManager, WorktreeRef,
+    WorktreeCreateSpec, WorktreeError, WorktreeHandle, WorktreeManager, WorktreeRef,
 };

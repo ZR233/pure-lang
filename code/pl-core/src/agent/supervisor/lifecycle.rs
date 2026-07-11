@@ -4,7 +4,10 @@ use tokio::time::{Duration, timeout};
 
 use super::snapshot::{apply_status_update, clear_for_reactivation};
 use super::state::descendant_ids;
-use super::{AgentRecord, AgentStatus, AgentStatusUpdate, AgentSupervisor};
+use super::{
+    AgentCloseDispositionKind, AgentCloseLifecycleRequest, AgentRecord, AgentStatus,
+    AgentStatusUpdate, AgentSupervisor,
+};
 use crate::agent::worktree::{CloseDisposition, WorktreeHandle};
 
 const AGENT_SHUTDOWN_WAIT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -74,6 +77,26 @@ impl AgentSupervisor {
         disposition: CloseDisposition,
     ) -> Result<AgentRecord, PureError> {
         let agent_id = self.resolve_agent(current_path, target).await?;
+        if let Some(hook) = self.lifecycle_hook() {
+            let record =
+                self.record(&agent_id)
+                    .await
+                    .ok_or_else(|| PureError::ToolExecutionFailed {
+                        tool: "close_agent".to_string(),
+                        error: format!("target agent not found: {target}"),
+                    })?;
+            let disposition_kind = match &disposition {
+                CloseDisposition::Merge { .. } => AgentCloseDispositionKind::Merge,
+                CloseDisposition::Discard => AgentCloseDispositionKind::Discard,
+            };
+            hook.validate_close(&AgentCloseLifecycleRequest {
+                agent_id: record.id,
+                agent_path: record.path,
+                role: record.role,
+                disposition: disposition_kind,
+            })
+            .await?;
+        }
         let (record, mut shutdown) = {
             let mut state = self.state.lock().await;
             let entry =
