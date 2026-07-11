@@ -23,6 +23,57 @@ async fn migrations_drop_legacy_agent_and_handoff_tables() {
 }
 
 #[tokio::test]
+async fn migrations_create_task_coordinator_tables() {
+    let store = StudioStore::open_memory().await.unwrap();
+    let rows = store
+        .db
+        .query_all(Statement::from_string(
+            DatabaseBackend::Sqlite,
+            "SELECT name FROM sqlite_master
+             WHERE type = 'table'
+               AND name IN (
+                 'task_runs', 'work_units', 'agent_outcomes',
+                 'merge_records', 'review_rounds', 'branch_leases'
+               )
+             ORDER BY name"
+                .to_string(),
+        ))
+        .await
+        .unwrap();
+    let names = rows
+        .into_iter()
+        .map(|row| row.try_get::<String>("", "name").unwrap())
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        names,
+        vec![
+            "agent_outcomes".to_string(),
+            "branch_leases".to_string(),
+            "merge_records".to_string(),
+            "review_rounds".to_string(),
+            "task_runs".to_string(),
+            "work_units".to_string(),
+        ]
+    );
+
+    let columns = store
+        .db
+        .query_all(Statement::from_string(
+            DatabaseBackend::Sqlite,
+            "PRAGMA table_info(work_units)".to_string(),
+        ))
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|row| row.try_get::<String>("", "name").unwrap())
+        .collect::<Vec<_>>();
+    for required in ["base_commit", "worktree_path", "branch"] {
+        assert!(columns.iter().any(|column| column == required));
+    }
+}
+
+#[tokio::test]
 async fn migrations_prune_legacy_agent_timeline_events() {
     let db_path = unique_test_db_path("legacy-agent-timeline");
     remove_test_db_files(&db_path).await;

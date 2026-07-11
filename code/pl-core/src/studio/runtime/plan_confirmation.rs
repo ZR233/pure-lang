@@ -1,4 +1,4 @@
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use pl_protocol::{
     InteractionKind, InteractionPayload, InteractionRequest, InteractionResolution,
     InteractionScope, InteractionStatus, PlanConfirmationResolution, PlanLifecycleEvent,
@@ -87,6 +87,19 @@ impl StudioRuntime {
                 if plan_content.is_empty() {
                     bail!("plan content is empty");
                 }
+                let session = self
+                    .store
+                    .read_session(&session_id)
+                    .await?
+                    .context("task session not found")?;
+                let project = self
+                    .store
+                    .read_project(&session.project_id)
+                    .await?
+                    .context("task project not found")?;
+                self.task_coordinator
+                    .start_confirmed_task(&session_id, &plan_content, &project.path)
+                    .await?;
                 let prompt = format!("{IMPLEMENT_PLAN_CURRENT_SESSION_PREFIX}\n\n{plan_content}");
                 let _ = self
                     .submit_prompt(StudioSubmitPromptRequest {

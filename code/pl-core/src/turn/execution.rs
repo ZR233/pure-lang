@@ -86,10 +86,18 @@ mod tests {
         assert!(executor.allows_tool("write_file", Some(ToolEffect::WorkspaceWrite)));
         assert!(executor.allows_tool("bash", Some(ToolEffect::Process)));
         assert!(executor.allows_tool("dynamic", None));
+        assert!(executor.allows_tool("submit_delivery", Some(ToolEffect::BranchControl)));
+        assert!(!executor.allows_tool("task_merge_agent", Some(ToolEffect::BranchControl)));
+        assert!(!executor.allows_tool("task_update_design", Some(ToolEffect::BranchControl)));
+        assert!(!executor.allows_tool("task_complete", Some(ToolEffect::BranchControl)));
         assert!(!executor.allows_tool("spawn_agent", Some(ToolEffect::AgentControl)));
+
+        assert!(!planner.allows_tool("submit_delivery", Some(ToolEffect::BranchControl)));
+        assert!(!explorer.allows_tool("submit_delivery", Some(ToolEffect::BranchControl)));
 
         let reviewer = TurnExecutionProfile::for_subagent(CompileMode::Task, "reviewer");
         assert!(reviewer.allows_tool("review_exit", Some(ToolEffect::Read)));
+        assert!(!reviewer.allows_tool("submit_delivery", Some(ToolEffect::BranchControl)));
         assert!(!reviewer.allows_tool("dynamic", None));
         assert!(!reviewer.allows_tool("apply_patch", Some(ToolEffect::WorkspaceWrite)));
     }
@@ -103,6 +111,14 @@ mod tests {
                 .with_conflict_resolution()
                 .allows_tool("merge_resolve_file", Some(ToolEffect::ConflictWrite))
         );
+    }
+
+    #[test]
+    fn simple_root_executor_keeps_builtin_branch_control() {
+        let executor = TurnExecutionProfile::root(CompileMode::Simple);
+
+        assert!(executor.allows_tool("git_commit", Some(ToolEffect::BranchControl)));
+        assert!(executor.allows_tool("git_branch", Some(ToolEffect::BranchControl)));
     }
 }
 
@@ -181,7 +197,12 @@ impl TurnExecutionProfile {
         match self.role {
             TurnExecutionRole::Executor => match effect {
                 Some(ToolEffect::Read | ToolEffect::WorkspaceWrite | ToolEffect::Process) => true,
-                Some(ToolEffect::BranchControl) => true,
+                Some(ToolEffect::BranchControl) => {
+                    (self.root_owner && self.mode == CompileMode::Simple)
+                        || (!self.root_owner
+                            && self.mode == CompileMode::Task
+                            && name == "submit_delivery")
+                }
                 Some(ToolEffect::AgentControl) => {
                     self.root_owner && self.mode == CompileMode::Simple
                 }

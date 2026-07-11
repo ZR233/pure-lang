@@ -100,6 +100,9 @@ impl StudioRuntime {
             .with_lsp_runtime(self.lsp_runtime.clone());
         core.register_default_tools(workspace_root.clone(), Some(workspace_instructions.clone()))
             .await;
+        if mode == CompileMode::Task {
+            self.task_coordinator.install_tools(&mut core);
+        }
         core.register_available_mcp_tools().await?;
         if options.interaction_callback.is_none()
             && (options.requires_user_approval_callback() || mode == CompileMode::Task)

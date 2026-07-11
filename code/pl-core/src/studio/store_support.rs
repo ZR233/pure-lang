@@ -32,6 +32,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../../migrations/0021_message_part_activity_group.sql"),
     include_str!("../../migrations/0022_drop_legacy_agent_and_handoff_tables.sql"),
     include_str!("../../migrations/0023_prune_legacy_agent_timeline_events.sql"),
+    include_str!("../../migrations/0024_task_coordinator.sql"),
 ];
 
 pub(super) async fn insert_message_with_tx(

@@ -10,6 +10,7 @@ mod runtime_usage;
 mod session;
 mod settings;
 mod skill;
+mod task;
 mod turn;
 
 pub use attachment::studio_attachment;
