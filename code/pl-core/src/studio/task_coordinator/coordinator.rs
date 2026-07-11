@@ -3,6 +3,7 @@ use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
 use anyhow::{Context, Result, bail};
+use tokio::sync::MutexGuard;
 
 use super::git::{RepositorySnapshot, inspect_repository};
 use super::{CreateTaskRun, TaskRunPhase, TaskRunRecord};
@@ -41,6 +42,11 @@ pub(crate) struct TaskCoordinator {
     pub(super) fail_design_compensation: std::sync::atomic::AtomicBool,
 }
 
+/// 持有期间串行化任务分支变更，并阻止 executor 基于中间 HEAD 分配。
+pub(crate) struct BranchMutationGuard<'a> {
+    _guard: MutexGuard<'a, ()>,
+}
+
 impl TaskCoordinator {
     pub(crate) fn new(store: StudioStore) -> Self {
         Self {
@@ -52,6 +58,12 @@ impl TaskCoordinator {
             design_after_commit_barrier: Mutex::new(None),
             #[cfg(test)]
             fail_design_compensation: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    pub(crate) async fn lock_branch_mutation(&self) -> BranchMutationGuard<'_> {
+        BranchMutationGuard {
+            _guard: self.branch_mutation_lock.lock().await,
         }
     }
 

@@ -129,11 +129,22 @@ focused design commit 成功后，SQLite 在一个事务中以旧 HEAD 为 CAS�
 不得覆盖外部变化。durable CAS 成功前 allocation phase gate 始终关闭，工具成功本身
 不启动 continuation。
 
+`git commit` / `git revert` 返回成功即进入 post-commit 边界；此后任何 HEAD、branch、
+status 或 diff 检查失败都不得再调用 pre-commit path rollback。coordinator 只接受能证明
+“当前 named branch HEAD 是本次提交”的 commit：它必须以旧 `expectedHead` 为唯一父提交，
+commit diff 必须精确等于预先验证的 design paths，且 index/worktree 没有 hook 或外部注入。
+不能完成该证明，或发现外部 clean commit、branch 变化、dirty workspace 时，必须 block
+精确 run 并保留现场；只有 exact commit 已证明且 HEAD/工作区仍安全时才能补偿。
+
 尚无 accepted source merge 且 base 之后只有本任务 design commit 时，取消操作通过
 创建受控 `git revert` commit 撤销设计（不 hard reset、不改写历史），再以同一事务推进
 任务与 lease 的 `expectedHead`，之后才可 terminalize。若已经接受 source merge，只有
 `designCommit == expectedHead` 才表示 planner 已完成最后一次设计一致性更新；部分实施
 失败也必须以最后一次 design consistency commit 收束后才能进入终态。
+取消 revert 使用同一 exact-commit 证明与 post-commit 补偿规则。内部 API 允许未来
+`task_stop` 显式持有 branch mutation guard，在同一锁作用域内完成 revert、durable HEAD
+推进和 terminalization；executor allocation 也需经过该锁，因此不会在 revert 与终态
+写入之间基于仍可分配的 phase 创建 work unit。
 
 当前编码轮全部交付合并后，planner 调用 `task_request_review` 间接创建只读 reviewer。
 reviewer 初始上下文包含 plan、任务 diff、代理结果、验证摘要和 design 文件索引，不

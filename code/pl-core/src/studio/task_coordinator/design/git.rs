@@ -6,7 +6,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use tokio::process::Command;
 
-use super::super::git::inspect_repository;
+use super::super::git::{changed_files_between, inspect_repository};
 
 const GIT_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -57,6 +57,31 @@ pub(super) async fn collect_unstaged_and_untracked(workspace: &Path) -> Result<V
 
 pub(super) async fn cached_changed_files(workspace: &Path) -> Result<Vec<String>> {
     git_paths(workspace, &["diff", "--cached", "--name-only", "-z"]).await
+}
+
+pub(super) async fn read_head(workspace: &Path) -> Result<String> {
+    let output = run_git_checked(workspace, &["rev-parse", "HEAD"]).await?;
+    Ok(String::from_utf8(output.stdout)?.trim().to_string())
+}
+
+pub(super) async fn validate_exact_commit(
+    workspace: &Path,
+    commit: &str,
+    previous_head: &str,
+    expected_paths: &[String],
+) -> Result<Vec<String>> {
+    ensure_single_parent(workspace, commit, previous_head).await?;
+    let changed_files = changed_files_between(workspace, previous_head, commit).await?;
+    let actual = changed_files.iter().collect::<BTreeSet<_>>();
+    let expected = expected_paths.iter().collect::<BTreeSet<_>>();
+    if actual != expected {
+        bail!(
+            "commit diff does not match the validated design paths: expected {:?}, actual {:?}",
+            expected_paths,
+            changed_files
+        );
+    }
+    Ok(changed_files)
 }
 
 pub(super) async fn git_paths(workspace: &Path, args: &[&str]) -> Result<Vec<String>> {
