@@ -21,6 +21,15 @@ pub struct WorktreeHandle {
     pub branch: String,
 }
 
+/// 创建 worktree 时由宿主固定的仓库、路径、分支和基线。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorktreeCreateSpec {
+    pub repo_root: PathBuf,
+    pub path: PathBuf,
+    pub branch: String,
+    pub base_commit: String,
+}
+
 /// 模型可见的 worktree 引用，用于 spawn 输出与 agent record。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -144,8 +153,37 @@ impl WorktreeManager {
     /// 创建 agent 的 worktree。
     pub async fn create(&self, agent_id: &str) -> Result<WorktreeHandle, WorktreeError> {
         let repo_root = self.require_repo_root()?;
-        let branch = Self::branch_for(agent_id);
-        let path = Self::allocate_path(&repo_root, agent_id);
+        self.create_from_spec(WorktreeCreateSpec {
+            branch: Self::branch_for(agent_id),
+            path: Self::allocate_path(&repo_root, agent_id),
+            repo_root,
+            base_commit: "HEAD".to_string(),
+        })
+        .await
+    }
+
+    /// 按宿主提供的精确 spec 创建 worktree。
+    pub async fn create_from_spec(
+        &self,
+        mut spec: WorktreeCreateSpec,
+    ) -> Result<WorktreeHandle, WorktreeError> {
+        let configured_root = self.require_repo_root()?;
+        if spec.repo_root != configured_root {
+            return Err(WorktreeError::InvalidRepoRoot(format!(
+                "spawn spec root {} does not match configured root {}",
+                spec.repo_root.display(),
+                configured_root.display()
+            )));
+        }
+        let worktree_root = git_compatible_path(configured_root.join(WORKTREE_DIR));
+        spec.path = git_compatible_path(spec.path);
+        if spec.path.strip_prefix(&worktree_root).is_err() || spec.base_commit.trim().is_empty() {
+            return Err(WorktreeError::InvalidRepoRoot(
+                "spawn spec must use a non-empty base and a path below .pure/worktrees".to_string(),
+            ));
+        }
+        let path = spec.path;
+        let branch = spec.branch;
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent)
                 .await
@@ -153,7 +191,7 @@ impl WorktreeManager {
         }
         self.inner
             .backend
-            .create(&repo_root, &branch, &path)
+            .create(&configured_root, &branch, &path, &spec.base_commit)
             .await?;
         Ok(WorktreeHandle { path, branch })
     }
@@ -252,5 +290,19 @@ impl WorktreeManager {
             .get()
             .cloned()
             .ok_or(WorktreeError::Disabled)
+    }
+}
+
+pub(crate) fn git_compatible_path(path: PathBuf) -> PathBuf {
+    if !cfg!(windows) {
+        return path;
+    }
+    let path = path.to_string_lossy();
+    if let Some(path) = path.strip_prefix(r"\\?\UNC\") {
+        PathBuf::from(format!(r"\\{path}"))
+    } else if let Some(path) = path.strip_prefix(r"\\?\") {
+        PathBuf::from(path)
+    } else {
+        PathBuf::from(path.as_ref())
     }
 }

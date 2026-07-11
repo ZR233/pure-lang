@@ -12,6 +12,64 @@ use super::state::AgentEntry;
 use super::*;
 use crate::turn::{CompileMode, TurnBudget, TurnOptions};
 
+#[derive(Debug)]
+struct RecordingSpawnLifecycleHook {
+    calls: Arc<Mutex<Vec<String>>>,
+}
+
+impl AgentLifecycleHook for RecordingSpawnLifecycleHook {
+    fn prepare_spawn<'a>(
+        &'a self,
+        request: &'a AgentSpawnLifecycleRequest,
+    ) -> Pin<
+        Box<dyn std::future::Future<Output = Result<AgentSpawnPreparation, PureError>> + Send + 'a>,
+    > {
+        Box::pin(async move {
+            self.calls
+                .lock()
+                .await
+                .push(format!("prepare:{}", request.agent_id));
+            Ok(AgentSpawnPreparation::without_worktree())
+        })
+    }
+
+    fn activate_spawn<'a>(
+        &'a self,
+        request: &'a AgentSpawnLifecycleRequest,
+        _preparation: &'a AgentSpawnPreparation,
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<(), PureError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.calls
+                .lock()
+                .await
+                .push(format!("activate:{}", request.agent_id));
+            Ok(())
+        })
+    }
+
+    fn rollback_spawn<'a>(
+        &'a self,
+        request: &'a AgentSpawnLifecycleRequest,
+        _preparation: &'a AgentSpawnPreparation,
+        _error: &'a str,
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<(), PureError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.calls
+                .lock()
+                .await
+                .push(format!("rollback:{}", request.agent_id));
+            Ok(())
+        })
+    }
+
+    fn validate_close<'a>(
+        &'a self,
+        _request: &'a AgentCloseLifecycleRequest,
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<(), PureError>> + Send + 'a>> {
+        Box::pin(async { Ok(()) })
+    }
+}
+
 fn agent_record(id: &str, status: AgentStatus) -> AgentRecord {
     AgentRecord {
         id: id.to_string(),
@@ -563,6 +621,42 @@ async fn followup_capacity_failure_does_not_mutate_agent_mailbox_or_status() {
     assert_eq!(entry.record.status, AgentStatus::Waiting);
     assert!(entry.mailbox.is_empty());
     assert!(entry.task.is_none());
+}
+
+#[tokio::test]
+async fn spawn_start_failure_rolls_back_lifecycle_and_supervisor_entry() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let supervisor = AgentSupervisor::default();
+    supervisor.set_lifecycle_hook(Arc::new(RecordingSpawnLifecycleHook {
+        calls: Arc::clone(&calls),
+    }));
+    supervisor.configure_limits(1, 1).await;
+    let _active_guard = supervisor.reserve_agent_execution().unwrap();
+
+    let result = supervisor
+        .spawn_agent(
+            AgentSpawnInput {
+                task_name: "implement".to_string(),
+                message: "implement".to_string(),
+                role: "executor".to_string(),
+                parent_path: Some(AgentPath::ROOT.to_string()),
+                session_id: "session-1".to_string(),
+                owned_paths: vec!["code/pl-core/**".to_string()],
+            },
+            test_run_spec("implement"),
+        )
+        .await;
+
+    assert!(matches!(result, Err(PureError::AgentLimitReached { .. })));
+    assert!(supervisor.list_agents(None).await.is_empty());
+    assert_eq!(
+        calls.lock().await.clone(),
+        vec![
+            "prepare:agent-1".to_string(),
+            "activate:agent-1".to_string(),
+            "rollback:agent-1".to_string(),
+        ]
+    );
 }
 
 #[tokio::test]

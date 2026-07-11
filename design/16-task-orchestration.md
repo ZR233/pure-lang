@@ -46,6 +46,16 @@ coordinator 后台监控代理。代理终结、merge 冲突或 reviewer 返回�
 同一 Git common directory 与分支只允许一个写入任务。`BranchLease` 是进程内所有权，
 `expectedHead` CAS 和工作区清洁检查负责检测用户或外部进程的变化。
 
+通用 agent supervisor 通过生命周期 hook 与精确 worktree spec 接入 Task 编排，
+不依赖 Studio store 或 coordinator 类型。Task coordinator 在 agent id 分配后先以事务
+创建 Pending `WorkUnit` 与 `AgentOutcome`，并返回固定的 repository、path、branch
+和 base commit；supervisor 按该 spec 创建 worktree，coordinator 再以事务把两条记录
+激活为 Running，之后才允许子 turn 启动。只有 `implementing | reworking` 阶段允许
+分配 executor。并行 allocation 在进程内串行化检查 attempt、并发数和 ownedPaths 后再
+事务写入；prepare 事务未提交时不留记录，随后 worktree 创建、持久化激活或 turn
+启动失败时删除 agent registry entry、worktree 与分支，并将 WorkUnit/Outcome
+事务性标记为 Failed，由 Outcome 保存错误供 planner 与重启恢复审计。
+
 ## Executor 交付
 
 executor 必须先自行 commit，并调用：
@@ -62,6 +72,9 @@ branch；交付校验不得改用随后可能因其他 executor 合并而推进�
 且 caller workspace 和 branch 必须与固定记录精确匹配。rename/copy 同时校验 source
 与 destination，delete 校验被删除的原路径。单个 work unit 最多尝试三次，同时运行
 的 executor 最多四个。
+
+Task executor 的通用 `close_agent merge=true` 必须在进入 worktree merge 路径前拒绝；
+关闭或取消只允许丢弃 worktree。Task worktree 不得调用通用的隐式 `commit_all`。
 
 worktree 路径和分支包含 task run id：
 

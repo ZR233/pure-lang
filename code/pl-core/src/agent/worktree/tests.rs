@@ -4,7 +4,7 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use super::{CloseDisposition, CloseOutcome, WorktreeError, WorktreeManager};
+use super::{CloseDisposition, CloseOutcome, WorktreeCreateSpec, WorktreeError, WorktreeManager};
 
 /// 临时仓库目录序号，避免并发测试因时间戳碰撞命中同一目录。
 static REPO_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -42,6 +42,16 @@ fn run_git(cwd: &Path, args: &[&str]) {
     );
 }
 
+fn git_output(cwd: &Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .current_dir(cwd)
+        .args(args)
+        .output()
+        .expect("git binary is required for worktree tests");
+    assert!(output.status.success());
+    String::from_utf8(output.stdout).unwrap().trim().to_string()
+}
+
 #[tokio::test]
 async fn disabled_manager_create_returns_disabled() {
     let manager = WorktreeManager::disabled();
@@ -58,6 +68,44 @@ async fn create_adds_worktree_on_new_branch() {
     assert_eq!(handle.branch, "pure-agent-agent-1");
     // worktree checkout 出主仓库的初始文件。
     assert!(handle.path.join("README.md").exists());
+    fs::remove_dir_all(repo).ok();
+}
+
+#[tokio::test]
+async fn create_from_spec_uses_exact_path_branch_and_base_commit() {
+    let repo = temp_git_repo();
+    let base_commit = git_output(&repo, &["rev-parse", "HEAD"]);
+    fs::write(repo.join("later.txt"), "later\n").unwrap();
+    run_git(&repo, &["add", "-A"]);
+    run_git(&repo, &["commit", "-m", "later"]);
+    let task_path = repo
+        .join(".pure")
+        .join("worktrees")
+        .join("task-run-1")
+        .join("agent-7");
+    let manager = WorktreeManager::local(repo.clone());
+
+    let handle = manager
+        .create_from_spec(WorktreeCreateSpec {
+            repo_root: repo.clone(),
+            path: task_path.clone(),
+            branch: "pure-task-run-1-agent-7".to_string(),
+            base_commit: base_commit.clone(),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(handle.path, task_path);
+    assert_eq!(handle.branch, "pure-task-run-1-agent-7");
+    assert_eq!(
+        git_output(&handle.path, &["rev-parse", "HEAD"]),
+        base_commit
+    );
+    assert!(!handle.path.join("later.txt").exists());
+    manager
+        .close(&handle, CloseDisposition::Discard)
+        .await
+        .unwrap();
     fs::remove_dir_all(repo).ok();
 }
 

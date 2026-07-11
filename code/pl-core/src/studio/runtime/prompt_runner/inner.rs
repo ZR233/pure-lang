@@ -101,7 +101,7 @@ impl StudioRuntime {
         core.register_default_tools(workspace_root.clone(), Some(workspace_instructions.clone()))
             .await;
         if mode == CompileMode::Task {
-            self.task_coordinator.install_tools(&mut core);
+            self.task_coordinator.install_tools(&mut core, session_id);
         }
         core.register_available_mcp_tools().await?;
         if options.interaction_callback.is_none()

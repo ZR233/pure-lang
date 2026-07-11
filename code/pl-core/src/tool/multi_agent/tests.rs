@@ -820,6 +820,22 @@ async fn host_agent_control_backend_display_error_maps_to_tool_error() {
     ));
 }
 
+#[test]
+fn agent_control_spawn_request_accepts_owned_paths() {
+    let request =
+        serde_json::from_value::<crate::tool::AgentControlSpawnRequest>(serde_json::json!({
+            "taskName": "implement",
+            "message": "implement task",
+            "agentType": "executor",
+            "ownedPaths": ["code/pl-core/**", "design/16-task-orchestration.md"]
+        }));
+
+    assert!(
+        request.is_ok(),
+        "ownedPaths should be part of the canonical spawn request"
+    );
+}
+
 #[tokio::test]
 async fn spawn_agent_enforces_mode_owner_and_depth_one_roles() {
     let spawn_tool = crate::tool::AgentControlTool::new(
@@ -879,6 +895,40 @@ async fn spawn_agent_enforces_mode_owner_and_depth_one_roles() {
         )
         .await
         .expect("simple root should create explorer agents");
+
+    let task_root = ToolContext {
+        event_tx: tokio::sync::broadcast::channel(8).0,
+        options: crate::TurnOptions::default(),
+        workspace_access: WorkspaceAccess::WorkspaceOnly,
+        mode: CompileMode::Task,
+        workspace_root: std::env::temp_dir(),
+        workspace_instructions: None,
+        instruction_snapshot: None,
+        provider_call_id: None,
+        active_subagent: None,
+        agent_supervisor: crate::AgentSupervisor::default(),
+        agent_tool_registrar: None,
+        lsp_runtime: None,
+        parent_session: Arc::new(crate::CoreSession::new()),
+    };
+    let reviewer_error = spawn_tool
+        .execute(
+            crate::tool::ToolInput {
+                arguments: serde_json::json!({
+                    "taskName": "review",
+                    "message": "review",
+                    "agentType": "reviewer",
+                    "skillMentions": ["rust"]
+                }),
+                session_id: "session-1".to_string(),
+                tool_id: "call-task-reviewer".to_string(),
+                revision_base: 0,
+            },
+            task_root,
+        )
+        .await
+        .expect_err("task reviewer creation is harness-only");
+    assert!(reviewer_error.to_string().contains("reviewer"));
 
     let task_child = ToolContext {
         event_tx: tokio::sync::broadcast::channel(8).0,
@@ -988,6 +1038,13 @@ async fn host_agent_control_tool_uses_shared_schema_parse_output_and_lock_policy
             .input_schema()
             .pointer("/properties/taskName")
             .is_some()
+    );
+    assert!(
+        spawn_tool
+            .input_schema()
+            .pointer("/properties/ownedPaths")
+            .is_some(),
+        "spawn schema should expose optional ownedPaths"
     );
     assert_eq!(
         spawn_tool.runtime_lock_policy(),

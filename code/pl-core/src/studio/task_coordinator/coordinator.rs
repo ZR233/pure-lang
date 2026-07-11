@@ -33,6 +33,7 @@ impl BranchKey {
 pub(crate) struct TaskCoordinator {
     pub(super) store: StudioStore,
     owned_process_leases: Mutex<HashMap<BranchKey, String>>,
+    pub(super) allocation_lock: tokio::sync::Mutex<()>,
 }
 
 impl TaskCoordinator {
@@ -40,6 +41,7 @@ impl TaskCoordinator {
         Self {
             store,
             owned_process_leases: Mutex::new(HashMap::new()),
+            allocation_lock: tokio::sync::Mutex::new(()),
         }
     }
 

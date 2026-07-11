@@ -180,6 +180,8 @@ pub struct AgentControlSpawnRequest {
     pub fork_turns: Option<String>,
     #[serde(default)]
     pub skill_mentions: Vec<String>,
+    #[serde(default)]
+    pub owned_paths: Vec<String>,
     #[serde(skip)]
     pub forked_messages: Option<Vec<Message>>,
 }

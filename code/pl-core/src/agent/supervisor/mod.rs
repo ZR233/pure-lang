@@ -15,6 +15,7 @@ use crate::turn::{CompileMode, TurnBudget, TurnOptions};
 mod events;
 mod execution;
 mod lifecycle;
+mod lifecycle_hook;
 mod messaging;
 mod registry;
 mod runner;
@@ -25,6 +26,7 @@ mod tests;
 mod wait;
 
 pub(crate) use events::emit_subagent_activity;
+pub use lifecycle_hook::*;
 pub use wait::{
     AgentWaitLoopError, AgentWaitLoopOptions, AgentWaitLoopResult, wait_for_agent_completion,
 };
@@ -257,6 +259,8 @@ pub struct AgentSpawnInput {
     pub message: String,
     pub role: String,
     pub parent_path: Option<String>,
+    pub session_id: String,
+    pub owned_paths: Vec<String>,
 }
 
 /// Handle returned after an agent is registered.
@@ -532,6 +536,7 @@ pub struct AgentSupervisor {
     notify: Arc<Notify>,
     execution: Arc<execution::AgentExecutionLimiter>,
     worktree: WorktreeManager,
+    lifecycle_hook: Arc<std::sync::RwLock<Option<Arc<dyn AgentLifecycleHook>>>>,
 }
 
 impl Default for AgentSupervisor {
@@ -541,11 +546,25 @@ impl Default for AgentSupervisor {
             notify: Arc::new(Notify::new()),
             execution: Arc::new(execution::AgentExecutionLimiter::default()),
             worktree: WorktreeManager::disabled(),
+            lifecycle_hook: Arc::new(std::sync::RwLock::new(None)),
         }
     }
 }
 
 impl AgentSupervisor {
+    pub fn set_lifecycle_hook(&self, hook: Arc<dyn AgentLifecycleHook>) {
+        *self
+            .lifecycle_hook
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(hook);
+    }
+
+    fn lifecycle_hook(&self) -> Option<Arc<dyn AgentLifecycleHook>> {
+        self.lifecycle_hook
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
     pub async fn configure_limits(&self, max_agents: usize, max_depth: u32) {
         let mut state = self.state.lock().await;
         state.max_agents = max_agents;

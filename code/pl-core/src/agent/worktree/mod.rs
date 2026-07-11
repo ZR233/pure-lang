@@ -12,4 +12,8 @@ mod tests;
 
 pub use backend::{LocalWorktreeBackend, MergeOutcome, WorktreeBackend};
 pub use error::WorktreeError;
-pub use manager::{CloseDisposition, CloseOutcome, WorktreeHandle, WorktreeManager, WorktreeRef};
+pub(crate) use manager::git_compatible_path;
+pub use manager::{
+    CloseDisposition, CloseOutcome, WorktreeCreateSpec, WorktreeHandle, WorktreeManager,
+    WorktreeRef,
+};

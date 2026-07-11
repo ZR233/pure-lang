@@ -67,10 +67,10 @@ fn validate_spawn_authority(context: &ToolContext, requested_role: &str) -> Resu
                 error: "simple mode may only spawn explorer agents".to_string(),
             })
         }
-        crate::CompileMode::Task if requested_role == "planner" => {
+        crate::CompileMode::Task if matches!(requested_role, "planner" | "reviewer") => {
             Err(PureError::ToolExecutionFailed {
                 tool: "spawn_agent".to_string(),
-                error: "task planner cannot spawn another planner".to_string(),
+                error: format!("task {requested_role} creation is harness-only"),
             })
         }
         crate::CompileMode::Simple | crate::CompileMode::Task => Ok(()),
