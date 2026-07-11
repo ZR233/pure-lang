@@ -57,7 +57,11 @@ submit_delivery { headCommit, verificationSummary }
 runtime 只接受 HEAD 已推进且 worktree 干净的交付，返回 `baseCommit`、`headCommit`、
 `changedFiles`、验证摘要和 `{ path, branch }`。runtime 不隐式执行 `git add -A`。
 work unit 声明 `ownedPaths`；并行 executor 的写入范围不得重叠，超出范围的交付必须
-返回 planner 决策。单个 work unit 最多尝试三次，同时运行的 executor 最多四个。
+返回 planner 决策。work unit 创建时固定记录 `baseCommit`、预期 worktree path 和
+branch；交付校验不得改用随后可能因其他 executor 合并而推进的 task `expectedHead`，
+且 caller workspace 和 branch 必须与固定记录精确匹配。rename/copy 同时校验 source
+与 destination，delete 校验被删除的原路径。单个 work unit 最多尝试三次，同时运行
+的 executor 最多四个。
 
 worktree 路径和分支包含 task run id：
 

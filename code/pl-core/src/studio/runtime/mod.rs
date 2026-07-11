@@ -8,6 +8,7 @@ use crate::mcp::McpRuntimeRegistry;
 use crate::studio::StudioStore;
 use crate::studio::active_turns::StudioActiveTurns;
 use crate::studio::records::SessionRecord;
+use crate::studio::task_coordinator::TaskCoordinator;
 use crate::studio::{
     InteractionEmitter, InteractionRuntime, StudioEventRuntime, StudioRuntimeState,
 };
@@ -133,6 +134,7 @@ pub struct StudioRuntime {
     events: StudioEventRuntime,
     runtime_state: StudioRuntimeState,
     active_turns: StudioActiveTurns,
+    task_coordinator: std::sync::Arc<TaskCoordinator>,
 }
 
 impl StudioRuntime {

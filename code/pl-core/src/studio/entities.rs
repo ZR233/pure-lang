@@ -47,6 +47,167 @@ pub mod session {
     impl ActiveModelBehavior for ActiveModel {}
 }
 
+pub mod task_run {
+    use super::*;
+
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
+    #[sea_orm(table_name = "task_runs")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: String,
+        pub session_id: String,
+        pub phase: String,
+        pub plan: String,
+        pub workspace_root: String,
+        pub git_common_dir: String,
+        pub branch: String,
+        pub base_commit: String,
+        pub expected_head: String,
+        pub design_commit: Option<String>,
+        pub status_message: Option<String>,
+        pub created_at: i64,
+        pub updated_at: i64,
+    }
+
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+pub mod work_unit {
+    use super::*;
+
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
+    #[sea_orm(table_name = "work_units")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: String,
+        pub task_run_id: String,
+        pub title: String,
+        pub status: String,
+        pub owned_paths_json: String,
+        pub base_commit: String,
+        pub worktree_path: String,
+        pub branch: String,
+        pub attempt: i32,
+        pub agent_id: Option<String>,
+        pub created_at: i64,
+        pub updated_at: i64,
+    }
+
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+pub mod agent_outcome {
+    use super::*;
+
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
+    #[sea_orm(table_name = "agent_outcomes")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: String,
+        pub task_run_id: String,
+        pub work_unit_id: Option<String>,
+        pub agent_id: String,
+        pub owner_path: String,
+        pub initiated_by: String,
+        pub requested_by_call_id: String,
+        pub role: String,
+        pub status: String,
+        pub attempt: i32,
+        pub summary: Option<String>,
+        pub error: Option<String>,
+        pub delivery_json: Option<String>,
+        pub review_json: Option<String>,
+        pub created_at: i64,
+        pub updated_at: i64,
+    }
+
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+pub mod merge_record {
+    use super::*;
+
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
+    #[sea_orm(table_name = "merge_records")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: String,
+        pub task_run_id: String,
+        pub agent_id: String,
+        pub status: String,
+        pub expected_head: String,
+        pub source_commit: String,
+        pub conflict_files_json: String,
+        pub resolution_summary: Option<String>,
+        pub verification_json: Option<String>,
+        pub attempt: i32,
+        pub created_at: i64,
+        pub updated_at: i64,
+    }
+
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+pub mod review_round {
+    use super::*;
+
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
+    #[sea_orm(table_name = "review_rounds")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: String,
+        pub task_run_id: String,
+        pub round: i32,
+        pub head_commit: String,
+        pub status: String,
+        pub reviewer_agent_id: Option<String>,
+        pub summary: Option<String>,
+        pub design_references_json: String,
+        pub findings_json: String,
+        pub created_at: i64,
+        pub updated_at: i64,
+    }
+
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+pub mod branch_lease {
+    use super::*;
+
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
+    #[sea_orm(table_name = "branch_leases")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: String,
+        pub task_run_id: String,
+        pub git_common_dir: String,
+        pub branch: String,
+        pub expected_head: String,
+        pub acquired_at: i64,
+        pub updated_at: i64,
+    }
+
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
 pub mod message {
     use super::*;
 

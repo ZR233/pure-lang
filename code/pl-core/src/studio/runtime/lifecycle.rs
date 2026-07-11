@@ -6,6 +6,7 @@ use crate::config::ConfigStore;
 use crate::mcp::McpRuntimeRegistry;
 use crate::resolve_workspace_root;
 use crate::studio::active_turns::StudioActiveTurns;
+use crate::studio::task_coordinator::TaskCoordinator;
 use crate::studio::{
     InteractionRuntime, StudioEventRuntime, StudioRuntimeSnapshot, StudioRuntimeState,
     StudioRuntimeStatus, StudioStore,
@@ -34,6 +35,7 @@ impl StudioRuntime {
         config_store: ConfigStore,
         runtime_state: StudioRuntimeState,
     ) -> Self {
+        let task_coordinator = std::sync::Arc::new(TaskCoordinator::new(store.clone()));
         Self {
             interactions: InteractionRuntime::new(store.clone()),
             events: StudioEventRuntime::new(store.clone()),
@@ -44,6 +46,7 @@ impl StudioRuntime {
             lsp_runtime: pl_lsp::LspRuntimeRegistry::new(),
             runtime_state: runtime_state.clone(),
             active_turns: StudioActiveTurns::new(runtime_state),
+            task_coordinator,
         }
     }
 
@@ -88,6 +91,7 @@ impl StudioRuntime {
                 .cancel_unfinished_turns("application restarted")
                 .await?;
             self.cancel_recovered_transient_interactions(turns).await?;
+            let _ = self.task_coordinator.recover_active_tasks().await?;
             Ok::<(), anyhow::Error>(())
         }
         .await;
@@ -132,6 +136,7 @@ impl StudioRuntime {
             .runtime_state
             .transition(StudioRuntimeStatus::ShuttingDown, None)?;
         self.active_turns.cancel_all_and_clear().await;
+        self.task_coordinator.suspend();
         self.stop_mcp_health_watcher().await;
         self.mcp_runtime.shutdown().await;
         self.lsp_runtime.shutdown().await;

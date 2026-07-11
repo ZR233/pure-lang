@@ -11,6 +11,7 @@ mod runtime;
 mod runtime_state;
 mod store;
 mod store_support;
+mod task_coordinator;
 mod timeline_actor;
 
 pub use event_runtime::StudioEventRuntime;

@@ -940,6 +940,53 @@ impl RegisteredTool {
         })
     }
 
+    /// 注册既解析强类型 arguments、又向产品 handler 保留完整调用元数据的工具。
+    ///
+    /// 适用于需要可信 `session_id` 或 `tool_id` 的宿主工具；模型仍只能控制
+    /// schema 声明的 arguments，调用元数据由 turn runtime 注入。
+    pub fn from_typed_tool_input_fallible_execution_result<Input, F, Fut, Artifact, Error>(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        input_schema: serde_json::Value,
+        handler: F,
+    ) -> Self
+    where
+        Input: DeserializeOwned + Send + 'static,
+        F: Fn(Input, ToolInput, ToolContext) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = std::result::Result<ToolExecutionResult<Artifact>, Error>>
+            + Send
+            + 'static,
+        Artifact: Send + 'static,
+        Error: fmt::Display + Send + 'static,
+    {
+        let name = name.into();
+        let tool_name = name.clone();
+        Self::new(name, description, input_schema, move |input, context| {
+            let tool_name = tool_name.clone();
+            let arguments = match serde_json::from_value::<Input>(input.arguments.clone()) {
+                Ok(arguments) => arguments,
+                Err(error) => {
+                    return Box::pin(async move {
+                        Err(PureError::ToolExecutionFailed {
+                            tool: tool_name,
+                            error: format!("invalid input: {error}"),
+                        })
+                    }) as RegisteredToolFuture;
+                }
+            };
+            let future = handler(arguments, input, context);
+            Box::pin(async move {
+                future
+                    .await
+                    .map(ToolExecutionResult::into_tool_output)
+                    .map_err(|error| PureError::ToolExecutionFailed {
+                        tool: tool_name,
+                        error: error.to_string(),
+                    })
+            }) as RegisteredToolFuture
+        })
+    }
+
     pub fn with_parallel_tool_calls(mut self) -> Self {
         self.supports_parallel_tool_calls = true;
         self
