@@ -158,7 +158,10 @@ impl StudioStore {
                 {
                     bail!("terminal outcome and work unit do not match");
                 }
-                if work_unit.status != WorkUnitStatus::Delivered.as_str() {
+                if !matches!(
+                    WorkUnitStatus::from_str(&work_unit.status),
+                    Some(WorkUnitStatus::Delivered | WorkUnitStatus::Merged)
+                ) {
                     let mut active_work_unit: entities::work_unit::ActiveModel = work_unit.into();
                     active_work_unit.status = Set(target.work_unit.as_str().to_string());
                     active_work_unit.updated_at = Set(now);

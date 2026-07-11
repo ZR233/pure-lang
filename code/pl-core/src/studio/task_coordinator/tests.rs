@@ -4,12 +4,1489 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::*;
-use crate::tool::{SubagentContext, Tool, ToolRegistry};
+use crate::tool::{SubagentContext, Tool, ToolContext, ToolInput, ToolRegistry, WorkspaceAccess};
 use crate::{
     AgentKernel, AgentKernelToolRequest, AgentRunSpec, AgentSpawnInput, AgentSupervisor,
-    CompileMode, CoreAgentProfile, PureCoreBuilder, StudioStore, ToolEffect, TurnBudget,
-    TurnExecutionProfile, TurnOptions,
+    CompileMode, CoreAgentProfile, CoreSession, PureCoreBuilder, StudioStore, ToolEffect,
+    TurnBudget, TurnExecutionProfile, TurnOptions,
 };
+
+#[tokio::test]
+async fn task_merge_agent_tool_has_typed_schema_branch_effect_and_planner_only_visibility() {
+    let coordinator = Arc::new(TaskCoordinator::new(
+        StudioStore::open_memory().await.unwrap(),
+    ));
+    let tool = coordinator.task_merge_agent_tool("studio-session");
+
+    assert_eq!(tool.name(), "task_merge_agent");
+    assert_eq!(tool.effect(), Some(ToolEffect::BranchControl));
+    assert_eq!(
+        tool.input_schema(),
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "agentId": { "type": "string" },
+                "expectedHeadCommit": { "type": "string" }
+            },
+            "required": ["agentId", "expectedHeadCommit"],
+            "additionalProperties": false
+        })
+    );
+
+    let mut registry = ToolRegistry::new();
+    registry.register(tool);
+    assert_eq!(
+        registry
+            .schemas_for_profile(TurnExecutionProfile::root(CompileMode::Task))
+            .len(),
+        1
+    );
+    assert!(
+        registry
+            .schemas_for_profile(TurnExecutionProfile::root(CompileMode::Simple))
+            .is_empty()
+    );
+    for role in ["executor", "explorer", "reviewer"] {
+        assert!(
+            registry
+                .schemas_for_profile(TurnExecutionProfile::for_subagent(CompileMode::Task, role,))
+                .is_empty()
+        );
+    }
+}
+
+#[test]
+fn production_merge_verifier_selects_repo_rust_fmt_and_flutter_project_analyze() {
+    let selected = select_merge_verification_commands(
+        Path::new("C:/repo"),
+        &[
+            "code/pl-core/src/lib.rs".to_string(),
+            "code/pure-studio-flutter/windows/runner/main.cpp".to_string(),
+            "code/pure-studio-flutter/lib/l10n/app_zh.arb".to_string(),
+        ],
+    );
+
+    assert_eq!(
+        selected,
+        vec![
+            MergeVerificationCommand {
+                working_directory: PathBuf::from("C:/repo"),
+                command: vec![
+                    "cargo".to_string(),
+                    "fmt".to_string(),
+                    "--all".to_string(),
+                    "--check".to_string(),
+                ],
+            },
+            MergeVerificationCommand {
+                working_directory: PathBuf::from("C:/repo/code/pure-studio-flutter"),
+                command: vec![
+                    "flutter".to_string(),
+                    "--no-version-check".to_string(),
+                    "analyze".to_string(),
+                ],
+            },
+        ]
+    );
+}
+
+#[tokio::test]
+async fn task_merge_agent_tool_rejects_non_task_root_before_resolving_session() {
+    let fixture = DeliveryFixture::new("merge-tool-role-guard", vec!["src/**"]).await;
+    let tool = fixture
+        .coordinator
+        .task_merge_agent_tool(fixture.session_id.clone());
+    let (event_tx, _) = tokio::sync::broadcast::channel(16);
+
+    let error = tool
+        .execute(
+            ToolInput {
+                arguments: serde_json::json!({
+                    "agentId": "agent-1",
+                    "expectedHeadCommit": fixture.base_commit
+                }),
+                session_id: "turn-id-must-not-be-used-as-session".to_string(),
+                tool_id: "call-merge".to_string(),
+                revision_base: 0,
+            },
+            ToolContext {
+                event_tx,
+                options: TurnOptions::default(),
+                workspace_access: WorkspaceAccess::WorkspaceOnly,
+                mode: CompileMode::Simple,
+                workspace_root: fixture.repository.clone(),
+                workspace_instructions: None,
+                instruction_snapshot: None,
+                provider_call_id: None,
+                active_subagent: None,
+                agent_supervisor: AgentSupervisor::default(),
+                agent_tool_registrar: None,
+                lsp_runtime: None,
+                parent_session: Arc::new(CoreSession::new()),
+            },
+        )
+        .await
+        .expect_err("simple root must not invoke the Task merge harness");
+
+    assert!(error.to_string().contains("requires the root Task planner"));
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn task_merge_agent_tool_uses_captured_studio_session_instead_of_turn_id() {
+    let fixture = DeliveryFixture::new("merge-tool-captured-session", vec!["README.md"]).await;
+    fixture.commit_file("README.md");
+    let source_head = git_output(&fixture.worktree, &["rev-parse", "HEAD"]);
+    fixture.submit(&source_head).await.unwrap();
+    let run = fixture
+        .store
+        .transition_task_run(&fixture.task_run_id, TaskRunPhase::Implementing, None)
+        .await
+        .unwrap();
+    let tool = fixture
+        .coordinator
+        .task_merge_agent_tool(fixture.session_id.clone());
+    let kernel = AgentKernel::builder(
+        PureCoreBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None)).unwrap(),
+    )
+    .with_profile(CoreAgentProfile::host_provided(fixture.repository.clone()))
+    .with_registered_tool(tool)
+    .build()
+    .await;
+    let (event_tx, _) = tokio::sync::broadcast::channel(16);
+
+    let output = kernel
+        .execute_tool(
+            AgentKernelToolRequest::new(
+                "task_merge_agent",
+                serde_json::json!({
+                    "agentId": fixture.subagent.id,
+                    "expectedHeadCommit": run.expected_head
+                }),
+                "turn-id-is-not-studio-session-id",
+                "call-merge-tool",
+                event_tx,
+            )
+            .with_mode(CompileMode::Task),
+        )
+        .await
+        .unwrap();
+    let merged: serde_json::Value = serde_json::from_str(&output.description).unwrap();
+
+    assert_eq!(merged["status"], "merged");
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn begin_task_merge_atomically_resolves_exact_delivered_executor_scope() {
+    let fixture = DeliveryFixture::new("merge-store-scope", vec!["src/**"]).await;
+    fixture.commit_file("src/lib.rs");
+    let source_head = git_output(&fixture.worktree, &["rev-parse", "HEAD"]);
+    let delivery = fixture.submit(&source_head).await.unwrap();
+    let run = fixture
+        .store
+        .transition_task_run(&fixture.task_run_id, TaskRunPhase::Implementing, None)
+        .await
+        .unwrap();
+
+    let scope = fixture
+        .store
+        .begin_task_merge(BeginTaskMerge {
+            session_id: fixture.session_id.clone(),
+            agent_id: fixture.subagent.id.clone(),
+            expected_head: run.expected_head.clone(),
+            pre_index_tree: run.expected_head.clone(),
+            changed_files: delivery.changed_files.clone(),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(scope.origin_phase, TaskRunPhase::Implementing);
+    assert_eq!(scope.run.phase, TaskRunPhase::Merging);
+    assert_eq!(scope.work_unit.id, fixture.work_unit_id);
+    assert_eq!(scope.work_unit.status, WorkUnitStatus::Delivered);
+    assert_eq!(scope.outcome.id, fixture.outcome_id);
+    assert_eq!(scope.outcome.status, AgentOutcomeStatus::Completed);
+    assert_eq!(scope.delivery, delivery);
+    assert_eq!(scope.merge.status, MergeStatus::Pending);
+    assert_eq!(scope.merge.expected_head, run.expected_head);
+    assert_eq!(scope.merge.source_commit, source_head);
+    let evidence = scope.merge.evidence.as_ref().unwrap();
+    assert_eq!(evidence.version, 1);
+    assert_eq!(evidence.origin_phase, TaskRunPhase::Implementing);
+    assert_eq!(evidence.work_unit_id, fixture.work_unit_id);
+    assert_eq!(evidence.outcome_id, fixture.outcome_id);
+    assert_eq!(evidence.pre_index_tree, run.expected_head);
+    assert_eq!(evidence.changed_files, vec!["src/lib.rs".to_string()]);
+    fixture.cleanup();
+}
+
+struct PassingMergeVerifier;
+
+impl MergeVerifier for PassingMergeVerifier {
+    fn verify(
+        &self,
+        _request: MergeVerificationRequest,
+    ) -> impl std::future::Future<Output = anyhow::Result<Vec<MergeVerificationStep>>> + Send {
+        std::future::ready(Ok(vec![MergeVerificationStep {
+            command: vec!["test-verifier".to_string()],
+            success: true,
+            output: "passed".to_string(),
+        }]))
+    }
+}
+
+struct FailingMergeVerifier;
+
+impl MergeVerifier for FailingMergeVerifier {
+    fn verify(
+        &self,
+        _request: MergeVerificationRequest,
+    ) -> impl std::future::Future<Output = anyhow::Result<Vec<MergeVerificationStep>>> + Send {
+        std::future::ready(Ok(vec![MergeVerificationStep {
+            command: vec!["test-verifier".to_string()],
+            success: false,
+            output: "focused check failed".to_string(),
+        }]))
+    }
+}
+
+#[tokio::test]
+async fn clean_delivery_merges_with_metadata_atomic_head_cas_and_worktree_cleanup() {
+    let fixture = DeliveryFixture::new("merge-clean", vec!["src/**"]).await;
+    fixture.commit_file("src/lib.rs");
+    let source_head = git_output(&fixture.worktree, &["rev-parse", "HEAD"]);
+    let delivery = fixture.submit(&source_head).await.unwrap();
+    let run = fixture
+        .store
+        .transition_task_run(&fixture.task_run_id, TaskRunPhase::Implementing, None)
+        .await
+        .unwrap();
+    let supervisor = AgentSupervisor::default();
+    let (event_tx, _) = tokio::sync::broadcast::channel(16);
+
+    let output = fixture
+        .coordinator
+        .merge_agent_with_verifier(
+            &fixture.session_id,
+            &fixture.subagent.id,
+            &run.expected_head,
+            &supervisor,
+            &event_tx,
+            "call-merge-clean",
+            &PassingMergeVerifier,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(output.status, MergeStatus::Merged);
+    assert_eq!(output.previous_head, run.expected_head);
+    assert_eq!(output.source_commit, source_head);
+    assert_eq!(output.changed_files, delivery.changed_files);
+    let merge_head = output.new_head.as_deref().unwrap();
+    assert_eq!(
+        git_output(&fixture.repository, &["rev-parse", "HEAD"]),
+        merge_head
+    );
+    assert_eq!(
+        git_output(
+            &fixture.repository,
+            &["rev-list", "--count", "-1", merge_head]
+        ),
+        "1"
+    );
+    let parents = git_output(
+        &fixture.repository,
+        &["show", "-s", "--format=%P", merge_head],
+    );
+    assert_eq!(parents, format!("{} {}", run.expected_head, source_head));
+    let message = git_output(
+        &fixture.repository,
+        &["show", "-s", "--format=%B", merge_head],
+    );
+    for trailer in [
+        format!("Pure-Task-Run: {}", fixture.task_run_id),
+        "Pure-Source-Agent: agent-1".to_string(),
+        format!("Pure-Previous-Head: {}", run.expected_head),
+        format!("Pure-Source-Commit: {source_head}"),
+    ] {
+        assert!(message.contains(&trailer), "missing trailer {trailer}");
+    }
+    let durable_run = fixture
+        .store
+        .read_task_run(&fixture.task_run_id)
+        .await
+        .unwrap()
+        .unwrap();
+    let durable_lease = fixture
+        .store
+        .read_branch_lease(&fixture.task_run_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(durable_run.phase, TaskRunPhase::Implementing);
+    assert_eq!(durable_run.expected_head, merge_head);
+    assert_eq!(durable_lease.expected_head, merge_head);
+    assert_eq!(fixture.work_unit().await.status, WorkUnitStatus::Merged);
+    assert_eq!(
+        fixture.outcome().await.status,
+        AgentOutcomeStatus::Completed
+    );
+    assert!(!fixture.worktree.exists());
+    assert_eq!(output.cleanup.status, "discarded");
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn accepted_delivery_cleanup_is_idempotent_after_resources_are_absent() {
+    let fixture = DeliveryFixture::new("merge-cleanup-idempotent", vec!["src/**"]).await;
+    fixture.commit_file("src/lib.rs");
+    let source_head = git_output(&fixture.worktree, &["rev-parse", "HEAD"]);
+    let delivery = fixture.submit(&source_head).await.unwrap();
+    let run = fixture
+        .store
+        .transition_task_run(&fixture.task_run_id, TaskRunPhase::Implementing, None)
+        .await
+        .unwrap();
+    let scope = fixture
+        .store
+        .begin_task_merge(BeginTaskMerge {
+            session_id: fixture.session_id.clone(),
+            agent_id: fixture.subagent.id.clone(),
+            expected_head: run.expected_head,
+            pre_index_tree: git_output(&fixture.repository, &["write-tree"]),
+            changed_files: delivery.changed_files,
+        })
+        .await
+        .unwrap();
+    let supervisor = AgentSupervisor::default();
+    let (event_tx, _) = tokio::sync::broadcast::channel(16);
+
+    let first =
+        merge::cleanup_accepted_delivery(&scope, &supervisor, &event_tx, "call-cleanup-first")
+            .await;
+    let second =
+        merge::cleanup_accepted_delivery(&scope, &supervisor, &event_tx, "call-cleanup-second")
+            .await;
+
+    assert_eq!(first.status, "discarded");
+    assert_eq!(second.status, "alreadyAbsent");
+    assert!(!fixture.worktree.exists());
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn verifier_failure_aborts_to_exact_prestate_blocks_and_preserves_delivery() {
+    let fixture = DeliveryFixture::new("merge-verifier-failure", vec!["src/**"]).await;
+    fixture.commit_file("src/lib.rs");
+    let source_head = git_output(&fixture.worktree, &["rev-parse", "HEAD"]);
+    fixture.submit(&source_head).await.unwrap();
+    let run = fixture
+        .store
+        .transition_task_run(&fixture.task_run_id, TaskRunPhase::Implementing, None)
+        .await
+        .unwrap();
+    let (event_tx, _) = tokio::sync::broadcast::channel(16);
+
+    let error = fixture
+        .coordinator
+        .merge_agent_with_verifier(
+            &fixture.session_id,
+            &fixture.subagent.id,
+            &run.expected_head,
+            &AgentSupervisor::default(),
+            &event_tx,
+            "call-merge-verifier-failure",
+            &FailingMergeVerifier,
+        )
+        .await
+        .expect_err("failed coordinator verification must reject merge");
+
+    assert!(error.to_string().contains("verification"));
+    assert_eq!(
+        git_output(&fixture.repository, &["rev-parse", "HEAD"]),
+        run.expected_head
+    );
+    assert!(
+        git_output(
+            &fixture.repository,
+            &["status", "--porcelain=v1", "--untracked-files=all"]
+        )
+        .is_empty()
+    );
+    let merge_head = Command::new("git")
+        .arg("-C")
+        .arg(&fixture.repository)
+        .args(["rev-parse", "--verify", "MERGE_HEAD"])
+        .output()
+        .unwrap();
+    assert!(!merge_head.status.success());
+    let durable_run = fixture
+        .store
+        .read_task_run(&fixture.task_run_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(durable_run.phase, TaskRunPhase::Blocked);
+    assert_eq!(fixture.work_unit().await.status, WorkUnitStatus::Delivered);
+    assert_eq!(
+        fixture.outcome().await.status,
+        AgentOutcomeStatus::Completed
+    );
+    assert!(fixture.worktree.exists());
+    let merges = fixture
+        .store
+        .list_merge_records(&fixture.task_run_id)
+        .await
+        .unwrap();
+    assert_eq!(merges.len(), 1);
+    assert_eq!(merges[0].status, MergeStatus::Failed);
+    assert!(!fixture.coordinator.process_lease_is_held(&durable_run));
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn accepted_merge_releases_branch_guard_before_worktree_cleanup() {
+    let fixture = Arc::new(DeliveryFixture::new("merge-cleanup-lock", vec!["src/**"]).await);
+    fixture.commit_file("src/lib.rs");
+    let source_head = git_output(&fixture.worktree, &["rev-parse", "HEAD"]);
+    fixture.submit(&source_head).await.unwrap();
+    let run = fixture
+        .store
+        .transition_task_run(&fixture.task_run_id, TaskRunPhase::Implementing, None)
+        .await
+        .unwrap();
+    let barrier = MergeCleanupTestBarrier::new();
+    fixture
+        .coordinator
+        .set_merge_cleanup_barrier(barrier.clone());
+    let task_fixture = fixture.clone();
+    let merge = tokio::spawn(async move {
+        let (event_tx, _) = tokio::sync::broadcast::channel(16);
+        task_fixture
+            .coordinator
+            .merge_agent_with_verifier(
+                &task_fixture.session_id,
+                &task_fixture.subagent.id,
+                &run.expected_head,
+                &AgentSupervisor::default(),
+                &event_tx,
+                "call-cleanup-lock",
+                &PassingMergeVerifier,
+            )
+            .await
+    });
+
+    barrier.wait_until_entered().await;
+    let guard = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        fixture.coordinator.lock_branch_mutation(),
+    )
+    .await
+    .expect("cleanup must not retain the branch mutation guard");
+    drop(guard);
+    barrier.release().await;
+    merge.await.unwrap().unwrap();
+
+    Arc::try_unwrap(fixture).ok().unwrap().cleanup();
+}
+
+#[tokio::test]
+async fn durable_merge_cas_failure_compensates_exact_clean_merge_commit() {
+    let fixture = DeliveryFixture::new("merge-cas-compensation", vec!["src/**"]).await;
+    fixture.commit_file("src/lib.rs");
+    let source_head = git_output(&fixture.worktree, &["rev-parse", "HEAD"]);
+    fixture.submit(&source_head).await.unwrap();
+    let run = fixture
+        .store
+        .transition_task_run(&fixture.task_run_id, TaskRunPhase::Implementing, None)
+        .await
+        .unwrap();
+    fixture
+        .store
+        .execute_test_sql(
+            "CREATE TRIGGER fail_merge_work_unit_cas BEFORE UPDATE OF status ON work_units \
+             WHEN NEW.status = 'merged' BEGIN SELECT RAISE(FAIL, 'injected merge CAS failure'); END;",
+        )
+        .await;
+    let (event_tx, _) = tokio::sync::broadcast::channel(16);
+
+    let error = fixture
+        .coordinator
+        .merge_agent_with_verifier(
+            &fixture.session_id,
+            &fixture.subagent.id,
+            &run.expected_head,
+            &AgentSupervisor::default(),
+            &event_tx,
+            "call-merge-cas-failure",
+            &PassingMergeVerifier,
+        )
+        .await
+        .expect_err("durable CAS failure must reject and compensate the Git commit");
+
+    assert!(error.to_string().contains("durable merge CAS failed"));
+    assert_eq!(
+        git_output(&fixture.repository, &["rev-parse", "HEAD"]),
+        run.expected_head
+    );
+    assert!(
+        git_output(
+            &fixture.repository,
+            &["status", "--porcelain=v1", "--untracked-files=all"]
+        )
+        .is_empty()
+    );
+    let durable_run = fixture
+        .store
+        .read_task_run(&fixture.task_run_id)
+        .await
+        .unwrap()
+        .unwrap();
+    let lease = fixture
+        .store
+        .read_branch_lease(&fixture.task_run_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(durable_run.phase, TaskRunPhase::Blocked);
+    assert_eq!(durable_run.expected_head, run.expected_head);
+    assert_eq!(lease.expected_head, run.expected_head);
+    assert_eq!(fixture.work_unit().await.status, WorkUnitStatus::Delivered);
+    let merge = fixture
+        .store
+        .list_merge_records(&fixture.task_run_id)
+        .await
+        .unwrap()
+        .pop()
+        .unwrap();
+    assert_eq!(
+        merge.status,
+        MergeStatus::Failed,
+        "run status: {:?}",
+        durable_run.status_message
+    );
+    assert!(
+        merge
+            .evidence
+            .as_ref()
+            .and_then(|evidence| evidence.compensation.as_deref())
+            .is_some_and(|detail| detail.contains("reset to previous HEAD"))
+    );
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn unsafe_merge_cas_compensation_blocks_without_overwriting_external_dirty_change() {
+    let fixture = Arc::new(DeliveryFixture::new("merge-cas-unsafe", vec!["src/**"]).await);
+    fixture.commit_file("src/lib.rs");
+    let source_head = git_output(&fixture.worktree, &["rev-parse", "HEAD"]);
+    fixture.submit(&source_head).await.unwrap();
+    let run = fixture
+        .store
+        .transition_task_run(&fixture.task_run_id, TaskRunPhase::Implementing, None)
+        .await
+        .unwrap();
+    fixture
+        .store
+        .execute_test_sql(
+            "CREATE TRIGGER fail_unsafe_merge_cas BEFORE UPDATE OF status ON work_units \
+             WHEN NEW.status = 'merged' BEGIN SELECT RAISE(FAIL, 'injected unsafe CAS failure'); END;",
+        )
+        .await;
+    let barrier = MergeCommitTestBarrier::new();
+    fixture
+        .coordinator
+        .set_merge_after_commit_barrier(barrier.clone());
+    let task_fixture = fixture.clone();
+    let merge = tokio::spawn(async move {
+        let (event_tx, _) = tokio::sync::broadcast::channel(16);
+        task_fixture
+            .coordinator
+            .merge_agent_with_verifier(
+                &task_fixture.session_id,
+                &task_fixture.subagent.id,
+                &run.expected_head,
+                &AgentSupervisor::default(),
+                &event_tx,
+                "call-merge-cas-unsafe",
+                &PassingMergeVerifier,
+            )
+            .await
+    });
+    barrier.wait_until_committed().await;
+    std::fs::write(fixture.repository.join("external.txt"), "preserve me\n").unwrap();
+    let merge_commit = git_output(&fixture.repository, &["rev-parse", "HEAD"]);
+    barrier.release().await;
+
+    let error = merge
+        .await
+        .unwrap()
+        .expect_err("unsafe CAS compensation must reject the merge");
+    assert!(error.to_string().contains("durable merge CAS failed"));
+    assert_eq!(
+        std::fs::read_to_string(fixture.repository.join("external.txt")).unwrap(),
+        "preserve me\n"
+    );
+    assert_eq!(
+        git_output(&fixture.repository, &["rev-parse", "HEAD"]),
+        merge_commit
+    );
+    let durable_run = fixture
+        .store
+        .read_task_run(&fixture.task_run_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(durable_run.phase, TaskRunPhase::Blocked);
+    assert_eq!(durable_run.expected_head, fixture.base_commit);
+    let record = fixture
+        .store
+        .list_merge_records(&fixture.task_run_id)
+        .await
+        .unwrap()
+        .pop()
+        .unwrap();
+    assert_eq!(record.status, MergeStatus::Failed);
+    assert!(
+        record
+            .evidence
+            .as_ref()
+            .and_then(|evidence| evidence.compensation.as_deref())
+            .is_some_and(|detail| detail.contains("unsafe"))
+    );
+    assert!(fixture.worktree.exists());
+
+    std::fs::remove_file(fixture.repository.join("external.txt")).unwrap();
+    Arc::try_unwrap(fixture).ok().unwrap().cleanup();
+}
+
+#[tokio::test]
+async fn two_deliveries_from_same_base_merge_incrementally_and_are_consumed_once() {
+    let fixture = IncrementalMergeFixture::new("merge-incremental").await;
+    let first = fixture
+        .deliver("agent-first", "src/first.rs", "first\n")
+        .await;
+    let second = fixture
+        .deliver("agent-second", "src/second.rs", "second\n")
+        .await;
+    let initial_head = fixture.run.expected_head.clone();
+    let (event_tx, _) = tokio::sync::broadcast::channel(16);
+
+    let first_output = fixture
+        .coordinator
+        .merge_agent_with_verifier(
+            &fixture.session_id,
+            &first.agent_id,
+            &initial_head,
+            &AgentSupervisor::default(),
+            &event_tx,
+            "call-first",
+            &PassingMergeVerifier,
+        )
+        .await
+        .unwrap();
+    let first_head = first_output.new_head.unwrap();
+    let second_output = fixture
+        .coordinator
+        .merge_agent_with_verifier(
+            &fixture.session_id,
+            &second.agent_id,
+            &first_head,
+            &AgentSupervisor::default(),
+            &event_tx,
+            "call-second",
+            &PassingMergeVerifier,
+        )
+        .await
+        .unwrap();
+    let second_head = second_output.new_head.unwrap();
+
+    assert_ne!(first_head, initial_head);
+    assert_ne!(second_head, first_head);
+    assert_eq!(
+        std::fs::read_to_string(fixture.repository.join("src/first.rs")).unwrap(),
+        "first\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.repository.join("src/second.rs")).unwrap(),
+        "second\n"
+    );
+    assert_eq!(
+        fixture
+            .store
+            .read_work_unit(&first.work_unit_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .status,
+        WorkUnitStatus::Merged
+    );
+    assert_eq!(
+        fixture
+            .store
+            .read_work_unit(&second.work_unit_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .status,
+        WorkUnitStatus::Merged
+    );
+    assert_eq!(
+        fixture
+            .store
+            .list_merge_records(&fixture.run.id)
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
+    let before_repeat = git_output(&fixture.repository, &["rev-parse", "HEAD"]);
+    assert!(
+        fixture
+            .coordinator
+            .merge_agent_with_verifier(
+                &fixture.session_id,
+                &first.agent_id,
+                &second_head,
+                &AgentSupervisor::default(),
+                &event_tx,
+                "call-first-repeat",
+                &PassingMergeVerifier,
+            )
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        git_output(&fixture.repository, &["rev-parse", "HEAD"]),
+        before_repeat
+    );
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn text_conflict_persists_stage_manifest_keeps_merge_state_and_queues_once() {
+    let fixture = ConflictMergeFixture::text("merge-text-conflict").await;
+    let (event_tx, _) = tokio::sync::broadcast::channel(16);
+
+    let output = fixture
+        .coordinator
+        .merge_agent_with_verifier(
+            &fixture.session_id,
+            &fixture.agent_id,
+            &fixture.expected_head,
+            &AgentSupervisor::default(),
+            &event_tx,
+            "call-text-conflict",
+            &PassingMergeVerifier,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(output.status, MergeStatus::Conflicted);
+    assert_eq!(output.conflict_files, vec!["src/shared.txt".to_string()]);
+    assert_eq!(
+        git_output(&fixture.repository, &["rev-parse", "HEAD"]),
+        fixture.expected_head
+    );
+    assert_eq!(
+        git_output(
+            &fixture.repository,
+            &["rev-parse", "--verify", "MERGE_HEAD"]
+        ),
+        fixture.source_head
+    );
+    let run = fixture
+        .store
+        .read_task_run(&fixture.task_run_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(run.phase, TaskRunPhase::ResolvingConflict);
+    let record = fixture
+        .store
+        .list_merge_records(&fixture.task_run_id)
+        .await
+        .unwrap()
+        .pop()
+        .unwrap();
+    assert_eq!(record.status, MergeStatus::Conflicted);
+    let manifest = record
+        .evidence
+        .as_ref()
+        .and_then(|evidence| evidence.conflict_manifest.as_ref())
+        .unwrap();
+    assert_eq!(manifest.merge_head, fixture.source_head);
+    assert_eq!(manifest.conflicts.len(), 1);
+    assert_eq!(manifest.conflicts[0].kind, ConflictKind::Text);
+    assert_eq!(
+        manifest.conflicts[0]
+            .stages
+            .iter()
+            .map(|stage| stage.stage)
+            .collect::<Vec<_>>(),
+        vec![1, 2, 3]
+    );
+    assert!(fixture.worktree.exists());
+    assert_eq!(
+        fixture
+            .store
+            .claim_merge_conflict_continuation(&fixture.session_id)
+            .await
+            .unwrap(),
+        Some(fixture.task_run_id.clone())
+    );
+    assert_eq!(
+        fixture
+            .store
+            .claim_merge_conflict_continuation(&fixture.session_id)
+            .await
+            .unwrap(),
+        None
+    );
+    fixture.cleanup_conflict();
+}
+
+#[tokio::test]
+async fn binary_conflict_is_classified_from_stage_blob_content() {
+    let fixture = ConflictMergeFixture::binary("merge-binary-conflict").await;
+    let (event_tx, _) = tokio::sync::broadcast::channel(16);
+
+    fixture
+        .coordinator
+        .merge_agent_with_verifier(
+            &fixture.session_id,
+            &fixture.agent_id,
+            &fixture.expected_head,
+            &AgentSupervisor::default(),
+            &event_tx,
+            "call-binary-conflict",
+            &PassingMergeVerifier,
+        )
+        .await
+        .unwrap();
+
+    let record = fixture
+        .store
+        .list_merge_records(&fixture.task_run_id)
+        .await
+        .unwrap()
+        .pop()
+        .unwrap();
+    let conflict = &record
+        .evidence
+        .as_ref()
+        .unwrap()
+        .conflict_manifest
+        .as_ref()
+        .unwrap()
+        .conflicts[0];
+    assert_eq!(conflict.path, "src/shared.bin");
+    assert_eq!(conflict.kind, ConflictKind::Binary);
+    assert!(conflict.binary);
+    assert!(
+        conflict
+            .stages
+            .iter()
+            .all(|stage| !stage.object_id.is_empty())
+    );
+    fixture.cleanup_conflict();
+}
+
+#[tokio::test]
+async fn rename_delete_conflict_persists_source_destination_and_stage_evidence() {
+    let fixture = ConflictMergeFixture::rename_delete("merge-rename-delete").await;
+    let (event_tx, _) = tokio::sync::broadcast::channel(16);
+
+    fixture
+        .coordinator
+        .merge_agent_with_verifier(
+            &fixture.session_id,
+            &fixture.agent_id,
+            &fixture.expected_head,
+            &AgentSupervisor::default(),
+            &event_tx,
+            "call-rename-delete",
+            &PassingMergeVerifier,
+        )
+        .await
+        .unwrap();
+
+    let record = fixture
+        .store
+        .list_merge_records(&fixture.task_run_id)
+        .await
+        .unwrap()
+        .pop()
+        .unwrap();
+    let manifest = record
+        .evidence
+        .as_ref()
+        .unwrap()
+        .conflict_manifest
+        .as_ref()
+        .unwrap();
+    let conflict = manifest
+        .conflicts
+        .iter()
+        .find(|conflict| conflict.kind == ConflictKind::RenameDelete)
+        .expect("rename/delete conflict must be classified");
+    assert_eq!(conflict.rename_source.as_deref(), Some("src/old.txt"));
+    assert_eq!(conflict.rename_destination.as_deref(), Some("src/new.txt"));
+    assert!(!conflict.stages.is_empty());
+    fixture.cleanup_conflict();
+}
+
+#[tokio::test]
+async fn restart_recovery_accepts_exact_durable_conflict_state_instead_of_blocking_dirty_tree() {
+    let fixture = ConflictMergeFixture::text("merge-conflict-recovery").await;
+    let (event_tx, _) = tokio::sync::broadcast::channel(16);
+    fixture
+        .coordinator
+        .merge_agent_with_verifier(
+            &fixture.session_id,
+            &fixture.agent_id,
+            &fixture.expected_head,
+            &AgentSupervisor::default(),
+            &event_tx,
+            "call-conflict-recovery",
+            &PassingMergeVerifier,
+        )
+        .await
+        .unwrap();
+    fixture.coordinator.suspend();
+    let recovered_coordinator = TaskCoordinator::new(fixture.store.clone());
+
+    let recovered = recovered_coordinator.recover_active_tasks().await.unwrap();
+
+    assert_eq!(recovered.len(), 1);
+    assert_eq!(recovered[0].id, fixture.task_run_id);
+    assert_eq!(recovered[0].phase, TaskRunPhase::ResolvingConflict);
+    assert_eq!(
+        git_output(
+            &fixture.repository,
+            &["rev-parse", "--verify", "MERGE_HEAD"]
+        ),
+        fixture.source_head
+    );
+    recovered_coordinator.suspend();
+    fixture.cleanup_conflict();
+}
+
+#[tokio::test]
+async fn restart_recovery_aborts_exact_verifying_merge_and_blocks_with_evidence() {
+    let fixture = IncrementalMergeFixture::new("merge-verifying-recovery").await;
+    let delivered = fixture
+        .deliver("agent_verifying_recovery", "src/lib.rs", "delivered\n")
+        .await;
+    let outcome = fixture
+        .store
+        .list_agent_outcomes(&fixture.run.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|outcome| outcome.agent_id == delivered.agent_id)
+        .unwrap();
+    let delivery = outcome.delivery.unwrap();
+    let work_unit = fixture
+        .store
+        .read_work_unit(&delivered.work_unit_id)
+        .await
+        .unwrap()
+        .unwrap();
+    let run = fixture.run.clone();
+    let pre_index_tree = git_output(&fixture.repository, &["write-tree"]);
+    let scope = fixture
+        .store
+        .begin_task_merge(BeginTaskMerge {
+            session_id: fixture.session_id.clone(),
+            agent_id: delivered.agent_id,
+            expected_head: run.expected_head.clone(),
+            pre_index_tree,
+            changed_files: delivery.changed_files,
+        })
+        .await
+        .unwrap();
+    git(
+        &fixture.repository,
+        &["merge", "--no-ff", "--no-commit", &work_unit.branch],
+    );
+    fixture
+        .store
+        .mark_task_merge_verifying(&scope.merge.id)
+        .await
+        .unwrap();
+    fixture.coordinator.suspend();
+    let recovered = TaskCoordinator::new(fixture.store.clone());
+
+    let runs = recovered.recover_active_tasks().await.unwrap();
+
+    assert!(runs.is_empty());
+    let durable_run = fixture
+        .store
+        .read_task_run(&fixture.run.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(durable_run.phase, TaskRunPhase::Blocked);
+    let merge = fixture
+        .store
+        .list_merge_records(&fixture.run.id)
+        .await
+        .unwrap()
+        .pop()
+        .unwrap();
+    assert_eq!(
+        merge.status,
+        MergeStatus::Failed,
+        "run status: {:?}",
+        durable_run.status_message
+    );
+    assert!(
+        merge
+            .evidence
+            .as_ref()
+            .and_then(|evidence| evidence.compensation.as_deref())
+            .is_some_and(|detail| detail.contains("restart recovery aborted"))
+    );
+    assert_eq!(
+        git_output(&fixture.repository, &["rev-parse", "HEAD"]),
+        run.expected_head
+    );
+    assert!(
+        git_output(
+            &fixture.repository,
+            &["status", "--porcelain=v1", "--untracked-files=all"]
+        )
+        .is_empty()
+    );
+    let merge_head = Command::new("git")
+        .arg("-C")
+        .arg(&fixture.repository)
+        .args(["rev-parse", "--verify", "MERGE_HEAD"])
+        .output()
+        .unwrap();
+    assert!(!merge_head.status.success());
+    recovered.suspend();
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn restart_recovery_releases_unstarted_pending_merge_for_exact_delivery_retry() {
+    let fixture = IncrementalMergeFixture::new("merge-pending-retry").await;
+    let delivered = fixture
+        .deliver("agent_pending_retry", "src/lib.rs", "delivered\n")
+        .await;
+    let outcome = fixture
+        .store
+        .list_agent_outcomes(&fixture.run.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|outcome| outcome.agent_id == delivered.agent_id)
+        .unwrap();
+    let delivery = outcome.delivery.unwrap();
+    let pre_index_tree = git_output(&fixture.repository, &["write-tree"]);
+    let pending = fixture
+        .store
+        .begin_task_merge(BeginTaskMerge {
+            session_id: fixture.session_id.clone(),
+            agent_id: delivered.agent_id.clone(),
+            expected_head: fixture.run.expected_head.clone(),
+            pre_index_tree,
+            changed_files: delivery.changed_files,
+        })
+        .await
+        .unwrap();
+    fixture.coordinator.suspend();
+    let recovered = Arc::new(TaskCoordinator::new(fixture.store.clone()));
+
+    let runs = recovered.recover_active_tasks().await.unwrap();
+
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0].phase, TaskRunPhase::Implementing);
+    let failed = fixture
+        .store
+        .list_merge_records(&fixture.run.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|record| record.id == pending.merge.id)
+        .unwrap();
+    assert_eq!(failed.status, MergeStatus::Failed);
+    let (event_tx, _) = tokio::sync::broadcast::channel(16);
+    let merged = recovered
+        .merge_agent_with_verifier(
+            &fixture.session_id,
+            &delivered.agent_id,
+            &fixture.run.expected_head,
+            &AgentSupervisor::default(),
+            &event_tx,
+            "call-pending-retry",
+            &PassingMergeVerifier,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(merged.status, MergeStatus::Merged);
+    assert_ne!(
+        merged.new_head.as_deref(),
+        Some(fixture.run.expected_head.as_str())
+    );
+    assert_eq!(
+        fixture
+            .store
+            .list_merge_records(&fixture.run.id)
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
+    recovered.suspend();
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn accepted_merge_closes_executor_through_persistent_supervisor_across_turn_boundary() {
+    let fixture = DeliveryFixture::new("merge-persistent-supervisor", vec!["src/**"]).await;
+    fixture.commit_file("src/persistent.rs");
+    let source_head = git_output(&fixture.worktree, &["rev-parse", "HEAD"]);
+    fixture.submit(&source_head).await.unwrap();
+    let run = fixture
+        .store
+        .transition_task_run(&fixture.task_run_id, TaskRunPhase::Implementing, None)
+        .await
+        .unwrap();
+    let supervisor = AgentSupervisor::default();
+    supervisor
+        .enable_worktrees(PathBuf::from(&run.workspace_root))
+        .await;
+    supervisor
+        .register_durable_worktree_for_test(
+            &fixture.subagent.id,
+            crate::agent::worktree::WorktreeHandle {
+                path: fixture.worktree.clone(),
+                branch: fixture.branch.clone(),
+            },
+        )
+        .await;
+    let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(16);
+
+    let output = fixture
+        .coordinator
+        .merge_agent_with_verifier(
+            &fixture.session_id,
+            &fixture.subagent.id,
+            &run.expected_head,
+            &supervisor,
+            &event_tx,
+            "call-persistent-cleanup",
+            &PassingMergeVerifier,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(output.cleanup.status, "discarded");
+    assert!(!fixture.worktree.exists());
+    let closed = tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        loop {
+            if let pl_trace::AgentEvent::SubAgentActivity {
+                agent_id,
+                kind: pl_protocol::SubAgentActivityKind::Closed,
+                ..
+            } = event_rx.recv().await.unwrap()
+                && agent_id.as_deref() == Some(fixture.subagent.id.as_str())
+            {
+                break true;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert!(closed);
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn cleanup_tip_drift_preserves_accepted_merge_and_persists_retryable_failure_evidence() {
+    let fixture = Arc::new(DeliveryFixture::new("merge-cleanup-failure", vec!["src/**"]).await);
+    fixture.commit_file("src/lib.rs");
+    let source_head = git_output(&fixture.worktree, &["rev-parse", "HEAD"]);
+    fixture.submit(&source_head).await.unwrap();
+    let run = fixture
+        .store
+        .transition_task_run(&fixture.task_run_id, TaskRunPhase::Implementing, None)
+        .await
+        .unwrap();
+    let barrier = MergeCleanupTestBarrier::new();
+    fixture
+        .coordinator
+        .set_merge_cleanup_barrier(barrier.clone());
+    let task_fixture = fixture.clone();
+    let merge = tokio::spawn(async move {
+        let (event_tx, _) = tokio::sync::broadcast::channel(16);
+        task_fixture
+            .coordinator
+            .merge_agent_with_verifier(
+                &task_fixture.session_id,
+                &task_fixture.subagent.id,
+                &run.expected_head,
+                &AgentSupervisor::default(),
+                &event_tx,
+                "call-cleanup-failure",
+                &PassingMergeVerifier,
+            )
+            .await
+    });
+    barrier.wait_until_entered().await;
+    git(
+        &fixture.repository,
+        &[
+            "update-ref",
+            &format!("refs/heads/{}", fixture.branch),
+            &fixture.base_commit,
+            &source_head,
+        ],
+    );
+    barrier.release().await;
+
+    let output = merge.await.unwrap().unwrap();
+    assert_eq!(output.status, MergeStatus::Merged);
+    assert_eq!(output.cleanup.status, "failed");
+    assert!(
+        output
+            .cleanup
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains("drifted"))
+    );
+    assert!(fixture.worktree.exists());
+    let durable_run = fixture
+        .store
+        .read_task_run(&fixture.task_run_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(durable_run.phase, TaskRunPhase::Implementing);
+    assert_eq!(durable_run.expected_head, output.new_head.unwrap());
+    assert_eq!(fixture.work_unit().await.status, WorkUnitStatus::Merged);
+    let record = fixture
+        .store
+        .list_merge_records(&fixture.task_run_id)
+        .await
+        .unwrap()
+        .pop()
+        .unwrap();
+    assert_eq!(
+        record
+            .evidence
+            .as_ref()
+            .and_then(|evidence| evidence.cleanup.as_ref())
+            .map(|cleanup| cleanup.status.as_str()),
+        Some("failed")
+    );
+    Arc::try_unwrap(fixture).ok().unwrap().cleanup();
+}
+
+#[tokio::test]
+async fn stale_expected_head_and_dirty_main_are_rejected_before_merge_side_effects() {
+    for (name, dirty, expected_head) in [
+        ("merge-stale-caller", false, "deadbeef"),
+        ("merge-dirty-main", true, ""),
+    ] {
+        let fixture = DeliveryFixture::new(name, vec!["src/**"]).await;
+        fixture.commit_file("src/lib.rs");
+        let source_head = git_output(&fixture.worktree, &["rev-parse", "HEAD"]);
+        fixture.submit(&source_head).await.unwrap();
+        let run = fixture
+            .store
+            .transition_task_run(&fixture.task_run_id, TaskRunPhase::Implementing, None)
+            .await
+            .unwrap();
+        if dirty {
+            std::fs::write(fixture.repository.join("external.txt"), "dirty\n").unwrap();
+        }
+        let caller_head = if expected_head.is_empty() {
+            run.expected_head.as_str()
+        } else {
+            expected_head
+        };
+        let (event_tx, _) = tokio::sync::broadcast::channel(16);
+
+        assert!(
+            fixture
+                .coordinator
+                .merge_agent_with_verifier(
+                    &fixture.session_id,
+                    &fixture.subagent.id,
+                    caller_head,
+                    &AgentSupervisor::default(),
+                    &event_tx,
+                    "call-preflight-reject",
+                    &PassingMergeVerifier,
+                )
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            fixture
+                .store
+                .read_task_run(&fixture.task_run_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .phase,
+            TaskRunPhase::Implementing
+        );
+        assert!(
+            fixture
+                .store
+                .list_merge_records(&fixture.task_run_id)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            git_output(&fixture.repository, &["rev-parse", "HEAD"]),
+            run.expected_head
+        );
+        if dirty {
+            std::fs::remove_file(fixture.repository.join("external.txt")).unwrap();
+        }
+        fixture.cleanup();
+    }
+}
+
+#[tokio::test]
+async fn stale_delivery_branch_tip_is_rejected_before_merge_record_creation() {
+    let fixture = DeliveryFixture::new("merge-stale-delivery", vec!["src/**"]).await;
+    fixture.commit_file("src/lib.rs");
+    let source_head = git_output(&fixture.worktree, &["rev-parse", "HEAD"]);
+    fixture.submit(&source_head).await.unwrap();
+    let run = fixture
+        .store
+        .transition_task_run(&fixture.task_run_id, TaskRunPhase::Implementing, None)
+        .await
+        .unwrap();
+    git(
+        &fixture.worktree,
+        &["reset", "--hard", &fixture.base_commit],
+    );
+    let (event_tx, _) = tokio::sync::broadcast::channel(16);
+
+    let error = fixture
+        .coordinator
+        .merge_agent_with_verifier(
+            &fixture.session_id,
+            &fixture.subagent.id,
+            &run.expected_head,
+            &AgentSupervisor::default(),
+            &event_tx,
+            "call-stale-delivery",
+            &PassingMergeVerifier,
+        )
+        .await
+        .expect_err("delivery branch tip drift must be rejected");
+
+    assert!(error.to_string().contains("outside the task coordinator"));
+    assert!(
+        fixture
+            .store
+            .list_merge_records(&fixture.task_run_id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn merge_and_design_update_serialize_through_the_same_branch_mutation_guard() {
+    let fixture = Arc::new(IncrementalMergeFixture::new("merge-design-serialization").await);
+    let delivery = fixture
+        .deliver("agent_merge_design", "src/merge_design.rs", "merged\n")
+        .await;
+    let barrier = MergeCommitTestBarrier::new();
+    fixture
+        .coordinator
+        .set_merge_after_commit_barrier(barrier.clone());
+    let merge_fixture = fixture.clone();
+    let expected_head = fixture.run.expected_head.clone();
+    let merge = tokio::spawn(async move {
+        let (event_tx, _) = tokio::sync::broadcast::channel(16);
+        merge_fixture
+            .coordinator
+            .merge_agent_with_verifier(
+                &merge_fixture.session_id,
+                &delivery.agent_id,
+                &expected_head,
+                &AgentSupervisor::default(),
+                &event_tx,
+                "call-merge-design",
+                &PassingMergeVerifier,
+            )
+            .await
+    });
+    barrier.wait_until_committed().await;
+    let design_fixture = fixture.clone();
+    let design = tokio::spawn(async move {
+        design_fixture
+            .coordinator
+            .update_design(
+                &design_fixture.session_id,
+                &design_fixture.repository,
+                "*** Begin Patch\n*** Update File: design/spec.md\n@@\n-before\n+after\n*** End Patch",
+            )
+            .await
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    assert!(
+        !design.is_finished(),
+        "design update must wait for merge branch guard"
+    );
+    barrier.release().await;
+
+    let merge_output = merge.await.unwrap().unwrap();
+    let design_output = design.await.unwrap().unwrap();
+    assert_eq!(design_output.previous_head, merge_output.new_head.unwrap());
+    assert_eq!(
+        std::fs::read_to_string(fixture.repository.join("design/spec.md")).unwrap(),
+        "after\n"
+    );
+    Arc::try_unwrap(fixture).ok().unwrap().cleanup();
+}
+
+#[tokio::test]
+async fn merged_work_unit_is_not_downgraded_by_late_terminal_event() {
+    let fixture = DeliveryFixture::new("merge-late-terminal", vec!["src/**"]).await;
+    fixture.commit_file("src/lib.rs");
+    let source_head = git_output(&fixture.worktree, &["rev-parse", "HEAD"]);
+    fixture.submit(&source_head).await.unwrap();
+    fixture
+        .store
+        .update_work_unit(
+            &fixture.work_unit_id,
+            WorkUnitStatus::Merged,
+            Some(fixture.subagent.id.clone()),
+        )
+        .await
+        .unwrap();
+
+    drain_agent_state(
+        &fixture,
+        pl_protocol::AgentStatus::Errored,
+        None,
+        Some("late executor error"),
+    )
+    .await;
+
+    assert_eq!(fixture.work_unit().await.status, WorkUnitStatus::Merged);
+    assert_eq!(
+        fixture.outcome().await.status,
+        AgentOutcomeStatus::Completed
+    );
+    fixture.cleanup();
+}
 
 #[tokio::test]
 async fn task_update_design_tool_has_typed_schema_branch_effect_and_planner_only_visibility() {
@@ -1182,6 +2659,338 @@ struct DeliveryFixture {
     subagent: SubagentContext,
 }
 
+struct IncrementalDelivery {
+    agent_id: String,
+    work_unit_id: String,
+}
+
+struct IncrementalMergeFixture {
+    repository: PathBuf,
+    store: StudioStore,
+    coordinator: Arc<TaskCoordinator>,
+    session_id: String,
+    run: TaskRunRecord,
+}
+
+impl IncrementalMergeFixture {
+    async fn new(name: &str) -> Self {
+        let repository = init_repository(name);
+        std::fs::create_dir_all(repository.join("design")).unwrap();
+        std::fs::write(repository.join("design/spec.md"), "before\n").unwrap();
+        std::fs::write(repository.join(".gitignore"), ".pure/\n").unwrap();
+        git(&repository, &["add", ".gitignore", "design/spec.md"]);
+        git(&repository, &["commit", "-m", "ignore task worktrees"]);
+        let store = task_store(&repository).await;
+        let session = task_session(&store, &repository).await;
+        let coordinator = Arc::new(TaskCoordinator::new(store.clone()));
+        let run = coordinator
+            .start_confirmed_task(&session.id, "plan", &repository)
+            .await
+            .unwrap();
+        let run = store
+            .transition_task_run(&run.id, TaskRunPhase::Implementing, None)
+            .await
+            .unwrap();
+        Self {
+            repository,
+            store,
+            coordinator,
+            session_id: session.id,
+            run,
+        }
+    }
+
+    async fn deliver(
+        &self,
+        agent_id: &str,
+        relative_path: &str,
+        content: &str,
+    ) -> IncrementalDelivery {
+        let worktree = crate::agent::worktree::git_compatible_path(
+            self.repository
+                .join(".pure/worktrees")
+                .join(&self.run.id)
+                .join(agent_id),
+        );
+        let branch = format!("pure-task-{}-{agent_id}", self.run.id);
+        let worktree_text = worktree.to_string_lossy().to_string();
+        git(
+            &self.repository,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                &branch,
+                &worktree_text,
+                &self.run.expected_head,
+            ],
+        );
+        let work_unit = self
+            .store
+            .create_work_unit(CreateWorkUnit {
+                task_run_id: self.run.id.clone(),
+                title: format!("Implement {agent_id}"),
+                owned_paths: vec![relative_path.to_string()],
+                base_commit: self.run.expected_head.clone(),
+                worktree_path: std::fs::canonicalize(&worktree)
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string(),
+                branch: branch.clone(),
+                attempt: 1,
+            })
+            .await
+            .unwrap();
+        self.store
+            .update_work_unit(
+                &work_unit.id,
+                WorkUnitStatus::Running,
+                Some(agent_id.to_string()),
+            )
+            .await
+            .unwrap();
+        self.store
+            .create_agent_outcome(CreateAgentOutcome {
+                task_run_id: self.run.id.clone(),
+                work_unit_id: Some(work_unit.id.clone()),
+                agent_id: agent_id.to_string(),
+                owner_path: "/root".to_string(),
+                initiated_by: "planner".to_string(),
+                requested_by_call_id: format!("call-{agent_id}"),
+                role: "executor".to_string(),
+                status: AgentOutcomeStatus::Running,
+                attempt: 1,
+            })
+            .await
+            .unwrap();
+        let path = worktree.join(relative_path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, content).unwrap();
+        git(&worktree, &["add", relative_path]);
+        git(&worktree, &["commit", "-m", &format!("deliver {agent_id}")]);
+        let head = git_output(&worktree, &["rev-parse", "HEAD"]);
+        let subagent = SubagentContext {
+            id: agent_id.to_string(),
+            parent_id: Some("/root".to_string()),
+            agent_path: Some(format!("/root/{agent_id}")),
+            role: "executor".to_string(),
+            task: format!("Implement {agent_id}"),
+            depth: 1,
+        };
+        self.coordinator
+            .submit_delivery(&subagent, &worktree, &head, "test passed")
+            .await
+            .unwrap();
+        IncrementalDelivery {
+            agent_id: agent_id.to_string(),
+            work_unit_id: work_unit.id,
+        }
+    }
+
+    fn cleanup(self) {
+        drop(self.coordinator);
+        remove_repository(self.repository);
+    }
+}
+
+struct ConflictMergeFixture {
+    repository: PathBuf,
+    worktree: PathBuf,
+    store: StudioStore,
+    coordinator: Arc<TaskCoordinator>,
+    session_id: String,
+    task_run_id: String,
+    agent_id: String,
+    expected_head: String,
+    source_head: String,
+}
+
+#[derive(Clone, Copy)]
+enum ConflictFixtureKind {
+    Text,
+    Binary,
+    RenameDelete,
+}
+
+impl ConflictMergeFixture {
+    async fn text(name: &str) -> Self {
+        Self::new(name, ConflictFixtureKind::Text).await
+    }
+
+    async fn binary(name: &str) -> Self {
+        Self::new(name, ConflictFixtureKind::Binary).await
+    }
+
+    async fn rename_delete(name: &str) -> Self {
+        Self::new(name, ConflictFixtureKind::RenameDelete).await
+    }
+
+    async fn new(name: &str, kind: ConflictFixtureKind) -> Self {
+        let repository = init_repository(name);
+        std::fs::create_dir_all(repository.join("src")).unwrap();
+        let base_path = match kind {
+            ConflictFixtureKind::Text => "src/shared.txt",
+            ConflictFixtureKind::Binary => "src/shared.bin",
+            ConflictFixtureKind::RenameDelete => "src/old.txt",
+        };
+        let base_content: &[u8] = match kind {
+            ConflictFixtureKind::Text | ConflictFixtureKind::RenameDelete => b"base\n",
+            ConflictFixtureKind::Binary => b"base\0blob",
+        };
+        std::fs::write(repository.join(base_path), base_content).unwrap();
+        std::fs::write(repository.join(".gitignore"), ".pure/\n").unwrap();
+        git(&repository, &["add", base_path, ".gitignore"]);
+        git(&repository, &["commit", "-m", "add shared base"]);
+        let store = task_store(&repository).await;
+        let session = task_session(&store, &repository).await;
+        let coordinator = Arc::new(TaskCoordinator::new(store.clone()));
+        let run = coordinator
+            .start_confirmed_task(&session.id, "plan", &repository)
+            .await
+            .unwrap();
+        let run = store
+            .transition_task_run(&run.id, TaskRunPhase::Implementing, None)
+            .await
+            .unwrap();
+        let agent_id = "agent-conflict".to_string();
+        let worktree = crate::agent::worktree::git_compatible_path(
+            repository
+                .join(".pure/worktrees")
+                .join(&run.id)
+                .join(&agent_id),
+        );
+        let branch = format!("pure-task-{}-{agent_id}", run.id);
+        let worktree_text = worktree.to_string_lossy().to_string();
+        git(
+            &repository,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                &branch,
+                &worktree_text,
+                &run.expected_head,
+            ],
+        );
+        let work_unit = store
+            .create_work_unit(CreateWorkUnit {
+                task_run_id: run.id.clone(),
+                title: "Implement conflicting edit".to_string(),
+                owned_paths: match kind {
+                    ConflictFixtureKind::Text => vec!["src/shared.txt".to_string()],
+                    ConflictFixtureKind::Binary => vec!["src/shared.bin".to_string()],
+                    ConflictFixtureKind::RenameDelete => {
+                        vec!["src/old.txt".to_string(), "src/new.txt".to_string()]
+                    }
+                },
+                base_commit: run.expected_head.clone(),
+                worktree_path: std::fs::canonicalize(&worktree)
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string(),
+                branch: branch.clone(),
+                attempt: 1,
+            })
+            .await
+            .unwrap();
+        store
+            .update_work_unit(
+                &work_unit.id,
+                WorkUnitStatus::Running,
+                Some(agent_id.clone()),
+            )
+            .await
+            .unwrap();
+        store
+            .create_agent_outcome(CreateAgentOutcome {
+                task_run_id: run.id.clone(),
+                work_unit_id: Some(work_unit.id),
+                agent_id: agent_id.clone(),
+                owner_path: "/root".to_string(),
+                initiated_by: "planner".to_string(),
+                requested_by_call_id: "call-conflict".to_string(),
+                role: "executor".to_string(),
+                status: AgentOutcomeStatus::Running,
+                attempt: 1,
+            })
+            .await
+            .unwrap();
+        match kind {
+            ConflictFixtureKind::Text => {
+                std::fs::write(worktree.join("src/shared.txt"), "executor\n").unwrap();
+                git(&worktree, &["add", "src/shared.txt"]);
+            }
+            ConflictFixtureKind::Binary => {
+                std::fs::write(worktree.join("src/shared.bin"), b"executor\0blob").unwrap();
+                git(&worktree, &["add", "src/shared.bin"]);
+            }
+            ConflictFixtureKind::RenameDelete => {
+                git(&worktree, &["mv", "src/old.txt", "src/new.txt"]);
+            }
+        }
+        git(&worktree, &["commit", "-m", "executor conflicting edit"]);
+        let source_head = git_output(&worktree, &["rev-parse", "HEAD"]);
+        coordinator
+            .submit_delivery(
+                &SubagentContext {
+                    id: agent_id.clone(),
+                    parent_id: Some("/root".to_string()),
+                    agent_path: Some(format!("/root/{agent_id}")),
+                    role: "executor".to_string(),
+                    task: "Implement conflicting edit".to_string(),
+                    depth: 1,
+                },
+                &worktree,
+                &source_head,
+                "test passed",
+            )
+            .await
+            .unwrap();
+        match kind {
+            ConflictFixtureKind::Text => {
+                std::fs::write(repository.join("src/shared.txt"), "planner branch\n").unwrap();
+                git(&repository, &["add", "src/shared.txt"]);
+            }
+            ConflictFixtureKind::Binary => {
+                std::fs::write(repository.join("src/shared.bin"), b"planner\0blob").unwrap();
+                git(&repository, &["add", "src/shared.bin"]);
+            }
+            ConflictFixtureKind::RenameDelete => {
+                git(&repository, &["rm", "src/old.txt"]);
+            }
+        }
+        git(&repository, &["commit", "-m", "main conflicting edit"]);
+        let expected_head = git_output(&repository, &["rev-parse", "HEAD"]);
+        assert!(
+            store
+                .compare_and_set_task_head(&run.id, &run.expected_head, &expected_head)
+                .await
+                .unwrap()
+        );
+        Self {
+            repository,
+            worktree,
+            store,
+            coordinator,
+            session_id: session.id,
+            task_run_id: run.id,
+            agent_id,
+            expected_head,
+            source_head,
+        }
+    }
+
+    fn cleanup_conflict(self) {
+        let _ = Command::new("git")
+            .arg("-C")
+            .arg(&self.repository)
+            .args(["merge", "--abort"])
+            .output();
+        self.coordinator.suspend();
+        remove_repository(self.repository);
+    }
+}
+
 impl DeliveryFixture {
     async fn new(name: &str, owned_paths: Vec<&str>) -> Self {
         Self::new_configured(name, owned_paths, 1, true).await
@@ -1248,7 +3057,7 @@ impl DeliveryFixture {
             .unwrap();
         let subagent = SubagentContext {
             id: "agent-1".to_string(),
-            parent_id: Some("root".to_string()),
+            parent_id: Some("/root".to_string()),
             agent_path: Some("root/agent-1".to_string()),
             role: "executor".to_string(),
             task: "Implement delivery".to_string(),
@@ -1260,7 +3069,7 @@ impl DeliveryFixture {
                 task_run_id: run.id,
                 work_unit_id: link_work_unit.then(|| work_unit.id.clone()),
                 agent_id: subagent.id.clone(),
-                owner_path: "root".to_string(),
+                owner_path: "/root".to_string(),
                 initiated_by: "planner".to_string(),
                 requested_by_call_id: "call-spawn".to_string(),
                 role: subagent.role.clone(),
@@ -2238,6 +4047,9 @@ fn init_repository(name: &str) -> PathBuf {
     git(&path, &["checkout", "-b", "main"]);
     git(&path, &["config", "user.email", "pure@example.invalid"]);
     git(&path, &["config", "user.name", "Pure Test"]);
+    git(&path, &["config", "core.autocrlf", "false"]);
+    git(&path, &["config", "commit.gpgSign", "false"]);
+    git(&path, &["config", "merge.renames", "true"]);
     std::fs::write(path.join("README.md"), "initial\n").unwrap();
     git(&path, &["add", "README.md"]);
     git(&path, &["commit", "-m", "initial"]);

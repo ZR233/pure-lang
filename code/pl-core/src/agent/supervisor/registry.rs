@@ -2,6 +2,8 @@ use pl_protocol::PureError;
 
 use super::snapshot::unix_seconds;
 use super::state::AgentEntry;
+#[cfg(test)]
+use crate::agent::worktree::WorktreeHandle;
 use crate::agent::worktree::{CloseDisposition, WorktreeRef};
 use pl_protocol::SubAgentActivityKind;
 
@@ -11,6 +13,37 @@ use super::{
 };
 
 impl AgentSupervisor {
+    #[cfg(test)]
+    pub(crate) async fn register_durable_worktree_for_test(
+        &self,
+        agent_id: &str,
+        worktree: WorktreeHandle,
+    ) {
+        let record = AgentRecord {
+            id: agent_id.to_string(),
+            path: format!("/root/{agent_id}"),
+            parent_path: Some(AgentPath::ROOT.to_string()),
+            role: "executor".to_string(),
+            task: "durable executor".to_string(),
+            status: AgentStatus::Completed,
+            summary: Some("delivered".to_string()),
+            error: None,
+            reason: None,
+            budget_limit_kind: None,
+            budget_usage: None,
+            depth: 1,
+            updated_at: unix_seconds(),
+        };
+        let mut entry = AgentEntry::new(record.clone());
+        entry.worktree = Some(worktree);
+        let mut state = self.state.lock().await;
+        state
+            .path_to_id
+            .insert(record.path.clone(), record.id.clone());
+        state.agents.insert(record.id.clone(), entry);
+        state.mark_activity();
+    }
+
     pub async fn spawn_agent(
         &self,
         input: AgentSpawnInput,

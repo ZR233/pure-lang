@@ -55,6 +55,10 @@ pub(crate) struct TaskCoordinator {
         Mutex<Option<super::design::DesignCommitTestBarrier>>,
     #[cfg(test)]
     pub(super) fail_design_compensation: std::sync::atomic::AtomicBool,
+    #[cfg(test)]
+    pub(super) merge_cleanup_barrier: Mutex<Option<super::merge::MergeCleanupTestBarrier>>,
+    #[cfg(test)]
+    pub(super) merge_after_commit_barrier: Mutex<Option<super::merge::MergeCommitTestBarrier>>,
 }
 
 /// 持有期间串行化任务分支变更，并阻止 executor 基于中间 HEAD 分配。
@@ -81,6 +85,10 @@ impl TaskCoordinator {
             design_before_rollback_barrier: Mutex::new(None),
             #[cfg(test)]
             fail_design_compensation: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(test)]
+            merge_cleanup_barrier: Mutex::new(None),
+            #[cfg(test)]
+            merge_after_commit_barrier: Mutex::new(None),
         }
     }
 
@@ -214,7 +222,22 @@ impl TaskCoordinator {
             {
                 continue;
             }
-            let snapshot = match inspect_repository(&run.workspace_root, true).await {
+            if run.phase == TaskRunPhase::Merging {
+                match self.recover_merging_run(&run).await {
+                    Ok(super::merge::MergeRestartRecovery::Resume(recovered_run)) => {
+                        recovered.push(*recovered_run);
+                    }
+                    Ok(super::merge::MergeRestartRecovery::Blocked) => {}
+                    Err(error) => {
+                        self.block_run(&run, format!("merge recovery failed: {error}"))
+                            .await?;
+                    }
+                }
+                continue;
+            }
+            let resolving_conflict = run.phase == TaskRunPhase::ResolvingConflict;
+            let snapshot = match inspect_repository(&run.workspace_root, !resolving_conflict).await
+            {
                 Ok(snapshot) => snapshot,
                 Err(error) => {
                     self.block_run(&run, format!("repository recovery failed: {error}"))
@@ -225,6 +248,27 @@ impl TaskCoordinator {
             if let Err(reason) = validate_snapshot(&run, &snapshot) {
                 self.block_run(&run, reason.to_string()).await?;
                 continue;
+            }
+            if resolving_conflict {
+                let records = self.store.list_merge_records(&run.id).await?;
+                let conflicted = records
+                    .iter()
+                    .filter(|record| record.status == super::MergeStatus::Conflicted)
+                    .collect::<Vec<_>>();
+                let result = match conflicted.as_slice() {
+                    [record] => super::merge::validate_conflict_recovery(&run, record).await,
+                    [] => Err(anyhow::anyhow!(
+                        "resolving-conflict run has no conflicted merge record"
+                    )),
+                    _ => Err(anyhow::anyhow!(
+                        "resolving-conflict run has multiple conflicted merge records"
+                    )),
+                };
+                if let Err(error) = result {
+                    self.block_run(&run, format!("conflict recovery failed: {error}"))
+                        .await?;
+                    continue;
+                }
             }
             recovered.push(run);
         }
@@ -339,7 +383,7 @@ impl TaskCoordinator {
             .is_some_and(|owner| owner == &run.id)
     }
 
-    fn release_owned_process_lease(&self, task_run_id: &str) {
+    pub(super) fn release_owned_process_lease(&self, task_run_id: &str) {
         let mut owned = self
             .owned_process_leases
             .lock()
