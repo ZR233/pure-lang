@@ -87,9 +87,8 @@ class SessionStatusBar extends ConsumerWidget {
                   ),
                   const SizedBox(width: 8),
                   _PhaseReadout(
-                    phase:
-                        state.activeInteraction?.kind.name ??
-                        state.turnPhase.name,
+                    turnPhase: state.turnPhase,
+                    interactionKind: state.activeInteraction?.kind,
                   ),
                 ],
               ),
@@ -487,13 +486,17 @@ String _formatStatusCount(int value) {
 }
 
 class _PhaseReadout extends StatelessWidget {
-  const _PhaseReadout({required this.phase});
+  const _PhaseReadout({required this.turnPhase, required this.interactionKind});
 
-  final String phase;
+  final TurnPhase turnPhase;
+  final InteractionKind? interactionKind;
 
   @override
   Widget build(BuildContext context) {
-    final idle = phase == TurnPhase.idle.name;
+    final idle = interactionKind == null && turnPhase == TurnPhase.idle;
+    final label = interactionKind == null
+        ? context.turnPhaseLabel(turnPhase)
+        : context.interactionKindLabel(interactionKind!);
     final foreground = idle ? context.studioInkSoft : StudioColors.clayDeep;
     return SizedBox(
       height: 26,
@@ -513,7 +516,7 @@ class _PhaseReadout extends StatelessWidget {
             ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 120),
               child: Text(
-                phase,
+                label,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: context.text.labelSmall?.copyWith(
