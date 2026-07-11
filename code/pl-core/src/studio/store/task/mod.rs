@@ -1,4 +1,7 @@
 mod allocation;
+mod continuation;
+#[cfg(test)]
+pub(crate) use continuation::ContinuationSnapshotTestBarrier;
 mod delivery;
 mod merge;
 mod outcome;

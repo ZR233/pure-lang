@@ -113,9 +113,10 @@ impl StudioRuntime {
         let (event_tx, event_rx) = tokio::sync::broadcast::channel(4096);
         let event_runtime = self.clone();
         let event_session_id = session_id.to_string();
+        let event_turn_id = turn_id.clone();
         let event_task = tokio::spawn(async move {
             event_runtime
-                .drain_agent_events(event_session_id, event_rx)
+                .drain_prompt_agent_events(event_session_id, event_turn_id, event_rx)
                 .await;
         });
         let mut recorder = TraceRecorder::new(session_id.to_string(), event_tx.clone(), 0);
@@ -127,10 +128,6 @@ impl StudioRuntime {
         let _ = event_task.await;
         let result = result?;
         let trace_events = result.trace_events.clone();
-        #[cfg(test)]
-        if let Some(barrier) = &self.prompt_completion_barrier {
-            let _ = barrier.pause_once().await;
-        }
         let _post_turn_guard = self.post_turn_lock.lock().await;
         if !matches!(
             self.runtime_snapshot().status,

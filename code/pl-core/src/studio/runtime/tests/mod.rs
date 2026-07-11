@@ -77,6 +77,17 @@ async fn serve_delayed_sse() -> (
     oneshot::Receiver<()>,
     oneshot::Sender<()>,
 ) {
+    serve_delayed_sse_body("data: [DONE]\n\n".to_string()).await
+}
+
+async fn serve_delayed_sse_body(
+    sse_body: String,
+) -> (
+    String,
+    tokio::task::JoinHandle<()>,
+    oneshot::Receiver<()>,
+    oneshot::Sender<()>,
+) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let (accepted_tx, accepted_rx) = oneshot::channel();
@@ -97,7 +108,6 @@ async fn serve_delayed_sse() -> (
         }
         let _ = accepted_tx.send(());
         let _ = release_rx.await;
-        let sse_body = "data: [DONE]\n\n";
         let response = format!(
             "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
             sse_body.len(),
@@ -110,57 +120,58 @@ async fn serve_delayed_sse() -> (
     (format!("http://{addr}"), handle, accepted_rx, release_tx)
 }
 
-async fn serve_sse_then_delayed_sse(
+async fn serve_two_delayed_sse(
     first_sse_body: String,
+    second_sse_body: String,
 ) -> (
     String,
     tokio::task::JoinHandle<()>,
     oneshot::Receiver<()>,
     oneshot::Sender<()>,
+    oneshot::Receiver<()>,
+    oneshot::Sender<()>,
 ) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
+    let (first_accepted_tx, first_accepted_rx) = oneshot::channel();
+    let (first_release_tx, first_release_rx) = oneshot::channel();
     let (second_accepted_tx, second_accepted_rx) = oneshot::channel();
     let (second_release_tx, second_release_rx) = oneshot::channel();
     let handle = tokio::spawn(async move {
-        let mut second_accepted_tx = Some(second_accepted_tx);
-        let mut second_release_rx = Some(second_release_rx);
-        for (index, sse_body) in [first_sse_body, "data: [DONE]\n\n".to_string()]
-            .into_iter()
-            .enumerate()
-        {
+        for (sse_body, accepted, release) in [
+            (first_sse_body, first_accepted_tx, first_release_rx),
+            (second_sse_body, second_accepted_tx, second_release_rx),
+        ] {
             let (mut socket, _) = listener.accept().await.unwrap();
             let mut buffer = Vec::new();
             let mut temp = [0_u8; 1024];
             loop {
-                let n = socket.read(&mut temp).await.unwrap();
-                assert_ne!(n, 0);
+                let n = socket.read(&mut temp).await.unwrap_or(0);
+                if n == 0 {
+                    return;
+                }
                 buffer.extend_from_slice(&temp[..n]);
                 if buffer.windows(4).any(|window| window == b"\r\n\r\n") {
                     break;
                 }
             }
-            if index == 1 {
-                if let Some(sender) = second_accepted_tx.take() {
-                    let _ = sender.send(());
-                }
-                if let Some(receiver) = second_release_rx.take() {
-                    let _ = receiver.await;
-                }
-            }
+            let _ = accepted.send(());
+            let _ = release.await;
             let response = format!(
                 "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
                 sse_body.len(),
                 sse_body
             );
-            socket.write_all(response.as_bytes()).await.unwrap();
-            socket.shutdown().await.unwrap();
+            let _ = socket.write_all(response.as_bytes()).await;
+            let _ = socket.shutdown().await;
         }
     });
 
     (
         format!("http://{addr}"),
         handle,
+        first_accepted_rx,
+        first_release_tx,
         second_accepted_rx,
         second_release_tx,
     )

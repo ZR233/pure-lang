@@ -18,6 +18,7 @@ pub(crate) struct ContinuationRequest {
     pub(crate) task_run_id: String,
     pub(crate) session_id: String,
     pub(crate) reason: ContinuationReason,
+    pub(crate) lifecycle_epoch: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,7 +49,7 @@ impl ContinuationScheduler {
         session_turn_state: SessionTurnState,
     ) -> Option<ContinuationClaim> {
         let mut scheduler = self.state.lock().await;
-        if !scheduler.enabled {
+        if !scheduler.enabled || request.lifecycle_epoch != scheduler.lifecycle_epoch {
             return None;
         }
         let state = scheduler
@@ -115,7 +116,7 @@ impl ContinuationScheduler {
 
     pub(crate) async fn defer(&self, claim: ContinuationClaim) {
         let mut scheduler = self.state.lock().await;
-        if !scheduler.enabled {
+        if !scheduler.enabled || claim.request.lifecycle_epoch != scheduler.lifecycle_epoch {
             return;
         }
         let Some(state) = scheduler.sessions.get_mut(&claim.request.session_id) else {
@@ -141,6 +142,9 @@ impl ContinuationScheduler {
         turn_id: &str,
     ) -> Option<ContinuationClaim> {
         let mut scheduler = self.state.lock().await;
+        if claim.request.lifecycle_epoch != scheduler.lifecycle_epoch {
+            return None;
+        }
         let session_id = &claim.request.session_id;
         let state = scheduler.sessions.get_mut(session_id)?;
         let active = state.active.as_mut()?;
@@ -161,6 +165,9 @@ impl ContinuationScheduler {
 
     pub(crate) async fn cancel_claim(&self, claim: &ContinuationClaim) -> bool {
         let mut scheduler = self.state.lock().await;
+        if claim.request.lifecycle_epoch != scheduler.lifecycle_epoch {
+            return false;
+        }
         let Some(state) = scheduler.sessions.get_mut(&claim.request.session_id) else {
             return false;
         };
@@ -182,8 +189,10 @@ impl ContinuationScheduler {
         scheduler.sessions.clear();
     }
 
-    pub(crate) async fn resume(&self) {
-        self.state.lock().await.enabled = true;
+    pub(crate) async fn resume(&self, lifecycle_epoch: u64) {
+        let mut scheduler = self.state.lock().await;
+        scheduler.lifecycle_epoch = lifecycle_epoch;
+        scheduler.enabled = true;
     }
 
     #[cfg(test)]
@@ -194,6 +203,7 @@ impl ContinuationScheduler {
 
 struct SchedulerState {
     enabled: bool,
+    lifecycle_epoch: u64,
     sessions: HashMap<String, SessionContinuation>,
 }
 
@@ -201,6 +211,7 @@ impl Default for SchedulerState {
     fn default() -> Self {
         Self {
             enabled: true,
+            lifecycle_epoch: 1,
             sessions: HashMap::new(),
         }
     }
