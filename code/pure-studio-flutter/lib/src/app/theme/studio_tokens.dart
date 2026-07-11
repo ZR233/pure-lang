@@ -33,9 +33,19 @@ final class StudioRadii {
 
   static const xs = 6.0;
   static const sm = 8.0;
-  static const md = 12.0;
-  static const lg = 14.0;
+  static const md = 8.0;
+  static const lg = 8.0;
   static const pill = 999.0;
+}
+
+final class StudioLayout {
+  const StudioLayout._();
+
+  static const sidebarWidth = 232.0;
+  static const compactRailWidth = 60.0;
+  static const conversationWidth = 860.0;
+  static const settingsNavigationWidth = 196.0;
+  static const compactBreakpoint = 900.0;
 }
 
 final class StudioShadows {

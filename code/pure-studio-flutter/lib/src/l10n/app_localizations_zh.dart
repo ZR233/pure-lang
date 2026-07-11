@@ -512,6 +512,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsOpenDetails => '打开详情';
 
   @override
+  String get settingsProviderActions => 'Provider 操作';
+
+  @override
   String get settingsEditProvider => '编辑 provider';
 
   @override
@@ -1370,6 +1373,9 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get settingsOpenDetails => '打开详情';
+
+  @override
+  String get settingsProviderActions => 'Provider 操作';
 
   @override
   String get settingsEditProvider => '编辑 provider';

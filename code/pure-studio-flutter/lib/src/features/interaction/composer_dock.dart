@@ -23,11 +23,13 @@ class ComposerDock extends ConsumerWidget {
     return SafeArea(
       top: false,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(26, 8, 26, 18),
+        padding: const EdgeInsets.fromLTRB(12, 7, 12, 12),
         child: Align(
           alignment: Alignment.center,
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 740),
+            constraints: const BoxConstraints(
+              maxWidth: StudioLayout.conversationWidth,
+            ),
             child: interaction == null
                 ? _PromptComposer(state: state)
                 : _InteractionDock(state: state, interaction: interaction),
@@ -82,7 +84,7 @@ class _PromptComposerState extends ConsumerState<_PromptComposer> {
         widget.state.composerText.trim().isNotEmpty &&
         !widget.state.isBusy;
     return StudioPanel(
-      backgroundColor: StudioColors.white,
+      backgroundColor: colors.surfaceContainerLowest,
       borderColor: colors.outlineVariant.withValues(alpha: 0.86),
       radius: StudioRadii.lg,
       shadow: true,

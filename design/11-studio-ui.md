@@ -143,7 +143,7 @@ Flutter 状态栏保留模式切换、planner 模型选择、reasoning effort、
 
 Flutter `SessionStatusBar` 展示同一组信息，并使用 Material 3 的 compact controls、tooltip 和 hover/focus 可达的弹层承载详情。Flutter 状态栏只消费 Riverpod selector，不直接订阅 bridge stream 或解析 raw JSON。
 
-Flutter context readout 对齐 Codex 桌面 app 的圆形用量 ring：状态栏中只显示无数字圆形进度，不直接显示 `contextTokens/contextWindow`；hover/focus 详情中展示上下文数字、百分比、总 token 和模型。费用、active skills、MCP、LSP 与 subagent 活动必须继续作为独立状态 chip/readout 展示，不能合并进 context tooltip 后从状态栏消失。
+Flutter context readout 使用紧凑百分比文字，不直接显示 `contextTokens/contextWindow`；hover/focus 详情中可以使用圆形进度并展示上下文数字、百分比、总 token 和模型。费用继续作为独立文字 readout；active skills、MCP、LSP 与 subagent 统一进入一个活动摘要和分区弹层，不能合并进 context 或费用详情，也不能在其他状态弹层重复展示 agent 数量。
 
 状态栏、interaction dock、timeline 工具/计划/提问摘要中的 UI 文案必须走 i18n；模型名称、provider 名称、模型 slug、tool 名称、agent 路径、reasoning effort 等来自配置或运行时的领域值按原始字符串透传展示，不做翻译或本地化映射。这样 zh-CN/en 只负责固定 UI 标签与状态说明，不改变用户配置、provider 返回值或协议枚举的可辨识性。
 
@@ -187,6 +187,12 @@ Flutter 端使用 Material 3 的工具型界面表达同一信息架构：`Navig
 Flutter 主聊天界面视觉应靠拢 Codex 桌面版的工作台气质：中性色浅色主题、低对比侧栏、白色阅读面、单一聚焦 composer 托盘和轻量状态信息行。Timeline 中普通 assistant 正文不使用卡片背景；只有 tool、reasoning、plan、agent 等结构化 part 使用轻边框面板。用户消息使用窄宽度浅色气泡，避免大面积品牌色。状态栏默认只展示当前模式、planner 模型、上下文、费用与活动能力摘要，不重复显示已在模型选择控件中的 runtime model；高频或诊断信息通过 tooltip/popover 承载。
 
 Flutter shell 的二级视觉层级继续收敛：顶部 header 只展示当前会话标题、项目名和短路径，不放大图标或重复品牌；侧栏底部操作使用低饱和按钮，只有发送按钮保留明显主操作色；session row 用 mode 小图标和轻量选中底色表达状态。Composer 的底部控制行承载权限、附件/后续工具入口和发送/停止，输入区域保持单一视觉焦点，不再把状态栏和输入控件混成一排同等权重按钮。
+
+Studio 采用紧凑控制台密度，但紧凑不等于堆叠入口。面板圆角不得超过 `8px`，阴影只用于 Composer、interaction dock 和 popover；普通设置分组、timeline 结构化行与 Provider 列表使用单层边框，不在卡片中继续嵌套卡片。聊天阅读流、状态区和 Composer 共享同一内容宽度，侧栏与设置导航使用统一布局 token，窗口变窄时按可用宽度切换为 icon rail。
+
+状态栏使用无边框、无常驻底色的文字控件和读数。模式、Planner 模型与 reasoning effort 是可点击选择器，只在 hover/focus 时显示轻背景；context、费用、活动与 phase 是文字读数，通过 popover 展示详情。Skills、MCP、LSP 与 agent 只保留一个活动摘要入口，header 不再重复显示 phase 或 busy spinner。权限模式仍可在 Composer 快捷切换，Security 页提供完整配置说明，但不得再用第二张“当前模式”卡片重复同一状态。
+
+设置页保持 Providers、Instructions、Skills、Roles、MCP、Security、General 七个领域入口。普通设置使用单层 group + divider；重复实体才使用紧凑列表。Provider 使用紧凑单列列表，整行进入详情，不再额外显示“打开”按钮，默认、刷新、编辑、删除统一进入 row overflow menu。列表只承载可扫描摘要，完整模型、凭据和工具明细留在详情页；Zhipu Coding Plan 例外地在列表中直接按 `fiveHour -> weekly -> mcpMonthly` 展示三条细进度，包括剩余比例和重置时间，缺失的 quota 不得伪造。
 
 Flutter 交互组件优先使用 Material 3 原生控件，按业务领域组织：shell 负责双栏、header、footer 与侧栏，status 负责状态栏 select/readout/popover，interaction 负责不同 pending interaction 的 dock，timeline 负责消息 part 与计划卡。`MaterialApp.router` 只负责路由和顶层主题组合，业务 wiring 由 Riverpod controller 与 feature widget 承担。
 

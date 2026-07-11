@@ -1,84 +1,284 @@
+import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pure_studio_flutter/src/app/theme/material3_theme.dart';
 import 'package:pure_studio_flutter/src/data/frb/studio_api.dart';
 import 'package:pure_studio_flutter/src/data/repositories/studio_repository.dart';
+import 'package:pure_studio_flutter/src/domain/models/studio_models.dart';
+import 'package:pure_studio_flutter/src/features/settings/settings_page.dart';
 import 'package:pure_studio_flutter/src/features/shell/studio_shell.dart';
 import 'package:pure_studio_flutter/src/l10n/app_localizations.dart';
 
+import 'support/responsive_visual_fixture.dart';
+
+const _visualViewports = [
+  (name: '1280x800', size: Size(1280, 800), brightness: Brightness.dark),
+  (name: '900x700', size: Size(900, 700), brightness: Brightness.light),
+  (name: '760x720', size: Size(760, 720), brightness: Brightness.light),
+];
+
+const _activityLabel = '1 skill · 1 MCP · 1 LSP · 2 agents';
+const _visualFontPath = 'test/assets/fonts/NotoSans-Variable.ttf';
+const _visualFontFamily = 'PureStudioVisualTest';
+const _visualFontFamilies = [
+  _visualFontFamily,
+  'Inter',
+  'Noto Sans SC',
+  'Segoe UI',
+  'Consolas',
+  'JetBrains Mono',
+];
+final _updateVisuals =
+    Platform.environment['PURE_CAPTURE_VISUALS']?.toLowerCase() == 'true' ||
+    const bool.fromEnvironment('PURE_CAPTURE_VISUALS');
+
+class _VisualStudioApi extends DemoStudioApi {
+  _VisualStudioApi() : visualState = responsiveVisualState();
+
+  final StudioState visualState;
+
+  @override
+  Future<StudioState> bootstrap() async => visualState;
+
+  @override
+  Future<StudioState> loadSessionState(String sessionId) async => visualState;
+
+  @override
+  Future<List<ProviderUsageView>> loadProviderUsages() async =>
+      visualState.providerUsages;
+
+  @override
+  Stream<Object> subscribeGlobalEvents() => const Stream.empty();
+
+  @override
+  Stream<Object> subscribeSessionEvents(String sessionId) =>
+      const Stream.empty();
+}
+
 void main() {
-  testWidgets('capture status detail screenshots', (tester) async {
-    if (!const bool.fromEnvironment('PURE_CAPTURE_VISUALS')) {
-      return;
-    }
+  TestWidgetsFlutterBinding.ensureInitialized();
+  setUpAll(_loadVisualFonts);
 
-    tester.view.physicalSize = const Size(1280, 800);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
+  for (final viewport in _visualViewports) {
+    testWidgets(
+      'capture chat at ${viewport.name} (${viewport.brightness.name})',
+      (tester) async {
+        _configureVisualView(tester, viewport.size);
+        final chatBoundary = await _pumpVisual(
+          tester,
+          home: const StudioShell(),
+          brightness: viewport.brightness,
+        );
+        expect(tester.takeException(), isNull);
+        _expectVisualFontApplied(find.text(responsiveVisualSessionTitle));
+        _expectAllTextTruncated(find.text(responsiveVisualSessionTitle));
+        await _verifyVisual(
+          chatBoundary,
+          'chat-${viewport.name}.png',
+          viewport.size,
+        );
+      },
+    );
 
-    final boundaryKey = GlobalKey();
-    await tester.pumpWidget(
-      RepaintBoundary(
-        key: boundaryKey,
-        child: ProviderScope(
-          overrides: [studioApiProvider.overrideWithValue(DemoStudioApi())],
-          child: MaterialApp(
-            locale: const Locale('en'),
-            localizationsDelegates: AppLocalizations.localizationsDelegates,
-            supportedLocales: AppLocalizations.supportedLocales,
-            theme: pureStudioTheme(Brightness.light),
-            home: const StudioShell(),
-          ),
+    testWidgets('capture activity popover at ${viewport.name} '
+        '(${viewport.brightness.name})', (tester) async {
+      _configureVisualView(tester, viewport.size);
+      final chatBoundary = await _pumpVisual(
+        tester,
+        home: const StudioShell(),
+        brightness: viewport.brightness,
+      );
+      final activityTrigger = find.text(_activityLabel);
+      expect(activityTrigger, findsOneWidget);
+      await tester.ensureVisible(activityTrigger);
+      await tester.pump();
+      final triggerRect = tester.getRect(activityTrigger);
+      await tester.tapAt(Offset(triggerRect.left + 8, triggerRect.center.dy));
+      await tester.pump(const Duration(milliseconds: 250));
+      expect(find.text('ACTIVE CAPABILITIES'), findsOneWidget);
+      expect(find.text('SUBAGENTS'), findsOneWidget);
+      _expectAllTextTruncated(find.text(responsiveVisualSessionTitle));
+      expect(tester.takeException(), isNull);
+      await _verifyVisual(
+        chatBoundary,
+        'activity-popover-${viewport.name}.png',
+        viewport.size,
+      );
+    });
+
+    testWidgets('capture provider settings at ${viewport.name} '
+        '(${viewport.brightness.name})', (tester) async {
+      _configureVisualView(tester, viewport.size);
+      final settingsBoundary = await _pumpVisual(
+        tester,
+        home: const SettingsPage(),
+        brightness: viewport.brightness,
+      );
+      expect(find.text('Search providers'), findsOneWidget);
+      expect(find.text(responsiveVisualProviderName), findsOneWidget);
+      _expectAllTextTruncated(find.text(responsiveVisualProviderName));
+      expect(tester.takeException(), isNull);
+      await _verifyVisual(
+        settingsBoundary,
+        'provider-settings-${viewport.name}.png',
+        viewport.size,
+      );
+    });
+  }
+}
+
+Future<void> _loadVisualFonts() async {
+  final bytes = await File(_visualFontPath).readAsBytes();
+  for (final family in _visualFontFamilies) {
+    final loader = FontLoader(family)
+      ..addFont(Future.value(ByteData.sublistView(bytes)));
+    await loader.load();
+  }
+  final materialIcons = await rootBundle.load(
+    'fonts/MaterialIcons-Regular.otf',
+  );
+  final iconLoader = FontLoader('MaterialIcons')
+    ..addFont(Future.value(materialIcons));
+  await iconLoader.load();
+}
+
+void _configureVisualView(WidgetTester tester, Size size) {
+  tester.view.physicalSize = size;
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+}
+
+Future<GlobalKey> _pumpVisual(
+  WidgetTester tester, {
+  required Widget home,
+  required Brightness brightness,
+}) async {
+  final boundaryKey = GlobalKey();
+  await tester.pumpWidget(
+    RepaintBoundary(
+      key: boundaryKey,
+      child: ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(_VisualStudioApi())],
+        child: MaterialApp(
+          debugShowCheckedModeBanner: false,
+          locale: const Locale('en'),
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          theme: _visualTheme(brightness),
+          home: home,
         ),
       ),
-    );
-    await tester.pump(const Duration(milliseconds: 600));
+    ),
+  );
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 600));
+  return boundaryKey;
+}
 
-    final outputDir = Directory('output/visual-check');
-    outputDir.createSync(recursive: true);
-    await _capture(boundaryKey, '${outputDir.path}/status-baseline.png');
+ThemeData _visualTheme(Brightness brightness) {
+  final theme = pureStudioTheme(brightness);
+  return theme.copyWith(
+    textTheme: theme.textTheme.apply(fontFamily: _visualFontFamily),
+    primaryTextTheme: theme.primaryTextTheme.apply(
+      fontFamily: _visualFontFamily,
+    ),
+    appBarTheme: theme.appBarTheme.copyWith(
+      titleTextStyle: theme.appBarTheme.titleTextStyle?.copyWith(
+        fontFamily: _visualFontFamily,
+      ),
+    ),
+  );
+}
 
-    final contextGesture = await tester.createGesture(
-      kind: ui.PointerDeviceKind.mouse,
-    );
-    await contextGesture.addPointer();
-    await contextGesture.moveTo(
-      tester.getCenter(find.bySemanticsLabel('Context')),
-    );
-    await tester.pump(const Duration(milliseconds: 250));
-    await _capture(boundaryKey, '${outputDir.path}/status-context-detail.png');
-    await contextGesture.removePointer();
-    await tester.pump(const Duration(milliseconds: 250));
+Future<void> _verifyVisual(
+  GlobalKey key,
+  String filename,
+  Size expectedSize,
+) async {
+  final imageFuture = captureImage(key.currentContext! as Element);
+  await TestWidgetsFlutterBinding.instance.runAsync(() async {
+    final image = await imageFuture;
+    try {
+      expect(image.width, expectedSize.width.toInt());
+      expect(image.height, expectedSize.height.toInt());
+      final data = await image.toByteData(format: ui.ImageByteFormat.png);
+      final bytes = data!.buffer.asUint8List();
+      expect(bytes.length, greaterThan(1000));
 
-    final capabilityText = find.text('2 skills · 1 MCP · 1 LSP');
-    final capabilityRect = tester.getRect(capabilityText);
-    await tester.tapAt(
-      Offset(capabilityRect.left + 8, capabilityRect.center.dy),
-    );
-    await tester.pump(const Duration(milliseconds: 250));
-    await _capture(
-      boundaryKey,
-      '${outputDir.path}/status-capability-detail.png',
-    );
+      final baseline = File('output/visual-check/$filename');
+      if (!_updateVisuals) {
+        expect(
+          baseline.existsSync(),
+          isTrue,
+          reason:
+              'Missing visual baseline $filename. Set '
+              'PURE_CAPTURE_VISUALS=true to create it.',
+        );
+        final expectedBytes = baseline.readAsBytesSync();
+        expect(
+          _firstByteDifference(bytes, expectedBytes),
+          isNull,
+          reason:
+              'Visual baseline drifted for $filename '
+              '(current ${bytes.length} bytes, '
+              'baseline ${expectedBytes.length} bytes). Set '
+              'PURE_CAPTURE_VISUALS=true only when intentionally updating.',
+        );
+        return;
+      }
 
-    final agentText = find.text('4 agents · 2 running');
-    final agentRect = tester.getRect(agentText);
-    await tester.tapAt(Offset(agentRect.left + 8, agentRect.center.dy));
-    await tester.pump(const Duration(milliseconds: 250));
-    await _capture(boundaryKey, '${outputDir.path}/status-agent-detail.png');
+      for (final directory in [
+        Directory('output/visual-check'),
+        Directory('../../.superpowers/sdd/task-4-screenshots'),
+      ]) {
+        directory.createSync(recursive: true);
+        File('${directory.path}/$filename').writeAsBytesSync(bytes);
+      }
+    } finally {
+      image.dispose();
+    }
   });
 }
 
-Future<void> _capture(GlobalKey key, String path) async {
-  final boundary =
-      key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
-  final image = await boundary.toImage(pixelRatio: 1);
-  final data = await image.toByteData(format: ui.ImageByteFormat.png);
-  File(path).writeAsBytesSync(data!.buffer.asUint8List());
+int? _firstByteDifference(Uint8List current, Uint8List baseline) {
+  if (current.length != baseline.length) {
+    return math.min(current.length, baseline.length);
+  }
+  for (var index = 0; index < current.length; index++) {
+    if (current[index] != baseline[index]) {
+      return index;
+    }
+  }
+  return null;
+}
+
+void _expectAllTextTruncated(Finder finder) {
+  final paragraphs = [
+    for (final element in finder.evaluate())
+      if (element.renderObject case final RenderParagraph paragraph) paragraph,
+  ];
+  expect(paragraphs, isNotEmpty);
+  expect(paragraphs.every((paragraph) => paragraph.didExceedMaxLines), isTrue);
+}
+
+void _expectVisualFontApplied(Finder finder) {
+  final paragraphs = [
+    for (final element in finder.evaluate())
+      if (element.renderObject case final RenderParagraph paragraph) paragraph,
+  ];
+  expect(paragraphs, isNotEmpty);
+  expect(
+    paragraphs.every(
+      (paragraph) => paragraph.text.style?.fontFamily == _visualFontFamily,
+    ),
+    isTrue,
+  );
 }

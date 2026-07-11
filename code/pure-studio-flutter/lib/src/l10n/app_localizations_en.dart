@@ -540,6 +540,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsOpenDetails => 'Open details';
 
   @override
+  String get settingsProviderActions => 'Provider actions';
+
+  @override
   String get settingsEditProvider => 'Edit provider';
 
   @override

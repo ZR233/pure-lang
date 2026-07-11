@@ -157,6 +157,7 @@
   "settingsDefaultProvider": "默认 provider",
   "settingsSetAsDefaultProvider": "设为默认",
   "settingsOpenDetails": "打开详情",
+  "settingsProviderActions": "Provider 操作",
   "settingsEditProvider": "编辑 provider",
   "settingsDeleteProvider": "删除 provider",
   "settingsNoProviderSelected": "未选择 provider",

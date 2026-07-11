@@ -7,7 +7,7 @@ import '../../shared/studio_chrome.dart';
 
 /// 子代理状态弹层。
 ///
-/// 在状态栏的「子代理」chip 上悬停或点击时展示，按 depth/parentPath
+/// 在状态栏的活动摘要上悬停或点击时展示，按 depth/parentPath
 /// 渲染树形结构，每个 agent 卡片可点击展开查看摘要、错误、路径等详情。
 class AgentDetailPanel extends StatelessWidget {
   const AgentDetailPanel({required this.agents, super.key});
@@ -28,20 +28,15 @@ class AgentDetailPanel extends StatelessWidget {
       children: [
         _AgentDetailHeader(count: agents.length, runningCount: runningCount),
         const SizedBox(height: 12),
-        ConstrainedBox(
-          constraints: const BoxConstraints(maxHeight: 360),
-          child: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                for (final agent in agents)
-                  Padding(
-                    padding: EdgeInsets.only(bottom: 6),
-                    child: AgentTreeCard(agent: agent),
-                  ),
-              ],
-            ),
-          ),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (final agent in agents)
+              Padding(
+                padding: EdgeInsets.only(bottom: 6),
+                child: AgentTreeCard(agent: agent),
+              ),
+          ],
         ),
       ],
     );
@@ -74,7 +69,7 @@ class _AgentDetailHeader extends StatelessWidget {
               fontFamily: 'Consolas',
               fontSize: 9.5,
               fontWeight: FontWeight.w600,
-              letterSpacing: 1,
+              letterSpacing: 0,
             ),
           ),
         ),

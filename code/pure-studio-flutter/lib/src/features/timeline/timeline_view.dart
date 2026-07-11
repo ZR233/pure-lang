@@ -136,7 +136,9 @@ class _TimelineViewState extends State<TimelineView> {
         Align(
           alignment: Alignment.topCenter,
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 740),
+            constraints: const BoxConstraints(
+              maxWidth: StudioLayout.conversationWidth,
+            ),
             child: ListView.builder(
               key: const ValueKey('timeline-scrollable'),
               controller: _controller,
@@ -174,7 +176,9 @@ class _TimelineViewState extends State<TimelineView> {
             child: Align(
               alignment: Alignment.bottomCenter,
               child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 740),
+                constraints: const BoxConstraints(
+                  maxWidth: StudioLayout.conversationWidth,
+                ),
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
                   child: Align(

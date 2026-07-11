@@ -1,9 +1,11 @@
 part of '../widget_test.dart';
 
 class _FakeStudioApi implements StudioApi {
-  _FakeStudioApi(this.initialState);
+  _FakeStudioApi(this.initialState, {List<ProviderUsageView>? providerUsages})
+    : providerUsages = providerUsages ?? _defaultProviderUsages;
 
   final StudioState initialState;
+  final List<ProviderUsageView> providerUsages;
   final _global = StreamController<Object>.broadcast();
   final _session = StreamController<Object>.broadcast();
   final Map<String, StudioState> sessionStates = {};
@@ -28,6 +30,7 @@ class _FakeStudioApi implements StudioApi {
   String? discoverProjectId;
   List<String> discoveredSkills = const [];
   int loadProviderUsagesCount = 0;
+  Completer<List<ProviderUsageView>>? blockedProviderUsageLoad;
 
   void emitGlobal(StudioBridgeEvent event) => _global.add(event);
 
@@ -237,25 +240,8 @@ class _FakeStudioApi implements StudioApi {
   @override
   Future<List<ProviderUsageView>> loadProviderUsages() async {
     loadProviderUsagesCount += 1;
-    return const [
-      ProviderUsageView(
-        providerId: 'deepseek',
-        updatedAt: 1,
-        status: 'ready',
-        usageKind: 'deepseekBalance',
-        balance: DeepSeekBalanceUsageView(
-          isAvailable: true,
-          balances: [
-            DeepSeekBalanceInfoView(
-              currency: 'CNY',
-              totalBalance: '88.00',
-              grantedBalance: '8.00',
-              toppedUpBalance: '80.00',
-            ),
-          ],
-        ),
-      ),
-    ];
+    final blocked = blockedProviderUsageLoad;
+    return blocked == null ? providerUsages : blocked.future;
   }
 
   @override
@@ -264,3 +250,23 @@ class _FakeStudioApi implements StudioApi {
     Map<String, Object?> draft,
   ) async {}
 }
+
+const _defaultProviderUsages = [
+  ProviderUsageView(
+    providerId: 'deepseek',
+    updatedAt: 1,
+    status: 'ready',
+    usageKind: 'deepseekBalance',
+    balance: DeepSeekBalanceUsageView(
+      isAvailable: true,
+      balances: [
+        DeepSeekBalanceInfoView(
+          currency: 'CNY',
+          totalBalance: '88.00',
+          grantedBalance: '8.00',
+          toppedUpBalance: '80.00',
+        ),
+      ],
+    ),
+  ),
+];

@@ -7,8 +7,8 @@ import '../../app/theme/studio_tokens.dart';
 import '../../l10n/studio_l10n.dart';
 import '../../shared/upward_popup_menu.dart';
 import 'agent_detail_panel.dart';
-import 'context_usage_ring.dart';
-import 'status_bar_chip.dart';
+import 'context_usage_readout.dart';
+import 'status_bar_item.dart';
 import 'status_detail_popover.dart';
 
 class SessionStatusBar extends ConsumerWidget {
@@ -23,19 +23,26 @@ class SessionStatusBar extends ConsumerWidget {
     final session = state.sessions
         .where((session) => session.id == state.selectedSessionId)
         .firstOrNull;
+    final activityLabel = _runtimeActivityLabel(
+      context,
+      runtime,
+      selectedAgents,
+    );
     return DecoratedBox(
       decoration: BoxDecoration(
         color: context.studioPaper2,
         border: Border(top: BorderSide(color: context.studioLine)),
       ),
       child: SizedBox(
-        height: 44,
+        height: 38,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 26),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
           child: Align(
             alignment: Alignment.center,
             child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 980),
+              constraints: const BoxConstraints(
+                maxWidth: StudioLayout.conversationWidth,
+              ),
               child: Row(
                 children: [
                   Expanded(
@@ -52,36 +59,34 @@ class SessionStatusBar extends ConsumerWidget {
                             _PlannerModelSelector(state: state),
                           if (_plannerEffortsForState(state).isNotEmpty)
                             _ReasoningEffortSelector(state: state),
-                          ContextUsageRing(runtime: runtime),
+                          ContextUsageReadout(runtime: runtime),
                           if (runtime.costLabel.isNotEmpty)
-                            _StatusChip(
+                            _StatusReadout(
                               label: runtime.costLabel,
                               tooltip: context.l10n.statusCost,
                               detailWidth: 260,
                               detailBuilder: (context) =>
                                   _CostDetail(runtime: runtime),
                             ),
-                          if (_runtimeCapabilityLabel(
-                            context,
-                            runtime,
-                          ).isNotEmpty)
-                            _StatusChip(
+                          if (activityLabel.isNotEmpty)
+                            _StatusReadout(
                               icon: Icons.tune_outlined,
-                              label: _runtimeCapabilityLabel(context, runtime),
+                              label: activityLabel,
                               tooltip: context.l10n.statusCapabilitiesTitle,
-                              detailWidth: 310,
-                              maxWidth: 150,
-                              detailBuilder: (context) =>
-                                  _CapabilityDetail(runtime: runtime),
+                              detailWidth: 420,
+                              maxWidth: 240,
+                              interactive: true,
+                              detailBuilder: (context) => _ActivityDetail(
+                                runtime: runtime,
+                                agents: selectedAgents,
+                              ),
                             ),
-                          if (selectedAgents.isNotEmpty)
-                            _AgentStatusChip(agents: selectedAgents),
                         ],
                       ),
                     ),
                   ),
                   const SizedBox(width: 8),
-                  _PhasePill(
+                  _PhaseReadout(
                     phase:
                         state.activeInteraction?.kind.name ??
                         state.turnPhase.name,
@@ -96,9 +101,10 @@ class SessionStatusBar extends ConsumerWidget {
   }
 }
 
-String _runtimeCapabilityLabel(
+String _runtimeActivityLabel(
   BuildContext context,
   SessionRuntimeView runtime,
+  List<StudioAgentView> agents,
 ) {
   final parts = [
     if (runtime.activeSkills.isNotEmpty)
@@ -107,6 +113,7 @@ String _runtimeCapabilityLabel(
       context.l10n.statusMcpCount(runtime.activeMcpServers.length),
     if (runtime.activeLspServers.isNotEmpty)
       context.l10n.statusLspCount(runtime.activeLspServers.length),
+    if (agents.isNotEmpty) context.l10n.statusAgentsCount(agents.length),
   ];
   return parts.join(' · ');
 }
@@ -137,8 +144,7 @@ class _SessionModeSelector extends ConsumerWidget {
             ),
           ),
       ],
-      child: _ControlChip(
-        icon: _modeIcon(mode),
+      child: _ControlItem(
         label: context.compileModeLabel(mode),
         enabled: enabled,
       ),
@@ -201,11 +207,7 @@ class _PlannerModelSelector extends ConsumerWidget {
             ),
           ),
       ],
-      child: _ControlChip(
-        icon: Icons.smart_toy_outlined,
-        label: current.model,
-        enabled: true,
-      ),
+      child: _ControlItem(label: current.model, enabled: true),
     );
   }
 }
@@ -250,33 +252,23 @@ class _ReasoningEffortSelector extends ConsumerWidget {
             ),
           ),
       ],
-      child: _ControlChip(
-        icon: Icons.schedule_outlined,
-        label: current,
-        enabled: true,
-      ),
+      child: _ControlItem(label: current, enabled: true),
     );
   }
 }
 
-class _ControlChip extends StatelessWidget {
-  const _ControlChip({
-    required this.icon,
-    required this.label,
-    required this.enabled,
-  });
+class _ControlItem extends StatelessWidget {
+  const _ControlItem({required this.label, required this.enabled});
 
-  final IconData icon;
   final String label;
   final bool enabled;
 
   @override
   Widget build(BuildContext context) {
-    return StatusBarChip(
-      icon: icon,
+    return StatusBarItem(
       label: label,
       enabled: enabled,
-      maxWidth: 160,
+      maxWidth: 140,
       trailingIcon: Icons.keyboard_arrow_down,
     );
   }
@@ -350,42 +342,15 @@ List<_PlannerModelOption> _plannerModelOptions(
   return options;
 }
 
-class _AgentStatusChip extends StatelessWidget {
-  const _AgentStatusChip({required this.agents});
-
-  final List<StudioAgentView> agents;
-
-  @override
-  Widget build(BuildContext context) {
-    final runningCount = agents.where(_agentIsActive).length;
-    final label = runningCount > 0
-        ? context.l10n.agentDetailSummary(agents.length, runningCount)
-        : context.l10n.statusAgentsCount(agents.length);
-    return StatusBarChip(
-      icon: Icons.account_tree_outlined,
-      label: label,
-      tooltip: context.l10n.statusAgentChipTooltip,
-      interactive: true,
-      enableHover: true,
-      detailWidth: 380,
-      maxWidth: 200,
-      detailBuilder: (context) => AgentDetailPanel(agents: agents),
-    );
-  }
-
-  bool _agentIsActive(StudioAgentView agent) {
-    return const {'queued', 'running', 'waiting'}.contains(agent.status);
-  }
-}
-
-class _StatusChip extends StatelessWidget {
-  const _StatusChip({
+class _StatusReadout extends StatelessWidget {
+  const _StatusReadout({
     required this.label,
     required this.tooltip,
     this.icon,
     this.detailBuilder,
     this.detailWidth = 300,
     this.maxWidth = 180,
+    this.interactive = false,
   });
 
   final IconData? icon;
@@ -394,10 +359,11 @@ class _StatusChip extends StatelessWidget {
   final WidgetBuilder? detailBuilder;
   final double detailWidth;
   final double maxWidth;
+  final bool interactive;
 
   @override
   Widget build(BuildContext context) {
-    final chip = StatusBarChip(
+    return StatusBarItem(
       icon: icon,
       label: label,
       tooltip: detailBuilder == null
@@ -406,9 +372,9 @@ class _StatusChip extends StatelessWidget {
       detailBuilder: detailBuilder,
       detailWidth: detailWidth,
       enableHover: detailBuilder == null,
+      interactive: interactive,
       maxWidth: maxWidth,
     );
-    return chip;
   }
 }
 
@@ -436,11 +402,34 @@ class _CostDetail extends StatelessWidget {
           label: context.l10n.statusTotalTokensLabel,
           value: _formatStatusCount(runtime.totalTokens),
         ),
-        if (runtime.agentCount > 0)
-          StatusDetailRow(
-            label: context.l10n.statusSubagentsSection,
-            value: context.l10n.statusAgentsCount(runtime.agentCount),
+      ],
+    );
+  }
+}
+
+class _ActivityDetail extends StatelessWidget {
+  const _ActivityDetail({required this.runtime, required this.agents});
+
+  final SessionRuntimeView runtime;
+  final List<StudioAgentView> agents;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasCapabilities =
+        runtime.activeSkills.isNotEmpty ||
+        runtime.activeMcpServers.isNotEmpty ||
+        runtime.activeLspServers.isNotEmpty;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (hasCapabilities) _CapabilityDetail(runtime: runtime),
+        if (hasCapabilities && agents.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Divider(height: 1, color: context.studioLine),
           ),
+        if (agents.isNotEmpty) AgentDetailPanel(agents: agents),
       ],
     );
   }
@@ -480,14 +469,6 @@ class _CapabilityDetail extends StatelessWidget {
             iconColor: StudioColors.ochre,
             backgroundColor: StudioColors.ochre.withValues(alpha: 0.15),
           ),
-        if (runtime.agentCount > 0)
-          StatusDetailIconRow(
-            icon: Icons.group_outlined,
-            title: context.l10n.statusSubagentsSection,
-            detail: context.l10n.statusAgentsCount(runtime.agentCount),
-            iconColor: StudioColors.rose,
-            backgroundColor: StudioColors.rose.withValues(alpha: 0.13),
-          ),
       ],
     );
   }
@@ -505,8 +486,8 @@ String _formatStatusCount(int value) {
   return buffer.toString();
 }
 
-class _PhasePill extends StatelessWidget {
-  const _PhasePill({required this.phase});
+class _PhaseReadout extends StatelessWidget {
+  const _PhaseReadout({required this.phase});
 
   final String phase;
 
@@ -514,44 +495,35 @@ class _PhasePill extends StatelessWidget {
   Widget build(BuildContext context) {
     final idle = phase == TurnPhase.idle.name;
     final foreground = idle ? context.studioInkSoft : StudioColors.clayDeep;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: idle ? context.studioPaper3 : StudioColors.claySoft,
-        border: Border.all(
-          color: idle ? context.studioLine2 : StudioColors.claySoft,
-        ),
-        borderRadius: BorderRadius.circular(StudioRadii.pill),
-      ),
-      child: SizedBox(
-        height: 26,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              DecoratedBox(
-                decoration: BoxDecoration(
-                  color: idle ? context.studioInkSoft : StudioColors.clay,
-                  borderRadius: BorderRadius.circular(StudioRadii.pill),
-                ),
-                child: const SizedBox.square(dimension: 5),
+    return SizedBox(
+      height: 26,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 7),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: idle ? context.studioInkSoft : StudioColors.clay,
+                borderRadius: BorderRadius.circular(StudioRadii.pill),
               ),
-              const SizedBox(width: 7),
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 160),
-                child: Text(
-                  phase,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: context.text.labelSmall?.copyWith(
-                    color: foreground,
-                    fontWeight: FontWeight.w500,
-                    height: 1,
-                  ),
+              child: const SizedBox.square(dimension: 5),
+            ),
+            const SizedBox(width: 7),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 120),
+              child: Text(
+                phase,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: context.text.labelSmall?.copyWith(
+                  color: foreground,
+                  fontWeight: FontWeight.w500,
+                  height: 1,
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
