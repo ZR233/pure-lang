@@ -40,6 +40,12 @@ impl StudioRuntime {
         runtime_state: StudioRuntimeState,
     ) -> Self {
         let task_coordinator = std::sync::Arc::new(TaskCoordinator::new(store.clone()));
+        let lifecycle_epoch =
+            if matches!(runtime_state.snapshot().status, StudioRuntimeStatus::Ready) {
+                1
+            } else {
+                0
+            };
         Self {
             interactions: InteractionRuntime::new(store.clone()),
             events: StudioEventRuntime::new(store.clone()),
@@ -52,6 +58,9 @@ impl StudioRuntime {
             active_turns: StudioActiveTurns::new(runtime_state),
             task_coordinator,
             lifecycle_lock: std::sync::Arc::new(tokio::sync::Mutex::new(())),
+            lifecycle_epoch: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(
+                lifecycle_epoch,
+            )),
             post_turn_lock: std::sync::Arc::new(tokio::sync::Mutex::new(())),
             continuation_scheduler: ContinuationScheduler::new(),
             continuation_launcher: None,
@@ -60,11 +69,17 @@ impl StudioRuntime {
             #[cfg(test)]
             continuation_pre_submit_barrier: None,
             #[cfg(test)]
+            continuation_post_lifecycle_barrier: None,
+            #[cfg(test)]
             continuation_launch_error_barrier: None,
             #[cfg(test)]
-            prompt_completion_barrier: None,
-            #[cfg(test)]
             prompt_finalization_barrier: None,
+            #[cfg(test)]
+            active_turn_removal_barrier: None,
+            #[cfg(test)]
+            shutdown_entry_barrier: None,
+            #[cfg(test)]
+            shutdown_after_cancel_barrier: None,
             #[cfg(test)]
             initialization_entry_barrier: None,
         }
@@ -136,7 +151,8 @@ impl StudioRuntime {
                 let ready = self
                     .runtime_state
                     .transition(StudioRuntimeStatus::Ready, None)?;
-                self.continuation_scheduler.resume().await;
+                let lifecycle_epoch = self.advance_lifecycle_epoch();
+                self.continuation_scheduler.resume(lifecycle_epoch).await;
                 for run in recovered_runs {
                     self.request_task_continuation(run.id, ContinuationReason::Recovery)
                         .await;
@@ -170,6 +186,10 @@ impl StudioRuntime {
 
     pub async fn shutdown_runtime(&self) -> Result<StudioRuntimeSnapshot> {
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
+        #[cfg(test)]
+        if let Some(barrier) = &self.shutdown_entry_barrier {
+            barrier.pause_once().await;
+        }
         let status = self.runtime_snapshot().status;
         if matches!(status, StudioRuntimeStatus::Stopped) {
             return Ok(self.runtime_snapshot());
@@ -178,10 +198,16 @@ impl StudioRuntime {
         let _ = self
             .runtime_state
             .transition(StudioRuntimeStatus::ShuttingDown, None)?;
+        let _ = self.advance_lifecycle_epoch();
         self.continuation_scheduler.pause_and_clear().await;
         self.active_turns.cancel_all().await;
+        #[cfg(test)]
+        if let Some(barrier) = &self.shutdown_after_cancel_barrier {
+            barrier.pause_once().await;
+        }
         drop(post_turn_guard);
         self.active_turns.wait_until_empty().await;
+        let _post_turn_guard = self.post_turn_lock.lock().await;
         self.task_coordinator.suspend();
         self.stop_mcp_health_watcher().await;
         self.mcp_runtime.shutdown().await;

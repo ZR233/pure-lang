@@ -32,15 +32,6 @@ pub(crate) struct ContinuationTestBarrier {
 }
 
 #[cfg(test)]
-#[derive(Clone)]
-pub(crate) struct PromptCompletionTestBarrier {
-    entered: Arc<tokio::sync::Barrier>,
-    release: Arc<tokio::sync::Barrier>,
-    finished: Arc<tokio::sync::Barrier>,
-    used: Arc<AtomicBool>,
-}
-
-#[cfg(test)]
 impl ContinuationTestBarrier {
     pub(crate) fn new() -> Self {
         Self {
@@ -63,42 +54,5 @@ impl ContinuationTestBarrier {
 
     pub(crate) async fn release(&self) {
         self.release.wait().await;
-    }
-}
-
-#[cfg(test)]
-impl PromptCompletionTestBarrier {
-    pub(crate) fn new() -> Self {
-        Self {
-            entered: Arc::new(tokio::sync::Barrier::new(2)),
-            release: Arc::new(tokio::sync::Barrier::new(2)),
-            finished: Arc::new(tokio::sync::Barrier::new(2)),
-            used: Arc::new(AtomicBool::new(false)),
-        }
-    }
-
-    pub(crate) async fn pause_once(&self) -> bool {
-        if self.used.swap(true, Ordering::SeqCst) {
-            return false;
-        }
-        self.entered.wait().await;
-        self.release.wait().await;
-        true
-    }
-
-    pub(crate) async fn wait_until_entered(&self) {
-        self.entered.wait().await;
-    }
-
-    pub(crate) async fn release(&self) {
-        self.release.wait().await;
-    }
-
-    pub(crate) async fn finish(&self) {
-        self.finished.wait().await;
-    }
-
-    pub(crate) async fn wait_until_finished(&self) {
-        self.finished.wait().await;
     }
 }

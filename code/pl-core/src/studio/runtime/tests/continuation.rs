@@ -5,14 +5,17 @@ use std::process::Command;
 use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
-use pl_protocol::{AgentStatus, StudioEventKind, StudioPartType};
+use pl_protocol::{
+    AgentStatus, InteractionResolution, StudioEventKind, StudioMessageRole, StudioMessageStatus,
+    StudioPartType,
+};
 use tokio::sync::Mutex;
 
 use super::*;
 use crate::studio::active_turns::SessionAlreadyHasActiveTurn;
 use crate::studio::runtime::continuation::{
     ContinuationLaunch, ContinuationLauncher, ContinuationReason, ContinuationRequest,
-    ContinuationScheduler, ContinuationTestBarrier, PromptCompletionTestBarrier, SessionTurnState,
+    ContinuationScheduler, ContinuationTestBarrier, SessionTurnState,
 };
 use crate::studio::task_coordinator::{
     AgentOutcomeStatus, CreateAgentOutcome, CreateTaskRun, CreateWorkUnit, TaskRunPhase,
@@ -1046,6 +1049,47 @@ async fn shutdown_discards_claimed_continuation_before_callback() {
 }
 
 #[tokio::test]
+async fn spawned_claim_from_previous_lifecycle_cannot_submit_after_restart() {
+    let repository = init_repository("continuation-lifecycle-epoch");
+    let store = StudioStore::open_memory().await.unwrap();
+    let run = persisted_repository_run(&store, &repository, "lifecycle-epoch").await;
+    let launcher = RecordingLauncher::successful();
+    let mut runtime = test_runtime(store, launcher.clone());
+    let prepared = ContinuationTestBarrier::new();
+    let lifecycle_entered = ContinuationTestBarrier::new();
+    runtime.continuation_pre_submit_barrier = Some(prepared.clone());
+    runtime.continuation_post_lifecycle_barrier = Some(lifecycle_entered.clone());
+
+    runtime
+        .request_task_continuation(run.id.clone(), ContinuationReason::AgentTerminal)
+        .await;
+    prepared.wait_until_entered().await;
+
+    assert_eq!(
+        runtime.shutdown_runtime().await.unwrap().status,
+        StudioRuntimeStatus::Stopped
+    );
+    assert_eq!(
+        runtime.initialize_runtime().await.unwrap().status,
+        StudioRuntimeStatus::Ready
+    );
+    let recovery_launches = launcher.wait_for_count(1).await;
+    assert_eq!(
+        recovery_launches[0].request.reason,
+        ContinuationReason::Recovery
+    );
+
+    prepared.release().await;
+    lifecycle_entered.wait_until_entered().await;
+    lifecycle_entered.release().await;
+    let lifecycle_guard = runtime.lifecycle_lock.lock().await;
+    drop(lifecycle_guard);
+
+    assert_eq!(launcher.launches.lock().await.len(), 1);
+    remove_repository(repository);
+}
+
+#[tokio::test]
 async fn failed_runtime_shutdown_clears_turns_scheduler_and_recovers_cleanly() {
     let repository = init_repository("continuation-failed-shutdown");
     let store = StudioStore::open_memory().await.unwrap();
@@ -1106,17 +1150,67 @@ async fn shutdown_waits_for_background_turn_before_same_runtime_recovery() {
         "data: [DONE]\n\n"
     )
     .to_string();
-    let (base_url, server, recovery_accepted, release_recovery) =
-        serve_sse_then_delayed_sse(old_sse).await;
+
+    let (control_base_url, control_server) = serve_sse_once(old_sse.clone()).await;
+    let control_store = StudioStore::open_memory().await.unwrap();
+    let control_workspace = std::env::temp_dir().join(format!(
+        "pure-response-gate-control-workspace-{}",
+        unique_id()
+    ));
+    tokio::fs::create_dir_all(&control_workspace).await.unwrap();
+    let control_project = control_store
+        .upsert_project(control_workspace.to_str().unwrap())
+        .await
+        .unwrap();
+    let control_session = control_store
+        .create_session(
+            &control_project.id,
+            "response gate control",
+            CompileMode::Simple,
+        )
+        .await
+        .unwrap();
+    let control_home =
+        std::env::temp_dir().join(format!("pure-response-gate-control-home-{}", unique_id()));
+    let control_config = ConfigStore::new(crate::config::ConfigPaths::from_home(&control_home));
+    control_config.save(&test_config(control_base_url)).unwrap();
+    let control_runtime = StudioRuntime::new(control_store.clone(), control_config);
+    control_runtime
+        .submit_prompt(StudioSubmitPromptRequest {
+            session_id: control_session.id.clone(),
+            prompt: "normal response".to_string(),
+            attachment_ids: Vec::new(),
+            options: StudioSubmitPromptOptions::default(),
+        })
+        .await
+        .unwrap();
+    wait_for_no_active_turn(&control_runtime).await;
+    control_server.await.unwrap();
+    assert!(
+        !control_store
+            .load_core_session(&control_session.id)
+            .await
+            .unwrap()
+            .messages()
+            .is_empty()
+    );
+    assert!(
+        control_store
+            .load_session_runtime(&control_session.id)
+            .await
+            .unwrap()
+            .is_some()
+    );
+
+    let (base_url, server, old_accepted, release_old, recovery_accepted, release_recovery) =
+        serve_two_delayed_sse(old_sse, "data: [DONE]\n\n".to_string()).await;
     let repository = init_repository("continuation-stale-background-restart");
     let store = StudioStore::open_memory().await.unwrap();
     let run = persisted_repository_run(&store, &repository, "stale-background-restart").await;
     let home = std::env::temp_dir().join(format!("pure-stale-background-home-{}", unique_id()));
     let config_store = ConfigStore::new(crate::config::ConfigPaths::from_home(&home));
     config_store.save(&test_config(base_url)).unwrap();
-    let mut runtime = StudioRuntime::new(store.clone(), config_store);
-    let completion = PromptCompletionTestBarrier::new();
-    runtime.prompt_completion_barrier = Some(completion.clone());
+    let runtime = StudioRuntime::new(store.clone(), config_store);
     let history_before = store
         .load_core_session(&run.session_id)
         .await
@@ -1127,6 +1221,7 @@ async fn shutdown_waits_for_background_turn_before_same_runtime_recovery() {
         .list_session_skill_names(&run.session_id)
         .await
         .unwrap();
+    let session_runtime_before = store.load_session_runtime(&run.session_id).await.unwrap();
     let old_turn = runtime
         .submit_prompt(StudioSubmitPromptRequest {
             session_id: run.session_id.clone(),
@@ -1143,8 +1238,78 @@ async fn shutdown_waits_for_background_turn_before_same_runtime_recovery() {
         })
         .await
         .unwrap();
-    completion.wait_until_entered().await;
-    let session_runtime_before = store.load_session_runtime(&run.session_id).await.unwrap();
+    tokio::time::timeout(TEST_RUNTIME_TIMEOUT, old_accepted)
+        .await
+        .unwrap()
+        .unwrap();
+    tokio::time::timeout(TEST_RUNTIME_TIMEOUT, async {
+        loop {
+            let events = store
+                .load_studio_events(&run.session_id, None, None)
+                .await
+                .unwrap();
+            let assistant_started = events.iter().any(|event| {
+                matches!(
+                    &event.kind,
+                    StudioEventKind::MessageUpdated { message }
+                        if message.turn_id == old_turn.turn_id
+                            && message.role == StudioMessageRole::Assistant
+                            && message.status == StudioMessageStatus::Streaming
+                )
+            });
+            let turn_part_started = events.iter().any(|event| {
+                matches!(
+                    &event.kind,
+                    StudioEventKind::MessagePartUpdated { part }
+                        if part.turn_id == old_turn.turn_id
+                            && part.part_type == StudioPartType::Turn
+                )
+            });
+            let context_loading = events.iter().any(|event| {
+                matches!(
+                    &event.kind,
+                    StudioEventKind::MessagePartUpdated { part }
+                        if part.turn_id == old_turn.turn_id
+                            && part.text == "已接收请求，正在准备上下文。"
+                )
+            });
+            let model_ready = events.iter().any(|event| {
+                matches!(
+                    &event.kind,
+                    StudioEventKind::MessagePartUpdated { part }
+                        if part.turn_id == old_turn.turn_id
+                            && part.text == "上下文已整理，准备调用模型。"
+                )
+            });
+            let inference_started = events.iter().any(|event| {
+                matches!(
+                    &event.kind,
+                    StudioEventKind::MessagePartUpdated { part }
+                        if part.turn_id == old_turn.turn_id
+                            && part.part_type == StudioPartType::Inference
+                )
+            });
+            if assistant_started
+                && turn_part_started
+                && context_loading
+                && model_ready
+                && inference_started
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let events_before = store
+        .load_studio_events(&run.session_id, None, None)
+        .await
+        .unwrap();
+    let old_turn_events_before = events_before
+        .iter()
+        .filter(|event| event.turn_id.as_deref() == Some(old_turn.turn_id.as_str()))
+        .count();
 
     let shutdown_runtime = runtime.clone();
     let shutdown = tokio::spawn(async move { shutdown_runtime.shutdown_runtime().await });
@@ -1163,11 +1328,9 @@ async fn shutdown_waits_for_background_turn_before_same_runtime_recovery() {
 
     let initialize_runtime = runtime.clone();
     let initialize = tokio::spawn(async move { initialize_runtime.initialize_runtime().await });
-    tokio::task::yield_now().await;
     assert!(!initialize.is_finished());
 
-    completion.release().await;
-    completion.wait_until_finished().await;
+    let _ = release_old.send(());
     assert_eq!(
         shutdown.await.unwrap().unwrap().status,
         StudioRuntimeStatus::Stopped
@@ -1182,37 +1345,6 @@ async fn shutdown_waits_for_background_turn_before_same_runtime_recovery() {
         .unwrap();
     let recovered_turn = runtime.runtime_snapshot().active_turns[0].clone();
     assert_ne!(recovered_turn.turn_id, old_turn.turn_id);
-    let mut current_interaction = pending_interaction(
-        "interaction-current-generation",
-        &run.session_id,
-        InteractionKind::UserInput,
-        InteractionPayload::UserInput {
-            questions: Vec::new(),
-        },
-    );
-    current_interaction.scope.turn_id = recovered_turn.turn_id.clone();
-    store
-        .upsert_interaction(&current_interaction)
-        .await
-        .unwrap();
-    let events_before = store
-        .load_studio_events(&run.session_id, None, None)
-        .await
-        .unwrap();
-    let old_turn_events_before = events_before
-        .iter()
-        .filter(|event| event.turn_id.as_deref() == Some(old_turn.turn_id.as_str()))
-        .count();
-    let old_lifecycle_events_before = events_before
-        .iter()
-        .filter(|event| {
-            matches!(
-                &event.kind,
-                StudioEventKind::PlanLifecycleChanged { event }
-                    if event.plan_id == "plan-old-generation"
-            )
-        })
-        .count();
 
     assert_eq!(
         runtime.runtime_snapshot().active_turns,
@@ -1224,15 +1356,6 @@ async fn shutdown_waits_for_background_turn_before_same_runtime_recovery() {
             .has_session(&run.session_id)
             .await
     );
-    assert_eq!(
-        store
-            .read_interaction("interaction-current-generation")
-            .await
-            .unwrap()
-            .unwrap()
-            .status,
-        InteractionStatus::Pending
-    );
     let events_after = store
         .load_studio_events(&run.session_id, None, None)
         .await
@@ -1242,18 +1365,13 @@ async fn shutdown_waits_for_background_turn_before_same_runtime_recovery() {
             .iter()
             .filter(|event| event.turn_id.as_deref() == Some(old_turn.turn_id.as_str()))
             .count(),
-        old_turn_events_before
-    );
-    assert_eq!(
+        old_turn_events_before,
+        "new old-turn events: {:#?}",
         events_after
             .iter()
-            .filter(|event| matches!(
-                &event.kind,
-                StudioEventKind::PlanLifecycleChanged { event }
-                    if event.plan_id == "plan-old-generation"
-            ))
-            .count(),
-        old_lifecycle_events_before
+            .filter(|event| event.turn_id.as_deref() == Some(old_turn.turn_id.as_str()))
+            .skip(old_turn_events_before)
+            .collect::<Vec<_>>()
     );
     assert_eq!(
         store
@@ -1298,6 +1416,141 @@ async fn shutdown_waits_for_background_turn_before_same_runtime_recovery() {
     server.await.unwrap();
     remove_repository(repository);
     let _ = tokio::fs::remove_dir_all(home).await;
+    let _ = tokio::fs::remove_dir_all(control_home).await;
+    let _ = tokio::fs::remove_dir_all(control_workspace).await;
+}
+
+#[tokio::test]
+async fn delayed_plan_response_after_shutdown_cannot_create_plan_side_effects() {
+    let tool_sse = concat!(
+        "data: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"function_call\",\"id\":\"fc_gate\",\"call_id\":\"call_gate\",\"name\":\"plan_exit\"}}\n\n",
+        "data: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"fc_gate\",\"call_id\":\"call_gate\",\"delta\":\"{\\\"content\\\":\\\"# Gated Plan\\\\n\\\\n- Inspect\\\\n- Implement\\\"}\"}\n\n",
+        "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"function_call\",\"id\":\"fc_gate\",\"call_id\":\"call_gate\",\"name\":\"plan_exit\",\"arguments\":\"{\\\"content\\\":\\\"# Gated Plan\\\\n\\\\n- Inspect\\\\n- Implement\\\"}\"}}\n\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_gate_1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3}}}\n\n",
+        "data: [DONE]\n\n"
+    )
+    .to_string();
+    let final_sse = concat!(
+        "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_gate\",\"delta\":\"Plan submitted.\"}\n\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_gate_2\",\"usage\":{\"input_tokens\":2,\"output_tokens\":1,\"total_tokens\":3}}}\n\n",
+        "data: [DONE]\n\n"
+    )
+    .to_string();
+
+    let (control_base_url, control_server) =
+        serve_sse_sequence(vec![tool_sse.clone(), final_sse]).await;
+    let control_workspace =
+        std::env::temp_dir().join(format!("pure-plan-gate-control-workspace-{}", unique_id()));
+    tokio::fs::create_dir_all(&control_workspace).await.unwrap();
+    let control_store = StudioStore::open_memory().await.unwrap();
+    let control_project = control_store
+        .upsert_project(control_workspace.to_str().unwrap())
+        .await
+        .unwrap();
+    let control_session = control_store
+        .create_session(&control_project.id, "plan gate control", CompileMode::Task)
+        .await
+        .unwrap();
+    let control_home =
+        std::env::temp_dir().join(format!("pure-plan-gate-control-home-{}", unique_id()));
+    let control_config = ConfigStore::new(crate::config::ConfigPaths::from_home(&control_home));
+    control_config.save(&test_config(control_base_url)).unwrap();
+    let control_runtime = StudioRuntime::new(control_store.clone(), control_config);
+    control_runtime
+        .submit_prompt(StudioSubmitPromptRequest {
+            session_id: control_session.id.clone(),
+            prompt: "make a plan".to_string(),
+            attachment_ids: Vec::new(),
+            options: StudioSubmitPromptOptions::default(),
+        })
+        .await
+        .unwrap();
+    wait_for_no_active_turn(&control_runtime).await;
+    control_server.await.unwrap();
+    assert!(
+        control_store
+            .list_pending_interactions(&control_session.id)
+            .await
+            .unwrap()
+            .iter()
+            .any(|interaction| interaction.kind == InteractionKind::PlanConfirmation)
+    );
+
+    let (base_url, server, accepted, release_response) = serve_delayed_sse_body(tool_sse).await;
+    let workspace = std::env::temp_dir().join(format!("pure-plan-gate-workspace-{}", unique_id()));
+    tokio::fs::create_dir_all(&workspace).await.unwrap();
+    let store = StudioStore::open_memory().await.unwrap();
+    let project = store
+        .upsert_project(workspace.to_str().unwrap())
+        .await
+        .unwrap();
+    let session = store
+        .create_session(&project.id, "plan response gate", CompileMode::Task)
+        .await
+        .unwrap();
+    let home = std::env::temp_dir().join(format!("pure-plan-gate-home-{}", unique_id()));
+    let config_store = ConfigStore::new(crate::config::ConfigPaths::from_home(&home));
+    config_store.save(&test_config(base_url)).unwrap();
+    let mut runtime = StudioRuntime::new(store.clone(), config_store);
+    let shutdown_cancelled = ContinuationTestBarrier::new();
+    runtime.shutdown_after_cancel_barrier = Some(shutdown_cancelled.clone());
+    let old_turn = runtime
+        .submit_prompt(StudioSubmitPromptRequest {
+            session_id: session.id.clone(),
+            prompt: "make a cancelled plan".to_string(),
+            attachment_ids: Vec::new(),
+            options: StudioSubmitPromptOptions::default(),
+        })
+        .await
+        .unwrap();
+    tokio::time::timeout(TEST_RUNTIME_TIMEOUT, accepted)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let shutdown_runtime = runtime.clone();
+    let shutdown = tokio::spawn(async move { shutdown_runtime.shutdown_runtime().await });
+    shutdown_cancelled.wait_until_entered().await;
+    assert_eq!(
+        runtime.runtime_snapshot().status,
+        StudioRuntimeStatus::ShuttingDown
+    );
+    assert!(!shutdown.is_finished());
+    let _ = release_response.send(());
+    shutdown_cancelled.release().await;
+    assert_eq!(
+        shutdown.await.unwrap().unwrap().status,
+        StudioRuntimeStatus::Stopped
+    );
+    server.await.unwrap();
+
+    assert!(
+        !store
+            .list_pending_interactions(&session.id)
+            .await
+            .unwrap()
+            .iter()
+            .any(|interaction| interaction.kind == InteractionKind::PlanConfirmation)
+    );
+    let events = store
+        .load_studio_events(&session.id, None, None)
+        .await
+        .unwrap();
+    assert!(!events.iter().any(|event| matches!(
+        &event.kind,
+        StudioEventKind::MessagePartUpdated { part }
+            if part.turn_id == old_turn.turn_id && part.part_type == StudioPartType::Plan
+    )));
+    assert!(!events.iter().any(|event| matches!(
+        &event.kind,
+        StudioEventKind::PlanLifecycleChanged { event }
+            if event.turn_id.as_deref() == Some(old_turn.turn_id.as_str())
+    )));
+
+    let _ = tokio::fs::remove_dir_all(home).await;
+    let _ = tokio::fs::remove_dir_all(workspace).await;
+    let _ = tokio::fs::remove_dir_all(control_home).await;
+    let _ = tokio::fs::remove_dir_all(control_workspace).await;
 }
 
 #[tokio::test]
@@ -1446,6 +1699,201 @@ async fn next_turn_interaction_is_inserted_only_after_previous_cleanup_and_remov
     let _ = tokio::fs::remove_dir_all(home).await;
 }
 
+#[tokio::test]
+async fn shutdown_fences_token_removal_through_scheduler_hook_before_restart() {
+    let repository = init_repository("continuation-removal-drain-fence");
+    let store = StudioStore::open_memory().await.unwrap();
+    let run = persisted_repository_run(&store, &repository, "removal-drain-fence").await;
+    let launcher = RecordingLauncher::successful();
+    let mut runtime = test_runtime(store, launcher.clone());
+    let token = tokio_util::sync::CancellationToken::new();
+    let removal = ContinuationTestBarrier::new();
+    let shutdown_entry = ContinuationTestBarrier::new();
+    runtime.active_turn_removal_barrier = Some(removal.clone());
+    runtime.shutdown_entry_barrier = Some(shutdown_entry.clone());
+    runtime
+        .active_turns
+        .insert(
+            run.session_id.clone(),
+            "turn-old-epoch".to_string(),
+            token.clone(),
+        )
+        .await
+        .unwrap();
+    runtime
+        .request_task_continuation(run.id.clone(), ContinuationReason::AgentTerminal)
+        .await;
+
+    let shutdown_runtime = runtime.clone();
+    let shutdown = tokio::spawn(async move { shutdown_runtime.shutdown_runtime().await });
+    shutdown_entry.wait_until_entered().await;
+    shutdown_entry.release().await;
+    token.cancelled().await;
+
+    let removal_runtime = runtime.clone();
+    let removal_task = tokio::spawn(async move {
+        removal_runtime
+            .active_turn_removed(&run.session_id, "turn-old-epoch")
+            .await
+    });
+    removal.wait_until_entered().await;
+
+    assert!(runtime.post_turn_lock.try_lock().is_err());
+    let initialize_runtime = runtime.clone();
+    let initialize = tokio::spawn(async move { initialize_runtime.initialize_runtime().await });
+    assert!(!shutdown.is_finished());
+    assert!(!initialize.is_finished());
+
+    removal.release().await;
+    assert!(removal_task.await.unwrap());
+    assert_eq!(
+        shutdown.await.unwrap().unwrap().status,
+        StudioRuntimeStatus::Stopped
+    );
+    assert_eq!(
+        initialize.await.unwrap().unwrap().status,
+        StudioRuntimeStatus::Ready
+    );
+    let launches = launcher.wait_for_count(1).await;
+    assert_eq!(launches.len(), 1);
+    assert_eq!(launches[0].request.reason, ContinuationReason::Recovery);
+    remove_repository(repository);
+}
+
+#[tokio::test]
+async fn shutting_down_current_turn_cancels_transient_rows_and_waiters_before_drain() {
+    let (base_url, server, accepted, release_response) = serve_delayed_sse().await;
+    let store = StudioStore::open_memory().await.unwrap();
+    let workspace = std::env::temp_dir().join(format!(
+        "pure-shutdown-interactions-workspace-{}",
+        unique_id()
+    ));
+    tokio::fs::create_dir_all(&workspace).await.unwrap();
+    let project = store
+        .upsert_project(workspace.to_str().unwrap())
+        .await
+        .unwrap();
+    let session = store
+        .create_session(&project.id, "shutdown interactions", CompileMode::Simple)
+        .await
+        .unwrap();
+    let home =
+        std::env::temp_dir().join(format!("pure-shutdown-interactions-home-{}", unique_id()));
+    let config_store = ConfigStore::new(crate::config::ConfigPaths::from_home(&home));
+    config_store.save(&test_config(base_url)).unwrap();
+    let mut runtime = StudioRuntime::new(store.clone(), config_store);
+    let removal = ContinuationTestBarrier::new();
+    runtime.active_turn_removal_barrier = Some(removal.clone());
+    let turn = runtime
+        .submit_prompt(StudioSubmitPromptRequest {
+            session_id: session.id.clone(),
+            prompt: "wait for shutdown".to_string(),
+            attachment_ids: Vec::new(),
+            options: StudioSubmitPromptOptions::default(),
+        })
+        .await
+        .unwrap();
+    tokio::time::timeout(TEST_RUNTIME_TIMEOUT, accepted)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let interaction_events = Arc::new(Mutex::new(Vec::new()));
+    let callback = runtime
+        .interactions()
+        .callback(session.id.clone(), emitter(interaction_events));
+    let mut user_input = pending_interaction(
+        "shutdown-user-input",
+        &session.id,
+        InteractionKind::UserInput,
+        InteractionPayload::UserInput {
+            questions: Vec::new(),
+        },
+    );
+    user_input.scope.turn_id = turn.turn_id.clone();
+    let mut tool_approval = pending_interaction(
+        "shutdown-tool-approval",
+        &session.id,
+        InteractionKind::ToolApproval,
+        InteractionPayload::ToolApproval {
+            name: "bash".to_string(),
+            arguments: serde_json::json!({"command": "echo hi"}),
+            working_directory: None,
+            parent_agent_id: None,
+        },
+    );
+    tool_approval.scope.turn_id = turn.turn_id;
+    let user_waiter = tokio::spawn(callback(user_input));
+    let approval_waiter = tokio::spawn(callback(tool_approval));
+    tokio::time::timeout(TEST_RUNTIME_TIMEOUT, async {
+        while store
+            .list_pending_interactions(&session.id)
+            .await
+            .unwrap()
+            .len()
+            != 2
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+
+    let shutdown_runtime = runtime.clone();
+    let shutdown = tokio::spawn(async move { shutdown_runtime.shutdown_runtime().await });
+    tokio::time::timeout(TEST_RUNTIME_TIMEOUT, async {
+        while runtime.runtime_snapshot().status != StudioRuntimeStatus::ShuttingDown {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let _ = release_response.send(());
+    removal.wait_until_entered().await;
+
+    assert_eq!(
+        store
+            .read_interaction("shutdown-user-input")
+            .await
+            .unwrap()
+            .unwrap()
+            .status,
+        InteractionStatus::Cancelled
+    );
+    assert_eq!(
+        store
+            .read_interaction("shutdown-tool-approval")
+            .await
+            .unwrap()
+            .unwrap()
+            .status,
+        InteractionStatus::Cancelled
+    );
+    assert_eq!(
+        user_waiter.await.unwrap(),
+        InteractionResolution::UserInput {
+            answers: Default::default(),
+        }
+    );
+    assert_eq!(
+        approval_waiter.await.unwrap(),
+        InteractionResolution::ToolApproval {
+            decision: pl_protocol::ToolApprovalResolution::Denied,
+            reason: Some("turn completed".to_string()),
+        }
+    );
+    assert!(!shutdown.is_finished());
+
+    removal.release().await;
+    assert_eq!(
+        shutdown.await.unwrap().unwrap().status,
+        StudioRuntimeStatus::Stopped
+    );
+    server.await.unwrap();
+    let _ = tokio::fs::remove_dir_all(home).await;
+    let _ = tokio::fs::remove_dir_all(workspace).await;
+}
+
 fn continuation_request(
     task_run_id: &str,
     session_id: &str,
@@ -1455,6 +1903,7 @@ fn continuation_request(
         task_run_id: task_run_id.to_string(),
         session_id: session_id.to_string(),
         reason,
+        lifecycle_epoch: 1,
     }
 }
 

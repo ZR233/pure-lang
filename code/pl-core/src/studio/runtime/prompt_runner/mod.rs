@@ -222,17 +222,16 @@ impl StudioRuntime {
                 history_policy,
             )
             .await;
-        #[cfg(test)]
-        let completion_barrier = self.prompt_completion_barrier.clone();
         let _post_turn_guard = self.post_turn_lock.lock().await;
         if self
             .active_turns
             .contains_exact(&session_id, &turn_id)
             .await
         {
+            let runtime_status = self.runtime_snapshot().status;
             if matches!(
-                self.runtime_snapshot().status,
-                crate::StudioRuntimeStatus::Ready
+                runtime_status,
+                crate::StudioRuntimeStatus::Ready | crate::StudioRuntimeStatus::ShuttingDown
             ) {
                 #[cfg(test)]
                 if let Some(barrier) = &self.prompt_finalization_barrier {
@@ -242,6 +241,8 @@ impl StudioRuntime {
                     .interactions
                     .cancel_transient_interactions(&session_id, "turn completed", emitter)
                     .await;
+            }
+            if matches!(runtime_status, crate::StudioRuntimeStatus::Ready) {
                 match result {
                     Ok(outcome) => {
                         self.emit_turn_completion(&session_id, &turn_id, &outcome)
@@ -291,11 +292,8 @@ impl StudioRuntime {
                     }
                 }
             }
-            self.active_turn_removed(&session_id, &turn_id).await;
-        }
-        #[cfg(test)]
-        if let Some(barrier) = completion_barrier {
-            barrier.finish().await;
+            self.active_turn_removed_under_post_turn_gate(&session_id, &turn_id)
+                .await;
         }
     }
 

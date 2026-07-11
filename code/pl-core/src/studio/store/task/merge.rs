@@ -70,7 +70,7 @@ impl StudioStore {
     }
 }
 
-fn merge_record(model: entities::merge_record::Model) -> Result<MergeRecord> {
+pub(super) fn merge_record(model: entities::merge_record::Model) -> Result<MergeRecord> {
     Ok(MergeRecord {
         id: model.id,
         task_run_id: model.task_run_id,

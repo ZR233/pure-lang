@@ -14,6 +14,7 @@ use crate::studio::records::SessionRecord;
 use crate::studio::task_coordinator::TaskCoordinator;
 use crate::studio::{
     InteractionEmitter, InteractionRuntime, StudioEventRuntime, StudioRuntimeState,
+    StudioRuntimeStatus,
 };
 use crate::{InteractionCallback, TurnOptions};
 
@@ -149,6 +150,7 @@ pub struct StudioRuntime {
     active_turns: StudioActiveTurns,
     task_coordinator: std::sync::Arc<TaskCoordinator>,
     lifecycle_lock: std::sync::Arc<tokio::sync::Mutex<()>>,
+    lifecycle_epoch: std::sync::Arc<std::sync::atomic::AtomicU64>,
     post_turn_lock: std::sync::Arc<tokio::sync::Mutex<()>>,
     continuation_scheduler: ContinuationScheduler,
     continuation_launcher: Option<SharedContinuationLauncher>,
@@ -157,24 +159,74 @@ pub struct StudioRuntime {
     #[cfg(test)]
     continuation_pre_submit_barrier: Option<continuation::ContinuationTestBarrier>,
     #[cfg(test)]
-    continuation_launch_error_barrier: Option<continuation::ContinuationTestBarrier>,
+    continuation_post_lifecycle_barrier: Option<continuation::ContinuationTestBarrier>,
     #[cfg(test)]
-    prompt_completion_barrier: Option<continuation::PromptCompletionTestBarrier>,
+    continuation_launch_error_barrier: Option<continuation::ContinuationTestBarrier>,
     #[cfg(test)]
     prompt_finalization_barrier: Option<continuation::ContinuationTestBarrier>,
     #[cfg(test)]
+    active_turn_removal_barrier: Option<continuation::ContinuationTestBarrier>,
+    #[cfg(test)]
+    shutdown_entry_barrier: Option<continuation::ContinuationTestBarrier>,
+    #[cfg(test)]
+    shutdown_after_cancel_barrier: Option<continuation::ContinuationTestBarrier>,
+    #[cfg(test)]
     initialization_entry_barrier: Option<std::sync::Arc<tokio::sync::Barrier>>,
+}
+
+impl StudioRuntime {
+    fn lifecycle_epoch(&self) -> u64 {
+        self.lifecycle_epoch
+            .load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    fn advance_lifecycle_epoch(&self) -> u64 {
+        self.lifecycle_epoch
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            + 1
+    }
 }
 
 impl StudioRuntime {
     pub async fn drain_agent_events(
         &self,
         session_id: String,
+        event_rx: tokio::sync::broadcast::Receiver<AgentEvent>,
+    ) {
+        self.drain_agent_events_inner(session_id, None, event_rx)
+            .await;
+    }
+
+    async fn drain_prompt_agent_events(
+        &self,
+        session_id: String,
+        turn_id: String,
+        event_rx: tokio::sync::broadcast::Receiver<AgentEvent>,
+    ) {
+        self.drain_agent_events_inner(session_id, Some(turn_id), event_rx)
+            .await;
+    }
+
+    async fn drain_agent_events_inner(
+        &self,
+        session_id: String,
+        turn_id: Option<String>,
         mut event_rx: tokio::sync::broadcast::Receiver<AgentEvent>,
     ) {
         loop {
             match event_rx.recv().await {
                 Ok(mut event) => {
+                    let _post_turn_guard = if turn_id.is_some() {
+                        Some(self.post_turn_lock.lock().await)
+                    } else {
+                        None
+                    };
+                    if let Some(turn_id) = turn_id.as_deref()
+                        && (!matches!(self.runtime_snapshot().status, StudioRuntimeStatus::Ready)
+                            || !self.active_turns.contains_exact(&session_id, turn_id).await)
+                    {
+                        continue;
+                    }
                     if let AgentEvent::AgentStateChanged {
                         id,
                         role,

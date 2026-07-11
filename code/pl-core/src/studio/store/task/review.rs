@@ -68,7 +68,9 @@ impl StudioStore {
     }
 }
 
-fn review_round_record(model: entities::review_round::Model) -> Result<ReviewRoundRecord> {
+pub(super) fn review_round_record(
+    model: entities::review_round::Model,
+) -> Result<ReviewRoundRecord> {
     Ok(ReviewRoundRecord {
         id: model.id,
         task_run_id: model.task_run_id,

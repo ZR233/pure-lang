@@ -1,4 +1,5 @@
 use super::*;
+use crate::studio::store::task::ContinuationSnapshotTestBarrier;
 use crate::studio::task_coordinator::*;
 
 fn create_input(session_id: &str) -> CreateTaskRun {
@@ -338,10 +339,13 @@ async fn continuation_snapshot_contains_exact_durable_task_state() {
         .await
         .unwrap();
 
-    let snapshot = store
-        .load_task_continuation_snapshot(&run.id)
+    let resolution = store
+        .load_task_continuation_resolution(&run.id)
         .await
         .unwrap();
+    let TaskContinuationResolution::Active(snapshot) = resolution else {
+        panic!("active task must resolve to a continuation snapshot");
+    };
     let prompt = snapshot.render_prompt().unwrap();
 
     assert_eq!(snapshot.run, run);
@@ -384,6 +388,102 @@ async fn continuation_snapshot_contains_exact_durable_task_state() {
     assert!(prompt.contains("mergeRecords"));
     assert!(prompt.contains("reviewRounds"));
     assert!(prompt.contains("不要无限等待代理"));
+}
+
+#[tokio::test]
+async fn terminal_continuation_resolution_does_not_require_branch_lease() {
+    let store = StudioStore::open_memory().await.unwrap();
+    let project = store
+        .upsert_project("C:/work/terminal-snapshot")
+        .await
+        .unwrap();
+    let session = store
+        .create_session(&project.id, "Terminal snapshot", CompileMode::Task)
+        .await
+        .unwrap();
+    let (run, _) = store
+        .create_task_run_with_lease(create_input(&session.id))
+        .await
+        .unwrap();
+    let terminal_run = store
+        .transition_task_run(
+            &run.id,
+            TaskRunPhase::Blocked,
+            Some("terminal before continuation".to_string()),
+        )
+        .await
+        .unwrap();
+    store.release_branch_lease(&run.id).await.unwrap();
+
+    let resolution = store
+        .load_task_continuation_resolution(&run.id)
+        .await
+        .expect("terminal continuation resolution must not require a branch lease");
+
+    assert_eq!(
+        resolution,
+        TaskContinuationResolution::Terminal(Box::new(terminal_run))
+    );
+}
+
+#[tokio::test]
+async fn concurrent_terminal_transition_resolves_active_snapshot_or_typed_terminal() {
+    let store = StudioStore::open_memory().await.unwrap();
+    let project = store
+        .upsert_project("C:/work/concurrent-terminal-snapshot")
+        .await
+        .unwrap();
+    let session = store
+        .create_session(&project.id, "Concurrent snapshot", CompileMode::Task)
+        .await
+        .unwrap();
+    let (run, lease) = store
+        .create_task_run_with_lease(create_input(&session.id))
+        .await
+        .unwrap();
+    let barrier = ContinuationSnapshotTestBarrier::new();
+    let reader_store = store.clone();
+    let reader_run_id = run.id.clone();
+    let reader_barrier = barrier.clone();
+    let reader = tokio::spawn(async move {
+        reader_store
+            .load_task_continuation_resolution_with_barrier(&reader_run_id, &reader_barrier)
+            .await
+    });
+    barrier.wait_until_entered().await;
+
+    let writer_store = store.clone();
+    let writer_run_id = run.id.clone();
+    let (writer_started_tx, writer_started_rx) = tokio::sync::oneshot::channel();
+    let writer = tokio::spawn(async move {
+        let _ = writer_started_tx.send(());
+        writer_store
+            .terminalize_task_and_release_lease_for_test(&writer_run_id)
+            .await
+    });
+    writer_started_rx.await.unwrap();
+    barrier.release().await;
+
+    let resolution = reader.await.unwrap().unwrap();
+    match resolution {
+        TaskContinuationResolution::Active(snapshot) => {
+            assert_eq!(snapshot.run, run);
+            assert_eq!(snapshot.branch_lease, lease);
+        }
+        TaskContinuationResolution::Terminal(terminal) => {
+            assert_eq!(terminal.id, run.id);
+            assert!(terminal.phase.is_terminal());
+        }
+    }
+    writer.await.unwrap().unwrap();
+    let final_resolution = store
+        .load_task_continuation_resolution(&run.id)
+        .await
+        .unwrap();
+    assert!(matches!(
+        final_resolution,
+        TaskContinuationResolution::Terminal(terminal) if terminal.id == run.id
+    ));
 }
 
 #[tokio::test]

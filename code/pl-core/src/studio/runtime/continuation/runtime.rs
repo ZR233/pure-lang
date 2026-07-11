@@ -9,7 +9,7 @@ use crate::studio::runtime::{
     PromptHistoryPolicy, StudioRuntime, StudioSubmitPromptOptions, StudioSubmitPromptRequest,
     StudioUserPromptPresentation,
 };
-use crate::studio::task_coordinator::TaskContinuationSnapshot;
+use crate::studio::task_coordinator::{TaskContinuationResolution, TaskContinuationSnapshot};
 
 use super::{
     ContinuationClaim, ContinuationLaunch, ContinuationLauncher, ContinuationReason,
@@ -37,6 +37,7 @@ impl StudioRuntime {
                         task_run_id,
                         session_id: String::new(),
                         reason,
+                        lifecycle_epoch: self.lifecycle_epoch(),
                     },
                     error.context("load task run for continuation"),
                 )
@@ -51,6 +52,7 @@ impl StudioRuntime {
             task_run_id,
             session_id: run.session_id,
             reason,
+            lifecycle_epoch: self.lifecycle_epoch(),
         };
         let session_turn_state = if self.active_turns.contains(&request.session_id).await {
             SessionTurnState::Active
@@ -78,8 +80,22 @@ impl StudioRuntime {
     }
 
     pub(crate) async fn active_turn_removed(&self, session_id: &str, turn_id: &str) -> bool {
+        let _post_turn_guard = self.post_turn_lock.lock().await;
+        self.active_turn_removed_under_post_turn_gate(session_id, turn_id)
+            .await
+    }
+
+    pub(crate) async fn active_turn_removed_under_post_turn_gate(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+    ) -> bool {
         if !self.active_turns.remove(session_id, turn_id).await {
             return false;
+        }
+        #[cfg(test)]
+        if let Some(barrier) = &self.active_turn_removal_barrier {
+            barrier.pause_once().await;
         }
         if let Some(claim) = self
             .continuation_scheduler
@@ -117,6 +133,16 @@ impl StudioRuntime {
             barrier.pause_once().await;
         }
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
+        #[cfg(test)]
+        if claim.request.reason == ContinuationReason::AgentTerminal
+            && let Some(barrier) = &self.continuation_post_lifecycle_barrier
+        {
+            barrier.pause_once().await;
+        }
+        if claim.request.lifecycle_epoch != self.lifecycle_epoch() {
+            let _ = self.continuation_scheduler.cancel_claim(&claim).await;
+            return;
+        }
         if !matches!(
             self.runtime_snapshot().status,
             crate::StudioRuntimeStatus::Ready
@@ -174,17 +200,20 @@ impl StudioRuntime {
         &self,
         request: &ContinuationRequest,
     ) -> Result<Option<ContinuationLaunch>> {
-        if !self.task_run_is_active(request).await? {
-            return Ok(None);
-        }
-        let snapshot: TaskContinuationSnapshot = self
+        let resolution = self
             .store
-            .load_task_continuation_snapshot(&request.task_run_id)
+            .load_task_continuation_resolution(&request.task_run_id)
             .await
             .context("load durable task continuation snapshot")?;
-        if snapshot.run.phase.is_terminal() {
-            return Ok(None);
-        }
+        let snapshot: TaskContinuationSnapshot = match resolution {
+            TaskContinuationResolution::Active(snapshot) => *snapshot,
+            TaskContinuationResolution::Terminal(run) => {
+                if run.session_id != request.session_id {
+                    bail!("task continuation session changed");
+                }
+                return Ok(None);
+            }
+        };
         if snapshot.run.session_id != request.session_id {
             bail!("task continuation session changed");
         }
