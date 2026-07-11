@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
@@ -157,6 +157,7 @@ fn validate_durable(
                 branch_exists
             );
         }
+        ensure_safe_existing_path(repository, &resource.path)?;
         if let Some(expected_head) = resource.expected_head.as_deref() {
             let actual_head = git_output(repository, &["rev-parse", &resource.branch])?;
             if actual_head.trim() != expected_head {
@@ -225,6 +226,10 @@ fn inventory(repository: &Path) -> Result<Inventory> {
 
 fn leaf_directories(repository: &Path) -> Result<Vec<PathBuf>> {
     let root = repository.join(WORKTREE_ROOT);
+    if !root.exists() {
+        return Ok(Vec::new());
+    }
+    ensure_safe_worktree_root(repository, &root)?;
     let entries = match std::fs::read_dir(&root) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -261,7 +266,7 @@ fn delete_branch(repository: &Path, branch: &str) -> Result<()> {
 }
 
 fn git_output(repository: &Path, args: &[&str]) -> Result<String> {
-    let mut child = Command::new("git")
+    let child = Command::new("git")
         .arg("-C")
         .arg(repository)
         .args(args)
@@ -271,18 +276,30 @@ fn git_output(repository: &Path, args: &[&str]) -> Result<String> {
         .stderr(Stdio::piped())
         .spawn()
         .with_context(|| format!("failed to run git {}", args.join(" ")))?;
-    let stdout = child.stdout.take().context("git stdout pipe is missing")?;
-    let stderr = child.stderr.take().context("git stderr pipe is missing")?;
+    let mut child = KillOnDropChild::new(child);
+    let stdout = child
+        .child
+        .stdout
+        .take()
+        .context("git stdout pipe is missing")?;
+    let stderr = child
+        .child
+        .stderr
+        .take()
+        .context("git stderr pipe is missing")?;
     let stdout_reader = std::thread::spawn(move || read_pipe(stdout));
     let stderr_reader = std::thread::spawn(move || read_pipe(stderr));
     let deadline = Instant::now() + GIT_TIMEOUT;
     let status = loop {
-        if let Some(status) = child.try_wait().context("failed to poll git process")? {
+        if let Some(status) = child
+            .child
+            .try_wait()
+            .context("failed to poll git process")?
+        {
             break status;
         }
         if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
+            child.kill_and_wait();
             let _ = stdout_reader.join();
             let _ = stderr_reader.join();
             bail!(
@@ -293,6 +310,7 @@ fn git_output(repository: &Path, args: &[&str]) -> Result<String> {
         }
         std::thread::sleep(Duration::from_millis(10));
     };
+    child.completed = true;
     let stdout = stdout_reader
         .join()
         .map_err(|_| anyhow::anyhow!("git stdout reader panicked"))??;
@@ -313,6 +331,34 @@ fn read_pipe(mut pipe: impl Read) -> std::io::Result<Vec<u8>> {
     let mut output = Vec::new();
     pipe.read_to_end(&mut output)?;
     Ok(output)
+}
+
+struct KillOnDropChild {
+    child: Child,
+    completed: bool,
+}
+
+impl KillOnDropChild {
+    fn new(child: Child) -> Self {
+        Self {
+            child,
+            completed: false,
+        }
+    }
+
+    fn kill_and_wait(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        self.completed = true;
+    }
+}
+
+impl Drop for KillOnDropChild {
+    fn drop(&mut self) {
+        if !self.completed {
+            self.kill_and_wait();
+        }
+    }
 }
 
 fn git_status(repository: &Path, args: &[&str]) -> Result<()> {
@@ -342,13 +388,7 @@ fn is_pure_branch(branch: &str) -> bool {
 
 fn ensure_safe_existing_path(repository: &Path, path: &Path) -> Result<()> {
     let root = repository.join(WORKTREE_ROOT);
-    let canonical_repository =
-        std::fs::canonicalize(repository).context("failed to canonicalize worktree repository")?;
-    let canonical_root =
-        std::fs::canonicalize(&root).context("failed to canonicalize worktree root")?;
-    if canonical_root.strip_prefix(&canonical_repository).is_err() {
-        bail!("worktree root escapes repository through a link or reparse point");
-    }
+    let canonical_root = ensure_safe_worktree_root(repository, &root)?;
     let canonical_path = std::fs::canonicalize(path)
         .with_context(|| format!("failed to canonicalize worktree path {}", path.display()))?;
     if canonical_path == canonical_root || canonical_path.strip_prefix(&canonical_root).is_err() {
@@ -360,14 +400,7 @@ fn ensure_safe_existing_path(repository: &Path, path: &Path) -> Result<()> {
 
     let mut current = path.to_path_buf();
     loop {
-        let metadata = std::fs::symlink_metadata(&current)
-            .with_context(|| format!("failed to inspect worktree path {}", current.display()))?;
-        if is_link_or_reparse(&metadata) {
-            bail!(
-                "worktree path contains a link or reparse point: {}",
-                current.display()
-            );
-        }
+        reject_link_or_reparse(&current)?;
         if normalize_path(&current) == normalize_path(&root) {
             break;
         }
@@ -375,6 +408,33 @@ fn ensure_safe_existing_path(repository: &Path, path: &Path) -> Result<()> {
             bail!("worktree path is not below its root: {}", path.display());
         };
         current = parent.to_path_buf();
+    }
+    Ok(())
+}
+
+fn ensure_safe_worktree_root(repository: &Path, root: &Path) -> Result<PathBuf> {
+    let canonical_repository =
+        std::fs::canonicalize(repository).context("failed to canonicalize worktree repository")?;
+    let canonical_root =
+        std::fs::canonicalize(root).context("failed to canonicalize worktree root")?;
+    if canonical_root.strip_prefix(&canonical_repository).is_err() {
+        bail!("worktree root escapes repository through a link or reparse point");
+    }
+    if let Some(pure_dir) = root.parent() {
+        reject_link_or_reparse(pure_dir)?;
+    }
+    reject_link_or_reparse(root)?;
+    Ok(canonical_root)
+}
+
+fn reject_link_or_reparse(path: &Path) -> Result<()> {
+    let metadata = std::fs::symlink_metadata(path)
+        .with_context(|| format!("failed to inspect worktree path {}", path.display()))?;
+    if is_link_or_reparse(&metadata) {
+        bail!(
+            "worktree path contains a link or reparse point: {}",
+            path.display()
+        );
     }
     Ok(())
 }
