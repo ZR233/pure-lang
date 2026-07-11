@@ -38,7 +38,7 @@ impl HostedAgentRuntime for RecordingHostedRuntime {
                 request,
                 kernel,
                 Vec::new(),
-                TurnRequest::new("hello".to_string(), CompileMode::Auto),
+                TurnRequest::new("hello".to_string(), CompileMode::Simple),
                 TurnOptions::default(),
             ))
         }

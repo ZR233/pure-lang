@@ -114,7 +114,7 @@ void registerShellSettingsTests() {
     expect(api.archivedProjectId, 'project-b');
   });
 
-  testWidgets('status bar exposes session mode and planner model controls', (
+  testWidgets('status bar routes model controls by session mode', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(1280, 800);
@@ -171,7 +171,8 @@ void registerShellSettingsTests() {
     await tester.pumpAndSettle();
 
     expect(find.byTooltip('Session mode'), findsOneWidget);
-    expect(find.byTooltip('Planner model'), findsOneWidget);
+    expect(find.byTooltip('Executor model'), findsOneWidget);
+    expect(find.byTooltip('Planner model'), findsNothing);
     expect(find.byTooltip('Reasoning effort'), findsOneWidget);
     expect(find.byType(StatusBarItem), findsWidgets);
     final contextReadout = find.bySemanticsLabel('Context');
@@ -227,9 +228,9 @@ void registerShellSettingsTests() {
 
     await tester.tap(find.byTooltip('Session mode'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Plan').last);
+    await tester.tap(find.text('Task').last);
     await tester.pumpAndSettle();
-    expect(api.sessionModeUpdate, CompileMode.plan);
+    expect(api.sessionModeUpdate, CompileMode.task);
     api.emitGlobal(
       _sessionListChangedEvent(
         projectId: 'project-1',
@@ -238,14 +239,15 @@ void registerShellSettingsTests() {
             id: 'session-1',
             projectId: 'project-1',
             title: 'Session',
-            mode: CompileMode.plan,
+            mode: CompileMode.task,
             updatedAt: DateTime.fromMillisecondsSinceEpoch(1000),
           ),
         ],
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.text('Plan'), findsOneWidget);
+    expect(find.text('Task'), findsOneWidget);
+    expect(find.byTooltip('Planner model'), findsOneWidget);
 
     await tester.tap(find.byTooltip('Planner model'));
     await tester.pumpAndSettle();
@@ -468,7 +470,7 @@ void registerShellSettingsTests() {
             id: 'session-1',
             projectId: 'project-1',
             title: 'Session',
-            mode: CompileMode.plan,
+            mode: CompileMode.task,
             updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
           ),
         ],
@@ -486,15 +488,15 @@ void registerShellSettingsTests() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('计划 · 更新于'), findsOneWidget);
-    expect(find.text('计划'), findsWidgets);
+    expect(find.textContaining('任务 · 更新于'), findsOneWidget);
+    expect(find.text('任务'), findsWidgets);
     expect(find.text('完全'), findsOneWidget);
     expect(find.text('Plan'), findsNothing);
     expect(find.text('Full'), findsNothing);
 
     await tester.tap(find.byTooltip('会话模式'));
     await tester.pumpAndSettle();
-    expect(find.text('自动'), findsOneWidget);
+    expect(find.text('简洁'), findsOneWidget);
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
 
@@ -525,11 +527,11 @@ void registerShellSettingsTests() {
     await _expectMenuOpensAboveTrigger(
       tester: tester,
       triggerTooltip: 'Session mode',
-      menuText: 'Plan',
+      menuText: 'Task',
     );
     await _expectMenuOpensAboveTrigger(
       tester: tester,
-      triggerTooltip: 'Planner model',
+      triggerTooltip: 'Executor model',
       menuText: 'DeepSeek / DeepSeek Reasoner',
     );
     await _expectMenuOpensAboveTrigger(

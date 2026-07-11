@@ -57,7 +57,7 @@ async fn run_self_learning_review(
     let mut core = PureCore::from_config(&config, ModelRole::Reviewer)?;
     core.register_skill_tools(workspace_root, Some(workspace_instructions.clone()));
     let mut session = CoreSession::from_messages(messages);
-    let request = TurnRequest::new(SELF_LEARNING_REVIEW_PROMPT.to_string(), CompileMode::Auto)
+    let request = TurnRequest::new(SELF_LEARNING_REVIEW_PROMPT.to_string(), CompileMode::Simple)
         .with_workspace_instructions(workspace_instructions)
         .with_budget(TurnBudget::new(120_000));
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);

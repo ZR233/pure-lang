@@ -7,35 +7,35 @@ use super::TurnBudget;
 
 /// 编译请求的执行模式。
 ///
-/// `Plan` 产出规划与解释，也可以在已注册工具边界内做只读探索；
-/// `Auto` 允许模型生成更主动的编译步骤和子任务。
+/// `Simple` 由 executor 直接对话和执行；`Task` 由 planner 负责规划、
+/// 协调实施、合并和审查闭环。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum CompileMode {
-    Plan,
     #[default]
-    Auto,
+    Simple,
+    Task,
 }
 
 impl CompileMode {
     pub fn instructions(self) -> &'static str {
         match self {
-            Self::Plan => include_str!("../../prompts/plan.md"),
-            Self::Auto => include_str!("../../prompts/auto.md"),
+            Self::Simple => include_str!("../../prompts/simple.md"),
+            Self::Task => include_str!("../../prompts/task.md"),
         }
     }
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Plan => "plan",
-            Self::Auto => "auto",
+            Self::Simple => "simple",
+            Self::Task => "task",
         }
     }
 
     pub fn from_label(label: &str) -> Self {
         match label {
-            "plan" => Self::Plan,
-            "auto" => Self::Auto,
-            _ => Self::Auto,
+            "task" => Self::Task,
+            "simple" => Self::Simple,
+            _ => Self::Simple,
         }
     }
 }

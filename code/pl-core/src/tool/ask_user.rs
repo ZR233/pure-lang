@@ -258,7 +258,7 @@ mod tests {
             event_tx,
             options,
             workspace_access: WorkspaceAccess::WorkspaceOnly,
-            mode: crate::CompileMode::Auto,
+            mode: crate::CompileMode::Simple,
             workspace_root: std::env::temp_dir(),
             workspace_instructions: None,
             instruction_snapshot: None,

@@ -219,7 +219,7 @@ void registerInteractionTests() {
     });
   });
 
-  testWidgets('plan confirmation implement keeps plan content in timeline', (
+  testWidgets('plan confirmation implement keeps task mode', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(1280, 900);
@@ -233,7 +233,7 @@ void registerInteractionTests() {
           id: 'session-1',
           projectId: 'project-1',
           title: 'Session',
-          mode: CompileMode.plan,
+          mode: CompileMode.task,
           updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
         ),
       ],
@@ -264,7 +264,7 @@ void registerInteractionTests() {
     expect(find.text('Implement this plan?'), findsOneWidget);
     expect(find.text('Implement this plan'), findsOneWidget);
     expect(find.text('Plan content'), findsNothing);
-    expect(find.text('Plan'), findsOneWidget);
+    expect(find.text('Task'), findsOneWidget);
     await tester.tap(find.widgetWithText(FilledButton, 'Implement this plan'));
     await tester.pump(const Duration(milliseconds: 50));
 
@@ -272,8 +272,8 @@ void registerInteractionTests() {
     expect(api.resolvedInteraction?['type'], 'planConfirmation');
     expect(api.resolvedInteraction?['decision'], 'implementFreshContext');
     expect(api.resolvedInteraction?.containsKey('content'), isFalse);
-    expect(find.text('Auto'), findsOneWidget);
-    expect(find.text('Plan'), findsNothing);
+    expect(find.text('Task'), findsOneWidget);
+    expect(find.text('Simple'), findsNothing);
   });
 
   testWidgets('plan confirmation adjustment submits only user instruction', (

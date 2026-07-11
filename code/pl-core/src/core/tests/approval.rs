@@ -62,7 +62,7 @@ async fn plan_mode_bash_requires_manual_approval_even_when_auto_allowed() {
     };
     let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(8);
     let mut context = test_tool_context(event_tx.clone());
-    context.mode = crate::turn::CompileMode::Plan;
+    context.mode = crate::turn::CompileMode::Task;
 
     let decision = approve_tool_call(&options, &request, &context).await;
 
@@ -87,7 +87,7 @@ async fn full_access_plan_bash_does_not_request_manual_approval() {
     };
     let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(8);
     let mut context = test_tool_context(event_tx.clone());
-    context.mode = crate::turn::CompileMode::Plan;
+    context.mode = crate::turn::CompileMode::Task;
 
     let decision = approve_tool_call(&options, &request, &context).await;
 
@@ -107,7 +107,7 @@ async fn plan_mode_read_tool_still_uses_auto_allow() {
     };
     let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(8);
     let mut context = test_tool_context(event_tx.clone());
-    context.mode = crate::turn::CompileMode::Plan;
+    context.mode = crate::turn::CompileMode::Task;
 
     let decision = approve_tool_call(&options, &request, &context).await;
 
@@ -137,7 +137,7 @@ async fn plan_mode_denies_disallowed_tool_before_execution_even_with_full_access
         ToolExecutionContext {
             core: &core,
             options: &options,
-            mode: crate::turn::CompileMode::Plan,
+            mode: crate::turn::CompileMode::Task,
             session_id: "turn-1",
             workspace_root: &workspace_root,
             workspace_instructions: None,
@@ -154,7 +154,7 @@ async fn plan_mode_denies_disallowed_tool_before_execution_even_with_full_access
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].status, TracePartStatus::Denied);
     assert_eq!(records[0].name, "write_file");
-    assert_eq!(records[0].result, "Tool disabled in plan mode: write_file");
+    assert_eq!(records[0].result, "Tool disabled in task mode: write_file");
 }
 
 #[tokio::test]
@@ -209,7 +209,7 @@ async fn request_approval_allows_external_path_after_user_approval() {
         ToolExecutionContext {
             core: &core,
             options: &options,
-            mode: crate::turn::CompileMode::Auto,
+            mode: crate::turn::CompileMode::Simple,
             session_id: "turn-1",
             workspace_root: &workspace_root,
             workspace_instructions: None,
@@ -264,7 +264,7 @@ async fn unknown_tool_records_one_terminal_event_and_tool_result() {
         ToolExecutionContext {
             core: &core,
             options: &TurnOptions::default(),
-            mode: crate::turn::CompileMode::Auto,
+            mode: crate::turn::CompileMode::Simple,
             session_id: "turn-1",
             workspace_root: &std::env::temp_dir(),
             workspace_instructions: None,
@@ -296,7 +296,7 @@ async fn unknown_tool_records_one_terminal_event_and_tool_result() {
 }
 
 #[tokio::test]
-async fn plan_disabled_tool_records_one_terminal_event_and_tool_result() {
+async fn task_disabled_tool_records_one_terminal_event_and_tool_result() {
     let mut core = PureCore::default_provider().unwrap();
     core.register_tool(WriteFileTool);
     let tool_call = ToolCall::function(
@@ -316,7 +316,7 @@ async fn plan_disabled_tool_records_one_terminal_event_and_tool_result() {
         ToolExecutionContext {
             core: &core,
             options: &TurnOptions::default(),
-            mode: crate::turn::CompileMode::Plan,
+            mode: crate::turn::CompileMode::Task,
             session_id: "turn-1",
             workspace_root: &std::env::temp_dir(),
             workspace_instructions: None,
@@ -336,7 +336,7 @@ async fn plan_disabled_tool_records_one_terminal_event_and_tool_result() {
     assert!(
         records[0]
             .result
-            .contains("Tool disabled in plan mode: write_file")
+            .contains("Tool disabled in task mode: write_file")
     );
     assert_eq!(terminal_tool_event_count(&events), 1);
     assert_eq!(
@@ -365,7 +365,7 @@ async fn plan_disabled_tool_records_one_terminal_event_and_tool_result() {
             .tool
             .as_ref()
             .and_then(|tool| tool.denial_reason.as_deref()),
-        Some("Tool disabled in plan mode: write_file")
+        Some("Tool disabled in task mode: write_file")
     );
 }
 
@@ -390,7 +390,7 @@ async fn policy_denied_tool_records_one_terminal_event_and_tool_result() {
         ToolExecutionContext {
             core: &core,
             options: &TurnOptions::deny_all(),
-            mode: crate::turn::CompileMode::Auto,
+            mode: crate::turn::CompileMode::Simple,
             session_id: "turn-1",
             workspace_root: &std::env::temp_dir(),
             workspace_instructions: None,
@@ -450,7 +450,7 @@ async fn cancelling_running_tool_records_interrupted_terminal_event() {
         ToolExecutionContext {
             core: &core,
             options: &options,
-            mode: crate::turn::CompileMode::Auto,
+            mode: crate::turn::CompileMode::Simple,
             session_id: "turn-1",
             workspace_root: &std::env::temp_dir(),
             workspace_instructions: None,

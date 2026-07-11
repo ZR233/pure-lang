@@ -201,7 +201,7 @@ StudioState responsiveVisualState() {
     id: 'session-1',
     projectId: project.id,
     title: responsiveVisualSessionTitle,
-    mode: CompileMode.auto,
+    mode: CompileMode.simple,
     updatedAt: timestamp,
   );
   final messages = [

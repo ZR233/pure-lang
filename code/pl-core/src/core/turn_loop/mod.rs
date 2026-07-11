@@ -301,7 +301,7 @@ pub(super) async fn run_turn_with_trace(
                 session_id: recorder.session_id().to_string(),
                 turn_id: turn_id.clone(),
                 inference_id: inference_id.clone(),
-                plan_mode: matches!(request.mode, CompileMode::Plan),
+                plan_mode: matches!(request.mode, CompileMode::Task),
                 trace_sequence_base: recorder.current_sequence(),
             }))
             .build();
@@ -530,7 +530,7 @@ pub(super) async fn run_turn_with_trace(
             }
         };
         progress.tool_detail("工具执行完成，准备回写结果。");
-        if request.mode == CompileMode::Plan {
+        if request.mode == CompileMode::Task {
             record_plan_exit_items(recorder, &turn_id, &tool_results);
         }
         if is_cancelled(&options) {

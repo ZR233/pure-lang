@@ -6,7 +6,7 @@ async fn invalid_message_projection_updates_are_rejected() {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project("C:/work/gamma").await.unwrap();
     let session = store
-        .create_session(&project.id, "Messages", CompileMode::Auto)
+        .create_session(&project.id, "Messages", CompileMode::Simple)
         .await
         .unwrap();
     let message = StudioMessage {

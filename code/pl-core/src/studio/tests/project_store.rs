@@ -22,7 +22,7 @@ async fn archive_project_hides_project_and_clears_studio_history() {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project("C:/work/alpha").await.unwrap();
     let session = store
-        .create_session(&project.id, "Build app", CompileMode::Auto)
+        .create_session(&project.id, "Build app", CompileMode::Simple)
         .await
         .unwrap();
     let message = Message {

@@ -17,7 +17,7 @@ async fn ui_submit_and_stop_are_core_runtime_apis() {
     let runtime = StudioRuntime::new(store.clone(), config_store);
     let project = runtime.open_project(&workspace).await.unwrap();
     let session = store
-        .create_session(&project.id, "UI runtime", CompileMode::Auto)
+        .create_session(&project.id, "UI runtime", CompileMode::Simple)
         .await
         .unwrap();
 
@@ -70,7 +70,7 @@ async fn ui_submit_clears_active_runtime_snapshot_after_completion() {
     let runtime = StudioRuntime::new(store.clone(), config_store);
     let project = runtime.open_project(&workspace).await.unwrap();
     let session = store
-        .create_session(&project.id, "UI completion", CompileMode::Auto)
+        .create_session(&project.id, "UI completion", CompileMode::Simple)
         .await
         .unwrap();
 

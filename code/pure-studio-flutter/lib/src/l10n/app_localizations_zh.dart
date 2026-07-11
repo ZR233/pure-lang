@@ -92,10 +92,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get permissionModeTooltip => '权限模式';
 
   @override
-  String get compileModeAuto => '自动';
+  String get compileModeSimple => '简洁';
 
   @override
-  String get compileModePlan => '计划';
+  String get compileModeTask => '任务';
 
   @override
   String get permissionModeRequestApproval => '请求';
@@ -126,6 +126,9 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get statusPlannerModel => 'Planner 模型';
+
+  @override
+  String get statusExecutorModel => 'Executor 模型';
 
   @override
   String get statusReasoningEffort => '思考等级';
@@ -994,10 +997,10 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String get permissionModeTooltip => '权限模式';
 
   @override
-  String get compileModeAuto => '自动';
+  String get compileModeSimple => '简洁';
 
   @override
-  String get compileModePlan => '计划';
+  String get compileModeTask => '任务';
 
   @override
   String get permissionModeRequestApproval => '请求';
@@ -1028,6 +1031,9 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get statusPlannerModel => 'Planner 模型';
+
+  @override
+  String get statusExecutorModel => 'Executor 模型';
 
   @override
   String get statusReasoningEffort => '思考等级';

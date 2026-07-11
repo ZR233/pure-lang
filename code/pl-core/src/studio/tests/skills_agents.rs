@@ -6,7 +6,7 @@ async fn session_skills_persist_from_skill_activation_trace_events_and_dedupe() 
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project("C:/work/alpha").await.unwrap();
     let session = store
-        .create_session(&project.id, "Skills", CompileMode::Auto)
+        .create_session(&project.id, "Skills", CompileMode::Simple)
         .await
         .unwrap();
     let first = SkillActivation {
@@ -67,7 +67,7 @@ async fn agent_trace_events_are_append_only_and_agents_are_snapshots() {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project("C:/work/alpha").await.unwrap();
     let session = store
-        .create_session(&project.id, "Agent work", CompileMode::Auto)
+        .create_session(&project.id, "Agent work", CompileMode::Simple)
         .await
         .unwrap();
 

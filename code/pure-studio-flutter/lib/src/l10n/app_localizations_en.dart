@@ -92,10 +92,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get permissionModeTooltip => 'Permission mode';
 
   @override
-  String get compileModeAuto => 'Auto';
+  String get compileModeSimple => 'Simple';
 
   @override
-  String get compileModePlan => 'Plan';
+  String get compileModeTask => 'Task';
 
   @override
   String get permissionModeRequestApproval => 'Request';
@@ -126,6 +126,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get statusPlannerModel => 'Planner model';
+
+  @override
+  String get statusExecutorModel => 'Executor model';
 
   @override
   String get statusReasoningEffort => 'Reasoning effort';

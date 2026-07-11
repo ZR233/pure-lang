@@ -5,7 +5,7 @@ async fn stale_event_is_not_durable() {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project("C:/work/beta").await.unwrap();
     let session = store
-        .create_session(&project.id, "Live", CompileMode::Auto)
+        .create_session(&project.id, "Live", CompileMode::Simple)
         .await
         .unwrap();
 

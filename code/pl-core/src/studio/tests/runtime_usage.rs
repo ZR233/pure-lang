@@ -6,7 +6,7 @@ async fn session_runtime_snapshot_accumulates_usage_and_cost() {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project("C:/work/alpha").await.unwrap();
     let session = store
-        .create_session(&project.id, "Build app", CompileMode::Auto)
+        .create_session(&project.id, "Build app", CompileMode::Simple)
         .await
         .unwrap();
 
@@ -180,7 +180,7 @@ async fn upsert_session_runtime_updates_context_after_existing_root_snapshot() {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project("C:/work/runtime").await.unwrap();
     let session = store
-        .create_session(&project.id, "Runtime", CompileMode::Auto)
+        .create_session(&project.id, "Runtime", CompileMode::Simple)
         .await
         .unwrap();
     let model = test_model_info("priced-model", Some(1_000_000));
@@ -217,7 +217,7 @@ async fn turn_runtime_upsert_does_not_double_count_recorded_inference_usage() {
         .await
         .unwrap();
     let session = store
-        .create_session(&project.id, "Runtime dedupe", CompileMode::Auto)
+        .create_session(&project.id, "Runtime dedupe", CompileMode::Simple)
         .await
         .unwrap();
     let model = test_model_info("priced-model", Some(1_000_000));
@@ -267,7 +267,7 @@ async fn agent_runtime_update_persists_before_session_runtime_broadcast() {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project("C:/work/live-runtime").await.unwrap();
     let session = store
-        .create_session(&project.id, "Live Runtime", CompileMode::Auto)
+        .create_session(&project.id, "Live Runtime", CompileMode::Simple)
         .await
         .unwrap();
     let config_store = crate::config::ConfigStore::new(crate::config::ConfigPaths::from_home(
@@ -366,7 +366,7 @@ fn turn_result_with_usage(
         },
         last_context_tokens: None,
         context_compactions: Vec::new(),
-        mode: CompileMode::Auto,
+        mode: CompileMode::Simple,
         session_message_count,
         status: TurnResultStatus::Completed,
         abort_reason: None,

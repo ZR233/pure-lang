@@ -49,7 +49,7 @@ async fn tool_execution_reuses_streamed_trace_part() {
         ToolExecutionContext {
             core: &core,
             options: &TurnOptions::default(),
-            mode: crate::turn::CompileMode::Auto,
+            mode: crate::turn::CompileMode::Simple,
             session_id: "turn-1",
             workspace_root: &workspace_root,
             workspace_instructions: None,
@@ -145,7 +145,7 @@ async fn tool_execution_reuses_streamed_trace_part_when_provider_id_arrives_late
         ToolExecutionContext {
             core: &core,
             options: &TurnOptions::default(),
-            mode: crate::turn::CompileMode::Auto,
+            mode: crate::turn::CompileMode::Simple,
             session_id: "turn-1",
             workspace_root: &workspace_root,
             workspace_instructions: None,
@@ -236,7 +236,7 @@ async fn tool_runtime_deltas_use_trace_part_id() {
         ToolExecutionContext {
             core: &core,
             options: &TurnOptions::default(),
-            mode: crate::turn::CompileMode::Auto,
+            mode: crate::turn::CompileMode::Simple,
             session_id: "turn-1",
             workspace_root: &std::env::temp_dir(),
             workspace_instructions: None,

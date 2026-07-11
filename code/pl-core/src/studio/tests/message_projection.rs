@@ -6,7 +6,7 @@ async fn append_studio_event_projects_message_part_snapshots() {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project("C:/work/alpha").await.unwrap();
     let session = store
-        .create_session(&project.id, "Conversation", CompileMode::Auto)
+        .create_session(&project.id, "Conversation", CompileMode::Simple)
         .await
         .unwrap();
     let message = StudioMessage {
@@ -110,7 +110,7 @@ async fn core_trace_user_snapshot_does_not_duplicate_canonical_user_part() {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project("C:/work/alpha").await.unwrap();
     let session = store
-        .create_session(&project.id, "Conversation", CompileMode::Auto)
+        .create_session(&project.id, "Conversation", CompileMode::Simple)
         .await
         .unwrap();
     let runtime = StudioEventRuntime::new(store.clone());

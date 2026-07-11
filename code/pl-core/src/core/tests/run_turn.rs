@@ -23,7 +23,7 @@ async fn run_turn_records_user_trace_part_before_internal_parts() {
     let result = core
         .run_turn_with_trace(
             &mut session,
-            TurnRequest::new("Build the thing".to_string(), CompileMode::Auto)
+            TurnRequest::new("Build the thing".to_string(), CompileMode::Simple)
                 .with_budget(crate::turn::TurnBudget::new(60_000)),
             &mut recorder,
             TurnOptions::default(),
@@ -84,7 +84,7 @@ async fn run_turn_emits_runtime_progress_commentary() {
     let result = core
         .run_turn_with_trace(
             &mut session,
-            TurnRequest::new("Build the thing".to_string(), CompileMode::Auto)
+            TurnRequest::new("Build the thing".to_string(), CompileMode::Simple)
                 .with_budget(crate::turn::TurnBudget::new(60_000)),
             &mut recorder,
             TurnOptions::default(),
@@ -130,7 +130,7 @@ async fn run_turn_persists_only_final_text_to_session_history() {
     let result = core
         .run_turn_with_trace(
             &mut session,
-            TurnRequest::new("Build the thing".to_string(), CompileMode::Auto)
+            TurnRequest::new("Build the thing".to_string(), CompileMode::Simple)
                 .with_budget(crate::turn::TurnBudget::new(60_000)),
             &mut recorder,
             TurnOptions::default(),
@@ -184,7 +184,7 @@ async fn run_turn_exposes_context_compaction_snapshot() {
     let result = core
         .run_turn_with_trace(
             &mut session,
-            TurnRequest::new("continue".to_string(), CompileMode::Auto)
+            TurnRequest::new("continue".to_string(), CompileMode::Simple)
                 .with_budget(crate::turn::TurnBudget::new(60_000)),
             &mut recorder,
             TurnOptions::default(),
@@ -212,7 +212,7 @@ async fn enabled_tools_snapshot_remains_internal_trace_event() {
     let mut core = PureCore::default_provider().unwrap();
     core.register_default_tools(std::env::temp_dir(), Some("rules".to_string()))
         .await;
-    let events = record_enabled_tools_for_core(&core, "session-1", "turn-1", CompileMode::Auto);
+    let events = record_enabled_tools_for_core(&core, "session-1", "turn-1", CompileMode::Simple);
     let event = enabled_tools_event(&events);
 
     assert_eq!(event.turn_id, "turn-1");
@@ -249,7 +249,7 @@ async fn run_turn_uses_prompt_cache_and_previous_response_id_incrementally() {
 
     core.run_turn_with_trace(
         &mut session,
-        TurnRequest::new("first prompt".to_string(), CompileMode::Auto)
+        TurnRequest::new("first prompt".to_string(), CompileMode::Simple)
             .with_budget(crate::turn::TurnBudget::new(60_000)),
         &mut recorder,
         options.clone(),
@@ -258,7 +258,7 @@ async fn run_turn_uses_prompt_cache_and_previous_response_id_incrementally() {
     .unwrap();
     core.run_turn_with_trace(
         &mut session,
-        TurnRequest::new("second prompt".to_string(), CompileMode::Auto)
+        TurnRequest::new("second prompt".to_string(), CompileMode::Simple)
             .with_budget(crate::turn::TurnBudget::new(60_000)),
         &mut recorder,
         options,
@@ -317,7 +317,7 @@ async fn run_turn_uses_runtime_profile_default_turn_options() {
 
     core.run_turn(
         &mut session,
-        TurnRequest::new("profile prompt".to_string(), CompileMode::Auto)
+        TurnRequest::new("profile prompt".to_string(), CompileMode::Simple)
             .with_budget(crate::turn::TurnBudget::new(60_000)),
         event_tx,
     )
@@ -370,7 +370,7 @@ async fn run_turn_retries_full_history_when_continuation_is_unsupported() {
     let result = core
         .run_turn_with_trace(
             &mut session,
-            TurnRequest::new("new prompt".to_string(), CompileMode::Auto)
+            TurnRequest::new("new prompt".to_string(), CompileMode::Simple)
                 .with_budget(crate::turn::TurnBudget::new(60_000)),
             &mut recorder,
             TurnOptions::default().with_prompt_cache_key("cache-session".to_string()),

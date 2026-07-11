@@ -218,7 +218,7 @@ async fn tool_context() -> ToolContext {
         event_tx,
         options: TurnOptions::default(),
         workspace_access: WorkspaceAccess::WorkspaceOnly,
-        mode: CompileMode::Auto,
+        mode: CompileMode::Simple,
         workspace_root: std::env::temp_dir(),
         workspace_instructions: None,
         instruction_snapshot: None,

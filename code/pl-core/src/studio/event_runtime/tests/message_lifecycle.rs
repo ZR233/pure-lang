@@ -6,7 +6,7 @@ async fn assistant_message_lifecycle_follows_turn_not_part_status() {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project("C:/work/studio").await.unwrap();
     let session = store
-        .create_session(&project.id, "Visible progress", CompileMode::Auto)
+        .create_session(&project.id, "Visible progress", CompileMode::Simple)
         .await
         .unwrap();
     let runtime = StudioEventRuntime::new(store.clone());

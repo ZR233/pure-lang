@@ -37,7 +37,7 @@ async fn tool_boundary_with_reused_provider_ids_creates_new_parts_after_tool() {
     let runtime = StudioRuntime::new(store.clone(), config_store);
     let project = runtime.open_project(&workspace).await.unwrap();
     let session = store
-        .create_session(&project.id, "Tool boundary test", CompileMode::Auto)
+        .create_session(&project.id, "Tool boundary test", CompileMode::Simple)
         .await
         .unwrap();
     let interaction_events = std::sync::Arc::new(Mutex::new(Vec::new()));
@@ -150,7 +150,7 @@ async fn late_responses_phase_reopens_text_block_as_new_part() {
     let runtime = StudioRuntime::new(store.clone(), config_store);
     let project = runtime.open_project(&workspace).await.unwrap();
     let session = store
-        .create_session(&project.id, "Late phase test", CompileMode::Auto)
+        .create_session(&project.id, "Late phase test", CompileMode::Simple)
         .await
         .unwrap();
     let interaction_events = std::sync::Arc::new(Mutex::new(Vec::new()));

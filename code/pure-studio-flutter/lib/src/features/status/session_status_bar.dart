@@ -55,10 +55,17 @@ class SessionStatusBar extends ConsumerWidget {
                               mode: session.mode,
                               enabled: !state.isBusy,
                             ),
-                          if (state.providers.isNotEmpty)
-                            _PlannerModelSelector(state: state),
-                          if (_plannerEffortsForState(state).isNotEmpty)
-                            _ReasoningEffortSelector(state: state),
+                          if (session != null && state.providers.isNotEmpty)
+                            _ModeModelSelector(
+                              state: state,
+                              mode: session.mode,
+                            ),
+                          if (session != null &&
+                              _effortsForState(state, session.mode).isNotEmpty)
+                            _ReasoningEffortSelector(
+                              state: state,
+                              mode: session.mode,
+                            ),
                           ContextUsageReadout(runtime: runtime),
                           if (runtime.costLabel.isNotEmpty)
                             _StatusReadout(
@@ -152,27 +159,31 @@ class _SessionModeSelector extends ConsumerWidget {
 
   IconData _modeIcon(CompileMode value) {
     return switch (value) {
-      CompileMode.auto => Icons.flash_on,
-      CompileMode.plan => Icons.route_outlined,
+      CompileMode.simple => Icons.flash_on,
+      CompileMode.task => Icons.route_outlined,
     };
   }
 }
 
-class _PlannerModelSelector extends ConsumerWidget {
-  const _PlannerModelSelector({required this.state});
+class _ModeModelSelector extends ConsumerWidget {
+  const _ModeModelSelector({required this.state, required this.mode});
 
   final StudioState state;
+  final CompileMode mode;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final options = _plannerModelOptions(state.providers);
+    final options = _modelOptions(state.providers);
     if (options.isEmpty) {
       return const SizedBox.shrink();
     }
-    final role = state.role('planner');
-    final current = _plannerModelFor(state) ?? options.first;
+    final roleKey = _roleKeyForMode(mode);
+    final role = state.role(roleKey);
+    final current = _modelFor(state, mode) ?? options.first;
     return UpwardPopupMenu<String>(
-      tooltip: context.l10n.statusPlannerModel,
+      tooltip: mode == CompileMode.task
+          ? context.l10n.statusPlannerModel
+          : context.l10n.statusExecutorModel,
       initialValue: current.key,
       onSelected: (key) {
         final option = options.firstWhere((option) => option.key == key);
@@ -182,7 +193,7 @@ class _PlannerModelSelector extends ConsumerWidget {
         ref
             .read(studioControllerProvider.notifier)
             .setModelRole(
-              roleKey: 'planner',
+              roleKey: roleKey,
               providerId: option.providerId,
               model: option.model,
               effort: effort,
@@ -212,14 +223,16 @@ class _PlannerModelSelector extends ConsumerWidget {
 }
 
 class _ReasoningEffortSelector extends ConsumerWidget {
-  const _ReasoningEffortSelector({required this.state});
+  const _ReasoningEffortSelector({required this.state, required this.mode});
 
   final StudioState state;
+  final CompileMode mode;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final role = state.role('planner');
-    final currentModel = _plannerModelFor(state);
+    final roleKey = _roleKeyForMode(mode);
+    final role = state.role(roleKey);
+    final currentModel = _modelFor(state, mode);
     final efforts = currentModel?.reasoningEfforts ?? const [];
     if (role == null || currentModel == null || efforts.isEmpty) {
       return const SizedBox.shrink();
@@ -232,7 +245,7 @@ class _ReasoningEffortSelector extends ConsumerWidget {
         ref
             .read(studioControllerProvider.notifier)
             .setModelRole(
-              roleKey: 'planner',
+              roleKey: roleKey,
               providerId: role.providerId,
               model: role.model,
               effort: effort,
@@ -273,8 +286,8 @@ class _ControlItem extends StatelessWidget {
   }
 }
 
-class _PlannerModelOption {
-  const _PlannerModelOption({
+class _ModeModelOption {
+  const _ModeModelOption({
     required this.providerId,
     required this.model,
     required this.label,
@@ -289,12 +302,19 @@ class _PlannerModelOption {
   String get key => '$providerId::$model';
 }
 
-_PlannerModelOption? _plannerModelFor(StudioState state) {
-  final role = state.role('planner');
+String _roleKeyForMode(CompileMode mode) {
+  return switch (mode) {
+    CompileMode.simple => 'executor',
+    CompileMode.task => 'planner',
+  };
+}
+
+_ModeModelOption? _modelFor(StudioState state, CompileMode mode) {
+  final role = state.role(_roleKeyForMode(mode));
   if (role == null) {
     return null;
   }
-  final options = _plannerModelOptions(state.providers);
+  final options = _modelOptions(state.providers);
   if (options.isEmpty) {
     return null;
   }
@@ -305,14 +325,12 @@ _PlannerModelOption? _plannerModelFor(StudioState state) {
   );
 }
 
-List<String> _plannerEffortsForState(StudioState state) {
-  return _plannerModelFor(state)?.reasoningEfforts ?? const [];
+List<String> _effortsForState(StudioState state, CompileMode mode) {
+  return _modelFor(state, mode)?.reasoningEfforts ?? const [];
 }
 
-List<_PlannerModelOption> _plannerModelOptions(
-  List<ProviderSettingsView> providers,
-) {
-  final options = <_PlannerModelOption>[];
+List<_ModeModelOption> _modelOptions(List<ProviderSettingsView> providers) {
+  final options = <_ModeModelOption>[];
   for (final provider in providers) {
     final models = provider.models.isEmpty
         ? [
@@ -328,7 +346,7 @@ List<_PlannerModelOption> _plannerModelOptions(
         continue;
       }
       options.add(
-        _PlannerModelOption(
+        _ModeModelOption(
           providerId: provider.id,
           model: model.slug,
           label:

@@ -3,8 +3,8 @@ use pretty_assertions::assert_eq;
 
 #[test]
 fn plan_mode_tool_allowlist_exposes_only_read_and_agent_tools() {
-    let auto = crate::turn::CompileMode::Auto;
-    let plan = crate::turn::CompileMode::Plan;
+    let auto = crate::turn::CompileMode::Simple;
+    let plan = crate::turn::CompileMode::Task;
 
     assert!(tool_allowed_in_mode(auto, "write_file"));
     assert!(tool_allowed_in_mode(plan, "read_file"));

@@ -166,7 +166,7 @@ impl AgentKernelToolRequest {
             event_tx,
             options: TurnOptions::default(),
             workspace_access: WorkspaceAccess::WorkspaceOnly,
-            mode: CompileMode::Auto,
+            mode: CompileMode::Simple,
             instruction_snapshot: None,
             provider_call_id: None,
             parent_session: Arc::new(crate::CoreSession::new()),

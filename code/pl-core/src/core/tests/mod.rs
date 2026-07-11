@@ -13,7 +13,7 @@ fn test_tool_context(event_tx: AgentEventSender) -> ToolContext {
         event_tx,
         options: TurnOptions::default(),
         workspace_access: WorkspaceAccess::WorkspaceOnly,
-        mode: crate::turn::CompileMode::Auto,
+        mode: crate::turn::CompileMode::Simple,
         workspace_root: std::env::temp_dir(),
         workspace_instructions: None,
         instruction_snapshot: None,
