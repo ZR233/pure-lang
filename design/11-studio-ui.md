@@ -131,7 +131,7 @@ Flutter 首版 `ListView.builder` 必须实现同一滚动语义。Timeline 以 
 
 Studio runtime 的恢复语义必须保证 UI 不展示已经无法唤醒的等待态。应用启动时，未完成 turn 标记为取消，`userInput` 与 `toolApproval` 这类依赖内存 waiter 的 transient pending interaction 同步取消并发出 interaction snapshot；`planConfirmation` 可在 turn 完成后继续等待用户决策，因此不会被普通启动恢复或 turn 收尾清理取消。单个 session 的 active turn 只在对应后台 turn 未终止时出现在 runtime snapshot 中，完成、失败、中断和取消后必须从 snapshot 中移除。
 
-聊天底部只渲染一个最高优先级 pending interaction，优先级为 `toolApproval > userInput > planConfirmation`。这个区域采用 opencode dock prompt 语义：pending 的问题与权限请求不写入 timeline view model，timeline 中 pending `request_user_input` / `question` tool part 隐藏，由 dock 显示真实问题、选项和输入控件；完成后的问题 tool part 可以作为普通 assistant tool part 显示“Questions / answered”摘要。普通 prompt 输入不再渲染 Auto/Plan 二级按钮，模式切换只存在于状态栏，避免与状态栏重复。`submit_prompt` 和 `resolve_interaction` 只表示提交成功，不返回最终 timeline；后续展示完全由 Studio event stream 驱动。`toolApproval` 必须显示工具名、参数、工作目录和 approve/deny；`userInput` 必须显示每个问题、选项、free text/other/secret 输入并提交 `{ [questionId]: { answers } }`，secret 答案不得以明文出现在 timeline；`planConfirmation` 保留 implement fresh、continue planning、dismiss 三动作，并和问题/权限一样使用 dock prompt，而不是从 timeline 自行推断“是否实施计划”。
+聊天底部只渲染一个最高优先级 pending interaction，优先级为 `toolApproval > userInput > planConfirmation`。普通 prompt 输入不再渲染 Simple/Task 二级按钮，模式切换只存在于状态栏；确认实施后保持 Task 并由 coordinator 推进。
 
 Flutter 的 `planConfirmation` dock 对齐 Codex 桌面 app 的决策式提示：标题固定为“实施此计划？”，计划正文留在 timeline plan card 中展示，dock 内常驻一个轻量调整输入框，用户可直接输入调整要求并提交 `continuePlanning`，不再通过二级按钮跳转到独立 composer 状态；实施动作不回传可编辑计划正文，继续调整只回传用户输入的调整内容，忽略动作保持弱化展示。Flutter 的 `userInput` dock 对齐 Codex 的分题交互：顶部显示问题数量与进度点，当前只聚焦一个问题，选项使用多选 checkbox row，Other/free text/secret 输入跟随当前问题展示，上一题/下一题/提交按钮保留在 dock footer；提交时为每个问题生成 `{ answers: [...] }`，未回答问题也保留空数组。
 
@@ -139,7 +139,7 @@ Flutter 的 `planConfirmation` dock 对齐 Codex 桌面 app 的决策式提示�
 
 pending interaction 只替换普通 prompt 输入，不得隐藏当前 turn 的停止控制；只要当前 session 的 turn 仍处于非终态，footer 必须保留停止按钮并调用 `stop_prompt(sessionId)`。`busy` 与停止按钮状态必须按 `sessionId` 归属计算，后台 session 的 turn event 不能让当前 session 显示不可用的停止态。
 
-Flutter 状态栏保留模式切换、planner 模型选择、reasoning effort、context/token/cost、active skills、MCP、LSP 和 subagent 活动列表。模式切换调用 `setSessionMode(sessionId, mode)`，planner 模型选择调用 `setModelRole(roleKey=planner, providerId, model, effort)`，不能只更新本地 chip 或 settings draft。权限模式不在状态栏重复展示，只在 composer 权限选择器和 Settings/Security 中修改。状态栏所有数据来自 Studio store；`mcpHealthChanged` 与 `lspHealthChanged` 必须更新对应 snapshot，不能在 reducer 中丢弃。
+Flutter 状态栏保留模式切换、当前根角色模型选择、reasoning effort、context/token/cost、active skills、MCP、LSP 和 agent 活动列表。Simple 编辑 executor role，Task 编辑 planner role；任务非终态期间禁用模式切换。状态栏所有数据来自 Studio store。
 
 Flutter `SessionStatusBar` 展示同一组信息，并使用 Material 3 的 compact controls、tooltip 和 hover/focus 可达的弹层承载详情。Flutter 状态栏只消费 Riverpod selector，不直接订阅 bridge stream 或解析 raw JSON。
 
@@ -206,4 +206,4 @@ Flutter 窗口 resize 时 UI 不应持续触发昂贵测量。Timeline 的贴底
 
 计划确认 dock 的固定文案语义为“实施此计划？”：主操作是实施计划，次操作是从同一卡片内输入并提交调整要求，忽略动作保持弱化展示。所有固定 UI 文案必须走 i18n；模型名称、provider 名称、tool 名称、agent 路径、reasoning effort 等领域值仍按原始字符串透传。
 
-用户选择“实施此计划”后，当前 session 必须退出 Plan 模式并切回执行用的 Auto 模式，再提交用于实施计划的后台 prompt。前端收到 resolve interaction 响应后要同步 session 列表中的 mode，避免状态栏和会话列表仍显示 plan。
+用户选择“实施此计划”后，当前 session 保持 Task 模式并进入 coordinator 实施阶段。状态栏和活动详情展示 task phase、当前分支、agent 交付、merge、冲突和 review 状态；模式选择在任务非终态期间禁用。

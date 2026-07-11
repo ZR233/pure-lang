@@ -45,11 +45,11 @@ SQLite 只保存 Studio 状态，例如项目、会话、消息、统一 interac
 | TOML key | 中文角色 | 用途 |
 | --- | --- | --- |
 | `explorer` | 探索者 | 代码、文档和上下文探索 |
-| `planner` | 计划者 | 所有 Studio 根聊天、计划生成和计划实施 |
-| `executor` | 执行者 | planner 调用的子代理执行任务 |
+| `planner` | 计划者 | Task 根聊天、计划生成、任务协调、merge 与审查闭环 |
+| `executor` | 执行者 | Simple 根聊天，或 Task 中 planner 调用的 worktree 执行者 |
 | `reviewer` | 审查者 | 代码审查和结果检查 |
 
-普通桌面对话始终使用 `planner` 角色。`compileMode = auto | plan` 只切换协作指令和工具边界，不切换根聊天模型角色。`executor` 角色只能由子代理运行时使用；用户直接在 chat 输入“执行计划”或点击计划确认实施，仍是 planner 角色发起的 root turn。
+桌面对话按 `compileMode = simple | task` 路由根角色：Simple 使用 executor，Task 使用 planner。Task 确认实施后仍由 planner 通过 coordinator 发起执行者、合并和 reviewer，不切换模式。
 
 每个角色必须配置：
 
@@ -300,7 +300,7 @@ MCP server 配置保存在顶层 `[mcp_servers.<server_id>]` 表，参考 Codex 
 - `bearer_token_env_var`（可选）
 - `headers`
 
-Pure 启动后会在后台并行探测配置意图为启用且凭据完整的 MCP server，流程为连接、`initialize`、`initialized` 和 `tools/list`。探测结果只保存在进程内 registry，状态包括 `checking`、`available`、`unavailable`、`disabled` 和 `missingCredential`；失败或超时不会修改配置，也不会阻塞普通对话。普通对话、Auto Mode 和 Plan Mode 只向模型暴露当前 registry 中 `available` MCP server 的 tools；启用 MCP server 表示用户显式信任该 server，MCP tool 调用不再触发额外审批弹窗。由于 MCP tool 不声明可靠的本地读写能力，Pure 不把 MCP 原始协议类型写入 `pl-protocol`，只通过现有 tool timeline 和 tool result 字符串表达执行状态。
+Pure 启动后会在后台探测启用且凭据完整的 MCP server。Simple executor 可以消费 available tools；Task planner、explorer、reviewer 只暴露 effect 策略明确允许的动态工具，未知 effect 默认拒绝。
 
 内置 Zhipu Coding Plan MCP server 固定为：
 

@@ -25,15 +25,15 @@ Flutter bridge crate 不承载流程逻辑，只把 Dart 调用转发到 `pl-cor
 
 运行输入统一为新 DTO 契约（camelCase wire）。
 
-- `compileMode`：`plan | auto`
+- `compileMode`：`simple | task`
 - `turnOptions.permissionMode`：默认固定 `request-approval`
 - `prompt`、`sessionId`、`workspaceRoot` 等进入 `StudioRuntime`
 
-`compileMode` 是会话级协作模式，不是模型角色路由。Studio 根聊天 turn 始终使用 `planner` 角色模型；`auto` 表示执行型协作模式，允许模型在审批策略约束内主动修改工作区；`plan` 是 Codex 风格规划模式，允许读取、搜索、运行经审批的探索命令和调度探索型子代理，但最终交付物应是一段可执行计划，而不是直接修改文件。前端切换 Auto/Plan 调用 `setSessionMode(sessionId, mode)` 持久化 session 默认模式；前端切换根聊天模型调用 `setModelRole(roleKey=planner, providerId, model, effort)` 持久化 planner role，下一轮 turn 按新的 planner role 解析 provider/model。模型可见输出在协议层分流：OpenAI Responses 等 native phase provider 使用原生 `commentary` / `final_answer` phase，Chat tagged provider 使用 `<commentary>...</commentary>` 表示运行中的短进展更新、`<final>...</final>` 表示最终答复。streaming 层把这些 provider 输出统一投影为 text part；plan part 只能由 `plan_exit.content` 或后续明确的 plan lifecycle 事件生成。普通 assistant 正文不显示 Chat 标签，Responses native phase 不解析标签，`<proposed_plan>` 按普通未标记文本处理。
+`compileMode` 同时决定根模型角色和协作边界。`simple` 根 turn 使用 executor，直接对话和实施，只能创建只读 explorer；`task` 根 turn 始终使用 planner，由 planner 通过持久化 coordinator 管理 explorer、executor、reviewer、当前分支和审查闭环。确认实施后仍保持 `task`，不会切换到 `simple`。详细状态机、交付和 merge 契约见 `16-task-orchestration.md`。
 
 `workspaceRoot` 是运行期有效工作区，而不是简单等于 UI 当前选中的目录。Studio 读取 project path 后先解析到规范化目录；如果该目录位于 Git 仓库中，则提升到最近的 Git 仓库根。这样用户从子 crate 或桌面壳层进入项目时，工具仍能访问完整仓库上下文。工作区记忆按 Codex 风格从 Git 根到当前工作目录读取层级文档，候选文件优先级为 `AGENTS.override.md`、`AGENTS.md`、`Agents.md`，并受配置的总字节预算限制。
 
-提示词在核心层按三层组装：`base/system`、`developer`、`user context`。`base/system` 是模型请求的顶层系统提示词，承载跨 Auto/Plan 共用的身份、工作原则、通用工具协作、子代理调度约定和文档同步工作流；`developer` 承载 Auto/Plan 模式差异、平台工具规则、skills 索引和运行约束；`user context` 承载用户配置的上下文偏好和 AGENTS 项目记忆。这些临时前置内容参与模型请求和 token 估算，但不写入普通会话消息历史。session snapshot 只冻结稳定上下文；Auto/Plan mode overlay 是 per-turn 注入，Plan session 后续切到 Auto 实施计划时不得继续携带 Plan-only developer 约束。
+提示词在核心层按三层组装：`base/system`、`developer`、`user context`。`developer` 承载 Simple/Task 与当前 execution profile 的差异；运行时工具 effect 和 coordinator phase 是最终权限来源，提示词不能扩大权限。
 
 系统提示词必须把文档同步作为代码修改前后的稳定约束：涉及架构、接口、行为或项目约定的变更，代理应先阅读相关设计文档和项目记忆，确认计划后先更新 `design/` 下对应文档，再开始实现；实现完成后需要整体回看计划、文档、代码和测试结果，确认交付内容仍与文档和计划一致。若实现过程中发现现有文档与可行方案冲突，应暂停并让用户在遵循现有文档、采纳新方案并同步文档、继续补充需求之间选择。
 
@@ -47,13 +47,13 @@ Flutter bridge crate 不承载流程逻辑，只把 Dart 调用转发到 `pl-cor
 - `PermissionMode::RequestApproval` 为默认且主路径；旧 `ToolApprovalPolicy` 仅作为兼容构造
 - 手动审批接口保留在系统能力中，但不作为默认流程；`request-approval` 模式只在工具请求 workspace 外访问时弹出用户审批，workspace 内读写直接放行
 - `auto-review` 模式使用 reviewer 角色模型审批 workspace 外访问。reviewer 只返回批准或拒绝，不执行工具；解析失败、provider 失败或非明确批准均按拒绝处理
-- `full-access` 放宽 Pure 文件工具和 `bash.workingDirectory` 的 workspace 边界，并在策略层直接放行 Plan Mode 中已暴露的 `bash`；该模式仍只执行已注册工具，不提供 OS 沙箱或系统级提权
-- Studio 中的 Plan Mode 会保留 `bash` 探索能力；`request-approval` 与 `auto-review` 下 bash 必须走手动审批，`full-access` 下直接放行。明确写入类工具不会暴露给模型，也不能执行模型幻觉出的写入工具调用
+- `full-access` 不能扩大 execution profile 的工具 effect；planner、explorer、reviewer 仍受角色白名单约束
+- Task planner 的探索和协调只使用 profile 允许的读取与 harness 工具；明确写入类工具不能通过权限模式绕过
 - 用户显式要求 `subagent`/子代理分工时，核心提示必须将异步 agent 调度作为强约束；普通 shell 或文件探索不能替代子代理调度
 - 显式子代理分工允许最多两轮只读定位；若仍未创建 agent，后续推理只暴露 `spawn_agent` 并保持 `auto` tool choice，避免触发不支持 required tool choice 的 provider 限制
 - 多 agent 协作只通过 `spawn_agent`、`send_input`、`wait_agent`、`list_agents`、`close_agent`、`resume_agent` 组成，不提供同步等待到最终摘要的 `subagent` 入口；这些工具只提交协作操作，实际 agent 生命周期由 `AgentSupervisor` 统一管理
 - `request_user_input` 是 Codex 风格的阻塞交互工具，root agent 与 subagent 都可用；工具通过统一 `Interaction` 域创建 `userInput` 请求，等待前端 resolution 后把答案作为工具结果返回，不作为普通用户聊天消息写入历史
-- `planner` 是所有 Studio 根聊天 turn 的唯一模型角色，包括 Auto、Plan 和 Plan 实施；`executor` 只用于 planner 通过子代理工具创建或继续的 child agent turn
+- `simple` 根聊天使用 executor，`task` 根聊天与 continuation turn 使用 planner；task child role 由 planner 指定，所有 child 禁止继续派生
 - agent 运行时状态对齐 Codex：`queued | running | waiting | completed | errored | interrupted | shutdown | notFound`
 - `budgetLimited` 不是 agent 状态，而是 turn abort reason；子 agent 预算耗尽时状态为 `interrupted`，并携带 `reason`、`budgetLimitKind` 和 `budgetUsage`
 - `interrupted` 是可恢复的非终局状态；`completed | errored | shutdown | notFound` 是终局状态
@@ -99,7 +99,7 @@ assistant 的 text、commentary、reasoning 和 plan part identity 不得直接�
 
 子代理没有独立的压缩实现。`AgentSupervisor` 为每个 agent 保存独立 `CoreSession`，`spawn_agent` 和带 `triggerTurn` 的 `send_input` 提交的 child turn 复用同一个 `PureCore` turn pipeline，因此每个子代理独立维护自己的压缩历史；父会话不会替子代理压缩，也不会因为子代理压缩而改写父历史。
 
-子代理继承父 turn 的 `compileMode` 和稳定 instruction context，但不继承 root 的模型角色。child agent 的模型角色由 `agentType` 决定，默认 executor；只有子代理路径可以使用 executor 角色。child turn 同样按当前 mode 注入 Auto/Plan overlay，并复用同一套工具边界和 proposed-plan 输出约定。
+子代理继承稳定 instruction context，但 execution profile 由角色决定，不直接继承父 turn 权限。explorer/reviewer 只读，executor 只写自己的 worktree；task child depth 固定为 1。
 
 子代理同样继承父 turn 的交互运行时。`request_user_input`、工具审批和计划确认统一表达为 `InteractionKind::{userInput, toolApproval, planConfirmation}`。每个 interaction 都带 `sessionId`、`turnId`、可选 `itemId/toolId/agentPath`，由 `InteractionRuntime` 创建、持久化、广播并等待 resolution。Studio 只渲染当前最高优先级 pending interaction；回答或审批只解除对应等待，不触发新 turn，也不写入普通聊天消息。UI 交互形态对齐 opencode dock prompt：pending question/permission/plan confirmation 在底部 dock 处理，timeline 只渲染 message/part 投影；`request_user_input` 的 completed tool part 可以显示 redacted 问题答案摘要。
 
@@ -136,8 +136,8 @@ Agent 协作 timeline 与状态分层：
 - `studio_messages`、`message_parts`、`agent_events`、`interactions`、`session_skills` 是 `StudioEventRuntime` 的 projection 表。message/part projection 保存 latest snapshot，live delta 只作为前端 overlay；除一次性迁移和启动恢复外，运行期不得由前端推断直接写入。Plan lifecycle 也必须先写 `StudioEventKind::PlanLifecycleChanged`，再由 projection 更新查询表。旧 `session_handoffs` projection 已通过后续迁移从当前 schema 清理，不再参与运行期读写。
 - `message_parts.part_order` 在 part 首次 durable snapshot 时由 `StudioEventEnvelope.sequence` 固化；后续同 part snapshot 即使携带旧 order，也必须保留既有 order，禁止终态 snapshot 或 backfill 改变首次展示位置。
 - session 的 `mode` 表示下一轮默认协作模式，由 Studio 模式切换命令持久化；运行时按 session 当前 `mode` 构造 `TurnRequest`
-- session 的 `instruction_snapshot_json` 保存首轮解析出的稳定 base/user/project context 和非 mode-specific developer context。已有 session 缺少快照时，在下一轮运行前按当前配置补建。后续配置、模型默认提示词或 AGENTS 文件变化不 retroactively 改写既有 session；新 session 才使用新配置。Auto/Plan mode overlay 每个 turn 重新注入，不能被 snapshot 永久冻结。
-- Plan Mode 生成的计划有独立生命周期事件：`pendingConfirmation | accepted | implementing | implemented | implementationFailed | continuedPlanning | dismissed | cancelled`。这些事件由 `StudioEventKind::PlanLifecycleChanged` 广播，并随 durable `studio_events` 重放；前端按 `planId` 折叠最新状态。计划实施确认不是前端从 timeline 自行推断的临时状态，而是后端在当前 live Plan turn 终态后创建的 `planConfirmation` interaction。确认实施沿用 wire 枚举名 `implementFreshContext`，但语义固定为当前 session 内实施：后端把 plan markdown 作为实施 prompt 的唯一意图来源，在同一 `sessionId` 启动新 turn，root turn 继续使用 planner 角色；旧 `session_handoffs` handoff/child session 路径不再作为 Plan 实施入口，也不作为当前 Studio projection。
+- session 的 `instruction_snapshot_json` 保存稳定 base/user/project context 和非 mode-specific developer context；Simple/Task 与 execution profile overlay 每个 turn 重新注入。
+- Task 计划与实施状态通过 durable coordinator 和 plan lifecycle 事件表达；确认实施后在同一 session 进入 `designUpdating`，由 planner continuation turn 推进，不切换会话模式。
 - `interactions` 表保存所有 pending/resolved/cancelled/expired 交互，是刷新与 session 切换恢复 pending UI 的事实来源。`InteractionChanged` 通过 `StudioEventKind::InteractionChanged` 广播当前 interaction 最新状态；旧 `studio-user-input-*`、`studio-tool-approval-*`、`studio-interaction-changed` sideband 事件不再作为 Studio 协议入口
 - `skill_view` 成功激活 skill 时，后端写入结构化 `SkillActivated` 事件并 upsert 会话级 skill runtime fact。Studio 当前会话的 `activeSkills` 只从 `session_skills` 等结构化持久层读取，不能再从 tool result JSON 文本反解析。
 - 如果 turn 内发生上下文压缩，`CoreSession` revision 会变化，Studio 以事务重写当前 session 的消息历史并追加本轮 trace；未发生压缩时继续使用追加写入
