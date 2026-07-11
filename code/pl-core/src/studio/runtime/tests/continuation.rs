@@ -9,6 +9,7 @@ use pl_protocol::{AgentStatus, StudioEventKind, StudioPartType};
 use tokio::sync::Mutex;
 
 use super::*;
+use crate::studio::active_turns::SessionAlreadyHasActiveTurn;
 use crate::studio::runtime::continuation::{
     ContinuationLaunch, ContinuationLauncher, ContinuationReason, ContinuationRequest,
     ContinuationScheduler, ContinuationTestBarrier, PromptCompletionTestBarrier, SessionTurnState,
@@ -248,6 +249,37 @@ async fn continuation_completion_before_turn_binding_does_not_requeue_claim() {
     );
     assert_eq!(scheduler.bind_turn(&claim, "turn-continuation").await, None);
     assert!(!scheduler.has_session("session-1").await);
+}
+
+#[tokio::test]
+async fn unbound_claim_retains_all_early_turn_removals_until_binding() {
+    let scheduler = ContinuationScheduler::new();
+    let first = continuation_request("run-1", "session-1", ContinuationReason::AgentTerminal);
+    let claim = scheduler
+        .request(first, SessionTurnState::Idle)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        scheduler
+            .turn_removed("session-1", "turn-continuation")
+            .await,
+        None
+    );
+    assert_eq!(scheduler.turn_removed("session-1", "turn-user").await, None);
+
+    let later = continuation_request("run-1", "session-1", ContinuationReason::ReviewReturned);
+    assert_eq!(
+        scheduler
+            .request(later.clone(), SessionTurnState::Active)
+            .await,
+        None
+    );
+    let later_claim = scheduler
+        .bind_turn(&claim, "turn-continuation")
+        .await
+        .unwrap();
+    assert_eq!(later_claim.request, later);
 }
 
 #[tokio::test]
@@ -945,12 +977,13 @@ async fn shutdown_clears_pending_and_same_runtime_recovers_once() {
     let run = persisted_repository_run(&store, &repository, "shutdown-pending").await;
     let launcher = RecordingLauncher::successful();
     let runtime = test_runtime(store.clone(), launcher.clone());
+    let token = tokio_util::sync::CancellationToken::new();
     runtime
         .active_turns
         .insert(
             run.session_id.clone(),
             "turn-competing".to_string(),
-            tokio_util::sync::CancellationToken::new(),
+            token.clone(),
         )
         .await
         .unwrap();
@@ -958,10 +991,13 @@ async fn shutdown_clears_pending_and_same_runtime_recovers_once() {
         .request_task_continuation(run.id.clone(), ContinuationReason::AgentTerminal)
         .await;
 
-    let stopped = runtime.shutdown_runtime().await.unwrap();
+    let shutdown_runtime = runtime.clone();
+    let shutdown = tokio::spawn(async move { shutdown_runtime.shutdown_runtime().await });
+    token.cancelled().await;
     runtime
         .active_turn_removed(&run.session_id, "turn-competing")
         .await;
+    let stopped = shutdown.await.unwrap().unwrap();
     assert_eq!(stopped.status, StudioRuntimeStatus::Stopped);
     assert!(
         !runtime
@@ -1037,7 +1073,13 @@ async fn failed_runtime_shutdown_clears_turns_scheduler_and_recovers_cleanly() {
         )
         .unwrap();
 
-    let stopped = runtime.shutdown_runtime().await.unwrap();
+    let shutdown_runtime = runtime.clone();
+    let shutdown = tokio::spawn(async move { shutdown_runtime.shutdown_runtime().await });
+    token.cancelled().await;
+    runtime
+        .active_turn_removed(&run.session_id, "turn-before-failure")
+        .await;
+    let stopped = shutdown.await.unwrap().unwrap();
 
     assert_eq!(stopped.status, StudioRuntimeStatus::Stopped);
     assert!(token.is_cancelled());
@@ -1057,7 +1099,7 @@ async fn failed_runtime_shutdown_clears_turns_scheduler_and_recovers_cleanly() {
 }
 
 #[tokio::test]
-async fn stale_background_turn_cannot_finalize_over_recovered_turn_generation() {
+async fn shutdown_waits_for_background_turn_before_same_runtime_recovery() {
     let old_sse = concat!(
         "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_old\",\"delta\":\"old done\"}\n\n",
         "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_old\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
@@ -1075,6 +1117,16 @@ async fn stale_background_turn_cannot_finalize_over_recovered_turn_generation() 
     let mut runtime = StudioRuntime::new(store.clone(), config_store);
     let completion = PromptCompletionTestBarrier::new();
     runtime.prompt_completion_barrier = Some(completion.clone());
+    let history_before = store
+        .load_core_session(&run.session_id)
+        .await
+        .unwrap()
+        .messages()
+        .to_vec();
+    let skills_before = store
+        .list_session_skill_names(&run.session_id)
+        .await
+        .unwrap();
     let old_turn = runtime
         .submit_prompt(StudioSubmitPromptRequest {
             session_id: run.session_id.clone(),
@@ -1092,13 +1144,36 @@ async fn stale_background_turn_cannot_finalize_over_recovered_turn_generation() 
         .await
         .unwrap();
     completion.wait_until_entered().await;
+    let session_runtime_before = store.load_session_runtime(&run.session_id).await.unwrap();
 
+    let shutdown_runtime = runtime.clone();
+    let shutdown = tokio::spawn(async move { shutdown_runtime.shutdown_runtime().await });
+    tokio::time::timeout(TEST_RUNTIME_TIMEOUT, async {
+        while runtime.runtime_snapshot().status == StudioRuntimeStatus::Ready {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
     assert_eq!(
-        runtime.shutdown_runtime().await.unwrap().status,
+        runtime.runtime_snapshot().status,
+        StudioRuntimeStatus::ShuttingDown
+    );
+    assert!(!shutdown.is_finished());
+
+    let initialize_runtime = runtime.clone();
+    let initialize = tokio::spawn(async move { initialize_runtime.initialize_runtime().await });
+    tokio::task::yield_now().await;
+    assert!(!initialize.is_finished());
+
+    completion.release().await;
+    completion.wait_until_finished().await;
+    assert_eq!(
+        shutdown.await.unwrap().unwrap().status,
         StudioRuntimeStatus::Stopped
     );
     assert_eq!(
-        runtime.initialize_runtime().await.unwrap().status,
+        initialize.await.unwrap().unwrap().status,
         StudioRuntimeStatus::Ready
     );
     tokio::time::timeout(TEST_RUNTIME_TIMEOUT, recovery_accepted)
@@ -1138,9 +1213,6 @@ async fn stale_background_turn_cannot_finalize_over_recovered_turn_generation() 
             )
         })
         .count();
-
-    completion.release().await;
-    completion.wait_until_finished().await;
 
     assert_eq!(
         runtime.runtime_snapshot().active_turns,
@@ -1193,9 +1265,182 @@ async fn stale_background_turn_cannot_finalize_over_recovered_turn_generation() 
             .count(),
         1
     );
+    assert_eq!(
+        store
+            .load_core_session(&run.session_id)
+            .await
+            .unwrap()
+            .messages(),
+        history_before
+    );
+    assert_eq!(
+        store
+            .list_session_skill_names(&run.session_id)
+            .await
+            .unwrap(),
+        skills_before
+    );
+    assert_eq!(
+        store.load_session_runtime(&run.session_id).await.unwrap(),
+        session_runtime_before
+    );
+    assert!(
+        !store
+            .list_pending_interactions(&run.session_id)
+            .await
+            .unwrap()
+            .iter()
+            .any(|interaction| interaction.kind == InteractionKind::PlanConfirmation)
+    );
 
     let _ = release_recovery.send(());
     wait_for_no_active_turn(&runtime).await;
+    server.await.unwrap();
+    remove_repository(repository);
+    let _ = tokio::fs::remove_dir_all(home).await;
+}
+
+#[tokio::test]
+async fn next_turn_interaction_is_inserted_only_after_previous_cleanup_and_removal() {
+    let sse_body = concat!(
+        "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_old\",\"delta\":\"done\"}\n\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_old\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+        "data: [DONE]\n\n"
+    )
+    .to_string();
+    let (base_url, server) = serve_sse_once(sse_body).await;
+    let repository = init_repository("continuation-finalization-cleanup");
+    let store = StudioStore::open_memory().await.unwrap();
+    let run = persisted_repository_run(&store, &repository, "finalization-cleanup").await;
+    let home = std::env::temp_dir().join(format!("pure-cleanup-home-{}", unique_id()));
+    let config_store = ConfigStore::new(crate::config::ConfigPaths::from_home(&home));
+    config_store.save(&test_config(base_url)).unwrap();
+    let mut runtime = StudioRuntime::new(store.clone(), config_store);
+    let finalization = ContinuationTestBarrier::new();
+    runtime.prompt_finalization_barrier = Some(finalization.clone());
+
+    let old_turn = runtime
+        .submit_prompt(StudioSubmitPromptRequest {
+            session_id: run.session_id.clone(),
+            prompt: "old background turn".to_string(),
+            attachment_ids: Vec::new(),
+            options: StudioSubmitPromptOptions::default(),
+        })
+        .await
+        .unwrap();
+    finalization.wait_until_entered().await;
+
+    let contender_runtime = runtime.clone();
+    let contender_store = store.clone();
+    let contender_session_id = run.session_id.clone();
+    let (attempted_tx, attempted_rx) = tokio::sync::oneshot::channel();
+    let contender = tokio::spawn(async move {
+        let mut attempted_tx = Some(attempted_tx);
+        let first_insert = contender_runtime
+            .active_turns
+            .insert(
+                contender_session_id.clone(),
+                "turn-next-generation".to_string(),
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await;
+        let inserted_before_release = match first_insert {
+            Ok(()) => true,
+            Err(error)
+                if error
+                    .downcast_ref::<SessionAlreadyHasActiveTurn>()
+                    .is_some() =>
+            {
+                false
+            }
+            Err(error) => panic!("next turn insertion failed: {error:#}"),
+        };
+        if !inserted_before_release {
+            if let Some(sender) = attempted_tx.take() {
+                let _ = sender.send(false);
+            }
+            loop {
+                let insert = contender_runtime
+                    .active_turns
+                    .insert(
+                        contender_session_id.clone(),
+                        "turn-next-generation".to_string(),
+                        tokio_util::sync::CancellationToken::new(),
+                    )
+                    .await;
+                match insert {
+                    Ok(()) => break,
+                    Err(error)
+                        if error
+                            .downcast_ref::<SessionAlreadyHasActiveTurn>()
+                            .is_some() =>
+                    {
+                        tokio::task::yield_now().await;
+                    }
+                    Err(error) => panic!("next turn insertion failed: {error:#}"),
+                }
+            }
+        }
+        let mut interaction = pending_interaction(
+            "interaction-next-generation",
+            &contender_session_id,
+            InteractionKind::UserInput,
+            InteractionPayload::UserInput {
+                questions: Vec::new(),
+            },
+        );
+        interaction.scope.turn_id = "turn-next-generation".to_string();
+        contender_store
+            .upsert_interaction(&interaction)
+            .await
+            .unwrap();
+        if let Some(sender) = attempted_tx {
+            let _ = sender.send(true);
+        }
+    });
+
+    let _ = attempted_rx.await.unwrap();
+    finalization.release().await;
+    tokio::time::timeout(TEST_RUNTIME_TIMEOUT, contender)
+        .await
+        .unwrap()
+        .unwrap();
+    tokio::time::timeout(TEST_RUNTIME_TIMEOUT, async {
+        loop {
+            let finalized = store
+                .load_studio_events(&run.session_id, None, None)
+                .await
+                .unwrap()
+                .iter()
+                .any(|event| {
+                    matches!(
+                        &event.kind,
+                        StudioEventKind::TurnChanged { turn }
+                            if turn.turn_id == old_turn.turn_id
+                                && turn.status == StudioTurnStatus::Completed
+                    )
+                });
+            if finalized {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        store
+            .read_interaction("interaction-next-generation")
+            .await
+            .unwrap()
+            .unwrap()
+            .status,
+        InteractionStatus::Pending
+    );
+
+    runtime
+        .active_turn_removed(&run.session_id, "turn-next-generation")
+        .await;
     server.await.unwrap();
     remove_repository(repository);
     let _ = tokio::fs::remove_dir_all(home).await;
