@@ -1,15 +1,26 @@
 use std::collections::{HashMap, HashSet};
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 
+use super::git_compatible_path;
+
 const WORKTREE_ROOT: &str = ".pure/worktrees";
+const GIT_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DurableWorktreeDisposition {
     Protect,
     Cleanup,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DurableWorktreePresence {
+    MustExist,
+    MayBeUncreated,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,6 +29,7 @@ pub(crate) struct DurableWorktreeResource {
     pub(crate) path: PathBuf,
     pub(crate) branch: String,
     pub(crate) expected_head: Option<String>,
+    pub(crate) presence: DurableWorktreePresence,
     pub(crate) disposition: DurableWorktreeDisposition,
 }
 
@@ -64,6 +76,7 @@ fn reconcile_blocking(
         if !path_is_below(&path_key, &worktree_root) || protected_paths.contains(&path_key) {
             continue;
         }
+        ensure_safe_existing_path(repository, &registration.path)?;
         remove_registration(repository, &registration.path)?;
         summary.cleaned_registrations += 1;
         if registration.path.exists() {
@@ -82,6 +95,7 @@ fn reconcile_blocking(
         if protected_paths.contains(&path_key) || inventory.registrations.contains_key(&path_key) {
             continue;
         }
+        ensure_safe_existing_path(repository, &path)?;
         std::fs::remove_dir_all(&path)
             .with_context(|| format!("failed to remove orphan worktree leaf {}", path.display()))?;
         summary.cleaned_paths += 1;
@@ -115,8 +129,10 @@ fn validate_durable(
             || !branches.insert(resource.branch.clone())
         {
             bail!(
-                "duplicate or unsafe durable worktree for {}",
-                resource.task_run_id
+                "duplicate or unsafe durable worktree for {}: path={}, root={}",
+                resource.task_run_id,
+                path_key,
+                worktree_root
             );
         }
         if resource.disposition == DurableWorktreeDisposition::Cleanup {
@@ -128,6 +144,10 @@ fn validate_durable(
             .is_some_and(|branch| branch == resource.branch);
         let path_exists = resource.path.is_dir();
         let branch_exists = inventory.branches.contains(&resource.branch);
+        let all_absent = !registration_matches && !path_exists && !branch_exists;
+        if all_absent && resource.presence == DurableWorktreePresence::MayBeUncreated {
+            continue;
+        }
         if !registration_matches || !path_exists || !branch_exists {
             bail!(
                 "durable worktree is partially missing for task {}: registration={}, path={}, branch={}",
@@ -213,12 +233,14 @@ fn leaf_directories(repository: &Path) -> Result<Vec<PathBuf>> {
     let mut leaves = Vec::new();
     for parent in entries {
         let parent = parent?.path();
+        ensure_safe_existing_path(repository, &parent)?;
         if !parent.is_dir() {
             continue;
         }
         for leaf in std::fs::read_dir(&parent)? {
             let leaf = leaf?.path();
             if leaf.is_dir() {
+                ensure_safe_existing_path(repository, &leaf)?;
                 leaves.push(leaf);
             }
         }
@@ -239,20 +261,58 @@ fn delete_branch(repository: &Path, branch: &str) -> Result<()> {
 }
 
 fn git_output(repository: &Path, args: &[&str]) -> Result<String> {
-    let output = Command::new("git")
+    let mut child = Command::new("git")
         .arg("-C")
         .arg(repository)
         .args(args)
-        .output()
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_ASKPASS", "")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .with_context(|| format!("failed to run git {}", args.join(" ")))?;
-    if !output.status.success() {
+    let stdout = child.stdout.take().context("git stdout pipe is missing")?;
+    let stderr = child.stderr.take().context("git stderr pipe is missing")?;
+    let stdout_reader = std::thread::spawn(move || read_pipe(stdout));
+    let stderr_reader = std::thread::spawn(move || read_pipe(stderr));
+    let deadline = Instant::now() + GIT_TIMEOUT;
+    let status = loop {
+        if let Some(status) = child.try_wait().context("failed to poll git process")? {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = stdout_reader.join();
+            let _ = stderr_reader.join();
+            bail!(
+                "git {} timed out after {}s",
+                args.join(" "),
+                GIT_TIMEOUT.as_secs()
+            );
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    let stdout = stdout_reader
+        .join()
+        .map_err(|_| anyhow::anyhow!("git stdout reader panicked"))??;
+    let stderr = stderr_reader
+        .join()
+        .map_err(|_| anyhow::anyhow!("git stderr reader panicked"))??;
+    if !status.success() {
         bail!(
             "git {} failed: {}",
             args.join(" "),
-            String::from_utf8_lossy(&output.stderr).trim()
+            String::from_utf8_lossy(&stderr).trim()
         );
     }
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    Ok(String::from_utf8_lossy(&stdout).to_string())
+}
+
+fn read_pipe(mut pipe: impl Read) -> std::io::Result<Vec<u8>> {
+    let mut output = Vec::new();
+    pipe.read_to_end(&mut output)?;
+    Ok(output)
 }
 
 fn git_status(repository: &Path, args: &[&str]) -> Result<()> {
@@ -262,6 +322,7 @@ fn git_status(repository: &Path, args: &[&str]) -> Result<()> {
 
 fn normalize_path(path: &Path) -> String {
     let path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let path = git_compatible_path(path);
     let value = path.to_string_lossy().replace('\\', "/");
     if cfg!(windows) {
         value.to_lowercase()
@@ -277,4 +338,57 @@ fn path_is_below(path: &str, root: &str) -> bool {
 
 fn is_pure_branch(branch: &str) -> bool {
     branch.starts_with("pure-task-") || branch.starts_with("pure-agent-")
+}
+
+fn ensure_safe_existing_path(repository: &Path, path: &Path) -> Result<()> {
+    let root = repository.join(WORKTREE_ROOT);
+    let canonical_repository =
+        std::fs::canonicalize(repository).context("failed to canonicalize worktree repository")?;
+    let canonical_root =
+        std::fs::canonicalize(&root).context("failed to canonicalize worktree root")?;
+    if canonical_root.strip_prefix(&canonical_repository).is_err() {
+        bail!("worktree root escapes repository through a link or reparse point");
+    }
+    let canonical_path = std::fs::canonicalize(path)
+        .with_context(|| format!("failed to canonicalize worktree path {}", path.display()))?;
+    if canonical_path == canonical_root || canonical_path.strip_prefix(&canonical_root).is_err() {
+        bail!(
+            "worktree path escapes root through a link or reparse point: {}",
+            path.display()
+        );
+    }
+
+    let mut current = path.to_path_buf();
+    loop {
+        let metadata = std::fs::symlink_metadata(&current)
+            .with_context(|| format!("failed to inspect worktree path {}", current.display()))?;
+        if is_link_or_reparse(&metadata) {
+            bail!(
+                "worktree path contains a link or reparse point: {}",
+                current.display()
+            );
+        }
+        if normalize_path(&current) == normalize_path(&root) {
+            break;
+        }
+        let Some(parent) = current.parent() else {
+            bail!("worktree path is not below its root: {}", path.display());
+        };
+        current = parent.to_path_buf();
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn is_link_or_reparse(metadata: &std::fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+    metadata.file_type().is_symlink()
+        || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+}
+
+#[cfg(not(windows))]
+fn is_link_or_reparse(metadata: &std::fs::Metadata) -> bool {
+    metadata.file_type().is_symlink()
 }

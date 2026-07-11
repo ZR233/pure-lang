@@ -9,14 +9,41 @@ use crate::studio::entities;
 use crate::studio::ids::unix_seconds;
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    AgentOutcomeStatus, RestartAgentReconciliation, TaskWorktreeOwnerSnapshot, WorkUnitStatus,
+    AgentOutcomeStatus, RestartAgentReconciliation, TaskWorktreeCreationState,
+    TaskWorktreeOwnerResource, TaskWorktreeOwnerSnapshot, WorkUnitStatus,
 };
 
 use super::{outcome::agent_outcome_record, task_run_record, work_unit::work_unit_record};
 
 const RESTART_DIAGNOSTIC: &str = "agent interrupted by application restart";
+const RESTART_BEFORE_CREATE_DIAGNOSTIC: &str =
+    "agent interrupted by application restart before worktree creation";
 
 impl StudioStore {
+    pub(crate) async fn list_task_worktree_workspaces(&self) -> Result<Vec<String>> {
+        let mut workspaces = entities::task_run::Entity::find()
+            .all(&self.db)
+            .await?
+            .into_iter()
+            .map(|run| run.workspace_root)
+            .collect::<Vec<_>>();
+        workspaces.sort_by_key(|workspace| {
+            if cfg!(windows) {
+                workspace.to_lowercase()
+            } else {
+                workspace.clone()
+            }
+        });
+        workspaces.dedup_by(|left, right| {
+            if cfg!(windows) {
+                left.eq_ignore_ascii_case(right)
+            } else {
+                left == right
+            }
+        });
+        Ok(workspaces)
+    }
+
     pub(crate) async fn list_task_worktree_owners(
         &self,
         workspace_root: &str,
@@ -41,10 +68,32 @@ impl StudioStore {
                 .into_iter()
                 .map(agent_outcome_record)
                 .collect::<Result<Vec<_>>>()?;
+            let resources = work_units
+                .into_iter()
+                .map(|work_unit| {
+                    let outcome = outcomes
+                        .iter()
+                        .find(|outcome| {
+                            outcome.work_unit_id.as_deref() == Some(work_unit.id.as_str())
+                        })
+                        .cloned();
+                    let creation_state = if outcome.as_ref().is_some_and(|outcome| {
+                        outcome.error.as_deref() == Some(RESTART_BEFORE_CREATE_DIAGNOSTIC)
+                    }) {
+                        TaskWorktreeCreationState::UncreatedBeforeRestart
+                    } else {
+                        TaskWorktreeCreationState::MustExist
+                    };
+                    TaskWorktreeOwnerResource {
+                        work_unit,
+                        outcome,
+                        creation_state,
+                    }
+                })
+                .collect();
             snapshots.push(TaskWorktreeOwnerSnapshot {
                 run: task_run_record(run)?,
-                work_units,
-                outcomes,
+                resources,
             });
         }
         Ok(snapshots)
@@ -71,6 +120,11 @@ impl StudioStore {
 
             validate_pairs(task_run_id, &work_units, &outcomes)?;
 
+            let pending_work_units = work_units
+                .iter()
+                .filter(|unit| unit.status == WorkUnitStatus::Pending.as_str())
+                .map(|unit| unit.id.clone())
+                .collect::<std::collections::HashSet<_>>();
             let now = unix_seconds();
             let mut summary = RestartAgentReconciliation::default();
             for work_unit in work_units {
@@ -90,10 +144,22 @@ impl StudioStore {
                 let cancel = is_transient_outcome(status);
                 let already_observed = outcome.terminal_observed != 0;
                 if cancel || !already_observed {
+                    let before_create = outcome
+                        .work_unit_id
+                        .as_deref()
+                        .is_some_and(|id| pending_work_units.contains(id))
+                        && status == AgentOutcomeStatus::Queued;
                     let mut active: entities::agent_outcome::ActiveModel = outcome.into();
                     if cancel {
                         active.status = Set(AgentOutcomeStatus::Cancelled.as_str().to_string());
-                        active.error = Set(Some(RESTART_DIAGNOSTIC.to_string()));
+                        active.error = Set(Some(
+                            if before_create {
+                                RESTART_BEFORE_CREATE_DIAGNOSTIC
+                            } else {
+                                RESTART_DIAGNOSTIC
+                            }
+                            .to_string(),
+                        ));
                         summary.cancelled_outcomes += 1;
                     }
                     active.terminal_observed = Set(1);

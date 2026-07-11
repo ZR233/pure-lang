@@ -10,7 +10,10 @@ use super::{
     CloseDisposition, CloseOutcome, MergeOutcome, WorktreeBackend, WorktreeCreateFailure,
     WorktreeCreateSpec, WorktreeError, WorktreeHandle, WorktreeManager,
 };
-use super::{DurableWorktreeDisposition, DurableWorktreeResource, reconcile_task_worktrees};
+use super::{
+    DurableWorktreeDisposition, DurableWorktreePresence, DurableWorktreeResource,
+    reconcile_task_worktrees,
+};
 
 #[derive(Debug)]
 struct FailingCleanupBackend {
@@ -207,6 +210,7 @@ async fn durable_reconciliation_preserves_owned_leaf_and_cleans_exact_orphan() {
             path: protected.path.clone(),
             branch: protected.branch.clone(),
             expected_head: None,
+            presence: DurableWorktreePresence::MustExist,
             disposition: DurableWorktreeDisposition::Protect,
         }],
     )
@@ -219,6 +223,7 @@ async fn durable_reconciliation_preserves_owned_leaf_and_cleans_exact_orphan() {
             path: protected.path.clone(),
             branch: protected.branch.clone(),
             expected_head: None,
+            presence: DurableWorktreePresence::MustExist,
             disposition: DurableWorktreeDisposition::Protect,
         }],
     )
@@ -247,6 +252,7 @@ async fn durable_reconciliation_rejects_partial_missing_without_cleanup() {
             path: spec.path.clone(),
             branch: spec.branch.clone(),
             expected_head: None,
+            presence: DurableWorktreePresence::MustExist,
             disposition: DurableWorktreeDisposition::Protect,
         }],
     )
@@ -257,6 +263,81 @@ async fn durable_reconciliation_rejects_partial_missing_without_cleanup() {
     assert!(!git_output(&repo, &["branch", "--list", &spec.branch]).is_empty());
     assert!(!spec.path.exists());
     fs::remove_dir_all(repo).ok();
+}
+
+#[tokio::test]
+async fn only_pending_creation_allows_all_worktree_resources_to_be_absent() {
+    let repo = temp_git_repo();
+    let spec = task_worktree_spec(&repo, "run-pending", "agent-pending");
+
+    reconcile_task_worktrees(
+        &repo,
+        &[DurableWorktreeResource {
+            task_run_id: "run-pending".to_string(),
+            path: spec.path.clone(),
+            branch: spec.branch.clone(),
+            expected_head: None,
+            presence: DurableWorktreePresence::MayBeUncreated,
+            disposition: DurableWorktreeDisposition::Protect,
+        }],
+    )
+    .await
+    .unwrap();
+    let error = reconcile_task_worktrees(
+        &repo,
+        &[DurableWorktreeResource {
+            task_run_id: "run-running".to_string(),
+            path: spec.path,
+            branch: spec.branch,
+            expected_head: None,
+            presence: DurableWorktreePresence::MustExist,
+            disposition: DurableWorktreeDisposition::Protect,
+        }],
+    )
+    .await
+    .expect_err("running worktree cannot be entirely absent");
+
+    assert!(error.to_string().contains("run-running"));
+    fs::remove_dir_all(repo).ok();
+}
+
+#[tokio::test]
+async fn reconciliation_rejects_linked_parent_without_touching_external_leaf() {
+    let repo = temp_git_repo();
+    let external = std::env::temp_dir().join(format!(
+        "pure-worktree-external-{}",
+        REPO_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    let external_leaf = external.join("agent-outside");
+    fs::create_dir_all(&external_leaf).unwrap();
+    fs::write(external_leaf.join("keep.txt"), "keep").unwrap();
+    let root = repo.join(".pure/worktrees");
+    fs::create_dir_all(&root).unwrap();
+    let linked_parent = root.join("linked-run");
+    create_directory_link(&external, &linked_parent);
+
+    let error = reconcile_task_worktrees(&repo, &[])
+        .await
+        .expect_err("linked worktree parent must be rejected");
+
+    assert!(error.to_string().contains("link") || error.to_string().contains("reparse"));
+    assert_eq!(
+        fs::read_to_string(external_leaf.join("keep.txt")).unwrap(),
+        "keep"
+    );
+    fs::remove_dir_all(repo).ok();
+    fs::remove_dir_all(external).ok();
+}
+
+#[cfg(windows)]
+fn create_directory_link(target: &Path, link: &Path) {
+    std::os::windows::fs::symlink_dir(target, link)
+        .expect("directory symlink support is required for worktree safety tests");
+}
+
+#[cfg(unix)]
+fn create_directory_link(target: &Path, link: &Path) {
+    std::os::unix::fs::symlink(target, link).unwrap();
 }
 
 fn task_worktree_spec(repo: &Path, run_id: &str, agent_id: &str) -> WorktreeCreateSpec {

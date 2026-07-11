@@ -111,7 +111,16 @@ released = git worktree remove + 删除分支 + 清空 AgentEntry.worktree
 - 只有没有 durable owner，或 durable owner 已终态且明确可清理的 leaf 才允许删除。
 - durable 记录声明资源存在而 registration、path、branch 部分缺失时，关联 run 进入
   blocked，保留现场；无 owner 的清理失败使初始化显式失败，均不得吞错。
+- `Pending/Queued` allocation 事务可能先于 worktree create 落盘；重启时仅这一 typed
+  creation state 允许 registration、path、branch 三者全部不存在。三者全部存在仍保护，
+  任意部分存在仍 block。`Running`、`WaitingForDelivery`、`Delivered` 不允许 all-absent。
 - 对账幂等；重复启动不得误删已保护资源，也不得重新报告已经观察过的 terminal 事件。
+- 启动按全部已知 Task workspace 去重对账，而不是依附某个 active run；只有 blocked、
+  terminal 或 cleanup-pending 记录时也必须执行。active run 只有在所属 workspace 对账成功
+  后才能进入 Recovery continuation。
+- inventory、registration remove、leaf remove 每一步都重新拒绝 symlink、Windows junction
+  与 reparse ancestor，并证明 canonical leaf 严格位于 canonical `.pure/worktrees` root。
+  Git 子进程禁用交互、设置有界超时并在超时后终止。
 
 subagent turn（`active_subagent.is_some()`）不再 enable；其 `workspace_root` 已被
 替换为自身 worktree 路径。
