@@ -8,6 +8,7 @@ mod types;
 
 pub(crate) use coordinator::*;
 pub(crate) use spawn::owned_paths_overlap;
+pub(crate) use terminal::*;
 pub(crate) use types::*;
 
 #[cfg(test)]

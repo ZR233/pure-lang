@@ -14,6 +14,7 @@ use crate::turn::{CompileMode, TurnBudget, TurnOptions};
 
 mod events;
 mod execution;
+mod identity;
 mod lifecycle;
 mod lifecycle_hook;
 mod messaging;

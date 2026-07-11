@@ -6,8 +6,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use super::*;
 use crate::tool::{SubagentContext, Tool, ToolRegistry};
 use crate::{
-    AgentKernel, AgentKernelToolRequest, CompileMode, CoreAgentProfile, PureCoreBuilder,
-    StudioStore, ToolEffect, TurnExecutionProfile,
+    AgentKernel, AgentKernelToolRequest, AgentRunSpec, AgentSpawnInput, AgentSupervisor,
+    CompileMode, CoreAgentProfile, PureCoreBuilder, StudioStore, ToolEffect, TurnBudget,
+    TurnExecutionProfile, TurnOptions,
 };
 
 #[tokio::test]
@@ -234,11 +235,227 @@ async fn duplicate_terminal_event_does_not_reopen_or_duplicate_outcome() {
 }
 
 #[tokio::test]
+async fn delayed_terminal_event_cannot_update_new_task_run_at_reused_path() {
+    let repository = init_repository("delayed-old-terminal");
+    let store = task_store(&repository).await;
+    let session = task_session(&store, &repository).await;
+    let coordinator = Arc::new(TaskCoordinator::new(store.clone()));
+    let old_run = coordinator
+        .start_confirmed_task(&session.id, "old plan", &repository)
+        .await
+        .unwrap();
+    let old_agent_id = spawned_agent_id(&session.id).await;
+    store
+        .create_agent_outcome(CreateAgentOutcome {
+            task_run_id: old_run.id.clone(),
+            work_unit_id: None,
+            agent_id: old_agent_id.clone(),
+            owner_path: "/root".to_string(),
+            initiated_by: "planner".to_string(),
+            requested_by_call_id: "call-old".to_string(),
+            role: "explorer".to_string(),
+            status: AgentOutcomeStatus::Running,
+            attempt: 1,
+        })
+        .await
+        .unwrap();
+    coordinator
+        .finish_task(&old_run.id, TaskRunPhase::Cancelled, None)
+        .await
+        .unwrap();
+
+    let new_run = coordinator
+        .start_confirmed_task(&session.id, "new plan", &repository)
+        .await
+        .unwrap();
+    let new_agent_id = spawned_agent_id(&session.id).await;
+    let new_outcome = store
+        .create_agent_outcome(CreateAgentOutcome {
+            task_run_id: new_run.id.clone(),
+            work_unit_id: None,
+            agent_id: new_agent_id,
+            owner_path: "/root".to_string(),
+            initiated_by: "planner".to_string(),
+            requested_by_call_id: "call-new".to_string(),
+            role: "explorer".to_string(),
+            status: AgentOutcomeStatus::Running,
+            attempt: 1,
+        })
+        .await
+        .unwrap();
+
+    drain_studio_agent_event(
+        store.clone(),
+        &session.id,
+        agent_state_event(&old_agent_id, pl_protocol::AgentStatus::Completed),
+    )
+    .await;
+
+    let outcome = store
+        .list_agent_outcomes(&new_run.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|outcome| outcome.id == new_outcome.id)
+        .unwrap();
+    assert_eq!(outcome.status, AgentOutcomeStatus::Running);
+    coordinator
+        .finish_task(&new_run.id, TaskRunPhase::Cancelled, None)
+        .await
+        .unwrap();
+    drop(coordinator);
+    remove_repository(repository);
+}
+
+#[tokio::test]
+async fn simultaneous_sessions_keep_isolated_studio_agent_snapshots() {
+    let repository = init_repository("cross-session-agent-ids");
+    let store = task_store(&repository).await;
+    let first_session = task_session(&store, &repository).await;
+    let second_session = task_session(&store, &repository).await;
+    let first_agent_id = spawned_agent_id(&first_session.id).await;
+    let second_agent_id = spawned_agent_id(&second_session.id).await;
+
+    drain_studio_agent_event(
+        store.clone(),
+        &first_session.id,
+        agent_state_event(&first_agent_id, pl_protocol::AgentStatus::Running),
+    )
+    .await;
+    drain_studio_agent_event(
+        store.clone(),
+        &second_session.id,
+        agent_state_event(&second_agent_id, pl_protocol::AgentStatus::Running),
+    )
+    .await;
+
+    let first_agents = store.list_agents(&first_session.id).await.unwrap();
+    let second_agents = store.list_agents(&second_session.id).await.unwrap();
+    assert_eq!(first_agents.len(), 1);
+    assert_eq!(second_agents.len(), 1);
+    assert_eq!(first_agents[0].id, first_agent_id);
+    assert_eq!(second_agents[0].id, second_agent_id);
+    assert_ne!(first_agents[0].id, second_agents[0].id);
+    remove_repository(repository);
+}
+
+#[tokio::test]
+async fn agent_changed_and_activity_share_durable_terminal_status() {
+    for (name, outcome_status, memory_status, expected_status) in [
+        (
+            "activity-delivered",
+            AgentOutcomeStatus::Completed,
+            pl_protocol::AgentStatus::Completed,
+            pl_protocol::AgentStatus::Completed,
+        ),
+        (
+            "activity-waiting",
+            AgentOutcomeStatus::WaitingForDelivery,
+            pl_protocol::AgentStatus::Completed,
+            pl_protocol::AgentStatus::Waiting,
+        ),
+        (
+            "activity-failed",
+            AgentOutcomeStatus::Failed,
+            pl_protocol::AgentStatus::Errored,
+            pl_protocol::AgentStatus::Errored,
+        ),
+        (
+            "activity-cancelled",
+            AgentOutcomeStatus::Cancelled,
+            pl_protocol::AgentStatus::Interrupted,
+            pl_protocol::AgentStatus::Interrupted,
+        ),
+    ] {
+        let fixture = DeliveryFixture::new(name, vec!["src/**"]).await;
+        if outcome_status == AgentOutcomeStatus::Completed {
+            fixture.commit_file("src/lib.rs");
+            let head = git_output(&fixture.worktree, &["rev-parse", "HEAD"]);
+            fixture.submit(&head).await.unwrap();
+        } else {
+            fixture
+                .store
+                .update_agent_outcome(
+                    &fixture.outcome_id,
+                    UpdateAgentOutcome {
+                        status: outcome_status,
+                        summary: Some("durable summary".to_string()),
+                        error: (outcome_status != AgentOutcomeStatus::WaitingForDelivery)
+                            .then(|| "durable error".to_string()),
+                        delivery: None,
+                        review: None,
+                    },
+                )
+                .await
+                .unwrap();
+        }
+        let state_event = pl_trace::AgentEvent::AgentStateChanged {
+            id: fixture.subagent.id.clone(),
+            path: "/root/executor".to_string(),
+            parent_path: Some("/root".to_string()),
+            role: "executor".to_string(),
+            task: "Implement delivery".to_string(),
+            status: memory_status,
+            summary: Some("memory summary".to_string()),
+            depth: 1,
+            error: None,
+            reason: None,
+            budget_limit_kind: None,
+            budget_usage: None,
+            updated_at: 10,
+        };
+        let activity_event = pl_trace::AgentEvent::SubAgentActivity {
+            call_id: format!("call-{name}"),
+            occurred_at: 11,
+            agent_id: Some(fixture.subagent.id.clone()),
+            path: Some("/root/executor".to_string()),
+            parent_path: Some("/root".to_string()),
+            kind: pl_protocol::SubAgentActivityKind::Closed,
+            status: Some(memory_status),
+            message: Some("memory activity".to_string()),
+            timed_out: None,
+            error: None,
+        };
+
+        drain_studio_agent_events(
+            fixture.store.clone(),
+            &fixture.session_id,
+            vec![state_event, activity_event],
+        )
+        .await;
+
+        let snapshot_status = fixture
+            .store
+            .list_agents(&fixture.session_id)
+            .await
+            .unwrap()[0]
+            .status;
+        let timeline = fixture
+            .store
+            .list_agent_events(&fixture.session_id)
+            .await
+            .unwrap();
+        let event: pl_protocol::StudioAgentTimelineEvent =
+            serde_json::from_str(&timeline[0].payload_json).unwrap();
+        let pl_protocol::StudioAgentTimelineEventKind::SubAgentActivity {
+            status: activity_status,
+            ..
+        } = event.kind
+        else {
+            panic!("expected subagent activity");
+        };
+        assert_eq!(snapshot_status, expected_status, "{name} snapshot");
+        assert_eq!(activity_status, Some(expected_status), "{name} activity");
+        fixture.cleanup();
+    }
+}
+
+#[tokio::test]
 async fn terminal_persistence_failure_blocks_task_and_suppresses_memory_snapshot() {
     let fixture = DeliveryFixture::new("terminal-store-failure", vec!["src/**"]).await;
     fixture
         .store
-        .execute_test_sql("DROP TABLE agent_outcomes")
+        .execute_test_sql("ALTER TABLE agent_outcomes RENAME TO unavailable_agent_outcomes")
         .await;
     let config_store = crate::config::ConfigStore::new(crate::config::ConfigPaths::from_home(
         std::env::temp_dir().join("pure-terminal-store-failure"),
@@ -253,23 +470,22 @@ async fn terminal_persistence_failure_blocks_task_and_suppresses_memory_snapshot
             runtime.drain_agent_events(session_id, event_rx).await;
         })
     };
-    event_tx
-        .send(pl_trace::AgentEvent::AgentStateChanged {
-            id: fixture.subagent.id.clone(),
-            path: "/root/executor".to_string(),
-            parent_path: Some("/root".to_string()),
-            role: "executor".to_string(),
-            task: "Implement delivery".to_string(),
-            status: pl_protocol::AgentStatus::Completed,
-            summary: Some("memory completion".to_string()),
-            depth: 1,
-            error: None,
-            reason: None,
-            budget_limit_kind: None,
-            budget_usage: None,
-            updated_at: 10,
-        })
-        .unwrap();
+    let completed_event = pl_trace::AgentEvent::AgentStateChanged {
+        id: fixture.subagent.id.clone(),
+        path: "/root/executor".to_string(),
+        parent_path: Some("/root".to_string()),
+        role: "executor".to_string(),
+        task: "Implement delivery".to_string(),
+        status: pl_protocol::AgentStatus::Completed,
+        summary: Some("memory completion".to_string()),
+        depth: 1,
+        error: None,
+        reason: None,
+        budget_limit_kind: None,
+        budget_usage: None,
+        updated_at: 10,
+    };
+    event_tx.send(completed_event.clone()).unwrap();
     drop(event_tx);
     drain.await.unwrap();
 
@@ -309,6 +525,23 @@ async fn terminal_persistence_failure_blocks_task_and_suppresses_memory_snapshot
     })
     .await;
     assert!(diagnostic.is_ok());
+    fixture
+        .store
+        .execute_test_sql("ALTER TABLE unavailable_agent_outcomes RENAME TO agent_outcomes")
+        .await;
+
+    drain_studio_agent_event(fixture.store.clone(), &fixture.session_id, completed_event).await;
+
+    assert!(
+        fixture
+            .store
+            .list_agents(&fixture.session_id)
+            .await
+            .unwrap()
+            .is_empty(),
+        "duplicate terminal event after a persistence block must stay suppressed"
+    );
+    assert_eq!(fixture.outcome().await.status, AgentOutcomeStatus::Running);
     fixture.cleanup();
 }
 
@@ -950,6 +1183,104 @@ async fn drain_agent_state(
             updated_at: 10,
         })
         .unwrap();
+    drop(event_tx);
+    drain.await.unwrap();
+}
+
+async fn spawned_agent_id(session_id: &str) -> String {
+    let supervisor = AgentSupervisor::default();
+    supervisor
+        .spawn_agent(
+            AgentSpawnInput {
+                task_name: "worker".to_string(),
+                message: "inspect".to_string(),
+                role: "explorer".to_string(),
+                parent_path: Some("/root".to_string()),
+                session_id: session_id.to_string(),
+                owned_paths: Vec::new(),
+            },
+            test_agent_run_spec("inspect"),
+        )
+        .await
+        .unwrap()
+        .id
+}
+
+fn test_agent_run_spec(message: &str) -> AgentRunSpec {
+    let mut provider_info = pl_model::ProviderInfo::openai(Some("http://example.invalid".into()));
+    provider_info.default_model = "test-model".to_string();
+    AgentRunSpec {
+        provider: pl_model::create_provider(provider_info).unwrap(),
+        reasoning_effort: None,
+        config: None,
+        mcp_runtime: None,
+        lsp_runtime: None,
+        workspace_instructions: None,
+        instruction_snapshot: None,
+        tool_registrar: None,
+        workspace_root: PathBuf::from("."),
+        options: TurnOptions::default(),
+        event_tx: tokio::sync::broadcast::channel(8).0,
+        call_id: "call-spawn".to_string(),
+        message: message.to_string(),
+        mode: CompileMode::Simple,
+        budget: TurnBudget::default(),
+        initial_session: crate::CoreSession::new(),
+    }
+}
+
+fn agent_state_event(agent_id: &str, status: pl_protocol::AgentStatus) -> pl_trace::AgentEvent {
+    pl_trace::AgentEvent::AgentStateChanged {
+        id: agent_id.to_string(),
+        path: "/root/worker".to_string(),
+        parent_path: Some("/root".to_string()),
+        role: "explorer".to_string(),
+        task: "inspect".to_string(),
+        status,
+        summary: Some("old completion".to_string()),
+        depth: 1,
+        error: None,
+        reason: None,
+        budget_limit_kind: None,
+        budget_usage: None,
+        updated_at: 10,
+    }
+}
+
+async fn drain_studio_agent_event(
+    store: StudioStore,
+    session_id: &str,
+    event: pl_trace::AgentEvent,
+) {
+    drain_studio_agent_events(store, session_id, vec![event]).await;
+}
+
+async fn drain_studio_agent_events(
+    store: StudioStore,
+    session_id: &str,
+    events: Vec<pl_trace::AgentEvent>,
+) {
+    let config_store = crate::config::ConfigStore::new(crate::config::ConfigPaths::from_home(
+        std::env::temp_dir().join(format!(
+            "pure-agent-id-test-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        )),
+    ));
+    let runtime = crate::studio::StudioRuntime::new(store, config_store);
+    let (event_tx, event_rx) = tokio::sync::broadcast::channel(8);
+    let drain = {
+        let runtime = runtime.clone();
+        let session_id = session_id.to_string();
+        tokio::spawn(async move {
+            runtime.drain_agent_events(session_id, event_rx).await;
+        })
+    };
+    for event in events {
+        event_tx.send(event).unwrap();
+    }
     drop(event_tx);
     drain.await.unwrap();
 }

@@ -53,9 +53,7 @@ impl AgentSupervisor {
                     error: format!("agent path already exists: {path}"),
                 });
             }
-            state.next_id += 1;
-            let next_id = state.next_id;
-            let id = format!("agent-{next_id}");
+            let id = super::identity::new_agent_id();
             let record = AgentRecord {
                 id: id.clone(),
                 path: path.to_string(),
@@ -252,10 +250,13 @@ impl AgentSupervisor {
         Ok(())
     }
 
-    pub async fn list_agents(&self, path_prefix: Option<&str>) -> Vec<AgentRecord> {
+    pub async fn list_agents(
+        &self,
+        path_prefix: Option<&str>,
+    ) -> Result<Vec<AgentRecord>, PureError> {
         let inputs = self.state.lock().await.agent_projection_inputs(path_prefix);
         let Some(hook) = self.lifecycle_hook() else {
-            return inputs.into_iter().map(|(record, _)| record).collect();
+            return Ok(inputs.into_iter().map(|(record, _)| record).collect());
         };
         let mut records = Vec::with_capacity(inputs.len());
         for (mut record, lifecycle_token) in inputs {
@@ -272,20 +273,13 @@ impl AgentSupervisor {
                     record.error.clone(),
                 ),
             };
-            match hook.project_snapshot(&request).await {
-                Ok(projection) => {
-                    record.status = projection.status;
-                    record.summary = projection.summary;
-                    record.error = projection.error;
-                }
-                Err(error) => {
-                    record.status = AgentStatus::Errored;
-                    record.error = Some(format!("durable agent projection failed: {error}"));
-                }
-            }
+            let projection = hook.project_snapshot(&request).await?;
+            record.status = projection.status;
+            record.summary = projection.summary;
+            record.error = projection.error;
             records.push(record);
         }
-        records
+        Ok(records)
     }
 
     pub async fn resolve_agent(

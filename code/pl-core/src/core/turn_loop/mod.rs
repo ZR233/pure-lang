@@ -82,7 +82,7 @@ pub(super) async fn run_turn_with_trace(
     let requires_subagent_dispatch =
         active_subagent.is_none() && prompt_requires_subagent_dispatch(&request.prompt);
     let initial_agent_count = if requires_subagent_dispatch {
-        Some(agent_supervisor.list_agents(None).await.len())
+        Some(agent_supervisor.list_agents(None).await?.len())
     } else {
         None
     };
@@ -157,7 +157,7 @@ pub(super) async fn run_turn_with_trace(
     let mut iteration = 0_u32;
     loop {
         let must_dispatch_agent_now = if let Some(initial_count) = initial_agent_count {
-            iteration >= 2 && agent_supervisor.list_agents(None).await.len() <= initial_count
+            iteration >= 2 && agent_supervisor.list_agents(None).await?.len() <= initial_count
         } else {
             false
         };
@@ -441,7 +441,7 @@ pub(super) async fn run_turn_with_trace(
                 ));
             }
             if let Some(initial_count) = initial_agent_count {
-                let current_count = agent_supervisor.list_agents(None).await.len();
+                let current_count = agent_supervisor.list_agents(None).await?.len();
                 if current_count <= initial_count {
                     return Ok(failed_turn_result(
                         recorder,

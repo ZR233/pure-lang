@@ -8,7 +8,9 @@ use crate::agent::{AgentLifecycleProjection, AgentTerminalStateChange};
 use crate::studio::entities;
 use crate::studio::ids::unix_seconds;
 use crate::studio::store::StudioStore;
-use crate::studio::task_coordinator::{AgentOutcomeStatus, TaskRunPhase, WorkUnitStatus};
+use crate::studio::task_coordinator::{
+    AgentOutcomeStatus, TaskRunPhase, TerminalAgentStateRecording, WorkUnitStatus,
+};
 
 use super::outcome::agent_outcome_record;
 
@@ -39,43 +41,88 @@ impl StudioStore {
         outcome.map(projection_from_outcome).transpose()
     }
 
+    pub(crate) async fn project_agent_activity(
+        &self,
+        session_id: &str,
+        agent_id: &str,
+    ) -> Result<Option<AgentLifecycleProjection>> {
+        let task_run_ids = entities::task_run::Entity::find()
+            .filter(entities::task_run::Column::SessionId.eq(session_id.to_string()))
+            .all(&self.db)
+            .await?
+            .into_iter()
+            .map(|run| run.id)
+            .collect::<Vec<_>>();
+        if task_run_ids.is_empty() {
+            return Ok(None);
+        }
+        let Some(outcome) = entities::agent_outcome::Entity::find()
+            .filter(entities::agent_outcome::Column::AgentId.eq(agent_id.to_string()))
+            .filter(entities::agent_outcome::Column::TaskRunId.is_in(task_run_ids))
+            .order_by_desc(entities::agent_outcome::Column::UpdatedAt)
+            .order_by_desc(entities::agent_outcome::Column::Id)
+            .one(&self.db)
+            .await?
+        else {
+            return Ok(None);
+        };
+        projection_from_outcome(outcome).map(Some)
+    }
+
     pub(crate) async fn record_terminal_agent_state(
         &self,
         session_id: &str,
         change: &AgentTerminalStateChange,
-    ) -> Result<Option<AgentLifecycleProjection>> {
+    ) -> Result<TerminalAgentStateRecording> {
         let Some(target) = terminal_target(&change.role, change.status) else {
-            return Ok(None);
+            return Ok(TerminalAgentStateRecording::Unhandled);
         };
         let tx = self.db.begin().await?;
         let result = async {
-            let Some(run) = entities::task_run::Entity::find()
+            let task_run_ids = entities::task_run::Entity::find()
                 .filter(entities::task_run::Column::SessionId.eq(session_id.to_string()))
-                .filter(entities::task_run::Column::Phase.is_not_in([
-                    TaskRunPhase::Completed.as_str(),
-                    TaskRunPhase::Blocked.as_str(),
-                    TaskRunPhase::Failed.as_str(),
-                    TaskRunPhase::Cancelled.as_str(),
-                ]))
-                .order_by_desc(entities::task_run::Column::UpdatedAt)
-                .order_by_desc(entities::task_run::Column::Id)
-                .one(&tx)
+                .all(&tx)
                 .await?
-            else {
-                return Ok(None);
-            };
+                .into_iter()
+                .map(|run| run.id)
+                .collect::<Vec<_>>();
+            if task_run_ids.is_empty() {
+                return Ok(TerminalAgentStateRecording::Unhandled);
+            }
             let Some(outcome) = entities::agent_outcome::Entity::find()
-                .filter(entities::agent_outcome::Column::TaskRunId.eq(run.id.clone()))
                 .filter(entities::agent_outcome::Column::AgentId.eq(change.agent_id.clone()))
+                .filter(entities::agent_outcome::Column::TaskRunId.is_in(task_run_ids))
                 .order_by_desc(entities::agent_outcome::Column::UpdatedAt)
                 .order_by_desc(entities::agent_outcome::Column::Id)
                 .one(&tx)
                 .await?
             else {
-                return Ok(None);
+                return Ok(TerminalAgentStateRecording::Unhandled);
             };
+            let run = entities::task_run::Entity::find_by_id(outcome.task_run_id.clone())
+                .one(&tx)
+                .await?
+                .context("terminal agent task run not found")?;
+            let phase = TaskRunPhase::from_str(&run.phase)
+                .with_context(|| format!("invalid stored task phase: {}", run.phase))?;
             if outcome.role != change.role {
                 bail!("terminal agent role does not match durable outcome");
+            }
+            if phase == TaskRunPhase::Blocked
+                && run.status_message.as_deref().is_some_and(|message| {
+                    message.starts_with("terminal agent state persistence failed:")
+                })
+            {
+                return Ok(TerminalAgentStateRecording::Suppressed);
+            }
+            if matches!(
+                phase,
+                TaskRunPhase::Completed
+                    | TaskRunPhase::Blocked
+                    | TaskRunPhase::Failed
+                    | TaskRunPhase::Cancelled
+            ) {
+                return Ok(TerminalAgentStateRecording::Unhandled);
             }
             let current = AgentOutcomeStatus::from_str(&outcome.status)
                 .with_context(|| format!("invalid agent outcome status: {}", outcome.status))?;
@@ -83,7 +130,9 @@ impl StudioStore {
                 || is_durable_terminal(current)
                 || outcome.delivery_json.is_some()
             {
-                return Ok(Some(projection_from_outcome(outcome)?));
+                return Ok(TerminalAgentStateRecording::Projected(
+                    projection_from_outcome(outcome)?,
+                ));
             }
 
             let now = unix_seconds();
@@ -111,7 +160,9 @@ impl StudioStore {
                     active_work_unit.update(&tx).await?;
                 }
             }
-            Ok(Some(projection_from_outcome(outcome)?))
+            Ok(TerminalAgentStateRecording::Projected(
+                projection_from_outcome(outcome)?,
+            ))
         }
         .await;
         match result {
