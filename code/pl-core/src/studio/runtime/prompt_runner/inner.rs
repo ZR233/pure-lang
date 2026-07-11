@@ -96,9 +96,23 @@ impl StudioRuntime {
             .await;
         self.lsp_runtime.reconcile_workspace(&workspace_root).await;
 
+        let task_run = match mode {
+            CompileMode::Simple => None,
+            CompileMode::Task => {
+                self.store
+                    .find_active_task_run_for_session(session_id)
+                    .await?
+            }
+        };
         let task_supervisor = self
             .task_agent_runtimes
-            .supervisor_for_mode(mode, session_id, &workspace_root, self.lifecycle_epoch())
+            .supervisor_for_mode_generation(
+                mode,
+                session_id,
+                &workspace_root,
+                self.lifecycle_epoch(),
+                task_run.as_ref().map(|run| run.id.as_str()),
+            )
             .await?;
         let mut core = PureCore::from_config(&config, root_role)?
             .with_mcp_runtime(self.mcp_runtime.clone())

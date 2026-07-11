@@ -87,3 +87,29 @@ async fn shutdown_quiesces_then_clears_registry_for_next_epoch() {
         .unwrap();
     assert!(!before.shares_runtime_with(&after));
 }
+
+#[tokio::test]
+async fn planning_generation_binds_first_run_then_rotates_after_terminal() {
+    let registry = TaskAgentRuntimeRegistry::new();
+    let planning = registry
+        .supervisor_for_task_generation("session", Path::new("C:/repo"), 5, None)
+        .await
+        .unwrap();
+    let first_run = registry
+        .supervisor_for_task_generation("session", Path::new("C:/repo"), 5, Some("run-1"))
+        .await
+        .unwrap();
+    let same_run = registry
+        .supervisor_for_task_generation("session", Path::new("C:/repo"), 5, Some("run-1"))
+        .await
+        .unwrap();
+    let next_planning = registry
+        .supervisor_for_task_generation("session", Path::new("C:/repo"), 5, None)
+        .await
+        .unwrap();
+
+    assert!(planning.shares_runtime_with(&first_run));
+    assert!(first_run.shares_runtime_with(&same_run));
+    assert!(!first_run.shares_runtime_with(&next_planning));
+    assert_eq!(registry.len().await, 1);
+}

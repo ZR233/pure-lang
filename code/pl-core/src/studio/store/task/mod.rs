@@ -103,6 +103,15 @@ impl StudioStore {
         &self,
         session_id: &str,
     ) -> Result<TaskRunRecord> {
+        self.find_active_task_run_for_session(session_id)
+            .await?
+            .context("active task run not found for this session")
+    }
+
+    pub(crate) async fn find_active_task_run_for_session(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<TaskRunRecord>> {
         let models = entities::task_run::Entity::find()
             .filter(entities::task_run::Column::SessionId.eq(session_id.to_string()))
             .filter(entities::task_run::Column::Phase.is_not_in([
@@ -116,8 +125,8 @@ impl StudioStore {
             .all(&self.db)
             .await?;
         match models.as_slice() {
-            [] => bail!("active task run not found for this session"),
-            [model] => task_run_record(model.clone()),
+            [] => Ok(None),
+            [model] => task_run_record(model.clone()).map(Some),
             _ => bail!("multiple active task runs found for this session"),
         }
     }
