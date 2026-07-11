@@ -5,6 +5,7 @@ pub(crate) use continuation::ContinuationSnapshotTestBarrier;
 mod delivery;
 mod merge;
 mod outcome;
+mod recovery;
 mod review;
 mod terminal;
 mod work_unit;
