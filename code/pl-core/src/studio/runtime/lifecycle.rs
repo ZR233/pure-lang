@@ -51,8 +51,17 @@ impl StudioRuntime {
             runtime_state: runtime_state.clone(),
             active_turns: StudioActiveTurns::new(runtime_state),
             task_coordinator,
+            lifecycle_lock: std::sync::Arc::new(tokio::sync::Mutex::new(())),
             continuation_scheduler: ContinuationScheduler::new(),
             continuation_launcher: None,
+            #[cfg(test)]
+            continuation_request_barrier: None,
+            #[cfg(test)]
+            continuation_pre_submit_barrier: None,
+            #[cfg(test)]
+            continuation_launch_error_barrier: None,
+            #[cfg(test)]
+            initialization_entry_barrier: None,
         }
     }
 
@@ -97,6 +106,11 @@ impl StudioRuntime {
     }
 
     pub async fn initialize_runtime(&self) -> Result<StudioRuntimeSnapshot> {
+        #[cfg(test)]
+        if let Some(barrier) = &self.initialization_entry_barrier {
+            barrier.wait().await;
+        }
+        let _lifecycle_guard = self.lifecycle_lock.lock().await;
         if matches!(self.runtime_snapshot().status, StudioRuntimeStatus::Ready) {
             return Ok(self.runtime_snapshot());
         }
@@ -117,6 +131,7 @@ impl StudioRuntime {
                 let ready = self
                     .runtime_state
                     .transition(StudioRuntimeStatus::Ready, None)?;
+                self.continuation_scheduler.resume().await;
                 for run in recovered_runs {
                     self.request_task_continuation(run.id, ContinuationReason::Recovery)
                         .await;
@@ -149,6 +164,7 @@ impl StudioRuntime {
     }
 
     pub async fn shutdown_runtime(&self) -> Result<StudioRuntimeSnapshot> {
+        let _lifecycle_guard = self.lifecycle_lock.lock().await;
         let status = self.runtime_snapshot().status;
         if matches!(
             status,
@@ -159,6 +175,7 @@ impl StudioRuntime {
         let _ = self
             .runtime_state
             .transition(StudioRuntimeStatus::ShuttingDown, None)?;
+        self.continuation_scheduler.pause_and_clear().await;
         self.active_turns.cancel_all_and_clear().await;
         self.task_coordinator.suspend();
         self.stop_mcp_health_watcher().await;

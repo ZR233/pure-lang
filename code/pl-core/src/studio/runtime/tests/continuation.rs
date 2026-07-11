@@ -11,7 +11,7 @@ use tokio::sync::Mutex;
 use super::*;
 use crate::studio::runtime::continuation::{
     ContinuationLaunch, ContinuationLauncher, ContinuationReason, ContinuationRequest,
-    ContinuationScheduler, SessionTurnState,
+    ContinuationScheduler, ContinuationTestBarrier, SessionTurnState,
 };
 use crate::studio::task_coordinator::{
     AgentOutcomeStatus, CreateAgentOutcome, CreateTaskRun, CreateWorkUnit, TaskRunPhase,
@@ -112,6 +112,101 @@ async fn duplicate_recovery_notification_does_not_queue_an_extra_turn() {
         None
     );
     assert_eq!(scheduler.turn_removed("session-1").await, None);
+}
+
+#[tokio::test]
+async fn removal_between_active_observation_and_enqueue_still_launches_once() {
+    let (store, run, _) = continuation_fixture("enqueue-removal-race").await;
+    let launcher = RecordingLauncher::successful();
+    let mut runtime = test_runtime(store, launcher.clone());
+    let barrier = ContinuationTestBarrier::new();
+    runtime.continuation_request_barrier = Some(barrier.clone());
+    runtime
+        .active_turns
+        .insert(
+            run.session_id.clone(),
+            "turn-competing".to_string(),
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    let request = {
+        let runtime = runtime.clone();
+        let run_id = run.id.clone();
+        tokio::spawn(async move {
+            runtime
+                .request_task_continuation(run_id, ContinuationReason::AgentTerminal)
+                .await;
+        })
+    };
+
+    barrier.wait_until_entered().await;
+    runtime.active_turn_removed(&run.session_id).await;
+    barrier.release().await;
+    request.await.unwrap();
+    let launches = launcher.wait_for_count(1).await;
+
+    assert_eq!(launches.len(), 1);
+    assert_eq!(launches[0].request.task_run_id, run.id);
+}
+
+#[tokio::test]
+async fn production_busy_collision_removed_before_defer_relaunches_once() {
+    let repository = init_repository("continuation-submit-defer-race");
+    let store = StudioStore::open_memory().await.unwrap();
+    let run = persisted_repository_run(&store, &repository, "submit-defer-race").await;
+    let home = std::env::temp_dir().join(format!("pure-defer-home-{}", unique_id()));
+    let mut runtime = StudioRuntime::new(
+        store.clone(),
+        ConfigStore::new(crate::config::ConfigPaths::from_home(home)),
+    );
+    let prepared = ContinuationTestBarrier::new();
+    let launch_error = ContinuationTestBarrier::new();
+    runtime.continuation_pre_submit_barrier = Some(prepared.clone());
+    runtime.continuation_launch_error_barrier = Some(launch_error.clone());
+
+    runtime
+        .request_task_continuation(run.id.clone(), ContinuationReason::Recovery)
+        .await;
+    prepared.wait_until_entered().await;
+    runtime
+        .active_turns
+        .insert(
+            run.session_id.clone(),
+            "turn-competing".to_string(),
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    prepared.release().await;
+    launch_error.wait_until_entered().await;
+    runtime.active_turn_removed(&run.session_id).await;
+    launch_error.release().await;
+
+    let part = tokio::time::timeout(TEST_RUNTIME_TIMEOUT, async {
+        loop {
+            if let Some(part) = store
+                .load_message_parts(&run.session_id)
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|record| record.part.text == "继续任务")
+            {
+                break part.part;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+
+    assert!(part.synthetic);
+    assert!(part.ignored);
+    assert_ne!(
+        store.read_task_run(&run.id).await.unwrap().unwrap().phase,
+        TaskRunPhase::Blocked
+    );
+    remove_repository(repository);
 }
 
 #[tokio::test]
@@ -290,6 +385,71 @@ async fn session_failure_blocks_exact_run_before_launch() {
 }
 
 #[tokio::test]
+async fn terminal_run_without_branch_lease_is_discarded_before_snapshot() {
+    let (store, run, _) = continuation_fixture("terminal-before-prepare").await;
+    store
+        .transition_task_run(
+            &run.id,
+            TaskRunPhase::Blocked,
+            Some("terminal before prepare".to_string()),
+        )
+        .await
+        .unwrap();
+    store.release_branch_lease(&run.id).await.unwrap();
+    let launcher = RecordingLauncher::successful();
+    let runtime = test_runtime(store.clone(), launcher.clone());
+
+    runtime
+        .request_task_continuation(run.id.clone(), ContinuationReason::Recovery)
+        .await;
+
+    assert!(launcher.launches.lock().await.is_empty());
+    let persisted = store.read_task_run(&run.id).await.unwrap().unwrap();
+    assert_eq!(persisted.phase, TaskRunPhase::Blocked);
+    assert_eq!(
+        persisted.status_message.as_deref(),
+        Some("terminal before prepare")
+    );
+}
+
+#[tokio::test]
+async fn terminal_after_prepare_is_discarded_before_callback() {
+    let (store, run, _) = continuation_fixture("terminal-after-prepare").await;
+    let launcher = RecordingLauncher::successful();
+    let mut runtime = test_runtime(store.clone(), launcher.clone());
+    let prepared = ContinuationTestBarrier::new();
+    runtime.continuation_pre_submit_barrier = Some(prepared.clone());
+
+    runtime
+        .request_task_continuation(run.id.clone(), ContinuationReason::Recovery)
+        .await;
+    prepared.wait_until_entered().await;
+    store
+        .transition_task_run(
+            &run.id,
+            TaskRunPhase::Blocked,
+            Some("terminal after prepare".to_string()),
+        )
+        .await
+        .unwrap();
+    store.release_branch_lease(&run.id).await.unwrap();
+    prepared.release().await;
+    tokio::time::timeout(TEST_RUNTIME_TIMEOUT, async {
+        while runtime
+            .continuation_scheduler
+            .has_session(&run.session_id)
+            .await
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+
+    assert!(launcher.launches.lock().await.is_empty());
+}
+
+#[tokio::test]
 async fn production_continuation_uses_ignored_synthetic_user_label() {
     let repository = init_repository("continuation-production-label");
     let store = StudioStore::open_memory().await.unwrap();
@@ -322,6 +482,40 @@ async fn production_continuation_uses_ignored_synthetic_user_label() {
 
     assert!(part.synthetic);
     assert!(part.ignored);
+    remove_repository(repository);
+}
+
+#[tokio::test]
+async fn production_continuation_does_not_persist_snapshot_turn_in_core_history() {
+    let sse_body = concat!(
+        "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"delta\":\"continued\"}\n\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+        "data: [DONE]\n\n"
+    )
+    .to_string();
+    let (base_url, handle) = serve_sse_once(sse_body).await;
+    let repository = init_repository("continuation-ephemeral-history");
+    let store = StudioStore::open_memory().await.unwrap();
+    let run = persisted_repository_run(&store, &repository, "ephemeral-history").await;
+    let prior = crate::user_text_message("prior durable history");
+    store.append_message(&run.session_id, &prior).await.unwrap();
+    let home = std::env::temp_dir().join(format!("pure-history-home-{}", unique_id()));
+    let config_store = ConfigStore::new(crate::config::ConfigPaths::from_home(home));
+    config_store.save(&test_config(base_url)).unwrap();
+    let runtime = StudioRuntime::new(store.clone(), config_store);
+
+    runtime
+        .request_task_continuation(run.id.clone(), ContinuationReason::Recovery)
+        .await;
+    handle.await.unwrap();
+    wait_for_no_active_turn(&runtime).await;
+
+    let history = store.load_core_session(&run.session_id).await.unwrap();
+    assert_eq!(history.messages(), &[prior]);
+    let parts = store.load_message_parts(&run.session_id).await.unwrap();
+    assert!(parts.iter().any(|record| {
+        record.part.text == "继续任务" && record.part.synthetic && record.part.ignored
+    }));
     remove_repository(repository);
 }
 
@@ -372,6 +566,116 @@ async fn recovery_launches_once_after_ready_and_skips_head_drift() {
     drop(runtime);
     remove_repository(recovered_repository);
     remove_repository(drifted_repository);
+}
+
+#[tokio::test]
+async fn concurrent_initialization_recovers_active_run_once_without_blocking_it() {
+    let repository = init_repository("continuation-concurrent-initialize");
+    let store = StudioStore::open_memory().await.unwrap();
+    let run = persisted_repository_run(&store, &repository, "concurrent-initialize").await;
+    let runtime_state = StudioRuntimeState::new();
+    let launcher = RecordingLauncher::successful().observing(runtime_state.clone());
+    let home = std::env::temp_dir().join(format!("pure-concurrent-home-{}", unique_id()));
+    let mut runtime = StudioRuntime::with_runtime_state_and_continuation_launcher(
+        store.clone(),
+        ConfigStore::new(crate::config::ConfigPaths::from_home(home)),
+        runtime_state,
+        Arc::new(launcher.clone()),
+    );
+    runtime.initialization_entry_barrier = Some(Arc::new(tokio::sync::Barrier::new(2)));
+    let first = {
+        let runtime = runtime.clone();
+        tokio::spawn(async move { runtime.initialize_runtime().await })
+    };
+    let second = {
+        let runtime = runtime.clone();
+        tokio::spawn(async move { runtime.initialize_runtime().await })
+    };
+
+    let (first, second) = tokio::join!(first, second);
+    let first = first.unwrap().unwrap();
+    let second = second.unwrap().unwrap();
+    let launches = launcher.wait_for_count(1).await;
+
+    assert_eq!(first.status, StudioRuntimeStatus::Ready);
+    assert_eq!(second.status, StudioRuntimeStatus::Ready);
+    assert_eq!(launches.len(), 1);
+    assert_eq!(launches[0].request.task_run_id, run.id);
+    assert_eq!(
+        store.read_task_run(&run.id).await.unwrap().unwrap().phase,
+        TaskRunPhase::Implementing
+    );
+    drop(runtime);
+    remove_repository(repository);
+}
+
+#[tokio::test]
+async fn shutdown_clears_pending_and_same_runtime_recovers_once() {
+    let repository = init_repository("continuation-shutdown-pending");
+    let store = StudioStore::open_memory().await.unwrap();
+    let run = persisted_repository_run(&store, &repository, "shutdown-pending").await;
+    let launcher = RecordingLauncher::successful();
+    let runtime = test_runtime(store.clone(), launcher.clone());
+    runtime
+        .active_turns
+        .insert(
+            run.session_id.clone(),
+            "turn-competing".to_string(),
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    runtime
+        .request_task_continuation(run.id.clone(), ContinuationReason::AgentTerminal)
+        .await;
+
+    let stopped = runtime.shutdown_runtime().await.unwrap();
+    runtime.active_turn_removed(&run.session_id).await;
+    assert_eq!(stopped.status, StudioRuntimeStatus::Stopped);
+    assert!(
+        !runtime
+            .continuation_scheduler
+            .has_session(&run.session_id)
+            .await
+    );
+    assert!(launcher.launches.lock().await.is_empty());
+
+    let ready = runtime.initialize_runtime().await.unwrap();
+    let launches = launcher.wait_for_count(1).await;
+    assert_eq!(ready.status, StudioRuntimeStatus::Ready);
+    assert_eq!(launches.len(), 1);
+    assert_eq!(launches[0].request.reason, ContinuationReason::Recovery);
+    remove_repository(repository);
+}
+
+#[tokio::test]
+async fn shutdown_discards_claimed_continuation_before_callback() {
+    let (store, run, _) = continuation_fixture("shutdown-claimed").await;
+    let launcher = RecordingLauncher::successful();
+    let mut runtime = test_runtime(store, launcher.clone());
+    let prepared = ContinuationTestBarrier::new();
+    runtime.continuation_pre_submit_barrier = Some(prepared.clone());
+
+    runtime
+        .request_task_continuation(run.id.clone(), ContinuationReason::Recovery)
+        .await;
+    prepared.wait_until_entered().await;
+    let stopped = runtime.shutdown_runtime().await.unwrap();
+    prepared.release().await;
+    tokio::time::timeout(TEST_RUNTIME_TIMEOUT, async {
+        while runtime
+            .continuation_scheduler
+            .has_session(&run.session_id)
+            .await
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+
+    assert_eq!(stopped.status, StudioRuntimeStatus::Stopped);
+    assert!(launcher.launches.lock().await.is_empty());
 }
 
 fn continuation_request(

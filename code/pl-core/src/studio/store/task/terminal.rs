@@ -128,10 +128,7 @@ impl StudioStore {
             }
             let current = AgentOutcomeStatus::from_str(&outcome.status)
                 .with_context(|| format!("invalid agent outcome status: {}", outcome.status))?;
-            if current == target.outcome
-                || is_durable_terminal(current)
-                || outcome.delivery_json.is_some()
-            {
+            if outcome.terminal_observed != 0 {
                 return Ok(TerminalAgentStateRecording::Projected(
                     projection_from_outcome(outcome)?,
                 ));
@@ -139,9 +136,15 @@ impl StudioStore {
 
             let now = unix_seconds();
             let mut active_outcome: entities::agent_outcome::ActiveModel = outcome.clone().into();
-            active_outcome.status = Set(target.outcome.as_str().to_string());
-            active_outcome.summary = Set(change.summary.clone());
-            active_outcome.error = Set(change.error.clone().or_else(|| target.default_error()));
+            if current != target.outcome
+                && !is_durable_terminal(current)
+                && outcome.delivery_json.is_none()
+            {
+                active_outcome.status = Set(target.outcome.as_str().to_string());
+                active_outcome.summary = Set(change.summary.clone());
+                active_outcome.error = Set(change.error.clone().or_else(|| target.default_error()));
+            }
+            active_outcome.terminal_observed = Set(1);
             active_outcome.updated_at = Set(now);
             let outcome = active_outcome.update(&tx).await?;
 

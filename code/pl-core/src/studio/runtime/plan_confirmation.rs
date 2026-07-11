@@ -114,6 +114,7 @@ impl StudioRuntime {
                                 session_id: session_id.clone(),
                                 plan_id: plan_id.clone(),
                             }),
+                            history_policy: super::PromptHistoryPolicy::Persist,
                         },
                     })
                     .await?;

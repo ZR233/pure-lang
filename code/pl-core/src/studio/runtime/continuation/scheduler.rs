@@ -26,7 +26,7 @@ pub(crate) enum SessionTurnState {
 
 #[derive(Clone, Default)]
 pub(crate) struct ContinuationScheduler {
-    sessions: Arc<Mutex<HashMap<String, SessionContinuation>>>,
+    state: Arc<Mutex<SchedulerState>>,
 }
 
 impl ContinuationScheduler {
@@ -39,8 +39,14 @@ impl ContinuationScheduler {
         request: ContinuationRequest,
         session_turn_state: SessionTurnState,
     ) -> Option<ContinuationRequest> {
-        let mut sessions = self.sessions.lock().await;
-        let state = sessions.entry(request.session_id.clone()).or_default();
+        let mut scheduler = self.state.lock().await;
+        if !scheduler.enabled {
+            return None;
+        }
+        let state = scheduler
+            .sessions
+            .entry(request.session_id.clone())
+            .or_default();
         if request.reason == ContinuationReason::Recovery && state.active.as_ref() == Some(&request)
         {
             return None;
@@ -53,25 +59,75 @@ impl ContinuationScheduler {
     }
 
     pub(crate) async fn turn_removed(&self, session_id: &str) -> Option<ContinuationRequest> {
-        let mut sessions = self.sessions.lock().await;
-        let state = sessions.get_mut(session_id)?;
+        let mut scheduler = self.state.lock().await;
+        if !scheduler.enabled {
+            return None;
+        }
+        let state = scheduler.sessions.get_mut(session_id)?;
         state.active = None;
         let launch = claim_pending(state);
         if state.active.is_none() && state.pending.is_none() {
-            sessions.remove(session_id);
+            scheduler.sessions.remove(session_id);
         }
         launch
     }
 
+    pub(crate) async fn claim_if_idle(&self, session_id: &str) -> Option<ContinuationRequest> {
+        let mut scheduler = self.state.lock().await;
+        if !scheduler.enabled {
+            return None;
+        }
+        let state = scheduler.sessions.get_mut(session_id)?;
+        if state.active.is_some() {
+            return None;
+        }
+        claim_pending(state)
+    }
+
     pub(crate) async fn defer(&self, request: ContinuationRequest) {
-        let mut sessions = self.sessions.lock().await;
-        let state = sessions.entry(request.session_id.clone()).or_default();
+        let mut scheduler = self.state.lock().await;
+        if !scheduler.enabled {
+            return;
+        }
+        let state = scheduler
+            .sessions
+            .entry(request.session_id.clone())
+            .or_default();
         state.active = None;
         state.pending = Some(request);
     }
 
     pub(crate) async fn cancel_session(&self, session_id: &str) {
-        self.sessions.lock().await.remove(session_id);
+        self.state.lock().await.sessions.remove(session_id);
+    }
+
+    pub(crate) async fn pause_and_clear(&self) {
+        let mut scheduler = self.state.lock().await;
+        scheduler.enabled = false;
+        scheduler.sessions.clear();
+    }
+
+    pub(crate) async fn resume(&self) {
+        self.state.lock().await.enabled = true;
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn has_session(&self, session_id: &str) -> bool {
+        self.state.lock().await.sessions.contains_key(session_id)
+    }
+}
+
+struct SchedulerState {
+    enabled: bool,
+    sessions: HashMap<String, SessionContinuation>,
+}
+
+impl Default for SchedulerState {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            sessions: HashMap::new(),
+        }
     }
 }
 

@@ -23,8 +23,8 @@ use crate::{
 
 use super::self_learning::{should_start_self_learning, spawn_self_learning_review};
 use super::{
-    RunPromptRequest, StudioPlanImplementationLifecycle, StudioResolveInteractionResponse,
-    StudioRuntime, StudioStopPromptResponse, StudioSubmitPromptOptions, StudioSubmitPromptRequest,
+    PromptHistoryPolicy, RunPromptRequest, StudioResolveInteractionResponse, StudioRuntime,
+    StudioStopPromptResponse, StudioSubmitPromptOptions, StudioSubmitPromptRequest,
     StudioSubmitPromptResponse,
 };
 
@@ -94,7 +94,7 @@ impl StudioRuntime {
                     prompt,
                     attachment_ids,
                     cancellation_token,
-                    options.lifecycle,
+                    options,
                 )
                 .await;
         });
@@ -174,7 +174,9 @@ impl StudioRuntime {
         self.active_turns
             .insert(session_id.clone(), turn_id, cancellation_token)
             .await?;
-        let outcome = self.run_prompt_inner(request).await;
+        let outcome = self
+            .run_prompt_inner(request, PromptHistoryPolicy::Persist)
+            .await;
         self.active_turn_removed(&session_id).await;
         outcome
     }
@@ -186,8 +188,10 @@ impl StudioRuntime {
         prompt: String,
         attachment_ids: Vec<String>,
         cancellation_token: CancellationToken,
-        lifecycle: Option<StudioPlanImplementationLifecycle>,
+        submit_options: StudioSubmitPromptOptions,
     ) {
+        let history_policy = submit_options.history_policy;
+        let lifecycle = submit_options.lifecycle;
         let _ = self
             .events
             .emit_turn(
@@ -205,15 +209,18 @@ impl StudioRuntime {
             .with_cancellation(cancellation_token)
             .with_interaction_callback(interaction_callback.clone());
         let result = self
-            .run_prompt_inner(RunPromptRequest {
-                session_id: session_id.clone(),
-                turn_id: turn_id.clone(),
-                prompt,
-                attachment_ids,
-                interaction_callback,
-                interaction_emitter: emitter.clone(),
-                options,
-            })
+            .run_prompt_inner(
+                RunPromptRequest {
+                    session_id: session_id.clone(),
+                    turn_id: turn_id.clone(),
+                    prompt,
+                    attachment_ids,
+                    interaction_callback,
+                    interaction_emitter: emitter.clone(),
+                    options,
+                },
+                history_policy,
+            )
             .await;
         self.active_turn_removed(&session_id).await;
         let _ = self
