@@ -76,7 +76,12 @@ impl TaskCoordinator {
                     if reason.is_empty() {
                         bail!("task_stop reason must not be empty");
                     }
-                    let run = coordinator.preflight_task_stop(&session_id).await?;
+                    let branch_guard = coordinator.lock_branch_mutation().await;
+                    coordinator.ensure_branch_mutation_guard(&branch_guard)?;
+                    let _allocation_guard = coordinator.allocation_lock.lock().await;
+                    let run = coordinator
+                        .preflight_task_stop_locked(&session_id, &branch_guard)
+                        .await?;
                     context
                         .agent_supervisor
                         .shutdown_descendants("/root", reason)
@@ -85,7 +90,9 @@ impl TaskCoordinator {
                         .store
                         .settle_agents_for_task_stop(&run.id, reason)
                         .await?;
-                    let stopped = coordinator.stop_task(&run.id, reason).await?;
+                    let stopped = coordinator
+                        .stop_task_locked(&run.id, reason, &branch_guard)
+                        .await?;
                     ToolExecutionResult::<serde_json::Value>::json(stopped)
                         .map_err(anyhow::Error::from)
                 }
@@ -137,9 +144,12 @@ impl TaskCoordinator {
         })
     }
 
-    async fn preflight_task_stop(&self, session_id: &str) -> Result<TaskRunRecord> {
-        let guard = self.lock_branch_mutation().await;
-        self.ensure_branch_mutation_guard(&guard)?;
+    async fn preflight_task_stop_locked(
+        &self,
+        session_id: &str,
+        guard: &super::BranchMutationGuard<'_>,
+    ) -> Result<TaskRunRecord> {
+        self.ensure_branch_mutation_guard(guard)?;
         let run = self
             .store
             .read_active_task_run_for_session(session_id)
@@ -148,9 +158,13 @@ impl TaskCoordinator {
         Ok(run)
     }
 
-    async fn stop_task(&self, task_run_id: &str, reason: &str) -> Result<TaskRunRecord> {
-        let guard = self.lock_branch_mutation().await;
-        self.ensure_branch_mutation_guard(&guard)?;
+    async fn stop_task_locked(
+        &self,
+        task_run_id: &str,
+        reason: &str,
+        guard: &super::BranchMutationGuard<'_>,
+    ) -> Result<TaskRunRecord> {
+        self.ensure_branch_mutation_guard(guard)?;
         let mut run = self
             .store
             .read_task_run(task_run_id)
@@ -165,7 +179,7 @@ impl TaskCoordinator {
             .any(|record| record.status == MergeStatus::Merged);
         if !has_source_merge {
             if run.design_commit.is_some() {
-                self.revert_design_for_no_source_cancel_locked(&run.id, &guard)
+                self.revert_design_for_no_source_cancel_locked(&run.id, guard)
                     .await?;
                 run = self
                     .store

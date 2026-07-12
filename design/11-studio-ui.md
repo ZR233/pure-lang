@@ -211,3 +211,6 @@ Flutter 窗口 resize 时 UI 不应持续触发昂贵测量。Timeline 的贴底
 活动摘要只显示本地化 task phase；弹层按 coordinator、work unit、merge/conflict 和 review
 分区展示 worktree、commit、来源与实际读取的 design 引用。存在 durable task 快照时不再
 重复叠加内存 agent 详情面板；长列表在单一、限高的滚动区内展示，760px 窗口不得溢出。
+活动摘要中的 agent 数只统计 `queued | running | waitingForDelivery`；详情的 durable agent
+分区展示全部历史 outcome，包括角色、来源 call、summary、error 和交付 commit，确保摘要
+中的活动代理都能在弹层中定位。

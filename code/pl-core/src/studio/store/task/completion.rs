@@ -12,6 +12,37 @@ use crate::studio::task_coordinator::{
 };
 
 impl StudioStore {
+    pub(crate) async fn block_task_and_release_lease(
+        &self,
+        task_run_id: &str,
+        reason: &str,
+    ) -> Result<TaskRunRecord> {
+        let tx = self.db.begin().await?;
+        let result = async {
+            let run = entities::task_run::Entity::find_by_id(task_run_id.to_string())
+                .one(&tx)
+                .await?
+                .context("task run not found while blocking")?;
+            let phase = TaskRunPhase::from_str(&run.phase)
+                .with_context(|| format!("invalid task phase: {}", run.phase))?;
+            if phase.is_terminal() {
+                return super::task_run_record(run);
+            }
+            if !phase.can_transition_to(TaskRunPhase::Blocked) {
+                bail!("task phase cannot transition to blocked");
+            }
+            let mut active: entities::task_run::ActiveModel = run.into();
+            active.phase = Set(TaskRunPhase::Blocked.as_str().to_string());
+            active.status_message = Set(Some(reason.to_string()));
+            active.updated_at = Set(unix_seconds());
+            let blocked = active.update(&tx).await?;
+            super::delete_blocked_branch_lease(&tx, task_run_id).await?;
+            super::task_run_record(blocked)
+        }
+        .await;
+        finish_transaction(tx, result).await
+    }
+
     pub(crate) async fn complete_reviewed_task(
         &self,
         session_id: &str,

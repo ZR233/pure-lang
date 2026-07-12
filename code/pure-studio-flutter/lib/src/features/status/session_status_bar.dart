@@ -115,7 +115,7 @@ String _runtimeActivityLabel(
 ) {
   final taskAgents = runtime.task?.agents;
   final agentCount = taskAgents != null && taskAgents.isNotEmpty
-      ? taskAgents.length
+      ? taskAgents.where((agent) => _isActiveTaskAgent(agent.status)).length
       : agents.length;
   final parts = [
     if (runtime.task case final task?) context.taskPhaseLabel(task.phase),
@@ -129,6 +129,9 @@ String _runtimeActivityLabel(
   ];
   return parts.join(' · ');
 }
+
+bool _isActiveTaskAgent(String status) =>
+    const {'queued', 'running', 'waitingForDelivery'}.contains(status);
 
 class _SessionModeSelector extends ConsumerWidget {
   const _SessionModeSelector({required this.mode, required this.enabled});

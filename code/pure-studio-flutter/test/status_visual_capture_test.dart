@@ -252,6 +252,16 @@ StudioState _taskVisualState() {
             error: null,
             headCommit: 'abcdef1234567890',
           ),
+          TaskAgentOutcomeView(
+            agentId: 'agent-explorer',
+            role: 'explorer',
+            status: 'running',
+            initiatedBy: 'planner',
+            requestedByCallId: 'call-explore-visual',
+            summary: 'Inspecting the affected design contract',
+            error: null,
+            headCommit: null,
+          ),
         ],
         merges: [
           TaskMergeView(

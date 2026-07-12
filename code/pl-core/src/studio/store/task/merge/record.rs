@@ -1,16 +1,18 @@
 use anyhow::{Context, Result};
-use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
-};
+#[cfg(test)]
+use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 
 use crate::studio::entities;
+#[cfg(test)]
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
-use crate::studio::task_coordinator::{
-    CreateMergeRecord, MergeEvidence, MergeRecord, MergeStatus, UpdateMergeRecord,
-};
+#[cfg(test)]
+use crate::studio::task_coordinator::{CreateMergeRecord, UpdateMergeRecord};
+use crate::studio::task_coordinator::{MergeEvidence, MergeRecord, MergeStatus};
 
 impl StudioStore {
+    #[cfg(test)]
     pub(crate) async fn create_merge_record(
         &self,
         input: CreateMergeRecord,
@@ -36,6 +38,7 @@ impl StudioStore {
         )
     }
 
+    #[cfg(test)]
     pub(crate) async fn update_merge_record(
         &self,
         merge_id: &str,

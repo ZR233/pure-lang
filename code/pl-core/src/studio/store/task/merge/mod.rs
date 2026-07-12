@@ -395,7 +395,7 @@ impl StudioStore {
             merge_active.updated_at = Set(now);
             let merge_model = merge_active.update(&tx).await?;
 
-            let run = entities::task_run::Entity::find_by_id(task_run_id)
+            let run = entities::task_run::Entity::find_by_id(task_run_id.clone())
                 .one(&tx)
                 .await?
                 .context("task run not found")?;
@@ -407,6 +407,7 @@ impl StudioStore {
             run_active.status_message = Set(Some(input.reason));
             run_active.updated_at = Set(now);
             run_active.update(&tx).await?;
+            super::delete_blocked_branch_lease(&tx, &task_run_id).await?;
             merge_record(merge_model)
         }
         .await;

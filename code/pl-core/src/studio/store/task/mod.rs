@@ -157,6 +157,7 @@ impl StudioStore {
             .map(branch_lease_record))
     }
 
+    #[cfg(test)]
     pub(crate) async fn transition_task_run(
         &self,
         task_run_id: &str,
@@ -288,6 +289,7 @@ impl StudioStore {
         Ok(true)
     }
 
+    #[cfg(test)]
     pub(crate) async fn release_branch_lease(&self, task_run_id: &str) -> Result<()> {
         entities::branch_lease::Entity::delete_many()
             .filter(entities::branch_lease::Column::TaskRunId.eq(task_run_id.to_string()))
@@ -343,4 +345,15 @@ fn branch_lease_record(model: entities::branch_lease::Model) -> BranchLeaseRecor
         acquired_at: model.acquired_at,
         updated_at: model.updated_at,
     }
+}
+
+async fn delete_blocked_branch_lease(
+    tx: &sea_orm::DatabaseTransaction,
+    task_run_id: &str,
+) -> Result<()> {
+    entities::branch_lease::Entity::delete_many()
+        .filter(entities::branch_lease::Column::TaskRunId.eq(task_run_id.to_string()))
+        .exec(tx)
+        .await?;
+    Ok(())
 }

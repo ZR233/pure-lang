@@ -46,40 +46,10 @@ impl StudioRuntime {
             });
         }
 
-        let resolved = self
-            .interactions
-            .resolve(
-                &interaction_id,
-                InteractionResolution::PlanConfirmation {
-                    decision: decision.clone(),
-                    content: resolution_content.clone(),
-                    reason: reason.clone(),
-                },
-                emitter,
-            )
-            .await?;
-
-        match decision {
+        let resolved = match decision {
             PlanConfirmationResolution::ImplementFreshContext => {
-                self.set_session_mode(&session_id, CompileMode::Task)
-                    .await?;
-                self.append_plan_lifecycle_event(
-                    &session_id,
-                    plan_id,
-                    PlanLifecycleState::Accepted,
-                    None,
-                    reason.filter(|value| !value.trim().is_empty()),
-                )
-                .await?;
-                self.append_plan_lifecycle_event(
-                    &session_id,
-                    plan_id,
-                    PlanLifecycleState::Implementing,
-                    None,
-                    None,
-                )
-                .await?;
                 let plan_content = resolution_content
+                    .clone()
                     .filter(|value| !value.trim().is_empty())
                     .unwrap_or_else(|| content.clone())
                     .trim()
@@ -92,34 +62,95 @@ impl StudioRuntime {
                     .read_session(&session_id)
                     .await?
                     .context("task session not found")?;
+                if session.mode != CompileMode::Task.label() {
+                    bail!("plan implementation requires a Task mode session");
+                }
                 let project = self
                     .store
                     .read_project(&session.project_id)
                     .await?
                     .context("task project not found")?;
-                self.task_coordinator
+                let run = self
+                    .task_coordinator
                     .start_confirmed_task(&session_id, &plan_content, &project.path)
                     .await?;
-                let prompt = format!("{IMPLEMENT_PLAN_CURRENT_SESSION_PREFIX}\n\n{plan_content}");
-                let _ = self
-                    .submit_prompt(StudioSubmitPromptRequest {
-                        session_id: session_id.clone(),
-                        prompt,
-                        attachment_ids: Vec::new(),
-                        options: StudioSubmitPromptOptions {
-                            user_prompt: StudioUserPromptPresentation::SyntheticIgnored {
-                                visible_prompt: "实施计划".to_string(),
+                let started = async {
+                    let resolved = self
+                        .interactions
+                        .resolve(
+                            &interaction_id,
+                            InteractionResolution::PlanConfirmation {
+                                decision: PlanConfirmationResolution::ImplementFreshContext,
+                                content: resolution_content,
+                                reason: reason.clone(),
                             },
-                            lifecycle: Some(StudioPlanImplementationLifecycle {
-                                session_id: session_id.clone(),
-                                plan_id: plan_id.clone(),
-                            }),
-                            history_policy: super::PromptHistoryPolicy::Persist,
-                        },
-                    })
+                            emitter,
+                        )
+                        .await?;
+                    self.append_plan_lifecycle_event(
+                        &session_id,
+                        plan_id,
+                        PlanLifecycleState::Accepted,
+                        None,
+                        reason.filter(|value| !value.trim().is_empty()),
+                    )
                     .await?;
+                    self.append_plan_lifecycle_event(
+                        &session_id,
+                        plan_id,
+                        PlanLifecycleState::Implementing,
+                        None,
+                        None,
+                    )
+                    .await?;
+                    let prompt =
+                        format!("{IMPLEMENT_PLAN_CURRENT_SESSION_PREFIX}\n\n{plan_content}");
+                    let _ = self
+                        .submit_prompt(StudioSubmitPromptRequest {
+                            session_id: session_id.clone(),
+                            prompt,
+                            attachment_ids: Vec::new(),
+                            options: StudioSubmitPromptOptions {
+                                user_prompt: StudioUserPromptPresentation::SyntheticIgnored {
+                                    visible_prompt: "实施计划".to_string(),
+                                },
+                                lifecycle: Some(StudioPlanImplementationLifecycle {
+                                    session_id: session_id.clone(),
+                                    plan_id: plan_id.clone(),
+                                }),
+                                history_policy: super::PromptHistoryPolicy::Persist,
+                            },
+                        })
+                        .await?;
+                    Ok::<_, anyhow::Error>(resolved)
+                }
+                .await;
+                match started {
+                    Ok(resolved) => resolved,
+                    Err(error) => {
+                        self.task_coordinator
+                            .block_continuation_failure(
+                                &run.id,
+                                format!("plan implementation startup failed: {error}"),
+                            )
+                            .await?;
+                        return Err(error);
+                    }
+                }
             }
             PlanConfirmationResolution::ContinuePlanning => {
+                let resolved = self
+                    .interactions
+                    .resolve(
+                        &interaction_id,
+                        InteractionResolution::PlanConfirmation {
+                            decision: PlanConfirmationResolution::ContinuePlanning,
+                            content: resolution_content.clone(),
+                            reason: reason.clone(),
+                        },
+                        emitter,
+                    )
+                    .await?;
                 self.append_plan_lifecycle_event(
                     &session_id,
                     plan_id,
@@ -128,8 +159,21 @@ impl StudioRuntime {
                     reason.or(resolution_content),
                 )
                 .await?;
+                resolved
             }
             PlanConfirmationResolution::Dismiss => {
+                let resolved = self
+                    .interactions
+                    .resolve(
+                        &interaction_id,
+                        InteractionResolution::PlanConfirmation {
+                            decision: PlanConfirmationResolution::Dismiss,
+                            content: resolution_content,
+                            reason: reason.clone(),
+                        },
+                        emitter,
+                    )
+                    .await?;
                 self.append_plan_lifecycle_event(
                     &session_id,
                     plan_id,
@@ -138,8 +182,9 @@ impl StudioRuntime {
                     reason,
                 )
                 .await?;
+                resolved
             }
-        }
+        };
 
         let sessions = if let Some(session) = self.store.read_session(&session_id).await? {
             self.store.list_sessions(&session.project_id).await?

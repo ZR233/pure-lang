@@ -500,6 +500,12 @@ abstract class AppLocalizations {
   /// **'Work units'**
   String get statusTaskWorkUnits;
 
+  /// No description provided for @statusTaskAgents.
+  ///
+  /// In en, this message translates to:
+  /// **'Agents'**
+  String get statusTaskAgents;
+
   /// No description provided for @statusTaskMerges.
   ///
   /// In en, this message translates to:
@@ -535,6 +541,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Conflicts'**
   String get statusTaskConflicts;
+
+  /// No description provided for @statusTaskRequest.
+  ///
+  /// In en, this message translates to:
+  /// **'Request'**
+  String get statusTaskRequest;
+
+  /// No description provided for @statusTaskSummary.
+  ///
+  /// In en, this message translates to:
+  /// **'Summary'**
+  String get statusTaskSummary;
+
+  /// No description provided for @statusTaskError.
+  ///
+  /// In en, this message translates to:
+  /// **'Error'**
+  String get statusTaskError;
 
   /// No description provided for @statusTaskPhasePlanning.
   ///
