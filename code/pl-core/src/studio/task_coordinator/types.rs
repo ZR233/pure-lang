@@ -152,10 +152,19 @@ pub(crate) enum TaskWorktreeCreationState {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum TaskWorktreeCleanupState {
+    NotMerged,
+    Protect,
+    Cleanup,
+    Replay { merge_id: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TaskWorktreeOwnerResource {
     pub(crate) work_unit: WorkUnitRecord,
     pub(crate) outcome: Option<AgentOutcomeRecord>,
     pub(crate) creation_state: TaskWorktreeCreationState,
+    pub(crate) cleanup_state: TaskWorktreeCleanupState,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

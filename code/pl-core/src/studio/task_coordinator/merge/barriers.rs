@@ -4,6 +4,34 @@ use crate::studio::task_coordinator::TaskCoordinator;
 
 impl TaskCoordinator {
     #[cfg(test)]
+    pub(crate) fn fail_next_merge_post_accept_read(&self) {
+        self.fail_merge_post_accept_read
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    #[cfg(test)]
+    pub(super) async fn read_accepted_task_run(
+        &self,
+        task_run_id: &str,
+    ) -> anyhow::Result<Option<crate::studio::task_coordinator::TaskRunRecord>> {
+        if self
+            .fail_merge_post_accept_read
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            anyhow::bail!("injected accepted task run read failure");
+        }
+        self.store.read_task_run(task_run_id).await
+    }
+
+    #[cfg(not(test))]
+    pub(super) async fn read_accepted_task_run(
+        &self,
+        task_run_id: &str,
+    ) -> anyhow::Result<Option<crate::studio::task_coordinator::TaskRunRecord>> {
+        self.store.read_task_run(task_run_id).await
+    }
+
+    #[cfg(test)]
     pub(crate) fn set_merge_after_commit_barrier(&self, barrier: MergeCommitTestBarrier) {
         *self
             .merge_after_commit_barrier

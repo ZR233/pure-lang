@@ -132,6 +132,7 @@ impl TaskCoordinator {
             .await?
         {
             self.ensure_process_lease_owned(&scope.run)?;
+            self.validate_accepted_cleanup_replay(&scope).await?;
             let output = merged_output(&scope)?;
             return self
                 .finish_accepted_delivery_cleanup(
@@ -391,31 +392,27 @@ impl TaskCoordinator {
                 .await;
         }
         self.pause_after_merge_acceptance().await;
-        let durable_run = self
-            .store
-            .read_task_run(&scope.run.id)
-            .await?
-            .context("accepted task run disappeared")?;
+        let durable_run = match self.read_accepted_task_run(&scope.run.id).await {
+            Ok(Some(run)) => run,
+            Ok(None) => {
+                return self
+                    .block_accepted_scope_failure(
+                        scope,
+                        anyhow::anyhow!("accepted task run disappeared after merge CAS"),
+                    )
+                    .await;
+            }
+            Err(error) => {
+                return self
+                    .block_accepted_scope_failure(
+                        scope,
+                        error.context("read accepted task run after merge CAS"),
+                    )
+                    .await;
+            }
+        };
         if let Err(error) = validate_final_head(&durable_run, &merge_commit).await {
-            let reason = format!("accepted merge final scope validation failed: {error:#}");
-            let block = self
-                .store
-                .block_accepted_merge(
-                    &scope.merge.id,
-                    &reason,
-                    super::MergeCleanupEvidence {
-                        status: "deferred".to_string(),
-                        detail: Some(reason.clone()),
-                    },
-                )
-                .await;
-            self.release_owned_process_lease(&scope.run.id);
-            return match block {
-                Ok(_) => Err(error).context(reason),
-                Err(block_error) => Err(error).context(format!(
-                    "{reason}; accepted-merge block persistence also failed: {block_error:#}"
-                )),
-            };
+            return self.block_accepted_scope_failure(scope, error).await;
         }
         Ok(TaskMergeAgentOutput {
             merge_id: scope.merge.id.clone(),
@@ -429,6 +426,32 @@ impl TaskCoordinator {
             cleanup: pending_cleanup(),
             conflict_files: Vec::new(),
         })
+    }
+
+    async fn block_accepted_scope_failure(
+        &self,
+        scope: &TaskMergeScope,
+        error: anyhow::Error,
+    ) -> Result<TaskMergeAgentOutput> {
+        let reason = format!("accepted merge final scope validation failed: {error:#}");
+        let block = self
+            .store
+            .block_accepted_merge(
+                &scope.merge.id,
+                &reason,
+                super::MergeCleanupEvidence {
+                    status: "deferred".to_string(),
+                    detail: Some(reason.clone()),
+                },
+            )
+            .await;
+        self.release_owned_process_lease(&scope.run.id);
+        match block {
+            Ok(_) => Err(error).context(reason),
+            Err(block_error) => Err(error).context(format!(
+                "{reason}; accepted-merge block persistence also failed: {block_error:#}"
+            )),
+        }
     }
 
     async fn handle_non_clean_merge(

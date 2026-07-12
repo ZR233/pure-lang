@@ -1,11 +1,12 @@
 use std::path::PathBuf;
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 
 use super::{
-    AgentOutcomeRecord, TaskCoordinator, TaskRunPhase, TaskWorktreeCreationState,
-    TaskWorktreeOwnerSnapshot, WorkUnitStatus,
+    AgentOutcomeRecord, TaskCoordinator, TaskRunPhase, TaskWorktreeCleanupState,
+    TaskWorktreeCreationState, TaskWorktreeOwnerSnapshot,
 };
+use crate::AgentSupervisor;
 use crate::agent::worktree::{
     DurableWorktreeDisposition, DurableWorktreePresence, DurableWorktreeResource,
     WorktreeReconciliation, reconcile_task_worktree_group,
@@ -26,10 +27,17 @@ impl TaskCoordinator {
             for resource in &owner.resources {
                 let unit = &resource.work_unit;
                 let outcome = resource.outcome.as_ref();
-                let disposition = if terminal_cleanup || unit.status == WorkUnitStatus::Merged {
-                    DurableWorktreeDisposition::Cleanup
-                } else {
-                    DurableWorktreeDisposition::Protect
+                let disposition = match &resource.cleanup_state {
+                    TaskWorktreeCleanupState::Cleanup => DurableWorktreeDisposition::Cleanup,
+                    TaskWorktreeCleanupState::Replay { merge_id } => {
+                        self.replay_accepted_cleanup(merge_id).await?;
+                        DurableWorktreeDisposition::Cleanup
+                    }
+                    TaskWorktreeCleanupState::Protect => DurableWorktreeDisposition::Protect,
+                    TaskWorktreeCleanupState::NotMerged if terminal_cleanup => {
+                        DurableWorktreeDisposition::Cleanup
+                    }
+                    TaskWorktreeCleanupState::NotMerged => DurableWorktreeDisposition::Protect,
                 };
                 resources.push(DurableWorktreeResource {
                     task_run_id: owner.run.id.clone(),
@@ -54,6 +62,34 @@ impl TaskCoordinator {
         }
         let _summary: WorktreeReconciliation =
             reconcile_task_worktree_group(repositories, &resources).await?;
+        Ok(())
+    }
+
+    async fn replay_accepted_cleanup(&self, merge_id: &str) -> Result<()> {
+        let scope = self.store.read_accepted_merge_scope(merge_id).await?;
+        self.validate_accepted_cleanup_replay(&scope).await?;
+        self.store.record_merge_cleanup_attempting(merge_id).await?;
+        let supervisor = AgentSupervisor::default();
+        let (event_tx, _) = tokio::sync::broadcast::channel(8);
+        let cleanup = super::merge::cleanup_accepted_delivery(
+            &scope,
+            &supervisor,
+            &event_tx,
+            "restart-cleanup-replay",
+        )
+        .await;
+        self.store
+            .record_merge_cleanup(merge_id, cleanup.clone())
+            .await?;
+        if cleanup.status == "failed" {
+            bail!(
+                "accepted cleanup replay failed: {}",
+                cleanup
+                    .detail
+                    .as_deref()
+                    .unwrap_or("unknown cleanup failure")
+            );
+        }
         Ok(())
     }
 }
