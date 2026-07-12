@@ -246,6 +246,7 @@ impl StudioStore {
             | TaskRunPhase::Merging
             | TaskRunPhase::ResolvingConflict
             | TaskRunPhase::Reviewing
+            | TaskRunPhase::Stopping
             | TaskRunPhase::Completed
             | TaskRunPhase::Blocked
             | TaskRunPhase::Failed

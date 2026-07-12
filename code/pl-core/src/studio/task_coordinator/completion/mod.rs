@@ -76,12 +76,18 @@ impl TaskCoordinator {
                     if reason.is_empty() {
                         bail!("task_stop reason must not be empty");
                     }
-                    let branch_guard = coordinator.lock_branch_mutation().await;
-                    coordinator.ensure_branch_mutation_guard(&branch_guard)?;
-                    let _allocation_guard = coordinator.allocation_lock.lock().await;
-                    let run = coordinator
-                        .preflight_task_stop_locked(&session_id, &branch_guard)
-                        .await?;
+                    let run = {
+                        let branch_guard = coordinator.lock_branch_mutation().await;
+                        coordinator.ensure_branch_mutation_guard(&branch_guard)?;
+                        let _allocation_guard = coordinator.allocation_lock.lock().await;
+                        let run = coordinator
+                            .preflight_task_stop_locked(&session_id, &branch_guard)
+                            .await?;
+                        coordinator
+                            .store
+                            .begin_task_stop(&run.id, &run.expected_head)
+                            .await?
+                    };
                     context
                         .agent_supervisor
                         .shutdown_descendants("/root", reason)
@@ -90,6 +96,7 @@ impl TaskCoordinator {
                         .store
                         .settle_agents_for_task_stop(&run.id, reason)
                         .await?;
+                    let branch_guard = coordinator.lock_branch_mutation().await;
                     let stopped = coordinator
                         .stop_task_locked(&run.id, reason, &branch_guard)
                         .await?;

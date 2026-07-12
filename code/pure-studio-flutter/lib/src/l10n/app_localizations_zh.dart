@@ -283,6 +283,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get statusTaskPhaseReworking => '返工中';
 
   @override
+  String get statusTaskPhaseStopping => '停止中';
+
+  @override
   String get statusTaskPhaseCompleted => '任务已完成';
 
   @override
@@ -1309,6 +1312,9 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get statusTaskPhaseReworking => '返工中';
+
+  @override
+  String get statusTaskPhaseStopping => '停止中';
 
   @override
   String get statusTaskPhaseCompleted => '任务已完成';

@@ -296,6 +296,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get statusTaskPhaseReworking => 'Reworking';
 
   @override
+  String get statusTaskPhaseStopping => 'Stopping';
+
+  @override
   String get statusTaskPhaseCompleted => 'Task completed';
 
   @override

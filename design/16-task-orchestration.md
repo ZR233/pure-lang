@@ -36,6 +36,7 @@ planner。
 ```text
 planning -> pendingConfirmation -> designUpdating -> implementing -> merging
          -> resolvingConflict -> reviewing -> reworking
+         -> stopping -> cancelled
          -> completed | blocked | failed | cancelled
 ```
 
@@ -244,9 +245,10 @@ run、保留残留现场并报告诊断，不能把它当作普通工具失败�
 `REVERT_HEAD`、index 和 worktree 现场。成功 commit 使用同一 exact-commit 证明与 post-commit
 补偿规则。安全补偿必须再次证明 workspace root、git common dir、named branch、clean 状态
 和 exact HEAD 全部仍属于该 run；即使 HEAD 相同，切换到另一分支也禁止 reset/restore。
-`task_stop` 按 branch mutation、allocation 的固定顺序取得两把 guard，并在同一锁作用域内
-完成预检、代理收束、revert、durable HEAD 推进和 terminalization；executor allocation
-也经过相同锁顺序，因此不会在停止窗口基于仍可分配的 phase 创建 work unit。
+`task_stop` 按 branch mutation、allocation 的固定顺序短暂取得两把 guard，完成预检并把
+TaskRun 持久化为 `stopping` 后立即释放；`stopping` 拒绝新的 allocation 和 delivery。
+随后在不持 branch mutation lock 的情况下等待代理收束，最后重新取得 branch guard，
+复验 repository 后完成 revert、durable HEAD 推进和 terminalization。
 显式传入的 branch mutation guard 必须绑定创建它的 coordinator；其他 coordinator 的
 guard 不得授权 locked mutation API。
 
@@ -277,8 +279,9 @@ work unit、outcome 和 merge 都必须已收束。存在已接受 source merge 
 `task_update_design` 必须已经把 `designCommit` 推进到当前 HEAD。runtime 按任务综合变更
 运行必要的最终检查后，以单事务写入 `completed` 并删除 BranchLease，再释放进程 lease。
 
-`task_stop` 先终止并等待当前任务的内存代理，将未完成的 durable agent/work unit 收束为
-`cancelled`，再进入 branch mutation lock。尚无 source merge 时，如已接受 design commit，
+`task_stop` 先在短锁事务中进入 `stopping`，再终止并等待当前任务的内存代理，将未完成的
+durable agent/work unit 收束为 `cancelled`，最后重新进入 branch mutation lock。尚无
+source merge 时，如已接受 design commit，
 必须先创建受控 revert commit；已有 source merge 时，必须先由 planner 更新 design 到当前
 实现。存在尚未安全 abort 的 merge/conflict 时停止操作拒绝终态写入，保留现场供 planner
 使用冲突工具处理。取消终态与 BranchLease 删除同样在一个事务中完成。

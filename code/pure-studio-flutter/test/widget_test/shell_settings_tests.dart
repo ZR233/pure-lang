@@ -184,7 +184,7 @@ void registerShellSettingsTests() {
     expect(find.text('42%'), findsNothing);
     expect(find.text('42/100'), findsNothing);
     expect(find.text('CNY 0.16'), findsOneWidget);
-    expect(find.text('1 skill · 1 MCP · 1 LSP · 2 agents'), findsOneWidget);
+    expect(find.text('1 skill · 1 MCP · 1 LSP · 1 agent'), findsOneWidget);
     expect(find.text('1 skill · 1 MCP · 1 LSP'), findsNothing);
     expect(find.text('2 agents · 1 running'), findsNothing);
 
@@ -207,7 +207,7 @@ void registerShellSettingsTests() {
     await tester.tapAt(Offset.zero);
     await tester.pumpAndSettle();
 
-    final activityFinder = find.text('1 skill · 1 MCP · 1 LSP · 2 agents');
+    final activityFinder = find.text('1 skill · 1 MCP · 1 LSP · 1 agent');
     final activityCenter = tester.getCenter(activityFinder);
     final activityRect = tester.getRect(activityFinder);
     await tester.tapAt(Offset(activityRect.left + 8, activityCenter.dy));
