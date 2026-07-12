@@ -26,6 +26,7 @@ impl StudioStore {
         let Some(run) = entities::task_run::Entity::find()
             .filter(entities::task_run::Column::SessionId.eq(session_id.to_string()))
             .filter(entities::task_run::Column::Phase.is_not_in([
+                TaskRunPhase::Stopping.as_str(),
                 TaskRunPhase::Completed.as_str(),
                 TaskRunPhase::Blocked.as_str(),
                 TaskRunPhase::Failed.as_str(),

@@ -39,6 +39,7 @@ impl StudioStore {
             };
             let Some(run) = entities::task_run::Entity::find_by_id(work_unit.task_run_id.clone())
                 .filter(entities::task_run::Column::Phase.is_not_in([
+                    TaskRunPhase::Stopping.as_str(),
                     TaskRunPhase::Completed.as_str(),
                     TaskRunPhase::Blocked.as_str(),
                     TaskRunPhase::Failed.as_str(),
@@ -92,6 +93,7 @@ impl StudioStore {
             let has_active_run =
                 entities::task_run::Entity::find_by_id(outcome.task_run_id.clone())
                     .filter(entities::task_run::Column::Phase.is_not_in([
+                        TaskRunPhase::Stopping.as_str(),
                         TaskRunPhase::Completed.as_str(),
                         TaskRunPhase::Blocked.as_str(),
                         TaskRunPhase::Failed.as_str(),
@@ -133,6 +135,7 @@ impl StudioStore {
         let tx = self.db.begin().await?;
         let result = async {
             let (outcome, work_unit) = load_delivery_pair(&tx, outcome_id, work_unit_id).await?;
+            ensure_task_accepts_delivery(&tx, &work_unit.task_run_id).await?;
             ensure_delivery_is_open(&outcome, Some(&work_unit))?;
             let now = unix_seconds();
 
@@ -177,6 +180,7 @@ impl StudioStore {
                 None => None,
             };
             validate_delivery_link(&outcome, work_unit.as_ref())?;
+            ensure_task_accepts_delivery(&tx, &outcome.task_run_id).await?;
             ensure_delivery_is_open(&outcome, work_unit.as_ref())?;
             let now = unix_seconds();
 
@@ -197,6 +201,22 @@ impl StudioStore {
         .await;
         finish_transaction(tx, result).await
     }
+}
+
+async fn ensure_task_accepts_delivery(
+    tx: &sea_orm::DatabaseTransaction,
+    task_run_id: &str,
+) -> Result<()> {
+    let run = entities::task_run::Entity::find_by_id(task_run_id.to_string())
+        .one(tx)
+        .await?
+        .context("task run not found for agent delivery")?;
+    let phase = TaskRunPhase::from_str(&run.phase)
+        .with_context(|| format!("invalid task phase: {}", run.phase))?;
+    if phase == TaskRunPhase::Stopping || phase.is_terminal() {
+        bail!("task phase is not accepting agent delivery");
+    }
+    Ok(())
 }
 
 async fn load_delivery_pair(
