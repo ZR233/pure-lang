@@ -29,7 +29,8 @@ impl StudioStore {
             {
                 bail!("merge record no longer matches the conflict verification scope");
             }
-            let run = entities::task_run::Entity::find_by_id(merge.task_run_id.clone())
+            let task_run_id = merge.task_run_id.clone();
+            let run = entities::task_run::Entity::find_by_id(task_run_id.clone())
                 .one(&tx)
                 .await?
                 .context("task run not found")?;
@@ -81,7 +82,8 @@ impl StudioStore {
             }
             let mut evidence = parse_required_evidence(merge.verification_json.as_deref())?;
             evidence.compensation = Some(input.compensation);
-            let run = entities::task_run::Entity::find_by_id(merge.task_run_id.clone())
+            let task_run_id = merge.task_run_id.clone();
+            let run = entities::task_run::Entity::find_by_id(task_run_id.clone())
                 .one(&tx)
                 .await?
                 .context("task run not found")?;
@@ -102,6 +104,7 @@ impl StudioStore {
             run_active.status_message = Set(Some(input.reason));
             run_active.updated_at = Set(now);
             run_active.update(&tx).await?;
+            super::super::delete_blocked_branch_lease(&tx, &task_run_id).await?;
             Ok(merge)
         }
         .await;

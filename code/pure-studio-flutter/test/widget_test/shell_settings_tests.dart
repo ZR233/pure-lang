@@ -502,6 +502,16 @@ void registerShellSettingsTests() {
                 error: null,
                 headCommit: 'abcdef1234567890',
               ),
+              TaskAgentOutcomeView(
+                agentId: 'agent-explorer',
+                role: 'explorer',
+                status: 'running',
+                initiatedBy: 'planner',
+                requestedByCallId: 'call-explore-1',
+                summary: 'Inspecting design constraints',
+                error: null,
+                headCommit: null,
+              ),
             ],
             merges: [
               TaskMergeView(
@@ -549,12 +559,15 @@ void registerShellSettingsTests() {
     expect(find.text('codex/task-mode'), findsOneWidget);
     expect(find.text('Implement coordinator UI'), findsOneWidget);
     expect(find.text('.pure/worktrees/task-run-1/agent-1'), findsOneWidget);
-    expect(find.text('abcdef1234'), findsOneWidget);
+    expect(find.text('abcdef1234'), findsNWidgets(2));
     expect(find.text('lib/status.dart'), findsOneWidget);
     expect(find.text('Delivered'), findsOneWidget);
     expect(find.text('Conflicted'), findsOneWidget);
     expect(find.text('Changes required'), findsOneWidget);
     expect(find.text('changesRequired'), findsNothing);
+    expect(find.text('explorer · agent-explorer'), findsOneWidget);
+    expect(find.text('call-explore-1'), findsOneWidget);
+    expect(find.text('Inspecting design constraints'), findsOneWidget);
     expect(
       find.text('design/16-task-orchestration.md#UI 与兼容性'),
       findsOneWidget,

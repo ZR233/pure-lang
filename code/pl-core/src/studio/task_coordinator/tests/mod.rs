@@ -1453,6 +1453,14 @@ async fn verifier_failure_aborts_to_exact_prestate_blocks_and_preserves_delivery
     assert_eq!(merges.len(), 1);
     assert_eq!(merges[0].status, MergeStatus::Failed);
     assert!(!fixture.coordinator.process_lease_is_held(&durable_run));
+    assert!(
+        fixture
+            .store
+            .read_branch_lease(&durable_run.id)
+            .await
+            .unwrap()
+            .is_none()
+    );
     fixture.cleanup();
 }
 
@@ -1678,11 +1686,10 @@ async fn durable_merge_cas_failure_compensates_exact_clean_merge_commit() {
         .store
         .read_branch_lease(&fixture.task_run_id)
         .await
-        .unwrap()
         .unwrap();
     assert_eq!(durable_run.phase, TaskRunPhase::Blocked);
     assert_eq!(durable_run.expected_head, run.expected_head);
-    assert_eq!(lease.expected_head, run.expected_head);
+    assert!(lease.is_none());
     assert_eq!(fixture.work_unit().await.status, WorkUnitStatus::Delivered);
     let merge = fixture
         .store

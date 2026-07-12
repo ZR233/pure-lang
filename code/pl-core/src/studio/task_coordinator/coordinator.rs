@@ -295,6 +295,7 @@ impl TaskCoordinator {
         Ok(recovered)
     }
 
+    #[cfg(test)]
     pub(crate) async fn verify_expected_head(&self, task_run_id: &str) -> Result<bool> {
         let run = self
             .store
@@ -316,6 +317,7 @@ impl TaskCoordinator {
         Ok(true)
     }
 
+    #[cfg(test)]
     pub(crate) async fn finish_task(
         &self,
         task_run_id: &str,
@@ -365,7 +367,7 @@ impl TaskCoordinator {
 
     pub(super) async fn block_run(&self, run: &TaskRunRecord, reason: String) -> Result<()> {
         self.store
-            .transition_task_run(&run.id, TaskRunPhase::Blocked, Some(reason))
+            .block_task_and_release_lease(&run.id, &reason)
             .await?;
         self.release_owned_process_lease(&run.id);
         release_process_lease(

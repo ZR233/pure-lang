@@ -8,9 +8,11 @@ use crate::studio::entities;
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    AgentOutcomeRecord, AgentOutcomeStatus, AgentReview, CompleteReviewRound, CreateReviewRound,
-    MergeStatus, ReviewRoundRecord, ReviewVerdict, TaskRunPhase, WorkUnitStatus,
+    AgentOutcomeRecord, AgentOutcomeStatus, AgentReview, MergeStatus, ReviewRoundRecord,
+    ReviewVerdict, TaskRunPhase, WorkUnitStatus,
 };
+#[cfg(test)]
+use crate::studio::task_coordinator::{CompleteReviewRound, CreateReviewRound};
 
 use super::outcome::agent_outcome_record;
 
@@ -248,6 +250,7 @@ impl StudioStore {
         .await;
         finish_transaction(tx, result).await
     }
+    #[cfg(test)]
     pub(crate) async fn create_review_round(
         &self,
         input: CreateReviewRound,
@@ -272,6 +275,7 @@ impl StudioStore {
         )
     }
 
+    #[cfg(test)]
     pub(crate) async fn update_review_round(
         &self,
         review_id: &str,

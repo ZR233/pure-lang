@@ -242,6 +242,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get statusTaskWorkUnits => 'Work units';
 
   @override
+  String get statusTaskAgents => 'Agents';
+
+  @override
   String get statusTaskMerges => 'Merges and conflicts';
 
   @override
@@ -258,6 +261,15 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get statusTaskConflicts => 'Conflicts';
+
+  @override
+  String get statusTaskRequest => 'Request';
+
+  @override
+  String get statusTaskSummary => 'Summary';
+
+  @override
+  String get statusTaskError => 'Error';
 
   @override
   String get statusTaskPhasePlanning => 'Planning';

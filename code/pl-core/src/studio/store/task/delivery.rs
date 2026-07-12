@@ -65,14 +65,20 @@ impl StudioStore {
         match matching_scopes.len() {
             0 => {}
             1 => {
-                return Ok(matching_scopes.pop().map(DeliveryScopeResolution::Resolved));
+                return Ok(matching_scopes
+                    .pop()
+                    .map(Box::new)
+                    .map(DeliveryScopeResolution::Resolved));
             }
             _ => bail!("ambiguous active delivery scope for executor worktree"),
         }
         match fallback_scopes.len() {
             0 => {}
             1 => {
-                return Ok(fallback_scopes.pop().map(DeliveryScopeResolution::Resolved));
+                return Ok(fallback_scopes
+                    .pop()
+                    .map(Box::new)
+                    .map(DeliveryScopeResolution::Resolved));
             }
             _ => bail!("ambiguous active delivery scope for executor worktree"),
         }
@@ -112,6 +118,7 @@ impl StudioStore {
             0 => Ok(None),
             1 => Ok(missing_work_units
                 .pop()
+                .map(Box::new)
                 .map(DeliveryScopeResolution::MissingWorkUnit)),
             _ => bail!("ambiguous active delivery scope for executor worktree"),
         }

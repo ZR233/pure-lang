@@ -7,8 +7,10 @@ use sea_orm::{
 use crate::studio::entities;
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
+#[cfg(test)]
+use crate::studio::task_coordinator::UpdateAgentOutcome;
 use crate::studio::task_coordinator::{
-    AgentOutcomeRecord, AgentOutcomeStatus, CreateAgentOutcome, TaskRunPhase, UpdateAgentOutcome,
+    AgentOutcomeRecord, AgentOutcomeStatus, CreateAgentOutcome, TaskRunPhase,
 };
 
 impl StudioStore {
@@ -89,6 +91,7 @@ impl StudioStore {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(crate) async fn create_agent_outcome(
         &self,
         input: CreateAgentOutcome,
@@ -119,6 +122,7 @@ impl StudioStore {
         )
     }
 
+    #[cfg(test)]
     pub(crate) async fn update_agent_outcome(
         &self,
         outcome_id: &str,

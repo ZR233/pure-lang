@@ -1,14 +1,18 @@
 use anyhow::{Context, Result};
-use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
-};
+#[cfg(test)]
+use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 
 use crate::studio::entities;
+#[cfg(test)]
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
-use crate::studio::task_coordinator::{CreateWorkUnit, WorkUnitRecord, WorkUnitStatus};
+#[cfg(test)]
+use crate::studio::task_coordinator::CreateWorkUnit;
+use crate::studio::task_coordinator::{WorkUnitRecord, WorkUnitStatus};
 
 impl StudioStore {
+    #[cfg(test)]
     pub(crate) async fn create_work_unit(&self, input: CreateWorkUnit) -> Result<WorkUnitRecord> {
         let now = unix_seconds();
         work_unit_record(
@@ -31,6 +35,7 @@ impl StudioStore {
         )
     }
 
+    #[cfg(test)]
     pub(crate) async fn update_work_unit(
         &self,
         work_unit_id: &str,

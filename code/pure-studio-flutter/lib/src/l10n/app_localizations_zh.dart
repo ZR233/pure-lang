@@ -229,6 +229,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get statusTaskWorkUnits => '工作单元';
 
   @override
+  String get statusTaskAgents => '代理';
+
+  @override
   String get statusTaskMerges => '合并与冲突';
 
   @override
@@ -245,6 +248,15 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get statusTaskConflicts => '冲突';
+
+  @override
+  String get statusTaskRequest => '调用请求';
+
+  @override
+  String get statusTaskSummary => '摘要';
+
+  @override
+  String get statusTaskError => '错误';
 
   @override
   String get statusTaskPhasePlanning => '规划中';
@@ -1245,6 +1257,9 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String get statusTaskWorkUnits => '工作单元';
 
   @override
+  String get statusTaskAgents => '代理';
+
+  @override
   String get statusTaskMerges => '合并与冲突';
 
   @override
@@ -1261,6 +1276,15 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get statusTaskConflicts => '冲突';
+
+  @override
+  String get statusTaskRequest => '调用请求';
+
+  @override
+  String get statusTaskSummary => '摘要';
+
+  @override
+  String get statusTaskError => '错误';
 
   @override
   String get statusTaskPhasePlanning => '规划中';

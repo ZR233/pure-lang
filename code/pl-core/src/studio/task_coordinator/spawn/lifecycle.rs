@@ -299,10 +299,12 @@ fn normalize_owned_paths(paths: &[String]) -> Result<Vec<String>> {
             bail!("ownedPaths entries must not overlap");
         }
     }
-    Ok(normalized
+    let mut canonical = normalized
         .into_iter()
         .map(OwnedPath::into_canonical)
-        .collect())
+        .collect::<Vec<_>>();
+    canonical.sort();
+    Ok(canonical)
 }
 
 fn spawn_error(error: impl Into<String>) -> PureError {

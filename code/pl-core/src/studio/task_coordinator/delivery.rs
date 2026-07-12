@@ -102,7 +102,7 @@ impl TaskCoordinator {
             .await?
             .context("active delivery scope not found for this executor worktree")?;
         let scope = match resolution {
-            DeliveryScopeResolution::Resolved(scope) => scope,
+            DeliveryScopeResolution::Resolved(scope) => *scope,
             DeliveryScopeResolution::MissingWorkUnit(outcome) => {
                 let error = anyhow!("executor outcome has no work unit");
                 self.store

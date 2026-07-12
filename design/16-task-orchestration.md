@@ -77,6 +77,8 @@ continuation。
 
 同一 Git common directory 与分支只允许一个写入任务。`BranchLease` 是进程内所有权，
 `expectedHead` CAS 和工作区清洁检查负责检测用户或外部进程的变化。
+任务进入 `blocked` 时必须在同一 SQLite 事务中更新 `TaskRun` 并删除 durable
+`BranchLease`，随后释放进程 lease；诊断事实保留，但不得永久阻塞同一分支的新任务。
 
 所有会改变任务分支的操作（设计提交、交付合并、冲突继续、完成和取消）共享同一
 branch mutation lock；该锁不与 scheduler 或 supervisor 锁嵌套。持锁后必须重新读取
@@ -92,6 +94,8 @@ directory、干净工作区及两条持久事实的 `expectedHead` 都与当前 
 事务写入；prepare 事务未提交时不留记录，随后 worktree 创建、持久化激活或 turn
 启动失败时删除 agent registry entry、worktree 与分支，并将 WorkUnit/Outcome
 事务性标记为 Failed，由 Outcome 保存错误供 planner 与重启恢复审计。
+同一工作单元的重试身份由排序后的规范 `ownedPaths` 集合确定，不依赖 planner 可改写的
+标题；同一任务内该身份最多分配三次。
 
 ## Executor 交付
 
@@ -197,6 +201,9 @@ planner 只能修改冲突清单中的文件。continue 前必须没有 unmerged
 
 用户确认实施后，planner 先调用 `task_update_design` 修改并提交 `design/**`；成功前
 不得创建 executor。任务取消或部分失败时，design 必须回退或更新到与当前实现一致。
+处理“实施”确认时必须先完成 plan、session、repository 与 branch lease 校验并创建
+`TaskRun`，再把 confirmation 标为 resolved 和写入 accepted/implementing lifecycle；
+创建失败时原 confirmation 保持 pending，不得留下虚假的 implementing 状态。
 该工具只对 Task 根 planner 可见，先完整解析并验证 patch 的所有 source 和 move
 destination 都是规范、非 ignored、且不会经 symlink 逃逸的 workspace-relative
 `design/**` 路径，再进行首次写入。应用与提交是 all-or-nothing：失败时精确恢复所有
@@ -237,10 +244,9 @@ run、保留残留现场并报告诊断，不能把它当作普通工具失败�
 `REVERT_HEAD`、index 和 worktree 现场。成功 commit 使用同一 exact-commit 证明与 post-commit
 补偿规则。安全补偿必须再次证明 workspace root、git common dir、named branch、clean 状态
 和 exact HEAD 全部仍属于该 run；即使 HEAD 相同，切换到另一分支也禁止 reset/restore。
-内部 API 允许未来
-`task_stop` 显式持有 branch mutation guard，在同一锁作用域内完成 revert、durable HEAD
-推进和 terminalization；executor allocation 也需经过该锁，因此不会在 revert 与终态
-写入之间基于仍可分配的 phase 创建 work unit。
+`task_stop` 按 branch mutation、allocation 的固定顺序取得两把 guard，并在同一锁作用域内
+完成预检、代理收束、revert、durable HEAD 推进和 terminalization；executor allocation
+也经过相同锁顺序，因此不会在停止窗口基于仍可分配的 phase 创建 work unit。
 显式传入的 branch mutation guard 必须绑定创建它的 coordinator；其他 coordinator 的
 guard 不得授权 locked mutation API。
 

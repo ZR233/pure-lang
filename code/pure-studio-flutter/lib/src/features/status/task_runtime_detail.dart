@@ -34,6 +34,15 @@ class TaskRuntimeDetail extends StatelessWidget {
             ),
           ],
         ),
+        if (task.agents.isNotEmpty) ...[
+          const _SectionDivider(),
+          StatusDetailPanel(
+            title: context.l10n.statusTaskAgents,
+            children: [
+              for (final agent in task.agents) _AgentDetail(agent: agent),
+            ],
+          ),
+        ],
         if (task.workUnits.isNotEmpty) ...[
           const _SectionDivider(),
           StatusDetailPanel(
@@ -63,6 +72,53 @@ class TaskRuntimeDetail extends StatelessWidget {
           ),
         ],
       ],
+    );
+  }
+}
+
+class _AgentDetail extends StatelessWidget {
+  const _AgentDetail({required this.agent});
+
+  final TaskAgentOutcomeView agent;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 9),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _ItemHeading(
+            title: '${agent.role} · ${agent.agentId}',
+            status: context.taskStatusLabel(agent.status),
+          ),
+          StatusDetailRow(
+            label: context.l10n.statusTaskSource,
+            value: agent.initiatedBy,
+          ),
+          StatusDetailRow(
+            label: context.l10n.statusTaskRequest,
+            value: agent.requestedByCallId,
+          ),
+          if (agent.summary case final summary?)
+            StatusDetailRow(
+              label: context.l10n.statusTaskSummary,
+              value: summary,
+              valueMaxLines: 3,
+            ),
+          if (agent.error case final error?)
+            StatusDetailRow(
+              label: context.l10n.statusTaskError,
+              value: error,
+              valueMaxLines: 3,
+            ),
+          if (agent.headCommit case final commit?)
+            StatusDetailRow(
+              label: context.l10n.statusTaskCommit,
+              value: _shortCommit(commit),
+            ),
+        ],
+      ),
     );
   }
 }

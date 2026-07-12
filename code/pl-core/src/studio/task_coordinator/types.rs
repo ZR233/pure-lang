@@ -432,8 +432,8 @@ pub(crate) struct DeliveryScope {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum DeliveryScopeResolution {
-    Resolved(DeliveryScope),
-    MissingWorkUnit(AgentOutcomeRecord),
+    Resolved(Box<DeliveryScope>),
+    MissingWorkUnit(Box<AgentOutcomeRecord>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -625,6 +625,7 @@ pub(crate) struct ReviewRoundRecord {
     pub(crate) updated_at: i64,
 }
 
+#[cfg(test)]
 pub(crate) struct CreateWorkUnit {
     pub(crate) task_run_id: String,
     pub(crate) title: String,
@@ -662,6 +663,7 @@ pub(crate) struct ExecutorAllocation {
     pub(crate) outcome: AgentOutcomeRecord,
 }
 
+#[cfg(test)]
 pub(crate) struct CreateMergeRecord {
     pub(crate) task_run_id: String,
     pub(crate) agent_id: String,
@@ -670,6 +672,7 @@ pub(crate) struct CreateMergeRecord {
     pub(crate) conflict_files: Vec<String>,
 }
 
+#[cfg(test)]
 pub(crate) struct UpdateAgentOutcome {
     pub(crate) status: AgentOutcomeStatus,
     pub(crate) summary: Option<String>,
@@ -678,6 +681,7 @@ pub(crate) struct UpdateAgentOutcome {
     pub(crate) review: Option<AgentReview>,
 }
 
+#[cfg(test)]
 pub(crate) struct UpdateMergeRecord {
     pub(crate) status: MergeStatus,
     pub(crate) resolution_summary: Option<String>,
@@ -685,6 +689,7 @@ pub(crate) struct UpdateMergeRecord {
     pub(crate) attempt: u32,
 }
 
+#[cfg(test)]
 pub(crate) struct CreateReviewRound {
     pub(crate) task_run_id: String,
     pub(crate) round: u32,
@@ -692,6 +697,7 @@ pub(crate) struct CreateReviewRound {
     pub(crate) reviewer_agent_id: Option<String>,
 }
 
+#[cfg(test)]
 pub(crate) struct CompleteReviewRound {
     pub(crate) verdict: ReviewVerdict,
     pub(crate) summary: String,

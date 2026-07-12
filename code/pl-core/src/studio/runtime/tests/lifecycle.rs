@@ -2,6 +2,97 @@ use super::*;
 use pretty_assertions::assert_eq;
 
 #[tokio::test]
+async fn failed_task_preflight_keeps_plan_confirmation_pending() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let repository = std::env::temp_dir().join(format!("pure-plan-preflight-{unique}"));
+    std::fs::create_dir_all(&repository).unwrap();
+    for args in [
+        vec!["init", "-b", "main"],
+        vec!["config", "user.email", "pure@example.com"],
+        vec!["config", "user.name", "Pure Tests"],
+    ] {
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&repository)
+            .args(args)
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+    std::fs::write(repository.join("README.md"), "initial\n").unwrap();
+    for args in [vec!["add", "README.md"], vec!["commit", "-m", "initial"]] {
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&repository)
+            .args(args)
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+    std::fs::write(repository.join("dirty.txt"), "dirty\n").unwrap();
+
+    let store = StudioStore::open_memory().await.unwrap();
+    let project = store.upsert_project(&repository).await.unwrap();
+    let session = store
+        .create_session(&project.id, "Task", CompileMode::Task)
+        .await
+        .unwrap();
+    let interaction = pending_interaction(
+        "plan-confirm-dirty",
+        &session.id,
+        InteractionKind::PlanConfirmation,
+        InteractionPayload::PlanConfirmation {
+            plan_id: "plan-dirty".to_string(),
+            content: "Implement the plan".to_string(),
+        },
+    );
+    store.upsert_interaction(&interaction).await.unwrap();
+    let home = std::env::temp_dir().join(format!("pure-plan-preflight-home-{unique}"));
+    let runtime = StudioRuntime::with_runtime_state(
+        store.clone(),
+        ConfigStore::new(crate::config::ConfigPaths::from_home(&home)),
+        StudioRuntimeState::new(),
+    );
+
+    runtime
+        .resolve_interaction(
+            interaction.interaction_id.clone(),
+            pl_protocol::InteractionResolution::PlanConfirmation {
+                decision: pl_protocol::PlanConfirmationResolution::ImplementFreshContext,
+                content: None,
+                reason: None,
+            },
+        )
+        .await
+        .expect_err("dirty repository must fail before resolving confirmation");
+
+    let stored = store
+        .read_interaction(&interaction.interaction_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored.status, InteractionStatus::Pending);
+    assert!(store.list_active_task_runs().await.unwrap().is_empty());
+    let events = store
+        .load_studio_events(&session.id, None, None)
+        .await
+        .unwrap();
+    assert!(!events.iter().any(|event| matches!(
+        &event.kind,
+        StudioEventKind::PlanLifecycleChanged { event }
+            if matches!(
+                event.state,
+                PlanLifecycleState::Accepted | PlanLifecycleState::Implementing
+            )
+    )));
+    let _ = std::fs::remove_dir_all(repository);
+    let _ = std::fs::remove_dir_all(home);
+}
+
+#[tokio::test]
 async fn initialize_runtime_cancels_recovered_transient_interactions() {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project("C:/work/recovered").await.unwrap();

@@ -62,9 +62,10 @@ impl StudioStore {
                 bail!("ownedPaths overlap active work unit {}", unit.id);
             }
         }
+        let owned_paths_json = serde_json::to_string(&input.owned_paths)?;
         let attempt = existing
             .iter()
-            .filter(|unit| unit.title == input.title)
+            .filter(|unit| unit.owned_paths_json == owned_paths_json)
             .map(|unit| unit.attempt.max(0) as u32)
             .max()
             .unwrap_or(0)
@@ -91,7 +92,7 @@ impl StudioStore {
                 task_run_id: Set(run.id.clone()),
                 title: Set(input.title),
                 status: Set(WorkUnitStatus::Pending.as_str().to_string()),
-                owned_paths_json: Set(serde_json::to_string(&input.owned_paths)?),
+                owned_paths_json: Set(owned_paths_json),
                 base_commit: Set(run.expected_head.clone()),
                 worktree_path: Set(worktree_path),
                 branch: Set(branch),

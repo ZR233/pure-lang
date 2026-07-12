@@ -75,6 +75,52 @@ async fn design_patch_commits_and_atomically_opens_executor_gate() {
 }
 
 #[tokio::test]
+async fn executor_retry_limit_uses_owned_paths_instead_of_mutable_title() {
+    let fixture = DesignFixture::new("stable-retry-identity").await;
+    fixture.update(DESIGN_PATCH).await.unwrap();
+
+    for attempt in 1..=3 {
+        let agent_id = format!("agent-retry-{attempt}");
+        let allocation = fixture
+            .store
+            .allocate_executor(AllocateExecutor {
+                session_id: fixture.session_id.clone(),
+                title: format!("renamed work unit {attempt}"),
+                owned_paths: vec!["src/shared.rs".to_string()],
+                agent_id: agent_id.clone(),
+                owner_path: "/root".to_string(),
+                requested_by_call_id: format!("call-retry-{attempt}"),
+            })
+            .await
+            .unwrap();
+        assert_eq!(allocation.work_unit.attempt, attempt);
+        fixture
+            .store
+            .fail_executor(&allocation.work_unit.id, &agent_id, "retry")
+            .await
+            .unwrap();
+    }
+
+    let result = fixture
+        .store
+        .allocate_executor(AllocateExecutor {
+            session_id: fixture.session_id.clone(),
+            title: "another renamed work unit".to_string(),
+            owned_paths: vec!["src/shared.rs".to_string()],
+            agent_id: "agent-retry-4".to_string(),
+            owner_path: "/root".to_string(),
+            requested_by_call_id: "call-retry-4".to_string(),
+        })
+        .await;
+    let error = match result {
+        Ok(_) => panic!("renaming a work unit must not reset its retry budget"),
+        Err(error) => error,
+    };
+    assert!(error.to_string().contains("attempt must be within 1..=3"));
+    fixture.cleanup().await;
+}
+
+#[tokio::test]
 async fn root_tool_uses_captured_studio_session_instead_of_turn_id() {
     let fixture = DesignFixture::new("captured-session").await;
     let tool = fixture
@@ -874,11 +920,10 @@ async fn durable_revert_cas_then_dirty_workspace_blocks_with_advanced_heads() {
         .store
         .read_branch_lease(&fixture.run.id)
         .await
-        .unwrap()
         .unwrap();
     assert_eq!(run.phase, TaskRunPhase::Blocked);
     assert_eq!(run.expected_head, durable_revert_head);
-    assert_eq!(lease.expected_head, durable_revert_head);
+    assert!(lease.is_none());
     assert_eq!(
         std::fs::read_to_string(fixture.repository.join("external.rs")).unwrap(),
         "external-dirty\n"
@@ -1305,7 +1350,6 @@ async fn assert_durable_design_final_scope_failure(name: &str, drift: FinalScope
         .store
         .read_branch_lease(&fixture.run.id)
         .await
-        .unwrap()
         .unwrap();
     assert_eq!(run.phase, TaskRunPhase::Blocked);
     assert_eq!(run.expected_head, durable_design_head);
@@ -1313,7 +1357,7 @@ async fn assert_durable_design_final_scope_failure(name: &str, drift: FinalScope
         run.design_commit.as_deref(),
         Some(durable_design_head.as_str())
     );
-    assert_eq!(lease.expected_head, durable_design_head);
+    assert!(lease.is_none());
     assert_eq!(fixture.head(), external_head);
     match drift {
         FinalScopeDrift::Commit => assert_ne!(external_head, durable_design_head),
