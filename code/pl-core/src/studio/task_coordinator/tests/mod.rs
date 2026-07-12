@@ -8,7 +8,10 @@ use super::merge::{
     MergeVerificationCommand, MergeVerifier, select_merge_verification_commands,
 };
 use super::*;
-use crate::tool::{SubagentContext, Tool, ToolContext, ToolInput, ToolRegistry, WorkspaceAccess};
+use crate::tool::{
+    SubagentContext, Tool, ToolContext, ToolInput, ToolRegistry, WorkspaceAccess,
+    strict_tool_input_schema,
+};
 use crate::{
     AgentKernel, AgentKernelToolRequest, AgentRunSpec, AgentSpawnInput, AgentSupervisor,
     CompileMode, CoreAgentProfile, CoreSession, PureCoreBuilder, StudioStore, ToolEffect,
@@ -318,6 +321,161 @@ async fn review_exit_requires_real_design_trace_and_persists_matching_pass() {
     assert_eq!(
         outcomes[0].review.as_ref().unwrap().verdict,
         ReviewVerdict::Pass
+    );
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn task_terminal_tools_are_typed_branch_control_and_planner_only() {
+    let coordinator = Arc::new(TaskCoordinator::new(
+        StudioStore::open_memory().await.unwrap(),
+    ));
+    let complete = coordinator.task_complete_tool("studio-session");
+    let stop = coordinator.task_stop_tool("studio-session");
+    assert_eq!(complete.effect(), Some(ToolEffect::BranchControl));
+    assert_eq!(complete.input_schema(), strict_tool_input_schema([]));
+    assert_eq!(stop.effect(), Some(ToolEffect::BranchControl));
+    assert_eq!(
+        stop.input_schema(),
+        strict_tool_input_schema([crate::tool::ToolInputSchemaField::required(
+            "reason",
+            serde_json::json!({"type":"string"}),
+        )])
+    );
+
+    let mut registry = ToolRegistry::new();
+    registry.register(complete);
+    registry.register(stop);
+    assert_eq!(
+        registry
+            .schemas_for_profile(TurnExecutionProfile::root(CompileMode::Task))
+            .len(),
+        2
+    );
+    for profile in [
+        TurnExecutionProfile::root(CompileMode::Simple),
+        TurnExecutionProfile::for_subagent(CompileMode::Task, "executor"),
+        TurnExecutionProfile::for_subagent(CompileMode::Task, "explorer"),
+        TurnExecutionProfile::for_subagent(CompileMode::Task, "reviewer"),
+    ] {
+        assert!(registry.schemas_for_profile(profile).is_empty());
+    }
+}
+
+#[tokio::test]
+async fn completion_requires_current_design_and_pass_then_atomically_releases_lease() {
+    let fixture = ReviewFixture::new("task-completion-gate").await;
+    let run = fixture
+        .store
+        .read_task_run(&fixture.run_id)
+        .await
+        .unwrap()
+        .unwrap();
+    let error = fixture
+        .store
+        .complete_reviewed_task(&fixture.session_id, &run.expected_head, "verified")
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("reviewing task run"));
+    fixture
+        .store
+        .advance_task_design_head(&run.id, &run.expected_head, &run.expected_head)
+        .await
+        .unwrap();
+    fixture
+        .store
+        .begin_task_review(&fixture.session_id, "call-complete-review")
+        .await
+        .unwrap();
+    let (_, outcome) = fixture
+        .store
+        .authorize_reviewer_spawn(
+            &fixture.session_id,
+            "call-complete-review",
+            "agent-complete-review",
+        )
+        .await
+        .unwrap();
+    fixture
+        .store
+        .update_spawned_outcome(
+            &outcome.id,
+            "agent-complete-review",
+            AgentOutcomeStatus::Running,
+            None,
+        )
+        .await
+        .unwrap();
+    fixture
+        .store
+        .complete_task_review(
+            &fixture.session_id,
+            "agent-complete-review",
+            AgentReview {
+                verdict: ReviewVerdict::Pass,
+                summary: "pass".to_string(),
+                design_references: vec![ReviewDesignReference {
+                    path: "design/guide.md".to_string(),
+                    section: "Review design".to_string(),
+                }],
+                findings: Vec::new(),
+            },
+        )
+        .await
+        .unwrap();
+
+    let completed = fixture
+        .store
+        .complete_reviewed_task(&fixture.session_id, &run.expected_head, "verified")
+        .await
+        .unwrap();
+
+    assert_eq!(completed.phase, TaskRunPhase::Completed);
+    assert_eq!(completed.status_message.as_deref(), Some("verified"));
+    assert!(
+        fixture
+            .store
+            .read_branch_lease(&fixture.run_id)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn task_stop_settles_transient_agents_and_atomically_releases_lease() {
+    let fixture = ReviewFixture::new("task-stop-terminalization").await;
+    let run = fixture
+        .store
+        .read_task_run(&fixture.run_id)
+        .await
+        .unwrap()
+        .unwrap();
+
+    fixture
+        .store
+        .settle_agents_for_task_stop(&run.id, "user stopped task")
+        .await
+        .unwrap();
+    let cancelled = fixture
+        .store
+        .cancel_task_and_release_lease(&run.id, &run.expected_head, "user stopped task")
+        .await
+        .unwrap();
+
+    assert_eq!(cancelled.phase, TaskRunPhase::Cancelled);
+    assert_eq!(
+        cancelled.status_message.as_deref(),
+        Some("user stopped task")
+    );
+    assert!(
+        fixture
+            .store
+            .read_branch_lease(&fixture.run_id)
+            .await
+            .unwrap()
+            .is_none()
     );
     fixture.cleanup();
 }

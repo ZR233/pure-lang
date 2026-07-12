@@ -264,3 +264,15 @@ executor；修复合并后必须创建新的 reviewer。最多三轮审查修复
 
 只有 design 一致、所有交付已处理、当前分支干净、最新 reviewer 对当前 HEAD 返回
 `pass` 且验证通过时，planner 才能调用 `task_complete`。
+
+`task_complete` 在共享 branch mutation lock 内重新校验 TaskRun、BranchLease、named
+branch、clean workspace 与 exact HEAD；最新 review 必须针对该 HEAD 返回 `pass`，所有
+work unit、outcome 和 merge 都必须已收束。存在已接受 source merge 时，最后一次
+`task_update_design` 必须已经把 `designCommit` 推进到当前 HEAD。runtime 按任务综合变更
+运行必要的最终检查后，以单事务写入 `completed` 并删除 BranchLease，再释放进程 lease。
+
+`task_stop` 先终止并等待当前任务的内存代理，将未完成的 durable agent/work unit 收束为
+`cancelled`，再进入 branch mutation lock。尚无 source merge 时，如已接受 design commit，
+必须先创建受控 revert commit；已有 source merge 时，必须先由 planner 更新 design 到当前
+实现。存在尚未安全 abort 的 merge/conflict 时停止操作拒绝终态写入，保留现场供 planner
+使用冲突工具处理。取消终态与 BranchLease 删除同样在一个事务中完成。

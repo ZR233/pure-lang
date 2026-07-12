@@ -28,10 +28,10 @@ use serde::Deserialize;
 pub(super) use barriers::MergeFailureTestPoint;
 #[cfg(test)]
 pub(crate) use cleanup::MergeCleanupTestBarrier;
-pub(crate) use verifier::MergeVerifier;
-use verifier::ProductionMergeVerifier;
 #[cfg(test)]
-pub(crate) use verifier::{MergeVerificationCommand, select_merge_verification_commands};
+pub(crate) use verifier::MergeVerificationCommand;
+pub(crate) use verifier::MergeVerifier;
+pub(crate) use verifier::{ProductionMergeVerifier, select_merge_verification_commands};
 
 #[cfg(test)]
 pub(crate) use self::accept::MergeCommitTestBarrier;
