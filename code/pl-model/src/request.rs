@@ -192,6 +192,17 @@ pub struct ToolCall {
 }
 
 impl ToolCall {
+    /// Returns the stable identity used to correlate a tool call across provider APIs.
+    ///
+    /// Responses providers expose a dedicated `call_id`; Chat Completions providers
+    /// may only expose the tool item id. Empty provider ids are treated as missing.
+    pub fn stable_call_id(&self) -> &str {
+        self.call_id
+            .as_deref()
+            .filter(|call_id| !call_id.is_empty())
+            .unwrap_or(&self.id)
+    }
+
     pub fn function(
         id: impl Into<String>,
         name: impl Into<String>,
@@ -252,6 +263,32 @@ impl ToolCall {
                 serde_json::to_string(arguments).unwrap_or_default()
             }
             ToolCallPayload::Custom { input } => input.clone(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tool_call_tests {
+    use super::ToolCall;
+
+    #[test]
+    fn stable_call_id_prefers_provider_call_id() {
+        let call = ToolCall::function(
+            "item-1",
+            "read_file",
+            serde_json::json!({}),
+            Some("call-1".to_string()),
+        );
+
+        assert_eq!(call.stable_call_id(), "call-1");
+    }
+
+    #[test]
+    fn stable_call_id_falls_back_to_item_id() {
+        for call_id in [None, Some(String::new())] {
+            let call = ToolCall::function("item-1", "read_file", serde_json::json!({}), call_id);
+
+            assert_eq!(call.stable_call_id(), "item-1");
         }
     }
 }

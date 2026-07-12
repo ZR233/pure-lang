@@ -129,24 +129,30 @@ impl AgentSupervisor {
     ) -> Result<AgentRecord, PureError> {
         let agent_id = self.resolve_agent(current_path, target).await?;
         if let Some(hook) = self.lifecycle_hook() {
-            let record =
-                self.record(&agent_id)
-                    .await
-                    .ok_or_else(|| PureError::ToolExecutionFailed {
-                        tool: "close_agent".to_string(),
-                        error: format!("target agent not found: {target}"),
+            let (record, lifecycle_token) =
+                {
+                    let state = self.state.lock().await;
+                    let entry = state.agents.get(&agent_id).ok_or_else(|| {
+                        PureError::ToolExecutionFailed {
+                            tool: "close_agent".to_string(),
+                            error: format!("target agent not found: {target}"),
+                        }
                     })?;
+                    (entry.record.clone(), entry.lifecycle_token.clone())
+                };
             let disposition_kind = match &disposition {
                 CloseDisposition::Merge { .. } => AgentCloseDispositionKind::Merge,
                 CloseDisposition::Discard => AgentCloseDispositionKind::Discard,
             };
-            hook.validate_close(&AgentCloseLifecycleRequest {
+            let request = AgentCloseLifecycleRequest {
                 agent_id: record.id,
                 agent_path: record.path,
                 role: record.role,
+                lifecycle_token,
                 disposition: disposition_kind,
-            })
-            .await?;
+            };
+            hook.validate_close(&request).await?;
+            hook.commit_close(&request).await?;
         }
         let (record, mut shutdown) = {
             let mut state = self.state.lock().await;

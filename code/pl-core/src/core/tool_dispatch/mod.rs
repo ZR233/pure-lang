@@ -216,7 +216,7 @@ pub(super) async fn execute_tool_calls(
             workspace_root: context.workspace_root.to_path_buf(),
             workspace_instructions: context.workspace_instructions.clone(),
             instruction_snapshot: context.instruction_snapshot.clone(),
-            provider_call_id: tool_call.call_id.clone(),
+            provider_call_id: Some(tool_call.stable_call_id().to_string()),
             active_subagent: context.active_subagent.clone(),
             agent_supervisor: context.agent_supervisor.clone(),
             agent_tool_registrar: context.agent_tool_registrar.clone(),

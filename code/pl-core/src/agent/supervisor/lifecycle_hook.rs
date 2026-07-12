@@ -78,6 +78,7 @@ pub struct AgentCloseLifecycleRequest {
     pub agent_id: String,
     pub agent_path: String,
     pub role: String,
+    pub lifecycle_token: Option<String>,
     pub disposition: AgentCloseDispositionKind,
 }
 
@@ -146,6 +147,17 @@ pub trait AgentLifecycleHook: std::fmt::Debug + Send + Sync {
         &'a self,
         request: &'a AgentCloseLifecycleRequest,
     ) -> Pin<Box<dyn std::future::Future<Output = Result<(), PureError>> + Send + 'a>>;
+
+    /// Persists the host disposition before the supervisor releases agent resources.
+    ///
+    /// Implementations must be idempotent. Returning an error leaves the in-memory
+    /// agent and its worktree untouched so the caller can retry safely.
+    fn commit_close<'a>(
+        &'a self,
+        _request: &'a AgentCloseLifecycleRequest,
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<(), PureError>> + Send + 'a>> {
+        Box::pin(async { Ok(()) })
+    }
 
     fn project_snapshot<'a>(
         &'a self,

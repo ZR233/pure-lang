@@ -4,6 +4,7 @@ use sea_orm::{
 };
 
 use super::{merge_record, parse_required_evidence};
+use crate::agent::worktree::same_worktree_path;
 use crate::studio::entities;
 use crate::studio::ids::unix_seconds;
 use crate::studio::store::StudioStore;
@@ -189,7 +190,7 @@ async fn complete_conflict_merge_transaction(
         || outcome.status != AgentOutcomeStatus::Completed.as_str()
         || delivery.head_commit != merge.source_commit
         || evidence.delivery_head != merge.source_commit
-        || delivery.worktree.path != work_unit.worktree_path
+        || !same_worktree_path(&delivery.worktree.path, &work_unit.worktree_path)
         || delivery.worktree.branch != work_unit.branch
         || delivery.base_commit != work_unit.base_commit
         || delivery.changed_files != evidence.changed_files

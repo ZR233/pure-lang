@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use anyhow::{Context, Result, bail};
 use tokio::sync::MutexGuard;
 
-use super::git::{RepositorySnapshot, inspect_repository};
+use super::git::{RepositorySnapshot, inspect_repository, prepare_repository_for_task};
 use super::{CreateTaskRun, TaskRunPhase, TaskRunRecord, TaskWorktreeOwnerSnapshot};
 use crate::studio::ids::new_id;
 use crate::studio::store::StudioStore;
@@ -138,7 +138,7 @@ impl TaskCoordinator {
         if plan.trim().is_empty() {
             bail!("task plan must not be empty");
         }
-        let snapshot = inspect_repository(repository, true).await?;
+        let snapshot = prepare_repository_for_task(repository).await?;
         let key = BranchKey::new(&snapshot.git_common_dir, &snapshot.branch);
         let owner_token = new_id("task-owner");
         acquire_process_lease(&key, &owner_token)?;

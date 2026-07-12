@@ -47,7 +47,8 @@ impl StudioStore {
                 bail!("task review exceeded the three-round limit");
             }
             if rounds.iter().any(|round| {
-                round.head_commit == run.expected_head
+                (round.head_commit == run.expected_head
+                    && round.status != ReviewVerdict::Failed.as_str())
                     || round.status == ReviewVerdict::Pending.as_str()
             }) {
                 bail!("current HEAD is already reviewed or has a pending review");

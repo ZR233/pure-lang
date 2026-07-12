@@ -22,5 +22,24 @@ pub(crate) use reconcile::{
     DurableWorktreeDisposition, DurableWorktreePresence, DurableWorktreeResource,
     WorktreeReconciliation, reconcile_task_worktree_group,
 };
+
+/// Compares worktree paths using filesystem identity where available and
+/// platform path semantics otherwise.
+pub(crate) fn same_worktree_path(
+    left: impl AsRef<std::path::Path>,
+    right: impl AsRef<std::path::Path>,
+) -> bool {
+    fn key(path: &std::path::Path) -> String {
+        let path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        let value = path.to_string_lossy().replace('\\', "/");
+        if cfg!(windows) {
+            value.to_lowercase()
+        } else {
+            value
+        }
+    }
+
+    key(left.as_ref()) == key(right.as_ref())
+}
 #[cfg(test)]
 pub(crate) use reconcile::{reconcile_task_worktrees, set_after_registration_remove_barrier};

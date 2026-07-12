@@ -40,7 +40,7 @@ impl AgentSupervisor {
         } else {
             None
         };
-        let (record, followup_messages) = {
+        let (record, followup_messages, followup_workspace) = {
             let mut state = self.state.lock().await;
             let entry =
                 state
@@ -55,6 +55,19 @@ impl AgentSupervisor {
                 return Err(PureError::ToolExecutionFailed {
                     tool: "send_input".to_string(),
                     error: "tasks cannot be assigned to the root agent".to_string(),
+                });
+            }
+            if mode == AgentMessageMode::TriggerTurn
+                && entry.record.role == "executor"
+                && entry.lifecycle_token.is_some()
+                && entry.worktree.is_none()
+            {
+                return Err(PureError::ToolExecutionFailed {
+                    tool: "send_input".to_string(),
+                    error: format!(
+                        "target executor {} has no assigned worktree",
+                        entry.record.path
+                    ),
                 });
             }
             if entry.record.status.is_final() {
@@ -101,9 +114,18 @@ impl AgentSupervisor {
                 }
                 Vec::new()
             };
+            let followup_workspace = mode
+                .trigger_turn()
+                .then(|| {
+                    entry
+                        .worktree
+                        .as_ref()
+                        .map(|worktree| worktree.path.clone())
+                })
+                .flatten();
             let record = entry.record.clone();
             state.mark_activity();
-            (record, followup_messages)
+            (record, followup_messages, followup_workspace)
         };
         self.notify_activity();
 
@@ -111,6 +133,9 @@ impl AgentSupervisor {
             let mut run_spec = trigger_run_spec
                 .take()
                 .expect("trigger run spec is reserved");
+            if let Some(workspace_root) = followup_workspace {
+                run_spec.workspace_root = workspace_root;
+            }
             let followup_message = followup_prompt(followup_messages);
             run_spec.message = followup_message.clone();
             run_spec.call_id = call_id.clone();

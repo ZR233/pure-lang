@@ -13,6 +13,7 @@ use sea_orm::{
 use super::outcome::agent_outcome_record;
 use super::work_unit::work_unit_record;
 use super::{branch_lease_record, task_run_record};
+use crate::agent::worktree::same_worktree_path;
 use crate::studio::entities;
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
@@ -117,7 +118,7 @@ impl StudioStore {
                 .map(serde_json::from_str)
                 .transpose()?
                 .context("completed executor outcome has no delivery")?;
-            if delivery.worktree.path != work_unit_model.worktree_path
+            if !same_worktree_path(&delivery.worktree.path, &work_unit_model.worktree_path)
                 || delivery.worktree.branch != work_unit_model.branch
                 || delivery.base_commit != work_unit_model.base_commit
                 || delivery.changed_files != input.changed_files
