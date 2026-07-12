@@ -176,6 +176,11 @@ workspace 检查误判为外部漂移。`MergeRecord.verification_json` 承载�
 包含来源 phase、prestate、delivery identity、验证、commit、冲突 manifest、补偿与 cleanup
 状态；保持现有六张 coordinator 表，不为 transient tool trace 新增协议或数据表。
 
+每次 merge durable 接受后记录一次尚未消费的完成通知。当前 planner turn 移除时，runtime
+在事务中 claim 同一任务尚未通知的全部成功 merge，并将其合并为一次 `MergeCompleted`
+continuation；重复扫描不得再次续跑。这样 planner 可以逐个接受 executor，同时不会因同一
+turn 内连续完成多个 merge 而产生重复协调 turn。
+
 冲突时持久化 `MergeRecord`，暂停其他 merge，由 planner 使用以下受限工具亲自解决：
 
 - `merge_list_conflicts`

@@ -4,6 +4,7 @@ mod cleanup;
 mod conflict;
 mod conflict_index;
 mod conflict_status;
+pub(crate) mod conflict_tools;
 mod failure;
 mod git;
 mod output;

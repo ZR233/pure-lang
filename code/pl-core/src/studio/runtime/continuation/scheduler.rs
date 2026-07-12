@@ -9,6 +9,7 @@ use crate::studio::ids::new_id;
 pub(crate) enum ContinuationReason {
     AgentTerminal,
     MergeConflict,
+    MergeCompleted,
     ReviewReturned,
     Recovery,
 }

@@ -1918,6 +1918,252 @@ async fn text_conflict_persists_stage_manifest_keeps_merge_state_and_queues_once
 }
 
 #[tokio::test]
+async fn planner_conflict_tools_resolve_verify_continue_and_cleanup_delivery() {
+    let fixture = ConflictMergeFixture::text("merge-conflict-tools-complete").await;
+    let (event_tx, _) = tokio::sync::broadcast::channel(16);
+    let output = fixture
+        .coordinator
+        .merge_agent_with_verifier(
+            &fixture.session_id,
+            &fixture.agent_id,
+            &fixture.expected_head,
+            &AgentSupervisor::default(),
+            &event_tx,
+            "call-conflict-tools-complete",
+            &PassingMergeVerifier,
+        )
+        .await
+        .unwrap();
+
+    let conflicts = fixture
+        .coordinator
+        .list_active_conflicts(&fixture.session_id, &output.merge_id)
+        .await
+        .unwrap();
+    assert_eq!(conflicts.len(), 1);
+    assert!(!conflicts[0].resolved);
+    let read = fixture
+        .coordinator
+        .read_active_conflict(&fixture.session_id, &output.merge_id, "src/shared.txt")
+        .await
+        .unwrap();
+    assert_eq!(read.base.content.as_deref(), Some("base\n"));
+    assert_eq!(read.ours.content.as_deref(), Some("planner branch\n"));
+    assert_eq!(read.theirs.content.as_deref(), Some("executor\n"));
+
+    let resolved = fixture
+        .coordinator
+        .resolve_active_conflict(
+            &fixture.session_id,
+            &output.merge_id,
+            "src/shared.txt",
+            super::merge::conflict_tools::ConflictResolutionChoice::Ours,
+        )
+        .await
+        .unwrap();
+    assert!(resolved.unresolved_paths.is_empty());
+    let verification = fixture
+        .coordinator
+        .verify_active_conflict(&fixture.session_id, &output.merge_id)
+        .await
+        .unwrap();
+    assert!(verification.success);
+    assert_eq!(verification.attempt, 1);
+
+    let completed = fixture
+        .coordinator
+        .continue_active_conflict(
+            &fixture.session_id,
+            &output.merge_id,
+            "kept the planner branch content",
+            &AgentSupervisor::default(),
+            &event_tx,
+            "call-conflict-continue",
+        )
+        .await
+        .unwrap();
+    assert_eq!(completed.status, MergeStatus::Merged);
+    let durable_run = fixture
+        .store
+        .read_task_run(&fixture.task_run_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(durable_run.phase, TaskRunPhase::Implementing);
+    assert_eq!(durable_run.expected_head, completed.new_head.unwrap());
+    assert!(!fixture.worktree.exists());
+    assert_eq!(
+        fixture
+            .store
+            .claim_merge_completion_continuation(&fixture.session_id)
+            .await
+            .unwrap(),
+        Some(fixture.task_run_id.clone())
+    );
+    assert_eq!(
+        fixture
+            .store
+            .claim_merge_completion_continuation(&fixture.session_id)
+            .await
+            .unwrap(),
+        None
+    );
+    fixture.cleanup_conflict();
+}
+
+#[tokio::test]
+async fn third_conflict_verification_failure_aborts_restores_and_blocks() {
+    let fixture = ConflictMergeFixture::text("merge-conflict-tools-three-failures").await;
+    let (event_tx, _) = tokio::sync::broadcast::channel(16);
+    let output = fixture
+        .coordinator
+        .merge_agent_with_verifier(
+            &fixture.session_id,
+            &fixture.agent_id,
+            &fixture.expected_head,
+            &AgentSupervisor::default(),
+            &event_tx,
+            "call-conflict-tools-three-failures",
+            &PassingMergeVerifier,
+        )
+        .await
+        .unwrap();
+
+    for attempt in 1..=3 {
+        let verification = fixture
+            .coordinator
+            .verify_active_conflict(&fixture.session_id, &output.merge_id)
+            .await
+            .unwrap();
+        assert!(!verification.success);
+        assert_eq!(verification.attempt, attempt);
+        assert_eq!(verification.aborted, attempt == 3);
+    }
+    let run = fixture
+        .store
+        .read_task_run(&fixture.task_run_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(run.phase, TaskRunPhase::Blocked);
+    assert_eq!(
+        git_output(&fixture.repository, &["rev-parse", "HEAD"]),
+        fixture.expected_head
+    );
+    assert!(
+        git_output(
+            &fixture.repository,
+            &["status", "--porcelain=v1", "--untracked-files=all"]
+        )
+        .is_empty()
+    );
+    fixture.cleanup_conflict();
+}
+
+#[tokio::test]
+async fn conflict_resolution_rejects_path_escape_and_explicit_abort_restores_prestate() {
+    let fixture = ConflictMergeFixture::text("merge-conflict-tools-abort").await;
+    let (event_tx, _) = tokio::sync::broadcast::channel(16);
+    let output = fixture
+        .coordinator
+        .merge_agent_with_verifier(
+            &fixture.session_id,
+            &fixture.agent_id,
+            &fixture.expected_head,
+            &AgentSupervisor::default(),
+            &event_tx,
+            "call-conflict-tools-abort",
+            &PassingMergeVerifier,
+        )
+        .await
+        .unwrap();
+    let error = fixture
+        .coordinator
+        .resolve_active_conflict(
+            &fixture.session_id,
+            &output.merge_id,
+            "../outside.txt",
+            super::merge::conflict_tools::ConflictResolutionChoice::Ours,
+        )
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("normalized"));
+
+    let aborted = fixture
+        .coordinator
+        .abort_active_conflict(
+            &fixture.session_id,
+            &output.merge_id,
+            "planner cannot resolve this conflict safely",
+        )
+        .await
+        .unwrap();
+    assert_eq!(aborted.status, MergeStatus::Aborted);
+    assert_eq!(
+        git_output(&fixture.repository, &["rev-parse", "HEAD"]),
+        fixture.expected_head
+    );
+    assert!(
+        git_output(
+            &fixture.repository,
+            &["status", "--porcelain=v1", "--untracked-files=all"]
+        )
+        .is_empty()
+    );
+    fixture.cleanup_conflict();
+}
+
+#[tokio::test]
+async fn binary_conflict_rejects_patch_and_accepts_explicit_theirs() {
+    let fixture = ConflictMergeFixture::binary("merge-conflict-tools-binary").await;
+    let (event_tx, _) = tokio::sync::broadcast::channel(16);
+    let output = fixture
+        .coordinator
+        .merge_agent_with_verifier(
+            &fixture.session_id,
+            &fixture.agent_id,
+            &fixture.expected_head,
+            &AgentSupervisor::default(),
+            &event_tx,
+            "call-conflict-tools-binary",
+            &PassingMergeVerifier,
+        )
+        .await
+        .unwrap();
+    let patch = "*** Begin Patch\n*** Update File: src/shared.bin\n@@\n-old\n+new\n*** End Patch";
+    assert!(
+        fixture
+            .coordinator
+            .resolve_active_conflict(
+                &fixture.session_id,
+                &output.merge_id,
+                "src/shared.bin",
+                super::merge::conflict_tools::ConflictResolutionChoice::Patch(patch.to_string()),
+            )
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("require ours, theirs, or delete")
+    );
+    let resolved = fixture
+        .coordinator
+        .resolve_active_conflict(
+            &fixture.session_id,
+            &output.merge_id,
+            "src/shared.bin",
+            super::merge::conflict_tools::ConflictResolutionChoice::Theirs,
+        )
+        .await
+        .unwrap();
+    assert!(resolved.unresolved_paths.is_empty());
+    assert_eq!(
+        std::fs::read(fixture.repository.join("src/shared.bin")).unwrap(),
+        b"executor\0blob"
+    );
+    fixture.cleanup_conflict();
+}
+
+#[tokio::test]
 async fn binary_conflict_is_classified_from_stage_blob_content() {
     let fixture = ConflictMergeFixture::binary("merge-binary-conflict").await;
     let (event_tx, _) = tokio::sync::broadcast::channel(16);
