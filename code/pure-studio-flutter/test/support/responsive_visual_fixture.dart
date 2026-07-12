@@ -293,6 +293,12 @@ StudioState responsiveVisualState() {
     providerUsages: responsiveVisualProviderUsages,
     roles: const [
       RoleSettingsView(
+        key: 'executor',
+        providerId: 'deepseek',
+        model: 'deepseek-reasoner',
+        effort: 'high',
+      ),
+      RoleSettingsView(
         key: 'planner',
         providerId: 'deepseek',
         model: 'deepseek-reasoner',

@@ -488,7 +488,69 @@ pub struct StudioSessionRuntime {
     pub active_mcp_servers: Vec<String>,
     #[serde(default)]
     pub active_lsp_servers: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task: Option<StudioTaskRuntime>,
     pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StudioTaskRuntime {
+    pub run_id: String,
+    pub phase: String,
+    pub branch: String,
+    pub expected_head: String,
+    pub status_message: Option<String>,
+    pub work_units: Vec<StudioTaskWorkUnitRuntime>,
+    pub agents: Vec<StudioTaskAgentRuntime>,
+    pub merges: Vec<StudioTaskMergeRuntime>,
+    pub reviews: Vec<StudioTaskReviewRuntime>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StudioTaskWorkUnitRuntime {
+    pub id: String,
+    pub title: String,
+    pub status: String,
+    pub worktree_path: String,
+    pub branch: String,
+    pub agent_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StudioTaskAgentRuntime {
+    pub agent_id: String,
+    pub role: String,
+    pub status: String,
+    pub initiated_by: String,
+    pub requested_by_call_id: String,
+    pub summary: Option<String>,
+    pub error: Option<String>,
+    pub head_commit: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StudioTaskMergeRuntime {
+    pub id: String,
+    pub agent_id: String,
+    pub status: String,
+    pub merge_commit: Option<String>,
+    pub conflict_files: Vec<String>,
+    pub resolution_summary: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StudioTaskReviewRuntime {
+    pub round: u32,
+    pub head_commit: String,
+    pub verdict: String,
+    pub reviewer_agent_id: Option<String>,
+    pub summary: Option<String>,
+    pub design_references: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

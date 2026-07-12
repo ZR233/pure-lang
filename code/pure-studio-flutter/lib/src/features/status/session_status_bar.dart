@@ -10,6 +10,7 @@ import 'agent_detail_panel.dart';
 import 'context_usage_readout.dart';
 import 'status_bar_item.dart';
 import 'status_detail_popover.dart';
+import 'task_runtime_detail.dart';
 
 class SessionStatusBar extends ConsumerWidget {
   const SessionStatusBar({required this.state, super.key});
@@ -53,7 +54,7 @@ class SessionStatusBar extends ConsumerWidget {
                           if (session != null)
                             _SessionModeSelector(
                               mode: session.mode,
-                              enabled: !state.isBusy,
+                              enabled: !state.isBusy && !runtime.hasActiveTask,
                             ),
                           if (session != null && state.providers.isNotEmpty)
                             _ModeModelSelector(
@@ -80,7 +81,7 @@ class SessionStatusBar extends ConsumerWidget {
                               icon: Icons.tune_outlined,
                               label: activityLabel,
                               tooltip: context.l10n.statusCapabilitiesTitle,
-                              detailWidth: 420,
+                              detailWidth: 520,
                               maxWidth: 240,
                               interactive: true,
                               detailBuilder: (context) => _ActivityDetail(
@@ -112,14 +113,19 @@ String _runtimeActivityLabel(
   SessionRuntimeView runtime,
   List<StudioAgentView> agents,
 ) {
+  final taskAgents = runtime.task?.agents;
+  final agentCount = taskAgents != null && taskAgents.isNotEmpty
+      ? taskAgents.length
+      : agents.length;
   final parts = [
+    if (runtime.task case final task?) context.taskPhaseLabel(task.phase),
     if (runtime.activeSkills.isNotEmpty)
       context.l10n.statusSkillsCount(runtime.activeSkills.length),
     if (runtime.activeMcpServers.isNotEmpty)
       context.l10n.statusMcpCount(runtime.activeMcpServers.length),
     if (runtime.activeLspServers.isNotEmpty)
       context.l10n.statusLspCount(runtime.activeLspServers.length),
-    if (agents.isNotEmpty) context.l10n.statusAgentsCount(agents.length),
+    if (agentCount > 0) context.l10n.statusAgentsCount(agentCount),
   ];
   return parts.join(' · ');
 }
@@ -436,18 +442,39 @@ class _ActivityDetail extends StatelessWidget {
         runtime.activeSkills.isNotEmpty ||
         runtime.activeMcpServers.isNotEmpty ||
         runtime.activeLspServers.isNotEmpty;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        if (hasCapabilities) _CapabilityDetail(runtime: runtime),
-        if (hasCapabilities && agents.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            child: Divider(height: 1, color: context.studioLine),
-          ),
-        if (agents.isNotEmpty) AgentDetailPanel(agents: agents),
-      ],
+    final task = runtime.task;
+    if (task == null) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (hasCapabilities) _CapabilityDetail(runtime: runtime),
+          if (hasCapabilities && agents.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Divider(height: 1, color: context.studioLine),
+            ),
+          if (agents.isNotEmpty) AgentDetailPanel(agents: agents),
+        ],
+      );
+    }
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxHeight: 480),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            TaskRuntimeDetail(task: task),
+            if (hasCapabilities)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Divider(height: 1, color: context.studioLine),
+              ),
+            if (hasCapabilities) _CapabilityDetail(runtime: runtime),
+          ],
+        ),
+      ),
     );
   }
 }

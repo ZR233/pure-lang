@@ -74,6 +74,14 @@ impl StudioRuntime {
     }
 
     pub async fn set_session_mode(&self, session_id: &str, mode: CompileMode) -> Result<()> {
+        if self
+            .store
+            .find_active_task_run_for_session(session_id)
+            .await?
+            .is_some()
+        {
+            bail!("session mode cannot change while a task is active");
+        }
         self.store.set_session_mode(session_id, mode).await?;
         let Some(session) = self.store.read_session(session_id).await? else {
             return Ok(());

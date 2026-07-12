@@ -44,4 +44,43 @@ extension StudioLocalizationsX on BuildContext {
         l10n.statusInteractionPlanConfirmation,
     };
   }
+
+  String taskPhaseLabel(String phase) {
+    return switch (phase) {
+      'planning' => l10n.statusTaskPhasePlanning,
+      'pendingConfirmation' => l10n.statusTaskPhasePendingConfirmation,
+      'designUpdating' => l10n.statusTaskPhaseDesignUpdating,
+      'implementing' => l10n.statusTaskPhaseImplementing,
+      'merging' => l10n.statusTaskPhaseMerging,
+      'resolvingConflict' => l10n.statusTaskPhaseResolvingConflict,
+      'reviewing' => l10n.statusTaskPhaseReviewing,
+      'reworking' => l10n.statusTaskPhaseReworking,
+      'completed' => l10n.statusTaskPhaseCompleted,
+      'blocked' => l10n.statusTaskPhaseBlocked,
+      'failed' => l10n.statusTaskPhaseFailed,
+      'cancelled' => l10n.statusTaskPhaseCancelled,
+      _ => phase,
+    };
+  }
+
+  String taskStatusLabel(String status) {
+    return switch (status) {
+      'pending' => l10n.statusTaskStatusPending,
+      'queued' => l10n.statusTaskStatusQueued,
+      'running' => l10n.statusTaskStatusRunning,
+      'waitingForDelivery' => l10n.statusTaskStatusWaitingForDelivery,
+      'delivered' => l10n.statusTaskStatusDelivered,
+      'merged' => l10n.statusTaskStatusMerged,
+      'completed' => l10n.statusTaskStatusCompleted,
+      'failed' => l10n.statusTaskStatusFailed,
+      'cancelled' => l10n.statusTaskStatusCancelled,
+      'conflicted' => l10n.statusTaskStatusConflicted,
+      'verifying' => l10n.statusTaskStatusVerifying,
+      'aborted' => l10n.statusTaskStatusAborted,
+      'pass' => l10n.statusTaskStatusPass,
+      'changesRequired' => l10n.statusTaskStatusChangesRequired,
+      'blocked' => l10n.statusTaskStatusBlocked,
+      _ => status,
+    };
+  }
 }

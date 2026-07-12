@@ -482,15 +482,34 @@ impl StudioRuntime {
         }
     }
 
-    async fn session_runtime_event(&self, session_id: &str) -> Result<StudioSessionRuntime> {
+    pub async fn session_runtime_view(&self, session_id: &str) -> Result<StudioSessionRuntime> {
         let runtime = self.session_runtime(session_id).await?;
         let active_skills = self.store.list_session_skill_names(session_id).await?;
+        let task = match self
+            .store
+            .find_latest_task_run_for_session(session_id)
+            .await?
+        {
+            Some(run) => Some(projection::studio_task_runtime(
+                run.clone(),
+                self.store.list_work_units(&run.id).await?,
+                self.store.list_agent_outcomes(&run.id).await?,
+                self.store.list_merge_records(&run.id).await?,
+                self.store.list_review_rounds(&run.id).await?,
+            )),
+            None => None,
+        };
         Ok(studio_session_runtime(
             runtime,
             active_skills,
             self.mcp_runtime.available_server_names().await,
             self.lsp_runtime.active_server_names().await,
+            task,
         ))
+    }
+
+    async fn session_runtime_event(&self, session_id: &str) -> Result<StudioSessionRuntime> {
+        self.session_runtime_view(session_id).await
     }
 }
 

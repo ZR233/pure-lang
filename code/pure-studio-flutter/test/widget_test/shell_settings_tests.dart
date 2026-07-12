@@ -455,6 +455,113 @@ void registerShellSettingsTests() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('active task locks mode and exposes durable coordinator detail', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(760, 720);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _FakeStudioApi(
+      _stateWithPlannerModels().copyWith(
+        runtime: const SessionRuntimeView(
+          model: 'planner/local',
+          contextTokens: 1200,
+          contextWindow: 100000,
+          totalTokens: 1800,
+          costLabel: '',
+          activeSkills: [],
+          activeMcpServers: [],
+          activeLspServers: [],
+          agentCount: 1,
+          task: TaskRuntimeView(
+            runId: 'task-run-1',
+            phase: 'implementing',
+            branch: 'codex/task-mode',
+            expectedHead: '1234567890abcdef',
+            statusMessage: 'Executor delivery ready',
+            workUnits: [
+              TaskWorkUnitView(
+                id: 'unit-1',
+                title: 'Implement coordinator UI',
+                status: 'delivered',
+                worktreePath: '.pure/worktrees/task-run-1/agent-1',
+                branch: 'pure-task-run-1-agent-1',
+                agentId: 'agent-1',
+              ),
+            ],
+            agents: [
+              TaskAgentOutcomeView(
+                agentId: 'agent-1',
+                role: 'executor',
+                status: 'completed',
+                initiatedBy: 'planner',
+                requestedByCallId: 'call-spawn-1',
+                summary: 'Implemented UI',
+                error: null,
+                headCommit: 'abcdef1234567890',
+              ),
+            ],
+            merges: [
+              TaskMergeView(
+                id: 'merge-1',
+                agentId: 'agent-1',
+                status: 'conflicted',
+                mergeCommit: null,
+                conflictFiles: ['lib/status.dart'],
+                resolutionSummary: null,
+              ),
+            ],
+            reviews: [
+              TaskReviewView(
+                round: 1,
+                headCommit: '1234567890abcdef',
+                verdict: 'changesRequired',
+                reviewerAgentId: 'reviewer-1',
+                summary: 'One issue remains',
+                designReferences: ['design/16-task-orchestration.md#UI 与兼容性'],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final taskActivity = find.textContaining('Implementing · 1 agent');
+    expect(taskActivity, findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.tap(find.byTooltip('Session mode'));
+    await tester.pumpAndSettle();
+    expect(find.text('Task'), findsNothing);
+    expect(api.sessionModeUpdate, isNull);
+
+    await tester.tap(taskActivity);
+    await tester.pumpAndSettle();
+    expect(find.text('TASK COORDINATOR'), findsOneWidget);
+    expect(find.text('codex/task-mode'), findsOneWidget);
+    expect(find.text('Implement coordinator UI'), findsOneWidget);
+    expect(find.text('.pure/worktrees/task-run-1/agent-1'), findsOneWidget);
+    expect(find.text('abcdef1234'), findsOneWidget);
+    expect(find.text('lib/status.dart'), findsOneWidget);
+    expect(find.text('Delivered'), findsOneWidget);
+    expect(find.text('Conflicted'), findsOneWidget);
+    expect(find.text('Changes required'), findsOneWidget);
+    expect(find.text('changesRequired'), findsNothing);
+    expect(
+      find.text('design/16-task-orchestration.md#UI 与兼容性'),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('zh Hans localizes session and permission mode labels', (
     tester,
   ) async {

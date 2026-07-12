@@ -125,7 +125,11 @@ class _StatusDetailPopoverState extends State<StatusDetailPopover> {
       ancestor: overlayRenderObject,
     );
     final overlaySize = overlayRenderObject.size;
-    final maxLeft = math.max(8.0, overlaySize.width - widget.width - 8);
+    final effectiveWidth = math.max(
+      0.0,
+      math.min(widget.width, overlaySize.width - 16),
+    );
+    final maxLeft = math.max(8.0, overlaySize.width - effectiveWidth - 8);
     final left = targetTopLeft.dx.clamp(8.0, maxLeft).toDouble();
     final bottom = math.max(8.0, overlaySize.height - targetTopLeft.dy + 8);
     final theme = Theme.of(context);
@@ -140,7 +144,7 @@ class _StatusDetailPopoverState extends State<StatusDetailPopover> {
                   Positioned(
                     left: left,
                     bottom: bottom,
-                    width: widget.width,
+                    width: effectiveWidth,
                     child: Material(
                       color: Colors.transparent,
                       child: DecoratedBox(

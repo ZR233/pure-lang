@@ -2,7 +2,8 @@ use crate::api::studio::runtime::BridgeRuntime;
 use crate::api::studio::types::{
     BridgeActiveTurn, BridgeLspHealthDto, BridgeMcpHealthDto, BridgeMcpServerDto,
     BridgeRuntimeCostAmountDto, BridgeRuntimeStatus, BridgeSessionRuntimeDto,
-    BridgeSkillActivationDto, RuntimeSnapshot,
+    BridgeSkillActivationDto, BridgeTaskAgentDto, BridgeTaskMergeDto, BridgeTaskReviewDto,
+    BridgeTaskRuntimeDto, BridgeTaskWorkUnitDto, RuntimeSnapshot,
 };
 use anyhow::Result;
 use pl_core::StudioRuntimeSnapshot as CoreRuntimeSnapshot;
@@ -38,7 +39,7 @@ pub(crate) async fn bridge_session_runtime_view(
     bridge: &'static BridgeRuntime,
     session_id: &str,
 ) -> Result<BridgeSessionRuntimeDto> {
-    let runtime = bridge.studio.session_runtime(session_id).await?;
+    let runtime = bridge.studio.session_runtime_view(session_id).await?;
     let active_skills = bridge
         .studio
         .store()
@@ -46,22 +47,24 @@ pub(crate) async fn bridge_session_runtime_view(
         .await?;
     Ok(BridgeSessionRuntimeDto {
         session_id: runtime.session_id,
-        model: runtime.model,
-        context_window: runtime.context_window,
-        latest_context_tokens: runtime.latest_context_tokens,
-        prompt_tokens: runtime.prompt_tokens,
-        completion_tokens: runtime.completion_tokens,
-        cached_prompt_tokens: runtime.cached_prompt_tokens,
-        total_tokens: runtime.total_tokens,
+        model: runtime.usage.model,
+        context_window: runtime.usage.context_window,
+        latest_context_tokens: runtime.usage.latest_context_tokens,
+        prompt_tokens: runtime.usage.prompt_tokens,
+        completion_tokens: runtime.usage.completion_tokens,
+        cached_prompt_tokens: runtime.usage.cached_prompt_tokens,
+        total_tokens: runtime.usage.total_tokens,
         estimated_costs: runtime
+            .usage
             .estimated_costs
             .into_iter()
             .map(bridge_cost_amount)
             .collect(),
-        has_unpriced_usage: runtime.has_unpriced_usage,
+        has_unpriced_usage: runtime.usage.has_unpriced_usage,
         active_skills,
         active_mcp_servers: bridge.studio.mcp_runtime().available_server_names().await,
         active_lsp_servers: bridge.studio.lsp_runtime().active_server_names().await,
+        task: runtime.task.map(bridge_task_runtime),
         updated_at: runtime.updated_at,
     })
 }
@@ -86,7 +89,68 @@ pub(crate) fn bridge_session_runtime(snapshot: StudioSessionRuntime) -> BridgeSe
         active_skills: snapshot.active_skills,
         active_mcp_servers: snapshot.active_mcp_servers,
         active_lsp_servers: snapshot.active_lsp_servers,
+        task: snapshot.task.map(bridge_task_runtime),
         updated_at: snapshot.updated_at,
+    }
+}
+
+fn bridge_task_runtime(task: pl_protocol::StudioTaskRuntime) -> BridgeTaskRuntimeDto {
+    BridgeTaskRuntimeDto {
+        run_id: task.run_id,
+        phase: task.phase,
+        branch: task.branch,
+        expected_head: task.expected_head,
+        status_message: task.status_message,
+        work_units: task
+            .work_units
+            .into_iter()
+            .map(|unit| BridgeTaskWorkUnitDto {
+                id: unit.id,
+                title: unit.title,
+                status: unit.status,
+                worktree_path: unit.worktree_path,
+                branch: unit.branch,
+                agent_id: unit.agent_id,
+            })
+            .collect(),
+        agents: task
+            .agents
+            .into_iter()
+            .map(|agent| BridgeTaskAgentDto {
+                agent_id: agent.agent_id,
+                role: agent.role,
+                status: agent.status,
+                initiated_by: agent.initiated_by,
+                requested_by_call_id: agent.requested_by_call_id,
+                summary: agent.summary,
+                error: agent.error,
+                head_commit: agent.head_commit,
+            })
+            .collect(),
+        merges: task
+            .merges
+            .into_iter()
+            .map(|merge| BridgeTaskMergeDto {
+                id: merge.id,
+                agent_id: merge.agent_id,
+                status: merge.status,
+                merge_commit: merge.merge_commit,
+                conflict_files: merge.conflict_files,
+                resolution_summary: merge.resolution_summary,
+            })
+            .collect(),
+        reviews: task
+            .reviews
+            .into_iter()
+            .map(|review| BridgeTaskReviewDto {
+                round: review.round,
+                head_commit: review.head_commit,
+                verdict: review.verdict,
+                reviewer_agent_id: review.reviewer_agent_id,
+                summary: review.summary,
+                design_references: review.design_references,
+            })
+            .collect(),
     }
 }
 

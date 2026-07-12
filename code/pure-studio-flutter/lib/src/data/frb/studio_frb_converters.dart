@@ -278,6 +278,62 @@ SessionRuntimeView _sessionRuntimeFromFrbWithAgents(
     activeMcpServers: runtime.activeMcpServers,
     activeLspServers: runtime.activeLspServers,
     agentCount: agentCount,
+    task: switch (runtime.task) {
+      final task? => TaskRuntimeView(
+        runId: task.runId,
+        phase: task.phase,
+        branch: task.branch,
+        expectedHead: task.expectedHead,
+        statusMessage: task.statusMessage,
+        workUnits: [
+          for (final unit in task.workUnits)
+            TaskWorkUnitView(
+              id: unit.id,
+              title: unit.title,
+              status: unit.status,
+              worktreePath: unit.worktreePath,
+              branch: unit.branch,
+              agentId: unit.agentId,
+            ),
+        ],
+        agents: [
+          for (final agent in task.agents)
+            TaskAgentOutcomeView(
+              agentId: agent.agentId,
+              role: agent.role,
+              status: agent.status,
+              initiatedBy: agent.initiatedBy,
+              requestedByCallId: agent.requestedByCallId,
+              summary: agent.summary,
+              error: agent.error,
+              headCommit: agent.headCommit,
+            ),
+        ],
+        merges: [
+          for (final merge in task.merges)
+            TaskMergeView(
+              id: merge.id,
+              agentId: merge.agentId,
+              status: merge.status,
+              mergeCommit: merge.mergeCommit,
+              conflictFiles: merge.conflictFiles,
+              resolutionSummary: merge.resolutionSummary,
+            ),
+        ],
+        reviews: [
+          for (final review in task.reviews)
+            TaskReviewView(
+              round: review.round.toInt(),
+              headCommit: review.headCommit,
+              verdict: review.verdict,
+              reviewerAgentId: review.reviewerAgentId,
+              summary: review.summary,
+              designReferences: review.designReferences,
+            ),
+        ],
+      ),
+      null => null,
+    },
   );
 }
 

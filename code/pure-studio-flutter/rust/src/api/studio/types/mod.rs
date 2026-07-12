@@ -30,7 +30,8 @@ pub use response::{
 pub use runtime::{
     BridgeActiveTurn, BridgeLspHealthDto, BridgeMcpHealthDto, BridgeMcpServerDto,
     BridgePlanLifecycleDto, BridgeRuntimeCostAmountDto, BridgeRuntimeStatus,
-    BridgeSessionRuntimeDto, BridgeSkillActivationDto, RuntimeSnapshot,
+    BridgeSessionRuntimeDto, BridgeSkillActivationDto, BridgeTaskAgentDto, BridgeTaskMergeDto,
+    BridgeTaskReviewDto, BridgeTaskRuntimeDto, BridgeTaskWorkUnitDto, RuntimeSnapshot,
 };
 pub use settings::{
     InstructionsSettingsInput, McpServerInput, McpSettingsInput, ProviderInput, ProviderModelInput,

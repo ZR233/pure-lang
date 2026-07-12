@@ -230,6 +230,117 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get statusTaskSection => 'Task coordinator';
+
+  @override
+  String get statusTaskBranch => 'Branch';
+
+  @override
+  String get statusTaskHead => 'HEAD';
+
+  @override
+  String get statusTaskWorkUnits => 'Work units';
+
+  @override
+  String get statusTaskMerges => 'Merges and conflicts';
+
+  @override
+  String get statusTaskReviews => 'Reviews';
+
+  @override
+  String get statusTaskWorktree => 'Worktree';
+
+  @override
+  String get statusTaskCommit => 'Commit';
+
+  @override
+  String get statusTaskSource => 'Source';
+
+  @override
+  String get statusTaskConflicts => 'Conflicts';
+
+  @override
+  String get statusTaskPhasePlanning => 'Planning';
+
+  @override
+  String get statusTaskPhasePendingConfirmation => 'Waiting for confirmation';
+
+  @override
+  String get statusTaskPhaseDesignUpdating => 'Updating design';
+
+  @override
+  String get statusTaskPhaseImplementing => 'Implementing';
+
+  @override
+  String get statusTaskPhaseMerging => 'Merging';
+
+  @override
+  String get statusTaskPhaseResolvingConflict => 'Resolving conflicts';
+
+  @override
+  String get statusTaskPhaseReviewing => 'Reviewing';
+
+  @override
+  String get statusTaskPhaseReworking => 'Reworking';
+
+  @override
+  String get statusTaskPhaseCompleted => 'Task completed';
+
+  @override
+  String get statusTaskPhaseBlocked => 'Task blocked';
+
+  @override
+  String get statusTaskPhaseFailed => 'Task failed';
+
+  @override
+  String get statusTaskPhaseCancelled => 'Task cancelled';
+
+  @override
+  String get statusTaskStatusPending => 'Pending';
+
+  @override
+  String get statusTaskStatusQueued => 'Queued';
+
+  @override
+  String get statusTaskStatusRunning => 'Running';
+
+  @override
+  String get statusTaskStatusWaitingForDelivery => 'Waiting for delivery';
+
+  @override
+  String get statusTaskStatusDelivered => 'Delivered';
+
+  @override
+  String get statusTaskStatusMerged => 'Merged';
+
+  @override
+  String get statusTaskStatusCompleted => 'Completed';
+
+  @override
+  String get statusTaskStatusFailed => 'Failed';
+
+  @override
+  String get statusTaskStatusCancelled => 'Cancelled';
+
+  @override
+  String get statusTaskStatusConflicted => 'Conflicted';
+
+  @override
+  String get statusTaskStatusVerifying => 'Verifying';
+
+  @override
+  String get statusTaskStatusAborted => 'Aborted';
+
+  @override
+  String get statusTaskStatusPass => 'Passed';
+
+  @override
+  String get statusTaskStatusChangesRequired => 'Changes required';
+
+  @override
+  String get statusTaskStatusBlocked => 'Blocked';
+
+  @override
   String get statusSkillsSection => 'Skills';
 
   @override
