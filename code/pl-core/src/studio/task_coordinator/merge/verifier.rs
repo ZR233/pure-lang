@@ -13,7 +13,7 @@ pub(crate) trait MergeVerifier: Send + Sync {
     ) -> impl std::future::Future<Output = Result<Vec<MergeVerificationStep>>> + Send;
 }
 
-pub(super) struct ProductionMergeVerifier;
+pub(crate) struct ProductionMergeVerifier;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MergeVerificationCommand {
@@ -22,7 +22,7 @@ pub(crate) struct MergeVerificationCommand {
 }
 
 impl ProductionMergeVerifier {
-    pub(super) async fn verify_commands(
+    pub(crate) async fn verify_commands(
         commands: Vec<MergeVerificationCommand>,
     ) -> Vec<MergeVerificationStep> {
         let mut steps = Vec::new();

@@ -1,3 +1,4 @@
+mod completion;
 mod conflict_types;
 mod continuation;
 mod coordinator;

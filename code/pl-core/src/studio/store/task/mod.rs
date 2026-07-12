@@ -1,4 +1,5 @@
 mod allocation;
+mod completion;
 mod continuation;
 #[cfg(test)]
 pub(crate) use continuation::ContinuationSnapshotTestBarrier;
