@@ -1,3 +1,4 @@
+mod cleanup;
 mod continuation;
 mod record;
 
@@ -16,8 +17,8 @@ use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
     AgentDelivery, AgentOutcomeStatus, BeginTaskMerge, CompleteTaskMerge, ConflictTaskMerge,
-    FailTaskMerge, MergeCleanupEvidence, MergeEvidence, MergeRecord, MergeStatus, TaskMergeScope,
-    TaskRunPhase, TaskRunRecord, WorkUnitStatus,
+    FailTaskMerge, MergeEvidence, MergeRecord, MergeStatus, TaskMergeScope, TaskRunPhase,
+    TaskRunRecord, WorkUnitStatus,
 };
 
 impl StudioStore {
@@ -484,25 +485,5 @@ impl StudioStore {
                 Err(error)
             }
         }
-    }
-
-    pub(crate) async fn record_merge_cleanup(
-        &self,
-        merge_id: &str,
-        cleanup: MergeCleanupEvidence,
-    ) -> Result<MergeRecord> {
-        let merge = entities::merge_record::Entity::find_by_id(merge_id.to_string())
-            .one(&self.db)
-            .await?
-            .context("merge record not found")?;
-        if merge.status != MergeStatus::Merged.as_str() {
-            bail!("cleanup evidence requires an accepted merge");
-        }
-        let mut evidence = parse_required_evidence(merge.verification_json.as_deref())?;
-        evidence.cleanup = Some(cleanup);
-        let mut active: entities::merge_record::ActiveModel = merge.into();
-        active.verification_json = Set(Some(serde_json::to_string(&evidence)?));
-        active.updated_at = Set(unix_seconds());
-        merge_record(active.update(&self.db).await?)
     }
 }

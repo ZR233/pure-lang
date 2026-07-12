@@ -36,10 +36,16 @@ impl TaskCoordinator {
                     path: unit.worktree_path.clone().into(),
                     branch: unit.branch.clone(),
                     expected_head: protected_expected_head(disposition, outcome),
-                    presence: match resource.creation_state {
-                        TaskWorktreeCreationState::MustExist => DurableWorktreePresence::MustExist,
-                        TaskWorktreeCreationState::UncreatedBeforeRestart => {
-                            DurableWorktreePresence::MayBeUncreated
+                    presence: if disposition == DurableWorktreeDisposition::Cleanup {
+                        DurableWorktreePresence::MayBeUncreated
+                    } else {
+                        match resource.creation_state {
+                            TaskWorktreeCreationState::MustExist => {
+                                DurableWorktreePresence::MustExist
+                            }
+                            TaskWorktreeCreationState::UncreatedBeforeRestart => {
+                                DurableWorktreePresence::MayBeUncreated
+                            }
                         }
                     },
                     disposition,

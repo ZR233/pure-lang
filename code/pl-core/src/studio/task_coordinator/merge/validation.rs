@@ -148,7 +148,7 @@ pub(super) async fn changed_files_between(
     parse_name_status(&output.stdout)
 }
 
-async fn validate_repository_identity(
+pub(super) async fn validate_repository_identity(
     repository: &Path,
     expected_workspace: &Path,
     expected_common_dir: &Path,

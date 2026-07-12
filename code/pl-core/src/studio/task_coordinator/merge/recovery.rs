@@ -6,7 +6,8 @@ use anyhow::{Context, Result, bail};
 use super::git::{checked_git, run_git};
 use super::validation::validate_final_head;
 use crate::studio::task_coordinator::{
-    FailTaskMerge, MergeRecord, MergeStatus, TaskCoordinator, TaskMergeScope, TaskRunRecord,
+    ConflictEntry, ConflictManifest, FailTaskMerge, MergeIndexEntry, MergeRecord, MergeStatus,
+    TaskCoordinator, TaskMergeScope, TaskRunRecord,
 };
 
 pub(crate) enum MergeRestartRecovery {
@@ -77,7 +78,11 @@ impl TaskCoordinator {
         }
         if !unmerged.stdout.is_empty() {
             let scope = self.load_merge_recovery_scope(run, record).await?;
-            self.persist_merge_conflict(&scope, workspace).await?;
+            if let Err(error) = self.persist_merge_conflict(&scope, workspace).await {
+                return self
+                    .block_unsafe_merge_recovery(run, record, error.to_string())
+                    .await;
+            }
             let recovered = self
                 .store
                 .read_task_run(&run.id)
@@ -274,4 +279,140 @@ fn normalized_path(path: &Path) -> String {
     } else {
         value
     }
+}
+
+pub(super) struct ConflictWorkspaceEvidence {
+    pub(super) status_porcelain_v1_z: Vec<u8>,
+    pub(super) index_stage_zero_entries: Vec<MergeIndexEntry>,
+}
+
+pub(super) async fn capture_conflict_workspace_evidence(
+    workspace: &Path,
+    conflicts: &mut [ConflictEntry],
+) -> Result<ConflictWorkspaceEvidence> {
+    let status_porcelain_v1_z = read_conflict_status(workspace).await?;
+    validate_no_untracked_status(&status_porcelain_v1_z)?;
+    let index_stage_zero_entries = read_index_stage_zero_entries(workspace).await?;
+    for conflict in conflicts {
+        conflict.worktree_object_id = worktree_object_id(workspace, &conflict.path).await?;
+    }
+    Ok(ConflictWorkspaceEvidence {
+        status_porcelain_v1_z,
+        index_stage_zero_entries,
+    })
+}
+
+pub(super) async fn validate_conflict_workspace_evidence(
+    workspace: &Path,
+    manifest: &ConflictManifest,
+) -> Result<()> {
+    let mut actual_conflicts = manifest.conflicts.clone();
+    let actual = capture_conflict_workspace_evidence(workspace, &mut actual_conflicts).await?;
+    if actual.status_porcelain_v1_z != manifest.status_porcelain_v1_z {
+        bail!("durable conflict porcelain status drifted");
+    }
+    if actual.index_stage_zero_entries != manifest.index_stage_zero_entries {
+        bail!("durable conflict stage-zero index evidence drifted");
+    }
+    for (expected, actual) in manifest.conflicts.iter().zip(actual_conflicts.iter()) {
+        if expected.path != actual.path || expected.worktree_object_id != actual.worktree_object_id
+        {
+            bail!("durable conflict worktree object evidence drifted");
+        }
+    }
+    Ok(())
+}
+
+pub(super) async fn read_conflict_status(workspace: &Path) -> Result<Vec<u8>> {
+    let status = run_git(
+        workspace,
+        vec![
+            "status".into(),
+            "--porcelain=v1".into(),
+            "-z".into(),
+            "--untracked-files=all".into(),
+        ],
+    )
+    .await?;
+    if !status.success {
+        bail!(
+            "failed to inspect conflict status: {}",
+            status.stderr_lossy()
+        );
+    }
+    Ok(status.stdout)
+}
+
+async fn read_index_stage_zero_entries(workspace: &Path) -> Result<Vec<MergeIndexEntry>> {
+    let output = run_git(
+        workspace,
+        vec!["ls-files".into(), "--stage".into(), "-z".into()],
+    )
+    .await?;
+    if !output.success {
+        bail!(
+            "failed to inspect conflict index: {}",
+            output.stderr_lossy()
+        );
+    }
+    let mut entries = Vec::new();
+    for record in output
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|record| !record.is_empty())
+    {
+        let tab = record
+            .iter()
+            .position(|byte| *byte == b'\t')
+            .context("index path missing")?;
+        let metadata = std::str::from_utf8(&record[..tab])?;
+        let path = std::str::from_utf8(&record[tab + 1..])?.replace('\\', "/");
+        let mut fields = metadata.split_whitespace();
+        let mode = fields.next().context("index mode missing")?;
+        let object_id = fields.next().context("index object id missing")?;
+        let stage = fields.next().context("index stage missing")?;
+        if stage == "0" {
+            entries.push(MergeIndexEntry {
+                path,
+                mode: mode.to_string(),
+                object_id: object_id.to_string(),
+            });
+        }
+    }
+    entries.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(entries)
+}
+
+async fn worktree_object_id(workspace: &Path, path: &str) -> Result<Option<String>> {
+    let absolute = workspace.join(path);
+    let metadata = match std::fs::symlink_metadata(&absolute) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error).with_context(|| format!("inspect conflict path `{path}`")),
+    };
+    if metadata.is_dir() {
+        return Ok(None);
+    }
+    let output = run_git(
+        workspace,
+        vec!["hash-object".into(), "--".into(), path.to_string()],
+    )
+    .await?;
+    if !output.success {
+        bail!(
+            "failed to hash conflict worktree path `{path}`: {}",
+            output.stderr_lossy()
+        );
+    }
+    Ok(Some(output.stdout_text()?.trim().to_string()))
+}
+
+fn validate_no_untracked_status(status: &[u8]) -> Result<()> {
+    if status
+        .split(|byte| *byte == 0)
+        .any(|entry| entry.starts_with(b"?? "))
+    {
+        bail!("durable conflict contains untracked workspace paths");
+    }
+    Ok(())
 }

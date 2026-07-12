@@ -2697,10 +2697,13 @@ async fn merge_conflict_continuation_fixture(
                 merge_head: delivery_head,
                 merge_base: run.base_commit.clone(),
                 pre_index_tree: "tree-before-merge".to_string(),
+                status_porcelain_v1_z: Vec::new(),
+                index_stage_zero_entries: Vec::new(),
                 conflicts: vec![ConflictEntry {
                     path: "src/conflict.rs".to_string(),
                     kind: ConflictKind::Text,
                     stages: Vec::new(),
+                    worktree_object_id: None,
                     binary: false,
                     rename_source: None,
                     rename_destination: None,

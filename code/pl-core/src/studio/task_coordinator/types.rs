@@ -487,6 +487,10 @@ pub(crate) struct ConflictManifest {
     pub(crate) merge_base: String,
     pub(crate) pre_index_tree: String,
     pub(crate) conflicts: Vec<ConflictEntry>,
+    #[serde(default)]
+    pub(crate) status_porcelain_v1_z: Vec<u8>,
+    #[serde(default)]
+    pub(crate) index_stage_zero_entries: Vec<MergeIndexEntry>,
     pub(crate) auto_merged_entries: Vec<MergeIndexEntry>,
 }
 
@@ -496,6 +500,8 @@ pub(crate) struct ConflictEntry {
     pub(crate) path: String,
     pub(crate) kind: ConflictKind,
     pub(crate) stages: Vec<MergeIndexStage>,
+    #[serde(default)]
+    pub(crate) worktree_object_id: Option<String>,
     pub(crate) binary: bool,
     pub(crate) rename_source: Option<String>,
     pub(crate) rename_destination: Option<String>,
