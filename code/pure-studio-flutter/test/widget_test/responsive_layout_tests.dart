@@ -13,7 +13,7 @@ const _activityStressViewports = [
   (name: '760x720', size: Size(760, 720)),
 ];
 
-const _activityStressLabel = '1 skill · 1 MCP · 1 LSP · 8 agents';
+const _activityStressLabel = '1 skill · 1 MCP · 1 LSP · 4 agents';
 
 void registerResponsiveLayoutTests() {
   group('responsive visual regression', () {

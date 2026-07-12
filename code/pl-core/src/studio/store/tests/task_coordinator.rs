@@ -84,6 +84,75 @@ async fn task_stop_gate_is_durable_and_keeps_lease_for_terminalization() {
 }
 
 #[tokio::test]
+async fn stopping_task_rejects_executor_delivery_without_mutating_records() {
+    let (store, run, work_unit, outcome) = delivery_transition_fixture().await;
+    store
+        .begin_task_stop(&run.id, &run.expected_head)
+        .await
+        .unwrap();
+
+    let error = store
+        .complete_agent_delivery(&outcome.id, &work_unit.id, delivery_receipt())
+        .await
+        .expect_err("stopping task must reject executor delivery");
+
+    assert!(error.to_string().contains("not accepting agent delivery"));
+    let persisted_outcome = store
+        .list_agent_outcomes(&run.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|record| record.id == outcome.id)
+        .unwrap();
+    let persisted_work_unit = store.read_work_unit(&work_unit.id).await.unwrap().unwrap();
+    assert_eq!(persisted_outcome.status, AgentOutcomeStatus::Running);
+    assert_eq!(persisted_outcome.delivery, None);
+    assert_eq!(persisted_work_unit.status, WorkUnitStatus::Running);
+}
+
+#[tokio::test]
+async fn stopping_task_rejects_new_explorer_outcome() {
+    let store = StudioStore::open_memory().await.unwrap();
+    let project = store
+        .upsert_project("C:/work/task-stop-explorer")
+        .await
+        .unwrap();
+    let session = store
+        .create_session(&project.id, "Task", CompileMode::Task)
+        .await
+        .unwrap();
+    let mut input = create_input(&session.id);
+    input.workspace_root = "C:/work/task-stop-explorer".to_string();
+    input.git_common_dir = "C:/work/task-stop-explorer/.git".to_string();
+    let (run, _) = store.create_task_run_with_lease(input).await.unwrap();
+    store
+        .begin_task_stop(&run.id, &run.expected_head)
+        .await
+        .unwrap();
+
+    let outcome = store
+        .create_explorer_outcome(
+            &session.id,
+            CreateAgentOutcome {
+                task_run_id: run.id.clone(),
+                work_unit_id: None,
+                agent_id: "agent-after-stop".to_string(),
+                owner_path: "/root".to_string(),
+                initiated_by: "planner".to_string(),
+                requested_by_call_id: "call-after-stop".to_string(),
+                role: "explorer".to_string(),
+                status: AgentOutcomeStatus::Queued,
+                attempt: 1,
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(outcome, None);
+    assert!(store.list_agent_outcomes(&run.id).await.unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn worktree_owner_queries_aggregate_common_directory_and_all_runs() {
     let store = StudioStore::open_memory().await.unwrap();
     let mut runs = Vec::new();
