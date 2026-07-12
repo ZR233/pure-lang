@@ -24,7 +24,7 @@ const _visualViewports = [
   (name: '760x720', size: Size(760, 720), brightness: Brightness.light),
 ];
 
-const _activityLabel = '1 skill · 1 MCP · 1 LSP · 2 agents';
+const _activityLabel = '1 skill · 1 MCP · 1 LSP · 1 agent';
 const _visualFontPath = 'test/assets/fonts/NotoSans-Variable.ttf';
 const _visualFontFamily = 'PureStudioVisualTest';
 const _visualFontFamilies = [

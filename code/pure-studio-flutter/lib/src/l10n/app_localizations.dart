@@ -608,6 +608,12 @@ abstract class AppLocalizations {
   /// **'Reworking'**
   String get statusTaskPhaseReworking;
 
+  /// No description provided for @statusTaskPhaseStopping.
+  ///
+  /// In en, this message translates to:
+  /// **'Stopping'**
+  String get statusTaskPhaseStopping;
+
   /// No description provided for @statusTaskPhaseCompleted.
   ///
   /// In en, this message translates to:

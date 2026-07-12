@@ -46,6 +46,44 @@ async fn task_run_and_branch_lease_are_created_atomically() {
 }
 
 #[tokio::test]
+async fn task_stop_gate_is_durable_and_keeps_lease_for_terminalization() {
+    let store = StudioStore::open_memory().await.unwrap();
+    let project = store.upsert_project("C:/work/task-stop").await.unwrap();
+    let session = store
+        .create_session(&project.id, "Task", CompileMode::Task)
+        .await
+        .unwrap();
+    let mut input = create_input(&session.id);
+    input.workspace_root = "C:/work/task-stop".to_string();
+    input.git_common_dir = "C:/work/task-stop/.git".to_string();
+    input.phase = TaskRunPhase::Implementing;
+    let (run, _) = store.create_task_run_with_lease(input).await.unwrap();
+
+    let stopping = store
+        .begin_task_stop(&run.id, &run.expected_head)
+        .await
+        .unwrap();
+
+    assert_eq!(stopping.phase, TaskRunPhase::Stopping);
+    assert!(store.read_branch_lease(&run.id).await.unwrap().is_some());
+    let allocation = store
+        .allocate_executor(AllocateExecutor {
+            session_id: session.id,
+            title: "must not start".to_string(),
+            owned_paths: vec!["src/**".to_string()],
+            agent_id: "agent-after-stop".to_string(),
+            owner_path: "/root".to_string(),
+            requested_by_call_id: "call-after-stop".to_string(),
+        })
+        .await;
+    let error = match allocation {
+        Ok(_) => panic!("stopping gate must reject executor allocation"),
+        Err(error) => error,
+    };
+    assert!(error.to_string().contains("requires task phase"));
+}
+
+#[tokio::test]
 async fn worktree_owner_queries_aggregate_common_directory_and_all_runs() {
     let store = StudioStore::open_memory().await.unwrap();
     let mut runs = Vec::new();

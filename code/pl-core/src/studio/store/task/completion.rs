@@ -12,6 +12,39 @@ use crate::studio::task_coordinator::{
 };
 
 impl StudioStore {
+    pub(crate) async fn begin_task_stop(
+        &self,
+        task_run_id: &str,
+        expected_head: &str,
+    ) -> Result<TaskRunRecord> {
+        let tx = self.db.begin().await?;
+        let result = async {
+            let run = entities::task_run::Entity::find_by_id(task_run_id.to_string())
+                .one(&tx)
+                .await?
+                .context("task run not found while beginning stop")?;
+            let phase = TaskRunPhase::from_str(&run.phase)
+                .with_context(|| format!("invalid task phase: {}", run.phase))?;
+            if run.expected_head != expected_head || phase.is_terminal() {
+                bail!("task stop no longer matches the active task HEAD");
+            }
+            validate_lease(&tx, &run, expected_head).await?;
+            if phase == TaskRunPhase::Stopping {
+                return super::task_run_record(run);
+            }
+            if !phase.can_transition_to(TaskRunPhase::Stopping) {
+                bail!("task phase cannot transition to stopping");
+            }
+            let mut active: entities::task_run::ActiveModel = run.into();
+            active.phase = Set(TaskRunPhase::Stopping.as_str().to_string());
+            active.status_message = Set(Some("task stop is settling agents".to_string()));
+            active.updated_at = Set(unix_seconds());
+            super::task_run_record(active.update(&tx).await?)
+        }
+        .await;
+        finish_transaction(tx, result).await
+    }
+
     pub(crate) async fn block_task_and_release_lease(
         &self,
         task_run_id: &str,

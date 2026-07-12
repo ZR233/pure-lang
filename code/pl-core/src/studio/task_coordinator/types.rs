@@ -13,6 +13,7 @@ pub(crate) enum TaskRunPhase {
     ResolvingConflict,
     Reviewing,
     Reworking,
+    Stopping,
     Completed,
     Blocked,
     Failed,
@@ -30,6 +31,7 @@ impl TaskRunPhase {
             Self::ResolvingConflict => "resolvingConflict",
             Self::Reviewing => "reviewing",
             Self::Reworking => "reworking",
+            Self::Stopping => "stopping",
             Self::Completed => "completed",
             Self::Blocked => "blocked",
             Self::Failed => "failed",
@@ -47,6 +49,7 @@ impl TaskRunPhase {
             "resolvingConflict" => Some(Self::ResolvingConflict),
             "reviewing" => Some(Self::Reviewing),
             "reworking" => Some(Self::Reworking),
+            "stopping" => Some(Self::Stopping),
             "completed" => Some(Self::Completed),
             "blocked" => Some(Self::Blocked),
             "failed" => Some(Self::Failed),
@@ -70,6 +73,9 @@ impl TaskRunPhase {
             return !matches!(self, Self::Completed | Self::Failed | Self::Cancelled);
         }
         if next == Self::Blocked {
+            return !self.is_terminal();
+        }
+        if next == Self::Stopping {
             return !self.is_terminal();
         }
         match self {
@@ -100,6 +106,7 @@ impl TaskRunPhase {
                 )
             }
             Self::Reworking => matches!(next, Self::Implementing | Self::Blocked | Self::Failed),
+            Self::Stopping => false,
             Self::Completed | Self::Blocked | Self::Failed | Self::Cancelled => false,
         }
     }

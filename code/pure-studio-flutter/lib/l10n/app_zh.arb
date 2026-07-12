@@ -82,6 +82,7 @@
   "statusTaskPhaseResolvingConflict": "解决冲突",
   "statusTaskPhaseReviewing": "审查中",
   "statusTaskPhaseReworking": "返工中",
+  "statusTaskPhaseStopping": "停止中",
   "statusTaskPhaseCompleted": "任务已完成",
   "statusTaskPhaseBlocked": "任务已阻塞",
   "statusTaskPhaseFailed": "任务失败",

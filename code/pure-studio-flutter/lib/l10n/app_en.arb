@@ -125,6 +125,7 @@
   "statusTaskPhaseResolvingConflict": "Resolving conflicts",
   "statusTaskPhaseReviewing": "Reviewing",
   "statusTaskPhaseReworking": "Reworking",
+  "statusTaskPhaseStopping": "Stopping",
   "statusTaskPhaseCompleted": "Task completed",
   "statusTaskPhaseBlocked": "Task blocked",
   "statusTaskPhaseFailed": "Task failed",

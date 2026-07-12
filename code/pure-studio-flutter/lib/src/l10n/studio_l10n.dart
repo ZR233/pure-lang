@@ -55,6 +55,7 @@ extension StudioLocalizationsX on BuildContext {
       'resolvingConflict' => l10n.statusTaskPhaseResolvingConflict,
       'reviewing' => l10n.statusTaskPhaseReviewing,
       'reworking' => l10n.statusTaskPhaseReworking,
+      'stopping' => l10n.statusTaskPhaseStopping,
       'completed' => l10n.statusTaskPhaseCompleted,
       'blocked' => l10n.statusTaskPhaseBlocked,
       'failed' => l10n.statusTaskPhaseFailed,

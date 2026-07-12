@@ -1,6 +1,6 @@
 part of '../widget_test.dart';
 
-const _responsiveActivityLabel = '1 skill · 1 MCP · 1 LSP · 2 agents';
+const _responsiveActivityLabel = '1 skill · 1 MCP · 1 LSP · 1 agent';
 
 const _responsiveViewports = [
   (name: '1280x800', size: Size(1280, 800)),
