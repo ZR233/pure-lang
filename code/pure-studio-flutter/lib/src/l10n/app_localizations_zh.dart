@@ -217,6 +217,117 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
+  String get statusTaskSection => '任务协调';
+
+  @override
+  String get statusTaskBranch => '分支';
+
+  @override
+  String get statusTaskHead => 'HEAD';
+
+  @override
+  String get statusTaskWorkUnits => '工作单元';
+
+  @override
+  String get statusTaskMerges => '合并与冲突';
+
+  @override
+  String get statusTaskReviews => '代码审查';
+
+  @override
+  String get statusTaskWorktree => '工作树';
+
+  @override
+  String get statusTaskCommit => '提交';
+
+  @override
+  String get statusTaskSource => '来源';
+
+  @override
+  String get statusTaskConflicts => '冲突';
+
+  @override
+  String get statusTaskPhasePlanning => '规划中';
+
+  @override
+  String get statusTaskPhasePendingConfirmation => '等待确认';
+
+  @override
+  String get statusTaskPhaseDesignUpdating => '更新设计';
+
+  @override
+  String get statusTaskPhaseImplementing => '实施中';
+
+  @override
+  String get statusTaskPhaseMerging => '合并中';
+
+  @override
+  String get statusTaskPhaseResolvingConflict => '解决冲突';
+
+  @override
+  String get statusTaskPhaseReviewing => '审查中';
+
+  @override
+  String get statusTaskPhaseReworking => '返工中';
+
+  @override
+  String get statusTaskPhaseCompleted => '任务已完成';
+
+  @override
+  String get statusTaskPhaseBlocked => '任务已阻塞';
+
+  @override
+  String get statusTaskPhaseFailed => '任务失败';
+
+  @override
+  String get statusTaskPhaseCancelled => '任务已取消';
+
+  @override
+  String get statusTaskStatusPending => '待处理';
+
+  @override
+  String get statusTaskStatusQueued => '排队中';
+
+  @override
+  String get statusTaskStatusRunning => '运行中';
+
+  @override
+  String get statusTaskStatusWaitingForDelivery => '等待交付';
+
+  @override
+  String get statusTaskStatusDelivered => '已交付';
+
+  @override
+  String get statusTaskStatusMerged => '已合并';
+
+  @override
+  String get statusTaskStatusCompleted => '已完成';
+
+  @override
+  String get statusTaskStatusFailed => '失败';
+
+  @override
+  String get statusTaskStatusCancelled => '已取消';
+
+  @override
+  String get statusTaskStatusConflicted => '存在冲突';
+
+  @override
+  String get statusTaskStatusVerifying => '验证中';
+
+  @override
+  String get statusTaskStatusAborted => '已中止';
+
+  @override
+  String get statusTaskStatusPass => '已通过';
+
+  @override
+  String get statusTaskStatusChangesRequired => '需要修改';
+
+  @override
+  String get statusTaskStatusBlocked => '已阻塞';
+
+  @override
   String get statusSkillsSection => 'Skills';
 
   @override
@@ -1120,6 +1231,117 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String statusAgentsCount(int count) {
     return '$count 个 agent';
   }
+
+  @override
+  String get statusTaskSection => '任务协调';
+
+  @override
+  String get statusTaskBranch => '分支';
+
+  @override
+  String get statusTaskHead => 'HEAD';
+
+  @override
+  String get statusTaskWorkUnits => '工作单元';
+
+  @override
+  String get statusTaskMerges => '合并与冲突';
+
+  @override
+  String get statusTaskReviews => '代码审查';
+
+  @override
+  String get statusTaskWorktree => '工作树';
+
+  @override
+  String get statusTaskCommit => '提交';
+
+  @override
+  String get statusTaskSource => '来源';
+
+  @override
+  String get statusTaskConflicts => '冲突';
+
+  @override
+  String get statusTaskPhasePlanning => '规划中';
+
+  @override
+  String get statusTaskPhasePendingConfirmation => '等待确认';
+
+  @override
+  String get statusTaskPhaseDesignUpdating => '更新设计';
+
+  @override
+  String get statusTaskPhaseImplementing => '实施中';
+
+  @override
+  String get statusTaskPhaseMerging => '合并中';
+
+  @override
+  String get statusTaskPhaseResolvingConflict => '解决冲突';
+
+  @override
+  String get statusTaskPhaseReviewing => '审查中';
+
+  @override
+  String get statusTaskPhaseReworking => '返工中';
+
+  @override
+  String get statusTaskPhaseCompleted => '任务已完成';
+
+  @override
+  String get statusTaskPhaseBlocked => '任务已阻塞';
+
+  @override
+  String get statusTaskPhaseFailed => '任务失败';
+
+  @override
+  String get statusTaskPhaseCancelled => '任务已取消';
+
+  @override
+  String get statusTaskStatusPending => '待处理';
+
+  @override
+  String get statusTaskStatusQueued => '排队中';
+
+  @override
+  String get statusTaskStatusRunning => '运行中';
+
+  @override
+  String get statusTaskStatusWaitingForDelivery => '等待交付';
+
+  @override
+  String get statusTaskStatusDelivered => '已交付';
+
+  @override
+  String get statusTaskStatusMerged => '已合并';
+
+  @override
+  String get statusTaskStatusCompleted => '已完成';
+
+  @override
+  String get statusTaskStatusFailed => '失败';
+
+  @override
+  String get statusTaskStatusCancelled => '已取消';
+
+  @override
+  String get statusTaskStatusConflicted => '存在冲突';
+
+  @override
+  String get statusTaskStatusVerifying => '验证中';
+
+  @override
+  String get statusTaskStatusAborted => '已中止';
+
+  @override
+  String get statusTaskStatusPass => '已通过';
+
+  @override
+  String get statusTaskStatusChangesRequired => '需要修改';
+
+  @override
+  String get statusTaskStatusBlocked => '已阻塞';
 
   @override
   String get statusSkillsSection => 'Skills';

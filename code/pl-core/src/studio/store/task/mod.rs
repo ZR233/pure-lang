@@ -109,6 +109,20 @@ impl StudioStore {
             .context("active task run not found for this session")
     }
 
+    pub(crate) async fn find_latest_task_run_for_session(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<TaskRunRecord>> {
+        entities::task_run::Entity::find()
+            .filter(entities::task_run::Column::SessionId.eq(session_id.to_string()))
+            .order_by_desc(entities::task_run::Column::CreatedAt)
+            .order_by_desc(entities::task_run::Column::Id)
+            .one(&self.db)
+            .await?
+            .map(task_run_record)
+            .transpose()
+    }
+
     pub(crate) async fn find_active_task_run_for_session(
         &self,
         session_id: &str,

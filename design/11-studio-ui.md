@@ -207,3 +207,7 @@ Flutter 窗口 resize 时 UI 不应持续触发昂贵测量。Timeline 的贴底
 计划确认 dock 的固定文案语义为“实施此计划？”：主操作是实施计划，次操作是从同一卡片内输入并提交调整要求，忽略动作保持弱化展示。所有固定 UI 文案必须走 i18n；模型名称、provider 名称、tool 名称、agent 路径、reasoning effort 等领域值仍按原始字符串透传。
 
 用户选择“实施此计划”后，当前 session 保持 Task 模式并进入 coordinator 实施阶段。状态栏和活动详情展示 task phase、当前分支、agent 交付、merge、冲突和 review 状态；模式选择在任务非终态期间禁用。
+这些信息通过 `StudioSessionRuntime.task` 的 typed projection 进入 Flutter，不读取 raw JSON。
+活动摘要只显示本地化 task phase；弹层按 coordinator、work unit、merge/conflict 和 review
+分区展示 worktree、commit、来源与实际读取的 design 引用。存在 durable task 快照时不再
+重复叠加内存 agent 详情面板；长列表在单一、限高的滚动区内展示，760px 窗口不得溢出。

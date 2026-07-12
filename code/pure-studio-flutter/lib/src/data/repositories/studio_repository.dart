@@ -202,6 +202,7 @@ class StudioController extends AsyncNotifier<StudioState> {
     if (current == null ||
         sessionId == null ||
         current.isBusy ||
+        current.runtime.hasActiveTask ||
         current.sessions
                 .where((session) => session.id == sessionId)
                 .firstOrNull

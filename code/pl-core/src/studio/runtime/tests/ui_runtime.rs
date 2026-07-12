@@ -1,5 +1,83 @@
 use super::*;
+use crate::studio::task_coordinator::TaskRunPhase;
 use pretty_assertions::assert_eq;
+
+#[tokio::test]
+async fn active_task_locks_session_mode_and_projects_coordinator_runtime() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let home = std::env::temp_dir().join(format!("pure-task-runtime-home-{unique}"));
+    let workspace = std::env::temp_dir().join(format!("pure-task-runtime-workspace-{unique}"));
+    std::fs::create_dir_all(&workspace).unwrap();
+    for arguments in [
+        vec!["init"],
+        vec!["config", "user.email", "pure@example.com"],
+        vec!["config", "user.name", "Pure Tests"],
+    ] {
+        assert!(
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(&workspace)
+                .args(arguments)
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+    std::fs::write(workspace.join("README.md"), "task runtime\n").unwrap();
+    assert!(
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(&workspace)
+            .args(["add", "README.md"])
+            .status()
+            .unwrap()
+            .success()
+    );
+    assert!(
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(&workspace)
+            .args(["commit", "-m", "init"])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let config_store = ConfigStore::new(crate::config::ConfigPaths::from_home(&home));
+    let store = StudioStore::open_memory().await.unwrap();
+    let runtime = StudioRuntime::new(store.clone(), config_store);
+    let project = runtime.open_project(&workspace).await.unwrap();
+    let session = store
+        .create_session(&project.id, "Task runtime", CompileMode::Task)
+        .await
+        .unwrap();
+    let run = runtime
+        .task_coordinator
+        .start_confirmed_task(&session.id, "implement task runtime", &workspace)
+        .await
+        .unwrap();
+
+    let error = runtime
+        .set_session_mode(&session.id, CompileMode::Simple)
+        .await
+        .unwrap_err();
+    let view = runtime.session_runtime_view(&session.id).await.unwrap();
+    let task = view.task.unwrap();
+
+    assert!(error.to_string().contains("task is active"));
+    assert_eq!(task.run_id, run.id);
+    assert_eq!(task.phase, "designUpdating");
+    assert_eq!(task.branch, run.branch);
+    runtime
+        .task_coordinator
+        .finish_task(&run.id, TaskRunPhase::Cancelled, None)
+        .await
+        .unwrap();
+    let _ = std::fs::remove_dir_all(home);
+    let _ = std::fs::remove_dir_all(workspace);
+}
 
 #[tokio::test]
 async fn ui_submit_and_stop_are_core_runtime_apis() {

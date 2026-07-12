@@ -447,6 +447,62 @@ void registerSnapshotJsonTests() {
     expect(payload.delta.revision, 4);
   });
 
+  test('FRB runtime event projects typed task coordinator detail', () {
+    final event = StudioBridgeEvent.fromFrb(
+      frb.BridgeEventEnvelope(
+        eventId: 'event-task-runtime',
+        sessionId: 'session-1',
+        sequence: BigInt.from(10),
+        createdAt: 1,
+        payload: frb.BridgeEventPayload.sessionRuntimeChanged(
+          runtime: frb.BridgeSessionRuntimeDto(
+            sessionId: 'session-1',
+            model: 'planner/local',
+            contextWindow: BigInt.from(100000),
+            latestContextTokens: BigInt.from(10),
+            promptTokens: BigInt.from(10),
+            completionTokens: BigInt.zero,
+            cachedPromptTokens: BigInt.zero,
+            totalTokens: BigInt.from(10),
+            estimatedCosts: const [],
+            hasUnpricedUsage: false,
+            activeSkills: const [],
+            activeMcpServers: const [],
+            activeLspServers: const [],
+            updatedAt: 1,
+            task: const frb.BridgeTaskRuntimeDto(
+              runId: 'run-1',
+              phase: 'reviewing',
+              branch: 'codex/task',
+              expectedHead: 'abcdef123456',
+              statusMessage: 'Review returned',
+              workUnits: [],
+              agents: [],
+              merges: [],
+              reviews: [
+                frb.BridgeTaskReviewDto(
+                  round: 1,
+                  headCommit: 'abcdef123456',
+                  verdict: 'pass',
+                  reviewerAgentId: 'reviewer-1',
+                  summary: 'Passed',
+                  designReferences: ['design/16-task-orchestration.md#UI'],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final payload = event.payload as SessionRuntimeChangedPayload;
+    expect(payload.runtime.task?.phase, 'reviewing');
+    expect(payload.runtime.task?.branch, 'codex/task');
+    expect(payload.runtime.task?.reviews.single.designReferences, [
+      'design/16-task-orchestration.md#UI',
+    ]);
+  });
+
   test('FRB typed message part events reject unknown part types', () {
     expect(
       () => StudioBridgeEvent.fromFrb(

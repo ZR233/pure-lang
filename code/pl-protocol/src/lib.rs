@@ -31,6 +31,7 @@ pub use studio_event::{
     StudioKeyValue, StudioLspHealth, StudioLspServer, StudioMcpHealth, StudioMcpServer,
     StudioMessage, StudioMessageRole, StudioMessageStatus, StudioPart, StudioPartDelta,
     StudioPartDeltaField, StudioPartStatus, StudioPartType, StudioPlanPart, StudioRuntimeUsage,
-    StudioSessionHandoff, StudioSessionRuntime, StudioSessionSummary, StudioTextChannel,
-    StudioToolPart, StudioTurn, StudioTurnStatus,
+    StudioSessionHandoff, StudioSessionRuntime, StudioSessionSummary, StudioTaskAgentRuntime,
+    StudioTaskMergeRuntime, StudioTaskReviewRuntime, StudioTaskRuntime, StudioTaskWorkUnitRuntime,
+    StudioTextChannel, StudioToolPart, StudioTurn, StudioTurnStatus,
 };

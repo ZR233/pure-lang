@@ -476,6 +476,228 @@ abstract class AppLocalizations {
   /// **'{count, plural, =1{1 agent} other{{count} agents}}'**
   String statusAgentsCount(int count);
 
+  /// No description provided for @statusTaskSection.
+  ///
+  /// In en, this message translates to:
+  /// **'Task coordinator'**
+  String get statusTaskSection;
+
+  /// No description provided for @statusTaskBranch.
+  ///
+  /// In en, this message translates to:
+  /// **'Branch'**
+  String get statusTaskBranch;
+
+  /// No description provided for @statusTaskHead.
+  ///
+  /// In en, this message translates to:
+  /// **'HEAD'**
+  String get statusTaskHead;
+
+  /// No description provided for @statusTaskWorkUnits.
+  ///
+  /// In en, this message translates to:
+  /// **'Work units'**
+  String get statusTaskWorkUnits;
+
+  /// No description provided for @statusTaskMerges.
+  ///
+  /// In en, this message translates to:
+  /// **'Merges and conflicts'**
+  String get statusTaskMerges;
+
+  /// No description provided for @statusTaskReviews.
+  ///
+  /// In en, this message translates to:
+  /// **'Reviews'**
+  String get statusTaskReviews;
+
+  /// No description provided for @statusTaskWorktree.
+  ///
+  /// In en, this message translates to:
+  /// **'Worktree'**
+  String get statusTaskWorktree;
+
+  /// No description provided for @statusTaskCommit.
+  ///
+  /// In en, this message translates to:
+  /// **'Commit'**
+  String get statusTaskCommit;
+
+  /// No description provided for @statusTaskSource.
+  ///
+  /// In en, this message translates to:
+  /// **'Source'**
+  String get statusTaskSource;
+
+  /// No description provided for @statusTaskConflicts.
+  ///
+  /// In en, this message translates to:
+  /// **'Conflicts'**
+  String get statusTaskConflicts;
+
+  /// No description provided for @statusTaskPhasePlanning.
+  ///
+  /// In en, this message translates to:
+  /// **'Planning'**
+  String get statusTaskPhasePlanning;
+
+  /// No description provided for @statusTaskPhasePendingConfirmation.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for confirmation'**
+  String get statusTaskPhasePendingConfirmation;
+
+  /// No description provided for @statusTaskPhaseDesignUpdating.
+  ///
+  /// In en, this message translates to:
+  /// **'Updating design'**
+  String get statusTaskPhaseDesignUpdating;
+
+  /// No description provided for @statusTaskPhaseImplementing.
+  ///
+  /// In en, this message translates to:
+  /// **'Implementing'**
+  String get statusTaskPhaseImplementing;
+
+  /// No description provided for @statusTaskPhaseMerging.
+  ///
+  /// In en, this message translates to:
+  /// **'Merging'**
+  String get statusTaskPhaseMerging;
+
+  /// No description provided for @statusTaskPhaseResolvingConflict.
+  ///
+  /// In en, this message translates to:
+  /// **'Resolving conflicts'**
+  String get statusTaskPhaseResolvingConflict;
+
+  /// No description provided for @statusTaskPhaseReviewing.
+  ///
+  /// In en, this message translates to:
+  /// **'Reviewing'**
+  String get statusTaskPhaseReviewing;
+
+  /// No description provided for @statusTaskPhaseReworking.
+  ///
+  /// In en, this message translates to:
+  /// **'Reworking'**
+  String get statusTaskPhaseReworking;
+
+  /// No description provided for @statusTaskPhaseCompleted.
+  ///
+  /// In en, this message translates to:
+  /// **'Task completed'**
+  String get statusTaskPhaseCompleted;
+
+  /// No description provided for @statusTaskPhaseBlocked.
+  ///
+  /// In en, this message translates to:
+  /// **'Task blocked'**
+  String get statusTaskPhaseBlocked;
+
+  /// No description provided for @statusTaskPhaseFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Task failed'**
+  String get statusTaskPhaseFailed;
+
+  /// No description provided for @statusTaskPhaseCancelled.
+  ///
+  /// In en, this message translates to:
+  /// **'Task cancelled'**
+  String get statusTaskPhaseCancelled;
+
+  /// No description provided for @statusTaskStatusPending.
+  ///
+  /// In en, this message translates to:
+  /// **'Pending'**
+  String get statusTaskStatusPending;
+
+  /// No description provided for @statusTaskStatusQueued.
+  ///
+  /// In en, this message translates to:
+  /// **'Queued'**
+  String get statusTaskStatusQueued;
+
+  /// No description provided for @statusTaskStatusRunning.
+  ///
+  /// In en, this message translates to:
+  /// **'Running'**
+  String get statusTaskStatusRunning;
+
+  /// No description provided for @statusTaskStatusWaitingForDelivery.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for delivery'**
+  String get statusTaskStatusWaitingForDelivery;
+
+  /// No description provided for @statusTaskStatusDelivered.
+  ///
+  /// In en, this message translates to:
+  /// **'Delivered'**
+  String get statusTaskStatusDelivered;
+
+  /// No description provided for @statusTaskStatusMerged.
+  ///
+  /// In en, this message translates to:
+  /// **'Merged'**
+  String get statusTaskStatusMerged;
+
+  /// No description provided for @statusTaskStatusCompleted.
+  ///
+  /// In en, this message translates to:
+  /// **'Completed'**
+  String get statusTaskStatusCompleted;
+
+  /// No description provided for @statusTaskStatusFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Failed'**
+  String get statusTaskStatusFailed;
+
+  /// No description provided for @statusTaskStatusCancelled.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancelled'**
+  String get statusTaskStatusCancelled;
+
+  /// No description provided for @statusTaskStatusConflicted.
+  ///
+  /// In en, this message translates to:
+  /// **'Conflicted'**
+  String get statusTaskStatusConflicted;
+
+  /// No description provided for @statusTaskStatusVerifying.
+  ///
+  /// In en, this message translates to:
+  /// **'Verifying'**
+  String get statusTaskStatusVerifying;
+
+  /// No description provided for @statusTaskStatusAborted.
+  ///
+  /// In en, this message translates to:
+  /// **'Aborted'**
+  String get statusTaskStatusAborted;
+
+  /// No description provided for @statusTaskStatusPass.
+  ///
+  /// In en, this message translates to:
+  /// **'Passed'**
+  String get statusTaskStatusPass;
+
+  /// No description provided for @statusTaskStatusChangesRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Changes required'**
+  String get statusTaskStatusChangesRequired;
+
+  /// No description provided for @statusTaskStatusBlocked.
+  ///
+  /// In en, this message translates to:
+  /// **'Blocked'**
+  String get statusTaskStatusBlocked;
+
   /// No description provided for @statusSkillsSection.
   ///
   /// In en, this message translates to:

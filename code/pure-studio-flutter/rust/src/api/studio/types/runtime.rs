@@ -44,7 +44,68 @@ pub struct BridgeSessionRuntimeDto {
     pub active_skills: Vec<String>,
     pub active_mcp_servers: Vec<String>,
     pub active_lsp_servers: Vec<String>,
+    pub task: Option<BridgeTaskRuntimeDto>,
     pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeTaskRuntimeDto {
+    pub run_id: String,
+    pub phase: String,
+    pub branch: String,
+    pub expected_head: String,
+    pub status_message: Option<String>,
+    pub work_units: Vec<BridgeTaskWorkUnitDto>,
+    pub agents: Vec<BridgeTaskAgentDto>,
+    pub merges: Vec<BridgeTaskMergeDto>,
+    pub reviews: Vec<BridgeTaskReviewDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeTaskWorkUnitDto {
+    pub id: String,
+    pub title: String,
+    pub status: String,
+    pub worktree_path: String,
+    pub branch: String,
+    pub agent_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeTaskAgentDto {
+    pub agent_id: String,
+    pub role: String,
+    pub status: String,
+    pub initiated_by: String,
+    pub requested_by_call_id: String,
+    pub summary: Option<String>,
+    pub error: Option<String>,
+    pub head_commit: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeTaskMergeDto {
+    pub id: String,
+    pub agent_id: String,
+    pub status: String,
+    pub merge_commit: Option<String>,
+    pub conflict_files: Vec<String>,
+    pub resolution_summary: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeTaskReviewDto {
+    pub round: u32,
+    pub head_commit: String,
+    pub verdict: String,
+    pub reviewer_agent_id: Option<String>,
+    pub summary: Option<String>,
+    pub design_references: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
