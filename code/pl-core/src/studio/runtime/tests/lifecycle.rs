@@ -34,6 +34,45 @@ async fn failed_task_preflight_keeps_plan_confirmation_pending() {
     }
     std::fs::write(repository.join("dirty.txt"), "dirty\n").unwrap();
 
+    assert_failed_task_preflight_keeps_confirmation_pending(&repository, "dirty").await;
+    let _ = std::fs::remove_dir_all(repository);
+}
+
+#[tokio::test]
+async fn failed_initial_commit_hook_keeps_plan_confirmation_pending() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let repository = std::env::temp_dir().join(format!("pure-plan-hook-{unique}"));
+    std::fs::create_dir_all(&repository).unwrap();
+    let status = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&repository)
+        .args(["init", "-b", "main"])
+        .status()
+        .unwrap();
+    assert!(status.success());
+    std::fs::write(repository.join("README.md"), "initial\n").unwrap();
+    let hook = repository.join(".git/hooks/pre-commit");
+    std::fs::write(&hook, "#!/bin/sh\nexit 1\n").unwrap();
+    make_hook_executable(&hook);
+
+    assert_failed_task_preflight_keeps_confirmation_pending(&repository, "hook").await;
+    let head = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&repository)
+        .args(["rev-parse", "--verify", "HEAD"])
+        .output()
+        .unwrap();
+    assert!(!head.status.success());
+    let _ = std::fs::remove_dir_all(repository);
+}
+
+async fn assert_failed_task_preflight_keeps_confirmation_pending(
+    repository: &std::path::Path,
+    suffix: &str,
+) {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project(&repository).await.unwrap();
     let session = store
@@ -41,16 +80,19 @@ async fn failed_task_preflight_keeps_plan_confirmation_pending() {
         .await
         .unwrap();
     let interaction = pending_interaction(
-        "plan-confirm-dirty",
+        &format!("plan-confirm-{suffix}"),
         &session.id,
         InteractionKind::PlanConfirmation,
         InteractionPayload::PlanConfirmation {
-            plan_id: "plan-dirty".to_string(),
+            plan_id: format!("plan-{suffix}"),
             content: "Implement the plan".to_string(),
         },
     );
     store.upsert_interaction(&interaction).await.unwrap();
-    let home = std::env::temp_dir().join(format!("pure-plan-preflight-home-{unique}"));
+    let home = std::env::temp_dir().join(format!(
+        "pure-plan-preflight-home-{suffix}-{}",
+        std::process::id()
+    ));
     let runtime = StudioRuntime::with_runtime_state(
         store.clone(),
         ConfigStore::new(crate::config::ConfigPaths::from_home(&home)),
@@ -67,7 +109,7 @@ async fn failed_task_preflight_keeps_plan_confirmation_pending() {
             },
         )
         .await
-        .expect_err("dirty repository must fail before resolving confirmation");
+        .expect_err("repository preparation must fail before resolving confirmation");
 
     let stored = store
         .read_interaction(&interaction.interaction_id)
@@ -88,9 +130,20 @@ async fn failed_task_preflight_keeps_plan_confirmation_pending() {
                 PlanLifecycleState::Accepted | PlanLifecycleState::Implementing
             )
     )));
-    let _ = std::fs::remove_dir_all(repository);
     let _ = std::fs::remove_dir_all(home);
 }
+
+#[cfg(unix)]
+fn make_hook_executable(path: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mut permissions = std::fs::metadata(path).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(path, permissions).unwrap();
+}
+
+#[cfg(windows)]
+fn make_hook_executable(_path: &std::path::Path) {}
 
 #[tokio::test]
 async fn initialize_runtime_cancels_recovered_transient_interactions() {

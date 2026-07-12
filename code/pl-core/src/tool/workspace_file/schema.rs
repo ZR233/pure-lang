@@ -46,7 +46,7 @@ impl WorkspaceFileToolKind {
     pub fn description(self) -> &'static str {
         match self {
             Self::ReadFile => {
-                "Read a UTF-8 text file from the agent workspace with bounded output. Use lineStart/lineCount for source files or offset/maxBytes for byte paging."
+                "Read a UTF-8 text file from the agent workspace with bounded output. Use lineStart/lineCount for source lines or offset/maxBytes for byte paging. The field `limit` is not supported."
             }
             Self::ListFiles => {
                 "List files from the agent workspace with an optional glob and bounded result count."
@@ -72,13 +72,21 @@ impl WorkspaceFileToolKind {
                 ),
                 (
                     "lineCount",
-                    json!({ "type": "integer", "minimum": 1 }),
+                    json!({
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Number of source lines to return with lineStart."
+                    }),
                     false,
                 ),
                 ("offset", json!({ "type": "integer", "minimum": 0 }), false),
                 (
                     "maxBytes",
-                    json!({ "type": "integer", "minimum": 1 }),
+                    json!({
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Maximum UTF-8 bytes to return; use with offset for paging."
+                    }),
                     false,
                 ),
             ]),

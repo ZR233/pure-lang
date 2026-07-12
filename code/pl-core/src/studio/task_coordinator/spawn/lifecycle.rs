@@ -240,6 +240,27 @@ impl AgentLifecycleHook for TaskAgentLifecycleHook {
         })
     }
 
+    fn commit_close<'a>(
+        &'a self,
+        request: &'a AgentCloseLifecycleRequest,
+    ) -> Pin<Box<dyn std::future::Future<Output = PureResult<()>> + Send + 'a>> {
+        Box::pin(async move {
+            if request.role != "executor"
+                || request.disposition != AgentCloseDispositionKind::Discard
+            {
+                return Ok(());
+            }
+            let lifecycle_token = request.lifecycle_token.as_deref().ok_or_else(|| {
+                spawn_error("task executor close requires an exact lifecycle token")
+            })?;
+            self.coordinator
+                .store
+                .cancel_executor_for_discard(&self.session_id, lifecycle_token, &request.agent_id)
+                .await
+                .map_err(|error| spawn_error(error.to_string()))
+        })
+    }
+
     fn project_snapshot<'a>(
         &'a self,
         request: &'a AgentLifecycleProjectionRequest,
@@ -702,6 +723,7 @@ mod tests {
             agent_id: "agent-executor".to_string(),
             agent_path: "/root/executor".to_string(),
             role: "executor".to_string(),
+            lifecycle_token: Some("work-unit-executor".to_string()),
             disposition: crate::agent::AgentCloseDispositionKind::Merge,
         };
         let error = fixture
@@ -847,6 +869,37 @@ mod tests {
             )
             .is_empty()
         );
+        let cancelled_work_unit = fixture
+            .store
+            .list_work_units(&fixture.run_id)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|unit| unit.id == work_unit.id)
+            .unwrap();
+        let cancelled_outcome = fixture
+            .store
+            .list_agent_outcomes(&fixture.run_id)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|outcome| outcome.agent_id == handle.id)
+            .unwrap();
+        assert_eq!(cancelled_work_unit.status, WorkUnitStatus::Cancelled);
+        assert_eq!(cancelled_outcome.status, AgentOutcomeStatus::Cancelled);
+
+        let replacement = fixture.request(
+            "agent-replacement",
+            "implement_replacement",
+            "executor",
+            vec!["code/pl-core/**"],
+        );
+        let replacement_preparation = fixture.hook.prepare_spawn(&replacement).await.unwrap();
+        fixture
+            .hook
+            .rollback_spawn(&replacement, &replacement_preparation, "test cleanup")
+            .await
+            .unwrap();
         fixture.cleanup();
     }
 

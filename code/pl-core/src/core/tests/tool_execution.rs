@@ -1,6 +1,50 @@
 use super::*;
 use pretty_assertions::assert_eq;
 
+#[derive(Debug)]
+struct ProviderCallIdEchoTool;
+
+impl Tool for ProviderCallIdEchoTool {
+    fn name(&self) -> &str {
+        "provider_call_id_echo"
+    }
+
+    fn description(&self) -> &str {
+        "Returns the stable provider call identity from ToolContext"
+    }
+
+    fn input_schema(&self) -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+        })
+    }
+
+    fn execute<'a>(
+        &'a self,
+        _input: ToolInput,
+        context: ToolContext,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = std::result::Result<ToolOutput, PureError>>
+                + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async move {
+            Ok(ToolOutput {
+                description: context.provider_call_id.unwrap_or_default(),
+                truncated: OutputTruncation::empty(),
+                output_file: PathBuf::new(),
+                exit_code: None,
+                timed_out: false,
+                runtime_events: Vec::new(),
+            })
+        })
+    }
+}
+
 fn read_file_result_text(result: Option<&str>) -> String {
     serde_json::from_str::<serde_json::Value>(result.expect("tool result"))
         .expect("read_file json")
@@ -8,6 +52,46 @@ fn read_file_result_text(result: Option<&str>) -> String {
         .and_then(serde_json::Value::as_str)
         .expect("text")
         .to_string()
+}
+
+#[tokio::test]
+async fn tool_context_uses_item_id_when_provider_call_id_is_missing() {
+    let mut core = PureCore::default_provider().unwrap();
+    core.register_tool(ProviderCallIdEchoTool);
+    let tool_call = ToolCall::function(
+        "chat-tool-call-1",
+        "provider_call_id_echo",
+        serde_json::json!({}),
+        None,
+    );
+    let (event_tx, _) = tokio::sync::broadcast::channel(8);
+    let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
+    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(60_000));
+
+    let records = execute_tool_calls(
+        &[tool_call],
+        &mut budget,
+        &mut recorder,
+        ToolExecutionContext {
+            core: &core,
+            options: &TurnOptions::default(),
+            mode: crate::turn::CompileMode::Simple,
+            session_id: "turn-1",
+            workspace_root: &std::env::temp_dir(),
+            workspace_instructions: None,
+            instruction_snapshot: None,
+            active_subagent: None,
+            agent_supervisor: crate::AgentSupervisor::default(),
+            agent_tool_registrar: None,
+            parent_session: std::sync::Arc::new(CoreSession::new()),
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].result, "chat-tool-call-1");
+    assert_eq!(records[0].call_id, None);
 }
 
 #[tokio::test]

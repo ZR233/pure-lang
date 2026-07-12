@@ -49,7 +49,7 @@ pub fn completion_response_preview(response: &pl_model::CompletionResponse) -> S
         format!(
             "function_call {} {}: {}",
             call.name,
-            call.call_id.as_deref().unwrap_or(&call.id),
+            call.stable_call_id(),
             call.payload_text()
         )
     }));
@@ -215,7 +215,7 @@ pub fn completion_response_snapshot(
     }
     output.extend(response.tool_calls.iter().map(|call| {
         CompletionResponseOutputSnapshot::function_call(
-            call.call_id.clone().unwrap_or_else(|| call.id.clone()),
+            call.stable_call_id(),
             call.name.clone(),
             call.arguments_for_tool(),
             call.payload_text(),

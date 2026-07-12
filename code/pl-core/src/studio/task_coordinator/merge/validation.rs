@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 
 use super::git::{checked_git, run_git};
+use crate::agent::worktree::same_worktree_path;
 use crate::studio::task_coordinator::{
     AgentDelivery, AgentOutcomeRecord, AgentOutcomeStatus, BranchLeaseRecord, TaskRunRecord,
     WorkUnitRecord, WorkUnitStatus,
@@ -20,23 +21,44 @@ pub(super) fn ensure_preflight_delivery_identity(
     outcome: &AgentOutcomeRecord,
     delivery: &AgentDelivery,
 ) -> Result<()> {
-    if outcome.task_run_id != task_run_id
-        || outcome.agent_id != agent_id
-        || outcome.owner_path != "/root"
-        || outcome.initiated_by != "planner"
-        || outcome.role != "executor"
-        || outcome.status != AgentOutcomeStatus::Completed
-        || outcome.work_unit_id.as_deref() != Some(work_unit.id.as_str())
-        || work_unit.task_run_id != task_run_id
-        || work_unit.agent_id.as_deref() != Some(agent_id)
+    let mut mismatches = Vec::new();
+    if outcome.task_run_id != task_run_id || work_unit.task_run_id != task_run_id {
+        mismatches.push("taskRunId");
+    }
+    if outcome.agent_id != agent_id || work_unit.agent_id.as_deref() != Some(agent_id) {
+        mismatches.push("agentId");
+    }
+    if outcome.owner_path != "/root" || outcome.initiated_by != "planner" {
+        mismatches.push("planner ownership");
+    }
+    if outcome.role != "executor" {
+        mismatches.push("role");
+    }
+    if outcome.status != AgentOutcomeStatus::Completed
         || work_unit.status != WorkUnitStatus::Delivered
-        || work_unit.attempt != outcome.attempt
-        || !(1..=3).contains(&work_unit.attempt)
-        || delivery.worktree.path != work_unit.worktree_path
-        || delivery.worktree.branch != work_unit.branch
-        || delivery.base_commit != work_unit.base_commit
     {
-        bail!("agent delivery does not match the planner-owned delivered work unit");
+        mismatches.push("delivery status");
+    }
+    if outcome.work_unit_id.as_deref() != Some(work_unit.id.as_str()) {
+        mismatches.push("workUnitId");
+    }
+    if work_unit.attempt != outcome.attempt || !(1..=3).contains(&work_unit.attempt) {
+        mismatches.push("attempt");
+    }
+    if !same_worktree_path(&delivery.worktree.path, &work_unit.worktree_path) {
+        mismatches.push("worktree path");
+    }
+    if delivery.worktree.branch != work_unit.branch {
+        mismatches.push("worktree branch");
+    }
+    if delivery.base_commit != work_unit.base_commit {
+        mismatches.push("base commit");
+    }
+    if !mismatches.is_empty() {
+        bail!(
+            "agent delivery does not match the planner-owned delivered work unit: {}",
+            mismatches.join(", ")
+        );
     }
     Ok(())
 }
@@ -78,7 +100,7 @@ pub(super) async fn validate_merge_preflight(
         true,
     )
     .await?;
-    if delivery.worktree.path != work_unit.worktree_path
+    if !same_worktree_path(&delivery.worktree.path, &work_unit.worktree_path)
         || delivery.worktree.branch != work_unit.branch
         || delivery.base_commit != work_unit.base_commit
     {

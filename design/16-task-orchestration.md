@@ -55,6 +55,11 @@ generation 在该 session 首次创建 `TaskRun` 时绑定 run id；run 终态�
 不得跨越停止 supervisor 的异步等待，不同 session 应能并行；shutdown 与获取/轮换通过
 registry 生命周期门禁互斥，避免清空期间漏掉或覆盖 supervisor。
 
+已分配 worktree 的 agent 在后续 `resume_agent` 与 `send_input(triggerTurn=true)` turn 中
+必须继续使用 agent entry 持有的 worktree path；父 planner 当前 workspace 只能提供模型与
+turn 配置，不能覆盖 child 的工作区。worktree 句柄缺失或与 durable assignment 不一致时
+拒绝启动 follow-up，不得回退到主工作区执行。
+
 Task lifecycle hook 在安装时绑定 Studio session，并通过该 per-session supervisor 边界选择
 持久 TaskRun；通用 `AgentSpawnLifecycleRequest.sessionId` 保持工具执行 turn scope 语义，
 不得被误作 Studio session 身份或与 hook 绑定值比较。
@@ -78,6 +83,19 @@ continuation。
 
 同一 Git common directory 与分支只允许一个写入任务。`BranchLease` 是进程内所有权，
 `expectedHead` CAS 和工作区清洁检查负责检测用户或外部进程的变化。
+用户确认实施时，任务启动边界先准备项目 Git 基线：有效仓库继续要求 named branch、
+有效 HEAD 和 clean working tree；完全不属于 Git 仓库的项目在项目根初始化 `main`，
+已初始化但尚无 HEAD 的仓库保留当前 named branch。两种无 HEAD 情况都按现有
+`.gitignore` 暂存全部项目文件，并创建 `chore: initialize Pure Studio workspace`
+首提交；空项目允许空提交。提交优先使用用户已有 Git identity，缺失时仅对该次提交
+临时使用 `Pure Studio <pure-studio@local>`，不得写入 local 或 global 配置。初始化和
+首提交是独立、持久的项目准备操作；其后 TaskRun、lease 或 continuation 启动失败不得
+回滚 `.git` 或改写该提交，重试必须幂等复用已经建立的 clean HEAD。只有任务启动入口
+允许执行该准备流程，恢复、交付、设计、合并和审查阶段的 repository 检查始终只读。
+已有仓库的 dirty、detached、merge/rebase 现场或损坏状态不得触发自动初始化。
+仓库准备阶段还必须幂等确保 Git 私有 `info/exclude` 包含 `.pure/worktrees/`，使
+coordinator 创建的内部 worktree 不会污染主工作区 clean 门禁；不得为此修改或提交用户的
+`.gitignore`。该规则同时适用于已有仓库与自动初始化仓库。
 任务进入 `blocked` 时必须在同一 SQLite 事务中更新 `TaskRun` 并删除 durable
 `BranchLease`，随后释放进程 lease；诊断事实保留，但不得永久阻塞同一分支的新任务。
 
@@ -122,6 +140,11 @@ delivery 必须复用同一个解析模型，避免两条路径产生不同边�
 
 Task executor 的通用 `close_agent merge=true` 必须在进入 worktree merge 路径前拒绝；
 关闭或取消只允许丢弃 worktree。Task worktree 不得调用通用的隐式 `commit_all`。
+对 Pending、Running 或 WaitingForDelivery executor 执行 discard 时，Task lifecycle hook
+必须使用精确 lifecycle token，在一个事务中把配对 WorkUnit 与 AgentOutcome 幂等收束为
+Cancelled，并标记终态已观察；只有 durable 处置成功后 supervisor 才能释放 worktree。
+worktree 清理失败不回滚 Cancelled 事实，资源信息保留给恢复清理，但该 WorkUnit 不再占用
+ownedPaths。重复 discard 不得产生第二次状态迁移或 continuation。
 
 worktree 路径和分支包含 task run id：
 
@@ -269,6 +292,11 @@ tool trace 校验 reviewer 先成功定位文档，再以规范的 workspace-rel
 `review_exit` 便终结的 reviewer 会把本轮与 outcome 标记为失败，并恢复到可实施阶段，
 不得伪造通过或重复触发 continuation。`changesRequired` 返回 planner 派发修复
 executor；修复合并后必须创建新的 reviewer。最多三轮审查修复。
+
+所有 provider 工具调用使用同一个稳定调用身份：优先采用非空 provider `call_id`，缺失时
+回退到通用 ToolCall `id`。消息历史、tool context、review/merge/conflict authorization 与
+agent requestedByCallId 必须消费同一身份，使 Chat Completions 与 Responses provider
+具有一致的 harness 关联语义。
 
 只有 design 一致、所有交付已处理、当前分支干净、最新 reviewer 对当前 HEAD 返回
 `pass` 且验证通过时，planner 才能调用 `task_complete`。

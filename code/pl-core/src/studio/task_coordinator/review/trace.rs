@@ -32,7 +32,9 @@ pub(super) async fn validate_review_trace(
             continue;
         }
         if !locator_seen {
-            bail!("reviewer must locate relevant design before reading it");
+            // A premature read cannot satisfy the gate, but it must not poison the
+            // entire round: the reviewer may still locate and re-read the document.
+            continue;
         }
         let arguments: serde_json::Value = serde_json::from_str(
             metadata
@@ -51,6 +53,9 @@ pub(super) async fn validate_review_trace(
             .get("path")
             .and_then(serde_json::Value::as_str)
             .context("read_file history has no path")?;
+        if !is_design_read_candidate(path) {
+            continue;
+        }
         let normalized = validate_design_read_path(workspace, path).await?;
         let returned: serde_json::Value = serde_json::from_str(&output)?;
         let text = returned.get("text").and_then(serde_json::Value::as_str);
@@ -70,6 +75,10 @@ pub(super) async fn validate_review_trace(
         bail!("reviewer must successfully read at least one relevant design document");
     }
     Ok(ReviewTrace { read_design })
+}
+
+fn is_design_read_candidate(path: &str) -> bool {
+    path == "design" || path.starts_with("design/") || path.starts_with("design\\")
 }
 
 fn successful_output(output: &str) -> bool {
@@ -161,7 +170,51 @@ mod tests {
 
         let error = validate_review_trace(&session, &root).await.unwrap_err();
 
-        assert!(error.to_string().contains("locate relevant design"));
+        assert!(error.to_string().contains("search_files or list_files"));
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[tokio::test]
+    async fn premature_read_can_recover_by_locating_and_reading_again() {
+        let root = std::env::temp_dir().join(format!(
+            "pure-review-trace-recovery-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("design")).unwrap();
+        std::fs::write(root.join("design/guide.md"), "# Guide\n").unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/lib.rs"), "pub fn live() {}\n").unwrap();
+        let read = || {
+            crate::tool_result_history_message(
+                "call-read".to_string(),
+                "read_file".to_string(),
+                r#"{"path":"design/guide.md"}"#.to_string(),
+                r##"{"path":"design/guide.md","text":"# Guide\n"}"##.to_string(),
+            )
+        };
+        let session = crate::CoreSession::from_messages(vec![
+            read(),
+            crate::tool_result_history_message(
+                "call-list".to_string(),
+                "list_files".to_string(),
+                r#"{"path":"design"}"#.to_string(),
+                r#"{"files":["design/guide.md"]}"#.to_string(),
+            ),
+            read(),
+            crate::tool_result_history_message(
+                "call-read-source".to_string(),
+                "read_file".to_string(),
+                r#"{"path":"src/lib.rs"}"#.to_string(),
+                r##"{"path":"src/lib.rs","text":"pub fn live() {}\n"}"##.to_string(),
+            ),
+        ]);
+
+        let trace = validate_review_trace(&session, &root).await.unwrap();
+
+        assert_eq!(trace.read_design["design/guide.md"], "# Guide\n");
         std::fs::remove_dir_all(root).ok();
     }
 }

@@ -22,6 +22,25 @@ struct RecordingSpawnLifecycleHook {
 }
 
 #[derive(Debug)]
+struct RecordingWorkspaceRegistrar {
+    workspaces: Arc<Mutex<Vec<PathBuf>>>,
+}
+
+impl AgentToolRegistrar for RecordingWorkspaceRegistrar {
+    fn register_tools<'a>(
+        &'a self,
+        _core: &'a mut crate::PureCore,
+        workspace_root: PathBuf,
+        _workspace_instructions: Option<String>,
+    ) -> Pin<Box<dyn std::future::Future<Output = pl_protocol::Result<()>> + Send + 'a>> {
+        Box::pin(async move {
+            self.workspaces.lock().await.push(workspace_root);
+            Ok(())
+        })
+    }
+}
+
+#[derive(Debug)]
 struct FailingRollbackLifecycleHook {
     calls: Arc<Mutex<Vec<String>>>,
     worktree: WorktreeCreateSpec,
@@ -782,6 +801,93 @@ async fn followup_capacity_failure_does_not_mutate_agent_mailbox_or_status() {
     assert_eq!(entry.record.status, AgentStatus::Waiting);
     assert!(entry.mailbox.is_empty());
     assert!(entry.task.is_none());
+}
+
+#[tokio::test]
+async fn executor_followup_reuses_assigned_worktree_instead_of_parent_workspace() {
+    let supervisor = AgentSupervisor::default();
+    let record = agent_record("worker", AgentStatus::Waiting);
+    let assigned_worktree = PathBuf::from("C:/repo/.pure/worktrees/run/worker");
+    {
+        let mut state = supervisor.state.lock().await;
+        state
+            .path_to_id
+            .insert(record.path.clone(), record.id.clone());
+        let mut entry = AgentEntry::new(record.clone());
+        entry.worktree = Some(WorktreeHandle {
+            path: assigned_worktree.clone(),
+            branch: "pure-task-run-worker".to_string(),
+        });
+        entry.lifecycle_token = Some("work-unit-worker".to_string());
+        state.agents.insert(record.id.clone(), entry);
+    }
+    let workspaces = Arc::new(Mutex::new(Vec::new()));
+    let mut run_spec = test_run_spec("continue");
+    run_spec.workspace_root = PathBuf::from("C:/repo");
+    run_spec.tool_registrar = Some(Arc::new(RecordingWorkspaceRegistrar {
+        workspaces: workspaces.clone(),
+    }));
+    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+
+    supervisor
+        .send_message(AgentMessageRequest {
+            current_path: AgentPath::ROOT,
+            target: "/root/worker",
+            message: "continue in the assigned worktree".to_string(),
+            mode: AgentMessageMode::TriggerTurn,
+            run_spec: Some(run_spec),
+            event_tx: &event_tx,
+            call_id: "call-followup".to_string(),
+        })
+        .await
+        .unwrap();
+
+    timeout(Duration::from_secs(1), async {
+        loop {
+            if !workspaces.lock().await.is_empty() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("follow-up registrar did not run");
+    assert_eq!(workspaces.lock().await.as_slice(), [assigned_worktree]);
+}
+
+#[tokio::test]
+async fn executor_followup_rejects_missing_assigned_worktree_without_mutating_mailbox() {
+    let supervisor = AgentSupervisor::default();
+    let record = agent_record("worker", AgentStatus::Waiting);
+    insert_agent(&supervisor, record).await;
+    supervisor
+        .state
+        .lock()
+        .await
+        .agents
+        .get_mut("worker")
+        .unwrap()
+        .lifecycle_token = Some("work-unit-worker".to_string());
+    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+
+    let error = supervisor
+        .send_message(AgentMessageRequest {
+            current_path: AgentPath::ROOT,
+            target: "/root/worker",
+            message: "continue".to_string(),
+            mode: AgentMessageMode::TriggerTurn,
+            run_spec: Some(test_run_spec("continue")),
+            event_tx: &event_tx,
+            call_id: "call-followup".to_string(),
+        })
+        .await
+        .expect_err("missing durable worktree must reject follow-up");
+
+    assert!(error.to_string().contains("has no assigned worktree"));
+    let state = supervisor.state.lock().await;
+    let entry = state.agents.get("worker").unwrap();
+    assert_eq!(entry.record.status, AgentStatus::Waiting);
+    assert!(entry.mailbox.is_empty());
 }
 
 #[tokio::test]

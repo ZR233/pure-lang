@@ -15,7 +15,7 @@ use crate::tool::{
 };
 use crate::turn::{CompileMode, ToolEffect, TurnExecutionRole};
 
-const REVIEWER_CONSTRAINT: &str = "你是只读代码审查者。先检查完整 plan、综合 diff 和受影响代码；必须使用 search_files 或 list_files 定位相关 design 文档，并用 read_file 阅读审查所需正文。对照实际读取的 design 检查一致性，同时检查 bug、回归、安全与测试缺口。所有设计结论必须引用实际读取的 design 路径和章节。只能调用只读工具与 review_exit；禁止修改、派生代理、修复、合并或宣布任务完成。";
+const REVIEWER_CONSTRAINT: &str = "你是只读代码审查者。先检查完整 plan、综合 diff 和受影响代码。工具顺序是强制门禁：在任何 design read_file 之前，必须先调用 search_files 或 list_files 定位相关 design 文档；然后用 read_file 阅读审查所需正文。对照实际读取的 design 检查一致性，同时检查 bug、回归、安全与测试缺口。所有设计结论必须引用实际读取的 design 路径和章节。最终必须成功调用 review_exit，普通文本结论不算完成；如果结论为 pass，findings 必须是空数组，不要把已通过的检查或 info 说明作为 finding；如果 review_exit 被拒绝，必须根据错误补齐 locator、重新 read_file 并再次调用 review_exit。只能调用只读工具与 review_exit；禁止修改、派生代理、修复、合并或宣布任务完成。";
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]

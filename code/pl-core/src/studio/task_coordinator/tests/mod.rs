@@ -18,6 +18,8 @@ use crate::{
     TurnBudget, TurnExecutionProfile, TurnOptions,
 };
 
+mod live;
+
 #[tokio::test]
 async fn task_merge_agent_tool_has_typed_schema_branch_effect_and_planner_only_visibility() {
     let coordinator = Arc::new(TaskCoordinator::new(
@@ -218,6 +220,13 @@ async fn reviewer_terminal_without_review_exit_fails_round_and_restores_phase() 
         .pop()
         .unwrap();
     assert_eq!(outcome.status, AgentOutcomeStatus::Failed);
+    let retry = fixture
+        .store
+        .begin_task_review(&fixture.session_id, "call-review-retry")
+        .await
+        .unwrap();
+    assert_eq!(retry.round, 2);
+    assert_eq!(retry.head_commit, round.head_commit);
     fixture.cleanup();
 }
 
@@ -5078,6 +5087,154 @@ async fn drain_studio_agent_events(
 }
 
 #[tokio::test]
+async fn task_start_initializes_non_repository_and_preserves_the_baseline_on_lease_failure() {
+    let project = temporary_project("start-initializes-files");
+    std::fs::write(project.join("README.md"), "initial\n").unwrap();
+    std::fs::write(project.join(".gitignore"), "ignored.txt\n").unwrap();
+    std::fs::write(project.join("ignored.txt"), "secret\n").unwrap();
+    let store = task_store(&project).await;
+    let session = task_session(&store, &project).await;
+    let competing_session = store
+        .create_session(&session.project_id, "Competing task", CompileMode::Task)
+        .await
+        .unwrap();
+    let coordinator = TaskCoordinator::new(store.clone());
+
+    let run = coordinator
+        .start_confirmed_task(&session.id, "plan", &project)
+        .await
+        .unwrap();
+
+    assert_eq!(run.branch, "main");
+    assert_eq!(git_output(&project, &["rev-list", "--count", "HEAD"]), "1");
+    assert_eq!(
+        git_output(&project, &["log", "-1", "--pretty=%s"]),
+        "chore: initialize Pure Studio workspace"
+    );
+    assert_eq!(
+        git_output(&project, &["ls-tree", "-r", "--name-only", "HEAD"]),
+        ".gitignore\nREADME.md"
+    );
+    assert!(git_output(&project, &["status", "--porcelain=v1"]).is_empty());
+    let internal_worktree = project.join(".pure/worktrees/run/agent");
+    std::fs::create_dir_all(&internal_worktree).unwrap();
+    std::fs::write(internal_worktree.join("internal.txt"), "runtime\n").unwrap();
+    assert!(git_output(&project, &["status", "--porcelain=v1"]).is_empty());
+    assert!(
+        std::fs::read_to_string(project.join(".git/info/exclude"))
+            .unwrap()
+            .lines()
+            .any(|line| line.trim() == ".pure/worktrees/")
+    );
+
+    coordinator
+        .start_confirmed_task(&competing_session.id, "competing plan", &project)
+        .await
+        .expect_err("active branch lease must still reject a competing task");
+    assert_eq!(git_output(&project, &["rev-list", "--count", "HEAD"]), "1");
+
+    coordinator
+        .finish_task(
+            &run.id,
+            TaskRunPhase::Cancelled,
+            Some("test complete".into()),
+        )
+        .await
+        .unwrap();
+    remove_repository(project);
+}
+
+#[tokio::test]
+async fn task_start_initializes_an_empty_project_with_an_empty_commit() {
+    let project = temporary_project("start-initializes-empty");
+    let store = task_store(&project).await;
+    let session = task_session(&store, &project).await;
+    let coordinator = TaskCoordinator::new(store);
+
+    let run = coordinator
+        .start_confirmed_task(&session.id, "plan", &project)
+        .await
+        .unwrap();
+
+    assert_eq!(run.branch, "main");
+    assert!(git_output(&project, &["status", "--porcelain=v1"]).is_empty());
+    assert!(git_output(&project, &["ls-tree", "-r", "--name-only", "HEAD"]).is_empty());
+    coordinator
+        .finish_task(
+            &run.id,
+            TaskRunPhase::Cancelled,
+            Some("test complete".into()),
+        )
+        .await
+        .unwrap();
+    remove_repository(project);
+}
+
+#[tokio::test]
+async fn task_start_commits_an_unborn_branch_with_temporary_identity_only() {
+    let project = temporary_project("start-initializes-unborn");
+    git(&project, &["init", "-b", "draft"]);
+    git(&project, &["config", "user.name", ""]);
+    git(&project, &["config", "user.email", ""]);
+    std::fs::write(project.join("README.md"), "initial\n").unwrap();
+    let store = task_store(&project).await;
+    let session = task_session(&store, &project).await;
+    let coordinator = TaskCoordinator::new(store);
+
+    let run = coordinator
+        .start_confirmed_task(&session.id, "plan", &project)
+        .await
+        .unwrap();
+
+    assert_eq!(run.branch, "draft");
+    assert_eq!(
+        git_output(&project, &["log", "-1", "--pretty=%an <%ae>"]),
+        "Pure Studio <pure-studio@local>"
+    );
+    assert!(git_output(&project, &["config", "--local", "--get", "user.name"]).is_empty());
+    assert!(git_output(&project, &["config", "--local", "--get", "user.email"]).is_empty());
+    coordinator
+        .finish_task(
+            &run.id,
+            TaskRunPhase::Cancelled,
+            Some("test complete".into()),
+        )
+        .await
+        .unwrap();
+    remove_repository(project);
+}
+
+#[tokio::test]
+async fn task_start_keeps_unborn_repository_and_no_run_when_initial_commit_hook_fails() {
+    let project = temporary_project("start-initial-hook-failure");
+    git(&project, &["init", "-b", "main"]);
+    std::fs::write(project.join("README.md"), "initial\n").unwrap();
+    let hook = project.join(".git/hooks/pre-commit");
+    std::fs::write(&hook, "#!/bin/sh\nexit 1\n").unwrap();
+    make_executable(&hook);
+    let store = task_store(&project).await;
+    let session = task_session(&store, &project).await;
+    let coordinator = TaskCoordinator::new(store.clone());
+
+    let error = coordinator
+        .start_confirmed_task(&session.id, "plan", &project)
+        .await
+        .expect_err("a failing initial commit hook must stop task creation");
+
+    assert!(error.to_string().contains("initial Git commit failed"));
+    assert!(project.join(".git").is_dir());
+    assert!(store.list_active_task_runs().await.unwrap().is_empty());
+    let head = Command::new("git")
+        .arg("-C")
+        .arg(&project)
+        .args(["rev-parse", "--verify", "HEAD"])
+        .output()
+        .unwrap();
+    assert!(!head.status.success());
+    remove_repository(project);
+}
+
+#[tokio::test]
 async fn task_start_requires_clean_named_branch() {
     let repository = init_repository("start-guards");
     let store = task_store(&repository).await;
@@ -5100,6 +5257,49 @@ async fn task_start_requires_clean_named_branch() {
     assert!(detached.to_string().contains("detached HEAD"));
 
     remove_repository(repository);
+}
+
+#[tokio::test]
+async fn task_start_rejects_existing_merge_rebase_and_corrupt_git_state() {
+    let repository = init_repository("start-operation-guards");
+    let store = task_store(&repository).await;
+    let session = task_session(&store, &repository).await;
+    let coordinator = TaskCoordinator::new(store);
+
+    std::fs::write(repository.join(".git/MERGE_HEAD"), "invalid\n").unwrap();
+    let merge = coordinator
+        .start_confirmed_task(&session.id, "plan", &repository)
+        .await
+        .expect_err("merge state must be rejected");
+    assert!(merge.to_string().contains("merge is in progress"));
+    std::fs::remove_file(repository.join(".git/MERGE_HEAD")).unwrap();
+
+    std::fs::create_dir(repository.join(".git/rebase-merge")).unwrap();
+    let rebase = coordinator
+        .start_confirmed_task(&session.id, "plan", &repository)
+        .await
+        .expect_err("rebase state must be rejected");
+    assert!(rebase.to_string().contains("rebase is in progress"));
+    remove_repository(repository);
+
+    let corrupt = temporary_project("start-corrupt-git");
+    std::fs::write(corrupt.join(".git"), "not a gitdir\n").unwrap();
+    let store = task_store(&corrupt).await;
+    let session = task_session(&store, &corrupt).await;
+    let error = TaskCoordinator::new(store)
+        .start_confirmed_task(&session.id, "plan", &corrupt)
+        .await
+        .expect_err("corrupt Git metadata must not be replaced");
+    assert!(
+        error
+            .to_string()
+            .contains("rev-parse --show-toplevel failed")
+    );
+    assert_eq!(
+        std::fs::read_to_string(corrupt.join(".git")).unwrap(),
+        "not a gitdir\n"
+    );
+    remove_repository(corrupt);
 }
 
 #[tokio::test]
@@ -5854,15 +6054,7 @@ async fn create_running_recovery_worktree(
 }
 
 fn init_repository(name: &str) -> PathBuf {
-    let stamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let path = std::env::temp_dir().join(format!(
-        "pure-task-coordinator-{name}-{}-{stamp}",
-        std::process::id()
-    ));
-    std::fs::create_dir_all(&path).unwrap();
+    let path = temporary_project(name);
     git(&path, &["init"]);
     git(&path, &["checkout", "-b", "main"]);
     git(&path, &["config", "user.email", "pure@example.invalid"]);
@@ -5875,6 +6067,31 @@ fn init_repository(name: &str) -> PathBuf {
     git(&path, &["commit", "-m", "initial"]);
     path
 }
+
+fn temporary_project(name: &str) -> PathBuf {
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let path = std::env::temp_dir().join(format!(
+        "pure-task-coordinator-{name}-{}-{stamp}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&path).unwrap();
+    path
+}
+
+#[cfg(unix)]
+fn make_executable(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mut permissions = std::fs::metadata(path).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(path, permissions).unwrap();
+}
+
+#[cfg(windows)]
+fn make_executable(_path: &Path) {}
 
 fn git(repository: &Path, args: &[&str]) {
     let output = Command::new("git")

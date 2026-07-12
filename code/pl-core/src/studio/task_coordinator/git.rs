@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Output};
+use std::sync::{Mutex, OnceLock};
 
 use anyhow::{Context, Result, bail};
 
@@ -9,6 +10,25 @@ pub(super) struct RepositorySnapshot {
     pub(super) git_common_dir: PathBuf,
     pub(super) branch: String,
     pub(super) head: String,
+}
+
+const INITIAL_COMMIT_MESSAGE: &str = "chore: initialize Pure Studio workspace";
+const FALLBACK_GIT_NAME: &str = "Pure Studio";
+const FALLBACK_GIT_EMAIL: &str = "pure-studio@local";
+const INTERNAL_WORKTREE_EXCLUDE: &str = ".pure/worktrees/";
+
+pub(super) async fn prepare_repository_for_task(
+    path: impl AsRef<Path>,
+) -> Result<RepositorySnapshot> {
+    let path = path.as_ref().to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        let _preparation_guard = repository_preparation_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        prepare_repository_for_task_blocking(&path)
+    })
+    .await
+    .context("git repository preparation task failed")?
 }
 
 pub(super) async fn inspect_repository(
@@ -140,16 +160,168 @@ fn inspect_repository_blocking(path: &Path, require_clean: bool) -> Result<Repos
     })
 }
 
+fn prepare_repository_for_task_blocking(path: &Path) -> Result<RepositorySnapshot> {
+    let metadata = std::fs::metadata(path)
+        .with_context(|| format!("task project path does not exist: {}", path.display()))?;
+    if !metadata.is_dir() {
+        bail!("task project path is not a directory: {}", path.display());
+    }
+
+    let repository_probe = git_command(path, &["rev-parse", "--show-toplevel"])?;
+    if !repository_probe.status.success() {
+        let error = git_error(&repository_probe);
+        if path.join(".git").exists() || !error.contains("not a git repository") {
+            bail!("git rev-parse --show-toplevel failed: {error}");
+        }
+        git_output(path, &["init", "-b", "main"])
+            .context("failed to initialize task project as a Git repository")?;
+    }
+
+    let workspace_root = PathBuf::from(git_output(path, &["rev-parse", "--show-toplevel"])?);
+    ensure_internal_worktrees_excluded(&workspace_root)?;
+    let branch = git_output(
+        &workspace_root,
+        &["symbolic-ref", "--quiet", "--short", "HEAD"],
+    )
+    .context("task mode requires a named branch; detached HEAD is not supported")?;
+    let head_probe = git_command(&workspace_root, &["rev-parse", "--verify", "HEAD"])?;
+    if !head_probe.status.success() {
+        create_initial_commit(&workspace_root)?;
+    }
+
+    ensure_no_task_start_git_operation(&workspace_root)?;
+    let snapshot = inspect_repository_blocking(&workspace_root, true)?;
+    if snapshot.branch != branch {
+        bail!("task project branch changed during Git repository preparation");
+    }
+    Ok(snapshot)
+}
+
+fn ensure_internal_worktrees_excluded(workspace_root: &Path) -> Result<()> {
+    let exclude_path = PathBuf::from(git_output(
+        workspace_root,
+        &["rev-parse", "--git-path", "info/exclude"],
+    )?);
+    let exclude_path = if exclude_path.is_absolute() {
+        exclude_path
+    } else {
+        workspace_root.join(exclude_path)
+    };
+    let content = std::fs::read_to_string(&exclude_path).unwrap_or_default();
+    if content
+        .lines()
+        .map(str::trim)
+        .any(|line| line == INTERNAL_WORKTREE_EXCLUDE)
+    {
+        return Ok(());
+    }
+    let parent = exclude_path
+        .parent()
+        .context("Git exclude path has no parent directory")?;
+    std::fs::create_dir_all(parent).context("failed to create Git info directory")?;
+    let mut updated = content;
+    if !updated.is_empty() && !updated.ends_with('\n') {
+        updated.push('\n');
+    }
+    updated.push_str(INTERNAL_WORKTREE_EXCLUDE);
+    updated.push('\n');
+    std::fs::write(&exclude_path, updated).context("failed to update Git private exclude file")
+}
+
+fn create_initial_commit(workspace_root: &Path) -> Result<()> {
+    git_output(workspace_root, &["add", "--all", "--", "."])
+        .context("failed to stage task project files for the initial Git commit")?;
+
+    let has_name = git_optional_output(workspace_root, &["config", "--get", "user.name"])?
+        .is_some_and(|value| !value.trim().is_empty());
+    let has_email = git_optional_output(workspace_root, &["config", "--get", "user.email"])?
+        .is_some_and(|value| !value.trim().is_empty());
+    let mut command = Command::new("git");
+    command
+        .env("LC_ALL", "C")
+        .env("LANG", "C")
+        .arg("-C")
+        .arg(workspace_root);
+    if !has_name {
+        command.args(["-c", &format!("user.name={FALLBACK_GIT_NAME}")]);
+    }
+    if !has_email {
+        command.args(["-c", &format!("user.email={FALLBACK_GIT_EMAIL}")]);
+    }
+    let output = command
+        .args(["commit", "--allow-empty", "-m", INITIAL_COMMIT_MESSAGE])
+        .output()
+        .context("failed to run git commit for task project initialization")?;
+    if !output.status.success() {
+        bail!("initial Git commit failed: {}", git_error(&output));
+    }
+    Ok(())
+}
+
+fn ensure_no_task_start_git_operation(workspace_root: &Path) -> Result<()> {
+    for (name, marker) in [
+        ("merge", "MERGE_HEAD"),
+        ("rebase", "rebase-merge"),
+        ("rebase", "rebase-apply"),
+    ] {
+        let marker_path = PathBuf::from(git_output(
+            workspace_root,
+            &["rev-parse", "--git-path", marker],
+        )?);
+        let marker_path = if marker_path.is_absolute() {
+            marker_path
+        } else {
+            workspace_root.join(marker_path)
+        };
+        if marker_path.exists() {
+            bail!("task mode cannot start while a Git {name} is in progress");
+        }
+    }
+    Ok(())
+}
+
+fn repository_preparation_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
 fn git_output(path: &Path, args: &[&str]) -> Result<String> {
-    let output = Command::new("git")
+    let output = git_command(path, args)?;
+    if !output.status.success() {
+        bail!("git {} failed: {}", args.join(" "), git_error(&output));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+fn git_optional_output(path: &Path, args: &[&str]) -> Result<Option<String>> {
+    let output = git_command(path, args)?;
+    if output.status.success() {
+        return Ok(Some(
+            String::from_utf8_lossy(&output.stdout).trim().to_string(),
+        ));
+    }
+    match output.status.code() {
+        Some(1) => Ok(None),
+        _ => bail!("git {} failed: {}", args.join(" "), git_error(&output)),
+    }
+}
+
+fn git_command(path: &Path, args: &[&str]) -> Result<Output> {
+    Command::new("git")
+        .env("LC_ALL", "C")
+        .env("LANG", "C")
         .arg("-C")
         .arg(path)
         .args(args)
         .output()
-        .with_context(|| format!("failed to run git {}", args.join(" ")))?;
-    if !output.status.success() {
-        let error = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        bail!("git {} failed: {error}", args.join(" "));
+        .with_context(|| format!("failed to run git {}", args.join(" ")))
+}
+
+fn git_error(output: &Output) -> String {
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if stderr.is_empty() {
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    } else {
+        stderr
     }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
