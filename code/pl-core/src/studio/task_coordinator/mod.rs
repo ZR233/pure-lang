@@ -7,6 +7,7 @@ mod git;
 mod merge;
 mod owned_path;
 mod recovery;
+pub(crate) mod review;
 mod spawn;
 mod terminal;
 mod types;

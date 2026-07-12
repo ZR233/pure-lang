@@ -31,7 +31,7 @@ impl StudioStore {
                     .one(&self.db)
                     .await?
             }
-            "explorer" => {
+            "explorer" | "reviewer" => {
                 entities::agent_outcome::Entity::find_by_id(lifecycle_token.to_string())
                     .one(&self.db)
                     .await?
@@ -146,7 +146,7 @@ impl StudioStore {
             }
             active_outcome.terminal_observed = Set(1);
             active_outcome.updated_at = Set(now);
-            let outcome = active_outcome.update(&tx).await?;
+            let mut outcome = active_outcome.update(&tx).await?;
 
             if let Some(work_unit_id) = outcome.work_unit_id.as_deref() {
                 let work_unit = entities::work_unit::Entity::find_by_id(work_unit_id.to_string())
@@ -166,6 +166,55 @@ impl StudioStore {
                     active_work_unit.status = Set(target.work_unit.as_str().to_string());
                     active_work_unit.updated_at = Set(now);
                     active_work_unit.update(&tx).await?;
+                }
+            }
+            if outcome.role == "reviewer" {
+                let rounds = entities::review_round::Entity::find()
+                    .filter(
+                        entities::review_round::Column::TaskRunId.eq(outcome.task_run_id.clone()),
+                    )
+                    .filter(
+                        entities::review_round::Column::ReviewerAgentId
+                            .eq(Some(outcome.agent_id.clone())),
+                    )
+                    .filter(
+                        entities::review_round::Column::Status
+                            .eq(crate::studio::task_coordinator::ReviewVerdict::Pending.as_str()),
+                    )
+                    .all(&tx)
+                    .await?;
+                let pending = match rounds.as_slice() {
+                    [] => None,
+                    [round] => Some(round.clone()),
+                    _ => bail!("reviewer has multiple pending review rounds"),
+                };
+                if let Some(round) = pending {
+                    let reason = change.error.clone().unwrap_or_else(|| {
+                        "reviewer terminated without a successful review_exit".to_string()
+                    });
+                    let mut outcome_active: entities::agent_outcome::ActiveModel = outcome.into();
+                    outcome_active.status = Set(AgentOutcomeStatus::Failed.as_str().to_string());
+                    outcome_active.error = Set(Some(reason.clone()));
+                    outcome_active.updated_at = Set(now);
+                    outcome = outcome_active.update(&tx).await?;
+                    let mut round_active: entities::review_round::ActiveModel =
+                        round.clone().into();
+                    round_active.status =
+                        Set(crate::studio::task_coordinator::ReviewVerdict::Failed
+                            .as_str()
+                            .to_string());
+                    round_active.summary = Set(Some(reason.clone()));
+                    round_active.updated_at = Set(now);
+                    round_active.update(&tx).await?;
+                    let mut run_active: entities::task_run::ActiveModel = run.into();
+                    run_active.phase = Set(if round.round == 1 {
+                        TaskRunPhase::Implementing.as_str().to_string()
+                    } else {
+                        TaskRunPhase::Reworking.as_str().to_string()
+                    });
+                    run_active.status_message = Set(Some(reason));
+                    run_active.updated_at = Set(now);
+                    run_active.update(&tx).await?;
                 }
             }
             Ok(TerminalAgentStateRecording::Changed {

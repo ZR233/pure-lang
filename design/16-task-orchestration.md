@@ -249,9 +249,18 @@ reviewer 初始上下文包含 plan、任务 diff、代理结果、验证摘要�
 预载 design 正文。系统提示词要求 reviewer 根据改动主动搜索并读取相关 design，再
 对照设计审查正确性、回归、安全和测试缺口。
 
+审查创建以 `task_request_review` 的 provider call id 作为一次性持久授权。harness 消费
+该授权后，`ReviewRound`、reviewer `AgentOutcome`、`ownerPath=/root` 和
+`requestedByCallId` 必须精确配对；直接派生 reviewer 或重复消费授权均拒绝。审查 diff
+固定为任务 base 到当前 `expectedHead` 的非 design 综合 diff，design 只提供排序后的
+文件索引，避免模型把预载正文误当作已经主动核验的设计依据。
+
 `review_exit` 返回 `verdict`、`summary`、`designReferences` 和 `findings`。runtime 根据
-tool trace 校验引用位于 `design/**` 且确实被 reviewer 读取。`changesRequired` 返回
-planner 派发修复 executor；修复合并后必须创建新的 reviewer。最多三轮审查修复。
+tool trace 校验 reviewer 先成功定位文档，再以规范的 workspace-relative 路径读取
+`design/**` 正文；路径、章节和 finding 引用都必须能在实际读取结果中验证。未调用
+`review_exit` 便终结的 reviewer 会把本轮与 outcome 标记为失败，并恢复到可实施阶段，
+不得伪造通过或重复触发 continuation。`changesRequired` 返回 planner 派发修复
+executor；修复合并后必须创建新的 reviewer。最多三轮审查修复。
 
 只有 design 一致、所有交付已处理、当前分支干净、最新 reviewer 对当前 HEAD 返回
 `pass` 且验证通过时，planner 才能调用 `task_complete`。

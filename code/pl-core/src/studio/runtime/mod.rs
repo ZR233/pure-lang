@@ -308,7 +308,7 @@ impl StudioRuntime {
                             } => {
                                 self.request_task_continuation(
                                     task_run_id,
-                                    ContinuationReason::AgentTerminal,
+                                    terminal_continuation_reason(&change.role),
                                 )
                                 .await;
                                 Some(projection)
@@ -491,6 +491,14 @@ impl StudioRuntime {
             self.mcp_runtime.available_server_names().await,
             self.lsp_runtime.active_server_names().await,
         ))
+    }
+}
+
+fn terminal_continuation_reason(role: &str) -> ContinuationReason {
+    if role == "reviewer" {
+        ContinuationReason::ReviewReturned
+    } else {
+        ContinuationReason::AgentTerminal
     }
 }
 

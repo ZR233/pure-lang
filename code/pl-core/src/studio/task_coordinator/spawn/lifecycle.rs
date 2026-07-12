@@ -116,6 +116,22 @@ impl AgentLifecycleHook for TaskAgentLifecycleHook {
                         work_unit_id,
                     ))
                 }
+                "reviewer" => {
+                    if !request.owned_paths.is_empty() {
+                        return Err(spawn_error("reviewer must not declare ownedPaths"));
+                    }
+                    let (_, outcome) = self
+                        .coordinator
+                        .store
+                        .authorize_reviewer_spawn(
+                            &self.session_id,
+                            &request.requested_by_call_id,
+                            &request.agent_id,
+                        )
+                        .await
+                        .map_err(|error| spawn_error(error.to_string()))?;
+                    Ok(AgentSpawnPreparation::with_token(outcome.id))
+                }
                 role => Err(spawn_error(format!("task {role} creation is harness-only"))),
             }
         })
@@ -138,7 +154,7 @@ impl AgentLifecycleHook for TaskAgentLifecycleHook {
                         .await
                         .map_err(|error| spawn_error(error.to_string()))?;
                 }
-                "explorer" => {
+                "explorer" | "reviewer" => {
                     if let Some(outcome_id) = preparation.lifecycle_token() {
                         self.coordinator
                             .store
@@ -189,6 +205,18 @@ impl AgentLifecycleHook for TaskAgentLifecycleHook {
                             .await
                             .map_err(|failure| spawn_error(failure.to_string()))?;
                     }
+                }
+                "reviewer" => {
+                    self.coordinator
+                        .store
+                        .fail_reviewer_spawn(
+                            &self.session_id,
+                            Some(&request.agent_id),
+                            &request.requested_by_call_id,
+                            error,
+                        )
+                        .await
+                        .map_err(|failure| spawn_error(failure.to_string()))?;
                 }
                 _ => {}
             }

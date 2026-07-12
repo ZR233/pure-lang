@@ -184,6 +184,17 @@ impl PureCore {
         self.agent_tool_registrar = Some(registrar);
     }
 
+    pub(crate) fn agent_tool_runtime(&self) -> crate::tool::AgentToolRuntime {
+        crate::tool::AgentToolRuntime::new(
+            self.provider.clone(),
+            self.reasoning_effort.clone(),
+            self.config.clone(),
+            self.mcp_runtime.clone(),
+            self.lsp_runtime.clone(),
+            self.workspace_instructions.clone(),
+        )
+    }
+
     pub(crate) fn set_agent_lifecycle_hook(
         &mut self,
         hook: std::sync::Arc<dyn crate::agent::AgentLifecycleHook>,

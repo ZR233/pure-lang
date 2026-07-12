@@ -36,6 +36,7 @@ struct DeliveryValidation<'a> {
 
 struct TaskToolRegistrar {
     coordinator: Arc<TaskCoordinator>,
+    session_id: String,
 }
 
 impl std::fmt::Debug for TaskToolRegistrar {
@@ -57,6 +58,7 @@ impl AgentToolRegistrar for TaskToolRegistrar {
             core.register_default_tools(workspace_root, workspace_instructions)
                 .await;
             core.register_tool(self.coordinator.submit_delivery_tool());
+            core.register_tool(self.coordinator.review_exit_tool(&self.session_id));
             Ok(())
         })
     }
@@ -64,13 +66,16 @@ impl AgentToolRegistrar for TaskToolRegistrar {
 
 impl TaskCoordinator {
     pub(crate) fn install_tools(self: &Arc<Self>, core: &mut PureCore, session_id: &str) {
+        let agent_runtime = core.agent_tool_runtime();
         core.register_tool(self.submit_delivery_tool());
         core.register_tool(self.task_update_design_tool(session_id));
         core.register_tool(self.task_merge_agent_tool(session_id));
+        core.register_tool(self.task_request_review_tool(session_id, agent_runtime));
         self.register_conflict_tools(core, session_id);
         core.set_agent_lifecycle_hook(self.lifecycle_hook(session_id));
         core.set_agent_tool_registrar(Arc::new(TaskToolRegistrar {
             coordinator: self.clone(),
+            session_id: session_id.to_string(),
         }));
     }
 
