@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 
 use super::git::run_git;
 use crate::studio::task_coordinator::{MergeVerificationRequest, MergeVerificationStep};
@@ -21,6 +21,23 @@ pub(crate) struct MergeVerificationCommand {
     pub(crate) command: Vec<String>,
 }
 
+impl ProductionMergeVerifier {
+    pub(super) async fn verify_commands(
+        commands: Vec<MergeVerificationCommand>,
+    ) -> Vec<MergeVerificationStep> {
+        let mut steps = Vec::new();
+        for command in commands {
+            let step = run_check(command).await;
+            let success = step.success;
+            steps.push(step);
+            if !success {
+                break;
+            }
+        }
+        steps
+    }
+}
+
 impl MergeVerifier for ProductionMergeVerifier {
     async fn verify(
         &self,
@@ -30,15 +47,7 @@ impl MergeVerifier for ProductionMergeVerifier {
             Path::new(&request.workspace_root),
             &request.changed_files,
         );
-        let mut steps = Vec::new();
-        for command in commands {
-            let step = run_check(command).await?;
-            if !step.success {
-                bail!("merge verification failed: {}", step.output);
-            }
-            steps.push(step);
-        }
-        Ok(steps)
+        Ok(Self::verify_commands(commands).await)
     }
 }
 
@@ -74,19 +83,36 @@ pub(crate) fn select_merge_verification_commands(
     commands
 }
 
-async fn run_check(selected: MergeVerificationCommand) -> Result<MergeVerificationStep> {
-    let (program, arguments) = selected
-        .command
-        .split_first()
-        .context("merge verifier command is empty")?;
-    let output =
-        super::process::run_process(&selected.working_directory, program, arguments.to_vec())
-            .await?;
-    Ok(MergeVerificationStep {
-        command: selected.command,
-        success: output.success,
-        output: output.combined,
-    })
+async fn run_check(selected: MergeVerificationCommand) -> MergeVerificationStep {
+    let command = selected.command;
+    let Some((program, arguments)) = command.split_first() else {
+        return MergeVerificationStep {
+            command,
+            success: false,
+            output: "merge verifier command is empty".to_string(),
+        };
+    };
+    match super::process::run_process(&selected.working_directory, program, arguments.to_vec())
+        .await
+    {
+        Ok(output) => {
+            let detail = if !output.success && output.combined.is_empty() {
+                "command exited unsuccessfully without output".to_string()
+            } else {
+                output.combined
+            };
+            MergeVerificationStep {
+                command,
+                success: output.success,
+                output: detail,
+            }
+        }
+        Err(error) => MergeVerificationStep {
+            command,
+            success: false,
+            output: format!("{error:#}"),
+        },
+    }
 }
 
 pub(super) async fn abort_merge(workspace: &Path) -> Result<()> {

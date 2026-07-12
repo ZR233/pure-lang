@@ -4,11 +4,18 @@ use std::path::Path;
 use anyhow::{Context, Result, bail};
 
 use super::git::{checked_git, run_git};
+use super::recovery::{
+    capture_conflict_workspace_evidence, read_conflict_status, validate_conflict_workspace_evidence,
+};
 use crate::studio::task_coordinator::{
     ConflictEntry, ConflictKind, ConflictManifest, ConflictTaskMerge, MergeCleanupEvidence,
     MergeIndexEntry, MergeIndexStage, MergeRecord, MergeStatus, TaskCoordinator,
     TaskMergeAgentOutput, TaskMergeScope, TaskRunRecord,
 };
+
+#[cfg(test)]
+#[path = "tests/conflict_recovery.rs"]
+mod recovery_tests;
 
 impl TaskCoordinator {
     pub(super) async fn persist_merge_conflict(
@@ -89,6 +96,7 @@ async fn build_conflict_manifest(
             path: path.clone(),
             kind,
             stages: stages.clone(),
+            worktree_object_id: None,
             binary,
             rename_source: rename.map(|pair| pair.0.clone()),
             rename_destination: rename.map(|pair| pair.1.clone()),
@@ -97,6 +105,7 @@ async fn build_conflict_manifest(
     conflicts.sort_by(|left, right| left.path.cmp(&right.path));
     validate_conflict_paths(&conflicts)?;
     validate_no_unrelated_merge_edits(scope, workspace, &conflicts).await?;
+    let workspace_evidence = capture_conflict_workspace_evidence(workspace, &mut conflicts).await?;
     let auto_merged_entries = auto_merged_entries(workspace, &conflicts).await?;
     let pre_index_tree = scope
         .merge
@@ -109,6 +118,8 @@ async fn build_conflict_manifest(
         merge_base,
         pre_index_tree,
         conflicts,
+        status_porcelain_v1_z: workspace_evidence.status_porcelain_v1_z,
+        index_stage_zero_entries: workspace_evidence.index_stage_zero_entries,
         auto_merged_entries,
     })
 }
@@ -151,6 +162,7 @@ pub(crate) async fn validate_conflict_recovery(
     {
         bail!("durable conflict HEAD, MERGE_HEAD, or merge base drifted");
     }
+    validate_conflict_workspace_evidence(workspace, manifest).await?;
     let unmerged = run_git(workspace, vec!["ls-files".into(), "-u".into(), "-z".into()]).await?;
     if !unmerged.success {
         bail!(
@@ -323,22 +335,7 @@ async fn validate_no_unrelated_merge_edits(
     workspace: &Path,
     conflicts: &[ConflictEntry],
 ) -> Result<()> {
-    let status = run_git(
-        workspace,
-        vec![
-            "status".into(),
-            "--porcelain=v1".into(),
-            "-z".into(),
-            "--untracked-files=all".into(),
-        ],
-    )
-    .await?;
-    if !status.success {
-        bail!(
-            "failed to inspect conflict status: {}",
-            status.stderr_lossy()
-        );
-    }
+    let status = read_conflict_status(workspace).await?;
     let mut allowed = scope
         .delivery
         .changed_files
@@ -350,20 +347,70 @@ async fn validate_no_unrelated_merge_edits(
         allowed.extend(conflict.rename_source.iter().cloned());
         allowed.extend(conflict.rename_destination.iter().cloned());
     }
-    let fields = status
-        .stdout
-        .split(|byte| *byte == 0)
-        .filter(|field| !field.is_empty());
-    for field in fields {
-        if field.len() < 4 {
-            bail!("invalid Git conflict status entry");
+    validate_conflict_status_scope(&status, &allowed)
+}
+
+fn validate_conflict_status_scope(status: &[u8], allowed: &HashSet<String>) -> Result<()> {
+    for entry in parse_porcelain_entries(status)? {
+        if entry.status == "??" {
+            bail!(
+                "merge conflict contains untracked workspace path `{}`",
+                entry.path
+            );
         }
-        let path = std::str::from_utf8(&field[3..])?.replace('\\', "/");
-        if !allowed.contains(&path) {
-            bail!("merge conflict produced unrelated workspace edit `{path}`");
+        if !allowed.contains(&entry.path) {
+            bail!(
+                "merge conflict produced unrelated workspace edit `{}`",
+                entry.path
+            );
+        }
+        if let Some(original_path) = entry.original_path
+            && !allowed.contains(&original_path)
+        {
+            bail!("merge conflict produced unrelated rename source `{original_path}`");
         }
     }
     Ok(())
+}
+
+struct PorcelainEntry {
+    status: String,
+    path: String,
+    original_path: Option<String>,
+}
+
+fn parse_porcelain_entries(bytes: &[u8]) -> Result<Vec<PorcelainEntry>> {
+    let fields = bytes
+        .split(|byte| *byte == 0)
+        .filter(|field| !field.is_empty())
+        .collect::<Vec<_>>();
+    let mut entries = Vec::new();
+    let mut index = 0;
+    while index < fields.len() {
+        let field = fields[index];
+        index += 1;
+        if field.len() < 4 || field[2] != b' ' {
+            bail!("invalid Git conflict status entry");
+        }
+        let status = std::str::from_utf8(&field[..2])?.to_string();
+        let path = std::str::from_utf8(&field[3..])?.replace('\\', "/");
+        let renamed = matches!(field[0], b'R' | b'C') || matches!(field[1], b'R' | b'C');
+        let original_path = if renamed {
+            let original = fields
+                .get(index)
+                .context("rename status entry has no original path")?;
+            index += 1;
+            Some(std::str::from_utf8(original)?.replace('\\', "/"))
+        } else {
+            None
+        };
+        entries.push(PorcelainEntry {
+            status,
+            path,
+            original_path,
+        });
+    }
+    Ok(entries)
 }
 
 async fn auto_merged_entries(

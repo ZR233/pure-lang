@@ -59,6 +59,12 @@ pub(crate) struct TaskCoordinator {
     pub(super) merge_cleanup_barrier: Mutex<Option<super::merge::MergeCleanupTestBarrier>>,
     #[cfg(test)]
     pub(super) merge_after_commit_barrier: Mutex<Option<super::merge::MergeCommitTestBarrier>>,
+    #[cfg(test)]
+    pub(super) merge_before_proof_barrier: Mutex<Option<super::merge::MergeCommitTestBarrier>>,
+    #[cfg(test)]
+    pub(super) merge_after_acceptance_barrier: Mutex<Option<super::merge::MergeCommitTestBarrier>>,
+    #[cfg(test)]
+    pub(super) merge_after_abort_barrier: Mutex<Option<super::merge::MergeCommitTestBarrier>>,
 }
 
 /// 持有期间串行化任务分支变更，并阻止 executor 基于中间 HEAD 分配。
@@ -89,6 +95,12 @@ impl TaskCoordinator {
             merge_cleanup_barrier: Mutex::new(None),
             #[cfg(test)]
             merge_after_commit_barrier: Mutex::new(None),
+            #[cfg(test)]
+            merge_before_proof_barrier: Mutex::new(None),
+            #[cfg(test)]
+            merge_after_acceptance_barrier: Mutex::new(None),
+            #[cfg(test)]
+            merge_after_abort_barrier: Mutex::new(None),
         }
     }
 

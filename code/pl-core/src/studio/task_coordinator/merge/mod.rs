@@ -1,11 +1,16 @@
 mod accept;
+mod barriers;
 mod cleanup;
 mod conflict;
 mod git;
+mod output;
 mod process;
 mod recovery;
 mod validation;
 mod verifier;
+#[cfg(test)]
+#[path = "tests/verifier.rs"]
+mod verifier_tests;
 pub(super) use conflict::validate_conflict_recovery;
 pub(crate) use recovery::MergeRestartRecovery;
 
@@ -23,9 +28,12 @@ pub(crate) use verifier::{MergeVerificationCommand, select_merge_verification_co
 
 #[cfg(test)]
 pub(crate) use self::accept::MergeCommitTestBarrier;
-use self::accept::{merge_commit_message, pending_cleanup, verify_created_merge_commit};
+use self::accept::{
+    MergeCommitProof, merge_commit_message, pending_cleanup, verify_created_merge_commit,
+};
 pub(crate) use self::cleanup::cleanup_accepted_delivery;
 use self::git::{checked_git, run_git};
+use self::output::{empty_preflight_merge, merged_output};
 use self::validation::{
     ensure_preflight_delivery_identity, validate_final_head, validate_merge_preflight,
 };
@@ -37,7 +45,7 @@ use crate::AgentSupervisor;
 use crate::tool::{
     RegisteredTool, ToolExecutionResult, ToolInputSchemaField, strict_tool_input_schema,
 };
-use crate::turn::{CompileMode, ToolEffect};
+use crate::turn::{CompileMode, ToolEffect, TurnExecutionRole};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -74,7 +82,11 @@ impl TaskCoordinator {
                 let coordinator = coordinator.clone();
                 let session_id = session_id.clone();
                 async move {
-                    if context.mode != CompileMode::Task || context.active_subagent.is_some() {
+                    if context.mode != CompileMode::Task
+                        || context.active_subagent.is_some()
+                        || context.execution_profile().role() != TurnExecutionRole::Planner
+                        || !context.execution_profile().is_root_owner()
+                    {
                         bail!("task_merge_agent requires the root Task planner");
                     }
                     let call_id = context
@@ -114,8 +126,25 @@ impl TaskCoordinator {
         if agent_id.is_empty() || caller_expected_head.is_empty() {
             bail!("agentId and expectedHeadCommit must not be empty");
         }
+        if let Some(scope) = self
+            .store
+            .find_accepted_merge_scope(request.session_id, agent_id, caller_expected_head)
+            .await?
+        {
+            self.ensure_process_lease_owned(&scope.run)?;
+            let output = merged_output(&scope)?;
+            return self
+                .finish_accepted_delivery_cleanup(
+                    &scope,
+                    output,
+                    supervisor,
+                    event_tx,
+                    request.call_id,
+                )
+                .await;
+        }
 
-        let (scope, mut output) = {
+        let (scope, output) = {
             let guard = self.lock_branch_mutation().await;
             self.ensure_branch_mutation_guard(&guard)?;
             let scope = self
@@ -149,14 +178,8 @@ impl TaskCoordinator {
         if output.status == MergeStatus::Conflicted {
             return Ok(output);
         }
-        self.pause_before_merge_cleanup().await;
-        let cleanup =
-            cleanup_accepted_delivery(&scope, supervisor, event_tx, request.call_id).await;
-        self.store
-            .record_merge_cleanup(&scope.merge.id, cleanup.clone())
-            .await?;
-        output.cleanup = cleanup;
-        Ok(output)
+        self.finish_accepted_delivery_cleanup(&scope, output, supervisor, event_tx, request.call_id)
+            .await
     }
 
     #[cfg(test)]
@@ -187,29 +210,6 @@ impl TaskCoordinator {
         )
         .await
     }
-
-    #[cfg(test)]
-    pub(crate) fn set_merge_cleanup_barrier(&self, barrier: MergeCleanupTestBarrier) {
-        *self
-            .merge_cleanup_barrier
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(barrier);
-    }
-
-    #[cfg(test)]
-    async fn pause_before_merge_cleanup(&self) {
-        let barrier = self
-            .merge_cleanup_barrier
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take();
-        if let Some(barrier) = barrier {
-            barrier.pause().await;
-        }
-    }
-
-    #[cfg(not(test))]
-    async fn pause_before_merge_cleanup(&self) {}
 
     async fn load_merge_preflight_scope(
         &self,
@@ -269,6 +269,36 @@ impl TaskCoordinator {
         })
     }
 
+    async fn finish_accepted_delivery_cleanup(
+        &self,
+        scope: &TaskMergeScope,
+        mut output: TaskMergeAgentOutput,
+        supervisor: &AgentSupervisor,
+        event_tx: &pl_trace::AgentEventSender,
+        call_id: &str,
+    ) -> Result<TaskMergeAgentOutput> {
+        if let Some(cleanup) = scope
+            .merge
+            .evidence
+            .as_ref()
+            .and_then(|evidence| evidence.cleanup.clone())
+            && cleanup.status != "attempting"
+        {
+            output.cleanup = cleanup;
+            return Ok(output);
+        }
+        self.store
+            .record_merge_cleanup_attempting(&scope.merge.id)
+            .await?;
+        self.pause_before_merge_cleanup().await;
+        let cleanup = cleanup_accepted_delivery(scope, supervisor, event_tx, call_id).await;
+        self.store
+            .record_merge_cleanup(&scope.merge.id, cleanup.clone())
+            .await?;
+        output.cleanup = cleanup;
+        Ok(output)
+    }
+
     async fn merge_clean_locked<V: MergeVerifier>(
         &self,
         scope: &TaskMergeScope,
@@ -317,6 +347,7 @@ impl TaskCoordinator {
                     .await;
             }
         };
+        let expected_tree = checked_git(workspace, vec!["write-tree".into()]).await?;
         let message = merge_commit_message(scope, &verification);
         let commit = run_git(workspace, vec!["commit".into(), "-m".into(), message]).await?;
         if !commit.success {
@@ -330,7 +361,20 @@ impl TaskCoordinator {
                 .await;
         }
         let merge_commit = checked_git(workspace, vec!["rev-parse".into(), "HEAD".into()]).await?;
-        verify_created_merge_commit(scope, workspace, &merge_commit).await?;
+        let proof = MergeCommitProof {
+            commit: merge_commit.clone(),
+            expected_tree,
+        };
+        self.pause_before_merge_proof().await;
+        if let Err(error) = verify_created_merge_commit(scope, workspace, &proof).await {
+            return self
+                .fail_committed_merge_without_compensation(
+                    scope,
+                    verification,
+                    format!("merge commit proof failed: {error:#}"),
+                )
+                .await;
+        }
         self.pause_after_merge_commit().await;
         let completed = self
             .store
@@ -343,15 +387,36 @@ impl TaskCoordinator {
             .await;
         if let Err(error) = completed {
             return self
-                .compensate_failed_durable_cas(scope, workspace, &merge_commit, verification, error)
+                .compensate_failed_durable_cas(scope, workspace, &proof, verification, error)
                 .await;
         }
+        self.pause_after_merge_acceptance().await;
         let durable_run = self
             .store
             .read_task_run(&scope.run.id)
             .await?
             .context("accepted task run disappeared")?;
-        validate_final_head(&durable_run, &merge_commit).await?;
+        if let Err(error) = validate_final_head(&durable_run, &merge_commit).await {
+            let reason = format!("accepted merge final scope validation failed: {error:#}");
+            let block = self
+                .store
+                .block_accepted_merge(
+                    &scope.merge.id,
+                    &reason,
+                    super::MergeCleanupEvidence {
+                        status: "deferred".to_string(),
+                        detail: Some(reason.clone()),
+                    },
+                )
+                .await;
+            self.release_owned_process_lease(&scope.run.id);
+            return match block {
+                Ok(_) => Err(error).context(reason),
+                Err(block_error) => Err(error).context(format!(
+                    "{reason}; accepted-merge block persistence also failed: {block_error:#}"
+                )),
+            };
+        }
         Ok(TaskMergeAgentOutput {
             merge_id: scope.merge.id.clone(),
             status: MergeStatus::Merged,
@@ -365,29 +430,6 @@ impl TaskCoordinator {
             conflict_files: Vec::new(),
         })
     }
-
-    #[cfg(test)]
-    pub(crate) fn set_merge_after_commit_barrier(&self, barrier: MergeCommitTestBarrier) {
-        *self
-            .merge_after_commit_barrier
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(barrier);
-    }
-
-    #[cfg(test)]
-    async fn pause_after_merge_commit(&self) {
-        let barrier = self
-            .merge_after_commit_barrier
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take();
-        if let Some(barrier) = barrier {
-            barrier.pause().await;
-        }
-    }
-
-    #[cfg(not(test))]
-    async fn pause_after_merge_commit(&self) {}
 
     async fn handle_non_clean_merge(
         &self,
@@ -405,23 +447,5 @@ impl TaskCoordinator {
         }
         self.fail_uncommitted_merge(scope, workspace, Vec::new(), detail)
             .await
-    }
-}
-
-fn empty_preflight_merge() -> super::MergeRecord {
-    super::MergeRecord {
-        id: String::new(),
-        task_run_id: String::new(),
-        agent_id: String::new(),
-        status: MergeStatus::Pending,
-        expected_head: String::new(),
-        source_commit: String::new(),
-        conflict_files: Vec::new(),
-        resolution_summary: None,
-        verification: None,
-        evidence: None,
-        attempt: 0,
-        created_at: 0,
-        updated_at: 0,
     }
 }
