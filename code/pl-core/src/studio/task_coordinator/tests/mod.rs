@@ -4,8 +4,8 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::merge::{
-    MergeCleanupTestBarrier, MergeCommitTestBarrier, MergeVerificationCommand, MergeVerifier,
-    select_merge_verification_commands,
+    MergeCleanupTestBarrier, MergeCommitTestBarrier, MergeFailureTestPoint,
+    MergeVerificationCommand, MergeVerifier, select_merge_verification_commands,
 };
 use super::*;
 use crate::tool::{SubagentContext, Tool, ToolContext, ToolInput, ToolRegistry, WorkspaceAccess};
@@ -1282,6 +1282,269 @@ async fn durable_merge_cas_failure_compensates_exact_clean_merge_commit() {
             .as_ref()
             .and_then(|evidence| evidence.compensation.as_deref())
             .is_some_and(|detail| detail.contains("reset to previous HEAD"))
+    );
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn mark_verifying_persistence_failure_aborts_blocks_and_releases_lease() {
+    let fixture = DeliveryFixture::new("merge-mark-verifying-failure", vec!["src/**"]).await;
+    fixture.commit_file("src/lib.rs");
+    let source_head = git_output(&fixture.worktree, &["rev-parse", "HEAD"]);
+    fixture.submit(&source_head).await.unwrap();
+    let run = fixture
+        .store
+        .transition_task_run(&fixture.task_run_id, TaskRunPhase::Implementing, None)
+        .await
+        .unwrap();
+    fixture
+        .store
+        .execute_test_sql(
+            "CREATE TRIGGER fail_mark_verifying BEFORE UPDATE OF status ON merge_records \
+             WHEN NEW.status = 'verifying' BEGIN SELECT RAISE(FAIL, 'injected mark verifying failure'); END;",
+        )
+        .await;
+    let (event_tx, _) = tokio::sync::broadcast::channel(16);
+
+    fixture
+        .coordinator
+        .merge_agent_with_verifier(
+            &fixture.session_id,
+            &fixture.subagent.id,
+            &run.expected_head,
+            &AgentSupervisor::default(),
+            &event_tx,
+            "call-mark-verifying-failure",
+            &PassingMergeVerifier,
+        )
+        .await
+        .expect_err("mark-verifying persistence failure must close the merge lifecycle");
+
+    fixture
+        .store
+        .execute_test_sql("DROP TRIGGER fail_mark_verifying")
+        .await;
+    let durable_run = fixture
+        .store
+        .read_task_run(&fixture.task_run_id)
+        .await
+        .unwrap()
+        .unwrap();
+    let merge = fixture
+        .store
+        .list_merge_records(&fixture.task_run_id)
+        .await
+        .unwrap()
+        .pop()
+        .unwrap();
+    assert_eq!(durable_run.phase, TaskRunPhase::Blocked);
+    assert_eq!(merge.status, MergeStatus::Failed);
+    assert_eq!(
+        git_output(&fixture.repository, &["rev-parse", "HEAD"]),
+        run.expected_head
+    );
+    assert!(
+        git_output(
+            &fixture.repository,
+            &["status", "--porcelain=v1", "--untracked-files=all"]
+        )
+        .is_empty()
+    );
+    assert!(!fixture.coordinator.process_lease_is_held(&durable_run));
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn clean_merge_infrastructure_failures_close_the_durable_lifecycle() {
+    for (name, point) in [
+        ("merge-write-tree-failure", MergeFailureTestPoint::WriteTree),
+        (
+            "merge-commit-start-failure",
+            MergeFailureTestPoint::CommitRunnerBeforeStart,
+        ),
+        (
+            "merge-commit-finished-failure",
+            MergeFailureTestPoint::CommitRunnerAfterSuccess,
+        ),
+        (
+            "merge-post-commit-head-failure",
+            MergeFailureTestPoint::PostCommitRevParse,
+        ),
+    ] {
+        let fixture = DeliveryFixture::new(name, vec!["src/**"]).await;
+        fixture.commit_file("src/lib.rs");
+        let source_head = git_output(&fixture.worktree, &["rev-parse", "HEAD"]);
+        fixture.submit(&source_head).await.unwrap();
+        let run = fixture
+            .store
+            .transition_task_run(&fixture.task_run_id, TaskRunPhase::Implementing, None)
+            .await
+            .unwrap();
+        fixture.coordinator.fail_next_merge_at(point);
+        let (event_tx, _) = tokio::sync::broadcast::channel(16);
+
+        fixture
+            .coordinator
+            .merge_agent_with_verifier(
+                &fixture.session_id,
+                &fixture.subagent.id,
+                &run.expected_head,
+                &AgentSupervisor::default(),
+                &event_tx,
+                "call-clean-infrastructure-failure",
+                &PassingMergeVerifier,
+            )
+            .await
+            .expect_err("post-merge infrastructure failure must close the merge lifecycle");
+
+        let durable_run = fixture
+            .store
+            .read_task_run(&fixture.task_run_id)
+            .await
+            .unwrap()
+            .unwrap();
+        let merge = fixture
+            .store
+            .list_merge_records(&fixture.task_run_id)
+            .await
+            .unwrap()
+            .pop()
+            .unwrap();
+        assert_eq!(durable_run.phase, TaskRunPhase::Blocked, "{name}");
+        assert_eq!(merge.status, MergeStatus::Failed, "{name}");
+        assert!(!fixture.coordinator.process_lease_is_held(&durable_run));
+        assert_eq!(
+            git_output(&fixture.repository, &["rev-parse", "HEAD"]),
+            run.expected_head,
+            "{name}"
+        );
+        assert!(
+            git_output(
+                &fixture.repository,
+                &["status", "--porcelain=v1", "--untracked-files=all"]
+            )
+            .is_empty(),
+            "{name}"
+        );
+        fixture.cleanup();
+    }
+}
+
+#[tokio::test]
+async fn conflict_infrastructure_failures_abort_block_and_release_lease() {
+    for (name, point) in [
+        (
+            "merge-conflict-manifest-failure",
+            MergeFailureTestPoint::ConflictManifest,
+        ),
+        (
+            "merge-conflict-persistence-failure",
+            MergeFailureTestPoint::ConflictPersistence,
+        ),
+    ] {
+        let fixture = ConflictMergeFixture::text(name).await;
+        fixture.coordinator.fail_next_merge_at(point);
+        let (event_tx, _) = tokio::sync::broadcast::channel(16);
+
+        fixture
+            .coordinator
+            .merge_agent_with_verifier(
+                &fixture.session_id,
+                &fixture.agent_id,
+                &fixture.expected_head,
+                &AgentSupervisor::default(),
+                &event_tx,
+                "call-conflict-infrastructure-failure",
+                &PassingMergeVerifier,
+            )
+            .await
+            .expect_err("conflict infrastructure failure must close the merge lifecycle");
+
+        let durable_run = fixture
+            .store
+            .read_task_run(&fixture.task_run_id)
+            .await
+            .unwrap()
+            .unwrap();
+        let merge = fixture
+            .store
+            .list_merge_records(&fixture.task_run_id)
+            .await
+            .unwrap()
+            .pop()
+            .unwrap();
+        assert_eq!(durable_run.phase, TaskRunPhase::Blocked, "{name}");
+        assert_eq!(merge.status, MergeStatus::Failed, "{name}");
+        assert!(!fixture.coordinator.process_lease_is_held(&durable_run));
+        assert_eq!(
+            git_output(&fixture.repository, &["rev-parse", "HEAD"]),
+            fixture.expected_head,
+            "{name}"
+        );
+        assert!(
+            git_output(
+                &fixture.repository,
+                &["status", "--porcelain=v1", "--untracked-files=all"]
+            )
+            .is_empty(),
+            "{name}"
+        );
+        fixture.cleanup_conflict();
+    }
+}
+
+#[tokio::test]
+async fn merge_failure_persistence_falls_back_to_exact_run_block() {
+    let fixture = DeliveryFixture::new("merge-failure-persistence-fallback", vec!["src/**"]).await;
+    fixture.commit_file("src/lib.rs");
+    let source_head = git_output(&fixture.worktree, &["rev-parse", "HEAD"]);
+    fixture.submit(&source_head).await.unwrap();
+    let run = fixture
+        .store
+        .transition_task_run(&fixture.task_run_id, TaskRunPhase::Implementing, None)
+        .await
+        .unwrap();
+    fixture
+        .coordinator
+        .fail_next_merge_at(MergeFailureTestPoint::FailurePersistence);
+    let (event_tx, _) = tokio::sync::broadcast::channel(16);
+
+    fixture
+        .coordinator
+        .merge_agent_with_verifier(
+            &fixture.session_id,
+            &fixture.subagent.id,
+            &run.expected_head,
+            &AgentSupervisor::default(),
+            &event_tx,
+            "call-failure-persistence-fallback",
+            &FailingMergeVerifier,
+        )
+        .await
+        .expect_err("failure persistence error must fall back to blocking the exact run");
+
+    let durable_run = fixture
+        .store
+        .read_task_run(&fixture.task_run_id)
+        .await
+        .unwrap()
+        .unwrap();
+    let merge = fixture
+        .store
+        .list_merge_records(&fixture.task_run_id)
+        .await
+        .unwrap()
+        .pop()
+        .unwrap();
+    assert_eq!(durable_run.phase, TaskRunPhase::Blocked);
+    assert!(matches!(
+        merge.status,
+        MergeStatus::Pending | MergeStatus::Verifying
+    ));
+    assert!(!fixture.coordinator.process_lease_is_held(&durable_run));
+    assert_eq!(
+        git_output(&fixture.repository, &["rev-parse", "HEAD"]),
+        run.expected_head
     );
     fixture.cleanup();
 }

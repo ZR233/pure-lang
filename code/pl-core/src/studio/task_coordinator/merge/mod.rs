@@ -2,10 +2,14 @@ mod accept;
 mod barriers;
 mod cleanup;
 mod conflict;
+mod conflict_index;
+mod conflict_status;
+mod failure;
 mod git;
 mod output;
 mod process;
 mod recovery;
+mod scope;
 mod validation;
 mod verifier;
 #[cfg(test)]
@@ -20,6 +24,8 @@ use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
 #[cfg(test)]
+pub(super) use barriers::MergeFailureTestPoint;
+#[cfg(test)]
 pub(crate) use cleanup::MergeCleanupTestBarrier;
 pub(crate) use verifier::MergeVerifier;
 use verifier::ProductionMergeVerifier;
@@ -32,14 +38,13 @@ use self::accept::{
     MergeCommitProof, merge_commit_message, pending_cleanup, verify_created_merge_commit,
 };
 pub(crate) use self::cleanup::cleanup_accepted_delivery;
-use self::git::{checked_git, run_git};
-use self::output::{empty_preflight_merge, merged_output};
-use self::validation::{
-    ensure_preflight_delivery_identity, validate_final_head, validate_merge_preflight,
-};
+use self::failure::MergeFailureStage;
+use self::git::run_git;
+use self::output::merged_output;
+use self::validation::{validate_final_head, validate_merge_preflight};
 use super::{
     BeginTaskMerge, CompleteTaskMerge, MergeStatus, MergeVerificationRequest, TaskCoordinator,
-    TaskMergeAgentOutput, TaskMergeScope, TaskRunPhase,
+    TaskMergeAgentOutput, TaskMergeScope,
 };
 use crate::AgentSupervisor;
 use crate::tool::{
@@ -212,101 +217,13 @@ impl TaskCoordinator {
         .await
     }
 
-    async fn load_merge_preflight_scope(
-        &self,
-        session_id: &str,
-        agent_id: &str,
-    ) -> Result<TaskMergeScope> {
-        let run = self
-            .store
-            .read_active_task_run_for_session(session_id)
-            .await?;
-        if !matches!(
-            run.phase,
-            TaskRunPhase::Implementing | TaskRunPhase::Reworking
-        ) {
-            bail!("task merge requires phase implementing or reworking");
-        }
-        let lease = self
-            .store
-            .read_branch_lease(&run.id)
-            .await?
-            .context("task branch lease not found")?;
-        let outcomes = self
-            .store
-            .list_agent_outcomes(&run.id)
-            .await?
-            .into_iter()
-            .filter(|outcome| outcome.agent_id == agent_id)
-            .collect::<Vec<_>>();
-        let outcome = match outcomes.as_slice() {
-            [outcome] => outcome.clone(),
-            [] => bail!("delivered executor outcome not found for agent"),
-            _ => bail!("ambiguous executor outcome for agent"),
-        };
-        let work_unit_id = outcome
-            .work_unit_id
-            .as_deref()
-            .context("executor outcome has no work unit")?;
-        let work_unit = self
-            .store
-            .read_work_unit(work_unit_id)
-            .await?
-            .context("executor work unit not found")?;
-        let delivery = outcome
-            .delivery
-            .clone()
-            .context("completed executor outcome has no delivery")?;
-        ensure_preflight_delivery_identity(&run.id, agent_id, &work_unit, &outcome, &delivery)?;
-        Ok(TaskMergeScope {
-            #[cfg(test)]
-            origin_phase: run.phase,
-            run,
-            lease,
-            work_unit,
-            outcome,
-            delivery,
-            merge: empty_preflight_merge(),
-        })
-    }
-
-    async fn finish_accepted_delivery_cleanup(
-        &self,
-        scope: &TaskMergeScope,
-        mut output: TaskMergeAgentOutput,
-        supervisor: &AgentSupervisor,
-        event_tx: &pl_trace::AgentEventSender,
-        call_id: &str,
-    ) -> Result<TaskMergeAgentOutput> {
-        if let Some(cleanup) = scope
-            .merge
-            .evidence
-            .as_ref()
-            .and_then(|evidence| evidence.cleanup.clone())
-            && cleanup.status != "attempting"
-        {
-            output.cleanup = cleanup;
-            return Ok(output);
-        }
-        self.store
-            .record_merge_cleanup_attempting(&scope.merge.id)
-            .await?;
-        self.pause_before_merge_cleanup().await;
-        let cleanup = cleanup_accepted_delivery(scope, supervisor, event_tx, call_id).await;
-        self.store
-            .record_merge_cleanup(&scope.merge.id, cleanup.clone())
-            .await?;
-        output.cleanup = cleanup;
-        Ok(output)
-    }
-
     async fn merge_clean_locked<V: MergeVerifier>(
         &self,
         scope: &TaskMergeScope,
         workspace: &std::path::Path,
         verifier: &V,
     ) -> Result<TaskMergeAgentOutput> {
-        let merge_output = run_git(
+        let merge_output = match run_git(
             workspace,
             vec![
                 "merge".into(),
@@ -315,15 +232,37 @@ impl TaskCoordinator {
                 scope.work_unit.branch.clone(),
             ],
         )
-        .await?;
+        .await
+        {
+            Ok(output) => output,
+            Err(error) => {
+                return self
+                    .handle_merge_stage_failure(
+                        scope,
+                        workspace,
+                        Vec::new(),
+                        error.context("git merge runner failed"),
+                        MergeFailureStage::BeforeCommit,
+                    )
+                    .await;
+            }
+        };
         if !merge_output.success {
             return self
                 .handle_non_clean_merge(scope, workspace, merge_output.stderr_lossy())
                 .await;
         }
-        self.store
-            .mark_task_merge_verifying(&scope.merge.id)
-            .await?;
+        if let Err(error) = self.mark_task_merge_verifying(scope).await {
+            return self
+                .handle_merge_stage_failure(
+                    scope,
+                    workspace,
+                    Vec::new(),
+                    error.context("mark task merge verifying"),
+                    MergeFailureStage::BeforeCommit,
+                )
+                .await;
+        }
         let verification = match verifier
             .verify(MergeVerificationRequest {
                 workspace_root: scope.run.workspace_root.clone(),
@@ -334,34 +273,87 @@ impl TaskCoordinator {
             Ok(steps) if steps.iter().all(|step| step.success) => steps,
             Ok(steps) => {
                 return self
-                    .fail_uncommitted_merge(
+                    .handle_merge_stage_failure(
                         scope,
                         workspace,
                         steps,
-                        "merge verification returned a failed check".to_string(),
+                        anyhow::anyhow!("merge verification returned a failed check"),
+                        MergeFailureStage::BeforeCommit,
                     )
                     .await;
             }
             Err(error) => {
                 return self
-                    .fail_uncommitted_merge(scope, workspace, Vec::new(), error.to_string())
+                    .handle_merge_stage_failure(
+                        scope,
+                        workspace,
+                        Vec::new(),
+                        error.context("merge verifier runner failed"),
+                        MergeFailureStage::BeforeCommit,
+                    )
                     .await;
             }
         };
-        let expected_tree = checked_git(workspace, vec!["write-tree".into()]).await?;
+        let expected_tree = match self.read_merge_index_tree(workspace).await {
+            Ok(tree) => tree,
+            Err(error) => {
+                return self
+                    .handle_merge_stage_failure(
+                        scope,
+                        workspace,
+                        verification,
+                        error.context("capture verified merge index tree"),
+                        MergeFailureStage::BeforeCommit,
+                    )
+                    .await;
+            }
+        };
         let message = merge_commit_message(scope, &verification);
-        let commit = run_git(workspace, vec!["commit".into(), "-m".into(), message]).await?;
+        let commit = match self.run_merge_commit(workspace, message).await {
+            Ok(commit) => commit,
+            Err(error) => {
+                return self
+                    .handle_merge_stage_failure(
+                        scope,
+                        workspace,
+                        verification,
+                        error.context("create merge commit"),
+                        MergeFailureStage::CommitAttempted {
+                            expected_tree: Some(expected_tree),
+                        },
+                    )
+                    .await;
+            }
+        };
         if !commit.success {
             return self
-                .fail_uncommitted_merge(
+                .handle_merge_stage_failure(
                     scope,
                     workspace,
                     verification,
-                    format!("merge commit failed: {}", commit.stderr_lossy()),
+                    anyhow::anyhow!("merge commit failed: {}", commit.stderr_lossy()),
+                    MergeFailureStage::CommitAttempted {
+                        expected_tree: Some(expected_tree),
+                    },
                 )
                 .await;
         }
-        let merge_commit = checked_git(workspace, vec!["rev-parse".into(), "HEAD".into()]).await?;
+        let merge_commit = match self.read_post_commit_head(workspace).await {
+            Ok(head) => head,
+            Err(error) => {
+                return self
+                    .handle_merge_stage_failure(
+                        scope,
+                        workspace,
+                        verification,
+                        error.context("read merge commit HEAD"),
+                        MergeFailureStage::CommitAttempted {
+                            expected_tree: Some(expected_tree),
+                        },
+                    )
+                    .await;
+            }
+        };
         let proof = MergeCommitProof {
             commit: merge_commit.clone(),
             expected_tree,
@@ -369,10 +361,14 @@ impl TaskCoordinator {
         self.pause_before_merge_proof().await;
         if let Err(error) = verify_created_merge_commit(scope, workspace, &proof).await {
             return self
-                .fail_committed_merge_without_compensation(
+                .handle_merge_stage_failure(
                     scope,
+                    workspace,
                     verification,
-                    format!("merge commit proof failed: {error:#}"),
+                    error.context("merge commit proof failed"),
+                    MergeFailureStage::CommitAttempted {
+                        expected_tree: Some(proof.expected_tree.clone()),
+                    },
                 )
                 .await;
         }
@@ -388,7 +384,15 @@ impl TaskCoordinator {
             .await;
         if let Err(error) = completed {
             return self
-                .compensate_failed_durable_cas(scope, workspace, &proof, verification, error)
+                .handle_merge_stage_failure(
+                    scope,
+                    workspace,
+                    verification,
+                    error.context("durable merge CAS failed"),
+                    MergeFailureStage::CommitAttempted {
+                        expected_tree: Some(proof.expected_tree),
+                    },
+                )
                 .await;
         }
         self.pause_after_merge_acceptance().await;
@@ -460,15 +464,35 @@ impl TaskCoordinator {
         workspace: &std::path::Path,
         detail: String,
     ) -> Result<TaskMergeAgentOutput> {
-        let merge_head = run_git(
+        let merge_head = match run_git(
             workspace,
             vec!["rev-parse".into(), "--verify".into(), "MERGE_HEAD".into()],
         )
-        .await?;
+        .await
+        {
+            Ok(output) => output,
+            Err(error) => {
+                return self
+                    .handle_merge_stage_failure(
+                        scope,
+                        workspace,
+                        Vec::new(),
+                        error.context("inspect MERGE_HEAD after non-clean merge"),
+                        MergeFailureStage::Conflict,
+                    )
+                    .await;
+            }
+        };
         if merge_head.success {
             return self.persist_merge_conflict(scope, workspace).await;
         }
-        self.fail_uncommitted_merge(scope, workspace, Vec::new(), detail)
-            .await
+        self.handle_merge_stage_failure(
+            scope,
+            workspace,
+            Vec::new(),
+            anyhow::anyhow!(detail),
+            MergeFailureStage::BeforeCommit,
+        )
+        .await
     }
 }

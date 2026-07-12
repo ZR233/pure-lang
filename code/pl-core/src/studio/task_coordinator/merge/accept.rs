@@ -1,16 +1,12 @@
 use std::collections::HashSet;
 use std::path::Path;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 
-use super::git::{checked_git, run_git};
-use super::validation::{
-    changed_files_between, validate_merge_preflight, validate_repository_identity,
-};
-use super::verifier::abort_merge;
+use super::git::checked_git;
+use super::validation::{changed_files_between, validate_repository_identity};
 use crate::studio::task_coordinator::{
-    FailTaskMerge, MergeCleanupEvidence, MergeVerificationStep, TaskCoordinator,
-    TaskMergeAgentOutput, TaskMergeScope,
+    MergeCleanupEvidence, MergeVerificationStep, TaskMergeScope,
 };
 
 #[cfg(test)]
@@ -40,174 +36,6 @@ impl MergeCommitTestBarrier {
 
     pub(crate) async fn release(&self) {
         self.release.wait().await;
-    }
-}
-
-impl TaskCoordinator {
-    pub(super) async fn fail_uncommitted_merge(
-        &self,
-        scope: &TaskMergeScope,
-        workspace: &Path,
-        verification: Vec<MergeVerificationStep>,
-        reason: String,
-    ) -> Result<TaskMergeAgentOutput> {
-        let compensation = match abort_merge(workspace).await {
-            Ok(()) => {
-                self.pause_after_merge_abort().await;
-                match validate_merge_preflight(
-                    &scope.run,
-                    &scope.lease,
-                    &scope.work_unit,
-                    &scope.delivery,
-                    &scope.run.expected_head,
-                )
-                .await
-                {
-                    Ok(_) => "merge --abort restored exact prestate".to_string(),
-                    Err(error) => format!(
-                        "unsafe abort result preserved for inspection; exact prestate validation failed: {error:#}"
-                    ),
-                }
-            }
-            Err(error) => {
-                format!("unsafe abort failure preserved merge state for inspection: {error:#}")
-            }
-        };
-        let persistence = self
-            .store
-            .fail_task_merge(FailTaskMerge {
-                merge_id: scope.merge.id.clone(),
-                reason: reason.clone(),
-                verification_steps: verification,
-                compensation: Some(compensation.clone()),
-            })
-            .await;
-        self.release_owned_process_lease(&scope.run.id);
-        if let Err(error) = persistence {
-            bail!(
-                "{reason}; merge failure persistence also failed: {error:#}; compensation: {compensation}"
-            );
-        }
-        bail!("{reason}")
-    }
-
-    pub(super) async fn fail_committed_merge_without_compensation(
-        &self,
-        scope: &TaskMergeScope,
-        verification: Vec<MergeVerificationStep>,
-        reason: String,
-    ) -> Result<TaskMergeAgentOutput> {
-        let persistence = self
-            .store
-            .fail_task_merge(FailTaskMerge {
-                merge_id: scope.merge.id.clone(),
-                reason: reason.clone(),
-                verification_steps: verification,
-                compensation: Some(
-                    "unsafe post-commit state preserved without reset or cleanup".to_string(),
-                ),
-            })
-            .await;
-        self.release_owned_process_lease(&scope.run.id);
-        match persistence {
-            Ok(_) => bail!("{reason}"),
-            Err(error) => bail!("{reason}; merge failure persistence also failed: {error:#}"),
-        }
-    }
-
-    pub(super) async fn compensate_failed_durable_cas(
-        &self,
-        scope: &TaskMergeScope,
-        workspace: &Path,
-        proof: &MergeCommitProof,
-        verification: Vec<MergeVerificationStep>,
-        operation: anyhow::Error,
-    ) -> Result<TaskMergeAgentOutput> {
-        if let Err(safety_error) = verify_created_merge_commit(scope, workspace, proof).await {
-            let persistence = self
-                .store
-                .fail_task_merge(FailTaskMerge {
-                    merge_id: scope.merge.id.clone(),
-                    reason: format!("durable merge CAS failed: {operation}"),
-                    verification_steps: verification,
-                    compensation: Some(format!(
-                        "unsafe compensation was not attempted; external Git state preserved: {safety_error}"
-                    )),
-                })
-                .await;
-            self.release_owned_process_lease(&scope.run.id);
-            if let Err(error) = persistence {
-                return Err(operation).context(format!(
-                    "durable merge CAS failed with unsafe compensation state; failure persistence also failed: {error:#}"
-                ));
-            }
-            return Err(operation)
-                .context("durable merge CAS failed with unsafe compensation state");
-        }
-        if let Err(safety_error) = verify_created_merge_commit(scope, workspace, proof).await {
-            let persistence = self
-                .store
-                .fail_task_merge(FailTaskMerge {
-                    merge_id: scope.merge.id.clone(),
-                    reason: format!("durable merge CAS failed: {operation}"),
-                    verification_steps: verification,
-                    compensation: Some(format!(
-                        "unsafe compensation was cancelled by second full proof; external Git state preserved: {safety_error}"
-                    )),
-                })
-                .await;
-            self.release_owned_process_lease(&scope.run.id);
-            if let Err(error) = persistence {
-                return Err(operation).context(format!(
-                    "durable merge CAS failed after compensation proof drift; failure persistence also failed: {error:#}"
-                ));
-            }
-            return Err(operation)
-                .context("durable merge CAS failed after compensation proof drift");
-        }
-        let compensation = match run_git(
-            workspace,
-            vec![
-                "reset".into(),
-                "--hard".into(),
-                scope.run.expected_head.clone(),
-            ],
-        )
-        .await
-        {
-            Ok(reset) if reset.success => match validate_merge_preflight(
-                &scope.run,
-                &scope.lease,
-                &scope.work_unit,
-                &scope.delivery,
-                &scope.run.expected_head,
-            )
-            .await
-            {
-                Ok(_) => "exact merge commit reset to previous HEAD".to_string(),
-                Err(error) => {
-                    format!("merge reset ran but exact prestate validation failed: {error:#}")
-                }
-            },
-            Ok(reset) => format!("merge compensation failed: {}", reset.stderr_lossy()),
-            Err(error) => format!("merge compensation process failed: {error:#}"),
-        };
-        let persistence = self
-            .store
-            .fail_task_merge(FailTaskMerge {
-                merge_id: scope.merge.id.clone(),
-                reason: format!("durable merge CAS failed: {operation}"),
-                verification_steps: verification,
-                compensation: Some(compensation),
-            })
-            .await;
-        self.release_owned_process_lease(&scope.run.id);
-        if let Err(error) = persistence {
-            return Err(operation).context(format!(
-                "durable merge CAS failed after Git commit; failure persistence also failed: {error:#}"
-            ));
-        }
-        Err(operation).context("durable merge CAS failed after Git commit")
     }
 }
 
