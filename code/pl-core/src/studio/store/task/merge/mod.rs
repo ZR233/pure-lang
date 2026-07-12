@@ -1,4 +1,5 @@
 mod cleanup;
+mod conflict_resolution;
 mod continuation;
 mod record;
 
@@ -145,6 +146,8 @@ impl StudioStore {
                 merge_commit: None,
                 conflict_manifest: None,
                 conflict_continuation_requested: false,
+                merge_completion_continuation_requested: false,
+                conflict_verification: None,
                 compensation: None,
                 cleanup: None,
             };

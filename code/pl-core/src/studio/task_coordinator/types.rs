@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use super::conflict_types::ConflictVerificationEvidence;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum TaskRunPhase {
@@ -468,6 +470,10 @@ pub(crate) struct MergeEvidence {
     pub(crate) conflict_manifest: Option<ConflictManifest>,
     #[serde(default)]
     pub(crate) conflict_continuation_requested: bool,
+    #[serde(default)]
+    pub(crate) merge_completion_continuation_requested: bool,
+    #[serde(default)]
+    pub(crate) conflict_verification: Option<ConflictVerificationEvidence>,
     #[serde(default)]
     pub(crate) compensation: Option<String>,
     #[serde(default)]

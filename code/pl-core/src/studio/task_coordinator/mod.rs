@@ -1,3 +1,4 @@
+mod conflict_types;
 mod continuation;
 mod coordinator;
 mod delivery;
@@ -10,6 +11,7 @@ mod spawn;
 mod terminal;
 mod types;
 
+pub(crate) use conflict_types::*;
 pub(crate) use continuation::*;
 pub(crate) use coordinator::*;
 pub(crate) use spawn::owned_paths_overlap;
