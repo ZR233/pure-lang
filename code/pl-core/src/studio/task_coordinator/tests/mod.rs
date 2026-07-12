@@ -598,6 +598,63 @@ async fn accepted_merge_final_scope_drift_blocks_without_downgrading_or_cleanup(
 }
 
 #[tokio::test]
+async fn accepted_merge_task_run_read_failure_blocks_and_defers_cleanup() {
+    let fixture = DeliveryFixture::new("merge-post-cas-read-failure", vec!["src/**"]).await;
+    fixture.commit_file("src/lib.rs");
+    let source_head = git_output(&fixture.worktree, &["rev-parse", "HEAD"]);
+    fixture.submit(&source_head).await.unwrap();
+    let run = fixture
+        .store
+        .transition_task_run(&fixture.task_run_id, TaskRunPhase::Implementing, None)
+        .await
+        .unwrap();
+    fixture.coordinator.fail_next_merge_post_accept_read();
+    let (event_tx, _) = tokio::sync::broadcast::channel(16);
+
+    fixture
+        .coordinator
+        .merge_agent_with_verifier(
+            &fixture.session_id,
+            &fixture.subagent.id,
+            &run.expected_head,
+            &AgentSupervisor::default(),
+            &event_tx,
+            "call-post-cas-read-failure",
+            &PassingMergeVerifier,
+        )
+        .await
+        .expect_err("post-CAS task run read failure must block accepted merge");
+
+    let durable_run = fixture
+        .store
+        .read_task_run(&fixture.task_run_id)
+        .await
+        .unwrap()
+        .unwrap();
+    let record = fixture
+        .store
+        .list_merge_records(&fixture.task_run_id)
+        .await
+        .unwrap()
+        .pop()
+        .unwrap();
+    assert_eq!(durable_run.phase, TaskRunPhase::Blocked);
+    assert_eq!(record.status, MergeStatus::Merged);
+    assert_eq!(fixture.work_unit().await.status, WorkUnitStatus::Merged);
+    assert_eq!(
+        record
+            .evidence
+            .as_ref()
+            .and_then(|evidence| evidence.cleanup.as_ref())
+            .map(|cleanup| cleanup.status.as_str()),
+        Some("deferred")
+    );
+    assert!(fixture.worktree.exists());
+    assert!(!fixture.coordinator.process_lease_is_held(&durable_run));
+    fixture.cleanup();
+}
+
+#[tokio::test]
 async fn accepted_delivery_cleanup_is_idempotent_after_resources_are_absent() {
     let fixture = DeliveryFixture::new("merge-cleanup-idempotent", vec!["src/**"]).await;
     fixture.commit_file("src/lib.rs");
@@ -724,6 +781,21 @@ async fn cleanup_final_evidence_failure_replays_after_restart_without_new_merge_
         "recovered runs: {recovered_runs:?}; status: {:?}",
         recovered_run.status_message
     );
+    let recovered_cleanup = fixture
+        .store
+        .list_merge_records(&fixture.run.id)
+        .await
+        .unwrap()
+        .pop()
+        .unwrap();
+    assert_eq!(
+        recovered_cleanup
+            .evidence
+            .as_ref()
+            .and_then(|evidence| evidence.cleanup.as_ref())
+            .map(|cleanup| cleanup.status.as_str()),
+        Some("alreadyAbsent")
+    );
     let (event_tx, _) = tokio::sync::broadcast::channel(16);
 
     let replayed = recovered
@@ -750,6 +822,144 @@ async fn cleanup_final_evidence_failure_replays_after_restart_without_new_merge_
             .unwrap()
             .len(),
         1
+    );
+    recovered.suspend();
+    Arc::try_unwrap(fixture).ok().unwrap().cleanup();
+}
+
+#[tokio::test]
+async fn restart_protects_deferred_cleanup_resources_from_generic_gc() {
+    let fixture = Arc::new(IncrementalMergeFixture::new("merge-deferred-restart-protect").await);
+    let delivered = fixture
+        .deliver("agent_deferred_restart", "src/lib.rs", "delivered\n")
+        .await;
+    let outcome = fixture
+        .store
+        .list_agent_outcomes(&fixture.run.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|outcome| outcome.agent_id == delivered.agent_id)
+        .unwrap();
+    let delivery = outcome.delivery.unwrap();
+    let worktree = PathBuf::from(&delivery.worktree.path);
+    let barrier = MergeCommitTestBarrier::new();
+    fixture
+        .coordinator
+        .set_merge_after_acceptance_barrier(barrier.clone());
+    let task_fixture = fixture.clone();
+    let merge = tokio::spawn(async move {
+        let (event_tx, _) = tokio::sync::broadcast::channel(16);
+        task_fixture
+            .coordinator
+            .merge_agent_with_verifier(
+                &task_fixture.session_id,
+                &delivered.agent_id,
+                &task_fixture.run.expected_head,
+                &AgentSupervisor::default(),
+                &event_tx,
+                "call-deferred-restart",
+                &PassingMergeVerifier,
+            )
+            .await
+    });
+    barrier.wait_until_committed().await;
+    std::fs::write(fixture.repository.join("external.txt"), "external\n").unwrap();
+    barrier.release().await;
+    merge
+        .await
+        .unwrap()
+        .expect_err("dirty post-CAS scope must defer cleanup");
+    std::fs::remove_file(fixture.repository.join("external.txt")).unwrap();
+    fixture.coordinator.suspend();
+    let recovered = TaskCoordinator::new(fixture.store.clone());
+
+    assert!(recovered.recover_active_tasks().await.unwrap().is_empty());
+    assert!(worktree.exists());
+    assert_eq!(
+        git_output(
+            &fixture.repository,
+            &[
+                "rev-parse",
+                &format!("refs/heads/{}", delivery.worktree.branch)
+            ]
+        ),
+        delivery.head_commit
+    );
+    recovered.suspend();
+    Arc::try_unwrap(fixture).ok().unwrap().cleanup();
+}
+
+#[tokio::test]
+async fn restart_protects_failed_cleanup_tip_drift_without_deleting_evidence() {
+    let fixture = Arc::new(IncrementalMergeFixture::new("merge-failed-restart-protect").await);
+    let delivered = fixture
+        .deliver("agent_failed_restart", "src/lib.rs", "delivered\n")
+        .await;
+    let outcome = fixture
+        .store
+        .list_agent_outcomes(&fixture.run.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|outcome| outcome.agent_id == delivered.agent_id)
+        .unwrap();
+    let delivery = outcome.delivery.unwrap();
+    let worktree = PathBuf::from(&delivery.worktree.path);
+    let barrier = MergeCleanupTestBarrier::new();
+    fixture
+        .coordinator
+        .set_merge_cleanup_barrier(barrier.clone());
+    let task_fixture = fixture.clone();
+    let merge = tokio::spawn(async move {
+        let (event_tx, _) = tokio::sync::broadcast::channel(16);
+        task_fixture
+            .coordinator
+            .merge_agent_with_verifier(
+                &task_fixture.session_id,
+                &delivered.agent_id,
+                &task_fixture.run.expected_head,
+                &AgentSupervisor::default(),
+                &event_tx,
+                "call-failed-restart",
+                &PassingMergeVerifier,
+            )
+            .await
+    });
+    barrier.wait_until_entered().await;
+    git(
+        &fixture.repository,
+        &[
+            "update-ref",
+            &format!("refs/heads/{}", delivery.worktree.branch),
+            &delivery.base_commit,
+            &delivery.head_commit,
+        ],
+    );
+    barrier.release().await;
+    let output = merge.await.unwrap().unwrap();
+    assert_eq!(output.cleanup.status, "failed");
+    fixture.coordinator.suspend();
+    let recovered = TaskCoordinator::new(fixture.store.clone());
+
+    assert!(recovered.recover_active_tasks().await.unwrap().is_empty());
+    let durable_run = fixture
+        .store
+        .read_task_run(&fixture.run.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(durable_run.phase, TaskRunPhase::Blocked);
+    assert!(worktree.exists());
+    assert_eq!(
+        git_output(
+            &fixture.repository,
+            &[
+                "rev-parse",
+                &format!("refs/heads/{}", delivery.worktree.branch)
+            ]
+        ),
+        delivery.base_commit
     );
     recovered.suspend();
     Arc::try_unwrap(fixture).ok().unwrap().cleanup();
@@ -1262,6 +1472,103 @@ async fn two_deliveries_from_same_base_merge_incrementally_and_are_consumed_once
         before_repeat
     );
     fixture.cleanup();
+}
+
+#[tokio::test]
+async fn older_accepted_cleanup_replays_after_later_delivery_advances_task_head() {
+    let fixture = Arc::new(IncrementalMergeFixture::new("merge-old-cleanup-replay").await);
+    let first = fixture
+        .deliver("agent_old_cleanup", "src/first.rs", "first\n")
+        .await;
+    let second = fixture
+        .deliver("agent_later_merge", "src/second.rs", "second\n")
+        .await;
+    let initial_head = fixture.run.expected_head.clone();
+    let barrier = MergeCleanupTestBarrier::new();
+    fixture
+        .coordinator
+        .set_merge_cleanup_barrier(barrier.clone());
+    let task_fixture = fixture.clone();
+    let first_agent_id = first.agent_id.clone();
+    let first_merge = tokio::spawn(async move {
+        let (event_tx, _) = tokio::sync::broadcast::channel(16);
+        task_fixture
+            .coordinator
+            .merge_agent_with_verifier(
+                &task_fixture.session_id,
+                &first_agent_id,
+                &initial_head,
+                &AgentSupervisor::default(),
+                &event_tx,
+                "call-old-cleanup-first",
+                &PassingMergeVerifier,
+            )
+            .await
+    });
+    barrier.wait_until_entered().await;
+    fixture
+        .store
+        .execute_test_sql(
+            "CREATE TRIGGER fail_old_cleanup_final BEFORE UPDATE ON merge_records \
+             WHEN OLD.status = 'merged' BEGIN SELECT RAISE(FAIL, 'old cleanup final failure'); END",
+        )
+        .await;
+    barrier.release().await;
+    first_merge
+        .await
+        .unwrap()
+        .expect_err("first cleanup final persistence must fail");
+    fixture
+        .store
+        .execute_test_sql("DROP TRIGGER fail_old_cleanup_final")
+        .await;
+    let first_head = git_output(&fixture.repository, &["rev-parse", "HEAD"]);
+    let (event_tx, _) = tokio::sync::broadcast::channel(16);
+    let second_output = fixture
+        .coordinator
+        .merge_agent_with_verifier(
+            &fixture.session_id,
+            &second.agent_id,
+            &first_head,
+            &AgentSupervisor::default(),
+            &event_tx,
+            "call-later-merge",
+            &PassingMergeVerifier,
+        )
+        .await
+        .unwrap();
+    let current_head = second_output.new_head.unwrap();
+
+    let replayed = fixture
+        .coordinator
+        .merge_agent_with_verifier(
+            &fixture.session_id,
+            &first.agent_id,
+            &fixture.run.expected_head,
+            &AgentSupervisor::default(),
+            &event_tx,
+            "call-old-cleanup-replay",
+            &PassingMergeVerifier,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(replayed.status, MergeStatus::Merged);
+    assert_eq!(replayed.cleanup.status, "alreadyAbsent");
+    assert_eq!(
+        git_output(&fixture.repository, &["rev-parse", "HEAD"]),
+        current_head
+    );
+    assert_eq!(
+        fixture
+            .store
+            .list_merge_records(&fixture.run.id)
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
+    Arc::try_unwrap(fixture).ok().unwrap().cleanup();
 }
 
 #[tokio::test]
@@ -4383,7 +4690,7 @@ async fn recovery_reconciles_terminal_workspace_without_active_run_once() {
     store
         .update_work_unit(
             &unit.id,
-            WorkUnitStatus::Merged,
+            WorkUnitStatus::Delivered,
             Some("agent-merged".to_string()),
         )
         .await
@@ -4420,6 +4727,41 @@ async fn recovery_reconciles_terminal_workspace_without_active_run_once() {
                     verification_summary: "passed".to_string(),
                 }),
                 review: None,
+            },
+        )
+        .await
+        .unwrap();
+    store
+        .transition_task_run(&run.id, TaskRunPhase::Implementing, None)
+        .await
+        .unwrap();
+    let merge = store
+        .begin_task_merge(BeginTaskMerge {
+            session_id: session.id.clone(),
+            agent_id: "agent-merged".to_string(),
+            expected_head: run.expected_head.clone(),
+            pre_index_tree: run.expected_head.clone(),
+            changed_files: Vec::new(),
+        })
+        .await
+        .unwrap()
+        .merge;
+    store.mark_task_merge_verifying(&merge.id).await.unwrap();
+    store
+        .complete_task_merge(CompleteTaskMerge {
+            merge_id: merge.id.clone(),
+            expected_head: run.expected_head.clone(),
+            merge_commit: run.expected_head.clone(),
+            verification_steps: Vec::new(),
+        })
+        .await
+        .unwrap();
+    store
+        .record_merge_cleanup(
+            &merge.id,
+            MergeCleanupEvidence {
+                status: "discarded".to_string(),
+                detail: Some("simulated accepted cleanup before restart".to_string()),
             },
         )
         .await

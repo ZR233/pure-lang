@@ -44,20 +44,40 @@ impl StudioStore {
             [merge] => merge.clone(),
             _ => bail!("multiple accepted merges found for executor delivery"),
         };
+        self.accepted_merge_scope(run, merge).await.map(Some)
+    }
+
+    pub(crate) async fn read_accepted_merge_scope(&self, merge_id: &str) -> Result<TaskMergeScope> {
+        let merge = entities::merge_record::Entity::find_by_id(merge_id.to_string())
+            .one(&self.db)
+            .await?
+            .context("accepted merge record not found")?;
+        if merge.status != MergeStatus::Merged.as_str() {
+            bail!("cleanup replay requires an accepted merge record");
+        }
+        let run = entities::task_run::Entity::find_by_id(merge.task_run_id.clone())
+            .one(&self.db)
+            .await?
+            .context("accepted merge task run not found")?;
+        self.accepted_merge_scope(run, merge).await
+    }
+
+    async fn accepted_merge_scope(
+        &self,
+        run: entities::task_run::Model,
+        merge: entities::merge_record::Model,
+    ) -> Result<TaskMergeScope> {
         let evidence = parse_required_evidence(merge.verification_json.as_deref())?;
-        let merge_commit = evidence
+        evidence
             .merge_commit
             .as_deref()
             .context("accepted merge evidence has no merge commit")?;
-        if run.expected_head != merge_commit {
-            bail!("accepted merge no longer matches the durable task head");
-        }
         let lease = entities::branch_lease::Entity::find()
             .filter(entities::branch_lease::Column::TaskRunId.eq(run.id.clone()))
             .one(&self.db)
             .await?
             .context("accepted merge branch lease not found")?;
-        if lease.expected_head != merge_commit
+        if lease.expected_head != run.expected_head
             || lease.branch != run.branch
             || lease.git_common_dir != run.git_common_dir
         {
@@ -77,7 +97,16 @@ impl StudioStore {
                 .as_deref()
                 .context("accepted merge delivery disappeared")?,
         )?;
-        Ok(Some(TaskMergeScope {
+        if work_unit.task_run_id != run.id
+            || outcome.task_run_id != run.id
+            || outcome.work_unit_id.as_deref() != Some(work_unit.id.as_str())
+            || outcome.agent_id != merge.agent_id
+            || work_unit.agent_id.as_deref() != Some(merge.agent_id.as_str())
+            || delivery.head_commit != evidence.delivery_head
+        {
+            bail!("accepted merge work unit, outcome, and delivery identity drifted");
+        }
+        Ok(TaskMergeScope {
             #[cfg(test)]
             origin_phase: TaskRunPhase::from_str(&run.phase)
                 .context("accepted merge run has invalid phase")?,
@@ -87,7 +116,7 @@ impl StudioStore {
             outcome: agent_outcome_record(outcome)?,
             delivery,
             merge: merge_record(merge)?,
-        }))
+        })
     }
 
     pub(crate) async fn record_merge_cleanup_attempting(

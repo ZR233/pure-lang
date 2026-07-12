@@ -1,10 +1,42 @@
 use std::path::{Path, PathBuf};
 
+use anyhow::{Context, Result, bail};
+
 use crate::AgentSupervisor;
 use crate::agent::worktree::{CloseDisposition, WorktreeHandle, WorktreeManager};
 
 use super::git::{checked_git, run_git};
-use crate::studio::task_coordinator::{MergeCleanupEvidence, TaskMergeScope};
+use super::validation::validate_final_head;
+use crate::studio::task_coordinator::{MergeCleanupEvidence, TaskCoordinator, TaskMergeScope};
+
+impl TaskCoordinator {
+    pub(in crate::studio::task_coordinator) async fn validate_accepted_cleanup_replay(
+        &self,
+        scope: &TaskMergeScope,
+    ) -> Result<()> {
+        validate_final_head(&scope.run, &scope.run.expected_head).await?;
+        let merge_commit = scope
+            .merge
+            .evidence
+            .as_ref()
+            .and_then(|evidence| evidence.merge_commit.as_deref())
+            .context("accepted cleanup replay has no merge commit")?;
+        let ancestor = run_git(
+            &scope.run.workspace_root,
+            vec![
+                "merge-base".into(),
+                "--is-ancestor".into(),
+                merge_commit.to_string(),
+                scope.run.expected_head.clone(),
+            ],
+        )
+        .await?;
+        if !ancestor.success {
+            bail!("accepted merge commit is not an ancestor of the current durable task head");
+        }
+        Ok(())
+    }
+}
 
 #[cfg(test)]
 #[derive(Clone)]

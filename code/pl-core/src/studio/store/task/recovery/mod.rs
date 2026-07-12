@@ -9,11 +9,15 @@ use crate::studio::entities;
 use crate::studio::ids::unix_seconds;
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    AgentOutcomeStatus, RestartAgentReconciliation, TaskWorktreeCreationState,
-    TaskWorktreeOwnerResource, TaskWorktreeOwnerSnapshot, WorkUnitStatus,
+    AgentOutcomeStatus, RestartAgentReconciliation, TaskWorktreeCleanupState,
+    TaskWorktreeCreationState, TaskWorktreeOwnerResource, TaskWorktreeOwnerSnapshot,
+    WorkUnitStatus,
 };
 
-use super::{outcome::agent_outcome_record, task_run_record, work_unit::work_unit_record};
+use super::{
+    merge::parse_required_evidence, outcome::agent_outcome_record, task_run_record,
+    work_unit::work_unit_record,
+};
 
 const RESTART_DIAGNOSTIC: &str = "agent interrupted by application restart";
 const RESTART_BEFORE_CREATE_DIAGNOSTIC: &str =
@@ -72,9 +76,13 @@ impl StudioStore {
                 .into_iter()
                 .map(agent_outcome_record)
                 .collect::<Result<Vec<_>>>()?;
+            let merges = entities::merge_record::Entity::find()
+                .filter(entities::merge_record::Column::TaskRunId.eq(run.id.clone()))
+                .all(&self.db)
+                .await?;
             let resources = work_units
                 .into_iter()
-                .map(|work_unit| {
+                .map(|work_unit| -> Result<_> {
                     let outcome = outcomes
                         .iter()
                         .find(|outcome| {
@@ -88,13 +96,15 @@ impl StudioStore {
                     } else {
                         TaskWorktreeCreationState::MustExist
                     };
-                    TaskWorktreeOwnerResource {
+                    let cleanup_state = merge_cleanup_state(&work_unit, &merges)?;
+                    Ok(TaskWorktreeOwnerResource {
                         work_unit,
                         outcome,
                         creation_state,
-                    }
+                        cleanup_state,
+                    })
                 })
-                .collect();
+                .collect::<Result<Vec<_>>>()?;
             snapshots.push(TaskWorktreeOwnerSnapshot {
                 run: task_run_record(run)?,
                 resources,
@@ -184,6 +194,42 @@ impl StudioStore {
                 Err(error)
             }
         }
+    }
+}
+
+fn merge_cleanup_state(
+    work_unit: &crate::studio::task_coordinator::WorkUnitRecord,
+    merges: &[entities::merge_record::Model],
+) -> Result<TaskWorktreeCleanupState> {
+    if work_unit.status != WorkUnitStatus::Merged {
+        return Ok(TaskWorktreeCleanupState::NotMerged);
+    }
+    let mut matches = Vec::new();
+    for merge in merges {
+        if merge.status != crate::studio::task_coordinator::MergeStatus::Merged.as_str() {
+            continue;
+        }
+        let evidence = parse_required_evidence(merge.verification_json.as_deref())?;
+        if evidence.work_unit_id == work_unit.id {
+            matches.push((merge, evidence));
+        }
+    }
+    let (merge, evidence) = match matches.as_slice() {
+        [(merge, evidence)] => (*merge, evidence),
+        [] => bail!("merged work unit has no accepted merge evidence"),
+        _ => bail!("merged work unit has ambiguous accepted merge evidence"),
+    };
+    match evidence
+        .cleanup
+        .as_ref()
+        .map(|cleanup| cleanup.status.as_str())
+    {
+        Some("discarded" | "alreadyAbsent") => Ok(TaskWorktreeCleanupState::Cleanup),
+        None | Some("attempting") => Ok(TaskWorktreeCleanupState::Replay {
+            merge_id: merge.id.clone(),
+        }),
+        Some("failed" | "deferred") => Ok(TaskWorktreeCleanupState::Protect),
+        Some(status) => bail!("accepted merge has unknown cleanup status `{status}`"),
     }
 }
 
