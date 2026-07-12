@@ -3,6 +3,10 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 
+use super::barriers::MergeFailurePoint;
+use super::conflict_index::parse_unmerged_entries;
+use super::conflict_status::parse_porcelain_entries;
+use super::failure::MergeFailureStage;
 use super::git::{checked_git, run_git};
 use super::recovery::{
     capture_conflict_workspace_evidence, read_conflict_status, validate_conflict_workspace_evidence,
@@ -23,18 +27,60 @@ impl TaskCoordinator {
         scope: &TaskMergeScope,
         workspace: &Path,
     ) -> Result<TaskMergeAgentOutput> {
-        let manifest = build_conflict_manifest(scope, workspace).await?;
+        let manifest = match self.inject_merge_failure(MergeFailurePoint::ConflictManifest) {
+            Ok(()) => match build_conflict_manifest(scope, workspace).await {
+                Ok(manifest) => manifest,
+                Err(error) => {
+                    return self
+                        .handle_merge_stage_failure(
+                            scope,
+                            workspace,
+                            Vec::new(),
+                            error.context("build merge conflict manifest"),
+                            MergeFailureStage::Conflict,
+                        )
+                        .await;
+                }
+            },
+            Err(error) => {
+                return self
+                    .handle_merge_stage_failure(
+                        scope,
+                        workspace,
+                        Vec::new(),
+                        error.context("build merge conflict manifest"),
+                        MergeFailureStage::Conflict,
+                    )
+                    .await;
+            }
+        };
         let conflict_files = manifest
             .conflicts
             .iter()
             .map(|entry| entry.path.clone())
             .collect::<Vec<_>>();
-        self.store
-            .conflict_task_merge(ConflictTaskMerge {
-                merge_id: scope.merge.id.clone(),
-                manifest,
-            })
-            .await?;
+        let persistence = match self.inject_merge_failure(MergeFailurePoint::ConflictPersistence) {
+            Ok(()) => {
+                self.store
+                    .conflict_task_merge(ConflictTaskMerge {
+                        merge_id: scope.merge.id.clone(),
+                        manifest,
+                    })
+                    .await
+            }
+            Err(error) => Err(error),
+        };
+        if let Err(error) = persistence {
+            return self
+                .handle_merge_stage_failure(
+                    scope,
+                    workspace,
+                    Vec::new(),
+                    error.context("persist merge conflict manifest"),
+                    MergeFailureStage::Conflict,
+                )
+                .await;
+        }
         Ok(TaskMergeAgentOutput {
             merge_id: scope.merge.id.clone(),
             status: MergeStatus::Conflicted,
@@ -51,6 +97,20 @@ impl TaskCoordinator {
             conflict_files,
         })
     }
+}
+
+pub(super) async fn validate_merge_failure_workspace(
+    scope: &TaskMergeScope,
+    workspace: &Path,
+) -> Result<()> {
+    let status = read_conflict_status(workspace).await?;
+    let allowed = scope
+        .delivery
+        .changed_files
+        .iter()
+        .cloned()
+        .collect::<HashSet<_>>();
+    validate_conflict_status_scope(&status, &allowed)
 }
 
 async fn build_conflict_manifest(
@@ -184,43 +244,6 @@ pub(crate) async fn validate_conflict_recovery(
         bail!("durable conflict auto-merged index evidence drifted");
     }
     Ok(())
-}
-
-fn parse_unmerged_entries(bytes: &[u8]) -> Result<BTreeMap<String, Vec<MergeIndexStage>>> {
-    let mut grouped = BTreeMap::<String, Vec<MergeIndexStage>>::new();
-    for record in bytes
-        .split(|byte| *byte == 0)
-        .filter(|record| !record.is_empty())
-    {
-        let tab = record
-            .iter()
-            .position(|byte| *byte == b'\t')
-            .context("unmerged index record has no path separator")?;
-        let metadata =
-            std::str::from_utf8(&record[..tab]).context("unmerged index metadata is not UTF-8")?;
-        let path = std::str::from_utf8(&record[tab + 1..])
-            .context("unmerged index path is not UTF-8")?
-            .replace('\\', "/");
-        let mut fields = metadata.split_whitespace();
-        let mode = fields.next().context("unmerged index mode is missing")?;
-        let object_id = fields
-            .next()
-            .context("unmerged index object id is missing")?;
-        let stage = fields
-            .next()
-            .context("unmerged index stage is missing")?
-            .parse::<u8>()
-            .context("unmerged index stage is invalid")?;
-        if !matches!(stage, 1..=3) {
-            bail!("invalid unmerged index stage {stage}");
-        }
-        grouped.entry(path).or_default().push(MergeIndexStage {
-            stage,
-            mode: mode.to_string(),
-            object_id: object_id.to_string(),
-        });
-    }
-    Ok(grouped)
 }
 
 async fn stages_are_binary(workspace: &Path, stages: &[MergeIndexStage]) -> Result<bool> {
@@ -371,46 +394,6 @@ fn validate_conflict_status_scope(status: &[u8], allowed: &HashSet<String>) -> R
         }
     }
     Ok(())
-}
-
-struct PorcelainEntry {
-    status: String,
-    path: String,
-    original_path: Option<String>,
-}
-
-fn parse_porcelain_entries(bytes: &[u8]) -> Result<Vec<PorcelainEntry>> {
-    let fields = bytes
-        .split(|byte| *byte == 0)
-        .filter(|field| !field.is_empty())
-        .collect::<Vec<_>>();
-    let mut entries = Vec::new();
-    let mut index = 0;
-    while index < fields.len() {
-        let field = fields[index];
-        index += 1;
-        if field.len() < 4 || field[2] != b' ' {
-            bail!("invalid Git conflict status entry");
-        }
-        let status = std::str::from_utf8(&field[..2])?.to_string();
-        let path = std::str::from_utf8(&field[3..])?.replace('\\', "/");
-        let renamed = matches!(field[0], b'R' | b'C') || matches!(field[1], b'R' | b'C');
-        let original_path = if renamed {
-            let original = fields
-                .get(index)
-                .context("rename status entry has no original path")?;
-            index += 1;
-            Some(std::str::from_utf8(original)?.replace('\\', "/"))
-        } else {
-            None
-        };
-        entries.push(PorcelainEntry {
-            status,
-            path,
-            original_path,
-        });
-    }
-    Ok(entries)
 }
 
 async fn auto_merged_entries(

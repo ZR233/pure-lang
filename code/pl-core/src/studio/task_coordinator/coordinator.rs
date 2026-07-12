@@ -67,6 +67,8 @@ pub(crate) struct TaskCoordinator {
     pub(super) merge_after_abort_barrier: Mutex<Option<super::merge::MergeCommitTestBarrier>>,
     #[cfg(test)]
     pub(super) fail_merge_post_accept_read: std::sync::atomic::AtomicBool,
+    #[cfg(test)]
+    pub(super) merge_failure_point: Mutex<Option<super::merge::MergeFailureTestPoint>>,
 }
 
 /// 持有期间串行化任务分支变更，并阻止 executor 基于中间 HEAD 分配。
@@ -105,6 +107,8 @@ impl TaskCoordinator {
             merge_after_abort_barrier: Mutex::new(None),
             #[cfg(test)]
             fail_merge_post_accept_read: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(test)]
+            merge_failure_point: Mutex::new(None),
         }
     }
 
