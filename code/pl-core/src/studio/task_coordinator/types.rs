@@ -372,6 +372,8 @@ pub(crate) struct ReviewFinding {
     pub(crate) body: String,
     pub(crate) path: Option<String>,
     pub(crate) line: Option<u32>,
+    #[serde(default)]
+    pub(crate) design_references: Vec<ReviewDesignReference>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

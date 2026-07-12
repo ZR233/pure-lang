@@ -59,6 +59,269 @@ async fn task_merge_agent_tool_has_typed_schema_branch_effect_and_planner_only_v
     }
 }
 
+#[tokio::test]
+async fn reviewer_harness_authorization_is_one_shot_and_has_no_work_unit() {
+    let fixture = ReviewFixture::new("review-harness-authorization").await;
+    let round = fixture
+        .store
+        .begin_task_review(&fixture.session_id, "call-review")
+        .await
+        .unwrap();
+    let hook = fixture.coordinator.lifecycle_hook(&fixture.session_id);
+    let request = crate::agent::AgentSpawnLifecycleRequest {
+        agent_id: "agent-reviewer".to_string(),
+        agent_path: "/root/review_round_1".to_string(),
+        owner_path: "/root".to_string(),
+        session_id: fixture.session_id.clone(),
+        task_name: "review_round_1".to_string(),
+        role: "reviewer".to_string(),
+        owned_paths: Vec::new(),
+        requested_by_call_id: "call-review".to_string(),
+    };
+    let preparation = hook.prepare_spawn(&request).await.unwrap();
+    assert!(preparation.lifecycle_token().is_some());
+    hook.activate_spawn(&request, &preparation).await.unwrap();
+    assert!(hook.prepare_spawn(&request).await.is_err());
+    assert!(
+        fixture
+            .store
+            .list_work_units(&fixture.run_id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    let outcomes = fixture
+        .store
+        .list_agent_outcomes(&fixture.run_id)
+        .await
+        .unwrap();
+    assert_eq!(outcomes.len(), 1);
+    assert_eq!(outcomes[0].role, "reviewer");
+    assert_eq!(outcomes[0].owner_path, "/root");
+    assert_eq!(outcomes[0].requested_by_call_id, "call-review");
+    assert_eq!(outcomes[0].status, AgentOutcomeStatus::Running);
+    let rounds = fixture
+        .store
+        .list_review_rounds(&fixture.run_id)
+        .await
+        .unwrap();
+    assert_eq!(rounds[0].id, round.id);
+    assert_eq!(
+        rounds[0].reviewer_agent_id.as_deref(),
+        Some("agent-reviewer")
+    );
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn review_tools_have_role_visibility_and_prompt_only_indexes_design() {
+    let fixture = ReviewFixture::new("review-tool-visibility-prompt").await;
+    let core = PureCoreBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None))
+        .unwrap()
+        .build();
+    let request_tool = fixture
+        .coordinator
+        .task_request_review_tool(&fixture.session_id, core.agent_tool_runtime());
+    assert_eq!(request_tool.name(), "task_request_review");
+    assert_eq!(request_tool.effect(), Some(ToolEffect::BranchControl));
+    let exit_tool = fixture.coordinator.review_exit_tool(&fixture.session_id);
+    assert_eq!(exit_tool.effect(), Some(ToolEffect::Read));
+    let explorer = TurnExecutionProfile::for_subagent(CompileMode::Task, "explorer");
+    let reviewer = TurnExecutionProfile::for_subagent(CompileMode::Task, "reviewer");
+    assert!(!explorer.allows_tool("review_exit", Some(ToolEffect::Read)));
+    assert!(reviewer.allows_tool("review_exit", Some(ToolEffect::Read)));
+    let run = fixture
+        .store
+        .read_task_run(&fixture.run_id)
+        .await
+        .unwrap()
+        .unwrap();
+    let prompt = super::review::prompt::build_review_prompt(&fixture.coordinator, &run)
+        .await
+        .unwrap();
+    assert!(prompt.contains("review this implementation"));
+    assert!(prompt.contains("- design/guide.md"));
+    assert!(!prompt.contains("# Review design"));
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn reviewer_terminal_without_review_exit_fails_round_and_restores_phase() {
+    let fixture = ReviewFixture::new("reviewer-terminal-without-exit").await;
+    fixture
+        .store
+        .begin_task_review(&fixture.session_id, "call-review-terminal")
+        .await
+        .unwrap();
+    let (_, outcome) = fixture
+        .store
+        .authorize_reviewer_spawn(
+            &fixture.session_id,
+            "call-review-terminal",
+            "agent-reviewer-terminal",
+        )
+        .await
+        .unwrap();
+    fixture
+        .store
+        .update_spawned_outcome(
+            &outcome.id,
+            "agent-reviewer-terminal",
+            AgentOutcomeStatus::Running,
+            None,
+        )
+        .await
+        .unwrap();
+
+    let recording = fixture
+        .coordinator
+        .record_terminal_agent_state(
+            &fixture.session_id,
+            &crate::agent::AgentTerminalStateChange {
+                agent_id: "agent-reviewer-terminal".to_string(),
+                role: "reviewer".to_string(),
+                status: pl_protocol::AgentStatus::Completed,
+                summary: Some("returned text instead of review_exit".to_string()),
+                error: None,
+            },
+        )
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        recording,
+        TerminalAgentStateRecording::Changed { .. }
+    ));
+    let run = fixture
+        .store
+        .read_task_run(&fixture.run_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(run.phase, TaskRunPhase::Implementing);
+    let round = fixture
+        .store
+        .list_review_rounds(&fixture.run_id)
+        .await
+        .unwrap()
+        .pop()
+        .unwrap();
+    assert_eq!(round.verdict, ReviewVerdict::Failed);
+    let outcome = fixture
+        .store
+        .list_agent_outcomes(&fixture.run_id)
+        .await
+        .unwrap()
+        .pop()
+        .unwrap();
+    assert_eq!(outcome.status, AgentOutcomeStatus::Failed);
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn review_exit_requires_real_design_trace_and_persists_matching_pass() {
+    let fixture = ReviewFixture::new("review-exit-trace").await;
+    fixture
+        .store
+        .begin_task_review(&fixture.session_id, "call-review-exit")
+        .await
+        .unwrap();
+    let (_, outcome) = fixture
+        .store
+        .authorize_reviewer_spawn(
+            &fixture.session_id,
+            "call-review-exit",
+            "agent-reviewer-exit",
+        )
+        .await
+        .unwrap();
+    fixture
+        .store
+        .update_spawned_outcome(
+            &outcome.id,
+            "agent-reviewer-exit",
+            AgentOutcomeStatus::Running,
+            None,
+        )
+        .await
+        .unwrap();
+    let history = CoreSession::from_messages(vec![
+        crate::tool_result_history_message(
+            "call-search".to_string(),
+            "search_files".to_string(),
+            r#"{"query":"review design"}"#.to_string(),
+            r#"{"matches":["design/guide.md"]}"#.to_string(),
+        ),
+        crate::tool_result_history_message(
+            "call-read".to_string(),
+            "read_file".to_string(),
+            r#"{"path":"design/guide.md"}"#.to_string(),
+            r##"{"path":"design/guide.md","text":"# Review design\n","offset":0,"bytesReturned":16,"bytesOmitted":0,"truncated":false,"nextOffset":null}"##.to_string(),
+        ),
+    ]);
+    let tool = fixture
+        .coordinator
+        .review_exit_tool(fixture.session_id.clone());
+    let (event_tx, _) = tokio::sync::broadcast::channel(16);
+    let output = tool
+        .execute(
+            ToolInput {
+                arguments: serde_json::json!({
+                    "verdict":"pass",
+                    "summary":"implementation matches the reviewed design",
+                    "designReferences":[{"path":"design/guide.md","section":"Review design"}],
+                    "findings":[]
+                }),
+                session_id: "reviewer-turn".to_string(),
+                tool_id: "call-review-exit".to_string(),
+                revision_base: 0,
+            },
+            ToolContext {
+                event_tx,
+                options: TurnOptions::default(),
+                workspace_access: WorkspaceAccess::WorkspaceOnly,
+                mode: CompileMode::Task,
+                workspace_root: fixture.repository.clone(),
+                workspace_instructions: None,
+                instruction_snapshot: None,
+                provider_call_id: Some("call-review-exit".to_string()),
+                active_subagent: Some(SubagentContext {
+                    id: "agent-reviewer-exit".to_string(),
+                    parent_id: Some("/root".to_string()),
+                    agent_path: Some("/root/review_round_1".to_string()),
+                    role: "reviewer".to_string(),
+                    task: "review".to_string(),
+                    depth: 1,
+                }),
+                agent_supervisor: AgentSupervisor::default(),
+                agent_tool_registrar: None,
+                lsp_runtime: None,
+                parent_session: Arc::new(history),
+            },
+        )
+        .await
+        .unwrap();
+    assert!(output.ends_turn());
+    let rounds = fixture
+        .store
+        .list_review_rounds(&fixture.run_id)
+        .await
+        .unwrap();
+    assert_eq!(rounds[0].verdict, ReviewVerdict::Pass);
+    assert_eq!(rounds[0].design_references[0].path, "design/guide.md");
+    let outcomes = fixture
+        .store
+        .list_agent_outcomes(&fixture.run_id)
+        .await
+        .unwrap();
+    assert_eq!(outcomes[0].status, AgentOutcomeStatus::Completed);
+    assert_eq!(
+        outcomes[0].review.as_ref().unwrap().verdict,
+        ReviewVerdict::Pass
+    );
+    fixture.cleanup();
+}
+
 #[test]
 fn production_merge_verifier_selects_repo_rust_fmt_and_flutter_project_analyze() {
     let selected = select_merge_verification_commands(
@@ -4105,6 +4368,47 @@ impl IncrementalMergeFixture {
 
     fn cleanup(self) {
         drop(self.coordinator);
+        remove_repository(self.repository);
+    }
+}
+
+struct ReviewFixture {
+    repository: PathBuf,
+    store: StudioStore,
+    coordinator: Arc<TaskCoordinator>,
+    session_id: String,
+    run_id: String,
+}
+
+impl ReviewFixture {
+    async fn new(name: &str) -> Self {
+        let repository = init_repository(name);
+        std::fs::create_dir_all(repository.join("design")).unwrap();
+        std::fs::write(repository.join("design/guide.md"), "# Review design\n").unwrap();
+        git(&repository, &["add", "design/guide.md"]);
+        git(&repository, &["commit", "-m", "add review design"]);
+        let store = task_store(&repository).await;
+        let session = task_session(&store, &repository).await;
+        let coordinator = Arc::new(TaskCoordinator::new(store.clone()));
+        let run = coordinator
+            .start_confirmed_task(&session.id, "review this implementation", &repository)
+            .await
+            .unwrap();
+        let run = store
+            .transition_task_run(&run.id, TaskRunPhase::Implementing, None)
+            .await
+            .unwrap();
+        Self {
+            repository,
+            store,
+            coordinator,
+            session_id: session.id,
+            run_id: run.id,
+        }
+    }
+
+    fn cleanup(self) {
+        self.coordinator.suspend();
         remove_repository(self.repository);
     }
 }

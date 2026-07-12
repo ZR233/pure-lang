@@ -221,9 +221,10 @@ impl TurnExecutionProfile {
                 Some(ToolEffect::ConflictWrite) => self.root_owner && self.resolving_conflict,
                 Some(ToolEffect::WorkspaceWrite | ToolEffect::Process) | None => false,
             },
-            TurnExecutionRole::Explorer | TurnExecutionRole::Reviewer => {
-                matches!(effect, Some(ToolEffect::Read))
+            TurnExecutionRole::Explorer => {
+                name != "review_exit" && matches!(effect, Some(ToolEffect::Read))
             }
+            TurnExecutionRole::Reviewer => matches!(effect, Some(ToolEffect::Read)),
         }
     }
 }

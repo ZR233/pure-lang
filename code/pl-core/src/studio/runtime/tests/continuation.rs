@@ -13,6 +13,18 @@ use tokio::sync::Mutex;
 
 use super::*;
 use crate::studio::active_turns::SessionAlreadyHasActiveTurn;
+
+#[test]
+fn reviewer_terminal_uses_review_returned_continuation_reason() {
+    assert_eq!(
+        terminal_continuation_reason("reviewer"),
+        ContinuationReason::ReviewReturned
+    );
+    assert_eq!(
+        terminal_continuation_reason("executor"),
+        ContinuationReason::AgentTerminal
+    );
+}
 use crate::studio::runtime::continuation::{
     ContinuationLaunch, ContinuationLauncher, ContinuationReason, ContinuationRequest,
     ContinuationScheduler, ContinuationTestBarrier, SessionTurnState,

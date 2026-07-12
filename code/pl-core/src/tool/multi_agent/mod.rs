@@ -29,6 +29,7 @@ pub use schema::{
     AgentControlToolKind, TOOL_CLOSE_AGENT, TOOL_LIST_AGENTS, TOOL_RESUME_AGENT, TOOL_SEND_INPUT,
     TOOL_SPAWN_AGENT, TOOL_WAIT_AGENT,
 };
+pub(crate) use types::AgentToolRuntime;
 pub use types::{
     CloseAgentTool, ListAgentsTool, ResumeAgentTool, SendInputTool, SpawnAgentTool, WaitAgentTool,
 };

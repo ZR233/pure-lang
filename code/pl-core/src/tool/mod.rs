@@ -8,6 +8,7 @@ mod lsp;
 mod mcp_resource;
 mod mcp_tool;
 mod multi_agent;
+pub(crate) use multi_agent::AgentToolRuntime;
 mod output_format;
 mod path_policy;
 mod plan;

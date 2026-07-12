@@ -48,7 +48,7 @@ impl SendInputTool {
 }
 
 impl AgentToolRuntime {
-    pub(in crate::tool::multi_agent) fn run_config(
+    pub(crate) fn run_config(
         &self,
         context: &ToolContext,
         options: crate::TurnOptions,

@@ -7,7 +7,7 @@ use crate::config::{PureConfig, ReasoningEffort};
 pub(super) const DEFAULT_WAIT_TIMEOUT_MS: i64 = 30_000;
 
 #[derive(Debug, Clone)]
-pub(super) struct AgentToolRuntime {
+pub(crate) struct AgentToolRuntime {
     pub provider: SharedModelProvider,
     pub reasoning_effort: Option<ReasoningEffort>,
     pub config: Option<PureConfig>,
@@ -17,7 +17,7 @@ pub(super) struct AgentToolRuntime {
 }
 
 impl AgentToolRuntime {
-    pub fn new(
+    pub(crate) fn new(
         provider: SharedModelProvider,
         reasoning_effort: Option<ReasoningEffort>,
         config: Option<PureConfig>,
