@@ -218,6 +218,7 @@ pub mod message {
         #[sea_orm(primary_key, auto_increment = false)]
         pub id: String,
         pub session_id: String,
+        pub item_type: String,
         pub role: String,
         pub content: String,
         pub reasoning_content: Option<String>,

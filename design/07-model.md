@@ -119,7 +119,9 @@ OpenAI Responses 使用 `input_text` 与 `input_image` data URL；OpenAI Chat、
 
 配置模型会覆盖或补充 bundled model；`used_fallback` 仍是运行时状态，不从 TOML 读取。旧配置里的 `capabilities = [...]` 和 `input_modalities = [...]` 不再兼容；读取失败时要求用户按新的能力矩阵重写配置或让 Studio 重新生成配置。
 
-模型信息中的 `base_instructions` 是模型级基础提示词来源，进入 `pl-core` 的 instruction assembler；配置中的 `[instructions].base_override` 可以完整替换它。模型信息中的 `context_window`、`max_context_window` 和 `auto_compact_token_limit` 只描述模型能力与默认阈值。上下文压缩的触发判断、摘要 prompt、历史替换和持久化都在 `pl-core` 完成，`pl-model` 不维护压缩状态。
+模型信息中的 `base_instructions` 是模型级基础提示词来源，进入 `pl-core` 的 instruction assembler；配置中的 `[instructions].base_override` 可以完整替换它。模型信息中的 `context_window`、`max_context_window` 和 `auto_compact_token_limit` 只描述模型能力与默认阈值。上下文压缩的触发判断、历史保留、原子替换和持久化都在 `pl-core` 完成，`pl-model` 不维护压缩状态。
+
+`CompletionRequest.input` 使用 provider 无关的有序 `ModelContextItem`，包括普通 `Message` 和专用 `Compaction { encryptedContent }`；`.messages(...)` 只是不含 checkpoint 的便捷构造器。Responses request 可以把 compaction item 映射为 OpenAI 原生输入，Chat Completions 必须明确拒绝。`ModelProvider::compact_context` 接收模型、instructions、有序上下文、工具、parallel tool calls、reasoning 和 prompt cache key，并返回经过 provider 解析的上下文项与可选 usage。只有 `ProviderKind::OpenAi` runtime 实现远程协议：默认 v2 `/responses` + `compaction_trigger`，显式 legacy 使用 `/responses/compact`；其他 provider 的该方法不构成远程能力声明。
 
 ## 7.8 模型可调参数
 

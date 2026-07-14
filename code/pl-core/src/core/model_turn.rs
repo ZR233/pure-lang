@@ -281,14 +281,14 @@ fn completion_request(
     let history_source = if use_continuation {
         session
             .continuation_start_index()
-            .and_then(|start| session.messages().get(start..))
-            .unwrap_or_else(|| session.messages())
+            .and_then(|start| session.items().get(start..))
+            .unwrap_or_else(|| session.items())
     } else {
-        session.messages()
+        session.items()
     };
     CompletionRequest::builder(request.model.clone())
         .maybe_instructions(request.instructions.clone())
-        .messages(history_source.to_vec())
+        .input(history_source.to_vec())
         .tools(request.tools.clone())
         .parallel_tool_calls(request.parallel_tool_calls)
         .maybe_max_tokens(request.max_tokens)

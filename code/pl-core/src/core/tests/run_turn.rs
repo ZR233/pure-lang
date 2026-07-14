@@ -175,6 +175,9 @@ async fn run_turn_exposes_context_compaction_snapshot() {
     model.auto_compact_token_limit = Some(1);
     let core = PureCoreBuilder::from_provider_info_with_models(provider, vec![model])
         .unwrap()
+        .with_runtime_profile(CoreRuntimeProfile::minimal().with_context_compaction(
+            ContextCompactionConfig::default().with_openai_mode(OpenAiCompactionMode::Local),
+        ))
         .build();
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(32);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
@@ -196,7 +199,7 @@ async fn run_turn_exposes_context_compaction_snapshot() {
     assert_eq!(result.status, TurnResultStatus::Completed);
     assert_eq!(result.context_compactions.len(), 1);
     let compaction = &result.context_compactions[0];
-    assert_eq!(compaction.summary, "compressed memory");
+    assert_eq!(compaction.summary.as_deref(), Some("compressed memory"));
     assert_eq!(compaction.trigger.as_str(), "estimatedTokens");
     assert_eq!(compaction.provider_prompt_tokens, None);
     assert_eq!(compaction.auto_compact_limit, 1);
@@ -205,6 +208,60 @@ async fn run_turn_exposes_context_compaction_snapshot() {
             .replacement_tokens
             .is_some_and(|tokens| tokens > 0)
     );
+}
+
+#[tokio::test]
+async fn manual_compaction_runs_standalone_for_single_message_and_resets_history() {
+    let compact_sse = concat!(
+        "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"msg_compact\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\"}}\n\n",
+        "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_compact\",\"delta\":\"manual summary\"}\n\n",
+        "data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"msg_compact\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\",\"content\":[{\"type\":\"output_text\",\"text\":\"manual summary\"}]}}\n\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_compact\",\"usage\":{\"input_tokens\":5,\"output_tokens\":2,\"total_tokens\":7}}}\n\n",
+        "data: [DONE]\n\n"
+    )
+    .to_string();
+    let (base_url, _requests, handle) = serve_sse_sequence(vec![compact_sse]).await;
+    let mut provider = ProviderInfo::openai(Some(base_url));
+    provider.bearer_token = Some("test-token".to_string());
+    provider.default_model = "local-responses".to_string();
+    let core = PureCoreBuilder::from_provider_info_with_models(
+        provider,
+        vec![pl_model::ModelInfo::fallback("local-responses")],
+    )
+    .unwrap()
+    .with_runtime_profile(CoreRuntimeProfile::minimal().with_context_compaction(
+        ContextCompactionConfig::default().with_openai_mode(OpenAiCompactionMode::Local),
+    ))
+    .build();
+    let mut session = CoreSession::from_messages(vec![Message {
+        role: MessageRole::User,
+        content: MessageContent::Text("only message".to_string()),
+        reasoning_content: None,
+        metadata: HashMap::new(),
+    }]);
+    let original_revision = session.revision();
+    let (event_tx, _) = tokio::sync::broadcast::channel(16);
+
+    let snapshot = core
+        .compact_session(
+            &mut session,
+            ManualContextCompactionRequest::new(CompileMode::Simple),
+            event_tx,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    handle.await.unwrap();
+
+    assert_eq!(snapshot.trigger, ContextCompactionTrigger::Manual);
+    assert_eq!(snapshot.phase, ContextCompactionPhase::Standalone);
+    assert_eq!(snapshot.summary.as_deref(), Some("manual summary"));
+    assert_eq!(session.revision(), original_revision + 1);
+    assert!(session.messages().last().is_some_and(|message| {
+        message
+            .metadata
+            .contains_key(crate::context_compaction::SUMMARY_METADATA_KEY)
+    }));
 }
 
 #[tokio::test]

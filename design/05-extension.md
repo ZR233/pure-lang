@@ -19,7 +19,9 @@ OpenAI-compatible 不是一等公共 provider 抽象。新增供应商必须显�
 
 需要影响 turn、session、store 或编译阶段时扩展 `pl-core`。
 
-上下文压缩属于 `pl-core` 扩展点：模型层只暴露窗口、阈值和 provider 调用能力，turn pipeline 负责判断触发、生成摘要、替换 `CoreSession` 历史，并在 Studio store 中同步持久化改写后的消息。
+上下文压缩的编排属于 `pl-core` 扩展点：turn pipeline 负责自动/手动触发、pre-turn/mid-turn/standalone phase、原子替换 `CoreSession` 有序上下文项，并在 Studio store 中同步持久化。`pl-model::ModelProvider::compact_context` 只暴露统一压缩请求/响应，provider runtime 内部封装私有 wire。远程压缩能力严格限于 `ProviderKind::OpenAi`；新增 provider 即使复用 OpenAI 协议，也默认且强制走本地摘要，除非未来通过新的设计变更明确提升为一等远程能力。
+
+OpenAI 远程模式默认使用 v2 `compaction_trigger`，`/responses/compact` 只作为显式 legacy 兼容模式，不做运行期自动回退。扩展压缩 wire 时必须保持 `ModelContextItem::Compaction` 的 provider 无关边界，不得把加密 checkpoint 伪装成普通 system/user 消息，也不得让 Chat Completions 消费该项。
 
 扩展时保持入口层薄：
 

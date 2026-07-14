@@ -1,7 +1,7 @@
 use std::fmt;
 use std::sync::Arc;
 
-use pl_protocol::Result;
+use pl_protocol::{PureError, Result};
 use pl_trace::AgentEventSender;
 
 use crate::capabilities::{ModelCapabilities, ProviderCapabilities};
@@ -9,6 +9,7 @@ use crate::model_info::ModelInfo;
 use crate::provider_info::ProviderInfo;
 use crate::request::CompletionRequest;
 use crate::request::CompletionResponse;
+use crate::request::{ModelCompactionRequest, ModelCompactionResponse};
 use crate::stream::CompletionEventStream;
 
 mod openai_runtime;
@@ -38,6 +39,18 @@ pub trait ModelProvider: fmt::Debug + Send + Sync {
         request: CompletionRequest,
         event_tx: AgentEventSender,
     ) -> impl std::future::Future<Output = Result<CompletionResponse>> + Send;
+
+    fn compact_context(
+        &self,
+        request: ModelCompactionRequest,
+    ) -> impl std::future::Future<Output = Result<ModelCompactionResponse>> + Send {
+        async move {
+            let _ = request;
+            Err(PureError::ConfigError(
+                "provider does not support remote context compaction".to_string(),
+            ))
+        }
+    }
 
     fn auth_token(&self) -> impl std::future::Future<Output = Result<Option<String>>> + Send;
 
@@ -84,6 +97,13 @@ impl ModelProvider for OpenAiProvider {
         event_tx: AgentEventSender,
     ) -> impl std::future::Future<Output = Result<CompletionResponse>> + Send {
         OpenAiProvider::stream_complete(self, request, event_tx)
+    }
+
+    fn compact_context(
+        &self,
+        request: ModelCompactionRequest,
+    ) -> impl std::future::Future<Output = Result<ModelCompactionResponse>> + Send {
+        OpenAiProvider::compact_context(self, request)
     }
 
     fn auth_token(&self) -> impl std::future::Future<Output = Result<Option<String>>> + Send {

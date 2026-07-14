@@ -4,9 +4,9 @@ use std::time::Duration;
 use pl_model::{ModelCapabilities, ModelInfo, ModelRequestProfile, TokenUsage, TruncationPolicy};
 use pl_protocol::{
     AgentRuntimeDelta, AgentStatus, ContentPart, ImageSource, Message, MessageContent, MessageRole,
-    RuntimeCostAmount, SkillActivation, StudioEventEnvelope, StudioEventKind, StudioMessage,
-    StudioMessageRole, StudioMessageStatus, StudioPart, StudioPartStatus, StudioPartType,
-    StudioTextChannel, TokenUsageSnapshot,
+    ModelContextItem, RuntimeCostAmount, SkillActivation, StudioEventEnvelope, StudioEventKind,
+    StudioMessage, StudioMessageRole, StudioMessageStatus, StudioPart, StudioPartStatus,
+    StudioPartType, StudioTextChannel, TokenUsageSnapshot,
 };
 use pl_trace::{
     TraceEvent, TraceEventKind, TracePart, TracePartKind, TracePartSource, TracePartStatus,

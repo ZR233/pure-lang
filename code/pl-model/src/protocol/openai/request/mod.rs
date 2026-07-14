@@ -1,4 +1,4 @@
-use pl_protocol::{PureError, Result};
+use pl_protocol::{Message, ModelContextItem, PureError, Result};
 use serde::Serialize;
 use serde_json::{Map, Value};
 
@@ -29,8 +29,9 @@ pub(crate) fn build_openai_request_body(
     request: &CompletionRequest,
     model: &ModelInfo,
 ) -> Result<OpenAiRequestBody> {
+    let messages = messages_after_last_compaction(&request.input);
     validate_tool_history(
-        &request.messages,
+        &messages,
         endpoint,
         endpoint == OpenAiEndpoint::Responses && request.previous_response_id.is_some(),
     )?;
@@ -51,6 +52,18 @@ pub(crate) fn build_openai_request_body(
             Ok(OpenAiRequestBody::Chat(body))
         }
     }
+}
+
+fn messages_after_last_compaction(input: &[ModelContextItem]) -> Vec<Message> {
+    let start = input
+        .iter()
+        .rposition(ModelContextItem::is_compaction)
+        .map_or(0, |index| index + 1);
+    input[start..]
+        .iter()
+        .filter_map(ModelContextItem::as_message)
+        .cloned()
+        .collect()
 }
 
 fn apply_responses_max_tokens_field(

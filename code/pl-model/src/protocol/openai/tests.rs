@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use pl_protocol::{ContentPart, ImageSource, Message, MessageContent, MessageRole, PureError};
+use pl_protocol::{
+    ContentPart, ImageSource, Message, MessageContent, MessageRole, ModelContextItem, PureError,
+};
 use pretty_assertions::assert_eq;
 
 use super::*;
@@ -36,11 +38,15 @@ fn image_message() -> Message {
     }
 }
 
+fn context_items(messages: Vec<Message>) -> Vec<ModelContextItem> {
+    messages.into_iter().map(ModelContextItem::from).collect()
+}
+
 fn request_with_effort(effort: &str) -> CompletionRequest {
     CompletionRequest {
         model: "gpt-5.5".to_string(),
         instructions: None,
-        messages: vec![text_message(MessageRole::User, "hello")],
+        input: context_items(vec![text_message(MessageRole::User, "hello")]),
         tools: Vec::new(),
         tool_choice: "auto".to_string(),
         parallel_tool_calls: true,
@@ -63,11 +69,11 @@ fn responses_use_top_level_instructions_and_developer_messages() {
     let request = CompletionRequest {
         model: "gpt-5.5".to_string(),
         instructions: Some("base".to_string()),
-        messages: vec![
+        input: context_items(vec![
             text_message(MessageRole::System, "developer"),
             text_message(MessageRole::User, "user context"),
             text_message(MessageRole::User, "real prompt"),
-        ],
+        ]),
         tools: Vec::new(),
         tool_choice: "auto".to_string(),
         parallel_tool_calls: false,
@@ -114,7 +120,7 @@ fn responses_maps_image_parts_to_input_image() {
     let request = CompletionRequest {
         model: "gpt-5.5".to_string(),
         instructions: None,
-        messages: vec![image_message()],
+        input: context_items(vec![image_message()]),
         tools: Vec::new(),
         tool_choice: "auto".to_string(),
         parallel_tool_calls: false,
@@ -144,7 +150,7 @@ fn chat_maps_image_parts_to_content_array() {
     let request = CompletionRequest {
         model: "glm-5v".to_string(),
         instructions: None,
-        messages: vec![image_message()],
+        input: context_items(vec![image_message()]),
         tools: Vec::new(),
         tool_choice: "auto".to_string(),
         parallel_tool_calls: false,
@@ -183,7 +189,7 @@ fn request_with_tool_history(tool_metadata: HashMap<String, String>) -> Completi
     CompletionRequest {
         model: "gpt-5.5".to_string(),
         instructions: None,
-        messages: vec![
+        input: context_items(vec![
             Message {
                 role: MessageRole::Assistant,
                 content: MessageContent::Text(String::new()),
@@ -196,7 +202,7 @@ fn request_with_tool_history(tool_metadata: HashMap<String, String>) -> Completi
                 reasoning_content: None,
                 metadata: tool_metadata,
             },
-        ],
+        ]),
         tools: Vec::new(),
         tool_choice: "auto".to_string(),
         parallel_tool_calls: false,
@@ -226,7 +232,7 @@ fn request_with_function_tool_history(tool_metadata: HashMap<String, String>) ->
     CompletionRequest {
         model: "gpt-5.5".to_string(),
         instructions: None,
-        messages: vec![
+        input: context_items(vec![
             Message {
                 role: MessageRole::Assistant,
                 content: MessageContent::Text(String::new()),
@@ -239,7 +245,7 @@ fn request_with_function_tool_history(tool_metadata: HashMap<String, String>) ->
                 reasoning_content: None,
                 metadata: tool_metadata,
             },
-        ],
+        ]),
         tools: Vec::new(),
         tool_choice: "auto".to_string(),
         parallel_tool_calls: false,
@@ -441,12 +447,12 @@ fn glm52_chat_body_none_disables_thinking_and_removes_reasoning_effort() {
 #[test]
 fn chat_body_writes_assistant_reasoning_content() {
     let mut request = request_with_effort("high");
-    request.messages = vec![Message {
+    request.input = vec![pl_protocol::ModelContextItem::from(Message {
         role: MessageRole::Assistant,
         content: MessageContent::Text("9.11 更大。".to_string()),
         reasoning_content: Some("比较小数位。".to_string()),
         metadata: HashMap::new(),
-    }];
+    })];
 
     let body = OpenAiProtocol::chat().build_request_body(&request);
 
@@ -840,12 +846,12 @@ fn missing_tool_output_fails_request_build() {
     let request = CompletionRequest {
         model: "gpt-5.5".to_string(),
         instructions: None,
-        messages: vec![Message {
+        input: context_items(vec![Message {
             role: MessageRole::Assistant,
             content: MessageContent::Text(String::new()),
             reasoning_content: None,
             metadata: assistant_metadata,
-        }],
+        }]),
         tools: Vec::new(),
         tool_choice: "auto".to_string(),
         parallel_tool_calls: false,
@@ -891,7 +897,7 @@ fn responses_history_requires_call_id_but_chat_uses_tool_call_id() {
     let request = CompletionRequest {
         model: "gpt-5.5".to_string(),
         instructions: None,
-        messages: vec![
+        input: context_items(vec![
             Message {
                 role: MessageRole::Assistant,
                 content: MessageContent::Text(String::new()),
@@ -904,7 +910,7 @@ fn responses_history_requires_call_id_but_chat_uses_tool_call_id() {
                 reasoning_content: None,
                 metadata: tool_metadata,
             },
-        ],
+        ]),
         tools: Vec::new(),
         tool_choice: "auto".to_string(),
         parallel_tool_calls: false,

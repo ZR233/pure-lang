@@ -1,8 +1,8 @@
 use super::*;
 use crate::tool::{OutputTruncation, Tool, ToolInput, ToolOutput};
 use crate::turn::{CompileMode, PermissionMode, ToolApprovalPolicy};
-use crate::{ConfigStore, ModelRole};
-use pl_model::ToolCall;
+use crate::{ConfigStore, ContextCompactionTrigger, ModelRole};
+use pl_model::{OpenAiCompactionMode, ToolCall};
 use pl_protocol::{InteractionPayload, InteractionResolution, ToolApprovalResolution};
 use pl_trace::{TraceEventKind, TracePartKind, TracePartSource, TraceTextChannel};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};

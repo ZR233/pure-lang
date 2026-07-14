@@ -74,6 +74,28 @@ async fn migrations_create_task_coordinator_tables() {
 }
 
 #[tokio::test]
+async fn migrations_add_model_context_item_type_with_message_default() {
+    let store = StudioStore::open_memory().await.unwrap();
+    let columns = store
+        .db
+        .query_all(Statement::from_string(
+            DatabaseBackend::Sqlite,
+            "PRAGMA table_info(messages)".to_string(),
+        ))
+        .await
+        .unwrap();
+    let item_type = columns
+        .iter()
+        .find(|row| row.try_get::<String>("", "name").unwrap() == "item_type")
+        .expect("messages.item_type column");
+
+    assert_eq!(
+        item_type.try_get::<String>("", "dflt_value").unwrap(),
+        "'message'"
+    );
+}
+
+#[tokio::test]
 async fn migrations_prune_legacy_agent_timeline_events() {
     let db_path = unique_test_db_path("legacy-agent-timeline");
     remove_test_db_files(&db_path).await;
@@ -85,6 +107,20 @@ async fn migrations_prune_legacy_agent_timeline_events() {
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].event_id, "canonical-event");
     assert_eq!(events[0].kind, "spawned");
+
+    let legacy_message = store
+        .db
+        .query_one(Statement::from_string(
+            DatabaseBackend::Sqlite,
+            "SELECT item_type FROM messages WHERE id = 'legacy-message'".to_string(),
+        ))
+        .await
+        .unwrap()
+        .expect("legacy message row");
+    assert_eq!(
+        legacy_message.try_get::<String>("", "item_type").unwrap(),
+        "message"
+    );
 
     let migration_marker = store
         .db
@@ -116,6 +152,24 @@ async fn seed_agent_events_db_at_migration_22(path: &Path) {
         "CREATE TABLE studio_schema_migrations (
             version INTEGER PRIMARY KEY,
             applied_at INTEGER NOT NULL
+        );",
+    )
+    .await;
+    execute_sql(
+        &db,
+        "CREATE TABLE messages (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            reasoning_content TEXT,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            created_at INTEGER NOT NULL
+        );
+        INSERT INTO messages (
+            id, session_id, role, content, reasoning_content, metadata_json, created_at
+        ) VALUES (
+            'legacy-message', 'session-1', 'user', 'hello', NULL, '{}', 1
         );",
     )
     .await;

@@ -2,6 +2,7 @@ mod error;
 mod event;
 mod interaction;
 mod message;
+mod model_context;
 mod permission;
 mod studio_event;
 
@@ -24,6 +25,7 @@ pub use message::{
     TOOL_CALL_KIND_METADATA_KEY, TOOL_CALLS_METADATA_KEY, TOOL_NAME_METADATA_KEY,
     ToolCallHistoryMetadata, ToolCallKind, ToolResultMetadata,
 };
+pub use model_context::ModelContextItem;
 pub use permission::PermissionLevel;
 pub use studio_event::{
     StudioAgentPart, StudioAgentSnapshot, StudioAgentTimelineEvent, StudioAgentTimelineEventKind,

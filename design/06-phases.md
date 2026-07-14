@@ -34,6 +34,13 @@ P0 不包含独立沙箱。`pure-studio-flutter` 接入工具系统时默认使�
 
 ## 6.4 验证命令
 
+仓库通过 `.cargo/config.toml` 将 Rust test harness 的默认并发限制为 4。`pl-core`
+同时运行大量本地 HTTP/SSE mock server、git 子进程和 SQLite runtime；在 Windows 上使用
+CPU 核心数作为无界默认并发会造成临时端口连接失败，并让等待预期连接的异步测试长时间
+不退出。`RUST_TEST_THREADS=4` 是当前全量回归通过的基线，外部 CI 可以显式覆盖，但提高前
+必须用完整 workspace 测试验证。新增 mock 网络测试应继续使用独立临时目录、
+`127.0.0.1:0` 动态端口和有界异步等待。
+
 ```powershell
 cargo fmt
 cargo clippy -- -D warnings

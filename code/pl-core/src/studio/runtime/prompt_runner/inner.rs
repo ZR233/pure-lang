@@ -171,13 +171,13 @@ impl StudioRuntime {
         match history_policy {
             PromptHistoryPolicy::Persist if session.revision() != previous_revision => {
                 self.store
-                    .replace_turn_records(session_id, &trace_events, session.messages())
+                    .replace_turn_context_records(session_id, &trace_events, session.items())
                     .await?;
             }
             PromptHistoryPolicy::Persist => {
-                let new_messages = &session.messages()[previous_len..];
+                let new_items = &session.items()[previous_len..];
                 self.store
-                    .append_turn_records(session_id, &trace_events, new_messages)
+                    .append_turn_context_records(session_id, &trace_events, new_items)
                     .await?;
             }
             PromptHistoryPolicy::Ephemeral => {

@@ -39,7 +39,16 @@ impl ResponsesRequestBody {
     pub(super) fn from_request(request: &CompletionRequest) -> Result<Self> {
         let mut input = Vec::new();
 
-        for msg in &request.messages {
+        for item in &request.input {
+            let msg = match item {
+                pl_protocol::ModelContextItem::Message { message } => message,
+                pl_protocol::ModelContextItem::Compaction { encrypted_content } => {
+                    input.push(ResponsesInputItem::Compaction {
+                        encrypted_content: encrypted_content.clone(),
+                    });
+                    continue;
+                }
+            };
             match msg.role {
                 MessageRole::Assistant if msg.metadata.contains_key(TOOL_CALLS_METADATA_KEY) => {
                     let text = message_content_text(&msg.content);
@@ -140,6 +149,9 @@ enum ResponsesInputItem {
     CustomToolCallOutput {
         call_id: String,
         output: String,
+    },
+    Compaction {
+        encrypted_content: String,
     },
 }
 

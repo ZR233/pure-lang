@@ -1,3 +1,4 @@
+use pl_model::OpenAiCompactionMode;
 use serde::{Deserialize, Serialize};
 
 use crate::turn::PermissionMode;
@@ -12,6 +13,8 @@ pub struct RuntimeConfig {
     pub active_skills: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub active_mcp_servers: Vec<String>,
+    #[serde(default, skip_serializing_if = "OpenAiCompactionMode::is_default")]
+    pub openai_compaction_mode: OpenAiCompactionMode,
 }
 
 impl RuntimeConfig {
@@ -20,6 +23,7 @@ impl RuntimeConfig {
             && self.tool_capabilities.is_default()
             && self.active_skills.is_empty()
             && self.active_mcp_servers.is_empty()
+            && self.openai_compaction_mode.is_default()
     }
 }
 

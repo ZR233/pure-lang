@@ -4,7 +4,8 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use pl_model::{
-    ProviderInfo, ZHIPU_CODING_PLAN_BASE_URL, default_models, zhipu_default_model_slugs,
+    OpenAiCompactionMode, ProviderInfo, ZHIPU_CODING_PLAN_BASE_URL, default_models,
+    zhipu_default_model_slugs,
 };
 
 use super::role::{ModelRole, ReasoningEffort};
@@ -118,6 +119,7 @@ fn toml_round_trip_preserves_roles_models_and_token() {
     let mut config = PureConfig::default_config();
     config.providers.get_mut("deepseek").unwrap().bearer_token = Some("secret-token".to_string());
     config.runtime.permission_mode = PermissionMode::AutoReview;
+    config.runtime.openai_compaction_mode = OpenAiCompactionMode::RemoteLegacy;
     config.runtime.active_skills = vec!["rust".to_string(), "git".to_string()];
     config.runtime.active_mcp_servers = vec!["github".to_string()];
     config.runtime.tool_capabilities.git = true;
@@ -164,6 +166,10 @@ fn toml_round_trip_preserves_roles_models_and_token() {
         config.providers["deepseek"].models[0].capabilities
     );
     assert_eq!(parsed.runtime.permission_mode, PermissionMode::AutoReview);
+    assert_eq!(
+        parsed.runtime.openai_compaction_mode,
+        OpenAiCompactionMode::RemoteLegacy
+    );
     assert_eq!(
         parsed.runtime.active_skills,
         vec!["rust".to_string(), "git".to_string()]
@@ -473,6 +479,10 @@ fn missing_runtime_defaults_to_empty_lists() {
     assert_eq!(
         parsed.runtime.permission_mode,
         PermissionMode::RequestApproval
+    );
+    assert_eq!(
+        parsed.runtime.openai_compaction_mode,
+        OpenAiCompactionMode::RemoteV2
     );
     assert_eq!(parsed.skills, SkillsConfig::default());
 }

@@ -37,7 +37,7 @@ fn zhipu_disabled_request() -> CompletionRequest {
     CompletionRequest {
         model: ProviderInfo::zhipu(None).default_model,
         instructions: Some("请用简短中文回答。".to_string()),
-        messages: vec![user_message("请回答：2 + 2 等于几？")],
+        input: vec![user_message("请回答：2 + 2 等于几？").into()],
         tools: Vec::new(),
         tool_choice: "auto".to_string(),
         parallel_tool_calls: false,
@@ -62,7 +62,7 @@ fn zhipu_thinking_request() -> CompletionRequest {
             "请先思考，最后用一句中文简短作答。所有可见答案必须放在 <final>...</final> 中，不要输出标签之外的普通正文。"
                 .to_string(),
         ),
-        messages: vec![user_message("比较 9.11 和 9.8 哪个更大？")],
+        input: vec![user_message("比较 9.11 和 9.8 哪个更大？").into()],
         tools: Vec::new(),
         tool_choice: "auto".to_string(),
         parallel_tool_calls: false,
