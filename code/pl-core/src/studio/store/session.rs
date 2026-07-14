@@ -1,5 +1,5 @@
 use anyhow::Result;
-use pl_protocol::Message;
+use pl_protocol::{Message, ModelContextItem};
 use pl_trace::TraceEvent;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
@@ -8,12 +8,14 @@ use sea_orm::{
 
 use crate::studio::entities;
 use crate::studio::ids::{new_id, unix_seconds};
-use crate::studio::mappers::{message_to_row_parts, row_to_message, session_record};
+use crate::studio::mappers::{
+    message_to_row_parts, row_to_context_item, row_to_message, session_record,
+};
 use crate::studio::records::{SessionRecord, SessionVisibility};
 use crate::studio::store::StudioStore;
 use crate::studio::store::skill;
 use crate::studio::store_support::{
-    insert_message_with_tx, non_empty_title, touch_session_with_tx,
+    insert_context_item_with_tx, insert_message_with_tx, non_empty_title, touch_session_with_tx,
 };
 use crate::{CompileMode, CoreSession, InstructionSnapshot};
 
@@ -77,15 +79,27 @@ impl StudioStore {
     }
 
     pub async fn load_core_session(&self, session_id: &str) -> Result<CoreSession> {
-        Ok(CoreSession::from_messages(
-            self.load_messages(session_id).await?,
+        Ok(CoreSession::from_items(
+            self.load_context_items(session_id).await?,
         ))
+    }
+
+    pub async fn load_context_items(&self, session_id: &str) -> Result<Vec<ModelContextItem>> {
+        use entities::message;
+        let rows = message::Entity::find()
+            .filter(message::Column::SessionId.eq(session_id.to_string()))
+            .order_by_asc(message::Column::CreatedAt)
+            .order_by_asc(message::Column::Id)
+            .all(&self.db)
+            .await?;
+        rows.into_iter().map(row_to_context_item).collect()
     }
 
     pub async fn load_messages(&self, session_id: &str) -> Result<Vec<Message>> {
         use entities::message;
         let rows = message::Entity::find()
             .filter(message::Column::SessionId.eq(session_id.to_string()))
+            .filter(message::Column::ItemType.eq("message"))
             .order_by_asc(message::Column::CreatedAt)
             .order_by_asc(message::Column::Id)
             .all(&self.db)
@@ -101,6 +115,7 @@ impl StudioStore {
         message_entity::ActiveModel {
             id: Set(new_id("message")),
             session_id: Set(session_id.to_string()),
+            item_type: Set("message".to_string()),
             role: Set(role),
             content: Set(content),
             reasoning_content: Set(message.reasoning_content.clone()),
@@ -142,6 +157,35 @@ impl StudioStore {
     ) -> Result<()> {
         let tx = self.db.begin().await?;
         replace_session_messages_with_tx(&tx, session_id, messages).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn append_context_items(
+        &self,
+        session_id: &str,
+        items: &[ModelContextItem],
+    ) -> Result<()> {
+        if items.is_empty() {
+            return Ok(());
+        }
+        let tx = self.db.begin().await?;
+        let now = unix_seconds();
+        for item in items {
+            insert_context_item_with_tx(&tx, session_id, item, now).await?;
+        }
+        touch_session_with_tx(&tx, session_id, now).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn replace_session_context_items(
+        &self,
+        session_id: &str,
+        items: &[ModelContextItem],
+    ) -> Result<()> {
+        let tx = self.db.begin().await?;
+        replace_session_context_items_with_tx(&tx, session_id, items).await?;
         tx.commit().await?;
         Ok(())
     }
@@ -256,6 +300,45 @@ impl StudioStore {
         tx.commit().await?;
         Ok(())
     }
+
+    pub async fn append_turn_context_records(
+        &self,
+        session_id: &str,
+        trace_events: &[TraceEvent],
+        items: &[ModelContextItem],
+    ) -> Result<()> {
+        if trace_events.is_empty() && items.is_empty() {
+            return Ok(());
+        }
+        let tx = self.db.begin().await?;
+        if !trace_events.is_empty() {
+            skill::upsert_session_skill_events_with_tx(&tx, trace_events).await?;
+        }
+        if !items.is_empty() {
+            let now = unix_seconds();
+            for item in items {
+                insert_context_item_with_tx(&tx, session_id, item, now).await?;
+            }
+            touch_session_with_tx(&tx, session_id, now).await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn replace_turn_context_records(
+        &self,
+        session_id: &str,
+        trace_events: &[TraceEvent],
+        items: &[ModelContextItem],
+    ) -> Result<()> {
+        let tx = self.db.begin().await?;
+        if !trace_events.is_empty() {
+            skill::upsert_session_skill_events_with_tx(&tx, trace_events).await?;
+        }
+        replace_session_context_items_with_tx(&tx, session_id, items).await?;
+        tx.commit().await?;
+        Ok(())
+    }
 }
 
 async fn replace_session_messages_with_tx(
@@ -271,6 +354,24 @@ async fn replace_session_messages_with_tx(
         .await?;
     for message in messages {
         insert_message_with_tx(tx, session_id, message, now).await?;
+    }
+    touch_session_with_tx(tx, session_id, now).await?;
+    Ok(())
+}
+
+async fn replace_session_context_items_with_tx(
+    tx: &sea_orm::DatabaseTransaction,
+    session_id: &str,
+    items: &[ModelContextItem],
+) -> Result<()> {
+    use entities::message;
+    let now = unix_seconds();
+    message::Entity::delete_many()
+        .filter(message::Column::SessionId.eq(session_id.to_string()))
+        .exec(tx)
+        .await?;
+    for item in items {
+        insert_context_item_with_tx(tx, session_id, item, now).await?;
     }
     touch_session_with_tx(tx, session_id, now).await?;
     Ok(())

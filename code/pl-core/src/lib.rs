@@ -50,8 +50,9 @@ pub use config_editor::{
     ProviderEdit, ProviderModelEdit, ProviderSettingsEdit, RoleEdit, infer_provider_template_kind,
 };
 pub use context_compaction::{
-    ContextCompactionConfig, ContextCompactionReplacement, ContextCompactionSnapshot,
-    ContextCompactionTrigger, RecentInteractionTailConfig,
+    ContextCompactionConfig, ContextCompactionImplementation, ContextCompactionPhase,
+    ContextCompactionReplacement, ContextCompactionSnapshot, ContextCompactionTrigger,
+    ManualContextCompactionRequest, RecentInteractionTailConfig,
 };
 pub use core::{
     AgentBackendProfile, AgentKernel, AgentKernelBuilder, AgentKernelToolRequest,
@@ -95,21 +96,23 @@ pub use pl_lsp::{
 };
 pub use pl_model::{
     DeepSeekBalanceInfo, DeepSeekBalanceUsage, ModelCapabilities, ModelContinuationState,
-    ModelInfo, ModelModality, ModelParameter, ModelRequestProfile, ProviderKind,
-    ReasoningInterleaved, ReasoningInterleavedField, ToolCapabilities, ToolWirePolicy,
-    TruncationMode, ZhipuCodingPlanUsage, ZhipuQuotaLimit, ZhipuQuotaWindow, ZhipuToolUsageDetail,
+    ModelInfo, ModelModality, ModelParameter, ModelRequestProfile, OpenAiCompactionMode,
+    ProviderKind, ReasoningInterleaved, ReasoningInterleavedField, ToolCapabilities,
+    ToolWirePolicy, TruncationMode, ZhipuCodingPlanUsage, ZhipuQuotaLimit, ZhipuQuotaWindow,
+    ZhipuToolUsageDetail,
 };
 pub use pl_protocol::{
     AgentRuntimeDelta, BudgetLimitKind, BudgetUsage, ContentPart, ErrorSeverity, ImageSource,
     InteractionChangedEvent, InteractionKind, InteractionPayload, InteractionRequest,
     InteractionResolution, InteractionScope, InteractionStatus, Message, MessageContent,
-    MessageRole, OutputStream, PermissionLevel, PipelineStage, PlanConfirmationResolution,
-    PureError, Result, RuntimeCostAmount, RuntimeUsageSnapshot, SkillActivation, StudioAgentPart,
-    StudioAttachment, StudioEventEnvelope, StudioEventKind, StudioFilePart, StudioInferencePart,
-    StudioMessage, StudioMessageRole, StudioMessageStatus, StudioPart, StudioPartDelta,
-    StudioPartDeltaField, StudioPartStatus, StudioPartType, StudioPlanPart, StudioTextChannel,
-    StudioToolPart, StudioTurn, StudioTurnStatus, TokenUsageSnapshot, ToolApprovalResolution,
-    UserInputAnswer, UserInputRequest, UserInputResponse, UserQuestion, UserQuestionOption,
+    MessageRole, ModelContextItem, OutputStream, PermissionLevel, PipelineStage,
+    PlanConfirmationResolution, PureError, Result, RuntimeCostAmount, RuntimeUsageSnapshot,
+    SkillActivation, StudioAgentPart, StudioAttachment, StudioEventEnvelope, StudioEventKind,
+    StudioFilePart, StudioInferencePart, StudioMessage, StudioMessageRole, StudioMessageStatus,
+    StudioPart, StudioPartDelta, StudioPartDeltaField, StudioPartStatus, StudioPartType,
+    StudioPlanPart, StudioTextChannel, StudioToolPart, StudioTurn, StudioTurnStatus,
+    TokenUsageSnapshot, ToolApprovalResolution, UserInputAnswer, UserInputRequest,
+    UserInputResponse, UserQuestion, UserQuestionOption,
 };
 pub use provider_error::is_retryable_model_error;
 pub use provider_usage::{

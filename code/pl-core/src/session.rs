@@ -2,8 +2,8 @@ use std::collections::{HashMap, HashSet};
 
 use pl_model::{CompletionResponse, ModelContinuationState, ToolCall};
 use pl_protocol::{
-    Message, MessageContent, MessageRole, TOOL_CALLS_METADATA_KEY, ToolCallHistoryMetadata,
-    ToolCallKind, ToolResultMetadata,
+    Message, MessageContent, MessageRole, ModelContextItem, TOOL_CALLS_METADATA_KEY,
+    ToolCallHistoryMetadata, ToolCallKind, ToolResultMetadata,
 };
 
 /// 核心编译会话。
@@ -11,6 +11,7 @@ use pl_protocol::{
 /// 保存多轮 turn 之间的消息历史，供 `PureCore` 构造模型请求。
 #[derive(Debug, Clone, Default)]
 pub struct CoreSession {
+    items: Vec<ModelContextItem>,
     messages: Vec<Message>,
     revision: u64,
     continuation: ModelContinuationState,
@@ -23,10 +24,29 @@ impl CoreSession {
 
     pub fn from_messages(messages: Vec<Message>) -> Self {
         Self {
+            items: messages
+                .iter()
+                .cloned()
+                .map(ModelContextItem::from)
+                .collect(),
             messages,
             revision: 0,
             continuation: ModelContinuationState::default(),
         }
+    }
+
+    pub fn from_items(items: Vec<ModelContextItem>) -> Self {
+        let messages = messages_from_items(&items);
+        Self {
+            items,
+            messages,
+            revision: 0,
+            continuation: ModelContinuationState::default(),
+        }
+    }
+
+    pub fn items(&self) -> &[ModelContextItem] {
+        &self.items
     }
 
     pub fn messages(&self) -> &[Message] {
@@ -38,20 +58,38 @@ impl CoreSession {
     }
 
     pub fn replace_messages(&mut self, messages: Vec<Message>) {
+        self.items = messages
+            .iter()
+            .cloned()
+            .map(ModelContextItem::from)
+            .collect();
         self.messages = messages;
         self.revision = self.revision.saturating_add(1);
         self.reset_continuation();
     }
 
     pub fn replace_messages_preserving_continuation(&mut self, messages: Vec<Message>) {
+        self.items = messages
+            .iter()
+            .cloned()
+            .map(ModelContextItem::from)
+            .collect();
         self.messages = messages;
         self.revision = self.revision.saturating_add(1);
         self.continuation
-            .reset_if_acknowledged_messages_were_removed(self.messages.len());
+            .reset_if_acknowledged_messages_were_removed(self.items.len());
+    }
+
+    pub fn replace_items(&mut self, items: Vec<ModelContextItem>) {
+        self.messages = messages_from_items(&items);
+        self.items = items;
+        self.revision = self.revision.saturating_add(1);
+        self.reset_continuation();
     }
 
     pub(crate) fn truncate_messages(&mut self, len: usize) {
-        self.messages.truncate(len);
+        self.items.truncate(len);
+        self.messages = messages_from_items(&self.items);
         self.continuation
             .reset_if_acknowledged_messages_were_removed(len);
     }
@@ -61,7 +99,7 @@ impl CoreSession {
     }
 
     pub fn push_user_content(&mut self, content: MessageContent) {
-        self.messages.push(Message {
+        self.push_message(Message {
             role: MessageRole::User,
             content,
             reasoning_content: None,
@@ -70,7 +108,7 @@ impl CoreSession {
     }
 
     pub fn push_assistant_response(&mut self, content: String, reasoning_content: Option<String>) {
-        self.messages.push(Message {
+        self.push_message(Message {
             role: MessageRole::Assistant,
             content: MessageContent::Text(content),
             reasoning_content,
@@ -91,7 +129,7 @@ impl CoreSession {
         let json = serde_json::to_string(&tool_calls)
             .expect("ToolCall serialization should be infallible");
         ToolCallHistoryMetadata::new(json).insert_into(&mut metadata);
-        self.messages.push(Message {
+        self.push_message(Message {
             role: MessageRole::Assistant,
             content: MessageContent::Text(content.unwrap_or_default()),
             reasoning_content,
@@ -120,7 +158,7 @@ impl CoreSession {
                 response.reasoning_content.clone(),
             );
         }
-        self.acknowledge_model_response(self.messages.len(), response.response_id.clone());
+        self.acknowledge_model_response(self.items.len(), response.response_id.clone());
     }
 
     /// 推入 tool result 消息。
@@ -142,7 +180,7 @@ impl CoreSession {
             tool_arguments,
         )
         .insert_into(&mut metadata);
-        self.messages.push(Message {
+        self.push_message(Message {
             role: MessageRole::Tool,
             content: MessageContent::Text(result),
             reasoning_content: None,
@@ -151,11 +189,11 @@ impl CoreSession {
     }
 
     pub fn len(&self) -> usize {
-        self.messages.len()
+        self.items.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.messages.is_empty()
+        self.items.is_empty()
     }
 
     pub fn set_prompt_cache_key(&mut self, key: String) {
@@ -190,7 +228,7 @@ impl CoreSession {
         self.continuation.acknowledge_response(
             acknowledged_message_count,
             response_id,
-            self.messages.len(),
+            self.items.len(),
         );
     }
 
@@ -201,6 +239,19 @@ impl CoreSession {
     pub fn reset_continuation(&mut self) {
         self.continuation.reset();
     }
+
+    fn push_message(&mut self, message: Message) {
+        self.items.push(ModelContextItem::from(message.clone()));
+        self.messages.push(message);
+    }
+}
+
+fn messages_from_items(items: &[ModelContextItem]) -> Vec<Message> {
+    items
+        .iter()
+        .filter_map(ModelContextItem::as_message)
+        .cloned()
+        .collect()
 }
 
 /// 构造包含 assistant tool_calls metadata 的历史消息。
@@ -646,6 +697,40 @@ mod tests {
         assert_eq!(session.len(), 2);
         assert_eq!(session.messages()[0].role, MessageRole::User);
         assert_eq!(session.messages()[1].role, MessageRole::Assistant);
+    }
+
+    #[test]
+    fn from_items_preserves_checkpoint_order_but_message_view_filters_it() {
+        let user = text_message("retained user");
+        let items = vec![
+            ModelContextItem::from(user.clone()),
+            ModelContextItem::Compaction {
+                encrypted_content: "encrypted".to_string(),
+            },
+        ];
+
+        let session = CoreSession::from_items(items.clone());
+
+        assert_eq!(session.items(), items.as_slice());
+        assert_eq!(session.messages(), &[user]);
+        assert_eq!(session.len(), 2);
+    }
+
+    #[test]
+    fn replace_items_increments_revision_and_resets_continuation() {
+        let mut session = CoreSession::from_messages(vec![text_message("old")]);
+        session.set_prompt_cache_key("cache-1".to_string());
+        session.acknowledge_model_response(session.len(), Some("resp-1".to_string()));
+        let original_revision = session.revision();
+
+        session.replace_items(vec![ModelContextItem::Compaction {
+            encrypted_content: "encrypted".to_string(),
+        }]);
+
+        assert_eq!(session.revision(), original_revision + 1);
+        assert_eq!(session.previous_response_id(), None);
+        assert_eq!(session.acknowledged_message_count(), 0);
+        assert!(session.messages().is_empty());
     }
 
     #[test]

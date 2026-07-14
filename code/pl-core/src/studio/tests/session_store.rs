@@ -28,6 +28,52 @@ async fn session_crud_and_message_restore() {
 }
 
 #[tokio::test]
+async fn context_items_restore_after_reopen_without_exposing_checkpoint_as_message() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let db_path = std::env::temp_dir().join(format!("pure-lang-context-items-{unique}.db"));
+    let user = Message {
+        role: MessageRole::User,
+        content: MessageContent::Text("retained".to_string()),
+        reasoning_content: None,
+        metadata: HashMap::new(),
+    };
+    let items = vec![
+        ModelContextItem::from(user.clone()),
+        ModelContextItem::Compaction {
+            encrypted_content: "encrypted-checkpoint".to_string(),
+        },
+    ];
+
+    let store = StudioStore::open(&db_path).await.unwrap();
+    let project = store.upsert_project("C:/work/context-items").await.unwrap();
+    let session = store
+        .create_session(&project.id, "Compacted", CompileMode::Simple)
+        .await
+        .unwrap();
+    store
+        .replace_session_context_items(&session.id, &items)
+        .await
+        .unwrap();
+    drop(store);
+
+    let reopened = StudioStore::open(&db_path).await.unwrap();
+    let restored = reopened.load_core_session(&session.id).await.unwrap();
+    assert_eq!(restored.items(), items.as_slice());
+    assert_eq!(
+        reopened.load_messages(&session.id).await.unwrap(),
+        vec![user]
+    );
+    drop(reopened);
+
+    for suffix in ["", "-wal", "-shm"] {
+        let _ = tokio::fs::remove_file(format!("{}{suffix}", db_path.display())).await;
+    }
+}
+
+#[tokio::test]
 async fn message_storage_round_trips_image_attachment_parts() {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project("C:/work/alpha").await.unwrap();

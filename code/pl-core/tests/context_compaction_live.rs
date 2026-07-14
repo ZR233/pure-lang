@@ -1,13 +1,13 @@
 use pl_core::{
-    CompileMode, CoreRuntimeProfile, CoreSession, ModelInfo, PureCoreBuilder, TurnBudget,
-    TurnRequest, TurnResultStatus, is_compaction_summary_text, message_content_text,
+    CompileMode, ContextCompactionImplementation, CoreRuntimeProfile, CoreSession, ModelInfo,
+    PureCoreBuilder, TurnBudget, TurnRequest, TurnResultStatus,
 };
 use pl_model::{ProviderInfo, default_models};
+use pl_protocol::{MessageRole, ModelContextItem};
 
 const OPENAI_LIVE_ENV_KEY: &str = "API_KEY_OPENAI";
 const OPENAI_LIVE_BASE_URL_ENV_KEY: &str = "API_BASE_OPENAI";
 const OPENAI_LIVE_MODEL_ENV_KEY: &str = "API_MODEL_OPENAI";
-const SUMMARY_PREFIX: &str = "以下是此前对话的压缩摘要。";
 
 fn live_api_key() -> Option<String> {
     match std::env::var(OPENAI_LIVE_ENV_KEY) {
@@ -89,21 +89,21 @@ async fn openai_responses_compacts_context_live() {
         1,
         "expected one forced compaction snapshot"
     );
-    assert!(
-        !result.context_compactions[0].summary.trim().is_empty(),
-        "compaction summary should not be empty"
+    assert_eq!(
+        result.context_compactions[0].implementation,
+        ContextCompactionImplementation::RemoteV2
     );
-    let first_message = session
-        .messages()
-        .first()
-        .expect("compacted session should keep summary message");
-    assert!(
-        is_compaction_summary_text(
-            &message_content_text(&first_message.content),
-            SUMMARY_PREFIX
-        ),
-        "first compacted message should be the summary"
-    );
+    assert!(result.context_compactions[0].summary.is_none());
+    let checkpoint_index = session
+        .items()
+        .iter()
+        .position(ModelContextItem::is_compaction)
+        .expect("remote v2 should install an encrypted checkpoint");
+    assert!(matches!(
+        session.items().get(checkpoint_index + 1),
+        Some(ModelContextItem::Message { message }) if message.role == MessageRole::Assistant
+    ));
+    assert_eq!(checkpoint_index + 2, session.items().len());
     assert!(
         !result.content.trim().is_empty(),
         "final model output should not be empty"

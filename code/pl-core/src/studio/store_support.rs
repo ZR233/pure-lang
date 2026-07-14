@@ -1,5 +1,5 @@
 use anyhow::Result;
-use pl_protocol::{ContentPart, ImageSource, Message, MessageContent};
+use pl_protocol::{ContentPart, ImageSource, Message, MessageContent, ModelContextItem};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, DatabaseBackend,
     DatabaseConnection, DatabaseTransaction, EntityTrait, QueryFilter, Statement,
@@ -34,6 +34,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../../migrations/0023_prune_legacy_agent_timeline_events.sql"),
     include_str!("../../migrations/0024_task_coordinator.sql"),
     include_str!("../../migrations/0025_task_terminal_observed.sql"),
+    include_str!("../../migrations/0026_model_context_items.sql"),
 ];
 
 pub(super) async fn insert_message_with_tx(
@@ -49,6 +50,7 @@ pub(super) async fn insert_message_with_tx(
     message_entity::ActiveModel {
         id: Set(message_id.clone()),
         session_id: Set(session_id.to_string()),
+        item_type: Set("message".to_string()),
         role: Set(role),
         content: Set(content),
         reasoning_content: Set(message.reasoning_content.clone()),
@@ -59,6 +61,35 @@ pub(super) async fn insert_message_with_tx(
     .await?;
     bind_message_attachments_with_tx(tx, session_id, &message_id, message).await?;
     Ok(())
+}
+
+pub(super) async fn insert_context_item_with_tx(
+    tx: &DatabaseTransaction,
+    session_id: &str,
+    item: &ModelContextItem,
+    now: i64,
+) -> Result<()> {
+    match item {
+        ModelContextItem::Message { message } => {
+            insert_message_with_tx(tx, session_id, message, now).await
+        }
+        ModelContextItem::Compaction { encrypted_content } => {
+            use entities::message as message_entity;
+            message_entity::ActiveModel {
+                id: Set(new_id("message")),
+                session_id: Set(session_id.to_string()),
+                item_type: Set("compaction".to_string()),
+                role: Set(String::new()),
+                content: Set(encrypted_content.clone()),
+                reasoning_content: Set(None),
+                metadata_json: Set("{}".to_string()),
+                created_at: Set(now),
+            }
+            .insert(tx)
+            .await?;
+            Ok(())
+        }
+    }
 }
 
 pub(super) async fn bind_message_attachments_with_tx(

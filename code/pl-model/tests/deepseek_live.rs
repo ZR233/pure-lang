@@ -45,7 +45,7 @@ fn deepseek_request(messages: Vec<Message>, turn_id: &str) -> CompletionRequest 
             "请用简短中文回答。所有可见答案必须放在 <final>...</final> 中，不要输出标签之外的普通正文。"
                 .to_string(),
         ),
-        messages,
+        input: messages.into_iter().map(Into::into).collect(),
         tools: Vec::new(),
         tool_choice: "auto".to_string(),
         parallel_tool_calls: false,

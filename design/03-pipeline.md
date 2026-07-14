@@ -95,7 +95,11 @@ assistant 的 text、commentary、reasoning 和 plan part identity 不得直接�
 
 模型输出的 `commentary` 只进入 timeline，用于让用户看到阶段性进展，不写入 `CoreSession`。只有 `final` 输出会作为 assistant response 写入会话历史；带工具调用的中间轮次如果只输出 commentary，也不得把 commentary 当作 assistant tool-call content 写回 provider 历史。
 
-`run_turn_with_trace` 在每次模型请求前执行自动上下文压缩检查。压缩阈值来自当前模型的 `autoCompactTokenLimit`，未配置时使用有效上下文窗口的 90%；模型没有上下文窗口信息时不触发自动压缩。压缩估算包含 base/system、developer、user context 和真实消息历史。压缩由 `pl-core` 本地摘要完成：用当前模型和固定 compact prompt 生成 handoff summary，再用一条带 metadata 的用户摘要消息加最近真实用户消息替换原始历史。工具调用、工具结果和 assistant 中间过程不以原始片段保留，避免压缩后出现破碎的 tool-call 配对。
+`run_turn_with_trace` 在每次模型请求前执行自动上下文压缩检查。首次请求使用完整 assembled request 的估算 token；工具调用后的后续请求优先使用 provider 上一响应报告的实际上下文 token。同一 session revision 与上下文项长度没有变化时不得重复压缩。压缩阈值来自当前模型的 `autoCompactTokenLimit`，未配置时使用有效上下文窗口的 90%；模型没有上下文窗口信息时不触发自动压缩。`PureCore::compact_session` 和 trace 版本提供忽略阈值的 standalone 手动入口；空上下文或只有既有 checkpoint 时不修改会话。
+
+压缩实现由 provider 能力和配置共同决定。非 OpenAI provider（包括 DeepSeek、Zhipu 与 OpenAI-compatible Chat）始终本地压缩。`ProviderKind::OpenAi` 读取 `runtime.openai_compaction_mode = "remote_v2" | "remote_legacy" | "local"`，默认 `remote_v2`；v2 在普通 `/responses` 流中追加 `compaction_trigger` 并声明 `remote_compaction_v2`，legacy 调用 `/responses/compact`，两者都复用常规模型请求的认证、header、模型映射、instructions、工具、parallel tool calls、reasoning 和 prompt cache 信息。远程失败不得自动回退本地，也不得安装局部结果；只有完整校验成功后才原子替换 session 并重置 Responses continuation。
+
+本地压缩使用当前 turn 的 canonical instructions，把 compact prompt 作为最后一条 synthetic user 输入，请求不携带工具；遇到不支持 max output 参数或 context pressure 时按压缩规则重试。替换历史过滤旧摘要，按 20k token 预算保留最近真实用户消息，边界消息按 token 截断，最后追加新摘要。OpenAI v2 按 64k token 预算保留最近真实用户消息及图片，最后追加唯一的加密 compaction item；legacy 只安装真实用户、assistant 与 compaction item。instruction prelude 参与压缩请求但不进入替换历史，下一次模型调用重新生成 canonical prelude。含加密 checkpoint 的会话若切换到非 OpenAI provider，当前轮必须在请求前失败并提示继续使用 OpenAI 或新建会话。
 
 子代理没有独立的压缩实现。`AgentSupervisor` 为每个 agent 保存独立 `CoreSession`，`spawn_agent` 和带 `triggerTurn` 的 `send_input` 提交的 child turn 复用同一个 `PureCore` turn pipeline，因此每个子代理独立维护自己的压缩历史；父会话不会替子代理压缩，也不会因为子代理压缩而改写父历史。
 
@@ -140,7 +144,7 @@ Agent 协作 timeline 与状态分层：
 - Task 计划与实施状态通过 durable coordinator 和 plan lifecycle 事件表达；确认实施后在同一 session 进入 `designUpdating`，由 planner continuation turn 推进，不切换会话模式。
 - `interactions` 表保存所有 pending/resolved/cancelled/expired 交互，是刷新与 session 切换恢复 pending UI 的事实来源。`InteractionChanged` 通过 `StudioEventKind::InteractionChanged` 广播当前 interaction 最新状态；旧 `studio-user-input-*`、`studio-tool-approval-*`、`studio-interaction-changed` sideband 事件不再作为 Studio 协议入口
 - `skill_view` 成功激活 skill 时，后端写入结构化 `SkillActivated` 事件并 upsert 会话级 skill runtime fact。Studio 当前会话的 `activeSkills` 只从 `session_skills` 等结构化持久层读取，不能再从 tool result JSON 文本反解析。
-- 如果 turn 内发生上下文压缩，`CoreSession` revision 会变化，Studio 以事务重写当前 session 的消息历史并追加本轮 trace；未发生压缩时继续使用追加写入
+- 如果 turn 内发生上下文压缩，`CoreSession` revision 会变化，Studio 以事务重写当前 session 的有序模型上下文项并追加本轮 trace；未发生压缩时继续使用追加写入。`messages.item_type` 区分普通 `message` 与加密 `compaction`，旧行默认是普通消息。`load_core_session` 恢复两类上下文项，Studio/Flutter 消息查询与 projection 只返回普通消息，绝不暴露 checkpoint 加密内容
 - StudioEvent 读取以 `sequence` 为 durable 单调游标；message/part snapshot projection 的 `sequence` 必须等于来源 `StudioEventEnvelope.sequence`。`messagePartDelta` 没有 durable sequence 语义，前端不得用它推进 cursor。
 - agent tree、agent events、agent messages 与 turn snapshot 分表持久化；`agents` 为 latest snapshot，`agent_events` 为 append-only event log
 

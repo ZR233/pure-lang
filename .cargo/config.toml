@@ -1,4 +1,8 @@
 include = [{ path = "config.local.toml", optional = true }]
 
+[env]
+# Bound local HTTP/SSE, git, and SQLite test resource usage on Windows.
+RUST_TEST_THREADS = { value = "4", force = false }
+
 [alias]
 xtask = "run -p pl-xtask --"

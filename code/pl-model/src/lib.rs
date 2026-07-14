@@ -48,8 +48,9 @@ pub use provider_usage::{
 };
 pub use request::{
     CompletionRequest, CompletionRequestBuilder, CompletionResponse, CompletionTraceContext,
-    FinishReason, ReasoningConfig, ReasoningSummary, TokenUsage, ToolCall, ToolCallPayload,
-    ToolFormat, ToolSchema,
+    FinishReason, ModelCompactionRequest, ModelCompactionResponse, OpenAiCompactionMode,
+    ReasoningConfig, ReasoningSummary, TokenUsage, ToolCall, ToolCallPayload, ToolFormat,
+    ToolSchema,
 };
 pub use stream::{
     CompletionBlockContent, CompletionBlockField, CompletionBlockKind, CompletionEventStream,

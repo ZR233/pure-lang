@@ -3,8 +3,8 @@ use serde::de::DeserializeOwned;
 
 use pl_protocol::{
     AgentStatus, ContentPart, InteractionPayload, InteractionRequest, InteractionResolution,
-    InteractionScope, InteractionStatus, Message, MessageContent, MessageRole, RuntimeCostAmount,
-    RuntimeUsageSnapshot, StudioEventEnvelope, StudioMessage, StudioMessageRole,
+    InteractionScope, InteractionStatus, Message, MessageContent, MessageRole, ModelContextItem,
+    RuntimeCostAmount, RuntimeUsageSnapshot, StudioEventEnvelope, StudioMessage, StudioMessageRole,
     StudioMessageStatus, StudioPart, StudioPartStatus, StudioPartType, StudioTextChannel,
     StudioTurnStatus,
 };
@@ -477,6 +477,9 @@ pub fn costs_to_json(costs: &[RuntimeCostAmount]) -> String {
 }
 
 pub fn row_to_message(row: entities::message::Model) -> Result<Message> {
+    if row.item_type != "message" {
+        bail!("studio db row is not a message: {}", row.item_type);
+    }
     let role = match row.role.as_str() {
         "system" => MessageRole::System,
         "user" => MessageRole::User,
@@ -494,6 +497,16 @@ pub fn row_to_message(row: entities::message::Model) -> Result<Message> {
         reasoning_content: row.reasoning_content,
         metadata,
     })
+}
+
+pub fn row_to_context_item(row: entities::message::Model) -> Result<ModelContextItem> {
+    match row.item_type.as_str() {
+        "message" => row_to_message(row).map(ModelContextItem::from),
+        "compaction" => Ok(ModelContextItem::Compaction {
+            encrypted_content: row.content,
+        }),
+        other => bail!("unsupported model context item type in studio db: {other}"),
+    }
 }
 
 pub fn message_to_row_parts(message: &Message) -> Result<(String, String)> {

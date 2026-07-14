@@ -2,7 +2,9 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use crate::{ModelCapabilities, ModelContinuationState, ModelModality};
-use pl_protocol::{ContentPart, ImageSource, Message, MessageContent, PureError, ToolCallKind};
+use pl_protocol::{
+    ContentPart, ImageSource, Message, MessageContent, ModelContextItem, PureError, ToolCallKind,
+};
 use pl_trace::TraceEvent;
 
 const APPLY_PATCH_FUNCTION_FALLBACK_DESCRIPTION: &str = "Complete Codex-style apply_patch text beginning with *** Begin Patch and ending with *** End Patch. Each file operation must use one of these hunk headers: *** Add File: <path>, *** Delete File: <path>, or *** Update File: <path>. Do not use ---/+++ unified diff, *** File: metadata, or natural-language edit instructions such as Insert after. If a previous patch failed, read the target file again and retry with a smaller patch based on current content; do not repeat the same failed patch. Minimal update example:\n*** Begin Patch\n*** Update File: notes.txt\n@@\n-old line\n+new line\n*** End Patch";
@@ -13,7 +15,7 @@ pub struct CompletionRequest {
     pub model: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instructions: Option<String>,
-    pub messages: Vec<Message>,
+    pub input: Vec<ModelContextItem>,
     #[serde(default)]
     pub tools: Vec<ToolSchema>,
     #[serde(default = "default_tool_choice")]
@@ -33,6 +35,42 @@ pub struct CompletionRequest {
     pub stream: bool,
     #[serde(skip)]
     pub trace: Option<CompletionTraceContext>,
+}
+
+/// OpenAI provider 的上下文压缩协议选择。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OpenAiCompactionMode {
+    #[default]
+    RemoteV2,
+    RemoteLegacy,
+    Local,
+}
+
+impl OpenAiCompactionMode {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+/// 统一的 provider 压缩请求。
+#[derive(Debug, Clone)]
+pub struct ModelCompactionRequest {
+    pub mode: OpenAiCompactionMode,
+    pub model: String,
+    pub instructions: String,
+    pub input: Vec<ModelContextItem>,
+    pub tools: Vec<ToolSchema>,
+    pub parallel_tool_calls: bool,
+    pub reasoning: Option<ReasoningConfig>,
+    pub prompt_cache_key: Option<String>,
+}
+
+/// Provider 完成远程压缩后返回的替换历史。
+#[derive(Debug, Clone)]
+pub struct ModelCompactionResponse {
+    pub input: Vec<ModelContextItem>,
+    pub usage: Option<TokenUsage>,
 }
 
 fn default_tool_choice() -> String {
@@ -60,7 +98,12 @@ impl CompletionRequestBuilder {
     }
 
     pub fn messages(mut self, messages: Vec<Message>) -> Self {
-        self.request.messages = messages;
+        self.request.input = messages.into_iter().map(ModelContextItem::from).collect();
+        self
+    }
+
+    pub fn input(mut self, input: Vec<ModelContextItem>) -> Self {
+        self.request.input = input;
         self
     }
 
@@ -70,9 +113,12 @@ impl CompletionRequestBuilder {
         continuation: &ModelContinuationState,
         use_continuation: bool,
     ) -> Self {
-        self.request.messages = continuation
+        self.request.input = continuation
             .acknowledged_tail(messages, use_continuation)
-            .to_vec();
+            .iter()
+            .cloned()
+            .map(ModelContextItem::from)
+            .collect();
         self.continuation(continuation, use_continuation)
     }
 
@@ -416,7 +462,7 @@ impl CompletionRequest {
             request: CompletionRequest {
                 model: model.into(),
                 instructions: None,
-                messages: Vec::new(),
+                input: Vec::new(),
                 tools: Vec::new(),
                 tool_choice: default_tool_choice(),
                 parallel_tool_calls: false,
@@ -442,7 +488,7 @@ impl CompletionRequest {
     }
 
     pub fn validate_against(&self, capabilities: &ModelCapabilities) -> pl_protocol::Result<()> {
-        let requirements = RequestRequirements::from_messages(&self.messages)?;
+        let requirements = RequestRequirements::from_input(&self.input)?;
         if requirements.text && !capabilities.supports_input_modality(ModelModality::Text) {
             return Err(PureError::ConfigError(format!(
                 "model {} does not support text input",
@@ -503,9 +549,12 @@ struct RequestRequirements {
 }
 
 impl RequestRequirements {
-    fn from_messages(messages: &[Message]) -> pl_protocol::Result<Self> {
+    fn from_input(input: &[ModelContextItem]) -> pl_protocol::Result<Self> {
         let mut requirements = Self::default();
-        for message in messages {
+        for item in input {
+            let Some(message) = item.as_message() else {
+                continue;
+            };
             match &message.content {
                 MessageContent::Text(text) => {
                     if !text.is_empty() {
@@ -594,12 +643,12 @@ mod tests {
         CompletionRequest {
             model: "model".to_string(),
             instructions: None,
-            messages: vec![Message {
+            input: vec![ModelContextItem::from(Message {
                 role: MessageRole::User,
                 content,
                 reasoning_content: None,
                 metadata: HashMap::new(),
-            }],
+            })],
             tools: Vec::new(),
             tool_choice: "auto".to_string(),
             parallel_tool_calls: false,
@@ -736,7 +785,14 @@ mod tests {
 
         assert_eq!(request.model, "gpt-5.5");
         assert_eq!(request.instructions.as_deref(), Some("reply briefly"));
-        assert_eq!(request.messages, messages[2..]);
+        assert_eq!(
+            request.input,
+            messages[2..]
+                .iter()
+                .cloned()
+                .map(ModelContextItem::from)
+                .collect::<Vec<_>>()
+        );
         assert_eq!(request.store, Some(true));
         assert_eq!(request.previous_response_id.as_deref(), Some("resp-1"));
         assert_eq!(request.prompt_cache_key.as_deref(), Some("cache-1"));

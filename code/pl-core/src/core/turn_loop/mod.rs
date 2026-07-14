@@ -11,12 +11,13 @@ mod attachments;
 pub(super) mod enabled_tools;
 mod plan_exit;
 
-use attachments::materialize_messages;
+use attachments::materialize_context_items;
 use enabled_tools::record_enabled_tools;
 use plan_exit::record_plan_exit_items;
 
 use crate::context_compaction::{
-    CompactionOutcome, ContextCompactionRequest, maybe_compact_session,
+    CompactionOutcome, ContextCompactionPhase, ContextCompactionRequest,
+    ensure_provider_can_consume_session, maybe_compact_session,
 };
 use crate::instruction::{InstructionAssembler, InstructionAssemblyRequest};
 use crate::runtime_usage::{agent_runtime_delta, identity_for_subagent, token_usage_snapshot};
@@ -48,6 +49,7 @@ pub(super) async fn run_turn_with_trace(
     options: TurnOptions,
 ) -> Result<TurnResult> {
     let provider = core.provider.clone();
+    ensure_provider_can_consume_session(provider.info().provider_kind, session)?;
     let reasoning_effort = core.reasoning_effort.clone();
     let workspace_root = core
         .workspace_root
@@ -197,6 +199,8 @@ pub(super) async fn run_turn_with_trace(
             turn_instruction_snapshot.clone()
         };
         let instruction_bundle = iteration_snapshot.to_bundle();
+        let model_capabilities = provider.effective_model_capabilities(&model);
+        let parallel_tool_calls = should_request_parallel_tool_calls(model_capabilities, &options);
 
         let compaction_trigger = provider_prompt_tokens_for_compaction.take().map_or(
             crate::context_compaction::CompactionTrigger::EstimatedTokens,
@@ -214,7 +218,16 @@ pub(super) async fn run_turn_with_trace(
                     config: &core.context_compaction,
                     request_instructions: &instruction_bundle.instructions,
                     request_messages: &instruction_bundle.prelude_messages,
+                    tools: &iteration_tools,
+                    parallel_tool_calls,
+                    reasoning: reasoning.clone(),
+                    prompt_cache_key: session.prompt_cache_key().map(ToString::to_string),
                     trigger: compaction_trigger,
+                    phase: if iteration == 0 {
+                        ContextCompactionPhase::PreTurn
+                    } else {
+                        ContextCompactionPhase::MidTurn
+                    },
                     event_tx: recorder.sender().clone(),
                     progress: Some(&mut progress),
                 },
@@ -226,21 +239,23 @@ pub(super) async fn run_turn_with_trace(
                     last_compacted_state = Some((session.revision(), session.len()));
                     safe_message_count = session.len();
                     session_message_count = safe_message_count;
-                    total_usage.prompt_tokens += usage.prompt_tokens;
-                    total_usage.completion_tokens += usage.completion_tokens;
-                    total_usage.cached_prompt_tokens += usage.cached_prompt_tokens;
-                    total_usage.reasoning_tokens += usage.reasoning_tokens;
-                    let usage_snapshot = token_usage_snapshot(&usage);
-                    let model_info = provider.model_info(&model);
-                    recorder.broadcast(AgentEvent::AgentRuntimeUpdated {
-                        delta: agent_runtime_delta(
-                            format!("{turn_id}-compact-{iteration}"),
-                            identity_for_subagent(active_subagent.as_ref()),
-                            &model_info,
-                            usage_snapshot,
-                            unix_seconds(),
-                        ),
-                    });
+                    if let Some(usage) = usage {
+                        total_usage.prompt_tokens += usage.prompt_tokens;
+                        total_usage.completion_tokens += usage.completion_tokens;
+                        total_usage.cached_prompt_tokens += usage.cached_prompt_tokens;
+                        total_usage.reasoning_tokens += usage.reasoning_tokens;
+                        let usage_snapshot = token_usage_snapshot(&usage);
+                        let model_info = provider.model_info(&model);
+                        recorder.broadcast(AgentEvent::AgentRuntimeUpdated {
+                            delta: agent_runtime_delta(
+                                format!("{turn_id}-compact-{iteration}"),
+                                identity_for_subagent(active_subagent.as_ref()),
+                                &model_info,
+                                usage_snapshot,
+                                unix_seconds(),
+                            ),
+                        });
+                    }
                     context_compactions.push(snapshot);
                 }
                 Err(error) => {
@@ -254,7 +269,7 @@ pub(super) async fn run_turn_with_trace(
                         last_reasoning_content,
                         last_model,
                         total_usage,
-                        session.messages().len(),
+                        session.len(),
                         error,
                         severity,
                     ));
@@ -268,12 +283,17 @@ pub(super) async fn run_turn_with_trace(
         budget_tracker.record_model_step();
         let continuation_start = session.continuation_start_index();
         let history_source = continuation_start
-            .and_then(|start| session.messages().get(start..))
-            .unwrap_or_else(|| session.messages());
-        let history_messages =
-            materialize_messages(history_source, &request.materialized_attachments)?;
-        let mut messages = instruction_bundle.prelude_messages.clone();
-        messages.extend(history_messages.clone());
+            .and_then(|start| session.items().get(start..))
+            .unwrap_or_else(|| session.items());
+        let history_items =
+            materialize_context_items(history_source, &request.materialized_attachments)?;
+        let mut input = instruction_bundle
+            .prelude_messages
+            .iter()
+            .cloned()
+            .map(pl_protocol::ModelContextItem::from)
+            .collect::<Vec<_>>();
+        input.extend(history_items.clone());
         if iteration == 0 {
             progress.milestone("上下文已整理，准备调用模型。");
         } else {
@@ -283,12 +303,9 @@ pub(super) async fn run_turn_with_trace(
         let inference_id = format!("{turn_id}-inf-{iteration}");
         let mut inference_item = recorder.inference_item(&turn_id, &inference_id, &model);
         recorder.start_item(inference_item.clone());
-        let model_capabilities = provider.effective_model_capabilities(&model);
-        let parallel_tool_calls = should_request_parallel_tool_calls(model_capabilities, &options);
-
         let completion_request = CompletionRequest::builder(model.clone())
             .instructions(instruction_bundle.instructions.clone())
-            .messages(messages.clone())
+            .input(input.clone())
             .tools(iteration_tools)
             .parallel_tool_calls(parallel_tool_calls)
             .store(session.prompt_cache_key().map(|_| true))
@@ -367,7 +384,7 @@ pub(super) async fn run_turn_with_trace(
                     last_reasoning_content,
                     last_model,
                     total_usage,
-                    session.messages().len(),
+                    session.len(),
                     error,
                     severity,
                 ));
@@ -435,7 +452,7 @@ pub(super) async fn run_turn_with_trace(
                     last_reasoning_content,
                     last_model,
                     total_usage,
-                    session.messages().len(),
+                    session.len(),
                     "模型返回了未执行的工具调用文本，未产生可执行 tool call。".to_string(),
                     ErrorSeverity::Recoverable,
                 ));
@@ -451,7 +468,7 @@ pub(super) async fn run_turn_with_trace(
                         last_reasoning_content,
                         last_model,
                         total_usage,
-                        session.messages().len(),
+                        session.len(),
                         "用户明确要求子代理分工，但本轮没有实际创建任何 agent。".to_string(),
                         ErrorSeverity::Recoverable,
                     ));
@@ -460,7 +477,7 @@ pub(super) async fn run_turn_with_trace(
             session.push_assistant_response(content.clone(), reasoning_content.clone());
             last_content = content;
             last_reasoning_content = reasoning_content;
-            session_message_count = session.messages().len();
+            session_message_count = session.len();
             safe_message_count = session_message_count;
             session.acknowledge_model_response(session_message_count, response_id);
             break;
@@ -484,7 +501,7 @@ pub(super) async fn run_turn_with_trace(
         if response_reached_auto_compact_limit {
             provider_prompt_tokens_for_compaction = Some(response_total_tokens);
         }
-        session.acknowledge_model_response(session.messages().len(), response_id);
+        session.acknowledge_model_response(session.len(), response_id);
         let count = tool_calls.len();
         progress.tool_detail(format!("模型请求调用 {count} 个工具。"));
 
@@ -503,7 +520,7 @@ pub(super) async fn run_turn_with_trace(
                 agent_supervisor: agent_supervisor.clone(),
                 agent_tool_registrar: core.agent_tool_registrar.clone(),
                 instruction_snapshot: Some(instruction_snapshot.clone()),
-                parent_session: Arc::new(CoreSession::from_messages(history_messages)),
+                parent_session: Arc::new(CoreSession::from_items(history_items)),
             },
         )
         .await
@@ -562,7 +579,7 @@ pub(super) async fn run_turn_with_trace(
             );
         }
 
-        session_message_count = session.messages().len();
+        session_message_count = session.len();
         safe_message_count = session_message_count;
         if should_end_turn {
             break;

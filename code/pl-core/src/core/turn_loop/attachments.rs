@@ -1,15 +1,18 @@
-use pl_protocol::{ContentPart, ImageSource, Message, MessageContent, Result};
+use pl_protocol::{ContentPart, ImageSource, MessageContent, ModelContextItem, Result};
 
-pub(super) fn materialize_messages(
-    messages: &[Message],
+pub(super) fn materialize_context_items(
+    items: &[ModelContextItem],
     attachments: &[crate::MaterializedAttachment],
-) -> Result<Vec<Message>> {
-    messages
+) -> Result<Vec<ModelContextItem>> {
+    items
         .iter()
-        .map(|message| {
-            let mut message = message.clone();
-            message.content = materialize_content(&message.content, attachments)?;
-            Ok(message)
+        .map(|item| match item {
+            ModelContextItem::Message { message } => {
+                let mut message = message.clone();
+                message.content = materialize_content(&message.content, attachments)?;
+                Ok(ModelContextItem::from(message))
+            }
+            ModelContextItem::Compaction { .. } => Ok(item.clone()),
         })
         .collect()
 }

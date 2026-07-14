@@ -13,7 +13,12 @@ use pl_trace::AgentEventSender;
 use pl_trace::{AgentEvent, TraceEvent, TracePartStatus};
 
 use crate::config::{ModelRole, PureConfig, ReasoningEffort, ToolCapabilityConfig};
-use crate::context_compaction::ContextCompactionConfig;
+use crate::context_compaction::{
+    CompactionOutcome, CompactionTrigger, ContextCompactionConfig, ContextCompactionPhase,
+    ContextCompactionRequest, ContextCompactionSnapshot, ManualContextCompactionRequest,
+    maybe_compact_session,
+};
+use crate::instruction::{InstructionAssembler, InstructionAssemblyRequest};
 use crate::permission::parse_reviewer_decision;
 use crate::session::CoreSession;
 use crate::tool::{
@@ -29,6 +34,7 @@ use crate::turn::{BudgetTracker, TurnResultStatus};
 use crate::turn::{
     ToolApprovalDecision, ToolApprovalRequest, TurnOptions, TurnRequest, TurnResult,
 };
+use progress::{ProgressEmitter, ProgressVerbosity};
 
 mod hosted_agent;
 mod kernel;
@@ -161,9 +167,12 @@ impl PureCore {
     pub fn from_config(config: &PureConfig, role: ModelRole) -> Result<Self> {
         let resolved = config.resolve_role(role)?;
         let provider = create_provider_with_models(resolved.provider_info, resolved.models)?;
+        let mut runtime_profile = CoreRuntimeProfile::minimal();
+        runtime_profile.context_compaction.openai_mode = config.runtime.openai_compaction_mode;
         Ok(PureCoreBuilder::new(provider)
             .with_reasoning_effort(resolved.role_config.effort)
             .with_config(config.clone())
+            .with_runtime_profile(runtime_profile)
             .build())
     }
 
@@ -446,6 +455,110 @@ impl PureCore {
         options: TurnOptions,
     ) -> Result<TurnResult> {
         turn_loop::run_turn_with_trace(self, session, request, recorder, options).await
+    }
+
+    /// 立即压缩当前会话，不检查自动压缩阈值。
+    ///
+    /// 空历史或只有远程 checkpoint 时返回 `Ok(None)`。成功压缩会原子替换
+    /// 会话上下文并重置 Responses continuation。
+    ///
+    /// # Errors
+    ///
+    /// instruction 组装失败、provider 压缩失败或远程结果校验失败时返回错误；
+    /// 失败不会安装部分压缩历史。
+    pub async fn compact_session(
+        &self,
+        session: &mut CoreSession,
+        request: ManualContextCompactionRequest,
+        event_tx: AgentEventSender,
+    ) -> Result<Option<ContextCompactionSnapshot>> {
+        let mut recorder = TraceRecorder::disabled(event_tx);
+        self.compact_session_with_trace(session, request, &mut recorder)
+            .await
+    }
+
+    /// 立即压缩当前会话，并把进展写入给定 trace recorder。
+    ///
+    /// # Errors
+    ///
+    /// 与 [`PureCore::compact_session`] 相同。
+    pub async fn compact_session_with_trace(
+        &self,
+        session: &mut CoreSession,
+        request: ManualContextCompactionRequest,
+        recorder: &mut TraceRecorder,
+    ) -> Result<Option<ContextCompactionSnapshot>> {
+        let model = self.provider.default_model().to_string();
+        let model_info = self.provider.model_info(&model);
+        let workspace_root = self
+            .workspace_root
+            .clone()
+            .unwrap_or_else(turn_result::default_workspace_root);
+        let snapshot = match request.instruction_snapshot {
+            Some(snapshot) => snapshot,
+            None => {
+                let assembly_request = InstructionAssemblyRequest {
+                    config: self.config.as_ref(),
+                    model: &model_info,
+                    mode: request.mode,
+                    workspace_root: &workspace_root,
+                    current_dir: &workspace_root,
+                    workspace_instructions: request.workspace_instructions.as_deref(),
+                    subagent_constraint: None,
+                };
+                match self.instruction_profile.as_ref() {
+                    Some(profile) => {
+                        InstructionAssembler::assemble_with_profile(assembly_request, profile)?
+                    }
+                    None => InstructionAssembler::assemble(assembly_request)?,
+                }
+            }
+        };
+        let bundle = snapshot.to_bundle();
+        let execution_profile = crate::TurnExecutionProfile::root(request.mode);
+        let tools = self.tools.schemas_for_profile(execution_profile);
+        let capabilities = self.provider.effective_model_capabilities(&model);
+        let parallel_tool_calls = capabilities.supports_parallel_tool_calls();
+        let reasoning = self
+            .reasoning_effort
+            .as_ref()
+            .map(|effort| ReasoningConfig {
+                effort: Some(effort.as_str().to_string()),
+                summary: Some(if effort.is_none() {
+                    ReasoningSummary::Disabled
+                } else {
+                    ReasoningSummary::Enabled
+                }),
+            });
+        let turn_id = request.turn_id.unwrap_or_else(generate_turn_id);
+        let mut progress = ProgressEmitter::new(
+            recorder.sender().clone(),
+            turn_id,
+            ProgressVerbosity::from_env(),
+        );
+        let outcome = maybe_compact_session(
+            session,
+            ContextCompactionRequest {
+                provider: self.provider.as_ref(),
+                model: &model,
+                config: &self.context_compaction,
+                request_instructions: &bundle.instructions,
+                request_messages: &bundle.prelude_messages,
+                tools: &tools,
+                parallel_tool_calls,
+                reasoning,
+                prompt_cache_key: session.prompt_cache_key().map(ToString::to_string),
+                trigger: CompactionTrigger::Manual,
+                phase: ContextCompactionPhase::Standalone,
+                event_tx: recorder.sender().clone(),
+                progress: Some(&mut progress),
+            },
+        )
+        .await?;
+        Ok(match outcome {
+            CompactionOutcome::Skipped => None,
+            CompactionOutcome::Compacted { snapshot, .. } => Some(snapshot),
+        })
     }
 }
 

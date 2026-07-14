@@ -20,6 +20,7 @@ use crate::protocol::openai::sse;
 use crate::protocol::openai::{OpenAiProtocol, OpenAiRequestBody};
 use crate::provider_info::{ProviderInfo, ProviderKind};
 use crate::request::{CompletionRequest, CompletionResponse};
+use crate::request::{ModelCompactionRequest, ModelCompactionResponse};
 use crate::stream::{
     CompletionEventStream, collect_completion_event_stream, decode_provider_stream,
 };
@@ -32,6 +33,8 @@ pub struct OpenAiProvider {
     capabilities: ProviderCapabilities,
     bundled_models: Vec<ModelInfo>,
 }
+
+mod compaction;
 
 impl OpenAiProvider {
     pub(crate) fn new(info: ProviderInfo, configured_models: Vec<ModelInfo>) -> Result<Self> {
@@ -132,6 +135,13 @@ impl OpenAiProvider {
 
             Ok(decode_provider_stream(stream, protocol))
         }
+    }
+
+    pub(crate) fn compact_context(
+        &self,
+        request: ModelCompactionRequest,
+    ) -> impl std::future::Future<Output = Result<ModelCompactionResponse>> + Send {
+        compaction::compact_context(self, request)
     }
 
     pub(crate) fn model_info(&self, model: &str) -> ModelInfo {

@@ -55,7 +55,7 @@ Studio store 持久化 `messagePartUpdated` 前必须在同一事务内验证 pa
 
 工具调度层不得在普通 verbosity 下为工具阶段生成 runtime commentary；工具阶段的可见进展由 Studio tool part 和 Flutter 的“工具活动”结构化块承担。普通 timeline 不显示“模型请求调用 N 个工具”、工具执行结束、结果回写上下文、准备继续调用模型这类与工具活动块重复或低信息量的状态。若诊断仍需要这些状态，只能作为 `toolDetail` 或 `debug` 在 verbose/debug 下生成。单个工具开始、完成、审批、审查等细节同样属于 `toolDetail` 级别，只在 verbose/debug 下生成。该 commentary 不替代 tool part，也不承载工具参数、stdout/stderr 或最终结果；工具事实仍以逐工具 `tool` part snapshot 和 `tool.result` delta 为准。工具进度 commentary 必须标记为 synthetic，并且不得写入后续 provider history。
 
-上下文自动压缩属于 turn 内部 runtime 阶段，也应生成 synthetic commentary：开始压缩、因 context/token limit 缩小历史后重试、压缩完成并继续模型调用。该进展不改变消息历史协议；压缩后的摘要仍只通过 session history replacement 生效，重试过程不得写入 assistant final 正文。
+上下文自动压缩属于 turn 内部 runtime 阶段，也应生成 synthetic commentary：开始压缩、因 context/token limit 缩小历史后重试、压缩完成并继续模型调用。手动压缩使用 standalone phase 并复用同一 trace/progress 语义。该进展不改变可见消息协议；本地摘要或 OpenAI 加密 checkpoint 只通过 session context replacement 生效，重试过程不得写入 assistant final 正文。远程 v2 流只有在收到 `response.completed` 且恰好一个 compaction item 后才算成功；可重试传输/流错误最多重试两次，额外输出项允许忽略，缺失、重复或 completed 前 EOF 都必须使当前 turn 明确失败且保持原历史不变。
 
 `bash` 命令运行期间，stdout/stderr chunk 作为原始命令输出追加到原 `bash` tool part 的 `tool.result` live overlay；stderr chunk 由投影层保留来源标记，前端按普通工具结果增量展示。每个 chunk 使用该 tool part 当前 revision 作为基线继续递增，终态 `messagePartUpdated` 携带不低于最后一个输出 delta 的 revision，并以紧凑 JSON 结果固化 snapshot；`write_stdin` 轮询只返回自己的紧凑结果，不把同一后台进程的输出复制成新的父 timeline tool part。
 

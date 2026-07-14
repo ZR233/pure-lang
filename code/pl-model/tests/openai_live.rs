@@ -43,7 +43,7 @@ fn openai_request(model: String) -> CompletionRequest {
             "Answer briefly. Use the provider's native visible output channels when available. Reply with exactly: ok."
                 .to_string(),
         ),
-        messages: vec![user_message("Reply with exactly: ok")],
+        input: vec![user_message("Reply with exactly: ok").into()],
         tools: Vec::new(),
         tool_choice: "auto".to_string(),
         parallel_tool_calls: false,
