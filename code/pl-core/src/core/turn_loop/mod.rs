@@ -520,7 +520,10 @@ pub(super) async fn run_turn_with_trace(
                 agent_supervisor: agent_supervisor.clone(),
                 agent_tool_registrar: core.agent_tool_registrar.clone(),
                 instruction_snapshot: Some(instruction_snapshot.clone()),
-                parent_session: Arc::new(CoreSession::from_items(history_items)),
+                parent_session: Arc::new(CoreSession::from_items(materialize_context_items(
+                    session.items(),
+                    &request.materialized_attachments,
+                )?)),
             },
         )
         .await

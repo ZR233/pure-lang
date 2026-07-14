@@ -316,6 +316,7 @@ fn reviewer_session_diagnostics(session: &CoreSession) -> String {
 }
 
 #[tokio::test]
+#[ignore = "requires explicit live DeepSeek credentials and incurs model usage"]
 async fn live_deepseek_completes_task_orchestration_with_worktree_merge_and_review() {
     let Some(api_key) = live_api_key() else {
         return;

@@ -624,3 +624,238 @@ async fn model_turn_client_caches_unsupported_continuation_by_key() {
     assert!(bodies[2].get("previous_response_id").is_none());
     assert_eq!(bodies[2]["store"], serde_json::json!(false));
 }
+
+#[tokio::test]
+async fn tool_context_keeps_full_session_history_across_responses_continuation() {
+    let responses = vec![
+        tool_call_sse("history-marker", "history_marker"),
+        tool_call_sse("history-probe", "parent_history_probe"),
+        final_sse("history-complete", "history checked"),
+    ];
+    let (base_url, bodies, handle) = serve_sse_sequence(responses).await;
+    let mut provider = ProviderInfo::openai(Some(base_url));
+    provider.bearer_token = Some("test-token".to_string());
+    provider.default_model = "local-responses".to_string();
+    let mut core = PureCore::from_provider_info(provider).unwrap();
+    core.register_tool(HistoryMarkerTool);
+    core.register_tool(ParentHistoryProbeTool);
+    let (event_tx, _) = tokio::sync::broadcast::channel(32);
+    let mut recorder = TraceRecorder::new("session-history".to_string(), event_tx, 0);
+    let mut session = CoreSession::new();
+
+    let result = core
+        .run_turn_with_trace(
+            &mut session,
+            TurnRequest::new("check tool history".to_string(), CompileMode::Simple)
+                .with_budget(crate::turn::TurnBudget::new(60_000)),
+            &mut recorder,
+            TurnOptions::default(),
+        )
+        .await
+        .unwrap();
+    handle.await.unwrap();
+
+    assert_eq!(result.status, TurnResultStatus::Completed);
+    let probe_result = result
+        .trace_events
+        .iter()
+        .find_map(|event| match &event.kind {
+            TraceEventKind::TracePartCompleted { item }
+                if item
+                    .tool
+                    .as_ref()
+                    .is_some_and(|tool| tool.name == "parent_history_probe") =>
+            {
+                item.tool.as_ref().and_then(|tool| tool.result.as_deref())
+            }
+            TraceEventKind::TracePartStarted { .. }
+            | TraceEventKind::TracePartDelta { .. }
+            | TraceEventKind::TracePartCompleted { .. }
+            | TraceEventKind::TracePartFailed { .. }
+            | TraceEventKind::PlanLifecycleChanged { .. }
+            | TraceEventKind::InteractionChanged { .. }
+            | TraceEventKind::SkillActivated { .. }
+            | TraceEventKind::EnabledToolsRecorded { .. } => None,
+        })
+        .expect("parent history probe result");
+    assert_eq!(probe_result, "history marker visible");
+    let bodies = bodies.lock().unwrap();
+    assert_eq!(bodies[1]["previous_response_id"], "response_history-marker");
+    assert_eq!(bodies[2]["previous_response_id"], "response_history-probe");
+}
+
+#[derive(Debug)]
+struct HistoryMarkerTool;
+
+impl Tool for HistoryMarkerTool {
+    fn name(&self) -> &str {
+        "history_marker"
+    }
+
+    fn description(&self) -> &str {
+        "Records a marker in tool history"
+    }
+
+    fn input_schema(&self) -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+        })
+    }
+
+    fn execute<'a>(
+        &'a self,
+        _input: ToolInput,
+        _context: ToolContext,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = std::result::Result<ToolOutput, PureError>>
+                + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async {
+            Ok(ToolOutput {
+                description: "history marker".to_string(),
+                truncated: OutputTruncation::empty(),
+                output_file: std::path::PathBuf::new(),
+                exit_code: None,
+                timed_out: false,
+                runtime_events: Vec::new(),
+            })
+        })
+    }
+}
+
+#[derive(Debug)]
+struct ParentHistoryProbeTool;
+
+impl Tool for ParentHistoryProbeTool {
+    fn name(&self) -> &str {
+        "parent_history_probe"
+    }
+
+    fn description(&self) -> &str {
+        "Reports whether prior tool history is visible"
+    }
+
+    fn input_schema(&self) -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+        })
+    }
+
+    fn execute<'a>(
+        &'a self,
+        _input: ToolInput,
+        context: ToolContext,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = std::result::Result<ToolOutput, PureError>>
+                + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async move {
+            let marker_visible = context.parent_session.messages().iter().any(|message| {
+                pl_protocol::ToolResultMetadata::from_metadata(&message.metadata)
+                    .ok()
+                    .is_some_and(|metadata| metadata.tool_name == "history_marker")
+            });
+            Ok(ToolOutput {
+                description: if marker_visible {
+                    "history marker visible"
+                } else {
+                    "history marker missing"
+                }
+                .to_string(),
+                truncated: OutputTruncation::empty(),
+                output_file: std::path::PathBuf::new(),
+                exit_code: None,
+                timed_out: false,
+                runtime_events: Vec::new(),
+            })
+        })
+    }
+}
+
+fn tool_call_sse(id: &str, name: &str) -> String {
+    let item_id = format!("fc_{id}");
+    let call_id = format!("call_{id}");
+    [
+        serde_json::json!({
+            "type": "response.output_item.added",
+            "item": {
+                "type": "function_call",
+                "id": item_id,
+                "call_id": call_id,
+                "name": name
+            }
+        }),
+        serde_json::json!({
+            "type": "response.output_item.done",
+            "item": {
+                "type": "function_call",
+                "id": item_id,
+                "call_id": call_id,
+                "name": name,
+                "arguments": "{}"
+            }
+        }),
+        serde_json::json!({
+            "type": "response.completed",
+            "response": {
+                "id": format!("response_{id}"),
+                "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
+            }
+        }),
+    ]
+    .into_iter()
+    .map(|event| format!("data: {event}\n\n"))
+    .chain(std::iter::once("data: [DONE]\n\n".to_string()))
+    .collect()
+}
+
+fn final_sse(id: &str, content: &str) -> String {
+    let item_id = format!("msg_{id}");
+    [
+        serde_json::json!({
+            "type": "response.output_item.added",
+            "item": {
+                "id": item_id,
+                "type": "message",
+                "role": "assistant",
+                "phase": "final_answer"
+            }
+        }),
+        serde_json::json!({
+            "type": "response.output_text.delta",
+            "item_id": item_id,
+            "delta": content
+        }),
+        serde_json::json!({
+            "type": "response.output_item.done",
+            "item": {
+                "id": item_id,
+                "type": "message",
+                "role": "assistant",
+                "phase": "final_answer",
+                "content": [{"type": "output_text", "text": content}]
+            }
+        }),
+        serde_json::json!({
+            "type": "response.completed",
+            "response": {
+                "id": format!("response_{id}"),
+                "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
+            }
+        }),
+    ]
+    .into_iter()
+    .map(|event| format!("data: {event}\n\n"))
+    .chain(std::iter::once("data: [DONE]\n\n".to_string()))
+    .collect()
+}
