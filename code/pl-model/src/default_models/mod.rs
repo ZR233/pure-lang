@@ -18,7 +18,14 @@ use crate::model_info::{ModelInfo, ModelRequestProfile, TruncationMode};
 use crate::parameter::{ModelParameter, ParameterWire, WireAssignment};
 
 const DEEPSEEK_DEFAULT_MODEL_SLUGS: &[&str] = &["deepseek-v4-flash", "deepseek-v4-pro"];
-const OPENAI_DEFAULT_MODEL_SLUGS: &[&str] = &["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"];
+const OPENAI_DEFAULT_MODEL_SLUGS: &[&str] = &[
+    "gpt-5.5",
+    "gpt-5.4",
+    "gpt-5.4-mini",
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+];
 const ZHIPU_GLM_DEFAULT_MODEL_SLUGS: &[&str] = &[
     "glm-5.2",
     "glm-5",
@@ -42,6 +49,8 @@ pub fn zhipu_default_model_slugs() -> &'static [&'static str] {
 
 pub fn default_models() -> Vec<ModelInfo> {
     let openai = openai_family();
+    let openai_gpt56 = openai_gpt56_family("medium");
+    let openai_gpt56_sol = openai_gpt56_family("low");
     let deepseek = deepseek_family();
     let zhipu_text = zhipu_text_family();
     let zhipu_glm52 = zhipu_glm52_family();
@@ -102,6 +111,33 @@ pub fn default_models() -> Vec<ModelInfo> {
             "Small, fast, and cost-efficient model for simpler coding tasks.",
             272_000,
             272_000,
+            None,
+            ModelPricing::default(),
+        ),
+        openai_gpt56_sol.instantiate(
+            "gpt-5.6-sol",
+            "GPT-5.6-Sol",
+            "Latest frontier agentic coding model.",
+            372_000,
+            372_000,
+            None,
+            ModelPricing::default(),
+        ),
+        openai_gpt56.instantiate(
+            "gpt-5.6-terra",
+            "GPT-5.6-Terra",
+            "Balanced agentic coding model for everyday work.",
+            372_000,
+            372_000,
+            None,
+            ModelPricing::default(),
+        ),
+        openai_gpt56.instantiate(
+            "gpt-5.6-luna",
+            "GPT-5.6-Luna",
+            "Fast and affordable agentic coding model.",
+            372_000,
+            372_000,
             None,
             ModelPricing::default(),
         ),
@@ -288,7 +324,26 @@ fn openai_family() -> ModelFamily {
         capabilities: openai_capabilities(),
         truncation_mode: TruncationMode::Tokens,
         truncation_limit: 10_000,
-        parameters: vec![openai_effort_parameter()],
+        parameters: vec![openai_effort_parameter(&["medium", "low", "high", "xhigh"])],
+        request_profile: ModelRequestProfile::default(),
+        base_instructions: String::new(),
+    }
+}
+
+fn openai_gpt56_family(default_effort: &str) -> ModelFamily {
+    let mut candidates = vec![default_effort];
+    for effort in ["low", "medium", "high", "xhigh", "max"] {
+        if effort != default_effort {
+            candidates.push(effort);
+        }
+    }
+
+    ModelFamily {
+        id: "openai-gpt56-reasoning",
+        capabilities: openai_capabilities(),
+        truncation_mode: TruncationMode::Tokens,
+        truncation_limit: 10_000,
+        parameters: vec![openai_effort_parameter(&candidates)],
         request_profile: ModelRequestProfile::default(),
         base_instructions: String::new(),
     }
@@ -356,21 +411,20 @@ fn deepseek_request_profile() -> ModelRequestProfile {
 
 // ---- effort 参数声明 ----
 
-/// OpenAI effort：候选值 medium/low/high/xhigh，透传到 Responses 的 `reasoning.effort`。
-fn openai_effort_parameter() -> ModelParameter {
+/// OpenAI effort：候选值按模型声明顺序透传到 Responses 的 `reasoning.effort`。
+fn openai_effort_parameter(candidates: &[&str]) -> ModelParameter {
+    let candidates = candidates
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
     ModelParameter {
         name: "effort".to_string(),
         label: None,
-        candidates: vec![
-            "medium".to_string(),
-            "low".to_string(),
-            "high".to_string(),
-            "xhigh".to_string(),
-        ],
-        wire: ["medium", "low", "high", "xhigh"]
-            .into_iter()
-            .map(|value| (value.to_string(), wire_set_one("reasoning.effort", value)))
+        wire: candidates
+            .iter()
+            .map(|value| (value.clone(), wire_set_one("reasoning.effort", value)))
             .collect(),
+        candidates,
     }
 }
 

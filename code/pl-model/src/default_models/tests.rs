@@ -15,7 +15,14 @@ fn openai_default_models_match_codex_metadata() {
             .iter()
             .map(|model| model.slug.as_str())
             .collect::<Vec<_>>(),
-        vec!["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"]
+        vec![
+            "gpt-5.5",
+            "gpt-5.4",
+            "gpt-5.4-mini",
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-5.6-luna",
+        ]
     );
 
     let gpt_55 = openai_models[0];
@@ -36,9 +43,43 @@ fn openai_default_models_match_codex_metadata() {
     assert_eq!(gpt_54.context_window, Some(272_000));
     assert_eq!(gpt_54.max_context_window, Some(1_000_000));
 
+    let gpt_56_sol = openai_models[3];
+    assert_eq!(gpt_56_sol.display_name, "GPT-5.6-Sol");
+    assert_eq!(gpt_56_sol.context_window, Some(372_000));
+    assert_eq!(gpt_56_sol.max_context_window, Some(372_000));
+    assert_eq!(gpt_56_sol.max_output_tokens, None);
+    assert_eq!(
+        gpt_56_sol.supported_efforts(),
+        vec!["low", "medium", "high", "xhigh", "max"]
+    );
+    assert_eq!(gpt_56_sol.default_effort().as_deref(), Some("low"));
+    assert_eq!(gpt_56_sol.truncation_policy.mode, TruncationMode::Tokens);
+    assert_eq!(gpt_56_sol.truncation_policy.limit, 10_000);
+    assert!(gpt_56_sol.capabilities.web_search);
+    assert!(gpt_56_sol.capabilities.tools.freeform_tools);
+
+    for (model, display_name) in [
+        (openai_models[4], "GPT-5.6-Terra"),
+        (openai_models[5], "GPT-5.6-Luna"),
+    ] {
+        assert_eq!(model.display_name, display_name);
+        assert_eq!(model.context_window, Some(372_000));
+        assert_eq!(model.max_context_window, Some(372_000));
+        assert_eq!(model.max_output_tokens, None);
+        assert_eq!(
+            model.supported_efforts(),
+            vec!["medium", "low", "high", "xhigh", "max"]
+        );
+        assert_eq!(model.default_effort().as_deref(), Some("medium"));
+        assert!(model.capabilities.web_search);
+        assert!(model.capabilities.tools.freeform_tools);
+    }
+
     assert!(!models.iter().any(|model| model.slug == "gpt-5.4-nano"));
     assert!(!models.iter().any(|model| model.slug == "gpt-5.3-codex"));
     assert!(!models.iter().any(|model| model.slug == "gpt-5.2"));
+    assert!(!models.iter().any(|model| model.slug == "gpt-5.6"));
+    assert!(!models.iter().any(|model| model.slug == "gpt-5.6-pro"));
 }
 
 #[test]

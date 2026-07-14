@@ -245,6 +245,21 @@ const _providerTemplates = [
         displayName: 'GPT-5.4-Mini',
         reasoningEfforts: ['medium', 'low', 'high', 'xhigh'],
       ),
+      ProviderModelView(
+        slug: 'gpt-5.6-sol',
+        displayName: 'GPT-5.6-Sol',
+        reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+      ),
+      ProviderModelView(
+        slug: 'gpt-5.6-terra',
+        displayName: 'GPT-5.6-Terra',
+        reasoningEfforts: ['medium', 'low', 'high', 'xhigh', 'max'],
+      ),
+      ProviderModelView(
+        slug: 'gpt-5.6-luna',
+        displayName: 'GPT-5.6-Luna',
+        reasoningEfforts: ['medium', 'low', 'high', 'xhigh', 'max'],
+      ),
     ],
   ),
   _ProviderTemplateDefaults(

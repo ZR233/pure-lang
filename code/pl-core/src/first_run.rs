@@ -425,6 +425,21 @@ mod tests {
             "medium"
         );
         assert_eq!(
+            config.providers["openai"]
+                .models
+                .iter()
+                .map(|model| model.slug.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "gpt-5.5",
+                "gpt-5.4",
+                "gpt-5.4-mini",
+                "gpt-5.6-sol",
+                "gpt-5.6-terra",
+                "gpt-5.6-luna",
+            ]
+        );
+        assert_eq!(
             config.providers["openai"].bearer_token.as_deref(),
             Some("sk-openai")
         );
