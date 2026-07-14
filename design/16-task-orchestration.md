@@ -93,9 +93,10 @@ continuation。
 回滚 `.git` 或改写该提交，重试必须幂等复用已经建立的 clean HEAD。只有任务启动入口
 允许执行该准备流程，恢复、交付、设计、合并和审查阶段的 repository 检查始终只读。
 已有仓库的 dirty、detached、merge/rebase 现场或损坏状态不得触发自动初始化。
-仓库准备阶段还必须幂等确保 Git 私有 `info/exclude` 包含 `.pure/worktrees/`，使
-coordinator 创建的内部 worktree 不会污染主工作区 clean 门禁；不得为此修改或提交用户的
-`.gitignore`。该规则同时适用于已有仓库与自动初始化仓库。
+仓库准备阶段还必须幂等确保 Git 私有 `info/exclude` 包含 `.pure/worktrees/` 和
+`target/pure/`：前者避免 coordinator 创建的内部 worktree 污染主工作区 clean 门禁，
+后者避免 `bash` / `write_stdin` 的完整命令输出污染 executor 的 clean delivery 门禁；
+不得为此修改或提交用户的 `.gitignore`。该规则同时适用于已有仓库与自动初始化仓库。
 任务进入 `blocked` 时必须在同一 SQLite 事务中更新 `TaskRun` 并删除 durable
 `BranchLease`，随后释放进程 lease；诊断事实保留，但不得永久阻塞同一分支的新任务。
 
@@ -288,7 +289,9 @@ reviewer 初始上下文包含 plan、任务 diff、代理结果、验证摘要�
 
 `review_exit` 返回 `verdict`、`summary`、`designReferences` 和 `findings`。runtime 根据
 tool trace 校验 reviewer 先成功定位文档，再以规范的 workspace-relative 路径读取
-`design/**` 正文；路径、章节和 finding 引用都必须能在实际读取结果中验证。未调用
+`design/**` 正文；该校验必须读取完整 reviewer CoreSession，不得因 Responses
+continuation 只发送增量上下文而丢失先前的 locator 或 read 证据。路径、章节和 finding
+引用都必须能在实际读取结果中验证。未调用
 `review_exit` 便终结的 reviewer 会把本轮与 outcome 标记为失败，并恢复到可实施阶段，
 不得伪造通过或重复触发 continuation。`changesRequired` 返回 planner 派发修复
 executor；修复合并后必须创建新的 reviewer。最多三轮审查修复。

@@ -5119,13 +5119,17 @@ async fn task_start_initializes_non_repository_and_preserves_the_baseline_on_lea
     let internal_worktree = project.join(".pure/worktrees/run/agent");
     std::fs::create_dir_all(&internal_worktree).unwrap();
     std::fs::write(internal_worktree.join("internal.txt"), "runtime\n").unwrap();
+    let command_output = project.join("target/pure/session/tool");
+    std::fs::create_dir_all(&command_output).unwrap();
+    std::fs::write(command_output.join("output.log"), "command output\n").unwrap();
     assert!(git_output(&project, &["status", "--porcelain=v1"]).is_empty());
-    assert!(
-        std::fs::read_to_string(project.join(".git/info/exclude"))
-            .unwrap()
-            .lines()
-            .any(|line| line.trim() == ".pure/worktrees/")
-    );
+    let private_excludes = std::fs::read_to_string(project.join(".git/info/exclude")).unwrap();
+    for expected in [".pure/worktrees/", "target/pure/"] {
+        assert!(
+            private_excludes.lines().any(|line| line.trim() == expected),
+            "missing private exclude `{expected}`"
+        );
+    }
 
     coordinator
         .start_confirmed_task(&competing_session.id, "competing plan", &project)

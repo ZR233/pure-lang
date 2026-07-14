@@ -15,7 +15,7 @@ pub(super) struct RepositorySnapshot {
 const INITIAL_COMMIT_MESSAGE: &str = "chore: initialize Pure Studio workspace";
 const FALLBACK_GIT_NAME: &str = "Pure Studio";
 const FALLBACK_GIT_EMAIL: &str = "pure-studio@local";
-const INTERNAL_WORKTREE_EXCLUDE: &str = ".pure/worktrees/";
+const TASK_RUNTIME_EXCLUDES: &[&str] = &[".pure/worktrees/", "target/pure/"];
 
 pub(super) async fn prepare_repository_for_task(
     path: impl AsRef<Path>,
@@ -178,7 +178,7 @@ fn prepare_repository_for_task_blocking(path: &Path) -> Result<RepositorySnapsho
     }
 
     let workspace_root = PathBuf::from(git_output(path, &["rev-parse", "--show-toplevel"])?);
-    ensure_internal_worktrees_excluded(&workspace_root)?;
+    ensure_task_runtime_paths_excluded(&workspace_root)?;
     let branch = git_output(
         &workspace_root,
         &["symbolic-ref", "--quiet", "--short", "HEAD"],
@@ -197,7 +197,7 @@ fn prepare_repository_for_task_blocking(path: &Path) -> Result<RepositorySnapsho
     Ok(snapshot)
 }
 
-fn ensure_internal_worktrees_excluded(workspace_root: &Path) -> Result<()> {
+fn ensure_task_runtime_paths_excluded(workspace_root: &Path) -> Result<()> {
     let exclude_path = PathBuf::from(git_output(
         workspace_root,
         &["rev-parse", "--git-path", "info/exclude"],
@@ -208,11 +208,12 @@ fn ensure_internal_worktrees_excluded(workspace_root: &Path) -> Result<()> {
         workspace_root.join(exclude_path)
     };
     let content = std::fs::read_to_string(&exclude_path).unwrap_or_default();
-    if content
-        .lines()
-        .map(str::trim)
-        .any(|line| line == INTERNAL_WORKTREE_EXCLUDE)
-    {
+    let missing = TASK_RUNTIME_EXCLUDES
+        .iter()
+        .copied()
+        .filter(|exclude| !content.lines().map(str::trim).any(|line| line == *exclude))
+        .collect::<Vec<_>>();
+    if missing.is_empty() {
         return Ok(());
     }
     let parent = exclude_path
@@ -223,8 +224,10 @@ fn ensure_internal_worktrees_excluded(workspace_root: &Path) -> Result<()> {
     if !updated.is_empty() && !updated.ends_with('\n') {
         updated.push('\n');
     }
-    updated.push_str(INTERNAL_WORKTREE_EXCLUDE);
-    updated.push('\n');
+    for exclude in missing {
+        updated.push_str(exclude);
+        updated.push('\n');
+    }
     std::fs::write(&exclude_path, updated).context("failed to update Git private exclude file")
 }
 
