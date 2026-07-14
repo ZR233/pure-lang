@@ -162,7 +162,9 @@ impl ParameterWire {
 
 | 供应商 | candidates | wire.set（选中值 → 字段） | wire.remove |
 | --- | --- | --- | --- |
-| OpenAI | `medium` / `low` / `high` / `xhigh` | `reasoning.effort` = 值 | — |
+| OpenAI（GPT-5.5 / GPT-5.4 / GPT-5.4-Mini） | `medium` / `low` / `high` / `xhigh` | `reasoning.effort` = 值 | — |
+| OpenAI（GPT-5.6 Sol） | `low` / `medium` / `high` / `xhigh` / `max` | `reasoning.effort` = 值 | — |
+| OpenAI（GPT-5.6 Terra / Luna） | `medium` / `low` / `high` / `xhigh` / `max` | `reasoning.effort` = 值 | — |
 | DeepSeek | `high` / `max` | `reasoning_effort` = 值（`thinking.type = enabled` 作为 base body） | — |
 | Zhipu 普通 | `enabled` / `none` | `thinking.type` = 值 | — |
 | GLM-5.2 | `high` / `max` / `none` | `high`/`max`：`reasoning_effort` + `thinking.type = enabled` + `thinking.clear_thinking = false`；`none`：`thinking.type = disabled` | `none` 移除 `reasoning_effort` |

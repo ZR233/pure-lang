@@ -702,6 +702,38 @@ void registerShellSettingsTests() {
     expect(settings['defaultProviderId'], 'deepseek-2');
   });
 
+  testWidgets('OpenAI provider template exposes GPT-5.6 variants', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _FakeStudioApi(_stateWithPlannerModels());
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const SettingsPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Add provider'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(DropdownButtonFormField<String>).first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('OpenAI').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('GPT-5.6-Sol'), findsOneWidget);
+    expect(find.text('gpt-5.6-sol'), findsOneWidget);
+    expect(find.text('GPT-5.6-Terra'), findsOneWidget);
+    expect(find.text('gpt-5.6-terra'), findsOneWidget);
+    expect(find.text('GPT-5.6-Luna'), findsOneWidget);
+    expect(find.text('gpt-5.6-luna'), findsOneWidget);
+  });
+
   test('provider settings save updates default provider in store', () async {
     final api = _FakeStudioApi(_stateWithPlannerModels());
     final container = ProviderContainer(

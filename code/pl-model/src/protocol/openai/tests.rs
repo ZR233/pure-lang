@@ -277,6 +277,15 @@ fn responses_body_writes_effort_via_parameter_wire() {
 }
 
 #[test]
+fn responses_body_writes_gpt56_max_effort_via_parameter_wire() {
+    let model = bundled_model("gpt-5.6-sol");
+    let body = OpenAiProtocol::responses()
+        .build_request_body_with_model(&request_with_effort("max"), &model);
+
+    assert_eq!(body["reasoning"]["effort"], serde_json::json!("max"));
+}
+
+#[test]
 fn responses_body_maps_enabled_reasoning_summary_to_auto() {
     let model = bundled_model("gpt-5.5");
     let mut request = request_with_effort("medium");
