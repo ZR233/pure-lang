@@ -1,4 +1,5 @@
 use super::*;
+use crate::tool::StatPathTool;
 use pretty_assertions::assert_eq;
 
 fn read_output_text(output: &crate::tool::ToolOutput) -> String {
@@ -12,6 +13,47 @@ fn read_output_text(output: &crate::tool::ToolOutput) -> String {
 
 fn read_output_json(output: &crate::tool::ToolOutput) -> serde_json::Value {
     serde_json::from_str(&output.description).unwrap()
+}
+
+#[tokio::test]
+async fn stat_path_reports_missing_workspace_path_without_tool_failure() {
+    let root = unique_temp_dir("stat-missing");
+    tokio::fs::create_dir_all(&root).await.unwrap();
+
+    let output = StatPathTool
+        .execute(
+            input(serde_json::json!({ "path": "design" })),
+            context(&root).await,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        read_output_json(&output),
+        serde_json::json!({
+            "path": "design",
+            "exists": false,
+        })
+    );
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn stat_path_missing_target_still_rejects_workspace_escape() {
+    let root = unique_temp_dir("stat-missing-escape");
+    tokio::fs::create_dir_all(&root).await.unwrap();
+
+    let error = StatPathTool
+        .execute(
+            input(serde_json::json!({ "path": "../missing" })),
+            context(&root).await,
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("escapes the workspace"), "{error}");
+    let _ = tokio::fs::remove_dir_all(root).await;
 }
 
 #[tokio::test]

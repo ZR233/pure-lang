@@ -121,7 +121,7 @@ async fn executor_retry_limit_uses_owned_paths_instead_of_mutable_title() {
 }
 
 #[tokio::test]
-async fn root_tool_uses_captured_studio_session_instead_of_turn_id() {
+async fn root_tool_uses_captured_studio_session_and_reports_patch_cause() {
     let fixture = DesignFixture::new("captured-session").await;
     let tool = fixture
         .coordinator
@@ -134,6 +134,27 @@ async fn root_tool_uses_captured_studio_session_instead_of_turn_id() {
     .build()
     .await;
     let (event_tx, _) = tokio::sync::broadcast::channel(16);
+
+    let error = kernel
+        .execute_tool(
+            AgentKernelToolRequest::new(
+                "task_update_design",
+                serde_json::json!({
+                    "patch": "*** Add File: design/missing-wrapper.md\n+content"
+                }),
+                "turn-id-is-not-studio-session-id",
+                "call-invalid-design",
+                event_tx.clone(),
+            )
+            .with_mode(CompileMode::Task),
+        )
+        .await
+        .unwrap_err();
+    let message = error.to_string();
+    assert!(
+        message.contains("first line must be '*** Begin Patch'"),
+        "missing parser cause in tool error: {message}"
+    );
 
     let output = kernel
         .execute_tool(

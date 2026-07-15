@@ -16,7 +16,9 @@ use tokio::sync::{Mutex, oneshot};
 use super::plan_confirmation::plan_confirmation_id;
 use super::*;
 use crate::config::{ModelRole, ProviderConfig, RoleConfig, RoleConfigs};
-use crate::studio::runtime::self_learning::{started_tool_snapshot_count, tool_call_count};
+use crate::studio::runtime::self_learning::{
+    should_start_self_learning, started_tool_snapshot_count, tool_call_count,
+};
 use crate::{CompileMode, StudioRuntimeStatus, TurnResultStatus};
 
 mod task_agent_runtime;

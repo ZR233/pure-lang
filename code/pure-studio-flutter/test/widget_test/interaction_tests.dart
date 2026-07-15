@@ -219,9 +219,7 @@ void registerInteractionTests() {
     });
   });
 
-  testWidgets('plan confirmation implement keeps task mode', (
-    tester,
-  ) async {
+  testWidgets('plan confirmation implement keeps task mode', (tester) async {
     tester.view.physicalSize = const Size(1280, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -326,5 +324,69 @@ void registerInteractionTests() {
       'content': 'add tests first',
       'reason': 'continue planning',
     });
+  });
+
+  testWidgets('plan confirmation failure stays pending and can be retried', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final state = _emptyState().copyWith(
+      sessions: [
+        StudioSession(
+          id: 'session-1',
+          projectId: 'project-1',
+          title: 'Session',
+          mode: CompileMode.task,
+          updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
+        ),
+      ],
+      pendingInteractions: const [
+        PendingInteraction(
+          id: 'interaction-plan-failure',
+          sessionId: 'session-1',
+          kind: InteractionKind.planConfirmation,
+          title: 'Confirm plan',
+          body: '## Plan\n- Implement',
+        ),
+      ],
+      turnPhase: TurnPhase.completed,
+    );
+    final api = _FakeStudioApi(state)
+      ..resolveInteractionError = StateError(
+        'task mode requires a clean working tree',
+      );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 50));
+
+    final implementButton = find.widgetWithText(
+      FilledButton,
+      'Implement this plan',
+    );
+    await tester.tap(implementButton);
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(tester.takeException(), isNull);
+    expect(api.resolveInteractionCount, 1);
+    expect(find.byKey(const Key('plan-confirmation-error')), findsOneWidget);
+    expect(find.textContaining('clean working tree'), findsOneWidget);
+    expect(find.text('Implement this plan?'), findsOneWidget);
+    expect(tester.widget<FilledButton>(implementButton).onPressed, isNotNull);
+
+    api.resolveInteractionError = null;
+    await tester.tap(implementButton);
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(api.resolveInteractionCount, 2);
+    expect(api.resolvedInteractionId, 'interaction-plan-failure');
+    expect(tester.takeException(), isNull);
   });
 }

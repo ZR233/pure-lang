@@ -3249,6 +3249,8 @@ async fn task_update_design_tool_has_typed_schema_branch_effect_and_planner_only
     let tool = coordinator.task_update_design_tool("studio-session");
 
     assert_eq!(tool.name(), "task_update_design");
+    assert!(tool.description().contains("*** Begin Patch"));
+    assert!(tool.description().contains("+# Design"));
     assert_eq!(tool.effect(), Some(ToolEffect::BranchControl));
     assert_eq!(
         tool.input_schema(),

@@ -27,6 +27,8 @@ class _FakeStudioApi implements StudioApi {
   PermissionMode? savedPermissionMode;
   String? resolvedInteractionId;
   Map<String, Object?>? resolvedInteraction;
+  Object? resolveInteractionError;
+  int resolveInteractionCount = 0;
   String? discoverProjectId;
   List<String> discoveredSkills = const [];
   int loadProviderUsagesCount = 0;
@@ -134,6 +136,10 @@ class _FakeStudioApi implements StudioApi {
     Map<String, Object?> resolution,
   ) async {
     jsonEncode(resolution);
+    resolveInteractionCount += 1;
+    if (resolveInteractionError case final error?) {
+      throw error;
+    }
     resolvedInteractionId = interactionId;
     resolvedInteraction = resolution;
   }

@@ -171,7 +171,7 @@ where
     async fn list(&self, request: WorkspaceFileListRequest) -> Result<WorkspaceFileListResult> {
         let limit = request.max_files.saturating_add(1);
         let rg_command = format!(
-            "if command -v rg >/dev/null 2>&1; then rg --files -g {glob} {path} | sort | head -n {limit}; else exit 127; fi",
+            "if ! test -e {path}; then exit 0; elif command -v rg >/dev/null 2>&1; then rg --files -g {glob} {path} | sort | head -n {limit}; else exit 127; fi",
             path = shell_quote(&request.path),
             glob = shell_quote(&request.glob),
             limit = limit
@@ -190,7 +190,7 @@ where
         if output.status == 127 {
             let type_filter = if request.include_dirs { "" } else { "-type f " };
             let command = format!(
-                "find {path} {type_filter}-name {glob} | sort | head -n {limit}",
+                "if test -e {path}; then find {path} {type_filter}-name {glob} | sort | head -n {limit}; fi",
                 path = shell_quote(&request.path),
                 type_filter = type_filter,
                 glob = shell_quote(&request.glob),
@@ -209,7 +209,7 @@ where
                 .map_err(|error| tool_error("list_files", error))?;
         } else if request.include_dirs {
             let dir_command = format!(
-                "find {path} -type d -name {glob} | sort | head -n {limit}",
+                "if test -e {path}; then find {path} -type d -name {glob} | sort | head -n {limit}; fi",
                 path = shell_quote(&request.path),
                 glob = shell_quote(&request.glob),
                 limit = limit

@@ -19,12 +19,16 @@ fn skill_content(name: &str, description: &str) -> String {
 }
 
 fn tool_context(workspace_root: PathBuf) -> ToolContext {
+    tool_context_for_mode(workspace_root, CompileMode::Simple)
+}
+
+fn tool_context_for_mode(workspace_root: PathBuf, mode: CompileMode) -> ToolContext {
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
     ToolContext {
         event_tx,
         options: TurnOptions::default(),
         workspace_access: super::super::WorkspaceAccess::WorkspaceOnly,
-        mode: CompileMode::Simple,
+        mode,
         workspace_root,
         workspace_instructions: None,
         instruction_snapshot: None,
@@ -185,6 +189,34 @@ async fn skill_view_success_emits_skill_activation() {
     assert_eq!(activation.turn_id, "turn-1");
     assert_eq!(activation.tool_call_id, "call-1");
     assert!(activation.path.ends_with("local-flow"));
+    fs::remove_dir_all(workspace).unwrap();
+}
+
+#[tokio::test]
+async fn skill_view_in_task_mode_does_not_write_project_usage() {
+    let workspace = temp_dir("view-task-readonly");
+    write_project_skill(&workspace, "local-flow");
+    let usage_path = workspace.join("skills/local-flow/.usage.json");
+    let tool = SkillViewTool::new(SkillsConfig {
+        project_dir: "skills".to_string(),
+        ..SkillsConfig::default()
+    });
+
+    let output = tool
+        .execute(
+            ToolInput {
+                arguments: json!({"name": "local-flow"}),
+                session_id: "turn-task".to_string(),
+                tool_id: "call-task".to_string(),
+                revision_base: 0,
+            },
+            tool_context_for_mode(workspace.clone(), CompileMode::Task),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(activation_from_output(&output).name, "local-flow");
+    assert!(!usage_path.exists());
     fs::remove_dir_all(workspace).unwrap();
 }
 

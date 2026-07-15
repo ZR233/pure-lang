@@ -42,3 +42,24 @@ fn counts_started_tool_items_for_self_learning_threshold() {
     );
     assert_eq!(tool_call_count(&[started, running]), 1);
 }
+
+#[test]
+fn self_learning_runs_only_for_completed_simple_turns() {
+    let mut config = crate::config::PureConfig::default();
+    config.skills.enabled = true;
+    config.skills.auto_learn = true;
+    config.skills.auto_learn_min_tool_calls = 0;
+
+    assert!(should_start_self_learning(
+        &config,
+        CompileMode::Simple,
+        &TurnResultStatus::Completed,
+        &[],
+    ));
+    assert!(!should_start_self_learning(
+        &config,
+        CompileMode::Task,
+        &TurnResultStatus::Completed,
+        &[],
+    ));
+}
