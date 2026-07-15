@@ -24,10 +24,12 @@ const SELF_LEARNING_REVIEW_PROMPT: &str = r#"你是 Pure-Lang 项目 skills 自�
 
 pub(super) fn should_start_self_learning(
     config: &crate::config::PureConfig,
+    mode: CompileMode,
     status: &TurnResultStatus,
     trace_events: &[TraceEvent],
 ) -> bool {
-    config.skills.enabled
+    mode == CompileMode::Simple
+        && config.skills.enabled
         && config.skills.auto_learn
         && matches!(status, TurnResultStatus::Completed)
         && tool_call_count(trace_events) >= config.skills.auto_learn_min_tool_calls

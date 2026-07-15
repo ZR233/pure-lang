@@ -93,10 +93,17 @@ continuation。
 回滚 `.git` 或改写该提交，重试必须幂等复用已经建立的 clean HEAD。只有任务启动入口
 允许执行该准备流程，恢复、交付、设计、合并和审查阶段的 repository 检查始终只读。
 已有仓库的 dirty、detached、merge/rebase 现场或损坏状态不得触发自动初始化。
+Task 模式从规划 turn 开始即保持 coordinator 的工作区写入独占：skills 可以只读发现、读取和
+激活，但 `skill_view` 不得更新项目使用统计，主 turn 完成后也不得启动 skills 自学习
+reviewer。这样用户确认实施时的 clean working tree 检查只反映用户或外部进程修改，不会被
+规划阶段的后台副作用污染。
 仓库准备阶段还必须幂等确保 Git 私有 `info/exclude` 包含 `.pure/worktrees/` 和
 `target/pure/`：前者避免 coordinator 创建的内部 worktree 污染主工作区 clean 门禁，
 后者避免 `bash` / `write_stdin` 的完整命令输出污染 executor 的 clean delivery 门禁；
 不得为此修改或提交用户的 `.gitignore`。该规则同时适用于已有仓库与自动初始化仓库。
+计划确认 resolution 只有在任务启动边界完整成功后才可从 pending projection 移除。若 clean
+working tree 或其他启动预检失败，Flutter 必须捕获并展示错误，保持同一确认交互可见且可
+重试，不得让 bridge 异常成为未捕获的 UI 异步异常。
 任务进入 `blocked` 时必须在同一 SQLite 事务中更新 `TaskRun` 并删除 durable
 `BranchLease`，随后释放进程 lease；诊断事实保留，但不得永久阻塞同一分支的新任务。
 
@@ -226,6 +233,10 @@ planner 只能修改冲突清单中的文件。continue 前必须没有 unmerged
 
 用户确认实施后，planner 先调用 `task_update_design` 修改并提交 `design/**`；成功前
 不得创建 executor。任务取消或部分失败时，design 必须回退或更新到与当前实现一致。
+`task_update_design` 的 patch 必须是从 `*** Begin Patch` 到 `*** End Patch` 的完整
+Codex patch；新增文件的每一行内容都必须带 `+` 前缀。工具说明必须给出完整示例，
+执行失败时必须向模型保留解析、路径或 Git 操作的具体根因，不能只返回通用重试提示，
+否则模型无法根据失败类型修正下一次调用。
 处理“实施”确认时必须先完成 plan、session、repository 与 branch lease 校验并创建
 `TaskRun`，再把 confirmation 标为 resolved 和写入 accepted/implementing lifecycle；
 创建失败时原 confirmation 保持 pending，不得留下虚假的 implementing 状态。

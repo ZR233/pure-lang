@@ -107,11 +107,11 @@ assistant 的 text、commentary、reasoning 和 plan part identity 不得直接�
 
 子代理同样继承父 turn 的交互运行时。`request_user_input`、工具审批和计划确认统一表达为 `InteractionKind::{userInput, toolApproval, planConfirmation}`。每个 interaction 都带 `sessionId`、`turnId`、可选 `itemId/toolId/agentPath`，由 `InteractionRuntime` 创建、持久化、广播并等待 resolution。Studio 只渲染当前最高优先级 pending interaction；回答或审批只解除对应等待，不触发新 turn，也不写入普通聊天消息。UI 交互形态对齐 opencode dock prompt：pending question/permission/plan confirmation 在底部 dock 处理，timeline 只渲染 message/part 投影；`request_user_input` 的 completed tool part 可以显示 redacted 问题答案摘要。
 
-主 turn 保存完成后，如果 `[skills].auto_learn = true` 且本轮达到自学习触发条件，`StudioRuntime` 启动后台 reviewer。reviewer 只开放 skills 工具，复盘结果只写项目 skills 目录；失败只记录日志，不改变本轮响应。
+Simple 模式主 turn 保存完成后，如果 `[skills].auto_learn = true` 且本轮达到自学习触发条件，`StudioRuntime` 启动后台 reviewer。reviewer 只开放 skills 工具，复盘结果只写项目 skills 目录；失败只记录日志，不改变本轮响应。Task 模式从规划开始由 coordinator 独占工作区写入，既不启动后台自学习 reviewer，也不允许只读的 `skill_view` 更新项目使用统计，避免计划确认前出现绕过 TaskRun 的 workspace 修改。
 
 文件、shell 和 LSP 查询工具都以有效 `workspaceRoot` 为默认边界。工具输入不要求全部使用绝对路径；相对路径一律按 `workspaceRoot` 解析，而不是按 Pure Studio 进程 cwd。执行前，核心层用统一路径策略把输入解析为规范化绝对路径，并用同一结果做权限预判和实际执行。`bash` 默认在 workspace root 下执行，`workingDirectory` 也按 workspace root 解析并拒绝逃逸；文件工具默认只允许访问 workspace root 内的路径；`lsp_query_*` 的 `filePath` 解析后才交给 `pl-lsp` 生成 file URI。`full-access` 模式会放宽该边界，允许文件路径和 `bash.workingDirectory` 指向 workspace 外，但仍要求 existing 或 existing-parent 可解析，不绕过工具自身校验、写锁、超时、输出截断和 timeline 记录。
 
-Skills 管理工具同样以 `workspaceRoot` 为边界，但写入面收窄到 `<workspaceRoot>/<skills.project_dir>/`。用户级、系统和外部 skills 只读参与发现，不允许被工具原地修改。
+Skills 管理工具同样以 `workspaceRoot` 为边界，但写入面收窄到 `<workspaceRoot>/<skills.project_dir>/`。用户级、系统和外部 skills 只读参与发现，不允许被工具原地修改。Task 模式仍可发现、读取和激活 skills，但所有项目 skill 写入及使用统计更新都必须停用；Task 实施所需的设计和源码修改只能通过 coordinator 管理的边界发生。
 
 工具预算与收尾原则：
 

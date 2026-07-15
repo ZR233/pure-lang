@@ -45,6 +45,10 @@ OpenAI 远程模式默认使用 v2 `compaction_trigger`，`/responses/compact` �
 
 文件工具作为 `pl-core` 工具系统的一部分注册，当前不新增独立 `pl-tool` crate。文件工具包括读取、写入、列目录、搜索、stat、建目录、删除、复制、移动和 `apply_patch`。工具 schema 不强制模型提供绝对路径；workspace-relative 路径按 `workspaceRoot` 解析，执行层统一转换为规范化绝对路径后再校验、审批和执行。只读工具仍受工作区路径边界限制；修改工具进入现有工具审批流程。
 
+`stat_path` 同时承担安全的存在性探测：目标存在时返回 `exists: true` 和元数据；目标不存在但最近存在父目录仍可在当前路径权限下安全解析时，返回成功结果 `exists: false`，不得把常规的“不存在”记录成工具失败。绝对路径、父目录跳转、符号链接或其他 workspace 越界仍按统一路径策略拒绝，不能因为存在性探测而放宽边界。
+
+`list_files` 对 workspace 内尚不存在的目录返回成功的空列表，供 planner 在首次创建 `design/**` 前安全探测；本地与容器 backend 必须保持相同语义。缺失路径之外的读取错误仍显式失败，workspace 越界规则不变。
+
 文件工具输入 schema 使用明确 enum 表示危险语义。`delete_path` 的删除模式是 `mode: "file" | "emptyDirectory" | "recursiveDirectory"`；`copy_path` / `move_path` 的目标冲突策略是 `collision: "failIfExists" | "overwrite"`。旧 bool 字段 `recursive` 和 `overwrite` 的运行期兼容读取路径已删除，工具 schema 只暴露 `mode` / `collision`，历史会话或手写输入若仍使用旧字段会被校验拒绝。
 
 `bash` 是模型可调用的命令执行入口。它保留 `command`、`workingDirectory` 和 `timeoutSeconds` 参数，并支持 `yieldTimeMs` 与 `maxOutputChars` 控制首次等待时长和模型上下文中的输出预算。Windows 上执行层优先使用 PowerShell Core (`pwsh.exe`)，找不到时回退到 Windows PowerShell (`powershell.exe`)，最后才回退到 `cmd.exe`；PowerShell 调用会注入 UTF-8 输出前缀以稳定捕获中文和 Unicode 输出。Unix 上仍使用 `sh -c`。`workingDirectory` 与文件工具复用同一套路径策略：缺省为 `workspaceRoot`，相对路径按 `workspaceRoot` 解析，workspace-only 模式拒绝逃逸，`full-access` 模式允许解析到 workspace 外的已存在目录。短命令在当前工具调用内返回完成状态；超过 `yieldTimeMs` 仍未退出的命令进入后台运行，工具结果返回 `running` 状态和 `processId`。后台进程由 `pl-core` 内的进程管理器持有，并通过配套 `write_stdin` 工具继续发送 stdin、等待新输出或轮询最终状态；`write_stdin` 只能操作已经由 `bash` 启动且通过审批的 live process，不重新触发命令审批。完整 stdout/stderr 始终写入 `target/pure/<session>/<tool>/output.log`，模型上下文只回传截断后的 stdout/stderr、状态、退出码、超时标记、输出文件路径和恢复提示。命令超时、用户中断、turn 清理或运行时 drop 时，执行层应尽力终止仍存活的子进程；后台进程数量受固定上限保护，超过上限时返回可恢复错误，提示模型等待现有进程结束或轮询已有 `processId`。

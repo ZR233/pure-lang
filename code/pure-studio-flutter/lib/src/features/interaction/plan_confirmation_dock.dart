@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -19,6 +21,8 @@ class PlanConfirmationDock extends ConsumerStatefulWidget {
 
 class _PlanConfirmationDockState extends ConsumerState<PlanConfirmationDock> {
   late final TextEditingController _adjustmentController;
+  bool _submitting = false;
+  String? _error;
 
   @override
   void initState() {
@@ -46,14 +50,19 @@ class _PlanConfirmationDockState extends ConsumerState<PlanConfirmationDock> {
         children: [
           _PlanAdjustmentInput(
             controller: _adjustmentController,
-            canSubmit: canSubmitAdjustment,
+            enabled: !_submitting,
+            canSubmit: canSubmitAdjustment && !_submitting,
             onChanged: () => setState(() {}),
             onSubmit: _resolveContinuePlanning,
           ),
+          if (_error case final error?) ...[
+            const SizedBox(height: 10),
+            _PlanResolutionError(message: error),
+          ],
           const SizedBox(height: 12),
           _PlanDecisionActions(
-            onDismiss: _resolveDismiss,
-            onImplement: _resolveImplement,
+            onDismiss: _submitting ? null : _resolveDismiss,
+            onImplement: _submitting ? null : _resolveImplement,
           ),
         ],
       ),
@@ -61,10 +70,12 @@ class _PlanConfirmationDockState extends ConsumerState<PlanConfirmationDock> {
   }
 
   void _resolveImplement() {
-    ref.read(studioControllerProvider.notifier).resolveActiveInteraction({
-      'type': 'planConfirmation',
-      'decision': 'implementFreshContext',
-    });
+    unawaited(
+      _resolve({
+        'type': 'planConfirmation',
+        'decision': 'implementFreshContext',
+      }),
+    );
   }
 
   void _resolveContinuePlanning() {
@@ -72,20 +83,82 @@ class _PlanConfirmationDockState extends ConsumerState<PlanConfirmationDock> {
     if (content.isEmpty) {
       return;
     }
-    ref.read(studioControllerProvider.notifier).resolveActiveInteraction({
-      'type': 'planConfirmation',
-      'decision': 'continuePlanning',
-      'content': content,
-      'reason': 'continue planning',
-    });
+    unawaited(
+      _resolve({
+        'type': 'planConfirmation',
+        'decision': 'continuePlanning',
+        'content': content,
+        'reason': 'continue planning',
+      }),
+    );
   }
 
   void _resolveDismiss() {
-    ref.read(studioControllerProvider.notifier).resolveActiveInteraction({
-      'type': 'planConfirmation',
-      'decision': 'dismiss',
-      'reason': 'dismissed',
+    unawaited(
+      _resolve({
+        'type': 'planConfirmation',
+        'decision': 'dismiss',
+        'reason': 'dismissed',
+      }),
+    );
+  }
+
+  Future<void> _resolve(Map<String, Object?> resolution) async {
+    if (_submitting) {
+      return;
+    }
+    setState(() {
+      _submitting = true;
+      _error = null;
     });
+    try {
+      await ref
+          .read(studioControllerProvider.notifier)
+          .resolveActiveInteraction(resolution);
+    } catch (error) {
+      if (mounted) {
+        setState(() => _error = error.toString());
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _submitting = false);
+      }
+    }
+  }
+}
+
+class _PlanResolutionError extends StatelessWidget {
+  const _PlanResolutionError({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Container(
+      key: const Key('plan-confirmation-error'),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: colors.errorContainer.withValues(alpha: 0.55),
+        border: Border.all(color: colors.error.withValues(alpha: 0.35)),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.error_outline, size: 18, color: colors.error),
+          const SizedBox(width: 8),
+          Expanded(
+            child: SelectableText(
+              message,
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: colors.onErrorContainer),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -95,8 +168,8 @@ class _PlanDecisionActions extends StatelessWidget {
     required this.onImplement,
   });
 
-  final VoidCallback onDismiss;
-  final VoidCallback onImplement;
+  final VoidCallback? onDismiss;
+  final VoidCallback? onImplement;
 
   @override
   Widget build(BuildContext context) {
@@ -156,12 +229,14 @@ class _PlanDecisionActions extends StatelessWidget {
 class _PlanAdjustmentInput extends StatelessWidget {
   const _PlanAdjustmentInput({
     required this.controller,
+    required this.enabled,
     required this.canSubmit,
     required this.onChanged,
     required this.onSubmit,
   });
 
   final TextEditingController controller;
+  final bool enabled;
   final bool canSubmit;
   final VoidCallback onChanged;
   final VoidCallback onSubmit;
@@ -173,6 +248,7 @@ class _PlanAdjustmentInput extends StatelessWidget {
         final compact = constraints.maxWidth < 560;
         final input = TextField(
           controller: controller,
+          enabled: enabled,
           minLines: 1,
           maxLines: 4,
           textInputAction: TextInputAction.send,

@@ -210,7 +210,7 @@ impl StudioRuntime {
             .upsert_session_runtime_for_turn(session_id, &turn_id, &result, model)
             .await?;
         if history_policy == PromptHistoryPolicy::Persist
-            && should_start_self_learning(&config, &result.status, &trace_events)
+            && should_start_self_learning(&config, mode, &result.status, &trace_events)
         {
             let review_messages = session.messages().to_vec();
             spawn_self_learning_review(

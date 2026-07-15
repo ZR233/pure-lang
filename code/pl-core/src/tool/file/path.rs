@@ -24,6 +24,10 @@ impl WorkspacePaths {
         self.policy.resolve_for_write(path)
     }
 
+    pub async fn resolve_existing_or_parent(&self, path: &str) -> Result<PathBuf, PureError> {
+        self.policy.resolve_existing_or_parent(path)
+    }
+
     pub async fn reject_symlink_write(&self, path: &Path) -> Result<(), PureError> {
         self.reject_symlink(path, "write").await
     }

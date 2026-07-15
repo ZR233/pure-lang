@@ -81,6 +81,11 @@ impl LocalWorkspaceFileBackend {
         self.paths.resolve_for_write(&path).await
     }
 
+    async fn resolve_existing_or_parent(&self, cwd: Option<&str>, path: &str) -> Result<PathBuf> {
+        let path = self.with_cwd(cwd, path)?;
+        self.paths.resolve_existing_or_parent(&path).await
+    }
+
     async fn notify_changed(&self, path: &Path) {
         if let Some(registry) = &self.lsp_runtime {
             registry.notify_file_changed(path.to_path_buf()).await;
@@ -184,8 +189,14 @@ impl WorkspaceFileBackend for LocalWorkspaceFileBackend {
 
     async fn list(&self, request: WorkspaceFileListRequest) -> Result<WorkspaceFileListResult> {
         let root = self
-            .resolve_existing(request.cwd.as_deref(), &request.path)
+            .resolve_existing_or_parent(request.cwd.as_deref(), &request.path)
             .await?;
+        if !tokio::fs::try_exists(&root).await? {
+            return Ok(WorkspaceFileListResult {
+                files: Vec::new(),
+                truncated: false,
+            });
+        }
         let mut files = Vec::new();
         collect_entries(
             &self.paths,

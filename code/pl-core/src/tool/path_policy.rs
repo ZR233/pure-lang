@@ -74,6 +74,10 @@ impl ToolPathPolicy {
     }
 
     pub(crate) fn resolve_for_write(&self, path: &str) -> Result<PathBuf, PureError> {
+        self.resolve_existing_or_parent(path)
+    }
+
+    pub(crate) fn resolve_existing_or_parent(&self, path: &str) -> Result<PathBuf, PureError> {
         self.resolve_existing_or_parent_path(Path::new(path), path)
     }
 

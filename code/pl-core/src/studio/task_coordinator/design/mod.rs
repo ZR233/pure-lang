@@ -161,7 +161,7 @@ impl TaskCoordinator {
         let studio_session_id = studio_session_id.into();
         RegisteredTool::from_fallible_execution_result(
             "task_update_design",
-            "Apply and commit a Codex-style design-only patch for the current Task run. Use `*** Add File: design/<path>` for a new file and put its `+content` lines directly after that header without an `@@` hunk. Use `*** Update File:` only for an existing file. After a failed patch, read the target again and retry with a smaller patch; never use `*** New File`.",
+            "Apply and commit exactly one complete Codex-style design-only patch for the current Task run. The patch must begin with `*** Begin Patch` and end with `*** End Patch`. For a new file, use `*** Add File: design/<path>` and prefix every content line with `+`, without an `@@` hunk. Complete example: `*** Begin Patch\n*** Add File: design/spec.md\n+# Design\n*** End Patch`. Use `*** Update File:` only for an existing file. After a failed patch, follow the reported cause, read an existing target again when needed, and retry with a smaller complete patch; never use `*** New File`.",
             strict_tool_input_schema([ToolInputSchemaField::required(
                 "patch",
                 serde_json::json!({ "type": "string" }),
@@ -186,7 +186,7 @@ impl TaskCoordinator {
                             &arguments.patch,
                         )
                         .await
-                        .context("task_update_design failed; read the target again and retry with `*** Add File:` for new files (no `@@`) or a smaller `*** Update File:` patch for existing files")?;
+                        .map_err(|error| anyhow::anyhow!("task_update_design failed: {error:#}"))?;
                     ToolExecutionResult::<serde_json::Value>::json(output)
                         .map_err(anyhow::Error::from)
                 }

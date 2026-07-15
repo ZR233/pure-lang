@@ -49,7 +49,7 @@ impl WorkspaceFileToolKind {
                 "Read a UTF-8 text file from the agent workspace with bounded output. Use lineStart/lineCount for source lines or offset/maxBytes for byte paging. The field `limit` is not supported."
             }
             Self::ListFiles => {
-                "List files from the agent workspace with an optional glob and bounded result count."
+                "List files from the agent workspace with an optional glob and bounded result count. A missing workspace directory returns an empty list."
             }
             Self::SearchFiles => {
                 "Search workspace file contents and return structured matches with path, line, column, and text."

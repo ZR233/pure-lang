@@ -174,6 +174,30 @@ fn file_tool_schemas_use_unified_camel_case_inputs() {
 }
 
 #[tokio::test]
+async fn list_files_returns_empty_for_missing_workspace_directory() {
+    let root = unique_temp_dir("list-missing-directory");
+    tokio::fs::create_dir_all(&root).await.unwrap();
+    let tool = list_files_tool();
+
+    let output = tool
+        .execute(
+            input(serde_json::json!({
+                "path": "design",
+                "includeDirs": true,
+            })),
+            context(&root).await,
+        )
+        .await
+        .unwrap();
+
+    let value: serde_json::Value = serde_json::from_str(&output.description).unwrap();
+    assert_eq!(value["files"], serde_json::json!([]));
+    assert_eq!(value["count"], serde_json::json!(0));
+    assert_eq!(value["truncated"], serde_json::json!(false));
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
 async fn list_files_directory_glob_matches_entries_relative_to_path() {
     let root = unique_temp_dir("list-path-relative-dirs");
     tokio::fs::create_dir_all(root.join("code/pl-core/src"))
