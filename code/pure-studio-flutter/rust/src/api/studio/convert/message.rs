@@ -55,6 +55,8 @@ pub(crate) fn bridge_part(part: StudioPart) -> BridgeStudioPartDto {
             name: tool.name,
             arguments: tool.arguments,
             result: tool.result,
+            output_artifacts_json: serde_json::to_string(&tool.output_artifacts)
+                .unwrap_or_else(|_| "[]".to_string()),
             exit_code: tool.exit_code,
             timed_out: tool.timed_out,
             working_directory: tool.working_directory,

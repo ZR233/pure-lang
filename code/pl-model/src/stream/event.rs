@@ -1,3 +1,4 @@
+use crate::WebSearchAction;
 use crate::request::TokenUsage;
 use pl_trace::TraceTextChannel;
 
@@ -60,6 +61,15 @@ pub enum ModelStreamEvent {
         call_id: Option<String>,
         name: Option<String>,
         payload: Option<ToolInputDeltaPayload>,
+    },
+    WebSearchStarted {
+        item_id: String,
+        action: WebSearchAction,
+    },
+    WebSearchCompleted {
+        item_id: String,
+        action: WebSearchAction,
+        results: Option<Vec<serde_json::Value>>,
     },
     Usage(TokenUsage),
     Completed {

@@ -389,6 +389,7 @@ fn studio_tool_part(tool: TraceToolPart) -> StudioToolPart {
         name: tool.name,
         arguments: tool.arguments,
         result: tool.result,
+        output_artifacts: tool.output_artifacts,
         exit_code: tool.exit_code,
         timed_out: tool.timed_out,
         working_directory: tool.working_directory,

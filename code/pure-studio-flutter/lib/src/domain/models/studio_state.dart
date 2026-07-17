@@ -32,6 +32,7 @@ class StudioState {
     this.instructions = const InstructionsSettingsView(),
     this.skills = const SkillsSettingsView(),
     this.general = const GeneralSettingsView(),
+    this.webSearch = const WebSearchSettingsView(),
     required this.selectedProjectId,
     required this.selectedSessionId,
     required this.permissionMode,
@@ -59,6 +60,7 @@ class StudioState {
   final InstructionsSettingsView instructions;
   final SkillsSettingsView skills;
   final GeneralSettingsView general;
+  final WebSearchSettingsView webSearch;
   final String? selectedProjectId;
   final String? selectedSessionId;
   final PermissionMode permissionMode;
@@ -164,6 +166,7 @@ class StudioState {
     InstructionsSettingsView? instructions,
     SkillsSettingsView? skills,
     GeneralSettingsView? general,
+    WebSearchSettingsView? webSearch,
     Object? selectedProjectId = _studioStateUnset,
     Object? selectedSessionId = _studioStateUnset,
     PermissionMode? permissionMode,
@@ -195,6 +198,7 @@ class StudioState {
       instructions: instructions ?? this.instructions,
       skills: skills ?? this.skills,
       general: general ?? this.general,
+      webSearch: webSearch ?? this.webSearch,
       selectedProjectId: identical(selectedProjectId, _studioStateUnset)
           ? this.selectedProjectId
           : selectedProjectId as String?,

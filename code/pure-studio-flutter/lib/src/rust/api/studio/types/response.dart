@@ -10,6 +10,7 @@ import 'interaction.dart';
 import 'message.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'runtime.dart';
+import 'settings.dart';
 
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
@@ -150,6 +151,7 @@ class BridgeStudioSnapshotResponse {
   final BridgeSessionRuntimeDto? sessionRuntime;
   final String configJson;
   final String generalSettingsJson;
+  final BridgeWebSearchSettingsDto webSearch;
 
   const BridgeStudioSnapshotResponse({
     required this.projects,
@@ -162,6 +164,7 @@ class BridgeStudioSnapshotResponse {
     this.sessionRuntime,
     required this.configJson,
     required this.generalSettingsJson,
+    required this.webSearch,
   });
 
   @override
@@ -175,7 +178,8 @@ class BridgeStudioSnapshotResponse {
       interactions.hashCode ^
       sessionRuntime.hashCode ^
       configJson.hashCode ^
-      generalSettingsJson.hashCode;
+      generalSettingsJson.hashCode ^
+      webSearch.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -191,7 +195,8 @@ class BridgeStudioSnapshotResponse {
           interactions == other.interactions &&
           sessionRuntime == other.sessionRuntime &&
           configJson == other.configJson &&
-          generalSettingsJson == other.generalSettingsJson;
+          generalSettingsJson == other.generalSettingsJson &&
+          webSearch == other.webSearch;
 }
 
 class ConfigSavedResponse {

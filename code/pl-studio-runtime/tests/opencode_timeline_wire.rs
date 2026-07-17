@@ -112,6 +112,7 @@ fn tool_part(part_id: &str, status: StudioPartStatus) -> StudioPart {
             name: "bash".to_string(),
             arguments: r#"{"command":"pwd"}"#.to_string(),
             result: None,
+            output_artifacts: Vec::new(),
             exit_code: None,
             timed_out: false,
             working_directory: Some("D:/repo".to_string()),

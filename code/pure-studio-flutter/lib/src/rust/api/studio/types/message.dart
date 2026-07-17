@@ -267,6 +267,7 @@ class BridgeStudioToolPartDto {
   final String name;
   final String arguments;
   final String? result;
+  final String outputArtifactsJson;
   final int? exitCode;
   final bool timedOut;
   final String? workingDirectory;
@@ -279,6 +280,7 @@ class BridgeStudioToolPartDto {
     required this.name,
     required this.arguments,
     this.result,
+    required this.outputArtifactsJson,
     this.exitCode,
     required this.timedOut,
     this.workingDirectory,
@@ -293,6 +295,7 @@ class BridgeStudioToolPartDto {
       name.hashCode ^
       arguments.hashCode ^
       result.hashCode ^
+      outputArtifactsJson.hashCode ^
       exitCode.hashCode ^
       timedOut.hashCode ^
       workingDirectory.hashCode ^
@@ -309,6 +312,7 @@ class BridgeStudioToolPartDto {
           name == other.name &&
           arguments == other.arguments &&
           result == other.result &&
+          outputArtifactsJson == other.outputArtifactsJson &&
           exitCode == other.exitCode &&
           timedOut == other.timedOut &&
           workingDirectory == other.workingDirectory &&

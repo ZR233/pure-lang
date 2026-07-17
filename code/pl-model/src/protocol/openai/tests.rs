@@ -599,6 +599,40 @@ fn responses_body_writes_custom_grammar_tool() {
 }
 
 #[test]
+fn responses_body_writes_current_hosted_web_search_shape() {
+    let mut request = request_with_effort("xhigh");
+    request.tools = vec![ToolSchema::WebSearch {
+        external_web_access: true,
+        indexed_web_access: Some(true),
+        filters: Some(crate::WebSearchFilters {
+            allowed_domains: vec!["example.com".to_string()],
+        }),
+        user_location: Some(crate::WebSearchUserLocation {
+            kind: crate::WebSearchUserLocationType::Approximate,
+            country: Some("US".to_string()),
+            region: Some("CA".to_string()),
+            city: None,
+            timezone: Some("America/Los_Angeles".to_string()),
+        }),
+        search_context_size: Some(crate::WebSearchContextSize::High),
+        search_content_types: None,
+    }];
+
+    let body = OpenAiProtocol::responses().build_request_body(&request);
+
+    assert_eq!(body["tools"][0]["type"], "web_search");
+    assert_eq!(body["tools"][0]["external_web_access"], true);
+    assert_eq!(body["tools"][0]["indexed_web_access"], true);
+    assert_eq!(
+        body["tools"][0]["filters"]["allowed_domains"][0],
+        "example.com"
+    );
+    assert_eq!(body["tools"][0]["user_location"]["type"], "approximate");
+    assert_eq!(body["tools"][0]["search_context_size"], "high");
+    assert!(body["tools"][0].get("search_content_types").is_none());
+}
+
+#[test]
 fn chat_body_writes_custom_grammar_tool() {
     let mut request = request_with_effort("xhigh");
     request.tools = vec![ToolSchema::custom_grammar(
@@ -679,6 +713,71 @@ fn responses_parse_response_reads_custom_tool_call() {
         }
         other => panic!("unexpected payload: {other:?}"),
     }
+}
+
+#[test]
+fn responses_parse_response_preserves_hosted_web_search_actions_and_results() {
+    let response = OpenAiProtocol::responses()
+        .parse_response(serde_json::json!({
+            "id": "resp_1",
+            "model": "gpt-5.5",
+            "output": [
+                {
+                    "type": "web_search_call",
+                    "id": "search_1",
+                    "action": {"type": "search", "queries": ["alpha", "beta"]},
+                    "results": [{"url": "https://example.com/search", "future": 1}]
+                },
+                {
+                    "type": "web_search_call",
+                    "id": "open_1",
+                    "action": {"type": "open_page", "url": "https://example.com/page"}
+                },
+                {
+                    "type": "web_search_call",
+                    "id": "find_1",
+                    "action": {
+                        "type": "find_in_page",
+                        "url": "https://example.com/page",
+                        "pattern": "needle"
+                    }
+                },
+                {
+                    "type": "web_search_call",
+                    "id": "future_1",
+                    "action": {"type": "future_action", "opaque": true}
+                }
+            ]
+        }))
+        .unwrap();
+
+    assert_eq!(response.hosted_web_search_calls.len(), 4);
+    assert!(matches!(
+        &response.hosted_web_search_calls[0].action,
+        crate::WebSearchAction::Search { query: None, queries }
+            if queries == &["alpha", "beta"]
+    ));
+    assert_eq!(
+        response.hosted_web_search_calls[0]
+            .results
+            .as_ref()
+            .unwrap()[0]["future"],
+        1
+    );
+    assert!(matches!(
+        &response.hosted_web_search_calls[1].action,
+        crate::WebSearchAction::OpenPage { url: Some(url) }
+            if url == "https://example.com/page"
+    ));
+    assert!(matches!(
+        &response.hosted_web_search_calls[2].action,
+        crate::WebSearchAction::FindInPage { pattern: Some(pattern), .. }
+            if pattern == "needle"
+    ));
+    assert_eq!(
+        response.hosted_web_search_calls[3].action,
+        crate::WebSearchAction::Other
+    );
 }
 
 #[test]

@@ -470,9 +470,10 @@ class _SecurityTab extends ConsumerWidget {
 }
 
 class _GeneralTab extends ConsumerStatefulWidget {
-  const _GeneralTab({required this.settings});
+  const _GeneralTab({required this.settings, required this.webSearch});
 
   final GeneralSettingsView settings;
+  final WebSearchSettingsView webSearch;
 
   @override
   ConsumerState<_GeneralTab> createState() => _GeneralTabState();
@@ -516,6 +517,7 @@ class _GeneralTabState extends ConsumerState<_GeneralTab> {
               onChanged: (value) =>
                   _save(widget.settings.copyWith(compactTimeline: value)),
             ),
+            _WebSearchSettingsCard(settings: widget.webSearch),
           ],
         ),
         if (_error != null) _InlineError(message: _error!),

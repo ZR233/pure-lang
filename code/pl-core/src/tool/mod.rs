@@ -20,6 +20,7 @@ mod text_escape;
 mod todo;
 mod tool_output;
 mod truncation;
+mod web_search;
 mod workspace_file;
 
 pub use ask_user::AskUserTool;
@@ -75,6 +76,7 @@ pub use skill::{SkillManageTool, SkillViewTool, SkillsListTool};
 pub use todo::{TOOL_UPDATE_TODO_LIST, TodoListTool};
 pub use tool_output::*;
 pub use truncation::{OutputTruncation, TruncatedOutput, TruncationStrategy};
+pub use web_search::{HostedWebSearchTool, TOOL_WEB_SEARCH, WebSearchTool};
 pub use workspace_file::apply_patch_to_backend;
 pub use workspace_file::{
     ContainerWorkspaceFileBackend, LocalWorkspaceFileBackend, LocalWorkspaceFileTool,

@@ -25,6 +25,7 @@ class TimelineToolPart {
     this.providerItemId,
     this.arguments = '',
     this.result,
+    this.outputArtifacts = const [],
     this.exitCode,
     this.timedOut = false,
     this.workingDirectory,
@@ -37,6 +38,7 @@ class TimelineToolPart {
   final String? providerItemId;
   final String arguments;
   final String? result;
+  final List<Object?> outputArtifacts;
   final int? exitCode;
   final bool timedOut;
   final String? workingDirectory;
@@ -50,6 +52,7 @@ class TimelineToolPart {
       providerItemId: providerItemId,
       arguments: arguments ?? this.arguments,
       result: result ?? this.result,
+      outputArtifacts: outputArtifacts,
       exitCode: exitCode,
       timedOut: timedOut,
       workingDirectory: workingDirectory,

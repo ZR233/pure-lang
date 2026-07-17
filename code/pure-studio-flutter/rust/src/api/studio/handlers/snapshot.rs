@@ -4,7 +4,7 @@ use crate::api::studio::convert::interaction::interaction_request_bridge_dto;
 use crate::api::studio::convert::message::{bridge_message, bridge_part};
 use crate::api::studio::convert::records::{project_dto, session_dto};
 use crate::api::studio::convert::runtime::bridge_session_runtime_view;
-use crate::api::studio::convert::settings::studio_config_projection;
+use crate::api::studio::convert::settings::{studio_config_projection, web_search_settings_dto};
 use crate::api::studio::runtime::BridgeRuntime;
 use crate::api::studio::types::{
     BridgeSessionStateResponse, BridgeStudioMessageProjectionDto, BridgeStudioPartProjectionDto,
@@ -88,6 +88,15 @@ pub(super) async fn studio_snapshot_from_projects_inner(
         None => None,
     };
     let config = bridge.studio.config_store().load_or_default()?;
+    let web_search_role = selected_session_id
+        .as_deref()
+        .and_then(|session_id| sessions.iter().find(|session| session.id == session_id))
+        .map(|session| pl_studio_runtime::StudioMode::from_label(&session.mode))
+        .map_or(pl_studio_runtime::StudioRole::Executor, |mode| match mode {
+            pl_studio_runtime::StudioMode::Simple => pl_studio_runtime::StudioRole::Executor,
+            pl_studio_runtime::StudioMode::Task => pl_studio_runtime::StudioRole::Planner,
+        });
+    let web_search = web_search_settings_dto(&config, web_search_role)?;
     let config_json = serde_json::to_string(&studio_config_projection(&config)?)?;
     let general_settings = bridge
         .studio
@@ -115,6 +124,7 @@ pub(super) async fn studio_snapshot_from_projects_inner(
         session_runtime,
         config_json,
         general_settings_json,
+        web_search,
     })
 }
 

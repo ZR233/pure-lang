@@ -14,6 +14,7 @@ mod tool_arguments;
 mod transport_policy;
 mod transport_session;
 mod visible_text;
+mod web_search;
 
 pub use capabilities::{
     ModelCapabilities, ModelModality, ProviderCapabilities, ReasoningInterleaved,
@@ -49,9 +50,9 @@ pub use provider_usage::{
 };
 pub use request::{
     CompletionRequest, CompletionRequestBuilder, CompletionResponse, CompletionTraceContext,
-    FinishReason, InvalidToolArguments, ModelCompactionRequest, ModelCompactionResponse,
-    OpenAiCompactionMode, ReasoningConfig, ReasoningSummary, TokenUsage, ToolCall, ToolCallPayload,
-    ToolFormat, ToolSchema,
+    FinishReason, HostedWebSearchCall, InvalidToolArguments, ModelCompactionRequest,
+    ModelCompactionResponse, OpenAiCompactionMode, ReasoningConfig, ReasoningSummary, TokenUsage,
+    ToolCall, ToolCallPayload, ToolFormat, ToolSchema,
 };
 pub use stream::{
     CompletionBlockContent, CompletionBlockField, CompletionBlockKind, CompletionEventStream,
@@ -59,3 +60,11 @@ pub use stream::{
     ToolInputPayloadKind, collect_completion_event_stream,
 };
 pub use transport_session::ModelTransportSession;
+pub use web_search::{
+    ClickOperation, ExternalWebAccess, ExternalWebAccessMode, FinanceAssetType, FinanceOperation,
+    FindOperation, OpenOperation, ScreenshotOperation, SearchAllowedCaller, SearchCommands,
+    SearchQuery, SearchRequest, SearchResponse, SearchResponseLength, SearchSettings,
+    SportsFunction, SportsLeague, SportsOperation, SportsToolName, TimeOperation, WeatherOperation,
+    WebSearchAction, WebSearchClient, WebSearchConfig, WebSearchContextSize, WebSearchFilters,
+    WebSearchLocation, WebSearchMode, WebSearchUserLocation, WebSearchUserLocationType,
+};

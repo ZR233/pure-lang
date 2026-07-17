@@ -1036,6 +1036,114 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get settingsCompactTimelineSubtitle => '减少消息间距，适合更密集阅读。';
+
+  @override
+  String get settingsWebSearchTitle => 'Web 搜索';
+
+  @override
+  String get settingsWebSearchSubtitle =>
+      '通过符合条件的 OpenAI 账户执行搜索；修改从下一次 turn 起生效。';
+
+  @override
+  String get settingsWebSearchConfiguredMode => '已配置模式';
+
+  @override
+  String get settingsWebSearchEffectiveMode => '有效模式';
+
+  @override
+  String get settingsWebSearchProvider => 'OpenAI Provider';
+
+  @override
+  String get settingsWebSearchModel => '搜索模型';
+
+  @override
+  String get settingsWebSearchMode => '模式';
+
+  @override
+  String get settingsWebSearchModeDisabled => '禁用';
+
+  @override
+  String get settingsWebSearchModeCached => '缓存';
+
+  @override
+  String get settingsWebSearchModeIndexed => '索引';
+
+  @override
+  String get settingsWebSearchModeLive => '实时';
+
+  @override
+  String get settingsWebSearchContextSize => '上下文大小';
+
+  @override
+  String get settingsWebSearchContextLow => '低';
+
+  @override
+  String get settingsWebSearchContextMedium => '中';
+
+  @override
+  String get settingsWebSearchContextHigh => '高';
+
+  @override
+  String get settingsServiceDefault => '服务默认值';
+
+  @override
+  String get settingsWebSearchAllowedDomains => '允许的域名';
+
+  @override
+  String get settingsWebSearchDomainsHint => 'example.com, docs.example.com';
+
+  @override
+  String get settingsWebSearchCountry => '国家';
+
+  @override
+  String get settingsWebSearchRegion => '地区';
+
+  @override
+  String get settingsWebSearchCity => '城市';
+
+  @override
+  String get settingsWebSearchTimezone => '时区';
+
+  @override
+  String get settingsWebSearchAvailable => '可用';
+
+  @override
+  String get settingsWebSearchDisabled => '已禁用';
+
+  @override
+  String get settingsWebSearchMissingCredential => '缺少凭证';
+
+  @override
+  String get settingsWebSearchUnsupportedModel => '模型不支持';
+
+  @override
+  String get settingsWebSearchMissingCredentialReason =>
+      '没有源自 OpenAI preset 且凭证有效的 Provider，远程 Web 搜索已完全禁用。';
+
+  @override
+  String get settingsWebSearchUnsupportedModelReason =>
+      '当前路由无法暴露函数工具或 hosted Web 搜索。';
+
+  @override
+  String get settingsNotAvailable => '不可用';
+
+  @override
+  String get settingsSaveWebSearch => '保存 Web 搜索';
+
+  @override
+  String get timelineWebSearchTitle => 'Web 搜索';
+
+  @override
+  String get timelineWebSearchSearching => '正在搜索网页';
+
+  @override
+  String get timelineWebSearchOpening => '正在打开网页';
+
+  @override
+  String get timelineWebSearchFinding => '正在页内查找';
+
+  @override
+  String get timelineWebSearchResults => '结果链接';
 }
 
 /// The translations for Chinese, using the Han script (`zh_Hans`).
@@ -2070,4 +2178,112 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get settingsCompactTimelineSubtitle => '减少消息间距，适合更密集阅读。';
+
+  @override
+  String get settingsWebSearchTitle => 'Web 搜索';
+
+  @override
+  String get settingsWebSearchSubtitle =>
+      '通过符合条件的 OpenAI 账户执行搜索；修改从下一次 turn 起生效。';
+
+  @override
+  String get settingsWebSearchConfiguredMode => '已配置模式';
+
+  @override
+  String get settingsWebSearchEffectiveMode => '有效模式';
+
+  @override
+  String get settingsWebSearchProvider => 'OpenAI Provider';
+
+  @override
+  String get settingsWebSearchModel => '搜索模型';
+
+  @override
+  String get settingsWebSearchMode => '模式';
+
+  @override
+  String get settingsWebSearchModeDisabled => '禁用';
+
+  @override
+  String get settingsWebSearchModeCached => '缓存';
+
+  @override
+  String get settingsWebSearchModeIndexed => '索引';
+
+  @override
+  String get settingsWebSearchModeLive => '实时';
+
+  @override
+  String get settingsWebSearchContextSize => '上下文大小';
+
+  @override
+  String get settingsWebSearchContextLow => '低';
+
+  @override
+  String get settingsWebSearchContextMedium => '中';
+
+  @override
+  String get settingsWebSearchContextHigh => '高';
+
+  @override
+  String get settingsServiceDefault => '服务默认值';
+
+  @override
+  String get settingsWebSearchAllowedDomains => '允许的域名';
+
+  @override
+  String get settingsWebSearchDomainsHint => 'example.com, docs.example.com';
+
+  @override
+  String get settingsWebSearchCountry => '国家';
+
+  @override
+  String get settingsWebSearchRegion => '地区';
+
+  @override
+  String get settingsWebSearchCity => '城市';
+
+  @override
+  String get settingsWebSearchTimezone => '时区';
+
+  @override
+  String get settingsWebSearchAvailable => '可用';
+
+  @override
+  String get settingsWebSearchDisabled => '已禁用';
+
+  @override
+  String get settingsWebSearchMissingCredential => '缺少凭证';
+
+  @override
+  String get settingsWebSearchUnsupportedModel => '模型不支持';
+
+  @override
+  String get settingsWebSearchMissingCredentialReason =>
+      '没有源自 OpenAI preset 且凭证有效的 Provider，远程 Web 搜索已完全禁用。';
+
+  @override
+  String get settingsWebSearchUnsupportedModelReason =>
+      '当前路由无法暴露函数工具或 hosted Web 搜索。';
+
+  @override
+  String get settingsNotAvailable => '不可用';
+
+  @override
+  String get settingsSaveWebSearch => '保存 Web 搜索';
+
+  @override
+  String get timelineWebSearchTitle => 'Web 搜索';
+
+  @override
+  String get timelineWebSearchSearching => '正在搜索网页';
+
+  @override
+  String get timelineWebSearchOpening => '正在打开网页';
+
+  @override
+  String get timelineWebSearchFinding => '正在页内查找';
+
+  @override
+  String get timelineWebSearchResults => '结果链接';
 }

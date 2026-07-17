@@ -137,6 +137,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BigInt dco_decode_box_autoadd_u_64(dynamic raw);
 
   @protected
+  WebSearchSettingsInput dco_decode_box_autoadd_web_search_settings_input(
+    dynamic raw,
+  );
+
+  @protected
   ZhipuCodingPlanUsageDto dco_decode_box_autoadd_zhipu_coding_plan_usage_dto(
     dynamic raw,
   );
@@ -315,6 +320,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeUserQuestionOptionDto dco_decode_bridge_user_question_option_dto(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeWebSearchSettingsDto dco_decode_bridge_web_search_settings_dto(
     dynamic raw,
   );
 
@@ -550,6 +560,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void dco_decode_unit(dynamic raw);
 
   @protected
+  WebSearchSettingsInput dco_decode_web_search_settings_input(dynamic raw);
+
+  @protected
   ZhipuCodingPlanUsageDto dco_decode_zhipu_coding_plan_usage_dto(dynamic raw);
 
   @protected
@@ -679,6 +692,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BigInt sse_decode_box_autoadd_u_64(SseDeserializer deserializer);
+
+  @protected
+  WebSearchSettingsInput sse_decode_box_autoadd_web_search_settings_input(
+    SseDeserializer deserializer,
+  );
 
   @protected
   ZhipuCodingPlanUsageDto sse_decode_box_autoadd_zhipu_coding_plan_usage_dto(
@@ -919,6 +937,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeUserQuestionOptionDto sse_decode_bridge_user_question_option_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeWebSearchSettingsDto sse_decode_bridge_web_search_settings_dto(
     SseDeserializer deserializer,
   );
 
@@ -1208,6 +1231,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_decode_unit(SseDeserializer deserializer);
 
   @protected
+  WebSearchSettingsInput sse_decode_web_search_settings_input(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   ZhipuCodingPlanUsageDto sse_decode_zhipu_coding_plan_usage_dto(
     SseDeserializer deserializer,
   );
@@ -1365,6 +1393,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_box_autoadd_u_64(BigInt self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_web_search_settings_input(
+    WebSearchSettingsInput self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_box_autoadd_zhipu_coding_plan_usage_dto(
@@ -1657,6 +1691,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_bridge_user_question_option_dto(
     BridgeUserQuestionOptionDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_web_search_settings_dto(
+    BridgeWebSearchSettingsDto self,
     SseSerializer serializer,
   );
 
@@ -2004,6 +2044,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_unit(void self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_web_search_settings_input(
+    WebSearchSettingsInput self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_zhipu_coding_plan_usage_dto(

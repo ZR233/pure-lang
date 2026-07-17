@@ -192,6 +192,7 @@ async fn message_part_snapshot_round_trip_preserves_activity_group_id() {
             name: "bash".to_string(),
             arguments: "{\"command\":\"cargo test -p pl-core\"}".to_string(),
             result: None,
+            output_artifacts: Vec::new(),
             exit_code: None,
             timed_out: false,
             working_directory: Some("D:/work".to_string()),

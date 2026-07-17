@@ -1,11 +1,13 @@
 use super::snapshot::studio_snapshot_inner;
 use crate::api::studio::convert::settings::{
     mcp_transport_from_label, normalized_string_list, provider_settings_edit,
+    web_search_config_from_input, web_search_settings_dto,
 };
 use crate::api::studio::runtime::bridge;
 use crate::api::studio::types::{
-    BridgeProviderCatalogSnapshot, BridgeStudioSnapshotResponse, ConfigSavedResponse,
-    InstructionsSettingsInput, McpSettingsInput, ProviderSettingsInput, SkillsSettingsInput,
+    BridgeProviderCatalogSnapshot, BridgeStudioSnapshotResponse, BridgeWebSearchSettingsDto,
+    ConfigSavedResponse, InstructionsSettingsInput, McpSettingsInput, ProviderSettingsInput,
+    SkillsSettingsInput, WebSearchSettingsInput,
 };
 use anyhow::{Context, Result};
 use pl_studio_runtime::{
@@ -18,6 +20,25 @@ pub fn load_provider_catalog() -> Result<BridgeProviderCatalogSnapshot> {
     Ok(pl_studio_runtime::builtin_provider_catalog()
         .snapshot()?
         .into())
+}
+
+pub fn load_web_search_settings() -> Result<BridgeWebSearchSettingsDto> {
+    let bridge = bridge()?;
+    let config = bridge.studio.config_store().load_or_default()?;
+    web_search_settings_dto(&config, pl_studio_runtime::StudioRole::Executor)
+}
+
+pub fn save_web_search_settings(
+    input: WebSearchSettingsInput,
+) -> Result<BridgeStudioSnapshotResponse> {
+    let bridge = bridge()?;
+    bridge.block_on(async {
+        let mut config = bridge.studio.config_store().load_or_default()?;
+        config.web_search = web_search_config_from_input(input)?;
+        config.validate()?;
+        bridge.studio.config_store().save(&config)?;
+        studio_snapshot_inner(bridge, None, None).await
+    })
 }
 
 pub fn save_runtime_permission_mode(mode: String) -> Result<ConfigSavedResponse> {

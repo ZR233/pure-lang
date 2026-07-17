@@ -222,6 +222,19 @@ enum ResponsesTool {
         description: String,
         format: ToolFormatBody,
     },
+    WebSearch {
+        external_web_access: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        indexed_web_access: Option<bool>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        filters: Option<crate::WebSearchFilters>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        user_location: Option<crate::WebSearchUserLocation>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        search_context_size: Option<crate::WebSearchContextSize>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        search_content_types: Option<Vec<String>>,
+    },
 }
 
 impl ResponsesTool {
@@ -244,6 +257,21 @@ impl ResponsesTool {
                 name: name.clone(),
                 description: description.clone(),
                 format: ToolFormatBody::from_format(format),
+            },
+            ToolSchema::WebSearch {
+                external_web_access,
+                indexed_web_access,
+                filters,
+                user_location,
+                search_context_size,
+                search_content_types,
+            } => Self::WebSearch {
+                external_web_access: *external_web_access,
+                indexed_web_access: *indexed_web_access,
+                filters: filters.clone(),
+                user_location: user_location.clone(),
+                search_context_size: *search_context_size,
+                search_content_types: search_content_types.clone(),
             },
         }
     }

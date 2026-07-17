@@ -9,6 +9,12 @@ class DemoStudioApi implements StudioApi {
   InstructionsSettingsView _instructions = const InstructionsSettingsView();
   SkillsSettingsView _skills = const SkillsSettingsView();
   GeneralSettingsView _general = const GeneralSettingsView();
+  WebSearchSettingsView _webSearch = const WebSearchSettingsView(
+    effectiveMode: 'cached',
+    availability: 'available',
+    providerId: 'openai',
+    model: 'gpt-5',
+  );
   PermissionMode _permissionMode = PermissionMode.requestApproval;
   final Set<String> _archivedProjectIds = <String>{};
   final Map<String, Map<String, Object?>> _settingsDrafts = {};
@@ -265,6 +271,7 @@ class DemoStudioApi implements StudioApi {
       instructions: _instructions,
       skills: _skills,
       general: _general,
+      webSearch: _webSearch,
       pendingInteractions: const [],
     );
     if (_archivedProjectIds.contains(project.id)) {
@@ -280,6 +287,7 @@ class DemoStudioApi implements StudioApi {
         instructions: state.instructions,
         skills: state.skills,
         general: state.general,
+        webSearch: state.webSearch,
         selectedProjectId: null,
         selectedSessionId: null,
         permissionMode: state.permissionMode,
@@ -519,6 +527,28 @@ class DemoStudioApi implements StudioApi {
   @override
   Future<StudioState> saveGeneralSettings(Map<String, Object?> settings) async {
     _general = _generalFromJson(settings);
+    return bootstrap();
+  }
+
+  @override
+  Future<StudioState> saveWebSearchSettings(
+    WebSearchSettingsView settings,
+  ) async {
+    _webSearch = WebSearchSettingsView(
+      configuredMode: settings.configuredMode,
+      effectiveMode: settings.configuredMode,
+      availability: settings.configuredMode == 'disabled'
+          ? 'disabled'
+          : 'available',
+      contextSize: settings.contextSize,
+      allowedDomains: settings.allowedDomains,
+      country: settings.country,
+      region: settings.region,
+      city: settings.city,
+      timezone: settings.timezone,
+      providerId: 'openai',
+      model: 'gpt-5',
+    );
     return bootstrap();
   }
 

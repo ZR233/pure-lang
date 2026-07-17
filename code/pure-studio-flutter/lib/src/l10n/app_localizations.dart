@@ -2003,6 +2003,216 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Reduce message spacing for denser reading.'**
   String get settingsCompactTimelineSubtitle;
+
+  /// No description provided for @settingsWebSearchTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Web search'**
+  String get settingsWebSearchTitle;
+
+  /// No description provided for @settingsWebSearchSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Search through an eligible OpenAI account. Changes apply from the next turn.'**
+  String get settingsWebSearchSubtitle;
+
+  /// No description provided for @settingsWebSearchConfiguredMode.
+  ///
+  /// In en, this message translates to:
+  /// **'Configured mode'**
+  String get settingsWebSearchConfiguredMode;
+
+  /// No description provided for @settingsWebSearchEffectiveMode.
+  ///
+  /// In en, this message translates to:
+  /// **'Effective mode'**
+  String get settingsWebSearchEffectiveMode;
+
+  /// No description provided for @settingsWebSearchProvider.
+  ///
+  /// In en, this message translates to:
+  /// **'OpenAI provider'**
+  String get settingsWebSearchProvider;
+
+  /// No description provided for @settingsWebSearchModel.
+  ///
+  /// In en, this message translates to:
+  /// **'Search model'**
+  String get settingsWebSearchModel;
+
+  /// No description provided for @settingsWebSearchMode.
+  ///
+  /// In en, this message translates to:
+  /// **'Mode'**
+  String get settingsWebSearchMode;
+
+  /// No description provided for @settingsWebSearchModeDisabled.
+  ///
+  /// In en, this message translates to:
+  /// **'Disabled'**
+  String get settingsWebSearchModeDisabled;
+
+  /// No description provided for @settingsWebSearchModeCached.
+  ///
+  /// In en, this message translates to:
+  /// **'Cached'**
+  String get settingsWebSearchModeCached;
+
+  /// No description provided for @settingsWebSearchModeIndexed.
+  ///
+  /// In en, this message translates to:
+  /// **'Indexed'**
+  String get settingsWebSearchModeIndexed;
+
+  /// No description provided for @settingsWebSearchModeLive.
+  ///
+  /// In en, this message translates to:
+  /// **'Live'**
+  String get settingsWebSearchModeLive;
+
+  /// No description provided for @settingsWebSearchContextSize.
+  ///
+  /// In en, this message translates to:
+  /// **'Context size'**
+  String get settingsWebSearchContextSize;
+
+  /// No description provided for @settingsWebSearchContextLow.
+  ///
+  /// In en, this message translates to:
+  /// **'Low'**
+  String get settingsWebSearchContextLow;
+
+  /// No description provided for @settingsWebSearchContextMedium.
+  ///
+  /// In en, this message translates to:
+  /// **'Medium'**
+  String get settingsWebSearchContextMedium;
+
+  /// No description provided for @settingsWebSearchContextHigh.
+  ///
+  /// In en, this message translates to:
+  /// **'High'**
+  String get settingsWebSearchContextHigh;
+
+  /// No description provided for @settingsServiceDefault.
+  ///
+  /// In en, this message translates to:
+  /// **'Service default'**
+  String get settingsServiceDefault;
+
+  /// No description provided for @settingsWebSearchAllowedDomains.
+  ///
+  /// In en, this message translates to:
+  /// **'Allowed domains'**
+  String get settingsWebSearchAllowedDomains;
+
+  /// No description provided for @settingsWebSearchDomainsHint.
+  ///
+  /// In en, this message translates to:
+  /// **'example.com, docs.example.com'**
+  String get settingsWebSearchDomainsHint;
+
+  /// No description provided for @settingsWebSearchCountry.
+  ///
+  /// In en, this message translates to:
+  /// **'Country'**
+  String get settingsWebSearchCountry;
+
+  /// No description provided for @settingsWebSearchRegion.
+  ///
+  /// In en, this message translates to:
+  /// **'Region'**
+  String get settingsWebSearchRegion;
+
+  /// No description provided for @settingsWebSearchCity.
+  ///
+  /// In en, this message translates to:
+  /// **'City'**
+  String get settingsWebSearchCity;
+
+  /// No description provided for @settingsWebSearchTimezone.
+  ///
+  /// In en, this message translates to:
+  /// **'Timezone'**
+  String get settingsWebSearchTimezone;
+
+  /// No description provided for @settingsWebSearchAvailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Available'**
+  String get settingsWebSearchAvailable;
+
+  /// No description provided for @settingsWebSearchDisabled.
+  ///
+  /// In en, this message translates to:
+  /// **'Disabled'**
+  String get settingsWebSearchDisabled;
+
+  /// No description provided for @settingsWebSearchMissingCredential.
+  ///
+  /// In en, this message translates to:
+  /// **'Missing credential'**
+  String get settingsWebSearchMissingCredential;
+
+  /// No description provided for @settingsWebSearchUnsupportedModel.
+  ///
+  /// In en, this message translates to:
+  /// **'Unsupported model'**
+  String get settingsWebSearchUnsupportedModel;
+
+  /// No description provided for @settingsWebSearchMissingCredentialReason.
+  ///
+  /// In en, this message translates to:
+  /// **'No credentialed provider originating from the OpenAI preset is available. Remote web search is fully disabled.'**
+  String get settingsWebSearchMissingCredentialReason;
+
+  /// No description provided for @settingsWebSearchUnsupportedModelReason.
+  ///
+  /// In en, this message translates to:
+  /// **'The current route cannot expose either the function tool or hosted web search.'**
+  String get settingsWebSearchUnsupportedModelReason;
+
+  /// No description provided for @settingsNotAvailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Not available'**
+  String get settingsNotAvailable;
+
+  /// No description provided for @settingsSaveWebSearch.
+  ///
+  /// In en, this message translates to:
+  /// **'Save web search'**
+  String get settingsSaveWebSearch;
+
+  /// No description provided for @timelineWebSearchTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Web search'**
+  String get timelineWebSearchTitle;
+
+  /// No description provided for @timelineWebSearchSearching.
+  ///
+  /// In en, this message translates to:
+  /// **'Searching the web'**
+  String get timelineWebSearchSearching;
+
+  /// No description provided for @timelineWebSearchOpening.
+  ///
+  /// In en, this message translates to:
+  /// **'Opening a web page'**
+  String get timelineWebSearchOpening;
+
+  /// No description provided for @timelineWebSearchFinding.
+  ///
+  /// In en, this message translates to:
+  /// **'Finding text on a page'**
+  String get timelineWebSearchFinding;
+
+  /// No description provided for @timelineWebSearchResults.
+  ///
+  /// In en, this message translates to:
+  /// **'Result links'**
+  String get timelineWebSearchResults;
 }
 
 class _AppLocalizationsDelegate

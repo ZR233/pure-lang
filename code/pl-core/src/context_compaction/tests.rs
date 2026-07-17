@@ -372,6 +372,7 @@ impl ModelProvider for FakeCompactionProvider {
             raw_content: content,
             reasoning_content: None,
             tool_calls: Vec::new(),
+            hosted_web_search_calls: Vec::new(),
             trace_events: Vec::new(),
             next_sequence: 0,
             usage: TokenUsage {

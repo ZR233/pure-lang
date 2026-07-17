@@ -114,3 +114,11 @@ Studio timeline 以 message/part projection 派生的 conversation row 为准。
 工具、命令、文件修改、子代理协作活动和 todo list 更新的用户可读文本由前端 projection 根据结构化 `StudioPart.tool`、`StudioPart.agent` 与 agent timeline typed payload 生成。后端不新增 `activityText` 之类的本地化文案字段；如果展示层缺少必要事实，应补充结构化字段而不是补一段后端写死文本。固定标签和状态说明由 Flutter i18n 负责，工具名、agent path、工作目录、路径、命令摘要和模型名按原始领域值展示。工具运行时的单工具 start/end/approval/review commentary 属于 verbose/debug 诊断信息，普通模式只保留 turn 级工具批次 commentary，避免 timeline 在已有工具组之外重复出现每个工具的进展文本。
 
 父 timeline 默认只展示子代理高层协作事件，例如 spawn、wait、send/followup、close 和 todo list update。子代理协作活动可按 `callId` 合并 begin/end 状态；todo list update 必须按每次调用新增 row，不参与该合并。子代理内部普通工具 trace 不自动灌入父 timeline；这些细节应保留在子代理详情、状态栏弹层或专门的 agent 视图中。`AgentChanged` 是 latest snapshot merge，适合更新状态栏和活动详情，不应作为每次状态变更的新 timeline row。
+
+## Web 搜索工具规划
+
+`web_search` 是 `ToolEffect::Read` 且允许并行的内置函数工具。mode 非 disabled、存在可用 OpenAI preset 且当前模型支持 function calling 时优先暴露该工具，并抑制 Responses hosted `web_search`；函数工具可由任意 provider 模型调用，但执行请求始终使用自动选择的 OpenAI provider。
+
+独立工具输入与 OpenAI `/alpha/search` commands 对齐，支持网页/图片查询、open、click、find、PDF screenshot、finance、weather、sports、time 和 response length。请求上下文只保留最近两个 user message 及其间受限的 assistant text，排除 system、environment 和 tool 消息。响应 `output` 写回模型，`results` 只进入 trace/persistence/UI，`encrypted_output` 不进入模型上下文。
+
+如果函数工具无法暴露，只有当前模型请求自身满足 OpenAI preset、有效凭据、Responses wire 和 web-search capability 时才使用 hosted tool。无凭据状态必须在工具规划和 executor 构造两层拒绝，保证错误配置或历史 tool call 不能绕过门控发起远程请求。

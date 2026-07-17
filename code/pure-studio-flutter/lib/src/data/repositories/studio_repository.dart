@@ -301,6 +301,10 @@ class StudioController extends AsyncNotifier<StudioState> {
     await _saveConfigSettings(() => _api.saveGeneralSettings(settings));
   }
 
+  Future<void> saveWebSearchSettings(WebSearchSettingsView settings) async {
+    await _saveConfigSettings(() => _api.saveWebSearchSettings(settings));
+  }
+
   Future<void> _saveConfigSettings(
     Future<StudioState> Function() request,
   ) async {

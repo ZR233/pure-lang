@@ -289,6 +289,7 @@ impl FirstRunConfigDraft {
                     .map(|role| (role.id(), route.clone()))
                     .collect(),
             },
+            web_search: Default::default(),
             runtime: Default::default(),
             instructions: Default::default(),
             skills: Default::default(),
