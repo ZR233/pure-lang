@@ -8,13 +8,11 @@ pub(crate) fn is_provider_429_error(error: &str) -> bool {
 /// 该 helper 只覆盖模型请求/流式传输层面的通用错误；宿主产品自己的 relay、
 /// 队列、业务状态错误应在产品层继续单独判断。
 pub fn is_retryable_model_error(error: &str) -> bool {
-    let error = error.trim();
-    let Some(model_error) = error.strip_prefix("model error: ") else {
-        return false;
-    };
-    let model_error = model_error
-        .strip_prefix("LLM provider error: ")
-        .unwrap_or(model_error);
+    let model_error = strip_model_error_wrappers(error.trim());
+
+    if model_error.starts_with("transient model transport error: ") {
+        return true;
+    }
 
     if let Some(stream_error) = model_error.strip_prefix("stream error: ") {
         return is_retryable_model_stream_error(stream_error);
@@ -30,6 +28,18 @@ pub fn is_retryable_model_error(error: &str) -> bool {
         || contains_standalone_status_code(model_error, "502")
         || contains_standalone_status_code(model_error, "503")
         || contains_standalone_status_code(model_error, "504")
+}
+
+fn strip_model_error_wrappers(mut error: &str) -> &str {
+    loop {
+        let stripped = ["model error: ", "LLM provider error: ", "HTTP error: "]
+            .into_iter()
+            .find_map(|prefix| error.strip_prefix(prefix));
+        let Some(stripped) = stripped else {
+            return error;
+        };
+        error = stripped.trim_start();
+    }
 }
 
 fn is_retryable_model_stream_error(error: &str) -> bool {
@@ -79,6 +89,8 @@ mod tests {
             "model error: stream error: idle timeout waiting for SSE",
             "model error: LLM provider error: stream error: idle timeout waiting for SSE",
             "model error: stream error: response.incomplete event received: max_output_tokens",
+            "transient model transport error: Responses WebSocket stream failed: server closed the connection",
+            "model error: transient model transport error: Responses WebSocket send timed out",
         ] {
             assert!(is_retryable_model_error(error), "{error}");
         }
@@ -89,6 +101,8 @@ mod tests {
         for error in [
             "model error: request to https://example.test/v1/chat/completions returned 400 Bad Request",
             "model error: stream error: response.incomplete event received: content_filter",
+            "HTTP error: Responses WebSocket handshake failed: HTTP error: 401 Unauthorized",
+            "HTTP error: Responses WebSocket error invalid_request_error (HTTP 400)",
             "relay request timed out",
             "local tool failed with code 1500",
         ] {

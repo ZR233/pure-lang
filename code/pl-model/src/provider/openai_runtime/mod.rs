@@ -21,6 +21,7 @@ use crate::stream::{
     CompletionEventStream, collect_completion_event_stream, decode_openai_event_stream,
     decode_provider_stream,
 };
+use crate::transport_policy::{RESPONSES_WEBSOCKET_MAX_RETRIES, responses_websocket_retry_delay};
 
 #[derive(Debug)]
 pub struct OpenAiProvider {
@@ -76,15 +77,57 @@ impl OpenAiProvider {
         get_auth_token(bearer)
     }
 
-    pub(crate) fn stream_complete(
+    pub(crate) async fn stream_complete(
         &self,
         request: CompletionRequest,
         event_tx: AgentEventSender,
-    ) -> impl std::future::Future<Output = Result<CompletionResponse>> + Send {
-        let trace = request.trace.clone();
-        async move {
-            let event_stream = self.stream_events(request).await?;
-            collect_completion_event_stream(event_stream, &event_tx, trace).await
+    ) -> Result<CompletionResponse> {
+        let retries_enabled = self.info.protocol == ProviderWireProtocol::Responses
+            && self.info.connection_mode == ProviderConnectionMode::WebSocket;
+        let max_retries = if retries_enabled {
+            RESPONSES_WEBSOCKET_MAX_RETRIES
+        } else {
+            0
+        };
+        let original_trace = request.trace.clone();
+        let mut retry_number = 0_u32;
+
+        loop {
+            let mut attempt_request = request.clone();
+            if retry_number > 0
+                && let Some(trace) = attempt_request.trace.as_mut()
+            {
+                let original_inference_id = original_trace
+                    .as_ref()
+                    .map(|trace| trace.inference_id.as_str())
+                    .unwrap_or(trace.inference_id.as_str());
+                trace.inference_id = format!("{original_inference_id}-ws-retry-{retry_number}");
+            }
+            let trace = attempt_request.trace.clone();
+            let result = match self.stream_events(attempt_request).await {
+                Ok(event_stream) => {
+                    collect_completion_event_stream(event_stream, &event_tx, trace).await
+                }
+                Err(error) => Err(error),
+            };
+            let Err(error) = result else {
+                return result;
+            };
+            if !error.is_transient_model_transport() || retry_number >= max_retries {
+                return Err(error);
+            }
+
+            retry_number += 1;
+            let delay = responses_websocket_retry_delay(retry_number, error.retry_after_ms());
+            tracing::warn!(
+                provider = %self.info.name,
+                retry_number,
+                max_retries,
+                delay_ms = delay.as_millis(),
+                error = %error,
+                "Responses WebSocket 传输中断，将在同一 WS 模式下重放完整模型请求"
+            );
+            tokio::time::sleep(delay).await;
         }
     }
 

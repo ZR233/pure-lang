@@ -210,6 +210,7 @@ async fn collect_completion_event_stream_returns_idle_timeout_when_stream_stalls
 
     assert_eq!(
         error.to_string(),
-        "LLM provider error: stream error: idle timeout waiting for SSE"
+        "transient model transport error: stream error: idle timeout waiting for provider event"
     );
+    assert!(error.is_transient_model_transport());
 }

@@ -43,6 +43,59 @@ pub enum PureError {
 
     #[error("HTTP error: {0}")]
     HttpError(String),
+
+    #[error("transient model transport error: {message}")]
+    TransientModelTransport {
+        message: String,
+        retry_after_ms: Option<u64>,
+    },
+}
+
+impl PureError {
+    /// 构造一个可以安全重放完整模型请求的临时传输错误。
+    pub fn transient_model_transport(message: impl Into<String>) -> Self {
+        Self::TransientModelTransport {
+            message: message.into(),
+            retry_after_ms: None,
+        }
+    }
+
+    /// 构造携带供应商建议等待时间的临时传输错误。
+    pub fn transient_model_transport_after(
+        message: impl Into<String>,
+        retry_after_ms: u64,
+    ) -> Self {
+        Self::TransientModelTransport {
+            message: message.into(),
+            retry_after_ms: Some(retry_after_ms),
+        }
+    }
+
+    /// 返回该错误是否允许在工具尚未执行时重放完整模型请求。
+    pub fn is_transient_model_transport(&self) -> bool {
+        matches!(self, Self::TransientModelTransport { .. })
+    }
+
+    /// 返回供应商建议的重试等待时间。
+    pub fn retry_after_ms(&self) -> Option<u64> {
+        match self {
+            Self::TransientModelTransport { retry_after_ms, .. } => *retry_after_ms,
+            Self::LlmError(_)
+            | Self::ContextOverflow(_)
+            | Self::ToolNotFound(_)
+            | Self::ToolExecutionFailed { .. }
+            | Self::AgentLimitReached { .. }
+            | Self::AgentDepthLimitReached { .. }
+            | Self::ProviderCapacity { .. }
+            | Self::PermissionDenied(_)
+            | Self::SandboxError(_)
+            | Self::MemoryError(_)
+            | Self::ConfigError(_)
+            | Self::Io(_)
+            | Self::SerdeJson(_)
+            | Self::HttpError(_) => None,
+        }
+    }
 }
 
 pub type Result<T> = std::result::Result<T, PureError>;

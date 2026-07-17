@@ -6,7 +6,9 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use tokio::process::Command;
 
-use super::super::git::{changed_files_between, inspect_repository};
+use super::super::git::{
+    STUDIO_GIT_EMAIL_CONFIG, STUDIO_GIT_NAME_CONFIG, changed_files_between, inspect_repository,
+};
 
 const GIT_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -193,7 +195,14 @@ pub(super) async fn run_git(workspace: &Path, args: &[&str]) -> Result<Output> {
         .kill_on_drop(true)
         .arg("-C")
         .arg(workspace)
-        .args(["-c", "commit.gpgSign=false"])
+        .args([
+            "-c",
+            STUDIO_GIT_NAME_CONFIG,
+            "-c",
+            STUDIO_GIT_EMAIL_CONFIG,
+            "-c",
+            "commit.gpgSign=false",
+        ])
         .args(args)
         .env("GIT_TERMINAL_PROMPT", "0");
     Ok(tokio::time::timeout(GIT_TIMEOUT, command.output())

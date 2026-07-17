@@ -164,6 +164,55 @@ fn completed_text_uses_authoritative_text_and_revision() {
 }
 
 #[test]
+fn failed_sampling_attempt_invalidates_completed_and_streaming_parts() {
+    let mut trace = trace();
+    let _ = trace.append_text_delta("msg_1", TraceTextChannel::Final, "partial".to_string());
+    let _ = trace.complete_text(
+        "msg_1",
+        TraceTextChannel::Final,
+        Some("partial".to_string()),
+    );
+    let _ = trace.append_thinking_delta("thinking", 0, "reasoning".to_string());
+
+    let failed = trace
+        .fail_attempt("connection lost")
+        .into_iter()
+        .filter_map(|event| match event {
+            AgentEvent::TracePartFailed { item, error } => Some((item.item_id, item.status, error)),
+            AgentEvent::TracePartStarted { .. }
+            | AgentEvent::TracePartDelta { .. }
+            | AgentEvent::TracePartCompleted { .. }
+            | AgentEvent::InteractionChanged { .. }
+            | AgentEvent::AgentRuntimeUpdated { .. }
+            | AgentEvent::AgentStateChanged { .. }
+            | AgentEvent::SubAgentActivity { .. }
+            | AgentEvent::TodoListUpdated { .. }
+            | AgentEvent::TurnInterrupted { .. }
+            | AgentEvent::TurnBudgetLimited { .. }
+            | AgentEvent::SkillActivated { .. }
+            | AgentEvent::Done
+            | AgentEvent::Error { .. } => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        failed,
+        vec![
+            (
+                "inference-1-text-final-1".to_string(),
+                TracePartStatus::Failed,
+                "connection lost".to_string(),
+            ),
+            (
+                "inference-1-reasoning-1".to_string(),
+                TracePartStatus::Failed,
+                "connection lost".to_string(),
+            ),
+        ]
+    );
+}
+
+#[test]
 fn update_tool_trace_keeps_streaming_tool_status_after_arguments_delta() {
     let mut trace = trace();
     let snapshot = ToolCallAccumulatorSnapshot {

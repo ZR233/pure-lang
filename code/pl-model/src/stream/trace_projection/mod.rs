@@ -388,6 +388,41 @@ impl TraceProjection {
         events
     }
 
+    pub(crate) fn fail_attempt(&mut self, error: &str) -> Vec<AgentEvent> {
+        let mut item_ids = self.started.keys().cloned().collect::<Vec<_>>();
+        item_ids.sort_by_key(|item_id| {
+            self.started
+                .get(item_id)
+                .map(|item| item.started_sequence)
+                .unwrap_or_default()
+        });
+        let mut events = Vec::new();
+        for item_id in item_ids {
+            let Some(item) = self.started.get_mut(&item_id) else {
+                continue;
+            };
+            if item.status == TracePartStatus::Failed {
+                continue;
+            }
+            item.revision += 1;
+            item.status = TracePartStatus::Failed;
+            item.updated_at = unix_seconds();
+            let item = item.clone();
+            self.record(
+                TraceEventKind::TracePartFailed {
+                    item: item.clone(),
+                    error: error.to_string(),
+                },
+                item.updated_at,
+            );
+            events.push(AgentEvent::TracePartFailed {
+                item,
+                error: error.to_string(),
+            });
+        }
+        events
+    }
+
     pub(crate) fn update_tool_trace(&mut self, call: &ToolCall) -> Vec<AgentEvent> {
         let now = unix_seconds();
         let item_id = self.active_tool_call_item_id(call);

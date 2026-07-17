@@ -1,10 +1,9 @@
 use std::collections::HashMap;
 
-use futures::{SinkExt, StreamExt};
 use pl_protocol::{PureError, Result};
 use serde_json::{Map, Value};
 use tokio::sync::OwnedMutexGuard;
-use tokio::time::{Duration, timeout};
+use tokio::time::timeout;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
@@ -15,11 +14,18 @@ use crate::ModelTransportSession;
 use crate::protocol::openai::sse::SseStreamEvent;
 use crate::provider_info::RESPONSES_WEBSOCKET_DIALECT;
 use crate::stream::OpenAiRawEventStream;
-use crate::transport_session::{ResponsesWebSocket, ResponsesWebSocketSession};
+use crate::transport_policy::{
+    RESPONSES_WEBSOCKET_CONNECT_TIMEOUT, RESPONSES_WEBSOCKET_IDLE_TIMEOUT,
+    RESPONSES_WEBSOCKET_SEND_TIMEOUT,
+};
+use crate::transport_session::{ResponsesWebSocketConnection, ResponsesWebSocketSession};
 
-use super::redact_secret_like_values;
+mod error;
 
-const WEBSOCKET_IDLE_TIMEOUT: Duration = Duration::from_secs(180);
+use error::{
+    close_error, connection_error, continuation_id_invalid, handshake_error, protocol_error,
+    response_terminal_error, server_error,
+};
 
 pub(super) async fn stream_responses(
     api_base: String,
@@ -40,29 +46,22 @@ pub(super) async fn stream_responses(
         guard.connection_key = Some(connection_key);
     }
 
-    let (mut wire_body, mut used_continuation) = incremental_request(&guard, &body)
+    let (mut wire_body, used_continuation) = incremental_request(&guard, &body)
         .map(|body| (body, true))
         .unwrap_or_else(|| (body.clone(), false));
-    let mut request_text = response_create_text(&mut wire_body)?;
-    if send_request(&mut guard, &request_text).await.is_err() {
+    let request_text = response_create_text(&mut wire_body)?;
+    if let Err(error) = send_request(&mut guard, &request_text).await {
         guard.invalidate();
-        guard.connection =
-            Some(connect(&api_base, token.as_deref(), provider_headers, model_headers).await?);
-        guard.connection_key = Some(connection_key);
-        used_continuation = false;
-        let mut retry_body = body.clone();
-        request_text = response_create_text(&mut retry_body)?;
-        if let Err(error) = send_request(&mut guard, &request_text).await {
-            guard.invalidate();
-            return Err(error);
-        }
+        return Err(error);
     }
 
     let state = WebSocketEventState {
         guard,
-        terminal: false,
+        completed_event: None,
+        terminal_failure: false,
+        stream_finished: false,
         used_continuation,
-        retry_available: true,
+        continuation_retry_available: true,
         events_emitted: false,
         full_request: body,
         reconnect: WebSocketReconnect {
@@ -76,7 +75,11 @@ pub(super) async fn stream_responses(
     Ok(Box::pin(futures::stream::unfold(
         state,
         |mut state| async move {
-            if state.terminal {
+            if state.terminal_failure {
+                return None;
+            }
+            if let Some(event) = state.completed_event.take() {
+                state.finish_completed_response(&event);
                 return None;
             }
             let event = state.next_event().await;
@@ -143,7 +146,7 @@ async fn connect(
     token: Option<&str>,
     provider_headers: Option<&HashMap<String, String>>,
     model_headers: &HashMap<String, String>,
-) -> Result<ResponsesWebSocket> {
+) -> Result<ResponsesWebSocketConnection> {
     let url = responses_websocket_url(api_base)?;
     let mut request = url
         .as_str()
@@ -163,12 +166,15 @@ async fn connect(
     }
     insert_headers(request.headers_mut(), model_headers)?;
 
-    let (connection, _) = connect_async(request).await.map_err(|error| {
-        PureError::HttpError(redact_secret_like_values(&format!(
-            "Responses WebSocket handshake failed: {error}"
-        )))
-    })?;
-    Ok(connection)
+    let (connection, _) = timeout(RESPONSES_WEBSOCKET_CONNECT_TIMEOUT, connect_async(request))
+        .await
+        .map_err(|_| {
+            PureError::transient_model_transport(
+                "Responses WebSocket handshake timed out after 15 seconds",
+            )
+        })?
+        .map_err(handshake_error)?;
+    Ok(ResponsesWebSocketConnection::new(connection))
 }
 
 fn responses_websocket_url(api_base: &str) -> Result<reqwest::Url> {
@@ -211,23 +217,28 @@ async fn send_request(
     session: &mut OwnedMutexGuard<ResponsesWebSocketSession>,
     request_text: &str,
 ) -> Result<()> {
-    let connection = session.connection.as_mut().ok_or_else(|| {
-        PureError::HttpError("Responses WebSocket connection is unavailable".to_string())
-    })?;
+    let connection = session
+        .connection
+        .as_mut()
+        .ok_or_else(|| connection_error("connection is unavailable"))?;
     timeout(
-        WEBSOCKET_IDLE_TIMEOUT,
+        RESPONSES_WEBSOCKET_SEND_TIMEOUT,
         connection.send(Message::Text(request_text.to_string().into())),
     )
     .await
-    .map_err(|_| PureError::HttpError("Responses WebSocket send timed out".to_string()))?
-    .map_err(|error| PureError::HttpError(error.to_string()))
+    .map_err(|_| {
+        PureError::transient_model_transport("Responses WebSocket send timed out after 15 seconds")
+    })?
+    .map_err(connection_error)
 }
 
 struct WebSocketEventState {
     guard: OwnedMutexGuard<ResponsesWebSocketSession>,
-    terminal: bool,
+    completed_event: Option<SseStreamEvent>,
+    terminal_failure: bool,
+    stream_finished: bool,
     used_continuation: bool,
-    retry_available: bool,
+    continuation_retry_available: bool,
     events_emitted: bool,
     full_request: Map<String, Value>,
     reconnect: WebSocketReconnect,
@@ -245,43 +256,36 @@ impl WebSocketEventState {
     async fn next_event(&mut self) -> Result<SseStreamEvent> {
         loop {
             let next = {
-                let connection = self.guard.connection.as_mut().ok_or_else(|| {
-                    PureError::HttpError(
-                        "Responses WebSocket connection is unavailable".to_string(),
-                    )
-                })?;
-                timeout(WEBSOCKET_IDLE_TIMEOUT, connection.next()).await
+                let connection = self
+                    .guard
+                    .connection
+                    .as_mut()
+                    .ok_or_else(|| connection_error("connection is unavailable"))?;
+                timeout(RESPONSES_WEBSOCKET_IDLE_TIMEOUT, connection.next()).await
             };
             let message = match next {
                 Ok(Some(Ok(message))) => message,
-                Ok(Some(Err(error))) => {
-                    if self.retry_after_disconnect().await? {
-                        continue;
-                    }
-                    return Err(self.connection_error(error.to_string()));
-                }
+                Ok(Some(Err(error))) => return Err(self.invalidate_with_connection_error(error)),
                 Ok(None) => {
-                    if self.retry_after_disconnect().await? {
-                        continue;
-                    }
-                    return Err(self.connection_error(
-                        "connection closed before a terminal response event".to_string(),
+                    return Err(self.invalidate_with_connection_error(
+                        "connection closed before a terminal response event",
                     ));
                 }
                 Err(_) => {
-                    if self.retry_after_disconnect().await? {
-                        continue;
-                    }
-                    return Err(self.connection_error(
-                        "idle timeout waiting for a response event".to_string(),
+                    return Err(self.invalidate_with_connection_error(
+                        "idle timeout waiting for a response event",
                     ));
                 }
             };
             match message {
                 Message::Text(text) => {
-                    let value: Value = serde_json::from_str(text.as_str()).map_err(|error| {
-                        self.connection_error(format!("invalid Responses WebSocket event: {error}"))
-                    })?;
+                    let value: Value = match serde_json::from_str(text.as_str()) {
+                        Ok(value) => value,
+                        Err(error) => {
+                            self.guard.invalidate();
+                            return Err(protocol_error(format!("invalid JSON event: {error}")));
+                        }
+                    };
                     if value.get("type").and_then(Value::as_str) == Some("error") {
                         if !self.events_emitted
                             && self.used_continuation
@@ -290,17 +294,31 @@ impl WebSocketEventState {
                             self.restart_with_full_history().await?;
                             continue;
                         }
-                        return Err(self.connection_error(websocket_error_message(&value)));
+                        self.guard.invalidate();
+                        return Err(server_error(&value));
                     }
-                    let event: SseStreamEvent = serde_json::from_value(value)
-                        .map_err(|error| self.connection_error(error.to_string()))?;
+                    if matches!(
+                        value.get("type").and_then(Value::as_str),
+                        Some("response.failed" | "response.incomplete")
+                    ) && let Some(error) = response_terminal_error(&value)
+                    {
+                        self.terminal_failure = true;
+                        self.guard.invalidate();
+                        return Err(error);
+                    }
+                    let event: SseStreamEvent = match serde_json::from_value(value) {
+                        Ok(event) => event,
+                        Err(error) => {
+                            self.guard.invalidate();
+                            return Err(protocol_error(error.to_string()));
+                        }
+                    };
                     match event.kind.as_str() {
                         "response.completed" => {
-                            self.terminal = true;
-                            self.commit_completed_response(&event);
+                            self.completed_event = Some(event.clone());
                         }
                         "response.failed" | "response.incomplete" => {
-                            self.terminal = true;
+                            self.terminal_failure = true;
                             self.guard.invalidate();
                         }
                         _ => {}
@@ -308,55 +326,31 @@ impl WebSocketEventState {
                     self.events_emitted = true;
                     return Ok(event);
                 }
-                Message::Ping(payload) => {
-                    let connection = self.guard.connection.as_mut().ok_or_else(|| {
-                        PureError::HttpError(
-                            "Responses WebSocket connection is unavailable".to_string(),
-                        )
-                    })?;
-                    connection
-                        .send(Message::Pong(payload))
-                        .await
-                        .map_err(|error| self.connection_error(error.to_string()))?;
-                }
-                Message::Pong(_) | Message::Frame(_) => {}
+                Message::Ping(_) | Message::Pong(_) | Message::Frame(_) => {}
                 Message::Binary(_) => {
-                    return Err(PureError::LlmError(
-                        "unexpected binary Responses WebSocket event".to_string(),
-                    ));
+                    self.guard.invalidate();
+                    return Err(protocol_error("unexpected binary event"));
                 }
                 Message::Close(frame) => {
-                    if self.retry_after_disconnect().await? {
-                        continue;
-                    }
-                    return Err(
-                        self.connection_error(format!("server closed the connection: {frame:?}"))
-                    );
+                    self.guard.invalidate();
+                    return Err(close_error(frame));
                 }
             }
         }
     }
 
-    fn connection_error(&mut self, detail: String) -> PureError {
+    fn invalidate_with_connection_error(&mut self, detail: impl AsRef<str>) -> PureError {
         self.guard.invalidate();
-        let prefix = if self.used_continuation {
-            "previous_response_id requires the original Responses WebSocket connection"
-        } else {
-            "Responses WebSocket stream failed"
-        };
-        PureError::HttpError(redact_secret_like_values(&format!("{prefix}: {detail}")))
-    }
-
-    async fn retry_after_disconnect(&mut self) -> Result<bool> {
-        if self.events_emitted || !self.retry_available {
-            return Ok(false);
-        }
-        self.restart_with_full_history().await?;
-        Ok(true)
+        connection_error(detail)
     }
 
     async fn restart_with_full_history(&mut self) -> Result<()> {
-        self.retry_available = false;
+        if !self.continuation_retry_available {
+            return Err(protocol_error(
+                "previous_response_id remained invalid after a full-history retry",
+            ));
+        }
+        self.continuation_retry_available = false;
         self.guard.invalidate();
         self.guard.connection = Some(
             connect(
@@ -399,6 +393,11 @@ impl WebSocketEventState {
             self.guard.last_response_id = None;
             self.guard.last_response_items.clear();
         }
+    }
+
+    fn finish_completed_response(&mut self, event: &SseStreamEvent) {
+        self.commit_completed_response(event);
+        self.stream_finished = true;
     }
 }
 
@@ -451,41 +450,10 @@ fn canonical_response_history_items(items: &[Value]) -> Vec<Value> {
 
 impl Drop for WebSocketEventState {
     fn drop(&mut self) {
-        if !self.terminal {
+        if !self.stream_finished {
             self.guard.invalidate();
         }
     }
-}
-
-fn websocket_error_message(value: &Value) -> String {
-    let error = value.get("error").unwrap_or(value);
-    let code = error.get("code").and_then(Value::as_str);
-    let message = error
-        .get("message")
-        .and_then(Value::as_str)
-        .unwrap_or("Responses WebSocket returned an error");
-    redact_secret_like_values(&match code {
-        Some(code) => format!("Responses WebSocket error {code}: {message}"),
-        None => format!("Responses WebSocket error: {message}"),
-    })
-}
-
-fn continuation_id_invalid(value: &Value) -> bool {
-    let error = value.get("error").unwrap_or(value);
-    let code = error
-        .get("code")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    let message = error
-        .get("message")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    code.contains("previous_response")
-        || message.contains("previous_response_id")
-        || (message.contains("response")
-            && (message.contains("not found") || message.contains("invalid")))
 }
 
 #[cfg(test)]

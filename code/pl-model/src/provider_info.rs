@@ -4,6 +4,8 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use serde::Deserialize;
 use serde::Serialize;
 
+use crate::transport_policy::RESPONSES_WEBSOCKET_PROFILE_REVISION;
+
 pub const ZHIPU_CODING_PLAN_BASE_URL: &str = "https://open.bigmodel.cn/api/coding/paas/v4";
 pub(crate) const RESPONSES_WEBSOCKET_DIALECT: &str = "responses_websockets=2026-02-06";
 
@@ -53,7 +55,7 @@ pub fn provider_transport_profile_revision(
 ) -> &'static str {
     match (protocol, mode) {
         (ProviderWireProtocol::Responses, ProviderConnectionMode::WebSocket) => {
-            RESPONSES_WEBSOCKET_DIALECT
+            RESPONSES_WEBSOCKET_PROFILE_REVISION
         }
         (ProviderWireProtocol::Responses, ProviderConnectionMode::Http) => "responses-http-v1",
         (ProviderWireProtocol::ChatCompletions, ProviderConnectionMode::Http) => {
@@ -237,7 +239,7 @@ mod tests {
         assert_eq!(info.tool_wire_policy, ToolWirePolicy::NativeCustomTools);
         assert_eq!(
             provider_transport_profile_revision(info.protocol, info.connection_mode),
-            RESPONSES_WEBSOCKET_DIALECT
+            RESPONSES_WEBSOCKET_PROFILE_REVISION
         );
     }
 
