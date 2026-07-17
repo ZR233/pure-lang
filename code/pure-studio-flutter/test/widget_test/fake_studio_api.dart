@@ -1,11 +1,15 @@
 part of '../widget_test.dart';
 
 class _FakeStudioApi implements StudioApi {
-  _FakeStudioApi(this.initialState, {List<ProviderUsageView>? providerUsages})
-    : providerUsages = providerUsages ?? _defaultProviderUsages;
+  _FakeStudioApi(
+    this.initialState, {
+    List<ProviderUsageView>? providerUsages,
+    this.providerCatalog = _testProviderCatalog,
+  }) : providerUsages = providerUsages ?? _defaultProviderUsages;
 
   final StudioState initialState;
   final List<ProviderUsageView> providerUsages;
+  final ProviderCatalogView providerCatalog;
   final _global = StreamController<Object>.broadcast();
   final _session = StreamController<Object>.broadcast();
   final Map<String, StudioState> sessionStates = {};
@@ -17,7 +21,7 @@ class _FakeStudioApi implements StudioApi {
   String? archivedProjectId;
   String? archiveSelectedProjectId;
   String? archivedSessionId;
-  CompileMode? sessionModeUpdate;
+  StudioMode? sessionModeUpdate;
   _RoleUpdate? roleUpdate;
   Map<String, Object?>? savedProviderSettings;
   Map<String, Object?>? savedInstructionsSettings;
@@ -37,6 +41,9 @@ class _FakeStudioApi implements StudioApi {
   void emitGlobal(StudioBridgeEvent event) => _global.add(event);
 
   void emitSession(StudioBridgeEvent event) => _session.add(event);
+
+  @override
+  Future<ProviderCatalogView> loadProviderCatalog() async => providerCatalog;
 
   @override
   Future<StudioState> bootstrap() async => initialState;
@@ -84,7 +91,7 @@ class _FakeStudioApi implements StudioApi {
   }
 
   @override
-  Future<StudioState> setSessionMode(String sessionId, CompileMode mode) async {
+  Future<StudioState> setSessionMode(String sessionId, StudioMode mode) async {
     sessionModeUpdate = mode;
     return initialState.copyWith(
       sessions: [

@@ -175,7 +175,7 @@ class _PlanDecisionActions extends StatelessWidget {
   Widget build(BuildContext context) {
     final hint = Text(
       context.l10n.interactionPlanImplementFooterHint(
-        context.compileModeLabel(CompileMode.task),
+        context.compileModeLabel(StudioMode.task),
       ),
       maxLines: 2,
       overflow: TextOverflow.ellipsis,

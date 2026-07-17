@@ -2,7 +2,7 @@
 
 ## 动机
 
-当前 subagent（`AgentSupervisor` 管理的 child agent）与父 agent 共享同一个
+未启用 Studio worktree lifecycle 时，subagent（`AgentRuntime` 管理的 child actor）与父 agent 共享同一个
 `workspace_root`，所有 file / git / lsp 工具在同一目录操作，仅靠进程内写锁做软隔离。
 这带来三个问题：
 
@@ -21,7 +21,8 @@
 
 - `03-pipeline.md`：child turn「复用同一套工具边界」。本设计把 subagent 的工具边界
   改为 **agent-scoped `workspace_root`**——同一套工具，不同 `workspace_root` 实参。
-  实现上只替换 `AgentRunSpec.workspace_root`，单个工具无需改动。
+  实现上由 Studio turn factory 从 lifecycle resource lease 解析本轮 `workspace_root`，
+  单个工具无需改动。
 - `05-extension.md`：进程内 workspace 写锁共享。写锁以规范化后的 `workspace_root`
   路径为键，因此每个 subagent 独有的 worktree 路径会自动获得独立写锁，锁语义无需
   调整，sibling subagent 之间不竞争。
@@ -31,7 +32,7 @@ merge 在既有文档中零提及（`merge` 一词此前全部指 snapshot / con
 
 ## 架构
 
-新增 `pl-core::agent::worktree` 模块，按端口-适配器组织：
+Studio 产品层的 `pl-studio-runtime::agent::worktree` 模块按端口-适配器组织：
 
 - `WorktreeBackend`（端口，RPITIT + `Send`，遵循仓库禁止 `async_trait` 的约定）：
   封装 `git worktree add/remove`、兜底 `git commit`、`git merge` 的底层执行。
@@ -43,20 +44,18 @@ merge 在既有文档中零提及（`merge` 一词此前全部指 snapshot / con
   创建 / 提交 / 合并 / 释放编排；独立的 typed reconciler 在 Studio 启动恢复阶段根据
   durable owner inventory 对账孤儿 worktree。
 
-`AgentSupervisor` 持有 `Arc<WorktreeManager>`。默认 `WorktreeManager::disabled()` 为
-no-op，保持既有「subagent 共享 `workspace_root`」行为与全部既有测试不变；显式
-`enable_worktrees(repo_root)` 后才为 subagent 分配 worktree。enable 只幂等绑定主
-`workspace_root` 解析出的 repo_root，不扫描或清理磁盘；孤儿对账只属于 Studio 启动恢复。
+`StudioHost` 的 lifecycle adapter 在 spawn prepare 阶段创建可回滚的 worktree lease，
+在 activate/rollback/close 阶段完成资源提交或补偿。`WorktreeManager::disabled()` 为 no-op；
+Studio Task policy 显式提供 repo root 时才为 subagent 分配 worktree。创建过程只绑定主
+`workspace_root` 解析出的 repo root，不扫描或清理磁盘；孤儿对账只属于 Studio 启动恢复。
 
 ## 关键类型（接口契约）
 
-- `WorktreeHandle { path: PathBuf, branch: String }`：存入 `AgentEntry`，随 agent
-  条目同生共死；root agent 为 `None`。
+- `WorktreeHandle { path: PathBuf, branch: String }`：存入 Studio lifecycle resource lease，
+  随 agent 产品资源同生共死；root agent 为 `None`。
 - `WorktreeRef { path: String, branch: String }`：worktree 的模型可见出口。默认
-  工具路径通过 `AgentHandle.worktree`（`spawn_agent` 返回）与 `SpawnAgentResult`
-  暴露给调用方；`close_agent` 的 `merge` 入参（`CloseAgentArgs`）选择 disposition。
-  `AgentControlBackend` 共享类型（宿主扩展路径）不携带 worktree，避免破坏性对外
-  API 变更，宿主可经 `AgentSupervisor` 自行接入。
+  工具路径通过 runtime snapshot 的产品资源投影暴露给 task coordinator；通用
+  `AgentRuntimeHandle` 不携带 Studio worktree 类型，避免框架层反向依赖产品资源。
 - `CloseDisposition::Discard` 只负责放弃未采纳产物；Task merge 由 coordinator 的
   `task_merge_agent` 负责，不通过 `close_agent` 隐式合并。
 - `MergeOutcome { Merged, Conflict }`：merge 结果，`Conflict` 时不释放 worktree。
@@ -69,7 +68,7 @@ no-op，保持既有「subagent 共享 `workspace_root`」行为与全部既有�
 spawn -> running -> waitingForDelivery -> delivered -> planner merge -> released
                                    \-> discard / task terminal -> released
 
-released = git worktree remove + 删除分支 + 清空 AgentEntry.worktree
+released = git worktree remove + 删除分支 + 清空 durable lifecycle resource
 ```
 
 要点：
@@ -153,7 +152,7 @@ runtime shutdown 路径；Task shutdown 的清理错误必须显式返回，不�
 
 ## crate 边界
 
-`WorktreeBackend` 端口与默认本地实现都位于 `pl-core::agent::worktree`，因为 worktree
-是 subagent 执行环境的基础设施，而非业务端口。`AgentSupervisor` 只持有
-`WorktreeManager`，不直接执行 git 命令。宿主若需要自定义 worktree 后端（如容器内
-git），可注入实现 `WorktreeBackend` 的类型。
+`WorktreeBackend` 端口与默认本地实现都位于 `pl-studio-runtime::agent::worktree`，因为
+worktree 是 Studio Task 的产品资源，不属于通用 agent 框架。`StudioHost` lifecycle
+只编排 `WorktreeManager`，不直接执行 git 命令。其他宿主若需要容器或远端 workspace，
+应在自己的 `AgentLifecycleAdapter` 中定义资源 lease，不向 `pl-core` 注入 Studio 类型。

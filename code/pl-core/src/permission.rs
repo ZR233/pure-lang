@@ -2,8 +2,7 @@ use serde::Deserialize;
 
 use crate::tool::WorkspaceAccess;
 use crate::turn::{
-    CompileMode, PermissionMode, ToolApprovalDecision, ToolApprovalPolicy, ToolApprovalRequest,
-    TurnOptions,
+    PermissionMode, ToolApprovalDecision, ToolApprovalPolicy, ToolApprovalRequest, TurnOptions,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -16,7 +15,6 @@ pub(crate) enum PermissionDecision {
 
 pub(crate) fn decide_tool_permission(
     options: &TurnOptions,
-    mode: CompileMode,
     request: &ToolApprovalRequest,
     requested_access: WorkspaceAccess,
 ) -> PermissionDecision {
@@ -44,9 +42,7 @@ pub(crate) fn decide_tool_permission(
         };
     }
 
-    if matches!(options.tool_approval_policy, ToolApprovalPolicy::Manual)
-        || (mode == CompileMode::Task && request.name == "bash")
-    {
+    if matches!(options.tool_approval_policy, ToolApprovalPolicy::Manual) {
         return PermissionDecision::NeedsUserApproval {
             workspace_access: requested_access,
         };
@@ -121,23 +117,13 @@ mod tests {
         let request_approval =
             TurnOptions::default().with_permission_mode(PermissionMode::RequestApproval);
         assert_eq!(
-            decide_tool_permission(
-                &request_approval,
-                CompileMode::Simple,
-                &write,
-                WorkspaceAccess::WorkspaceOnly,
-            ),
+            decide_tool_permission(&request_approval, &write, WorkspaceAccess::WorkspaceOnly,),
             PermissionDecision::Approved {
                 workspace_access: WorkspaceAccess::WorkspaceOnly
             }
         );
         assert_eq!(
-            decide_tool_permission(
-                &request_approval,
-                CompileMode::Simple,
-                &read,
-                WorkspaceAccess::ExternalAllowed,
-            ),
+            decide_tool_permission(&request_approval, &read, WorkspaceAccess::ExternalAllowed,),
             PermissionDecision::NeedsUserApproval {
                 workspace_access: WorkspaceAccess::ExternalAllowed
             }
@@ -145,12 +131,7 @@ mod tests {
 
         let auto_review = TurnOptions::default().with_permission_mode(PermissionMode::AutoReview);
         assert_eq!(
-            decide_tool_permission(
-                &auto_review,
-                CompileMode::Simple,
-                &bash,
-                WorkspaceAccess::ExternalAllowed,
-            ),
+            decide_tool_permission(&auto_review, &bash, WorkspaceAccess::ExternalAllowed,),
             PermissionDecision::NeedsAiReview {
                 workspace_access: WorkspaceAccess::ExternalAllowed
             }
@@ -158,12 +139,7 @@ mod tests {
 
         let full_access = TurnOptions::default().with_permission_mode(PermissionMode::FullAccess);
         assert_eq!(
-            decide_tool_permission(
-                &full_access,
-                CompileMode::Simple,
-                &bash,
-                WorkspaceAccess::WorkspaceOnly,
-            ),
+            decide_tool_permission(&full_access, &bash, WorkspaceAccess::WorkspaceOnly,),
             PermissionDecision::Approved {
                 workspace_access: WorkspaceAccess::ExternalAllowed
             }
@@ -179,23 +155,13 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            decide_tool_permission(
-                &manual,
-                CompileMode::Simple,
-                &read,
-                WorkspaceAccess::WorkspaceOnly,
-            ),
+            decide_tool_permission(&manual, &read, WorkspaceAccess::WorkspaceOnly,),
             PermissionDecision::NeedsUserApproval {
                 workspace_access: WorkspaceAccess::WorkspaceOnly
             }
         );
         assert_eq!(
-            decide_tool_permission(
-                &manual,
-                CompileMode::Simple,
-                &write_stdin,
-                WorkspaceAccess::WorkspaceOnly,
-            ),
+            decide_tool_permission(&manual, &write_stdin, WorkspaceAccess::WorkspaceOnly,),
             PermissionDecision::Approved {
                 workspace_access: WorkspaceAccess::WorkspaceOnly
             }
@@ -204,28 +170,11 @@ mod tests {
         assert_eq!(
             decide_tool_permission(
                 &TurnOptions::deny_all(),
-                CompileMode::Simple,
                 &read,
                 WorkspaceAccess::WorkspaceOnly,
             ),
             PermissionDecision::Denied {
                 reason: "tool execution denied by policy".to_string()
-            }
-        );
-    }
-
-    #[test]
-    fn plan_mode_bash_requires_user_approval_without_full_access() {
-        let options = TurnOptions::default().with_permission_mode(PermissionMode::RequestApproval);
-        assert_eq!(
-            decide_tool_permission(
-                &options,
-                CompileMode::Task,
-                &request("bash"),
-                WorkspaceAccess::WorkspaceOnly,
-            ),
-            PermissionDecision::NeedsUserApproval {
-                workspace_access: WorkspaceAccess::WorkspaceOnly
             }
         );
     }
@@ -240,7 +189,6 @@ mod tests {
         assert_eq!(
             decide_tool_permission(
                 &manual,
-                CompileMode::Task,
                 &request("mcp__github__search_issues"),
                 WorkspaceAccess::ExternalAllowed,
             ),
@@ -251,15 +199,10 @@ mod tests {
     }
 
     #[test]
-    fn full_access_approves_plan_bash_without_user_approval() {
+    fn full_access_approves_bash_without_user_approval() {
         let options = TurnOptions::default().with_permission_mode(PermissionMode::FullAccess);
         assert_eq!(
-            decide_tool_permission(
-                &options,
-                CompileMode::Task,
-                &request("bash"),
-                WorkspaceAccess::WorkspaceOnly,
-            ),
+            decide_tool_permission(&options, &request("bash"), WorkspaceAccess::WorkspaceOnly,),
             PermissionDecision::Approved {
                 workspace_access: WorkspaceAccess::ExternalAllowed
             }

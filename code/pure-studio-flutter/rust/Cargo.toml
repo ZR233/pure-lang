@@ -9,6 +9,7 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 
 [dependencies]
 pl-core = { workspace = true }
+pl-studio-runtime = { workspace = true }
 pl-protocol = { workspace = true }
 anyhow = { workspace = true }
 serde = { workspace = true }

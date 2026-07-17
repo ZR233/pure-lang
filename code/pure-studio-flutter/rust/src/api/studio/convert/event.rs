@@ -6,7 +6,7 @@ use super::runtime::{
     bridge_lsp_health, bridge_mcp_health, bridge_session_runtime, bridge_skill_activation,
 };
 use crate::api::studio::types::{BridgeEventEnvelope, BridgeEventPayload, BridgePlanLifecycleDto};
-use pl_protocol::{StudioEventEnvelope, StudioEventKind};
+use pl_studio_runtime::{StudioEventEnvelope, StudioEventKind};
 pub(crate) fn bridge_event_envelope(event: StudioEventEnvelope) -> Option<BridgeEventEnvelope> {
     if !bridge_visible_event(&event) {
         return None;

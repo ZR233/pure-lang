@@ -1,5 +1,39 @@
 part of 'studio_api.dart';
 
+const demoProviderCatalogFixture = ProviderCatalogView(
+  schemaVersion: 3,
+  revision: 'demo-future-catalog-v3',
+  presets: [
+    ProviderPresetView(
+      id: 'future-provider',
+      displayName: 'Future Provider',
+      description: 'Injected demo provider catalog fixture',
+      wireProtocol: 'chat_completions',
+      connectionModes: [
+        ProviderConnectionModeView(id: 'http', displayName: 'HTTP'),
+      ],
+      defaultConnectionMode: 'http',
+      baseUrl: 'https://future.example/v1',
+      credentialLabel: 'Access Key',
+      credentialEnv: 'FUTURE_PROVIDER_KEY',
+      modelCatalogId: 'future-catalog',
+      suggestedModel: 'future-model',
+    ),
+  ],
+  modelCatalogs: {
+    'future-catalog': [
+      ProviderModelView(
+        slug: 'future-model',
+        displayName: 'Future Model',
+        reasoningEfforts: ['eco', 'balanced', 'max'],
+        defaultReasoningEffort: 'balanced',
+        contextWindow: 500000,
+        maxOutputTokens: 64000,
+      ),
+    ],
+  },
+);
+
 ProviderUsageView _demoProviderUsage(ProviderSettingsView provider) {
   final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
   if (!provider.hasBearerToken) {
@@ -9,69 +43,6 @@ ProviderUsageView _demoProviderUsage(ProviderSettingsView provider) {
       status: 'missingCredential',
       usageKind: 'unknown',
       message: 'provider API key is not configured',
-    );
-  }
-  if (provider.templateKind == 'deepseek') {
-    return ProviderUsageView(
-      providerId: provider.id,
-      updatedAt: now,
-      status: 'ready',
-      usageKind: 'deepseekBalance',
-      balance: const DeepSeekBalanceUsageView(
-        isAvailable: true,
-        balances: [
-          DeepSeekBalanceInfoView(
-            currency: 'CNY',
-            totalBalance: '126.40',
-            grantedBalance: '26.40',
-            toppedUpBalance: '100.00',
-          ),
-        ],
-      ),
-    );
-  }
-  if (provider.templateKind == 'zhipu-coding-plan') {
-    return ProviderUsageView(
-      providerId: provider.id,
-      updatedAt: now,
-      status: 'ready',
-      usageKind: 'zhipuCodingPlan',
-      codingPlan: const ZhipuCodingPlanUsageView(
-        level: 'Pro',
-        limits: [
-          ZhipuQuotaLimitView(
-            window: 'fiveHour',
-            label: '5h',
-            percentage: 32,
-            remaining: 68000,
-            total: 100000,
-            usageDetails: [],
-          ),
-          ZhipuQuotaLimitView(
-            window: 'weekly',
-            label: '7d',
-            percentage: 54,
-            remaining: 460000,
-            total: 1000000,
-            usageDetails: [],
-          ),
-          ZhipuQuotaLimitView(
-            window: 'mcpMonthly',
-            label: 'MCP',
-            percentage: 18,
-            remaining: 82,
-            total: 100,
-            usageDetails: [
-              ZhipuToolUsageDetailView(
-                name: 'search',
-                currentValue: 12,
-                total: 100,
-                percentage: 12,
-              ),
-            ],
-          ),
-        ],
-      ),
     );
   }
   return ProviderUsageView(
@@ -85,6 +56,7 @@ ProviderUsageView _demoProviderUsage(ProviderSettingsView provider) {
 List<ProviderSettingsView> _providersFromSettingsPayload(
   Map<String, Object?> settings, {
   List<ProviderSettingsView> previous = const [],
+  required ProviderCatalogView catalog,
 }) {
   return _list(settings['providers']).map((value) {
     final provider = _map(value);
@@ -92,8 +64,10 @@ List<ProviderSettingsView> _providersFromSettingsPayload(
         .map(_providerSettingsModelFromJson)
         .where((model) => model.slug.isNotEmpty)
         .toList();
-    final template = _templateFor(_string(provider['templateKind']));
-    final defaultModels = template.defaultModels;
+    final template =
+        catalog.preset(_string(provider['templateKind'])) ??
+        catalog.presets.first;
+    final defaultModels = catalog.modelsFor(template.modelCatalogId);
     final models = [...defaultModels, ...customModels];
     final token = _string(provider['bearerToken']);
     final previousProvider = previous
@@ -104,15 +78,14 @@ List<ProviderSettingsView> _providersFromSettingsPayload(
     return ProviderSettingsView(
       id: _string(provider['id']),
       templateKind: template.id,
-      name: _string(provider['name'], fallback: template.name),
-      subtitle:
-          '${_string(provider['name'], fallback: template.name)} Platform',
+      name: _string(provider['name'], fallback: template.displayName),
+      subtitle: _string(provider['name'], fallback: template.displayName),
       baseUrl: _string(provider['baseUrl'], fallback: template.baseUrl),
       bearerToken: '',
       hasBearerToken: hasToken,
       defaultModel: _string(
         provider['defaultModel'],
-        fallback: template.defaultModel,
+        fallback: template.suggestedModel,
       ),
       models: models,
       defaultModels: defaultModels,
@@ -121,7 +94,15 @@ List<ProviderSettingsView> _providersFromSettingsPayload(
       usageLabel: '${models.length} models',
       modelCount: '${models.length}',
       updatedAt: 'Preview',
-      providerKind: template.providerKind,
+      wireProtocol: template.wireProtocol,
+      connectionMode: _string(
+        provider['connectionMode'],
+        fallback: template.defaultConnectionMode,
+      ),
+      catalogId: template.modelCatalogId,
+      credentialLabel: template.credentialLabel,
+      credentialEnv: template.credentialEnv,
+      iconKey: template.iconKey,
     );
   }).toList();
 }
@@ -177,127 +158,3 @@ SkillsSettingsView _skillsFromSettingsPayload(Map<String, Object?> settings) {
     autoLearnMinToolCalls: _int(settings['autoLearnMinToolCalls'], fallback: 5),
   );
 }
-
-_ProviderTemplateDefaults _templateFor(String id) {
-  return _providerTemplates.firstWhere(
-    (template) => template.id == id,
-    orElse: () => _providerTemplates.first,
-  );
-}
-
-class _ProviderTemplateDefaults {
-  const _ProviderTemplateDefaults({
-    required this.id,
-    required this.name,
-    required this.baseUrl,
-    required this.defaultModel,
-    required this.providerKind,
-    required this.defaultModels,
-  });
-
-  final String id;
-  final String name;
-  final String baseUrl;
-  final String defaultModel;
-  final String providerKind;
-  final List<ProviderModelView> defaultModels;
-}
-
-const _providerTemplates = [
-  _ProviderTemplateDefaults(
-    id: 'deepseek',
-    name: 'DeepSeek',
-    baseUrl: 'https://api.deepseek.com',
-    defaultModel: 'deepseek-v4-flash',
-    providerKind: 'deep_seek',
-    defaultModels: [
-      ProviderModelView(
-        slug: 'deepseek-v4-flash',
-        displayName: 'DeepSeek V4 Flash',
-        reasoningEfforts: ['high', 'max'],
-      ),
-      ProviderModelView(
-        slug: 'deepseek-v4-pro',
-        displayName: 'DeepSeek V4 Pro',
-        reasoningEfforts: ['high', 'max'],
-      ),
-    ],
-  ),
-  _ProviderTemplateDefaults(
-    id: 'openai',
-    name: 'OpenAI',
-    baseUrl: 'https://api.openai.com/v1',
-    defaultModel: 'gpt-5.5',
-    providerKind: 'open_ai',
-    defaultModels: [
-      ProviderModelView(
-        slug: 'gpt-5.5',
-        displayName: 'GPT-5.5',
-        reasoningEfforts: ['medium', 'low', 'high', 'xhigh'],
-      ),
-      ProviderModelView(
-        slug: 'gpt-5.4',
-        displayName: 'GPT-5.4',
-        reasoningEfforts: ['medium', 'low', 'high', 'xhigh'],
-      ),
-      ProviderModelView(
-        slug: 'gpt-5.4-mini',
-        displayName: 'GPT-5.4-Mini',
-        reasoningEfforts: ['medium', 'low', 'high', 'xhigh'],
-      ),
-      ProviderModelView(
-        slug: 'gpt-5.6-sol',
-        displayName: 'GPT-5.6-Sol',
-        reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
-      ),
-      ProviderModelView(
-        slug: 'gpt-5.6-terra',
-        displayName: 'GPT-5.6-Terra',
-        reasoningEfforts: ['medium', 'low', 'high', 'xhigh', 'max'],
-      ),
-      ProviderModelView(
-        slug: 'gpt-5.6-luna',
-        displayName: 'GPT-5.6-Luna',
-        reasoningEfforts: ['medium', 'low', 'high', 'xhigh', 'max'],
-      ),
-    ],
-  ),
-  _ProviderTemplateDefaults(
-    id: 'zhipu',
-    name: 'Zhipu',
-    baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
-    defaultModel: 'glm-5.2',
-    providerKind: 'zhipu',
-    defaultModels: [
-      ProviderModelView(
-        slug: 'glm-5.2',
-        displayName: 'GLM-5.2',
-        reasoningEfforts: ['enabled', 'none'],
-      ),
-      ProviderModelView(
-        slug: 'glm-5',
-        displayName: 'GLM-5',
-        reasoningEfforts: ['enabled', 'none'],
-      ),
-    ],
-  ),
-  _ProviderTemplateDefaults(
-    id: 'zhipu-coding-plan',
-    name: 'Zhipu Coding Plan',
-    baseUrl: 'https://open.bigmodel.cn/api/coding/paas/v4',
-    defaultModel: 'glm-5.2',
-    providerKind: 'zhipu',
-    defaultModels: [
-      ProviderModelView(
-        slug: 'glm-5.2',
-        displayName: 'GLM-5.2',
-        reasoningEfforts: ['enabled', 'none'],
-      ),
-      ProviderModelView(
-        slug: 'glm-5',
-        displayName: 'GLM-5',
-        reasoningEfforts: ['enabled', 'none'],
-      ),
-    ],
-  ),
-];

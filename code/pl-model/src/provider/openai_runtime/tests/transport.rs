@@ -1,9 +1,33 @@
 use super::*;
+use crate::default_models;
 use crate::request::{
     ModelCompactionRequest, OpenAiCompactionMode, ReasoningConfig, ReasoningSummary, ToolSchema,
 };
+use futures::{SinkExt, StreamExt};
 use pl_protocol::ModelContextItem;
 use pretty_assertions::assert_eq;
+use tokio::net::TcpListener;
+use tokio_tungstenite::tungstenite::Message as WebSocketMessage;
+use tokio_tungstenite::tungstenite::handshake::server::{
+    ErrorResponse, Request as WebSocketRequest, Response as WebSocketResponse,
+};
+use tokio_tungstenite::{accept_async, accept_hdr_async};
+
+// tungstenite 的 header callback 必须返回其固定 ErrorResponse；该第三方类型较大，
+// 测试 helper 无法在不改变 callback 契约的情况下装箱。
+#[allow(clippy::result_large_err)]
+fn validate_openai_websocket_handshake(
+    request: &WebSocketRequest,
+    response: WebSocketResponse,
+) -> std::result::Result<WebSocketResponse, ErrorResponse> {
+    assert_eq!(request.uri().path(), "/v1/responses");
+    assert_eq!(
+        request.headers()["openai-beta"],
+        "responses_websockets=2026-02-06"
+    );
+    assert_eq!(request.headers()["authorization"], "Bearer test-token");
+    Ok(response)
+}
 
 fn openai_provider(base_url: String) -> OpenAiProvider {
     let mut model = default_models()
@@ -14,7 +38,8 @@ fn openai_provider(base_url: String) -> OpenAiProvider {
     model.context_window = Some(128_000);
     OpenAiProvider::new(
         ProviderInfo {
-            provider_kind: crate::provider_info::ProviderKind::OpenAi,
+            protocol: crate::provider_info::ProviderWireProtocol::Responses,
+            connection_mode: crate::provider_info::ProviderConnectionMode::Http,
             name: "Local Responses".to_string(),
             base_url,
             bearer_token: Some("test-token".to_string()),
@@ -57,6 +82,325 @@ fn compaction_request(mode: OpenAiCompactionMode) -> ModelCompactionRequest {
         }),
         prompt_cache_key: Some("cache-key".to_string()),
     }
+}
+
+#[tokio::test]
+async fn responses_websocket_reuses_the_agent_session_connection() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let websocket = accept_hdr_async(stream, validate_openai_websocket_handshake)
+            .await
+            .unwrap();
+        let (mut writer, mut reader) = websocket.split();
+        let mut requests = Vec::new();
+        for ordinal in 1..=2 {
+            let WebSocketMessage::Text(text) = reader.next().await.unwrap().unwrap() else {
+                panic!("expected a text response.create frame");
+            };
+            requests.push(serde_json::from_str::<serde_json::Value>(text.as_str()).unwrap());
+            let response_id = format!("resp-{ordinal}");
+            for event in [
+                serde_json::json!({
+                    "type": "response.created",
+                    "response": {"id": response_id.clone(), "model": "local-responses"}
+                }),
+                serde_json::json!({
+                    "type": "response.output_text.delta",
+                    "item_id": format!("message-{ordinal}"),
+                    "delta": format!("ok-{ordinal}")
+                }),
+                serde_json::json!({
+                    "type": "response.completed",
+                    "response": {
+                        "id": response_id,
+                        "model": "local-responses",
+                        "output": [{
+                            "type": "message",
+                            "id": format!("message-{ordinal}"),
+                            "status": "completed",
+                            "role": "assistant",
+                            "content": [{
+                                "type": "output_text",
+                                "text": format!("ok-{ordinal}")
+                            }]
+                        }],
+                        "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
+                    }
+                }),
+            ] {
+                writer
+                    .send(WebSocketMessage::Text(event.to_string().into()))
+                    .await
+                    .unwrap();
+            }
+        }
+        requests
+    });
+
+    let mut info = ProviderInfo::openai(Some(format!("http://{address}/v1")));
+    info.default_model = "local-responses".to_string();
+    info.bearer_token = Some("test-token".to_string());
+    let mut model = ModelInfo::fallback("local-responses");
+    model.context_window = Some(128_000);
+    let provider = OpenAiProvider::new(info, vec![model]).unwrap();
+    let transport_session = crate::ModelTransportSession::default();
+    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
+
+    let mut first_request = minimal_request("local-responses");
+    first_request.store = Some(true);
+    first_request.transport_session = transport_session.clone();
+    let first = provider
+        .stream_complete(first_request, event_tx.clone())
+        .await
+        .unwrap();
+    let mut second_request = minimal_request("local-responses");
+    second_request.store = Some(true);
+    second_request.input.extend([
+        Message {
+            role: MessageRole::Assistant,
+            content: MessageContent::Text("ok-1".to_string()),
+            reasoning_content: None,
+            metadata: HashMap::new(),
+        }
+        .into(),
+        Message {
+            role: MessageRole::User,
+            content: MessageContent::Text("again".to_string()),
+            reasoning_content: None,
+            metadata: HashMap::new(),
+        }
+        .into(),
+    ]);
+    second_request.transport_session = transport_session;
+    let second = provider
+        .stream_complete(second_request, event_tx)
+        .await
+        .unwrap();
+    let requests = server.await.unwrap();
+
+    assert_eq!(first.content.as_deref(), Some("ok-1"));
+    assert_eq!(second.content.as_deref(), Some("ok-2"));
+    assert_eq!(requests[0]["type"], "response.create");
+    assert_eq!(requests[0]["tools"], serde_json::json!([]));
+    assert_eq!(requests[0]["store"], false);
+    assert_eq!(requests[1]["store"], false);
+    assert_eq!(requests[1]["previous_response_id"], "resp-1");
+    assert_eq!(
+        requests[1]["input"],
+        serde_json::json!([{
+            "type": "message",
+            "role": "user",
+            "content": [{ "type": "input_text", "text": "again" }]
+        }])
+    );
+}
+
+#[tokio::test]
+async fn responses_websocket_retries_an_immediate_close_with_full_history() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let websocket = accept_async(stream).await.unwrap();
+        let (mut writer, mut reader) = websocket.split();
+        let WebSocketMessage::Text(first) = reader.next().await.unwrap().unwrap() else {
+            panic!("expected first response.create frame");
+        };
+        writer.send(WebSocketMessage::Close(None)).await.unwrap();
+        drop(writer);
+
+        let (stream, _) = listener.accept().await.unwrap();
+        let websocket = accept_async(stream).await.unwrap();
+        let (mut writer, mut reader) = websocket.split();
+        let WebSocketMessage::Text(retried) = reader.next().await.unwrap().unwrap() else {
+            panic!("expected retried response.create frame");
+        };
+        for event in [
+            serde_json::json!({
+                "type": "response.output_text.delta",
+                "item_id": "message-1",
+                "delta": "ok"
+            }),
+            serde_json::json!({
+                "type": "response.completed",
+                "response": {
+                    "id": "resp-1",
+                    "model": "local-responses",
+                    "output": [{
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{ "type": "output_text", "text": "ok" }]
+                    }],
+                    "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
+                }
+            }),
+        ] {
+            writer
+                .send(WebSocketMessage::Text(event.to_string().into()))
+                .await
+                .unwrap();
+        }
+        [first, retried]
+            .map(|frame| serde_json::from_str::<serde_json::Value>(frame.as_str()).unwrap())
+    });
+
+    let mut info = ProviderInfo::openai(Some(format!("http://{address}/v1")));
+    info.default_model = "local-responses".to_string();
+    info.bearer_token = Some("test-token".to_string());
+    let mut model = ModelInfo::fallback("local-responses");
+    model.context_window = Some(128_000);
+    let provider = OpenAiProvider::new(info, vec![model]).unwrap();
+    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
+
+    let response = provider
+        .stream_complete(minimal_request("local-responses"), event_tx)
+        .await
+        .unwrap();
+    let [initial, retried] = server.await.unwrap();
+
+    assert_eq!(response.content.as_deref(), Some("ok"));
+    assert_eq!(initial, retried);
+    assert_eq!(retried["tools"], serde_json::json!([]));
+}
+
+#[tokio::test]
+async fn responses_websocket_retries_an_invalid_continuation_once_with_full_history() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let websocket = accept_async(stream).await.unwrap();
+        let (mut writer, mut reader) = websocket.split();
+        let WebSocketMessage::Text(first) = reader.next().await.unwrap().unwrap() else {
+            panic!("expected first response.create frame");
+        };
+        for event in [
+            serde_json::json!({
+                "type": "response.output_text.delta",
+                "item_id": "message-1",
+                "delta": "ok-1"
+            }),
+            serde_json::json!({
+                "type": "response.completed",
+                "response": {
+                    "id": "resp-1",
+                    "model": "local-responses",
+                    "output": [{
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{ "type": "output_text", "text": "ok-1" }]
+                    }],
+                    "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
+                }
+            }),
+        ] {
+            writer
+                .send(WebSocketMessage::Text(event.to_string().into()))
+                .await
+                .unwrap();
+        }
+        let WebSocketMessage::Text(incremental) = reader.next().await.unwrap().unwrap() else {
+            panic!("expected incremental response.create frame");
+        };
+        writer
+            .send(WebSocketMessage::Text(
+                serde_json::json!({
+                    "type": "error",
+                    "error": {
+                        "code": "invalid_previous_response_id",
+                        "message": "previous_response_id is no longer valid"
+                    }
+                })
+                .to_string()
+                .into(),
+            ))
+            .await
+            .unwrap();
+        drop(writer);
+
+        let (stream, _) = listener.accept().await.unwrap();
+        let websocket = accept_async(stream).await.unwrap();
+        let (mut writer, mut reader) = websocket.split();
+        let WebSocketMessage::Text(retried) = reader.next().await.unwrap().unwrap() else {
+            panic!("expected full-history retry frame");
+        };
+        for event in [
+            serde_json::json!({
+                "type": "response.output_text.delta",
+                "item_id": "message-2",
+                "delta": "ok-2"
+            }),
+            serde_json::json!({
+                "type": "response.completed",
+                "response": {
+                    "id": "resp-2",
+                    "model": "local-responses",
+                    "output": [{
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{ "type": "output_text", "text": "ok-2" }]
+                    }],
+                    "usage": {"input_tokens": 3, "output_tokens": 1, "total_tokens": 4}
+                }
+            }),
+        ] {
+            writer
+                .send(WebSocketMessage::Text(event.to_string().into()))
+                .await
+                .unwrap();
+        }
+        [first, incremental, retried]
+            .map(|frame| serde_json::from_str::<serde_json::Value>(frame.as_str()).unwrap())
+    });
+
+    let mut info = ProviderInfo::openai(Some(format!("http://{address}/v1")));
+    info.default_model = "local-responses".to_string();
+    info.bearer_token = Some("test-token".to_string());
+    let mut model = ModelInfo::fallback("local-responses");
+    model.context_window = Some(128_000);
+    let provider = OpenAiProvider::new(info, vec![model]).unwrap();
+    let transport_session = crate::ModelTransportSession::default();
+    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
+
+    let mut first_request = minimal_request("local-responses");
+    first_request.transport_session = transport_session.clone();
+    let first = provider
+        .stream_complete(first_request, event_tx.clone())
+        .await
+        .unwrap();
+    let mut second_request = minimal_request("local-responses");
+    second_request.input.extend([
+        Message {
+            role: MessageRole::Assistant,
+            content: MessageContent::Text("ok-1".to_string()),
+            reasoning_content: None,
+            metadata: HashMap::new(),
+        }
+        .into(),
+        Message {
+            role: MessageRole::User,
+            content: MessageContent::Text("again".to_string()),
+            reasoning_content: None,
+            metadata: HashMap::new(),
+        }
+        .into(),
+    ]);
+    second_request.transport_session = transport_session;
+    let second = provider
+        .stream_complete(second_request, event_tx)
+        .await
+        .unwrap();
+    let [initial, incremental, retried] = server.await.unwrap();
+
+    assert_eq!(first.content.as_deref(), Some("ok-1"));
+    assert_eq!(second.content.as_deref(), Some("ok-2"));
+    assert!(initial.get("previous_response_id").is_none());
+    assert_eq!(incremental["previous_response_id"], "resp-1");
+    assert_eq!(incremental["input"].as_array().unwrap().len(), 1);
+    assert!(retried.get("previous_response_id").is_none());
+    assert_eq!(retried["input"].as_array().unwrap().len(), 3);
 }
 
 #[tokio::test]
@@ -170,7 +514,8 @@ async fn stream_complete_uses_chat_endpoint_without_auth_when_token_missing() {
     model.context_window = Some(128_000);
     let provider = OpenAiProvider::new(
         ProviderInfo {
-            provider_kind: crate::provider_info::ProviderKind::DeepSeek,
+            protocol: crate::provider_info::ProviderWireProtocol::ChatCompletions,
+            connection_mode: crate::provider_info::ProviderConnectionMode::Http,
             name: "Local Chat".to_string(),
             base_url,
             default_model: "local-chat".to_string(),
@@ -239,7 +584,8 @@ async fn stream_complete_chat_tags_project_commentary_and_final_only() {
     model.context_window = Some(128_000);
     let provider = OpenAiProvider::new(
         ProviderInfo {
-            provider_kind: crate::provider_info::ProviderKind::DeepSeek,
+            protocol: crate::provider_info::ProviderWireProtocol::ChatCompletions,
+            connection_mode: crate::provider_info::ProviderConnectionMode::Http,
             name: "Local Chat".to_string(),
             base_url,
             default_model: "local-chat".to_string(),
@@ -301,7 +647,8 @@ async fn stream_complete_sends_responses_bearer_and_custom_headers() {
     model.context_window = Some(128_000);
     let provider = OpenAiProvider::new(
         ProviderInfo {
-            provider_kind: crate::provider_info::ProviderKind::OpenAi,
+            protocol: crate::provider_info::ProviderWireProtocol::Responses,
+            connection_mode: crate::provider_info::ProviderConnectionMode::Http,
             name: "Local Responses".to_string(),
             base_url,
             bearer_token: Some("test-token".to_string()),

@@ -1404,6 +1404,12 @@ abstract class AppLocalizations {
   /// **'Template'**
   String get settingsTemplate;
 
+  /// No description provided for @settingsCustomProvider.
+  ///
+  /// In en, this message translates to:
+  /// **'Custom provider'**
+  String get settingsCustomProvider;
+
   /// No description provided for @settingsDefaultModel.
   ///
   /// In en, this message translates to:

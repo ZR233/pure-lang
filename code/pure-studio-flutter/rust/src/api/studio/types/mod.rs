@@ -34,6 +34,9 @@ pub use runtime::{
     BridgeTaskReviewDto, BridgeTaskRuntimeDto, BridgeTaskWorkUnitDto, RuntimeSnapshot,
 };
 pub use settings::{
-    InstructionsSettingsInput, McpServerInput, McpSettingsInput, ProviderInput, ProviderModelInput,
-    ProviderSettingsInput, RoleInput, SkillsSettingsInput,
+    BridgeModelCapabilities, BridgeModelCatalogDescriptor, BridgeModelDescriptor,
+    BridgeModelPricing, BridgeModelReasoningDescriptor, BridgeProviderCatalogSnapshot,
+    BridgeProviderConnectionModeDescriptor, BridgeProviderPresetDescriptor,
+    BridgeProviderTransportDescriptor, InstructionsSettingsInput, McpServerInput, McpSettingsInput,
+    ProviderInput, ProviderModelInput, ProviderSettingsInput, RoleInput, SkillsSettingsInput,
 };

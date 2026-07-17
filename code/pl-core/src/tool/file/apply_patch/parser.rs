@@ -16,7 +16,7 @@ const VALID_HUNK_HEADERS: &str = "valid hunk headers are '*** Add File: {path}',
 pub(crate) const PATCH_RETRY_GUIDANCE: &str = "Recovery: read the target file again, then retry with a smaller Codex-style patch built from the current file contents. Do not repeat the same failed patch.";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Hunk {
+pub enum Hunk {
     Add {
         path: String,
         content: String,
@@ -32,14 +32,14 @@ pub(crate) enum Hunk {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct UpdateChunk {
-    pub(crate) context: Option<String>,
-    pub(crate) old_lines: Vec<String>,
-    pub(crate) new_lines: Vec<String>,
-    pub(crate) eof: bool,
+pub struct UpdateChunk {
+    pub context: Option<String>,
+    pub old_lines: Vec<String>,
+    pub new_lines: Vec<String>,
+    pub eof: bool,
 }
 
-pub(crate) fn parse_patch(patch: &str) -> Result<Vec<Hunk>, PureError> {
+pub fn parse_patch(patch: &str) -> Result<Vec<Hunk>, PureError> {
     let patch = normalize_patch_input(patch)?;
     let lines: Vec<&str> = patch.trim().lines().collect();
     match (

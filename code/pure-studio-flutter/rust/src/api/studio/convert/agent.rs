@@ -3,8 +3,12 @@ use crate::api::studio::types::{
     BridgeTodoItemDto, BridgeTodoListSnapshotDto,
 };
 use anyhow::{Context, Result};
-use pl_protocol::{StudioAgentSnapshot, StudioAgentTimelineEvent, StudioAgentTimelineEventKind};
-pub(crate) fn agent_bridge_dto(agent: pl_core::AgentSnapshotRecord) -> BridgeAgentSnapshotDto {
+use pl_studio_runtime::{
+    StudioAgentSnapshot, StudioAgentTimelineEvent, StudioAgentTimelineEventKind,
+};
+pub(crate) fn agent_bridge_dto(
+    agent: pl_studio_runtime::AgentSnapshotRecord,
+) -> BridgeAgentSnapshotDto {
     BridgeAgentSnapshotDto {
         id: agent.id,
         session_id: agent.session_id,
@@ -22,7 +26,7 @@ pub(crate) fn agent_bridge_dto(agent: pl_core::AgentSnapshotRecord) -> BridgeAge
 }
 
 pub(crate) fn agent_event_bridge_dto(
-    event: pl_core::AgentTimelineEventRecord,
+    event: pl_studio_runtime::AgentTimelineEventRecord,
 ) -> Result<BridgeAgentTimelineEventDto> {
     let payload = serde_json::from_str::<StudioAgentTimelineEvent>(&event.payload_json)
         .with_context(|| {

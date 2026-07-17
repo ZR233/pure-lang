@@ -6,10 +6,10 @@ import 'app_localizations.dart';
 extension StudioLocalizationsX on BuildContext {
   AppLocalizations get l10n => AppLocalizations.of(this);
 
-  String compileModeLabel(CompileMode mode) {
+  String compileModeLabel(StudioMode mode) {
     return switch (mode) {
-      CompileMode.simple => l10n.compileModeSimple,
-      CompileMode.task => l10n.compileModeTask,
+      StudioMode.simple => l10n.compileModeSimple,
+      StudioMode.task => l10n.compileModeTask,
     };
   }
 

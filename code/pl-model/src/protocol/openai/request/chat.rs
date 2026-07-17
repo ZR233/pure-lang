@@ -157,12 +157,15 @@ enum ChatMessageToolCall {
 
 impl ChatMessageToolCall {
     fn from_tool_call(tool_call: ToolCall) -> Self {
+        let invalid_arguments = tool_call.invalid_arguments;
         match tool_call.payload {
             ToolCallPayload::Function { arguments } => Self::Function {
                 id: tool_call.id,
                 function: ChatFunctionCall {
                     name: tool_call.name,
-                    arguments: serde_json::to_string(&arguments).unwrap_or_default(),
+                    arguments: invalid_arguments
+                        .map(|invalid| invalid.raw)
+                        .unwrap_or_else(|| serde_json::to_string(&arguments).unwrap_or_default()),
                 },
             },
             ToolCallPayload::Custom { input } => Self::Custom {

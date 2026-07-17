@@ -1,6 +1,6 @@
 use pl_core::{
-    CompileMode, ContextCompactionImplementation, CoreRuntimeProfile, CoreSession, ModelInfo,
-    PureCoreBuilder, TurnBudget, TurnRequest, TurnResultStatus,
+    AgentSession, ContextCompactionImplementation, CoreRuntimeProfile, ModelInfo, TurnBudget,
+    TurnEngineBuilder, TurnRequest, TurnResultStatus,
 };
 use pl_model::{ProviderInfo, default_models};
 use pl_protocol::{MessageRole, ModelContextItem};
@@ -55,23 +55,20 @@ async fn openai_responses_compacts_context_live() {
     let model = live_model(&info.default_model);
     info.default_model = model.clone();
     let core =
-        PureCoreBuilder::from_provider_info_with_models(info, vec![compacting_model(&model)])
+        TurnEngineBuilder::from_provider_info_with_models(info, vec![compacting_model(&model)])
             .unwrap()
             .with_runtime_profile(CoreRuntimeProfile::minimal())
             .build();
 
-    let mut session = CoreSession::new();
+    let mut session = AgentSession::new();
     session.push_user_prompt(
         "旧上下文：项目代号 alpha，用户偏好回答要简短，并且最终回复只需要 ok。".to_string(),
     );
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(256);
     let mut recorder =
         pl_core::TraceRecorder::new("context-compaction-live".to_string(), event_tx, 0);
-    let request = TurnRequest::new(
-        "请根据当前上下文只回答 ok，不要解释。".to_string(),
-        CompileMode::Simple,
-    )
-    .with_budget(TurnBudget::new(180_000));
+    let request = TurnRequest::new("请根据当前上下文只回答 ok，不要解释。".to_string())
+        .with_budget(TurnBudget::new(180_000));
 
     let result = core
         .run_turn_with_trace(&mut session, request, &mut recorder, Default::default())

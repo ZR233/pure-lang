@@ -139,18 +139,18 @@ bool _isActiveMemoryAgent(String status) =>
 class _SessionModeSelector extends ConsumerWidget {
   const _SessionModeSelector({required this.mode, required this.enabled});
 
-  final CompileMode mode;
+  final StudioMode mode;
   final bool enabled;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return UpwardPopupMenu<CompileMode>(
+    return UpwardPopupMenu<StudioMode>(
       tooltip: context.l10n.statusSessionMode,
       enabled: enabled,
       initialValue: mode,
       onSelected: ref.read(studioControllerProvider.notifier).setSessionMode,
       itemBuilder: (context) => [
-        for (final option in CompileMode.values)
+        for (final option in StudioMode.values)
           PopupMenuItem(
             value: option,
             child: Row(
@@ -169,10 +169,10 @@ class _SessionModeSelector extends ConsumerWidget {
     );
   }
 
-  IconData _modeIcon(CompileMode value) {
+  IconData _modeIcon(StudioMode value) {
     return switch (value) {
-      CompileMode.simple => Icons.flash_on,
-      CompileMode.task => Icons.route_outlined,
+      StudioMode.simple => Icons.flash_on,
+      StudioMode.task => Icons.route_outlined,
     };
   }
 }
@@ -181,7 +181,7 @@ class _ModeModelSelector extends ConsumerWidget {
   const _ModeModelSelector({required this.state, required this.mode});
 
   final StudioState state;
-  final CompileMode mode;
+  final StudioMode mode;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -193,7 +193,7 @@ class _ModeModelSelector extends ConsumerWidget {
     final role = state.role(roleKey);
     final current = _modelFor(state, mode) ?? options.first;
     return UpwardPopupMenu<String>(
-      tooltip: mode == CompileMode.task
+      tooltip: mode == StudioMode.task
           ? context.l10n.statusPlannerModel
           : context.l10n.statusExecutorModel,
       initialValue: current.key,
@@ -238,7 +238,7 @@ class _ReasoningEffortSelector extends ConsumerWidget {
   const _ReasoningEffortSelector({required this.state, required this.mode});
 
   final StudioState state;
-  final CompileMode mode;
+  final StudioMode mode;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -314,14 +314,14 @@ class _ModeModelOption {
   String get key => '$providerId::$model';
 }
 
-String _roleKeyForMode(CompileMode mode) {
+String _roleKeyForMode(StudioMode mode) {
   return switch (mode) {
-    CompileMode.simple => 'executor',
-    CompileMode.task => 'planner',
+    StudioMode.simple => 'executor',
+    StudioMode.task => 'planner',
   };
 }
 
-_ModeModelOption? _modelFor(StudioState state, CompileMode mode) {
+_ModeModelOption? _modelFor(StudioState state, StudioMode mode) {
   final role = state.role(_roleKeyForMode(mode));
   if (role == null) {
     return null;
@@ -337,7 +337,7 @@ _ModeModelOption? _modelFor(StudioState state, CompileMode mode) {
   );
 }
 
-List<String> _effortsForState(StudioState state, CompileMode mode) {
+List<String> _effortsForState(StudioState state, StudioMode mode) {
   return _modelFor(state, mode)?.reasoningEfforts ?? const [];
 }
 

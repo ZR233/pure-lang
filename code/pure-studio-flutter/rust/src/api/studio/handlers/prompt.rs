@@ -4,8 +4,8 @@ use crate::api::studio::types::{
     ResolveInteractionResponse, StopPromptResponse, SubmitPromptResponse,
 };
 use anyhow::{Context, Result};
-use pl_core::{StudioSubmitPromptOptions, StudioSubmitPromptRequest};
 use pl_protocol::InteractionResolution;
+use pl_studio_runtime::{StudioSubmitPromptOptions, StudioSubmitPromptRequest};
 // ── Prompt / Interaction ──
 
 pub fn submit_prompt(

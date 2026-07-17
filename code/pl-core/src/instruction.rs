@@ -5,8 +5,7 @@ use pl_model::ModelInfo;
 use pl_protocol::{Message, MessageContent, MessageRole, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::config::{InstructionsConfig, PureConfig};
-use crate::turn::CompileMode;
+use crate::config::{InstructionsConfig, SkillsConfig};
 use crate::workspace::load_workspace_instruction_documents;
 
 const DEFAULT_BASE_INSTRUCTIONS: &str = include_str!("prompts/system.md");
@@ -20,13 +19,21 @@ const PLATFORM_SPECIFIC_INSTRUCTIONS: &str = "";
 
 #[derive(Debug, Clone)]
 pub struct InstructionAssemblyRequest<'a> {
-    pub config: Option<&'a PureConfig>,
+    pub instructions: Option<&'a InstructionsConfig>,
+    pub skills: Option<&'a SkillsConfig>,
+    pub execution_profile: Option<ExecutionInstructionProfile<'a>>,
     pub model: &'a ModelInfo,
-    pub mode: CompileMode,
     pub workspace_root: &'a Path,
     pub current_dir: &'a Path,
     pub workspace_instructions: Option<&'a str>,
     pub subagent_constraint: Option<&'a str>,
+}
+
+/// 产品层为一次 turn 提供的角色或模式指令。
+#[derive(Debug, Clone, Copy)]
+pub struct ExecutionInstructionProfile<'a> {
+    pub label: &'a str,
+    pub instructions: &'a str,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,7 +75,7 @@ pub enum InstructionSourceKind {
     ModelBase,
     ConfigBaseOverride,
     ProfileBaseOverride,
-    Mode,
+    ExecutionProfile,
     Platform,
     ConfigDeveloper,
     ProfileDeveloper,
@@ -157,18 +164,19 @@ impl InstructionAssembler {
         request: InstructionAssemblyRequest<'_>,
         profile: Option<&InstructionProfile>,
     ) -> Result<InstructionSnapshot> {
-        let config_instructions = request.config.map(|config| &config.instructions);
+        let config_instructions = request.instructions;
         let mut snapshot = InstructionSnapshot {
             base: base_block(profile, config_instructions, request.model),
             developer: Vec::new(),
             user: Vec::new(),
         };
 
-        let mode = request.mode.label();
-        snapshot.push_developer(
-            InstructionSource::new(InstructionSourceKind::Mode, format!("compile mode: {mode}")),
-            request.mode.instructions(),
-        );
+        if let Some(execution) = request.execution_profile {
+            snapshot.push_developer(
+                InstructionSource::new(InstructionSourceKind::ExecutionProfile, execution.label),
+                execution.instructions,
+            );
+        }
         snapshot.push_developer(
             InstructionSource::new(InstructionSourceKind::Platform, platform_label()),
             &platform_instructions(),
@@ -184,8 +192,8 @@ impl InstructionAssembler {
                 snapshot.push_developer(block.source.clone(), &block.content);
             }
         }
-        if let Some(config) = request.config {
-            match crate::skill::build_skills_prompt(request.workspace_root, &config.skills) {
+        if let Some(skills) = request.skills {
+            match crate::skill::build_skills_prompt(request.workspace_root, skills) {
                 Ok(Some(skills)) => {
                     snapshot.push_developer(
                         InstructionSource::new(InstructionSourceKind::Skills, "skills"),
@@ -341,7 +349,7 @@ impl InstructionSourceKind {
     fn is_turn_overlay(self) -> bool {
         matches!(
             self,
-            Self::Mode
+            Self::ExecutionProfile
                 | Self::Platform
                 | Self::Skills
                 | Self::SubagentConstraint
@@ -541,14 +549,20 @@ mod tests {
         let dir = temp_dir("order");
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("AGENTS.md"), "project rules").unwrap();
-        let mut config = PureConfig::default();
-        config.instructions.developer = "config dev".to_string();
-        config.instructions.user = "config user".to_string();
+        let config = InstructionsConfig {
+            developer: "config dev".to_string(),
+            user: "config user".to_string(),
+            ..InstructionsConfig::default()
+        };
 
         let snapshot = InstructionAssembler::assemble(InstructionAssemblyRequest {
-            config: Some(&config),
+            instructions: Some(&config),
+            skills: None,
+            execution_profile: Some(ExecutionInstructionProfile {
+                label: "test",
+                instructions: "mode instructions",
+            }),
             model: &ModelInfo::fallback("test-model"),
-            mode: CompileMode::Task,
             workspace_root: &dir,
             current_dir: &dir,
             workspace_instructions: None,
@@ -563,10 +577,9 @@ mod tests {
                 .map(|block| block.source.kind)
                 .collect::<Vec<_>>(),
             vec![
-                InstructionSourceKind::Mode,
+                InstructionSourceKind::ExecutionProfile,
                 InstructionSourceKind::Platform,
                 InstructionSourceKind::ConfigDeveloper,
-                InstructionSourceKind::Skills,
                 InstructionSourceKind::SubagentConstraint
             ]
         );
@@ -588,13 +601,19 @@ mod tests {
     fn platform_block_is_after_mode_and_before_config_developer() {
         let dir = temp_dir("platform-order");
         fs::create_dir_all(&dir).unwrap();
-        let mut config = PureConfig::default();
-        config.instructions.developer = "config dev".to_string();
+        let config = InstructionsConfig {
+            developer: "config dev".to_string(),
+            ..InstructionsConfig::default()
+        };
 
         let snapshot = InstructionAssembler::assemble(InstructionAssemblyRequest {
-            config: Some(&config),
+            instructions: Some(&config),
+            skills: None,
+            execution_profile: Some(ExecutionInstructionProfile {
+                label: "test",
+                instructions: "mode instructions",
+            }),
             model: &ModelInfo::fallback("test-model"),
-            mode: CompileMode::Simple,
             workspace_root: &dir,
             current_dir: &dir,
             workspace_instructions: None,
@@ -604,7 +623,7 @@ mod tests {
 
         assert_eq!(
             snapshot.developer[0].source.kind,
-            InstructionSourceKind::Mode
+            InstructionSourceKind::ExecutionProfile
         );
         assert_eq!(
             snapshot.developer[1].source.kind,
@@ -652,9 +671,10 @@ mod tests {
         model.base_instructions = "model base".to_string();
 
         let snapshot = InstructionAssembler::assemble(InstructionAssemblyRequest {
-            config: None,
+            instructions: None,
+            skills: None,
+            execution_profile: None,
             model: &model,
-            mode: CompileMode::Simple,
             workspace_root: &dir,
             current_dir: &dir,
             workspace_instructions: Some(""),
@@ -679,9 +699,10 @@ mod tests {
 
         let snapshot = InstructionAssembler::assemble_with_profile(
             InstructionAssemblyRequest {
-                config: None,
+                instructions: None,
+                skills: None,
+                execution_profile: None,
                 model: &ModelInfo::fallback("test-model"),
-                mode: CompileMode::Simple,
                 workspace_root: &dir,
                 current_dir: &dir,
                 workspace_instructions: None,
@@ -731,7 +752,7 @@ mod tests {
                 content: "base".to_string(),
             },
             developer: vec![InstructionBlock {
-                source: InstructionSource::new(InstructionSourceKind::Mode, "mode"),
+                source: InstructionSource::new(InstructionSourceKind::ExecutionProfile, "mode"),
                 content: "dev".to_string(),
             }],
             user: vec![InstructionBlock {
@@ -752,15 +773,21 @@ mod tests {
     fn config_base_override_replaces_model_base() {
         let dir = temp_dir("base-override");
         fs::create_dir_all(&dir).unwrap();
-        let mut config = PureConfig::default();
-        config.instructions.base_override = "config base".to_string();
+        let config = InstructionsConfig {
+            base_override: "config base".to_string(),
+            ..InstructionsConfig::default()
+        };
         let mut model = ModelInfo::fallback("test-model");
         model.base_instructions = "model base".to_string();
 
         let snapshot = InstructionAssembler::assemble(InstructionAssemblyRequest {
-            config: Some(&config),
+            instructions: Some(&config),
+            skills: None,
+            execution_profile: Some(ExecutionInstructionProfile {
+                label: "test",
+                instructions: "mode instructions",
+            }),
             model: &model,
-            mode: CompileMode::Simple,
             workspace_root: &dir,
             current_dir: &dir,
             workspace_instructions: None,
@@ -782,9 +809,10 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
 
         let snapshot = InstructionAssembler::assemble(InstructionAssemblyRequest {
-            config: None,
+            instructions: None,
+            skills: None,
+            execution_profile: None,
             model: &ModelInfo::fallback("test-model"),
-            mode: CompileMode::Simple,
             workspace_root: &dir,
             current_dir: &dir,
             workspace_instructions: None,
