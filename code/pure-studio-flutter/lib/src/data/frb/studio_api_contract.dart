@@ -1,6 +1,7 @@
 part of 'studio_api.dart';
 
 abstract class StudioApi {
+  Future<ProviderCatalogView> loadProviderCatalog();
   Future<StudioState> bootstrap();
   Future<StudioState> openProject(String path);
   Future<StudioState> selectProject(String projectId);
@@ -13,7 +14,7 @@ abstract class StudioApi {
     String sessionId, {
     String? selectedSessionId,
   });
-  Future<StudioState> setSessionMode(String sessionId, CompileMode mode);
+  Future<StudioState> setSessionMode(String sessionId, StudioMode mode);
   Future<StudioState> setModelRole({
     required String roleKey,
     required String providerId,
@@ -55,6 +56,7 @@ abstract class StudioApi {
 
 class FrbStudioApi implements StudioApi {
   static Future<void>? _initFuture;
+  ProviderCatalogView? _providerCatalogCache;
 
   static Future<void> _ensureReady() {
     return _initFuture ??= () async {
@@ -62,6 +64,16 @@ class FrbStudioApi implements StudioApi {
       await frb.initializeRuntime();
       await frb.startRuntime();
     }();
+  }
+
+  @override
+  Future<ProviderCatalogView> loadProviderCatalog() async {
+    final cached = _providerCatalogCache;
+    if (cached != null) return cached;
+    await _ensureReady();
+    final catalog = providerCatalogFromFrb(await frb.loadProviderCatalog());
+    _providerCatalogCache = catalog;
+    return catalog;
   }
 
   @override
@@ -121,7 +133,7 @@ class FrbStudioApi implements StudioApi {
   }
 
   @override
-  Future<StudioState> setSessionMode(String sessionId, CompileMode mode) async {
+  Future<StudioState> setSessionMode(String sessionId, StudioMode mode) async {
     await _ensureReady();
     return studioStateFromFrbSession(
       await frb.setSessionMode(

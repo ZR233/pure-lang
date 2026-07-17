@@ -21,7 +21,7 @@ pub use scanning::{
 
 pub const SKILL_FILE_NAME: &str = "SKILL.md";
 pub const USAGE_FILE_NAME: &str = ".usage.json";
-const SYSTEM_MARKER_FILE_NAME: &str = ".pure-system-skills.marker";
+const SYSTEM_MARKER_FILE_NAME: &str = ".pl-system-skills.marker";
 const SYSTEM_MARKER_SALT: &str = "v1";
 const MAX_SKILL_SCAN_DEPTH: usize = 5;
 const ALLOWED_SUPPORT_DIRS: &[&str] = &["references", "templates", "scripts", "assets"];

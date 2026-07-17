@@ -1,7 +1,6 @@
 use std::fmt;
 use std::future::Future;
 use std::path::PathBuf;
-use std::pin::Pin;
 use std::sync::Arc;
 
 use pl_protocol::{PureError, Result};
@@ -9,9 +8,9 @@ use serde_json::Value;
 
 use crate::tool::{RegisteredTool, Tool, ToolContext, ToolInput, ToolOutput, WorkspaceAccess};
 use crate::trace::TraceRecorder;
-use crate::turn::{CompileMode, TurnOptions, TurnRequest, TurnResult};
+use crate::turn::{TurnOptions, TurnRequest, TurnResult};
 
-use super::{CoreRuntimeProfile, PureCore, PureCoreBuilder, ToolProfile, ToolSetBuilder};
+use super::{CoreRuntimeProfile, ToolSetBuilder, TurnEngine, TurnEngineBuilder};
 
 /// 产品 agent 运行 profile。
 ///
@@ -21,32 +20,28 @@ pub type CoreAgentProfile = CoreRuntimeProfile;
 
 /// pl-core agent runtime kernel。
 ///
-/// 该类型统一持有 `PureCore`、profile 注册出的共享工具和宿主动态工具，
+/// 该类型统一持有 `TurnEngine`、profile 注册出的共享工具和宿主动态工具，
 /// 让宿主只配置定制化 agent，不再复刻模型 turn loop 与通用 tool dispatch。
 #[derive(Debug)]
 pub struct AgentKernel {
-    core: PureCore,
+    core: TurnEngine,
 }
 
 impl AgentKernel {
-    pub fn builder(core_builder: PureCoreBuilder) -> AgentKernelBuilder<NoAgentKernelToolSet> {
+    pub fn builder(core_builder: TurnEngineBuilder) -> AgentKernelBuilder<NoAgentKernelToolSet> {
         AgentKernelBuilder::new(core_builder)
     }
 
-    pub fn core(&self) -> &PureCore {
+    pub fn core(&self) -> &TurnEngine {
         &self.core
     }
 
-    pub fn core_mut(&mut self) -> &mut PureCore {
+    pub fn core_mut(&mut self) -> &mut TurnEngine {
         &mut self.core
     }
 
     pub fn tool(&self, name: &str) -> Option<&dyn Tool> {
         self.core.tools.get(name)
-    }
-
-    pub fn agent_tool_registrar(&self) -> Option<Arc<dyn crate::AgentToolRegistrar>> {
-        self.core.agent_tool_registrar.clone()
     }
 
     pub fn tool_names(&self) -> Vec<String> {
@@ -65,13 +60,12 @@ impl AgentKernel {
                 tool: request.name.clone(),
                 error: format!("Unknown tool: {}", request.name),
             })?;
-        let execution_profile = match &self.core.active_subagent {
-            Some(subagent) => {
-                crate::TurnExecutionProfile::for_subagent(request.mode, &subagent.role)
-            }
-            None => crate::TurnExecutionProfile::root(request.mode),
-        };
-        if !execution_profile.allows_tool(&request.name, tool.effect()) {
+        if !request
+            .options
+            .execution_policy
+            .as_ref()
+            .is_none_or(|policy| policy.allows_tool(&request.name, tool.effect()))
+        {
             return Err(PureError::ToolExecutionFailed {
                 tool: request.name,
                 error: "tool is not allowed by the turn execution profile".to_string(),
@@ -92,14 +86,11 @@ impl AgentKernel {
             event_tx: request.event_tx,
             options: request.options,
             workspace_access: request.workspace_access,
-            mode: request.mode,
             workspace_root,
             workspace_instructions: self.core.workspace_instructions.clone(),
             instruction_snapshot: request.instruction_snapshot,
             provider_call_id: request.provider_call_id,
             active_subagent: self.core.active_subagent.clone(),
-            agent_supervisor: self.core.agent_supervisor.clone(),
-            agent_tool_registrar: self.core.agent_tool_registrar.clone(),
             lsp_runtime: self.core.lsp_runtime.clone(),
             parent_session: request.parent_session,
         };
@@ -108,7 +99,7 @@ impl AgentKernel {
 
     pub fn run_turn<'a>(
         &'a self,
-        session: &'a mut crate::CoreSession,
+        session: &'a mut crate::AgentSession,
         request: TurnRequest,
         event_tx: pl_trace::AgentEventSender,
     ) -> impl std::future::Future<Output = Result<TurnResult>> + Send + 'a {
@@ -117,7 +108,7 @@ impl AgentKernel {
 
     pub async fn run_turn_with_options(
         &self,
-        session: &mut crate::CoreSession,
+        session: &mut crate::AgentSession,
         request: TurnRequest,
         event_tx: pl_trace::AgentEventSender,
         options: TurnOptions,
@@ -129,7 +120,7 @@ impl AgentKernel {
 
     pub async fn run_turn_with_trace(
         &self,
-        session: &mut crate::CoreSession,
+        session: &mut crate::AgentSession,
         request: TurnRequest,
         recorder: &mut TraceRecorder,
         options: TurnOptions,
@@ -155,10 +146,9 @@ pub struct AgentKernelToolRequest {
     event_tx: pl_trace::AgentEventSender,
     options: TurnOptions,
     workspace_access: WorkspaceAccess,
-    mode: CompileMode,
     instruction_snapshot: Option<crate::instruction::InstructionSnapshot>,
     provider_call_id: Option<String>,
-    parent_session: Arc<crate::CoreSession>,
+    parent_session: Arc<crate::AgentSession>,
 }
 
 impl AgentKernelToolRequest {
@@ -178,10 +168,9 @@ impl AgentKernelToolRequest {
             event_tx,
             options: TurnOptions::default(),
             workspace_access: WorkspaceAccess::WorkspaceOnly,
-            mode: CompileMode::Simple,
             instruction_snapshot: None,
             provider_call_id: None,
-            parent_session: Arc::new(crate::CoreSession::new()),
+            parent_session: Arc::new(crate::AgentSession::new()),
         }
     }
 
@@ -200,11 +189,6 @@ impl AgentKernelToolRequest {
         self
     }
 
-    pub fn with_mode(mut self, mode: CompileMode) -> Self {
-        self.mode = mode;
-        self
-    }
-
     pub fn with_instruction_snapshot(
         mut self,
         snapshot: crate::instruction::InstructionSnapshot,
@@ -218,13 +202,13 @@ impl AgentKernelToolRequest {
         self
     }
 
-    pub fn with_parent_session(mut self, session: Arc<crate::CoreSession>) -> Self {
+    pub fn with_parent_session(mut self, session: Arc<crate::AgentSession>) -> Self {
         self.parent_session = session;
         self
     }
 
     pub fn with_parent_history(mut self, history: Vec<pl_protocol::Message>) -> Self {
-        self.parent_session = Arc::new(crate::CoreSession::from_messages(history));
+        self.parent_session = Arc::new(crate::AgentSession::from_messages(history));
         self
     }
 }
@@ -237,7 +221,7 @@ impl AgentKernelToolRequest {
 pub trait AgentKernelToolSet: fmt::Debug + Send + Sync + 'static {
     fn register_tools<'a>(
         &'a self,
-        core: &'a mut PureCore,
+        core: &'a mut TurnEngine,
         workspace_root: PathBuf,
         workspace_instructions: Option<String>,
     ) -> impl Future<Output = ()> + Send + 'a;
@@ -250,26 +234,24 @@ pub struct NoAgentKernelToolSet;
 impl AgentKernelToolSet for NoAgentKernelToolSet {
     async fn register_tools(
         &self,
-        _core: &mut PureCore,
+        _core: &mut TurnEngine,
         _workspace_root: PathBuf,
         _workspace_instructions: Option<String>,
     ) {
     }
 }
 
-impl<B, P, C, A, Q, M, T> AgentKernelToolSet for ToolSetBuilder<B, P, C, A, Q, M, T>
+impl<B, P, C, M, T> AgentKernelToolSet for ToolSetBuilder<B, P, C, M, T>
 where
     B: crate::tool::ExecutionBackend + 'static,
     P: crate::tool::GitCredentialProvider + 'static,
     C: crate::tool::ContainerBackend + 'static,
-    A: crate::tool::AgentControlBackend + 'static,
-    Q: crate::tool::AgentControlPolicy + 'static,
     M: crate::tool::McpResourceBackend + 'static,
     T: crate::tool::McpToolBackend + 'static,
 {
     async fn register_tools(
         &self,
-        core: &mut PureCore,
+        core: &mut TurnEngine,
         workspace_root: PathBuf,
         workspace_instructions: Option<String>,
     ) {
@@ -280,7 +262,7 @@ where
 
 #[derive(Debug)]
 pub struct AgentKernelBuilder<T = NoAgentKernelToolSet> {
-    core_builder: PureCoreBuilder,
+    core_builder: TurnEngineBuilder,
     profile: CoreAgentProfile,
     tool_set: T,
     runtime_tools: Vec<Arc<dyn Tool>>,
@@ -293,7 +275,7 @@ fn default_workspace_root() -> PathBuf {
 }
 
 impl AgentKernelBuilder<NoAgentKernelToolSet> {
-    fn new(core_builder: PureCoreBuilder) -> Self {
+    fn new(core_builder: TurnEngineBuilder) -> Self {
         Self {
             core_builder,
             profile: CoreAgentProfile::minimal(),
@@ -384,58 +366,6 @@ where
         for tool in &self.registered_tools {
             core.register_tool(tool.clone());
         }
-        core.agent_tool_registrar = Some(Arc::new(KernelToolRegistrar {
-            profile: self.profile,
-            tool_set: self.tool_set,
-            runtime_tools: self.runtime_tools,
-            registered_tools: self.registered_tools,
-        }));
         AgentKernel { core }
-    }
-}
-
-#[derive(Debug)]
-struct KernelToolRegistrar<T> {
-    profile: CoreAgentProfile,
-    tool_set: T,
-    runtime_tools: Vec<Arc<dyn Tool>>,
-    registered_tools: Vec<RegisteredTool>,
-}
-
-impl<T> crate::AgentToolRegistrar for KernelToolRegistrar<T>
-where
-    T: AgentKernelToolSet,
-{
-    fn register_tools<'a>(
-        &'a self,
-        core: &'a mut PureCore,
-        workspace_root: PathBuf,
-        workspace_instructions: Option<String>,
-    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
-        Box::pin(async move {
-            match self.profile.tool_profile {
-                ToolProfile::LocalWorkspace => {
-                    core.register_default_tools(
-                        workspace_root.clone(),
-                        workspace_instructions.clone(),
-                    )
-                    .await;
-                }
-                ToolProfile::HostProvided | ToolProfile::Minimal => {
-                    core.workspace_root = Some(workspace_root.clone());
-                    core.workspace_instructions = workspace_instructions.clone();
-                }
-            }
-            self.tool_set
-                .register_tools(core, workspace_root.clone(), workspace_instructions.clone())
-                .await;
-            for tool in &self.runtime_tools {
-                core.register_tool(tool.clone());
-            }
-            for tool in &self.registered_tools {
-                core.register_tool(tool.clone());
-            }
-            Ok(())
-        })
     }
 }

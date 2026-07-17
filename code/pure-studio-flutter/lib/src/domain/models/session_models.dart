@@ -24,12 +24,12 @@ class StudioSession {
   final String id;
   final String projectId;
   final String title;
-  final CompileMode mode;
+  final StudioMode mode;
   final DateTime updatedAt;
 
   StudioSession copyWith({
     String? title,
-    CompileMode? mode,
+    StudioMode? mode,
     DateTime? updatedAt,
   }) {
     return StudioSession(

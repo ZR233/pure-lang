@@ -4,8 +4,6 @@ use pl_trace::TraceEvent;
 
 use crate::context_compaction::ContextCompactionSnapshot;
 
-use super::CompileMode;
-
 /// 单轮运行的最终状态。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TurnResultStatus {
@@ -45,7 +43,6 @@ pub struct TurnResult {
     pub usage: TokenUsage,
     pub last_context_tokens: Option<u64>,
     pub context_compactions: Vec<ContextCompactionSnapshot>,
-    pub mode: CompileMode,
     pub session_message_count: usize,
     pub status: TurnResultStatus,
     pub abort_reason: Option<TurnAbortReason>,

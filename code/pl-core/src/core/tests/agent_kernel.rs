@@ -61,7 +61,7 @@ async fn agent_kernel_registers_dynamic_tools() {
     )
     .with_runtime_lock_policy(ToolRuntimeLockPolicy::Shared);
     let kernel = AgentKernel::builder(
-        PureCoreBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None)).unwrap(),
+        TurnEngineBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None)).unwrap(),
     )
     .with_profile(CoreAgentProfile::host_provided(std::env::temp_dir()))
     .with_registered_tool(tool)
@@ -143,7 +143,7 @@ async fn agent_kernel_registers_and_routes_product_tools_as_registered_tools() {
     let calls = Arc::new(Mutex::new(Vec::new()));
     let tool = product_echo_tool(calls.clone());
     let kernel = AgentKernel::builder(
-        PureCoreBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None)).unwrap(),
+        TurnEngineBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None)).unwrap(),
     )
     .with_profile(CoreAgentProfile::host_provided(std::env::temp_dir()))
     .with_registered_tool(tool)
@@ -204,7 +204,6 @@ async fn agent_kernel_executes_registered_tool_with_kernel_context() {
                 calls.lock().await.push(serde_json::json!({
                     "message": message,
                     "workspaceRoot": context.workspace_root,
-                    "hasRegistrar": context.agent_tool_registrar.is_some(),
                     "sessionId": input.session_id,
                     "toolId": input.tool_id,
                 }));
@@ -213,7 +212,7 @@ async fn agent_kernel_executes_registered_tool_with_kernel_context() {
         },
     );
     let kernel = AgentKernel::builder(
-        PureCoreBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None)).unwrap(),
+        TurnEngineBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None)).unwrap(),
     )
     .with_profile(CoreAgentProfile::host_provided(workspace_root.clone()))
     .with_registered_tool(tool)
@@ -238,7 +237,6 @@ async fn agent_kernel_executes_registered_tool_with_kernel_context() {
         &[serde_json::json!({
             "message": "hello",
             "workspaceRoot": workspace_root,
-            "hasRegistrar": true,
             "sessionId": "session-1",
             "toolId": "tool-1",
         })]
@@ -249,7 +247,7 @@ async fn agent_kernel_executes_registered_tool_with_kernel_context() {
 async fn agent_kernel_host_profile_exposes_only_product_tools() {
     let tool = product_echo_tool(Arc::new(Mutex::new(Vec::new())));
     let kernel = AgentKernel::builder(
-        PureCoreBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None)).unwrap(),
+        TurnEngineBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None)).unwrap(),
     )
     .with_profile(CoreAgentProfile::host_provided(std::env::temp_dir()))
     .with_registered_tool(tool)
@@ -267,7 +265,7 @@ async fn agent_kernel_host_profile_exposes_only_product_tools() {
 async fn agent_kernel_local_workspace_combines_shared_and_product_tools() {
     let tool = product_echo_tool(Arc::new(Mutex::new(Vec::new())));
     let kernel = AgentKernel::builder(
-        PureCoreBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None)).unwrap(),
+        TurnEngineBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None)).unwrap(),
     )
     .with_profile(CoreAgentProfile::local_workspace(std::env::temp_dir()))
     .with_registered_tool(tool)
@@ -277,13 +275,13 @@ async fn agent_kernel_local_workspace_combines_shared_and_product_tools() {
 
     assert!(names.contains(&"bash".to_string()));
     assert!(names.contains(&"read_file".to_string()));
-    assert!(names.contains(&"spawn_agent".to_string()));
+    assert!(!names.contains(&"spawn_agent".to_string()));
     assert!(names.contains(&"product_echo".to_string()));
     assert!(!names.contains(&"git_status".to_string()));
 }
 
 #[tokio::test]
-async fn agent_kernel_builder_registers_tool_set_and_replays_it_for_children() {
+async fn agent_kernel_builder_registers_explicit_tool_set() {
     let workspace_root = std::env::temp_dir().join("pl-core-agent-kernel-tool-set");
     let tool_set = ToolSetBuilder::from_capabilities(ToolCapabilityConfig {
         bash: false,
@@ -291,14 +289,13 @@ async fn agent_kernel_builder_registers_tool_set_and_replays_it_for_children() {
         skills: false,
         mcp: false,
         lsp: false,
-        subagents: false,
         ask_user: true,
         git: false,
         docker: false,
         container: false,
     });
     let kernel = AgentKernel::builder(
-        PureCoreBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None)).unwrap(),
+        TurnEngineBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None)).unwrap(),
     )
     .with_profile(CoreAgentProfile::host_provided(workspace_root.clone()))
     .with_tool_set(tool_set)
@@ -306,45 +303,6 @@ async fn agent_kernel_builder_registers_tool_set_and_replays_it_for_children() {
     .await;
 
     assert!(kernel.tool("request_user_input").is_some());
-
-    let registrar = kernel
-        .agent_tool_registrar()
-        .expect("kernel exposes child tool registrar");
-    let mut child_core =
-        PureCoreBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None))
-            .unwrap()
-            .build();
-    registrar
-        .register_tools(&mut child_core, workspace_root, None)
-        .await
-        .unwrap();
-
-    assert!(child_core.tools.get("request_user_input").is_some());
-}
-
-#[tokio::test]
-async fn agent_kernel_registrar_rebuilds_product_tools_for_child_core() {
-    let tool = product_echo_tool(Arc::new(Mutex::new(Vec::new())));
-    let kernel = AgentKernel::builder(
-        PureCoreBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None)).unwrap(),
-    )
-    .with_profile(CoreAgentProfile::host_provided(std::env::temp_dir()))
-    .with_registered_tool(tool)
-    .build()
-    .await;
-    let registrar = kernel.agent_tool_registrar().expect("agent tool registrar");
-    let mut child_core =
-        PureCoreBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None))
-            .unwrap()
-            .build();
-
-    registrar
-        .register_tools(&mut child_core, std::env::temp_dir(), None)
-        .await
-        .unwrap();
-
-    assert!(child_core.tools.get("product_echo").is_some());
-    assert!(child_core.tools.get("bash").is_none());
 }
 
 fn product_echo_tool(calls: Arc<Mutex<Vec<String>>>) -> RegisteredTool {

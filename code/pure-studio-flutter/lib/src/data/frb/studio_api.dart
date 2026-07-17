@@ -13,6 +13,7 @@ part 'studio_frb_converters.dart';
 part 'studio_legacy_json_converters.dart';
 part 'studio_state_converters.dart';
 part 'studio_config_converters.dart';
+part 'studio_provider_catalog_converters.dart';
 part 'studio_demo_api.dart';
 part 'studio_demo_settings.dart';
 
@@ -20,14 +21,14 @@ bool _isIgnoredTimelinePartType(Object? value) {
   return isInternalTimelinePartType(_partType(value));
 }
 
-CompileMode _compileMode(Object? value) {
-  return _string(value) == 'task' ? CompileMode.task : CompileMode.simple;
+StudioMode _compileMode(Object? value) {
+  return _string(value) == 'task' ? StudioMode.task : StudioMode.simple;
 }
 
-String _compileModeLabel(CompileMode mode) {
+String _compileModeLabel(StudioMode mode) {
   return switch (mode) {
-    CompileMode.simple => 'simple',
-    CompileMode.task => 'task',
+    StudioMode.simple => 'simple',
+    StudioMode.task => 'task',
   };
 }
 

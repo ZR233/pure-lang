@@ -8,7 +8,8 @@
 - `pl-trace`：内部 agent/trace 事件协议
 - `pl-model`：模型 provider 适配
 - `pl-lsp`：LSP 客户端与语言服务器运行时
-- `pl-core`：应用编排、领域模型、端口定义、基础设施适配器
+- `pl-core`：产品无关的 turn/session/agent 框架、模型配置值对象与通用工具
+- `pl-studio-runtime`：Pure Studio 配置、持久化、项目与任务编排
 - `pl-studio-bridge`：Flutter Rust Bridge v2 桥接 crate
 - `pure-studio-flutter`：Flutter Windows 桌面端
 - `pl-xtask`：本仓库开发任务入口，不参与运行时依赖链
@@ -17,9 +18,10 @@
 
 职责保持不变：定义稳定 wire 协议、错误与公共状态类型。
 
-- 放置 `PureError`、`Message`、Studio DTO、interaction、runtime usage、agent status 等跨层共享类型
+- 放置 `PureError`、`Message`、interaction、runtime usage 与无 secret 的
+  `ProviderCatalogSnapshot` 等跨产品 wire 类型
 - 不依赖任何内部 crate
-- 不包含 raw `AgentEvent` / `TracePart`、运行时行为与存储实现
+- 不包含 Studio 产品 DTO、raw `AgentEvent` / `TracePart`、运行时行为与存储实现
 
 ## 2.3 pl-trace
 
@@ -27,14 +29,16 @@
 
 - 放置 `AgentEvent`、`AgentEventSender`、`TraceEvent`、`TracePart`、`EnabledToolsEvent` 等 core/provider 内部类型
 - 依赖 `pl-protocol` 的公共状态与 interaction 类型
-- 不作为 Studio wire DTO 暴露；进入 UI 前必须由 `pl-core` 映射为 `StudioEventEnvelope`
+- 不作为 Studio wire DTO 暴露；进入 UI 前必须由 `pl-studio-runtime` 映射为
+  `StudioEventEnvelope`
 
 ## 2.4 pl-model
 
-职责保持不变：封装 provider 差异，不承担会话编排。
+职责保持不变：封装 provider 差异，不承担产品 agent/session 编排。
 
 - `ModelProvider` / `CompletionRequest` / `CompletionResponse`
-- OpenAI-compatible wire 适配
+- Responses WebSocket/HTTP、Chat Completions HTTP wire 适配
+- session 级 `ModelTransportSession`，只管理物理连接、fingerprint 与 continuation
 - 依赖 `pl-protocol` 与 `pl-trace`，不依赖 `pl-core`
 
 ## 2.5 pl-lsp
@@ -45,43 +49,49 @@
 - `LspRuntimeRegistry`、诊断和 query 结果类型
 - 不依赖 `pl-core`；`pl-core` 在工具路径策略完成后，把规范化绝对路径交给 `pl-lsp`
 
-## 2.6 pl-core（端口-适配器）
+## 2.6 pl-core（Agent 框架）
 
-`pl-core` 继续作为所有桌面端共享的 Studio runtime 所有者，并按端口-适配器边界渐进式整理。当前代码中 `interfaces` 放置可替换端口 trait；公开 API 由 crate root 直接 re-export，具体实现按 `studio`、`core`、`tool`、`config`、`mcp` 等业务命名空间组织。不要再新增只转发类型的 `application`、`domain` 或 `infrastructure` 包装模块；需要新端口时放入 `interfaces`，需要新实现时放入对应业务命名空间。
+`pl-core` 是产品无关的 agent 框架，不再拥有 Pure Studio。它提供 `TurnEngine`、
+`AgentSession`、`AgentRuntime<H>`、非泛型 `AgentRuntimeHandle`、host 端口、动态执行策略和
+通用工具。详细边界见 `17-agent-runtime-host.md`。
 
-- `interfaces`：端口 trait（RPITIT + `Send`）
-- `studio`：Studio runtime、store、事件投影和 UI-facing records
-- `core`：turn pipeline、权限、工具调度和结果归一化
-- `tool`、`config`、`mcp`：具体适配器与运行时能力
+- `agent_runtime`：actor、命令句柄、host 端口、commit 与恢复
+- `core`：turn pipeline、工具调度和结果归一化
+- `tool`、`mcp`：通用工具与运行时能力
+- `model_config`：只含 serde 值对象及校验/解析
 
-当前核心端口：
+核心 host 端口：
 
-- `SessionRepository`
-- `ConfigRepository`
-- `EventSink`
-- `TurnSnapshotRepository`
-- `RuntimeEventEmitter`
+- `AgentStateRepository`
+- `AgentTurnFactory`
+- `AgentLifecycleAdapter`
+- `AgentEventSink`
 
 约束：
 
 - trait 异步方法统一使用原生 RPITIT，并显式 `+ Send`
 - `lib.rs` 只做模块声明与 `pub use` 出口
-- `StudioRuntime` 不直接嵌入具体数据库/文件系统细节
-- UI-facing runtime 状态机固定为 `Uninitialized -> Initializing -> Ready -> ShuttingDown -> Stopped/Failed`
-- `active_turns`、`submit_prompt`、`stop_prompt`、`resolve_interaction` 和后台 turn 启动/取消语义属于 `pl-core::studio`，Flutter 只做调用者
-- `StudioEventRuntime` 保留旧全量订阅，并新增会话订阅和全局订阅；高频 message/part delta 只进入会话流，MCP/LSP health、配置和项目列表等低频变化进入全局流
+- `pl-core` 不依赖 SeaORM，不感知配置文件路径和产品 schema version
+- agent/session/turn lifecycle 只能由 `AgentRuntime` 修改
+- 产品工具只能通过 `AgentRuntimeHandle` 访问协作状态机
+
+### 2.6.1 pl-studio-runtime
+
+`pl-studio-runtime` 拥有 Studio config、SQLite/store、事件投影、项目、会话、任务、worktree、
+Simple/Task 产品策略与 `Studio*` wire DTO。Flutter bridge 只调用该 crate。
 
 默认权限模式固定为 `PermissionMode::RequestApproval`。旧 `ToolApprovalPolicy::AutoAllow | Manual | DenyAll` 只作为兼容构造保留，核心执行前统一以 `PermissionMode` 和工具路径访问分类做策略判断。
 
 ## 2.7 pl-studio-bridge（FRB 桥接）
 
-`pl-studio-bridge` 位于 `code/pure-studio-flutter/rust/`，crate 名称遵循 `pl-` 前缀。它是 Flutter Rust Bridge v2 的 native crate，只负责把 Dart 调用转换成 `pl-core` Studio runtime API。
+`pl-studio-bridge` 位于 `code/pure-studio-flutter/rust/`，crate 名称遵循 `pl-` 前缀。它是 Flutter Rust Bridge v2 的 native crate，只负责把 Dart 调用转换成 `pl-studio-runtime` API。
 
 公开 API 以 Flutter 端需求为边界：
 
 - `initializeRuntime() -> RuntimeSnapshot`
 - `startRuntime() -> RuntimeSnapshot`
 - `shutdownRuntime() -> RuntimeSnapshot`
+- `loadProviderCatalog() -> ProviderCatalogSnapshot`
 - `bootstrapStudio() -> BridgeStudioSnapshotResponse`
 - `openProject(path) -> BridgeStudioSnapshotResponse`
 - `selectProject(projectId) -> BridgeStudioSnapshotResponse`
@@ -107,7 +117,7 @@
 - `subscribeSessionEvents(sessionId) -> Stream<BridgeEventEnvelope>`
 - `subscribeGlobalEvents() -> Stream<BridgeEventEnvelope>`
 
-`openProject` 调用 `pl-core::studio` 的项目打开、LSP reconcile 和 session bootstrap 流程后返回新的 Studio 快照。`selectProject`、`archiveProject`、`createSession`、`archiveSession`、`setSessionMode` 和 `setModelRole` 都返回 Studio 快照或当前 session snapshot，由 Flutter store 原子替换项目、会话、选中项、config view，并对返回的 `selectedSessionId` 再调用 `loadSessionState` 恢复当前会话 projection。`archiveProject` 是归档语义，不删除项目目录或历史会话；关闭当前项目时返回下一个可用项目/会话，没有剩余项目时返回空选中态。`setSessionMode` 只修改 session 的下一轮 `compileMode`；`setModelRole` 修改 `~/.pure/config.toml` 中对应模型角色，状态栏 planner 模型选择固定写 `planner` role，因为 Studio 根聊天 turn 始终使用 planner 角色。`listDiscoveredSkills` 只读取当前项目 workspace、user、system 与 external skill catalog，返回 typed `skills[]`，不改变配置。typed settings 保存接口直接写回 canonical config 或 Studio setting，并返回新的 Studio 快照；`saveStudioSettingsDraft` 只保留兼容旧草稿入口，不作为当前设置页生效配置的主路径。
+`openProject` 调用 `pl-studio-runtime` 的项目打开、LSP reconcile 和 session bootstrap 流程后返回新的 Studio 快照。`selectProject`、`archiveProject`、`createSession`、`archiveSession`、`setSessionMode` 和 `setModelRole` 都返回 Studio 快照或当前 session snapshot，由 Flutter store 原子替换项目、会话、选中项和 config view。`loadProviderCatalog` 返回 PL canonical catalog，Flutter 只按 `revision` 做进程内缓存，不把目录写入 Studio 设置。`archiveProject` 是归档语义，不删除项目目录或历史会话；`setModelRole` 只保存 provider/model/effort 路由，模型元数据始终来自 catalog 或 provider 的 effective models。
 
 `BridgeEventEnvelope` 当前 wire 字段为：`eventId`、`sessionId`、`turnId`、`sequence`、`createdAt`、`payload: BridgeEventPayload`。`BridgeEventPayload` 是 FRB/Freezed sealed union，承载 turn、message、part、delta、interaction、agent、agent timeline、runtime、health、session list 和 stale 等结构化事件；Dart FRB adapter 将其归一为 app 内部 typed `StudioBridgeEventPayload` 后交给 Riverpod reducer。`loadStudioEvents` backfill 返回 `BridgeStudioEventsResponse`，其中 `events[]` 与实时 stream 使用同一个 typed `BridgeEventEnvelope`。Studio snapshot、session snapshot 和小型命令响应均使用 typed DTO；完整 config 与 general settings 暂以 `configJson`/`generalSettingsJson` 字符串保留在 adapter 边界，agent timeline payload 使用 `BridgeAgentTimelinePayloadDto` union 表达。桥接层不得把 `serde_json::Value` 直接暴露为 FRB 类型，也不得复制 UI 业务规则。
 
@@ -115,7 +125,8 @@
 
 `pure-studio-flutter` 位于 `code/pure-studio-flutter/`，首版只承诺 Windows 桌面。UI 使用 Material 3 工具型设计、Riverpod 状态管理和 `go_router` 页面栈。功能覆盖 Studio 主路径：项目/会话侧栏、聊天 timeline、streaming markdown、reasoning/tool/plan part、composer、停止、权限模式、tool approval、user input、plan confirmation、状态栏，以及 Provider/Instructions/Skills/Roles/MCP/Security/General 设置页。
 
-Flutter store 不直接读取 SQLite 或配置文件，只通过 `pl-studio-bridge` 调用 `pl-core`。打开会话时订阅该会话事件流，切换会话时取消旧订阅；全局事件流只承载低频配置、项目和 health 变化。
+Flutter store 不直接读取 SQLite 或配置文件，只通过 `pl-studio-bridge` 调用
+`pl-studio-runtime`。打开会话时订阅该会话事件流，切换会话时取消旧订阅；全局事件流只承载低频配置、项目和 health 变化。
 
 ## 2.9 pl-xtask（开发任务入口）
 
@@ -131,13 +142,9 @@ GUI 命令从仓库根目录调用，但所有 Flutter 子命令都以 `code/pur
 
 ## 2.10 本地数据版本
 
-方案乙采用破坏性升级，运行期不再保留迁移与兼容读取路径：
-
-- SQLite 固定使用新 schema（v2），v1→v2 检测/备份/重建逻辑已删除
-- `config.toml` 固定使用新结构（v2）
-- 旧格式数据不再被识别或迁移，用户需从备份手动恢复
-
-Flutter 桌面端不做额外 SQLite 或 `~/.pure/config.toml` 破坏性迁移。
+Studio SQLite 使用单一基础 schema（当前 `user_version = 1`）；版本不匹配时删除并重建，
+不维护 migration chain。`config.toml` 当前 schema 为 8：schema 5/6/7 在写入备份后升级为 catalog +
+正交 transport 结构；更老或无法校验的配置删除并生成默认配置。Flutter 不实现第二套迁移逻辑。
 
 ## 2.11 Workspace
 
@@ -154,6 +161,7 @@ members = [
     "code/pl-patch",
     "code/pl-skill-core",
     "code/pl-core",
+    "code/pl-studio-runtime",
     "code/pure-studio-flutter/rust",
     "xtask",
 ]

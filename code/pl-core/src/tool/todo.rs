@@ -142,7 +142,7 @@ fn todo_list_snapshot(
         path: Some(
             active
                 .and_then(|agent| agent.agent_path.clone())
-                .unwrap_or_else(|| crate::AgentPath::ROOT.to_string()),
+                .unwrap_or_else(|| "/root".to_string()),
         ),
         parent_path: active.and_then(|agent| agent.parent_id.clone()),
         explanation: args
@@ -168,7 +168,7 @@ mod tests {
 
     use super::*;
     use crate::tool::{SubagentContext, WorkspaceAccess};
-    use crate::{AgentSupervisor, CompileMode, CoreSession, TurnOptions};
+    use crate::{AgentSession, TurnOptions};
 
     fn context() -> (ToolContext, tokio::sync::broadcast::Receiver<AgentEvent>) {
         let (event_tx, event_rx) = tokio::sync::broadcast::channel(8);
@@ -177,16 +177,13 @@ mod tests {
                 event_tx,
                 options: TurnOptions::default(),
                 workspace_access: WorkspaceAccess::WorkspaceOnly,
-                mode: CompileMode::Simple,
                 workspace_root: std::env::temp_dir(),
                 workspace_instructions: None,
                 instruction_snapshot: None,
                 provider_call_id: None,
                 active_subagent: None,
-                agent_supervisor: AgentSupervisor::default(),
-                agent_tool_registrar: None,
                 lsp_runtime: None,
-                parent_session: Arc::new(CoreSession::new()),
+                parent_session: Arc::new(AgentSession::new()),
             },
             event_rx,
         )
@@ -231,7 +228,7 @@ mod tests {
         };
         assert_eq!(snapshot.call_id, "call-1");
         assert_eq!(snapshot.agent_id, None);
-        assert_eq!(snapshot.path.as_deref(), Some(crate::AgentPath::ROOT));
+        assert_eq!(snapshot.path.as_deref(), Some("/root"));
         assert_eq!(snapshot.parent_path, None);
         assert_eq!(snapshot.explanation.as_deref(), Some("Plan the pass"));
         assert_eq!(snapshot.items.len(), 3);
@@ -243,7 +240,7 @@ mod tests {
         let (mut context, mut event_rx) = context();
         context.active_subagent = Some(SubagentContext {
             id: "agent-1".to_string(),
-            parent_id: Some(crate::AgentPath::ROOT.to_string()),
+            parent_id: Some("/root".to_string()),
             agent_path: Some("/root/explorer-1".to_string()),
             role: "explorer".to_string(),
             task: "Explore".to_string(),
@@ -265,10 +262,7 @@ mod tests {
         };
         assert_eq!(snapshot.agent_id.as_deref(), Some("agent-1"));
         assert_eq!(snapshot.path.as_deref(), Some("/root/explorer-1"));
-        assert_eq!(
-            snapshot.parent_path.as_deref(),
-            Some(crate::AgentPath::ROOT)
-        );
+        assert_eq!(snapshot.parent_path.as_deref(), Some("/root"));
     }
 
     #[tokio::test]

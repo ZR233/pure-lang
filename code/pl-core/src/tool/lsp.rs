@@ -272,8 +272,8 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::*;
-    use crate::turn::{CompileMode, TurnOptions};
-    use crate::{AgentSupervisor, CoreSession};
+    use crate::AgentSession;
+    use crate::turn::TurnOptions;
 
     fn test_context(
         workspace_root: PathBuf,
@@ -284,16 +284,13 @@ mod tests {
             event_tx,
             options: TurnOptions::default(),
             workspace_access,
-            mode: CompileMode::Simple,
             workspace_root,
             workspace_instructions: None,
             instruction_snapshot: None,
             provider_call_id: None,
             active_subagent: None,
-            agent_supervisor: AgentSupervisor::default(),
-            agent_tool_registrar: None,
             lsp_runtime: None,
-            parent_session: Arc::new(CoreSession::new()),
+            parent_session: Arc::new(AgentSession::new()),
         }
     }
 

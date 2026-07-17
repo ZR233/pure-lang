@@ -2,7 +2,9 @@ use crate::api::studio::types::{
     BridgeStudioAgentPartDto, BridgeStudioMessageDto, BridgeStudioPartDeltaDto,
     BridgeStudioPartDto, BridgeStudioPlanPartDto, BridgeStudioToolPartDto, BridgeStudioTurnDto,
 };
-use pl_protocol::{StudioMessage, StudioPart, StudioPartDelta, StudioPartDeltaField, StudioTurn};
+use pl_studio_runtime::{
+    StudioMessage, StudioPart, StudioPartDelta, StudioPartDeltaField, StudioTurn,
+};
 pub(crate) fn bridge_turn(turn: StudioTurn) -> BridgeStudioTurnDto {
     BridgeStudioTurnDto {
         turn_id: turn.turn_id,

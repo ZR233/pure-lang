@@ -400,16 +400,13 @@ mod tests {
             event_tx,
             options: crate::TurnOptions::default(),
             workspace_access: crate::tool::WorkspaceAccess::WorkspaceOnly,
-            mode: crate::CompileMode::Simple,
             workspace_root: std::env::temp_dir(),
             workspace_instructions: None,
             instruction_snapshot: None,
             provider_call_id: None,
             active_subagent: None,
-            agent_supervisor: crate::AgentSupervisor::default(),
-            agent_tool_registrar: None,
             lsp_runtime: None,
-            parent_session: Arc::new(crate::CoreSession::new()),
+            parent_session: Arc::new(crate::AgentSession::new()),
         }
     }
 }

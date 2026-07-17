@@ -8,6 +8,7 @@ members = [
     "code/pl-patch",
     "code/pl-skill-core",
     "code/pl-core",
+    "code/pl-studio-runtime",
     "code/pure-studio-flutter/rust",
     "xtask",
 ]
@@ -21,6 +22,7 @@ license = "Apache-2.0"
 [workspace.dependencies]
 tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7"
+tokio-tungstenite = { version = "0.29", features = ["connect", "rustls-tls-webpki-roots"] }
 futures = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -58,4 +60,5 @@ pl-output = { path = "code/pl-output" }
 pl-patch = { path = "code/pl-patch" }
 pl-skill-core = { path = "code/pl-skill-core" }
 pl-core = { path = "code/pl-core" }
+pl-studio-runtime = { path = "code/pl-studio-runtime" }
 pl-model = { path = "code/pl-model" }

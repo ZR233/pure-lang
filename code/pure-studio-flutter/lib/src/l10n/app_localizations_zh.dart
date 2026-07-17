@@ -716,6 +716,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsTemplate => 'Template';
 
   @override
+  String get settingsCustomProvider => '自定义 Provider';
+
+  @override
   String get settingsDefaultModel => 'Default model';
 
   @override
@@ -1745,6 +1748,9 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get settingsTemplate => 'Template';
+
+  @override
+  String get settingsCustomProvider => '自定义 Provider';
 
   @override
   String get settingsDefaultModel => 'Default model';

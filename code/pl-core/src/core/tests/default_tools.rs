@@ -2,12 +2,11 @@ use super::*;
 use pretty_assertions::assert_eq;
 
 #[test]
-fn shared_tool_schemas_can_describe_hosted_workspace_surface() {
+fn shared_tool_schemas_can_describe_container_workspace_surface() {
     let names = shared_tool_schemas(SharedToolSchemaOptions {
         bash: false,
         workspace_files: true,
         ask_user: true,
-        subagents: true,
         git: true,
         container: true,
         mcp_resources: false,
@@ -27,12 +26,6 @@ fn shared_tool_schemas_can_describe_hosted_workspace_surface() {
             "apply_patch",
             "request_user_input",
             "update_todo_list",
-            "spawn_agent",
-            "send_input",
-            "wait_agent",
-            "list_agents",
-            "close_agent",
-            "resume_agent",
             "git_status",
             "git_diff",
             "git_branch",
@@ -53,7 +46,6 @@ fn shared_tool_names_match_shared_schema_order() {
         bash: false,
         workspace_files: true,
         ask_user: true,
-        subagents: true,
         git: true,
         container: true,
         mcp_resources: true,
@@ -71,7 +63,7 @@ fn shared_tool_names_match_shared_schema_order() {
 #[test]
 fn shared_tool_schema_options_can_disable_plan_exit_fluently() {
     let options = SharedToolSchemaOptions::from_capabilities(
-        &crate::config::ToolCapabilityConfig::hosted_container_workspace(),
+        &crate::config::ToolCapabilityConfig::container_workspace(),
     )
     .with_plan_exit(false);
     let names = shared_tool_names(options);
@@ -82,38 +74,9 @@ fn shared_tool_schema_options_can_disable_plan_exit_fluently() {
 }
 
 #[test]
-fn hosted_container_shared_tool_names_apply_visibility_toggles() {
-    let names = hosted_container_shared_tool_names(HostedSharedToolVisibility::default());
-
-    assert!(names.contains(&"read_file".to_string()));
-    assert!(names.contains(&"container_exec".to_string()));
-    assert!(names.contains(&"list_mcp_resources".to_string()));
-    assert!(names.contains(&"send_input".to_string()));
-    assert!(names.contains(&"wait_agent".to_string()));
-    assert!(!names.contains(&"spawn_agent".to_string()));
-    assert!(!names.contains(&"close_agent".to_string()));
-    assert!(!names.contains(&"git_status".to_string()));
-    assert!(!names.contains(&"plan_exit".to_string()));
-
-    let elevated = hosted_container_shared_tool_names(
-        HostedSharedToolVisibility::default()
-            .with_git(true)
-            .with_spawn_agent(true)
-            .with_close_agent(true),
-    );
-
-    assert!(elevated.contains(&"git_status".to_string()));
-    assert!(elevated.contains(&"git_workspace_info".to_string()));
-    assert!(elevated.contains(&"spawn_agent".to_string()));
-    assert!(elevated.contains(&"close_agent".to_string()));
-}
-
-#[test]
 fn tool_visibility_set_combines_shared_product_and_dynamic_tools() {
-    let visibility = ToolVisibilitySet::hosted_container(
-        HostedSharedToolVisibility::default().with_spawn_agent(true),
-    )
-    .with_tool_names(["github_api_request", "mcp__docs__lookup"]);
+    let visibility = ToolVisibilitySet::from_tool_names(["read_file", "spawn_agent"])
+        .with_tool_names(["github_api_request", "mcp__docs__lookup"]);
 
     assert!(visibility.contains("read_file"));
     assert!(visibility.contains("spawn_agent"));
@@ -134,25 +97,6 @@ fn tool_visibility_set_combines_shared_product_and_dynamic_tools() {
             .collect::<Vec<_>>(),
         vec!["github_api_request".to_string()]
     );
-}
-
-#[test]
-fn hosted_container_visibility_combines_product_and_dynamic_names() {
-    let visibility = ToolVisibilitySet::hosted_container_with_tool_names(
-        HostedSharedToolVisibility::default()
-            .with_git(true)
-            .with_spawn_agent(true),
-        ["github_api_request", "save_artifact"],
-        ["mcp__docs__lookup"],
-    );
-
-    assert!(visibility.contains("read_file"));
-    assert!(visibility.contains("git_status"));
-    assert!(visibility.contains("spawn_agent"));
-    assert!(visibility.contains("github_api_request"));
-    assert!(visibility.contains("save_artifact"));
-    assert!(visibility.contains("mcp__docs__lookup"));
-    assert!(!visibility.contains("close_agent"));
 }
 
 #[test]
@@ -196,19 +140,19 @@ fn shared_tool_schemas_keep_git_and_container_opt_in() {
 }
 
 #[tokio::test]
-async fn default_tools_register_bash_and_agent_tools() {
-    let mut core = PureCore::default_provider().unwrap();
+async fn default_tools_register_shared_tools_without_product_collaboration() {
+    let mut core = TurnEngine::default_provider().unwrap();
 
     core.register_default_tools(std::env::temp_dir(), Some("rules".to_string()))
         .await;
 
     assert!(core.tools.get("bash").is_some());
     assert!(core.tools.get("write_stdin").is_some());
-    assert!(core.tools.get("spawn_agent").is_some());
-    assert!(core.tools.get("wait_agent").is_some());
-    assert!(core.tools.get("list_agents").is_some());
-    assert!(core.tools.get("send_input").is_some());
-    assert!(core.tools.get("resume_agent").is_some());
+    assert!(core.tools.get("spawn_agent").is_none());
+    assert!(core.tools.get("wait_agent").is_none());
+    assert!(core.tools.get("list_agents").is_none());
+    assert!(core.tools.get("send_input").is_none());
+    assert!(core.tools.get("close_agent").is_none());
     assert!(core.tools.get("request_user_input").is_some());
     assert!(core.tools.get("update_todo_list").is_some());
     assert!(core.tools.get("plan_exit").is_some());
@@ -234,8 +178,8 @@ async fn default_capabilities_keep_product_tools_disabled() {
 }
 
 #[tokio::test]
-async fn shared_tools_expose_only_canonical_codex_shape_names() {
-    let mut core = PureCore::default_provider().unwrap();
+async fn default_tool_builder_exposes_only_framework_independent_names() {
+    let mut core = TurnEngine::default_provider().unwrap();
     let capabilities = crate::config::ToolCapabilityConfig {
         container: true,
         git: true,
@@ -254,8 +198,6 @@ async fn shared_tools_expose_only_canonical_codex_shape_names() {
 
     let names = core.tools.names();
     for canonical in [
-        "send_input",
-        "resume_agent",
         "git_workspace_info",
         "container_copy",
         "read_file",
@@ -271,6 +213,11 @@ async fn shared_tools_expose_only_canonical_codex_shape_names() {
         );
     }
     for removed in [
+        "spawn_agent",
+        "send_input",
+        "wait_agent",
+        "list_agents",
+        "close_agent",
         "send_message",
         "followup_task",
         "git_worktree_info",
@@ -351,54 +298,6 @@ fn workspace_file_tool_kind_rejects_dot_aliases() {
 }
 
 #[test]
-fn agent_control_schemas_use_codex_camel_case_fields() {
-    let spawn_schema = crate::tool::AgentControlToolKind::SpawnAgent.input_schema();
-    assert!(spawn_schema.pointer("/properties/taskName").is_some());
-    assert!(spawn_schema.pointer("/properties/agentType").is_some());
-    assert!(
-        spawn_schema
-            .pointer("/properties/reasoningEffort")
-            .is_some()
-    );
-    assert!(spawn_schema.pointer("/properties/forkTurns").is_some());
-    assert!(spawn_schema.pointer("/properties/skillMentions").is_some());
-    assert_eq!(
-        spawn_schema.pointer("/properties/forkTurns/type"),
-        Some(&serde_json::json!("string"))
-    );
-    assert_eq!(
-        spawn_schema.pointer("/required"),
-        Some(&serde_json::json!(["taskName", "message"]))
-    );
-    assert!(spawn_schema.pointer("/properties/name").is_none());
-    assert!(spawn_schema.pointer("/properties/agent_type").is_none());
-    assert!(spawn_schema.pointer("/properties/skill_mentions").is_none());
-    assert!(
-        spawn_schema
-            .pointer("/properties/reasoning_effort")
-            .is_none()
-    );
-
-    let send_schema = crate::tool::AgentControlToolKind::SendInput.input_schema();
-    assert!(send_schema.pointer("/properties/triggerTurn").is_some());
-    assert!(send_schema.pointer("/properties/skillMentions").is_some());
-    assert!(send_schema.pointer("/properties/trigger_turn").is_none());
-    assert!(send_schema.pointer("/properties/skill_mentions").is_none());
-
-    let wait_schema = crate::tool::AgentControlToolKind::WaitAgent.input_schema();
-    assert!(wait_schema.pointer("/properties/target").is_some());
-    assert!(wait_schema.pointer("/properties/targets").is_some());
-    assert!(wait_schema.pointer("/properties/timeoutMs").is_some());
-    assert!(wait_schema.pointer("/properties/timeout_ms").is_none());
-
-    let resume_schema = crate::tool::AgentControlToolKind::ResumeAgent.input_schema();
-    assert_eq!(
-        resume_schema.pointer("/required"),
-        Some(&serde_json::json!(["target"]))
-    );
-}
-
-#[test]
 fn git_schemas_use_codex_camel_case_fields() {
     let branch_schema = crate::tool::GitToolKind::Branch.input_schema();
     assert!(branch_schema.pointer("/properties/startPoint").is_some());
@@ -418,11 +317,10 @@ fn git_schemas_use_codex_camel_case_fields() {
 }
 
 #[tokio::test]
-async fn tool_set_builder_can_disable_shell_and_subagents() {
-    let mut core = PureCore::default_provider().unwrap();
+async fn tool_set_builder_can_disable_shell() {
+    let mut core = TurnEngine::default_provider().unwrap();
     let capabilities = crate::config::ToolCapabilityConfig {
         bash: false,
-        subagents: false,
         ..Default::default()
     };
 
@@ -433,7 +331,6 @@ async fn tool_set_builder_can_disable_shell_and_subagents() {
     assert!(core.tools.get("write_stdin").is_none());
     assert!(core.tools.get("spawn_agent").is_none());
     assert!(core.tools.get("wait_agent").is_none());
-    assert!(core.tools.get("resume_agent").is_none());
     assert!(core.tools.get("read_file").is_some());
     assert!(core.tools.get("request_user_input").is_some());
     assert!(core.tools.get("plan_exit").is_some());
@@ -441,7 +338,7 @@ async fn tool_set_builder_can_disable_shell_and_subagents() {
 
 #[test]
 fn register_git_tools_exposes_git_pack_explicitly() {
-    let mut core = PureCore::default_provider().unwrap();
+    let mut core = TurnEngine::default_provider().unwrap();
 
     core.register_git_tools(
         crate::tool::GitWorkspaceConfig::local(std::env::temp_dir()),
@@ -465,7 +362,7 @@ async fn tool_set_builder_registers_git_only_with_runtime_config() {
         git: true,
         ..Default::default()
     };
-    let mut core = PureCore::default_provider().unwrap();
+    let mut core = TurnEngine::default_provider().unwrap();
 
     ToolSetBuilder::from_capabilities(capabilities.clone())
         .register(&mut core, std::env::temp_dir(), None)
@@ -473,7 +370,7 @@ async fn tool_set_builder_registers_git_only_with_runtime_config() {
 
     assert!(core.tools.get("git_status").is_none());
 
-    let mut core = PureCore::default_provider().unwrap();
+    let mut core = TurnEngine::default_provider().unwrap();
     ToolSetBuilder::from_capabilities(capabilities)
         .with_git_tools(
             crate::tool::GitWorkspaceConfig::local(std::env::temp_dir()),
@@ -532,7 +429,7 @@ async fn tool_set_builder_registers_container_only_with_backend() {
     };
     let schema_names_without_backend =
         ToolSetBuilder::from_capabilities(capabilities.clone()).shared_tool_names();
-    let mut core = PureCore::default_provider().unwrap();
+    let mut core = TurnEngine::default_provider().unwrap();
 
     ToolSetBuilder::from_capabilities(capabilities.clone())
         .register(&mut core, std::env::temp_dir(), None)
@@ -551,7 +448,7 @@ async fn tool_set_builder_registers_container_only_with_backend() {
     assert!(core.tools.get("search_files").is_none());
     assert!(core.tools.get("apply_patch").is_none());
 
-    let mut core = PureCore::default_provider().unwrap();
+    let mut core = TurnEngine::default_provider().unwrap();
     ToolSetBuilder::from_capabilities(capabilities)
         .with_container_tools(std::sync::Arc::new(FakeContainerBackend))
         .register(&mut core, std::env::temp_dir(), None)
@@ -563,169 +460,6 @@ async fn tool_set_builder_registers_container_only_with_backend() {
     assert!(core.tools.get("search_files").is_some());
     assert!(core.tools.get("apply_patch").is_some());
     assert!(core.tools.get("container_copy").is_some());
-}
-
-#[derive(Debug, Clone, Default)]
-struct FakeAgentControlBackend;
-
-impl crate::tool::AgentControlBackend for FakeAgentControlBackend {
-    type Error = String;
-
-    async fn spawn_agent(
-        &self,
-        request: crate::tool::AgentControlSpawnRequest,
-    ) -> std::result::Result<crate::tool::AgentControlSpawnOutput, Self::Error> {
-        Ok(crate::tool::AgentControlSpawnOutput {
-            agent_id: "agent-1".to_string(),
-            task_name: request.task_name,
-            path: "agent-1".to_string(),
-            status: pl_protocol::AgentStatus::Running,
-            turn_id: None,
-        })
-    }
-
-    async fn send_input(
-        &self,
-        request: crate::tool::AgentControlSendInputRequest,
-    ) -> std::result::Result<crate::tool::AgentControlSendInputOutput, Self::Error> {
-        Ok(crate::tool::AgentControlSendInputOutput {
-            target: request.target,
-            status: pl_protocol::AgentStatus::Running,
-            interrupt: request.interrupt,
-            queued: !request.trigger_turn,
-            turn_id: None,
-        })
-    }
-
-    async fn wait_agent(
-        &self,
-        _request: crate::tool::AgentControlWaitRequest,
-    ) -> std::result::Result<crate::tool::AgentControlWaitOutput, Self::Error> {
-        Ok(crate::tool::AgentControlWaitOutput {
-            message: String::new(),
-            timed_out: false,
-        })
-    }
-
-    async fn list_agents(
-        &self,
-        _request: crate::tool::AgentControlListRequest,
-    ) -> std::result::Result<crate::tool::AgentControlListOutput, Self::Error> {
-        Ok(crate::tool::AgentControlListOutput { agents: Vec::new() })
-    }
-
-    async fn close_agent(
-        &self,
-        request: crate::tool::AgentControlTargetRequest,
-    ) -> std::result::Result<crate::tool::AgentControlMessageOutput, Self::Error> {
-        Ok(crate::tool::AgentControlMessageOutput {
-            target: request.target,
-            status: pl_protocol::AgentStatus::Shutdown,
-        })
-    }
-
-    async fn resume_agent(
-        &self,
-        request: crate::tool::AgentControlTargetRequest,
-    ) -> std::result::Result<crate::tool::AgentControlMessageOutput, Self::Error> {
-        Ok(crate::tool::AgentControlMessageOutput {
-            target: request.target,
-            status: pl_protocol::AgentStatus::Running,
-        })
-    }
-}
-
-#[derive(Debug, Clone)]
-struct DenyAgentControlTargetPolicy;
-
-impl crate::tool::AgentControlPolicy for DenyAgentControlTargetPolicy {
-    type Error = String;
-
-    async fn check_tool(
-        &self,
-        _kind: crate::tool::AgentControlToolKind,
-    ) -> std::result::Result<(), Self::Error> {
-        Ok(())
-    }
-
-    async fn check_target(
-        &self,
-        kind: crate::tool::AgentControlToolKind,
-        _target: &str,
-    ) -> std::result::Result<(), Self::Error> {
-        Err(format!("target denied by builder policy: {}", kind.name()))
-    }
-}
-
-#[tokio::test]
-async fn tool_set_builder_registers_host_agent_control_backend() {
-    let capabilities = crate::config::ToolCapabilityConfig {
-        subagents: true,
-        ..Default::default()
-    };
-    let mut core = PureCore::default_provider().unwrap();
-
-    ToolSetBuilder::from_capabilities(capabilities.clone())
-        .with_allowed_tools(["spawn_agent", "send_input"])
-        .register(&mut core, std::env::temp_dir(), None)
-        .await;
-
-    assert!(core.tools.get("spawn_agent").is_some());
-    assert!(core.tools.get("send_input").is_some());
-    assert!(core.tools.get("wait_agent").is_none());
-
-    let mut core = PureCore::default_provider().unwrap();
-    ToolSetBuilder::from_capabilities(capabilities)
-        .with_allowed_tools(["spawn_agent", "send_input"])
-        .with_agent_control_tools(std::sync::Arc::new(FakeAgentControlBackend))
-        .register(&mut core, std::env::temp_dir(), None)
-        .await;
-
-    assert!(core.tools.get("spawn_agent").is_some());
-    assert!(core.tools.get("send_input").is_some());
-    assert!(core.tools.get("wait_agent").is_none());
-}
-
-#[tokio::test]
-async fn tool_set_builder_registers_host_agent_control_policy() {
-    let capabilities = crate::config::ToolCapabilityConfig {
-        subagents: true,
-        ..Default::default()
-    };
-    let mut core = PureCore::default_provider().unwrap();
-
-    ToolSetBuilder::from_capabilities(capabilities)
-        .with_allowed_tools(["send_input"])
-        .with_agent_control_tools(std::sync::Arc::new(FakeAgentControlBackend))
-        .with_agent_control_policy(std::sync::Arc::new(DenyAgentControlTargetPolicy))
-        .register(&mut core, std::env::temp_dir(), None)
-        .await;
-
-    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
-    let error = core
-        .tools
-        .get("send_input")
-        .expect("send_input")
-        .execute(
-            crate::tool::ToolInput {
-                arguments: serde_json::json!({
-                    "target": "agent-1",
-                    "message": "continue"
-                }),
-                session_id: "session-1".to_string(),
-                tool_id: "call-1".to_string(),
-                revision_base: 0,
-            },
-            test_tool_context(event_tx),
-        )
-        .await
-        .expect_err("policy should deny target before backend");
-
-    assert!(
-        error
-            .to_string()
-            .contains("target denied by builder policy")
-    );
 }
 
 #[derive(Debug, Clone, Default)]
@@ -782,7 +516,7 @@ async fn tool_set_builder_registers_mcp_resource_backend() {
         mcp: true,
         ..Default::default()
     };
-    let mut core = PureCore::default_provider().unwrap();
+    let mut core = TurnEngine::default_provider().unwrap();
 
     ToolSetBuilder::from_capabilities(capabilities.clone())
         .with_allowed_tools(["list_mcp_resources", "read_mcp_resource"])
@@ -792,7 +526,7 @@ async fn tool_set_builder_registers_mcp_resource_backend() {
     assert!(core.tools.get("list_mcp_resources").is_none());
     assert!(core.tools.get("read_mcp_resource").is_none());
 
-    let mut core = PureCore::default_provider().unwrap();
+    let mut core = TurnEngine::default_provider().unwrap();
     ToolSetBuilder::from_capabilities(capabilities)
         .with_allowed_tools(["list_mcp_resources", "read_mcp_resource"])
         .with_mcp_resource_tools(std::sync::Arc::new(FakeMcpResourceBackend))
@@ -810,7 +544,7 @@ async fn tool_set_builder_registers_host_mcp_tools() {
         mcp: true,
         ..Default::default()
     };
-    let mut core = PureCore::default_provider().unwrap();
+    let mut core = TurnEngine::default_provider().unwrap();
     let schema = pl_model::ToolSchema::function(
         "mcp__docs__lookup",
         "Lookup docs.",
@@ -862,7 +596,7 @@ async fn tool_set_builder_registers_host_mcp_tools() {
     );
 
     let kernel = AgentKernel::builder(
-        PureCoreBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None)).unwrap(),
+        TurnEngineBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None)).unwrap(),
     )
     .with_profile(CoreAgentProfile::host_provided(std::env::temp_dir()))
     .with_tool_set(
@@ -886,7 +620,7 @@ async fn tool_set_builder_respects_allowed_tools() {
         git: true,
         ..Default::default()
     };
-    let mut core = PureCore::default_provider().unwrap();
+    let mut core = TurnEngine::default_provider().unwrap();
 
     let builder = ToolSetBuilder::from_capabilities(capabilities)
         .with_allowed_tools([
@@ -938,7 +672,7 @@ async fn tool_set_builder_respects_allowed_tools() {
 async fn profiled_local_workspace_registers_default_tools() {
     let runtime = CoreRuntimeProfile::local_workspace(std::env::temp_dir())
         .with_workspace_instructions("rules");
-    let mut core = PureCoreBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None))
+    let mut core = TurnEngineBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None))
         .unwrap()
         .with_runtime_profile(runtime)
         .build();
@@ -947,14 +681,14 @@ async fn profiled_local_workspace_registers_default_tools() {
 
     assert!(core.tools.get("bash").is_some());
     assert!(core.tools.get("read_file").is_some());
-    assert!(core.tools.get("spawn_agent").is_some());
+    assert!(core.tools.get("spawn_agent").is_none());
 }
 
 #[tokio::test]
 async fn profiled_local_workspace_uses_unified_workspace_file_tools() {
     let runtime = CoreRuntimeProfile::local_workspace(std::env::temp_dir())
         .with_workspace_instructions("rules");
-    let mut core = PureCoreBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None))
+    let mut core = TurnEngineBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None))
         .unwrap()
         .with_runtime_profile(runtime)
         .build();
@@ -971,7 +705,7 @@ async fn profiled_local_workspace_uses_unified_workspace_file_tools() {
 async fn profiled_host_tools_do_not_register_local_workspace_tools() {
     let runtime = CoreRuntimeProfile::host_provided(std::env::temp_dir())
         .with_workspace_instructions("rules");
-    let mut core = PureCoreBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None))
+    let mut core = TurnEngineBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None))
         .unwrap()
         .with_runtime_profile(runtime)
         .build();
@@ -984,7 +718,7 @@ async fn profiled_host_tools_do_not_register_local_workspace_tools() {
 #[tokio::test]
 async fn default_tools_register_lsp_query_when_runtime_is_shared() {
     let registry = pl_lsp::LspRuntimeRegistry::new();
-    let mut core = PureCore::default_provider()
+    let mut core = TurnEngine::default_provider()
         .unwrap()
         .with_lsp_runtime(registry.clone());
 
@@ -1002,36 +736,35 @@ async fn default_tools_register_lsp_query_when_runtime_is_shared() {
 }
 
 #[tokio::test]
-async fn enabled_tools_snapshot_records_mode_filtered_tools() {
-    let mut core = PureCore::default_provider().unwrap();
+async fn enabled_tools_snapshot_records_registered_tools() {
+    let mut core = TurnEngine::default_provider().unwrap();
     core.register_default_tools(std::env::temp_dir(), Some("rules".to_string()))
         .await;
 
-    let events = record_enabled_tools_for_core(&core, "session-1", "turn-1", CompileMode::Task);
+    let events = record_enabled_tools_for_core(&core, "session-1", "turn-1");
     let event = enabled_tools_event(&events);
 
     assert_eq!(event.turn_id, "turn-1");
-    assert_eq!(event.mode, "task");
-    assert!(!event.tools.contains(&"bash".to_string()));
+    assert!(event.tools.contains(&"bash".to_string()));
     assert!(event.tools.contains(&"read_file".to_string()));
     assert!(event.tools.contains(&"plan_exit".to_string()));
-    assert!(!event.tools.contains(&"write_file".to_string()));
-    assert!(!event.tools.contains(&"apply_patch".to_string()));
+    assert!(event.tools.contains(&"write_file".to_string()));
+    assert!(event.tools.contains(&"apply_patch".to_string()));
 }
 
 #[tokio::test]
 async fn enabled_tools_snapshot_includes_lsp_query_when_runtime_is_shared() {
     let registry = pl_lsp::LspRuntimeRegistry::new();
-    let mut core = PureCore::default_provider()
+    let mut core = TurnEngine::default_provider()
         .unwrap()
         .with_lsp_runtime(registry);
     core.register_default_tools(std::env::temp_dir(), Some("rules".to_string()))
         .await;
 
-    let events = record_enabled_tools_for_core(&core, "session-1", "turn-1", CompileMode::Simple);
+    let events = record_enabled_tools_for_core(&core, "session-1", "turn-1");
     let event = enabled_tools_event(&events);
 
     // 空注册表没有可用语言，不应出现任何 LSP 工具。
     assert!(event.tools.iter().all(|t| !t.starts_with("lsp_query_")));
-    assert!(!event.tools.contains(&"plan_exit".to_string()));
+    assert!(event.tools.contains(&"plan_exit".to_string()));
 }

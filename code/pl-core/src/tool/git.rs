@@ -1,380 +1,41 @@
 use std::collections::BTreeMap;
 use std::fmt;
-use std::future::Future;
-use std::path::{Component, Path, PathBuf};
-use std::process::Stdio;
+use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
-use pl_model::ToolSchema;
 use pl_protocol::PureError;
-use secrecy::{ExposeSecret, SecretString};
-use serde::Deserialize;
 use serde_json::{Value, json};
-use tokio::process::Command;
 
-use super::shell::shell_quote_word;
 use super::{BoxFuture, OutputTruncation, Tool, ToolContext, ToolInput, ToolOutput};
 
-pub const TOOL_GIT_STATUS: &str = "git_status";
-pub const TOOL_GIT_DIFF: &str = "git_diff";
-pub const TOOL_GIT_BRANCH: &str = "git_branch";
-pub const TOOL_GIT_FETCH: &str = "git_fetch";
-pub const TOOL_GIT_COMMIT: &str = "git_commit";
-pub const TOOL_GIT_PUSH: &str = "git_push";
-pub const TOOL_GIT_WORKSPACE_INFO: &str = "git_workspace_info";
-pub const TOOL_GIT_SYNC_DEFAULT_BRANCH: &str = "git_sync_default_branch";
+mod credential;
+mod execution;
+mod policy;
+mod schema;
+
+pub use credential::{
+    GIT_TOKEN_ENV, GitCredential, GitCredentialOperation, GitCredentialProvider,
+    GitCredentialRequest, GitShellCommandRequest, GitShellCredential, NoGitCredentialProvider,
+    git_askpass_script, git_shell_command, git_shell_credential_prelude, git_shell_retry_function,
+};
+pub use execution::{
+    ExecutionBackend, ExecutionOutput, ExecutionRequest, LocalExecutionBackend,
+    LocalExecutionFailure,
+};
+pub use policy::GitPolicy;
+pub use schema::{
+    GitToolKind, TOOL_GIT_BRANCH, TOOL_GIT_COMMIT, TOOL_GIT_DIFF, TOOL_GIT_FETCH, TOOL_GIT_PUSH,
+    TOOL_GIT_STATUS, TOOL_GIT_SYNC_DEFAULT_BRANCH, TOOL_GIT_WORKSPACE_INFO,
+};
+
+use credential::write_askpass_script;
+use schema::{
+    GitBranchInput, GitCommitInput, GitDiffInput, GitFetchInput, GitPushInput,
+    GitSyncDefaultBranchInput,
+};
 
 const GIT_TIMEOUT: Duration = Duration::from_secs(600);
-pub const GIT_TOKEN_ENV: &str = "PL_GIT_TOKEN";
-
-/// git shell 命令的凭据注入模式。
-///
-/// 容器或 sidecar backend 需要把 git 命令序列化成 shell 字符串时，用该枚举选择是否
-/// 通过统一 askpass 脚本读取 `PL_GIT_TOKEN`。token 值只应通过环境变量传入，不能拼进
-/// 命令文本。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GitShellCredential {
-    Disabled,
-    EnvToken,
-}
-
-/// 生成可在 shell backend 中执行的 git 命令。
-///
-/// 该请求面向容器、sidecar 等只能接收 shell 字符串的执行后端。调用方负责把工作区挂载
-/// 到 `safe_directory`，并在 `credential` 为 [`GitShellCredential::EnvToken`] 时注入
-/// [`GIT_TOKEN_ENV`] 环境变量。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct GitShellCommandRequest<'a> {
-    pub safe_directory: &'a str,
-    pub args: &'a [&'a str],
-    pub credential: GitShellCredential,
-}
-
-pub fn git_shell_command(request: GitShellCommandRequest<'_>) -> String {
-    let mut command_parts = vec![
-        "git".to_string(),
-        "-c".to_string(),
-        shell_quote_word("core.hooksPath=/dev/null"),
-        "-c".to_string(),
-        shell_quote_word(&format!("safe.directory={}", request.safe_directory)),
-        "-c".to_string(),
-        shell_quote_word("credential.helper="),
-    ];
-    command_parts.extend(request.args.iter().map(|arg| shell_quote_word(arg)));
-    let git_command = command_parts.join(" ");
-    match request.credential {
-        GitShellCredential::Disabled => git_command,
-        GitShellCredential::EnvToken => git_shell_command_with_askpass(&git_command),
-    }
-}
-
-/// 生成 shell 脚本片段，为后续 git 命令安装统一 askpass 凭据环境。
-///
-/// 该片段不会设置 `set -e`，调用方可把它嵌入更大的 sidecar 脚本，并通过
-/// [`GIT_TOKEN_ENV`] 环境变量传入 token。
-pub fn git_shell_credential_prelude() -> String {
-    format!(
-        "askpass=/tmp/pl-git-askpass-$$.sh\n\
-         trap 'rm -f \"$askpass\"' EXIT\n\
-         cat > \"$askpass\" <<'PL_GIT_ASKPASS'\n\
-         {}PL_GIT_ASKPASS\n\
-         chmod 700 \"$askpass\"\n\
-         export GIT_ASKPASS=\"$askpass\"\n\
-         export GIT_TERMINAL_PROMPT=0\n",
-        git_askpass_script()
-    )
-}
-
-/// 生成 sidecar shell 脚本中可复用的 `git_with_retry` 函数。
-pub fn git_shell_retry_function() -> &'static str {
-    "git_with_retry() {\n\
-       attempts=0\n\
-       while :; do\n\
-         attempts=$((attempts + 1))\n\
-         git -c credential.helper= -c http.version=HTTP/1.1 \"$@\" && return 0\n\
-         status=$?\n\
-         if [ \"$attempts\" -ge 3 ]; then\n\
-           return \"$status\"\n\
-         fi\n\
-         sleep $((attempts * 2))\n\
-       done\n\
-     }\n"
-}
-
-/// 通用命令执行请求。
-#[derive(Clone, PartialEq, Eq)]
-pub struct ExecutionRequest {
-    pub program: PathBuf,
-    pub args: Vec<String>,
-    pub cwd: PathBuf,
-    pub env: BTreeMap<String, String>,
-    pub timeout: Option<Duration>,
-}
-
-impl fmt::Debug for ExecutionRequest {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let env = self
-            .env
-            .keys()
-            .map(|key| {
-                let value = if key.contains("TOKEN") || key.contains("PASSWORD") {
-                    "[redacted]"
-                } else {
-                    self.env.get(key).map(String::as_str).unwrap_or_default()
-                };
-                (key, value)
-            })
-            .collect::<BTreeMap<_, _>>();
-        f.debug_struct("ExecutionRequest")
-            .field("program", &self.program)
-            .field("args", &self.args)
-            .field("cwd", &self.cwd)
-            .field("env", &env)
-            .field("timeout", &self.timeout)
-            .finish()
-    }
-}
-
-/// 通用命令执行结果。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExecutionOutput {
-    pub status: i32,
-    pub stdout: String,
-    pub stderr: String,
-}
-
-/// shell/process 类工具共用的执行后端。
-///
-/// 实现方负责在指定工作目录运行命令，并遵守请求中给出的环境和超时。
-pub trait ExecutionBackend: fmt::Debug + Send + Sync {
-    type Error: fmt::Display + Send + 'static;
-
-    fn run(
-        &self,
-        request: ExecutionRequest,
-    ) -> impl Future<Output = std::result::Result<ExecutionOutput, Self::Error>> + Send;
-}
-
-/// 本地进程执行后端。
-#[derive(Debug, Clone, Default)]
-pub struct LocalExecutionBackend;
-
-/// 本地命令失败发生在进程启动前还是启动后。
-#[derive(Debug)]
-pub(crate) enum LocalExecutionFailure {
-    BeforeSpawn(String),
-    AfterSpawn(String),
-    TimedOut,
-}
-
-impl fmt::Display for LocalExecutionFailure {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::BeforeSpawn(error) | Self::AfterSpawn(error) => formatter.write_str(error),
-            Self::TimedOut => formatter.write_str("command timed out"),
-        }
-    }
-}
-
-impl LocalExecutionBackend {
-    pub(crate) async fn run_classified(
-        &self,
-        request: ExecutionRequest,
-    ) -> std::result::Result<ExecutionOutput, LocalExecutionFailure> {
-        let mut command = Command::new(&request.program);
-        command.args(&request.args);
-        command.current_dir(&request.cwd);
-        command.envs(&request.env);
-        command.stdin(Stdio::null());
-        command.stdout(Stdio::piped());
-        command.stderr(Stdio::piped());
-        command.kill_on_drop(true);
-        let child = command.spawn().map_err(|error| {
-            LocalExecutionFailure::BeforeSpawn(format!("failed to run command: {error}"))
-        })?;
-        let output = match request.timeout {
-            Some(timeout) => tokio::time::timeout(timeout, child.wait_with_output())
-                .await
-                .map_err(|_| LocalExecutionFailure::TimedOut)?,
-            None => child.wait_with_output().await,
-        }
-        .map_err(|error| {
-            LocalExecutionFailure::AfterSpawn(format!("failed to run command: {error}"))
-        })?;
-        Ok(ExecutionOutput {
-            status: output.status.code().unwrap_or(-1),
-            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        })
-    }
-}
-
-impl ExecutionBackend for LocalExecutionBackend {
-    type Error = String;
-
-    async fn run(
-        &self,
-        request: ExecutionRequest,
-    ) -> std::result::Result<ExecutionOutput, Self::Error> {
-        self.run_classified(request)
-            .await
-            .map_err(|error| error.to_string())
-    }
-}
-
-/// 需要 git 凭据的操作类型。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GitCredentialOperation {
-    Fetch,
-    Push,
-}
-
-/// git 凭据请求。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GitCredentialRequest {
-    pub operation: GitCredentialOperation,
-    pub remote: String,
-}
-
-/// git 短期凭据。
-#[derive(Clone)]
-pub struct GitCredential(SecretString);
-
-impl fmt::Debug for GitCredential {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("GitCredential").field(&"[redacted]").finish()
-    }
-}
-
-impl GitCredential {
-    pub fn new(value: String) -> Self {
-        Self(SecretString::from(value))
-    }
-
-    fn expose(&self) -> &str {
-        self.0.expose_secret()
-    }
-}
-
-/// 为需要认证的 git 操作按需提供凭据。
-///
-/// 实现方只返回当前 workspace 可用的短期 token；不得把 token 放进工具 schema、
-/// 参数回显或错误文本。返回 `None` 表示该操作没有可用凭据。
-pub trait GitCredentialProvider: fmt::Debug + Send + Sync {
-    type Error: fmt::Display + Send + 'static;
-
-    fn credential(
-        &self,
-        request: GitCredentialRequest,
-    ) -> impl Future<Output = std::result::Result<Option<GitCredential>, Self::Error>> + Send;
-}
-
-/// 不提供任何 git 凭据的 provider。
-#[derive(Debug, Clone, Default)]
-pub struct NoGitCredentialProvider;
-
-impl GitCredentialProvider for NoGitCredentialProvider {
-    type Error = String;
-
-    async fn credential(
-        &self,
-        _request: GitCredentialRequest,
-    ) -> std::result::Result<Option<GitCredential>, Self::Error> {
-        Ok(None)
-    }
-}
-
-/// git workspace 安全策略。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GitPolicy {
-    allowed_remote: String,
-    default_branch: String,
-}
-
-impl Default for GitPolicy {
-    fn default() -> Self {
-        Self {
-            allowed_remote: "origin".to_string(),
-            default_branch: "main".to_string(),
-        }
-    }
-}
-
-impl GitPolicy {
-    pub fn new(default_branch: impl Into<String>) -> Self {
-        Self {
-            default_branch: default_branch.into(),
-            ..Self::default()
-        }
-    }
-
-    pub fn validate_remote(&self, remote: &str) -> Result<(), PureError> {
-        if remote == self.allowed_remote {
-            Ok(())
-        } else {
-            Err(tool_error(
-                "git",
-                format!(
-                    "unsupported git remote `{remote}`; only `{}` is allowed",
-                    self.allowed_remote
-                ),
-            ))
-        }
-    }
-
-    pub fn validate_branch(&self, branch: &str) -> Result<(), PureError> {
-        if branch.trim().is_empty()
-            || branch.starts_with('/')
-            || branch.ends_with('/')
-            || branch.starts_with('.')
-            || branch.contains("..")
-            || branch.contains("//")
-            || branch.contains("@{")
-            || branch.contains('\\')
-            || branch.ends_with(".lock")
-            || branch.chars().any(char::is_control)
-        {
-            return Err(tool_error("git", format!("unsafe git branch `{branch}`")));
-        }
-        Ok(())
-    }
-
-    pub fn validate_path(&self, path: &str) -> Result<(), PureError> {
-        let normalized = path.trim();
-        if normalized.is_empty()
-            || normalized != path
-            || normalized.starts_with('/')
-            || normalized.contains('\\')
-            || has_windows_drive_prefix(normalized)
-            || normalized.chars().any(char::is_control)
-            || Path::new(normalized).is_absolute()
-            || Path::new(normalized)
-                .components()
-                .any(|component| matches!(component, Component::ParentDir))
-        {
-            return Err(tool_error("git", format!("unsafe git path `{path}`")));
-        }
-        Ok(())
-    }
-
-    pub fn validate_fetch_refspec(&self, refspec: Option<&str>) -> Result<(), PureError> {
-        let Some(refspec) = refspec else {
-            return Ok(());
-        };
-        if refspec == self.default_branch
-            || refspec == format!("refs/heads/{}", self.default_branch)
-            || is_pull_request_head_ref(refspec)
-        {
-            Ok(())
-        } else {
-            Err(tool_error(
-                "git",
-                format!("unsupported git fetch refspec `{refspec}`"),
-            ))
-        }
-    }
-}
 
 /// git 工具运行配置。
 #[derive(Debug, Clone, PartialEq)]
@@ -397,131 +58,6 @@ impl GitWorkspaceConfig {
             remote_url: None,
             workspace_info: BTreeMap::new(),
         }
-    }
-}
-
-/// pl-core 提供的通用 git 工具类型。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GitToolKind {
-    Status,
-    Diff,
-    Branch,
-    Fetch,
-    Commit,
-    Push,
-    WorkspaceInfo,
-    SyncDefaultBranch,
-}
-
-impl GitToolKind {
-    pub fn all() -> &'static [Self] {
-        &[
-            Self::Status,
-            Self::Diff,
-            Self::Branch,
-            Self::Fetch,
-            Self::Commit,
-            Self::Push,
-            Self::WorkspaceInfo,
-            Self::SyncDefaultBranch,
-        ]
-    }
-
-    pub fn from_name(name: &str) -> Option<Self> {
-        match name {
-            TOOL_GIT_STATUS => Some(Self::Status),
-            TOOL_GIT_DIFF => Some(Self::Diff),
-            TOOL_GIT_BRANCH => Some(Self::Branch),
-            TOOL_GIT_FETCH => Some(Self::Fetch),
-            TOOL_GIT_COMMIT => Some(Self::Commit),
-            TOOL_GIT_PUSH => Some(Self::Push),
-            TOOL_GIT_WORKSPACE_INFO => Some(Self::WorkspaceInfo),
-            TOOL_GIT_SYNC_DEFAULT_BRANCH => Some(Self::SyncDefaultBranch),
-            _ => None,
-        }
-    }
-
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Status => TOOL_GIT_STATUS,
-            Self::Diff => TOOL_GIT_DIFF,
-            Self::Branch => TOOL_GIT_BRANCH,
-            Self::Fetch => TOOL_GIT_FETCH,
-            Self::Commit => TOOL_GIT_COMMIT,
-            Self::Push => TOOL_GIT_PUSH,
-            Self::WorkspaceInfo => TOOL_GIT_WORKSPACE_INFO,
-            Self::SyncDefaultBranch => TOOL_GIT_SYNC_DEFAULT_BRANCH,
-        }
-    }
-
-    fn description(self) -> &'static str {
-        match self {
-            Self::Status => "Show git working tree status for this workspace.",
-            Self::Diff => "Show git diff for this workspace.",
-            Self::Branch => "List branches or create/switch the current branch.",
-            Self::Fetch => "Fetch from the repository remote using host-injected credentials.",
-            Self::Commit => "Create a git commit in this workspace.",
-            Self::Push => "Push the current branch using host-injected credentials.",
-            Self::WorkspaceInfo => "Show information about this git workspace.",
-            Self::SyncDefaultBranch => {
-                "Synchronize this workspace branch with the configured default branch."
-            }
-        }
-    }
-
-    pub fn input_schema(self) -> Value {
-        match self {
-            Self::Status | Self::WorkspaceInfo => object_schema(vec![]),
-            Self::Diff => object_schema(vec![
-                ("staged", json!({ "type": "boolean" }), false),
-                ("path", json!({ "type": "string" }), false),
-            ]),
-            Self::Branch => object_schema(vec![
-                (
-                    "action",
-                    json!({ "type": "string", "enum": ["list", "switch", "create"] }),
-                    false,
-                ),
-                ("name", json!({ "type": "string" }), false),
-                ("startPoint", json!({ "type": "string" }), false),
-            ]),
-            Self::Fetch => object_schema(vec![
-                ("remote", json!({ "type": "string" }), false),
-                ("refspec", json!({ "type": "string" }), false),
-                ("prune", json!({ "type": "boolean" }), false),
-            ]),
-            Self::Commit => object_schema(vec![
-                ("message", json!({ "type": "string" }), true),
-                ("all", json!({ "type": "boolean" }), false),
-            ]),
-            Self::Push => object_schema(vec![
-                ("remote", json!({ "type": "string" }), false),
-                ("branch", json!({ "type": "string" }), false),
-                ("setUpstream", json!({ "type": "boolean" }), false),
-            ]),
-            Self::SyncDefaultBranch => object_schema(vec![
-                (
-                    "force",
-                    json!({
-                        "type": "boolean",
-                        "description": "Discard uncommitted workspace changes while syncing."
-                    }),
-                    false,
-                ),
-                (
-                    "preserveChanges",
-                    json!({
-                        "type": "boolean",
-                        "description": "Stash uncommitted workspace changes before syncing and restore them afterwards."
-                    }),
-                    false,
-                ),
-            ]),
-        }
-    }
-
-    pub fn to_schema(self) -> ToolSchema {
-        ToolSchema::function(self.name(), self.description(), self.input_schema())
     }
 }
 
@@ -849,57 +385,6 @@ where
     }
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct GitDiffInput {
-    #[serde(default)]
-    staged: bool,
-    path: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct GitBranchInput {
-    action: Option<String>,
-    name: Option<String>,
-    start_point: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct GitFetchInput {
-    remote: Option<String>,
-    refspec: Option<String>,
-    #[serde(default = "default_true")]
-    prune: bool,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct GitCommitInput {
-    message: String,
-    #[serde(default)]
-    all: bool,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct GitPushInput {
-    remote: Option<String>,
-    branch: Option<String>,
-    #[serde(default)]
-    set_upstream: bool,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct GitSyncDefaultBranchInput {
-    #[serde(default)]
-    force: bool,
-    #[serde(default)]
-    preserve_changes: bool,
-}
-
 struct GitToolOutcome {
     description: String,
     exit_code: Option<i32>,
@@ -937,26 +422,9 @@ fn json_description(tool: &str, value: Value) -> Result<String, PureError> {
         .map_err(|error| tool_error(tool, format!("failed to serialize git output: {error}")))
 }
 
-fn object_schema(properties: Vec<(&'static str, Value, bool)>) -> Value {
-    let mut props = serde_json::Map::new();
-    let mut required = Vec::new();
-    for (name, schema, is_required) in properties {
-        props.insert(name.to_string(), schema);
-        if is_required {
-            required.push(Value::String(name.to_string()));
-        }
-    }
-    json!({
-        "type": "object",
-        "properties": props,
-        "required": required,
-        "additionalProperties": false,
-    })
-}
-
 fn parse_input<T>(tool: &str, arguments: Value) -> Result<T, PureError>
 where
-    T: for<'de> Deserialize<'de>,
+    T: serde::de::DeserializeOwned,
 {
     serde_json::from_value(arguments)
         .map_err(|error| tool_error(tool, format!("invalid git tool input: {error}")))
@@ -975,80 +443,6 @@ fn redact(value: String, credential: Option<&GitCredential>) -> String {
         Some(credential) => value.replace(credential.expose(), "[redacted]"),
         None => value,
     }
-}
-
-async fn write_askpass_script(tool: &str) -> Result<PathBuf, PureError> {
-    let path = std::env::temp_dir().join(format!(
-        "pl-core-git-askpass-{}-{}",
-        std::process::id(),
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
-    ));
-    tokio::fs::write(&path, git_askpass_script())
-        .await
-        .map_err(|error| tool_error(tool, format!("failed to write git askpass: {error}")))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        tokio::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700))
-            .await
-            .map_err(|error| tool_error(tool, format!("failed to chmod git askpass: {error}")))?;
-    }
-    Ok(path)
-}
-
-/// 返回统一的 git askpass 脚本文本。
-///
-/// 调用方可把该脚本写入临时文件并将路径配置到 `GIT_ASKPASS`，token 值通过
-/// [`GIT_TOKEN_ENV`] 环境变量读取。
-pub fn git_askpass_script() -> &'static str {
-    "#!/bin/sh\ncase \"$1\" in\n  *Username*) printf '%s\\n' x-access-token ;;\n  *Password*) printf '%s\\n' \"$PL_GIT_TOKEN\" ;;\n  *) printf '\\n' ;;\nesac\n"
-}
-
-fn git_shell_command_with_askpass(git_command: &str) -> String {
-    format!(
-        "askpass=$(mktemp) && cat > \"$askpass\" <<'PL_GIT_ASKPASS'\n{}PL_GIT_ASKPASS\nchmod 700 \"$askpass\" && GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=\"$askpass\" {git_command}; status=$?; rm -f \"$askpass\"; exit $status",
-        git_askpass_script()
-    )
-}
-
-fn default_true() -> bool {
-    true
-}
-
-fn is_pull_request_head_ref(refspec: &str) -> bool {
-    let (source, destination) = match refspec.split_once(':') {
-        Some((source, destination)) => (source, Some(destination)),
-        None => (refspec, None),
-    };
-    let source = source.strip_prefix("refs/").unwrap_or(source);
-    let Some(number) = pull_request_head_number(source) else {
-        return false;
-    };
-    match destination {
-        Some(destination) => is_pull_request_head_destination(destination, number),
-        None => true,
-    }
-}
-
-fn pull_request_head_number(refspec: &str) -> Option<&str> {
-    let refspec = refspec.strip_prefix("refs/").unwrap_or(refspec);
-    let rest = refspec.strip_prefix("pull/")?;
-    let number = rest.strip_suffix("/head")?;
-    (!number.is_empty() && number.chars().all(|ch| ch.is_ascii_digit())).then_some(number)
-}
-
-fn is_pull_request_head_destination(destination: &str, number: &str) -> bool {
-    destination == format!("pr/{number}")
-        || destination == format!("refs/pull/{number}/head")
-        || destination == format!("refs/remotes/origin/pr/{number}")
-}
-
-fn has_windows_drive_prefix(path: &str) -> bool {
-    let bytes = path.as_bytes();
-    bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
 }
 
 fn tool_error(tool: &str, error: impl fmt::Display) -> PureError {
@@ -1246,16 +640,13 @@ mod tests {
             event_tx,
             options: crate::turn::TurnOptions::default(),
             workspace_access: crate::tool::WorkspaceAccess::WorkspaceOnly,
-            mode: crate::turn::CompileMode::Simple,
             workspace_root: std::env::temp_dir(),
             workspace_instructions: None,
             instruction_snapshot: None,
             provider_call_id: None,
             active_subagent: None,
-            agent_supervisor: crate::AgentSupervisor::default(),
-            agent_tool_registrar: None,
             lsp_runtime: None,
-            parent_session: Arc::new(crate::CoreSession::new()),
+            parent_session: Arc::new(crate::AgentSession::new()),
         }
     }
 

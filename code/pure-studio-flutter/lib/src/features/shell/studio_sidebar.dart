@@ -189,7 +189,7 @@ class _SessionTile extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final modeIcon = session.mode == CompileMode.task
+    final modeIcon = session.mode == StudioMode.task
         ? Icons.route
         : Icons.flash_on;
     final colors = Theme.of(context).colorScheme;
@@ -217,7 +217,7 @@ class _SessionTile extends ConsumerWidget {
       subtitle: _sessionSubtitle(context, session),
       dense: true,
       iconColor: selected ? StudioColors.clayDeep : colors.onSurfaceVariant,
-      markerColor: session.mode == CompileMode.task
+      markerColor: session.mode == StudioMode.task
           ? StudioColors.clay
           : StudioColors.sage,
       onTap: () =>

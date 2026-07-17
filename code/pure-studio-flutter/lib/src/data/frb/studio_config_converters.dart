@@ -28,23 +28,31 @@ List<ProviderSettingsView> _providersFromConfig(Map<String, Object?> config) {
   final providers = _map(config['providers']);
   return providers.entries.map((entry) {
     final value = _map(entry.value);
-    final templateKind = _providerTemplateKind(entry.key, value);
-    final defaultSlugs = _templateDefaultModelSlugs(templateKind);
+    final templateKind = _providerTemplateKind(value);
     final providerModels = _providerModels(value['models']);
+    final projectedCustomModels = _providerModels(
+      _firstValue(value, const ['customModels', 'custom_models']),
+    );
+    final customSlugs = projectedCustomModels
+        .map((model) => model.slug)
+        .toSet();
     final defaultModels = providerModels
-        .where((model) => defaultSlugs.contains(model.slug))
+        .where((model) => !customSlugs.contains(model.slug))
         .toList();
-    final customModels = providerModels
-        .where((model) => !defaultSlugs.contains(model.slug))
-        .toList();
-    final visibleModels = defaultModels.isEmpty
+    final customModels = projectedCustomModels.isEmpty
         ? providerModels
-        : [...defaultModels, ...customModels];
+              .where((model) => customSlugs.contains(model.slug))
+              .toList()
+        : projectedCustomModels;
+    final visibleModels = providerModels;
     final defaultModel = _string(
       _firstValue(value, const ['defaultModel', 'default_model']),
     );
-    final bearerToken = _string(
-      _firstValue(value, const ['bearerToken', 'bearer_token']),
+    final hasBearerToken = _boolWithDefault(
+      _firstValue(value, const ['hasBearerToken', 'has_bearer_token']),
+      _string(
+        _firstValue(value, const ['bearerToken', 'bearer_token']),
+      ).trim().isNotEmpty,
     );
     final name = _string(
       _firstValue(value, const ['displayName', 'display_name', 'name']),
@@ -57,18 +65,32 @@ List<ProviderSettingsView> _providersFromConfig(Map<String, Object?> config) {
       subtitle: '$name Platform',
       baseUrl: _string(_firstValue(value, const ['baseUrl', 'base_url'])),
       bearerToken: '',
-      hasBearerToken: bearerToken.trim().isNotEmpty,
+      hasBearerToken: hasBearerToken,
       defaultModel: defaultModel,
       models: visibleModels,
       defaultModels: defaultModels.isEmpty ? providerModels : defaultModels,
       customModels: customModels,
-      status: bearerToken.trim().isEmpty ? 'missingCredential' : 'ready',
+      status: hasBearerToken ? 'ready' : 'missingCredential',
       usageLabel: visibleModels.isEmpty
           ? defaultModel
           : '${visibleModels.length} models',
       modelCount: '${visibleModels.length}',
       updatedAt: 'Loaded',
-      providerKind: _providerKindName(_string(value['provider_kind'])),
+      wireProtocol: _string(
+        value['wireProtocol'],
+        fallback: 'chat_completions',
+      ),
+      connectionMode: _string(
+        _firstValue(value, const ['connectionMode', 'connection_mode']),
+        fallback: 'http',
+      ),
+      catalogId: _string(
+        _firstValue(_map(value['catalog']), const [
+          'catalog',
+          'catalogId',
+          'catalog_id',
+        ]),
+      ),
     );
   }).toList();
 }
@@ -120,55 +142,15 @@ List<ProviderModelView> _providerModels(Object? value) {
       .toList();
 }
 
-String _providerTemplateKind(String providerId, Map<String, Object?> provider) {
-  final direct = _string(
-    _firstValue(provider, const ['templateKind', 'template_kind']),
+String _providerTemplateKind(Map<String, Object?> provider) {
+  return _string(
+    _firstValue(provider, const [
+      'presetId',
+      'preset_id',
+      'templateKind',
+      'template_kind',
+    ]),
   );
-  if (direct.isNotEmpty) {
-    return direct;
-  }
-  final providerKind = _string(provider['provider_kind']);
-  final baseUrl = _string(_firstValue(provider, const ['baseUrl', 'base_url']));
-  if (providerId == 'zhipu-coding-plan' ||
-      baseUrl.contains('/api/coding/paas/')) {
-    return 'zhipu-coding-plan';
-  }
-  return switch (providerKind) {
-    'deep_seek' => 'deepseek',
-    'zhipu' => 'zhipu',
-    _ => 'openai',
-  };
-}
-
-String _providerKindName(String value) {
-  return switch (value) {
-    'deep_seek' => 'deep_seek',
-    'zhipu' => 'zhipu',
-    'open_ai' => 'open_ai',
-    _ => value.isEmpty ? 'open_ai' : value,
-  };
-}
-
-Set<String> _templateDefaultModelSlugs(String templateKind) {
-  return switch (templateKind) {
-    'deepseek' => {'deepseek-v4-flash', 'deepseek-v4-pro'},
-    'zhipu' || 'zhipu-coding-plan' => {
-      'glm-5.2',
-      'glm-5',
-      'glm-5-turbo',
-      'glm-4.7',
-      'glm-4.7-flashx',
-      'glm-4.7-flash',
-    },
-    _ => {
-      'gpt-5.5',
-      'gpt-5.4',
-      'gpt-5.4-mini',
-      'gpt-5.6-sol',
-      'gpt-5.6-terra',
-      'gpt-5.6-luna',
-    },
-  };
 }
 
 List<String> _modelReasoningEfforts(Map<String, Object?> model) {
@@ -343,23 +325,15 @@ bool _hasZhipuMcpCredential(Map<String, Object?> config) {
   final providers = _map(config['providers']);
   bool hasToken(MapEntry<String, Object?> entry) {
     final provider = _map(entry.value);
-    return _string(
-      _firstValue(provider, const ['bearerToken', 'bearer_token']),
-    ).trim().isNotEmpty;
+    return _bool(provider['hasBearerToken']);
   }
 
   if (providers.entries.any(
     (entry) =>
         hasToken(entry) &&
-        _providerTemplateKind(entry.key, _map(entry.value)) ==
-            'zhipu-coding-plan',
+        _providerTemplateKind(_map(entry.value)) == 'zhipu-coding-plan',
   )) {
     return true;
   }
-  return providers.entries.any(
-    (entry) =>
-        hasToken(entry) &&
-        _providerKindName(_string(_map(entry.value)['provider_kind'])) ==
-            'zhipu',
-  );
+  return false;
 }

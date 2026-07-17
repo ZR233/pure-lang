@@ -12,3 +12,4 @@ export 'studio/types/interaction.dart';
 export 'studio/types/message.dart';
 export 'studio/types/response.dart';
 export 'studio/types/runtime.dart';
+export 'studio/types/settings.dart';

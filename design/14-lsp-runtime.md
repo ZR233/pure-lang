@@ -21,11 +21,11 @@ v1 只内置 `rust-analyzer`：
 - 提供 `LspRuntimeRegistry` 给 `pl-core` 和 Studio 复用。
 - 关闭 runtime 时先走 LSP `shutdown` / `exit`，再显式等待子进程退出；超时后按进程树强制终止，Drop 只作为兜底清理。
 
-`pl-core` 负责把 LSP 能力接入 agent：
+`pl-core` 负责把 LSP 能力接入通用 turn engine，`pl-studio-runtime` 负责产品生命周期：
 
 - `StudioRuntime` 持有共享 `LspRuntimeRegistry`，项目打开/选择时 reconcile 当前 workspace。
-- `PureCore` 通过 `with_lsp_runtime` 接收共享 registry。
-- LSP 查询工具按语言拆分为独立工具（如 `lsp_query_rust`），父 agent 和 subagent 共用同一 runtime。工具列表在每轮创建 `PureCore` 并注册默认工具时，根据当前可用语言同步；对应 LSP 服务器不可用时不会暴露给 LLM。
+- `StudioAgentTurnFactory` 在准备 `AgentKernel` 时把共享 registry 注入 `TurnEngineBuilder`。
+- LSP 查询工具按语言拆分为独立工具（如 `lsp_query_rust`），父 agent 和 subagent 共用同一 registry。工具列表在每轮准备 kernel 并注册默认工具时，根据当前可用语言同步；对应 LSP 服务器不可用时不会暴露给 LLM。
 - `lsp_query_*` 的 `filePath` 在 `pl-core` 中复用工具统一路径策略解析：相对路径按 `workspaceRoot` 解释，workspace-only 模式拒绝越界，交给 `pl-lsp` 前必须已经是规范化绝对路径。
 - 文件写入、patch、move/delete 成功后通知 LSP runtime 同步已打开文档。
 

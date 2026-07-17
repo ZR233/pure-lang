@@ -39,6 +39,7 @@ pub(super) async fn compact_local(
             .input(input.clone())
             .tool_choice("none")
             .maybe_max_tokens(max_tokens)
+            .store(Some(false))
             .reasoning(None::<ReasoningConfig>)
             .build();
         let response = match provider

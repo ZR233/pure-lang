@@ -2,7 +2,7 @@ use super::snapshot::{load_session_state_inner, studio_snapshot_inner};
 use crate::api::studio::runtime::bridge;
 use crate::api::studio::types::{BridgeSessionStateResponse, BridgeStudioSnapshotResponse};
 use anyhow::{Context, Result};
-use pl_core::{CompileMode, ModelRole};
+use pl_studio_runtime::{StudioMode, StudioRole};
 // ── Session management ──
 
 pub fn create_session(
@@ -45,7 +45,7 @@ pub fn set_session_mode(session_id: String, mode: String) -> Result<BridgeSessio
     bridge.block_on(async {
         bridge
             .studio
-            .set_session_mode(&session_id, CompileMode::from_label(&mode))
+            .set_session_mode(&session_id, StudioMode::from_label(&mode))
             .await?;
         load_session_state_inner(bridge, session_id).await
     })
@@ -62,7 +62,7 @@ pub fn set_model_role(
 ) -> Result<BridgeStudioSnapshotResponse> {
     let bridge = bridge()?;
     bridge.block_on(async {
-        let role = ModelRole::from_key(role_key.trim())
+        let role = StudioRole::from_key(role_key.trim())
             .with_context(|| format!("unsupported model role: {role_key}"))?;
         bridge
             .studio

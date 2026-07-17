@@ -3,20 +3,20 @@ use std::path::{Component, Path, PathBuf};
 use pl_protocol::PureError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PathAccess {
+pub enum PathAccess {
     Workspace,
     External,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ToolPathPolicy {
+pub struct ToolPathPolicy {
     root_canonical: PathBuf,
     allow_workspace_escape: bool,
     tool: String,
 }
 
 impl ToolPathPolicy {
-    pub(crate) fn new(
+    pub fn new(
         root: PathBuf,
         allow_workspace_escape: bool,
         tool: impl Into<String>,
@@ -34,19 +34,15 @@ impl ToolPathPolicy {
         })
     }
 
-    pub(crate) fn root(&self) -> &Path {
+    pub fn root(&self) -> &Path {
         &self.root_canonical
     }
 
-    pub(crate) fn resolve_existing(&self, path: &str) -> Result<PathBuf, PureError> {
+    pub fn resolve_existing(&self, path: &str) -> Result<PathBuf, PureError> {
         self.resolve_existing_path(Path::new(path), path)
     }
 
-    pub(crate) fn resolve_existing_path(
-        &self,
-        path: &Path,
-        original: &str,
-    ) -> Result<PathBuf, PureError> {
+    pub fn resolve_existing_path(&self, path: &Path, original: &str) -> Result<PathBuf, PureError> {
         self.validate_for_execution(path, original)?;
         let candidate = self.candidate(path);
         let canonical = std::fs::canonicalize(&candidate)
@@ -55,7 +51,7 @@ impl ToolPathPolicy {
         Ok(canonical)
     }
 
-    pub(crate) fn resolve_existing_directory(
+    pub fn resolve_existing_directory(
         &self,
         path: &Path,
         original: &str,
@@ -73,15 +69,15 @@ impl ToolPathPolicy {
         Ok(resolved)
     }
 
-    pub(crate) fn resolve_for_write(&self, path: &str) -> Result<PathBuf, PureError> {
+    pub fn resolve_for_write(&self, path: &str) -> Result<PathBuf, PureError> {
         self.resolve_existing_or_parent(path)
     }
 
-    pub(crate) fn resolve_existing_or_parent(&self, path: &str) -> Result<PathBuf, PureError> {
+    pub fn resolve_existing_or_parent(&self, path: &str) -> Result<PathBuf, PureError> {
         self.resolve_existing_or_parent_path(Path::new(path), path)
     }
 
-    pub(crate) fn resolve_existing_or_parent_path(
+    pub fn resolve_existing_or_parent_path(
         &self,
         path: &Path,
         original: &str,
@@ -106,7 +102,7 @@ impl ToolPathPolicy {
         }
     }
 
-    pub(crate) fn access_for_input(&self, path: &str) -> PathAccess {
+    pub fn access_for_input(&self, path: &str) -> PathAccess {
         let path = Path::new(path.trim());
         if path.as_os_str().is_empty() {
             return PathAccess::Workspace;
@@ -134,7 +130,7 @@ impl ToolPathPolicy {
         }
     }
 
-    pub(crate) fn display_relative(&self, path: &Path) -> String {
+    pub fn display_relative(&self, path: &Path) -> String {
         path.strip_prefix(&self.root_canonical)
             .unwrap_or(path)
             .display()

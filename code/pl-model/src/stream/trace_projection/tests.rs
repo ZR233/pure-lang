@@ -182,6 +182,7 @@ fn update_tool_trace_keeps_streaming_tool_status_after_arguments_delta() {
             payload: ToolCallPayload::Function {
                 arguments: serde_json::json!({"cmd": "echo hi"}),
             },
+            invalid_arguments: None,
         })
         .into_iter()
         .find_map(started_tool_item)
@@ -230,6 +231,7 @@ fn late_provider_tool_id_keeps_original_trace_part_id() {
             payload: ToolCallPayload::Function {
                 arguments: serde_json::json!({"cmd": "echo hi"}),
             },
+            invalid_arguments: None,
         })
         .into_iter()
         .find_map(started_tool_item)

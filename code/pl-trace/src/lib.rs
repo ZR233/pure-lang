@@ -421,7 +421,6 @@ pub struct TraceEvent {
 #[serde(rename_all = "camelCase")]
 pub struct EnabledToolsEvent {
     pub turn_id: String,
-    pub mode: String,
     pub tools: Vec<String>,
 }
 

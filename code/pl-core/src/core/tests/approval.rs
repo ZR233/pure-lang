@@ -51,113 +51,6 @@ async fn manual_tool_approval_can_approve_through_interaction() {
 }
 
 #[tokio::test]
-async fn plan_mode_bash_requires_manual_approval_even_when_auto_allowed() {
-    let options = TurnOptions::default();
-    let request = ToolApprovalRequest {
-        id: "call-1".to_string(),
-        name: "bash".to_string(),
-        arguments: serde_json::json!({"command": "pwd"}),
-        working_directory: None,
-        parent_agent_id: None,
-    };
-    let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(8);
-    let mut context = test_tool_context(event_tx.clone());
-    context.mode = crate::turn::CompileMode::Task;
-
-    let decision = approve_tool_call(&options, &request, &context).await;
-
-    assert_eq!(
-        decision,
-        ToolApprovalDecision::Denied {
-            reason: "manual approval required but no interaction runtime is configured".to_string()
-        }
-    );
-    assert!(event_rx.try_recv().is_err());
-}
-
-#[tokio::test]
-async fn full_access_plan_bash_does_not_request_manual_approval() {
-    let options = TurnOptions::default().with_permission_mode(PermissionMode::FullAccess);
-    let request = ToolApprovalRequest {
-        id: "call-1".to_string(),
-        name: "bash".to_string(),
-        arguments: serde_json::json!({"command": "pwd"}),
-        working_directory: None,
-        parent_agent_id: None,
-    };
-    let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(8);
-    let mut context = test_tool_context(event_tx.clone());
-    context.mode = crate::turn::CompileMode::Task;
-
-    let decision = approve_tool_call(&options, &request, &context).await;
-
-    assert_eq!(decision, ToolApprovalDecision::Approved);
-    assert!(event_rx.try_recv().is_err());
-}
-
-#[tokio::test]
-async fn plan_mode_read_tool_still_uses_auto_allow() {
-    let options = TurnOptions::default();
-    let request = ToolApprovalRequest {
-        id: "call-1".to_string(),
-        name: "read_file".to_string(),
-        arguments: serde_json::json!({"path": "Cargo.toml"}),
-        working_directory: None,
-        parent_agent_id: None,
-    };
-    let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(8);
-    let mut context = test_tool_context(event_tx.clone());
-    context.mode = crate::turn::CompileMode::Task;
-
-    let decision = approve_tool_call(&options, &request, &context).await;
-
-    assert_eq!(decision, ToolApprovalDecision::Approved);
-    assert!(event_rx.try_recv().is_err());
-}
-
-#[tokio::test]
-async fn plan_mode_denies_disallowed_tool_before_execution_even_with_full_access() {
-    let core = PureCore::default_provider().unwrap();
-    let tool_call = ToolCall::function(
-        "call-1",
-        "write_file",
-        serde_json::json!({"path": "a.txt", "content": "oops"}),
-        None,
-    );
-    let options = TurnOptions::default().with_permission_mode(PermissionMode::FullAccess);
-    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
-    let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
-    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(60_000));
-    let workspace_root = std::env::temp_dir();
-
-    let records = execute_tool_calls(
-        &[tool_call],
-        &mut budget,
-        &mut recorder,
-        ToolExecutionContext {
-            core: &core,
-            options: &options,
-            mode: crate::turn::CompileMode::Task,
-            session_id: "turn-1",
-            workspace_root: &workspace_root,
-            workspace_instructions: None,
-            instruction_snapshot: None,
-            active_subagent: None,
-            agent_supervisor: crate::AgentSupervisor::default(),
-            agent_tool_registrar: None,
-            parent_session: std::sync::Arc::new(CoreSession::new()),
-        },
-    )
-    .await
-    .unwrap();
-
-    assert_eq!(records.len(), 1);
-    assert_eq!(records[0].status, TracePartStatus::Denied);
-    assert_eq!(records[0].name, "write_file");
-    assert_eq!(records[0].result, "Tool disabled in task mode: write_file");
-}
-
-#[tokio::test]
 async fn request_approval_allows_external_path_after_user_approval() {
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -171,7 +64,7 @@ async fn request_approval_allows_external_path_after_user_approval() {
     tokio::fs::write(&outside_file, "external ok")
         .await
         .unwrap();
-    let mut core = PureCore::default_provider().unwrap();
+    let mut core = TurnEngine::default_provider().unwrap();
     core.register_tool(LocalWorkspaceFileTool::new(WorkspaceFileToolKind::ReadFile));
     let tool_call = ToolCall::function(
         "call-1",
@@ -209,15 +102,12 @@ async fn request_approval_allows_external_path_after_user_approval() {
         ToolExecutionContext {
             core: &core,
             options: &options,
-            mode: crate::turn::CompileMode::Simple,
             session_id: "turn-1",
             workspace_root: &workspace_root,
             workspace_instructions: None,
             instruction_snapshot: None,
             active_subagent: None,
-            agent_supervisor: crate::AgentSupervisor::default(),
-            agent_tool_registrar: None,
-            parent_session: std::sync::Arc::new(CoreSession::new()),
+            parent_session: std::sync::Arc::new(AgentSession::new()),
         },
     )
     .await
@@ -246,7 +136,7 @@ async fn request_approval_allows_external_path_after_user_approval() {
 
 #[tokio::test]
 async fn unknown_tool_records_one_terminal_event_and_tool_result() {
-    let core = PureCore::default_provider().unwrap();
+    let core = TurnEngine::default_provider().unwrap();
     let tool_call = ToolCall::function(
         "provider-item-1",
         "missing_tool",
@@ -264,15 +154,12 @@ async fn unknown_tool_records_one_terminal_event_and_tool_result() {
         ToolExecutionContext {
             core: &core,
             options: &TurnOptions::default(),
-            mode: crate::turn::CompileMode::Simple,
             session_id: "turn-1",
             workspace_root: &std::env::temp_dir(),
             workspace_instructions: None,
             instruction_snapshot: None,
             active_subagent: None,
-            agent_supervisor: crate::AgentSupervisor::default(),
-            agent_tool_registrar: None,
-            parent_session: std::sync::Arc::new(CoreSession::new()),
+            parent_session: std::sync::Arc::new(AgentSession::new()),
         },
     )
     .await
@@ -296,8 +183,8 @@ async fn unknown_tool_records_one_terminal_event_and_tool_result() {
 }
 
 #[tokio::test]
-async fn task_disabled_tool_records_one_terminal_event_and_tool_result() {
-    let mut core = PureCore::default_provider().unwrap();
+async fn execution_policy_denied_tool_records_one_terminal_event_and_tool_result() {
+    let mut core = TurnEngine::default_provider().unwrap();
     core.register_tool(WriteFileTool);
     let tool_call = ToolCall::function(
         "provider-item-1",
@@ -308,6 +195,8 @@ async fn task_disabled_tool_records_one_terminal_event_and_tool_result() {
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
     let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(60_000));
+    let options =
+        TurnOptions::default().with_execution_policy(crate::AgentExecutionPolicy::default());
 
     let records = execute_tool_calls(
         &[tool_call],
@@ -315,16 +204,13 @@ async fn task_disabled_tool_records_one_terminal_event_and_tool_result() {
         &mut recorder,
         ToolExecutionContext {
             core: &core,
-            options: &TurnOptions::default(),
-            mode: crate::turn::CompileMode::Task,
+            options: &options,
             session_id: "turn-1",
             workspace_root: &std::env::temp_dir(),
             workspace_instructions: None,
             instruction_snapshot: None,
             active_subagent: None,
-            agent_supervisor: crate::AgentSupervisor::default(),
-            agent_tool_registrar: None,
-            parent_session: std::sync::Arc::new(CoreSession::new()),
+            parent_session: std::sync::Arc::new(AgentSession::new()),
         },
     )
     .await
@@ -336,7 +222,7 @@ async fn task_disabled_tool_records_one_terminal_event_and_tool_result() {
     assert!(
         records[0]
             .result
-            .contains("Tool disabled in task mode: write_file")
+            .contains("Tool disabled by execution policy: write_file")
     );
     assert_eq!(terminal_tool_event_count(&events), 1);
     assert_eq!(
@@ -365,13 +251,13 @@ async fn task_disabled_tool_records_one_terminal_event_and_tool_result() {
             .tool
             .as_ref()
             .and_then(|tool| tool.denial_reason.as_deref()),
-        Some("Tool disabled in task mode: write_file")
+        Some("Tool disabled by execution policy: write_file")
     );
 }
 
 #[tokio::test]
 async fn policy_denied_tool_records_one_terminal_event_and_tool_result() {
-    let mut core = PureCore::default_provider().unwrap();
+    let mut core = TurnEngine::default_provider().unwrap();
     core.register_tool(LocalWorkspaceFileTool::new(WorkspaceFileToolKind::ReadFile));
     let tool_call = ToolCall::function(
         "provider-item-1",
@@ -390,15 +276,12 @@ async fn policy_denied_tool_records_one_terminal_event_and_tool_result() {
         ToolExecutionContext {
             core: &core,
             options: &TurnOptions::deny_all(),
-            mode: crate::turn::CompileMode::Simple,
             session_id: "turn-1",
             workspace_root: &std::env::temp_dir(),
             workspace_instructions: None,
             instruction_snapshot: None,
             active_subagent: None,
-            agent_supervisor: crate::AgentSupervisor::default(),
-            agent_tool_registrar: None,
-            parent_session: std::sync::Arc::new(CoreSession::new()),
+            parent_session: std::sync::Arc::new(AgentSession::new()),
         },
     )
     .await
@@ -425,7 +308,7 @@ async fn policy_denied_tool_records_one_terminal_event_and_tool_result() {
 
 #[tokio::test]
 async fn cancelling_running_tool_records_interrupted_terminal_event() {
-    let mut core = PureCore::default_provider().unwrap();
+    let mut core = TurnEngine::default_provider().unwrap();
     core.register_tool(SleepingTool);
     let tool_call = ToolCall::function(
         "provider-item-1",
@@ -450,15 +333,12 @@ async fn cancelling_running_tool_records_interrupted_terminal_event() {
         ToolExecutionContext {
             core: &core,
             options: &options,
-            mode: crate::turn::CompileMode::Simple,
             session_id: "turn-1",
             workspace_root: &std::env::temp_dir(),
             workspace_instructions: None,
             instruction_snapshot: None,
             active_subagent: None,
-            agent_supervisor: crate::AgentSupervisor::default(),
-            agent_tool_registrar: None,
-            parent_session: std::sync::Arc::new(CoreSession::new()),
+            parent_session: std::sync::Arc::new(AgentSession::new()),
         },
     )
     .await

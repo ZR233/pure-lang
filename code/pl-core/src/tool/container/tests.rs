@@ -5,7 +5,7 @@ use pretty_assertions::assert_eq;
 use serde_json::json;
 
 use crate::tool::{Tool, ToolContext, ToolInput, WorkspaceAccess};
-use crate::{AgentSupervisor, CompileMode, CoreSession, TurnOptions};
+use crate::{AgentSession, TurnOptions};
 
 use super::*;
 
@@ -218,16 +218,13 @@ async fn tool_context() -> ToolContext {
         event_tx,
         options: TurnOptions::default(),
         workspace_access: WorkspaceAccess::WorkspaceOnly,
-        mode: CompileMode::Simple,
         workspace_root: std::env::temp_dir(),
         workspace_instructions: None,
         instruction_snapshot: None,
         provider_call_id: None,
         active_subagent: None,
-        agent_supervisor: AgentSupervisor::default(),
-        agent_tool_registrar: None,
         lsp_runtime: None,
-        parent_session: Arc::new(CoreSession::new()),
+        parent_session: Arc::new(AgentSession::new()),
     }
 }
 

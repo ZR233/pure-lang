@@ -14,7 +14,7 @@ use crate::capabilities::{
     ToolCapabilities,
 };
 use crate::model_family::{ModelFamily, ModelPricing};
-use crate::model_info::{ModelInfo, ModelRequestProfile, TruncationMode};
+use crate::model_info::{MaxTokensField, ModelInfo, ModelRequestProfile, TruncationMode};
 use crate::parameter::{ModelParameter, ParameterWire, WireAssignment};
 
 const DEEPSEEK_DEFAULT_MODEL_SLUGS: &[&str] = &["deepseek-v4-flash", "deepseek-v4-pro"];
@@ -26,6 +26,8 @@ const OPENAI_DEFAULT_MODEL_SLUGS: &[&str] = &[
     "gpt-5.6-terra",
     "gpt-5.6-luna",
 ];
+const MIMO_DEFAULT_MODEL_SLUGS: &[&str] =
+    &["mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-pro", "mimo-v2-omni"];
 const ZHIPU_GLM_DEFAULT_MODEL_SLUGS: &[&str] = &[
     "glm-5.2",
     "glm-5",
@@ -43,6 +45,10 @@ pub fn openai_default_model_slugs() -> &'static [&'static str] {
     OPENAI_DEFAULT_MODEL_SLUGS
 }
 
+pub fn mimo_default_model_slugs() -> &'static [&'static str] {
+    MIMO_DEFAULT_MODEL_SLUGS
+}
+
 pub fn zhipu_default_model_slugs() -> &'static [&'static str] {
     ZHIPU_GLM_DEFAULT_MODEL_SLUGS
 }
@@ -52,6 +58,8 @@ pub fn default_models() -> Vec<ModelInfo> {
     let openai_gpt56 = openai_gpt56_family("medium");
     let openai_gpt56_sol = openai_gpt56_family("low");
     let deepseek = deepseek_family();
+    let mimo_text = mimo_family(false);
+    let mimo_vision = mimo_family(true);
     let zhipu_text = zhipu_text_family();
     let zhipu_glm52 = zhipu_glm52_family();
     let zhipu_vision = zhipu_vision_family();
@@ -139,6 +147,43 @@ pub fn default_models() -> Vec<ModelInfo> {
             372_000,
             372_000,
             None,
+            ModelPricing::default(),
+        ),
+        // Xiaomi MiMo（OpenAI-compatible Chat）
+        mimo_text.instantiate(
+            "mimo-v2.5-pro",
+            "MiMo V2.5 Pro",
+            "Xiaomi MiMo flagship model for long-horizon agent work.",
+            1_000_000,
+            1_000_000,
+            Some(131_072),
+            ModelPricing::default(),
+        ),
+        mimo_vision.instantiate(
+            "mimo-v2.5",
+            "MiMo V2.5",
+            "Xiaomi MiMo full-modal agent model with a one-million-token context window.",
+            1_000_000,
+            1_000_000,
+            Some(32_768),
+            ModelPricing::default(),
+        ),
+        mimo_text.instantiate(
+            "mimo-v2-pro",
+            "MiMo V2 Pro",
+            "Xiaomi MiMo long-context reasoning model for complex agent tasks.",
+            1_000_000,
+            1_000_000,
+            Some(131_072),
+            ModelPricing::default(),
+        ),
+        mimo_vision.instantiate(
+            "mimo-v2-omni",
+            "MiMo V2 Omni",
+            "Xiaomi MiMo multimodal model for text and visual agent tasks.",
+            256_000,
+            256_000,
+            Some(32_768),
             ModelPricing::default(),
         ),
         // Zhipu GLM-5.2（effort 候选值 high/max/none，联动 reasoning_effort + thinking）
@@ -373,6 +418,21 @@ fn zhipu_text_family() -> ModelFamily {
     }
 }
 
+fn mimo_family(vision: bool) -> ModelFamily {
+    ModelFamily {
+        id: if vision { "mimo-vision" } else { "mimo-text" },
+        capabilities: mimo_capabilities(vision),
+        truncation_mode: TruncationMode::Tokens,
+        truncation_limit: 10_000,
+        parameters: vec![mimo_effort_parameter()],
+        request_profile: ModelRequestProfile {
+            max_tokens_field: MaxTokensField::MaxCompletionTokens,
+            ..ModelRequestProfile::default()
+        },
+        base_instructions: String::new(),
+    }
+}
+
 fn zhipu_glm52_family() -> ModelFamily {
     ModelFamily {
         id: "zhipu-glm52",
@@ -437,6 +497,19 @@ fn deepseek_effort_parameter() -> ModelParameter {
         wire: ["high", "max"]
             .into_iter()
             .map(|value| (value.to_string(), wire_set_one("reasoning_effort", value)))
+            .collect(),
+    }
+}
+
+/// MiMo thinking 开关；官方 Chat API 只声明 `thinking.type`。
+fn mimo_effort_parameter() -> ModelParameter {
+    ModelParameter {
+        name: "effort".to_string(),
+        label: Some("Thinking".to_string()),
+        candidates: vec!["enabled".to_string(), "disabled".to_string()],
+        wire: ["enabled", "disabled"]
+            .into_iter()
+            .map(|value| (value.to_string(), wire_set_one("thinking.type", value)))
             .collect(),
     }
 }
@@ -564,6 +637,30 @@ fn deepseek_capabilities() -> ModelCapabilities {
         tools: ToolCapabilities {
             function_calling: true,
             parallel_tool_calls: true,
+            custom_tools: false,
+            freeform_tools: false,
+        },
+        interleaved: Some(ReasoningInterleaved {
+            field: ReasoningInterleavedField::ReasoningContent,
+        }),
+    }
+}
+
+fn mimo_capabilities(vision: bool) -> ModelCapabilities {
+    let mut input = vec![ModelModality::Text];
+    if vision {
+        input.push(ModelModality::Image);
+    }
+    ModelCapabilities {
+        streaming: true,
+        temperature: false,
+        reasoning: true,
+        web_search: false,
+        input,
+        output: vec![ModelModality::Text],
+        tools: ToolCapabilities {
+            function_calling: true,
+            parallel_tool_calls: false,
             custom_tools: false,
             freeform_tools: false,
         },

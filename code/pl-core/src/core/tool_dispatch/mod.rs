@@ -10,14 +10,14 @@ use pl_trace::TracePartStatus;
 use tokio::sync::RwLock;
 
 use crate::permission::{PermissionDecision, decide_tool_permission};
-use crate::session::CoreSession;
+use crate::session::AgentSession;
 use crate::tool::{
     SubagentContext, ToolContext, ToolInput, ToolRuntimeEvent, ToolRuntimeLockPolicy,
     WorkspaceAccess,
 };
 use crate::turn::{BudgetTracker, ToolApprovalDecision, ToolExecutionMode, TurnOptions};
 
-use super::PureCore;
+use super::TurnEngine;
 use super::permission::{approval_request, request_user_approval, requested_workspace_access};
 use super::progress::{ProgressEmitter, ProgressVerbosity};
 use super::turn_result::{is_cancelled, unix_seconds};
@@ -76,17 +76,14 @@ pub(super) enum ToolExecutionError {
 }
 
 pub(super) struct ToolExecutionContext<'a> {
-    pub(super) core: &'a PureCore,
+    pub(super) core: &'a TurnEngine,
     pub(super) options: &'a TurnOptions,
-    pub(super) mode: crate::turn::CompileMode,
     pub(super) session_id: &'a str,
     pub(super) workspace_root: &'a Path,
     pub(super) workspace_instructions: Option<String>,
     pub(super) instruction_snapshot: Option<crate::instruction::InstructionSnapshot>,
     pub(super) active_subagent: Option<SubagentContext>,
-    pub(super) agent_supervisor: crate::AgentSupervisor,
-    pub(super) agent_tool_registrar: Option<Arc<dyn crate::AgentToolRegistrar>>,
-    pub(super) parent_session: Arc<CoreSession>,
+    pub(super) parent_session: Arc<AgentSession>,
 }
 
 pub(super) async fn execute_tool_calls(
@@ -142,20 +139,34 @@ pub(super) async fn execute_tool_calls(
         }
         budget_tracker.record_tool_call(&tool_call.name);
 
+        if let Some(message) = tool_call.invalid_arguments_message() {
+            emit_tool_snapshot(recorder, &mut item, TracePartStatus::Failed);
+            scheduled.push(ScheduledToolExecution {
+                tool_call: tool_call.clone(),
+                item,
+                future: Box::pin(ready_tool_execution_record(
+                    tool_call.clone(),
+                    ToolExecutionError::RespondToModel(message),
+                    TracePartStatus::Failed,
+                    None,
+                    false,
+                )),
+            });
+            continue;
+        }
+
         let registered_tool = context.core.tools.get(&tool_call.name);
-        let execution_profile = match &context.active_subagent {
-            Some(subagent) => {
-                crate::TurnExecutionProfile::for_subagent(context.mode, &subagent.role)
-            }
-            None => crate::TurnExecutionProfile::root(context.mode),
-        };
         let effect = registered_tool
             .and_then(crate::tool::Tool::effect)
             .or_else(|| crate::ToolEffect::for_builtin_name(&tool_call.name));
-        if !execution_profile.allows_tool(&tool_call.name, effect) {
-            let mode = context.mode.label();
+        let allowed = context
+            .options
+            .execution_policy
+            .as_ref()
+            .is_none_or(|policy| policy.allows_tool(&tool_call.name, effect));
+        if !allowed {
             let name = &tool_call.name;
-            let message = format!("Tool disabled in {mode} mode: {name}");
+            let message = format!("Tool disabled by execution policy: {name}");
             if let Some(tool) = &mut item.tool {
                 tool.denial_reason = Some(message.clone());
             }
@@ -212,14 +223,11 @@ pub(super) async fn execute_tool_calls(
             event_tx: recorder.sender().clone(),
             options: context.options.clone(),
             workspace_access: WorkspaceAccess::WorkspaceOnly,
-            mode: context.mode,
             workspace_root: context.workspace_root.to_path_buf(),
             workspace_instructions: context.workspace_instructions.clone(),
             instruction_snapshot: context.instruction_snapshot.clone(),
             provider_call_id: Some(tool_call.stable_call_id().to_string()),
             active_subagent: context.active_subagent.clone(),
-            agent_supervisor: context.agent_supervisor.clone(),
-            agent_tool_registrar: context.agent_tool_registrar.clone(),
             lsp_runtime: context.core.lsp_runtime.clone(),
             parent_session: context.parent_session.clone(),
         };
@@ -227,66 +235,65 @@ pub(super) async fn execute_tool_calls(
         approval_request.id = trace_part_id.clone();
         let requested_access = requested_workspace_access(tool_call, context.workspace_root);
         let mut execution_workspace_access = WorkspaceAccess::WorkspaceOnly;
-        let decision = match decide_tool_permission(
-            context.options,
-            context.mode,
-            &approval_request,
-            requested_access,
-        ) {
-            PermissionDecision::Approved { workspace_access } => {
-                execution_workspace_access = workspace_access;
-                ToolApprovalDecision::Approved
-            }
-            PermissionDecision::NeedsUserApproval { workspace_access } => {
-                emit_tool_snapshot(recorder, &mut item, TracePartStatus::AwaitingApproval);
-                let name = &tool_call.name;
-                progress.tool_detail(format!("工具 `{name}` 正在等待授权。"));
-                let decision =
-                    request_user_approval(context.options, &approval_request, context.session_id)
-                        .await;
-                if matches!(decision, ToolApprovalDecision::Approved) {
+        let decision =
+            match decide_tool_permission(context.options, &approval_request, requested_access) {
+                PermissionDecision::Approved { workspace_access } => {
                     execution_workspace_access = workspace_access;
+                    ToolApprovalDecision::Approved
                 }
-                match &decision {
-                    ToolApprovalDecision::Approved => {}
-                    ToolApprovalDecision::Denied { reason } => {
-                        if let Some(tool) = &mut item.tool {
-                            tool.denial_reason = Some(reason.clone());
-                        }
-                    }
-                }
-                decision
-            }
-            PermissionDecision::NeedsAiReview { workspace_access } => {
-                emit_tool_snapshot(recorder, &mut item, TracePartStatus::AwaitingApproval);
-                let name = &tool_call.name;
-                progress.tool_detail(format!("正在审查工具 `{name}`。"));
-                let mut review_context = tool_context.clone();
-                review_context.workspace_access = workspace_access;
-                let decision = context
-                    .core
-                    .review_tool_call_with_ai(&approval_request, &review_context)
+                PermissionDecision::NeedsUserApproval { workspace_access } => {
+                    emit_tool_snapshot(recorder, &mut item, TracePartStatus::AwaitingApproval);
+                    let name = &tool_call.name;
+                    progress.tool_detail(format!("工具 `{name}` 正在等待授权。"));
+                    let decision = request_user_approval(
+                        context.options,
+                        &approval_request,
+                        context.session_id,
+                    )
                     .await;
-                if matches!(decision, ToolApprovalDecision::Approved) {
-                    execution_workspace_access = workspace_access;
-                }
-                match &decision {
-                    ToolApprovalDecision::Approved => {}
-                    ToolApprovalDecision::Denied { reason } => {
-                        if let Some(tool) = &mut item.tool {
-                            tool.denial_reason = Some(reason.clone());
+                    if matches!(decision, ToolApprovalDecision::Approved) {
+                        execution_workspace_access = workspace_access;
+                    }
+                    match &decision {
+                        ToolApprovalDecision::Approved => {}
+                        ToolApprovalDecision::Denied { reason } => {
+                            if let Some(tool) = &mut item.tool {
+                                tool.denial_reason = Some(reason.clone());
+                            }
                         }
                     }
+                    decision
                 }
-                decision
-            }
-            PermissionDecision::Denied { reason } => {
-                if let Some(tool) = &mut item.tool {
-                    tool.denial_reason = Some(reason.clone());
+                PermissionDecision::NeedsAiReview { workspace_access } => {
+                    emit_tool_snapshot(recorder, &mut item, TracePartStatus::AwaitingApproval);
+                    let name = &tool_call.name;
+                    progress.tool_detail(format!("正在审查工具 `{name}`。"));
+                    let mut review_context = tool_context.clone();
+                    review_context.workspace_access = workspace_access;
+                    let decision = context
+                        .core
+                        .review_tool_call_with_ai(&approval_request, &review_context)
+                        .await;
+                    if matches!(decision, ToolApprovalDecision::Approved) {
+                        execution_workspace_access = workspace_access;
+                    }
+                    match &decision {
+                        ToolApprovalDecision::Approved => {}
+                        ToolApprovalDecision::Denied { reason } => {
+                            if let Some(tool) = &mut item.tool {
+                                tool.denial_reason = Some(reason.clone());
+                            }
+                        }
+                    }
+                    decision
                 }
-                ToolApprovalDecision::Denied { reason }
-            }
-        };
+                PermissionDecision::Denied { reason } => {
+                    if let Some(tool) = &mut item.tool {
+                        tool.denial_reason = Some(reason.clone());
+                    }
+                    ToolApprovalDecision::Denied { reason }
+                }
+            };
         if is_cancelled(context.options) {
             emit_tool_snapshot(recorder, &mut item, TracePartStatus::Interrupted);
             scheduled.push(ScheduledToolExecution {

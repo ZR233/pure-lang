@@ -1,8 +1,8 @@
 use crate::api::studio::types::{ProjectDto, SessionDto};
-use pl_core::SessionRecord;
+use pl_studio_runtime::SessionRecord;
 // ── Project/Session DTOs ──
 
-pub(crate) fn project_dto(project: pl_core::ProjectRecord) -> ProjectDto {
+pub(crate) fn project_dto(project: pl_studio_runtime::ProjectRecord) -> ProjectDto {
     ProjectDto {
         id: project.id,
         name: project.name,
@@ -23,7 +23,7 @@ pub(crate) fn session_dto(session: SessionRecord) -> SessionDto {
     }
 }
 
-pub(crate) fn session_summary_dto(session: pl_protocol::StudioSessionSummary) -> SessionDto {
+pub(crate) fn session_summary_dto(session: pl_studio_runtime::StudioSessionSummary) -> SessionDto {
     SessionDto {
         id: session.id,
         project_id: session.project_id,

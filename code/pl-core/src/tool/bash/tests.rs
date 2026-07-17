@@ -43,16 +43,13 @@ fn test_context_with_sender(event_tx: pl_trace::AgentEventSender) -> ToolContext
         event_tx,
         options: crate::turn::TurnOptions::default(),
         workspace_access: crate::tool::WorkspaceAccess::WorkspaceOnly,
-        mode: crate::turn::CompileMode::Simple,
         workspace_root: std::env::temp_dir(),
         workspace_instructions: None,
         instruction_snapshot: None,
         provider_call_id: None,
         active_subagent: None,
-        agent_supervisor: crate::AgentSupervisor::default(),
-        agent_tool_registrar: None,
         lsp_runtime: None,
-        parent_session: std::sync::Arc::new(crate::CoreSession::new()),
+        parent_session: std::sync::Arc::new(crate::AgentSession::new()),
     }
 }
 
