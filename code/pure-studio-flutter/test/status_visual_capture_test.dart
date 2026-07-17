@@ -1,3 +1,6 @@
+@Tags(<String>['visual'])
+library;
+
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
