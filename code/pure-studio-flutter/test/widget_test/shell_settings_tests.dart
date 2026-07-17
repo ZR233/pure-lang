@@ -230,7 +230,7 @@ void registerShellSettingsTests() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Task').last);
     await tester.pumpAndSettle();
-    expect(api.sessionModeUpdate, CompileMode.task);
+    expect(api.sessionModeUpdate, StudioMode.task);
     api.emitGlobal(
       _sessionListChangedEvent(
         projectId: 'project-1',
@@ -239,7 +239,7 @@ void registerShellSettingsTests() {
             id: 'session-1',
             projectId: 'project-1',
             title: 'Session',
-            mode: CompileMode.task,
+            mode: StudioMode.task,
             updatedAt: DateTime.fromMillisecondsSinceEpoch(1000),
           ),
         ],
@@ -590,7 +590,7 @@ void registerShellSettingsTests() {
             id: 'session-1',
             projectId: 'project-1',
             title: 'Session',
-            mode: CompileMode.task,
+            mode: StudioMode.task,
             updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
           ),
         ],
@@ -732,6 +732,97 @@ void registerShellSettingsTests() {
     expect(find.text('gpt-5.6-terra'), findsOneWidget);
     expect(find.text('GPT-5.6-Luna'), findsOneWidget);
     expect(find.text('gpt-5.6-luna'), findsOneWidget);
+    expect(find.text('WebSocket'), findsOneWidget);
+    expect(find.text('HTTP'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+
+    final providers = api.savedProviderSettings!['providers'] as List<Object?>;
+    final openai = providers.last! as Map<String, Object?>;
+    expect(openai['connectionMode'], 'web_socket');
+    expect(openai['wireProtocol'], 'responses');
+  });
+
+  testWidgets('unknown provider catalog entry works without UI branches', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _FakeStudioApi(
+      _stateWithPlannerModels(),
+      providerCatalog: _testProviderCatalog,
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const SettingsPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Add provider'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(DropdownButtonFormField<String>).first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Future Provider').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Future Model'), findsOneWidget);
+    expect(find.text('future-model'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+
+    final providers = api.savedProviderSettings!['providers'] as List<Object?>;
+    final future = providers.last! as Map<String, Object?>;
+    expect(future['templateKind'], 'future-provider');
+    expect(future['defaultModel'], 'future-model');
+  });
+
+  testWidgets('custom Responses provider defaults to HTTP without a preset', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _FakeStudioApi(_stateWithPlannerModels());
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const SettingsPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Add provider'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(DropdownButtonFormField<String>).first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Custom provider').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('chat_completions').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('responses').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Add model'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('WebSocket'), findsOneWidget);
+    expect(find.text('HTTP'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+
+    final providers = api.savedProviderSettings!['providers'] as List<Object?>;
+    final custom = providers.last! as Map<String, Object?>;
+    expect(custom['templateKind'], '');
+    expect(custom['wireProtocol'], 'responses');
+    expect(custom['connectionMode'], 'http');
   });
 
   test('provider settings save updates default provider in store', () async {
@@ -854,7 +945,7 @@ void registerShellSettingsTests() {
             status: 'ready',
             usageLabel: '1 models',
             modelCount: '1',
-            providerKind: 'open_ai',
+            wireProtocol: 'responses',
           ),
         ],
       ),
@@ -871,10 +962,20 @@ void registerShellSettingsTests() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Edit provider').last);
     await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Provider key'),
+      'openai-team',
+    );
+    await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, 'Save'));
     await tester.pumpAndSettle();
 
     expect(api.savedProviderSettings?['defaultProviderId'], 'deepseek');
+    final providers = api.savedProviderSettings!['providers'] as List<Object?>;
+    final openAi = providers.last! as Map<String, Object?>;
+    expect(openAi['id'], 'openai-team');
+    expect(openAi['originalId'], 'openai');
+    expect(openAi['connectionMode'], 'http');
   });
 
   testWidgets(
@@ -1355,7 +1456,7 @@ StudioState _providerListState({bool zhipuOnly = false}) {
     status: 'ready',
     usageLabel: '1 model',
     modelCount: '1',
-    providerKind: 'zhipu',
+    wireProtocol: 'chat_completions',
   );
   if (zhipuOnly) {
     return base.copyWith(defaultProviderId: zhipu.id, providers: const [zhipu]);
@@ -1365,7 +1466,7 @@ StudioState _providerListState({bool zhipuOnly = false}) {
     subtitle: 'DeepSeek Platform',
     hasBearerToken: true,
     modelCount: '2',
-    providerKind: 'deep_seek',
+    wireProtocol: 'chat_completions',
   );
   return base.copyWith(
     defaultProviderId: deepSeek.id,

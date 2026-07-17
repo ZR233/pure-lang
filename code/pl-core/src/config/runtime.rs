@@ -29,8 +29,8 @@ impl RuntimeConfig {
 
 /// 共享 agent runtime 的工具能力开关。
 ///
-/// 默认配置保持 pure-studio 既有本地能力：shell、workspace 文件、skills、MCP/LSP、
-/// subagent 和用户输入工具开启；git、docker、container 等产品/环境相关能力关闭。
+/// 默认配置保持 pure-studio 既有本地能力：shell、workspace 文件、skills、MCP/LSP
+/// 和用户输入工具开启；git、docker、container 等产品/环境相关能力关闭。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ToolCapabilityConfig {
     #[serde(default = "default_true")]
@@ -43,8 +43,6 @@ pub struct ToolCapabilityConfig {
     pub mcp: bool,
     #[serde(default = "default_true")]
     pub lsp: bool,
-    #[serde(default = "default_true")]
-    pub subagents: bool,
     #[serde(default = "default_true")]
     pub ask_user: bool,
     #[serde(default)]
@@ -63,7 +61,6 @@ impl Default for ToolCapabilityConfig {
             skills: true,
             mcp: true,
             lsp: true,
-            subagents: true,
             ask_user: true,
             git: false,
             docker: false,
@@ -73,19 +70,18 @@ impl Default for ToolCapabilityConfig {
 }
 
 impl ToolCapabilityConfig {
-    /// Host 提供容器 workspace/backend 时使用的共享 agent 工具能力预设。
+    /// 产品提供容器 workspace/backend 时使用的通用工具能力预设。
     ///
     /// 该预设关闭 pure-studio 本地 shell、skills、LSP 和 Docker 管理能力，
-    /// 保留 workspace file、MCP、subagent、用户输入、git 与 container 工具。
-    /// 宿主仍可在注册工具集时按实际 backend 可用性进一步关闭单项能力。
-    pub fn hosted_container_workspace() -> Self {
+    /// 保留 workspace file、MCP、用户输入、git 与 container 工具。agent 协作工具
+    /// 由 `AgentRuntimeHandle` 按执行策略注入，不属于静态工具能力配置。
+    pub fn container_workspace() -> Self {
         Self {
             bash: false,
             workspace_files: true,
             skills: false,
             mcp: true,
             lsp: false,
-            subagents: true,
             ask_user: true,
             git: true,
             docker: false,
@@ -104,7 +100,6 @@ impl ToolCapabilityConfig {
             skills: false,
             mcp: false,
             lsp: false,
-            subagents: false,
             ask_user: false,
             git: true,
             docker: false,
@@ -184,7 +179,7 @@ fn default_project_skills_dir() -> String {
 }
 
 fn default_user_skills_dir() -> String {
-    "~/.pure/skills".to_string()
+    "~/.local/share/pl/skills".to_string()
 }
 
 fn default_auto_learn_min_tool_calls() -> u32 {

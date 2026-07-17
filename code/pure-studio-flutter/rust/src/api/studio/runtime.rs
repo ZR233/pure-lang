@@ -2,7 +2,7 @@ use std::future::Future;
 use std::sync::OnceLock;
 
 use anyhow::{Context, Result};
-use pl_core::StudioRuntime;
+use pl_studio_runtime::StudioRuntime;
 
 static BRIDGE: OnceLock<BridgeRuntime> = OnceLock::new();
 

@@ -6,21 +6,28 @@ use crate::api::studio::types::{
     BridgeTaskRuntimeDto, BridgeTaskWorkUnitDto, RuntimeSnapshot,
 };
 use anyhow::Result;
-use pl_core::StudioRuntimeSnapshot as CoreRuntimeSnapshot;
-use pl_protocol::{
-    RuntimeCostAmount, SkillActivation, StudioLspHealth, StudioMcpHealth, StudioSessionRuntime,
+use pl_protocol::{RuntimeCostAmount, SkillActivation};
+use pl_studio_runtime::{
+    StudioLspHealth, StudioMcpHealth, StudioRuntimeSnapshot as CoreRuntimeSnapshot,
+    StudioSessionRuntime,
 };
 // ── Core conversion functions ──
 
 pub(crate) fn runtime_snapshot(snapshot: CoreRuntimeSnapshot) -> RuntimeSnapshot {
     RuntimeSnapshot {
         status: match snapshot.status {
-            pl_core::StudioRuntimeStatus::Uninitialized => BridgeRuntimeStatus::Uninitialized,
-            pl_core::StudioRuntimeStatus::Initializing => BridgeRuntimeStatus::Initializing,
-            pl_core::StudioRuntimeStatus::Ready => BridgeRuntimeStatus::Ready,
-            pl_core::StudioRuntimeStatus::ShuttingDown => BridgeRuntimeStatus::ShuttingDown,
-            pl_core::StudioRuntimeStatus::Stopped => BridgeRuntimeStatus::Stopped,
-            pl_core::StudioRuntimeStatus::Failed => BridgeRuntimeStatus::Failed,
+            pl_studio_runtime::StudioRuntimeStatus::Uninitialized => {
+                BridgeRuntimeStatus::Uninitialized
+            }
+            pl_studio_runtime::StudioRuntimeStatus::Initializing => {
+                BridgeRuntimeStatus::Initializing
+            }
+            pl_studio_runtime::StudioRuntimeStatus::Ready => BridgeRuntimeStatus::Ready,
+            pl_studio_runtime::StudioRuntimeStatus::ShuttingDown => {
+                BridgeRuntimeStatus::ShuttingDown
+            }
+            pl_studio_runtime::StudioRuntimeStatus::Stopped => BridgeRuntimeStatus::Stopped,
+            pl_studio_runtime::StudioRuntimeStatus::Failed => BridgeRuntimeStatus::Failed,
         },
         active_turns: snapshot
             .active_turns
@@ -94,7 +101,7 @@ pub(crate) fn bridge_session_runtime(snapshot: StudioSessionRuntime) -> BridgeSe
     }
 }
 
-fn bridge_task_runtime(task: pl_protocol::StudioTaskRuntime) -> BridgeTaskRuntimeDto {
+fn bridge_task_runtime(task: pl_studio_runtime::StudioTaskRuntime) -> BridgeTaskRuntimeDto {
     BridgeTaskRuntimeDto {
         run_id: task.run_id,
         phase: task.phase,

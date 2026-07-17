@@ -100,7 +100,9 @@ class _RolesTabState extends ConsumerState<_RolesTab> {
             model: model.slug,
             label:
                 '${provider.name} / ${model.displayName.isEmpty ? model.slug : model.displayName}',
-            effort: model.reasoningEfforts.firstOrNull,
+            effort: model.defaultReasoningEffort.isNotEmpty
+                ? model.defaultReasoningEffort
+                : model.reasoningEfforts.firstOrNull,
           ),
         );
       }

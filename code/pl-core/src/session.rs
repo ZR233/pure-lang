@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
+use std::num::NonZeroUsize;
 
-use pl_model::{CompletionResponse, ModelContinuationState, ToolCall};
+use pl_model::{CompletionResponse, ModelTransportSession, ToolCall};
 use pl_protocol::{
     Message, MessageContent, MessageRole, ModelContextItem, TOOL_CALLS_METADATA_KEY,
     ToolCallHistoryMetadata, ToolCallKind, ToolResultMetadata,
@@ -8,18 +9,45 @@ use pl_protocol::{
 
 /// 核心编译会话。
 ///
-/// 保存多轮 turn 之间的消息历史，供 `PureCore` 构造模型请求。
+/// 保存多轮 turn 之间的消息历史，供 `TurnEngine` 构造模型请求。
 #[derive(Debug, Clone, Default)]
-pub struct CoreSession {
+pub struct AgentSession {
     items: Vec<ModelContextItem>,
     messages: Vec<Message>,
     revision: u64,
-    continuation: ModelContinuationState,
+    prompt_cache_key: Option<String>,
+    transport_session: ModelTransportSession,
 }
 
-impl CoreSession {
+/// child agent 从 parent canonical session 继承历史的策略。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentSessionForkPolicy {
+    /// 不继承对话历史。
+    Empty,
+    /// 继承全部已闭合的用户/助手消息。
+    AllMessages,
+    /// 只继承最后若干个用户轮次。
+    LastUserTurns(NonZeroUsize),
+}
+
+impl AgentSession {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// 为 child agent 创建 provider 协议完整的 session 副本。
+    ///
+    /// 工具调用与 tool result 不直接跨 agent 继承，避免在当前工具尚未返回时
+    /// 复制出孤立 assistant tool call。
+    pub fn fork(&self, policy: AgentSessionForkPolicy) -> Self {
+        let messages = forkable_messages(&self.messages);
+        match policy {
+            AgentSessionForkPolicy::Empty => Self::new(),
+            AgentSessionForkPolicy::AllMessages => Self::from_messages(messages),
+            AgentSessionForkPolicy::LastUserTurns(turns) => {
+                Self::from_messages(last_user_turns(messages, turns.get()))
+            }
+        }
     }
 
     pub fn from_messages(messages: Vec<Message>) -> Self {
@@ -31,7 +59,8 @@ impl CoreSession {
                 .collect(),
             messages,
             revision: 0,
-            continuation: ModelContinuationState::default(),
+            prompt_cache_key: None,
+            transport_session: ModelTransportSession::default(),
         }
     }
 
@@ -41,7 +70,8 @@ impl CoreSession {
             items,
             messages,
             revision: 0,
-            continuation: ModelContinuationState::default(),
+            prompt_cache_key: None,
+            transport_session: ModelTransportSession::default(),
         }
     }
 
@@ -65,33 +95,18 @@ impl CoreSession {
             .collect();
         self.messages = messages;
         self.revision = self.revision.saturating_add(1);
-        self.reset_continuation();
-    }
-
-    pub fn replace_messages_preserving_continuation(&mut self, messages: Vec<Message>) {
-        self.items = messages
-            .iter()
-            .cloned()
-            .map(ModelContextItem::from)
-            .collect();
-        self.messages = messages;
-        self.revision = self.revision.saturating_add(1);
-        self.continuation
-            .reset_if_acknowledged_messages_were_removed(self.items.len());
     }
 
     pub fn replace_items(&mut self, items: Vec<ModelContextItem>) {
         self.messages = messages_from_items(&items);
         self.items = items;
         self.revision = self.revision.saturating_add(1);
-        self.reset_continuation();
     }
 
     pub(crate) fn truncate_messages(&mut self, len: usize) {
         self.items.truncate(len);
         self.messages = messages_from_items(&self.items);
-        self.continuation
-            .reset_if_acknowledged_messages_were_removed(len);
+        self.revision = self.revision.saturating_add(1);
     }
 
     pub fn push_user_prompt(&mut self, prompt: String) {
@@ -141,7 +156,7 @@ impl CoreSession {
     ///
     /// 该方法集中维护 completion response 到会话历史的映射：普通响应写入
     /// assistant 文本消息，带 tool call 的响应写入带 metadata 的 assistant
-    /// tool_calls 消息，并在写入后用 response id 更新 continuation ack。
+    /// tool_calls 消息。协议级 continuation 状态由 transport session 独占维护。
     pub fn push_assistant_completion_response(&mut self, response: &CompletionResponse) {
         if response.tool_calls.is_empty() {
             self.push_assistant_response(
@@ -158,7 +173,6 @@ impl CoreSession {
                 response.reasoning_content.clone(),
             );
         }
-        self.acknowledge_model_response(self.items.len(), response.response_id.clone());
     }
 
     /// 推入 tool result 消息。
@@ -197,53 +211,55 @@ impl CoreSession {
     }
 
     pub fn set_prompt_cache_key(&mut self, key: String) {
-        self.continuation.set_prompt_cache_key(key);
+        self.prompt_cache_key = Some(key);
     }
 
     pub fn prompt_cache_key(&self) -> Option<&str> {
-        self.continuation.prompt_cache_key()
+        self.prompt_cache_key.as_deref()
     }
 
-    pub fn previous_response_id(&self) -> Option<&str> {
-        self.continuation.previous_response_id()
-    }
-
-    pub fn acknowledged_message_count(&self) -> usize {
-        self.continuation.acknowledged_message_count()
-    }
-
-    pub fn continuation_start_index(&self) -> Option<usize> {
-        self.continuation.continuation_start_index()
-    }
-
-    pub fn continuation_disabled(&self) -> bool {
-        self.continuation.disabled()
-    }
-
-    pub fn acknowledge_model_response(
-        &mut self,
-        acknowledged_message_count: usize,
-        response_id: Option<String>,
-    ) {
-        self.continuation.acknowledge_response(
-            acknowledged_message_count,
-            response_id,
-            self.items.len(),
-        );
-    }
-
-    pub fn mark_continuation_unsupported(&mut self) {
-        self.continuation.mark_unsupported();
-    }
-
-    pub fn reset_continuation(&mut self) {
-        self.continuation.reset();
+    pub fn transport_session(&self) -> ModelTransportSession {
+        self.transport_session.clone()
     }
 
     fn push_message(&mut self, message: Message) {
         self.items.push(ModelContextItem::from(message.clone()));
         self.messages.push(message);
     }
+}
+
+fn forkable_messages(messages: &[Message]) -> Vec<Message> {
+    messages
+        .iter()
+        .filter(|message| match message.role {
+            MessageRole::System | MessageRole::User => true,
+            MessageRole::Assistant => !message.metadata.contains_key(TOOL_CALLS_METADATA_KEY),
+            MessageRole::Tool => false,
+        })
+        .map(|message| Message {
+            role: message.role,
+            content: message.content.clone(),
+            reasoning_content: None,
+            metadata: HashMap::new(),
+        })
+        .collect()
+}
+
+fn last_user_turns(messages: Vec<Message>, turns: usize) -> Vec<Message> {
+    let (system, conversation): (Vec<_>, Vec<_>) = messages
+        .into_iter()
+        .partition(|message| message.role == MessageRole::System);
+    let start = conversation
+        .iter()
+        .enumerate()
+        .rev()
+        .filter(|(_, message)| message.role == MessageRole::User)
+        .nth(turns.saturating_sub(1))
+        .map_or(0, |(index, _)| index);
+    system
+        .into_iter()
+        .chain(conversation.into_iter().skip(start))
+        .collect()
 }
 
 fn messages_from_items(items: &[ModelContextItem]) -> Vec<Message> {
@@ -257,7 +273,7 @@ fn messages_from_items(items: &[ModelContextItem]) -> Vec<Message> {
 /// 构造包含 assistant tool_calls metadata 的历史消息。
 ///
 /// 宿主测试或迁移工具需要手工构造历史时，应复用该 helper，而不是直接拼
-/// `tool_calls` metadata JSON。生产 turn loop 仍应优先通过 `CoreSession`
+/// `tool_calls` metadata JSON。生产 turn loop 仍应优先通过 `AgentSession`
 /// 记录模型返回的真实 `ToolCall`。
 pub fn tool_call_history_message(
     call_id: String,
@@ -469,14 +485,14 @@ mod tests {
 
     #[test]
     fn new_session_is_empty() {
-        let session = CoreSession::new();
+        let session = AgentSession::new();
         assert!(session.is_empty());
         assert_eq!(session.len(), 0);
     }
 
     #[test]
     fn push_user_prompt_adds_message() {
-        let mut session = CoreSession::new();
+        let mut session = AgentSession::new();
         session.push_user_prompt("hello".to_string());
 
         assert_eq!(session.len(), 1);
@@ -489,7 +505,7 @@ mod tests {
 
     #[test]
     fn push_assistant_response_adds_message() {
-        let mut session = CoreSession::new();
+        let mut session = AgentSession::new();
         session.push_assistant_response("reply".to_string(), Some("thinking".to_string()));
 
         assert_eq!(session.len(), 1);
@@ -502,7 +518,7 @@ mod tests {
 
     #[test]
     fn push_assistant_tool_calls_stores_metadata() {
-        let mut session = CoreSession::new();
+        let mut session = AgentSession::new();
         let tool_calls = vec![ToolCall::function(
             "call-1",
             "bash",
@@ -518,7 +534,7 @@ mod tests {
 
     #[test]
     fn push_assistant_completion_response_adds_text_message() {
-        let mut session = CoreSession::new();
+        let mut session = AgentSession::new();
         let response = CompletionResponse {
             content: Some("reply".to_string()),
             raw_content: Some("reply".to_string()),
@@ -543,14 +559,11 @@ mod tests {
                 metadata: HashMap::new(),
             }]
         );
-        assert_eq!(session.previous_response_id(), Some("resp-1"));
-        assert_eq!(session.acknowledged_message_count(), 1);
-        assert_eq!(session.continuation_start_index(), Some(1));
     }
 
     #[test]
     fn push_assistant_completion_response_preserves_tool_call_history() {
-        let mut session = CoreSession::new();
+        let mut session = AgentSession::new();
         let tool_calls = vec![ToolCall::function(
             "call-1",
             "bash",
@@ -588,14 +601,11 @@ mod tests {
             metadata.tool_calls_json,
             serde_json::to_string(&tool_calls).expect("tool call json")
         );
-        assert_eq!(session.previous_response_id(), Some("resp-1"));
-        assert_eq!(session.acknowledged_message_count(), 1);
-        assert_eq!(session.continuation_start_index(), Some(1));
     }
 
     #[test]
     fn push_tool_result_stores_metadata() {
-        let mut session = CoreSession::new();
+        let mut session = AgentSession::new();
         session.push_tool_result(
             "provider-item-1".to_string(),
             Some("call-1".to_string()),
@@ -693,10 +703,52 @@ mod tests {
                 metadata: HashMap::new(),
             },
         ];
-        let session = CoreSession::from_messages(msgs.clone());
+        let session = AgentSession::from_messages(msgs.clone());
         assert_eq!(session.len(), 2);
         assert_eq!(session.messages()[0].role, MessageRole::User);
         assert_eq!(session.messages()[1].role, MessageRole::Assistant);
+    }
+
+    #[test]
+    fn child_fork_excludes_open_and_completed_tool_protocol_messages() {
+        let mut parent = AgentSession::new();
+        parent.push_user_prompt("implement".to_string());
+        parent.push_assistant_response("working".to_string(), None);
+        parent.push_assistant_tool_calls(
+            None,
+            vec![ToolCall::function(
+                "call-1",
+                "task_request_review",
+                serde_json::json!({}),
+                Some("call-1".to_string()),
+            )],
+            None,
+        );
+        parent.push_tool_result(
+            "call-1".to_string(),
+            Some("call-1".to_string()),
+            "task_request_review".to_string(),
+            ToolCallKind::Function,
+            "ok".to_string(),
+            "{}".to_string(),
+        );
+
+        let child = parent.fork(AgentSessionForkPolicy::AllMessages);
+
+        assert_eq!(
+            child
+                .messages()
+                .iter()
+                .map(|message| message.role)
+                .collect::<Vec<_>>(),
+            vec![MessageRole::User, MessageRole::Assistant]
+        );
+        assert!(
+            child
+                .messages()
+                .iter()
+                .all(|message| message.metadata.is_empty())
+        );
     }
 
     #[test]
@@ -709,7 +761,7 @@ mod tests {
             },
         ];
 
-        let session = CoreSession::from_items(items.clone());
+        let session = AgentSession::from_items(items.clone());
 
         assert_eq!(session.items(), items.as_slice());
         assert_eq!(session.messages(), &[user]);
@@ -717,10 +769,9 @@ mod tests {
     }
 
     #[test]
-    fn replace_items_increments_revision_and_resets_continuation() {
-        let mut session = CoreSession::from_messages(vec![text_message("old")]);
+    fn replace_items_increments_revision_and_preserves_prompt_cache_key() {
+        let mut session = AgentSession::from_messages(vec![text_message("old")]);
         session.set_prompt_cache_key("cache-1".to_string());
-        session.acknowledge_model_response(session.len(), Some("resp-1".to_string()));
         let original_revision = session.revision();
 
         session.replace_items(vec![ModelContextItem::Compaction {
@@ -728,14 +779,13 @@ mod tests {
         }]);
 
         assert_eq!(session.revision(), original_revision + 1);
-        assert_eq!(session.previous_response_id(), None);
-        assert_eq!(session.acknowledged_message_count(), 0);
+        assert_eq!(session.prompt_cache_key(), Some("cache-1"));
         assert!(session.messages().is_empty());
     }
 
     #[test]
     fn replace_messages_updates_history_and_revision() {
-        let mut session = CoreSession::new();
+        let mut session = AgentSession::new();
         session.push_user_prompt("old".to_string());
         let original_revision = session.revision();
         let messages = vec![Message {
@@ -752,15 +802,15 @@ mod tests {
     }
 
     #[test]
-    fn truncate_messages_keeps_prefix_without_revision_change() {
-        let mut session = CoreSession::new();
+    fn truncate_messages_keeps_prefix_and_invalidates_history_revision() {
+        let mut session = AgentSession::new();
         session.push_user_prompt("first".to_string());
         session.push_assistant_response("second".to_string(), None);
         let original_revision = session.revision();
 
         session.truncate_messages(1);
 
-        assert_eq!(session.revision(), original_revision);
+        assert_eq!(session.revision(), original_revision + 1);
         assert_eq!(session.len(), 1);
         assert_eq!(session.messages()[0].role, MessageRole::User);
         assert_eq!(
@@ -770,52 +820,8 @@ mod tests {
     }
 
     #[test]
-    fn continuation_state_tracks_response_and_acknowledged_messages() {
-        let mut session = CoreSession::new();
-        session.push_user_prompt("hello".to_string());
-        session.set_prompt_cache_key("cache-1".to_string());
-        session.acknowledge_model_response(session.len(), Some("resp-1".to_string()));
-
-        assert_eq!(session.prompt_cache_key(), Some("cache-1"));
-        assert_eq!(session.previous_response_id(), Some("resp-1"));
-        assert_eq!(session.acknowledged_message_count(), 1);
-        assert_eq!(session.continuation_start_index(), Some(1));
-
-        session.mark_continuation_unsupported();
-
-        assert_eq!(session.previous_response_id(), None);
-        assert_eq!(session.acknowledged_message_count(), 0);
-        assert_eq!(session.continuation_start_index(), None);
-        assert!(session.continuation_disabled());
-    }
-
-    #[test]
-    fn replace_messages_preserving_continuation_keeps_valid_response_state() {
-        let mut session = CoreSession::from_messages(vec![text_message("first")]);
-        session.set_prompt_cache_key("cache-1".to_string());
-        session.acknowledge_model_response(session.len(), Some("resp-1".to_string()));
-
-        session.replace_messages_preserving_continuation(vec![
-            text_message("first"),
-            text_message("second"),
-        ]);
-
-        assert_eq!(session.prompt_cache_key(), Some("cache-1"));
-        assert_eq!(session.previous_response_id(), Some("resp-1"));
-        assert_eq!(session.acknowledged_message_count(), 1);
-        assert_eq!(session.continuation_start_index(), Some(1));
-
-        session.replace_messages_preserving_continuation(Vec::new());
-
-        assert_eq!(session.prompt_cache_key(), Some("cache-1"));
-        assert_eq!(session.previous_response_id(), None);
-        assert_eq!(session.acknowledged_message_count(), 0);
-        assert_eq!(session.continuation_start_index(), None);
-    }
-
-    #[test]
     fn repair_incomplete_tool_history_inserts_missing_result_before_next_user_message() {
-        let mut session = CoreSession::new();
+        let mut session = AgentSession::new();
         session.push_assistant_tool_calls(
             None,
             vec![ToolCall::function(

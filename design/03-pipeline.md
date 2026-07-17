@@ -7,11 +7,12 @@
 ```text
 Flutter action
   -> flutter_rust_bridge API (pl-studio-bridge)
-  -> pl-core StudioRuntime
+  -> pl-studio-runtime StudioRuntime / StudioHost
   -> StudioConversationSink / StudioEventRuntime
   -> interfaces ports
   -> studio/config/tool/mcp adapters (sqlite/config/fs/event/tool)
-  -> PureCore turn pipeline
+  -> pl-core AgentRuntime actor
+  -> TurnEngine turn pipeline
   -> pl-trace AgentEvent / TraceEvent / TracePart
   -> StudioEventRuntime canonical message/part snapshot + live part delta
   -> FRB Stream<BridgeEventEnvelope>
@@ -19,7 +20,11 @@ Flutter action
   -> Material 3 UI rendering
 ```
 
-Flutter bridge crate 不承载流程逻辑，只把 Dart 调用转发到 `pl-core`，并把 `StudioEventEnvelope` 映射为 `BridgeEventEnvelope`。
+Flutter bridge crate 不承载流程逻辑，只把 Dart 调用转发到 `pl-studio-runtime`，并把
+`StudioEventEnvelope` 映射为 `BridgeEventEnvelope`。
+
+agent 的输入队列、活动 turn、取消和恢复由 `pl-core::AgentRuntime` 唯一维护。Studio 只通过
+`StudioHost` 准备 turn、提交 durable state、管理外部资源和广播已提交事件。
 
 ## 3.2 输入与策略
 
@@ -50,22 +55,19 @@ Flutter bridge crate 不承载流程逻辑，只把 Dart 调用转发到 `pl-cor
 - `full-access` 不能扩大 execution profile 的工具 effect；planner、explorer、reviewer 仍受角色白名单约束
 - Task planner 的探索和协调只使用 profile 允许的读取与 harness 工具；明确写入类工具不能通过权限模式绕过
 - 用户显式要求 `subagent`/子代理分工时，核心提示必须将异步 agent 调度作为强约束；普通 shell 或文件探索不能替代子代理调度
-- 显式子代理分工允许最多两轮只读定位；若仍未创建 agent，后续推理只暴露 `spawn_agent` 并保持 `auto` tool choice，避免触发不支持 required tool choice 的 provider 限制
-- 多 agent 协作只通过 `spawn_agent`、`send_input`、`wait_agent`、`list_agents`、`close_agent`、`resume_agent` 组成，不提供同步等待到最终摘要的 `subagent` 入口；这些工具只提交协作操作，实际 agent 生命周期由 `AgentSupervisor` 统一管理
+- 多 agent 协作只通过 `spawn_agent`、`send_input`、`wait_agent`、`list_agents` 和 `close_agent` 组成；工具只持有非泛型 `AgentRuntimeHandle`，不接触 Studio host 或 actor 内部状态
 - `request_user_input` 是 Codex 风格的阻塞交互工具，root agent 与 subagent 都可用；工具通过统一 `Interaction` 域创建 `userInput` 请求，等待前端 resolution 后把答案作为工具结果返回，不作为普通用户聊天消息写入历史
 - `simple` 根聊天使用 executor，`task` 根聊天与 continuation turn 使用 planner；task child role 由 planner 指定，所有 child 禁止继续派生
-- agent 运行时状态对齐 Codex：`queued | running | waiting | completed | errored | interrupted | shutdown | notFound`
-- `budgetLimited` 不是 agent 状态，而是 turn abort reason；子 agent 预算耗尽时状态为 `interrupted`，并携带 `reason`、`budgetLimitKind` 和 `budgetUsage`
-- `interrupted` 是可恢复的非终局状态；`completed | errored | shutdown | notFound` 是终局状态
-- `send_input` 不能重新激活终局 agent；`triggerTurn` 不抢占已经 `running` 或已 `queued` 的 agent，调用方应等待该 agent 进入可接收新 turn 的状态；`interrupted` agent 是可恢复状态，可以通过 `send_input` 触发新 turn
-- `send_input` 默认把消息放入目标 agent 队列，不启动 turn，也不把 `running` / `queued` agent 降级为 `waiting`；设置 `triggerTurn` 时 queued message 会按入队顺序并入新 prompt，设置 `interrupt` 时立即打断并重定向目标 agent
-- `wait_agent` 等待 supervisor 活动流，只返回 `{ message, timedOut }`；状态明细通过 `list_agents` 和实时 `agentChanged`/`agentTimelineChanged` 获取，不能把完整 agent snapshot 塞回 wait 工具结果
-- 父 agent 因中断、错误、预算限制或关闭而停止时，必须级联关闭仍在运行的子树，避免后台子 agent 残留为 `running`
-- `AgentSupervisor` 是 agent latest snapshot、运行 handle、取消 token、父子路径和执行容量的唯一状态机入口；内部状态迁移必须集中处理 `status`、`updatedAt`、错误原因与预算详情。进入 `queued`、`running` 或 `completed` 时清理旧的 `error/reason/budgetLimitKind/budgetUsage`，避免从 `interrupted` 恢复后残留旧预算限制；进入 `errored/interrupted/shutdown` 时按当前 turn 或关闭原因写入详情。状态机必须拒绝从终局状态重新激活 agent，`send_input` 对 `queued/running` 保持原状态，只有 `triggerTurn` 可把可恢复非运行状态推进到 `queued`。
+- agent 状态正交拆为 lifecycle（`Active | Closing | Closed | Faulted`）、activity（`Idle | Queued | Running | WaitingTool | WaitingInteraction`）和 last turn outcome（`Completed | Cancelled | Failed | BudgetLimited`）
+- turn 完成或失败后 agent 回到 `Active + Idle`；未关闭 agent 可继续接收输入，不存在 `resume_agent`
+- 输入使用 `QueueOnly | Start | InterruptThenStart`。actor 先持久化 FIFO queue/activity，再准备和执行 turn；取消先触发 token，超过 grace period 才 abort
+- `wait_agent` 在目标 Idle 且队列为空时完成并返回 last outcome；状态明细通过 `list_agents` 和实时 snapshot/timeline 获取
+- 关闭父 agent 时按产品策略级联关闭子树；终态 repository commit 失败才把 actor 置为 Faulted 并拒绝新输入
+- `AgentRuntime` actor 是 session、pending input、active turn、cancel token、revision 和 event sequence 的唯一状态机；宿主只能通过 CAS `AgentCommit` 与 lifecycle saga 持久化/管理外部资源
 
 ## 3.3 核心 turn 编排
 
-`StudioRuntime` 只做 use case 编排；Studio UI 状态不由命令完成响应驱动，而由 `StudioEventRuntime` 持久事件流驱动。UI-facing runtime 在 `pl-core` 内维护状态机：
+`StudioRuntime` 只做 use case 编排；Studio UI 状态不由命令完成响应驱动，而由 `StudioEventRuntime` 持久事件流驱动。UI-facing runtime 在 `pl-studio-runtime` 内维护状态机：
 
 ```text
 Uninitialized -> Initializing -> Ready -> ShuttingDown -> Stopped
@@ -73,35 +75,35 @@ Uninitialized -> Initializing -> Ready -> ShuttingDown -> Stopped
                          └──────────────► Failed ◄──┘
 ```
 
-`initializeRuntime()` 完成配置、store、projection 恢复和非终态 turn 收敛；`startRuntime()` 启动后台 health、事件桥接和可取消 turn 执行能力；`shutdownRuntime()` 取消活动 turn、停止后台任务并返回最终 snapshot。所有后台 turn 的 active handle、cancellation token、pending interaction wakeup 和收尾状态都属于 `pl-core::studio`，Flutter 只通过 runtime API 触发。
+`initializeRuntime()` 完成配置、store、projection 恢复和非终态 turn 收敛；`startRuntime()` 启动后台 health、事件桥接和 `pl-core::AgentRuntime`；`shutdownRuntime()` 通过 runtime handle 取消活动 turn、停止后台任务并返回最终 snapshot。active turn、FIFO、cancellation 与 session 归 PL actor，interaction projection 和 Studio 产品资源归 `pl-studio-runtime`。
 
 核心编排步骤：
 
 1. 读取 session/project/config
 2. 解析或创建 session 级提示词快照
 3. 构造 `TurnRequest` 与 `TurnOptions`
-4. 组装 `PureCore`（含工具注册）
-5. 执行 `run_turn_with_trace`
+4. `StudioHost::prepare_turn` 组装 `AgentKernel`、`TurnEngine` 与 execution policy
+5. `AgentRuntime` 注入 turn identity/cancellation/trace 后执行 turn
 6. 运行中每个可见对话 lifecycle 先进入 `StudioEventRuntime`。用户、assistant、commentary、reasoning、plan 和 tool 均规范化为 opencode 式 `StudioMessage` / `StudioPart`。`messageUpdated` 与 `messagePartUpdated` 是 durable snapshot，由 store 在同一个事务中分配 `StudioEventEnvelope.sequence`、写入 `studio_events` 与 `studio_messages/message_parts` projection，再广播同一份 envelope 给 Studio；`messagePartDelta` 只进入实时通道，是 live overlay，不写入 `studio_events`、不推进 durable cursor。
 7. turn 收尾只负责消息、最终 runtime snapshot 与生命周期终态校准；不得要求前端等待最终响应才能看到过程
 
 前端提交普通 prompt 或 Plan 实施时调用同一套后台 turn 提交流程。Flutter `submitPrompt(sessionId, prompt, attachmentIds)` 只创建 turn、注册 cancellation token、写入 `turnChanged(queued/contextLoading/waitingForModel)`、用户 `messageUpdated` 和用户 `messagePartUpdated`，随后在后台执行 run，并立即返回 `{ sessionId, turnId, cursor }`。计划确认选择实施时，`resolve_interaction` 在当前 `sessionId` 内解决 interaction、写入 `accepted/implementing` lifecycle，并启动同会话实施 turn；不得创建或切换 target child session，也不得依赖 `sessionHandoffChanged` 展示实施过程。内部实施 prompt 可以标记为 `synthetic/ignored`，避免 timeline 出现一条巨大的重复用户消息。
 
-`run_turn_with_trace` 在每次模型请求前用 `InstructionAssembler` 解析当前提示词快照。base/system 写入 `CompletionRequest.instructions`；developer 块作为临时 system 消息置于历史消息之前；user context 块作为临时 user 消息置于 developer 块之后、真实历史之前。临时前置消息只用于本次 provider request，不写入 `CoreSession`，因此压缩和持久化只处理真实对话历史。
+`TurnEngine` 在每次模型请求前用 `InstructionAssembler` 解析当前提示词快照。base/system 写入 `CompletionRequest.instructions`；developer 块作为临时 system 消息置于历史消息之前；user context 块作为临时 user 消息置于 developer 块之后、真实历史之前。临时前置消息只用于本次 provider request，不写入 `AgentSession`，因此压缩和持久化只处理真实对话历史。
 
-`run_turn_with_trace` 接收新 turn 后，真实用户输入必须已经通过 `submit_prompt` 生成 durable user message/part，并在 `CoreSession` 中作为模型历史写入；随后才能记录 enabled tools、turn running、inference、工具和模型输出等内部运行事件。每个 turn 的用户输入只能对应一个 canonical user text part：message id 为 `{turnId}:user`，part id 为 `{turnId}:user-text`。若内部 trace 仍产生用户输入 snapshot，进入 Studio 协议前必须忽略，只保留为内部诊断，不能覆盖既有 part 或生成第二条用户消息。`StudioEventEnvelope.sequence` 是后端唯一 durable 游标，part 的 `order` 只用于 message 内展示顺序，前端 optimistic 提示不得改变后端游标。
+`TurnEngine` 接收新 turn 后，真实用户输入必须已经通过 `submit_prompt` 生成 durable user message/part，并在 `AgentSession` 中作为模型历史写入；随后才能记录 enabled tools、turn running、inference、工具和模型输出等内部运行事件。每个 turn 的用户输入只能对应一个 canonical user text part：message id 为 `{turnId}:user`，part id 为 `{turnId}:user-text`。若内部 trace 仍产生用户输入 snapshot，进入 Studio 协议前必须忽略，只保留为内部诊断，不能覆盖既有 part 或生成第二条用户消息。`StudioEventEnvelope.sequence` 是后端唯一 durable 游标，part 的 `order` 只用于 message 内展示顺序，前端 optimistic 提示不得改变后端游标。
 
 assistant 的 text、commentary、reasoning 和 plan part identity 不得直接使用 provider 局部 `item_id`。provider id 只在单个 inference 内定位当前打开的 stream block；进入 Studio part 前必须生成包含 `{turnId}`、`{inferenceId}` 和语义段序号的稳定 id，例如 `{inferenceId}-reasoning-1`、`{inferenceId}-text-final-1`。同一个 provider item 若出现 text channel/phase 变化，必须先关闭旧 block 再打开新 block，不能把旧 block id 继续用于另一种可见 channel。工具调用是语义边界：遇到 tool start/ready 或 step finish 时，当前打开的 text/reasoning/plan 必须先完成并清理 active provider 映射；工具后的模型输出必须创建新的 part，展示顺序排在工具之后。工具 part 使用 runtime tool call id 保持稳定，使 provider tool snapshot 与 core tool execution snapshot 更新同一个 part。
 
-模型输出的 `commentary` 只进入 timeline，用于让用户看到阶段性进展，不写入 `CoreSession`。只有 `final` 输出会作为 assistant response 写入会话历史；带工具调用的中间轮次如果只输出 commentary，也不得把 commentary 当作 assistant tool-call content 写回 provider 历史。
+模型输出的 `commentary` 只进入 timeline，用于让用户看到阶段性进展，不写入 `AgentSession`。只有 `final` 输出会作为 assistant response 写入会话历史；带工具调用的中间轮次如果只输出 commentary，也不得把 commentary 当作 assistant tool-call content 写回 provider 历史。
 
-`run_turn_with_trace` 在每次模型请求前执行自动上下文压缩检查。首次请求使用完整 assembled request 的估算 token；工具调用后的后续请求优先使用 provider 上一响应报告的实际上下文 token。同一 session revision 与上下文项长度没有变化时不得重复压缩。压缩阈值来自当前模型的 `autoCompactTokenLimit`，未配置时使用有效上下文窗口的 90%；模型没有上下文窗口信息时不触发自动压缩。`PureCore::compact_session` 和 trace 版本提供忽略阈值的 standalone 手动入口；空上下文或只有既有 checkpoint 时不修改会话。
+`TurnEngine` 在每次模型请求前执行自动上下文压缩检查。首次请求使用完整 assembled request 的估算 token；工具调用后的后续请求优先使用 provider 上一响应报告的实际上下文 token。同一 session revision 与上下文项长度没有变化时不得重复压缩。压缩阈值来自当前模型的 `autoCompactTokenLimit`，未配置时使用有效上下文窗口的 90%；模型没有上下文窗口信息时不触发自动压缩。`TurnEngine::compact_session` 和 trace 版本提供忽略阈值的 standalone 手动入口；空上下文或只有既有 checkpoint 时不修改会话。
 
-压缩实现由 provider 能力和配置共同决定。非 OpenAI provider（包括 DeepSeek、Zhipu 与 OpenAI-compatible Chat）始终本地压缩。`ProviderKind::OpenAi` 读取 `runtime.openai_compaction_mode = "remote_v2" | "remote_legacy" | "local"`，默认 `remote_v2`；v2 在普通 `/responses` 流中追加 `compaction_trigger` 并声明 `remote_compaction_v2`，legacy 调用 `/responses/compact`，两者都复用常规模型请求的认证、header、模型映射、instructions、工具、parallel tool calls、reasoning 和 prompt cache 信息。远程失败不得自动回退本地，也不得安装局部结果；只有完整校验成功后才原子替换 session 并重置 Responses continuation。
+压缩实现由 wire protocol 和配置共同决定。Chat Completions 始终本地压缩；Responses provider 可读取 `runtime.openai_compaction_mode = "remote_v2" | "remote_legacy" | "local"`，默认 `remote_v2`。远程压缩始终使用独立 Responses HTTP 请求，不复用常规 WS 连接，也不改变 provider 实例选择的连接模式。远程失败不得自动回退本地，也不得安装局部结果；只有完整校验成功后才原子替换 session，并使 transport session 的旧 continuation 失效。
 
 本地压缩使用当前 turn 的 canonical instructions，把 compact prompt 作为最后一条 synthetic user 输入，请求不携带工具；遇到不支持 max output 参数或 context pressure 时按压缩规则重试。替换历史过滤旧摘要，按 20k token 预算保留最近真实用户消息，边界消息按 token 截断，最后追加新摘要。OpenAI v2 按 64k token 预算保留最近真实用户消息及图片，最后追加唯一的加密 compaction item；legacy 只安装真实用户、assistant 与 compaction item。instruction prelude 参与压缩请求但不进入替换历史，下一次模型调用重新生成 canonical prelude。含加密 checkpoint 的会话若切换到非 OpenAI provider，当前轮必须在请求前失败并提示继续使用 OpenAI 或新建会话。
 
-子代理没有独立的压缩实现。`AgentSupervisor` 为每个 agent 保存独立 `CoreSession`，`spawn_agent` 和带 `triggerTurn` 的 `send_input` 提交的 child turn 复用同一个 `PureCore` turn pipeline，因此每个子代理独立维护自己的压缩历史；父会话不会替子代理压缩，也不会因为子代理压缩而改写父历史。
+子代理没有独立的压缩实现。`AgentRuntime` 为每个 agent 保存独立 `AgentSession` 集合，child turn 复用同一个 `TurnEngine` pipeline，因此每个子代理独立维护自己的压缩历史与 transport session；父会话不会替子代理压缩，也不会因为子代理压缩而改写父历史。
 
 子代理继承稳定 instruction context，但 execution profile 由角色决定，不直接继承父 turn 权限。explorer/reviewer 只读，executor 只写自己的 worktree；task child depth 固定为 1。
 
@@ -144,7 +146,7 @@ Agent 协作 timeline 与状态分层：
 - Task 计划与实施状态通过 durable coordinator 和 plan lifecycle 事件表达；确认实施后在同一 session 进入 `designUpdating`，由 planner continuation turn 推进，不切换会话模式。
 - `interactions` 表保存所有 pending/resolved/cancelled/expired 交互，是刷新与 session 切换恢复 pending UI 的事实来源。`InteractionChanged` 通过 `StudioEventKind::InteractionChanged` 广播当前 interaction 最新状态；旧 `studio-user-input-*`、`studio-tool-approval-*`、`studio-interaction-changed` sideband 事件不再作为 Studio 协议入口
 - `skill_view` 成功激活 skill 时，后端写入结构化 `SkillActivated` 事件并 upsert 会话级 skill runtime fact。Studio 当前会话的 `activeSkills` 只从 `session_skills` 等结构化持久层读取，不能再从 tool result JSON 文本反解析。
-- 如果 turn 内发生上下文压缩，`CoreSession` revision 会变化，Studio 以事务重写当前 session 的有序模型上下文项并追加本轮 trace；未发生压缩时继续使用追加写入。`messages.item_type` 区分普通 `message` 与加密 `compaction`，旧行默认是普通消息。`load_core_session` 恢复两类上下文项，Studio/Flutter 消息查询与 projection 只返回普通消息，绝不暴露 checkpoint 加密内容
+- 如果 turn 内发生上下文压缩，`AgentSession` revision 会变化，Studio 以事务重写当前 session 的有序模型上下文项并追加本轮 trace；未发生压缩时继续使用追加写入。`messages.item_type` 区分普通 `message` 与加密 `compaction`。恢复时加载两类上下文项，Studio/Flutter 消息查询与 projection 只返回普通消息，绝不暴露 checkpoint 加密内容
 - StudioEvent 读取以 `sequence` 为 durable 单调游标；message/part snapshot projection 的 `sequence` 必须等于来源 `StudioEventEnvelope.sequence`。`messagePartDelta` 没有 durable sequence 语义，前端不得用它推进 cursor。
 - agent tree、agent events、agent messages 与 turn snapshot 分表持久化；`agents` 为 latest snapshot，`agent_events` 为 append-only event log
 

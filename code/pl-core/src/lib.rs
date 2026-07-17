@@ -1,53 +1,45 @@
-mod agent;
-mod attachment;
-mod config;
-mod config_editor;
+mod agent_runtime;
+pub mod attachment;
+pub mod config;
 mod context_compaction;
 mod core;
-mod first_run;
 mod instruction;
 mod interaction;
-#[cfg(feature = "studio")]
-pub mod interfaces;
-mod mcp;
+pub mod mcp;
 mod message;
+mod model_config;
 mod permission;
 mod process;
 mod provider_error;
-mod provider_usage;
-mod runtime_usage;
+pub mod runtime_usage;
 mod session;
-mod skill;
-#[cfg(feature = "studio")]
-mod studio;
-mod tool;
+pub mod skill;
+pub mod tool;
 mod trace;
-mod turn;
+pub mod turn;
 mod workspace;
 
-pub use agent::{
-    AgentHandle, AgentInputBusyAction, AgentInputInitialAction, AgentInputQueue,
-    AgentInputStartAttempt, AgentInputSubmission, AgentInputTurnMode, AgentLifecycleStatusKind,
-    AgentMessage, AgentMessageMode, AgentMessageRequest, AgentPath, AgentRecord, AgentRunSpec,
-    AgentSpawnInput, AgentStatus, AgentStatusUpdate, AgentSupervisor, AgentToolRegistrar,
-    AgentTurnPresence, AgentTurnStartReadiness, AgentTurnStartSnapshot, AgentWaitCompletion,
-    AgentWaitLoopError, AgentWaitLoopOptions, AgentWaitLoopResult, AgentWaitOutcome,
-    AgentWaitSnapshot, CloseDisposition, CloseOutcome, LocalWorktreeBackend, MergeOutcome,
-    WorktreeBackend, WorktreeCreateFailure, WorktreeError, WorktreeHandle, WorktreeManager,
-    WorktreeRef, wait_for_agent_completion,
+pub use agent_runtime::{
+    AgentAccessPolicy, AgentActivityState, AgentCollaborationTools, AgentCommit,
+    AgentCommitOutcome, AgentCommittedEvent, AgentDurableState, AgentEventSink,
+    AgentExecutionPolicy, AgentId, AgentIdentity, AgentLifecycleAdapter, AgentLifecycleState,
+    AgentRegistration, AgentRuntime, AgentRuntimeError, AgentRuntimeEvent, AgentRuntimeEventKind,
+    AgentRuntimeHandle, AgentRuntimeHost, AgentRuntimeOptions, AgentRuntimeResult,
+    AgentSessionCommitPolicy, AgentSessionState, AgentSnapshot, AgentSpawnRequest,
+    AgentSpawnResult, AgentStateRepository, AgentSubmitRequest, AgentTargetSelector,
+    AgentTurnFactory, AgentTurnOutcome, AgentTurnPreparationContext, AgentWaitResult,
+    CloseLifecycleRequest, InputDelivery, PendingAgentInput, PreparedAgentTurn,
+    RestoredAgentRuntime, RestoredInputPolicy, SessionId, SpawnLifecycleRequest, ToolEffectSet,
+    TurnFinalizationPolicy, TurnId, TurnOutcomeKind,
 };
 pub use attachment::MaterializedAttachment;
 pub use config::{
-    BuiltinMcpServerState, ConfigPaths, ConfigStore, DEFAULT_PROJECT_DOC_MAX_BYTES,
-    EffectiveMcpServerConfig, InstructionsConfig, McpServerConfig, McpServerMutationPolicy,
-    McpServerSourceKind, McpServerStatusKind, McpServerTransport, ModelRole, ProviderConfig,
-    PureConfig, ReasoningEffort, ResolvedRoleConfig, RoleConfig, RoleConfigs, RuntimeConfig,
-    SkillsConfig, SystemSkillsConfig, ToolCapabilityConfig, active_mcp_server_names,
-    builtin_mcp_server_ids, effective_mcp_servers, is_builtin_mcp_server_id,
-    normalize_builtin_mcp_server_states, zhipu_coding_plan_token,
-};
-pub use config_editor::{
-    ProviderEdit, ProviderModelEdit, ProviderSettingsEdit, RoleEdit, infer_provider_template_kind,
+    BuiltinMcpServerState, DEFAULT_PROJECT_DOC_MAX_BYTES, EffectiveMcpServerConfig,
+    InstructionsConfig, McpServerConfig, McpServerMutationPolicy, McpServerSourceKind,
+    McpServerStatusKind, McpServerTransport, ReasoningEffort, RuntimeConfig, SkillsConfig,
+    SystemSkillsConfig, ToolCapabilityConfig, active_mcp_server_names, builtin_mcp_server_ids,
+    effective_mcp_servers, is_builtin_mcp_server_id, normalize_builtin_mcp_server_states,
+    zhipu_coding_plan_token,
 };
 pub use context_compaction::{
     ContextCompactionConfig, ContextCompactionImplementation, ContextCompactionPhase,
@@ -55,32 +47,21 @@ pub use context_compaction::{
     ManualContextCompactionRequest, RecentInteractionTailConfig,
 };
 pub use core::{
-    AgentBackendProfile, AgentKernel, AgentKernelBuilder, AgentKernelToolRequest,
-    AgentKernelToolSet, CoreAgentProfile, CoreModelContinuationConfig,
-    CoreModelContinuationProfile, CoreModelProviderFamily, CoreModelTurnClient,
-    CoreModelTurnOptions, CoreModelTurnRequest, CoreModelWireApi, CoreRuntimeOptions,
-    CoreRuntimeProfile, HostedAgentRunError, HostedAgentRunner, HostedAgentRuntime,
-    HostedProductToolRegistrar, HostedSharedToolVisibility, HostedTurnCompletion,
-    HostedTurnPreparation, HostedTurnRequest, NoAgentKernelToolSet, PureCore, PureCoreBuilder,
-    SharedToolSchemaOptions, ToolProfile, ToolSetBuilder, ToolVisibilitySet, WorkspaceProfile,
-    hosted_container_shared_tool_names, shared_tool_names, shared_tool_schemas,
-    stream_history_completion_message_text, stream_session_completion_message_text,
-    stream_session_completion_response,
-};
-pub use first_run::{
-    FirstRunConfigDraft, FirstRunModelDraft, FirstRunProviderDraft, ProviderTemplateKind,
+    AgentKernel, AgentKernelBuilder, AgentKernelToolRequest, AgentKernelToolSet, CoreAgentProfile,
+    CoreModelTurnClient, CoreModelTurnOptions, CoreModelTurnRequest, CoreRuntimeOptions,
+    CoreRuntimeProfile, NoAgentKernelToolSet, SharedToolSchemaOptions, ToolProfile, ToolSetBuilder,
+    ToolVisibilitySet, TurnEngine, TurnEngineBuilder, WorkspaceProfile, shared_tool_names,
+    shared_tool_schemas, stream_history_completion_message_text,
+    stream_session_completion_message_text, stream_session_completion_response,
 };
 pub use instruction::{
-    InstructionAssembler, InstructionAssemblyRequest, InstructionBlock, InstructionBundle,
-    InstructionProfile, InstructionSnapshot, InstructionSource, InstructionSourceKind,
+    ExecutionInstructionProfile, InstructionAssembler, InstructionAssemblyRequest,
+    InstructionBlock, InstructionBundle, InstructionProfile, InstructionSnapshot,
+    InstructionSource, InstructionSourceKind,
 };
 pub use interaction::{
     UserInputOptionProjection, UserInputProjection, UserInputQuestionProjection,
     project_user_input_questions,
-};
-#[cfg(feature = "studio")]
-pub use interfaces::{
-    ConfigRepository, EventSink, RuntimeEventEmitter, SessionRepository, TurnSnapshotRepository,
 };
 pub use mcp::{McpAvailabilityKind, McpAvailabilitySnapshot, McpRuntimeRegistry};
 pub use message::{
@@ -90,14 +71,21 @@ pub use message::{
     message_content_text, message_content_text_lines, text_preview_chars, user_message_text,
     user_text_message,
 };
+pub use model_config::{
+    AgentModelConfig, AgentRoleId, ModelCatalog, ModelCatalogId, ModelRouteConfig,
+    ProviderCatalogRegistry, ProviderConfig, ProviderConnectionPolicy, ProviderId,
+    ProviderModelCatalogConfig, ProviderPreset, ProviderPresetId, ProviderTransportSelection,
+    ResolvedModelRoute, builtin_model_catalog, builtin_provider_catalog,
+    provider_connection_mode_descriptors, provider_connection_modes,
+};
 pub use pl_lsp::{
     LspActivityKind, LspAvailabilityKind, LspDiagnostic, LspPosition, LspQuery, LspQueryOperation,
     LspQueryResult, LspRange, LspRuntimeRegistry, LspServerSnapshot,
 };
 pub use pl_model::{
-    DeepSeekBalanceInfo, DeepSeekBalanceUsage, ModelCapabilities, ModelContinuationState,
-    ModelInfo, ModelModality, ModelParameter, ModelRequestProfile, OpenAiCompactionMode,
-    ProviderKind, ReasoningInterleaved, ReasoningInterleavedField, ToolCapabilities,
+    DeepSeekBalanceInfo, DeepSeekBalanceUsage, ModelCapabilities, ModelInfo, ModelModality,
+    ModelParameter, ModelRequestProfile, OpenAiCompactionMode, ProviderConnectionMode,
+    ProviderWireProtocol, ReasoningInterleaved, ReasoningInterleavedField, ToolCapabilities,
     ToolWirePolicy, TruncationMode, ZhipuCodingPlanUsage, ZhipuQuotaLimit, ZhipuQuotaWindow,
     ZhipuToolUsageDetail,
 };
@@ -106,69 +94,44 @@ pub use pl_protocol::{
     InteractionChangedEvent, InteractionKind, InteractionPayload, InteractionRequest,
     InteractionResolution, InteractionScope, InteractionStatus, Message, MessageContent,
     MessageRole, ModelContextItem, OutputStream, PermissionLevel, PipelineStage,
-    PlanConfirmationResolution, PureError, Result, RuntimeCostAmount, RuntimeUsageSnapshot,
-    SkillActivation, StudioAgentPart, StudioAttachment, StudioEventEnvelope, StudioEventKind,
-    StudioFilePart, StudioInferencePart, StudioMessage, StudioMessageRole, StudioMessageStatus,
-    StudioPart, StudioPartDelta, StudioPartDeltaField, StudioPartStatus, StudioPartType,
-    StudioPlanPart, StudioTextChannel, StudioToolPart, StudioTurn, StudioTurnStatus,
-    TokenUsageSnapshot, ToolApprovalResolution, UserInputAnswer, UserInputRequest,
-    UserInputResponse, UserQuestion, UserQuestionOption,
+    PlanConfirmationResolution, ProviderCatalogSnapshot, ProviderConnectionModeDescriptor,
+    ProviderPresetDescriptor, ProviderTransportDescriptor, PureError, Result, RuntimeCostAmount,
+    RuntimeUsageSnapshot, SkillActivation, TokenUsageSnapshot, ToolApprovalResolution,
+    UserInputAnswer, UserInputRequest, UserInputResponse, UserQuestion, UserQuestionOption,
 };
 pub use provider_error::is_retryable_model_error;
-pub use provider_usage::{
-    ProviderUsageData, ProviderUsageRecord, ProviderUsageState, provider_usage_records,
-};
 pub use runtime_usage::ModelTokenUsageSnapshot;
 pub use session::{
-    CoreSession, repair_incomplete_tool_history, tool_call_history_message,
-    tool_result_history_message,
+    AgentSession, AgentSessionForkPolicy, repair_incomplete_tool_history,
+    tool_call_history_message, tool_result_history_message,
 };
 pub use skill::{SkillCatalog, SkillMetadata, SkillSourceKind};
-#[cfg(feature = "studio")]
-pub use studio::{
-    AgentSnapshotRecord, AgentTimelineEventRecord, AttachmentRecord, InteractionEmitter,
-    InteractionEmitterFuture, InteractionRuntime, ProjectRecord, RunPromptRequest, SessionRecord,
-    SessionRuntimeRecord, SessionSkillRecord, SessionVisibility, StudioActiveTurn,
-    StudioEventFilter, StudioEventRuntime, StudioEventScope, StudioFilteredEventReceiver,
-    StudioPlanImplementationLifecycle, StudioPromptOutcome, StudioResolveInteractionResponse,
-    StudioRuntime, StudioRuntimeSnapshot, StudioRuntimeState, StudioRuntimeStatus,
-    StudioStopPromptResponse, StudioStore, StudioSubmitPromptOptions, StudioSubmitPromptRequest,
-    StudioSubmitPromptResponse, StudioUserPromptPresentation, resolution_matches_kind,
-    studio_attachment,
-};
 #[cfg(feature = "docker-tools")]
 pub use tool::DockerCliContainerBackend;
 pub use tool::{
-    AgentControlAgentRecord, AgentControlAgentType, AgentControlAgentTypePolicy,
-    AgentControlBackend, AgentControlListOutput, AgentControlListRequest,
-    AgentControlMessageOutput, AgentControlPolicy, AgentControlSendInputOutput,
-    AgentControlSendInputRequest, AgentControlSpawnOutput, AgentControlSpawnRequest,
-    AgentControlStatusKind, AgentControlTargetRequest, AgentControlTool, AgentControlToolKind,
-    AgentControlWaitOutput, AgentControlWaitRequest, AllowAllAgentControlPolicy, AskUserTool,
-    BashInput, BashTool, ContainerBackend, ContainerCopyFromRequest, ContainerCopyToRequest,
-    ContainerExecOutput, ContainerExecRequest, ContainerTool, ContainerToolExecution,
-    ContainerToolKind, ContainerWorkspaceFileBackend, DEFAULT_MODEL_TOOL_OUTPUT_TOKENS,
-    ExecutionBackend, ExecutionOutput, ExecutionRequest, GIT_TOKEN_ENV, GitCredential,
-    GitCredentialOperation, GitCredentialProvider, GitCredentialRequest, GitPolicy,
-    GitShellCommandRequest, GitShellCredential, GitTool, GitToolKind, GitWorkspaceConfig,
-    HostMcpToolSpec, LocalExecutionBackend, LocalWorkspaceFileBackend, LspLanguageTool,
-    LspQueryTool, McpListResourceTemplatesRequest, McpListResourcesRequest, McpReadResourceRequest,
-    McpResourceBackend, McpResourceTool, McpResourceToolKind, McpTool, McpToolBackend,
-    McpToolRequest, NoContainerBackend, NoGitCredentialProvider, OutputTruncation, PlanExitTool,
-    RegisteredTool, RegisteredToolSchemaError, ResumeAgentTool, SECRET_REDACTION_REPLACEMENT,
-    SecretRedaction, ShellCommandTimeout, SubagentContext, TOOL_APPLY_PATCH, TOOL_CLOSE_AGENT,
-    TOOL_CONTAINER_COPY, TOOL_CONTAINER_EXEC, TOOL_GIT_BRANCH, TOOL_GIT_COMMIT, TOOL_GIT_DIFF,
-    TOOL_GIT_FETCH, TOOL_GIT_PUSH, TOOL_GIT_STATUS, TOOL_GIT_SYNC_DEFAULT_BRANCH,
-    TOOL_GIT_WORKSPACE_INFO, TOOL_LIST_AGENTS, TOOL_LIST_FILES, TOOL_LIST_MCP_RESOURCE_TEMPLATES,
-    TOOL_LIST_MCP_RESOURCES, TOOL_READ_FILE, TOOL_READ_MCP_RESOURCE, TOOL_RESUME_AGENT,
-    TOOL_SEARCH_FILES, TOOL_SEND_INPUT, TOOL_SPAWN_AGENT, TOOL_UPDATE_TODO_LIST, TOOL_WAIT_AGENT,
-    TodoListTool, Tool, ToolContext, ToolExecutionResult, ToolHistoryProjection, ToolInput,
-    ToolInputSchemaField, ToolLifecyclePhase, ToolLifecycleProjection, ToolOutput,
-    ToolOutputArtifactDescriptor, ToolOutputArtifactPathRequest, ToolOutputCapture,
-    ToolOutputCaptureRequest, ToolOutputModelOutputRequest, ToolOutputStream,
-    ToolOutputStreamCapture, ToolOutputStreamSizes, ToolRegistry, ToolRuntimeEvent,
-    ToolRuntimeLockPolicy, TruncatedOutput, TruncationStrategy, WorkspaceAccess,
-    WorkspaceFileBackend, WorkspaceFileListEntry, WorkspaceFileListRequest,
+    AskUserTool, BashInput, BashTool, ContainerBackend, ContainerCopyFromRequest,
+    ContainerCopyToRequest, ContainerExecOutput, ContainerExecRequest, ContainerTool,
+    ContainerToolExecution, ContainerToolKind, ContainerWorkspaceFileBackend,
+    DEFAULT_MODEL_TOOL_OUTPUT_TOKENS, ExecutionBackend, ExecutionOutput, ExecutionRequest,
+    GIT_TOKEN_ENV, GitCredential, GitCredentialOperation, GitCredentialProvider,
+    GitCredentialRequest, GitPolicy, GitShellCommandRequest, GitShellCredential, GitTool,
+    GitToolKind, GitWorkspaceConfig, HostMcpToolSpec, LocalExecutionBackend,
+    LocalWorkspaceFileBackend, LspLanguageTool, LspQueryTool, McpListResourceTemplatesRequest,
+    McpListResourcesRequest, McpReadResourceRequest, McpResourceBackend, McpResourceTool,
+    McpResourceToolKind, McpTool, McpToolBackend, McpToolRequest, NoContainerBackend,
+    NoGitCredentialProvider, OutputTruncation, PlanExitTool, RegisteredTool,
+    RegisteredToolSchemaError, SECRET_REDACTION_REPLACEMENT, SecretRedaction, ShellCommandTimeout,
+    SubagentContext, TOOL_APPLY_PATCH, TOOL_CONTAINER_COPY, TOOL_CONTAINER_EXEC, TOOL_GIT_BRANCH,
+    TOOL_GIT_COMMIT, TOOL_GIT_DIFF, TOOL_GIT_FETCH, TOOL_GIT_PUSH, TOOL_GIT_STATUS,
+    TOOL_GIT_SYNC_DEFAULT_BRANCH, TOOL_GIT_WORKSPACE_INFO, TOOL_LIST_FILES,
+    TOOL_LIST_MCP_RESOURCE_TEMPLATES, TOOL_LIST_MCP_RESOURCES, TOOL_READ_FILE,
+    TOOL_READ_MCP_RESOURCE, TOOL_SEARCH_FILES, TOOL_UPDATE_TODO_LIST, TodoListTool, Tool,
+    ToolContext, ToolExecutionResult, ToolHistoryProjection, ToolInput, ToolInputSchemaField,
+    ToolLifecyclePhase, ToolLifecycleProjection, ToolOutput, ToolOutputArtifactDescriptor,
+    ToolOutputArtifactPathRequest, ToolOutputCapture, ToolOutputCaptureRequest,
+    ToolOutputModelOutputRequest, ToolOutputStream, ToolOutputStreamCapture, ToolOutputStreamSizes,
+    ToolRegistry, ToolRuntimeEvent, ToolRuntimeLockPolicy, TruncatedOutput, TruncationStrategy,
+    WorkspaceAccess, WorkspaceFileBackend, WorkspaceFileListEntry, WorkspaceFileListRequest,
     WorkspaceFileListResult, WorkspaceFileReadRequest, WorkspaceFileRemoveRequest,
     WorkspaceFileSearchMatch, WorkspaceFileSearchRequest, WorkspaceFileSearchResult,
     WorkspaceFileStat, WorkspaceFileStatRequest, WorkspaceFileTool, WorkspaceFileToolExecution,
@@ -184,10 +147,9 @@ pub use tool::{
 };
 pub use trace::TraceRecorder;
 pub use turn::{
-    AGENT_MAX_COUNT, AGENT_MAX_DEPTH, CompileMode, DEFAULT_WALL_CLOCK_MS, InteractionCallback,
+    AGENT_MAX_COUNT, AGENT_MAX_DEPTH, DEFAULT_WALL_CLOCK_MS, InteractionCallback,
     InteractionFuture, PermissionMode, ToolApprovalDecision, ToolApprovalPolicy,
-    ToolApprovalRequest, ToolEffect, ToolExecutionMode, TurnAbortReason, TurnBudget,
-    TurnExecutionProfile, TurnExecutionRole, TurnOptions, TurnRequest, TurnResult,
-    TurnResultStatus, UserInputMode,
+    ToolApprovalRequest, ToolEffect, ToolExecutionMode, TurnAbortReason, TurnBudget, TurnOptions,
+    TurnRequest, TurnResult, TurnResultStatus, UserInputMode,
 };
 pub use workspace::{load_workspace_instructions, resolve_workspace_root};

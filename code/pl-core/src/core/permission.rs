@@ -145,7 +145,7 @@ pub(super) async fn approve_tool_call(
     request: &ToolApprovalRequest,
     context: &ToolContext,
 ) -> ToolApprovalDecision {
-    match decide_tool_permission(options, context.mode, request, context.workspace_access) {
+    match decide_tool_permission(options, request, context.workspace_access) {
         PermissionDecision::Approved { .. } => ToolApprovalDecision::Approved,
         PermissionDecision::NeedsUserApproval { .. } => {
             request_user_approval(options, request, "").await

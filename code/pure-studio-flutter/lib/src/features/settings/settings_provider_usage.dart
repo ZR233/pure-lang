@@ -52,9 +52,7 @@ class _ProviderUsagePanel extends StatelessWidget {
               ),
               const SizedBox(width: 4),
               IconButton(
-                tooltip: _providerSupportsUsage(provider)
-                    ? context.l10n.settingsRefreshUsage
-                    : context.l10n.settingsUsageNotSupported,
+                tooltip: context.l10n.settingsRefreshUsage,
                 icon: loading
                     ? const SizedBox(
                         width: 18,
@@ -62,9 +60,7 @@ class _ProviderUsagePanel extends StatelessWidget {
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : const Icon(Icons.refresh, size: 18),
-                onPressed: loading || !_providerSupportsUsage(provider)
-                    ? null
-                    : onRefresh,
+                onPressed: loading ? null : onRefresh,
               ),
             ],
           ),
@@ -84,9 +80,7 @@ class _ProviderUsagePanel extends StatelessWidget {
                   : Icons.account_balance_wallet_outlined,
               message: loading
                   ? context.l10n.settingsUsageChecking
-                  : _providerSupportsUsage(provider)
-                  ? context.l10n.settingsUsageNotLoaded
-                  : context.l10n.settingsUsageNotSupported,
+                  : context.l10n.settingsUsageNotLoaded,
               tone: loading ? _UsageTone.neutral : _UsageTone.muted,
             )
           else if (usage.status == 'ready' &&

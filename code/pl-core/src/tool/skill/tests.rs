@@ -3,8 +3,8 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::*;
-use crate::session::CoreSession;
-use crate::turn::{CompileMode, TurnOptions};
+use crate::session::AgentSession;
+use crate::turn::TurnOptions;
 
 fn temp_dir(name: &str) -> PathBuf {
     let stamp = SystemTime::now()
@@ -19,25 +19,18 @@ fn skill_content(name: &str, description: &str) -> String {
 }
 
 fn tool_context(workspace_root: PathBuf) -> ToolContext {
-    tool_context_for_mode(workspace_root, CompileMode::Simple)
-}
-
-fn tool_context_for_mode(workspace_root: PathBuf, mode: CompileMode) -> ToolContext {
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
     ToolContext {
         event_tx,
         options: TurnOptions::default(),
         workspace_access: super::super::WorkspaceAccess::WorkspaceOnly,
-        mode,
         workspace_root,
         workspace_instructions: None,
         instruction_snapshot: None,
         provider_call_id: None,
         active_subagent: None,
-        agent_supervisor: crate::AgentSupervisor::default(),
-        agent_tool_registrar: None,
         lsp_runtime: None,
-        parent_session: Arc::new(CoreSession::new()),
+        parent_session: Arc::new(AgentSession::new()),
     }
 }
 
@@ -193,7 +186,7 @@ async fn skill_view_success_emits_skill_activation() {
 }
 
 #[tokio::test]
-async fn skill_view_in_task_mode_does_not_write_project_usage() {
+async fn skill_view_records_project_usage_independent_of_product_mode() {
     let workspace = temp_dir("view-task-readonly");
     write_project_skill(&workspace, "local-flow");
     let usage_path = workspace.join("skills/local-flow/.usage.json");
@@ -210,13 +203,13 @@ async fn skill_view_in_task_mode_does_not_write_project_usage() {
                 tool_id: "call-task".to_string(),
                 revision_base: 0,
             },
-            tool_context_for_mode(workspace.clone(), CompileMode::Task),
+            tool_context(workspace.clone()),
         )
         .await
         .unwrap();
 
     assert_eq!(activation_from_output(&output).name, "local-flow");
-    assert!(!usage_path.exists());
+    assert!(usage_path.exists());
     fs::remove_dir_all(workspace).unwrap();
 }
 

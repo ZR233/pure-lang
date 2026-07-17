@@ -2,24 +2,28 @@
 
 ## 5.1 Provider 扩展
 
-新增模型 provider 时优先扩展 `pl-model`：
+Provider 扩展分为协议、preset 和实例三层：
 
-- 新增明确的 provider 类型、`ProviderInfo` 构造或配置来源。
-- 在 `~/.pure/config.toml` 中新增 provider 和完整 models 列表。
-- 实现或复用 `ModelProvider`。
-- 适配目标 API 的 request/response wire 格式。
+- 新 wire 协议才扩展 `pl-model` 的 typed request/stream adapter。
+- 使用现有 Responses 或 Chat Completions 的供应商只在 `pl-core::ProviderCatalogRegistry`
+  增加 preset，并把模型元数据放入 `pl-model` canonical catalog。
+- 产品配置只保存 preset/catalog 引用、实例凭证、endpoint override、连接模式和附加模型。
+- 完全自定义 provider 使用 `ProviderTransportSelection::Custom` 与 `Explicit` 模型目录。
 
-OpenAI-compatible 不是一等公共 provider 抽象。新增供应商必须显式建模为 provider，并通过 `protocol::openai` 或未来其他 protocol 复用底层 API 协议。provider 私有 request/stream 结构不得泄漏到 `pl-core`；如果目标 API 兼容 Chat Completions 或 Responses 但增加了私有字段，应新增本地强类型扩展并继续通过 `async-openai` client/stream 发送。
+Responses-compatible 与 Chat-compatible 都是一等公共协议能力，不为 MiMo、DeepSeek、Zhipu
+等厂商增加执行枚举或 runtime struct。provider 私有 request/stream 结构不得泄漏到 `pl-core`；
+兼容 API 的字段差异通过 `ModelRequestProfile`、模型参数 wire 和 tool wire policy 数据化表达。
 
 公共消息、事件和错误类型继续来自 `pl-protocol`。
 
-配置里的模型信息会覆盖或补充 bundled model，使用户可以接入自定义模型。
+Bundled catalog 只读，`additional_models` 只能追加不冲突 slug；完全自定义目录使用
+`Explicit`。`ProviderConfig::effective_models()` 是唯一合并入口。
 
 ## 5.2 核心流程扩展
 
 需要影响 turn、session、store 或编译阶段时扩展 `pl-core`。
 
-上下文压缩的编排属于 `pl-core` 扩展点：turn pipeline 负责自动/手动触发、pre-turn/mid-turn/standalone phase、原子替换 `CoreSession` 有序上下文项，并在 Studio store 中同步持久化。`pl-model::ModelProvider::compact_context` 只暴露统一压缩请求/响应，provider runtime 内部封装私有 wire。远程压缩能力严格限于 `ProviderKind::OpenAi`；新增 provider 即使复用 OpenAI 协议，也默认且强制走本地摘要，除非未来通过新的设计变更明确提升为一等远程能力。
+上下文压缩的编排属于 `pl-core` 扩展点：turn pipeline 负责自动/手动触发、pre-turn/mid-turn/standalone phase、原子替换 `AgentSession` 有序上下文项，并由宿主同步持久化。`pl-model::ModelProvider::compact_context` 只暴露统一压缩请求/响应，provider runtime 内部封装私有 wire。远程压缩能力由 `ProviderWireProtocol::Responses` 与显式 compaction 配置共同决定，不依赖 preset 或厂商 ID；Chat Completions 始终使用本地摘要。
 
 OpenAI 远程模式默认使用 v2 `compaction_trigger`，`/responses/compact` 只作为显式 legacy 兼容模式，不做运行期自动回退。扩展压缩 wire 时必须保持 `ModelContextItem::Compaction` 的 provider 无关边界，不得把加密 checkpoint 伪装成普通 system/user 消息，也不得让 Chat Completions 消费该项。
 
@@ -29,13 +33,16 @@ OpenAI 远程模式默认使用 v2 `compaction_trigger`，`/responses/compact` �
 - 进入核心层前转换为明确 enum 或 options struct。
 - 避免把 bool 参数暴露到核心 API。
 
-需要影响角色、provider/model 路由或配置持久化时扩展 `pl-core` 的配置模块。
+需要影响 provider/model 路由的通用值对象与校验时扩展 `pl-core::model_config`；产品角色、
+默认值、schema version、路径与文件持久化分别扩展 `pl-studio-runtime` 或其他宿主。
 
 ## 5.3 前端扩展
 
-`pure-studio-flutter` 是当前桌面前端。后续可以增加 CLI、Web 或 IDE 前端，但都应调用 `pl-core`，并复用 `pl-protocol` 的事件和消息类型。
+`pure-studio-flutter` 是当前桌面前端。后续可以增加 CLI、Web 或 IDE 前端；产品前端调用
+自己的宿主 runtime，宿主再接入 `pl-core` agent 框架。
 
-`pure-studio-flutter` 使用 Flutter Windows 桌面应用，UI 使用 Material 3、Riverpod 和 flutter_rust_bridge。桌面端状态通过 `pl-core::StudioStore` 纯异步写入 SQLite，业务配置仍通过 `pl-core::ConfigStore` 读写 `~/.pure/config.toml`。
+`pure-studio-flutter` 使用 Flutter Windows 桌面应用，UI 使用 Material 3、Riverpod 和
+flutter_rust_bridge。桌面端状态和配置均由 `pl-studio-runtime` 持久化。
 
 ## 5.4 执行能力扩展
 
@@ -44,6 +51,8 @@ OpenAI 远程模式默认使用 v2 `compaction_trigger`，`/responses/compact` �
 桌面端允许注册 `bash`、完整 agent 协作工具和文件工具。当前 Studio 运行路径默认使用 `PermissionMode::RequestApproval`：workspace 内访问按工具策略直接放行，workspace 外访问请求用户审批；`auto-review` 会把 workspace 外访问交给 reviewer，`full-access` 在策略层放行已暴露工具。旧 `ToolApprovalPolicy::Manual` 和 `DenyAll` 只作为兼容构造保留；审批和交互结果通过统一 `Interaction` 与 Studio event/projection 记录，拒绝时将拒绝原因作为 tool result 写回会话。
 
 文件工具作为 `pl-core` 工具系统的一部分注册，当前不新增独立 `pl-tool` crate。文件工具包括读取、写入、列目录、搜索、stat、建目录、删除、复制、移动和 `apply_patch`。工具 schema 不强制模型提供绝对路径；workspace-relative 路径按 `workspaceRoot` 解析，执行层统一转换为规范化绝对路径后再校验、审批和执行。只读工具仍受工作区路径边界限制；修改工具进入现有工具审批流程。
+
+容器文件 backend 以容器本身作为隔离边界，`cwd` 只负责解析相对路径，不充当第二个文件系统沙箱。绝对容器路径按其自身语义解析，即使同时传入了不同目录的 `cwd` 也不得被误判为“逃逸 cwd”；相对路径中的 `..` 仍不能越过声明的绝对 `cwd`。`stat`、读取、写入、删除、列目录和搜索必须采用一致的绝对路径语义，避免前置检查成功而复制阶段拒绝同一路径。宿主本地文件 backend 仍按 workspace 与权限模式执行原有边界校验，不因容器语义而放宽。
 
 `stat_path` 同时承担安全的存在性探测：目标存在时返回 `exists: true` 和元数据；目标不存在但最近存在父目录仍可在当前路径权限下安全解析时，返回成功结果 `exists: false`，不得把常规的“不存在”记录成工具失败。绝对路径、父目录跳转、符号链接或其他 workspace 越界仍按统一路径策略拒绝，不能因为存在性探测而放宽边界。
 
@@ -59,4 +68,8 @@ OpenAI 远程模式默认使用 v2 `compaction_trigger`，`/responses/compact` �
 
 Skills 工具同样挂在 `pl-core` 默认工具集中。`skills_list` 和 `skill_view` 是只读工具；`skill_manage` 是写入工具，但只能修改当前项目的 `<workspace_root>/skills/`，不能修改用户级、系统或外部只读 skills。subagent 通过同一默认工具注册入口继承 skills 能力。
 
-Subagent 工具通过 `spawn_agent`、`send_input`、`wait_agent`、`list_agents`、`close_agent` 和 `resume_agent` 暴露。`spawn_agent.forkTurns` 可取 `none`、`all` 或正整数字符串；默认 `none`，表示子代理只接收初始任务消息。显式请求 `all` 或 `N` 时，运行时从父会话构造过滤后的历史快照：保留 system/user 消息和 assistant 最终文本，丢弃工具调用、工具结果、reasoning 内容和运行时提示，避免把大输出复制给子代理。`send_input.triggerTurn` 表达继续执行，`send_input.interrupt` 表达立即打断并重定向。`wait_agent` 只返回 `{ message, timedOut }` 的活动等待结果；状态明细、摘要、错误和预算信息通过 `list_agents` 读取当前 compact snapshot。Studio 的 agent 展示继续以 `AgentChanged` latest snapshot 和 `SubAgentActivity` append-only timeline 为准，不依赖模型上下文中的详细 tool result。
+协作工具通过 `spawn_agent`、`send_input`、`wait_agent`、`list_agents` 和 `close_agent`
+暴露，并只持有非泛型 `AgentRuntimeHandle`。未关闭 agent 可连续接收输入，不存在
+`resume_agent`。输入使用 `QueueOnly | Start | InterruptThenStart` 明确表达；角色、目标选择和工具
+effect 均来自产品编译出的 `AgentExecutionPolicy`。`wait_agent` 在目标 Idle 且 FIFO 队列为空时
+返回 last turn outcome。Studio 的 agent 展示继续以 durable snapshot 和 append-only timeline 为准。

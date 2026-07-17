@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use pl_core::{
-    CompileMode, CoreSession, ModelRole, PureConfig, PureCore, TurnBudget, TurnOptions,
+    AgentSession, ToolCapabilityConfig, TurnBudget, TurnEngine, TurnEngineBuilder, TurnOptions,
     TurnRequest, TurnResultStatus,
 };
 use pl_protocol::{InteractionPayload, InteractionResolution, ToolApprovalResolution};
@@ -90,17 +90,21 @@ fn approval_options(requested_tools: Arc<Mutex<Vec<String>>>) -> TurnOptions {
     }))
 }
 
-async fn configured_core(api_key: String, workspace: &Path) -> PureCore {
-    let mut config = PureConfig::default_config();
-    config.skills.enabled = false;
-    config.skills.auto_learn = false;
-    config
-        .providers
-        .get_mut("deepseek")
-        .expect("default config should include deepseek provider")
-        .bearer_token = Some(api_key);
-
-    let mut core = PureCore::from_config(&config, ModelRole::Planner).unwrap();
+async fn configured_core(api_key: String, workspace: &Path) -> TurnEngine {
+    let mut provider = pl_model::ProviderInfo::deepseek(None);
+    provider.bearer_token = Some(api_key);
+    let model = pl_model::default_models()
+        .into_iter()
+        .find(|model| model.slug == provider.default_model)
+        .unwrap_or_else(|| pl_model::ModelInfo::fallback(&provider.default_model));
+    let capabilities = ToolCapabilityConfig {
+        skills: false,
+        ..ToolCapabilityConfig::default()
+    };
+    let mut core = TurnEngineBuilder::from_provider_info_with_models(provider, vec![model])
+        .unwrap()
+        .with_tool_capabilities(capabilities)
+        .build();
     core.register_default_tools(workspace, None).await;
     core
 }
@@ -215,11 +219,10 @@ async fn live_deepseek_applies_patch_with_prompt() {
 
     let core = configured_core(api_key, workspace.path()).await;
     let requested_tools = Arc::new(Mutex::new(Vec::new()));
-    let mut session = CoreSession::new();
+    let mut session = AgentSession::new();
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(256);
     let mut recorder = pl_core::TraceRecorder::new("live-apply-patch".to_string(), event_tx, 0);
-    let request =
-        TurnRequest::new(live_prompt(), CompileMode::Simple).with_budget(TurnBudget::new(180_000));
+    let request = TurnRequest::new(live_prompt()).with_budget(TurnBudget::new(180_000));
     let result = core
         .run_turn_with_trace(
             &mut session,

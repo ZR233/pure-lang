@@ -344,6 +344,7 @@
   "settingsNewProvider": "New provider",
   "settingsProviderKey": "Provider key",
   "settingsTemplate": "Template",
+  "settingsCustomProvider": "Custom provider",
   "settingsDefaultModel": "Default model",
   "settingsApiKey": "API key",
   "settingsApiKeyKeepCurrent": "API key (leave blank to keep current)",

@@ -8,7 +8,7 @@ use pl_protocol::{
 
 use super::history::{estimate_message_tokens, is_compaction_summary};
 use super::{APPROX_CHARS_PER_TOKEN, ContextCompactionConfig};
-use crate::session::CoreSession;
+use crate::session::AgentSession;
 
 const RETAINED_REMOTE_V2_TOKEN_BUDGET: u64 = 64_000;
 const CONTEXT_WINDOW_TRUNCATED_OUTPUT_MESSAGE: &str =
@@ -27,7 +27,7 @@ pub(super) struct RemoteCompactionRequest<'a, P: ModelProvider + ?Sized> {
 }
 
 pub(super) async fn compact_remote(
-    session: &CoreSession,
+    session: &AgentSession,
     request: RemoteCompactionRequest<'_, impl ModelProvider + ?Sized>,
 ) -> Result<(Vec<ModelContextItem>, Option<TokenUsage>)> {
     let RemoteCompactionRequest {

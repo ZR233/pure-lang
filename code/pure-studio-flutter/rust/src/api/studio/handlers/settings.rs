@@ -4,15 +4,21 @@ use crate::api::studio::convert::settings::{
 };
 use crate::api::studio::runtime::bridge;
 use crate::api::studio::types::{
-    BridgeStudioSnapshotResponse, ConfigSavedResponse, InstructionsSettingsInput, McpSettingsInput,
-    ProviderSettingsInput, SkillsSettingsInput,
+    BridgeProviderCatalogSnapshot, BridgeStudioSnapshotResponse, ConfigSavedResponse,
+    InstructionsSettingsInput, McpSettingsInput, ProviderSettingsInput, SkillsSettingsInput,
 };
 use anyhow::{Context, Result};
-use pl_core::{
+use pl_studio_runtime::{
     BuiltinMcpServerState, McpServerConfig, McpServerTransport, PermissionMode,
     is_builtin_mcp_server_id,
 };
 // ── Settings ──
+
+pub fn load_provider_catalog() -> Result<BridgeProviderCatalogSnapshot> {
+    Ok(pl_studio_runtime::builtin_provider_catalog()
+        .snapshot()?
+        .into())
+}
 
 pub fn save_runtime_permission_mode(mode: String) -> Result<ConfigSavedResponse> {
     let bridge = bridge()?;
@@ -81,8 +87,8 @@ pub fn save_mcp_settings(settings_json: String) -> Result<BridgeStudioSnapshotRe
         let input: McpSettingsInput =
             serde_json::from_str(&settings_json).context("invalid mcp settings json")?;
         let mut config = bridge.studio.config_store().load_or_default()?;
-        let mut next_servers = std::mem::take(&mut config.mcp_servers);
-        let mut next_builtin = std::mem::take(&mut config.builtin_mcp_servers);
+        let mut next_servers = std::mem::take(&mut config.mcp.servers);
+        let mut next_builtin = std::mem::take(&mut config.mcp.builtin_servers);
         for server in input.servers {
             let server_id = server.id.trim().to_string();
             if server_id.is_empty() {
@@ -119,8 +125,8 @@ pub fn save_mcp_settings(settings_json: String) -> Result<BridgeStudioSnapshotRe
             }
             next_servers.insert(server_id, mcp_config);
         }
-        config.mcp_servers = next_servers;
-        config.builtin_mcp_servers = next_builtin;
+        config.mcp.servers = next_servers;
+        config.mcp.builtin_servers = next_builtin;
         config.validate()?;
         bridge.studio.config_store().save(&config)?;
         bridge.studio.reconcile_mcp_runtime().await?;

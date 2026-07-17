@@ -1,7 +1,7 @@
 use super::*;
+use crate::ContextCompactionTrigger;
 use crate::tool::{OutputTruncation, Tool, ToolInput, ToolOutput};
-use crate::turn::{CompileMode, PermissionMode, ToolApprovalPolicy};
-use crate::{ConfigStore, ContextCompactionTrigger, ModelRole};
+use crate::turn::{PermissionMode, ToolApprovalPolicy};
 use pl_model::{OpenAiCompactionMode, ToolCall};
 use pl_protocol::{InteractionPayload, InteractionResolution, ToolApprovalResolution};
 use pl_trace::{TraceEventKind, TracePartKind, TracePartSource, TraceTextChannel};
@@ -13,16 +13,13 @@ fn test_tool_context(event_tx: AgentEventSender) -> ToolContext {
         event_tx,
         options: TurnOptions::default(),
         workspace_access: WorkspaceAccess::WorkspaceOnly,
-        mode: crate::turn::CompileMode::Simple,
         workspace_root: std::env::temp_dir(),
         workspace_instructions: None,
         instruction_snapshot: None,
         provider_call_id: None,
         active_subagent: None,
-        agent_supervisor: crate::AgentSupervisor::default(),
-        agent_tool_registrar: None,
         lsp_runtime: None,
-        parent_session: std::sync::Arc::new(CoreSession::new()),
+        parent_session: std::sync::Arc::new(AgentSession::new()),
     }
 }
 
@@ -143,15 +140,11 @@ fn runtime_progress_texts(
 
 mod agent_kernel;
 mod approval;
-mod configuration;
 mod default_tools;
 mod errors;
-mod hosted_agent;
 mod progress_emitter;
 mod run_turn;
-mod subagent;
 mod tool_execution;
-mod tool_modes;
 
 async fn serve_sse_once(sse_body: String) -> (String, tokio::task::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -217,14 +210,6 @@ impl TestHttpResponse {
         Self {
             status: 200,
             content_type: "text/event-stream",
-            body,
-        }
-    }
-
-    fn json(status: u16, body: String) -> Self {
-        Self {
-            status,
-            content_type: "application/json",
             body,
         }
     }
@@ -313,23 +298,15 @@ fn trace_started_kinds(events: &[TraceEvent]) -> Vec<TracePartKind> {
 }
 
 fn record_enabled_tools_for_core(
-    core: &PureCore,
+    core: &TurnEngine,
     session_id: &str,
     turn_id: &str,
-    mode: CompileMode,
 ) -> Vec<TraceEvent> {
-    let tool_schemas = core
-        .tools
-        .schemas_for_profile(crate::TurnExecutionProfile::root(mode));
+    let tool_schemas = core.tools.schemas();
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
     let mut recorder = TraceRecorder::new(session_id.to_string(), event_tx, 0);
 
-    super::turn_loop::enabled_tools::record_enabled_tools(
-        &mut recorder,
-        turn_id,
-        mode,
-        &tool_schemas,
-    );
+    super::turn_loop::enabled_tools::record_enabled_tools(&mut recorder, turn_id, &tool_schemas);
 
     recorder.drain()
 }

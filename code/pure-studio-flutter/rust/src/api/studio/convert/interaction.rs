@@ -11,7 +11,7 @@ pub(crate) fn interaction_request_bridge_dto(
 }
 
 pub(crate) fn resolve_interaction_response(
-    response: pl_core::StudioResolveInteractionResponse,
+    response: pl_studio_runtime::StudioResolveInteractionResponse,
 ) -> ResolveInteractionResponse {
     ResolveInteractionResponse {
         session_id: response.session_id,

@@ -10,7 +10,6 @@ fn serializes_enabled_tools_trace_event_as_camel_case() {
     let event = TraceEventKind::EnabledToolsRecorded {
         event: EnabledToolsEvent {
             turn_id: "turn-1".to_string(),
-            mode: "auto".to_string(),
             tools: vec!["bash".to_string(), "lsp_query".to_string()],
         },
     };
@@ -21,7 +20,6 @@ fn serializes_enabled_tools_trace_event_as_camel_case() {
             "type": "enabledToolsRecorded",
             "event": {
                 "turnId": "turn-1",
-                "mode": "auto",
                 "tools": ["bash", "lsp_query"]
             }
         })

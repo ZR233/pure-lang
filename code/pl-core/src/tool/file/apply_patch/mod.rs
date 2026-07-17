@@ -2,7 +2,7 @@ mod matcher;
 mod parser;
 
 pub(crate) use matcher::apply_chunks;
-pub(crate) use parser::{Hunk, parse_patch};
+pub use parser::{Hunk, parse_patch};
 
 fn tool_error(error: impl std::fmt::Display) -> pl_protocol::PureError {
     pl_protocol::PureError::ToolExecutionFailed {

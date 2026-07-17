@@ -23,9 +23,11 @@ execution profile 的工具 effect 白名单优先于权限模式。即使当前
 安全边界按端口-适配器落位：
 
 - `pure-studio-flutter`：输入收集、事件展示、命令调用
-- `pl-core::StudioRuntime` / `pl-core::PureCore`：策略编排与约束
-- `pl-core/interfaces`：安全相关端口抽象
-- `pl-core::studio`、`pl-core::tool`、`pl-core::config`、`pl-core::mcp`：文件、数据库、工具执行、事件落盘
+- `pl-studio-runtime::StudioRuntime` / `StudioHost`：产品策略编译与资源约束
+- `pl-core::AgentRuntime` / `TurnEngine`：执行策略校验、actor 状态与通用 turn 约束
+- `pl-core::agent_runtime` host traits：repository、turn factory、lifecycle 与 event 端口
+- `pl-core::tool`、`pl-core::mcp`：通用工具执行与协议能力
+- `pl-studio-runtime`：Studio 配置文件、SQLite、事件落盘和产品资源生命周期
 - `pl-model`：仅访问已配置 API
 
 `pl-protocol` 只承载类型，不持有策略实现。

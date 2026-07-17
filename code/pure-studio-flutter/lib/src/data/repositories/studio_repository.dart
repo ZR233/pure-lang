@@ -53,7 +53,11 @@ class StudioController extends AsyncNotifier<StudioState> {
       }
       _clearAnySessionLoadBarrier();
     });
-    final bootstrapped = await _api.bootstrap();
+    final catalog = await _api.loadProviderCatalog();
+    final bootstrapped = _attachProviderCatalog(
+      await _api.bootstrap(),
+      catalog,
+    );
     final sessionId = bootstrapped.selectedSessionId;
     _subscribe(sessionId);
     if (sessionId == null) {
@@ -196,7 +200,7 @@ class StudioController extends AsyncNotifier<StudioState> {
     await _api.saveRuntimePermissionMode(mode);
   }
 
-  Future<void> setSessionMode(CompileMode mode) async {
+  Future<void> setSessionMode(StudioMode mode) async {
     final current = state.value;
     final sessionId = current?.selectedSessionId;
     if (current == null ||
@@ -361,7 +365,7 @@ class StudioController extends AsyncNotifier<StudioState> {
             ? [
                 for (final session in latest.sessions)
                   session.id == interaction.sessionId
-                      ? session.copyWith(mode: CompileMode.task)
+                      ? session.copyWith(mode: StudioMode.task)
                       : session,
               ]
             : latest.sessions,
@@ -548,6 +552,10 @@ class StudioController extends AsyncNotifier<StudioState> {
   }
 
   Future<void> _adoptState(StudioState next) async {
+    final catalog = state.value?.providerCatalog;
+    if (catalog != null) {
+      next = _attachProviderCatalog(next, catalog);
+    }
     _subscribe(next.selectedSessionId);
     state = AsyncData(next);
     final sessionId = next.selectedSessionId;
@@ -626,4 +634,17 @@ class StudioController extends AsyncNotifier<StudioState> {
     }
     return reduced.state;
   }
+}
+
+StudioState _attachProviderCatalog(
+  StudioState state,
+  ProviderCatalogView catalog,
+) {
+  return state.copyWith(
+    providerCatalog: catalog,
+    providers: [
+      for (final provider in state.providers)
+        providerWithCatalogMetadata(provider, catalog),
+    ],
+  );
 }

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use pl_model::{
     CompletionRequest, ModelProvider, ProviderInfo, ReasoningConfig, ReasoningSummary,
-    SharedModelProvider, create_provider, create_provider_with_models,
+    SharedModelProvider, create_provider,
 };
 #[cfg(test)]
 use pl_protocol::{ErrorSeverity, PureError};
@@ -12,7 +12,7 @@ use pl_trace::AgentEventSender;
 #[cfg(test)]
 use pl_trace::{AgentEvent, TraceEvent, TracePartStatus};
 
-use crate::config::{ModelRole, PureConfig, ReasoningEffort, ToolCapabilityConfig};
+use crate::config::{ReasoningEffort, SkillsConfig, ToolCapabilityConfig};
 use crate::context_compaction::{
     CompactionOutcome, CompactionTrigger, ContextCompactionConfig, ContextCompactionPhase,
     ContextCompactionRequest, ContextCompactionSnapshot, ManualContextCompactionRequest,
@@ -20,7 +20,7 @@ use crate::context_compaction::{
 };
 use crate::instruction::{InstructionAssembler, InstructionAssemblyRequest};
 use crate::permission::parse_reviewer_decision;
-use crate::session::CoreSession;
+use crate::session::AgentSession;
 use crate::tool::{
     ContainerBackend, ContainerTool, ContainerToolKind, ExecutionBackend, GitCredentialProvider,
     GitTool, GitToolKind, GitWorkspaceConfig, SkillManageTool, SkillViewTool, SkillsListTool,
@@ -36,7 +36,6 @@ use crate::turn::{
 };
 use progress::{ProgressEmitter, ProgressVerbosity};
 
-mod hosted_agent;
 mod kernel;
 mod model_turn;
 mod permission;
@@ -47,29 +46,22 @@ mod tool_set;
 mod turn_loop;
 mod turn_result;
 
-pub use hosted_agent::{
-    HostedAgentRunError, HostedAgentRunner, HostedAgentRuntime, HostedProductToolRegistrar,
-    HostedTurnCompletion, HostedTurnPreparation, HostedTurnRequest,
-};
 pub use kernel::{
     AgentKernel, AgentKernelBuilder, AgentKernelToolRequest, AgentKernelToolSet, CoreAgentProfile,
     NoAgentKernelToolSet,
 };
 pub use model_turn::{
-    CoreModelContinuationConfig, CoreModelContinuationProfile, CoreModelProviderFamily,
-    CoreModelTurnClient, CoreModelTurnOptions, CoreModelTurnRequest, CoreModelWireApi,
+    CoreModelTurnClient, CoreModelTurnOptions, CoreModelTurnRequest,
     stream_history_completion_message_text, stream_session_completion_message_text,
     stream_session_completion_response,
 };
 pub use profile::{
-    AgentBackendProfile, CoreRuntimeOptions, CoreRuntimeProfile, PureCoreBuilder, ToolProfile,
-    WorkspaceProfile,
+    CoreRuntimeOptions, CoreRuntimeProfile, ToolProfile, TurnEngineBuilder, WorkspaceProfile,
 };
 pub use tool_set::{
-    HostedSharedToolVisibility, SharedToolSchemaOptions, ToolSetBuilder, ToolVisibilitySet,
-    hosted_container_shared_tool_names, shared_tool_names, shared_tool_schemas,
+    SharedToolSchemaOptions, ToolSetBuilder, ToolVisibilitySet, shared_tool_names,
+    shared_tool_schemas,
 };
-pub(crate) use turn_result::compact_text;
 /// 生成唯一的 turn ID（毫秒时间戳 + 序列号），用于隔离每个 turn 的 trace part id。
 fn generate_turn_id() -> String {
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -82,19 +74,15 @@ fn generate_turn_id() -> String {
     format!("{ts:x}-{seq:x}")
 }
 
-const SUBAGENT_DISPATCH_CONSTRAINT: &str = "\n\n# 子代理调度约束\n用户明确要求使用 subagent/子代理分工时，必须先调度 `spawn_agent` 工具；不要只用 `bash` 或文件工具替代。若尚未知道 crate 列表，可以先用只读工具定位 workspace，再为每个 crate 创建 explorer agent，最后由父会话汇总。如果子代理创建返回结构化容量错误，表示 provider 并发/容量或 agent 数量限制导致子代理不可用；此时停止继续创建或重试子代理，由当前父 agent 自己完成剩余工作。";
-
-const SUBAGENT_FORCE_DISPATCH_INSTRUCTION: &str = "# 当前轮强制要求\n前面已进行了必要定位但尚未创建 agent。本轮必须调用 `spawn_agent`，不要继续调用文件、shell 或搜索工具，也不要输出最终回答。若子代理创建返回结构化容量错误，后续不再重试创建子代理，改由当前 agent 自己完成任务。";
-
 /// Pure-Lang 核心逻辑层。
 ///
 /// 负责组合会话状态、模型 provider、工具注册表和单轮编译请求。
 /// 工具能力由调用方显式注册，并通过 `TurnOptions` 控制审批策略。
 #[derive(Debug)]
-pub struct PureCore {
+pub struct TurnEngine {
     provider: SharedModelProvider,
     reasoning_effort: Option<ReasoningEffort>,
-    config: Option<PureConfig>,
+    skills: Option<SkillsConfig>,
     mcp_runtime: Option<crate::mcp::McpRuntimeRegistry>,
     lsp_runtime: Option<pl_lsp::LspRuntimeRegistry>,
     workspace_root: Option<PathBuf>,
@@ -105,17 +93,15 @@ pub struct PureCore {
     runtime_options: CoreRuntimeOptions,
     context_compaction: ContextCompactionConfig,
     active_subagent: Option<SubagentContext>,
-    agent_supervisor: crate::AgentSupervisor,
-    agent_tool_registrar: Option<std::sync::Arc<dyn crate::AgentToolRegistrar>>,
     tools: ToolRegistry,
 }
 
-impl PureCore {
+impl TurnEngine {
     pub fn new(provider: SharedModelProvider) -> Self {
         Self {
             provider,
             reasoning_effort: None,
-            config: None,
+            skills: None,
             mcp_runtime: None,
             lsp_runtime: None,
             workspace_root: None,
@@ -126,8 +112,6 @@ impl PureCore {
             runtime_options: CoreRuntimeOptions::default(),
             context_compaction: ContextCompactionConfig::default(),
             active_subagent: None,
-            agent_supervisor: crate::AgentSupervisor::default(),
-            agent_tool_registrar: None,
             tools: ToolRegistry::new(),
         }
     }
@@ -139,7 +123,7 @@ impl PureCore {
         Self {
             provider,
             reasoning_effort: Some(reasoning_effort),
-            config: None,
+            skills: None,
             mcp_runtime: None,
             lsp_runtime: None,
             workspace_root: None,
@@ -150,8 +134,6 @@ impl PureCore {
             runtime_options: CoreRuntimeOptions::default(),
             context_compaction: ContextCompactionConfig::default(),
             active_subagent: None,
-            agent_supervisor: crate::AgentSupervisor::default(),
-            agent_tool_registrar: None,
             tools: ToolRegistry::new(),
         }
     }
@@ -164,51 +146,9 @@ impl PureCore {
         Self::from_provider_info(ProviderInfo::default_provider())
     }
 
-    pub fn from_config(config: &PureConfig, role: ModelRole) -> Result<Self> {
-        let resolved = config.resolve_role(role)?;
-        let provider = create_provider_with_models(resolved.provider_info, resolved.models)?;
-        let mut runtime_profile = CoreRuntimeProfile::minimal();
-        runtime_profile.context_compaction.openai_mode = config.runtime.openai_compaction_mode;
-        Ok(PureCoreBuilder::new(provider)
-            .with_reasoning_effort(resolved.role_config.effort)
-            .with_config(config.clone())
-            .with_runtime_profile(runtime_profile)
-            .build())
-    }
-
     pub fn with_subagent_context(mut self, context: SubagentContext) -> Self {
         self.active_subagent = Some(context);
         self
-    }
-
-    pub fn with_agent_supervisor(mut self, agent_supervisor: crate::AgentSupervisor) -> Self {
-        self.agent_supervisor = agent_supervisor;
-        self
-    }
-
-    pub(crate) fn set_agent_tool_registrar(
-        &mut self,
-        registrar: std::sync::Arc<dyn crate::AgentToolRegistrar>,
-    ) {
-        self.agent_tool_registrar = Some(registrar);
-    }
-
-    pub(crate) fn agent_tool_runtime(&self) -> crate::tool::AgentToolRuntime {
-        crate::tool::AgentToolRuntime::new(
-            self.provider.clone(),
-            self.reasoning_effort.clone(),
-            self.config.clone(),
-            self.mcp_runtime.clone(),
-            self.lsp_runtime.clone(),
-            self.workspace_instructions.clone(),
-        )
-    }
-
-    pub(crate) fn set_agent_lifecycle_hook(
-        &mut self,
-        hook: std::sync::Arc<dyn crate::agent::AgentLifecycleHook>,
-    ) {
-        self.agent_supervisor.set_lifecycle_hook(hook);
     }
 
     pub fn with_mcp_runtime(mut self, registry: crate::mcp::McpRuntimeRegistry) -> Self {
@@ -321,8 +261,7 @@ impl PureCore {
         self.tool_capabilities.mcp
     }
 
-    #[cfg_attr(not(feature = "studio"), allow(dead_code))]
-    pub(crate) fn register_skill_tools(
+    pub fn register_skill_tools(
         &mut self,
         workspace_root: impl Into<std::path::PathBuf>,
         workspace_instructions: Option<String>,
@@ -337,7 +276,7 @@ impl PureCore {
     ) {
         self.workspace_root = Some(workspace_root);
         self.workspace_instructions = workspace_instructions;
-        let Some(config) = self.config.as_ref().map(|config| config.skills.clone()) else {
+        let Some(config) = self.skills.clone() else {
             return;
         };
         if !config.enabled {
@@ -353,17 +292,8 @@ impl PureCore {
         request: &ToolApprovalRequest,
         context: &ToolContext,
     ) -> ToolApprovalDecision {
-        let (provider, reasoning_effort) = match &self.config {
-            Some(config) => match PureCore::from_config(config, ModelRole::Reviewer) {
-                Ok(core) => (core.provider, core.reasoning_effort),
-                Err(error) => {
-                    return ToolApprovalDecision::Denied {
-                        reason: format!("AI reviewer is unavailable: {error}"),
-                    };
-                }
-            },
-            None => (self.provider.clone(), self.reasoning_effort.clone()),
-        };
+        let provider = self.provider.clone();
+        let reasoning_effort = self.reasoning_effort.clone();
         let reasoning = reasoning_effort.as_ref().map(|effort| ReasoningConfig {
             effort: Some(effort.as_str().to_string()),
             summary: Some(ReasoningSummary::Enabled),
@@ -375,7 +305,6 @@ impl PureCore {
             "parentAgentId": &request.parent_agent_id,
             "permissionMode": context.options.permission_mode.label(),
             "workspaceAccess": format!("{:?}", context.workspace_access),
-            "compileMode": context.mode.label(),
             "workspaceRoot": context.workspace_root.display().to_string(),
             "riskSummary": permission::permission_risk_summary(&request.name),
         });
@@ -393,6 +322,7 @@ impl PureCore {
             .tool_choice("none")
             .temperature(Some(0.0))
             .max_tokens(512)
+            .store(Some(false))
             .reasoning(reasoning)
             .stream(false)
             .build();
@@ -423,7 +353,7 @@ impl PureCore {
 
     pub fn run_turn<'a>(
         &'a self,
-        session: &'a mut CoreSession,
+        session: &'a mut AgentSession,
         request: TurnRequest,
         event_tx: AgentEventSender,
     ) -> impl std::future::Future<Output = Result<TurnResult>> + Send + 'a {
@@ -437,7 +367,7 @@ impl PureCore {
 
     pub async fn run_turn_with_options(
         &self,
-        session: &mut CoreSession,
+        session: &mut AgentSession,
         request: TurnRequest,
         event_tx: AgentEventSender,
         options: TurnOptions,
@@ -449,7 +379,7 @@ impl PureCore {
 
     pub async fn run_turn_with_trace(
         &self,
-        session: &mut CoreSession,
+        session: &mut AgentSession,
         request: TurnRequest,
         recorder: &mut TraceRecorder,
         options: TurnOptions,
@@ -468,7 +398,7 @@ impl PureCore {
     /// 失败不会安装部分压缩历史。
     pub async fn compact_session(
         &self,
-        session: &mut CoreSession,
+        session: &mut AgentSession,
         request: ManualContextCompactionRequest,
         event_tx: AgentEventSender,
     ) -> Result<Option<ContextCompactionSnapshot>> {
@@ -481,10 +411,10 @@ impl PureCore {
     ///
     /// # Errors
     ///
-    /// 与 [`PureCore::compact_session`] 相同。
+    /// 与 [`TurnEngine::compact_session`] 相同。
     pub async fn compact_session_with_trace(
         &self,
-        session: &mut CoreSession,
+        session: &mut AgentSession,
         request: ManualContextCompactionRequest,
         recorder: &mut TraceRecorder,
     ) -> Result<Option<ContextCompactionSnapshot>> {
@@ -498,9 +428,10 @@ impl PureCore {
             Some(snapshot) => snapshot,
             None => {
                 let assembly_request = InstructionAssemblyRequest {
-                    config: self.config.as_ref(),
+                    instructions: None,
+                    skills: self.skills.as_ref(),
+                    execution_profile: None,
                     model: &model_info,
-                    mode: request.mode,
                     workspace_root: &workspace_root,
                     current_dir: &workspace_root,
                     workspace_instructions: request.workspace_instructions.as_deref(),
@@ -515,8 +446,10 @@ impl PureCore {
             }
         };
         let bundle = snapshot.to_bundle();
-        let execution_profile = crate::TurnExecutionProfile::root(request.mode);
-        let tools = self.tools.schemas_for_profile(execution_profile);
+        let tools = request.execution_policy.as_ref().map_or_else(
+            || self.tools.schemas(),
+            |policy| self.tools.schemas_for_policy(policy),
+        );
         let capabilities = self.provider.effective_model_capabilities(&model);
         let parallel_tool_calls = capabilities.supports_parallel_tool_calls();
         let reasoning = self
@@ -568,11 +501,11 @@ use permission::{approval_request, approve_tool_call};
 #[cfg(test)]
 use pl_model::TokenUsage;
 #[cfg(test)]
-use tool_dispatch::{ToolExecutionContext, execute_tool_calls, namespaced_tool_trace_part_id};
+use tool_dispatch::{ToolExecutionContext, execute_tool_calls};
 #[cfg(test)]
 use turn_result::{
     failed_turn_result, looks_like_unexecuted_tool_call_text, normalize_provider_error,
-    prompt_requires_subagent_dispatch, provider_error_severity, tool_allowed_in_mode,
+    provider_error_severity,
 };
 
 #[cfg(test)]

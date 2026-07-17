@@ -38,154 +38,6 @@ class _ProviderDraft {
   }
 }
 
-class _ProviderTemplate {
-  const _ProviderTemplate({
-    required this.id,
-    required this.name,
-    required this.baseUrl,
-    required this.defaultModel,
-    required this.providerKind,
-    required this.defaultModels,
-  });
-
-  final String id;
-  final String name;
-  final String baseUrl;
-  final String defaultModel;
-  final String providerKind;
-  final List<ProviderModelView> defaultModels;
-
-  ProviderSettingsView createProvider(String providerId) {
-    return ProviderSettingsView(
-      id: providerId,
-      templateKind: id,
-      name: name,
-      subtitle: '$name Platform',
-      baseUrl: baseUrl,
-      bearerToken: '',
-      hasBearerToken: false,
-      defaultModel: defaultModel,
-      models: defaultModels,
-      defaultModels: defaultModels,
-      customModels: const [],
-      status: 'missingCredential',
-      usageLabel: '${defaultModels.length} models',
-      modelCount: '${defaultModels.length}',
-      updatedAt: 'Draft',
-      providerKind: providerKind,
-    );
-  }
-}
-
-const _providerTemplates = [
-  _ProviderTemplate(
-    id: 'deepseek',
-    name: 'DeepSeek',
-    baseUrl: 'https://api.deepseek.com',
-    defaultModel: 'deepseek-v4-flash',
-    providerKind: 'deep_seek',
-    defaultModels: [
-      ProviderModelView(
-        slug: 'deepseek-v4-flash',
-        displayName: 'DeepSeek V4 Flash',
-        reasoningEfforts: ['high', 'max'],
-        contextWindow: 1000000,
-        maxOutputTokens: 384000,
-        currency: 'CNY',
-        inputPricePerMTok: 1,
-        outputPricePerMTok: 2,
-      ),
-      ProviderModelView(
-        slug: 'deepseek-v4-pro',
-        displayName: 'DeepSeek V4 Pro',
-        reasoningEfforts: ['high', 'max'],
-        contextWindow: 1000000,
-        maxOutputTokens: 384000,
-        currency: 'CNY',
-        inputPricePerMTok: 3,
-        outputPricePerMTok: 6,
-      ),
-    ],
-  ),
-  _ProviderTemplate(
-    id: 'openai',
-    name: 'OpenAI',
-    baseUrl: 'https://api.openai.com/v1',
-    defaultModel: 'gpt-5.5',
-    providerKind: 'open_ai',
-    defaultModels: [
-      ProviderModelView(
-        slug: 'gpt-5.5',
-        displayName: 'GPT-5.5',
-        reasoningEfforts: ['medium', 'low', 'high', 'xhigh'],
-      ),
-      ProviderModelView(
-        slug: 'gpt-5.4',
-        displayName: 'GPT-5.4',
-        reasoningEfforts: ['medium', 'low', 'high', 'xhigh'],
-      ),
-      ProviderModelView(
-        slug: 'gpt-5.4-mini',
-        displayName: 'GPT-5.4-Mini',
-        reasoningEfforts: ['medium', 'low', 'high', 'xhigh'],
-      ),
-      ProviderModelView(
-        slug: 'gpt-5.6-sol',
-        displayName: 'GPT-5.6-Sol',
-        reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
-      ),
-      ProviderModelView(
-        slug: 'gpt-5.6-terra',
-        displayName: 'GPT-5.6-Terra',
-        reasoningEfforts: ['medium', 'low', 'high', 'xhigh', 'max'],
-      ),
-      ProviderModelView(
-        slug: 'gpt-5.6-luna',
-        displayName: 'GPT-5.6-Luna',
-        reasoningEfforts: ['medium', 'low', 'high', 'xhigh', 'max'],
-      ),
-    ],
-  ),
-  _ProviderTemplate(
-    id: 'zhipu',
-    name: 'Zhipu',
-    baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
-    defaultModel: 'glm-5.2',
-    providerKind: 'zhipu',
-    defaultModels: [
-      ProviderModelView(
-        slug: 'glm-5.2',
-        displayName: 'GLM-5.2',
-        reasoningEfforts: ['enabled', 'none'],
-      ),
-      ProviderModelView(
-        slug: 'glm-5',
-        displayName: 'GLM-5',
-        reasoningEfforts: ['enabled', 'none'],
-      ),
-    ],
-  ),
-  _ProviderTemplate(
-    id: 'zhipu-coding-plan',
-    name: 'Zhipu Coding Plan',
-    baseUrl: 'https://open.bigmodel.cn/api/coding/paas/v4',
-    defaultModel: 'glm-5.2',
-    providerKind: 'zhipu',
-    defaultModels: [
-      ProviderModelView(
-        slug: 'glm-5.2',
-        displayName: 'GLM-5.2',
-        reasoningEfforts: ['enabled', 'none'],
-      ),
-      ProviderModelView(
-        slug: 'glm-5',
-        displayName: 'GLM-5',
-        reasoningEfforts: ['enabled', 'none'],
-      ),
-    ],
-  ),
-];
-
 String _initials(String value) {
   final words = value.trim().split(RegExp(r'\s+'));
   if (words.isEmpty || words.first.isEmpty) {
@@ -221,11 +73,6 @@ String _trimNumber(double value) {
       .replaceFirst(RegExp(r'\.$'), '');
 }
 
-bool _providerSupportsUsage(ProviderSettingsView provider) {
-  return provider.templateKind == 'deepseek' ||
-      provider.templateKind == 'zhipu-coding-plan';
-}
-
 String _providerUsageSummary(
   BuildContext context,
   ProviderSettingsView provider,
@@ -236,23 +83,18 @@ String _providerUsageSummary(
     return context.l10n.settingsUsageCheckingShort;
   }
   if (usage == null) {
-    return _providerSupportsUsage(provider)
-        ? context.l10n.settingsUsageNotLoaded
-        : context.l10n.settingsUsageUnsupported;
+    return context.l10n.settingsUsageNotLoaded;
   }
   return switch (usage.status) {
     'unsupported' => context.l10n.settingsUsageUnsupported,
     'missingCredential' => context.l10n.settingsUsageMissingKey,
     'failed' => context.l10n.settingsUsageFailed,
-    'ready' => _readyProviderUsageSummary(provider, usage),
+    'ready' => _readyProviderUsageSummary(usage),
     _ => context.l10n.settingsUsageUnavailable,
   };
 }
 
-String _readyProviderUsageSummary(
-  ProviderSettingsView provider,
-  ProviderUsageView usage,
-) {
+String _readyProviderUsageSummary(ProviderUsageView usage) {
   if (usage.usageKind == 'deepseekBalance' && usage.balance != null) {
     final primary =
         usage.balance!.balances
@@ -263,8 +105,7 @@ String _readyProviderUsageSummary(
         ? 'Usage unavailable'
         : '${primary.currency} ${primary.totalBalance}';
   }
-  if (provider.templateKind == 'zhipu-coding-plan' &&
-      usage.codingPlan != null) {
+  if (usage.usageKind == 'zhipuCodingPlan' && usage.codingPlan != null) {
     final fiveHour = _findQuotaLimit(usage.codingPlan!.limits, 'fiveHour');
     final weekly = _findQuotaLimit(usage.codingPlan!.limits, 'weekly');
     if (fiveHour != null && weekly != null) {

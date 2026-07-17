@@ -191,11 +191,13 @@ void registerSnapshotJsonTests() {
       'config': {
         'providers': {
           'zhipu-coding-plan': {
-            'provider_kind': 'zhipu',
-            'base_url': 'https://open.bigmodel.cn/api/coding/paas/v4',
-            'bearer_token': 'token',
+            'presetId': 'zhipu-coding-plan',
+            'wireProtocol': 'chat_completions',
+            'connectionMode': 'http',
+            'baseUrl': 'https://open.bigmodel.cn/api/coding/paas/v4',
+            'hasBearerToken': true,
             'name': 'Zhipu Coding Plan',
-            'default_model': 'glm-5',
+            'defaultModel': 'glm-5',
             'models': [],
           },
         },

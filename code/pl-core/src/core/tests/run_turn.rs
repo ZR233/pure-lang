@@ -13,17 +13,18 @@ async fn run_turn_records_user_trace_part_before_internal_parts() {
     .to_string();
     let (base_url, handle) = serve_sse_once(sse_body).await;
     let mut provider = ProviderInfo::openai(Some(base_url));
+    provider.connection_mode = pl_model::ProviderConnectionMode::Http;
     provider.bearer_token = Some("test-token".to_string());
     provider.default_model = "local-responses".to_string();
-    let core = PureCore::from_provider_info(provider).unwrap();
+    let core = TurnEngine::from_provider_info(provider).unwrap();
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(32);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
-    let mut session = CoreSession::new();
+    let mut session = AgentSession::new();
 
     let result = core
         .run_turn_with_trace(
             &mut session,
-            TurnRequest::new("Build the thing".to_string(), CompileMode::Simple)
+            TurnRequest::new("Build the thing".to_string())
                 .with_budget(crate::turn::TurnBudget::new(60_000)),
             &mut recorder,
             TurnOptions::default(),
@@ -74,17 +75,18 @@ async fn run_turn_emits_runtime_progress_commentary() {
     .to_string();
     let (base_url, handle) = serve_sse_once(sse_body).await;
     let mut provider = ProviderInfo::openai(Some(base_url));
+    provider.connection_mode = pl_model::ProviderConnectionMode::Http;
     provider.bearer_token = Some("test-token".to_string());
     provider.default_model = "local-responses".to_string();
-    let core = PureCore::from_provider_info(provider).unwrap();
+    let core = TurnEngine::from_provider_info(provider).unwrap();
     let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(64);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
-    let mut session = CoreSession::new();
+    let mut session = AgentSession::new();
 
     let result = core
         .run_turn_with_trace(
             &mut session,
-            TurnRequest::new("Build the thing".to_string(), CompileMode::Simple)
+            TurnRequest::new("Build the thing".to_string())
                 .with_budget(crate::turn::TurnBudget::new(60_000)),
             &mut recorder,
             TurnOptions::default(),
@@ -120,17 +122,18 @@ async fn run_turn_persists_only_final_text_to_session_history() {
     .to_string();
     let (base_url, handle) = serve_sse_once(sse_body).await;
     let mut provider = ProviderInfo::openai(Some(base_url));
+    provider.connection_mode = pl_model::ProviderConnectionMode::Http;
     provider.bearer_token = Some("test-token".to_string());
     provider.default_model = "local-responses".to_string();
-    let core = PureCore::from_provider_info(provider).unwrap();
+    let core = TurnEngine::from_provider_info(provider).unwrap();
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(32);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
-    let mut session = CoreSession::new();
+    let mut session = AgentSession::new();
 
     let result = core
         .run_turn_with_trace(
             &mut session,
-            TurnRequest::new("Build the thing".to_string(), CompileMode::Simple)
+            TurnRequest::new("Build the thing".to_string())
                 .with_budget(crate::turn::TurnBudget::new(60_000)),
             &mut recorder,
             TurnOptions::default(),
@@ -169,11 +172,12 @@ async fn run_turn_exposes_context_compaction_snapshot() {
     .to_string();
     let (base_url, _requests, handle) = serve_sse_sequence(vec![compact_sse, answer_sse]).await;
     let mut provider = ProviderInfo::openai(Some(base_url));
+    provider.connection_mode = pl_model::ProviderConnectionMode::Http;
     provider.bearer_token = Some("test-token".to_string());
     provider.default_model = "local-responses".to_string();
     let mut model = pl_model::ModelInfo::fallback("local-responses");
     model.auto_compact_token_limit = Some(1);
-    let core = PureCoreBuilder::from_provider_info_with_models(provider, vec![model])
+    let core = TurnEngineBuilder::from_provider_info_with_models(provider, vec![model])
         .unwrap()
         .with_runtime_profile(CoreRuntimeProfile::minimal().with_context_compaction(
             ContextCompactionConfig::default().with_openai_mode(OpenAiCompactionMode::Local),
@@ -181,13 +185,13 @@ async fn run_turn_exposes_context_compaction_snapshot() {
         .build();
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(32);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
-    let mut session = CoreSession::new();
+    let mut session = AgentSession::new();
     session.push_user_prompt("old context".to_string());
 
     let result = core
         .run_turn_with_trace(
             &mut session,
-            TurnRequest::new("continue".to_string(), CompileMode::Simple)
+            TurnRequest::new("continue".to_string())
                 .with_budget(crate::turn::TurnBudget::new(60_000)),
             &mut recorder,
             TurnOptions::default(),
@@ -222,9 +226,10 @@ async fn manual_compaction_runs_standalone_for_single_message_and_resets_history
     .to_string();
     let (base_url, _requests, handle) = serve_sse_sequence(vec![compact_sse]).await;
     let mut provider = ProviderInfo::openai(Some(base_url));
+    provider.connection_mode = pl_model::ProviderConnectionMode::Http;
     provider.bearer_token = Some("test-token".to_string());
     provider.default_model = "local-responses".to_string();
-    let core = PureCoreBuilder::from_provider_info_with_models(
+    let core = TurnEngineBuilder::from_provider_info_with_models(
         provider,
         vec![pl_model::ModelInfo::fallback("local-responses")],
     )
@@ -233,7 +238,7 @@ async fn manual_compaction_runs_standalone_for_single_message_and_resets_history
         ContextCompactionConfig::default().with_openai_mode(OpenAiCompactionMode::Local),
     ))
     .build();
-    let mut session = CoreSession::from_messages(vec![Message {
+    let mut session = AgentSession::from_messages(vec![Message {
         role: MessageRole::User,
         content: MessageContent::Text("only message".to_string()),
         reasoning_content: None,
@@ -245,7 +250,7 @@ async fn manual_compaction_runs_standalone_for_single_message_and_resets_history
     let snapshot = core
         .compact_session(
             &mut session,
-            ManualContextCompactionRequest::new(CompileMode::Simple),
+            ManualContextCompactionRequest::new(),
             event_tx,
         )
         .await
@@ -266,10 +271,10 @@ async fn manual_compaction_runs_standalone_for_single_message_and_resets_history
 
 #[tokio::test]
 async fn enabled_tools_snapshot_remains_internal_trace_event() {
-    let mut core = PureCore::default_provider().unwrap();
+    let mut core = TurnEngine::default_provider().unwrap();
     core.register_default_tools(std::env::temp_dir(), Some("rules".to_string()))
         .await;
-    let events = record_enabled_tools_for_core(&core, "session-1", "turn-1", CompileMode::Simple);
+    let events = record_enabled_tools_for_core(&core, "session-1", "turn-1");
     let event = enabled_tools_event(&events);
 
     assert_eq!(event.turn_id, "turn-1");
@@ -277,7 +282,7 @@ async fn enabled_tools_snapshot_remains_internal_trace_event() {
 }
 
 #[tokio::test]
-async fn run_turn_uses_prompt_cache_and_previous_response_id_incrementally() {
+async fn responses_http_uses_prompt_cache_and_full_canonical_history() {
     let first_sse = concat!(
         "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\"}}\n\n",
         "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"delta\":\"first ok\"}\n\n",
@@ -296,17 +301,18 @@ async fn run_turn_uses_prompt_cache_and_previous_response_id_incrementally() {
     .to_string();
     let (base_url, bodies, handle) = serve_sse_sequence(vec![first_sse, second_sse]).await;
     let mut provider = ProviderInfo::openai(Some(base_url));
+    provider.connection_mode = pl_model::ProviderConnectionMode::Http;
     provider.bearer_token = Some("test-token".to_string());
     provider.default_model = "local-responses".to_string();
-    let core = PureCore::from_provider_info(provider).unwrap();
+    let core = TurnEngine::from_provider_info(provider).unwrap();
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(32);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
-    let mut session = CoreSession::new();
+    let mut session = AgentSession::new();
     let options = TurnOptions::default().with_prompt_cache_key("cache-session".to_string());
 
     core.run_turn_with_trace(
         &mut session,
-        TurnRequest::new("first prompt".to_string(), CompileMode::Simple)
+        TurnRequest::new("first prompt".to_string())
             .with_budget(crate::turn::TurnBudget::new(60_000)),
         &mut recorder,
         options.clone(),
@@ -315,7 +321,7 @@ async fn run_turn_uses_prompt_cache_and_previous_response_id_incrementally() {
     .unwrap();
     core.run_turn_with_trace(
         &mut session,
-        TurnRequest::new("second prompt".to_string(), CompileMode::Simple)
+        TurnRequest::new("second prompt".to_string())
             .with_budget(crate::turn::TurnBudget::new(60_000)),
         &mut recorder,
         options,
@@ -326,25 +332,22 @@ async fn run_turn_uses_prompt_cache_and_previous_response_id_incrementally() {
 
     let bodies = bodies.lock().unwrap();
     assert_eq!(bodies.len(), 2);
-    assert_eq!(bodies[0]["store"], serde_json::json!(true));
+    assert_eq!(bodies[0]["store"], false);
     assert_eq!(
         bodies[0]["prompt_cache_key"],
         serde_json::json!("cache-session")
     );
     assert!(bodies[0].get("previous_response_id").is_none());
-    assert_eq!(bodies[1]["store"], serde_json::json!(true));
+    assert_eq!(bodies[1]["store"], false);
     assert_eq!(
         bodies[1]["prompt_cache_key"],
         serde_json::json!("cache-session")
     );
-    assert_eq!(
-        bodies[1]["previous_response_id"],
-        serde_json::json!("resp_1")
-    );
+    assert!(bodies[1].get("previous_response_id").is_none());
     let second_input = serde_json::to_string(&bodies[1]["input"]).unwrap();
     assert!(second_input.contains("second prompt"));
-    assert!(!second_input.contains("first prompt"));
-    assert!(!second_input.contains("first ok"));
+    assert!(second_input.contains("first prompt"));
+    assert!(second_input.contains("first ok"));
 }
 
 #[tokio::test]
@@ -359,22 +362,23 @@ async fn run_turn_uses_runtime_profile_default_turn_options() {
     .to_string();
     let (base_url, bodies, handle) = serve_sse_sequence(vec![sse_body]).await;
     let mut provider = ProviderInfo::openai(Some(base_url));
+    provider.connection_mode = pl_model::ProviderConnectionMode::Http;
     provider.bearer_token = Some("test-token".to_string());
     provider.default_model = "local-responses".to_string();
     let runtime = CoreRuntimeProfile::minimal().with_runtime_options(
         CoreRuntimeOptions::default()
             .with_turn_options(TurnOptions::default().with_prompt_cache_key("profile-cache")),
     );
-    let core = PureCoreBuilder::from_provider_info(provider)
+    let core = TurnEngineBuilder::from_provider_info(provider)
         .unwrap()
         .with_runtime_profile(runtime)
         .build();
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(32);
-    let mut session = CoreSession::new();
+    let mut session = AgentSession::new();
 
     core.run_turn(
         &mut session,
-        TurnRequest::new("profile prompt".to_string(), CompileMode::Simple)
+        TurnRequest::new("profile prompt".to_string())
             .with_budget(crate::turn::TurnBudget::new(60_000)),
         event_tx,
     )
@@ -384,7 +388,7 @@ async fn run_turn_uses_runtime_profile_default_turn_options() {
 
     let bodies = bodies.lock().unwrap();
     assert_eq!(bodies.len(), 1);
-    assert_eq!(bodies[0]["store"], serde_json::json!(true));
+    assert_eq!(bodies[0]["store"], false);
     assert_eq!(
         bodies[0]["prompt_cache_key"],
         serde_json::json!("profile-cache")
@@ -392,7 +396,7 @@ async fn run_turn_uses_runtime_profile_default_turn_options() {
 }
 
 #[tokio::test]
-async fn run_turn_retries_full_history_when_continuation_is_unsupported() {
+async fn run_turn_http_sends_full_history_without_a_retry_path() {
     let retry_sse = concat!(
         "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"msg_retry\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\"}}\n\n",
         "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_retry\",\"delta\":\"retry ok\"}\n\n",
@@ -401,33 +405,24 @@ async fn run_turn_retries_full_history_when_continuation_is_unsupported() {
         "data: [DONE]\n\n"
     )
     .to_string();
-    let unsupported = serde_json::json!({
-        "error": {
-            "message": "previous_response_id is not supported by this endpoint"
-        }
-    })
-    .to_string();
-    let (base_url, bodies, handle) = serve_http_sequence(vec![
-        TestHttpResponse::json(400, unsupported),
-        TestHttpResponse::sse(retry_sse),
-    ])
-    .await;
+    let (base_url, bodies, handle) =
+        serve_http_sequence(vec![TestHttpResponse::sse(retry_sse)]).await;
     let mut provider = ProviderInfo::openai(Some(base_url));
+    provider.connection_mode = pl_model::ProviderConnectionMode::Http;
     provider.bearer_token = Some("test-token".to_string());
     provider.default_model = "local-responses".to_string();
-    let core = PureCore::from_provider_info(provider).unwrap();
+    let core = TurnEngine::from_provider_info(provider).unwrap();
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(32);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
-    let mut session = CoreSession::new();
+    let mut session = AgentSession::new();
     session.push_user_prompt("old prompt".to_string());
     session.push_assistant_response("old answer".to_string(), None);
     session.set_prompt_cache_key("cache-session".to_string());
-    session.acknowledge_model_response(session.len(), Some("resp_old".to_string()));
 
     let result = core
         .run_turn_with_trace(
             &mut session,
-            TurnRequest::new("new prompt".to_string(), CompileMode::Simple)
+            TurnRequest::new("new prompt".to_string())
                 .with_budget(crate::turn::TurnBudget::new(60_000)),
             &mut recorder,
             TurnOptions::default().with_prompt_cache_key("cache-session".to_string()),
@@ -438,20 +433,16 @@ async fn run_turn_retries_full_history_when_continuation_is_unsupported() {
 
     assert_eq!(result.status, TurnResultStatus::Completed);
     let bodies = bodies.lock().unwrap();
-    assert_eq!(bodies.len(), 2);
-    assert_eq!(
-        bodies[0]["previous_response_id"],
-        serde_json::json!("resp_old")
-    );
-    assert!(bodies[1].get("previous_response_id").is_none());
-    let retry_input = serde_json::to_string(&bodies[1]["input"]).unwrap();
+    assert_eq!(bodies.len(), 1);
+    assert!(bodies[0].get("previous_response_id").is_none());
+    let retry_input = serde_json::to_string(&bodies[0]["input"]).unwrap();
     assert!(retry_input.contains("old prompt"));
     assert!(retry_input.contains("old answer"));
     assert!(retry_input.contains("new prompt"));
 }
 
 #[tokio::test]
-async fn model_turn_helper_retries_full_history_when_continuation_is_unsupported() {
+async fn model_turn_helper_http_sends_full_history_once() {
     let retry_sse = concat!(
         "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"msg_retry\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\"}}\n\n",
         "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_retry\",\"delta\":\"retry ok\"}\n\n",
@@ -460,33 +451,22 @@ async fn model_turn_helper_retries_full_history_when_continuation_is_unsupported
         "data: [DONE]\n\n"
     )
     .to_string();
-    let unsupported = serde_json::json!({
-        "error": {
-            "message": "previous_response_id is only supported on Responses WebSocket v2"
-        }
-    })
-    .to_string();
-    let (base_url, bodies, handle) = serve_http_sequence(vec![
-        TestHttpResponse::json(400, unsupported),
-        TestHttpResponse::sse(retry_sse),
-    ])
-    .await;
+    let (base_url, bodies, handle) =
+        serve_http_sequence(vec![TestHttpResponse::sse(retry_sse)]).await;
     let mut provider_info = ProviderInfo::openai(Some(base_url));
+    provider_info.connection_mode = pl_model::ProviderConnectionMode::Http;
     provider_info.bearer_token = Some("test-token".to_string());
     provider_info.default_model = "local-responses".to_string();
     let provider = pl_model::create_provider(provider_info).unwrap();
-    let mut session = CoreSession::new();
+    let mut session = AgentSession::new();
     session.push_user_prompt("old prompt".to_string());
     session.push_assistant_response("old answer".to_string(), None);
     session.set_prompt_cache_key("cache-session".to_string());
-    session.acknowledge_model_response(session.len(), Some("resp_old".to_string()));
 
     let response = stream_session_completion_response(
         provider,
         &mut session,
-        CoreModelTurnRequest::new("local-responses")
-            .with_instructions("reply briefly")
-            .with_continuation(true),
+        CoreModelTurnRequest::new("local-responses").with_instructions("reply briefly"),
         CoreModelTurnOptions::default(),
     )
     .await
@@ -494,16 +474,10 @@ async fn model_turn_helper_retries_full_history_when_continuation_is_unsupported
     handle.await.unwrap();
 
     assert_eq!(response.content.as_deref(), Some("retry ok"));
-    assert!(session.continuation_disabled());
-    assert_eq!(session.previous_response_id(), None);
     let bodies = bodies.lock().unwrap();
-    assert_eq!(bodies.len(), 2);
-    assert_eq!(
-        bodies[0]["previous_response_id"],
-        serde_json::json!("resp_old")
-    );
-    assert!(bodies[1].get("previous_response_id").is_none());
-    let retry_input = serde_json::to_string(&bodies[1]["input"]).unwrap();
+    assert_eq!(bodies.len(), 1);
+    assert!(bodies[0].get("previous_response_id").is_none());
+    let retry_input = serde_json::to_string(&bodies[0]["input"]).unwrap();
     assert!(retry_input.contains("old prompt"));
     assert!(retry_input.contains("old answer"));
 }
@@ -520,10 +494,11 @@ async fn model_turn_text_helper_returns_assistant_message_text() {
     .to_string();
     let (base_url, handle) = serve_sse_once(sse_body).await;
     let mut provider_info = ProviderInfo::openai(Some(base_url));
+    provider_info.connection_mode = pl_model::ProviderConnectionMode::Http;
     provider_info.bearer_token = Some("test-token".to_string());
     provider_info.default_model = "local-responses".to_string();
     let provider = pl_model::create_provider(provider_info).unwrap();
-    let mut session = CoreSession::new();
+    let mut session = AgentSession::new();
     session.push_user_prompt("summarize this".to_string());
 
     let text = stream_session_completion_message_text(
@@ -537,11 +512,10 @@ async fn model_turn_text_helper_returns_assistant_message_text() {
     handle.await.unwrap();
 
     assert_eq!(text, "title");
-    assert_eq!(session.previous_response_id(), Some("resp_title"));
 }
 
 #[tokio::test]
-async fn model_turn_client_caches_unsupported_continuation_by_key() {
+async fn model_turn_client_keeps_independent_http_sessions_full_history() {
     let retry_sse = concat!(
         "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"msg_retry\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\"}}\n\n",
         "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_retry\",\"delta\":\"retry ok\"}\n\n",
@@ -558,55 +532,40 @@ async fn model_turn_client_caches_unsupported_continuation_by_key() {
         "data: [DONE]\n\n"
     )
     .to_string();
-    let unsupported = serde_json::json!({
-        "error": {
-            "message": "previous_response_id is not supported"
-        }
-    })
-    .to_string();
     let (base_url, bodies, handle) = serve_http_sequence(vec![
-        TestHttpResponse::json(400, unsupported),
         TestHttpResponse::sse(retry_sse),
         TestHttpResponse::sse(second_sse),
     ])
     .await;
     let mut provider_info = ProviderInfo::openai(Some(base_url));
+    provider_info.connection_mode = pl_model::ProviderConnectionMode::Http;
     provider_info.bearer_token = Some("test-token".to_string());
     provider_info.default_model = "local-responses".to_string();
     let provider = pl_model::create_provider(provider_info).unwrap();
     let client = CoreModelTurnClient::new();
 
-    let mut first_session = CoreSession::new();
+    let mut first_session = AgentSession::new();
     first_session.push_user_prompt("old prompt".to_string());
     first_session.push_assistant_response("old answer".to_string(), None);
-    first_session.acknowledge_model_response(first_session.len(), Some("resp_old".to_string()));
     let first = client
         .stream_session_completion_response(
             provider.clone(),
             &mut first_session,
-            CoreModelTurnRequest::new("local-responses")
-                .with_instructions("reply briefly")
-                .with_continuation(true)
-                .with_continuation_cache_key("openai|local-responses"),
+            CoreModelTurnRequest::new("local-responses").with_instructions("reply briefly"),
             CoreModelTurnOptions::default(),
         )
         .await
         .unwrap();
     assert_eq!(first.content.as_deref(), Some("retry ok"));
 
-    let mut second_session = CoreSession::new();
+    let mut second_session = AgentSession::new();
     second_session.push_user_prompt("new prompt".to_string());
     second_session.push_assistant_response("new answer".to_string(), None);
-    second_session
-        .acknowledge_model_response(second_session.len(), Some("resp_second_old".to_string()));
     let second = client
         .stream_session_completion_response(
             provider,
             &mut second_session,
-            CoreModelTurnRequest::new("local-responses")
-                .with_instructions("reply briefly")
-                .with_continuation(true)
-                .with_continuation_cache_key("openai|local-responses"),
+            CoreModelTurnRequest::new("local-responses").with_instructions("reply briefly"),
             CoreModelTurnOptions::default(),
         )
         .await
@@ -615,18 +574,23 @@ async fn model_turn_client_caches_unsupported_continuation_by_key() {
 
     assert_eq!(second.content.as_deref(), Some("second ok"));
     let bodies = bodies.lock().unwrap();
-    assert_eq!(bodies.len(), 3);
-    assert_eq!(
-        bodies[0]["previous_response_id"],
-        serde_json::json!("resp_old")
-    );
+    assert_eq!(bodies.len(), 2);
+    assert!(bodies[0].get("previous_response_id").is_none());
     assert!(bodies[1].get("previous_response_id").is_none());
-    assert!(bodies[2].get("previous_response_id").is_none());
-    assert_eq!(bodies[2]["store"], serde_json::json!(false));
+    assert!(
+        serde_json::to_string(&bodies[0]["input"])
+            .unwrap()
+            .contains("old answer")
+    );
+    assert!(
+        serde_json::to_string(&bodies[1]["input"])
+            .unwrap()
+            .contains("new answer")
+    );
 }
 
 #[tokio::test]
-async fn tool_context_keeps_full_session_history_across_responses_continuation() {
+async fn tool_context_keeps_full_session_history_across_responses_http_requests() {
     let responses = vec![
         tool_call_sse("history-marker", "history_marker"),
         tool_call_sse("history-probe", "parent_history_probe"),
@@ -634,19 +598,20 @@ async fn tool_context_keeps_full_session_history_across_responses_continuation()
     ];
     let (base_url, bodies, handle) = serve_sse_sequence(responses).await;
     let mut provider = ProviderInfo::openai(Some(base_url));
+    provider.connection_mode = pl_model::ProviderConnectionMode::Http;
     provider.bearer_token = Some("test-token".to_string());
     provider.default_model = "local-responses".to_string();
-    let mut core = PureCore::from_provider_info(provider).unwrap();
+    let mut core = TurnEngine::from_provider_info(provider).unwrap();
     core.register_tool(HistoryMarkerTool);
     core.register_tool(ParentHistoryProbeTool);
     let (event_tx, _) = tokio::sync::broadcast::channel(32);
     let mut recorder = TraceRecorder::new("session-history".to_string(), event_tx, 0);
-    let mut session = CoreSession::new();
+    let mut session = AgentSession::new();
 
     let result = core
         .run_turn_with_trace(
             &mut session,
-            TurnRequest::new("check tool history".to_string(), CompileMode::Simple)
+            TurnRequest::new("check tool history".to_string())
                 .with_budget(crate::turn::TurnBudget::new(60_000)),
             &mut recorder,
             TurnOptions::default(),
@@ -680,8 +645,17 @@ async fn tool_context_keeps_full_session_history_across_responses_continuation()
         .expect("parent history probe result");
     assert_eq!(probe_result, "history marker visible");
     let bodies = bodies.lock().unwrap();
-    assert_eq!(bodies[1]["previous_response_id"], "response_history-marker");
-    assert_eq!(bodies[2]["previous_response_id"], "response_history-probe");
+    assert_eq!(bodies.len(), 3);
+    assert!(
+        bodies
+            .iter()
+            .all(|body| body.get("previous_response_id").is_none())
+    );
+    assert!(
+        serde_json::to_string(&bodies[2]["input"])
+            .unwrap()
+            .contains("history_marker")
+    );
 }
 
 #[derive(Debug)]

@@ -39,7 +39,7 @@ impl McpAvailabilityKind {
     }
 }
 
-/// Studio 展示用的 MCP availability 快照。
+/// 产品投影层展示用的 MCP availability 快照。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct McpAvailabilitySnapshot {
     pub server_id: String,
@@ -133,7 +133,7 @@ impl McpRuntimeRegistry {
             .collect()
     }
 
-    pub async fn register_available_tools(&self, core: &mut crate::PureCore) -> Result<()> {
+    pub async fn register_available_tools(&self, core: &mut crate::TurnEngine) -> Result<()> {
         if !core.mcp_tools_enabled() {
             return Ok(());
         }

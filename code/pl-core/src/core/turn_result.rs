@@ -5,11 +5,7 @@ use pl_protocol::{BudgetLimitKind, BudgetUsage, ErrorSeverity, PureError};
 use pl_trace::{AgentEvent, TracePartStatus};
 
 use crate::trace::TraceRecorder;
-use crate::turn::{
-    CompileMode, ToolExecutionMode, TurnAbortReason, TurnOptions, TurnResult, TurnResultStatus,
-};
-#[cfg(test)]
-use crate::turn::{ToolEffect, TurnExecutionProfile};
+use crate::turn::{ToolExecutionMode, TurnAbortReason, TurnOptions, TurnResult, TurnResultStatus};
 
 pub(super) fn provider_error_severity(
     active_subagent: Option<&crate::tool::SubagentContext>,
@@ -47,11 +43,6 @@ pub(super) fn should_request_parallel_tool_calls(
     }
 }
 
-#[cfg(test)]
-pub(super) fn tool_allowed_in_mode(mode: CompileMode, name: &str) -> bool {
-    TurnExecutionProfile::root(mode).allows_tool(name, ToolEffect::for_builtin_name(name))
-}
-
 pub(super) fn is_cancelled(options: &TurnOptions) -> bool {
     options
         .cancellation_token
@@ -81,7 +72,6 @@ pub(super) fn budget_limit_message(kind: BudgetLimitKind, usage: &BudgetUsage) -
 pub(super) fn interrupted_turn_result(
     recorder: &mut TraceRecorder,
     turn_id: &str,
-    mode: CompileMode,
     content: String,
     reasoning_content: Option<String>,
     model: String,
@@ -104,7 +94,6 @@ pub(super) fn interrupted_turn_result(
         usage,
         last_context_tokens: None,
         context_compactions: Vec::new(),
-        mode,
         session_message_count,
         status: TurnResultStatus::Aborted,
         abort_reason: Some(crate::turn::TurnAbortReason::Interrupted),
@@ -119,7 +108,6 @@ pub(super) fn interrupted_turn_result(
 pub(super) fn failed_turn_result(
     recorder: &mut TraceRecorder,
     turn_id: &str,
-    mode: CompileMode,
     content: String,
     reasoning_content: Option<String>,
     model: String,
@@ -131,7 +119,6 @@ pub(super) fn failed_turn_result(
     failed_turn_result_with_abort_reason(
         recorder,
         turn_id,
-        mode,
         content,
         reasoning_content,
         model,
@@ -147,7 +134,6 @@ pub(super) fn failed_turn_result(
 pub(super) fn failed_turn_result_with_abort_reason(
     recorder: &mut TraceRecorder,
     turn_id: &str,
-    mode: CompileMode,
     content: String,
     reasoning_content: Option<String>,
     model: String,
@@ -175,7 +161,6 @@ pub(super) fn failed_turn_result_with_abort_reason(
         usage,
         last_context_tokens: None,
         context_compactions: Vec::new(),
-        mode,
         session_message_count,
         status: TurnResultStatus::Errored,
         abort_reason: Some(abort_reason),
@@ -190,7 +175,6 @@ pub(super) fn failed_turn_result_with_abort_reason(
 pub(super) fn budget_limited_turn_result(
     recorder: &mut TraceRecorder,
     turn_id: &str,
-    mode: CompileMode,
     content: String,
     reasoning_content: Option<String>,
     model: String,
@@ -219,7 +203,6 @@ pub(super) fn budget_limited_turn_result(
         usage,
         last_context_tokens: None,
         context_compactions: Vec::new(),
-        mode,
         session_message_count,
         status: TurnResultStatus::Aborted,
         abort_reason: Some(crate::turn::TurnAbortReason::BudgetLimited),
@@ -230,36 +213,8 @@ pub(super) fn budget_limited_turn_result(
     }
 }
 
-pub(crate) fn compact_text(text: &str) -> String {
-    const MAX_CHARS: usize = 240;
-    let trimmed = text.trim();
-    let mut result = String::new();
-    for (index, ch) in trimmed.chars().enumerate() {
-        if index >= MAX_CHARS {
-            result.push_str("...");
-            return result;
-        }
-        result.push(ch);
-    }
-    result
-}
-
 pub(super) fn default_workspace_root() -> PathBuf {
     std::env::current_dir().unwrap_or_default()
-}
-
-pub(super) fn prompt_requires_subagent_dispatch(prompt: &str) -> bool {
-    let lower = prompt.to_ascii_lowercase();
-    let lower_without_file_mentions = lower
-        .replace("subagent.rs", "")
-        .replace("subagent.md", "")
-        .replace("subagent.toml", "");
-    let mentions_subagent = lower_without_file_mentions.contains("subagent")
-        || prompt.contains("子代理")
-        || prompt.contains("分代理");
-    let requests_partition =
-        lower.contains("crate") || prompt.contains("每个") || prompt.contains("分别");
-    mentions_subagent && requests_partition
 }
 
 pub(super) fn looks_like_unexecuted_tool_call_text(content: &str) -> bool {
