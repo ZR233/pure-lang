@@ -75,6 +75,35 @@ async fn design_patch_commits_and_atomically_opens_executor_gate() {
 }
 
 #[tokio::test]
+async fn design_commit_uses_studio_identity_without_changing_repository_config() {
+    let fixture = DesignFixture::new("studio-commit-identity").await;
+    git(&fixture.repository, &["config", "user.name", ""]);
+    git(&fixture.repository, &["config", "user.email", ""]);
+
+    fixture.update(DESIGN_PATCH).await.unwrap();
+
+    assert_eq!(
+        git_output(&fixture.repository, &["log", "-1", "--pretty=%an <%ae>"]),
+        "Pure Studio <pure-studio@local>"
+    );
+    assert_eq!(
+        git_output(
+            &fixture.repository,
+            &["config", "--local", "--get", "user.name"]
+        ),
+        ""
+    );
+    assert_eq!(
+        git_output(
+            &fixture.repository,
+            &["config", "--local", "--get", "user.email"]
+        ),
+        ""
+    );
+    fixture.cleanup().await;
+}
+
+#[tokio::test]
 async fn executor_retry_limit_uses_owned_paths_instead_of_mutable_title() {
     let fixture = DesignFixture::new("stable-retry-identity").await;
     fixture.update(DESIGN_PATCH).await.unwrap();

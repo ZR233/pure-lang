@@ -13,8 +13,8 @@ pub(super) struct RepositorySnapshot {
 }
 
 const INITIAL_COMMIT_MESSAGE: &str = "chore: initialize Pure Studio workspace";
-const FALLBACK_GIT_NAME: &str = "Pure Studio";
-const FALLBACK_GIT_EMAIL: &str = "pure-studio@local";
+pub(super) const STUDIO_GIT_NAME_CONFIG: &str = "user.name=Pure Studio";
+pub(super) const STUDIO_GIT_EMAIL_CONFIG: &str = "user.email=pure-studio@local";
 const TASK_RUNTIME_EXCLUDES: &[&str] = &[".pure/worktrees/", "target/pure/"];
 
 pub(super) async fn prepare_repository_for_task(
@@ -246,10 +246,10 @@ fn create_initial_commit(workspace_root: &Path) -> Result<()> {
         .arg("-C")
         .arg(workspace_root);
     if !has_name {
-        command.args(["-c", &format!("user.name={FALLBACK_GIT_NAME}")]);
+        command.args(["-c", STUDIO_GIT_NAME_CONFIG]);
     }
     if !has_email {
-        command.args(["-c", &format!("user.email={FALLBACK_GIT_EMAIL}")]);
+        command.args(["-c", STUDIO_GIT_EMAIL_CONFIG]);
     }
     let output = command
         .args(["commit", "--allow-empty", "-m", INITIAL_COMMIT_MESSAGE])
