@@ -371,7 +371,7 @@ fn token_usage(value: &Value) -> Result<TokenUsage> {
 
 fn is_retryable(error: &PureError) -> bool {
     match error {
-        PureError::HttpError(_) => true,
+        PureError::HttpError(_) | PureError::TransientModelTransport { .. } => true,
         PureError::LlmError(message) => {
             let message = message.to_ascii_lowercase();
             ["408", "409", "429", "500", "502", "503", "504", "timeout"]

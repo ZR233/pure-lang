@@ -11,7 +11,10 @@ pub(super) fn provider_error_severity(
     active_subagent: Option<&crate::tool::SubagentContext>,
     error: &str,
 ) -> ErrorSeverity {
-    if active_subagent.is_none() && crate::provider_error::is_provider_429_error(error) {
+    if active_subagent.is_none()
+        && (crate::provider_error::is_provider_429_error(error)
+            || crate::provider_error::is_retryable_model_error(error))
+    {
         ErrorSeverity::Transient
     } else {
         ErrorSeverity::Recoverable

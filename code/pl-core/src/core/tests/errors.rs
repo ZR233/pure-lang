@@ -29,6 +29,13 @@ fn root_provider_429_is_transient_and_subagent_429_is_provider_capacity() {
         provider_error_severity(None, "API error 500"),
         ErrorSeverity::Recoverable
     ));
+    assert!(matches!(
+        provider_error_severity(
+            None,
+            "transient model transport error: Responses WebSocket stream failed"
+        ),
+        ErrorSeverity::Transient
+    ));
 }
 
 #[test]
