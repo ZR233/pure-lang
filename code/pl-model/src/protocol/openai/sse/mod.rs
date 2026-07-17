@@ -11,7 +11,7 @@ mod item;
 use item::{
     assistant_message_identity, assistant_message_text, cached_tokens_from_details,
     output_item_tool_completed, output_item_tool_started, reasoning_item_id,
-    reasoning_summary_texts,
+    reasoning_summary_texts, web_search_lifecycle_event,
 };
 
 /// SSE 流事件原始结构（从 JSON 解析）
@@ -477,6 +477,9 @@ enum StreamEventBatch {
 }
 
 fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEventBatch> {
+    if let Some(event) = web_search_lifecycle_event(event) {
+        return Some(StreamEventBatch::Single(event));
+    }
     if let Some(choice) = event.choices.as_ref().and_then(|choices| choices.first()) {
         let mut events = Vec::new();
         if let Some(delta) = &choice.delta.reasoning_content

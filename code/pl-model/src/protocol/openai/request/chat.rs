@@ -84,8 +84,17 @@ impl ChatRequestBody {
             }
         }
 
-        let tools = (!request.tools.is_empty())
-            .then(|| request.tools.iter().map(ChatTool::from_schema).collect());
+        let tools = if request.tools.is_empty() {
+            None
+        } else {
+            Some(
+                request
+                    .tools
+                    .iter()
+                    .map(ChatTool::from_schema)
+                    .collect::<Result<Vec<_>>>()?,
+            )
+        };
         let tool_choice = tools.as_ref().map(|_| request.tool_choice.clone());
 
         let (max_tokens, max_completion_tokens) = match model.request_profile.max_tokens_field {
@@ -204,8 +213,8 @@ enum ChatTool {
 }
 
 impl ChatTool {
-    fn from_schema(tool: &ToolSchema) -> Self {
-        match tool {
+    fn from_schema(tool: &ToolSchema) -> Result<Self> {
+        let tool = match tool {
             ToolSchema::Function {
                 name,
                 description,
@@ -228,7 +237,13 @@ impl ChatTool {
                     format: ToolFormatBody::from_format(format),
                 },
             },
-        }
+            ToolSchema::WebSearch { .. } => {
+                return Err(protocol_error(
+                    "hosted web search is only supported by the Responses API",
+                ));
+            }
+        };
+        Ok(tool)
     }
 }
 

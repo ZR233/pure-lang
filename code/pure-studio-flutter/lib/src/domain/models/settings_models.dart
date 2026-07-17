@@ -135,3 +135,57 @@ class GeneralSettingsView {
     );
   }
 }
+
+class WebSearchSettingsView {
+  const WebSearchSettingsView({
+    this.configuredMode = 'cached',
+    this.effectiveMode = 'disabled',
+    this.availability = 'missingCredential',
+    this.contextSize,
+    this.allowedDomains = const [],
+    this.country,
+    this.region,
+    this.city,
+    this.timezone,
+    this.providerId,
+    this.model,
+  });
+
+  final String configuredMode;
+  final String effectiveMode;
+  final String availability;
+  final String? contextSize;
+  final List<String> allowedDomains;
+  final String? country;
+  final String? region;
+  final String? city;
+  final String? timezone;
+  final String? providerId;
+  final String? model;
+
+  bool get isAvailable => availability == 'available';
+
+  WebSearchSettingsView withConfiguredValues({
+    required String configuredMode,
+    String? contextSize,
+    List<String> allowedDomains = const [],
+    String? country,
+    String? region,
+    String? city,
+    String? timezone,
+  }) {
+    return WebSearchSettingsView(
+      configuredMode: configuredMode,
+      effectiveMode: effectiveMode,
+      availability: availability,
+      contextSize: contextSize,
+      allowedDomains: allowedDomains,
+      country: country,
+      region: region,
+      city: city,
+      timezone: timezone,
+      providerId: providerId,
+      model: model,
+    );
+  }
+}

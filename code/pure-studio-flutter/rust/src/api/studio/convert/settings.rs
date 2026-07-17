@@ -83,7 +83,102 @@ pub(crate) fn studio_config_projection(config: &pl_studio_runtime::StudioConfig)
         "skills": config.skills,
         "mcpServers": config.mcp.servers,
         "builtinMcpServers": config.mcp.builtin_servers,
+        "webSearch": config.web_search,
     }))
+}
+
+pub(crate) fn web_search_settings_dto(
+    config: &pl_studio_runtime::StudioConfig,
+    role: pl_studio_runtime::StudioRole,
+) -> Result<crate::api::studio::types::BridgeWebSearchSettingsDto> {
+    let route = config.resolve_role(role)?;
+    let resolution = pl_studio_runtime::resolve_web_search(config, &route);
+    let location = config.web_search.location.as_ref();
+    Ok(crate::api::studio::types::BridgeWebSearchSettingsDto {
+        configured_mode: web_search_mode_label(resolution.configured_mode).to_string(),
+        effective_mode: web_search_mode_label(resolution.effective_mode).to_string(),
+        availability: web_search_availability_label(resolution.availability).to_string(),
+        context_size: config
+            .web_search
+            .context_size
+            .map(web_search_context_size_label)
+            .map(str::to_string),
+        allowed_domains: config.web_search.allowed_domains.clone(),
+        country: location.and_then(|location| location.country.clone()),
+        region: location.and_then(|location| location.region.clone()),
+        city: location.and_then(|location| location.city.clone()),
+        timezone: location.and_then(|location| location.timezone.clone()),
+        provider_id: resolution
+            .backend
+            .as_ref()
+            .map(|backend| backend.provider_id.to_string()),
+        model: resolution.backend.map(|backend| backend.model),
+    })
+}
+
+pub(crate) fn web_search_config_from_input(
+    input: crate::api::studio::types::WebSearchSettingsInput,
+) -> Result<pl_studio_runtime::StudioWebSearchConfig> {
+    let mode = match input.mode.trim() {
+        "disabled" => pl_studio_runtime::WebSearchMode::Disabled,
+        "cached" => pl_studio_runtime::WebSearchMode::Cached,
+        "indexed" => pl_studio_runtime::WebSearchMode::Indexed,
+        "live" => pl_studio_runtime::WebSearchMode::Live,
+        mode => anyhow::bail!("unsupported web search mode: {mode}"),
+    };
+    let context_size = match input.context_size.as_deref().map(str::trim) {
+        None | Some("") => None,
+        Some("low") => Some(pl_studio_runtime::WebSearchContextSize::Low),
+        Some("medium") => Some(pl_studio_runtime::WebSearchContextSize::Medium),
+        Some("high") => Some(pl_studio_runtime::WebSearchContextSize::High),
+        Some(size) => anyhow::bail!("unsupported web search context size: {size}"),
+    };
+    let location = pl_studio_runtime::WebSearchLocation {
+        country: normalized_optional(input.country),
+        region: normalized_optional(input.region),
+        city: normalized_optional(input.city),
+        timezone: normalized_optional(input.timezone),
+    };
+    Ok(pl_studio_runtime::StudioWebSearchConfig {
+        mode,
+        context_size,
+        allowed_domains: normalized_string_list(input.allowed_domains),
+        location: (!location.is_empty()).then_some(location),
+    })
+}
+
+fn normalized_optional(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn web_search_mode_label(mode: pl_studio_runtime::WebSearchMode) -> &'static str {
+    match mode {
+        pl_studio_runtime::WebSearchMode::Disabled => "disabled",
+        pl_studio_runtime::WebSearchMode::Cached => "cached",
+        pl_studio_runtime::WebSearchMode::Indexed => "indexed",
+        pl_studio_runtime::WebSearchMode::Live => "live",
+    }
+}
+
+fn web_search_context_size_label(size: pl_studio_runtime::WebSearchContextSize) -> &'static str {
+    match size {
+        pl_studio_runtime::WebSearchContextSize::Low => "low",
+        pl_studio_runtime::WebSearchContextSize::Medium => "medium",
+        pl_studio_runtime::WebSearchContextSize::High => "high",
+    }
+}
+
+fn web_search_availability_label(
+    availability: pl_studio_runtime::StudioWebSearchAvailability,
+) -> &'static str {
+    match availability {
+        pl_studio_runtime::StudioWebSearchAvailability::Available => "available",
+        pl_studio_runtime::StudioWebSearchAvailability::Disabled => "disabled",
+        pl_studio_runtime::StudioWebSearchAvailability::MissingCredential => "missingCredential",
+        pl_studio_runtime::StudioWebSearchAvailability::UnsupportedModel => "unsupportedModel",
+    }
 }
 
 fn protocol_label(protocol: pl_studio_runtime::ProviderWireProtocol) -> &'static str {

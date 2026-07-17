@@ -5,6 +5,7 @@
 
 mod mode;
 mod store;
+mod web_search;
 
 use std::collections::BTreeMap;
 
@@ -13,6 +14,7 @@ use pl_core::config::{
     BuiltinMcpServerState, InstructionsConfig, McpServerConfig, RuntimeConfig, SkillsConfig,
 };
 use pl_core::{AgentModelConfig, ProviderConfig};
+use pl_model::WebSearchConfig;
 use serde::{Deserialize, Serialize};
 
 pub use mode::StudioMode;
@@ -25,8 +27,12 @@ pub use pl_core::config::{
 };
 pub use pl_core::{AgentRoleId, ModelRouteConfig, ProviderId, ReasoningEffort};
 pub use store::{ConfigPaths, ConfigStore};
+pub use web_search::{
+    StudioWebSearchAvailability, StudioWebSearchBackend, StudioWebSearchPath,
+    StudioWebSearchResolution, resolve_web_search,
+};
 
-pub const STUDIO_CONFIG_SCHEMA_VERSION: u32 = 8;
+pub const STUDIO_CONFIG_SCHEMA_VERSION: u32 = 9;
 pub const STUDIO_CONFIG_DIR_NAME: &str = ".pure";
 pub const STUDIO_CONFIG_FILE_NAME: &str = "config.toml";
 pub const CONFIG_DIR_NAME: &str = STUDIO_CONFIG_DIR_NAME;
@@ -92,6 +98,8 @@ impl StudioRole {
 pub type StudioRuntimeConfig = RuntimeConfig;
 pub type StudioInstructionsConfig = InstructionsConfig;
 pub type StudioSkillsConfig = SkillsConfig;
+pub type StudioWebSearchConfig = WebSearchConfig;
+pub use pl_model::{WebSearchContextSize, WebSearchLocation, WebSearchMode};
 
 /// Studio 自有的 MCP 配置段。
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -117,6 +125,8 @@ impl StudioUiConfig {
 pub struct StudioConfig {
     pub schema_version: u32,
     pub models: AgentModelConfig,
+    #[serde(default)]
+    pub web_search: StudioWebSearchConfig,
     #[serde(default, skip_serializing_if = "RuntimeConfig::is_empty")]
     pub runtime: StudioRuntimeConfig,
     #[serde(default, skip_serializing_if = "InstructionsConfig::is_default")]
@@ -159,6 +169,7 @@ impl StudioConfig {
                 providers: BTreeMap::from([(provider_id, provider)]),
                 routes,
             },
+            web_search: StudioWebSearchConfig::default(),
             runtime: StudioRuntimeConfig::default(),
             instructions: StudioInstructionsConfig::default(),
             skills,

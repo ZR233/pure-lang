@@ -211,6 +211,8 @@ pub struct StudioToolPart {
     pub arguments: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub output_artifacts: Vec<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exit_code: Option<i32>,
     #[serde(default)]

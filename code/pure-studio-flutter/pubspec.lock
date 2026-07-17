@@ -345,10 +345,10 @@ packages:
     dependency: "direct main"
     description:
       name: gpt_markdown
-      sha256: c14c2a4599a67df5b6a984808cbb7631b8d15c91984ffdd7998597b93a6ff136
+      sha256: ab6fe339f500104816139a034b8a23a125dadbc1988eda1641c6616562a4962b
       url: "https://pub.dev"
     source: hosted
-    version: "1.1.7"
+    version: "1.1.8"
   graphs:
     dependency: transitive
     description:
@@ -734,10 +734,10 @@ packages:
     dependency: transitive
     description:
       name: uuid
-      sha256: "1fef9e8e11e2991bb773070d4656b7bd5d850967a2456cfc83cf47925ba79489"
+      sha256: "9b129329f58692f6e6578329498a8fe9fbe98f090beb764ffbb8ee2eadd01dcd"
       url: "https://pub.dev"
     source: hosted
-    version: "4.5.3"
+    version: "4.6.0"
   vector_graphics:
     dependency: transitive
     description:

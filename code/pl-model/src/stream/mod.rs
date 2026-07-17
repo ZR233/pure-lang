@@ -147,6 +147,7 @@ pub struct StreamCompletionAccumulator {
     reasoning_summary_parts: Vec<String>,
     raw_reasoning_parts: Vec<String>,
     tool_calls: Vec<ToolCall>,
+    hosted_web_search_calls: HashMap<String, crate::HostedWebSearchCall>,
     tool_stream: ToolStream,
     lifecycle: StreamLifecycle,
     final_usage: Option<TokenUsage>,
@@ -164,6 +165,7 @@ impl StreamCompletionAccumulator {
             reasoning_summary_parts: Vec::new(),
             raw_reasoning_parts: Vec::new(),
             tool_calls: Vec::new(),
+            hosted_web_search_calls: HashMap::new(),
             tool_stream: ToolStream::new(),
             lifecycle: StreamLifecycle::new(),
             final_usage: None,
@@ -372,6 +374,31 @@ impl StreamCompletionAccumulator {
                     self.tool_calls.push(call);
                 }
             }
+            ModelStreamEvent::WebSearchStarted { item_id, action } => {
+                self.hosted_web_search_calls
+                    .entry(item_id.clone())
+                    .or_insert(crate::HostedWebSearchCall {
+                        item_id: item_id.clone(),
+                        action: action.clone(),
+                        results: None,
+                    });
+                self.record_web_search_started(&item_id, action, event_tx);
+            }
+            ModelStreamEvent::WebSearchCompleted {
+                item_id,
+                action,
+                results,
+            } => {
+                self.hosted_web_search_calls.insert(
+                    item_id.clone(),
+                    crate::HostedWebSearchCall {
+                        item_id: item_id.clone(),
+                        action: action.clone(),
+                        results: results.clone(),
+                    },
+                );
+                self.record_web_search_completed(&item_id, action, results, event_tx);
+            }
             ModelStreamEvent::Usage(usage) => {
                 self.final_usage = Some(usage);
             }
@@ -447,6 +474,11 @@ impl StreamCompletionAccumulator {
             .as_ref()
             .map(TraceProjection::events)
             .unwrap_or_default();
+        let mut hosted_web_search_calls = self
+            .hosted_web_search_calls
+            .into_values()
+            .collect::<Vec<_>>();
+        hosted_web_search_calls.sort_by(|left, right| left.item_id.cmp(&right.item_id));
         let next_sequence = self
             .trace
             .as_ref()
@@ -460,6 +492,7 @@ impl StreamCompletionAccumulator {
             reasoning_content,
             tool_calls: self.tool_calls,
             trace_events,
+            hosted_web_search_calls,
             next_sequence,
             usage: self.final_usage.unwrap_or_default(),
             finish_reason,
@@ -486,6 +519,35 @@ impl StreamCompletionAccumulator {
             return;
         };
         for event in trace.start_text(item_id, text_channel) {
+            let _ = event_tx.send(event);
+        }
+    }
+
+    fn record_web_search_started(
+        &mut self,
+        item_id: &str,
+        action: crate::WebSearchAction,
+        event_tx: &AgentEventSender,
+    ) {
+        let Some(trace) = self.trace.as_mut() else {
+            return;
+        };
+        for event in trace.start_web_search(item_id, action) {
+            let _ = event_tx.send(event);
+        }
+    }
+
+    fn record_web_search_completed(
+        &mut self,
+        item_id: &str,
+        action: crate::WebSearchAction,
+        results: Option<Vec<serde_json::Value>>,
+        event_tx: &AgentEventSender,
+    ) {
+        let Some(trace) = self.trace.as_mut() else {
+            return;
+        };
+        for event in trace.complete_web_search(item_id, action, results) {
             let _ = event_tx.send(event);
         }
     }

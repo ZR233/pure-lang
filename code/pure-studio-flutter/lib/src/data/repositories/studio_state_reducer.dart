@@ -147,6 +147,7 @@ StudioState mergeStudioConfigState(StudioState current, StudioState next) {
     instructions: next.instructions,
     skills: next.skills,
     general: next.general,
+    webSearch: next.webSearch,
     permissionMode: next.permissionMode,
     runtime: next.runtime.model.isEmpty ? current.runtime : next.runtime,
   );

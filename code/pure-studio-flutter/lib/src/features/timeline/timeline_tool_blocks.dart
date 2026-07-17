@@ -15,6 +15,9 @@ class _ToolGroupPartState extends State<_ToolGroupPart> {
   @override
   Widget build(BuildContext context) {
     final group = widget.group;
+    if (group.items.length == 1 && _isWebSearch(group.items.first)) {
+      return _WebSearchToolCard(item: group.items.first);
+    }
     return _TimelinePanel(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -45,7 +48,10 @@ class _ToolGroupPartState extends State<_ToolGroupPart> {
                       context,
                     ).colorScheme.outlineVariant.withValues(alpha: 0.5),
                   ),
-                  for (final item in group.items) _ToolGroupItemRow(item: item),
+                  for (final item in group.items)
+                    _isWebSearch(item)
+                        ? _WebSearchToolCard(item: item, embedded: true)
+                        : _ToolGroupItemRow(item: item),
                 ],
               ),
             ),
@@ -77,6 +83,268 @@ class _ToolGroupPartState extends State<_ToolGroupPart> {
       );
     }
     return context.l10n.timelineToolGroupSummary(group.count);
+  }
+}
+
+bool _isWebSearch(TimelineToolGroupItem item) {
+  return item.tool?.name == 'web_search';
+}
+
+class _WebSearchToolCard extends StatelessWidget {
+  const _WebSearchToolCard({required this.item, this.embedded = false});
+
+  final TimelineToolGroupItem item;
+  final bool embedded;
+
+  @override
+  Widget build(BuildContext context) {
+    final data = _WebSearchCardData.fromTool(item.tool);
+    final content = Padding(
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.travel_explore, size: 19, color: StudioColors.clay),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Text(
+                  data.title(context),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: context.text.titleSmall?.copyWith(
+                    color: context.studioInk,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              _StatusPill(label: item.status),
+            ],
+          ),
+          if (data.details.isNotEmpty) ...[
+            const SizedBox(height: 9),
+            SelectionArea(
+              child: Text(
+                data.details.join('\n'),
+                style: context.text.bodySmall?.copyWith(
+                  color: context.studioInkSoft,
+                  height: 1.45,
+                ),
+              ),
+            ),
+          ],
+          if (data.links.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Text(
+              context.l10n.timelineWebSearchResults,
+              style: context.text.labelSmall?.copyWith(
+                color: context.studioInkSoft,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 4),
+            for (final link in data.links)
+              Padding(
+                padding: const EdgeInsets.only(top: 3),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.link, size: 14, color: context.colors.primary),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: SelectionArea(
+                        child: Text(
+                          link,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: context.text.bodySmall?.copyWith(
+                            color: context.colors.primary,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+          if (item.part.error?.trim().isNotEmpty == true) ...[
+            const SizedBox(height: 8),
+            Text(
+              item.part.error!,
+              style: context.text.bodySmall?.copyWith(
+                color: context.colors.error,
+              ),
+            ),
+          ] else if (item.tool?.result?.trim().isNotEmpty == true) ...[
+            const SizedBox(height: 8),
+            Text(
+              item.tool!.result!,
+              maxLines: 4,
+              overflow: TextOverflow.ellipsis,
+              style: context.text.bodySmall?.copyWith(
+                color: context.studioInkSoft,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+    if (embedded) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 9),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: context.studioPaper2,
+            borderRadius: BorderRadius.circular(StudioRadii.sm),
+            border: Border.all(color: context.studioLine),
+          ),
+          child: content,
+        ),
+      );
+    }
+    return _TimelinePanel(child: content);
+  }
+}
+
+enum _WebSearchActionKind { search, open, find, other }
+
+class _WebSearchCardData {
+  const _WebSearchCardData({
+    required this.kind,
+    required this.details,
+    required this.links,
+  });
+
+  factory _WebSearchCardData.fromTool(TimelineToolPart? tool) {
+    final arguments = _decodeWebSearchArguments(tool?.arguments ?? '');
+    final details = <String>[];
+    var kind = _WebSearchActionKind.other;
+    final type = arguments['type']?.toString();
+    final queries = <String>[];
+    final directQuery = arguments['query']?.toString().trim();
+    if (directQuery?.isNotEmpty == true) {
+      queries.add(directQuery!);
+    }
+    final actionQueries = arguments['queries'];
+    if (actionQueries is List) {
+      queries.addAll(
+        actionQueries
+            .map((value) => value.toString().trim())
+            .where((value) => value.isNotEmpty),
+      );
+    }
+    for (final key in const ['search_query', 'image_query']) {
+      final commands = arguments[key];
+      if (commands is List) {
+        for (final command in commands) {
+          final query = _webSearchMap(command)['q']?.toString().trim();
+          if (query?.isNotEmpty == true) {
+            queries.add(query!);
+          }
+        }
+      }
+    }
+    if (type == 'search' || queries.isNotEmpty) {
+      kind = _WebSearchActionKind.search;
+      details.addAll(queries);
+    }
+
+    String? url = arguments['url']?.toString();
+    final openCommands = arguments['open'];
+    if (openCommands is List && openCommands.isNotEmpty) {
+      final command = openCommands.first;
+      if (command is Map) {
+        url = command['ref_id']?.toString();
+      }
+    }
+    if (type == 'open_page' || openCommands is List) {
+      kind = _WebSearchActionKind.open;
+      if (url?.isNotEmpty == true) details.add(url!);
+    }
+
+    String? pattern = arguments['pattern']?.toString();
+    final findCommands = arguments['find'];
+    if (findCommands is List && findCommands.isNotEmpty) {
+      final command = findCommands.first;
+      if (command is Map) {
+        url = command['ref_id']?.toString();
+        pattern = command['pattern']?.toString();
+      }
+    }
+    if (type == 'find_in_page' || findCommands is List) {
+      kind = _WebSearchActionKind.find;
+      if (url?.isNotEmpty == true) details.add(url!);
+      if (pattern?.isNotEmpty == true) details.add(pattern!);
+    }
+
+    final links = <String>{};
+    for (final artifact in tool?.outputArtifacts ?? const []) {
+      _collectWebLinks(artifact, links);
+    }
+    return _WebSearchCardData(
+      kind: kind,
+      details: details,
+      links: links.take(6).toList(),
+    );
+  }
+
+  final _WebSearchActionKind kind;
+  final List<String> details;
+  final List<String> links;
+
+  String title(BuildContext context) {
+    return switch (kind) {
+      _WebSearchActionKind.search => context.l10n.timelineWebSearchSearching,
+      _WebSearchActionKind.open => context.l10n.timelineWebSearchOpening,
+      _WebSearchActionKind.find => context.l10n.timelineWebSearchFinding,
+      _WebSearchActionKind.other => context.l10n.timelineWebSearchTitle,
+    };
+  }
+}
+
+Map<String, Object?> _decodeWebSearchArguments(String value) {
+  if (value.trim().isEmpty) {
+    return const {};
+  }
+  try {
+    return _webSearchMap(jsonDecode(value));
+  } catch (_) {
+    return const {};
+  }
+}
+
+Map<String, Object?> _webSearchMap(Object? value) {
+  if (value is Map<String, Object?>) {
+    return value;
+  }
+  if (value is Map) {
+    return value.map((key, value) => MapEntry(key.toString(), value));
+  }
+  return const {};
+}
+
+void _collectWebLinks(Object? value, Set<String> links) {
+  if (links.length >= 6) {
+    return;
+  }
+  if (value is String) {
+    final trimmed = value.trim();
+    if (trimmed.startsWith('https://') || trimmed.startsWith('http://')) {
+      links.add(trimmed);
+    }
+    return;
+  }
+  if (value is List) {
+    for (final item in value) {
+      _collectWebLinks(item, links);
+    }
+    return;
+  }
+  if (value is Map) {
+    for (final entry in value.entries) {
+      _collectWebLinks(entry.value, links);
+    }
   }
 }
 

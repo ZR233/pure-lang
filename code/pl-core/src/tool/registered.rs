@@ -203,6 +203,9 @@ impl RegisteredTool {
                 let _ = (description, format);
                 Err(RegisteredToolSchemaError { name })
             }
+            ToolSchema::WebSearch { .. } => Err(RegisteredToolSchemaError {
+                name: "web_search".to_string(),
+            }),
         }
     }
 

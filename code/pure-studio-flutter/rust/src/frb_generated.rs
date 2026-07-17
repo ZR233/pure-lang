@@ -38,7 +38,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.12.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1069376794;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -500701874;
 
 // Section: executor
 
@@ -458,6 +458,41 @@ fn wire__crate__api__studio__handlers__events__load_studio_events_impl(
         },
     )
 }
+fn wire__crate__api__studio__handlers__settings__load_web_search_settings_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "load_web_search_settings",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || {
+                        let output_ok =
+                            crate::api::studio::handlers::settings::load_web_search_settings()?;
+                        Ok(output_ok)
+                    })(),
+                )
+            }
+        },
+    )
+}
 fn wire__crate__api__studio__handlers__lifecycle__open_project_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -752,6 +787,47 @@ fn wire__crate__api__studio__handlers__settings__save_skills_settings_impl(
                         let output_ok =
                             crate::api::studio::handlers::settings::save_skills_settings(
                                 api_settings_json,
+                            )?;
+                        Ok(output_ok)
+                    })(),
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__studio__handlers__settings__save_web_search_settings_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "save_web_search_settings",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_input =
+                <crate::api::studio::types::settings::WebSearchSettingsInput>::sse_decode(
+                    &mut deserializer,
+                );
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || {
+                        let output_ok =
+                            crate::api::studio::handlers::settings::save_web_search_settings(
+                                api_input,
                             )?;
                         Ok(output_ok)
                     })(),
@@ -2089,6 +2165,10 @@ impl SseDecode for crate::api::studio::types::response::BridgeStudioSnapshotResp
         >>::sse_decode(deserializer);
         let mut var_configJson = <String>::sse_decode(deserializer);
         let mut var_generalSettingsJson = <String>::sse_decode(deserializer);
+        let mut var_webSearch =
+            <crate::api::studio::types::settings::BridgeWebSearchSettingsDto>::sse_decode(
+                deserializer,
+            );
         return crate::api::studio::types::response::BridgeStudioSnapshotResponse {
             projects: var_projects,
             selected_project_id: var_selectedProjectId,
@@ -2100,6 +2180,7 @@ impl SseDecode for crate::api::studio::types::response::BridgeStudioSnapshotResp
             session_runtime: var_sessionRuntime,
             config_json: var_configJson,
             general_settings_json: var_generalSettingsJson,
+            web_search: var_webSearch,
         };
     }
 }
@@ -2113,6 +2194,7 @@ impl SseDecode for crate::api::studio::types::message::BridgeStudioToolPartDto {
         let mut var_name = <String>::sse_decode(deserializer);
         let mut var_arguments = <String>::sse_decode(deserializer);
         let mut var_result = <Option<String>>::sse_decode(deserializer);
+        let mut var_outputArtifactsJson = <String>::sse_decode(deserializer);
         let mut var_exitCode = <Option<i32>>::sse_decode(deserializer);
         let mut var_timedOut = <bool>::sse_decode(deserializer);
         let mut var_workingDirectory = <Option<String>>::sse_decode(deserializer);
@@ -2124,6 +2206,7 @@ impl SseDecode for crate::api::studio::types::message::BridgeStudioToolPartDto {
             name: var_name,
             arguments: var_arguments,
             result: var_result,
+            output_artifacts_json: var_outputArtifactsJson,
             exit_code: var_exitCode,
             timed_out: var_timedOut,
             working_directory: var_workingDirectory,
@@ -2331,6 +2414,36 @@ impl SseDecode for crate::api::studio::types::interaction::BridgeUserQuestionOpt
         return crate::api::studio::types::interaction::BridgeUserQuestionOptionDto {
             label: var_label,
             description: var_description,
+        };
+    }
+}
+
+impl SseDecode for crate::api::studio::types::settings::BridgeWebSearchSettingsDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_configuredMode = <String>::sse_decode(deserializer);
+        let mut var_effectiveMode = <String>::sse_decode(deserializer);
+        let mut var_availability = <String>::sse_decode(deserializer);
+        let mut var_contextSize = <Option<String>>::sse_decode(deserializer);
+        let mut var_allowedDomains = <Vec<String>>::sse_decode(deserializer);
+        let mut var_country = <Option<String>>::sse_decode(deserializer);
+        let mut var_region = <Option<String>>::sse_decode(deserializer);
+        let mut var_city = <Option<String>>::sse_decode(deserializer);
+        let mut var_timezone = <Option<String>>::sse_decode(deserializer);
+        let mut var_providerId = <Option<String>>::sse_decode(deserializer);
+        let mut var_model = <Option<String>>::sse_decode(deserializer);
+        return crate::api::studio::types::settings::BridgeWebSearchSettingsDto {
+            configured_mode: var_configuredMode,
+            effective_mode: var_effectiveMode,
+            availability: var_availability,
+            context_size: var_contextSize,
+            allowed_domains: var_allowedDomains,
+            country: var_country,
+            region: var_region,
+            city: var_city,
+            timezone: var_timezone,
+            provider_id: var_providerId,
+            model: var_model,
         };
     }
 }
@@ -3212,6 +3325,28 @@ impl SseDecode for () {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {}
 }
 
+impl SseDecode for crate::api::studio::types::settings::WebSearchSettingsInput {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_mode = <String>::sse_decode(deserializer);
+        let mut var_contextSize = <Option<String>>::sse_decode(deserializer);
+        let mut var_allowedDomains = <Vec<String>>::sse_decode(deserializer);
+        let mut var_country = <Option<String>>::sse_decode(deserializer);
+        let mut var_region = <Option<String>>::sse_decode(deserializer);
+        let mut var_city = <Option<String>>::sse_decode(deserializer);
+        let mut var_timezone = <Option<String>>::sse_decode(deserializer);
+        return crate::api::studio::types::settings::WebSearchSettingsInput {
+            mode: var_mode,
+            context_size: var_contextSize,
+            allowed_domains: var_allowedDomains,
+            country: var_country,
+            region: var_region,
+            city: var_city,
+            timezone: var_timezone,
+        };
+    }
+}
+
 impl SseDecode for crate::api::studio::types::response::ZhipuCodingPlanUsageDto {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -3344,103 +3479,115 @@ fn pde_ffi_dispatcher_primary_impl(
             rust_vec_len,
             data_len,
         ),
-        12 => wire__crate__api__studio__handlers__lifecycle__open_project_impl(
+        12 => wire__crate__api__studio__handlers__settings__load_web_search_settings_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        13 => wire__crate__api__studio__handlers__prompt__resolve_interaction_impl(
+        13 => wire__crate__api__studio__handlers__lifecycle__open_project_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        14 => wire__crate__api__studio__handlers__settings__save_general_settings_impl(
+        14 => wire__crate__api__studio__handlers__prompt__resolve_interaction_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        15 => wire__crate__api__studio__handlers__settings__save_instructions_settings_impl(
+        15 => wire__crate__api__studio__handlers__settings__save_general_settings_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        16 => wire__crate__api__studio__handlers__settings__save_mcp_settings_impl(
+        16 => wire__crate__api__studio__handlers__settings__save_instructions_settings_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        17 => wire__crate__api__studio__handlers__settings__save_provider_settings_impl(
+        17 => wire__crate__api__studio__handlers__settings__save_mcp_settings_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        18 => wire__crate__api__studio__handlers__settings__save_runtime_permission_mode_impl(
+        18 => wire__crate__api__studio__handlers__settings__save_provider_settings_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        19 => wire__crate__api__studio__handlers__settings__save_skills_settings_impl(
+        19 => wire__crate__api__studio__handlers__settings__save_runtime_permission_mode_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        20 => wire__crate__api__studio__handlers__lifecycle__select_project_impl(
+        20 => wire__crate__api__studio__handlers__settings__save_skills_settings_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        21 => wire__crate__api__studio__handlers__session__set_model_role_impl(
+        21 => wire__crate__api__studio__handlers__settings__save_web_search_settings_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        22 => wire__crate__api__studio__handlers__session__set_session_mode_impl(
+        22 => wire__crate__api__studio__handlers__lifecycle__select_project_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        23 => wire__crate__api__studio__handlers__lifecycle__shutdown_runtime_impl(
+        23 => wire__crate__api__studio__handlers__session__set_model_role_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        24 => wire__crate__api__studio__handlers__lifecycle__start_runtime_impl(
+        24 => wire__crate__api__studio__handlers__session__set_session_mode_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        25 => wire__crate__api__studio__handlers__prompt__stop_prompt_impl(
+        25 => wire__crate__api__studio__handlers__lifecycle__shutdown_runtime_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        26 => wire__crate__api__studio__handlers__prompt__submit_prompt_impl(
+        26 => wire__crate__api__studio__handlers__lifecycle__start_runtime_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        27 => wire__crate__api__studio__handlers__events__subscribe_global_events_impl(
+        27 => wire__crate__api__studio__handlers__prompt__stop_prompt_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        28 => wire__crate__api__studio__handlers__events__subscribe_session_events_impl(
+        28 => wire__crate__api__studio__handlers__prompt__submit_prompt_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        29 => wire__crate__api__studio__handlers__events__subscribe_global_events_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        30 => wire__crate__api__studio__handlers__events__subscribe_session_events_impl(
             port,
             ptr,
             rust_vec_len,
@@ -4485,6 +4632,7 @@ impl flutter_rust_bridge::IntoDart
             self.session_runtime.into_into_dart().into_dart(),
             self.config_json.into_into_dart().into_dart(),
             self.general_settings_json.into_into_dart().into_dart(),
+            self.web_search.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -4512,6 +4660,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::studio::types::message::Bridg
             self.name.into_into_dart().into_dart(),
             self.arguments.into_into_dart().into_dart(),
             self.result.into_into_dart().into_dart(),
+            self.output_artifacts_json.into_into_dart().into_dart(),
             self.exit_code.into_into_dart().into_dart(),
             self.timed_out.into_into_dart().into_dart(),
             self.working_directory.into_into_dart().into_dart(),
@@ -4781,6 +4930,40 @@ impl
     > for crate::api::studio::types::interaction::BridgeUserQuestionOptionDto
 {
     fn into_into_dart(self) -> crate::api::studio::types::interaction::BridgeUserQuestionOptionDto {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart
+    for crate::api::studio::types::settings::BridgeWebSearchSettingsDto
+{
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.configured_mode.into_into_dart().into_dart(),
+            self.effective_mode.into_into_dart().into_dart(),
+            self.availability.into_into_dart().into_dart(),
+            self.context_size.into_into_dart().into_dart(),
+            self.allowed_domains.into_into_dart().into_dart(),
+            self.country.into_into_dart().into_dart(),
+            self.region.into_into_dart().into_dart(),
+            self.city.into_into_dart().into_dart(),
+            self.timezone.into_into_dart().into_dart(),
+            self.provider_id.into_into_dart().into_dart(),
+            self.model.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::settings::BridgeWebSearchSettingsDto
+{
+}
+impl
+    flutter_rust_bridge::IntoIntoDart<
+        crate::api::studio::types::settings::BridgeWebSearchSettingsDto,
+    > for crate::api::studio::types::settings::BridgeWebSearchSettingsDto
+{
+    fn into_into_dart(self) -> crate::api::studio::types::settings::BridgeWebSearchSettingsDto {
         self
     }
 }
@@ -5060,6 +5243,32 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::response::Subm
     for crate::api::studio::types::response::SubmitPromptResponse
 {
     fn into_into_dart(self) -> crate::api::studio::types::response::SubmitPromptResponse {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::studio::types::settings::WebSearchSettingsInput {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.mode.into_into_dart().into_dart(),
+            self.context_size.into_into_dart().into_dart(),
+            self.allowed_domains.into_into_dart().into_dart(),
+            self.country.into_into_dart().into_dart(),
+            self.region.into_into_dart().into_dart(),
+            self.city.into_into_dart().into_dart(),
+            self.timezone.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::settings::WebSearchSettingsInput
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::settings::WebSearchSettingsInput>
+    for crate::api::studio::types::settings::WebSearchSettingsInput
+{
+    fn into_into_dart(self) -> crate::api::studio::types::settings::WebSearchSettingsInput {
         self
     }
 }
@@ -5853,6 +6062,10 @@ impl SseEncode for crate::api::studio::types::response::BridgeStudioSnapshotResp
         );
         <String>::sse_encode(self.config_json, serializer);
         <String>::sse_encode(self.general_settings_json, serializer);
+        <crate::api::studio::types::settings::BridgeWebSearchSettingsDto>::sse_encode(
+            self.web_search,
+            serializer,
+        );
     }
 }
 
@@ -5865,6 +6078,7 @@ impl SseEncode for crate::api::studio::types::message::BridgeStudioToolPartDto {
         <String>::sse_encode(self.name, serializer);
         <String>::sse_encode(self.arguments, serializer);
         <Option<String>>::sse_encode(self.result, serializer);
+        <String>::sse_encode(self.output_artifacts_json, serializer);
         <Option<i32>>::sse_encode(self.exit_code, serializer);
         <bool>::sse_encode(self.timed_out, serializer);
         <Option<String>>::sse_encode(self.working_directory, serializer);
@@ -5999,6 +6213,23 @@ impl SseEncode for crate::api::studio::types::interaction::BridgeUserQuestionOpt
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <String>::sse_encode(self.label, serializer);
         <String>::sse_encode(self.description, serializer);
+    }
+}
+
+impl SseEncode for crate::api::studio::types::settings::BridgeWebSearchSettingsDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.configured_mode, serializer);
+        <String>::sse_encode(self.effective_mode, serializer);
+        <String>::sse_encode(self.availability, serializer);
+        <Option<String>>::sse_encode(self.context_size, serializer);
+        <Vec<String>>::sse_encode(self.allowed_domains, serializer);
+        <Option<String>>::sse_encode(self.country, serializer);
+        <Option<String>>::sse_encode(self.region, serializer);
+        <Option<String>>::sse_encode(self.city, serializer);
+        <Option<String>>::sse_encode(self.timezone, serializer);
+        <Option<String>>::sse_encode(self.provider_id, serializer);
+        <Option<String>>::sse_encode(self.model, serializer);
     }
 }
 
@@ -6694,6 +6925,19 @@ impl SseEncode for u8 {
 impl SseEncode for () {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {}
+}
+
+impl SseEncode for crate::api::studio::types::settings::WebSearchSettingsInput {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.mode, serializer);
+        <Option<String>>::sse_encode(self.context_size, serializer);
+        <Vec<String>>::sse_encode(self.allowed_domains, serializer);
+        <Option<String>>::sse_encode(self.country, serializer);
+        <Option<String>>::sse_encode(self.region, serializer);
+        <Option<String>>::sse_encode(self.city, serializer);
+        <Option<String>>::sse_encode(self.timezone, serializer);
+    }
 }
 
 impl SseEncode for crate::api::studio::types::response::ZhipuCodingPlanUsageDto {

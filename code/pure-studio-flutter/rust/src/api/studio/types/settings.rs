@@ -81,6 +81,37 @@ pub struct McpServerInput {
     pub endpoint: String,
 }
 
+/// Web 搜索设置的 typed bridge 输入。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebSearchSettingsInput {
+    pub mode: String,
+    pub context_size: Option<String>,
+    #[serde(default)]
+    pub allowed_domains: Vec<String>,
+    pub country: Option<String>,
+    pub region: Option<String>,
+    pub city: Option<String>,
+    pub timezone: Option<String>,
+}
+
+/// Web 搜索配置、有效状态和自动 OpenAI backend 的 canonical bridge 快照。
+#[derive(Debug, Clone, serde::Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeWebSearchSettingsDto {
+    pub configured_mode: String,
+    pub effective_mode: String,
+    pub availability: String,
+    pub context_size: Option<String>,
+    pub allowed_domains: Vec<String>,
+    pub country: Option<String>,
+    pub region: Option<String>,
+    pub city: Option<String>,
+    pub timezone: Option<String>,
+    pub provider_id: Option<String>,
+    pub model: Option<String>,
+}
+
 // ── Provider catalog output ──
 
 #[derive(Debug, Clone)]

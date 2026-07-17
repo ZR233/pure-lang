@@ -7,10 +7,10 @@ pub mod types;
 pub use self::handlers::{
     archive_project, archive_session, bootstrap_studio, create_session, initialize_runtime,
     list_discovered_skills, load_provider_catalog, load_provider_usages, load_session_state,
-    load_studio_events, open_project, resolve_interaction, save_general_settings,
-    save_instructions_settings, save_mcp_settings, save_provider_settings,
-    save_runtime_permission_mode, save_skills_settings, select_project, set_model_role,
-    set_session_mode, shutdown_runtime, start_runtime, stop_prompt, submit_prompt,
+    load_studio_events, load_web_search_settings, open_project, resolve_interaction,
+    save_general_settings, save_instructions_settings, save_mcp_settings, save_provider_settings,
+    save_runtime_permission_mode, save_skills_settings, save_web_search_settings, select_project,
+    set_model_role, set_session_mode, shutdown_runtime, start_runtime, stop_prompt, submit_prompt,
     subscribe_global_events, subscribe_session_events,
 };
 pub use self::types::{
@@ -26,12 +26,13 @@ pub use self::types::{
     BridgeStudioMessageProjectionDto, BridgeStudioPartDeltaDto, BridgeStudioPartDto,
     BridgeStudioPartProjectionDto, BridgeStudioPlanPartDto, BridgeStudioSnapshotResponse,
     BridgeStudioToolPartDto, BridgeStudioTurnDto, BridgeTodoItemDto, BridgeTodoListSnapshotDto,
-    BridgeUserQuestionDto, BridgeUserQuestionOptionDto, ConfigSavedResponse, DeepSeekBalanceDto,
-    DeepSeekBalanceInfoDto, InstructionsSettingsInput, McpServerInput, McpSettingsInput,
-    ProjectDto, ProviderInput, ProviderModelInput, ProviderSettingsInput, ProviderUsageDto,
-    ProviderUsagesResponse, ResolveInteractionResponse, RoleInput, RuntimeSnapshot, SessionDto,
-    SkillSummaryDto, SkillsResponse, SkillsSettingsInput, StopPromptResponse, SubmitPromptResponse,
-    ZhipuCodingPlanUsageDto, ZhipuQuotaLimitDto, ZhipuToolUsageDetailDto,
+    BridgeUserQuestionDto, BridgeUserQuestionOptionDto, BridgeWebSearchSettingsDto,
+    ConfigSavedResponse, DeepSeekBalanceDto, DeepSeekBalanceInfoDto, InstructionsSettingsInput,
+    McpServerInput, McpSettingsInput, ProjectDto, ProviderInput, ProviderModelInput,
+    ProviderSettingsInput, ProviderUsageDto, ProviderUsagesResponse, ResolveInteractionResponse,
+    RoleInput, RuntimeSnapshot, SessionDto, SkillSummaryDto, SkillsResponse, SkillsSettingsInput,
+    StopPromptResponse, SubmitPromptResponse, WebSearchSettingsInput, ZhipuCodingPlanUsageDto,
+    ZhipuQuotaLimitDto, ZhipuToolUsageDetailDto,
 };
 
 #[cfg(test)]

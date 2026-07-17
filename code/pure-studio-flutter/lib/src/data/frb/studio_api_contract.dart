@@ -46,6 +46,7 @@ abstract class StudioApi {
   Future<StudioState> saveSkillsSettings(Map<String, Object?> settings);
   Future<StudioState> saveMcpSettings(Map<String, Object?> settings);
   Future<StudioState> saveGeneralSettings(Map<String, Object?> settings);
+  Future<StudioState> saveWebSearchSettings(WebSearchSettingsView settings);
   Future<List<ProviderUsageView>> loadProviderUsages();
   Future<List<String>> listDiscoveredSkills(String projectId);
   Future<void> saveStudioSettingsDraft(
@@ -279,6 +280,26 @@ class FrbStudioApi implements StudioApi {
     await _ensureReady();
     return studioStateFromFrbSnapshot(
       await frb.saveGeneralSettings(settingsJson: jsonEncode(settings)),
+    );
+  }
+
+  @override
+  Future<StudioState> saveWebSearchSettings(
+    WebSearchSettingsView settings,
+  ) async {
+    await _ensureReady();
+    return studioStateFromFrbSnapshot(
+      await frb.saveWebSearchSettings(
+        input: frb.WebSearchSettingsInput(
+          mode: settings.configuredMode,
+          contextSize: settings.contextSize,
+          allowedDomains: settings.allowedDomains,
+          country: settings.country,
+          region: settings.region,
+          city: settings.city,
+          timezone: settings.timezone,
+        ),
+      ),
     );
   }
 

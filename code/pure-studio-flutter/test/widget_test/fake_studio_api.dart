@@ -28,6 +28,7 @@ class _FakeStudioApi implements StudioApi {
   Map<String, Object?>? savedSkillsSettings;
   Map<String, Object?>? savedMcpSettings;
   Map<String, Object?>? savedGeneralSettings;
+  WebSearchSettingsView? savedWebSearchSettings;
   PermissionMode? savedPermissionMode;
   String? resolvedInteractionId;
   Map<String, Object?>? resolvedInteraction;
@@ -248,6 +249,14 @@ class _FakeStudioApi implements StudioApi {
         compactTimeline: settings['compactTimeline'] as bool? ?? false,
       ),
     );
+  }
+
+  @override
+  Future<StudioState> saveWebSearchSettings(
+    WebSearchSettingsView settings,
+  ) async {
+    savedWebSearchSettings = settings;
+    return initialState.copyWith(webSearch: settings);
   }
 
   @override

@@ -14,6 +14,15 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 Future<BridgeProviderCatalogSnapshot> loadProviderCatalog() =>
     RustLib.instance.api.crateApiStudioHandlersSettingsLoadProviderCatalog();
 
+Future<BridgeWebSearchSettingsDto> loadWebSearchSettings() =>
+    RustLib.instance.api.crateApiStudioHandlersSettingsLoadWebSearchSettings();
+
+Future<BridgeStudioSnapshotResponse> saveWebSearchSettings({
+  required WebSearchSettingsInput input,
+}) => RustLib.instance.api.crateApiStudioHandlersSettingsSaveWebSearchSettings(
+  input: input,
+);
+
 Future<ConfigSavedResponse> saveRuntimePermissionMode({required String mode}) =>
     RustLib.instance.api
         .crateApiStudioHandlersSettingsSaveRuntimePermissionMode(mode: mode);

@@ -18,6 +18,7 @@ part 'settings_common.dart';
 part 'settings_provider_drafts.dart';
 part 'settings_tabs.dart';
 part 'settings_system_tabs.dart';
+part 'settings_web_search.dart';
 
 class SettingsPage extends ConsumerWidget {
   const SettingsPage({super.key});
@@ -101,7 +102,7 @@ class _SettingsScaffold extends StatelessWidget {
       _RolesTab(providers: state.providers, roles: state.roles),
       _McpTab(servers: state.mcpServers),
       _SecurityTab(mode: state.permissionMode),
-      _GeneralTab(settings: state.general),
+      _GeneralTab(settings: state.general, webSearch: state.webSearch),
     ];
     return LayoutBuilder(
       builder: (context, constraints) {
