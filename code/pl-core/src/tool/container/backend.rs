@@ -10,6 +10,8 @@ use tokio_util::sync::CancellationToken;
 /// token、宿主路径等产品私有信息放入工具参数。
 #[derive(Clone)]
 pub struct ContainerExecRequest {
+    /// 工具调用身份；仅生成持久化输出 artifact 的调用必须提供。
+    pub call_id: Option<String>,
     pub command: String,
     pub cwd: Option<String>,
     pub timeout_secs: Option<u64>,
@@ -21,6 +23,7 @@ impl fmt::Debug for ContainerExecRequest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ContainerExecRequest")
             .field("command", &self.command)
+            .field("call_id", &self.call_id)
             .field("cwd", &self.cwd)
             .field("timeout_secs", &self.timeout_secs)
             .field("output_bytes_cap", &self.output_bytes_cap)

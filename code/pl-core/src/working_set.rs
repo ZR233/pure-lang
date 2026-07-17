@@ -1,0 +1,480 @@
+use std::collections::{BTreeMap, VecDeque};
+use std::sync::{Arc, RwLock};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use pl_protocol::{
+    ContextSectionId, PinnedContextSection, PureError, TodoListSnapshot, ToolResultReceipt,
+};
+use sha2::{Digest, Sha256};
+
+use crate::AgentSession;
+
+pub const CURRENT_TODO_SECTION_ID: &str = "pl.current_todo";
+pub const EVIDENCE_LEDGER_SECTION_ID: &str = "pl.evidence_ledger";
+pub const REVIEW_MANIFEST_SECTION_ID: &str = "mai.review_manifest";
+pub const REVIEW_CHECKPOINT_SECTION_ID: &str = "mai.review_checkpoint";
+
+pub const MAX_PINNED_SECTION_BYTES: usize = 32 * 1024;
+pub const MAX_PINNED_CONTEXT_BYTES: usize = 96 * 1024;
+const MAX_TODO_ITEMS: usize = 32;
+const MAX_TODO_STEP_CHARS: usize = 256;
+const MAX_TODO_BYTES: usize = 8 * 1024;
+const MAX_EVIDENCE_ITEMS: usize = 64;
+const MAX_EVIDENCE_VISIBLE_BYTES: usize = 16 * 1024;
+const MAX_ARCHIVED_ARTIFACT_REFS: usize = 16;
+
+/// 单轮内可立即读取、并可同步回 canonical session 的工作上下文。
+#[derive(Clone, Default)]
+pub struct TurnWorkingSetHandle {
+    inner: Arc<RwLock<TurnWorkingSet>>,
+}
+
+impl std::fmt::Debug for TurnWorkingSetHandle {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("TurnWorkingSetHandle")
+            .field("section_count", &self.sections().len())
+            .finish()
+    }
+}
+
+/// 对 turn working set 的原子语义变更。
+#[derive(Debug, Clone)]
+pub enum TurnWorkingSetChange {
+    ReplaceTodo(TodoListSnapshot),
+    UpsertSection(PinnedContextSection),
+    RemoveSection(ContextSectionId),
+    AppendEvidence(ToolResultReceipt),
+}
+
+#[derive(Clone, Default)]
+struct TurnWorkingSet {
+    sections: BTreeMap<ContextSectionId, PinnedContextSection>,
+    evidence: EvidenceLedgerDocument,
+}
+
+#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EvidenceLedgerDocument {
+    recent: VecDeque<ToolResultReceipt>,
+    archived: EvidenceArchiveIndex,
+}
+
+#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EvidenceArchiveIndex {
+    count: u64,
+    digest: String,
+    artifact_refs: VecDeque<serde_json::Value>,
+    artifact_refs_omitted: u64,
+}
+
+impl TurnWorkingSetHandle {
+    pub fn from_session(session: &AgentSession) -> Result<Self, PureError> {
+        let handle = Self::default();
+        for section in session.pinned_context_sections() {
+            handle.apply(TurnWorkingSetChange::UpsertSection(section.clone()))?;
+        }
+        Ok(handle)
+    }
+
+    pub fn apply(&self, change: TurnWorkingSetChange) -> Result<(), PureError> {
+        let mut state = self
+            .inner
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut next = state.clone();
+        match change {
+            TurnWorkingSetChange::ReplaceTodo(snapshot) => {
+                validate_todo(&snapshot)?;
+                let content = serde_json::to_string_pretty(&snapshot)?;
+                if content.len() > MAX_TODO_BYTES {
+                    return Err(PureError::ConfigError(format!(
+                        "todo working context exceeds {MAX_TODO_BYTES} bytes"
+                    )));
+                }
+                let id = context_section_id(CURRENT_TODO_SECTION_ID);
+                let revision = next_revision(&next.sections, &id);
+                let section = section(id, revision, "Current Todo", content);
+                validate_section(&section)?;
+                next.sections.insert(section.id.clone(), section);
+            }
+            TurnWorkingSetChange::UpsertSection(section) => {
+                validate_section(&section)?;
+                if section.id.as_str() == EVIDENCE_LEDGER_SECTION_ID {
+                    if section.content.len() > MAX_EVIDENCE_VISIBLE_BYTES {
+                        return Err(PureError::ConfigError(format!(
+                            "evidence ledger exceeds {MAX_EVIDENCE_VISIBLE_BYTES} bytes"
+                        )));
+                    }
+                    next.evidence = serde_json::from_str(&section.content).map_err(|error| {
+                        PureError::ConfigError(format!(
+                            "evidence ledger contains invalid receipts: {error}"
+                        ))
+                    })?;
+                    while next.evidence.recent.len() > MAX_EVIDENCE_ITEMS {
+                        archive_oldest_evidence(&mut next.evidence)?;
+                    }
+                }
+                next.sections.insert(section.id.clone(), section);
+            }
+            TurnWorkingSetChange::RemoveSection(id) => {
+                next.sections.remove(&id);
+                if id.as_str() == EVIDENCE_LEDGER_SECTION_ID {
+                    next.evidence = EvidenceLedgerDocument::default();
+                }
+            }
+            TurnWorkingSetChange::AppendEvidence(receipt) => {
+                next.evidence.recent.push_back(receipt);
+                while next.evidence.recent.len() > MAX_EVIDENCE_ITEMS {
+                    archive_oldest_evidence(&mut next.evidence)?;
+                }
+                let id = context_section_id(EVIDENCE_LEDGER_SECTION_ID);
+                let revision = next_revision(&next.sections, &id);
+                let content = bounded_evidence_content(&mut next.evidence)?;
+                let section = section(id, revision, "Evidence Ledger", content);
+                validate_section(&section)?;
+                next.sections.insert(section.id.clone(), section);
+            }
+        }
+        validate_total_size(next.sections.values())?;
+        *state = next;
+        Ok(())
+    }
+
+    pub fn sections(&self) -> Vec<PinnedContextSection> {
+        self.inner
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .sections
+            .values()
+            .cloned()
+            .collect()
+    }
+
+    pub fn sync_session(&self, session: &mut AgentSession) -> Result<bool, PureError> {
+        let sections = self.sections();
+        validate_total_size(sections.iter())?;
+        Ok(session.replace_pinned_context_sections(sections))
+    }
+}
+
+/// 计算可跨产品复用的稳定内容摘要。
+pub fn canonical_content_hash(content: &[u8]) -> String {
+    let digest = Sha256::digest(content);
+    format!("sha256:{digest:x}")
+}
+
+/// 对 JSON 对象键排序后计算摘要，避免等价参数因字段顺序不同产生不同 receipt。
+pub fn canonical_json_hash(value: &serde_json::Value) -> String {
+    canonical_content_hash(canonical_json_string(value).as_bytes())
+}
+
+pub(crate) fn canonical_json_string(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::Object(map) => {
+            let sorted = map
+                .iter()
+                .map(|(key, value)| (key.as_str(), canonical_json_string(value)))
+                .collect::<BTreeMap<_, _>>();
+            format!(
+                "{{{}}}",
+                sorted
+                    .into_iter()
+                    .map(|(key, value)| format!(
+                        "{}:{value}",
+                        serde_json::to_string(key)
+                            .expect("canonical JSON key serialization must succeed")
+                    ))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            )
+        }
+        serde_json::Value::Array(items) => format!(
+            "[{}]",
+            items
+                .iter()
+                .map(canonical_json_string)
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        serde_json::Value::Null
+        | serde_json::Value::Bool(_)
+        | serde_json::Value::Number(_)
+        | serde_json::Value::String(_) => value.to_string(),
+    }
+}
+
+pub fn context_section(
+    id: impl Into<String>,
+    revision: u64,
+    title: impl Into<String>,
+    content: impl Into<String>,
+) -> Result<PinnedContextSection, PureError> {
+    let id =
+        ContextSectionId::new(id).map_err(|error| PureError::ConfigError(error.to_string()))?;
+    let section = section(id, revision, title, content.into());
+    validate_section(&section)?;
+    Ok(section)
+}
+
+fn section(
+    id: ContextSectionId,
+    revision: u64,
+    title: impl Into<String>,
+    content: String,
+) -> PinnedContextSection {
+    PinnedContextSection {
+        id,
+        revision,
+        title: title.into(),
+        content_hash: canonical_content_hash(content.as_bytes()),
+        content,
+        updated_at: unix_seconds(),
+    }
+}
+
+fn context_section_id(value: &str) -> ContextSectionId {
+    ContextSectionId::new(value).expect("built-in context section id must be valid")
+}
+
+fn next_revision(
+    sections: &BTreeMap<ContextSectionId, PinnedContextSection>,
+    id: &ContextSectionId,
+) -> u64 {
+    sections
+        .get(id)
+        .map_or(1, |section| section.revision.saturating_add(1))
+}
+
+fn validate_section(section: &PinnedContextSection) -> Result<(), PureError> {
+    if section.content.len() > MAX_PINNED_SECTION_BYTES {
+        return Err(PureError::ConfigError(format!(
+            "pinned context section `{}` exceeds {MAX_PINNED_SECTION_BYTES} bytes",
+            section.id
+        )));
+    }
+    let actual_hash = canonical_content_hash(section.content.as_bytes());
+    if section.content_hash != actual_hash {
+        return Err(PureError::ConfigError(format!(
+            "pinned context section `{}` has an invalid content hash",
+            section.id
+        )));
+    }
+    Ok(())
+}
+
+fn validate_total_size<'a>(
+    sections: impl IntoIterator<Item = &'a PinnedContextSection>,
+) -> Result<(), PureError> {
+    let total = sections
+        .into_iter()
+        .map(|section| section.content.len())
+        .sum::<usize>();
+    if total > MAX_PINNED_CONTEXT_BYTES {
+        return Err(PureError::ConfigError(format!(
+            "pinned context exceeds {MAX_PINNED_CONTEXT_BYTES} bytes"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_todo(snapshot: &TodoListSnapshot) -> Result<(), PureError> {
+    if snapshot.items.len() > MAX_TODO_ITEMS {
+        return Err(PureError::ToolExecutionFailed {
+            tool: "update_todo_list".to_string(),
+            error: format!("todo list may contain at most {MAX_TODO_ITEMS} items"),
+        });
+    }
+    if let Some(item) = snapshot
+        .items
+        .iter()
+        .find(|item| item.step.chars().count() > MAX_TODO_STEP_CHARS)
+    {
+        return Err(PureError::ToolExecutionFailed {
+            tool: "update_todo_list".to_string(),
+            error: format!(
+                "todo item exceeds {MAX_TODO_STEP_CHARS} characters: {}",
+                item.step.chars().take(32).collect::<String>()
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn bounded_evidence_content(evidence: &mut EvidenceLedgerDocument) -> Result<String, PureError> {
+    loop {
+        let content = serde_json::to_string_pretty(evidence)?;
+        if content.len() <= MAX_EVIDENCE_VISIBLE_BYTES {
+            return Ok(content);
+        }
+        if evidence.recent.len() > 1 {
+            archive_oldest_evidence(evidence)?;
+            continue;
+        }
+        if evidence.archived.artifact_refs.pop_front().is_some() {
+            evidence.archived.artifact_refs_omitted =
+                evidence.archived.artifact_refs_omitted.saturating_add(1);
+            continue;
+        }
+        return Err(PureError::ConfigError(format!(
+            "evidence ledger cannot fit within {MAX_EVIDENCE_VISIBLE_BYTES} bytes"
+        )));
+    }
+}
+
+fn archive_oldest_evidence(evidence: &mut EvidenceLedgerDocument) -> Result<(), PureError> {
+    let Some(receipt) = evidence.recent.pop_front() else {
+        return Ok(());
+    };
+    let receipt_json = serde_json::to_vec(&receipt)?;
+    evidence.archived.digest = canonical_content_hash(
+        [evidence.archived.digest.as_bytes(), receipt_json.as_slice()]
+            .concat()
+            .as_slice(),
+    );
+    evidence.archived.count = evidence.archived.count.saturating_add(1);
+    evidence.archived.artifact_refs.extend(receipt.artifacts);
+    while evidence.archived.artifact_refs.len() > MAX_ARCHIVED_ARTIFACT_REFS {
+        evidence.archived.artifact_refs.pop_front();
+        evidence.archived.artifact_refs_omitted =
+            evidence.archived.artifact_refs_omitted.saturating_add(1);
+    }
+    Ok(())
+}
+
+fn unix_seconds() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
+}
+
+#[cfg(test)]
+mod tests {
+    use pl_protocol::{TodoItem, TodoStatus};
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+
+    #[test]
+    fn todo_and_evidence_are_kept_as_sorted_pinned_sections() {
+        let handle = TurnWorkingSetHandle::default();
+        handle
+            .apply(TurnWorkingSetChange::ReplaceTodo(TodoListSnapshot {
+                call_id: "todo-1".to_string(),
+                agent_id: None,
+                path: Some("/root".to_string()),
+                parent_path: None,
+                explanation: None,
+                items: vec![TodoItem {
+                    step: "Inspect".to_string(),
+                    status: TodoStatus::InProgress,
+                }],
+            }))
+            .unwrap();
+        handle
+            .apply(TurnWorkingSetChange::AppendEvidence(ToolResultReceipt {
+                call_id: "read-1".to_string(),
+                tool_name: "read_file".to_string(),
+                arguments_hash: "sha256:args".to_string(),
+                result_hash: "sha256:result".to_string(),
+                total_bytes: 10,
+                visible_bytes: 10,
+                truncated: false,
+                artifacts: Vec::new(),
+                continuation: None,
+                reused_from_call_id: None,
+            }))
+            .unwrap();
+
+        assert_eq!(
+            handle
+                .sections()
+                .iter()
+                .map(|section| section.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![CURRENT_TODO_SECTION_ID, EVIDENCE_LEDGER_SECTION_ID]
+        );
+    }
+
+    #[test]
+    fn restored_evidence_ledger_is_extended_instead_of_replaced() {
+        let first = TurnWorkingSetHandle::default();
+        first
+            .apply(TurnWorkingSetChange::AppendEvidence(receipt("read-1")))
+            .unwrap();
+        let mut session = AgentSession::new();
+        first.sync_session(&mut session).unwrap();
+        let restored = TurnWorkingSetHandle::from_session(&session).unwrap();
+
+        restored
+            .apply(TurnWorkingSetChange::AppendEvidence(receipt("read-2")))
+            .unwrap();
+
+        let evidence = restored
+            .sections()
+            .into_iter()
+            .find(|section| section.id.as_str() == EVIDENCE_LEDGER_SECTION_ID)
+            .unwrap();
+        let receipts = serde_json::from_str::<EvidenceLedgerDocument>(&evidence.content).unwrap();
+        assert_eq!(
+            receipts
+                .recent
+                .into_iter()
+                .map(|receipt| receipt.call_id)
+                .collect::<Vec<_>>(),
+            vec!["read-1".to_string(), "read-2".to_string()]
+        );
+    }
+
+    #[test]
+    fn old_evidence_is_reduced_to_a_durable_archive_index() {
+        let handle = TurnWorkingSetHandle::default();
+        for index in 0..=MAX_EVIDENCE_ITEMS {
+            handle
+                .apply(TurnWorkingSetChange::AppendEvidence(receipt(&format!(
+                    "read-{index}"
+                ))))
+                .unwrap();
+        }
+        let section = handle
+            .sections()
+            .into_iter()
+            .find(|section| section.id.as_str() == EVIDENCE_LEDGER_SECTION_ID)
+            .unwrap();
+        let ledger = serde_json::from_str::<EvidenceLedgerDocument>(&section.content).unwrap();
+
+        assert_eq!(ledger.recent.len(), MAX_EVIDENCE_ITEMS);
+        assert_eq!(ledger.archived.count, 1);
+        assert!(!ledger.archived.digest.is_empty());
+    }
+
+    #[test]
+    fn canonical_json_hash_ignores_object_order_but_keeps_json_types() {
+        let first = serde_json::json!({"b": [2, 3], "a": 1});
+        let reordered = serde_json::json!({"a": 1, "b": [2, 3]});
+        let string_value = serde_json::json!({"a": "1", "b": [2, 3]});
+
+        assert_eq!(canonical_json_hash(&first), canonical_json_hash(&reordered));
+        assert_ne!(
+            canonical_json_hash(&first),
+            canonical_json_hash(&string_value)
+        );
+    }
+
+    fn receipt(call_id: &str) -> ToolResultReceipt {
+        ToolResultReceipt {
+            call_id: call_id.to_string(),
+            tool_name: "read_file".to_string(),
+            arguments_hash: "sha256:args".to_string(),
+            result_hash: "sha256:result".to_string(),
+            total_bytes: 10,
+            visible_bytes: 10,
+            truncated: false,
+            artifacts: Vec::new(),
+            continuation: None,
+            reused_from_call_id: None,
+        }
+    }
+}

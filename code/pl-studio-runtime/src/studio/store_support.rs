@@ -48,6 +48,22 @@ pub(super) async fn insert_context_item_with_tx(
         ModelContextItem::Message { message } => {
             insert_message_with_tx(tx, session_id, message, now).await
         }
+        ModelContextItem::ToolResult { .. } | ModelContextItem::PinnedContext { .. } => {
+            use entities::message as message_entity;
+            message_entity::ActiveModel {
+                id: Set(new_id("message")),
+                session_id: Set(session_id.to_string()),
+                item_type: Set("canonical".to_string()),
+                role: Set(String::new()),
+                content: Set(serde_json::to_string(item)?),
+                reasoning_content: Set(None),
+                metadata_json: Set("{}".to_string()),
+                created_at: Set(now),
+            }
+            .insert(tx)
+            .await?;
+            Ok(())
+        }
         ModelContextItem::Compaction { encrypted_content } => {
             use entities::message as message_entity;
             message_entity::ActiveModel {

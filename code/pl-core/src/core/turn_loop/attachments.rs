@@ -12,7 +12,17 @@ pub(super) fn materialize_context_items(
                 message.content = materialize_content(&message.content, attachments)?;
                 Ok(ModelContextItem::from(message))
             }
-            ModelContextItem::Compaction { .. } => Ok(item.clone()),
+            ModelContextItem::ToolResult { message, receipt } => {
+                let mut message = message.clone();
+                message.content = materialize_content(&message.content, attachments)?;
+                Ok(ModelContextItem::ToolResult {
+                    message,
+                    receipt: receipt.clone(),
+                })
+            }
+            ModelContextItem::PinnedContext { .. } | ModelContextItem::Compaction { .. } => {
+                Ok(item.clone())
+            }
         })
         .collect()
 }

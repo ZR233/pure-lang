@@ -33,6 +33,10 @@ pub(crate) enum ActorCommand {
         activity: AgentActivityState,
         reply: oneshot::Sender<AgentRuntimeResult<()>>,
     },
+    Checkpoint {
+        checkpoint: super::AgentTurnCheckpoint,
+        reply: oneshot::Sender<AgentRuntimeResult<()>>,
+    },
     OpenSession {
         session: super::AgentSessionState,
         reply: oneshot::Sender<AgentRuntimeResult<()>>,
@@ -86,6 +90,7 @@ struct ActiveTurn {
     abort_handle: AbortHandle,
     settled: oneshot::Receiver<()>,
     cancellation_requested: bool,
+    checkpoint_sequence: u64,
 }
 
 struct AgentActor<H>
@@ -172,6 +177,13 @@ where
                             reply,
                         } => {
                             let result = self.set_activity(turn_id, activity).await;
+                            let _ = reply.send(result);
+                        }
+                        ActorCommand::Checkpoint { checkpoint, reply } => {
+                            let result = self.checkpoint(checkpoint).await;
+                            if let Err(error) = &result {
+                                self.fault_in_memory(error.to_string());
+                            }
                             let _ = reply.send(result);
                         }
                         ActorCommand::OpenSession { session, reply } => {
@@ -302,6 +314,72 @@ where
         .await
     }
 
+    async fn checkpoint(
+        &mut self,
+        checkpoint: super::AgentTurnCheckpoint,
+    ) -> AgentRuntimeResult<()> {
+        self.flush_pending_traces().await?;
+        let Some(active) = &self.active else {
+            return Ok(());
+        };
+        if active.turn_id != checkpoint.turn_id
+            || active.session_id != checkpoint.session_id
+            || active.cancellation_requested
+            || active.cancellation.is_cancelled()
+            || checkpoint.sequence <= active.checkpoint_sequence
+        {
+            return Ok(());
+        }
+        let expected_revision = self.state.snapshot.revision;
+        let mut next = self.state.clone();
+        next.snapshot.revision = expected_revision.saturating_add(1);
+        next.snapshot.updated_at = unix_timestamp();
+        let Some(session) = next.sessions.get_mut(&checkpoint.session_id) else {
+            return Err(AgentRuntimeError::Repository(format!(
+                "active session {} is missing for checkpoint",
+                checkpoint.session_id
+            )));
+        };
+        session.session = checkpoint.session;
+        let result = self
+            .host
+            .repository()
+            .commit(AgentCommit {
+                agent_id: next.snapshot.identity.id.clone(),
+                expected_revision: Some(expected_revision),
+                next_state: next.clone(),
+                events: Vec::new(),
+                trace_events: Vec::new(),
+                mutation: super::AgentStateMutation::ReplaceSession {
+                    session_id: checkpoint.session_id.clone(),
+                },
+            })
+            .await
+            .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
+        match result {
+            AgentCommitOutcome::Applied => {
+                tracing::debug!(
+                    agent_id = %next.snapshot.identity.id,
+                    turn_id = %checkpoint.turn_id,
+                    sequence = checkpoint.sequence,
+                    reason = ?checkpoint.reason,
+                    "agent turn checkpoint committed"
+                );
+                self.state = next;
+                if let Some(active) = &mut self.active {
+                    active.checkpoint_sequence = checkpoint.sequence;
+                }
+                Ok(())
+            }
+            AgentCommitOutcome::RevisionConflict { actual_revision } => {
+                Err(AgentRuntimeError::RevisionConflict {
+                    expected: Some(expected_revision),
+                    actual: actual_revision,
+                })
+            }
+        }
+    }
+
     async fn open_session(&mut self, session: super::AgentSessionState) -> AgentRuntimeResult<()> {
         if self.state.snapshot.lifecycle != AgentLifecycleState::Active {
             return Err(AgentRuntimeError::NotActive(
@@ -419,6 +497,7 @@ where
             abort_handle,
             settled,
             cancellation_requested: false,
+            checkpoint_sequence: 0,
         });
     }
 
@@ -491,6 +570,7 @@ where
                 next_state: next.clone(),
                 events: Vec::new(),
                 trace_events,
+                mutation: super::AgentStateMutation::AppendTrace,
             })
             .await
             .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
@@ -548,6 +628,7 @@ where
                 next_state: next.clone(),
                 events: vec![event.clone()],
                 trace_events,
+                mutation: super::AgentStateMutation::SnapshotAndQueue,
             })
             .await
             .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;

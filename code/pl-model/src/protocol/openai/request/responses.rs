@@ -41,7 +41,9 @@ impl ResponsesRequestBody {
 
         for item in &request.input {
             let msg = match item {
-                pl_protocol::ModelContextItem::Message { message } => message,
+                pl_protocol::ModelContextItem::Message { message }
+                | pl_protocol::ModelContextItem::ToolResult { message, .. } => message,
+                pl_protocol::ModelContextItem::PinnedContext { .. } => continue,
                 pl_protocol::ModelContextItem::Compaction { encrypted_content } => {
                     input.push(ResponsesInputItem::Compaction {
                         encrypted_content: encrypted_content.clone(),

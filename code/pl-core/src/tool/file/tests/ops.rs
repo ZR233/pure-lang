@@ -161,9 +161,10 @@ fn file_tool_schemas_use_unified_camel_case_inputs() {
     let list_schema = list_files_tool().input_schema();
     let search_schema = search_files_tool().input_schema();
 
-    assert!(read_schema["properties"].get("lineStart").is_some());
+    assert!(read_schema["properties"].get("startLine").is_some());
+    assert!(read_schema["properties"].get("maxLines").is_some());
     assert!(read_schema["properties"].get("line_start").is_none());
-    assert!(list_schema["properties"].get("maxFiles").is_some());
+    assert!(list_schema["properties"].get("limit").is_some());
     assert!(list_schema["properties"].get("max_files").is_none());
     assert!(list_schema["properties"].get("depth").is_none());
     assert!(search_schema["properties"].get("query").is_some());
@@ -193,7 +194,7 @@ async fn list_files_returns_empty_for_missing_workspace_directory() {
     let value: serde_json::Value = serde_json::from_str(&output.description).unwrap();
     assert_eq!(value["files"], serde_json::json!([]));
     assert_eq!(value["count"], serde_json::json!(0));
-    assert_eq!(value["truncated"], serde_json::json!(false));
+    assert_eq!(value["nextCursor"], serde_json::Value::Null);
     let _ = tokio::fs::remove_dir_all(root).await;
 }
 
@@ -214,7 +215,7 @@ async fn list_files_directory_glob_matches_entries_relative_to_path() {
                 "path": "code",
                 "glob": "*/",
                 "includeDirs": true,
-                "maxFiles": 10,
+                "limit": 10,
             })),
             context(&root).await,
         )
@@ -246,7 +247,7 @@ async fn list_files_globstar_matches_files_directly_under_prefix() {
         .execute(
             input(serde_json::json!({
                 "glob": "design/**/*.md",
-                "maxFiles": 10,
+                "limit": 10,
             })),
             context(&root).await,
         )
@@ -258,6 +259,40 @@ async fn list_files_globstar_matches_files_directly_under_prefix() {
         value["files"],
         serde_json::json!(["design/nested/report.md", "design/overview.md"])
     );
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn list_cursor_is_bound_to_workspace_epoch() {
+    let root = unique_temp_dir("list-cursor-epoch");
+    tokio::fs::create_dir_all(&root).await.unwrap();
+    tokio::fs::write(root.join("a.txt"), "a").await.unwrap();
+    tokio::fs::write(root.join("b.txt"), "b").await.unwrap();
+    let tool = list_files_tool();
+    let context = context(&root).await;
+    let first = tool
+        .execute(
+            input(serde_json::json!({"path": ".", "limit": 1})),
+            context.clone(),
+        )
+        .await
+        .unwrap();
+    let first: serde_json::Value = serde_json::from_str(&first.description).unwrap();
+    let cursor = first["nextCursor"].as_str().unwrap().to_string();
+    assert_eq!(first["workspaceEpoch"], 0);
+
+    context
+        .tool_cache
+        .record_effect(Some(crate::ToolEffect::WorkspaceWrite), true);
+    let error = tool
+        .execute(
+            input(serde_json::json!({"path": ".", "limit": 1, "cursor": cursor})),
+            context,
+        )
+        .await
+        .expect_err("old cursor must not page a mutated workspace");
+
+    assert!(error.to_string().contains("cursor does not belong"));
     let _ = tokio::fs::remove_dir_all(root).await;
 }
 
@@ -285,12 +320,14 @@ async fn search_files_accepts_pattern_as_search_text() {
     let value: serde_json::Value = serde_json::from_str(&output.description).unwrap();
     assert_eq!(value["count"], serde_json::json!(1));
     assert_eq!(
-        value["matches"][0],
+        value["files"][0],
         serde_json::json!({
             "path": "src/args.rs",
-            "line": 1,
-            "column": 1,
-            "text": "fn parse_args() {}",
+            "matches": [{
+                "line": 1,
+                "column": 1,
+                "text": "fn parse_args() {}",
+            }],
         })
     );
     let _ = tokio::fs::remove_dir_all(root).await;
@@ -320,7 +357,75 @@ async fn search_files_treats_empty_path_as_current_directory() {
     let value: serde_json::Value = serde_json::from_str(&output.description).unwrap();
     assert_eq!(value["path"], serde_json::json!("."));
     assert_eq!(value["count"], serde_json::json!(1));
-    assert_eq!(value["matches"][0]["path"], serde_json::json!("AGENTS.md"));
+    assert_eq!(value["files"][0]["path"], serde_json::json!("AGENTS.md"));
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn list_and_search_treat_empty_cursor_as_first_page() {
+    let root = unique_temp_dir("empty-cursor-first-page");
+    tokio::fs::create_dir_all(&root).await.unwrap();
+    tokio::fs::write(root.join("README.md"), "maintainers\n")
+        .await
+        .unwrap();
+
+    let listed = list_files_tool()
+        .execute(
+            input(serde_json::json!({
+                "path": "",
+                "glob": "README*",
+                "cursor": "",
+            })),
+            context(&root).await,
+        )
+        .await
+        .expect("list first page");
+    let searched = search_files_tool()
+        .execute(
+            input(serde_json::json!({
+                "path": "",
+                "query": "maintainers",
+                "literal": true,
+                "cursor": "   ",
+            })),
+            context(&root).await,
+        )
+        .await
+        .expect("search first page");
+    let listed: serde_json::Value = serde_json::from_str(&listed.description).unwrap();
+    let searched: serde_json::Value = serde_json::from_str(&searched.description).unwrap();
+
+    assert_eq!(listed["count"], 1);
+    assert_eq!(searched["count"], 1);
+    assert_eq!(listed["cursorReset"], false);
+    assert_eq!(searched["cursorReset"], false);
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn malformed_cursor_is_explicitly_reset_to_first_page() {
+    let root = unique_temp_dir("malformed-cursor-reset");
+    tokio::fs::create_dir_all(&root).await.unwrap();
+    tokio::fs::write(root.join("README.md"), "maintainers\n")
+        .await
+        .unwrap();
+
+    let output = search_files_tool()
+        .execute(
+            input(serde_json::json!({
+                "path": "",
+                "query": "maintainers",
+                "literal": true,
+                "cursor": "x",
+            })),
+            context(&root).await,
+        )
+        .await
+        .expect("reset malformed cursor");
+    let value: serde_json::Value = serde_json::from_str(&output.description).unwrap();
+
+    assert_eq!(value["count"], 1);
+    assert_eq!(value["cursorReset"], true);
     let _ = tokio::fs::remove_dir_all(root).await;
 }
 
@@ -351,6 +456,6 @@ async fn search_files_file_pattern_filters_paths() {
 
     let value: serde_json::Value = serde_json::from_str(&output.description).unwrap();
     assert_eq!(value["count"], serde_json::json!(1));
-    assert_eq!(value["matches"][0]["path"], serde_json::json!("src/lib.rs"));
+    assert_eq!(value["files"][0]["path"], serde_json::json!("src/lib.rs"));
     let _ = tokio::fs::remove_dir_all(root).await;
 }

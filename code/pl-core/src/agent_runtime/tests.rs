@@ -7,6 +7,7 @@ use pretty_assertions::assert_eq;
 use tokio::sync::Notify;
 
 use super::*;
+use crate::AgentSession;
 
 #[derive(Debug, Clone)]
 struct TestError(String);
@@ -28,6 +29,7 @@ enum FactoryMode {
 #[derive(Clone)]
 struct TestRepository {
     states: Arc<Mutex<BTreeMap<AgentId, AgentDurableState>>>,
+    mutations: Arc<Mutex<Vec<AgentStateMutation>>>,
     fail_trace: Arc<Mutex<bool>>,
     fail_terminal: Arc<Mutex<bool>>,
     fail_registration: Arc<Mutex<bool>>,
@@ -38,6 +40,7 @@ impl TestRepository {
     fn empty() -> Self {
         Self {
             states: Arc::new(Mutex::new(BTreeMap::new())),
+            mutations: Arc::new(Mutex::new(Vec::new())),
             fail_trace: Arc::new(Mutex::new(false)),
             fail_terminal: Arc::new(Mutex::new(false)),
             fail_registration: Arc::new(Mutex::new(false)),
@@ -129,6 +132,7 @@ impl AgentStateRepository for TestRepository {
                 actual_revision: actual,
             });
         }
+        self.mutations.lock().unwrap().push(commit.mutation.clone());
         states.insert(commit.agent_id, commit.next_state);
         Ok(AgentCommitOutcome::Applied)
     }
@@ -616,6 +620,118 @@ async fn activity_updates_are_durable_and_stale_turn_updates_are_ignored() {
     assert_eq!(
         repository.state(&agent_id).snapshot.revision,
         terminal_revision
+    );
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn checkpoint_survives_cancel_and_stale_sequences_are_ignored() {
+    let repository = TestRepository::empty();
+    let host = TestHost::new(repository.clone(), FactoryMode::Block);
+    let runtime = AgentRuntime::start(host.clone(), test_options())
+        .await
+        .unwrap();
+    let handle = runtime.handle();
+    let agent_id = AgentId::new("root").unwrap();
+    let session_id = SessionId::new("chat").unwrap();
+    handle.register(registration("root", "chat")).await.unwrap();
+    let turn_id = handle
+        .submit(
+            agent_id.clone(),
+            AgentSubmitRequest::start(session_id.clone(), "block"),
+        )
+        .await
+        .unwrap();
+    wait_for_prepared_messages(&host.turn_factory, 1).await;
+
+    let content = "review manifest at the selected head";
+    let section = pl_protocol::PinnedContextSection {
+        id: pl_protocol::ContextSectionId::new(crate::REVIEW_MANIFEST_SECTION_ID).unwrap(),
+        revision: 1,
+        title: "Review manifest".to_string(),
+        content: content.to_string(),
+        content_hash: crate::canonical_content_hash(content.as_bytes()),
+        updated_at: 1,
+    };
+    let mut checkpoint_session = AgentSession::new();
+    checkpoint_session.upsert_pinned_context(section.clone());
+    handle
+        .checkpoint_turn(
+            agent_id.clone(),
+            AgentTurnCheckpoint {
+                turn_id: turn_id.clone(),
+                session_id: session_id.clone(),
+                sequence: 1,
+                session: checkpoint_session,
+                reason: TurnCheckpointReason::WorkingSetChanged,
+            },
+        )
+        .await
+        .unwrap();
+    let checkpoint_revision = repository.state(&agent_id).snapshot.revision;
+
+    handle
+        .checkpoint_turn(
+            agent_id.clone(),
+            AgentTurnCheckpoint {
+                turn_id: turn_id.clone(),
+                session_id: session_id.clone(),
+                sequence: 1,
+                session: AgentSession::new(),
+                reason: TurnCheckpointReason::BeforeInference,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        repository.state(&agent_id).snapshot.revision,
+        checkpoint_revision
+    );
+
+    handle
+        .cancel_turn(agent_id.clone(), turn_id.clone())
+        .await
+        .unwrap();
+    handle
+        .wait_timeout(agent_id.clone(), Duration::from_secs(1))
+        .await
+        .unwrap();
+    let terminal_state = repository.state(&agent_id);
+    assert_eq!(
+        terminal_state.sessions[&session_id]
+            .session
+            .pinned_context_sections()
+            .cloned()
+            .collect::<Vec<_>>(),
+        vec![section]
+    );
+    let terminal_revision = terminal_state.snapshot.revision;
+
+    handle
+        .checkpoint_turn(
+            agent_id.clone(),
+            AgentTurnCheckpoint {
+                turn_id,
+                session_id: session_id.clone(),
+                sequence: 2,
+                session: AgentSession::new(),
+                reason: TurnCheckpointReason::Terminal,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        repository.state(&agent_id).snapshot.revision,
+        terminal_revision
+    );
+    assert!(
+        repository
+            .mutations
+            .lock()
+            .unwrap()
+            .contains(&AgentStateMutation::ReplaceSession {
+                session_id: session_id.clone(),
+            })
     );
     runtime.shutdown().await.unwrap();
 }

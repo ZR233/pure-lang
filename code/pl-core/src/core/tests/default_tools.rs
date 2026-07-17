@@ -235,22 +235,25 @@ async fn default_tool_builder_exposes_only_framework_independent_names() {
 #[test]
 fn workspace_file_schemas_use_codex_camel_case_fields() {
     let read_schema = crate::tool::WorkspaceFileToolKind::ReadFile.input_schema();
-    assert!(read_schema.pointer("/properties/lineStart").is_some());
-    assert!(read_schema.pointer("/properties/lineCount").is_some());
-    assert!(read_schema.pointer("/properties/maxBytes").is_some());
+    assert!(read_schema.pointer("/properties/startLine").is_some());
+    assert!(read_schema.pointer("/properties/maxLines").is_some());
+    assert!(read_schema.pointer("/properties/maxBytes").is_none());
+    assert!(read_schema.pointer("/properties/offset").is_none());
     assert!(read_schema.pointer("/properties/line_start").is_none());
     assert!(read_schema.pointer("/properties/line_count").is_none());
     assert!(read_schema.pointer("/properties/max_bytes").is_none());
 
     let list_schema = crate::tool::WorkspaceFileToolKind::ListFiles.input_schema();
-    assert!(list_schema.pointer("/properties/maxFiles").is_some());
+    assert!(list_schema.pointer("/properties/limit").is_some());
+    assert!(list_schema.pointer("/properties/cursor").is_some());
     assert!(list_schema.pointer("/properties/includeDirs").is_some());
     assert!(list_schema.pointer("/properties/max_files").is_none());
     assert!(list_schema.pointer("/properties/include_dirs").is_none());
 
     let search_schema = crate::tool::WorkspaceFileToolKind::SearchFiles.input_schema();
     assert!(search_schema.pointer("/properties/caseSensitive").is_some());
-    assert!(search_schema.pointer("/properties/maxMatches").is_some());
+    assert!(search_schema.pointer("/properties/limit").is_some());
+    assert!(search_schema.pointer("/properties/cursor").is_some());
     assert!(search_schema.pointer("/properties/contextLines").is_some());
     assert!(
         search_schema

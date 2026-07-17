@@ -1,6 +1,5 @@
 use pl_model::{CompletionRequest, ModelProvider, ReasoningConfig, ReasoningSummary};
-use pl_protocol::TokenUsageSnapshot;
-use pl_protocol::{ErrorSeverity, Result};
+use pl_protocol::{ErrorSeverity, Result, TokenUsageSnapshot, ToolResultReceipt};
 use pl_trace::{AgentEvent, TracePartStatus};
 use std::sync::Arc;
 
@@ -12,6 +11,7 @@ use attachments::materialize_context_items;
 use enabled_tools::record_enabled_tools;
 use plan_exit::record_plan_exit_items;
 
+use crate::context_assembler::ContextAssembler;
 use crate::context_compaction::{
     CompactionOutcome, ContextCompactionPhase, ContextCompactionRequest,
     ensure_provider_can_consume_session, maybe_compact_session,
@@ -23,6 +23,7 @@ use crate::trace::TraceRecorder;
 use crate::turn::{
     BudgetLimit, BudgetTracker, TurnOptions, TurnRequest, TurnResult, TurnResultStatus,
 };
+use crate::working_set::{TurnWorkingSetChange, TurnWorkingSetHandle, canonical_content_hash};
 
 use super::TurnEngine;
 use super::permission::cancellation_reason;
@@ -72,6 +73,8 @@ pub(super) async fn run_turn_with_trace(
         session.set_prompt_cache_key(prompt_cache_key);
     }
     session.push_user_content(request.user_content.clone());
+    let working_set = TurnWorkingSetHandle::from_session(session)?;
+    let tool_cache = crate::TurnToolCacheHandle::default();
     record_enabled_tools(recorder, &turn_id, &tool_schemas);
     let turn_item = recorder.turn_item(&turn_id, TracePartStatus::Running);
     recorder.start_item(turn_item.clone());
@@ -128,6 +131,14 @@ pub(super) async fn run_turn_with_trace(
     let mut last_compacted_state = None;
     let mut iteration = 0_u32;
     loop {
+        if working_set.sync_session(session)? {
+            persist_checkpoint(
+                &options,
+                session,
+                crate::TurnCheckpointReason::WorkingSetChanged,
+            )
+            .await?;
+        }
         if is_cancelled(&options) {
             session.truncate_messages(safe_message_count);
             return Ok(interrupted_turn_result(
@@ -149,6 +160,11 @@ pub(super) async fn run_turn_with_trace(
         let iteration_tools = tool_schemas.clone();
         let iteration_snapshot = turn_instruction_snapshot.clone();
         let instruction_bundle = iteration_snapshot.to_bundle();
+        let mut assembled_context = ContextAssembler::assemble(
+            &instruction_bundle.instructions,
+            &instruction_bundle.prelude_messages,
+            session.items(),
+        )?;
         let model_capabilities = provider.effective_model_capabilities(&model);
         let parallel_tool_calls = should_request_parallel_tool_calls(model_capabilities, &options);
 
@@ -166,8 +182,8 @@ pub(super) async fn run_turn_with_trace(
                     provider: provider.as_ref(),
                     model: &model,
                     config: &core.context_compaction,
-                    request_instructions: &instruction_bundle.instructions,
-                    request_messages: &instruction_bundle.prelude_messages,
+                    request_instructions: &assembled_context.instructions,
+                    request_messages: &assembled_context.prelude_messages,
                     tools: &iteration_tools,
                     parallel_tool_calls,
                     reasoning: reasoning.clone(),
@@ -207,6 +223,18 @@ pub(super) async fn run_turn_with_trace(
                         });
                     }
                     context_compactions.push(snapshot);
+                    working_set.sync_session(session)?;
+                    assembled_context = ContextAssembler::assemble(
+                        &instruction_bundle.instructions,
+                        &instruction_bundle.prelude_messages,
+                        session.items(),
+                    )?;
+                    persist_checkpoint(
+                        &options,
+                        session,
+                        crate::TurnCheckpointReason::ContextCompacted,
+                    )
+                    .await?;
                 }
                 Err(error) => {
                     let (error, severity) =
@@ -230,9 +258,17 @@ pub(super) async fn run_turn_with_trace(
             break;
         }
         budget_tracker.record_model_step();
-        let history_items =
-            materialize_context_items(session.items(), &request.materialized_attachments)?;
-        let mut input = instruction_bundle
+        persist_checkpoint(
+            &options,
+            session,
+            crate::TurnCheckpointReason::BeforeInference,
+        )
+        .await?;
+        let history_items = materialize_context_items(
+            &assembled_context.history,
+            &request.materialized_attachments,
+        )?;
+        let mut input = assembled_context
             .prelude_messages
             .iter()
             .cloned()
@@ -249,7 +285,7 @@ pub(super) async fn run_turn_with_trace(
         let mut inference_item = recorder.inference_item(&turn_id, &inference_id, &model);
         recorder.start_item(inference_item.clone());
         let completion_request = CompletionRequest::builder(model.clone())
-            .instructions(instruction_bundle.instructions.clone())
+            .instructions(assembled_context.instructions.clone())
             .input(input.clone())
             .tools(iteration_tools)
             .parallel_tool_calls(parallel_tool_calls)
@@ -436,6 +472,8 @@ pub(super) async fn run_turn_with_trace(
                     session.items(),
                     &request.materialized_attachments,
                 )?)),
+                working_set: working_set.clone(),
+                tool_cache: tool_cache.clone(),
             },
         )
         .await
@@ -460,6 +498,41 @@ pub(super) async fn run_turn_with_trace(
         };
         progress.tool_detail("工具执行完成，准备回写结果。");
         record_plan_exit_items(recorder, &turn_id, &tool_results);
+        if working_set.sync_session(session)? {
+            persist_checkpoint(
+                &options,
+                session,
+                crate::TurnCheckpointReason::WorkingSetChanged,
+            )
+            .await?;
+        }
+        let should_end_turn = tool_results.iter().any(|tool_result| {
+            tool_result
+                .runtime_events
+                .iter()
+                .any(|event| matches!(event, crate::tool::ToolRuntimeEvent::EndTurn))
+        });
+        for tool_result in tool_results {
+            let receipt = tool_result_receipt(&tool_result);
+            working_set.apply(TurnWorkingSetChange::AppendEvidence(receipt.clone()))?;
+            session.push_tool_result_with_receipt(
+                tool_result.id,
+                tool_result.call_id,
+                tool_result.name,
+                tool_result.kind,
+                tool_result.result,
+                tool_result.arguments,
+                receipt,
+            );
+        }
+        if working_set.sync_session(session)? {
+            persist_checkpoint(
+                &options,
+                session,
+                crate::TurnCheckpointReason::WorkingSetChanged,
+            )
+            .await?;
+        }
         if is_cancelled(&options) {
             session.truncate_messages(safe_message_count);
             return Ok(interrupted_turn_result(
@@ -472,22 +545,6 @@ pub(super) async fn run_turn_with_trace(
                 safe_message_count,
                 cancellation_reason(),
             ));
-        }
-        let should_end_turn = tool_results.iter().any(|tool_result| {
-            tool_result
-                .runtime_events
-                .iter()
-                .any(|event| matches!(event, crate::tool::ToolRuntimeEvent::EndTurn))
-        });
-        for tool_result in tool_results {
-            session.push_tool_result(
-                tool_result.id,
-                tool_result.call_id,
-                tool_result.name,
-                tool_result.kind,
-                tool_result.result,
-                tool_result.arguments,
-            );
         }
 
         session_message_count = session.len();
@@ -542,6 +599,7 @@ pub(super) async fn run_turn_with_trace(
     });
     recorder.complete_item(completed_turn_item);
     progress.milestone("本轮已完成。");
+    persist_checkpoint(&options, session, crate::TurnCheckpointReason::Terminal).await?;
     recorder.broadcast(AgentEvent::Done);
 
     Ok(TurnResult {
@@ -559,4 +617,102 @@ pub(super) async fn run_turn_with_trace(
         budget_usage: None,
         trace_events: recorder.drain(),
     })
+}
+
+async fn persist_checkpoint(
+    options: &TurnOptions,
+    session: &AgentSession,
+    reason: crate::TurnCheckpointReason,
+) -> Result<()> {
+    let Some(checkpoint) = &options.checkpoint else {
+        return Ok(());
+    };
+    checkpoint
+        .checkpoint(session.clone(), reason)
+        .await
+        .map_err(|error| pl_protocol::PureError::MemoryError(error.to_string()))
+}
+
+fn tool_result_receipt(result: &super::tool_dispatch::ToolExecutionRecord) -> ToolResultReceipt {
+    let artifacts = result
+        .runtime_events
+        .iter()
+        .filter_map(|event| match event {
+            crate::tool::ToolRuntimeEvent::OutputArtifacts { artifacts } => {
+                Some(artifacts.as_slice())
+            }
+            crate::tool::ToolRuntimeEvent::SkillActivated { .. }
+            | crate::tool::ToolRuntimeEvent::ToolResultRevision { .. }
+            | crate::tool::ToolRuntimeEvent::CacheHit { .. }
+            | crate::tool::ToolRuntimeEvent::OutputMetrics { .. }
+            | crate::tool::ToolRuntimeEvent::EndTurn => None,
+        })
+        .flatten()
+        .cloned()
+        .collect::<Vec<_>>();
+    let cache_hit = result.runtime_events.iter().find_map(|event| match event {
+        crate::tool::ToolRuntimeEvent::CacheHit {
+            reused_from_call_id,
+            result_hash,
+            total_bytes,
+        } => Some((reused_from_call_id, result_hash, *total_bytes)),
+        crate::tool::ToolRuntimeEvent::SkillActivated { .. }
+        | crate::tool::ToolRuntimeEvent::ToolResultRevision { .. }
+        | crate::tool::ToolRuntimeEvent::OutputArtifacts { .. }
+        | crate::tool::ToolRuntimeEvent::OutputMetrics { .. }
+        | crate::tool::ToolRuntimeEvent::EndTurn => None,
+    });
+    let metrics = result.runtime_events.iter().find_map(|event| match event {
+        crate::tool::ToolRuntimeEvent::OutputMetrics {
+            raw_bytes,
+            model_visible_bytes,
+            artifact_bytes: _,
+            result_hash,
+        } => Some((*raw_bytes, *model_visible_bytes, result_hash)),
+        crate::tool::ToolRuntimeEvent::SkillActivated { .. }
+        | crate::tool::ToolRuntimeEvent::ToolResultRevision { .. }
+        | crate::tool::ToolRuntimeEvent::OutputArtifacts { .. }
+        | crate::tool::ToolRuntimeEvent::CacheHit { .. }
+        | crate::tool::ToolRuntimeEvent::EndTurn => None,
+    });
+    ToolResultReceipt {
+        call_id: result.call_id.clone().unwrap_or_else(|| result.id.clone()),
+        tool_name: result.name.clone(),
+        arguments_hash: serde_json::from_str(&result.arguments).map_or_else(
+            |_| canonical_content_hash(result.arguments.as_bytes()),
+            |value| crate::canonical_json_hash(&value),
+        ),
+        result_hash: cache_hit.map_or_else(
+            || {
+                metrics.map_or_else(
+                    || canonical_content_hash(result.result.as_bytes()),
+                    |(_, _, hash)| hash.clone(),
+                )
+            },
+            |(_, hash, _)| hash.clone(),
+        ),
+        total_bytes: cache_hit.map_or_else(
+            || metrics.map_or(result.result.len() as u64, |(raw, _, _)| raw),
+            |(_, _, bytes)| bytes,
+        ),
+        visible_bytes: metrics.map_or(result.result.len() as u64, |(_, visible, _)| visible),
+        truncated: cache_hit.is_some()
+            || metrics.is_some_and(|(raw, visible, _)| raw > visible)
+            || result.result.len() >= crate::tool::MAX_MODEL_TOOL_OUTPUT_BYTES,
+        artifacts,
+        continuation: tool_result_continuation(&result.result),
+        reused_from_call_id: cache_hit.map(|(call_id, _, _)| call_id.clone()),
+    }
+}
+
+fn tool_result_continuation(output: &str) -> Option<String> {
+    let value = serde_json::from_str::<serde_json::Value>(output).ok()?;
+    ["nextStartLine", "nextStartByte", "nextCursor", "nextOffset"]
+        .into_iter()
+        .find_map(|key| {
+            value
+                .get(key)
+                .filter(|value| !value.is_null())
+                .map(|value| serde_json::json!({ "field": key, "value": value }).to_string())
+        })
 }

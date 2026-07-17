@@ -217,6 +217,7 @@ mod tests {
 
         let output = backend
             .exec(ContainerExecRequest {
+                call_id: None,
                 command: "printf hello".to_string(),
                 cwd: Some("/workspace".to_string()),
                 timeout_secs: Some(3),

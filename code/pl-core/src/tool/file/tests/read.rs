@@ -69,8 +69,8 @@ async fn read_file_uses_unified_camel_case_json_output() {
         .execute(
             input(serde_json::json!({
                 "path": "a.txt",
-                "lineStart": 2,
-                "lineCount": 1,
+                "startLine": 2,
+                "maxLines": 1,
             })),
             context(&root).await,
         )
@@ -78,18 +78,37 @@ async fn read_file_uses_unified_camel_case_json_output() {
         .unwrap();
     let value: serde_json::Value = serde_json::from_str(&output.description).unwrap();
 
-    assert_eq!(
-        value,
-        serde_json::json!({
-            "path": "a.txt",
-            "offset": 0,
-            "bytesReturned": 4,
-            "bytesOmitted": 0,
-            "truncated": false,
-            "nextOffset": null,
-            "text": "two\n",
-        })
+    assert_eq!(value["path"], "a.txt");
+    assert_eq!(value["startLine"], 2);
+    assert_eq!(value["endLine"], 2);
+    assert_eq!(value["nextStartLine"], 3);
+    assert_eq!(value["text"], "two\n");
+    assert!(
+        value["contentHash"]
+            .as_str()
+            .unwrap()
+            .starts_with("sha256:")
     );
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn read_file_rejects_invalid_line_bounds_instead_of_clamping() {
+    let root = unique_temp_dir("invalid-read-bounds");
+    let tool = read_file_tool();
+    tokio::fs::create_dir_all(&root).await.unwrap();
+    tokio::fs::write(root.join("a.txt"), "one\n").await.unwrap();
+
+    for arguments in [
+        serde_json::json!({"path": "a.txt", "startLine": 0}),
+        serde_json::json!({"path": "a.txt", "maxLines": 501}),
+    ] {
+        assert!(
+            tool.execute(input(arguments), context(&root).await)
+                .await
+                .is_err()
+        );
+    }
     let _ = tokio::fs::remove_dir_all(root).await;
 }
 
@@ -130,8 +149,8 @@ async fn write_and_read_file_roundtrip() {
         .execute(
             input(serde_json::json!({
                 "path": "notes/a.txt",
-                "lineStart": 2,
-                "lineCount": 1,
+                "startLine": 2,
+                "maxLines": 1,
             })),
             context(&root).await,
         )
@@ -172,7 +191,7 @@ async fn read_file_line_offset_starts_at_given_line() {
         .unwrap();
     let output = tool
         .execute(
-            input(serde_json::json!({ "path": "a.txt", "lineStart": 2 })),
+            input(serde_json::json!({ "path": "a.txt", "startLine": 2 })),
             context(&root).await,
         )
         .await
@@ -194,8 +213,8 @@ async fn read_file_max_lines_limits_output() {
         .execute(
             input(serde_json::json!({
                 "path": "a.txt",
-                "lineStart": 1,
-                "lineCount": 2,
+                "startLine": 1,
+                "maxLines": 2,
             })),
             context(&root).await,
         )
@@ -216,7 +235,7 @@ async fn read_file_line_offset_out_of_range_errors() {
         .unwrap();
     let result = tool
         .execute(
-            input(serde_json::json!({ "path": "a.txt", "lineStart": 10 })),
+            input(serde_json::json!({ "path": "a.txt", "startLine": 10 })),
             context(&root).await,
         )
         .await;
@@ -228,7 +247,7 @@ async fn read_file_line_offset_out_of_range_errors() {
 
 #[tokio::test]
 async fn read_file_trailing_newline_offset_at_end_returns_empty() {
-    // "one\ntwo\n" 有 2 行；lineStart=3（行数+1）返回空切片，不报错（对齐 codex）
+    // "one\ntwo\n" 有 2 行；startLine=3（行数+1）返回空切片，不报错（对齐 codex）
     let root = unique_temp_dir("offset-end");
     let tool = read_file_tool();
     tokio::fs::create_dir_all(&root).await.unwrap();
@@ -237,7 +256,7 @@ async fn read_file_trailing_newline_offset_at_end_returns_empty() {
         .unwrap();
     let output = tool
         .execute(
-            input(serde_json::json!({ "path": "a.txt", "lineStart": 3 })),
+            input(serde_json::json!({ "path": "a.txt", "startLine": 3 })),
             context(&root).await,
         )
         .await
@@ -303,24 +322,27 @@ async fn read_file_empty_file() {
 }
 
 #[tokio::test]
-async fn read_file_truncates_large_output() {
+async fn read_file_pages_large_output_by_lines() {
     let root = unique_temp_dir("trunc");
     let tool = read_file_tool();
     tokio::fs::create_dir_all(&root).await.unwrap();
-    let big = "a".repeat(2500);
+    let big = (1..=600)
+        .map(|line| format!("line-{line}\n"))
+        .collect::<String>();
     tokio::fs::write(root.join("big.txt"), &big).await.unwrap();
     let output = tool
         .execute(
-            input(serde_json::json!({ "path": "big.txt", "maxBytes": 10 })),
+            input(serde_json::json!({ "path": "big.txt", "maxLines": 500 })),
             context(&root).await,
         )
         .await
         .unwrap();
 
     let value = read_output_json(&output);
-    assert_eq!(value["text"], serde_json::json!("aaaaaaaaaa"));
-    assert_eq!(value["truncated"], serde_json::json!(true));
-    assert_eq!(value["nextOffset"], serde_json::json!(10));
+    assert_eq!(value["startLine"], serde_json::json!(1));
+    assert_eq!(value["endLine"], serde_json::json!(500));
+    assert_eq!(value["nextStartLine"], serde_json::json!(501));
+    assert!(value["text"].as_str().unwrap().contains("line-500\n"));
     let _ = tokio::fs::remove_dir_all(root).await;
 }
 

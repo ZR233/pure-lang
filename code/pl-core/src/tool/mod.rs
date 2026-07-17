@@ -1,5 +1,6 @@
 mod ask_user;
 mod bash;
+mod cache;
 mod command;
 mod container;
 mod context;
@@ -9,6 +10,7 @@ mod git;
 mod lsp;
 mod mcp_resource;
 mod mcp_tool;
+mod model_output;
 mod output_format;
 mod path_policy;
 mod plan;
@@ -25,6 +27,7 @@ mod workspace_file;
 pub use ask_user::AskUserTool;
 pub(crate) use bash::command_tool_pair;
 pub use bash::{BashInput, BashTool, WriteStdinTool};
+pub use cache::{ToolCachePolicy, TurnToolCacheHandle};
 #[cfg(feature = "docker-tools")]
 pub use container::DockerCliContainerBackend;
 pub use container::{
@@ -57,14 +60,18 @@ pub use mcp_tool::{
     HostMcpToolSpec, McpTool, McpToolBackend, McpToolRequest, host_mcp_tool_schema,
     host_mcp_tool_schemas,
 };
+pub use model_output::{
+    DEFAULT_MODEL_TOOL_OUTPUT_TOKENS, MAX_MODEL_TOOL_OUTPUT_BYTES, enforce_model_output_limit,
+    model_visible_tool_output, model_visible_tool_output_with_tokens,
+};
 pub use output_format::{
-    DEFAULT_MODEL_TOOL_OUTPUT_TOKENS, SECRET_REDACTION_REPLACEMENT, SecretRedaction,
+    MAX_TOOL_UI_PREVIEW_BYTES, SECRET_REDACTION_REPLACEMENT, SecretRedaction,
     ToolHistoryProjection, ToolLifecyclePhase, ToolLifecycleProjection,
     ToolOutputArtifactDescriptor, ToolOutputArtifactPathRequest, ToolOutputCapture,
     ToolOutputCaptureRequest, ToolOutputStream, ToolOutputStreamCapture, ToolOutputStreamSizes,
-    model_visible_tool_output, model_visible_tool_output_with_tokens, redacted_trace_preview_value,
-    tool_history_projection, tool_lifecycle_projection, tool_lifecycle_projections,
-    tool_output_artifact_file_path, trace_preview_output, trace_preview_value,
+    redacted_trace_preview_value, tool_history_projection, tool_lifecycle_projection,
+    tool_lifecycle_projections, tool_output_artifact_file_path, trace_preview_output,
+    trace_preview_value,
 };
 pub use path_policy::{PathAccess, ToolPathPolicy};
 pub use plan::PlanExitTool;
@@ -348,7 +355,7 @@ mod tests {
             "full output".to_string(),
             true,
             10_000,
-            vec![serde_json::json!({"id": "artifact-1"})],
+            vec![serde_json::json!({"id": "artifact-1", "sizeBytes": 19})],
         );
 
         assert_eq!(
@@ -358,7 +365,7 @@ mod tests {
                 output: "full output".to_string(),
                 model_output: "full output".to_string(),
                 ends_turn: true,
-                output_artifacts: vec![serde_json::json!({"id": "artifact-1"})],
+                output_artifacts: vec![serde_json::json!({"id": "artifact-1", "sizeBytes": 19})],
             }
         );
         assert_eq!(
@@ -369,7 +376,18 @@ mod tests {
                 output_file: PathBuf::new(),
                 exit_code: Some(0),
                 timed_out: false,
-                runtime_events: vec![ToolRuntimeEvent::EndTurn],
+                runtime_events: vec![
+                    ToolRuntimeEvent::EndTurn,
+                    ToolRuntimeEvent::OutputArtifacts {
+                        artifacts: vec![serde_json::json!({"id": "artifact-1", "sizeBytes": 19})],
+                    },
+                    ToolRuntimeEvent::OutputMetrics {
+                        raw_bytes: 11,
+                        model_visible_bytes: 11,
+                        artifact_bytes: 19,
+                        result_hash: crate::canonical_content_hash(b"full output"),
+                    },
+                ],
             }
         );
     }
@@ -507,6 +525,8 @@ mod tests {
                     active_subagent: None,
                     lsp_runtime: None,
                     parent_session: Arc::new(crate::session::AgentSession::new()),
+                    working_set: crate::TurnWorkingSetHandle::default(),
+                    tool_cache: crate::TurnToolCacheHandle::default(),
                 },
             )
             .await;
@@ -558,6 +578,8 @@ mod tests {
                     active_subagent: None,
                     lsp_runtime: None,
                     parent_session: Arc::new(crate::session::AgentSession::new()),
+                    working_set: crate::TurnWorkingSetHandle::default(),
+                    tool_cache: crate::TurnToolCacheHandle::default(),
                 },
             )
             .await;
@@ -610,6 +632,8 @@ mod tests {
                     active_subagent: None,
                     lsp_runtime: None,
                     parent_session: Arc::new(crate::session::AgentSession::new()),
+                    working_set: crate::TurnWorkingSetHandle::default(),
+                    tool_cache: crate::TurnToolCacheHandle::default(),
                 },
             )
             .await
@@ -715,6 +739,8 @@ mod tests {
                     active_subagent: None,
                     lsp_runtime: None,
                     parent_session: Arc::new(crate::session::AgentSession::new()),
+                    working_set: crate::TurnWorkingSetHandle::default(),
+                    tool_cache: crate::TurnToolCacheHandle::default(),
                 },
             )
             .await;
@@ -803,6 +829,24 @@ mod tests {
             .and_then(serde_json::Value::as_str)
             .expect("visible output");
         assert!(visible.len() <= 32);
+    }
+
+    #[test]
+    fn model_visible_tool_output_keeps_json_array_items_structured() {
+        let output = model_visible_tool_output_with_tokens(
+            &serde_json::to_string(&vec![
+                serde_json::json!({"id": 1, "state": "completed"}),
+                serde_json::json!({"id": 2, "payload": "x".repeat(200)}),
+                serde_json::json!({"id": 3, "state": "queued"}),
+            ])
+            .unwrap(),
+            24,
+        );
+        let value = serde_json::from_str::<serde_json::Value>(&output).unwrap();
+
+        assert!(value["items"].is_array());
+        assert!(value["itemsReturned"].as_u64().is_some());
+        assert!(value["itemsOmitted"].as_u64().is_some());
     }
 
     #[test]
@@ -899,6 +943,8 @@ mod tests {
             active_subagent: None,
             lsp_runtime: None,
             parent_session: Arc::new(crate::session::AgentSession::new()),
+            working_set: crate::TurnWorkingSetHandle::default(),
+            tool_cache: crate::TurnToolCacheHandle::default(),
         };
         let first_guard = context.workspace_write_lock().await;
         let second_context = context.clone();

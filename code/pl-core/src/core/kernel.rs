@@ -93,6 +93,8 @@ impl AgentKernel {
             active_subagent: self.core.active_subagent.clone(),
             lsp_runtime: self.core.lsp_runtime.clone(),
             parent_session: request.parent_session,
+            working_set: request.working_set,
+            tool_cache: request.tool_cache,
         };
         Tool::execute(tool, input, context).await
     }
@@ -149,6 +151,8 @@ pub struct AgentKernelToolRequest {
     instruction_snapshot: Option<crate::instruction::InstructionSnapshot>,
     provider_call_id: Option<String>,
     parent_session: Arc<crate::AgentSession>,
+    working_set: crate::TurnWorkingSetHandle,
+    tool_cache: crate::TurnToolCacheHandle,
 }
 
 impl AgentKernelToolRequest {
@@ -171,6 +175,8 @@ impl AgentKernelToolRequest {
             instruction_snapshot: None,
             provider_call_id: None,
             parent_session: Arc::new(crate::AgentSession::new()),
+            working_set: crate::TurnWorkingSetHandle::default(),
+            tool_cache: crate::TurnToolCacheHandle::default(),
         }
     }
 
@@ -209,6 +215,16 @@ impl AgentKernelToolRequest {
 
     pub fn with_parent_history(mut self, history: Vec<pl_protocol::Message>) -> Self {
         self.parent_session = Arc::new(crate::AgentSession::from_messages(history));
+        self
+    }
+
+    pub fn with_working_set(mut self, working_set: crate::TurnWorkingSetHandle) -> Self {
+        self.working_set = working_set;
+        self
+    }
+
+    pub fn with_tool_cache(mut self, tool_cache: crate::TurnToolCacheHandle) -> Self {
+        self.tool_cache = tool_cache;
         self
     }
 }

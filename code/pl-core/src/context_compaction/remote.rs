@@ -45,8 +45,15 @@ pub(super) async fn compact_remote(
         .iter()
         .cloned()
         .map(ModelContextItem::from)
-        .chain(session.items().iter().cloned())
+        .chain(
+            session
+                .items()
+                .iter()
+                .filter(|item| !item.is_pinned_context())
+                .cloned(),
+        )
         .collect::<Vec<_>>();
+    super::compact_old_tool_results_for_request(&mut input);
     trim_tool_outputs_to_context_window(
         &mut input,
         request_instructions,
@@ -114,11 +121,13 @@ fn filter_legacy_replacement(
         .into_iter()
         .filter(|item| match item {
             ModelContextItem::Compaction { .. } => true,
-            ModelContextItem::Message { message } => match message.role {
+            ModelContextItem::Message { message }
+            | ModelContextItem::ToolResult { message, .. } => match message.role {
                 MessageRole::User => canonical_users.contains(&message.content),
                 MessageRole::Assistant => true,
                 MessageRole::System | MessageRole::Tool => false,
             },
+            ModelContextItem::PinnedContext { .. } => false,
         })
         .collect::<Vec<_>>();
     if !replacement.iter().any(ModelContextItem::is_compaction) {
@@ -196,18 +205,29 @@ fn trim_tool_outputs_to_context_window(
         if estimate_input_tokens(instructions, input) <= context_window {
             break;
         }
-        let ModelContextItem::Message { message } = &input[index] else {
-            continue;
+        let (message, receipt) = match &input[index] {
+            ModelContextItem::Message { message } => (message, None),
+            ModelContextItem::ToolResult { message, receipt } => (message, Some(receipt.clone())),
+            ModelContextItem::PinnedContext { .. } | ModelContextItem::Compaction { .. } => {
+                continue;
+            }
         };
         if message.role != MessageRole::Tool {
             continue;
         }
-        input[index] = ModelContextItem::from(Message {
+        let replacement_message = Message {
             role: MessageRole::Tool,
             content: MessageContent::Text(CONTEXT_WINDOW_TRUNCATED_OUTPUT_MESSAGE.to_string()),
             reasoning_content: None,
             metadata: message.metadata.clone(),
-        });
+        };
+        input[index] = match receipt {
+            Some(receipt) => ModelContextItem::ToolResult {
+                message: replacement_message,
+                receipt,
+            },
+            None => ModelContextItem::from(replacement_message),
+        };
     }
 }
 
@@ -216,7 +236,9 @@ fn estimate_input_tokens(instructions: &str, input: &[ModelContextItem]) -> u64 
         + input
             .iter()
             .map(|item| match item {
-                ModelContextItem::Message { message } => estimate_message_tokens(message),
+                ModelContextItem::Message { message }
+                | ModelContextItem::ToolResult { message, .. } => estimate_message_tokens(message),
+                ModelContextItem::PinnedContext { .. } => 0,
                 ModelContextItem::Compaction { encrypted_content } => {
                     estimate_text_tokens(encrypted_content)
                 }

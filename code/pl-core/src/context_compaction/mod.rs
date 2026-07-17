@@ -26,6 +26,56 @@ pub(crate) const SUMMARY_METADATA_KEY: &str = "context_compaction";
 pub(crate) const SUMMARY_METADATA_VALUE: &str = "summary";
 const DEFAULT_SUMMARY_PREFIX: &str = "以下是此前对话的压缩摘要。";
 const DEFAULT_EMPTY_SUMMARY_ERROR: &str = "context compaction returned an empty summary";
+const RETAINED_FULL_TOOL_RESULTS_FOR_COMPACTION: usize = 3;
+
+fn compact_old_tool_results_for_request(input: &mut [ModelContextItem]) {
+    let compact_count = input
+        .iter()
+        .filter(|item| {
+            item.as_message()
+                .is_some_and(|message| message.role == pl_protocol::MessageRole::Tool)
+        })
+        .count()
+        .saturating_sub(RETAINED_FULL_TOOL_RESULTS_FOR_COMPACTION);
+    let mut remaining = compact_count;
+    for item in input {
+        if remaining == 0 {
+            break;
+        }
+        match item {
+            ModelContextItem::ToolResult { message, receipt }
+                if message.role == pl_protocol::MessageRole::Tool =>
+            {
+                message.content = pl_protocol::MessageContent::Text(
+                    serde_json::json!({
+                        "compactedToolResult": true,
+                        "receipt": receipt,
+                    })
+                    .to_string(),
+                );
+                remaining -= 1;
+            }
+            ModelContextItem::Message { message }
+                if message.role == pl_protocol::MessageRole::Tool =>
+            {
+                let text = serde_json::to_string(&message.content).unwrap_or_default();
+                message.content = pl_protocol::MessageContent::Text(
+                    serde_json::json!({
+                        "compactedToolResult": true,
+                        "resultHash": crate::canonical_content_hash(text.as_bytes()),
+                        "visibleBytes": text.len(),
+                    })
+                    .to_string(),
+                );
+                remaining -= 1;
+            }
+            ModelContextItem::Message { .. }
+            | ModelContextItem::ToolResult { .. }
+            | ModelContextItem::PinnedContext { .. }
+            | ModelContextItem::Compaction { .. } => {}
+        }
+    }
+}
 
 /// 上下文压缩的产品级文案与实现配置。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -238,8 +288,12 @@ pub(crate) async fn maybe_compact_session(
         (_, Some(limit)) => limit,
         (_, None) => return Ok(CompactionOutcome::Skipped),
     };
-    let estimated_tokens =
-        estimate_context_request_tokens(request_instructions, request_messages, session.items());
+    let estimated_tokens = estimate_context_request_tokens(
+        request_instructions,
+        request_messages,
+        session.items(),
+        tools,
+    );
     let should_compact = match trigger {
         CompactionTrigger::EstimatedTokens => estimated_tokens >= limit,
         CompactionTrigger::ProviderPromptTokens(prompt_tokens) => {
@@ -295,6 +349,7 @@ pub(crate) async fn maybe_compact_session(
             request_instructions,
             request_messages,
             &replacement,
+            tools,
         ));
         (
             replacement,
@@ -315,7 +370,7 @@ pub(crate) async fn maybe_compact_session(
         implementation,
         phase,
     };
-    session.replace_items(replacement);
+    session.replace_compactable_items(replacement);
     if let Some(progress) = progress {
         progress.milestone("上下文已压缩，继续准备模型调用。");
     }
@@ -358,6 +413,7 @@ fn estimate_context_request_tokens(
     instructions: &str,
     request_messages: &[Message],
     session_items: &[ModelContextItem],
+    tools: &[ToolSchema],
 ) -> u64 {
     estimate_text_tokens(instructions)
         + request_messages
@@ -367,10 +423,20 @@ fn estimate_context_request_tokens(
         + session_items
             .iter()
             .map(|item| match item {
-                ModelContextItem::Message { message } => history::estimate_message_tokens(message),
+                ModelContextItem::Message { message }
+                | ModelContextItem::ToolResult { message, .. } => {
+                    history::estimate_message_tokens(message)
+                }
+                ModelContextItem::PinnedContext { .. } => 0,
                 ModelContextItem::Compaction { encrypted_content } => {
                     estimate_text_tokens(encrypted_content)
                 }
+            })
+            .sum::<u64>()
+        + tools
+            .iter()
+            .map(|tool| {
+                serde_json::to_string(tool).map_or(0, |schema| estimate_text_tokens(&schema))
             })
             .sum::<u64>()
 }

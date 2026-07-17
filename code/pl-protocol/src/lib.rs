@@ -25,7 +25,10 @@ pub use message::{
     TOOL_CALL_KIND_METADATA_KEY, TOOL_CALLS_METADATA_KEY, TOOL_NAME_METADATA_KEY,
     ToolCallHistoryMetadata, ToolCallKind, ToolResultMetadata,
 };
-pub use model_context::ModelContextItem;
+pub use model_context::{
+    ContextSectionId, ContextSectionIdError, ModelContextItem, PinnedContextSection,
+    ToolResultReceipt,
+};
 pub use permission::PermissionLevel;
 pub use provider_catalog::{
     CredentialDescriptorDto, ModelCapabilitiesDto, ModelCatalogDescriptor, ModelDescriptor,

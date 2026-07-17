@@ -84,6 +84,8 @@ pub(super) struct ToolExecutionContext<'a> {
     pub(super) instruction_snapshot: Option<crate::instruction::InstructionSnapshot>,
     pub(super) active_subagent: Option<SubagentContext>,
     pub(super) parent_session: Arc<AgentSession>,
+    pub(super) working_set: crate::TurnWorkingSetHandle,
+    pub(super) tool_cache: crate::TurnToolCacheHandle,
 }
 
 pub(super) async fn execute_tool_calls(
@@ -124,7 +126,7 @@ pub(super) async fn execute_tool_calls(
                     &trace_part_id,
                     tool_call.name.clone(),
                     tool_call.payload_text(),
-                    tool_call.call_id.clone(),
+                    Some(tool_call.stable_call_id().to_string()),
                     Some(tool_call.id.clone()),
                 );
                 recorder.start_item(item.clone());
@@ -132,7 +134,7 @@ pub(super) async fn execute_tool_calls(
             });
         if let Some(tool) = &mut item.tool {
             tool.tool_call_id = trace_part_id.clone();
-            tool.call_id = tool_call.call_id.clone();
+            tool.call_id = Some(tool_call.stable_call_id().to_string());
             tool.provider_item_id = Some(tool_call.id.clone());
             tool.name = tool_call.name.clone();
             tool.arguments = tool_call.payload_text();
@@ -230,6 +232,8 @@ pub(super) async fn execute_tool_calls(
             active_subagent: context.active_subagent.clone(),
             lsp_runtime: context.core.lsp_runtime.clone(),
             parent_session: context.parent_session.clone(),
+            working_set: context.working_set.clone(),
+            tool_cache: context.tool_cache.clone(),
         };
         let mut approval_request = approval_request(tool_call, &tool_context);
         approval_request.id = trace_part_id.clone();
@@ -330,27 +334,46 @@ pub(super) async fn execute_tool_calls(
                     tool_id: invocation.runtime_tool_call_id.clone(),
                     revision_base: item.revision,
                 };
+                let cache_policy = tool.cache_policy(&tool_input.arguments);
+                let invalidates_cache = tool.invalidates_cache(&tool_input.arguments);
                 let lock = runtime_lock.clone();
                 let tool_name = invocation.name.clone();
                 let tool_call_for_task = tool_call.clone();
                 let tool_context = invocation.context;
+                let cache = context.tool_cache.clone();
+                let cache_arguments = tool_input.arguments.clone();
+                let cache_workspace_root = context.workspace_root.to_path_buf();
+                let cache_call_id = tool_call.stable_call_id().to_string();
+                let tool_effect = effect;
                 scheduled.push(ScheduledToolExecution {
                     tool_call: tool_call.clone(),
                     item,
                     future: Box::pin(async move {
+                        let execute = || {
+                            cache.execute_or_reuse(
+                                &tool_name,
+                                &cache_arguments,
+                                &cache_workspace_root,
+                                cache_policy,
+                                cache_call_id,
+                                || tool.execute(tool_input, tool_context),
+                            )
+                        };
                         let result = match runtime_lock_policy {
                             ToolRuntimeLockPolicy::Shared if supports_parallel => {
                                 let _guard = lock.read().await;
-                                tool.execute(tool_input, tool_context).await
+                                execute().await
                             }
-                            ToolRuntimeLockPolicy::None => {
-                                tool.execute(tool_input, tool_context).await
-                            }
+                            ToolRuntimeLockPolicy::None => execute().await,
                             ToolRuntimeLockPolicy::Exclusive | ToolRuntimeLockPolicy::Shared => {
                                 let _guard = lock.write().await;
-                                tool.execute(tool_input, tool_context).await
+                                execute().await
                             }
                         };
+                        if invalidates_cache && result.is_ok() {
+                            cache.invalidate_tool(&tool_name);
+                        }
+                        cache.record_effect(tool_effect, result.is_ok());
                         tool_execution_record(tool_call_for_task, tool_name, result)
                     }),
                 });

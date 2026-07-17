@@ -4,7 +4,8 @@ use pl_protocol::PureError;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use super::{
-    DEFAULT_MODEL_TOOL_OUTPUT_TOKENS, OutputTruncation, ToolRuntimeEvent,
+    DEFAULT_MODEL_TOOL_OUTPUT_TOKENS, MAX_MODEL_TOOL_OUTPUT_BYTES, OutputTruncation,
+    ToolRuntimeEvent, enforce_model_output_limit, model_visible_tool_output,
     model_visible_tool_output_with_tokens,
 };
 
@@ -106,25 +107,64 @@ impl<Artifact> ToolExecutionResult<Artifact> {
         Self {
             success,
             output,
-            model_output,
+            model_output: enforce_model_output_limit(&model_output, MAX_MODEL_TOOL_OUTPUT_BYTES),
             ends_turn,
             output_artifacts,
         }
     }
 
-    pub fn into_tool_output(self) -> ToolOutput {
-        ToolOutput::from_model_output(ToolOutputModelOutputRequest {
+    pub fn into_tool_output(self) -> ToolOutput
+    where
+        Artifact: Serialize,
+    {
+        let raw_bytes = self.output.len() as u64;
+        let model_visible_bytes = self.model_output.len() as u64;
+        let artifacts = self
+            .output_artifacts
+            .into_iter()
+            .map(|artifact| {
+                serde_json::to_value(artifact).unwrap_or_else(
+                    |error| serde_json::json!({ "serializationError": error.to_string() }),
+                )
+            })
+            .collect::<Vec<_>>();
+        let artifact_bytes = tool_output_artifact_bytes(&artifacts);
+        let mut output = ToolOutput::from_model_output(ToolOutputModelOutputRequest {
             model_output: self.model_output,
             success: self.success,
             ends_turn: self.ends_turn,
-        })
+        });
+        if !artifacts.is_empty() {
+            output
+                .runtime_events
+                .push(ToolRuntimeEvent::OutputArtifacts { artifacts });
+        }
+        output.runtime_events.push(ToolRuntimeEvent::OutputMetrics {
+            raw_bytes,
+            model_visible_bytes,
+            artifact_bytes,
+            result_hash: crate::canonical_content_hash(self.output.as_bytes()),
+        });
+        output
     }
+}
+
+/// 汇总 artifact 描述符声明的完整输出字节数。
+pub fn tool_output_artifact_bytes(artifacts: &[serde_json::Value]) -> u64 {
+    artifacts
+        .iter()
+        .filter_map(|artifact| {
+            ["sizeBytes", "size_bytes", "size"]
+                .into_iter()
+                .find_map(|field| artifact.get(field).and_then(serde_json::Value::as_u64))
+        })
+        .fold(0_u64, u64::saturating_add)
 }
 
 impl ToolOutput {
     pub fn from_model_output(request: ToolOutputModelOutputRequest) -> Self {
         Self {
-            description: request.model_output,
+            description: model_visible_tool_output(&request.model_output),
             truncated: OutputTruncation::empty(),
             output_file: PathBuf::new(),
             exit_code: if request.success { Some(0) } else { Some(1) },
@@ -144,7 +184,7 @@ impl ToolOutput {
                 error: format!("failed to serialize JSON output: {error}"),
             })?;
         Ok(Self {
-            description,
+            description: model_visible_tool_output(&description),
             truncated: OutputTruncation::empty(),
             output_file: PathBuf::new(),
             exit_code: None,
@@ -158,7 +198,7 @@ impl ToolOutput {
     /// `ToolOutput` 内部目前用 `description` 存储模型可见输出；产品层应通过该
     /// 语义方法读取，避免把字段名当作共享协议。
     pub fn into_model_output(self) -> String {
-        self.description
+        model_visible_tool_output(&self.description)
     }
 
     /// 从工具运行时事件中提取并解码输出 artifact。
@@ -180,6 +220,8 @@ impl ToolOutput {
                 ToolRuntimeEvent::ToolResultRevision {
                     revision: _revision,
                 } => None,
+                ToolRuntimeEvent::CacheHit { .. } => None,
+                ToolRuntimeEvent::OutputMetrics { .. } => None,
                 ToolRuntimeEvent::EndTurn => None,
             })
             .flatten()
@@ -203,6 +245,8 @@ impl ToolOutput {
             ToolRuntimeEvent::OutputArtifacts {
                 artifacts: _artifacts,
             } => false,
+            ToolRuntimeEvent::CacheHit { .. } => false,
+            ToolRuntimeEvent::OutputMetrics { .. } => false,
         })
     }
 

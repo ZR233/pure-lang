@@ -325,6 +325,8 @@ async fn tool_transport_failure_marks_server_unavailable() {
         active_subagent: None,
         lsp_runtime: None,
         parent_session: Arc::new(crate::AgentSession::new()),
+        working_set: crate::TurnWorkingSetHandle::default(),
+        tool_cache: crate::TurnToolCacheHandle::default(),
     };
 
     let error = adapter
