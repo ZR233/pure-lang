@@ -297,6 +297,34 @@ async fn search_files_accepts_pattern_as_search_text() {
 }
 
 #[tokio::test]
+async fn search_files_treats_empty_path_as_current_directory() {
+    let root = unique_temp_dir("search-empty-path");
+    tokio::fs::create_dir_all(&root).await.unwrap();
+    tokio::fs::write(root.join("AGENTS.md"), "project constraints\n")
+        .await
+        .unwrap();
+    let tool = search_files_tool();
+
+    let output = tool
+        .execute(
+            input(serde_json::json!({
+                "path": "",
+                "query": "project constraints",
+                "literal": true
+            })),
+            context(&root).await,
+        )
+        .await
+        .unwrap();
+
+    let value: serde_json::Value = serde_json::from_str(&output.description).unwrap();
+    assert_eq!(value["path"], serde_json::json!("."));
+    assert_eq!(value["count"], serde_json::json!(1));
+    assert_eq!(value["matches"][0]["path"], serde_json::json!("AGENTS.md"));
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
 async fn search_files_file_pattern_filters_paths() {
     let root = unique_temp_dir("search-file-pattern");
     tokio::fs::create_dir_all(root.join("src")).await.unwrap();

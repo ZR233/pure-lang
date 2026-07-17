@@ -151,7 +151,7 @@ where
     B: WorkspaceFileBackend,
 {
     let input: ListFilesInput = parse_input(arguments, TOOL_LIST_FILES)?;
-    let path = input.path.unwrap_or_else(|| ".".to_string());
+    let path = path_or_current(input.path);
     let glob = input.glob.unwrap_or_else(|| "*".to_string());
     let include_dirs = input.include_dirs.unwrap_or(false);
     let max_files = input
@@ -195,7 +195,7 @@ where
     B: WorkspaceFileBackend,
 {
     let input: SearchFilesInput = parse_input(arguments, TOOL_SEARCH_FILES)?;
-    let path = input.path.unwrap_or_else(|| ".".to_string());
+    let path = path_or_current(input.path);
     let max_matches = input
         .max_matches
         .unwrap_or(DEFAULT_SEARCH_MATCH_LIMIT)
@@ -250,6 +250,11 @@ where
 fn parse_input<T: serde::de::DeserializeOwned>(arguments: Value, tool: &str) -> Result<T> {
     serde_json::from_value(arguments)
         .map_err(|error| tool_error(tool, format!("invalid input: {error}")))
+}
+
+fn path_or_current(path: Option<String>) -> String {
+    path.filter(|path| !path.trim().is_empty())
+        .unwrap_or_else(|| ".".to_string())
 }
 
 pub(crate) fn tool_error(tool: &str, error: impl std::fmt::Display) -> PureError {
