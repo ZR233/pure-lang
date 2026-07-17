@@ -1,3 +1,5 @@
+mod input;
+
 use pl_model::{
     SearchCommands, SearchRequest, SearchSettings, ToolSchema, WebSearchAction, WebSearchClient,
     WebSearchConfig, WebSearchFilters, WebSearchMode, WebSearchUserLocation,
@@ -7,6 +9,7 @@ use serde_json::{Value, json};
 
 use crate::turn::ToolEffect;
 
+use self::input::parse_commands;
 use super::{
     BoxFuture, OutputTruncation, Tool, ToolContext, ToolInput, ToolOutput, ToolRuntimeEvent,
     run_tool_backend_with_cancellation,
@@ -14,6 +17,7 @@ use super::{
 
 pub const TOOL_WEB_SEARCH: &str = "web_search";
 const ASSISTANT_CONTEXT_CHAR_LIMIT: usize = 4_000;
+const WEB_SEARCH_DESCRIPTION: &str = "Search or open web pages, find text in pages, capture PDF pages, and query finance, weather, sports, or time data. Pass commands as arrays of objects, for example {\"search_query\":[{\"q\":\"latest Flutter release\"}]} or {\"open\":[{\"ref_id\":\"turn0search0\"}]}. Multiple commands may be combined in one call.";
 
 /// 使用已门控 OpenAI backend 执行 `/alpha/search` 的普通函数工具。
 #[derive(Debug, Clone)]
@@ -46,7 +50,7 @@ impl Tool for WebSearchTool {
     }
 
     fn description(&self) -> &str {
-        "Search or open web pages, find text in pages, capture PDF pages, and query finance, weather, sports, or time data."
+        WEB_SEARCH_DESCRIPTION
     }
 
     fn input_schema(&self) -> Value {
@@ -67,13 +71,7 @@ impl Tool for WebSearchTool {
         context: ToolContext,
     ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
         Box::pin(async move {
-            let commands =
-                serde_json::from_value::<SearchCommands>(input.arguments).map_err(|error| {
-                    PureError::ToolExecutionFailed {
-                        tool: TOOL_WEB_SEARCH.to_string(),
-                        error: format!("invalid input: {error}"),
-                    }
-                })?;
+            let commands = parse_commands(input.arguments)?;
             let action = command_action(&commands);
             let request = SearchRequest {
                 id: format!("{}:{}", input.session_id, input.tool_id),
