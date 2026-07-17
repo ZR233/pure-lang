@@ -1,5 +1,4 @@
 mod capabilities;
-mod continuation;
 mod default_models;
 mod manager;
 mod model_family;
@@ -12,16 +11,16 @@ mod provider_usage;
 mod request;
 mod stream;
 mod tool_arguments;
+mod transport_session;
 mod visible_text;
 
 pub use capabilities::{
     ModelCapabilities, ModelModality, ProviderCapabilities, ReasoningInterleaved,
     ReasoningInterleavedField, ToolCapabilities,
 };
-pub use continuation::{ModelContinuationState, is_continuation_unsupported_error};
 pub use default_models::{
-    deepseek_default_model_slugs, default_models, openai_default_model_slugs,
-    zhipu_default_model_slugs,
+    deepseek_default_model_slugs, default_models, mimo_default_model_slugs,
+    openai_default_model_slugs, zhipu_default_model_slugs,
 };
 pub use manager::{DefaultModelsManager, ModelsManager};
 pub use model_family::{ModelFamily, ModelPricing};
@@ -36,10 +35,11 @@ pub use parameter::{
 pub use pl_protocol::ToolCallKind;
 pub use provider::{
     ModelProvider, OpenAiProvider, SharedModelProvider, create_provider,
-    create_provider_with_models,
+    create_provider_with_catalog,
 };
 pub use provider_info::{
-    ApplyPatchToolType, ProviderInfo, ProviderKind, ToolWirePolicy, ZHIPU_CODING_PLAN_BASE_URL,
+    ApplyPatchToolType, ProviderConnectionMode, ProviderInfo, ProviderWireProtocol, ToolWirePolicy,
+    ZHIPU_CODING_PLAN_BASE_URL, provider_transport_profile_revision,
 };
 pub use provider_usage::{
     DeepSeekBalanceInfo, DeepSeekBalanceUsage, ZhipuCodingPlanUsage, ZhipuQuotaLimit,
@@ -48,12 +48,13 @@ pub use provider_usage::{
 };
 pub use request::{
     CompletionRequest, CompletionRequestBuilder, CompletionResponse, CompletionTraceContext,
-    FinishReason, ModelCompactionRequest, ModelCompactionResponse, OpenAiCompactionMode,
-    ReasoningConfig, ReasoningSummary, TokenUsage, ToolCall, ToolCallPayload, ToolFormat,
-    ToolSchema,
+    FinishReason, InvalidToolArguments, ModelCompactionRequest, ModelCompactionResponse,
+    OpenAiCompactionMode, ReasoningConfig, ReasoningSummary, TokenUsage, ToolCall, ToolCallPayload,
+    ToolFormat, ToolSchema,
 };
 pub use stream::{
     CompletionBlockContent, CompletionBlockField, CompletionBlockKind, CompletionEventStream,
     CompletionStreamAccumulator, CompletionStreamEvent, ToolInputDeltaPayload,
     ToolInputPayloadKind, collect_completion_event_stream,
 };
+pub use transport_session::ModelTransportSession;

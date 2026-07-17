@@ -225,7 +225,7 @@ StudioState _taskVisualState() {
   return state.copyWith(
     sessions: [
       for (final session in state.sessions)
-        session.copyWith(mode: CompileMode.task),
+        session.copyWith(mode: StudioMode.task),
     ],
     runtime: state.runtime.copyWith(
       task: const TaskRuntimeView(

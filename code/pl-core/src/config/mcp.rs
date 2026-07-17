@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use pl_model::{ProviderKind, ZHIPU_CODING_PLAN_BASE_URL};
+use pl_model::ZHIPU_CODING_PLAN_BASE_URL;
 use pl_protocol::{PureError, Result};
 use serde::{Deserialize, Serialize};
 
@@ -243,8 +243,12 @@ pub fn validate_builtin_mcp_server_states(
     Ok(())
 }
 
-pub fn active_mcp_server_names(config: &super::PureConfig) -> Vec<String> {
-    effective_mcp_servers(config)
+pub fn active_mcp_server_names(
+    user_servers: &BTreeMap<String, McpServerConfig>,
+    builtin_states: &BTreeMap<String, BuiltinMcpServerState>,
+    models: &crate::AgentModelConfig,
+) -> Vec<String> {
+    effective_mcp_servers(user_servers, builtin_states, models)
         .into_iter()
         .filter(|(_, server)| server.status_kind == McpServerStatusKind::Enabled)
         .map(|(server_id, _)| server_id)
@@ -265,10 +269,12 @@ pub fn is_builtin_mcp_server_id(server_id: &str) -> bool {
 }
 
 pub fn effective_mcp_servers(
-    config: &super::PureConfig,
+    user_servers: &BTreeMap<String, McpServerConfig>,
+    builtin_states: &BTreeMap<String, BuiltinMcpServerState>,
+    models: &crate::AgentModelConfig,
 ) -> BTreeMap<String, EffectiveMcpServerConfig> {
     let mut servers = BTreeMap::new();
-    for (server_id, server) in &config.mcp_servers {
+    for (server_id, server) in user_servers {
         let status_kind = if server.enabled {
             McpServerStatusKind::Enabled
         } else {
@@ -290,10 +296,9 @@ pub fn effective_mcp_servers(
         );
     }
 
-    let zhipu_token = zhipu_coding_plan_token(config);
+    let zhipu_token = zhipu_coding_plan_token(models);
     for definition in BUILTIN_ZHIPU_MCP_SERVERS {
-        let builtin_enabled = config
-            .builtin_mcp_servers
+        let builtin_enabled = builtin_states
             .get(definition.id)
             .is_none_or(|state| state.enabled);
         let status_kind = if !builtin_enabled {
@@ -332,51 +337,47 @@ pub fn effective_mcp_servers(
     servers
 }
 
-pub fn builtin_mcp_server_states_are_default(
-    states: &BTreeMap<String, BuiltinMcpServerState>,
-) -> bool {
-    states.is_empty() || states.values().all(|state| state.enabled)
-}
-
-pub fn normalize_builtin_mcp_server_states(config: &mut super::PureConfig) {
-    config
-        .builtin_mcp_servers
-        .retain(|server_id, _| is_builtin_mcp_server_id(server_id));
-    if zhipu_coding_plan_token(config).is_some() {
+pub fn normalize_builtin_mcp_server_states(
+    states: &mut BTreeMap<String, BuiltinMcpServerState>,
+    models: &crate::AgentModelConfig,
+) {
+    states.retain(|server_id, _| is_builtin_mcp_server_id(server_id));
+    if zhipu_coding_plan_token(models).is_some() {
         for server_id in builtin_mcp_server_ids() {
-            config
-                .builtin_mcp_servers
+            states
                 .entry((*server_id).to_string())
                 .or_insert(BuiltinMcpServerState { enabled: true });
         }
     }
 }
 
-pub fn zhipu_coding_plan_token(config: &super::PureConfig) -> Option<String> {
-    config
+pub fn zhipu_coding_plan_token(models: &crate::AgentModelConfig) -> Option<String> {
+    models
         .providers
         .iter()
-        .find_map(|(provider_key, provider)| {
-            is_zhipu_coding_plan_provider(provider_key, provider)
+        .find_map(|(provider_id, provider)| {
+            is_zhipu_coding_plan_provider(provider_id.as_str(), provider)
                 .then(|| provider_token(provider))
                 .flatten()
         })
         .or_else(|| {
-            config.providers.iter().find_map(|(_, provider)| {
-                (provider.provider_kind == ProviderKind::Zhipu)
+            models.providers.iter().find_map(|(_, provider)| {
+                (provider.base_url.contains("bigmodel.cn"))
                     .then(|| provider_token(provider))
                     .flatten()
             })
         })
 }
 
-fn is_zhipu_coding_plan_provider(provider_key: &str, provider: &super::ProviderConfig) -> bool {
-    provider.provider_kind == ProviderKind::Zhipu
-        && (provider_key == "zhipu-coding-plan"
-            || normalized_base_url(&provider.base_url) == ZHIPU_CODING_PLAN_BASE_URL)
+fn is_zhipu_coding_plan_provider(provider_key: &str, provider: &crate::ProviderConfig) -> bool {
+    provider
+        .preset_id()
+        .is_some_and(|preset| preset.as_str() == "zhipu-coding-plan")
+        || provider_key == "zhipu-coding-plan"
+        || normalized_base_url(&provider.base_url) == ZHIPU_CODING_PLAN_BASE_URL
 }
 
-fn provider_token(provider: &super::ProviderConfig) -> Option<String> {
+fn provider_token(provider: &crate::ProviderConfig) -> Option<String> {
     provider
         .bearer_token
         .as_deref()

@@ -55,8 +55,46 @@ fn read_file_result_text(result: Option<&str>) -> String {
 }
 
 #[tokio::test]
+async fn invalid_function_arguments_are_returned_to_the_model_without_running_the_tool() {
+    let core = TurnEngine::default_provider().unwrap();
+    let tool_call = ToolCall::invalid_function(
+        "call-1",
+        "github_api_request",
+        "{\"method\":\"POST\"\n\"path\":\"/repos/o/r/pulls/1/reviews\"}",
+        "expected `,` or `}` at line 2 column 1",
+        None,
+    );
+    let (event_tx, _) = tokio::sync::broadcast::channel(8);
+    let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
+    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(60_000));
+
+    let records = execute_tool_calls(
+        &[tool_call],
+        &mut budget,
+        &mut recorder,
+        ToolExecutionContext {
+            core: &core,
+            options: &TurnOptions::default(),
+            session_id: "turn-1",
+            workspace_root: &std::env::temp_dir(),
+            workspace_instructions: None,
+            instruction_snapshot: None,
+            active_subagent: None,
+            parent_session: std::sync::Arc::new(AgentSession::new()),
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].status, TracePartStatus::Failed);
+    assert!(records[0].result.contains("Invalid JSON arguments"));
+    assert!(records[0].result.contains("github_api_request"));
+}
+
+#[tokio::test]
 async fn tool_context_uses_item_id_when_provider_call_id_is_missing() {
-    let mut core = PureCore::default_provider().unwrap();
+    let mut core = TurnEngine::default_provider().unwrap();
     core.register_tool(ProviderCallIdEchoTool);
     let tool_call = ToolCall::function(
         "chat-tool-call-1",
@@ -75,15 +113,12 @@ async fn tool_context_uses_item_id_when_provider_call_id_is_missing() {
         ToolExecutionContext {
             core: &core,
             options: &TurnOptions::default(),
-            mode: crate::turn::CompileMode::Simple,
             session_id: "turn-1",
             workspace_root: &std::env::temp_dir(),
             workspace_instructions: None,
             instruction_snapshot: None,
             active_subagent: None,
-            agent_supervisor: crate::AgentSupervisor::default(),
-            agent_tool_registrar: None,
-            parent_session: std::sync::Arc::new(CoreSession::new()),
+            parent_session: std::sync::Arc::new(AgentSession::new()),
         },
     )
     .await
@@ -105,7 +140,7 @@ async fn tool_execution_reuses_streamed_trace_part() {
     tokio::fs::write(workspace_root.join("note.txt"), "provider item reuse")
         .await
         .unwrap();
-    let mut core = PureCore::default_provider().unwrap();
+    let mut core = TurnEngine::default_provider().unwrap();
     core.register_tool(LocalWorkspaceFileTool::new(WorkspaceFileToolKind::ReadFile));
     let tool_call = ToolCall::function(
         "provider-item-1",
@@ -133,15 +168,12 @@ async fn tool_execution_reuses_streamed_trace_part() {
         ToolExecutionContext {
             core: &core,
             options: &TurnOptions::default(),
-            mode: crate::turn::CompileMode::Simple,
             session_id: "turn-1",
             workspace_root: &workspace_root,
             workspace_instructions: None,
             instruction_snapshot: None,
             active_subagent: None,
-            agent_supervisor: crate::AgentSupervisor::default(),
-            agent_tool_registrar: None,
-            parent_session: std::sync::Arc::new(CoreSession::new()),
+            parent_session: std::sync::Arc::new(AgentSession::new()),
         },
     )
     .await
@@ -201,7 +233,7 @@ async fn tool_execution_reuses_streamed_trace_part_when_provider_id_arrives_late
     tokio::fs::write(workspace_root.join("note.txt"), "late provider id")
         .await
         .unwrap();
-    let mut core = PureCore::default_provider().unwrap();
+    let mut core = TurnEngine::default_provider().unwrap();
     core.register_tool(LocalWorkspaceFileTool::new(WorkspaceFileToolKind::ReadFile));
     let tool_call = ToolCall::function(
         "provider-item-1",
@@ -229,15 +261,12 @@ async fn tool_execution_reuses_streamed_trace_part_when_provider_id_arrives_late
         ToolExecutionContext {
             core: &core,
             options: &TurnOptions::default(),
-            mode: crate::turn::CompileMode::Simple,
             session_id: "turn-1",
             workspace_root: &workspace_root,
             workspace_instructions: None,
             instruction_snapshot: None,
             active_subagent: None,
-            agent_supervisor: crate::AgentSupervisor::default(),
-            agent_tool_registrar: None,
-            parent_session: std::sync::Arc::new(CoreSession::new()),
+            parent_session: std::sync::Arc::new(AgentSession::new()),
         },
     )
     .await
@@ -301,7 +330,7 @@ async fn tool_execution_reuses_streamed_trace_part_when_provider_id_arrives_late
 
 #[tokio::test]
 async fn tool_runtime_deltas_use_trace_part_id() {
-    let mut core = PureCore::default_provider().unwrap();
+    let mut core = TurnEngine::default_provider().unwrap();
     core.register_tool(DeltaEchoTool);
     let tool_call = ToolCall::function(
         "provider-item-1",
@@ -320,15 +349,12 @@ async fn tool_runtime_deltas_use_trace_part_id() {
         ToolExecutionContext {
             core: &core,
             options: &TurnOptions::default(),
-            mode: crate::turn::CompileMode::Simple,
             session_id: "turn-1",
             workspace_root: &std::env::temp_dir(),
             workspace_instructions: None,
             instruction_snapshot: None,
             active_subagent: None,
-            agent_supervisor: crate::AgentSupervisor::default(),
-            agent_tool_registrar: None,
-            parent_session: std::sync::Arc::new(CoreSession::new()),
+            parent_session: std::sync::Arc::new(AgentSession::new()),
         },
     )
     .await

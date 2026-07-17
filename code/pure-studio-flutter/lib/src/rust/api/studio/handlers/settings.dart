@@ -8,7 +8,11 @@ import '../types/agent.dart';
 import '../types/interaction.dart';
 import '../types/response.dart';
 import '../types/runtime.dart';
+import '../types/settings.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
+
+Future<BridgeProviderCatalogSnapshot> loadProviderCatalog() =>
+    RustLib.instance.api.crateApiStudioHandlersSettingsLoadProviderCatalog();
 
 Future<ConfigSavedResponse> saveRuntimePermissionMode({required String mode}) =>
     RustLib.instance.api

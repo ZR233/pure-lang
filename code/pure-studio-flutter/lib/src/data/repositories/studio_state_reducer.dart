@@ -130,8 +130,14 @@ StudioState mergeStudioSessionState(
 }
 
 StudioState mergeStudioConfigState(StudioState current, StudioState next) {
+  final nextProviders = next.providers.isEmpty
+      ? current.providers
+      : next.providers;
   return current.copyWith(
-    providers: next.providers.isEmpty ? current.providers : next.providers,
+    providers: [
+      for (final provider in nextProviders)
+        providerWithCatalogMetadata(provider, current.providerCatalog),
+    ],
     defaultProviderId: next.defaultProviderId,
     providerUsages: next.providerUsages.isEmpty
         ? current.providerUsages

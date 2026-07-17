@@ -240,7 +240,7 @@ pub struct RuntimeCostAmount {
 
 /// Cumulative runtime usage snapshot.
 ///
-/// Used by Studio DTOs to expose the current usage total for either a session
+/// Used by product DTOs to expose the current usage total for either a session
 /// or a single agent. `estimated_costs` is grouped by currency.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -262,7 +262,7 @@ pub struct RuntimeUsageSnapshot {
 
 /// Per-inference runtime usage attributed to a root or child agent.
 ///
-/// `inference_id` is stable for a model call and is used by Studio persistence
+/// `inference_id` is stable for a model call and is used by product persistence
 /// as an idempotency key.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -301,7 +301,7 @@ pub enum PipelineStage {
     Integration,
 }
 
-/// Token usage snapshot shared by Studio and internal trace mapping.
+/// Token usage snapshot shared by product projection and internal trace mapping.
 ///
 /// Lightweight copy of `pl_model::TokenUsage` to avoid coupling public protocol
 /// DTOs to `pl-model`.

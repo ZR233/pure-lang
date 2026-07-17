@@ -4,7 +4,13 @@ use super::ops::tool_error;
 
 pub(super) fn resolve_container_copy_path(path: &str, cwd: Option<&str>) -> Result<String> {
     if path.starts_with('/') {
+<<<<<<< HEAD
         return normalize_container_path(path);
+=======
+        return Ok(normalize_container_path(Path::new(path))?
+            .to_string_lossy()
+            .into_owned());
+>>>>>>> 6bd37cb0f58096be1872f15256a73a99e1a05ced
     }
     let Some(cwd) = cwd.filter(|cwd| !cwd.is_empty() && *cwd != ".") else {
         return normalize_container_path(path);
@@ -81,6 +87,40 @@ mod tests {
 
     #[test]
     fn relative_container_path_uses_posix_separators_on_windows() {
+        assert_eq!(
+            resolve_container_copy_path("src/lib.rs", Some("/workspace/repo"))
+                .expect("relative container path"),
+            "/workspace/repo/src/lib.rs",
+        );
+    }
+
+    #[test]
+    fn relative_container_path_cannot_escape_absolute_cwd() {
+        let error = resolve_container_copy_path("../secret", Some("/workspace/repo"))
+            .expect_err("cwd escape must be rejected");
+
+        assert!(error.to_string().contains("escapes container cwd"));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn absolute_container_path_is_independent_from_cwd() {
+        assert_eq!(
+            resolve_container_copy_path(
+                "/tmp/.mai-team/skills/demo/SKILL.md",
+                Some("/workspace/repo"),
+            )
+            .expect("absolute container path"),
+            "/tmp/.mai-team/skills/demo/SKILL.md",
+        );
+    }
+
+    #[test]
+    fn relative_container_path_is_resolved_from_cwd() {
         assert_eq!(
             resolve_container_copy_path("src/lib.rs", Some("/workspace/repo"))
                 .expect("relative container path"),

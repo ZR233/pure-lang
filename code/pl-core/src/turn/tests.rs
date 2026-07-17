@@ -12,21 +12,10 @@ fn turn_budget_default_matches_codex_style_wall_clock() {
 
 #[test]
 fn turn_request_uses_default_budget() {
-    let request = TurnRequest::new("hello", CompileMode::Simple);
+    let request = TurnRequest::new("hello");
 
     assert_eq!(request.budget, TurnBudget::default());
     assert_eq!(request.prompt, "hello");
-    assert_eq!(request.mode, CompileMode::Simple);
-}
-
-#[test]
-fn compile_mode_uses_only_simple_and_task_wire_labels() {
-    assert_eq!(CompileMode::default().label(), "simple");
-    assert_eq!(CompileMode::from_label("simple").label(), "simple");
-    assert_eq!(CompileMode::from_label("task").label(), "task");
-    assert_eq!(CompileMode::from_label("auto").label(), "simple");
-    assert_eq!(CompileMode::from_label("plan").label(), "simple");
-    assert_eq!(CompileMode::from_label("").label(), "simple");
 }
 
 #[test]

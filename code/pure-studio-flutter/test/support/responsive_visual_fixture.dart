@@ -35,7 +35,7 @@ const responsiveVisualProviders = [
     status: 'ready',
     usageLabel: 'Balance available',
     modelCount: '2',
-    providerKind: 'deep_seek',
+    wireProtocol: 'chat_completions',
   ),
   ProviderSettingsView(
     id: 'openai-enterprise',
@@ -60,7 +60,7 @@ const responsiveVisualProviders = [
     status: 'ready',
     usageLabel: 'Usage unavailable',
     modelCount: '2',
-    providerKind: 'open_ai',
+    wireProtocol: 'responses',
   ),
   ProviderSettingsView(
     id: 'anthropic-direct',
@@ -85,7 +85,7 @@ const responsiveVisualProviders = [
     status: 'ready',
     usageLabel: 'Usage unavailable',
     modelCount: '2',
-    providerKind: 'anthropic',
+    wireProtocol: 'chat_completions',
   ),
   ProviderSettingsView(
     id: 'local-openai-compatible',
@@ -110,7 +110,7 @@ const responsiveVisualProviders = [
     status: 'missingCredential',
     usageLabel: 'Credential optional',
     modelCount: '2',
-    providerKind: 'open_ai',
+    wireProtocol: 'responses',
   ),
   ProviderSettingsView(
     id: 'zhipu-coding-plan',
@@ -130,7 +130,7 @@ const responsiveVisualProviders = [
     status: 'ready',
     usageLabel: 'Coding plan ready',
     modelCount: '1',
-    providerKind: 'zhipu',
+    wireProtocol: 'chat_completions',
   ),
 ];
 
@@ -201,7 +201,7 @@ StudioState responsiveVisualState() {
     id: 'session-1',
     projectId: project.id,
     title: responsiveVisualSessionTitle,
-    mode: CompileMode.simple,
+    mode: StudioMode.simple,
     updatedAt: timestamp,
   );
   final messages = [

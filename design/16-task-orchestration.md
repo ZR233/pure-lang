@@ -44,33 +44,33 @@ coordinator 后台监控代理。代理终结、merge 冲突或 reviewer 返回�
 并启动 planner continuation turn；planner 不依靠单个长 turn 持续 wait。应用重启后
 从持久事实恢复，Git 状态与 `expectedHead` 不一致时进入 `blocked`。
 
-Studio 为每个 Task session 持有一个私有 agent runtime（supervisor、repository identity、
+Studio 为每个 Task session 持有一个私有 `AgentRuntime<StudioHost>`（actor coordinator、repository identity、
 task generation 与 lifecycle epoch）。同一 session 的用户 root turn 与 continuation
-复用该 supervisor，因此后续 planner 能继续 list、wait、send 和 close 先前 turn 创建的
-agent；不同 session 完全隔离。Simple mode 仍使用 turn-local supervisor。planning
+复用该 runtime，因此后续 planner 能继续 list、wait、send 和 close 先前 turn 创建的
+agent；不同 session 完全隔离。Simple mode 仍使用 turn-local runtime。planning
 generation 在该 session 首次创建 `TaskRun` 时绑定 run id；run 终态且旧 turn 已静止后，
 下一个 root turn 才安全轮换 generation，避免旧 agent path 泄漏到新任务。
-同一 session 的 supervisor 获取与 generation 轮换必须在稳定的 per-session cell 内单航班
+同一 session 的 runtime 获取与 generation 轮换必须在稳定的 per-session cell 内单航班
 执行；停止旧 generation 成功后原子替换该 cell，失败则保留原 entry。全局 registry 锁
-不得跨越停止 supervisor 的异步等待，不同 session 应能并行；shutdown 与获取/轮换通过
-registry 生命周期门禁互斥，避免清空期间漏掉或覆盖 supervisor。
+不得跨越停止 runtime 的异步等待，不同 session 应能并行；shutdown 与获取/轮换通过
+registry 生命周期门禁互斥，避免清空期间漏掉或覆盖 runtime。
 
-已分配 worktree 的 agent 在后续 `resume_agent` 与 `send_input(triggerTurn=true)` turn 中
+已分配 worktree 的 agent 在后续 `submit(InputDelivery::Start)` turn 中
 必须继续使用 agent entry 持有的 worktree path；父 planner 当前 workspace 只能提供模型与
 turn 配置，不能覆盖 child 的工作区。worktree 句柄缺失或与 durable assignment 不一致时
 拒绝启动 follow-up，不得回退到主工作区执行。
 
-Task lifecycle hook 在安装时绑定 Studio session，并通过该 per-session supervisor 边界选择
+Task lifecycle adapter 在安装时绑定 Studio session，并通过该 per-session runtime 边界选择
 持久 TaskRun；通用 `AgentSpawnLifecycleRequest.sessionId` 保持工具执行 turn scope 语义，
 不得被误作 Studio session 身份或与 hook 绑定值比较。
 
 root turn 结束或 UI 仅切换所选 session 不销毁 Task agent runtime。进程 shutdown 先停止
-root turn 与 continuation scheduler，再复制 supervisor 列表、释放 registry 锁，并逐个
+root turn 与 continuation scheduler，再复制 runtime 列表、释放 registry 锁，并逐个
 cancel-and-wait/quiesce；该路径保留 durable worktree，不调用会 discard 且吞错的通用
 `shutdown_descendants`。旧 epoch 的 agent 事件不得跨越 runtime restart 产生 UI 或
 continuation 副作用，也不得写入新 epoch 的 durable agent outcome 或终结观察事实。
 
-真实进程重启不能恢复内存 task handle、child `CoreSession` 或 mailbox。取得 process lease
+真实进程重启不能恢复内存 task handle、物理模型连接或 actor mailbox。取得 process lease
 后，store 以 run-scoped 单事务把 `Pending | Running | WaitingForDelivery` WorkUnit 及其
 精确配对 Outcome 原子收束为 `Cancelled`；explorer 的 `Queued | Running` Outcome 同样
 收束。`Delivered | Merged | Failed | Cancelled` 及 delivery 保持不变，所有旧 terminal
@@ -300,7 +300,7 @@ reviewer 初始上下文包含 plan、任务 diff、代理结果、验证摘要�
 
 `review_exit` 返回 `verdict`、`summary`、`designReferences` 和 `findings`。runtime 根据
 tool trace 校验 reviewer 先成功定位文档，再以规范的 workspace-relative 路径读取
-`design/**` 正文；该校验必须读取完整 reviewer CoreSession，不得因 Responses
+`design/**` 正文；该校验必须读取完整 reviewer `AgentSession`，不得因 Responses
 continuation 只发送增量上下文而丢失先前的 locator 或 read 证据。路径、章节和 finding
 引用都必须能在实际读取结果中验证。未调用
 `review_exit` 便终结的 reviewer 会把本轮与 outcome 标记为失败，并恢复到可实施阶段，

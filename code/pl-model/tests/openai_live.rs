@@ -64,6 +64,7 @@ fn openai_request(model: String) -> CompletionRequest {
             plan_mode: false,
             trace_sequence_base: 0,
         }),
+        transport_session: Default::default(),
     }
 }
 

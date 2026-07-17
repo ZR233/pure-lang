@@ -49,16 +49,9 @@ impl Tool for PlanExitTool {
     fn execute<'a>(
         &'a self,
         input: ToolInput,
-        context: ToolContext,
+        _context: ToolContext,
     ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
         Box::pin(async move {
-            if context.mode != crate::turn::CompileMode::Task {
-                return Err(PureError::ToolExecutionFailed {
-                    tool: self.name().to_string(),
-                    error: "plan_exit is only available in Task mode".to_string(),
-                });
-            }
-
             let args: PlanExitInput = serde_json::from_value(input.arguments).map_err(|error| {
                 PureError::ToolExecutionFailed {
                     tool: self.name().to_string(),
@@ -96,24 +89,21 @@ mod tests {
 
     use super::*;
     use crate::tool::WorkspaceAccess;
-    use crate::{AgentSupervisor, CompileMode, CoreSession, TurnOptions};
+    use crate::{AgentSession, TurnOptions};
 
-    fn context(mode: CompileMode) -> ToolContext {
+    fn context() -> ToolContext {
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
         ToolContext {
             event_tx,
             options: TurnOptions::default(),
             workspace_access: WorkspaceAccess::WorkspaceOnly,
-            mode,
             workspace_root: std::env::temp_dir(),
             workspace_instructions: None,
             instruction_snapshot: None,
             provider_call_id: None,
             active_subagent: None,
-            agent_supervisor: AgentSupervisor::default(),
-            agent_tool_registrar: None,
             lsp_runtime: None,
-            parent_session: Arc::new(CoreSession::new()),
+            parent_session: Arc::new(AgentSession::new()),
         }
     }
 
@@ -129,7 +119,7 @@ mod tests {
     #[tokio::test]
     async fn submits_completed_plan() {
         let output = PlanExitTool
-            .execute(input("# Plan\n\n- Do it"), context(CompileMode::Task))
+            .execute(input("# Plan\n\n- Do it"), context())
             .await
             .unwrap();
 
@@ -143,19 +133,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rejects_auto_mode() {
-        let error = PlanExitTool
-            .execute(input("# Plan"), context(CompileMode::Simple))
-            .await
-            .unwrap_err();
-
-        assert!(error.to_string().contains("Task mode"));
-    }
-
-    #[tokio::test]
     async fn rejects_empty_content() {
         let error = PlanExitTool
-            .execute(input("  "), context(CompileMode::Task))
+            .execute(input("  "), context())
             .await
             .unwrap_err();
 

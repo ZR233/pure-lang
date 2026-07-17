@@ -22,16 +22,13 @@ async fn context(root: &Path) -> ToolContext {
         event_tx,
         options: TurnOptions::default(),
         workspace_access: crate::tool::WorkspaceAccess::WorkspaceOnly,
-        mode: crate::turn::CompileMode::Simple,
         workspace_root: root.to_path_buf(),
         workspace_instructions: None,
         instruction_snapshot: None,
         provider_call_id: None,
         active_subagent: None,
-        agent_supervisor: crate::AgentSupervisor::default(),
-        agent_tool_registrar: None,
         lsp_runtime: None,
-        parent_session: std::sync::Arc::new(crate::CoreSession::new()),
+        parent_session: std::sync::Arc::new(crate::AgentSession::new()),
     }
 }
 

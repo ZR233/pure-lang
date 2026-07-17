@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -11,7 +12,9 @@ use super::tool_adapter::{McpToolAdapter, format_mcp_content};
 use super::transport::{HttpMcpClient, McpStderrSeverity, classify_mcp_stderr_line};
 use super::wire::{McpToolDefinition, default_input_schema};
 use super::{McpAvailabilityKind, McpRuntimeRegistry, exposed_tool_name, is_mcp_tool_name};
-use crate::config::{McpServerConfig, McpServerTransport, PureConfig, effective_mcp_servers};
+use crate::config::{
+    McpServerConfig, McpServerTransport, ToolCapabilityConfig, effective_mcp_servers,
+};
 use crate::tool::{Tool, ToolContext, ToolInput};
 
 #[derive(Debug)]
@@ -137,8 +140,8 @@ fn http_client_uses_bearer_token_override() {
 
 #[tokio::test]
 async fn registry_marks_disabled_and_missing_credential_without_probe() {
-    let mut config = PureConfig::default();
-    config.mcp_servers.insert(
+    let mut servers = BTreeMap::new();
+    servers.insert(
         "draft".to_string(),
         McpServerConfig {
             enabled: false,
@@ -147,7 +150,13 @@ async fn registry_marks_disabled_and_missing_credential_without_probe() {
     );
     let registry = McpRuntimeRegistry::new();
 
-    registry.reconcile(effective_mcp_servers(&config)).await;
+    registry
+        .reconcile(effective_mcp_servers(
+            &servers,
+            &BTreeMap::new(),
+            &crate::AgentModelConfig::default(),
+        ))
+        .await;
     let snapshots = registry.snapshots().await;
 
     assert_eq!(
@@ -183,7 +192,7 @@ async fn registry_registers_only_available_tools() {
         .await
         .servers
         .insert("draft".to_string(), McpRuntimeServerState::disabled(1));
-    let mut core = crate::PureCore::default_provider().unwrap();
+    let mut core = crate::TurnEngine::default_provider().unwrap();
 
     registry.register_available_tools(&mut core).await.unwrap();
 
@@ -207,10 +216,15 @@ async fn registry_respects_mcp_capability_gate() {
             }],
         ),
     );
-    let mut config = PureConfig::default();
-    config.runtime.tool_capabilities.mcp = false;
+    let capabilities = ToolCapabilityConfig {
+        mcp: false,
+        ..ToolCapabilityConfig::default()
+    };
     let mut core =
-        crate::PureCore::from_config(&config, crate::config::ModelRole::Executor).unwrap();
+        crate::TurnEngineBuilder::from_provider_info(pl_model::ProviderInfo::default_provider())
+            .unwrap()
+            .with_tool_capabilities(capabilities)
+            .build();
 
     registry.register_available_tools(&mut core).await.unwrap();
 
@@ -256,8 +270,8 @@ async fn reconcile_disabled_server_closes_previous_client() {
             Vec::new(),
         ),
     );
-    let mut config = PureConfig::default();
-    config.mcp_servers.insert(
+    let mut servers = BTreeMap::new();
+    servers.insert(
         "github".to_string(),
         McpServerConfig {
             enabled: false,
@@ -265,7 +279,13 @@ async fn reconcile_disabled_server_closes_previous_client() {
         },
     );
 
-    registry.reconcile(effective_mcp_servers(&config)).await;
+    registry
+        .reconcile(effective_mcp_servers(
+            &servers,
+            &BTreeMap::new(),
+            &crate::AgentModelConfig::default(),
+        ))
+        .await;
     let snapshots = registry.snapshots().await;
 
     assert_eq!(shutdown_count.load(Ordering::SeqCst), 1);
@@ -298,16 +318,13 @@ async fn tool_transport_failure_marks_server_unavailable() {
         event_tx,
         options: crate::turn::TurnOptions::default(),
         workspace_access: crate::tool::WorkspaceAccess::WorkspaceOnly,
-        mode: crate::turn::CompileMode::Simple,
         workspace_root: std::env::temp_dir(),
         workspace_instructions: None,
         instruction_snapshot: None,
         provider_call_id: None,
         active_subagent: None,
-        agent_supervisor: crate::AgentSupervisor::default(),
-        agent_tool_registrar: None,
         lsp_runtime: None,
-        parent_session: Arc::new(crate::CoreSession::new()),
+        parent_session: Arc::new(crate::AgentSession::new()),
     };
 
     let error = adapter

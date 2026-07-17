@@ -15,6 +15,7 @@ import 'api/studio/types/interaction.dart';
 import 'api/studio/types/message.dart';
 import 'api/studio/types/response.dart';
 import 'api/studio/types/runtime.dart';
+import 'api/studio/types/settings.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:ffi' as ffi;
@@ -55,6 +56,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeMcpHealthDto dco_decode_box_autoadd_bridge_mcp_health_dto(dynamic raw);
+
+  @protected
+  BridgeModelPricing dco_decode_box_autoadd_bridge_model_pricing(dynamic raw);
+
+  @protected
+  BridgeModelReasoningDescriptor
+  dco_decode_box_autoadd_bridge_model_reasoning_descriptor(dynamic raw);
 
   @protected
   BridgePlanLifecycleDto dco_decode_box_autoadd_bridge_plan_lifecycle_dto(
@@ -181,7 +189,44 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeMcpServerDto dco_decode_bridge_mcp_server_dto(dynamic raw);
 
   @protected
+  BridgeModelCapabilities dco_decode_bridge_model_capabilities(dynamic raw);
+
+  @protected
+  BridgeModelCatalogDescriptor dco_decode_bridge_model_catalog_descriptor(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeModelDescriptor dco_decode_bridge_model_descriptor(dynamic raw);
+
+  @protected
+  BridgeModelPricing dco_decode_bridge_model_pricing(dynamic raw);
+
+  @protected
+  BridgeModelReasoningDescriptor dco_decode_bridge_model_reasoning_descriptor(
+    dynamic raw,
+  );
+
+  @protected
   BridgePlanLifecycleDto dco_decode_bridge_plan_lifecycle_dto(dynamic raw);
+
+  @protected
+  BridgeProviderCatalogSnapshot dco_decode_bridge_provider_catalog_snapshot(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeProviderConnectionModeDescriptor
+  dco_decode_bridge_provider_connection_mode_descriptor(dynamic raw);
+
+  @protected
+  BridgeProviderPresetDescriptor dco_decode_bridge_provider_preset_descriptor(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeProviderTransportDescriptor
+  dco_decode_bridge_provider_transport_descriptor(dynamic raw);
 
   @protected
   BridgeRuntimeCostAmountDto dco_decode_bridge_runtime_cost_amount_dto(
@@ -317,6 +362,23 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<BridgeMcpServerDto> dco_decode_list_bridge_mcp_server_dto(dynamic raw);
 
   @protected
+  List<BridgeModelCatalogDescriptor>
+  dco_decode_list_bridge_model_catalog_descriptor(dynamic raw);
+
+  @protected
+  List<BridgeModelDescriptor> dco_decode_list_bridge_model_descriptor(
+    dynamic raw,
+  );
+
+  @protected
+  List<BridgeProviderConnectionModeDescriptor>
+  dco_decode_list_bridge_provider_connection_mode_descriptor(dynamic raw);
+
+  @protected
+  List<BridgeProviderPresetDescriptor>
+  dco_decode_list_bridge_provider_preset_descriptor(dynamic raw);
+
+  @protected
   List<BridgeRuntimeCostAmountDto>
   dco_decode_list_bridge_runtime_cost_amount_dto(dynamic raw);
 
@@ -384,6 +446,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   String? dco_decode_opt_String(dynamic raw);
+
+  @protected
+  BridgeModelPricing? dco_decode_opt_box_autoadd_bridge_model_pricing(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeModelReasoningDescriptor?
+  dco_decode_opt_box_autoadd_bridge_model_reasoning_descriptor(dynamic raw);
 
   @protected
   BridgeSessionRuntimeDto?
@@ -519,6 +590,17 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeMcpHealthDto sse_decode_box_autoadd_bridge_mcp_health_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeModelPricing sse_decode_box_autoadd_bridge_model_pricing(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeModelReasoningDescriptor
+  sse_decode_box_autoadd_bridge_model_reasoning_descriptor(
     SseDeserializer deserializer,
   );
 
@@ -667,9 +749,54 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeModelCapabilities sse_decode_bridge_model_capabilities(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeModelCatalogDescriptor sse_decode_bridge_model_catalog_descriptor(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeModelDescriptor sse_decode_bridge_model_descriptor(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeModelPricing sse_decode_bridge_model_pricing(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeModelReasoningDescriptor sse_decode_bridge_model_reasoning_descriptor(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgePlanLifecycleDto sse_decode_bridge_plan_lifecycle_dto(
     SseDeserializer deserializer,
   );
+
+  @protected
+  BridgeProviderCatalogSnapshot sse_decode_bridge_provider_catalog_snapshot(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeProviderConnectionModeDescriptor
+  sse_decode_bridge_provider_connection_mode_descriptor(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeProviderPresetDescriptor sse_decode_bridge_provider_preset_descriptor(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeProviderTransportDescriptor
+  sse_decode_bridge_provider_transport_descriptor(SseDeserializer deserializer);
 
   @protected
   BridgeRuntimeCostAmountDto sse_decode_bridge_runtime_cost_amount_dto(
@@ -851,6 +978,27 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  List<BridgeModelCatalogDescriptor>
+  sse_decode_list_bridge_model_catalog_descriptor(SseDeserializer deserializer);
+
+  @protected
+  List<BridgeModelDescriptor> sse_decode_list_bridge_model_descriptor(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<BridgeProviderConnectionModeDescriptor>
+  sse_decode_list_bridge_provider_connection_mode_descriptor(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<BridgeProviderPresetDescriptor>
+  sse_decode_list_bridge_provider_preset_descriptor(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<BridgeRuntimeCostAmountDto>
   sse_decode_list_bridge_runtime_cost_amount_dto(SseDeserializer deserializer);
 
@@ -936,6 +1084,17 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   String? sse_decode_opt_String(SseDeserializer deserializer);
+
+  @protected
+  BridgeModelPricing? sse_decode_opt_box_autoadd_bridge_model_pricing(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeModelReasoningDescriptor?
+  sse_decode_opt_box_autoadd_bridge_model_reasoning_descriptor(
+    SseDeserializer deserializer,
+  );
 
   @protected
   BridgeSessionRuntimeDto?
@@ -1102,6 +1261,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_bridge_mcp_health_dto(
     BridgeMcpHealthDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_bridge_model_pricing(
+    BridgeModelPricing self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_bridge_model_reasoning_descriptor(
+    BridgeModelReasoningDescriptor self,
     SseSerializer serializer,
   );
 
@@ -1280,8 +1451,62 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_bridge_model_capabilities(
+    BridgeModelCapabilities self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_model_catalog_descriptor(
+    BridgeModelCatalogDescriptor self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_model_descriptor(
+    BridgeModelDescriptor self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_model_pricing(
+    BridgeModelPricing self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_model_reasoning_descriptor(
+    BridgeModelReasoningDescriptor self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_bridge_plan_lifecycle_dto(
     BridgePlanLifecycleDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_provider_catalog_snapshot(
+    BridgeProviderCatalogSnapshot self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_provider_connection_mode_descriptor(
+    BridgeProviderConnectionModeDescriptor self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_provider_preset_descriptor(
+    BridgeProviderPresetDescriptor self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_provider_transport_descriptor(
+    BridgeProviderTransportDescriptor self,
     SseSerializer serializer,
   );
 
@@ -1502,6 +1727,30 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_bridge_model_catalog_descriptor(
+    List<BridgeModelCatalogDescriptor> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_bridge_model_descriptor(
+    List<BridgeModelDescriptor> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_bridge_provider_connection_mode_descriptor(
+    List<BridgeProviderConnectionModeDescriptor> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_bridge_provider_preset_descriptor(
+    List<BridgeProviderPresetDescriptor> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_bridge_runtime_cost_amount_dto(
     List<BridgeRuntimeCostAmountDto> self,
     SseSerializer serializer,
@@ -1611,6 +1860,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_opt_String(String? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_box_autoadd_bridge_model_pricing(
+    BridgeModelPricing? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_bridge_model_reasoning_descriptor(
+    BridgeModelReasoningDescriptor? self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_opt_box_autoadd_bridge_session_runtime_dto(

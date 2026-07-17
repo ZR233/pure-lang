@@ -1,0 +1,530 @@
+use std::collections::{BTreeMap, BTreeSet};
+
+use pl_model::{
+    ModelInfo, ModelModality, ProviderConnectionMode, ProviderInfo, ProviderWireProtocol,
+    deepseek_default_model_slugs, default_models, mimo_default_model_slugs,
+    openai_default_model_slugs, provider_transport_profile_revision, zhipu_default_model_slugs,
+};
+use pl_protocol::{
+    CredentialDescriptorDto, ModelCapabilitiesDto, ModelCatalogDescriptor, ModelDescriptor,
+    ModelPricingDto, ModelReasoningDescriptor, PROVIDER_CATALOG_SCHEMA_VERSION,
+    ProviderCatalogSnapshot, ProviderConnectionModeDescriptor, ProviderPresetDescriptor,
+    ProviderTransportDescriptor, PureError, Result,
+};
+
+use super::{ModelCatalogId, ProviderConfig, ProviderPresetId};
+
+const MIMO_API_BASE_URL: &str = "https://api.xiaomimimo.com/v1";
+const MIMO_TOKEN_PLAN_BASE_URL: &str = "https://token-plan-cn.xiaomimimo.com/v1";
+
+/// 一组由 PL 维护且对产品只读的模型定义。
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModelCatalog {
+    pub id: ModelCatalogId,
+    pub protocol: ProviderWireProtocol,
+    pub models: Vec<ModelInfo>,
+}
+
+/// preset 支持的连接方式及创建实例时的明确默认值。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderConnectionPolicy {
+    pub supported_modes: Vec<ProviderConnectionMode>,
+    pub default_mode: ProviderConnectionMode,
+}
+
+/// 可由宿主直接实例化的内置 Provider 预设。
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProviderPreset {
+    pub id: ProviderPresetId,
+    pub display_name: String,
+    pub description: Option<String>,
+    pub provider: ProviderConfig,
+    pub credential_label: String,
+    pub credential_env: Option<String>,
+    pub model_catalog: ModelCatalogId,
+    pub suggested_model: String,
+    pub icon_key: Option<String>,
+    pub protocol: ProviderWireProtocol,
+    pub connection_policy: ProviderConnectionPolicy,
+}
+
+/// PL 内置 Provider 与模型目录注册表。
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProviderCatalogRegistry {
+    pub presets: Vec<ProviderPreset>,
+    pub model_catalogs: BTreeMap<ModelCatalogId, ModelCatalog>,
+}
+
+impl ProviderCatalogRegistry {
+    /// 构造当前二进制内置的完整目录。
+    pub fn builtin() -> Self {
+        let model_catalogs = [
+            model_catalog(
+                "openai",
+                ProviderWireProtocol::Responses,
+                openai_default_model_slugs(),
+            ),
+            model_catalog(
+                "deepseek",
+                ProviderWireProtocol::ChatCompletions,
+                deepseek_default_model_slugs(),
+            ),
+            model_catalog(
+                "zhipu",
+                ProviderWireProtocol::ChatCompletions,
+                zhipu_default_model_slugs(),
+            ),
+            model_catalog(
+                "mimo",
+                ProviderWireProtocol::ChatCompletions,
+                mimo_default_model_slugs(),
+            ),
+        ]
+        .into_iter()
+        .map(|catalog| (catalog.id.clone(), catalog))
+        .collect();
+
+        let presets = vec![
+            preset(
+                "openai",
+                ProviderInfo::openai(None),
+                "openai",
+                "OPENAI_API_KEY",
+                "OpenAI models served through the Responses API.",
+                "openai",
+            ),
+            preset(
+                "deepseek",
+                ProviderInfo::deepseek(None),
+                "deepseek",
+                "DEEPSEEK_API_KEY",
+                "DeepSeek reasoning and coding models.",
+                "deepseek",
+            ),
+            preset(
+                "zhipu",
+                ProviderInfo::zhipu(None),
+                "zhipu",
+                "ZAI_API_KEY",
+                "Zhipu BigModel API.",
+                "zhipu",
+            ),
+            preset(
+                "zhipu-coding-plan",
+                ProviderInfo::zhipu_coding_plan(None),
+                "zhipu",
+                "ZAI_API_KEY",
+                "Zhipu Coding Plan endpoint.",
+                "zhipu",
+            ),
+            preset(
+                "mimo-api",
+                ProviderInfo::openai_compatible_chat(
+                    "MiMo API",
+                    MIMO_API_BASE_URL,
+                    "mimo-v2.5-pro",
+                ),
+                "mimo",
+                "MIMO_API_KEY",
+                "Xiaomi MiMo public API.",
+                "mimo",
+            ),
+            preset(
+                "mimo-token-plan",
+                ProviderInfo::openai_compatible_chat(
+                    "MiMo Token Plan",
+                    MIMO_TOKEN_PLAN_BASE_URL,
+                    "mimo-v2.5-pro",
+                ),
+                "mimo",
+                "MIMO_TOKEN_PLAN_API_KEY",
+                "Xiaomi MiMo Token Plan endpoint.",
+                "mimo",
+            ),
+        ];
+
+        Self {
+            presets,
+            model_catalogs,
+        }
+    }
+
+    /// 校验 preset、catalog、transport 与 suggested model 的引用完整性。
+    pub fn validate(&self) -> Result<()> {
+        let mut preset_ids = BTreeSet::new();
+        for preset in &self.presets {
+            if !preset_ids.insert(preset.id.as_str()) {
+                return Err(PureError::ConfigError(format!(
+                    "duplicate provider preset: {}",
+                    preset.id
+                )));
+            }
+            let catalog = self
+                .model_catalogs
+                .get(&preset.model_catalog)
+                .ok_or_else(|| {
+                    PureError::ConfigError(format!(
+                        "provider preset {} references missing catalog: {}",
+                        preset.id, preset.model_catalog
+                    ))
+                })?;
+            if catalog.protocol != preset.protocol {
+                return Err(PureError::ConfigError(format!(
+                    "provider preset {} protocol does not match catalog {}",
+                    preset.id, preset.model_catalog
+                )));
+            }
+            if preset.connection_policy.supported_modes.is_empty()
+                || !preset
+                    .connection_policy
+                    .supported_modes
+                    .contains(&preset.connection_policy.default_mode)
+                || preset.provider.connection_mode() != preset.connection_policy.default_mode
+            {
+                return Err(PureError::ConfigError(format!(
+                    "provider preset {} has invalid connection mode defaults",
+                    preset.id
+                )));
+            }
+            if !catalog
+                .models
+                .iter()
+                .any(|model| model.slug == preset.suggested_model)
+            {
+                return Err(PureError::ConfigError(format!(
+                    "provider preset {} references missing suggested model: {}",
+                    preset.id, preset.suggested_model
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    /// 查找一个内置模型目录。
+    pub fn model_catalog(&self, id: &ModelCatalogId) -> Option<&ModelCatalog> {
+        self.model_catalogs.get(id)
+    }
+
+    /// 生成供 Web 与 Flutter 共用的无 secret 快照。
+    pub fn snapshot(&self) -> Result<ProviderCatalogSnapshot> {
+        self.validate()?;
+        let presets = self.presets.iter().map(preset_descriptor).collect();
+        let model_catalogs = self
+            .model_catalogs
+            .iter()
+            .map(|(id, catalog)| {
+                (
+                    id.to_string(),
+                    ModelCatalogDescriptor {
+                        id: id.to_string(),
+                        models: catalog.models.iter().map(model_descriptor).collect(),
+                    },
+                )
+            })
+            .collect();
+        let mut snapshot = ProviderCatalogSnapshot {
+            schema_version: PROVIDER_CATALOG_SCHEMA_VERSION,
+            revision: String::new(),
+            presets,
+            model_catalogs,
+        };
+        let mut canonical = serde_json::to_vec(&snapshot)
+            .map_err(|error| PureError::ConfigError(error.to_string()))?;
+        for preset in &self.presets {
+            for mode in &preset.connection_policy.supported_modes {
+                canonical.push(0);
+                canonical.extend_from_slice(
+                    provider_transport_profile_revision(preset.protocol, *mode).as_bytes(),
+                );
+            }
+        }
+        snapshot.revision = stable_revision(&canonical);
+        Ok(snapshot)
+    }
+}
+
+/// 返回当前 PL 内置 Provider 目录。
+pub fn builtin_provider_catalog() -> ProviderCatalogRegistry {
+    ProviderCatalogRegistry::builtin()
+}
+
+/// 返回一个内置模型目录的副本。
+pub fn builtin_model_catalog(id: &ModelCatalogId) -> Result<ModelCatalog> {
+    ProviderCatalogRegistry::builtin()
+        .model_catalog(id)
+        .cloned()
+        .ok_or_else(|| PureError::ConfigError(format!("unknown model catalog: {id}")))
+}
+
+fn model_catalog(id: &str, protocol: ProviderWireProtocol, slugs: &[&str]) -> ModelCatalog {
+    let models = default_models()
+        .into_iter()
+        .filter(|model| slugs.contains(&model.slug.as_str()))
+        .collect();
+    ModelCatalog {
+        id: ModelCatalogId::new(id).expect("static model catalog id is valid"),
+        protocol,
+        models,
+    }
+}
+
+fn preset(
+    id: &str,
+    info: ProviderInfo,
+    catalog: &str,
+    credential_env: &str,
+    description: &str,
+    icon_key: &str,
+) -> ProviderPreset {
+    let protocol = info.protocol;
+    let default_connection_mode = info.connection_mode;
+    let suggested_model = info.default_model.clone();
+    let display_name = info.name.clone();
+    let model_catalog = ModelCatalogId::new(catalog).expect("static model catalog id is valid");
+    let preset_id = ProviderPresetId::new(id).expect("static provider preset id is valid");
+    let mut provider =
+        ProviderConfig::from_bundled_catalog(info, model_catalog.clone(), Vec::new())
+            .with_preset(preset_id.clone());
+    provider.bearer_token_env = Some(credential_env.to_string());
+    let connection_policy = ProviderConnectionPolicy {
+        supported_modes: provider_connection_modes(protocol),
+        default_mode: default_connection_mode,
+    };
+    ProviderPreset {
+        id: preset_id.clone(),
+        display_name,
+        description: Some(description.to_string()),
+        provider,
+        credential_label: "API Key".to_string(),
+        credential_env: Some(credential_env.to_string()),
+        model_catalog,
+        suggested_model,
+        icon_key: Some(icon_key.to_string()),
+        protocol,
+        connection_policy,
+    }
+}
+
+fn preset_descriptor(preset: &ProviderPreset) -> ProviderPresetDescriptor {
+    ProviderPresetDescriptor {
+        id: preset.id.to_string(),
+        display_name: preset.display_name.clone(),
+        description: preset.description.clone(),
+        transport: ProviderTransportDescriptor {
+            protocol: protocol_label(preset.protocol).to_string(),
+            connection_modes: preset
+                .connection_policy
+                .supported_modes
+                .iter()
+                .copied()
+                .map(connection_mode_descriptor)
+                .collect(),
+            default_connection_mode: connection_mode_label(preset.connection_policy.default_mode)
+                .to_string(),
+        },
+        base_url: preset.provider.base_url.clone(),
+        credential: CredentialDescriptorDto {
+            label: preset.credential_label.clone(),
+            env_var: preset.credential_env.clone(),
+        },
+        model_catalog_id: preset.model_catalog.to_string(),
+        suggested_model: preset.suggested_model.clone(),
+        icon_key: preset.icon_key.clone(),
+    }
+}
+
+/// 返回指定 wire protocol 支持的连接模式，顺序即 UI 展示顺序。
+pub fn provider_connection_modes(protocol: ProviderWireProtocol) -> Vec<ProviderConnectionMode> {
+    match protocol {
+        ProviderWireProtocol::Responses => vec![
+            ProviderConnectionMode::WebSocket,
+            ProviderConnectionMode::Http,
+        ],
+        ProviderWireProtocol::ChatCompletions => vec![ProviderConnectionMode::Http],
+    }
+}
+
+/// 返回指定 wire protocol 的无 secret UI 连接模式描述。
+pub fn provider_connection_mode_descriptors(
+    protocol: ProviderWireProtocol,
+) -> Vec<ProviderConnectionModeDescriptor> {
+    provider_connection_modes(protocol)
+        .into_iter()
+        .map(connection_mode_descriptor)
+        .collect()
+}
+
+fn connection_mode_descriptor(mode: ProviderConnectionMode) -> ProviderConnectionModeDescriptor {
+    ProviderConnectionModeDescriptor {
+        id: connection_mode_label(mode).to_string(),
+        display_name: match mode {
+            ProviderConnectionMode::WebSocket => "WebSocket".to_string(),
+            ProviderConnectionMode::Http => "HTTP".to_string(),
+        },
+    }
+}
+
+fn connection_mode_label(mode: ProviderConnectionMode) -> &'static str {
+    match mode {
+        ProviderConnectionMode::WebSocket => "web_socket",
+        ProviderConnectionMode::Http => "http",
+    }
+}
+
+fn model_descriptor(model: &ModelInfo) -> ModelDescriptor {
+    let capabilities = &model.capabilities;
+    let reasoning = model
+        .effort_parameter()
+        .map(|parameter| ModelReasoningDescriptor {
+            parameter: parameter.name.clone(),
+            label: parameter
+                .label
+                .clone()
+                .unwrap_or_else(|| "Reasoning effort".to_string()),
+            default: parameter.candidates.first().cloned(),
+            candidates: parameter.candidates.clone(),
+        });
+    let pricing = model.currency.as_ref().map(|currency| ModelPricingDto {
+        currency: currency.clone(),
+        input_per_mtok: model.input_price_per_mtok,
+        output_per_mtok: model.output_price_per_mtok,
+        cache_read_per_mtok: model.cache_read_price_per_mtok,
+    });
+    ModelDescriptor {
+        id: model.slug.clone(),
+        display_name: model.display_name.clone(),
+        description: model.description.clone(),
+        context_window: model.context_window,
+        max_context_window: model.max_context_window,
+        max_output_tokens: model.max_output_tokens,
+        modalities: capabilities
+            .input
+            .iter()
+            .map(|modality| modality_label(*modality).to_string())
+            .collect(),
+        capabilities: ModelCapabilitiesDto {
+            streaming: capabilities.streaming,
+            temperature: capabilities.temperature,
+            reasoning: capabilities.reasoning,
+            web_search: capabilities.web_search,
+            function_calling: capabilities.tools.function_calling,
+            parallel_tool_calls: capabilities.tools.parallel_tool_calls,
+            custom_tools: capabilities.tools.custom_tools,
+            freeform_tools: capabilities.tools.freeform_tools,
+        },
+        reasoning,
+        pricing,
+    }
+}
+
+fn protocol_label(protocol: ProviderWireProtocol) -> &'static str {
+    match protocol {
+        ProviderWireProtocol::Responses => "responses",
+        ProviderWireProtocol::ChatCompletions => "chat_completions",
+    }
+}
+
+fn modality_label(modality: ModelModality) -> &'static str {
+    match modality {
+        ModelModality::Text => "text",
+        ModelModality::Image => "image",
+        ModelModality::Audio => "audio",
+        ModelModality::Video => "video",
+        ModelModality::Pdf => "pdf",
+    }
+}
+
+fn stable_revision(bytes: &[u8]) -> String {
+    let mut hash = 0xcbf29ce484222325_u64;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")
+}
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+
+    #[test]
+    fn builtin_registry_contains_gpt56_and_shared_mimo_catalog() {
+        let registry = ProviderCatalogRegistry::builtin();
+        registry.validate().unwrap();
+        let snapshot = registry.snapshot().unwrap();
+
+        let openai = &snapshot.model_catalogs["openai"];
+        assert!(openai.models.iter().any(|model| model.id == "gpt-5.6-sol"));
+        let openai_preset = snapshot
+            .presets
+            .iter()
+            .find(|preset| preset.id == "openai")
+            .unwrap();
+        assert_eq!(
+            openai_preset.transport.connection_modes,
+            vec![
+                ProviderConnectionModeDescriptor {
+                    id: "web_socket".to_string(),
+                    display_name: "WebSocket".to_string(),
+                },
+                ProviderConnectionModeDescriptor {
+                    id: "http".to_string(),
+                    display_name: "HTTP".to_string(),
+                },
+            ]
+        );
+        assert_eq!(openai_preset.transport.protocol, "responses");
+        assert_eq!(
+            openai_preset.transport.default_connection_mode,
+            "web_socket"
+        );
+        let mimo = &snapshot.model_catalogs["mimo"];
+        assert_eq!(
+            mimo.models
+                .iter()
+                .map(|model| model.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-pro", "mimo-v2-omni"]
+        );
+        assert_eq!(
+            snapshot
+                .presets
+                .iter()
+                .filter(|preset| preset.model_catalog_id == "mimo")
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn snapshot_revision_is_stable_and_secret_free() {
+        let registry = ProviderCatalogRegistry::builtin();
+        let first = registry.snapshot().unwrap();
+        let second = registry.snapshot().unwrap();
+
+        assert_eq!(first.revision, second.revision);
+        let json = serde_json::to_string(&first).unwrap();
+        assert!(!json.contains("bearer_token"));
+    }
+
+    #[test]
+    fn snapshot_revision_covers_connection_mode_order() {
+        let registry = ProviderCatalogRegistry::builtin();
+        let original = registry.snapshot().unwrap();
+        let mut reordered = registry;
+        reordered
+            .presets
+            .iter_mut()
+            .find(|preset| preset.id.as_str() == "openai")
+            .unwrap()
+            .connection_policy
+            .supported_modes
+            .reverse();
+
+        let reordered = reordered.snapshot().unwrap();
+
+        assert_ne!(original.revision, reordered.revision);
+    }
+}

@@ -2,7 +2,7 @@ use pl_protocol::{PureError, Result};
 use serde::Deserialize;
 
 use crate::request::{CompletionResponse, FinishReason, TokenUsage, ToolCall};
-use crate::tool_arguments::parse_function_tool_arguments;
+use crate::tool_arguments::function_tool_call_from_raw;
 
 #[derive(Debug, Clone, Deserialize)]
 struct ProviderTokenUsage {
@@ -174,10 +174,10 @@ impl ResponsesOutputItem {
                     .arguments
                     .as_deref()
                     .ok_or_else(|| response_protocol_error("function_call missing arguments"))?;
-                Ok(Some(ToolCall::function(
+                Ok(Some(function_tool_call_from_raw(
                     id,
-                    name.clone(),
-                    parse_function_tool_arguments(arguments, &name)?,
+                    name,
+                    arguments.to_string(),
                     self.call_id.clone(),
                 )))
             }
@@ -321,10 +321,10 @@ impl ChatResponseToolCall {
                 let function = self.function.as_ref().ok_or_else(|| {
                     response_protocol_error("function tool call missing function payload")
                 })?;
-                Ok(Some(ToolCall::function(
+                Ok(Some(function_tool_call_from_raw(
                     id,
                     function.name.clone(),
-                    parse_function_tool_arguments(&function.arguments, &function.name)?,
+                    function.arguments.clone(),
                     None,
                 )))
             }

@@ -262,6 +262,7 @@ fn minimal_request(model: &str) -> CompletionRequest {
         reasoning: None,
         stream: false,
         trace: None,
+        transport_session: Default::default(),
     }
 }
 

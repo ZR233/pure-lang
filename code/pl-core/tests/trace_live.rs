@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use pl_core::{
-    CompileMode, CoreSession, ModelRole, PureConfig, PureCore, TurnBudget, TurnRequest,
+    AgentSession, ToolCapabilityConfig, TurnBudget, TurnEngine, TurnEngineBuilder, TurnRequest,
     TurnResultStatus,
 };
 use pl_trace::{TraceEvent, TraceEventKind};
@@ -47,17 +47,21 @@ fn live_api_key() -> Option<String> {
     }
 }
 
-async fn configured_core(api_key: String, workspace: &Path) -> PureCore {
-    let mut config = PureConfig::default_config();
-    config.skills.enabled = false;
-    config.skills.auto_learn = false;
-    config
-        .providers
-        .get_mut("deepseek")
-        .expect("default config should include deepseek provider")
-        .bearer_token = Some(api_key);
-
-    let mut core = PureCore::from_config(&config, ModelRole::Planner).unwrap();
+async fn configured_core(api_key: String, workspace: &Path) -> TurnEngine {
+    let mut provider = pl_model::ProviderInfo::deepseek(None);
+    provider.bearer_token = Some(api_key);
+    let model = pl_model::default_models()
+        .into_iter()
+        .find(|model| model.slug == provider.default_model)
+        .unwrap_or_else(|| pl_model::ModelInfo::fallback(&provider.default_model));
+    let capabilities = ToolCapabilityConfig {
+        skills: false,
+        ..ToolCapabilityConfig::default()
+    };
+    let mut core = TurnEngineBuilder::from_provider_info_with_models(provider, vec![model])
+        .unwrap()
+        .with_tool_capabilities(capabilities)
+        .build();
     core.register_default_tools(workspace, None).await;
     core
 }
@@ -116,16 +120,14 @@ async fn cross_turn_trace_isolation_live() {
     let workspace = TempWorkspace::new("trace-live");
     tokio::fs::create_dir_all(workspace.path()).await.unwrap();
     let core = configured_core(api_key, workspace.path()).await;
-    let mut session = CoreSession::new();
+    let mut session = AgentSession::new();
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(256);
     let mut recorder = pl_core::TraceRecorder::new("trace-live".to_string(), event_tx, 0);
 
     // turn 1：要求模型输出简短中文 final 文本
-    let request1 = TurnRequest::new(
-        "请只输出 <final>你好，第一轮。</final>，不要输出其它内容。".to_string(),
-        CompileMode::Simple,
-    )
-    .with_budget(TurnBudget::new(90_000));
+    let request1 =
+        TurnRequest::new("请只输出 <final>你好，第一轮。</final>，不要输出其它内容。".to_string())
+            .with_budget(TurnBudget::new(90_000));
     let result1 = core
         .run_turn_with_trace(&mut session, request1, &mut recorder, Default::default())
         .await
@@ -151,11 +153,9 @@ async fn cross_turn_trace_isolation_live() {
     );
 
     // turn 2：第二轮，不同 turn_id（recorder/generate_session_id per-turn 唯一）
-    let request2 = TurnRequest::new(
-        "请只输出 <final>你好，第二轮。</final>，不要输出其它内容。".to_string(),
-        CompileMode::Simple,
-    )
-    .with_budget(TurnBudget::new(90_000));
+    let request2 =
+        TurnRequest::new("请只输出 <final>你好，第二轮。</final>，不要输出其它内容。".to_string())
+            .with_budget(TurnBudget::new(90_000));
     let result2 = core
         .run_turn_with_trace(&mut session, request2, &mut recorder, Default::default())
         .await

@@ -1,7 +1,4 @@
-use pl_model::{
-    CompletionRequest, ModelProvider, ReasoningConfig, ReasoningSummary,
-    is_continuation_unsupported_error,
-};
+use pl_model::{CompletionRequest, ModelProvider, ReasoningConfig, ReasoningSummary};
 use pl_protocol::TokenUsageSnapshot;
 use pl_protocol::{ErrorSeverity, Result};
 use pl_trace::{AgentEvent, TracePartStatus};
@@ -21,16 +18,13 @@ use crate::context_compaction::{
 };
 use crate::instruction::{InstructionAssembler, InstructionAssemblyRequest};
 use crate::runtime_usage::{agent_runtime_delta, identity_for_subagent, token_usage_snapshot};
-use crate::session::CoreSession;
+use crate::session::AgentSession;
 use crate::trace::TraceRecorder;
 use crate::turn::{
-    AGENT_MAX_COUNT, AGENT_MAX_DEPTH, BudgetLimit, BudgetTracker, CompileMode, TurnOptions,
-    TurnRequest, TurnResult, TurnResultStatus,
+    BudgetLimit, BudgetTracker, TurnOptions, TurnRequest, TurnResult, TurnResultStatus,
 };
 
-use super::PureCore;
-use super::SUBAGENT_DISPATCH_CONSTRAINT;
-use super::SUBAGENT_FORCE_DISPATCH_INSTRUCTION;
+use super::TurnEngine;
 use super::permission::cancellation_reason;
 use super::progress::{ProgressEmitter, ProgressVerbosity};
 use super::tool_dispatch::{ToolExecutionContext, ToolExecutionError, execute_tool_calls};
@@ -38,18 +32,18 @@ use super::turn_result::{
     budget_limited_turn_result, default_workspace_root, failed_turn_result,
     failed_turn_result_with_abort_reason, interrupted_turn_result, is_cancelled,
     looks_like_unexecuted_tool_call_text, normalize_provider_error,
-    prompt_requires_subagent_dispatch, should_request_parallel_tool_calls, unix_seconds,
+    should_request_parallel_tool_calls, unix_seconds,
 };
 
 pub(super) async fn run_turn_with_trace(
-    core: &PureCore,
-    session: &mut CoreSession,
+    core: &TurnEngine,
+    session: &mut AgentSession,
     request: TurnRequest,
     recorder: &mut TraceRecorder,
     options: TurnOptions,
 ) -> Result<TurnResult> {
     let provider = core.provider.clone();
-    ensure_provider_can_consume_session(provider.info().provider_kind, session)?;
+    ensure_provider_can_consume_session(provider.info().protocol, session)?;
     let reasoning_effort = core.reasoning_effort.clone();
     let workspace_root = core
         .workspace_root
@@ -57,23 +51,11 @@ pub(super) async fn run_turn_with_trace(
         .unwrap_or_else(default_workspace_root);
     let workspace_instructions = core.workspace_instructions.clone();
     let active_subagent = core.active_subagent.clone();
-    let agent_supervisor = core.agent_supervisor.clone();
-    agent_supervisor
-        .configure_limits(AGENT_MAX_COUNT, AGENT_MAX_DEPTH)
-        .await;
-    // root turn 启动时基于主 workspace 幂等绑定 per-subagent worktree 仓库；
-    // durable-aware 孤儿对账只在 Studio 启动恢复阶段执行。
-    if active_subagent.is_none()
-        && let Ok(repo_root) = crate::workspace::resolve_workspace_root(&workspace_root)
-    {
-        agent_supervisor.enable_worktrees(repo_root).await;
-    }
     let cancellation_token = options.cancellation_token.clone();
-    let execution_profile = match &active_subagent {
-        Some(subagent) => crate::TurnExecutionProfile::for_subagent(request.mode, &subagent.role),
-        None => crate::TurnExecutionProfile::root(request.mode),
+    let tool_schemas = match options.execution_policy.as_ref() {
+        Some(policy) => core.tools.schemas_for_policy(policy),
+        None => core.tools.schemas(),
     };
-    let tool_schemas = core.tools.schemas_for_profile(execution_profile);
     let mut budget_tracker = BudgetTracker::new(request.budget);
     let mut budget_limit: Option<BudgetLimit> = None;
 
@@ -81,13 +63,6 @@ pub(super) async fn run_turn_with_trace(
         .turn_id
         .clone()
         .unwrap_or_else(super::generate_turn_id);
-    let requires_subagent_dispatch =
-        active_subagent.is_none() && prompt_requires_subagent_dispatch(&request.prompt);
-    let initial_agent_count = if requires_subagent_dispatch {
-        Some(agent_supervisor.list_agents(None).await?.len())
-    } else {
-        None
-    };
     recorder.user_text_item_with_attachments(
         &turn_id,
         request.prompt.clone(),
@@ -97,7 +72,7 @@ pub(super) async fn run_turn_with_trace(
         session.set_prompt_cache_key(prompt_cache_key);
     }
     session.push_user_content(request.user_content.clone());
-    record_enabled_tools(recorder, &turn_id, request.mode, &tool_schemas);
+    record_enabled_tools(recorder, &turn_id, &tool_schemas);
     let turn_item = recorder.turn_item(&turn_id, TracePartStatus::Running);
     recorder.start_item(turn_item.clone());
     let mut progress = ProgressEmitter::new(
@@ -122,9 +97,10 @@ pub(super) async fn run_turn_with_trace(
         Some(snapshot) => snapshot,
         None => {
             let assembly_request = InstructionAssemblyRequest {
-                config: core.config.as_ref(),
+                instructions: None,
+                skills: core.skills.as_ref(),
+                execution_profile: None,
                 model: &model_info,
-                mode: request.mode,
                 workspace_root: &workspace_root,
                 current_dir: &workspace_root,
                 workspace_instructions: request.workspace_instructions.as_deref(),
@@ -138,13 +114,7 @@ pub(super) async fn run_turn_with_trace(
             }
         }
     };
-    let turn_instruction_snapshot = if requires_subagent_dispatch {
-        instruction_snapshot
-            .clone()
-            .with_subagent_constraint(SUBAGENT_DISPATCH_CONSTRAINT)
-    } else {
-        instruction_snapshot.clone()
-    };
+    let turn_instruction_snapshot = instruction_snapshot.clone();
     let reasoning = reasoning_effort.as_ref().map(|effort| ReasoningConfig {
         effort: Some(effort.as_str().to_string()),
         summary: Some(if effort.is_none() {
@@ -158,17 +128,11 @@ pub(super) async fn run_turn_with_trace(
     let mut last_compacted_state = None;
     let mut iteration = 0_u32;
     loop {
-        let must_dispatch_agent_now = if let Some(initial_count) = initial_agent_count {
-            iteration >= 2 && agent_supervisor.list_agents(None).await?.len() <= initial_count
-        } else {
-            false
-        };
         if is_cancelled(&options) {
             session.truncate_messages(safe_message_count);
             return Ok(interrupted_turn_result(
                 recorder,
                 &turn_id,
-                request.mode,
                 last_content,
                 last_reasoning_content,
                 last_model,
@@ -182,22 +146,8 @@ pub(super) async fn run_turn_with_trace(
             break;
         }
 
-        let iteration_tools = if must_dispatch_agent_now {
-            tool_schemas
-                .iter()
-                .filter(|schema| schema.name() == "spawn_agent")
-                .cloned()
-                .collect()
-        } else {
-            tool_schemas.clone()
-        };
-        let iteration_snapshot = if must_dispatch_agent_now {
-            turn_instruction_snapshot
-                .clone()
-                .with_subagent_force(SUBAGENT_FORCE_DISPATCH_INSTRUCTION)
-        } else {
-            turn_instruction_snapshot.clone()
-        };
+        let iteration_tools = tool_schemas.clone();
+        let iteration_snapshot = turn_instruction_snapshot.clone();
         let instruction_bundle = iteration_snapshot.to_bundle();
         let model_capabilities = provider.effective_model_capabilities(&model);
         let parallel_tool_calls = should_request_parallel_tool_calls(model_capabilities, &options);
@@ -264,7 +214,6 @@ pub(super) async fn run_turn_with_trace(
                     return Ok(failed_turn_result(
                         recorder,
                         &turn_id,
-                        request.mode,
                         last_content,
                         last_reasoning_content,
                         last_model,
@@ -281,12 +230,8 @@ pub(super) async fn run_turn_with_trace(
             break;
         }
         budget_tracker.record_model_step();
-        let continuation_start = session.continuation_start_index();
-        let history_source = continuation_start
-            .and_then(|start| session.items().get(start..))
-            .unwrap_or_else(|| session.items());
         let history_items =
-            materialize_context_items(history_source, &request.materialized_attachments)?;
+            materialize_context_items(session.items(), &request.materialized_attachments)?;
         let mut input = instruction_bundle
             .prelude_messages
             .iter()
@@ -308,22 +253,23 @@ pub(super) async fn run_turn_with_trace(
             .input(input.clone())
             .tools(iteration_tools)
             .parallel_tool_calls(parallel_tool_calls)
-            .store(session.prompt_cache_key().map(|_| true))
-            .previous_response_id(session.previous_response_id().map(ToString::to_string))
+            .store(Some(false))
             .prompt_cache_key(session.prompt_cache_key().map(ToString::to_string))
             .reasoning(reasoning.clone())
             .trace(Some(pl_model::CompletionTraceContext {
                 session_id: recorder.session_id().to_string(),
                 turn_id: turn_id.clone(),
                 inference_id: inference_id.clone(),
-                plan_mode: matches!(request.mode, CompileMode::Task),
+                plan_mode: tool_schemas
+                    .iter()
+                    .any(|schema| schema.name() == "plan_exit"),
                 trace_sequence_base: recorder.current_sequence(),
             }))
+            .transport_session(session.transport_session())
             .build();
         progress.heartbeat("正在等待模型响应。");
         progress.debug(format!("模型 `{model}` 流式请求已发起。"));
 
-        let had_continuation = completion_request.previous_response_id.is_some();
         let response_result = match &cancellation_token {
             Some(token) => {
                 tokio::select! {
@@ -333,7 +279,6 @@ pub(super) async fn run_turn_with_trace(
                         return Ok(interrupted_turn_result(
                             recorder,
                             &turn_id,
-                            request.mode,
                             last_content,
                             last_reasoning_content,
                             last_model,
@@ -357,7 +302,6 @@ pub(super) async fn run_turn_with_trace(
                 return Ok(interrupted_turn_result(
                     recorder,
                     &turn_id,
-                    request.mode,
                     last_content,
                     last_reasoning_content,
                     last_model,
@@ -367,19 +311,11 @@ pub(super) async fn run_turn_with_trace(
                 ));
             }
             Err(error) => {
-                if had_continuation && is_continuation_unsupported_error(&error) {
-                    session.mark_continuation_unsupported();
-                    progress.tool_detail(
-                        "provider 不支持 previous_response_id，已回退为完整上下文。".to_string(),
-                    );
-                    continue;
-                }
                 let (error, severity) =
                     normalize_provider_error(active_subagent.as_ref(), error.to_string());
                 return Ok(failed_turn_result(
                     recorder,
                     &turn_id,
-                    request.mode,
                     last_content,
                     last_reasoning_content,
                     last_model,
@@ -431,7 +367,6 @@ pub(super) async fn run_turn_with_trace(
 
         let content = response.content.unwrap_or_default();
         let reasoning_content = response.reasoning_content.clone();
-        let response_id = response.response_id.clone();
         let tool_calls = response.tool_calls;
 
         total_usage.prompt_tokens += response.usage.prompt_tokens;
@@ -447,7 +382,6 @@ pub(super) async fn run_turn_with_trace(
                 return Ok(failed_turn_result(
                     recorder,
                     &turn_id,
-                    request.mode,
                     last_content,
                     last_reasoning_content,
                     last_model,
@@ -457,29 +391,11 @@ pub(super) async fn run_turn_with_trace(
                     ErrorSeverity::Recoverable,
                 ));
             }
-            if let Some(initial_count) = initial_agent_count {
-                let current_count = agent_supervisor.list_agents(None).await?.len();
-                if current_count <= initial_count {
-                    return Ok(failed_turn_result(
-                        recorder,
-                        &turn_id,
-                        request.mode,
-                        last_content,
-                        last_reasoning_content,
-                        last_model,
-                        total_usage,
-                        session.len(),
-                        "用户明确要求子代理分工，但本轮没有实际创建任何 agent。".to_string(),
-                        ErrorSeverity::Recoverable,
-                    ));
-                }
-            }
             session.push_assistant_response(content.clone(), reasoning_content.clone());
             last_content = content;
             last_reasoning_content = reasoning_content;
             session_message_count = session.len();
             safe_message_count = session_message_count;
-            session.acknowledge_model_response(session_message_count, response_id);
             break;
         }
 
@@ -501,7 +417,6 @@ pub(super) async fn run_turn_with_trace(
         if response_reached_auto_compact_limit {
             provider_prompt_tokens_for_compaction = Some(response_total_tokens);
         }
-        session.acknowledge_model_response(session.len(), response_id);
         let count = tool_calls.len();
         progress.tool_detail(format!("模型请求调用 {count} 个工具。"));
 
@@ -512,15 +427,12 @@ pub(super) async fn run_turn_with_trace(
             ToolExecutionContext {
                 core,
                 options: &options,
-                mode: request.mode,
                 session_id: &turn_id,
                 workspace_root: &workspace_root,
                 workspace_instructions: workspace_instructions.clone(),
                 active_subagent: active_subagent.clone(),
-                agent_supervisor: agent_supervisor.clone(),
-                agent_tool_registrar: core.agent_tool_registrar.clone(),
                 instruction_snapshot: Some(instruction_snapshot.clone()),
-                parent_session: Arc::new(CoreSession::from_items(materialize_context_items(
+                parent_session: Arc::new(AgentSession::from_items(materialize_context_items(
                     session.items(),
                     &request.materialized_attachments,
                 )?)),
@@ -535,7 +447,6 @@ pub(super) async fn run_turn_with_trace(
                 return Ok(failed_turn_result_with_abort_reason(
                     recorder,
                     &turn_id,
-                    request.mode,
                     last_content,
                     last_reasoning_content,
                     last_model,
@@ -548,15 +459,12 @@ pub(super) async fn run_turn_with_trace(
             }
         };
         progress.tool_detail("工具执行完成，准备回写结果。");
-        if request.mode == CompileMode::Task {
-            record_plan_exit_items(recorder, &turn_id, &tool_results);
-        }
+        record_plan_exit_items(recorder, &turn_id, &tool_results);
         if is_cancelled(&options) {
             session.truncate_messages(safe_message_count);
             return Ok(interrupted_turn_result(
                 recorder,
                 &turn_id,
-                request.mode,
                 last_content,
                 last_reasoning_content,
                 last_model,
@@ -599,7 +507,6 @@ pub(super) async fn run_turn_with_trace(
         return Ok(interrupted_turn_result(
             recorder,
             &turn_id,
-            request.mode,
             last_content,
             last_reasoning_content,
             last_model,
@@ -613,7 +520,6 @@ pub(super) async fn run_turn_with_trace(
         return Ok(budget_limited_turn_result(
             recorder,
             &turn_id,
-            request.mode,
             last_content,
             last_reasoning_content,
             last_model,
@@ -645,7 +551,6 @@ pub(super) async fn run_turn_with_trace(
         usage: total_usage,
         last_context_tokens,
         context_compactions,
-        mode: request.mode,
         session_message_count,
         status: TurnResultStatus::Completed,
         abort_reason: None,

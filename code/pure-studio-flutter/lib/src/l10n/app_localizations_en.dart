@@ -745,6 +745,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsTemplate => 'Template';
 
   @override
+  String get settingsCustomProvider => 'Custom provider';
+
+  @override
   String get settingsDefaultModel => 'Default model';
 
   @override

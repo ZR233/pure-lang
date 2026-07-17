@@ -5,6 +5,10 @@ use pl_protocol::{PureError, Result};
 use pl_trace::AgentEventSender;
 
 use crate::capabilities::{ModelCapabilities, ProviderCapabilities};
+use crate::default_models::{
+    deepseek_default_model_slugs, default_models, mimo_default_model_slugs,
+    openai_default_model_slugs, zhipu_default_model_slugs,
+};
 use crate::model_info::ModelInfo;
 use crate::provider_info::ProviderInfo;
 use crate::request::CompletionRequest;
@@ -21,9 +25,9 @@ pub use openai_runtime::OpenAiProvider;
 /// 封装认证、API 调用、能力查询和模型目录等 provider 特定逻辑。
 /// 实现者应只暴露 `pl-model` 的统一请求/响应类型，不把 provider 私有 wire 结构泄漏给 `pl-core`。
 ///
-/// 当前 OpenAI、DeepSeek、Zhipu 三家供应商共享同一个 OpenAI 兼容 transport，
-/// 差异由 `ProviderKind` 在 `OpenAiProvider::new` 中一次性决定（endpoint、
-/// bundled 模型、能力位），不再为每家供应商单独定义 struct 或穷尽枚举分发。
+/// 当前 Responses 与 Chat Completions 供应商共享同一个 OpenAI 兼容 transport，
+/// endpoint 由 `ProviderWireProtocol` 决定，供应商差异由模型目录和 wire policy
+/// 数据表达，不再为每家供应商单独定义 runtime struct。
 /// 未来若引入协议真正不同的供应商（如 Anthropic），再新增独立 provider struct。
 pub trait ModelProvider: fmt::Debug + Send + Sync {
     fn info(&self) -> &ProviderInfo;
@@ -57,6 +61,15 @@ pub trait ModelProvider: fmt::Debug + Send + Sync {
     fn model_info(&self, model: &str) -> ModelInfo;
     fn list_models(&self) -> Vec<ModelInfo>;
     fn effective_model_capabilities(&self, model: &str) -> ModelCapabilities;
+    fn connection_fingerprint(&self, model: &str) -> u64 {
+        use std::hash::{DefaultHasher, Hash, Hasher};
+
+        let mut hasher = DefaultHasher::new();
+        self.info().connection_fingerprint().hash(&mut hasher);
+        model.hash(&mut hasher);
+        let fingerprint = hasher.finish();
+        if fingerprint == 0 { 1 } else { fingerprint }
+    }
     fn default_model(&self) -> &str;
 }
 
@@ -64,11 +77,30 @@ pub type SharedModelProvider = Arc<OpenAiProvider>;
 
 /// 根据 ProviderInfo 创建对应的 ModelProvider 实例。
 pub fn create_provider(info: ProviderInfo) -> Result<SharedModelProvider> {
-    create_provider_with_models(info, Vec::new())
+    let slugs = default_catalog_slugs(&info.default_model);
+    let models = default_models()
+        .into_iter()
+        .filter(|model| slugs.contains(&model.slug.as_str()))
+        .collect();
+    create_provider_with_catalog(info, models)
 }
 
-/// 根据 ProviderInfo 和配置模型列表创建对应的 ModelProvider 实例。
-pub fn create_provider_with_models(
+fn default_catalog_slugs(default_model: &str) -> &'static [&'static str] {
+    for slugs in [
+        openai_default_model_slugs(),
+        deepseek_default_model_slugs(),
+        zhipu_default_model_slugs(),
+        mimo_default_model_slugs(),
+    ] {
+        if slugs.contains(&default_model) {
+            return slugs;
+        }
+    }
+    &[]
+}
+
+/// 根据 ProviderInfo 和已经解析完成的 effective catalog 创建 Provider 实例。
+pub fn create_provider_with_catalog(
     info: ProviderInfo,
     models: Vec<ModelInfo>,
 ) -> Result<SharedModelProvider> {
@@ -120,6 +152,10 @@ impl ModelProvider for OpenAiProvider {
 
     fn effective_model_capabilities(&self, model: &str) -> ModelCapabilities {
         OpenAiProvider::effective_model_capabilities(self, model)
+    }
+
+    fn connection_fingerprint(&self, model: &str) -> u64 {
+        OpenAiProvider::connection_fingerprint(self, model)
     }
 
     fn default_model(&self) -> &str {

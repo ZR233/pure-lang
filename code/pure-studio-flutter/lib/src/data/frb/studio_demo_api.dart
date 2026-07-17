@@ -1,6 +1,9 @@
 part of 'studio_api.dart';
 
 class DemoStudioApi implements StudioApi {
+  DemoStudioApi({this._providerCatalog = demoProviderCatalogFixture});
+
+  final ProviderCatalogView _providerCatalog;
   List<ProviderSettingsView>? _providers;
   List<RoleSettingsView>? _roles;
   InstructionsSettingsView _instructions = const InstructionsSettingsView();
@@ -25,7 +28,7 @@ class DemoStudioApi implements StudioApi {
       id: 'session-main',
       projectId: project.id,
       title: 'Flutter + FRB 重构',
-      mode: CompileMode.simple,
+      mode: StudioMode.simple,
       updatedAt: now,
     );
     final userCreatedAt = now.subtract(const Duration(minutes: 9));
@@ -136,6 +139,23 @@ class DemoStudioApi implements StudioApi {
         textChannel: TimelineTextChannel.finalAnswer,
       ),
     ];
+    final preset = _providerCatalog.presets.first;
+    final defaultModels = _providerCatalog.modelsFor(preset.modelCatalogId);
+    final defaultProvider = preset
+        .createProvider(preset.id, defaultModels)
+        .copyWith(hasBearerToken: true, status: 'ready', updatedAt: 'Loaded');
+    final defaultEffort = defaultModels
+        .where((model) => model.slug == preset.suggestedModel)
+        .firstOrNull
+        ?.defaultReasoningEffort;
+    final resolvedDefaultEffort = defaultEffort?.isNotEmpty == true
+        ? defaultEffort!
+        : defaultModels
+                  .where((model) => model.slug == preset.suggestedModel)
+                  .firstOrNull
+                  ?.reasoningEfforts
+                  .firstOrNull ??
+              '';
     final state = StudioState(
       projects: const [project],
       sessions: [session],
@@ -223,95 +243,23 @@ class DemoStudioApi implements StudioApi {
           ),
         },
       },
-      providers:
-          _providers ??
-          const [
-            ProviderSettingsView(
-              id: 'deepseek',
-              templateKind: 'deepseek',
-              name: 'DeepSeek',
-              subtitle: 'DeepSeek Platform',
-              baseUrl: 'https://api.deepseek.com',
-              hasBearerToken: true,
-              defaultModel: 'deepseek-reasoner',
-              models: [
-                ProviderModelView(
-                  slug: 'deepseek-reasoner',
-                  displayName: 'DeepSeek Reasoner',
-                  reasoningEfforts: ['high', 'max'],
-                  contextWindow: 1000000,
-                  maxOutputTokens: 384000,
-                  currency: 'CNY',
-                  inputPricePerMTok: 3,
-                  outputPricePerMTok: 6,
-                ),
-                ProviderModelView(
-                  slug: 'deepseek-v4-flash',
-                  displayName: 'DeepSeek V4 Flash',
-                  reasoningEfforts: ['high', 'max'],
-                  contextWindow: 1000000,
-                  maxOutputTokens: 384000,
-                  currency: 'CNY',
-                  inputPricePerMTok: 1,
-                  outputPricePerMTok: 2,
-                ),
-              ],
-              defaultModels: [
-                ProviderModelView(
-                  slug: 'deepseek-reasoner',
-                  displayName: 'DeepSeek Reasoner',
-                  reasoningEfforts: ['high', 'max'],
-                  contextWindow: 1000000,
-                  maxOutputTokens: 384000,
-                  currency: 'CNY',
-                  inputPricePerMTok: 3,
-                  outputPricePerMTok: 6,
-                ),
-                ProviderModelView(
-                  slug: 'deepseek-v4-flash',
-                  displayName: 'DeepSeek V4 Flash',
-                  reasoningEfforts: ['high', 'max'],
-                  contextWindow: 1000000,
-                  maxOutputTokens: 384000,
-                  currency: 'CNY',
-                  inputPricePerMTok: 1,
-                  outputPricePerMTok: 2,
-                ),
-              ],
-              status: 'ready',
-              usageLabel: 'Balance split available',
-              modelCount: '2',
-              updatedAt: 'Loaded',
-              providerKind: 'deep_seek',
-            ),
-          ],
+      providers: _providers ?? [defaultProvider],
+      providerCatalog: _providerCatalog,
       roles:
           _roles ??
-          const [
-            RoleSettingsView(
-              key: 'planner',
-              providerId: 'deepseek',
-              model: 'deepseek-reasoner',
-              effort: 'high',
-            ),
-            RoleSettingsView(
-              key: 'explorer',
-              providerId: 'deepseek',
-              model: 'deepseek-reasoner',
-              effort: 'high',
-            ),
-            RoleSettingsView(
-              key: 'executor',
-              providerId: 'deepseek',
-              model: 'deepseek-v4-flash',
-              effort: 'high',
-            ),
-            RoleSettingsView(
-              key: 'reviewer',
-              providerId: 'deepseek',
-              model: 'deepseek-v4-flash',
-              effort: 'high',
-            ),
+          [
+            for (final key in const [
+              'planner',
+              'explorer',
+              'executor',
+              'reviewer',
+            ])
+              RoleSettingsView(
+                key: key,
+                providerId: defaultProvider.id,
+                model: defaultProvider.defaultModel,
+                effort: resolvedDefaultEffort,
+              ),
           ],
       mcpServers: const [],
       instructions: _instructions,
@@ -326,6 +274,7 @@ class DemoStudioApi implements StudioApi {
         messagesBySession: const {},
         agentsBySession: const {},
         providers: state.providers,
+        providerCatalog: _providerCatalog,
         roles: state.roles,
         mcpServers: state.mcpServers,
         instructions: state.instructions,
@@ -374,7 +323,7 @@ class DemoStudioApi implements StudioApi {
   }) => bootstrap();
 
   @override
-  Future<StudioState> setSessionMode(String sessionId, CompileMode mode) async {
+  Future<StudioState> setSessionMode(String sessionId, StudioMode mode) async {
     final state = await bootstrap();
     return state.copyWith(
       sessions: [
@@ -532,6 +481,9 @@ class DemoStudioApi implements StudioApi {
   }
 
   @override
+  Future<ProviderCatalogView> loadProviderCatalog() async => _providerCatalog;
+
+  @override
   Future<StudioState> saveProviderSettings(
     Map<String, Object?> settings,
   ) async {
@@ -539,6 +491,7 @@ class DemoStudioApi implements StudioApi {
     _providers = _providersFromSettingsPayload(
       settings,
       previous: current.providers,
+      catalog: _providerCatalog,
     );
     _roles = _rolesFromSettingsPayload(settings);
     return bootstrap();

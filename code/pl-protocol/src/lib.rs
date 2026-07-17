@@ -4,7 +4,7 @@ mod interaction;
 mod message;
 mod model_context;
 mod permission;
-mod studio_event;
+mod provider_catalog;
 
 pub use error::{PureError, Result};
 pub use event::{
@@ -27,13 +27,9 @@ pub use message::{
 };
 pub use model_context::ModelContextItem;
 pub use permission::PermissionLevel;
-pub use studio_event::{
-    StudioAgentPart, StudioAgentSnapshot, StudioAgentTimelineEvent, StudioAgentTimelineEventKind,
-    StudioAttachment, StudioEventEnvelope, StudioEventKind, StudioFilePart, StudioInferencePart,
-    StudioKeyValue, StudioLspHealth, StudioLspServer, StudioMcpHealth, StudioMcpServer,
-    StudioMessage, StudioMessageRole, StudioMessageStatus, StudioPart, StudioPartDelta,
-    StudioPartDeltaField, StudioPartStatus, StudioPartType, StudioPlanPart, StudioRuntimeUsage,
-    StudioSessionHandoff, StudioSessionRuntime, StudioSessionSummary, StudioTaskAgentRuntime,
-    StudioTaskMergeRuntime, StudioTaskReviewRuntime, StudioTaskRuntime, StudioTaskWorkUnitRuntime,
-    StudioTextChannel, StudioToolPart, StudioTurn, StudioTurnStatus,
+pub use provider_catalog::{
+    CredentialDescriptorDto, ModelCapabilitiesDto, ModelCatalogDescriptor, ModelDescriptor,
+    ModelPricingDto, ModelReasoningDescriptor, PROVIDER_CATALOG_SCHEMA_VERSION,
+    ProviderCatalogSnapshot, ProviderConnectionModeDescriptor, ProviderPresetDescriptor,
+    ProviderTransportDescriptor,
 };

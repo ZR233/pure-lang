@@ -61,6 +61,7 @@ fn request_with_effort(effort: &str) -> CompletionRequest {
         }),
         stream: true,
         trace: None,
+        transport_session: Default::default(),
     }
 }
 
@@ -85,6 +86,7 @@ fn responses_use_top_level_instructions_and_developer_messages() {
         reasoning: None,
         stream: true,
         trace: None,
+        transport_session: Default::default(),
     };
 
     let responses_body = OpenAiProtocol::responses().build_request_body(&request);
@@ -132,6 +134,7 @@ fn responses_maps_image_parts_to_input_image() {
         reasoning: None,
         stream: true,
         trace: None,
+        transport_session: Default::default(),
     };
 
     let body = OpenAiProtocol::responses().build_request_body(&request);
@@ -162,6 +165,7 @@ fn chat_maps_image_parts_to_content_array() {
         reasoning: None,
         stream: true,
         trace: None,
+        transport_session: Default::default(),
     };
 
     let body = OpenAiProtocol::chat().build_request_body(&request);
@@ -214,6 +218,7 @@ fn request_with_tool_history(tool_metadata: HashMap<String, String>) -> Completi
         reasoning: None,
         stream: true,
         trace: None,
+        transport_session: Default::default(),
     }
 }
 
@@ -257,6 +262,7 @@ fn request_with_function_tool_history(tool_metadata: HashMap<String, String>) ->
         reasoning: None,
         stream: true,
         trace: None,
+        transport_session: Default::default(),
     }
 }
 
@@ -398,6 +404,26 @@ fn chat_body_can_use_profiled_max_completion_tokens_field() {
 
     assert!(body.get("max_tokens").is_none());
     assert_eq!(body["max_completion_tokens"], serde_json::json!(8192));
+}
+
+#[test]
+fn mimo_chat_body_uses_catalog_wire_policy_without_reasoning_effort() {
+    let model = bundled_model("mimo-v2.5-pro");
+    let mut request = request_with_effort("enabled");
+    request.model = model.slug.clone();
+    request.max_tokens = Some(131_072);
+
+    let body = OpenAiProtocol::chat().build_request_body_with_model(&request, &model);
+
+    assert_eq!(body["max_completion_tokens"], serde_json::json!(131_072));
+    assert_eq!(body["thinking"]["type"], serde_json::json!("enabled"));
+    assert!(body.get("reasoning_effort").is_none());
+    assert!(model.capabilities.tools.function_calling);
+    assert!(!model.capabilities.tools.parallel_tool_calls);
+    assert_eq!(
+        model.capabilities.interleaved.unwrap().field,
+        crate::ReasoningInterleavedField::ReasoningContent
+    );
 }
 
 #[test]
@@ -656,8 +682,8 @@ fn responses_parse_response_reads_custom_tool_call() {
 }
 
 #[test]
-fn responses_parse_response_rejects_invalid_function_arguments() {
-    let error = OpenAiProtocol::responses()
+fn responses_parse_response_preserves_invalid_function_arguments() {
+    let response = OpenAiProtocol::responses()
         .parse_response(serde_json::json!({
             "model": "gpt-5.5",
             "output": [{
@@ -668,15 +694,16 @@ fn responses_parse_response_rejects_invalid_function_arguments() {
                 "arguments": "{bad"
             }]
         }))
-        .unwrap_err();
+        .unwrap();
 
-    match error {
-        PureError::LlmError(message) => {
-            assert!(message.contains("invalid JSON arguments"));
-            assert!(message.contains("read_file"));
-        }
-        other => panic!("unexpected error: {other:?}"),
-    }
+    let call = &response.tool_calls[0];
+    assert_eq!(call.payload_text(), "{bad");
+    assert_eq!(call.invalid_arguments.as_ref().unwrap().raw, "{bad");
+    assert!(
+        call.invalid_arguments_message()
+            .unwrap()
+            .contains("read_file")
+    );
 }
 
 #[test]
@@ -714,8 +741,8 @@ fn chat_parse_response_reads_custom_tool_call() {
 }
 
 #[test]
-fn chat_parse_response_rejects_invalid_function_arguments() {
-    let error = OpenAiProtocol::chat()
+fn chat_parse_response_preserves_invalid_function_arguments() {
+    let response = OpenAiProtocol::chat()
         .parse_response(serde_json::json!({
             "model": "gpt-5.5",
             "choices": [{
@@ -733,15 +760,16 @@ fn chat_parse_response_rejects_invalid_function_arguments() {
                 "finish_reason": "tool_calls"
             }]
         }))
-        .unwrap_err();
+        .unwrap();
 
-    match error {
-        PureError::LlmError(message) => {
-            assert!(message.contains("invalid JSON arguments"));
-            assert!(message.contains("read_file"));
-        }
-        other => panic!("unexpected error: {other:?}"),
-    }
+    let call = &response.tool_calls[0];
+    assert_eq!(call.payload_text(), "{bad");
+    assert_eq!(call.invalid_arguments.as_ref().unwrap().raw, "{bad");
+    assert!(
+        call.invalid_arguments_message()
+            .unwrap()
+            .contains("read_file")
+    );
 }
 
 #[test]
@@ -872,6 +900,7 @@ fn missing_tool_output_fails_request_build() {
         reasoning: None,
         stream: true,
         trace: None,
+        transport_session: Default::default(),
     };
 
     let error = OpenAiProtocol::responses()
@@ -931,6 +960,7 @@ fn responses_history_requires_call_id_but_chat_uses_tool_call_id() {
         reasoning: None,
         stream: true,
         trace: None,
+        transport_session: Default::default(),
     };
 
     let responses_error = OpenAiProtocol::responses()

@@ -17,6 +17,6 @@ pub use session::{
     archive_session, create_session, load_session_state, set_model_role, set_session_mode,
 };
 pub use settings::{
-    save_general_settings, save_instructions_settings, save_mcp_settings, save_provider_settings,
-    save_runtime_permission_mode, save_skills_settings,
+    load_provider_catalog, save_general_settings, save_instructions_settings, save_mcp_settings,
+    save_provider_settings, save_runtime_permission_mode, save_skills_settings,
 };

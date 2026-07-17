@@ -6,35 +6,38 @@ pub mod types;
 // Re-exports from submodules
 pub use self::handlers::{
     archive_project, archive_session, bootstrap_studio, create_session, initialize_runtime,
-    list_discovered_skills, load_provider_usages, load_session_state, load_studio_events,
-    open_project, resolve_interaction, save_general_settings, save_instructions_settings,
-    save_mcp_settings, save_provider_settings, save_runtime_permission_mode, save_skills_settings,
-    select_project, set_model_role, set_session_mode, shutdown_runtime, start_runtime, stop_prompt,
-    submit_prompt, subscribe_global_events, subscribe_session_events,
+    list_discovered_skills, load_provider_catalog, load_provider_usages, load_session_state,
+    load_studio_events, open_project, resolve_interaction, save_general_settings,
+    save_instructions_settings, save_mcp_settings, save_provider_settings,
+    save_runtime_permission_mode, save_skills_settings, select_project, set_model_role,
+    set_session_mode, shutdown_runtime, start_runtime, stop_prompt, submit_prompt,
+    subscribe_global_events, subscribe_session_events,
 };
 pub use self::types::{
     BridgeActiveTurn, BridgeAgentSnapshotDto, BridgeAgentTimelineEventDto,
     BridgeAgentTimelinePayloadDto, BridgeEventEnvelope, BridgeEventPayload,
     BridgeInteractionChangedDto, BridgeInteractionPayloadDto, BridgeLspHealthDto,
-    BridgeMcpHealthDto, BridgeMcpServerDto, BridgePlanLifecycleDto, BridgeRuntimeCostAmountDto,
-    BridgeRuntimeStatus, BridgeSessionRuntimeDto, BridgeSessionStateResponse,
-    BridgeSkillActivationDto, BridgeStudioAgentPartDto, BridgeStudioEventsResponse,
-    BridgeStudioMessageDto, BridgeStudioMessageProjectionDto, BridgeStudioPartDeltaDto,
-    BridgeStudioPartDto, BridgeStudioPartProjectionDto, BridgeStudioPlanPartDto,
-    BridgeStudioSnapshotResponse, BridgeStudioToolPartDto, BridgeStudioTurnDto, BridgeTodoItemDto,
-    BridgeTodoListSnapshotDto, BridgeUserQuestionDto, BridgeUserQuestionOptionDto,
-    ConfigSavedResponse, DeepSeekBalanceDto, DeepSeekBalanceInfoDto, InstructionsSettingsInput,
-    McpServerInput, McpSettingsInput, ProjectDto, ProviderInput, ProviderModelInput,
-    ProviderSettingsInput, ProviderUsageDto, ProviderUsagesResponse, ResolveInteractionResponse,
-    RoleInput, RuntimeSnapshot, SessionDto, SkillSummaryDto, SkillsResponse, SkillsSettingsInput,
-    StopPromptResponse, SubmitPromptResponse, ZhipuCodingPlanUsageDto, ZhipuQuotaLimitDto,
-    ZhipuToolUsageDetailDto,
+    BridgeMcpHealthDto, BridgeMcpServerDto, BridgeModelCapabilities, BridgeModelCatalogDescriptor,
+    BridgeModelDescriptor, BridgeModelPricing, BridgeModelReasoningDescriptor,
+    BridgePlanLifecycleDto, BridgeProviderCatalogSnapshot, BridgeProviderConnectionModeDescriptor,
+    BridgeProviderPresetDescriptor, BridgeRuntimeCostAmountDto, BridgeRuntimeStatus,
+    BridgeSessionRuntimeDto, BridgeSessionStateResponse, BridgeSkillActivationDto,
+    BridgeStudioAgentPartDto, BridgeStudioEventsResponse, BridgeStudioMessageDto,
+    BridgeStudioMessageProjectionDto, BridgeStudioPartDeltaDto, BridgeStudioPartDto,
+    BridgeStudioPartProjectionDto, BridgeStudioPlanPartDto, BridgeStudioSnapshotResponse,
+    BridgeStudioToolPartDto, BridgeStudioTurnDto, BridgeTodoItemDto, BridgeTodoListSnapshotDto,
+    BridgeUserQuestionDto, BridgeUserQuestionOptionDto, ConfigSavedResponse, DeepSeekBalanceDto,
+    DeepSeekBalanceInfoDto, InstructionsSettingsInput, McpServerInput, McpSettingsInput,
+    ProjectDto, ProviderInput, ProviderModelInput, ProviderSettingsInput, ProviderUsageDto,
+    ProviderUsagesResponse, ResolveInteractionResponse, RoleInput, RuntimeSnapshot, SessionDto,
+    SkillSummaryDto, SkillsResponse, SkillsSettingsInput, StopPromptResponse, SubmitPromptResponse,
+    ZhipuCodingPlanUsageDto, ZhipuQuotaLimitDto, ZhipuToolUsageDetailDto,
 };
 
 #[cfg(test)]
 mod tests {
-    use pl_core::McpServerTransport;
-    use pl_protocol::StudioEventKind;
+    use pl_studio_runtime::McpServerTransport;
+    use pl_studio_runtime::StudioEventKind;
     use pretty_assertions::assert_eq;
 
     use super::{
@@ -45,7 +48,7 @@ mod tests {
 
     #[test]
     fn bridge_event_envelope_uses_typed_payload() {
-        let event = pl_protocol::StudioEventEnvelope {
+        let event = pl_studio_runtime::StudioEventEnvelope {
             event_id: "event-1".to_string(),
             project_id: None,
             session_id: Some("session-1".to_string()),
@@ -68,7 +71,7 @@ mod tests {
 
     #[test]
     fn bridge_filters_legacy_session_handoff_events() {
-        let event = pl_protocol::StudioEventEnvelope {
+        let event = pl_studio_runtime::StudioEventEnvelope {
             event_id: "event-1".to_string(),
             project_id: None,
             session_id: Some("session-1".to_string()),
@@ -76,7 +79,7 @@ mod tests {
             sequence: 7,
             created_at: 10,
             kind: StudioEventKind::SessionHandoffChanged {
-                handoff: pl_protocol::StudioSessionHandoff {
+                handoff: pl_studio_runtime::StudioSessionHandoff {
                     origin_session_id: "session-1".to_string(),
                     target_session_id: "session-2".to_string(),
                     target_session: None,
@@ -93,7 +96,7 @@ mod tests {
 
     #[test]
     fn bridge_event_envelope_rejects_session_handoff_events() {
-        let event = pl_protocol::StudioEventEnvelope {
+        let event = pl_studio_runtime::StudioEventEnvelope {
             event_id: "event-1".to_string(),
             project_id: None,
             session_id: Some("session-1".to_string()),
@@ -101,7 +104,7 @@ mod tests {
             sequence: 7,
             created_at: 10,
             kind: StudioEventKind::SessionHandoffChanged {
-                handoff: pl_protocol::StudioSessionHandoff {
+                handoff: pl_studio_runtime::StudioSessionHandoff {
                     origin_session_id: "session-1".to_string(),
                     target_session_id: "session-2".to_string(),
                     target_session: None,
@@ -161,6 +164,85 @@ mod tests {
             super::save_mcp_settings;
         let _general: fn(String) -> anyhow::Result<BridgeStudioSnapshotResponse> =
             super::save_general_settings;
+    }
+
+    #[test]
+    fn provider_catalog_bridge_projects_the_canonical_pl_snapshot() {
+        let canonical = pl_studio_runtime::builtin_provider_catalog()
+            .snapshot()
+            .unwrap();
+        let bridge = super::load_provider_catalog().unwrap();
+
+        assert_eq!(bridge.schema_version, canonical.schema_version);
+        assert_eq!(bridge.revision, canonical.revision);
+        assert_eq!(
+            bridge
+                .presets
+                .iter()
+                .map(|preset| preset.id.as_str())
+                .collect::<Vec<_>>(),
+            canonical
+                .presets
+                .iter()
+                .map(|preset| preset.id.as_str())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            bridge
+                .presets
+                .iter()
+                .map(|preset| (
+                    preset.transport.protocol.as_str(),
+                    preset
+                        .transport
+                        .connection_modes
+                        .iter()
+                        .map(|mode| mode.id.as_str())
+                        .collect::<Vec<_>>(),
+                    preset.transport.default_connection_mode.as_str(),
+                ))
+                .collect::<Vec<_>>(),
+            canonical
+                .presets
+                .iter()
+                .map(|preset| (
+                    preset.transport.protocol.as_str(),
+                    preset
+                        .transport
+                        .connection_modes
+                        .iter()
+                        .map(|mode| mode.id.as_str())
+                        .collect::<Vec<_>>(),
+                    preset.transport.default_connection_mode.as_str(),
+                ))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            bridge
+                .model_catalogs
+                .iter()
+                .map(|catalog| (
+                    catalog.id.as_str(),
+                    catalog
+                        .models
+                        .iter()
+                        .map(|model| model.id.as_str())
+                        .collect::<Vec<_>>(),
+                ))
+                .collect::<Vec<_>>(),
+            canonical
+                .model_catalogs
+                .values()
+                .map(|catalog| (
+                    catalog.id.as_str(),
+                    catalog
+                        .models
+                        .iter()
+                        .map(|model| model.id.as_str())
+                        .collect::<Vec<_>>(),
+                ))
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]

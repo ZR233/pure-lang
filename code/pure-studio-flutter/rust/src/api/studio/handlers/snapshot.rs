@@ -4,6 +4,7 @@ use crate::api::studio::convert::interaction::interaction_request_bridge_dto;
 use crate::api::studio::convert::message::{bridge_message, bridge_part};
 use crate::api::studio::convert::records::{project_dto, session_dto};
 use crate::api::studio::convert::runtime::bridge_session_runtime_view;
+use crate::api::studio::convert::settings::studio_config_projection;
 use crate::api::studio::runtime::BridgeRuntime;
 use crate::api::studio::types::{
     BridgeSessionStateResponse, BridgeStudioMessageProjectionDto, BridgeStudioPartProjectionDto,
@@ -43,7 +44,7 @@ pub(super) async fn studio_snapshot_inner(
 
 pub(super) async fn studio_snapshot_from_projects_inner(
     bridge: &'static BridgeRuntime,
-    projects: Vec<pl_core::ProjectRecord>,
+    projects: Vec<pl_studio_runtime::ProjectRecord>,
     requested_project_id: Option<String>,
     requested_session_id: Option<String>,
 ) -> Result<BridgeStudioSnapshotResponse> {
@@ -86,7 +87,8 @@ pub(super) async fn studio_snapshot_from_projects_inner(
         Some(session_id) => Some(bridge_session_runtime_view(bridge, session_id).await?),
         None => None,
     };
-    let config_json = serde_json::to_string(&bridge.studio.config_store().load_or_default()?)?;
+    let config = bridge.studio.config_store().load_or_default()?;
+    let config_json = serde_json::to_string(&studio_config_projection(&config)?)?;
     let general_settings = bridge
         .studio
         .store()
