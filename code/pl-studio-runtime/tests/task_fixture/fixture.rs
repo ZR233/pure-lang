@@ -159,6 +159,20 @@ impl TaskFlowFixture {
                     .join("\n")
             })
             .unwrap_or_else(|error| format!("agent event query failed: {error:#}"));
+        let message_parts = self
+            .store
+            .load_message_parts(&self.session_id)
+            .await
+            .map(|parts| {
+                parts
+                    .into_iter()
+                    .rev()
+                    .take(20)
+                    .map(|part| format!("{part:#?}"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })
+            .unwrap_or_else(|error| format!("message part query failed: {error:#}"));
         let git = if self.workspace.join(".git").exists() {
             git_output(&self.workspace, &["status", "--porcelain"])
                 .unwrap_or_else(|error| format!("git status failed: {error:#}"))
@@ -167,7 +181,7 @@ impl TaskFlowFixture {
         };
         let server = self.server.diagnostics().await;
         format!(
-            "task projection:\n{runtime}\npending interactions:\n{interactions}\nrecent events:\n{events}\ngit status:\n{git}\n{server}"
+            "task projection:\n{runtime}\npending interactions:\n{interactions}\nrecent events:\n{events}\nrecent message parts:\n{message_parts}\ngit status:\n{git}\n{server}"
         )
     }
 }
