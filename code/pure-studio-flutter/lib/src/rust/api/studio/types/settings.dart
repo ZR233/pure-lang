@@ -6,132 +6,321 @@
 import '../../../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `InstructionsSettingsInput`, `McpServerInput`, `McpSettingsInput`, `SkillsSettingsInput`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `InstructionsSettingsInput`, `McpServerInput`, `McpSettingsInput`, `ProviderInput`, `ProviderModelInput`, `ProviderSettingsInput`, `RoleInput`, `SkillsSettingsInput`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`
 
-class ProviderInput {
+class BridgeModelCapabilities {
+  final bool streaming;
+  final bool temperature;
+  final bool reasoning;
+  final bool webSearch;
+  final bool functionCalling;
+  final bool parallelToolCalls;
+  final bool customTools;
+  final bool freeformTools;
+
+  const BridgeModelCapabilities({
+    required this.streaming,
+    required this.temperature,
+    required this.reasoning,
+    required this.webSearch,
+    required this.functionCalling,
+    required this.parallelToolCalls,
+    required this.customTools,
+    required this.freeformTools,
+  });
+
+  @override
+  int get hashCode =>
+      streaming.hashCode ^
+      temperature.hashCode ^
+      reasoning.hashCode ^
+      webSearch.hashCode ^
+      functionCalling.hashCode ^
+      parallelToolCalls.hashCode ^
+      customTools.hashCode ^
+      freeformTools.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeModelCapabilities &&
+          runtimeType == other.runtimeType &&
+          streaming == other.streaming &&
+          temperature == other.temperature &&
+          reasoning == other.reasoning &&
+          webSearch == other.webSearch &&
+          functionCalling == other.functionCalling &&
+          parallelToolCalls == other.parallelToolCalls &&
+          customTools == other.customTools &&
+          freeformTools == other.freeformTools;
+}
+
+class BridgeModelCatalogDescriptor {
   final String id;
-  final String templateKind;
-  final String name;
-  final String baseUrl;
-  final String bearerToken;
-  final String defaultModel;
-  final List<ProviderModelInput> customModels;
+  final List<BridgeModelDescriptor> models;
 
-  const ProviderInput({
+  const BridgeModelCatalogDescriptor({required this.id, required this.models});
+
+  @override
+  int get hashCode => id.hashCode ^ models.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeModelCatalogDescriptor &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          models == other.models;
+}
+
+class BridgeModelDescriptor {
+  final String id;
+  final String displayName;
+  final String? description;
+  final BigInt? contextWindow;
+  final BigInt? maxContextWindow;
+  final BigInt? maxOutputTokens;
+  final List<String> modalities;
+  final BridgeModelCapabilities capabilities;
+  final BridgeModelReasoningDescriptor? reasoning;
+  final BridgeModelPricing? pricing;
+
+  const BridgeModelDescriptor({
     required this.id,
-    required this.templateKind,
-    required this.name,
-    required this.baseUrl,
-    required this.bearerToken,
-    required this.defaultModel,
-    required this.customModels,
+    required this.displayName,
+    this.description,
+    this.contextWindow,
+    this.maxContextWindow,
+    this.maxOutputTokens,
+    required this.modalities,
+    required this.capabilities,
+    this.reasoning,
+    this.pricing,
   });
 
   @override
   int get hashCode =>
       id.hashCode ^
-      templateKind.hashCode ^
-      name.hashCode ^
-      baseUrl.hashCode ^
-      bearerToken.hashCode ^
-      defaultModel.hashCode ^
-      customModels.hashCode;
+      displayName.hashCode ^
+      description.hashCode ^
+      contextWindow.hashCode ^
+      maxContextWindow.hashCode ^
+      maxOutputTokens.hashCode ^
+      modalities.hashCode ^
+      capabilities.hashCode ^
+      reasoning.hashCode ^
+      pricing.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is ProviderInput &&
+      other is BridgeModelDescriptor &&
           runtimeType == other.runtimeType &&
           id == other.id &&
-          templateKind == other.templateKind &&
-          name == other.name &&
-          baseUrl == other.baseUrl &&
-          bearerToken == other.bearerToken &&
-          defaultModel == other.defaultModel &&
-          customModels == other.customModels;
-}
-
-class ProviderModelInput {
-  final String slug;
-  final String displayName;
-  final List<String> reasoningEfforts;
-  final String? baseInstructions;
-
-  const ProviderModelInput({
-    required this.slug,
-    required this.displayName,
-    required this.reasoningEfforts,
-    this.baseInstructions,
-  });
-
-  @override
-  int get hashCode =>
-      slug.hashCode ^
-      displayName.hashCode ^
-      reasoningEfforts.hashCode ^
-      baseInstructions.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is ProviderModelInput &&
-          runtimeType == other.runtimeType &&
-          slug == other.slug &&
           displayName == other.displayName &&
-          reasoningEfforts == other.reasoningEfforts &&
-          baseInstructions == other.baseInstructions;
+          description == other.description &&
+          contextWindow == other.contextWindow &&
+          maxContextWindow == other.maxContextWindow &&
+          maxOutputTokens == other.maxOutputTokens &&
+          modalities == other.modalities &&
+          capabilities == other.capabilities &&
+          reasoning == other.reasoning &&
+          pricing == other.pricing;
 }
 
-class ProviderSettingsInput {
-  final String defaultProviderId;
-  final List<ProviderInput> providers;
-  final List<RoleInput> roles;
+class BridgeModelPricing {
+  final String currency;
+  final double? inputPerMtok;
+  final double? outputPerMtok;
+  final double? cacheReadPerMtok;
 
-  const ProviderSettingsInput({
-    required this.defaultProviderId,
-    required this.providers,
-    required this.roles,
+  const BridgeModelPricing({
+    required this.currency,
+    this.inputPerMtok,
+    this.outputPerMtok,
+    this.cacheReadPerMtok,
   });
 
   @override
   int get hashCode =>
-      defaultProviderId.hashCode ^ providers.hashCode ^ roles.hashCode;
+      currency.hashCode ^
+      inputPerMtok.hashCode ^
+      outputPerMtok.hashCode ^
+      cacheReadPerMtok.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is ProviderSettingsInput &&
+      other is BridgeModelPricing &&
           runtimeType == other.runtimeType &&
-          defaultProviderId == other.defaultProviderId &&
-          providers == other.providers &&
-          roles == other.roles;
+          currency == other.currency &&
+          inputPerMtok == other.inputPerMtok &&
+          outputPerMtok == other.outputPerMtok &&
+          cacheReadPerMtok == other.cacheReadPerMtok;
 }
 
-class RoleInput {
-  final String key;
-  final String provider;
-  final String model;
-  final String effort;
+class BridgeModelReasoningDescriptor {
+  final String parameter;
+  final String label;
+  final String? defaultCandidate;
+  final List<String> candidates;
 
-  const RoleInput({
-    required this.key,
-    required this.provider,
-    required this.model,
-    required this.effort,
+  const BridgeModelReasoningDescriptor({
+    required this.parameter,
+    required this.label,
+    this.defaultCandidate,
+    required this.candidates,
   });
 
   @override
   int get hashCode =>
-      key.hashCode ^ provider.hashCode ^ model.hashCode ^ effort.hashCode;
+      parameter.hashCode ^
+      label.hashCode ^
+      defaultCandidate.hashCode ^
+      candidates.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is RoleInput &&
+      other is BridgeModelReasoningDescriptor &&
           runtimeType == other.runtimeType &&
-          key == other.key &&
-          provider == other.provider &&
-          model == other.model &&
-          effort == other.effort;
+          parameter == other.parameter &&
+          label == other.label &&
+          defaultCandidate == other.defaultCandidate &&
+          candidates == other.candidates;
+}
+
+class BridgeProviderCatalogSnapshot {
+  final int schemaVersion;
+  final String revision;
+  final List<BridgeProviderPresetDescriptor> presets;
+  final List<BridgeModelCatalogDescriptor> modelCatalogs;
+
+  const BridgeProviderCatalogSnapshot({
+    required this.schemaVersion,
+    required this.revision,
+    required this.presets,
+    required this.modelCatalogs,
+  });
+
+  @override
+  int get hashCode =>
+      schemaVersion.hashCode ^
+      revision.hashCode ^
+      presets.hashCode ^
+      modelCatalogs.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeProviderCatalogSnapshot &&
+          runtimeType == other.runtimeType &&
+          schemaVersion == other.schemaVersion &&
+          revision == other.revision &&
+          presets == other.presets &&
+          modelCatalogs == other.modelCatalogs;
+}
+
+class BridgeProviderConnectionModeDescriptor {
+  final String id;
+  final String displayName;
+
+  const BridgeProviderConnectionModeDescriptor({
+    required this.id,
+    required this.displayName,
+  });
+
+  @override
+  int get hashCode => id.hashCode ^ displayName.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeProviderConnectionModeDescriptor &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          displayName == other.displayName;
+}
+
+class BridgeProviderPresetDescriptor {
+  final String id;
+  final String displayName;
+  final String? description;
+  final BridgeProviderTransportDescriptor transport;
+  final String baseUrl;
+  final String credentialLabel;
+  final String? credentialEnv;
+  final String modelCatalogId;
+  final String suggestedModel;
+  final String? iconKey;
+
+  const BridgeProviderPresetDescriptor({
+    required this.id,
+    required this.displayName,
+    this.description,
+    required this.transport,
+    required this.baseUrl,
+    required this.credentialLabel,
+    this.credentialEnv,
+    required this.modelCatalogId,
+    required this.suggestedModel,
+    this.iconKey,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      displayName.hashCode ^
+      description.hashCode ^
+      transport.hashCode ^
+      baseUrl.hashCode ^
+      credentialLabel.hashCode ^
+      credentialEnv.hashCode ^
+      modelCatalogId.hashCode ^
+      suggestedModel.hashCode ^
+      iconKey.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeProviderPresetDescriptor &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          displayName == other.displayName &&
+          description == other.description &&
+          transport == other.transport &&
+          baseUrl == other.baseUrl &&
+          credentialLabel == other.credentialLabel &&
+          credentialEnv == other.credentialEnv &&
+          modelCatalogId == other.modelCatalogId &&
+          suggestedModel == other.suggestedModel &&
+          iconKey == other.iconKey;
+}
+
+class BridgeProviderTransportDescriptor {
+  final String protocol;
+  final List<BridgeProviderConnectionModeDescriptor> connectionModes;
+  final String defaultConnectionMode;
+
+  const BridgeProviderTransportDescriptor({
+    required this.protocol,
+    required this.connectionModes,
+    required this.defaultConnectionMode,
+  });
+
+  @override
+  int get hashCode =>
+      protocol.hashCode ^
+      connectionModes.hashCode ^
+      defaultConnectionMode.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeProviderTransportDescriptor &&
+          runtimeType == other.runtimeType &&
+          protocol == other.protocol &&
+          connectionModes == other.connectionModes &&
+          defaultConnectionMode == other.defaultConnectionMode;
 }

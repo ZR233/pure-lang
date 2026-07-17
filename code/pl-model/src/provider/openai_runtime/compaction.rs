@@ -15,7 +15,7 @@ use serde_json::{Map, Value};
 use super::{OpenAiProvider, PureOpenAiConfig, get_auth_token, openai_error_to_pure};
 use crate::protocol::openai::sse;
 use crate::protocol::openai::{OpenAiProtocol, OpenAiRequestBody};
-use crate::provider_info::ProviderKind;
+use crate::provider_info::ProviderWireProtocol;
 use crate::request::{
     CompletionRequest, ModelCompactionRequest, ModelCompactionResponse, OpenAiCompactionMode,
     TokenUsage,
@@ -28,9 +28,9 @@ pub(super) async fn compact_context(
     provider: &OpenAiProvider,
     request: ModelCompactionRequest,
 ) -> Result<ModelCompactionResponse> {
-    if provider.info.provider_kind != ProviderKind::OpenAi {
+    if provider.info.protocol != ProviderWireProtocol::Responses {
         return Err(PureError::ConfigError(
-            "remote context compaction is limited to the OpenAI provider".to_string(),
+            "remote context compaction requires the Responses protocol".to_string(),
         ));
     }
     match request.mode {

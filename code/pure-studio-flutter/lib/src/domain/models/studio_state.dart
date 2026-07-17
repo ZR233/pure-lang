@@ -24,6 +24,7 @@ class StudioState {
     this.agentTimelineEventsBySession = const {},
     this.agentsBySession = const {},
     required this.providers,
+    this.providerCatalog = const ProviderCatalogView.empty(),
     this.defaultProviderId,
     this.providerUsages = const [],
     required this.roles,
@@ -50,6 +51,7 @@ class StudioState {
   agentTimelineEventsBySession;
   final Map<String, Map<String, StudioAgentView>> agentsBySession;
   final List<ProviderSettingsView> providers;
+  final ProviderCatalogView providerCatalog;
   final String? defaultProviderId;
   final List<ProviderUsageView> providerUsages;
   final List<RoleSettingsView> roles;
@@ -154,6 +156,7 @@ class StudioState {
     Map<String, Map<String, TimelineAgentEvent>>? agentTimelineEventsBySession,
     Map<String, Map<String, StudioAgentView>>? agentsBySession,
     List<ProviderSettingsView>? providers,
+    ProviderCatalogView? providerCatalog,
     Object? defaultProviderId = _studioStateUnset,
     List<ProviderUsageView>? providerUsages,
     List<RoleSettingsView>? roles,
@@ -182,6 +185,7 @@ class StudioState {
           agentTimelineEventsBySession ?? this.agentTimelineEventsBySession,
       agentsBySession: agentsBySession ?? this.agentsBySession,
       providers: providers ?? this.providers,
+      providerCatalog: providerCatalog ?? this.providerCatalog,
       defaultProviderId: identical(defaultProviderId, _studioStateUnset)
           ? this.defaultProviderId
           : defaultProviderId as String?,

@@ -71,7 +71,7 @@ class _ProviderDetails extends StatelessWidget {
           runSpacing: 8,
           children: [
             _InfoPill(icon: Icons.key_outlined, label: provider.status),
-            _InfoPill(icon: Icons.hub_outlined, label: provider.providerKind),
+            _InfoPill(icon: Icons.hub_outlined, label: provider.wireProtocol),
             _InfoPill(icon: Icons.memory_outlined, label: provider.modelCount),
           ],
         ),
@@ -85,7 +85,9 @@ class _ProviderDetails extends StatelessWidget {
             ),
             _Readout(
               label: context.l10n.settingsTemplate,
-              value: provider.templateKind,
+              value: provider.templateKind.isEmpty
+                  ? context.l10n.settingsCustomProvider
+                  : provider.templateKind,
             ),
             _Readout(
               label: context.l10n.settingsDefaultModel,
@@ -115,6 +117,7 @@ class _ProviderDetails extends StatelessWidget {
 class _ProviderEditor extends StatelessWidget {
   const _ProviderEditor({
     required this.draft,
+    required this.presets,
     required this.saving,
     required this.error,
     required this.onCancel,
@@ -127,6 +130,7 @@ class _ProviderEditor extends StatelessWidget {
   });
 
   final _ProviderDraft draft;
+  final List<ProviderPresetView> presets;
   final bool saving;
   final String? error;
   final VoidCallback onCancel;
@@ -142,6 +146,24 @@ class _ProviderEditor extends StatelessWidget {
   Widget build(BuildContext context) {
     final provider = draft.provider;
     final models = provider.allModels;
+    final preset = presets
+        .where((item) => item.id == provider.templateKind)
+        .firstOrNull;
+    final modesByProtocol = <String, List<ProviderConnectionModeView>>{};
+    for (final candidate in presets) {
+      modesByProtocol.putIfAbsent(
+        candidate.wireProtocol,
+        () => candidate.connectionModes,
+      );
+    }
+    final connectionModes =
+        preset?.connectionModes ??
+        modesByProtocol[provider.wireProtocol] ??
+        const [];
+    final selectedConnectionMode =
+        connectionModes.any((mode) => mode.id == provider.connectionMode)
+        ? provider.connectionMode
+        : preset?.defaultConnectionMode ?? provider.connectionMode;
     return ListView(
       children: [
         _SettingsHeader(
@@ -188,11 +210,15 @@ class _ProviderEditor extends StatelessWidget {
                     labelText: context.l10n.settingsTemplate,
                   ),
                   items: [
-                    for (final template in _providerTemplates)
+                    for (final template in presets)
                       DropdownMenuItem(
                         value: template.id,
-                        child: Text(template.name),
+                        child: Text(template.displayName),
                       ),
+                    DropdownMenuItem(
+                      value: '',
+                      child: Text(context.l10n.settingsCustomProvider),
+                    ),
                   ],
                   onChanged: saving
                       ? null
@@ -209,13 +235,83 @@ class _ProviderEditor extends StatelessWidget {
                   onChanged: (value) =>
                       onUpdate((item) => item.copyWith(name: value)),
                 ),
-                _ReadonlyField(
-                  label: context.l10n.settingsProtocolType,
-                  value: provider.providerKind,
-                ),
+                if (preset == null)
+                  DropdownButtonFormField<String>(
+                    initialValue:
+                        modesByProtocol.containsKey(provider.wireProtocol)
+                        ? provider.wireProtocol
+                        : modesByProtocol.keys.firstOrNull,
+                    decoration: InputDecoration(
+                      labelText: context.l10n.settingsProtocolType,
+                    ),
+                    items: [
+                      for (final protocol in modesByProtocol.keys)
+                        DropdownMenuItem(
+                          value: protocol,
+                          child: Text(protocol),
+                        ),
+                    ],
+                    onChanged: saving
+                        ? null
+                        : (protocol) {
+                            if (protocol == null) return;
+                            final modes = modesByProtocol[protocol] ?? const [];
+                            final mode =
+                                modes
+                                    .where(
+                                      (candidate) => candidate.id == 'http',
+                                    )
+                                    .firstOrNull
+                                    ?.id ??
+                                modes.firstOrNull?.id ??
+                                'http';
+                            onUpdate(
+                              (item) => item.copyWith(
+                                wireProtocol: protocol,
+                                connectionMode: mode,
+                              ),
+                            );
+                          },
+                  )
+                else
+                  _ReadonlyField(
+                    label: context.l10n.settingsProtocolType,
+                    value: provider.wireProtocol,
+                  ),
               ],
             ),
             const SizedBox(height: 10),
+            if (connectionModes.isNotEmpty) ...[
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  context.l10n.settingsProtocolType,
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: SegmentedButton<String>(
+                  segments: [
+                    for (final mode in connectionModes)
+                      ButtonSegment<String>(
+                        value: mode.id,
+                        label: Text(mode.displayName),
+                      ),
+                  ],
+                  selected: {selectedConnectionMode},
+                  showSelectedIcon: false,
+                  onSelectionChanged: saving || connectionModes.length == 1
+                      ? null
+                      : (selection) => onUpdate(
+                          (item) =>
+                              item.copyWith(connectionMode: selection.single),
+                        ),
+                ),
+              ),
+              const SizedBox(height: 10),
+            ],
             _TextEdit(
               label: context.l10n.settingsBaseUrl,
               value: provider.baseUrl,
@@ -227,13 +323,20 @@ class _ProviderEditor extends StatelessWidget {
             _TextEdit(
               label: provider.hasBearerToken
                   ? context.l10n.settingsApiKeyKeepCurrent
-                  : context.l10n.settingsApiKey,
+                  : provider.credentialLabel,
               value: provider.bearerToken,
               enabled: !saving,
               obscureText: true,
               onChanged: (value) =>
                   onUpdate((item) => item.copyWith(bearerToken: value)),
             ),
+            if (provider.credentialEnv.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(
+                provider.credentialEnv,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
             const SizedBox(height: 10),
             DropdownButtonFormField<String>(
               initialValue:
@@ -389,6 +492,7 @@ class _ModelReadout extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final price = _modelPriceLabel(model);
+    final traits = [...model.modalities, ...model.capabilities];
     final row = Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       child: Row(
@@ -421,6 +525,15 @@ class _ModelReadout extends StatelessWidget {
                     fontFamily: 'Consolas',
                   ),
                 ),
+                if (traits.isNotEmpty)
+                  Text(
+                    traits.join(' · '),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: context.text.labelSmall?.copyWith(
+                      color: context.studioInkSoft,
+                    ),
+                  ),
               ],
             ),
           ),

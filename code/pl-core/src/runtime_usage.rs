@@ -3,9 +3,9 @@ use pl_protocol::{AgentRuntimeDelta, RuntimeCostAmount, RuntimeUsageSnapshot, To
 
 use crate::tool::SubagentContext;
 
-pub(crate) const ROOT_AGENT_ID: &str = "agent-root";
-pub(crate) const ROOT_AGENT_PATH: &str = "/root";
-pub(crate) const ROOT_AGENT_ROLE: &str = "root";
+pub const ROOT_AGENT_ID: &str = "agent-root";
+pub const ROOT_AGENT_PATH: &str = "/root";
+pub const ROOT_AGENT_ROLE: &str = "root";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RuntimeAgentIdentity {
@@ -37,7 +37,7 @@ pub(crate) fn identity_for_subagent(
     )
 }
 
-pub(crate) fn token_usage_snapshot(usage: &TokenUsage) -> TokenUsageSnapshot {
+pub fn token_usage_snapshot(usage: &TokenUsage) -> TokenUsageSnapshot {
     TokenUsageSnapshot {
         prompt_tokens: usage.prompt_tokens,
         completion_tokens: usage.completion_tokens,
@@ -92,7 +92,7 @@ impl ModelTokenUsageSnapshot {
     }
 }
 
-pub(crate) fn cost_for_usage(
+pub fn cost_for_usage(
     usage: &TokenUsageSnapshot,
     model: Option<&ModelInfo>,
 ) -> (Vec<RuntimeCostAmount>, bool) {
@@ -149,8 +149,7 @@ pub(crate) fn agent_runtime_delta(
     }
 }
 
-#[cfg_attr(not(feature = "studio"), allow(dead_code))]
-pub(crate) fn aggregate_runtime_usage(
+pub fn aggregate_runtime_usage(
     session_id: &str,
     snapshots: impl IntoIterator<Item = RuntimeUsageSnapshot>,
 ) -> RuntimeUsageSnapshot {
@@ -193,8 +192,7 @@ pub(crate) fn aggregate_runtime_usage(
     aggregate
 }
 
-#[cfg_attr(not(feature = "studio"), allow(dead_code))]
-pub(crate) fn merge_costs(target: &mut Vec<RuntimeCostAmount>, incoming: &[RuntimeCostAmount]) {
+pub fn merge_costs(target: &mut Vec<RuntimeCostAmount>, incoming: &[RuntimeCostAmount]) {
     for cost in incoming {
         match target
             .iter_mut()

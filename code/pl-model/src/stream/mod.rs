@@ -32,6 +32,8 @@ pub use event::{
 };
 
 pub type CompletionEventStream = Pin<Box<dyn Stream<Item = Result<CompletionStreamEvent>> + Send>>;
+pub(crate) type OpenAiRawEventStream =
+    Pin<Box<dyn Stream<Item = Result<sse::SseStreamEvent>> + Send>>;
 const COMPLETION_STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(180);
 
 pub type CompletionStreamAccumulator = StreamCompletionAccumulator;
@@ -40,8 +42,18 @@ pub(crate) fn decode_provider_stream(
     stream: StreamResponse<sse::SseStreamEvent>,
     protocol: OpenAiProtocol,
 ) -> CompletionEventStream {
+    let stream = stream.map(|event| {
+        event.map_err(|error| PureError::LlmError(format!("provider stream error: {error}")))
+    });
+    decode_openai_event_stream(Box::pin(stream), protocol)
+}
+
+pub(crate) fn decode_openai_event_stream(
+    stream: OpenAiRawEventStream,
+    protocol: OpenAiProtocol,
+) -> CompletionEventStream {
     let state = ProviderStreamDecodeState {
-        stream: Box::pin(stream),
+        stream,
         decoder: protocol.new_stream_decoder(),
         visible_output: VisibleOutputDecoder::new(protocol.visible_output_protocol()),
         pending: VecDeque::new(),
@@ -55,14 +67,7 @@ pub(crate) fn decode_provider_stream(
 
             let sse_event = match state.stream.next().await {
                 Some(Ok(event)) => event,
-                Some(Err(error)) => {
-                    return Some((
-                        Err(PureError::LlmError(format!(
-                            "provider stream error: {error}"
-                        ))),
-                        state,
-                    ));
-                }
+                Some(Err(error)) => return Some((Err(error), state)),
                 None => {
                     state.visible_output.record_diagnostics();
                     return None;
@@ -79,7 +84,7 @@ pub(crate) fn decode_provider_stream(
 }
 
 struct ProviderStreamDecodeState {
-    stream: Pin<Box<StreamResponse<sse::SseStreamEvent>>>,
+    stream: OpenAiRawEventStream,
     decoder: sse::OpenAiStreamDecoder,
     visible_output: VisibleOutputDecoder,
     pending: VecDeque<CompletionStreamEvent>,

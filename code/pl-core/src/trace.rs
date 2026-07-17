@@ -9,13 +9,15 @@ use pl_trace::{
 ///
 /// Wraps an `AgentEventSender` and simultaneously:
 /// - Passes `AgentEvent`s through to the broadcast channel (unchanged behavior)
-/// - Appends item-first `TraceEvent`s to an in-memory log (flushed to DB after turn)
+/// - Appends item-first `TraceEvent`s to an in-memory log
+/// - Agent runtime 模式下同步送入 durable channel，由 actor 先持久化再广播
 ///
 /// When tracing is not needed, use `TraceRecorder::disabled()` which still
 /// forwards broadcasts but discards trace events.
 pub struct TraceRecorder {
     session_id: String,
     event_tx: AgentEventSender,
+    durable_tx: Option<tokio::sync::mpsc::UnboundedSender<TraceEvent>>,
     events: Vec<TraceEvent>,
     sequence: u64,
     disabled: bool,
@@ -27,6 +29,24 @@ impl TraceRecorder {
         Self {
             session_id,
             event_tx,
+            durable_tx: None,
+            events: Vec::new(),
+            sequence: starting_sequence,
+            disabled: false,
+        }
+    }
+
+    /// 创建同时把 trace 送入 agent runtime durable channel 的 recorder。
+    pub(crate) fn streaming(
+        session_id: String,
+        event_tx: AgentEventSender,
+        starting_sequence: u64,
+        durable_tx: tokio::sync::mpsc::UnboundedSender<TraceEvent>,
+    ) -> Self {
+        Self {
+            session_id,
+            event_tx,
+            durable_tx: Some(durable_tx),
             events: Vec::new(),
             sequence: starting_sequence,
             disabled: false,
@@ -38,6 +58,7 @@ impl TraceRecorder {
         Self {
             session_id: String::new(),
             event_tx,
+            durable_tx: None,
             events: Vec::new(),
             sequence: 0,
             disabled: true,
@@ -56,7 +77,7 @@ impl TraceRecorder {
             kind,
         };
         self.sequence += 1;
-        self.events.push(event);
+        self.push_event(event);
     }
 
     pub fn record_event(&mut self, mut event: TraceEvent) {
@@ -68,7 +89,7 @@ impl TraceRecorder {
         event.sequence = self.sequence;
         event.session_id = self.session_id.clone();
         self.sequence += 1;
-        self.events.push(event);
+        self.push_event(event);
     }
 
     pub fn record_events(&mut self, events: Vec<TraceEvent>) {
@@ -99,7 +120,7 @@ impl TraceRecorder {
             kind: TraceEventKind::TracePartCompleted { item: item.clone() },
         };
         self.sequence += 1;
-        self.events.push(event);
+        self.push_event(event);
         self.broadcast(AgentEvent::TracePartCompleted { item });
     }
 
@@ -120,7 +141,7 @@ impl TraceRecorder {
             },
         };
         self.sequence += 1;
-        self.events.push(event);
+        self.push_event(event);
         self.broadcast(AgentEvent::TracePartFailed { item, error });
     }
 
@@ -389,6 +410,13 @@ impl TraceRecorder {
         let _ = self.event_tx.send(event);
     }
 
+    fn push_event(&mut self, event: TraceEvent) {
+        if let Some(durable_tx) = &self.durable_tx {
+            let _ = durable_tx.send(event.clone());
+        }
+        self.events.push(event);
+    }
+
     /// Get the raw event sender for passing to providers.
     pub fn sender(&self) -> &AgentEventSender {
         &self.event_tx
@@ -424,7 +452,7 @@ impl TraceRecorder {
             kind: TraceEventKind::TracePartStarted { item: item.clone() },
         };
         self.sequence += 1;
-        self.events.push(event);
+        self.push_event(event);
         self.broadcast(AgentEvent::TracePartStarted { item });
     }
 

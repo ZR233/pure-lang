@@ -225,6 +225,7 @@
   "settingsNewProvider": "新建 provider",
   "settingsProviderKey": "Provider key",
   "settingsTemplate": "Template",
+  "settingsCustomProvider": "自定义 Provider",
   "settingsDefaultModel": "Default model",
   "settingsApiKey": "API key",
   "settingsApiKeyKeepCurrent": "API key（留空以保留当前值）",

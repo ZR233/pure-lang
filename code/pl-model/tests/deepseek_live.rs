@@ -66,6 +66,7 @@ fn deepseek_request(messages: Vec<Message>, turn_id: &str) -> CompletionRequest 
             plan_mode: false,
             trace_sequence_base: 0,
         }),
+        transport_session: Default::default(),
     }
 }
 

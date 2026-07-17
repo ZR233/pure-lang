@@ -1,4 +1,4 @@
-# 10 - 持久化配置
+# 10 - 模型配置值对象与 Studio 持久化配置
 
 ## 10.1 配置位置
 
@@ -20,27 +20,33 @@ Windows 下对应：
 ~/.pure/studio/studio_2.sqlite
 ```
 
-SQLite 只保存 Studio 状态，例如项目、会话、消息、统一 interaction、agent 状态事件和应用设置，并由 `pl-core` 通过 SeaORM 纯异步访问。provider/model/role 配置仍只由 `~/.pure/config.toml` 表达。
+SQLite 只保存 Studio 状态，例如项目、会话、消息、统一 interaction、agent 状态事件和应用设置，并由 `pl-studio-runtime` 通过 SeaORM 纯异步访问。`pl-core` 的正常依赖树不包含 SeaORM。provider/model/role 配置仍只由 `~/.pure/config.toml` 表达。
 
-普通对话运行时读取配置；当配置文件不存在时，`pure-studio-flutter` 设置页展示默认配置。设置页不提供全局保存或重载操作，普通设置项在用户修改后即时写入配置，例如删除 provider、选择默认 provider、调整角色路由、切换权限、禁用 skill 或切换 MCP server。独立新增/编辑页面保留本地草稿，必须点击页面内保存按钮才写入配置，取消则丢弃草稿。若已存在的配置文件无法解析或无法通过当前 schema 校验，运行时会先把原文件备份为 `config.invalid.backup.<unix>.toml`，再写入当前 schema 的默认配置；这属于重置恢复，不做旧字段迁移。
+普通对话运行时读取配置；当配置文件不存在时，`pure-studio-flutter` 设置页展示默认配置。设置页不提供全局保存或重载操作，普通设置项在用户修改后即时写入配置。独立新增/编辑页面保留本地草稿，必须点击页面内保存按钮才写入配置，取消则丢弃草稿。schema 5/6/7 配置在写入版本化备份后迁到 schema 8；无法解析、更老或迁移后无法校验的配置先备份再重建。迁移只处理产品配置，不复制数据库或会话历史。
 
 `pure-studio-flutter` 设置页的 typed 配置保存成功后必须返回 canonical config/bootstrap snapshot，由 Flutter store 合并。校验失败时只展示错误并保留当前页面状态，不覆盖原配置。Instructions 文本作为普通设置组展示时，在输入停止后自动写入 `~/.pure/config.toml`；Provider 新增/编辑等独立页面不自动保存。
 
 ## 10.2 配置职责
 
-配置能力属于 `pl-core`：
+`pl-core` 只负责产品无关的模型配置值对象：
 
-- 定义 TOML schema。
-- 解析和保存 `~/.pure/config.toml`。
-- 校验角色到 provider/model/effort 的路由。
-- 将配置转换为运行时 `ProviderInfo` 和模型列表。
-- 定义提示词配置，并在运行时生成 session 级 instruction snapshot。
+- `AgentModelConfig`、`ProviderConfig`、`ModelRouteConfig`。
+- 校验动态角色到 provider/model/effort 的路由。
+- 将路由解析为运行时 `ProviderInfo` 和模型列表。
+
+`pl-studio-runtime` 负责：
+
+- `StudioConfig` 与 schema version 8。
+- `~/.pure/config.toml` 路径、serde TOML 解析、原子保存和默认值。
+- Studio instructions、skills、MCP、runtime 和 UI 配置。
+- 生成 session 级 instruction snapshot。
 
 `pl-model` 只消费已经解析好的 provider 和模型信息，不负责文件 IO 或路径定位。
 
 ## 10.3 角色路由
 
-配置不使用 `active_provider`。系统固定四个模型角色：
+配置不使用 `active_provider`。`pl-core` 的角色表是动态字符串映射；Studio 默认提供以下
+四个产品角色，但其他宿主可定义不同角色：
 
 | TOML key | 中文角色 | 用途 |
 | --- | --- | --- |
@@ -59,14 +65,15 @@ SQLite 只保存 Studio 状态，例如项目、会话、消息、统一 interac
 
 `effort` 使用字符串，校验 against 对应模型 `parameters` 中 `name = "effort"` 参数的候选值（即 `supported_efforts()`）。
 
-为了兼容旧配置，读取 TOML 时允许缺失某个 `[roles.<key>]` 块。缺失角色按默认模型补齐：按配置 key 顺序取首个 provider，并使用该 provider 的 `default_model` 和该模型的默认 effort（`default_effort()`，即 effort 参数候选值的首项）。如果角色块存在但引用了不存在的 provider、model 或 effort，配置仍视为无效并返回错误。
+Studio 默认配置必须显式提供所需角色路由。provider 不保存 `default_model`；模型选择只由
+route 决定。旧版本、缺失必需路由或无效引用会触发 Studio 配置重建，不进行兼容补齐。
 
 ## 10.4 TOML 示例
 
 本地 TOML 使用 `snake_case`，不同于 API wire 格式。
 
 ```toml
-schema_version = 4
+schema_version = 8
 
 [runtime]
 permission_mode = "request-approval"
@@ -80,14 +87,14 @@ user = ""
 project_doc_max_bytes = 65536
 project_doc_fallback_filenames = []
 
-[mcp_servers.filesystem]
+[mcp.servers.filesystem]
 enabled = true
 transport = "stdio"
 command = "npx"
 args = ["-y", "@modelcontextprotocol/server-filesystem", "D:/workspace"]
 env = {}
 
-[mcp_servers.github]
+[mcp.servers.github]
 enabled = true
 transport = "streamableHttp"
 url = "https://example.com/mcp"
@@ -106,107 +113,79 @@ auto_learn_min_tool_calls = 5
 [skills.system]
 enabled = true
 
-[roles.explorer]
+[models.routes.explorer]
 provider = "deepseek"
 model = "deepseek-v4-flash"
 effort = "high"
 
-[roles.planner]
+[models.routes.planner]
 provider = "deepseek"
 model = "deepseek-v4-flash"
 effort = "high"
 
-[roles.executor]
+[models.routes.executor]
 provider = "deepseek"
 model = "deepseek-v4-flash"
 effort = "high"
 
-[roles.reviewer]
+[models.routes.reviewer]
 provider = "deepseek"
 model = "deepseek-v4-flash"
 effort = "high"
 
-[providers.deepseek]
-provider_kind = "deep_seek"
+[models.providers.deepseek]
 name = "DeepSeek"
 base_url = "https://api.deepseek.com"
 bearer_token = "sk-..."
-default_model = "deepseek-v4-flash"
 tool_wire_policy = "function_fallback"
 
-[[providers.deepseek.models]]
-slug = "deepseek-v4-flash"
-display_name = "DeepSeek V4 Flash"
-description = "DeepSeek fast reasoning model with thinking mode."
-context_window = 1000000
-max_context_window = 1000000
-max_output_tokens = 384000
-currency = "CNY"
-input_price_per_mtok = 1.0
-output_price_per_mtok = 2.0
-cache_read_price_per_mtok = 0.02
-capabilities = { streaming = true, temperature = false, reasoning = true, web_search = false, input = ["text"], output = ["text"], tools = { function_calling = true, parallel_tool_calls = true, custom_tools = false, freeform_tools = false }, interleaved = { field = "reasoning_content" } }
-request_profile = { body = { thinking = { type = "enabled" } } }
-base_instructions = ""
-truncation_policy = { mode = "tokens", limit = 10000 }
+[models.providers.deepseek.transport]
+source = "preset"
+preset = "deepseek"
+connection_mode = "http"
 
-[[providers.deepseek.models.parameters]]
-name = "effort"
-candidates = ["high", "max"]
+[models.providers.deepseek.catalog]
+source = "bundled"
+catalog = "deepseek"
 
-[providers.deepseek.models.parameters.wire.high]
-set = [{ path = "reasoning_effort", value = "high" }]
+[models.providers.openai-work]
+name = "OpenAI Work"
+base_url = "https://api.openai.com/v1"
+bearer_token_env = "OPENAI_API_KEY"
 
-[providers.deepseek.models.parameters.wire.max]
-set = [{ path = "reasoning_effort", value = "max" }]
+[models.providers.openai-work.transport]
+source = "preset"
+preset = "openai"
+connection_mode = "web_socket"
 
-[[providers.deepseek.models]]
-slug = "deepseek-v4-pro"
-display_name = "DeepSeek V4 Pro"
-description = "DeepSeek flagship reasoning model with thinking mode."
-context_window = 1000000
-max_context_window = 1000000
-max_output_tokens = 384000
-currency = "CNY"
-input_price_per_mtok = 3.0
-output_price_per_mtok = 6.0
-cache_read_price_per_mtok = 0.025
-capabilities = { streaming = true, temperature = false, reasoning = true, web_search = false, input = ["text"], output = ["text"], tools = { function_calling = true, parallel_tool_calls = true, custom_tools = false, freeform_tools = false }, interleaved = { field = "reasoning_content" } }
-request_profile = { body = { thinking = { type = "enabled" } } }
-base_instructions = ""
-truncation_policy = { mode = "tokens", limit = 10000 }
-
-[[providers.deepseek.models.parameters]]
-name = "effort"
-candidates = ["high", "max"]
-
-[providers.deepseek.models.parameters.wire.high]
-set = [{ path = "reasoning_effort", value = "high" }]
-
-[providers.deepseek.models.parameters.wire.max]
-set = [{ path = "reasoning_effort", value = "max" }]
+[models.providers.openai-work.catalog]
+source = "bundled"
+catalog = "openai"
 ```
 
 ## 10.5 Provider 和 Model
 
-`providers` 可保存多个 provider。schema v4 是破坏性配置版本，不自动兼容 schema v3 的 `reasoning_efforts` 字段（已改为 `parameters` 块，见 07-model.md 7.8），也不兼容更早 schema 的 `wire_api`、`env_key`、`auth_command`、`env_http_headers`、request retry 或 stream idle 字段。App 读取到旧 schema 或无法解析的配置时，会备份原文件并重置为默认 schema v4 配置，而不是尝试迁移。
+`models.providers` 可保存多个 provider，相同 preset 可重复使用；唯一性只约束 map key
+`ProviderId`。当前 StudioConfig schema 为 8，provider catalog snapshot schema 为 3。
 
-每个 provider 持久化：
+每个 provider 实例持久化：
 
-- provider 运行配置，例如 `provider_kind`、`name`、`base_url`、`bearer_token`、`http_headers` 和 `tool_wire_policy`。
-- 完整 `models` 列表。
+- `transport`：`Preset { preset, connection_mode }` 或
+  `Custom { protocol, connection_mode }`。
+- 实例字段：`name`、`base_url`、`bearer_token`/`bearer_token_env`、`http_headers`、
+  `tool_wire_policy` 与 `apply_patch_tool_type`。
+- `catalog`：`Bundled { catalog, additional_models }` 或 `Explicit { models }`。
 
-`provider_kind` 必须显式声明，当前可选值：
+Preset 配置不重复保存协议；`AgentModelConfig::resolve()` 从 canonical registry 解析 preset 后返回
+协议、连接模式、wire policy 和有效模型。Custom 配置显式保存
+`responses | chat_completions`。合法矩阵为 Responses+WS/HTTP、Chat+HTTP。
 
-- `open_ai`
-- `deep_seek`
-- `zhipu`
-
-Zhipu Coding Plan 是 provider 模板，不是新的 `provider_kind`。它持久化为 `provider_kind = "zhipu"`，默认 `base_url = "https://open.bigmodel.cn/api/coding/paas/v4"`，默认模型为 `glm-5.2`，并复用 Zhipu Chat Completions runtime。
+OpenAI、MiMo API、MiMo Token Plan、DeepSeek、Zhipu 与 Zhipu Coding Plan 都只是 catalog
+preset；厂商身份不进入模型执行分支。两个 MiMo preset 共享 `mimo` catalog。
 
 Anthropic 只在 `pl-model` 的 protocol 层保留占位，未实现 provider runtime 前不能写入配置。
 
-模型配置必须能完整表达运行时 `ModelInfo` 的可持久化字段：
+`pl-model` canonical catalog 与自定义/附加模型使用同一个 `ModelInfo`，可表达：
 
 - `slug`
 - `display_name`
@@ -228,7 +207,7 @@ Anthropic 只在 `pl-model` 的 protocol 层保留占位，未实现 provider ru
 
 `used_fallback` 是运行时状态，不写入 TOML。
 
-`capabilities` 是结构化能力矩阵（schema v3 引入，v4 保留）。旧的 `capabilities = [...]` 或 `input_modalities = [...]` 会导致配置校验失败，并由 Studio 备份旧文件后生成新 schema 配置。视觉模型必须显式声明 `input = ["text", "image"]`；非视觉模型即使 provider wire API 接受图片字段，也会在本地被拒绝。
+`capabilities` 是结构化能力矩阵。视觉模型必须显式声明 `input = ["text", "image"]`；非视觉模型即使 provider wire API 接受图片字段，也会在本地被拒绝。
 
 价格字段为可选字段，用于本地 UI 估算费用。`currency` 只作为展示单位，系统不做汇率转换；三个 `*_price_per_mtok` 字段均表示每百万 token 单价。缺失任一参与计算的价格或缺失 `currency` 时，本次 token 仍进入上下文和用量统计，但费用标记为未计价。
 
@@ -242,7 +221,9 @@ Bundled OpenAI/GPT 模型参数以本地 Codex 仓库 `codex-rs/models-manager/m
 
 Bundled Zhipu 模型 effort 候选值默认为 `enabled` / `none`，直接映射到 Chat 的 `thinking.type`；`glm-5.2` 例外，候选值为 `high` / `max` / `none`，wire 层 `high` / `max` 同时写入 `reasoning_effort` 并设置 `thinking.type = enabled`，`none` 设置 `thinking.type = disabled` 并移除 `reasoning_effort`。
 
-配置里的模型按字段级合并覆盖 bundled model：用户只需写差异字段，缺失字段从 bundled 默认值继承（Option 字段未提供即继承，`parameters` / `capabilities` / `truncation_policy` 为空或默认时也继承 bundled）。角色引用的 model 必须存在于对应 provider 的 `models` 中。
+Bundled 模型只读，`additional_models` 只能添加新的 slug，冲突直接校验失败，不支持字段级覆盖。
+完全自定义 provider 用 `Explicit` 保存完整模型列表。角色引用的 model 必须存在于
+`ProviderConfig::effective_models()` 结果中。
 
 ## 10.6 提示词配置
 
@@ -272,15 +253,15 @@ Bundled Zhipu 模型 effort 候选值默认为 `enabled` / `none`，直接映射
 
 Pure v1 的权限模式是本地策略层，不是 OS 沙箱。`request-approval` 和 `auto-review` 都直接允许 workspace 内读写；工具请求 workspace 外路径或 workspace 外 cwd 时分别走用户审批或 reviewer 审批。`full-access` 会放宽 Pure 文件工具和 `bash.workingDirectory` 的 workspace 边界并直接放行。
 
-`active_skills` 仅声明旧版 GUI 状态栏展示所需的 Skill 名称，不作为真实 skills 启停来源。`active_mcp_servers` 是兼容旧配置和旧状态栏的字段，MCP server 的用户启用意图来源为 `[mcp_servers.<id>].enabled`；真实可用性由进程内 MCP runtime registry 后台探测，不写入 TOML。缺失 `[runtime]` 或字段时按空列表处理；缺失 `permission_mode` 时按 `request-approval` 处理。旧配置里的 `workspace-write` 兼容读取为 `request-approval`，新配置不再输出该值。
+`active_skills` 只声明启动时预选项，不作为真实 skills 发现来源。`active_mcp_servers` 只声明启动时预选项，MCP server 的用户启用意图来源为 `[mcp.servers.<id>].enabled`；真实可用性由进程内 MCP registry 探测，不写回配置。
 
 真实 skills 能力由 `[skills]` 配置和项目目录驱动。`active_skills` 不作为启停来源，不影响模型可见的 skills 列表，也不作为当前会话状态栏 Skills 的来源。Studio 当前会话的 `activeSkills` 由后端持久化的会话级 skill activation 记录派生；只有成功执行过 `skill_view`、且后端写入 `SkillActivated` 的 skill 才计入。
 
 ## 10.8 MCP 配置
 
-MCP server 配置保存在顶层 `[mcp_servers.<server_id>]` 表，参考 Codex 的 MCP 配置形态。`server_id` 必须非空，且只能包含 ASCII 字母、数字、`_` 和 `-`，因为它会参与模型可见工具名。Pure 还会在运行时合成一组内置 MCP server；内置 server 不写入 `[mcp_servers]`，但会出现在 Studio MCP 设置页和状态栏中。用户配置不得占用内置保留 id。
+MCP server 配置保存在 `[mcp.servers.<server_id>]` 表。`server_id` 必须非空，且只能包含 ASCII 字母、数字、`_` 和 `-`，因为它会参与模型可见工具名。Pure 还会在运行时合成一组内置 MCP server；内置 server 不写入 `mcp.servers`，但会出现在 Studio MCP 设置页和状态栏中。用户配置不得占用内置保留 id。
 
-内置 MCP 的 UI toggle 状态可保存在独立的 `[builtin_mcp_servers.<server_id>]` 状态表中；该表不描述 transport 或 endpoint，也不允许新增 server。检测到 Zhipu Coding Plan 或 Zhipu token 时，Zhipu Coding Plan 内置 server 的缺失状态会按默认启用补齐，但不会覆盖用户显式禁用。
+内置 MCP 的 UI toggle 状态保存在 `[mcp.builtin_servers.<server_id>]`；该表不描述 transport 或 endpoint，也不允许新增 server。检测到 Zhipu Coding Plan 凭证时，相关内置 server 的缺失状态按默认启用补齐，但不会覆盖用户显式禁用。
 
 每个 MCP server 必须配置：
 
@@ -338,62 +319,67 @@ mcp__{server_id}__{tool_name}
 
 ## 10.10 配置草稿
 
-配置构造和校验的纯逻辑属于 `pl-core`。`pure-studio-flutter` 设置页可以使用默认配置草稿，并支持：
+通用 provider/model 值对象和解析属于 `pl-core`，`StudioConfig`、schema、默认角色和配置文件 IO
+属于 `pl-studio-runtime`。`pure-studio-flutter` 设置页先加载 canonical provider catalog，再构造产品草稿：
 
-- 默认选中 DeepSeek provider，也可切换为 OpenAI、Zhipu 或 Zhipu Coding Plan provider。
+- 默认选中 Studio 产品默认 preset，也可选择 catalog 返回的任意 preset 或 Custom provider。
 - 至少配置一个 provider。
 - 可继续添加多个 provider 实例，允许同类 provider 重复，例如 `deepseek`、`deepseek-2`、`openai`、`openai-work`。
 - 每个 provider key 必须唯一。
-- DeepSeek 模板来自 `ProviderInfo::deepseek(None)`，OpenAI 模板来自 `ProviderInfo::openai(None)`，智谱模板来自 `ProviderInfo::zhipu(None)`，Zhipu Coding Plan 模板来自 `ProviderInfo::zhipu_coding_plan(None)`。
-- 每个 provider 的模型列表包含模板默认模型，并可追加用户自定义模型。
-- 用户选择一个默认 provider；四个模型角色默认都指向该 provider 的默认模型和默认 effort。
+- preset、endpoint、凭证提示、协议、允许连接模式、suggested model 和 bundled catalog 全部来自
+  `ProviderCatalogSnapshot`；Flutter 不保存生产目录副本。
+- preset provider 引用只读 bundled catalog，并可追加不冲突的模型；Custom provider 使用 explicit models。
+- 用户选择一个默认 provider；四个模型角色默认都指向创建时选择的 suggested/default model 和该模型声明的默认 effort。
 
 设置项写入前必须完成本地校验：
 
 - provider key 非空且唯一。
-- provider kind 必须是 OpenAI、DeepSeek 或 Zhipu。
+- preset 引用必须存在；Custom provider 必须显式选择 wire protocol。
+- `Responses + WebSocket/Http` 合法，`ChatCompletions + Http` 合法，`ChatCompletions + WebSocket` 在发起网络请求前拒绝。
 - API key 非空。
-- provider 的 default model 必须存在于该 provider 模型列表中。
+- 每个角色 route 的 model 必须存在于对应 provider 的 effective models。
 - 同一 provider 下模型 slug 不重复。
 - 角色引用的默认模型必须声明 `name = "effort"` 参数且至少一个候选值，用于生成角色 `effort`。
 
 ## 10.11 pure-studio-flutter 设置页
 
-`pure-studio-flutter` 设置页复用 `pl-core` 的配置类型和校验逻辑，首版覆盖：
+`pure-studio-flutter` 设置页消费 Bridge 返回的 catalog/config projection，保存时由
+`pl-studio-runtime` 组合 `StudioConfig` 并统一校验，覆盖：
 
-- DeepSeek / OpenAI / Zhipu / Zhipu Coding Plan provider。
+- catalog 中的全部 preset 与 Custom Responses/Chat provider。
 - API key、base URL、provider key 和显示名。
 - provider 默认模型和自定义模型。
 - 四个模型角色到 provider/model/effort 的路由。
 - Security 标签页选择权限模式：请求批准、替我审批、完全访问。选择后即时写入 `[runtime].permission_mode`。
 - Instructions 标签页编辑 `[instructions]` 的 base override、developer、user 和项目文档预算；保存前由 `pl-core` 校验并即时写入配置。
-- MCP 标签页管理用户 `[mcp_servers]`，包括 server id、启用状态、stdio/Streamable HTTP 传输方式、命令参数、环境变量、HTTP URL 和 token 环境变量；同时展示不可删除的内置 Zhipu Coding Plan MCP server。
+- MCP 标签页管理用户 `[mcp.servers]`，包括 server id、启用状态、stdio/Streamable HTTP 传输方式、命令参数、环境变量、HTTP URL 和 token 环境变量；同时展示不可删除的内置 Zhipu Coding Plan MCP server。
 - Provider 列表卡片展示供应商身份、默认模型、模型数量和只读额度状态，不把 base URL 作为主卡片信息。base URL 仍保留在编辑页和 TOML 配置中。
 - Provider 额度查询由后端执行，前端只消费脱敏 DTO。DeepSeek provider 查询账户余额；Zhipu Coding Plan provider 查询 5 小时、7 天和 MCP 工具额度；普通 Zhipu provider 不查询 Coding Plan 额度。
 - 供应商设置页打开时可触发一次额度刷新，并提供手动刷新入口；不做后台定时轮询。缺少 API key、网络失败和 provider 业务失败必须作为卡片状态展示，不能阻塞配置编辑。
 
-每次设置项写入前必须执行 `PureConfig::validate()`；失败时只在 UI 中展示错误，不写入磁盘。
+每次设置项写入前必须执行 `StudioConfig::validate()`（内部调用
+`AgentModelConfig::validate()`）；失败时只在 UI 中展示错误，不写入磁盘。
 
 MCP 标签页使用结构化表单，不展示 raw TOML。新增和编辑用户 server 使用本地草稿；保存成功后即时写入 `~/.pure/config.toml`、触发后台 MCP registry reconcile 并刷新设置页状态。删除 server 和启用切换同样即时写入。内置 Zhipu Coding Plan MCP server 不可删除，不允许编辑 server id、transport、endpoint 或运行时注入字段；界面同时显示配置状态和实际可用性。设置页状态栏展示的 MCP 数量和列表来自 MCP registry 中当前 `available` 的 server。
 
-设置页 UI 按 Flutter feature/page 模块拆分，顶层 `MaterialApp.router` 负责页面路由，Riverpod controller 负责共享状态，具体页面放在 `lib/src/features/settings`，桥接调用封装在 repository 层。Provider 标签页优先从 `PureConfig.providers` 派生 provider 卡片列表，不引入新的配置存储。
+设置页 UI 按 Flutter feature/page 模块拆分，顶层 `MaterialApp.router` 负责页面路由，Riverpod controller 负责共享状态，具体页面放在 `lib/src/features/settings`，桥接调用封装在 repository 层。Provider 标签页并行消费 canonical catalog 与服务端解析的 provider projection，不引入前端配置存储或目录 fallback。
 
 Provider 标签页必须提供结构化编辑能力：
 
 - Provider 列表页只提供一个“添加供应商”入口；点击后进入 Provider 编辑页。
-- 新增 Provider 默认使用模板列表第一项，自动生成唯一 provider key；编辑页通过供应商类型下拉切换 DeepSeek / OpenAI / Zhipu / Zhipu Coding Plan 等模板。
+- 新增 Provider 默认使用 catalog preset 的显式 `default_connection_mode` 并自动生成唯一 provider key；编辑页的 preset 下拉完全由 catalog 生成，也提供 Custom provider。
 - 编辑 provider key、显示名、base URL、API key 和默认模型。
-- 以 provider 卡片作为主要信息载体，展示 provider key、provider kind、状态、默认模型、模型数量和额度状态等摘要信息；base URL 只在编辑页展示。
+- 以 provider 卡片作为主要信息载体，展示 provider key、preset/协议、连接模式、状态、当前路由模型、模型数量和额度状态等摘要信息；base URL 只在编辑页展示。
 - Provider 列表页不直接编辑字段；点击卡片编辑按钮进入 provider 编辑页。
 - Provider 编辑页使用本地草稿，提供保存和取消按钮；保存成功后即时写入配置并返回列表，取消或返回列表不修改当前配置。
 - Provider 卡片必须提供删除按钮；删除和默认 provider 选择都即时写入配置，列表页不使用独立右侧详情面板。
 - Provider 标签页不展示 raw TOML 配置编辑器，确保列表和编辑页占据主要工作区。
-- 展示 provider 模板自带的默认模型列表。
-- 允许追加用户自定义模型，保存时由 `pl-core` 将模板默认模型排在前面，再追加用户自定义模型。
+- 展示 provider effective models；bundled 模型与附加模型的顺序由服务端统一解析。
+- 允许追加用户自定义模型，冲突 slug 直接拒绝，Flutter 不自行实现合并规则。
 - 模型列表应展示关键参数，例如上下文窗口、最大输出 token、自动压缩阈值、temperature、effort 候选值（`supported_efforts()`）、capabilities、输入模态和截断策略。
-- provider kind 决定运行时 endpoint policy：OpenAI 默认使用 Responses；DeepSeek 和 Zhipu 使用 OpenAI Chat Completions protocol。运行时由 `pl-model` 内部 typed protocol 层转换为 async-openai 请求，用户配置中的 base URL 不自动追加或改写版本路径，只去除末尾多余 `/` 后与对应 API path 拼接。
+- `wire_protocol` 决定请求格式，`connection_mode` 独立决定流连接。Responses 允许 `web_socket | http`；官方 OpenAI preset 的模式顺序为 WS、HTTP且默认 WS，HTTP 选项仍是 Responses HTTP/SSE。Chat Completions 只允许 HTTP。运行时由 `pl-model` typed protocol 层转换请求，用户配置中的 base URL 不自动改写版本路径，只去除末尾多余 `/` 后与对应 API path 拼接。Web 和 Flutter 的协议/模式/默认值必须来自 provider catalog，不得按 preset ID 分支。
 - Zhipu 请求固定使用流式 `chat/completions`；effort 由模型 `parameters` 声明驱动（见 07-model.md 7.8）。默认模型 effort 候选值为 `enabled` / `none`，直接映射到 `thinking.type`，不发送 wire-level `reasoning_effort`。`glm-5.2` 候选值为 `high` / `max` / `none`，其中 `high` / `max` 会作为 `reasoning_effort` 透传给 API 并设置 `thinking.type = enabled` 与 `clear_thinking = false`，`none` 设置 `thinking.type = disabled` 并移除 `reasoning_effort`。历史回放仍通过 assistant message 的 `reasoning_content` 字段保留。
-- 写入前由 `pl-core` 构造 `PureConfig` 并执行 `PureConfig::validate()`；校验失败时只在 UI 中展示错误，不写入磁盘。
+- 写入前由 `pl-studio-runtime` 构造 `StudioConfig` 并执行完整校验；校验失败时只在 UI 中展示错误，不写入磁盘。更新 API key 时，空输入表示保留现有 secret；provider key 重命名必须携带 `originalId`，以便服务端保留 secret、headers、catalog metadata 和模型能力。
 
 Roles 标签页必须展示固定四个角色：探索者、计划者、执行者、审查者。每个角色提供 provider、model 和 effort 下拉选择。provider 改变时，model 默认切换为该 provider 的 `default_model`；model 改变时，effort 默认切换为该模型的第一个可用 effort。角色路由下拉变更后即时提交完整 roles 快照，`pl-core` 统一校验后写入 `~/.pure/config.toml`。
 

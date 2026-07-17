@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::{ModelCapabilities, ModelContinuationState, ModelModality};
+use crate::{ModelCapabilities, ModelModality, ModelTransportSession};
 use pl_protocol::{
     ContentPart, ImageSource, Message, MessageContent, ModelContextItem, PureError, ToolCallKind,
 };
@@ -35,6 +35,8 @@ pub struct CompletionRequest {
     pub stream: bool,
     #[serde(skip)]
     pub trace: Option<CompletionTraceContext>,
+    #[serde(skip)]
+    pub transport_session: ModelTransportSession,
 }
 
 /// OpenAI provider 的上下文压缩协议选择。
@@ -107,21 +109,6 @@ impl CompletionRequestBuilder {
         self
     }
 
-    pub fn messages_from_continuation(
-        mut self,
-        messages: &[Message],
-        continuation: &ModelContinuationState,
-        use_continuation: bool,
-    ) -> Self {
-        self.request.input = continuation
-            .acknowledged_tail(messages, use_continuation)
-            .iter()
-            .cloned()
-            .map(ModelContextItem::from)
-            .collect();
-        self.continuation(continuation, use_continuation)
-    }
-
     pub fn tools(mut self, tools: Vec<ToolSchema>) -> Self {
         self.request.tools = tools;
         self
@@ -157,26 +144,8 @@ impl CompletionRequestBuilder {
         self
     }
 
-    pub fn previous_response_id(mut self, response_id: Option<String>) -> Self {
-        self.request.previous_response_id = response_id;
-        self
-    }
-
     pub fn prompt_cache_key(mut self, prompt_cache_key: Option<String>) -> Self {
         self.request.prompt_cache_key = prompt_cache_key;
-        self
-    }
-
-    pub fn continuation(
-        mut self,
-        continuation: &ModelContinuationState,
-        use_continuation: bool,
-    ) -> Self {
-        self.request.store = Some(use_continuation);
-        self.request.previous_response_id = use_continuation
-            .then(|| continuation.previous_response_id().map(ToString::to_string))
-            .flatten();
-        self.request.prompt_cache_key = continuation.prompt_cache_key().map(ToString::to_string);
         self
     }
 
@@ -192,6 +161,11 @@ impl CompletionRequestBuilder {
 
     pub fn trace(mut self, trace: Option<CompletionTraceContext>) -> Self {
         self.request.trace = trace;
+        self
+    }
+
+    pub fn transport_session(mut self, transport_session: ModelTransportSession) -> Self {
+        self.request.transport_session = transport_session;
         self
     }
 
@@ -235,6 +209,18 @@ pub struct ToolCall {
     pub payload: ToolCallPayload,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub call_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub invalid_arguments: Option<InvalidToolArguments>,
+}
+
+/// Provider 返回的 function tool 参数无法解析为 JSON 时保留的诊断信息。
+///
+/// 该信息让执行层把模型输出错误作为失败的工具调用反馈给模型，而不是把整次
+/// completion 误判为 provider 传输失败。原始参数同时用于历史回放与 trace。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct InvalidToolArguments {
+    pub raw: String,
+    pub error: String,
 }
 
 impl ToolCall {
@@ -260,6 +246,29 @@ impl ToolCall {
             name: name.into(),
             payload: ToolCallPayload::Function { arguments },
             call_id,
+            invalid_arguments: None,
+        }
+    }
+
+    /// 构造 provider 已给出稳定身份、但 function 参数不是合法 JSON 的工具调用。
+    pub fn invalid_function(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        raw: impl Into<String>,
+        error: impl Into<String>,
+        call_id: Option<String>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            payload: ToolCallPayload::Function {
+                arguments: serde_json::Value::Null,
+            },
+            call_id,
+            invalid_arguments: Some(InvalidToolArguments {
+                raw: raw.into(),
+                error: error.into(),
+            }),
         }
     }
 
@@ -276,6 +285,7 @@ impl ToolCall {
                 input: input.into(),
             },
             call_id,
+            invalid_arguments: None,
         }
     }
 
@@ -297,6 +307,12 @@ impl ToolCall {
     }
 
     pub fn arguments_for_display(&self) -> serde_json::Value {
+        if let Some(invalid) = &self.invalid_arguments {
+            return serde_json::json!({
+                "raw": invalid.raw,
+                "parse_error": invalid.error,
+            });
+        }
         match &self.payload {
             ToolCallPayload::Function { arguments } => arguments.clone(),
             ToolCallPayload::Custom { input } => serde_json::json!({ "input": input }),
@@ -304,12 +320,24 @@ impl ToolCall {
     }
 
     pub fn payload_text(&self) -> String {
+        if let Some(invalid) = &self.invalid_arguments {
+            return invalid.raw.clone();
+        }
         match &self.payload {
             ToolCallPayload::Function { arguments } => {
                 serde_json::to_string(arguments).unwrap_or_default()
             }
             ToolCallPayload::Custom { input } => input.clone(),
         }
+    }
+
+    /// 返回可直接反馈给模型的非法参数诊断；合法调用返回 `None`。
+    pub fn invalid_arguments_message(&self) -> Option<String> {
+        let invalid = self.invalid_arguments.as_ref()?;
+        Some(format!(
+            "Invalid JSON arguments for function tool {}: {}. Call the tool again with exactly one valid JSON object.",
+            self.name, invalid.error
+        ))
     }
 }
 
@@ -474,6 +502,7 @@ impl CompletionRequest {
                 reasoning: None,
                 stream: true,
                 trace: None,
+                transport_session: ModelTransportSession::default(),
             },
         }
     }
@@ -660,6 +689,7 @@ mod tests {
             reasoning: None,
             stream: true,
             trace: None,
+            transport_session: ModelTransportSession::default(),
         }
     }
 
@@ -737,67 +767,5 @@ mod tests {
             error.to_string(),
             "configuration error: model model does not support reasoning"
         );
-    }
-
-    #[test]
-    fn builder_applies_continuation_state_and_message_tail() {
-        let messages = vec![
-            Message {
-                role: MessageRole::System,
-                content: MessageContent::Text("system".to_string()),
-                reasoning_content: None,
-                metadata: HashMap::new(),
-            },
-            Message {
-                role: MessageRole::User,
-                content: MessageContent::Text("first".to_string()),
-                reasoning_content: None,
-                metadata: HashMap::new(),
-            },
-            Message {
-                role: MessageRole::Assistant,
-                content: MessageContent::Text("answer".to_string()),
-                reasoning_content: None,
-                metadata: HashMap::new(),
-            },
-            Message {
-                role: MessageRole::User,
-                content: MessageContent::Text("second".to_string()),
-                reasoning_content: None,
-                metadata: HashMap::new(),
-            },
-        ];
-        let mut continuation = crate::ModelContinuationState::default();
-        continuation.set_prompt_cache_key("cache-1".to_string());
-        continuation.acknowledge_response(2, Some("resp-1".to_string()), messages.len());
-
-        let request = CompletionRequest::builder("gpt-5.5")
-            .instructions("reply briefly")
-            .messages_from_continuation(&messages, &continuation, true)
-            .tools(vec![ToolSchema::function(
-                "lookup",
-                "Lookup docs",
-                serde_json::json!({ "type": "object" }),
-            )])
-            .parallel_tool_calls(true)
-            .max_tokens(128)
-            .build();
-
-        assert_eq!(request.model, "gpt-5.5");
-        assert_eq!(request.instructions.as_deref(), Some("reply briefly"));
-        assert_eq!(
-            request.input,
-            messages[2..]
-                .iter()
-                .cloned()
-                .map(ModelContextItem::from)
-                .collect::<Vec<_>>()
-        );
-        assert_eq!(request.store, Some(true));
-        assert_eq!(request.previous_response_id.as_deref(), Some("resp-1"));
-        assert_eq!(request.prompt_cache_key.as_deref(), Some("cache-1"));
-        assert_eq!(request.tools.len(), 1);
-        assert!(request.parallel_tool_calls);
-        assert_eq!(request.max_tokens, Some(128));
     }
 }

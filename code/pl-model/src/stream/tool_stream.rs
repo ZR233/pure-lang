@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use pl_protocol::{PureError, Result};
 
 use crate::request::ToolCall;
-use crate::tool_arguments::parse_function_tool_arguments;
+use crate::tool_arguments::function_tool_call_from_raw;
 
 use super::event::ToolInputDeltaPayload;
 
@@ -285,12 +285,9 @@ impl ToolCallAccumulator {
             ));
         }
         match self.payload {
-            ToolCallPayloadAccumulator::FunctionArguments(arguments) => Ok(ToolCall::function(
-                self.id,
-                self.name.clone(),
-                parse_function_tool_arguments(&arguments, &self.name)?,
-                self.call_id,
-            )),
+            ToolCallPayloadAccumulator::FunctionArguments(arguments) => Ok(
+                function_tool_call_from_raw(self.id, self.name, arguments, self.call_id),
+            ),
             ToolCallPayloadAccumulator::CustomInput(input) => {
                 Ok(ToolCall::custom(self.id, self.name, input, self.call_id))
             }
@@ -427,7 +424,7 @@ mod tests {
     }
 
     #[test]
-    fn invalid_function_arguments_fail_instead_of_becoming_string() {
+    fn invalid_function_arguments_are_preserved_for_tool_feedback() {
         let mut stream = ToolStream::new();
         let call_id = "call-1".to_string();
         stream.append_delta(
@@ -438,16 +435,17 @@ mod tests {
             ToolInputDeltaPayload::FunctionArguments("{bad".to_string()),
         );
 
-        let error = stream
+        let call = stream
             .finish_ready(None, Some(&call_id), "provider-tool-1", None, None)
-            .unwrap_err();
+            .unwrap()
+            .expect("tool call");
 
-        match error {
-            PureError::LlmError(message) => {
-                assert!(message.contains("invalid JSON arguments"));
-                assert!(message.contains("read_file"));
-            }
-            other => panic!("unexpected error: {other:?}"),
-        }
+        assert_eq!(call.payload_text(), "{bad");
+        assert_eq!(call.invalid_arguments.as_ref().unwrap().raw, "{bad");
+        assert!(
+            call.invalid_arguments_message()
+                .unwrap()
+                .contains("read_file")
+        );
     }
 }

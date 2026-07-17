@@ -249,8 +249,8 @@ mod tests {
     use tokio_util::sync::CancellationToken;
 
     use super::*;
+    use crate::TurnOptions;
     use crate::tool::WorkspaceAccess;
-    use crate::{AgentSupervisor, TurnOptions};
 
     fn context(options: TurnOptions) -> ToolContext {
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
@@ -258,16 +258,13 @@ mod tests {
             event_tx,
             options,
             workspace_access: WorkspaceAccess::WorkspaceOnly,
-            mode: crate::CompileMode::Simple,
             workspace_root: std::env::temp_dir(),
             workspace_instructions: None,
             instruction_snapshot: None,
             provider_call_id: None,
             active_subagent: None,
-            agent_supervisor: AgentSupervisor::default(),
-            agent_tool_registrar: None,
             lsp_runtime: None,
-            parent_session: Arc::new(crate::CoreSession::new()),
+            parent_session: Arc::new(crate::AgentSession::new()),
         }
     }
 

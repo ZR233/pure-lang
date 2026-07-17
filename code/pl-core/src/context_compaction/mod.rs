@@ -1,12 +1,13 @@
 use pl_model::{
-    ModelProvider, OpenAiCompactionMode, ProviderKind, ReasoningConfig, TokenUsage, ToolSchema,
+    ModelProvider, OpenAiCompactionMode, ProviderWireProtocol, ReasoningConfig, TokenUsage,
+    ToolSchema,
 };
 use pl_protocol::{Message, ModelContextItem, PureError, Result};
 use pl_trace::AgentEventSender;
 
 use crate::core::progress::ProgressEmitter;
-use crate::session::CoreSession;
-use crate::{CompileMode, InstructionSnapshot};
+use crate::session::AgentSession;
+use crate::{AgentExecutionPolicy, InstructionSnapshot};
 
 mod history;
 mod local;
@@ -154,19 +155,25 @@ pub struct ContextCompactionSnapshot {
 #[derive(Debug, Clone)]
 pub struct ManualContextCompactionRequest {
     pub turn_id: Option<String>,
-    pub mode: CompileMode,
     pub workspace_instructions: Option<String>,
     pub instruction_snapshot: Option<InstructionSnapshot>,
+    pub execution_policy: Option<AgentExecutionPolicy>,
 }
 
 impl ManualContextCompactionRequest {
-    pub fn new(mode: CompileMode) -> Self {
+    pub fn new() -> Self {
         Self {
             turn_id: None,
-            mode,
             workspace_instructions: None,
             instruction_snapshot: None,
+            execution_policy: None,
         }
+    }
+}
+
+impl Default for ManualContextCompactionRequest {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -203,7 +210,7 @@ pub(crate) struct ContextCompactionRequest<'a, P: ModelProvider + ?Sized> {
 }
 
 pub(crate) async fn maybe_compact_session(
-    session: &mut CoreSession,
+    session: &mut AgentSession,
     request: ContextCompactionRequest<'_, impl ModelProvider + ?Sized>,
 ) -> Result<CompactionOutcome> {
     let ContextCompactionRequest {
@@ -224,7 +231,7 @@ pub(crate) async fn maybe_compact_session(
     if !has_compactable_history(session.items(), trigger) {
         return Ok(CompactionOutcome::Skipped);
     }
-    ensure_provider_can_consume_session(provider.info().provider_kind, session)?;
+    ensure_provider_can_consume_session(provider.info().protocol, session)?;
     let model_info = provider.model_info(model);
     let limit = match (trigger, model_info.resolved_auto_compact_limit()) {
         (CompactionTrigger::Manual, limit) => limit.unwrap_or_default(),
@@ -247,7 +254,7 @@ pub(crate) async fn maybe_compact_session(
     if let Some(progress) = progress.as_mut() {
         progress.milestone("上下文接近上限，正在压缩历史。");
     }
-    let use_remote = provider.info().provider_kind == ProviderKind::OpenAi
+    let use_remote = provider.info().protocol == ProviderWireProtocol::Responses
         && config.openai_mode != OpenAiCompactionMode::Local;
     let (replacement, usage, summary, implementation, replacement_tokens) = if use_remote {
         let (replacement, usage) = remote::compact_remote(
@@ -333,10 +340,10 @@ fn provider_prompt_tokens(trigger: CompactionTrigger) -> Option<u64> {
 }
 
 pub(crate) fn ensure_provider_can_consume_session(
-    provider_kind: ProviderKind,
-    session: &CoreSession,
+    protocol: ProviderWireProtocol,
+    session: &AgentSession,
 ) -> Result<()> {
-    if provider_kind != ProviderKind::OpenAi
+    if protocol != ProviderWireProtocol::Responses
         && session.items().iter().any(ModelContextItem::is_compaction)
     {
         return Err(PureError::ConfigError(

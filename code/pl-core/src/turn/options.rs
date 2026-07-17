@@ -115,6 +115,7 @@ pub struct TurnOptions {
     pub tool_execution_mode: ToolExecutionMode,
     pub prompt_cache_key: Option<String>,
     pub user_input_mode: UserInputMode,
+    pub execution_policy: Option<crate::AgentExecutionPolicy>,
 }
 
 impl TurnOptions {
@@ -127,6 +128,7 @@ impl TurnOptions {
             tool_execution_mode: ToolExecutionMode::ModelDefault,
             prompt_cache_key: None,
             user_input_mode: UserInputMode::AwaitResponse,
+            execution_policy: None,
         }
     }
 
@@ -168,6 +170,12 @@ impl TurnOptions {
         self
     }
 
+    /// 使用宿主编译出的数据化工具与协作策略。
+    pub fn with_execution_policy(mut self, policy: crate::AgentExecutionPolicy) -> Self {
+        self.execution_policy = Some(policy);
+        self
+    }
+
     pub fn requires_user_approval_callback(&self) -> bool {
         matches!(self.permission_mode, PermissionMode::RequestApproval)
             || matches!(self.tool_approval_policy, ToolApprovalPolicy::Manual)
@@ -196,6 +204,7 @@ impl std::fmt::Debug for TurnOptions {
             .field("tool_execution_mode", &self.tool_execution_mode)
             .field("prompt_cache_key", &self.prompt_cache_key)
             .field("user_input_mode", &self.user_input_mode)
+            .field("execution_policy", &self.execution_policy)
             .finish()
     }
 }

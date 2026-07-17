@@ -3,7 +3,8 @@ use std::sync::{Arc, Mutex};
 
 use pl_model::{
     CompletionEventStream, CompletionRequest, CompletionResponse, FinishReason, ModelCapabilities,
-    ModelInfo, OpenAiCompactionMode, ProviderCapabilities, ProviderInfo, ProviderKind, TokenUsage,
+    ModelInfo, OpenAiCompactionMode, ProviderCapabilities, ProviderInfo, ProviderWireProtocol,
+    TokenUsage,
 };
 use pl_protocol::{Message, MessageContent, MessageRole, ModelContextItem, PureError, Result};
 use pl_trace::{AgentEvent, AgentEventSender, TracePartSource};
@@ -184,10 +185,10 @@ async fn remote_failure_does_not_replace_session_history_or_revision() {
 }
 
 #[tokio::test]
-async fn non_openai_provider_always_uses_local_compaction() {
+async fn chat_completions_provider_always_uses_local_compaction() {
     let mut provider =
         FakeCompactionProvider::new(test_model(), FakeCompactionFailure::ContextPressure);
-    provider.info.provider_kind = ProviderKind::DeepSeek;
+    provider.info.protocol = ProviderWireProtocol::ChatCompletions;
     let mut session = test_session();
     let config =
         ContextCompactionConfig::default().with_openai_mode(OpenAiCompactionMode::RemoteV2);
@@ -211,12 +212,14 @@ async fn non_openai_provider_always_uses_local_compaction() {
 }
 
 #[test]
-fn encrypted_checkpoint_rejects_non_openai_provider() {
-    let session = CoreSession::from_items(vec![ModelContextItem::Compaction {
+fn encrypted_checkpoint_rejects_chat_completions_provider() {
+    let session = AgentSession::from_items(vec![ModelContextItem::Compaction {
         encrypted_content: "encrypted".to_string(),
     }]);
 
-    let error = ensure_provider_can_consume_session(ProviderKind::DeepSeek, &session).unwrap_err();
+    let error =
+        ensure_provider_can_consume_session(ProviderWireProtocol::ChatCompletions, &session)
+            .unwrap_err();
 
     assert!(error.to_string().contains("继续使用 OpenAI provider"));
 }
@@ -230,8 +233,8 @@ fn test_model() -> ModelInfo {
     model
 }
 
-fn test_session() -> CoreSession {
-    let mut session = CoreSession::new();
+fn test_session() -> AgentSession {
+    let mut session = AgentSession::new();
     session.push_user_prompt("old request ".repeat(20));
     session.push_assistant_response("old answer ".repeat(20), None);
     session.push_user_prompt("latest request ".repeat(20));

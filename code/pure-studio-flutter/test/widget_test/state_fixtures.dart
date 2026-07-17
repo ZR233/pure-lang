@@ -1,12 +1,132 @@
 part of '../widget_test.dart';
 
+const _testProviderCatalog = ProviderCatalogView(
+  schemaVersion: 3,
+  revision: 'widget-test-catalog-v3',
+  presets: [
+    ProviderPresetView(
+      id: 'deepseek',
+      displayName: 'DeepSeek',
+      description: 'DeepSeek API',
+      wireProtocol: 'chat_completions',
+      connectionModes: [
+        ProviderConnectionModeView(id: 'http', displayName: 'HTTP'),
+      ],
+      defaultConnectionMode: 'http',
+      baseUrl: 'https://api.deepseek.com',
+      credentialLabel: 'API Key',
+      credentialEnv: 'DEEPSEEK_API_KEY',
+      modelCatalogId: 'deepseek',
+      suggestedModel: 'deepseek-v4-flash',
+    ),
+    ProviderPresetView(
+      id: 'openai',
+      displayName: 'OpenAI',
+      description: 'OpenAI API',
+      wireProtocol: 'responses',
+      connectionModes: [
+        ProviderConnectionModeView(id: 'web_socket', displayName: 'WebSocket'),
+        ProviderConnectionModeView(id: 'http', displayName: 'HTTP'),
+      ],
+      defaultConnectionMode: 'web_socket',
+      baseUrl: 'https://api.openai.com/v1',
+      credentialLabel: 'API Key',
+      credentialEnv: 'OPENAI_API_KEY',
+      modelCatalogId: 'openai',
+      suggestedModel: 'gpt-5.6-sol',
+    ),
+    ProviderPresetView(
+      id: 'zhipu-coding-plan',
+      displayName: 'Zhipu Coding Plan',
+      description: 'Zhipu Coding Plan API',
+      wireProtocol: 'chat_completions',
+      connectionModes: [
+        ProviderConnectionModeView(id: 'http', displayName: 'HTTP'),
+      ],
+      defaultConnectionMode: 'http',
+      baseUrl: 'https://open.bigmodel.cn/api/coding/paas/v4',
+      credentialLabel: 'API Key',
+      credentialEnv: 'ZHIPU_API_KEY',
+      modelCatalogId: 'zhipu',
+      suggestedModel: 'glm-4.7',
+    ),
+    ProviderPresetView(
+      id: 'future-provider',
+      displayName: 'Future Provider',
+      description: 'Unknown provider fixture',
+      wireProtocol: 'chat_completions',
+      connectionModes: [
+        ProviderConnectionModeView(id: 'http', displayName: 'HTTP'),
+      ],
+      defaultConnectionMode: 'http',
+      baseUrl: 'https://future.example/v1',
+      credentialLabel: 'Access Key',
+      credentialEnv: 'FUTURE_PROVIDER_KEY',
+      modelCatalogId: 'future-catalog',
+      suggestedModel: 'future-model',
+    ),
+  ],
+  modelCatalogs: {
+    'deepseek': [
+      ProviderModelView(
+        slug: 'deepseek-v4-flash',
+        displayName: 'DeepSeek V4 Flash',
+        reasoningEfforts: ['high', 'max'],
+        defaultReasoningEffort: 'high',
+      ),
+      ProviderModelView(
+        slug: 'deepseek-reasoner',
+        displayName: 'DeepSeek Reasoner',
+        reasoningEfforts: ['high', 'max'],
+        defaultReasoningEffort: 'high',
+      ),
+    ],
+    'openai': [
+      ProviderModelView(
+        slug: 'gpt-5.6-sol',
+        displayName: 'GPT-5.6-Sol',
+        reasoningEfforts: ['low', 'medium', 'high', 'max'],
+        defaultReasoningEffort: 'high',
+      ),
+      ProviderModelView(
+        slug: 'gpt-5.6-terra',
+        displayName: 'GPT-5.6-Terra',
+        reasoningEfforts: ['low', 'medium', 'high', 'max'],
+        defaultReasoningEffort: 'high',
+      ),
+      ProviderModelView(
+        slug: 'gpt-5.6-luna',
+        displayName: 'GPT-5.6-Luna',
+        reasoningEfforts: ['low', 'medium', 'high', 'max'],
+        defaultReasoningEffort: 'high',
+      ),
+    ],
+    'zhipu': [
+      ProviderModelView(
+        slug: 'glm-4.7',
+        displayName: 'GLM-4.7',
+        reasoningEfforts: ['enabled', 'disabled'],
+        defaultReasoningEffort: 'enabled',
+      ),
+    ],
+    'future-catalog': [
+      ProviderModelView(
+        slug: 'future-model',
+        displayName: 'Future Model',
+        reasoningEfforts: ['eco', 'balanced', 'max'],
+        defaultReasoningEffort: 'balanced',
+      ),
+    ],
+  },
+);
+
 StudioState _emptyState() {
   const project = StudioProject(id: 'project-1', name: 'project', path: '.');
   final session = StudioSession(
     id: 'session-1',
     projectId: project.id,
     title: 'Session',
-    mode: CompileMode.simple,
+    mode: StudioMode.simple,
     updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
   );
   return StudioState(
@@ -76,7 +196,7 @@ StudioState _twoProjectState({
         id: 'session-a',
         projectId: 'project-a',
         title: 'Session A',
-        mode: CompileMode.simple,
+        mode: StudioMode.simple,
         updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
       ),
     if (projects.any((project) => project.id == 'project-b'))
@@ -84,7 +204,7 @@ StudioState _twoProjectState({
         id: 'session-b',
         projectId: 'project-b',
         title: 'Session B',
-        mode: CompileMode.task,
+        mode: StudioMode.task,
         updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
       ),
   ];
@@ -113,7 +233,7 @@ StudioState _sessionHistoryState({
     id: sessionId,
     projectId: projectId,
     title: 'Loaded $sessionId',
-    mode: CompileMode.simple,
+    mode: StudioMode.simple,
     updatedAt: DateTime.fromMillisecondsSinceEpoch(1),
   );
   return _emptyState().copyWith(

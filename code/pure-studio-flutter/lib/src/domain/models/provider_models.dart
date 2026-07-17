@@ -5,7 +5,12 @@ class ProviderModelView {
     required this.reasoningEfforts,
     this.description = '',
     this.contextWindow,
+    this.maxContextWindow,
     this.maxOutputTokens,
+    this.modalities = const [],
+    this.capabilities = const [],
+    this.reasoningLabel = '',
+    this.defaultReasoningEffort = '',
     this.currency = '',
     this.inputPricePerMTok,
     this.outputPricePerMTok,
@@ -18,7 +23,12 @@ class ProviderModelView {
   final List<String> reasoningEfforts;
   final String description;
   final int? contextWindow;
+  final int? maxContextWindow;
   final int? maxOutputTokens;
+  final List<String> modalities;
+  final List<String> capabilities;
+  final String reasoningLabel;
+  final String defaultReasoningEffort;
   final String currency;
   final double? inputPricePerMTok;
   final double? outputPricePerMTok;
@@ -31,7 +41,12 @@ class ProviderModelView {
     List<String>? reasoningEfforts,
     String? description,
     int? contextWindow,
+    int? maxContextWindow,
     int? maxOutputTokens,
+    List<String>? modalities,
+    List<String>? capabilities,
+    String? reasoningLabel,
+    String? defaultReasoningEffort,
     String? currency,
     double? inputPricePerMTok,
     double? outputPricePerMTok,
@@ -44,7 +59,13 @@ class ProviderModelView {
       reasoningEfforts: reasoningEfforts ?? this.reasoningEfforts,
       description: description ?? this.description,
       contextWindow: contextWindow ?? this.contextWindow,
+      maxContextWindow: maxContextWindow ?? this.maxContextWindow,
       maxOutputTokens: maxOutputTokens ?? this.maxOutputTokens,
+      modalities: modalities ?? this.modalities,
+      capabilities: capabilities ?? this.capabilities,
+      reasoningLabel: reasoningLabel ?? this.reasoningLabel,
+      defaultReasoningEffort:
+          defaultReasoningEffort ?? this.defaultReasoningEffort,
       currency: currency ?? this.currency,
       inputPricePerMTok: inputPricePerMTok ?? this.inputPricePerMTok,
       outputPricePerMTok: outputPricePerMTok ?? this.outputPricePerMTok,
@@ -58,7 +79,7 @@ class ProviderModelView {
 class ProviderSettingsView {
   const ProviderSettingsView({
     required this.id,
-    this.templateKind = 'openai',
+    this.templateKind = '',
     required this.name,
     this.subtitle = '',
     required this.baseUrl,
@@ -72,7 +93,12 @@ class ProviderSettingsView {
     required this.usageLabel,
     this.modelCount = '',
     this.updatedAt = '',
-    this.providerKind = '',
+    this.wireProtocol = '',
+    this.connectionMode = 'http',
+    this.catalogId = '',
+    this.credentialLabel = 'API Key',
+    this.credentialEnv = '',
+    this.iconKey,
   });
 
   final String id;
@@ -90,7 +116,12 @@ class ProviderSettingsView {
   final String usageLabel;
   final String modelCount;
   final String updatedAt;
-  final String providerKind;
+  final String wireProtocol;
+  final String connectionMode;
+  final String catalogId;
+  final String credentialLabel;
+  final String credentialEnv;
+  final String? iconKey;
 
   List<ProviderModelView> get allModels {
     if (models.isNotEmpty) {
@@ -115,7 +146,12 @@ class ProviderSettingsView {
     String? usageLabel,
     String? modelCount,
     String? updatedAt,
-    String? providerKind,
+    String? wireProtocol,
+    String? connectionMode,
+    String? catalogId,
+    String? credentialLabel,
+    String? credentialEnv,
+    Object? iconKey = _providerSettingsUnset,
   }) {
     return ProviderSettingsView(
       id: id ?? this.id,
@@ -133,9 +169,144 @@ class ProviderSettingsView {
       usageLabel: usageLabel ?? this.usageLabel,
       modelCount: modelCount ?? this.modelCount,
       updatedAt: updatedAt ?? this.updatedAt,
-      providerKind: providerKind ?? this.providerKind,
+      wireProtocol: wireProtocol ?? this.wireProtocol,
+      connectionMode: connectionMode ?? this.connectionMode,
+      catalogId: catalogId ?? this.catalogId,
+      credentialLabel: credentialLabel ?? this.credentialLabel,
+      credentialEnv: credentialEnv ?? this.credentialEnv,
+      iconKey: identical(iconKey, _providerSettingsUnset)
+          ? this.iconKey
+          : iconKey as String?,
     );
   }
+}
+
+const _providerSettingsUnset = Object();
+
+class ProviderCatalogView {
+  const ProviderCatalogView({
+    required this.schemaVersion,
+    required this.revision,
+    required this.presets,
+    required this.modelCatalogs,
+  });
+
+  const ProviderCatalogView.empty()
+    : schemaVersion = 0,
+      revision = '',
+      presets = const [],
+      modelCatalogs = const {};
+
+  final int schemaVersion;
+  final String revision;
+  final List<ProviderPresetView> presets;
+  final Map<String, List<ProviderModelView>> modelCatalogs;
+
+  ProviderPresetView? preset(String id) {
+    for (final preset in presets) {
+      if (preset.id == id) return preset;
+    }
+    return null;
+  }
+
+  List<ProviderModelView> modelsFor(String catalogId) {
+    return modelCatalogs[catalogId] ?? const [];
+  }
+}
+
+class ProviderPresetView {
+  const ProviderPresetView({
+    required this.id,
+    required this.displayName,
+    required this.description,
+    required this.wireProtocol,
+    required this.connectionModes,
+    required this.defaultConnectionMode,
+    required this.baseUrl,
+    required this.credentialLabel,
+    required this.credentialEnv,
+    required this.modelCatalogId,
+    required this.suggestedModel,
+    this.iconKey,
+  });
+
+  final String id;
+  final String displayName;
+  final String description;
+  final String wireProtocol;
+  final List<ProviderConnectionModeView> connectionModes;
+  final String defaultConnectionMode;
+  final String baseUrl;
+  final String credentialLabel;
+  final String credentialEnv;
+  final String modelCatalogId;
+  final String suggestedModel;
+  final String? iconKey;
+
+  ProviderSettingsView createProvider(
+    String providerId,
+    List<ProviderModelView> models,
+  ) {
+    return ProviderSettingsView(
+      id: providerId,
+      templateKind: id,
+      name: displayName,
+      subtitle: description,
+      baseUrl: baseUrl,
+      bearerToken: '',
+      hasBearerToken: false,
+      defaultModel: suggestedModel,
+      models: models,
+      defaultModels: models,
+      customModels: const [],
+      status: 'missingCredential',
+      usageLabel: '${models.length} models',
+      modelCount: '${models.length}',
+      updatedAt: 'Draft',
+      wireProtocol: wireProtocol,
+      connectionMode: defaultConnectionMode,
+      catalogId: modelCatalogId,
+      credentialLabel: credentialLabel,
+      credentialEnv: credentialEnv,
+      iconKey: iconKey,
+    );
+  }
+}
+
+class ProviderConnectionModeView {
+  const ProviderConnectionModeView({
+    required this.id,
+    required this.displayName,
+  });
+
+  final String id;
+  final String displayName;
+}
+
+ProviderSettingsView providerWithCatalogMetadata(
+  ProviderSettingsView provider,
+  ProviderCatalogView catalog,
+) {
+  final preset = catalog.preset(provider.templateKind);
+  if (preset == null) return provider;
+  final bundledModels = catalog.modelsFor(preset.modelCatalogId);
+  final effectiveModels = [...bundledModels, ...provider.customModels];
+  return provider.copyWith(
+    subtitle: provider.subtitle.isEmpty
+        ? preset.description
+        : provider.subtitle,
+    catalogId: preset.modelCatalogId,
+    credentialLabel: preset.credentialLabel,
+    credentialEnv: preset.credentialEnv,
+    iconKey: preset.iconKey,
+    wireProtocol: preset.wireProtocol,
+    connectionMode:
+        preset.connectionModes.any((mode) => mode.id == provider.connectionMode)
+        ? provider.connectionMode
+        : preset.defaultConnectionMode,
+    defaultModels: bundledModels,
+    models: effectiveModels,
+  );
 }
 
 class ProviderUsageView {

@@ -52,6 +52,7 @@ fn zhipu_disabled_request() -> CompletionRequest {
         }),
         stream: true,
         trace: None,
+        transport_session: Default::default(),
     }
 }
 
@@ -83,6 +84,7 @@ fn zhipu_thinking_request() -> CompletionRequest {
             plan_mode: false,
             trace_sequence_base: 0,
         }),
+        transport_session: Default::default(),
     }
 }
 

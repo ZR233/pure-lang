@@ -210,7 +210,7 @@ Chat tagged decoder 对未标记普通 `content` 保持兼容：默认仍作为 
 - 不支持并行的工具通过独占锁与其他工具互斥。
 - 写文件、patch、delete、move、shell 等可能产生副作用的工具默认不并行。
 - 只读文件、搜索、stat、list、spawn/wait/list agent 等工具可以按风险显式 opt-in。
-- 工具结果写回 `CoreSession` 必须保持模型发出工具调用的顺序。
+- 工具结果写回 `AgentSession` 必须保持模型发出工具调用的顺序。
 
 工具运行时把 unknown tool、权限拒绝、参数错误和本地执行失败都归为模型可恢复 tool result；内部 invariant、join failure 和历史协议污染归为 fatal tool error，当前 turn 使用 `TurnAbortReason::ToolError` 收尾。并行调度可以按完成顺序收集执行结果，但写回 session history 和 provider 下一轮输入时必须恢复模型发出顺序。
 
