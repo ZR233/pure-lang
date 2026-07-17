@@ -250,3 +250,9 @@ pub struct ModelPricing {
 ```
 
 `pl-model` 内置四个预设：`openai_family`、`deepseek_family`、`zhipu_text_family`、`zhipu_vision_family`。原 `openai_capabilities` / `deepseek_capabilities` / `zhipu_capabilities` 三个能力构造函数的能力矩阵直接编入对应 family，消除重复。`zhipu_text_family` 与 `zhipu_vision_family` 的差异仅在 capabilities 的输入模态（是否含 `image`）和 effort 候选值域。
+
+## 7.9 Web 搜索 Provider 边界
+
+Web 搜索只把 `ProviderTransportSelection::Preset { preset: "openai", .. }` 且 `resolved_bearer_token()` 非空的 provider 实例视为可用 OpenAI 账户。实例 id、显示名或 base URL 可以修改而不改变 preset 身份；普通 custom Responses-compatible provider 即使协议和模型名称相同，也不能获得 OpenAI hosted 或 `/alpha/search` 能力。
+
+Responses 原生搜索通过 `ToolSchema::WebSearch` 表达，并只允许在当前 turn 自身使用上述 OpenAI preset、Responses wire、有效凭据且模型声明 `capabilities.web_search` 时注入。跨 provider 搜索只能走普通函数工具，由该工具使用另一个已解析的 OpenAI provider 调用 `/alpha/search`；不得把 hosted tool 注入非 OpenAI provider 请求。

@@ -1,5 +1,6 @@
 use serde_json::Value;
 
+use crate::WebSearchAction;
 use crate::stream::event::{ModelStreamEvent, ToolInputDeltaPayload, ToolInputPayloadKind};
 use pl_trace::TraceTextChannel;
 
@@ -39,6 +40,10 @@ pub(super) fn output_item_tool_started(item: &Value) -> Option<ModelStreamEvent>
             call_id,
             name,
             payload_kind: ToolInputPayloadKind::CustomInput,
+        }),
+        "web_search_call" => Some(ModelStreamEvent::WebSearchStarted {
+            item_id,
+            action: web_search_action(item.get("action")),
         }),
         _ => None,
     }
@@ -100,7 +105,65 @@ pub(super) fn output_item_tool_completed(item: &Value) -> Option<Vec<ModelStream
                 },
             ])
         }
+        "web_search_call" => Some(vec![ModelStreamEvent::WebSearchCompleted {
+            item_id,
+            action: web_search_action(item.get("action")),
+            results: item.get("results").and_then(Value::as_array).cloned(),
+        }]),
         _ => None,
+    }
+}
+
+pub(super) fn web_search_lifecycle_event(
+    event: &super::SseStreamEvent,
+) -> Option<ModelStreamEvent> {
+    let item_id = event.item_id.clone().unwrap_or_default();
+    match event.kind.as_str() {
+        "response.web_search_call.in_progress" | "response.web_search_call.searching" => {
+            Some(ModelStreamEvent::WebSearchStarted {
+                item_id,
+                action: WebSearchAction::Other,
+            })
+        }
+        "response.web_search_call.completed" => Some(ModelStreamEvent::WebSearchCompleted {
+            item_id,
+            action: WebSearchAction::Other,
+            results: None,
+        }),
+        _ => None,
+    }
+}
+
+fn web_search_action(value: Option<&Value>) -> WebSearchAction {
+    let Some(value) = value else {
+        return WebSearchAction::Other;
+    };
+    match value.get("type").and_then(Value::as_str) {
+        Some("search") => WebSearchAction::Search {
+            query: value
+                .get("query")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            queries: value
+                .get("queries")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect(),
+        },
+        Some("open_page") | Some("openPage") => WebSearchAction::OpenPage {
+            url: value.get("url").and_then(Value::as_str).map(str::to_string),
+        },
+        Some("find_in_page") | Some("findInPage") => WebSearchAction::FindInPage {
+            url: value.get("url").and_then(Value::as_str).map(str::to_string),
+            pattern: value
+                .get("pattern")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+        },
+        _ => WebSearchAction::Other,
     }
 }
 
@@ -183,5 +246,81 @@ fn reasoning_summary_part_text(part: &Value) -> Option<&str> {
             .filter(|text| !text.is_empty())
         }
         Value::Null | Value::Bool(_) | Value::Number(_) | Value::Array(_) => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn web_search_items_decode_search_open_find_and_unknown_actions() {
+        let cases = [
+            (
+                serde_json::json!({"type": "search", "query": "rust"}),
+                WebSearchAction::Search {
+                    query: Some("rust".to_string()),
+                    queries: Vec::new(),
+                },
+            ),
+            (
+                serde_json::json!({
+                    "type": "open_page",
+                    "url": "https://example.com"
+                }),
+                WebSearchAction::OpenPage {
+                    url: Some("https://example.com".to_string()),
+                },
+            ),
+            (
+                serde_json::json!({
+                    "type": "find_in_page",
+                    "url": "https://example.com",
+                    "pattern": "needle"
+                }),
+                WebSearchAction::FindInPage {
+                    url: Some("https://example.com".to_string()),
+                    pattern: Some("needle".to_string()),
+                },
+            ),
+            (
+                serde_json::json!({"type": "future_action"}),
+                WebSearchAction::Other,
+            ),
+        ];
+
+        for (action, expected) in cases {
+            let started = output_item_tool_started(&serde_json::json!({
+                "type": "web_search_call",
+                "id": "ws_1",
+                "action": action
+            }))
+            .expect("started event");
+            assert!(matches!(
+                started,
+                ModelStreamEvent::WebSearchStarted { item_id, action }
+                    if item_id == "ws_1" && action == expected
+            ));
+        }
+    }
+
+    #[test]
+    fn completed_web_search_item_preserves_opaque_results() {
+        let events = output_item_tool_completed(&serde_json::json!({
+            "type": "web_search_call",
+            "id": "ws_1",
+            "action": {"type": "search", "query": "rust"},
+            "results": [{"url": "https://example.com", "future": {"rank": 1}}]
+        }))
+        .expect("completed events");
+
+        assert!(matches!(
+            &events[0],
+            ModelStreamEvent::WebSearchCompleted {
+                item_id,
+                results: Some(results),
+                ..
+            } if item_id == "ws_1" && results[0]["future"]["rank"] == 1
+        ));
     }
 }

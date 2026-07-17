@@ -59,6 +59,7 @@ pub struct BridgeStudioToolPartDto {
     pub name: String,
     pub arguments: String,
     pub result: Option<String>,
+    pub output_artifacts_json: String,
     pub exit_code: Option<i32>,
     pub timed_out: bool,
     pub working_directory: Option<String>,

@@ -61,6 +61,7 @@ StudioState _stateFromTypedSnapshot({
   required SessionRuntimeView runtime,
   required Map<String, Object?> config,
   required Map<String, Object?> generalSettings,
+  frb.BridgeWebSearchSettingsDto? webSearch,
   required int eventNextSequence,
 }) {
   final messagesBySession = <String, List<TimelineMessage>>{};
@@ -104,6 +105,9 @@ StudioState _stateFromTypedSnapshot({
       instructions: _instructionsFromConfig(config),
       skills: _skillsFromConfig(config),
       general: _generalFromJson(generalSettings),
+      webSearch: webSearch == null
+          ? const WebSearchSettingsView()
+          : _webSearchFromFrb(webSearch),
       selectedProjectId: selectedProjectId,
       selectedSessionId: selectedSessionId,
       permissionMode: _permissionMode(
@@ -194,6 +198,7 @@ StudioState _withInteraction(
     instructions: state.instructions,
     skills: state.skills,
     general: state.general,
+    webSearch: state.webSearch,
     selectedProjectId: state.selectedProjectId,
     selectedSessionId: state.selectedSessionId,
     permissionMode: state.permissionMode,
@@ -202,6 +207,22 @@ StudioState _withInteraction(
     pendingInteractions: interactions,
     eventCursorsBySession: state.eventCursorsBySession,
     composerText: state.composerText,
+  );
+}
+
+WebSearchSettingsView _webSearchFromFrb(frb.BridgeWebSearchSettingsDto value) {
+  return WebSearchSettingsView(
+    configuredMode: value.configuredMode,
+    effectiveMode: value.effectiveMode,
+    availability: value.availability,
+    contextSize: value.contextSize,
+    allowedDomains: value.allowedDomains,
+    country: value.country,
+    region: value.region,
+    city: value.city,
+    timezone: value.timezone,
+    providerId: value.providerId,
+    model: value.model,
   );
 }
 
@@ -357,6 +378,9 @@ TimelineToolPart? _toolPart(Object? value) {
     name: _string(json['name'], fallback: 'tool'),
     arguments: _string(json['arguments']),
     result: _nullableString(json['result']),
+    outputArtifacts: _list(
+      _firstValue(json, const ['outputArtifacts', 'output_artifacts']),
+    ),
     exitCode: _nullableInt(_firstValue(json, const ['exitCode', 'exit_code'])),
     timedOut: _bool(_firstValue(json, const ['timedOut', 'timed_out'])),
     workingDirectory: _nullableString(

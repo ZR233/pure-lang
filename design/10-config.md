@@ -403,8 +403,16 @@ Studio 交互状态统一保存在 SQLite `interactions` 表。工具审批、`r
 
 ## 10.12 凭据策略
 
-配置允许持久化明文 `bearer_token`，但这会把 API token 直接写入 `~/.pure/config.toml`。当前运行时只使用配置中保存的 `bearer_token` 作为 provider API key。
+配置允许持久化明文 `bearer_token`，但这会把 API token 直接写入 `~/.pure/config.toml`。Provider 也可保存 `bearer_token_env` 环境变量名；运行时通过 `resolved_bearer_token()` 解析凭据，非空的显式 token 优先，其次读取非空环境变量值，空白值和缺失环境变量都视为无凭据。
 
-schema v4 不再保留 `env_key`、`auth_command` 或 `env_http_headers` 字段。`pure-studio-flutter` 设置页按用户确认会把输入的 API key 明文写入对应 provider 的 `bearer_token`。后续版本可以增加系统凭据库模式，但当前运行时不从环境变量读取 provider key。
+schema v4 不再保留旧的 `env_key`、`auth_command` 或 `env_http_headers` 字段。`pure-studio-flutter` 设置页按用户确认会把输入的 API key 明文写入对应 provider 的 `bearer_token`；手工配置可使用当前的 `bearer_token_env`。后续版本可以增加系统凭据库模式。
 
 MCP stdio server 的 `env` 会按配置原样传给子进程，可能包含明文凭据。Streamable HTTP 的 `bearer_token_env_var` 只保存环境变量名，运行时从 Pure 进程环境读取对应 token 并构造 Authorization header。
+
+## 10.13 Web 搜索配置与凭据门控
+
+Studio 配置 schema v9 增加顶层 `web_search`：`mode` 为 `disabled | cached | indexed | live`，默认 `cached`；`context_size`、`allowed_domains` 和近似位置 `country/region/city/timezone` 均可省略。v8 配置迁移到 v9 时只补默认 mode，不虚构位置、域名或 context size。
+
+配置值与生效值必须分离：没有有凭据的 OpenAI preset 时保留 configured mode，但 effective mode 为 `disabled`。此状态下工具规划不得注册独立搜索或 hosted 搜索，且运行时不得创建 `/alpha/search` 客户端。可用账户优先当前 turn 的 OpenAI provider；否则按 provider id 稳定排序，并按 `explorer -> planner -> executor -> reviewer` 选择首个指向该 provider 的有效模型，最后才回退到目录首个模型。
+
+`cached` 映射为禁止外部实时访问；`indexed` 映射为显式 indexed 访问；`live` 允许实时外网；`disabled` 完全移除搜索能力。设置保存返回 canonical config 和 availability，前端不得仅修改本地 draft。

@@ -6,6 +6,7 @@ use pl_trace::{
     TraceToolPart,
 };
 
+use crate::WebSearchAction;
 use crate::request::{CompletionTraceContext, ToolCall};
 
 use super::tool_stream::ToolCallAccumulatorSnapshot;
@@ -311,6 +312,102 @@ impl TraceProjection {
         vec![AgentEvent::TracePartStarted { item }]
     }
 
+    pub(crate) fn start_web_search(
+        &mut self,
+        provider_item_id: &str,
+        action: WebSearchAction,
+    ) -> Vec<AgentEvent> {
+        let now = unix_seconds();
+        let item_id =
+            self.resolve_tool_item_id(vec![provider_item_id.to_string()], provider_item_id);
+        if let Some(item) = self.started.get_mut(&item_id) {
+            if item.status != TracePartStatus::Completed
+                && let Some(tool) = &mut item.tool
+            {
+                tool.arguments = web_search_arguments(&action);
+                item.updated_at = now;
+            }
+            return Vec::new();
+        }
+        let item = TracePart {
+            turn_id: self.turn_id.clone(),
+            item_id: item_id.clone(),
+            started_sequence: self.sequence,
+            revision: 0,
+            kind: TracePartKind::Tool,
+            status: TracePartStatus::Streaming,
+            created_at: now,
+            updated_at: now,
+            source: TracePartSource::Model,
+            text_channel: None,
+            content: String::new(),
+            attachments: Vec::new(),
+            thinking_chunks: Vec::new(),
+            tool: Some(TraceToolPart {
+                tool_call_id: item_id.clone(),
+                call_id: None,
+                provider_item_id: (!provider_item_id.is_empty())
+                    .then(|| provider_item_id.to_string()),
+                name: "web_search".to_string(),
+                arguments: web_search_arguments(&action),
+                result: None,
+                exit_code: None,
+                timed_out: false,
+                output_artifacts: Vec::new(),
+                working_directory: None,
+                denial_reason: None,
+            }),
+            agent: None,
+            inference: None,
+            usage: None,
+        };
+        self.record(TraceEventKind::TracePartStarted { item: item.clone() }, now);
+        self.started.insert(item_id, item.clone());
+        vec![AgentEvent::TracePartStarted { item }]
+    }
+
+    pub(crate) fn complete_web_search(
+        &mut self,
+        provider_item_id: &str,
+        action: WebSearchAction,
+        results: Option<Vec<serde_json::Value>>,
+    ) -> Vec<AgentEvent> {
+        let mut events = self.start_web_search(provider_item_id, action.clone());
+        let item_id =
+            self.resolve_tool_item_id(vec![provider_item_id.to_string()], provider_item_id);
+        let Some(item) = self.started.get_mut(&item_id) else {
+            return events;
+        };
+        let arguments = web_search_arguments(&action);
+        let artifacts = vec![serde_json::json!({
+            "kind": "webSearch",
+            "action": action,
+            "results": results,
+        })];
+        let changed = item
+            .tool
+            .as_ref()
+            .is_none_or(|tool| tool.arguments != arguments || tool.output_artifacts != artifacts);
+        if item.status == TracePartStatus::Completed && !changed {
+            return events;
+        }
+        item.revision += 1;
+        item.status = TracePartStatus::Completed;
+        item.updated_at = unix_seconds();
+        if let Some(tool) = &mut item.tool {
+            tool.name = "web_search".to_string();
+            tool.arguments = arguments;
+            tool.output_artifacts = artifacts;
+        }
+        let item = item.clone();
+        self.record(
+            TraceEventKind::TracePartCompleted { item: item.clone() },
+            item.updated_at,
+        );
+        events.push(AgentEvent::TracePartCompleted { item });
+        events
+    }
+
     pub(crate) fn append_tool_arguments_delta(
         &mut self,
         snapshot: &ToolCallAccumulatorSnapshot,
@@ -596,6 +693,10 @@ fn unix_seconds() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i64
+}
+
+fn web_search_arguments(action: &WebSearchAction) -> String {
+    serde_json::to_string(action).unwrap_or_else(|_| "{\"type\":\"other\"}".to_string())
 }
 
 fn text_provider_key(provider_item_id: &str, channel: TraceTextChannel) -> String {

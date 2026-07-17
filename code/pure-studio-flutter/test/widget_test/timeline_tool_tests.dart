@@ -1,6 +1,68 @@
 part of '../widget_test.dart';
 
 void registerTimelineToolTests() {
+  testWidgets('timeline renders dedicated web search action and result links', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(900, 620);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final message = TimelineMessage(
+      id: 'message-web-search',
+      sessionId: 'session-1',
+      role: 'assistant',
+      createdAt: DateTime.fromMillisecondsSinceEpoch(0),
+    );
+    final part = _toolTimelinePart(
+      id: 'web-search-1',
+      messageId: message.id,
+      turnId: 'turn-web-search',
+      name: 'web_search',
+      status: 'streaming',
+      arguments: jsonEncode({
+        'type': 'find_in_page',
+        'url': 'https://example.com/page',
+        'pattern': 'needle',
+      }),
+      outputArtifacts: const [
+        {
+          'kind': 'webSearch',
+          'results': [
+            {
+              'url': 'https://example.com/result',
+              'unknownFutureField': {'rank': 1},
+            },
+          ],
+        },
+      ],
+    );
+
+    await tester.pumpWidget(
+      _timelineApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 720,
+            height: 480,
+            child: TimelineView(
+              sessionId: 'session-1',
+              rows: timelineRowsFromMessages([message], parts: [part]),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('Finding text on a page'), findsOneWidget);
+    expect(find.textContaining('https://example.com/page'), findsOneWidget);
+    expect(find.textContaining('needle'), findsOneWidget);
+    expect(find.text('Result links'), findsOneWidget);
+    expect(find.text('https://example.com/result'), findsOneWidget);
+    expect(find.text('streaming'), findsOneWidget);
+    expect(find.text('Tool activity'), findsNothing);
+  });
+
   testWidgets('timeline renders todo list update rows', (tester) async {
     tester.view.physicalSize = const Size(900, 620);
     tester.view.devicePixelRatio = 1;

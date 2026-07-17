@@ -146,6 +146,7 @@ TimelineToolPart? _toolPartFromFrb(frb.BridgeStudioToolPartDto? tool) {
     name: tool.name.isEmpty ? 'tool' : tool.name,
     arguments: tool.arguments,
     result: tool.result,
+    outputArtifacts: _list(_tryDecodeJsonValue(tool.outputArtifactsJson)),
     exitCode: tool.exitCode,
     timedOut: tool.timedOut,
     workingDirectory: tool.workingDirectory,
@@ -500,6 +501,7 @@ StudioState studioStateFromFrbSnapshot(frb.BridgeStudioSnapshotResponse value) {
           ),
     config: _decodeJson(value.configJson),
     generalSettings: _decodeJson(value.generalSettingsJson),
+    webSearch: value.webSearch,
     eventNextSequence: 0,
   );
 }

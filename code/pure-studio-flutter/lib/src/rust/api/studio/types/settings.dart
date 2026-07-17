@@ -7,7 +7,7 @@ import '../../../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `InstructionsSettingsInput`, `McpServerInput`, `McpSettingsInput`, `ProviderInput`, `ProviderModelInput`, `ProviderSettingsInput`, `RoleInput`, `SkillsSettingsInput`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`
 
 class BridgeModelCapabilities {
   final bool streaming;
@@ -323,4 +323,108 @@ class BridgeProviderTransportDescriptor {
           protocol == other.protocol &&
           connectionModes == other.connectionModes &&
           defaultConnectionMode == other.defaultConnectionMode;
+}
+
+/// Web 搜索配置、有效状态和自动 OpenAI backend 的 canonical bridge 快照。
+class BridgeWebSearchSettingsDto {
+  final String configuredMode;
+  final String effectiveMode;
+  final String availability;
+  final String? contextSize;
+  final List<String> allowedDomains;
+  final String? country;
+  final String? region;
+  final String? city;
+  final String? timezone;
+  final String? providerId;
+  final String? model;
+
+  const BridgeWebSearchSettingsDto({
+    required this.configuredMode,
+    required this.effectiveMode,
+    required this.availability,
+    this.contextSize,
+    required this.allowedDomains,
+    this.country,
+    this.region,
+    this.city,
+    this.timezone,
+    this.providerId,
+    this.model,
+  });
+
+  @override
+  int get hashCode =>
+      configuredMode.hashCode ^
+      effectiveMode.hashCode ^
+      availability.hashCode ^
+      contextSize.hashCode ^
+      allowedDomains.hashCode ^
+      country.hashCode ^
+      region.hashCode ^
+      city.hashCode ^
+      timezone.hashCode ^
+      providerId.hashCode ^
+      model.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeWebSearchSettingsDto &&
+          runtimeType == other.runtimeType &&
+          configuredMode == other.configuredMode &&
+          effectiveMode == other.effectiveMode &&
+          availability == other.availability &&
+          contextSize == other.contextSize &&
+          allowedDomains == other.allowedDomains &&
+          country == other.country &&
+          region == other.region &&
+          city == other.city &&
+          timezone == other.timezone &&
+          providerId == other.providerId &&
+          model == other.model;
+}
+
+/// Web 搜索设置的 typed bridge 输入。
+class WebSearchSettingsInput {
+  final String mode;
+  final String? contextSize;
+  final List<String> allowedDomains;
+  final String? country;
+  final String? region;
+  final String? city;
+  final String? timezone;
+
+  const WebSearchSettingsInput({
+    required this.mode,
+    this.contextSize,
+    required this.allowedDomains,
+    this.country,
+    this.region,
+    this.city,
+    this.timezone,
+  });
+
+  @override
+  int get hashCode =>
+      mode.hashCode ^
+      contextSize.hashCode ^
+      allowedDomains.hashCode ^
+      country.hashCode ^
+      region.hashCode ^
+      city.hashCode ^
+      timezone.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is WebSearchSettingsInput &&
+          runtimeType == other.runtimeType &&
+          mode == other.mode &&
+          contextSize == other.contextSize &&
+          allowedDomains == other.allowedDomains &&
+          country == other.country &&
+          region == other.region &&
+          city == other.city &&
+          timezone == other.timezone;
 }

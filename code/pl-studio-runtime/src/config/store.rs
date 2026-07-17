@@ -26,6 +26,7 @@ use super::{
 const LEGACY_STUDIO_CONFIG_SCHEMA_VERSION: u32 = 5;
 const CATALOG_STUDIO_CONFIG_SCHEMA_VERSION: u32 = 6;
 const CONNECTION_STUDIO_CONFIG_SCHEMA_VERSION: u32 = 7;
+const PREVIOUS_STUDIO_CONFIG_SCHEMA_VERSION: u32 = 8;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfigPaths {
@@ -85,6 +86,9 @@ impl ConfigStore {
         match self.load() {
             Ok(config) => Ok(config),
             Err(_) => {
+                if let Some(config) = self.migrate_v8()? {
+                    return Ok(config);
+                }
                 if let Some(config) = self.migrate_catalog_config()? {
                     return Ok(config);
                 }
@@ -168,6 +172,7 @@ impl ConfigStore {
                 providers,
                 routes: legacy.models.routes,
             },
+            web_search: Default::default(),
             runtime: legacy.runtime,
             instructions: legacy.instructions,
             skills: legacy.skills,
@@ -209,6 +214,7 @@ impl ConfigStore {
                 providers,
                 routes: legacy.models.routes,
             },
+            web_search: Default::default(),
             runtime: legacy.runtime,
             instructions: legacy.instructions,
             skills: legacy.skills,
@@ -217,6 +223,22 @@ impl ConfigStore {
         };
         config.validate()?;
         self.backup_schema(version)?;
+        self.save(&config)?;
+        Ok(Some(config))
+    }
+
+    fn migrate_v8(&self) -> Result<Option<StudioConfig>> {
+        let content = fs::read_to_string(self.paths.config_file())?;
+        let mut config: StudioConfig = match toml::from_str(&content) {
+            Ok(config) => config,
+            Err(_) => return Ok(None),
+        };
+        if config.schema_version != PREVIOUS_STUDIO_CONFIG_SCHEMA_VERSION {
+            return Ok(None);
+        }
+        config.schema_version = STUDIO_CONFIG_SCHEMA_VERSION;
+        config.validate()?;
+        self.backup_schema(PREVIOUS_STUDIO_CONFIG_SCHEMA_VERSION)?;
         self.save(&config)?;
         Ok(Some(config))
     }
@@ -601,5 +623,34 @@ mod tests {
                 .editable_models()
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn schema_v8_document_defaults_web_search_to_cached_and_is_backed_up() {
+        let store = ConfigStore::new(ConfigPaths::from_home(temp_home("migrate-v8")));
+        fs::create_dir_all(store.paths().config_dir()).unwrap();
+        let current = StudioConfig::default_config();
+        let mut document = toml::Value::try_from(&current).unwrap();
+        let root = document.as_table_mut().unwrap();
+        root.insert(
+            "schema_version".to_string(),
+            toml::Value::Integer(i64::from(PREVIOUS_STUDIO_CONFIG_SCHEMA_VERSION)),
+        );
+        root.remove("web_search");
+        fs::write(
+            store.paths().config_file(),
+            toml::to_string_pretty(&document).unwrap(),
+        )
+        .unwrap();
+
+        let migrated = store.load_or_default().unwrap();
+
+        assert_eq!(migrated.schema_version, STUDIO_CONFIG_SCHEMA_VERSION);
+        assert_eq!(migrated.web_search.mode, pl_model::WebSearchMode::Cached);
+        assert_eq!(migrated.web_search.context_size, None);
+        assert!(migrated.web_search.allowed_domains.is_empty());
+        assert_eq!(migrated.web_search.location, None);
+        assert_eq!(migrated.models, current.models);
+        assert!(schema_backup_path(store.paths().config_file(), 8).exists());
     }
 }

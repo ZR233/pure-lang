@@ -37,6 +37,7 @@ pub use settings::{
     BridgeModelCapabilities, BridgeModelCatalogDescriptor, BridgeModelDescriptor,
     BridgeModelPricing, BridgeModelReasoningDescriptor, BridgeProviderCatalogSnapshot,
     BridgeProviderConnectionModeDescriptor, BridgeProviderPresetDescriptor,
-    BridgeProviderTransportDescriptor, InstructionsSettingsInput, McpServerInput, McpSettingsInput,
-    ProviderInput, ProviderModelInput, ProviderSettingsInput, RoleInput, SkillsSettingsInput,
+    BridgeProviderTransportDescriptor, BridgeWebSearchSettingsDto, InstructionsSettingsInput,
+    McpServerInput, McpSettingsInput, ProviderInput, ProviderModelInput, ProviderSettingsInput,
+    RoleInput, SkillsSettingsInput, WebSearchSettingsInput,
 };

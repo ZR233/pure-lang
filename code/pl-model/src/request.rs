@@ -1,7 +1,10 @@
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::{ModelCapabilities, ModelModality, ModelTransportSession};
+use crate::{
+    ModelCapabilities, ModelModality, ModelTransportSession, WebSearchContextSize,
+    WebSearchFilters, WebSearchUserLocation,
+};
 use pl_protocol::{
     ContentPart, ImageSource, Message, MessageContent, ModelContextItem, PureError, ToolCallKind,
 };
@@ -186,6 +189,8 @@ pub struct CompletionResponse {
     pub tool_calls: Vec<ToolCall>,
     #[serde(default)]
     pub trace_events: Vec<TraceEvent>,
+    #[serde(default)]
+    pub hosted_web_search_calls: Vec<HostedWebSearchCall>,
     #[serde(default)]
     pub next_sequence: u64,
     pub usage: TokenUsage,
@@ -388,6 +393,28 @@ pub enum ToolSchema {
         description: String,
         format: ToolFormat,
     },
+    WebSearch {
+        external_web_access: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        indexed_web_access: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        filters: Option<WebSearchFilters>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        user_location: Option<WebSearchUserLocation>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        search_context_size: Option<WebSearchContextSize>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        search_content_types: Option<Vec<String>>,
+    },
+}
+
+/// 非流式 Responses 中解析出的 hosted Web Search 调用。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct HostedWebSearchCall {
+    pub item_id: String,
+    pub action: crate::WebSearchAction,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub results: Option<Vec<serde_json::Value>>,
 }
 
 impl ToolSchema {
@@ -422,17 +449,23 @@ impl ToolSchema {
     pub fn name(&self) -> &str {
         match self {
             Self::Function { name, .. } | Self::Custom { name, .. } => name,
+            Self::WebSearch { .. } => "web_search",
         }
     }
 
     pub fn description(&self) -> &str {
         match self {
             Self::Function { description, .. } | Self::Custom { description, .. } => description,
+            Self::WebSearch { .. } => "Search the web.",
         }
     }
 
     pub fn is_custom(&self) -> bool {
         matches!(self, Self::Custom { .. })
+    }
+
+    pub fn is_hosted(&self) -> bool {
+        matches!(self, Self::WebSearch { .. })
     }
 
     pub fn provider_compatible(self, supports_custom_tools: bool) -> Self {
@@ -547,15 +580,25 @@ impl CompletionRequest {
                 self.model
             )));
         }
-        if !self.tools.is_empty() && !capabilities.supports_function_calling() {
+        let has_function_tools = self.tools.iter().any(|tool| !tool.is_hosted());
+        if has_function_tools && !capabilities.supports_function_calling() {
             return Err(PureError::ConfigError(format!(
                 "model {} does not support function calling",
                 self.model
             )));
         }
-        if self.parallel_tool_calls && !capabilities.supports_parallel_tool_calls() {
+        if has_function_tools
+            && self.parallel_tool_calls
+            && !capabilities.supports_parallel_tool_calls()
+        {
             return Err(PureError::ConfigError(format!(
                 "model {} does not support parallel tool calls",
+                self.model
+            )));
+        }
+        if self.tools.iter().any(ToolSchema::is_hosted) && !capabilities.supports_web_search() {
+            return Err(PureError::ConfigError(format!(
+                "model {} does not support hosted web search",
                 self.model
             )));
         }

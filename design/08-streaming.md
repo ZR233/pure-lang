@@ -228,3 +228,9 @@ root agent 和 subagent 使用同一套 runtime usage 数据模型。每次模�
 Studio 状态栏必须在运行中即时反映上下文和费用。前端消费 `StudioEventKind::SessionRuntimeChanged` 中后端聚合后的运行态快照；刷新或切换 session 时用 `load_session_state` / `select_session` 的 `sessionRuntime` 恢复。`AgentRuntimeUpdated` 进入 Studio bridge 时必须先写入 agent/session runtime projection，再广播 `SessionRuntimeChanged`；turn 收尾只在本 turn 没有实时 inference runtime snapshot 时，才用最终 usage 补写 legacy root delta，避免同一轮 usage 被实时事件和收尾事件重复累计。前端不得同时按 inference item 和 turn item 重复累计费用。
 
 费用为本地估算值，使用配置中的每百万 token 单价。不同货币不做汇率转换，也不合并为单一数字。Flutter 状态栏消费通用 runtime snapshot，不直接解析 provider 私有 usage 字段。
+
+## 8.8 Web 搜索流事件
+
+OpenAI Responses 的 `web_search_call` 必须在 HTTP/SSE、WebSocket 和非流式响应中归一化为 provider-neutral 搜索生命周期，不能继续作为未知 output item 丢弃。动作固定为 `search`、`openPage`、`findInPage` 和前向兼容的 `other`；未知 provider action 只能映射为 `other`，不能导致整轮失败。
+
+搜索生命周期进入 Studio 时继续使用普通 tool part，工具名固定为 `web_search`，并携带结构化 action、query、URL、pattern 和不透明 results。hosted 搜索没有本地执行阶段，stream adapter 仍需产生 started/terminal 快照；独立搜索由 tool runtime 产生同形状快照。两条路径必须在同一 turn 中互斥，避免重复搜索和重复 timeline 行。

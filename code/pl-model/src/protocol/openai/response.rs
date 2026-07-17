@@ -1,7 +1,7 @@
 use pl_protocol::{PureError, Result};
 use serde::Deserialize;
 
-use crate::request::{CompletionResponse, FinishReason, TokenUsage, ToolCall};
+use crate::request::{CompletionResponse, FinishReason, HostedWebSearchCall, TokenUsage, ToolCall};
 use crate::tool_arguments::function_tool_call_from_raw;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -107,6 +107,8 @@ struct ResponsesOutputItem {
     arguments: Option<String>,
     input: Option<String>,
     content: Option<Vec<ResponsesOutputContent>>,
+    action: Option<serde_json::Value>,
+    results: Option<Vec<serde_json::Value>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -128,9 +130,13 @@ pub(crate) fn responses_parse_response(body: serde_json::Value) -> Result<Comple
         })?
     });
     let mut tool_calls = Vec::new();
+    let mut hosted_web_search_calls = Vec::new();
     for item in &output {
         if let Some(tool_call) = item.to_tool_call()? {
             tool_calls.push(tool_call);
+        }
+        if let Some(search_call) = item.to_web_search_call() {
+            hosted_web_search_calls.push(search_call);
         }
     }
 
@@ -147,6 +153,7 @@ pub(crate) fn responses_parse_response(body: serde_json::Value) -> Result<Comple
         reasoning_content: None,
         tool_calls,
         trace_events: Vec::new(),
+        hosted_web_search_calls,
         next_sequence: 0,
         usage: body
             .usage
@@ -214,6 +221,57 @@ impl ResponsesOutputItem {
             | "code_interpreter_call" => Ok(None),
             _ => Ok(None),
         }
+    }
+
+    fn to_web_search_call(&self) -> Option<HostedWebSearchCall> {
+        (self.kind == "web_search_call").then(|| HostedWebSearchCall {
+            item_id: self
+                .id
+                .clone()
+                .or_else(|| self.call_id.clone())
+                .unwrap_or_default(),
+            action: response_web_search_action(self.action.as_ref()),
+            results: self.results.clone(),
+        })
+    }
+}
+
+fn response_web_search_action(value: Option<&serde_json::Value>) -> crate::WebSearchAction {
+    let Some(value) = value else {
+        return crate::WebSearchAction::Other;
+    };
+    match value.get("type").and_then(serde_json::Value::as_str) {
+        Some("search") => crate::WebSearchAction::Search {
+            query: value
+                .get("query")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string),
+            queries: value
+                .get("queries")
+                .and_then(serde_json::Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(serde_json::Value::as_str)
+                .map(str::to_string)
+                .collect(),
+        },
+        Some("open_page") | Some("openPage") => crate::WebSearchAction::OpenPage {
+            url: value
+                .get("url")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string),
+        },
+        Some("find_in_page") | Some("findInPage") => crate::WebSearchAction::FindInPage {
+            url: value
+                .get("url")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string),
+            pattern: value
+                .get("pattern")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string),
+        },
+        _ => crate::WebSearchAction::Other,
     }
 }
 
@@ -284,6 +342,7 @@ pub(crate) fn chat_parse_response(body: serde_json::Value) -> Result<CompletionR
         reasoning_content,
         tool_calls,
         trace_events: Vec::new(),
+        hosted_web_search_calls: Vec::new(),
         next_sequence: 0,
         usage: body
             .usage

@@ -215,3 +215,7 @@ Flutter 窗口 resize 时 UI 不应持续触发昂贵测量。Timeline 的贴底
 只统计 `queued | running | waiting`；详情的 durable agent
 分区展示全部历史 outcome，包括角色、来源 call、summary、error 和交付 commit，确保摘要
 中的活动代理都能在弹层中定位。
+
+Web Search 作为 General 设置中的 typed 配置组展示 mode、context size、allowed domains、country、region、city 和 timezone，并展示后端自动解析的 provider/model 与 `available | disabled | missingCredential | unsupportedModel` 状态。configured mode 与 effective mode 必须同时保留：缺少凭据时显示不可用原因，但不能把用户保存的 `cached/indexed/live` 覆盖为 `disabled`。
+
+timeline 中 `tool.name == "web_search"` 使用搜索专用详情，不新增数据库 part 类型。卡片根据结构化 action 展示搜索词、打开 URL、页内查找 pattern、进行中/完成/失败状态以及 results 中可识别的链接；未知 results 字段保持不透明，不由 Dart reducer 重写。独立搜索与 hosted 搜索必须投影成相同 UI 形状。

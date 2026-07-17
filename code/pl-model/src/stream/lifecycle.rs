@@ -237,6 +237,20 @@ impl StreamLifecycle {
                 });
                 events
             }
+            ModelStreamEvent::WebSearchStarted { item_id, action } => {
+                let mut events = self.close_open_content_blocks();
+                events.push(ModelStreamEvent::WebSearchStarted { item_id, action });
+                events
+            }
+            ModelStreamEvent::WebSearchCompleted {
+                item_id,
+                action,
+                results,
+            } => vec![ModelStreamEvent::WebSearchCompleted {
+                item_id,
+                action,
+                results,
+            }],
             ModelStreamEvent::Usage(usage) => vec![ModelStreamEvent::Usage(usage)],
             ModelStreamEvent::Failed { code, message } => {
                 let mut events = self.close_open_blocks();

@@ -2,13 +2,14 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::{ContentPart, ImageSource, MessageContent, PureError, Result};
+use pl_core::tool::{HostedWebSearchTool, WebSearchTool};
 use pl_core::{
     AgentCollaborationTools, AgentKernel, AgentTurnFactory, AgentTurnPreparationContext,
     CoreAgentProfile, ExecutionInstructionProfile, InstructionAssembler,
     InstructionAssemblyRequest, PreparedAgentTurn, SubagentContext, ToolVisibilitySet,
     TurnEngineBuilder, TurnOptions, TurnRequest, load_workspace_instructions,
 };
-use pl_model::create_provider_with_catalog;
+use pl_model::{WebSearchClient, create_provider_with_catalog};
 
 use crate::config::ConfigStore;
 use crate::studio::task_coordinator::TaskCoordinator;
@@ -110,6 +111,8 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             context.snapshot.identity.role.clone()
         };
         let route = config.models.resolve(&model_role)?;
+        let web_search = crate::config::resolve_web_search(&config, &route);
+        let web_search_path = web_search.path;
         let provider = create_provider_with_catalog(route.provider_info, route.models)?;
         let mut builder = TurnEngineBuilder::new(provider)
             .with_tool_capabilities(config.runtime.tool_capabilities.clone())
@@ -146,6 +149,29 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             None => kernel_builder.build().await,
         };
 
+        match web_search.path {
+            Some(crate::config::StudioWebSearchPath::Standalone) => {
+                let backend = web_search.backend.ok_or_else(|| {
+                    turn_error("standalone web search is missing its resolved OpenAI backend")
+                })?;
+                let client = WebSearchClient::new(&backend.provider_info)?;
+                kernel.core_mut().register_tool(WebSearchTool::new(
+                    client,
+                    backend.model,
+                    &config.web_search,
+                    backend.max_output_tokens,
+                ));
+            }
+            Some(crate::config::StudioWebSearchPath::Hosted) => {
+                let tool =
+                    HostedWebSearchTool::from_config(&config.web_search).ok_or_else(|| {
+                        turn_error("hosted web search requires an enabled effective mode")
+                    })?;
+                kernel.core_mut().register_tool(tool);
+            }
+            None => {}
+        }
+
         if mode == StudioMode::Task {
             self.coordinator.install_tools(
                 kernel.core_mut(),
@@ -160,11 +186,23 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         self.lsp_runtime.reconcile_workspace(&workspace_root).await;
         kernel.core_mut().register_available_mcp_tools().await?;
 
-        let policy = studio_execution_policy(
+        let visible_tools = match web_search_path {
+            Some(crate::config::StudioWebSearchPath::Hosted) => {
+                ToolVisibilitySet::from_tool_names([pl_core::tool::TOOL_WEB_SEARCH])
+            }
+            Some(crate::config::StudioWebSearchPath::Standalone) | None => {
+                ToolVisibilitySet::from_tool_names(kernel.tool_names())
+            }
+        };
+        let mut policy = studio_execution_policy(
             &context.snapshot,
             StudioPolicyContext { mode, task_phase },
-            ToolVisibilitySet::from_tool_names(kernel.tool_names()),
+            visible_tools,
         );
+        if web_search_path == Some(crate::config::StudioWebSearchPath::Hosted) {
+            policy.visible_tools =
+                ToolVisibilitySet::from_tool_names([pl_core::tool::TOOL_WEB_SEARCH]);
+        }
         let collaboration = AgentCollaborationTools::new(
             context.runtime.clone(),
             context.snapshot.identity.id.clone(),

@@ -1371,6 +1371,54 @@ void registerShellSettingsTests() {
     expect(api.savedInstructionsSettings?['baseOverride'], 'new base');
   });
 
+  testWidgets('web search settings show gating and save typed values', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _FakeStudioApi(
+      _stateWithPlannerModels().copyWith(
+        webSearch: const WebSearchSettingsView(
+          configuredMode: 'cached',
+          effectiveMode: 'disabled',
+          availability: 'missingCredential',
+        ),
+      ),
+    );
+    await _pumpSettingsPage(tester, api);
+    await tester.tap(find.text('General'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Web search'), findsOneWidget);
+    expect(find.text('Missing credential'), findsOneWidget);
+    expect(
+      find.textContaining('Remote web search is fully disabled'),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.byType(DropdownButtonFormField<String>).first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Live').last);
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byType(TextField).first,
+      'example.com, docs.example.com',
+    );
+    await tester.enterText(find.byType(TextField).at(1), 'US');
+    await tester.enterText(find.byType(TextField).at(4), 'America/New_York');
+    await tester.tap(find.text('Save web search'));
+    await tester.pumpAndSettle();
+
+    final saved = api.savedWebSearchSettings;
+    expect(saved?.configuredMode, 'live');
+    expect(saved?.allowedDomains, ['example.com', 'docs.example.com']);
+    expect(saved?.country, 'US');
+    expect(saved?.timezone, 'America/New_York');
+  });
+
   testWidgets(
     'zh Hans locale localizes shell while config names pass through',
     (tester) async {

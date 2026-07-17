@@ -3,6 +3,7 @@ use super::event::BridgeEventEnvelope;
 use super::interaction::BridgeInteractionChangedDto;
 use super::message::{BridgeStudioMessageDto, BridgeStudioPartDto};
 use super::runtime::BridgeSessionRuntimeDto;
+use super::settings::BridgeWebSearchSettingsDto;
 use serde::{Deserialize, Serialize};
 // ── Response types ──
 
@@ -19,6 +20,7 @@ pub struct BridgeStudioSnapshotResponse {
     pub session_runtime: Option<BridgeSessionRuntimeDto>,
     pub config_json: String,
     pub general_settings_json: String,
+    pub web_search: BridgeWebSearchSettingsDto,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

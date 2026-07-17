@@ -1083,4 +1083,112 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get settingsCompactTimelineSubtitle =>
       'Reduce message spacing for denser reading.';
+
+  @override
+  String get settingsWebSearchTitle => 'Web search';
+
+  @override
+  String get settingsWebSearchSubtitle =>
+      'Search through an eligible OpenAI account. Changes apply from the next turn.';
+
+  @override
+  String get settingsWebSearchConfiguredMode => 'Configured mode';
+
+  @override
+  String get settingsWebSearchEffectiveMode => 'Effective mode';
+
+  @override
+  String get settingsWebSearchProvider => 'OpenAI provider';
+
+  @override
+  String get settingsWebSearchModel => 'Search model';
+
+  @override
+  String get settingsWebSearchMode => 'Mode';
+
+  @override
+  String get settingsWebSearchModeDisabled => 'Disabled';
+
+  @override
+  String get settingsWebSearchModeCached => 'Cached';
+
+  @override
+  String get settingsWebSearchModeIndexed => 'Indexed';
+
+  @override
+  String get settingsWebSearchModeLive => 'Live';
+
+  @override
+  String get settingsWebSearchContextSize => 'Context size';
+
+  @override
+  String get settingsWebSearchContextLow => 'Low';
+
+  @override
+  String get settingsWebSearchContextMedium => 'Medium';
+
+  @override
+  String get settingsWebSearchContextHigh => 'High';
+
+  @override
+  String get settingsServiceDefault => 'Service default';
+
+  @override
+  String get settingsWebSearchAllowedDomains => 'Allowed domains';
+
+  @override
+  String get settingsWebSearchDomainsHint => 'example.com, docs.example.com';
+
+  @override
+  String get settingsWebSearchCountry => 'Country';
+
+  @override
+  String get settingsWebSearchRegion => 'Region';
+
+  @override
+  String get settingsWebSearchCity => 'City';
+
+  @override
+  String get settingsWebSearchTimezone => 'Timezone';
+
+  @override
+  String get settingsWebSearchAvailable => 'Available';
+
+  @override
+  String get settingsWebSearchDisabled => 'Disabled';
+
+  @override
+  String get settingsWebSearchMissingCredential => 'Missing credential';
+
+  @override
+  String get settingsWebSearchUnsupportedModel => 'Unsupported model';
+
+  @override
+  String get settingsWebSearchMissingCredentialReason =>
+      'No credentialed provider originating from the OpenAI preset is available. Remote web search is fully disabled.';
+
+  @override
+  String get settingsWebSearchUnsupportedModelReason =>
+      'The current route cannot expose either the function tool or hosted web search.';
+
+  @override
+  String get settingsNotAvailable => 'Not available';
+
+  @override
+  String get settingsSaveWebSearch => 'Save web search';
+
+  @override
+  String get timelineWebSearchTitle => 'Web search';
+
+  @override
+  String get timelineWebSearchSearching => 'Searching the web';
+
+  @override
+  String get timelineWebSearchOpening => 'Opening a web page';
+
+  @override
+  String get timelineWebSearchFinding => 'Finding text on a page';
+
+  @override
+  String get timelineWebSearchResults => 'Result links';
 }
