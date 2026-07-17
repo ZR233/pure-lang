@@ -117,12 +117,24 @@ async fn collect_completion_event_stream_with_idle_timeout(
             Ok(Some(event)) => event,
             Ok(None) => break,
             Err(_) => {
-                return Err(PureError::LlmError(
-                    "stream error: idle timeout waiting for SSE".to_string(),
-                ));
+                let error = PureError::transient_model_transport(
+                    "stream error: idle timeout waiting for provider event",
+                );
+                accumulator.fail_attempt(&error, event_tx);
+                return Err(error);
             }
         };
-        accumulator.apply(event?, event_tx)?;
+        let event = match event {
+            Ok(event) => event,
+            Err(error) => {
+                accumulator.fail_attempt(&error, event_tx);
+                return Err(error);
+            }
+        };
+        if let Err(error) = accumulator.apply(event, event_tx) {
+            accumulator.fail_attempt(&error, event_tx);
+            return Err(error);
+        }
     }
 
     accumulator.finish(event_tx)
@@ -389,9 +401,10 @@ impl StreamCompletionAccumulator {
 
     pub fn finish(mut self, event_tx: &AgentEventSender) -> Result<CompletionResponse> {
         if !self.completed {
-            return Err(PureError::LlmError(
-                "provider stream ended before completion".to_string(),
-            ));
+            let error =
+                PureError::transient_model_transport("provider stream ended before completion");
+            self.fail_attempt(&error, event_tx);
+            return Err(error);
         }
 
         for call in self.tool_stream.finish_all(&self.tool_calls)? {
@@ -452,6 +465,15 @@ impl StreamCompletionAccumulator {
             finish_reason,
             model: String::new(),
         })
+    }
+
+    fn fail_attempt(&mut self, error: &PureError, event_tx: &AgentEventSender) {
+        let Some(trace) = self.trace.as_mut() else {
+            return;
+        };
+        for event in trace.fail_attempt(&error.to_string()) {
+            let _ = event_tx.send(event);
+        }
     }
 
     fn record_text_started(

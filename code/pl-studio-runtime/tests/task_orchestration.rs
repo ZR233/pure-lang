@@ -83,6 +83,13 @@ async fn run_offline_task_flow() -> Result<()> {
         .merge_commit
         .as_deref()
         .context("accepted merge has no merge commit")?;
+    assert_eq!(
+        git_output(
+            &fixture.workspace,
+            &["show", "-s", "--format=%an <%ae>", merge_commit]
+        )?,
+        "Pure Studio <pure-studio@local>"
+    );
     let merge_parents = git_output(
         &fixture.workspace,
         &["show", "-s", "--format=%P", merge_commit],

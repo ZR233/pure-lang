@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
 use serde_json::{Map, Value};
-use tokio::net::TcpStream;
 use tokio::sync::{Mutex, OwnedMutexGuard};
-use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
-pub(crate) type ResponsesWebSocket = WebSocketStream<MaybeTlsStream<TcpStream>>;
+mod responses_websocket;
+
+pub(crate) use responses_websocket::ResponsesWebSocketConnection;
 
 /// 单个模型会话的运行期 transport 状态。
 ///
@@ -36,7 +36,7 @@ impl ModelTransportSession {
 #[derive(Default)]
 pub(crate) struct ResponsesWebSocketSession {
     pub(crate) connection_key: Option<u64>,
-    pub(crate) connection: Option<ResponsesWebSocket>,
+    pub(crate) connection: Option<ResponsesWebSocketConnection>,
     pub(crate) last_request: Option<Map<String, Value>>,
     pub(crate) last_response_id: Option<String>,
     pub(crate) last_response_items: Vec<Value>,

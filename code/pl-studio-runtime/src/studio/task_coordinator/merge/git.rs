@@ -5,6 +5,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 
+use super::super::git::{STUDIO_GIT_EMAIL_CONFIG, STUDIO_GIT_NAME_CONFIG};
+
 const GIT_TIMEOUT: Duration = Duration::from_secs(120);
 
 pub(super) struct GitCommandOutput {
@@ -49,6 +51,14 @@ fn run_git_blocking(repository: PathBuf, arguments: Vec<String>) -> Result<GitCo
     let child = Command::new("git")
         .arg("-C")
         .arg(&repository)
+        .args([
+            "-c",
+            STUDIO_GIT_NAME_CONFIG,
+            "-c",
+            STUDIO_GIT_EMAIL_CONFIG,
+            "-c",
+            "commit.gpgSign=false",
+        ])
         .args(&arguments)
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_LITERAL_PATHSPECS", "1")

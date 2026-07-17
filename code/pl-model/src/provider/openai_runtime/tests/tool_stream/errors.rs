@@ -16,8 +16,12 @@ fn stream_accumulator_requires_completed_event() {
     let error = accumulator.finish(&event_tx).unwrap_err();
 
     match error {
-        PureError::LlmError(message) => {
+        PureError::TransientModelTransport {
+            message,
+            retry_after_ms,
+        } => {
             assert_eq!(message, "provider stream ended before completion");
+            assert_eq!(retry_after_ms, None);
         }
         other => panic!("unexpected error: {other:?}"),
     }
