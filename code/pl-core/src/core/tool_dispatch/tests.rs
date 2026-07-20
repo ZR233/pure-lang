@@ -107,6 +107,21 @@ fn finalize_tool_item_carries_output_artifacts() {
                 "stream": "stdout",
             })],
         });
+    record
+        .runtime_events
+        .push(crate::tool::ToolRuntimeEvent::OutputMetrics {
+            raw_bytes: 20_000,
+            model_visible_bytes: 12_000,
+            artifact_bytes: 8_000,
+            result_hash: "result-hash".to_string(),
+        });
+    record
+        .runtime_events
+        .push(crate::tool::ToolRuntimeEvent::CacheHit {
+            reused_from_call_id: "earlier".to_string(),
+            result_hash: "hash".to_string(),
+            total_bytes: 20_000,
+        });
 
     finalize_tool_item(&mut recorder, item, &record);
     let events = recorder.drain();
@@ -130,5 +145,15 @@ fn finalize_tool_item_carries_output_artifacts() {
             "id": "artifact-1",
             "stream": "stdout",
         })]
+    );
+    assert_eq!(
+        completed.tool.as_ref().unwrap().output_metrics,
+        Some(pl_trace::TraceToolOutputMetrics {
+            raw_bytes: 20_000,
+            model_visible_bytes: 12_000,
+            artifact_bytes: 8_000,
+            result_hash: "result-hash".to_string(),
+            cache_hit: true,
+        })
     );
 }

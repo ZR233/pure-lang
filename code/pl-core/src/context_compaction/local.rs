@@ -26,6 +26,7 @@ pub(super) async fn compact_local(
         .map(ModelContextItem::from)
         .chain(session_items.iter().cloned())
         .collect::<Vec<_>>();
+    super::compact_old_tool_results_for_request(&mut input);
     input.push(ModelContextItem::from(Message {
         role: MessageRole::User,
         content: MessageContent::Text(config.instructions.clone()),
@@ -88,10 +89,11 @@ fn can_retry_context_items(error: &PureError, input: &mut Vec<ModelContextItem>)
         return false;
     }
     input.remove(0);
-    while matches!(
-        input.first(),
-        Some(ModelContextItem::Message { message }) if message.role == MessageRole::Tool
-    ) {
+    while input
+        .first()
+        .and_then(ModelContextItem::as_message)
+        .is_some_and(|message| message.role == MessageRole::Tool)
+    {
         input.remove(0);
     }
     true

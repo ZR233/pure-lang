@@ -19,8 +19,8 @@ pub use collaboration::AgentCollaborationTools;
 pub use handle::AgentRuntimeHandle;
 pub use host::{
     AgentCommit, AgentCommitOutcome, AgentCommittedEvent, AgentEventSink, AgentLifecycleAdapter,
-    AgentRuntimeHost, AgentStateRepository, AgentTurnFactory, CloseLifecycleRequest,
-    RestoredAgentRuntime, SpawnLifecycleRequest,
+    AgentRuntimeHost, AgentStateMutation, AgentStateRepository, AgentTurnFactory,
+    CloseLifecycleRequest, RestoredAgentRuntime, SpawnLifecycleRequest,
 };
 pub use id::{AgentId, SessionId, TurnId};
 pub use policy::{
@@ -34,4 +34,7 @@ pub use state::{
     AgentSessionState, AgentSnapshot, AgentSpawnRequest, AgentSpawnResult, AgentSubmitRequest,
     AgentTurnOutcome, AgentWaitResult, InputDelivery, PendingAgentInput, TurnOutcomeKind,
 };
-pub use turn::{AgentSessionCommitPolicy, AgentTurnPreparationContext, PreparedAgentTurn};
+pub use turn::{
+    AgentSessionCommitPolicy, AgentTurnCheckpoint, AgentTurnCheckpointHandle,
+    AgentTurnPreparationContext, PreparedAgentTurn, TurnCheckpointReason,
+};

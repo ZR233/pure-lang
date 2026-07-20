@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use pl_core::{AgentRuntimeHost, AgentRuntimeOptions};
 
-use crate::McpRuntimeRegistry;
+use crate::McpRuntimeHandle;
 use crate::config::ConfigStore;
 use crate::studio::task_coordinator::TaskCoordinator;
 use crate::studio::{InteractionRuntime, StudioEventRuntime, StudioRuntimeState, StudioStore};
@@ -36,7 +36,7 @@ impl StudioAgentHost {
     pub(super) fn new(
         store: StudioStore,
         config_store: ConfigStore,
-        mcp_runtime: McpRuntimeRegistry,
+        mcp_runtime: McpRuntimeHandle,
         lsp_runtime: pl_lsp::LspRuntimeRegistry,
         interactions: InteractionRuntime,
         events: StudioEventRuntime,

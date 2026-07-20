@@ -6,8 +6,8 @@ use tokio::sync::{mpsc, oneshot};
 use super::coordinator::CoordinatorCommand;
 use super::{
     AgentActivityState, AgentId, AgentRegistration, AgentRuntimeResult, AgentSessionState,
-    AgentSnapshot, AgentSpawnRequest, AgentSpawnResult, AgentSubmitRequest, AgentWaitResult,
-    TurnId,
+    AgentSnapshot, AgentSpawnRequest, AgentSpawnResult, AgentSubmitRequest, AgentTurnCheckpoint,
+    AgentWaitResult, TurnId,
 };
 use crate::agent_runtime::state::AgentRuntimeError;
 
@@ -85,6 +85,21 @@ impl AgentRuntimeHandle {
             agent_id,
             turn_id,
             activity,
+            reply,
+        })
+        .await?;
+        receive(receiver).await?
+    }
+
+    pub(crate) async fn checkpoint_turn(
+        &self,
+        agent_id: AgentId,
+        checkpoint: AgentTurnCheckpoint,
+    ) -> AgentRuntimeResult<()> {
+        let (reply, receiver) = oneshot::channel();
+        self.send(CoordinatorCommand::Checkpoint {
+            agent_id,
+            checkpoint,
             reply,
         })
         .await?;

@@ -72,17 +72,11 @@ where
                 self.kind.name(),
                 input.arguments,
                 context.options.cancellation_token.clone(),
+                context.tool_cache.workspace_epoch(),
             )
             .await?
             .ok_or_else(|| ops::tool_error(self.name(), "unknown workspace file tool"))?;
-            Ok(ToolOutput {
-                description: execution.model_output,
-                truncated: execution.truncated,
-                output_file: PathBuf::new(),
-                exit_code: execution.exit_code,
-                timed_out: false,
-                runtime_events: Vec::new(),
-            })
+            Ok(workspace_tool_output(execution))
         })
     }
 
@@ -142,21 +136,32 @@ impl Tool for LocalWorkspaceFileTool {
                 self.kind.name(),
                 input.arguments,
                 context.options.cancellation_token.clone(),
+                context.tool_cache.workspace_epoch(),
             )
             .await?
             .ok_or_else(|| ops::tool_error(self.name(), "unknown workspace file tool"))?;
-            Ok(ToolOutput {
-                description: execution.model_output,
-                truncated: execution.truncated,
-                output_file: PathBuf::new(),
-                exit_code: execution.exit_code,
-                timed_out: false,
-                runtime_events: Vec::new(),
-            })
+            Ok(workspace_tool_output(execution))
         })
     }
 
     fn to_schema(&self) -> ToolSchema {
         self.kind.to_schema()
+    }
+}
+
+fn workspace_tool_output(execution: WorkspaceFileToolExecution) -> ToolOutput {
+    let metrics = crate::tool::ToolRuntimeEvent::OutputMetrics {
+        raw_bytes: execution.output.len() as u64,
+        model_visible_bytes: execution.model_output.len() as u64,
+        artifact_bytes: 0,
+        result_hash: crate::canonical_content_hash(execution.output.as_bytes()),
+    };
+    ToolOutput {
+        description: execution.model_output,
+        truncated: execution.truncated,
+        output_file: PathBuf::new(),
+        exit_code: execution.exit_code,
+        timed_out: false,
+        runtime_events: vec![metrics],
     }
 }

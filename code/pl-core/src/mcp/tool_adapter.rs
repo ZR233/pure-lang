@@ -1,59 +1,44 @@
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::sync::Arc;
 
 use futures::Future;
 use pl_protocol::{PureError, Result};
 use serde_json::Value;
 
 use crate::tool::{OutputTruncation, Tool, ToolContext, ToolInput, ToolOutput};
+use crate::turn::ToolEffect;
 
-use super::client::McpClient;
-use super::wire::{McpCallToolResult, McpToolDefinition};
-use super::{McpRuntimeRegistry, exposed_tool_name};
+use super::contract::McpCallRequest;
+use super::runtime::{McpRuntimeToolDescriptor, McpTurnLease};
+use super::wire::McpCallToolResult;
 
 #[derive(Debug, Clone)]
-pub(crate) struct McpToolAdapter {
-    server_id: String,
-    exposed_name: String,
-    raw_name: String,
-    description: String,
-    input_schema: Value,
-    client: Arc<dyn McpClient>,
-    registry: Option<McpRuntimeRegistry>,
+pub(super) struct McpLeaseToolAdapter {
+    lease: McpTurnLease,
+    descriptor: McpRuntimeToolDescriptor,
 }
 
-impl McpToolAdapter {
-    pub(super) fn new(
-        server_id: &str,
-        definition: McpToolDefinition,
-        client: Arc<dyn McpClient>,
-        registry: Option<McpRuntimeRegistry>,
-    ) -> Result<Self> {
-        let exposed_name = exposed_tool_name(server_id, &definition.name)?;
-        Ok(Self {
-            server_id: server_id.to_string(),
-            exposed_name,
-            raw_name: definition.name,
-            description: definition.description.unwrap_or_default(),
-            input_schema: definition.input_schema,
-            client,
-            registry,
-        })
+impl McpLeaseToolAdapter {
+    pub(super) fn new(lease: McpTurnLease, descriptor: McpRuntimeToolDescriptor) -> Self {
+        Self { lease, descriptor }
     }
 }
 
-impl Tool for McpToolAdapter {
+impl Tool for McpLeaseToolAdapter {
     fn name(&self) -> &str {
-        &self.exposed_name
+        &self.descriptor.exposed_name
     }
 
     fn description(&self) -> &str {
-        &self.description
+        &self.descriptor.description
     }
 
     fn input_schema(&self) -> Value {
-        self.input_schema.clone()
+        self.descriptor.input_schema.clone()
+    }
+
+    fn effect(&self) -> Option<ToolEffect> {
+        self.descriptor.effect
     }
 
     fn execute<'a>(
@@ -62,35 +47,26 @@ impl Tool for McpToolAdapter {
         _context: ToolContext,
     ) -> Pin<Box<dyn Future<Output = Result<ToolOutput>> + Send + 'a>> {
         Box::pin(async move {
-            let params = serde_json::json!({
-                "name": self.raw_name,
-                "arguments": input.arguments,
-            });
-            let value = match self.client.request("tools/call", params).await {
-                Ok(value) => value,
-                Err(error) => {
-                    if let Some(registry) = &self.registry {
-                        registry
-                            .mark_unavailable(&self.server_id, error.to_string())
-                            .await;
-                    }
-                    return Err(error);
-                }
-            };
-            let result: McpCallToolResult = match serde_json::from_value(value) {
-                Ok(result) => result,
-                Err(error) => {
-                    if let Some(registry) = &self.registry {
-                        registry
-                            .mark_unavailable(&self.server_id, error.to_string())
-                            .await;
-                    }
-                    return Err(error.into());
-                }
-            };
+            let value = self
+                .lease
+                .call_tool(
+                    self.descriptor.server_id.clone(),
+                    McpCallRequest {
+                        name: self.descriptor.raw_name.clone(),
+                        arguments: input.arguments,
+                    },
+                )
+                .await?;
+            let result: McpCallToolResult = serde_json::from_value(value).map_err(|error| {
+                self.lease.mark_unavailable(
+                    self.descriptor.server_id.clone(),
+                    format!("invalid MCP tools/call response: {error}"),
+                );
+                PureError::from(error)
+            })?;
             if result.is_error {
                 return Err(PureError::ToolExecutionFailed {
-                    tool: self.exposed_name.clone(),
+                    tool: self.descriptor.exposed_name.clone(),
                     error: format_mcp_content(&result.content),
                 });
             }

@@ -3,10 +3,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 
-const TOKEN_ESTIMATE_BYTES: usize = 4;
-
-pub const DEFAULT_MODEL_TOOL_OUTPUT_TOKENS: usize = 10_000;
 pub const SECRET_REDACTION_REPLACEMENT: &str = "<redacted>";
+pub const MAX_TOOL_UI_PREVIEW_BYTES: usize = 2 * 1024;
 
 /// 对产品层注入的明确 secret 做稳定遮蔽。
 ///
@@ -78,42 +76,22 @@ impl SecretRedaction {
     }
 }
 
-pub fn model_visible_tool_output(output: &str) -> String {
-    model_visible_tool_output_with_tokens(output, DEFAULT_MODEL_TOOL_OUTPUT_TOKENS)
-}
-
-pub fn model_visible_tool_output_with_tokens(output: &str, max_output_tokens: usize) -> String {
-    let max_bytes = max_output_tokens
-        .saturating_mul(TOKEN_ESTIMATE_BYTES)
-        .max(1);
-    if output.len() <= max_bytes {
-        return output.to_string();
-    }
-    if let Ok(value) = serde_json::from_str::<Value>(output) {
-        return bounded_json_tool_output(value, max_bytes).to_string();
-    }
-    let (text, truncated, bytes_omitted, next_offset) = bounded_text(output, max_bytes, 0);
-    json!({
-        "truncated": truncated,
-        "bytesReturned": text.len(),
-        "bytesOmitted": bytes_omitted,
-        "nextOffset": next_offset,
-        "text": text,
-    })
-    .to_string()
-}
-
 pub fn trace_preview_value(value: &Value, max: usize) -> String {
     let redacted = redacted_trace_preview_value(value);
     let serialized =
         serde_json::to_string_pretty(&redacted).unwrap_or_else(|_| redacted.to_string());
-    preview(&serialized, max)
+    preview(&serialized, max.min(MAX_TOOL_UI_PREVIEW_BYTES))
 }
 
 pub fn trace_preview_output(output: &str, max: usize) -> String {
     serde_json::from_str::<Value>(output)
         .map(|value| trace_preview_value(&value, max))
-        .unwrap_or_else(|_| preview(&redact_preview_string(output), max))
+        .unwrap_or_else(|_| {
+            preview(
+                &redact_preview_string(output),
+                max.min(MAX_TOOL_UI_PREVIEW_BYTES),
+            )
+        })
 }
 
 pub fn redacted_trace_preview_value(value: &Value) -> Value {
@@ -166,6 +144,7 @@ pub struct ToolLifecycleProjection {
     output: String,
     output_preview: String,
     output_artifacts: Vec<Value>,
+    output_metrics: Option<pl_trace::TraceToolOutputMetrics>,
     duration_ms: Option<u64>,
     started_at_unix: i64,
     completed_at_unix: Option<i64>,
@@ -202,6 +181,10 @@ impl ToolLifecycleProjection {
 
     pub fn output_artifacts(&self) -> &[Value] {
         &self.output_artifacts
+    }
+
+    pub fn output_metrics(&self) -> Option<&pl_trace::TraceToolOutputMetrics> {
+        self.output_metrics.as_ref()
     }
 
     pub fn duration_ms(&self) -> Option<u64> {
@@ -417,6 +400,7 @@ fn projection_from_trace_part(
         output,
         output_preview,
         output_artifacts,
+        output_metrics: tool.output_metrics.clone(),
         duration_ms,
         started_at_unix: item.created_at,
         completed_at_unix,
@@ -782,89 +766,19 @@ fn safe_path_component_or(raw: &str, fallback: &str) -> String {
     }
 }
 
-fn bounded_json_tool_output(mut value: Value, max_bytes: usize) -> Value {
-    match &mut value {
-        Value::Object(map) => {
-            for key in [
-                "stdout",
-                "stderr",
-                "body",
-                "text",
-                "tarBase64",
-                "contentBase64",
-            ] {
-                if let Some(Value::String(text)) = map.get_mut(key) {
-                    let (bounded, truncated, bytes_omitted, next_offset) =
-                        bounded_text(text, max_bytes, 0);
-                    if truncated {
-                        let bytes_returned = bounded.len();
-                        *text = bounded;
-                        map.insert("truncated".to_string(), Value::Bool(true));
-                        map.insert("bytesReturned".to_string(), json!(bytes_returned));
-                        map.insert("bytesOmitted".to_string(), json!(bytes_omitted));
-                        map.insert("nextOffset".to_string(), json!(next_offset));
-                        break;
-                    }
-                }
-            }
-            if value.to_string().len() > max_bytes {
-                json_preview(value, max_bytes)
-            } else {
-                value
-            }
-        }
-        Value::Array(_) | Value::String(_) | Value::Bool(_) | Value::Number(_) | Value::Null => {
-            let serialized = value.to_string();
-            if serialized.len() <= max_bytes {
-                value
-            } else {
-                json_preview(Value::String(serialized), max_bytes)
-            }
-        }
-    }
-}
-
-fn json_preview(value: Value, max_bytes: usize) -> Value {
-    let serialized = match value {
-        Value::String(text) => text,
-        other => other.to_string(),
-    };
-    let (text, _, bytes_omitted, next_offset) = bounded_text(&serialized, max_bytes, 0);
-    json!({
-        "truncated": true,
-        "bytesReturned": text.len(),
-        "bytesOmitted": bytes_omitted,
-        "nextOffset": next_offset,
-        "jsonPreview": text,
-    })
-}
-
-fn bounded_text(
-    value: &str,
-    max_bytes: usize,
-    offset: usize,
-) -> (String, bool, usize, Option<usize>) {
-    if value.len() <= max_bytes {
-        return (value.to_string(), false, 0, None);
-    }
-    let mut end = max_bytes;
-    while !value.is_char_boundary(end) {
-        end = end.saturating_sub(1);
-    }
-    let text = value[..end].to_string();
-    let omitted = value.len().saturating_sub(end);
-    (text, true, omitted, Some(offset.saturating_add(end)))
-}
-
 fn preview(value: &str, max: usize) -> String {
     if value.len() <= max {
         return value.to_string();
     }
-    let mut end = max;
+    const MARKER: &str = "...";
+    if max <= MARKER.len() {
+        return MARKER[..max].to_string();
+    }
+    let mut end = max - MARKER.len();
     while !value.is_char_boundary(end) {
         end = end.saturating_sub(1);
     }
-    format!("{}...", &value[..end])
+    format!("{}{MARKER}", &value[..end])
 }
 
 fn redact_preview_string(value: &str) -> String {
@@ -906,6 +820,17 @@ mod tests {
     use serde::Deserialize;
     use serde_json::json;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn trace_preview_never_exceeds_ui_budget() {
+        let preview = super::trace_preview_output(
+            &"a".repeat(super::MAX_TOOL_UI_PREVIEW_BYTES * 2),
+            usize::MAX,
+        );
+
+        assert!(preview.len() <= super::MAX_TOOL_UI_PREVIEW_BYTES);
+        assert_eq!(super::preview(&"a".repeat(32), 10), "aaaaaaa...");
+    }
 
     #[tokio::test]
     async fn tool_output_capture_keeps_non_empty_streams_and_removes_empty_files() {
@@ -1070,6 +995,7 @@ mod tests {
             "pub fn output(",
             "pub fn output_preview(",
             "pub fn output_artifacts(",
+            "pub fn output_metrics(",
             "pub fn duration_ms(",
             "pub fn started_at_unix(",
             "pub fn completed_at_unix(",
@@ -1267,6 +1193,7 @@ mod tests {
                     output: String::new(),
                     output_preview: String::new(),
                     output_artifacts: Vec::new(),
+                    output_metrics: None,
                     duration_ms: None,
                     started_at_unix: 10,
                     completed_at_unix: None,
@@ -1282,6 +1209,7 @@ mod tests {
                     output_preview: "{\n  \"api_key\": \"<redacted>\",\n  \"ok\": true\n}"
                         .to_string(),
                     output_artifacts: vec![json!({"id": "artifact-1"})],
+                    output_metrics: None,
                     duration_ms: Some(2_000),
                     started_at_unix: 10,
                     completed_at_unix: Some(12),
@@ -1403,6 +1331,7 @@ mod tests {
                 exit_code: None,
                 timed_out: false,
                 output_artifacts,
+                output_metrics: None,
                 working_directory: None,
                 denial_reason: None,
             }),

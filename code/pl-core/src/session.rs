@@ -3,9 +3,12 @@ use std::num::NonZeroUsize;
 
 use pl_model::{CompletionResponse, ModelTransportSession, ToolCall};
 use pl_protocol::{
-    Message, MessageContent, MessageRole, ModelContextItem, TOOL_CALLS_METADATA_KEY,
-    ToolCallHistoryMetadata, ToolCallKind, ToolResultMetadata,
+    Message, MessageContent, MessageRole, ModelContextItem, PinnedContextSection,
+    TOOL_CALLS_METADATA_KEY, ToolCallHistoryMetadata, ToolCallKind, ToolResultMetadata,
+    ToolResultReceipt,
 };
+
+use crate::working_set::canonical_content_hash;
 
 /// 核心编译会话。
 ///
@@ -103,8 +106,74 @@ impl AgentSession {
         self.revision = self.revision.saturating_add(1);
     }
 
+    /// 只替换可压缩的时间线，保留当前所有 pinned working context。
+    pub fn replace_compactable_items(&mut self, items: Vec<ModelContextItem>) {
+        let pinned = self
+            .items
+            .iter()
+            .filter(|item| item.is_pinned_context())
+            .cloned()
+            .collect::<Vec<_>>();
+        self.items = items
+            .into_iter()
+            .filter(|item| !item.is_pinned_context())
+            .chain(pinned)
+            .collect();
+        self.messages = messages_from_items(&self.items);
+        self.revision = self.revision.saturating_add(1);
+    }
+
+    /// 原子替换所有 pinned sections；返回 canonical session 是否发生变化。
+    pub fn replace_pinned_context_sections(
+        &mut self,
+        mut sections: Vec<PinnedContextSection>,
+    ) -> bool {
+        sections.sort_by(|left, right| left.id.cmp(&right.id));
+        let current = self.pinned_context_sections().cloned().collect::<Vec<_>>();
+        if current == sections {
+            return false;
+        }
+        self.items.retain(|item| !item.is_pinned_context());
+        self.items.extend(
+            sections
+                .into_iter()
+                .map(|section| ModelContextItem::PinnedContext { section }),
+        );
+        self.revision = self.revision.saturating_add(1);
+        true
+    }
+
+    pub fn upsert_pinned_context(&mut self, section: PinnedContextSection) {
+        let mut sections = self
+            .pinned_context_sections()
+            .filter(|existing| existing.id != section.id)
+            .cloned()
+            .collect::<Vec<_>>();
+        sections.push(section);
+        self.replace_pinned_context_sections(sections);
+    }
+
+    pub fn pinned_context_sections(&self) -> impl Iterator<Item = &PinnedContextSection> {
+        self.items
+            .iter()
+            .filter_map(ModelContextItem::as_pinned_context)
+    }
+
     pub(crate) fn truncate_messages(&mut self, len: usize) {
-        self.items.truncate(len);
+        let mut chronological = self
+            .items
+            .iter()
+            .filter(|item| !item.is_pinned_context())
+            .take(len)
+            .cloned()
+            .collect::<Vec<_>>();
+        chronological.extend(
+            self.items
+                .iter()
+                .filter(|item| item.is_pinned_context())
+                .cloned(),
+        );
+        self.items = chronological;
         self.messages = messages_from_items(&self.items);
         self.revision = self.revision.saturating_add(1);
     }
@@ -185,6 +254,41 @@ impl AgentSession {
         result: String,
         tool_arguments: String,
     ) {
+        let receipt = ToolResultReceipt {
+            call_id: tool_call_id.clone(),
+            tool_name: tool_name.clone(),
+            arguments_hash: canonical_content_hash(tool_arguments.as_bytes()),
+            result_hash: canonical_content_hash(result.as_bytes()),
+            total_bytes: result.len() as u64,
+            visible_bytes: result.len() as u64,
+            truncated: false,
+            artifacts: Vec::new(),
+            continuation: None,
+            reused_from_call_id: None,
+        };
+        self.push_tool_result_with_receipt(
+            tool_call_id,
+            tool_call_call_id,
+            tool_name,
+            tool_call_kind,
+            result,
+            tool_arguments,
+            receipt,
+        );
+    }
+
+    /// 推入带 compact receipt 的 canonical tool result。
+    #[allow(clippy::too_many_arguments)]
+    pub fn push_tool_result_with_receipt(
+        &mut self,
+        tool_call_id: String,
+        tool_call_call_id: Option<String>,
+        tool_name: String,
+        tool_call_kind: ToolCallKind,
+        result: String,
+        tool_arguments: String,
+        receipt: ToolResultReceipt,
+    ) {
         let mut metadata = HashMap::new();
         ToolResultMetadata::new(
             tool_call_id,
@@ -194,20 +298,36 @@ impl AgentSession {
             tool_arguments,
         )
         .insert_into(&mut metadata);
-        self.push_message(Message {
+        let message = Message {
             role: MessageRole::Tool,
             content: MessageContent::Text(result),
             reasoning_content: None,
             metadata,
-        });
+        };
+        let insertion = self
+            .items
+            .iter()
+            .position(ModelContextItem::is_pinned_context)
+            .unwrap_or(self.items.len());
+        self.items.insert(
+            insertion,
+            ModelContextItem::ToolResult {
+                message: message.clone(),
+                receipt,
+            },
+        );
+        self.messages.push(message);
     }
 
     pub fn len(&self) -> usize {
-        self.items.len()
+        self.items
+            .iter()
+            .filter(|item| !item.is_pinned_context())
+            .count()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.items.is_empty()
+        self.len() == 0
     }
 
     pub fn set_prompt_cache_key(&mut self, key: String) {
@@ -223,7 +343,13 @@ impl AgentSession {
     }
 
     fn push_message(&mut self, message: Message) {
-        self.items.push(ModelContextItem::from(message.clone()));
+        let insertion = self
+            .items
+            .iter()
+            .position(ModelContextItem::is_pinned_context)
+            .unwrap_or(self.items.len());
+        self.items
+            .insert(insertion, ModelContextItem::from(message.clone()));
         self.messages.push(message);
     }
 }

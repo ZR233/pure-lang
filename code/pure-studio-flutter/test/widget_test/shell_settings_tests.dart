@@ -773,7 +773,20 @@ void registerShellSettingsTests() {
 
     expect(find.text('Future Model'), findsOneWidget);
     expect(find.text('future-model'), findsOneWidget);
+    final editor = find.byType(ListView).last;
+    await tester.fling(editor, const Offset(0, -1000), 2000);
+    await tester.pumpAndSettle();
+    expect(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is TextFormField &&
+            widget.initialValue == 'future_search_dialect',
+      ),
+      findsOneWidget,
+    );
 
+    await tester.fling(editor, const Offset(0, 1000), 2000);
+    await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, 'Save'));
     await tester.pumpAndSettle();
 
@@ -781,6 +794,8 @@ void registerShellSettingsTests() {
     final future = providers.last! as Map<String, Object?>;
     expect(future['templateKind'], 'future-provider');
     expect(future['defaultModel'], 'future-model');
+    expect(future['capabilitySource'], 'preset_defaults');
+    expect(future['standaloneWebSearch'], 'future_search_dialect');
   });
 
   testWidgets('custom Responses provider defaults to HTTP without a preset', (
@@ -823,6 +838,7 @@ void registerShellSettingsTests() {
     expect(custom['templateKind'], '');
     expect(custom['wireProtocol'], 'responses');
     expect(custom['connectionMode'], 'http');
+    expect(custom['capabilitySource'], 'explicit');
   });
 
   test('provider settings save updates default provider in store', () async {

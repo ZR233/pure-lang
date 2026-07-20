@@ -40,8 +40,9 @@ pub use provider::{
     create_provider_with_catalog,
 };
 pub use provider_info::{
-    ApplyPatchToolType, ProviderConnectionMode, ProviderInfo, ProviderWireProtocol, ToolWirePolicy,
-    ZHIPU_CODING_PLAN_BASE_URL, provider_transport_profile_revision,
+    ApplyPatchToolType, ProviderConnectionMode, ProviderInfo, ProviderServiceCapabilities,
+    ProviderWireProtocol, StandaloneWebSearchDialect, ToolWirePolicy,
+    WebSearchProviderCapabilities, ZHIPU_CODING_PLAN_BASE_URL, provider_transport_profile_revision,
 };
 pub use provider_usage::{
     DeepSeekBalanceInfo, DeepSeekBalanceUsage, ZhipuCodingPlanUsage, ZhipuQuotaLimit,

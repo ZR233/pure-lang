@@ -74,6 +74,7 @@ fn tool_part(turn_id: &str, item_id: &str, sequence: u64) -> TracePart {
             exit_code: Some(0),
             timed_out: false,
             output_artifacts: Vec::new(),
+            output_metrics: None,
             working_directory: None,
             denial_reason: None,
         }),

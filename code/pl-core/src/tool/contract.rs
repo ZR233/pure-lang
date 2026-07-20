@@ -8,7 +8,7 @@ use pl_protocol::PureError;
 
 use crate::turn::ToolEffect;
 
-use super::{ToolContext, ToolInput, ToolOutput, ToolRuntimeLockPolicy};
+use super::{ToolCachePolicy, ToolContext, ToolInput, ToolOutput, ToolRuntimeLockPolicy};
 
 /// 便捷类型别名：boxed future。
 pub(super) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -140,6 +140,18 @@ pub trait Tool: fmt::Debug + Send + Sync {
     fn effect(&self) -> Option<ToolEffect> {
         ToolEffect::for_builtin_name(self.name())
     }
+    fn cache_policy(&self, _arguments: &serde_json::Value) -> ToolCachePolicy {
+        match self.name() {
+            "read_file" | "list_files" | "search_files" | "stat_path" | "skills_list"
+            | "skill_view" | "git_workspace_info" | "git_status" | "git_diff" => {
+                ToolCachePolicy::UntilWorkspaceMutation
+            }
+            _ => ToolCachePolicy::Never,
+        }
+    }
+    fn invalidates_cache(&self, _arguments: &serde_json::Value) -> bool {
+        false
+    }
     fn runtime_lock_policy(&self) -> ToolRuntimeLockPolicy {
         if self.supports_parallel_tool_calls() {
             ToolRuntimeLockPolicy::Shared
@@ -181,6 +193,14 @@ where
 
     fn effect(&self) -> Option<ToolEffect> {
         (**self).effect()
+    }
+
+    fn cache_policy(&self, arguments: &serde_json::Value) -> ToolCachePolicy {
+        (**self).cache_policy(arguments)
+    }
+
+    fn invalidates_cache(&self, arguments: &serde_json::Value) -> bool {
+        (**self).invalidates_cache(arguments)
     }
 
     fn runtime_lock_policy(&self) -> ToolRuntimeLockPolicy {

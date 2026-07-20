@@ -55,6 +55,7 @@ fn openai_provider(base_url: String) -> OpenAiProvider {
             default_model: "local-responses".to_string(),
             tool_wire_policy: crate::provider_info::ToolWirePolicy::NativeCustomTools,
             apply_patch_tool_type: Some(crate::provider_info::ApplyPatchToolType::Freeform),
+            service_capabilities: Default::default(),
         },
         vec![model],
     )
@@ -849,6 +850,7 @@ async fn stream_complete_uses_chat_endpoint_without_auth_when_token_missing() {
             http_headers: None,
             tool_wire_policy: crate::provider_info::ToolWirePolicy::FunctionFallback,
             apply_patch_tool_type: None,
+            service_capabilities: Default::default(),
         },
         vec![model],
     )
@@ -919,6 +921,7 @@ async fn stream_complete_chat_tags_project_commentary_and_final_only() {
             http_headers: None,
             tool_wire_policy: crate::provider_info::ToolWirePolicy::FunctionFallback,
             apply_patch_tool_type: None,
+            service_capabilities: Default::default(),
         },
         vec![model],
     )
@@ -985,6 +988,7 @@ async fn stream_complete_sends_responses_bearer_and_custom_headers() {
             default_model: "local-responses".to_string(),
             tool_wire_policy: crate::provider_info::ToolWirePolicy::NativeCustomTools,
             apply_patch_tool_type: Some(crate::provider_info::ApplyPatchToolType::Freeform),
+            service_capabilities: Default::default(),
         },
         vec![model],
     )

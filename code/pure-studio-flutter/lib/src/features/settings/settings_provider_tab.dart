@@ -220,6 +220,9 @@ class _ProvidersTabState extends ConsumerState<_ProvidersTab> {
             defaultModel: current.provider.customModels.firstOrNull?.slug ?? '',
             credentialLabel: 'API Key',
             credentialEnv: '',
+            capabilitySource: 'explicit',
+            hostedWebSearch: false,
+            standaloneWebSearch: '',
             iconKey: null,
           ),
         );
@@ -542,6 +545,11 @@ class _ProvidersTabState extends ConsumerState<_ProvidersTab> {
       'bearerToken': provider.bearerToken,
       'defaultModel': provider.defaultModel,
       'wireProtocol': provider.wireProtocol,
+      'capabilitySource': provider.capabilitySource,
+      'hostedWebSearch': provider.hostedWebSearch,
+      'standaloneWebSearch': provider.standaloneWebSearch.isEmpty
+          ? null
+          : provider.standaloneWebSearch,
       'customModels': provider.customModels.map(_modelPayload).toList(),
     };
   }

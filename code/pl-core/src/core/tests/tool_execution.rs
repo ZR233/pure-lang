@@ -81,6 +81,8 @@ async fn invalid_function_arguments_are_returned_to_the_model_without_running_th
             instruction_snapshot: None,
             active_subagent: None,
             parent_session: std::sync::Arc::new(AgentSession::new()),
+            working_set: crate::TurnWorkingSetHandle::default(),
+            tool_cache: crate::TurnToolCacheHandle::default(),
         },
     )
     .await
@@ -119,6 +121,8 @@ async fn tool_context_uses_item_id_when_provider_call_id_is_missing() {
             instruction_snapshot: None,
             active_subagent: None,
             parent_session: std::sync::Arc::new(AgentSession::new()),
+            working_set: crate::TurnWorkingSetHandle::default(),
+            tool_cache: crate::TurnToolCacheHandle::default(),
         },
     )
     .await
@@ -127,6 +131,21 @@ async fn tool_context_uses_item_id_when_provider_call_id_is_missing() {
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].result, "chat-tool-call-1");
     assert_eq!(records[0].call_id, None);
+    let terminal_tool = recorder
+        .drain()
+        .into_iter()
+        .find_map(|event| match event.kind {
+            TraceEventKind::TracePartCompleted { item } => item.tool,
+            TraceEventKind::TracePartStarted { .. }
+            | TraceEventKind::TracePartDelta { .. }
+            | TraceEventKind::TracePartFailed { .. }
+            | TraceEventKind::PlanLifecycleChanged { .. }
+            | TraceEventKind::InteractionChanged { .. }
+            | TraceEventKind::SkillActivated { .. }
+            | TraceEventKind::EnabledToolsRecorded { .. } => None,
+        })
+        .expect("terminal tool trace");
+    assert_eq!(terminal_tool.call_id.as_deref(), Some("chat-tool-call-1"));
 }
 
 #[tokio::test]
@@ -174,6 +193,8 @@ async fn tool_execution_reuses_streamed_trace_part() {
             instruction_snapshot: None,
             active_subagent: None,
             parent_session: std::sync::Arc::new(AgentSession::new()),
+            working_set: crate::TurnWorkingSetHandle::default(),
+            tool_cache: crate::TurnToolCacheHandle::default(),
         },
     )
     .await
@@ -267,6 +288,8 @@ async fn tool_execution_reuses_streamed_trace_part_when_provider_id_arrives_late
             instruction_snapshot: None,
             active_subagent: None,
             parent_session: std::sync::Arc::new(AgentSession::new()),
+            working_set: crate::TurnWorkingSetHandle::default(),
+            tool_cache: crate::TurnToolCacheHandle::default(),
         },
     )
     .await
@@ -355,6 +378,8 @@ async fn tool_runtime_deltas_use_trace_part_id() {
             instruction_snapshot: None,
             active_subagent: None,
             parent_session: std::sync::Arc::new(AgentSession::new()),
+            working_set: crate::TurnWorkingSetHandle::default(),
+            tool_cache: crate::TurnToolCacheHandle::default(),
         },
     )
     .await

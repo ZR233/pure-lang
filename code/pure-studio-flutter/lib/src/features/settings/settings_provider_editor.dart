@@ -164,6 +164,12 @@ class _ProviderEditor extends StatelessWidget {
         connectionModes.any((mode) => mode.id == provider.connectionMode)
         ? provider.connectionMode
         : preset?.defaultConnectionMode ?? provider.connectionMode;
+    final standaloneDialects = <String>{
+      for (final candidate in presets)
+        if (candidate.standaloneWebSearch.isNotEmpty)
+          candidate.standaloneWebSearch,
+      if (provider.standaloneWebSearch.isNotEmpty) provider.standaloneWebSearch,
+    }.toList();
     return ListView(
       children: [
         _SettingsHeader(
@@ -361,6 +367,100 @@ class _ProviderEditor extends StatelessWidget {
                       }
                     },
             ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        _SectionPanel(
+          title: 'Service capabilities',
+          children: [
+            DropdownButtonFormField<String>(
+              initialValue: provider.capabilitySource,
+              decoration: const InputDecoration(labelText: 'Capability source'),
+              items: [
+                if (preset != null)
+                  const DropdownMenuItem(
+                    value: 'preset_defaults',
+                    child: Text('Follow preset defaults'),
+                  ),
+                const DropdownMenuItem(
+                  value: 'explicit',
+                  child: Text('Explicit override'),
+                ),
+              ],
+              onChanged: saving
+                  ? null
+                  : (source) {
+                      if (source == null) return;
+                      onUpdate(
+                        (item) => item.copyWith(
+                          capabilitySource: source,
+                          hostedWebSearch: source == 'preset_defaults'
+                              ? preset?.hostedWebSearch ?? false
+                              : item.hostedWebSearch,
+                          standaloneWebSearch: source == 'preset_defaults'
+                              ? preset?.standaloneWebSearch ?? ''
+                              : item.standaloneWebSearch,
+                        ),
+                      );
+                    },
+            ),
+            const SizedBox(height: 10),
+            if (provider.capabilitySource == 'explicit')
+              _ResponsiveFieldGrid(
+                children: [
+                  DropdownButtonFormField<bool>(
+                    initialValue: provider.hostedWebSearch,
+                    decoration: const InputDecoration(
+                      labelText: 'Hosted Web Search',
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: false, child: Text('Disabled')),
+                      DropdownMenuItem(value: true, child: Text('Enabled')),
+                    ],
+                    onChanged: saving
+                        ? null
+                        : (value) {
+                            if (value != null) {
+                              onUpdate(
+                                (item) => item.copyWith(hostedWebSearch: value),
+                              );
+                            }
+                          },
+                  ),
+                  DropdownButtonFormField<String>(
+                    initialValue: provider.standaloneWebSearch,
+                    decoration: const InputDecoration(
+                      labelText: 'Standalone Web Search',
+                    ),
+                    items: [
+                      const DropdownMenuItem(
+                        value: '',
+                        child: Text('Disabled'),
+                      ),
+                      for (final dialect in standaloneDialects)
+                        DropdownMenuItem(value: dialect, child: Text(dialect)),
+                    ],
+                    onChanged: saving
+                        ? null
+                        : (value) => onUpdate(
+                            (item) =>
+                                item.copyWith(standaloneWebSearch: value ?? ''),
+                          ),
+                  ),
+                ],
+              )
+            else ...[
+              _ReadonlyField(
+                label: 'Hosted Web Search',
+                value: provider.hostedWebSearch ? 'Enabled' : 'Disabled',
+              ),
+              _ReadonlyField(
+                label: 'Standalone Web Search',
+                value: provider.standaloneWebSearch.isEmpty
+                    ? 'Disabled'
+                    : provider.standaloneWebSearch,
+              ),
+            ],
           ],
         ),
         const SizedBox(height: 12),

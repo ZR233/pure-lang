@@ -26,6 +26,9 @@ ProviderCatalogView providerCatalogFromFrb(
           credentialEnv: preset.credentialEnv ?? '',
           modelCatalogId: preset.modelCatalogId,
           suggestedModel: preset.suggestedModel,
+          hostedWebSearch: preset.serviceCapabilities.webSearch.hostedResponses,
+          standaloneWebSearch:
+              preset.serviceCapabilities.webSearch.standalone ?? '',
           iconKey: preset.iconKey,
         ),
     ],

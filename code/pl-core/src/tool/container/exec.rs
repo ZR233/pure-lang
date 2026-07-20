@@ -16,8 +16,8 @@ use super::files::copy_container;
 use super::helpers::{parse_input, tool_error};
 use super::schema::{ContainerToolKind, TOOL_CONTAINER_EXEC};
 
-const DEFAULT_MODEL_TOOL_OUTPUT_TOKENS: usize = 10_000;
-const MAX_MODEL_TOOL_OUTPUT_TOKENS: usize = 100_000;
+const DEFAULT_MODEL_TOOL_OUTPUT_TOKENS: usize = crate::tool::DEFAULT_MODEL_TOOL_OUTPUT_TOKENS;
+const MAX_MODEL_TOOL_OUTPUT_TOKENS: usize = crate::tool::DEFAULT_MODEL_TOOL_OUTPUT_TOKENS;
 const DEFAULT_EXEC_OUTPUT_BYTES_CAP: usize = 1024 * 1024;
 const MAX_EXEC_OUTPUT_BYTES_CAP: usize = 16 * 1024 * 1024;
 
@@ -37,6 +37,7 @@ pub async fn execute_container_tool<B>(
     backend: &B,
     name: &str,
     arguments: Value,
+    call_id: &str,
     cancellation_token: Option<CancellationToken>,
 ) -> Result<Option<ContainerToolExecution>>
 where
@@ -46,7 +47,9 @@ where
         return Ok(None);
     };
     let execution = match kind {
-        ContainerToolKind::Exec => execute_shell(backend, arguments, cancellation_token).await?,
+        ContainerToolKind::Exec => {
+            execute_shell(backend, arguments, call_id, cancellation_token).await?
+        }
         ContainerToolKind::Copy => {
             let output = copy_container(backend, arguments).await?;
             ContainerToolExecution::json(true, output, Vec::new(), DEFAULT_MODEL_TOOL_OUTPUT_TOKENS)
@@ -110,21 +113,34 @@ where
         context: ToolContext,
     ) -> BoxFuture<'a, Result<ToolOutput>> {
         Box::pin(async move {
+            let artifact_call_id = context
+                .provider_call_id
+                .as_deref()
+                .unwrap_or(input.tool_id.as_str());
             let execution = execute_container_tool(
                 self.backend.as_ref(),
                 self.kind.name(),
                 input.arguments,
+                artifact_call_id,
                 context.options.cancellation_token.clone(),
             )
             .await?
             .ok_or_else(|| tool_error(self.name(), "unknown container tool"))?;
-            let runtime_events = if execution.output_artifacts.is_empty() {
+            let artifact_bytes =
+                crate::tool::tool_output_artifact_bytes(&execution.output_artifacts);
+            let mut runtime_events = if execution.output_artifacts.is_empty() {
                 Vec::new()
             } else {
                 vec![crate::tool::ToolRuntimeEvent::OutputArtifacts {
                     artifacts: execution.output_artifacts.clone(),
                 }]
             };
+            runtime_events.push(crate::tool::ToolRuntimeEvent::OutputMetrics {
+                raw_bytes: execution.output.len() as u64,
+                model_visible_bytes: execution.model_output.len() as u64,
+                artifact_bytes,
+                result_hash: crate::canonical_content_hash(execution.output.as_bytes()),
+            });
             Ok(ToolOutput {
                 description: execution.model_output,
                 truncated: execution.truncated,
@@ -154,6 +170,7 @@ struct ContainerExecInput {
 async fn execute_shell<B>(
     backend: &B,
     arguments: Value,
+    call_id: &str,
     cancellation_token: Option<CancellationToken>,
 ) -> Result<ContainerToolExecution>
 where
@@ -170,6 +187,7 @@ where
         .clamp(1, MAX_EXEC_OUTPUT_BYTES_CAP);
     let output = backend
         .exec(ContainerExecRequest {
+            call_id: Some(call_id.to_string()),
             command: input.command,
             cwd: input.cwd,
             timeout_secs: input.timeout_secs,

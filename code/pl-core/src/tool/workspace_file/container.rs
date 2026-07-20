@@ -39,6 +39,7 @@ where
         let output = self
             .backend
             .exec(ContainerExecRequest {
+                call_id: None,
                 command:
                     "if [ -d /workspace/repo ]; then printf /workspace/repo; else printf /workspace; fi"
                         .to_string(),
@@ -69,6 +70,7 @@ where
         let output = self
             .backend
             .exec(ContainerExecRequest {
+                call_id: None,
                 command,
                 cwd: request.cwd,
                 timeout_secs: Some(10),
@@ -147,6 +149,7 @@ where
         let output = self
             .backend
             .exec(ContainerExecRequest {
+                call_id: None,
                 command,
                 cwd: Some("/".to_string()),
                 timeout_secs: Some(20),
@@ -179,6 +182,7 @@ where
         let mut output = self
             .backend
             .exec(ContainerExecRequest {
+                call_id: None,
                 command: rg_command,
                 cwd: request.cwd.clone(),
                 timeout_secs: Some(20),
@@ -199,6 +203,7 @@ where
             output = self
                 .backend
                 .exec(ContainerExecRequest {
+                    call_id: None,
                     command,
                     cwd: request.cwd.clone(),
                     timeout_secs: Some(20),
@@ -217,6 +222,7 @@ where
             let dirs = self
                 .backend
                 .exec(ContainerExecRequest {
+                    call_id: None,
                     command: dir_command,
                     cwd: request.cwd.clone(),
                     timeout_secs: Some(20),
@@ -288,6 +294,7 @@ where
         let output = self
             .backend
             .exec(ContainerExecRequest {
+                call_id: None,
                 command,
                 cwd: request.cwd.clone(),
                 timeout_secs: Some(30),
@@ -354,34 +361,11 @@ where
         &self,
         request: WorkspaceFileSearchRequest,
     ) -> Result<WorkspaceFileSearchResult> {
-        let mut grep_args = vec![
-            "grep".to_string(),
-            "-R".to_string(),
-            "-n".to_string(),
-            "-H".to_string(),
-        ];
-        if !request.case_sensitive {
-            grep_args.push("-i".to_string());
-        }
-        if request.literal {
-            grep_args.push("-F".to_string());
-        }
-        grep_args.push("--".to_string());
-        grep_args.push(request.query);
-        grep_args.push(request.path);
-        let grep = shell_command(&grep_args);
-        let command = if let Some(glob) = &request.glob {
-            format!(
-                "{grep} | grep {} | head -n {}",
-                shell_quote(glob),
-                request.max_matches.saturating_add(1)
-            )
-        } else {
-            format!("{grep} | head -n {}", request.max_matches.saturating_add(1))
-        };
+        let command = grep_search_command(&request);
         let output = self
             .backend
             .exec(ContainerExecRequest {
+                call_id: None,
                 command,
                 cwd: request.cwd,
                 timeout_secs: Some(30),
@@ -421,6 +405,29 @@ where
     }
 }
 
+fn grep_search_command(request: &WorkspaceFileSearchRequest) -> String {
+    let mut grep_args = vec![
+        "grep".to_string(),
+        "-R".to_string(),
+        "-n".to_string(),
+        "-H".to_string(),
+    ];
+    if !request.case_sensitive {
+        grep_args.push("-i".to_string());
+    }
+    if request.literal {
+        grep_args.push("-F".to_string());
+    }
+    if let Some(glob) = &request.glob {
+        grep_args.push(format!("--include={glob}"));
+    }
+    grep_args.push("--".to_string());
+    grep_args.push(request.query.clone());
+    grep_args.push(request.path.clone());
+    let grep = shell_command(&grep_args);
+    format!("{grep} | head -n {}", request.max_matches.saturating_add(1))
+}
+
 #[derive(Debug, Deserialize)]
 struct RgJsonEvent {
     #[serde(rename = "type")]
@@ -445,4 +452,44 @@ struct RgJsonText {
 #[derive(Debug, Deserialize)]
 struct RgJsonSubmatch {
     start: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use std::process::Command;
+
+    use super::*;
+
+    #[test]
+    fn grep_fallback_uses_native_glob_filtering() {
+        let root = std::env::temp_dir().join(format!(
+            "pl-container-search-fallback-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("match.rs"), "pub static FD_TABLE: usize = 0;\n").unwrap();
+        std::fs::write(root.join("match.txt"), "pub static FD_TABLE: usize = 0;\n").unwrap();
+        let request = WorkspaceFileSearchRequest {
+            query: "static FD_TABLE".to_string(),
+            path: root.to_string_lossy().into_owned(),
+            cwd: None,
+            glob: Some("*.rs".to_string()),
+            case_sensitive: true,
+            literal: true,
+            max_matches: 10,
+            context_lines: 0,
+        };
+
+        let output = Command::new("sh")
+            .arg("-c")
+            .arg(grep_search_command(&request))
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8(output.stdout).unwrap();
+
+        assert!(output.status.success());
+        assert!(stdout.contains("match.rs"));
+        assert!(!stdout.contains("match.txt"));
+        let _ = std::fs::remove_dir_all(root);
+    }
 }

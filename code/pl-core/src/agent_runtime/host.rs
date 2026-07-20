@@ -25,6 +25,15 @@ pub struct AgentCommit {
     pub next_state: AgentDurableState,
     pub events: Vec<AgentRuntimeEvent>,
     pub trace_events: Vec<TraceEvent>,
+    pub mutation: AgentStateMutation,
+}
+
+/// repository 可据此只更新真正变化的 durable aggregate 部分。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentStateMutation {
+    SnapshotAndQueue,
+    ReplaceSession { session_id: super::SessionId },
+    AppendTrace,
 }
 
 /// repository CAS 提交结果。

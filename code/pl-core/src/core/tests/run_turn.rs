@@ -658,8 +658,103 @@ async fn tool_context_keeps_full_session_history_across_responses_http_requests(
     );
 }
 
+#[tokio::test]
+async fn large_tool_artifact_does_not_break_tool_history_or_evidence() {
+    let responses = vec![
+        tool_call_sse("large-artifact", "large_artifact"),
+        final_sse("large-artifact-complete", "artifact checked"),
+    ];
+    let (base_url, bodies, handle) = serve_sse_sequence(responses).await;
+    let mut provider = ProviderInfo::openai(Some(base_url));
+    provider.connection_mode = pl_model::ProviderConnectionMode::Http;
+    provider.bearer_token = Some("test-token".to_string());
+    provider.default_model = "local-responses".to_string();
+    let mut core = TurnEngine::from_provider_info(provider).unwrap();
+    core.register_tool(LargeArtifactTool);
+    let (event_tx, _) = tokio::sync::broadcast::channel(32);
+    let mut recorder = TraceRecorder::new("session-large-artifact".to_string(), event_tx, 0);
+    let mut session = AgentSession::new();
+
+    let result = core
+        .run_turn_with_trace(
+            &mut session,
+            TurnRequest::new("check a large artifact".to_string())
+                .with_budget(crate::turn::TurnBudget::new(60_000)),
+            &mut recorder,
+            TurnOptions::default(),
+        )
+        .await
+        .unwrap();
+    handle.await.unwrap();
+
+    assert_eq!(result.status, TurnResultStatus::Completed);
+    assert_eq!(result.content, "artifact checked");
+    assert_eq!(bodies.lock().unwrap().len(), 2);
+    let receipt = session
+        .items()
+        .iter()
+        .find_map(|item| match item {
+            pl_protocol::ModelContextItem::ToolResult { receipt, .. } => Some(receipt),
+            pl_protocol::ModelContextItem::Message { .. }
+            | pl_protocol::ModelContextItem::PinnedContext { .. }
+            | pl_protocol::ModelContextItem::Compaction { .. } => None,
+        })
+        .expect("tool receipt");
+    assert_eq!(receipt.artifacts[0]["kind"], "largeArtifact");
+    assert_eq!(receipt.artifacts[0].get("payload"), None);
+}
+
 #[derive(Debug)]
 struct HistoryMarkerTool;
+
+#[derive(Debug)]
+struct LargeArtifactTool;
+
+impl Tool for LargeArtifactTool {
+    fn name(&self) -> &str {
+        "large_artifact"
+    }
+
+    fn description(&self) -> &str {
+        "Returns a large artifact payload"
+    }
+
+    fn input_schema(&self) -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+        })
+    }
+
+    fn execute<'a>(
+        &'a self,
+        _input: ToolInput,
+        _context: ToolContext,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = std::result::Result<ToolOutput, PureError>>
+                + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async {
+            Ok(ToolOutput {
+                description: "large artifact ready".to_string(),
+                truncated: OutputTruncation::empty(),
+                output_file: std::path::PathBuf::new(),
+                exit_code: Some(0),
+                timed_out: false,
+                runtime_events: vec![crate::tool::ToolRuntimeEvent::OutputArtifacts {
+                    artifacts: vec![serde_json::json!({
+                        "kind": "largeArtifact",
+                        "payload": "x".repeat(64 * 1024),
+                    })],
+                }],
+            })
+        })
+    }
+}
 
 impl Tool for HistoryMarkerTool {
     fn name(&self) -> &str {

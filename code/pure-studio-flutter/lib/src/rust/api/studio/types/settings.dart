@@ -7,7 +7,7 @@ import '../../../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `InstructionsSettingsInput`, `McpServerInput`, `McpSettingsInput`, `ProviderInput`, `ProviderModelInput`, `ProviderSettingsInput`, `RoleInput`, `SkillsSettingsInput`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`
 
 class BridgeModelCapabilities {
   final bool streaming;
@@ -254,6 +254,7 @@ class BridgeProviderPresetDescriptor {
   final String modelCatalogId;
   final String suggestedModel;
   final String? iconKey;
+  final BridgeProviderServiceCapabilitiesDescriptor serviceCapabilities;
 
   const BridgeProviderPresetDescriptor({
     required this.id,
@@ -266,6 +267,7 @@ class BridgeProviderPresetDescriptor {
     required this.modelCatalogId,
     required this.suggestedModel,
     this.iconKey,
+    required this.serviceCapabilities,
   });
 
   @override
@@ -279,7 +281,8 @@ class BridgeProviderPresetDescriptor {
       credentialEnv.hashCode ^
       modelCatalogId.hashCode ^
       suggestedModel.hashCode ^
-      iconKey.hashCode;
+      iconKey.hashCode ^
+      serviceCapabilities.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -295,7 +298,24 @@ class BridgeProviderPresetDescriptor {
           credentialEnv == other.credentialEnv &&
           modelCatalogId == other.modelCatalogId &&
           suggestedModel == other.suggestedModel &&
-          iconKey == other.iconKey;
+          iconKey == other.iconKey &&
+          serviceCapabilities == other.serviceCapabilities;
+}
+
+class BridgeProviderServiceCapabilitiesDescriptor {
+  final BridgeWebSearchProviderCapabilitiesDescriptor webSearch;
+
+  const BridgeProviderServiceCapabilitiesDescriptor({required this.webSearch});
+
+  @override
+  int get hashCode => webSearch.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeProviderServiceCapabilitiesDescriptor &&
+          runtimeType == other.runtimeType &&
+          webSearch == other.webSearch;
 }
 
 class BridgeProviderTransportDescriptor {
@@ -323,6 +343,27 @@ class BridgeProviderTransportDescriptor {
           protocol == other.protocol &&
           connectionModes == other.connectionModes &&
           defaultConnectionMode == other.defaultConnectionMode;
+}
+
+class BridgeWebSearchProviderCapabilitiesDescriptor {
+  final bool hostedResponses;
+  final String? standalone;
+
+  const BridgeWebSearchProviderCapabilitiesDescriptor({
+    required this.hostedResponses,
+    this.standalone,
+  });
+
+  @override
+  int get hashCode => hostedResponses.hashCode ^ standalone.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeWebSearchProviderCapabilitiesDescriptor &&
+          runtimeType == other.runtimeType &&
+          hostedResponses == other.hostedResponses &&
+          standalone == other.standalone;
 }
 
 /// Web 搜索配置、有效状态和自动 OpenAI backend 的 canonical bridge 快照。

@@ -20,19 +20,20 @@ pub use self::types::{
     BridgeMcpHealthDto, BridgeMcpServerDto, BridgeModelCapabilities, BridgeModelCatalogDescriptor,
     BridgeModelDescriptor, BridgeModelPricing, BridgeModelReasoningDescriptor,
     BridgePlanLifecycleDto, BridgeProviderCatalogSnapshot, BridgeProviderConnectionModeDescriptor,
-    BridgeProviderPresetDescriptor, BridgeRuntimeCostAmountDto, BridgeRuntimeStatus,
-    BridgeSessionRuntimeDto, BridgeSessionStateResponse, BridgeSkillActivationDto,
-    BridgeStudioAgentPartDto, BridgeStudioEventsResponse, BridgeStudioMessageDto,
-    BridgeStudioMessageProjectionDto, BridgeStudioPartDeltaDto, BridgeStudioPartDto,
-    BridgeStudioPartProjectionDto, BridgeStudioPlanPartDto, BridgeStudioSnapshotResponse,
-    BridgeStudioToolPartDto, BridgeStudioTurnDto, BridgeTodoItemDto, BridgeTodoListSnapshotDto,
-    BridgeUserQuestionDto, BridgeUserQuestionOptionDto, BridgeWebSearchSettingsDto,
-    ConfigSavedResponse, DeepSeekBalanceDto, DeepSeekBalanceInfoDto, InstructionsSettingsInput,
-    McpServerInput, McpSettingsInput, ProjectDto, ProviderInput, ProviderModelInput,
-    ProviderSettingsInput, ProviderUsageDto, ProviderUsagesResponse, ResolveInteractionResponse,
-    RoleInput, RuntimeSnapshot, SessionDto, SkillSummaryDto, SkillsResponse, SkillsSettingsInput,
-    StopPromptResponse, SubmitPromptResponse, WebSearchSettingsInput, ZhipuCodingPlanUsageDto,
-    ZhipuQuotaLimitDto, ZhipuToolUsageDetailDto,
+    BridgeProviderPresetDescriptor, BridgeProviderServiceCapabilitiesDescriptor,
+    BridgeRuntimeCostAmountDto, BridgeRuntimeStatus, BridgeSessionRuntimeDto,
+    BridgeSessionStateResponse, BridgeSkillActivationDto, BridgeStudioAgentPartDto,
+    BridgeStudioEventsResponse, BridgeStudioMessageDto, BridgeStudioMessageProjectionDto,
+    BridgeStudioPartDeltaDto, BridgeStudioPartDto, BridgeStudioPartProjectionDto,
+    BridgeStudioPlanPartDto, BridgeStudioSnapshotResponse, BridgeStudioToolPartDto,
+    BridgeStudioTurnDto, BridgeTodoItemDto, BridgeTodoListSnapshotDto, BridgeUserQuestionDto,
+    BridgeUserQuestionOptionDto, BridgeWebSearchProviderCapabilitiesDescriptor,
+    BridgeWebSearchSettingsDto, ConfigSavedResponse, DeepSeekBalanceDto, DeepSeekBalanceInfoDto,
+    InstructionsSettingsInput, McpServerInput, McpSettingsInput, ProjectDto, ProviderInput,
+    ProviderModelInput, ProviderSettingsInput, ProviderUsageDto, ProviderUsagesResponse,
+    ResolveInteractionResponse, RoleInput, RuntimeSnapshot, SessionDto, SkillSummaryDto,
+    SkillsResponse, SkillsSettingsInput, StopPromptResponse, SubmitPromptResponse,
+    WebSearchSettingsInput, ZhipuCodingPlanUsageDto, ZhipuQuotaLimitDto, ZhipuToolUsageDetailDto,
 };
 
 #[cfg(test)]
@@ -186,6 +187,24 @@ mod tests {
                 .presets
                 .iter()
                 .map(|preset| preset.id.as_str())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            bridge
+                .presets
+                .iter()
+                .map(|preset| (
+                    preset.service_capabilities.web_search.hosted_responses,
+                    preset.service_capabilities.web_search.standalone.as_deref(),
+                ))
+                .collect::<Vec<_>>(),
+            canonical
+                .presets
+                .iter()
+                .map(|preset| (
+                    preset.service_capabilities.web_search.hosted_responses,
+                    preset.service_capabilities.web_search.standalone.as_deref(),
+                ))
                 .collect::<Vec<_>>()
         );
         assert_eq!(

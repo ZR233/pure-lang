@@ -50,8 +50,8 @@ impl StudioRuntime {
         let config = self.config_store.load_or_default()?;
         let servers = effective_mcp_servers(&config);
         match refresh {
-            McpRuntimeRefresh::Reconcile => self.mcp_runtime.reconcile(servers).await,
-            McpRuntimeRefresh::Recheck => self.mcp_runtime.recheck(servers).await,
+            McpRuntimeRefresh::Reconcile => self.mcp_runtime.reconcile(servers).await?,
+            McpRuntimeRefresh::Recheck => self.mcp_runtime.recheck(servers).await?,
         }
         self.emit_mcp_health_snapshot().await
     }

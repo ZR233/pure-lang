@@ -41,6 +41,11 @@ pub(crate) enum CoordinatorCommand {
         activity: super::AgentActivityState,
         reply: oneshot::Sender<AgentRuntimeResult<()>>,
     },
+    Checkpoint {
+        agent_id: AgentId,
+        checkpoint: super::AgentTurnCheckpoint,
+        reply: oneshot::Sender<AgentRuntimeResult<()>>,
+    },
     OpenSession {
         agent_id: AgentId,
         session: super::AgentSessionState,
@@ -161,6 +166,18 @@ async fn run_coordinator<H>(
                         activity,
                         reply,
                     },
+                )
+                .await;
+            }
+            CoordinatorCommand::Checkpoint {
+                agent_id,
+                checkpoint,
+                reply,
+            } => {
+                route(
+                    &actors,
+                    &agent_id,
+                    ActorCommand::Checkpoint { checkpoint, reply },
                 )
                 .await;
             }
@@ -356,6 +373,9 @@ fn reject_missing(command: ActorCommand, agent_id: AgentId) {
             let _ = reply.send(Err(error));
         }
         ActorCommand::SetActivity { reply, .. } => {
+            let _ = reply.send(Err(error));
+        }
+        ActorCommand::Checkpoint { reply, .. } => {
             let _ = reply.send(Err(error));
         }
         ActorCommand::OpenSession { reply, .. } => {

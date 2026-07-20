@@ -10,16 +10,36 @@ use crate::turn::ToolEffect;
 
 use super::contract::{BoxFuture, RegisteredToolFuture, RegisteredToolHandler};
 use super::{
-    RegisteredToolSchemaError, Tool, ToolContext, ToolExecutionResult, ToolInput, ToolOutput,
-    ToolRuntimeLockPolicy,
+    RegisteredToolSchemaError, Tool, ToolCachePolicy, ToolContext, ToolExecutionResult, ToolInput,
+    ToolOutput, ToolRuntimeLockPolicy,
 };
+
+type CachePolicyResolver = Arc<dyn Fn(&serde_json::Value) -> ToolCachePolicy + Send + Sync>;
+type CacheInvalidationResolver = Arc<dyn Fn(&serde_json::Value) -> bool + Send + Sync>;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", tag = "type")]
 pub enum ToolRuntimeEvent {
-    SkillActivated { activation: SkillActivation },
-    ToolResultRevision { revision: u64 },
-    OutputArtifacts { artifacts: Vec<serde_json::Value> },
+    SkillActivated {
+        activation: SkillActivation,
+    },
+    ToolResultRevision {
+        revision: u64,
+    },
+    OutputArtifacts {
+        artifacts: Vec<serde_json::Value>,
+    },
+    CacheHit {
+        reused_from_call_id: String,
+        result_hash: String,
+        total_bytes: u64,
+    },
+    OutputMetrics {
+        raw_bytes: u64,
+        model_visible_bytes: u64,
+        artifact_bytes: u64,
+        result_hash: String,
+    },
     EndTurn,
 }
 
@@ -36,6 +56,9 @@ pub struct RegisteredTool {
     supports_parallel_tool_calls: bool,
     runtime_lock_policy: Option<ToolRuntimeLockPolicy>,
     effect: Option<ToolEffect>,
+    cache_policy: ToolCachePolicy,
+    cache_policy_resolver: Option<CachePolicyResolver>,
+    cache_invalidation_resolver: Option<CacheInvalidationResolver>,
     handler: Arc<RegisteredToolHandler>,
 }
 
@@ -72,6 +95,9 @@ impl RegisteredTool {
             supports_parallel_tool_calls: false,
             runtime_lock_policy: None,
             effect: None,
+            cache_policy: ToolCachePolicy::Never,
+            cache_policy_resolver: None,
+            cache_invalidation_resolver: None,
             handler: Arc::new(move |input, context| {
                 if context
                     .options
@@ -101,7 +127,7 @@ impl RegisteredTool {
     where
         F: Fn(ToolInput, ToolContext) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<ToolExecutionResult<Artifact>, PureError>> + Send + 'static,
-        Artifact: Send + 'static,
+        Artifact: Serialize + Send + 'static,
     {
         Self::new(name, description, input_schema, move |input, context| {
             let future = handler(input, context);
@@ -120,7 +146,7 @@ impl RegisteredTool {
         Fut: Future<Output = std::result::Result<ToolExecutionResult<Artifact>, Error>>
             + Send
             + 'static,
-        Artifact: Send + 'static,
+        Artifact: Serialize + Send + 'static,
         Error: fmt::Display + Send + 'static,
     {
         let name = name.into();
@@ -155,7 +181,7 @@ impl RegisteredTool {
         Fut: Future<Output = std::result::Result<ToolExecutionResult<Artifact>, Error>>
             + Send
             + 'static,
-        Artifact: Send + 'static,
+        Artifact: Serialize + Send + 'static,
         Error: fmt::Display + Send + 'static,
     {
         match schema {
@@ -200,7 +226,7 @@ impl RegisteredTool {
         Fut: Future<Output = std::result::Result<ToolExecutionResult<Artifact>, Error>>
             + Send
             + 'static,
-        Artifact: Send + 'static,
+        Artifact: Serialize + Send + 'static,
         Error: fmt::Display + Send + 'static,
     {
         let name = name.into();
@@ -245,6 +271,33 @@ impl RegisteredTool {
         self.effect = Some(effect);
         self
     }
+
+    pub fn with_cache_policy(mut self, policy: ToolCachePolicy) -> Self {
+        self.cache_policy = policy;
+        self.cache_policy_resolver = None;
+        self
+    }
+
+    /// 按规范化工具参数选择 turn-scoped 缓存策略。
+    ///
+    /// 用于同一产品工具同时承载只读与写入操作的场景；resolver 必须是纯函数，
+    /// 不得读取外部状态或执行 I/O。
+    pub fn with_cache_policy_resolver<F>(mut self, resolver: F) -> Self
+    where
+        F: Fn(&serde_json::Value) -> ToolCachePolicy + Send + Sync + 'static,
+    {
+        self.cache_policy_resolver = Some(Arc::new(resolver));
+        self
+    }
+
+    /// 声明哪些成功调用会使同名只读结果失效。
+    pub fn with_cache_invalidation_resolver<F>(mut self, resolver: F) -> Self
+    where
+        F: Fn(&serde_json::Value) -> bool + Send + Sync + 'static,
+    {
+        self.cache_invalidation_resolver = Some(Arc::new(resolver));
+        self
+    }
 }
 
 impl Tool for RegisteredTool {
@@ -266,6 +319,18 @@ impl Tool for RegisteredTool {
 
     fn effect(&self) -> Option<ToolEffect> {
         self.effect
+    }
+
+    fn cache_policy(&self, arguments: &serde_json::Value) -> ToolCachePolicy {
+        self.cache_policy_resolver
+            .as_ref()
+            .map_or(self.cache_policy, |resolver| resolver(arguments))
+    }
+
+    fn invalidates_cache(&self, arguments: &serde_json::Value) -> bool {
+        self.cache_invalidation_resolver
+            .as_ref()
+            .is_some_and(|resolver| resolver(arguments))
     }
 
     fn runtime_lock_policy(&self) -> ToolRuntimeLockPolicy {
