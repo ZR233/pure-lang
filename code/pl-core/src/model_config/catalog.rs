@@ -1,15 +1,16 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use pl_model::{
-    ModelInfo, ModelModality, ProviderConnectionMode, ProviderInfo, ProviderWireProtocol,
-    deepseek_default_model_slugs, default_models, mimo_default_model_slugs,
+    ModelInfo, ModelModality, ProviderConnectionMode, ProviderInfo, ProviderServiceCapabilities,
+    ProviderWireProtocol, deepseek_default_model_slugs, default_models, mimo_default_model_slugs,
     openai_default_model_slugs, provider_transport_profile_revision, zhipu_default_model_slugs,
 };
 use pl_protocol::{
     CredentialDescriptorDto, ModelCapabilitiesDto, ModelCatalogDescriptor, ModelDescriptor,
     ModelPricingDto, ModelReasoningDescriptor, PROVIDER_CATALOG_SCHEMA_VERSION,
     ProviderCatalogSnapshot, ProviderConnectionModeDescriptor, ProviderPresetDescriptor,
-    ProviderTransportDescriptor, PureError, Result,
+    ProviderServiceCapabilitiesDescriptor, ProviderTransportDescriptor, PureError, Result,
+    WebSearchProviderCapabilitiesDescriptor,
 };
 
 use super::{ModelCatalogId, ProviderConfig, ProviderPresetId};
@@ -46,6 +47,7 @@ pub struct ProviderPreset {
     pub icon_key: Option<String>,
     pub protocol: ProviderWireProtocol,
     pub connection_policy: ProviderConnectionPolicy,
+    pub service_capabilities: ProviderServiceCapabilities,
 }
 
 /// PL 内置 Provider 与模型目录注册表。
@@ -174,6 +176,14 @@ impl ProviderCatalogRegistry {
                     preset.id, preset.model_catalog
                 )));
             }
+            if preset.service_capabilities.web_search.hosted_responses
+                && preset.protocol != ProviderWireProtocol::Responses
+            {
+                return Err(PureError::ConfigError(format!(
+                    "provider preset {} declares hosted Responses web search for protocol {:?}",
+                    preset.id, preset.protocol
+                )));
+            }
             if preset.connection_policy.supported_modes.is_empty()
                 || !preset
                     .connection_policy
@@ -276,6 +286,7 @@ fn preset(
     description: &str,
     icon_key: &str,
 ) -> ProviderPreset {
+    let service_capabilities = info.service_capabilities.clone();
     let protocol = info.protocol;
     let default_connection_mode = info.connection_mode;
     let suggested_model = info.default_model.clone();
@@ -302,6 +313,7 @@ fn preset(
         icon_key: Some(icon_key.to_string()),
         protocol,
         connection_policy,
+        service_capabilities,
     }
 }
 
@@ -330,6 +342,24 @@ fn preset_descriptor(preset: &ProviderPreset) -> ProviderPresetDescriptor {
         model_catalog_id: preset.model_catalog.to_string(),
         suggested_model: preset.suggested_model.clone(),
         icon_key: preset.icon_key.clone(),
+        service_capabilities: provider_service_capabilities_descriptor(
+            &preset.service_capabilities,
+        ),
+    }
+}
+
+/// 将运行时服务能力投影为无凭证公共 DTO。
+pub fn provider_service_capabilities_descriptor(
+    capabilities: &ProviderServiceCapabilities,
+) -> ProviderServiceCapabilitiesDescriptor {
+    ProviderServiceCapabilitiesDescriptor {
+        web_search: WebSearchProviderCapabilitiesDescriptor {
+            hosted_responses: capabilities.web_search.hosted_responses,
+            standalone: capabilities
+                .web_search
+                .standalone
+                .map(|dialect| dialect.as_str().to_string()),
+        },
     }
 }
 
@@ -526,5 +556,43 @@ mod tests {
         let reordered = reordered.snapshot().unwrap();
 
         assert_ne!(original.revision, reordered.revision);
+    }
+
+    #[test]
+    fn snapshot_revision_covers_service_capabilities() {
+        let registry = ProviderCatalogRegistry::builtin();
+        let original = registry.snapshot().unwrap();
+        let mut changed = registry;
+        changed
+            .presets
+            .iter_mut()
+            .find(|preset| preset.id.as_str() == "openai")
+            .unwrap()
+            .service_capabilities = ProviderServiceCapabilities::default();
+
+        let changed = changed.snapshot().unwrap();
+
+        assert_ne!(original.revision, changed.revision);
+    }
+
+    #[test]
+    fn registry_rejects_hosted_responses_capability_on_chat_protocol() {
+        let mut registry = ProviderCatalogRegistry::builtin();
+        registry
+            .presets
+            .iter_mut()
+            .find(|preset| preset.id.as_str() == "deepseek")
+            .unwrap()
+            .service_capabilities
+            .web_search
+            .hosted_responses = true;
+
+        assert!(
+            registry
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("hosted Responses web search")
+        );
     }
 }

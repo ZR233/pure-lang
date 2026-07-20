@@ -31,6 +31,8 @@ pub struct ToolContext {
     pub active_subagent: Option<SubagentContext>,
     pub lsp_runtime: Option<pl_lsp::LspRuntimeRegistry>,
     pub parent_session: Arc<crate::session::AgentSession>,
+    pub working_set: crate::TurnWorkingSetHandle,
+    pub tool_cache: crate::TurnToolCacheHandle,
 }
 
 /// 单次工具调用的路径访问策略。
@@ -67,6 +69,8 @@ impl fmt::Debug for ToolContext {
             .field("provider_call_id", &self.provider_call_id)
             .field("active_subagent", &self.active_subagent)
             .field("lsp_runtime", &self.lsp_runtime.is_some())
+            .field("working_set", &self.working_set)
+            .field("workspace_epoch", &self.tool_cache.workspace_epoch())
             .finish_non_exhaustive()
     }
 }

@@ -12,8 +12,8 @@ use crate::config::{
 };
 use crate::first_run::ProviderTemplateKind;
 use crate::{
-    AgentModelConfig, ProviderConfig, ProviderModelCatalogConfig, ProviderPresetId,
-    builtin_provider_catalog,
+    AgentModelConfig, ProviderCapabilitySelection, ProviderConfig, ProviderModelCatalogConfig,
+    ProviderPresetId, builtin_provider_catalog,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,6 +34,7 @@ pub struct ProviderEdit {
     pub name: String,
     pub base_url: Option<String>,
     pub bearer_token: Option<String>,
+    pub capabilities: ProviderCapabilitySelection,
     pub default_model: String,
     pub custom_models: Vec<ProviderModelEdit>,
 }
@@ -142,6 +143,7 @@ impl ProviderEdit {
                     config.http_headers = current.http_headers.clone();
                     config.tool_wire_policy = current.tool_wire_policy;
                     config.apply_patch_tool_type = current.apply_patch_tool_type;
+                    config.capabilities = current.capabilities.clone();
                 }
                 let ProviderModelCatalogConfig::Bundled {
                     additional_models, ..
@@ -155,6 +157,14 @@ impl ProviderEdit {
                 config
             }
             None => {
+                if matches!(
+                    self.capabilities,
+                    ProviderCapabilitySelection::PresetDefaults
+                ) {
+                    return Err(PureError::ConfigError(format!(
+                        "custom provider {provider_key} must use explicit service capabilities"
+                    )));
+                }
                 let current_custom = current.filter(|provider| {
                     provider.preset_id().is_none()
                         && provider.protocol().ok() == Some(self.protocol)
@@ -172,6 +182,9 @@ impl ProviderEdit {
                         .unwrap_or_default(),
                     apply_patch_tool_type: current_custom
                         .and_then(|provider| provider.apply_patch_tool_type),
+                    service_capabilities: current_custom
+                        .and_then(|provider| provider.service_capabilities().ok())
+                        .unwrap_or_default(),
                 };
                 let mut config = ProviderConfig::from_provider_info(info, custom_models);
                 config.bearer_token_env =
@@ -180,6 +193,7 @@ impl ProviderEdit {
             }
         };
         config.set_connection_mode(self.connection_mode);
+        config.capabilities = self.capabilities.clone();
         config.name = name;
         config.base_url = base_url;
         config.bearer_token = bearer_token;
@@ -514,6 +528,7 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::*;
+    use crate::ProviderServiceCapabilities;
 
     fn template(id: &str) -> ProviderTemplateKind {
         ProviderTemplateKind::from_key(id).unwrap()
@@ -529,6 +544,7 @@ mod tests {
             name: "OpenAI".to_string(),
             base_url: Some("https://api.openai.com/v1".to_string()),
             bearer_token: None,
+            capabilities: ProviderCapabilitySelection::PresetDefaults,
             default_model: "gpt-5.6-sol".to_string(),
             custom_models: Vec::new(),
         }
@@ -544,6 +560,7 @@ mod tests {
             name: "Zhipu".to_string(),
             base_url: Some("https://open.bigmodel.cn/api/paas/v4".to_string()),
             bearer_token: None,
+            capabilities: ProviderCapabilitySelection::PresetDefaults,
             default_model: "glm-5.2".to_string(),
             custom_models: Vec::new(),
         }
@@ -676,6 +693,7 @@ mod tests {
             )])),
             tool_wire_policy: pl_model::ToolWirePolicy::FunctionFallback,
             apply_patch_tool_type: None,
+            service_capabilities: Default::default(),
         };
         let mut model = ModelInfo::fallback("gateway-model");
         model.context_window = Some(256_000);
@@ -707,6 +725,9 @@ mod tests {
             name: "Gateway 2".to_string(),
             base_url: Some("https://gateway.example/v2".to_string()),
             bearer_token: Some("new-secret".to_string()),
+            capabilities: ProviderCapabilitySelection::Explicit(
+                ProviderServiceCapabilities::default(),
+            ),
             default_model: "gateway-model".to_string(),
             custom_models: vec![ProviderModelEdit {
                 slug: "gateway-model".to_string(),

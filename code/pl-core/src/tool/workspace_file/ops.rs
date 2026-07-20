@@ -1,9 +1,11 @@
+use base64::Engine;
 use pl_protocol::{PureError, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
 use crate::tool::OutputTruncation;
+use crate::tool::model_visible_tool_output;
 
 use super::backend::{
     WorkspaceFileBackend, WorkspaceFileListRequest, WorkspaceFileReadRequest,
@@ -14,12 +16,12 @@ use super::schema::{
     TOOL_APPLY_PATCH, TOOL_LIST_FILES, TOOL_READ_FILE, TOOL_SEARCH_FILES, WorkspaceFileToolKind,
 };
 
-const DEFAULT_READ_FILE_BYTES: usize = 50 * 1024;
-const MAX_READ_FILE_BYTES: usize = 512 * 1024;
-const DEFAULT_LIST_FILES_LIMIT: usize = 200;
-const MAX_LIST_FILES_LIMIT: usize = 1_000;
+const DEFAULT_READ_FILE_LINES: usize = 200;
+const MAX_READ_FILE_LINES: usize = 500;
+const DEFAULT_LIST_FILES_LIMIT: usize = 100;
+const MAX_LIST_FILES_LIMIT: usize = 200;
 const DEFAULT_SEARCH_MATCH_LIMIT: usize = 100;
-const MAX_SEARCH_MATCH_LIMIT: usize = 2_000;
+const MAX_SEARCH_MATCH_LIMIT: usize = 200;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct WorkspaceFileToolExecution {
@@ -40,7 +42,7 @@ impl WorkspaceFileToolExecution {
         })?;
         Ok(Self {
             success: true,
-            model_output: output.clone(),
+            model_output: model_visible_tool_output(&output),
             output,
             exit_code: Some(0),
             truncated: OutputTruncation::empty(),
@@ -53,6 +55,7 @@ pub async fn execute_workspace_file_tool<B>(
     name: &str,
     arguments: Value,
     _cancellation_token: Option<CancellationToken>,
+    workspace_epoch: u64,
 ) -> Result<Option<WorkspaceFileToolExecution>>
 where
     B: WorkspaceFileBackend,
@@ -62,8 +65,10 @@ where
     };
     let value = match kind {
         WorkspaceFileToolKind::ReadFile => read_file(backend, arguments).await?,
-        WorkspaceFileToolKind::ListFiles => list_files(backend, arguments).await?,
-        WorkspaceFileToolKind::SearchFiles => search_files(backend, arguments).await?,
+        WorkspaceFileToolKind::ListFiles => list_files(backend, arguments, workspace_epoch).await?,
+        WorkspaceFileToolKind::SearchFiles => {
+            search_files(backend, arguments, workspace_epoch).await?
+        }
         WorkspaceFileToolKind::ApplyPatch => apply_patch(backend, arguments).await?,
     };
     Ok(Some(WorkspaceFileToolExecution::json(value)?))
@@ -74,10 +79,8 @@ where
 struct ReadFileInput {
     path: String,
     cwd: Option<String>,
-    line_start: Option<usize>,
-    line_count: Option<usize>,
-    offset: Option<usize>,
-    max_bytes: Option<usize>,
+    start_line: Option<usize>,
+    max_lines: Option<usize>,
 }
 
 async fn read_file<B>(backend: &B, arguments: Value) -> Result<Value>
@@ -85,17 +88,17 @@ where
     B: WorkspaceFileBackend,
 {
     let input: ReadFileInput = parse_input(arguments, TOOL_READ_FILE)?;
-    let offset = input.offset.unwrap_or(0);
-    if input.line_start.is_some() && offset > 0 {
+    let start_line = input.start_line.unwrap_or(1);
+    if start_line == 0 {
+        return Err(tool_error(TOOL_READ_FILE, "startLine is 1-based"));
+    }
+    let max_lines = input.max_lines.unwrap_or(DEFAULT_READ_FILE_LINES);
+    if !(1..=MAX_READ_FILE_LINES).contains(&max_lines) {
         return Err(tool_error(
             TOOL_READ_FILE,
-            "read_file cannot combine line_start with offset",
+            format!("maxLines must be between 1 and {MAX_READ_FILE_LINES}"),
         ));
     }
-    let max_bytes = input
-        .max_bytes
-        .unwrap_or(DEFAULT_READ_FILE_BYTES)
-        .clamp(1, MAX_READ_FILE_BYTES);
     let stat = backend
         .stat(WorkspaceFileStatRequest {
             path: input.path.clone(),
@@ -114,25 +117,24 @@ where
             cwd: input.cwd.clone(),
         })
         .await?;
-    let (window, window_offset) = if let Some(line_start) = input.line_start {
-        let start = line_start_byte_offset(&content, line_start)
-            .map_err(|error| tool_error(TOOL_READ_FILE, error))?;
-        let end = line_end_byte_offset(&content, start, input.line_count);
-        (&content[start..end], 0)
+    let start = line_start_byte_offset(&content, start_line)
+        .map_err(|error| tool_error(TOOL_READ_FILE, error))?;
+    let end = line_end_byte_offset(&content, start, Some(max_lines));
+    let text = content[start..end].to_string();
+    let returned_lines = logical_line_count(&text);
+    let end_line = if returned_lines == 0 {
+        start_line.saturating_sub(1)
     } else {
-        let start = byte_offset_boundary(&content, offset)?;
-        (&content[start..], offset)
+        start_line.saturating_add(returned_lines.saturating_sub(1))
     };
-    let (text, truncated, bytes_omitted, next_offset) =
-        bounded_text(window, max_bytes, window_offset);
+    let next_start_line = (end < content.len()).then_some(end_line.saturating_add(1));
     Ok(json!({
         "path": input.path,
+        "startLine": start_line,
+        "endLine": end_line,
+        "nextStartLine": next_start_line,
+        "contentHash": crate::working_set::canonical_content_hash(content.as_bytes()),
         "text": text,
-        "offset": window_offset,
-        "bytesReturned": text.len(),
-        "bytesOmitted": bytes_omitted,
-        "truncated": truncated,
-        "nextOffset": next_offset,
     }))
 }
 
@@ -142,38 +144,60 @@ struct ListFilesInput {
     path: Option<String>,
     cwd: Option<String>,
     glob: Option<String>,
-    max_files: Option<usize>,
+    limit: Option<usize>,
+    cursor: Option<String>,
     include_dirs: Option<bool>,
 }
 
-async fn list_files<B>(backend: &B, arguments: Value) -> Result<Value>
+async fn list_files<B>(backend: &B, arguments: Value, workspace_epoch: u64) -> Result<Value>
 where
     B: WorkspaceFileBackend,
 {
     let input: ListFilesInput = parse_input(arguments, TOOL_LIST_FILES)?;
-    let path = input.path.unwrap_or_else(|| ".".to_string());
+    let path = path_or_current(input.path);
     let glob = input.glob.unwrap_or_else(|| "*".to_string());
     let include_dirs = input.include_dirs.unwrap_or(false);
-    let max_files = input
-        .max_files
-        .unwrap_or(DEFAULT_LIST_FILES_LIMIT)
-        .clamp(1, MAX_LIST_FILES_LIMIT);
+    let limit = input.limit.unwrap_or(DEFAULT_LIST_FILES_LIMIT);
+    if !(1..=MAX_LIST_FILES_LIMIT).contains(&limit) {
+        return Err(tool_error(
+            TOOL_LIST_FILES,
+            format!("limit must be between 1 and {MAX_LIST_FILES_LIMIT}"),
+        ));
+    }
+    let cursor_key = cursor_key(&json!({
+        "path": path,
+        "cwd": input.cwd,
+        "glob": glob,
+        "includeDirs": include_dirs,
+        "workspaceEpoch": workspace_epoch,
+    }));
+    let cursor = decode_cursor(input.cursor.as_deref(), CursorKind::List, &cursor_key)?;
+    let offset = cursor.offset;
     let result = backend
         .list(WorkspaceFileListRequest {
             path: path.clone(),
             cwd: input.cwd,
             glob: glob.clone(),
-            max_files,
+            max_files: offset.saturating_add(limit).saturating_add(1),
             include_dirs,
         })
         .await?;
+    let end = offset.saturating_add(limit).min(result.files.len());
+    let files = result.files.get(offset..end).unwrap_or_default().to_vec();
+    let has_more = end < result.files.len() || result.truncated;
+    let next_cursor = has_more.then(|| encode_cursor(CursorKind::List, &cursor_key, end));
+    let result_hash =
+        crate::working_set::canonical_content_hash(serde_json::to_string(&files)?.as_bytes());
     Ok(json!({
         "path": path,
         "glob": glob,
         "includeDirs": include_dirs,
-        "files": result.files,
-        "count": result.files.len(),
-        "truncated": result.truncated,
+        "files": files,
+        "count": files.len(),
+        "nextCursor": next_cursor,
+        "cursorReset": cursor.reset,
+        "resultHash": result_hash,
+        "workspaceEpoch": workspace_epoch,
     }))
 }
 
@@ -186,40 +210,160 @@ struct SearchFilesInput {
     glob: Option<String>,
     case_sensitive: Option<bool>,
     literal: Option<bool>,
-    max_matches: Option<usize>,
+    limit: Option<usize>,
+    cursor: Option<String>,
     context_lines: Option<usize>,
 }
 
-async fn search_files<B>(backend: &B, arguments: Value) -> Result<Value>
+async fn search_files<B>(backend: &B, arguments: Value, workspace_epoch: u64) -> Result<Value>
 where
     B: WorkspaceFileBackend,
 {
     let input: SearchFilesInput = parse_input(arguments, TOOL_SEARCH_FILES)?;
-    let path = input.path.unwrap_or_else(|| ".".to_string());
-    let max_matches = input
-        .max_matches
-        .unwrap_or(DEFAULT_SEARCH_MATCH_LIMIT)
-        .clamp(1, MAX_SEARCH_MATCH_LIMIT);
+    let path = path_or_current(input.path);
+    let limit = input.limit.unwrap_or(DEFAULT_SEARCH_MATCH_LIMIT);
+    if !(1..=MAX_SEARCH_MATCH_LIMIT).contains(&limit) {
+        return Err(tool_error(
+            TOOL_SEARCH_FILES,
+            format!("limit must be between 1 and {MAX_SEARCH_MATCH_LIMIT}"),
+        ));
+    }
+    let case_sensitive = input.case_sensitive.unwrap_or(true);
+    let literal = input.literal.unwrap_or(false);
+    let context_lines = input.context_lines.unwrap_or(0);
+    if context_lines > 20 {
+        return Err(tool_error(
+            TOOL_SEARCH_FILES,
+            "contextLines must be between 0 and 20",
+        ));
+    }
+    let cursor_key = cursor_key(&json!({
+        "query": input.query,
+        "path": path,
+        "cwd": input.cwd,
+        "glob": input.glob,
+        "caseSensitive": case_sensitive,
+        "literal": literal,
+        "contextLines": context_lines,
+        "workspaceEpoch": workspace_epoch,
+    }));
+    let cursor = decode_cursor(input.cursor.as_deref(), CursorKind::Search, &cursor_key)?;
+    let offset = cursor.offset;
     let result = backend
         .search(WorkspaceFileSearchRequest {
             query: input.query.clone(),
             path: path.clone(),
             cwd: input.cwd,
             glob: input.glob.clone(),
-            case_sensitive: input.case_sensitive.unwrap_or(true),
-            literal: input.literal.unwrap_or(false),
-            max_matches,
-            context_lines: input.context_lines.unwrap_or(0).min(20),
+            case_sensitive,
+            literal,
+            max_matches: offset.saturating_add(limit).saturating_add(1),
+            context_lines,
         })
         .await?;
+    let end = offset.saturating_add(limit).min(result.matches.len());
+    let matches = result.matches.get(offset..end).unwrap_or_default();
+    let files = group_search_matches(matches);
+    let has_more = end < result.matches.len() || result.truncated;
+    let next_cursor = has_more.then(|| encode_cursor(CursorKind::Search, &cursor_key, end));
+    let result_hash =
+        crate::working_set::canonical_content_hash(serde_json::to_string(matches)?.as_bytes());
     Ok(json!({
         "query": input.query,
         "path": path,
         "glob": input.glob,
-        "matches": result.matches,
-        "count": result.matches.len(),
-        "truncated": result.truncated,
+        "files": files,
+        "count": matches.len(),
+        "nextCursor": next_cursor,
+        "cursorReset": cursor.reset,
+        "resultHash": result_hash,
+        "workspaceEpoch": workspace_epoch,
     }))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum CursorKind {
+    List,
+    Search,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceCursor {
+    kind: CursorKind,
+    key: String,
+    offset: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CursorResolution {
+    offset: usize,
+    reset: bool,
+}
+
+fn cursor_key(value: &Value) -> String {
+    crate::working_set::canonical_content_hash(value.to_string().as_bytes())
+}
+
+fn encode_cursor(kind: CursorKind, key: &str, offset: usize) -> String {
+    let value = serde_json::to_vec(&WorkspaceCursor {
+        kind,
+        key: key.to_string(),
+        offset,
+    })
+    .expect("workspace cursor serialization must succeed");
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(value)
+}
+
+fn decode_cursor(
+    cursor: Option<&str>,
+    expected_kind: CursorKind,
+    expected_key: &str,
+) -> Result<CursorResolution> {
+    let Some(cursor) = cursor.map(str::trim).filter(|cursor| !cursor.is_empty()) else {
+        return Ok(CursorResolution {
+            offset: 0,
+            reset: false,
+        });
+    };
+    let Ok(bytes) = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(cursor) else {
+        return Ok(CursorResolution {
+            offset: 0,
+            reset: true,
+        });
+    };
+    let Ok(cursor) = serde_json::from_slice::<WorkspaceCursor>(&bytes) else {
+        return Ok(CursorResolution {
+            offset: 0,
+            reset: true,
+        });
+    };
+    if cursor.kind != expected_kind || cursor.key != expected_key {
+        return Err(tool_error(
+            "workspace_cursor",
+            "cursor does not belong to this request",
+        ));
+    }
+    Ok(CursorResolution {
+        offset: cursor.offset,
+        reset: false,
+    })
+}
+
+fn group_search_matches(matches: &[super::WorkspaceFileSearchMatch]) -> Vec<Value> {
+    let mut grouped = std::collections::BTreeMap::<&str, Vec<Value>>::new();
+    for item in matches {
+        grouped.entry(&item.path).or_default().push(json!({
+            "line": item.line,
+            "column": item.column,
+            "text": item.text,
+        }));
+    }
+    grouped
+        .into_iter()
+        .map(|(path, matches)| json!({ "path": path, "matches": matches }))
+        .collect()
 }
 
 #[derive(Debug, Deserialize)]
@@ -252,41 +396,16 @@ fn parse_input<T: serde::de::DeserializeOwned>(arguments: Value, tool: &str) -> 
         .map_err(|error| tool_error(tool, format!("invalid input: {error}")))
 }
 
+fn path_or_current(path: Option<String>) -> String {
+    path.filter(|path| !path.trim().is_empty())
+        .unwrap_or_else(|| ".".to_string())
+}
+
 pub(crate) fn tool_error(tool: &str, error: impl std::fmt::Display) -> PureError {
     PureError::ToolExecutionFailed {
         tool: tool.to_string(),
         error: error.to_string(),
     }
-}
-
-pub(crate) fn bounded_text(
-    value: &str,
-    max_bytes: usize,
-    offset: usize,
-) -> (String, bool, usize, Option<usize>) {
-    if value.len() <= max_bytes {
-        return (value.to_string(), false, 0, None);
-    }
-    let mut end = max_bytes;
-    while !value.is_char_boundary(end) {
-        end = end.saturating_sub(1);
-    }
-    let text = value[..end].to_string();
-    let omitted = value.len().saturating_sub(end);
-    (text, true, omitted, Some(offset.saturating_add(end)))
-}
-
-fn byte_offset_boundary(content: &str, offset: usize) -> Result<usize> {
-    if offset >= content.len() {
-        return Ok(content.len());
-    }
-    if content.is_char_boundary(offset) {
-        return Ok(offset);
-    }
-    Err(tool_error(
-        TOOL_READ_FILE,
-        format!("offset {offset} is not on a UTF-8 character boundary"),
-    ))
 }
 
 fn line_start_byte_offset(content: &str, line_start: usize) -> std::result::Result<usize, String> {
@@ -303,7 +422,7 @@ fn line_start_byte_offset(content: &str, line_start: usize) -> std::result::Resu
         }
     }
     Err(format!(
-        "line_start {line_start} exceeds file length ({current_line} lines)"
+        "startLine {line_start} exceeds file length ({current_line} lines)"
     ))
 }
 
@@ -321,4 +440,11 @@ fn line_end_byte_offset(content: &str, start_byte: usize, line_count: Option<usi
         }
     }
     content.len()
+}
+
+fn logical_line_count(content: &str) -> usize {
+    if content.is_empty() {
+        return 0;
+    }
+    content.lines().count().max(1)
 }

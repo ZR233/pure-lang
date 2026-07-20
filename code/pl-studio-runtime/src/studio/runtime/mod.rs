@@ -1,8 +1,8 @@
 use crate::InteractionRequest;
 use anyhow::Result;
 
+use crate::McpRuntimeHandle;
 use crate::config::ConfigStore;
-use crate::mcp::McpRuntimeRegistry;
 use crate::studio::agent_host::{
     StudioAgentResources, StudioAgentRuntime, StudioContinuationService,
 };
@@ -84,7 +84,7 @@ pub struct StudioResolveInteractionResponse {
 pub struct StudioRuntime {
     store: StudioStore,
     config_store: ConfigStore,
-    mcp_runtime: McpRuntimeRegistry,
+    mcp_runtime: McpRuntimeHandle,
     mcp_health_watcher: std::sync::Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
     lsp_runtime: pl_lsp::LspRuntimeRegistry,
     interactions: InteractionRuntime,

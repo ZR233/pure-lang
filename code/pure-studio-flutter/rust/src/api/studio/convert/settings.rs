@@ -5,8 +5,10 @@ use crate::api::studio::types::{
 };
 use anyhow::{Context, Result};
 use pl_studio_runtime::{
-    McpServerTransport, ProviderEdit, ProviderModelEdit, ProviderPresetId, ProviderSettingsEdit,
-    ProviderUsageData, ProviderUsageState, ProviderWireProtocol, RoleEdit, ZhipuQuotaWindow,
+    McpServerTransport, ProviderCapabilitySelection, ProviderEdit, ProviderModelEdit,
+    ProviderPresetId, ProviderServiceCapabilities, ProviderSettingsEdit, ProviderUsageData,
+    ProviderUsageState, ProviderWireProtocol, RoleEdit, StandaloneWebSearchDialect,
+    WebSearchProviderCapabilities, ZhipuQuotaWindow,
 };
 use serde_json::{Map, Value, json};
 // ── Utility functions ──
@@ -52,6 +54,13 @@ pub(crate) fn studio_config_projection(config: &pl_studio_runtime::StudioConfig)
                 "name": provider.name,
                 "baseUrl": provider.base_url,
                 "hasBearerToken": provider.resolved_bearer_token().is_some(),
+                "capabilitySource": match &provider.capabilities {
+                    ProviderCapabilitySelection::PresetDefaults => "preset_defaults",
+                    ProviderCapabilitySelection::Explicit(_) => "explicit",
+                },
+                "serviceCapabilities": pl_studio_runtime::provider_service_capabilities_descriptor(
+                    &provider.service_capabilities()?,
+                ),
                 "defaultModel": default_model,
                 "models": models,
                 "customModels": provider.editable_models(),
@@ -92,7 +101,8 @@ pub(crate) fn web_search_settings_dto(
     role: pl_studio_runtime::StudioRole,
 ) -> Result<crate::api::studio::types::BridgeWebSearchSettingsDto> {
     let route = config.resolve_role(role)?;
-    let resolution = pl_studio_runtime::resolve_web_search(config, &route);
+    let resolution =
+        pl_studio_runtime::plan_web_search(&config.models, &route, &config.web_search)?.resolution;
     let location = config.web_search.location.as_ref();
     Ok(crate::api::studio::types::BridgeWebSearchSettingsDto {
         configured_mode: web_search_mode_label(resolution.configured_mode).to_string(),
@@ -109,10 +119,9 @@ pub(crate) fn web_search_settings_dto(
         city: location.and_then(|location| location.city.clone()),
         timezone: location.and_then(|location| location.timezone.clone()),
         provider_id: resolution
-            .backend
-            .as_ref()
-            .map(|backend| backend.provider_id.to_string()),
-        model: resolution.backend.map(|backend| backend.model),
+            .provider_id
+            .map(|provider_id| provider_id.to_string()),
+        model: resolution.model,
     })
 }
 
@@ -171,13 +180,14 @@ fn web_search_context_size_label(size: pl_studio_runtime::WebSearchContextSize) 
 }
 
 fn web_search_availability_label(
-    availability: pl_studio_runtime::StudioWebSearchAvailability,
+    availability: pl_studio_runtime::WebSearchAvailability,
 ) -> &'static str {
     match availability {
-        pl_studio_runtime::StudioWebSearchAvailability::Available => "available",
-        pl_studio_runtime::StudioWebSearchAvailability::Disabled => "disabled",
-        pl_studio_runtime::StudioWebSearchAvailability::MissingCredential => "missingCredential",
-        pl_studio_runtime::StudioWebSearchAvailability::UnsupportedModel => "unsupportedModel",
+        pl_studio_runtime::WebSearchAvailability::Available => "available",
+        pl_studio_runtime::WebSearchAvailability::Disabled => "disabled",
+        pl_studio_runtime::WebSearchAvailability::MissingCredential => "missingCredential",
+        pl_studio_runtime::WebSearchAvailability::ProviderUnsupported => "providerUnsupported",
+        pl_studio_runtime::WebSearchAvailability::ModelUnsupported => "modelUnsupported",
     }
 }
 
@@ -236,6 +246,25 @@ fn provider_edit(
     } else {
         Some(input.bearer_token)
     };
+    let capabilities = match input.capability_source.as_str() {
+        "preset_defaults" if preset.is_some() => ProviderCapabilitySelection::PresetDefaults,
+        "preset_defaults" => {
+            anyhow::bail!("custom provider must use explicit service capabilities")
+        }
+        "explicit" => ProviderCapabilitySelection::Explicit(ProviderServiceCapabilities {
+            web_search: WebSearchProviderCapabilities {
+                hosted_responses: input.hosted_web_search,
+                standalone: input
+                    .standalone_web_search
+                    .as_deref()
+                    .filter(|value| !value.trim().is_empty())
+                    .map(str::parse::<StandaloneWebSearchDialect>)
+                    .transpose()
+                    .map_err(anyhow::Error::msg)?,
+            },
+        }),
+        source => anyhow::bail!("unsupported provider capability source: {source}"),
+    };
     Ok(ProviderEdit {
         key: input.id,
         original_key: input.original_id,
@@ -249,6 +278,7 @@ fn provider_edit(
         name: input.name,
         base_url: Some(input.base_url),
         bearer_token,
+        capabilities,
         default_model: input.default_model,
         custom_models: input
             .custom_models
@@ -415,6 +445,9 @@ mod tests {
                 name: "OpenAI Team".to_string(),
                 base_url: "https://api.openai.com/v1".to_string(),
                 bearer_token: String::new(),
+                capability_source: "preset_defaults".to_string(),
+                hosted_web_search: true,
+                standalone_web_search: Some("open_ai_search_api".to_string()),
                 default_model: "gpt-5.6-sol".to_string(),
                 custom_models: Vec::new(),
             },

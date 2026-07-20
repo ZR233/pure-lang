@@ -1,21 +1,29 @@
 use std::collections::BTreeMap;
 
-use pl_model::ZHIPU_CODING_PLAN_BASE_URL;
 use pl_protocol::{PureError, Result};
 use serde::{Deserialize, Serialize};
+
+use crate::turn::ToolEffect;
 
 pub const ZHIPU_SEARCH_MCP_ID: &str = "zhipu_search";
 pub const ZHIPU_READER_MCP_ID: &str = "zhipu_reader";
 pub const ZHIPU_ZREAD_MCP_ID: &str = "zhipu_zread";
 pub const ZHIPU_VISION_MCP_ID: &str = "zhipu_vision";
 
-const BUILTIN_ZHIPU_MCP_SERVERS: &[BuiltinMcpServerDefinition] = &[
+const BUILTIN_MCP_SERVERS: &[BuiltinMcpServerDefinition] = &[
     BuiltinMcpServerDefinition {
         id: ZHIPU_SEARCH_MCP_ID,
         transport: McpServerTransport::StreamableHttp,
         url: Some("https://open.bigmodel.cn/api/mcp/web_search_prime/mcp"),
         command: None,
         args: &[],
+        credential: ZHIPU_CREDENTIAL,
+        source_detail: "Zhipu Coding Plan",
+        tool_effect: Some(ToolEffect::Read),
+        env: &[],
+        credential_env_var: None,
+        startup_timeout_secs: None,
+        tool_timeout_secs: None,
     },
     BuiltinMcpServerDefinition {
         id: ZHIPU_READER_MCP_ID,
@@ -23,6 +31,13 @@ const BUILTIN_ZHIPU_MCP_SERVERS: &[BuiltinMcpServerDefinition] = &[
         url: Some("https://open.bigmodel.cn/api/mcp/web_reader/mcp"),
         command: None,
         args: &[],
+        credential: ZHIPU_CREDENTIAL,
+        source_detail: "Zhipu Coding Plan",
+        tool_effect: Some(ToolEffect::Read),
+        env: &[],
+        credential_env_var: None,
+        startup_timeout_secs: None,
+        tool_timeout_secs: None,
     },
     BuiltinMcpServerDefinition {
         id: ZHIPU_ZREAD_MCP_ID,
@@ -30,6 +45,13 @@ const BUILTIN_ZHIPU_MCP_SERVERS: &[BuiltinMcpServerDefinition] = &[
         url: Some("https://open.bigmodel.cn/api/mcp/zread/mcp"),
         command: None,
         args: &[],
+        credential: ZHIPU_CREDENTIAL,
+        source_detail: "Zhipu Coding Plan",
+        tool_effect: Some(ToolEffect::Read),
+        env: &[],
+        credential_env_var: None,
+        startup_timeout_secs: None,
+        tool_timeout_secs: None,
     },
     BuiltinMcpServerDefinition {
         id: ZHIPU_VISION_MCP_ID,
@@ -37,8 +59,27 @@ const BUILTIN_ZHIPU_MCP_SERVERS: &[BuiltinMcpServerDefinition] = &[
         url: None,
         command: Some("npx"),
         args: &["-y", "@z_ai/mcp-server"],
+        credential: ZHIPU_CREDENTIAL,
+        source_detail: "Zhipu Coding Plan",
+        tool_effect: Some(ToolEffect::Read),
+        env: &[
+            ("Z_AI_MODE", "ZHIPU"),
+            // npm server 默认 32768，会显著放大简单图片冒烟的延迟和上下文。
+            ("Z_AI_VISION_MODEL_MAX_TOKENS", "4096"),
+        ],
+        credential_env_var: Some("Z_AI_API_KEY"),
+        // 首次运行可能需要由 npx 下载内置 server；后续 generation 会复用 npm cache。
+        startup_timeout_secs: Some(60),
+        // 上游 vision server 自身的默认请求超时为 300 秒；仅对该 server 放宽，
+        // 不改变其他 MCP 的快速失败语义。
+        tool_timeout_secs: Some(360),
     },
 ];
+
+const ZHIPU_CREDENTIAL: BuiltinMcpCredentialSource = BuiltinMcpCredentialSource::Provider {
+    preset_ids: &["zhipu-coding-plan", "zhipu"],
+    endpoint_hosts: &["open.bigmodel.cn"],
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct McpServerConfig {
@@ -60,6 +101,18 @@ pub struct McpServerConfig {
     pub bearer_token_env_var: Option<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub headers: BTreeMap<String, String>,
+    /// 建立 transport 并完成工具探测的超时秒数。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub startup_timeout_secs: Option<u64>,
+    /// 单次工具或资源请求的超时秒数。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_timeout_secs: Option<u64>,
+    /// 可选工具白名单；未配置时允许 server 暴露的全部工具。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled_tools: Option<Vec<String>>,
+    /// 工具黑名单，优先级高于白名单。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub disabled_tools: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -79,6 +132,7 @@ pub struct EffectiveMcpServerConfig {
     pub status_message: Option<String>,
     pub mutation_policy: McpServerMutationPolicy,
     pub bearer_token: Option<String>,
+    pub tool_effect: Option<ToolEffect>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -114,6 +168,18 @@ impl McpServerConfig {
         if !self.enabled {
             return Ok(());
         }
+        if self.startup_timeout_secs == Some(0) {
+            return Err(mcp_config_error(
+                server_id,
+                "startup timeout must be greater than zero",
+            ));
+        }
+        if self.tool_timeout_secs == Some(0) {
+            return Err(mcp_config_error(
+                server_id,
+                "tool timeout must be greater than zero",
+            ));
+        }
         match self.transport {
             McpServerTransport::Stdio => {
                 let Some(command) = self.command.as_deref().map(str::trim) else {
@@ -139,6 +205,15 @@ impl McpServerConfig {
                         "streamable HTTP url is required",
                     ));
                 }
+                let parsed = reqwest::Url::parse(url).map_err(|error| {
+                    mcp_config_error(server_id, &format!("invalid url: {error}"))
+                })?;
+                if !matches!(parsed.scheme(), "http" | "https") {
+                    return Err(mcp_config_error(
+                        server_id,
+                        "streamable HTTP url must use http or https",
+                    ));
+                }
                 if let Some(token_env) = self.bearer_token_env_var.as_deref() {
                     validate_env_key(server_id, token_env)?;
                 }
@@ -150,9 +225,24 @@ impl McpServerConfig {
     pub fn endpoint_summary(&self) -> String {
         match self.transport {
             McpServerTransport::Stdio => self.command.clone().unwrap_or_default(),
-            McpServerTransport::StreamableHttp => self.url.clone().unwrap_or_default(),
+            McpServerTransport::StreamableHttp => self
+                .url
+                .as_deref()
+                .map(redacted_http_endpoint)
+                .unwrap_or_default(),
         }
     }
+}
+
+fn redacted_http_endpoint(value: &str) -> String {
+    let Ok(mut url) = reqwest::Url::parse(value) else {
+        return "invalid MCP endpoint".to_string();
+    };
+    let _ = url.set_username("");
+    let _ = url.set_password(None);
+    url.set_query(None);
+    url.set_fragment(None);
+    url.to_string()
 }
 
 impl McpServerTransport {
@@ -180,6 +270,10 @@ impl Default for McpServerConfig {
             url: None,
             bearer_token_env_var: None,
             headers: BTreeMap::new(),
+            startup_timeout_secs: None,
+            tool_timeout_secs: None,
+            enabled_tools: None,
+            disabled_tools: Vec::new(),
         }
     }
 }
@@ -255,17 +349,17 @@ pub fn active_mcp_server_names(
         .collect()
 }
 
-pub fn builtin_mcp_server_ids() -> &'static [&'static str] {
-    &[
-        ZHIPU_SEARCH_MCP_ID,
-        ZHIPU_READER_MCP_ID,
-        ZHIPU_ZREAD_MCP_ID,
-        ZHIPU_VISION_MCP_ID,
-    ]
+pub fn builtin_mcp_server_ids() -> Vec<&'static str> {
+    BUILTIN_MCP_SERVERS
+        .iter()
+        .map(|definition| definition.id)
+        .collect()
 }
 
 pub fn is_builtin_mcp_server_id(server_id: &str) -> bool {
-    builtin_mcp_server_ids().contains(&server_id)
+    BUILTIN_MCP_SERVERS
+        .iter()
+        .any(|definition| definition.id == server_id)
 }
 
 pub fn effective_mcp_servers(
@@ -292,18 +386,19 @@ pub fn effective_mcp_servers(
                 status_message: None,
                 mutation_policy: McpServerMutationPolicy::UserEditable,
                 bearer_token: None,
+                tool_effect: None,
             },
         );
     }
 
-    let zhipu_token = zhipu_coding_plan_token(models);
-    for definition in BUILTIN_ZHIPU_MCP_SERVERS {
+    for definition in BUILTIN_MCP_SERVERS {
+        let token = definition.credential.resolve(models);
         let builtin_enabled = builtin_states
             .get(definition.id)
             .is_none_or(|state| state.enabled);
         let status_kind = if !builtin_enabled {
             McpServerStatusKind::Disabled
-        } else if zhipu_token.is_some() {
+        } else if token.is_some() {
             McpServerStatusKind::Enabled
         } else {
             McpServerStatusKind::MissingCredential
@@ -312,10 +407,10 @@ pub fn effective_mcp_servers(
             definition.id.to_string(),
             EffectiveMcpServerConfig {
                 id: definition.id.to_string(),
-                config: definition.config(zhipu_token.as_deref()),
+                config: definition.config(token.as_deref()),
                 source_kind: McpServerSourceKind::BuiltIn,
                 source_label: "Built-in".to_string(),
-                source_detail: Some("Zhipu Coding Plan".to_string()),
+                source_detail: Some(definition.source_detail.to_string()),
                 status_kind,
                 status_message: match status_kind {
                     McpServerStatusKind::Enabled => Some(
@@ -329,7 +424,8 @@ pub fn effective_mcp_servers(
                     McpServerStatusKind::Disabled => None,
                 },
                 mutation_policy: McpServerMutationPolicy::LockedIdentity,
-                bearer_token: zhipu_token.clone(),
+                bearer_token: token,
+                tool_effect: definition.tool_effect,
             },
         );
     }
@@ -342,52 +438,17 @@ pub fn normalize_builtin_mcp_server_states(
     models: &crate::AgentModelConfig,
 ) {
     states.retain(|server_id, _| is_builtin_mcp_server_id(server_id));
-    if zhipu_coding_plan_token(models).is_some() {
-        for server_id in builtin_mcp_server_ids() {
+    for definition in BUILTIN_MCP_SERVERS {
+        if definition.credential.resolve(models).is_some() {
             states
-                .entry((*server_id).to_string())
+                .entry(definition.id.to_string())
                 .or_insert(BuiltinMcpServerState { enabled: true });
         }
     }
 }
 
 pub fn zhipu_coding_plan_token(models: &crate::AgentModelConfig) -> Option<String> {
-    models
-        .providers
-        .iter()
-        .find_map(|(provider_id, provider)| {
-            is_zhipu_coding_plan_provider(provider_id.as_str(), provider)
-                .then(|| provider_token(provider))
-                .flatten()
-        })
-        .or_else(|| {
-            models.providers.iter().find_map(|(_, provider)| {
-                (provider.base_url.contains("bigmodel.cn"))
-                    .then(|| provider_token(provider))
-                    .flatten()
-            })
-        })
-}
-
-fn is_zhipu_coding_plan_provider(provider_key: &str, provider: &crate::ProviderConfig) -> bool {
-    provider
-        .preset_id()
-        .is_some_and(|preset| preset.as_str() == "zhipu-coding-plan")
-        || provider_key == "zhipu-coding-plan"
-        || normalized_base_url(&provider.base_url) == ZHIPU_CODING_PLAN_BASE_URL
-}
-
-fn provider_token(provider: &crate::ProviderConfig) -> Option<String> {
-    provider
-        .bearer_token
-        .as_deref()
-        .map(str::trim)
-        .filter(|token| !token.is_empty())
-        .map(ToOwned::to_owned)
-}
-
-fn normalized_base_url(value: &str) -> &str {
-    value.trim().trim_end_matches('/')
+    ZHIPU_CREDENTIAL.resolve(models)
 }
 
 pub fn validate_mcp_identifier(value: &str, label: &str) -> Result<()> {
@@ -426,16 +487,61 @@ struct BuiltinMcpServerDefinition {
     url: Option<&'static str>,
     command: Option<&'static str>,
     args: &'static [&'static str],
+    credential: BuiltinMcpCredentialSource,
+    source_detail: &'static str,
+    tool_effect: Option<ToolEffect>,
+    env: &'static [(&'static str, &'static str)],
+    credential_env_var: Option<&'static str>,
+    startup_timeout_secs: Option<u64>,
+    tool_timeout_secs: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum BuiltinMcpCredentialSource {
+    Provider {
+        preset_ids: &'static [&'static str],
+        endpoint_hosts: &'static [&'static str],
+    },
+}
+
+impl BuiltinMcpCredentialSource {
+    fn resolve(self, models: &crate::AgentModelConfig) -> Option<String> {
+        let Self::Provider {
+            preset_ids,
+            endpoint_hosts,
+        } = self;
+        models
+            .providers
+            .values()
+            .filter(|provider| {
+                provider
+                    .preset_id()
+                    .is_some_and(|preset| preset_ids.contains(&preset.as_str()))
+            })
+            .find_map(crate::ProviderConfig::resolved_bearer_token)
+            .or_else(|| {
+                models.providers.values().find_map(|provider| {
+                    let matches_endpoint = reqwest::Url::parse(&provider.base_url)
+                        .ok()
+                        .and_then(|url| url.host_str().map(str::to_string))
+                        .is_some_and(|host| endpoint_hosts.contains(&host.as_str()));
+                    matches_endpoint
+                        .then(|| provider.resolved_bearer_token())
+                        .flatten()
+                })
+            })
+    }
 }
 
 impl BuiltinMcpServerDefinition {
     fn config(&self, zhipu_token: Option<&str>) -> McpServerConfig {
-        let mut env = BTreeMap::new();
-        if self.id == ZHIPU_VISION_MCP_ID {
-            env.insert("Z_AI_MODE".to_string(), "ZHIPU".to_string());
-            if let Some(token) = zhipu_token {
-                env.insert("Z_AI_API_KEY".to_string(), token.to_string());
-            }
+        let mut env = self
+            .env
+            .iter()
+            .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
+            .collect::<BTreeMap<_, _>>();
+        if let (Some(key), Some(token)) = (self.credential_env_var, zhipu_token) {
+            env.insert(key.to_string(), token.to_string());
         }
         McpServerConfig {
             enabled: zhipu_token.is_some(),
@@ -449,6 +555,10 @@ impl BuiltinMcpServerDefinition {
             url: self.url.map(ToOwned::to_owned),
             bearer_token_env_var: None,
             headers: BTreeMap::new(),
+            startup_timeout_secs: self.startup_timeout_secs,
+            tool_timeout_secs: self.tool_timeout_secs,
+            enabled_tools: None,
+            disabled_tools: Vec::new(),
         }
     }
 }
@@ -466,4 +576,135 @@ fn default_true() -> bool {
 
 fn is_true(value: &bool) -> bool {
     *value
+}
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+    use crate::{AgentModelConfig, ProviderConfig, ProviderId, builtin_provider_catalog};
+    use pl_model::{ModelInfo, ProviderInfo};
+
+    #[test]
+    fn public_http_endpoint_removes_userinfo_query_and_fragment() {
+        let server = McpServerConfig {
+            transport: McpServerTransport::StreamableHttp,
+            url: Some("https://user:secret@example.com/mcp?api_key=secret#private".to_string()),
+            ..Default::default()
+        };
+
+        assert_eq!(server.endpoint_summary(), "https://example.com/mcp");
+    }
+
+    #[test]
+    fn malformed_http_endpoint_is_not_reflected_to_public_projection() {
+        let server = McpServerConfig {
+            transport: McpServerTransport::StreamableHttp,
+            url: Some("not a url?token=secret".to_string()),
+            ..Default::default()
+        };
+
+        assert_eq!(server.endpoint_summary(), "invalid MCP endpoint");
+    }
+
+    #[test]
+    fn builtin_credential_selector_uses_preset_or_compatible_endpoint_not_provider_key() {
+        let mut preset = builtin_provider_catalog()
+            .presets
+            .into_iter()
+            .find(|preset| preset.id.as_str() == "zhipu-coding-plan")
+            .unwrap()
+            .provider;
+        preset.bearer_token = Some("preset-token".to_string());
+        preset.bearer_token_env = None;
+        let compatible_model = ModelInfo::fallback("compatible-model");
+        let mut compatible_info = ProviderInfo::openai_compatible_chat(
+            "Compatible",
+            "https://open.bigmodel.cn/custom/v1",
+            &compatible_model.slug,
+        );
+        compatible_info.bearer_token = Some("compatible-token".to_string());
+        let compatible =
+            ProviderConfig::from_provider_info(compatible_info, vec![compatible_model]);
+        let unrelated_model = ModelInfo::fallback("unrelated-model");
+        let mut unrelated_info = ProviderInfo::openai_compatible_chat(
+            "Unrelated",
+            "https://example.com/v1",
+            &unrelated_model.slug,
+        );
+        unrelated_info.bearer_token = Some("unrelated-token".to_string());
+        let unrelated = ProviderConfig::from_provider_info(unrelated_info, vec![unrelated_model]);
+        let models = AgentModelConfig {
+            providers: BTreeMap::from([
+                (ProviderId::new("renamed-preset").unwrap(), preset),
+                (ProviderId::new("compatible").unwrap(), compatible),
+                (
+                    ProviderId::new("zhipu-coding-plan").unwrap(),
+                    unrelated.clone(),
+                ),
+            ]),
+            routes: BTreeMap::new(),
+        };
+
+        assert_eq!(
+            zhipu_coding_plan_token(&models).as_deref(),
+            Some("preset-token")
+        );
+        let unrelated_only = AgentModelConfig {
+            providers: BTreeMap::from([(ProviderId::new("zhipu-coding-plan").unwrap(), unrelated)]),
+            routes: BTreeMap::new(),
+        };
+        assert_eq!(zhipu_coding_plan_token(&unrelated_only), None);
+    }
+
+    #[test]
+    fn builtin_zhipu_directory_declares_read_effect_and_injects_vision_secret() {
+        let model = ModelInfo::fallback("compatible-model");
+        let mut info = ProviderInfo::openai_compatible_chat(
+            "Compatible",
+            "https://open.bigmodel.cn/v1",
+            &model.slug,
+        );
+        info.bearer_token = Some("secret".to_string());
+        let models = AgentModelConfig {
+            providers: BTreeMap::from([(
+                ProviderId::new("compatible").unwrap(),
+                ProviderConfig::from_provider_info(info, vec![model]),
+            )]),
+            routes: BTreeMap::new(),
+        };
+
+        let servers = effective_mcp_servers(&BTreeMap::new(), &BTreeMap::new(), &models);
+
+        assert!(
+            servers
+                .values()
+                .all(|server| server.tool_effect == Some(ToolEffect::Read))
+        );
+        assert_eq!(
+            servers[ZHIPU_VISION_MCP_ID]
+                .config
+                .env
+                .get("Z_AI_API_KEY")
+                .map(String::as_str),
+            Some("secret")
+        );
+        assert_eq!(
+            servers[ZHIPU_VISION_MCP_ID].config.startup_timeout_secs,
+            Some(60)
+        );
+        assert_eq!(
+            servers[ZHIPU_VISION_MCP_ID].config.tool_timeout_secs,
+            Some(360)
+        );
+        assert_eq!(
+            servers[ZHIPU_VISION_MCP_ID]
+                .config
+                .env
+                .get("Z_AI_VISION_MODEL_MAX_TOKENS")
+                .map(String::as_str),
+            Some("4096")
+        );
+    }
 }

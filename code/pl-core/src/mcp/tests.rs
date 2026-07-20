@@ -1,121 +1,272 @@
 use std::collections::BTreeMap;
+use std::io;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::time::Duration;
 
-use pl_protocol::{PureError, Result};
 use pretty_assertions::assert_eq;
-use serde_json::Value;
+use serde_json::{Value, json};
+use tokio::sync::{Mutex, Notify};
 
-use super::client::{BoxFuture, McpClient};
-use super::registry::McpRuntimeServerState;
-use super::tool_adapter::{McpToolAdapter, format_mcp_content};
-use super::transport::{HttpMcpClient, McpStderrSeverity, classify_mcp_stderr_line};
-use super::wire::{McpToolDefinition, default_input_schema};
-use super::{McpAvailabilityKind, McpRuntimeRegistry, exposed_tool_name, is_mcp_tool_name};
-use crate::config::{
-    McpServerConfig, McpServerTransport, ToolCapabilityConfig, effective_mcp_servers,
+use super::contract::{
+    McpCallRequest, McpConnectRequest, McpRuntimeHost, McpSession, McpToolDefinition,
 };
-use crate::tool::{Tool, ToolContext, ToolInput};
+use super::tool_adapter::format_mcp_content;
+use super::transport::{HttpMcpClient, McpStderrSeverity, classify_mcp_stderr_line};
+use super::{McpAvailabilityKind, McpRuntime, is_mcp_tool_name};
+use crate::config::{
+    EffectiveMcpServerConfig, McpServerConfig, McpServerMutationPolicy, McpServerSourceKind,
+    McpServerStatusKind, McpServerTransport,
+};
+use crate::turn::ToolEffect;
 
-#[derive(Debug)]
-struct FakeMcpClient {
-    behavior: FakeMcpBehavior,
-    shutdown_count: Option<Arc<AtomicUsize>>,
+#[derive(Clone, Default)]
+struct FakeHost {
+    state: Arc<Mutex<FakeHostState>>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum FakeMcpBehavior {
-    Succeed,
-    FailRequests,
+#[derive(Default)]
+struct FakeHostState {
+    definitions: BTreeMap<String, FakeServerDefinition>,
+    connect_count: usize,
+    shutdown_count: Arc<AtomicUsize>,
 }
 
-impl McpClient for FakeMcpClient {
-    fn request<'a>(&'a self, _method: &'a str, _params: Value) -> BoxFuture<'a, Result<Value>> {
-        Box::pin(async move {
-            match self.behavior {
-                FakeMcpBehavior::Succeed => Ok(serde_json::json!({
-                    "content": [{"type": "text", "text": "ok"}],
-                    "isError": false
-                })),
-                FakeMcpBehavior::FailRequests => Err(PureError::ToolExecutionFailed {
-                    tool: "mcp".to_string(),
-                    error: "transport failed".to_string(),
-                }),
-            }
+#[derive(Clone)]
+struct FakeServerDefinition {
+    tools: Vec<McpToolDefinition>,
+    response: String,
+    fail_calls: Arc<AtomicBool>,
+    connect_gate: Option<Arc<Notify>>,
+}
+
+struct FakeSession {
+    definition: FakeServerDefinition,
+    shutdown_count: Arc<AtomicUsize>,
+}
+
+impl McpRuntimeHost for FakeHost {
+    type Error = io::Error;
+    type Session = FakeSession;
+
+    async fn connect(&self, request: McpConnectRequest) -> io::Result<Self::Session> {
+        let (definition, shutdown_count) = {
+            let mut state = self.state.lock().await;
+            state.connect_count += 1;
+            let definition = state
+                .definitions
+                .get(&request.server_id)
+                .cloned()
+                .ok_or_else(|| io::Error::other("missing fake server"))?;
+            (definition, state.shutdown_count.clone())
+        };
+        if let Some(gate) = &definition.connect_gate {
+            gate.notified().await;
+        }
+        Ok(FakeSession {
+            definition,
+            shutdown_count,
         })
     }
+}
 
-    fn notify<'a>(&'a self, _method: &'a str, _params: Value) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async { Ok(()) })
+impl McpSession for FakeSession {
+    type Error = io::Error;
+
+    async fn list_tools(&self) -> io::Result<Vec<McpToolDefinition>> {
+        Ok(self.definition.tools.clone())
     }
 
-    fn shutdown<'a>(&'a self) -> BoxFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(count) = &self.shutdown_count {
-                count.fetch_add(1, Ordering::SeqCst);
-            }
-        })
+    async fn call_tool(&self, _request: McpCallRequest) -> io::Result<Value> {
+        if self.definition.fail_calls.load(Ordering::SeqCst) {
+            return Err(io::Error::other("transport failed"));
+        }
+        Ok(json!({
+            "content": [{"type": "text", "text": self.definition.response}],
+            "isError": false
+        }))
+    }
+
+    async fn list_resources(&self, cursor: Option<String>) -> io::Result<Value> {
+        Ok(json!({ "resources": [], "cursor": cursor }))
+    }
+
+    async fn list_resource_templates(&self, cursor: Option<String>) -> io::Result<Value> {
+        Ok(json!({ "resourceTemplates": [], "cursor": cursor }))
+    }
+
+    async fn read_resource(&self, uri: String) -> io::Result<Value> {
+        Ok(json!({ "uri": uri, "text": self.definition.response }))
+    }
+
+    async fn shutdown(&self) {
+        self.shutdown_count.fetch_add(1, Ordering::SeqCst);
     }
 }
 
-fn fake_client(behavior: FakeMcpBehavior) -> Arc<FakeMcpClient> {
-    Arc::new(FakeMcpClient {
-        behavior,
-        shutdown_count: None,
-    })
+impl FakeHost {
+    async fn define_raw(&self, server_id: &str, tools: Vec<McpToolDefinition>) {
+        self.state.lock().await.definitions.insert(
+            server_id.to_string(),
+            FakeServerDefinition {
+                tools,
+                response: "ok".to_string(),
+                fail_calls: Arc::new(AtomicBool::new(false)),
+                connect_gate: None,
+            },
+        );
+    }
+
+    async fn define(&self, server_id: &str, response: &str, fail_calls: Arc<AtomicBool>) {
+        self.define_tools(server_id, response, fail_calls, ["read/page"])
+            .await;
+    }
+
+    async fn define_tools(
+        &self,
+        server_id: &str,
+        response: &str,
+        fail_calls: Arc<AtomicBool>,
+        tools: impl IntoIterator<Item = &'static str>,
+    ) {
+        self.define_tools_with_gate(server_id, response, fail_calls, tools, None)
+            .await;
+    }
+
+    async fn define_tools_with_gate(
+        &self,
+        server_id: &str,
+        response: &str,
+        fail_calls: Arc<AtomicBool>,
+        tools: impl IntoIterator<Item = &'static str>,
+        connect_gate: Option<Arc<Notify>>,
+    ) {
+        self.state.lock().await.definitions.insert(
+            server_id.to_string(),
+            FakeServerDefinition {
+                tools: tools
+                    .into_iter()
+                    .map(|name| McpToolDefinition {
+                        name: name.to_string(),
+                        description: Some(format!("Tool {name}")),
+                        input_schema: json!({ "type": "object" }),
+                    })
+                    .collect(),
+                response: response.to_string(),
+                fail_calls,
+                connect_gate,
+            },
+        );
+    }
+
+    async fn connect_count(&self) -> usize {
+        self.state.lock().await.connect_count
+    }
+
+    async fn shutdown_count(&self) -> usize {
+        self.state
+            .lock()
+            .await
+            .shutdown_count
+            .load(Ordering::SeqCst)
+    }
+}
+
+#[tokio::test]
+async fn discovery_filters_are_applied_by_pl_before_exposed_names_are_assigned() {
+    let host = FakeHost::default();
+    host.define_tools(
+        "filtered",
+        "ok",
+        Arc::new(AtomicBool::new(false)),
+        ["keep", "deny", "other"],
+    )
+    .await;
+    let runtime = McpRuntime::new(host);
+    let handle = runtime.handle();
+    let mut server = effective_server(
+        "filtered",
+        McpServerStatusKind::Enabled,
+        McpServerSourceKind::User,
+        "v1",
+    );
+    server.config.enabled_tools = Some(vec!["keep".to_string(), "deny".to_string()]);
+    server.config.disabled_tools = vec!["deny".to_string()];
+
+    handle
+        .reconcile(BTreeMap::from([("filtered".to_string(), server)]))
+        .await
+        .unwrap();
+    let lease = handle.acquire_turn_lease().await.unwrap();
+
+    assert_eq!(
+        lease
+            .tools()
+            .iter()
+            .map(|tool| tool.raw_name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["keep"]
+    );
 }
 
 #[test]
-fn exposed_tool_name_prefixes_server_and_tool() {
-    let name = exposed_tool_name("github", "search_issues").unwrap();
+fn zero_runtime_timeout_is_rejected_before_connecting() {
+    let mut server = McpServerConfig {
+        transport: McpServerTransport::StreamableHttp,
+        url: Some("https://example.com/mcp".to_string()),
+        startup_timeout_secs: Some(0),
+        ..Default::default()
+    };
+    assert!(server.validate("future").is_err());
 
-    assert_eq!(name, "mcp__github__search_issues");
-    assert!(is_mcp_tool_name(&name));
+    server.startup_timeout_secs = Some(1);
+    server.tool_timeout_secs = Some(0);
+    assert!(server.validate("future").is_err());
 }
 
-#[test]
-fn exposed_tool_name_rejects_invalid_raw_tool() {
-    let error = exposed_tool_name("github", "bad tool").unwrap_err();
-
-    assert!(error.to_string().contains("MCP tool name"));
+fn effective_server(
+    id: &str,
+    status_kind: McpServerStatusKind,
+    source_kind: McpServerSourceKind,
+    revision: &str,
+) -> EffectiveMcpServerConfig {
+    EffectiveMcpServerConfig {
+        id: id.to_string(),
+        config: McpServerConfig {
+            transport: McpServerTransport::StreamableHttp,
+            url: Some(format!("https://example.com/{revision}")),
+            ..Default::default()
+        },
+        source_kind,
+        source_label: "Test".to_string(),
+        source_detail: None,
+        status_kind,
+        status_message: None,
+        mutation_policy: McpServerMutationPolicy::UserEditable,
+        bearer_token: None,
+        tool_effect: (source_kind == McpServerSourceKind::BuiltIn).then_some(ToolEffect::Read),
+    }
 }
 
 #[test]
 fn format_mcp_content_prefers_text_parts() {
     let content = vec![
-        serde_json::json!({"type": "text", "text": "hello"}),
-        serde_json::json!({"type": "json", "json": {"ok": true}}),
+        json!({"type": "text", "text": "hello"}),
+        json!({"type": "json", "json": {"ok": true}}),
     ];
 
     assert_eq!(format_mcp_content(&content), "hello\n{\"ok\":true}");
 }
 
 #[test]
-fn mcp_stderr_info_lines_are_suppressed() {
+fn mcp_stderr_classification_filters_only_informational_lines() {
     assert_eq!(
-        classify_mcp_stderr_line(
-            r#"{"timestamp":"2026-06-24T12:28:05.798Z","level":"INFO","message":"Running"}"#
-        ),
+        classify_mcp_stderr_line(r#"{"level":"INFO","message":"Running"}"#),
         McpStderrSeverity::Info
     );
     assert_eq!(
-        classify_mcp_stderr_line("[2026-06-24T12:28:05.798Z] INFO: MCP Server started"),
-        McpStderrSeverity::Info
-    );
-    assert_eq!(classify_mcp_stderr_line(""), McpStderrSeverity::Info);
-}
-
-#[test]
-fn mcp_stderr_warning_error_and_unknown_lines_are_forwarded() {
-    assert_eq!(
-        classify_mcp_stderr_line(
-            r#"{"timestamp":"2026-06-24T12:28:05.798Z","level":"WARN","message":"Retrying"}"#
-        ),
+        classify_mcp_stderr_line("[2026-06-24] WARN: retrying"),
         McpStderrSeverity::Warning
-    );
-    assert_eq!(
-        classify_mcp_stderr_line("[2026-06-24T12:28:05.798Z] ERROR: startup failed"),
-        McpStderrSeverity::Error
     );
     assert_eq!(
         classify_mcp_stderr_line("child process exited unexpectedly"),
@@ -139,215 +290,307 @@ fn http_client_uses_bearer_token_override() {
 }
 
 #[tokio::test]
-async fn registry_marks_disabled_and_missing_credential_without_probe() {
-    let mut servers = BTreeMap::new();
-    servers.insert(
-        "draft".to_string(),
-        McpServerConfig {
-            enabled: false,
-            ..Default::default()
-        },
-    );
-    let registry = McpRuntimeRegistry::new();
-
-    registry
-        .reconcile(effective_mcp_servers(
-            &servers,
-            &BTreeMap::new(),
-            &crate::AgentModelConfig::default(),
-        ))
+async fn generation_is_atomic_and_active_lease_keeps_old_session() {
+    let host = FakeHost::default();
+    host.define("future server", "v1", Arc::new(AtomicBool::new(false)))
         .await;
-    let snapshots = registry.snapshots().await;
-
-    assert_eq!(
-        snapshots["draft"].availability_kind,
-        McpAvailabilityKind::Disabled
-    );
-    assert_eq!(
-        snapshots["zhipu_search"].availability_kind,
-        McpAvailabilityKind::MissingCredential
-    );
-    assert!(registry.available_server_names().await.is_empty());
-}
-
-#[tokio::test]
-async fn registry_registers_only_available_tools() {
-    let registry = McpRuntimeRegistry::new();
-    registry.state.lock().await.servers.insert(
-        "github".to_string(),
-        McpRuntimeServerState::available(
-            1,
-            123,
-            fake_client(FakeMcpBehavior::Succeed),
-            vec![McpToolDefinition {
-                name: "search_issues".to_string(),
-                description: Some("Search issues".to_string()),
-                input_schema: default_input_schema(),
-            }],
-        ),
-    );
-    registry
-        .state
-        .lock()
+    let runtime = McpRuntime::new(host.clone());
+    let handle = runtime.handle();
+    handle
+        .reconcile(BTreeMap::from([(
+            "future server".to_string(),
+            effective_server(
+                "future server",
+                McpServerStatusKind::Enabled,
+                McpServerSourceKind::User,
+                "v1",
+            ),
+        )]))
         .await
-        .servers
-        .insert("draft".to_string(), McpRuntimeServerState::disabled(1));
-    let mut core = crate::TurnEngine::default_provider().unwrap();
+        .unwrap();
+    let old = handle.acquire_turn_lease().await.unwrap();
+    assert_eq!(old.tools()[0].exposed_name, "mcp__future_server__read_page");
 
-    registry.register_available_tools(&mut core).await.unwrap();
-
-    assert!(core.has_tool("mcp__github__search_issues"));
-    assert!(!core.has_tool("mcp__draft__anything"));
-}
-
-#[tokio::test]
-async fn registry_respects_mcp_capability_gate() {
-    let registry = McpRuntimeRegistry::new();
-    registry.state.lock().await.servers.insert(
-        "github".to_string(),
-        McpRuntimeServerState::available(
-            1,
-            123,
-            fake_client(FakeMcpBehavior::Succeed),
-            vec![McpToolDefinition {
-                name: "search_issues".to_string(),
-                description: Some("Search issues".to_string()),
-                input_schema: default_input_schema(),
-            }],
-        ),
-    );
-    let capabilities = ToolCapabilityConfig {
-        mcp: false,
-        ..ToolCapabilityConfig::default()
-    };
-    let mut core =
-        crate::TurnEngineBuilder::from_provider_info(pl_model::ProviderInfo::default_provider())
-            .unwrap()
-            .with_tool_capabilities(capabilities)
-            .build();
-
-    registry.register_available_tools(&mut core).await.unwrap();
-
-    assert!(!core.has_tool("mcp__github__search_issues"));
-}
-
-#[tokio::test]
-async fn registry_shutdown_closes_available_clients() {
-    let registry = McpRuntimeRegistry::new();
-    let shutdown_count = Arc::new(AtomicUsize::new(0));
-    registry.state.lock().await.servers.insert(
-        "github".to_string(),
-        McpRuntimeServerState::available(
-            1,
-            123,
-            Arc::new(FakeMcpClient {
-                behavior: FakeMcpBehavior::Succeed,
-                shutdown_count: Some(shutdown_count.clone()),
-            }),
-            Vec::new(),
-        ),
-    );
-
-    registry.shutdown().await;
-
-    assert_eq!(shutdown_count.load(Ordering::SeqCst), 1);
-    assert!(registry.snapshots().await.is_empty());
-}
-
-#[tokio::test]
-async fn reconcile_disabled_server_closes_previous_client() {
-    let registry = McpRuntimeRegistry::new();
-    let shutdown_count = Arc::new(AtomicUsize::new(0));
-    registry.state.lock().await.servers.insert(
-        "github".to_string(),
-        McpRuntimeServerState::available(
-            1,
-            123,
-            Arc::new(FakeMcpClient {
-                behavior: FakeMcpBehavior::Succeed,
-                shutdown_count: Some(shutdown_count.clone()),
-            }),
-            Vec::new(),
-        ),
-    );
-    let mut servers = BTreeMap::new();
-    servers.insert(
-        "github".to_string(),
-        McpServerConfig {
-            enabled: false,
-            ..Default::default()
-        },
-    );
-
-    registry
-        .reconcile(effective_mcp_servers(
-            &servers,
-            &BTreeMap::new(),
-            &crate::AgentModelConfig::default(),
-        ))
+    host.define("future server", "v2", Arc::new(AtomicBool::new(false)))
         .await;
-    let snapshots = registry.snapshots().await;
+    handle
+        .reconcile(BTreeMap::from([(
+            "future server".to_string(),
+            effective_server(
+                "future server",
+                McpServerStatusKind::Enabled,
+                McpServerSourceKind::User,
+                "v2",
+            ),
+        )]))
+        .await
+        .unwrap();
+    let current = handle.acquire_turn_lease().await.unwrap();
 
-    assert_eq!(shutdown_count.load(Ordering::SeqCst), 1);
+    let old_value = old
+        .call_tool(
+            "future server".to_string(),
+            McpCallRequest {
+                name: "read/page".to_string(),
+                arguments: json!({}),
+            },
+        )
+        .await
+        .unwrap();
+    let current_value = current
+        .call_tool(
+            "future server".to_string(),
+            McpCallRequest {
+                name: "read/page".to_string(),
+                arguments: json!({}),
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(old_value["content"][0]["text"], "v1");
+    assert_eq!(current_value["content"][0]["text"], "v2");
+    assert_eq!(host.connect_count().await, 2);
+    drop(old);
+    tokio::task::yield_now().await;
+    assert_eq!(host.shutdown_count().await, 1);
+    drop(current);
+    handle.shutdown().await;
+    assert_eq!(host.shutdown_count().await, 2);
+}
+
+#[tokio::test]
+async fn active_lease_calls_continue_while_next_generation_is_preparing() {
+    let host = FakeHost::default();
+    host.define("future", "v1", Arc::new(AtomicBool::new(false)))
+        .await;
+    let handle = McpRuntime::new(host.clone()).handle();
+    handle
+        .reconcile(BTreeMap::from([(
+            "future".to_string(),
+            effective_server(
+                "future",
+                McpServerStatusKind::Enabled,
+                McpServerSourceKind::User,
+                "v1",
+            ),
+        )]))
+        .await
+        .unwrap();
+    let old = handle.acquire_turn_lease().await.unwrap();
+    let gate = Arc::new(Notify::new());
+    host.define_tools_with_gate(
+        "future",
+        "v2",
+        Arc::new(AtomicBool::new(false)),
+        ["read/page"],
+        Some(gate.clone()),
+    )
+    .await;
+    let reconcile = tokio::spawn({
+        let handle = handle.clone();
+        async move {
+            handle
+                .reconcile(BTreeMap::from([(
+                    "future".to_string(),
+                    effective_server(
+                        "future",
+                        McpServerStatusKind::Enabled,
+                        McpServerSourceKind::User,
+                        "v2",
+                    ),
+                )]))
+                .await
+        }
+    });
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while host.connect_count().await < 2 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+
+    let value = tokio::time::timeout(
+        Duration::from_millis(250),
+        old.call_tool(
+            "future".to_string(),
+            McpCallRequest {
+                name: "read/page".to_string(),
+                arguments: json!({}),
+            },
+        ),
+    )
+    .await
+    .expect("old generation calls must not wait for reconcile")
+    .unwrap();
+
+    assert_eq!(value["content"][0]["text"], "v1");
+    gate.notify_one();
+    reconcile.await.unwrap().unwrap();
+    drop(old);
+    handle.shutdown().await;
+}
+
+#[tokio::test]
+async fn unchanged_server_is_reused_and_builtin_tools_are_read_effect() {
+    let host = FakeHost::default();
+    host.define("zhipu", "ok", Arc::new(AtomicBool::new(false)))
+        .await;
+    let handle = McpRuntime::new(host.clone()).handle();
+    let config = effective_server(
+        "zhipu",
+        McpServerStatusKind::Enabled,
+        McpServerSourceKind::BuiltIn,
+        "same",
+    );
+    handle
+        .reconcile(BTreeMap::from([("zhipu".to_string(), config.clone())]))
+        .await
+        .unwrap();
+    handle
+        .reconcile(BTreeMap::from([("zhipu".to_string(), config)]))
+        .await
+        .unwrap();
+    let lease = handle.acquire_turn_lease().await.unwrap();
+
+    assert_eq!(host.connect_count().await, 1);
+    assert_eq!(lease.tools()[0].effect, Some(ToolEffect::Read));
+    assert!(is_mcp_tool_name(&lease.tools()[0].exposed_name));
+    drop(lease);
+    handle.shutdown().await;
+}
+
+#[tokio::test]
+async fn runtime_normalizes_tool_schema_before_exposing_generation() {
+    let host = FakeHost::default();
+    host.define_raw(
+        "schema",
+        vec![McpToolDefinition {
+            name: "lookup".to_string(),
+            description: None,
+            input_schema: serde_json::json!({ "type": "object" }),
+        }],
+    )
+    .await;
+    let runtime = McpRuntime::new(host);
+    let handle = runtime.handle();
+    handle
+        .reconcile(BTreeMap::from([(
+            "schema".to_string(),
+            effective_server(
+                "schema",
+                McpServerStatusKind::Enabled,
+                McpServerSourceKind::User,
+                "command-a",
+            ),
+        )]))
+        .await
+        .unwrap();
+
+    let lease = handle.acquire_turn_lease().await.unwrap();
+
     assert_eq!(
-        snapshots["github"].availability_kind,
-        McpAvailabilityKind::Disabled
+        lease.tools()[0].input_schema,
+        serde_json::json!({
+            "type": "object",
+            "properties": {},
+        })
     );
 }
 
 #[tokio::test]
-async fn tool_transport_failure_marks_server_unavailable() {
-    let registry = McpRuntimeRegistry::new();
-    registry.state.lock().await.servers.insert(
-        "github".to_string(),
-        McpRuntimeServerState::available(1, 123, fake_client(FakeMcpBehavior::Succeed), Vec::new()),
-    );
-    let adapter = McpToolAdapter::new(
-        "github",
-        McpToolDefinition {
-            name: "search_issues".to_string(),
-            description: Some("Search issues".to_string()),
-            input_schema: default_input_schema(),
-        },
-        fake_client(FakeMcpBehavior::FailRequests),
-        Some(registry.clone()),
-    )
-    .unwrap();
-    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(1);
-    let context = ToolContext {
-        event_tx,
-        options: crate::turn::TurnOptions::default(),
-        workspace_access: crate::tool::WorkspaceAccess::WorkspaceOnly,
-        workspace_root: std::env::temp_dir(),
-        workspace_instructions: None,
-        instruction_snapshot: None,
-        provider_call_id: None,
-        active_subagent: None,
-        lsp_runtime: None,
-        parent_session: Arc::new(crate::AgentSession::new()),
-    };
-
-    let error = adapter
-        .execute(
-            ToolInput {
-                arguments: serde_json::json!({}),
-                session_id: "session".to_string(),
-                tool_id: "tool".to_string(),
-                revision_base: 0,
+async fn failing_server_is_removed_from_new_leases_without_polluting_others() {
+    let host = FakeHost::default();
+    let failing = Arc::new(AtomicBool::new(true));
+    host.define("broken", "unused", failing).await;
+    host.define("healthy", "ok", Arc::new(AtomicBool::new(false)))
+        .await;
+    let handle = McpRuntime::new(host).handle();
+    handle
+        .reconcile(BTreeMap::from([
+            (
+                "broken".to_string(),
+                effective_server(
+                    "broken",
+                    McpServerStatusKind::Enabled,
+                    McpServerSourceKind::User,
+                    "broken",
+                ),
+            ),
+            (
+                "healthy".to_string(),
+                effective_server(
+                    "healthy",
+                    McpServerStatusKind::Enabled,
+                    McpServerSourceKind::User,
+                    "healthy",
+                ),
+            ),
+        ]))
+        .await
+        .unwrap();
+    let lease = handle.acquire_turn_lease().await.unwrap();
+    let error = lease
+        .call_tool(
+            "broken".to_string(),
+            McpCallRequest {
+                name: "read/page".to_string(),
+                arguments: json!({}),
             },
-            context,
         )
         .await
         .unwrap_err();
-    let snapshots = registry.snapshots().await;
-
     assert!(error.to_string().contains("transport failed"));
+
+    let next = handle.acquire_turn_lease().await.unwrap();
+    assert!(next.tools().iter().all(|tool| tool.server_id == "healthy"));
+    let snapshots = handle.snapshots().await;
     assert_eq!(
-        snapshots["github"].availability_kind,
+        snapshots["broken"].availability_kind,
         McpAvailabilityKind::Unavailable
     );
     assert_eq!(
-        registry.available_server_names().await,
-        Vec::<String>::new()
+        snapshots["healthy"].availability_kind,
+        McpAvailabilityKind::Available
     );
+    let repeated = lease
+        .call_tool(
+            "broken".to_string(),
+            McpCallRequest {
+                name: "read/page".to_string(),
+                arguments: json!({}),
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(repeated.to_string().contains("unavailable"));
+    drop(lease);
+    drop(next);
+    handle.shutdown().await;
+}
+
+#[tokio::test]
+async fn disabled_server_is_visible_in_health_without_connecting() {
+    let host = FakeHost::default();
+    let handle = McpRuntime::new(host.clone()).handle();
+    handle
+        .reconcile(BTreeMap::from([(
+            "draft".to_string(),
+            effective_server(
+                "draft",
+                McpServerStatusKind::Disabled,
+                McpServerSourceKind::User,
+                "disabled",
+            ),
+        )]))
+        .await
+        .unwrap();
+
+    assert_eq!(host.connect_count().await, 0);
+    assert_eq!(
+        handle.snapshots().await["draft"].availability_kind,
+        McpAvailabilityKind::Disabled
+    );
+    handle.shutdown().await;
 }

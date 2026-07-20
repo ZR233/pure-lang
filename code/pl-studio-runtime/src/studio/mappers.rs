@@ -502,6 +502,8 @@ pub fn row_to_message(row: entities::message::Model) -> Result<Message> {
 pub fn row_to_context_item(row: entities::message::Model) -> Result<ModelContextItem> {
     match row.item_type.as_str() {
         "message" => row_to_message(row).map(ModelContextItem::from),
+        "canonical" => serde_json::from_str(&row.content)
+            .with_context(|| format!("failed to parse canonical context item: {}", row.id)),
         "compaction" => Ok(ModelContextItem::Compaction {
             encrypted_content: row.content,
         }),

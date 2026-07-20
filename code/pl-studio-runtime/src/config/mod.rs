@@ -5,7 +5,6 @@
 
 mod mode;
 mod store;
-mod web_search;
 
 use std::collections::BTreeMap;
 
@@ -27,12 +26,8 @@ pub use pl_core::config::{
 };
 pub use pl_core::{AgentRoleId, ModelRouteConfig, ProviderId, ReasoningEffort};
 pub use store::{ConfigPaths, ConfigStore};
-pub use web_search::{
-    StudioWebSearchAvailability, StudioWebSearchBackend, StudioWebSearchPath,
-    StudioWebSearchResolution, resolve_web_search,
-};
 
-pub const STUDIO_CONFIG_SCHEMA_VERSION: u32 = 9;
+pub const STUDIO_CONFIG_SCHEMA_VERSION: u32 = 10;
 pub const STUDIO_CONFIG_DIR_NAME: &str = ".pure";
 pub const STUDIO_CONFIG_FILE_NAME: &str = "config.toml";
 pub const CONFIG_DIR_NAME: &str = STUDIO_CONFIG_DIR_NAME;

@@ -1,5 +1,5 @@
 /// 工具对运行环境产生的副作用类别。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ToolEffect {
     Read,
     WorkspaceWrite,

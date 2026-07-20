@@ -1860,8 +1860,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 10)
-      throw Exception('unexpected arr length: expect 10 but see ${arr.length}');
+    if (arr.length != 11)
+      throw Exception('unexpected arr length: expect 11 but see ${arr.length}');
     return BridgeProviderPresetDescriptor(
       id: dco_decode_String(arr[0]),
       displayName: dco_decode_String(arr[1]),
@@ -1873,6 +1873,22 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       modelCatalogId: dco_decode_String(arr[7]),
       suggestedModel: dco_decode_String(arr[8]),
       iconKey: dco_decode_opt_String(arr[9]),
+      serviceCapabilities:
+          dco_decode_bridge_provider_service_capabilities_descriptor(arr[10]),
+    );
+  }
+
+  @protected
+  BridgeProviderServiceCapabilitiesDescriptor
+  dco_decode_bridge_provider_service_capabilities_descriptor(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 1)
+      throw Exception('unexpected arr length: expect 1 but see ${arr.length}');
+    return BridgeProviderServiceCapabilitiesDescriptor(
+      webSearch: dco_decode_bridge_web_search_provider_capabilities_descriptor(
+        arr[0],
+      ),
     );
   }
 
@@ -2319,6 +2335,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     return BridgeUserQuestionOptionDto(
       label: dco_decode_String(arr[0]),
       description: dco_decode_String(arr[1]),
+    );
+  }
+
+  @protected
+  BridgeWebSearchProviderCapabilitiesDescriptor
+  dco_decode_bridge_web_search_provider_capabilities_descriptor(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return BridgeWebSearchProviderCapabilitiesDescriptor(
+      hostedResponses: dco_decode_bool(arr[0]),
+      standalone: dco_decode_opt_String(arr[1]),
     );
   }
 
@@ -3730,6 +3759,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_modelCatalogId = sse_decode_String(deserializer);
     var var_suggestedModel = sse_decode_String(deserializer);
     var var_iconKey = sse_decode_opt_String(deserializer);
+    var var_serviceCapabilities =
+        sse_decode_bridge_provider_service_capabilities_descriptor(
+          deserializer,
+        );
     return BridgeProviderPresetDescriptor(
       id: var_id,
       displayName: var_displayName,
@@ -3741,6 +3774,22 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       modelCatalogId: var_modelCatalogId,
       suggestedModel: var_suggestedModel,
       iconKey: var_iconKey,
+      serviceCapabilities: var_serviceCapabilities,
+    );
+  }
+
+  @protected
+  BridgeProviderServiceCapabilitiesDescriptor
+  sse_decode_bridge_provider_service_capabilities_descriptor(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_webSearch =
+        sse_decode_bridge_web_search_provider_capabilities_descriptor(
+          deserializer,
+        );
+    return BridgeProviderServiceCapabilitiesDescriptor(
+      webSearch: var_webSearch,
     );
   }
 
@@ -4335,6 +4384,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     return BridgeUserQuestionOptionDto(
       label: var_label,
       description: var_description,
+    );
+  }
+
+  @protected
+  BridgeWebSearchProviderCapabilitiesDescriptor
+  sse_decode_bridge_web_search_provider_capabilities_descriptor(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_hostedResponses = sse_decode_bool(deserializer);
+    var var_standalone = sse_decode_opt_String(deserializer);
+    return BridgeWebSearchProviderCapabilitiesDescriptor(
+      hostedResponses: var_hostedResponses,
+      standalone: var_standalone,
     );
   }
 
@@ -5927,6 +5990,22 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.modelCatalogId, serializer);
     sse_encode_String(self.suggestedModel, serializer);
     sse_encode_opt_String(self.iconKey, serializer);
+    sse_encode_bridge_provider_service_capabilities_descriptor(
+      self.serviceCapabilities,
+      serializer,
+    );
+  }
+
+  @protected
+  void sse_encode_bridge_provider_service_capabilities_descriptor(
+    BridgeProviderServiceCapabilitiesDescriptor self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bridge_web_search_provider_capabilities_descriptor(
+      self.webSearch,
+      serializer,
+    );
   }
 
   @protected
@@ -6342,6 +6421,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.label, serializer);
     sse_encode_String(self.description, serializer);
+  }
+
+  @protected
+  void sse_encode_bridge_web_search_provider_capabilities_descriptor(
+    BridgeWebSearchProviderCapabilitiesDescriptor self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bool(self.hostedResponses, serializer);
+    sse_encode_opt_String(self.standalone, serializer);
   }
 
   @protected

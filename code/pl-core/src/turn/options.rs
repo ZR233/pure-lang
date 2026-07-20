@@ -116,6 +116,7 @@ pub struct TurnOptions {
     pub prompt_cache_key: Option<String>,
     pub user_input_mode: UserInputMode,
     pub execution_policy: Option<crate::AgentExecutionPolicy>,
+    pub(crate) checkpoint: Option<crate::AgentTurnCheckpointHandle>,
 }
 
 impl TurnOptions {
@@ -129,6 +130,7 @@ impl TurnOptions {
             prompt_cache_key: None,
             user_input_mode: UserInputMode::AwaitResponse,
             execution_policy: None,
+            checkpoint: None,
         }
     }
 
@@ -205,6 +207,7 @@ impl std::fmt::Debug for TurnOptions {
             .field("prompt_cache_key", &self.prompt_cache_key)
             .field("user_input_mode", &self.user_input_mode)
             .field("execution_policy", &self.execution_policy)
+            .field("checkpoint", &self.checkpoint)
             .finish()
     }
 }

@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use pl_protocol::PureError;
 use pl_trace::{AgentEvent, TraceEventKind, TracePartStatus};
 
+use crate::tool::model_visible_tool_output;
 use crate::tool::{ToolOutput, ToolRuntimeEvent};
 
 use super::display::display_result_for_tool;
@@ -41,6 +42,7 @@ pub(super) fn finalize_tool_item(
         tool.exit_code = record.exit_code;
         tool.timed_out = record.timed_out;
         tool.output_artifacts = output_artifacts(&record.runtime_events);
+        tool.output_metrics = output_metrics(&record.runtime_events);
     }
     if let Some(revision) = record.revision {
         item.revision = item.revision.max(revision);
@@ -73,6 +75,8 @@ pub(super) fn finalize_tool_item(
                 }
                 ToolRuntimeEvent::ToolResultRevision { .. } => {}
                 ToolRuntimeEvent::OutputArtifacts { .. } => {}
+                ToolRuntimeEvent::CacheHit { .. } => {}
+                ToolRuntimeEvent::OutputMetrics { .. } => {}
                 ToolRuntimeEvent::EndTurn => {}
             }
         }
@@ -110,18 +114,33 @@ pub(super) fn tool_execution_record(
     result: std::result::Result<ToolOutput, PureError>,
 ) -> Result<ToolExecutionRecord, ToolExecutionError> {
     let (envelope, status) = match result {
-        Ok(output) => (
-            ToolOutputEnvelope {
-                model_visible_text: output.description.clone(),
-                display_text: output.description,
-                full_output_file: (!output.output_file.as_os_str().is_empty())
-                    .then_some(output.output_file),
-                exit_code: output.exit_code,
-                timed_out: output.timed_out,
-                runtime_events: output.runtime_events,
-            },
-            TracePartStatus::Completed,
-        ),
+        Ok(output) => {
+            let model_visible_text = model_visible_tool_output(&output.description);
+            let mut runtime_events = output.runtime_events;
+            if !runtime_events
+                .iter()
+                .any(|event| matches!(event, ToolRuntimeEvent::OutputMetrics { .. }))
+            {
+                runtime_events.push(ToolRuntimeEvent::OutputMetrics {
+                    raw_bytes: output.description.len() as u64,
+                    model_visible_bytes: model_visible_text.len() as u64,
+                    artifact_bytes: 0,
+                    result_hash: crate::canonical_content_hash(output.description.as_bytes()),
+                });
+            }
+            (
+                ToolOutputEnvelope {
+                    model_visible_text,
+                    display_text: output.description,
+                    full_output_file: (!output.output_file.as_os_str().is_empty())
+                        .then_some(output.output_file),
+                    exit_code: output.exit_code,
+                    timed_out: output.timed_out,
+                    runtime_events,
+                },
+                TracePartStatus::Completed,
+            )
+        }
         Err(error) => {
             return Err(ToolExecutionError::RespondToModel(format!(
                 "Tool execution error: {error}"
@@ -151,8 +170,42 @@ fn tool_execution_record_from_envelope(
         ToolRuntimeEvent::ToolResultRevision { revision } => Some(*revision),
         ToolRuntimeEvent::SkillActivated { .. }
         | ToolRuntimeEvent::OutputArtifacts { .. }
+        | ToolRuntimeEvent::CacheHit { .. }
+        | ToolRuntimeEvent::OutputMetrics { .. }
         | ToolRuntimeEvent::EndTurn => None,
     });
+    let (raw_bytes, model_visible_bytes, artifact_bytes) = runtime_events
+        .iter()
+        .find_map(|event| match event {
+            ToolRuntimeEvent::OutputMetrics {
+                raw_bytes,
+                model_visible_bytes,
+                artifact_bytes,
+                result_hash: _,
+            } => Some((*raw_bytes, *model_visible_bytes, *artifact_bytes)),
+            ToolRuntimeEvent::SkillActivated { .. }
+            | ToolRuntimeEvent::ToolResultRevision { .. }
+            | ToolRuntimeEvent::OutputArtifacts { .. }
+            | ToolRuntimeEvent::CacheHit { .. }
+            | ToolRuntimeEvent::EndTurn => None,
+        })
+        .unwrap_or((
+            model_visible_text.len() as u64,
+            model_visible_text.len() as u64,
+            0,
+        ));
+    let cache_hit = runtime_events
+        .iter()
+        .any(|event| matches!(event, ToolRuntimeEvent::CacheHit { .. }));
+    tracing::info!(
+        target: "pl_core::tool_metrics",
+        tool = %tool_name,
+        raw_bytes,
+        model_visible_bytes,
+        artifact_bytes,
+        cache_hit,
+        "tool output projected"
+    );
     let display_result = display_result_for_tool(&tool_call, &tool_name, &display_text, status);
     ToolExecutionRecord {
         id: tool_call.id.clone(),
@@ -177,11 +230,38 @@ fn output_artifacts(runtime_events: &[ToolRuntimeEvent]) -> Vec<serde_json::Valu
             ToolRuntimeEvent::OutputArtifacts { artifacts } => Some(artifacts.as_slice()),
             ToolRuntimeEvent::SkillActivated { .. }
             | ToolRuntimeEvent::ToolResultRevision { .. }
+            | ToolRuntimeEvent::CacheHit { .. }
+            | ToolRuntimeEvent::OutputMetrics { .. }
             | ToolRuntimeEvent::EndTurn => None,
         })
         .flatten()
         .cloned()
         .collect()
+}
+
+fn output_metrics(runtime_events: &[ToolRuntimeEvent]) -> Option<pl_trace::TraceToolOutputMetrics> {
+    let cache_hit = runtime_events
+        .iter()
+        .any(|event| matches!(event, ToolRuntimeEvent::CacheHit { .. }));
+    runtime_events.iter().find_map(|event| match event {
+        ToolRuntimeEvent::OutputMetrics {
+            raw_bytes,
+            model_visible_bytes,
+            artifact_bytes,
+            result_hash,
+        } => Some(pl_trace::TraceToolOutputMetrics {
+            raw_bytes: *raw_bytes,
+            model_visible_bytes: *model_visible_bytes,
+            artifact_bytes: *artifact_bytes,
+            result_hash: result_hash.clone(),
+            cache_hit,
+        }),
+        ToolRuntimeEvent::SkillActivated { .. }
+        | ToolRuntimeEvent::ToolResultRevision { .. }
+        | ToolRuntimeEvent::OutputArtifacts { .. }
+        | ToolRuntimeEvent::CacheHit { .. }
+        | ToolRuntimeEvent::EndTurn => None,
+    })
 }
 
 pub(super) fn interrupted_tool_execution_record(

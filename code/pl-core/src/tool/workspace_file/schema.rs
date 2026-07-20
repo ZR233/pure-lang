@@ -46,7 +46,7 @@ impl WorkspaceFileToolKind {
     pub fn description(self) -> &'static str {
         match self {
             Self::ReadFile => {
-                "Read a UTF-8 text file from the agent workspace with bounded output. Use lineStart/lineCount for source lines or offset/maxBytes for byte paging. The field `limit` is not supported."
+                "Read a UTF-8 text file by 1-based source lines. Use startLine and nextStartLine for deterministic paging; each call returns at most 500 lines."
             }
             Self::ListFiles => {
                 "List files from the agent workspace with an optional glob and bounded result count. A missing workspace directory returns an empty list."
@@ -66,26 +66,17 @@ impl WorkspaceFileToolKind {
                 ("path", json!({ "type": "string" }), true),
                 ("cwd", json!({ "type": "string" }), false),
                 (
-                    "lineStart",
+                    "startLine",
                     json!({ "type": "integer", "minimum": 1 }),
                     false,
                 ),
                 (
-                    "lineCount",
+                    "maxLines",
                     json!({
                         "type": "integer",
                         "minimum": 1,
-                        "description": "Number of source lines to return with lineStart."
-                    }),
-                    false,
-                ),
-                ("offset", json!({ "type": "integer", "minimum": 0 }), false),
-                (
-                    "maxBytes",
-                    json!({
-                        "type": "integer",
-                        "minimum": 1,
-                        "description": "Maximum UTF-8 bytes to return; use with offset for paging."
+                        "maximum": 500,
+                        "description": "Maximum source lines to return. Defaults to 200."
                     }),
                     false,
                 ),
@@ -102,8 +93,16 @@ impl WorkspaceFileToolKind {
                     false,
                 ),
                 (
-                    "maxFiles",
-                    json!({ "type": "integer", "minimum": 1 }),
+                    "limit",
+                    json!({ "type": "integer", "minimum": 1, "maximum": 200 }),
+                    false,
+                ),
+                (
+                    "cursor",
+                    json!({
+                        "type": "string",
+                        "description": "Opaque continuation returned as nextCursor by the previous call. Omit it on the first page."
+                    }),
                     false,
                 ),
                 (
@@ -158,8 +157,16 @@ impl WorkspaceFileToolKind {
                     false,
                 ),
                 (
-                    "maxMatches",
-                    json!({ "type": "integer", "minimum": 1 }),
+                    "limit",
+                    json!({ "type": "integer", "minimum": 1, "maximum": 200 }),
+                    false,
+                ),
+                (
+                    "cursor",
+                    json!({
+                        "type": "string",
+                        "description": "Opaque continuation returned as nextCursor by the previous call. Omit it on the first page."
+                    }),
                     false,
                 ),
                 (
@@ -167,6 +174,7 @@ impl WorkspaceFileToolKind {
                     json!({
                         "type": "integer",
                         "minimum": 0,
+                        "maximum": 20,
                         "description": "Number of context lines to include before and after each match."
                     }),
                     false,

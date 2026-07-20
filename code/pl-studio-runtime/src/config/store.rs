@@ -6,12 +6,12 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use pl_core::{
-    AgentModelConfig, AgentRoleId, ModelRouteConfig, ProviderConfig, ProviderId,
-    ProviderModelCatalogConfig, ProviderPresetId, builtin_provider_catalog,
+    AgentModelConfig, AgentRoleId, ModelRouteConfig, ProviderCapabilitySelection, ProviderConfig,
+    ProviderId, ProviderModelCatalogConfig, ProviderPresetId, builtin_provider_catalog,
 };
 use pl_model::{
-    ApplyPatchToolType, ModelInfo, ProviderConnectionMode, ProviderInfo, ProviderWireProtocol,
-    ToolWirePolicy,
+    ApplyPatchToolType, ModelInfo, ProviderConnectionMode, ProviderInfo,
+    ProviderServiceCapabilities, ProviderWireProtocol, ToolWirePolicy,
 };
 use serde::Deserialize;
 
@@ -26,7 +26,7 @@ use super::{
 const LEGACY_STUDIO_CONFIG_SCHEMA_VERSION: u32 = 5;
 const CATALOG_STUDIO_CONFIG_SCHEMA_VERSION: u32 = 6;
 const CONNECTION_STUDIO_CONFIG_SCHEMA_VERSION: u32 = 7;
-const PREVIOUS_STUDIO_CONFIG_SCHEMA_VERSION: u32 = 8;
+const PREVIOUS_STUDIO_CONFIG_SCHEMA_VERSIONS: [u32; 2] = [8, 9];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfigPaths {
@@ -233,12 +233,20 @@ impl ConfigStore {
             Ok(config) => config,
             Err(_) => return Ok(None),
         };
-        if config.schema_version != PREVIOUS_STUDIO_CONFIG_SCHEMA_VERSION {
+        if !PREVIOUS_STUDIO_CONFIG_SCHEMA_VERSIONS.contains(&config.schema_version) {
             return Ok(None);
         }
+        let previous_version = config.schema_version;
         config.schema_version = STUDIO_CONFIG_SCHEMA_VERSION;
+        for provider in config.models.providers.values_mut() {
+            provider.capabilities = if provider.preset_id().is_some() {
+                ProviderCapabilitySelection::PresetDefaults
+            } else {
+                ProviderCapabilitySelection::Explicit(ProviderServiceCapabilities::default())
+            };
+        }
         config.validate()?;
-        self.backup_schema(PREVIOUS_STUDIO_CONFIG_SCHEMA_VERSION)?;
+        self.backup_schema(previous_version)?;
         self.save(&config)?;
         Ok(Some(config))
     }
@@ -363,6 +371,7 @@ fn migrate_provider(id: &ProviderId, legacy: LegacyProviderConfig) -> Result<Pro
         http_headers: legacy.http_headers,
         tool_wire_policy: legacy.tool_wire_policy,
         apply_patch_tool_type: legacy.apply_patch_tool_type,
+        service_capabilities: Default::default(),
     };
     let registry = builtin_provider_catalog();
     let preset = registry.presets.into_iter().find(|preset| {
@@ -424,6 +433,7 @@ fn migrate_catalog_provider(
         http_headers: legacy.http_headers,
         tool_wire_policy: legacy.tool_wire_policy,
         apply_patch_tool_type: legacy.apply_patch_tool_type,
+        service_capabilities: Default::default(),
     };
     let mut provider = match legacy.catalog {
         ProviderModelCatalogConfig::Bundled {
@@ -632,10 +642,7 @@ mod tests {
         let current = StudioConfig::default_config();
         let mut document = toml::Value::try_from(&current).unwrap();
         let root = document.as_table_mut().unwrap();
-        root.insert(
-            "schema_version".to_string(),
-            toml::Value::Integer(i64::from(PREVIOUS_STUDIO_CONFIG_SCHEMA_VERSION)),
-        );
+        root.insert("schema_version".to_string(), toml::Value::Integer(8));
         root.remove("web_search");
         fs::write(
             store.paths().config_file(),

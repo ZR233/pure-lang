@@ -35,10 +35,20 @@ where
     let initial_trace_sequence = context.trace_sequence;
     let activity_runtime = context.runtime.clone();
     let activity_agent_id = context.snapshot.identity.id.clone();
+    let checkpoint = super::AgentTurnCheckpointHandle::new(
+        context.runtime.clone(),
+        context.snapshot.identity.id.clone(),
+        context.turn_id.clone(),
+        context.session_id.clone(),
+    );
     let mut session = context.session.clone();
     let (result, session_commit) = match host.turn_factory().prepare_turn(context).await {
         Ok(prepared) => {
-            let prepared = prepared.with_runtime_context(&turn_id, cancellation.clone());
+            let prepared =
+                prepared.with_runtime_context(&turn_id, cancellation.clone(), checkpoint);
+            for section in &prepared.pinned_context {
+                session.upsert_pinned_context(section.clone());
+            }
             let policy = prepared.policy.clone();
             let session_commit = prepared.session_commit;
             let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(128);

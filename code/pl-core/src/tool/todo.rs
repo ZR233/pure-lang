@@ -90,6 +90,9 @@ impl Tool for TodoListTool {
                 }
             })?;
             let snapshot = todo_list_snapshot(input.tool_id, args, &context)?;
+            context
+                .working_set
+                .apply(crate::TurnWorkingSetChange::ReplaceTodo(snapshot.clone()))?;
             let _ = context
                 .event_tx
                 .send(AgentEvent::TodoListUpdated { snapshot });
@@ -184,6 +187,8 @@ mod tests {
                 active_subagent: None,
                 lsp_runtime: None,
                 parent_session: Arc::new(AgentSession::new()),
+                working_set: crate::TurnWorkingSetHandle::default(),
+                tool_cache: crate::TurnToolCacheHandle::default(),
             },
             event_rx,
         )

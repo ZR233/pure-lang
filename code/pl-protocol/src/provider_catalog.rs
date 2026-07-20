@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// Provider/模型目录跨产品传输协议版本。
-pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 3;
+pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 4;
 
 /// 无敏感信息、可供 Web 与桌面端直接渲染的 Provider 目录快照。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -26,6 +26,31 @@ pub struct ProviderPresetDescriptor {
     pub model_catalog_id: String,
     pub suggested_model: String,
     pub icon_key: Option<String>,
+    pub service_capabilities: ProviderServiceCapabilitiesDescriptor,
+}
+
+/// 无敏感信息的 Provider 外部服务能力。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProviderServiceCapabilitiesDescriptor {
+    pub web_search: WebSearchProviderCapabilitiesDescriptor,
+}
+
+/// UI 可直接渲染的 Web Search 服务能力。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WebSearchProviderCapabilitiesDescriptor {
+    pub hosted_responses: bool,
+    pub standalone: Option<String>,
+}
+
+/// 当前角色 Web Search configured/effective 路径的无密钥投影。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WebSearchResolutionDescriptor {
+    pub configured_mode: String,
+    pub effective_mode: String,
+    pub availability: String,
+    pub path: Option<String>,
+    pub provider_id: Option<String>,
+    pub model: Option<String>,
 }
 
 /// UI 可直接消费的 provider wire protocol 与连接策略。

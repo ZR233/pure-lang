@@ -3,7 +3,6 @@ use std::path::Path;
 use anyhow::{Context, Result};
 
 use crate::config::ConfigStore;
-use crate::mcp::McpRuntimeRegistry;
 use crate::resolve_workspace_root;
 use crate::studio::agent_host::{
     StudioAgentHost, StudioAgentResources, StudioAgentRuntime, StudioContinuationReason,
@@ -14,6 +13,7 @@ use crate::studio::{
     InteractionRuntime, StudioEventRuntime, StudioRuntimeSnapshot, StudioRuntimeState,
     StudioRuntimeStatus, StudioStore,
 };
+use crate::{LocalMcpRuntimeHost, McpRuntime, McpRuntimeHandle};
 
 use super::StudioRuntime;
 
@@ -48,7 +48,7 @@ impl StudioRuntime {
             events,
             store,
             config_store,
-            mcp_runtime: McpRuntimeRegistry::new(),
+            mcp_runtime: McpRuntime::new(LocalMcpRuntimeHost).handle(),
             mcp_health_watcher: Default::default(),
             lsp_runtime: pl_lsp::LspRuntimeRegistry::new(),
             runtime_state,
@@ -78,7 +78,7 @@ impl StudioRuntime {
         &self.config_store
     }
 
-    pub fn mcp_runtime(&self) -> &McpRuntimeRegistry {
+    pub fn mcp_runtime(&self) -> &McpRuntimeHandle {
         &self.mcp_runtime
     }
 

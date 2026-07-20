@@ -138,7 +138,6 @@ pub struct TurnEngineBuilder {
     reasoning_effort: Option<ReasoningEffort>,
     tool_capabilities: ToolCapabilityConfig,
     skills: Option<SkillsConfig>,
-    mcp_runtime: Option<crate::mcp::McpRuntimeRegistry>,
     lsp_runtime: Option<pl_lsp::LspRuntimeRegistry>,
     runtime_profile: CoreRuntimeProfile,
 }
@@ -150,7 +149,6 @@ impl TurnEngineBuilder {
             reasoning_effort: None,
             tool_capabilities: ToolCapabilityConfig::default(),
             skills: None,
-            mcp_runtime: None,
             lsp_runtime: None,
             runtime_profile: CoreRuntimeProfile::minimal(),
         }
@@ -182,11 +180,6 @@ impl TurnEngineBuilder {
         self
     }
 
-    pub fn with_mcp_runtime(mut self, registry: crate::mcp::McpRuntimeRegistry) -> Self {
-        self.mcp_runtime = Some(registry);
-        self
-    }
-
     pub fn with_lsp_runtime(mut self, registry: pl_lsp::LspRuntimeRegistry) -> Self {
         self.lsp_runtime = Some(registry);
         self
@@ -209,7 +202,6 @@ impl TurnEngineBuilder {
             provider: self.provider,
             reasoning_effort: self.reasoning_effort,
             skills: self.skills,
-            mcp_runtime: self.mcp_runtime,
             lsp_runtime: self.lsp_runtime,
             workspace_root: workspace_profile.root,
             workspace_instructions: workspace_profile.instructions,

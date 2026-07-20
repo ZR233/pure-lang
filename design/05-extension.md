@@ -10,6 +10,12 @@ Provider 扩展分为协议、preset 和实例三层：
 - 产品配置只保存 preset/catalog 引用、实例凭证、endpoint override、连接模式和附加模型。
 - 完全自定义 provider 使用 `ProviderTransportSelection::Custom` 与 `Explicit` 模型目录。
 
+Provider 提供的外部服务能力与 wire 协议正交。`ProviderPreset` 通过
+`ProviderServiceCapabilities` 声明 hosted Web Search、standalone Web Search 等默认能力；preset
+实例默认保存 `ProviderCapabilitySelection::PresetDefaults`，因而重新编译后可获得新增能力。完全
+自定义 provider 默认保存显式空能力，也可在高级配置中声明兼容能力。运行期只能消费解析后的能力，
+不得根据 provider id、preset id、模型 slug 或 endpoint 猜测能力。
+
 Responses-compatible 与 Chat-compatible 都是一等公共协议能力，不为 MiMo、DeepSeek、Zhipu
 等厂商增加执行枚举或 runtime struct。provider 私有 request/stream 结构不得泄漏到 `pl-core`；
 兼容 API 的字段差异通过 `ModelRequestProfile`、模型参数 wire 和 tool wire policy 数据化表达。
@@ -18,6 +24,15 @@ Responses-compatible 与 Chat-compatible 都是一等公共协议能力，不为
 
 Bundled catalog 只读，`additional_models` 只能追加不冲突 slug；完全自定义目录使用
 `Explicit`。`ProviderConfig::effective_models()` 是唯一合并入口。
+
+Web Search 的候选发现、优先级和模型门控统一由 `pl-core::plan_web_search()` 完成。产品只提供
+`AgentModelConfig`、当前 `ResolvedModelRoute` 和用户配置，再把 `WebSearchPlan` 安装到
+`TurnEngine`；Studio、Mai 和后续宿主不得各自实现 resolver。
+
+MCP 执行环境通过 `McpRuntimeHost` 扩展。PL 拥有配置 fingerprint、增量 reconcile、工具发现、
+命名冲突、健康状态和 generation 生命周期；产品 Host 只连接具体 session。Studio 使用
+`LocalMcpRuntimeHost`，容器产品实现自己的 container Host。turn 只持有固定 generation 的
+`McpTurnLease`，配置更新不得改变正在执行 turn 的 schema 或 backend。
 
 ## 5.2 核心流程扩展
 

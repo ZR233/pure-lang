@@ -155,6 +155,7 @@ where
                 next_state: agent.state.clone(),
                 events: vec![event.clone()],
                 trace_events: Vec::new(),
+                mutation: super::AgentStateMutation::SnapshotAndQueue,
             })
             .await
             .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;

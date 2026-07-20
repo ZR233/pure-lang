@@ -111,7 +111,7 @@ async fn registered_tool_from_execution_result_uses_core_output_mapping() {
                     "full internal output".to_string(),
                     "visible output".to_string(),
                     true,
-                    vec![serde_json::json!({"id": "artifact-1"})],
+                    vec![serde_json::json!({"id": "artifact-1", "sizeBytes": 19})],
                 ),
             )
         },
@@ -134,7 +134,18 @@ async fn registered_tool_from_execution_result_uses_core_output_mapping() {
     assert_eq!(output.exit_code, Some(1));
     assert_eq!(
         output.runtime_events,
-        vec![crate::tool::ToolRuntimeEvent::EndTurn]
+        vec![
+            crate::tool::ToolRuntimeEvent::EndTurn,
+            crate::tool::ToolRuntimeEvent::OutputArtifacts {
+                artifacts: vec![serde_json::json!({"id": "artifact-1", "sizeBytes": 19})],
+            },
+            crate::tool::ToolRuntimeEvent::OutputMetrics {
+                raw_bytes: 20,
+                model_visible_bytes: 14,
+                artifact_bytes: 19,
+                result_hash: crate::canonical_content_hash(b"full internal output"),
+            },
+        ]
     );
 }
 

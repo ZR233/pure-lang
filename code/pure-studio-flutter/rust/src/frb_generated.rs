@@ -1792,6 +1792,7 @@ impl SseDecode for crate::api::studio::types::settings::BridgeProviderPresetDesc
         let mut var_modelCatalogId = <String>::sse_decode(deserializer);
         let mut var_suggestedModel = <String>::sse_decode(deserializer);
         let mut var_iconKey = <Option<String>>::sse_decode(deserializer);
+        let mut var_serviceCapabilities = <crate::api::studio::types::settings::BridgeProviderServiceCapabilitiesDescriptor>::sse_decode(deserializer);
         return crate::api::studio::types::settings::BridgeProviderPresetDescriptor {
             id: var_id,
             display_name: var_displayName,
@@ -1803,6 +1804,19 @@ impl SseDecode for crate::api::studio::types::settings::BridgeProviderPresetDesc
             model_catalog_id: var_modelCatalogId,
             suggested_model: var_suggestedModel,
             icon_key: var_iconKey,
+            service_capabilities: var_serviceCapabilities,
+        };
+    }
+}
+
+impl SseDecode
+    for crate::api::studio::types::settings::BridgeProviderServiceCapabilitiesDescriptor
+{
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_webSearch = <crate::api::studio::types::settings::BridgeWebSearchProviderCapabilitiesDescriptor>::sse_decode(deserializer);
+        return crate::api::studio::types::settings::BridgeProviderServiceCapabilitiesDescriptor {
+            web_search: var_webSearch,
         };
     }
 }
@@ -2415,6 +2429,17 @@ impl SseDecode for crate::api::studio::types::interaction::BridgeUserQuestionOpt
             label: var_label,
             description: var_description,
         };
+    }
+}
+
+impl SseDecode
+    for crate::api::studio::types::settings::BridgeWebSearchProviderCapabilitiesDescriptor
+{
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_hostedResponses = <bool>::sse_decode(deserializer);
+        let mut var_standalone = <Option<String>>::sse_decode(deserializer);
+        return crate::api::studio::types::settings::BridgeWebSearchProviderCapabilitiesDescriptor{hosted_responses: var_hostedResponses, standalone: var_standalone};
     }
 }
 
@@ -4207,6 +4232,7 @@ impl flutter_rust_bridge::IntoDart
             self.model_catalog_id.into_into_dart().into_dart(),
             self.suggested_model.into_into_dart().into_dart(),
             self.icon_key.into_into_dart().into_dart(),
+            self.service_capabilities.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -4221,6 +4247,29 @@ impl
     > for crate::api::studio::types::settings::BridgeProviderPresetDescriptor
 {
     fn into_into_dart(self) -> crate::api::studio::types::settings::BridgeProviderPresetDescriptor {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart
+    for crate::api::studio::types::settings::BridgeProviderServiceCapabilitiesDescriptor
+{
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [self.web_search.into_into_dart().into_dart()].into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::settings::BridgeProviderServiceCapabilitiesDescriptor
+{
+}
+impl
+    flutter_rust_bridge::IntoIntoDart<
+        crate::api::studio::types::settings::BridgeProviderServiceCapabilitiesDescriptor,
+    > for crate::api::studio::types::settings::BridgeProviderServiceCapabilitiesDescriptor
+{
+    fn into_into_dart(
+        self,
+    ) -> crate::api::studio::types::settings::BridgeProviderServiceCapabilitiesDescriptor {
         self
     }
 }
@@ -4930,6 +4979,33 @@ impl
     > for crate::api::studio::types::interaction::BridgeUserQuestionOptionDto
 {
     fn into_into_dart(self) -> crate::api::studio::types::interaction::BridgeUserQuestionOptionDto {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart
+    for crate::api::studio::types::settings::BridgeWebSearchProviderCapabilitiesDescriptor
+{
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.hosted_responses.into_into_dart().into_dart(),
+            self.standalone.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::settings::BridgeWebSearchProviderCapabilitiesDescriptor
+{
+}
+impl
+    flutter_rust_bridge::IntoIntoDart<
+        crate::api::studio::types::settings::BridgeWebSearchProviderCapabilitiesDescriptor,
+    > for crate::api::studio::types::settings::BridgeWebSearchProviderCapabilitiesDescriptor
+{
+    fn into_into_dart(
+        self,
+    ) -> crate::api::studio::types::settings::BridgeWebSearchProviderCapabilitiesDescriptor {
         self
     }
 }
@@ -5799,6 +5875,16 @@ impl SseEncode for crate::api::studio::types::settings::BridgeProviderPresetDesc
         <String>::sse_encode(self.model_catalog_id, serializer);
         <String>::sse_encode(self.suggested_model, serializer);
         <Option<String>>::sse_encode(self.icon_key, serializer);
+        <crate::api::studio::types::settings::BridgeProviderServiceCapabilitiesDescriptor>::sse_encode(self.service_capabilities, serializer);
+    }
+}
+
+impl SseEncode
+    for crate::api::studio::types::settings::BridgeProviderServiceCapabilitiesDescriptor
+{
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <crate::api::studio::types::settings::BridgeWebSearchProviderCapabilitiesDescriptor>::sse_encode(self.web_search, serializer);
     }
 }
 
@@ -6213,6 +6299,16 @@ impl SseEncode for crate::api::studio::types::interaction::BridgeUserQuestionOpt
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <String>::sse_encode(self.label, serializer);
         <String>::sse_encode(self.description, serializer);
+    }
+}
+
+impl SseEncode
+    for crate::api::studio::types::settings::BridgeWebSearchProviderCapabilitiesDescriptor
+{
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.hosted_responses, serializer);
+        <Option<String>>::sse_encode(self.standalone, serializer);
     }
 }
 

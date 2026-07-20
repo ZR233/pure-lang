@@ -19,7 +19,8 @@
 职责保持不变：定义稳定 wire 协议、错误与公共状态类型。
 
 - 放置 `PureError`、`Message`、interaction、runtime usage 与无 secret 的
-  `ProviderCatalogSnapshot` 等跨产品 wire 类型
+  `ProviderCatalogSnapshot`、provider 服务能力、Web Search resolution 与 MCP health descriptor
+  等跨产品 wire 类型
 - 不依赖任何内部 crate
 - 不包含 Studio 产品 DTO、raw `AgentEvent` / `TracePart`、运行时行为与存储实现
 
@@ -57,7 +58,9 @@
 
 - `agent_runtime`：actor、命令句柄、host 端口、commit 与恢复
 - `core`：turn pipeline、工具调度和结果归一化
-- `tool`、`mcp`：通用工具与运行时能力
+- `tool`：通用工具、effect 与执行策略
+- `mcp`：Host 驱动的公共 runtime、非泛型 handle、generation lease、健康状态和本地 Host
+- `web_search`：provider capability planner 与统一工具安装入口
 - `model_config`：只含 serde 值对象及校验/解析
 
 核心 host 端口：

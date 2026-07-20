@@ -13,7 +13,7 @@ use crate::tool::{
 };
 use crate::{
     AgentKernel, AgentKernelToolRequest, AgentSession, CoreAgentProfile, StudioMode, StudioStore,
-    ToolEffect, TurnEngineBuilder, TurnOptions,
+    ToolEffect, TurnEngineBuilder, TurnOptions, TurnToolCacheHandle, TurnWorkingSetHandle,
 };
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -222,7 +222,7 @@ async fn review_exit_requires_real_design_trace_and_persists_matching_pass() {
             "call-read".to_string(),
             "read_file".to_string(),
             r#"{"path":"design/guide.md"}"#.to_string(),
-            r##"{"path":"design/guide.md","text":"# Review design\n","offset":0,"bytesReturned":16,"bytesOmitted":0,"truncated":false,"nextOffset":null}"##.to_string(),
+            r##"{"path":"design/guide.md","startLine":1,"endLine":1,"nextStartLine":null,"contentHash":"fixture","text":"# Review design\n"}"##.to_string(),
         ),
     ]);
     let tool = fixture
@@ -260,6 +260,8 @@ async fn review_exit_requires_real_design_trace_and_persists_matching_pass() {
                 }),
                 lsp_runtime: None,
                 parent_session: Arc::new(history),
+                working_set: TurnWorkingSetHandle::default(),
+                tool_cache: TurnToolCacheHandle::default(),
             },
         )
         .await

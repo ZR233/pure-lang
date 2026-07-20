@@ -225,6 +225,8 @@ async fn tool_context() -> ToolContext {
         active_subagent: None,
         lsp_runtime: None,
         parent_session: Arc::new(AgentSession::new()),
+        working_set: crate::TurnWorkingSetHandle::default(),
+        tool_cache: crate::TurnToolCacheHandle::default(),
     }
 }
 
@@ -304,6 +306,7 @@ async fn upload_trims_base64_payload() {
             "path": "/tmp/hello.txt",
             "contentBase64": " aGVsbG8= \n",
         }),
+        "tool-call",
         None,
     )
     .await
@@ -337,8 +340,8 @@ async fn workspace_file_read_has_same_json_shape_for_local_and_container_backend
     ));
     let input = json!({
         "path": "a.txt",
-        "lineStart": 2,
-        "lineCount": 1,
+        "startLine": 2,
+        "maxLines": 1,
     });
 
     let local_output = crate::tool::execute_workspace_file_tool(
@@ -346,6 +349,7 @@ async fn workspace_file_read_has_same_json_shape_for_local_and_container_backend
         crate::tool::WorkspaceFileToolKind::ReadFile.name(),
         input.clone(),
         None,
+        0,
     )
     .await
     .unwrap()
@@ -355,6 +359,7 @@ async fn workspace_file_read_has_same_json_shape_for_local_and_container_backend
         crate::tool::WorkspaceFileToolKind::ReadFile.name(),
         input,
         None,
+        0,
     )
     .await
     .unwrap()
@@ -390,6 +395,7 @@ async fn workspace_file_apply_patch_has_same_json_shape_for_local_and_container_
         crate::tool::WorkspaceFileToolKind::ApplyPatch.name(),
         input.clone(),
         None,
+        0,
     )
     .await
     .unwrap()
@@ -399,6 +405,7 @@ async fn workspace_file_apply_patch_has_same_json_shape_for_local_and_container_
         crate::tool::WorkspaceFileToolKind::ApplyPatch.name(),
         input,
         None,
+        0,
     )
     .await
     .unwrap()

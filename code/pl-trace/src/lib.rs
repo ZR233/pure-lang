@@ -201,9 +201,22 @@ pub struct TraceToolPart {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub output_artifacts: Vec<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_metrics: Option<TraceToolOutputMetrics>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub working_directory: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub denial_reason: Option<String>,
+}
+
+/// 工具完整输出、模型视图和 artifact 的字节统计。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TraceToolOutputMetrics {
+    pub raw_bytes: u64,
+    pub model_visible_bytes: u64,
+    pub artifact_bytes: u64,
+    pub result_hash: String,
+    pub cache_hit: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

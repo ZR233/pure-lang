@@ -38,10 +38,15 @@ impl ChatRequestBody {
         }
 
         for item in &request.input {
-            let pl_protocol::ModelContextItem::Message { message: msg } = item else {
-                return Err(protocol_error(
-                    "Chat Completions cannot consume remote compaction items",
-                ));
+            let msg = match item {
+                pl_protocol::ModelContextItem::Message { message }
+                | pl_protocol::ModelContextItem::ToolResult { message, .. } => message,
+                pl_protocol::ModelContextItem::PinnedContext { .. } => continue,
+                pl_protocol::ModelContextItem::Compaction { .. } => {
+                    return Err(protocol_error(
+                        "Chat Completions cannot consume remote compaction items",
+                    ));
+                }
             };
             match msg.role {
                 MessageRole::Assistant if msg.metadata.contains_key(TOOL_CALLS_METADATA_KEY) => {

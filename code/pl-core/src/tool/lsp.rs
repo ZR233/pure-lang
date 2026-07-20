@@ -291,6 +291,8 @@ mod tests {
             active_subagent: None,
             lsp_runtime: None,
             parent_session: Arc::new(AgentSession::new()),
+            working_set: crate::TurnWorkingSetHandle::default(),
+            tool_cache: crate::TurnToolCacheHandle::default(),
         }
     }
 
