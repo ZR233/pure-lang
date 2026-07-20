@@ -83,7 +83,6 @@ pub struct TurnEngine {
     provider: SharedModelProvider,
     reasoning_effort: Option<ReasoningEffort>,
     skills: Option<SkillsConfig>,
-    mcp_runtime: Option<crate::mcp::McpRuntimeRegistry>,
     lsp_runtime: Option<pl_lsp::LspRuntimeRegistry>,
     workspace_root: Option<PathBuf>,
     workspace_instructions: Option<String>,
@@ -102,7 +101,6 @@ impl TurnEngine {
             provider,
             reasoning_effort: None,
             skills: None,
-            mcp_runtime: None,
             lsp_runtime: None,
             workspace_root: None,
             workspace_instructions: None,
@@ -124,7 +122,6 @@ impl TurnEngine {
             provider,
             reasoning_effort: Some(reasoning_effort),
             skills: None,
-            mcp_runtime: None,
             lsp_runtime: None,
             workspace_root: None,
             workspace_instructions: None,
@@ -148,11 +145,6 @@ impl TurnEngine {
 
     pub fn with_subagent_context(mut self, context: SubagentContext) -> Self {
         self.active_subagent = Some(context);
-        self
-    }
-
-    pub fn with_mcp_runtime(mut self, registry: crate::mcp::McpRuntimeRegistry) -> Self {
-        self.mcp_runtime = Some(registry);
         self
     }
 
@@ -241,20 +233,6 @@ impl TurnEngine {
         for kind in ContainerToolKind::all() {
             self.register_tool(ContainerTool::new(*kind, backend.clone()));
         }
-    }
-
-    pub async fn register_available_mcp_tools(&mut self) -> Result<()> {
-        if !self.mcp_tools_enabled() {
-            return Ok(());
-        }
-        let Some(registry) = self.mcp_runtime.clone() else {
-            return Ok(());
-        };
-        registry.register_available_tools(self).await
-    }
-
-    pub async fn register_configured_mcp_tools(&mut self) -> Result<()> {
-        self.register_available_mcp_tools().await
     }
 
     pub(crate) fn mcp_tools_enabled(&self) -> bool {

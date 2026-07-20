@@ -1,6 +1,7 @@
 mod error;
 mod event;
 mod interaction;
+mod mcp;
 mod message;
 mod model_context;
 mod permission;
@@ -19,6 +20,7 @@ pub use interaction::{
     InteractionResolution, InteractionScope, InteractionStatus, PlanConfirmationResolution,
     ToolApprovalResolution,
 };
+pub use mcp::{McpAvailabilityDescriptor, McpHealthSnapshot, McpServerDescriptor};
 pub use message::{
     ContentPart, ImageSource, Message, MessageContent, MessageRole,
     TOOL_CALL_ARGUMENTS_METADATA_KEY, TOOL_CALL_CALL_ID_METADATA_KEY, TOOL_CALL_ID_METADATA_KEY,
@@ -34,5 +36,6 @@ pub use provider_catalog::{
     CredentialDescriptorDto, ModelCapabilitiesDto, ModelCatalogDescriptor, ModelDescriptor,
     ModelPricingDto, ModelReasoningDescriptor, PROVIDER_CATALOG_SCHEMA_VERSION,
     ProviderCatalogSnapshot, ProviderConnectionModeDescriptor, ProviderPresetDescriptor,
-    ProviderTransportDescriptor,
+    ProviderServiceCapabilitiesDescriptor, ProviderTransportDescriptor,
+    WebSearchProviderCapabilitiesDescriptor, WebSearchResolutionDescriptor,
 };

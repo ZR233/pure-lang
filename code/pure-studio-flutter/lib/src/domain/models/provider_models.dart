@@ -98,6 +98,9 @@ class ProviderSettingsView {
     this.catalogId = '',
     this.credentialLabel = 'API Key',
     this.credentialEnv = '',
+    this.capabilitySource = 'explicit',
+    this.hostedWebSearch = false,
+    this.standaloneWebSearch = '',
     this.iconKey,
   });
 
@@ -121,6 +124,9 @@ class ProviderSettingsView {
   final String catalogId;
   final String credentialLabel;
   final String credentialEnv;
+  final String capabilitySource;
+  final bool hostedWebSearch;
+  final String standaloneWebSearch;
   final String? iconKey;
 
   List<ProviderModelView> get allModels {
@@ -151,6 +157,9 @@ class ProviderSettingsView {
     String? catalogId,
     String? credentialLabel,
     String? credentialEnv,
+    String? capabilitySource,
+    bool? hostedWebSearch,
+    String? standaloneWebSearch,
     Object? iconKey = _providerSettingsUnset,
   }) {
     return ProviderSettingsView(
@@ -174,6 +183,9 @@ class ProviderSettingsView {
       catalogId: catalogId ?? this.catalogId,
       credentialLabel: credentialLabel ?? this.credentialLabel,
       credentialEnv: credentialEnv ?? this.credentialEnv,
+      capabilitySource: capabilitySource ?? this.capabilitySource,
+      hostedWebSearch: hostedWebSearch ?? this.hostedWebSearch,
+      standaloneWebSearch: standaloneWebSearch ?? this.standaloneWebSearch,
       iconKey: identical(iconKey, _providerSettingsUnset)
           ? this.iconKey
           : iconKey as String?,
@@ -227,6 +239,8 @@ class ProviderPresetView {
     required this.credentialEnv,
     required this.modelCatalogId,
     required this.suggestedModel,
+    this.hostedWebSearch = false,
+    this.standaloneWebSearch = '',
     this.iconKey,
   });
 
@@ -241,6 +255,8 @@ class ProviderPresetView {
   final String credentialEnv;
   final String modelCatalogId;
   final String suggestedModel;
+  final bool hostedWebSearch;
+  final String standaloneWebSearch;
   final String? iconKey;
 
   ProviderSettingsView createProvider(
@@ -268,6 +284,9 @@ class ProviderPresetView {
       catalogId: modelCatalogId,
       credentialLabel: credentialLabel,
       credentialEnv: credentialEnv,
+      capabilitySource: 'preset_defaults',
+      hostedWebSearch: hostedWebSearch,
+      standaloneWebSearch: standaloneWebSearch,
       iconKey: iconKey,
     );
   }
@@ -298,6 +317,12 @@ ProviderSettingsView providerWithCatalogMetadata(
     catalogId: preset.modelCatalogId,
     credentialLabel: preset.credentialLabel,
     credentialEnv: preset.credentialEnv,
+    hostedWebSearch: provider.capabilitySource == 'preset_defaults'
+        ? preset.hostedWebSearch
+        : provider.hostedWebSearch,
+    standaloneWebSearch: provider.capabilitySource == 'preset_defaults'
+        ? preset.standaloneWebSearch
+        : provider.standaloneWebSearch,
     iconKey: preset.iconKey,
     wireProtocol: preset.wireProtocol,
     connectionMode:

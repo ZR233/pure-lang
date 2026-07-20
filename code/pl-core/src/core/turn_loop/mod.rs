@@ -512,18 +512,29 @@ pub(super) async fn run_turn_with_trace(
                 .iter()
                 .any(|event| matches!(event, crate::tool::ToolRuntimeEvent::EndTurn))
         });
-        for tool_result in tool_results {
-            let receipt = tool_result_receipt(&tool_result);
-            working_set.apply(TurnWorkingSetChange::AppendEvidence(receipt.clone()))?;
+        let tool_results = tool_results
+            .into_iter()
+            .map(|tool_result| {
+                let receipt = tool_result_receipt(&tool_result);
+                (tool_result, receipt)
+            })
+            .collect::<Vec<_>>();
+        // 先补齐全部 canonical tool result，再更新辅助 evidence ledger。这样即使
+        // pinned working context 的大小校验或持久化失败，也不会留下只有
+        // assistant tool call、没有对应 output 的不可重放 session。
+        for (tool_result, receipt) in &tool_results {
             session.push_tool_result_with_receipt(
-                tool_result.id,
-                tool_result.call_id,
-                tool_result.name,
+                tool_result.id.clone(),
+                tool_result.call_id.clone(),
+                tool_result.name.clone(),
                 tool_result.kind,
-                tool_result.result,
-                tool_result.arguments,
-                receipt,
+                tool_result.result.clone(),
+                tool_result.arguments.clone(),
+                receipt.clone(),
             );
+        }
+        for (_, receipt) in tool_results {
+            working_set.apply(TurnWorkingSetChange::AppendEvidence(receipt))?;
         }
         if working_set.sync_session(session)? {
             persist_checkpoint(
@@ -648,7 +659,7 @@ fn tool_result_receipt(result: &super::tool_dispatch::ToolExecutionRecord) -> To
             | crate::tool::ToolRuntimeEvent::EndTurn => None,
         })
         .flatten()
-        .cloned()
+        .map(compact_artifact_reference)
         .collect::<Vec<_>>();
     let cache_hit = result.runtime_events.iter().find_map(|event| match event {
         crate::tool::ToolRuntimeEvent::CacheHit {
@@ -705,6 +716,57 @@ fn tool_result_receipt(result: &super::tool_dispatch::ToolExecutionRecord) -> To
     }
 }
 
+fn compact_artifact_reference(artifact: &serde_json::Value) -> serde_json::Value {
+    const REFERENCE_FIELDS: [&str; 20] = [
+        "artifactId",
+        "artifact_id",
+        "callId",
+        "call_id",
+        "contentHash",
+        "content_hash",
+        "id",
+        "kind",
+        "mediaType",
+        "media_type",
+        "mimeType",
+        "mime_type",
+        "name",
+        "path",
+        "sha256",
+        "size",
+        "sizeBytes",
+        "size_bytes",
+        "stream",
+        "uri",
+    ];
+    let serialized = serde_json::to_vec(artifact).unwrap_or_default();
+    let mut reference = serde_json::Map::new();
+    if let Some(object) = artifact.as_object() {
+        for field in REFERENCE_FIELDS {
+            if let Some(value) = object.get(field)
+                && matches!(
+                    value,
+                    serde_json::Value::Null
+                        | serde_json::Value::Bool(_)
+                        | serde_json::Value::Number(_)
+                        | serde_json::Value::String(_)
+                )
+            {
+                reference.insert(field.to_string(), value.clone());
+            }
+        }
+    }
+    reference.insert(
+        "receiptHash".to_string(),
+        serde_json::Value::String(canonical_content_hash(&serialized)),
+    );
+    reference.insert(
+        "receiptBytes".to_string(),
+        serde_json::Value::from(serialized.len() as u64),
+    );
+    serde_json::Value::Object(reference)
+}
+
 fn tool_result_continuation(output: &str) -> Option<String> {
     let value = serde_json::from_str::<serde_json::Value>(output).ok()?;
     ["nextStartLine", "nextStartByte", "nextCursor", "nextOffset"]
@@ -715,4 +777,33 @@ fn tool_result_continuation(output: &str) -> Option<String> {
                 .filter(|value| !value.is_null())
                 .map(|value| serde_json::json!({ "field": key, "value": value }).to_string())
         })
+}
+
+#[cfg(test)]
+mod receipt_tests {
+    use pretty_assertions::assert_eq;
+
+    use super::compact_artifact_reference;
+
+    #[test]
+    fn artifact_receipt_keeps_identity_but_not_large_payload() {
+        let artifact = serde_json::json!({
+            "kind": "webSearch",
+            "id": "artifact-1",
+            "results": "x".repeat(64 * 1024),
+        });
+
+        let reference = compact_artifact_reference(&artifact);
+
+        assert_eq!(reference["kind"], "webSearch");
+        assert_eq!(reference["id"], "artifact-1");
+        assert_eq!(reference.get("results"), None);
+        assert!(reference["receiptBytes"].as_u64().unwrap() > 64 * 1024);
+        assert!(
+            reference["receiptHash"]
+                .as_str()
+                .unwrap()
+                .starts_with("sha256:")
+        );
+    }
 }

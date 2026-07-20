@@ -230,6 +230,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeProviderServiceCapabilitiesDescriptor
+  dco_decode_bridge_provider_service_capabilities_descriptor(dynamic raw);
+
+  @protected
   BridgeProviderTransportDescriptor
   dco_decode_bridge_provider_transport_descriptor(dynamic raw);
 
@@ -322,6 +326,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeUserQuestionOptionDto dco_decode_bridge_user_question_option_dto(
     dynamic raw,
   );
+
+  @protected
+  BridgeWebSearchProviderCapabilitiesDescriptor
+  dco_decode_bridge_web_search_provider_capabilities_descriptor(dynamic raw);
 
   @protected
   BridgeWebSearchSettingsDto dco_decode_bridge_web_search_settings_dto(
@@ -813,6 +821,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeProviderServiceCapabilitiesDescriptor
+  sse_decode_bridge_provider_service_capabilities_descriptor(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeProviderTransportDescriptor
   sse_decode_bridge_provider_transport_descriptor(SseDeserializer deserializer);
 
@@ -937,6 +951,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeUserQuestionOptionDto sse_decode_bridge_user_question_option_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeWebSearchProviderCapabilitiesDescriptor
+  sse_decode_bridge_web_search_provider_capabilities_descriptor(
     SseDeserializer deserializer,
   );
 
@@ -1539,6 +1559,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_bridge_provider_service_capabilities_descriptor(
+    BridgeProviderServiceCapabilitiesDescriptor self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_bridge_provider_transport_descriptor(
     BridgeProviderTransportDescriptor self,
     SseSerializer serializer,
@@ -1691,6 +1717,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_bridge_user_question_option_dto(
     BridgeUserQuestionOptionDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_web_search_provider_capabilities_descriptor(
+    BridgeWebSearchProviderCapabilitiesDescriptor self,
     SseSerializer serializer,
   );
 

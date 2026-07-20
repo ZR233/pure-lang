@@ -1,8 +1,8 @@
 use std::collections::{BTreeSet, HashMap};
 
 use pl_model::{
-    ApplyPatchToolType, ModelInfo, ProviderConnectionMode, ProviderInfo, ProviderWireProtocol,
-    ToolWirePolicy,
+    ApplyPatchToolType, ModelInfo, ProviderConnectionMode, ProviderInfo,
+    ProviderServiceCapabilities, ProviderWireProtocol, ToolWirePolicy,
 };
 use pl_protocol::{PureError, Result};
 use serde::{Deserialize, Serialize};
@@ -40,6 +40,17 @@ pub enum ProviderTransportSelection {
     },
 }
 
+/// Provider 服务能力的配置来源。
+///
+/// preset 实例通常继承 registry 默认能力；显式配置可覆盖任意兼容 endpoint。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "source", rename_all = "snake_case")]
+pub enum ProviderCapabilitySelection {
+    #[default]
+    PresetDefaults,
+    Explicit(ProviderServiceCapabilities),
+}
+
 /// 可由产品配置文件组合使用的 Provider 值对象。
 ///
 /// 具体默认模型不属于 Provider；调用方必须通过角色路由选择模型。
@@ -59,6 +70,8 @@ pub struct ProviderConfig {
     pub tool_wire_policy: ToolWirePolicy,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub apply_patch_tool_type: Option<ApplyPatchToolType>,
+    #[serde(default)]
+    pub capabilities: ProviderCapabilitySelection,
     pub catalog: ProviderModelCatalogConfig,
 }
 
@@ -99,6 +112,7 @@ impl ProviderConfig {
     }
 
     fn from_parts(info: ProviderInfo, catalog: ProviderModelCatalogConfig) -> Self {
+        let service_capabilities = info.service_capabilities.clone();
         Self {
             transport: ProviderTransportSelection::Custom {
                 protocol: info.protocol,
@@ -111,6 +125,7 @@ impl ProviderConfig {
             http_headers: info.http_headers,
             tool_wire_policy: info.tool_wire_policy,
             apply_patch_tool_type: info.apply_patch_tool_type,
+            capabilities: ProviderCapabilitySelection::Explicit(service_capabilities),
             catalog,
         }
     }
@@ -121,7 +136,26 @@ impl ProviderConfig {
             preset,
             connection_mode: self.connection_mode(),
         };
+        self.capabilities = ProviderCapabilitySelection::PresetDefaults;
         self
+    }
+
+    /// 解析 preset 默认值或实例显式覆盖后的服务能力。
+    pub fn service_capabilities(&self) -> Result<ProviderServiceCapabilities> {
+        match &self.capabilities {
+            ProviderCapabilitySelection::Explicit(capabilities) => Ok(capabilities.clone()),
+            ProviderCapabilitySelection::PresetDefaults => match self.preset_id() {
+                Some(preset_id) => super::builtin_provider_catalog()
+                    .presets
+                    .into_iter()
+                    .find(|preset| &preset.id == preset_id)
+                    .map(|preset| preset.service_capabilities)
+                    .ok_or_else(|| {
+                        PureError::ConfigError(format!("unknown provider preset: {preset_id}"))
+                    }),
+                None => Ok(ProviderServiceCapabilities::default()),
+            },
+        }
     }
 
     /// 返回实例绑定的内置 preset；自定义 provider 返回 `None`。
@@ -232,6 +266,7 @@ impl ProviderConfig {
             http_headers: self.http_headers.clone(),
             tool_wire_policy: self.tool_wire_policy,
             apply_patch_tool_type: self.apply_patch_tool_type,
+            service_capabilities: self.service_capabilities()?,
         })
     }
 
@@ -265,6 +300,14 @@ impl ProviderConfig {
             return Err(PureError::ConfigError(format!(
                 "provider {provider_id} protocol {protocol:?} does not support {:?}",
                 self.connection_mode()
+            )));
+        }
+        let service_capabilities = self.service_capabilities()?;
+        if service_capabilities.web_search.hosted_responses
+            && protocol != ProviderWireProtocol::Responses
+        {
+            return Err(PureError::ConfigError(format!(
+                "provider {provider_id} declares hosted Responses web search for protocol {protocol:?}"
             )));
         }
         if self

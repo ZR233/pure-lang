@@ -1,8 +1,8 @@
 part of '../widget_test.dart';
 
 const _testProviderCatalog = ProviderCatalogView(
-  schemaVersion: 3,
-  revision: 'widget-test-catalog-v3',
+  schemaVersion: 4,
+  revision: 'widget-test-catalog-v4',
   presets: [
     ProviderPresetView(
       id: 'deepseek',
@@ -34,6 +34,8 @@ const _testProviderCatalog = ProviderCatalogView(
       credentialEnv: 'OPENAI_API_KEY',
       modelCatalogId: 'openai',
       suggestedModel: 'gpt-5.6-sol',
+      hostedWebSearch: true,
+      standaloneWebSearch: 'open_ai_search_api',
     ),
     ProviderPresetView(
       id: 'zhipu-coding-plan',
@@ -64,6 +66,8 @@ const _testProviderCatalog = ProviderCatalogView(
       credentialEnv: 'FUTURE_PROVIDER_KEY',
       modelCatalogId: 'future-catalog',
       suggestedModel: 'future-model',
+      hostedWebSearch: true,
+      standaloneWebSearch: 'future_search_dialect',
     ),
   ],
   modelCatalogs: {

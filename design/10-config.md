@@ -166,7 +166,7 @@ catalog = "openai"
 ## 10.5 Provider 和 Model
 
 `models.providers` 可保存多个 provider，相同 preset 可重复使用；唯一性只约束 map key
-`ProviderId`。当前 StudioConfig schema 为 8，provider catalog snapshot schema 为 3。
+`ProviderId`。当前 StudioConfig schema 为 10，provider catalog snapshot schema 为 4。
 
 每个 provider 实例持久化：
 
@@ -175,10 +175,17 @@ catalog = "openai"
 - 实例字段：`name`、`base_url`、`bearer_token`/`bearer_token_env`、`http_headers`、
   `tool_wire_policy` 与 `apply_patch_tool_type`。
 - `catalog`：`Bundled { catalog, additional_models }` 或 `Explicit { models }`。
+- `capabilities`：`PresetDefaults` 或显式 `ProviderServiceCapabilities`。preset 实例默认继承
+  canonical preset 的服务能力；custom 实例默认显式无能力。
 
-Preset 配置不重复保存协议；`AgentModelConfig::resolve()` 从 canonical registry 解析 preset 后返回
-协议、连接模式、wire policy 和有效模型。Custom 配置显式保存
+Preset 配置不重复保存协议或默认服务能力；`AgentModelConfig::resolve()` 从 canonical registry
+解析 preset 后返回协议、连接模式、wire policy、服务能力和有效模型。Custom 配置显式保存
 `responses | chat_completions`。合法矩阵为 Responses+WS/HTTP、Chat+HTTP。
+
+服务能力不是模型能力的别名：provider 服务能力表示 endpoint 可以执行 hosted 或 standalone
+Web Search，`ModelCapabilities` 仍表示当前模型能否使用 native search 或 function tools。Web Search
+planner 必须同时校验两者。产品 UI 从 catalog schema 4 的无密钥 descriptor 动态渲染能力选项，
+不得识别 OpenAI、muxai 或其他具体 id。
 
 OpenAI、MiMo API、MiMo Token Plan、DeepSeek、Zhipu 与 Zhipu Coding Plan 都只是 catalog
 preset；厂商身份不进入模型执行分支。两个 MiMo preset 共享 `mimo` catalog。
@@ -281,7 +288,10 @@ MCP server 配置保存在 `[mcp.servers.<server_id>]` 表。`server_id` 必须�
 - `bearer_token_env_var`（可选）
 - `headers`
 
-Pure 启动后会在后台探测启用且凭据完整的 MCP server。Simple executor 可以消费 available tools；Task planner、explorer、reviewer 只暴露 effect 策略明确允许的动态工具，未知 effect 默认拒绝。
+Pure 启动后由 `McpRuntime<LocalMcpRuntimeHost>` 在后台探测启用且凭据完整的 MCP server。PL 统一
+维护配置 fingerprint、增量 reconcile、工具命名、冲突检查、健康状态和 generation 原子替换；
+Studio 只负责组合配置与本地连接 Host。Simple executor 可以消费 available tools；Task planner、
+explorer、reviewer 只暴露 effect 策略明确允许的动态工具，未知 effect 默认拒绝。
 
 内置 Zhipu Coding Plan MCP server 固定为：
 
@@ -292,13 +302,16 @@ Pure 启动后会在后台探测启用且凭据完整的 MCP server。Simple exe
 
 这些内置 server 优先复用 Zhipu Coding Plan provider 的 `bearer_token` 作为 Coding Plan key；若不存在 Coding Plan provider，则兼容回退到普通 Zhipu provider 的 `bearer_token`。缺少可用 token 时内置 server 的配置状态为缺少凭据且不会进入健康探测；检测到 token 时，未显式配置状态的内置 server 默认启用并进入后台探测，已被用户禁用的内置 server 保持禁用。HTTP 内置 server 运行时直接发送 bearer token；Vision server 运行时注入 `Z_AI_API_KEY=<token>` 和 `Z_AI_MODE=ZHIPU`。
 
-模型可见的 MCP tool 名称固定为：
+模型可见的 MCP tool 名称以以下形式为基础：
 
 ```text
 mcp__{server_id}__{tool_name}
 ```
 
-该命名避免远端 tool 与本地工具或其他 server tool 冲突。若 server id、远端 tool name 或合成后的工具名不满足 provider function name 约束，注册阶段必须返回清晰配置/运行时错误。
+PL 对 server id 和远端 tool name 统一规范化，合成名称最长 64 个字符；发生冲突时追加稳定 hash
+后缀。命名规则属于公共 MCP runtime，产品 Host 和 UI 不重复实现。每个 turn 从 runtime 获取固定
+generation 的 `McpTurnLease` 后再安装工具；新 generation 完全 ready 前不对新 turn 可见，旧
+generation 在最后一个 lease 释放后异步关闭。
 
 ## 10.9 Skills 配置
 

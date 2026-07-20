@@ -308,7 +308,10 @@ fn bounded_evidence_content(evidence: &mut EvidenceLedgerDocument) -> Result<Str
         if content.len() <= MAX_EVIDENCE_VISIBLE_BYTES {
             return Ok(content);
         }
-        if evidence.recent.len() > 1 {
+        // 单个 receipt 也可能携带宿主提供的大型 artifact 描述。工作上下文是
+        // 辅助索引，不能因为一个不可见的大对象而让 canonical tool history
+        // 提交失败；放不下时将该 receipt 降级为摘要索引。
+        if !evidence.recent.is_empty() {
             archive_oldest_evidence(evidence)?;
             continue;
         }
@@ -448,6 +451,30 @@ mod tests {
         assert_eq!(ledger.recent.len(), MAX_EVIDENCE_ITEMS);
         assert_eq!(ledger.archived.count, 1);
         assert!(!ledger.archived.digest.is_empty());
+    }
+
+    #[test]
+    fn oversized_single_receipt_is_archived_instead_of_failing_the_turn() {
+        let handle = TurnWorkingSetHandle::default();
+        let mut receipt = receipt("web-search-1");
+        receipt.artifacts = vec![serde_json::json!({
+            "kind": "webSearch",
+            "results": "x".repeat(MAX_EVIDENCE_VISIBLE_BYTES * 2),
+        })];
+
+        handle
+            .apply(TurnWorkingSetChange::AppendEvidence(receipt))
+            .unwrap();
+
+        let evidence = handle
+            .sections()
+            .into_iter()
+            .find(|section| section.id.as_str() == EVIDENCE_LEDGER_SECTION_ID)
+            .unwrap();
+        let ledger = serde_json::from_str::<EvidenceLedgerDocument>(&evidence.content).unwrap();
+        assert_eq!(ledger.recent.len(), 0);
+        assert_eq!(ledger.archived.count, 1);
+        assert!(evidence.content.len() <= MAX_EVIDENCE_VISIBLE_BYTES);
     }
 
     #[test]

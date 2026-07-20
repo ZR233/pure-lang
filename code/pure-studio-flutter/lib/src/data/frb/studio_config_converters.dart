@@ -58,6 +58,8 @@ List<ProviderSettingsView> _providersFromConfig(Map<String, Object?> config) {
       _firstValue(value, const ['displayName', 'display_name', 'name']),
       fallback: entry.key,
     );
+    final capabilities = _map(value['serviceCapabilities']);
+    final webSearchCapabilities = _map(capabilities['web_search']);
     return ProviderSettingsView(
       id: entry.key,
       templateKind: templateKind,
@@ -91,6 +93,15 @@ List<ProviderSettingsView> _providersFromConfig(Map<String, Object?> config) {
           'catalog_id',
         ]),
       ),
+      capabilitySource: _string(
+        value['capabilitySource'],
+        fallback: templateKind.isEmpty ? 'explicit' : 'preset_defaults',
+      ),
+      hostedWebSearch: _boolWithDefault(
+        webSearchCapabilities['hosted_responses'],
+        false,
+      ),
+      standaloneWebSearch: _string(webSearchCapabilities['standalone']),
     );
   }).toList();
 }

@@ -18,6 +18,7 @@ pub mod skill;
 pub mod tool;
 mod trace;
 pub mod turn;
+mod web_search;
 mod working_set;
 mod workspace;
 
@@ -42,7 +43,7 @@ pub use config::{
     McpServerStatusKind, McpServerTransport, ReasoningEffort, RuntimeConfig, SkillsConfig,
     SystemSkillsConfig, ToolCapabilityConfig, active_mcp_server_names, builtin_mcp_server_ids,
     effective_mcp_servers, is_builtin_mcp_server_id, normalize_builtin_mcp_server_states,
-    zhipu_coding_plan_token,
+    validate_builtin_mcp_server_states, validate_mcp_servers, zhipu_coding_plan_token,
 };
 pub use context_assembler::{AssembledModelContext, ContextAssembler};
 pub use context_compaction::{
@@ -67,7 +68,11 @@ pub use interaction::{
     UserInputOptionProjection, UserInputProjection, UserInputQuestionProjection,
     project_user_input_questions,
 };
-pub use mcp::{McpAvailabilityKind, McpAvailabilitySnapshot, McpRuntimeRegistry};
+pub use mcp::{
+    LocalMcpRuntimeHost, LocalMcpSession, McpAvailabilityKind, McpAvailabilitySnapshot,
+    McpCallRequest, McpConnectRequest, McpGeneration, McpRuntime, McpRuntimeHandle, McpRuntimeHost,
+    McpRuntimeToolDescriptor, McpSession, McpToolDefinition, McpTurnLease,
+};
 pub use message::{
     CompletionResponseOutputSnapshot, CompletionResponseSnapshot, append_message_fragment_text,
     assistant_reasoning_message, assistant_text_message, completion_response_message_text,
@@ -77,10 +82,11 @@ pub use message::{
 };
 pub use model_config::{
     AgentModelConfig, AgentRoleId, ModelCatalog, ModelCatalogId, ModelRouteConfig,
-    ProviderCatalogRegistry, ProviderConfig, ProviderConnectionPolicy, ProviderId,
-    ProviderModelCatalogConfig, ProviderPreset, ProviderPresetId, ProviderTransportSelection,
-    ResolvedModelRoute, builtin_model_catalog, builtin_provider_catalog,
-    provider_connection_mode_descriptors, provider_connection_modes,
+    ProviderCapabilitySelection, ProviderCatalogRegistry, ProviderConfig, ProviderConnectionPolicy,
+    ProviderId, ProviderModelCatalogConfig, ProviderPreset, ProviderPresetId,
+    ProviderTransportSelection, ResolvedModelRoute, builtin_model_catalog,
+    builtin_provider_catalog, provider_connection_mode_descriptors, provider_connection_modes,
+    provider_service_capabilities_descriptor,
 };
 pub use pl_lsp::{
     LspActivityKind, LspAvailabilityKind, LspDiagnostic, LspPosition, LspQuery, LspQueryOperation,
@@ -89,20 +95,22 @@ pub use pl_lsp::{
 pub use pl_model::{
     DeepSeekBalanceInfo, DeepSeekBalanceUsage, ModelCapabilities, ModelInfo, ModelModality,
     ModelParameter, ModelRequestProfile, OpenAiCompactionMode, ProviderConnectionMode,
-    ProviderWireProtocol, ReasoningInterleaved, ReasoningInterleavedField, ToolCapabilities,
-    ToolWirePolicy, TruncationMode, ZhipuCodingPlanUsage, ZhipuQuotaLimit, ZhipuQuotaWindow,
-    ZhipuToolUsageDetail,
+    ProviderServiceCapabilities, ProviderWireProtocol, ReasoningInterleaved,
+    ReasoningInterleavedField, StandaloneWebSearchDialect, ToolCapabilities, ToolWirePolicy,
+    TruncationMode, WebSearchProviderCapabilities, ZhipuCodingPlanUsage, ZhipuQuotaLimit,
+    ZhipuQuotaWindow, ZhipuToolUsageDetail,
 };
 pub use pl_protocol::{
     AgentRuntimeDelta, BudgetLimitKind, BudgetUsage, ContentPart, ContextSectionId, ErrorSeverity,
     ImageSource, InteractionChangedEvent, InteractionKind, InteractionPayload, InteractionRequest,
-    InteractionResolution, InteractionScope, InteractionStatus, Message, MessageContent,
-    MessageRole, ModelContextItem, OutputStream, PermissionLevel, PinnedContextSection,
-    PipelineStage, PlanConfirmationResolution, ProviderCatalogSnapshot,
-    ProviderConnectionModeDescriptor, ProviderPresetDescriptor, ProviderTransportDescriptor,
-    PureError, Result, RuntimeCostAmount, RuntimeUsageSnapshot, SkillActivation,
-    TokenUsageSnapshot, ToolApprovalResolution, ToolResultReceipt, UserInputAnswer,
-    UserInputRequest, UserInputResponse, UserQuestion, UserQuestionOption,
+    InteractionResolution, InteractionScope, InteractionStatus, McpAvailabilityDescriptor,
+    McpHealthSnapshot, McpServerDescriptor, Message, MessageContent, MessageRole, ModelContextItem,
+    OutputStream, PermissionLevel, PinnedContextSection, PipelineStage, PlanConfirmationResolution,
+    ProviderCatalogSnapshot, ProviderConnectionModeDescriptor, ProviderPresetDescriptor,
+    ProviderServiceCapabilitiesDescriptor, ProviderTransportDescriptor, PureError, Result,
+    RuntimeCostAmount, RuntimeUsageSnapshot, SkillActivation, TokenUsageSnapshot,
+    ToolApprovalResolution, ToolResultReceipt, UserInputAnswer, UserInputRequest,
+    UserInputResponse, UserQuestion, UserQuestionOption,
 };
 pub use provider_error::is_retryable_model_error;
 pub use runtime_usage::ModelTokenUsageSnapshot;
@@ -157,6 +165,10 @@ pub use turn::{
     InteractionFuture, PermissionMode, ToolApprovalDecision, ToolApprovalPolicy,
     ToolApprovalRequest, ToolEffect, ToolExecutionMode, TurnAbortReason, TurnBudget, TurnOptions,
     TurnRequest, TurnResult, TurnResultStatus, UserInputMode,
+};
+pub use web_search::{
+    ToolVisibilityConstraint, WebSearchAvailability, WebSearchBackend, WebSearchPath,
+    WebSearchPlan, WebSearchResolution, plan_web_search,
 };
 pub use working_set::{
     CURRENT_TODO_SECTION_ID, EVIDENCE_LEDGER_SECTION_ID, MAX_PINNED_CONTEXT_BYTES,

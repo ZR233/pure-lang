@@ -21,6 +21,9 @@ pub struct ProviderInput {
     pub name: String,
     pub base_url: String,
     pub bearer_token: String,
+    pub capability_source: String,
+    pub hosted_web_search: bool,
+    pub standalone_web_search: Option<String>,
     pub default_model: String,
     pub custom_models: Vec<ProviderModelInput>,
 }
@@ -134,6 +137,18 @@ pub struct BridgeProviderPresetDescriptor {
     pub model_catalog_id: String,
     pub suggested_model: String,
     pub icon_key: Option<String>,
+    pub service_capabilities: BridgeProviderServiceCapabilitiesDescriptor,
+}
+
+#[derive(Debug, Clone)]
+pub struct BridgeProviderServiceCapabilitiesDescriptor {
+    pub web_search: BridgeWebSearchProviderCapabilitiesDescriptor,
+}
+
+#[derive(Debug, Clone)]
+pub struct BridgeWebSearchProviderCapabilitiesDescriptor {
+    pub hosted_responses: bool,
+    pub standalone: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -228,6 +243,15 @@ impl From<pl_protocol::ProviderCatalogSnapshot> for BridgeProviderCatalogSnapsho
                     model_catalog_id: preset.model_catalog_id,
                     suggested_model: preset.suggested_model,
                     icon_key: preset.icon_key,
+                    service_capabilities: BridgeProviderServiceCapabilitiesDescriptor {
+                        web_search: BridgeWebSearchProviderCapabilitiesDescriptor {
+                            hosted_responses: preset
+                                .service_capabilities
+                                .web_search
+                                .hosted_responses,
+                            standalone: preset.service_capabilities.web_search.standalone,
+                        },
+                    },
                 })
                 .collect(),
             model_catalogs: snapshot

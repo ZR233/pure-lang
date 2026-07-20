@@ -370,7 +370,7 @@ pub struct SearchResponse {
     pub results: Option<Vec<serde_json::Value>>,
 }
 
-/// 只负责 OpenAI `/alpha/search` 边界的 HTTP 客户端。
+/// 只负责兼容 `/alpha/search` dialect 的 HTTP 客户端。
 #[derive(Debug, Clone)]
 pub struct WebSearchClient {
     client: reqwest::Client,
@@ -382,7 +382,7 @@ pub struct WebSearchClient {
 impl WebSearchClient {
     /// 使用已解析的 provider runtime 信息创建客户端。
     ///
-    /// preset 身份由上层账户解析器校验；此处再次拒绝空凭据，保证无凭据时
+    /// 服务能力由上层 planner 校验；此处再次拒绝空凭据，保证无凭据时
     /// 客户端不可构造。
     pub fn new(provider: &ProviderInfo) -> Result<Self> {
         Self::with_timeout(provider, WEB_SEARCH_REQUEST_TIMEOUT)
@@ -395,7 +395,7 @@ impl WebSearchClient {
             .filter(|token| !token.trim().is_empty())
             .ok_or_else(|| {
                 PureError::ConfigError(
-                    "OpenAI web search requires a non-empty bearer token".to_string(),
+                    "standalone web search requires a non-empty bearer token".to_string(),
                 )
             })?;
         let headers = configured_headers(provider.http_headers.as_ref())?;

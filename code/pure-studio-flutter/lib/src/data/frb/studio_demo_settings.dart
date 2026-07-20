@@ -1,8 +1,8 @@
 part of 'studio_api.dart';
 
 const demoProviderCatalogFixture = ProviderCatalogView(
-  schemaVersion: 3,
-  revision: 'demo-future-catalog-v3',
+  schemaVersion: 4,
+  revision: 'demo-future-catalog-v4',
   presets: [
     ProviderPresetView(
       id: 'future-provider',
@@ -18,6 +18,8 @@ const demoProviderCatalogFixture = ProviderCatalogView(
       credentialEnv: 'FUTURE_PROVIDER_KEY',
       modelCatalogId: 'future-catalog',
       suggestedModel: 'future-model',
+      hostedWebSearch: true,
+      standaloneWebSearch: 'future_search_dialect',
     ),
   ],
   modelCatalogs: {
@@ -102,6 +104,18 @@ List<ProviderSettingsView> _providersFromSettingsPayload(
       catalogId: template.modelCatalogId,
       credentialLabel: template.credentialLabel,
       credentialEnv: template.credentialEnv,
+      capabilitySource: _string(
+        provider['capabilitySource'],
+        fallback: 'preset_defaults',
+      ),
+      hostedWebSearch: _boolWithDefault(
+        provider['hostedWebSearch'],
+        template.hostedWebSearch,
+      ),
+      standaloneWebSearch: _string(
+        provider['standaloneWebSearch'],
+        fallback: template.standaloneWebSearch,
+      ),
       iconKey: template.iconKey,
     );
   }).toList();

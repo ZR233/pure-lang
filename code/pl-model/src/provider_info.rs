@@ -9,6 +9,64 @@ use crate::transport_policy::RESPONSES_WEBSOCKET_PROFILE_REVISION;
 pub const ZHIPU_CODING_PLAN_BASE_URL: &str = "https://open.bigmodel.cn/api/coding/paas/v4";
 pub(crate) const RESPONSES_WEBSOCKET_DIALECT: &str = "responses_websockets=2026-02-06";
 
+/// Provider 可提供的独立 Web Search 协议。
+///
+/// 该类型描述服务能力，不代表 provider 身份；任何兼容 endpoint 都可显式声明。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StandaloneWebSearchDialect {
+    OpenAiSearchApi,
+}
+
+impl StandaloneWebSearchDialect {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::OpenAiSearchApi => "open_ai_search_api",
+        }
+    }
+}
+
+impl std::str::FromStr for StandaloneWebSearchDialect {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "open_ai_search_api" => Ok(Self::OpenAiSearchApi),
+            value => Err(format!(
+                "unsupported standalone web search dialect: {value}"
+            )),
+        }
+    }
+}
+
+/// Provider endpoint 可提供的 Web Search 服务能力。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WebSearchProviderCapabilities {
+    #[serde(default)]
+    pub hosted_responses: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub standalone: Option<StandaloneWebSearchDialect>,
+}
+
+/// 与具体产品无关的 Provider 外部服务能力。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderServiceCapabilities {
+    #[serde(default)]
+    pub web_search: WebSearchProviderCapabilities,
+}
+
+impl ProviderServiceCapabilities {
+    /// 返回同时支持 Responses hosted 与 OpenAI Search API 的能力集合。
+    pub fn openai_web_search() -> Self {
+        Self {
+            web_search: WebSearchProviderCapabilities {
+                hosted_responses: true,
+                standalone: Some(StandaloneWebSearchDialect::OpenAiSearchApi),
+            },
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProviderInfo {
     pub protocol: ProviderWireProtocol,
@@ -23,6 +81,8 @@ pub struct ProviderInfo {
     pub tool_wire_policy: ToolWirePolicy,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub apply_patch_tool_type: Option<ApplyPatchToolType>,
+    #[serde(default)]
+    pub service_capabilities: ProviderServiceCapabilities,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -97,6 +157,7 @@ impl ProviderInfo {
             http_headers: None,
             tool_wire_policy: ToolWirePolicy::NativeCustomTools,
             apply_patch_tool_type: Some(ApplyPatchToolType::Freeform),
+            service_capabilities: ProviderServiceCapabilities::openai_web_search(),
         }
     }
 
@@ -111,6 +172,7 @@ impl ProviderInfo {
             http_headers: None,
             tool_wire_policy: ToolWirePolicy::FunctionFallback,
             apply_patch_tool_type: None,
+            service_capabilities: ProviderServiceCapabilities::default(),
         }
     }
 
@@ -125,6 +187,7 @@ impl ProviderInfo {
             http_headers: None,
             tool_wire_policy: ToolWirePolicy::FunctionFallback,
             apply_patch_tool_type: None,
+            service_capabilities: ProviderServiceCapabilities::default(),
         }
     }
 
@@ -139,6 +202,7 @@ impl ProviderInfo {
             http_headers: None,
             tool_wire_policy: ToolWirePolicy::FunctionFallback,
             apply_patch_tool_type: None,
+            service_capabilities: ProviderServiceCapabilities::default(),
         }
     }
 
@@ -157,6 +221,7 @@ impl ProviderInfo {
             http_headers: None,
             tool_wire_policy: ToolWirePolicy::FunctionFallback,
             apply_patch_tool_type: None,
+            service_capabilities: ProviderServiceCapabilities::default(),
         }
     }
 
@@ -179,6 +244,7 @@ impl ProviderInfo {
             http_headers: None,
             tool_wire_policy: ToolWirePolicy::FunctionFallback,
             apply_patch_tool_type: None,
+            service_capabilities: ProviderServiceCapabilities::default(),
         }
     }
 
@@ -225,6 +291,18 @@ mod tests {
         assert_eq!(info.name, "DeepSeek");
         assert_eq!(info.default_model, "deepseek-v4-flash");
         assert_eq!(info.tool_wire_policy, ToolWirePolicy::FunctionFallback);
+    }
+
+    #[test]
+    fn standalone_web_search_dialect_has_a_stable_wire_name() {
+        let dialect = StandaloneWebSearchDialect::OpenAiSearchApi;
+
+        assert_eq!(dialect.as_str(), "open_ai_search_api");
+        assert_eq!(dialect.as_str().parse(), Ok(dialect));
+        assert_eq!(
+            "future_dialect".parse::<StandaloneWebSearchDialect>(),
+            Err("unsupported standalone web search dialect: future_dialect".to_string())
+        );
     }
 
     #[test]

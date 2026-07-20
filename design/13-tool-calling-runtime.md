@@ -42,7 +42,11 @@ Chat Completions provider 如果没有 Responses 风格的 completed event，pro
 
 `list_files` 的 `glob` 既可以匹配 workspace-relative 路径，也可以匹配 `path` 参数之下的相对条目；`includeDirs=true` 时目录候选按带尾随 `/` 的形式参与匹配。`**/` 表示零层或多层目录，因此 `**/Cargo.toml` 必须同时匹配 workspace 根下和子目录下的 `Cargo.toml`。
 
-MCP tools 由进程内 registry 的当前可用快照注册。Simple executor 可以使用 available tools；Task planner、explorer、reviewer 只暴露 effect 策略明确允许的动态工具，未知 effect 默认拒绝。
+MCP tools 由 `McpRuntimeHandle` 的 turn lease 注册。`McpRuntime<H>` 的泛型 worker 持有具体
+`McpRuntimeHost`，产品和工具只持有非泛型 handle；`McpTurnLease` 固定 generation、tool schema、
+resource 入口和调用 backend。Simple executor 可以使用 available tools；Task planner、explorer、
+reviewer 只暴露 effect 策略明确允许的动态工具，未知 effect 默认拒绝。内置 Zhipu 工具统一声明为
+`ToolEffect::Read`。
 
 内置 Zhipu Coding Plan MCP server 优先复用 Zhipu Coding Plan provider 的 `bearer_token`，并兼容回退到普通 Zhipu provider 的 `bearer_token`。缺少 token 时内置 server 处于 `missingCredential`，不参与后台探测，也不应导致普通 turn 或 subagent 启动失败；检测到 token 后进入后台探测流程，只有探测成功的 server 会被主会话和 subagent runner 注册。HTTP 内置 server 在 transport 层直接发送 bearer token；stdio Vision server 在启动进程时注入 `Z_AI_API_KEY` 和 `Z_AI_MODE=ZHIPU`。
 
@@ -101,7 +105,7 @@ Windows 上 `bash.command` 的默认宿主 shell 是 PowerShell：运行时先�
 
 `update_todo_list` 是 Codex `update_plan` 风格的内置 checklist 工具，root agent 与 subagent 都可用，且不代表 Plan Mode 的 `plan` part。工具输入是完整快照：`explanation?: string` 与 `items: [{ step, status }]`，其中 `status` 只允许 `pending | inProgress | completed`，且同一快照最多一个 `inProgress`。工具成功后只返回紧凑 `{ status: "updated" }` 给模型，同时发送 `TodoListUpdated` agent timeline event；后端不维护 latest todo cache，也不按 patch 增量合并。
 
-MCP tool 成功结果写回紧凑字符串。文本内容按 MCP content 顺序合并；JSON 或非文本内容序列化为紧凑 JSON。MCP `isError` 或 transport/protocol 错误按本地执行错误处理，使用 `Tool execution error: {error}` 前缀写回模型上下文，同时在 Studio timeline 中展示失败原因。transport/protocol 错误还会把对应 server 的 availability 标记为 `unavailable`，后续 turn 不再暴露该 server 的 tools，直到后台周期重检或保存配置后的 reconcile 恢复。HTTP MCP 的 SSE 响应必须先按事件收集完整 `data` payload，再交给 JSON-RPC wire 类型反序列化，不能只解析第一行 `data`。MCP runtime 命名空间按职责拆分：registry 只维护 server availability 和可用工具快照，tool adapter 只负责 exposed tool 到 `tools/call` 的转换，transport client 按 stdio/http 持有连接生命周期，JSON-RPC wire 类型集中在协议子模块，避免单个 `mcp` 模块同时承载状态机、I/O 和 wire schema。
+MCP tool 成功结果写回紧凑字符串。文本内容按 MCP content 顺序合并；JSON 或非文本内容序列化为紧凑 JSON。MCP `isError` 或 transport/protocol 错误按本地执行错误处理，使用 `Tool execution error: {error}` 前缀写回模型上下文，同时在产品 timeline 中展示失败原因。transport/protocol 错误只把对应 server 的 availability 标记为 `unavailable`，不得污染其他 server。新 turn 不再获得该 server 的工具，持有旧 lease 的 turn 仍按固定 generation 收尾。HTTP MCP 的 SSE 响应必须先按事件收集完整 `data` payload，再交给 JSON-RPC wire 类型反序列化，不能只解析第一行 `data`。MCP runtime 按 contract、worker、generation、tool adapter、local host 和 wire protocol 拆分；产品 Host 不实现 reconcile、命名或健康状态机。
 
 文件修改工具不向 schema 暴露语义模糊的 bool 参数。`delete_path` 使用 `mode: "file" | "emptyDirectory" | "recursiveDirectory"`；`copy_path` 和 `move_path` 使用 `collision: "failIfExists" | "overwrite"`。运行期不再保留 `recursive` / `overwrite` 旧 bool 字段的读取路径，历史会话或手写输入若使用旧字段会被 schema 校验拒绝，工具描述只暴露 `mode` / `collision`。
 
@@ -117,8 +121,15 @@ Studio timeline 以 message/part projection 派生的 conversation row 为准。
 
 ## Web 搜索工具规划
 
-`web_search` 是 `ToolEffect::Read` 且允许并行的内置函数工具。mode 非 disabled、存在可用 OpenAI preset 且当前模型支持 function calling 时优先暴露该工具，并抑制 Responses hosted `web_search`；函数工具可由任意 provider 模型调用，但执行请求始终使用自动选择的 OpenAI provider。
+`web_search` 是 `ToolEffect::Read` 且允许并行的内置函数工具。`plan_web_search()` 只读取解析后的
+`ProviderServiceCapabilities`、协议、模型能力、凭据和产品 Web Search 配置，不识别 provider 或
+preset id。planner 按当前 provider、角色路由和 provider 配置顺序确定性寻找 standalone candidate；
+当前模型支持 function calling 时优先形成 additive standalone 工具，否则在当前 provider 同时支持
+Responses hosted search 和模型 native search 时形成 exclusive hosted tool。
 
 独立工具输入与 OpenAI `/alpha/search` commands 对齐，支持网页/图片查询、open、click、find、PDF screenshot、finance、weather、sports、time 和 response length。请求上下文只保留最近两个 user message 及其间受限的 assistant text，排除 system、environment 和 tool 消息。响应 `output` 写回模型，`results` 只进入 trace/persistence/UI，`encrypted_output` 不进入模型上下文。
 
-如果函数工具无法暴露，只有当前模型请求自身满足 OpenAI preset、有效凭据、Responses wire 和 web-search capability 时才使用 hosted tool。无凭据状态必须在工具规划和 executor 构造两层拒绝，保证错误配置或历史 tool call 不能绕过门控发起远程请求。
+`WebSearchPlan` 明确返回 `Additive | Exclusive | Unavailable` 可见性以及脱敏 resolution；无有效
+candidate 时区分 disabled、缺凭据、provider 不支持和模型不支持。产品只能通过 PL 统一安装入口
+应用 plan，不能改变候选优先级，也不能直接构造独立或 hosted Web Search 工具。执行器再次校验
+plan 中解析出的 provider，保证错误配置或历史 tool call 不能绕过门控发起远程请求。
