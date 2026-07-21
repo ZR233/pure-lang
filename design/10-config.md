@@ -222,7 +222,7 @@ Anthropic 只在 `pl-model` 的 protocol 层保留占位，未实现 provider ru
 
 Bundled DeepSeek 模型按中国官网人民币 API 价格配置：`deepseek-v4-flash` 为缓存命中输入 0.02 元、缓存未命中输入 1 元、输出 2 元；`deepseek-v4-pro` 为缓存命中输入 0.025 元、缓存未命中输入 3 元、输出 6 元。`input_price_per_mtok` 表示缓存未命中输入价，`cache_read_price_per_mtok` 表示缓存命中输入价。
 
-Bundled OpenAI/GPT 模型参数以本地 Codex 仓库 `codex-rs/models-manager/models.json` 的修改为准，不按公开 API 文档臆造价格、最大输出或上下文窗口。当前 OpenAI 模板顺序为 `gpt-5.5`、`gpt-5.4`、`gpt-5.4-mini`、`gpt-5.6-sol`、`gpt-5.6-terra`、`gpt-5.6-luna`。GPT-5.6 三个模型的上下文窗口和最大上下文窗口均为 `372000`，最大输出 token 未声明，且继承 OpenAI 的 Responses、视觉输入、工具调用、并行工具和 web search 能力。Pure 当前 `ModelInfo` 不持久化 Codex 的 `default_reasoning_level` 字段，因此 OpenAI 模型 effort 参数候选值的首项表示 Codex 默认 reasoning level，后续项表示其他支持档位；选中值通过 wire 写入 Responses 的 `reasoning.effort`。GPT-5.6 Sol 的默认 effort 为 `low`，Terra/Luna 的默认 effort 为 `medium`。Codex 的 `ultra` 是带自动任务委派语义的内部档位，Pure 没有对应语义，因此不加入候选值。
+Bundled OpenAI/GPT 模型参数以本地 Codex 仓库 `codex-rs/models-manager/models.json` 的修改为准，不按公开 API 文档臆造价格、最大输出或上下文窗口。当前 OpenAI 模板顺序为 `gpt-5.5`、`gpt-5.4`、`gpt-5.4-mini`、`gpt-5.6-sol`、`gpt-5.6-terra`、`gpt-5.6-luna`。GPT-5.6 三个模型的上下文窗口和最大上下文窗口均为 `272000`，最大输出 token 未声明，且继承 OpenAI 的 Responses、视觉输入、工具调用、并行工具和 web search 能力。Pure 当前 `ModelInfo` 不持久化 Codex 的 `default_reasoning_level` 字段，因此 OpenAI 模型 effort 参数候选值的首项表示 Codex 默认 reasoning level，后续项表示其他支持档位；选中值通过 wire 写入 Responses 的 `reasoning.effort`。GPT-5.6 Sol 的默认 effort 为 `low`，Terra/Luna 的默认 effort 为 `medium`。Codex 的 `ultra` 是带自动任务委派语义的内部档位，Pure 没有对应语义，因此不加入候选值。
 
 `request_profile.responses_max_tokens_field` 控制 Responses endpoint 如何序列化 `CompletionRequest::max_tokens`，可选值为 `omit`、`max_output_tokens`、`max_tokens` 和 `max_completion_tokens`。默认值为 `omit`，与 Codex 常规 Responses 请求保持一致；只有兼容代理明确要求输出 token 限制字段时才应在模型 profile 中显式设置。
 
