@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use tokio::sync::{mpsc, oneshot};
 
 use super::actor::{ActorCommand, AgentActorHandle, spawn_agent_actor};
-use super::host::{AgentEventSink, AgentLifecycleAdapter, AgentStateRepository};
+use super::host::{AgentCommitObserver, AgentLifecycleAdapter, AgentStateRepository};
 use super::runtime::{AgentRuntimeOptions, RestoredInputPolicy};
 use super::state::{AgentRuntimeError, unix_timestamp};
 use super::{
@@ -12,6 +12,7 @@ use super::{
     AgentRuntimeResult, AgentSnapshot, AgentSpawnRequest, AgentSpawnResult, AgentSubmitRequest,
     AgentWaitResult, PendingAgentInput, RestoredAgentRuntime, SpawnLifecycleRequest, TurnId,
 };
+use crate::SessionEventHub;
 
 mod spawn;
 use spawn::{register_agent, spawn_child_agent};
@@ -51,6 +52,12 @@ pub(crate) enum CoordinatorCommand {
         session: super::AgentSessionState,
         reply: oneshot::Sender<AgentRuntimeResult<()>>,
     },
+    RecordSessionFacts {
+        agent_id: AgentId,
+        session_id: super::SessionId,
+        facts: Vec<crate::SessionEventFact>,
+        reply: oneshot::Sender<AgentRuntimeResult<()>>,
+    },
     Close {
         agent_id: AgentId,
         reply: oneshot::Sender<AgentRuntimeResult<AgentSnapshot>>,
@@ -78,12 +85,13 @@ pub(crate) fn spawn_coordinator<H>(
     host: H,
     restored: Vec<RestoredAgentRuntime>,
     options: AgentRuntimeOptions,
-) -> AgentRuntimeHandle
+    session_events: SessionEventHub,
+) -> AgentRuntimeResult<AgentRuntimeHandle>
 where
     H: AgentRuntimeHost,
 {
     let (sender, receiver) = mpsc::channel(options.command_capacity.max(1));
-    let handle = AgentRuntimeHandle::new(sender);
+    let handle = AgentRuntimeHandle::new(sender, session_events.handle());
     let mut actors = BTreeMap::new();
     for restored_agent in restored {
         let id = restored_agent.state.snapshot.identity.id.clone();
@@ -106,7 +114,7 @@ where
         receiver,
         options,
     ));
-    handle
+    Ok(handle)
 }
 
 async fn run_coordinator<H>(
@@ -190,6 +198,23 @@ async fn run_coordinator<H>(
                     &actors,
                     &agent_id,
                     ActorCommand::OpenSession { session, reply },
+                )
+                .await;
+            }
+            CoordinatorCommand::RecordSessionFacts {
+                agent_id,
+                session_id,
+                facts,
+                reply,
+            } => {
+                route(
+                    &actors,
+                    &agent_id,
+                    ActorCommand::RecordSessionFacts {
+                        session_id,
+                        facts,
+                        reply,
+                    },
                 )
                 .await;
             }
@@ -379,6 +404,9 @@ fn reject_missing(command: ActorCommand, agent_id: AgentId) {
             let _ = reply.send(Err(error));
         }
         ActorCommand::OpenSession { reply, .. } => {
+            let _ = reply.send(Err(error));
+        }
+        ActorCommand::RecordSessionFacts { reply, .. } => {
             let _ = reply.send(Err(error));
         }
         ActorCommand::Snapshot { reply } => {

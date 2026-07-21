@@ -6,7 +6,7 @@
 import '../../../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 class BridgeActiveTurn {
   final String sessionId;
@@ -118,62 +118,6 @@ class BridgeMcpServerDto {
           availabilityKind == other.availabilityKind;
 }
 
-class BridgePlanLifecycleDto {
-  final String planId;
-  final String state;
-  final String? turnId;
-  final String? reason;
-  final PlatformInt64 updatedAt;
-
-  const BridgePlanLifecycleDto({
-    required this.planId,
-    required this.state,
-    this.turnId,
-    this.reason,
-    required this.updatedAt,
-  });
-
-  @override
-  int get hashCode =>
-      planId.hashCode ^
-      state.hashCode ^
-      turnId.hashCode ^
-      reason.hashCode ^
-      updatedAt.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgePlanLifecycleDto &&
-          runtimeType == other.runtimeType &&
-          planId == other.planId &&
-          state == other.state &&
-          turnId == other.turnId &&
-          reason == other.reason &&
-          updatedAt == other.updatedAt;
-}
-
-class BridgeRuntimeCostAmountDto {
-  final String currency;
-  final double amount;
-
-  const BridgeRuntimeCostAmountDto({
-    required this.currency,
-    required this.amount,
-  });
-
-  @override
-  int get hashCode => currency.hashCode ^ amount.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeRuntimeCostAmountDto &&
-          runtimeType == other.runtimeType &&
-          currency == other.currency &&
-          amount == other.amount;
-}
-
 enum BridgeRuntimeStatus {
   uninitialized,
   initializing,
@@ -181,120 +125,6 @@ enum BridgeRuntimeStatus {
   shuttingDown,
   stopped,
   failed,
-}
-
-class BridgeSessionRuntimeDto {
-  final String sessionId;
-  final String model;
-  final BigInt? contextWindow;
-  final BigInt latestContextTokens;
-  final BigInt promptTokens;
-  final BigInt completionTokens;
-  final BigInt cachedPromptTokens;
-  final BigInt totalTokens;
-  final List<BridgeRuntimeCostAmountDto> estimatedCosts;
-  final bool hasUnpricedUsage;
-  final List<String> activeSkills;
-  final List<String> activeMcpServers;
-  final List<String> activeLspServers;
-  final BridgeTaskRuntimeDto? task;
-  final PlatformInt64 updatedAt;
-
-  const BridgeSessionRuntimeDto({
-    required this.sessionId,
-    required this.model,
-    this.contextWindow,
-    required this.latestContextTokens,
-    required this.promptTokens,
-    required this.completionTokens,
-    required this.cachedPromptTokens,
-    required this.totalTokens,
-    required this.estimatedCosts,
-    required this.hasUnpricedUsage,
-    required this.activeSkills,
-    required this.activeMcpServers,
-    required this.activeLspServers,
-    this.task,
-    required this.updatedAt,
-  });
-
-  @override
-  int get hashCode =>
-      sessionId.hashCode ^
-      model.hashCode ^
-      contextWindow.hashCode ^
-      latestContextTokens.hashCode ^
-      promptTokens.hashCode ^
-      completionTokens.hashCode ^
-      cachedPromptTokens.hashCode ^
-      totalTokens.hashCode ^
-      estimatedCosts.hashCode ^
-      hasUnpricedUsage.hashCode ^
-      activeSkills.hashCode ^
-      activeMcpServers.hashCode ^
-      activeLspServers.hashCode ^
-      task.hashCode ^
-      updatedAt.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeSessionRuntimeDto &&
-          runtimeType == other.runtimeType &&
-          sessionId == other.sessionId &&
-          model == other.model &&
-          contextWindow == other.contextWindow &&
-          latestContextTokens == other.latestContextTokens &&
-          promptTokens == other.promptTokens &&
-          completionTokens == other.completionTokens &&
-          cachedPromptTokens == other.cachedPromptTokens &&
-          totalTokens == other.totalTokens &&
-          estimatedCosts == other.estimatedCosts &&
-          hasUnpricedUsage == other.hasUnpricedUsage &&
-          activeSkills == other.activeSkills &&
-          activeMcpServers == other.activeMcpServers &&
-          activeLspServers == other.activeLspServers &&
-          task == other.task &&
-          updatedAt == other.updatedAt;
-}
-
-class BridgeSkillActivationDto {
-  final String name;
-  final String source;
-  final String path;
-  final String turnId;
-  final String toolCallId;
-  final PlatformInt64 activatedAt;
-
-  const BridgeSkillActivationDto({
-    required this.name,
-    required this.source,
-    required this.path,
-    required this.turnId,
-    required this.toolCallId,
-    required this.activatedAt,
-  });
-
-  @override
-  int get hashCode =>
-      name.hashCode ^
-      source.hashCode ^
-      path.hashCode ^
-      turnId.hashCode ^
-      toolCallId.hashCode ^
-      activatedAt.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeSkillActivationDto &&
-          runtimeType == other.runtimeType &&
-          name == other.name &&
-          source == other.source &&
-          path == other.path &&
-          turnId == other.turnId &&
-          toolCallId == other.toolCallId &&
-          activatedAt == other.activatedAt;
 }
 
 class BridgeTaskAgentDto {

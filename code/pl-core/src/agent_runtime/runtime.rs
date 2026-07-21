@@ -1,13 +1,15 @@
 use std::time::Duration;
 
 use super::coordinator::spawn_coordinator;
-use super::host::{AgentEventSink, AgentStateRepository};
+use super::host::{AgentCommitObserver, AgentStateRepository};
 use super::state::{AgentRuntimeError, unix_timestamp};
 use super::{
     AgentActivityState, AgentCommit, AgentCommitOutcome, AgentCommittedEvent, AgentLifecycleState,
     AgentRuntimeEvent, AgentRuntimeEventKind, AgentRuntimeHandle, AgentRuntimeHost,
     AgentRuntimeResult, AgentTurnOutcome, RestoredAgentRuntime, SessionId, TurnId, TurnOutcomeKind,
 };
+use crate::session_event::{project_runtime_event, runtime_event_session_id};
+use crate::{SessionEventHub, SessionEventHubHandle, SessionEventOptions};
 
 /// runtime 启动时如何处理 repository 恢复出的 pending inputs。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -25,6 +27,7 @@ pub struct AgentRuntimeOptions {
     pub command_capacity: usize,
     pub cancel_grace: Duration,
     pub restored_inputs: RestoredInputPolicy,
+    pub session_events: SessionEventOptions,
 }
 
 impl Default for AgentRuntimeOptions {
@@ -33,6 +36,7 @@ impl Default for AgentRuntimeOptions {
             command_capacity: 128,
             cancel_grace: Duration::from_millis(500),
             restored_inputs: RestoredInputPolicy::Start,
+            session_events: SessionEventOptions::default(),
         }
     }
 }
@@ -60,8 +64,20 @@ where
             .restore_runtime()
             .await
             .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
-        let restored = recover_interrupted_turns(&host, restored).await?;
-        let handle = spawn_coordinator(host.clone(), restored, options);
+        let session_events = SessionEventHub::new(options.session_events);
+        let session_event_handle = session_events.handle();
+        for agent in &restored {
+            for projection in &agent.session_projections {
+                session_event_handle
+                    .replace_snapshot(
+                        projection.snapshot.clone(),
+                        projection.durable_events.clone(),
+                    )
+                    .map_err(|error| AgentRuntimeError::SessionEvents(error.to_string()))?;
+            }
+        }
+        let restored = recover_interrupted_turns(&host, &session_event_handle, restored).await?;
+        let handle = spawn_coordinator(host.clone(), restored, options, session_events)?;
         Ok(Self { host, handle })
     }
 
@@ -83,6 +99,7 @@ where
 
 async fn recover_interrupted_turns<H>(
     host: &H,
+    session_events: &SessionEventHubHandle,
     restored: Vec<RestoredAgentRuntime>,
 ) -> AgentRuntimeResult<Vec<RestoredAgentRuntime>>
 where
@@ -147,6 +164,27 @@ where
                 snapshot: agent.state.snapshot.clone(),
             },
         };
+        let session_id = runtime_event_session_id(&event)
+            .expect("recovery cancellation always belongs to a session")
+            .to_string();
+        let session_key = SessionId::new(session_id.clone())
+            .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
+        let sequence = agent
+            .state
+            .sessions
+            .get(&session_key)
+            .map_or(0, |session| session.session_event_sequence);
+        let projected = project_runtime_event(&event, sequence);
+        let durable_session_events = projected.durable_events();
+        let projection = super::SessionProjectionCommit {
+            snapshot: session_events
+                .project_durable(&session_id, &durable_session_events)
+                .map_err(|error| AgentRuntimeError::SessionEvents(error.to_string()))?,
+            durable_events: durable_session_events,
+        };
+        if let Some(session) = agent.state.sessions.get_mut(&session_key) {
+            session.session_event_sequence = projected.through_sequence;
+        }
         let commit_outcome = host
             .repository()
             .commit(AgentCommit {
@@ -155,14 +193,29 @@ where
                 next_state: agent.state.clone(),
                 events: vec![event.clone()],
                 trace_events: Vec::new(),
+                session_projection: Some(projection.clone()),
                 mutation: super::AgentStateMutation::SnapshotAndQueue,
             })
             .await
             .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
         match commit_outcome {
             AgentCommitOutcome::Applied => {
-                host.events()
-                    .publish(AgentCommittedEvent::runtime(event))
+                session_events
+                    .publish_batch(projected.events.clone())
+                    .map_err(|error| AgentRuntimeError::SessionEvents(error.to_string()))?;
+                host.observer()
+                    .publish(AgentCommittedEvent {
+                        agent_id: event.agent_id.clone(),
+                        session_id: Some(session_key),
+                        turn_id: projected
+                            .events
+                            .first()
+                            .and_then(|session_event| session_event.turn_id.clone())
+                            .and_then(|value| TurnId::new(value).ok()),
+                        runtime_events: vec![event],
+                        trace_events: Vec::new(),
+                        session_events: projected.events,
+                    })
                     .await
             }
             AgentCommitOutcome::RevisionConflict { actual_revision } => {
@@ -171,6 +224,23 @@ where
                     actual: actual_revision,
                 });
             }
+        }
+        if let Some(restored_projection) = agent
+            .session_projections
+            .iter_mut()
+            .find(|restored| restored.snapshot.session_id == session_id)
+        {
+            restored_projection.snapshot = projection.snapshot;
+            restored_projection
+                .durable_events
+                .extend(projection.durable_events);
+        } else {
+            agent
+                .session_projections
+                .push(super::RestoredSessionProjection {
+                    snapshot: projection.snapshot,
+                    durable_events: projection.durable_events,
+                });
         }
         recovered.push(agent);
     }

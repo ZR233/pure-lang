@@ -4,9 +4,6 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import '../../../frb_generated.dart';
-import 'agent.dart';
-import 'interaction.dart';
-import 'message.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 import 'response.dart';
@@ -15,36 +12,35 @@ part 'event.freezed.dart';
 
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `eq`, `eq`, `fmt`, `fmt`
 
-class BridgeEventEnvelope {
+/// Flutter Bridge 的 Studio 产品事件信封。
+///
+/// session 事件通过 `BridgeSessionStreamFrame` 透明传输，不得加入此类型。
+class BridgeProductEventEnvelope {
   final String eventId;
-  final String? sessionId;
-  final String? turnId;
+  final String? projectId;
   final BigInt sequence;
   final PlatformInt64 createdAt;
-  final BridgeEventPayload payload;
+  final BridgeProductEventPayload payload;
 
-  const BridgeEventEnvelope({
+  const BridgeProductEventEnvelope({
     required this.eventId,
-    this.sessionId,
-    this.turnId,
+    this.projectId,
     required this.sequence,
     required this.createdAt,
     required this.payload,
   });
 
-  static Future<BridgeEventEnvelope> stale({
-    String? sessionId,
+  static Future<BridgeProductEventEnvelope> stale({
     required BigInt laggedEvents,
-  }) => RustLib.instance.api.crateApiStudioTypesEventBridgeEventEnvelopeStale(
-    sessionId: sessionId,
-    laggedEvents: laggedEvents,
-  );
+  }) => RustLib.instance.api
+      .crateApiStudioTypesEventBridgeProductEventEnvelopeStale(
+        laggedEvents: laggedEvents,
+      );
 
   @override
   int get hashCode =>
       eventId.hashCode ^
-      sessionId.hashCode ^
-      turnId.hashCode ^
+      projectId.hashCode ^
       sequence.hashCode ^
       createdAt.hashCode ^
       payload.hashCode;
@@ -52,66 +48,34 @@ class BridgeEventEnvelope {
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is BridgeEventEnvelope &&
+      other is BridgeProductEventEnvelope &&
           runtimeType == other.runtimeType &&
           eventId == other.eventId &&
-          sessionId == other.sessionId &&
-          turnId == other.turnId &&
+          projectId == other.projectId &&
           sequence == other.sequence &&
           createdAt == other.createdAt &&
           payload == other.payload;
 }
 
 @freezed
-sealed class BridgeEventPayload with _$BridgeEventPayload {
-  const BridgeEventPayload._();
+sealed class BridgeProductEventPayload with _$BridgeProductEventPayload {
+  const BridgeProductEventPayload._();
 
-  const factory BridgeEventPayload.turnChanged({
-    required BridgeStudioTurnDto turn,
-  }) = BridgeEventPayload_TurnChanged;
-  const factory BridgeEventPayload.messageUpdated({
-    required BridgeStudioMessageDto message,
-  }) = BridgeEventPayload_MessageUpdated;
-  const factory BridgeEventPayload.messageRemoved({required String messageId}) =
-      BridgeEventPayload_MessageRemoved;
-  const factory BridgeEventPayload.messagePartUpdated({
-    required BridgeStudioPartDto part_,
-  }) = BridgeEventPayload_MessagePartUpdated;
-  const factory BridgeEventPayload.messagePartRemoved({
-    required String messageId,
-    required String partId,
-  }) = BridgeEventPayload_MessagePartRemoved;
-  const factory BridgeEventPayload.messagePartDelta({
-    required BridgeStudioPartDeltaDto delta,
-  }) = BridgeEventPayload_MessagePartDelta;
-  const factory BridgeEventPayload.interactionChanged({
-    required BridgeInteractionChangedDto event,
-  }) = BridgeEventPayload_InteractionChanged;
-  const factory BridgeEventPayload.agentChanged({
-    required BridgeAgentSnapshotDto agent,
-  }) = BridgeEventPayload_AgentChanged;
-  const factory BridgeEventPayload.agentTimelineChanged({
-    required BridgeAgentTimelineEventDto event,
-  }) = BridgeEventPayload_AgentTimelineChanged;
-  const factory BridgeEventPayload.sessionRuntimeChanged({
-    required BridgeSessionRuntimeDto runtime,
-  }) = BridgeEventPayload_SessionRuntimeChanged;
-  const factory BridgeEventPayload.skillActivated({
-    required BridgeSkillActivationDto activation,
-  }) = BridgeEventPayload_SkillActivated;
-  const factory BridgeEventPayload.planLifecycleChanged({
-    required BridgePlanLifecycleDto event,
-  }) = BridgeEventPayload_PlanLifecycleChanged;
-  const factory BridgeEventPayload.sessionListChanged({
+  const factory BridgeProductEventPayload.sessionListChanged({
     required String projectId,
     required List<SessionDto> sessions,
-  }) = BridgeEventPayload_SessionListChanged;
-  const factory BridgeEventPayload.mcpHealthChanged({
+  }) = BridgeProductEventPayload_SessionListChanged;
+  const factory BridgeProductEventPayload.mcpHealthChanged({
     required BridgeMcpHealthDto health,
-  }) = BridgeEventPayload_McpHealthChanged;
-  const factory BridgeEventPayload.lspHealthChanged({
+  }) = BridgeProductEventPayload_McpHealthChanged;
+  const factory BridgeProductEventPayload.lspHealthChanged({
     required BridgeLspHealthDto health,
-  }) = BridgeEventPayload_LspHealthChanged;
-  const factory BridgeEventPayload.stale({required BigInt laggedEvents}) =
-      BridgeEventPayload_Stale;
+  }) = BridgeProductEventPayload_LspHealthChanged;
+  const factory BridgeProductEventPayload.sessionTaskChanged({
+    required String sessionId,
+    BridgeTaskRuntimeDto? task,
+  }) = BridgeProductEventPayload_SessionTaskChanged;
+  const factory BridgeProductEventPayload.stale({
+    required BigInt laggedEvents,
+  }) = BridgeProductEventPayload_Stale;
 }

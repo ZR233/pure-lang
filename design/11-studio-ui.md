@@ -1,6 +1,6 @@
 # Pure Studio UI
 
-本文约束唯一的 `code/pure-studio-flutter` Flutter 桌面端。Flutter 端使用 Material 3 工具型设计、Riverpod 状态管理和 FRB session/global stream，覆盖 Studio 主路径功能。
+本文约束唯一的 `code/pure-studio-flutter` Flutter 桌面端。Flutter 端使用 Material 3 工具型设计、Riverpod 状态管理和 FRB session/global stream，覆盖 Studio 主路径功能。Flutter 视觉在统一事件迁移中保持不变；session stream 直接消费 `pl-protocol::SessionStreamFrame`，不再定义 Studio 私有 timeline 协议。
 
 ## 1. 前端框架
 
@@ -34,7 +34,7 @@ lib/src/shared/
 - `partTextAccumDelta[partId]`
 - `messageSequences[messageId]`
 - `partSequences[partId]`
-- `eventNextSequence[sessionId]`
+- `eventCursor[sessionId]`
 - `sessionStatus[sessionId]`
 - `interactions[interactionId]`
 - `planStates[planId]`
@@ -46,11 +46,17 @@ lib/src/shared/
 
 `StudioPart.revision` 与 `StudioPartDelta.revision` 是每个 part 的 live 版本号。start snapshot 使用 `revision=0`，同 part 每个 delta 递增，terminal snapshot 携带最新 revision。前端 reducer 必须按 `partId + field` 保存 overlay，并在 `delta.revision <= lastRevision` 时丢弃该 delta；terminal snapshot 到达后清理 overlay，terminal 后到达的 delta 一律丢弃。旧历史或旧后端缺失 revision 时按默认 0 读取，只能作为 durable snapshot 初始化；live delta 必须携带大于当前 field revision 的 revision，不能用缺省 0 覆盖已有 snapshot 或 overlay。
 
-历史、实时和 stale backfill 都进入同一个 event reducer。`load_session_state` 用 projection snapshot 初始化 message/part 与 per-id sequence guard；`load_studio_events(afterSequence)` 只回放 durable envelope。前端不得恢复旧 `TimelineItem`、`ConversationEntry` 或 raw `AgentEvent` 入口。
+snapshot、durable replay 和 live event 都进入同一个 event reducer。`subscribeSessionEvents` 的首帧
+原子初始化 projection 或推进 durable cursor；不再通过 `load_studio_events` 建立第二条补拉路径。
+前端不得恢复旧 `TimelineItem`、`ConversationEntry` 或 raw trace/agent event 入口。
 
 Flutter 解析层必须接受 Studio 协议内的所有 part type。当前不直接渲染的 lifecycle/internal/file part 可以进入 normalized snapshot 后由 row projection 过滤，或在 bridge payload 层忽略，但不能把协议内类型当未知类型抛出导致 timeline 白屏。真正未知的 part type 仍应 fail fast。
 
-切换或恢复选中 session 时必须建立 session load barrier：先带 generation 订阅目标 `sessionId` 的实时 stream，再加载 `load_session_state`，加载期间同 generation 的 session event 只进入 buffer，不直接修改 timeline。snapshot 返回后若 generation/session 已过期则丢弃；否则先用 per-message/per-part sequence guard 合并 snapshot，再按事件 sequence 和到达顺序重放 buffer。live-only 事件没有 durable 排序语义，若多个 live-only 事件在 barrier 中拥有相同 sequence/createdAt，必须保留接收顺序，不能用 eventId 重新排序导致 part revision gap。重放 durable event 前必须按 snapshot 合并后的 `eventCursorsBySession[sessionId]` 丢弃 `sequence <= cursor` 的旧事件；cursor 合并取较大值。`messagePartDelta` 继续作为 live-only overlay，不推进 durable cursor，只按 part revision 单独处理。旧订阅迟到事件、缺失 sessionId 的 timeline event 或 generation 不匹配的 event 必须丢弃，不能污染当前会话。
+切换或恢复选中 session 时先增加 generation、取消旧 stream，再订阅目标 `sessionId`。PL runtime
+已经按“先注册 receiver、再读取 snapshot/replay”建立 load barrier；Flutter 只需原子应用首个
+bootstrap frame，再处理同 generation live frame。durable event 不大于 snapshot cursor 时丢弃；
+transient delta 不推进 cursor，只按 part revision 处理。旧订阅迟到事件、缺失 sessionId 或
+generation 不匹配的 frame 必须丢弃，不能污染当前会话。
 
 状态管理对齐 opencode `global-sync`：Flutter Riverpod store 只保存归一化 entity 表和少量 UI 本地状态，组件不得直接把多个表临时拼成业务状态。选中会话、状态栏、timeline、交互 dock 和会话列表都必须通过 selector/view model 派生：
 
@@ -60,11 +66,11 @@ Flutter 解析层必须接受 Studio 协议内的所有 part type。当前不直
 
 `sessionRuntimeChanged` 只能更新 `sessionRuntime[sessionId]`；MCP/LSP 的全局 health event 更新 server catalog，当前会话实际 active 列表来自 selected session runtime。`agentChanged` 是 latest snapshot merge：如果新 snapshot 未携带 `runtimeUsage`，必须保留同 agent 已有的 runtime usage，避免状态变更覆盖 token/cost 信息。
 
-Flutter Riverpod store 使用同一归一化状态结构：`StudioController` 负责 bootstrap、session stream 切换和全局 stream 生命周期；`timelineRowsProvider(sessionId)`、`selectedSessionViewProvider`、`statusBarViewProvider`、`settingsPageProvider` 等 selector 只派生 view model，不直接发起 bridge 调用。`subscribeSessionEvents(sessionId)` 的取消必须跟随选中会话变化，避免后台会话继续接收高频 delta。
+Flutter Riverpod store 使用同一归一化状态结构：`StudioController` 负责 bootstrap、session stream 切换和全局 stream 生命周期；`timelineRowsProvider(sessionId)`、`selectedSessionViewProvider`、`statusBarViewProvider`、`settingsPageProvider` 等 selector 只派生 view model，不直接发起 bridge 调用。`subscribeSessionEvents(sessionId, afterSequence)` 的取消必须跟随选中会话变化，避免后台会话继续接收高频 delta。
 
-Flutter 数据层必须保持编排与归约分离：`StudioController` 只负责桥接 API 调用、订阅生命周期、session load barrier、frame 批处理和 stale recovery 副作用；事件归约、session/config snapshot merge、durable cursor、part overlay 与 agent timeline projection 逻辑放在纯 reducer 模块。纯 reducer 不访问 Riverpod、不调用 bridge、不调度异步任务；需要触发 stale recovery 时只返回明确的 session id 给 controller 执行。
+Flutter 数据层必须保持编排与归约分离：`StudioController` 只负责桥接 API 调用、订阅生命周期、bootstrap frame、frame 批处理和 resync 副作用；事件归约、session/config snapshot merge、durable cursor、part overlay 与 agent timeline projection 逻辑放在纯 reducer 模块。纯 reducer 不访问 Riverpod、不调用 bridge、不调度异步任务；需要 resync 时只返回明确原因给 controller 重新订阅。
 
-Flutter reducer 必须按 `sessionId` 过滤实时事件，旧 session stream 取消后迟到的事件不得覆盖当前会话。每个 session 维护 durable event cursor；收到 live-only `stale` 时优先调用 `loadStudioEvents(sessionId, afterSequence, limit)` 补拉缺口，补拉事件与实时事件进入同一 reducer。`messagePartDelta` 不推进 durable cursor，但只能追加到已有且未 terminal 的 part 字段。
+Flutter reducer 必须按 `sessionId` 过滤实时事件，旧 session stream 取消后迟到的事件不得覆盖当前会话。每个 session 维护 durable event cursor；收到 `ResyncRequired` 时关闭旧 stream 并以无 cursor subscription 获取 authoritative snapshot。`messagePartDelta` 不推进 durable cursor，但只能追加到已有且未 terminal 的 part 字段。
 
 `StudioState.copyWith` 必须支持对 nullable selection/config 字段显式置空。`selectedProjectId`、`selectedSessionId`、`defaultProviderId` 等字段的 `null` 表示清空领域状态，而不是“保持不变”；需要保持原值时调用方应省略对应参数。
 
@@ -78,7 +84,11 @@ FRB JSON bootstrap 与 `load_session_state` 解包时只能写入 message snapsh
 
 Flutter timeline 协议解析必须严格处理枚举值。未知 `partType` 或非空未知 `textChannel` 是协议错误，应直接抛出并暴露给调用方；不得默认降级为 `text` 或 `final`，避免新协议字段被旧 UI 错误展示。
 
-Flutter bridge event 协议解析同样必须严格处理事件类型。实时 stream 使用 FRB `BridgeEventPayload` sealed union；未知或不允许进入 Flutter 的事件是协议错误，应在 FRB/JSON 入口抛出。FRB adapter 必须把事件归一为 typed app `StudioBridgeEventPayload` 后交给 reducer，reducer 不得读取 `payloadJson`/Map 或用 `_ => current` 静默忽略未知事件。`AgentTimelineChanged` 进入 Flutter domain 后也必须保持 typed payload，不得用 string kind + `Map<String, Object?>` 作为 reducer 协议；桥接层如果遇到未知 agent timeline payload，应抛出协议错误而不是生成 generic activity row。`sessionHandoffChanged` 不再作为前端 bridge event 兼容入口；旧 handoff 数据只能通过历史会话列表/查询视图体现，不参与实时 reducer。
+Flutter bridge event 协议解析同样必须严格处理事件类型。实时 stream 使用 FRB
+`BridgeSessionStreamFrame` sealed union；未知或不允许进入 Flutter 的事件是协议错误，应在
+FRB 入口抛出。FRB adapter 必须把公共事件归一为 typed app payload 后交给 reducer，reducer
+不得读取 `payloadJson`/Map 或用 `_ => current` 静默忽略未知事件。Studio-only handoff/task/
+session-list 继续只通过 product stream 或查询视图进入，不混入 session stream。
 
 `lib/src/rust/**` 与 `frb_generated.dart` 是生成边界，业务代码不得手写修改；`lib/src/data/frb/studio_api.dart` 保持对外稳定 barrel，内部按 `StudioApi` 接口、FRB runtime adapter、typed bridge event、FRB DTO converter、legacy/demo converter 和 demo API 分文件维护。生产路径只从 FRB typed DTO/union 进入 domain model；legacy JSON 解析必须集中在明确命名的 legacy/demo adapter 中，不能混入实时 FRB stream reducer。
 
@@ -173,7 +183,7 @@ Security 页是紧凑的权限配置页，不使用与 provider/MCP 相同的大
 
 - `pure-studio-flutter` 可在 Windows 上 `flutter analyze`、`flutter test`、`flutter build windows`，并通过 FRB 调用 `pl-core` runtime。
 - `messagePartDelta` 可以实时显示 text/reasoning/tool/plan 中间输出。
-- terminal snapshot 清除 overlay，reload/backfill 与 live terminal UI 收敛。
+- terminal snapshot 清除 overlay，snapshot/replay 与 live terminal UI 收敛。
 - 用户一次输入只出现一条用户消息。
 - 多个 reasoning part 不复用旧 row，不发生“新思考更新到旧信息上”。
 - 真实 UI 回归通过：项目/会话侧栏、输入、流式输出、停止、切换 session、Plan 确认、tool approval、user input、状态栏和全部设置页均可用。

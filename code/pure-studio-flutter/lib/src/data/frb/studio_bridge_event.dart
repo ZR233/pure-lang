@@ -10,14 +10,32 @@ class StudioBridgeEvent {
     this.createdAt,
   });
 
-  factory StudioBridgeEvent.fromFrb(frb.BridgeEventEnvelope event) {
+  factory StudioBridgeEvent.fromProduct(frb.BridgeProductEventEnvelope event) {
     return StudioBridgeEvent(
       eventId: event.eventId,
-      sessionId: event.sessionId,
-      turnId: event.turnId,
       sequence: event.sequence,
       createdAt: _dateFromUnix(event.createdAt),
-      payload: _bridgePayloadFromFrb(event.payload, sequence: event.sequence),
+      payload: _productPayloadFromFrb(event.payload),
+    );
+  }
+
+  factory StudioBridgeEvent.fromCanonicalJson(Map<String, Object?> event) {
+    final position = _map(event['position']);
+    final sequence = _string(position['persistence']) == 'durable'
+        ? _int(position['sequence'])
+        : 0;
+    final sessionId = _string(event['sessionId']);
+    return StudioBridgeEvent(
+      eventId: _nullableString(event['eventId']),
+      sessionId: sessionId,
+      turnId: _nullableString(event['turnId']),
+      sequence: sequence <= 0 ? null : BigInt.from(sequence),
+      createdAt: _dateFromUnix(_int(event['emittedAt'])),
+      payload: _canonicalEventPayload(
+        _map(event['kind']),
+        sequence: sequence,
+        sessionId: sessionId,
+      ),
     );
   }
 
@@ -119,9 +137,11 @@ final class SessionRuntimeChangedPayload extends StudioBridgeEventPayload {
   const SessionRuntimeChangedPayload({
     required this.runtime,
     required this.sessionId,
+    this.agentCount,
   });
 
   final SessionRuntimeView runtime;
+  final int? agentCount;
 
   @override
   final String sessionId;
@@ -147,6 +167,14 @@ final class SessionListChangedPayload extends StudioBridgeEventPayload {
 
   final String? projectId;
   final List<StudioSession> sessions;
+}
+
+final class SessionTaskChangedPayload extends StudioBridgeEventPayload {
+  const SessionTaskChangedPayload({required this.sessionId, this.task});
+
+  @override
+  final String sessionId;
+  final TaskRuntimeView? task;
 }
 
 final class McpHealthChangedPayload extends StudioBridgeEventPayload {

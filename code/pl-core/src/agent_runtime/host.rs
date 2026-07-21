@@ -1,6 +1,7 @@
 use std::error::Error;
 use std::future::Future;
 
+use pl_protocol::{SessionEventEnvelope, SessionViewSnapshot};
 use pl_trace::TraceEvent;
 
 use super::{
@@ -12,6 +13,14 @@ use super::{
 #[derive(Debug, Clone)]
 pub struct RestoredAgentRuntime {
     pub state: AgentDurableState,
+    pub session_projections: Vec<RestoredSessionProjection>,
+}
+
+/// 进程恢复时用于重建 session hub 的已提交 projection 与有界 journal。
+#[derive(Debug, Clone)]
+pub struct RestoredSessionProjection {
+    pub snapshot: SessionViewSnapshot,
+    pub durable_events: Vec<SessionEventEnvelope>,
 }
 
 /// repository 一次原子提交的完整输入。
@@ -25,7 +34,15 @@ pub struct AgentCommit {
     pub next_state: AgentDurableState,
     pub events: Vec<AgentRuntimeEvent>,
     pub trace_events: Vec<TraceEvent>,
+    pub session_projection: Option<SessionProjectionCommit>,
     pub mutation: AgentStateMutation,
+}
+
+/// repository 与 session hub 共享的 canonical session 投影提交。
+#[derive(Debug, Clone)]
+pub struct SessionProjectionCommit {
+    pub snapshot: SessionViewSnapshot,
+    pub durable_events: Vec<SessionEventEnvelope>,
 }
 
 /// repository 可据此只更新真正变化的 durable aggregate 部分。
@@ -34,6 +51,7 @@ pub enum AgentStateMutation {
     SnapshotAndQueue,
     ReplaceSession { session_id: super::SessionId },
     AppendTrace,
+    AppendSessionEvents { session_id: super::SessionId },
 }
 
 /// repository CAS 提交结果。
@@ -51,6 +69,7 @@ pub struct AgentCommittedEvent {
     pub turn_id: Option<super::TurnId>,
     pub runtime_events: Vec<AgentRuntimeEvent>,
     pub trace_events: Vec<TraceEvent>,
+    pub session_events: Vec<SessionEventEnvelope>,
 }
 
 impl AgentCommittedEvent {
@@ -61,6 +80,7 @@ impl AgentCommittedEvent {
             turn_id: None,
             runtime_events: vec![event],
             trace_events: Vec::new(),
+            session_events: Vec::new(),
         }
     }
 }
@@ -150,7 +170,7 @@ pub trait AgentLifecycleAdapter: Clone + Send + Sync + 'static {
 /// 已持久化 runtime event 的无失败广播端口。
 ///
 /// 实现内部可记录广播错误，但不得把广播失败反馈为 durable transaction 失败。
-pub trait AgentEventSink: Clone + Send + Sync + 'static {
+pub trait AgentCommitObserver: Clone + Send + Sync + 'static {
     fn publish(&self, committed: AgentCommittedEvent) -> impl Future<Output = ()> + Send;
 }
 
@@ -160,10 +180,10 @@ pub trait AgentRuntimeHost: Clone + Send + Sync + 'static {
     type Repository: AgentStateRepository<Error = Self::Error>;
     type TurnFactory: AgentTurnFactory<Error = Self::Error>;
     type Lifecycle: AgentLifecycleAdapter<Error = Self::Error>;
-    type Events: AgentEventSink;
+    type Observer: AgentCommitObserver;
 
     fn repository(&self) -> &Self::Repository;
     fn turn_factory(&self) -> &Self::TurnFactory;
     fn lifecycle(&self) -> &Self::Lifecycle;
-    fn events(&self) -> &Self::Events;
+    fn observer(&self) -> &Self::Observer;
 }

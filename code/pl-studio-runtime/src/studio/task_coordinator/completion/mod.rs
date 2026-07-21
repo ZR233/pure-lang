@@ -46,6 +46,7 @@ impl TaskCoordinator {
                 async move {
                     let output = coordinator.complete_task(&session_id).await?;
                     ToolExecutionResult::<serde_json::Value>::json(output)
+                        .map(ToolExecutionResult::ending_turn)
                         .map_err(anyhow::Error::from)
                 }
             },

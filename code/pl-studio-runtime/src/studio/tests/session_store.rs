@@ -2,112 +2,6 @@ use super::*;
 use pretty_assertions::assert_eq;
 
 #[tokio::test]
-async fn session_crud_and_message_restore() {
-    let store = StudioStore::open_memory().await.unwrap();
-    let project = store.upsert_project("C:/work/alpha").await.unwrap();
-    let session = store
-        .create_session(&project.id, "Build app", StudioMode::Simple)
-        .await
-        .unwrap();
-    let message = Message {
-        role: MessageRole::User,
-        content: MessageContent::Text("hello".to_string()),
-        reasoning_content: None,
-        metadata: HashMap::new(),
-    };
-
-    store.append_message(&session.id, &message).await.unwrap();
-    let restored = store.load_core_session(&session.id).await.unwrap();
-
-    assert_eq!(restored.len(), 1);
-    assert_eq!(restored.messages()[0].role, MessageRole::User);
-    match &restored.messages()[0].content {
-        MessageContent::Text(text) => assert_eq!(text, "hello"),
-        MessageContent::MultiPart(_) => panic!("expected text message"),
-    }
-}
-
-#[tokio::test]
-async fn context_items_restore_after_reopen_without_exposing_checkpoint_as_message() {
-    let unique = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let db_path = std::env::temp_dir().join(format!("pure-lang-context-items-{unique}.db"));
-    let user = Message {
-        role: MessageRole::User,
-        content: MessageContent::Text("retained".to_string()),
-        reasoning_content: None,
-        metadata: HashMap::new(),
-    };
-    let items = vec![
-        ModelContextItem::from(user.clone()),
-        ModelContextItem::Compaction {
-            encrypted_content: "encrypted-checkpoint".to_string(),
-        },
-    ];
-
-    let store = StudioStore::open(&db_path).await.unwrap();
-    let project = store.upsert_project("C:/work/context-items").await.unwrap();
-    let session = store
-        .create_session(&project.id, "Compacted", StudioMode::Simple)
-        .await
-        .unwrap();
-    store
-        .replace_session_context_items(&session.id, &items)
-        .await
-        .unwrap();
-    drop(store);
-
-    let reopened = StudioStore::open(&db_path).await.unwrap();
-    let restored = reopened.load_core_session(&session.id).await.unwrap();
-    assert_eq!(restored.items(), items.as_slice());
-    assert_eq!(
-        reopened.load_messages(&session.id).await.unwrap(),
-        vec![user]
-    );
-    drop(reopened);
-
-    for suffix in ["", "-wal", "-shm"] {
-        let _ = tokio::fs::remove_file(format!("{}{suffix}", db_path.display())).await;
-    }
-}
-
-#[tokio::test]
-async fn message_storage_round_trips_image_attachment_parts() {
-    let store = StudioStore::open_memory().await.unwrap();
-    let project = store.upsert_project("C:/work/alpha").await.unwrap();
-    let session = store
-        .create_session(&project.id, "Vision", StudioMode::Simple)
-        .await
-        .unwrap();
-    let message = Message {
-        role: MessageRole::User,
-        content: MessageContent::MultiPart(vec![
-            ContentPart::Text {
-                text: "what is this?".to_string(),
-            },
-            ContentPart::Image {
-                source: ImageSource::Attachment {
-                    attachment_id: "attachment-1".to_string(),
-                },
-                media_type: "image/png".to_string(),
-                filename: Some("image.png".to_string()),
-            },
-        ]),
-        reasoning_content: None,
-        metadata: HashMap::new(),
-    };
-
-    store.append_message(&session.id, &message).await.unwrap();
-
-    assert_eq!(
-        store.load_messages(&session.id).await.unwrap(),
-        vec![message]
-    );
-}
-
-#[tokio::test]
 async fn archive_session_hides_it_from_session_list() {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project("C:/work/alpha").await.unwrap();
@@ -115,53 +9,12 @@ async fn archive_session_hides_it_from_session_list() {
         .create_session(&project.id, "Build app", StudioMode::Simple)
         .await
         .unwrap();
-    let message = Message {
-        role: MessageRole::User,
-        content: MessageContent::Text("hello".to_string()),
-        reasoning_content: None,
-        metadata: HashMap::new(),
-    };
 
-    store.append_message(&session.id, &message).await.unwrap();
     let archived = store.archive_session(&session.id).await.unwrap().unwrap();
     let sessions = store.list_sessions(&project.id).await.unwrap();
-    let restored = store.load_messages(&session.id).await.unwrap();
 
     assert_eq!(archived.id, session.id);
     assert_eq!(sessions, Vec::<SessionRecord>::new());
-    assert_eq!(restored, vec![message]);
-}
-
-#[tokio::test]
-async fn replace_session_messages_rewrites_history() {
-    let store = StudioStore::open_memory().await.unwrap();
-    let project = store.upsert_project("C:/work/alpha").await.unwrap();
-    let session = store
-        .create_session(&project.id, "Build app", StudioMode::Simple)
-        .await
-        .unwrap();
-    let first = Message {
-        role: MessageRole::User,
-        content: MessageContent::Text("first".to_string()),
-        reasoning_content: None,
-        metadata: HashMap::new(),
-    };
-    let second = Message {
-        role: MessageRole::User,
-        content: MessageContent::Text("second".to_string()),
-        reasoning_content: None,
-        metadata: HashMap::new(),
-    };
-
-    store.append_message(&session.id, &first).await.unwrap();
-    store
-        .replace_session_messages(&session.id, std::slice::from_ref(&second))
-        .await
-        .unwrap();
-    let restored = store.load_messages(&session.id).await.unwrap();
-
-    assert_eq!(restored.len(), 1);
-    assert_eq!(restored[0], second);
 }
 
 #[tokio::test]

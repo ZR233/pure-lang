@@ -278,6 +278,129 @@ StudioState _sessionHistoryState({
   );
 }
 
+SessionSnapshotFrame _sessionSnapshotFrame(StudioState state) {
+  final sessionId = state.selectedSessionId!;
+  final runtime = state.runtime;
+  return SessionSnapshotFrame(
+    snapshot: {
+      'schemaVersion': 1,
+      'sessionId': sessionId,
+      'throughSequence': state.eventCursorsBySession[sessionId] ?? 0,
+      'messages': [
+        for (final message in state.messagesBySession[sessionId] ?? const [])
+          {
+            'messageId': message.id,
+            'sessionId': message.sessionId,
+            'turnId': message.turnId,
+            'role': message.role,
+            'status': message.status,
+            'createdAt': message.createdAt.millisecondsSinceEpoch ~/ 1000,
+            'updatedAt': message.updatedAt.millisecondsSinceEpoch ~/ 1000,
+            if (message.completedAt != null)
+              'completedAt':
+                  message.completedAt!.millisecondsSinceEpoch ~/ 1000,
+            if (message.error != null) 'error': message.error,
+          },
+      ],
+      'parts': [
+        for (final part
+            in state.partSnapshotsBySession[sessionId]?.values ??
+                const <TimelinePartSnapshot>[])
+          {
+            'partId': part.id,
+            'messageId': part.messageId,
+            'sessionId': part.sessionId,
+            'turnId': part.turnId,
+            'order': part.order,
+            'revision': part.revision,
+            'status': part.status,
+            'createdAt': part.createdAt.millisecondsSinceEpoch ~/ 1000,
+            'updatedAt': part.updatedAt.millisecondsSinceEpoch ~/ 1000,
+            if (part.completedAt != null)
+              'completedAt': part.completedAt!.millisecondsSinceEpoch ~/ 1000,
+            if (part.error != null) 'error': part.error,
+            'content': _canonicalPartContent(part),
+            'synthetic': part.synthetic,
+            'ignored': part.ignored,
+          },
+      ],
+      'interactions': const <Object?>[],
+      'agents': const <Object?>[],
+      'timelineEvents': const <Object?>[],
+      'runtime': {
+        'sessionId': sessionId,
+        'usage': {
+          'model': runtime.model,
+          'latestContextTokens': runtime.contextTokens,
+          'contextWindow': runtime.contextWindow,
+          'promptTokens': 0,
+          'completionTokens': 0,
+          'cachedPromptTokens': 0,
+          'totalTokens': runtime.totalTokens,
+          'estimatedCosts': const <Object?>[],
+          'hasUnpricedUsage': false,
+          'updatedAt': 0,
+        },
+        'activeSkills': runtime.activeSkills,
+        'activeMcpServers': runtime.activeMcpServers,
+        'activeLspServers': runtime.activeLspServers,
+        'agentCount': runtime.agentCount,
+        'updatedAt': 0,
+      },
+      'activatedSkills': const <Object?>[],
+      'planEvents': const <Object?>[],
+    },
+  );
+}
+
+Map<String, Object?> _canonicalPartContent(TimelinePartSnapshot part) {
+  return switch (part.type) {
+    TimelinePartType.text => {
+      'type': 'text',
+      'channel': switch (part.textChannel) {
+        TimelineTextChannel.user => 'user',
+        TimelineTextChannel.commentary => 'commentary',
+        TimelineTextChannel.finalAnswer => 'final',
+        null => 'commentary',
+      },
+      'text': part.text,
+      'attachments': const <Object?>[],
+    },
+    TimelinePartType.reasoning => {'type': 'reasoning', 'text': part.text},
+    TimelinePartType.tool => {
+      'type': 'tool',
+      'tool': {
+        'toolCallId': part.tool?.toolCallId ?? part.id,
+        'name': part.tool?.name ?? 'tool',
+        'arguments': part.tool?.arguments ?? '',
+        if (part.tool?.result != null) 'result': part.tool!.result,
+      },
+    },
+    TimelinePartType.agent => {
+      'type': 'agent',
+      'agent': {
+        'id': part.agent?.id ?? part.id,
+        'path': part.agent?.path ?? '',
+        'role': part.agent?.role ?? 'agent',
+        'task': part.agent?.task ?? '',
+        'status': part.agent?.status ?? 'completed',
+        'depth': part.agent?.depth ?? 0,
+      },
+    },
+    TimelinePartType.turn => {'type': 'turn'},
+    TimelinePartType.inference => {
+      'type': 'inference',
+      'inferenceId': part.id,
+      'model': '',
+    },
+    TimelinePartType.plan => {
+      'type': 'plan',
+      'content': part.planContent ?? part.text,
+    },
+    TimelinePartType.file => {'type': 'file', 'path': part.text},
+  };
+}
+
 StudioState _stateWithPlannerModels() {
   final state = _emptyState();
   return state.copyWith(
@@ -318,36 +441,5 @@ StudioState _stateWithPlannerModels() {
       ),
     ],
     runtime: state.runtime.copyWith(model: 'deepseek-v4-flash'),
-  );
-}
-
-frb.BridgeStudioPartDto _bridgePartDto({
-  required String partId,
-  required String messageId,
-  required String partType,
-  String sessionId = 'session-1',
-  String turnId = 'turn-1',
-  String status = 'completed',
-  String text = '',
-  String? textChannel,
-  String? activityGroupId,
-  bool synthetic = false,
-}) {
-  return frb.BridgeStudioPartDto(
-    partId: partId,
-    messageId: messageId,
-    sessionId: sessionId,
-    turnId: turnId,
-    partType: partType,
-    order: BigInt.zero,
-    revision: BigInt.zero,
-    status: status,
-    createdAt: 1,
-    updatedAt: 1,
-    textChannel: textChannel,
-    activityGroupId: activityGroupId,
-    text: text,
-    synthetic: synthetic,
-    ignored: false,
   );
 }

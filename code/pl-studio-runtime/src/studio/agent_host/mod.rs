@@ -13,10 +13,12 @@ use pl_core::{AgentRuntimeHost, AgentRuntimeOptions};
 use crate::McpRuntimeHandle;
 use crate::config::ConfigStore;
 use crate::studio::task_coordinator::TaskCoordinator;
-use crate::studio::{InteractionRuntime, StudioEventRuntime, StudioRuntimeState, StudioStore};
+use crate::studio::{
+    InteractionRuntime, StudioProductEventRuntime, StudioRuntimeState, StudioStore,
+};
 
 pub(super) use continuation::{StudioContinuationReason, StudioContinuationService};
-use events::StudioAgentEventSink;
+use events::StudioAgentCommitObserver;
 use lifecycle::StudioAgentLifecycle;
 use repository::StudioAgentRepository;
 pub(super) use resources::{StudioAgentResources, root_agent_id};
@@ -28,7 +30,7 @@ pub(super) struct StudioAgentHost {
     repository: StudioAgentRepository,
     turn_factory: StudioAgentTurnFactory,
     lifecycle: StudioAgentLifecycle,
-    events: StudioAgentEventSink,
+    observer: StudioAgentCommitObserver,
 }
 
 impl StudioAgentHost {
@@ -39,11 +41,11 @@ impl StudioAgentHost {
         mcp_runtime: McpRuntimeHandle,
         lsp_runtime: pl_lsp::LspRuntimeRegistry,
         interactions: InteractionRuntime,
-        events: StudioEventRuntime,
         runtime_state: StudioRuntimeState,
         continuations: StudioContinuationService,
         coordinator: Arc<TaskCoordinator>,
         resources: StudioAgentResources,
+        product_events: StudioProductEventRuntime,
     ) -> Self {
         Self {
             repository: StudioAgentRepository::new(store.clone()),
@@ -53,20 +55,27 @@ impl StudioAgentHost {
                 mcp_runtime,
                 lsp_runtime,
                 interactions.clone(),
-                events.clone(),
                 coordinator.clone(),
                 resources.clone(),
             ),
             lifecycle: StudioAgentLifecycle::new(coordinator, resources.clone()),
-            events: StudioAgentEventSink::new(
+            observer: StudioAgentCommitObserver::new(
                 store,
-                events,
                 interactions,
                 runtime_state,
                 resources,
                 continuations,
+                product_events,
             ),
         }
+    }
+
+    pub(super) async fn attach_runtime(&self, runtime: pl_core::AgentRuntimeHandle) {
+        self.observer.attach_runtime(runtime).await;
+    }
+
+    pub(super) async fn detach_runtime(&self) {
+        self.observer.detach_runtime().await;
     }
 }
 
@@ -75,7 +84,7 @@ impl AgentRuntimeHost for StudioAgentHost {
     type Repository = StudioAgentRepository;
     type TurnFactory = StudioAgentTurnFactory;
     type Lifecycle = StudioAgentLifecycle;
-    type Events = StudioAgentEventSink;
+    type Observer = StudioAgentCommitObserver;
 
     fn repository(&self) -> &Self::Repository {
         &self.repository
@@ -89,8 +98,8 @@ impl AgentRuntimeHost for StudioAgentHost {
         &self.lifecycle
     }
 
-    fn events(&self) -> &Self::Events {
-        &self.events
+    fn observer(&self) -> &Self::Observer {
+        &self.observer
     }
 }
 

@@ -1,43 +1,34 @@
+use anyhow::Result;
+
 use crate::{
-    StudioRuntimeUsage, StudioSessionRuntime, StudioTaskAgentRuntime, StudioTaskMergeRuntime,
-    StudioTaskReviewRuntime, StudioTaskRuntime, StudioTaskWorkUnitRuntime,
+    StudioTaskAgentRuntime, StudioTaskMergeRuntime, StudioTaskReviewRuntime, StudioTaskRuntime,
+    StudioTaskWorkUnitRuntime,
 };
 
-use crate::studio::records::SessionRuntimeRecord;
-use crate::studio::task_coordinator::{
-    AgentOutcomeRecord, MergeRecord, ReviewRoundRecord, TaskRunRecord, WorkUnitRecord,
+use super::{
+    StudioStore,
+    task_coordinator::{
+        AgentOutcomeRecord, MergeRecord, ReviewRoundRecord, TaskRunRecord, WorkUnitRecord,
+    },
 };
 
-pub(super) fn studio_session_runtime(
-    runtime: SessionRuntimeRecord,
-    active_skills: Vec<String>,
-    active_mcp_servers: Vec<String>,
-    active_lsp_servers: Vec<String>,
-    task: Option<StudioTaskRuntime>,
-) -> StudioSessionRuntime {
-    StudioSessionRuntime {
-        session_id: runtime.session_id,
-        usage: studio_runtime_usage(crate::RuntimeUsageSnapshot {
-            model: runtime.model,
-            context_window: runtime.context_window,
-            latest_context_tokens: runtime.latest_context_tokens,
-            prompt_tokens: runtime.prompt_tokens,
-            completion_tokens: runtime.completion_tokens,
-            cached_prompt_tokens: runtime.cached_prompt_tokens,
-            total_tokens: runtime.total_tokens,
-            estimated_costs: runtime.estimated_costs,
-            has_unpriced_usage: runtime.has_unpriced_usage,
-            updated_at: runtime.updated_at,
-        }),
-        active_skills,
-        active_mcp_servers,
-        active_lsp_servers,
-        task,
-        updated_at: runtime.updated_at,
-    }
+pub(crate) async fn load_task_runtime(
+    store: &StudioStore,
+    session_id: &str,
+) -> Result<Option<StudioTaskRuntime>> {
+    let Some(run) = store.find_latest_task_run_for_session(session_id).await? else {
+        return Ok(None);
+    };
+    Ok(Some(studio_task_runtime(
+        run.clone(),
+        store.list_work_units(&run.id).await?,
+        store.list_agent_outcomes(&run.id).await?,
+        store.list_merge_records(&run.id).await?,
+        store.list_review_rounds(&run.id).await?,
+    )))
 }
 
-pub(super) fn studio_task_runtime(
+fn studio_task_runtime(
     run: TaskRunRecord,
     work_units: Vec<WorkUnitRecord>,
     agents: Vec<AgentOutcomeRecord>,
@@ -103,26 +94,5 @@ pub(super) fn studio_task_runtime(
                     .collect(),
             })
             .collect(),
-    }
-}
-
-fn studio_runtime_usage(usage: crate::RuntimeUsageSnapshot) -> StudioRuntimeUsage {
-    let cache_hit_rate = if usage.prompt_tokens == 0 {
-        None
-    } else {
-        Some(usage.cached_prompt_tokens as f64 / usage.prompt_tokens as f64)
-    };
-    StudioRuntimeUsage {
-        model: usage.model,
-        context_window: usage.context_window,
-        latest_context_tokens: usage.latest_context_tokens,
-        prompt_tokens: usage.prompt_tokens,
-        completion_tokens: usage.completion_tokens,
-        cached_prompt_tokens: usage.cached_prompt_tokens,
-        total_tokens: usage.total_tokens,
-        cache_hit_rate,
-        estimated_costs: usage.estimated_costs,
-        has_unpriced_usage: usage.has_unpriced_usage,
-        updated_at: usage.updated_at,
     }
 }

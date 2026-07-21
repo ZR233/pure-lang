@@ -222,7 +222,7 @@ TimelineAgentEventPayload _agentEventPayloadFromMap(
       timedOut: _boolValue(kind['timedOut']),
       error: _stringValue(kind['error']),
     ),
-    'todoListUpdated' => _todoListPayloadFromMap(kind),
+    'todoListChanged' => _todoListPayloadFromMap(kind),
     _ => throw FormatException('Unknown agent timeline event type: $kindType'),
   };
 }

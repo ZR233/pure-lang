@@ -1,93 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-use pl_protocol::{
-    AgentStatus, BudgetLimitKind, BudgetUsage, RuntimeCostAmount, SubAgentActivityKind,
-    TodoListSnapshot,
-};
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct StudioAgentSnapshot {
-    pub id: String,
-    pub session_id: String,
-    pub path: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parent_path: Option<String>,
-    pub role: String,
-    pub task: String,
-    pub status: AgentStatus,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub summary: Option<String>,
-    pub depth: u32,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub budget_limit_kind: Option<BudgetLimitKind>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub budget_usage: Option<BudgetUsage>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub runtime_usage: Option<StudioRuntimeUsage>,
-    pub updated_at: i64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct StudioAgentTimelineEvent {
-    pub event_id: String,
-    pub session_id: String,
-    pub sequence: u64,
-    pub created_at: i64,
-    pub kind: StudioAgentTimelineEventKind,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase",
-    tag = "type"
-)]
-pub enum StudioAgentTimelineEventKind {
-    SubAgentActivity {
-        call_id: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        agent_id: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        path: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        parent_path: Option<String>,
-        kind: SubAgentActivityKind,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        status: Option<AgentStatus>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        message: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        timed_out: Option<bool>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        error: Option<String>,
-    },
-    TodoListUpdated {
-        snapshot: TodoListSnapshot,
-    },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct StudioSessionRuntime {
-    pub session_id: String,
-    pub usage: StudioRuntimeUsage,
-    #[serde(default)]
-    pub active_skills: Vec<String>,
-    #[serde(default)]
-    pub active_mcp_servers: Vec<String>,
-    #[serde(default)]
-    pub active_lsp_servers: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub task: Option<StudioTaskRuntime>,
-    pub updated_at: i64,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct StudioTaskRuntime {
@@ -146,26 +58,6 @@ pub struct StudioTaskReviewRuntime {
     pub reviewer_agent_id: Option<String>,
     pub summary: Option<String>,
     pub design_references: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct StudioRuntimeUsage {
-    pub model: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub context_window: Option<u64>,
-    pub latest_context_tokens: u64,
-    pub prompt_tokens: u64,
-    pub completion_tokens: u64,
-    pub cached_prompt_tokens: u64,
-    pub total_tokens: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cache_hit_rate: Option<f64>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub estimated_costs: Vec<RuntimeCostAmount>,
-    #[serde(default)]
-    pub has_unpriced_usage: bool,
-    pub updated_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

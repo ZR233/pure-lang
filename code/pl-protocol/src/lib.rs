@@ -6,6 +6,9 @@ mod message;
 mod model_context;
 mod permission;
 mod provider_catalog;
+mod session;
+#[cfg(feature = "typescript")]
+mod typescript;
 
 pub use error::{PureError, Result};
 pub use event::{
@@ -39,3 +42,14 @@ pub use provider_catalog::{
     ProviderServiceCapabilitiesDescriptor, ProviderTransportDescriptor,
     WebSearchProviderCapabilitiesDescriptor, WebSearchResolutionDescriptor,
 };
+pub use session::{
+    SESSION_EVENT_SCHEMA_VERSION, SessionAgentPart, SessionAgentSnapshot, SessionAttachment,
+    SessionContextCompaction, SessionEventEnvelope, SessionEventKind, SessionEventPosition,
+    SessionMessage, SessionMessageRole, SessionMessageStatus, SessionPart, SessionPartContent,
+    SessionPartDelta, SessionPartDeltaField, SessionPartStatus, SessionResyncReason,
+    SessionRuntimeSnapshot, SessionRuntimeUsage, SessionStreamFrame, SessionSubscriptionRequest,
+    SessionTextChannel, SessionTimelineEvent, SessionTimelineEventKind, SessionToolPart,
+    SessionTurn, SessionTurnStatus, SessionViewSnapshot,
+};
+#[cfg(feature = "typescript")]
+pub use typescript::session_events_typescript;

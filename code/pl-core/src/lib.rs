@@ -14,6 +14,7 @@ mod process;
 mod provider_error;
 pub mod runtime_usage;
 mod session;
+mod session_event;
 pub mod skill;
 pub mod tool;
 mod trace;
@@ -24,7 +25,7 @@ mod workspace;
 
 pub use agent_runtime::{
     AgentAccessPolicy, AgentActivityState, AgentCollaborationTools, AgentCommit,
-    AgentCommitOutcome, AgentCommittedEvent, AgentDurableState, AgentEventSink,
+    AgentCommitObserver, AgentCommitOutcome, AgentCommittedEvent, AgentDurableState,
     AgentExecutionPolicy, AgentId, AgentIdentity, AgentLifecycleAdapter, AgentLifecycleState,
     AgentRegistration, AgentRuntime, AgentRuntimeError, AgentRuntimeEvent, AgentRuntimeEventKind,
     AgentRuntimeHandle, AgentRuntimeHost, AgentRuntimeOptions, AgentRuntimeResult,
@@ -32,9 +33,10 @@ pub use agent_runtime::{
     AgentSpawnResult, AgentStateMutation, AgentStateRepository, AgentSubmitRequest,
     AgentTargetSelector, AgentTurnCheckpoint, AgentTurnCheckpointHandle, AgentTurnFactory,
     AgentTurnOutcome, AgentTurnPreparationContext, AgentWaitResult, CloseLifecycleRequest,
-    InputDelivery, PendingAgentInput, PreparedAgentTurn, RestoredAgentRuntime, RestoredInputPolicy,
-    SessionId, SpawnLifecycleRequest, ToolEffectSet, TurnCheckpointReason, TurnFinalizationPolicy,
-    TurnId, TurnOutcomeKind,
+    InputDelivery, PendingAgentInput, PreparedAgentTurn, PreparedSessionRuntime,
+    RestoredAgentRuntime, RestoredInputPolicy, RestoredSessionProjection, SessionId,
+    SessionProjectionCommit, SpawnLifecycleRequest, ToolEffectSet, TurnCheckpointReason,
+    TurnFinalizationPolicy, TurnId, TurnOutcomeKind,
 };
 pub use attachment::MaterializedAttachment;
 pub use config::{
@@ -117,6 +119,10 @@ pub use runtime_usage::ModelTokenUsageSnapshot;
 pub use session::{
     AgentSession, AgentSessionForkPolicy, repair_incomplete_tool_history,
     tool_call_history_message, tool_result_history_message,
+};
+pub use session_event::{
+    SessionEventError, SessionEventFact, SessionEventFactPosition, SessionEventHub,
+    SessionEventHubHandle, SessionEventOptions, SessionEventSubscription,
 };
 pub use skill::{SkillCatalog, SkillMetadata, SkillSourceKind};
 #[cfg(feature = "docker-tools")]

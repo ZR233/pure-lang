@@ -17,24 +17,12 @@ final studioApiProvider = Provider<StudioApi>((ref) {
 final studioControllerProvider =
     AsyncNotifierProvider<StudioController, StudioState>(StudioController.new);
 
-class _BufferedSessionEvent {
-  const _BufferedSessionEvent(this.event, this.arrivalIndex);
-
-  final StudioBridgeEvent event;
-  final int arrivalIndex;
-}
-
 class StudioController extends AsyncNotifier<StudioState> {
   StreamSubscription<Object>? _globalSubscription;
-  StreamSubscription<Object>? _sessionSubscription;
+  StreamSubscription<SessionStreamFrame>? _sessionSubscription;
   final List<StudioBridgeEvent> _pendingPartDeltas = [];
   bool _partDeltaFrameScheduled = false;
-  final List<_BufferedSessionEvent> _sessionLoadBuffer = [];
-  int _sessionLoadBufferNextIndex = 0;
   int _sessionGeneration = 0;
-  String? _loadingSessionId;
-  int? _loadingGeneration;
-  bool _bufferedStaleSession = false;
 
   StudioApi get _api => ref.read(studioApiProvider);
 
@@ -51,7 +39,6 @@ class StudioController extends AsyncNotifier<StudioState> {
       if (session != null) {
         unawaited(session.cancel());
       }
-      _clearAnySessionLoadBarrier();
     });
     final catalog = await _api.loadProviderCatalog();
     final bootstrapped = _attachProviderCatalog(
@@ -60,13 +47,7 @@ class StudioController extends AsyncNotifier<StudioState> {
     );
     final sessionId = bootstrapped.selectedSessionId;
     _subscribe(sessionId);
-    if (sessionId == null) {
-      return bootstrapped;
-    }
-    final generation = _sessionGeneration;
-    _startSessionLoadBarrier(sessionId, generation);
-    final projected = await _withSelectedSessionProjection(bootstrapped);
-    return _flushSessionLoadBuffer(projected, sessionId, generation);
+    return bootstrapped;
   }
 
   Future<void> openProject(String path) async {
@@ -120,21 +101,25 @@ class StudioController extends AsyncNotifier<StudioState> {
     await _adoptState(next);
   }
 
-  void _subscribe(String? sessionId) {
+  void _subscribe(String? sessionId, {bool forceSnapshot = false}) {
     _flushPartDeltaBatch();
     _sessionGeneration += 1;
     final generation = _sessionGeneration;
-    _globalSubscription ??= _api.subscribeGlobalEvents().listen(_handleEvent);
+    _globalSubscription ??= _api.subscribeProductEvents().listen(_handleEvent);
     final oldSession = _sessionSubscription;
     if (oldSession != null) {
       unawaited(oldSession.cancel());
     }
+    final afterSequence = forceSnapshot || sessionId == null
+        ? null
+        : state.value?.eventCursorsBySession[sessionId];
     _sessionSubscription = sessionId == null
         ? null
         : _api
-              .subscribeSessionEvents(sessionId)
+              .subscribeSessionEvents(sessionId, afterSequence: afterSequence)
               .listen(
-                (event) => _handleSessionEvent(event, sessionId, generation),
+                (frame) => _handleSessionFrame(frame, sessionId, generation),
+                onError: (_) => _resubscribeSnapshot(sessionId, generation),
               );
   }
 
@@ -145,19 +130,6 @@ class StudioController extends AsyncNotifier<StudioState> {
     }
     state = AsyncData(current.copyWith(selectedSessionId: sessionId));
     _subscribe(sessionId);
-    final generation = _sessionGeneration;
-    _startSessionLoadBarrier(sessionId, generation);
-    final sessionState = await _api.loadSessionState(sessionId);
-    final latest = state.value;
-    if (latest == null ||
-        latest.selectedSessionId != sessionId ||
-        generation != _sessionGeneration) {
-      _clearSessionLoadBarrier(sessionId, generation);
-      return;
-    }
-    var merged = mergeStudioSessionState(latest, sessionState);
-    merged = _flushSessionLoadBuffer(merged, sessionId, generation);
-    state = AsyncData(merged);
   }
 
   void updateComposer(String value) {
@@ -222,12 +194,19 @@ class StudioController extends AsyncNotifier<StudioState> {
         ],
       ),
     );
-    final next = await _api.setSessionMode(sessionId, mode);
+    final updated = await _api.setSessionMode(sessionId, mode);
     final latest = state.value;
     if (latest == null) {
       return;
     }
-    state = AsyncData(mergeStudioSessionState(latest, next));
+    state = AsyncData(
+      latest.copyWith(
+        sessions: [
+          for (final session in latest.sessions)
+            session.id == updated.id ? updated : session,
+        ],
+      ),
+    );
   }
 
   Future<void> setModelRole({
@@ -405,7 +384,7 @@ class StudioController extends AsyncNotifier<StudioState> {
     if (event.payload is StalePayload) {
       final sessionId = event.sessionId ?? latest.selectedSessionId;
       if (sessionId != null) {
-        unawaited(_recoverStaleSession(sessionId));
+        _resubscribeSnapshot(sessionId, _sessionGeneration);
       }
       return;
     }
@@ -416,97 +395,38 @@ class StudioController extends AsyncNotifier<StudioState> {
     state = AsyncData(_reduceEventWithCursor(latest, event));
   }
 
-  void _handleSessionEvent(Object event, String sessionId, int generation) {
-    if (generation != _sessionGeneration || event is! StudioBridgeEvent) {
-      return;
-    }
-    final eventSessionId = studioEventSessionId(event);
-    if (eventSessionId != null && eventSessionId != sessionId) {
-      return;
-    }
-    if (_loadingSessionId == sessionId && _loadingGeneration == generation) {
-      if (event.payload is StalePayload) {
-        _bufferedStaleSession = true;
-      } else {
-        _sessionLoadBuffer.add(
-          _BufferedSessionEvent(event, _sessionLoadBufferNextIndex++),
-        );
-      }
-      return;
-    }
-    _handleEvent(event);
-  }
-
-  void _startSessionLoadBarrier(String sessionId, int generation) {
-    _flushPartDeltaBatch();
-    _loadingSessionId = sessionId;
-    _loadingGeneration = generation;
-    _bufferedStaleSession = false;
-    _sessionLoadBuffer.clear();
-    _sessionLoadBufferNextIndex = 0;
-  }
-
-  void _clearAnySessionLoadBarrier() {
-    _loadingSessionId = null;
-    _loadingGeneration = null;
-    _bufferedStaleSession = false;
-    _sessionLoadBuffer.clear();
-    _sessionLoadBufferNextIndex = 0;
-  }
-
-  void _clearSessionLoadBarrier(String sessionId, int generation) {
-    if (_loadingSessionId == sessionId && _loadingGeneration == generation) {
-      _clearAnySessionLoadBarrier();
-    }
-  }
-
-  StudioState _flushSessionLoadBuffer(
-    StudioState current,
+  void _handleSessionFrame(
+    SessionStreamFrame frame,
     String sessionId,
     int generation,
   ) {
-    if (_loadingSessionId != sessionId || _loadingGeneration != generation) {
-      return current;
+    if (generation != _sessionGeneration ||
+        state.value?.selectedSessionId != sessionId) {
+      return;
     }
-    _sessionLoadBuffer.sort((a, b) {
-      final aEvent = a.event;
-      final bEvent = b.event;
-      if (isLiveOnlyStudioEvent(aEvent) && isLiveOnlyStudioEvent(bEvent)) {
-        return a.arrivalIndex.compareTo(b.arrivalIndex);
-      }
-      final aSequence = aEvent.sequence?.toInt() ?? 0;
-      final bSequence = bEvent.sequence?.toInt() ?? 0;
-      final sequence = switch ((aSequence > 0, bSequence > 0)) {
-        (true, true) => aSequence.compareTo(bSequence),
-        (true, false) => -1,
-        (false, true) => 1,
-        (false, false) => 0,
-      };
-      if (sequence != 0) {
-        return sequence;
-      }
-      final createdAt = (aEvent.createdAt?.millisecondsSinceEpoch ?? 0)
-          .compareTo(bEvent.createdAt?.millisecondsSinceEpoch ?? 0);
-      if (createdAt != 0) {
-        return createdAt;
-      }
-      return (aEvent.eventId ?? '').compareTo(bEvent.eventId ?? '');
-    });
-    var latest = current;
-    for (final buffered in _sessionLoadBuffer) {
-      final event = buffered.event;
-      if (!targetsSelectedSession(latest, event) ||
-          isDuplicateDurableEvent(latest, event)) {
-        continue;
-      }
-      latest = _reduceEventWithCursor(latest, event);
+    switch (frame) {
+      case SessionSnapshotFrame(:final snapshot):
+        _flushPartDeltaBatch();
+        final current = state.value;
+        if (current != null) {
+          state = AsyncData(applyCanonicalSessionSnapshot(current, snapshot));
+        }
+      case SessionEventFrame(:final event):
+        final eventSessionId = studioEventSessionId(event);
+        if (eventSessionId == null || eventSessionId == sessionId) {
+          _handleEvent(event);
+        }
+      case SessionResyncRequiredFrame():
+        _resubscribeSnapshot(sessionId, generation);
     }
-    final shouldRecover = _bufferedStaleSession;
-    _clearAnySessionLoadBarrier();
-    if (shouldRecover) {
-      unawaited(_recoverStaleSession(sessionId));
+  }
+
+  void _resubscribeSnapshot(String sessionId, int generation) {
+    if (generation != _sessionGeneration ||
+        state.value?.selectedSessionId != sessionId) {
+      return;
     }
-    return latest;
+    _subscribe(sessionId, forceSnapshot: true);
   }
 
   void _queuePartDelta(StudioState current, StudioBridgeEvent event) {
@@ -546,81 +466,13 @@ class StudioController extends AsyncNotifier<StudioState> {
     state = AsyncData(latest);
   }
 
-  Future<void> _reloadSession(String sessionId) async {
-    final sessionState = await _api.loadSessionState(sessionId);
-    final current = state.value;
-    if (current == null || current.selectedSessionId != sessionId) {
-      return;
-    }
-    state = AsyncData(mergeStudioSessionState(current, sessionState));
-  }
-
   Future<void> _adoptState(StudioState next) async {
     final catalog = state.value?.providerCatalog;
     if (catalog != null) {
       next = _attachProviderCatalog(next, catalog);
     }
-    _subscribe(next.selectedSessionId);
     state = AsyncData(next);
-    final sessionId = next.selectedSessionId;
-    if (sessionId == null) {
-      return;
-    }
-    final generation = _sessionGeneration;
-    _startSessionLoadBarrier(sessionId, generation);
-    final withProjection = await _withSelectedSessionProjection(next);
-    final current = state.value;
-    if (current == null ||
-        current.selectedSessionId != sessionId ||
-        generation != _sessionGeneration) {
-      _clearSessionLoadBarrier(sessionId, generation);
-      return;
-    }
-    var merged = mergeStudioSessionState(current, withProjection);
-    merged = _flushSessionLoadBuffer(merged, sessionId, generation);
-    state = AsyncData(merged);
-  }
-
-  Future<StudioState> _withSelectedSessionProjection(StudioState next) async {
-    final sessionId = next.selectedSessionId;
-    if (sessionId == null) {
-      return next;
-    }
-    final sessionState = await _api.loadSessionState(sessionId);
-    return mergeStudioSessionState(next, sessionState);
-  }
-
-  Future<void> _recoverStaleSession(String sessionId) async {
-    final current = state.value;
-    final afterSequence = current?.eventCursorsBySession[sessionId];
-    if (current == null || afterSequence == null || afterSequence <= 0) {
-      await _reloadSession(sessionId);
-      return;
-    }
-    final events = await _api.loadStudioEvents(
-      sessionId,
-      afterSequence: afterSequence,
-      limit: 500,
-    );
-    final liveState = state.value;
-    if (liveState == null || liveState.selectedSessionId != sessionId) {
-      return;
-    }
-    var latest = liveState;
-    if (events.isEmpty) {
-      return;
-    }
-    for (final event in events) {
-      if (!targetsSelectedSession(latest, event) ||
-          isDuplicateDurableEvent(latest, event)) {
-        continue;
-      }
-      latest = _reduceEventWithCursor(latest, event);
-    }
-    state = AsyncData(latest);
-    if (events.length >= 500) {
-      await _reloadSession(sessionId);
-    }
+    _subscribe(next.selectedSessionId);
   }
 
   StudioState _reduceEventWithCursor(
@@ -634,7 +486,7 @@ class StudioController extends AsyncNotifier<StudioState> {
     final reduced = reduceStudioEvent(current, event);
     final staleSessionId = reduced.staleSessionId;
     if (staleSessionId != null) {
-      unawaited(_recoverStaleSession(staleSessionId));
+      _resubscribeSnapshot(staleSessionId, _sessionGeneration);
     }
     return reduced.state;
   }

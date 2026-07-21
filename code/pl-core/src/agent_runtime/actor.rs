@@ -5,8 +5,8 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::task::AbortHandle;
 use tokio_util::sync::CancellationToken;
 
-use super::execution::{TurnCompletion, execute_turn};
-use super::host::{AgentEventSink, AgentStateRepository};
+use super::execution::{TurnCompletion, execute_turn, turn_outcome};
+use super::host::{AgentCommitObserver, AgentStateRepository, SessionProjectionCommit};
 use super::state::{AgentRuntimeError, unix_timestamp};
 use super::{
     AgentActivityState, AgentCommit, AgentCommitOutcome, AgentCommittedEvent, AgentDurableState,
@@ -14,6 +14,10 @@ use super::{
     AgentRuntimeHost, AgentRuntimeResult, AgentSnapshot, AgentSubmitRequest,
     AgentTurnPreparationContext, AgentWaitResult, InputDelivery, PendingAgentInput, SessionId,
     TurnId,
+};
+use crate::session_event::{
+    ObservedTurnEvent, TurnObservation, project_observation, project_runtime_event,
+    project_trace_events, runtime_event_session_id,
 };
 
 mod completion;
@@ -39,6 +43,11 @@ pub(crate) enum ActorCommand {
     },
     OpenSession {
         session: super::AgentSessionState,
+        reply: oneshot::Sender<AgentRuntimeResult<()>>,
+    },
+    RecordSessionFacts {
+        session_id: SessionId,
+        facts: Vec<crate::SessionEventFact>,
         reply: oneshot::Sender<AgentRuntimeResult<()>>,
     },
     Snapshot {
@@ -104,6 +113,8 @@ where
     receiver: mpsc::Receiver<ActorCommand>,
     trace_sender: mpsc::UnboundedSender<TraceEvent>,
     trace_receiver: mpsc::UnboundedReceiver<TraceEvent>,
+    observation_sender: mpsc::UnboundedSender<ObservedTurnEvent>,
+    observation_receiver: mpsc::UnboundedReceiver<ObservedTurnEvent>,
     active: Option<ActiveTurn>,
     run_queue: bool,
     waiters: Vec<oneshot::Sender<AgentRuntimeResult<AgentWaitResult>>>,
@@ -123,6 +134,7 @@ where
 {
     let (sender, receiver) = mpsc::channel(command_capacity.max(1));
     let (trace_sender, trace_receiver) = mpsc::unbounded_channel();
+    let (observation_sender, observation_receiver) = mpsc::unbounded_channel();
     let handle = AgentActorHandle {
         sender: sender.clone(),
         #[cfg(test)]
@@ -138,6 +150,8 @@ where
             receiver,
             trace_sender,
             trace_receiver,
+            observation_sender,
+            observation_receiver,
             active: None,
             run_queue,
             waiters: Vec::new(),
@@ -190,6 +204,17 @@ where
                             let result = self.open_session(session).await;
                             let _ = reply.send(result);
                         }
+                        ActorCommand::RecordSessionFacts {
+                            session_id,
+                            facts,
+                            reply,
+                        } => {
+                            let result = self.record_session_facts(session_id, facts).await;
+                            if let Err(error) = &result {
+                                self.fault_in_memory(error.to_string());
+                            }
+                            let _ = reply.send(result);
+                        }
                         ActorCommand::Snapshot { reply } => {
                             let _ = reply.send(Ok(self.state.snapshot.clone()));
                         }
@@ -218,6 +243,14 @@ where
                         continue;
                     };
                     if let Err(error) = self.persist_trace_batch(vec![trace]).await {
+                        self.fault_in_memory(error.to_string());
+                    }
+                }
+                observation = self.observation_receiver.recv() => {
+                    let Some(observation) = observation else {
+                        continue;
+                    };
+                    if let Err(error) = self.persist_observation(observation).await {
                         self.fault_in_memory(error.to_string());
                     }
                 }
@@ -350,6 +383,7 @@ where
                 next_state: next.clone(),
                 events: Vec::new(),
                 trace_events: Vec::new(),
+                session_projection: None,
                 mutation: super::AgentStateMutation::ReplaceSession {
                     session_id: checkpoint.session_id.clone(),
                 },
@@ -400,6 +434,105 @@ where
             }
         })
         .await
+    }
+
+    async fn record_session_facts(
+        &mut self,
+        session_id: SessionId,
+        facts: Vec<crate::SessionEventFact>,
+    ) -> AgentRuntimeResult<()> {
+        if facts.is_empty() {
+            return Ok(());
+        }
+        if !self.state.sessions.contains_key(&session_id) {
+            return Err(AgentRuntimeError::Repository(format!(
+                "agent {} does not own session {session_id}",
+                self.state.snapshot.identity.id
+            )));
+        }
+        let current = self
+            .runtime
+            .session_events
+            .snapshot(session_id.as_str())
+            .map_err(|error| AgentRuntimeError::SessionEvents(error.to_string()))?;
+        let projected = crate::session_event::project_session_facts(
+            session_id.as_str(),
+            current.through_sequence,
+            facts,
+        );
+        let durable_events = projected.durable_events();
+        if durable_events.is_empty() {
+            self.runtime
+                .session_events
+                .publish_batch(projected.events)
+                .map_err(|error| AgentRuntimeError::SessionEvents(error.to_string()))?;
+            return Ok(());
+        }
+
+        let expected_revision = self.state.snapshot.revision;
+        let projection = SessionProjectionCommit {
+            snapshot: self
+                .runtime
+                .session_events
+                .project_durable(session_id.as_str(), &durable_events)
+                .map_err(|error| AgentRuntimeError::SessionEvents(error.to_string()))?,
+            durable_events,
+        };
+        let mut next = self.state.clone();
+        next.snapshot.revision = expected_revision.saturating_add(1);
+        next.snapshot.updated_at = unix_timestamp();
+        next.sessions
+            .get_mut(&session_id)
+            .expect("validated session must be present")
+            .session_event_sequence = projected.through_sequence;
+        let outcome = self
+            .host
+            .repository()
+            .commit(AgentCommit {
+                agent_id: next.snapshot.identity.id.clone(),
+                expected_revision: Some(expected_revision),
+                next_state: next.clone(),
+                events: Vec::new(),
+                trace_events: Vec::new(),
+                session_projection: Some(projection),
+                mutation: super::AgentStateMutation::AppendSessionEvents {
+                    session_id: session_id.clone(),
+                },
+            })
+            .await
+            .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
+        match outcome {
+            AgentCommitOutcome::Applied => {
+                let agent_id = next.snapshot.identity.id.clone();
+                self.state = next;
+                self.runtime
+                    .session_events
+                    .publish_batch(projected.events.clone())
+                    .map_err(|error| AgentRuntimeError::SessionEvents(error.to_string()))?;
+                self.host
+                    .observer()
+                    .publish(AgentCommittedEvent {
+                        agent_id,
+                        session_id: Some(session_id),
+                        turn_id: projected
+                            .events
+                            .first()
+                            .and_then(|event| event.turn_id.clone())
+                            .and_then(|value| TurnId::new(value).ok()),
+                        runtime_events: Vec::new(),
+                        trace_events: Vec::new(),
+                        session_events: projected.events,
+                    })
+                    .await;
+                Ok(())
+            }
+            AgentCommitOutcome::RevisionConflict { actual_revision } => {
+                Err(AgentRuntimeError::RevisionConflict {
+                    expected: Some(expected_revision),
+                    actual: actual_revision,
+                })
+            }
+        }
     }
 
     fn wait(&mut self, reply: oneshot::Sender<AgentRuntimeResult<AgentWaitResult>>) {
@@ -464,8 +597,16 @@ where
         let worker_host = self.host.clone();
         let worker_cancellation = cancellation.clone();
         let durable_trace_tx = self.trace_sender.clone();
+        let observation_tx = self.observation_sender.clone();
         let worker = tokio::spawn(async move {
-            execute_turn(worker_host, context, worker_cancellation, durable_trace_tx).await
+            execute_turn(
+                worker_host,
+                context,
+                worker_cancellation,
+                durable_trace_tx,
+                observation_tx,
+            )
+            .await
         });
         let abort_handle = worker.abort_handle();
         let (settled_sender, settled) = oneshot::channel();
@@ -521,6 +662,120 @@ where
         self.persist_trace_batch(trace_events).await
     }
 
+    pub(super) async fn flush_pending_observations(&mut self) -> AgentRuntimeResult<()> {
+        let mut observations = Vec::new();
+        while let Ok(observation) = self.observation_receiver.try_recv() {
+            observations.push(observation);
+        }
+        for observation in observations {
+            self.persist_observation(observation).await?;
+        }
+        Ok(())
+    }
+
+    pub(super) async fn persist_turn_observation(
+        &mut self,
+        observation: TurnObservation,
+    ) -> AgentRuntimeResult<()> {
+        let Some(active) = &self.active else {
+            return Ok(());
+        };
+        self.persist_observation(ObservedTurnEvent {
+            turn_id: active.turn_id.to_string(),
+            session_id: active.session_id.to_string(),
+            observation,
+        })
+        .await
+    }
+
+    async fn persist_observation(&mut self, observed: ObservedTurnEvent) -> AgentRuntimeResult<()> {
+        let Some(active) = &self.active else {
+            return Ok(());
+        };
+        if active.turn_id.as_str() != observed.turn_id
+            || active.session_id.as_str() != observed.session_id
+            || active.cancellation_requested
+        {
+            return Ok(());
+        }
+        let session_id = active.session_id.clone();
+        let turn_id = active.turn_id.clone();
+        let expected_revision = self.state.snapshot.revision;
+        let sequence = self.state.sessions[&session_id].session_event_sequence;
+        let current = self
+            .runtime
+            .session_events
+            .snapshot(session_id.as_str())
+            .map_err(|error| AgentRuntimeError::SessionEvents(error.to_string()))?;
+        let projected = project_observation(
+            self.state.snapshot.identity.id.as_str(),
+            session_id.as_str(),
+            turn_id.as_str(),
+            sequence,
+            &current,
+            observed.observation,
+        );
+        let durable_events = projected.durable_events();
+        let projection = SessionProjectionCommit {
+            snapshot: self
+                .runtime
+                .session_events
+                .project_durable(session_id.as_str(), &durable_events)
+                .map_err(|error| AgentRuntimeError::SessionEvents(error.to_string()))?,
+            durable_events,
+        };
+        let mut next = self.state.clone();
+        next.snapshot.revision = expected_revision.saturating_add(1);
+        next.snapshot.updated_at = unix_timestamp();
+        next.sessions
+            .get_mut(&session_id)
+            .expect("active session must be present")
+            .session_event_sequence = projected.through_sequence;
+        let outcome = self
+            .host
+            .repository()
+            .commit(AgentCommit {
+                agent_id: next.snapshot.identity.id.clone(),
+                expected_revision: Some(expected_revision),
+                next_state: next.clone(),
+                events: Vec::new(),
+                trace_events: Vec::new(),
+                session_projection: Some(projection),
+                mutation: super::AgentStateMutation::AppendSessionEvents {
+                    session_id: session_id.clone(),
+                },
+            })
+            .await
+            .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
+        match outcome {
+            AgentCommitOutcome::Applied => {
+                self.state = next;
+                self.runtime
+                    .session_events
+                    .publish_batch(projected.events.clone())
+                    .map_err(|error| AgentRuntimeError::SessionEvents(error.to_string()))?;
+                self.host
+                    .observer()
+                    .publish(AgentCommittedEvent {
+                        agent_id: self.state.snapshot.identity.id.clone(),
+                        session_id: Some(session_id),
+                        turn_id: Some(turn_id),
+                        runtime_events: Vec::new(),
+                        trace_events: Vec::new(),
+                        session_events: projected.events,
+                    })
+                    .await;
+                Ok(())
+            }
+            AgentCommitOutcome::RevisionConflict { actual_revision } => {
+                Err(AgentRuntimeError::RevisionConflict {
+                    expected: Some(expected_revision),
+                    actual: actual_revision,
+                })
+            }
+        }
+    }
+
     async fn persist_trace_batch(
         &mut self,
         mut trace_events: Vec<TraceEvent>,
@@ -553,14 +808,37 @@ where
             .map(|trace| trace.sequence.saturating_add(1))
             .unwrap_or(current_sequence);
         let expected_revision = self.state.snapshot.revision;
+        let session_event_sequence = self.state.sessions[&session_id].session_event_sequence;
+        let projected = project_trace_events(
+            self.state.snapshot.identity.id.as_str(),
+            session_id.as_str(),
+            session_event_sequence,
+            &trace_events,
+        );
+        let durable_session_events = projected.durable_events();
+        let session_projection = if durable_session_events.is_empty() {
+            None
+        } else {
+            Some(SessionProjectionCommit {
+                snapshot: self
+                    .runtime
+                    .session_events
+                    .project_durable(session_id.as_str(), &durable_session_events)
+                    .map_err(|error| AgentRuntimeError::SessionEvents(error.to_string()))?,
+                durable_events: durable_session_events,
+            })
+        };
         let mut next = self.state.clone();
         next.snapshot.revision = expected_revision.saturating_add(1);
         next.snapshot.updated_at = unix_timestamp();
-        next.sessions
+        let next_session = next
+            .sessions
             .get_mut(&session_id)
-            .expect("active session must be present")
-            .trace_sequence = next_trace_sequence;
+            .expect("active session must be present");
+        next_session.trace_sequence = next_trace_sequence;
+        next_session.session_event_sequence = projected.through_sequence;
         let committed_trace_events = trace_events.clone();
+        let committed_session_events = projected.events.clone();
         let result = self
             .host
             .repository()
@@ -570,6 +848,7 @@ where
                 next_state: next.clone(),
                 events: Vec::new(),
                 trace_events,
+                session_projection,
                 mutation: super::AgentStateMutation::AppendTrace,
             })
             .await
@@ -578,14 +857,19 @@ where
             AgentCommitOutcome::Applied => {
                 let agent_id = next.snapshot.identity.id.clone();
                 self.state = next;
+                self.runtime
+                    .session_events
+                    .publish_batch(committed_session_events.clone())
+                    .map_err(|error| AgentRuntimeError::SessionEvents(error.to_string()))?;
                 self.host
-                    .events()
+                    .observer()
                     .publish(AgentCommittedEvent {
                         agent_id,
                         session_id: Some(session_id),
                         turn_id: Some(turn_id),
                         runtime_events: Vec::new(),
                         trace_events: committed_trace_events,
+                        session_events: committed_session_events,
                     })
                     .await;
                 Ok(())
@@ -618,7 +902,39 @@ where
             created_at: next.snapshot.updated_at,
             kind: event_kind(next.snapshot.clone()),
         };
+        let session_id = runtime_event_session_id(&event).map(str::to_string);
+        let current_session_event_sequence = session_id
+            .as_ref()
+            .and_then(|session_id| {
+                self.state
+                    .sessions
+                    .get(&SessionId::new(session_id.clone()).ok()?)
+            })
+            .map_or(0, |session| session.session_event_sequence);
+        let projected = project_runtime_event(&event, current_session_event_sequence);
+        let durable_session_events = projected.durable_events();
+        let session_projection = match session_id.as_deref() {
+            Some(session_id) if !durable_session_events.is_empty() => {
+                Some(SessionProjectionCommit {
+                    snapshot: self
+                        .runtime
+                        .session_events
+                        .project_durable(session_id, &durable_session_events)
+                        .map_err(|error| AgentRuntimeError::SessionEvents(error.to_string()))?,
+                    durable_events: durable_session_events,
+                })
+            }
+            Some(_) | None => None,
+        };
+        if let Some(session_id) = session_id.as_ref() {
+            let session_id = SessionId::new(session_id.clone())
+                .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
+            if let Some(session) = next.sessions.get_mut(&session_id) {
+                session.session_event_sequence = projected.through_sequence;
+            }
+        }
         let committed_trace_events = trace_events.clone();
+        let committed_session_events = projected.events.clone();
         let result = self
             .host
             .repository()
@@ -628,6 +944,7 @@ where
                 next_state: next.clone(),
                 events: vec![event.clone()],
                 trace_events,
+                session_projection,
                 mutation: super::AgentStateMutation::SnapshotAndQueue,
             })
             .await
@@ -635,14 +952,23 @@ where
         match result {
             AgentCommitOutcome::Applied => {
                 self.state = next;
+                self.runtime
+                    .session_events
+                    .publish_batch(committed_session_events.clone())
+                    .map_err(|error| AgentRuntimeError::SessionEvents(error.to_string()))?;
                 self.host
-                    .events()
+                    .observer()
                     .publish(AgentCommittedEvent {
                         agent_id: event.agent_id.clone(),
-                        session_id: self.state.snapshot.active_session_id.clone(),
-                        turn_id: self.state.snapshot.active_turn_id.clone(),
+                        session_id: session_id.and_then(|value| SessionId::new(value).ok()),
+                        turn_id: projected
+                            .events
+                            .first()
+                            .and_then(|event| event.turn_id.clone())
+                            .and_then(|value| TurnId::new(value).ok()),
                         runtime_events: vec![event],
                         trace_events: committed_trace_events,
+                        session_events: committed_session_events,
                     })
                     .await;
                 Ok(())
@@ -663,12 +989,38 @@ where
         }
     }
 
-    fn fault_in_memory(&mut self, _reason: String) {
+    fn fault_in_memory(&mut self, reason: String) {
+        let turn_id = self
+            .active
+            .as_ref()
+            .map(|active| active.turn_id.clone())
+            .or_else(|| self.state.snapshot.active_turn_id.clone());
+        let session_id = self
+            .active
+            .as_ref()
+            .map(|active| active.session_id.clone())
+            .or_else(|| self.state.snapshot.active_session_id.clone());
+        let fault_outcome = turn_id
+            .clone()
+            .zip(session_id.clone())
+            .map(|(turn_id, session_id)| {
+                turn_outcome(turn_id, session_id, Err(reason.clone()), false).0
+            });
+        tracing::error!(
+            agent_id = %self.state.snapshot.identity.id,
+            turn_id = turn_id.as_ref().map(TurnId::as_str),
+            session_id = session_id.as_ref().map(SessionId::as_str),
+            reason,
+            "agent runtime entered an in-memory faulted state"
+        );
         self.stop_active_turn();
         self.state.snapshot.lifecycle = AgentLifecycleState::Faulted;
         self.state.snapshot.activity = AgentActivityState::Idle;
         self.state.snapshot.active_turn_id = None;
         self.state.snapshot.active_session_id = None;
+        if fault_outcome.is_some() {
+            self.state.snapshot.last_turn = fault_outcome;
+        }
         let result = self.wait_result();
         for waiter in self.waiters.drain(..) {
             let _ = waiter.send(Ok(result.clone()));

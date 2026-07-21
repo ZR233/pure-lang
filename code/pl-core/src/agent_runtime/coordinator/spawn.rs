@@ -37,6 +37,7 @@ where
             next_state: state.clone(),
             events: vec![event.clone()],
             trace_events: Vec::new(),
+            session_projection: None,
             mutation: super::super::AgentStateMutation::SnapshotAndQueue,
         })
         .await
@@ -50,7 +51,7 @@ where
             });
         }
     }
-    host.events()
+    host.observer()
         .publish(AgentCommittedEvent::runtime(event))
         .await;
     actors.insert(
@@ -135,6 +136,7 @@ where
             next_state: state.clone(),
             events: vec![event.clone()],
             trace_events: Vec::new(),
+            session_projection: None,
             mutation: super::super::AgentStateMutation::SnapshotAndQueue,
         })
         .await;
@@ -184,7 +186,7 @@ where
         );
         return Err(AgentRuntimeError::Lifecycle(reason));
     }
-    host.events()
+    host.observer()
         .publish(AgentCommittedEvent::runtime(event))
         .await;
     actors.insert(
@@ -251,13 +253,14 @@ where
             next_state: state.clone(),
             events: vec![event.clone()],
             trace_events: Vec::new(),
+            session_projection: None,
             mutation: super::super::AgentStateMutation::SnapshotAndQueue,
         })
         .await
         .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
     match outcome {
         AgentCommitOutcome::Applied => {
-            host.events()
+            host.observer()
                 .publish(AgentCommittedEvent::runtime(event))
                 .await;
             Ok(state)

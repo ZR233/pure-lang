@@ -76,6 +76,12 @@ impl<Artifact> ToolExecutionResult<Artifact> {
         Self::new(false, output.into(), false)
     }
 
+    /// 标记成功或失败结果写入 history 后立即结束当前 turn。
+    pub fn ending_turn(mut self) -> Self {
+        self.ends_turn = true;
+        self
+    }
+
     pub fn new(success: bool, output: String, ends_turn: bool) -> Self {
         Self::with_model_tokens(
             success,

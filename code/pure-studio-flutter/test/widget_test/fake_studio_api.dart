@@ -11,12 +11,13 @@ class _FakeStudioApi implements StudioApi {
   final List<ProviderUsageView> providerUsages;
   final ProviderCatalogView providerCatalog;
   final _global = StreamController<Object>.broadcast();
-  final _session = StreamController<Object>.broadcast();
+  final _session = StreamController<SessionStreamFrame>.broadcast();
   final Map<String, StudioState> sessionStates = {};
-  final Map<String, Completer<StudioState>> blockedSessionLoads = {};
   final Map<String, StudioState> selectProjectStates = {};
   final Map<String, StudioState> archiveProjectStates = {};
   final List<String> loadedSessionIds = [];
+  final List<({String sessionId, int? afterSequence})> sessionSubscriptions =
+      [];
   int createSessionCount = 0;
   String? archivedProjectId;
   String? archiveSelectedProjectId;
@@ -41,23 +42,16 @@ class _FakeStudioApi implements StudioApi {
 
   void emitGlobal(StudioBridgeEvent event) => _global.add(event);
 
-  void emitSession(StudioBridgeEvent event) => _session.add(event);
+  void emitSession(StudioBridgeEvent event) =>
+      _session.add(SessionEventFrame(event: event));
+
+  void emitSessionFrame(SessionStreamFrame frame) => _session.add(frame);
 
   @override
   Future<ProviderCatalogView> loadProviderCatalog() async => providerCatalog;
 
   @override
   Future<StudioState> bootstrap() async => initialState;
-
-  @override
-  Future<StudioState> loadSessionState(String sessionId) async {
-    loadedSessionIds.add(sessionId);
-    final blocked = blockedSessionLoads.remove(sessionId);
-    if (blocked != null) {
-      return blocked.future;
-    }
-    return sessionStates[sessionId] ?? initialState;
-  }
 
   @override
   Future<StudioState> openProject(String path) async => initialState;
@@ -92,14 +86,14 @@ class _FakeStudioApi implements StudioApi {
   }
 
   @override
-  Future<StudioState> setSessionMode(String sessionId, StudioMode mode) async {
+  Future<StudioSession> setSessionMode(
+    String sessionId,
+    StudioMode mode,
+  ) async {
     sessionModeUpdate = mode;
-    return initialState.copyWith(
-      sessions: [
-        for (final session in initialState.sessions)
-          session.id == sessionId ? session.copyWith(mode: mode) : session,
-      ],
-    );
+    return initialState.sessions
+        .firstWhere((session) => session.id == sessionId)
+        .copyWith(mode: mode);
   }
 
   @override
@@ -132,13 +126,6 @@ class _FakeStudioApi implements StudioApi {
   }
 
   @override
-  Future<List<StudioBridgeEvent>> loadStudioEvents(
-    String sessionId, {
-    int? afterSequence,
-    int limit = 500,
-  }) async => const [];
-
-  @override
   Future<void> resolveInteraction(
     String interactionId,
     Map<String, Object?> resolution,
@@ -156,10 +143,19 @@ class _FakeStudioApi implements StudioApi {
   Future<void> stopPrompt(String sessionId) async {}
 
   @override
-  Stream<Object> subscribeGlobalEvents() => _global.stream;
+  Stream<Object> subscribeProductEvents() => _global.stream;
 
   @override
-  Stream<Object> subscribeSessionEvents(String sessionId) => _session.stream;
+  Stream<SessionStreamFrame> subscribeSessionEvents(
+    String sessionId, {
+    int? afterSequence,
+  }) {
+    sessionSubscriptions.add((
+      sessionId: sessionId,
+      afterSequence: afterSequence,
+    ));
+    return _session.stream;
+  }
 
   @override
   Future<void> submitPrompt(

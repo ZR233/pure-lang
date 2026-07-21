@@ -1,16 +1,9 @@
-use crate::api::studio::convert::agent::{agent_bridge_dto, agent_event_bridge_dto};
-use crate::api::studio::convert::event::{bridge_event_envelope, is_session_state_event};
-use crate::api::studio::convert::interaction::interaction_request_bridge_dto;
-use crate::api::studio::convert::message::{bridge_message, bridge_part};
 use crate::api::studio::convert::records::{project_dto, session_dto};
-use crate::api::studio::convert::runtime::bridge_session_runtime_view;
+use crate::api::studio::convert::runtime::bridge_task_runtime;
 use crate::api::studio::convert::settings::{studio_config_projection, web_search_settings_dto};
 use crate::api::studio::runtime::BridgeRuntime;
-use crate::api::studio::types::{
-    BridgeSessionStateResponse, BridgeStudioMessageProjectionDto, BridgeStudioPartProjectionDto,
-    BridgeStudioSnapshotResponse,
-};
-use anyhow::{Context, Result};
+use crate::api::studio::types::BridgeStudioSnapshotResponse;
+use anyhow::Result;
 // ── Inner async helpers ──
 
 pub(super) async fn bootstrap_studio_inner(
@@ -60,9 +53,6 @@ pub(super) async fn studio_snapshot_from_projects_inner(
     let selected_project_id = selected_project.as_ref().map(|project| project.id.clone());
     let mut sessions = Vec::new();
     let mut selected_session_id = None;
-    let mut agent_events = Vec::new();
-    let mut agents = Vec::new();
-    let mut interactions = Vec::new();
 
     if let Some(project) = selected_project {
         bridge
@@ -73,18 +63,13 @@ pub(super) async fn studio_snapshot_from_projects_inner(
         selected_session_id = requested_session_id
             .filter(|session_id| sessions.iter().any(|session| session.id == *session_id))
             .or_else(|| sessions.first().map(|session| session.id.clone()));
-        if let Some(session_id) = selected_session_id.as_deref() {
-            agent_events = bridge.studio.store().list_agent_events(session_id).await?;
-            agents = bridge.studio.store().list_agents(session_id).await?;
-            interactions = bridge
-                .studio
-                .store()
-                .list_pending_interactions(session_id)
-                .await?;
-        }
     }
-    let session_runtime = match selected_session_id.as_deref() {
-        Some(session_id) => Some(bridge_session_runtime_view(bridge, session_id).await?),
+    let selected_session_task = match selected_session_id.as_deref() {
+        Some(session_id) => bridge
+            .studio
+            .session_task_view(session_id)
+            .await?
+            .map(bridge_task_runtime),
         None => None,
     };
     let config = bridge.studio.config_store().load_or_default()?;
@@ -112,113 +97,9 @@ pub(super) async fn studio_snapshot_from_projects_inner(
         selected_project_id,
         sessions: sessions.into_iter().map(session_dto).collect(),
         selected_session_id,
-        agent_events: agent_events
-            .into_iter()
-            .map(agent_event_bridge_dto)
-            .collect::<Result<Vec<_>>>()?,
-        agents: agents.into_iter().map(agent_bridge_dto).collect(),
-        interactions: interactions
-            .into_iter()
-            .map(interaction_request_bridge_dto)
-            .collect(),
-        session_runtime,
+        selected_session_task,
         config_json,
         general_settings_json,
         web_search,
-    })
-}
-
-pub(super) async fn load_session_state_inner(
-    bridge: &'static BridgeRuntime,
-    session_id: String,
-) -> Result<BridgeSessionStateResponse> {
-    let session = bridge
-        .studio
-        .store()
-        .read_session(&session_id)
-        .await?
-        .context("selected session not found")?;
-    let events = bridge
-        .studio
-        .store()
-        .load_studio_events(&session_id, None, None)
-        .await?
-        .into_iter()
-        .filter(is_session_state_event)
-        .filter_map(bridge_event_envelope)
-        .collect();
-    let messages = bridge
-        .studio
-        .store()
-        .load_studio_messages(&session_id)
-        .await?
-        .into_iter()
-        .map(|record| BridgeStudioMessageProjectionDto {
-            message: bridge_message(record.message),
-            sequence: record.sequence.max(0) as u64,
-        })
-        .collect();
-    let parts = bridge
-        .studio
-        .store()
-        .load_message_parts(&session_id)
-        .await?
-        .into_iter()
-        .map(|record| BridgeStudioPartProjectionDto {
-            part: bridge_part(record.part),
-            sequence: record.sequence.max(0) as u64,
-        })
-        .collect();
-    let event_next_sequence = bridge
-        .studio
-        .store()
-        .next_studio_event_sequence(&session_id)
-        .await? as u64;
-    let sessions = bridge
-        .studio
-        .store()
-        .list_sessions(&session.project_id)
-        .await?
-        .into_iter()
-        .map(session_dto)
-        .collect();
-    let agents = bridge
-        .studio
-        .store()
-        .list_agents(&session_id)
-        .await?
-        .into_iter()
-        .map(agent_bridge_dto)
-        .collect();
-    let agent_events = bridge
-        .studio
-        .store()
-        .list_agent_events(&session_id)
-        .await?
-        .into_iter()
-        .map(agent_event_bridge_dto)
-        .collect::<Result<Vec<_>>>()?;
-    let interactions = bridge
-        .studio
-        .store()
-        .list_pending_interactions(&session_id)
-        .await?
-        .into_iter()
-        .map(interaction_request_bridge_dto)
-        .collect();
-    let session_runtime = bridge_session_runtime_view(bridge, &session_id).await.ok();
-
-    Ok(BridgeSessionStateResponse {
-        session_id: session_id.clone(),
-        session: session_dto(session),
-        sessions,
-        messages,
-        parts,
-        events,
-        event_next_sequence,
-        agents,
-        agent_events,
-        interactions,
-        session_runtime,
     })
 }

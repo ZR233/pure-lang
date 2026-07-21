@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::{StudioEventKind, StudioKeyValue, StudioMcpHealth, StudioMcpServer};
+use crate::{StudioKeyValue, StudioMcpHealth, StudioMcpServer, StudioProductEventKind};
 use anyhow::Result;
 use tokio::sync::broadcast::error::RecvError;
 
@@ -58,14 +58,8 @@ impl StudioRuntime {
 
     async fn emit_mcp_health_snapshot(&self) -> Result<()> {
         let health = self.mcp_health_snapshot().await?;
-        self.events
-            .emit(
-                None,
-                None,
-                None,
-                StudioEventKind::McpHealthChanged { health },
-            )
-            .await?;
+        self.product_events
+            .emit(None, StudioProductEventKind::McpHealthChanged { health });
         Ok(())
     }
 

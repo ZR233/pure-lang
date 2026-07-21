@@ -28,26 +28,6 @@ pub struct BridgeActiveTurn {
     pub turn_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct BridgeSessionRuntimeDto {
-    pub session_id: String,
-    pub model: String,
-    pub context_window: Option<u64>,
-    pub latest_context_tokens: u64,
-    pub prompt_tokens: u64,
-    pub completion_tokens: u64,
-    pub cached_prompt_tokens: u64,
-    pub total_tokens: u64,
-    pub estimated_costs: Vec<BridgeRuntimeCostAmountDto>,
-    pub has_unpriced_usage: bool,
-    pub active_skills: Vec<String>,
-    pub active_mcp_servers: Vec<String>,
-    pub active_lsp_servers: Vec<String>,
-    pub task: Option<BridgeTaskRuntimeDto>,
-    pub updated_at: i64,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct BridgeTaskRuntimeDto {
@@ -106,34 +86,6 @@ pub struct BridgeTaskReviewDto {
     pub reviewer_agent_id: Option<String>,
     pub summary: Option<String>,
     pub design_references: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct BridgeRuntimeCostAmountDto {
-    pub currency: String,
-    pub amount: f64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct BridgeSkillActivationDto {
-    pub name: String,
-    pub source: String,
-    pub path: String,
-    pub turn_id: String,
-    pub tool_call_id: String,
-    pub activated_at: i64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct BridgePlanLifecycleDto {
-    pub plan_id: String,
-    pub state: String,
-    pub turn_id: Option<String>,
-    pub reason: Option<String>,
-    pub updated_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

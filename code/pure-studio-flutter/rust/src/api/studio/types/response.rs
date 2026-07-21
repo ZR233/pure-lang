@@ -1,8 +1,5 @@
-use super::agent::{BridgeAgentSnapshotDto, BridgeAgentTimelineEventDto};
-use super::event::BridgeEventEnvelope;
 use super::interaction::BridgeInteractionChangedDto;
-use super::message::{BridgeStudioMessageDto, BridgeStudioPartDto};
-use super::runtime::BridgeSessionRuntimeDto;
+use super::runtime::BridgeTaskRuntimeDto;
 use super::settings::BridgeWebSearchSettingsDto;
 use serde::{Deserialize, Serialize};
 // ── Response types ──
@@ -14,10 +11,7 @@ pub struct BridgeStudioSnapshotResponse {
     pub selected_project_id: Option<String>,
     pub sessions: Vec<SessionDto>,
     pub selected_session_id: Option<String>,
-    pub agent_events: Vec<BridgeAgentTimelineEventDto>,
-    pub agents: Vec<BridgeAgentSnapshotDto>,
-    pub interactions: Vec<BridgeInteractionChangedDto>,
-    pub session_runtime: Option<BridgeSessionRuntimeDto>,
+    pub selected_session_task: Option<BridgeTaskRuntimeDto>,
     pub config_json: String,
     pub general_settings_json: String,
     pub web_search: BridgeWebSearchSettingsDto,
@@ -42,44 +36,6 @@ pub struct SessionDto {
     pub updated_at: i64,
     pub visibility: String,
     pub parent_session_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct BridgeStudioEventsResponse {
-    pub session_id: String,
-    pub events: Vec<BridgeEventEnvelope>,
-    pub next_sequence: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct BridgeSessionStateResponse {
-    pub session_id: String,
-    pub session: SessionDto,
-    pub sessions: Vec<SessionDto>,
-    pub messages: Vec<BridgeStudioMessageProjectionDto>,
-    pub parts: Vec<BridgeStudioPartProjectionDto>,
-    pub events: Vec<BridgeEventEnvelope>,
-    pub event_next_sequence: u64,
-    pub agents: Vec<BridgeAgentSnapshotDto>,
-    pub agent_events: Vec<BridgeAgentTimelineEventDto>,
-    pub interactions: Vec<BridgeInteractionChangedDto>,
-    pub session_runtime: Option<BridgeSessionRuntimeDto>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct BridgeStudioMessageProjectionDto {
-    pub message: BridgeStudioMessageDto,
-    pub sequence: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct BridgeStudioPartProjectionDto {
-    pub part: BridgeStudioPartDto,
-    pub sequence: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
