@@ -66,6 +66,16 @@ pub struct PinnedContextSection {
     pub updated_at: i64,
 }
 
+/// 随 canonical session 持久化、但不会直接进入模型上下文的文本笔记。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionNote {
+    pub revision: u64,
+    pub content: String,
+    pub content_hash: String,
+    pub updated_at: i64,
+}
+
 /// 工具结果的紧凑、可持久化收据。
 ///
 /// 完整工具输出不进入 canonical history；history 只保存有界模型视图、内容
@@ -107,6 +117,9 @@ pub enum ModelContextItem {
     PinnedContext {
         section: PinnedContextSection,
     },
+    SessionNote {
+        note: SessionNote,
+    },
     Compaction {
         #[serde(rename = "encryptedContent")]
         encrypted_content: String,
@@ -118,7 +131,7 @@ impl ModelContextItem {
         match self {
             Self::Message { message } => Some(message),
             Self::ToolResult { message, .. } => Some(message),
-            Self::PinnedContext { .. } | Self::Compaction { .. } => None,
+            Self::PinnedContext { .. } | Self::SessionNote { .. } | Self::Compaction { .. } => None,
         }
     }
 
@@ -126,7 +139,7 @@ impl ModelContextItem {
         match self {
             Self::Message { message } => Some(message),
             Self::ToolResult { message, .. } => Some(message),
-            Self::PinnedContext { .. } | Self::Compaction { .. } => None,
+            Self::PinnedContext { .. } | Self::SessionNote { .. } | Self::Compaction { .. } => None,
         }
     }
 
@@ -137,19 +150,39 @@ impl ModelContextItem {
     pub fn as_pinned_context(&self) -> Option<&PinnedContextSection> {
         match self {
             Self::PinnedContext { section } => Some(section),
-            Self::Message { .. } | Self::ToolResult { .. } | Self::Compaction { .. } => None,
+            Self::Message { .. }
+            | Self::ToolResult { .. }
+            | Self::SessionNote { .. }
+            | Self::Compaction { .. } => None,
+        }
+    }
+
+    pub fn as_session_note(&self) -> Option<&SessionNote> {
+        match self {
+            Self::SessionNote { note } => Some(note),
+            Self::Message { .. }
+            | Self::ToolResult { .. }
+            | Self::PinnedContext { .. }
+            | Self::Compaction { .. } => None,
         }
     }
 
     pub fn as_tool_result_receipt(&self) -> Option<&ToolResultReceipt> {
         match self {
             Self::ToolResult { receipt, .. } => Some(receipt),
-            Self::Message { .. } | Self::PinnedContext { .. } | Self::Compaction { .. } => None,
+            Self::Message { .. }
+            | Self::PinnedContext { .. }
+            | Self::SessionNote { .. }
+            | Self::Compaction { .. } => None,
         }
     }
 
     pub fn is_pinned_context(&self) -> bool {
         matches!(self, Self::PinnedContext { .. })
+    }
+
+    pub fn is_session_note(&self) -> bool {
+        matches!(self, Self::SessionNote { .. })
     }
 }
 
@@ -189,12 +222,22 @@ mod tests {
                     updated_at: 42,
                 },
             },
+            ModelContextItem::SessionNote {
+                note: SessionNote {
+                    revision: 3,
+                    content: "important".to_string(),
+                    content_hash: "sha256:note".to_string(),
+                    updated_at: 43,
+                },
+            },
         ];
 
         let value = serde_json::to_value(&items).unwrap();
         assert_eq!(value[1]["type"], "compaction");
         assert_eq!(value[1]["encryptedContent"], "encrypted");
         assert_eq!(value[2]["section"]["id"], "pl.current_todo");
+        assert_eq!(value[3]["type"], "sessionNote");
+        assert_eq!(value[3]["note"]["revision"], 3);
         assert_eq!(
             serde_json::from_value::<Vec<ModelContextItem>>(value).unwrap(),
             items

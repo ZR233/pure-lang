@@ -712,6 +712,13 @@ async fn checkpoint_survives_cancel_and_stale_sequences_are_ignored() {
     };
     let mut checkpoint_session = AgentSession::new();
     checkpoint_session.upsert_pinned_context(section.clone());
+    let note = pl_protocol::SessionNote {
+        revision: 1,
+        content: "durable session note".to_string(),
+        content_hash: crate::canonical_content_hash(b"durable session note"),
+        updated_at: 1,
+    };
+    checkpoint_session.replace_session_note(note.clone());
     handle
         .checkpoint_turn(
             agent_id.clone(),
@@ -761,6 +768,10 @@ async fn checkpoint_survives_cancel_and_stale_sequences_are_ignored() {
             .cloned()
             .collect::<Vec<_>>(),
         vec![section]
+    );
+    assert_eq!(
+        terminal_state.sessions[&session_id].session.session_note(),
+        Some(&note)
     );
     let terminal_revision = terminal_state.snapshot.revision;
 

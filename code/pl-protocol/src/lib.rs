@@ -31,7 +31,7 @@ pub use message::{
     ToolCallHistoryMetadata, ToolCallKind, ToolResultMetadata,
 };
 pub use model_context::{
-    ContextSectionId, ContextSectionIdError, ModelContextItem, PinnedContextSection,
+    ContextSectionId, ContextSectionIdError, ModelContextItem, PinnedContextSection, SessionNote,
     ToolResultReceipt,
 };
 pub use permission::PermissionLevel;

@@ -3,7 +3,8 @@ use std::sync::{Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use pl_protocol::{
-    ContextSectionId, PinnedContextSection, PureError, TodoListSnapshot, ToolResultReceipt,
+    ContextSectionId, PinnedContextSection, PureError, SessionNote, TodoListSnapshot,
+    ToolResultReceipt,
 };
 use sha2::{Digest, Sha256};
 
@@ -16,6 +17,7 @@ pub const REVIEW_CHECKPOINT_SECTION_ID: &str = "mai.review_checkpoint";
 
 pub const MAX_PINNED_SECTION_BYTES: usize = 32 * 1024;
 pub const MAX_PINNED_CONTEXT_BYTES: usize = 96 * 1024;
+pub const MAX_SESSION_NOTE_BYTES: usize = 1024 * 1024;
 const MAX_TODO_ITEMS: usize = 32;
 const MAX_TODO_STEP_CHARS: usize = 256;
 const MAX_TODO_BYTES: usize = 8 * 1024;
@@ -51,6 +53,7 @@ pub enum TurnWorkingSetChange {
 struct TurnWorkingSet {
     sections: BTreeMap<ContextSectionId, PinnedContextSection>,
     evidence: EvidenceLedgerDocument,
+    session_note: Option<SessionNote>,
 }
 
 #[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -75,6 +78,14 @@ impl TurnWorkingSetHandle {
         for section in session.pinned_context_sections() {
             handle.apply(TurnWorkingSetChange::UpsertSection(section.clone()))?;
         }
+        if let Some(note) = session.session_note() {
+            validate_session_note(note)?;
+        }
+        handle
+            .inner
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .session_note = session.session_note().cloned();
         Ok(handle)
     }
 
@@ -152,11 +163,87 @@ impl TurnWorkingSetHandle {
             .collect()
     }
 
+    /// 返回当前会话笔记；尚未创建时返回 revision 为 0 的空快照。
+    pub fn session_note(&self) -> SessionNote {
+        self.inner
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .session_note
+            .clone()
+            .unwrap_or_else(empty_session_note)
+    }
+
+    /// 在 revision 匹配时原子替换会话笔记正文。
+    pub fn replace_session_note(
+        &self,
+        expected_revision: u64,
+        content: String,
+    ) -> Result<SessionNote, PureError> {
+        validate_session_note_content(&content)?;
+        let mut state = self
+            .inner
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let current_revision = state.session_note.as_ref().map_or(0, |note| note.revision);
+        if expected_revision != current_revision {
+            return Err(PureError::ConfigError(format!(
+                "session note revision mismatch: expected {expected_revision}, current {current_revision}"
+            )));
+        }
+        let note = SessionNote {
+            revision: current_revision.saturating_add(1),
+            content_hash: canonical_content_hash(content.as_bytes()),
+            content,
+            updated_at: unix_seconds(),
+        };
+        state.session_note = Some(note.clone());
+        Ok(note)
+    }
+
     pub fn sync_session(&self, session: &mut AgentSession) -> Result<bool, PureError> {
         let sections = self.sections();
         validate_total_size(sections.iter())?;
-        Ok(session.replace_pinned_context_sections(sections))
+        let mut changed = session.replace_pinned_context_sections(sections);
+        let note = self
+            .inner
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .session_note
+            .clone();
+        if let Some(note) = note {
+            changed |= session.replace_session_note(note);
+        }
+        Ok(changed)
     }
+}
+
+fn empty_session_note() -> SessionNote {
+    SessionNote {
+        revision: 0,
+        content: String::new(),
+        content_hash: canonical_content_hash(&[]),
+        updated_at: 0,
+    }
+}
+
+fn validate_session_note_content(content: &str) -> Result<(), PureError> {
+    if content.len() > MAX_SESSION_NOTE_BYTES {
+        return Err(PureError::ConfigError(format!(
+            "session note exceeds {MAX_SESSION_NOTE_BYTES} bytes"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_session_note(note: &SessionNote) -> Result<(), PureError> {
+    validate_session_note_content(&note.content)?;
+    let actual_hash = canonical_content_hash(note.content.as_bytes());
+    if note.content_hash != actual_hash {
+        return Err(PureError::ConfigError(
+            "session note has an invalid content hash".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 /// 计算可跨产品复用的稳定内容摘要。
@@ -429,6 +516,25 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["read-1".to_string(), "read-2".to_string()]
         );
+    }
+
+    #[test]
+    fn session_note_round_trips_through_working_set_and_sync() {
+        let handle = TurnWorkingSetHandle::default();
+        let first = handle
+            .replace_session_note(0, "重要节点".to_string())
+            .unwrap();
+        let mut session = AgentSession::new();
+
+        assert!(handle.sync_session(&mut session).unwrap());
+        let restored = TurnWorkingSetHandle::from_session(&session).unwrap();
+        let second = restored
+            .replace_session_note(first.revision, "更新节点".to_string())
+            .unwrap();
+
+        assert_eq!(restored.session_note(), second);
+        assert_eq!(second.revision, 2);
+        assert_eq!(second.content, "更新节点");
     }
 
     #[test]

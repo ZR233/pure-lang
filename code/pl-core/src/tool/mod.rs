@@ -16,8 +16,10 @@ mod path_policy;
 mod plan;
 mod registered;
 mod registry;
+mod session_note;
 mod shell;
 mod skill;
+mod text_document;
 mod text_escape;
 mod todo;
 mod tool_output;
@@ -78,6 +80,10 @@ pub use path_policy::{PathAccess, ToolPathPolicy};
 pub use plan::PlanExitTool;
 pub use registered::*;
 pub use registry::*;
+pub use session_note::{
+    SessionNoteTool, SessionNoteToolKind, TOOL_APPLY_SESSION_NOTE_PATCH, TOOL_READ_SESSION_NOTE,
+    TOOL_SEARCH_SESSION_NOTE, TOOL_WRITE_SESSION_NOTE,
+};
 pub use shell::{ShellCommandTimeout, shell_command_with_timeout, shell_quote_word};
 pub use skill::{SkillManageTool, SkillViewTool, SkillsListTool};
 pub use todo::{TOOL_UPDATE_TODO_LIST, TodoListTool};

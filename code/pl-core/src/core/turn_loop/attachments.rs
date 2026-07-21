@@ -20,9 +20,9 @@ pub(super) fn materialize_context_items(
                     receipt: receipt.clone(),
                 })
             }
-            ModelContextItem::PinnedContext { .. } | ModelContextItem::Compaction { .. } => {
-                Ok(item.clone())
-            }
+            ModelContextItem::PinnedContext { .. }
+            | ModelContextItem::SessionNote { .. }
+            | ModelContextItem::Compaction { .. } => Ok(item.clone()),
         })
         .collect()
 }
