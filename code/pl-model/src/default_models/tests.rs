@@ -45,8 +45,9 @@ fn openai_default_models_match_codex_metadata() {
 
     let gpt_56_sol = openai_models[3];
     assert_eq!(gpt_56_sol.display_name, "GPT-5.6-Sol");
-    assert_eq!(gpt_56_sol.context_window, Some(372_000));
-    assert_eq!(gpt_56_sol.max_context_window, Some(372_000));
+    assert_eq!(gpt_56_sol.context_window, Some(272_000));
+    assert_eq!(gpt_56_sol.max_context_window, Some(272_000));
+    assert_eq!(gpt_56_sol.resolved_auto_compact_limit(), Some(244_800));
     assert_eq!(gpt_56_sol.max_output_tokens, None);
     assert_eq!(
         gpt_56_sol.supported_efforts(),
@@ -63,8 +64,9 @@ fn openai_default_models_match_codex_metadata() {
         (openai_models[5], "GPT-5.6-Luna"),
     ] {
         assert_eq!(model.display_name, display_name);
-        assert_eq!(model.context_window, Some(372_000));
-        assert_eq!(model.max_context_window, Some(372_000));
+        assert_eq!(model.context_window, Some(272_000));
+        assert_eq!(model.max_context_window, Some(272_000));
+        assert_eq!(model.resolved_auto_compact_limit(), Some(244_800));
         assert_eq!(model.max_output_tokens, None);
         assert_eq!(
             model.supported_efforts(),
