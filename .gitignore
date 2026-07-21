@@ -1,5 +1,6 @@
 # Build artifacts
 /target
+/target-codex
 /dist
 /output
 /code/pure-studio/node_modules
