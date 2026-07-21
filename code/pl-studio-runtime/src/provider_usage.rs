@@ -86,7 +86,7 @@ async fn provider_usage_data(
     >,
 ) -> ProviderUsageState {
     if provider
-        .bearer_token
+        .resolved_bearer_token()
         .as_ref()
         .is_none_or(|token| token.trim().is_empty())
     {
@@ -171,5 +171,32 @@ mod tests {
             .expect("deepseek record");
 
         assert_eq!(deepseek_record.state, ProviderUsageState::MissingCredential);
+    }
+
+    #[tokio::test]
+    async fn environment_token_is_accepted_as_provider_credential() {
+        let mut provider = ProviderConfig::deepseek_preset();
+        provider.base_url = "http://127.0.0.1:9".to_string();
+        provider.bearer_token = None;
+        provider.bearer_token_env = Some(environment_path_variable().to_string());
+
+        let record = provider_usage_record(
+            "deepseek".to_string(),
+            provider,
+            "deepseek-chat".to_string(),
+        )
+        .await;
+
+        assert!(matches!(record.state, ProviderUsageState::Failed(_)));
+    }
+
+    #[cfg(windows)]
+    fn environment_path_variable() -> &'static str {
+        "Path"
+    }
+
+    #[cfg(not(windows))]
+    fn environment_path_variable() -> &'static str {
+        "PATH"
     }
 }
