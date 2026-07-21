@@ -697,6 +697,7 @@ async fn large_tool_artifact_does_not_break_tool_history_or_evidence() {
             pl_protocol::ModelContextItem::ToolResult { receipt, .. } => Some(receipt),
             pl_protocol::ModelContextItem::Message { .. }
             | pl_protocol::ModelContextItem::PinnedContext { .. }
+            | pl_protocol::ModelContextItem::SessionNote { .. }
             | pl_protocol::ModelContextItem::Compaction { .. } => None,
         })
         .expect("tool receipt");

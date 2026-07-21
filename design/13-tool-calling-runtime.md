@@ -105,6 +105,20 @@ Windows 上 `bash.command` 的默认宿主 shell 是 PowerShell：运行时先�
 
 `update_todo_list` 是 Codex `update_plan` 风格的内置 checklist 工具，root agent 与 subagent 都可用，且不代表 Plan Mode 的 `plan` part。工具输入是完整快照：`explanation?: string` 与 `items: [{ step, status }]`，其中 `status` 只允许 `pending | inProgress | completed`，且同一快照最多一个 `inProgress`。工具成功后只返回紧凑 `{ status: "updated" }` 给模型，同时发送 `TodoListUpdated` agent timeline event；后端不维护 latest todo cache，也不按 patch 增量合并。
 
+会话笔记是独立于模型历史和 pinned context 的持久化文本。它作为隐藏的
+`ModelContextItem` 随 canonical session 保存，在 session 删除时一并删除；正文不进入
+provider request、token 估算、附件物化或 compaction 输入。每个 turn 只注入一段有界提示，
+说明当前 revision、字节数、行数和可用笔记工具。child agent fork 创建独立 session，
+不继承父 session 的笔记。
+
+会话笔记工具由 `read_session_note`、`search_session_note`、`write_session_note` 和
+`apply_session_note_patch` 四个内置工具组成。读取按一基行号和有界行数返回，调用方可在取得
+足够信息后停止，不要求读到 EOF。搜索是单行、ripgrep 风格的字面量或正则搜索，支持大小写、
+上下文、结果上限和 revision 绑定游标；修改笔记后旧游标必须报过期。写入和 patch 使用
+`expectedRevision` 做乐观并发控制，成功后 revision 单调递增；正文上限为 1 MiB。
+`apply_session_note_patch` 复用 `pl-patch`，只接受虚拟路径 `session-note.md`，在内存副本完成
+全部 hunk 后一次提交，拒绝移动和其他路径，任何失败都不得留下部分更新。
+
 MCP tool 成功结果写回紧凑字符串。文本内容按 MCP content 顺序合并；JSON 或非文本内容序列化为紧凑 JSON。MCP `isError` 或 transport/protocol 错误按本地执行错误处理，使用 `Tool execution error: {error}` 前缀写回模型上下文，同时在产品 timeline 中展示失败原因。transport/protocol 错误只把对应 server 的 availability 标记为 `unavailable`，不得污染其他 server。新 turn 不再获得该 server 的工具，持有旧 lease 的 turn 仍按固定 generation 收尾。HTTP MCP 的 SSE 响应必须先按事件收集完整 `data` payload，再交给 JSON-RPC wire 类型反序列化，不能只解析第一行 `data`。MCP runtime 按 contract、worker、generation、tool adapter、local host 和 wire protocol 拆分；产品 Host 不实现 reconcile、命名或健康状态机。
 
 文件修改工具不向 schema 暴露语义模糊的 bool 参数。`delete_path` 使用 `mode: "file" | "emptyDirectory" | "recursiveDirectory"`；`copy_path` 和 `move_path` 使用 `collision: "failIfExists" | "overwrite"`。运行期不再保留 `recursive` / `overwrite` 旧 bool 字段的读取路径，历史会话或手写输入若使用旧字段会被 schema 校验拒绝，工具描述只暴露 `mode` / `collision`。

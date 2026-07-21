@@ -498,6 +498,32 @@ fn chat_body_writes_assistant_reasoning_content() {
 }
 
 #[test]
+fn session_note_is_not_serialized_to_chat_or_responses_requests() {
+    let secret = "hidden-session-note-body";
+    let note = ModelContextItem::SessionNote {
+        note: pl_protocol::SessionNote {
+            revision: 1,
+            content: secret.to_string(),
+            content_hash: "sha256:test".to_string(),
+            updated_at: 1,
+        },
+    };
+    let mut request = request_with_effort("high");
+    request.input = vec![
+        note,
+        ModelContextItem::from(text_message(MessageRole::User, "visible")),
+    ];
+
+    let chat = OpenAiProtocol::chat().build_request_body(&request);
+    let responses = OpenAiProtocol::responses().build_request_body(&request);
+
+    assert!(!chat.to_string().contains(secret));
+    assert!(!responses.to_string().contains(secret));
+    assert_eq!(chat["messages"].as_array().unwrap().len(), 1);
+    assert_eq!(responses["input"].as_array().unwrap().len(), 1);
+}
+
+#[test]
 fn chat_parse_response_reads_reasoning_content() {
     let response = OpenAiProtocol::chat()
         .parse_response(serde_json::json!({

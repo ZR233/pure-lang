@@ -13,8 +13,8 @@ use crate::tool::{
     McpListResourceTemplatesRequest, McpListResourcesRequest, McpReadResourceRequest,
     McpResourceBackend, McpResourceTool, McpResourceToolKind, McpTool, McpToolBackend,
     McpToolRequest, MovePathTool, NoContainerBackend, NoGitCredentialProvider, PlanExitTool,
-    StatPathTool, TodoListTool, Tool, WorkspaceFileTool, WorkspaceFileToolKind, WriteFileTool,
-    command_tool_pair,
+    SessionNoteTool, SessionNoteToolKind, StatPathTool, TodoListTool, Tool, WorkspaceFileTool,
+    WorkspaceFileToolKind, WriteFileTool, command_tool_pair,
 };
 
 use super::TurnEngine;
@@ -249,6 +249,11 @@ where
             );
         }
         register_if_allowed(core, TodoListTool, |name| self.tool_allowed(name));
+        for kind in SessionNoteToolKind::all() {
+            register_if_allowed(core, SessionNoteTool::new(*kind), |name| {
+                self.tool_allowed(name)
+            });
+        }
         register_if_allowed(core, PlanExitTool, |name| self.tool_allowed(name));
     }
 }
@@ -274,6 +279,12 @@ pub fn shared_tool_schemas(options: SharedToolSchemaOptions) -> Vec<ToolSchema> 
     if options.todo {
         schemas.push(TodoListTool.to_schema());
     }
+    schemas.extend(
+        SessionNoteToolKind::all()
+            .iter()
+            .copied()
+            .map(|kind| SessionNoteTool::new(kind).to_schema()),
+    );
     if options.git {
         schemas.extend(
             GitToolKind::all()

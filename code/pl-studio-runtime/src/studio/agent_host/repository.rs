@@ -494,3 +494,88 @@ fn i64_from_u64(value: u64) -> Result<i64, PureError> {
 fn store_error(error: impl std::fmt::Display) -> PureError {
     PureError::MemoryError(error.to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn session_note_is_restored_and_removed_with_its_session() {
+        let store = StudioStore::open_memory().await.unwrap();
+        let repository = StudioAgentRepository::new(store.clone());
+        let agent_id = pl_core::AgentId::new("agent-note").unwrap();
+        let session_id = pl_core::SessionId::new("session-note").unwrap();
+        let mut session = AgentSession::new();
+        session.replace_session_note(pl_protocol::SessionNote {
+            revision: 3,
+            content: "durable note".to_string(),
+            content_hash: pl_core::canonical_content_hash(b"durable note"),
+            updated_at: 1,
+        });
+        let session_state = AgentSessionState {
+            id: session_id.clone(),
+            metadata: serde_json::Value::Null,
+            session,
+            usage: pl_model::TokenUsage::default(),
+            last_context_tokens: None,
+            trace_sequence: 0,
+            session_event_sequence: 0,
+        };
+        let mut state = AgentDurableState {
+            snapshot: pl_core::AgentSnapshot {
+                identity: pl_core::AgentIdentity {
+                    id: agent_id.clone(),
+                    parent_id: None,
+                    role: pl_core::AgentRoleId::new("executor").unwrap(),
+                    depth: 0,
+                },
+                lifecycle: pl_core::AgentLifecycleState::Active,
+                activity: AgentActivityState::Idle,
+                active_turn_id: None,
+                active_session_id: None,
+                pending_inputs: 0,
+                last_turn: None,
+                revision: 1,
+                event_sequence: 0,
+                updated_at: 1,
+            },
+            sessions: BTreeMap::from([(session_id.clone(), session_state)]),
+            pending_inputs: VecDeque::new(),
+        };
+
+        let tx = store.database().begin().await.unwrap();
+        replace_sessions(&tx, agent_id.as_str(), &state)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        let restored = repository
+            .restore_sessions(agent_id.as_str())
+            .await
+            .unwrap();
+        assert_eq!(
+            restored[&session_id]
+                .session
+                .session_note()
+                .unwrap()
+                .content,
+            "durable note"
+        );
+
+        state.sessions.clear();
+        let tx = store.database().begin().await.unwrap();
+        replace_sessions(&tx, agent_id.as_str(), &state)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        assert!(
+            repository
+                .restore_sessions(agent_id.as_str())
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    }
+}
