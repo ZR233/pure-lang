@@ -1,5 +1,5 @@
 use super::*;
-use crate::StudioEventKind;
+use crate::StudioProductEventKind;
 use pretty_assertions::assert_eq;
 
 #[tokio::test]
@@ -119,18 +119,6 @@ async fn assert_failed_task_preflight_keeps_confirmation_pending(
         .unwrap();
     assert_eq!(stored.status, InteractionStatus::Pending);
     assert!(store.list_active_task_runs().await.unwrap().is_empty());
-    let events = store
-        .load_studio_events(&session.id, None, None)
-        .await
-        .unwrap();
-    assert!(!events.iter().any(|event| matches!(
-        &event.kind,
-        StudioEventKind::PlanLifecycleChanged { event }
-            if matches!(
-                event.state,
-                PlanLifecycleState::Accepted | PlanLifecycleState::Implementing
-            )
-    )));
     let _ = std::fs::remove_dir_all(home);
 }
 
@@ -152,15 +140,6 @@ async fn initialize_runtime_cancels_recovered_transient_interactions() {
     let project = store.upsert_project("C:/work/recovered").await.unwrap();
     let session = store
         .create_session(&project.id, "Recovered", StudioMode::Simple)
-        .await
-        .unwrap();
-    store
-        .create_turn(
-            &session.id,
-            "turn-recovered",
-            StudioTurnStatus::WaitingForModel,
-            1,
-        )
         .await
         .unwrap();
     store
@@ -233,20 +212,28 @@ async fn initialize_runtime_cancels_recovered_transient_interactions() {
     assert_eq!(ask.status, InteractionStatus::Cancelled);
     assert_eq!(approval.status, InteractionStatus::Cancelled);
     assert_eq!(plan.status, InteractionStatus::Pending);
-    let studio_events = store
-        .load_studio_events(&session.id, None, None)
+    let canonical = runtime.session_event_snapshot(&session.id).await.unwrap();
+    let mut subscription = runtime
+        .subscribe_session_events(pl_protocol::SessionSubscriptionRequest {
+            session_id: session.id.clone(),
+            after_sequence: Some(0),
+        })
         .await
         .unwrap();
-    let cancelled_interactions = studio_events
-        .iter()
-        .filter(|event| {
-            matches!(
-                &event.kind,
-                StudioEventKind::InteractionChanged { event }
-                    if event.interaction.status == InteractionStatus::Cancelled
-            )
-        })
-        .count();
+    let mut cancelled_interactions = 0;
+    for _ in 0..canonical.through_sequence {
+        let Some(pl_protocol::SessionStreamFrame::Event { event }) = subscription.recv().await
+        else {
+            continue;
+        };
+        if matches!(
+            &event.kind,
+            pl_protocol::SessionEventKind::InteractionChanged { event }
+                if event.interaction.status == InteractionStatus::Cancelled
+        ) {
+            cancelled_interactions += 1;
+        }
+    }
     assert_eq!(cancelled_interactions, 2);
     let _ = tokio::fs::remove_dir_all(home).await;
 }
@@ -262,7 +249,7 @@ async fn start_runtime_emits_mcp_health_snapshot() {
         StudioStore::open_memory().await.unwrap(),
         ConfigStore::new(crate::config::ConfigPaths::from_home(&home)),
     );
-    let mut events = runtime.events().subscribe_global();
+    let mut events = runtime.product_events().subscribe();
 
     runtime.start_runtime().await.unwrap();
 
@@ -270,7 +257,7 @@ async fn start_runtime_emits_mcp_health_snapshot() {
         .await
         .unwrap()
         .unwrap();
-    let StudioEventKind::McpHealthChanged { health } = event.kind else {
+    let StudioProductEventKind::McpHealthChanged { health } = event.kind else {
         panic!("expected McpHealthChanged event");
     };
     assert!(health.active_mcp_servers.is_empty());

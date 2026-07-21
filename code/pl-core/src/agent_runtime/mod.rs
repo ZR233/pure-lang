@@ -18,9 +18,10 @@ mod tests;
 pub use collaboration::AgentCollaborationTools;
 pub use handle::AgentRuntimeHandle;
 pub use host::{
-    AgentCommit, AgentCommitOutcome, AgentCommittedEvent, AgentEventSink, AgentLifecycleAdapter,
-    AgentRuntimeHost, AgentStateMutation, AgentStateRepository, AgentTurnFactory,
-    CloseLifecycleRequest, RestoredAgentRuntime, SpawnLifecycleRequest,
+    AgentCommit, AgentCommitObserver, AgentCommitOutcome, AgentCommittedEvent,
+    AgentLifecycleAdapter, AgentRuntimeHost, AgentStateMutation, AgentStateRepository,
+    AgentTurnFactory, CloseLifecycleRequest, RestoredAgentRuntime, RestoredSessionProjection,
+    SessionProjectionCommit, SpawnLifecycleRequest,
 };
 pub use id::{AgentId, SessionId, TurnId};
 pub use policy::{
@@ -36,5 +37,5 @@ pub use state::{
 };
 pub use turn::{
     AgentSessionCommitPolicy, AgentTurnCheckpoint, AgentTurnCheckpointHandle,
-    AgentTurnPreparationContext, PreparedAgentTurn, TurnCheckpointReason,
+    AgentTurnPreparationContext, PreparedAgentTurn, PreparedSessionRuntime, TurnCheckpointReason,
 };

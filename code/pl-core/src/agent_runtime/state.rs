@@ -89,6 +89,8 @@ pub struct AgentSessionState {
     pub last_context_tokens: Option<u64>,
     /// 当前 session 下一条 durable trace 的 sequence。
     pub trace_sequence: u64,
+    /// 当前 session 已提交的 canonical UI event sequence。
+    pub session_event_sequence: u64,
 }
 
 impl AgentSessionState {
@@ -101,6 +103,7 @@ impl AgentSessionState {
             usage: TokenUsage::default(),
             last_context_tokens: None,
             trace_sequence: 0,
+            session_event_sequence: 0,
         }
     }
 }
@@ -301,6 +304,7 @@ pub enum AgentRuntimeError {
         actual: Option<u64>,
     },
     Lifecycle(String),
+    SessionEvents(String),
     ChannelClosed,
     TimedOut,
 }
@@ -326,6 +330,7 @@ impl fmt::Display for AgentRuntimeError {
                 "agent revision conflict: expected {expected:?}, actual {actual:?}"
             ),
             Self::Lifecycle(error) => write!(formatter, "agent lifecycle failed: {error}"),
+            Self::SessionEvents(error) => write!(formatter, "session events failed: {error}"),
             Self::ChannelClosed => formatter.write_str("agent runtime channel closed"),
             Self::TimedOut => formatter.write_str("agent wait timed out"),
         }

@@ -4,151 +4,19 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import '../../../frb_generated.dart';
-import 'agent.dart';
-import 'event.dart';
 import 'interaction.dart';
-import 'message.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'runtime.dart';
 import 'settings.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
-
-class BridgeSessionStateResponse {
-  final String sessionId;
-  final SessionDto session;
-  final List<SessionDto> sessions;
-  final List<BridgeStudioMessageProjectionDto> messages;
-  final List<BridgeStudioPartProjectionDto> parts;
-  final List<BridgeEventEnvelope> events;
-  final BigInt eventNextSequence;
-  final List<BridgeAgentSnapshotDto> agents;
-  final List<BridgeAgentTimelineEventDto> agentEvents;
-  final List<BridgeInteractionChangedDto> interactions;
-  final BridgeSessionRuntimeDto? sessionRuntime;
-
-  const BridgeSessionStateResponse({
-    required this.sessionId,
-    required this.session,
-    required this.sessions,
-    required this.messages,
-    required this.parts,
-    required this.events,
-    required this.eventNextSequence,
-    required this.agents,
-    required this.agentEvents,
-    required this.interactions,
-    this.sessionRuntime,
-  });
-
-  @override
-  int get hashCode =>
-      sessionId.hashCode ^
-      session.hashCode ^
-      sessions.hashCode ^
-      messages.hashCode ^
-      parts.hashCode ^
-      events.hashCode ^
-      eventNextSequence.hashCode ^
-      agents.hashCode ^
-      agentEvents.hashCode ^
-      interactions.hashCode ^
-      sessionRuntime.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeSessionStateResponse &&
-          runtimeType == other.runtimeType &&
-          sessionId == other.sessionId &&
-          session == other.session &&
-          sessions == other.sessions &&
-          messages == other.messages &&
-          parts == other.parts &&
-          events == other.events &&
-          eventNextSequence == other.eventNextSequence &&
-          agents == other.agents &&
-          agentEvents == other.agentEvents &&
-          interactions == other.interactions &&
-          sessionRuntime == other.sessionRuntime;
-}
-
-class BridgeStudioEventsResponse {
-  final String sessionId;
-  final List<BridgeEventEnvelope> events;
-  final BigInt nextSequence;
-
-  const BridgeStudioEventsResponse({
-    required this.sessionId,
-    required this.events,
-    required this.nextSequence,
-  });
-
-  @override
-  int get hashCode =>
-      sessionId.hashCode ^ events.hashCode ^ nextSequence.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeStudioEventsResponse &&
-          runtimeType == other.runtimeType &&
-          sessionId == other.sessionId &&
-          events == other.events &&
-          nextSequence == other.nextSequence;
-}
-
-class BridgeStudioMessageProjectionDto {
-  final BridgeStudioMessageDto message;
-  final BigInt sequence;
-
-  const BridgeStudioMessageProjectionDto({
-    required this.message,
-    required this.sequence,
-  });
-
-  @override
-  int get hashCode => message.hashCode ^ sequence.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeStudioMessageProjectionDto &&
-          runtimeType == other.runtimeType &&
-          message == other.message &&
-          sequence == other.sequence;
-}
-
-class BridgeStudioPartProjectionDto {
-  final BridgeStudioPartDto part_;
-  final BigInt sequence;
-
-  const BridgeStudioPartProjectionDto({
-    required this.part_,
-    required this.sequence,
-  });
-
-  @override
-  int get hashCode => part_.hashCode ^ sequence.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeStudioPartProjectionDto &&
-          runtimeType == other.runtimeType &&
-          part_ == other.part_ &&
-          sequence == other.sequence;
-}
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 class BridgeStudioSnapshotResponse {
   final List<ProjectDto> projects;
   final String? selectedProjectId;
   final List<SessionDto> sessions;
   final String? selectedSessionId;
-  final List<BridgeAgentTimelineEventDto> agentEvents;
-  final List<BridgeAgentSnapshotDto> agents;
-  final List<BridgeInteractionChangedDto> interactions;
-  final BridgeSessionRuntimeDto? sessionRuntime;
+  final BridgeTaskRuntimeDto? selectedSessionTask;
   final String configJson;
   final String generalSettingsJson;
   final BridgeWebSearchSettingsDto webSearch;
@@ -158,10 +26,7 @@ class BridgeStudioSnapshotResponse {
     this.selectedProjectId,
     required this.sessions,
     this.selectedSessionId,
-    required this.agentEvents,
-    required this.agents,
-    required this.interactions,
-    this.sessionRuntime,
+    this.selectedSessionTask,
     required this.configJson,
     required this.generalSettingsJson,
     required this.webSearch,
@@ -173,10 +38,7 @@ class BridgeStudioSnapshotResponse {
       selectedProjectId.hashCode ^
       sessions.hashCode ^
       selectedSessionId.hashCode ^
-      agentEvents.hashCode ^
-      agents.hashCode ^
-      interactions.hashCode ^
-      sessionRuntime.hashCode ^
+      selectedSessionTask.hashCode ^
       configJson.hashCode ^
       generalSettingsJson.hashCode ^
       webSearch.hashCode;
@@ -190,10 +52,7 @@ class BridgeStudioSnapshotResponse {
           selectedProjectId == other.selectedProjectId &&
           sessions == other.sessions &&
           selectedSessionId == other.selectedSessionId &&
-          agentEvents == other.agentEvents &&
-          agents == other.agents &&
-          interactions == other.interactions &&
-          sessionRuntime == other.sessionRuntime &&
+          selectedSessionTask == other.selectedSessionTask &&
           configJson == other.configJson &&
           generalSettingsJson == other.generalSettingsJson &&
           webSearch == other.webSearch;

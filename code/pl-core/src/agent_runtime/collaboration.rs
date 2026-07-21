@@ -169,6 +169,7 @@ impl CollaborationTool {
             usage: pl_model::TokenUsage::default(),
             last_context_tokens: None,
             trace_sequence: 0,
+            session_event_sequence: 0,
         };
         let mut metadata = match args.metadata {
             Value::Object(metadata) => metadata,

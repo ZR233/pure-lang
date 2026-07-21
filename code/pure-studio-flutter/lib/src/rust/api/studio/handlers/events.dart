@@ -4,29 +4,40 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import '../../../frb_generated.dart';
-import '../types/agent.dart';
 import '../types/event.dart';
-import '../types/interaction.dart';
-import '../types/message.dart';
 import '../types/response.dart';
 import '../types/runtime.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-Future<BridgeStudioEventsResponse> loadStudioEvents({
-  required String sessionId,
-  PlatformInt64? afterSequence,
-  PlatformInt64? limit,
-}) => RustLib.instance.api.crateApiStudioHandlersEventsLoadStudioEvents(
-  sessionId: sessionId,
-  afterSequence: afterSequence,
-  limit: limit,
-);
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `eq`, `fmt`
 
-Stream<BridgeEventEnvelope> subscribeSessionEvents({
+Stream<BridgeSessionStreamFrame> subscribeSessionEvents({
   required String sessionId,
+  BigInt? afterSequence,
 }) => RustLib.instance.api.crateApiStudioHandlersEventsSubscribeSessionEvents(
   sessionId: sessionId,
+  afterSequence: afterSequence,
 );
 
-Stream<BridgeEventEnvelope> subscribeGlobalEvents() =>
-    RustLib.instance.api.crateApiStudioHandlersEventsSubscribeGlobalEvents();
+Stream<BridgeProductEventEnvelope> subscribeProductEvents() =>
+    RustLib.instance.api.crateApiStudioHandlersEventsSubscribeProductEvents();
+
+/// FRB 的透明传输容器。
+///
+/// `payload_json` 始终由 `pl-protocol::SessionStreamFrame` 直接序列化，Flutter
+/// 因而消费与 Mai SSE 完全相同的 canonical JSON，而不复制一套 Rust wire 类型。
+class BridgeSessionStreamFrame {
+  final String payloadJson;
+
+  const BridgeSessionStreamFrame({required this.payloadJson});
+
+  @override
+  int get hashCode => payloadJson.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeSessionStreamFrame &&
+          runtimeType == other.runtimeType &&
+          payloadJson == other.payloadJson;
+}

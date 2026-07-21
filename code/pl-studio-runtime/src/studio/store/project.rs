@@ -138,11 +138,7 @@ impl StudioStore {
     }
 
     pub async fn archive_project(&self, project_id: &str) -> Result<Option<ProjectRecord>> {
-        use entities::{
-            agent, agent_event, agent_runtime_event, agent_runtime_snapshot, attachment,
-            interaction, message, message_part, project, session, session_runtime_snapshot,
-            session_skill, studio_event, studio_message, tool_approval, turn,
-        };
+        use entities::{attachment, interaction, project, session, tool_approval};
         let Some(project) = project::Entity::find_by_id(project_id.to_string())
             .one(&self.db)
             .await?
@@ -160,28 +156,8 @@ impl StudioStore {
 
         for session_id in &session_ids {
             let session_id = session_id.to_string();
-            studio_event::Entity::delete_many()
-                .filter(studio_event::Column::SessionId.eq(session_id.clone()))
-                .exec(&tx)
-                .await?;
-            message_part::Entity::delete_many()
-                .filter(message_part::Column::SessionId.eq(session_id.clone()))
-                .exec(&tx)
-                .await?;
-            studio_message::Entity::delete_many()
-                .filter(studio_message::Column::SessionId.eq(session_id.clone()))
-                .exec(&tx)
-                .await?;
-            turn::Entity::delete_many()
-                .filter(turn::Column::SessionId.eq(session_id.clone()))
-                .exec(&tx)
-                .await?;
             attachment::Entity::delete_many()
                 .filter(attachment::Column::SessionId.eq(session_id.clone()))
-                .exec(&tx)
-                .await?;
-            message::Entity::delete_many()
-                .filter(message::Column::SessionId.eq(session_id.clone()))
                 .exec(&tx)
                 .await?;
             tool_approval::Entity::delete_many()
@@ -192,30 +168,33 @@ impl StudioStore {
                 .filter(interaction::Column::SessionId.eq(session_id.clone()))
                 .exec(&tx)
                 .await?;
-            session_skill::Entity::delete_many()
-                .filter(session_skill::Column::SessionId.eq(session_id.clone()))
-                .exec(&tx)
+
+            for sql in [
+                "DELETE FROM agent_pending_inputs
+                 WHERE agent_id IN (
+                     SELECT agent_id FROM agent_runtime_sessions WHERE session_id = ?
+                 )",
+                "DELETE FROM agent_framework_events
+                 WHERE agent_id IN (
+                     SELECT agent_id FROM agent_runtime_sessions WHERE session_id = ?
+                 )",
+                "DELETE FROM agent_runtime_states
+                 WHERE agent_id IN (
+                     SELECT agent_id FROM agent_runtime_sessions WHERE session_id = ?
+                 )",
+                "DELETE FROM agent_turns WHERE session_id = ?",
+                "DELETE FROM agent_runtime_traces WHERE session_id = ?",
+                "DELETE FROM session_event_journal WHERE session_id = ?",
+                "DELETE FROM session_view_snapshots WHERE session_id = ?",
+                "DELETE FROM agent_runtime_sessions WHERE session_id = ?",
+            ] {
+                tx.execute(Statement::from_sql_and_values(
+                    DatabaseBackend::Sqlite,
+                    sql,
+                    [session_id.clone().into()],
+                ))
                 .await?;
-            agent::Entity::delete_many()
-                .filter(agent::Column::SessionId.eq(session_id.clone()))
-                .exec(&tx)
-                .await?;
-            agent_event::Entity::delete_many()
-                .filter(agent_event::Column::SessionId.eq(session_id.clone()))
-                .exec(&tx)
-                .await?;
-            agent_runtime_event::Entity::delete_many()
-                .filter(agent_runtime_event::Column::SessionId.eq(session_id.clone()))
-                .exec(&tx)
-                .await?;
-            agent_runtime_snapshot::Entity::delete_many()
-                .filter(agent_runtime_snapshot::Column::SessionId.eq(session_id.clone()))
-                .exec(&tx)
-                .await?;
-            session_runtime_snapshot::Entity::delete_many()
-                .filter(session_runtime_snapshot::Column::SessionId.eq(session_id))
-                .exec(&tx)
-                .await?;
+            }
         }
         session::Entity::delete_many()
             .filter(session::Column::ProjectId.eq(project_id.to_string()))

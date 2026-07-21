@@ -39,13 +39,20 @@ StudioReduceResult reduceStudioEvent(
     ),
     InteractionChangedPayload(:final interaction, :final status) =>
       StudioReduceResult(_upsertInteraction(current, interaction, status)),
-    SessionRuntimeChangedPayload(:final runtime) => StudioReduceResult(
-      current.copyWith(
-        runtime: runtime.copyWith(agentCount: current.runtime.agentCount),
+    SessionRuntimeChangedPayload(:final runtime, :final agentCount) =>
+      StudioReduceResult(
+        current.copyWith(
+          runtime: runtime.copyWith(
+            agentCount: agentCount ?? current.runtime.agentCount,
+            task: current.runtime.task,
+          ),
+        ),
       ),
-    ),
     SessionListChangedPayload() => StudioReduceResult(
       _mergeSessionListChanged(current, event),
+    ),
+    SessionTaskChangedPayload(:final task) => StudioReduceResult(
+      current.copyWith(runtime: current.runtime.copyWith(task: task)),
     ),
     AgentChangedPayload(:final agent) => StudioReduceResult(
       _applyAgentChanged(current, agent),

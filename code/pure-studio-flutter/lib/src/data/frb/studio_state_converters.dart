@@ -1,51 +1,5 @@
 part of 'studio_api.dart';
 
-StudioState _stateFromJson(
-  Map<String, Object?> json, {
-  required String? selectedProjectId,
-  required String? selectedSessionId,
-}) {
-  final timeline = _timelineFromJson(
-    _list(json['messages']),
-    _list(json['parts']),
-  );
-  for (final session in studioSessionsFromJson(json['sessions'])) {
-    timeline.messagesBySession.putIfAbsent(session.id, () => []);
-  }
-  final config = _map(json['config']);
-  final runtimeJson = Map<String, Object?>.from(_map(json['sessionRuntime']));
-  if (!runtimeJson.containsKey('agents')) {
-    runtimeJson['agents'] = _list(json['agents']);
-  }
-  final eventNextSequence = _int(
-    _firstValue(json, const ['eventNextSequence', 'event_next_sequence']),
-  );
-  return _stateFromTypedSnapshot(
-    projects: _list(json['projects']).map(_projectFromJson).toList(),
-    sessions: studioSessionsFromJson(json['sessions']),
-    selectedProjectId: selectedProjectId,
-    selectedSessionId: selectedSessionId,
-    messages: timeline.messagesBySession.values
-        .expand((messages) => messages)
-        .toList(),
-    parts: timeline.partSnapshotsBySession.values
-        .expand((parts) => parts.values)
-        .toList(),
-    agentTimelineEventsBySession: _agentTimelineEventsFromJson(
-      json['agentEvents'],
-    ),
-    interactions: _list(json['interactions'])
-        .map(pendingInteractionFromJson)
-        .where((interaction) => interaction.id.isNotEmpty)
-        .toList(),
-    runtime: sessionRuntimeFromJson(runtimeJson),
-    config: config,
-    generalSettings: _map(json['generalSettings']),
-    eventNextSequence: eventNextSequence,
-    agents: const [],
-  );
-}
-
 StudioState _stateFromTypedSnapshot({
   required List<StudioProject> projects,
   required List<StudioSession> sessions,
@@ -56,7 +10,7 @@ StudioState _stateFromTypedSnapshot({
   Iterable<StudioBridgeEvent> events = const [],
   Iterable<TimelineAgentEvent> agentEvents = const [],
   Map<String, Map<String, TimelineAgentEvent>>? agentTimelineEventsBySession,
-  required Iterable<frb.BridgeAgentSnapshotDto> agents,
+  required Iterable<StudioAgentView> agents,
   required List<PendingInteraction> interactions,
   required SessionRuntimeView runtime,
   required Map<String, Object?> config,
@@ -130,6 +84,19 @@ StudioState _stateFromTypedSnapshot({
       agentCount: agentsBySession[selectedSessionId]?.length ?? 0,
     ),
   );
+}
+
+Map<String, Map<String, TimelineAgentEvent>> _agentTimelineEventsFromTyped(
+  Iterable<TimelineAgentEvent> events,
+) {
+  final bySession = <String, Map<String, TimelineAgentEvent>>{};
+  for (final event in events) {
+    if (event.eventId.isEmpty || event.sessionId.isEmpty) {
+      continue;
+    }
+    bySession.putIfAbsent(event.sessionId, () => {})[event.eventId] = event;
+  }
+  return bySession;
 }
 
 StudioState _applySnapshotEvent(StudioState state, StudioBridgeEvent event) {
@@ -226,104 +193,6 @@ WebSearchSettingsView _webSearchFromFrb(frb.BridgeWebSearchSettingsDto value) {
   );
 }
 
-Map<String, Map<String, TimelineAgentEvent>> _agentTimelineEventsFromJson(
-  Object? value,
-) {
-  final bySession = <String, Map<String, TimelineAgentEvent>>{};
-  for (final item in _list(value)) {
-    final json = _map(item);
-    final event = timelineAgentEventFromPayload(
-      json,
-      eventId: _string(json['eventId']),
-      sessionId: _string(json['sessionId']),
-      sequence: _int(json['sequence']),
-      createdAt: _dateFromUnix(_int(json['createdAt'])),
-      kindType: _string(json['kindType']),
-    );
-    if (event.eventId.isEmpty || event.sessionId.isEmpty) {
-      continue;
-    }
-    bySession.putIfAbsent(event.sessionId, () => {})[event.eventId] = event;
-  }
-  return bySession;
-}
-
-class _TimelineLoadResult {
-  const _TimelineLoadResult({
-    required this.messagesBySession,
-    required this.partSnapshotsBySession,
-  });
-
-  final Map<String, List<TimelineMessage>> messagesBySession;
-  final Map<String, Map<String, TimelinePartSnapshot>> partSnapshotsBySession;
-}
-
-_TimelineLoadResult _timelineFromJson(
-  List<Object?> messageValues,
-  List<Object?> partValues,
-) {
-  final snapshotsBySession = <String, Map<String, TimelinePartSnapshot>>{};
-  for (final value in partValues) {
-    final wrapper = _map(value);
-    final nested = _map(wrapper['part']);
-    final partJson = nested.isEmpty ? _map(value) : nested;
-    final part = timelinePartSnapshotFromJson(
-      partJson,
-      sequence: _int(wrapper['sequence']),
-    );
-    if (part.id.isEmpty ||
-        part.messageId.isEmpty ||
-        part.sessionId.isEmpty ||
-        part.ignored ||
-        isInternalTimelinePartType(part.type)) {
-      continue;
-    }
-    snapshotsBySession.putIfAbsent(part.sessionId, () => {})[part.id] = part;
-  }
-
-  final bySession = <String, List<TimelineMessage>>{};
-  for (final value in messageValues) {
-    final wrapper = _map(value);
-    final nested = _map(wrapper['message']);
-    final messageJson = nested.isEmpty ? _map(value) : nested;
-    final message = timelineMessageFromJson(
-      messageJson,
-      sequence: _int(wrapper['sequence']),
-    );
-    if (message.id.isEmpty || message.sessionId.isEmpty) {
-      continue;
-    }
-    bySession.putIfAbsent(message.sessionId, () => []).add(message);
-  }
-  for (final messages in bySession.values) {
-    messages.sort((a, b) => a.createdAt.compareTo(b.createdAt));
-  }
-  return _TimelineLoadResult(
-    messagesBySession: bySession,
-    partSnapshotsBySession: snapshotsBySession,
-  );
-}
-
-StudioProject _projectFromJson(Object? value) {
-  final json = _map(value);
-  return StudioProject(
-    id: _string(json['id']),
-    name: _string(json['name']),
-    path: _string(json['path']),
-  );
-}
-
-StudioSession _sessionFromJson(Object? value) {
-  final json = _map(value);
-  return StudioSession(
-    id: _string(json['id']),
-    projectId: _string(json['projectId']),
-    title: _string(json['title'], fallback: 'Untitled'),
-    mode: _compileMode(json['mode']),
-    updatedAt: _dateFromUnix(_int(json['updatedAt'])),
-  );
-}
-
 String _partText(Map<String, Object?> json, TimelinePartType type) {
   final text = _string(json['text']);
   if (text.isNotEmpty) {
@@ -368,27 +237,17 @@ TimelineToolPart? _toolPart(Object? value) {
     return null;
   }
   return TimelineToolPart(
-    toolCallId: _string(
-      _firstValue(json, const ['toolCallId', 'tool_call_id']),
-    ),
-    callId: _nullableString(_firstValue(json, const ['callId', 'call_id'])),
-    providerItemId: _nullableString(
-      _firstValue(json, const ['providerItemId', 'provider_item_id']),
-    ),
+    toolCallId: _string(json['toolCallId']),
+    callId: _nullableString(json['callId']),
+    providerItemId: _nullableString(json['providerItemId']),
     name: _string(json['name'], fallback: 'tool'),
     arguments: _string(json['arguments']),
     result: _nullableString(json['result']),
-    outputArtifacts: _list(
-      _firstValue(json, const ['outputArtifacts', 'output_artifacts']),
-    ),
-    exitCode: _nullableInt(_firstValue(json, const ['exitCode', 'exit_code'])),
-    timedOut: _bool(_firstValue(json, const ['timedOut', 'timed_out'])),
-    workingDirectory: _nullableString(
-      _firstValue(json, const ['workingDirectory', 'working_directory']),
-    ),
-    denialReason: _nullableString(
-      _firstValue(json, const ['denialReason', 'denial_reason']),
-    ),
+    outputArtifacts: _list(json['outputArtifacts']),
+    exitCode: _nullableInt(json['exitCode']),
+    timedOut: _bool(json['timedOut']),
+    workingDirectory: _nullableString(json['workingDirectory']),
+    denialReason: _nullableString(json['denialReason']),
   );
 }
 
@@ -400,9 +259,7 @@ TimelineAgentPart? _agentPart(Object? value) {
   return TimelineAgentPart(
     id: _string(json['id']),
     path: _string(json['path']),
-    parentPath: _nullableString(
-      _firstValue(json, const ['parentPath', 'parent_path']),
-    ),
+    parentPath: _nullableString(json['parentPath']),
     role: _string(json['role'], fallback: 'agent'),
     task: _string(json['task']),
     status: _string(json['status']),
@@ -414,9 +271,7 @@ TimelineAgentPart? _agentPart(Object? value) {
 }
 
 String _partPlanContent(Map<String, Object?> json) {
-  final direct = _string(
-    _firstValue(json, const ['planContent', 'plan_content']),
-  );
+  final direct = _string(json['planContent']);
   if (direct.isNotEmpty) {
     return direct;
   }

@@ -5,8 +5,7 @@ use anyhow::{Context, Result, bail};
 use crate::config::{ModelRouteConfig, ProviderId, ReasoningEffort, StudioConfig, StudioRole};
 use crate::skill::SkillCatalog;
 use crate::studio::agent_host::root_agent_id;
-use crate::studio::mappers::default_session_runtime_record;
-use crate::studio::records::{ProjectRecord, SessionRecord, SessionRuntimeRecord};
+use crate::studio::records::{ProjectRecord, SessionRecord};
 use crate::{StudioMode, resolve_workspace_root};
 
 use super::StudioRuntime;
@@ -37,7 +36,7 @@ impl StudioRuntime {
             .store
             .create_session(project_id, title, StudioMode::Simple)
             .await?;
-        self.events.emit_session_list(project_id).await?;
+        self.product_events.emit_session_list(project_id).await?;
         Ok(session)
     }
 
@@ -51,7 +50,9 @@ impl StudioRuntime {
             .await?;
         let archived = self.store.archive_session(&session_id).await?;
         if let Some(session) = &archived {
-            self.events.emit_session_list(&session.project_id).await?;
+            self.product_events
+                .emit_session_list(&session.project_id)
+                .await?;
         }
         Ok(archived)
     }
@@ -71,7 +72,7 @@ impl StudioRuntime {
         }
         let archived = self.store.archive_project(project_id).await?;
         if archived.is_some() {
-            self.events.emit_session_list(project_id).await?;
+            self.product_events.emit_session_list(project_id).await?;
         }
         Ok(archived)
     }
@@ -89,7 +90,9 @@ impl StudioRuntime {
         let Some(session) = self.store.read_session(session_id).await? else {
             return Ok(());
         };
-        self.events.emit_session_list(&session.project_id).await?;
+        self.product_events
+            .emit_session_list(&session.project_id)
+            .await?;
         Ok(())
     }
 
@@ -157,28 +160,6 @@ impl StudioRuntime {
         config.validate()?;
         self.config_store.save(&config)?;
         Ok(config)
-    }
-
-    pub async fn session_runtime(&self, session_id: &str) -> Result<SessionRuntimeRecord> {
-        if let Some(snapshot) = self.store.load_session_runtime(session_id).await? {
-            return Ok(snapshot);
-        }
-        let config = self.config_store.load_or_default()?;
-        let mode = self
-            .store
-            .read_session(session_id)
-            .await?
-            .map(|session| StudioMode::from_label(&session.mode))
-            .unwrap_or_default();
-        let role = match mode {
-            StudioMode::Simple => StudioRole::Executor,
-            StudioMode::Task => StudioRole::Planner,
-        };
-        let resolved = config.resolve_role(role)?;
-        Ok(default_session_runtime_record(
-            session_id,
-            Some(&resolved.model),
-        ))
     }
 
     pub async fn provider_usages(&self) -> Result<Vec<crate::ProviderUsageRecord>> {

@@ -5,14 +5,15 @@ use crate::{ContentPart, ImageSource, MessageContent, PureError, Result};
 use pl_core::{
     AgentCollaborationTools, AgentKernel, AgentTurnFactory, AgentTurnPreparationContext,
     CoreAgentProfile, ExecutionInstructionProfile, InstructionAssembler,
-    InstructionAssemblyRequest, PreparedAgentTurn, SubagentContext, ToolVisibilitySet,
-    TurnEngineBuilder, TurnOptions, TurnRequest, load_workspace_instructions, plan_web_search,
+    InstructionAssemblyRequest, PreparedAgentTurn, PreparedSessionRuntime, SubagentContext,
+    ToolVisibilitySet, TurnEngineBuilder, TurnOptions, TurnRequest, load_workspace_instructions,
+    plan_web_search,
 };
 use pl_model::create_provider_with_catalog;
 
 use crate::config::ConfigStore;
 use crate::studio::task_coordinator::TaskCoordinator;
-use crate::studio::{InteractionRuntime, StudioEventRuntime, StudioStore};
+use crate::studio::{InteractionRuntime, StudioStore};
 use crate::{McpRuntimeHandle, StudioMode, resolve_workspace_root};
 
 use super::policy::{StudioPolicyContext, studio_execution_policy};
@@ -26,7 +27,6 @@ pub(in crate::studio) struct StudioAgentTurnFactory {
     mcp_runtime: McpRuntimeHandle,
     lsp_runtime: pl_lsp::LspRuntimeRegistry,
     interactions: InteractionRuntime,
-    events: StudioEventRuntime,
     coordinator: Arc<TaskCoordinator>,
     resources: StudioAgentResources,
 }
@@ -39,7 +39,6 @@ impl StudioAgentTurnFactory {
         mcp_runtime: McpRuntimeHandle,
         lsp_runtime: pl_lsp::LspRuntimeRegistry,
         interactions: InteractionRuntime,
-        events: StudioEventRuntime,
         coordinator: Arc<TaskCoordinator>,
         resources: StudioAgentResources,
     ) -> Self {
@@ -49,7 +48,6 @@ impl StudioAgentTurnFactory {
             mcp_runtime,
             lsp_runtime,
             interactions,
-            events,
             coordinator,
             resources,
         }
@@ -160,10 +158,11 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             .reconcile(crate::config::effective_mcp_servers(&config))
             .await?;
         self.lsp_runtime.reconcile_workspace(&workspace_root).await;
-        self.mcp_runtime
-            .acquire_turn_lease()
-            .await?
-            .install(kernel.core_mut())?;
+        let mcp_lease = self.mcp_runtime.acquire_turn_lease().await?;
+        let active_mcp_servers = mcp_lease.server_ids().to_vec();
+        let mcp_health = self.mcp_runtime.health_snapshot().await?;
+        let active_lsp_servers = self.lsp_runtime.active_server_names().await;
+        mcp_lease.install(kernel.core_mut())?;
 
         let mut policy = studio_execution_policy(
             &context.snapshot,
@@ -225,12 +224,24 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             .with_trace_attachments(trace_attachments)
             .with_workspace_instructions(workspace_instructions)
             .with_instruction_snapshot(instruction_snapshot);
-        let emitter = interaction_emitter(self.events.clone(), studio_session_id.clone());
+        let emitter = interaction_emitter(
+            context.runtime,
+            studio_session_id.clone(),
+            context.snapshot.identity.id.to_string(),
+        );
         let interaction_callback = self.interactions.callback(studio_session_id, emitter);
         let options = TurnOptions::default()
             .with_permission_mode(config.runtime.permission_mode)
             .with_interaction_callback(interaction_callback);
-        let prepared = PreparedAgentTurn::new(kernel, request, options, policy);
+        let mut session_runtime = PreparedSessionRuntime::new(route.model.slug.clone())
+            .with_mcp_servers(active_mcp_servers)
+            .with_mcp_health(mcp_health)
+            .with_lsp(active_lsp_servers);
+        if let Some(context_window) = route.model.resolved_context_window() {
+            session_runtime = session_runtime.with_context_window(context_window);
+        }
+        let prepared = PreparedAgentTurn::new(kernel, request, options, policy)
+            .with_session_runtime(session_runtime);
         if context
             .input
             .metadata
@@ -292,15 +303,30 @@ fn prompt_content(prompt: &str, attachments: &[crate::studio::AttachmentRecord])
 }
 
 fn interaction_emitter(
-    events: StudioEventRuntime,
+    runtime: pl_core::AgentRuntimeHandle,
     session_id: String,
+    source_agent_id: String,
 ) -> crate::studio::InteractionEmitter {
     Arc::new(move |interaction| {
-        let events = events.clone();
+        let runtime = runtime.clone();
         let session_id = session_id.clone();
+        let source_agent_id = source_agent_id.clone();
         Box::pin(async move {
-            events
-                .emit_interaction(&session_id, crate::InteractionChangedEvent { interaction })
+            let turn_id = interaction.scope.turn_id.clone();
+            let emitted_at = interaction.updated_at;
+            runtime
+                .record_session_facts(
+                    super::root_agent_id(&session_id),
+                    pl_core::SessionId::new(session_id)?,
+                    vec![pl_core::SessionEventFact::durable(
+                        Some(source_agent_id),
+                        Some(turn_id),
+                        emitted_at,
+                        crate::SessionEventKind::InteractionChanged {
+                            event: Box::new(crate::InteractionChangedEvent { interaction }),
+                        },
+                    )],
+                )
                 .await?;
             Ok(())
         })

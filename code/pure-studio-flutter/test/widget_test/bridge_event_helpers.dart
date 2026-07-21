@@ -1,5 +1,23 @@
 part of '../widget_test.dart';
 
+StudioBridgeEvent _canonicalSessionEvent({
+  required String sessionId,
+  required Map<String, Object?> kind,
+  int sequence = 1,
+  int emittedAt = 1,
+  String? eventId,
+  String? turnId,
+}) {
+  return StudioBridgeEvent.fromCanonicalJson({
+    'eventId': eventId ?? 'event-$sequence',
+    'sessionId': sessionId,
+    'turnId': ?turnId,
+    'emittedAt': emittedAt,
+    'position': {'persistence': 'durable', 'sequence': sequence},
+    'kind': kind,
+  });
+}
+
 StudioBridgeEvent _messageUpdatedEvent({
   required String sessionId,
   required Map<String, Object?> message,

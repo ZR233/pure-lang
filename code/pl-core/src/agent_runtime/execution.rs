@@ -1,4 +1,5 @@
 use pl_model::TokenUsage;
+use pl_protocol::SessionEventKind;
 use pl_trace::{AgentEvent, TraceEvent, TraceEventKind, TracePartKind};
 use tokio_util::sync::CancellationToken;
 
@@ -8,6 +9,7 @@ use super::{
     AgentActivityState, AgentExecutionPolicy, AgentRuntimeHost, AgentTurnOutcome,
     AgentTurnPreparationContext, SessionId, TurnFinalizationPolicy, TurnId, TurnOutcomeKind,
 };
+use crate::session_event::{ObservedTurnEvent, observation_from_agent_event};
 use crate::{AgentSession, TraceRecorder, TurnResult, TurnResultStatus};
 
 pub(crate) struct TurnCompletion {
@@ -25,12 +27,14 @@ pub(crate) async fn execute_turn<H>(
     context: AgentTurnPreparationContext,
     cancellation: CancellationToken,
     durable_trace_tx: tokio::sync::mpsc::UnboundedSender<TraceEvent>,
+    observation_tx: tokio::sync::mpsc::UnboundedSender<ObservedTurnEvent>,
 ) -> TurnCompletion
 where
     H: AgentRuntimeHost,
 {
     let turn_id = context.turn_id.clone();
     let start_revision = context.snapshot.revision;
+    let framework_session_id = context.session_id.clone();
     let trace_session_id = context.session_id.to_string();
     let initial_trace_sequence = context.trace_sequence;
     let activity_runtime = context.runtime.clone();
@@ -51,43 +55,86 @@ where
             }
             let policy = prepared.policy.clone();
             let session_commit = prepared.session_commit;
-            let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(128);
-            let activity_turn_id = turn_id.clone();
-            tokio::spawn(async move {
-                loop {
-                    match event_rx.recv().await {
-                        Ok(event) => {
-                            if let Some(activity) = activity_for_event(&event) {
-                                let _ = activity_runtime
-                                    .set_activity(
-                                        activity_agent_id.clone(),
-                                        activity_turn_id.clone(),
-                                        activity,
-                                    )
-                                    .await;
-                            }
-                        }
-                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+            let session_runtime_result = if let Some(runtime) = &prepared.session_runtime {
+                match activity_runtime.session_snapshot(&framework_session_id) {
+                    Ok(current) => {
+                        let updated_at = unix_timestamp();
+                        let snapshot =
+                            runtime.merge_with(&framework_session_id, &current, updated_at);
+                        activity_runtime
+                            .record_session_facts(
+                                activity_agent_id.clone(),
+                                framework_session_id.clone(),
+                                vec![crate::SessionEventFact::durable(
+                                    Some(activity_agent_id.to_string()),
+                                    Some(turn_id.to_string()),
+                                    updated_at,
+                                    SessionEventKind::RuntimeChanged {
+                                        runtime: Box::new(snapshot),
+                                    },
+                                )],
+                            )
+                            .await
                     }
+                    Err(error) => Err(error),
                 }
-            });
-            let mut recorder = TraceRecorder::streaming(
-                trace_session_id,
-                event_tx,
-                initial_trace_sequence,
-                durable_trace_tx,
-            );
-            let mut result = prepared
-                .kernel
-                .run_turn_with_trace(
-                    &mut session,
-                    prepared.request,
-                    &mut recorder,
-                    prepared.options,
-                )
-                .await
-                .map_err(|error| error.to_string());
+            } else {
+                Ok(())
+            };
+            let mut result = 'execute: {
+                if let Err(error) = session_runtime_result {
+                    break 'execute Err(error.to_string());
+                }
+                let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(128);
+                let activity_turn_id = turn_id.clone();
+                let observation_turn_id = turn_id.to_string();
+                let observation_session_id = trace_session_id.clone();
+                let event_task = tokio::spawn(async move {
+                    loop {
+                        match event_rx.recv().await {
+                            Ok(event) => {
+                                if let Some(observation) = observation_from_agent_event(&event) {
+                                    let _ = observation_tx.send(ObservedTurnEvent {
+                                        turn_id: observation_turn_id.clone(),
+                                        session_id: observation_session_id.clone(),
+                                        observation,
+                                    });
+                                }
+                                if let Some(activity) = activity_for_event(&event) {
+                                    let _ = activity_runtime
+                                        .set_activity(
+                                            activity_agent_id.clone(),
+                                            activity_turn_id.clone(),
+                                            activity,
+                                        )
+                                        .await;
+                                }
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                        }
+                    }
+                });
+                let mut recorder = TraceRecorder::streaming(
+                    trace_session_id,
+                    event_tx,
+                    initial_trace_sequence,
+                    durable_trace_tx,
+                );
+                let result = prepared
+                    .kernel
+                    .run_turn_with_trace(
+                        &mut session,
+                        prepared.request,
+                        &mut recorder,
+                        prepared.options,
+                    )
+                    .await
+                    .map_err(|error| error.to_string());
+                drop(recorder);
+                let _ = event_task.await;
+                break 'execute result;
+            };
             enforce_finalization(&mut result, &policy);
             (result, session_commit)
         }

@@ -50,64 +50,87 @@ void registerDemoProjectTests() {
     );
   });
 
-  test('bootstrap loads selected session history', () async {
-    final api = _FakeStudioApi(
-      _twoProjectState(selectedProjectId: 'project-a'),
-    );
-    api.sessionStates['session-a'] = _sessionHistoryState(
-      projectId: 'project-a',
-      sessionId: 'session-a',
-      text: 'restored history from session a',
-    );
-    final container = ProviderContainer(
-      overrides: [studioApiProvider.overrideWithValue(api)],
-    );
-    addTearDown(container.dispose);
+  test(
+    'bootstrap hydrates selected session from subscription snapshot',
+    () async {
+      final api = _FakeStudioApi(
+        _twoProjectState(selectedProjectId: 'project-a'),
+      );
+      api.sessionStates['session-a'] = _sessionHistoryState(
+        projectId: 'project-a',
+        sessionId: 'session-a',
+        text: 'restored history from session a',
+      );
+      final container = ProviderContainer(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+      );
+      addTearDown(container.dispose);
 
-    final state = await container.read(studioControllerProvider.future);
+      await container.read(studioControllerProvider.future);
+      api.emitSessionFrame(
+        _sessionSnapshotFrame(api.sessionStates['session-a']!),
+      );
+      await pumpEventQueue();
+      final state = container.read(studioControllerProvider).requireValue;
 
-    expect(api.loadedSessionIds, ['session-a']);
-    expect(state.selectedSessionId, 'session-a');
-    expect(
-      state.selectedTimelineRows.single.part!.text,
-      'restored history from session a',
-    );
-  });
-
-  test('project selection reloads selected session history', () async {
-    final api = _FakeStudioApi(
-      _twoProjectState(selectedProjectId: 'project-a'),
-    );
-    api.selectProjectStates['project-b'] = _twoProjectState(
-      selectedProjectId: 'project-b',
-    );
-    api.sessionStates['session-b'] = _sessionHistoryState(
-      projectId: 'project-b',
-      sessionId: 'session-b',
-      text: 'restored history from session b',
-    );
-    final container = ProviderContainer(
-      overrides: [studioApiProvider.overrideWithValue(api)],
-    );
-    addTearDown(container.dispose);
-    await container.read(studioControllerProvider.future);
-
-    await container
-        .read(studioControllerProvider.notifier)
-        .selectProject('project-b');
-
-    final state = container.read(studioControllerProvider).requireValue;
-    expect(api.loadedSessionIds, ['session-a', 'session-b']);
-    expect(state.selectedProjectId, 'project-b');
-    expect(state.selectedSessionId, 'session-b');
-    expect(
-      state.selectedTimelineRows.single.part!.text,
-      'restored history from session b',
-    );
-  });
+      expect(api.loadedSessionIds, isEmpty);
+      expect(api.sessionSubscriptions, [
+        (sessionId: 'session-a', afterSequence: null),
+      ]);
+      expect(state.selectedSessionId, 'session-a');
+      expect(
+        state.selectedTimelineRows.single.part!.text,
+        'restored history from session a',
+      );
+    },
+  );
 
   test(
-    'session load replays only buffered durable events after snapshot cursor',
+    'project selection switches subscription and applies its snapshot',
+    () async {
+      final api = _FakeStudioApi(
+        _twoProjectState(selectedProjectId: 'project-a'),
+      );
+      api.selectProjectStates['project-b'] = _twoProjectState(
+        selectedProjectId: 'project-b',
+      );
+      api.sessionStates['session-b'] = _sessionHistoryState(
+        projectId: 'project-b',
+        sessionId: 'session-b',
+        text: 'restored history from session b',
+      );
+      final container = ProviderContainer(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+      );
+      addTearDown(container.dispose);
+      await container.read(studioControllerProvider.future);
+
+      await container
+          .read(studioControllerProvider.notifier)
+          .selectProject('project-b');
+      api.emitSessionFrame(
+        _sessionSnapshotFrame(api.sessionStates['session-b']!),
+      );
+      await pumpEventQueue();
+      await _pumpFrameBatch();
+
+      final state = container.read(studioControllerProvider).requireValue;
+      expect(api.loadedSessionIds, isEmpty);
+      expect(api.sessionSubscriptions.map((item) => item.sessionId), [
+        'session-a',
+        'session-b',
+      ]);
+      expect(state.selectedProjectId, 'project-b');
+      expect(state.selectedSessionId, 'session-b');
+      expect(
+        state.selectedTimelineRows.single.part!.text,
+        'restored history from session b',
+      );
+    },
+  );
+
+  test(
+    'session snapshot cursor rejects older replay and accepts later events',
     () async {
       final api = _FakeStudioApi(
         _twoProjectState(selectedProjectId: 'project-a'),
@@ -123,17 +146,18 @@ void registerDemoProjectTests() {
         messageSequence: 1,
         partSequence: 2,
       );
-      final blockedLoad = Completer<StudioState>();
-      api.blockedSessionLoads['session-b'] = blockedLoad;
       final container = ProviderContainer(
         overrides: [studioApiProvider.overrideWithValue(api)],
       );
       addTearDown(container.dispose);
       await container.read(studioControllerProvider.future);
 
-      final selectFuture = container
+      await container
           .read(studioControllerProvider.notifier)
           .selectProject('project-b');
+      api.emitSessionFrame(
+        _sessionSnapshotFrame(api.sessionStates['session-b']!),
+      );
       await pumpEventQueue();
 
       api.emitSession(
@@ -175,7 +199,7 @@ void registerDemoProjectTests() {
             'sessionId': 'session-b',
             'messageId': 'turn-live:assistant',
             'turnId': 'turn-live',
-            'partType': 'text',
+            'type': 'text',
             'order': 6,
             'revision': 0,
             'status': 'streaming',
@@ -188,15 +212,7 @@ void registerDemoProjectTests() {
       );
       await pumpEventQueue();
 
-      var state = container.read(studioControllerProvider).requireValue;
-      expect(state.selectedSessionId, 'session-b');
-      expect(state.selectedMessages, isEmpty);
-
-      blockedLoad.complete(api.sessionStates['session-b']!);
-      await selectFuture;
-      await pumpEventQueue();
-
-      state = container.read(studioControllerProvider).requireValue;
+      final state = container.read(studioControllerProvider).requireValue;
       expect(state.selectedSessionId, 'session-b');
       expect(
         state.selectedMessages.where(
@@ -213,7 +229,7 @@ void registerDemoProjectTests() {
   );
 
   test(
-    'session load keeps live delta arrival order inside hydrate barrier',
+    'session stream keeps live delta arrival order after snapshot',
     () async {
       final api = _FakeStudioApi(
         _twoProjectState(selectedProjectId: 'project-a'),
@@ -229,17 +245,18 @@ void registerDemoProjectTests() {
         messageSequence: 1,
         partSequence: 2,
       );
-      final blockedLoad = Completer<StudioState>();
-      api.blockedSessionLoads['session-b'] = blockedLoad;
       final container = ProviderContainer(
         overrides: [studioApiProvider.overrideWithValue(api)],
       );
       addTearDown(container.dispose);
       await container.read(studioControllerProvider.future);
 
-      final selectFuture = container
+      await container
           .read(studioControllerProvider.notifier)
           .selectProject('project-b');
+      api.emitSessionFrame(
+        _sessionSnapshotFrame(api.sessionStates['session-b']!),
+      );
       await pumpEventQueue();
 
       api.emitSession(
@@ -266,7 +283,7 @@ void registerDemoProjectTests() {
             'sessionId': 'session-b',
             'messageId': 'turn-live:assistant',
             'turnId': 'turn-live',
-            'partType': 'text',
+            'type': 'text',
             'order': 0,
             'revision': 0,
             'status': 'streaming',
@@ -310,10 +327,7 @@ void registerDemoProjectTests() {
         ),
       );
       await pumpEventQueue();
-
-      blockedLoad.complete(api.sessionStates['session-b']!);
-      await selectFuture;
-      await pumpEventQueue();
+      await _pumpFrameBatch();
 
       final state = container.read(studioControllerProvider).requireValue;
       final liveRow = state.selectedTimelineRows.singleWhere(
@@ -326,45 +340,50 @@ void registerDemoProjectTests() {
     },
   );
 
-  test(
-    'archive project switches project and reloads selected session history',
-    () async {
-      final api = _FakeStudioApi(
-        _twoProjectState(selectedProjectId: 'project-a'),
-      );
-      api.archiveProjectStates['project-a'] = _twoProjectState(
-        selectedProjectId: 'project-b',
-        projects: const [
-          StudioProject(id: 'project-b', name: 'Project B', path: 'b'),
-        ],
-      );
-      api.sessionStates['session-b'] = _sessionHistoryState(
-        projectId: 'project-b',
-        sessionId: 'session-b',
-        text: 'history after project close',
-      );
-      final container = ProviderContainer(
-        overrides: [studioApiProvider.overrideWithValue(api)],
-      );
-      addTearDown(container.dispose);
-      await container.read(studioControllerProvider.future);
+  test('archive project switches project and session subscription', () async {
+    final api = _FakeStudioApi(
+      _twoProjectState(selectedProjectId: 'project-a'),
+    );
+    api.archiveProjectStates['project-a'] = _twoProjectState(
+      selectedProjectId: 'project-b',
+      projects: const [
+        StudioProject(id: 'project-b', name: 'Project B', path: 'b'),
+      ],
+    );
+    api.sessionStates['session-b'] = _sessionHistoryState(
+      projectId: 'project-b',
+      sessionId: 'session-b',
+      text: 'history after project close',
+    );
+    final container = ProviderContainer(
+      overrides: [studioApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+    await container.read(studioControllerProvider.future);
 
-      await container
-          .read(studioControllerProvider.notifier)
-          .archiveProject('project-a');
+    await container
+        .read(studioControllerProvider.notifier)
+        .archiveProject('project-a');
+    api.emitSessionFrame(
+      _sessionSnapshotFrame(api.sessionStates['session-b']!),
+    );
+    await pumpEventQueue();
 
-      final state = container.read(studioControllerProvider).requireValue;
-      expect(api.archivedProjectId, 'project-a');
-      expect(api.archiveSelectedProjectId, 'project-a');
-      expect(api.loadedSessionIds, ['session-a', 'session-b']);
-      expect(state.projects.map((project) => project.id), ['project-b']);
-      expect(state.selectedProjectId, 'project-b');
-      expect(
-        state.selectedTimelineRows.single.part!.text,
-        'history after project close',
-      );
-    },
-  );
+    final state = container.read(studioControllerProvider).requireValue;
+    expect(api.archivedProjectId, 'project-a');
+    expect(api.archiveSelectedProjectId, 'project-a');
+    expect(api.loadedSessionIds, isEmpty);
+    expect(api.sessionSubscriptions.map((item) => item.sessionId), [
+      'session-a',
+      'session-b',
+    ]);
+    expect(state.projects.map((project) => project.id), ['project-b']);
+    expect(state.selectedProjectId, 'project-b');
+    expect(
+      state.selectedTimelineRows.single.part!.text,
+      'history after project close',
+    );
+  });
 
   test('archive last project clears current selection', () async {
     final api = _FakeStudioApi(

@@ -3,8 +3,8 @@ use std::collections::{BTreeMap, VecDeque};
 use crate::{ModelContextItem, PureError};
 use pl_core::{
     AgentActivityState, AgentCommit, AgentCommitOutcome, AgentDurableState, AgentSession,
-    AgentSessionState, AgentStateRepository, PendingAgentInput, RestoredAgentRuntime, SessionId,
-    TurnOutcomeKind,
+    AgentSessionState, AgentStateRepository, PendingAgentInput, RestoredAgentRuntime,
+    RestoredSessionProjection, SessionId, SessionProjectionCommit, TurnOutcomeKind,
 };
 use sea_orm::{ConnectionTrait, DatabaseBackend, QueryResult, Statement, TransactionTrait};
 
@@ -41,12 +41,14 @@ impl AgentStateRepository for StudioAgentRepository {
             let snapshot = serde_json::from_str(&text(&row, "snapshot_json")?)?;
             let sessions = self.restore_sessions(&agent_id).await?;
             let pending_inputs = self.restore_pending_inputs(&agent_id).await?;
+            let session_projections = self.restore_session_projections(&agent_id).await?;
             restored.push(RestoredAgentRuntime {
                 state: AgentDurableState {
                     snapshot,
                     sessions,
                     pending_inputs,
                 },
+                session_projections,
             });
         }
         Ok(restored)
@@ -120,6 +122,9 @@ impl AgentStateRepository for StudioAgentRepository {
             .await
             .map_err(store_error)?;
         }
+        if let Some(projection) = &commit.session_projection {
+            persist_session_projection(&tx, projection).await?;
+        }
         tx.commit().await.map_err(store_error)?;
         Ok(AgentCommitOutcome::Applied)
     }
@@ -134,7 +139,7 @@ impl StudioAgentRepository {
             .database()
             .query_all(statement(
                 "SELECT session_id, metadata_json, context_json, usage_json, last_context_tokens,
-                        trace_sequence
+                        trace_sequence, session_event_sequence
                  FROM agent_runtime_sessions WHERE agent_id = ? ORDER BY session_id",
                 [agent_id.to_string().into()],
             ))
@@ -158,10 +163,54 @@ impl StudioAgentRepository {
                         usage: serde_json::from_str(&text(&row, "usage_json")?)?,
                         last_context_tokens,
                         trace_sequence: integer_u64(&row, "trace_sequence")?,
+                        session_event_sequence: integer_u64(&row, "session_event_sequence")?,
                     },
                 ))
             })
             .collect()
+    }
+
+    async fn restore_session_projections(
+        &self,
+        agent_id: &str,
+    ) -> Result<Vec<RestoredSessionProjection>, PureError> {
+        let rows = self
+            .store
+            .database()
+            .query_all(statement(
+                "SELECT projection.session_id, projection.snapshot_json
+                 FROM session_view_snapshots projection
+                 INNER JOIN agent_runtime_sessions runtime_session
+                   ON runtime_session.session_id = projection.session_id
+                 WHERE runtime_session.agent_id = ?
+                 ORDER BY projection.session_id",
+                [agent_id.to_string().into()],
+            ))
+            .await
+            .map_err(store_error)?;
+        let mut projections = Vec::with_capacity(rows.len());
+        for row in rows {
+            let session_id = text(&row, "session_id")?;
+            let snapshot = serde_json::from_str(&text(&row, "snapshot_json")?)?;
+            let durable_events = self
+                .store
+                .database()
+                .query_all(statement(
+                    "SELECT event_json FROM session_event_journal
+                     WHERE session_id = ? ORDER BY sequence",
+                    [session_id.into()],
+                ))
+                .await
+                .map_err(store_error)?
+                .into_iter()
+                .map(|event| serde_json::from_str(&text(&event, "event_json")?).map_err(Into::into))
+                .collect::<Result<_, PureError>>()?;
+            projections.push(RestoredSessionProjection {
+                snapshot,
+                durable_events,
+            });
+        }
+        Ok(projections)
     }
 
     async fn restore_pending_inputs(
@@ -183,6 +232,59 @@ impl StudioAgentRepository {
     }
 }
 
+async fn persist_session_projection(
+    tx: &sea_orm::DatabaseTransaction,
+    projection: &SessionProjectionCommit,
+) -> Result<(), PureError> {
+    let session_id = projection.snapshot.session_id.clone();
+    tx.execute(statement(
+        "INSERT INTO session_view_snapshots
+         (session_id, through_sequence, snapshot_json, updated_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(session_id) DO UPDATE SET
+           through_sequence = excluded.through_sequence,
+           snapshot_json = excluded.snapshot_json,
+           updated_at = excluded.updated_at",
+        [
+            session_id.clone().into(),
+            i64_from_u64(projection.snapshot.through_sequence)?.into(),
+            serde_json::to_string(&projection.snapshot)?.into(),
+            projection
+                .durable_events
+                .last()
+                .map_or(0, |event| event.emitted_at)
+                .into(),
+        ],
+    ))
+    .await
+    .map_err(store_error)?;
+    for event in &projection.durable_events {
+        let sequence = event.position.durable_sequence().ok_or_else(|| {
+            store_error("session projection commit contains transient event".to_string())
+        })?;
+        tx.execute(statement(
+            "INSERT OR REPLACE INTO session_event_journal
+             (session_id, sequence, event_json, emitted_at) VALUES (?, ?, ?, ?)",
+            [
+                session_id.clone().into(),
+                i64_from_u64(sequence)?.into(),
+                serde_json::to_string(event)?.into(),
+                event.emitted_at.into(),
+            ],
+        ))
+        .await
+        .map_err(store_error)?;
+    }
+    let retain_after = projection.snapshot.through_sequence.saturating_sub(4096);
+    tx.execute(statement(
+        "DELETE FROM session_event_journal WHERE session_id = ? AND sequence <= ?",
+        [session_id.into(), i64_from_u64(retain_after)?.into()],
+    ))
+    .await
+    .map_err(store_error)?;
+    Ok(())
+}
+
 async fn replace_sessions(
     tx: &sea_orm::DatabaseTransaction,
     agent_id: &str,
@@ -198,8 +300,8 @@ async fn replace_sessions(
         tx.execute(statement(
             "INSERT INTO agent_runtime_sessions
              (agent_id, session_id, metadata_json, context_json, usage_json,
-              last_context_tokens, trace_sequence, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+              last_context_tokens, trace_sequence, session_event_sequence, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 agent_id.to_string().into(),
                 session.id.to_string().into(),
@@ -212,6 +314,7 @@ async fn replace_sessions(
                     .transpose()?
                     .into(),
                 i64_from_u64(session.trace_sequence)?.into(),
+                i64_from_u64(session.session_event_sequence)?.into(),
                 state.snapshot.updated_at.into(),
             ],
         ))

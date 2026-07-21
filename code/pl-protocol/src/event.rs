@@ -84,7 +84,7 @@ pub struct PlanLifecycleEvent {
     pub updated_at: i64,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum ErrorSeverity {
     Transient,

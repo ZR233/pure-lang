@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::{
     InteractionChangedEvent, InteractionKind, InteractionResolution, PlanLifecycleEvent,
-    PlanLifecycleState, StudioEventKind,
+    PlanLifecycleState,
 };
 use anyhow::{Context, Result, bail};
 
@@ -43,11 +43,15 @@ impl StudioRuntime {
         let turn_id = handle
             .submit(
                 agent_id.clone(),
-                pl_core::AgentSubmitRequest::start(session, prompt.clone()).with_metadata(metadata),
+                pl_core::AgentSubmitRequest::start(session.clone(), prompt.clone())
+                    .with_metadata(metadata),
             )
             .await
             .map_err(|error| anyhow::anyhow!(error))?;
-        let cursor = self.store.next_studio_event_sequence(&session_id).await? as u64;
+        let cursor = handle
+            .session_snapshot(&session)
+            .map_err(|error| anyhow::anyhow!(error))?
+            .through_sequence;
         Ok(StudioSubmitPromptResponse {
             session_id,
             turn_id: turn_id.into_string(),
@@ -131,10 +135,11 @@ impl StudioRuntime {
                     "projectId": session_record.project_id,
                     "title": session_record.title,
                 }),
-                session: self.store.load_core_session(studio_session_id).await?,
+                session: pl_core::AgentSession::new(),
                 usage: pl_model::TokenUsage::default(),
                 last_context_tokens: None,
                 trace_sequence: 0,
+                session_event_sequence: 0,
             }],
         };
         match handle.register(registration).await {
@@ -185,24 +190,44 @@ impl StudioRuntime {
         turn_id: Option<String>,
         reason: Option<String>,
     ) -> Result<()> {
-        self.events
-            .emit(
+        let updated_at = unix_seconds();
+        self.record_session_facts(
+            session_id,
+            vec![pl_core::SessionEventFact::durable(
                 None,
-                Some(session_id.to_string()),
                 turn_id.clone(),
-                StudioEventKind::PlanLifecycleChanged {
+                updated_at,
+                crate::SessionEventKind::PlanChanged {
                     event: PlanLifecycleEvent {
                         plan_id: plan_id.to_string(),
                         state,
                         turn_id,
                         reason,
-                        updated_at: unix_seconds(),
+                        updated_at,
                     },
                 },
-            )
-            .await?;
+            )],
+        )
+        .await?;
         Ok(())
     }
+
+    pub(super) async fn record_session_facts(
+        &self,
+        session_id: &str,
+        facts: Vec<pl_core::SessionEventFact>,
+    ) -> Result<()> {
+        let runtime = self.agent_framework().await?.handle();
+        runtime
+            .record_session_facts(
+                root_agent_id(session_id),
+                pl_core::SessionId::new(session_id.to_string())?,
+                facts,
+            )
+            .await
+            .map_err(Into::into)
+    }
+
     pub(super) fn interaction_emitter(&self, session_id: String) -> InteractionEmitter {
         let runtime = self.clone();
         Arc::new(move |interaction| {
@@ -210,30 +235,34 @@ impl StudioRuntime {
             let session_id = session_id.clone();
             Box::pin(async move {
                 runtime
-                    .events
-                    .emit_interaction(&session_id, InteractionChangedEvent { interaction })
+                    .record_session_facts(
+                        &session_id,
+                        vec![pl_core::SessionEventFact::durable(
+                            None,
+                            Some(interaction.scope.turn_id.clone()),
+                            interaction.updated_at,
+                            crate::SessionEventKind::InteractionChanged {
+                                event: Box::new(InteractionChangedEvent { interaction }),
+                            },
+                        )],
+                    )
                     .await?;
                 Ok(())
             })
         })
     }
 
-    pub(super) async fn cancel_recovered_transient_interactions(
-        &self,
-        cancelled_turns: Vec<crate::studio::records::StudioTurnRecord>,
-    ) -> Result<()> {
-        let mut session_ids = cancelled_turns
-            .into_iter()
-            .map(|turn| turn.session_id)
-            .collect::<Vec<_>>();
-        session_ids.extend(
-            self.store
-                .list_sessions_with_transient_pending_interactions()
-                .await?,
-        );
+    pub(super) async fn cancel_recovered_transient_interactions(&self) -> Result<()> {
+        let mut session_ids = self
+            .store
+            .list_sessions_with_transient_pending_interactions()
+            .await?;
         session_ids.sort();
         session_ids.dedup();
         for session_id in session_ids {
+            // 旧数据库可能有 pending interaction，但尚未写入 framework registration。
+            // 先注册 owner，恢复事件仍由 PL actor 分配序列、持久化并广播。
+            let _ = self.ensure_root_agent(&session_id).await?;
             let emitter = self.interaction_emitter(session_id.clone());
             self.interactions
                 .cancel_transient_interactions(&session_id, "application restarted", emitter)

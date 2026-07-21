@@ -8,16 +8,15 @@ use crate::studio::agent_host::{
 };
 use crate::studio::records::SessionRecord;
 use crate::studio::task_coordinator::TaskCoordinator;
-use crate::studio::{InteractionRuntime, StudioEventRuntime, StudioRuntimeState, StudioStore};
+use crate::studio::{
+    InteractionRuntime, StudioProductEventRuntime, StudioRuntimeState, StudioStore,
+};
 
 mod lifecycle;
 mod mcp_health;
 mod plan_confirmation;
-mod projection;
 mod prompt_runner;
 mod session_service;
-
-use projection::studio_session_runtime;
 
 /// Studio UI 提交 prompt 的请求。
 ///
@@ -88,7 +87,7 @@ pub struct StudioRuntime {
     mcp_health_watcher: std::sync::Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
     lsp_runtime: pl_lsp::LspRuntimeRegistry,
     interactions: InteractionRuntime,
-    events: StudioEventRuntime,
+    product_events: StudioProductEventRuntime,
     runtime_state: StudioRuntimeState,
     agent_framework: std::sync::Arc<tokio::sync::Mutex<Option<std::sync::Arc<StudioAgentRuntime>>>>,
     agent_resources: StudioAgentResources,
@@ -100,33 +99,11 @@ pub struct StudioRuntime {
 }
 
 impl StudioRuntime {
-    pub async fn session_runtime_view(
+    pub async fn session_task_view(
         &self,
         session_id: &str,
-    ) -> Result<crate::StudioSessionRuntime> {
-        let runtime = self.session_runtime(session_id).await?;
-        let active_skills = self.store.list_session_skill_names(session_id).await?;
-        let task = match self
-            .store
-            .find_latest_task_run_for_session(session_id)
-            .await?
-        {
-            Some(run) => Some(projection::studio_task_runtime(
-                run.clone(),
-                self.store.list_work_units(&run.id).await?,
-                self.store.list_agent_outcomes(&run.id).await?,
-                self.store.list_merge_records(&run.id).await?,
-                self.store.list_review_rounds(&run.id).await?,
-            )),
-            None => None,
-        };
-        Ok(studio_session_runtime(
-            runtime,
-            active_skills,
-            self.mcp_runtime.available_server_names().await,
-            self.lsp_runtime.active_server_names().await,
-            task,
-        ))
+    ) -> Result<Option<crate::StudioTaskRuntime>> {
+        super::task_projection::load_task_runtime(&self.store, session_id).await
     }
 }
 

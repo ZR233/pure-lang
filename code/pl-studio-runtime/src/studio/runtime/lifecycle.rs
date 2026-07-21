@@ -10,7 +10,7 @@ use crate::studio::agent_host::{
 };
 use crate::studio::task_coordinator::TaskCoordinator;
 use crate::studio::{
-    InteractionRuntime, StudioEventRuntime, StudioRuntimeSnapshot, StudioRuntimeState,
+    InteractionRuntime, StudioProductEventRuntime, StudioRuntimeSnapshot, StudioRuntimeState,
     StudioRuntimeStatus, StudioStore,
 };
 use crate::{LocalMcpRuntimeHost, McpRuntime, McpRuntimeHandle};
@@ -40,12 +40,11 @@ impl StudioRuntime {
     ) -> Self {
         let task_coordinator = std::sync::Arc::new(TaskCoordinator::new(store.clone()));
         let interactions = InteractionRuntime::new(store.clone());
-        let events = StudioEventRuntime::new(store.clone());
-        let continuations =
-            StudioContinuationService::new(store.clone(), task_coordinator.clone(), events.clone());
+        let product_events = StudioProductEventRuntime::new(store.clone());
+        let continuations = StudioContinuationService::new(store.clone(), task_coordinator.clone());
         Self {
             interactions,
-            events,
+            product_events,
             store,
             config_store,
             mcp_runtime: McpRuntime::new(LocalMcpRuntimeHost).handle(),
@@ -70,8 +69,8 @@ impl StudioRuntime {
         &self.interactions
     }
 
-    pub fn events(&self) -> &StudioEventRuntime {
-        &self.events
+    pub fn product_events(&self) -> &StudioProductEventRuntime {
+        &self.product_events
     }
 
     pub fn config_store(&self) -> &ConfigStore {
@@ -101,11 +100,11 @@ impl StudioRuntime {
             self.mcp_runtime.clone(),
             self.lsp_runtime.clone(),
             self.interactions.clone(),
-            self.events.clone(),
             self.runtime_state.clone(),
             self.continuations.clone(),
             self.task_coordinator.clone(),
             self.agent_resources.clone(),
+            self.product_events.clone(),
         );
         let runtime = std::sync::Arc::new(
             StudioAgentRuntime::start(host, runtime_options())
@@ -113,6 +112,7 @@ impl StudioRuntime {
                 .map_err(|error| anyhow::anyhow!(error))?,
         );
         let handle = runtime.handle();
+        runtime.host().attach_runtime(handle.clone()).await;
         let mut recovered_children = handle
             .list()
             .await
@@ -145,10 +145,36 @@ impl StudioRuntime {
         Ok(runtime)
     }
 
+    /// 订阅 PL canonical session stream；首帧由 framework 决定为 snapshot 或 replay。
+    pub async fn subscribe_session_events(
+        &self,
+        request: pl_protocol::SessionSubscriptionRequest,
+    ) -> Result<pl_core::SessionEventSubscription> {
+        let framework = self.agent_framework().await?;
+        framework
+            .handle()
+            .subscribe_session(request)
+            .map_err(|error| anyhow::anyhow!(error))
+    }
+
+    /// 读取包含尚未终态化 delta overlay 的 authoritative session snapshot。
+    pub async fn session_event_snapshot(
+        &self,
+        session_id: &str,
+    ) -> Result<pl_protocol::SessionViewSnapshot> {
+        let framework = self.agent_framework().await?;
+        let session_id = pl_core::SessionId::new(session_id.to_string())?;
+        framework
+            .handle()
+            .session_snapshot(&session_id)
+            .map_err(|error| anyhow::anyhow!(error))
+    }
+
     async fn shutdown_agent_framework(&self) -> Result<()> {
         self.continuations.detach().await;
         let framework = self.agent_framework.lock().await.take();
         if let Some(framework) = framework {
+            framework.host().detach_runtime().await;
             framework
                 .shutdown()
                 .await
@@ -170,13 +196,8 @@ impl StudioRuntime {
             .runtime_state
             .transition(StudioRuntimeStatus::Initializing, None)?;
         let initialization = async {
-            let turns = self
-                .store
-                .cancel_unfinished_turns("application restarted")
-                .await?;
-            self.cancel_recovered_transient_interactions(turns).await?;
+            self.cancel_recovered_transient_interactions().await?;
             let recovered_runs = self.task_coordinator.recover_active_tasks().await?;
-            let _ = self.agent_framework().await?;
             Ok(recovered_runs)
         }
         .await;

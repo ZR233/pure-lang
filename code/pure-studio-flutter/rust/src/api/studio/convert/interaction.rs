@@ -3,12 +3,7 @@ use crate::api::studio::types::{
     BridgeInteractionChangedDto, BridgeInteractionPayloadDto, BridgeUserQuestionDto,
     BridgeUserQuestionOptionDto, ResolveInteractionResponse,
 };
-use pl_protocol::{InteractionPayload, InteractionRequest};
-pub(crate) fn interaction_request_bridge_dto(
-    interaction: InteractionRequest,
-) -> BridgeInteractionChangedDto {
-    bridge_interaction_changed(pl_protocol::InteractionChangedEvent { interaction })
-}
+use pl_protocol::InteractionPayload;
 
 pub(crate) fn resolve_interaction_response(
     response: pl_studio_runtime::StudioResolveInteractionResponse,

@@ -1,67 +1,23 @@
-use super::agent::{BridgeAgentSnapshotDto, BridgeAgentTimelineEventDto};
-use super::interaction::BridgeInteractionChangedDto;
-use super::message::{
-    BridgeStudioMessageDto, BridgeStudioPartDeltaDto, BridgeStudioPartDto, BridgeStudioTurnDto,
-};
 use super::response::SessionDto;
-use super::runtime::{
-    BridgeLspHealthDto, BridgeMcpHealthDto, BridgePlanLifecycleDto, BridgeSessionRuntimeDto,
-    BridgeSkillActivationDto,
-};
+use super::runtime::{BridgeLspHealthDto, BridgeMcpHealthDto, BridgeTaskRuntimeDto};
 use serde::{Deserialize, Serialize};
-// ── Event types ──
 
+/// Flutter Bridge 的 Studio 产品事件信封。
+///
+/// session 事件通过 `BridgeSessionStreamFrame` 透明传输，不得加入此类型。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct BridgeEventEnvelope {
+pub struct BridgeProductEventEnvelope {
     pub event_id: String,
-    pub session_id: Option<String>,
-    pub turn_id: Option<String>,
+    pub project_id: Option<String>,
     pub sequence: u64,
     pub created_at: i64,
-    pub payload: BridgeEventPayload,
+    pub payload: BridgeProductEventPayload,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub enum BridgeEventPayload {
-    TurnChanged {
-        turn: BridgeStudioTurnDto,
-    },
-    MessageUpdated {
-        message: BridgeStudioMessageDto,
-    },
-    MessageRemoved {
-        message_id: String,
-    },
-    MessagePartUpdated {
-        part: Box<BridgeStudioPartDto>,
-    },
-    MessagePartRemoved {
-        message_id: String,
-        part_id: String,
-    },
-    MessagePartDelta {
-        delta: BridgeStudioPartDeltaDto,
-    },
-    InteractionChanged {
-        event: BridgeInteractionChangedDto,
-    },
-    AgentChanged {
-        agent: Box<BridgeAgentSnapshotDto>,
-    },
-    AgentTimelineChanged {
-        event: BridgeAgentTimelineEventDto,
-    },
-    SessionRuntimeChanged {
-        runtime: BridgeSessionRuntimeDto,
-    },
-    SkillActivated {
-        activation: BridgeSkillActivationDto,
-    },
-    PlanLifecycleChanged {
-        event: BridgePlanLifecycleDto,
-    },
+pub enum BridgeProductEventPayload {
     SessionListChanged {
         project_id: String,
         sessions: Vec<SessionDto>,
@@ -72,36 +28,26 @@ pub enum BridgeEventPayload {
     LspHealthChanged {
         health: BridgeLspHealthDto,
     },
+    SessionTaskChanged {
+        session_id: String,
+        task: Option<BridgeTaskRuntimeDto>,
+    },
     Stale {
         lagged_events: u64,
     },
 }
 
-// ── BridgeEventEnvelope helpers ──
-
-impl BridgeEventEnvelope {
-    pub fn stale(session_id: Option<String>, lagged_events: u64) -> Self {
+impl BridgeProductEventEnvelope {
+    pub fn stale(lagged_events: u64) -> Self {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default();
         Self {
-            event_id: {
-                use std::time::{SystemTime, UNIX_EPOCH};
-                let nanos = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_nanos();
-                let suffix = format!("{nanos:x}");
-                format!("bridge-stale-{suffix}")
-            },
-            session_id,
-            turn_id: None,
+            event_id: format!("bridge-product-stale-{:x}", now.as_nanos()),
+            project_id: None,
             sequence: 0,
-            created_at: {
-                use std::time::{SystemTime, UNIX_EPOCH};
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs() as i64
-            },
-            payload: BridgeEventPayload::Stale { lagged_events },
+            created_at: now.as_secs() as i64,
+            payload: BridgeProductEventPayload::Stale { lagged_events },
         }
     }
 }
