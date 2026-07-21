@@ -49,7 +49,7 @@ pub(super) async fn compact_remote(
             session
                 .items()
                 .iter()
-                .filter(|item| !item.is_pinned_context())
+                .filter(|item| !item.is_pinned_context() && !item.is_session_note())
                 .cloned(),
         )
         .collect::<Vec<_>>();
@@ -127,7 +127,7 @@ fn filter_legacy_replacement(
                 MessageRole::Assistant => true,
                 MessageRole::System | MessageRole::Tool => false,
             },
-            ModelContextItem::PinnedContext { .. } => false,
+            ModelContextItem::PinnedContext { .. } | ModelContextItem::SessionNote { .. } => false,
         })
         .collect::<Vec<_>>();
     if !replacement.iter().any(ModelContextItem::is_compaction) {
@@ -208,7 +208,9 @@ fn trim_tool_outputs_to_context_window(
         let (message, receipt) = match &input[index] {
             ModelContextItem::Message { message } => (message, None),
             ModelContextItem::ToolResult { message, receipt } => (message, Some(receipt.clone())),
-            ModelContextItem::PinnedContext { .. } | ModelContextItem::Compaction { .. } => {
+            ModelContextItem::PinnedContext { .. }
+            | ModelContextItem::SessionNote { .. }
+            | ModelContextItem::Compaction { .. } => {
                 continue;
             }
         };
@@ -238,7 +240,7 @@ fn estimate_input_tokens(instructions: &str, input: &[ModelContextItem]) -> u64 
             .map(|item| match item {
                 ModelContextItem::Message { message }
                 | ModelContextItem::ToolResult { message, .. } => estimate_message_tokens(message),
-                ModelContextItem::PinnedContext { .. } => 0,
+                ModelContextItem::PinnedContext { .. } | ModelContextItem::SessionNote { .. } => 0,
                 ModelContextItem::Compaction { encrypted_content } => {
                     estimate_text_tokens(encrypted_content)
                 }

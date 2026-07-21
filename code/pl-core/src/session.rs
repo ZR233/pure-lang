@@ -3,7 +3,7 @@ use std::num::NonZeroUsize;
 
 use pl_model::{CompletionResponse, ModelTransportSession, ToolCall};
 use pl_protocol::{
-    Message, MessageContent, MessageRole, ModelContextItem, PinnedContextSection,
+    Message, MessageContent, MessageRole, ModelContextItem, PinnedContextSection, SessionNote,
     TOOL_CALLS_METADATA_KEY, ToolCallHistoryMetadata, ToolCallKind, ToolResultMetadata,
     ToolResultReceipt,
 };
@@ -91,11 +91,16 @@ impl AgentSession {
     }
 
     pub fn replace_messages(&mut self, messages: Vec<Message>) {
+        let note = self.session_note().cloned();
         self.items = messages
             .iter()
             .cloned()
             .map(ModelContextItem::from)
             .collect();
+        self.items.extend(
+            note.into_iter()
+                .map(|note| ModelContextItem::SessionNote { note }),
+        );
         self.messages = messages;
         self.revision = self.revision.saturating_add(1);
     }
@@ -106,18 +111,18 @@ impl AgentSession {
         self.revision = self.revision.saturating_add(1);
     }
 
-    /// 只替换可压缩的时间线，保留当前所有 pinned working context。
+    /// 只替换可压缩的时间线，保留当前所有 pinned working context 和会话笔记。
     pub fn replace_compactable_items(&mut self, items: Vec<ModelContextItem>) {
-        let pinned = self
+        let retained = self
             .items
             .iter()
-            .filter(|item| item.is_pinned_context())
+            .filter(|item| is_durable_context(item))
             .cloned()
             .collect::<Vec<_>>();
         self.items = items
             .into_iter()
-            .filter(|item| !item.is_pinned_context())
-            .chain(pinned)
+            .filter(|item| !is_durable_context(item))
+            .chain(retained)
             .collect();
         self.messages = messages_from_items(&self.items);
         self.revision = self.revision.saturating_add(1);
@@ -159,18 +164,35 @@ impl AgentSession {
             .filter_map(ModelContextItem::as_pinned_context)
     }
 
+    pub fn session_note(&self) -> Option<&SessionNote> {
+        self.items
+            .iter()
+            .find_map(ModelContextItem::as_session_note)
+    }
+
+    /// 原子替换隐藏会话笔记；返回 canonical session 是否发生变化。
+    pub fn replace_session_note(&mut self, note: SessionNote) -> bool {
+        if self.session_note() == Some(&note) {
+            return false;
+        }
+        self.items.retain(|item| !item.is_session_note());
+        self.items.push(ModelContextItem::SessionNote { note });
+        self.revision = self.revision.saturating_add(1);
+        true
+    }
+
     pub(crate) fn truncate_messages(&mut self, len: usize) {
         let mut chronological = self
             .items
             .iter()
-            .filter(|item| !item.is_pinned_context())
+            .filter(|item| !is_durable_context(item))
             .take(len)
             .cloned()
             .collect::<Vec<_>>();
         chronological.extend(
             self.items
                 .iter()
-                .filter(|item| item.is_pinned_context())
+                .filter(|item| is_durable_context(item))
                 .cloned(),
         );
         self.items = chronological;
@@ -307,7 +329,7 @@ impl AgentSession {
         let insertion = self
             .items
             .iter()
-            .position(ModelContextItem::is_pinned_context)
+            .position(is_durable_context)
             .unwrap_or(self.items.len());
         self.items.insert(
             insertion,
@@ -322,7 +344,7 @@ impl AgentSession {
     pub fn len(&self) -> usize {
         self.items
             .iter()
-            .filter(|item| !item.is_pinned_context())
+            .filter(|item| !is_durable_context(item))
             .count()
     }
 
@@ -346,12 +368,16 @@ impl AgentSession {
         let insertion = self
             .items
             .iter()
-            .position(ModelContextItem::is_pinned_context)
+            .position(is_durable_context)
             .unwrap_or(self.items.len());
         self.items
             .insert(insertion, ModelContextItem::from(message.clone()));
         self.messages.push(message);
     }
+}
+
+fn is_durable_context(item: &ModelContextItem) -> bool {
+    item.is_pinned_context() || item.is_session_note()
 }
 
 fn forkable_messages(messages: &[Message]) -> Vec<Message> {
@@ -915,6 +941,8 @@ mod tests {
     fn replace_messages_updates_history_and_revision() {
         let mut session = AgentSession::new();
         session.push_user_prompt("old".to_string());
+        let note = session_note(3, "durable");
+        session.replace_session_note(note.clone());
         let original_revision = session.revision();
         let messages = vec![Message {
             role: MessageRole::User,
@@ -927,6 +955,7 @@ mod tests {
 
         assert_eq!(session.revision(), original_revision + 1);
         assert_eq!(session.messages(), messages.as_slice());
+        assert_eq!(session.session_note(), Some(&note));
     }
 
     #[test]
@@ -934,6 +963,8 @@ mod tests {
         let mut session = AgentSession::new();
         session.push_user_prompt("first".to_string());
         session.push_assistant_response("second".to_string(), None);
+        let note = session_note(4, "survives truncation");
+        session.replace_session_note(note.clone());
         let original_revision = session.revision();
 
         session.truncate_messages(1);
@@ -945,6 +976,31 @@ mod tests {
             session.messages()[0].content,
             MessageContent::Text("first".to_string())
         );
+        assert_eq!(session.session_note(), Some(&note));
+    }
+
+    #[test]
+    fn compaction_preserves_note_and_child_forks_do_not_inherit_it() {
+        let mut parent = AgentSession::from_messages(vec![text_message("before")]);
+        let note = session_note(7, "important checkpoint");
+        parent.replace_session_note(note.clone());
+
+        parent.replace_compactable_items(vec![ModelContextItem::from(text_message("summary"))]);
+        let child = parent.fork(AgentSessionForkPolicy::AllMessages);
+
+        assert_eq!(parent.session_note(), Some(&note));
+        assert_eq!(parent.messages(), &[text_message("summary")]);
+        assert_eq!(child.messages(), &[text_message("summary")]);
+        assert_eq!(child.session_note(), None);
+    }
+
+    fn session_note(revision: u64, content: &str) -> SessionNote {
+        SessionNote {
+            revision,
+            content: content.to_string(),
+            content_hash: canonical_content_hash(content.as_bytes()),
+            updated_at: 1,
+        }
     }
 
     #[test]

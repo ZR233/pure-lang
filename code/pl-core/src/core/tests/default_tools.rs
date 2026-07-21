@@ -1,4 +1,5 @@
 use super::*;
+use crate::ToolEffect;
 use pretty_assertions::assert_eq;
 
 #[test]
@@ -26,6 +27,10 @@ fn shared_tool_schemas_can_describe_container_workspace_surface() {
             "apply_patch",
             "request_user_input",
             "update_todo_list",
+            "read_session_note",
+            "search_session_note",
+            "write_session_note",
+            "apply_session_note_patch",
             "git_status",
             "git_diff",
             "git_branch",
@@ -58,6 +63,18 @@ fn shared_tool_names_match_shared_schema_order() {
         .collect::<Vec<_>>();
 
     assert_eq!(shared_tool_names(options), schema_names);
+}
+
+#[test]
+fn session_note_tools_are_available_to_read_only_plan_policy() {
+    for name in [
+        "read_session_note",
+        "search_session_note",
+        "write_session_note",
+        "apply_session_note_patch",
+    ] {
+        assert_eq!(ToolEffect::for_builtin_name(name), Some(ToolEffect::Read));
+    }
 }
 
 #[test]
@@ -112,6 +129,10 @@ fn shared_tool_schemas_can_include_mcp_resource_tools() {
     assert_eq!(
         names,
         vec![
+            "read_session_note",
+            "search_session_note",
+            "write_session_note",
+            "apply_session_note_patch",
             "list_mcp_resources",
             "list_mcp_resource_templates",
             "read_mcp_resource",
@@ -155,6 +176,10 @@ async fn default_tools_register_shared_tools_without_product_collaboration() {
     assert!(core.tools.get("close_agent").is_none());
     assert!(core.tools.get("request_user_input").is_some());
     assert!(core.tools.get("update_todo_list").is_some());
+    assert!(core.tools.get("read_session_note").is_some());
+    assert!(core.tools.get("search_session_note").is_some());
+    assert!(core.tools.get("write_session_note").is_some());
+    assert!(core.tools.get("apply_session_note_patch").is_some());
     assert!(core.tools.get("plan_exit").is_some());
     assert!(core.tools.get("send_message").is_none());
     assert!(core.tools.get("followup_task").is_none());
@@ -206,6 +231,10 @@ async fn default_tool_builder_exposes_only_framework_independent_names() {
         "apply_patch",
         "request_user_input",
         "update_todo_list",
+        "read_session_note",
+        "search_session_note",
+        "write_session_note",
+        "apply_session_note_patch",
     ] {
         assert!(
             names.contains(&canonical),

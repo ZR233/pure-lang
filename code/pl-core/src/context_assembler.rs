@@ -1,4 +1,4 @@
-use pl_protocol::{Message, ModelContextItem, PinnedContextSection, PureError};
+use pl_protocol::{Message, ModelContextItem, PinnedContextSection, PureError, SessionNote};
 
 use crate::working_set::{MAX_PINNED_CONTEXT_BYTES, MAX_PINNED_SECTION_BYTES};
 
@@ -28,18 +28,11 @@ impl ContextAssembler {
         sections.sort_by(|left, right| left.id.cmp(&right.id));
         validate_sections(&sections)?;
 
-        let instructions = if sections.is_empty() {
-            base_instructions.to_string()
-        } else {
-            format!(
-                "{}\n\n{}",
-                base_instructions.trim_end(),
-                render_sections(&sections)
-            )
-        };
+        let note = items.iter().find_map(ModelContextItem::as_session_note);
+        let instructions = render_instructions(base_instructions, &sections, note);
         let history = items
             .iter()
-            .filter(|item| !item.is_pinned_context())
+            .filter(|item| !item.is_pinned_context() && !item.is_session_note())
             .cloned()
             .collect();
         Ok(AssembledModelContext {
@@ -47,6 +40,35 @@ impl ContextAssembler {
             prelude_messages: prelude_messages.to_vec(),
             history,
         })
+    }
+}
+
+fn render_instructions(
+    base_instructions: &str,
+    sections: &[PinnedContextSection],
+    note: Option<&SessionNote>,
+) -> String {
+    let mut instructions = base_instructions.trim_end().to_string();
+    if !sections.is_empty() {
+        instructions.push_str("\n\n");
+        instructions.push_str(&render_sections(sections));
+    }
+    if let Some(note) = note.filter(|note| !note.content.is_empty()) {
+        instructions.push_str(&format!(
+            "\n\n# Session note available\nA persistent session note exists (revision {}, {} bytes, {} lines). Use search_session_note to locate relevant content and read_session_note for targeted line ranges. You do not need to read the entire note.",
+            note.revision,
+            note.content.len(),
+            logical_line_count(&note.content),
+        ));
+    }
+    instructions
+}
+
+fn logical_line_count(content: &str) -> usize {
+    if content.is_empty() {
+        0
+    } else {
+        content.lines().count().max(1)
     }
 }
 
@@ -142,5 +164,30 @@ mod tests {
                 .contains(crate::CURRENT_TODO_SECTION_ID)
         );
         assert_eq!(assembled.history.len(), 1);
+    }
+
+    #[test]
+    fn session_note_body_is_hidden_and_only_metadata_reminder_is_injected() {
+        let secret = "do-not-send-note-body";
+        let note = SessionNote {
+            revision: 9,
+            content: format!("first\n{secret}"),
+            content_hash: crate::canonical_content_hash(format!("first\n{secret}").as_bytes()),
+            updated_at: 1,
+        };
+        let assembled =
+            ContextAssembler::assemble("system", &[], &[ModelContextItem::SessionNote { note }])
+                .unwrap();
+
+        assert!(assembled.history.is_empty());
+        assert!(assembled.instructions.contains("revision 9"));
+        assert!(assembled.instructions.contains("2 lines"));
+        assert!(assembled.instructions.contains("search_session_note"));
+        assert!(
+            assembled
+                .instructions
+                .contains("do not need to read the entire note")
+        );
+        assert!(!assembled.instructions.contains(secret));
     }
 }
