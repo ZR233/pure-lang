@@ -4,8 +4,6 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import '../../../frb_generated.dart';
-import '../types/agent.dart';
-import '../types/interaction.dart';
 import '../types/response.dart';
 import '../types/runtime.dart';
 import '../types/settings.dart';

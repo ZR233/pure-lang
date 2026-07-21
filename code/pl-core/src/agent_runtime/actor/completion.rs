@@ -1,6 +1,8 @@
 use super::super::execution::{TurnCompletion, add_usage, turn_outcome};
 use super::super::{AgentActivityState, AgentRuntimeEventKind, AgentRuntimeHost};
 use super::AgentActor;
+use crate::agent_runtime::state::unix_timestamp;
+use crate::session_event::compaction_observation;
 
 impl<H> AgentActor<H>
 where
@@ -18,6 +20,24 @@ where
         if let Err(error) = self.flush_pending_traces().await {
             self.fault_in_memory(error.to_string());
             return;
+        }
+        if let Err(error) = self.flush_pending_observations().await {
+            self.fault_in_memory(error.to_string());
+            return;
+        }
+        let compactions = completion
+            .result
+            .as_ref()
+            .ok()
+            .map_or_else(Vec::new, |result| result.context_compactions.clone());
+        for compaction in &compactions {
+            if let Err(error) = self
+                .persist_turn_observation(compaction_observation(compaction, unix_timestamp()))
+                .await
+            {
+                self.fault_in_memory(error.to_string());
+                return;
+            }
         }
         let active = self
             .active

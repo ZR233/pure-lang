@@ -8,8 +8,8 @@ use crate::studio::ids::unix_seconds;
 
 /// Studio runtime 对 UI 暴露的生命周期状态。
 ///
-/// 状态机只描述 runtime 服务自身是否可接受请求；单个 turn 的运行阶段仍由
-/// `StudioTurnStatus` 和 session 事件表达。
+/// 状态机只描述 runtime 服务自身是否可接受请求；单个 turn 的运行阶段由公共
+/// session 事件表达。
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum StudioRuntimeStatus {

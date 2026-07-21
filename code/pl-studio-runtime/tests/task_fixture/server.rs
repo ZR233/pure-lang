@@ -93,7 +93,7 @@ impl ScriptedModelServer {
         if !progress.errors.is_empty() {
             bail!("scripted model errors:\n{}", progress.errors.join("\n"));
         }
-        if (progress.planner, progress.executor, progress.reviewer) != (12, 5, 3) {
+        if (progress.planner, progress.executor, progress.reviewer) != (11, 5, 3) {
             bail!(
                 "scripted model stopped at planner={}, executor={}, reviewer={}\n{}",
                 progress.planner,
@@ -252,10 +252,6 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
             "task_complete",
             tool_call("complete-task", "task_complete", serde_json::json!({})),
         ),
-        11 => (
-            "final",
-            final_text("task-completed", "Task completed successfully."),
-        ),
         _ => bail!("unexpected planner request step {step}"),
     };
     Ok(response)
@@ -360,9 +356,8 @@ fn reviewer_response(step: usize) -> Result<(&'static str, String)> {
 async fn current_task(state: &ScriptState) -> Result<StudioTaskRuntime> {
     state
         .runtime
-        .session_runtime_view(&state.session_id)
+        .session_task_view(&state.session_id)
         .await?
-        .task
         .context("task projection is not available")
 }
 

@@ -1,16 +1,15 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use crate::ErrorSeverity;
+use crate::{ErrorSeverity, SessionEventFact, SessionEventKind};
 use pl_core::{AgentRuntimeHandle, AgentSubmitRequest, InputDelivery, SessionId, TurnOutcomeKind};
-use pl_trace::AgentEvent;
 use tokio::sync::{Mutex, RwLock};
 
+use crate::studio::StudioStore;
 use crate::studio::task_coordinator::{
     StudioAgentTerminalChange, TaskContinuationResolution, TaskCoordinator,
     TerminalAgentStateRecording,
 };
-use crate::studio::{StudioEventRuntime, StudioStore};
 
 use super::resources::root_agent_id;
 
@@ -44,21 +43,15 @@ impl StudioContinuationReason {
 pub(in crate::studio) struct StudioContinuationService {
     store: StudioStore,
     coordinator: Arc<TaskCoordinator>,
-    events: StudioEventRuntime,
     runtime: Arc<RwLock<Option<AgentRuntimeHandle>>>,
     dispatching: Arc<Mutex<BTreeSet<String>>>,
 }
 
 impl StudioContinuationService {
-    pub(in crate::studio) fn new(
-        store: StudioStore,
-        coordinator: Arc<TaskCoordinator>,
-        events: StudioEventRuntime,
-    ) -> Self {
+    pub(in crate::studio) fn new(store: StudioStore, coordinator: Arc<TaskCoordinator>) -> Self {
         Self {
             store,
             coordinator,
-            events,
             runtime: Default::default(),
             dispatching: Default::default(),
         }
@@ -126,16 +119,7 @@ impl StudioContinuationService {
                     .coordinator
                     .block_terminal_persistence_failure(studio_session_id, &error.to_string())
                     .await;
-                let _ = self
-                    .events
-                    .emit_agent_event(
-                        studio_session_id,
-                        AgentEvent::Error {
-                            message: diagnostic,
-                            severity: ErrorSeverity::Recoverable,
-                        },
-                    )
-                    .await;
+                self.emit_error(studio_session_id, diagnostic);
             }
         }
     }
@@ -160,16 +144,7 @@ impl StudioContinuationService {
                 Ok(None) => {}
                 Err(error) => {
                     let diagnostic = format!("task continuation claim failed: {error}");
-                    let _ = self
-                        .events
-                        .emit_agent_event(
-                            studio_session_id,
-                            AgentEvent::Error {
-                                message: diagnostic,
-                                severity: ErrorSeverity::Recoverable,
-                            },
-                        )
-                        .await;
+                    self.emit_error(studio_session_id, diagnostic);
                 }
             }
         }
@@ -251,16 +226,45 @@ impl StudioContinuationService {
             .block_continuation_failure(task_run_id, diagnostic.clone())
             .await;
         if let Ok(Some(run)) = self.store.read_task_run(task_run_id).await {
-            let _ = self
-                .events
-                .emit_agent_event(
-                    &run.session_id,
-                    AgentEvent::Error {
-                        message: diagnostic,
-                        severity: ErrorSeverity::Recoverable,
-                    },
-                )
-                .await;
+            self.emit_error(&run.session_id, diagnostic);
         }
+    }
+
+    fn emit_error(&self, session_id: &str, message: String) {
+        let runtime = self.runtime.clone();
+        let session_id = session_id.to_string();
+        tokio::spawn(async move {
+            let Some(runtime) = runtime.read().await.clone() else {
+                tracing::warn!("cannot record Studio continuation error before runtime attachment");
+                return;
+            };
+            let emitted_at = crate::studio::ids::unix_seconds();
+            let target = root_agent_id(&session_id);
+            let session = match SessionId::new(session_id) {
+                Ok(session) => session,
+                Err(error) => {
+                    tracing::warn!("invalid Studio continuation session: {error}");
+                    return;
+                }
+            };
+            if let Err(error) = runtime
+                .record_session_facts(
+                    target,
+                    session,
+                    vec![SessionEventFact::durable(
+                        None,
+                        None,
+                        emitted_at,
+                        SessionEventKind::ErrorOccurred {
+                            message,
+                            severity: ErrorSeverity::Recoverable,
+                        },
+                    )],
+                )
+                .await
+            {
+                tracing::warn!("failed to record Studio continuation error: {error}");
+            }
+        });
     }
 }

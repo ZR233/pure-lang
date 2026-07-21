@@ -1,6 +1,7 @@
-use super::snapshot::{load_session_state_inner, studio_snapshot_inner};
+use super::snapshot::studio_snapshot_inner;
+use crate::api::studio::convert::records::session_dto;
 use crate::api::studio::runtime::bridge;
-use crate::api::studio::types::{BridgeSessionStateResponse, BridgeStudioSnapshotResponse};
+use crate::api::studio::types::{BridgeStudioSnapshotResponse, SessionDto};
 use anyhow::{Context, Result};
 use pl_studio_runtime::{StudioMode, StudioRole};
 // ── Session management ──
@@ -40,14 +41,20 @@ pub fn archive_session(
     })
 }
 
-pub fn set_session_mode(session_id: String, mode: String) -> Result<BridgeSessionStateResponse> {
+pub fn set_session_mode(session_id: String, mode: String) -> Result<SessionDto> {
     let bridge = bridge()?;
     bridge.block_on(async {
         bridge
             .studio
             .set_session_mode(&session_id, StudioMode::from_label(&mode))
             .await?;
-        load_session_state_inner(bridge, session_id).await
+        let session = bridge
+            .studio
+            .store()
+            .read_session(&session_id)
+            .await?
+            .context("selected session not found")?;
+        Ok(session_dto(session))
     })
 }
 
@@ -82,11 +89,4 @@ pub fn set_model_role(
         };
         studio_snapshot_inner(bridge, selected_project_id, selected_session_id).await
     })
-}
-
-// ── Session state / events ──
-
-pub fn load_session_state(session_id: String) -> Result<BridgeSessionStateResponse> {
-    let bridge = bridge()?;
-    bridge.block_on(async { load_session_state_inner(bridge, session_id).await })
 }

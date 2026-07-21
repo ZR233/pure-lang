@@ -1,90 +1,58 @@
-use crate::api::studio::convert::event::bridge_event_envelope;
+use crate::api::studio::convert::event::bridge_product_event;
 use crate::api::studio::runtime::bridge;
-use crate::api::studio::types::{BridgeEventEnvelope, BridgeStudioEventsResponse};
+use crate::api::studio::types::BridgeProductEventEnvelope;
 use crate::frb_generated::StreamSink;
 use anyhow::Result;
-pub fn load_studio_events(
-    session_id: String,
-    after_sequence: Option<i64>,
-    limit: Option<i64>,
-) -> Result<BridgeStudioEventsResponse> {
-    let bridge = bridge()?;
-    bridge.block_on(async {
-        let events = bridge
-            .studio
-            .store()
-            .load_studio_events(&session_id, after_sequence, limit)
-            .await?;
-        let events = events
-            .into_iter()
-            .filter_map(bridge_event_envelope)
-            .collect::<Vec<_>>();
-        let next_sequence = bridge
-            .studio
-            .store()
-            .next_studio_event_sequence(&session_id)
-            .await? as u64;
-        Ok(BridgeStudioEventsResponse {
-            session_id,
-            events,
-            next_sequence,
-        })
-    })
+
+/// FRB 的透明传输容器。
+///
+/// `payload_json` 始终由 `pl-protocol::SessionStreamFrame` 直接序列化，Flutter
+/// 因而消费与 Mai SSE 完全相同的 canonical JSON，而不复制一套 Rust wire 类型。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeSessionStreamFrame {
+    pub payload_json: String,
 }
 
 pub fn subscribe_session_events(
     session_id: String,
-    sink: StreamSink<BridgeEventEnvelope>,
+    after_sequence: Option<u64>,
+    sink: StreamSink<BridgeSessionStreamFrame>,
 ) -> Result<()> {
     let bridge = bridge()?;
-    let stale_session_id = session_id.clone();
-    let mut events = bridge.studio.events().subscribe_session(session_id);
+    let mut events = bridge.block_on(bridge.studio.subscribe_session_events(
+        pl_protocol::SessionSubscriptionRequest {
+            session_id,
+            after_sequence,
+        },
+    ))?;
     bridge.tokio.spawn(async move {
-        loop {
-            match events.recv().await {
-                Ok(event) => {
-                    let Some(event) = bridge_event_envelope(event) else {
-                        continue;
-                    };
-                    if sink.add(event).is_err() {
-                        break;
-                    }
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(lagged_events)) => {
-                    if sink
-                        .add(BridgeEventEnvelope::stale(
-                            Some(stale_session_id.clone()),
-                            lagged_events,
-                        ))
-                        .is_err()
-                    {
-                        break;
-                    }
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+        while let Some(frame) = events.recv().await {
+            let payload_json = match serde_json::to_string(&frame) {
+                Ok(payload_json) => payload_json,
+                Err(_) => break,
+            };
+            if sink.add(BridgeSessionStreamFrame { payload_json }).is_err() {
+                break;
             }
         }
     });
     Ok(())
 }
 
-pub fn subscribe_global_events(sink: StreamSink<BridgeEventEnvelope>) -> Result<()> {
+pub fn subscribe_product_events(sink: StreamSink<BridgeProductEventEnvelope>) -> Result<()> {
     let bridge = bridge()?;
-    let mut events = bridge.studio.events().subscribe_global();
+    let mut events = bridge.studio.product_events().subscribe();
     bridge.tokio.spawn(async move {
         loop {
             match events.recv().await {
                 Ok(event) => {
-                    let Some(event) = bridge_event_envelope(event) else {
-                        continue;
-                    };
-                    if sink.add(event).is_err() {
+                    if sink.add(bridge_product_event(event)).is_err() {
                         break;
                     }
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(lagged_events)) => {
                     if sink
-                        .add(BridgeEventEnvelope::stale(None, lagged_events))
+                        .add(BridgeProductEventEnvelope::stale(lagged_events))
                         .is_err()
                     {
                         break;

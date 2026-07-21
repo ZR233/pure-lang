@@ -52,18 +52,17 @@ class _VisualStudioApi extends DemoStudioApi {
   Future<StudioState> bootstrap() async => visualState;
 
   @override
-  Future<StudioState> loadSessionState(String sessionId) async => visualState;
-
-  @override
   Future<List<ProviderUsageView>> loadProviderUsages() async =>
       visualState.providerUsages;
 
   @override
-  Stream<Object> subscribeGlobalEvents() => const Stream.empty();
+  Stream<Object> subscribeProductEvents() => const Stream.empty();
 
   @override
-  Stream<Object> subscribeSessionEvents(String sessionId) =>
-      const Stream.empty();
+  Stream<SessionStreamFrame> subscribeSessionEvents(
+    String sessionId, {
+    int? afterSequence,
+  }) => const Stream.empty();
 }
 
 void main() {

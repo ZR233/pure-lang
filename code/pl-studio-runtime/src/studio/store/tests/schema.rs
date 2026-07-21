@@ -18,7 +18,9 @@ async fn base_schema_contains_framework_and_task_tables() {
              WHERE type = 'table'
                AND name IN (
                  'agent_runtime_states', 'agent_runtime_sessions',
-                 'agent_runtime_traces', 'agent_runtime_events',
+                 'agent_runtime_traces', 'agent_framework_events',
+                 'agent_pending_inputs', 'agent_turns',
+                 'session_event_journal', 'session_view_snapshots',
                  'task_runs', 'work_units', 'agent_outcomes',
                  'merge_records', 'review_rounds', 'branch_leases'
                )
@@ -34,14 +36,18 @@ async fn base_schema_contains_framework_and_task_tables() {
     assert_eq!(
         names,
         vec![
+            "agent_framework_events",
             "agent_outcomes",
-            "agent_runtime_events",
+            "agent_pending_inputs",
             "agent_runtime_sessions",
             "agent_runtime_states",
             "agent_runtime_traces",
+            "agent_turns",
             "branch_leases",
             "merge_records",
             "review_rounds",
+            "session_event_journal",
+            "session_view_snapshots",
             "task_runs",
             "work_units",
         ]
@@ -53,23 +59,25 @@ async fn base_schema_contains_framework_and_task_tables() {
 }
 
 #[tokio::test]
-async fn base_schema_has_final_message_and_work_unit_columns() {
+async fn base_schema_has_only_canonical_session_projection_tables() {
     let store = StudioStore::open_memory().await.unwrap();
 
-    let message_columns = table_columns(&store.db, "messages").await;
-    assert_eq!(
-        message_columns,
-        vec![
-            "id",
-            "session_id",
-            "role",
-            "content",
-            "reasoning_content",
-            "metadata_json",
-            "created_at",
-            "item_type",
-        ]
-    );
+    for removed in [
+        "agent_events",
+        "agent_runtime_events",
+        "agent_runtime_snapshots",
+        "agents",
+        "messages",
+        "session_runtime_snapshots",
+        "session_skills",
+        "trace_events",
+        "turns",
+    ] {
+        assert_eq!(
+            table_columns(&store.db, removed).await,
+            Vec::<String>::new()
+        );
+    }
 
     let work_unit_columns = table_columns(&store.db, "work_units").await;
     for required in ["base_commit", "worktree_path", "branch"] {
@@ -81,6 +89,11 @@ async fn base_schema_has_final_message_and_work_unit_columns() {
         runtime_session_columns
             .iter()
             .any(|column| column == "trace_sequence")
+    );
+    assert!(
+        runtime_session_columns
+            .iter()
+            .any(|column| column == "session_event_sequence")
     );
 }
 

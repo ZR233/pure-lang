@@ -440,48 +440,44 @@ void registerTimelineModelTests() {
 
     await container.read(studioControllerProvider.future);
     api.emitSession(
-      StudioBridgeEvent.fromFrb(
-        frb.BridgeEventEnvelope(
-          eventId: 'agent-snapshot-1',
-          sessionId: 'session-1',
-          sequence: BigInt.from(1),
-          createdAt: 1,
-          payload: frb.BridgeEventPayload.agentChanged(
-            agent: frb.BridgeAgentSnapshotDto(
-              id: 'agent-1',
-              sessionId: 'session-1',
-              path: 'root/reviewer',
-              role: 'reviewer',
-              task: 'Audit timeline',
-              status: 'running',
-              depth: 1,
-              updatedAt: 1,
-            ),
-          ),
-        ),
+      _canonicalSessionEvent(
+        sessionId: 'session-1',
+        eventId: 'agent-snapshot-1',
+        kind: {
+          'type': 'agentChanged',
+          'agent': {
+            'id': 'agent-1',
+            'sessionId': 'session-1',
+            'path': 'root/reviewer',
+            'role': 'reviewer',
+            'task': 'Audit timeline',
+            'status': 'running',
+            'depth': 1,
+            'updatedAt': 1,
+          },
+        },
       ),
     );
     api.emitSession(
-      StudioBridgeEvent.fromFrb(
-        frb.BridgeEventEnvelope(
-          eventId: 'agent-snapshot-2',
-          sessionId: 'session-1',
-          sequence: BigInt.from(2),
-          createdAt: 2,
-          payload: frb.BridgeEventPayload.agentChanged(
-            agent: frb.BridgeAgentSnapshotDto(
-              id: 'agent-1',
-              sessionId: 'session-1',
-              path: 'root/reviewer',
-              role: 'reviewer',
-              task: 'Audit timeline',
-              status: 'completed',
-              summary: 'done',
-              depth: 1,
-              updatedAt: 2,
-            ),
-          ),
-        ),
+      _canonicalSessionEvent(
+        sessionId: 'session-1',
+        eventId: 'agent-snapshot-2',
+        sequence: 2,
+        emittedAt: 2,
+        kind: {
+          'type': 'agentChanged',
+          'agent': {
+            'id': 'agent-1',
+            'sessionId': 'session-1',
+            'path': 'root/reviewer',
+            'role': 'reviewer',
+            'task': 'Audit timeline',
+            'status': 'completed',
+            'summary': 'done',
+            'depth': 1,
+            'updatedAt': 2,
+          },
+        },
       ),
     );
     await pumpEventQueue();
@@ -499,46 +495,30 @@ void registerTimelineModelTests() {
   });
 
   test(
-    'typed session snapshot restores agent timeline events for projection',
+    'canonical session snapshot restores agent timeline events for projection',
     () {
-      const session = frb.SessionDto(
-        id: 'session-1',
-        projectId: 'project-1',
-        title: 'Session',
-        mode: 'auto',
-        updatedAt: 1,
-        visibility: 'visible',
-      );
-      final state = studioStateFromFrbSession(
-        frb.BridgeSessionStateResponse(
-          sessionId: 'session-1',
-          session: session,
-          sessions: const [session],
-          messages: const [],
-          parts: const [],
-          events: const [],
-          eventNextSequence: BigInt.zero,
-          agents: const [],
-          agentEvents: [
-            frb.BridgeAgentTimelineEventDto(
-              eventId: 'agent-event-1',
-              sessionId: 'session-1',
-              sequence: BigInt.from(7),
-              createdAt: 3,
-              payload: const frb.BridgeAgentTimelinePayloadDto.subAgentActivity(
-                callId: 'call-2',
-                path: 'root/worker',
-                parentPath: 'root',
-                kind: 'messageQueued',
-                status: 'waiting',
-                message: 'status',
-                timedOut: false,
-              ),
-            ),
-          ],
-          interactions: const [],
-        ),
-      );
+      final state = applyCanonicalSessionSnapshot(_emptyState(), {
+        'sessionId': 'session-1',
+        'throughSequence': 7,
+        'timelineEvents': [
+          {
+            'eventId': 'agent-event-1',
+            'sessionId': 'session-1',
+            'sequence': 7,
+            'createdAt': 3,
+            'kind': {
+              'type': 'subAgentActivity',
+              'callId': 'call-2',
+              'path': 'root/worker',
+              'parentPath': 'root',
+              'kind': 'messageQueued',
+              'status': 'waiting',
+              'message': 'status',
+              'timedOut': false,
+            },
+          },
+        ],
+      });
 
       expect(state.agentTimelineEventsBySession['session-1']!.keys, {
         'agent-event-1',
@@ -555,51 +535,32 @@ void registerTimelineModelTests() {
     },
   );
 
-  test('typed session snapshot restores todo list timeline events', () {
-    const session = frb.SessionDto(
-      id: 'session-1',
-      projectId: 'project-1',
-      title: 'Session',
-      mode: 'auto',
-      updatedAt: 1,
-      visibility: 'visible',
-    );
-    final state = studioStateFromFrbSession(
-      frb.BridgeSessionStateResponse(
-        sessionId: 'session-1',
-        session: session,
-        sessions: const [session],
-        messages: const [],
-        parts: const [],
-        events: const [],
-        eventNextSequence: BigInt.zero,
-        agents: const [],
-        agentEvents: [
-          frb.BridgeAgentTimelineEventDto(
-            eventId: 'todo-event-1',
-            sessionId: 'session-1',
-            sequence: BigInt.from(8),
-            createdAt: 4,
-            payload: const frb.BridgeAgentTimelinePayloadDto.todoListUpdated(
-              snapshot: frb.BridgeTodoListSnapshotDto(
-                callId: 'call-3',
-                path: '/root/worker',
-                parentPath: '/root',
-                explanation: 'Todo restore',
-                items: [
-                  frb.BridgeTodoItemDto(
-                    step: 'Restore payload',
-                    status: 'completed',
-                  ),
-                  frb.BridgeTodoItemDto(step: 'Render row', status: 'pending'),
-                ],
-              ),
-            ),
-          ),
-        ],
-        interactions: const [],
-      ),
-    );
+  test('canonical session snapshot restores todo list timeline events', () {
+    final state = applyCanonicalSessionSnapshot(_emptyState(), {
+      'sessionId': 'session-1',
+      'throughSequence': 8,
+      'timelineEvents': [
+        {
+          'eventId': 'todo-event-1',
+          'sessionId': 'session-1',
+          'sequence': 8,
+          'createdAt': 4,
+          'kind': {
+            'type': 'todoListChanged',
+            'snapshot': {
+              'callId': 'call-3',
+              'path': '/root/worker',
+              'parentPath': '/root',
+              'explanation': 'Todo restore',
+              'items': [
+                {'step': 'Restore payload', 'status': 'completed'},
+                {'step': 'Render row', 'status': 'pending'},
+              ],
+            },
+          },
+        },
+      ],
+    });
 
     final row = state.selectedTimelineRows.single;
     expect(row.id, 'agent-activity:todo-event-1');
@@ -615,41 +576,24 @@ void registerTimelineModelTests() {
     ]);
   });
 
-  test('typed session snapshot restores agent status state', () {
-    const session = frb.SessionDto(
-      id: 'session-1',
-      projectId: 'project-1',
-      title: 'Session',
-      mode: 'auto',
-      updatedAt: 1,
-      visibility: 'visible',
-    );
-    final state = studioStateFromFrbSession(
-      frb.BridgeSessionStateResponse(
-        sessionId: 'session-1',
-        session: session,
-        sessions: const [session],
-        messages: const [],
-        parts: const [],
-        events: const [],
-        eventNextSequence: BigInt.zero,
-        agents: const [
-          frb.BridgeAgentSnapshotDto(
-            id: 'agent-1',
-            sessionId: 'session-1',
-            path: 'root/worker',
-            role: 'worker',
-            task: 'Implement',
-            status: 'running',
-            summary: 'halfway',
-            depth: 1,
-            updatedAt: 4,
-          ),
-        ],
-        agentEvents: const [],
-        interactions: const [],
-      ),
-    );
+  test('canonical session snapshot restores agent status state', () {
+    final state = applyCanonicalSessionSnapshot(_emptyState(), {
+      'sessionId': 'session-1',
+      'throughSequence': 1,
+      'agents': [
+        {
+          'id': 'agent-1',
+          'sessionId': 'session-1',
+          'path': 'root/worker',
+          'role': 'worker',
+          'task': 'Implement',
+          'status': 'running',
+          'summary': 'halfway',
+          'depth': 1,
+          'updatedAt': 4,
+        },
+      ],
+    });
 
     expect(state.runtime.agentCount, 1);
     expect(state.selectedTimelineRows, isEmpty);

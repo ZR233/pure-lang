@@ -14,7 +14,7 @@ abstract class StudioApi {
     String sessionId, {
     String? selectedSessionId,
   });
-  Future<StudioState> setSessionMode(String sessionId, StudioMode mode);
+  Future<StudioSession> setSessionMode(String sessionId, StudioMode mode);
   Future<StudioState> setModelRole({
     required String roleKey,
     required String providerId,
@@ -22,14 +22,11 @@ abstract class StudioApi {
     String? effort,
     String? selectedSessionId,
   });
-  Future<StudioState> loadSessionState(String sessionId);
-  Future<List<StudioBridgeEvent>> loadStudioEvents(
+  Stream<Object> subscribeProductEvents();
+  Stream<SessionStreamFrame> subscribeSessionEvents(
     String sessionId, {
     int? afterSequence,
-    int limit = 500,
   });
-  Stream<Object> subscribeGlobalEvents();
-  Stream<Object> subscribeSessionEvents(String sessionId);
   Future<void> submitPrompt(
     String sessionId,
     String prompt,
@@ -134,9 +131,12 @@ class FrbStudioApi implements StudioApi {
   }
 
   @override
-  Future<StudioState> setSessionMode(String sessionId, StudioMode mode) async {
+  Future<StudioSession> setSessionMode(
+    String sessionId,
+    StudioMode mode,
+  ) async {
     await _ensureReady();
-    return studioStateFromFrbSession(
+    return _sessionFromFrb(
       await frb.setSessionMode(
         sessionId: sessionId,
         mode: _compileModeLabel(mode),
@@ -165,29 +165,6 @@ class FrbStudioApi implements StudioApi {
   }
 
   @override
-  Future<StudioState> loadSessionState(String sessionId) async {
-    await _ensureReady();
-    return studioStateFromFrbSession(
-      await frb.loadSessionState(sessionId: sessionId),
-    );
-  }
-
-  @override
-  Future<List<StudioBridgeEvent>> loadStudioEvents(
-    String sessionId, {
-    int? afterSequence,
-    int limit = 500,
-  }) async {
-    await _ensureReady();
-    final response = await frb.loadStudioEvents(
-      sessionId: sessionId,
-      afterSequence: _frbNullablePlatformInt64(afterSequence),
-      limit: _frbPlatformInt64(limit),
-    );
-    return response.events.map(StudioBridgeEvent.fromFrb).toList();
-  }
-
-  @override
   Future<void> resolveInteraction(
     String interactionId,
     Map<String, Object?> resolution,
@@ -206,17 +183,25 @@ class FrbStudioApi implements StudioApi {
   }
 
   @override
-  Stream<Object> subscribeGlobalEvents() async* {
+  Stream<Object> subscribeProductEvents() async* {
     await _ensureReady();
-    yield* frb.subscribeGlobalEvents().map(StudioBridgeEvent.fromFrb);
+    yield* frb.subscribeProductEvents().map(StudioBridgeEvent.fromProduct);
   }
 
   @override
-  Stream<Object> subscribeSessionEvents(String sessionId) async* {
+  Stream<SessionStreamFrame> subscribeSessionEvents(
+    String sessionId, {
+    int? afterSequence,
+  }) async* {
     await _ensureReady();
     yield* frb
-        .subscribeSessionEvents(sessionId: sessionId)
-        .map(StudioBridgeEvent.fromFrb);
+        .subscribeSessionEvents(
+          sessionId: sessionId,
+          afterSequence: afterSequence == null
+              ? null
+              : BigInt.from(afterSequence),
+        )
+        .map(SessionStreamFrame.fromFrb);
   }
 
   @override

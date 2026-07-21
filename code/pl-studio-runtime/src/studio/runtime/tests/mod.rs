@@ -1,9 +1,6 @@
 use std::time::Duration;
 
-use crate::{
-    InteractionKind, InteractionPayload, InteractionScope, InteractionStatus, PlanLifecycleState,
-    StudioTurnStatus,
-};
+use crate::{InteractionKind, InteractionPayload, InteractionScope, InteractionStatus};
 use pl_model::{ModelInfo, ProviderInfo};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;

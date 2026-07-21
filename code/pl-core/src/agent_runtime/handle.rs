@@ -3,13 +3,16 @@ use std::time::Duration;
 
 use tokio::sync::{mpsc, oneshot};
 
+use pl_protocol::{SessionSubscriptionRequest, SessionViewSnapshot};
+
 use super::coordinator::CoordinatorCommand;
 use super::{
     AgentActivityState, AgentId, AgentRegistration, AgentRuntimeResult, AgentSessionState,
     AgentSnapshot, AgentSpawnRequest, AgentSpawnResult, AgentSubmitRequest, AgentTurnCheckpoint,
-    AgentWaitResult, TurnId,
+    AgentWaitResult, SessionId, TurnId,
 };
 use crate::agent_runtime::state::AgentRuntimeError;
+use crate::{SessionEventHubHandle, SessionEventSubscription};
 
 /// 不包含 host 泛型的 cloneable runtime 命令句柄。
 ///
@@ -17,11 +20,18 @@ use crate::agent_runtime::state::AgentRuntimeError;
 #[derive(Clone)]
 pub struct AgentRuntimeHandle {
     pub(crate) sender: mpsc::Sender<CoordinatorCommand>,
+    pub(crate) session_events: SessionEventHubHandle,
 }
 
 impl AgentRuntimeHandle {
-    pub(crate) fn new(sender: mpsc::Sender<CoordinatorCommand>) -> Self {
-        Self { sender }
+    pub(crate) fn new(
+        sender: mpsc::Sender<CoordinatorCommand>,
+        session_events: SessionEventHubHandle,
+    ) -> Self {
+        Self {
+            sender,
+            session_events,
+        }
     }
 
     /// 注册已经准备好外部资源的 root 或恢复 agent。
@@ -122,6 +132,27 @@ impl AgentRuntimeHandle {
         receive(receiver).await?
     }
 
+    /// 将产品关联出的公共事实交给目标 agent 串行持久化和投影。
+    ///
+    /// 调用端不能自行分配 sequence 或广播；该入口主要用于把 child agent 的事实汇聚到
+    /// 产品正在展示的 root session，以及记录产品触发的通用 interaction/plan 事实。
+    pub async fn record_session_facts(
+        &self,
+        agent_id: AgentId,
+        session_id: SessionId,
+        facts: Vec<crate::SessionEventFact>,
+    ) -> AgentRuntimeResult<()> {
+        let (reply, receiver) = oneshot::channel();
+        self.send(CoordinatorCommand::RecordSessionFacts {
+            agent_id,
+            session_id,
+            facts,
+            reply,
+        })
+        .await?;
+        receive(receiver).await?
+    }
+
     /// 关闭 agent 及其产品资源。
     pub async fn close(&self, agent_id: AgentId) -> AgentRuntimeResult<AgentSnapshot> {
         let (reply, receiver) = oneshot::channel();
@@ -162,6 +193,26 @@ impl AgentRuntimeHandle {
         tokio::time::timeout(timeout, self.wait(agent_id))
             .await
             .map_err(|_| AgentRuntimeError::TimedOut)?
+    }
+
+    /// 订阅指定 session；首帧为 snapshot/replay，随后进入独立实时 channel。
+    pub fn subscribe_session(
+        &self,
+        request: SessionSubscriptionRequest,
+    ) -> AgentRuntimeResult<SessionEventSubscription> {
+        self.session_events
+            .subscribe(request)
+            .map_err(|error| AgentRuntimeError::SessionEvents(error.to_string()))
+    }
+
+    /// 读取包含当前 transient overlay 的 authoritative session projection。
+    pub fn session_snapshot(
+        &self,
+        session_id: &SessionId,
+    ) -> AgentRuntimeResult<SessionViewSnapshot> {
+        self.session_events
+            .snapshot(session_id.as_str())
+            .map_err(|error| AgentRuntimeError::SessionEvents(error.to_string()))
     }
 
     /// host 完成外部资源恢复后，一次性放行启动时暂停的 durable FIFO。

@@ -63,8 +63,11 @@ async fn active_task_locks_session_mode_and_projects_coordinator_runtime() {
         .set_session_mode(&session.id, StudioMode::Simple)
         .await
         .unwrap_err();
-    let view = runtime.session_runtime_view(&session.id).await.unwrap();
-    let task = view.task.unwrap();
+    let task = runtime
+        .session_task_view(&session.id)
+        .await
+        .unwrap()
+        .unwrap();
 
     assert!(error.to_string().contains("task is active"));
     assert_eq!(task.run_id, run.id);

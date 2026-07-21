@@ -89,7 +89,10 @@ impl AgentStateRepository for TestRepository {
             .unwrap()
             .values()
             .cloned()
-            .map(|state| RestoredAgentRuntime { state })
+            .map(|state| RestoredAgentRuntime {
+                state,
+                session_projections: Vec::new(),
+            })
             .collect())
     }
 
@@ -303,7 +306,7 @@ impl TestEvents {
     }
 }
 
-impl AgentEventSink for TestEvents {
+impl AgentCommitObserver for TestEvents {
     async fn publish(&self, committed: AgentCommittedEvent) {
         self.runtime
             .lock()
@@ -337,7 +340,7 @@ impl AgentRuntimeHost for TestHost {
     type Repository = TestRepository;
     type TurnFactory = TestTurnFactory;
     type Lifecycle = TestLifecycle;
-    type Events = TestEvents;
+    type Observer = TestEvents;
 
     fn repository(&self) -> &Self::Repository {
         &self.repository
@@ -351,7 +354,7 @@ impl AgentRuntimeHost for TestHost {
         &self.lifecycle
     }
 
-    fn events(&self) -> &Self::Events {
+    fn observer(&self) -> &Self::Observer {
         &self.events
     }
 }
@@ -374,6 +377,7 @@ fn test_options() -> AgentRuntimeOptions {
         command_capacity: 32,
         cancel_grace: Duration::from_millis(10),
         restored_inputs: RestoredInputPolicy::Start,
+        session_events: crate::SessionEventOptions::default(),
     }
 }
 
@@ -398,6 +402,59 @@ async fn wait_for_prepared_messages(factory: &TestTurnFactory, expected: usize) 
     })
     .await
     .expect("turn factory should receive the expected inputs");
+}
+
+#[tokio::test]
+async fn product_session_facts_are_sequenced_persisted_and_broadcast_by_the_owner_actor() {
+    let repository = TestRepository::empty();
+    let host = TestHost::new(repository.clone(), FactoryMode::Fail);
+    let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
+    let handle = runtime.handle();
+    let agent_id = AgentId::new("root").unwrap();
+    let session_id = SessionId::new("chat").unwrap();
+    handle.register(registration("root", "chat")).await.unwrap();
+    let mut subscription = handle
+        .subscribe_session(pl_protocol::SessionSubscriptionRequest::new("chat"))
+        .unwrap();
+    assert!(matches!(
+        subscription.recv().await,
+        Some(pl_protocol::SessionStreamFrame::Snapshot { .. })
+    ));
+
+    handle
+        .record_session_facts(
+            agent_id.clone(),
+            session_id,
+            vec![crate::SessionEventFact::durable(
+                Some("child".to_string()),
+                Some("child-turn".to_string()),
+                7,
+                pl_protocol::SessionEventKind::ErrorOccurred {
+                    message: "child failed".to_string(),
+                    severity: pl_protocol::ErrorSeverity::Recoverable,
+                },
+            )],
+        )
+        .await
+        .unwrap();
+
+    let Some(pl_protocol::SessionStreamFrame::Event { event }) = subscription.recv().await else {
+        panic!("expected canonical fact event");
+    };
+    assert_eq!(event.session_id, "chat");
+    assert_eq!(event.position.durable_sequence(), Some(1));
+    assert_eq!(event.source_agent_id.as_deref(), Some("child"));
+    assert_eq!(
+        repository.mutations.lock().unwrap().last(),
+        Some(&AgentStateMutation::AppendSessionEvents {
+            session_id: SessionId::new("chat").unwrap(),
+        })
+    );
+    assert_eq!(
+        repository.state(&agent_id).sessions[&SessionId::new("chat").unwrap()]
+            .session_event_sequence,
+        1
+    );
 }
 
 #[tokio::test]
@@ -748,7 +805,7 @@ async fn trace_is_durable_before_broadcast_and_commit_failure_faults_actor() {
     let actor = spawn_agent_actor(
         host.clone(),
         state,
-        AgentRuntimeHandle::new(runtime_sender),
+        AgentRuntimeHandle::new(runtime_sender, crate::SessionEventHub::default().handle()),
         Duration::from_millis(10),
         false,
         32,
@@ -816,6 +873,17 @@ async fn trace_is_durable_before_broadcast_and_commit_failure_faults_actor() {
     .await
     .unwrap();
     assert_eq!(snapshot.activity, AgentActivityState::Idle);
+    assert_eq!(
+        snapshot.last_turn.as_ref().map(|outcome| outcome.kind),
+        Some(TurnOutcomeKind::Failed)
+    );
+    assert_eq!(
+        snapshot
+            .last_turn
+            .as_ref()
+            .and_then(|outcome| outcome.reason.as_deref()),
+        Some("agent repository failed: trace commit failed")
+    );
 
     let (submit_reply, submit_receiver) = tokio::sync::oneshot::channel();
     actor
@@ -923,13 +991,24 @@ async fn terminal_repository_failure_faults_actor_and_rejects_new_input() {
         )
         .await
         .unwrap();
-    let snapshot = handle
+    let waited = handle
         .wait_timeout(agent_id.clone(), Duration::from_secs(1))
         .await
-        .unwrap()
-        .snapshot;
+        .unwrap();
+    let snapshot = waited.snapshot;
 
     assert_eq!(snapshot.lifecycle, AgentLifecycleState::Faulted);
+    assert_eq!(
+        waited.last_turn.as_ref().map(|outcome| outcome.kind),
+        Some(TurnOutcomeKind::Failed)
+    );
+    assert!(
+        waited
+            .last_turn
+            .as_ref()
+            .and_then(|outcome| outcome.reason.as_deref())
+            .is_some_and(|reason| reason.contains("terminal commit failed"))
+    );
     let error = handle
         .submit(
             agent_id.clone(),

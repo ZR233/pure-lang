@@ -5,120 +5,66 @@ pub mod types;
 
 // Re-exports from submodules
 pub use self::handlers::{
-    archive_project, archive_session, bootstrap_studio, create_session, initialize_runtime,
-    list_discovered_skills, load_provider_catalog, load_provider_usages, load_session_state,
-    load_studio_events, load_web_search_settings, open_project, resolve_interaction,
-    save_general_settings, save_instructions_settings, save_mcp_settings, save_provider_settings,
+    BridgeSessionStreamFrame, archive_project, archive_session, bootstrap_studio, create_session,
+    initialize_runtime, list_discovered_skills, load_provider_catalog, load_provider_usages,
+    load_web_search_settings, open_project, resolve_interaction, save_general_settings,
+    save_instructions_settings, save_mcp_settings, save_provider_settings,
     save_runtime_permission_mode, save_skills_settings, save_web_search_settings, select_project,
     set_model_role, set_session_mode, shutdown_runtime, start_runtime, stop_prompt, submit_prompt,
-    subscribe_global_events, subscribe_session_events,
+    subscribe_product_events, subscribe_session_events,
 };
 pub use self::types::{
-    BridgeActiveTurn, BridgeAgentSnapshotDto, BridgeAgentTimelineEventDto,
-    BridgeAgentTimelinePayloadDto, BridgeEventEnvelope, BridgeEventPayload,
-    BridgeInteractionChangedDto, BridgeInteractionPayloadDto, BridgeLspHealthDto,
+    BridgeActiveTurn, BridgeInteractionChangedDto, BridgeInteractionPayloadDto, BridgeLspHealthDto,
     BridgeMcpHealthDto, BridgeMcpServerDto, BridgeModelCapabilities, BridgeModelCatalogDescriptor,
     BridgeModelDescriptor, BridgeModelPricing, BridgeModelReasoningDescriptor,
-    BridgePlanLifecycleDto, BridgeProviderCatalogSnapshot, BridgeProviderConnectionModeDescriptor,
-    BridgeProviderPresetDescriptor, BridgeProviderServiceCapabilitiesDescriptor,
-    BridgeRuntimeCostAmountDto, BridgeRuntimeStatus, BridgeSessionRuntimeDto,
-    BridgeSessionStateResponse, BridgeSkillActivationDto, BridgeStudioAgentPartDto,
-    BridgeStudioEventsResponse, BridgeStudioMessageDto, BridgeStudioMessageProjectionDto,
-    BridgeStudioPartDeltaDto, BridgeStudioPartDto, BridgeStudioPartProjectionDto,
-    BridgeStudioPlanPartDto, BridgeStudioSnapshotResponse, BridgeStudioToolPartDto,
-    BridgeStudioTurnDto, BridgeTodoItemDto, BridgeTodoListSnapshotDto, BridgeUserQuestionDto,
-    BridgeUserQuestionOptionDto, BridgeWebSearchProviderCapabilitiesDescriptor,
-    BridgeWebSearchSettingsDto, ConfigSavedResponse, DeepSeekBalanceDto, DeepSeekBalanceInfoDto,
-    InstructionsSettingsInput, McpServerInput, McpSettingsInput, ProjectDto, ProviderInput,
-    ProviderModelInput, ProviderSettingsInput, ProviderUsageDto, ProviderUsagesResponse,
-    ResolveInteractionResponse, RoleInput, RuntimeSnapshot, SessionDto, SkillSummaryDto,
-    SkillsResponse, SkillsSettingsInput, StopPromptResponse, SubmitPromptResponse,
-    WebSearchSettingsInput, ZhipuCodingPlanUsageDto, ZhipuQuotaLimitDto, ZhipuToolUsageDetailDto,
+    BridgeProductEventEnvelope, BridgeProductEventPayload, BridgeProviderCatalogSnapshot,
+    BridgeProviderConnectionModeDescriptor, BridgeProviderPresetDescriptor,
+    BridgeProviderServiceCapabilitiesDescriptor, BridgeRuntimeStatus, BridgeStudioSnapshotResponse,
+    BridgeUserQuestionDto, BridgeUserQuestionOptionDto,
+    BridgeWebSearchProviderCapabilitiesDescriptor, BridgeWebSearchSettingsDto, ConfigSavedResponse,
+    DeepSeekBalanceDto, DeepSeekBalanceInfoDto, InstructionsSettingsInput, McpServerInput,
+    McpSettingsInput, ProjectDto, ProviderInput, ProviderModelInput, ProviderSettingsInput,
+    ProviderUsageDto, ProviderUsagesResponse, ResolveInteractionResponse, RoleInput,
+    RuntimeSnapshot, SessionDto, SkillSummaryDto, SkillsResponse, SkillsSettingsInput,
+    StopPromptResponse, SubmitPromptResponse, WebSearchSettingsInput, ZhipuCodingPlanUsageDto,
+    ZhipuQuotaLimitDto, ZhipuToolUsageDetailDto,
 };
 
 #[cfg(test)]
 mod tests {
     use pl_studio_runtime::McpServerTransport;
-    use pl_studio_runtime::StudioEventKind;
+    use pl_studio_runtime::StudioProductEventKind;
     use pretty_assertions::assert_eq;
 
     use super::{
-        BridgeEventPayload, BridgeSessionStateResponse, BridgeStudioEventsResponse,
-        BridgeStudioSnapshotResponse, ConfigSavedResponse, ProviderUsagesResponse,
-        ResolveInteractionResponse, SkillsResponse, StopPromptResponse, SubmitPromptResponse,
+        BridgeProductEventPayload, BridgeStudioSnapshotResponse, ConfigSavedResponse,
+        ProviderUsagesResponse, ResolveInteractionResponse, SkillsResponse, StopPromptResponse,
+        SubmitPromptResponse,
     };
 
     #[test]
-    fn bridge_event_envelope_uses_typed_payload() {
-        let event = pl_studio_runtime::StudioEventEnvelope {
+    fn bridge_product_event_uses_typed_payload() {
+        let event = pl_studio_runtime::StudioProductEventEnvelope {
             event_id: "event-1".to_string(),
             project_id: None,
-            session_id: Some("session-1".to_string()),
-            turn_id: Some("turn-1".to_string()),
             sequence: 7,
             created_at: 10,
-            kind: StudioEventKind::Stale { lagged_events: 2 },
+            kind: StudioProductEventKind::SessionListChanged {
+                project_id: "project-1".to_string(),
+                sessions: Vec::new(),
+            },
         };
 
-        let envelope =
-            super::convert::event::bridge_event_envelope(event).expect("event is bridge-visible");
+        let envelope = super::convert::event::bridge_product_event(event);
 
-        assert_eq!(envelope.session_id.as_deref(), Some("session-1"));
         assert_eq!(envelope.sequence, 7);
         assert_eq!(
             envelope.payload,
-            BridgeEventPayload::Stale { lagged_events: 2 }
+            BridgeProductEventPayload::SessionListChanged {
+                project_id: "project-1".to_string(),
+                sessions: Vec::new(),
+            }
         );
-    }
-
-    #[test]
-    fn bridge_filters_legacy_session_handoff_events() {
-        let event = pl_studio_runtime::StudioEventEnvelope {
-            event_id: "event-1".to_string(),
-            project_id: None,
-            session_id: Some("session-1".to_string()),
-            turn_id: Some("turn-1".to_string()),
-            sequence: 7,
-            created_at: 10,
-            kind: StudioEventKind::SessionHandoffChanged {
-                handoff: pl_studio_runtime::StudioSessionHandoff {
-                    origin_session_id: "session-1".to_string(),
-                    target_session_id: "session-2".to_string(),
-                    target_session: None,
-                    kind: "planImplementation".to_string(),
-                    status: "completed".to_string(),
-                    plan_id: None,
-                    updated_at: 10,
-                },
-            },
-        };
-
-        assert!(!super::convert::event::bridge_visible_event(&event));
-    }
-
-    #[test]
-    fn bridge_event_envelope_rejects_session_handoff_events() {
-        let event = pl_studio_runtime::StudioEventEnvelope {
-            event_id: "event-1".to_string(),
-            project_id: None,
-            session_id: Some("session-1".to_string()),
-            turn_id: Some("turn-1".to_string()),
-            sequence: 7,
-            created_at: 10,
-            kind: StudioEventKind::SessionHandoffChanged {
-                handoff: pl_studio_runtime::StudioSessionHandoff {
-                    origin_session_id: "session-1".to_string(),
-                    target_session_id: "session-2".to_string(),
-                    target_session: None,
-                    kind: "planImplementation".to_string(),
-                    status: "completed".to_string(),
-                    plan_id: None,
-                    updated_at: 10,
-                },
-            },
-        };
-
-        assert_eq!(super::convert::event::bridge_event_envelope(event), None);
     }
 
     #[test]
@@ -146,18 +92,7 @@ mod tests {
     }
 
     #[test]
-    fn load_studio_events_api_returns_typed_bridge_events() {
-        let _api: fn(
-            String,
-            Option<i64>,
-            Option<i64>,
-        ) -> anyhow::Result<BridgeStudioEventsResponse> = super::load_studio_events;
-    }
-
-    #[test]
     fn typed_settings_apis_are_exposed_to_flutter() {
-        let _session: fn(String) -> anyhow::Result<BridgeSessionStateResponse> =
-            super::load_session_state;
         let _instructions: fn(String) -> anyhow::Result<BridgeStudioSnapshotResponse> =
             super::save_instructions_settings;
         let _skills: fn(String) -> anyhow::Result<BridgeStudioSnapshotResponse> =

@@ -19,7 +19,7 @@ class DemoStudioApi implements StudioApi {
   final Set<String> _archivedProjectIds = <String>{};
   final Map<String, Map<String, Object?>> _settingsDrafts = {};
   final _globalEvents = StreamController<Object>.broadcast();
-  final _sessionEvents = StreamController<Object>.broadcast();
+  final _sessionEvents = StreamController<SessionStreamFrame>.broadcast();
   int _eventSequence = 0;
 
   @override
@@ -300,9 +300,6 @@ class DemoStudioApi implements StudioApi {
   }
 
   @override
-  Future<StudioState> loadSessionState(String sessionId) => bootstrap();
-
-  @override
   Future<StudioState> openProject(String path) {
     _archivedProjectIds.remove('project-local');
     return bootstrap();
@@ -331,14 +328,14 @@ class DemoStudioApi implements StudioApi {
   }) => bootstrap();
 
   @override
-  Future<StudioState> setSessionMode(String sessionId, StudioMode mode) async {
+  Future<StudioSession> setSessionMode(
+    String sessionId,
+    StudioMode mode,
+  ) async {
     final state = await bootstrap();
-    return state.copyWith(
-      sessions: [
-        for (final session in state.sessions)
-          session.id == sessionId ? session.copyWith(mode: mode) : session,
-      ],
-    );
+    return state.sessions
+        .firstWhere((session) => session.id == sessionId)
+        .copyWith(mode: mode);
   }
 
   @override
@@ -365,13 +362,6 @@ class DemoStudioApi implements StudioApi {
   }
 
   @override
-  Future<List<StudioBridgeEvent>> loadStudioEvents(
-    String sessionId, {
-    int? afterSequence,
-    int limit = 500,
-  }) async => const [];
-
-  @override
   Future<void> resolveInteraction(
     String interactionId,
     Map<String, Object?> resolution,
@@ -388,11 +378,13 @@ class DemoStudioApi implements StudioApi {
   }
 
   @override
-  Stream<Object> subscribeGlobalEvents() => _globalEvents.stream;
+  Stream<Object> subscribeProductEvents() => _globalEvents.stream;
 
   @override
-  Stream<Object> subscribeSessionEvents(String sessionId) =>
-      _sessionEvents.stream;
+  Stream<SessionStreamFrame> subscribeSessionEvents(
+    String sessionId, {
+    int? afterSequence,
+  }) => _sessionEvents.stream;
 
   @override
   Future<void> submitPrompt(
@@ -424,7 +416,7 @@ class DemoStudioApi implements StudioApi {
           'partId': '$userMessageId:text',
           'messageId': userMessageId,
           'sessionId': sessionId,
-          'partType': 'text',
+          'type': 'text',
           'order': 0,
           'revision': 0,
           'status': 'completed',
@@ -461,7 +453,7 @@ class DemoStudioApi implements StudioApi {
           'partId': '$assistantMessageId:text',
           'messageId': assistantMessageId,
           'sessionId': sessionId,
-          'partType': 'text',
+          'type': 'text',
           'order': 1,
           'revision': 0,
           'status': 'completed',
@@ -587,11 +579,13 @@ class DemoStudioApi implements StudioApi {
   }) {
     _eventSequence += 1;
     _sessionEvents.add(
-      StudioBridgeEvent(
-        payload: payload,
-        sessionId: sessionId,
-        sequence: BigInt.from(_eventSequence),
-        createdAt: DateTime.now(),
+      SessionEventFrame(
+        event: StudioBridgeEvent(
+          payload: payload,
+          sessionId: sessionId,
+          sequence: BigInt.from(_eventSequence),
+          createdAt: DateTime.now(),
+        ),
       ),
     );
   }

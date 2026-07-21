@@ -1,16 +1,15 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
-
 import '../../domain/models/studio_models.dart';
 import '../../rust/api/studio.dart' as frb;
 import '../../rust/frb_generated.dart';
 
 part 'studio_bridge_event.dart';
+part 'studio_session_stream.dart';
 part 'studio_api_contract.dart';
 part 'studio_frb_converters.dart';
-part 'studio_legacy_json_converters.dart';
+part 'studio_session_json_converters.dart';
 part 'studio_state_converters.dart';
 part 'studio_config_converters.dart';
 part 'studio_provider_catalog_converters.dart';
@@ -103,17 +102,6 @@ Map<String, Object?> _decodeJson(String json) {
   return _map(value);
 }
 
-Object? _tryDecodeJsonValue(String json) {
-  if (json.trim().isEmpty) {
-    return null;
-  }
-  try {
-    return jsonDecode(json);
-  } catch (_) {
-    return null;
-  }
-}
-
 Map<String, Object?> _map(Object? value) {
   if (value is Map<String, Object?>) {
     return value;
@@ -199,8 +187,6 @@ double? _nullableDouble(Object? value) {
   return string.isEmpty ? null : double.tryParse(string);
 }
 
-double _double(Object? value) => _nullableDouble(value) ?? 0;
-
 bool _bool(Object? value) {
   if (value is bool) {
     return value;
@@ -233,15 +219,6 @@ int? _frbNullableInt(Object? value) {
     return null;
   }
   return _frbInt(value);
-}
-
-PlatformInt64 _frbPlatformInt64(int value) => PlatformInt64Util.from(value);
-
-PlatformInt64? _frbNullablePlatformInt64(int? value) {
-  if (value == null) {
-    return null;
-  }
-  return _frbPlatformInt64(value);
 }
 
 DateTime _dateFromUnix(Object seconds) {

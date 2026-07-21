@@ -84,7 +84,7 @@ void registerReducerRecoveryTests() {
             'messageId': 'turn-1:assistant',
             'sessionId': 'session-1',
             'turnId': 'turn-1',
-            'partType': 'text',
+            'type': 'text',
             'order': 0,
             'revision': 0,
             'status': 'streaming',
@@ -111,8 +111,14 @@ void registerReducerRecoveryTests() {
       await _pumpFrameBatch();
       await pumpEventQueue();
 
+      expect(api.sessionSubscriptions.last, (
+        sessionId: 'session-1',
+        afterSequence: null,
+      ));
+      api.emitSessionFrame(_sessionSnapshotFrame(recovered));
+      await pumpEventQueue();
       final state = container.read(studioControllerProvider).requireValue;
-      expect(api.loadedSessionIds, contains('session-1'));
+      expect(api.loadedSessionIds, isEmpty);
       expect(state.partOverlaysBySession['session-1'], isEmpty);
       expect(state.selectedTimelineRows.single.part!.text, 'restored');
     },
@@ -159,8 +165,6 @@ void registerReducerRecoveryTests() {
     addTearDown(container.dispose);
 
     await container.read(studioControllerProvider.future);
-    final blockedRecovery = Completer<StudioState>();
-    api.blockedSessionLoads['session-1'] = blockedRecovery;
     api.emitSession(
       _messageUpdatedEvent(
         sessionId: 'session-1',
@@ -183,7 +187,7 @@ void registerReducerRecoveryTests() {
           'messageId': 'turn-1:assistant',
           'sessionId': 'session-1',
           'turnId': 'turn-1',
-          'partType': 'text',
+          'type': 'text',
           'order': 0,
           'revision': 2,
           'status': 'completed',
@@ -205,7 +209,7 @@ void registerReducerRecoveryTests() {
           'messageId': 'turn-1:assistant',
           'sessionId': 'session-1',
           'turnId': 'turn-1',
-          'partType': 'text',
+          'type': 'text',
           'order': 9,
           'revision': 2,
           'status': 'completed',
@@ -225,7 +229,7 @@ void registerReducerRecoveryTests() {
           'messageId': 'turn-1:assistant',
           'sessionId': 'session-1',
           'turnId': 'turn-1',
-          'partType': 'text',
+          'type': 'text',
           'order': 0,
           'revision': 1,
           'status': 'completed',
@@ -245,7 +249,7 @@ void registerReducerRecoveryTests() {
           'messageId': 'turn-1:assistant',
           'sessionId': 'session-1',
           'turnId': 'turn-1',
-          'partType': 'text',
+          'type': 'text',
           'order': 0,
           'revision': 2,
           'status': 'completed',
@@ -262,14 +266,16 @@ void registerReducerRecoveryTests() {
     final state = container.read(studioControllerProvider).requireValue;
     expect(state.selectedTimelineRows.single.part!.text, 'stable');
     expect(state.partSnapshotsBySession['session-1']!['part-1']!.order, 0);
-    expect(api.loadedSessionIds, contains('session-1'));
-
-    blockedRecovery.complete(recovered);
+    expect(api.sessionSubscriptions.last, (
+      sessionId: 'session-1',
+      afterSequence: null,
+    ));
+    api.emitSessionFrame(_sessionSnapshotFrame(recovered));
     await pumpEventQueue();
     final recoveredState = container
         .read(studioControllerProvider)
         .requireValue;
-    expect(recoveredState.selectedTimelineRows.single.part!.text, 'stable');
+    expect(recoveredState.selectedTimelineRows.single.part!.text, 'recovered');
   });
 
   test('message snapshots keep original createdAt', () async {
@@ -319,7 +325,7 @@ void registerReducerRecoveryTests() {
           'messageId': 'turn-1:assistant',
           'sessionId': 'session-1',
           'turnId': 'turn-1',
-          'partType': 'text',
+          'type': 'text',
           'order': 0,
           'revision': 0,
           'status': 'streaming',
@@ -359,7 +365,7 @@ void registerReducerRecoveryTests() {
           'messageId': 'missing-message',
           'sessionId': 'session-1',
           'turnId': 'turn-1',
-          'partType': 'text',
+          'type': 'text',
           'order': 0,
           'revision': 0,
           'status': 'streaming',

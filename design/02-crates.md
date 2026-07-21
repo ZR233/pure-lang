@@ -18,20 +18,21 @@
 
 职责保持不变：定义稳定 wire 协议、错误与公共状态类型。
 
-- 放置 `PureError`、`Message`、interaction、runtime usage 与无 secret 的
-  `ProviderCatalogSnapshot`、provider 服务能力、Web Search resolution 与 MCP health descriptor
+- 放置 `PureError`、`Message`、interaction、runtime usage、统一的
+  `SessionEventEnvelope/SessionStreamFrame/SessionViewSnapshot` 与无 secret 的
+  `ProviderCatalogSnapshot`、provider 服务能力、Web Search resolution、MCP/LSP health descriptor
   等跨产品 wire 类型
 - 不依赖任何内部 crate
-- 不包含 Studio 产品 DTO、raw `AgentEvent` / `TracePart`、运行时行为与存储实现
+- 不包含 Studio 产品 DTO、raw trace、运行时行为与存储实现
 
 ## 2.3 pl-trace
 
-`pl-trace` 是内部运行事件 crate。
+`pl-trace` 是内部诊断 trace crate。
 
-- 放置 `AgentEvent`、`AgentEventSender`、`TraceEvent`、`TracePart`、`EnabledToolsEvent` 等 core/provider 内部类型
+- 放置 `TraceEvent`、`TracePart`、`EnabledToolsEvent` 等 core/provider 内部类型
 - 依赖 `pl-protocol` 的公共状态与 interaction 类型
-- 不作为 Studio wire DTO 暴露；进入 UI 前必须由 `pl-studio-runtime` 映射为
-  `StudioEventEnvelope`
+- 不导出 UI broadcast；进入产品前必须由 `pl-core::SessionEventProjector` 映射为公共
+  session event
 
 ## 2.4 pl-model
 
@@ -57,6 +58,7 @@
 通用工具。详细边界见 `17-agent-runtime-host.md`。
 
 - `agent_runtime`：actor、命令句柄、host 端口、commit 与恢复
+- `session_event`：公共 session projection、per-session channel、snapshot/replay 与 reducer
 - `core`：turn pipeline、工具调度和结果归一化
 - `tool`：通用工具、effect 与执行策略
 - `mcp`：Host 驱动的公共 runtime、非泛型 handle、generation lease、健康状态和本地 Host
@@ -68,7 +70,7 @@
 - `AgentStateRepository`
 - `AgentTurnFactory`
 - `AgentLifecycleAdapter`
-- `AgentEventSink`
+- `AgentCommitObserver`
 
 约束：
 
@@ -80,8 +82,9 @@
 
 ### 2.6.1 pl-studio-runtime
 
-`pl-studio-runtime` 拥有 Studio config、SQLite/store、事件投影、项目、会话、任务、worktree、
-Simple/Task 产品策略与 `Studio*` wire DTO。Flutter bridge 只调用该 crate。
+`pl-studio-runtime` 拥有 Studio config、SQLite/store、公共 session event repository 适配、
+产品级事件、项目、会话、任务、worktree、Simple/Task 产品策略与 Studio-only DTO。
+Flutter bridge 只调用该 crate。
 
 默认权限模式固定为 `PermissionMode::RequestApproval`。旧 `ToolApprovalPolicy::AutoAllow | Manual | DenyAll` 只作为兼容构造保留，核心执行前统一以 `PermissionMode` 和工具路径访问分类做策略判断。
 
@@ -115,14 +118,16 @@ Simple/Task 产品策略与 `Studio*` wire DTO。Flutter bridge 只调用该 cra
 - `stopPrompt(sessionId) -> StopPromptResponse`
 - `resolveInteraction(interactionId, resolutionJson) -> ResolveInteractionResponse`
 - `loadSessionState(sessionId) -> BridgeSessionStateResponse`
-- `loadStudioEvents(sessionId, afterSequence, limit) -> BridgeStudioEventsResponse`
 - `listDiscoveredSkills(projectId) -> SkillsResponse`
-- `subscribeSessionEvents(sessionId) -> Stream<BridgeEventEnvelope>`
+- `subscribeSessionEvents(sessionId, afterSequence) -> Stream<BridgeSessionStreamFrame>`
 - `subscribeGlobalEvents() -> Stream<BridgeEventEnvelope>`
 
 `openProject` 调用 `pl-studio-runtime` 的项目打开、LSP reconcile 和 session bootstrap 流程后返回新的 Studio 快照。`selectProject`、`archiveProject`、`createSession`、`archiveSession`、`setSessionMode` 和 `setModelRole` 都返回 Studio 快照或当前 session snapshot，由 Flutter store 原子替换项目、会话、选中项和 config view。`loadProviderCatalog` 返回 PL canonical catalog，Flutter 只按 `revision` 做进程内缓存，不把目录写入 Studio 设置。`archiveProject` 是归档语义，不删除项目目录或历史会话；`setModelRole` 只保存 provider/model/effort 路由，模型元数据始终来自 catalog 或 provider 的 effective models。
 
-`BridgeEventEnvelope` 当前 wire 字段为：`eventId`、`sessionId`、`turnId`、`sequence`、`createdAt`、`payload: BridgeEventPayload`。`BridgeEventPayload` 是 FRB/Freezed sealed union，承载 turn、message、part、delta、interaction、agent、agent timeline、runtime、health、session list 和 stale 等结构化事件；Dart FRB adapter 将其归一为 app 内部 typed `StudioBridgeEventPayload` 后交给 Riverpod reducer。`loadStudioEvents` backfill 返回 `BridgeStudioEventsResponse`，其中 `events[]` 与实时 stream 使用同一个 typed `BridgeEventEnvelope`。Studio snapshot、session snapshot 和小型命令响应均使用 typed DTO；完整 config 与 general settings 暂以 `configJson`/`generalSettingsJson` 字符串保留在 adapter 边界，agent timeline payload 使用 `BridgeAgentTimelinePayloadDto` union 表达。桥接层不得把 `serde_json::Value` 直接暴露为 FRB 类型，也不得复制 UI 业务规则。
+`BridgeSessionStreamFrame` 机械映射 `pl-protocol::SessionStreamFrame`，session stream 的首帧
+为 snapshot 或 replay，后续为 live event；lag 通过 `ResyncRequired` 要求重新订阅。Studio-only
+global event 继续使用独立 envelope。桥接层不得复制 session projection 规则，也不得把
+`serde_json::Value` 直接暴露为 FRB 类型。
 
 ## 2.8 pure-studio-flutter（Flutter UI）
 
@@ -145,9 +150,9 @@ GUI 命令从仓库根目录调用，但所有 Flutter 子命令都以 `code/pur
 
 ## 2.10 本地数据版本
 
-Studio SQLite 使用单一基础 schema（当前 `user_version = 1`）；版本不匹配时删除并重建，
-不维护 migration chain。`config.toml` 当前 schema 为 8：schema 5/6/7 在写入备份后升级为 catalog +
-正交 transport 结构；更老或无法校验的配置删除并生成默认配置。Flutter 不实现第二套迁移逻辑。
+Studio SQLite 使用单一基础 schema（当前 `user_version = 2`）；版本不匹配时删除并重建，
+不维护数据库 migration chain。`config.toml` 当前 schema 为 10，继续由 Studio runtime 单点校验与
+升级；本次事件协议不改变配置结构。Flutter 不实现第二套迁移逻辑。
 
 ## 2.11 Workspace
 

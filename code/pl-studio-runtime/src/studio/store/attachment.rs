@@ -1,6 +1,5 @@
 use std::path::PathBuf;
 
-use crate::StudioAttachment;
 use anyhow::{Context, Result, bail};
 use base64::Engine;
 use image::GenericImageView;
@@ -237,18 +236,6 @@ async fn materialize_attachments(
 
 pub(crate) fn trace_attachment(record: &AttachmentRecord) -> TraceAttachment {
     TraceAttachment {
-        id: record.id.clone(),
-        media_type: record.media_type.clone(),
-        filename: record.filename.clone(),
-        width: record.width,
-        height: record.height,
-        byte_size: record.byte_size,
-        data_url: None,
-    }
-}
-
-pub fn studio_attachment(record: &AttachmentRecord) -> StudioAttachment {
-    StudioAttachment {
         id: record.id.clone(),
         media_type: record.media_type.clone(),
         filename: record.filename.clone(),

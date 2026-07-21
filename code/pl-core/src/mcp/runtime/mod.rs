@@ -248,6 +248,11 @@ impl McpTurnLease {
         self.tools.as_slice()
     }
 
+    /// 返回本 generation 已就绪并对本轮可见的 MCP server ID。
+    pub fn server_ids(&self) -> &[String] {
+        self.server_ids.as_slice()
+    }
+
     pub(super) async fn call_tool(
         &self,
         server_id: String,

@@ -88,6 +88,7 @@ impl TaskCoordinator {
                                 usage: pl_model::TokenUsage::default(),
                                 last_context_tokens: None,
                                 trace_sequence: 0,
+                                session_event_sequence: 0,
                             },
                             initial_message: Some(prompt),
                             metadata: serde_json::json!({

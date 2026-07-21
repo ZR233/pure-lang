@@ -4,10 +4,6 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import '../../../frb_generated.dart';
-import '../types/agent.dart';
-import '../types/event.dart';
-import '../types/interaction.dart';
-import '../types/message.dart';
 import '../types/response.dart';
 import '../types/runtime.dart';
 import '../types/settings.dart';
@@ -29,7 +25,7 @@ Future<BridgeStudioSnapshotResponse> archiveSession({
   selectedSessionId: selectedSessionId,
 );
 
-Future<BridgeSessionStateResponse> setSessionMode({
+Future<SessionDto> setSessionMode({
   required String sessionId,
   required String mode,
 }) => RustLib.instance.api.crateApiStudioHandlersSessionSetSessionMode(
@@ -49,10 +45,4 @@ Future<BridgeStudioSnapshotResponse> setModelRole({
   model: model,
   effort: effort,
   selectedSessionId: selectedSessionId,
-);
-
-Future<BridgeSessionStateResponse> loadSessionState({
-  required String sessionId,
-}) => RustLib.instance.api.crateApiStudioHandlersSessionLoadSessionState(
-  sessionId: sessionId,
 );

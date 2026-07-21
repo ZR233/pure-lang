@@ -104,11 +104,7 @@ impl TaskFlowFixture {
     pub async fn wait_for_completed_task(&self) -> Result<StudioTaskRuntime> {
         let deadline = Instant::now() + TEST_TIMEOUT;
         loop {
-            if let Some(task) = self
-                .runtime
-                .session_runtime_view(&self.session_id)
-                .await?
-                .task
+            if let Some(task) = self.runtime.session_task_view(&self.session_id).await?
                 && task.phase == "completed"
             {
                 return Ok(task);
@@ -133,11 +129,11 @@ impl TaskFlowFixture {
     }
 
     async fn diagnostics(&self) -> String {
-        let runtime = self
+        let task = self
             .runtime
-            .session_runtime_view(&self.session_id)
+            .session_task_view(&self.session_id)
             .await
-            .map(|runtime| format!("{:#?}", runtime.task))
+            .map(|task| format!("{task:#?}"))
             .unwrap_or_else(|error| format!("task projection failed: {error:#}"));
         let interactions = self
             .store
@@ -146,25 +142,27 @@ impl TaskFlowFixture {
             .map(|interactions| format!("{interactions:#?}"))
             .unwrap_or_else(|error| format!("pending interaction query failed: {error:#}"));
         let events = self
-            .store
-            .list_agent_events(&self.session_id)
+            .runtime
+            .session_event_snapshot(&self.session_id)
             .await
-            .map(|events| {
-                events
+            .map(|snapshot| {
+                snapshot
+                    .timeline_events
                     .into_iter()
                     .rev()
                     .take(12)
-                    .map(|event| format!("{} {}", event.kind, event.payload_json))
+                    .map(|event| format!("{event:#?}"))
                     .collect::<Vec<_>>()
                     .join("\n")
             })
-            .unwrap_or_else(|error| format!("agent event query failed: {error:#}"));
-        let message_parts = self
-            .store
-            .load_message_parts(&self.session_id)
+            .unwrap_or_else(|error| format!("session event query failed: {error:#}"));
+        let session_parts = self
+            .runtime
+            .session_event_snapshot(&self.session_id)
             .await
-            .map(|parts| {
-                parts
+            .map(|snapshot| {
+                snapshot
+                    .parts
                     .into_iter()
                     .rev()
                     .take(20)
@@ -172,7 +170,7 @@ impl TaskFlowFixture {
                     .collect::<Vec<_>>()
                     .join("\n")
             })
-            .unwrap_or_else(|error| format!("message part query failed: {error:#}"));
+            .unwrap_or_else(|error| format!("session projection query failed: {error:#}"));
         let git = if self.workspace.join(".git").exists() {
             git_output(&self.workspace, &["status", "--porcelain"])
                 .unwrap_or_else(|error| format!("git status failed: {error:#}"))
@@ -181,7 +179,7 @@ impl TaskFlowFixture {
         };
         let server = self.server.diagnostics().await;
         format!(
-            "task projection:\n{runtime}\npending interactions:\n{interactions}\nrecent events:\n{events}\nrecent message parts:\n{message_parts}\ngit status:\n{git}\n{server}"
+            "task projection:\n{task}\npending interactions:\n{interactions}\nrecent events:\n{events}\nrecent session parts:\n{session_parts}\ngit status:\n{git}\n{server}"
         )
     }
 }
