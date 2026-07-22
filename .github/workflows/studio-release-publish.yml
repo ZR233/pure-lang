@@ -290,8 +290,25 @@ jobs:
           if (-not $productVersion.StartsWith($env:RELEASE_VERSION)) {
             throw "Installed version $productVersion does not match $env:RELEASE_VERSION"
           }
-          $uninstall = Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' | Get-ItemProperty | Where-Object DisplayName -eq 'Pure Studio'
-          if ($null -eq $uninstall) { throw 'Per-user uninstall registration missing' }
+          $uninstallRoots = @(
+            'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall',
+            'HKCU:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall'
+          )
+          $uninstall = @(
+            foreach ($root in $uninstallRoots) {
+              if (Test-Path -LiteralPath $root) {
+                Get-ChildItem -LiteralPath $root |
+                  Get-ItemProperty |
+                  Where-Object {
+                    $_.DisplayName -like 'Pure Studio*' -and
+                    $_.DisplayVersion -eq $env:RELEASE_VERSION
+                  }
+              }
+            }
+          )
+          if ($uninstall.Count -ne 1) {
+            throw "Expected one per-user uninstall registration for $env:RELEASE_VERSION, found $($uninstall.Count)"
+          }
           cargo xtask release-gui verify --version $env:RELEASE_VERSION
 
       - name: Attest installer provenance
