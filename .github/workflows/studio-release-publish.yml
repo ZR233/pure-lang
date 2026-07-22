@@ -11,6 +11,11 @@ on:
         description: Exact main commit that parents the prepared version
         required: true
         type: string
+      publishOnlyReleaseSha:
+        description: Existing prepared release commit for publish-only recovery
+        required: false
+        default: ''
+        type: string
 
 concurrency:
   group: studio-stable-release-publish
@@ -24,7 +29,7 @@ permissions:
 jobs:
   release:
     name: Release Windows x64
-    if: github.ref == 'refs/heads/studio-release/active'
+    if: github.ref == 'refs/heads/studio-release/active' && inputs.publishOnlyReleaseSha == ''
     runs-on: windows-latest
     env:
       BASE_SHA: ${{ inputs.baseSha }}
@@ -122,11 +127,17 @@ jobs:
             }
           }
 
-          $releaseJson = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/v$env:RELEASE_VERSION" 2> $null
-          $releaseStatus = $LASTEXITCODE
-          $global:LASTEXITCODE = 0
-          if ($releaseStatus -eq 0) {
-            $release = $releaseJson | ConvertFrom-Json
+          $releaseListJson = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to inspect Release v$env:RELEASE_VERSION"
+          }
+          $releases = @($releaseListJson | ConvertFrom-Json)
+          $matchingReleases = @($releases | Where-Object tag_name -eq "v$env:RELEASE_VERSION")
+          if ($matchingReleases.Count -gt 1) {
+            throw "Multiple Releases use tag v$env:RELEASE_VERSION"
+          }
+          if ($matchingReleases.Count -eq 1) {
+            $release = $matchingReleases[0]
             if (-not $release.draft) {
               throw "Published Release v$env:RELEASE_VERSION already exists and will not be overwritten"
             }
@@ -134,9 +145,6 @@ jobs:
               throw "Draft Release v$env:RELEASE_VERSION is not bound to the prepared release commit"
             }
             Write-Output "Resuming draft Release v$env:RELEASE_VERSION."
-          }
-          if ($releaseStatus -ne 0 -and $releaseStatus -ne 1) {
-            throw "Failed to inspect Release v$env:RELEASE_VERSION (gh exit $releaseStatus)"
           }
 
       - name: Set up Flutter
@@ -384,27 +392,33 @@ jobs:
           }
 
       - name: Validate draft Release state
+        id: release_state
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # A missing Release is expected before the draft is created.
-          $PSNativeCommandUseErrorActionPreference = $false
-          $releaseJson = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/v$env:RELEASE_VERSION" 2> $null
-          $releaseStatus = $LASTEXITCODE
-          $global:LASTEXITCODE = 0
-          if ($releaseStatus -eq 1) {
+          $releaseListJson = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to inspect Release v$env:RELEASE_VERSION"
+          }
+          $releases = @($releaseListJson | ConvertFrom-Json)
+          $matchingReleases = @($releases | Where-Object tag_name -eq "v$env:RELEASE_VERSION")
+          if ($matchingReleases.Count -gt 1) {
+            throw "Multiple Releases use tag v$env:RELEASE_VERSION"
+          }
+          if ($matchingReleases.Count -eq 0) {
+            'exists=false' | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
             exit 0
           }
-          if ($releaseStatus -ne 0) {
-            throw "Failed to inspect Release v$env:RELEASE_VERSION (gh exit $releaseStatus)"
-          }
-          $release = $releaseJson | ConvertFrom-Json
+
+          $release = $matchingReleases[0]
           if (-not $release.draft -or $release.tag_name -ne "v$env:RELEASE_VERSION") {
             throw "Refusing to overwrite published or mismatched Release v$env:RELEASE_VERSION"
           }
+          'exists=true' | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Upload draft GitHub Release
+        if: steps.release_state.outputs.exists != 'true'
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           tag_name: v${{ inputs.version }}
@@ -426,10 +440,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $release = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/v$env:RELEASE_VERSION" | ConvertFrom-Json
+          $releaseListJson = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100"
           if ($LASTEXITCODE -ne 0) {
-            throw "Failed to read draft Release v$env:RELEASE_VERSION"
+            throw "Failed to inspect draft Release v$env:RELEASE_VERSION"
           }
+          $releases = @($releaseListJson | ConvertFrom-Json)
+          $matchingReleases = @($releases | Where-Object tag_name -eq "v$env:RELEASE_VERSION")
+          if ($matchingReleases.Count -ne 1) {
+            throw "Expected one draft Release for v$env:RELEASE_VERSION, found $($matchingReleases.Count)"
+          }
+          $release = $matchingReleases[0]
           if (-not $release.draft -or $release.tag_name -ne "v$env:RELEASE_VERSION") {
             throw "Release v$env:RELEASE_VERSION is not the expected draft"
           }
@@ -457,9 +477,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw "Failed to publish Release v$env:RELEASE_VERSION"
           }
-          $published = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/v$env:RELEASE_VERSION" | ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0 -or $published.draft) {
+          $published = gh api "repos/$env:GITHUB_REPOSITORY/releases/$($release.id)" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $published.draft -or $published.prerelease) {
             throw "Release v$env:RELEASE_VERSION was not published"
+          }
+
+          $latest = gh api "repos/$env:GITHUB_REPOSITORY/releases/latest" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $latest.id -ne $release.id) {
+            throw "Release v$env:RELEASE_VERSION was not marked latest"
           }
 
       - name: Release active lock
@@ -475,6 +500,203 @@ jobs:
           if ($activeSha -ne $env:RELEASE_SHA) {
             throw "Refusing to delete Studio release lock at unexpected SHA $activeSha"
           }
+          $released = $false
+          foreach ($attempt in 1..3) {
+            git push `
+              --force-with-lease="refs/heads/studio-release/active:$env:RELEASE_SHA" `
+              origin `
+              ':refs/heads/studio-release/active'
+            if ($LASTEXITCODE -eq 0) {
+              $released = $true
+              break
+            }
+            Start-Sleep -Seconds 5
+          }
+          if (-not $released) {
+            throw 'Failed to release the active Studio release lock after three attempts'
+          }
+
+  recover_release:
+    name: Publish verified draft Release
+    if: github.ref == 'refs/heads/main' && inputs.publishOnlyReleaseSha != ''
+    runs-on: windows-latest
+    env:
+      BASE_SHA: ${{ inputs.baseSha }}
+      RELEASE_SHA: ${{ inputs.publishOnlyReleaseSha }}
+      RELEASE_VERSION: ${{ inputs.version }}
+    steps:
+      - name: Check out prepared release
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.publishOnlyReleaseSha }}
+          fetch-depth: 0
+
+      - name: Validate publish-only recovery state
+        id: recovery
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          if ($env:RELEASE_VERSION -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') {
+            throw 'Version must be stable SemVer without a v prefix'
+          }
+          if ($env:BASE_SHA -notmatch '^[0-9a-f]{40}$' -or $env:RELEASE_SHA -notmatch '^[0-9a-f]{40}$') {
+            throw 'Release source SHAs must be full lowercase Git object IDs'
+          }
+
+          git fetch origin main --tags
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Failed to fetch main and release tags'
+          }
+          $head = (git rev-parse HEAD).Trim()
+          $parent = (git rev-parse HEAD^).Trim()
+          $originMain = (git rev-parse origin/main).Trim()
+          if ($head -ne $env:RELEASE_SHA) {
+            throw "Checked-out release source $head does not match $env:RELEASE_SHA"
+          }
+          if ($parent -ne $env:BASE_SHA) {
+            throw "Prepared release parent $parent does not match $env:BASE_SHA"
+          }
+          git merge-base --is-ancestor $env:RELEASE_SHA $originMain
+          if ($LASTEXITCODE -ne 0) {
+            throw "origin/main $originMain does not contain prepared release $env:RELEASE_SHA"
+          }
+
+          $active = @(git ls-remote --heads origin 'refs/heads/studio-release/active')
+          if ($LASTEXITCODE -ne 0 -or $active.Count -gt 1) {
+            throw 'The active Studio release lock is ambiguous'
+          }
+          if ($active.Count -eq 1) {
+            $activeSha = ($active[0] -split '\s+')[0]
+            if ($activeSha -ne $env:RELEASE_SHA) {
+              throw "Active Studio release lock points to $activeSha instead of $env:RELEASE_SHA"
+            }
+          } else {
+            Write-Output 'The active Studio release lock was already released.'
+          }
+
+          $changed = @(git diff --name-only "$env:BASE_SHA..$env:RELEASE_SHA")
+          if ($LASTEXITCODE -ne 0 -or $changed.Count -ne 1 -or $changed[0] -ne 'code/pure-studio-flutter/pubspec.yaml') {
+            throw "Prepared release commit changed an unexpected file set: $($changed -join ', ')"
+          }
+          $subject = (git log -1 --format=%s).Trim()
+          if ($subject -ne "chore(studio): prepare v$env:RELEASE_VERSION") {
+            throw "Unexpected release commit subject: $subject"
+          }
+          if (-not [string]::IsNullOrWhiteSpace((git status --porcelain))) {
+            throw 'Prepared release checkout is not clean'
+          }
+
+          $matches = @(Select-String -Path code/pure-studio-flutter/pubspec.yaml -Pattern '^version:\s*([^+\s]+)\+(\d+)\s*$')
+          if ($matches.Count -ne 1) {
+            throw 'pubspec.yaml must contain one x.y.z+build version'
+          }
+          $pubspecVersion = $matches[0].Matches[0].Groups[1].Value
+          if ($pubspecVersion -ne $env:RELEASE_VERSION) {
+            throw "Prepared version $env:RELEASE_VERSION does not match pubspec version $pubspecVersion"
+          }
+
+          $matchingTags = @(git tag --list "v$env:RELEASE_VERSION")
+          if ($LASTEXITCODE -ne 0 -or $matchingTags.Count -ne 1) {
+            throw "Expected one tag v$env:RELEASE_VERSION, found $($matchingTags.Count)"
+          }
+          $tagCommit = (git rev-list -n 1 "v$env:RELEASE_VERSION").Trim()
+          if ($LASTEXITCODE -ne 0 -or $tagCommit -ne $env:RELEASE_SHA) {
+            throw "Tag v$env:RELEASE_VERSION points to $tagCommit instead of $env:RELEASE_SHA"
+          }
+
+          $releaseListJson = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to inspect Release v$env:RELEASE_VERSION"
+          }
+          $releases = @($releaseListJson | ConvertFrom-Json)
+          $matchingReleases = @($releases | Where-Object tag_name -eq "v$env:RELEASE_VERSION")
+          if ($matchingReleases.Count -ne 1) {
+            throw "Expected one Release for v$env:RELEASE_VERSION, found $($matchingReleases.Count)"
+          }
+          $release = $matchingReleases[0]
+          if ($release.prerelease) {
+            throw "Release v$env:RELEASE_VERSION must not be a prerelease"
+          }
+
+          $setup = "Pure-Studio-$env:RELEASE_VERSION-windows-x86_64-setup.exe"
+          $portable = "Pure-Studio-$env:RELEASE_VERSION-windows-x86_64-portable.zip"
+          $expected = @(
+            $setup,
+            "$setup.minisig",
+            $portable,
+            "$portable.minisig",
+            'latest.json',
+            'SHA256SUMS.txt'
+          ) | Sort-Object
+          $actual = @($release.assets | ForEach-Object name | Sort-Object)
+          if (($actual -join "`n") -ne ($expected -join "`n")) {
+            throw "Release asset set mismatch: $($actual -join ', ')"
+          }
+          $invalidAssets = @($release.assets | Where-Object { $_.state -ne 'uploaded' -or $_.size -le 0 })
+          if ($invalidAssets.Count -ne 0) {
+            throw "Release contains incomplete assets: $($invalidAssets.name -join ', ')"
+          }
+
+          "releaseId=$($release.id)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "draft=$($release.draft.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Publish verified draft Release
+        if: steps.recovery.outputs.draft == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ steps.recovery.outputs.releaseId }}
+        run: |
+          gh api `
+            --method PATCH `
+            "repos/$env:GITHUB_REPOSITORY/releases/$env:RELEASE_ID" `
+            -F draft=false `
+            -f make_latest=true *> $null
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to publish Release v$env:RELEASE_VERSION"
+          }
+
+      - name: Verify published Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ steps.recovery.outputs.releaseId }}
+        run: |
+          $published = gh api "repos/$env:GITHUB_REPOSITORY/releases/$env:RELEASE_ID" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to read published Release v$env:RELEASE_VERSION"
+          }
+          if ($published.draft -or $published.prerelease -or $published.tag_name -ne "v$env:RELEASE_VERSION") {
+            throw "Release v$env:RELEASE_VERSION is not in the expected published state"
+          }
+
+          $latest = gh api "repos/$env:GITHUB_REPOSITORY/releases/latest" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $latest.id -ne $published.id) {
+            throw "Release v$env:RELEASE_VERSION was not marked latest"
+          }
+
+      - name: Release active lock
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          $active = @(git ls-remote --heads origin 'refs/heads/studio-release/active')
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Failed to inspect the active Studio release lock'
+          }
+          if ($active.Count -eq 0) {
+            Write-Output 'The active Studio release lock was already released.'
+            exit 0
+          }
+          if ($active.Count -ne 1) {
+            throw 'The active Studio release lock is ambiguous'
+          }
+          $activeSha = ($active[0] -split '\s+')[0]
+          if ($activeSha -ne $env:RELEASE_SHA) {
+            throw "Refusing to delete Studio release lock at unexpected SHA $activeSha"
+          }
+
           $released = $false
           foreach ($attempt in 1..3) {
             git push `
