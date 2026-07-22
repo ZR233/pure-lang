@@ -6,9 +6,16 @@
 ## 1. 版本与发布入口
 
 `code/pure-studio-flutter/pubspec.yaml` 的 `version: x.y.z+build` 是 Studio 版本唯一事实源。
-稳定版只允许在 `main` 上手动运行 `studio-release.yml`，输入不带 `v` 的稳定 SemVer，且
-必须与 pubspec 的 `x.y.z` 完全一致。工作流创建不可变的 `v{x.y.z}` Git tag 和 GitHub
-Release；已有 tag 或 Release 必须拒绝，回滚通过更高版本 forward fix 完成。
+稳定版只允许在 `main` 上手动运行 `studio-release.yml`。发布表单默认选择修复，对应 patch
+递增；功能增加对应 minor 递增并清零 patch；勾选大版本时忽略变更类型，递增 major 并清零
+minor 和 patch。每次发布同时将 build number 递增一。CI 自动生成
+`chore(studio): prepare v{x.y.z}` 版本提交，不再要求人工计算或输入版本号。
+
+版本提交先推送到固定临时分支 `studio-release/active`，内部发布工作流从该精确提交构建、签名、
+烟测并生成 provenance。全部验证成功后才允许将版本提交快进到 `main`，再创建不可变的
+`v{x.y.z}` tag 和 GitHub Release。失败时不得推进 `main`，临时分支作为并发锁和重试来源保留；
+成功后只能用精确 SHA lease 删除。已有正式 Release 必须拒绝覆盖；同一提交留下的 tag 或草稿
+Release 可继续完成。回滚通过更高版本 forward fix 完成。
 
 稳定 Release 固定包含：
 
@@ -24,7 +31,9 @@ Release；已有 tag 或 Release 必须拒绝，回滚通过更高版本 forward
 
 ## 2. Windows 包边界
 
-`cargo xtask release-gui stage|finalize|verify --version <semver>` 是正式打包入口。
+`cargo xtask release-gui prepare --bump patch|minor|major` typed 解析并更新 pubspec，输出包含
+`version`、`buildNumber` 和 `pubspecVersion` 的 camelCase JSON。CI 只允许该步骤修改
+`pubspec.yaml`。`cargo xtask release-gui stage|finalize|verify --version <semver>` 是正式打包入口。
 `stage` 复用 `build-gui`，生成 per-user Inno Setup 安装器和便携 zip；安装器使用稳定 AppId，
 默认安装到 LocalAppData，声明 CloseApplications/RestartApplications。打包输入排除 PDB，
 包含 LICENSE 与 THIRD_PARTY_NOTICES。便携版只供手动分发；便携用户执行应用内升级时进入

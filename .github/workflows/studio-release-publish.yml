@@ -1,0 +1,421 @@
+name: Studio Release Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Prepared stable version without the v prefix
+        required: true
+        type: string
+      baseSha:
+        description: Exact main commit that parents the prepared version
+        required: true
+        type: string
+
+concurrency:
+  group: studio-stable-release-publish
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    name: Release Windows x64
+    if: github.ref == 'refs/heads/studio-release/active'
+    runs-on: windows-latest
+    env:
+      BASE_SHA: ${{ inputs.baseSha }}
+      RELEASE_SHA: ${{ github.sha }}
+      RELEASE_VERSION: ${{ inputs.version }}
+    steps:
+      - name: Check out prepared release
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Validate prepared source and immutability
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ($env:RELEASE_VERSION -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') {
+            throw 'Version must be stable SemVer without a v prefix'
+          }
+          if ($env:BASE_SHA -notmatch '^[0-9a-f]{40}$' -or $env:RELEASE_SHA -notmatch '^[0-9a-f]{40}$') {
+            throw 'Release source SHAs must be full lowercase Git object IDs'
+          }
+
+          git fetch origin --tags
+          $head = (git rev-parse HEAD).Trim()
+          $parent = (git rev-parse HEAD^).Trim()
+          $mainRef = @(git ls-remote --heads origin 'refs/heads/main')
+          if ($mainRef.Count -ne 1) {
+            throw 'Remote main branch is missing or ambiguous'
+          }
+          $originMain = ($mainRef[0] -split '\s+')[0]
+          if ($head -ne $env:RELEASE_SHA) {
+            throw "Checked-out release source $head does not match workflow SHA $env:RELEASE_SHA"
+          }
+          if ($parent -ne $env:BASE_SHA) {
+            throw "Prepared release parent $parent does not match expected main $env:BASE_SHA"
+          }
+          if ($originMain -ne $env:BASE_SHA -and $originMain -ne $env:RELEASE_SHA) {
+            git fetch origin main
+            $fetchedMain = (git rev-parse FETCH_HEAD).Trim()
+            if ($fetchedMain -ne $originMain) {
+              throw "Fetched main $fetchedMain does not match remote main $originMain"
+            }
+            git merge-base --is-ancestor $env:RELEASE_SHA $fetchedMain
+            if ($LASTEXITCODE -ne 0) {
+              throw "origin/main moved to unrelated commit $originMain after release preparation"
+            }
+            Write-Output "origin/main already contains prepared release $env:RELEASE_SHA; continuing interrupted release."
+          }
+
+          $active = @(git ls-remote --heads origin 'refs/heads/studio-release/active')
+          if ($active.Count -ne 1) {
+            throw 'The active Studio release lock is missing or ambiguous'
+          }
+          $activeSha = ($active[0] -split '\s+')[0]
+          if ($activeSha -ne $env:RELEASE_SHA) {
+            throw "Active Studio release lock points to $activeSha instead of $env:RELEASE_SHA"
+          }
+
+          $changed = @(git diff --name-only "$env:BASE_SHA..$env:RELEASE_SHA")
+          if ($changed.Count -ne 1 -or $changed[0] -ne 'code/pure-studio-flutter/pubspec.yaml') {
+            throw "Prepared release commit changed an unexpected file set: $($changed -join ', ')"
+          }
+          $subject = (git log -1 --format=%s).Trim()
+          if ($subject -ne "chore(studio): prepare v$env:RELEASE_VERSION") {
+            throw "Unexpected release commit subject: $subject"
+          }
+          if (-not [string]::IsNullOrWhiteSpace((git status --porcelain))) {
+            throw 'Prepared release checkout is not clean'
+          }
+
+          $matches = @(Select-String -Path code/pure-studio-flutter/pubspec.yaml -Pattern '^version:\s*([^+\s]+)\+(\d+)\s*$')
+          if ($matches.Count -ne 1) {
+            throw 'pubspec.yaml must contain one x.y.z+build version'
+          }
+          $pubspecVersion = $matches[0].Matches[0].Groups[1].Value
+          if ($pubspecVersion -ne $env:RELEASE_VERSION) {
+            throw "Prepared version $env:RELEASE_VERSION does not match pubspec version $pubspecVersion"
+          }
+
+          $tagCommit = $null
+          git show-ref --verify --quiet "refs/tags/v$env:RELEASE_VERSION"
+          if ($LASTEXITCODE -eq 0) {
+            $tagCommit = (git rev-list -n 1 "v$env:RELEASE_VERSION").Trim()
+            if ($tagCommit -ne $env:RELEASE_SHA) {
+              throw "Tag v$env:RELEASE_VERSION points to $tagCommit instead of $env:RELEASE_SHA"
+            }
+          } elseif ($LASTEXITCODE -ne 1) {
+            throw "Failed to inspect tag v$env:RELEASE_VERSION (git exit $LASTEXITCODE)"
+          }
+
+          $releaseJson = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/v$env:RELEASE_VERSION" 2> $null
+          $releaseStatus = $LASTEXITCODE
+          if ($releaseStatus -eq 0) {
+            $release = $releaseJson | ConvertFrom-Json
+            if (-not $release.draft) {
+              throw "Published Release v$env:RELEASE_VERSION already exists and will not be overwritten"
+            }
+            if ($release.tag_name -ne "v$env:RELEASE_VERSION" -or $tagCommit -ne $env:RELEASE_SHA) {
+              throw "Draft Release v$env:RELEASE_VERSION is not bound to the prepared release commit"
+            }
+            Write-Output "Resuming draft Release v$env:RELEASE_VERSION."
+          }
+          if ($releaseStatus -ne 0 -and $releaseStatus -ne 1) {
+            throw "Failed to inspect Release v$env:RELEASE_VERSION (gh exit $releaseStatus)"
+          }
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: 3.44.5
+          channel: stable
+          cache: true
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: 1.96.1
+          components: rustfmt, clippy
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+
+      - name: Verify Rust workspace
+        env:
+          API_KEY_DEEPSEEK: ""
+          API_KEY_OPENAI: ""
+          API_KEY_ZHIPU: ""
+        shell: pwsh
+        run: |
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+
+      - name: Verify Flutter application
+        working-directory: code/pure-studio-flutter
+        shell: pwsh
+        run: |
+          flutter pub get
+          flutter analyze --no-pub
+          flutter test --no-pub --exclude-tags visual
+
+      - name: Install release tools
+        shell: pwsh
+        run: |
+          choco install innosetup --version=6.4.3 --yes --no-progress
+          $archive = Join-Path $env:RUNNER_TEMP 'minisign-0.12-win64.zip'
+          Invoke-WebRequest -Uri 'https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-win64.zip' -OutFile $archive
+          $actualHash = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          if ($actualHash -ne '37b600344e20c19314b2e82813db2bfdcc408b77b876f7727889dbd46d539479') {
+            throw "Unexpected Minisign archive SHA-256: $actualHash"
+          }
+          $toolDir = Join-Path $env:RUNNER_TEMP 'minisign-0.12'
+          Expand-Archive -LiteralPath $archive -DestinationPath $toolDir
+          $minisign = Get-ChildItem -Path $toolDir -Filter minisign.exe -Recurse | Select-Object -First 1
+          if ($null -eq $minisign) { throw 'minisign.exe not found in verified archive' }
+          $minisign.DirectoryName | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: Materialize optional Authenticode certificate
+        shell: pwsh
+        env:
+          AUTHENTICODE_CERTIFICATE_BASE64: ${{ secrets.AUTHENTICODE_CERTIFICATE_BASE64 }}
+        run: |
+          if (-not [string]::IsNullOrWhiteSpace($env:AUTHENTICODE_CERTIFICATE_BASE64)) {
+            $certificate = Join-Path $env:RUNNER_TEMP 'pure-studio-authenticode.pfx'
+            [IO.File]::WriteAllBytes($certificate, [Convert]::FromBase64String($env:AUTHENTICODE_CERTIFICATE_BASE64))
+            "WINDOWS_CERTIFICATE_PATH=$certificate" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            $signTool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Filter signtool.exe -Recurse | Sort-Object FullName -Descending | Select-Object -First 1
+            if ($null -eq $signTool) { throw 'signtool.exe not found' }
+            "WINDOWS_SIGNTOOL_PATH=$($signTool.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          }
+
+      - name: Stage Windows packages
+        env:
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.AUTHENTICODE_CERTIFICATE_PASSWORD }}
+        run: cargo xtask release-gui stage --version $env:RELEASE_VERSION
+
+      - name: Remove Authenticode certificate
+        if: always()
+        shell: pwsh
+        run: |
+          if (-not [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PATH) -and (Test-Path -LiteralPath $env:WINDOWS_CERTIFICATE_PATH)) {
+            Remove-Item -LiteralPath $env:WINDOWS_CERTIFICATE_PATH -Force
+          }
+
+      - name: Materialize Minisign credentials
+        shell: pwsh
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:MINISIGN_SECRET_KEY)) {
+            throw 'MINISIGN_SECRET_KEY secret is required'
+          }
+          if ([string]::IsNullOrWhiteSpace($env:MINISIGN_PASSWORD)) {
+            throw 'MINISIGN_PASSWORD secret is required'
+          }
+          $minisignKey = Join-Path $env:RUNNER_TEMP 'pure-studio.key'
+          Set-Content -LiteralPath $minisignKey -Value $env:MINISIGN_SECRET_KEY -NoNewline
+          "MINISIGN_SECRET_KEY_FILE=$minisignKey" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Finalize and verify signed release
+        env:
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+        run: cargo xtask release-gui finalize --version $env:RELEASE_VERSION
+
+      - name: Remove Minisign secret key
+        if: always()
+        shell: pwsh
+        run: |
+          if (-not [string]::IsNullOrWhiteSpace($env:MINISIGN_SECRET_KEY_FILE) -and (Test-Path -LiteralPath $env:MINISIGN_SECRET_KEY_FILE)) {
+            Remove-Item -LiteralPath $env:MINISIGN_SECRET_KEY_FILE -Force
+          }
+
+      - name: Smoke-test per-user installer
+        shell: pwsh
+        run: |
+          $releaseDir = Join-Path $env:GITHUB_WORKSPACE "dist/studio-release/$env:RELEASE_VERSION"
+          $installer = Join-Path $releaseDir "Pure-Studio-$env:RELEASE_VERSION-windows-x86_64-setup.exe"
+          $installDir = Join-Path $env:RUNNER_TEMP 'pure-studio-smoke'
+          $process = Start-Process -FilePath $installer -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CURRENTUSER',"/DIR=$installDir" -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Installer exited with $($process.ExitCode)" }
+          $executable = Join-Path $installDir 'pure_studio_flutter.exe'
+          if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) { throw 'Installed executable missing' }
+          $productVersion = (Get-Item -LiteralPath $executable).VersionInfo.ProductVersion
+          if (-not $productVersion.StartsWith($env:RELEASE_VERSION)) {
+            throw "Installed version $productVersion does not match $env:RELEASE_VERSION"
+          }
+          $uninstall = Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' | Get-ItemProperty | Where-Object DisplayName -eq 'Pure Studio'
+          if ($null -eq $uninstall) { throw 'Per-user uninstall registration missing' }
+          cargo xtask release-gui verify --version $env:RELEASE_VERSION
+
+      - name: Attest installer provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: dist/studio-release/${{ inputs.version }}/Pure-Studio-${{ inputs.version }}-windows-x86_64-setup.exe
+
+      - name: Attest portable provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: dist/studio-release/${{ inputs.version }}/Pure-Studio-${{ inputs.version }}-windows-x86_64-portable.zip
+
+      - name: Promote verified version to main
+        shell: pwsh
+        run: |
+          $mainRef = @(git ls-remote --heads origin 'refs/heads/main')
+          if ($mainRef.Count -ne 1) {
+            throw 'Remote main branch is missing or ambiguous'
+          }
+          $originMain = ($mainRef[0] -split '\s+')[0]
+          if ($originMain -eq $env:BASE_SHA) {
+            git push origin 'HEAD:refs/heads/main'
+            exit 0
+          }
+          if ($originMain -eq $env:RELEASE_SHA) {
+            Write-Output 'Prepared version is already present on main; continuing interrupted release.'
+            exit 0
+          }
+          git fetch origin main
+          $fetchedMain = (git rev-parse FETCH_HEAD).Trim()
+          if ($fetchedMain -ne $originMain) {
+            throw "Fetched main $fetchedMain does not match remote main $originMain"
+          }
+          git merge-base --is-ancestor $env:RELEASE_SHA $fetchedMain
+          if ($LASTEXITCODE -eq 0) {
+            Write-Output "Current main $originMain already contains prepared release $env:RELEASE_SHA; continuing."
+            exit 0
+          }
+          throw "origin/main moved to unrelated commit $originMain; refusing to promote $env:RELEASE_SHA"
+
+      - name: Create immutable tag
+        shell: pwsh
+        run: |
+          git fetch origin --tags
+          git show-ref --verify --quiet "refs/tags/v$env:RELEASE_VERSION"
+          if ($LASTEXITCODE -eq 0) {
+            $tagCommit = (git rev-list -n 1 "v$env:RELEASE_VERSION").Trim()
+            if ($tagCommit -ne $env:RELEASE_SHA) {
+              throw "Tag v$env:RELEASE_VERSION points to $tagCommit instead of $env:RELEASE_SHA"
+            }
+            Write-Output "Tag v$env:RELEASE_VERSION already points to the prepared release; continuing."
+            exit 0
+          }
+          if ($LASTEXITCODE -ne 1) {
+            throw "Failed to inspect tag v$env:RELEASE_VERSION (git exit $LASTEXITCODE)"
+          }
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git tag -a "v$env:RELEASE_VERSION" -m "Pure Studio v$env:RELEASE_VERSION" $env:RELEASE_SHA
+          git push origin "refs/tags/v$env:RELEASE_VERSION"
+
+      - name: Validate draft Release state
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $releaseJson = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/v$env:RELEASE_VERSION" 2> $null
+          $releaseStatus = $LASTEXITCODE
+          if ($releaseStatus -eq 1) {
+            exit 0
+          }
+          if ($releaseStatus -ne 0) {
+            throw "Failed to inspect Release v$env:RELEASE_VERSION (gh exit $releaseStatus)"
+          }
+          $release = $releaseJson | ConvertFrom-Json
+          if (-not $release.draft -or $release.tag_name -ne "v$env:RELEASE_VERSION") {
+            throw "Refusing to overwrite published or mismatched Release v$env:RELEASE_VERSION"
+          }
+
+      - name: Upload draft GitHub Release
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+        with:
+          tag_name: v${{ inputs.version }}
+          name: Pure Studio v${{ inputs.version }}
+          draft: true
+          generate_release_notes: true
+          make_latest: false
+          fail_on_unmatched_files: true
+          files: |
+            dist/studio-release/${{ inputs.version }}/Pure-Studio-${{ inputs.version }}-windows-x86_64-setup.exe
+            dist/studio-release/${{ inputs.version }}/Pure-Studio-${{ inputs.version }}-windows-x86_64-setup.exe.minisig
+            dist/studio-release/${{ inputs.version }}/Pure-Studio-${{ inputs.version }}-windows-x86_64-portable.zip
+            dist/studio-release/${{ inputs.version }}/Pure-Studio-${{ inputs.version }}-windows-x86_64-portable.zip.minisig
+            dist/studio-release/${{ inputs.version }}/latest.json
+            dist/studio-release/${{ inputs.version }}/SHA256SUMS.txt
+
+      - name: Verify and publish GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $release = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/v$env:RELEASE_VERSION" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to read draft Release v$env:RELEASE_VERSION"
+          }
+          if (-not $release.draft -or $release.tag_name -ne "v$env:RELEASE_VERSION") {
+            throw "Release v$env:RELEASE_VERSION is not the expected draft"
+          }
+
+          $setup = "Pure-Studio-$env:RELEASE_VERSION-windows-x86_64-setup.exe"
+          $portable = "Pure-Studio-$env:RELEASE_VERSION-windows-x86_64-portable.zip"
+          $expected = @(
+            $setup,
+            "$setup.minisig",
+            $portable,
+            "$portable.minisig",
+            'latest.json',
+            'SHA256SUMS.txt'
+          ) | Sort-Object
+          $actual = @($release.assets | ForEach-Object name | Sort-Object)
+          if (($actual -join "`n") -ne ($expected -join "`n")) {
+            throw "Draft Release asset set mismatch: $($actual -join ', ')"
+          }
+
+          gh api `
+            --method PATCH `
+            "repos/$env:GITHUB_REPOSITORY/releases/$($release.id)" `
+            -F draft=false `
+            -f make_latest=true *> $null
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to publish Release v$env:RELEASE_VERSION"
+          }
+          $published = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/v$env:RELEASE_VERSION" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $published.draft) {
+            throw "Release v$env:RELEASE_VERSION was not published"
+          }
+
+      - name: Release active lock
+        shell: pwsh
+        run: |
+          $active = @(git ls-remote --heads origin 'refs/heads/studio-release/active')
+          if ($active.Count -ne 1) {
+            throw 'The active Studio release lock disappeared before cleanup'
+          }
+          $activeSha = ($active[0] -split '\s+')[0]
+          if ($activeSha -ne $env:RELEASE_SHA) {
+            throw "Refusing to delete Studio release lock at unexpected SHA $activeSha"
+          }
+          $released = $false
+          foreach ($attempt in 1..3) {
+            git push `
+              --force-with-lease="refs/heads/studio-release/active:$env:RELEASE_SHA" `
+              origin `
+              ':refs/heads/studio-release/active'
+            if ($LASTEXITCODE -eq 0) {
+              $released = $true
+              break
+            }
+            Start-Sleep -Seconds 5
+          }
+          if (-not $released) {
+            throw 'Failed to release the active Studio release lock after three attempts'
+          }
