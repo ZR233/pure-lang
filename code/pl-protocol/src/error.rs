@@ -48,6 +48,8 @@ pub enum PureError {
     TransientModelTransport {
         message: String,
         retry_after_ms: Option<u64>,
+        code: Option<String>,
+        http_status: Option<u16>,
     },
 }
 
@@ -57,6 +59,8 @@ impl PureError {
         Self::TransientModelTransport {
             message: message.into(),
             retry_after_ms: None,
+            code: None,
+            http_status: None,
         }
     }
 
@@ -68,6 +72,23 @@ impl PureError {
         Self::TransientModelTransport {
             message: message.into(),
             retry_after_ms: Some(retry_after_ms),
+            code: None,
+            http_status: None,
+        }
+    }
+
+    /// 构造保留 provider code 与 HTTP 状态的临时模型错误。
+    pub fn transient_model_failure(
+        message: impl Into<String>,
+        retry_after_ms: Option<u64>,
+        code: Option<String>,
+        http_status: Option<u16>,
+    ) -> Self {
+        Self::TransientModelTransport {
+            message: message.into(),
+            retry_after_ms,
+            code,
+            http_status,
         }
     }
 
@@ -80,6 +101,29 @@ impl PureError {
     pub fn retry_after_ms(&self) -> Option<u64> {
         match self {
             Self::TransientModelTransport { retry_after_ms, .. } => *retry_after_ms,
+            Self::LlmError(_)
+            | Self::ContextOverflow(_)
+            | Self::ToolNotFound(_)
+            | Self::ToolExecutionFailed { .. }
+            | Self::AgentLimitReached { .. }
+            | Self::AgentDepthLimitReached { .. }
+            | Self::ProviderCapacity { .. }
+            | Self::PermissionDenied(_)
+            | Self::SandboxError(_)
+            | Self::MemoryError(_)
+            | Self::ConfigError(_)
+            | Self::Io(_)
+            | Self::SerdeJson(_)
+            | Self::HttpError(_) => None,
+        }
+    }
+
+    /// 返回瞬态模型错误携带的 provider code 与 HTTP 状态。
+    pub fn transient_model_metadata(&self) -> Option<(Option<&str>, Option<u16>)> {
+        match self {
+            Self::TransientModelTransport {
+                code, http_status, ..
+            } => Some((code.as_deref(), *http_status)),
             Self::LlmError(_)
             | Self::ContextOverflow(_)
             | Self::ToolNotFound(_)

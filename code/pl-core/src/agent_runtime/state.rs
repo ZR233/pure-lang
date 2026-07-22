@@ -3,6 +3,7 @@ use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use pl_model::TokenUsage;
+use pl_protocol::TurnFailure;
 use serde::{Deserialize, Serialize};
 
 use crate::{AgentRoleId, AgentSession};
@@ -58,6 +59,8 @@ pub struct AgentTurnOutcome {
     pub session_id: SessionId,
     pub kind: TurnOutcomeKind,
     pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure: Option<TurnFailure>,
     pub usage: TokenUsage,
     pub finished_at: i64,
 }

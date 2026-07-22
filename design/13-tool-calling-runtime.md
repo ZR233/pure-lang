@@ -62,6 +62,16 @@ reviewer 只暴露 effect 策略明确允许的动态工具，未知 effect 默�
 
 ## 运行时错误分类
 
+模型与 turn 边界使用结构化 `TurnFailure` 保存失败事实。失败包含稳定类别、
+provider code、HTTP status、用户可读消息与 `RetryDisposition`；可重试变体可附带
+`retryAfterMs`。`TurnResult` 和 `AgentTurnOutcome` 必须携带同一份结构化失败，宿主产品
+不得通过解析 `reason` 文本判断是否重试。provider 内部仅在工具副作用尚未发生时重放
+完整模型请求；重试耗尽后把原始瞬态语义交给宿主调度器。
+
+Responses WebSocket 的限流、连接容量、`server_is_overloaded`、408/409/425/429、5xx
+及瞬态网络错误统一映射为可重试 provider failure。鉴权、权限、输入验证和协议错误保持
+永久失败；错误正文仍用于展示和日志，但不再承担控制流协议。
+
 工具调度层使用轻量 runtime envelope 统一执行结果：
 
 - `ToolInvocation` 保存工具名、实际复用或创建的 trace part id、provider item id、Responses call id、payload 和执行上下文；工具 runtime 发出的结果 delta 必须使用同一个 trace part id。

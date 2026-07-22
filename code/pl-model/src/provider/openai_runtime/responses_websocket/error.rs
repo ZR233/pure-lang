@@ -124,7 +124,7 @@ pub(super) fn server_error(value: &Value) -> PureError {
     });
 
     if code.is_some_and(retryable_code) || status.is_some_and(retryable_status) {
-        return transient(detail, retry_after_ms);
+        return transient_provider_error(detail, retry_after_ms, code, status);
     }
     match status {
         Some(_) => PureError::HttpError(detail),
@@ -154,9 +154,11 @@ pub(super) fn response_terminal_error(event: &Value) -> Option<PureError> {
         .and_then(|error| error.get("message"))
         .and_then(Value::as_str)
         .unwrap_or("Responses WebSocket response failed temporarily");
-    Some(transient(
+    Some(transient_provider_error(
         websocket_error_message(status, code, message),
         None,
+        code,
+        status,
     ))
 }
 
@@ -179,10 +181,21 @@ pub(super) fn continuation_id_invalid(value: &Value) -> bool {
 }
 
 fn transient(message: String, retry_after_ms: Option<u64>) -> PureError {
-    match retry_after_ms {
-        Some(delay) => PureError::transient_model_transport_after(message, delay),
-        None => PureError::transient_model_transport(message),
-    }
+    PureError::transient_model_failure(message, retry_after_ms, None, None)
+}
+
+fn transient_provider_error(
+    message: String,
+    retry_after_ms: Option<u64>,
+    code: Option<&str>,
+    status: Option<u16>,
+) -> PureError {
+    PureError::transient_model_failure(
+        message,
+        retry_after_ms,
+        code.map(ToString::to_string),
+        status,
+    )
 }
 
 fn retryable_status(status: u16) -> bool {
@@ -198,6 +211,7 @@ fn retryable_code(code: &str) -> bool {
             | "temporarily_unavailable"
             | "service_unavailable"
             | "request_timeout"
+            | "server_is_overloaded"
     )
 }
 
@@ -283,6 +297,10 @@ mod tests {
 
         assert!(error.is_transient_model_transport());
         assert_eq!(error.retry_after_ms(), Some(250));
+        assert_eq!(
+            error.transient_model_metadata(),
+            Some((Some("websocket_connection_limit_reached"), Some(400)))
+        );
 
         let compatible_status = server_error(&serde_json::json!({
             "type": "error",
@@ -290,6 +308,25 @@ mod tests {
             "error": { "message": "proxy unavailable" }
         }));
         assert!(compatible_status.is_transient_model_transport());
+    }
+
+    #[test]
+    fn classifies_server_overload_without_http_status_as_transient() {
+        let error = server_error(&serde_json::json!({
+            "type": "error",
+            "error": {
+                "code": "server_is_overloaded",
+                "message": "Our servers are currently overloaded. Please try again later.",
+                "retry_after_ms": 750
+            }
+        }));
+
+        assert!(error.is_transient_model_transport());
+        assert_eq!(error.retry_after_ms(), Some(750));
+        assert_eq!(
+            error.transient_model_metadata(),
+            Some((Some("server_is_overloaded"), None))
+        );
     }
 
     #[test]
