@@ -20,7 +20,7 @@ async fn manual_tool_approval_can_approve_through_interaction() {
             Box::pin(async move {
                 assert_eq!(interaction.kind, pl_protocol::InteractionKind::ToolApproval);
                 match &interaction.payload {
-                    InteractionPayload::ToolApproval { name, .. } => assert_eq!(name, "bash"),
+                    InteractionPayload::ToolApproval { name, .. } => assert_eq!(name, "exec"),
                     other => panic!("unexpected payload: {other:?}"),
                 }
                 *seen_interaction.lock().unwrap() = Some(interaction);
@@ -33,7 +33,7 @@ async fn manual_tool_approval_can_approve_through_interaction() {
     );
     let request = ToolApprovalRequest {
         id: "call-1".to_string(),
-        name: "bash".to_string(),
+        name: "exec".to_string(),
         arguments: serde_json::json!({"command": "echo hi"}),
         working_directory: None,
         parent_agent_id: None,
@@ -390,7 +390,7 @@ async fn deny_all_tool_approval_denies_without_request_event() {
     let options = TurnOptions::deny_all();
     let request = ToolApprovalRequest {
         id: "call-1".to_string(),
-        name: "bash".to_string(),
+        name: "exec".to_string(),
         arguments: serde_json::json!({"command": "echo hi"}),
         working_directory: None,
         parent_agent_id: None,
@@ -413,10 +413,10 @@ async fn deny_all_tool_approval_denies_without_request_event() {
 fn approval_request_extracts_working_directory() {
     let call = ToolCall::function(
         "call-1",
-        "bash",
+        "exec",
         serde_json::json!({
             "command": "pwd",
-            "workingDirectory": "C:/work"
+            "cwd": "C:/work"
         }),
         None,
     );
@@ -431,7 +431,7 @@ fn approval_request_extracts_working_directory() {
 fn approval_request_marks_parent_agent() {
     let call = ToolCall::function(
         "call-1",
-        "bash",
+        "exec",
         serde_json::json!({"command": "pwd"}),
         None,
     );

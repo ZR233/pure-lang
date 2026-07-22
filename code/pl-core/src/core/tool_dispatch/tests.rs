@@ -93,12 +93,12 @@ fn finalize_tool_item_carries_output_artifacts() {
     let item = recorder.tool_item(
         "turn-1",
         "turn-1-call-1",
-        "container_exec".to_string(),
+        "exec".to_string(),
         "{}".to_string(),
         Some("call-1".to_string()),
         None,
     );
-    let mut record = completed_record("container_exec");
+    let mut record = completed_record("exec");
     record
         .runtime_events
         .push(crate::tool::ToolRuntimeEvent::OutputArtifacts {

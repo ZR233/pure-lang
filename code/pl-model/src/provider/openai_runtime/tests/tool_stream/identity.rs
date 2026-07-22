@@ -18,7 +18,7 @@ fn stream_trace_part_ids_are_scoped_to_turn() {
                 stream_id: None,
                 item_id: "call_0".to_string(),
                 call_id: Some("call_0".to_string()),
-                name: Some("bash".to_string()),
+                name: Some("exec".to_string()),
                 payload_delta: ToolCallDeltaPayload::FunctionArguments(
                     r#"{"command":"pwd"}"#.to_string(),
                 ),
@@ -32,7 +32,7 @@ fn stream_trace_part_ids_are_scoped_to_turn() {
                 stream_id: None,
                 item_id: "call_0".to_string(),
                 call_id: Some("call_0".to_string()),
-                name: Some("bash".to_string()),
+                name: Some("exec".to_string()),
                 payload: Some(ToolCallDeltaPayload::FunctionArguments(
                     "{\"command\":\"pwd\"}".to_string(),
                 )),
@@ -264,7 +264,7 @@ fn stream_trace_scope_rejects_similar_turn_prefix() {
                 stream_id: None,
                 item_id: "turn-10-call".to_string(),
                 call_id: None,
-                name: Some("bash".to_string()),
+                name: Some("exec".to_string()),
                 payload_delta: ToolCallDeltaPayload::FunctionArguments(
                     r#"{"command":"pwd"}"#.to_string(),
                 ),

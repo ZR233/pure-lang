@@ -73,7 +73,7 @@ pub(super) async fn prepare_output_file(
     if let Some(parent) = output_file.parent() {
         tokio::fs::create_dir_all(parent).await.map_err(|error| {
             tool_error(
-                "bash",
+                "exec",
                 format!("failed to create output directory: {error}"),
             )
         })?;
@@ -84,7 +84,7 @@ pub(super) async fn prepare_output_file(
     );
     tokio::fs::write(output_file, header.as_bytes())
         .await
-        .map_err(|error| tool_error("bash", format!("failed to write output file: {error}")))
+        .map_err(|error| tool_error("exec", format!("failed to write output file: {error}")))
 }
 
 async fn append_output_chunk(
@@ -96,7 +96,7 @@ async fn append_output_chunk(
     let mut file = tokio::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(&entry.output_file)
+        .open(entry.output_target.capture_file())
         .await
         .map_err(|error| format!("failed to open output file: {error}"))?;
     let label = match stream {
@@ -113,6 +113,21 @@ async fn append_output_chunk(
         file.write_all(b"\n")
             .await
             .map_err(|error| format!("failed to finish output chunk: {error}"))?;
+    }
+    if let Some(stream_file) = match stream {
+        StreamKind::Stdout => entry.output_target.stdout_capture_file(),
+        StreamKind::Stderr => entry.output_target.stderr_capture_file(),
+    } {
+        let mut stream_capture = tokio::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(stream_file)
+            .await
+            .map_err(|error| format!("failed to open stream capture file: {error}"))?;
+        stream_capture
+            .write_all(chunk)
+            .await
+            .map_err(|error| format!("failed to write stream capture: {error}"))?;
     }
     Ok(())
 }

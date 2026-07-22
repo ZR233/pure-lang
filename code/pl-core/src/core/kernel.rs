@@ -257,11 +257,12 @@ impl AgentKernelToolSet for NoAgentKernelToolSet {
     }
 }
 
-impl<B, P, C, M, T> AgentKernelToolSet for ToolSetBuilder<B, P, C, M, T>
+impl<B, P, E, W, M, T> AgentKernelToolSet for ToolSetBuilder<B, P, E, W, M, T>
 where
     B: crate::tool::ExecutionBackend + 'static,
     P: crate::tool::GitCredentialProvider + 'static,
-    C: crate::tool::ContainerBackend + 'static,
+    E: crate::tool::CommandBackend,
+    W: crate::tool::WorkspaceFileBackend + 'static,
     M: crate::tool::McpResourceBackend + 'static,
     T: crate::tool::McpToolBackend + 'static,
 {

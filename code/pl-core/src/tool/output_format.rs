@@ -1186,7 +1186,7 @@ mod tests {
                 super::ToolLifecycleProjection {
                     phase: super::ToolLifecyclePhase::Started,
                     call_id: "call-1".to_string(),
-                    tool_name: "container_exec".to_string(),
+                    tool_name: "exec".to_string(),
                     arguments: json!({"token": "secret", "path": "src"}),
                     arguments_preview: "{\n  \"path\": \"src\",\n  \"token\": \"<redacted>\"\n}"
                         .to_string(),
@@ -1201,7 +1201,7 @@ mod tests {
                 super::ToolLifecycleProjection {
                     phase: super::ToolLifecyclePhase::Finished { success: true },
                     call_id: "call-1".to_string(),
-                    tool_name: "container_exec".to_string(),
+                    tool_name: "exec".to_string(),
                     arguments: json!({"token": "secret", "path": "src"}),
                     arguments_preview: "{\n  \"path\": \"src\",\n  \"token\": \"<redacted>\"\n}"
                         .to_string(),
@@ -1238,13 +1238,13 @@ mod tests {
             tool_call_message(
                 "provider-call",
                 Some("call-1"),
-                "container_exec",
+                "exec",
                 json!({"command": "pwd", "token": "secret"}),
             ),
             tool_result_message(
                 "provider-call",
                 Some("call-1"),
-                "container_exec",
+                "exec",
                 r#"{"command":"pwd","token":"secret"}"#,
                 r#"{"status":0,"stdout":"/workspace\n","stderr":""}"#,
             ),
@@ -1257,7 +1257,7 @@ mod tests {
             projection,
             super::ToolHistoryProjection {
                 call_id: "call-1".to_string(),
-                tool_name: "container_exec".to_string(),
+                tool_name: "exec".to_string(),
                 arguments: json!({"command": "pwd", "token": "secret"}),
                 arguments_preview: "{\n  \"command\": \"pwd\",\n  \"token\": \"<redacted>\"\n}"
                     .to_string(),
@@ -1273,7 +1273,7 @@ mod tests {
     fn tool_history_projection_reports_inferred_success() {
         let successful = super::ToolHistoryProjection {
             call_id: "call-1".to_string(),
-            tool_name: "container_exec".to_string(),
+            tool_name: "exec".to_string(),
             arguments: json!({}),
             arguments_preview: "{}".to_string(),
             output: "visible output".to_string(),
@@ -1325,7 +1325,7 @@ mod tests {
                 tool_call_id: "trace-call".to_string(),
                 call_id: Some("call-1".to_string()),
                 provider_item_id: None,
-                name: "container_exec".to_string(),
+                name: "exec".to_string(),
                 arguments: r#"{"token":"secret","path":"src"}"#.to_string(),
                 result: result.map(ToString::to_string),
                 exit_code: None,

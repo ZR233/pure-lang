@@ -219,7 +219,7 @@ fn update_tool_trace_keeps_streaming_tool_status_after_arguments_delta() {
         id: "provider-tool-1".to_string(),
         trace_id: "provider-tool-1".to_string(),
         call_id: Some("call-1".to_string()),
-        name: "bash".to_string(),
+        name: "exec".to_string(),
         arguments: "{\"cmd\":\"ec".to_string(),
     };
     let _ = trace.append_tool_arguments_delta(&snapshot, "{\"cmd\":\"ec".to_string());
@@ -227,7 +227,7 @@ fn update_tool_trace_keeps_streaming_tool_status_after_arguments_delta() {
         .update_tool_trace(&ToolCall {
             id: "provider-tool-1".to_string(),
             call_id: Some("call-1".to_string()),
-            name: "bash".to_string(),
+            name: "exec".to_string(),
             payload: ToolCallPayload::Function {
                 arguments: serde_json::json!({"cmd": "echo hi"}),
             },
@@ -251,14 +251,14 @@ fn late_provider_tool_id_keeps_original_trace_part_id() {
         id: "call-1".to_string(),
         trace_id: "call-1".to_string(),
         call_id: Some("call-1".to_string()),
-        name: "bash".to_string(),
+        name: "exec".to_string(),
         arguments: "{\"cmd\":\"ec".to_string(),
     };
     let late = ToolCallAccumulatorSnapshot {
         id: "provider-tool-1".to_string(),
         trace_id: "call-1".to_string(),
         call_id: Some("call-1".to_string()),
-        name: "bash".to_string(),
+        name: "exec".to_string(),
         arguments: "{\"cmd\":\"echo hi\"}".to_string(),
     };
 
@@ -276,7 +276,7 @@ fn late_provider_tool_id_keeps_original_trace_part_id() {
         .update_tool_trace(&ToolCall {
             id: "provider-tool-1".to_string(),
             call_id: Some("call-1".to_string()),
-            name: "bash".to_string(),
+            name: "exec".to_string(),
             payload: ToolCallPayload::Function {
                 arguments: serde_json::json!({"cmd": "echo hi"}),
             },

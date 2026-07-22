@@ -122,7 +122,7 @@ sequenceDiagram
 | 安全 | **前端配置 DTO 携带 `bearer_token`**。 | `ProviderDto` 与 `ProviderInput` 都有 `bearer_token: String`。citeturn28view1 | 这意味着敏感信息沿桌面 UI ↔ Rust 命令桥来回流动，扩大了明文出现面。 |
 | 安全 | **Tauri CSP 被显式关闭**。`tauri.conf.json` 中 `"csp": null`；Tauri 官方文档把 CSP 标为非常重要的安全配置。 | Tauri 配置文件的 `csp: null`；官方配置/安全文档强调 CSP 是 WebView 安全的重要部分。citeturn46view0turn48search0turn48search12 | 如果 UI 后续引入更多动态内容、插件或远端资源，这会显著增加 XSS/资源注入类风险面。 |
 | 安全/实现一致性 | **设计文档与运行时审批策略不一致**。安全文档写“当前 Studio 路径暂时使用 `AutoAllow`”，但实际 `run_prompt` 已改为 `TurnOptions::manual(...)`。 | 文档写当前是 `AutoAllow`；`main.rs` 实现明确使用 `TurnOptions::manual(approval_callback)`。citeturn15view2turn47view2 | 这会直接误导后续开发、测试和审计。文档-实现漂移本身就是架构风险。 |
-| 安全 | **bash 工具执行的是原生 shell 命令字符串**。 | `BashTool` 通过 `sh -c` / `cmd /C` 执行命令，默认超时 60 秒，超时后会尝试 `kill -9` 或 `taskkill /F`。citeturn35view1turn35view2turn35view0 | 即使有工作目录与审批，命令执行仍是最强权限边界之一；如果继续发展自动化能力，必须把权限模型、隔离与审计做成一等能力。 |
+| 安全 | **exec 工具执行的是原生 shell 命令字符串**。 | `ExecTool` 通过环境 backend 启动命令，默认超时 60 秒，并由统一进程管理器终止进程树。citeturn35view1turn35view2turn35view0 | 即使有工作目录与审批，命令执行仍是最强权限边界之一；如果继续发展自动化能力，必须把权限模型、隔离与审计做成一等能力。 |
 | 测试 | **测试分布失衡**。`pl-protocol`、`pl-core/config.rs`、`pl-core/core.rs` 有内联测试，但 `pl-core/studio.rs`、`pl-core/turn.rs`、`pure-studio/src-tauri/main.rs`、前端 `App.tsx` 基本没有对应测试。 | `core.rs` 和 `config.rs` 有 `#[cfg(test)]`；`studio.rs`、`turn.rs`、`main.rs` 找不到 `#[cfg(test)]`；前端 `App.tsx` 找不到测试模式。citeturn40view0turn40view3turn40view1turn40view2turn40view5turn40view6 | 当前最薄弱的是端到端编排层与桌面桥接层，而这恰恰是最容易发生回归的位置。 |
 | 测试 | **唯一显式 integration test 偏向 live API 测试**。`pl-model/tests` 下只看到 `deepseek_live.rs`，且未设环境变量时会直接 return。 | `pl-model/tests` 目录仅有 `deepseek_live.rs`；测试函数在 `API_KEY_DEEPSEEK` 不存在时直接 `return`。citeturn41view0turn43view1turn43view0 | 这说明仓库缺少“可离线、可稳定复现”的 provider contract test 和端到端回放测试。 |
 | CI/CD | **没有 GitHub Actions 流水线**。 | Actions 页面显示的是通用“Automate your workflow”落地页，而不是仓库工作流列表。citeturn39view0 | 代码质量目前依赖开发者手工执行 `cargo fmt/clippy/test` 与前端 typecheck/build。README 确实只给出手工命令。citeturn45view0 |
@@ -308,7 +308,7 @@ function studioReducer(state: StudioState, action: StudioAction): StudioState {
 | 可靠性指标 | 在高频流式输出下，事件排水不因 `Lagged` 退出；至少有 1 套“多 delta / 工具审批 / 中断 / subagent”回放回归样本。当前生产代码与测试代码对 lag 的处理不一致，应被消除。citeturn50view3turn43view0turn43view1 |
 | 测试指标 | Rust 侧按官方建议同时补 unit tests 与 integration tests；前端补 reducer/事件处理测试；关键桌面命令有 contract test。citeturn49search0 |
 | CI/CD 指标 | Linux/macOS/Windows 统一执行 `cargo fmt`、`cargo clippy -- -D warnings`、crate tests、前端 typecheck/build；从“手工命令”升级为自动流水线。当前仓库尚无工作流。citeturn45view0turn39view0 |
-| 安全指标 | 不再默认把明文 token 暴露给 UI 表单回传链路；Tauri CSP 不再是 `null`；bash/文件工具的审批文档与运行时实现保持一致。citeturn28view1turn46view0turn48search0turn15view2turn47view2 |
+| 安全指标 | 不再默认把明文 token 暴露给 UI 表单回传链路；Tauri CSP 不再是 `null`；exec/文件工具的审批文档与运行时实现保持一致。citeturn28view1turn46view0turn48search0turn15view2turn47view2 |
 
 ### 自动化测试与 CI/CD 改造建议
 

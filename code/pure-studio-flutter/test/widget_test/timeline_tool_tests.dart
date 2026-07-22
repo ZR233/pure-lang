@@ -141,7 +141,7 @@ void registerTimelineToolTests() {
         activityGroupId: 'tool-group:turn-tool:0',
         tool: TimelineToolPart(
           toolCallId: 'tool-call-1',
-          name: 'bash',
+          name: 'exec',
           arguments: jsonEncode({
             'command': 'cargo test -p pl-model\ncargo test -p pl-core',
           }),
@@ -249,7 +249,7 @@ void registerTimelineToolTests() {
         messageId: message.id,
         turnId: 'turn-1',
         order: 4,
-        name: 'bash',
+        name: 'exec',
         arguments: jsonEncode({'command': 'flutter test'}),
         activityGroupId: 'tool-group:turn-1:4',
       ),
@@ -282,7 +282,7 @@ void registerTimelineToolTests() {
 
     expect(find.text('read_file completed'), findsOneWidget);
     expect(find.text('search_files completed'), findsOneWidget);
-    expect(find.text('bash completed'), findsNothing);
+    expect(find.text('exec completed'), findsNothing);
     expect(find.textContaining('lib/a.dart'), findsOneWidget);
     expect(find.textContaining('activityGroupId'), findsOneWidget);
     expect(find.textContaining('flutter test'), findsNothing);
@@ -290,7 +290,7 @@ void registerTimelineToolTests() {
     await tester.tap(find.text('Tool activity').last);
     await tester.pump();
 
-    expect(find.text('bash completed'), findsOneWidget);
+    expect(find.text('exec completed'), findsOneWidget);
     expect(find.textContaining('flutter test'), findsOneWidget);
   });
 
@@ -314,7 +314,7 @@ void registerTimelineToolTests() {
         messageId: message.id,
         turnId: 'turn-tool',
         status: 'awaitingApproval',
-        name: 'bash',
+        name: 'exec',
         arguments: jsonEncode({'command': 'cargo test -p pl-core'}),
         activityGroupId: 'tool-group:turn-tool:0',
       ),
@@ -365,7 +365,7 @@ void registerTimelineToolTests() {
     await tester.tap(find.text('Tool activity'));
     await tester.pump();
 
-    expect(find.text('bash awaiting approval'), findsOneWidget);
+    expect(find.text('exec awaiting approval'), findsOneWidget);
     expect(find.text('read_file failed'), findsOneWidget);
     expect(find.textContaining('cargo test -p pl-core'), findsOneWidget);
     expect(find.textContaining('lib/main.dart'), findsOneWidget);

@@ -1,5 +1,7 @@
 use super::*;
+use crate::{CommandOutputSizes, CommandOutputTarget, CommandSpawnRequest};
 use pretty_assertions::assert_eq;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 fn tool_input(command: &str, session_id: &str, tool_id: &str) -> ToolInput {
     ToolInput {
@@ -10,23 +12,101 @@ fn tool_input(command: &str, session_id: &str, tool_id: &str) -> ToolInput {
     }
 }
 
-fn test_tool() -> BashTool {
-    let root = std::env::temp_dir().join(format!(
+type TestExecTool = ExecTool<LocalCommandBackend>;
+type TestWriteStdinTool = WriteStdinTool<LocalCommandBackend>;
+
+fn test_root() -> PathBuf {
+    std::env::temp_dir().join(format!(
         "pure-test-tool-{}",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos()
-    ));
-    std::fs::create_dir_all(&root).unwrap();
-    BashTool::new(root)
+    ))
 }
 
-fn shared_tools() -> (BashTool, WriteStdinTool) {
-    let manager = CommandProcessManager::default();
-    let bash = test_tool().with_process_manager(manager.clone());
-    let stdin = WriteStdinTool::new(manager);
-    (bash, stdin)
+fn test_backend() -> Arc<LocalCommandBackend> {
+    let root = test_root();
+    std::fs::create_dir_all(&root).unwrap();
+    Arc::new(LocalCommandBackend::new(root))
+}
+
+fn test_tool() -> TestExecTool {
+    ExecTool::new(test_backend())
+}
+
+fn test_tool_with_root() -> (TestExecTool, PathBuf) {
+    let root = test_root();
+    std::fs::create_dir_all(&root).unwrap();
+    let tool = ExecTool::new(Arc::new(LocalCommandBackend::new(root.clone())));
+    (tool, root)
+}
+
+fn shared_tools() -> (TestExecTool, TestWriteStdinTool) {
+    command_tool_pair(test_backend())
+}
+
+#[derive(Debug)]
+struct HostedContractBackend {
+    local: LocalCommandBackend,
+    publish_count: AtomicUsize,
+}
+
+impl CommandBackend for HostedContractBackend {
+    type Error = PureError;
+
+    async fn resolve_cwd(
+        &self,
+        cwd: Option<&std::path::Path>,
+        allow_workspace_escape: bool,
+    ) -> Result<PathBuf, Self::Error> {
+        self.local.resolve_cwd(cwd, allow_workspace_escape).await
+    }
+
+    async fn output_target(
+        &self,
+        session_id: &str,
+        tool_id: &str,
+        call_id: &str,
+        command: &str,
+    ) -> Result<CommandOutputTarget, Self::Error> {
+        let local = self
+            .local
+            .output_target(session_id, tool_id, call_id, command)
+            .await?;
+        Ok(CommandOutputTarget::new(
+            local.capture_file(),
+            PathBuf::from("hosted/output.log"),
+        ))
+    }
+
+    async fn spawn(
+        &self,
+        request: CommandSpawnRequest,
+    ) -> Result<tokio::process::Child, Self::Error> {
+        self.local.spawn(request).await
+    }
+
+    async fn publish_output(&self, _target: &CommandOutputTarget) -> Result<(), Self::Error> {
+        self.publish_count.fetch_add(1, Ordering::Relaxed);
+        Ok(())
+    }
+
+    async fn collect_output_artifacts(
+        &self,
+        _target: &CommandOutputTarget,
+        _sizes: CommandOutputSizes,
+    ) -> Result<Vec<serde_json::Value>, Self::Error> {
+        Ok(Vec::new())
+    }
+
+    async fn terminate(&self, process_id: &str, host_pid: Option<u32>) {
+        self.local.terminate(process_id, host_pid).await;
+    }
+
+    fn terminate_sync(&self, process_id: &str, host_pid: Option<u32>) {
+        self.local.terminate_sync(process_id, host_pid);
+    }
 }
 
 fn command_json(output: &ToolOutput) -> CommandJsonOutput {
@@ -125,6 +205,32 @@ async fn echoes_hello() {
     assert!(!output.truncated.stdout.was_truncated);
     assert!(output.truncated.stdout.content.contains("hello"));
     assert_eq!(output.exit_code, Some(0));
+}
+
+#[tokio::test]
+async fn injected_backend_keeps_the_exec_result_contract() {
+    let root = test_root();
+    std::fs::create_dir_all(&root).unwrap();
+    let backend = Arc::new(HostedContractBackend {
+        local: LocalCommandBackend::new(root.clone()),
+        publish_count: AtomicUsize::new(0),
+    });
+    let tool = ExecTool::new(backend.clone());
+
+    let output = tool
+        .execute(
+            tool_input("echo hosted", "hosted-session", "hosted-tool"),
+            test_context(),
+        )
+        .await
+        .unwrap();
+    let result = command_json(&output);
+
+    assert_eq!(result.status, "completed");
+    assert_eq!(result.output_file, "hosted/output.log");
+    assert!(result.stdout.contains("hosted"));
+    assert!(backend.publish_count.load(Ordering::Relaxed) >= 1);
+    let _ = tokio::fs::remove_dir_all(root).await;
 }
 
 #[tokio::test]
@@ -259,7 +365,7 @@ async fn invalid_input_returns_error() {
 
 #[tokio::test]
 async fn defaults_to_workspace_root_as_current_directory() {
-    let tool = test_tool();
+    let (tool, root) = test_tool_with_root();
     let output = tool
         .execute(
             tool_input("echo marker > cwd-check.txt", "cwd-session", "cwd-tool"),
@@ -269,8 +375,8 @@ async fn defaults_to_workspace_root_as_current_directory() {
         .unwrap();
 
     assert_eq!(output.exit_code, Some(0));
-    assert!(tool.workspace_root.join("cwd-check.txt").exists());
-    let _ = tokio::fs::remove_file(tool.workspace_root.join("cwd-check.txt")).await;
+    assert!(root.join("cwd-check.txt").exists());
+    let _ = tokio::fs::remove_dir_all(root).await;
 }
 
 #[tokio::test]
@@ -281,7 +387,7 @@ async fn rejects_working_directory_outside_workspace() {
             ToolInput {
                 arguments: serde_json::json!({
                     "command": "echo no",
-                    "workingDirectory": ".."
+                    "cwd": ".."
                 }),
                 session_id: "cwd-session".to_string(),
                 tool_id: "escape-tool".to_string(),
@@ -296,8 +402,8 @@ async fn rejects_working_directory_outside_workspace() {
 
 #[tokio::test]
 async fn relative_working_directory_resolves_from_workspace_root() {
-    let tool = test_tool();
-    tokio::fs::create_dir_all(tool.workspace_root.join("subdir"))
+    let (tool, root) = test_tool_with_root();
+    tokio::fs::create_dir_all(root.join("subdir"))
         .await
         .unwrap();
     let output = tool
@@ -305,7 +411,7 @@ async fn relative_working_directory_resolves_from_workspace_root() {
             ToolInput {
                 arguments: serde_json::json!({
                     "command": "echo marker > cwd-check.txt",
-                    "workingDirectory": "subdir",
+                    "cwd": "subdir",
                 }),
                 session_id: "cwd-session".to_string(),
                 tool_id: "relative-cwd".to_string(),
@@ -317,14 +423,14 @@ async fn relative_working_directory_resolves_from_workspace_root() {
         .unwrap();
 
     assert_eq!(output.exit_code, Some(0));
-    assert!(tool.workspace_root.join("subdir/cwd-check.txt").exists());
-    let _ = tokio::fs::remove_dir_all(&tool.workspace_root).await;
+    assert!(root.join("subdir/cwd-check.txt").exists());
+    let _ = tokio::fs::remove_dir_all(root).await;
 }
 
 #[tokio::test]
 async fn full_access_allows_working_directory_outside_workspace() {
-    let tool = test_tool();
-    let outside = tool.workspace_root.parent().unwrap().to_path_buf();
+    let (tool, root) = test_tool_with_root();
+    let outside = root.parent().unwrap().to_path_buf();
     let mut context = test_context();
     context.options = crate::turn::TurnOptions::default()
         .with_permission_mode(crate::turn::PermissionMode::FullAccess);
@@ -333,7 +439,7 @@ async fn full_access_allows_working_directory_outside_workspace() {
             ToolInput {
                 arguments: serde_json::json!({
                     "command": "echo yes",
-                    "workingDirectory": outside,
+                    "cwd": outside,
                 }),
                 session_id: "cwd-session".to_string(),
                 tool_id: "full-access-cwd".to_string(),
@@ -388,8 +494,8 @@ async fn output_file_path_follows_convention() {
 
 #[tokio::test]
 async fn long_command_returns_process_id_then_can_be_polled() {
-    let (bash, stdin) = shared_tools();
-    let running = bash
+    let (exec, stdin) = shared_tools();
+    let running = exec
         .execute(
             ToolInput {
                 arguments: serde_json::json!({
@@ -440,8 +546,8 @@ async fn long_command_returns_process_id_then_can_be_polled() {
 
 #[tokio::test]
 async fn write_stdin_sends_input_to_running_process() {
-    let (bash, stdin) = shared_tools();
-    let running = bash
+    let (exec, stdin) = shared_tools();
+    let running = exec
         .execute(
             ToolInput {
                 arguments: serde_json::json!({
@@ -543,10 +649,10 @@ async fn timeout_terminates_background_process() {
 
 #[tokio::test]
 async fn process_limit_returns_recoverable_error() {
-    let manager = CommandProcessManager::new(1);
-    let bash = test_tool().with_process_manager(manager.clone());
+    let manager = CommandProcessManager::with_max_processes(test_backend(), 1);
+    let exec = test_tool().with_process_manager(manager.clone());
     let stdin = WriteStdinTool::new(manager);
-    let first = bash
+    let first = exec
         .execute(
             ToolInput {
                 arguments: serde_json::json!({
@@ -563,7 +669,7 @@ async fn process_limit_returns_recoverable_error() {
         .unwrap();
     let process_id = command_json(&first).process_id.unwrap();
 
-    let second = bash
+    let second = exec
         .execute(
             ToolInput {
                 arguments: serde_json::json!({

@@ -112,7 +112,7 @@ async fn configured_core(api_key: String, workspace: &Path) -> TurnEngine {
 fn live_prompt() -> String {
     r#"你正在一个临时 workspace 中执行真实集成测试。
 
-必须实际调用 `apply_patch` 工具修改 `notes.txt`，不要调用 `bash`，不要调用 `write_file`，不要把 patch 当作正文输出。
+必须实际调用 `apply_patch` 工具修改 `notes.txt`，不要调用 `exec`，不要调用 `write_file`，不要把 patch 当作正文输出。
 
 任务：把 `notes.txt` 中这一行：
 status: pending

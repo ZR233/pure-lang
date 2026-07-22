@@ -112,7 +112,7 @@ mod tests {
     fn permission_modes_decide_external_access() {
         let read = request("read_file");
         let write = request("write_file");
-        let bash = request("bash");
+        let exec = request("exec");
 
         let request_approval =
             TurnOptions::default().with_permission_mode(PermissionMode::RequestApproval);
@@ -131,7 +131,7 @@ mod tests {
 
         let auto_review = TurnOptions::default().with_permission_mode(PermissionMode::AutoReview);
         assert_eq!(
-            decide_tool_permission(&auto_review, &bash, WorkspaceAccess::ExternalAllowed,),
+            decide_tool_permission(&auto_review, &exec, WorkspaceAccess::ExternalAllowed,),
             PermissionDecision::NeedsAiReview {
                 workspace_access: WorkspaceAccess::ExternalAllowed
             }
@@ -139,7 +139,7 @@ mod tests {
 
         let full_access = TurnOptions::default().with_permission_mode(PermissionMode::FullAccess);
         assert_eq!(
-            decide_tool_permission(&full_access, &bash, WorkspaceAccess::WorkspaceOnly,),
+            decide_tool_permission(&full_access, &exec, WorkspaceAccess::WorkspaceOnly,),
             PermissionDecision::Approved {
                 workspace_access: WorkspaceAccess::ExternalAllowed
             }
@@ -199,10 +199,10 @@ mod tests {
     }
 
     #[test]
-    fn full_access_approves_bash_without_user_approval() {
+    fn full_access_approves_exec_without_user_approval() {
         let options = TurnOptions::default().with_permission_mode(PermissionMode::FullAccess);
         assert_eq!(
-            decide_tool_permission(&options, &request("bash"), WorkspaceAccess::WorkspaceOnly,),
+            decide_tool_permission(&options, &request("exec"), WorkspaceAccess::WorkspaceOnly,),
             PermissionDecision::Approved {
                 workspace_access: WorkspaceAccess::ExternalAllowed
             }
