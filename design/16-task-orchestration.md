@@ -99,7 +99,7 @@ reviewer。这样用户确认实施时的 clean working tree 检查只反映用�
 规划阶段的后台副作用污染。
 仓库准备阶段还必须幂等确保 Git 私有 `info/exclude` 包含 `.pure/worktrees/` 和
 `target/pure/`：前者避免 coordinator 创建的内部 worktree 污染主工作区 clean 门禁，
-后者避免 `bash` / `write_stdin` 的完整命令输出污染 executor 的 clean delivery 门禁；
+后者避免 `exec` / `write_stdin` 的完整命令输出污染 executor 的 clean delivery 门禁；
 不得为此修改或提交用户的 `.gitignore`。该规则同时适用于已有仓库与自动初始化仓库。
 计划确认 resolution 只有在任务启动边界完整成功后才可从 pending projection 移除。若 clean
 working tree 或其他启动预检失败，Flutter 必须捕获并展示错误，保持同一确认交互可见且可

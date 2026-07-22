@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -10,42 +10,46 @@ use super::command::process_manager::{
     CommandOutputObserver, CommandOutputSnapshot, CommandOutputStream, CommandProcessManager,
     CommandStartRequest, CommandWriteRequest,
 };
+use super::command::{CommandBackend, LocalCommandBackend};
 use super::truncation::{OutputTruncation, TruncationStrategy};
-use super::{Tool, ToolContext, ToolInput, ToolOutput, ToolPathPolicy, ToolRuntimeEvent};
+use super::{Tool, ToolContext, ToolInput, ToolOutput, ToolRuntimeEvent};
 
-const TOOL_OUTPUT_DIR: &str = "target/pure";
-const OUTPUT_LOG_FILE: &str = "output.log";
+pub const TOOL_EXEC: &str = "exec";
+pub const TOOL_WRITE_STDIN: &str = "write_stdin";
+
 const DEFAULT_TIMEOUT_SECS: u64 = 60;
 const DEFAULT_YIELD_TIME_MS: u64 = 10_000;
 const MIN_YIELD_TIME_MS: u64 = 250;
 const MAX_YIELD_TIME_MS: u64 = 30_000;
 const MAX_MODEL_OUTPUT_CHARS: usize = 64 * 1024;
 
-/// 执行 shell 命令并捕获输出的工具。
-///
-/// 短命令在当前工具调用内返回；长命令在 `yieldTimeMs` 后进入后台，
-/// 返回 `processId`，由 `write_stdin` 继续观察或写入 stdin。
-#[derive(Debug)]
-pub struct BashTool {
-    truncation: TruncationStrategy,
-    workspace_root: PathBuf,
-    default_timeout: Duration,
-    process_manager: CommandProcessManager,
-}
-
-/// 向后台命令写入 stdin 或轮询输出的工具。
+/// 启动命令并通过统一 workspace backend 执行的工具。
 #[derive(Debug, Clone)]
-pub struct WriteStdinTool {
-    process_manager: CommandProcessManager,
+pub struct ExecTool<B>
+where
+    B: CommandBackend,
+{
+    truncation: TruncationStrategy,
+    default_timeout: Duration,
+    process_manager: CommandProcessManager<B>,
 }
 
-/// BashTool 的结构化输入。
+/// 向 `exec` 启动的后台命令写入 stdin 或轮询输出。
+#[derive(Debug, Clone)]
+pub struct WriteStdinTool<B>
+where
+    B: CommandBackend,
+{
+    process_manager: CommandProcessManager<B>,
+}
+
+/// `exec` 的结构化输入。
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BashInput {
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ExecInput {
     pub command: String,
     #[serde(default)]
-    pub working_directory: Option<PathBuf>,
+    pub cwd: Option<PathBuf>,
     #[serde(default)]
     pub timeout_seconds: Option<u64>,
     #[serde(default)]
@@ -54,9 +58,9 @@ pub struct BashInput {
     pub max_output_chars: Option<usize>,
 }
 
-/// WriteStdinTool 的结构化输入。
+/// `write_stdin` 的结构化输入。
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WriteStdinInput {
     pub process_id: String,
     #[serde(default)]
@@ -81,13 +85,15 @@ struct CommandJsonOutput {
     message: String,
 }
 
-impl BashTool {
-    pub fn new(workspace_root: PathBuf) -> Self {
+impl<B> ExecTool<B>
+where
+    B: CommandBackend,
+{
+    pub fn new(backend: Arc<B>) -> Self {
         Self {
             truncation: TruncationStrategy::default(),
-            workspace_root,
             default_timeout: Duration::from_secs(DEFAULT_TIMEOUT_SECS),
-            process_manager: CommandProcessManager::default(),
+            process_manager: CommandProcessManager::new(backend),
         }
     }
 
@@ -101,40 +107,17 @@ impl BashTool {
         self
     }
 
-    pub(crate) fn with_process_manager(mut self, manager: CommandProcessManager) -> Self {
+    #[cfg(test)]
+    pub(crate) fn with_process_manager(mut self, manager: CommandProcessManager<B>) -> Self {
         self.process_manager = manager;
         self
     }
 
-    fn output_path(&self, session_id: &str, tool_id: &str) -> PathBuf {
-        self.workspace_root
-            .join(TOOL_OUTPUT_DIR)
-            .join(session_id)
-            .join(tool_id)
-            .join(OUTPUT_LOG_FILE)
-    }
-
-    fn parse_input(arguments: serde_json::Value, tool_name: &str) -> Result<BashInput, PureError> {
+    fn parse_input(arguments: serde_json::Value, tool_name: &str) -> Result<ExecInput, PureError> {
         serde_json::from_value(arguments).map_err(|error| PureError::ToolExecutionFailed {
             tool: tool_name.to_string(),
             error: format!("invalid input: {error}"),
         })
-    }
-
-    fn resolve_working_directory(
-        &self,
-        working_directory: Option<&Path>,
-        allow_workspace_escape: bool,
-    ) -> Result<PathBuf, PureError> {
-        let policy = ToolPathPolicy::new(
-            self.workspace_root.clone(),
-            allow_workspace_escape,
-            self.name(),
-        )?;
-        match working_directory {
-            Some(dir) => policy.resolve_existing_directory(dir, &dir.display().to_string()),
-            None => Ok(policy.root().to_path_buf()),
-        }
     }
 
     fn default_max_output_chars(&self) -> usize {
@@ -173,16 +156,35 @@ impl CommandOutputObserver for ToolResultOutputObserver {
     }
 }
 
-pub(crate) fn command_tool_pair(workspace_root: PathBuf) -> (BashTool, WriteStdinTool) {
-    let manager = CommandProcessManager::default();
+pub(crate) fn command_tool_pair<B>(backend: Arc<B>) -> (ExecTool<B>, WriteStdinTool<B>)
+where
+    B: CommandBackend,
+{
+    let manager = CommandProcessManager::new(backend);
     (
-        BashTool::new(workspace_root).with_process_manager(manager.clone()),
+        ExecTool {
+            truncation: TruncationStrategy::default(),
+            default_timeout: Duration::from_secs(DEFAULT_TIMEOUT_SECS),
+            process_manager: manager.clone(),
+        },
         WriteStdinTool::new(manager),
     )
 }
 
-impl WriteStdinTool {
-    pub(crate) fn new(process_manager: CommandProcessManager) -> Self {
+pub(crate) fn local_command_tool_pair(
+    workspace_root: PathBuf,
+) -> (
+    ExecTool<LocalCommandBackend>,
+    WriteStdinTool<LocalCommandBackend>,
+) {
+    command_tool_pair(Arc::new(LocalCommandBackend::new(workspace_root)))
+}
+
+impl<B> WriteStdinTool<B>
+where
+    B: CommandBackend,
+{
+    pub(crate) fn new(process_manager: CommandProcessManager<B>) -> Self {
         Self { process_manager }
     }
 
@@ -197,16 +199,16 @@ impl WriteStdinTool {
     }
 }
 
-impl Tool for BashTool {
+impl<B> Tool for ExecTool<B>
+where
+    B: CommandBackend,
+{
     fn name(&self) -> &str {
-        "bash"
+        TOOL_EXEC
     }
 
     fn description(&self) -> &str {
-        "Start a shell command and return a compact JSON result. If the command \
-         is still running after yieldTimeMs, the result includes processId; use \
-         write_stdin with that processId to wait, poll, or send stdin. Full \
-         stdout/stderr is saved to outputFile."
+        "Start a shell command in the agent workspace and return a compact JSON result. If the command is still running after yieldTimeMs, use write_stdin with the returned processId. Full output is saved to a workspace-relative outputFile."
     }
 
     fn input_schema(&self) -> serde_json::Value {
@@ -217,24 +219,28 @@ impl Tool for BashTool {
                     "type": "string",
                     "description": "The shell command to execute"
                 },
-                "workingDirectory": {
+                "cwd": {
                     "type": "string",
-                    "description": "Optional working directory for the command"
+                    "description": "Optional working directory relative to the agent workspace"
                 },
                 "timeoutSeconds": {
                     "type": "integer",
+                    "minimum": 1,
                     "description": "Optional total timeout in seconds (default: 60)"
                 },
                 "yieldTimeMs": {
                     "type": "integer",
-                    "description": "How long to wait before returning a running processId (default: 10000, clamped 250..30000)"
+                    "minimum": 0,
+                    "description": "How long to wait before returning a running processId (default: 10000, clamped 250..30000 when non-zero)"
                 },
                 "maxOutputChars": {
                     "type": "integer",
-                    "description": "Maximum stdout/stderr chars to include in the JSON result; full output remains in outputFile"
+                    "minimum": 1,
+                    "description": "Maximum stdout/stderr chars in the JSON result; full output remains in outputFile"
                 }
             },
-            "required": ["command"]
+            "required": ["command"],
+            "additionalProperties": false
         })
     }
 
@@ -244,34 +250,36 @@ impl Tool for BashTool {
         context: ToolContext,
     ) -> super::BoxFuture<'a, Result<ToolOutput, PureError>> {
         Box::pin(async move {
-            let bash_input = Self::parse_input(input.arguments, self.name())?;
-            let timeout = bash_input
+            let exec_input = Self::parse_input(input.arguments, self.name())?;
+            let timeout = exec_input
                 .timeout_seconds
                 .map(Duration::from_secs)
                 .unwrap_or(self.default_timeout);
-            let yield_time = yield_duration(bash_input.yield_time_ms);
-            let max_output_chars =
-                max_output_chars(bash_input.max_output_chars, self.default_max_output_chars());
-            let working_directory = self.resolve_working_directory(
-                bash_input.working_directory.as_deref(),
-                context.allows_workspace_escape(),
-            )?;
-            let output_file = self.output_path(&input.session_id, &input.tool_id);
             let observer = Arc::new(ToolResultOutputObserver {
                 event_tx: context.event_tx.clone(),
                 turn_id: input.session_id.clone(),
                 item_id: input.tool_id.clone(),
                 revision_base: input.revision_base,
             });
+            let call_id = context
+                .provider_call_id
+                .clone()
+                .unwrap_or_else(|| input.tool_id.clone());
             let snapshot = self
                 .process_manager
                 .start(CommandStartRequest {
-                    command: bash_input.command,
-                    working_directory,
+                    command: exec_input.command,
+                    cwd: exec_input.cwd,
+                    allow_workspace_escape: context.allows_workspace_escape(),
                     timeout,
-                    yield_time,
-                    max_output_chars,
-                    output_file,
+                    yield_time: yield_duration(exec_input.yield_time_ms),
+                    max_output_chars: max_output_chars(
+                        exec_input.max_output_chars,
+                        self.default_max_output_chars(),
+                    ),
+                    session_id: input.session_id,
+                    tool_id: input.tool_id,
+                    call_id,
                     cancellation_token: context.options.cancellation_token.clone(),
                     output_observer: Some(observer),
                 })
@@ -282,15 +290,16 @@ impl Tool for BashTool {
     }
 }
 
-impl Tool for WriteStdinTool {
+impl<B> Tool for WriteStdinTool<B>
+where
+    B: CommandBackend,
+{
     fn name(&self) -> &str {
-        "write_stdin"
+        TOOL_WRITE_STDIN
     }
 
     fn description(&self) -> &str {
-        "Write stdin to, or poll, a live process previously started by bash. \
-         Pass empty chars to wait without sending input. Does not start a new \
-         command or re-request command approval."
+        "Write stdin to, or poll, a live process previously started by exec. Pass empty chars to wait without sending input. Does not start a new command or re-request command approval."
     }
 
     fn input_schema(&self) -> serde_json::Value {
@@ -299,7 +308,7 @@ impl Tool for WriteStdinTool {
             "properties": {
                 "processId": {
                     "type": "string",
-                    "description": "processId returned by a running bash result"
+                    "description": "processId returned by a running exec result"
                 },
                 "chars": {
                     "type": "string",
@@ -307,14 +316,17 @@ impl Tool for WriteStdinTool {
                 },
                 "yieldTimeMs": {
                     "type": "integer",
-                    "description": "How long to wait for output or process exit (default: 10000, clamped 250..30000)"
+                    "minimum": 0,
+                    "description": "How long to wait for output or process exit (default: 10000, clamped 250..30000 when non-zero)"
                 },
                 "maxOutputChars": {
                     "type": "integer",
-                    "description": "Maximum stdout/stderr chars to include in the JSON result; full output remains in outputFile"
+                    "minimum": 1,
+                    "description": "Maximum stdout/stderr chars in the JSON result; full output remains in outputFile"
                 }
             },
-            "required": ["processId"]
+            "required": ["processId"],
+            "additionalProperties": false
         })
     }
 
@@ -346,15 +358,16 @@ impl Tool for WriteStdinTool {
 }
 
 fn yield_duration(value: Option<u64>) -> Duration {
-    Duration::from_millis(
-        value
-            .unwrap_or(DEFAULT_YIELD_TIME_MS)
-            .clamp(MIN_YIELD_TIME_MS, MAX_YIELD_TIME_MS),
-    )
+    let millis = match value {
+        Some(0) => 0,
+        Some(value) => value.clamp(MIN_YIELD_TIME_MS, MAX_YIELD_TIME_MS),
+        None => DEFAULT_YIELD_TIME_MS,
+    };
+    Duration::from_millis(millis)
 }
 
 fn max_output_chars(value: Option<usize>, default: usize) -> usize {
-    value.unwrap_or(default).min(MAX_MODEL_OUTPUT_CHARS)
+    value.unwrap_or(default).clamp(1, MAX_MODEL_OUTPUT_CHARS)
 }
 
 fn tool_output_from_snapshot(
@@ -362,6 +375,7 @@ fn tool_output_from_snapshot(
     tool: &str,
     revision_base: u64,
 ) -> Result<ToolOutput, PureError> {
+    let capture_file = snapshot.capture_file.clone();
     let output = CommandJsonOutput {
         status: snapshot.status,
         process_id: snapshot.process_id,
@@ -377,18 +391,24 @@ fn tool_output_from_snapshot(
             tool: tool.to_string(),
             error: format!("failed to serialize command output: {error}"),
         })?;
+    let mut runtime_events = vec![ToolRuntimeEvent::ToolResultRevision {
+        revision: revision_base.saturating_add(snapshot.output_revision),
+    }];
+    if !snapshot.output_artifacts.is_empty() {
+        runtime_events.push(ToolRuntimeEvent::OutputArtifacts {
+            artifacts: snapshot.output_artifacts,
+        });
+    }
     Ok(ToolOutput {
         description,
         truncated: OutputTruncation {
             stdout: snapshot.stdout,
             stderr: snapshot.stderr,
         },
-        output_file: snapshot.output_file,
+        output_file: capture_file,
         exit_code: snapshot.exit_code,
         timed_out: snapshot.timed_out,
-        runtime_events: vec![ToolRuntimeEvent::ToolResultRevision {
-            revision: revision_base.saturating_add(snapshot.output_revision),
-        }],
+        runtime_events,
     })
 }
 

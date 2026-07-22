@@ -7,11 +7,10 @@ use crate::config::ToolCapabilityConfig;
 /// 共享工具 schema 导出选项。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SharedToolSchemaOptions {
-    pub bash: bool,
+    pub exec: bool,
     pub workspace_files: bool,
     pub ask_user: bool,
     pub git: bool,
-    pub container: bool,
     pub mcp_resources: bool,
     pub todo: bool,
     pub plan_exit: bool,
@@ -20,11 +19,10 @@ pub struct SharedToolSchemaOptions {
 impl SharedToolSchemaOptions {
     pub fn from_capabilities(capabilities: &ToolCapabilityConfig) -> Self {
         Self {
-            bash: capabilities.bash,
+            exec: capabilities.exec,
             workspace_files: capabilities.workspace_files,
             ask_user: capabilities.ask_user,
             git: capabilities.git,
-            container: capabilities.container,
             mcp_resources: capabilities.mcp,
             todo: true,
             plan_exit: true,

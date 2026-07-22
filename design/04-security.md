@@ -12,9 +12,9 @@ Pure v1 的权限模式是本地策略层，不是 OS 沙箱、网络沙箱或�
 
 权限模式：
 
-- `request-approval`：默认模式。workspace 内文件读写、`apply_patch`、项目 skill 写入和 workspace cwd 的 `bash` 直接放行；工具请求访问 workspace 外路径或 workspace 外 cwd 时请求用户批准。
+- `request-approval`：默认模式。workspace 内文件读写、`apply_patch`、项目 skill 写入和 workspace cwd 的 `exec` 直接放行；工具请求访问 workspace 外路径或 workspace 外 cwd 时请求用户批准。
 - `auto-review`：workspace 内行为同 `request-approval`；工具请求访问 workspace 外路径或 workspace 外 cwd 时交给 reviewer 模型审批。reviewer 只返回是否批准，不执行工具。
-- `full-access`：所有已注册工具在策略层直接放行；文件工具可解析 workspace 外路径，`bash.workingDirectory` 可指向 workspace 外已存在目录。
+- `full-access`：所有已注册工具在策略层直接放行；本地文件 backend 可解析 workspace 外路径，`exec.cwd` 可指向 workspace 外已存在目录。
 
 execution profile 的工具 effect 白名单优先于权限模式。即使当前权限模式是 `full-access`，task planner、explorer 和 reviewer 也不能获得未声明或越权的写入工具。planner 仅在 design 更新和 merge 冲突阶段获得路径受限写权限。
 
@@ -44,7 +44,7 @@ execution profile 的工具 effect 白名单优先于权限模式。即使当前
 - `apply_patch` 直接改文件，不经 shell 转发
 - 符号链接目标不可确认或越界时拒绝
 
-当用户显式选择 `full-access` 时，Pure 放宽文件工具和 `bash.workingDirectory` 的 workspace 边界：绝对路径和 `..` 可以解析到 workspace 外。该模式仍要求目标自身或其最近存在父目录可解析，只影响 Pure 工具的本地策略，不代表系统级完全隔离或提权。
+当用户显式选择 `full-access` 时，Pure 放宽本地文件 backend 和 `exec.cwd` 的 workspace 边界：绝对路径和 `..` 可以解析到 workspace 外。该模式仍要求目标自身或其最近存在父目录可解析，只影响 Pure 工具的本地策略，不代表系统级完全隔离或提权；容器或远程 backend 可以继续拒绝越界路径。
 
 ## 4.4 凭据暴露面
 

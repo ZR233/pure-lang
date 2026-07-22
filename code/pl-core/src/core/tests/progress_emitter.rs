@@ -9,7 +9,7 @@ fn progress_emitter_sends_runtime_commentary_by_verbosity() {
 
     progress.milestone("正在准备上下文。");
     progress.heartbeat("等待模型响应。");
-    progress.tool_detail("工具 `bash` 已完成。");
+    progress.tool_detail("工具 `exec` 已完成。");
 
     let first = event_rx.try_recv().unwrap();
     assert!(event_rx.try_recv().is_err());
@@ -30,7 +30,7 @@ fn progress_emitter_sends_tool_detail_only_when_verbose() {
     let (normal_tx, mut normal_rx) = tokio::sync::broadcast::channel(8);
     let mut normal =
         progress::ProgressEmitter::new(normal_tx, "turn-1", progress::ProgressVerbosity::Normal);
-    normal.tool_detail("工具 `bash` 已完成。");
+    normal.tool_detail("工具 `exec` 已完成。");
     normal.tool_detail("工具结果已写入上下文，准备继续调用模型。");
     normal.tool_detail("模型请求调用 2 个工具。");
     assert!(normal_rx.try_recv().is_err());
@@ -38,7 +38,7 @@ fn progress_emitter_sends_tool_detail_only_when_verbose() {
     let (verbose_tx, mut verbose_rx) = tokio::sync::broadcast::channel(8);
     let mut verbose =
         progress::ProgressEmitter::new(verbose_tx, "turn-1", progress::ProgressVerbosity::Verbose);
-    verbose.tool_detail("工具 `bash` 已完成。");
+    verbose.tool_detail("工具 `exec` 已完成。");
     verbose.tool_detail("工具结果已写入上下文，准备继续调用模型。");
     verbose.tool_detail("模型请求调用 2 个工具。");
 
@@ -47,7 +47,7 @@ fn progress_emitter_sends_tool_detail_only_when_verbose() {
     };
     assert_eq!(first.source, TracePartSource::Runtime);
     assert_eq!(first.text_channel, Some(TraceTextChannel::Commentary));
-    assert_eq!(first.content, "工具 `bash` 已完成。");
+    assert_eq!(first.content, "工具 `exec` 已完成。");
 
     let AgentEvent::TracePartCompleted { item: second } = verbose_rx.try_recv().unwrap() else {
         panic!("expected completed progress part");

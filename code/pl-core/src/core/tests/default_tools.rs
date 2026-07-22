@@ -3,13 +3,12 @@ use crate::ToolEffect;
 use pretty_assertions::assert_eq;
 
 #[test]
-fn shared_tool_schemas_can_describe_container_workspace_surface() {
+fn shared_tool_schemas_describe_host_independent_workspace_surface() {
     let names = shared_tool_schemas(SharedToolSchemaOptions {
-        bash: false,
+        exec: true,
         workspace_files: true,
         ask_user: true,
         git: true,
-        container: true,
         mcp_resources: false,
         todo: true,
         plan_exit: false,
@@ -21,6 +20,8 @@ fn shared_tool_schemas_can_describe_container_workspace_surface() {
     assert_eq!(
         names,
         vec![
+            "exec",
+            "write_stdin",
             "read_file",
             "list_files",
             "search_files",
@@ -39,8 +40,6 @@ fn shared_tool_schemas_can_describe_container_workspace_surface() {
             "git_push",
             "git_workspace_info",
             "git_sync_default_branch",
-            "container_exec",
-            "container_copy",
         ]
     );
 }
@@ -48,11 +47,10 @@ fn shared_tool_schemas_can_describe_container_workspace_surface() {
 #[test]
 fn shared_tool_names_match_shared_schema_order() {
     let options = SharedToolSchemaOptions {
-        bash: false,
+        exec: true,
         workspace_files: true,
         ask_user: true,
         git: true,
-        container: true,
         mcp_resources: true,
         todo: true,
         plan_exit: false,
@@ -80,12 +78,12 @@ fn session_note_tools_are_available_to_read_only_plan_policy() {
 #[test]
 fn shared_tool_schema_options_can_disable_plan_exit_fluently() {
     let options = SharedToolSchemaOptions::from_capabilities(
-        &crate::config::ToolCapabilityConfig::container_workspace(),
+        &crate::config::ToolCapabilityConfig::hosted_workspace(),
     )
     .with_plan_exit(false);
     let names = shared_tool_names(options);
 
-    assert!(names.contains(&"container_exec".to_string()));
+    assert!(names.contains(&"exec".to_string()));
     assert!(names.contains(&"git_status".to_string()));
     assert!(!names.contains(&"plan_exit".to_string()));
 }
@@ -141,7 +139,7 @@ fn shared_tool_schemas_can_include_mcp_resource_tools() {
 }
 
 #[test]
-fn shared_tool_schemas_keep_git_and_container_opt_in() {
+fn shared_tool_schemas_keep_exec_and_git_opt_in() {
     let names = shared_tool_schemas(SharedToolSchemaOptions {
         workspace_files: true,
         ask_user: true,
@@ -156,7 +154,7 @@ fn shared_tool_schemas_keep_git_and_container_opt_in() {
     assert!(names.contains(&"request_user_input".to_string()));
     assert!(names.contains(&"update_todo_list".to_string()));
     assert!(!names.contains(&"git_status".to_string()));
-    assert!(!names.contains(&"container_exec".to_string()));
+    assert!(!names.contains(&"exec".to_string()));
     assert!(!names.contains(&"spawn_agent".to_string()));
 }
 
@@ -167,7 +165,7 @@ async fn default_tools_register_shared_tools_without_product_collaboration() {
     core.register_default_tools(std::env::temp_dir(), Some("rules".to_string()))
         .await;
 
-    assert!(core.tools.get("bash").is_some());
+    assert!(core.tools.get("exec").is_some());
     assert!(core.tools.get("write_stdin").is_some());
     assert!(core.tools.get("spawn_agent").is_none());
     assert!(core.tools.get("wait_agent").is_none());
@@ -198,33 +196,36 @@ async fn default_capabilities_keep_product_tools_disabled() {
     let capabilities = crate::config::ToolCapabilityConfig::default();
 
     assert!(!capabilities.git);
-    assert!(!capabilities.docker);
-    assert!(!capabilities.container);
 }
 
 #[tokio::test]
 async fn default_tool_builder_exposes_only_framework_independent_names() {
     let mut core = TurnEngine::default_provider().unwrap();
-    let capabilities = crate::config::ToolCapabilityConfig {
-        container: true,
-        git: true,
-        ..Default::default()
-    };
+    let capabilities = crate::config::ToolCapabilityConfig::hosted_workspace();
+    let workspace_root = std::env::temp_dir();
 
-    ToolSetBuilder::from_capabilities(capabilities)
-        .with_container_tools(std::sync::Arc::new(FakeContainerBackend))
+    ToolSetBuilder::host_provided(capabilities)
+        .with_command_backend(std::sync::Arc::new(crate::tool::LocalCommandBackend::new(
+            workspace_root.clone(),
+        )))
+        .with_workspace_file_backend(std::sync::Arc::new(
+            crate::tool::ContainerWorkspaceFileBackend::new(std::sync::Arc::new(
+                FakeContainerBackend,
+            )),
+        ))
         .with_git_tools(
             crate::tool::GitWorkspaceConfig::local(std::env::temp_dir()),
             std::sync::Arc::new(crate::tool::LocalExecutionBackend),
             std::sync::Arc::new(crate::tool::NoGitCredentialProvider),
         )
-        .register(&mut core, std::env::temp_dir(), None)
+        .register(&mut core, workspace_root, None)
         .await;
 
     let names = core.tools.names();
     for canonical in [
         "git_workspace_info",
-        "container_copy",
+        "exec",
+        "write_stdin",
         "read_file",
         "list_files",
         "search_files",
@@ -253,6 +254,10 @@ async fn default_tool_builder_exposes_only_framework_independent_names() {
         "github_api_get",
         "container_cp_upload",
         "container_cp_download",
+        "container_exec",
+        "container_copy",
+        "bash",
+        "run_in_container",
     ] {
         assert!(
             !names.contains(&removed),
@@ -349,17 +354,17 @@ fn git_schemas_use_codex_camel_case_fields() {
 }
 
 #[tokio::test]
-async fn tool_set_builder_can_disable_shell() {
+async fn tool_set_builder_can_disable_exec() {
     let mut core = TurnEngine::default_provider().unwrap();
     let capabilities = crate::config::ToolCapabilityConfig {
-        bash: false,
+        exec: false,
         ..Default::default()
     };
 
     core.register_tools_with_capabilities(std::env::temp_dir(), None, capabilities)
         .await;
 
-    assert!(core.tools.get("bash").is_none());
+    assert!(core.tools.get("exec").is_none());
     assert!(core.tools.get("write_stdin").is_none());
     assert!(core.tools.get("spawn_agent").is_none());
     assert!(core.tools.get("wait_agent").is_none());
@@ -454,44 +459,51 @@ impl crate::tool::ContainerBackend for FakeContainerBackend {
 }
 
 #[tokio::test]
-async fn tool_set_builder_registers_container_only_with_backend() {
-    let capabilities = crate::config::ToolCapabilityConfig {
-        container: true,
-        ..Default::default()
-    };
+async fn host_provided_tool_set_requires_explicit_workspace_backends() {
+    let capabilities = crate::config::ToolCapabilityConfig::hosted_workspace();
     let schema_names_without_backend =
-        ToolSetBuilder::from_capabilities(capabilities.clone()).shared_tool_names();
+        ToolSetBuilder::host_provided(capabilities.clone()).shared_tool_names();
     let mut core = TurnEngine::default_provider().unwrap();
 
-    ToolSetBuilder::from_capabilities(capabilities.clone())
+    ToolSetBuilder::host_provided(capabilities.clone())
         .register(&mut core, std::env::temp_dir(), None)
         .await;
 
-    assert!(!schema_names_without_backend.contains(&"container_exec".to_string()));
-    assert!(!schema_names_without_backend.contains(&"container_copy".to_string()));
+    assert!(!schema_names_without_backend.contains(&"exec".to_string()));
     assert!(!schema_names_without_backend.contains(&"read_file".to_string()));
     assert!(!schema_names_without_backend.contains(&"list_files".to_string()));
     assert!(!schema_names_without_backend.contains(&"search_files".to_string()));
     assert!(!schema_names_without_backend.contains(&"apply_patch".to_string()));
-    assert!(core.tools.get("container_exec").is_none());
-    assert!(core.tools.get("container_copy").is_none());
+    assert!(core.tools.get("exec").is_none());
+    assert!(core.tools.get("write_stdin").is_none());
     assert!(core.tools.get("read_file").is_none());
     assert!(core.tools.get("list_files").is_none());
     assert!(core.tools.get("search_files").is_none());
     assert!(core.tools.get("apply_patch").is_none());
 
     let mut core = TurnEngine::default_provider().unwrap();
-    ToolSetBuilder::from_capabilities(capabilities)
-        .with_container_tools(std::sync::Arc::new(FakeContainerBackend))
+    ToolSetBuilder::host_provided(capabilities)
+        .with_command_backend(std::sync::Arc::new(crate::tool::LocalCommandBackend::new(
+            std::env::temp_dir(),
+        )))
+        .with_workspace_file_backend(std::sync::Arc::new(
+            crate::tool::ContainerWorkspaceFileBackend::new(std::sync::Arc::new(
+                FakeContainerBackend,
+            )),
+        ))
         .register(&mut core, std::env::temp_dir(), None)
         .await;
 
-    assert!(core.tools.get("container_exec").is_some());
+    assert!(core.tools.get("exec").is_some());
+    assert!(core.tools.get("write_stdin").is_some());
     assert!(core.tools.get("read_file").is_some());
     assert!(core.tools.get("list_files").is_some());
     assert!(core.tools.get("search_files").is_some());
     assert!(core.tools.get("apply_patch").is_some());
-    assert!(core.tools.get("container_copy").is_some());
+    assert!(core.tools.get("container_exec").is_none());
+    assert!(core.tools.get("container_copy").is_none());
+    assert!(core.tools.get("bash").is_none());
+    assert!(core.tools.get("run_in_container").is_none());
 }
 
 #[derive(Debug, Clone, Default)]
@@ -647,22 +659,25 @@ async fn tool_set_builder_registers_host_mcp_tools() {
 
 #[tokio::test]
 async fn tool_set_builder_respects_allowed_tools() {
-    let capabilities = crate::config::ToolCapabilityConfig {
-        container: true,
-        git: true,
-        ..Default::default()
-    };
+    let capabilities = crate::config::ToolCapabilityConfig::hosted_workspace();
     let mut core = TurnEngine::default_provider().unwrap();
 
-    let builder = ToolSetBuilder::from_capabilities(capabilities)
+    let builder = ToolSetBuilder::host_provided(capabilities)
         .with_allowed_tools([
-            "container_exec",
+            "exec",
             "read_file",
             "git_status",
             "request_user_input",
             "update_todo_list",
         ])
-        .with_container_tools(std::sync::Arc::new(FakeContainerBackend))
+        .with_command_backend(std::sync::Arc::new(crate::tool::LocalCommandBackend::new(
+            std::env::temp_dir(),
+        )))
+        .with_workspace_file_backend(std::sync::Arc::new(
+            crate::tool::ContainerWorkspaceFileBackend::new(std::sync::Arc::new(
+                FakeContainerBackend,
+            )),
+        ))
         .with_git_tools(
             crate::tool::GitWorkspaceConfig::local(std::env::temp_dir()),
             std::sync::Arc::new(crate::tool::LocalExecutionBackend),
@@ -681,20 +696,23 @@ async fn tool_set_builder_respects_allowed_tools() {
     assert_eq!(
         schema_names,
         vec![
+            "exec",
             "read_file",
             "request_user_input",
             "update_todo_list",
             "git_status",
-            "container_exec",
         ]
     );
-    assert!(core.tools.get("container_exec").is_some());
+    assert!(core.tools.get("exec").is_some());
     assert!(core.tools.get("read_file").is_some());
     assert!(core.tools.get("git_status").is_some());
     assert!(core.tools.get("request_user_input").is_some());
     assert!(core.tools.get("update_todo_list").is_some());
 
     assert!(core.tools.get("container_copy").is_none());
+    assert!(core.tools.get("container_exec").is_none());
+    assert!(core.tools.get("bash").is_none());
+    assert!(core.tools.get("run_in_container").is_none());
     assert!(core.tools.get("list_files").is_none());
     assert!(core.tools.get("git_push").is_none());
     assert!(core.tools.get("plan_exit").is_none());
@@ -711,7 +729,7 @@ async fn profiled_local_workspace_registers_default_tools() {
 
     core.register_profile_tools().await;
 
-    assert!(core.tools.get("bash").is_some());
+    assert!(core.tools.get("exec").is_some());
     assert!(core.tools.get("read_file").is_some());
     assert!(core.tools.get("spawn_agent").is_none());
 }
@@ -777,7 +795,7 @@ async fn enabled_tools_snapshot_records_registered_tools() {
     let event = enabled_tools_event(&events);
 
     assert_eq!(event.turn_id, "turn-1");
-    assert!(event.tools.contains(&"bash".to_string()));
+    assert!(event.tools.contains(&"exec".to_string()));
     assert!(event.tools.contains(&"read_file".to_string()));
     assert!(event.tools.contains(&"plan_exit".to_string()));
     assert!(event.tools.contains(&"write_file".to_string()));

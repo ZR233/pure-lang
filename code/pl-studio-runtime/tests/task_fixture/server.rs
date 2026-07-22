@@ -268,18 +268,18 @@ async fn executor_response(state: &ScriptState, step: usize) -> Result<(&'static
             ),
         ),
         1 => (
-            "bash(git add)",
+            "exec(git add)",
             tool_call(
                 "executor-add",
-                "bash",
+                "exec",
                 serde_json::json!({"command": "git add -- src/feature.txt"}),
             ),
         ),
         2 => (
-            "bash(git commit)",
+            "exec(git commit)",
             tool_call(
                 "executor-commit",
-                "bash",
+                "exec",
                 serde_json::json!({
                     "command": "git -c user.name=Pure -c user.email=pure@local commit -m \"test: add offline task fixture\""
                 }),

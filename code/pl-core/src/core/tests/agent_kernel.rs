@@ -266,7 +266,7 @@ async fn agent_kernel_host_profile_exposes_only_product_tools() {
     .await;
 
     assert_eq!(kernel.tool_names(), vec!["product_echo".to_string()]);
-    assert!(kernel.core().tools.get("bash").is_none());
+    assert!(kernel.core().tools.get("exec").is_none());
     assert!(kernel.core().tools.get("read_file").is_none());
     assert!(kernel.core().tools.get("spawn_agent").is_none());
     assert!(kernel.core().tools.get("git_status").is_none());
@@ -284,7 +284,7 @@ async fn agent_kernel_local_workspace_combines_shared_and_product_tools() {
     .await;
     let names = kernel.tool_names();
 
-    assert!(names.contains(&"bash".to_string()));
+    assert!(names.contains(&"exec".to_string()));
     assert!(names.contains(&"read_file".to_string()));
     assert!(!names.contains(&"spawn_agent".to_string()));
     assert!(names.contains(&"product_echo".to_string()));
@@ -295,15 +295,13 @@ async fn agent_kernel_local_workspace_combines_shared_and_product_tools() {
 async fn agent_kernel_builder_registers_explicit_tool_set() {
     let workspace_root = std::env::temp_dir().join("pl-core-agent-kernel-tool-set");
     let tool_set = ToolSetBuilder::from_capabilities(ToolCapabilityConfig {
-        bash: false,
+        exec: false,
         workspace_files: false,
         skills: false,
         mcp: false,
         lsp: false,
         ask_user: true,
         git: false,
-        docker: false,
-        container: false,
     });
     let kernel = AgentKernel::builder(
         TurnEngineBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None)).unwrap(),

@@ -22,9 +22,8 @@ use crate::instruction::{InstructionAssembler, InstructionAssemblyRequest};
 use crate::permission::parse_reviewer_decision;
 use crate::session::AgentSession;
 use crate::tool::{
-    ContainerBackend, ContainerTool, ContainerToolKind, ExecutionBackend, GitCredentialProvider,
-    GitTool, GitToolKind, GitWorkspaceConfig, SkillManageTool, SkillViewTool, SkillsListTool,
-    SubagentContext, ToolContext, ToolRegistry,
+    ExecutionBackend, GitCredentialProvider, GitTool, GitToolKind, GitWorkspaceConfig,
+    SkillManageTool, SkillViewTool, SkillsListTool, SubagentContext, ToolContext, ToolRegistry,
 };
 #[cfg(test)]
 use crate::tool::{LocalWorkspaceFileTool, WorkspaceAccess, WorkspaceFileToolKind, WriteFileTool};
@@ -222,16 +221,6 @@ impl TurnEngine {
                 backend.clone(),
                 credential_provider.clone(),
             ));
-        }
-    }
-
-    /// 注册 pl-core 提供的通用容器 workspace 工具集合。
-    pub fn register_container_tools<B>(&mut self, backend: std::sync::Arc<B>)
-    where
-        B: ContainerBackend + 'static,
-    {
-        for kind in ContainerToolKind::all() {
-            self.register_tool(ContainerTool::new(*kind, backend.clone()));
         }
     }
 

@@ -37,11 +37,7 @@ impl ToolEffect {
             | "git_diff" => Some(Self::Read),
             "write_file" | "apply_patch" | "create_directory" | "delete_path" | "copy_path"
             | "move_path" | "skill_manage" => Some(Self::WorkspaceWrite),
-            "bash"
-            | "write_stdin"
-            | "container_exec"
-            | "container_copy_to"
-            | "container_copy_from" => Some(Self::Process),
+            "exec" | "write_stdin" => Some(Self::Process),
             "spawn_agent" | "wait_agent" | "list_agents" | "send_input" | "close_agent" => {
                 Some(Self::AgentControl)
             }

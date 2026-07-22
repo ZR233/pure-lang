@@ -7,14 +7,14 @@ use serde_json::Value;
 
 use crate::config::ToolCapabilityConfig;
 use crate::tool::{
-    AskUserTool, ContainerBackend, ContainerToolKind, ContainerWorkspaceFileBackend, CopyPathTool,
-    CreateDirectoryTool, DeletePathTool, ExecutionBackend, GitCredentialProvider, GitToolKind,
-    GitWorkspaceConfig, LocalExecutionBackend, LocalWorkspaceFileTool,
+    AskUserTool, CommandBackend, CopyPathTool, CreateDirectoryTool, DeletePathTool,
+    ExecutionBackend, GitCredentialProvider, GitToolKind, GitWorkspaceConfig, LocalCommandBackend,
+    LocalExecutionBackend, LocalWorkspaceFileBackend, LocalWorkspaceFileTool,
     McpListResourceTemplatesRequest, McpListResourcesRequest, McpReadResourceRequest,
     McpResourceBackend, McpResourceTool, McpResourceToolKind, McpTool, McpToolBackend,
-    McpToolRequest, MovePathTool, NoContainerBackend, NoGitCredentialProvider, PlanExitTool,
-    SessionNoteTool, SessionNoteToolKind, StatPathTool, TodoListTool, Tool, WorkspaceFileTool,
-    WorkspaceFileToolKind, WriteFileTool, command_tool_pair,
+    McpToolRequest, MovePathTool, NoGitCredentialProvider, PlanExitTool, SessionNoteTool,
+    SessionNoteToolKind, StatPathTool, TodoListTool, Tool, WorkspaceFileBackend, WorkspaceFileTool,
+    WorkspaceFileToolKind, WriteFileTool, command_tool_pair, local_command_tool_pair,
 };
 
 use super::TurnEngine;
@@ -23,17 +23,20 @@ mod visibility;
 pub use visibility::{SharedToolSchemaOptions, ToolVisibilitySet};
 
 /// 按能力开关组装通用工具；agent 协作工具由 `AgentRuntimeHandle` 按 turn 注入。
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ToolSetBuilder<
     B = LocalExecutionBackend,
     P = NoGitCredentialProvider,
-    C = NoContainerBackend,
+    E = LocalCommandBackend,
+    W = LocalWorkspaceFileBackend,
     M = NoMcpResourceBackend,
     T = NoMcpToolBackend,
 > {
     capabilities: ToolCapabilityConfig,
+    local_backends: bool,
     git_runtime: Option<GitToolRuntime<B, P>>,
-    container_runtime: Option<ContainerToolRuntime<C>>,
+    command_runtime: Option<CommandToolRuntime<E>>,
+    workspace_file_runtime: Option<WorkspaceFileToolRuntime<W>>,
     mcp_resource_runtime: Option<McpResourceToolRuntime<M>>,
     mcp_tool_runtime: Option<McpToolRuntime<T>>,
     allowed_tools: Option<HashSet<String>>,
@@ -43,8 +46,24 @@ impl ToolSetBuilder {
     pub fn from_capabilities(capabilities: ToolCapabilityConfig) -> Self {
         Self {
             capabilities,
+            local_backends: true,
             git_runtime: None,
-            container_runtime: None,
+            command_runtime: None,
+            workspace_file_runtime: None,
+            mcp_resource_runtime: None,
+            mcp_tool_runtime: None,
+            allowed_tools: None,
+        }
+    }
+
+    /// 构造只使用宿主显式注入 backend 的工具集合。
+    pub fn host_provided(capabilities: ToolCapabilityConfig) -> Self {
+        Self {
+            capabilities,
+            local_backends: false,
+            git_runtime: None,
+            command_runtime: None,
+            workspace_file_runtime: None,
             mcp_resource_runtime: None,
             mcp_tool_runtime: None,
             allowed_tools: None,
@@ -52,7 +71,7 @@ impl ToolSetBuilder {
     }
 }
 
-impl<B, P, C, M, T> ToolSetBuilder<B, P, C, M, T> {
+impl<B, P, E, W, M, T> ToolSetBuilder<B, P, E, W, M, T> {
     pub fn with_allowed_tools<I, S>(mut self, allowed_tools: I) -> Self
     where
         I: IntoIterator<Item = S>,
@@ -67,37 +86,62 @@ impl<B, P, C, M, T> ToolSetBuilder<B, P, C, M, T> {
         config: GitWorkspaceConfig,
         backend: Arc<NB>,
         credential_provider: Arc<NP>,
-    ) -> ToolSetBuilder<NB, NP, C, M, T> {
+    ) -> ToolSetBuilder<NB, NP, E, W, M, T> {
         ToolSetBuilder {
             capabilities: self.capabilities,
+            local_backends: self.local_backends,
             git_runtime: Some(GitToolRuntime {
                 config,
                 backend,
                 credential_provider,
             }),
-            container_runtime: self.container_runtime,
+            command_runtime: self.command_runtime,
+            workspace_file_runtime: self.workspace_file_runtime,
             mcp_resource_runtime: self.mcp_resource_runtime,
             mcp_tool_runtime: self.mcp_tool_runtime,
             allowed_tools: self.allowed_tools,
         }
     }
 
-    pub fn with_container_tools<NC>(self, backend: Arc<NC>) -> ToolSetBuilder<B, P, NC, M, T> {
+    pub fn with_command_backend<NE>(self, backend: Arc<NE>) -> ToolSetBuilder<B, P, NE, W, M, T> {
         ToolSetBuilder {
             capabilities: self.capabilities,
+            local_backends: self.local_backends,
             git_runtime: self.git_runtime,
-            container_runtime: Some(ContainerToolRuntime { backend }),
+            command_runtime: Some(CommandToolRuntime { backend }),
+            workspace_file_runtime: self.workspace_file_runtime,
             mcp_resource_runtime: self.mcp_resource_runtime,
             mcp_tool_runtime: self.mcp_tool_runtime,
             allowed_tools: self.allowed_tools,
         }
     }
 
-    pub fn with_mcp_resource_tools<NM>(self, backend: Arc<NM>) -> ToolSetBuilder<B, P, C, NM, T> {
+    pub fn with_workspace_file_backend<NW>(
+        self,
+        backend: Arc<NW>,
+    ) -> ToolSetBuilder<B, P, E, NW, M, T> {
         ToolSetBuilder {
             capabilities: self.capabilities,
+            local_backends: self.local_backends,
             git_runtime: self.git_runtime,
-            container_runtime: self.container_runtime,
+            command_runtime: self.command_runtime,
+            workspace_file_runtime: Some(WorkspaceFileToolRuntime { backend }),
+            mcp_resource_runtime: self.mcp_resource_runtime,
+            mcp_tool_runtime: self.mcp_tool_runtime,
+            allowed_tools: self.allowed_tools,
+        }
+    }
+
+    pub fn with_mcp_resource_tools<NM>(
+        self,
+        backend: Arc<NM>,
+    ) -> ToolSetBuilder<B, P, E, W, NM, T> {
+        ToolSetBuilder {
+            capabilities: self.capabilities,
+            local_backends: self.local_backends,
+            git_runtime: self.git_runtime,
+            command_runtime: self.command_runtime,
+            workspace_file_runtime: self.workspace_file_runtime,
             mcp_resource_runtime: Some(McpResourceToolRuntime { backend }),
             mcp_tool_runtime: self.mcp_tool_runtime,
             allowed_tools: self.allowed_tools,
@@ -108,11 +152,13 @@ impl<B, P, C, M, T> ToolSetBuilder<B, P, C, M, T> {
         self,
         schemas: Vec<ToolSchema>,
         backend: Arc<NT>,
-    ) -> ToolSetBuilder<B, P, C, M, NT> {
+    ) -> ToolSetBuilder<B, P, E, W, M, NT> {
         ToolSetBuilder {
             capabilities: self.capabilities,
+            local_backends: self.local_backends,
             git_runtime: self.git_runtime,
-            container_runtime: self.container_runtime,
+            command_runtime: self.command_runtime,
+            workspace_file_runtime: self.workspace_file_runtime,
             mcp_resource_runtime: self.mcp_resource_runtime,
             mcp_tool_runtime: Some(McpToolRuntime { schemas, backend }),
             allowed_tools: self.allowed_tools,
@@ -125,11 +171,13 @@ impl<B, P, C, M, T> ToolSetBuilder<B, P, C, M, T> {
 
     pub fn shared_tool_schemas(&self) -> Vec<ToolSchema> {
         let mut options = SharedToolSchemaOptions::from_capabilities(&self.capabilities);
-        if self.capabilities.container && self.container_runtime.is_none() {
+        if !self.local_backends && self.workspace_file_runtime.is_none() {
             options.workspace_files = false;
         }
+        if !self.local_backends && self.command_runtime.is_none() {
+            options.exec = false;
+        }
         options.git = options.git && self.git_runtime.is_some();
-        options.container = options.container && self.container_runtime.is_some();
         options.mcp_resources = options.mcp_resources && self.mcp_resource_runtime.is_some();
         let mut schemas = shared_tool_schemas(options);
         if self.capabilities.mcp
@@ -157,11 +205,12 @@ impl<B, P, C, M, T> ToolSetBuilder<B, P, C, M, T> {
     }
 }
 
-impl<B, P, C, M, T> ToolSetBuilder<B, P, C, M, T>
+impl<B, P, E, W, M, T> ToolSetBuilder<B, P, E, W, M, T>
 where
     B: ExecutionBackend + 'static,
     P: GitCredentialProvider + 'static,
-    C: ContainerBackend + 'static,
+    E: CommandBackend,
+    W: WorkspaceFileBackend + 'static,
     M: McpResourceBackend + 'static,
     T: McpToolBackend + 'static,
 {
@@ -180,20 +229,25 @@ where
                 workspace_instructions.clone(),
             );
         }
-        if self.capabilities.bash {
-            let (bash, write_stdin) = command_tool_pair(workspace_root.clone());
-            register_if_allowed(core, bash, |name| self.tool_allowed(name));
+        if self.capabilities.exec && self.local_backends {
+            let (exec, write_stdin) = local_command_tool_pair(workspace_root.clone());
+            register_if_allowed(core, exec, |name| self.tool_allowed(name));
             register_if_allowed(core, write_stdin, |name| self.tool_allowed(name));
         }
-        let container_workspace = self.capabilities.container && self.container_runtime.is_some();
-        if self.capabilities.workspace_files && !self.capabilities.container {
+        if self.capabilities.exec
+            && let Some(runtime) = &self.command_runtime
+        {
+            let (exec, write_stdin) = command_tool_pair(runtime.backend.clone());
+            register_if_allowed(core, exec, |name| self.tool_allowed(name));
+            register_if_allowed(core, write_stdin, |name| self.tool_allowed(name));
+        }
+        if self.capabilities.workspace_files && self.local_backends {
             register_file_tools(core, |name| self.tool_allowed(name));
         }
         if self.capabilities.workspace_files
-            && container_workspace
-            && let Some(runtime) = &self.container_runtime
+            && let Some(runtime) = &self.workspace_file_runtime
         {
-            register_container_file_tools(core, runtime.backend.clone(), |name| {
+            register_workspace_file_tools(core, runtime.backend.clone(), |name| {
                 self.tool_allowed(name)
             });
         }
@@ -215,18 +269,6 @@ where
                         runtime.config.clone(),
                         runtime.backend.clone(),
                         runtime.credential_provider.clone(),
-                    ));
-                }
-            }
-        }
-        if self.capabilities.container
-            && let Some(runtime) = &self.container_runtime
-        {
-            for kind in ContainerToolKind::all() {
-                if self.tool_allowed(kind.name()) {
-                    core.register_tool(crate::tool::ContainerTool::new(
-                        *kind,
-                        runtime.backend.clone(),
                     ));
                 }
             }
@@ -260,9 +302,9 @@ where
 
 pub fn shared_tool_schemas(options: SharedToolSchemaOptions) -> Vec<ToolSchema> {
     let mut schemas = Vec::new();
-    if options.bash {
-        let (bash, write_stdin) = command_tool_pair(PathBuf::new());
-        schemas.push(bash.to_schema());
+    if options.exec {
+        let (exec, write_stdin) = local_command_tool_pair(PathBuf::new());
+        schemas.push(exec.to_schema());
         schemas.push(write_stdin.to_schema());
     }
     if options.workspace_files {
@@ -291,14 +333,6 @@ pub fn shared_tool_schemas(options: SharedToolSchemaOptions) -> Vec<ToolSchema> 
                 .iter()
                 .copied()
                 .map(GitToolKind::to_schema),
-        );
-    }
-    if options.container {
-        schemas.extend(
-            ContainerToolKind::all()
-                .iter()
-                .copied()
-                .map(ContainerToolKind::to_schema),
         );
     }
     if options.mcp_resources {
@@ -330,8 +364,13 @@ struct GitToolRuntime<B, P> {
 }
 
 #[derive(Debug, Clone)]
-struct ContainerToolRuntime<C> {
-    backend: Arc<C>,
+struct CommandToolRuntime<E> {
+    backend: Arc<E>,
+}
+
+#[derive(Debug, Clone)]
+struct WorkspaceFileToolRuntime<W> {
+    backend: Arc<W>,
 }
 
 #[derive(Debug, Clone)]
@@ -403,14 +442,13 @@ fn register_file_tools(core: &mut TurnEngine, allowed: impl Fn(&str) -> bool + C
     register_if_allowed(core, MovePathTool, allowed);
 }
 
-fn register_container_file_tools<C>(
+fn register_workspace_file_tools<W>(
     core: &mut TurnEngine,
-    backend: Arc<C>,
+    backend: Arc<W>,
     allowed: impl Fn(&str) -> bool,
 ) where
-    C: ContainerBackend + 'static,
+    W: WorkspaceFileBackend + 'static,
 {
-    let backend = Arc::new(ContainerWorkspaceFileBackend::new(backend));
     for kind in WorkspaceFileToolKind::all() {
         if allowed(kind.name()) {
             core.register_tool(WorkspaceFileTool::new(*kind, backend.clone()));

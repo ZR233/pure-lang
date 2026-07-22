@@ -58,7 +58,7 @@ fn budget_tracker_records_observability() {
     let mut tracker = BudgetTracker::new(TurnBudget::new(60_000));
 
     tracker.record_model_step();
-    tracker.record_tool_call("bash");
+    tracker.record_tool_call("exec");
     tracker.record_tool_call("wait_agent");
 
     let usage = tracker.usage();
@@ -73,7 +73,7 @@ fn budget_tracker_only_enforces_wall_clock() {
 
     for _ in 0..200 {
         tracker.record_model_step();
-        tracker.record_tool_call("bash");
+        tracker.record_tool_call("exec");
     }
 
     assert!(tracker.check_wall_clock().is_ok());

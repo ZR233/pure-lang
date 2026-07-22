@@ -71,6 +71,12 @@ impl HeadTailBuffer {
         String::from_utf8_lossy(&bytes).to_string()
     }
 
+    pub(super) fn total_bytes(&self) -> usize {
+        self.head_bytes
+            .saturating_add(self.tail_bytes)
+            .saturating_add(self.omitted_bytes)
+    }
+
     fn push_to_tail(&mut self, chunk: Vec<u8>) {
         if self.tail_budget == 0 {
             self.omitted_bytes = self.omitted_bytes.saturating_add(chunk.len());

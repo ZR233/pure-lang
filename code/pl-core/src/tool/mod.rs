@@ -1,10 +1,10 @@
 mod ask_user;
-mod bash;
 mod cache;
 mod command;
 mod container;
 mod context;
 mod contract;
+mod exec;
 mod file;
 mod git;
 mod lsp;
@@ -28,18 +28,25 @@ mod web_search;
 mod workspace_file;
 
 pub use ask_user::AskUserTool;
-pub(crate) use bash::command_tool_pair;
-pub use bash::{BashInput, BashTool, WriteStdinTool};
 pub use cache::{ToolCachePolicy, TurnToolCacheHandle};
+pub use command::process_manager::{
+    CommandOutputObserver, CommandOutputSnapshot, CommandOutputStream, CommandProcessManager,
+    CommandStartRequest, CommandWriteRequest,
+};
+pub use command::{
+    CommandBackend, CommandOutputSizes, CommandOutputTarget, CommandSpawnRequest,
+    LocalCommandBackend, command_output_model_path,
+};
 #[cfg(feature = "docker-tools")]
 pub use container::DockerCliContainerBackend;
 pub use container::{
     ContainerBackend, ContainerCopyFromRequest, ContainerCopyToRequest, ContainerExecOutput,
-    ContainerExecRequest, ContainerTool, ContainerToolExecution, ContainerToolKind,
-    NoContainerBackend, TOOL_CONTAINER_COPY, TOOL_CONTAINER_EXEC, execute_container_tool,
+    ContainerExecRequest, NoContainerBackend,
 };
 pub use context::*;
 pub use contract::*;
+pub use exec::{ExecInput, ExecTool, TOOL_EXEC, TOOL_WRITE_STDIN, WriteStdinTool};
+pub(crate) use exec::{command_tool_pair, local_command_tool_pair};
 pub use file::apply_patch::{Hunk as CodexPatchHunk, parse_patch as parse_codex_patch};
 pub use file::{
     CopyPathTool, CreateDirectoryTool, DeletePathTool, MovePathTool, StatPathTool, WriteFileTool,

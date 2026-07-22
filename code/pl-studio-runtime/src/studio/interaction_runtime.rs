@@ -326,7 +326,7 @@ mod tests {
                 agent_path: None,
             },
             payload: InteractionPayload::ToolApproval {
-                name: "bash".to_string(),
+                name: "exec".to_string(),
                 arguments: serde_json::json!({"command": "echo hi"}),
                 working_directory: None,
                 parent_agent_id: None,

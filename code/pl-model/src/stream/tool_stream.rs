@@ -367,7 +367,7 @@ mod tests {
             None,
             String::new(),
             Some(&call_id),
-            Some("bash".to_string()),
+            Some("exec".to_string()),
             ToolInputDeltaPayload::FunctionArguments("{\"cmd\":\"ec".to_string()),
         );
         let second = stream.append_delta(
@@ -382,7 +382,7 @@ mod tests {
                 None,
                 Some(&call_id),
                 "provider-tool-1",
-                Some("bash".to_string()),
+                Some("exec".to_string()),
                 None,
             )
             .unwrap()

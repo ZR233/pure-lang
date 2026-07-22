@@ -76,7 +76,7 @@ fn stream_accumulator_splits_reasoning_and_text_across_tool_boundary() {
                 stream_id: None,
                 item_id: "call_1".to_string(),
                 call_id: Some("call_1".to_string()),
-                name: Some("bash".to_string()),
+                name: Some("exec".to_string()),
                 payload_kind: crate::stream::event::ToolInputPayloadKind::FunctionArguments,
             },
             &event_tx,
@@ -88,7 +88,7 @@ fn stream_accumulator_splits_reasoning_and_text_across_tool_boundary() {
                 stream_id: None,
                 item_id: "call_1".to_string(),
                 call_id: Some("call_1".to_string()),
-                name: Some("bash".to_string()),
+                name: Some("exec".to_string()),
                 payload: Some(ToolCallDeltaPayload::FunctionArguments(
                     "{\"command\":\"pwd\"}".to_string(),
                 )),
@@ -264,7 +264,7 @@ fn stream_accumulator_terminal_snapshots_converge_with_live_deltas() {
                 stream_id: None,
                 item_id: "fc_1".to_string(),
                 call_id: Some("call_1".to_string()),
-                name: Some("bash".to_string()),
+                name: Some("exec".to_string()),
                 payload_delta: ToolCallDeltaPayload::FunctionArguments(
                     "{\"command\":\"pwd\"}".to_string(),
                 ),
@@ -278,7 +278,7 @@ fn stream_accumulator_terminal_snapshots_converge_with_live_deltas() {
                 stream_id: None,
                 item_id: "fc_1".to_string(),
                 call_id: Some("call_1".to_string()),
-                name: Some("bash".to_string()),
+                name: Some("exec".to_string()),
                 payload: Some(ToolCallDeltaPayload::FunctionArguments(
                     "{\"command\":\"pwd\"}".to_string(),
                 )),

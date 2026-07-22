@@ -34,7 +34,8 @@ pub(super) fn approval_request(
 
 pub(super) fn get_working_directory(arguments: &serde_json::Value) -> Option<String> {
     arguments
-        .get("workingDirectory")
+        .get("cwd")
+        .or_else(|| arguments.get("workingDirectory"))
         .or_else(|| arguments.get("working_directory"))
         .and_then(serde_json::Value::as_str)
         .map(ToOwned::to_owned)
@@ -64,7 +65,7 @@ pub(super) fn requested_paths_for_tool(name: &str, arguments: &serde_json::Value
         return argument_path(arguments, "filePath").into_iter().collect();
     }
     match name {
-        "bash" => get_working_directory(arguments).into_iter().collect(),
+        "exec" => get_working_directory(arguments).into_iter().collect(),
         "write_stdin" => Vec::new(),
         "read_file" | "write_file" | "stat_path" | "create_directory" | "delete_path" => {
             argument_path(arguments, "path").into_iter().collect()
@@ -125,7 +126,7 @@ pub(super) fn permission_risk_summary(tool_name: &str) -> &'static str {
         return "read-only LSP code intelligence query";
     }
     match tool_name {
-        "bash" => "shell command; may execute arbitrary process actions",
+        "exec" => "shell command; may execute arbitrary process actions",
         "write_stdin" => "stdin or polling for an already approved shell process",
         "write_file" => "file write; may create, overwrite, or append content",
         "create_directory" => "filesystem write; creates directories",
@@ -284,8 +285,8 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         let tool_call = ToolCall::function(
             "call-1",
-            "bash",
-            serde_json::json!({ "command": "pwd", "workingDirectory": ".." }),
+            "exec",
+            serde_json::json!({ "command": "pwd", "cwd": ".." }),
             None,
         );
 

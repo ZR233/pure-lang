@@ -16,7 +16,7 @@ use super::backend::{
     WorkspaceFileSearchRequest, WorkspaceFileSearchResult, WorkspaceFileStat,
     WorkspaceFileStatRequest, WorkspaceFileWriteRequest,
 };
-use super::container_path::resolve_container_copy_path;
+use super::container_path::resolve_container_workspace_path;
 
 const MAX_SEARCH_OUTPUT_TEXT_BYTES: usize = 4 * 1024;
 
@@ -110,7 +110,7 @@ where
         let bytes = self
             .backend
             .copy_from(ContainerCopyFromRequest {
-                path: resolve_container_copy_path(&request.path, request.cwd.as_deref())?,
+                path: resolve_container_workspace_path(&request.path, request.cwd.as_deref())?,
                 archive: false,
             })
             .await
@@ -131,7 +131,7 @@ where
     async fn write_text(&self, request: WorkspaceFileWriteRequest) -> Result<()> {
         self.backend
             .copy_to(ContainerCopyToRequest {
-                path: resolve_container_copy_path(&request.path, request.cwd.as_deref())?,
+                path: resolve_container_workspace_path(&request.path, request.cwd.as_deref())?,
                 content: request.content.into_bytes(),
             })
             .await
@@ -144,7 +144,7 @@ where
     }
 
     async fn remove_file(&self, request: WorkspaceFileRemoveRequest) -> Result<()> {
-        let path = resolve_container_copy_path(&request.path, request.cwd.as_deref())?;
+        let path = resolve_container_workspace_path(&request.path, request.cwd.as_deref())?;
         let command = format!("rm -f -- {}", shell_quote(&path));
         let output = self
             .backend

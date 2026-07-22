@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -10,9 +9,10 @@ use tokio::process::ChildStdin;
 use tokio::sync::{Mutex, Notify};
 use tokio_util::sync::CancellationToken;
 
+use super::backend::{
+    CommandBackend, CommandOutputSizes, CommandOutputTarget, CommandSpawnRequest,
+};
 use super::head_tail_buffer::HeadTailBuffer;
-use super::shell::shell_command;
-use crate::process::{configure_background_command, terminate_process_tree_sync};
 use crate::tool::truncation::TruncatedOutput;
 
 mod lifecycle;
@@ -27,22 +27,39 @@ use stream_io::{prepare_output_file, read_stderr, read_stdout};
 const DEFAULT_MAX_PROCESSES: usize = 16;
 const INTERNAL_BUFFER_BYTES: usize = 64 * 1024;
 
-#[derive(Debug, Clone)]
-pub(crate) struct CommandProcessManager {
+#[derive(Debug)]
+pub struct CommandProcessManager<B>
+where
+    B: CommandBackend,
+{
     state: Arc<Mutex<CommandProcessManagerState>>,
+    backend: Arc<B>,
+}
+
+impl<B> Clone for CommandProcessManager<B>
+where
+    B: CommandBackend,
+{
+    fn clone(&self) -> Self {
+        Self {
+            state: self.state.clone(),
+            backend: self.backend.clone(),
+        }
+    }
 }
 
 #[derive(Debug)]
 struct CommandProcessManagerState {
     entries: HashMap<String, Arc<CommandProcessEntry>>,
     next_id: u64,
+    starting: usize,
     max_processes: usize,
 }
 
 struct CommandProcessEntry {
     process_id: String,
     os_pid: Option<u32>,
-    output_file: PathBuf,
+    output_target: CommandOutputTarget,
     stdin: Mutex<Option<ChildStdin>>,
     state: Mutex<CommandProcessState>,
     notify: Notify,
@@ -55,7 +72,7 @@ impl std::fmt::Debug for CommandProcessEntry {
         f.debug_struct("CommandProcessEntry")
             .field("process_id", &self.process_id)
             .field("os_pid", &self.os_pid)
-            .field("output_file", &self.output_file)
+            .field("output_file", &self.output_target.model_file())
             .field("state", &self.state)
             .finish_non_exhaustive()
     }
@@ -90,13 +107,16 @@ enum CommandProcessTransition {
     StreamClosed(StreamKind),
 }
 
-pub(crate) struct CommandStartRequest {
+pub struct CommandStartRequest {
     pub command: String,
-    pub working_directory: PathBuf,
+    pub cwd: Option<PathBuf>,
+    pub allow_workspace_escape: bool,
     pub timeout: Duration,
     pub yield_time: Duration,
     pub max_output_chars: usize,
-    pub output_file: PathBuf,
+    pub session_id: String,
+    pub tool_id: String,
+    pub call_id: String,
     pub cancellation_token: Option<CancellationToken>,
     pub output_observer: Option<Arc<dyn CommandOutputObserver>>,
 }
@@ -105,18 +125,21 @@ impl std::fmt::Debug for CommandStartRequest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CommandStartRequest")
             .field("command", &self.command)
-            .field("working_directory", &self.working_directory)
+            .field("cwd", &self.cwd)
+            .field("allow_workspace_escape", &self.allow_workspace_escape)
             .field("timeout", &self.timeout)
             .field("yield_time", &self.yield_time)
             .field("max_output_chars", &self.max_output_chars)
-            .field("output_file", &self.output_file)
+            .field("session_id", &self.session_id)
+            .field("tool_id", &self.tool_id)
+            .field("call_id", &self.call_id)
             .field("cancellation_token", &self.cancellation_token.is_some())
             .finish_non_exhaustive()
     }
 }
 
 #[derive(Debug)]
-pub(crate) struct CommandWriteRequest {
+pub struct CommandWriteRequest {
     pub process_id: String,
     pub chars: String,
     pub yield_time: Duration,
@@ -124,7 +147,7 @@ pub(crate) struct CommandWriteRequest {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct CommandOutputSnapshot {
+pub struct CommandOutputSnapshot {
     pub status: String,
     pub process_id: Option<String>,
     pub exit_code: Option<i32>,
@@ -132,12 +155,14 @@ pub(crate) struct CommandOutputSnapshot {
     pub stdout: TruncatedOutput,
     pub stderr: TruncatedOutput,
     pub output_file: PathBuf,
+    pub capture_file: PathBuf,
     pub message: String,
     pub output_revision: u64,
+    pub output_artifacts: Vec<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CommandOutputStream {
+pub enum CommandOutputStream {
     Stdout,
     Stderr,
 }
@@ -146,17 +171,14 @@ pub(crate) enum CommandOutputStream {
 ///
 /// `CommandProcessManager` 在读取 stdout/stderr chunk 后调用实现者，
 /// 用于把后台进程输出投影到上层 timeline 或其他 live 观察通道。
-pub(crate) trait CommandOutputObserver: Send + Sync + 'static {
+pub trait CommandOutputObserver: Send + Sync + 'static {
     fn output_chunk(&self, stream: CommandOutputStream, chunk: &[u8], revision: u64);
 }
 
-impl Default for CommandProcessManager {
-    fn default() -> Self {
-        Self::new(DEFAULT_MAX_PROCESSES)
-    }
-}
-
-impl Drop for CommandProcessManager {
+impl<B> Drop for CommandProcessManager<B>
+where
+    B: CommandBackend,
+{
     fn drop(&mut self) {
         if Arc::strong_count(&self.state) != 1 {
             return;
@@ -170,83 +192,100 @@ impl Drop for CommandProcessManager {
             {
                 continue;
             }
-            terminate_process_tree_sync(entry.os_pid);
+            self.backend.terminate_sync(&entry.process_id, entry.os_pid);
         }
     }
 }
 
-impl CommandProcessManager {
-    pub(crate) fn new(max_processes: usize) -> Self {
+impl<B> CommandProcessManager<B>
+where
+    B: CommandBackend,
+{
+    pub fn new(backend: Arc<B>) -> Self {
+        Self::with_max_processes(backend, DEFAULT_MAX_PROCESSES)
+    }
+
+    pub fn with_max_processes(backend: Arc<B>, max_processes: usize) -> Self {
         Self {
             state: Arc::new(Mutex::new(CommandProcessManagerState {
                 entries: HashMap::new(),
                 next_id: 0,
+                starting: 0,
                 max_processes,
             })),
+            backend,
         }
     }
 
-    pub(crate) async fn start(
+    pub async fn start(
         &self,
         request: CommandStartRequest,
     ) -> Result<CommandOutputSnapshot, PureError> {
+        let working_directory = self
+            .backend
+            .resolve_cwd(request.cwd.as_deref(), request.allow_workspace_escape)
+            .await
+            .map_err(|error| tool_error("exec", error))?;
+        let output_target = self
+            .backend
+            .output_target(
+                &request.session_id,
+                &request.tool_id,
+                &request.call_id,
+                &request.command,
+            )
+            .await
+            .map_err(|error| tool_error("exec", error))?;
         prepare_output_file(
-            &request.output_file,
+            output_target.capture_file(),
             &request.command,
-            &request.working_directory,
+            &working_directory,
         )
         .await?;
 
-        let mut command = shell_command(&request.command);
-        command.current_dir(&request.working_directory);
-        command.stdin(Stdio::piped());
-        command.stdout(Stdio::piped());
-        command.stderr(Stdio::piped());
-        configure_background_command(&mut command);
-
-        let (process_id, entry, stdout, stderr) = {
-            let mut manager_state = self.state.lock().await;
-            if manager_state.entries.len() >= manager_state.max_processes {
-                return Err(tool_error(
-                    "bash",
-                    format!(
-                        "background process limit reached ({}). Wait for an existing process with write_stdin or let it finish before starting another command.",
-                        manager_state.max_processes
-                    ),
-                ));
-            }
-            manager_state.next_id = manager_state.next_id.saturating_add(1);
-            let next_id = manager_state.next_id;
-            let process_id = format!("proc-{next_id}");
-            let mut child = command
-                .spawn()
-                .map_err(|error| tool_error("bash", format!("failed to spawn command: {error}")))?;
-            let stdout = child.stdout.take();
-            let stderr = child.stderr.take();
-            let stdout_open = stdout.is_some();
-            let stderr_open = stderr.is_some();
-            let stdin = child.stdin.take();
-            let entry = Arc::new(CommandProcessEntry {
+        let process_id = self.reserve_process_id().await?;
+        let child = self
+            .backend
+            .spawn(CommandSpawnRequest {
                 process_id: process_id.clone(),
-                os_pid: child.id(),
-                output_file: request.output_file.clone(),
-                stdin: Mutex::new(stdin),
-                state: Mutex::new(CommandProcessState::new(stdout_open, stderr_open)),
-                notify: Notify::new(),
-                output_file_lock: Mutex::new(()),
-                output_observer: request.output_observer.clone(),
-            });
-            manager_state
-                .entries
-                .insert(process_id.clone(), entry.clone());
-            spawn_lifecycle_task(
-                entry.clone(),
-                child,
-                request.timeout,
-                request.cancellation_token.clone(),
-            );
-            (process_id, entry, stdout, stderr)
+                command: request.command,
+                cwd: working_directory,
+            })
+            .await;
+        let mut child = match child {
+            Ok(child) => child,
+            Err(error) => {
+                self.release_start_reservation().await;
+                return Err(tool_error("exec", error));
+            }
         };
+        let stdout = child.stdout.take();
+        let stderr = child.stderr.take();
+        let stdout_open = stdout.is_some();
+        let stderr_open = stderr.is_some();
+        let stdin = child.stdin.take();
+        let entry = Arc::new(CommandProcessEntry {
+            process_id: process_id.clone(),
+            os_pid: child.id(),
+            output_target,
+            stdin: Mutex::new(stdin),
+            state: Mutex::new(CommandProcessState::new(stdout_open, stderr_open)),
+            notify: Notify::new(),
+            output_file_lock: Mutex::new(()),
+            output_observer: request.output_observer,
+        });
+        {
+            let mut state = self.state.lock().await;
+            state.starting = state.starting.saturating_sub(1);
+            state.entries.insert(process_id.clone(), entry.clone());
+        }
+        spawn_lifecycle_task(
+            entry.clone(),
+            child,
+            request.timeout,
+            request.cancellation_token,
+            self.backend.clone(),
+        );
 
         if let Some(stdout) = stdout {
             tokio::spawn(read_stdout(entry.clone(), stdout));
@@ -258,7 +297,7 @@ impl CommandProcessManager {
             .await
     }
 
-    pub(crate) async fn write_stdin(
+    pub async fn write_stdin(
         &self,
         request: CommandWriteRequest,
     ) -> Result<CommandOutputSnapshot, PureError> {
@@ -266,7 +305,7 @@ impl CommandProcessManager {
             return Err(tool_error(
                 "write_stdin",
                 format!(
-                    "processId '{}' is not a live process. Re-check the previous bash result and avoid restarting the same command unless the process has ended.",
+                    "processId '{}' is not a live process. Re-check the previous exec result and avoid restarting the same command unless the process has ended.",
                     request.process_id
                 ),
             ));
@@ -310,6 +349,27 @@ impl CommandProcessManager {
         .await
     }
 
+    async fn reserve_process_id(&self) -> Result<String, PureError> {
+        let mut state = self.state.lock().await;
+        if state.entries.len().saturating_add(state.starting) >= state.max_processes {
+            return Err(tool_error(
+                "exec",
+                format!(
+                    "background process limit reached ({}). Wait for an existing process with write_stdin or let it finish before starting another command.",
+                    state.max_processes
+                ),
+            ));
+        }
+        state.next_id = state.next_id.saturating_add(1);
+        state.starting = state.starting.saturating_add(1);
+        Ok(format!("proc-{}", state.next_id))
+    }
+
+    async fn release_start_reservation(&self) {
+        let mut state = self.state.lock().await;
+        state.starting = state.starting.saturating_sub(1);
+    }
+
     async fn entry(&self, process_id: &str) -> Option<Arc<CommandProcessEntry>> {
         self.state.lock().await.entries.get(process_id).cloned()
     }
@@ -327,8 +387,17 @@ impl CommandProcessManager {
             ));
         };
         wait_for_process_activity(&entry, yield_time).await;
-        let snapshot = entry.snapshot(max_output_chars).await;
+        self.backend
+            .publish_output(&entry.output_target)
+            .await
+            .map_err(|error| tool_error("exec", error))?;
+        let (mut snapshot, sizes) = entry.snapshot(max_output_chars).await;
         if snapshot.process_id.is_none() {
+            snapshot.output_artifacts = self
+                .backend
+                .collect_output_artifacts(&entry.output_target, sizes)
+                .await
+                .map_err(|error| tool_error("exec", error))?;
             self.state.lock().await.entries.remove(process_id);
         }
         Ok(snapshot)
@@ -345,24 +414,40 @@ impl CommandProcessEntry {
         self.state.lock().await.is_final()
     }
 
-    async fn snapshot(&self, max_output_chars: usize) -> CommandOutputSnapshot {
+    async fn snapshot(
+        &self,
+        max_output_chars: usize,
+    ) -> (CommandOutputSnapshot, CommandOutputSizes) {
         let state = self.state.lock().await;
         let status = status_for_state(&state);
         let process_id = (status == "running").then(|| self.process_id.clone());
         let stdout = truncate_text(&state.stdout.display_text(), max_output_chars);
         let stderr = truncate_text(&state.stderr.display_text(), max_output_chars);
-        let message = message_for_state(&state, process_id.as_deref(), &self.output_file);
-        CommandOutputSnapshot {
-            status: status.to_string(),
-            process_id,
-            exit_code: state.exit_code,
-            timed_out: state.timed_out(),
-            stdout,
-            stderr,
-            output_file: self.output_file.clone(),
-            message,
-            output_revision: state.output_revision,
-        }
+        let message = message_for_state(
+            &state,
+            process_id.as_deref(),
+            self.output_target.model_file(),
+        );
+        let sizes = CommandOutputSizes {
+            stdout_bytes: state.stdout.total_bytes() as u64,
+            stderr_bytes: state.stderr.total_bytes() as u64,
+        };
+        (
+            CommandOutputSnapshot {
+                status: status.to_string(),
+                process_id,
+                exit_code: state.exit_code,
+                timed_out: state.timed_out(),
+                stdout,
+                stderr,
+                output_file: self.output_target.model_file().to_path_buf(),
+                capture_file: self.output_target.capture_file().to_path_buf(),
+                message,
+                output_revision: state.output_revision,
+                output_artifacts: Vec::new(),
+            },
+            sizes,
+        )
     }
 }
 

@@ -200,7 +200,7 @@ void registerMarkdownRenderTests() {
         type: TimelinePartType.text,
         order: 3,
         textChannel: TimelineTextChannel.commentary,
-        text: '正在执行工具 `bash`。',
+        text: '正在执行工具 `exec`。',
         synthetic: true,
       ),
       TimelinePart(
@@ -211,7 +211,7 @@ void registerMarkdownRenderTests() {
         type: TimelinePartType.text,
         order: 4,
         textChannel: TimelineTextChannel.commentary,
-        text: '工具 `bash` 已完成。',
+        text: '工具 `exec` 已完成。',
         synthetic: true,
       ),
       TimelinePart(
@@ -245,8 +245,8 @@ void registerMarkdownRenderTests() {
     expect(find.text('上下文已整理，准备调用模型。'), findsOneWidget);
     expect(find.text('已接收请求，正在准备上下文。'), findsNothing);
     expect(find.text('模型请求调用 3 个工具。'), findsNothing);
-    expect(find.text('正在执行工具 `bash`。'), findsNothing);
-    expect(find.text('工具 `bash` 已完成。'), findsNothing);
+    expect(find.text('正在执行工具 `exec`。'), findsNothing);
+    expect(find.text('工具 `exec` 已完成。'), findsNothing);
     expect(find.text('最终答复保持独立。'), findsOneWidget);
 
     await tester.tap(find.text('上下文已整理，准备调用模型。'));
@@ -254,8 +254,8 @@ void registerMarkdownRenderTests() {
 
     expect(find.text('已接收请求，正在准备上下文。'), findsOneWidget);
     expect(find.text('模型请求调用 3 个工具。'), findsNothing);
-    expect(find.text('正在执行工具 `bash`。'), findsNothing);
-    expect(find.text('工具 `bash` 已完成。'), findsNothing);
+    expect(find.text('正在执行工具 `exec`。'), findsNothing);
+    expect(find.text('工具 `exec` 已完成。'), findsNothing);
   });
 
   testWidgets(

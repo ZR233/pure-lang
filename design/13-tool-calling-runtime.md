@@ -38,7 +38,9 @@ Chat Completions provider 如果没有 Responses 风格的 completed event，pro
 5. 对批准的工具执行本地实现；对禁用、未知或拒绝的工具直接生成工具结果。
 6. 在统一收尾阶段写入唯一终态 `message.part.updated` snapshot。
 
-路径类工具不要求模型提供绝对路径。运行时把相对路径按 `workspaceRoot` 解析，规范化为绝对路径后再进入权限判断和实际执行；文件工具、`apply_patch`、`bash.workingDirectory`、`lsp_query_*` 的 `filePath` 和权限 precheck 必须复用同一个 resolver，避免审批看到 workspace 内而执行时解析到 workspace 外。`WorkspaceOnly` 模式拒绝 `..`、Windows drive-relative、越界绝对路径、越界 UNC / verbatim 路径和符号链接越界；`full-access` 允许 workspace 外路径，但仍要求目标或最近存在父目录可解析。
+路径类工具不要求模型提供绝对路径。运行时把相对路径按 `workspaceRoot` 解析，规范化为绝对路径后再进入权限判断和实际执行；文件工具、`apply_patch`、`exec.cwd`、`lsp_query_*` 的 `filePath` 和权限 precheck 必须复用同一个 resolver，避免审批看到 workspace 内而执行时解析到 workspace 外。`WorkspaceOnly` 模式拒绝 `..`、Windows drive-relative、越界绝对路径、越界 UNC / verbatim 路径和符号链接越界；`full-access` 允许本地 backend 解析 workspace 外路径，但宿主注入的容器或远程 backend 可以保持更严格的隔离边界。
+
+模型只看到环境无关的 `exec`、`write_stdin`、`read_file`、`search_files` 和 `apply_patch`。`ToolSetBuilder` 分别接收 `CommandBackend` 与 `WorkspaceFileBackend`；Studio 注入本地实现，Mai 等宿主注入容器或远程实现。PL 统一拥有 schema、权限、进程表、stdin、超时、取消、输出截断和 turn 清理，backend 只负责 cwd 映射、启动/终止进程、发布完整输出和生成宿主 artifact。低层容器复制能力只服务文件 backend 与输出同步，不注册为模型工具。新请求不得暴露 `bash`、`container_exec`、`run_in_container` 或 `container_copy`；恢复旧会话时仅在持久化历史边界把前三种旧命令调用名称规范化为 `exec`。
 
 `list_files` 的 `glob` 既可以匹配 workspace-relative 路径，也可以匹配 `path` 参数之下的相对条目；`includeDirs=true` 时目录候选按带尾随 `/` 的形式参与匹配。`**/` 表示零层或多层目录，因此 `**/Cargo.toml` 必须同时匹配 workspace 根下和子目录下的 `Cargo.toml`。
 
@@ -54,7 +56,7 @@ reviewer 只暴露 effect 策略明确允许的动态工具，未知 effect 默�
 
 `plan_exit` 是 Task planning 阶段专用的内置协调工具，schema 只包含 `content: string`。它表示“计划已完成，请 Studio 发起确认交互”，不是执行工具；确认实施后会话保持 Task，由 coordinator 推进后续阶段。`<proposed_plan>` 不再是协议入口。
 
-后台 stdio 子进程（MCP server、`bash` 命令、LSP server）由运行时显式持有生命周期。正常路径必须通过 async shutdown / terminate 请求关闭 stdin、终止进程树并等待退出；Drop 只能做 best-effort 兜底。Windows GUI 进程中启动这些后台子进程和兜底终止命令时不得显示额外终端窗口。
+后台 stdio 子进程（MCP server、`exec` 命令、LSP server）由运行时显式持有生命周期。正常路径必须通过 async shutdown / terminate 请求关闭 stdin、终止进程树并等待退出；Drop 只能做 best-effort 兜底。容器 backend 必须同时终止宿主 transport 进程和容器内进程组，不能只杀 Docker CLI 后留下孤儿任务。Windows GUI 进程中启动这些后台子进程和兜底终止命令时不得显示额外终端窗口。
 
 终态事件只允许出现一次。`completed` 表示工具成功执行，`failed` 表示工具实现或注册失败，`denied` 表示模式、策略或审批拒绝，`interrupted` 和 `budgetLimited` 表示 turn 控制层中断或预算限制。`approved` 可作为执行前的非终态状态展示，但不能替代最终 `completed` 或 `failed`。
 
@@ -83,7 +85,7 @@ provider 输出的 function tool arguments 必须是合法 JSON，并由 `pl-mod
 
 `apply_patch` 的解析或上下文匹配失败属于本地执行错误，仍使用 `Tool execution error: {error}` 前缀写回模型上下文。错误文本应包含可恢复提示：不要重复同一个失败 patch；先重新读取目标文件当前内容，再生成更小、更精确的 Codex 风格 patch 重试。成功前已提交的 hunk 必须在错误文本中列出 committed delta，方便后续模型只处理剩余改动。
 
-`bash` 和 `write_stdin` 成功执行时，写回模型上下文的 result 是一个紧凑 JSON 字符串，而不是完整原始输出。字段包括：
+`exec` 和 `write_stdin` 成功执行时，写回模型上下文的 result 是一个紧凑 JSON 字符串，而不是完整原始输出。字段包括：
 
 - `status`：`running`、`completed`、`failed`、`timedOut` 或 `interrupted`。
 - `processId`：后台进程 id；仅当命令仍可继续观察或写入时存在。
@@ -93,13 +95,13 @@ provider 输出的 function tool arguments 必须是合法 JSON，并由 `pl-mod
 - `outputFile`：完整 stdout/stderr 文件路径。
 - `message`：面向模型的下一步提示。
 
-当 `bash` 在 `yieldTimeMs` 内未完成时，result 使用 `running` 状态并带 `processId`。后续模型必须用 `write_stdin` 携带该 `processId` 发送输入或传空 `chars` 轮询，不应重复执行同一条 `bash` 命令。命令管理器只有在子进程退出且 stdout/stderr 管道都已读到 EOF、完整输出文件已写入后，才返回 `completed`、`failed`、`timedOut` 或 `interrupted` 终态并释放 `processId`；如果子进程已退出但尾部输出仍在排空，结果仍保持 `running` 并提示继续轮询。需要完整输出时，模型应使用文件读取工具读取 `outputFile`，不要要求命令工具把大输出完整塞回上下文。`write_stdin` 找不到 live process、进程数量达到上限、stdin 写入失败或后台命令已被终止时，应返回可恢复错误，让模型等待、轮询或解释当前状态。
+当 `exec` 在 `yieldTimeMs` 内未完成时，result 使用 `running` 状态并带 `processId`。后续模型必须用 `write_stdin` 携带该 `processId` 发送输入或传空 `chars` 轮询，不应重复执行同一条 `exec` 命令。命令管理器只有在子进程退出且 stdout/stderr 管道都已读到 EOF、完整输出文件已写入 workspace 后，才返回 `completed`、`failed`、`timedOut` 或 `interrupted` 终态并释放 `processId`；如果子进程已退出但尾部输出仍在排空，结果仍保持 `running` 并提示继续轮询。需要完整输出时，模型应使用文件读取工具读取 `outputFile`，不要要求命令工具把大输出完整塞回上下文。`write_stdin` 找不到 live process、进程数量达到上限、stdin 写入失败或后台命令已被终止时，应返回可恢复错误，让模型等待、轮询或解释当前状态。
 
-Studio 实时展示层可以在 `bash` 子进程仍运行时看到 stdout/stderr chunk。命令管理器读取管道后先更新内存截断缓冲并分配输出 revision，再通过 trace delta 把 chunk 投影到原 `bash` tool part 的 `tool.result` live overlay，同时异步追加完整输出文件；delta revision 从该 part 已有 revision 继续递增，终态 JSON snapshot 的 revision 不低于最后一个输出 chunk。`write_stdin` 负责写入或轮询后台进程，返回自己的紧凑 JSON 结果；后台进程新增输出仍归属最初启动它的 `bash` tool part，不在父 timeline 中复制成新的工具输出正文。
+Studio 实时展示层可以在 `exec` 子进程仍运行时看到 stdout/stderr chunk。命令管理器读取管道后先更新内存截断缓冲并分配输出 revision，再通过 trace delta 把 chunk 投影到原 `exec` tool part 的 `tool.result` live overlay，同时异步追加完整输出文件；delta revision 从该 part 已有 revision 继续递增，终态 JSON snapshot 的 revision 不低于最后一个输出 chunk。`write_stdin` 负责写入或轮询后台进程，返回自己的紧凑 JSON 结果；后台进程新增输出仍归属最初启动它的 `exec` tool part，不在父 timeline 中复制成新的工具输出正文。
 
 Studio runtime 的 live-only event 通道只允许发送 `MessagePartDelta` 和 `Stale`。turn、message、part snapshot、agent snapshot、interaction、runtime usage 等 durable 事件必须先通过 store transaction 校验、分配 durable sequence、写入 projection 并持久化后再广播，不能误用 live-only 通道，否则前端 durable cursor 与历史回放会分叉。
 
-Windows 上 `bash.command` 的默认宿主 shell 是 PowerShell：运行时先查找 `pwsh.exe`，再查找 `powershell.exe`，都不可用时才使用 `cmd.exe /C`。PowerShell 命令以 `-NoProfile -Command` 执行，并注入 UTF-8 输出设置；这只影响命令字符串的宿主 shell，不改变 `bash` / `write_stdin` 的公开 schema、审批策略或 JSON 结果字段。
+Windows 本地 backend 上 `exec.command` 的默认宿主 shell 是 PowerShell：运行时先查找 `pwsh.exe`，再查找 `powershell.exe`，都不可用时才使用 `cmd.exe /C`。PowerShell 命令以 `-NoProfile -Command` 执行，并注入 UTF-8 输出设置；这只影响命令字符串的宿主 shell，不改变 `exec` / `write_stdin` 的公开 schema、审批策略或 JSON 结果字段。
 
 `spawn_agent`、`send_input`、`wait_agent`、`list_agents` 和 `close_agent` 的模型可见输出必须由 pl-core collaboration adapter 从 runtime typed snapshot 构造；宿主只通过 lifecycle、repository 与 event sink 提供产品资源和持久化事实，不手写共享状态形状。`wait_agent` 在目标 `Idle` 且队列为空时返回 `{ target, timedOut: false, snapshot, lastTurn }`，超时仅返回 `{ target, timedOut: true }`；需要树级状态时调用 `list_agents` 获取 compact snapshot。后续输入由 `send_input.delivery` 的 `QueueOnly | Start | InterruptThenStart` 明确表达，不存在单独的 resume 命令。Studio 展示依赖持久化后的 `AgentChanged` latest snapshot 和 `SubAgentActivity` / `TodoListUpdated` append-only timeline。`spawn_agent.forkTurns` 的历史继承只复制过滤后的父会话消息，不复制工具结果、工具调用 metadata、reasoning 内容或运行时调度提示。
 

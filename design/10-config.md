@@ -258,7 +258,7 @@ Bundled 模型只读，`additional_models` 只能添加新的 slug，冲突直�
 - `auto-review`
 - `full-access`
 
-Pure v1 的权限模式是本地策略层，不是 OS 沙箱。`request-approval` 和 `auto-review` 都直接允许 workspace 内读写；工具请求 workspace 外路径或 workspace 外 cwd 时分别走用户审批或 reviewer 审批。`full-access` 会放宽 Pure 文件工具和 `bash.workingDirectory` 的 workspace 边界并直接放行。
+Pure v1 的权限模式是策略层，不是 OS 沙箱。`request-approval` 和 `auto-review` 都直接允许 workspace 内读写；工具请求 workspace 外路径或 workspace 外 cwd 时分别走用户审批或 reviewer 审批。`full-access` 会放宽本地文件 backend 和 `exec.cwd` 的 workspace 边界并直接放行；宿主注入的容器或远程 backend 仍可保持更严格边界。
 
 `active_skills` 只声明启动时预选项，不作为真实 skills 发现来源。`active_mcp_servers` 只声明启动时预选项，MCP server 的用户启用意图来源为 `[mcp.servers.<id>].enabled`；真实可用性由进程内 MCP registry 探测，不写回配置。
 

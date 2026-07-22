@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use tokio_util::sync::CancellationToken;
 
-use crate::process::terminate_process_tree;
+use crate::tool::command::CommandBackend;
 
 use super::{CommandProcessEntry, CommandProcessTransition};
 
@@ -30,12 +30,15 @@ pub(super) async fn wait_for_process_activity(entry: &CommandProcessEntry, yield
     }
 }
 
-pub(super) fn spawn_lifecycle_task(
+pub(super) fn spawn_lifecycle_task<B>(
     entry: Arc<CommandProcessEntry>,
     mut child: tokio::process::Child,
     timeout: Duration,
     cancellation_token: Option<CancellationToken>,
-) {
+    backend: Arc<B>,
+) where
+    B: CommandBackend,
+{
     tokio::spawn(async move {
         let outcome = wait_for_lifecycle_outcome(&mut child, timeout, cancellation_token).await;
         let wait_result = match outcome {
@@ -43,14 +46,14 @@ pub(super) fn spawn_lifecycle_task(
             LifecycleOutcome::TimedOut => {
                 apply_transition(&entry, CommandProcessTransition::TimedOut).await;
                 close_stdin(&entry).await;
-                terminate_process_tree(child.id()).await;
+                backend.terminate(&entry.process_id, child.id()).await;
                 let _ = child.start_kill();
                 child.wait().await
             }
             LifecycleOutcome::Interrupted => {
                 apply_transition(&entry, CommandProcessTransition::Interrupted).await;
                 close_stdin(&entry).await;
-                terminate_process_tree(child.id()).await;
+                backend.terminate(&entry.process_id, child.id()).await;
                 let _ = child.start_kill();
                 child.wait().await
             }
