@@ -1,17 +1,50 @@
 use anyhow::{Context, Result, bail};
 use std::ffi::{OsStr, OsString};
+use std::io::Write;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, ExitStatus, Stdio};
 
 pub(crate) fn run_checked(command: &mut Command, display: &str) -> Result<()> {
+    print_command_context(command, display);
+    let status = command
+        .status()
+        .with_context(|| format!("failed to start command from PATH: {display}"))?;
+    ensure_success(status, display)
+}
+
+pub(crate) fn run_checked_with_stdin(
+    command: &mut Command,
+    display: &str,
+    input: &[u8],
+) -> Result<()> {
+    print_command_context(command, display);
+    command.stdin(Stdio::piped());
+    let mut child = command
+        .spawn()
+        .with_context(|| format!("failed to start command from PATH: {display}"))?;
+    let mut stdin = child
+        .stdin
+        .take()
+        .with_context(|| format!("failed to open command stdin: {display}"))?;
+    stdin
+        .write_all(input)
+        .with_context(|| format!("failed to write command stdin: {display}"))?;
+    drop(stdin);
+    let status = child
+        .wait()
+        .with_context(|| format!("failed to wait for command: {display}"))?;
+    ensure_success(status, display)
+}
+
+fn print_command_context(command: &Command, display: &str) {
     let cwd = command
         .get_current_dir()
         .map(Path::to_path_buf)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
     println!("==> ({}) {display}", cwd.display());
-    let status = command
-        .status()
-        .with_context(|| format!("failed to start command from PATH: {display}"))?;
+}
+
+fn ensure_success(status: ExitStatus, display: &str) -> Result<()> {
     if !status.success() {
         let code = status
             .code()

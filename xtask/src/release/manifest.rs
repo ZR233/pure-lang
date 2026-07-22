@@ -53,8 +53,11 @@ pub(super) fn finalize(workspace_root: &Path, release_dir: &Path, version: &Vers
     let secret_key = env::var_os("MINISIGN_SECRET_KEY_FILE")
         .map(PathBuf::from)
         .context("MINISIGN_SECRET_KEY_FILE is required for release-gui finalize")?;
-    sign_file(&secret_key, &setup_path, version)?;
-    sign_file(&secret_key, &portable_path, version)?;
+    let password = env::var("MINISIGN_PASSWORD")
+        .context("MINISIGN_PASSWORD is required for release-gui finalize")?;
+    let password_input = minisign_password_input(&password)?;
+    sign_file(&secret_key, &setup_path, version, &password_input)?;
+    sign_file(&secret_key, &portable_path, version, &password_input)?;
 
     let manifest = manifest_for(
         version,
@@ -228,7 +231,12 @@ fn sha256_file(path: &Path) -> Result<String> {
     Ok(format!("{:x}", hasher.finalize()))
 }
 
-fn sign_file(secret_key: &Path, message: &Path, version: &Version) -> Result<()> {
+fn sign_file(
+    secret_key: &Path,
+    message: &Path,
+    version: &Version,
+    password_input: &[u8],
+) -> Result<()> {
     if !secret_key.is_file() {
         bail!("Minisign secret key not found: {}", secret_key.display());
     }
@@ -246,10 +254,24 @@ fn sign_file(secret_key: &Path, message: &Path, version: &Version) -> Result<()>
     ];
     let mut command = Command::new("minisign");
     command.args(args);
-    process::run_checked(
+    process::run_checked_with_stdin(
         &mut command,
         &format!("minisign sign {}", message.display()),
+        password_input,
     )
+}
+
+fn minisign_password_input(password: &str) -> Result<Vec<u8>> {
+    if password.is_empty() {
+        bail!("MINISIGN_PASSWORD must not be empty");
+    }
+    if password.contains(['\r', '\n']) {
+        bail!("MINISIGN_PASSWORD must be a single line");
+    }
+    let mut input = Vec::with_capacity(password.len() + 2);
+    input.extend_from_slice(password.as_bytes());
+    input.extend_from_slice(b"\r\n");
+    Ok(input)
 }
 
 fn verify_signature(public_key: &Path, message: &Path) -> Result<()> {
@@ -335,6 +357,18 @@ mod tests {
             verify_signature_reader(TEST_PUBLIC_KEY, TEST_SIGNATURE, Cursor::new(b"tampered"))
                 .is_err()
         );
+        Ok(())
+    }
+
+    #[test]
+    fn minisign_password_is_sent_as_one_stdin_line() -> Result<()> {
+        assert_eq!(
+            minisign_password_input("correct horse")?,
+            b"correct horse\r\n"
+        );
+        assert!(minisign_password_input("").is_err());
+        assert!(minisign_password_input("first\nsecond").is_err());
+        assert!(minisign_password_input("first\rsecond").is_err());
         Ok(())
     }
 }
