@@ -3,26 +3,59 @@
 mod manifest;
 mod package;
 
-use crate::cli::{ReleaseGuiAction, ReleaseGuiOptions};
+use crate::cli::ReleaseGuiOptions;
 use crate::paths;
 use crate::studio_version;
 use anyhow::{Context, Result, bail};
 use semver::Version;
+use serde::Serialize;
 use std::path::{Path, PathBuf};
 
 const PLATFORM: &str = "windows-x86_64";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReleaseGuiStep {
+    Stage,
+    Finalize,
+    Verify,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PreparedStudioVersion {
+    version: String,
+    build_number: u64,
+    pubspec_version: String,
+}
+
 pub(crate) fn run(options: ReleaseGuiOptions) -> Result<()> {
-    let version = validate_version(&options.version)?;
     let workspace_root = paths::workspace_root()?;
+    let (step, raw_version) = match options {
+        ReleaseGuiOptions::Prepare { bump } => return prepare(&workspace_root, bump),
+        ReleaseGuiOptions::Stage { version } => (ReleaseGuiStep::Stage, version),
+        ReleaseGuiOptions::Finalize { version } => (ReleaseGuiStep::Finalize, version),
+        ReleaseGuiOptions::Verify { version } => (ReleaseGuiStep::Verify, version),
+    };
+    let version = validate_version(&raw_version)?;
     ensure_pubspec_version(&workspace_root, &version)?;
     let release_dir = release_dir(&workspace_root, &version);
 
-    match options.action {
-        ReleaseGuiAction::Stage => package::stage(&workspace_root, &release_dir, &version),
-        ReleaseGuiAction::Finalize => manifest::finalize(&workspace_root, &release_dir, &version),
-        ReleaseGuiAction::Verify => manifest::verify(&workspace_root, &release_dir, &version),
+    match step {
+        ReleaseGuiStep::Stage => package::stage(&workspace_root, &release_dir, &version),
+        ReleaseGuiStep::Finalize => manifest::finalize(&workspace_root, &release_dir, &version),
+        ReleaseGuiStep::Verify => manifest::verify(&workspace_root, &release_dir, &version),
     }
+}
+
+fn prepare(workspace_root: &Path, bump: studio_version::StudioVersionBump) -> Result<()> {
+    let version = studio_version::prepare(&paths::flutter_app_dir(workspace_root), bump)?;
+    let output = PreparedStudioVersion {
+        version: version.release.to_string(),
+        build_number: version.build_number,
+        pubspec_version: version.pubspec_value(),
+    };
+    println!("{}", serde_json::to_string(&output)?);
+    Ok(())
 }
 
 fn validate_version(raw: &str) -> Result<Version> {
@@ -35,8 +68,11 @@ fn validate_version(raw: &str) -> Result<Version> {
 
 fn ensure_pubspec_version(workspace_root: &Path, version: &Version) -> Result<()> {
     let actual = studio_version::read(&paths::flutter_app_dir(workspace_root))?;
-    if &actual != version {
-        bail!("release version {version} does not match pubspec.yaml base version {actual}");
+    if &actual.release != version {
+        bail!(
+            "release version {version} does not match pubspec.yaml base version {}",
+            actual.release
+        );
     }
     Ok(())
 }
@@ -74,6 +110,24 @@ mod tests {
         assert_eq!(
             asset_name(&version, "portable.zip"),
             "Pure-Studio-1.2.3-windows-x86_64-portable.zip"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn prepared_version_uses_typed_camel_case_json() -> Result<()> {
+        let output = PreparedStudioVersion {
+            version: "1.3.0".to_string(),
+            build_number: 8,
+            pubspec_version: "1.3.0+8".to_string(),
+        };
+        assert_eq!(
+            serde_json::to_value(output)?,
+            serde_json::json!({
+                "version": "1.3.0",
+                "buildNumber": 8,
+                "pubspecVersion": "1.3.0+8",
+            })
         );
         Ok(())
     }

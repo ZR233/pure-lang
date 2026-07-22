@@ -1,3 +1,4 @@
+use crate::studio_version::StudioVersionBump;
 use anyhow::{Result, anyhow, bail};
 use std::collections::VecDeque;
 use std::ffi::OsString;
@@ -33,17 +34,12 @@ pub(crate) struct BuildGuiOptions {
     pub(crate) no_clean: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ReleaseGuiAction {
-    Stage,
-    Finalize,
-    Verify,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ReleaseGuiOptions {
-    pub(crate) action: ReleaseGuiAction,
-    pub(crate) version: String,
+pub(crate) enum ReleaseGuiOptions {
+    Prepare { bump: StudioVersionBump },
+    Stage { version: String },
+    Finalize { version: String },
+    Verify { version: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -111,7 +107,7 @@ pub(crate) fn help_text(topic: HelpTopic) -> &'static str {
             "Usage: cargo xtask build-gui [--demo] [--no-clean]\n\nOptions:\n  --demo      Build with PURE_STUDIO_DEMO=true.\n  --no-clean  Keep existing files in dist/pure-studio-flutter-release.\n  -h, --help  Print help."
         }
         HelpTopic::ReleaseGui => {
-            "Usage: cargo xtask release-gui <stage|finalize|verify> --version <x.y.z>\n\nThe version must be stable SemVer and match pubspec.yaml. Signing uses the minisign executable and MINISIGN_SECRET_KEY_FILE for finalize."
+            "Usage:\n  cargo xtask release-gui prepare --bump <patch|minor|major>\n  cargo xtask release-gui <stage|finalize|verify> --version <x.y.z>\n\nPrepare increments pubspec.yaml and prints typed JSON. Package versions must be stable SemVer and match pubspec.yaml. Signing uses the minisign executable and MINISIGN_SECRET_KEY_FILE for finalize."
         }
         HelpTopic::BuildRustBridge => {
             "Usage: cargo xtask build-rust-bridge --workspace-root <path> --configuration <Debug|Profile|Release> --output-dir <path> [--target-dir <path>]\n\nOptions:\n  --workspace-root <path>              Pure-Lang workspace root.\n  --configuration <Debug|Profile|Release>\n  --output-dir <path>                  Directory that receives pl_studio_bridge.dll.\n  --target-dir <path>                  Optional Cargo target directory.\n  -h, --help                           Print help."
@@ -124,23 +120,44 @@ fn parse_release_gui(mut args: VecDeque<OsString>) -> Result<Command> {
         return Ok(Command::Help(HelpTopic::ReleaseGui));
     }
     let action = match args.pop_front().map(into_string).transpose()?.as_deref() {
-        Some("stage") => ReleaseGuiAction::Stage,
-        Some("finalize") => ReleaseGuiAction::Finalize,
-        Some("verify") => ReleaseGuiAction::Verify,
+        Some("prepare") => {
+            let bump = parse_required_option(&mut args, "--bump")?;
+            let bump = match bump.as_str() {
+                "patch" => StudioVersionBump::Patch,
+                "minor" => StudioVersionBump::Minor,
+                "major" => StudioVersionBump::Major,
+                _ => bail!("release bump must be one of patch, minor, or major; got {bump}"),
+            };
+            ReleaseGuiOptions::Prepare { bump }
+        }
+        Some("stage") => ReleaseGuiOptions::Stage {
+            version: parse_required_option(&mut args, "--version")?,
+        },
+        Some("finalize") => ReleaseGuiOptions::Finalize {
+            version: parse_required_option(&mut args, "--version")?,
+        },
+        Some("verify") => ReleaseGuiOptions::Verify {
+            version: parse_required_option(&mut args, "--version")?,
+        },
         Some(other) => bail!("unknown release-gui action: {other}"),
         None => bail!("missing release-gui action"),
     };
-    let mut version = None;
-    while let Some(arg) = args.pop_front() {
-        match into_string(arg)?.as_str() {
-            "--version" => version = Some(next_string(&mut args, "--version")?),
-            other => bail!("unknown release-gui option: {other}"),
-        }
+    Ok(Command::ReleaseGui(action))
+}
+
+fn parse_required_option(args: &mut VecDeque<OsString>, name: &str) -> Result<String> {
+    let Some(option) = args.pop_front() else {
+        bail!("missing required option {name}");
+    };
+    let option = into_string(option)?;
+    if option != name {
+        bail!("unknown release-gui option: {option}");
     }
-    Ok(Command::ReleaseGui(ReleaseGuiOptions {
-        action,
-        version: version.ok_or_else(|| anyhow!("missing required option --version"))?,
-    }))
+    let value = next_string(args, name)?;
+    if let Some(extra) = args.pop_front() {
+        bail!("unknown release-gui option: {}", into_string(extra)?);
+    }
+    Ok(value)
 }
 
 fn parse_run_gui(mut args: VecDeque<OsString>) -> Result<Command> {
@@ -310,12 +327,35 @@ mod tests {
     fn parses_release_gui_options() -> Result<()> {
         assert_eq!(
             parse_words(&["xtask", "release-gui", "finalize", "--version", "1.2.3",])?,
-            Command::ReleaseGui(ReleaseGuiOptions {
-                action: ReleaseGuiAction::Finalize,
+            Command::ReleaseGui(ReleaseGuiOptions::Finalize {
                 version: "1.2.3".to_string(),
             })
         );
+        assert_eq!(
+            parse_words(&["xtask", "release-gui", "prepare", "--bump", "minor",])?,
+            Command::ReleaseGui(ReleaseGuiOptions::Prepare {
+                bump: StudioVersionBump::Minor,
+            })
+        );
         Ok(())
+    }
+
+    #[test]
+    fn rejects_invalid_release_prepare_options() {
+        assert!(parse_words(&["xtask", "release-gui", "prepare", "--bump", "feature"]).is_err());
+        assert!(parse_words(&["xtask", "release-gui", "prepare"]).is_err());
+        assert!(
+            parse_words(&[
+                "xtask",
+                "release-gui",
+                "prepare",
+                "--bump",
+                "patch",
+                "--version",
+                "1.2.3",
+            ])
+            .is_err()
+        );
     }
 
     #[test]
