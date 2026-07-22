@@ -237,8 +237,25 @@ impl StudioRuntime {
         Ok(self.runtime_snapshot())
     }
 
+    /// Stops all Studio runtime services.
     pub async fn shutdown_runtime(&self) -> Result<StudioRuntimeSnapshot> {
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
+        self.shutdown_runtime_locked().await
+    }
+
+    /// Stops the runtime only when no turn or durable task is active.
+    ///
+    /// Holding the lifecycle lock makes the final idle check atomic with the
+    /// transition away from `Ready`; prompt submission uses the same lock.
+    pub async fn shutdown_runtime_if_idle(&self) -> Result<Option<StudioRuntimeSnapshot>> {
+        let _lifecycle_guard = self.lifecycle_lock.lock().await;
+        if self.is_busy_for_update().await? {
+            return Ok(None);
+        }
+        self.shutdown_runtime_locked().await.map(Some)
+    }
+
+    async fn shutdown_runtime_locked(&self) -> Result<StudioRuntimeSnapshot> {
         let status = self.runtime_snapshot().status;
         if matches!(status, StudioRuntimeStatus::Stopped) {
             return Ok(self.runtime_snapshot());

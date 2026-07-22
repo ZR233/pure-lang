@@ -2184,6 +2184,90 @@ abstract class AppLocalizations {
   /// **'Save web search'**
   String get settingsSaveWebSearch;
 
+  /// No description provided for @settingsStudioUpdateTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Pure Studio update'**
+  String get settingsStudioUpdateTitle;
+
+  /// No description provided for @settingsStudioUpdateDisabled.
+  ///
+  /// In en, this message translates to:
+  /// **'Version {version}. Automatic checks run only in Windows release builds.'**
+  String settingsStudioUpdateDisabled(String version);
+
+  /// No description provided for @settingsStudioUpdateCurrent.
+  ///
+  /// In en, this message translates to:
+  /// **'Current version: {version}'**
+  String settingsStudioUpdateCurrent(String version);
+
+  /// No description provided for @settingsStudioUpdateChecking.
+  ///
+  /// In en, this message translates to:
+  /// **'Version {version}. Checking for updates...'**
+  String settingsStudioUpdateChecking(String version);
+
+  /// No description provided for @settingsStudioUpdateLatest.
+  ///
+  /// In en, this message translates to:
+  /// **'Version {version} is up to date.'**
+  String settingsStudioUpdateLatest(String version);
+
+  /// No description provided for @settingsStudioUpdateAvailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Version {current} is installed. Version {latest} is available.'**
+  String settingsStudioUpdateAvailable(String current, String latest);
+
+  /// No description provided for @settingsStudioUpdateDownloading.
+  ///
+  /// In en, this message translates to:
+  /// **'Downloading version {version}: {progress}%'**
+  String settingsStudioUpdateDownloading(String version, int progress);
+
+  /// No description provided for @settingsStudioUpdateVerifying.
+  ///
+  /// In en, this message translates to:
+  /// **'Verifying version {version}...'**
+  String settingsStudioUpdateVerifying(String version);
+
+  /// No description provided for @settingsStudioUpdateInstallerLaunched.
+  ///
+  /// In en, this message translates to:
+  /// **'Installer for version {version} started.'**
+  String settingsStudioUpdateInstallerLaunched(String version);
+
+  /// No description provided for @settingsStudioUpdateFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Update failed: {error}'**
+  String settingsStudioUpdateFailed(String error);
+
+  /// No description provided for @settingsStudioUpdateBusy.
+  ///
+  /// In en, this message translates to:
+  /// **'Finish the active turn or task before installing.'**
+  String get settingsStudioUpdateBusy;
+
+  /// No description provided for @settingsStudioUpdateCheck.
+  ///
+  /// In en, this message translates to:
+  /// **'Check for updates'**
+  String get settingsStudioUpdateCheck;
+
+  /// No description provided for @settingsStudioUpdateInstall.
+  ///
+  /// In en, this message translates to:
+  /// **'Download and install'**
+  String get settingsStudioUpdateInstall;
+
+  /// No description provided for @settingsStudioUpdateReleaseNotes.
+  ///
+  /// In en, this message translates to:
+  /// **'Release notes'**
+  String get settingsStudioUpdateReleaseNotes;
+
   /// No description provided for @timelineWebSearchTitle.
   ///
   /// In en, this message translates to:

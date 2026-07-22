@@ -9,11 +9,13 @@ import 'api/studio/handlers/prompt.dart';
 import 'api/studio/handlers/providers.dart';
 import 'api/studio/handlers/session.dart';
 import 'api/studio/handlers/settings.dart';
+import 'api/studio/handlers/updater.dart';
 import 'api/studio/types/event.dart';
 import 'api/studio/types/interaction.dart';
 import 'api/studio/types/response.dart';
 import 'api/studio/types/runtime.dart';
 import 'api/studio/types/settings.dart';
+import 'api/studio/types/updater.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'frb_generated.dart';
@@ -74,7 +76,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.12.0';
 
   @override
-  int get rustContentHash => -954915604;
+  int get rustContentHash => -737415281;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -106,6 +108,11 @@ abstract class RustLibApi extends BaseApi {
     required BigInt laggedEvents,
   });
 
+  Future<BridgeStudioUpdateCheckDto>
+  crateApiStudioHandlersUpdaterCheckStudioUpdate({
+    required String currentVersion,
+  });
+
   Future<BridgeStudioSnapshotResponse>
   crateApiStudioHandlersSessionCreateSession({
     required String projectId,
@@ -113,6 +120,11 @@ abstract class RustLibApi extends BaseApi {
   });
 
   Future<RuntimeSnapshot> crateApiStudioHandlersLifecycleInitializeRuntime();
+
+  Stream<BridgeStudioUpdateEventDto>
+  crateApiStudioHandlersUpdaterInstallStudioUpdate({
+    required BridgeStudioUpdateDto update,
+  });
 
   Future<SkillsResponse> crateApiStudioHandlersProvidersListDiscoveredSkills({
     required String projectId,
@@ -355,6 +367,40 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<BridgeStudioUpdateCheckDto>
+  crateApiStudioHandlersUpdaterCheckStudioUpdate({
+    required String currentVersion,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(currentVersion, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 5,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_bridge_studio_update_check_dto,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiStudioHandlersUpdaterCheckStudioUpdateConstMeta,
+        argValues: [currentVersion],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiStudioHandlersUpdaterCheckStudioUpdateConstMeta =>
+      const TaskConstMeta(
+        debugName: "check_studio_update",
+        argNames: ["currentVersion"],
+      );
+
+  @override
   Future<BridgeStudioSnapshotResponse>
   crateApiStudioHandlersSessionCreateSession({
     required String projectId,
@@ -369,7 +415,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 5,
+            funcId: 6,
             port: port_,
           );
         },
@@ -399,7 +445,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 6,
+            funcId: 7,
             port: port_,
           );
         },
@@ -419,6 +465,49 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "initialize_runtime", argNames: []);
 
   @override
+  Stream<BridgeStudioUpdateEventDto>
+  crateApiStudioHandlersUpdaterInstallStudioUpdate({
+    required BridgeStudioUpdateDto update,
+  }) {
+    final sink = RustStreamSink<BridgeStudioUpdateEventDto>();
+    unawaited(
+      handler.executeNormal(
+        NormalTask(
+          callFfi: (port_) {
+            final serializer = SseSerializer(generalizedFrbRustBinding);
+            sse_encode_box_autoadd_bridge_studio_update_dto(update, serializer);
+            sse_encode_StreamSink_bridge_studio_update_event_dto_Sse(
+              sink,
+              serializer,
+            );
+            pdeCallFfi(
+              generalizedFrbRustBinding,
+              serializer,
+              funcId: 8,
+              port: port_,
+            );
+          },
+          codec: SseCodec(
+            decodeSuccessData: sse_decode_unit,
+            decodeErrorData: sse_decode_AnyhowException,
+          ),
+          constMeta: kCrateApiStudioHandlersUpdaterInstallStudioUpdateConstMeta,
+          argValues: [update, sink],
+          apiImpl: this,
+        ),
+      ),
+    );
+    return sink.stream;
+  }
+
+  TaskConstMeta
+  get kCrateApiStudioHandlersUpdaterInstallStudioUpdateConstMeta =>
+      const TaskConstMeta(
+        debugName: "install_studio_update",
+        argNames: ["update", "sink"],
+      );
+
+  @override
   Future<SkillsResponse> crateApiStudioHandlersProvidersListDiscoveredSkills({
     required String projectId,
   }) {
@@ -430,7 +519,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 7,
+            funcId: 9,
             port: port_,
           );
         },
@@ -463,7 +552,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 8,
+            funcId: 10,
             port: port_,
           );
         },
@@ -492,7 +581,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 9,
+            funcId: 11,
             port: port_,
           );
         },
@@ -521,7 +610,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 10,
+            funcId: 12,
             port: port_,
           );
         },
@@ -552,7 +641,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 11,
+            funcId: 13,
             port: port_,
           );
         },
@@ -585,7 +674,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 12,
+            funcId: 14,
             port: port_,
           );
         },
@@ -619,7 +708,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 13,
+            funcId: 15,
             port: port_,
           );
         },
@@ -654,7 +743,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 14,
+            funcId: 16,
             port: port_,
           );
         },
@@ -690,7 +779,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 15,
+            funcId: 17,
             port: port_,
           );
         },
@@ -724,7 +813,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 16,
+            funcId: 18,
             port: port_,
           );
         },
@@ -759,7 +848,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 17,
+            funcId: 19,
             port: port_,
           );
         },
@@ -795,7 +884,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 18,
+            funcId: 20,
             port: port_,
           );
         },
@@ -830,7 +919,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 19,
+            funcId: 21,
             port: port_,
           );
         },
@@ -864,7 +953,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 20,
+            funcId: 22,
             port: port_,
           );
         },
@@ -903,7 +992,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 21,
+            funcId: 23,
             port: port_,
           );
         },
@@ -944,7 +1033,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 22,
+            funcId: 24,
             port: port_,
           );
         },
@@ -974,7 +1063,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 23,
+            funcId: 25,
             port: port_,
           );
         },
@@ -1001,7 +1090,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 24,
+            funcId: 26,
             port: port_,
           );
         },
@@ -1031,7 +1120,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 25,
+            funcId: 27,
             port: port_,
           );
         },
@@ -1065,7 +1154,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 26,
+            funcId: 28,
             port: port_,
           );
         },
@@ -1102,7 +1191,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             pdeCallFfi(
               generalizedFrbRustBinding,
               serializer,
-              funcId: 27,
+              funcId: 29,
               port: port_,
             );
           },
@@ -1148,7 +1237,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             pdeCallFfi(
               generalizedFrbRustBinding,
               serializer,
-              funcId: 28,
+              funcId: 30,
               port: port_,
             );
           },
@@ -1194,6 +1283,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  RustStreamSink<BridgeStudioUpdateEventDto>
+  dco_decode_StreamSink_bridge_studio_update_event_dto_Sse(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    throw UnimplementedError();
+  }
+
+  @protected
   String dco_decode_String(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as String;
@@ -1228,6 +1324,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   dco_decode_box_autoadd_bridge_model_reasoning_descriptor(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_bridge_model_reasoning_descriptor(raw);
+  }
+
+  @protected
+  BridgeStudioUpdateDto dco_decode_box_autoadd_bridge_studio_update_dto(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_bridge_studio_update_dto(raw);
   }
 
   @protected
@@ -1633,6 +1737,69 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       generalSettingsJson: dco_decode_String(arr[6]),
       webSearch: dco_decode_bridge_web_search_settings_dto(arr[7]),
     );
+  }
+
+  @protected
+  BridgeStudioUpdateCheckDto dco_decode_bridge_studio_update_check_dto(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    switch (raw[0]) {
+      case 0:
+        return BridgeStudioUpdateCheckDto_UpToDate();
+      case 1:
+        return BridgeStudioUpdateCheckDto_Available(
+          update: dco_decode_box_autoadd_bridge_studio_update_dto(raw[1]),
+        );
+      default:
+        throw Exception("unreachable");
+    }
+  }
+
+  @protected
+  BridgeStudioUpdateDto dco_decode_bridge_studio_update_dto(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 7)
+      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
+    return BridgeStudioUpdateDto(
+      version: dco_decode_String(arr[0]),
+      publishedAt: dco_decode_i_64(arr[1]),
+      notesUrl: dco_decode_String(arr[2]),
+      installerUrl: dco_decode_String(arr[3]),
+      installerSize: dco_decode_u_64(arr[4]),
+      installerSha256: dco_decode_String(arr[5]),
+      installerSignatureUrl: dco_decode_String(arr[6]),
+    );
+  }
+
+  @protected
+  BridgeStudioUpdateEventDto dco_decode_bridge_studio_update_event_dto(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    switch (raw[0]) {
+      case 0:
+        return BridgeStudioUpdateEventDto_Started(
+          total: dco_decode_u_64(raw[1]),
+        );
+      case 1:
+        return BridgeStudioUpdateEventDto_Progress(
+          downloaded: dco_decode_u_64(raw[1]),
+          total: dco_decode_u_64(raw[2]),
+        );
+      case 2:
+        return BridgeStudioUpdateEventDto_Verifying();
+      case 3:
+        return BridgeStudioUpdateEventDto_InstallerLaunched();
+      case 4:
+        return BridgeStudioUpdateEventDto_Failed(
+          code: dco_decode_String(raw[1]),
+          message: dco_decode_String(raw[2]),
+        );
+      default:
+        throw Exception("unreachable");
+    }
   }
 
   @protected
@@ -2334,6 +2501,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  RustStreamSink<BridgeStudioUpdateEventDto>
+  sse_decode_StreamSink_bridge_studio_update_event_dto_Sse(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    throw UnimplementedError('Unreachable ()');
+  }
+
+  @protected
   String sse_decode_String(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var inner = sse_decode_list_prim_u_8_strict(deserializer);
@@ -2377,6 +2553,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_bridge_model_reasoning_descriptor(deserializer));
+  }
+
+  @protected
+  BridgeStudioUpdateDto sse_decode_box_autoadd_bridge_studio_update_dto(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_bridge_studio_update_dto(deserializer));
   }
 
   @protected
@@ -2868,6 +3052,83 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       generalSettingsJson: var_generalSettingsJson,
       webSearch: var_webSearch,
     );
+  }
+
+  @protected
+  BridgeStudioUpdateCheckDto sse_decode_bridge_studio_update_check_dto(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var tag_ = sse_decode_i_32(deserializer);
+    switch (tag_) {
+      case 0:
+        return BridgeStudioUpdateCheckDto_UpToDate();
+      case 1:
+        var var_update = sse_decode_box_autoadd_bridge_studio_update_dto(
+          deserializer,
+        );
+        return BridgeStudioUpdateCheckDto_Available(update: var_update);
+      default:
+        throw UnimplementedError('');
+    }
+  }
+
+  @protected
+  BridgeStudioUpdateDto sse_decode_bridge_studio_update_dto(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_version = sse_decode_String(deserializer);
+    var var_publishedAt = sse_decode_i_64(deserializer);
+    var var_notesUrl = sse_decode_String(deserializer);
+    var var_installerUrl = sse_decode_String(deserializer);
+    var var_installerSize = sse_decode_u_64(deserializer);
+    var var_installerSha256 = sse_decode_String(deserializer);
+    var var_installerSignatureUrl = sse_decode_String(deserializer);
+    return BridgeStudioUpdateDto(
+      version: var_version,
+      publishedAt: var_publishedAt,
+      notesUrl: var_notesUrl,
+      installerUrl: var_installerUrl,
+      installerSize: var_installerSize,
+      installerSha256: var_installerSha256,
+      installerSignatureUrl: var_installerSignatureUrl,
+    );
+  }
+
+  @protected
+  BridgeStudioUpdateEventDto sse_decode_bridge_studio_update_event_dto(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var tag_ = sse_decode_i_32(deserializer);
+    switch (tag_) {
+      case 0:
+        var var_total = sse_decode_u_64(deserializer);
+        return BridgeStudioUpdateEventDto_Started(total: var_total);
+      case 1:
+        var var_downloaded = sse_decode_u_64(deserializer);
+        var var_total = sse_decode_u_64(deserializer);
+        return BridgeStudioUpdateEventDto_Progress(
+          downloaded: var_downloaded,
+          total: var_total,
+        );
+      case 2:
+        return BridgeStudioUpdateEventDto_Verifying();
+      case 3:
+        return BridgeStudioUpdateEventDto_InstallerLaunched();
+      case 4:
+        var var_code = sse_decode_String(deserializer);
+        var var_message = sse_decode_String(deserializer);
+        return BridgeStudioUpdateEventDto_Failed(
+          code: var_code,
+          message: var_message,
+        );
+      default:
+        throw UnimplementedError('');
+    }
   }
 
   @protected
@@ -3822,6 +4083,23 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_StreamSink_bridge_studio_update_event_dto_Sse(
+    RustStreamSink<BridgeStudioUpdateEventDto> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(
+      self.setupAndSerialize(
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_bridge_studio_update_event_dto,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+      ),
+      serializer,
+    );
+  }
+
+  @protected
   void sse_encode_String(String self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_list_prim_u_8_strict(utf8.encoder.convert(self), serializer);
@@ -3867,6 +4145,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_bridge_model_reasoning_descriptor(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_bridge_studio_update_dto(
+    BridgeStudioUpdateDto self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bridge_studio_update_dto(self, serializer);
   }
 
   @protected
@@ -4249,6 +4536,67 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.configJson, serializer);
     sse_encode_String(self.generalSettingsJson, serializer);
     sse_encode_bridge_web_search_settings_dto(self.webSearch, serializer);
+  }
+
+  @protected
+  void sse_encode_bridge_studio_update_check_dto(
+    BridgeStudioUpdateCheckDto self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    switch (self) {
+      case BridgeStudioUpdateCheckDto_UpToDate():
+        sse_encode_i_32(0, serializer);
+      case BridgeStudioUpdateCheckDto_Available(update: final update):
+        sse_encode_i_32(1, serializer);
+        sse_encode_box_autoadd_bridge_studio_update_dto(update, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_bridge_studio_update_dto(
+    BridgeStudioUpdateDto self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.version, serializer);
+    sse_encode_i_64(self.publishedAt, serializer);
+    sse_encode_String(self.notesUrl, serializer);
+    sse_encode_String(self.installerUrl, serializer);
+    sse_encode_u_64(self.installerSize, serializer);
+    sse_encode_String(self.installerSha256, serializer);
+    sse_encode_String(self.installerSignatureUrl, serializer);
+  }
+
+  @protected
+  void sse_encode_bridge_studio_update_event_dto(
+    BridgeStudioUpdateEventDto self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    switch (self) {
+      case BridgeStudioUpdateEventDto_Started(total: final total):
+        sse_encode_i_32(0, serializer);
+        sse_encode_u_64(total, serializer);
+      case BridgeStudioUpdateEventDto_Progress(
+        downloaded: final downloaded,
+        total: final total,
+      ):
+        sse_encode_i_32(1, serializer);
+        sse_encode_u_64(downloaded, serializer);
+        sse_encode_u_64(total, serializer);
+      case BridgeStudioUpdateEventDto_Verifying():
+        sse_encode_i_32(2, serializer);
+      case BridgeStudioUpdateEventDto_InstallerLaunched():
+        sse_encode_i_32(3, serializer);
+      case BridgeStudioUpdateEventDto_Failed(
+        code: final code,
+        message: final message,
+      ):
+        sse_encode_i_32(4, serializer);
+        sse_encode_String(code, serializer);
+        sse_encode_String(message, serializer);
+    }
   }
 
   @protected

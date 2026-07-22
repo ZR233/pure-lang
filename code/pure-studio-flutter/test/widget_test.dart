@@ -20,6 +20,7 @@ import 'package:pure_studio_flutter/src/features/status/context_usage_readout.da
 import 'package:pure_studio_flutter/src/features/status/session_status_bar.dart';
 import 'package:pure_studio_flutter/src/features/timeline/markdown_repair.dart';
 import 'package:pure_studio_flutter/src/features/timeline/timeline_view.dart';
+import 'package:pure_studio_flutter/src/features/update/studio_update_controller.dart';
 import 'package:pure_studio_flutter/src/l10n/app_localizations.dart';
 import 'package:pure_studio_flutter/src/rust/api/studio.dart' as frb;
 import 'package:pure_studio_flutter/src/shared/studio_chrome.dart';
@@ -47,6 +48,7 @@ part 'widget_test/menu_scroll_helpers.dart';
 part 'widget_test/state_fixtures.dart';
 part 'widget_test/fake_studio_api.dart';
 part 'widget_test/settings_helpers.dart';
+part 'widget_test/studio_update_tests.dart';
 
 void main() {
   registerControllerStreamTests();
@@ -64,4 +66,5 @@ void main() {
   registerShellSettingsTests();
   registerInteractionTests();
   registerSkillsTests();
+  registerStudioUpdateTests();
 }

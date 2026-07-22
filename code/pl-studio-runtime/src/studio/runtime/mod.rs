@@ -99,6 +99,14 @@ pub struct StudioRuntime {
 }
 
 impl StudioRuntime {
+    /// Returns whether a turn or durable task prevents a safe application update.
+    pub async fn is_busy_for_update(&self) -> Result<bool> {
+        if !self.runtime_snapshot().active_turns.is_empty() {
+            return Ok(true);
+        }
+        Ok(!self.store.list_active_task_runs().await?.is_empty())
+    }
+
     pub async fn session_task_view(
         &self,
         session_id: &str,

@@ -13,6 +13,7 @@ mod first_run;
 mod protocol;
 mod provider_usage;
 mod studio;
+mod updater;
 
 pub use agent::{
     CloseDisposition, CloseOutcome, DurableWorktreeDisposition, DurableWorktreePresence,
@@ -36,3 +37,4 @@ pub use provider_usage::{
     ProviderUsageData, ProviderUsageRecord, ProviderUsageState, provider_usage_records,
 };
 pub use studio::*;
+pub use updater::*;

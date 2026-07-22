@@ -3,6 +3,72 @@ use crate::StudioProductEventKind;
 use pretty_assertions::assert_eq;
 
 #[tokio::test]
+async fn update_shutdown_refuses_active_task_and_stops_idle_runtime() {
+    use crate::studio::task_coordinator::{CreateTaskRun, TaskRunPhase};
+
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let busy_store = StudioStore::open_memory().await.unwrap();
+    let project = busy_store
+        .upsert_project("C:/work/update-busy")
+        .await
+        .unwrap();
+    let session = busy_store
+        .create_session(&project.id, "Update busy", StudioMode::Task)
+        .await
+        .unwrap();
+    busy_store
+        .create_task_run_with_lease(CreateTaskRun {
+            session_id: session.id,
+            phase: TaskRunPhase::Planning,
+            plan: "# Plan".to_string(),
+            workspace_root: "C:/work/update-busy".to_string(),
+            git_common_dir: "C:/work/update-busy/.git".to_string(),
+            branch: "main".to_string(),
+            head_commit: "1111111".to_string(),
+        })
+        .await
+        .unwrap();
+    let busy_home = std::env::temp_dir().join(format!("pure-update-busy-{unique}"));
+    let busy_runtime = StudioRuntime::with_runtime_state(
+        busy_store,
+        ConfigStore::new(crate::config::ConfigPaths::from_home(&busy_home)),
+        StudioRuntimeState::new(),
+    );
+
+    assert!(
+        busy_runtime
+            .shutdown_runtime_if_idle()
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_ne!(
+        busy_runtime.runtime_snapshot().status,
+        StudioRuntimeStatus::Stopped
+    );
+
+    let idle_home = std::env::temp_dir().join(format!("pure-update-idle-{unique}"));
+    let idle_runtime = StudioRuntime::with_runtime_state(
+        StudioStore::open_memory().await.unwrap(),
+        ConfigStore::new(crate::config::ConfigPaths::from_home(&idle_home)),
+        StudioRuntimeState::new(),
+    );
+    idle_runtime.initialize_runtime().await.unwrap();
+    let stopped = idle_runtime
+        .shutdown_runtime_if_idle()
+        .await
+        .unwrap()
+        .expect("idle runtime should stop for update");
+    assert_eq!(stopped.status, StudioRuntimeStatus::Stopped);
+
+    let _ = tokio::fs::remove_dir_all(busy_home).await;
+    let _ = tokio::fs::remove_dir_all(idle_home).await;
+}
+
+#[tokio::test]
 async fn failed_task_preflight_keeps_plan_confirmation_pending() {
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

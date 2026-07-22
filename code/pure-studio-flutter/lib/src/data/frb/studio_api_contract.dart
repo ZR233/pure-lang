@@ -56,6 +56,8 @@ class FrbStudioApi implements StudioApi {
   static Future<void>? _initFuture;
   ProviderCatalogView? _providerCatalogCache;
 
+  static Future<void> ensureReady() => _ensureReady();
+
   static Future<void> _ensureReady() {
     return _initFuture ??= () async {
       await RustLib.init();

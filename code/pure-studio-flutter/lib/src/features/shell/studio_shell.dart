@@ -8,6 +8,7 @@ import '../../data/repositories/studio_repository.dart';
 import '../../domain/models/studio_models.dart';
 import '../../l10n/studio_l10n.dart';
 import '../../shared/studio_chrome.dart';
+import '../update/studio_update_controller.dart';
 import '../interaction/composer_dock.dart';
 import '../status/session_status_bar.dart';
 import '../timeline/timeline_view.dart';
