@@ -1,5 +1,5 @@
 use pl_model::TokenUsage;
-use pl_protocol::{BudgetLimitKind, BudgetUsage};
+use pl_protocol::{BudgetLimitKind, BudgetUsage, TurnFailure};
 use pl_trace::TraceEvent;
 
 use crate::context_compaction::ContextCompactionSnapshot;
@@ -47,6 +47,7 @@ pub struct TurnResult {
     pub status: TurnResultStatus,
     pub abort_reason: Option<TurnAbortReason>,
     pub error: Option<String>,
+    pub failure: Option<TurnFailure>,
     pub budget_limit_kind: Option<BudgetLimitKind>,
     pub budget_usage: Option<BudgetUsage>,
     /// Structured trace events recorded during this turn (if tracing was enabled).

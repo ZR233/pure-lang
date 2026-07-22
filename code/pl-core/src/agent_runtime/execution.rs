@@ -199,10 +199,11 @@ pub(crate) fn turn_outcome(
     result: std::result::Result<TurnResult, String>,
     cancelled: bool,
 ) -> (AgentTurnOutcome, Vec<TraceEvent>, Option<TurnResult>) {
-    let (kind, reason, usage, traces, result) = match result {
+    let (kind, reason, failure, usage, traces, result) = match result {
         Ok(result) if cancelled => (
             TurnOutcomeKind::Cancelled,
             Some("cancelled".to_string()),
+            None,
             result.usage.clone(),
             result.trace_events.clone(),
             Some(result),
@@ -224,6 +225,7 @@ pub(crate) fn turn_outcome(
             (
                 kind,
                 reason,
+                result.failure.clone(),
                 result.usage.clone(),
                 result.trace_events.clone(),
                 Some(result),
@@ -232,6 +234,7 @@ pub(crate) fn turn_outcome(
         Err(error) if cancelled => (
             TurnOutcomeKind::Cancelled,
             Some(error),
+            None,
             TokenUsage::default(),
             Vec::new(),
             None,
@@ -239,6 +242,10 @@ pub(crate) fn turn_outcome(
         Err(error) => (
             TurnOutcomeKind::Failed,
             Some(error),
+            Some(pl_protocol::TurnFailure::permanent(
+                pl_protocol::TurnFailureCategory::Internal,
+                "agent runtime execution failed",
+            )),
             TokenUsage::default(),
             Vec::new(),
             None,
@@ -250,6 +257,7 @@ pub(crate) fn turn_outcome(
             session_id,
             kind,
             reason,
+            failure,
             usage,
             finished_at: unix_timestamp(),
         },
@@ -299,6 +307,11 @@ fn enforce_finalization(
     });
     if !finalized {
         result.status = TurnResultStatus::Errored;
-        result.error = Some(format!("turn must finalize with tool `{name}`"));
+        let message = format!("turn must finalize with tool `{name}`");
+        result.error = Some(message.clone());
+        result.failure = Some(pl_protocol::TurnFailure::permanent(
+            pl_protocol::TurnFailureCategory::Validation,
+            message,
+        ));
     }
 }

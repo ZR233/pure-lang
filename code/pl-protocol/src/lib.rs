@@ -7,6 +7,7 @@ mod model_context;
 mod permission;
 mod provider_catalog;
 mod session;
+mod turn_failure;
 #[cfg(feature = "typescript")]
 mod typescript;
 
@@ -51,5 +52,6 @@ pub use session::{
     SessionTextChannel, SessionTimelineEvent, SessionTimelineEventKind, SessionToolPart,
     SessionTurn, SessionTurnStatus, SessionViewSnapshot,
 };
+pub use turn_failure::{RetryDisposition, TurnFailure, TurnFailureCategory};
 #[cfg(feature = "typescript")]
 pub use typescript::session_events_typescript;

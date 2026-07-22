@@ -1,7 +1,10 @@
 use std::path::PathBuf;
 
 use pl_model::ModelCapabilities;
-use pl_protocol::{BudgetLimitKind, BudgetUsage, ErrorSeverity, PureError};
+use pl_protocol::{
+    BudgetLimitKind, BudgetUsage, ErrorSeverity, PureError, RetryDisposition, TurnFailure,
+    TurnFailureCategory,
+};
 use pl_trace::{AgentEvent, TracePartStatus};
 
 use crate::trace::TraceRecorder;
@@ -23,16 +26,58 @@ pub(super) fn provider_error_severity(
 
 pub(super) fn normalize_provider_error(
     active_subagent: Option<&crate::tool::SubagentContext>,
-    error: String,
-) -> (String, ErrorSeverity) {
-    if active_subagent.is_some() && crate::provider_error::is_provider_429_error(&error) {
+    error: PureError,
+) -> (String, ErrorSeverity, TurnFailure) {
+    let message = error.to_string();
+    if active_subagent.is_some() && crate::provider_error::is_provider_429_error(&message) {
+        let message = PureError::ProviderCapacity { message }.to_string();
         return (
-            PureError::ProviderCapacity { message: error }.to_string(),
+            message.clone(),
             ErrorSeverity::Recoverable,
+            TurnFailure::permanent(TurnFailureCategory::ProviderCapacity, message),
         );
     }
-    let severity = provider_error_severity(active_subagent, &error);
-    (error, severity)
+    let severity = provider_error_severity(active_subagent, &message);
+    let retry = if error.is_transient_model_transport()
+        || crate::provider_error::is_retryable_model_error(&message)
+    {
+        RetryDisposition::Retryable {
+            retry_after_ms: error.retry_after_ms(),
+        }
+    } else {
+        RetryDisposition::Permanent
+    };
+    let (code, http_status) = error
+        .transient_model_metadata()
+        .map_or((None, None), |(code, status)| {
+            (code.map(ToString::to_string), status)
+        });
+    let category = if retry.is_retryable()
+        && (code.as_deref().is_some_and(provider_capacity_code)
+            || matches!(http_status, Some(429 | 503)))
+    {
+        TurnFailureCategory::ProviderCapacity
+    } else {
+        TurnFailureCategory::Provider
+    };
+    (
+        message.clone(),
+        severity,
+        TurnFailure {
+            category,
+            code,
+            http_status,
+            message,
+            retry,
+        },
+    )
+}
+
+fn provider_capacity_code(code: &str) -> bool {
+    matches!(
+        code,
+        "server_is_overloaded" | "rate_limit_exceeded" | "websocket_connection_limit_reached"
+    )
 }
 
 pub(super) fn should_request_parallel_tool_calls(
@@ -101,6 +146,7 @@ pub(super) fn interrupted_turn_result(
         status: TurnResultStatus::Aborted,
         abort_reason: Some(crate::turn::TurnAbortReason::Interrupted),
         error: None,
+        failure: None,
         budget_limit_kind: None,
         budget_usage: None,
         trace_events: recorder.drain(),
@@ -118,6 +164,7 @@ pub(super) fn failed_turn_result(
     session_message_count: usize,
     error: String,
     severity: ErrorSeverity,
+    failure: TurnFailure,
 ) -> TurnResult {
     failed_turn_result_with_abort_reason(
         recorder,
@@ -129,6 +176,7 @@ pub(super) fn failed_turn_result(
         session_message_count,
         error,
         severity,
+        failure,
         TurnAbortReason::ProviderError,
     )
 }
@@ -144,6 +192,7 @@ pub(super) fn failed_turn_result_with_abort_reason(
     session_message_count: usize,
     error: String,
     severity: ErrorSeverity,
+    failure: TurnFailure,
     abort_reason: TurnAbortReason,
 ) -> TurnResult {
     usage.total_tokens = usage.prompt_tokens + usage.completion_tokens;
@@ -168,6 +217,7 @@ pub(super) fn failed_turn_result_with_abort_reason(
         status: TurnResultStatus::Errored,
         abort_reason: Some(abort_reason),
         error: Some(error),
+        failure: Some(failure),
         budget_limit_kind: None,
         budget_usage: None,
         trace_events: recorder.drain(),
@@ -210,6 +260,7 @@ pub(super) fn budget_limited_turn_result(
         status: TurnResultStatus::Aborted,
         abort_reason: Some(crate::turn::TurnAbortReason::BudgetLimited),
         error: None,
+        failure: None,
         budget_limit_kind: Some(limit_kind),
         budget_usage: Some(budget_usage),
         trace_events: recorder.drain(),

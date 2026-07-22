@@ -137,6 +137,7 @@ where
             session_id,
             kind: TurnOutcomeKind::Cancelled,
             reason: Some("runtime_restarted".to_string()),
+            failure: None,
             usage: pl_model::TokenUsage::default(),
             finished_at: unix_timestamp(),
         };

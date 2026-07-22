@@ -19,6 +19,7 @@ fn stream_accumulator_requires_completed_event() {
         PureError::TransientModelTransport {
             message,
             retry_after_ms,
+            ..
         } => {
             assert_eq!(message, "provider stream ended before completion");
             assert_eq!(retry_after_ms, None);

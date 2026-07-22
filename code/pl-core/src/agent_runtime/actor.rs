@@ -62,7 +62,7 @@ pub(crate) enum ActorCommand {
     Close {
         reply: oneshot::Sender<AgentRuntimeResult<AgentSnapshot>>,
     },
-    TurnFinished(TurnCompletion),
+    TurnFinished(Box<TurnCompletion>),
     Shutdown {
         reply: oneshot::Sender<AgentRuntimeResult<()>>,
     },
@@ -229,7 +229,7 @@ where
                             let _ = reply.send(result);
                         }
                         ActorCommand::TurnFinished(completion) => {
-                            self.finish_turn(completion).await;
+                            self.finish_turn(*completion).await;
                         }
                         ActorCommand::Shutdown { reply } => {
                             let result = self.shutdown().await;
@@ -627,7 +627,7 @@ where
             };
             let _ = settled_sender.send(());
             let _ = completion_sender
-                .send(ActorCommand::TurnFinished(completion))
+                .send(ActorCommand::TurnFinished(Box::new(completion)))
                 .await;
         });
         self.active = Some(ActiveTurn {

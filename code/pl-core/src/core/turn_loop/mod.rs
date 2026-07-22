@@ -237,8 +237,8 @@ pub(super) async fn run_turn_with_trace(
                     .await?;
                 }
                 Err(error) => {
-                    let (error, severity) =
-                        normalize_provider_error(active_subagent.as_ref(), error.to_string());
+                    let (error, severity, failure) =
+                        normalize_provider_error(active_subagent.as_ref(), error);
                     return Ok(failed_turn_result(
                         recorder,
                         &turn_id,
@@ -249,6 +249,7 @@ pub(super) async fn run_turn_with_trace(
                         session.len(),
                         error,
                         severity,
+                        failure,
                     ));
                 }
             }
@@ -347,8 +348,8 @@ pub(super) async fn run_turn_with_trace(
                 ));
             }
             Err(error) => {
-                let (error, severity) =
-                    normalize_provider_error(active_subagent.as_ref(), error.to_string());
+                let (error, severity, failure) =
+                    normalize_provider_error(active_subagent.as_ref(), error);
                 return Ok(failed_turn_result(
                     recorder,
                     &turn_id,
@@ -359,6 +360,7 @@ pub(super) async fn run_turn_with_trace(
                     session.len(),
                     error,
                     severity,
+                    failure,
                 ));
             }
         };
@@ -425,6 +427,10 @@ pub(super) async fn run_turn_with_trace(
                     session.len(),
                     "模型返回了未执行的工具调用文本，未产生可执行 tool call。".to_string(),
                     ErrorSeverity::Recoverable,
+                    pl_protocol::TurnFailure::permanent(
+                        pl_protocol::TurnFailureCategory::Validation,
+                        "模型返回了未执行的工具调用文本，未产生可执行 tool call。",
+                    ),
                 ));
             }
             session.push_assistant_response(content.clone(), reasoning_content.clone());
@@ -492,6 +498,10 @@ pub(super) async fn run_turn_with_trace(
                     safe_message_count,
                     error,
                     ErrorSeverity::Recoverable,
+                    pl_protocol::TurnFailure::permanent(
+                        pl_protocol::TurnFailureCategory::Tool,
+                        "tool execution failed",
+                    ),
                     crate::turn::TurnAbortReason::ToolError,
                 ));
             }
@@ -624,6 +634,7 @@ pub(super) async fn run_turn_with_trace(
         status: TurnResultStatus::Completed,
         abort_reason: None,
         error: None,
+        failure: None,
         budget_limit_kind: None,
         budget_usage: None,
         trace_events: recorder.drain(),

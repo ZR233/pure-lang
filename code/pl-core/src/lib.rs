@@ -110,9 +110,9 @@ pub use pl_protocol::{
     OutputStream, PermissionLevel, PinnedContextSection, PipelineStage, PlanConfirmationResolution,
     ProviderCatalogSnapshot, ProviderConnectionModeDescriptor, ProviderPresetDescriptor,
     ProviderServiceCapabilitiesDescriptor, ProviderTransportDescriptor, PureError, Result,
-    RuntimeCostAmount, RuntimeUsageSnapshot, SkillActivation, TokenUsageSnapshot,
-    ToolApprovalResolution, ToolResultReceipt, UserInputAnswer, UserInputRequest,
-    UserInputResponse, UserQuestion, UserQuestionOption,
+    RetryDisposition, RuntimeCostAmount, RuntimeUsageSnapshot, SkillActivation, TokenUsageSnapshot,
+    ToolApprovalResolution, ToolResultReceipt, TurnFailure, TurnFailureCategory, UserInputAnswer,
+    UserInputRequest, UserInputResponse, UserQuestion, UserQuestionOption,
 };
 pub use provider_error::is_retryable_model_error;
 pub use runtime_usage::ModelTokenUsageSnapshot;

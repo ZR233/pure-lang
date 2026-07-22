@@ -16,15 +16,20 @@ fn root_provider_429_is_transient_and_subagent_429_is_provider_capacity() {
         task: "inspect worker".to_string(),
         depth: 1,
     };
-    let (error, severity) = normalize_provider_error(
+    let (error, severity, failure) = normalize_provider_error(
         Some(&subagent),
-        "API error 429 Too Many Requests".to_string(),
+        pl_protocol::PureError::LlmError("API error 429 Too Many Requests".to_string()),
     );
     assert_eq!(
         error,
-        "provider capacity unavailable: API error 429 Too Many Requests"
+        "provider capacity unavailable: LLM provider error: API error 429 Too Many Requests"
     );
     assert!(matches!(severity, ErrorSeverity::Recoverable));
+    assert_eq!(
+        failure.category,
+        pl_protocol::TurnFailureCategory::ProviderCapacity
+    );
+    assert!(!failure.retry.is_retryable());
     assert!(matches!(
         provider_error_severity(None, "API error 500"),
         ErrorSeverity::Recoverable
@@ -72,6 +77,10 @@ fn failed_turn_result_preserves_error_message() {
         3,
         "provider rejected request".to_string(),
         ErrorSeverity::Transient,
+        pl_protocol::TurnFailure::permanent(
+            pl_protocol::TurnFailureCategory::Provider,
+            "provider rejected request",
+        ),
     );
 
     assert_eq!(result.status, TurnResultStatus::Errored);
@@ -81,6 +90,10 @@ fn failed_turn_result_preserves_error_message() {
     );
     assert_eq!(result.content, "partial summary");
     assert_eq!(result.error.as_deref(), Some("provider rejected request"));
+    assert_eq!(
+        result.failure.as_ref().map(|failure| failure.category),
+        Some(pl_protocol::TurnFailureCategory::Provider)
+    );
     assert!(matches!(
         event_rx.try_recv().unwrap(),
         AgentEvent::TracePartStarted { item }
