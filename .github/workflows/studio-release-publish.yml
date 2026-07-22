@@ -214,9 +214,11 @@ jobs:
           }
           $toolDir = Join-Path $env:RUNNER_TEMP 'minisign-0.12'
           Expand-Archive -LiteralPath $archive -DestinationPath $toolDir
-          $minisign = Get-ChildItem -Path $toolDir -Filter minisign.exe -Recurse | Select-Object -First 1
-          if ($null -eq $minisign) { throw 'minisign.exe not found in verified archive' }
-          $minisign.DirectoryName | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          $minisign = Join-Path $toolDir 'minisign-win64\x86_64\minisign.exe'
+          if (-not (Test-Path -LiteralPath $minisign -PathType Leaf)) {
+            throw 'x86_64 minisign.exe not found in verified archive'
+          }
+          (Split-Path -Parent $minisign) | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
 
       - name: Materialize optional Authenticode certificate
         shell: pwsh
