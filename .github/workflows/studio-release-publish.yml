@@ -197,10 +197,13 @@ jobs:
             throw 'Inno Setup 6 compiler was not found after installation'
           }
           $isccVersion = [Version](Get-Item -LiteralPath $iscc).VersionInfo.FileVersion
-          if ($isccVersion.Major -ne 6 -or $isccVersion -lt [Version]'6.4.3') {
+          if ($isccVersion -eq [Version]'0.0.0.0') {
+            Write-Warning "Inno Setup at $iscc does not expose meaningful file-version metadata; package staging will validate the compiler"
+          } elseif ($isccVersion.Major -ne 6 -or $isccVersion -lt [Version]'6.4.3') {
             throw "Unsupported Inno Setup compiler version $isccVersion at $iscc"
+          } else {
+            Write-Output "Using Inno Setup compiler $isccVersion at $iscc"
           }
-          Write-Output "Using Inno Setup compiler $isccVersion at $iscc"
           "ISCC_PATH=$iscc" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
           $archive = Join-Path $env:RUNNER_TEMP 'minisign-0.12-win64.zip'
