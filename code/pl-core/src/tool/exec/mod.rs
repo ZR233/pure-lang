@@ -128,7 +128,7 @@ where
 }
 
 struct ToolResultOutputObserver {
-    event_tx: pl_trace::AgentEventSender,
+    event_tx: tokio::sync::broadcast::WeakSender<AgentEvent>,
     turn_id: String,
     item_id: String,
     revision_base: u64,
@@ -152,7 +152,9 @@ impl CommandOutputObserver for ToolResultOutputObserver {
             updated_at: now,
             delta: TraceDelta::ToolResult { delta },
         };
-        let _ = self.event_tx.send(AgentEvent::TracePartDelta { event });
+        if let Some(event_tx) = self.event_tx.upgrade() {
+            let _ = event_tx.send(AgentEvent::TracePartDelta { event });
+        }
     }
 }
 
@@ -256,7 +258,7 @@ where
                 .map(Duration::from_secs)
                 .unwrap_or(self.default_timeout);
             let observer = Arc::new(ToolResultOutputObserver {
-                event_tx: context.event_tx.clone(),
+                event_tx: context.event_tx.downgrade(),
                 turn_id: input.session_id.clone(),
                 item_id: input.tool_id.clone(),
                 revision_base: input.revision_base,
