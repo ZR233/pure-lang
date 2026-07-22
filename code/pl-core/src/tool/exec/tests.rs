@@ -192,6 +192,31 @@ fn large_output_command() -> &'static str {
 }
 
 #[tokio::test]
+async fn background_output_observer_does_not_keep_turn_event_channel_open() {
+    let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(8);
+    let observer = ToolResultOutputObserver {
+        event_tx: event_tx.downgrade(),
+        turn_id: "turn-1".to_string(),
+        item_id: "tool-1".to_string(),
+        revision_base: 0,
+    };
+
+    observer.output_chunk(CommandOutputStream::Stdout, b"running", 1);
+    assert!(matches!(
+        event_rx.recv().await,
+        Ok(pl_trace::AgentEvent::TracePartDelta { .. })
+    ));
+
+    drop(event_tx);
+    assert!(matches!(
+        event_rx.recv().await,
+        Err(tokio::sync::broadcast::error::RecvError::Closed)
+    ));
+
+    observer.output_chunk(CommandOutputStream::Stdout, b"late output", 2);
+}
+
+#[tokio::test]
 async fn echoes_hello() {
     let tool = test_tool();
     let output = tool
