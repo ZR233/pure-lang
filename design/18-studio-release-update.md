@@ -5,19 +5,27 @@
 
 ## 1. 版本与发布入口
 
-`code/pure-studio-flutter/pubspec.yaml` 的 `version: x.y.z+build` 是 Studio 版本唯一事实源。
-稳定版只允许在 `main` 上手动运行 `studio-release.yml`。发布表单默认选择修复，对应 patch
-递增；功能增加对应 minor 递增并清零 patch；勾选大版本时忽略变更类型，递增 major 并清零
-minor 和 patch。每次发布同时将 build number 递增一。CI 自动生成
-`chore(studio): prepare v{x.y.z}` 版本提交，不再要求人工计算或输入版本号。
+Studio 使用 Release Please 的单一根组件管理版本。根 `studio-version.txt`、
+`.release-please-manifest.json` 与带 `x-release-please-version` 注解的 Flutter
+`pubspec.yaml` 由同一个 Release PR 同步更新；Flutter 版本只允许规范的稳定 `x.y.z`，不使用
+`+build`。Release Please 从整个仓库收集 Conventional Commits：`fix:` 递增 patch，`feat:`
+递增 minor，带 `!` 或 `BREAKING CHANGE:` 的提交递增 major。`ci:`、`docs:` 与 `chore:` 等
+非产品修改不单独触发版本。人工审查并合并 Release PR 即批准发版，不再从 Actions 输入或推算版本。
 
-版本提交先推送到固定临时分支 `studio-release/active`，内部发布工作流从该精确提交构建、签名、
-烟测并生成 provenance。全部验证成功后才允许将版本提交快进到 `main`，再创建不可变的
-`v{x.y.z}` tag 和 GitHub Release。失败时不得推进 `main`，临时分支作为并发锁和重试来源保留；
-成功后只能用精确 SHA lease 删除。已有正式 Release 必须拒绝覆盖；同一提交留下的 tag 或草稿
-Release 可继续完成。若版本提交已进入 `main` 且草稿资产已经上传，内部发布工作流允许用版本、
-父提交与版本提交的完整 SHA 进入 publish-only 恢复路径；该路径只复核 tag、固定资产集与草稿状态，
-发布既有草稿并按精确 lease 释放锁，不重新升版、重建或覆盖资产。回滚通过更高版本 forward fix 完成。
+`studio-release.yml` 在 `main` push 或手动刷新时运行固定提交的 Release Please v5，并使用仓库
+专属 fine-grained PAT 创建或更新 Release PR，使 PR 自身能触发正常质量检查。Release PR 维护根
+`CHANGELOG.md`；合并后 Release Please 创建不可变 `v{x.y.z}` tag 和 draft Release。publisher
+唯一接收该 Release 的数字 ID，再从 GitHub API 和 tag 独立解析仓库、稳定 SemVer、提交 SHA 与
+三个版本文件，拒绝人工提供的版本或 SHA。回滚只允许发布更高版本的 forward fix，不覆盖 tag 或
+既有 Release。
+
+publisher 分为构建与发布两阶段。Windows job 从 tag 的精确提交执行 Rust/Flutter 检查、构建、
+签名、安装烟测、独立 verify 和 provenance，再把六个正式文件保存为同一 workflow run 的不可变
+Actions artifact。publish job 下载该 artifact 并按 Release ID 对账：draft 可为空或只含部分资产，
+但任何已有资产的名称、长度与 GitHub SHA-256 digest 必须和本地文件完全一致；只允许补传缺失资产，
+不得覆盖不同字节。六项全部一致后才能取消 draft 并标记 latest。failed job 重跑复用原 artifact
+继续补传；完整 draft 与已发布 Release 重跑均幂等成功。若存在尚未完成的稳定 draft，
+`studio-release.yml` 优先重新调度 publisher，而不创建下一版 Release PR。
 
 稳定 Release 固定包含：
 
@@ -33,9 +41,8 @@ Release 可继续完成。若版本提交已进入 `main` 且草稿资产已经�
 
 ## 2. Windows 包边界
 
-`cargo xtask release-gui prepare --bump patch|minor|major` typed 解析并更新 pubspec，输出包含
-`version`、`buildNumber` 和 `pubspecVersion` 的 camelCase JSON。CI 只允许该步骤修改
-`pubspec.yaml`。`cargo xtask release-gui stage|finalize|verify --version <semver>` 是正式打包入口。
+`cargo xtask release-gui stage|finalize|verify --version <semver>` 是正式打包入口。三个命令都
+严格接受不带 `v`、prerelease 或 build metadata 的规范 `x.y.z`，并要求它与 pubspec 完全一致。
 `stage` 复用 `build-gui`，生成 per-user Inno Setup 安装器和便携 zip；安装器使用稳定 AppId，
 默认安装到 LocalAppData，声明 CloseApplications/RestartApplications。打包输入排除 PDB，
 包含 LICENSE 与 THIRD_PARTY_NOTICES。便携版只供手动分发；便携用户执行应用内升级时进入
@@ -46,8 +53,8 @@ Authenticode 是可选增强：证书存在时先签主 EXE/自有 DLL，再签�
 GitHub Actions secrets。私钥轮换必须先通过仍受旧密钥信任的应用版本发布新的公钥集合。
 
 `finalize` 只对最终字节生成 SHA-256、Minisign 签名、校验和文件与更新清单；`verify` 必须
-独立复核文件集、版本、长度、哈希、签名和清单。CI 在创建 tag/Release 前执行安装器临时
-目录静默安装烟测并再次执行 `verify`。
+独立复核文件集、版本、长度、哈希、签名和清单。tag 与 draft Release 由 Release Please 先创建，
+但 CI 只有在安装器临时目录静默安装烟测及再次 `verify` 全部通过后才公开 Release。
 
 ## 3. 更新清单
 

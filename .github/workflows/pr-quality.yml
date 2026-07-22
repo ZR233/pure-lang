@@ -6,43 +6,128 @@ on:
     branches:
       - main
 
+permissions: {}
+
 jobs:
-  rust-quality:
-    name: Rust (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - windows-latest
+  pr-title:
+    name: Conventional PR title
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Validate Conventional Commit title
+        uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         with:
+          types: |
+            build
+            chore
+            ci
+            docs
+            feat
+            fix
+            perf
+            refactor
+            revert
+            test
+          requireScope: false
+
+  release-configuration:
+    name: Release configuration
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Validate workflows with actionlint
+        uses: reviewdog/action-actionlint@50842263c20a7c46bd0065b9e624d3c569db061e # v1
+        with:
+          fail_level: error
+          reporter: local
+
+      - name: Parse workflow PowerShell blocks
+        shell: pwsh
+        run: .github/scripts/test-workflow-powershell.ps1
+
+      - name: Test resumable Release asset rules
+        shell: pwsh
+        run: .github/scripts/test-studio-release-assets.ps1
+
+      - name: Validate Release Please configuration and dry run
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VALIDATION_BRANCH: ${{ github.head_ref || github.ref_name }}
+          VALIDATION_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+        run: |
+          Get-Content -Raw release-please-config.json | ConvertFrom-Json | Out-Null
+          Get-Content -Raw .release-please-manifest.json | ConvertFrom-Json | Out-Null
+          npx --yes release-please@17.10.4 release-pr `
+            --dry-run `
+            --repo-url=$env:VALIDATION_REPOSITORY `
+            --target-branch=$env:VALIDATION_BRANCH `
+            --config-file=release-please-config.json `
+            --manifest-file=.release-please-manifest.json `
+            --token=$env:GH_TOKEN
+          if ($LASTEXITCODE -ne 0) {
+            throw "Release Please dry run failed with exit code $LASTEXITCODE"
+          }
+
+  rust-quality:
+    name: Rust (Windows)
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: 1.96.1
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+
       - name: cargo fmt
-        run: cargo fmt --all -- --check
+        run: cargo fmt --all --check
+
       - name: cargo clippy
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
       - name: cargo test
-        run: cargo test
+        run: cargo test --workspace
 
   flutter-quality:
     name: Flutter
     runs-on: windows-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: subosito/flutter-action@v2
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
+          flutter-version: 3.44.5
           channel: stable
           cache: true
+
       - name: flutter pub get
         working-directory: code/pure-studio-flutter
         run: flutter pub get
+
       - name: flutter analyze
         working-directory: code/pure-studio-flutter
-        run: flutter analyze
+        run: flutter analyze --no-pub
+
       - name: flutter test
         working-directory: code/pure-studio-flutter
-        run: flutter test --exclude-tags visual
+        run: flutter test --no-pub --exclude-tags visual
