@@ -40,8 +40,6 @@ jobs:
         id: source
         shell: pwsh
         run: |
-          # These probes intentionally use non-zero native exit codes for absent refs.
-          $PSNativeCommandUseErrorActionPreference = $false
           $head = (git rev-parse HEAD).Trim()
           $mainRef = @(git ls-remote --heads origin 'refs/heads/main')
           if ($mainRef.Count -ne 1) {
@@ -52,12 +50,12 @@ jobs:
             throw "Workflow source $head is not the current origin/main $originMain"
           }
 
-          git ls-remote --exit-code origin 'refs/heads/studio-release/active' *> $null
-          if ($LASTEXITCODE -eq 0) {
-            throw 'A Studio release is already active. Re-run or finish the existing Studio Release Publish workflow.'
-          }
-          if ($LASTEXITCODE -ne 2) {
+          $active = @(git ls-remote --heads origin 'refs/heads/studio-release/active')
+          if ($LASTEXITCODE -ne 0) {
             throw "Failed to inspect the Studio release lock (git exit $LASTEXITCODE)"
+          }
+          if ($active.Count -ne 0) {
+            throw 'A Studio release is already active. Re-run or finish the existing Studio Release Publish workflow.'
           }
           "baseSha=$head" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
@@ -120,19 +118,21 @@ jobs:
         run: |
           # Missing tags and releases are the expected pre-release state.
           $PSNativeCommandUseErrorActionPreference = $false
-          git ls-remote --exit-code origin "refs/tags/v$env:RELEASE_VERSION" *> $null
-          if ($LASTEXITCODE -eq 0) {
-            throw "Tag v$env:RELEASE_VERSION already exists"
-          }
-          if ($LASTEXITCODE -ne 2) {
+          $tagRef = @(git ls-remote --tags origin "refs/tags/v$env:RELEASE_VERSION")
+          if ($LASTEXITCODE -ne 0) {
             throw "Failed to inspect tag v$env:RELEASE_VERSION (git exit $LASTEXITCODE)"
           }
+          if ($tagRef.Count -ne 0) {
+            throw "Tag v$env:RELEASE_VERSION already exists"
+          }
           gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/v$env:RELEASE_VERSION" *> $null
-          if ($LASTEXITCODE -eq 0) {
+          $releaseStatus = $LASTEXITCODE
+          $global:LASTEXITCODE = 0
+          if ($releaseStatus -eq 0) {
             throw "Release v$env:RELEASE_VERSION already exists"
           }
-          if ($LASTEXITCODE -ne 1) {
-            throw "Failed to inspect Release v$env:RELEASE_VERSION (gh exit $LASTEXITCODE)"
+          if ($releaseStatus -ne 1) {
+            throw "Failed to inspect Release v$env:RELEASE_VERSION (gh exit $releaseStatus)"
           }
 
       - name: Commit and lock release source

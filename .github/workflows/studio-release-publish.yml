@@ -41,7 +41,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Missing tags/releases and a negative ancestor probe are handled explicitly.
+          # A missing Release is handled explicitly below.
           $PSNativeCommandUseErrorActionPreference = $false
           if ($env:RELEASE_VERSION -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') {
             throw 'Version must be stable SemVer without a v prefix'
@@ -51,6 +51,9 @@ jobs:
           }
 
           git fetch origin --tags
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Failed to fetch prepared release history and tags'
+          }
           $head = (git rev-parse HEAD).Trim()
           $parent = (git rev-parse HEAD^).Trim()
           $mainRef = @(git ls-remote --heads origin 'refs/heads/main')
@@ -70,8 +73,8 @@ jobs:
             if ($fetchedMain -ne $originMain) {
               throw "Fetched main $fetchedMain does not match remote main $originMain"
             }
-            git merge-base --is-ancestor $env:RELEASE_SHA $fetchedMain
-            if ($LASTEXITCODE -ne 0) {
+            $mergeBase = (git merge-base $env:RELEASE_SHA $fetchedMain).Trim()
+            if ($LASTEXITCODE -ne 0 -or $mergeBase -ne $env:RELEASE_SHA) {
               throw "origin/main moved to unrelated commit $originMain after release preparation"
             }
             Write-Output "origin/main already contains prepared release $env:RELEASE_SHA; continuing interrupted release."
@@ -108,18 +111,20 @@ jobs:
           }
 
           $tagCommit = $null
-          git show-ref --verify --quiet "refs/tags/v$env:RELEASE_VERSION"
-          if ($LASTEXITCODE -eq 0) {
+          $matchingTags = @(git tag --list "v$env:RELEASE_VERSION")
+          if ($LASTEXITCODE -ne 0 -or $matchingTags.Count -gt 1) {
+            throw "Failed to inspect tag v$env:RELEASE_VERSION"
+          }
+          if ($matchingTags.Count -eq 1) {
             $tagCommit = (git rev-list -n 1 "v$env:RELEASE_VERSION").Trim()
             if ($tagCommit -ne $env:RELEASE_SHA) {
               throw "Tag v$env:RELEASE_VERSION points to $tagCommit instead of $env:RELEASE_SHA"
             }
-          } elseif ($LASTEXITCODE -ne 1) {
-            throw "Failed to inspect tag v$env:RELEASE_VERSION (git exit $LASTEXITCODE)"
           }
 
           $releaseJson = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/v$env:RELEASE_VERSION" 2> $null
           $releaseStatus = $LASTEXITCODE
+          $global:LASTEXITCODE = 0
           if ($releaseStatus -eq 0) {
             $release = $releaseJson | ConvertFrom-Json
             if (-not $release.draft) {
@@ -272,8 +277,6 @@ jobs:
       - name: Promote verified version to main
         shell: pwsh
         run: |
-          # A negative ancestor probe is an expected concurrency outcome.
-          $PSNativeCommandUseErrorActionPreference = $false
           $mainRef = @(git ls-remote --heads origin 'refs/heads/main')
           if ($mainRef.Count -ne 1) {
             throw 'Remote main branch is missing or ambiguous'
@@ -295,8 +298,8 @@ jobs:
           if ($fetchedMain -ne $originMain) {
             throw "Fetched main $fetchedMain does not match remote main $originMain"
           }
-          git merge-base --is-ancestor $env:RELEASE_SHA $fetchedMain
-          if ($LASTEXITCODE -eq 0) {
+          $mergeBase = (git merge-base $env:RELEASE_SHA $fetchedMain).Trim()
+          if ($LASTEXITCODE -eq 0 -and $mergeBase -eq $env:RELEASE_SHA) {
             Write-Output "Current main $originMain already contains prepared release $env:RELEASE_SHA; continuing."
             exit 0
           }
@@ -305,23 +308,21 @@ jobs:
       - name: Create immutable tag
         shell: pwsh
         run: |
-          # An absent tag is expected before the first successful publication.
-          $PSNativeCommandUseErrorActionPreference = $false
           git fetch origin --tags
           if ($LASTEXITCODE -ne 0) {
             throw 'Failed to fetch existing release tags'
           }
-          git show-ref --verify --quiet "refs/tags/v$env:RELEASE_VERSION"
-          if ($LASTEXITCODE -eq 0) {
+          $matchingTags = @(git tag --list "v$env:RELEASE_VERSION")
+          if ($LASTEXITCODE -ne 0 -or $matchingTags.Count -gt 1) {
+            throw "Failed to inspect tag v$env:RELEASE_VERSION"
+          }
+          if ($matchingTags.Count -eq 1) {
             $tagCommit = (git rev-list -n 1 "v$env:RELEASE_VERSION").Trim()
             if ($tagCommit -ne $env:RELEASE_SHA) {
               throw "Tag v$env:RELEASE_VERSION points to $tagCommit instead of $env:RELEASE_SHA"
             }
             Write-Output "Tag v$env:RELEASE_VERSION already points to the prepared release; continuing."
             exit 0
-          }
-          if ($LASTEXITCODE -ne 1) {
-            throw "Failed to inspect tag v$env:RELEASE_VERSION (git exit $LASTEXITCODE)"
           }
 
           git config user.name 'github-actions[bot]'
@@ -344,6 +345,7 @@ jobs:
           $PSNativeCommandUseErrorActionPreference = $false
           $releaseJson = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/v$env:RELEASE_VERSION" 2> $null
           $releaseStatus = $LASTEXITCODE
+          $global:LASTEXITCODE = 0
           if ($releaseStatus -eq 1) {
             exit 0
           }
