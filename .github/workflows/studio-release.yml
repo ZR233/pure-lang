@@ -40,6 +40,8 @@ jobs:
         id: source
         shell: pwsh
         run: |
+          # These probes intentionally use non-zero native exit codes for absent refs.
+          $PSNativeCommandUseErrorActionPreference = $false
           $head = (git rev-parse HEAD).Trim()
           $mainRef = @(git ls-remote --heads origin 'refs/heads/main')
           if ($mainRef.Count -ne 1) {
@@ -116,6 +118,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
+          # Missing tags and releases are the expected pre-release state.
+          $PSNativeCommandUseErrorActionPreference = $false
           git ls-remote --exit-code origin "refs/tags/v$env:RELEASE_VERSION" *> $null
           if ($LASTEXITCODE -eq 0) {
             throw "Tag v$env:RELEASE_VERSION already exists"
@@ -157,6 +161,8 @@ jobs:
           RELEASE_SHA: ${{ steps.commit.outputs.releaseSha }}
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
+          # A failed dispatch is handled below so the recovery branch can be preserved.
+          $PSNativeCommandUseErrorActionPreference = $false
           gh workflow run studio-release-publish.yml `
             --repo $env:GITHUB_REPOSITORY `
             --ref studio-release/active `

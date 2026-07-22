@@ -41,6 +41,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Missing tags/releases and a negative ancestor probe are handled explicitly.
+          $PSNativeCommandUseErrorActionPreference = $false
           if ($env:RELEASE_VERSION -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') {
             throw 'Version must be stable SemVer without a v prefix'
           }
@@ -270,6 +272,8 @@ jobs:
       - name: Promote verified version to main
         shell: pwsh
         run: |
+          # A negative ancestor probe is an expected concurrency outcome.
+          $PSNativeCommandUseErrorActionPreference = $false
           $mainRef = @(git ls-remote --heads origin 'refs/heads/main')
           if ($mainRef.Count -ne 1) {
             throw 'Remote main branch is missing or ambiguous'
@@ -277,6 +281,9 @@ jobs:
           $originMain = ($mainRef[0] -split '\s+')[0]
           if ($originMain -eq $env:BASE_SHA) {
             git push origin 'HEAD:refs/heads/main'
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to fast-forward origin/main to $env:RELEASE_SHA"
+            }
             exit 0
           }
           if ($originMain -eq $env:RELEASE_SHA) {
@@ -298,7 +305,12 @@ jobs:
       - name: Create immutable tag
         shell: pwsh
         run: |
+          # An absent tag is expected before the first successful publication.
+          $PSNativeCommandUseErrorActionPreference = $false
           git fetch origin --tags
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Failed to fetch existing release tags'
+          }
           git show-ref --verify --quiet "refs/tags/v$env:RELEASE_VERSION"
           if ($LASTEXITCODE -eq 0) {
             $tagCommit = (git rev-list -n 1 "v$env:RELEASE_VERSION").Trim()
@@ -315,13 +327,21 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git tag -a "v$env:RELEASE_VERSION" -m "Pure Studio v$env:RELEASE_VERSION" $env:RELEASE_SHA
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to create tag v$env:RELEASE_VERSION"
+          }
           git push origin "refs/tags/v$env:RELEASE_VERSION"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to push tag v$env:RELEASE_VERSION"
+          }
 
       - name: Validate draft Release state
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # A missing Release is expected before the draft is created.
+          $PSNativeCommandUseErrorActionPreference = $false
           $releaseJson = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/v$env:RELEASE_VERSION" 2> $null
           $releaseStatus = $LASTEXITCODE
           if ($releaseStatus -eq 1) {
@@ -396,6 +416,8 @@ jobs:
       - name: Release active lock
         shell: pwsh
         run: |
+          # Failed lease attempts are retried explicitly below.
+          $PSNativeCommandUseErrorActionPreference = $false
           $active = @(git ls-remote --heads origin 'refs/heads/studio-release/active')
           if ($active.Count -ne 1) {
             throw 'The active Studio release lock disappeared before cleanup'
