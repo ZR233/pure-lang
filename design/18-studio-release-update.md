@@ -15,7 +15,9 @@ minor 和 patch。每次发布同时将 build number 递增一。CI 自动生成
 烟测并生成 provenance。全部验证成功后才允许将版本提交快进到 `main`，再创建不可变的
 `v{x.y.z}` tag 和 GitHub Release。失败时不得推进 `main`，临时分支作为并发锁和重试来源保留；
 成功后只能用精确 SHA lease 删除。已有正式 Release 必须拒绝覆盖；同一提交留下的 tag 或草稿
-Release 可继续完成。回滚通过更高版本 forward fix 完成。
+Release 可继续完成。若版本提交已进入 `main` 且草稿资产已经上传，内部发布工作流允许用版本、
+父提交与版本提交的完整 SHA 进入 publish-only 恢复路径；该路径只复核 tag、固定资产集与草稿状态，
+发布既有草稿并按精确 lease 释放锁，不重新升版、重建或覆盖资产。回滚通过更高版本 forward fix 完成。
 
 稳定 Release 固定包含：
 
