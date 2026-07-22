@@ -2,6 +2,7 @@ use crate::cli::{BuildGuiOptions, RunGuiOptions};
 use crate::paths;
 use crate::process;
 use crate::pubspec_lock::{self, LockfileChange};
+use crate::studio_version;
 use anyhow::{Context, Result, bail};
 use std::ffi::OsString;
 use std::fs;
@@ -79,6 +80,8 @@ pub(crate) fn run_gui(options: RunGuiOptions) -> Result<()> {
     let workspace_root = paths::workspace_root()?;
     let app_dir = paths::flutter_app_dir(&workspace_root);
     let target = DesktopTarget::current()?;
+    let app_version = studio_version::read(&app_dir)?;
+    let version_define = format!("--dart-define=PURE_STUDIO_VERSION={app_version}");
     print_context(&workspace_root, &app_dir);
 
     run_flutter(&workspace_root, &app_dir, &["pub", "get"], DemoMode::Native)?;
@@ -91,7 +94,7 @@ pub(crate) fn run_gui(options: RunGuiOptions) -> Result<()> {
     let run_result = run_flutter(
         &workspace_root,
         &app_dir,
-        &["run", "-d", target.flutter_name()],
+        &["run", "-d", target.flutter_name(), &version_define],
         demo_mode,
     );
 
@@ -108,7 +111,7 @@ pub(crate) fn run_gui(options: RunGuiOptions) -> Result<()> {
         return run_flutter(
             &workspace_root,
             &app_dir,
-            &["run", "-d", target.flutter_name()],
+            &["run", "-d", target.flutter_name(), &version_define],
             DemoMode::Demo,
         );
     }
@@ -117,10 +120,22 @@ pub(crate) fn run_gui(options: RunGuiOptions) -> Result<()> {
 }
 
 pub(crate) fn build_gui(options: BuildGuiOptions) -> Result<()> {
+    build_gui_with_version(options, None)
+}
+
+pub(crate) fn build_gui_release(options: BuildGuiOptions, version: &str) -> Result<()> {
+    build_gui_with_version(options, Some(version))
+}
+
+fn build_gui_with_version(options: BuildGuiOptions, release_version: Option<&str>) -> Result<()> {
     let workspace_root = paths::workspace_root()?;
     let app_dir = paths::flutter_app_dir(&workspace_root);
     let dist_dir = paths::release_dist_dir(&workspace_root);
     let target = DesktopTarget::current()?;
+    let app_version = studio_version::read(&app_dir)?;
+    if release_version.is_some_and(|version| version != app_version.to_string()) {
+        bail!("release version does not match pubspec.yaml version {app_version}");
+    }
     let lock_path = app_dir.join("pubspec.lock");
     let original_lock = pubspec_lock::read_optional(&lock_path)?;
     print_context(&workspace_root, &app_dir);
@@ -135,6 +150,8 @@ pub(crate) fn build_gui(options: BuildGuiOptions) -> Result<()> {
         }
 
         let mut args = vec!["build", target.flutter_name(), "--release"];
+        let version_define = format!("--dart-define=PURE_STUDIO_VERSION={app_version}");
+        args.push(&version_define);
         if options.demo {
             args.push("--dart-define=PURE_STUDIO_DEMO=true");
         }

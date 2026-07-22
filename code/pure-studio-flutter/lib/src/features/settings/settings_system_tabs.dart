@@ -470,10 +470,15 @@ class _SecurityTab extends ConsumerWidget {
 }
 
 class _GeneralTab extends ConsumerStatefulWidget {
-  const _GeneralTab({required this.settings, required this.webSearch});
+  const _GeneralTab({
+    required this.settings,
+    required this.webSearch,
+    required this.runtimeBusy,
+  });
 
   final GeneralSettingsView settings;
   final WebSearchSettingsView webSearch;
+  final bool runtimeBusy;
 
   @override
   ConsumerState<_GeneralTab> createState() => _GeneralTabState();
@@ -518,6 +523,7 @@ class _GeneralTabState extends ConsumerState<_GeneralTab> {
                   _save(widget.settings.copyWith(compactTimeline: value)),
             ),
             _WebSearchSettingsCard(settings: widget.webSearch),
+            _StudioUpdateSettingsRow(runtimeBusy: widget.runtimeBusy),
           ],
         ),
         if (_error != null) _InlineError(message: _error!),

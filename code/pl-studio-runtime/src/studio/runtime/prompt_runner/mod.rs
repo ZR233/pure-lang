@@ -31,6 +31,8 @@ impl StudioRuntime {
         if prompt.trim().is_empty() && attachment_ids.is_empty() {
             bail!("prompt is empty");
         }
+        // Serialize turn registration with the updater's final idle check.
+        let _lifecycle_guard = self.lifecycle_lock.lock().await;
         if !matches!(
             self.runtime_snapshot().status,
             crate::StudioRuntimeStatus::Ready

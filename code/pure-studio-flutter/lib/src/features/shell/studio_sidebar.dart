@@ -460,6 +460,9 @@ class _SidebarActions extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final horizontalPadding = compact ? 8.0 : 14.0;
+    final hasUpdate = ref.watch(
+      studioUpdateControllerProvider.select((state) => state.hasUpdate),
+    );
     return Padding(
       padding: EdgeInsets.fromLTRB(
         horizontalPadding,
@@ -490,6 +493,7 @@ class _SidebarActions extends ConsumerWidget {
                 _SidebarActionButton(
                   tooltip: context.l10n.sidebarSettings,
                   icon: Icons.settings,
+                  showIndicator: hasUpdate,
                   onPressed: () => context.go('/settings'),
                 ),
               ],
@@ -515,6 +519,7 @@ class _SidebarActions extends ConsumerWidget {
                 _SidebarActionButton(
                   tooltip: context.l10n.sidebarSettings,
                   icon: Icons.settings,
+                  showIndicator: hasUpdate,
                   onPressed: () => context.go('/settings'),
                 ),
               ],
@@ -536,18 +541,39 @@ class _SidebarActionButton extends StatelessWidget {
     required this.icon,
     required this.tooltip,
     required this.onPressed,
+    this.showIndicator = false,
   });
 
   final IconData icon;
   final String tooltip;
   final VoidCallback? onPressed;
+  final bool showIndicator;
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     return IconButton(
       tooltip: tooltip,
-      icon: Icon(icon),
+      icon: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Icon(icon),
+          if (showIndicator)
+            Positioned(
+              key: const ValueKey('studio-update-indicator'),
+              right: -3,
+              top: -3,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: StudioColors.clay,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: context.studioPaper, width: 1.5),
+                ),
+                child: const SizedBox.square(dimension: 8),
+              ),
+            ),
+        ],
+      ),
       style: IconButton.styleFrom(
         fixedSize: const Size.square(40),
         iconSize: 18,

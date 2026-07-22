@@ -76,6 +76,12 @@ Flutter reducer 必须按 `sessionId` 过滤实时事件，旧 session stream �
 
 Flutter store 中的 message snapshot、part snapshot、live overlay 与 agent timeline event 是 timeline 的事实源。`TimelineMessage` 是纯 message snapshot，不携带 `parts` 字段；可渲染 `TimelinePart` 只存在于 `TimelineRow` projection/view model 中，reducer 不得把 overlay 后的 `TimelinePart` 再写回 message snapshot，避免 snapshot state 与 projected part 双写不一致。`timelineRowsProvider` 必须按 message `sequence -> createdAt -> id`、part `order -> sequence -> id` 从 `messagesBySession + partSnapshotsBySession + partOverlaysBySession` 派生可渲染 row；`agentTimelineEventsBySession` 中的 `SubAgentActivity` 可按 `callId` 合并 begin/end 后投影为独立 `AgentActivity` row，`TodoListUpdated` 必须按 `eventId` 保留每次更新，不写入 `messagesBySession`，也不伪造 message/part identity。
 
+应用更新不是 Studio 会话或 canonical snapshot 的组成部分。Flutter 使用独立的 Riverpod
+update controller 保存检查、下载、校验和安装状态；该 controller 只通过 typed FRB updater
+API 工作，不得向 `StudioState`、session reducer 或 product event stream 写入更新状态。Windows
+release 构建在应用启动后静默检查稳定更新，debug 与 demo 构建不得联网。发现更新时只在
+Settings/General 与侧栏设置按钮显示低干扰提示，下载和安装必须由用户明确触发。
+
 Part snapshot、part delta、part removal 的 reducer 路径只能写 `partSnapshotsBySession` 与 `partOverlaysBySession`；不得把当前 message list 作为可写参数传入 part reducer，也不得因为 part 更新重排或重写 `messagesBySession`。message list 只由 message snapshot、message removal 和 session snapshot 初始化维护。
 
 FRB JSON bootstrap 与 `load_session_state` 解包时只能写入 message snapshot 表和 part snapshot 表，不能为了方便 UI 渲染把 `timelinePartFromSnapshot` 的结果写回 message snapshot。刷新、重载和实时流必须通过同一个 selector 得到一致的 projected rows。
@@ -168,6 +174,11 @@ Flutter context readout 使用紧凑圆形进度环，不显示百分比文字�
 项目关闭和会话关闭都是归档语义，不删除磁盘内容、配置或历史会话。Project row 上的关闭按钮调用 `archiveProject(projectId, selectedProjectId)`；关闭当前项目后切换到后端返回的下一个可用项目/会话，关闭最后一个项目后清空当前 selection 并取消 session stream。Session row 上的关闭按钮调用 `archiveSession(sessionId, selectedSessionId)`；后端会拒绝 active turn，会取消该会话 pending interaction，并返回同项目的新 session selection。前端收到 payload 后删除/隐藏归档 session、切换到返回的 `selectedSessionId`，并用 `loadSessionState` 恢复新会话 projection；如果项目内没有剩余 session，状态栏与 composer 禁用，用户可以用新建会话按钮创建会话。会话列表只显示 `visibility=active && parentSessionId=null`，legacy handoff child/archived session 不作为 root row 出现。
 
 Settings 是独立页面栈中的配置编辑入口。它必须覆盖 Providers、Instructions、Skills、Roles、MCP、Security 和 General 页签。App bootstrap/first-run 先调用 `loadProviderCatalog()`，目录只按 revision 做进程内缓存；加载失败显示错误与重试，不回退本地常量。普通设置项改完即保存；Provider 新增/编辑使用独立本地草稿，点击保存后调用 `saveProviderSettings(settingsJson)`。Provider payload 为 `defaultProviderId`、`providers[]`、`roles[]`，实例字段为 `id`、可选 `originalId`、`templateKind`、`wireProtocol`、`connectionMode`、`name`、`baseUrl`、`bearerToken`、`defaultModel`、`customModels[]`；model 字段为 `slug/displayName/reasoningEfforts/baseInstructions`。空 bearer token 保留已存 secret；重命名用 `originalId` 关联原实例。所有 typed save 成功后必须用返回的 canonical config 更新 providers、roles、instructions、skills、MCP servers、permission mode 和 config 状态。
+
+General 页现有单一 settings group 内展示应用版本和稳定更新状态：最新时显示当前版本与
+“检查更新”，可升级时显示目标版本、Release Notes 与“下载并安装”，下载时显示进度，
+失败时显示可重试错误。活动 turn 或 task 期间安装按钮禁用并说明原因；安装动作在 Bridge
+侧再次检查 busy，避免 UI 状态与 runtime 状态竞争。固定更新文案必须进入中英文 i18n。
 
 Provider typed save 返回的 canonical config 必须同步 `defaultProviderId`。保存默认 provider 后列表、卡片和状态栏应立即从 store 反映新默认值，不能等下一次 bootstrap 或页面重载。
 

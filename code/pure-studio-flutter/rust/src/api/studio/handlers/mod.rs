@@ -5,6 +5,7 @@ pub mod providers;
 pub mod session;
 pub mod settings;
 mod snapshot;
+pub mod updater;
 
 pub use events::{BridgeSessionStreamFrame, subscribe_product_events, subscribe_session_events};
 pub use lifecycle::{
@@ -19,3 +20,4 @@ pub use settings::{
     save_instructions_settings, save_mcp_settings, save_provider_settings,
     save_runtime_permission_mode, save_skills_settings, save_web_search_settings,
 };
+pub use updater::{check_studio_update, install_studio_update};

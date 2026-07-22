@@ -1587,6 +1587,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
 
 [[package]]
+name = "minisign-verify"
+version = "0.2.5"
+
+[[package]]
 name = "miniz_oxide"
 version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1882,6 +1886,7 @@ dependencies = [
  "futures",
  "image",
  "include_dir",
+ "minisign-verify",
  "pl-core",
  "pl-lsp",
  "pl-model",
@@ -1894,13 +1899,17 @@ dependencies = [
  "reqwest",
  "sea-orm",
  "secrecy",
+ "semver",
  "serde",
  "serde_json",
  "serde_norway",
+ "sha2",
+ "thiserror",
  "tokio",
  "tokio-util",
  "toml",
  "tracing",
+ "url",
  "which",
 ]
 
@@ -1920,9 +1929,13 @@ name = "pl-xtask"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "minisign-verify",
  "pretty_assertions",
+ "semver",
  "serde",
+ "serde_json",
  "serde_norway",
+ "sha2",
 ]
 
 [[package]]

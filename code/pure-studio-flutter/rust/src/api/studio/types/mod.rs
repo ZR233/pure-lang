@@ -3,6 +3,7 @@ pub mod interaction;
 pub mod response;
 pub mod runtime;
 pub mod settings;
+pub mod updater;
 
 pub use event::{BridgeProductEventEnvelope, BridgeProductEventPayload};
 pub use interaction::{
@@ -29,3 +30,4 @@ pub use settings::{
     InstructionsSettingsInput, McpServerInput, McpSettingsInput, ProviderInput, ProviderModelInput,
     ProviderSettingsInput, RoleInput, SkillsSettingsInput, WebSearchSettingsInput,
 };
+pub use updater::{BridgeStudioUpdateCheckDto, BridgeStudioUpdateDto, BridgeStudioUpdateEventDto};

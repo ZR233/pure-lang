@@ -1131,6 +1131,66 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsSaveWebSearch => '保存 Web 搜索';
 
   @override
+  String get settingsStudioUpdateTitle => 'Pure Studio 更新';
+
+  @override
+  String settingsStudioUpdateDisabled(String version) {
+    return '当前版本 $version。仅 Windows 正式版会自动检查更新。';
+  }
+
+  @override
+  String settingsStudioUpdateCurrent(String version) {
+    return '当前版本：$version';
+  }
+
+  @override
+  String settingsStudioUpdateChecking(String version) {
+    return '当前版本 $version，正在检查更新…';
+  }
+
+  @override
+  String settingsStudioUpdateLatest(String version) {
+    return '当前版本 $version 已是最新版。';
+  }
+
+  @override
+  String settingsStudioUpdateAvailable(String current, String latest) {
+    return '已安装 $current，可升级到 $latest。';
+  }
+
+  @override
+  String settingsStudioUpdateDownloading(String version, int progress) {
+    return '正在下载 $version：$progress%';
+  }
+
+  @override
+  String settingsStudioUpdateVerifying(String version) {
+    return '正在验证 $version…';
+  }
+
+  @override
+  String settingsStudioUpdateInstallerLaunched(String version) {
+    return '$version 安装程序已启动。';
+  }
+
+  @override
+  String settingsStudioUpdateFailed(String error) {
+    return '更新失败：$error';
+  }
+
+  @override
+  String get settingsStudioUpdateBusy => '请先等待当前 turn 或 task 结束，再安装更新。';
+
+  @override
+  String get settingsStudioUpdateCheck => '检查更新';
+
+  @override
+  String get settingsStudioUpdateInstall => '下载并安装';
+
+  @override
+  String get settingsStudioUpdateReleaseNotes => '发行说明';
+
+  @override
   String get timelineWebSearchTitle => 'Web 搜索';
 
   @override
@@ -2271,6 +2331,66 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get settingsSaveWebSearch => '保存 Web 搜索';
+
+  @override
+  String get settingsStudioUpdateTitle => 'Pure Studio 更新';
+
+  @override
+  String settingsStudioUpdateDisabled(String version) {
+    return '当前版本 $version。仅 Windows 正式版会自动检查更新。';
+  }
+
+  @override
+  String settingsStudioUpdateCurrent(String version) {
+    return '当前版本：$version';
+  }
+
+  @override
+  String settingsStudioUpdateChecking(String version) {
+    return '当前版本 $version，正在检查更新…';
+  }
+
+  @override
+  String settingsStudioUpdateLatest(String version) {
+    return '当前版本 $version 已是最新版。';
+  }
+
+  @override
+  String settingsStudioUpdateAvailable(String current, String latest) {
+    return '已安装 $current，可升级到 $latest。';
+  }
+
+  @override
+  String settingsStudioUpdateDownloading(String version, int progress) {
+    return '正在下载 $version：$progress%';
+  }
+
+  @override
+  String settingsStudioUpdateVerifying(String version) {
+    return '正在验证 $version…';
+  }
+
+  @override
+  String settingsStudioUpdateInstallerLaunched(String version) {
+    return '$version 安装程序已启动。';
+  }
+
+  @override
+  String settingsStudioUpdateFailed(String error) {
+    return '更新失败：$error';
+  }
+
+  @override
+  String get settingsStudioUpdateBusy => '请先等待当前 turn 或 task 结束，再安装更新。';
+
+  @override
+  String get settingsStudioUpdateCheck => '检查更新';
+
+  @override
+  String get settingsStudioUpdateInstall => '下载并安装';
+
+  @override
+  String get settingsStudioUpdateReleaseNotes => '发行说明';
 
   @override
   String get timelineWebSearchTitle => 'Web 搜索';

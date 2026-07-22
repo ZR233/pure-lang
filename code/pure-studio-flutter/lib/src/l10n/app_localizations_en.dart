@@ -1178,6 +1178,67 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsSaveWebSearch => 'Save web search';
 
   @override
+  String get settingsStudioUpdateTitle => 'Pure Studio update';
+
+  @override
+  String settingsStudioUpdateDisabled(String version) {
+    return 'Version $version. Automatic checks run only in Windows release builds.';
+  }
+
+  @override
+  String settingsStudioUpdateCurrent(String version) {
+    return 'Current version: $version';
+  }
+
+  @override
+  String settingsStudioUpdateChecking(String version) {
+    return 'Version $version. Checking for updates...';
+  }
+
+  @override
+  String settingsStudioUpdateLatest(String version) {
+    return 'Version $version is up to date.';
+  }
+
+  @override
+  String settingsStudioUpdateAvailable(String current, String latest) {
+    return 'Version $current is installed. Version $latest is available.';
+  }
+
+  @override
+  String settingsStudioUpdateDownloading(String version, int progress) {
+    return 'Downloading version $version: $progress%';
+  }
+
+  @override
+  String settingsStudioUpdateVerifying(String version) {
+    return 'Verifying version $version...';
+  }
+
+  @override
+  String settingsStudioUpdateInstallerLaunched(String version) {
+    return 'Installer for version $version started.';
+  }
+
+  @override
+  String settingsStudioUpdateFailed(String error) {
+    return 'Update failed: $error';
+  }
+
+  @override
+  String get settingsStudioUpdateBusy =>
+      'Finish the active turn or task before installing.';
+
+  @override
+  String get settingsStudioUpdateCheck => 'Check for updates';
+
+  @override
+  String get settingsStudioUpdateInstall => 'Download and install';
+
+  @override
+  String get settingsStudioUpdateReleaseNotes => 'Release notes';
+
+  @override
   String get timelineWebSearchTitle => 'Web search';
 
   @override

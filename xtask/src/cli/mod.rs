@@ -8,6 +8,7 @@ pub(crate) enum Command {
     Help(HelpTopic),
     RunGui(RunGuiOptions),
     BuildGui(BuildGuiOptions),
+    ReleaseGui(ReleaseGuiOptions),
     BuildRustBridge(BuildRustBridgeOptions),
 }
 
@@ -16,6 +17,7 @@ pub(crate) enum HelpTopic {
     Global,
     RunGui,
     BuildGui,
+    ReleaseGui,
     BuildRustBridge,
 }
 
@@ -29,6 +31,19 @@ pub(crate) struct RunGuiOptions {
 pub(crate) struct BuildGuiOptions {
     pub(crate) demo: bool,
     pub(crate) no_clean: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReleaseGuiAction {
+    Stage,
+    Finalize,
+    Verify,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ReleaseGuiOptions {
+    pub(crate) action: ReleaseGuiAction,
+    pub(crate) version: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,6 +86,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command>
         "-h" | "--help" | "help" => Ok(Command::Help(HelpTopic::Global)),
         "run-gui" => parse_run_gui(args),
         "build-gui" => parse_build_gui(args),
+        "release-gui" => parse_release_gui(args),
         "build-rust-bridge" => parse_build_rust_bridge(args),
         _ => bail!(
             "unknown xtask command: {command}\n\n{}",
@@ -86,7 +102,7 @@ pub(crate) fn print_help(topic: HelpTopic) {
 pub(crate) fn help_text(topic: HelpTopic) -> &'static str {
     match topic {
         HelpTopic::Global => {
-            "Usage: cargo xtask <command> [options]\n\nCommands:\n  run-gui             Run the Pure Studio Flutter desktop app.\n  build-gui           Build release artifacts for the current desktop OS.\n  build-rust-bridge   Build the Windows Rust bridge DLL for Flutter CMake.\n\nRun `cargo xtask <command> --help` for command-specific options."
+            "Usage: cargo xtask <command> [options]\n\nCommands:\n  run-gui             Run the Pure Studio Flutter desktop app.\n  build-gui           Build release artifacts for the current desktop OS.\n  release-gui         Stage, finalize, or verify a Windows stable release.\n  build-rust-bridge   Build the Windows Rust bridge DLL for Flutter CMake.\n\nRun `cargo xtask <command> --help` for command-specific options."
         }
         HelpTopic::RunGui => {
             "Usage: cargo xtask run-gui [--demo] [--demo-fallback]\n\nOptions:\n  --demo           Run with PURE_STUDIO_DEMO=true.\n  --demo-fallback  Retry in demo mode if the native run fails.\n  -h, --help       Print help."
@@ -94,10 +110,37 @@ pub(crate) fn help_text(topic: HelpTopic) -> &'static str {
         HelpTopic::BuildGui => {
             "Usage: cargo xtask build-gui [--demo] [--no-clean]\n\nOptions:\n  --demo      Build with PURE_STUDIO_DEMO=true.\n  --no-clean  Keep existing files in dist/pure-studio-flutter-release.\n  -h, --help  Print help."
         }
+        HelpTopic::ReleaseGui => {
+            "Usage: cargo xtask release-gui <stage|finalize|verify> --version <x.y.z>\n\nThe version must be stable SemVer and match pubspec.yaml. Signing uses the minisign executable and MINISIGN_SECRET_KEY_FILE for finalize."
+        }
         HelpTopic::BuildRustBridge => {
             "Usage: cargo xtask build-rust-bridge --workspace-root <path> --configuration <Debug|Profile|Release> --output-dir <path> [--target-dir <path>]\n\nOptions:\n  --workspace-root <path>              Pure-Lang workspace root.\n  --configuration <Debug|Profile|Release>\n  --output-dir <path>                  Directory that receives pl_studio_bridge.dll.\n  --target-dir <path>                  Optional Cargo target directory.\n  -h, --help                           Print help."
         }
     }
+}
+
+fn parse_release_gui(mut args: VecDeque<OsString>) -> Result<Command> {
+    if args.iter().any(|arg| arg == "-h" || arg == "--help") {
+        return Ok(Command::Help(HelpTopic::ReleaseGui));
+    }
+    let action = match args.pop_front().map(into_string).transpose()?.as_deref() {
+        Some("stage") => ReleaseGuiAction::Stage,
+        Some("finalize") => ReleaseGuiAction::Finalize,
+        Some("verify") => ReleaseGuiAction::Verify,
+        Some(other) => bail!("unknown release-gui action: {other}"),
+        None => bail!("missing release-gui action"),
+    };
+    let mut version = None;
+    while let Some(arg) = args.pop_front() {
+        match into_string(arg)?.as_str() {
+            "--version" => version = Some(next_string(&mut args, "--version")?),
+            other => bail!("unknown release-gui option: {other}"),
+        }
+    }
+    Ok(Command::ReleaseGui(ReleaseGuiOptions {
+        action,
+        version: version.ok_or_else(|| anyhow!("missing required option --version"))?,
+    }))
 }
 
 fn parse_run_gui(mut args: VecDeque<OsString>) -> Result<Command> {
@@ -258,6 +301,18 @@ mod tests {
                 configuration: BridgeConfiguration::Release,
                 output_dir: PathBuf::from("out"),
                 target_dir: Some(PathBuf::from("target")),
+            })
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn parses_release_gui_options() -> Result<()> {
+        assert_eq!(
+            parse_words(&["xtask", "release-gui", "finalize", "--version", "1.2.3",])?,
+            Command::ReleaseGui(ReleaseGuiOptions {
+                action: ReleaseGuiAction::Finalize,
+                version: "1.2.3".to_string(),
             })
         );
         Ok(())

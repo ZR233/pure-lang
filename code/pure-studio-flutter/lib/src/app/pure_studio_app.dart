@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../features/settings/settings_page.dart';
 import '../features/shell/studio_shell.dart';
+import '../features/update/studio_update_controller.dart';
 import '../l10n/app_localizations.dart';
 import '../l10n/studio_l10n.dart';
 import 'theme/material3_theme.dart';
 
-class PureStudioApp extends StatelessWidget {
+class PureStudioApp extends ConsumerWidget {
   const PureStudioApp({super.key});
 
   static final GoRouter _router = GoRouter(
@@ -21,7 +23,8 @@ class PureStudioApp extends StatelessWidget {
   );
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    ref.watch(studioUpdateControllerProvider);
     return MaterialApp.router(
       onGenerateTitle: (context) => context.l10n.appTitle,
       debugShowCheckedModeBanner: false,
