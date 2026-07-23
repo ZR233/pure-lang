@@ -1,10 +1,16 @@
 name: Studio Release Publish
 
 on:
+  workflow_call:
+    inputs:
+      releaseId:
+        description: Exact GitHub Release ID created by Release Please
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       releaseId:
-        description: Exact GitHub draft Release ID created by Release Please
+        description: Exact GitHub Release ID created by Release Please
         required: true
         type: string
 
