@@ -8,7 +8,6 @@ use crate::paths;
 use crate::studio_version;
 use anyhow::{Context, Result, bail};
 use semver::Version;
-use serde::Serialize;
 use std::path::{Path, PathBuf};
 
 const PLATFORM: &str = "windows-x86_64";
@@ -20,18 +19,9 @@ enum ReleaseGuiStep {
     Verify,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PreparedStudioVersion {
-    version: String,
-    build_number: u64,
-    pubspec_version: String,
-}
-
 pub(crate) fn run(options: ReleaseGuiOptions) -> Result<()> {
     let workspace_root = paths::workspace_root()?;
     let (step, raw_version) = match options {
-        ReleaseGuiOptions::Prepare { bump } => return prepare(&workspace_root, bump),
         ReleaseGuiOptions::Stage { version } => (ReleaseGuiStep::Stage, version),
         ReleaseGuiOptions::Finalize { version } => (ReleaseGuiStep::Finalize, version),
         ReleaseGuiOptions::Verify { version } => (ReleaseGuiStep::Verify, version),
@@ -47,17 +37,6 @@ pub(crate) fn run(options: ReleaseGuiOptions) -> Result<()> {
     }
 }
 
-fn prepare(workspace_root: &Path, bump: studio_version::StudioVersionBump) -> Result<()> {
-    let version = studio_version::prepare(&paths::flutter_app_dir(workspace_root), bump)?;
-    let output = PreparedStudioVersion {
-        version: version.release.to_string(),
-        build_number: version.build_number,
-        pubspec_version: version.pubspec_value(),
-    };
-    println!("{}", serde_json::to_string(&output)?);
-    Ok(())
-}
-
 fn validate_version(raw: &str) -> Result<Version> {
     let version = Version::parse(raw).with_context(|| format!("invalid release version: {raw}"))?;
     if !version.pre.is_empty() || !version.build.is_empty() || raw.starts_with('v') {
@@ -68,11 +47,8 @@ fn validate_version(raw: &str) -> Result<Version> {
 
 fn ensure_pubspec_version(workspace_root: &Path, version: &Version) -> Result<()> {
     let actual = studio_version::read(&paths::flutter_app_dir(workspace_root))?;
-    if &actual.release != version {
-        bail!(
-            "release version {version} does not match pubspec.yaml base version {}",
-            actual.release
-        );
+    if &actual != version {
+        bail!("release version {version} does not match pubspec.yaml version {actual}");
     }
     Ok(())
 }
@@ -110,24 +86,6 @@ mod tests {
         assert_eq!(
             asset_name(&version, "portable.zip"),
             "Pure-Studio-1.2.3-windows-x86_64-portable.zip"
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn prepared_version_uses_typed_camel_case_json() -> Result<()> {
-        let output = PreparedStudioVersion {
-            version: "1.3.0".to_string(),
-            build_number: 8,
-            pubspec_version: "1.3.0+8".to_string(),
-        };
-        assert_eq!(
-            serde_json::to_value(output)?,
-            serde_json::json!({
-                "version": "1.3.0",
-                "buildNumber": 8,
-                "pubspecVersion": "1.3.0+8",
-            })
         );
         Ok(())
     }
