@@ -27,6 +27,12 @@ Actions artifact。publish job 下载该 artifact 并按 Release ID 对账：dra
 继续补传；完整 draft 与已发布 Release 重跑均幂等成功。若存在尚未完成的稳定 draft，
 `studio-release.yml` 优先重新调度 publisher，而不创建下一版 Release PR。
 
+GitHub draft Release 只对具备仓库 push 权限的身份可见，因此负责发现和解析 draft 的 job
+使用 `contents: write`，但只执行读取；构建 job 仍保持 `contents: read`，只有最终 publish job
+执行资产上传和 Release 状态修改。
+解析 draft 时，其 GitHub 页面必须是同仓库生成的 `untagged-*` URL；取消 draft 后则必须严格
+切换为对应 `v{x.y.z}` tag URL。
+
 稳定 Release 固定包含：
 
 - `Pure-Studio-{version}-windows-x86_64-setup.exe`
