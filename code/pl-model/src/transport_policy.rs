@@ -4,8 +4,7 @@ pub(crate) const RESPONSES_WEBSOCKET_CONNECT_TIMEOUT: Duration = Duration::from_
 pub(crate) const RESPONSES_WEBSOCKET_SEND_TIMEOUT: Duration = Duration::from_secs(15);
 pub(crate) const RESPONSES_WEBSOCKET_IDLE_TIMEOUT: Duration = Duration::from_secs(300);
 pub(crate) const RESPONSES_WEBSOCKET_MAX_RETRIES: u32 = 5;
-pub(crate) const RESPONSES_WEBSOCKET_PROFILE_REVISION: &str =
-    "responses_websockets=2026-02-06;pl-ws-v2;connect=15s;send=15s;idle=300s;retries=5";
+pub(crate) const RESPONSES_WEBSOCKET_PROFILE_REVISION: &str = "responses_websockets=2026-02-06;pl-ws-v2;happy-eyeballs=250ms;connect=15s;send=15s;idle=300s;retries=5";
 
 pub(crate) fn responses_websocket_retry_delay(
     retry_number: u32,

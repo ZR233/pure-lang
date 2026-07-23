@@ -110,7 +110,7 @@ catalog 返回的选项。相同 preset 可以创建多个实例，每个实例�
 
 Responses WebSocket 使用 `/responses` 握手和 `response.create` 帧，并强制发送 `store: false`；continuation 只依赖当前物理连接，不能把响应持久化到供应商侧。物理连接属于 `AgentSession` 的运行期 transport session：同一会话跨 turn 复用，不同会话绝不共享，持久化恢复后重新建立。HTTP 模式和连接重建都不能偷偷改变用户选择；握手或流错误按所选模式直接报告。`previous_response_id` continuation 只在 WebSocket 模式启用，因为该状态与物理连接绑定；HTTP/SSE 始终发送完整 canonical history，不依赖连接级 continuation。
 
-WebSocket 握手超时必须保留 transient 分类，同时给出可操作诊断：检查 WebSocket 网络可达性，或在 Studio Provider 设置中显式切换为 HTTP。运行时不得因此自动回退连接模式。
+WebSocket 建连通过系统 DNS 解析全部目标地址，并以 250ms 间隔交错竞争 IPv4/IPv6；首个成功的 TCP 连接继续使用原始域名完成 SNI、证书校验和 WebSocket 握手。单次完整握手保持 15 秒上限，超时保留 transient 分类并进入同一 WS 模式的既有重试。耗尽重试后的错误给出可操作诊断：检查 WebSocket 网络可达性，或在 Studio Provider 设置中显式切换为 HTTP；运行时不得自动回退连接模式。
 
 effort 等可调参数的 wire 写入由通用透传机制驱动，协议层不再为每供应商硬编码 reasoning/thinking 映射。`build_request` 接收当前 `ModelInfo`，先序列化强类型核心字段（model、messages、stream、tools 等）为 JSON 对象，再依次注入：base body（`ModelRequestProfile.body`，如 DeepSeek 固定的 `thinking.type = enabled`），以及 parameter wire（用户选中的候选值按模型 `parameters` 声明写入或移除字段，见 7.8）。覆盖优先级为 parameter wire > base body > 协议默认字段。
 
