@@ -64,6 +64,55 @@ try {
     $names = @(Get-StudioReleaseAssetNames -Version $version)
     $assets = @($names | ForEach-Object { New-TestAsset -Directory $testRoot -Name $_ })
 
+    $draftRelease = [pscustomobject]@{
+        draft = $true
+        html_url = 'https://github.com/ZR233/pure-lang/releases/tag/untagged-0123456789abcdef'
+    }
+    Assert-StudioReleasePageUrl `
+        -Release $draftRelease `
+        -Repository 'ZR233/pure-lang' `
+        -Tag "v$version"
+    $publishedRelease = [pscustomobject]@{
+        draft = $false
+        html_url = "https://github.com/ZR233/pure-lang/releases/tag/v$version"
+    }
+    Assert-StudioReleasePageUrl `
+        -Release $publishedRelease `
+        -Repository 'ZR233/pure-lang' `
+        -Tag "v$version"
+    Assert-Throws `
+        -Action {
+            Assert-StudioReleasePageUrl `
+                -Release $draftRelease `
+                -Repository 'other/repository' `
+                -Tag "v$version"
+        } `
+        -Message 'A draft URL from another repository must be rejected'
+    $draftWithPublishedUrl = [pscustomobject]@{
+        draft = $true
+        html_url = "https://github.com/ZR233/pure-lang/releases/tag/v$version"
+    }
+    Assert-Throws `
+        -Action {
+            Assert-StudioReleasePageUrl `
+                -Release $draftWithPublishedUrl `
+                -Repository 'ZR233/pure-lang' `
+                -Tag "v$version"
+        } `
+        -Message 'A draft must use its GitHub untagged URL'
+    $publishedWithDraftUrl = [pscustomobject]@{
+        draft = $false
+        html_url = $draftRelease.html_url
+    }
+    Assert-Throws `
+        -Action {
+            Assert-StudioReleasePageUrl `
+                -Release $publishedWithDraftUrl `
+                -Repository 'ZR233/pure-lang' `
+                -Tag "v$version"
+        } `
+        -Message 'A published Release must use its version tag URL'
+
     $emptyDraft = [pscustomobject]@{ draft = $true; assets = @() }
     $emptyPlan = Get-StudioReleaseAssetPlan -Release $emptyDraft -Version $version -AssetDirectory $testRoot
     Assert-Equal -Expected $names -Actual $emptyPlan.MissingNames -Message 'Empty draft must upload every asset'

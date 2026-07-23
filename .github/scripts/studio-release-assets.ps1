@@ -1,5 +1,31 @@
 Set-StrictMode -Version Latest
 
+function Assert-StudioReleasePageUrl {
+    param(
+        [Parameter(Mandatory)]
+        [object] $Release,
+
+        [Parameter(Mandatory)]
+        [string] $Repository,
+
+        [Parameter(Mandatory)]
+        [string] $Tag
+    )
+
+    $tagBaseUrl = "https://github.com/$Repository/releases/tag/"
+    if ([bool]$Release.draft) {
+        $draftUrlPattern = '^' + [regex]::Escape($tagBaseUrl) + 'untagged-[0-9a-f]+$'
+        if ([string]$Release.html_url -cnotmatch $draftUrlPattern) {
+            throw "Draft Release has an unexpected GitHub URL: $($Release.html_url)"
+        }
+        return
+    }
+
+    if ([string]$Release.html_url -cne "$tagBaseUrl$Tag") {
+        throw "Published Release has an unexpected GitHub URL: $($Release.html_url)"
+    }
+}
+
 function Get-StudioReleaseAssetNames {
     param(
         [Parameter(Mandatory)]
