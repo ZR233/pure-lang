@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path};
 
 use anyhow::{Context, Result, bail};
+use pl_core::path_safety::validate_path_for_write_async;
 
 use super::git::{git_path_is_ignored, run_git_checked};
 use super::{OriginalPath, ValidatedDesignPatch};
@@ -68,37 +69,17 @@ pub(super) async fn validate_design_path(workspace: &Path, raw: &str) -> Result<
     if normalized != raw {
         bail!("design patch path is not normalized: `{raw}`");
     }
-    reject_symlink_ancestors(workspace, path).await?;
+    validate_real_path_ancestors(workspace, path).await?;
     if git_path_is_ignored(workspace, &normalized).await? {
         bail!("design patch path is ignored by Git: `{normalized}`");
     }
     Ok(normalized)
 }
 
-pub(super) async fn reject_symlink_ancestors(workspace: &Path, relative: &Path) -> Result<()> {
-    let mut candidate = workspace.to_path_buf();
-    for component in relative.components() {
-        let Component::Normal(part) = component else {
-            bail!("design patch path contains an invalid component");
-        };
-        candidate.push(part);
-        match tokio::fs::symlink_metadata(&candidate).await {
-            Ok(metadata) if metadata.file_type().is_symlink() => {
-                bail!(
-                    "design patch path traverses symbolic link `{}`",
-                    candidate.display()
-                )
-            }
-            Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
-            Err(error) => {
-                return Err(error).with_context(|| {
-                    format!("failed to inspect design path `{}`", candidate.display())
-                });
-            }
-        }
-    }
-    Ok(())
+pub(super) async fn validate_real_path_ancestors(workspace: &Path, relative: &Path) -> Result<()> {
+    validate_path_for_write_async(workspace, &workspace.join(relative))
+        .await
+        .context("design patch path traverses a symbolic link or Windows reparse point")
 }
 
 pub(super) async fn snapshot_paths(
@@ -162,7 +143,7 @@ async fn resolve_safe_restore_path(
     path_policy: &ToolPathPolicy,
     path: &str,
 ) -> Result<std::path::PathBuf> {
-    reject_symlink_ancestors(path_policy.root(), Path::new(path)).await?;
+    validate_real_path_ancestors(path_policy.root(), Path::new(path)).await?;
     path_policy
         .resolve_for_write(path)
         .map_err(anyhow::Error::from)

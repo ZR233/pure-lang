@@ -2,6 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
+use pl_core::path_safety::{metadata_if_real, real_directory_entries};
 
 use super::super::git::run_git;
 use super::scope::conflict_entry;
@@ -119,7 +120,10 @@ async fn read_stage_blob(
 
 fn locate_design_references(workspace: &Path, affected_path: &str) -> Result<Vec<String>> {
     let design = workspace.join("design");
-    if !design.is_dir() {
+    if !metadata_if_real(&design)
+        .map_err(anyhow::Error::from)?
+        .is_some_and(|metadata| metadata.is_dir())
+    {
         return Ok(Vec::new());
     }
     let file_name = Path::new(affected_path)
@@ -129,12 +133,17 @@ fn locate_design_references(workspace: &Path, affected_path: &str) -> Result<Vec
     let mut references = Vec::new();
     let mut pending = vec![design];
     while let Some(directory) = pending.pop() {
-        for item in fs::read_dir(&directory)
+        for path in real_directory_entries(&directory)
             .with_context(|| format!("failed to inspect `{}`", directory.display()))?
         {
-            let path = item?.path();
-            if path.is_dir() {
+            let Some(metadata) = metadata_if_real(&path).map_err(anyhow::Error::from)? else {
+                continue;
+            };
+            if metadata.is_dir() {
                 pending.push(path);
+                continue;
+            }
+            if !metadata.is_file() {
                 continue;
             }
             if path.extension().and_then(|extension| extension.to_str()) != Some("md") {

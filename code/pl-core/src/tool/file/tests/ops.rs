@@ -1,16 +1,6 @@
 use super::*;
 use pretty_assertions::assert_eq;
 
-#[cfg(unix)]
-fn create_directory_symlink(target: &Path, link: &Path) -> std::io::Result<()> {
-    std::os::unix::fs::symlink(target, link)
-}
-
-#[cfg(windows)]
-fn create_directory_symlink(target: &Path, link: &Path) -> std::io::Result<()> {
-    std::os::windows::fs::symlink_dir(target, link)
-}
-
 #[tokio::test]
 async fn write_file_waits_for_workspace_write_lock() {
     let root = unique_temp_dir("write-lock-tool");
@@ -512,6 +502,149 @@ async fn list_and_search_skip_symbolic_link_directories() {
     assert_eq!(listed["files"], serde_json::json!(["visible.txt"]));
     assert_eq!(searched["count"], 1);
     assert_eq!(searched["files"][0]["path"], "visible.txt");
+    remove_directory_symlink(&root.join("linked")).unwrap();
+    let _ = tokio::fs::remove_dir_all(root).await;
+    let _ = tokio::fs::remove_dir_all(outside).await;
+}
+
+#[tokio::test]
+async fn modifying_tools_reject_link_ancestors() {
+    let root = unique_temp_dir("reject-linked-writes");
+    let outside = unique_temp_dir("reject-linked-writes-target");
+    tokio::fs::create_dir_all(&root).await.unwrap();
+    tokio::fs::create_dir_all(&outside).await.unwrap();
+    tokio::fs::write(outside.join("source.txt"), "outside")
+        .await
+        .unwrap();
+    tokio::fs::write(root.join("source.txt"), "inside")
+        .await
+        .unwrap();
+    create_directory_symlink(&outside, &root.join("linked")).unwrap();
+
+    let write = WriteFileTool
+        .execute(
+            input(serde_json::json!({
+                "path": "linked/new.txt",
+                "content": "blocked",
+                "mode": "create"
+            })),
+            context(&root).await,
+        )
+        .await;
+    let create = super::super::CreateDirectoryTool
+        .execute(
+            input(serde_json::json!({ "path": "linked/new-directory" })),
+            context(&root).await,
+        )
+        .await;
+    let patch = apply_patch_tool()
+        .execute(
+            input(serde_json::json!({
+                "input": "*** Begin Patch\n*** Add File: linked/patched.txt\n+blocked\n*** End Patch\n"
+            })),
+            context(&root).await,
+        )
+        .await;
+    let copy_source = CopyPathTool
+        .execute(
+            input(serde_json::json!({
+                "from": "linked/source.txt",
+                "to": "copied.txt",
+                "collision": "failIfExists"
+            })),
+            context(&root).await,
+        )
+        .await;
+    let copy_target = CopyPathTool
+        .execute(
+            input(serde_json::json!({
+                "from": "source.txt",
+                "to": "linked/copied.txt",
+                "collision": "failIfExists"
+            })),
+            context(&root).await,
+        )
+        .await;
+    let move_target = MovePathTool
+        .execute(
+            input(serde_json::json!({
+                "from": "source.txt",
+                "to": "linked/moved.txt",
+                "collision": "failIfExists"
+            })),
+            context(&root).await,
+        )
+        .await;
+    let delete = DeletePathTool
+        .execute(
+            input(serde_json::json!({
+                "path": "linked/source.txt",
+                "mode": "file"
+            })),
+            context(&root).await,
+        )
+        .await;
+
+    for result in [
+        write,
+        create,
+        patch,
+        copy_source,
+        copy_target,
+        move_target,
+        delete,
+    ] {
+        let error = result.unwrap_err().to_string();
+        assert!(
+            error.contains("symbolic link") && error.contains("reparse point"),
+            "{error}"
+        );
+    }
+    assert!(!outside.join("new.txt").exists());
+    assert!(!outside.join("new-directory").exists());
+    assert!(!outside.join("patched.txt").exists());
+    assert!(!outside.join("copied.txt").exists());
+    assert!(!outside.join("moved.txt").exists());
+    assert_eq!(
+        tokio::fs::read_to_string(outside.join("source.txt"))
+            .await
+            .unwrap(),
+        "outside"
+    );
+    remove_directory_symlink(&root.join("linked")).unwrap();
+    let _ = tokio::fs::remove_dir_all(root).await;
+    let _ = tokio::fs::remove_dir_all(outside).await;
+}
+
+#[tokio::test]
+async fn recursive_delete_unlinks_child_without_touching_target() {
+    let root = unique_temp_dir("safe-recursive-delete");
+    let outside = unique_temp_dir("safe-recursive-delete-target");
+    tokio::fs::create_dir_all(root.join("tree")).await.unwrap();
+    tokio::fs::create_dir_all(&outside).await.unwrap();
+    tokio::fs::write(outside.join("kept.txt"), "kept")
+        .await
+        .unwrap();
+    create_directory_symlink(&outside, &root.join("tree/linked")).unwrap();
+
+    DeletePathTool
+        .execute(
+            input(serde_json::json!({
+                "path": "tree",
+                "mode": "recursiveDirectory"
+            })),
+            context(&root).await,
+        )
+        .await
+        .unwrap();
+
+    assert!(!root.join("tree").exists());
+    assert_eq!(
+        tokio::fs::read_to_string(outside.join("kept.txt"))
+            .await
+            .unwrap(),
+        "kept"
+    );
     let _ = tokio::fs::remove_dir_all(root).await;
     let _ = tokio::fs::remove_dir_all(outside).await;
 }

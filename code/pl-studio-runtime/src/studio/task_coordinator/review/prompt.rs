@@ -3,6 +3,7 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
+use pl_core::path_safety::{metadata_if_real, real_directory_entries};
 
 use super::super::{TaskCoordinator, TaskRunRecord};
 
@@ -64,19 +65,26 @@ async fn task_diff(run: &TaskRunRecord) -> Result<String> {
 
 fn design_index(workspace: &Path) -> Result<Vec<String>> {
     let design = workspace.join("design");
-    if !design.is_dir() {
+    if !metadata_if_real(&design)
+        .map_err(anyhow::Error::from)?
+        .is_some_and(|metadata| metadata.is_dir())
+    {
         return Ok(Vec::new());
     }
     let mut pending = vec![design];
     let mut files = Vec::new();
     while let Some(directory) = pending.pop() {
-        for entry in std::fs::read_dir(&directory)
+        for path in real_directory_entries(&directory)
             .with_context(|| format!("failed to read `{}`", directory.display()))?
         {
-            let path = entry?.path();
-            if path.is_dir() {
+            let Some(metadata) = metadata_if_real(&path).map_err(anyhow::Error::from)? else {
+                continue;
+            };
+            if metadata.is_dir() {
                 pending.push(path);
-            } else if path.extension().and_then(|value| value.to_str()) == Some("md") {
+            } else if metadata.is_file()
+                && path.extension().and_then(|value| value.to_str()) == Some("md")
+            {
                 files.push(relative_path(workspace, path)?);
             }
         }

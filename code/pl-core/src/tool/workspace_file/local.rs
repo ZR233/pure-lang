@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use pl_protocol::Result;
 
+use crate::path_safety::{metadata_if_real_async, real_directory_entries_async};
 use crate::tool::ToolContext;
 use crate::tool::file::path::{WorkspacePaths, matches_pattern};
 
@@ -119,7 +120,6 @@ impl WorkspaceFileBackend for LocalWorkspaceFileBackend {
 
     async fn read_text(&self, request: WorkspaceFileReadRequest) -> Result<String> {
         let input_path = self.with_cwd(request.cwd.as_deref(), &request.path)?;
-        self.paths.reject_symlink_read(&input_path).await?;
         let path = self.paths.resolve_existing(&input_path).await?;
         let metadata = tokio::fs::metadata(&path).await?;
         if !metadata.is_file() {
@@ -143,7 +143,6 @@ impl WorkspaceFileBackend for LocalWorkspaceFileBackend {
         let path = self
             .resolve_for_write(request.cwd.as_deref(), &request.path)
             .await?;
-        self.paths.reject_symlink_write(&path).await?;
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent).await?;
         }
@@ -166,7 +165,6 @@ impl WorkspaceFileBackend for LocalWorkspaceFileBackend {
         let path = self
             .resolve_existing(request.cwd.as_deref(), &request.path)
             .await?;
-        self.paths.reject_symlink_write(&path).await?;
         let metadata = tokio::fs::metadata(&path).await?;
         if !metadata.is_file() {
             return Err(tool_error(
@@ -252,9 +250,11 @@ async fn collect_entries(
             if include_dirs && matches_list_entry(root, &path, &display, glob, true) {
                 output.push(format!("{display}/"));
             }
-            let mut entries = tokio::fs::read_dir(&path).await?;
-            while let Some(entry) = entries.next_entry().await? {
-                stack.push(entry.path());
+            for entry in real_directory_entries_async(&path)
+                .await
+                .map_err(|error| tool_error("file", error))?
+            {
+                stack.push(entry);
             }
         } else if metadata.is_file() {
             let display = paths.display_relative(&path);
@@ -313,9 +313,11 @@ async fn search_entries(
             if is_skipped_dir(&path) {
                 continue;
             }
-            let mut entries = tokio::fs::read_dir(&path).await?;
-            while let Some(entry) = entries.next_entry().await? {
-                stack.push(entry.path());
+            for entry in real_directory_entries_async(&path)
+                .await
+                .map_err(|error| tool_error("file", error))?
+            {
+                stack.push(entry);
             }
             continue;
         }
@@ -347,22 +349,9 @@ async fn search_entries(
 }
 
 async fn traversal_metadata(path: &Path) -> Result<Option<std::fs::Metadata>> {
-    let metadata = tokio::fs::symlink_metadata(path).await?;
-    Ok((!is_link_or_reparse(&metadata)).then_some(metadata))
-}
-
-#[cfg(windows)]
-fn is_link_or_reparse(metadata: &std::fs::Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt;
-
-    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
-    metadata.file_type().is_symlink()
-        || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
-}
-
-#[cfg(not(windows))]
-fn is_link_or_reparse(metadata: &std::fs::Metadata) -> bool {
-    metadata.file_type().is_symlink()
+    metadata_if_real_async(path)
+        .await
+        .map_err(|error| tool_error("file", error))
 }
 
 fn match_line(line: &str, query: &str, case_sensitive: bool) -> Option<usize> {

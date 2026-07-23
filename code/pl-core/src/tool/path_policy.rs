@@ -2,6 +2,10 @@ use std::path::{Component, Path, PathBuf};
 
 use pl_protocol::PureError;
 
+use crate::path_safety::{
+    PathSafetyError, is_lexically_within, validate_existing_path, validate_path_for_write,
+};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PathAccess {
     Workspace,
@@ -44,7 +48,14 @@ impl ToolPathPolicy {
 
     pub fn resolve_existing_path(&self, path: &Path, original: &str) -> Result<PathBuf, PureError> {
         self.validate_for_execution(path, original)?;
-        let candidate = self.candidate(path);
+        let candidate = lexical_normalize(&self.candidate(path));
+        let safety_root = self.safety_root(&candidate, original)?;
+        validate_existing_path(&safety_root, &candidate).map_err(|error| match error {
+            PathSafetyError::Io { source, .. } if source.kind() == std::io::ErrorKind::NotFound => {
+                self.error(format!("failed to resolve path '{original}': {source}"))
+            }
+            error => self.error(error.to_string()),
+        })?;
         let canonical = std::fs::canonicalize(&candidate)
             .map_err(|error| self.error(format!("failed to resolve path '{original}': {error}")))?;
         self.ensure_allowed(&canonical, original)?;
@@ -83,7 +94,10 @@ impl ToolPathPolicy {
         original: &str,
     ) -> Result<PathBuf, PureError> {
         self.validate_for_execution(path, original)?;
-        let candidate = self.candidate(path);
+        let candidate = lexical_normalize(&self.candidate(path));
+        let safety_root = self.safety_root(&candidate, original)?;
+        validate_path_for_write(&safety_root, &candidate)
+            .map_err(|error| self.error(error.to_string()))?;
         let (ancestor, tail) = existing_ancestor_and_tail(&candidate).map_err(|error| {
             self.error(format!(
                 "failed to inspect parent for path '{original}': {error}"
@@ -100,6 +114,21 @@ impl ToolPathPolicy {
         } else {
             Ok(canonical.join(tail))
         }
+    }
+
+    fn safety_root(&self, candidate: &Path, original: &str) -> Result<PathBuf, PureError> {
+        if is_lexically_within(&self.root_canonical, candidate) {
+            return Ok(self.root_canonical.clone());
+        }
+        if !self.allow_workspace_escape {
+            return Err(self.error(format!("path '{original}' is outside the workspace")));
+        }
+        absolute_path_anchor(candidate).ok_or_else(|| {
+            self.error(format!(
+                "path '{}' has no absolute filesystem anchor",
+                candidate.display()
+            ))
+        })
     }
 
     pub fn access_for_input(&self, path: &str) -> PathAccess {
@@ -180,12 +209,16 @@ impl ToolPathPolicy {
 fn existing_ancestor_and_tail(candidate: &Path) -> std::io::Result<(PathBuf, PathBuf)> {
     let mut current = candidate.to_path_buf();
     loop {
-        if current.exists() {
-            let tail = candidate
-                .strip_prefix(&current)
-                .unwrap_or_else(|_| Path::new(""))
-                .to_path_buf();
-            return Ok((current, tail));
+        match std::fs::symlink_metadata(&current) {
+            Ok(_) => {
+                let tail = candidate
+                    .strip_prefix(&current)
+                    .unwrap_or_else(|_| Path::new(""))
+                    .to_path_buf();
+                return Ok((current, tail));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
         }
         if !current.pop() {
             return Err(std::io::Error::new(
@@ -194,6 +227,37 @@ fn existing_ancestor_and_tail(candidate: &Path) -> std::io::Result<(PathBuf, Pat
             ));
         }
     }
+}
+
+fn lexical_normalize(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            Component::RootDir => normalized.push(component.as_os_str()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                let _ = normalized.pop();
+            }
+            Component::Normal(part) => normalized.push(part),
+        }
+    }
+    normalized
+}
+
+fn absolute_path_anchor(path: &Path) -> Option<PathBuf> {
+    if !path.is_absolute() {
+        return None;
+    }
+    let mut anchor = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => anchor.push(prefix.as_os_str()),
+            Component::RootDir => anchor.push(component.as_os_str()),
+            Component::CurDir | Component::ParentDir | Component::Normal(_) => break,
+        }
+    }
+    (!anchor.as_os_str().is_empty()).then_some(anchor)
 }
 
 fn path_has_parent(path: &Path) -> bool {
@@ -319,5 +383,64 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(workspace);
         let _ = std::fs::remove_dir_all(outside);
+    }
+
+    #[test]
+    fn existing_and_write_paths_reject_link_ancestors() {
+        let workspace = unique_temp_dir("path-policy-link-workspace");
+        let outside = unique_temp_dir("path-policy-link-outside");
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("existing.txt"), "outside").unwrap();
+        create_directory_link(&outside, &workspace.join("linked"));
+        let policy = ToolPathPolicy::new(workspace.clone(), false, "test").unwrap();
+
+        let existing = policy.resolve_existing("linked/existing.txt").unwrap_err();
+        let write = policy.resolve_for_write("linked/new.txt").unwrap_err();
+
+        assert!(existing.to_string().contains("reparse point"));
+        assert!(write.to_string().contains("reparse point"));
+        remove_directory_link(&workspace.join("linked"));
+        std::fs::remove_dir_all(workspace).unwrap();
+        std::fs::remove_dir_all(outside).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn absolute_drive_path_matches_verbatim_workspace_root() {
+        let workspace = unique_temp_dir("path-policy-verbatim-workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let file = workspace.join("file.txt");
+        std::fs::write(&file, "content").unwrap();
+        let policy = ToolPathPolicy::new(workspace.clone(), false, "test").unwrap();
+
+        assert_eq!(
+            policy
+                .resolve_existing_path(&file, &file.to_string_lossy())
+                .unwrap(),
+            std::fs::canonicalize(&file).unwrap()
+        );
+
+        std::fs::remove_dir_all(workspace).unwrap();
+    }
+
+    #[cfg(unix)]
+    fn create_directory_link(target: &Path, link: &Path) {
+        std::os::unix::fs::symlink(target, link).unwrap();
+    }
+
+    #[cfg(windows)]
+    fn create_directory_link(target: &Path, link: &Path) {
+        std::os::windows::fs::symlink_dir(target, link).unwrap();
+    }
+
+    #[cfg(unix)]
+    fn remove_directory_link(link: &Path) {
+        std::fs::remove_file(link).unwrap();
+    }
+
+    #[cfg(windows)]
+    fn remove_directory_link(link: &Path) {
+        std::fs::remove_dir(link).unwrap();
     }
 }

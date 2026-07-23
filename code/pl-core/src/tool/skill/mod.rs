@@ -257,7 +257,8 @@ impl Tool for SkillViewTool {
             })?;
             let read = read_skill_file(skill, input.file_path.as_deref())
                 .map_err(|error| tool_error(self.name(), error))?;
-            bump_project_view(skill).map_err(|error| tool_error(self.name(), error))?;
+            bump_project_view(&catalog.project_dir, skill)
+                .map_err(|error| tool_error(self.name(), error))?;
             let support_files = if read.is_main {
                 list_support_files(&skill.path).map_err(|error| tool_error(self.name(), error))?
             } else {

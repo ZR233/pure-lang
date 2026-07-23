@@ -59,6 +59,26 @@ fn apply_patch_tool() -> LocalWorkspaceFileTool {
     LocalWorkspaceFileTool::new(WorkspaceFileToolKind::ApplyPatch)
 }
 
+#[cfg(unix)]
+fn create_directory_symlink(target: &Path, link: &Path) -> std::io::Result<()> {
+    std::os::unix::fs::symlink(target, link)
+}
+
+#[cfg(windows)]
+fn create_directory_symlink(target: &Path, link: &Path) -> std::io::Result<()> {
+    std::os::windows::fs::symlink_dir(target, link)
+}
+
+#[cfg(unix)]
+fn remove_directory_symlink(link: &Path) -> std::io::Result<()> {
+    std::fs::remove_file(link)
+}
+
+#[cfg(windows)]
+fn remove_directory_symlink(link: &Path) -> std::io::Result<()> {
+    std::fs::remove_dir(link)
+}
+
 mod apply_patch;
 mod ops;
 mod read;

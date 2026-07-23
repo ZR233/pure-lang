@@ -7,6 +7,7 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
+use pl_core::path_safety::{remove_dir_all_no_follow, validate_existing_path};
 
 use super::git_compatible_path;
 
@@ -117,14 +118,15 @@ fn reconcile_blocking(
         remove_registration(representative, &registration.path)?;
         pause_after_registration_remove(&registration.path);
         summary.cleaned_registrations += 1;
-        if registration.path.exists() {
+        if std::fs::symlink_metadata(&registration.path).is_ok() {
             ensure_safe_existing_path(root.repository, &registration.path)?;
-            std::fs::remove_dir_all(&registration.path).with_context(|| {
-                format!(
-                    "failed to remove worktree leaf {}",
-                    registration.path.display()
-                )
-            })?;
+            remove_dir_all_no_follow(&root.repository.join(WORKTREE_ROOT), &registration.path)
+                .with_context(|| {
+                    format!(
+                        "failed to remove worktree leaf {}",
+                        registration.path.display()
+                    )
+                })?;
             summary.cleaned_paths += 1;
         }
     }
@@ -138,9 +140,9 @@ fn reconcile_blocking(
                 continue;
             }
             ensure_safe_existing_path(root.repository, &path)?;
-            std::fs::remove_dir_all(&path).with_context(|| {
-                format!("failed to remove orphan worktree leaf {}", path.display())
-            })?;
+            remove_dir_all_no_follow(&root.repository.join(WORKTREE_ROOT), &path).with_context(
+                || format!("failed to remove orphan worktree leaf {}", path.display()),
+            )?;
             summary.cleaned_paths += 1;
         }
     }
@@ -292,15 +294,13 @@ fn inventory(repository: &Path) -> Result<Inventory> {
 
 fn leaf_directories(repository: &Path) -> Result<Vec<PathBuf>> {
     let root = repository.join(WORKTREE_ROOT);
-    if !root.exists() {
-        return Ok(Vec::new());
-    }
-    ensure_safe_worktree_root(repository, &root)?;
-    let entries = match std::fs::read_dir(&root) {
-        Ok(entries) => entries,
+    match std::fs::symlink_metadata(&root) {
+        Ok(_) => {}
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(error) => return Err(error).context("failed to inspect worktree root"),
-    };
+    }
+    ensure_safe_worktree_root(repository, &root)?;
+    let entries = std::fs::read_dir(&root).context("failed to inspect worktree root")?;
     let mut leaves = Vec::new();
     for parent in entries {
         let parent = parent?.path();
@@ -310,8 +310,8 @@ fn leaf_directories(repository: &Path) -> Result<Vec<PathBuf>> {
         }
         for leaf in std::fs::read_dir(&parent)? {
             let leaf = leaf?.path();
+            ensure_safe_existing_path(repository, &leaf)?;
             if leaf.is_dir() {
-                ensure_safe_existing_path(repository, &leaf)?;
                 leaves.push(leaf);
             }
         }
@@ -397,17 +397,8 @@ fn ensure_safe_existing_path(repository: &Path, path: &Path) -> Result<()> {
         );
     }
 
-    let mut current = path.to_path_buf();
-    loop {
-        reject_link_or_reparse(&current)?;
-        if normalize_path(&current) == normalize_path(&root) {
-            break;
-        }
-        let Some(parent) = current.parent() else {
-            bail!("worktree path is not below its root: {}", path.display());
-        };
-        current = parent.to_path_buf();
-    }
+    validate_existing_path(&root, path)
+        .with_context(|| format!("unsafe worktree path {}", path.display()))?;
     Ok(())
 }
 
@@ -419,35 +410,7 @@ fn ensure_safe_worktree_root(repository: &Path, root: &Path) -> Result<PathBuf> 
     if canonical_root.strip_prefix(&canonical_repository).is_err() {
         bail!("worktree root escapes repository through a link or reparse point");
     }
-    if let Some(pure_dir) = root.parent() {
-        reject_link_or_reparse(pure_dir)?;
-    }
-    reject_link_or_reparse(root)?;
+    validate_existing_path(repository, root)
+        .context("worktree root contains a link or reparse point")?;
     Ok(canonical_root)
-}
-
-fn reject_link_or_reparse(path: &Path) -> Result<()> {
-    let metadata = std::fs::symlink_metadata(path)
-        .with_context(|| format!("failed to inspect worktree path {}", path.display()))?;
-    if is_link_or_reparse(&metadata) {
-        bail!(
-            "worktree path contains a link or reparse point: {}",
-            path.display()
-        );
-    }
-    Ok(())
-}
-
-#[cfg(windows)]
-fn is_link_or_reparse(metadata: &std::fs::Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt;
-
-    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
-    metadata.file_type().is_symlink()
-        || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
-}
-
-#[cfg(not(windows))]
-fn is_link_or_reparse(metadata: &std::fs::Metadata) -> bool {
-    metadata.file_type().is_symlink()
 }

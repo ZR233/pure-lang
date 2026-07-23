@@ -346,25 +346,36 @@ async fn read_file_pages_large_output_by_lines() {
     let _ = tokio::fs::remove_dir_all(root).await;
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn read_file_rejects_symlink() {
-    use std::os::unix::fs::symlink;
     let root = unique_temp_dir("reject-symlink");
+    let outside = unique_temp_dir("reject-symlink-target");
     let tool = read_file_tool();
     tokio::fs::create_dir_all(&root).await.unwrap();
-    tokio::fs::write(root.join("real.txt"), "content")
+    tokio::fs::create_dir_all(&outside).await.unwrap();
+    tokio::fs::write(outside.join("real.txt"), "content")
         .await
         .unwrap();
-    symlink("real.txt", root.join("link.txt")).unwrap();
+    create_directory_symlink(&outside, &root.join("linked")).unwrap();
     let result = tool
         .execute(
-            input(serde_json::json!({ "path": "link.txt" })),
+            input(serde_json::json!({ "path": "linked/real.txt" })),
             context(&root).await,
         )
         .await;
 
     let error = result.unwrap_err().to_string();
     assert!(error.contains("symbolic link"));
+    let stat_error = StatPathTool
+        .execute(
+            input(serde_json::json!({ "path": "linked/real.txt" })),
+            context(&root).await,
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(stat_error.contains("reparse point"), "{stat_error}");
+    remove_directory_symlink(&root.join("linked")).unwrap();
     let _ = tokio::fs::remove_dir_all(root).await;
+    let _ = tokio::fs::remove_dir_all(outside).await;
 }
