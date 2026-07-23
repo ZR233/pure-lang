@@ -44,6 +44,8 @@ Chat Completions provider 如果没有 Responses 风格的 completed event，pro
 
 `list_files` 的 `glob` 既可以匹配 workspace-relative 路径，也可以匹配 `path` 参数之下的相对条目；`includeDirs=true` 时目录候选按带尾随 `/` 的形式参与匹配。`**/` 表示零层或多层目录，因此 `**/Cargo.toml` 必须同时匹配 workspace 根下和子目录下的 `Cargo.toml`。
 
+本地 `list_files` / `search_files` 递归遍历不得跟随符号链接或 Windows reparse point，也不把这些入口作为普通文件或目录返回。链接是 workspace 文件边界，不应让 Flutter plugin symlink、目录联接或不可访问的挂载目标使整次搜索失败；跳过链接之外的真实目录读取和元数据错误仍须显式失败。
+
 MCP tools 由 `McpRuntimeHandle` 的 turn lease 注册。`McpRuntime<H>` 的泛型 worker 持有具体
 `McpRuntimeHost`，产品和工具只持有非泛型 handle；`McpTurnLease` 固定 generation、tool schema、
 resource 入口和调用 backend。Simple executor 可以使用 available tools；Task planner、explorer、
