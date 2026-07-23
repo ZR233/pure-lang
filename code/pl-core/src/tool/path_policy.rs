@@ -49,7 +49,7 @@ impl ToolPathPolicy {
     pub fn resolve_existing_path(&self, path: &Path, original: &str) -> Result<PathBuf, PureError> {
         self.validate_for_execution(path, original)?;
         let candidate = lexical_normalize(&self.candidate(path));
-        let safety_root = self.safety_root(&candidate, original)?;
+        let safety_root = self.safety_root(&candidate)?;
         validate_existing_path(&safety_root, &candidate).map_err(|error| match error {
             PathSafetyError::Io { source, .. } if source.kind() == std::io::ErrorKind::NotFound => {
                 self.error(format!("failed to resolve path '{original}': {source}"))
@@ -95,7 +95,7 @@ impl ToolPathPolicy {
     ) -> Result<PathBuf, PureError> {
         self.validate_for_execution(path, original)?;
         let candidate = lexical_normalize(&self.candidate(path));
-        let safety_root = self.safety_root(&candidate, original)?;
+        let safety_root = self.safety_root(&candidate)?;
         validate_path_for_write(&safety_root, &candidate)
             .map_err(|error| self.error(error.to_string()))?;
         let (ancestor, tail) = existing_ancestor_and_tail(&candidate).map_err(|error| {
@@ -116,12 +116,9 @@ impl ToolPathPolicy {
         }
     }
 
-    fn safety_root(&self, candidate: &Path, original: &str) -> Result<PathBuf, PureError> {
-        if is_lexically_within(&self.root_canonical, candidate) {
+    fn safety_root(&self, candidate: &Path) -> Result<PathBuf, PureError> {
+        if !self.allow_workspace_escape || is_lexically_within(&self.root_canonical, candidate) {
             return Ok(self.root_canonical.clone());
-        }
-        if !self.allow_workspace_escape {
-            return Err(self.error(format!("path '{original}' is outside the workspace")));
         }
         absolute_path_anchor(candidate).ok_or_else(|| {
             self.error(format!(

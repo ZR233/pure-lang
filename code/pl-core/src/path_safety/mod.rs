@@ -232,7 +232,7 @@ fn validate_path(
     candidate: &Path,
     requirement: ExistingPathRequirement,
 ) -> Result<(), PathSafetyError> {
-    let components = descendant_components(root, candidate)?;
+    let components = checked_descendant_components(root, candidate, requirement)?;
     let mut current = root.to_path_buf();
     for (index, component) in components.iter().enumerate() {
         current.push(component);
@@ -271,7 +271,7 @@ async fn validate_path_async(
     candidate: &Path,
     requirement: ExistingPathRequirement,
 ) -> Result<(), PathSafetyError> {
-    let components = descendant_components(root, candidate)?;
+    let components = checked_descendant_components_async(root, candidate, requirement).await?;
     let target_is_root = components.is_empty();
     let mut current = root.to_path_buf();
     for component in components {
@@ -300,6 +300,36 @@ async fn validate_path_async(
     Ok(())
 }
 
+fn checked_descendant_components(
+    root: &Path,
+    candidate: &Path,
+    requirement: ExistingPathRequirement,
+) -> Result<Vec<PathBuf>, PathSafetyError> {
+    match descendant_components(root, candidate) {
+        Ok(components) => Ok(components),
+        #[cfg(windows)]
+        Err(PathSafetyError::OutsideRoot { .. }) => {
+            windows_checked_descendant_components(root, candidate, requirement)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+async fn checked_descendant_components_async(
+    root: &Path,
+    candidate: &Path,
+    requirement: ExistingPathRequirement,
+) -> Result<Vec<PathBuf>, PathSafetyError> {
+    match descendant_components(root, candidate) {
+        Ok(components) => Ok(components),
+        #[cfg(windows)]
+        Err(PathSafetyError::OutsideRoot { .. }) => {
+            windows_checked_descendant_components_async(root, candidate, requirement).await
+        }
+        Err(error) => Err(error),
+    }
+}
+
 fn descendant_components(root: &Path, candidate: &Path) -> Result<Vec<PathBuf>, PathSafetyError> {
     let comparison_root = lexical_comparison_path(root);
     let comparison_candidate = lexical_comparison_path(candidate);
@@ -323,6 +353,175 @@ fn descendant_components(root: &Path, candidate: &Path) -> Result<Vec<PathBuf>, 
         }
     }
     Ok(components)
+}
+
+#[cfg(windows)]
+fn windows_checked_descendant_components(
+    root: &Path,
+    candidate: &Path,
+    requirement: ExistingPathRequirement,
+) -> Result<Vec<PathBuf>, PathSafetyError> {
+    let (existing, missing) = inspect_windows_candidate(root, candidate, requirement, |path| {
+        std::fs::symlink_metadata(path)
+    })?;
+    let canonical_existing = std::fs::canonicalize(&existing)
+        .map_err(|error| PathSafetyError::io("canonicalize path", &existing, error))?;
+    let canonical_root = std::fs::canonicalize(root)
+        .map_err(|error| PathSafetyError::io("canonicalize trusted root", root, error))?;
+    append_missing_components(
+        root,
+        candidate,
+        &canonical_root,
+        &canonical_existing,
+        missing,
+    )
+}
+
+#[cfg(windows)]
+async fn windows_checked_descendant_components_async(
+    root: &Path,
+    candidate: &Path,
+    requirement: ExistingPathRequirement,
+) -> Result<Vec<PathBuf>, PathSafetyError> {
+    let (existing, missing) = inspect_windows_candidate_async(root, candidate, requirement).await?;
+    let canonical_existing = tokio::fs::canonicalize(&existing)
+        .await
+        .map_err(|error| PathSafetyError::io("canonicalize path", &existing, error))?;
+    let canonical_root = tokio::fs::canonicalize(root)
+        .await
+        .map_err(|error| PathSafetyError::io("canonicalize trusted root", root, error))?;
+    append_missing_components(
+        root,
+        candidate,
+        &canonical_root,
+        &canonical_existing,
+        missing,
+    )
+}
+
+#[cfg(windows)]
+fn inspect_windows_candidate(
+    root: &Path,
+    candidate: &Path,
+    requirement: ExistingPathRequirement,
+    inspect: impl Fn(&Path) -> std::io::Result<std::fs::Metadata>,
+) -> Result<(PathBuf, Vec<PathBuf>), PathSafetyError> {
+    let mut current = PathBuf::new();
+    let mut existing = PathBuf::new();
+    let mut missing = Vec::new();
+    for component in candidate.components() {
+        match component {
+            Component::Prefix(prefix) => {
+                current.push(prefix.as_os_str());
+                existing = current.clone();
+            }
+            Component::RootDir => {
+                current.push(component.as_os_str());
+                existing = current.clone();
+            }
+            Component::CurDir => {}
+            Component::ParentDir => return Err(outside_root(root, candidate)),
+            Component::Normal(part) if missing.is_empty() => {
+                current.push(part);
+                match inspect(&current) {
+                    Ok(metadata) if is_link_or_reparse(&metadata) => {
+                        return Err(PathSafetyError::LinkOrReparse { path: current });
+                    }
+                    Ok(_) => existing = current.clone(),
+                    Err(error)
+                        if error.kind() == std::io::ErrorKind::NotFound
+                            && matches!(
+                                requirement,
+                                ExistingPathRequirement::AllowMissingSuffix
+                            ) =>
+                    {
+                        missing.push(PathBuf::from(part));
+                    }
+                    Err(error) => {
+                        return Err(PathSafetyError::io("inspect path", &current, error));
+                    }
+                }
+            }
+            Component::Normal(part) => missing.push(PathBuf::from(part)),
+        }
+    }
+    if existing.as_os_str().is_empty() {
+        return Err(outside_root(root, candidate));
+    }
+    Ok((existing, missing))
+}
+
+#[cfg(windows)]
+async fn inspect_windows_candidate_async(
+    root: &Path,
+    candidate: &Path,
+    requirement: ExistingPathRequirement,
+) -> Result<(PathBuf, Vec<PathBuf>), PathSafetyError> {
+    let mut current = PathBuf::new();
+    let mut existing = PathBuf::new();
+    let mut missing = Vec::new();
+    for component in candidate.components() {
+        match component {
+            Component::Prefix(prefix) => {
+                current.push(prefix.as_os_str());
+                existing = current.clone();
+            }
+            Component::RootDir => {
+                current.push(component.as_os_str());
+                existing = current.clone();
+            }
+            Component::CurDir => {}
+            Component::ParentDir => return Err(outside_root(root, candidate)),
+            Component::Normal(part) if missing.is_empty() => {
+                current.push(part);
+                match tokio::fs::symlink_metadata(&current).await {
+                    Ok(metadata) if is_link_or_reparse(&metadata) => {
+                        return Err(PathSafetyError::LinkOrReparse { path: current });
+                    }
+                    Ok(_) => existing = current.clone(),
+                    Err(error)
+                        if error.kind() == std::io::ErrorKind::NotFound
+                            && matches!(
+                                requirement,
+                                ExistingPathRequirement::AllowMissingSuffix
+                            ) =>
+                    {
+                        missing.push(PathBuf::from(part));
+                    }
+                    Err(error) => {
+                        return Err(PathSafetyError::io("inspect path", &current, error));
+                    }
+                }
+            }
+            Component::Normal(part) => missing.push(PathBuf::from(part)),
+        }
+    }
+    if existing.as_os_str().is_empty() {
+        return Err(outside_root(root, candidate));
+    }
+    Ok((existing, missing))
+}
+
+#[cfg(windows)]
+fn append_missing_components(
+    root: &Path,
+    candidate: &Path,
+    canonical_root: &Path,
+    canonical_existing: &Path,
+    missing: Vec<PathBuf>,
+) -> Result<Vec<PathBuf>, PathSafetyError> {
+    let mut components = descendant_components(canonical_root, canonical_existing)
+        .map_err(|_| outside_root(root, candidate))?;
+    components.extend(missing);
+    Ok(components)
+}
+
+#[cfg(windows)]
+fn outside_root(root: &Path, candidate: &Path) -> PathSafetyError {
+    PathSafetyError::OutsideRoot {
+        root: root.to_path_buf(),
+        path: candidate.to_path_buf(),
+    }
 }
 
 #[cfg(not(windows))]
