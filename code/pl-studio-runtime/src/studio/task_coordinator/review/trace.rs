@@ -3,6 +3,7 @@ use std::path::{Component, Path};
 
 use crate::{MessageRole, ToolResultMetadata};
 use anyhow::{Context, Result, bail};
+use pl_core::path_safety::validate_existing_path_async;
 
 #[derive(Debug)]
 pub(super) struct ReviewTrace {
@@ -125,19 +126,10 @@ async fn validate_design_read_path(workspace: &Path, raw: &str) -> Result<String
     if normalized != raw {
         bail!("reviewer design path is not normalized");
     }
-    let mut current = workspace.to_path_buf();
-    for component in components {
-        let Component::Normal(part) = component else {
-            bail!("reviewer design path contains invalid component");
-        };
-        current.push(part);
-        let metadata = tokio::fs::symlink_metadata(&current)
-            .await
-            .with_context(|| format!("reviewer design path does not exist: `{raw}`"))?;
-        if metadata.file_type().is_symlink() {
-            bail!("reviewer design path traverses a symbolic link");
-        }
-    }
+    let current = workspace.join(path);
+    validate_existing_path_async(workspace, &current)
+        .await
+        .with_context(|| format!("reviewer design path is unsafe or does not exist: `{raw}`"))?;
     if !current.is_file() {
         bail!("reviewer design reference is not a file");
     }

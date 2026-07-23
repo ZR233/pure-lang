@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use pl_core::path_safety::remove_dir_all_no_follow_async;
 use serde::{Deserialize, Serialize};
 
 use super::backend::{
@@ -271,20 +272,25 @@ impl WorktreeManager {
             failures.push(error);
         }
 
-        match tokio::fs::try_exists(&handle.path).await {
-            Ok(true) => {
-                if let Err(error) = tokio::fs::remove_dir_all(&handle.path).await {
+        match tokio::fs::symlink_metadata(&handle.path).await {
+            Ok(_) => {
+                let worktree_root = repo_root.join(WORKTREE_DIR);
+                if let Err(error) =
+                    remove_dir_all_no_follow_async(&worktree_root, &handle.path).await
+                {
                     failures.push(WorktreeError::Io(format!(
                         "failed to remove {}: {error}",
                         handle.path.display()
                     )));
                 }
             }
-            Ok(false) => {}
-            Err(error) => failures.push(WorktreeError::Io(format!(
-                "failed to inspect {}: {error}",
-                handle.path.display()
-            ))),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                failures.push(WorktreeError::Io(format!(
+                    "failed to inspect {}: {error}",
+                    handle.path.display()
+                )));
+            }
         }
 
         if let Err(error) = self

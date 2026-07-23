@@ -461,4 +461,57 @@ mod tests {
         );
         let _ = std::fs::remove_dir_all(root);
     }
+
+    #[test]
+    fn resolve_query_path_rejects_link_ancestor() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("pure-lsp-link-root-{unique}"));
+        let outside = std::env::temp_dir().join(format!("pure-lsp-link-outside-{unique}"));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("lib.rs"), "fn main() {}\n").unwrap();
+        create_directory_link(&outside, &root.join("linked"));
+        let query = LspQuery {
+            operation: LspQueryOperation::Hover,
+            file_path: Some(PathBuf::from("linked/lib.rs")),
+            line: Some(1),
+            character: Some(1),
+            query: None,
+            max_results: None,
+            language_id: None,
+        };
+        let context = test_context(root.clone(), crate::tool::WorkspaceAccess::WorkspaceOnly);
+
+        let error = resolve_query_path(query, &context, "lsp_query")
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("reparse point"), "{error}");
+        remove_directory_link(&root.join("linked"));
+        std::fs::remove_dir_all(root).unwrap();
+        std::fs::remove_dir_all(outside).unwrap();
+    }
+
+    #[cfg(unix)]
+    fn create_directory_link(target: &std::path::Path, link: &std::path::Path) {
+        std::os::unix::fs::symlink(target, link).unwrap();
+    }
+
+    #[cfg(windows)]
+    fn create_directory_link(target: &std::path::Path, link: &std::path::Path) {
+        std::os::windows::fs::symlink_dir(target, link).unwrap();
+    }
+
+    #[cfg(unix)]
+    fn remove_directory_link(link: &std::path::Path) {
+        std::fs::remove_file(link).unwrap();
+    }
+
+    #[cfg(windows)]
+    fn remove_directory_link(link: &std::path::Path) {
+        std::fs::remove_dir(link).unwrap();
+    }
 }

@@ -47,6 +47,26 @@ fn write_project_skill(workspace: &Path, name: &str) {
     fs::write(skill_dir.join("references/example.md"), "support").unwrap();
 }
 
+#[cfg(unix)]
+fn create_directory_link(target: &Path, link: &Path) {
+    std::os::unix::fs::symlink(target, link).unwrap();
+}
+
+#[cfg(windows)]
+fn create_directory_link(target: &Path, link: &Path) {
+    std::os::windows::fs::symlink_dir(target, link).unwrap();
+}
+
+#[cfg(unix)]
+fn remove_directory_link(link: &Path) {
+    fs::remove_file(link).unwrap();
+}
+
+#[cfg(windows)]
+fn remove_directory_link(link: &Path) {
+    fs::remove_dir(link).unwrap();
+}
+
 fn activation_from_output(output: &ToolOutput) -> &SkillActivation {
     let Some(ToolRuntimeEvent::SkillActivated { activation }) = output.runtime_events.first()
     else {
@@ -298,4 +318,113 @@ async fn skill_view_failure_does_not_emit_activation() {
 
     assert!(error.to_string().contains("skill not found"));
     let _ = fs::remove_dir_all(workspace);
+}
+
+#[tokio::test]
+async fn skill_discovery_skips_linked_skill_directories() {
+    let workspace = temp_dir("linked-discovery");
+    let outside = temp_dir("linked-discovery-target");
+    fs::create_dir_all(workspace.join("skills")).unwrap();
+    write_project_skill(&outside, "linked-flow");
+    create_directory_link(
+        &outside.join("skills/linked-flow"),
+        &workspace.join("skills/linked-flow"),
+    );
+    let tool = SkillViewTool::new(SkillsConfig {
+        project_dir: "skills".to_string(),
+        ..SkillsConfig::default()
+    });
+
+    let error = tool
+        .execute(
+            ToolInput {
+                arguments: json!({"name": "linked-flow"}),
+                session_id: "turn-linked".to_string(),
+                tool_id: "call-linked".to_string(),
+                revision_base: 0,
+            },
+            tool_context(workspace.clone()),
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("skill not found"), "{error}");
+    remove_directory_link(&workspace.join("skills/linked-flow"));
+    fs::remove_dir_all(workspace).unwrap();
+    fs::remove_dir_all(outside).unwrap();
+}
+
+#[tokio::test]
+async fn skill_manage_rejects_linked_support_directory() {
+    let workspace = temp_dir("linked-support-write");
+    let outside = temp_dir("linked-support-write-target");
+    write_project_skill(&workspace, "local-flow");
+    fs::remove_dir_all(workspace.join("skills/local-flow/references")).unwrap();
+    fs::create_dir_all(&outside).unwrap();
+    create_directory_link(&outside, &workspace.join("skills/local-flow/references"));
+    let tool = SkillManageTool::new(SkillsConfig {
+        project_dir: "skills".to_string(),
+        ..SkillsConfig::default()
+    });
+
+    let error = tool
+        .execute(
+            ToolInput {
+                arguments: json!({
+                    "action": "writeFile",
+                    "name": "local-flow",
+                    "filePath": "references/new.md",
+                    "fileContent": "blocked"
+                }),
+                session_id: "turn-linked".to_string(),
+                tool_id: "call-linked".to_string(),
+                revision_base: 0,
+            },
+            tool_context(workspace.clone()),
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("reparse point"), "{error}");
+    assert!(!outside.join("new.md").exists());
+    remove_directory_link(&workspace.join("skills/local-flow/references"));
+    fs::remove_dir_all(workspace).unwrap();
+    fs::remove_dir_all(outside).unwrap();
+}
+
+#[tokio::test]
+async fn skill_delete_unlinks_support_directory_without_touching_target() {
+    let workspace = temp_dir("linked-support-delete");
+    let outside = temp_dir("linked-support-delete-target");
+    write_project_skill(&workspace, "local-flow");
+    fs::remove_dir_all(workspace.join("skills/local-flow/references")).unwrap();
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(outside.join("kept.md"), "kept").unwrap();
+    create_directory_link(&outside, &workspace.join("skills/local-flow/references"));
+    let tool = SkillManageTool::new(SkillsConfig {
+        project_dir: "skills".to_string(),
+        ..SkillsConfig::default()
+    });
+
+    tool.execute(
+        ToolInput {
+            arguments: json!({
+                "action": "delete",
+                "name": "local-flow"
+            }),
+            session_id: "turn-linked".to_string(),
+            tool_id: "call-linked".to_string(),
+            revision_base: 0,
+        },
+        tool_context(workspace.clone()),
+    )
+    .await
+    .unwrap();
+
+    assert!(!workspace.join("skills/local-flow").exists());
+    assert_eq!(fs::read_to_string(outside.join("kept.md")).unwrap(), "kept");
+    fs::remove_dir_all(workspace).unwrap();
+    fs::remove_dir_all(outside).unwrap();
 }

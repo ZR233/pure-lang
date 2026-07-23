@@ -136,7 +136,11 @@ pub fn validate_skills_config(config: &SkillsConfig) -> Result<()> {
 
 pub fn project_skills_dir(workspace_root: &Path, config: &SkillsConfig) -> Result<PathBuf> {
     let relative = util::safe_relative_path(&config.project_dir)?;
-    Ok(workspace_root.join(relative))
+    if !workspace_root.exists() {
+        return Ok(workspace_root.join(relative));
+    }
+    crate::tool::ToolPathPolicy::new(workspace_root.to_path_buf(), false, "skills")?
+        .resolve_for_write(&config.project_dir)
 }
 
 pub fn validate_skill_name(name: &str) -> Result<()> {
@@ -162,27 +166,33 @@ pub fn validate_skill_name(name: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn bump_project_view(skill: &SkillMetadata) -> Result<()> {
+pub fn bump_project_view(project_dir: &Path, skill: &SkillMetadata) -> Result<()> {
     if skill.source != SkillSourceKind::Project {
         return Ok(());
     }
+    util::validate_usage_write(project_dir, &skill.path)?;
     let now = util::unix_seconds();
     let mut usage = util::load_usage(&skill.path).unwrap_or_else(|| SkillUsage::agent_created(now));
     usage.views += 1;
     usage.uses += 1;
     usage.updated_at = now;
     usage.last_viewed_at = Some(now);
-    util::save_usage(&skill.path, &usage)
+    util::save_usage(project_dir, &skill.path, &usage)
 }
 
-pub fn mark_project_skill_created(skill_dir: &Path) -> Result<()> {
-    util::save_usage(skill_dir, &SkillUsage::agent_created(util::unix_seconds()))
+pub fn mark_project_skill_created(project_dir: &Path, skill_dir: &Path) -> Result<()> {
+    util::save_usage(
+        project_dir,
+        skill_dir,
+        &SkillUsage::agent_created(util::unix_seconds()),
+    )
 }
 
-pub fn bump_project_patch(skill_dir: &Path) -> Result<()> {
+pub fn bump_project_patch(project_dir: &Path, skill_dir: &Path) -> Result<()> {
+    util::validate_usage_write(project_dir, skill_dir)?;
     let now = util::unix_seconds();
     let mut usage = util::load_usage(skill_dir).unwrap_or_else(|| SkillUsage::agent_created(now));
     usage.patches += 1;
     usage.updated_at = now;
-    util::save_usage(skill_dir, &usage)
+    util::save_usage(project_dir, skill_dir, &usage)
 }
