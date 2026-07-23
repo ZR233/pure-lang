@@ -2,6 +2,13 @@
 
 Pure Studio release notes are generated from Conventional Commits by Release Please.
 
+## [1.0.3](https://github.com/ZR233/pure-lang/compare/v1.0.2...v1.0.3) (2026-07-23)
+
+
+### Bug Fixes
+
+* **model:** 修复 Responses WebSocket 地址族超时 ([#22](https://github.com/ZR233/pure-lang/issues/22)) ([73e5714](https://github.com/ZR233/pure-lang/commit/73e5714cac3436375d96d1147d673eeee3d38e1d))
+
 ## [1.0.2](https://github.com/ZR233/pure-lang/compare/v1.0.1...v1.0.2) (2026-07-23)
 
 
