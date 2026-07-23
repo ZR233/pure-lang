@@ -54,6 +54,10 @@ jobs:
         shell: pwsh
         run: .github/scripts/test-workflow-powershell.ps1
 
+      - name: Test official Studio Release flow
+        shell: pwsh
+        run: .github/scripts/test-studio-release-workflow.ps1
+
       - name: Test resumable Release asset rules
         shell: pwsh
         run: .github/scripts/test-studio-release-assets.ps1

@@ -12,10 +12,14 @@ Studio 使用 Release Please 的单一根组件管理版本。根 `studio-versio
 递增 minor，带 `!` 或 `BREAKING CHANGE:` 的提交递增 major。`ci:`、`docs:` 与 `chore:` 等
 非产品修改不单独触发版本。人工审查并合并 Release PR 即批准发版，不再从 Actions 输入或推算版本。
 
-`studio-release.yml` 在 `main` push 或手动刷新时运行固定提交的 Release Please v5，并使用仓库
-专属 fine-grained PAT 创建或更新 Release PR，使 PR 自身能触发正常质量检查。Release PR 维护根
-`CHANGELOG.md`；合并后 Release Please 创建不可变 `v{x.y.z}` tag 和 draft Release。publisher
-唯一接收该 Release 的数字 ID，再从 GitHub API 和 tag 独立解析仓库、稳定 SemVer、提交 SHA 与
+`studio-release.yml` 按 Release Please 官方模式在 `main` push 或手动刷新时运行固定提交的
+Release Please v5，并使用仓库专属 fine-grained PAT 创建或更新 Release PR，使 PR 自身及其
+合并提交能触发正常 Actions。workflow 必须先通过 GitHub `/user` API 确认 PAT 属于仓库所有者，
+不得以 `GITHUB_TOKEN` 代替。Release PR 维护根 `CHANGELOG.md`；合并后，同一次 workflow 从
+Release Please 的 `release_created`、`upload_url`、`tag_name`、`version` 与 `sha` 输出解析
+不可变 `v{x.y.z}` tag、draft Release 和精确数字 ID，并同步调用 reusable publisher。调用方
+必须等待 publisher 完成，构建或发布失败直接使 Studio Release 失败，不通过新的 GitHub 事件或
+API dispatch 串联。publisher 再从 GitHub API 和 tag 独立解析仓库、稳定 SemVer、提交 SHA 与
 三个版本文件，拒绝人工提供的版本或 SHA。回滚只允许发布更高版本的 forward fix，不覆盖 tag 或
 既有 Release。
 
@@ -25,7 +29,8 @@ Actions artifact。publish job 下载该 artifact 并按 Release ID 对账：dra
 但任何已有资产的名称、长度与 GitHub SHA-256 digest 必须和本地文件完全一致；只允许补传缺失资产，
 不得覆盖不同字节。六项全部一致后才能取消 draft 并标记 latest。failed job 重跑复用原 artifact
 继续补传；完整 draft 与已发布 Release 重跑均幂等成功。若存在尚未完成的稳定 draft，
-`studio-release.yml` 优先重新调度 publisher，而不创建下一版 Release PR。
+`studio-release.yml` 优先通过同一个 reusable workflow 恢复 publisher，而不创建下一版
+Release PR。Publisher 保留带精确 Release ID 的手动入口，仅用于故障恢复，不属于正常发版步骤。
 
 GitHub draft Release 只对具备仓库 push 权限的身份可见，因此负责发现和解析 draft 的 job
 使用 `contents: write`，但只执行读取；构建 job 仍保持 `contents: read`，只有最终 publish job
