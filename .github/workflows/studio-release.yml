@@ -63,18 +63,28 @@ jobs:
     if: needs.inspect.outputs.hasDraft != 'true'
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
+      issues: write
+      pull-requests: write
     outputs:
       releaseCreated: ${{ steps.release.outputs.release_created }}
       releaseId: ${{ steps.release-id.outputs.releaseId }}
     steps:
-      - name: Require Release Please token
+      - name: Require Release Please PAT
         shell: pwsh
         env:
-          RELEASE_PLEASE_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:RELEASE_PLEASE_TOKEN)) {
+          if ([string]::IsNullOrWhiteSpace($env:GH_TOKEN)) {
             throw 'RELEASE_PLEASE_TOKEN must be configured before Studio Release can run'
+          }
+          $login = gh api user --jq '.login'
+          if ($LASTEXITCODE -ne 0) {
+            throw 'RELEASE_PLEASE_TOKEN must be a user PAT accepted by the GitHub API'
+          }
+          $login = ([string]$login).Trim()
+          if ($login -cne 'ZR233') {
+            throw "RELEASE_PLEASE_TOKEN must authenticate as ZR233, not $login"
           }
 
       - name: Create or update Release PR
@@ -128,48 +138,28 @@ jobs:
           }
           "releaseId=$releaseId" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-  dispatch-existing:
+  publish-existing:
     name: Resume draft publisher
     needs: inspect
     if: needs.inspect.outputs.hasDraft == 'true'
-    runs-on: windows-latest
+    uses: ./.github/workflows/studio-release-publish.yml
+    with:
+      releaseId: ${{ needs.inspect.outputs.releaseId }}
+    secrets: inherit
     permissions:
-      actions: write
-    steps:
-      - name: Dispatch existing draft
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_ID: ${{ needs.inspect.outputs.releaseId }}
-        run: |
-          gh workflow run studio-release-publish.yml `
-            --repo $env:GITHUB_REPOSITORY `
-            --ref main `
-            -f "releaseId=$env:RELEASE_ID"
-          if ($LASTEXITCODE -ne 0) {
-            throw "Failed to dispatch Studio publisher for Release $env:RELEASE_ID"
-          }
-  dispatch-created:
-    name: Dispatch new publisher
+      attestations: write
+      contents: write
+      id-token: write
+
+  publish-created:
+    name: Publish new Release
     needs: release-please
     if: needs.release-please.outputs.releaseCreated == 'true'
-    runs-on: windows-latest
+    uses: ./.github/workflows/studio-release-publish.yml
+    with:
+      releaseId: ${{ needs.release-please.outputs.releaseId }}
+    secrets: inherit
     permissions:
-      actions: write
-    steps:
-      - name: Dispatch created draft
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_ID: ${{ needs.release-please.outputs.releaseId }}
-        run: |
-          if ($env:RELEASE_ID -notmatch '^[1-9]\d*$') {
-            throw "Release Please did not return a valid Release ID: $env:RELEASE_ID"
-          }
-          gh workflow run studio-release-publish.yml `
-            --repo $env:GITHUB_REPOSITORY `
-            --ref main `
-            -f "releaseId=$env:RELEASE_ID"
-          if ($LASTEXITCODE -ne 0) {
-            throw "Failed to dispatch Studio publisher for Release $env:RELEASE_ID"
-          }
+      attestations: write
+      contents: write
+      id-token: write
