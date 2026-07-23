@@ -241,7 +241,9 @@ async fn collect_entries(
         if output.len() >= limit {
             break;
         }
-        let metadata = tokio::fs::metadata(&path).await?;
+        let Some(metadata) = traversal_metadata(&path).await? else {
+            continue;
+        };
         if metadata.is_dir() {
             if is_skipped_dir(&path) {
                 continue;
@@ -304,7 +306,9 @@ async fn search_entries(
         if output.len() > request.max_matches {
             break;
         }
-        let metadata = tokio::fs::metadata(&path).await?;
+        let Some(metadata) = traversal_metadata(&path).await? else {
+            continue;
+        };
         if metadata.is_dir() {
             if is_skipped_dir(&path) {
                 continue;
@@ -340,6 +344,25 @@ async fn search_entries(
         }
     }
     Ok(())
+}
+
+async fn traversal_metadata(path: &Path) -> Result<Option<std::fs::Metadata>> {
+    let metadata = tokio::fs::symlink_metadata(path).await?;
+    Ok((!is_link_or_reparse(&metadata)).then_some(metadata))
+}
+
+#[cfg(windows)]
+fn is_link_or_reparse(metadata: &std::fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+    metadata.file_type().is_symlink()
+        || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+}
+
+#[cfg(not(windows))]
+fn is_link_or_reparse(metadata: &std::fs::Metadata) -> bool {
+    metadata.file_type().is_symlink()
 }
 
 fn match_line(line: &str, query: &str, case_sensitive: bool) -> Option<usize> {
