@@ -4,7 +4,6 @@ use pl_protocol::{PureError, Result};
 use serde_json::{Map, Value};
 use tokio::sync::OwnedMutexGuard;
 use tokio::time::timeout;
-use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::header::AUTHORIZATION;
@@ -20,11 +19,12 @@ use crate::transport_policy::{
 };
 use crate::transport_session::{ResponsesWebSocketConnection, ResponsesWebSocketSession};
 
+mod dialer;
 mod error;
 
 use error::{
-    close_error, connection_error, continuation_id_invalid, handshake_error, protocol_error,
-    response_terminal_error, server_error,
+    close_error, connection_error, continuation_id_invalid, handshake_error,
+    handshake_timeout_error, protocol_error, response_terminal_error, server_error,
 };
 
 pub(super) async fn stream_responses(
@@ -166,14 +166,13 @@ async fn connect(
     }
     insert_headers(request.headers_mut(), model_headers)?;
 
-    let (connection, _) = timeout(RESPONSES_WEBSOCKET_CONNECT_TIMEOUT, connect_async(request))
-        .await
-        .map_err(|_| {
-            PureError::transient_model_transport(
-                "Responses WebSocket handshake timed out after 15 seconds",
-            )
-        })?
-        .map_err(handshake_error)?;
+    let (connection, _) = timeout(
+        RESPONSES_WEBSOCKET_CONNECT_TIMEOUT,
+        dialer::connect(request, &url),
+    )
+    .await
+    .map_err(|_| handshake_timeout_error())?
+    .map_err(handshake_error)?;
     Ok(ResponsesWebSocketConnection::new(connection))
 }
 

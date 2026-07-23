@@ -7,6 +7,7 @@ use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use super::super::redact_secret_like_values;
 
 const CONNECTION_LIMIT_CODE: &str = "websocket_connection_limit_reached";
+const HANDSHAKE_TIMEOUT_MESSAGE: &str = "Responses WebSocket handshake timed out after 15 seconds; check WebSocket network access or switch this provider instance to HTTP explicitly in Studio settings";
 
 #[derive(Debug, Deserialize)]
 struct WebSocketErrorDetail {
@@ -63,6 +64,10 @@ pub(super) fn handshake_error(error: TungsteniteError) -> PureError {
         | TungsteniteError::WriteBufferFull(_) => PureError::transient_model_transport(detail),
         TungsteniteError::Http(_) => unreachable!("HTTP handshake error handled above"),
     }
+}
+
+pub(super) fn handshake_timeout_error() -> PureError {
+    PureError::transient_model_transport(HANDSHAKE_TIMEOUT_MESSAGE)
 }
 
 pub(super) fn connection_error(detail: impl AsRef<str>) -> PureError {
@@ -282,6 +287,17 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::*;
+
+    #[test]
+    fn handshake_timeout_is_transient_and_suggests_http_mode() {
+        let error = handshake_timeout_error();
+
+        assert!(error.is_transient_model_transport());
+        assert_eq!(
+            error.to_string(),
+            format!("transient model transport error: {HANDSHAKE_TIMEOUT_MESSAGE}")
+        );
+    }
 
     #[test]
     fn classifies_connection_limit_and_retry_after_as_transient() {
