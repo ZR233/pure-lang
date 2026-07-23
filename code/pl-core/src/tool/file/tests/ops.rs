@@ -1,6 +1,16 @@
 use super::*;
 use pretty_assertions::assert_eq;
 
+#[cfg(unix)]
+fn create_directory_symlink(target: &Path, link: &Path) -> std::io::Result<()> {
+    std::os::unix::fs::symlink(target, link)
+}
+
+#[cfg(windows)]
+fn create_directory_symlink(target: &Path, link: &Path) -> std::io::Result<()> {
+    std::os::windows::fs::symlink_dir(target, link)
+}
+
 #[tokio::test]
 async fn write_file_waits_for_workspace_write_lock() {
     let root = unique_temp_dir("write-lock-tool");
@@ -458,4 +468,50 @@ async fn search_files_file_pattern_filters_paths() {
     assert_eq!(value["count"], serde_json::json!(1));
     assert_eq!(value["files"][0]["path"], serde_json::json!("src/lib.rs"));
     let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn list_and_search_skip_symbolic_link_directories() {
+    let root = unique_temp_dir("skip-symbolic-link");
+    let outside = unique_temp_dir("symbolic-link-target");
+    tokio::fs::create_dir_all(&root).await.unwrap();
+    tokio::fs::create_dir_all(&outside).await.unwrap();
+    tokio::fs::write(root.join("visible.txt"), "needle\n")
+        .await
+        .unwrap();
+    tokio::fs::write(outside.join("hidden.txt"), "needle\n")
+        .await
+        .unwrap();
+    create_directory_symlink(&outside, &root.join("linked")).unwrap();
+
+    let listed = list_files_tool()
+        .execute(
+            input(serde_json::json!({
+                "glob": "**/*.txt",
+                "includeDirs": true,
+                "limit": 10,
+            })),
+            context(&root).await,
+        )
+        .await
+        .expect("list should skip symbolic link directories");
+    let searched = search_files_tool()
+        .execute(
+            input(serde_json::json!({
+                "query": "needle",
+                "literal": true,
+                "limit": 10,
+            })),
+            context(&root).await,
+        )
+        .await
+        .expect("search should skip symbolic link directories");
+    let listed: serde_json::Value = serde_json::from_str(&listed.description).unwrap();
+    let searched: serde_json::Value = serde_json::from_str(&searched.description).unwrap();
+
+    assert_eq!(listed["files"], serde_json::json!(["visible.txt"]));
+    assert_eq!(searched["count"], 1);
+    assert_eq!(searched["files"][0]["path"], "visible.txt");
+    let _ = tokio::fs::remove_dir_all(root).await;
+    let _ = tokio::fs::remove_dir_all(outside).await;
 }
