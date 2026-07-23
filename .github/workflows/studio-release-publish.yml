@@ -19,7 +19,7 @@ jobs:
     name: Resolve immutable Release source
     runs-on: windows-latest
     permissions:
-      contents: read
+      contents: write
     outputs:
       draft: ${{ steps.release.outputs.draft }}
       releaseId: ${{ steps.release.outputs.releaseId }}
@@ -70,9 +70,11 @@ jobs:
           }
           $version = $Matches['version']
           $tag = "v$version"
-          if ($release.html_url -cne "https://github.com/$env:GITHUB_REPOSITORY/releases/tag/$tag") {
-            throw "Release $env:RELEASE_ID has an unexpected public URL"
-          }
+          . (Join-Path $env:GITHUB_WORKSPACE '.github/scripts/studio-release-assets.ps1')
+          Assert-StudioReleasePageUrl `
+            -Release $release `
+            -Repository $env:GITHUB_REPOSITORY `
+            -Tag $tag
 
           git fetch --force origin `
             'refs/heads/main:refs/remotes/origin/main' `
@@ -112,7 +114,6 @@ jobs:
             throw "Tag $tag does not contain the matching Release Please manifest version"
           }
 
-          . (Join-Path $env:GITHUB_WORKSPACE '.github/scripts/studio-release-assets.ps1')
           $expectedNames = @(Get-StudioReleaseAssetNames -Version $version)
           Assert-StudioReleaseRemoteAssets `
             -Release $release `
