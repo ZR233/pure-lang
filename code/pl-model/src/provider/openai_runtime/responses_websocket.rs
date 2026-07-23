@@ -23,8 +23,8 @@ use crate::transport_session::{ResponsesWebSocketConnection, ResponsesWebSocketS
 mod error;
 
 use error::{
-    close_error, connection_error, continuation_id_invalid, handshake_error, protocol_error,
-    response_terminal_error, server_error,
+    close_error, connection_error, continuation_id_invalid, handshake_error,
+    handshake_timeout_error, protocol_error, response_terminal_error, server_error,
 };
 
 pub(super) async fn stream_responses(
@@ -168,11 +168,7 @@ async fn connect(
 
     let (connection, _) = timeout(RESPONSES_WEBSOCKET_CONNECT_TIMEOUT, connect_async(request))
         .await
-        .map_err(|_| {
-            PureError::transient_model_transport(
-                "Responses WebSocket handshake timed out after 15 seconds",
-            )
-        })?
+        .map_err(|_| handshake_timeout_error())?
         .map_err(handshake_error)?;
     Ok(ResponsesWebSocketConnection::new(connection))
 }

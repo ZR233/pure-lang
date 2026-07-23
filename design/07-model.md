@@ -110,6 +110,8 @@ catalog 返回的选项。相同 preset 可以创建多个实例，每个实例�
 
 Responses WebSocket 使用 `/responses` 握手和 `response.create` 帧，并强制发送 `store: false`；continuation 只依赖当前物理连接，不能把响应持久化到供应商侧。物理连接属于 `AgentSession` 的运行期 transport session：同一会话跨 turn 复用，不同会话绝不共享，持久化恢复后重新建立。HTTP 模式和连接重建都不能偷偷改变用户选择；握手或流错误按所选模式直接报告。`previous_response_id` continuation 只在 WebSocket 模式启用，因为该状态与物理连接绑定；HTTP/SSE 始终发送完整 canonical history，不依赖连接级 continuation。
 
+WebSocket 握手超时必须保留 transient 分类，同时给出可操作诊断：检查 WebSocket 网络可达性，或在 Studio Provider 设置中显式切换为 HTTP。运行时不得因此自动回退连接模式。
+
 effort 等可调参数的 wire 写入由通用透传机制驱动，协议层不再为每供应商硬编码 reasoning/thinking 映射。`build_request` 接收当前 `ModelInfo`，先序列化强类型核心字段（model、messages、stream、tools 等）为 JSON 对象，再依次注入：base body（`ModelRequestProfile.body`，如 DeepSeek 固定的 `thinking.type = enabled`），以及 parameter wire（用户选中的候选值按模型 `parameters` 声明写入或移除字段，见 7.8）。覆盖优先级为 parameter wire > base body > 协议默认字段。
 
 OpenAI Responses 的 `reasoning.summary` 仍按 Codex wire 语义发送（`Auto` 和兼容层的 `Enabled` 都发送 `auto`，`Disabled` 不发送 summary 字段），由 `ReasoningConfig.summary` 独立驱动，不进入 parameter wire。模型返回的 `reasoning_content` 进入 canonical reasoning event；历史回放时仍通过 assistant message 的 `reasoning_content` 字段写回 Chat Completions。
