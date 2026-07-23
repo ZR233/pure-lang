@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 use include_dir::Dir;
 use pl_protocol::Result;
 
+use crate::path_safety::remove_dir_all_no_follow;
+
 use super::SYSTEM_MARKER_FILE_NAME;
 use super::util::expand_home;
 use crate::config::SkillsConfig;
@@ -32,8 +34,18 @@ fn install_system_skills_to_dir(system_dir: &Path) -> Result<()> {
         return Ok(());
     }
 
-    if system_dir.exists() {
-        fs::remove_dir_all(system_dir)?;
+    match fs::symlink_metadata(system_dir) {
+        Ok(_) => {
+            let parent = system_dir.parent().ok_or_else(|| {
+                pl_protocol::PureError::ConfigError(
+                    "system skills directory has no parent".to_string(),
+                )
+            })?;
+            remove_dir_all_no_follow(parent, system_dir)
+                .map_err(|error| pl_protocol::PureError::ConfigError(error.to_string()))?;
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
     }
     write_embedded_dir(&SYSTEM_SKILLS_DIR, system_dir)?;
     fs::write(marker_path, format!("{expected}\n"))?;

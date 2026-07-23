@@ -3,6 +3,9 @@ use std::path::{Path, PathBuf};
 
 use pl_protocol::PureError;
 
+use crate::path_safety::{
+    is_lexically_within, remove_dir_all_no_follow, validate_existing_path, validate_path_for_write,
+};
 use crate::skill::{
     SkillCatalog, SkillMetadata, SkillSourceKind, bump_project_patch, mark_project_skill_created,
     project_skill_dir_for_create, support_file_path, validate_skill_document,
@@ -33,8 +36,20 @@ pub(super) fn create_skill(
     let category = input.category.as_deref().or(metadata.category.as_deref());
     let skill_dir = project_skill_dir_for_create(&catalog.project_dir, &metadata.name, category)
         .map_err(|error| tool_error(tool, error))?;
-    ensure_project_child(&catalog.project_dir, &skill_dir, tool)?;
-    if skill_dir.join("SKILL.md").exists() {
+    ensure_project_path(
+        &catalog.project_dir,
+        &skill_dir,
+        ProjectPathRequirement::AllowMissing,
+        tool,
+    )?;
+    let skill_file = skill_dir.join("SKILL.md");
+    ensure_project_path(
+        &catalog.project_dir,
+        &skill_file,
+        ProjectPathRequirement::AllowMissing,
+        tool,
+    )?;
+    if skill_file.exists() {
         return Err(tool_error(
             tool,
             format!(
@@ -45,9 +60,10 @@ pub(super) fn create_skill(
     }
     fs::create_dir_all(&skill_dir)
         .map_err(|error| tool_error(tool, format!("failed to create skill directory: {error}")))?;
-    fs::write(skill_dir.join("SKILL.md"), content)
+    fs::write(skill_file, content)
         .map_err(|error| tool_error(tool, format!("failed to write SKILL.md: {error}")))?;
-    mark_project_skill_created(&skill_dir).map_err(|error| tool_error(tool, error))?;
+    mark_project_skill_created(&catalog.project_dir, &skill_dir)
+        .map_err(|error| tool_error(tool, error))?;
     json_output(SkillPathOutput {
         success: true,
         action: "create",
@@ -65,10 +81,17 @@ pub(super) fn edit_skill(
     let content = required(input.content, tool, "content")?;
     let metadata = validate_skill_document(&content, Some(&input.name))
         .map_err(|error| tool_error(tool, error))?;
-    ensure_project_child(&catalog.project_dir, &skill.path, tool)?;
-    fs::write(skill.path.join("SKILL.md"), content)
+    let skill_file = skill.path.join("SKILL.md");
+    ensure_project_path(
+        &catalog.project_dir,
+        &skill_file,
+        ProjectPathRequirement::MustExist,
+        tool,
+    )?;
+    fs::write(skill_file, content)
         .map_err(|error| tool_error(tool, format!("failed to write SKILL.md: {error}")))?;
-    bump_project_patch(&skill.path).map_err(|error| tool_error(tool, error))?;
+    bump_project_patch(&catalog.project_dir, &skill.path)
+        .map_err(|error| tool_error(tool, error))?;
     json_output(SkillPathOutput {
         success: true,
         action: "edit",
@@ -83,12 +106,24 @@ pub(super) fn patch_skill(
     input: SkillManageInput,
 ) -> Result<ToolOutput, PureError> {
     let skill = writable_project_skill(tool, catalog, &input.name)?;
+    ensure_project_path(
+        &catalog.project_dir,
+        &skill.path,
+        ProjectPathRequirement::MustExist,
+        tool,
+    )?;
     let old_string = required(input.old_string, tool, "oldString")?;
     if old_string.is_empty() {
         return Err(tool_error(tool, "oldString must not be empty"));
     }
     let new_string = required(input.new_string, tool, "newString")?;
     let path = skill.path.join("SKILL.md");
+    ensure_project_path(
+        &catalog.project_dir,
+        &path,
+        ProjectPathRequirement::MustExist,
+        tool,
+    )?;
     let content = fs::read_to_string(&path)
         .map_err(|error| tool_error(tool, format!("failed to read SKILL.md: {error}")))?;
     let (needle, matches) = patch_needle(&content, &old_string).ok_or_else(|| {
@@ -114,7 +149,8 @@ pub(super) fn patch_skill(
         .map_err(|error| tool_error(tool, error))?;
     fs::write(&path, updated)
         .map_err(|error| tool_error(tool, format!("failed to write SKILL.md: {error}")))?;
-    bump_project_patch(&skill.path).map_err(|error| tool_error(tool, error))?;
+    bump_project_patch(&catalog.project_dir, &skill.path)
+        .map_err(|error| tool_error(tool, error))?;
     json_output(SkillPatchOutput {
         success: true,
         action: "patch",
@@ -144,8 +180,13 @@ pub(super) fn delete_skill(
     input: SkillManageInput,
 ) -> Result<ToolOutput, PureError> {
     let skill = writable_project_skill(tool, catalog, &input.name)?;
-    ensure_project_child(&catalog.project_dir, &skill.path, tool)?;
-    fs::remove_dir_all(&skill.path)
+    ensure_project_path(
+        &catalog.project_dir,
+        &skill.path,
+        ProjectPathRequirement::MustExist,
+        tool,
+    )?;
+    remove_dir_all_no_follow(&catalog.project_dir, &skill.path)
         .map_err(|error| tool_error(tool, format!("failed to delete skill: {error}")))?;
     json_output(SkillDeleteOutput {
         success: true,
@@ -165,7 +206,12 @@ pub(super) fn write_support_file(
     let file_content = required(input.file_content, tool, "fileContent")?;
     let relative = support_file_path(&file_path).map_err(|error| tool_error(tool, error))?;
     let path = skill.path.join(relative);
-    ensure_project_child(&catalog.project_dir, &path, tool)?;
+    ensure_project_path(
+        &catalog.project_dir,
+        &path,
+        ProjectPathRequirement::AllowMissing,
+        tool,
+    )?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| {
             tool_error(
@@ -176,7 +222,8 @@ pub(super) fn write_support_file(
     }
     fs::write(&path, file_content)
         .map_err(|error| tool_error(tool, format!("failed to write support file: {error}")))?;
-    bump_project_patch(&skill.path).map_err(|error| tool_error(tool, error))?;
+    bump_project_patch(&catalog.project_dir, &skill.path)
+        .map_err(|error| tool_error(tool, error))?;
     json_output(SkillFileOutput {
         success: true,
         action: "writeFile",
@@ -194,7 +241,12 @@ pub(super) fn remove_support_file(
     let file_path = required(input.file_path, tool, "filePath")?;
     let relative = support_file_path(&file_path).map_err(|error| tool_error(tool, error))?;
     let path = skill.path.join(relative);
-    ensure_project_child(&catalog.project_dir, &path, tool)?;
+    ensure_project_path(
+        &catalog.project_dir,
+        &path,
+        ProjectPathRequirement::MustExist,
+        tool,
+    )?;
     if !path.is_file() {
         return Err(tool_error(
             tool,
@@ -203,7 +255,8 @@ pub(super) fn remove_support_file(
     }
     fs::remove_file(&path)
         .map_err(|error| tool_error(tool, format!("failed to remove support file: {error}")))?;
-    bump_project_patch(&skill.path).map_err(|error| tool_error(tool, error))?;
+    bump_project_patch(&catalog.project_dir, &skill.path)
+        .map_err(|error| tool_error(tool, error))?;
     json_output(SkillFileOutput {
         success: true,
         action: "removeFile",
@@ -237,17 +290,58 @@ pub(super) fn writable_project_skill<'a>(
     Err(tool_error(tool, format!("project skill not found: {name}")))
 }
 
-fn ensure_project_child(project_dir: &Path, path: &Path, tool: &str) -> Result<(), PureError> {
+#[derive(Debug, Clone, Copy)]
+enum ProjectPathRequirement {
+    MustExist,
+    AllowMissing,
+}
+
+fn ensure_project_path(
+    project_dir: &Path,
+    path: &Path,
+    requirement: ProjectPathRequirement,
+    tool: &str,
+) -> Result<(), PureError> {
     let absolute_project = absolute_path(project_dir);
     let absolute_path = absolute_path(path);
-    if absolute_path.starts_with(&absolute_project) {
-        Ok(())
-    } else {
-        Err(tool_error(
+    if !is_lexically_within(&absolute_project, &absolute_path) {
+        return Err(tool_error(
             tool,
             format!("path escapes project skills directory: {}", path.display()),
-        ))
+        ));
     }
+    match std::fs::symlink_metadata(&absolute_project) {
+        Ok(metadata) if crate::path_safety::is_link_or_reparse(&metadata) => {
+            return Err(tool_error(
+                tool,
+                format!(
+                    "project skills directory is a symbolic link or Windows reparse point: {}",
+                    project_dir.display()
+                ),
+            ));
+        }
+        Ok(metadata) if !metadata.is_dir() => {
+            return Err(tool_error(
+                tool,
+                format!(
+                    "project skills path is not a directory: {}",
+                    project_dir.display()
+                ),
+            ));
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(tool_error(tool, error)),
+    }
+    let result = match requirement {
+        ProjectPathRequirement::MustExist => {
+            validate_existing_path(&absolute_project, &absolute_path)
+        }
+        ProjectPathRequirement::AllowMissing => {
+            validate_path_for_write(&absolute_project, &absolute_path)
+        }
+    };
+    result.map_err(|error| tool_error(tool, error))
 }
 
 fn absolute_path(path: &Path) -> PathBuf {

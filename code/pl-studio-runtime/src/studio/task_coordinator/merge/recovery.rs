@@ -390,6 +390,9 @@ async fn worktree_object_id(workspace: &Path, path: &str) -> Result<Option<Strin
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error).with_context(|| format!("inspect conflict path `{path}`")),
     };
+    if pl_core::path_safety::is_link_or_reparse(&metadata) {
+        bail!("conflict worktree path is a symbolic link or Windows reparse point: `{path}`");
+    }
     if metadata.is_dir() {
         return Ok(None);
     }

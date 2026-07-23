@@ -9,6 +9,7 @@ mod interaction;
 pub mod mcp;
 mod message;
 mod model_config;
+pub mod path_safety;
 mod permission;
 mod process;
 mod provider_error;

@@ -124,6 +124,8 @@ released = git worktree remove + 删除分支 + 清空 durable lifecycle resourc
   与 reparse ancestor，并证明 canonical leaf 严格位于 canonical `.pure/worktrees` root。
   `git worktree remove` 返回后、任何 fallback 文件系统删除之前必须再次证明，覆盖 Git
   调用期间祖先被替换为链接的竞态。
+  上述检查与文件工具共享 `pl-core::path_safety`；fallback 递归删除不跟随 worktree
+  子树里的链接，只解除链接入口并保留目标。
   Git 子进程禁用交互、设置有界超时并在超时后终止。
 
 subagent turn（`active_subagent.is_some()`）不再 enable；其 `workspace_root` 已被

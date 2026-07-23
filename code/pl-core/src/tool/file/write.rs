@@ -7,6 +7,7 @@ use super::input::{
     CopyMoveInput, DeleteMode, DeletePathInput, PathCollision, PathInput, WriteFileInput,
     WriteMode, copy_move_schema, path_schema,
 };
+use crate::path_safety::remove_dir_all_no_follow_async;
 use crate::tool::{BoxFuture, Tool, ToolContext, ToolInput, ToolOutput};
 
 #[derive(Debug)]
@@ -56,7 +57,6 @@ impl Tool for WriteFileTool {
             let input: WriteFileInput = parse_input(input.arguments, self.name())?;
             let paths = workspace(&context).await?;
             let path = paths.resolve_for_write(&input.path).await?;
-            paths.reject_symlink_write(&path).await?;
             if let Some(parent) = path.parent() {
                 tokio::fs::create_dir_all(parent).await?;
             }
@@ -115,7 +115,6 @@ impl Tool for CreateDirectoryTool {
             let input: PathInput = parse_input(input.arguments, self.name())?;
             let paths = workspace(&context).await?;
             let path = paths.resolve_for_write(&input.path).await?;
-            paths.reject_symlink_write(&path).await?;
             tokio::fs::create_dir_all(&path).await?;
             Ok(text_output(format!(
                 "Created directory {}",
@@ -159,7 +158,6 @@ impl Tool for DeletePathTool {
             let input: DeletePathInput = parse_input(input.arguments, self.name())?;
             let paths = workspace(&context).await?;
             let path = paths.resolve_existing(&input.path).await?;
-            paths.reject_symlink_write(&path).await?;
             let metadata = tokio::fs::metadata(&path).await?;
             match (metadata.is_dir(), input.delete_mode()) {
                 (false, DeleteMode::File) => tokio::fs::remove_file(&path).await?,
@@ -177,7 +175,9 @@ impl Tool for DeletePathTool {
                 }
                 (true, DeleteMode::EmptyDirectory) => tokio::fs::remove_dir(&path).await?,
                 (true, DeleteMode::RecursiveDirectory) => {
-                    tokio::fs::remove_dir_all(&path).await?;
+                    remove_dir_all_no_follow_async(paths.root(), &path)
+                        .await
+                        .map_err(|error| tool_error(self.name(), error))?;
                 }
             }
             sync_lsp_deleted(&context, &path).await;
@@ -213,7 +213,6 @@ impl Tool for CopyPathTool {
             let paths = workspace(&context).await?;
             let from = paths.resolve_existing(&input.from).await?;
             let to = paths.resolve_for_write(&input.to).await?;
-            paths.reject_symlink_write(&to).await?;
             ensure_overwrite(
                 &to,
                 input.collision() == PathCollision::Overwrite,
@@ -258,8 +257,6 @@ impl Tool for MovePathTool {
             let paths = workspace(&context).await?;
             let from = paths.resolve_existing(&input.from).await?;
             let to = paths.resolve_for_write(&input.to).await?;
-            paths.reject_symlink_write(&from).await?;
-            paths.reject_symlink_write(&to).await?;
             ensure_overwrite(
                 &to,
                 input.collision() == PathCollision::Overwrite,

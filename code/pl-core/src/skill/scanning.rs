@@ -3,6 +3,8 @@ use std::path::{Component, Path, PathBuf};
 
 use pl_protocol::{PureError, Result};
 
+use crate::path_safety::{metadata_if_real, real_directory_entries, validate_existing_path};
+
 use super::util::category_path;
 use super::{
     ALLOWED_SUPPORT_DIRS, SKILL_FILE_NAME, SkillFile, SkillFrontmatter, SkillMetadata,
@@ -13,7 +15,12 @@ pub fn list_support_files(skill_dir: &Path) -> Result<Vec<SkillFile>> {
     let mut files = Vec::new();
     for dir in ALLOWED_SUPPORT_DIRS {
         let root = skill_dir.join(dir);
-        if !root.exists() {
+        let Some(metadata) =
+            metadata_if_real(&root).map_err(|error| PureError::ConfigError(error.to_string()))?
+        else {
+            continue;
+        };
+        if !metadata.is_dir() {
             continue;
         }
         collect_support_files(skill_dir, &root, &mut files)?;
@@ -37,6 +44,7 @@ pub fn read_skill_file(skill: &SkillMetadata, file_path: Option<&str>) -> Result
         }
         SkillFileSelection::Main => skill.path.join(SKILL_FILE_NAME),
     };
+    ensure_real_skill_path(&skill.path, &path)?;
     let content = fs::read_to_string(&path).map_err(|error| {
         let display_path = path.display();
         PureError::ToolExecutionFailed {
@@ -176,6 +184,13 @@ pub(super) fn parse_frontmatter(content: &str) -> Result<SkillFrontmatter> {
 
 pub(super) fn find_skill_files(root: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
+    if !metadata_if_real(root)
+        .ok()
+        .flatten()
+        .is_some_and(|metadata| metadata.is_dir())
+    {
+        return files;
+    }
     find_skill_files_inner(root, 0, &mut files);
     files
 }
@@ -184,16 +199,23 @@ fn find_skill_files_inner(dir: &Path, depth: usize, files: &mut Vec<PathBuf>) {
     if depth > super::MAX_SKILL_SCAN_DEPTH {
         return;
     }
-    if dir.join(SKILL_FILE_NAME).is_file() {
-        files.push(dir.join(SKILL_FILE_NAME));
+    let skill_file = dir.join(SKILL_FILE_NAME);
+    if metadata_if_real(&skill_file)
+        .ok()
+        .flatten()
+        .is_some_and(|metadata| metadata.is_file())
+    {
+        files.push(skill_file);
         return;
     }
-    let Ok(entries) = fs::read_dir(dir) else {
+    let Ok(entries) = real_directory_entries(dir) else {
         return;
     };
-    for entry in entries.filter_map(std::result::Result::ok) {
-        let path = entry.path();
-        if !path.is_dir() || should_skip_dir(&path) {
+    for path in entries {
+        let Some(metadata) = metadata_if_real(&path).ok().flatten() else {
+            continue;
+        };
+        if !metadata.is_dir() || should_skip_dir(&path) {
             continue;
         }
         find_skill_files_inner(&path, depth + 1, files);
@@ -242,29 +264,27 @@ fn skill_core_error(error: pl_skill_core::SkillCoreError) -> PureError {
 }
 
 fn collect_support_files(skill_dir: &Path, dir: &Path, files: &mut Vec<SkillFile>) -> Result<()> {
-    let entries = fs::read_dir(dir).map_err(|error| {
+    let entries = real_directory_entries(dir).map_err(|error| {
         PureError::ConfigError(format!(
             "failed to read support files in {}: {error}",
             dir.display()
         ))
     })?;
-    for entry in entries.filter_map(std::result::Result::ok) {
-        let path = entry.path();
-        if path.is_dir() {
+    for path in entries {
+        let Some(metadata) =
+            metadata_if_real(&path).map_err(|error| PureError::ConfigError(error.to_string()))?
+        else {
+            continue;
+        };
+        if metadata.is_dir() {
             collect_support_files(skill_dir, &path, files)?;
             continue;
         }
-        if !path.is_file() {
+        if !metadata.is_file() {
             continue;
         }
         let relative = path.strip_prefix(skill_dir).map_err(|error| {
             PureError::ConfigError(format!("failed to resolve support file path: {error}"))
-        })?;
-        let metadata = path.metadata().map_err(|error| {
-            PureError::ConfigError(format!(
-                "failed to read support file metadata {}: {error}",
-                path.display()
-            ))
         })?;
         files.push(SkillFile {
             path: relative.to_string_lossy().replace('\\', "/"),
@@ -272,4 +292,29 @@ fn collect_support_files(skill_dir: &Path, dir: &Path, files: &mut Vec<SkillFile
         });
     }
     Ok(())
+}
+
+fn ensure_real_skill_path(skill_dir: &Path, path: &Path) -> Result<()> {
+    let root_metadata = metadata_if_real(skill_dir)
+        .map_err(|error| PureError::ToolExecutionFailed {
+            tool: "skill_view".to_string(),
+            error: error.to_string(),
+        })?
+        .ok_or_else(|| PureError::ToolExecutionFailed {
+            tool: "skill_view".to_string(),
+            error: format!(
+                "skill directory is a symbolic link or Windows reparse point: {}",
+                skill_dir.display()
+            ),
+        })?;
+    if !root_metadata.is_dir() {
+        return Err(PureError::ToolExecutionFailed {
+            tool: "skill_view".to_string(),
+            error: format!("skill path is not a directory: {}", skill_dir.display()),
+        });
+    }
+    validate_existing_path(skill_dir, path).map_err(|error| PureError::ToolExecutionFailed {
+        tool: "skill_view".to_string(),
+        error: error.to_string(),
+    })
 }

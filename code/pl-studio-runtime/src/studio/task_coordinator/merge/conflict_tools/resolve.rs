@@ -1,6 +1,7 @@
-use std::path::{Component, Path};
+use std::path::Path;
 
 use anyhow::{Context, Result, bail};
+use pl_core::path_safety::validate_path_for_write_async;
 
 use super::super::git::run_git;
 use super::ConflictResolutionChoice;
@@ -39,7 +40,7 @@ impl TaskCoordinator {
             bail!("binary and delete/rename conflicts require ours, theirs, or delete");
         }
         let workspace = Path::new(&scope.run.workspace_root);
-        reject_symlink_ancestors(workspace, path).await?;
+        validate_real_path_ancestors(workspace, path).await?;
         match &choice {
             ConflictResolutionChoice::Patch(patch) => {
                 validate_exact_patch(patch, path)?;
@@ -163,25 +164,9 @@ pub(super) async fn reject_conflict_markers(workspace: &Path, path: &str) -> Res
     Ok(())
 }
 
-async fn reject_symlink_ancestors(workspace: &Path, path: &str) -> Result<()> {
+async fn validate_real_path_ancestors(workspace: &Path, path: &str) -> Result<()> {
     validate_conflict_path(path)?;
-    let mut current = workspace.to_path_buf();
-    for component in Path::new(path).components() {
-        let Component::Normal(part) = component else {
-            bail!("conflict path contains an invalid component");
-        };
-        current.push(part);
-        match tokio::fs::symlink_metadata(&current).await {
-            Ok(metadata) if metadata.file_type().is_symlink() => {
-                bail!(
-                    "conflict path traverses symbolic link `{}`",
-                    current.display()
-                )
-            }
-            Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
-            Err(error) => return Err(error).context("failed to inspect conflict path"),
-        }
-    }
-    Ok(())
+    validate_path_for_write_async(workspace, &workspace.join(path))
+        .await
+        .context("conflict path traverses a symbolic link or Windows reparse point")
 }

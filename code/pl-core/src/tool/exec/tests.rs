@@ -46,10 +46,51 @@ fn shared_tools() -> (TestExecTool, TestWriteStdinTool) {
     command_tool_pair(test_backend())
 }
 
+#[cfg(unix)]
+fn create_directory_link(target: &std::path::Path, link: &std::path::Path) {
+    std::os::unix::fs::symlink(target, link).unwrap();
+}
+
+#[cfg(windows)]
+fn create_directory_link(target: &std::path::Path, link: &std::path::Path) {
+    std::os::windows::fs::symlink_dir(target, link).unwrap();
+}
+
+#[cfg(unix)]
+fn remove_directory_link(link: &std::path::Path) {
+    std::fs::remove_file(link).unwrap();
+}
+
+#[cfg(windows)]
+fn remove_directory_link(link: &std::path::Path) {
+    std::fs::remove_dir(link).unwrap();
+}
+
 #[derive(Debug)]
 struct HostedContractBackend {
     local: LocalCommandBackend,
     publish_count: AtomicUsize,
+}
+
+#[tokio::test]
+async fn local_backend_rejects_linked_working_directory() {
+    let root = test_root();
+    let outside = test_root();
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    create_directory_link(&outside, &root.join("linked"));
+    let backend = LocalCommandBackend::new(root.clone());
+
+    let error = backend
+        .resolve_cwd(Some(std::path::Path::new("linked")), false)
+        .await
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("reparse point"), "{error}");
+    remove_directory_link(&root.join("linked"));
+    std::fs::remove_dir_all(root).unwrap();
+    std::fs::remove_dir_all(outside).unwrap();
 }
 
 impl CommandBackend for HostedContractBackend {

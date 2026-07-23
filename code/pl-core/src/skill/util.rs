@@ -3,6 +3,8 @@ use std::path::{Component, Path, PathBuf};
 
 use pl_protocol::{PureError, Result};
 
+use crate::path_safety::{metadata_if_real, validate_existing_path, validate_path_for_write};
+
 pub(super) fn safe_relative_path(path: &str) -> Result<PathBuf> {
     let mut result = PathBuf::new();
     for component in Path::new(path).components() {
@@ -94,12 +96,41 @@ pub(super) fn load_usage(skill_dir: &Path) -> Option<super::SkillUsage> {
         .and_then(|content| serde_json::from_str(&content).ok())
 }
 
-pub(super) fn save_usage(skill_dir: &Path, usage: &super::SkillUsage) -> Result<()> {
+pub(super) fn save_usage(
+    project_dir: &Path,
+    skill_dir: &Path,
+    usage: &super::SkillUsage,
+) -> Result<()> {
+    validate_usage_write(project_dir, skill_dir)?;
+    let usage_path = skill_dir.join(super::USAGE_FILE_NAME);
     std::fs::create_dir_all(skill_dir)?;
     let content = serde_json::to_string_pretty(usage).map_err(|error| {
         PureError::ConfigError(format!("failed to serialize skill usage: {error}"))
     })?;
-    std::fs::write(skill_dir.join(super::USAGE_FILE_NAME), content)?;
+    std::fs::write(usage_path, content)?;
+    Ok(())
+}
+
+pub(super) fn validate_usage_write(project_dir: &Path, skill_dir: &Path) -> Result<()> {
+    validate_existing_path(project_dir, skill_dir)
+        .map_err(|error| PureError::ConfigError(error.to_string()))?;
+    let metadata = metadata_if_real(skill_dir)
+        .map_err(|error| PureError::ConfigError(error.to_string()))?
+        .ok_or_else(|| {
+            PureError::ConfigError(format!(
+                "skill directory is a symbolic link or Windows reparse point: {}",
+                skill_dir.display()
+            ))
+        })?;
+    if !metadata.is_dir() {
+        return Err(PureError::ConfigError(format!(
+            "skill path is not a directory: {}",
+            skill_dir.display()
+        )));
+    }
+    let usage_path = skill_dir.join(super::USAGE_FILE_NAME);
+    validate_path_for_write(project_dir, &usage_path)
+        .map_err(|error| PureError::ConfigError(error.to_string()))?;
     Ok(())
 }
 

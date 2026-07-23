@@ -44,7 +44,9 @@ Chat Completions provider 如果没有 Responses 风格的 completed event，pro
 
 `list_files` 的 `glob` 既可以匹配 workspace-relative 路径，也可以匹配 `path` 参数之下的相对条目；`includeDirs=true` 时目录候选按带尾随 `/` 的形式参与匹配。`**/` 表示零层或多层目录，因此 `**/Cargo.toml` 必须同时匹配 workspace 根下和子目录下的 `Cargo.toml`。
 
-本地 `list_files` / `search_files` 递归遍历不得跟随符号链接或 Windows reparse point，也不把这些入口作为普通文件或目录返回。链接是 workspace 文件边界，不应让 Flutter plugin symlink、目录联接或不可访问的挂载目标使整次搜索失败；跳过链接之外的真实目录读取和元数据错误仍须显式失败。
+主机本地路径统一通过 `pl-core::path_safety` 在 `canonicalize` 前检查；canonical workspace root 是可信边界，根以下的 Unix symbolic link、Windows symlink、junction、mount point 和其他 reparse point 都是不可信路径入口。`stat_path`、`read_file`、写入、创建、patch、复制、移动、删除、LSP 文件参数与 `exec.cwd` 直接命中链接或经链接祖先访问时必须拒绝，即使目标仍在 workspace 内。`exec` 只约束 `cwd`，不分析命令正文。
+
+本地 `list_files` / `search_files` 递归遍历不得跟随链接，也不把链接入口作为普通文件或目录返回。链接不应让 Flutter plugin symlink 或不可访问的挂载目标使整次搜索失败；跳过链接之外的真实目录读取和元数据错误仍须显式失败。递归删除必须使用同一安全分类：目标及祖先为链接时拒绝，子树内链接只解除入口而不访问目标。
 
 MCP tools 由 `McpRuntimeHandle` 的 turn lease 注册。`McpRuntime<H>` 的泛型 worker 持有具体
 `McpRuntimeHost`，产品和工具只持有非泛型 handle；`McpTurnLease` 固定 generation、tool schema、
