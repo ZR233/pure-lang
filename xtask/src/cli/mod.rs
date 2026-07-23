@@ -1,4 +1,3 @@
-use crate::studio_version::StudioVersionBump;
 use anyhow::{Result, anyhow, bail};
 use std::collections::VecDeque;
 use std::ffi::OsString;
@@ -36,7 +35,6 @@ pub(crate) struct BuildGuiOptions {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ReleaseGuiOptions {
-    Prepare { bump: StudioVersionBump },
     Stage { version: String },
     Finalize { version: String },
     Verify { version: String },
@@ -107,7 +105,7 @@ pub(crate) fn help_text(topic: HelpTopic) -> &'static str {
             "Usage: cargo xtask build-gui [--demo] [--no-clean]\n\nOptions:\n  --demo      Build with PURE_STUDIO_DEMO=true.\n  --no-clean  Keep existing files in dist/pure-studio-flutter-release.\n  -h, --help  Print help."
         }
         HelpTopic::ReleaseGui => {
-            "Usage:\n  cargo xtask release-gui prepare --bump <patch|minor|major>\n  cargo xtask release-gui <stage|finalize|verify> --version <x.y.z>\n\nPrepare increments pubspec.yaml and prints typed JSON. Package versions must be stable SemVer and match pubspec.yaml. Signing uses the minisign executable and MINISIGN_SECRET_KEY_FILE for finalize."
+            "Usage:\n  cargo xtask release-gui <stage|finalize|verify> --version <x.y.z>\n\nPackage versions must be stable SemVer and match pubspec.yaml. Signing uses the minisign executable and MINISIGN_SECRET_KEY_FILE for finalize."
         }
         HelpTopic::BuildRustBridge => {
             "Usage: cargo xtask build-rust-bridge --workspace-root <path> --configuration <Debug|Profile|Release> --output-dir <path> [--target-dir <path>]\n\nOptions:\n  --workspace-root <path>              Pure-Lang workspace root.\n  --configuration <Debug|Profile|Release>\n  --output-dir <path>                  Directory that receives pl_studio_bridge.dll.\n  --target-dir <path>                  Optional Cargo target directory.\n  -h, --help                           Print help."
@@ -120,16 +118,6 @@ fn parse_release_gui(mut args: VecDeque<OsString>) -> Result<Command> {
         return Ok(Command::Help(HelpTopic::ReleaseGui));
     }
     let action = match args.pop_front().map(into_string).transpose()?.as_deref() {
-        Some("prepare") => {
-            let bump = parse_required_option(&mut args, "--bump")?;
-            let bump = match bump.as_str() {
-                "patch" => StudioVersionBump::Patch,
-                "minor" => StudioVersionBump::Minor,
-                "major" => StudioVersionBump::Major,
-                _ => bail!("release bump must be one of patch, minor, or major; got {bump}"),
-            };
-            ReleaseGuiOptions::Prepare { bump }
-        }
         Some("stage") => ReleaseGuiOptions::Stage {
             version: parse_required_option(&mut args, "--version")?,
         },
@@ -332,30 +320,17 @@ mod tests {
             })
         );
         assert_eq!(
-            parse_words(&["xtask", "release-gui", "prepare", "--bump", "minor",])?,
-            Command::ReleaseGui(ReleaseGuiOptions::Prepare {
-                bump: StudioVersionBump::Minor,
+            parse_words(&["xtask", "release-gui", "verify", "--version", "2.0.0",])?,
+            Command::ReleaseGui(ReleaseGuiOptions::Verify {
+                version: "2.0.0".to_string(),
             })
         );
         Ok(())
     }
 
     #[test]
-    fn rejects_invalid_release_prepare_options() {
-        assert!(parse_words(&["xtask", "release-gui", "prepare", "--bump", "feature"]).is_err());
-        assert!(parse_words(&["xtask", "release-gui", "prepare"]).is_err());
-        assert!(
-            parse_words(&[
-                "xtask",
-                "release-gui",
-                "prepare",
-                "--bump",
-                "patch",
-                "--version",
-                "1.2.3",
-            ])
-            .is_err()
-        );
+    fn rejects_removed_release_prepare_action() {
+        assert!(parse_words(&["xtask", "release-gui", "prepare", "--version", "1.2.3",]).is_err());
     }
 
     #[test]

@@ -80,7 +80,7 @@ pub(crate) fn run_gui(options: RunGuiOptions) -> Result<()> {
     let workspace_root = paths::workspace_root()?;
     let app_dir = paths::flutter_app_dir(&workspace_root);
     let target = DesktopTarget::current()?;
-    let app_version = studio_version::read(&app_dir)?.release;
+    let app_version = studio_version::read(&app_dir)?;
     let version_define = format!("--dart-define=PURE_STUDIO_VERSION={app_version}");
     print_context(&workspace_root, &app_dir);
 
@@ -132,7 +132,7 @@ fn build_gui_with_version(options: BuildGuiOptions, release_version: Option<&str
     let app_dir = paths::flutter_app_dir(&workspace_root);
     let dist_dir = paths::release_dist_dir(&workspace_root);
     let target = DesktopTarget::current()?;
-    let app_version = studio_version::read(&app_dir)?.release;
+    let app_version = studio_version::read(&app_dir)?;
     if release_version.is_some_and(|version| version != app_version.to_string()) {
         bail!("release version does not match pubspec.yaml version {app_version}");
     }

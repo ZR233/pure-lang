@@ -1,182 +1,175 @@
 name: Studio Release
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
-    inputs:
-      changeType:
-        description: Release change type (ignored for a major release)
-        required: true
-        default: fix
-        type: choice
-        options:
-          - fix
-          - feature
-      majorRelease:
-        description: Publish the next major version
-        required: false
-        default: false
-        type: boolean
 
 concurrency:
-  group: studio-stable-release-prepare
+  group: studio-release-please
   cancel-in-progress: false
 
-permissions:
-  actions: write
-  contents: write
+permissions: {}
 
 jobs:
-  prepare:
-    name: Prepare version commit
-    if: github.ref == 'refs/heads/main'
+  inspect:
+    name: Inspect active draft
     runs-on: windows-latest
+    permissions:
+      contents: read
+    outputs:
+      hasDraft: ${{ steps.draft.outputs.hasDraft }}
+      releaseId: ${{ steps.draft.outputs.releaseId }}
     steps:
-      - name: Check out main
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-
-      - name: Validate main and release lock
-        id: source
-        shell: pwsh
-        run: |
-          $head = (git rev-parse HEAD).Trim()
-          $mainRef = @(git ls-remote --heads origin 'refs/heads/main')
-          if ($mainRef.Count -ne 1) {
-            throw 'Remote main branch is missing or ambiguous'
-          }
-          $originMain = ($mainRef[0] -split '\s+')[0]
-          if ($head -ne $originMain) {
-            throw "Workflow source $head is not the current origin/main $originMain"
-          }
-
-          $active = @(git ls-remote --heads origin 'refs/heads/studio-release/active')
-          if ($LASTEXITCODE -ne 0) {
-            throw "Failed to inspect the Studio release lock (git exit $LASTEXITCODE)"
-          }
-          if ($active.Count -ne 0) {
-            throw 'A Studio release is already active. Re-run or finish the existing Studio Release Publish workflow.'
-          }
-          "baseSha=$head" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
-        with:
-          toolchain: 1.96.1
-
-      - name: Cache Rust build
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-
-      - name: Prepare next Studio version
-        id: version
-        shell: pwsh
-        env:
-          CHANGE_TYPE: ${{ inputs.changeType }}
-          MAJOR_RELEASE: ${{ inputs.majorRelease }}
-        run: |
-          if ($env:MAJOR_RELEASE -eq 'true') {
-            $bump = 'major'
-          } elseif ($env:CHANGE_TYPE -eq 'feature') {
-            $bump = 'minor'
-          } elseif ($env:CHANGE_TYPE -eq 'fix') {
-            $bump = 'patch'
-          } else {
-            throw "Unsupported change type: $env:CHANGE_TYPE"
-          }
-
-          $json = @(cargo xtask release-gui prepare --bump $bump) -join ''
-          if ($LASTEXITCODE -ne 0) {
-            throw "Failed to prepare the Studio version (cargo exit $LASTEXITCODE)"
-          }
-          $prepared = $json | ConvertFrom-Json
-          if ($prepared.version -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') {
-            throw "xtask returned an invalid release version: $($prepared.version)"
-          }
-          if ($prepared.pubspecVersion -ne "$($prepared.version)+$($prepared.buildNumber)") {
-            throw 'xtask returned inconsistent Studio version metadata'
-          }
-
-          $changed = @(git diff --name-only)
-          if ($changed.Count -ne 1 -or $changed[0] -ne 'code/pure-studio-flutter/pubspec.yaml') {
-            throw "Version preparation changed an unexpected file set: $($changed -join ', ')"
-          }
-          git diff --check
-          if ($LASTEXITCODE -ne 0) {
-            throw 'Prepared Studio version contains whitespace errors'
-          }
-
-          "bump=$bump" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "version=$($prepared.version)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "buildNumber=$($prepared.buildNumber)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "pubspecVersion=$($prepared.pubspecVersion)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-
-      - name: Validate release immutability
+      - name: Find resumable stable draft
+        id: draft
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
-          # Missing tags and releases are the expected pre-release state.
-          $PSNativeCommandUseErrorActionPreference = $false
-          $tagRef = @(git ls-remote --tags origin "refs/tags/v$env:RELEASE_VERSION")
+          if ($env:GITHUB_REF -cne 'refs/heads/main') {
+            throw "Studio Release must run from main, not $env:GITHUB_REF"
+          }
+          $releases = @(gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" | ConvertFrom-Json)
           if ($LASTEXITCODE -ne 0) {
-            throw "Failed to inspect tag v$env:RELEASE_VERSION (git exit $LASTEXITCODE)"
+            throw 'Failed to inspect existing GitHub Releases'
           }
-          if ($tagRef.Count -ne 0) {
-            throw "Tag v$env:RELEASE_VERSION already exists"
+          $drafts = @(
+            $releases | Where-Object {
+              $_.draft -and
+              -not $_.prerelease -and
+              $_.tag_name -match '^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$'
+            }
+          )
+          if ($drafts.Count -gt 1) {
+            throw "Multiple stable draft Releases require manual resolution: $($drafts.id -join ', ')"
           }
-          gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/v$env:RELEASE_VERSION" *> $null
-          $releaseStatus = $LASTEXITCODE
-          $global:LASTEXITCODE = 0
-          if ($releaseStatus -eq 0) {
-            throw "Release v$env:RELEASE_VERSION already exists"
-          }
-          if ($releaseStatus -ne 1) {
-            throw "Failed to inspect Release v$env:RELEASE_VERSION (gh exit $releaseStatus)"
-          }
-
-      - name: Commit and lock release source
-        id: commit
-        shell: pwsh
-        env:
-          RELEASE_VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -- code/pure-studio-flutter/pubspec.yaml
-          $staged = @(git diff --cached --name-only)
-          if ($staged.Count -ne 1 -or $staged[0] -ne 'code/pure-studio-flutter/pubspec.yaml') {
-            throw "Unexpected staged file set: $($staged -join ', ')"
-          }
-          git commit -m "chore(studio): prepare v$env:RELEASE_VERSION"
-          $releaseSha = (git rev-parse HEAD).Trim()
-          git push origin 'HEAD:refs/heads/studio-release/active'
-          "releaseSha=$releaseSha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-
-      - name: Dispatch signed release build
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-          BASE_SHA: ${{ steps.source.outputs.baseSha }}
-          RELEASE_SHA: ${{ steps.commit.outputs.releaseSha }}
-          RELEASE_VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          # A failed dispatch is handled below so the recovery branch can be preserved.
-          $PSNativeCommandUseErrorActionPreference = $false
-          gh workflow run studio-release-publish.yml `
-            --repo $env:GITHUB_REPOSITORY `
-            --ref studio-release/active `
-            -f "version=$env:RELEASE_VERSION" `
-            -f "baseSha=$env:BASE_SHA"
-          if ($LASTEXITCODE -eq 0) {
-            "Publisher dispatched for Pure Studio v$env:RELEASE_VERSION from $env:RELEASE_SHA." |
-              Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          if ($drafts.Count -eq 0) {
+            'hasDraft=false' | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
             exit 0
           }
 
-          @(
-            "Publisher dispatch failed for Pure Studio v$env:RELEASE_VERSION.",
-            "The protected source remains at studio-release/active ($env:RELEASE_SHA).",
-            "Re-run Studio Release Publish with version=$env:RELEASE_VERSION and baseSha=$env:BASE_SHA."
-          ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
-          throw "Failed to dispatch Studio Release Publish for v$env:RELEASE_VERSION; the active release branch was preserved for recovery"
+          $draft = $drafts[0]
+          if ($draft.url -cne "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/$($draft.id)") {
+            throw "Draft Release $($draft.id) belongs to an unexpected repository"
+          }
+          'hasDraft=true' | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "releaseId=$($draft.id)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+  release-please:
+    name: Update Release PR
+    needs: inspect
+    if: needs.inspect.outputs.hasDraft != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      releaseCreated: ${{ steps.release.outputs.release_created }}
+      releaseId: ${{ steps.release-id.outputs.releaseId }}
+    steps:
+      - name: Require Release Please token
+        shell: pwsh
+        env:
+          RELEASE_PLEASE_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:RELEASE_PLEASE_TOKEN)) {
+            throw 'RELEASE_PLEASE_TOKEN must be configured before Studio Release can run'
+          }
+
+      - name: Create or update Release PR
+        id: release
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          target-branch: main
+
+      - name: Resolve created draft Release ID
+        id: release-id
+        if: steps.release.outputs.release_created == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          RELEASE_SHA: ${{ steps.release.outputs.sha }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag_name }}
+          RELEASE_UPLOAD_URL: ${{ steps.release.outputs.upload_url }}
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          if ($env:RELEASE_VERSION -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') {
+            throw "Release Please returned invalid stable SemVer: $env:RELEASE_VERSION"
+          }
+          if ($env:RELEASE_TAG -cne "v$env:RELEASE_VERSION") {
+            throw "Release Please tag $env:RELEASE_TAG does not match version $env:RELEASE_VERSION"
+          }
+          if ($env:RELEASE_SHA -notmatch '^[0-9a-f]{40}$') {
+            throw "Release Please returned invalid commit SHA: $env:RELEASE_SHA"
+          }
+
+          $repository = [regex]::Escape($env:GITHUB_REPOSITORY)
+          $uploadPattern = "^https://uploads\.github\.com/repos/$repository/releases/(?<id>[1-9]\d*)/assets\{\?name,label\}$"
+          $match = [regex]::Match($env:RELEASE_UPLOAD_URL, $uploadPattern)
+          if (-not $match.Success) {
+            throw "Release Please returned an unexpected upload URL: $env:RELEASE_UPLOAD_URL"
+          }
+          $releaseId = $match.Groups['id'].Value
+          $release = gh api "repos/$env:GITHUB_REPOSITORY/releases/$releaseId" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to read Release $releaseId created by Release Please"
+          }
+          if (
+            [string]$release.id -cne $releaseId -or
+            $release.tag_name -cne $env:RELEASE_TAG -or
+            -not $release.draft -or
+            $release.prerelease
+          ) {
+            throw "Release Please created an unexpected Release state for $env:RELEASE_TAG"
+          }
+          "releaseId=$releaseId" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+  dispatch-existing:
+    name: Resume draft publisher
+    needs: inspect
+    if: needs.inspect.outputs.hasDraft == 'true'
+    runs-on: windows-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Dispatch existing draft
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ needs.inspect.outputs.releaseId }}
+        run: |
+          gh workflow run studio-release-publish.yml `
+            --repo $env:GITHUB_REPOSITORY `
+            --ref main `
+            -f "releaseId=$env:RELEASE_ID"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to dispatch Studio publisher for Release $env:RELEASE_ID"
+          }
+  dispatch-created:
+    name: Dispatch new publisher
+    needs: release-please
+    if: needs.release-please.outputs.releaseCreated == 'true'
+    runs-on: windows-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Dispatch created draft
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ needs.release-please.outputs.releaseId }}
+        run: |
+          if ($env:RELEASE_ID -notmatch '^[1-9]\d*$') {
+            throw "Release Please did not return a valid Release ID: $env:RELEASE_ID"
+          }
+          gh workflow run studio-release-publish.yml `
+            --repo $env:GITHUB_REPOSITORY `
+            --ref main `
+            -f "releaseId=$env:RELEASE_ID"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to dispatch Studio publisher for Release $env:RELEASE_ID"
+          }
