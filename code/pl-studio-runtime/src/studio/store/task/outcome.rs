@@ -8,6 +8,8 @@ use crate::studio::entities;
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 #[cfg(test)]
+use crate::studio::task_coordinator::CompletionContract;
+#[cfg(test)]
 use crate::studio::task_coordinator::UpdateAgentOutcome;
 use crate::studio::task_coordinator::{
     AgentOutcomeRecord, AgentOutcomeStatus, CreateAgentOutcome, TaskRunPhase,
@@ -32,6 +34,7 @@ impl StudioStore {
                 TaskRunPhase::Failed.as_str(),
                 TaskRunPhase::Cancelled.as_str(),
             ]))
+            .filter(entities::task_run::Column::StopRequested.eq(0))
             .order_by_desc(entities::task_run::Column::UpdatedAt)
             .order_by_desc(entities::task_run::Column::Id)
             .one(&tx)
@@ -61,6 +64,8 @@ impl StudioStore {
                 error: Set(None),
                 delivery_json: Set(None),
                 review_json: Set(None),
+                completion_contract_json: Set(None),
+                delivery_recovery_count: Set(0),
                 terminal_observed: Set(0),
                 created_at: Set(now),
                 updated_at: Set(now),
@@ -98,6 +103,17 @@ impl StudioStore {
         input: CreateAgentOutcome,
     ) -> Result<AgentOutcomeRecord> {
         let now = unix_seconds();
+        let completion_contract = input
+            .work_unit_id
+            .as_ref()
+            .filter(|_| input.role == "executor")
+            .map(|work_unit_id| {
+                serde_json::to_string(&CompletionContract::delivery_required(
+                    input.task_run_id.clone(),
+                    work_unit_id.clone(),
+                ))
+            })
+            .transpose()?;
         agent_outcome_record(
             entities::agent_outcome::ActiveModel {
                 id: Set(new_id("agent-outcome")),
@@ -114,6 +130,8 @@ impl StudioStore {
                 error: Set(None),
                 delivery_json: Set(None),
                 review_json: Set(None),
+                completion_contract_json: Set(completion_contract),
+                delivery_recovery_count: Set(0),
                 terminal_observed: Set(0),
                 created_at: Set(now),
                 updated_at: Set(now),
@@ -190,6 +208,11 @@ pub(super) fn agent_outcome_record(
             .review_json
             .map(|json| serde_json::from_str(&json))
             .transpose()?,
+        completion_contract: model
+            .completion_contract_json
+            .map(|json| serde_json::from_str(&json))
+            .transpose()?,
+        delivery_recovery_count: model.delivery_recovery_count.max(0) as u32,
         created_at: model.created_at,
         updated_at: model.updated_at,
     })

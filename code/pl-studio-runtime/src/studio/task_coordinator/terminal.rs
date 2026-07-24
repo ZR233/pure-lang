@@ -1,7 +1,7 @@
 use anyhow::Result;
 use pl_core::TurnOutcomeKind;
 
-use super::{AgentOutcomeStatus, TaskCoordinator};
+use super::{AgentOutcomeStatus, DeliveryRecoveryNeed, TaskCoordinator};
 
 /// Studio 任务层消费的 framework turn 终态事实。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,6 +33,31 @@ pub(crate) enum TerminalAgentStateRecording {
 }
 
 impl TaskCoordinator {
+    pub(crate) async fn inspect_delivery_recovery_need(
+        &self,
+        task_run_id: &str,
+        agent_id: &str,
+    ) -> Result<DeliveryRecoveryNeed> {
+        let outcome = self
+            .store
+            .list_agent_outcomes(task_run_id)
+            .await?
+            .into_iter()
+            .find(|outcome| outcome.agent_id == agent_id && outcome.role == "executor")
+            .ok_or_else(|| anyhow::anyhow!("executor outcome not found for delivery recovery"))?;
+        let work_unit_id = outcome
+            .work_unit_id
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("executor delivery recovery work unit is missing"))?;
+        let work_unit = self
+            .store
+            .read_work_unit(work_unit_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("executor delivery recovery work unit not found"))?;
+        super::git::inspect_executor_recovery(&work_unit.worktree_path, &work_unit.base_commit)
+            .await
+    }
+
     pub(crate) async fn record_terminal_agent_state(
         &self,
         session_id: &str,

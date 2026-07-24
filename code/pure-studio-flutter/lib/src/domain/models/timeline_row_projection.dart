@@ -128,18 +128,36 @@ List<TimelineRow> _timelineRowsForMessage(
 ) {
   final sortedParts = [...?parts]..sort(_compareParts);
   final rows = <TimelineRow>[];
-  final toolGroupsById = _toolGroupsForMessage(message, sortedParts);
-  final insertedToolGroups = <String>{};
+  final adjacentTools = <TimelinePart>[];
+
+  void flushToolGroup() {
+    if (adjacentTools.isEmpty) {
+      return;
+    }
+    final first = adjacentTools.first;
+    rows.add(
+      TimelineRow.toolGroup(
+        message: message,
+        group: TimelineToolGroup(
+          id: _adjacentToolGroupId(message, first),
+          sessionId: message.sessionId,
+          messageId: message.id,
+          turnId: _toolGroupTurnId(message, first),
+          items: adjacentTools
+              .map((part) => TimelineToolGroupItem(part: part))
+              .toList(growable: false),
+        ),
+      ),
+    );
+    adjacentTools.clear();
+  }
 
   for (final part in sortedParts) {
     if (message.role != 'user' && part.type == TimelinePartType.tool) {
-      final groupId = _toolGroupId(message, part);
-      final toolGroup = toolGroupsById[groupId];
-      if (toolGroup != null && insertedToolGroups.add(groupId)) {
-        rows.add(TimelineRow.toolGroup(message: message, group: toolGroup));
-      }
+      adjacentTools.add(part);
       continue;
     }
+    flushToolGroup();
     rows.add(
       TimelineRow.messagePart(
         id: '${message.id}:${part.id}',
@@ -153,42 +171,11 @@ List<TimelineRow> _timelineRowsForMessage(
       ),
     );
   }
+  flushToolGroup();
   return rows;
 }
 
-Map<String, TimelineToolGroup> _toolGroupsForMessage(
-  TimelineMessage message,
-  List<TimelinePart> sortedParts,
-) {
-  if (message.role == 'user') {
-    return const {};
-  }
-  final partsByGroupId = <String, List<TimelinePart>>{};
-  for (final part in sortedParts) {
-    if (part.type != TimelinePartType.tool) {
-      continue;
-    }
-    partsByGroupId.putIfAbsent(_toolGroupId(message, part), () => []).add(part);
-  }
-  return {
-    for (final entry in partsByGroupId.entries)
-      entry.key: TimelineToolGroup(
-        id: entry.key,
-        sessionId: message.sessionId,
-        messageId: message.id,
-        turnId: _toolGroupTurnId(message, entry.value.first),
-        items: entry.value
-            .map((part) => TimelineToolGroupItem(part: part))
-            .toList(growable: false),
-      ),
-  };
-}
-
-String _toolGroupId(TimelineMessage message, TimelinePart part) {
-  final activityGroupId = part.activityGroupId;
-  if (activityGroupId != null && activityGroupId.isNotEmpty) {
-    return activityGroupId;
-  }
+String _adjacentToolGroupId(TimelineMessage message, TimelinePart part) {
   return 'tool-group:${message.sessionId}:${message.id}:${part.id}';
 }
 

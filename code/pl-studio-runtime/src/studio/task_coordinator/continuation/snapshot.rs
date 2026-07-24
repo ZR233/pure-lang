@@ -2,8 +2,8 @@ use anyhow::Result;
 use serde::Serialize;
 
 use super::super::{
-    AgentOutcomeRecord, BranchLeaseRecord, MergeRecord, ReviewRoundRecord, TaskRunRecord,
-    WorkUnitRecord,
+    AgentOutcomeRecord, AgentOutcomeStatus, BranchLeaseRecord, MergeRecord, ReviewRoundRecord,
+    TaskRunRecord, WorkUnitRecord,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -26,10 +26,38 @@ pub(crate) enum TaskContinuationResolution {
 impl TaskContinuationSnapshot {
     pub(crate) fn render_prompt(&self) -> Result<String> {
         let snapshot = serde_json::to_string_pretty(self)?;
+        let waiting_delivery_agents = self
+            .agent_outcomes
+            .iter()
+            .filter(|outcome| {
+                outcome.role == "executor"
+                    && outcome.status == AgentOutcomeStatus::WaitingForDelivery
+                    && outcome.delivery.is_none()
+            })
+            .map(|outcome| outcome.agent_id.as_str())
+            .collect::<Vec<_>>();
+        let delivery_guidance = if waiting_delivery_agents.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "检测到 executor 已结束但尚未交付：{}。\n\
+                 coordinator 会向对应 agent 自动投递最多一次受控 recovery；不要再调用 \
+                 send_input、close_agent 或重复 wait_agent。合同终结后本 continuation 会再次收到 \
+                 durable 结果。\n",
+                waiting_delivery_agents.join(", ")
+            )
+        };
+        let stop_guidance = if self.run.stop_requested {
+            "用户已经请求停止本任务。不要继续分配、审查或合并新工作；等待现有 delivery \
+             合同终结后立即重试 task_stop。\n"
+        } else {
+            ""
+        };
         Ok(format!(
             "这是一次 Task planner continuation（续跑），不是新任务。\n\
              请检查当前持久化事实，并采取下一项允许的 coordinator action。\n\
              不要使用过期的内存状态，也不要无限等待代理；代理终态已包含在下方快照中。\n\n\
+             {stop_guidance}{delivery_guidance}\n\
              <taskContinuationSnapshot>\n{snapshot}\n</taskContinuationSnapshot>"
         ))
     }

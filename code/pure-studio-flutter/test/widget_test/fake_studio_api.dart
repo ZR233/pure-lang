@@ -11,7 +11,8 @@ class _FakeStudioApi implements StudioApi {
   final List<ProviderUsageView> providerUsages;
   final ProviderCatalogView providerCatalog;
   final _global = StreamController<Object>.broadcast();
-  final _session = StreamController<SessionStreamFrame>.broadcast();
+  StreamController<SessionStreamFrame> _session =
+      StreamController<SessionStreamFrame>.broadcast();
   final Map<String, StudioState> sessionStates = {};
   final Map<String, StudioState> selectProjectStates = {};
   final Map<String, StudioState> archiveProjectStates = {};
@@ -46,6 +47,12 @@ class _FakeStudioApi implements StudioApi {
       _session.add(SessionEventFrame(event: event));
 
   void emitSessionFrame(SessionStreamFrame frame) => _session.add(frame);
+
+  Future<void> closeSessionStream() async {
+    final closed = _session;
+    _session = StreamController<SessionStreamFrame>.broadcast();
+    await closed.close();
+  }
 
   @override
   Future<ProviderCatalogView> loadProviderCatalog() async => providerCatalog;

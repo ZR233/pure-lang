@@ -549,9 +549,17 @@ void registerShellSettingsTests() {
     expect(find.text('Task'), findsNothing);
     expect(api.sessionModeUpdate, isNull);
 
-    await tester.ensureVisible(taskActivity);
+    await tester.tap(find.byKey(const ValueKey('status-overflow')));
     await tester.pumpAndSettle();
-    await tester.tap(taskActivity);
+    final taskActivityMenuItem = find
+        .ancestor(
+          of: find.text('Implementing').last,
+          matching: find.byWidgetPredicate((widget) => widget is PopupMenuItem),
+        )
+        .last;
+    await tester.ensureVisible(taskActivityMenuItem);
+    await tester.pumpAndSettle();
+    await tester.tap(taskActivityMenuItem);
     await tester.pumpAndSettle();
     expect(find.text('TASK COORDINATOR'), findsOneWidget);
     expect(find.text('codex/task-mode'), findsOneWidget);

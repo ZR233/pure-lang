@@ -113,6 +113,53 @@ async fn read_file_rejects_invalid_line_bounds_instead_of_clamping() {
 }
 
 #[tokio::test]
+async fn read_file_rejects_legacy_range_fields_with_schema_guidance() {
+    let root = unique_temp_dir("legacy-read-range");
+    let tool = read_file_tool();
+
+    for field in ["endLine", "limit"] {
+        let mut arguments = serde_json::json!({"path": "a.txt"});
+        arguments[field] = serde_json::json!(10);
+        let error = tool
+            .execute(input(arguments), context(&root).await)
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains(field), "{error}");
+        assert!(
+            error.contains("Allowed fields: path, cwd, startLine, maxLines"),
+            "{error}"
+        );
+        assert!(
+            error.contains("Use maxLines instead of endLine or limit"),
+            "{error}"
+        );
+    }
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn read_file_missing_path_suggests_workspace_discovery() {
+    let root = unique_temp_dir("missing-read-path");
+    let tool = read_file_tool();
+    let error = tool
+        .execute(
+            input(serde_json::json!({"path": "missing.txt"})),
+            context(&root).await,
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+
+    assert!(
+        error.contains("verify the path with list_files or search_files"),
+        "{error}"
+    );
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
 async fn read_file_rejects_workspace_escape() {
     let root = unique_temp_dir("escape");
     let tool = read_file_tool();

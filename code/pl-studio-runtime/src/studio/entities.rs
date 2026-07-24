@@ -73,6 +73,9 @@ pub mod task_run {
         pub expected_head: String,
         pub design_commit: Option<String>,
         pub status_message: Option<String>,
+        pub stop_requested: i32,
+        pub stop_requested_reason: Option<String>,
+        pub stop_requested_at: Option<i64>,
         pub created_at: i64,
         pub updated_at: i64,
     }
@@ -131,6 +134,8 @@ pub mod agent_outcome {
         pub error: Option<String>,
         pub delivery_json: Option<String>,
         pub review_json: Option<String>,
+        pub completion_contract_json: Option<String>,
+        pub delivery_recovery_count: i32,
         pub terminal_observed: i32,
         pub created_at: i64,
         pub updated_at: i64,

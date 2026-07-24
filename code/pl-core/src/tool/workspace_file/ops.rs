@@ -107,7 +107,13 @@ where
             path: input.path.clone(),
             cwd: input.cwd.clone(),
         })
-        .await?;
+        .await
+        .map_err(|error| {
+            tool_error(
+                TOOL_READ_FILE,
+                format!("{error}; verify the path with list_files or search_files before retrying"),
+            )
+        })?;
     if !stat.is_file {
         return Err(tool_error(
             TOOL_READ_FILE,
@@ -395,8 +401,28 @@ where
 }
 
 fn parse_input<T: serde::de::DeserializeOwned>(arguments: Value, tool: &str) -> Result<T> {
-    serde_json::from_value(arguments)
-        .map_err(|error| tool_error(tool, format!("invalid input: {error}")))
+    serde_json::from_value(arguments).map_err(|error| {
+        tool_error(
+            tool,
+            format!("invalid input: {error}. {}", input_guidance(tool)),
+        )
+    })
+}
+
+fn input_guidance(tool: &str) -> &'static str {
+    match tool {
+        TOOL_READ_FILE => {
+            "Allowed fields: path, cwd, startLine, maxLines. Use maxLines instead of endLine or limit"
+        }
+        TOOL_LIST_FILES => "Allowed fields: path, cwd, glob, limit, cursor, includeDirs",
+        TOOL_SEARCH_FILES => {
+            "Allowed fields: query, path, cwd, glob, caseSensitive, literal, limit, cursor, contextLines"
+        }
+        TOOL_APPLY_PATCH => {
+            "Allowed fields: input, cwd. Re-read changed files and generate a smaller patch after a context conflict"
+        }
+        _ => "Check the tool schema and remove unknown fields",
+    }
 }
 
 fn path_or_current(path: Option<String>) -> String {

@@ -126,15 +126,7 @@ void main() {
         brightness: viewport.brightness,
         state: _taskVisualState(),
       );
-      final activityTrigger = find.text(
-        'Implementing · 1 skill · 1 MCP · 1 LSP',
-      );
-      expect(activityTrigger, findsOneWidget);
-      await tester.ensureVisible(activityTrigger);
-      await tester.pump();
-      final triggerRect = tester.getRect(activityTrigger);
-      await tester.tapAt(Offset(triggerRect.left + 8, triggerRect.center.dy));
-      await tester.pump(const Duration(milliseconds: 250));
+      await _openTaskActivityDetail(tester);
       expect(find.text('TASK COORDINATOR'), findsOneWidget);
       expect(find.text('WORK UNITS'), findsOneWidget);
       expect(find.text('MERGES AND CONFLICTS'), findsOneWidget);
@@ -166,6 +158,36 @@ void main() {
       );
     });
   }
+}
+
+Future<void> _openTaskActivityDetail(WidgetTester tester) async {
+  const activityLabel = 'Implementing · 1 skill · 1 MCP · 1 LSP';
+  final activityTrigger = find.text(activityLabel);
+  final overflowTrigger = find.byKey(const ValueKey('status-overflow'));
+
+  if (activityTrigger.evaluate().isEmpty) {
+    expect(overflowTrigger, findsOneWidget);
+    await tester.tap(overflowTrigger);
+    await tester.pumpAndSettle();
+    expect(activityTrigger, findsOneWidget);
+    final activityMenuItem = find
+        .ancestor(
+          of: activityTrigger,
+          matching: find.byWidgetPredicate((widget) => widget is PopupMenuItem),
+        )
+        .last;
+    await tester.ensureVisible(activityMenuItem);
+    await tester.pumpAndSettle();
+    await tester.tap(activityMenuItem);
+  } else {
+    expect(activityTrigger, findsOneWidget);
+    await tester.ensureVisible(activityTrigger);
+    await tester.pump();
+    final triggerRect = tester.getRect(activityTrigger);
+    await tester.tapAt(Offset(triggerRect.left + 8, triggerRect.center.dy));
+  }
+
+  await tester.pumpAndSettle();
 }
 
 Future<void> _loadVisualFonts() async {

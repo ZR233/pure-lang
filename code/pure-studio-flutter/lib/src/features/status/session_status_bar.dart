@@ -12,9 +12,18 @@ import 'status_detail_popover.dart';
 import 'task_runtime_detail.dart';
 
 class SessionStatusBar extends ConsumerWidget {
-  const SessionStatusBar({required this.state, super.key});
+  const SessionStatusBar({
+    required this.state,
+    this.showTodo = false,
+    this.todoExpanded = false,
+    this.onToggleTodo,
+    super.key,
+  });
 
   final StudioState state;
+  final bool showTodo;
+  final bool todoExpanded;
+  final VoidCallback? onToggleTodo;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -25,7 +34,7 @@ class SessionStatusBar extends ConsumerWidget {
     final activityLabel = _runtimeActivityLabel(context, runtime);
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: context.studioPaper2,
+        color: context.studioPaper,
         border: Border(top: BorderSide(color: context.studioLine)),
       ),
       child: SizedBox(
@@ -34,75 +43,105 @@ class SessionStatusBar extends ConsumerWidget {
           padding: const EdgeInsets.symmetric(horizontal: 12),
           child: Align(
             alignment: Alignment.center,
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(
-                maxWidth: StudioLayout.conversationWidth,
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        children: [
-                          if (session != null)
-                            _StatusReadout(
-                              icon: Icons.account_tree_outlined,
-                              label: session.ownerRole.isEmpty
-                                  ? (session.isRoot ? 'planner' : 'agent')
-                                  : session.ownerRole,
-                              tooltip: session.agentStatus.isEmpty
-                                  ? session.title
-                                  : '${session.title} · ${session.agentStatus}',
-                              maxWidth: 132,
-                            ),
-                          if (session != null)
-                            _SessionModeSelector(
-                              mode: session.mode,
-                              enabled: !state.isBusy && !runtime.hasActiveTask,
-                            ),
-                          if (session != null && state.providers.isNotEmpty)
-                            _ModeModelSelector(
-                              state: state,
-                              mode: session.mode,
-                            ),
-                          if (session != null &&
-                              _effortsForState(state, session.mode).isNotEmpty)
-                            _ReasoningEffortSelector(
-                              state: state,
-                              mode: session.mode,
-                            ),
-                          ContextUsageReadout(runtime: runtime),
-                          if (runtime.costLabel.isNotEmpty)
-                            _StatusReadout(
-                              label: runtime.costLabel,
-                              tooltip: context.l10n.statusCost,
-                              detailWidth: 260,
-                              detailBuilder: (context) =>
-                                  _CostDetail(runtime: runtime),
-                            ),
-                          if (activityLabel.isNotEmpty)
-                            _StatusReadout(
-                              icon: Icons.tune_outlined,
-                              label: activityLabel,
-                              tooltip: context.l10n.statusCapabilitiesTitle,
-                              detailWidth: 520,
-                              maxWidth: 240,
-                              interactive: true,
-                              detailBuilder: (context) =>
-                                  _ActivityDetail(runtime: runtime),
-                            ),
-                        ],
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final showModel = constraints.maxWidth >= 610;
+                final showEffort = constraints.maxWidth >= 720;
+                final showCost = constraints.maxWidth >= 790;
+                final showActivity = constraints.maxWidth >= 840;
+                final hasOverflow =
+                    (!showEffort &&
+                        session != null &&
+                        _effortsForState(state, session.mode).isNotEmpty) ||
+                    (!showCost && runtime.costLabel.isNotEmpty) ||
+                    (!showActivity && activityLabel.isNotEmpty);
+                return Row(
+                  children: [
+                    if (showTodo)
+                      IconButton(
+                        key: const ValueKey('todo-open-button'),
+                        tooltip: context.l10n.timelineTodoListFallback,
+                        visualDensity: VisualDensity.compact,
+                        constraints: const BoxConstraints.tightFor(
+                          width: 32,
+                          height: 32,
+                        ),
+                        iconSize: 18,
+                        icon: Icon(
+                          todoExpanded
+                              ? Icons.checklist
+                              : Icons.checklist_outlined,
+                          color: todoExpanded
+                              ? StudioColors.clayDeep
+                              : context.studioInkSoft,
+                        ),
+                        onPressed: onToggleTodo,
                       ),
+                    if (session != null)
+                      _StatusReadout(
+                        icon: Icons.account_tree_outlined,
+                        label: session.ownerRole.isEmpty
+                            ? (session.isRoot ? 'planner' : 'agent')
+                            : session.ownerRole,
+                        tooltip: session.agentStatus.isEmpty
+                            ? session.title
+                            : '${session.title} · ${session.agentStatus}',
+                        maxWidth: 96,
+                      ),
+                    if (session != null)
+                      _SessionModeSelector(
+                        mode: session.mode,
+                        enabled: !state.isBusy && !runtime.hasActiveTask,
+                      ),
+                    if (showModel &&
+                        session != null &&
+                        state.providers.isNotEmpty)
+                      _ModeModelSelector(state: state, mode: session.mode),
+                    if (showEffort &&
+                        session != null &&
+                        _effortsForState(state, session.mode).isNotEmpty)
+                      _ReasoningEffortSelector(
+                        state: state,
+                        mode: session.mode,
+                      ),
+                    ContextUsageReadout(runtime: runtime),
+                    if (showCost && runtime.costLabel.isNotEmpty)
+                      _StatusReadout(
+                        label: runtime.costLabel,
+                        tooltip: context.l10n.statusCost,
+                        detailWidth: 260,
+                        detailBuilder: (context) =>
+                            _CostDetail(runtime: runtime),
+                      ),
+                    if (showActivity && activityLabel.isNotEmpty)
+                      _StatusReadout(
+                        icon: Icons.tune_outlined,
+                        label: activityLabel,
+                        tooltip: context.l10n.statusCapabilitiesTitle,
+                        detailWidth: 520,
+                        maxWidth: 160,
+                        interactive: true,
+                        detailBuilder: (context) =>
+                            _ActivityDetail(runtime: runtime),
+                      ),
+                    if (hasOverflow)
+                      _StatusOverflow(
+                        effort: session == null
+                            ? null
+                            : _selectedEffort(state, session.mode),
+                        cost: runtime.costLabel,
+                        activity: activityLabel,
+                        runtime: runtime,
+                      ),
+                    const Spacer(),
+                    const SizedBox(width: 8),
+                    _PhaseReadout(
+                      turnPhase: state.turnPhase,
+                      interactionKind: state.activeInteraction?.kind,
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  _PhaseReadout(
-                    turnPhase: state.turnPhase,
-                    interactionKind: state.activeInteraction?.kind,
-                  ),
-                ],
-              ),
+                  ],
+                );
+              },
             ),
           ),
         ),
@@ -123,6 +162,81 @@ String _runtimeActivityLabel(BuildContext context, SessionRuntimeView runtime) {
   ];
   return parts.join(' · ');
 }
+
+String? _selectedEffort(StudioState state, StudioMode mode) {
+  final effort = state.role(_roleKeyForMode(mode))?.effort.trim() ?? '';
+  return effort.isEmpty ? null : effort;
+}
+
+class _StatusOverflow extends StatelessWidget {
+  const _StatusOverflow({
+    required this.effort,
+    required this.cost,
+    required this.activity,
+    required this.runtime,
+  });
+
+  final String? effort;
+  final String cost;
+  final String activity;
+  final SessionRuntimeView runtime;
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<_StatusOverflowAction>(
+      key: const ValueKey('status-overflow'),
+      tooltip: MaterialLocalizations.of(context).moreButtonTooltip,
+      position: PopupMenuPosition.over,
+      icon: const Icon(Icons.more_horiz, size: 18),
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints.tightFor(width: 32, height: 32),
+      onSelected: (action) => _showDetail(context, action),
+      itemBuilder: (context) => [
+        if (effort case final value?)
+          PopupMenuItem<_StatusOverflowAction>(
+            enabled: false,
+            child: Text(
+              '${context.l10n.statusReasoningEffort}: $value',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        if (cost.isNotEmpty)
+          PopupMenuItem<_StatusOverflowAction>(
+            value: _StatusOverflowAction.cost,
+            child: Text(
+              '${context.l10n.statusCost}: $cost',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        if (activity.isNotEmpty)
+          PopupMenuItem<_StatusOverflowAction>(
+            value: _StatusOverflowAction.activity,
+            child: Text(activity, maxLines: 2, overflow: TextOverflow.ellipsis),
+          ),
+      ],
+    );
+  }
+
+  void _showDetail(BuildContext context, _StatusOverflowAction action) {
+    final detail = switch (action) {
+      _StatusOverflowAction.cost => _CostDetail(runtime: runtime),
+      _StatusOverflowAction.activity => _ActivityDetail(runtime: runtime),
+    };
+    showDialog<void>(
+      context: context,
+      builder: (context) => Dialog(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 560, maxHeight: 520),
+          child: Padding(padding: const EdgeInsets.all(16), child: detail),
+        ),
+      ),
+    );
+  }
+}
+
+enum _StatusOverflowAction { cost, activity }
 
 class _SessionModeSelector extends ConsumerWidget {
   const _SessionModeSelector({required this.mode, required this.enabled});

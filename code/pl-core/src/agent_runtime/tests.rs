@@ -426,8 +426,8 @@ async fn product_session_facts_are_sequenced_persisted_and_broadcast_by_the_owne
             agent_id.clone(),
             session_id,
             vec![crate::SessionEventFact::durable(
-                Some("child".to_string()),
-                Some("child-turn".to_string()),
+                Some("root".to_string()),
+                Some("root-turn".to_string()),
                 7,
                 pl_protocol::SessionEventKind::ErrorOccurred {
                     message: "child failed".to_string(),
@@ -443,7 +443,7 @@ async fn product_session_facts_are_sequenced_persisted_and_broadcast_by_the_owne
     };
     assert_eq!(event.session_id, "chat");
     assert_eq!(event.position.durable_sequence(), Some(1));
-    assert_eq!(event.source_agent_id.as_deref(), Some("child"));
+    assert_eq!(event.source_agent_id.as_deref(), Some("root"));
     assert_eq!(
         repository.mutations.lock().unwrap().last(),
         Some(&AgentStateMutation::AppendSessionEvents {
@@ -455,6 +455,108 @@ async fn product_session_facts_are_sequenced_persisted_and_broadcast_by_the_owne
             .session_event_sequence,
         1
     );
+}
+
+#[tokio::test]
+async fn product_session_facts_reject_a_different_source_agent() {
+    let repository = TestRepository::empty();
+    let host = TestHost::new(repository, FactoryMode::Fail);
+    let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
+    let handle = runtime.handle();
+    let agent_id = AgentId::new("root").unwrap();
+    let session_id = SessionId::new("chat").unwrap();
+    handle.register(registration("root", "chat")).await.unwrap();
+
+    let error = handle
+        .record_session_facts(
+            agent_id,
+            session_id.clone(),
+            vec![crate::SessionEventFact::durable(
+                Some("child".to_string()),
+                None,
+                1,
+                pl_protocol::SessionEventKind::ErrorOccurred {
+                    message: "must not cross sessions".to_string(),
+                    severity: pl_protocol::ErrorSeverity::Recoverable,
+                },
+            )],
+        )
+        .await
+        .unwrap_err();
+
+    assert!(error.to_string().contains("fact source is child"));
+    assert_eq!(
+        handle
+            .session_snapshot(&session_id)
+            .unwrap()
+            .through_sequence,
+        0
+    );
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn canonical_hub_cursor_wins_over_stale_runtime_checkpoint() {
+    let repository = TestRepository::empty();
+    let host = TestHost::new(repository.clone(), FactoryMode::Fail);
+    let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
+    let handle = runtime.handle();
+    let agent_id = AgentId::new("root").unwrap();
+    let session_id = SessionId::new("chat").unwrap();
+    handle.register(registration("root", "chat")).await.unwrap();
+
+    let existing = (1..=3)
+        .map(|sequence| pl_protocol::SessionEventEnvelope {
+            event_id: format!("chat:{sequence}"),
+            session_id: "chat".to_string(),
+            source_agent_id: Some("root".to_string()),
+            turn_id: Some("turn".to_string()),
+            emitted_at: sequence as i64,
+            position: pl_protocol::SessionEventPosition::Durable { sequence },
+            kind: pl_protocol::SessionEventKind::ErrorOccurred {
+                message: format!("existing-{sequence}"),
+                severity: pl_protocol::ErrorSeverity::Recoverable,
+            },
+        })
+        .collect();
+    handle
+        .session_events
+        .publish_batch(existing)
+        .expect("seed canonical cursor");
+    assert_eq!(
+        repository.state(&agent_id).sessions[&session_id].session_event_sequence,
+        0
+    );
+
+    handle
+        .record_session_facts(
+            agent_id.clone(),
+            session_id.clone(),
+            vec![crate::SessionEventFact::durable(
+                Some("root".to_string()),
+                Some("turn".to_string()),
+                4,
+                pl_protocol::SessionEventKind::ErrorOccurred {
+                    message: "next".to_string(),
+                    severity: pl_protocol::ErrorSeverity::Recoverable,
+                },
+            )],
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        handle
+            .session_snapshot(&session_id)
+            .unwrap()
+            .through_sequence,
+        4
+    );
+    assert_eq!(
+        repository.state(&agent_id).sessions[&session_id].session_event_sequence,
+        4
+    );
+    runtime.shutdown().await.unwrap();
 }
 
 #[tokio::test]
@@ -482,6 +584,136 @@ async fn failed_turn_returns_agent_to_active_idle_and_commits_snapshot() {
     assert_eq!(waited.last_turn.unwrap().kind, TurnOutcomeKind::Failed);
     assert_eq!(repository.state(&agent_id).snapshot, waited.snapshot);
     assert_eq!(host.events.runtime_len(), 4);
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn submit_rejects_session_not_owned_by_target_agent() {
+    let repository = TestRepository::empty();
+    let host = TestHost::new(repository.clone(), FactoryMode::Fail);
+    let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
+    let handle = runtime.handle();
+    let agent_id = AgentId::new("root").unwrap();
+    let unknown_session = SessionId::new("child-session").unwrap();
+
+    handle.register(registration("root", "chat")).await.unwrap();
+    let error = handle
+        .submit(
+            agent_id.clone(),
+            AgentSubmitRequest::start(unknown_session.clone(), "must fail"),
+        )
+        .await
+        .unwrap_err();
+
+    assert_eq!(
+        error,
+        AgentRuntimeError::SessionNotOwned {
+            agent_id: agent_id.clone(),
+            session_id: unknown_session,
+        }
+    );
+    assert_eq!(repository.state(&agent_id).sessions.len(), 1);
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn current_session_submit_resolves_the_single_owned_session() {
+    let repository = TestRepository::empty();
+    let host = TestHost::new(repository.clone(), FactoryMode::Fail);
+    let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
+    let handle = runtime.handle();
+    let agent_id = AgentId::new("root").unwrap();
+    let session_id = SessionId::new("chat").unwrap();
+
+    handle.register(registration("root", "chat")).await.unwrap();
+    handle
+        .submit_current_session(
+            agent_id.clone(),
+            AgentCurrentSessionSubmitRequest::start("resolved input"),
+        )
+        .await
+        .unwrap();
+    handle.wait(agent_id.clone()).await.unwrap();
+
+    assert_eq!(
+        repository
+            .state(&agent_id)
+            .snapshot
+            .last_turn
+            .as_ref()
+            .map(|turn| &turn.session_id),
+        Some(&session_id)
+    );
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn current_session_submit_rejects_ambiguous_idle_history() {
+    let repository = TestRepository::empty();
+    let host = TestHost::new(repository, FactoryMode::Fail);
+    let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
+    let handle = runtime.handle();
+    let agent_id = AgentId::new("root").unwrap();
+    let registration = AgentRegistration {
+        identity: identity("root"),
+        sessions: vec![
+            AgentSessionState::empty(SessionId::new("first").unwrap()),
+            AgentSessionState::empty(SessionId::new("historical").unwrap()),
+        ],
+    };
+
+    handle.register(registration).await.unwrap();
+    let error = handle
+        .submit_current_session(
+            agent_id.clone(),
+            AgentCurrentSessionSubmitRequest::start("must not guess"),
+        )
+        .await
+        .unwrap_err();
+
+    assert_eq!(
+        error,
+        AgentRuntimeError::CurrentSessionUnavailable {
+            agent_id,
+            session_count: 2,
+        }
+    );
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn current_session_submit_rejects_a_missing_parent_graph() {
+    let host = TestHost::new(TestRepository::empty(), FactoryMode::Fail);
+    let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
+    let handle = runtime.handle();
+    let agent_id = AgentId::new("child").unwrap();
+    let missing_parent = AgentId::new("missing-parent").unwrap();
+    let mut child_identity = identity("child");
+    child_identity.parent_id = Some(missing_parent.clone());
+    child_identity.depth = 1;
+
+    handle
+        .register(AgentRegistration::with_session(
+            child_identity,
+            SessionId::new("child-chat").unwrap(),
+        ))
+        .await
+        .unwrap();
+    let error = handle
+        .submit_current_session(
+            agent_id,
+            AgentCurrentSessionSubmitRequest::start("must reject invalid graph"),
+        )
+        .await
+        .unwrap_err();
+
+    assert_eq!(
+        error,
+        AgentRuntimeError::Lifecycle(format!(
+            "agent parent {} is missing while resolving root for child",
+            missing_parent.as_str()
+        ))
+    );
     runtime.shutdown().await.unwrap();
 }
 

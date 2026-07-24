@@ -134,6 +134,28 @@ pub(super) async fn is_ancestor(
     .context("git ancestry inspection task failed")?
 }
 
+pub(super) async fn inspect_executor_recovery(
+    path: impl AsRef<Path>,
+    base_commit: &str,
+) -> Result<super::DeliveryRecoveryNeed> {
+    let path = path.as_ref().to_path_buf();
+    let base_commit = base_commit.to_string();
+    tokio::task::spawn_blocking(move || {
+        let head = git_output(&path, &["rev-parse", "HEAD"])?;
+        let status = git_output(
+            &path,
+            &["status", "--porcelain=v1", "--untracked-files=all"],
+        )?;
+        Ok(if head != base_commit || !status.is_empty() {
+            super::DeliveryRecoveryNeed::Recoverable
+        } else {
+            super::DeliveryRecoveryNeed::NoDelivery
+        })
+    })
+    .await
+    .context("executor delivery recovery inspection task failed")?
+}
+
 fn inspect_repository_blocking(path: &Path, require_clean: bool) -> Result<RepositorySnapshot> {
     let workspace_root = PathBuf::from(git_output(path, &["rev-parse", "--show-toplevel"])?);
     let branch = git_output(path, &["symbolic-ref", "--quiet", "--short", "HEAD"])

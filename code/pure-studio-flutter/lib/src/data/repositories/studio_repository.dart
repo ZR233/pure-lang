@@ -23,6 +23,7 @@ class StudioController extends AsyncNotifier<StudioState> {
   final List<StudioBridgeEvent> _pendingPartDeltas = [];
   bool _partDeltaFrameScheduled = false;
   int _sessionGeneration = 0;
+  Timer? _sessionResubscribeTimer;
 
   StudioApi get _api => ref.read(studioApiProvider);
 
@@ -31,6 +32,7 @@ class StudioController extends AsyncNotifier<StudioState> {
     ref.onDispose(() {
       _pendingPartDeltas.clear();
       _partDeltaFrameScheduled = false;
+      _sessionResubscribeTimer?.cancel();
       final global = _globalSubscription;
       final session = _sessionSubscription;
       if (global != null) {
@@ -102,6 +104,8 @@ class StudioController extends AsyncNotifier<StudioState> {
   }
 
   void _subscribe(String? sessionId, {bool forceSnapshot = false}) {
+    _sessionResubscribeTimer?.cancel();
+    _sessionResubscribeTimer = null;
     _flushPartDeltaBatch();
     _sessionGeneration += 1;
     final generation = _sessionGeneration;
@@ -120,6 +124,7 @@ class StudioController extends AsyncNotifier<StudioState> {
               .listen(
                 (frame) => _handleSessionFrame(frame, sessionId, generation),
                 onError: (_) => _resubscribeSnapshot(sessionId, generation),
+                onDone: () => _resubscribeSnapshot(sessionId, generation),
               );
   }
 
@@ -480,7 +485,14 @@ class StudioController extends AsyncNotifier<StudioState> {
         state.value?.selectedSessionId != sessionId) {
       return;
     }
-    _subscribe(sessionId, forceSnapshot: true);
+    _sessionResubscribeTimer?.cancel();
+    _sessionResubscribeTimer = Timer(const Duration(milliseconds: 150), () {
+      if (generation != _sessionGeneration ||
+          state.value?.selectedSessionId != sessionId) {
+        return;
+      }
+      _subscribe(sessionId, forceSnapshot: true);
+    });
   }
 
   void _queuePartDelta(StudioState current, StudioBridgeEvent event) {

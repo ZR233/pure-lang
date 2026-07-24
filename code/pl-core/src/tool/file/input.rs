@@ -1,7 +1,7 @@
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct WriteFileInput {
     pub path: String,
     pub content: String,
@@ -17,13 +17,13 @@ pub(super) enum WriteMode {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct PathInput {
     pub path: String,
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct DeletePathInput {
     pub path: String,
     pub mode: DeleteMode,
@@ -44,7 +44,7 @@ pub(super) enum DeleteMode {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct CopyMoveInput {
     pub from: String,
     pub to: String,

@@ -132,6 +132,11 @@ void registerResponsiveLayoutTests() {
           );
           expect(reviewerRect.top, greaterThan(stableTriggerRect.bottom));
           expect(reviewerRect.overlaps(stableTriggerRect), isFalse);
+          expect(
+            (reviewerRect.right - stableTriggerRect.right).abs(),
+            lessThanOrEqualTo(32),
+            reason: 'reviewer=$reviewerRect trigger=$stableTriggerRect',
+          );
           expect(tester.takeException(), isNull);
         },
       );

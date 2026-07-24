@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::time::Duration;
 
 use pl_trace::TraceEvent;
@@ -7,13 +8,13 @@ use tokio_util::sync::CancellationToken;
 
 use super::execution::{TurnCompletion, execute_turn, turn_outcome};
 use super::host::{AgentCommitObserver, AgentStateRepository, SessionProjectionCommit};
-use super::state::{AgentRuntimeError, unix_timestamp};
+use super::state::{AgentRuntimeError, ResolvedAgentSessionTarget, unix_timestamp};
 use super::{
-    AgentActivityState, AgentCommit, AgentCommitOutcome, AgentCommittedEvent, AgentDurableState,
-    AgentLifecycleState, AgentRuntimeEvent, AgentRuntimeEventKind, AgentRuntimeHandle,
-    AgentRuntimeHost, AgentRuntimeResult, AgentSnapshot, AgentSubmitRequest,
-    AgentTurnPreparationContext, AgentWaitResult, InputDelivery, PendingAgentInput, SessionId,
-    TurnId,
+    AgentActivityState, AgentCommit, AgentCommitOutcome, AgentCommittedEvent,
+    AgentCurrentSessionSubmitRequest, AgentDurableState, AgentLifecycleState, AgentRuntimeEvent,
+    AgentRuntimeEventKind, AgentRuntimeHandle, AgentRuntimeHost, AgentRuntimeResult, AgentSnapshot,
+    AgentSubmitRequest, AgentTurnPreparationContext, AgentWaitResult, InputDelivery,
+    PendingAgentInput, SessionId, TurnId,
 };
 use crate::session_event::{
     ObservedTurnEvent, TurnObservation, project_observation, project_runtime_event,
@@ -26,6 +27,11 @@ mod lifecycle;
 pub(crate) enum ActorCommand {
     Submit {
         request: AgentSubmitRequest,
+        reply: oneshot::Sender<AgentRuntimeResult<TurnId>>,
+    },
+    SubmitCurrentSession {
+        root_agent_id: super::AgentId,
+        request: AgentCurrentSessionSubmitRequest,
         reply: oneshot::Sender<AgentRuntimeResult<TurnId>>,
     },
     CancelTurn {
@@ -181,6 +187,15 @@ where
                             let result = self.submit(request).await;
                             let _ = reply.send(result);
                         }
+                        ActorCommand::SubmitCurrentSession {
+                            root_agent_id,
+                            request,
+                            reply,
+                        } => {
+                            let result =
+                                self.submit_current_session(root_agent_id, request).await;
+                            let _ = reply.send(result);
+                        }
                         ActorCommand::CancelTurn { turn_id, reply } => {
                             let result = self.cancel_turn(turn_id);
                             let _ = reply.send(result);
@@ -269,6 +284,12 @@ where
                 self.state.snapshot.lifecycle,
             ));
         }
+        if !self.state.sessions.contains_key(&request.session_id) {
+            return Err(AgentRuntimeError::SessionNotOwned {
+                agent_id: self.state.snapshot.identity.id.clone(),
+                session_id: request.session_id,
+            });
+        }
         let input = PendingAgentInput {
             turn_id: TurnId::generate(),
             session_id: request.session_id,
@@ -307,6 +328,85 @@ where
             self.begin_next_turn().await;
         }
         Ok(turn_id)
+    }
+
+    async fn submit_current_session(
+        &mut self,
+        root_agent_id: super::AgentId,
+        request: AgentCurrentSessionSubmitRequest,
+    ) -> AgentRuntimeResult<TurnId> {
+        let target = self.resolve_current_session_target(root_agent_id)?;
+        debug_assert!(
+            target.root_agent_id == target.agent_id || self.state.snapshot.identity.depth > 0
+        );
+        debug_assert_eq!(target.agent_id, self.state.snapshot.identity.id);
+        debug_assert_eq!(target.owner_revision, self.state.snapshot.revision);
+        self.submit(AgentSubmitRequest {
+            session_id: target.session_id,
+            message: request.message,
+            metadata: request.metadata,
+            delivery: request.delivery,
+        })
+        .await
+    }
+
+    fn resolve_current_session_target(
+        &self,
+        root_agent_id: super::AgentId,
+    ) -> AgentRuntimeResult<ResolvedAgentSessionTarget> {
+        let agent_id = self.state.snapshot.identity.id.clone();
+        if self.state.snapshot.lifecycle != AgentLifecycleState::Active {
+            return Err(AgentRuntimeError::NotActive(
+                agent_id,
+                self.state.snapshot.lifecycle,
+            ));
+        }
+
+        let mut current = BTreeSet::new();
+        if let Some(session_id) = &self.state.snapshot.active_session_id {
+            current.insert(session_id.clone());
+        }
+        current.extend(
+            self.state
+                .pending_inputs
+                .iter()
+                .map(|input| input.session_id.clone()),
+        );
+        let session_id = match current.len() {
+            1 => current.into_iter().next().ok_or_else(|| {
+                AgentRuntimeError::CurrentSessionUnavailable {
+                    agent_id: agent_id.clone(),
+                    session_count: self.state.sessions.len(),
+                }
+            })?,
+            0 if self.state.sessions.len() == 1 => self
+                .state
+                .sessions
+                .first_key_value()
+                .map(|(session_id, _)| session_id.clone())
+                .ok_or_else(|| AgentRuntimeError::CurrentSessionUnavailable {
+                    agent_id: agent_id.clone(),
+                    session_count: self.state.sessions.len(),
+                })?,
+            _ => {
+                return Err(AgentRuntimeError::CurrentSessionUnavailable {
+                    agent_id,
+                    session_count: self.state.sessions.len(),
+                });
+            }
+        };
+        if !self.state.sessions.contains_key(&session_id) {
+            return Err(AgentRuntimeError::SessionNotOwned {
+                agent_id,
+                session_id,
+            });
+        }
+        Ok(ResolvedAgentSessionTarget {
+            root_agent_id,
+            agent_id,
+            session_id,
+            owner_revision: self.state.snapshot.revision,
+        })
     }
 
     fn cancel_turn(&mut self, turn_id: TurnId) -> AgentRuntimeResult<()> {
@@ -439,16 +539,29 @@ where
     async fn record_session_facts(
         &mut self,
         session_id: SessionId,
-        facts: Vec<crate::SessionEventFact>,
+        mut facts: Vec<crate::SessionEventFact>,
     ) -> AgentRuntimeResult<()> {
         if facts.is_empty() {
             return Ok(());
         }
         if !self.state.sessions.contains_key(&session_id) {
-            return Err(AgentRuntimeError::Repository(format!(
-                "agent {} does not own session {session_id}",
-                self.state.snapshot.identity.id
-            )));
+            return Err(AgentRuntimeError::SessionNotOwned {
+                agent_id: self.state.snapshot.identity.id.clone(),
+                session_id,
+            });
+        }
+        let owner_agent_id = self.state.snapshot.identity.id.to_string();
+        for fact in &mut facts {
+            match fact.source_agent_id.as_deref() {
+                Some(source_agent_id) if source_agent_id != owner_agent_id => {
+                    return Err(AgentRuntimeError::Repository(format!(
+                        "session {session_id} belongs to agent {owner_agent_id}, \
+                         but fact source is {source_agent_id}"
+                    )));
+                }
+                Some(_) => {}
+                None => fact.source_agent_id = Some(owner_agent_id.clone()),
+            }
         }
         let current = self
             .runtime
@@ -560,9 +673,6 @@ where
         next.snapshot.activity = AgentActivityState::Running;
         next.snapshot.active_turn_id = Some(input.turn_id.clone());
         next.snapshot.active_session_id = Some(input.session_id.clone());
-        next.sessions
-            .entry(input.session_id.clone())
-            .or_insert_with(|| super::AgentSessionState::empty(input.session_id.clone()));
         let committed = self
             .commit_transition(next, Vec::new(), |snapshot| {
                 AgentRuntimeEventKind::TurnStarted {
@@ -701,7 +811,6 @@ where
         let session_id = active.session_id.clone();
         let turn_id = active.turn_id.clone();
         let expected_revision = self.state.snapshot.revision;
-        let sequence = self.state.sessions[&session_id].session_event_sequence;
         let current = self
             .runtime
             .session_events
@@ -711,7 +820,7 @@ where
             self.state.snapshot.identity.id.as_str(),
             session_id.as_str(),
             turn_id.as_str(),
-            sequence,
+            current.through_sequence,
             &current,
             observed.observation,
         );
@@ -808,7 +917,12 @@ where
             .map(|trace| trace.sequence.saturating_add(1))
             .unwrap_or(current_sequence);
         let expected_revision = self.state.snapshot.revision;
-        let session_event_sequence = self.state.sessions[&session_id].session_event_sequence;
+        let session_event_sequence = self
+            .runtime
+            .session_events
+            .snapshot(session_id.as_str())
+            .map_err(|error| AgentRuntimeError::SessionEvents(error.to_string()))?
+            .through_sequence;
         let projected = project_trace_events(
             self.state.snapshot.identity.id.as_str(),
             session_id.as_str(),
@@ -903,14 +1017,16 @@ where
             kind: event_kind(next.snapshot.clone()),
         };
         let session_id = runtime_event_session_id(&event).map(str::to_string);
-        let current_session_event_sequence = session_id
-            .as_ref()
-            .and_then(|session_id| {
-                self.state
-                    .sessions
-                    .get(&SessionId::new(session_id.clone()).ok()?)
-            })
-            .map_or(0, |session| session.session_event_sequence);
+        let current_session_event_sequence = match session_id.as_deref() {
+            Some(session_id) => {
+                self.runtime
+                    .session_events
+                    .snapshot(session_id)
+                    .map_err(|error| AgentRuntimeError::SessionEvents(error.to_string()))?
+                    .through_sequence
+            }
+            None => 0,
+        };
         let projected = project_runtime_event(&event, current_session_event_sequence);
         let durable_session_events = projected.durable_events();
         let session_projection = match session_id.as_deref() {

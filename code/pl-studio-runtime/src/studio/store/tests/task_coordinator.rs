@@ -59,6 +59,32 @@ async fn task_stop_gate_is_durable_and_keeps_lease_for_terminalization() {
     input.phase = TaskRunPhase::Implementing;
     let (run, _) = store.create_task_run_with_lease(input).await.unwrap();
 
+    let requested = store
+        .request_task_stop(&run.id, &run.expected_head, "test stop")
+        .await
+        .unwrap();
+    assert!(requested.stop_requested);
+    assert_eq!(requested.phase, TaskRunPhase::Implementing);
+    assert!(store.read_branch_lease(&run.id).await.unwrap().is_some());
+    let requested_allocation = store
+        .allocate_executor(AllocateExecutor {
+            session_id: session.id.clone(),
+            title: "must not start after request".to_string(),
+            owned_paths: vec!["src/**".to_string()],
+            agent_id: "agent-after-request".to_string(),
+            owner_path: "/root".to_string(),
+            requested_by_call_id: "call-after-request".to_string(),
+        })
+        .await;
+    let requested_allocation = match requested_allocation {
+        Ok(_) => panic!("stop request must reject executor allocation"),
+        Err(error) => error,
+    };
+    assert!(
+        requested_allocation
+            .to_string()
+            .contains("after task stop was requested")
+    );
     let stopping = store
         .begin_task_stop(&run.id, &run.expected_head)
         .await
@@ -80,12 +106,16 @@ async fn task_stop_gate_is_durable_and_keeps_lease_for_terminalization() {
         Ok(_) => panic!("stopping gate must reject executor allocation"),
         Err(error) => error,
     };
-    assert!(error.to_string().contains("requires task phase"));
+    assert!(error.to_string().contains("task stop was requested"));
 }
 
 #[tokio::test]
 async fn stopping_task_rejects_executor_delivery_without_mutating_records() {
     let (store, run, work_unit, outcome) = delivery_transition_fixture().await;
+    store
+        .request_task_stop(&run.id, &run.expected_head, "test stop")
+        .await
+        .unwrap();
     store
         .begin_task_stop(&run.id, &run.expected_head)
         .await
@@ -125,6 +155,10 @@ async fn stopping_task_rejects_new_explorer_outcome() {
     input.workspace_root = "C:/work/task-stop-explorer".to_string();
     input.git_common_dir = "C:/work/task-stop-explorer/.git".to_string();
     let (run, _) = store.create_task_run_with_lease(input).await.unwrap();
+    store
+        .request_task_stop(&run.id, &run.expected_head, "test stop")
+        .await
+        .unwrap();
     store
         .begin_task_stop(&run.id, &run.expected_head)
         .await

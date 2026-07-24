@@ -356,7 +356,10 @@ void registerTimelineToolTests() {
     await tester.pump();
 
     expect(find.text('Tool activity'), findsOneWidget);
-    expect(find.text('3 tools, 1 running, 1 need attention'), findsOneWidget);
+    expect(
+      find.text('3 tools, 1 running, 1 need attention · file missing'),
+      findsOneWidget,
+    );
     expect(find.text('awaitingApproval'), findsOneWidget);
 
     await tester.tap(find.text('Tool activity'));
@@ -367,7 +370,10 @@ void registerTimelineToolTests() {
     expect(find.textContaining('cargo test -p pl-core'), findsOneWidget);
     expect(find.textContaining('lib/main.dart'), findsOneWidget);
     expect(find.textContaining('exit code 2'), findsOneWidget);
-    expect(find.textContaining('file missing'), findsOneWidget);
+    expect(
+      find.text('lib/main.dart\nexit code 2\nfile missing'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('timeline renders markdown after inline code fence closure', (

@@ -92,6 +92,20 @@ async fn base_schema_has_only_canonical_session_projection_tables() {
         assert!(work_unit_columns.iter().any(|column| column == required));
     }
 
+    let task_run_columns = table_columns(&store.db, "task_runs").await;
+    for required in [
+        "stop_requested",
+        "stop_requested_reason",
+        "stop_requested_at",
+    ] {
+        assert!(task_run_columns.iter().any(|column| column == required));
+    }
+
+    let outcome_columns = table_columns(&store.db, "agent_outcomes").await;
+    for required in ["completion_contract_json", "delivery_recovery_count"] {
+        assert!(outcome_columns.iter().any(|column| column == required));
+    }
+
     let runtime_session_columns = table_columns(&store.db, "agent_runtime_sessions").await;
     assert!(
         runtime_session_columns
@@ -424,6 +438,138 @@ async fn v2_schema_is_backed_up_and_migrated_without_losing_root_session() {
     drop(store);
     remove_test_db_files(&db_path).await;
     let _ = tokio::fs::remove_file(format!("{}.v2.bak", db_path.display())).await;
+}
+
+#[tokio::test]
+async fn v3_schema_is_backed_up_and_migrated_with_delivery_contracts() {
+    let db_path = unique_test_db_path("schema-v3-migration");
+    remove_test_db_files(&db_path).await;
+    let db = Database::connect(sqlite_url_for_test(&db_path))
+        .await
+        .unwrap();
+    execute_sql(
+        &db,
+        "CREATE TABLE sessions (id TEXT PRIMARY KEY);
+         CREATE TABLE task_runs (
+             id TEXT PRIMARY KEY,
+             session_id TEXT NOT NULL,
+             phase TEXT NOT NULL,
+             plan TEXT NOT NULL,
+             workspace_root TEXT NOT NULL,
+             git_common_dir TEXT NOT NULL,
+             branch TEXT NOT NULL,
+             base_commit TEXT NOT NULL,
+             expected_head TEXT NOT NULL,
+             design_commit TEXT,
+             status_message TEXT,
+             created_at INTEGER NOT NULL,
+             updated_at INTEGER NOT NULL
+         );
+         CREATE TABLE work_units (
+             id TEXT PRIMARY KEY,
+             task_run_id TEXT NOT NULL,
+             title TEXT NOT NULL,
+             status TEXT NOT NULL,
+             owned_paths_json TEXT NOT NULL,
+             base_commit TEXT NOT NULL,
+             worktree_path TEXT NOT NULL,
+             branch TEXT NOT NULL,
+             attempt INTEGER NOT NULL,
+             agent_id TEXT,
+             created_at INTEGER NOT NULL,
+             updated_at INTEGER NOT NULL
+         );
+         CREATE TABLE agent_outcomes (
+             id TEXT PRIMARY KEY,
+             task_run_id TEXT NOT NULL,
+             work_unit_id TEXT,
+             agent_id TEXT NOT NULL,
+             owner_path TEXT NOT NULL,
+             initiated_by TEXT NOT NULL,
+             requested_by_call_id TEXT NOT NULL,
+             role TEXT NOT NULL,
+             status TEXT NOT NULL,
+             attempt INTEGER NOT NULL,
+             summary TEXT,
+             error TEXT,
+             delivery_json TEXT,
+             review_json TEXT,
+             created_at INTEGER NOT NULL,
+             updated_at INTEGER NOT NULL,
+             terminal_observed INTEGER NOT NULL DEFAULT 0
+         );
+         INSERT INTO task_runs (
+             id, session_id, phase, plan, workspace_root, git_common_dir,
+             branch, base_commit, expected_head, created_at, updated_at
+         ) VALUES (
+             'run-v3', 'session-v3', 'implementing', 'plan', 'C:/fixture',
+             'C:/fixture/.git', 'main', 'base', 'base', 10, 11
+         );
+         INSERT INTO work_units (
+             id, task_run_id, title, status, owned_paths_json, base_commit,
+             worktree_path, branch, attempt, agent_id, created_at, updated_at
+         ) VALUES (
+             'work-v3', 'run-v3', 'Implement', 'waitingForDelivery', '[\"src/**\"]',
+             'base', 'C:/fixture/worktree', 'pure-task-v3', 1, 'executor-v3', 10, 11
+         );
+         INSERT INTO agent_outcomes (
+             id, task_run_id, work_unit_id, agent_id, owner_path, initiated_by,
+             requested_by_call_id, role, status, attempt, created_at, updated_at
+         ) VALUES (
+             'outcome-v3', 'run-v3', 'work-v3', 'executor-v3', '/root', 'planner',
+             'call-v3', 'executor', 'waitingForDelivery', 1, 10, 11
+         );
+         PRAGMA user_version = 3;",
+    )
+    .await;
+    db.close().await.unwrap();
+
+    let store = StudioStore::open(&db_path).await.unwrap();
+    assert_eq!(
+        schema_version(&store.db).await,
+        STUDIO_DATABASE_SCHEMA_VERSION
+    );
+    assert!(
+        table_columns(&store.db, "task_runs")
+            .await
+            .iter()
+            .any(|column| column == "stop_requested")
+    );
+    let row = store
+        .db
+        .query_one(Statement::from_string(
+            DatabaseBackend::Sqlite,
+            "SELECT completion_contract_json, delivery_recovery_count
+             FROM agent_outcomes WHERE id = 'outcome-v3'"
+                .to_string(),
+        ))
+        .await
+        .unwrap()
+        .unwrap();
+    let contract = row
+        .try_get::<String>("", "completion_contract_json")
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&contract).unwrap(),
+        serde_json::json!({
+            "kind": "deliveryRequired",
+            "taskRunId": "run-v3",
+            "workUnitId": "work-v3",
+            "recoveryLimit": 1,
+        })
+    );
+    assert_eq!(
+        row.try_get::<i64>("", "delivery_recovery_count").unwrap(),
+        0
+    );
+    assert!(
+        PathBuf::from(format!("{}.v3.bak", db_path.display())).is_file(),
+        "v3 migration must preserve a recoverable backup"
+    );
+
+    drop(store);
+    remove_test_db_files(&db_path).await;
+    let _ = tokio::fs::remove_file(format!("{}.v3.bak", db_path.display())).await;
 }
 
 #[tokio::test]

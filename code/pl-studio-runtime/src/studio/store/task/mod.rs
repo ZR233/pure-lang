@@ -4,6 +4,7 @@ mod continuation;
 #[cfg(test)]
 pub(crate) use continuation::ContinuationSnapshotTestBarrier;
 mod delivery;
+mod delivery_recovery;
 mod merge;
 mod outcome;
 mod recovery;
@@ -52,6 +53,9 @@ impl StudioStore {
             expected_head: Set(input.head_commit.clone()),
             design_commit: Set(None),
             status_message: Set(None),
+            stop_requested: Set(0),
+            stop_requested_reason: Set(None),
+            stop_requested_at: Set(None),
             created_at: Set(now),
             updated_at: Set(now),
         }
@@ -331,6 +335,9 @@ pub(super) fn task_run_record(model: entities::task_run::Model) -> Result<TaskRu
         expected_head: model.expected_head,
         design_commit: model.design_commit,
         status_message: model.status_message,
+        stop_requested: model.stop_requested != 0,
+        stop_requested_reason: model.stop_requested_reason,
+        stop_requested_at: model.stop_requested_at,
         created_at: model.created_at,
         updated_at: model.updated_at,
     })
