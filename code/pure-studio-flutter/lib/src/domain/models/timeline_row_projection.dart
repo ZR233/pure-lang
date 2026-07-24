@@ -115,7 +115,8 @@ List<TimelineRow> timelineRowsFromMessages(
     for (final message in sortedMessages)
       ..._timelineRowsForMessage(message, partsByMessage[message.id]),
     for (final event in latestTimelineAgentEvents(agentEvents))
-      timelineRowFromAgentEvent(event),
+      if (event.payload is! TimelineTodoListUpdate)
+        timelineRowFromAgentEvent(event),
   ];
   rows.sort(_compareRows);
   return rows;

@@ -379,7 +379,7 @@ void registerTimelineModelTests() {
     expect(row.agentEvent!.payload, isA<TimelineSubAgentActivity>());
   });
 
-  test('todo list updates keep one timeline row per event', () {
+  test('todo list updates stay out of the timeline projection', () {
     final now = DateTime.fromMillisecondsSinceEpoch(0);
     final rows = timelineRowsFromMessages(
       const [],
@@ -418,17 +418,7 @@ void registerTimelineModelTests() {
       ],
     );
 
-    expect(rows, hasLength(2));
-    expect(rows.map((row) => row.id), [
-      'agent-activity:todo-event-1',
-      'agent-activity:todo-event-2',
-    ]);
-    expect(
-      rows.every((row) => row.type == TimelineRowType.agentActivity),
-      true,
-    );
-    expect(rows.last.agentEvent!.payload, isA<TimelineTodoListUpdate>());
-    expect(rows.last.agentEvent!.status, 'pending');
+    expect(rows, isEmpty);
   });
 
   test('agent snapshots update status state without timeline rows', () async {
@@ -535,7 +525,7 @@ void registerTimelineModelTests() {
     },
   );
 
-  test('canonical session snapshot restores todo list timeline events', () {
+  test('canonical session snapshot restores the latest todo list', () {
     final state = applyCanonicalSessionSnapshot(_emptyState(), {
       'sessionId': 'session-1',
       'throughSequence': 8,
@@ -562,13 +552,10 @@ void registerTimelineModelTests() {
       ],
     });
 
-    final row = state.selectedTimelineRows.single;
-    expect(row.id, 'agent-activity:todo-event-1');
-    expect(row.agentEvent!.callId, 'call-3');
-    expect(row.agentEvent!.title, 'agentTimeline.todoList');
-    final payload = row.agentEvent!.payload;
-    expect(payload, isA<TimelineTodoListUpdate>());
-    final update = payload as TimelineTodoListUpdate;
+    expect(state.selectedTimelineRows, isEmpty);
+    final update = state.selectedTodoList;
+    expect(update, isNotNull);
+    expect(update!.callId, 'call-3');
     expect(update.explanation, 'Todo restore');
     expect(update.items.map((item) => item.step), [
       'Restore payload',

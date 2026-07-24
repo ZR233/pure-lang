@@ -217,6 +217,9 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
+  String get composerAgentRuntimeDriven => '此 Agent 会话由运行时驱动';
+
+  @override
   String get statusTaskSection => '任务协调';
 
   @override
@@ -1417,6 +1420,9 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String statusAgentsCount(int count) {
     return '$count 个 agent';
   }
+
+  @override
+  String get composerAgentRuntimeDriven => '此 Agent 会话由运行时驱动';
 
   @override
   String get statusTaskSection => '任务协调';

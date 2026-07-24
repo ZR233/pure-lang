@@ -48,7 +48,8 @@ pub(super) async fn checked_git(
 }
 
 fn run_git_blocking(repository: PathBuf, arguments: Vec<String>) -> Result<GitCommandOutput> {
-    let child = Command::new("git")
+    let mut command = Command::new("git");
+    command
         .arg("-C")
         .arg(&repository)
         .args([
@@ -65,7 +66,9 @@ fn run_git_blocking(repository: PathBuf, arguments: Vec<String>) -> Result<GitCo
         .env("GIT_ASKPASS", "")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    crate::process::configure_background_std_command(&mut command);
+    let child = command
         .spawn()
         .with_context(|| format!("failed to start git {}", arguments.join(" ")))?;
     let mut child = KillOnDropChild::new(child);

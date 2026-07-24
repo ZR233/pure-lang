@@ -167,6 +167,7 @@ impl SessionEventHub {
         let Some(first) = events.first() else {
             return Ok(());
         };
+        let started_at = std::time::Instant::now();
         let session_id = first.session_id.clone();
         if let Some(other) = events.iter().find(|event| event.session_id != session_id) {
             return Err(SessionEventError::SessionMismatch {
@@ -181,7 +182,7 @@ impl SessionEventHub {
             .map_err(|_| SessionEventError::LockPoisoned)?;
         let mut durable_snapshot = state.durable_snapshot.clone();
         let mut live_snapshot = state.live_snapshot.clone();
-        let mut durable_events = state.durable_events.clone();
+        let mut appended_durable = Vec::new();
         for event in &events {
             match event.position {
                 SessionEventPosition::Durable { sequence } => {
@@ -196,18 +197,30 @@ impl SessionEventHub {
                     durable_snapshot.through_sequence = sequence;
                     apply_session_event(&mut live_snapshot, event)?;
                     live_snapshot.through_sequence = sequence;
-                    durable_events.push_back(event.clone());
+                    appended_durable.push(event.clone());
                 }
                 SessionEventPosition::Transient { revision: _ } => {
                     apply_session_event(&mut live_snapshot, event)?;
                 }
             }
         }
-        trim_journal(&mut durable_events, self.inner.options);
         state.durable_snapshot = durable_snapshot;
         state.live_snapshot = live_snapshot;
-        state.durable_events = durable_events;
+        state.durable_events.extend(appended_durable);
+        trim_journal(&mut state.durable_events, self.inner.options);
+        let part_count = state.live_snapshot.parts.len();
+        let message_count = state.live_snapshot.messages.len();
+        let journal_count = state.durable_events.len();
         drop(state);
+        tracing::trace!(
+            session_id,
+            batch_events = events.len(),
+            message_count,
+            part_count,
+            journal_count,
+            elapsed_micros = started_at.elapsed().as_micros(),
+            "published session event batch"
+        );
         for event in events {
             let _ = channel.sender.send(SessionStreamFrame::Event {
                 event: Box::new(event),

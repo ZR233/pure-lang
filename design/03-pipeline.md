@@ -129,10 +129,16 @@ Skills 管理工具同样以 `workspaceRoot` 为边界，但写入面收窄到 `
 
 Agent 协作 timeline 与状态分层：
 
-- agent timeline 是 append-only 协作事件流，只记录 spawn、wait、message、followup、close、final status 和 todo list update 等事实事件
-- agent tree 是 latest snapshot，只按 `agent_id/path` 覆盖最新状态，供状态栏、树视图和 `list_agents` 使用
+- 每个 agent session 的 timeline 只记录该 owner 的 message/part/tool/interaction，以及它主动执行的 spawn、wait、message、followup、close 等协作事实
+- child 的内部模型输出、工具、Todo、skill 和 context 只进入 child session；root Planner timeline 只保留 Planner 自身协作工具调用和 child 返回的交付摘要
+- agent directory 是大会话级 latest snapshot，只保存身份、父子关系、状态、最近活动和 attention，供顶部切换入口与 `list_agents` 使用
 - 前端不得用 latest snapshot 渲染 timeline；同一个 agent 的多次状态变化必须在 timeline 中保留为多条独立事件
-- `AgentStateChanged` 只用于更新 latest snapshot；UI timeline 消费 `agentEvents` 中的 append-only `SubAgentActivity` 与 `TodoListUpdated` event。`update_todo_list` 是 Codex `update_plan` 风格的 checklist 工具事件，不是 Plan Mode plan part；每次调用提交完整 todo 快照，并在 timeline 中新增一条独立 row，不按 `callId` 覆盖旧 row。实时 `agentTimelineChanged` 与历史 `agentEvents` 都必须携带 canonical `StudioAgentTimelineEvent` 语义，Flutter 只解析规范化 payload，不得读取 raw `AgentEvent`。旧 spawn/interaction/wait/close begin/end payload 不再作为运行期协议保留。
+- `AgentStateChanged` 只更新大会话目录，不进入单 agent session stream。`update_todo_list` 是 Codex `update_plan` 风格的完整 checklist replacement，不是 Plan Mode plan part；当前 agent workspace 只展示 snapshot 中最新 Todo，不在 timeline 中保留 Todo 卡片历史。实时事件与历史 snapshot 都必须携带 canonical typed 语义，Flutter 不得读取 raw `AgentEvent`。
+
+spawn 使用 runtime 原生 child `SessionId` 创建 Studio agent session，先持久化 owner/session
+目录，再启动 runtime。Studio commit observer 不得把 child `session_events` 或 trace 重绑到
+root Studio session。恢复顺序固定为先恢复 session owner 和 agent directory，再挂载 runtime；
+owner 冲突必须拒绝并输出诊断。大会话归档级联归档其 agent sessions，但不删除历史。
 
 持久化原则：
 

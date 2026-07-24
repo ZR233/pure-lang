@@ -2334,16 +2334,25 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   SessionDto dco_decode_session_dto(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 7)
-      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
+    if (arr.length != 16)
+      throw Exception('unexpected arr length: expect 16 but see ${arr.length}');
     return SessionDto(
       id: dco_decode_String(arr[0]),
       projectId: dco_decode_String(arr[1]),
       title: dco_decode_String(arr[2]),
       mode: dco_decode_String(arr[3]),
-      updatedAt: dco_decode_i_64(arr[4]),
-      visibility: dco_decode_String(arr[5]),
-      parentSessionId: dco_decode_opt_String(arr[6]),
+      createdAt: dco_decode_i_64(arr[4]),
+      updatedAt: dco_decode_i_64(arr[5]),
+      visibility: dco_decode_String(arr[6]),
+      parentSessionId: dco_decode_opt_String(arr[7]),
+      rootSessionId: dco_decode_String(arr[8]),
+      sessionKind: dco_decode_String(arr[9]),
+      ownerAgentId: dco_decode_String(arr[10]),
+      ownerRole: dco_decode_String(arr[11]),
+      agentStatus: dco_decode_String(arr[12]),
+      agentSummary: dco_decode_opt_String(arr[13]),
+      agentError: dco_decode_opt_String(arr[14]),
+      agentUpdatedAt: dco_decode_opt_box_autoadd_i_64(arr[15]),
     );
   }
 
@@ -3886,17 +3895,35 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_projectId = sse_decode_String(deserializer);
     var var_title = sse_decode_String(deserializer);
     var var_mode = sse_decode_String(deserializer);
+    var var_createdAt = sse_decode_i_64(deserializer);
     var var_updatedAt = sse_decode_i_64(deserializer);
     var var_visibility = sse_decode_String(deserializer);
     var var_parentSessionId = sse_decode_opt_String(deserializer);
+    var var_rootSessionId = sse_decode_String(deserializer);
+    var var_sessionKind = sse_decode_String(deserializer);
+    var var_ownerAgentId = sse_decode_String(deserializer);
+    var var_ownerRole = sse_decode_String(deserializer);
+    var var_agentStatus = sse_decode_String(deserializer);
+    var var_agentSummary = sse_decode_opt_String(deserializer);
+    var var_agentError = sse_decode_opt_String(deserializer);
+    var var_agentUpdatedAt = sse_decode_opt_box_autoadd_i_64(deserializer);
     return SessionDto(
       id: var_id,
       projectId: var_projectId,
       title: var_title,
       mode: var_mode,
+      createdAt: var_createdAt,
       updatedAt: var_updatedAt,
       visibility: var_visibility,
       parentSessionId: var_parentSessionId,
+      rootSessionId: var_rootSessionId,
+      sessionKind: var_sessionKind,
+      ownerAgentId: var_ownerAgentId,
+      ownerRole: var_ownerRole,
+      agentStatus: var_agentStatus,
+      agentSummary: var_agentSummary,
+      agentError: var_agentError,
+      agentUpdatedAt: var_agentUpdatedAt,
     );
   }
 
@@ -5216,9 +5243,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.projectId, serializer);
     sse_encode_String(self.title, serializer);
     sse_encode_String(self.mode, serializer);
+    sse_encode_i_64(self.createdAt, serializer);
     sse_encode_i_64(self.updatedAt, serializer);
     sse_encode_String(self.visibility, serializer);
     sse_encode_opt_String(self.parentSessionId, serializer);
+    sse_encode_String(self.rootSessionId, serializer);
+    sse_encode_String(self.sessionKind, serializer);
+    sse_encode_String(self.ownerAgentId, serializer);
+    sse_encode_String(self.ownerRole, serializer);
+    sse_encode_String(self.agentStatus, serializer);
+    sse_encode_opt_String(self.agentSummary, serializer);
+    sse_encode_opt_String(self.agentError, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.agentUpdatedAt, serializer);
   }
 
   @protected

@@ -98,7 +98,7 @@ impl LocalExecutionBackend {
         command.stdin(Stdio::null());
         command.stdout(Stdio::piped());
         command.stderr(Stdio::piped());
-        command.kill_on_drop(true);
+        crate::process::configure_background_command(&mut command);
         let child = command.spawn().map_err(|error| {
             LocalExecutionFailure::BeforeSpawn(format!("failed to run command: {error}"))
         })?;

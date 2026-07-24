@@ -6,7 +6,7 @@ use crate::{
     SubAgentActivityKind, TodoListSnapshot, TokenUsageSnapshot,
 };
 
-pub const SESSION_EVENT_SCHEMA_VERSION: u32 = 1;
+pub const SESSION_EVENT_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -164,6 +164,8 @@ pub struct SessionViewSnapshot {
     pub session_id: String,
     pub through_sequence: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner: Option<SessionOwnerSnapshot>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn: Option<SessionTurn>,
     #[serde(default)]
     pub messages: Vec<SessionMessage>,
@@ -189,6 +191,7 @@ impl SessionViewSnapshot {
             schema_version: SESSION_EVENT_SCHEMA_VERSION,
             session_id: session_id.into(),
             through_sequence: 0,
+            owner: None,
             turn: None,
             messages: Vec::new(),
             parts: Vec::new(),
@@ -200,6 +203,17 @@ impl SessionViewSnapshot {
             plan_events: Vec::new(),
         }
     }
+}
+
+/// 单一 session 的稳定 owner 身份。
+///
+/// Session timeline、Todo、context、skills 与 interaction 都必须来自这个 agent。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionOwnerSnapshot {
+    pub agent_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -31,10 +31,47 @@ class ComposerDock extends ConsumerWidget {
               maxWidth: StudioLayout.conversationWidth,
             ),
             child: interaction == null
-                ? _PromptComposer(state: state)
+                ? state.selectedAgentSession?.isAgent == true
+                      ? _RuntimeDrivenAgentDock(state: state)
+                      : _PromptComposer(state: state)
                 : _InteractionDock(state: state, interaction: interaction),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _RuntimeDrivenAgentDock extends StatelessWidget {
+  const _RuntimeDrivenAgentDock({required this.state});
+
+  final StudioState state;
+
+  @override
+  Widget build(BuildContext context) {
+    return StudioPanel(
+      backgroundColor: context.studioPaper2,
+      borderColor: context.studioLine,
+      radius: StudioRadii.lg,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+      child: Row(
+        children: [
+          Icon(
+            Icons.lock_clock_outlined,
+            size: 18,
+            color: context.studioInkSoft,
+          ),
+          const SizedBox(width: 9),
+          Expanded(
+            child: Text(
+              context.l10n.composerAgentRuntimeDriven,
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: context.studioInkSoft),
+            ),
+          ),
+          if (state.isBusy) const _StopButton(),
+        ],
       ),
     );
   }

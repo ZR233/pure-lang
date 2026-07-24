@@ -12,11 +12,13 @@ import 'api/studio/handlers/prompt.dart';
 import 'api/studio/handlers/providers.dart';
 import 'api/studio/handlers/session.dart';
 import 'api/studio/handlers/settings.dart';
+import 'api/studio/handlers/updater.dart';
 import 'api/studio/types/event.dart';
 import 'api/studio/types/interaction.dart';
 import 'api/studio/types/response.dart';
 import 'api/studio/types/runtime.dart';
 import 'api/studio/types/settings.dart';
+import 'api/studio/types/updater.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'frb_generated.dart';
@@ -42,6 +44,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   dco_decode_StreamSink_bridge_session_stream_frame_Sse(dynamic raw);
 
   @protected
+  RustStreamSink<BridgeStudioUpdateEventDto>
+  dco_decode_StreamSink_bridge_studio_update_event_dto_Sse(dynamic raw);
+
+  @protected
   String dco_decode_String(dynamic raw);
 
   @protected
@@ -59,6 +65,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   BridgeModelReasoningDescriptor
   dco_decode_box_autoadd_bridge_model_reasoning_descriptor(dynamic raw);
+
+  @protected
+  BridgeStudioUpdateDto dco_decode_box_autoadd_bridge_studio_update_dto(
+    dynamic raw,
+  );
 
   @protected
   BridgeTaskRuntimeDto dco_decode_box_autoadd_bridge_task_runtime_dto(
@@ -168,6 +179,19 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeStudioSnapshotResponse dco_decode_bridge_studio_snapshot_response(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeStudioUpdateCheckDto dco_decode_bridge_studio_update_check_dto(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeStudioUpdateDto dco_decode_bridge_studio_update_dto(dynamic raw);
+
+  @protected
+  BridgeStudioUpdateEventDto dco_decode_bridge_studio_update_event_dto(
     dynamic raw,
   );
 
@@ -409,6 +433,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  RustStreamSink<BridgeStudioUpdateEventDto>
+  sse_decode_StreamSink_bridge_studio_update_event_dto_Sse(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   String sse_decode_String(SseDeserializer deserializer);
 
   @protected
@@ -432,6 +462,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   BridgeModelReasoningDescriptor
   sse_decode_box_autoadd_bridge_model_reasoning_descriptor(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeStudioUpdateDto sse_decode_box_autoadd_bridge_studio_update_dto(
     SseDeserializer deserializer,
   );
 
@@ -565,6 +600,21 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeStudioSnapshotResponse sse_decode_bridge_studio_snapshot_response(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeStudioUpdateCheckDto sse_decode_bridge_studio_update_check_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeStudioUpdateDto sse_decode_bridge_studio_update_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeStudioUpdateEventDto sse_decode_bridge_studio_update_event_dto(
     SseDeserializer deserializer,
   );
 
@@ -869,6 +919,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_StreamSink_bridge_studio_update_event_dto_Sse(
+    RustStreamSink<BridgeStudioUpdateEventDto> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_String(String self, SseSerializer serializer);
 
   @protected
@@ -895,6 +951,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_bridge_model_reasoning_descriptor(
     BridgeModelReasoningDescriptor self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_bridge_studio_update_dto(
+    BridgeStudioUpdateDto self,
     SseSerializer serializer,
   );
 
@@ -1057,6 +1119,24 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_bridge_studio_snapshot_response(
     BridgeStudioSnapshotResponse self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_studio_update_check_dto(
+    BridgeStudioUpdateCheckDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_studio_update_dto(
+    BridgeStudioUpdateDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_studio_update_event_dto(
+    BridgeStudioUpdateEventDto self,
     SseSerializer serializer,
   );
 

@@ -192,7 +192,6 @@ pub(super) async fn run_git_checked(workspace: &Path, args: &[&str]) -> Result<O
 pub(super) async fn run_git(workspace: &Path, args: &[&str]) -> Result<Output> {
     let mut command = Command::new("git");
     command
-        .kill_on_drop(true)
         .arg("-C")
         .arg(workspace)
         .args([
@@ -205,6 +204,7 @@ pub(super) async fn run_git(workspace: &Path, args: &[&str]) -> Result<Output> {
         ])
         .args(args)
         .env("GIT_TERMINAL_PROMPT", "0");
+    crate::process::configure_background_command(&mut command);
     Ok(tokio::time::timeout(GIT_TIMEOUT, command.output())
         .await
         .with_context(|| format!("git {} timed out", args.join(" ")))??)

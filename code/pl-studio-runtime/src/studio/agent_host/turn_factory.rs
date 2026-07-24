@@ -92,7 +92,7 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         let mode = StudioMode::from_label(&session_record.mode);
         let task_phase = if mode == StudioMode::Task {
             self.store
-                .find_active_task_run_for_session(&studio_session_id)
+                .find_active_task_run_for_session(&session_record.root_session_id)
                 .await
                 .map_err(anyhow_error)?
                 .map(|run| run.phase)
@@ -149,7 +149,7 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         if mode == StudioMode::Task {
             self.coordinator.install_tools(
                 kernel.core_mut(),
-                &studio_session_id,
+                &session_record.root_session_id,
                 context.runtime.clone(),
                 &context.snapshot,
             );

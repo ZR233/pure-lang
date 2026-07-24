@@ -230,6 +230,10 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get composerAgentRuntimeDriven =>
+      'This agent session is driven by the runtime';
+
+  @override
   String get statusTaskSection => 'Task coordinator';
 
   @override

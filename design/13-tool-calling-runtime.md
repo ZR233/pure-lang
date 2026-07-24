@@ -117,9 +117,9 @@ Studio runtime 的 live-only event 通道只允许发送 `MessagePartDelta` 和 
 
 Windows 本地 backend 上 `exec.command` 的默认宿主 shell 是 PowerShell：运行时先查找 `pwsh.exe`，再查找 `powershell.exe`，都不可用时才使用 `cmd.exe /C`。PowerShell 命令以 `-NoProfile -Command` 执行，并注入 UTF-8 输出设置；这只影响命令字符串的宿主 shell，不改变 `exec` / `write_stdin` 的公开 schema、审批策略或 JSON 结果字段。
 
-`spawn_agent`、`send_input`、`wait_agent`、`list_agents` 和 `close_agent` 的模型可见输出必须由 pl-core collaboration adapter 从 runtime typed snapshot 构造；宿主只通过 lifecycle、repository 与 event sink 提供产品资源和持久化事实，不手写共享状态形状。`wait_agent` 在目标 `Idle` 且队列为空时返回 `{ target, timedOut: false, snapshot, lastTurn }`，超时仅返回 `{ target, timedOut: true }`；需要树级状态时调用 `list_agents` 获取 compact snapshot。后续输入由 `send_input.delivery` 的 `QueueOnly | Start | InterruptThenStart` 明确表达，不存在单独的 resume 命令。Studio 展示依赖持久化后的 `AgentChanged` latest snapshot 和 `SubAgentActivity` / `TodoListUpdated` append-only timeline。`spawn_agent.forkTurns` 的历史继承只复制过滤后的父会话消息，不复制工具结果、工具调用 metadata、reasoning 内容或运行时调度提示。
+`spawn_agent`、`send_input`、`wait_agent`、`list_agents` 和 `close_agent` 的模型可见输出必须由 pl-core collaboration adapter 从 runtime typed snapshot 构造；宿主只通过 lifecycle、repository 与 event sink 提供产品资源和持久化事实，不手写共享状态形状。`wait_agent` 在目标 `Idle` 且队列为空时返回 `{ target, timedOut: false, snapshot, lastTurn }`，超时仅返回 `{ target, timedOut: true }`；需要树级状态时调用 `list_agents` 获取 compact snapshot。后续输入由 `send_input.delivery` 的 `QueueOnly | Start | InterruptThenStart` 明确表达，不存在单独的 resume 命令。Studio 把 owner lifecycle 投影到大会话级 Agent Directory；每个 agent session 的 `SubAgentActivity` 只记录该 owner 主动执行的协作事实，`TodoListUpdated` 作为完整 replacement 保存在该 session 的 canonical snapshot 中。`spawn_agent.forkTurns` 的历史继承只复制过滤后的父会话消息，不复制工具结果、工具调用 metadata、reasoning 内容或运行时调度提示。
 
-`update_todo_list` 是 Codex `update_plan` 风格的内置 checklist 工具，root agent 与 subagent 都可用，且不代表 Plan Mode 的 `plan` part。工具输入是完整快照：`explanation?: string` 与 `items: [{ step, status }]`，其中 `status` 只允许 `pending | inProgress | completed`，且同一快照最多一个 `inProgress`。工具成功后只返回紧凑 `{ status: "updated" }` 给模型，同时发送 `TodoListUpdated` agent timeline event；后端不维护 latest todo cache，也不按 patch 增量合并。
+`update_todo_list` 是 Codex `update_plan` 风格的内置 checklist 工具，root agent 与 subagent 都可用，且不代表 Plan Mode 的 `plan` part。工具输入是完整快照：`explanation?: string` 与 `items: [{ step, status }]`，其中 `status` 只允许 `pending | inProgress | completed`，且同一快照最多一个 `inProgress`。工具成功后只返回紧凑 `{ status: "updated" }` 给模型，同时提交 `TodoListUpdated` durable replacement；canonical session snapshot 保留最新 replacement，Flutter Todo selector 只展示最新值，不按 patch 增量合并，也不把历次更新渲染为 timeline row。
 
 会话笔记是独立于模型历史和 pinned context 的持久化文本。它作为隐藏的
 `ModelContextItem` 随 canonical session 保存，在 session 删除时一并删除；正文不进入
@@ -145,9 +145,9 @@ MCP tool 成功结果写回紧凑字符串。文本内容按 MCP content 顺序�
 
 Studio timeline 以 message/part projection 派生的 conversation row 为准。后端不创建聚合工具 part；每个工具调用仍作为独立 `StudioPartType::Tool` snapshot/delta 持久化，但 tool part 必须在 Studio wire、FRB DTO 和 `message_parts.activity_group_id` 中携带 `activityGroupId`。该字段由 turn timeline actor 根据 assistant 阅读流边界分配：连续工具复用当前工具活动段，遇到可见 assistant text/commentary/final、reasoning、plan 或 agent row 后关闭当前段，之后工具新开段。Flutter timeline projection 只把相同 `activityGroupId` 的 tool part 合并为一个默认折叠的工具活动组；缺失该字段的历史 tool part 按单工具组展示。工具组详情必须显示工具名称、状态、关键路径或命令摘要。静默文件工具的成功结果可以隐藏在详情中；但失败、拒绝、中断和预算受限时必须在组摘要和详情中展示 result/error，避免用户只看到“工具调用失败”而无法定位原因。
 
-工具、命令、文件修改、子代理协作活动和 todo list 更新的用户可读文本由前端 projection 根据结构化 `StudioPart.tool`、`StudioPart.agent` 与 agent timeline typed payload 生成。后端不新增 `activityText` 之类的本地化文案字段；如果展示层缺少必要事实，应补充结构化字段而不是补一段后端写死文本。固定标签和状态说明由 Flutter i18n 负责，工具名、agent path、工作目录、路径、命令摘要和模型名按原始领域值展示。工具运行时的单工具 start/end/approval/review commentary 属于 verbose/debug 诊断信息，普通模式只保留 turn 级工具批次 commentary，避免 timeline 在已有工具组之外重复出现每个工具的进展文本。
+工具、命令、文件修改和子代理协作活动的用户可读文本由前端 projection 根据结构化 `StudioPart.tool`、`StudioPart.agent` 与 agent timeline typed payload 生成；Todo replacement 由独立侧栏按结构化 item 渲染。后端不新增 `activityText` 之类的本地化文案字段；如果展示层缺少必要事实，应补充结构化字段而不是补一段后端写死文本。固定标签和状态说明由 Flutter i18n 负责，工具名、agent path、工作目录、路径、命令摘要和模型名按原始领域值展示。工具运行时的单工具 start/end/approval/review commentary 属于 verbose/debug 诊断信息，普通模式只保留 turn 级工具批次 commentary，避免 timeline 在已有工具组之外重复出现每个工具的进展文本。
 
-父 timeline 默认只展示子代理高层协作事件，例如 spawn、wait、send/followup、close 和 todo list update。子代理协作活动可按 `callId` 合并 begin/end 状态；todo list update 必须按每次调用新增 row，不参与该合并。子代理内部普通工具 trace 不自动灌入父 timeline；这些细节应保留在子代理详情、状态栏弹层或专门的 agent 视图中。`AgentChanged` 是 latest snapshot merge，适合更新状态栏和活动详情，不应作为每次状态变更的新 timeline row。
+父 timeline 默认只展示 Planner 自己执行的子代理高层协作事实，例如 spawn、wait、send/followup 和 close，以及 child 返回给 Planner 的交付摘要。子代理协作活动可按 `callId` 合并 begin/end 状态；Todo replacement 只进入执行该调用的 agent session 的最新 Todo 侧栏。子代理内部普通工具 trace 不自动灌入父 timeline，这些细节保留在 child 自己的 session。owner lifecycle/status 只更新大会话级 Agent Directory，不作为单 agent timeline row。
 
 ## Web 搜索工具规划
 

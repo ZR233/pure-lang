@@ -5,7 +5,9 @@ use crate::{
 use anyhow::{Context, Result, bail};
 
 use crate::studio::entities;
-use crate::studio::records::{AttachmentRecord, ProjectRecord, SessionRecord, SessionVisibility};
+use crate::studio::records::{
+    AttachmentRecord, ProjectRecord, SessionKind, SessionRecord, SessionVisibility,
+};
 
 pub fn project_record(model: entities::project::Model) -> ProjectRecord {
     ProjectRecord {
@@ -26,10 +28,26 @@ pub fn session_record(model: entities::session::Model) -> SessionRecord {
         project_id: model.project_id,
         title: model.title,
         mode: model.mode,
+        created_at: model.created_at,
         updated_at: model.updated_at,
         visibility: session_visibility_from_label(&model.visibility),
         parent_session_id: model.parent_session_id,
+        root_session_id: model.root_session_id,
+        session_kind: session_kind_from_label(&model.session_kind),
+        owner_agent_id: model.owner_agent_id,
+        owner_role: model.owner_role,
+        agent_status: model.agent_status,
+        agent_summary: model.agent_summary,
+        agent_error: model.agent_error,
+        agent_updated_at: model.agent_updated_at,
         instruction_snapshot,
+    }
+}
+
+fn session_kind_from_label(label: &str) -> SessionKind {
+    match label {
+        "agent" => SessionKind::Agent,
+        _ => SessionKind::Root,
     }
 }
 

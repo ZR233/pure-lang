@@ -202,8 +202,41 @@ StudioState responsiveVisualState() {
     projectId: project.id,
     title: responsiveVisualSessionTitle,
     mode: StudioMode.simple,
+    ownerAgentId: 'agent-planner',
+    ownerRole: 'planner',
+    agentStatus: 'idle',
     updatedAt: timestamp,
   );
+  final agentSessions = [
+    StudioSession(
+      id: 'session-reviewer',
+      projectId: project.id,
+      title: 'Responsive reviewer',
+      mode: StudioMode.simple,
+      createdAt: timestamp.add(const Duration(seconds: 1)),
+      updatedAt: timestamp.add(const Duration(seconds: 1)),
+      parentSessionId: session.id,
+      rootSessionId: session.id,
+      sessionKind: StudioSessionKind.agent,
+      ownerAgentId: 'agent-reviewer',
+      ownerRole: 'reviewer',
+      agentStatus: 'running',
+    ),
+    StudioSession(
+      id: 'session-worker',
+      projectId: project.id,
+      title: 'Capture worker',
+      mode: StudioMode.simple,
+      createdAt: timestamp.add(const Duration(seconds: 2)),
+      updatedAt: timestamp.add(const Duration(seconds: 2)),
+      parentSessionId: session.id,
+      rootSessionId: session.id,
+      sessionKind: StudioSessionKind.agent,
+      ownerAgentId: 'agent-worker',
+      ownerRole: 'worker',
+      agentStatus: 'completed',
+    ),
+  ];
   final messages = [
     TimelineMessage(
       id: 'message-user',
@@ -260,7 +293,7 @@ StudioState responsiveVisualState() {
   ];
   return StudioState(
     projects: const [project],
-    sessions: [session],
+    sessions: [session, ...agentSessions],
     messagesBySession: {session.id: messages},
     partSnapshotsBySession: {
       session.id: {for (final part in parts) part.id: part},

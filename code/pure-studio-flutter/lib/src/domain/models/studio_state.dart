@@ -13,6 +13,17 @@ class _StudioStateUnset {
 }
 
 const _studioStateUnset = _StudioStateUnset();
+const _emptySessionRuntime = SessionRuntimeView(
+  model: '',
+  contextTokens: 0,
+  contextWindow: 0,
+  totalTokens: 0,
+  costLabel: '',
+  activeSkills: [],
+  activeMcpServers: [],
+  activeLspServers: [],
+  agentCount: 0,
+);
 
 class StudioState {
   const StudioState({
@@ -35,12 +46,16 @@ class StudioState {
     this.webSearch = const WebSearchSettingsView(),
     required this.selectedProjectId,
     required this.selectedSessionId,
+    this.selectedRootSessionId,
     required this.permissionMode,
     required this.turnPhase,
     required this.runtime,
+    this.turnPhasesBySession = const {},
+    this.runtimesBySession = const {},
     required this.pendingInteractions,
     this.eventCursorsBySession = const {},
     this.composerText = '',
+    this.composerTextsBySession = const {},
   });
 
   final List<StudioProject> projects;
@@ -63,12 +78,88 @@ class StudioState {
   final WebSearchSettingsView webSearch;
   final String? selectedProjectId;
   final String? selectedSessionId;
+  final String? selectedRootSessionId;
   final PermissionMode permissionMode;
   final TurnPhase turnPhase;
   final SessionRuntimeView runtime;
+  final Map<String, TurnPhase> turnPhasesBySession;
+  final Map<String, SessionRuntimeView> runtimesBySession;
   final List<PendingInteraction> pendingInteractions;
   final Map<String, int> eventCursorsBySession;
   final String composerText;
+  final Map<String, String> composerTextsBySession;
+
+  String? get selectedAgentSessionId => selectedSessionId;
+
+  List<StudioSession> get rootSessions =>
+      sessions.where((session) => session.isRoot).toList();
+
+  StudioSession? get selectedAgentSession {
+    final sessionId = selectedSessionId;
+    if (sessionId == null) {
+      return null;
+    }
+    return sessions.where((session) => session.id == sessionId).firstOrNull;
+  }
+
+  StudioSession? get selectedRootSession {
+    final explicitRootId = selectedRootSessionId;
+    if (explicitRootId != null) {
+      final explicit = sessions
+          .where((session) => session.id == explicitRootId && session.isRoot)
+          .firstOrNull;
+      if (explicit != null) {
+        return explicit;
+      }
+    }
+    final selected = selectedAgentSession;
+    final rootId = selected?.effectiveRootSessionId;
+    if (rootId != null) {
+      return sessions
+          .where((session) => session.id == rootId && session.isRoot)
+          .firstOrNull;
+    }
+    return null;
+  }
+
+  List<StudioSession> get agentSessionsForSelectedRoot {
+    final root = selectedRootSession;
+    if (root == null) {
+      return const [];
+    }
+    final scoped = sessions
+        .where((session) => session.effectiveRootSessionId == root.id)
+        .toList();
+    final children = <String?, List<StudioSession>>{};
+    for (final session in scoped) {
+      children.putIfAbsent(session.parentSessionId, () => []).add(session);
+    }
+    for (final siblings in children.values) {
+      siblings.sort((left, right) {
+        final created = left.effectiveCreatedAt.compareTo(
+          right.effectiveCreatedAt,
+        );
+        return created != 0 ? created : left.id.compareTo(right.id);
+      });
+    }
+    final ordered = <StudioSession>[];
+    final visited = <String>{};
+    void appendBranch(StudioSession session) {
+      if (!visited.add(session.id)) {
+        return;
+      }
+      ordered.add(session);
+      for (final child in children[session.id] ?? const <StudioSession>[]) {
+        appendBranch(child);
+      }
+    }
+
+    appendBranch(root);
+    for (final session in scoped) {
+      appendBranch(session);
+    }
+    return ordered;
+  }
 
   List<TimelineMessage> get selectedMessages {
     final sessionId = selectedSessionId;
@@ -94,6 +185,21 @@ class StudioState {
       ],
       agentEvents: agentTimelineEventsBySession[sessionId]?.values ?? const [],
     );
+  }
+
+  TimelineTodoListUpdate? get selectedTodoList {
+    final sessionId = selectedSessionId;
+    if (sessionId == null) {
+      return null;
+    }
+    final updates =
+        (agentTimelineEventsBySession[sessionId]?.values ?? const [])
+            .where((event) => event.payload is TimelineTodoListUpdate)
+            .toList()
+          ..sort(compareTimelineAgentEvents);
+    return updates.isEmpty
+        ? null
+        : updates.last.payload as TimelineTodoListUpdate;
   }
 
   PendingInteraction? get activeInteraction {
@@ -169,13 +275,49 @@ class StudioState {
     WebSearchSettingsView? webSearch,
     Object? selectedProjectId = _studioStateUnset,
     Object? selectedSessionId = _studioStateUnset,
+    Object? selectedRootSessionId = _studioStateUnset,
     PermissionMode? permissionMode,
     TurnPhase? turnPhase,
     SessionRuntimeView? runtime,
+    Map<String, TurnPhase>? turnPhasesBySession,
+    Map<String, SessionRuntimeView>? runtimesBySession,
     List<PendingInteraction>? pendingInteractions,
     Map<String, int>? eventCursorsBySession,
     String? composerText,
+    Map<String, String>? composerTextsBySession,
   }) {
+    final nextSelectedSessionId =
+        identical(selectedSessionId, _studioStateUnset)
+        ? this.selectedSessionId
+        : selectedSessionId as String?;
+    final nextTurnPhases = {
+      ...this.turnPhasesBySession,
+      ...?turnPhasesBySession,
+    };
+    final nextRuntimes = {...this.runtimesBySession, ...?runtimesBySession};
+    final currentSessionId = this.selectedSessionId;
+    if (currentSessionId != null) {
+      nextTurnPhases[currentSessionId] = this.turnPhase;
+      nextRuntimes[currentSessionId] = this.runtime;
+    }
+    if (nextSelectedSessionId != null) {
+      if (turnPhase != null) {
+        nextTurnPhases[nextSelectedSessionId] = turnPhase;
+      }
+      if (runtime != null) {
+        nextRuntimes[nextSelectedSessionId] = runtime;
+      }
+    }
+    final selectedTurnPhase =
+        turnPhase ??
+        (nextSelectedSessionId == this.selectedSessionId
+            ? this.turnPhase
+            : nextTurnPhases[nextSelectedSessionId] ?? TurnPhase.idle);
+    final selectedRuntime =
+        runtime ??
+        (nextSelectedSessionId == this.selectedSessionId
+            ? this.runtime
+            : nextRuntimes[nextSelectedSessionId] ?? _emptySessionRuntime);
     return StudioState(
       projects: projects ?? this.projects,
       sessions: sessions ?? this.sessions,
@@ -202,16 +344,21 @@ class StudioState {
       selectedProjectId: identical(selectedProjectId, _studioStateUnset)
           ? this.selectedProjectId
           : selectedProjectId as String?,
-      selectedSessionId: identical(selectedSessionId, _studioStateUnset)
-          ? this.selectedSessionId
-          : selectedSessionId as String?,
+      selectedSessionId: nextSelectedSessionId,
+      selectedRootSessionId: identical(selectedRootSessionId, _studioStateUnset)
+          ? this.selectedRootSessionId
+          : selectedRootSessionId as String?,
       permissionMode: permissionMode ?? this.permissionMode,
-      turnPhase: turnPhase ?? this.turnPhase,
-      runtime: runtime ?? this.runtime,
+      turnPhase: selectedTurnPhase,
+      runtime: selectedRuntime,
+      turnPhasesBySession: nextTurnPhases,
+      runtimesBySession: nextRuntimes,
       pendingInteractions: pendingInteractions ?? this.pendingInteractions,
       eventCursorsBySession:
           eventCursorsBySession ?? this.eventCursorsBySession,
       composerText: composerText ?? this.composerText,
+      composerTextsBySession:
+          composerTextsBySession ?? this.composerTextsBySession,
     );
   }
 }

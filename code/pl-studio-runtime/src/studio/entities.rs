@@ -39,6 +39,14 @@ pub mod session {
         pub visibility: String,
         pub instruction_snapshot_json: Option<String>,
         pub parent_session_id: Option<String>,
+        pub root_session_id: String,
+        pub session_kind: String,
+        pub owner_agent_id: String,
+        pub owner_role: String,
+        pub agent_status: String,
+        pub agent_summary: Option<String>,
+        pub agent_error: Option<String>,
+        pub agent_updated_at: Option<i64>,
     }
 
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

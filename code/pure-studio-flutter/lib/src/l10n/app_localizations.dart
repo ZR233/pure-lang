@@ -476,6 +476,12 @@ abstract class AppLocalizations {
   /// **'{count, plural, =1{1 agent} other{{count} agents}}'**
   String statusAgentsCount(int count);
 
+  /// No description provided for @composerAgentRuntimeDriven.
+  ///
+  /// In en, this message translates to:
+  /// **'This agent session is driven by the runtime'**
+  String get composerAgentRuntimeDriven;
+
   /// No description provided for @statusTaskSection.
   ///
   /// In en, this message translates to:

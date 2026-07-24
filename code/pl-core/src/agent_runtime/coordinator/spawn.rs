@@ -97,12 +97,13 @@ where
         sessions: vec![request.session.clone()],
     }
     .into_durable_state();
+    let child_session_id = request.session.id.clone();
     let metadata = request.metadata.clone();
     let initial_turn_id = request.initial_message.map(|message| {
         let turn_id = TurnId::generate();
         state.pending_inputs.push_back(PendingAgentInput {
             turn_id: turn_id.clone(),
-            session_id: request.session.id,
+            session_id: child_session_id.clone(),
             message,
             metadata: request.metadata,
             queued_at: unix_timestamp(),
@@ -116,6 +117,7 @@ where
         .prepare_spawn(SpawnLifecycleRequest {
             parent,
             child: state.snapshot.clone(),
+            child_session_id,
             metadata,
         })
         .await

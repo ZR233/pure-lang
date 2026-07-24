@@ -49,8 +49,8 @@ async fn task_diff(run: &TaskRunRecord) -> Result<String> {
         ])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
+        .stderr(Stdio::piped());
+    crate::process::configure_background_command(&mut command);
     let output = tokio::time::timeout(Duration::from_secs(120), command.output())
         .await
         .context("review diff command timed out")??;

@@ -4,8 +4,8 @@ use super::projector::SessionEventProjectionBatch;
 
 /// 已由框架或产品适配层确认的会话事实。
 ///
-/// 产品可以决定事实属于哪个展示会话，但不能分配 durable sequence、构造事件 envelope，
-/// 或直接广播。所有重绑定、排序与投影仍由 `pl-core` 完成。
+/// 产品只能向当前 agent 拥有的 session 记录事实，不能分配 durable sequence、构造事件
+/// envelope 或直接广播。所有排序与投影仍由 `pl-core` 完成。
 #[derive(Debug, Clone)]
 pub struct SessionEventFact {
     pub source_event_id: String,
@@ -23,24 +23,6 @@ pub enum SessionEventFactPosition {
 }
 
 impl SessionEventFact {
-    /// 把另一个 framework session 的已校验事件作为共享展示会话的事实输入。
-    pub fn from_committed_event(event: SessionEventEnvelope) -> Self {
-        let position = match event.position {
-            SessionEventPosition::Durable { sequence: _ } => SessionEventFactPosition::Durable,
-            SessionEventPosition::Transient { revision } => {
-                SessionEventFactPosition::Transient { revision }
-            }
-        };
-        Self {
-            source_event_id: event.event_id,
-            source_agent_id: event.source_agent_id,
-            turn_id: event.turn_id,
-            emitted_at: event.emitted_at,
-            position,
-            kind: event.kind,
-        }
-    }
-
     pub fn durable(
         source_agent_id: Option<String>,
         turn_id: Option<String>,

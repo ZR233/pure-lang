@@ -21,10 +21,15 @@ pub(super) struct StudioAgentResource {
 #[derive(Clone, Default)]
 pub(in crate::studio) struct StudioAgentResources {
     entries: Arc<RwLock<BTreeMap<AgentId, StudioAgentResource>>>,
+    session_bindings: Arc<RwLock<BTreeMap<AgentId, String>>>,
 }
 
 impl StudioAgentResources {
     pub(super) async fn insert(&self, id: AgentId, resource: StudioAgentResource) {
+        self.session_bindings
+            .write()
+            .await
+            .insert(id.clone(), resource.studio_session_id.clone());
         self.entries.write().await.insert(id, resource);
     }
 
@@ -36,8 +41,24 @@ impl StudioAgentResources {
         self.entries.write().await.remove(id)
     }
 
+    pub(in crate::studio) async fn restore_bindings(
+        &self,
+        sessions: impl IntoIterator<Item = crate::studio::SessionRecord>,
+    ) {
+        let mut bindings = self.session_bindings.write().await;
+        for session in sessions {
+            let Ok(agent_id) = AgentId::new(session.owner_agent_id) else {
+                continue;
+            };
+            bindings.insert(agent_id, session.id);
+        }
+    }
+
     pub(super) async fn studio_session_id(&self, id: &AgentId) -> Option<String> {
         if let Some(session_id) = root_session_id(id) {
+            return Some(session_id);
+        }
+        if let Some(session_id) = self.session_bindings.read().await.get(id).cloned() {
             return Some(session_id);
         }
         self.get(id)

@@ -103,6 +103,7 @@
       "count": { "type": "int" }
     }
   },
+  "composerAgentRuntimeDriven": "This agent session is driven by the runtime",
   "statusTaskSection": "Task coordinator",
   "statusTaskBranch": "Branch",
   "statusTaskHead": "HEAD",

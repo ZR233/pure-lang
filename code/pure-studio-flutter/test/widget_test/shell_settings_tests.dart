@@ -184,8 +184,8 @@ void registerShellSettingsTests() {
     expect(find.text('42%'), findsNothing);
     expect(find.text('42/100'), findsNothing);
     expect(find.text('CNY 0.16'), findsOneWidget);
-    expect(find.text('1 skill · 1 MCP · 1 LSP · 1 agent'), findsOneWidget);
-    expect(find.text('1 skill · 1 MCP · 1 LSP'), findsNothing);
+    expect(find.text('1 skill · 1 MCP · 1 LSP'), findsOneWidget);
+    expect(find.text('1 skill · 1 MCP · 1 LSP · 1 agent'), findsNothing);
     expect(find.text('2 agents · 1 running'), findsNothing);
 
     final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
@@ -207,7 +207,7 @@ void registerShellSettingsTests() {
     await tester.tapAt(Offset.zero);
     await tester.pumpAndSettle();
 
-    final activityFinder = find.text('1 skill · 1 MCP · 1 LSP · 1 agent');
+    final activityFinder = find.text('1 skill · 1 MCP · 1 LSP');
     final activityCenter = tester.getCenter(activityFinder);
     final activityRect = tester.getRect(activityFinder);
     await tester.tapAt(Offset(activityRect.left + 8, activityCenter.dy));
@@ -216,13 +216,9 @@ void registerShellSettingsTests() {
     expect(find.textContaining('Skills · flutter-ui'), findsOneWidget);
     expect(find.textContaining('MCP · dart'), findsOneWidget);
     expect(find.textContaining('LSP · rust-analyzer'), findsOneWidget);
-    expect(find.text('SUBAGENTS'), findsOneWidget);
-    expect(find.text('reviewer'), findsOneWidget);
-    expect(find.text('worker'), findsOneWidget);
-    expect(find.text('Running'), findsOneWidget);
-    await tester.tap(find.text('reviewer'));
-    await tester.pumpAndSettle();
-    expect(find.textContaining('Checking status projection'), findsOneWidget);
+    expect(find.text('SUBAGENTS'), findsNothing);
+    expect(find.text('reviewer'), findsNothing);
+    expect(find.text('worker'), findsNothing);
     await tester.tapAt(Offset.zero);
     await tester.pumpAndSettle();
 
@@ -545,7 +541,7 @@ void registerShellSettingsTests() {
     );
     await tester.pumpAndSettle();
 
-    final taskActivity = find.textContaining('Implementing · 1 agent');
+    final taskActivity = find.text('Implementing');
     expect(taskActivity, findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.tap(find.byTooltip('Session mode'));
@@ -553,6 +549,8 @@ void registerShellSettingsTests() {
     expect(find.text('Task'), findsNothing);
     expect(api.sessionModeUpdate, isNull);
 
+    await tester.ensureVisible(taskActivity);
+    await tester.pumpAndSettle();
     await tester.tap(taskActivity);
     await tester.pumpAndSettle();
     expect(find.text('TASK COORDINATOR'), findsOneWidget);

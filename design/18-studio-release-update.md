@@ -59,6 +59,10 @@ GitHub draft Release 只对具备仓库 push 权限的身份可见，因此负�
 包含 LICENSE 与 THIRD_PARTY_NOTICES。便携版只供手动分发；便携用户执行应用内升级时进入
 正式安装版，不对当前运行目录做原地覆盖。
 
+安装器与便携包继续排除 PDB；Windows 构建必须同时产生独立、带 release version、commit
+SHA 与 session protocol version 映射的 symbols artifact，收集 runner 和 Rust bridge 的匹配
+PDB。symbols artifact 只用于崩溃分析，不作为公开更新资产，也不能被安装器加载。
+
 Authenticode 是可选增强：证书存在时先签主 EXE/自有 DLL，再签最终安装器；缺少证书不
 阻塞首版。Minisign/Ed25519 是强制信任根：生产公钥编译进 runtime，私钥与密码只存在于
 GitHub Actions secrets。私钥轮换必须先通过仍受旧密钥信任的应用版本发布新的公钥集合。
@@ -116,3 +120,16 @@ FRB 只公开 typed DTO 和事件：`checkStudioUpdate(currentVersion)`、
 
 更新失败不得启动任何二进制。未签名、错误签名、内容篡改、超限、长度不符、URL 越界或
 清单降级均属于终止错误；应用保留当前版本并允许用户重试检查或下载。
+
+## 5. 生产诊断与后台进程
+
+Studio 在 LocalAppData 的 `Pure Studio/logs` 写入滚动 Rust 与 Dart 错误日志，panic marker
+和 native dump 写入 `Pure Studio/crashes`。启动日志至少记录应用版本与 session protocol
+版本；session/runtime 日志记录 root/agent 身份、最后 cursor、运行阶段、snapshot
+messages/parts/journal 规模和最近 runtime 操作。Windows runner 为当前 exe 配置 WER
+LocalDumps，并保留 in-process unhandled exception minidump 兜底；`0xc0000409/BEX64`
+在没有匹配 dump/PDB 时只能报告现象，不能宣称唯一根因。
+
+所有由 GUI 发起的后台 Git、worktree、task/review/merge、Docker、MCP/LSP 与终止辅助命令
+在 Windows 使用 `CREATE_NO_WINDOW`；其他平台保持既有后台语义。只有用户显式打开交互终端
+或安装器等外部 UI 时允许正常显示窗口。

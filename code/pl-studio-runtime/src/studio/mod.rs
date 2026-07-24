@@ -3,6 +3,7 @@ pub mod entities;
 mod ids;
 mod interaction_runtime;
 mod mappers;
+mod migration;
 mod paths;
 mod product_event_runtime;
 mod records;
@@ -17,7 +18,7 @@ pub use interaction_runtime::{
     InteractionEmitter, InteractionEmitterFuture, InteractionRuntime, resolution_matches_kind,
 };
 pub use product_event_runtime::StudioProductEventRuntime;
-pub use records::{AttachmentRecord, ProjectRecord, SessionRecord, SessionVisibility};
+pub use records::{AttachmentRecord, ProjectRecord, SessionKind, SessionRecord, SessionVisibility};
 pub use runtime::{
     StudioPlanImplementationLifecycle, StudioResolveInteractionResponse, StudioRuntime,
     StudioStopPromptResponse, StudioSubmitPromptOptions, StudioSubmitPromptRequest,
@@ -26,6 +27,7 @@ pub use runtime::{
 pub use runtime_state::{
     StudioActiveTurn, StudioRuntimeSnapshot, StudioRuntimeState, StudioRuntimeStatus,
 };
+pub(in crate::studio) use store::AgentSessionSpec;
 pub use store::StudioStore;
 
 #[cfg(test)]

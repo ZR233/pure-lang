@@ -1,6 +1,6 @@
 use pl_protocol::{
     InteractionStatus, SessionEventEnvelope, SessionEventKind, SessionEventPosition,
-    SessionPartContent, SessionPartDeltaField, SessionViewSnapshot,
+    SessionOwnerSnapshot, SessionPartContent, SessionPartDeltaField, SessionViewSnapshot,
 };
 
 use super::SessionEventError;
@@ -14,6 +14,23 @@ pub(super) fn apply_session_event(
             expected: snapshot.session_id.clone(),
             actual: event.session_id.clone(),
         });
+    }
+    if let Some(source_agent_id) = event.source_agent_id.as_deref() {
+        match snapshot.owner.as_ref() {
+            Some(owner) if owner.agent_id != source_agent_id => {
+                return Err(SessionEventError::ProjectionInvariant(format!(
+                    "session {} is owned by {}, event came from {}",
+                    snapshot.session_id, owner.agent_id, source_agent_id
+                )));
+            }
+            None => {
+                snapshot.owner = Some(SessionOwnerSnapshot {
+                    agent_id: source_agent_id.to_string(),
+                    role: None,
+                });
+            }
+            Some(_) => {}
+        }
     }
     match &event.kind {
         SessionEventKind::TurnChanged { turn } => snapshot.turn = Some(turn.clone()),

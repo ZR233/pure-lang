@@ -94,6 +94,9 @@ impl StudioRuntime {
         if let Some(runtime) = framework.as_ref() {
             return Ok(runtime.clone());
         }
+        self.agent_resources
+            .restore_bindings(self.store.list_active_agent_sessions().await?)
+            .await;
         let host = StudioAgentHost::new(
             self.store.clone(),
             self.config_store.clone(),
@@ -113,29 +116,6 @@ impl StudioRuntime {
         );
         let handle = runtime.handle();
         runtime.host().attach_runtime(handle.clone()).await;
-        let mut recovered_children = handle
-            .list()
-            .await
-            .map_err(|error| anyhow::anyhow!(error))?
-            .into_iter()
-            .filter(|snapshot| {
-                snapshot.identity.parent_id.is_some()
-                    && snapshot.lifecycle != pl_core::AgentLifecycleState::Closed
-            })
-            .collect::<Vec<_>>();
-        recovered_children.sort_by_key(|snapshot| snapshot.identity.depth);
-        for child in recovered_children {
-            let latest = handle
-                .snapshot(child.identity.id.clone())
-                .await
-                .map_err(|error| anyhow::anyhow!(error))?;
-            if latest.lifecycle != pl_core::AgentLifecycleState::Closed {
-                handle
-                    .close(child.identity.id)
-                    .await
-                    .map_err(|error| anyhow::anyhow!(error))?;
-            }
-        }
         handle
             .start_restored_inputs()
             .await

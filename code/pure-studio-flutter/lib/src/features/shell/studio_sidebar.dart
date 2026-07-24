@@ -77,10 +77,10 @@ class _Sidebar extends ConsumerWidget {
                     _SidebarSectionLabel(label: context.l10n.sidebarSessions),
                     const SizedBox(height: 4),
                   ],
-                  for (final session in state.sessions)
+                  for (final session in state.rootSessions)
                     _SessionTile(
                       session: session,
-                      selected: session.id == state.selectedSessionId,
+                      selected: session.id == state.selectedRootSession?.id,
                       compact: compact,
                       canArchive: !state.isBusy,
                     ),

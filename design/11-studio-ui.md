@@ -38,9 +38,18 @@ lib/src/shared/
 - `sessionStatus[sessionId]`
 - `interactions[interactionId]`
 - `planStates[planId]`
-- `agents/sessionRuntime/agentTimelineEvents`
+- `agentDirectoryByRoot/sessionRuntimeBySession/agentTimelineEventsBySession`
 - `mcpServers/lspServers`
 - `turnPhase/turnStartedAt`
+
+大会话与 agent 工作区分层保存：
+
+- `selectedRootSessionId` 决定左侧大会话、标题、project、mode 和 task 全局信息。
+- `selectedAgentSessionId` 决定 timeline、Todo、runtime/context、skills、interaction、
+  状态栏和 Composer。
+- `AgentDirectoryProjection` 是 root 下轻量目录；`AgentWorkspaceProjection` 是当前
+  agent session 的唯一工作区事实源。
+- child 启动、完成、停止或故障只刷新目录状态，不自动切换当前 agent。
 
 `messageUpdated` upsert message snapshot；message snapshot 保留 `turnId/status/updatedAt/completedAt/error` 等 lifecycle 字段，但 message `createdAt` 首次创建后不可因后续 snapshot 回退或覆盖。message lifecycle 只更新 message snapshot，不驱动 part 终态，也不从 part 状态反推 message 状态。`messagePartUpdated` upsert 完整 part snapshot 并清除该 part 的 live delta；`messagePartDelta` payload 只携带 `partId/revision/field/delta/chunkIndex`，session 归属来自 envelope，message/turn 归属来自已有 part snapshot，不在 delta 内重复携带或信任第二套身份。`messagePartDelta` 只允许命中已有 part，orphan delta 直接丢弃。`messagePartDelta` 不推进 durable cursor，也不得覆盖 terminal snapshot。前端记录 part 的 snapshot sequence、delta sequence 和可选 `chunkIndex`，丢弃同 part stale delta、低序 delta 与重复/倒序 chunk。`messageRemoved`、`messagePartRemoved`、session reset 和 projection snapshot 替换必须清理相关 delta accum。
 
@@ -60,11 +69,11 @@ generation 不匹配的 frame 必须丢弃，不能污染当前会话。
 
 状态管理对齐 opencode `global-sync`：Flutter Riverpod store 只保存归一化 entity 表和少量 UI 本地状态，组件不得直接把多个表临时拼成业务状态。选中会话、状态栏、timeline、交互 dock 和会话列表都必须通过 selector/view model 派生：
 
-- `selectedSessionView` 从 `selectedSessionId` 读取当前 session、message、part、runtime、agent、interaction、turn phase、busy、MCP/LSP active 列表。
-- `visibleProjectSessions` 对 session list 做按 id 去重、过滤 `visibility=active` 且 `parentSessionId` 为空的 root session，并稳定排序，避免 handoff/archived/child session 或重复 DTO 出现在会话栏。Plan implementation 在当前 session 内运行，不创建 target session；legacy child session 即使存在也只可通过历史入口加载，不能作为侧栏 root 项。
-- `SessionStatusBar` 只消费 `selectedSessionView.runtime/agents/activeMcpServers/activeLspServers`，不得直接读后台 session 的 runtime event。
+- `selectedSessionView` 从 `selectedAgentSessionId` 读取当前 owner、message、part、runtime、Todo、interaction、turn phase、busy、MCP/LSP active 列表和 Composer 草稿。
+- `visibleProjectSessions` 对 session list 做按 id 去重，只把 `visibility=active` 且 `sessionKind=root` 的大会话放入左侧栏；同一 root 下的 agent session 只出现在标题区 agent 菜单，并按父子层级和创建顺序稳定排列。
+- `SessionStatusBar` 只消费 `selectedSessionView.runtime/activeMcpServers/activeLspServers` 与当前 owner 身份，不得直接读后台 session 的 runtime event，也不得聚合其他 agent。
 
-`sessionRuntimeChanged` 只能更新 `sessionRuntime[sessionId]`；MCP/LSP 的全局 health event 更新 server catalog，当前会话实际 active 列表来自 selected session runtime。`agentChanged` 是 latest snapshot merge：如果新 snapshot 未携带 `runtimeUsage`，必须保留同 agent 已有的 runtime usage，避免状态变更覆盖 token/cost 信息。
+`sessionRuntimeChanged` 只能更新 `sessionRuntimeBySession[sessionId]`；MCP/LSP 的全局 health event 更新 server catalog，当前会话实际 active 列表来自 selected agent session runtime。大会话的 Agent Directory 使用独立轻量事件刷新 owner、session、父子关系、状态和 attention，不通过单 agent session 的 `AgentChanged` 聚合 agent tree。
 
 Flutter Riverpod store 使用同一归一化状态结构：`StudioController` 负责 bootstrap、session stream 切换和全局 stream 生命周期；`timelineRowsProvider(sessionId)`、`selectedSessionViewProvider`、`statusBarViewProvider`、`settingsPageProvider` 等 selector 只派生 view model，不直接发起 bridge 调用。`subscribeSessionEvents(sessionId, afterSequence)` 的取消必须跟随选中会话变化，避免后台会话继续接收高频 delta。
 
@@ -74,7 +83,7 @@ Flutter reducer 必须按 `sessionId` 过滤实时事件，旧 session stream �
 
 `StudioState.copyWith` 必须支持对 nullable selection/config 字段显式置空。`selectedProjectId`、`selectedSessionId`、`defaultProviderId` 等字段的 `null` 表示清空领域状态，而不是“保持不变”；需要保持原值时调用方应省略对应参数。
 
-Flutter store 中的 message snapshot、part snapshot、live overlay 与 agent timeline event 是 timeline 的事实源。`TimelineMessage` 是纯 message snapshot，不携带 `parts` 字段；可渲染 `TimelinePart` 只存在于 `TimelineRow` projection/view model 中，reducer 不得把 overlay 后的 `TimelinePart` 再写回 message snapshot，避免 snapshot state 与 projected part 双写不一致。`timelineRowsProvider` 必须按 message `sequence -> createdAt -> id`、part `order -> sequence -> id` 从 `messagesBySession + partSnapshotsBySession + partOverlaysBySession` 派生可渲染 row；`agentTimelineEventsBySession` 中的 `SubAgentActivity` 可按 `callId` 合并 begin/end 后投影为独立 `AgentActivity` row，`TodoListUpdated` 必须按 `eventId` 保留每次更新，不写入 `messagesBySession`，也不伪造 message/part identity。
+Flutter store 中的 message snapshot、part snapshot、live overlay 与 agent timeline event 是 timeline 的事实源。`TimelineMessage` 是纯 message snapshot，不携带 `parts` 字段；可渲染 `TimelinePart` 只存在于 `TimelineRow` projection/view model 中，reducer 不得把 overlay 后的 `TimelinePart` 再写回 message snapshot，避免 snapshot state 与 projected part 双写不一致。`timelineRowsProvider` 必须按 message `sequence -> createdAt -> id`、part `order -> sequence -> id` 从 `messagesBySession + partSnapshotsBySession + partOverlaysBySession` 派生可渲染 row；`agentTimelineEventsBySession` 中的 `SubAgentActivity` 可按 `callId` 合并 begin/end 后投影为独立 `AgentActivity` row。`TodoListUpdated` 继续作为 canonical session 事实保存，但 timeline projection 必须过滤它，Todo selector 只读取当前 agent session 序列中最新的完整 replacement。
 
 应用更新不是 Studio 会话或 canonical snapshot 的组成部分。Flutter 使用独立的 Riverpod
 update controller 保存检查、下载、校验和安装状态；该 controller 只通过 typed FRB updater
@@ -131,9 +140,13 @@ plan、commentary、reasoning 和普通 text 的 live overlay 必须使用 strea
 
 工具展示使用 Codex/opencode 的 coalesced activity 思路：Studio store 仍保存逐工具 `StudioPart`，后端 turn timeline actor 为每个 assistant tool part 写入 `activityGroupId`，该字段是 Studio projection 元数据，不是模型历史或聚合工具事实。Flutter timeline selector 只按相同 `activityGroupId` 投影为一个默认折叠的 tool group row；不同 `activityGroupId` 即使属于同一 turn/message 也必须拆成多条工具活动 row，从而保留“文本 -> 工具 -> 文本 -> 工具”的阅读节奏。缺少 `activityGroupId` 的 tool part 按单工具组展示，不得按 turn/message 猜测合并。工具组 row 的 `order` 使用组内第一个工具 part 的 order，`sequence/renderVersion` 由组内所有工具 part 的 sequence、revision、status、arguments、result、工作目录、exit code、timeout、拒绝原因和 error 聚合计算；详情列表按 `part.order -> sequence -> id` 排序。工具状态以 part snapshot 的 `status` 为准；展示层不得改写 `StudioPart`。
 
-Todo list 展示使用 Codex `update_plan` 的历史块语义：`update_todo_list` 每次调用生成一条新的 `TodoListUpdated` agent timeline row，标题显示 explanation 或固定 “Todo list”，内容按 pending、inProgress、completed 三态渲染完整快照。completed 项可弱化和删除线展示，inProgress 项高亮，但 row identity 必须使用 `eventId`，不能按 `callId`、agent path 或 turn 折叠。
+Todo list 不进入 timeline。当前 agent snapshot 中最新的 `TodoListUpdated` 是唯一展示值，
+保持 runtime 原始顺序，并以 pending、inProgress、completed 三态使用 Material 3 dense
+`ListTile` 渲染；不显示分组、数量、比例、预计时间、进度条或统计。宽屏使用右侧可收放面板，
+窄屏使用 `endDrawer` 覆盖打开；展开状态按 agent session 保存，首次出现未完成 Todo 时自动
+展开一次，用户手动关闭后不重复抢焦点。
 
-工具组 header 显示工具数量和聚合状态：存在审批等待时为 `awaitingApproval`，存在 started/streaming/approved/running 时为 `running`，否则按 failed、denied、interrupted、budgetLimited、completed 的优先级折叠。header 中突出失败/拒绝数量；成功工具默认只占这一条折叠 row，展开后展示每个工具的工具名、状态、命令/路径/查询摘要、工作目录、exit code、timeout、拒绝原因和失败结果。工具、命令、文件修改和 subagent 活动文本由 Flutter timeline projection 基于结构化事实确定性生成，不在 `pl-core` 或 `pl-protocol` 中新增本地化文案字段。固定 UI 文案走 i18n；tool 名称、agent path、model slug、路径、命令摘要和 provider 返回值按领域值原样展示。`AgentTimelineChanged` 承载单条 agent timeline 事实：`SubAgentActivity` row identity 优先使用 `callId`，无 `callId` 时使用 event id；`TodoListUpdated` row identity 始终使用 event id。`AgentChanged` 只更新状态栏、agent 列表或活动详情，不应每次 snapshot 都在父 timeline 新增一行。父 timeline 默认不展开子代理内部工具 trace；`spawn_agent`、`wait_agent` 等 tool part 只作为父 turn 工具组详情项展示，不额外生成逐工具 timeline row。
+工具组 header 显示工具数量和聚合状态：存在审批等待时为 `awaitingApproval`，存在 started/streaming/approved/running 时为 `running`，否则按 failed、denied、interrupted、budgetLimited、completed 的优先级折叠。header 中突出失败/拒绝数量；成功工具默认只占这一条折叠 row，展开后展示每个工具的工具名、状态、命令/路径/查询摘要、工作目录、exit code、timeout、拒绝原因和失败结果。工具、命令、文件修改和 subagent 活动文本由 Flutter timeline projection 基于结构化事实确定性生成，不在 `pl-core` 或 `pl-protocol` 中新增本地化文案字段。固定 UI 文案走 i18n；tool 名称、agent path、model slug、路径、命令摘要和 provider 返回值按领域值原样展示。`AgentTimelineChanged` 承载当前 owner 主动执行的单条协作事实：`SubAgentActivity` row identity 优先使用 `callId`，无 `callId` 时使用 event id；`TodoListUpdated` 不生成 row。Agent Directory 事件只更新标题区 agent 列表或 attention，不进入单 agent timeline。父 timeline 默认不展开子代理内部工具 trace；`spawn_agent`、`wait_agent` 等 tool part 只作为父 turn 工具组详情项展示，不额外生成逐工具 timeline row。
 
 Timeline 虚拟滚动必须监听 opencode 同款 active assistant content version：当前 active assistant message 的完成状态、错误、text/reasoning 展示长度、tool status、tool result/metadata 长度变化都要触发 `virtua.measure()` 和底部锚定。row key 不变但内容增长时，仍要保持底部跟随；切换 session 时写入/读取 row cache，并用 keep-mounted 行避免 active turn 被虚拟列表过早卸载。
 
@@ -145,6 +158,11 @@ Flutter 首版 `ListView.builder` 必须实现同一滚动语义。Timeline 以 
 
 普通 prompt、Plan 确认、tool approval、ask-user、legacy session handoff、agent latest snapshot、agent timeline event 和 runtime usage 都以 `sessionId` 为边界。切换会话时用后端当前 session snapshot 替换当前 view；后台 session 事件只更新对应 view，不污染当前 timeline 或状态栏。Plan 确认的实施动作必须留在当前 session 内，不能改变 `selectedSessionId`。
 
+root Planner 使用普通 Composer。child agent 默认显示只读 Composer“此 Agent 会话由运行时驱动”，
+不允许直接发送普通 prompt；tool approval、user input、plan confirmation 与停止操作仍使用当前
+agent 的 interaction dock。切换 agent 时整套 timeline、Todo、状态栏、interaction 与 Composer
+同帧切换，Planner 草稿不能显示在 child workspace。
+
 Studio runtime 的恢复语义必须保证 UI 不展示已经无法唤醒的等待态。应用启动时，未完成 turn 标记为取消，`userInput` 与 `toolApproval` 这类依赖内存 waiter 的 transient pending interaction 同步取消并发出 interaction snapshot；`planConfirmation` 可在 turn 完成后继续等待用户决策，因此不会被普通启动恢复或 turn 收尾清理取消。单个 session 的 active turn 只在对应后台 turn 未终止时出现在 runtime snapshot 中，完成、失败、中断和取消后必须从 snapshot 中移除。
 
 聊天底部只渲染一个最高优先级 pending interaction，优先级为 `toolApproval > userInput > planConfirmation`。普通 prompt 输入不再渲染 Simple/Task 二级按钮，模式切换只存在于状态栏；确认实施后保持 Task 并由 coordinator 推进。
@@ -155,11 +173,11 @@ Flutter 的 `planConfirmation` dock 对齐 Codex 桌面 app 的决策式提示�
 
 pending interaction 只替换普通 prompt 输入，不得隐藏当前 turn 的停止控制；只要当前 session 的 turn 仍处于非终态，footer 必须保留停止按钮并调用 `stop_prompt(sessionId)`。`busy` 与停止按钮状态必须按 `sessionId` 归属计算，后台 session 的 turn event 不能让当前 session 显示不可用的停止态。
 
-Flutter 状态栏保留模式切换、当前根角色模型选择、reasoning effort、context/token/cost、active skills、MCP、LSP 和 agent 活动列表。Simple 编辑 executor role，Task 编辑 planner role；任务非终态期间禁用模式切换。状态栏所有数据来自 Studio store。
+Flutter 状态栏保留当前 owner 身份、模式切换、当前根角色模型选择、reasoning effort、context/token/cost、active skills、MCP 和 LSP。Simple 编辑 executor role，Task 编辑 planner role；任务非终态期间禁用模式切换。状态栏所有数据来自当前 agent workspace，不显示 agent 数量或其他 agent 列表。
 
 Flutter `SessionStatusBar` 展示同一组信息，并使用 Material 3 的 compact controls、tooltip 和 hover/focus 可达的弹层承载详情。Flutter 状态栏只消费 Riverpod selector，不直接订阅 bridge stream 或解析 raw JSON。
 
-Flutter context readout 使用紧凑圆形进度环，不显示百分比文字，也不直接显示 `contextTokens/contextWindow`；hover/focus 详情继续使用圆形进度，并展示上下文数字、百分比、总 token 和模型。费用继续作为独立文字 readout；active skills、MCP、LSP 与 subagent 统一进入一个活动摘要和分区弹层，不能合并进 context 或费用详情，也不能在其他状态弹层重复展示 agent 数量。
+Flutter context readout 使用紧凑圆形进度环，不显示百分比文字，也不直接显示 `contextTokens/contextWindow`；hover/focus 详情继续使用圆形进度，并展示上下文数字、百分比、总 token 和模型。费用继续作为独立文字 readout；active skills、MCP 与 LSP 进入当前 agent 的能力摘要和分区弹层，不能合并进 context 或费用详情。其他 agent 的状态只在标题区 `n agents` 菜单展示。
 
 状态栏、interaction dock、timeline 工具/计划/提问摘要中的 UI 文案必须走 i18n；模型名称、provider 名称、模型 slug、tool 名称、agent 路径、reasoning effort 等来自配置或运行时的领域值按原始字符串透传展示，不做翻译或本地化映射。这样 zh-CN/en 只负责固定 UI 标签与状态说明，不改变用户配置、provider 返回值或协议枚举的可辨识性。
 
@@ -201,7 +219,10 @@ Security 页是紧凑的权限配置页，不使用与 provider/MCP 相同的大
 
 ## 6. 视觉与组件约定
 
-聊天页面保持双栏布局：左侧项目/会话栏，右侧主聊天区。设置页面是页面栈中的全窗口页面，不保留聊天侧栏。不得新增常驻右侧环境信息栏；模型、上下文、MCP/LSP 与子代理信息继续由状态栏和弹层承载，权限模式由 composer 中的权限选择器承载。主聊天区采用居中阅读流，timeline 内容宽度由 `--conversation-content-width` 控制，底部 composer/dock 与阅读流对齐。
+聊天页面保持双栏布局：左侧项目/大会话栏，右侧当前 agent 工作区。设置页面是页面栈中的
+全窗口页面，不保留聊天侧栏。不得新增常驻环境信息栏；Todo 仅在存在 snapshot 时作为可收放
+右侧面板或 drawer，模型、上下文、MCP/LSP 继续由状态栏和弹层承载，权限模式由 composer
+中的权限选择器承载。主聊天区采用居中阅读流，底部状态栏和 composer/dock 跟随当前 agent。
 
 Pure Studio UI 采用低对比、紧凑、可扫描的桌面工具风格：侧栏背景浅于主内容区，列表项单行截断，当前项目/会话用轻量底色和状态点标识；聊天正文优先可读性，减少装饰性卡片。计划正文在 timeline 中作为计划卡展示，卡片只承载计划内容；计划确认仍属于 footer dock，不从 timeline 自行推断操作。
 
@@ -209,11 +230,15 @@ Flutter 端使用 Material 3 的工具型界面表达同一信息架构：`Navig
 
 Flutter 主聊天界面视觉应靠拢 Codex 桌面版的工作台气质：中性色浅色主题、低对比侧栏、白色阅读面、单一聚焦 composer 托盘和轻量状态信息行。Timeline 中普通 assistant 正文不使用卡片背景；只有 tool、reasoning、plan、agent 等结构化 part 使用轻边框面板。用户消息使用窄宽度浅色气泡，避免大面积品牌色。状态栏默认只展示当前模式、planner 模型、上下文、费用与活动能力摘要，不重复显示已在模型选择控件中的 runtime model；高频或诊断信息通过 tooltip/popover 承载。
 
-Flutter shell 的二级视觉层级继续收敛：顶部 header 只展示当前会话标题、项目名和短路径，不放大图标或重复品牌；侧栏底部操作统一使用固定尺寸、低饱和的图标工具栏，通过 tooltip 提供完整动作名称，不显示容易换行的缩写文字，只有发送按钮保留明显主操作色；session row 用 mode 小图标和轻量选中底色表达状态。Composer 的底部控制行承载权限、附件/后续工具入口和发送/停止，输入区域保持单一视觉焦点，不再把状态栏和输入控件混成一排同等权重按钮。
+Flutter shell 的二级视觉层级继续收敛：顶部 header 展示大会话标题、项目名和短路径，并以
+唯一 `n agents` compact 状态项打开 Material 3 `MenuAnchor`。菜单按父子层级与创建顺序列出
+状态点、名称、角色、短状态和选中标记，支持点击、约 250ms hover、focus 和键盘切换。不得再
+出现 Planner/Executor/Reviewer 分类横条或第二套 agent 切换控件；底部状态栏显示当前 agent
+本地身份，但不重复 agent 数量。
 
 Studio 采用紧凑控制台密度，但紧凑不等于堆叠入口。面板圆角不得超过 `8px`，阴影只用于 Composer、interaction dock 和 popover；普通设置分组、timeline 结构化行与 Provider 列表使用单层边框，不在卡片中继续嵌套卡片。聊天阅读流、状态区和 Composer 共享同一内容宽度，侧栏与设置导航使用统一布局 token，窗口变窄时按可用宽度切换为 icon rail。
 
-状态栏使用无边框、无常驻底色的紧凑控件和读数。模式、Planner 模型与 reasoning effort 是可点击选择器，只在 hover/focus 时显示轻背景；context 使用无文字圆形进度环，费用、活动与 phase 使用文字读数，并通过 popover 展示详情。Skills、MCP、LSP 与 agent 只保留一个活动摘要入口，header 不再重复显示 phase 或 busy spinner。权限模式仍可在 Composer 快捷切换，Security 页提供完整配置说明，但不得再用第二张“当前模式”卡片重复同一状态。
+状态栏使用无边框、无常驻底色的紧凑控件和读数。模式、Planner 模型与 reasoning effort 是可点击选择器，只在 hover/focus 时显示轻背景；context 使用无文字圆形进度环，费用、能力与 phase 使用文字读数，并通过 popover 展示详情。Skills、MCP 与 LSP 只保留一个当前 agent 能力摘要入口；agent 目录只保留标题区 `n agents` 入口。header 不再重复显示 phase 或 busy spinner。权限模式仍可在 Composer 快捷切换，Security 页提供完整配置说明，但不得再用第二张“当前模式”卡片重复同一状态。
 
 设置页保持 Providers、Instructions、Skills、Roles、MCP、Security、General 七个领域入口。普通设置使用单层 group + divider；重复实体才使用紧凑列表。Provider 使用紧凑单列列表，整行进入详情，不再额外显示“打开”按钮，默认、刷新、编辑、删除统一进入 row overflow menu。列表只承载可扫描摘要，完整模型、凭据和工具明细留在详情页；Zhipu Coding Plan 例外地在列表中直接按 `fiveHour -> weekly -> mcpMonthly` 展示三条细进度，包括剩余比例和重置时间，缺失的 quota 不得伪造。
 
@@ -221,7 +246,7 @@ Flutter 交互组件优先使用 Material 3 原生控件，按业务领域组织
 
 视觉参考以 `output/design` 中的 Pure Studio chat 状态图为准：默认聊天、流式响应、计划确认、环境弹层、select 菜单与窄屏响应式。实现时必须保持低对比侧栏、居中阅读流、底部同宽状态栏与 dock、计划卡渐隐预览、以及窄屏 icon rail，不得新增常驻右侧环境信息栏。
 
-聊天输入框中的权限模式是可交互设置项，使用 Flutter/Material 的紧凑菜单控件调用 `saveRuntimePermissionMode(mode)`，不得退化为静态提示文字，也不得在状态栏重复放置权限选择。状态栏的上下文、费用、能力、子智能体等 readout 使用 Flutter hover/focus popover 或 tooltip 展示详情，鼠标或焦点离开触发器和浮层后必须自动关闭；readout 本身不显示下拉箭头。点击选择只保留给模式、模型和 reasoning effort 这些真正的状态栏菜单控件。
+聊天输入框中的权限模式是可交互设置项，使用 Flutter/Material 的紧凑菜单控件调用 `saveRuntimePermissionMode(mode)`，不得退化为静态提示文字，也不得在状态栏重复放置权限选择。状态栏的上下文、费用和能力 readout 使用 Flutter hover/focus popover 或 tooltip 展示详情，鼠标或焦点离开触发器和浮层后必须自动关闭；readout 本身不显示下拉箭头。点击选择只保留给模式、模型和 reasoning effort 这些真正的状态栏菜单控件；agent 切换由标题区 Material 3 `MenuAnchor` 独立负责。
 
 Flutter 窗口 resize 时 UI 不应持续触发昂贵测量。Timeline 的贴底逻辑只在新内容、会话切换和少量后续 layout settle 帧内测量，不能长时间逐帧调用列表 measure 或反复写入 scroll offset。
 

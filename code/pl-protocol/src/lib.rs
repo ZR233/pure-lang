@@ -46,11 +46,11 @@ pub use provider_catalog::{
 pub use session::{
     SESSION_EVENT_SCHEMA_VERSION, SessionAgentPart, SessionAgentSnapshot, SessionAttachment,
     SessionContextCompaction, SessionEventEnvelope, SessionEventKind, SessionEventPosition,
-    SessionMessage, SessionMessageRole, SessionMessageStatus, SessionPart, SessionPartContent,
-    SessionPartDelta, SessionPartDeltaField, SessionPartStatus, SessionResyncReason,
-    SessionRuntimeSnapshot, SessionRuntimeUsage, SessionStreamFrame, SessionSubscriptionRequest,
-    SessionTextChannel, SessionTimelineEvent, SessionTimelineEventKind, SessionToolPart,
-    SessionTurn, SessionTurnStatus, SessionViewSnapshot,
+    SessionMessage, SessionMessageRole, SessionMessageStatus, SessionOwnerSnapshot, SessionPart,
+    SessionPartContent, SessionPartDelta, SessionPartDeltaField, SessionPartStatus,
+    SessionResyncReason, SessionRuntimeSnapshot, SessionRuntimeUsage, SessionStreamFrame,
+    SessionSubscriptionRequest, SessionTextChannel, SessionTimelineEvent, SessionTimelineEventKind,
+    SessionToolPart, SessionTurn, SessionTurnStatus, SessionViewSnapshot,
 };
 pub use turn_failure::{RetryDisposition, TurnFailure, TurnFailureCategory};
 #[cfg(feature = "typescript")]

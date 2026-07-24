@@ -27,7 +27,7 @@ const _visualViewports = [
   (name: '760x720', size: Size(760, 720), brightness: Brightness.light),
 ];
 
-const _activityLabel = '1 skill · 1 MCP · 1 LSP · 1 agent';
+const _agentSwitcherLabel = '3 agents';
 const _visualFontPath = 'test/assets/fonts/NotoSans-Variable.ttf';
 const _visualFontFamily = 'PureStudioVisualTest';
 const _visualFontFamilies = [
@@ -90,7 +90,7 @@ void main() {
       },
     );
 
-    testWidgets('capture activity popover at ${viewport.name} '
+    testWidgets('capture agent switcher at ${viewport.name} '
         '(${viewport.brightness.name})', (tester) async {
       _configureVisualView(tester, viewport.size);
       final chatBoundary = await _pumpVisual(
@@ -98,20 +98,21 @@ void main() {
         home: const StudioShell(),
         brightness: viewport.brightness,
       );
-      final activityTrigger = find.text(_activityLabel);
+      final activityTrigger = find.text(_agentSwitcherLabel);
       expect(activityTrigger, findsOneWidget);
       await tester.ensureVisible(activityTrigger);
       await tester.pump();
       final triggerRect = tester.getRect(activityTrigger);
       await tester.tapAt(Offset(triggerRect.left + 8, triggerRect.center.dy));
       await tester.pump(const Duration(milliseconds: 250));
-      expect(find.text('ACTIVE CAPABILITIES'), findsOneWidget);
-      expect(find.text('SUBAGENTS'), findsOneWidget);
+      expect(find.text('Planner'), findsOneWidget);
+      expect(find.text('Responsive reviewer'), findsOneWidget);
+      expect(find.text('Capture worker'), findsOneWidget);
       _expectAllTextTruncated(find.text(responsiveVisualSessionTitle));
       expect(tester.takeException(), isNull);
       await _verifyVisual(
         chatBoundary,
-        'activity-popover-${viewport.name}.png',
+        'agent-switcher-${viewport.name}.png',
         viewport.size,
       );
     });
@@ -126,7 +127,7 @@ void main() {
         state: _taskVisualState(),
       );
       final activityTrigger = find.text(
-        'Implementing · 1 skill · 1 MCP · 1 LSP · 1 agent',
+        'Implementing · 1 skill · 1 MCP · 1 LSP',
       );
       expect(activityTrigger, findsOneWidget);
       await tester.ensureVisible(activityTrigger);

@@ -7,11 +7,13 @@ use crate::{CloseDisposition, PureError, Result, WorktreeHandle, WorktreeManager
 
 use crate::studio::task_coordinator::TaskCoordinator;
 use crate::studio::task_coordinator::{StudioTaskSpawnPreparation, StudioTaskSpawnRequest};
+use crate::studio::{AgentSessionSpec, StudioStore};
 
 use super::resources::{StudioAgentResource, StudioAgentResources};
 
 #[derive(Clone)]
 pub(in crate::studio) struct StudioAgentLifecycle {
+    store: StudioStore,
     coordinator: Arc<TaskCoordinator>,
     resources: StudioAgentResources,
 }
@@ -28,8 +30,13 @@ pub(in crate::studio) struct StudioCloseLease {
 }
 
 impl StudioAgentLifecycle {
-    pub(super) fn new(coordinator: Arc<TaskCoordinator>, resources: StudioAgentResources) -> Self {
+    pub(super) fn new(
+        store: StudioStore,
+        coordinator: Arc<TaskCoordinator>,
+        resources: StudioAgentResources,
+    ) -> Self {
         Self {
+            store,
             coordinator,
             resources,
         }
@@ -42,7 +49,7 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
     type CloseLease = StudioCloseLease;
 
     async fn prepare_spawn(&self, request: SpawnLifecycleRequest) -> Result<Self::SpawnLease> {
-        let session_id = request
+        let parent_session_id = request
             .parent
             .active_session_id
             .as_ref()
@@ -55,6 +62,14 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
                     .map(str::to_string)
             })
             .ok_or_else(|| lifecycle_error("spawn has no Studio session boundary"))?;
+        let parent_session = self
+            .store
+            .read_session(&parent_session_id)
+            .await
+            .map_err(|error| lifecycle_error(error.to_string()))?
+            .ok_or_else(|| lifecycle_error("spawn parent Studio session does not exist"))?;
+        let root_session_id = parent_session.root_session_id.clone();
+        let child_session_id = request.child_session_id.to_string();
         let task_name = request
             .metadata
             .get("taskName")
@@ -79,7 +94,7 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
             .to_string();
         let studio_request = StudioTaskSpawnRequest {
             agent_id: request.child.identity.id.to_string(),
-            session_id: session_id.clone(),
+            session_id: root_session_id.clone(),
             task_name: task_name.clone(),
             role: request.child.identity.role.to_string(),
             owned_paths,
@@ -101,10 +116,20 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
                     .map(std::path::PathBuf::from)
                     .unwrap_or_default()
             });
+        self.store
+            .create_agent_session(AgentSessionSpec {
+                id: child_session_id.clone(),
+                parent_session_id,
+                owner_agent_id: request.child.identity.id.to_string(),
+                owner_role: request.child.identity.role.to_string(),
+                title: task_name.clone(),
+            })
+            .await
+            .map_err(|error| lifecycle_error(error.to_string()))?;
         Ok(StudioSpawnLease {
             agent_id: request.child.identity.id,
             resource: StudioAgentResource {
-                studio_session_id: session_id,
+                studio_session_id: child_session_id,
                 workspace_root,
                 task_name,
                 request: studio_request,
@@ -144,6 +169,16 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
             failures.push(error.to_string());
         }
         if failures.is_empty() {
+            self.store
+                .update_agent_session_status(
+                    &lease.resource.studio_session_id,
+                    "faulted",
+                    None,
+                    Some("framework spawn rolled back".to_string()),
+                    crate::studio::ids::unix_seconds(),
+                )
+                .await
+                .map_err(|error| lifecycle_error(error.to_string()))?;
             Ok(())
         } else {
             Err(lifecycle_error(failures.join("; ")))

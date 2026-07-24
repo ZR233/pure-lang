@@ -1,6 +1,6 @@
 part of '../widget_test.dart';
 
-const _responsiveActivityLabel = '1 skill · 1 MCP · 1 LSP · 1 agent';
+const _responsiveAgentCountLabel = '3 agents';
 
 const _responsiveViewports = [
   (name: '1280x800', size: Size(1280, 800)),
@@ -13,7 +13,7 @@ const _activityStressViewports = [
   (name: '760x720', size: Size(760, 720)),
 ];
 
-const _activityStressLabel = '1 skill · 1 MCP · 1 LSP · 4 agents';
+const _agentStressLabel = '16 agents';
 
 void registerResponsiveLayoutTests() {
   group('responsive visual regression', () {
@@ -91,7 +91,7 @@ void registerResponsiveLayoutTests() {
       });
 
       testWidgets(
-        'activity popover stays clear of its trigger at ${viewport.name}',
+        'agent switcher stays clear of its trigger at ${viewport.name}',
         (tester) async {
           _configureResponsiveView(tester, viewport.size);
           final api = _FakeStudioApi(responsiveVisualState());
@@ -104,7 +104,7 @@ void registerResponsiveLayoutTests() {
           );
           await tester.pumpAndSettle();
 
-          final trigger = find.text(_responsiveActivityLabel);
+          final trigger = find.text(_responsiveAgentCountLabel);
           expect(trigger, findsOneWidget);
           await tester.ensureVisible(trigger);
           await tester.pumpAndSettle();
@@ -116,24 +116,22 @@ void registerResponsiveLayoutTests() {
           );
           await tester.pumpAndSettle();
 
-          expect(find.text('ACTIVE CAPABILITIES'), findsOneWidget);
-          expect(find.textContaining('Skills · flutter-ui'), findsOneWidget);
-          expect(find.text('SUBAGENTS'), findsOneWidget);
-          expect(find.text('reviewer'), findsOneWidget);
-          expect(find.text('worker'), findsOneWidget);
-          final detailCard = find.ancestor(
-            of: find.text('ACTIVE CAPABILITIES'),
-            matching: find.byWidgetPredicate(_isLiftedDetailCard),
+          expect(find.text('Planner'), findsOneWidget);
+          expect(find.text('Responsive reviewer'), findsOneWidget);
+          expect(find.text('Capture worker'), findsOneWidget);
+          final reviewerItem = find.byKey(
+            const ValueKey('agent-session-session-reviewer'),
           );
-          expect(detailCard, findsOneWidget);
+          expect(reviewerItem, findsOneWidget);
           final stableTriggerRect = tester.getRect(trigger);
-          final detailRect = tester.getRect(detailCard);
-          expect(_rectFitsViewport(detailRect, inset: 8), isTrue);
+          final reviewerRect = tester.getRect(reviewerItem);
           expect(
-            detailRect.bottom,
-            lessThanOrEqualTo(stableTriggerRect.top - 8),
+            _rectFitsViewport(reviewerRect, inset: 8),
+            isTrue,
+            reason: 'reviewer=$reviewerRect trigger=$stableTriggerRect',
           );
-          expect(detailRect.overlaps(stableTriggerRect), isFalse);
+          expect(reviewerRect.top, greaterThan(stableTriggerRect.bottom));
+          expect(reviewerRect.overlaps(stableTriggerRect), isFalse);
           expect(tester.takeException(), isNull);
         },
       );
@@ -261,7 +259,7 @@ void registerResponsiveLayoutTests() {
     }
 
     for (final viewport in _activityStressViewports) {
-      testWidgets('expanded multi-agent popover is bounded and scrollable at '
+      testWidgets('expanded agent switcher is bounded and scrollable at '
           '${viewport.name}', (tester) async {
         _configureResponsiveView(tester, viewport.size);
         final api = _FakeStudioApi(_responsiveActivityStressState());
@@ -274,7 +272,7 @@ void registerResponsiveLayoutTests() {
         );
         await tester.pumpAndSettle();
 
-        final trigger = find.text(_activityStressLabel);
+        final trigger = find.text(_agentStressLabel);
         expect(trigger, findsOneWidget);
         await tester.ensureVisible(trigger);
         await tester.pumpAndSettle();
@@ -282,48 +280,30 @@ void registerResponsiveLayoutTests() {
 
         await tester.tapAt(Offset(triggerRect.left + 8, triggerRect.center.dy));
         await tester.pumpAndSettle();
-        await tester.tap(find.text('reviewer 1'));
-        await tester.pumpAndSettle();
-
-        final detailCard = find.ancestor(
-          of: find.text('ACTIVE CAPABILITIES'),
-          matching: find.byWidgetPredicate(_isLiftedDetailCard),
+        final firstAgent = find.byKey(
+          const ValueKey('agent-session-stress-session-1'),
         );
-        expect(detailCard, findsOneWidget);
-        final detailRect = tester.getRect(detailCard);
-        final stableTriggerRect = tester.getRect(trigger);
-        expect(_rectFitsViewport(detailRect, inset: 8), isTrue);
-        expect(detailRect.bottom, lessThanOrEqualTo(stableTriggerRect.top - 8));
-        expect(detailRect.overlaps(stableTriggerRect), isFalse);
-
-        final wholePopoverScrollable = find.ancestor(
-          of: find.text('ACTIVE CAPABILITIES'),
+        expect(firstAgent, findsOneWidget);
+        final menuScrollable = find.ancestor(
+          of: firstAgent,
           matching: find.byType(Scrollable),
         );
-        expect(wholePopoverScrollable, findsOneWidget);
-        final verticalScrollables = find.descendant(
-          of: detailCard,
-          matching: find.byWidgetPredicate(
-            (widget) =>
-                widget is Scrollable &&
-                (widget.axisDirection == AxisDirection.down ||
-                    widget.axisDirection == AxisDirection.up),
-          ),
+        expect(menuScrollable, findsOneWidget);
+        final menuRect = tester.getRect(menuScrollable);
+        final stableTriggerRect = tester.getRect(trigger);
+        expect(
+          _rectFitsViewport(menuRect, inset: 8),
+          isTrue,
+          reason: 'menu=$menuRect trigger=$stableTriggerRect',
         );
-        final position = tester
-            .state<ScrollableState>(wholePopoverScrollable)
-            .position;
+        expect(menuRect.top, greaterThan(stableTriggerRect.bottom));
+        expect(menuRect.overlaps(stableTriggerRect), isFalse);
+        final position = tester.state<ScrollableState>(menuScrollable).position;
         expect(position.maxScrollExtent, greaterThan(0));
         final initialOffset = position.pixels;
-        await tester.drag(find.text('reviewer 1'), const Offset(0, -120));
+        await tester.drag(firstAgent, const Offset(0, -120));
         await tester.pumpAndSettle();
-        expect(
-          (
-            scrollableCount: verticalScrollables.evaluate().length,
-            outerMoved: position.pixels > initialOffset,
-          ),
-          (scrollableCount: 1, outerMoved: true),
-        );
+        expect(position.pixels, greaterThan(initialOffset));
         expect(tester.takeException(), isNull);
       });
     }
@@ -357,30 +337,27 @@ List<RenderParagraph> _renderParagraphs(Finder finder) {
 StudioState _responsiveActivityStressState() {
   final state = responsiveVisualState();
   final updatedAt = DateTime.fromMillisecondsSinceEpoch(1735689600000);
-  final agents = <String, StudioAgentView>{
-    for (var index = 0; index < 8; index++)
-      'agent-$index': StudioAgentView(
-        id: 'agent-$index',
-        sessionId: 'session-1',
-        path: 'root/reviewer-${index + 1}',
-        role: 'reviewer ${index + 1}',
-        task:
-            'Audit the expanded activity popover at constrained desktop '
-            'heights without losing any agent details',
-        status: index.isEven ? 'running' : 'completed',
-        summary:
-            'Expanded summary ${index + 1} verifies that the complete popover '
-            'can move as one scrollable surface above the status trigger.',
-        reason:
-            'The responsive test intentionally supplies several detailed '
-            'agents so the content exceeds the available vertical space.',
-        depth: index % 3,
-        updatedAt: updatedAt,
+  final root = state.selectedRootSession!;
+  final agentSessions = [
+    for (var index = 0; index < 15; index++)
+      StudioSession(
+        id: 'stress-session-${index + 1}',
+        projectId: root.projectId,
+        title: 'reviewer ${index + 1}',
+        mode: root.mode,
+        createdAt: updatedAt.add(Duration(seconds: index + 1)),
+        updatedAt: updatedAt.add(Duration(seconds: index + 1)),
+        parentSessionId: root.id,
+        rootSessionId: root.id,
+        sessionKind: StudioSessionKind.agent,
+        ownerAgentId: 'stress-agent-${index + 1}',
+        ownerRole: index.isEven ? 'reviewer' : 'worker',
+        agentStatus: index.isEven ? 'running' : 'completed',
       ),
-  };
+  ];
   return state.copyWith(
-    runtime: state.runtime.copyWith(agentCount: agents.length),
-    agentsBySession: {'session-1': agents},
+    sessions: [root, ...agentSessions],
+    runtime: state.runtime.copyWith(agentCount: agentSessions.length),
   );
 }
 

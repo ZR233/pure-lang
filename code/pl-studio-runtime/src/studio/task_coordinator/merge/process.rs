@@ -25,13 +25,16 @@ pub(super) async fn run_process(
 }
 
 fn run_blocking(cwd: PathBuf, program: String, arguments: Vec<String>) -> Result<ProcessOutput> {
-    let child = Command::new(&program)
+    let mut command = Command::new(&program);
+    command
         .current_dir(cwd)
         .args(&arguments)
         .env("GIT_TERMINAL_PROMPT", "0")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    crate::process::configure_background_std_command(&mut command);
+    let child = command
         .spawn()
         .with_context(|| format!("failed to start {program}"))?;
     let mut child = KillOnDropChild::new(child);

@@ -1,8 +1,8 @@
 use crate::{
-    AgentStatus, InteractionKind, InteractionPayload, InteractionRequest, InteractionScope,
-    InteractionStatus, PlanLifecycleEvent, PlanLifecycleState, SessionAgentSnapshot,
-    SessionEventFact, SessionEventKind,
+    InteractionKind, InteractionPayload, InteractionRequest, InteractionScope, InteractionStatus,
+    PlanLifecycleEvent, PlanLifecycleState, SessionEventFact, SessionEventKind,
 };
+use anyhow::Context;
 use pl_core::{
     AgentActivityState, AgentCommitObserver, AgentCommittedEvent, AgentLifecycleState,
     AgentRuntimeEventKind, AgentRuntimeHandle, AgentSnapshot, SessionId, TurnOutcomeKind,
@@ -22,12 +22,12 @@ use super::resources::StudioAgentResources;
 pub(in crate::studio) struct StudioAgentCommitObserver {
     sender: mpsc::UnboundedSender<AgentCommittedEvent>,
     runtime: watch::Sender<Option<AgentRuntimeHandle>>,
+    runtime_state: StudioRuntimeState,
 }
 
 struct StudioAgentEventProjector {
     store: StudioStore,
     interactions: InteractionRuntime,
-    runtime_state: StudioRuntimeState,
     resources: StudioAgentResources,
     continuations: StudioContinuationService,
     product_events: StudioProductEventRuntime,
@@ -48,7 +48,6 @@ impl StudioAgentCommitObserver {
         let projector = StudioAgentEventProjector {
             store,
             interactions,
-            runtime_state,
             resources,
             continuations,
             product_events,
@@ -61,7 +60,11 @@ impl StudioAgentCommitObserver {
                 }
             }
         });
-        Self { sender, runtime }
+        Self {
+            sender,
+            runtime,
+            runtime_state,
+        }
     }
 
     pub(super) async fn attach_runtime(&self, runtime: AgentRuntimeHandle) {
@@ -75,8 +78,32 @@ impl StudioAgentCommitObserver {
 
 impl AgentCommitObserver for StudioAgentCommitObserver {
     async fn publish(&self, committed: AgentCommittedEvent) {
+        self.project_runtime_state(&committed);
         if self.sender.send(committed).is_err() {
             tracing::warn!("Studio agent event projector is no longer running");
+        }
+    }
+}
+
+impl StudioAgentCommitObserver {
+    fn project_runtime_state(&self, committed: &AgentCommittedEvent) {
+        for event in &committed.runtime_events {
+            match &event.kind {
+                AgentRuntimeEventKind::TurnQueued { input, .. } => {
+                    self.runtime_state
+                        .mark_active_turn(input.session_id.to_string(), input.turn_id.to_string());
+                }
+                AgentRuntimeEventKind::TurnFinished { outcome, .. }
+                | AgentRuntimeEventKind::RecoveryCancelledTurn { outcome, .. } => {
+                    self.runtime_state
+                        .clear_active_turn(outcome.session_id.as_str(), outcome.turn_id.as_str());
+                }
+                AgentRuntimeEventKind::Registered { .. }
+                | AgentRuntimeEventKind::StateChanged { .. }
+                | AgentRuntimeEventKind::TurnStarted { .. }
+                | AgentRuntimeEventKind::SessionOpened { .. }
+                | AgentRuntimeEventKind::Faulted { .. } => {}
+            }
         }
     }
 }
@@ -87,23 +114,10 @@ impl StudioAgentEventProjector {
             agent_id,
             runtime_events,
             trace_events,
-            session_events,
+            session_events: _,
             ..
         } = committed;
         let studio_session_id = self.resources.studio_session_id(&agent_id).await;
-        if let Some(session_id) = studio_session_id.as_deref()
-            && agent_id != super::root_agent_id(session_id)
-            && !session_events.is_empty()
-        {
-            self.record_facts(
-                session_id,
-                session_events
-                    .into_iter()
-                    .map(SessionEventFact::from_committed_event)
-                    .collect(),
-            )
-            .await?;
-        }
         if let Some(session_id) = studio_session_id.as_deref()
             && !trace_events.is_empty()
         {
@@ -114,9 +128,11 @@ impl StudioAgentEventProjector {
             self.project_runtime_event(event, &studio_session_id)
                 .await?;
         }
-        if let Some(session_id) = studio_session_id {
+        if let Some(session_id) = studio_session_id
+            && let Some(session) = self.store.read_session(&session_id).await?
+        {
             self.product_events
-                .refresh_session_task(&session_id)
+                .refresh_session_task(&session.root_session_id)
                 .await?;
         }
         Ok(())
@@ -136,12 +152,8 @@ impl StudioAgentEventProjector {
                     .await?;
             }
             AgentRuntimeEventKind::TurnQueued {
-                input, snapshot, ..
+                input: _, snapshot, ..
             } => {
-                if let Some(session_id) = studio_session_id.as_deref() {
-                    self.runtime_state
-                        .mark_active_turn(session_id.to_string(), input.turn_id.to_string());
-                }
                 self.emit_agent_snapshot(studio_session_id.as_deref(), snapshot)
                     .await?;
             }
@@ -155,9 +167,15 @@ impl StudioAgentEventProjector {
                     // continuation 是 durable task orchestration，不得被后续 trace/UI
                     // projection 的非关键失败截断。
                     if snapshot.identity.parent_id.is_some() {
+                        let root_session_id = self
+                            .store
+                            .read_session(session_id)
+                            .await?
+                            .context("child agent Studio session not found")?
+                            .root_session_id;
                         self.continuations
                             .record_child_terminal(
-                                session_id,
+                                &root_session_id,
                                 snapshot.identity.id.as_str(),
                                 snapshot.identity.role.as_str(),
                                 outcome.kind,
@@ -167,8 +185,6 @@ impl StudioAgentEventProjector {
                     } else {
                         self.continuations.request_merge_follow_up(session_id).await;
                     }
-                    self.runtime_state
-                        .clear_active_turn(session_id, outcome.turn_id.as_str());
                     self.project_plan_lifecycle(
                         event.agent_id.as_str(),
                         session_id,
@@ -242,6 +258,7 @@ impl StudioAgentEventProjector {
         }
         let now = crate::studio::ids::unix_seconds();
         self.record_facts(
+            agent_id,
             studio_session_id,
             vec![SessionEventFact::durable(
                 Some(agent_id.to_string()),
@@ -281,12 +298,14 @@ impl StudioAgentEventProjector {
         };
         let runtime = self.runtime.clone();
         let session_id = studio_session_id.to_string();
+        let owner_agent_id = agent_id.to_string();
         let emitter: crate::studio::InteractionEmitter = std::sync::Arc::new(move |interaction| {
             let runtime = runtime.clone();
             let session_id = session_id.clone();
+            let owner_agent_id = owner_agent_id.clone();
             Box::pin(async move {
                 let runtime = wait_for_runtime(runtime).await?;
-                let target_agent = super::root_agent_id(&session_id);
+                let target_agent = pl_core::AgentId::new(owner_agent_id)?;
                 let target_session = SessionId::new(session_id)?;
                 tokio::spawn(async move {
                     if let Err(error) = runtime
@@ -341,6 +360,7 @@ impl StudioAgentEventProjector {
         };
         let updated_at = crate::studio::ids::unix_seconds();
         self.record_facts(
+            agent_id,
             studio_session_id,
             vec![SessionEventFact::durable(
                 Some(agent_id.to_string()),
@@ -369,11 +389,8 @@ impl StudioAgentEventProjector {
         let Some(session_id) = studio_session_id else {
             return Ok(());
         };
-        if snapshot.identity.parent_id.is_none() {
-            return Ok(());
-        }
         let resource = self.resources.get(&snapshot.identity.id).await;
-        let status = agent_status(&snapshot);
+        let status = agent_status_label(&snapshot);
         let error = snapshot
             .last_turn
             .as_ref()
@@ -384,39 +401,15 @@ impl StudioAgentEventProjector {
                 )
             })
             .and_then(|outcome| outcome.reason.clone());
-        self.record_facts(
-            session_id,
-            vec![SessionEventFact::durable(
-                Some(snapshot.identity.id.to_string()),
-                snapshot.active_turn_id.as_ref().map(ToString::to_string),
-                snapshot.updated_at,
-                SessionEventKind::AgentChanged {
-                    agent: SessionAgentSnapshot {
-                        id: snapshot.identity.id.to_string(),
-                        session_id: session_id.to_string(),
-                        path: format!("/root/{}", snapshot.identity.id),
-                        parent_path: Some("/root".to_string()),
-                        role: snapshot.identity.role.to_string(),
-                        task: resource
-                            .map(|resource| resource.task_name)
-                            .unwrap_or_else(|| snapshot.identity.role.to_string()),
-                        status,
-                        summary: None,
-                        depth: snapshot.identity.depth,
-                        error,
-                        reason: snapshot
-                            .last_turn
-                            .as_ref()
-                            .and_then(|outcome| outcome.reason.clone()),
-                        budget_limit_kind: None,
-                        budget_usage: None,
-                        runtime_usage: None,
-                        updated_at: snapshot.updated_at,
-                    },
-                },
-            )],
-        )
-        .await?;
+        let summary = resource.as_ref().map(|resource| resource.task_name.clone());
+        self.store
+            .update_agent_session_status(session_id, status, summary, error, snapshot.updated_at)
+            .await?;
+        if let Some(session) = self.store.read_session(session_id).await? {
+            self.product_events
+                .emit_session_list(&session.project_id)
+                .await?;
+        }
         if snapshot.lifecycle == AgentLifecycleState::Closed {
             self.resources.remove(&snapshot.identity.id).await;
         }
@@ -425,13 +418,14 @@ impl StudioAgentEventProjector {
 
     async fn record_facts(
         &self,
+        agent_id: &str,
         session_id: &str,
         facts: Vec<SessionEventFact>,
     ) -> anyhow::Result<()> {
         let runtime = wait_for_runtime(self.runtime.clone()).await?;
         runtime
             .record_session_facts(
-                super::root_agent_id(session_id),
+                pl_core::AgentId::new(agent_id.to_string())?,
                 SessionId::new(session_id.to_string())?,
                 facts,
             )
@@ -454,23 +448,19 @@ async fn wait_for_runtime(
     }
 }
 
-fn agent_status(snapshot: &AgentSnapshot) -> AgentStatus {
+fn agent_status_label(snapshot: &AgentSnapshot) -> &'static str {
     match snapshot.lifecycle {
-        AgentLifecycleState::Closing | AgentLifecycleState::Closed => AgentStatus::Shutdown,
-        AgentLifecycleState::Faulted => AgentStatus::Errored,
+        AgentLifecycleState::Closing | AgentLifecycleState::Closed => "shutdown",
+        AgentLifecycleState::Faulted => "errored",
         AgentLifecycleState::Active => match snapshot.activity {
-            AgentActivityState::Queued => AgentStatus::Queued,
-            AgentActivityState::Running => AgentStatus::Running,
-            AgentActivityState::WaitingTool | AgentActivityState::WaitingInteraction => {
-                AgentStatus::Waiting
-            }
+            AgentActivityState::Queued => "queued",
+            AgentActivityState::Running => "running",
+            AgentActivityState::WaitingTool | AgentActivityState::WaitingInteraction => "waiting",
             AgentActivityState::Idle => match snapshot.last_turn.as_ref().map(|turn| turn.kind) {
-                Some(TurnOutcomeKind::Completed) => AgentStatus::Completed,
-                Some(TurnOutcomeKind::Cancelled) => AgentStatus::Interrupted,
-                Some(TurnOutcomeKind::Failed | TurnOutcomeKind::BudgetLimited) => {
-                    AgentStatus::Errored
-                }
-                None => AgentStatus::Queued,
+                Some(TurnOutcomeKind::Completed) => "completed",
+                Some(TurnOutcomeKind::Cancelled) => "interrupted",
+                Some(TurnOutcomeKind::Failed | TurnOutcomeKind::BudgetLimited) => "errored",
+                None => "idle",
             },
         },
     }
