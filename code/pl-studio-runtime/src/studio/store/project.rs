@@ -1,4 +1,3 @@
-use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -16,7 +15,7 @@ use crate::studio::paths::{default_db_path, project_name, sqlite_url};
 use crate::studio::records::ProjectRecord;
 use crate::studio::store::StudioStore;
 use crate::studio::store_support::{
-    STUDIO_DATABASE_SCHEMA_VERSION, configure_sqlite, initialize_schema,
+    STUDIO_DATABASE_SCHEMA_VERSION, configure_sqlite, initialize_schema, migrate_schema,
 };
 
 impl StudioStore {
@@ -39,12 +38,26 @@ impl StudioStore {
             let version = database_schema_version(&db).await?;
             if version == STUDIO_DATABASE_SCHEMA_VERSION {
                 false
-            } else {
+            } else if version == 0 {
+                true
+            } else if version < STUDIO_DATABASE_SCHEMA_VERSION {
+                db.execute(Statement::from_string(
+                    DatabaseBackend::Sqlite,
+                    "PRAGMA wal_checkpoint(TRUNCATE)".to_string(),
+                ))
+                .await?;
                 db.close().await?;
-                remove_database_files(path).await?;
+                backup_database(path, version).await?;
                 db = connect_sqlite(&url).await?;
                 configure_sqlite(&db).await?;
-                true
+                migrate_schema(&db, version).await?;
+                false
+            } else {
+                db.close().await?;
+                anyhow::bail!(
+                    "Studio 数据库版本 {version} 高于当前支持版本 \
+                     {STUDIO_DATABASE_SCHEMA_VERSION}，已保留原数据库"
+                );
             }
         } else {
             true
@@ -232,23 +245,10 @@ async fn database_schema_version(db: &DatabaseConnection) -> Result<i64> {
     Ok(row.try_get("", "user_version")?)
 }
 
-async fn remove_database_files(path: &Path) -> Result<()> {
-    for candidate in [
-        path.to_path_buf(),
-        sqlite_sidecar_path(path, "-wal"),
-        sqlite_sidecar_path(path, "-shm"),
-    ] {
-        match tokio::fs::remove_file(candidate).await {
-            Ok(()) => {}
-            Err(error) if error.kind() == ErrorKind::NotFound => {}
-            Err(error) => return Err(error.into()),
-        }
+async fn backup_database(path: &Path, version: i64) -> Result<PathBuf> {
+    let backup = PathBuf::from(format!("{}.v{version}.bak", path.display()));
+    if !tokio::fs::try_exists(&backup).await? {
+        tokio::fs::copy(path, &backup).await?;
     }
-    Ok(())
-}
-
-fn sqlite_sidecar_path(path: &Path, suffix: &str) -> PathBuf {
-    let mut value = path.as_os_str().to_os_string();
-    value.push(suffix);
-    PathBuf::from(value)
+    Ok(backup)
 }

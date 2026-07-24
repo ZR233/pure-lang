@@ -1,34 +1,12 @@
 use pl_protocol::{
-    AgentStatus, SessionAgentSnapshot, SessionEventEnvelope, SessionEventKind,
-    SessionEventPosition, SessionMessage, SessionMessageRole, SessionMessageStatus, SessionPart,
-    SessionPartContent, SessionPartDelta, SessionPartDeltaField, SessionPartStatus,
-    SessionRuntimeSnapshot, SessionRuntimeUsage, SessionStreamFrame, SessionSubscriptionRequest,
-    SessionTextChannel, SkillActivation,
+    SessionEventEnvelope, SessionEventKind, SessionEventPosition, SessionMessage,
+    SessionMessageRole, SessionMessageStatus, SessionPart, SessionPartContent, SessionPartDelta,
+    SessionPartDeltaField, SessionPartStatus, SessionRuntimeSnapshot, SessionRuntimeUsage,
+    SessionStreamFrame, SessionSubscriptionRequest, SessionTextChannel, SkillActivation,
 };
 use pretty_assertions::assert_eq;
 
-use super::{
-    SessionEventError, SessionEventFact, SessionEventHub, SessionEventOptions,
-    project_session_facts,
-};
-
-#[test]
-fn mirrored_fact_rebinds_nested_session_and_allocates_target_sequence() {
-    let source = message_event("child", 9, "child-message");
-    let projected = project_session_facts(
-        "root",
-        4,
-        vec![SessionEventFact::from_committed_event(source)],
-    );
-    assert_eq!(projected.through_sequence, 5);
-    let event = &projected.events[0];
-    assert_eq!(event.session_id, "root");
-    assert_eq!(event.position.durable_sequence(), Some(5));
-    let SessionEventKind::MessageChanged { message } = &event.kind else {
-        panic!("expected message");
-    };
-    assert_eq!(message.session_id, "root");
-}
+use super::{SessionEventError, SessionEventHub, SessionEventOptions};
 
 #[tokio::test]
 async fn subscriptions_are_isolated_by_session() {
@@ -237,7 +215,7 @@ async fn transient_revision_gap_does_not_modify_the_live_overlay() {
 }
 
 #[test]
-fn skill_and_agent_facts_keep_runtime_metadata_in_sync() {
+fn skill_fact_keeps_runtime_metadata_in_sync() {
     let hub = SessionEventHub::default();
     hub.publish_durable(SessionEventEnvelope {
         event_id: "a:1".to_string(),
@@ -291,40 +269,32 @@ fn skill_and_agent_facts_keep_runtime_metadata_in_sync() {
         },
     })
     .unwrap();
-    hub.publish_durable(SessionEventEnvelope {
-        event_id: "a:3".to_string(),
-        session_id: "a".to_string(),
-        source_agent_id: Some("child".to_string()),
-        turn_id: Some("turn".to_string()),
-        emitted_at: 3,
-        position: SessionEventPosition::Durable { sequence: 3 },
-        kind: SessionEventKind::AgentChanged {
-            agent: SessionAgentSnapshot {
-                id: "child".to_string(),
-                session_id: "a".to_string(),
-                path: "/root/child".to_string(),
-                parent_path: Some("/root".to_string()),
-                role: "explorer".to_string(),
-                task: "inspect".to_string(),
-                status: AgentStatus::Running,
-                summary: None,
-                depth: 1,
-                error: None,
-                reason: None,
-                budget_limit_kind: None,
-                budget_usage: None,
-                runtime_usage: None,
-                updated_at: 3,
-            },
-        },
-    })
-    .unwrap();
-
     let snapshot = hub.snapshot("a").unwrap();
     let runtime = snapshot.runtime.unwrap();
     assert_eq!(runtime.active_skills, vec!["review".to_string()]);
     assert_eq!(runtime.active_mcp_servers, vec!["search".to_string()]);
-    assert_eq!(runtime.agent_count, 1);
+    assert_eq!(runtime.agent_count, 0);
+}
+
+#[test]
+fn session_rejects_events_from_a_different_owner_agent() {
+    let hub = SessionEventHub::default();
+    hub.publish_durable(message_event("a", 1, "root-message"))
+        .expect("establish owner");
+    let mut child_event = message_event("a", 2, "child-message");
+    child_event.source_agent_id = Some("child".to_string());
+
+    let error = hub
+        .publish_durable(child_event)
+        .expect_err("cross-agent event must be rejected");
+
+    assert!(matches!(error, SessionEventError::ProjectionInvariant(_)));
+    let snapshot = hub.snapshot("a").expect("snapshot");
+    assert_eq!(snapshot.messages.len(), 1);
+    assert_eq!(
+        snapshot.owner.as_ref().map(|owner| owner.agent_id.as_str()),
+        Some("agent")
+    );
 }
 
 fn message_event(session_id: &str, sequence: u64, message_id: &str) -> SessionEventEnvelope {

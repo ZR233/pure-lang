@@ -240,18 +240,36 @@ class SessionDto {
   final String projectId;
   final String title;
   final String mode;
+  final PlatformInt64 createdAt;
   final PlatformInt64 updatedAt;
   final String visibility;
   final String? parentSessionId;
+  final String rootSessionId;
+  final String sessionKind;
+  final String ownerAgentId;
+  final String ownerRole;
+  final String agentStatus;
+  final String? agentSummary;
+  final String? agentError;
+  final PlatformInt64? agentUpdatedAt;
 
   const SessionDto({
     required this.id,
     required this.projectId,
     required this.title,
     required this.mode,
+    required this.createdAt,
     required this.updatedAt,
     required this.visibility,
     this.parentSessionId,
+    required this.rootSessionId,
+    required this.sessionKind,
+    required this.ownerAgentId,
+    required this.ownerRole,
+    required this.agentStatus,
+    this.agentSummary,
+    this.agentError,
+    this.agentUpdatedAt,
   });
 
   @override
@@ -260,9 +278,18 @@ class SessionDto {
       projectId.hashCode ^
       title.hashCode ^
       mode.hashCode ^
+      createdAt.hashCode ^
       updatedAt.hashCode ^
       visibility.hashCode ^
-      parentSessionId.hashCode;
+      parentSessionId.hashCode ^
+      rootSessionId.hashCode ^
+      sessionKind.hashCode ^
+      ownerAgentId.hashCode ^
+      ownerRole.hashCode ^
+      agentStatus.hashCode ^
+      agentSummary.hashCode ^
+      agentError.hashCode ^
+      agentUpdatedAt.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -273,9 +300,18 @@ class SessionDto {
           projectId == other.projectId &&
           title == other.title &&
           mode == other.mode &&
+          createdAt == other.createdAt &&
           updatedAt == other.updatedAt &&
           visibility == other.visibility &&
-          parentSessionId == other.parentSessionId;
+          parentSessionId == other.parentSessionId &&
+          rootSessionId == other.rootSessionId &&
+          sessionKind == other.sessionKind &&
+          ownerAgentId == other.ownerAgentId &&
+          ownerRole == other.ownerRole &&
+          agentStatus == other.agentStatus &&
+          agentSummary == other.agentSummary &&
+          agentError == other.agentError &&
+          agentUpdatedAt == other.agentUpdatedAt;
 }
 
 class SkillSummaryDto {

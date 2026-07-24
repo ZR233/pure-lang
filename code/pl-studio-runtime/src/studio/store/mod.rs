@@ -13,6 +13,8 @@ pub struct StudioStore {
     db: DatabaseConnection,
 }
 
+pub(in crate::studio) use session::AgentSessionSpec;
+
 impl StudioStore {
     pub(crate) fn database(&self) -> &DatabaseConnection {
         &self.db

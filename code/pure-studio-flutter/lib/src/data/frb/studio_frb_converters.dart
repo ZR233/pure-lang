@@ -99,7 +99,22 @@ StudioSession _sessionFromFrb(frb.SessionDto session) {
     projectId: session.projectId,
     title: session.title,
     mode: _compileMode(session.mode),
+    createdAt: _dateFromUnix(session.createdAt),
     updatedAt: _dateFromUnix(session.updatedAt),
+    visibility: session.visibility,
+    parentSessionId: session.parentSessionId,
+    rootSessionId: session.rootSessionId,
+    sessionKind: session.sessionKind == 'agent'
+        ? StudioSessionKind.agent
+        : StudioSessionKind.root,
+    ownerAgentId: session.ownerAgentId,
+    ownerRole: session.ownerRole,
+    agentStatus: session.agentStatus,
+    agentSummary: session.agentSummary,
+    agentError: session.agentError,
+    agentUpdatedAt: session.agentUpdatedAt == null
+        ? null
+        : _dateFromUnix(session.agentUpdatedAt!),
   );
 }
 

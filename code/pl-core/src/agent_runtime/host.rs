@@ -118,6 +118,7 @@ pub trait AgentTurnFactory: Clone + Send + Sync + 'static {
 pub struct SpawnLifecycleRequest {
     pub parent: AgentSnapshot,
     pub child: AgentSnapshot,
+    pub child_session_id: super::SessionId,
     pub metadata: serde_json::Value,
 }
 

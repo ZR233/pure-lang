@@ -6,7 +6,6 @@ import '../../domain/models/studio_models.dart';
 import '../../app/theme/studio_tokens.dart';
 import '../../l10n/studio_l10n.dart';
 import '../../shared/upward_popup_menu.dart';
-import 'agent_detail_panel.dart';
 import 'context_usage_readout.dart';
 import 'status_bar_item.dart';
 import 'status_detail_popover.dart';
@@ -20,15 +19,10 @@ class SessionStatusBar extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final runtime = state.runtime;
-    final selectedAgents = state.selectedAgents;
     final session = state.sessions
         .where((session) => session.id == state.selectedSessionId)
         .firstOrNull;
-    final activityLabel = _runtimeActivityLabel(
-      context,
-      runtime,
-      selectedAgents,
-    );
+    final activityLabel = _runtimeActivityLabel(context, runtime);
     return DecoratedBox(
       decoration: BoxDecoration(
         color: context.studioPaper2,
@@ -51,6 +45,17 @@ class SessionStatusBar extends ConsumerWidget {
                       scrollDirection: Axis.horizontal,
                       child: Row(
                         children: [
+                          if (session != null)
+                            _StatusReadout(
+                              icon: Icons.account_tree_outlined,
+                              label: session.ownerRole.isEmpty
+                                  ? (session.isRoot ? 'planner' : 'agent')
+                                  : session.ownerRole,
+                              tooltip: session.agentStatus.isEmpty
+                                  ? session.title
+                                  : '${session.title} · ${session.agentStatus}',
+                              maxWidth: 132,
+                            ),
                           if (session != null)
                             _SessionModeSelector(
                               mode: session.mode,
@@ -84,10 +89,8 @@ class SessionStatusBar extends ConsumerWidget {
                               detailWidth: 520,
                               maxWidth: 240,
                               interactive: true,
-                              detailBuilder: (context) => _ActivityDetail(
-                                runtime: runtime,
-                                agents: selectedAgents,
-                              ),
+                              detailBuilder: (context) =>
+                                  _ActivityDetail(runtime: runtime),
                             ),
                         ],
                       ),
@@ -108,15 +111,7 @@ class SessionStatusBar extends ConsumerWidget {
   }
 }
 
-String _runtimeActivityLabel(
-  BuildContext context,
-  SessionRuntimeView runtime,
-  List<StudioAgentView> agents,
-) {
-  final taskAgents = runtime.task?.agents;
-  final agentCount = taskAgents != null && taskAgents.isNotEmpty
-      ? taskAgents.where((agent) => _isActiveTaskAgent(agent.status)).length
-      : agents.where((agent) => _isActiveMemoryAgent(agent.status)).length;
+String _runtimeActivityLabel(BuildContext context, SessionRuntimeView runtime) {
   final parts = [
     if (runtime.task case final task?) context.taskPhaseLabel(task.phase),
     if (runtime.activeSkills.isNotEmpty)
@@ -125,16 +120,9 @@ String _runtimeActivityLabel(
       context.l10n.statusMcpCount(runtime.activeMcpServers.length),
     if (runtime.activeLspServers.isNotEmpty)
       context.l10n.statusLspCount(runtime.activeLspServers.length),
-    if (agentCount > 0) context.l10n.statusAgentsCount(agentCount),
   ];
   return parts.join(' · ');
 }
-
-bool _isActiveTaskAgent(String status) =>
-    const {'queued', 'running', 'waitingForDelivery'}.contains(status);
-
-bool _isActiveMemoryAgent(String status) =>
-    const {'queued', 'running', 'waiting'}.contains(status);
 
 class _SessionModeSelector extends ConsumerWidget {
   const _SessionModeSelector({required this.mode, required this.enabled});
@@ -437,10 +425,9 @@ class _CostDetail extends StatelessWidget {
 }
 
 class _ActivityDetail extends StatelessWidget {
-  const _ActivityDetail({required this.runtime, required this.agents});
+  const _ActivityDetail({required this.runtime});
 
   final SessionRuntimeView runtime;
-  final List<StudioAgentView> agents;
 
   @override
   Widget build(BuildContext context) {
@@ -450,19 +437,7 @@ class _ActivityDetail extends StatelessWidget {
         runtime.activeLspServers.isNotEmpty;
     final task = runtime.task;
     if (task == null) {
-      return Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (hasCapabilities) _CapabilityDetail(runtime: runtime),
-          if (hasCapabilities && agents.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              child: Divider(height: 1, color: context.studioLine),
-            ),
-          if (agents.isNotEmpty) AgentDetailPanel(agents: agents),
-        ],
-      );
+      return _CapabilityDetail(runtime: runtime);
     }
     return ConstrainedBox(
       constraints: const BoxConstraints(maxHeight: 480),

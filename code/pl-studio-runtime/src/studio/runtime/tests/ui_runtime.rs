@@ -164,8 +164,10 @@ async fn ui_submit_clears_active_runtime_snapshot_after_completion() {
         })
         .await
         .unwrap();
-    assert_eq!(runtime.runtime_snapshot().active_turns.len(), 1);
 
+    // The response may finish before submit_prompt wakes the caller. The delayed
+    // SSE test above owns the assertion for the observable active state; this
+    // case verifies that a terminal event never leaves a stale active turn.
     wait_for_no_active_turn(&runtime).await;
     handle.await.unwrap();
     let _ = tokio::fs::remove_dir_all(home).await;

@@ -250,6 +250,43 @@ jobs:
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.AUTHENTICODE_CERTIFICATE_PASSWORD }}
         run: cargo xtask release-gui stage --version $env:RELEASE_VERSION
 
+      - name: Package matching Windows symbols
+        shell: pwsh
+        run: |
+          $symbolsDir = Join-Path $env:RUNNER_TEMP "pure-studio-symbols-$env:RELEASE_VERSION"
+          New-Item -ItemType Directory -Path $symbolsDir | Out-Null
+          $roots = @(
+            (Join-Path $env:GITHUB_WORKSPACE 'dist/pure-studio-flutter-release'),
+            (Join-Path $env:GITHUB_WORKSPACE 'target/release'),
+            (Join-Path $env:GITHUB_WORKSPACE 'code/pure-studio-flutter/build/windows/x64/rust-target/release')
+          )
+          $copied = 0
+          for ($index = 0; $index -lt $roots.Count; $index += 1) {
+            $root = $roots[$index]
+            if (-not (Test-Path -LiteralPath $root -PathType Container)) {
+              continue
+            }
+            $target = Join-Path $symbolsDir "source-$index"
+            New-Item -ItemType Directory -Path $target | Out-Null
+            Get-ChildItem -LiteralPath $root -Filter *.pdb -File -Recurse |
+              ForEach-Object {
+                Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $target $_.Name)
+                $copied += 1
+              }
+          }
+          if ($copied -eq 0) {
+            throw 'No matching Windows PDB files were produced'
+          }
+          @{
+            version = $env:RELEASE_VERSION
+            commit = '${{ needs.resolve.outputs.sha }}'
+            protocolVersion = 2
+            generatedAt = [DateTime]::UtcNow.ToString('o')
+          } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $symbolsDir 'version-map.json')
+          $archive = Join-Path $env:RUNNER_TEMP "Pure-Studio-$env:RELEASE_VERSION-windows-x86_64-symbols.zip"
+          Compress-Archive -Path (Join-Path $symbolsDir '*') -DestinationPath $archive
+          "SYMBOL_ARCHIVE=$archive" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       - name: Remove Authenticode certificate
         if: always()
         shell: pwsh
@@ -340,6 +377,15 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
+
+      - name: Preserve matching debug symbols
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: studio-symbols-${{ needs.resolve.outputs.releaseId }}-${{ needs.resolve.outputs.version }}
+          path: ${{ env.SYMBOL_ARCHIVE }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
 
   publish:
     name: Reconcile assets and publish draft

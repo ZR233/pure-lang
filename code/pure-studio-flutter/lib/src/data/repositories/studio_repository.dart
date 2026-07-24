@@ -128,8 +128,47 @@ class StudioController extends AsyncNotifier<StudioState> {
     if (current == null || current.selectedSessionId == sessionId) {
       return;
     }
-    state = AsyncData(current.copyWith(selectedSessionId: sessionId));
+    final session = current.sessions
+        .where((session) => session.id == sessionId)
+        .firstOrNull;
+    final composerTexts = _composerTextsAfterLeaving(current);
+    state = AsyncData(
+      current.copyWith(
+        selectedRootSessionId: session?.effectiveRootSessionId ?? sessionId,
+        selectedSessionId: sessionId,
+        composerText: composerTexts[sessionId] ?? '',
+        composerTextsBySession: composerTexts,
+      ),
+    );
     _subscribe(sessionId);
+  }
+
+  Future<void> selectAgentSession(String sessionId) async {
+    final current = state.value;
+    if (current == null || current.selectedSessionId == sessionId) {
+      return;
+    }
+    final target = current.sessions
+        .where((session) => session.id == sessionId)
+        .firstOrNull;
+    if (target == null) {
+      return;
+    }
+    final selectedRoot = current.selectedRootSession;
+    if (selectedRoot != null &&
+        target.effectiveRootSessionId != selectedRoot.id) {
+      return;
+    }
+    final composerTexts = _composerTextsAfterLeaving(current);
+    state = AsyncData(
+      current.copyWith(
+        selectedRootSessionId: target.effectiveRootSessionId,
+        selectedSessionId: target.id,
+        composerText: composerTexts[target.id] ?? '',
+        composerTextsBySession: composerTexts,
+      ),
+    );
+    _subscribe(target.id);
   }
 
   void updateComposer(String value) {
@@ -137,7 +176,17 @@ class StudioController extends AsyncNotifier<StudioState> {
     if (current == null) {
       return;
     }
-    state = AsyncData(current.copyWith(composerText: value));
+    final sessionId = current.selectedAgentSessionId;
+    final composerTexts = {...current.composerTextsBySession};
+    if (sessionId != null) {
+      composerTexts[sessionId] = value;
+    }
+    state = AsyncData(
+      current.copyWith(
+        composerText: value,
+        composerTextsBySession: composerTexts,
+      ),
+    );
   }
 
   Future<void> submitComposer() async {
@@ -147,8 +196,13 @@ class StudioController extends AsyncNotifier<StudioState> {
     if (current == null || sessionId == null || prompt.isEmpty) {
       return;
     }
+    final composerTexts = {...current.composerTextsBySession}..[sessionId] = '';
     state = AsyncData(
-      current.copyWith(composerText: '', turnPhase: TurnPhase.waitingForModel),
+      current.copyWith(
+        composerText: '',
+        composerTextsBySession: composerTexts,
+        turnPhase: TurnPhase.waitingForModel,
+      ),
     );
     await _api.submitPrompt(sessionId, prompt, const []);
   }
@@ -467,10 +521,39 @@ class StudioController extends AsyncNotifier<StudioState> {
   }
 
   Future<void> _adoptState(StudioState next) async {
-    final catalog = state.value?.providerCatalog;
+    final current = state.value;
+    final catalog = current?.providerCatalog;
     if (catalog != null) {
       next = _attachProviderCatalog(next, catalog);
     }
+    if (current != null) {
+      final composerTexts = _composerTextsAfterLeaving(current);
+      final turnPhases = {
+        ...current.turnPhasesBySession,
+        ...next.turnPhasesBySession,
+      };
+      final runtimes = {
+        ...current.runtimesBySession,
+        ...next.runtimesBySession,
+      };
+      final currentSessionId = current.selectedAgentSessionId;
+      if (currentSessionId != null) {
+        turnPhases[currentSessionId] = current.turnPhase;
+        runtimes[currentSessionId] = current.runtime;
+      }
+      next = next.copyWith(
+        composerText:
+            composerTexts[next.selectedAgentSessionId] ?? next.composerText,
+        composerTextsBySession: composerTexts,
+        turnPhasesBySession: turnPhases,
+        runtimesBySession: runtimes,
+      );
+    }
+    final selected = next.selectedAgentSession;
+    next = next.copyWith(
+      selectedRootSessionId:
+          selected?.effectiveRootSessionId ?? next.rootSessions.firstOrNull?.id,
+    );
     state = AsyncData(next);
     _subscribe(next.selectedSessionId);
   }
@@ -490,6 +573,15 @@ class StudioController extends AsyncNotifier<StudioState> {
     }
     return reduced.state;
   }
+}
+
+Map<String, String> _composerTextsAfterLeaving(StudioState state) {
+  final composerTexts = {...state.composerTextsBySession};
+  final sessionId = state.selectedAgentSessionId;
+  if (sessionId != null) {
+    composerTexts[sessionId] = state.composerText;
+  }
+  return composerTexts;
 }
 
 StudioState _attachProviderCatalog(

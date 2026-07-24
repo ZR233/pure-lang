@@ -59,10 +59,11 @@ pub(super) async fn studio_snapshot_from_projects_inner(
             .studio
             .reconcile_lsp_runtime_for_project(&project.id)
             .await?;
-        sessions = bridge.studio.ensure_project_sessions(&project.id).await?;
+        let roots = bridge.studio.ensure_project_sessions(&project.id).await?;
+        sessions = bridge.studio.store().list_all_sessions(&project.id).await?;
         selected_session_id = requested_session_id
             .filter(|session_id| sessions.iter().any(|session| session.id == *session_id))
-            .or_else(|| sessions.first().map(|session| session.id.clone()));
+            .or_else(|| roots.first().map(|session| session.id.clone()));
     }
     let selected_session_task = match selected_session_id.as_deref() {
         Some(session_id) => bridge

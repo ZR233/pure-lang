@@ -60,6 +60,7 @@
   "statusMcpCount": "{count} 个 MCP",
   "statusLspCount": "{count} 个 LSP",
   "statusAgentsCount": "{count} 个 agent",
+  "composerAgentRuntimeDriven": "此 Agent 会话由运行时驱动",
   "statusTaskSection": "任务协调",
   "statusTaskBranch": "分支",
   "statusTaskHead": "HEAD",

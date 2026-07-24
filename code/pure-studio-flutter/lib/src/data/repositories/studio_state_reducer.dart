@@ -127,6 +127,9 @@ StudioState mergeStudioSessionState(
     selectedProjectId:
         sessionState.selectedProjectId ?? merged.selectedProjectId,
     selectedSessionId: sessionId ?? merged.selectedSessionId,
+    selectedRootSessionId:
+        sessionState.selectedRootSession?.id ??
+        merged.selectedRootSession?.id,
     runtime: sessionState.runtime,
     pendingInteractions: sessionState.pendingInteractions,
     eventCursorsBySession: _mergeEventCursors(
@@ -285,7 +288,39 @@ StudioState _mergeSessionListChanged(
       if (!projectIds.contains(session.projectId)) session,
     ...incoming,
   ];
-  return current.copyWith(sessions: sessions);
+  var selectedSessionId = current.selectedSessionId;
+  var selectedRootSessionId = current.selectedRootSession?.id;
+  final selected = sessions
+      .where((session) => session.id == selectedSessionId)
+      .firstOrNull;
+  if (selected != null) {
+    selectedRootSessionId = selected.effectiveRootSessionId;
+  } else if (selectedSessionId != null &&
+      !sessions.any((session) => session.id == selectedSessionId)) {
+    final fallbackRoot = sessions
+        .where(
+          (session) =>
+              session.isRoot &&
+              projectIds.contains(session.projectId) &&
+              (selectedRootSessionId == null ||
+                  session.id == selectedRootSessionId),
+        )
+        .firstOrNull;
+    final anyRoot = fallbackRoot ??
+        sessions
+            .where(
+              (session) =>
+                  session.isRoot && projectIds.contains(session.projectId),
+            )
+            .firstOrNull;
+    selectedSessionId = anyRoot?.id;
+    selectedRootSessionId = anyRoot?.id;
+  }
+  return current.copyWith(
+    sessions: sessions,
+    selectedSessionId: selectedSessionId,
+    selectedRootSessionId: selectedRootSessionId,
+  );
 }
 
 Map<String, int> _mergeEventCursors(

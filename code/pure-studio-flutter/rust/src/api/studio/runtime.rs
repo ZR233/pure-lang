@@ -13,6 +13,7 @@ pub(crate) struct BridgeRuntime {
 
 impl BridgeRuntime {
     fn new() -> Result<Self> {
+        crate::diagnostics::initialize();
         let tokio = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .thread_name("pl-studio-bridge")

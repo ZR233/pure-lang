@@ -1,4 +1,5 @@
 pub mod api;
+mod diagnostics;
 
 pub use pl_protocol::SessionStreamFrame;
 

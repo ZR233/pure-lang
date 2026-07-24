@@ -64,6 +64,10 @@ StudioState _stateFromTypedSnapshot({
           : _webSearchFromFrb(webSearch),
       selectedProjectId: selectedProjectId,
       selectedSessionId: selectedSessionId,
+      selectedRootSessionId: sessions
+          .where((session) => session.id == selectedSessionId)
+          .firstOrNull
+          ?.effectiveRootSessionId,
       permissionMode: _permissionMode(
         _firstValue(_map(config['runtime']), const [
           'permissionMode',
@@ -168,6 +172,7 @@ StudioState _withInteraction(
     webSearch: state.webSearch,
     selectedProjectId: state.selectedProjectId,
     selectedSessionId: state.selectedSessionId,
+    selectedRootSessionId: state.selectedRootSessionId,
     permissionMode: state.permissionMode,
     turnPhase: state.turnPhase,
     runtime: state.runtime,

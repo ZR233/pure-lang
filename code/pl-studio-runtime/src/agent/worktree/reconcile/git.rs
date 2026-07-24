@@ -13,14 +13,17 @@ pub(super) fn delete_branch(repository: &Path, branch: &str) -> Result<()> {
 }
 
 pub(super) fn git_output(repository: &Path, args: &[&str]) -> Result<String> {
-    let child = Command::new("git")
+    let mut command = Command::new("git");
+    command
         .arg("-C")
         .arg(repository)
         .args(args)
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_ASKPASS", "")
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    crate::process::configure_background_std_command(&mut command);
+    let child = command
         .spawn()
         .with_context(|| format!("failed to run git {}", args.join(" ")))?;
     let mut child = KillOnDropChild::new(child);

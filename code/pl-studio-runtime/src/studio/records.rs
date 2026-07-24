@@ -14,10 +14,34 @@ pub struct SessionRecord {
     pub project_id: String,
     pub title: String,
     pub mode: String,
+    pub created_at: i64,
     pub updated_at: i64,
     pub visibility: SessionVisibility,
     pub parent_session_id: Option<String>,
+    pub root_session_id: String,
+    pub session_kind: SessionKind,
+    pub owner_agent_id: String,
+    pub owner_role: String,
+    pub agent_status: String,
+    pub agent_summary: Option<String>,
+    pub agent_error: Option<String>,
+    pub agent_updated_at: Option<i64>,
     pub instruction_snapshot: Option<crate::InstructionSnapshot>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionKind {
+    Root,
+    Agent,
+}
+
+impl SessionKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Root => "root",
+            Self::Agent => "agent",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

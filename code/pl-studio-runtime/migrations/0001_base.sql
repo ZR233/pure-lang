@@ -192,6 +192,14 @@ CREATE TABLE sessions (
     instruction_snapshot_json TEXT,
     visibility TEXT NOT NULL DEFAULT 'active',
     parent_session_id TEXT,
+    root_session_id TEXT NOT NULL,
+    session_kind TEXT NOT NULL DEFAULT 'root',
+    owner_agent_id TEXT NOT NULL,
+    owner_role TEXT NOT NULL,
+    agent_status TEXT NOT NULL DEFAULT 'idle',
+    agent_summary TEXT,
+    agent_error TEXT,
+    agent_updated_at INTEGER,
     FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
 );
 
@@ -282,6 +290,12 @@ CREATE UNIQUE INDEX idx_review_rounds_run_round
 CREATE INDEX idx_sessions_parent_session
     ON sessions(parent_session_id);
 
+CREATE INDEX idx_sessions_root_session
+    ON sessions(root_session_id, created_at, id);
+
+CREATE UNIQUE INDEX idx_sessions_owner_runtime_session
+    ON sessions(owner_agent_id, id);
+
 CREATE INDEX idx_sessions_project_updated_at
     ON sessions(project_id, archived, updated_at DESC, id DESC);
 
@@ -297,4 +311,4 @@ CREATE INDEX idx_tool_approvals_session_created_at
 CREATE INDEX idx_work_units_run_status
     ON work_units(task_run_id, status, created_at ASC, id ASC);
 
-PRAGMA user_version = 2;
+PRAGMA user_version = 3;

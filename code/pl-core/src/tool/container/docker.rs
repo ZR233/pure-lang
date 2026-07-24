@@ -57,6 +57,7 @@ impl ContainerBackend for DockerCliContainerBackend {
             command.args(["-w", cwd]);
         }
         command.args([&self.container_id, "/bin/sh", "-lc", &shell_command]);
+        crate::process::configure_background_command(&mut command);
         let output = command.output().await.map_err(docker_error)?;
         let stdout_bytes = output.stdout.len() as u64;
         let stderr_bytes = output.stderr.len() as u64;
@@ -81,28 +82,26 @@ impl ContainerBackend for DockerCliContainerBackend {
     ) -> std::result::Result<Vec<u8>, Self::Error> {
         if request.archive {
             let source = format!("{}:{}", self.container_id, request.path);
-            let output = Command::new(&self.binary)
-                .args(["cp", &source, "-"])
-                .output()
-                .await
-                .map_err(docker_error)?;
+            let mut command = Command::new(&self.binary);
+            command.args(["cp", &source, "-"]);
+            crate::process::configure_background_command(&mut command);
+            let output = command.output().await.map_err(docker_error)?;
             if !output.status.success() {
                 return Err(docker_error(stderr_or_stdout(&output)));
             }
             return Ok(output.stdout);
         }
 
-        let output = Command::new(&self.binary)
-            .args([
-                "exec",
-                &self.container_id,
-                "/bin/sh",
-                "-lc",
-                &format!("cat -- {}", shell_quote(&request.path)),
-            ])
-            .output()
-            .await
-            .map_err(docker_error)?;
+        let mut command = Command::new(&self.binary);
+        command.args([
+            "exec",
+            &self.container_id,
+            "/bin/sh",
+            "-lc",
+            &format!("cat -- {}", shell_quote(&request.path)),
+        ]);
+        crate::process::configure_background_command(&mut command);
+        let output = command.output().await.map_err(docker_error)?;
         if !output.status.success() {
             return Err(docker_error(stderr_or_stdout(&output)));
         }
@@ -123,7 +122,8 @@ impl ContainerBackend for DockerCliContainerBackend {
                 shell_quote(&request.path)
             )
         };
-        let mut child = Command::new(&self.binary)
+        let mut command = Command::new(&self.binary);
+        command
             .args([
                 "exec",
                 "-i",
@@ -134,9 +134,9 @@ impl ContainerBackend for DockerCliContainerBackend {
             ])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(docker_error)?;
+            .stderr(Stdio::piped());
+        crate::process::configure_background_command(&mut command);
+        let mut child = command.spawn().map_err(docker_error)?;
         let mut stdin = child
             .stdin
             .take()

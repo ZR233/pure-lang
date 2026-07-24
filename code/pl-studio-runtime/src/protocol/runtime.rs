@@ -81,10 +81,22 @@ pub struct StudioSessionSummary {
     pub project_id: String,
     pub title: String,
     pub mode: String,
+    pub created_at: i64,
     pub updated_at: i64,
     pub visibility: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_session_id: Option<String>,
+    pub root_session_id: String,
+    pub session_kind: String,
+    pub owner_agent_id: String,
+    pub owner_role: String,
+    pub agent_status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_updated_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

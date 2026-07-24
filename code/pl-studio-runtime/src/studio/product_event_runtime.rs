@@ -58,7 +58,7 @@ impl StudioProductEventRuntime {
     pub async fn emit_session_list(&self, project_id: &str) -> Result<StudioProductEventEnvelope> {
         let sessions = self
             .store
-            .list_sessions(project_id)
+            .list_all_sessions(project_id)
             .await?
             .into_iter()
             .map(|session| StudioSessionSummary {
@@ -66,9 +66,18 @@ impl StudioProductEventRuntime {
                 project_id: session.project_id,
                 title: session.title,
                 mode: session.mode,
+                created_at: session.created_at,
                 updated_at: session.updated_at,
                 visibility: session.visibility.as_str().to_string(),
                 parent_session_id: session.parent_session_id,
+                root_session_id: session.root_session_id,
+                session_kind: session.session_kind.as_str().to_string(),
+                owner_agent_id: session.owner_agent_id,
+                owner_role: session.owner_role,
+                agent_status: session.agent_status,
+                agent_summary: session.agent_summary,
+                agent_error: session.agent_error,
+                agent_updated_at: session.agent_updated_at,
             })
             .collect();
         Ok(self.emit(
@@ -136,9 +145,18 @@ mod tests {
                     project_id: session.project_id,
                     title: session.title,
                     mode: session.mode,
+                    created_at: session.created_at,
                     updated_at: session.updated_at,
                     visibility: session.visibility.as_str().to_string(),
                     parent_session_id: session.parent_session_id,
+                    root_session_id: session.root_session_id,
+                    session_kind: session.session_kind.as_str().to_string(),
+                    owner_agent_id: session.owner_agent_id,
+                    owner_role: session.owner_role,
+                    agent_status: session.agent_status,
+                    agent_summary: session.agent_summary,
+                    agent_error: session.agent_error,
+                    agent_updated_at: session.agent_updated_at,
                 }],
             }
         );

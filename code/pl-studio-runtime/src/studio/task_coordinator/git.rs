@@ -50,21 +50,21 @@ pub(super) async fn changed_files_between(
     let base_commit = base_commit.to_string();
     let head_commit = head_commit.to_string();
     tokio::task::spawn_blocking(move || {
-        let output = Command::new("git")
-            .arg("-C")
-            .arg(&path)
-            .args([
-                "diff",
-                "--name-status",
-                "-z",
-                "--find-renames",
-                "--find-copies",
-                "--find-copies-harder",
-                "--diff-filter=ACDMRTUXB",
-                &base_commit,
-                &head_commit,
-                "--",
-            ])
+        let mut command = Command::new("git");
+        command.arg("-C").arg(&path).args([
+            "diff",
+            "--name-status",
+            "-z",
+            "--find-renames",
+            "--find-copies",
+            "--find-copies-harder",
+            "--diff-filter=ACDMRTUXB",
+            &base_commit,
+            &head_commit,
+            "--",
+        ]);
+        crate::process::configure_background_std_command(&mut command);
+        let output = command
             .output()
             .context("failed to run git diff --name-status")?;
         if !output.status.success() {
@@ -110,10 +110,15 @@ pub(super) async fn is_ancestor(
     let base_commit = base_commit.to_string();
     let head_commit = head_commit.to_string();
     tokio::task::spawn_blocking(move || {
-        let output = Command::new("git")
-            .arg("-C")
-            .arg(&path)
-            .args(["merge-base", "--is-ancestor", &base_commit, &head_commit])
+        let mut command = Command::new("git");
+        command.arg("-C").arg(&path).args([
+            "merge-base",
+            "--is-ancestor",
+            &base_commit,
+            &head_commit,
+        ]);
+        crate::process::configure_background_std_command(&mut command);
+        let output = command
             .output()
             .context("failed to run git merge-base --is-ancestor")?;
         match output.status.code() {
@@ -251,6 +256,7 @@ fn create_initial_commit(workspace_root: &Path) -> Result<()> {
     if !has_email {
         command.args(["-c", STUDIO_GIT_EMAIL_CONFIG]);
     }
+    crate::process::configure_background_std_command(&mut command);
     let output = command
         .args(["commit", "--allow-empty", "-m", INITIAL_COMMIT_MESSAGE])
         .output()
@@ -310,12 +316,15 @@ fn git_optional_output(path: &Path, args: &[&str]) -> Result<Option<String>> {
 }
 
 fn git_command(path: &Path, args: &[&str]) -> Result<Output> {
-    Command::new("git")
+    let mut command = Command::new("git");
+    command
         .env("LC_ALL", "C")
         .env("LANG", "C")
         .arg("-C")
         .arg(path)
-        .args(args)
+        .args(args);
+    crate::process::configure_background_std_command(&mut command);
+    command
         .output()
         .with_context(|| format!("failed to run git {}", args.join(" ")))
 }
