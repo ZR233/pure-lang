@@ -53,7 +53,7 @@ void ConfigureWindowsErrorReporting() {
     return;
   }
   const DWORD dump_type = 2;
-  const DWORD dump_count = 5;
+  const DWORD dump_count = 10;
   ::RegSetValueExW(
       key, L"DumpFolder", 0, REG_SZ,
       reinterpret_cast<const BYTE *>(folder.c_str()),

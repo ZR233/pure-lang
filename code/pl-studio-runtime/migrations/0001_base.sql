@@ -21,6 +21,8 @@ CREATE TABLE agent_outcomes (
     error TEXT,
     delivery_json TEXT,
     review_json TEXT,
+    completion_contract_json TEXT,
+    delivery_recovery_count INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     terminal_observed INTEGER NOT NULL DEFAULT 0,
@@ -215,6 +217,9 @@ CREATE TABLE task_runs (
     expected_head TEXT NOT NULL,
     design_commit TEXT,
     status_message TEXT,
+    stop_requested INTEGER NOT NULL DEFAULT 0,
+    stop_requested_reason TEXT,
+    stop_requested_at INTEGER,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
@@ -311,4 +316,4 @@ CREATE INDEX idx_tool_approvals_session_created_at
 CREATE INDEX idx_work_units_run_status
     ON work_units(task_run_id, status, created_at ASC, id ASC);
 
-PRAGMA user_version = 3;
+PRAGMA user_version = 4;

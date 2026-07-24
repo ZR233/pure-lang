@@ -21,15 +21,21 @@ provider、settings 等低频 product event，但这些事件不得混入 sessio
 大会话与 agent session 是两层身份。大会话 root session 负责 project、标题、模式、task
 与 agent 目录；root agent 和每个 child agent 都有自己的 `SessionId`。一个 `SessionId`
 只能属于一个 owner agent，`SessionEventEnvelope.sessionId` 必须等于 owner 当前 session，
-非空 `sourceAgentId` 必须等于 owner。跨 agent 输入必须同时指定目标 `agentId` 和
-`sessionId`，repository 与 reducer 都要拒绝 owner 不匹配，不能把 child event 重新绑定到
-root session。
+非空 `sourceAgentId` 必须等于 owner。跨 agent 输入的内部 envelope 必须同时携带 source/
+target agent 与 session；模型侧只提供 target，由 resolver 生成强类型
+`ResolvedAgentSessionTarget`，其中包含 root、agent、current session 和 owner revision。
+不存在 caller-session fallback。repository、actor 与 reducer 都要拒绝跨 root、历史 session、
+未知 session 和 owner 不匹配，不能隐式创建空 session，也不能把 child event 重新绑定到 root
+session。
 
 ## 8.2 Message/Part 模型
 
 每个 message snapshot 携带 `messageId/sessionId/turnId/role/status/createdAt/updatedAt`。
 每个 part snapshot 携带 `partId/messageId/sessionId/turnId/type/order/revision/status` 和
 对应内容。消息与 part 首次创建后身份字段和展示顺序不可改变，终态不可回退。
+`activityGroupId` 是 deprecated 兼容字段，不再由新事件生成，也不参与 canonical 归约或
+展示分组。展示层只把排序后相邻的可见 tool part 合并；任何其他可见 part 或 message 边界
+都会切断工具组。
 
 part 类型固定为：
 
@@ -79,6 +85,11 @@ terminal snapshot 必须包含最终完整内容，并在 durable transaction �
 这个顺序消除“读取 snapshot 时漏掉新事件”的窗口。session durable sequence 独立递增；
 `eventId` 只用于诊断和去重，cursor 只使用 durable sequence。
 
+Hub canonical projection 的 `throughSequence` 是 durable cursor 的唯一权威。所有 durable
+生产路径都必须在同一个 owner-validated projection transaction 中从该 cursor 分配 sequence，
+持久化成功后才安装 committed projection 并广播。actor/repository 的 sequence 字段仅是
+checkpoint 镜像；恢复时允许按 canonical cursor 修复落后镜像，禁止用镜像分配下一 sequence。
+
 无 cursor、cursor 早于 journal 下界、缺口超过 1000 条或 reducer 不变量失败时返回完整
 snapshot。每个 session 默认保留最近 4096 条 durable event；更早的读取自动回到 snapshot。
 receiver lag 时发送 `ResyncRequired` 并终止当前订阅，由调用方重新建立无 cursor 订阅。
@@ -119,8 +130,8 @@ stream 持续刷新，不携带 timeline、Todo 或 context；UI 只对当前可
 订阅。切换 agent session 时：
 
 1. 增加本地 generation 并关闭旧 stream。
-2. 建立新 subscription。
-3. 原子应用 snapshot 或 replay。
+2. 有缓存时原子切换到目标 workspace，无缓存时切换为空的 loading workspace，不能继续展示旧 agent。
+3. 建立新 subscription，并原子应用 snapshot 或 replay。
 4. 归约 generation 匹配的 live event。
 
 durable event sequence 不大于本地 cursor 时忽略。transient delta 按 frame 合批；同一 frame
@@ -134,6 +145,10 @@ child agent 的 lifecycle/status 变化只更新 Agent Directory，绝不修改
 `selectedAgentSessionId`。当前工作区的 timeline、Todo、runtime/context、skills、
 interaction、状态栏和 Composer 必须从同一个 agent snapshot/cursor 原子替换；迟到 frame
 直接按 generation 丢弃。
+
+FRB stream 的 `onError`、`onDone`、lagged 与 `ResyncRequired` 使用同一恢复路径：按短退避
+建立无 cursor subscription 并先请求 authoritative snapshot。旧 generation 的 error/done
+不得影响新 workspace；只有 reconnecting、stale 或 resync 时 UI 才显示 freshness 提示。
 
 ## 8.7 产品事件
 

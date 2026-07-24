@@ -166,6 +166,46 @@ impl AgentSubmitRequest {
     }
 }
 
+/// 提交到目标 agent 当前 session 的输入；session 身份只能由 runtime resolver 填充。
+#[derive(Debug, Clone, PartialEq)]
+pub struct AgentCurrentSessionSubmitRequest {
+    pub message: String,
+    pub metadata: serde_json::Value,
+    pub delivery: InputDelivery,
+}
+
+impl AgentCurrentSessionSubmitRequest {
+    /// 创建投递到当前 session 的普通输入。
+    pub fn start(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            metadata: serde_json::Value::Null,
+            delivery: InputDelivery::Start,
+        }
+    }
+
+    /// 设置产品自定义、可持久化的输入元数据。
+    pub fn with_metadata(mut self, metadata: serde_json::Value) -> Self {
+        self.metadata = metadata;
+        self
+    }
+
+    /// 设置明确的输入投递语义。
+    pub fn with_delivery(mut self, delivery: InputDelivery) -> Self {
+        self.delivery = delivery;
+        self
+    }
+}
+
+/// actor 内部解析出的 owner-bound current session capability。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ResolvedAgentSessionTarget {
+    pub(crate) root_agent_id: AgentId,
+    pub(crate) agent_id: AgentId,
+    pub(crate) session_id: SessionId,
+    pub(crate) owner_revision: u64,
+}
+
 /// repository 原子提交和恢复使用的 agent 全量 durable state。
 #[derive(Debug, Clone)]
 pub struct AgentDurableState {
@@ -301,6 +341,14 @@ pub enum AgentRuntimeError {
         expected: TurnId,
         actual: TurnId,
     },
+    SessionNotOwned {
+        agent_id: AgentId,
+        session_id: SessionId,
+    },
+    CurrentSessionUnavailable {
+        agent_id: AgentId,
+        session_count: usize,
+    },
     Repository(String),
     RevisionConflict {
         expected: Option<u64>,
@@ -327,6 +375,20 @@ impl fmt::Display for AgentRuntimeError {
                     "active turn mismatch: expected {expected}, got {actual}"
                 )
             }
+            Self::SessionNotOwned {
+                agent_id,
+                session_id,
+            } => write!(
+                formatter,
+                "agent {agent_id} does not own session {session_id}"
+            ),
+            Self::CurrentSessionUnavailable {
+                agent_id,
+                session_count,
+            } => write!(
+                formatter,
+                "agent {agent_id} has no unambiguous current session ({session_count} owned)"
+            ),
             Self::Repository(error) => write!(formatter, "agent repository failed: {error}"),
             Self::RevisionConflict { expected, actual } => write!(
                 formatter,

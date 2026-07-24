@@ -385,6 +385,26 @@ void registerDemoProjectTests() {
     );
   });
 
+  test('closed session stream resubscribes from canonical snapshot', () async {
+    final api = _FakeStudioApi(
+      _twoProjectState(selectedProjectId: 'project-a'),
+    );
+    final container = ProviderContainer(
+      overrides: [studioApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+    await container.read(studioControllerProvider.future);
+
+    expect(api.sessionSubscriptions, hasLength(1));
+    await api.closeSessionStream();
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    await pumpEventQueue();
+
+    expect(api.sessionSubscriptions, hasLength(2));
+    expect(api.sessionSubscriptions.last.sessionId, 'session-a');
+    expect(api.sessionSubscriptions.last.afterSequence, isNull);
+  });
+
   test('archive last project clears current selection', () async {
     final api = _FakeStudioApi(
       _twoProjectState(selectedProjectId: 'project-a'),

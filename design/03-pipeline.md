@@ -63,7 +63,8 @@ agent 的输入队列、活动 turn、取消和恢复由 `pl-core::AgentRuntime`
 - 输入使用 `QueueOnly | Start | InterruptThenStart`。actor 先持久化 FIFO queue/activity，再准备和执行 turn；取消先触发 token，超过 grace period 才 abort
 - `wait_agent` 在目标 Idle 且队列为空时完成并返回 last outcome；状态明细通过 `list_agents` 和实时 snapshot/timeline 获取
 - 关闭父 agent 时按产品策略级联关闭子树；终态 repository commit 失败才把 actor 置为 Faulted 并拒绝新输入
-- `AgentRuntime` actor 是 session、pending input、active turn、cancel token、revision 和 event sequence 的唯一状态机；宿主只能通过 CAS `AgentCommit` 与 lifecycle saga 持久化/管理外部资源
+- `AgentRuntime` actor 是 session、pending input、active turn、cancel token 和 revision 的唯一状态机；durable session cursor 只由 `SessionEventHub` 的 canonical projection 分配，actor/repository 中的 sequence 仅是提交后可修复的 checkpoint 镜像；宿主只能通过 CAS `AgentCommit` 与 lifecycle saga 持久化/管理外部资源
+- 协作输入先由 runtime resolver 把模型提供的 target 解析为 `ResolvedAgentSessionTarget { root, agent, currentSession, ownerRevision }`。模型工具不接受 `sessionId`，也不得回退到 caller session；coordinator 解析 root，actor 在同一条 submit 命令内从 active turn、durable pending FIFO 或唯一 owned session 原子解析 current session。多个 idle 历史 session 没有 current 指针时必须报歧义，不能用 `lastTurn` 猜测，也不能隐式创建空 session
 
 ## 3.3 核心 turn 编排
 
@@ -94,6 +95,13 @@ Uninitialized -> Initializing -> Ready -> ShuttingDown -> Stopped
 `TurnEngine` 接收新 turn 后，真实用户输入必须已经通过 `submit_prompt` 生成 durable user message/part，并在 `AgentSession` 中作为模型历史写入；随后才能记录 enabled tools、turn running、inference、工具和模型输出等内部运行事件。每个 turn 的用户输入只能对应一个 canonical user text part：message id 为 `{turnId}:user`，part id 为 `{turnId}:user-text`。若内部 trace 仍产生用户输入 snapshot，进入 Studio 协议前必须忽略，只保留为内部诊断，不能覆盖既有 part 或生成第二条用户消息。`StudioEventEnvelope.sequence` 是后端唯一 durable 游标，part 的 `order` 只用于 message 内展示顺序，前端 optimistic 提示不得改变后端游标。
 
 assistant 的 text、commentary、reasoning 和 plan part identity 不得直接使用 provider 局部 `item_id`。provider id 只在单个 inference 内定位当前打开的 stream block；进入 Studio part 前必须生成包含 `{turnId}`、`{inferenceId}` 和语义段序号的稳定 id，例如 `{inferenceId}-reasoning-1`、`{inferenceId}-text-final-1`。同一个 provider item 若出现 text channel/phase 变化，必须先关闭旧 block 再打开新 block，不能把旧 block id 继续用于另一种可见 channel。工具调用是语义边界：遇到 tool start/ready 或 step finish 时，当前打开的 text/reasoning/plan 必须先完成并清理 active provider 映射；工具后的模型输出必须创建新的 part，展示顺序排在工具之后。工具 part 使用 runtime tool call id 保持稳定，使 provider tool snapshot 与 core tool execution snapshot 更新同一个 part。
+
+message/part 是有序 item，而不是按 turn 聚合后的展示块。`partId` 首次插入时固定
+`messageId/sessionId/turnId/type/order/createdAt/textChannel`；后续 streaming/terminal
+snapshot 只能替换内容、revision 和状态，不能移动首次位置或改变身份。批内同一 part 的多次
+更新只发布最终 snapshot。`activityGroupId` 仅保留为旧 wire/数据库兼容字段，新事件停止
+生成，Flutter 不把它当作分组事实；展示层只合并排序后相邻的可见 tool part，任何 text、
+commentary、final、reasoning、plan、agent row 或 message 边界都会结束当前工具组。
 
 模型输出的 `commentary` 只进入 timeline，用于让用户看到阶段性进展，不写入 `AgentSession`。只有 `final` 输出会作为 assistant response 写入会话历史；带工具调用的中间轮次如果只输出 commentary，也不得把 commentary 当作 assistant tool-call content 写回 provider 历史。
 
@@ -144,6 +152,7 @@ owner 冲突必须拒绝并输出诊断。大会话归档级联归档其 agent s
 
 - 消息和内部 `pl-trace` 诊断事件采用事务批量写入，避免逐条写放大；旧 `timeline_events` 表的 entity、运行期写入、读取和清理路径均已删除，迁移历史按 append-only 保留（不再有运行期代码读写该表）
 - `studio_events` 是 Studio UI 的唯一 durable 重放事实流。每个 durable 事件带 `sessionId`、会话内单调 `sequence`、`createdAt` 和类型化 `kind`；前端通过 cursor 补拉缺失事件，而不是依赖命令最终响应补状态。广播 payload 必须与持久化 payload 完全一致，禁止 projection 重写一份、实时广播另一份。高频 `messagePartDelta` 是实时 overlay，不写入 durable log，必须能被后续 `messagePartUpdated` 完全覆盖。
+- `SessionEventHub` canonical snapshot 的 `throughSequence` 是下一 durable sequence 的唯一依据。observation、trace、runtime event 和外部 session fact 必须走同一 owner-validated projection transaction；`agent_runtime_sessions.session_event_sequence` 只保存提交后 checkpoint，恢复时若仅落后则按 snapshot/journal cursor 自动修复，绝不能据此分配 sequence。
 - `turns` 表保存当前与历史 turn 状态：`queued | contextLoading | waitingForModel | streaming | waitingForInteraction | runningTool | persisting | completed | failed | cancelled`。启动时所有非终态 turn 必须收敛为 `cancelled`
 - `studio_messages`、`message_parts`、`agent_events`、`interactions`、`session_skills` 是 `StudioEventRuntime` 的 projection 表。message/part projection 保存 latest snapshot，live delta 只作为前端 overlay；除一次性迁移和启动恢复外，运行期不得由前端推断直接写入。Plan lifecycle 也必须先写 `StudioEventKind::PlanLifecycleChanged`，再由 projection 更新查询表。旧 `session_handoffs` projection 已通过后续迁移从当前 schema 清理，不再参与运行期读写。
 - `message_parts.part_order` 在 part 首次 durable snapshot 时由 `StudioEventEnvelope.sequence` 固化；后续同 part snapshot 即使携带旧 order，也必须保留既有 order，禁止终态 snapshot 或 backfill 改变首次展示位置。

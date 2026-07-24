@@ -26,17 +26,17 @@ mod workspace;
 
 pub use agent_runtime::{
     AgentAccessPolicy, AgentActivityState, AgentCollaborationTools, AgentCommit,
-    AgentCommitObserver, AgentCommitOutcome, AgentCommittedEvent, AgentDurableState,
-    AgentExecutionPolicy, AgentId, AgentIdentity, AgentLifecycleAdapter, AgentLifecycleState,
-    AgentRegistration, AgentRuntime, AgentRuntimeError, AgentRuntimeEvent, AgentRuntimeEventKind,
-    AgentRuntimeHandle, AgentRuntimeHost, AgentRuntimeOptions, AgentRuntimeResult,
-    AgentSessionCommitPolicy, AgentSessionState, AgentSnapshot, AgentSpawnRequest,
-    AgentSpawnResult, AgentStateMutation, AgentStateRepository, AgentSubmitRequest,
-    AgentTargetSelector, AgentTurnCheckpoint, AgentTurnCheckpointHandle, AgentTurnFactory,
-    AgentTurnOutcome, AgentTurnPreparationContext, AgentWaitResult, CloseLifecycleRequest,
-    InputDelivery, PendingAgentInput, PreparedAgentTurn, PreparedSessionRuntime,
-    RestoredAgentRuntime, RestoredInputPolicy, RestoredSessionProjection, SessionId,
-    SessionProjectionCommit, SpawnLifecycleRequest, ToolEffectSet, TurnCheckpointReason,
+    AgentCommitObserver, AgentCommitOutcome, AgentCommittedEvent, AgentCurrentSessionSubmitRequest,
+    AgentDurableState, AgentExecutionPolicy, AgentId, AgentIdentity, AgentLifecycleAdapter,
+    AgentLifecycleState, AgentRegistration, AgentRuntime, AgentRuntimeError, AgentRuntimeEvent,
+    AgentRuntimeEventKind, AgentRuntimeHandle, AgentRuntimeHost, AgentRuntimeOptions,
+    AgentRuntimeResult, AgentSessionCommitPolicy, AgentSessionState, AgentSnapshot,
+    AgentSpawnRequest, AgentSpawnResult, AgentStateMutation, AgentStateRepository,
+    AgentSubmitRequest, AgentTargetSelector, AgentTurnCheckpoint, AgentTurnCheckpointHandle,
+    AgentTurnFactory, AgentTurnOutcome, AgentTurnPreparationContext, AgentWaitResult,
+    CloseLifecycleRequest, InputDelivery, PendingAgentInput, PreparedAgentTurn,
+    PreparedSessionRuntime, RestoredAgentRuntime, RestoredInputPolicy, RestoredSessionProjection,
+    SessionId, SessionProjectionCommit, SpawnLifecycleRequest, ToolEffectSet, TurnCheckpointReason,
     TurnFinalizationPolicy, TurnId, TurnOutcomeKind,
 };
 pub use attachment::MaterializedAttachment;

@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 
 use super::{
     AgentAccessPolicy, AgentId, AgentRuntimeHandle, AgentSessionState, AgentSpawnRequest,
-    AgentSubmitRequest, AgentTargetSelector, InputDelivery, SessionId,
+    AgentTargetSelector, InputDelivery, SessionId,
 };
 use crate::{AgentRoleId, Tool, ToolContext, ToolEffect, ToolInput, ToolOutput};
 
@@ -213,27 +213,13 @@ impl CollaborationTool {
         let target = parse_agent_id(TOOL_SEND_INPUT, args.target)?;
         self.authorize(&self.policy.message_targets, &target)
             .await?;
-        let session_id = args
-            .session_id
-            .map(SessionId::new)
-            .transpose()
-            .map_err(|error| tool_error(TOOL_SEND_INPUT, error.to_string()))?
-            .unwrap_or(SessionId::new(input.session_id).map_err(|error| {
-                tool_error(
-                    TOOL_SEND_INPUT,
-                    format!("invalid current session id: {error}"),
-                )
-            })?);
         let turn_id = self
             .runtime
-            .submit(
+            .submit_current_session(
                 target.clone(),
-                AgentSubmitRequest {
-                    session_id,
-                    message: args.message,
-                    metadata: args.metadata,
-                    delivery: args.delivery,
-                },
+                super::AgentCurrentSessionSubmitRequest::start(args.message)
+                    .with_metadata(args.metadata)
+                    .with_delivery(args.delivery),
             )
             .await
             .map_err(|error| tool_error(TOOL_SEND_INPUT, error.to_string()))?;
@@ -328,7 +314,6 @@ struct SpawnArgs {
 struct SendArgs {
     target: String,
     message: String,
-    session_id: Option<String>,
     #[serde(default)]
     delivery: InputDelivery,
     #[serde(default)]
@@ -381,6 +366,23 @@ mod tests {
         assert_eq!(
             schema["properties"]["role"]["enum"],
             json!(["researcher", "writer"])
+        );
+    }
+
+    #[test]
+    fn send_schema_resolves_target_session_in_runtime() {
+        let schema = send_schema();
+
+        assert!(schema["properties"]["target"].is_object());
+        assert!(schema["properties"]["message"].is_object());
+        assert!(schema["properties"].get("sessionId").is_none());
+        assert!(
+            serde_json::from_value::<SendArgs>(json!({
+                "target": "child",
+                "message": "continue",
+                "sessionId": "caller-session",
+            }))
+            .is_err()
         );
     }
 

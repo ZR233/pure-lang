@@ -132,6 +132,20 @@ executor 必须先自行 commit，并调用：
 submit_delivery { headCommit, verificationSummary }
 ```
 
+每个 task executor outcome 持久化 `CompletionContract::DeliveryRequired`，包含 task run、
+work unit 与一次 recovery 上限。executor turn 进入 terminal 时 coordinator 必须检查合同，
+不能只按 actor Idle 视为任务完成：已有合法 delivery 时完成合同并通知 Planner；worktree
+无改动且 HEAD 未推进时以 `noDelivery` 失败；HEAD 已推进或仍有未提交修改时进入
+`WaitingForDelivery`，保留 session、worktree 和 lease，并向同一 executor 投递一次受控
+recovery，要求实际验证、提交并调用 `submit_delivery`。recovery 后仍未交付则明确失败并保留
+worktree 诊断，不自动合并、不伪造 verification summary。Task executor 始终注册持久
+completion watcher，合同终结后幂等唤醒已有 Planner continuation，不依赖高频 `wait_agent`
+轮询。recovery claim 与 runtime FIFO 之间使用由 outcome id 和 recovery count 生成的稳定
+dispatch id；claim 提交后若进程退出，重启必须复用同一 claim。runtime durable turn metadata
+已存在该 dispatch id 时不得重复提交；该 turn 已终态但产品投影尚未完成时，恢复流程先重放
+terminal 投影再唤醒 Planner。这样 claim 提交、runtime submit 和产品 terminal 投影三个边界
+都可恢复，同时一次 recovery 上限不会被重复消费。
+
 runtime 只接受 HEAD 已推进且 worktree 干净的交付，返回 `baseCommit`、`headCommit`、
 `changedFiles`、验证摘要和 `{ path, branch }`。runtime 不隐式执行 `git add -A`。
 work unit 声明 `ownedPaths`；并行 executor 的写入范围不得重叠，超出范围的交付必须
@@ -280,9 +294,12 @@ run、保留残留现场并报告诊断，不能把它当作普通工具失败�
 `REVERT_HEAD`、index 和 worktree 现场。成功 commit 使用同一 exact-commit 证明与 post-commit
 补偿规则。安全补偿必须再次证明 workspace root、git common dir、named branch、clean 状态
 和 exact HEAD 全部仍属于该 run；即使 HEAD 相同，切换到另一分支也禁止 reset/restore。
-`task_stop` 按 branch mutation、allocation 的固定顺序短暂取得两把 guard，完成预检并把
-TaskRun 持久化为 `stopping` 后立即释放；`stopping` 拒绝新的 allocation 和 delivery。
-随后在不持 branch mutation lock 的情况下等待代理收束，最后重新取得 branch guard，
+`task_stop` 按 branch mutation、allocation 的固定顺序短暂取得两把 guard，完成预检并写入
+持久 `StopRequested`，但不立即进入不可逆 `stopping`，delivery scope 继续开放。随后在不持
+branch mutation lock 的情况下 interrupt active turn 并等待 canonical terminal，再统一检查
+全部 completion contract、HEAD 与 worktree。存在已推进 HEAD 或 dirty worktree 时停止返回
+`deferred`，executor 进入上述一次 delivery recovery；只有不存在可恢复成果且所有合同已
+终结时，才进入 `stopping` 并拒绝新的 allocation/delivery，最后重新取得 branch guard，
 复验 repository 后完成 revert、durable HEAD 推进和 terminalization。
 显式传入的 branch mutation guard 必须绑定创建它的 coordinator；其他 coordinator 的
 guard 不得授权 locked mutation API。
@@ -320,10 +337,14 @@ branch、clean workspace 与 exact HEAD；最新 review 必须针对该 HEAD 返
 work unit、outcome 和 merge 都必须已收束。存在已接受 source merge 时，最后一次
 `task_update_design` 必须已经把 `designCommit` 推进到当前 HEAD。runtime 按任务综合变更
 运行必要的最终检查后，以单事务写入 `completed` 并删除 BranchLease，再释放进程 lease。
+一旦 `StopRequested` 已持久化，`task_complete` 在 coordinator 预检和 store 事务两层都必须
+拒绝，不能绕过停止合同完成任务或释放 lease。
 
-`task_stop` 先在短锁事务中进入 `stopping`，再终止并等待当前任务的内存代理，将未完成的
-durable agent/work unit 收束为 `cancelled`，最后重新进入 branch mutation lock。尚无
-source merge 时，如已接受 design commit，
+`task_stop` 先持久化 `StopRequested`，再终止并等待当前任务的内存代理到 canonical terminal，
+随后检查 delivery-required 合同和精确 worktree。可恢复提交或修改使停止返回 `deferred`，
+不得关闭 delivery scope、取消 outcome 或释放 worktree；完成最多一次 recovery 后重新评估。
+只有无可恢复成果时才在短锁事务中进入 `stopping`，将剩余 durable agent/work unit 收束为
+`cancelled`，最后重新进入 branch mutation lock。尚无 source merge 时，如已接受 design commit，
 必须先创建受控 revert commit；已有 source merge 时，必须先由 planner 更新 design 到当前
 实现。存在尚未安全 abort 的 merge/conflict 时停止操作拒绝终态写入，保留现场供 planner
 使用冲突工具处理。取消终态与 BranchLease 删除同样在一个事务中完成。

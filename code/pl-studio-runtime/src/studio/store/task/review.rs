@@ -30,6 +30,7 @@ impl StudioStore {
                     TaskRunPhase::Implementing.as_str(),
                     TaskRunPhase::Reworking.as_str(),
                 ]))
+                .filter(entities::task_run::Column::StopRequested.eq(0))
                 .all(&tx)
                 .await?;
             let run = match runs.as_slice() {
@@ -113,6 +114,8 @@ impl StudioStore {
                 error: Set(None),
                 delivery_json: Set(None),
                 review_json: Set(None),
+                completion_contract_json: Set(None),
+                delivery_recovery_count: Set(0),
                 terminal_observed: Set(0),
                 created_at: Set(now),
                 updated_at: Set(now),
@@ -399,6 +402,7 @@ async fn review_run(
     let runs = entities::task_run::Entity::find()
         .filter(entities::task_run::Column::SessionId.eq(session_id.to_string()))
         .filter(entities::task_run::Column::Phase.eq(TaskRunPhase::Reviewing.as_str()))
+        .filter(entities::task_run::Column::StopRequested.eq(0))
         .all(tx)
         .await?;
     match runs.as_slice() {

@@ -178,6 +178,7 @@ impl StudioAgentEventProjector {
                                 &root_session_id,
                                 snapshot.identity.id.as_str(),
                                 snapshot.identity.role.as_str(),
+                                outcome.session_id.as_str(),
                                 outcome.kind,
                                 outcome.reason.clone(),
                             )

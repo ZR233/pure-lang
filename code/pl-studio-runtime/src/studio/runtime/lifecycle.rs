@@ -116,11 +116,11 @@ impl StudioRuntime {
         );
         let handle = runtime.handle();
         runtime.host().attach_runtime(handle.clone()).await;
+        self.continuations.attach(handle.clone()).await?;
         handle
             .start_restored_inputs()
             .await
             .map_err(|error| anyhow::anyhow!(error))?;
-        self.continuations.attach(handle).await;
         *framework = Some(runtime.clone());
         Ok(runtime)
     }

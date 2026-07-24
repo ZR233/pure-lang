@@ -7,9 +7,9 @@ use pl_protocol::{SessionSubscriptionRequest, SessionViewSnapshot};
 
 use super::coordinator::CoordinatorCommand;
 use super::{
-    AgentActivityState, AgentId, AgentRegistration, AgentRuntimeResult, AgentSessionState,
-    AgentSnapshot, AgentSpawnRequest, AgentSpawnResult, AgentSubmitRequest, AgentTurnCheckpoint,
-    AgentWaitResult, SessionId, TurnId,
+    AgentActivityState, AgentCurrentSessionSubmitRequest, AgentId, AgentRegistration,
+    AgentRuntimeResult, AgentSessionState, AgentSnapshot, AgentSpawnRequest, AgentSpawnResult,
+    AgentSubmitRequest, AgentTurnCheckpoint, AgentWaitResult, SessionId, TurnId,
 };
 use crate::agent_runtime::state::AgentRuntimeError;
 use crate::{SessionEventHubHandle, SessionEventSubscription};
@@ -56,6 +56,22 @@ impl AgentRuntimeHandle {
     ) -> AgentRuntimeResult<TurnId> {
         let (reply, receiver) = oneshot::channel();
         self.send(CoordinatorCommand::Submit {
+            agent_id,
+            request,
+            reply,
+        })
+        .await?;
+        receive(receiver).await?
+    }
+
+    /// 由目标 actor 原子解析 owner-bound current session 后提交输入。
+    pub async fn submit_current_session(
+        &self,
+        agent_id: AgentId,
+        request: AgentCurrentSessionSubmitRequest,
+    ) -> AgentRuntimeResult<TurnId> {
+        let (reply, receiver) = oneshot::channel();
+        self.send(CoordinatorCommand::SubmitCurrentSession {
             agent_id,
             request,
             reply,
@@ -134,8 +150,8 @@ impl AgentRuntimeHandle {
 
     /// 将产品关联出的公共事实交给目标 agent 串行持久化和投影。
     ///
-    /// 调用端不能自行分配 sequence 或广播；该入口主要用于把 child agent 的事实汇聚到
-    /// 产品正在展示的 root session，以及记录产品触发的通用 interaction/plan 事实。
+    /// 调用端不能自行分配 sequence 或广播；事实 source 必须是目标 session owner。
+    /// 产品触发的 interaction/plan 等事实未提供 source 时由 actor 补为 owner。
     pub async fn record_session_facts(
         &self,
         agent_id: AgentId,

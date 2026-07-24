@@ -129,6 +129,9 @@ pub(crate) struct TaskRunRecord {
     pub(crate) expected_head: String,
     pub(crate) design_commit: Option<String>,
     pub(crate) status_message: Option<String>,
+    pub(crate) stop_requested: bool,
+    pub(crate) stop_requested_reason: Option<String>,
+    pub(crate) stop_requested_at: Option<i64>,
     pub(crate) created_at: i64,
     pub(crate) updated_at: i64,
 }
@@ -368,6 +371,30 @@ pub(crate) struct AgentDelivery {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub(crate) enum CompletionContract {
+    DeliveryRequired {
+        task_run_id: String,
+        work_unit_id: String,
+        recovery_limit: u32,
+    },
+}
+
+impl CompletionContract {
+    pub(crate) fn delivery_required(task_run_id: String, work_unit_id: String) -> Self {
+        Self::DeliveryRequired {
+            task_run_id,
+            work_unit_id,
+            recovery_limit: 1,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ReviewDesignReference {
     pub(crate) path: String,
@@ -429,6 +456,8 @@ pub(crate) struct AgentOutcomeRecord {
     pub(crate) error: Option<String>,
     pub(crate) delivery: Option<AgentDelivery>,
     pub(crate) review: Option<AgentReview>,
+    pub(crate) completion_contract: Option<CompletionContract>,
+    pub(crate) delivery_recovery_count: u32,
     pub(crate) created_at: i64,
     pub(crate) updated_at: i64,
 }
@@ -444,4 +473,37 @@ pub(crate) struct DeliveryScope {
 pub(crate) enum DeliveryScopeResolution {
     Resolved(Box<DeliveryScope>),
     MissingWorkUnit(Box<AgentOutcomeRecord>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DeliveryRecoveryClaim {
+    pub(crate) task_run_id: String,
+    pub(crate) outcome_id: String,
+    pub(crate) work_unit_id: String,
+    pub(crate) agent_id: String,
+    pub(crate) recovery_count: u32,
+}
+
+impl DeliveryRecoveryClaim {
+    pub(crate) fn dispatch_id(&self) -> String {
+        format!(
+            "delivery-recovery:{}:{}",
+            self.outcome_id, self.recovery_count
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum DeliveryRecoveryDispatch {
+    Pending,
+    Terminal {
+        outcome: pl_core::TurnOutcomeKind,
+        reason: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DeliveryRecoveryNeed {
+    NoDelivery,
+    Recoverable,
 }

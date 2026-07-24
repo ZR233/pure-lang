@@ -102,6 +102,25 @@ class TimelineToolGroup {
   int get issueCount =>
       items.where((item) => _isIssueToolStatus(item.status)).length;
 
+  String? get firstIssueReason {
+    for (final item in items.where((item) => _isIssueToolStatus(item.status))) {
+      final candidates = [
+        item.part.error,
+        item.tool?.denialReason,
+        item.tool?.result,
+      ];
+      for (final candidate in candidates) {
+        final normalized = candidate?.trim().replaceAll(RegExp(r'\s+'), ' ');
+        if (normalized != null && normalized.isNotEmpty) {
+          return normalized.length <= 120
+              ? normalized
+              : '${normalized.substring(0, 117)}...';
+        }
+      }
+    }
+    return null;
+  }
+
   String get status {
     final statuses = items.map((item) => item.status).toSet();
     if (statuses.contains('awaitingApproval')) {

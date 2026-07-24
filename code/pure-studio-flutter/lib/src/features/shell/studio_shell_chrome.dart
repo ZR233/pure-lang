@@ -1,15 +1,9 @@
 part of 'studio_shell.dart';
 
 class _Header extends StatelessWidget {
-  const _Header({
-    required this.state,
-    required this.onOpenTodo,
-    required this.showTodoButton,
-  });
+  const _Header({required this.state});
 
   final StudioState state;
-  final VoidCallback? onOpenTodo;
-  final bool showTodoButton;
 
   @override
   Widget build(BuildContext context) {
@@ -18,9 +12,10 @@ class _Header extends StatelessWidget {
     final project = state.projects
         .where((project) => project.id == projectId)
         .firstOrNull;
-    final subtitle = _projectSubtitle(project);
+    final projectLabel = project?.name.trim() ?? '';
+    final taskPhase = state.runtime.task?.phase;
     return SizedBox(
-      height: 58,
+      height: 78,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16),
         child: Center(
@@ -28,49 +23,59 @@ class _Header extends StatelessWidget {
             constraints: const BoxConstraints(
               maxWidth: StudioLayout.conversationWidth,
             ),
-            child: Row(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        session?.title ?? context.l10n.shellNoSession,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(
-                              color: context.studioInk,
-                              fontWeight: FontWeight.w700,
-                            ),
+                Text(
+                  session?.title ?? context.l10n.shellNoSession,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: context.studioInk,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Row(
+                  children: [
+                    if (projectLabel.isNotEmpty)
+                      Flexible(
+                        child: Tooltip(
+                          message: project?.path ?? projectLabel,
+                          child: Text(
+                            projectLabel,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(color: context.studioInkSoft),
+                          ),
+                        ),
                       ),
-                      if (subtitle.isNotEmpty) ...[
-                        const SizedBox(height: 2),
-                        Text(
-                          subtitle,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                    if (projectLabel.isNotEmpty && taskPhase != null)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 7),
+                        child: Text(
+                          '·',
                           style: Theme.of(context).textTheme.bodySmall
                               ?.copyWith(color: context.studioInkSoft),
                         ),
-                      ],
-                    ],
-                  ),
+                      ),
+                    if (taskPhase != null)
+                      Text(
+                        context.taskPhaseLabel(taskPhase),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: StudioColors.clayDeep,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    const Spacer(),
+                    if (state.agentSessionsForSelectedRoot.isNotEmpty)
+                      _AgentSwitcher(state: state),
+                  ],
                 ),
-                if (showTodoButton) ...[
-                  const SizedBox(width: 8),
-                  IconButton(
-                    key: const ValueKey('todo-open-button'),
-                    tooltip: context.l10n.timelineTodoListFallback,
-                    icon: const Icon(Icons.checklist_outlined),
-                    onPressed: onOpenTodo,
-                  ),
-                ],
-                if (state.agentSessionsForSelectedRoot.isNotEmpty) ...[
-                  const SizedBox(width: 4),
-                  _AgentSwitcher(state: state),
-                ],
               ],
             ),
           ),
@@ -103,14 +108,28 @@ class _AgentSwitcherState extends ConsumerState<_AgentSwitcher> {
   Widget build(BuildContext context) {
     final sessions = widget.state.agentSessionsForSelectedRoot;
     final aggregateColor = _aggregateAgentColor(widget.state, sessions);
+    final viewport = MediaQuery.sizeOf(context);
+    final availableWidth = (viewport.width - 24)
+        .clamp(0.0, double.infinity)
+        .toDouble();
+    final minimumWidth = availableWidth < 240 ? availableWidth : 240.0;
+    final menuWidth = (viewport.width * 0.36)
+        .clamp(minimumWidth, availableWidth)
+        .toDouble();
+    // Reserve the compact header and overlay insets so a long menu can stay
+    // below its anchor and scroll instead of being flipped over the header.
+    final menuHeight = (viewport.height - 96)
+        .clamp(0.0, double.infinity)
+        .toDouble();
+    final contentWidth = (menuWidth - 116).clamp(140.0, 244.0).toDouble();
     return MenuAnchor(
       controller: _menuController,
-      style: const MenuStyle(
-        maximumSize: WidgetStatePropertyAll(Size(360, 560)),
+      style: MenuStyle(
+        alignment: AlignmentDirectional.bottomEnd,
+        minimumSize: WidgetStatePropertyAll(Size(menuWidth, 0)),
+        maximumSize: WidgetStatePropertyAll(Size(menuWidth, menuHeight)),
       ),
-      // The menu is wider than the compact chip. Pull it left so its trailing
-      // edge follows the trigger instead of being clamped to the window edge.
-      alignmentOffset: const Offset(-216, 6),
+      alignmentOffset: const Offset(0, 6),
       menuChildren: [
         for (final session in sessions)
           MenuItemButton(
@@ -135,7 +154,7 @@ class _AgentSwitcherState extends ConsumerState<_AgentSwitcher> {
                   .selectAgentSession(session.id);
             },
             child: SizedBox(
-              width: 244,
+              width: contentWidth,
               child: Row(
                 children: [
                   Expanded(
@@ -278,16 +297,6 @@ String _agentDisplayName(StudioSession session) {
   return '${role[0].toUpperCase()}${role.substring(1)}';
 }
 
-String _projectSubtitle(StudioProject? project) {
-  if (project == null) {
-    return '';
-  }
-  if (project.path.isEmpty) {
-    return project.name;
-  }
-  return '${project.name} · ${project.path}';
-}
-
 String _sessionSubtitle(BuildContext context, StudioSession session) {
   final mode = context.compileModeLabel(session.mode);
   final hour = session.updatedAt.hour.toString().padLeft(2, '0');
@@ -296,9 +305,17 @@ String _sessionSubtitle(BuildContext context, StudioSession session) {
 }
 
 class _Footer extends StatelessWidget {
-  const _Footer({required this.state});
+  const _Footer({
+    required this.state,
+    required this.showTodo,
+    required this.todoExpanded,
+    required this.onToggleTodo,
+  });
 
   final StudioState state;
+  final bool showTodo;
+  final bool todoExpanded;
+  final VoidCallback? onToggleTodo;
 
   @override
   Widget build(BuildContext context) {
@@ -307,7 +324,12 @@ class _Footer extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          SessionStatusBar(state: state),
+          SessionStatusBar(
+            state: state,
+            showTodo: showTodo,
+            todoExpanded: todoExpanded,
+            onToggleTodo: onToggleTodo,
+          ),
           ComposerDock(state: state),
         ],
       ),

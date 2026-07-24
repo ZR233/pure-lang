@@ -12,8 +12,8 @@ use crate::studio::entities;
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    AgentOutcomeStatus, AllocateExecutor, ExecutorAllocation, TaskRunPhase, WorkUnitStatus,
-    owned_paths_overlap,
+    AgentOutcomeStatus, AllocateExecutor, CompletionContract, ExecutorAllocation, TaskRunPhase,
+    WorkUnitStatus, owned_paths_overlap,
 };
 
 const MAX_ACTIVE_EXECUTORS: usize = 4;
@@ -39,6 +39,9 @@ impl StudioStore {
             .await?
             .context("active task run not found for this session")?;
         let run = task_run_record(run_model)?;
+        if run.stop_requested {
+            bail!("executor allocation is not allowed after task stop was requested");
+        }
         if !matches!(
             run.phase,
             TaskRunPhase::Implementing | TaskRunPhase::Reworking
@@ -108,7 +111,7 @@ impl StudioStore {
             entities::agent_outcome::ActiveModel {
                 id: Set(new_id("agent-outcome")),
                 task_run_id: Set(run.id.clone()),
-                work_unit_id: Set(Some(work_unit_id)),
+                work_unit_id: Set(Some(work_unit_id.clone())),
                 agent_id: Set(input.agent_id),
                 owner_path: Set(input.owner_path),
                 initiated_by: Set("planner".to_string()),
@@ -120,6 +123,10 @@ impl StudioStore {
                 error: Set(None),
                 delivery_json: Set(None),
                 review_json: Set(None),
+                completion_contract_json: Set(Some(serde_json::to_string(
+                    &CompletionContract::delivery_required(run.id.clone(), work_unit_id.clone()),
+                )?)),
+                delivery_recovery_count: Set(0),
                 terminal_observed: Set(0),
                 created_at: Set(now),
                 updated_at: Set(now),

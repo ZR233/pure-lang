@@ -27,6 +27,9 @@ class StudioShell extends ConsumerStatefulWidget {
 }
 
 class _StudioShellState extends ConsumerState<StudioShell> {
+  static const _todoPanelWidth = 304.0;
+  static const _minimumTimelineWidth = 560.0;
+
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   final Map<String, bool> _todoExpandedBySession = {};
   final Set<String> _todoAutoOpened = {};
@@ -42,7 +45,12 @@ class _StudioShellState extends ConsumerState<StudioShell> {
       data: (state) => LayoutBuilder(
         builder: (context, constraints) {
           final compact = constraints.maxWidth < StudioLayout.compactBreakpoint;
-          final todoInDrawer = constraints.maxWidth < 1180;
+          final sidebarWidth = compact
+              ? StudioLayout.compactRailWidth
+              : StudioLayout.sidebarWidth;
+          final workspaceWidth = constraints.maxWidth - sidebarWidth - 1;
+          final todoInDrawer =
+              workspaceWidth < _todoPanelWidth + _minimumTimelineWidth;
           final sessionId = state.selectedAgentSessionId;
           final todo = state.selectedTodoList;
           final todoExpanded =
@@ -89,23 +97,7 @@ class _StudioShellState extends ConsumerState<StudioShell> {
                     decoration: BoxDecoration(color: context.studioPaper),
                     child: Column(
                       children: [
-                        _Header(
-                          state: state,
-                          onOpenTodo: todo == null
-                              ? null
-                              : () {
-                                  if (todoInDrawer) {
-                                    _scaffoldKey.currentState?.openEndDrawer();
-                                  } else if (sessionId != null) {
-                                    setState(
-                                      () => _todoExpandedBySession[sessionId] =
-                                          true,
-                                    );
-                                  }
-                                },
-                          showTodoButton:
-                              todo != null && (todoInDrawer || !todoExpanded),
-                        ),
+                        _Header(state: state),
                         const Divider(height: 1),
                         Expanded(
                           child: Row(
@@ -131,7 +123,23 @@ class _StudioShellState extends ConsumerState<StudioShell> {
                             ],
                           ),
                         ),
-                        _Footer(state: state),
+                        _Footer(
+                          state: state,
+                          showTodo: todo != null,
+                          todoExpanded: todoExpanded,
+                          onToggleTodo: todo == null
+                              ? null
+                              : () {
+                                  if (todoInDrawer) {
+                                    _scaffoldKey.currentState?.openEndDrawer();
+                                  } else if (sessionId != null) {
+                                    setState(
+                                      () => _todoExpandedBySession[sessionId] =
+                                          !todoExpanded,
+                                    );
+                                  }
+                                },
+                        ),
                       ],
                     ),
                   ),

@@ -138,13 +138,24 @@ Provider stream adapter 必须在工具输入开始、工具调用就绪或新 s
 
 plan、commentary、reasoning 和普通 text 的 live overlay 必须使用 stream-safe Markdown 渲染。Flutter timeline 原生直接使用 `gpt_markdown` 的 `GptMarkdown` widget 渲染，不再包一层兼容 renderer facade。展示前只做轻量 agent repair（CRLF 归一化、CJK 标题补空格、行尾 closing fence 拆行、代码块内 inline closing fence 拆行），不在协议层或 reducer 层改写 Markdown。未闭合 fenced code block、不完整表格和逐字输出期间的临时结构由 renderer 容错展示，不能依赖 Rust/FRB 补全。运行中 delta 可以是不完整 Markdown，但 UI 仍应尽量即时显示列表、标题、表格、代码块等结构；terminal snapshot 到达后清 overlay，并以完整 snapshot 重新渲染。
 
-工具展示使用 Codex/opencode 的 coalesced activity 思路：Studio store 仍保存逐工具 `StudioPart`，后端 turn timeline actor 为每个 assistant tool part 写入 `activityGroupId`，该字段是 Studio projection 元数据，不是模型历史或聚合工具事实。Flutter timeline selector 只按相同 `activityGroupId` 投影为一个默认折叠的 tool group row；不同 `activityGroupId` 即使属于同一 turn/message 也必须拆成多条工具活动 row，从而保留“文本 -> 工具 -> 文本 -> 工具”的阅读节奏。缺少 `activityGroupId` 的 tool part 按单工具组展示，不得按 turn/message 猜测合并。工具组 row 的 `order` 使用组内第一个工具 part 的 order，`sequence/renderVersion` 由组内所有工具 part 的 sequence、revision、status、arguments、result、工作目录、exit code、timeout、拒绝原因和 error 聚合计算；详情列表按 `part.order -> sequence -> id` 排序。工具状态以 part snapshot 的 `status` 为准；展示层不得改写 `StudioPart`。
+工具展示使用 ordered item 上的相邻 coalescing：Studio store 仍保存逐工具 `StudioPart`，
+timeline selector 先按 message 与 part order 得到可见阅读流，再单次扫描合并相邻 tool part。
+text、commentary、final、reasoning、plan、agent row 或 message 边界立即结束当前工具组；
+隐藏 inference 不制造分组边界。`activityGroupId` 只保留为 deprecated wire/数据库兼容字段，
+新事件不生成，旧值也不参与展示。这样 `tool, tool, text, tool` 必须投影为两个工具组。
+工具组 row 的 `order` 使用组内第一个工具 part 的 order，`sequence/renderVersion` 由组内所有
+工具 part 的 sequence、revision、status、arguments、result、工作目录、exit code、timeout、
+拒绝原因和 error 聚合计算；详情列表保持扫描顺序。工具状态以 part snapshot 为准，展示层
+不得改写 `StudioPart`。
 
 Todo list 不进入 timeline。当前 agent snapshot 中最新的 `TodoListUpdated` 是唯一展示值，
 保持 runtime 原始顺序，并以 pending、inProgress、completed 三态使用 Material 3 dense
 `ListTile` 渲染；不显示分组、数量、比例、预计时间、进度条或统计。宽屏使用右侧可收放面板，
 窄屏使用 `endDrawer` 覆盖打开；展开状态按 agent session 保存，首次出现未完成 Todo 时自动
-展开一次，用户手动关闭后不重复抢焦点。
+展开一次，用户手动关闭后不重复抢焦点。Todo toggle 只存在于 agent 本地状态栏，不进入
+大会话 Header。宽窄判断使用 agent workspace `LayoutBuilder.maxWidth` 和可读 timeline 最小
+宽度计算，不使用全局固定 breakpoint；侧栏目标宽度约 300px，空间不足时 drawer 覆盖而不
+压缩阅读流。
 
 工具组 header 显示工具数量和聚合状态：存在审批等待时为 `awaitingApproval`，存在 started/streaming/approved/running 时为 `running`，否则按 failed、denied、interrupted、budgetLimited、completed 的优先级折叠。header 中突出失败/拒绝数量；成功工具默认只占这一条折叠 row，展开后展示每个工具的工具名、状态、命令/路径/查询摘要、工作目录、exit code、timeout、拒绝原因和失败结果。工具、命令、文件修改和 subagent 活动文本由 Flutter timeline projection 基于结构化事实确定性生成，不在 `pl-core` 或 `pl-protocol` 中新增本地化文案字段。固定 UI 文案走 i18n；tool 名称、agent path、model slug、路径、命令摘要和 provider 返回值按领域值原样展示。`AgentTimelineChanged` 承载当前 owner 主动执行的单条协作事实：`SubAgentActivity` row identity 优先使用 `callId`，无 `callId` 时使用 event id；`TodoListUpdated` 不生成 row。Agent Directory 事件只更新标题区 agent 列表或 attention，不进入单 agent timeline。父 timeline 默认不展开子代理内部工具 trace；`spawn_agent`、`wait_agent` 等 tool part 只作为父 turn 工具组详情项展示，不额外生成逐工具 timeline row。
 
@@ -176,6 +187,10 @@ pending interaction 只替换普通 prompt 输入，不得隐藏当前 turn 的�
 Flutter 状态栏保留当前 owner 身份、模式切换、当前根角色模型选择、reasoning effort、context/token/cost、active skills、MCP 和 LSP。Simple 编辑 executor role，Task 编辑 planner role；任务非终态期间禁用模式切换。状态栏所有数据来自当前 agent workspace，不显示 agent 数量或其他 agent 列表。
 
 Flutter `SessionStatusBar` 展示同一组信息，并使用 Material 3 的 compact controls、tooltip 和 hover/focus 可达的弹层承载详情。Flutter 状态栏只消费 Riverpod selector，不直接订阅 bridge stream 或解析 raw JSON。
+
+状态栏使用 `LayoutBuilder` 按优先级保留 agent 身份、Todo、mode/model、context 与 turn/
+interaction 状态；低优先级的 effort、skills/MCP/LSP、费用进入 overflow menu。不得用水平
+滚动把控件藏到视口外，也不得显示大会话 agent 数量。
 
 Flutter context readout 使用紧凑圆形进度环，不显示百分比文字，也不直接显示 `contextTokens/contextWindow`；hover/focus 详情继续使用圆形进度，并展示上下文数字、百分比、总 token 和模型。费用继续作为独立文字 readout；active skills、MCP 与 LSP 进入当前 agent 的能力摘要和分区弹层，不能合并进 context 或费用详情。其他 agent 的状态只在标题区 `n agents` 菜单展示。
 
@@ -230,11 +245,14 @@ Flutter 端使用 Material 3 的工具型界面表达同一信息架构：`Navig
 
 Flutter 主聊天界面视觉应靠拢 Codex 桌面版的工作台气质：中性色浅色主题、低对比侧栏、白色阅读面、单一聚焦 composer 托盘和轻量状态信息行。Timeline 中普通 assistant 正文不使用卡片背景；只有 tool、reasoning、plan、agent 等结构化 part 使用轻边框面板。用户消息使用窄宽度浅色气泡，避免大面积品牌色。状态栏默认只展示当前模式、planner 模型、上下文、费用与活动能力摘要，不重复显示已在模型选择控件中的 runtime model；高频或诊断信息通过 tooltip/popover 承载。
 
-Flutter shell 的二级视觉层级继续收敛：顶部 header 展示大会话标题、项目名和短路径，并以
-唯一 `n agents` compact 状态项打开 Material 3 `MenuAnchor`。菜单按父子层级与创建顺序列出
-状态点、名称、角色、短状态和选中标记，支持点击、约 250ms hover、focus 和键盘切换。不得再
-出现 Planner/Executor/Reviewer 分类横条或第二套 agent 切换控件；底部状态栏显示当前 agent
-本地身份，但不重复 agent 数量。
+Flutter shell 的二级视觉层级继续收敛：顶部 Header 明确分为两层，第一层只放大会话标题，
+第二层放项目末级名称、分支、Task 阶段、保存/同步状态和唯一 `n agents` compact 状态项；
+完整项目路径只放 tooltip，不常驻占据标题区，也不放 Todo 按钮。`n agents` 使用 Material 3
+`MenuAnchor`，菜单按父子层级与创建顺序列出状态点、名称、角色、短状态、attention 和选中
+标记，支持点击、约 250ms hover、focus 与 Enter/Space。菜单宽高和 anchor alignment 依据
+窗口可用区域约束，不使用固定 `360×560` 或负 offset。不得再出现
+Planner/Executor/Reviewer 分类横条或第二套 agent 切换控件；底部状态栏显示当前 agent 本地
+身份，但不重复 agent 数量。
 
 Studio 采用紧凑控制台密度，但紧凑不等于堆叠入口。面板圆角不得超过 `8px`，阴影只用于 Composer、interaction dock 和 popover；普通设置分组、timeline 结构化行与 Provider 列表使用单层边框，不在卡片中继续嵌套卡片。聊天阅读流、状态区和 Composer 共享同一内容宽度，侧栏与设置导航使用统一布局 token，窗口变窄时按可用宽度切换为 icon rail。
 

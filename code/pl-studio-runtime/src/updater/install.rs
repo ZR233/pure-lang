@@ -273,16 +273,15 @@ fn launch_installer(path: &Path) -> Result<(), StudioUpdateError> {
             "Pure Studio in-app installation currently supports Windows only",
         ));
     }
-    Command::new(path)
-        .args(installer_arguments())
-        .spawn()
-        .map(|_| ())
-        .map_err(|error| {
-            StudioUpdateError::new(
-                StudioUpdateErrorCode::InstallerLaunchFailed,
-                format!("failed to launch verified installer: {error}"),
-            )
-        })
+    let mut command = Command::new(path);
+    command.args(installer_arguments());
+    crate::process::configure_background_std_command(&mut command);
+    command.spawn().map(|_| ()).map_err(|error| {
+        StudioUpdateError::new(
+            StudioUpdateErrorCode::InstallerLaunchFailed,
+            format!("failed to launch verified installer: {error}"),
+        )
+    })
 }
 
 fn installer_arguments() -> [&'static str; 5] {

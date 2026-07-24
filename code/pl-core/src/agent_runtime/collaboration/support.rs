@@ -105,7 +105,6 @@ pub(super) fn send_schema() -> Value {
     object_schema(vec![
         ("target", json!({ "type": "string" }), true),
         ("message", json!({ "type": "string" }), true),
-        ("sessionId", json!({ "type": "string" }), false),
         (
             "delivery",
             json!({ "type": "string", "enum": ["queueOnly", "start", "interruptThenStart"] }),

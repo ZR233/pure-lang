@@ -12,6 +12,42 @@ use crate::studio::task_coordinator::{
 };
 
 impl StudioStore {
+    pub(crate) async fn request_task_stop(
+        &self,
+        task_run_id: &str,
+        expected_head: &str,
+        reason: &str,
+    ) -> Result<TaskRunRecord> {
+        let tx = self.db.begin().await?;
+        let result = async {
+            let run = entities::task_run::Entity::find_by_id(task_run_id.to_string())
+                .one(&tx)
+                .await?
+                .context("task run not found while requesting stop")?;
+            let phase = TaskRunPhase::from_str(&run.phase)
+                .with_context(|| format!("invalid task phase: {}", run.phase))?;
+            if run.expected_head != expected_head || phase.is_terminal() {
+                bail!("task stop no longer matches the active task HEAD");
+            }
+            validate_lease(&tx, &run, expected_head).await?;
+            if run.stop_requested != 0 {
+                return super::task_run_record(run);
+            }
+            let now = unix_seconds();
+            let mut active: entities::task_run::ActiveModel = run.into();
+            active.stop_requested = Set(1);
+            active.stop_requested_reason = Set(Some(reason.to_string()));
+            active.stop_requested_at = Set(Some(now));
+            active.status_message = Set(Some(
+                "task stop requested; settling active turns".to_string(),
+            ));
+            active.updated_at = Set(now);
+            super::task_run_record(active.update(&tx).await?)
+        }
+        .await;
+        finish_transaction(tx, result).await
+    }
+
     pub(crate) async fn begin_task_stop(
         &self,
         task_run_id: &str,
@@ -27,6 +63,9 @@ impl StudioStore {
                 .with_context(|| format!("invalid task phase: {}", run.phase))?;
             if run.expected_head != expected_head || phase.is_terminal() {
                 bail!("task stop no longer matches the active task HEAD");
+            }
+            if run.stop_requested == 0 {
+                bail!("task stop must be requested before entering stopping");
             }
             validate_lease(&tx, &run, expected_head).await?;
             if phase == TaskRunPhase::Stopping {
@@ -91,6 +130,9 @@ impl StudioStore {
             {
                 bail!("task completion requires reviewed design at the current HEAD");
             }
+            if run.stop_requested != 0 {
+                bail!("task completion is unavailable after stop was requested");
+            }
             validate_lease(&tx, &run, expected_head).await?;
             validate_completion_children(&tx, &run).await?;
             let now = unix_seconds();
@@ -113,10 +155,13 @@ impl StudioStore {
     ) -> Result<()> {
         let tx = self.db.begin().await?;
         let result = async {
-            entities::task_run::Entity::find_by_id(task_run_id.to_string())
+            let run = entities::task_run::Entity::find_by_id(task_run_id.to_string())
                 .one(&tx)
                 .await?
                 .context("task run not found while stopping agents")?;
+            if run.phase != TaskRunPhase::Stopping.as_str() || run.stop_requested == 0 {
+                bail!("task agents can only be settled after entering requested stopping");
+            }
             let now = unix_seconds();
             for unit in entities::work_unit::Entity::find()
                 .filter(entities::work_unit::Column::TaskRunId.eq(task_run_id.to_string()))
@@ -192,6 +237,9 @@ impl StudioStore {
                 .with_context(|| format!("invalid task phase: {}", run.phase))?;
             if phase.is_terminal() || run.expected_head != expected_head {
                 bail!("task stop no longer matches the active task HEAD");
+            }
+            if phase != TaskRunPhase::Stopping || run.stop_requested == 0 {
+                bail!("task cancellation requires requested stopping phase");
             }
             validate_lease(&tx, &run, expected_head).await?;
             let merges = entities::merge_record::Entity::find()

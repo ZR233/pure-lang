@@ -305,21 +305,21 @@ fn prompt_content(prompt: &str, attachments: &[crate::studio::AttachmentRecord])
 fn interaction_emitter(
     runtime: pl_core::AgentRuntimeHandle,
     session_id: String,
-    source_agent_id: String,
+    owner_agent_id: String,
 ) -> crate::studio::InteractionEmitter {
     Arc::new(move |interaction| {
         let runtime = runtime.clone();
         let session_id = session_id.clone();
-        let source_agent_id = source_agent_id.clone();
+        let owner_agent_id = owner_agent_id.clone();
         Box::pin(async move {
             let turn_id = interaction.scope.turn_id.clone();
             let emitted_at = interaction.updated_at;
             runtime
                 .record_session_facts(
-                    super::root_agent_id(&session_id),
+                    pl_core::AgentId::new(owner_agent_id.clone())?,
                     pl_core::SessionId::new(session_id)?,
                     vec![pl_core::SessionEventFact::durable(
-                        Some(source_agent_id),
+                        Some(owner_agent_id),
                         Some(turn_id),
                         emitted_at,
                         crate::SessionEventKind::InteractionChanged {

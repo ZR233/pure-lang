@@ -20,7 +20,9 @@ Pure Studio 的产品运行时位于独立 `pl-studio-runtime` crate。`pl-core`
 - `SessionEventHub`：按 session 提供 snapshot、durable replay 和实时 channel。
 
 每个 agent actor 独占 session 集合、FIFO 输入队列、活动 turn、取消句柄、revision 和最近
-结果。产品不得维护第二套 active-turn、queue 或 cancel 状态。
+结果。产品不得维护第二套 active-turn、queue 或 cancel 状态。session durable cursor 由
+`SessionEventHub` canonical projection 唯一拥有；actor/repository 中的 sequence 只是提交后
+checkpoint 镜像。
 
 ## 17.3 Host 端口
 
@@ -48,10 +50,19 @@ trait object。
 turn 完成后回到 `Active + Idle`。turn 失败是结果而非 agent 生命周期失败；只有持久化
 终态失败或无法补偿的不变量破坏会进入 `Faulted`。
 
-`AgentRuntimeHandle` 提供 `register`、`submit`、`cancel_turn`、`close`、`snapshot`、
+`AgentRuntimeHandle` 提供 `register`、`submit`、`submit_current_session`、`cancel_turn`、`close`、`snapshot`、
 `list`、`wait`、`subscribe_session`、`session_snapshot` 和 `shutdown`。输入投递明确使用
 `QueueOnly | Start | InterruptThenStart`。
 未关闭 agent 可连续接收输入，不存在 `resume_agent`。
+
+跨 agent 输入必须先由 runtime resolver 生成
+`ResolvedAgentSessionTarget { root, agent, current_session, owner_revision }`。submit 只接受
+该强类型目标；未知、历史、跨 root 或 owner 不匹配的 session 直接失败，不得回退到调用者
+session，也不得在 actor 中自动插入空 session。协作工具只提交目标 agent id；coordinator
+先解析稳定 root，目标 actor 再在同一条命令内原子解析 current session 并入队。活动 turn
+或 durable pending FIFO 只能指向一个 current session；idle agent 只有一个 owned session
+时可直接解析，存在多个 idle 历史 session 且没有 current 指针时必须报歧义，禁止使用
+`last_turn.session_id` 猜测。
 
 ## 17.5 执行与恢复
 
@@ -90,7 +101,8 @@ provider 不含第二份 `default_model`。
 `pl-studio-runtime` 拥有 Studio 配置、SQLite repository 适配、product event、
 project/session/task/worktree、Simple/Task 策略和 Studio-only wire DTO。session timeline
 事件直接消费 `pl-protocol` 公共类型，不在 Studio 重做 trace mapping。`pl-studio-bridge`
-只依赖该 crate。Studio 配置版本为 10，数据库版本为 2；数据库旧版本直接重建。
+只依赖该 crate。Studio 配置与数据库独立演进；当前数据库版本为 4。旧数据库通过带备份的
+事务迁移升级，未来版本明确拒绝打开，任何迁移失败都不得删除或降级原数据库。
 
 ## 17.9 Session 订阅不变量
 
@@ -98,6 +110,8 @@ project/session/task/worktree、Simple/Task 策略和 Studio-only wire DTO。ses
 - subscription 必须先注册 receiver，再建立 snapshot/replay bootstrap。
 - durable event 只在 transaction `Applied` 后广播；transient delta 只在 actor 校验 active
   turn 与 part revision 后广播。
+- 下一 durable sequence 只从 hub canonical snapshot 的 `through_sequence` 分配；恢复时
+  自动修复落后的 repository checkpoint，owner 冲突则拒绝挂载。
 - transient delta 不进入 journal；terminal snapshot 必须包含完整最终内容。
 - channel lag、cursor 超出保留窗口或 delta revision 缺口返回 `ResyncRequired`。
 - 产品 UI 只订阅当前可见 session；项目、设置和资源变化使用独立 product stream。

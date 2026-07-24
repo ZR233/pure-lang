@@ -70,9 +70,9 @@ void registerTimelineModelTests() {
     expect(first.renderVersion, isNot(second.renderVersion));
   });
 
-  test('timeline groups tool parts by activityGroupId', () {
+  test('timeline only groups adjacent tool parts', () {
     final now = DateTime.fromMillisecondsSinceEpoch(0);
-    final firstMessage = TimelineMessage(
+    final message = TimelineMessage(
       id: 'turn-1:assistant',
       sessionId: 'session-1',
       turnId: 'turn-1',
@@ -80,67 +80,49 @@ void registerTimelineModelTests() {
       createdAt: now,
       sequence: 1,
     );
-    final secondMessage = TimelineMessage(
-      id: 'turn-2:assistant',
-      sessionId: 'session-1',
-      turnId: 'turn-2',
-      role: 'assistant',
-      createdAt: now,
-      sequence: 10,
-    );
     final rows = timelineRowsFromMessages(
-      [firstMessage, secondMessage],
+      [message],
       parts: [
         _toolTimelinePart(
           id: 'tool-a',
-          messageId: firstMessage.id,
+          messageId: message.id,
           turnId: 'turn-1',
           order: 2,
           sequence: 3,
           name: 'read_file',
-          activityGroupId: 'tool-group:turn-1:2',
+          activityGroupId: 'legacy-whole-turn-group',
           result: 'ok',
+        ),
+        _toolTimelinePart(
+          id: 'tool-b',
+          messageId: message.id,
+          turnId: 'turn-1',
+          order: 3,
+          sequence: 4,
+          name: 'search_files',
+          activityGroupId: 'another-legacy-group',
+          result: 'matches',
         ),
         TimelinePart(
           id: 'final-a',
-          messageId: firstMessage.id,
+          messageId: message.id,
           sessionId: 'session-1',
           turnId: 'turn-1',
           type: TimelinePartType.text,
           text: 'answer',
           textChannel: TimelineTextChannel.finalAnswer,
-          order: 4,
+          order: 5,
           sequence: 5,
         ),
         _toolTimelinePart(
-          id: 'tool-b',
-          messageId: firstMessage.id,
+          id: 'tool-c',
+          messageId: message.id,
           turnId: 'turn-1',
           order: 6,
           sequence: 7,
-          name: 'search_files',
-          activityGroupId: 'tool-group:turn-1:2',
-          result: 'matches',
-        ),
-        _toolTimelinePart(
-          id: 'tool-d',
-          messageId: firstMessage.id,
-          turnId: 'turn-1b',
-          order: 8,
-          sequence: 9,
           name: 'write_file',
-          activityGroupId: 'tool-group:turn-1:8',
+          activityGroupId: 'legacy-whole-turn-group',
           status: 'denied',
-        ),
-        _toolTimelinePart(
-          id: 'tool-c',
-          messageId: secondMessage.id,
-          turnId: 'turn-2',
-          order: 0,
-          sequence: 11,
-          name: 'exec',
-          activityGroupId: 'tool-group:turn-2:0',
-          status: 'running',
         ),
       ],
     );
@@ -148,18 +130,17 @@ void registerTimelineModelTests() {
     final toolGroups = rows
         .where((row) => row.type == TimelineRowType.toolGroup)
         .toList();
-    expect(toolGroups, hasLength(3));
-    expect(toolGroups.first.id, 'tool-group:turn-1:2');
+    expect(toolGroups, hasLength(2));
+    expect(toolGroups.first.id, 'tool-group:session-1:turn-1:assistant:tool-a');
     expect(toolGroups.first.order, 2);
-    expect(toolGroups.first.sequence, 7);
+    expect(toolGroups.first.sequence, 4);
     expect(toolGroups.first.toolGroup!.items.map((item) => item.id), [
       'tool-a',
       'tool-b',
     ]);
     expect(toolGroups.first.toolGroup!.status, 'completed');
-    expect(toolGroups[1].id, 'tool-group:turn-1:8');
+    expect(toolGroups[1].id, 'tool-group:session-1:turn-1:assistant:tool-c');
     expect(toolGroups[1].toolGroup!.status, 'denied');
-    expect(toolGroups.last.toolGroup!.status, 'running');
   });
 
   test(
@@ -229,17 +210,17 @@ void registerTimelineModelTests() {
         TimelineRowType.commentary,
         TimelineRowType.toolGroup,
       ]);
-      expect(rows[1].id, 'tool-group:turn-1:1');
+      expect(rows[1].id, 'tool-group:session-1:turn-1:assistant:tool-a');
       expect(rows[1].toolGroup!.items.map((item) => item.id), [
         'tool-a',
         'tool-b',
       ]);
-      expect(rows[3].id, 'tool-group:turn-1:4');
+      expect(rows[3].id, 'tool-group:session-1:turn-1:assistant:tool-c');
       expect(rows[3].toolGroup!.items.single.id, 'tool-c');
     },
   );
 
-  test('timeline keeps tools without activityGroupId as singleton groups', () {
+  test('timeline groups adjacent tools without activityGroupId', () {
     final now = DateTime.fromMillisecondsSinceEpoch(0);
     final message = TimelineMessage(
       id: 'turn-1:assistant',
@@ -270,8 +251,8 @@ void registerTimelineModelTests() {
       ],
     );
 
-    expect(rows, hasLength(2));
-    expect(rows.map((row) => row.toolGroup!.items.single.id), [
+    expect(rows, hasLength(1));
+    expect(rows.single.toolGroup!.items.map((item) => item.id), [
       'tool-a',
       'tool-b',
     ]);

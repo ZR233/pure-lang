@@ -30,10 +30,11 @@ pub use policy::{
 };
 pub use runtime::{AgentRuntime, AgentRuntimeOptions, RestoredInputPolicy};
 pub use state::{
-    AgentActivityState, AgentDurableState, AgentIdentity, AgentLifecycleState, AgentRegistration,
-    AgentRuntimeError, AgentRuntimeEvent, AgentRuntimeEventKind, AgentRuntimeResult,
-    AgentSessionState, AgentSnapshot, AgentSpawnRequest, AgentSpawnResult, AgentSubmitRequest,
-    AgentTurnOutcome, AgentWaitResult, InputDelivery, PendingAgentInput, TurnOutcomeKind,
+    AgentActivityState, AgentCurrentSessionSubmitRequest, AgentDurableState, AgentIdentity,
+    AgentLifecycleState, AgentRegistration, AgentRuntimeError, AgentRuntimeEvent,
+    AgentRuntimeEventKind, AgentRuntimeResult, AgentSessionState, AgentSnapshot, AgentSpawnRequest,
+    AgentSpawnResult, AgentSubmitRequest, AgentTurnOutcome, AgentWaitResult, InputDelivery,
+    PendingAgentInput, TurnOutcomeKind,
 };
 pub use turn::{
     AgentSessionCommitPolicy, AgentTurnCheckpoint, AgentTurnCheckpointHandle,

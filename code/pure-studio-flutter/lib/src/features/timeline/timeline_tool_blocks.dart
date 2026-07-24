@@ -64,16 +64,19 @@ class _ToolGroupPartState extends State<_ToolGroupPart> {
     final issueCount = group.issueCount;
     final runningCount = group.runningCount;
     if (issueCount > 0 && runningCount > 0) {
-      return context.l10n.timelineToolGroupSummaryRunningWithIssues(
-        group.count,
-        runningCount,
-        issueCount,
+      return _withFirstIssue(
+        context.l10n.timelineToolGroupSummaryRunningWithIssues(
+          group.count,
+          runningCount,
+          issueCount,
+        ),
+        group,
       );
     }
     if (issueCount > 0) {
-      return context.l10n.timelineToolGroupSummaryIssues(
-        group.count,
-        issueCount,
+      return _withFirstIssue(
+        context.l10n.timelineToolGroupSummaryIssues(group.count, issueCount),
+        group,
       );
     }
     if (runningCount > 0) {
@@ -83,6 +86,11 @@ class _ToolGroupPartState extends State<_ToolGroupPart> {
       );
     }
     return context.l10n.timelineToolGroupSummary(group.count);
+  }
+
+  String _withFirstIssue(String summary, TimelineToolGroup group) {
+    final reason = group.firstIssueReason;
+    return reason == null ? summary : '$summary · $reason';
   }
 }
 

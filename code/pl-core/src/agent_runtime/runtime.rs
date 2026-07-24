@@ -59,14 +59,14 @@ where
 {
     /// 从 repository 恢复 durable agents，收束遗留 Running turn，并启动 actors。
     pub async fn start(host: H, options: AgentRuntimeOptions) -> AgentRuntimeResult<Self> {
-        let restored = host
+        let mut restored = host
             .repository()
             .restore_runtime()
             .await
             .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
         let session_events = SessionEventHub::new(options.session_events);
         let session_event_handle = session_events.handle();
-        for agent in &restored {
+        for agent in &mut restored {
             for projection in &agent.session_projections {
                 session_event_handle
                     .replace_snapshot(
@@ -74,6 +74,24 @@ where
                         projection.durable_events.clone(),
                     )
                     .map_err(|error| AgentRuntimeError::SessionEvents(error.to_string()))?;
+                let session_id = SessionId::new(projection.snapshot.session_id.clone())
+                    .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
+                let session = agent.state.sessions.get_mut(&session_id).ok_or_else(|| {
+                    AgentRuntimeError::SessionNotOwned {
+                        agent_id: agent.state.snapshot.identity.id.clone(),
+                        session_id: session_id.clone(),
+                    }
+                })?;
+                if session.session_event_sequence != projection.snapshot.through_sequence {
+                    tracing::warn!(
+                        agent_id = %agent.state.snapshot.identity.id,
+                        session_id = %session_id,
+                        checkpoint = session.session_event_sequence,
+                        canonical = projection.snapshot.through_sequence,
+                        "repairing stale session event checkpoint during restore"
+                    );
+                    session.session_event_sequence = projection.snapshot.through_sequence;
+                }
             }
         }
         let restored = recover_interrupted_turns(&host, &session_event_handle, restored).await?;
@@ -170,11 +188,10 @@ where
             .to_string();
         let session_key = SessionId::new(session_id.clone())
             .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
-        let sequence = agent
-            .state
-            .sessions
-            .get(&session_key)
-            .map_or(0, |session| session.session_event_sequence);
+        let sequence = session_events
+            .snapshot(&session_id)
+            .map_err(|error| AgentRuntimeError::SessionEvents(error.to_string()))?
+            .through_sequence;
         let projected = project_runtime_event(&event, sequence);
         let durable_session_events = projected.durable_events();
         let projection = super::SessionProjectionCommit {

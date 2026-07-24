@@ -3,6 +3,8 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
+
 use super::merge::{
     MergeCleanupTestBarrier, MergeCommitTestBarrier, MergeFailureTestPoint,
     MergeVerificationCommand, MergeVerifier, select_merge_verification_commands,
@@ -379,6 +381,81 @@ async fn completion_requires_current_design_and_pass_then_atomically_releases_le
 }
 
 #[tokio::test]
+async fn task_complete_rejects_a_durable_stop_request() {
+    let fixture = ReviewFixture::new("task-completion-stop-request").await;
+    let run = fixture
+        .store
+        .read_task_run(&fixture.run_id)
+        .await
+        .unwrap()
+        .unwrap();
+    fixture
+        .store
+        .advance_task_design_head(&run.id, &run.expected_head, &run.expected_head)
+        .await
+        .unwrap();
+    fixture
+        .store
+        .begin_task_review(&fixture.session_id, "call-stop-review")
+        .await
+        .unwrap();
+    let (_, outcome) = fixture
+        .store
+        .authorize_reviewer_spawn(&fixture.session_id, "call-stop-review", "agent-stop-review")
+        .await
+        .unwrap();
+    fixture
+        .store
+        .update_spawned_outcome(
+            &outcome.id,
+            "agent-stop-review",
+            AgentOutcomeStatus::Running,
+            None,
+        )
+        .await
+        .unwrap();
+    fixture
+        .store
+        .complete_task_review(
+            &fixture.session_id,
+            "agent-stop-review",
+            AgentReview {
+                verdict: ReviewVerdict::Pass,
+                summary: "pass".to_string(),
+                design_references: vec![ReviewDesignReference {
+                    path: "design/guide.md".to_string(),
+                    section: "Review design".to_string(),
+                }],
+                findings: Vec::new(),
+            },
+        )
+        .await
+        .unwrap();
+    fixture
+        .store
+        .request_task_stop(&fixture.run_id, &run.expected_head, "user requested stop")
+        .await
+        .unwrap();
+
+    let error = fixture
+        .store
+        .complete_reviewed_task(&fixture.session_id, &run.expected_head, "verified")
+        .await
+        .unwrap_err();
+
+    assert!(error.to_string().contains("after stop was requested"));
+    assert!(
+        fixture
+            .store
+            .read_branch_lease(&fixture.run_id)
+            .await
+            .unwrap()
+            .is_some()
+    );
+    fixture.cleanup();
+}
+
+#[tokio::test]
 async fn task_stop_settles_transient_agents_and_atomically_releases_lease() {
     let fixture = ReviewFixture::new("task-stop-terminalization").await;
     let run = fixture
@@ -388,6 +465,16 @@ async fn task_stop_settles_transient_agents_and_atomically_releases_lease() {
         .unwrap()
         .unwrap();
 
+    fixture
+        .store
+        .request_task_stop(&run.id, &run.expected_head, "user stopped task")
+        .await
+        .unwrap();
+    fixture
+        .store
+        .begin_task_stop(&run.id, &run.expected_head)
+        .await
+        .unwrap();
     fixture
         .store
         .settle_agents_for_task_stop(&run.id, "user stopped task")
@@ -3148,6 +3235,297 @@ async fn completed_executor_event_without_delivery_waits_for_delivery() {
         outcome.error.as_deref(),
         Some("executor completed without a successful delivery")
     );
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn delivery_recovery_is_claimed_once_and_second_terminal_fails() {
+    let fixture = DeliveryFixture::new("delivery-recovery-once", vec!["src/**"]).await;
+    drain_agent_state(
+        &fixture,
+        crate::TurnOutcomeKind::Completed,
+        Some("implementation finished"),
+        None,
+    )
+    .await;
+
+    let claim = fixture
+        .store
+        .claim_delivery_recovery(&fixture.task_run_id, &fixture.subagent.id)
+        .await
+        .unwrap()
+        .expect("first terminal must reserve the single recovery");
+    assert_eq!(claim.recovery_count, 1);
+    let replayed = fixture
+        .store
+        .claim_delivery_recovery(&fixture.task_run_id, &fixture.subagent.id)
+        .await
+        .unwrap()
+        .expect("an undispatched recovery claim must survive process restart");
+    assert_eq!(
+        replayed, claim,
+        "replaying a pending dispatch must not consume another recovery"
+    );
+
+    drain_agent_state(
+        &fixture,
+        crate::TurnOutcomeKind::Completed,
+        Some("recovery returned without delivery"),
+        None,
+    )
+    .await;
+
+    let outcome = fixture.outcome().await;
+    assert_eq!(outcome.status, AgentOutcomeStatus::Failed);
+    assert_eq!(outcome.delivery_recovery_count, 1);
+    assert_eq!(
+        outcome.error.as_deref(),
+        Some("executor delivery recovery finished without submit_delivery")
+    );
+    assert_eq!(fixture.work_unit().await.status, WorkUnitStatus::Failed);
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn delivery_recovery_dispatch_is_deduplicated_by_durable_turn_metadata() {
+    let fixture = DeliveryFixture::new("delivery-recovery-dispatch", vec!["src/**"]).await;
+    drain_agent_state(
+        &fixture,
+        crate::TurnOutcomeKind::Completed,
+        Some("implementation finished"),
+        None,
+    )
+    .await;
+    let claim = fixture
+        .store
+        .claim_delivery_recovery(&fixture.task_run_id, &fixture.subagent.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        fixture
+            .store
+            .delivery_recovery_dispatch(&claim)
+            .await
+            .unwrap(),
+        None
+    );
+
+    fixture
+        .store
+        .database()
+        .execute(Statement::from_sql_and_values(
+            DatabaseBackend::Sqlite,
+            "INSERT INTO agent_turns
+             (agent_id, turn_id, session_id, status, usage_json, metadata_json)
+             VALUES (?, ?, ?, 'queued', '{}', ?)",
+            [
+                fixture.subagent.id.clone().into(),
+                "turn-recovery".to_string().into(),
+                fixture.session_id.clone().into(),
+                serde_json::json!({
+                    "deliveryRecoveryDispatchId": claim.dispatch_id(),
+                })
+                .to_string()
+                .into(),
+            ],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        fixture
+            .store
+            .delivery_recovery_dispatch(&claim)
+            .await
+            .unwrap(),
+        Some(DeliveryRecoveryDispatch::Pending)
+    );
+
+    for status in ["waiting_tool", "waiting_interaction"] {
+        fixture
+            .store
+            .database()
+            .execute(Statement::from_sql_and_values(
+                DatabaseBackend::Sqlite,
+                "UPDATE agent_turns
+                 SET status = ?
+                 WHERE agent_id = ? AND turn_id = 'turn-recovery'",
+                [
+                    status.to_string().into(),
+                    fixture.subagent.id.clone().into(),
+                ],
+            ))
+            .await
+            .unwrap();
+        assert_eq!(
+            fixture
+                .store
+                .delivery_recovery_dispatch(&claim)
+                .await
+                .unwrap(),
+            Some(DeliveryRecoveryDispatch::Pending)
+        );
+    }
+
+    fixture
+        .store
+        .database()
+        .execute(Statement::from_sql_and_values(
+            DatabaseBackend::Sqlite,
+            "UPDATE agent_turns
+             SET status = 'budget_limited', reason = 'recovery budget exhausted'
+             WHERE agent_id = ? AND turn_id = 'turn-recovery'",
+            [fixture.subagent.id.clone().into()],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        fixture
+            .store
+            .delivery_recovery_dispatch(&claim)
+            .await
+            .unwrap(),
+        Some(DeliveryRecoveryDispatch::Terminal {
+            outcome: crate::TurnOutcomeKind::BudgetLimited,
+            reason: Some("recovery budget exhausted".to_string()),
+        })
+    );
+
+    fixture
+        .store
+        .database()
+        .execute(Statement::from_sql_and_values(
+            DatabaseBackend::Sqlite,
+            "UPDATE agent_turns
+             SET status = 'completed', reason = 'recovery finished'
+             WHERE agent_id = ? AND turn_id = 'turn-recovery'",
+            [fixture.subagent.id.clone().into()],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        fixture
+            .store
+            .delivery_recovery_dispatch(&claim)
+            .await
+            .unwrap(),
+        Some(DeliveryRecoveryDispatch::Terminal {
+            outcome: crate::TurnOutcomeKind::Completed,
+            reason: Some("recovery finished".to_string()),
+        })
+    );
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn unchanged_executor_worktree_fails_without_consuming_recovery() {
+    let fixture = DeliveryFixture::new("delivery-no-changes", vec!["src/**"]).await;
+    drain_agent_state(
+        &fixture,
+        crate::TurnOutcomeKind::Completed,
+        Some("finished without implementation"),
+        None,
+    )
+    .await;
+
+    assert_eq!(
+        fixture
+            .coordinator
+            .inspect_delivery_recovery_need(&fixture.task_run_id, &fixture.subagent.id)
+            .await
+            .unwrap(),
+        DeliveryRecoveryNeed::NoDelivery
+    );
+    fixture
+        .store
+        .fail_executor_without_delivery(&fixture.task_run_id, &fixture.subagent.id)
+        .await
+        .unwrap();
+
+    let outcome = fixture.outcome().await;
+    assert_eq!(outcome.status, AgentOutcomeStatus::Failed);
+    assert_eq!(outcome.delivery_recovery_count, 0);
+    assert!(
+        outcome
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("without delivery"))
+    );
+    assert_eq!(fixture.work_unit().await.status, WorkUnitStatus::Failed);
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn stop_request_preserves_lease_and_accepts_existing_executor_delivery() {
+    let fixture = DeliveryFixture::new("stop-request-delivery-open", vec!["src/**"]).await;
+    fixture.commit_file("src/lib.rs");
+    let head = git_output(&fixture.worktree, &["rev-parse", "HEAD"]);
+    let run = fixture
+        .store
+        .read_task_run(&fixture.task_run_id)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let requested = fixture
+        .store
+        .request_task_stop(&run.id, &run.expected_head, "user requested stop")
+        .await
+        .unwrap();
+
+    assert!(requested.stop_requested);
+    assert_eq!(requested.phase, run.phase);
+    assert_eq!(
+        requested.stop_requested_reason.as_deref(),
+        Some("user requested stop")
+    );
+    assert!(
+        fixture
+            .store
+            .read_branch_lease(&fixture.task_run_id)
+            .await
+            .unwrap()
+            .is_some()
+    );
+    let delivery = fixture.submit(&head).await.unwrap();
+    assert_eq!(fixture.outcome().await.delivery, Some(delivery));
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn task_stop_preflight_preserves_executor_waiting_for_delivery() {
+    let fixture = DeliveryFixture::new("stop-waiting-delivery", vec!["src/**"]).await;
+    drain_agent_state(
+        &fixture,
+        crate::TurnOutcomeKind::Completed,
+        Some("implementation committed"),
+        None,
+    )
+    .await;
+    let branch_guard = fixture.coordinator.lock_branch_mutation().await;
+
+    let error = fixture
+        .coordinator
+        .preflight_task_stop_locked(&fixture.session_id, &branch_guard)
+        .await
+        .expect_err("recoverable executor delivery must defer task_stop");
+
+    assert!(error.to_string().contains("task_stop deferred"));
+    let TaskContinuationResolution::Active(snapshot) = fixture
+        .coordinator
+        .store
+        .load_task_continuation_resolution(&fixture.task_run_id)
+        .await
+        .unwrap()
+    else {
+        panic!("waiting delivery task must remain active");
+    };
+    let prompt = snapshot.render_prompt().unwrap();
+    assert!(prompt.contains("自动投递"));
+    assert!(prompt.contains(fixture.subagent.id.as_str()));
+    assert!(prompt.contains("不要再调用"));
+    fixture.assert_waiting().await;
+    drop(branch_guard);
     fixture.cleanup();
 }
 

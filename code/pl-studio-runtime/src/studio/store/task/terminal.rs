@@ -8,8 +8,8 @@ use crate::studio::entities;
 use crate::studio::ids::unix_seconds;
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    AgentOutcomeStatus, StudioAgentOutcomeProjection, StudioAgentTerminalChange, TaskRunPhase,
-    TerminalAgentStateRecording, WorkUnitStatus,
+    AgentOutcomeStatus, CompletionContract, StudioAgentOutcomeProjection,
+    StudioAgentTerminalChange, TaskRunPhase, TerminalAgentStateRecording, WorkUnitStatus,
 };
 
 use super::outcome::agent_outcome_record;
@@ -179,14 +179,43 @@ impl StudioStore {
             }
 
             let now = unix_seconds();
+            let recovery_exhausted =
+                executor_recovery_exhausted(&outcome, current, change.outcome)?;
+            let stop_recovery_requested = run.stop_requested != 0
+                && outcome.role == "executor"
+                && outcome.delivery_json.is_none()
+                && change.outcome == pl_core::TurnOutcomeKind::Cancelled;
+            let outcome_target = if recovery_exhausted {
+                AgentOutcomeStatus::Failed
+            } else if stop_recovery_requested {
+                AgentOutcomeStatus::WaitingForDelivery
+            } else {
+                target.outcome
+            };
+            let work_unit_target = if recovery_exhausted {
+                WorkUnitStatus::Failed
+            } else if stop_recovery_requested {
+                WorkUnitStatus::WaitingForDelivery
+            } else {
+                target.work_unit
+            };
             let mut active_outcome: entities::agent_outcome::ActiveModel = outcome.clone().into();
-            if current != target.outcome
+            if current != outcome_target
                 && !is_durable_terminal(current)
                 && outcome.delivery_json.is_none()
             {
-                active_outcome.status = Set(target.outcome.as_str().to_string());
+                active_outcome.status = Set(outcome_target.as_str().to_string());
                 active_outcome.summary = Set(change.summary.clone());
-                active_outcome.error = Set(change.error.clone().or_else(|| target.default_error()));
+                active_outcome.error = Set(if recovery_exhausted {
+                    Some("executor delivery recovery finished without submit_delivery".to_string())
+                } else if stop_recovery_requested {
+                    Some(
+                        "task stop interrupted executor; delivery recovery is required before stop"
+                            .to_string(),
+                    )
+                } else {
+                    change.error.clone().or_else(|| target.default_error())
+                });
             }
             active_outcome.terminal_observed = Set(1);
             active_outcome.updated_at = Set(now);
@@ -207,7 +236,7 @@ impl StudioStore {
                     Some(WorkUnitStatus::Delivered | WorkUnitStatus::Merged)
                 ) {
                     let mut active_work_unit: entities::work_unit::ActiveModel = work_unit.into();
-                    active_work_unit.status = Set(target.work_unit.as_str().to_string());
+                    active_work_unit.status = Set(work_unit_target.as_str().to_string());
                     active_work_unit.updated_at = Set(now);
                     active_work_unit.update(&tx).await?;
                 }
@@ -320,6 +349,36 @@ fn is_durable_terminal(status: AgentOutcomeStatus) -> bool {
         status,
         AgentOutcomeStatus::Completed | AgentOutcomeStatus::Failed | AgentOutcomeStatus::Cancelled
     )
+}
+
+fn executor_recovery_exhausted(
+    outcome: &entities::agent_outcome::Model,
+    current: AgentOutcomeStatus,
+    turn_outcome: pl_core::TurnOutcomeKind,
+) -> Result<bool> {
+    if outcome.role != "executor"
+        || current != AgentOutcomeStatus::WaitingForDelivery
+        || turn_outcome != pl_core::TurnOutcomeKind::Completed
+        || outcome.delivery_json.is_some()
+    {
+        return Ok(false);
+    }
+    let contract = outcome
+        .completion_contract_json
+        .as_deref()
+        .context("executor completion contract is missing")
+        .and_then(|json| serde_json::from_str::<CompletionContract>(json).map_err(Into::into))?;
+    let CompletionContract::DeliveryRequired {
+        task_run_id,
+        work_unit_id,
+        recovery_limit,
+    } = contract;
+    if task_run_id != outcome.task_run_id
+        || outcome.work_unit_id.as_deref() != Some(work_unit_id.as_str())
+    {
+        bail!("executor completion contract identity does not match durable outcome");
+    }
+    Ok(outcome.delivery_recovery_count.max(0) as u32 >= recovery_limit)
 }
 
 fn projection_from_outcome(

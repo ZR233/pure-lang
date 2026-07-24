@@ -7,10 +7,11 @@ use super::host::{AgentCommitObserver, AgentLifecycleAdapter, AgentStateReposito
 use super::runtime::{AgentRuntimeOptions, RestoredInputPolicy};
 use super::state::{AgentRuntimeError, unix_timestamp};
 use super::{
-    AgentCommit, AgentCommitOutcome, AgentCommittedEvent, AgentId, AgentRegistration,
-    AgentRuntimeEvent, AgentRuntimeEventKind, AgentRuntimeHandle, AgentRuntimeHost,
-    AgentRuntimeResult, AgentSnapshot, AgentSpawnRequest, AgentSpawnResult, AgentSubmitRequest,
-    AgentWaitResult, PendingAgentInput, RestoredAgentRuntime, SpawnLifecycleRequest, TurnId,
+    AgentCommit, AgentCommitOutcome, AgentCommittedEvent, AgentCurrentSessionSubmitRequest,
+    AgentId, AgentRegistration, AgentRuntimeEvent, AgentRuntimeEventKind, AgentRuntimeHandle,
+    AgentRuntimeHost, AgentRuntimeResult, AgentSnapshot, AgentSpawnRequest, AgentSpawnResult,
+    AgentSubmitRequest, AgentWaitResult, PendingAgentInput, RestoredAgentRuntime,
+    SpawnLifecycleRequest, TurnId,
 };
 use crate::SessionEventHub;
 
@@ -25,6 +26,11 @@ pub(crate) enum CoordinatorCommand {
     Submit {
         agent_id: AgentId,
         request: AgentSubmitRequest,
+        reply: oneshot::Sender<AgentRuntimeResult<TurnId>>,
+    },
+    SubmitCurrentSession {
+        agent_id: AgentId,
+        request: AgentCurrentSessionSubmitRequest,
         reply: oneshot::Sender<AgentRuntimeResult<TurnId>>,
     },
     Spawn {
@@ -142,6 +148,29 @@ async fn run_coordinator<H>(
                 reply,
             } => {
                 route(&actors, &agent_id, ActorCommand::Submit { request, reply }).await;
+            }
+            CoordinatorCommand::SubmitCurrentSession {
+                agent_id,
+                request,
+                reply,
+            } => {
+                let root_agent_id = match root_agent_id_for(&actors, &agent_id).await {
+                    Ok(root_agent_id) => root_agent_id,
+                    Err(error) => {
+                        let _ = reply.send(Err(error));
+                        continue;
+                    }
+                };
+                route(
+                    &actors,
+                    &agent_id,
+                    ActorCommand::SubmitCurrentSession {
+                        root_agent_id,
+                        request,
+                        reply,
+                    },
+                )
+                .await;
             }
             CoordinatorCommand::Spawn { request, reply } => {
                 let result =
@@ -340,6 +369,43 @@ async fn close_agent_tree(
     target.ok_or_else(|| AgentRuntimeError::NotFound(agent_id.clone()))
 }
 
+async fn root_agent_id_for(
+    actors: &BTreeMap<AgentId, AgentActorHandle>,
+    agent_id: &AgentId,
+) -> AgentRuntimeResult<AgentId> {
+    let snapshots = list_snapshots(actors).await?;
+    let parents = snapshots
+        .iter()
+        .map(|snapshot| {
+            (
+                snapshot.identity.id.clone(),
+                snapshot.identity.parent_id.clone(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    if !parents.contains_key(agent_id) {
+        return Err(AgentRuntimeError::NotFound(agent_id.clone()));
+    }
+    let mut current = agent_id.clone();
+    let mut remaining = parents.len();
+    while let Some(parent) = parents.get(&current).cloned().flatten() {
+        if remaining == 0 {
+            return Err(AgentRuntimeError::Lifecycle(
+                "agent parent graph contains a cycle".to_string(),
+            ));
+        }
+        remaining -= 1;
+        current = parent;
+        if !parents.contains_key(&current) {
+            return Err(AgentRuntimeError::Lifecycle(format!(
+                "agent parent {} is missing while resolving root for {agent_id}",
+                current.as_str()
+            )));
+        }
+    }
+    Ok(current)
+}
+
 fn has_ancestor(
     parents: &BTreeMap<AgentId, Option<AgentId>>,
     candidate: &AgentId,
@@ -392,6 +458,9 @@ fn reject_missing(command: ActorCommand, agent_id: AgentId) {
     let error = AgentRuntimeError::NotFound(agent_id);
     match command {
         ActorCommand::Submit { reply, .. } => {
+            let _ = reply.send(Err(error));
+        }
+        ActorCommand::SubmitCurrentSession { reply, .. } => {
             let _ = reply.send(Err(error));
         }
         ActorCommand::CancelTurn { reply, .. } => {

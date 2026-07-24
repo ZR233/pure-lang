@@ -12,7 +12,7 @@ pub(super) fn parse_input<T: serde::de::DeserializeOwned>(
 ) -> Result<T, PureError> {
     serde_json::from_value(arguments).map_err(|error| PureError::ToolExecutionFailed {
         tool: tool.to_string(),
-        error: format!("invalid input: {error}"),
+        error: format!("invalid input: {error}. Check the tool schema and remove unknown fields"),
     })
 }
 
@@ -68,7 +68,10 @@ pub(super) async fn ensure_overwrite(
     if !overwrite && tokio::fs::try_exists(path).await? {
         return Err(tool_error(
             tool,
-            format!("target '{}' already exists", path.display()),
+            format!(
+                "target '{}' already exists; use overwrite mode or apply_patch for an intentional replacement",
+                path.display()
+            ),
         ));
     }
     Ok(())
