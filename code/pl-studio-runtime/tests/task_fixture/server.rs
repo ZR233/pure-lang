@@ -8,6 +8,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
 
+use super::PARENT_HISTORY_MARKER;
 use super::git::git_output;
 use super::sse::{final_text, tool_call};
 
@@ -93,7 +94,7 @@ impl ScriptedModelServer {
         if !progress.errors.is_empty() {
             bail!("scripted model errors:\n{}", progress.errors.join("\n"));
         }
-        if (progress.planner, progress.executor, progress.reviewer) != (11, 5, 3) {
+        if (progress.planner, progress.executor, progress.reviewer) != (8, 5, 3) {
             bail!(
                 "scripted model stopped at planner={}, executor={}, reviewer={}\n{}",
                 progress.planner,
@@ -193,25 +194,18 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
             ),
         ),
         3 => (
-            "spawn_agent(executor)",
+            "task_spawn_executor",
             tool_call(
                 "spawn-executor",
-                "spawn_agent",
+                "task_spawn_executor",
                 serde_json::json!({
+                    "taskName": "offline_executor",
                     "message": "Create src/feature.txt with the exact required content, commit it, and submit the committed delivery.",
-                    "role": "executor",
-                    "metadata": {
-                        "taskName": "offline_executor",
-                        "ownedPaths": ["src/**"]
-                    }
+                    "ownedPaths": ["src/**"]
                 }),
             ),
         ),
-        4 => (
-            "final",
-            final_text("executor-dispatched", "Executor dispatched."),
-        ),
-        5 => {
+        4 => {
             let task = current_task(state).await?;
             let executor = task
                 .agents
@@ -230,8 +224,7 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 ),
             )
         }
-        6 => ("final", final_text("delivery-merged", "Delivery merged.")),
-        7 => (
+        5 => (
             "task_update_design(consistency)",
             tool_call(
                 "design-consistency",
@@ -239,7 +232,7 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 serde_json::json!({"patch": CONSISTENCY_DESIGN_PATCH}),
             ),
         ),
-        8 => (
+        6 => (
             "task_request_review",
             tool_call(
                 "request-review",
@@ -247,8 +240,7 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 serde_json::json!({}),
             ),
         ),
-        9 => ("final", final_text("review-requested", "Review requested.")),
-        10 => (
+        7 => (
             "task_complete",
             tool_call("complete-task", "task_complete", serde_json::json!({})),
         ),
@@ -390,15 +382,80 @@ fn request_role(request: &serde_json::Value) -> Result<ScriptRole> {
         })
         .collect::<BTreeSet<_>>();
     if names.contains("submit_delivery") {
+        ensure_fresh_task_child(request, "executor")?;
+        let request_text = request.to_string();
+        if !request_text.contains("src/**") || !request_text.contains("ownedPaths") {
+            bail!("executor instructions do not contain the normalized ownedPaths scope");
+        }
         return Ok(ScriptRole::Executor);
     }
     if names.contains("review_exit") {
+        ensure_fresh_task_child(request, "reviewer")?;
         return Ok(ScriptRole::Reviewer);
     }
     if names.contains("plan_exit") || names.contains("task_update_design") {
+        validate_planner_spawn_contract(tools)?;
         return Ok(ScriptRole::Planner);
     }
     bail!("cannot identify scripted role from tools: {names:?}")
+}
+
+fn ensure_fresh_task_child(request: &serde_json::Value, role: &str) -> Result<()> {
+    if request.to_string().contains(PARENT_HISTORY_MARKER) {
+        bail!("{role} inherited the planner history marker");
+    }
+    Ok(())
+}
+
+fn validate_planner_spawn_contract(tools: &[serde_json::Value]) -> Result<()> {
+    let executor = find_tool(tools, "task_spawn_executor")
+        .context("planner tools do not include task_spawn_executor")?;
+    let executor_schema = tool_parameters(executor)
+        .context("task_spawn_executor does not expose function parameters")?;
+    let required = executor_schema
+        .get("required")
+        .and_then(serde_json::Value::as_array)
+        .context("task_spawn_executor schema has no required array")?
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .collect::<BTreeSet<_>>();
+    if required != BTreeSet::from(["message", "ownedPaths", "taskName"]) {
+        bail!("task_spawn_executor has unexpected required fields: {required:?}");
+    }
+    if executor_schema["properties"]["ownedPaths"]["minItems"] != 1 {
+        bail!("task_spawn_executor ownedPaths must require at least one item");
+    }
+
+    let generic =
+        find_tool(tools, "spawn_agent").context("planner tools do not include spawn_agent")?;
+    let generic_schema =
+        tool_parameters(generic).context("spawn_agent does not expose function parameters")?;
+    if generic_schema["properties"]["role"]["enum"] != serde_json::json!(["explorer"]) {
+        bail!("Task planner spawn_agent must only expose the explorer role");
+    }
+    Ok(())
+}
+
+fn find_tool<'a>(
+    tools: &'a [serde_json::Value],
+    expected_name: &str,
+) -> Option<&'a serde_json::Value> {
+    tools.iter().find(|tool| {
+        tool.get("name")
+            .or_else(|| {
+                tool.get("function")
+                    .and_then(|function| function.get("name"))
+            })
+            .and_then(serde_json::Value::as_str)
+            == Some(expected_name)
+    })
+}
+
+fn tool_parameters(tool: &serde_json::Value) -> Option<&serde_json::Value> {
+    tool.get("parameters").or_else(|| {
+        tool.get("function")
+            .and_then(|function| function.get("parameters"))
+    })
 }
 
 async fn read_json_request(socket: &mut TcpStream) -> Result<serde_json::Value> {

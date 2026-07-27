@@ -30,11 +30,11 @@ impl StudioStore {
         .map(Option::flatten)
     }
 
-    /// 判断同一 task run 是否已经在 framework durable FIFO 中排有后续轮。
+    /// 判断同一 task run 是否已有排队或正在执行的受管续轮。
     ///
-    /// 正在执行的 turn 不能阻止追加下一轮：child 可能先于当前 root turn 结束，
-    /// 此时必须把 continuation 排到当前 turn 之后，避免丢失唤醒。
-    pub(in crate::studio) async fn has_queued_task_continuation(
+    /// 普通 root turn 即使正在执行也不能阻止 child terminal 追加下一轮；只有
+    /// `historyPolicy=ephemeral` 的受管续轮在 live 状态时参与去重。
+    pub(in crate::studio) async fn has_live_task_continuation(
         &self,
         task_run_id: &str,
     ) -> Result<bool> {
@@ -44,8 +44,14 @@ impl StudioStore {
                 DatabaseBackend::Sqlite,
                 "SELECT 1 AS present
                  FROM agent_turns
-                 WHERE status = 'queued'
-                   AND json_extract(metadata_json, '$.taskRunId') = ?
+                 WHERE json_extract(metadata_json, '$.taskRunId') = ?
+                   AND (
+                     status = 'queued'
+                     OR (
+                       status IN ('running', 'waiting_tool', 'waiting_interaction')
+                       AND json_extract(metadata_json, '$.historyPolicy') = 'ephemeral'
+                     )
+                   )
                  LIMIT 1",
                 [task_run_id.to_string().into()],
             ))

@@ -22,6 +22,7 @@ use super::resources::root_agent_id;
 pub(in crate::studio) enum StudioContinuationReason {
     Recovery,
     AgentTerminal,
+    DeliveryCompleted,
     ReviewReturned,
     MergeConflict,
     MergeCompleted,
@@ -32,6 +33,7 @@ impl StudioContinuationReason {
         match self {
             Self::Recovery => "recovery",
             Self::AgentTerminal => "agentTerminal",
+            Self::DeliveryCompleted => "deliveryCompleted",
             Self::ReviewReturned => "reviewReturned",
             Self::MergeConflict => "mergeConflict",
             Self::MergeCompleted => "mergeCompleted",
@@ -401,7 +403,7 @@ impl StudioContinuationService {
         task_run_id: &str,
         reason: StudioContinuationReason,
     ) -> anyhow::Result<()> {
-        if self.store.has_queued_task_continuation(task_run_id).await? {
+        if self.store.has_live_task_continuation(task_run_id).await? {
             return Ok(());
         }
         let snapshot = match self
