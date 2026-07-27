@@ -5,7 +5,6 @@ use super::attachment::{
 use crate::StudioMode;
 use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
 
-mod agent_framework;
 mod attachment;
 mod project_archive;
 mod schema;

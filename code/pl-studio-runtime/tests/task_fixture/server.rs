@@ -468,6 +468,9 @@ fn request_role(request: &serde_json::Value) -> Result<ScriptRole> {
                 .and_then(serde_json::Value::as_str)
         })
         .collect::<BTreeSet<_>>();
+    if names.contains("wait_agent") {
+        bail!("model-visible wait_agent must not be installed");
+    }
     if names.contains("submit_delivery") {
         ensure_fresh_task_child(request, "executor")?;
         return Ok(ScriptRole::Executor);

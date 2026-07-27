@@ -42,7 +42,7 @@ impl TaskContinuationSnapshot {
             format!(
                 "检测到 executor 已结束但尚未交付：{}。\n\
                  coordinator 会向对应 agent 自动投递最多一次受控 recovery；不要再调用 \
-                 send_input、close_agent 或重复 wait_agent。合同终结后本 continuation 会再次收到 \
+                 send_input 或 close_agent，也不要轮询状态。合同终结后订阅机制会再次提交 \
                  durable 结果。\n",
                 waiting_delivery_agents.join(", ")
             )

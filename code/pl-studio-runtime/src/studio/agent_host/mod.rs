@@ -17,7 +17,7 @@ use crate::studio::{
     InteractionRuntime, StudioProductEventRuntime, StudioRuntimeState, StudioStore,
 };
 
-pub(super) use continuation::{StudioContinuationReason, StudioContinuationService};
+pub(super) use continuation::StudioContinuationService;
 use events::StudioAgentCommitObserver;
 use lifecycle::StudioAgentLifecycle;
 use repository::StudioAgentRepository;
@@ -56,7 +56,6 @@ impl StudioAgentHost {
                 lsp_runtime,
                 interactions.clone(),
                 coordinator.clone(),
-                continuations.clone(),
                 resources.clone(),
             ),
             lifecycle: StudioAgentLifecycle::new(store.clone(), coordinator, resources.clone()),

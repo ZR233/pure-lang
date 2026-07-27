@@ -168,7 +168,6 @@ async fn default_tools_register_shared_tools_without_product_collaboration() {
     assert!(core.tools.get("exec").is_some());
     assert!(core.tools.get("write_stdin").is_some());
     assert!(core.tools.get("spawn_agent").is_none());
-    assert!(core.tools.get("wait_agent").is_none());
     assert!(core.tools.get("list_agents").is_none());
     assert!(core.tools.get("send_input").is_none());
     assert!(core.tools.get("close_agent").is_none());
@@ -245,7 +244,6 @@ async fn default_tool_builder_exposes_only_framework_independent_names() {
     for removed in [
         "spawn_agent",
         "send_input",
-        "wait_agent",
         "list_agents",
         "close_agent",
         "send_message",
@@ -367,7 +365,6 @@ async fn tool_set_builder_can_disable_exec() {
     assert!(core.tools.get("exec").is_none());
     assert!(core.tools.get("write_stdin").is_none());
     assert!(core.tools.get("spawn_agent").is_none());
-    assert!(core.tools.get("wait_agent").is_none());
     assert!(core.tools.get("read_file").is_some());
     assert!(core.tools.get("request_user_input").is_some());
     assert!(core.tools.get("plan_exit").is_some());

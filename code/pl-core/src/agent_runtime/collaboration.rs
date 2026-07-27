@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::time::Duration;
 
 use pl_protocol::PureError;
 use serde::Deserialize;
@@ -7,21 +6,19 @@ use serde_json::{Value, json};
 
 use super::{
     AgentAccessPolicy, AgentId, AgentRuntimeHandle, AgentSessionState, AgentSpawnRequest,
-    AgentTargetSelector, InputDelivery, SessionId,
+    AgentTargetSelector, AgentWakePolicy, InputDelivery, SessionId,
 };
 use crate::{AgentRoleId, Tool, ToolContext, ToolEffect, ToolInput, ToolOutput};
 
 const TOOL_SPAWN_AGENT: &str = "spawn_agent";
 const TOOL_SEND_INPUT: &str = "send_input";
-const TOOL_WAIT_AGENT: &str = "wait_agent";
 const TOOL_LIST_AGENTS: &str = "list_agents";
 const TOOL_CLOSE_AGENT: &str = "close_agent";
-const DEFAULT_WAIT_TIMEOUT_MS: u64 = 30_000;
 
 mod support;
 use support::{
     filter_visible, fork_session, json_output, object_schema, parse_agent_id, parse_input,
-    send_schema, spawn_schema, target_schema, tool_error, wait_schema,
+    send_schema, spawn_schema, target_schema, tool_error,
 };
 
 /// 为一次 turn 构造由 `AgentRuntimeHandle` 驱动的协作工具。
@@ -44,7 +41,7 @@ impl AgentCollaborationTools {
         }
     }
 
-    /// 返回可直接注册到 `AgentKernelBuilder` 的五个协作工具。
+    /// 返回可直接注册到 `AgentKernelBuilder` 的四个协作工具。
     pub fn tools(&self) -> Vec<Arc<dyn Tool>> {
         CollaborationToolKind::ALL
             .into_iter()
@@ -64,19 +61,17 @@ impl AgentCollaborationTools {
 enum CollaborationToolKind {
     Spawn,
     Send,
-    Wait,
     List,
     Close,
 }
 
 impl CollaborationToolKind {
-    const ALL: [Self; 5] = [Self::Spawn, Self::Send, Self::Wait, Self::List, Self::Close];
+    const ALL: [Self; 4] = [Self::Spawn, Self::Send, Self::List, Self::Close];
 
     fn name(self) -> &'static str {
         match self {
             Self::Spawn => TOOL_SPAWN_AGENT,
             Self::Send => TOOL_SEND_INPUT,
-            Self::Wait => TOOL_WAIT_AGENT,
             Self::List => TOOL_LIST_AGENTS,
             Self::Close => TOOL_CLOSE_AGENT,
         }
@@ -86,7 +81,6 @@ impl CollaborationToolKind {
         match self {
             Self::Spawn => "Spawn a child agent using one of the roles allowed for this turn.",
             Self::Send => "Submit input to an accessible agent using an explicit delivery mode.",
-            Self::Wait => "Wait until an accessible agent is idle and its input queue is empty.",
             Self::List => "List agents visible to the current collaboration policy.",
             Self::Close => "Close an accessible child agent and its product resources.",
         }
@@ -114,7 +108,6 @@ impl Tool for CollaborationTool {
         match self.kind {
             CollaborationToolKind::Spawn => spawn_schema(&self.policy),
             CollaborationToolKind::Send => send_schema(),
-            CollaborationToolKind::Wait => wait_schema(),
             CollaborationToolKind::List => object_schema(Vec::new()),
             CollaborationToolKind::Close => target_schema("Agent id to close."),
         }
@@ -123,7 +116,7 @@ impl Tool for CollaborationTool {
     fn supports_parallel_tool_calls(&self) -> bool {
         matches!(
             self.kind,
-            CollaborationToolKind::Send | CollaborationToolKind::Wait | CollaborationToolKind::List
+            CollaborationToolKind::Send | CollaborationToolKind::List
         )
     }
 
@@ -142,7 +135,6 @@ impl Tool for CollaborationTool {
             match self.kind {
                 CollaborationToolKind::Spawn => self.spawn(input, context).await,
                 CollaborationToolKind::Send => self.send(input).await,
-                CollaborationToolKind::Wait => self.wait(input).await,
                 CollaborationToolKind::List => self.list(input).await,
                 CollaborationToolKind::Close => self.close(input).await,
             }
@@ -194,6 +186,7 @@ impl CollaborationTool {
             .spawn(AgentSpawnRequest {
                 parent_id: self.caller.clone(),
                 role,
+                wake_policy: AgentWakePolicy::RuntimeTerminal,
                 session,
                 initial_message: Some(args.message),
                 metadata: Value::Object(metadata),
@@ -224,25 +217,6 @@ impl CollaborationTool {
             .await
             .map_err(|error| tool_error(TOOL_SEND_INPUT, error.to_string()))?;
         json_output(json!({ "target": target, "turnId": turn_id }))
-    }
-
-    async fn wait(&self, input: ToolInput) -> Result<ToolOutput, PureError> {
-        let args: WaitArgs = parse_input(TOOL_WAIT_AGENT, input.arguments)?;
-        let target = parse_agent_id(TOOL_WAIT_AGENT, args.target)?;
-        self.authorize(&self.policy.wait_targets, &target).await?;
-        let timeout = Duration::from_millis(args.timeout_ms.unwrap_or(DEFAULT_WAIT_TIMEOUT_MS));
-        match self.runtime.wait_timeout(target.clone(), timeout).await {
-            Ok(result) => json_output(json!({
-                "target": target,
-                "timedOut": false,
-                "snapshot": result.snapshot,
-                "lastTurn": result.last_turn,
-            })),
-            Err(super::AgentRuntimeError::TimedOut) => {
-                json_output(json!({ "target": target, "timedOut": true }))
-            }
-            Err(error) => Err(tool_error(TOOL_WAIT_AGENT, error.to_string())),
-        }
     }
 
     async fn list(&self, input: ToolInput) -> Result<ToolOutput, PureError> {
@@ -318,13 +292,6 @@ struct SendArgs {
     delivery: InputDelivery,
     #[serde(default)]
     metadata: Value,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct WaitArgs {
-    target: String,
-    timeout_ms: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -413,6 +380,7 @@ mod tests {
                 role: AgentRoleId::new("test").unwrap(),
                 depth: parent.is_some() as u32,
             },
+            wake_policy: super::AgentWakePolicy::RuntimeTerminal,
             lifecycle: AgentLifecycleState::Active,
             activity: AgentActivityState::Idle,
             active_turn_id: None,

@@ -18,6 +18,13 @@ pub(crate) struct MergeRecord {
     pub(crate) updated_at: i64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TaskProductSignalClaim {
+    pub(crate) task_run_id: String,
+    pub(crate) agent_id: String,
+    pub(crate) signal_id: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct MergeEvidence {

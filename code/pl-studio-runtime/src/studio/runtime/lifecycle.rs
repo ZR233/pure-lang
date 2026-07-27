@@ -5,8 +5,8 @@ use anyhow::{Context, Result};
 use crate::config::ConfigStore;
 use crate::resolve_workspace_root;
 use crate::studio::agent_host::{
-    StudioAgentHost, StudioAgentResources, StudioAgentRuntime, StudioContinuationReason,
-    StudioContinuationService, runtime_options,
+    StudioAgentHost, StudioAgentResources, StudioAgentRuntime, StudioContinuationService,
+    runtime_options,
 };
 use crate::studio::task_coordinator::TaskCoordinator;
 use crate::studio::{
@@ -187,8 +187,7 @@ impl StudioRuntime {
                     .runtime_state
                     .transition(StudioRuntimeStatus::Ready, None)?;
                 for run in recovered_runs {
-                    self.continuations
-                        .request(run.id, StudioContinuationReason::Recovery);
+                    self.continuations.request_recovery(run.id);
                 }
                 Ok(ready)
             }

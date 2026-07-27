@@ -41,13 +41,16 @@ planning -> pendingConfirmation -> designUpdating -> implementing -> merging
          -> completed | blocked | failed | cancelled
 ```
 
-coordinator 后台监控代理。代理终结、merge 冲突或 reviewer 返回后，runtime 写入事实
-并启动 planner continuation turn；planner 不依靠单个长 turn 持续 wait。应用重启后
-从持久事实恢复，Git 状态与 `expectedHead` 不一致时进入 `blocked`。
+coordinator 在 durable 事实提交后向 `pl-core::AgentEventHub` 发布稳定 product signal。
+Planner 活跃时更新只被合并，不抢占当前 turn；当前 turn 收尾后由 core 排入一个
+ephemeral wake continuation。没有更新但仍有 direct child 时，Planner 进入
+`WaitingAgents`，由订阅消息或每个 child 独立的 30 秒 inactivity timer 唤醒，不暴露
+模型层等待工具。应用重启后从持久事实、agent snapshots 与 pending input FIFO 恢复；
+Git 状态与 `expectedHead` 不一致时进入 `blocked`。
 
 Studio 为每个 Task session 持有一个私有 `AgentRuntime<StudioHost>`（actor coordinator、repository identity、
 task generation 与 lifecycle epoch）。同一 session 的用户 root turn 与 continuation
-复用该 runtime，因此后续 planner 能继续 list、wait、send 和 close 先前 turn 创建的
+复用该 runtime，因此后续 planner 能继续 list、send 和 close 先前 turn 创建的
 agent；不同 session 完全隔离。Simple mode 仍使用 turn-local runtime。planning
 generation 在该 session 首次创建 `TaskRun` 时绑定 run id；run 终态且旧 turn 已静止后，
 下一个 root turn 才安全轮换 generation，避免旧 agent path 泄漏到新任务。
@@ -66,7 +69,7 @@ Task lifecycle adapter 在安装时绑定 Studio session，并通过该 per-sess
 不得被误作 Studio session 身份或与 hook 绑定值比较。
 
 root turn 结束或 UI 仅切换所选 session 不销毁 Task agent runtime。进程 shutdown 先停止
-root turn 与 continuation scheduler，再复制 runtime 列表、释放 registry 锁，并逐个
+root turn，再复制 runtime 列表、释放 registry 锁，并逐个
 cancel-and-wait/quiesce；该路径保留 durable worktree，不调用会 discard 且吞错的通用
 `shutdown_descendants`。旧 epoch 的 agent 事件不得跨越 runtime restart 产生 UI 或
 continuation 副作用，也不得写入新 epoch 的 durable agent outcome 或终结观察事实。
@@ -79,8 +82,10 @@ continuation 副作用，也不得写入新 epoch 的 durable agent outcome 或�
 状态配对错位时事务整体回滚并 block 精确 run，禁止伪恢复 agent 或产生第二次 continuation。
 
 启动恢复顺序固定为 process lease、agent 事务收束、durable-aware worktree 对账、主仓库
-校验，最后才允许 Recovery continuation。对账未完成或出现部分缺失资源的 run 不得进入
-continuation。
+校验，最后才允许把 recovery durable signal 发布到 AgentEventHub。对账未完成或出现部分
+缺失资源的 run 不得进入 continuation。runtime attach 会从 active Task 的 outcome、delivery、
+review round、merge evidence 和 recovery snapshot 重放稳定 product signal；accepted wake
+receipt 负责在 publish 前崩溃、乱序重放和重复 attach 下维持单次续轮。
 
 同一 Git common directory 与分支只允许一个写入任务。`BranchLease` 是进程内所有权，
 `expectedHead` CAS 和工作区清洁检查负责检测用户或外部进程的变化。
@@ -147,7 +152,8 @@ executor 固定使用 fresh session，不暴露父历史继承参数。planner �
 `ownedPaths`，要求只修改所属 worktree、提交并调用 `submit_delivery`，并禁止派生、合并
 或操作用户分支。成功结果只返回 `{ agentId, sessionId, turnId, ownedPaths }`，并立即结束
 当前 planner turn。planner 不在派生前快照中轮询、追派 executor 或读取子 worktree；
-delivery 提交或 executor terminal 事实会用最新 durable Task snapshot 唤醒 planner。
+delivery、失败合同或 inactivity timeout 会产生 typed wake batch；Studio Planner wake
+renderer 在 turn 准备时重新读取最新 durable Task snapshot，synthetic 输入不进入用户历史。
 
 ## Executor 交付
 
@@ -159,26 +165,33 @@ submit_delivery { headCommit, verificationSummary }
 
 每个 task executor outcome 持久化 `CompletionContract::DeliveryRequired`，包含 task run、
 work unit 与一次 recovery 上限。合法 `submit_delivery` 在同一事务中写入 Completed outcome
-和 Delivered work unit，提交成功后显式请求 Planner continuation；它不得依赖稍后到达的
-terminal projector 间接唤醒，也不得清除已经持久化的 terminal observation。executor turn
+和 Delivered work unit，提交成功后以 outcome id 发布 `ProductPhaseChanged`；它不得依赖
+稍后到达的 terminal projector 间接唤醒，也不得清除已经持久化的 terminal observation。
+executor turn
 进入 terminal 时 coordinator 仍必须检查合同，不能只按 actor Idle 视为任务完成：
 worktree 无改动且 HEAD 未推进时以 `noDelivery` 失败；HEAD 已推进或仍有未提交修改时进入
 `WaitingForDelivery`，保留 session、worktree 和 lease，并向同一 executor 投递一次受控
 recovery，要求实际验证、提交并调用 `submit_delivery`。recovery 后仍未交付则明确失败并保留
 worktree 诊断，不自动合并、不伪造 verification summary。Task executor 始终注册持久
-completion watcher，合同终结后幂等唤醒已有 Planner continuation，不依赖高频 `wait_agent`
-轮询。单个 turn 因 `InterruptThenStart` 结束时，如果 agent 快照仍有 active turn 或 pending
-input，或者 activity 尚未回到 `Idle`，它只是同一 executor 的中间 turn，不得结算 completion
-contract、关闭 Outcome/WorkUnit 的 delivery scope 或唤醒 Planner。异步 terminal projector
-还必须在写入产品终态前重新读取 latest agent snapshot，并确认 latest last turn 与待投影 turn
-一致；只有 queue-drained canonical terminal 才进入上述交付检查与恢复。continuation 去重同时
-识别 queued turn 和正在执行的 ephemeral 受管续轮；普通 root
-turn 不参与 running 去重，以免吞掉 child terminal 的后续输入。recovery claim 与 runtime
-FIFO 之间使用由 outcome id 和 recovery count 生成的稳定
-dispatch id；claim 提交后若进程退出，重启必须复用同一 claim。runtime durable turn metadata
-已存在该 dispatch id 时不得重复提交；该 turn 已终态但产品投影尚未完成时，恢复流程先重放
-terminal 投影再唤醒 Planner。这样 claim 提交、runtime submit 和产品 terminal 投影三个边界
-都可恢复，同时一次 recovery 上限不会被重复消费。
+completion watcher，并使用 `AgentWakePolicy::ProductGated`：底层 `TurnFinished` 只更新
+runtime 状态，不能越过 delivery contract 唤醒 Planner；合同终结后才发布以 durable record
+id 为幂等键的产品信号。单个 turn 因 `InterruptThenStart` 结束时，如果 agent 快照仍有
+active turn 或 pending input，或者 activity 尚未回到 `Idle`，它只是同一 executor 的中间
+turn，不得结算 completion contract、关闭 Outcome/WorkUnit 的 delivery scope 或发布产品
+信号。异步 terminal projector 还必须在写入产品终态前重新读取 latest agent snapshot，并
+确认 latest last turn 与待投影 turn 一致；只有 queue-drained canonical terminal 才进入上述
+交付检查与恢复。
+
+core 在 pending-input FIFO 之外持久化 accepted wake receipt，记录 typed wake id 与组成批次
+的 durable signal ids；因此同一产品事实即使在 wake 已出队后重启重放、或被合并进不同批次，
+也不会产生第二个续轮。continuation 去重同时识别 queued turn 和正在执行的 ephemeral 受管
+续轮，普通 root turn 不参与 running 去重，以免吞掉 child terminal 的后续输入。recovery
+claim 与 runtime FIFO 之间使用由
+outcome id 和 recovery count 生成的稳定 dispatch id；claim 提交后若进程退出，重启必须复用
+同一 claim。runtime durable turn metadata 已存在该 dispatch id 时不得重复提交；该 turn
+已终态但产品投影尚未完成时，恢复流程先重放 terminal 投影再发布产品信号。这样 claim
+提交、runtime submit 和产品 terminal 投影三个边界都可恢复，同时一次 recovery 上限不会被
+重复消费。
 
 runtime 只接受 HEAD 已推进且 worktree 干净的交付，返回 `baseCommit`、`headCommit`、
 `changedFiles`、验证摘要和 `{ path, branch }`。runtime 不隐式执行 `git add -A`。
@@ -249,8 +262,8 @@ pre-merge index tree、每个冲突 path 的 stage 1/2/3 mode 与 object id、re
 destination、binary 标记，以及 Git 已自动合并的 index entries。冲突按 text、add/add、
 rename/delete、modify/delete、binary 等 typed kind 持久化；路径必须是规范仓库相对路径，
 worktree/index 不得包含与该 merge 无关的修改。随后 `MergeRecord=Conflicted`、任务进入
-`resolvingConflict`，保留 MERGE_HEAD、index 与 worktree，只通过 coalescing scheduler
-请求一次 `MergeConflict` planner continuation，executor worktree 继续受 durable owner
+`resolvingConflict`，保留 MERGE_HEAD、index 与 worktree，只 claim 一次 merge record 并以
+该 record id 发布 `MergeConflict` product signal；executor worktree 继续受 durable owner
 保护。
 
 重启恢复按 merge phase 判断 Git 状态：`Pending | Verifying` 必须依据持久 prestate、
@@ -260,10 +273,10 @@ workspace 检查误判为外部漂移。`MergeRecord.verification_json` 承载�
 包含来源 phase、prestate、delivery identity、验证、commit、冲突 manifest、补偿与 cleanup
 状态；保持现有六张 coordinator 表，不为 transient tool trace 新增协议或数据表。
 
-每次 merge durable 接受后记录一次尚未消费的完成通知。当前 planner turn 移除时，runtime
-在事务中 claim 同一任务尚未通知的全部成功 merge，并将其合并为一次 `MergeCompleted`
-continuation；重复扫描不得再次续跑。这样 planner 可以逐个接受 executor，同时不会因同一
-turn 内连续完成多个 merge 而产生重复协调 turn。
+每次 merge durable 接受后记录一次尚未消费的完成通知。runtime 在事务中 claim 同一任务
+尚未通知的成功 merge，并以每个 merge record id 分别发布稳定 `MergeCompleted` product
+signal；AgentEventHub 在 Planner 活跃时把多个 record 更新合并为一个 wake batch，重复扫描
+不得再次续跑。
 
 冲突时持久化 `MergeRecord`，暂停其他 merge，由 planner 使用以下受限工具亲自解决：
 
@@ -328,9 +341,11 @@ run、保留残留现场并报告诊断，不能把它当作普通工具失败�
 `REVERT_HEAD`、index 和 worktree 现场。成功 commit 使用同一 exact-commit 证明与 post-commit
 补偿规则。安全补偿必须再次证明 workspace root、git common dir、named branch、clean 状态
 和 exact HEAD 全部仍属于该 run；即使 HEAD 相同，切换到另一分支也禁止 reset/restore。
-`task_stop` 按 branch mutation、allocation 的固定顺序短暂取得两把 guard，完成预检并写入
+`task_stop` 先订阅 Task terminal durable fact channel，再按 branch mutation、allocation 的
+固定顺序短暂取得两把 guard，完成预检并写入
 持久 `StopRequested`，但不立即进入不可逆 `stopping`，delivery scope 继续开放。随后在不持
-branch mutation lock 的情况下 interrupt active turn 并等待 canonical terminal，再统一检查
+branch mutation lock 的情况下 interrupt active turn；每次 terminal fact 通知后重查
+durable completion predicate，保留 10 秒总上限且不使用短轮询，再统一检查
 全部 completion contract、HEAD 与 worktree。存在已推进 HEAD 或 dirty worktree 时停止返回
 `deferred`，executor 进入上述一次 delivery recovery；只有不存在可恢复成果且所有合同已
 终结时，才进入 `stopping` 并拒绝新的 allocation/delivery，最后重新取得 branch guard，
@@ -342,8 +357,9 @@ guard 不得授权 locked mutation API。
 推进到当前 `expectedHead`，再调用 `task_request_review` 间接创建只读 reviewer。
 review harness 在创建 round 和派生 reviewer 前重新校验该不变量，使设计不一致在
 仍可更新设计的 `implementing/reworking` 阶段失败，不能进入只读 `reviewing` 后才暴露。
-reviewer 成功启动后同样结束当前 planner turn；reviewer terminal 事件以最新 review round
-和 HEAD 生成 continuation，planner 不在旧 turn 中等待或再次向 reviewer 发送输入。
+reviewer 成功启动后同样结束当前 planner turn；reviewer 使用
+`AgentWakePolicy::ProductGated`，`review_exit` durable transaction 成功后以 review round id
+发布 product signal。未满足审查合同时，runtime terminal 本身不得唤醒可执行 Planner 续轮。
 reviewer 使用 fresh session，不复制 planner 完整历史；harness 生成的自包含初始 prompt
 包含 plan、任务 diff、代理结果、验证摘要和 design 文件索引，不预载 design 正文。系统
 提示词要求 reviewer 根据改动主动搜索并读取相关 design，再对照设计审查正确性、回归、

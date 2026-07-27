@@ -157,7 +157,7 @@ pure-lang/
 
 ### 内置工具
 
-共 23 个内置工具 + MCP 动态工具，按分类如下：
+内置工具 + MCP 动态工具按分类如下：
 
 | 分类 | 工具 |
 |------|------|
@@ -166,7 +166,7 @@ pure-lang/
 | 文件写入 | `write_file`, `create_directory`, `delete_path`, `copy_path`, `move_path` |
 | 补丁 | `apply_patch` |
 | 代码智能 | `lsp_query` |
-| 子代理 | `spawn_agent`, `send_input`, `wait_agent`, `list_agents`, `close_agent`, `resume_agent` |
+| 子代理 | `spawn_agent`, `send_input`, `list_agents`, `close_agent`（等待由 runtime 订阅式 continuation 处理） |
 | 用户交互 | `request_user_input` |
 | 技能 | `skills_list`, `skill_view`, `skill_manage` |
 | MCP | 动态注册（`mcp__<server>__<tool>`） |

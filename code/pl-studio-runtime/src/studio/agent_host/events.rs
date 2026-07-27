@@ -476,7 +476,9 @@ fn agent_status_label(snapshot: &AgentSnapshot) -> &'static str {
         AgentLifecycleState::Active => match snapshot.activity {
             AgentActivityState::Queued => "queued",
             AgentActivityState::Running => "running",
-            AgentActivityState::WaitingTool | AgentActivityState::WaitingInteraction => "waiting",
+            AgentActivityState::WaitingTool
+            | AgentActivityState::WaitingInteraction
+            | AgentActivityState::WaitingAgents => "waiting",
             AgentActivityState::Idle => match snapshot.last_turn.as_ref().map(|turn| turn.kind) {
                 Some(TurnOutcomeKind::Completed) => "completed",
                 Some(TurnOutcomeKind::Cancelled) => "interrupted",
@@ -541,6 +543,7 @@ mod tests {
                 role: AgentRoleId::new("executor").unwrap(),
                 depth: 1,
             },
+            wake_policy: pl_core::AgentWakePolicy::ProductGated,
             lifecycle: AgentLifecycleState::Active,
             activity,
             active_turn_id: None,

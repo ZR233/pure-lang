@@ -69,14 +69,6 @@ fn progress_messages_describe_plan_and_subagent_lifecycle() {
         "子代理已创建。"
     );
     assert_eq!(
-        tool_start_progress_message("wait_agent"),
-        "正在等待子代理。"
-    );
-    assert_eq!(
-        tool_terminal_progress_message(&completed_record("wait_agent")),
-        "子代理等待已结束。"
-    );
-    assert_eq!(
         tool_start_progress_message("read_file"),
         "正在执行工具 `read_file`。"
     );

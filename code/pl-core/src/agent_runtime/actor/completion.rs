@@ -81,7 +81,6 @@ where
             self.fault_in_memory(error.to_string());
             return;
         }
-        self.notify_waiters_if_ready();
         if !self.state.pending_inputs.is_empty() && self.run_queue {
             self.begin_next_turn().await;
         }

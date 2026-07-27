@@ -146,7 +146,9 @@ async fn reviewer_harness_authorization_is_one_shot_and_has_no_work_unit() {
 #[tokio::test]
 async fn review_tools_have_role_visibility_and_prompt_only_indexes_design() {
     let fixture = ReviewFixture::new("review-tool-visibility-prompt").await;
-    let exit_tool = fixture.coordinator.review_exit_tool(&fixture.session_id);
+    let exit_tool = fixture
+        .coordinator
+        .review_exit_tool(&fixture.session_id, None);
     assert_eq!(exit_tool.effect(), Some(ToolEffect::Read));
     let run = fixture
         .store
@@ -327,7 +329,7 @@ async fn review_exit_requires_real_design_trace_and_persists_matching_pass() {
     ]);
     let tool = fixture
         .coordinator
-        .review_exit_tool(fixture.session_id.clone());
+        .review_exit_tool(fixture.session_id.clone(), None);
     let (event_tx, _) = tokio::sync::broadcast::channel(16);
     let output = tool
         .execute(
@@ -2410,14 +2412,14 @@ async fn text_conflict_persists_stage_manifest_keeps_merge_state_and_queues_once
         vec![1, 2, 3]
     );
     assert!(fixture.worktree.exists());
-    assert_eq!(
-        fixture
-            .store
-            .claim_merge_conflict_continuation(&fixture.session_id)
-            .await
-            .unwrap(),
-        Some(fixture.task_run_id.clone())
-    );
+    let conflict_claim = fixture
+        .store
+        .claim_merge_conflict_continuation(&fixture.session_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(conflict_claim.task_run_id, fixture.task_run_id);
+    assert_eq!(conflict_claim.agent_id, fixture.agent_id);
     assert_eq!(
         fixture
             .store
@@ -2502,13 +2504,18 @@ async fn planner_conflict_tools_resolve_verify_continue_and_cleanup_delivery() {
     assert_eq!(durable_run.phase, TaskRunPhase::Implementing);
     assert_eq!(durable_run.expected_head, completed.new_head.unwrap());
     assert!(!fixture.worktree.exists());
+    let completion_claims = fixture
+        .store
+        .claim_merge_completion_continuation(&fixture.session_id)
+        .await
+        .unwrap();
+    assert_eq!(completion_claims.len(), 1);
+    let completion_claim = &completion_claims[0];
+    assert_eq!(completion_claim.task_run_id, fixture.task_run_id);
+    assert_eq!(completion_claim.agent_id, fixture.agent_id);
     assert_eq!(
-        fixture
-            .store
-            .claim_merge_completion_continuation(&fixture.session_id)
-            .await
-            .unwrap(),
-        Some(fixture.task_run_id.clone())
+        completion_claim.signal_id,
+        format!("merge-completion:{}", output.merge_id)
     );
     assert_eq!(
         fixture
@@ -2516,7 +2523,7 @@ async fn planner_conflict_tools_resolve_verify_continue_and_cleanup_delivery() {
             .claim_merge_completion_continuation(&fixture.session_id)
             .await
             .unwrap(),
-        None
+        Vec::new()
     );
     fixture.cleanup_conflict();
 }
@@ -3497,7 +3504,7 @@ async fn delivery_recovery_dispatch_is_deduplicated_by_durable_turn_metadata() {
         Some(DeliveryRecoveryDispatch::Pending)
     );
 
-    for status in ["waiting_tool", "waiting_interaction"] {
+    for status in ["waiting_tool", "waiting_interaction", "waiting_agents"] {
         fixture
             .store
             .database()
@@ -3878,7 +3885,8 @@ async fn terminal_recording_reports_only_committed_durable_changes() {
         changed,
         TerminalAgentStateRecording::Changed {
             task_run_id,
-            projection: _
+            projection: _,
+            ..
         } if task_run_id == fixture.task_run_id
     ));
     assert!(matches!(
@@ -4225,7 +4233,7 @@ async fn submit_delivery_tool_has_typed_schema_branch_effect_and_role_visibility
     let coordinator = Arc::new(TaskCoordinator::new(
         StudioStore::open_memory().await.unwrap(),
     ));
-    let tool = coordinator.submit_delivery_tool(|_| {});
+    let tool = coordinator.submit_delivery_tool("test-session".to_string(), None);
 
     assert_eq!(tool.name(), "submit_delivery");
     assert_eq!(tool.effect(), Some(ToolEffect::BranchControl));
@@ -4248,7 +4256,9 @@ async fn child_dispatch_resolves_delivery_without_task_session_in_tool_input() {
     let fixture = DeliveryFixture::new("delivery-tool-handler", vec!["src/**"]).await;
     fixture.commit_file("src/lib.rs");
     let head = git_output(&fixture.worktree, &["rev-parse", "HEAD"]);
-    let tool = fixture.coordinator.submit_delivery_tool(|_| {});
+    let tool = fixture
+        .coordinator
+        .submit_delivery_tool(fixture.session_id.clone(), None);
     let (event_tx, _) = tokio::sync::broadcast::channel(16);
     let kernel = AgentKernel::builder(
         TurnEngineBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None)).unwrap(),
@@ -4279,7 +4289,7 @@ async fn child_dispatch_resolves_delivery_without_task_session_in_tool_input() {
 }
 
 #[tokio::test]
-async fn submit_delivery_notifies_after_executor_terminal_was_already_observed() {
+async fn submit_delivery_commits_after_executor_terminal_was_already_observed() {
     let fixture = DeliveryFixture::new("delivery-after-terminal-observed", vec!["src/**"]).await;
     drain_agent_state(
         &fixture,
@@ -4291,16 +4301,9 @@ async fn submit_delivery_notifies_after_executor_terminal_was_already_observed()
     fixture.assert_waiting().await;
     fixture.commit_file("src/lib.rs");
     let head = git_output(&fixture.worktree, &["rev-parse", "HEAD"]);
-    let notifications = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let captured_notifications = notifications.clone();
     let tool = fixture
         .coordinator
-        .submit_delivery_tool(move |task_run_id| {
-            captured_notifications
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .push(task_run_id);
-        });
+        .submit_delivery_tool(fixture.session_id.clone(), None);
     let (event_tx, _) = tokio::sync::broadcast::channel(16);
     let kernel = AgentKernel::builder(
         TurnEngineBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None)).unwrap(),
@@ -4325,12 +4328,6 @@ async fn submit_delivery_notifies_after_executor_terminal_was_already_observed()
         .await
         .unwrap();
 
-    assert_eq!(
-        *notifications
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner),
-        vec![fixture.task_run_id.clone()]
-    );
     assert_eq!(
         fixture.outcome().await.status,
         AgentOutcomeStatus::Completed

@@ -112,7 +112,6 @@ where
             self.persist_close_compensation(compensation).await?;
             return Err(error);
         }
-        self.notify_waiters_if_ready();
         Ok(self.state.snapshot.clone())
     }
 
@@ -149,7 +148,6 @@ where
             self.fault_in_memory(error.to_string());
             return Err(error);
         }
-        self.notify_waiters_if_ready();
         if restored && self.run_queue && !self.state.pending_inputs.is_empty() {
             self.begin_next_turn().await;
         }

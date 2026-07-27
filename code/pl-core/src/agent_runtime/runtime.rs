@@ -26,6 +26,7 @@ pub enum RestoredInputPolicy {
 pub struct AgentRuntimeOptions {
     pub command_capacity: usize,
     pub cancel_grace: Duration,
+    pub child_inactivity_timeout: Duration,
     pub restored_inputs: RestoredInputPolicy,
     pub session_events: SessionEventOptions,
 }
@@ -35,6 +36,7 @@ impl Default for AgentRuntimeOptions {
         Self {
             command_capacity: 128,
             cancel_grace: Duration::from_millis(500),
+            child_inactivity_timeout: Duration::from_secs(30),
             restored_inputs: RestoredInputPolicy::Start,
             session_events: SessionEventOptions::default(),
         }
@@ -218,6 +220,7 @@ where
             .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
         match commit_outcome {
             AgentCommitOutcome::Applied => {
+                // 恢复事件与普通 actor commit 使用同一个 parent subscription 事实源。
                 session_events
                     .publish_batch(projected.events.clone())
                     .map_err(|error| AgentRuntimeError::SessionEvents(error.to_string()))?;
