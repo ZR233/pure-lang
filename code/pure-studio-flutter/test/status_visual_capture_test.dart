@@ -90,6 +90,58 @@ void main() {
       },
     );
 
+    testWidgets('capture active reasoning at ${viewport.name} '
+        '(${viewport.brightness.name})', (tester) async {
+      _configureVisualView(tester, viewport.size);
+      final chatBoundary = await _pumpVisual(
+        tester,
+        home: const StudioShell(),
+        brightness: viewport.brightness,
+        state: responsiveVisualReasoningState(),
+      );
+      expect(
+        find.byKey(const ValueKey('timeline-current-activity')),
+        findsOneWidget,
+      );
+      expect(
+        find.text('Updating the active reasoning summary'),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+      await _verifyVisual(
+        chatBoundary,
+        'active-reasoning-${viewport.name}.png',
+        viewport.size,
+      );
+    });
+
+    testWidgets(
+      'capture active tool at ${viewport.name} (${viewport.brightness.name})',
+      (tester) async {
+        _configureVisualView(tester, viewport.size);
+        final chatBoundary = await _pumpVisual(
+          tester,
+          home: const StudioShell(),
+          brightness: viewport.brightness,
+          state: responsiveVisualToolState(),
+        );
+        expect(
+          find.byKey(const ValueKey('timeline-current-activity')),
+          findsOneWidget,
+        );
+        expect(
+          find.textContaining('flutter test test/widget_test.dart'),
+          findsOneWidget,
+        );
+        expect(tester.takeException(), isNull);
+        await _verifyVisual(
+          chatBoundary,
+          'active-tool-${viewport.name}.png',
+          viewport.size,
+        );
+      },
+    );
+
     testWidgets('capture agent switcher at ${viewport.name} '
         '(${viewport.brightness.name})', (tester) async {
       _configureVisualView(tester, viewport.size);

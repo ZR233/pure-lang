@@ -1,9 +1,14 @@
 part of 'timeline_view.dart';
 
 class _ToolGroupPart extends StatefulWidget {
-  const _ToolGroupPart({required this.group, super.key});
+  const _ToolGroupPart({
+    required this.group,
+    required this.isCurrentActivity,
+    super.key,
+  });
 
   final TimelineToolGroup group;
+  final bool isCurrentActivity;
 
   @override
   State<_ToolGroupPart> createState() => _ToolGroupPartState();
@@ -19,7 +24,11 @@ class _ToolGroupPartState extends State<_ToolGroupPart> {
   @override
   Widget build(BuildContext context) {
     final group = widget.group;
-    final activityLabel = _toolGroupActivityLabel(context, group);
+    final activityLabel = _toolGroupActivityLabel(
+      context,
+      group,
+      activeOnly: widget.isCurrentActivity,
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -37,47 +46,12 @@ class _ToolGroupPartState extends State<_ToolGroupPart> {
               borderRadius: BorderRadius.circular(StudioRadii.xs),
               onTap: _toggleExpanded,
               excludeFromSemantics: true,
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(minHeight: 32),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 2,
-                    vertical: 6,
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        _toolGroupIcon(group),
-                        size: 16,
-                        color: context.studioInkSoft.withValues(alpha: 0.76),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          activityLabel,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: context.text.bodySmall?.copyWith(
-                            color: context.studioInkSoft,
-                            height: 1.25,
-                          ),
-                        ),
-                      ),
-                      if (group.status != 'completed') ...[
-                        const SizedBox(width: 8),
-                        _StatusPill(label: group.status),
-                      ],
-                      const SizedBox(width: 4),
-                      Icon(
-                        expanded
-                            ? Icons.keyboard_arrow_up_rounded
-                            : Icons.keyboard_arrow_down_rounded,
-                        size: 17,
-                        color: context.studioInkSoft.withValues(alpha: 0.64),
-                      ),
-                    ],
-                  ),
-                ),
+              child: _TimelineActivitySummary(
+                icon: _toolGroupIcon(group),
+                label: activityLabel,
+                isCurrentActivity: widget.isCurrentActivity,
+                isIssue: group.issueCount > 0,
+                expanded: expanded,
               ),
             ),
           ),
@@ -110,14 +84,21 @@ class _ToolGroupPartState extends State<_ToolGroupPart> {
 
   String _toolGroupActivityLabel(
     BuildContext context,
-    TimelineToolGroup group,
-  ) {
-    final visibleItems = group.items.take(3).toList();
+    TimelineToolGroup group, {
+    required bool activeOnly,
+  }) {
+    final candidateItems = activeOnly
+        ? group.items.where(_isActiveToolItem).toList(growable: false)
+        : group.items;
+    final items = candidateItems.isEmpty ? group.items : candidateItems;
+    final visibleItems = items.take(3).toList();
     final labels = [
       for (final item in visibleItems)
-        _toolTitle(context, item.name, item.status),
+        activeOnly
+            ? _activeToolTitle(context, item)
+            : _toolTitle(context, item.name, item.status),
     ];
-    final hiddenCount = group.count - visibleItems.length;
+    final hiddenCount = items.length - visibleItems.length;
     if (hiddenCount > 0) {
       labels.add(context.l10n.timelineToolGroupSummary(hiddenCount));
     }
@@ -129,6 +110,24 @@ class _ToolGroupPartState extends State<_ToolGroupPart> {
         ? context.l10n.timelineToolGroupTitle
         : labels.join(' · ');
   }
+}
+
+bool _isActiveToolItem(TimelineToolGroupItem item) {
+  return const {
+    'awaitingApproval',
+    'started',
+    'streaming',
+    'approved',
+    'running',
+  }.contains(item.status);
+}
+
+String _activeToolTitle(BuildContext context, TimelineToolGroupItem item) {
+  final title = _toolTitle(context, item.name, item.status);
+  final detail = [item.summary, item.tool?.workingDirectory]
+      .whereType<String>()
+      .firstWhere((value) => value.trim().isNotEmpty, orElse: () => '');
+  return detail.isEmpty ? title : '$title — $detail';
 }
 
 IconData _toolGroupIcon(TimelineToolGroup group) {

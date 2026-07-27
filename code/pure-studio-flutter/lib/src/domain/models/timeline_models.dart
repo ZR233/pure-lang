@@ -165,6 +165,86 @@ class TimelineToolGroup {
   ]);
 }
 
+class TimelineReasoningGroup {
+  const TimelineReasoningGroup({
+    required this.id,
+    required this.sessionId,
+    required this.messageId,
+    required this.turnId,
+    required this.parts,
+  });
+
+  final String id;
+  final String sessionId;
+  final String messageId;
+  final String turnId;
+  final List<TimelinePart> parts;
+
+  int get count => parts.length;
+
+  int get order => parts.isEmpty ? 0 : parts.first.order;
+
+  int get sequence => parts.fold(0, (value, part) {
+    return part.sequence > value ? part.sequence : value;
+  });
+
+  DateTime? get createdAt => parts.isEmpty ? null : parts.first.createdAt;
+
+  bool get isActive =>
+      parts.any((part) => !_isTerminalTimelineStatus(part.status));
+
+  String get status {
+    for (final part in parts.reversed) {
+      if (!_isTerminalTimelineStatus(part.status)) {
+        return part.status;
+      }
+    }
+    for (final status in const [
+      'failed',
+      'interrupted',
+      'cancelled',
+      'denied',
+      'budgetLimited',
+      'completed',
+    ]) {
+      if (parts.any((part) => part.status == status)) {
+        return status;
+      }
+    }
+    return parts.isEmpty ? 'completed' : parts.last.status;
+  }
+
+  List<String> get summaries => parts
+      .map(_reasoningPartSummary)
+      .whereType<String>()
+      .toList(growable: false);
+
+  String? get latestSummary {
+    for (final part in parts.reversed) {
+      final summary = _reasoningPartSummary(part);
+      if (summary != null) {
+        return summary;
+      }
+    }
+    return null;
+  }
+
+  String get details => parts
+      .map((part) => part.text.trim())
+      .where((text) => text.isNotEmpty)
+      .join('\n\n');
+
+  int get renderVersion => Object.hashAll([
+    id,
+    sessionId,
+    messageId,
+    turnId,
+    status,
+    count,
+    for (final part in parts) _timelineRowRenderVersion(part),
+  ]);
+}
+
 class TimelineAgentPart {
   const TimelineAgentPart({
     required this.id,
@@ -424,6 +504,51 @@ String? _commandSummary(String arguments) {
       ? path!
       : query;
   return value == null || value.isEmpty ? null : value;
+}
+
+String? _reasoningPartSummary(TimelinePart part) {
+  final title = _plainReasoningSummary(part.title ?? '');
+  if (title != null) {
+    return title;
+  }
+  final lines = part.text.replaceAll('\r\n', '\n').split('\n');
+  for (final line in lines) {
+    final summary = _plainReasoningSummary(line);
+    if (summary != null) {
+      return summary;
+    }
+  }
+  return null;
+}
+
+String? _plainReasoningSummary(String value) {
+  var summary = value.trim();
+  if (summary.isEmpty || summary == '<!-- -->') {
+    return null;
+  }
+  if ((summary.startsWith('**') && summary.endsWith('**')) ||
+      (summary.startsWith('__') && summary.endsWith('__'))) {
+    summary = summary.substring(2, summary.length - 2);
+  }
+  summary = summary
+      .replaceFirst(RegExp(r'^#{1,6}\s+'), '')
+      .replaceFirst(RegExp(r'^>\s*'), '')
+      .replaceFirst(RegExp(r'^(?:[-+*]|\d+[.)])\s+'), '')
+      .replaceAll(RegExp(r'[*_`]'), '')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+  return summary.isEmpty ? null : summary;
+}
+
+bool _isTerminalTimelineStatus(String status) {
+  return const {
+    'completed',
+    'failed',
+    'interrupted',
+    'cancelled',
+    'denied',
+    'budgetLimited',
+  }.contains(status);
 }
 
 Map<String, Object?> _tryDecodeMap(String value) {

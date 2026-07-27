@@ -14,6 +14,7 @@ class TimelineRow {
     this.turnId,
     this.part,
     this.toolGroup,
+    this.reasoningGroup,
     this.agentEvent,
   });
 
@@ -76,6 +77,25 @@ class TimelineRow {
     );
   }
 
+  factory TimelineRow.reasoningGroup({
+    required TimelineMessage message,
+    required TimelineReasoningGroup group,
+  }) {
+    return TimelineRow._(
+      id: group.id,
+      sessionId: group.sessionId,
+      messageId: message.id,
+      role: message.role,
+      type: TimelineRowType.reasoningSummary,
+      createdAt: group.createdAt ?? message.createdAt,
+      order: group.order,
+      sequence: group.sequence == 0 ? message.sequence : group.sequence,
+      renderVersion: group.renderVersion,
+      turnId: group.turnId,
+      reasoningGroup: group,
+    );
+  }
+
   final String id;
   final String sessionId;
   final String? messageId;
@@ -88,6 +108,7 @@ class TimelineRow {
   final String? turnId;
   final TimelinePart? part;
   final TimelineToolGroup? toolGroup;
+  final TimelineReasoningGroup? reasoningGroup;
   final TimelineAgentEvent? agentEvent;
 }
 
@@ -129,6 +150,7 @@ List<TimelineRow> _timelineRowsForMessage(
   final sortedParts = [...?parts]..sort(_compareParts);
   final rows = <TimelineRow>[];
   final adjacentTools = <TimelinePart>[];
+  final adjacentReasoning = <TimelinePart>[];
 
   void flushToolGroup() {
     if (adjacentTools.isEmpty) {
@@ -152,12 +174,39 @@ List<TimelineRow> _timelineRowsForMessage(
     adjacentTools.clear();
   }
 
+  void flushReasoningGroup() {
+    if (adjacentReasoning.isEmpty) {
+      return;
+    }
+    final first = adjacentReasoning.first;
+    rows.add(
+      TimelineRow.reasoningGroup(
+        message: message,
+        group: TimelineReasoningGroup(
+          id: _adjacentReasoningGroupId(message, first),
+          sessionId: message.sessionId,
+          messageId: message.id,
+          turnId: first.turnId.isEmpty ? message.turnId : first.turnId,
+          parts: List.unmodifiable(adjacentReasoning),
+        ),
+      ),
+    );
+    adjacentReasoning.clear();
+  }
+
   for (final part in sortedParts) {
     if (message.role != 'user' && part.type == TimelinePartType.tool) {
+      flushReasoningGroup();
       adjacentTools.add(part);
       continue;
     }
+    if (message.role != 'user' && part.type == TimelinePartType.reasoning) {
+      flushToolGroup();
+      adjacentReasoning.add(part);
+      continue;
+    }
     flushToolGroup();
+    flushReasoningGroup();
     rows.add(
       TimelineRow.messagePart(
         id: '${message.id}:${part.id}',
@@ -172,11 +221,16 @@ List<TimelineRow> _timelineRowsForMessage(
     );
   }
   flushToolGroup();
+  flushReasoningGroup();
   return rows;
 }
 
 String _adjacentToolGroupId(TimelineMessage message, TimelinePart part) {
   return 'tool-group:${message.sessionId}:${message.id}:${part.id}';
+}
+
+String _adjacentReasoningGroupId(TimelineMessage message, TimelinePart part) {
+  return 'reasoning-group:${message.sessionId}:${message.id}:${part.id}';
 }
 
 String _toolGroupTurnId(TimelineMessage message, TimelinePart part) {

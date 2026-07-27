@@ -24,27 +24,36 @@ final _reasoningExpandedProvider =
 
 @immutable
 class _ReasoningExpansionKey {
-  const _ReasoningExpansionKey({required this.sessionId, required this.partId});
+  const _ReasoningExpansionKey({
+    required this.sessionId,
+    required this.groupId,
+  });
 
   final String sessionId;
-  final String partId;
+  final String groupId;
 
   @override
   bool operator ==(Object other) {
     return other is _ReasoningExpansionKey &&
         other.sessionId == sessionId &&
-        other.partId == partId;
+        other.groupId == groupId;
   }
 
   @override
-  int get hashCode => Object.hash(sessionId, partId);
+  int get hashCode => Object.hash(sessionId, groupId);
 }
 
 class TimelineView extends StatefulWidget {
-  const TimelineView({required this.sessionId, required this.rows, super.key});
+  const TimelineView({
+    required this.sessionId,
+    required this.rows,
+    required this.turnPhase,
+    super.key,
+  });
 
   final String? sessionId;
   final List<TimelineRow> rows;
+  final TurnPhase turnPhase;
 
   @override
   State<TimelineView> createState() => _TimelineViewState();
@@ -68,7 +77,7 @@ class _TimelineViewState extends State<TimelineView> {
   @override
   void initState() {
     super.initState();
-    _contentVersion = _timelineContentVersion(widget.rows);
+    _contentVersion = _timelineContentVersion(widget.rows, widget.turnPhase);
     _restoreSessionState();
     _controller.addListener(_handleScrollPositionChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -85,7 +94,7 @@ class _TimelineViewState extends State<TimelineView> {
     if (sessionChanged) {
       _saveSessionState(oldWidget.sessionId);
       _restoreSessionState();
-      _contentVersion = _timelineContentVersion(widget.rows);
+      _contentVersion = _timelineContentVersion(widget.rows, widget.turnPhase);
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
           _restorePendingPosition();
@@ -94,12 +103,15 @@ class _TimelineViewState extends State<TimelineView> {
       return;
     }
 
-    final nextContentVersion = _timelineContentVersion(widget.rows);
+    final nextContentVersion = _timelineContentVersion(
+      widget.rows,
+      widget.turnPhase,
+    );
     if (nextContentVersion == _contentVersion) {
       return;
     }
     final wasNearBottom = _isNearBottom();
-    final appendedMessage = widget.rows.length > oldWidget.rows.length;
+    final hasNewEvent = _hasNewTimelineEvent(oldWidget, widget);
     _contentVersion = nextContentVersion;
 
     if (!_detachedByUser && (_followingBottom || wasNearBottom)) {
@@ -107,14 +119,14 @@ class _TimelineViewState extends State<TimelineView> {
       _detachedByUser = false;
       _pendingNewEvents = 0;
       _scheduleBottomScroll(
-        appendedMessage
-            ? _BottomScrollIntent.animate
-            : _BottomScrollIntent.jump,
+        hasNewEvent ? _BottomScrollIntent.animate : _BottomScrollIntent.jump,
       );
     } else {
       _followingBottom = false;
       _detachedByUser = true;
-      _pendingNewEvents += 1;
+      if (hasNewEvent) {
+        _pendingNewEvents += 1;
+      }
     }
   }
 
@@ -128,10 +140,22 @@ class _TimelineViewState extends State<TimelineView> {
 
   @override
   Widget build(BuildContext context) {
-    if (widget.rows.isEmpty) {
+    final currentActivityRow = _currentActivityRow(
+      widget.rows,
+      widget.turnPhase,
+    );
+    final fallbackPhase =
+        currentActivityRow == null && _isActiveTurnPhase(widget.turnPhase)
+        ? widget.turnPhase
+        : null;
+    if (widget.rows.isEmpty && fallbackPhase == null) {
       return const _EmptyTimeline();
     }
-    final blocks = _timelineDisplayBlocks(widget.rows);
+    final blocks = _timelineDisplayBlocks(
+      widget.rows,
+      currentActivityRowId: currentActivityRow?.id,
+    );
+    final fallbackActivityCount = fallbackPhase == null ? 0 : 1;
     return Stack(
       children: [
         Align(
@@ -144,10 +168,14 @@ class _TimelineViewState extends State<TimelineView> {
               key: const ValueKey('timeline-scrollable'),
               controller: _controller,
               padding: const EdgeInsets.fromLTRB(24, 28, 24, 38),
-              itemCount: blocks.length + 1,
+              itemCount: blocks.length + fallbackActivityCount + 1,
               findChildIndexCallback: (key) {
                 if (key is! ValueKey<String>) {
                   return null;
+                }
+                if (fallbackPhase != null &&
+                    key.value == _phaseActivityId(widget.sessionId)) {
+                  return blocks.length;
                 }
                 final index = blocks.indexWhere(
                   (block) => block.id == key.value,
@@ -155,7 +183,13 @@ class _TimelineViewState extends State<TimelineView> {
                 return index == -1 ? null : index;
               },
               itemBuilder: (context, index) {
-                if (index == blocks.length) {
+                if (fallbackPhase != null && index == blocks.length) {
+                  return _TimelinePhaseActivityBlock(
+                    key: ValueKey(_phaseActivityId(widget.sessionId)),
+                    phase: fallbackPhase,
+                  );
+                }
+                if (index == blocks.length + fallbackActivityCount) {
                   return const SizedBox(height: 24);
                 }
                 final block = blocks[index];
@@ -167,6 +201,7 @@ class _TimelineViewState extends State<TimelineView> {
                     : _TimelineRowBlock(
                         key: ValueKey(block.id),
                         row: block.rows.single,
+                        isCurrentActivity: block.isCurrentActivity,
                       );
               },
             ),
@@ -369,15 +404,20 @@ class _TimelineScrollSnapshot {
   final int pendingNewEvents;
 }
 
-int _timelineContentVersion(List<TimelineRow> rows) {
+int _timelineContentVersion(List<TimelineRow> rows, TurnPhase turnPhase) {
   return Object.hashAll([
+    turnPhase,
     rows.length,
     for (final row in rows) ...[row.id, row.role, row.type, row.renderVersion],
   ]);
 }
 
 class _TimelineDisplayBlock {
-  const _TimelineDisplayBlock._(this.rows, {required this.id});
+  const _TimelineDisplayBlock._(
+    this.rows, {
+    required this.id,
+    this.isCurrentActivity = false,
+  });
 
   factory _TimelineDisplayBlock.single(TimelineRow row) {
     return _TimelineDisplayBlock._([row], id: row.id);
@@ -392,11 +432,19 @@ class _TimelineDisplayBlock {
 
   final List<TimelineRow> rows;
   final String id;
+  final bool isCurrentActivity;
 
   bool get isRuntimeProgressGroup => rows.length > 1;
+
+  _TimelineDisplayBlock asCurrentActivity() {
+    return _TimelineDisplayBlock._(rows, id: id, isCurrentActivity: true);
+  }
 }
 
-List<_TimelineDisplayBlock> _timelineDisplayBlocks(List<TimelineRow> rows) {
+List<_TimelineDisplayBlock> _timelineDisplayBlocks(
+  List<TimelineRow> rows, {
+  String? currentActivityRowId,
+}) {
   final blocks = <_TimelineDisplayBlock>[];
   final pendingProgress = <TimelineRow>[];
 
@@ -426,6 +474,16 @@ List<_TimelineDisplayBlock> _timelineDisplayBlocks(List<TimelineRow> rows) {
   }
   flushProgress();
 
+  if (currentActivityRowId != null) {
+    final activityIndex = blocks.indexWhere(
+      (block) => block.rows.any((row) => row.id == currentActivityRowId),
+    );
+    if (activityIndex != -1) {
+      final activity = blocks.removeAt(activityIndex);
+      blocks.add(activity.asCurrentActivity());
+    }
+  }
+
   return blocks;
 }
 
@@ -437,4 +495,66 @@ bool _sameRuntimeProgressGroup(TimelineRow left, TimelineRow right) {
   return left.sessionId == right.sessionId &&
       left.messageId == right.messageId &&
       left.turnId == right.turnId;
+}
+
+TimelineRow? _currentActivityRow(List<TimelineRow> rows, TurnPhase turnPhase) {
+  if (!_isActiveTurnPhase(turnPhase)) {
+    return null;
+  }
+  TimelineRow? activeTool;
+  TimelineRow? activeReasoning;
+  for (final row in rows) {
+    final toolGroup = row.toolGroup;
+    if (toolGroup != null &&
+        const {'awaitingApproval', 'running'}.contains(toolGroup.status)) {
+      activeTool = row;
+    }
+    if (row.reasoningGroup?.isActive == true) {
+      activeReasoning = row;
+    }
+  }
+  return activeTool ?? activeReasoning;
+}
+
+bool _isActiveTurnPhase(TurnPhase phase) {
+  return switch (phase) {
+    TurnPhase.queued ||
+    TurnPhase.contextLoading ||
+    TurnPhase.waitingForModel ||
+    TurnPhase.streaming ||
+    TurnPhase.waitingForInteraction ||
+    TurnPhase.runningTool => true,
+    TurnPhase.idle ||
+    TurnPhase.completed ||
+    TurnPhase.failed ||
+    TurnPhase.cancelled => false,
+  };
+}
+
+bool _hasNewTimelineEvent(TimelineView oldWidget, TimelineView newWidget) {
+  final oldIds = oldWidget.rows.map((row) => row.id).toSet();
+  if (newWidget.rows.any((row) => !oldIds.contains(row.id))) {
+    return true;
+  }
+  final previousActivity = _timelineActivityIdentity(
+    oldWidget.rows,
+    oldWidget.turnPhase,
+  );
+  final nextActivity = _timelineActivityIdentity(
+    newWidget.rows,
+    newWidget.turnPhase,
+  );
+  return nextActivity != null && nextActivity != previousActivity;
+}
+
+String? _timelineActivityIdentity(List<TimelineRow> rows, TurnPhase turnPhase) {
+  final row = _currentActivityRow(rows, turnPhase);
+  if (row != null) {
+    return row.id;
+  }
+  return _isActiveTurnPhase(turnPhase) ? 'phase-activity' : null;
+}
+
+String _phaseActivityId(String? sessionId) {
+  return 'phase-activity:${sessionId ?? 'none'}';
 }
