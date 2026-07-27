@@ -12,7 +12,8 @@ use pl_protocol::{
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
-use super::{OpenAiProvider, PureOpenAiConfig, get_auth_token, openai_error_to_pure};
+use super::provider_error::openai_error_to_pure;
+use super::{OpenAiProvider, PureOpenAiConfig, get_auth_token};
 use crate::protocol::openai::sse;
 use crate::protocol::openai::{OpenAiProtocol, OpenAiRequestBody};
 use crate::provider_info::ProviderWireProtocol;

@@ -3,7 +3,6 @@ use std::time::Duration;
 
 use async_openai::Client;
 use async_openai::config::Config;
-use async_openai::error::OpenAIError;
 use async_openai::types::stream::StreamResponse;
 use pl_protocol::{PureError, Result};
 use pl_trace::AgentEventSender;
@@ -21,7 +20,9 @@ use crate::stream::{
     CompletionEventStream, collect_completion_event_stream, decode_openai_event_stream,
     decode_provider_stream,
 };
-use crate::transport_policy::{RESPONSES_WEBSOCKET_MAX_RETRIES, responses_websocket_retry_delay};
+use crate::transport_policy::{
+    OPENAI_HTTP_MAX_RETRIES, RESPONSES_WEBSOCKET_MAX_RETRIES, model_request_retry_delay,
+};
 
 #[derive(Debug)]
 pub struct OpenAiProvider {
@@ -33,7 +34,10 @@ pub struct OpenAiProvider {
 }
 
 mod compaction;
+mod provider_error;
 mod responses_websocket;
+
+use provider_error::openai_error_to_pure;
 
 impl OpenAiProvider {
     pub(crate) fn new(info: ProviderInfo, models: Vec<ModelInfo>) -> Result<Self> {
@@ -82,12 +86,12 @@ impl OpenAiProvider {
         request: CompletionRequest,
         event_tx: AgentEventSender,
     ) -> Result<CompletionResponse> {
-        let retries_enabled = self.info.protocol == ProviderWireProtocol::Responses
+        let websocket_retries_enabled = self.info.protocol == ProviderWireProtocol::Responses
             && self.info.connection_mode == ProviderConnectionMode::WebSocket;
-        let max_retries = if retries_enabled {
+        let max_retries = if websocket_retries_enabled {
             RESPONSES_WEBSOCKET_MAX_RETRIES
         } else {
-            0
+            OPENAI_HTTP_MAX_RETRIES
         };
         let original_trace = request.trace.clone();
         let mut retry_number = 0_u32;
@@ -101,31 +105,47 @@ impl OpenAiProvider {
                     .as_ref()
                     .map(|trace| trace.inference_id.as_str())
                     .unwrap_or(trace.inference_id.as_str());
-                trace.inference_id = format!("{original_inference_id}-ws-retry-{retry_number}");
+                let transport = if websocket_retries_enabled {
+                    "ws"
+                } else {
+                    "http"
+                };
+                trace.inference_id =
+                    format!("{original_inference_id}-{transport}-retry-{retry_number}");
             }
             let trace = attempt_request.trace.clone();
-            let result = match self.stream_events(attempt_request).await {
-                Ok(event_stream) => {
-                    collect_completion_event_stream(event_stream, &event_tx, trace).await
-                }
-                Err(error) => Err(error),
+            let (result, retry_allowed) = match self.stream_events(attempt_request).await {
+                Ok(event_stream) => (
+                    collect_completion_event_stream(event_stream, &event_tx, trace).await,
+                    websocket_retries_enabled,
+                ),
+                Err(error) => (Err(error), true),
             };
             let Err(error) = result else {
                 return result;
             };
-            if !error.is_transient_model_transport() || retry_number >= max_retries {
+            if !retry_allowed
+                || !error.is_transient_model_transport()
+                || retry_number >= max_retries
+            {
                 return Err(error);
             }
 
             retry_number += 1;
-            let delay = responses_websocket_retry_delay(retry_number, error.retry_after_ms());
+            let delay = model_request_retry_delay(retry_number, error.retry_after_ms());
+            let transport = if websocket_retries_enabled {
+                "WebSocket"
+            } else {
+                "HTTP"
+            };
             tracing::warn!(
                 provider = %self.info.name,
+                transport,
                 retry_number,
                 max_retries,
                 delay_ms = delay.as_millis(),
                 error = %error,
-                "Responses WebSocket 传输中断，将在同一 WS 模式下重放完整模型请求"
+                "模型请求遇到瞬态 provider 错误，将在同一连接模式下重放完整请求"
             );
             tokio::time::sleep(delay).await;
         }
@@ -346,57 +366,6 @@ impl Config for PureOpenAiConfig {
     fn api_key(&self) -> &SecretString {
         &self.api_key
     }
-}
-
-fn openai_error_to_pure(error: OpenAIError) -> PureError {
-    match error {
-        OpenAIError::ApiError(api_error) => {
-            PureError::LlmError(redact_secret_like_values(&format!("API error {api_error}")))
-        }
-        OpenAIError::Reqwest(error) => {
-            PureError::HttpError(redact_secret_like_values(&error.to_string()))
-        }
-        OpenAIError::JSONDeserialize(error, content) => {
-            PureError::HttpError(redact_secret_like_values(&format!("{error}: {content}")))
-        }
-        OpenAIError::StreamError(error) => {
-            PureError::HttpError(redact_secret_like_values(&error.to_string()))
-        }
-        OpenAIError::InvalidArgument(message) => PureError::ConfigError(message),
-        OpenAIError::FileSaveError(message) | OpenAIError::FileReadError(message) => {
-            PureError::Io(std::io::Error::other(message))
-        }
-    }
-}
-
-fn redact_secret_like_values(input: &str) -> String {
-    input
-        .split_whitespace()
-        .map(redact_secret_like_token)
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-fn redact_secret_like_token(token: &str) -> String {
-    let trimmed = token.trim_matches(|ch: char| {
-        matches!(
-            ch,
-            '.' | ',' | ';' | ':' | ')' | '(' | '"' | '\'' | '[' | ']' | '{' | '}'
-        )
-    });
-    if !looks_like_secret_token(trimmed) {
-        return token.to_string();
-    }
-    token.replacen(trimmed, "[REDACTED_API_KEY]", 1)
-}
-
-fn looks_like_secret_token(token: &str) -> bool {
-    let lower = token.to_ascii_lowercase();
-    (lower.starts_with("sk-") || lower.starts_with("sk_"))
-        && token.len() >= 12
-        && token
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '*' | '.'))
 }
 
 #[cfg(test)]
