@@ -7,8 +7,14 @@ import 'interaction_payload.dart';
 import 'interaction_widgets.dart';
 
 class ToolApprovalDock extends ConsumerStatefulWidget {
-  const ToolApprovalDock({required this.payload, this.trailing, super.key});
+  const ToolApprovalDock({
+    required this.sessionId,
+    required this.payload,
+    this.trailing,
+    super.key,
+  });
 
+  final String sessionId;
   final InteractionPayloadSnapshot payload;
   final Widget? trailing;
 
@@ -93,10 +99,12 @@ class _ToolApprovalDockState extends ConsumerState<ToolApprovalDock> {
 
   void _resolve(String decision) {
     final reason = _reasonController.text.trim();
-    ref.read(studioControllerProvider.notifier).resolveActiveInteraction({
-      'type': 'toolApproval',
-      'decision': decision,
-      if (reason.isNotEmpty) 'reason': reason,
-    });
+    ref
+        .read(studioControllerProvider.notifier)
+        .resolveActiveInteraction(widget.sessionId, {
+          'type': 'toolApproval',
+          'decision': decision,
+          if (reason.isNotEmpty) 'reason': reason,
+        });
   }
 }

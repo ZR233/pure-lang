@@ -13,7 +13,7 @@ void registerAgentWorkspaceTests() {
 
       await container.read(studioControllerProvider.future);
       final controller = container.read(studioControllerProvider.notifier);
-      controller.updateComposer('Planner draft');
+      controller.updateComposer('session-1', 'Planner draft');
 
       await controller.selectAgentSession('agent-session-1');
       var state = container.read(studioControllerProvider).requireValue;
@@ -21,6 +21,88 @@ void registerAgentWorkspaceTests() {
       expect(state.composerText, isEmpty);
       expect(state.runtime.model, isEmpty);
       expect(state.turnPhase, TurnPhase.idle);
+      expect(
+        state.selectedAgentWorkspace?.syncState,
+        AgentWorkspaceSyncState.loading,
+      );
+      expect(state.selectedTimelineRows, isEmpty);
+
+      final timestamp = DateTime.fromMillisecondsSinceEpoch(2000);
+      final childSnapshot = initial.copyWith(
+        selectedSessionId: 'agent-session-1',
+        selectedRootSessionId: 'session-1',
+        runtimesBySession: {
+          'agent-session-1': const SessionRuntimeView(
+            model: 'reviewer/model',
+            contextTokens: 48,
+            contextWindow: 1000,
+            totalTokens: 72,
+            costLabel: '',
+            activeSkills: ['review-skill'],
+            activeMcpServers: ['review-mcp'],
+            activeLspServers: [],
+            agentCount: 0,
+          ),
+        },
+        messagesBySession: {
+          ...initial.messagesBySession,
+          'agent-session-1': [
+            TimelineMessage(
+              id: 'reviewer-message',
+              sessionId: 'agent-session-1',
+              role: 'assistant',
+              createdAt: timestamp,
+            ),
+          ],
+        },
+        partSnapshotsBySession: {
+          ...initial.partSnapshotsBySession,
+          'agent-session-1': {
+            'reviewer-part': TimelinePartSnapshot(
+              id: 'reviewer-part',
+              messageId: 'reviewer-message',
+              sessionId: 'agent-session-1',
+              turnId: 'reviewer-turn',
+              type: TimelinePartType.text,
+              order: 0,
+              revision: 0,
+              text: 'Reviewer snapshot',
+              status: 'completed',
+              createdAt: timestamp,
+              updatedAt: timestamp,
+            ),
+          },
+        },
+      );
+      api.emitSessionFrame(_sessionSnapshotFrame(childSnapshot));
+      await pumpEventQueue();
+
+      state = container.read(studioControllerProvider).requireValue;
+      final workspace = state.selectedAgentWorkspace!;
+      expect(workspace.syncState, AgentWorkspaceSyncState.ready);
+      expect(workspace.runtime.model, 'reviewer/model');
+      expect(workspace.runtime.activeMcpServers, ['review-mcp']);
+      expect(workspace.timelineRows, isNotEmpty);
+      expect(state.selectedMessages.single.sessionId, 'agent-session-1');
+
+      api.emitSession(
+        _interactionChangedEvent(
+          sessionId: 'agent-session-1',
+          interaction: const PendingInteraction(
+            id: 'reviewer-input',
+            sessionId: 'agent-session-1',
+            kind: InteractionKind.userInput,
+            title: 'Reviewer input',
+            body: 'Choose an option',
+          ),
+        ),
+      );
+      await pumpEventQueue();
+      state = container.read(studioControllerProvider).requireValue;
+      expect(
+        state.selectedAgentWorkspace?.activeInteraction?.id,
+        'reviewer-input',
+      );
 
       await controller.selectAgentSession('session-1');
       state = container.read(studioControllerProvider).requireValue;
@@ -29,7 +111,7 @@ void registerAgentWorkspaceTests() {
     },
   );
 
-  test('executor workspace keeps the planner timeline and todo snapshot', () {
+  test('executor workspace uses its own timeline and todo snapshot', () {
     final initial = _agentWorkspaceState(withTodo: true);
     final root = initial.selectedRootSession!;
     final executor = initial.sessions
@@ -55,12 +137,33 @@ void registerAgentWorkspaceTests() {
         root.id: [rootMessage],
         executor.id: [executorMessage],
       },
+      agentTimelineEventsBySession: {
+        ...initial.agentTimelineEventsBySession,
+        executor.id: {
+          'executor-todo': TimelineAgentEvent(
+            eventId: 'executor-todo',
+            sessionId: executor.id,
+            sequence: 2,
+            createdAt: DateTime.fromMillisecondsSinceEpoch(3000),
+            payload: const TimelineTodoListUpdate(
+              callId: 'executor-todo-call',
+              explanation: 'Executor checklist',
+              items: [
+                TimelineTodoItem(
+                  step: 'Implement the plan',
+                  status: 'inProgress',
+                ),
+              ],
+            ),
+          ),
+        },
+      },
     );
 
     expect(state.selectedAgentSessionId, executor.id);
-    expect(state.selectedTimelineSessionId, root.id);
-    expect(state.selectedMessages, [rootMessage]);
-    expect(state.selectedTodoList?.explanation, 'Agent workspace checklist');
+    expect(state.selectedTimelineSessionId, executor.id);
+    expect(state.selectedMessages, [executorMessage]);
+    expect(state.selectedTodoList?.explanation, 'Executor checklist');
   });
 
   test('non-executor agents keep their own timeline', () {
@@ -141,11 +244,41 @@ void registerAgentWorkspaceTests() {
           },
         ),
       );
+      api.emitSession(
+        _sessionRuntimeChangedEvent(
+          sessionId: 'session-1',
+          runtime: const SessionRuntimeView(
+            model: 'late/root-model',
+            contextTokens: 900,
+            contextWindow: 1000,
+            totalTokens: 900,
+            costLabel: '',
+            activeSkills: ['late-root-skill'],
+            activeMcpServers: [],
+            activeLspServers: [],
+            agentCount: 0,
+          ),
+        ),
+      );
+      api.emitSession(
+        _interactionChangedEvent(
+          sessionId: 'session-1',
+          interaction: const PendingInteraction(
+            id: 'late-root-interaction',
+            sessionId: 'session-1',
+            kind: InteractionKind.toolApproval,
+            title: 'Late approval',
+            body: 'Ignore this frame',
+          ),
+        ),
+      );
       await pumpEventQueue();
 
       final state = container.read(studioControllerProvider).requireValue;
       expect(state.selectedAgentSessionId, 'agent-session-1');
       expect(state.selectedMessages, isEmpty);
+      expect(state.runtime.model, isEmpty);
+      expect(state.activeInteraction, isNull);
       expect(
         state.messagesBySession['session-1']?.any(
               (message) => message.id == 'late-root-message',
@@ -163,7 +296,7 @@ void registerAgentWorkspaceTests() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    final api = _FakeStudioApi(_agentWorkspaceState());
+    final api = _FakeStudioApi(_agentWorkspaceState(cacheChild: true));
 
     await tester.pumpWidget(
       ProviderScope(
@@ -190,6 +323,9 @@ void registerAgentWorkspaceTests() {
       find.text('This agent session is driven by the runtime'),
       findsOneWidget,
     );
+    expect(find.text('reviewer/model'), findsOneWidget);
+    expect(find.byTooltip('Planner model'), findsNothing);
+    expect(find.byTooltip('Reasoning effort'), findsNothing);
     expect(
       find.byWidgetPredicate(
         (widget) =>
@@ -291,9 +427,57 @@ void registerAgentWorkspaceTests() {
     expect(tester.getSize(find.byType(TimelineView)).width, greaterThan(500));
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'agent workspace previews isolate root child and loading states',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      await tester.pumpWidget(agentWorkspaceRootPreview());
+      await tester.pumpAndSettle();
+      expect(find.text('Refine the implementation plan'), findsOneWidget);
+      expect(
+        find.text(
+          'Planner owns this root workspace and its editable composer.',
+        ),
+        findsOneWidget,
+      );
+
+      await tester.pumpWidget(agentWorkspaceChildPreview());
+      await tester.pumpAndSettle();
+      expect(find.text('reviewer/model'), findsOneWidget);
+      expect(
+        find.text('This agent session is driven by the runtime'),
+        findsOneWidget,
+      );
+      expect(
+        find.text('Reviewer is checking the workspace boundary.'),
+        findsOneWidget,
+      );
+
+      await tester.pumpWidget(agentWorkspaceLoadingPreview());
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey('agent-workspace-loading')),
+        findsOneWidget,
+      );
+      expect(find.text('reviewer/model'), findsNothing);
+      expect(
+        find.text('Reviewer is checking the workspace boundary.'),
+        findsNothing,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
 }
 
-StudioState _agentWorkspaceState({bool withTodo = false}) {
+StudioState _agentWorkspaceState({
+  bool withTodo = false,
+  bool cacheChild = false,
+}) {
   final base = _emptyState();
   final timestamp = DateTime.fromMillisecondsSinceEpoch(1000);
   final root = base.sessions.single.copyWith(
@@ -321,17 +505,37 @@ StudioState _agentWorkspaceState({bool withTodo = false}) {
   return base.copyWith(
     sessions: [root, child],
     selectedRootSessionId: root.id,
-    runtime: const SessionRuntimeView(
-      model: 'planner/model',
-      contextTokens: 120,
-      contextWindow: 1000,
-      totalTokens: 180,
-      costLabel: '',
-      activeSkills: ['session-skill'],
-      activeMcpServers: [],
-      activeLspServers: [],
-      agentCount: 1,
-    ),
+    runtimesBySession: {
+      root.id: const SessionRuntimeView(
+        model: 'planner/model',
+        contextTokens: 120,
+        contextWindow: 1000,
+        totalTokens: 180,
+        costLabel: '',
+        activeSkills: ['session-skill'],
+        activeMcpServers: [],
+        activeLspServers: [],
+        agentCount: 1,
+      ),
+      if (cacheChild)
+        child.id: const SessionRuntimeView(
+          model: 'reviewer/model',
+          contextTokens: 42,
+          contextWindow: 1000,
+          totalTokens: 64,
+          costLabel: '',
+          activeSkills: ['review-skill'],
+          activeMcpServers: [],
+          activeLspServers: [],
+          agentCount: 0,
+        ),
+    },
+    turnPhasesBySession: cacheChild
+        ? {child.id: TurnPhase.waitingForModel}
+        : const {},
+    workspaceSyncBySession: cacheChild
+        ? {child.id: AgentWorkspaceSyncState.ready}
+        : const {},
     agentTimelineEventsBySession: withTodo
         ? {
             root.id: {

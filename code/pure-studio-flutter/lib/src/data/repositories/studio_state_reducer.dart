@@ -35,25 +35,41 @@ StudioReduceResult reduceStudioEvent(
       delta,
     ),
     TurnChangedPayload(:final turn) => StudioReduceResult(
-      current.copyWith(turnPhase: _turnPhase(turn)),
+      _withTurnPhase(
+        current,
+        studioEventSessionId(event) ?? turn.sessionId,
+        _turnPhase(turn),
+      ),
     ),
     InteractionChangedPayload(:final interaction, :final status) =>
       StudioReduceResult(_upsertInteraction(current, interaction, status)),
-    SessionRuntimeChangedPayload(:final runtime, :final agentCount) =>
+    SessionRuntimeChangedPayload(
+      :final runtime,
+      :final agentCount,
+      :final sessionId,
+    ) =>
       StudioReduceResult(
-        current.copyWith(
-          runtime: runtime.copyWith(
-            agentCount: agentCount ?? current.runtime.agentCount,
-            task: current.runtime.task,
+        _withRuntime(
+          current,
+          sessionId,
+          runtime.copyWith(
+            agentCount:
+                agentCount ?? _runtimeFor(current, sessionId).agentCount,
+            task: _runtimeFor(current, sessionId).task,
           ),
         ),
       ),
     SessionListChangedPayload() => StudioReduceResult(
       _mergeSessionListChanged(current, event),
     ),
-    SessionTaskChangedPayload(:final task) => StudioReduceResult(
-      current.copyWith(runtime: current.runtime.copyWith(task: task)),
-    ),
+    SessionTaskChangedPayload(:final sessionId, :final task) =>
+      StudioReduceResult(
+        _withRuntime(
+          current,
+          sessionId,
+          _runtimeFor(current, sessionId).copyWith(task: task),
+        ),
+      ),
     AgentChangedPayload(:final agent) => StudioReduceResult(
       _applyAgentChanged(current, agent),
     ),
@@ -61,15 +77,34 @@ StudioReduceResult reduceStudioEvent(
       _upsertAgentTimelineEvent(current, event),
     ),
     SkillActivatedPayload(:final name) => StudioReduceResult(
-      _applySkillActivation(current, name),
+      _applySkillActivation(
+        current,
+        studioEventSessionId(event) ?? current.selectedSessionId,
+        name,
+      ),
     ),
     McpHealthChangedPayload(:final activeMcpServers, :final servers) =>
-      StudioReduceResult(_applyMcpHealth(current, activeMcpServers, servers)),
+      StudioReduceResult(
+        _applyMcpHealth(
+          current,
+          studioEventSessionId(event) ?? current.selectedSessionId,
+          activeMcpServers,
+          servers,
+        ),
+      ),
     LspHealthChangedPayload(:final activeLspServers) => StudioReduceResult(
-      _applyLspHealth(current, activeLspServers),
+      _applyLspHealth(
+        current,
+        studioEventSessionId(event) ?? current.selectedSessionId,
+        activeLspServers,
+      ),
     ),
     PlanLifecycleChangedPayload(:final state) => StudioReduceResult(
-      _applyPlanLifecycle(current, state),
+      _applyPlanLifecycle(
+        current,
+        studioEventSessionId(event) ?? current.selectedSessionId,
+        state,
+      ),
     ),
     StalePayload() ||
     IgnoredBridgeEventPayload() ||
@@ -128,9 +163,7 @@ StudioState mergeStudioSessionState(
         sessionState.selectedProjectId ?? merged.selectedProjectId,
     selectedSessionId: sessionId ?? merged.selectedSessionId,
     selectedRootSessionId:
-        sessionState.selectedRootSession?.id ??
-        merged.selectedRootSession?.id,
-    runtime: sessionState.runtime,
+        sessionState.selectedRootSession?.id ?? merged.selectedRootSession?.id,
     pendingInteractions: sessionState.pendingInteractions,
     eventCursorsBySession: _mergeEventCursors(
       merged.eventCursorsBySession,
@@ -159,7 +192,10 @@ StudioState mergeStudioConfigState(StudioState current, StudioState next) {
     general: next.general,
     webSearch: next.webSearch,
     permissionMode: next.permissionMode,
-    runtime: next.runtime.model.isEmpty ? current.runtime : next.runtime,
+    runtimesBySession: {
+      ...current.runtimesBySession,
+      ...next.runtimesBySession,
+    },
   );
 }
 
@@ -306,7 +342,8 @@ StudioState _mergeSessionListChanged(
                   session.id == selectedRootSessionId),
         )
         .firstOrNull;
-    final anyRoot = fallbackRoot ??
+    final anyRoot =
+        fallbackRoot ??
         sessions
             .where(
               (session) =>
@@ -351,8 +388,10 @@ StudioState _applyAgentChanged(StudioState current, StudioAgentView agent) {
     agent.id: agent,
   };
   return _withAgents(
-    current.copyWith(
-      runtime: current.runtime.copyWith(agentCount: agents.length),
+    _withRuntime(
+      current,
+      sessionId,
+      _runtimeFor(current, sessionId).copyWith(agentCount: agents.length),
     ),
     sessionId,
     agents,
@@ -371,50 +410,79 @@ StudioState _upsertAgentTimelineEvent(
   return _withAgentTimelineEvent(current, event);
 }
 
-StudioState _applySkillActivation(StudioState current, String name) {
-  if (name.isEmpty || current.runtime.activeSkills.contains(name)) {
+StudioState _applySkillActivation(
+  StudioState current,
+  String? sessionId,
+  String name,
+) {
+  if (sessionId == null || name.isEmpty) {
     return current;
   }
-  return current.copyWith(
-    runtime: current.runtime.copyWith(
-      activeSkills: [...current.runtime.activeSkills, name]..sort(),
-    ),
+  final runtime = _runtimeFor(current, sessionId);
+  if (runtime.activeSkills.contains(name)) {
+    return current;
+  }
+  return _withRuntime(
+    current,
+    sessionId,
+    runtime.copyWith(activeSkills: [...runtime.activeSkills, name]..sort()),
   );
 }
 
 StudioState _applyMcpHealth(
   StudioState current,
+  String? sessionId,
   List<String> activeMcpServers,
   List<McpServerSettingsView> servers,
 ) {
-  return current.copyWith(
-    runtime: current.runtime.copyWith(activeMcpServers: activeMcpServers),
+  final next = current.copyWith(
     mcpServers: servers.isEmpty ? current.mcpServers : servers,
   );
+  return sessionId == null
+      ? next
+      : _withRuntime(
+          next,
+          sessionId,
+          _runtimeFor(
+            next,
+            sessionId,
+          ).copyWith(activeMcpServers: activeMcpServers),
+        );
 }
 
 StudioState _applyLspHealth(
   StudioState current,
+  String? sessionId,
   List<String> activeLspServers,
 ) {
-  return current.copyWith(
-    runtime: current.runtime.copyWith(activeLspServers: activeLspServers),
-  );
+  return sessionId == null
+      ? current
+      : _withRuntime(
+          current,
+          sessionId,
+          _runtimeFor(
+            current,
+            sessionId,
+          ).copyWith(activeLspServers: activeLspServers),
+        );
 }
 
-StudioState _applyPlanLifecycle(StudioState current, String planState) {
-  return current.copyWith(
-    turnPhase: switch (planState) {
-      'pendingConfirmation' => TurnPhase.waitingForInteraction,
-      'accepted' || 'implementing' => TurnPhase.runningTool,
-      'implementationFailed' => TurnPhase.failed,
-      'cancelled' => TurnPhase.cancelled,
-      'implemented' ||
-      'continuedPlanning' ||
-      'dismissed' => TurnPhase.completed,
-      _ => current.turnPhase,
-    },
-  );
+StudioState _applyPlanLifecycle(
+  StudioState current,
+  String? sessionId,
+  String planState,
+) {
+  if (sessionId == null) {
+    return current;
+  }
+  return _withTurnPhase(current, sessionId, switch (planState) {
+    'pendingConfirmation' => TurnPhase.waitingForInteraction,
+    'accepted' || 'implementing' => TurnPhase.runningTool,
+    'implementationFailed' => TurnPhase.failed,
+    'cancelled' => TurnPhase.cancelled,
+    'implemented' || 'continuedPlanning' || 'dismissed' => TurnPhase.completed,
+    _ => current.turnPhasesBySession[sessionId] ?? TurnPhase.idle,
+  });
 }
 
 StudioState _upsertInteraction(
@@ -519,6 +587,47 @@ StudioState _withAgents(
 ) {
   return state.copyWith(
     agentsBySession: {...state.agentsBySession, sessionId: agents},
+  );
+}
+
+SessionRuntimeView _runtimeFor(StudioState state, String sessionId) {
+  return state.runtimesBySession[sessionId] ??
+      const SessionRuntimeView(
+        model: '',
+        contextTokens: 0,
+        contextWindow: 0,
+        totalTokens: 0,
+        costLabel: '',
+        activeSkills: [],
+        activeMcpServers: [],
+        activeLspServers: [],
+        agentCount: 0,
+      );
+}
+
+StudioState _withRuntime(
+  StudioState state,
+  String sessionId,
+  SessionRuntimeView runtime,
+) {
+  if (sessionId.isEmpty) {
+    return state;
+  }
+  return state.copyWith(
+    runtimesBySession: {...state.runtimesBySession, sessionId: runtime},
+  );
+}
+
+StudioState _withTurnPhase(
+  StudioState state,
+  String sessionId,
+  TurnPhase turnPhase,
+) {
+  if (sessionId.isEmpty) {
+    return state;
+  }
+  return state.copyWith(
+    turnPhasesBySession: {...state.turnPhasesBySession, sessionId: turnPhase},
   );
 }
 

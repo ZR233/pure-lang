@@ -9,12 +9,14 @@ import 'interaction_widgets.dart';
 
 class UserInputDock extends ConsumerStatefulWidget {
   const UserInputDock({
+    required this.sessionId,
     required this.interactionId,
     required this.payload,
     this.trailing,
     super.key,
   });
 
+  final String sessionId;
   final String interactionId;
   final InteractionPayloadSnapshot payload;
   final Widget? trailing;
@@ -204,21 +206,24 @@ class _UserInputDockState extends ConsumerState<UserInputDock> {
     if (text.isEmpty) {
       return;
     }
-    ref.read(studioControllerProvider.notifier).resolveActiveInteraction({
-      'type': 'userInput',
-      'answers': {
-        'answer': {
-          'answers': [text],
+    ref.read(studioControllerProvider.notifier).resolveActiveInteraction(
+      widget.sessionId,
+      {
+        'type': 'userInput',
+        'answers': {
+          'answer': {
+            'answers': [text],
+          },
         },
       },
-    });
+    );
   }
 
   void _submitAnswers() {
-    ref.read(studioControllerProvider.notifier).resolveActiveInteraction({
-      'type': 'userInput',
-      'answers': _answers(),
-    });
+    ref.read(studioControllerProvider.notifier).resolveActiveInteraction(
+      widget.sessionId,
+      {'type': 'userInput', 'answers': _answers()},
+    );
   }
 }
 

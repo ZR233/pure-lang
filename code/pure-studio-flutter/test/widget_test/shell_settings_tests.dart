@@ -125,17 +125,19 @@ void registerShellSettingsTests() {
     final updatedAt = DateTime.fromMillisecondsSinceEpoch(1);
     final api = _FakeStudioApi(
       _stateWithPlannerModels().copyWith(
-        runtime: const SessionRuntimeView(
-          model: 'planner/local',
-          contextTokens: 42,
-          contextWindow: 100,
-          totalTokens: 128,
-          costLabel: 'CNY 0.16',
-          activeSkills: ['flutter-ui'],
-          activeMcpServers: ['dart'],
-          activeLspServers: ['rust-analyzer'],
-          agentCount: 2,
-        ),
+        runtimesBySession: const {
+          'session-1': SessionRuntimeView(
+            model: 'planner/local',
+            contextTokens: 42,
+            contextWindow: 100,
+            totalTokens: 128,
+            costLabel: 'CNY 0.16',
+            activeSkills: ['flutter-ui'],
+            activeMcpServers: ['dart'],
+            activeLspServers: ['rust-analyzer'],
+            agentCount: 2,
+          ),
+        },
         agentsBySession: {
           'session-1': {
             'agent-reviewer': StudioAgentView(
@@ -303,7 +305,11 @@ void registerShellSettingsTests() {
             child: _localizedApp(
               locale: localeEntry.key,
               home: SessionStatusBar(
-                state: _emptyState().copyWith(turnPhase: phaseEntry.key),
+                workspace: _emptyState()
+                    .copyWith(
+                      turnPhasesBySession: {'session-1': phaseEntry.key},
+                    )
+                    .selectedAgentWorkspace!,
               ),
             ),
           ),
@@ -329,7 +335,9 @@ void registerShellSettingsTests() {
     addTearDown(tester.view.resetDevicePixelRatio);
 
     final api = _FakeStudioApi(
-      _stateWithPlannerModels().copyWith(turnPhase: TurnPhase.streaming),
+      _stateWithPlannerModels().copyWith(
+        turnPhasesBySession: const {'session-1': TurnPhase.streaming},
+      ),
     );
     await tester.pumpWidget(
       ProviderScope(
@@ -367,7 +375,7 @@ void registerShellSettingsTests() {
     for (final localeEntry in labelsByLocale.entries) {
       for (final interactionEntry in localeEntry.value.entries) {
         final state = _emptyState().copyWith(
-          turnPhase: TurnPhase.streaming,
+          turnPhasesBySession: const {'session-1': TurnPhase.streaming},
           pendingInteractions: [
             PendingInteraction(
               id: 'interaction-${interactionEntry.key.name}',
@@ -382,7 +390,7 @@ void registerShellSettingsTests() {
           ProviderScope(
             child: _localizedApp(
               locale: localeEntry.key,
-              home: SessionStatusBar(state: state),
+              home: SessionStatusBar(workspace: state.selectedAgentWorkspace!),
             ),
           ),
         );
@@ -410,17 +418,19 @@ void registerShellSettingsTests() {
 
     final api = _FakeStudioApi(
       _stateWithPlannerModels().copyWith(
-        runtime: const SessionRuntimeView(
-          model: 'planner/local',
-          contextTokens: 42000,
-          contextWindow: 100000,
-          totalTokens: 128000,
-          costLabel: 'CNY 12.34',
-          activeSkills: ['flutter-ui'],
-          activeMcpServers: ['dart'],
-          activeLspServers: ['rust-analyzer'],
-          agentCount: 1,
-        ),
+        runtimesBySession: const {
+          'session-1': SessionRuntimeView(
+            model: 'planner/local',
+            contextTokens: 42000,
+            contextWindow: 100000,
+            totalTokens: 128000,
+            costLabel: 'CNY 12.34',
+            activeSkills: ['flutter-ui'],
+            activeMcpServers: ['dart'],
+            activeLspServers: ['rust-analyzer'],
+            agentCount: 1,
+          ),
+        },
         agentsBySession: {
           'session-1': {
             'agent-reviewer': StudioAgentView(
@@ -461,76 +471,78 @@ void registerShellSettingsTests() {
 
     final api = _FakeStudioApi(
       _stateWithPlannerModels().copyWith(
-        runtime: const SessionRuntimeView(
-          model: 'planner/local',
-          contextTokens: 1200,
-          contextWindow: 100000,
-          totalTokens: 1800,
-          costLabel: '',
-          activeSkills: [],
-          activeMcpServers: [],
-          activeLspServers: [],
-          agentCount: 1,
-          task: TaskRuntimeView(
-            runId: 'task-run-1',
-            phase: 'implementing',
-            branch: 'codex/task-mode',
-            expectedHead: '1234567890abcdef',
-            statusMessage: 'Executor delivery ready',
-            workUnits: [
-              TaskWorkUnitView(
-                id: 'unit-1',
-                title: 'Implement coordinator UI',
-                status: 'delivered',
-                worktreePath: '.pure/worktrees/task-run-1/agent-1',
-                branch: 'pure-task-run-1-agent-1',
-                agentId: 'agent-1',
-              ),
-            ],
-            agents: [
-              TaskAgentOutcomeView(
-                agentId: 'agent-1',
-                role: 'executor',
-                status: 'completed',
-                initiatedBy: 'planner',
-                requestedByCallId: 'call-spawn-1',
-                summary: 'Implemented UI',
-                error: null,
-                headCommit: 'abcdef1234567890',
-              ),
-              TaskAgentOutcomeView(
-                agentId: 'agent-explorer',
-                role: 'explorer',
-                status: 'running',
-                initiatedBy: 'planner',
-                requestedByCallId: 'call-explore-1',
-                summary: 'Inspecting design constraints',
-                error: null,
-                headCommit: null,
-              ),
-            ],
-            merges: [
-              TaskMergeView(
-                id: 'merge-1',
-                agentId: 'agent-1',
-                status: 'conflicted',
-                mergeCommit: null,
-                conflictFiles: ['lib/status.dart'],
-                resolutionSummary: null,
-              ),
-            ],
-            reviews: [
-              TaskReviewView(
-                round: 1,
-                headCommit: '1234567890abcdef',
-                verdict: 'changesRequired',
-                reviewerAgentId: 'reviewer-1',
-                summary: 'One issue remains',
-                designReferences: ['design/16-task-orchestration.md#UI 与兼容性'],
-              ),
-            ],
+        runtimesBySession: const {
+          'session-1': SessionRuntimeView(
+            model: 'planner/local',
+            contextTokens: 1200,
+            contextWindow: 100000,
+            totalTokens: 1800,
+            costLabel: '',
+            activeSkills: [],
+            activeMcpServers: [],
+            activeLspServers: [],
+            agentCount: 1,
+            task: TaskRuntimeView(
+              runId: 'task-run-1',
+              phase: 'implementing',
+              branch: 'codex/task-mode',
+              expectedHead: '1234567890abcdef',
+              statusMessage: 'Executor delivery ready',
+              workUnits: [
+                TaskWorkUnitView(
+                  id: 'unit-1',
+                  title: 'Implement coordinator UI',
+                  status: 'delivered',
+                  worktreePath: '.pure/worktrees/task-run-1/agent-1',
+                  branch: 'pure-task-run-1-agent-1',
+                  agentId: 'agent-1',
+                ),
+              ],
+              agents: [
+                TaskAgentOutcomeView(
+                  agentId: 'agent-1',
+                  role: 'executor',
+                  status: 'completed',
+                  initiatedBy: 'planner',
+                  requestedByCallId: 'call-spawn-1',
+                  summary: 'Implemented UI',
+                  error: null,
+                  headCommit: 'abcdef1234567890',
+                ),
+                TaskAgentOutcomeView(
+                  agentId: 'agent-explorer',
+                  role: 'explorer',
+                  status: 'running',
+                  initiatedBy: 'planner',
+                  requestedByCallId: 'call-explore-1',
+                  summary: 'Inspecting design constraints',
+                  error: null,
+                  headCommit: null,
+                ),
+              ],
+              merges: [
+                TaskMergeView(
+                  id: 'merge-1',
+                  agentId: 'agent-1',
+                  status: 'conflicted',
+                  mergeCommit: null,
+                  conflictFiles: ['lib/status.dart'],
+                  resolutionSummary: null,
+                ),
+              ],
+              reviews: [
+                TaskReviewView(
+                  round: 1,
+                  headCommit: '1234567890abcdef',
+                  verdict: 'changesRequired',
+                  reviewerAgentId: 'reviewer-1',
+                  summary: 'One issue remains',
+                  designReferences: ['design/16-task-orchestration.md#UI 与兼容性'],
+                ),
+              ],
+            ),
           ),
-        ),
+        },
       ),
     );
     await tester.pumpWidget(
@@ -1250,9 +1262,11 @@ void registerShellSettingsTests() {
       final base = _stateWithPlannerModels();
       final api = _FakeStudioApi(
         base.copyWith(
-          runtime: base.runtime.copyWith(
-            activeSkills: ['flutter-ui-polish', 'rust-review'],
-          ),
+          runtimesBySession: {
+            base.selectedAgentSessionId!: base.runtime.copyWith(
+              activeSkills: ['flutter-ui-polish', 'rust-review'],
+            ),
+          },
           skills: const SkillsSettingsView(disabled: []),
           mcpServers: const [
             McpServerSettingsView(
@@ -1305,9 +1319,11 @@ void registerShellSettingsTests() {
 
       final api = _FakeStudioApi(
         _stateWithPlannerModels().copyWith(
-          runtime: _stateWithPlannerModels().runtime.copyWith(
-            activeSkills: ['flutter-ui-polish'],
-          ),
+          runtimesBySession: {
+            'session-1': _stateWithPlannerModels().runtime.copyWith(
+              activeSkills: ['flutter-ui-polish'],
+            ),
+          },
           skills: const SkillsSettingsView(disabled: []),
           mcpServers: const [
             McpServerSettingsView(

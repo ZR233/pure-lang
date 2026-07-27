@@ -154,7 +154,7 @@ void registerStudioUpdateTests() {
           studioApiProvider.overrideWithValue(
             _FakeStudioApi(
               _stateWithPlannerModels().copyWith(
-                turnPhase: TurnPhase.streaming,
+                turnPhasesBySession: const {'session-1': TurnPhase.streaming},
               ),
             ),
           ),

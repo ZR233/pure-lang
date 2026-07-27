@@ -168,21 +168,23 @@ class DemoStudioApi implements StudioApi {
       selectedProjectId: project.id,
       selectedSessionId: session.id,
       permissionMode: _permissionMode,
-      turnPhase: TurnPhase.idle,
-      runtime: const SessionRuntimeView(
-        model: 'planner/local-responses',
-        contextTokens: 18342,
-        contextWindow: 128000,
-        totalTokens: 26320,
-        costLabel: 'CNY 0.16',
-        activeSkills: [
-          'flutter-apply-architecture-best-practices',
-          'verification-before-completion',
-        ],
-        activeMcpServers: ['dart'],
-        activeLspServers: ['rust-analyzer'],
-        agentCount: 4,
-      ),
+      turnPhasesBySession: {session.id: TurnPhase.idle},
+      runtimesBySession: {
+        session.id: const SessionRuntimeView(
+          model: 'planner/local-responses',
+          contextTokens: 18342,
+          contextWindow: 128000,
+          totalTokens: 26320,
+          costLabel: 'CNY 0.16',
+          activeSkills: [
+            'flutter-apply-architecture-best-practices',
+            'verification-before-completion',
+          ],
+          activeMcpServers: ['dart'],
+          activeLspServers: ['rust-analyzer'],
+          agentCount: 4,
+        ),
+      },
       messagesBySession: {
         session.id: [
           TimelineMessage(
@@ -291,8 +293,6 @@ class DemoStudioApi implements StudioApi {
         selectedProjectId: null,
         selectedSessionId: null,
         permissionMode: state.permissionMode,
-        turnPhase: TurnPhase.idle,
-        runtime: state.runtime,
         pendingInteractions: const [],
       );
     }

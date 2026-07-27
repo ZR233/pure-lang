@@ -13,24 +13,22 @@ import 'task_runtime_detail.dart';
 
 class SessionStatusBar extends ConsumerWidget {
   const SessionStatusBar({
-    required this.state,
+    required this.workspace,
     this.showTodo = false,
     this.todoExpanded = false,
     this.onToggleTodo,
     super.key,
   });
 
-  final StudioState state;
+  final AgentWorkspaceView workspace;
   final bool showTodo;
   final bool todoExpanded;
   final VoidCallback? onToggleTodo;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final runtime = state.runtime;
-    final session = state.sessions
-        .where((session) => session.id == state.selectedSessionId)
-        .firstOrNull;
+    final runtime = workspace.runtime;
+    final session = workspace.session;
     final activityLabel = _runtimeActivityLabel(context, runtime);
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -51,8 +49,11 @@ class SessionStatusBar extends ConsumerWidget {
                 final showActivity = constraints.maxWidth >= 840;
                 final hasOverflow =
                     (!showEffort &&
-                        session != null &&
-                        _effortsForState(state, session.mode).isNotEmpty) ||
+                        session.isRoot &&
+                        _effortsForWorkspace(
+                          workspace,
+                          session.mode,
+                        ).isNotEmpty) ||
                     (!showCost && runtime.costLabel.isNotEmpty) ||
                     (!showActivity && activityLabel.isNotEmpty);
                 return Row(
@@ -77,31 +78,45 @@ class SessionStatusBar extends ConsumerWidget {
                         ),
                         onPressed: onToggleTodo,
                       ),
-                    if (session != null)
-                      _StatusReadout(
-                        icon: Icons.account_tree_outlined,
-                        label: session.ownerRole.isEmpty
-                            ? (session.isRoot ? 'planner' : 'agent')
-                            : session.ownerRole,
-                        tooltip: session.agentStatus.isEmpty
-                            ? session.title
-                            : '${session.title} · ${session.agentStatus}',
-                        maxWidth: 96,
-                      ),
-                    if (session != null)
+                    _StatusReadout(
+                      icon: Icons.account_tree_outlined,
+                      label: session.ownerRole.isEmpty
+                          ? (session.isRoot ? 'planner' : 'agent')
+                          : session.ownerRole,
+                      tooltip: session.agentStatus.isEmpty
+                          ? session.title
+                          : '${session.title} · ${session.agentStatus}',
+                      maxWidth: 96,
+                    ),
+                    if (session.isRoot)
                       _SessionModeSelector(
                         mode: session.mode,
-                        enabled: !state.isBusy && !runtime.hasActiveTask,
+                        enabled: !workspace.isBusy && !runtime.hasActiveTask,
                       ),
                     if (showModel &&
-                        session != null &&
-                        state.providers.isNotEmpty)
-                      _ModeModelSelector(state: state, mode: session.mode),
+                        session.isRoot &&
+                        workspace.providers.isNotEmpty)
+                      _ModeModelSelector(
+                        workspace: workspace,
+                        mode: session.mode,
+                      )
+                    else if (showModel &&
+                        session.isAgent &&
+                        runtime.model.isNotEmpty)
+                      _StatusReadout(
+                        icon: Icons.smart_toy_outlined,
+                        label: runtime.model,
+                        tooltip: runtime.model,
+                        maxWidth: 140,
+                      ),
                     if (showEffort &&
-                        session != null &&
-                        _effortsForState(state, session.mode).isNotEmpty)
+                        session.isRoot &&
+                        _effortsForWorkspace(
+                          workspace,
+                          session.mode,
+                        ).isNotEmpty)
                       _ReasoningEffortSelector(
-                        state: state,
+                        workspace: workspace,
                         mode: session.mode,
                       ),
                     ContextUsageReadout(runtime: runtime),
@@ -126,9 +141,9 @@ class SessionStatusBar extends ConsumerWidget {
                       ),
                     if (hasOverflow)
                       _StatusOverflow(
-                        effort: session == null
+                        effort: session.isAgent
                             ? null
-                            : _selectedEffort(state, session.mode),
+                            : _selectedEffort(workspace, session.mode),
                         cost: runtime.costLabel,
                         activity: activityLabel,
                         runtime: runtime,
@@ -136,8 +151,8 @@ class SessionStatusBar extends ConsumerWidget {
                     const Spacer(),
                     const SizedBox(width: 8),
                     _PhaseReadout(
-                      turnPhase: state.turnPhase,
-                      interactionKind: state.activeInteraction?.kind,
+                      turnPhase: workspace.turnPhase,
+                      interactionKind: workspace.activeInteraction?.kind,
                     ),
                   ],
                 );
@@ -163,8 +178,8 @@ String _runtimeActivityLabel(BuildContext context, SessionRuntimeView runtime) {
   return parts.join(' · ');
 }
 
-String? _selectedEffort(StudioState state, StudioMode mode) {
-  final effort = state.role(_roleKeyForMode(mode))?.effort.trim() ?? '';
+String? _selectedEffort(AgentWorkspaceView workspace, StudioMode mode) {
+  final effort = workspace.role(_roleKeyForMode(mode))?.effort.trim() ?? '';
   return effort.isEmpty ? null : effort;
 }
 
@@ -280,20 +295,20 @@ class _SessionModeSelector extends ConsumerWidget {
 }
 
 class _ModeModelSelector extends ConsumerWidget {
-  const _ModeModelSelector({required this.state, required this.mode});
+  const _ModeModelSelector({required this.workspace, required this.mode});
 
-  final StudioState state;
+  final AgentWorkspaceView workspace;
   final StudioMode mode;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final options = _modelOptions(state.providers);
+    final options = _modelOptions(workspace.providers);
     if (options.isEmpty) {
       return const SizedBox.shrink();
     }
     final roleKey = _roleKeyForMode(mode);
-    final role = state.role(roleKey);
-    final current = _modelFor(state, mode) ?? options.first;
+    final role = workspace.role(roleKey);
+    final current = _modelFor(workspace, mode) ?? options.first;
     return UpwardPopupMenu<String>(
       tooltip: mode == StudioMode.task
           ? context.l10n.statusPlannerModel
@@ -337,16 +352,16 @@ class _ModeModelSelector extends ConsumerWidget {
 }
 
 class _ReasoningEffortSelector extends ConsumerWidget {
-  const _ReasoningEffortSelector({required this.state, required this.mode});
+  const _ReasoningEffortSelector({required this.workspace, required this.mode});
 
-  final StudioState state;
+  final AgentWorkspaceView workspace;
   final StudioMode mode;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final roleKey = _roleKeyForMode(mode);
-    final role = state.role(roleKey);
-    final currentModel = _modelFor(state, mode);
+    final role = workspace.role(roleKey);
+    final currentModel = _modelFor(workspace, mode);
     final efforts = currentModel?.reasoningEfforts ?? const [];
     if (role == null || currentModel == null || efforts.isEmpty) {
       return const SizedBox.shrink();
@@ -423,12 +438,12 @@ String _roleKeyForMode(StudioMode mode) {
   };
 }
 
-_ModeModelOption? _modelFor(StudioState state, StudioMode mode) {
-  final role = state.role(_roleKeyForMode(mode));
+_ModeModelOption? _modelFor(AgentWorkspaceView workspace, StudioMode mode) {
+  final role = workspace.role(_roleKeyForMode(mode));
   if (role == null) {
     return null;
   }
-  final options = _modelOptions(state.providers);
+  final options = _modelOptions(workspace.providers);
   if (options.isEmpty) {
     return null;
   }
@@ -439,8 +454,11 @@ _ModeModelOption? _modelFor(StudioState state, StudioMode mode) {
   );
 }
 
-List<String> _effortsForState(StudioState state, StudioMode mode) {
-  return _modelFor(state, mode)?.reasoningEfforts ?? const [];
+List<String> _effortsForWorkspace(
+  AgentWorkspaceView workspace,
+  StudioMode mode,
+) {
+  return _modelFor(workspace, mode)?.reasoningEfforts ?? const [];
 }
 
 List<_ModeModelOption> _modelOptions(List<ProviderSettingsView> providers) {

@@ -74,8 +74,12 @@ StudioState _stateFromTypedSnapshot({
           'permission_mode',
         ]),
       ),
-      turnPhase: TurnPhase.idle,
-      runtime: runtime,
+      turnPhasesBySession: selectedSessionId == null
+          ? const {}
+          : {selectedSessionId: TurnPhase.idle},
+      runtimesBySession: selectedSessionId == null
+          ? const {}
+          : {selectedSessionId: runtime},
       pendingInteractions: interactions,
       eventCursorsBySession: selectedSessionId == null || eventNextSequence <= 0
           ? const {}
@@ -83,10 +87,15 @@ StudioState _stateFromTypedSnapshot({
     ),
     _applySnapshotEvent,
   );
+  if (selectedSessionId == null) {
+    return latest;
+  }
   return latest.copyWith(
-    runtime: latest.runtime.copyWith(
-      agentCount: agentsBySession[selectedSessionId]?.length ?? 0,
-    ),
+    runtimesBySession: {
+      selectedSessionId: latest.runtime.copyWith(
+        agentCount: agentsBySession[selectedSessionId]?.length ?? 0,
+      ),
+    },
   );
 }
 
@@ -106,13 +115,20 @@ Map<String, Map<String, TimelineAgentEvent>> _agentTimelineEventsFromTyped(
 StudioState _applySnapshotEvent(StudioState state, StudioBridgeEvent event) {
   return switch (event.payload) {
     TurnChangedPayload(:final turn) => state.copyWith(
-      turnPhase: _turnPhaseFromStatus(turn.status),
+      turnPhasesBySession: {turn.sessionId: _turnPhaseFromStatus(turn.status)},
     ),
     InteractionChangedPayload(:final interaction, :final status) =>
       _withInteraction(state, interaction, status),
-    SessionRuntimeChangedPayload(:final runtime) => state.copyWith(
-      runtime: runtime.copyWith(agentCount: state.runtime.agentCount),
-    ),
+    SessionRuntimeChangedPayload(:final sessionId, :final runtime) =>
+      state.copyWith(
+        runtimesBySession: {
+          sessionId: runtime.copyWith(
+            agentCount:
+                state.runtimesBySession[sessionId]?.agentCount ??
+                runtime.agentCount,
+          ),
+        },
+      ),
     AgentTimelineChangedPayload(:final event) => state.copyWith(
       agentTimelineEventsBySession: {
         ...state.agentTimelineEventsBySession,
@@ -123,18 +139,33 @@ StudioState _applySnapshotEvent(StudioState state, StudioBridgeEvent event) {
       },
     ),
     McpHealthChangedPayload(:final activeMcpServers, :final servers) =>
-      state.copyWith(
-        mcpServers: servers,
-        runtime: state.runtime.copyWith(activeMcpServers: activeMcpServers),
+      _withSessionRuntime(
+        state.copyWith(mcpServers: servers),
+        event.sessionId,
+        (runtime) => runtime.copyWith(activeMcpServers: activeMcpServers),
       ),
-    LspHealthChangedPayload(:final activeLspServers) => state.copyWith(
-      runtime: state.runtime.copyWith(activeLspServers: activeLspServers),
+    LspHealthChangedPayload(:final activeLspServers) => _withSessionRuntime(
+      state,
+      event.sessionId,
+      (runtime) => runtime.copyWith(activeLspServers: activeLspServers),
     ),
     SessionListChangedPayload(:final projectId, :final sessions)
         when projectId == null || projectId == state.selectedProjectId =>
       state.copyWith(sessions: sessions),
     _ => state,
   };
+}
+
+StudioState _withSessionRuntime(
+  StudioState state,
+  String? sessionId,
+  SessionRuntimeView Function(SessionRuntimeView runtime) update,
+) {
+  if (sessionId == null) {
+    return state;
+  }
+  final runtime = state.runtimesBySession[sessionId] ?? _emptyRuntimeView();
+  return state.copyWith(runtimesBySession: {sessionId: update(runtime)});
 }
 
 StudioState _withInteraction(
@@ -153,33 +184,7 @@ StudioState _withInteraction(
   } else if (index >= 0) {
     interactions.removeAt(index);
   }
-  return StudioState(
-    projects: state.projects,
-    sessions: state.sessions,
-    messagesBySession: state.messagesBySession,
-    partSnapshotsBySession: state.partSnapshotsBySession,
-    partOverlaysBySession: state.partOverlaysBySession,
-    agentTimelineEventsBySession: state.agentTimelineEventsBySession,
-    agentsBySession: state.agentsBySession,
-    providers: state.providers,
-    defaultProviderId: state.defaultProviderId,
-    providerUsages: state.providerUsages,
-    roles: state.roles,
-    mcpServers: state.mcpServers,
-    instructions: state.instructions,
-    skills: state.skills,
-    general: state.general,
-    webSearch: state.webSearch,
-    selectedProjectId: state.selectedProjectId,
-    selectedSessionId: state.selectedSessionId,
-    selectedRootSessionId: state.selectedRootSessionId,
-    permissionMode: state.permissionMode,
-    turnPhase: state.turnPhase,
-    runtime: state.runtime,
-    pendingInteractions: interactions,
-    eventCursorsBySession: state.eventCursorsBySession,
-    composerText: state.composerText,
-  );
+  return state.copyWith(pendingInteractions: interactions);
 }
 
 WebSearchSettingsView _webSearchFromFrb(frb.BridgeWebSearchSettingsDto value) {

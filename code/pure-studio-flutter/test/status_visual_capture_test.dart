@@ -249,69 +249,73 @@ StudioState _taskVisualState() {
       for (final session in state.sessions)
         session.copyWith(mode: StudioMode.task),
     ],
-    runtime: state.runtime.copyWith(
-      task: const TaskRuntimeView(
-        runId: 'task-run-visual',
-        phase: 'implementing',
-        branch: 'codex/task-mode-orchestrator',
-        expectedHead: '1234567890abcdef',
-        statusMessage: 'Executor delivery ready for merge',
-        workUnits: [
-          TaskWorkUnitView(
-            id: 'unit-visual',
-            title: 'Implement coordinator activity projection',
-            status: 'delivered',
-            worktreePath: '.pure/worktrees/task-run-visual/agent-executor',
-            branch: 'pure-task-task-run-visual-agent-executor',
-            agentId: 'agent-executor',
-          ),
-        ],
-        agents: [
-          TaskAgentOutcomeView(
-            agentId: 'agent-executor',
-            role: 'executor',
-            status: 'completed',
-            initiatedBy: 'planner',
-            requestedByCallId: 'call-spawn-visual',
-            summary: 'Coordinator projection implemented',
-            error: null,
-            headCommit: 'abcdef1234567890',
-          ),
-          TaskAgentOutcomeView(
-            agentId: 'agent-explorer',
-            role: 'explorer',
-            status: 'running',
-            initiatedBy: 'planner',
-            requestedByCallId: 'call-explore-visual',
-            summary: 'Inspecting the affected design contract',
-            error: null,
-            headCommit: null,
-          ),
-        ],
-        merges: [
-          TaskMergeView(
-            id: 'merge-visual',
-            agentId: 'agent-executor',
-            status: 'conflicted',
-            mergeCommit: null,
-            conflictFiles: ['lib/src/features/status/session_status_bar.dart'],
-            resolutionSummary: null,
-          ),
-        ],
-        reviews: [
-          TaskReviewView(
-            round: 1,
-            headCommit: '1234567890abcdef',
-            verdict: 'changesRequired',
-            reviewerAgentId: 'agent-reviewer',
-            summary: 'One responsive issue remains',
-            designReferences: [
-              'design/11-studio-ui.md#Flutter interaction and layout',
-            ],
-          ),
-        ],
+    runtimesBySession: {
+      state.selectedAgentSessionId!: state.runtime.copyWith(
+        task: const TaskRuntimeView(
+          runId: 'task-run-visual',
+          phase: 'implementing',
+          branch: 'codex/task-mode-orchestrator',
+          expectedHead: '1234567890abcdef',
+          statusMessage: 'Executor delivery ready for merge',
+          workUnits: [
+            TaskWorkUnitView(
+              id: 'unit-visual',
+              title: 'Implement coordinator activity projection',
+              status: 'delivered',
+              worktreePath: '.pure/worktrees/task-run-visual/agent-executor',
+              branch: 'pure-task-task-run-visual-agent-executor',
+              agentId: 'agent-executor',
+            ),
+          ],
+          agents: [
+            TaskAgentOutcomeView(
+              agentId: 'agent-executor',
+              role: 'executor',
+              status: 'completed',
+              initiatedBy: 'planner',
+              requestedByCallId: 'call-spawn-visual',
+              summary: 'Coordinator projection implemented',
+              error: null,
+              headCommit: 'abcdef1234567890',
+            ),
+            TaskAgentOutcomeView(
+              agentId: 'agent-explorer',
+              role: 'explorer',
+              status: 'running',
+              initiatedBy: 'planner',
+              requestedByCallId: 'call-explore-visual',
+              summary: 'Inspecting the affected design contract',
+              error: null,
+              headCommit: null,
+            ),
+          ],
+          merges: [
+            TaskMergeView(
+              id: 'merge-visual',
+              agentId: 'agent-executor',
+              status: 'conflicted',
+              mergeCommit: null,
+              conflictFiles: [
+                'lib/src/features/status/session_status_bar.dart',
+              ],
+              resolutionSummary: null,
+            ),
+          ],
+          reviews: [
+            TaskReviewView(
+              round: 1,
+              headCommit: '1234567890abcdef',
+              verdict: 'changesRequired',
+              reviewerAgentId: 'agent-reviewer',
+              summary: 'One responsive issue remains',
+              designReferences: [
+                'design/11-studio-ui.md#Flutter interaction and layout',
+              ],
+            ),
+          ],
+        ),
       ),
-    ),
+    },
   );
 }
 

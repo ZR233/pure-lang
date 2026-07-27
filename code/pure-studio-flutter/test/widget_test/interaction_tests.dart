@@ -19,7 +19,7 @@ void registerInteractionTests() {
           body: 'Tell me which branch to use',
         ),
       ],
-      turnPhase: TurnPhase.waitingForInteraction,
+      turnPhasesBySession: const {'session-1': TurnPhase.waitingForInteraction},
     );
     final api = _FakeStudioApi(state);
     await tester.pumpWidget(
@@ -92,7 +92,7 @@ void registerInteractionTests() {
           },
         ),
       ],
-      turnPhase: TurnPhase.waitingForInteraction,
+      turnPhasesBySession: const {'session-1': TurnPhase.waitingForInteraction},
     );
     final api = _FakeStudioApi(state);
     await tester.pumpWidget(
@@ -176,7 +176,9 @@ void registerInteractionTests() {
     final api = _FakeStudioApi(
       _emptyState().copyWith(
         pendingInteractions: [firstInteraction],
-        turnPhase: TurnPhase.waitingForInteraction,
+        turnPhasesBySession: const {
+          'session-1': TurnPhase.waitingForInteraction,
+        },
       ),
     );
     await tester.pumpWidget(
@@ -248,7 +250,7 @@ void registerInteractionTests() {
           },
         ),
       ],
-      turnPhase: TurnPhase.completed,
+      turnPhasesBySession: const {'session-1': TurnPhase.completed},
     );
     final api = _FakeStudioApi(state);
     await tester.pumpWidget(
@@ -296,7 +298,7 @@ void registerInteractionTests() {
           },
         ),
       ],
-      turnPhase: TurnPhase.completed,
+      turnPhasesBySession: const {'session-1': TurnPhase.completed},
     );
     final api = _FakeStudioApi(state);
     await tester.pumpWidget(
@@ -353,7 +355,7 @@ void registerInteractionTests() {
           body: '## Plan\n- Implement',
         ),
       ],
-      turnPhase: TurnPhase.completed,
+      turnPhasesBySession: const {'session-1': TurnPhase.completed},
     );
     final api = _FakeStudioApi(state)
       ..resolveInteractionError = StateError(

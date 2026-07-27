@@ -362,7 +362,11 @@ StudioState _responsiveActivityStressState() {
   ];
   return state.copyWith(
     sessions: [root, ...agentSessions],
-    runtime: state.runtime.copyWith(agentCount: agentSessions.length),
+    runtimesBySession: {
+      state.selectedAgentSessionId!: state.runtime.copyWith(
+        agentCount: agentSessions.length,
+      ),
+    },
   );
 }
 
