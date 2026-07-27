@@ -271,6 +271,99 @@ async fn apply_patch_matches_unicode_punctuation_context() {
 }
 
 #[tokio::test]
+async fn apply_patch_matches_preserved_arb_keys_and_keeps_current_values() {
+    let root = unique_temp_dir("patch-preserved-arb-context");
+    tokio::fs::create_dir_all(&root).await.unwrap();
+    tokio::fs::write(
+        root.join("app_zh.arb"),
+        "{\n  \"settingsModelField\": \"Model\",\n  \"settingsMcpTitle\": \"MCP\"\n}\n",
+    )
+    .await
+    .unwrap();
+    let tool = apply_patch_tool();
+    let patch = "*** Begin Patch\n*** Update File: app_zh.arb\n@@\n   \"settingsModelField\": \"模型\",\n+  \"settingsReasoningEffortField\": \"推理强度\",\n   \"settingsMcpTitle\": \"MCP\"\n*** End Patch";
+
+    tool.execute(
+        input(serde_json::json!({ "input": patch })),
+        context(&root).await,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        tokio::fs::read_to_string(root.join("app_zh.arb"))
+            .await
+            .unwrap(),
+        "{\n  \"settingsModelField\": \"Model\",\n  \"settingsReasoningEffortField\": \"推理强度\",\n  \"settingsMcpTitle\": \"MCP\"\n}\n"
+    );
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn apply_patch_does_not_key_match_an_arb_value_replacement() {
+    let root = unique_temp_dir("patch-arb-value-replacement");
+    tokio::fs::create_dir_all(&root).await.unwrap();
+    tokio::fs::write(
+        root.join("app_zh.arb"),
+        "{\n  \"settingsModelField\": \"Model\"\n}\n",
+    )
+    .await
+    .unwrap();
+    let tool = apply_patch_tool();
+    let patch = "*** Begin Patch\n*** Update File: app_zh.arb\n@@\n-  \"settingsModelField\": \"模型\"\n+  \"settingsModelField\": \"模型名称\"\n*** End Patch";
+
+    let error = tool
+        .execute(
+            input(serde_json::json!({ "input": patch })),
+            context(&root).await,
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("failed to find expected lines"));
+    assert_eq!(
+        tokio::fs::read_to_string(root.join("app_zh.arb"))
+            .await
+            .unwrap(),
+        "{\n  \"settingsModelField\": \"Model\"\n}\n"
+    );
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn apply_patch_does_not_key_match_json_shaped_text_files() {
+    let root = unique_temp_dir("patch-json-shaped-text");
+    tokio::fs::create_dir_all(&root).await.unwrap();
+    tokio::fs::write(
+        root.join("notes.txt"),
+        "\"settingsModelField\": \"Model\",\n\"settingsMcpTitle\": \"MCP\"\n",
+    )
+    .await
+    .unwrap();
+    let tool = apply_patch_tool();
+    let patch = "*** Begin Patch\n*** Update File: notes.txt\n@@\n \"settingsModelField\": \"模型\",\n+\"settingsReasoningEffortField\": \"推理强度\",\n \"settingsMcpTitle\": \"MCP\"\n*** End Patch";
+
+    let error = tool
+        .execute(
+            input(serde_json::json!({ "input": patch })),
+            context(&root).await,
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("failed to find expected lines"));
+    assert_eq!(
+        tokio::fs::read_to_string(root.join("notes.txt"))
+            .await
+            .unwrap(),
+        "\"settingsModelField\": \"Model\",\n\"settingsMcpTitle\": \"MCP\"\n"
+    );
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
 async fn apply_patch_skips_blank_lines_between_update_chunks() {
     let root = unique_temp_dir("patch-blank-between-chunks");
     tokio::fs::create_dir_all(&root).await.unwrap();

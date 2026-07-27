@@ -16,6 +16,7 @@ pub(crate) fn apply_chunks(
     }
     let mut cursor = 0;
     let mut replacements = Vec::new();
+    let allow_preserved_json_context = supports_preserved_json_context(path);
 
     for chunk in chunks {
         if let Some(context) = &chunk.context {
@@ -37,7 +38,8 @@ pub(crate) fn apply_chunks(
             continue;
         }
 
-        let Some((start, old_len, new_lines)) = find_chunk_replacement(&lines, chunk, cursor)
+        let Some((start, old_len, new_lines)) =
+            find_chunk_replacement(&lines, chunk, cursor, allow_preserved_json_context)
         else {
             return Err(tool_error(format!(
                 "failed to find expected lines in {}:\n{}\n{PATCH_RETRY_GUIDANCE}",
@@ -63,6 +65,7 @@ fn find_chunk_replacement(
     lines: &[String],
     chunk: &UpdateChunk,
     cursor: usize,
+    allow_preserved_json_context: bool,
 ) -> Option<(usize, usize, Vec<String>)> {
     let mut candidates = vec![(chunk.old_lines.clone(), chunk.new_lines.clone())];
     if let Some(candidate) = duplicated_edge_context_candidate(chunk) {
@@ -70,7 +73,15 @@ fn find_chunk_replacement(
     }
 
     for (old_lines, new_lines) in candidates {
-        if let Some(start) = find_sequence(lines, &old_lines, cursor, chunk.eof) {
+        if let Some(start) = find_sequence(lines, &old_lines, cursor, chunk.eof).or_else(|| {
+            if allow_preserved_json_context {
+                find_preserved_json_context_sequence(
+                    lines, &old_lines, &new_lines, cursor, chunk.eof,
+                )
+            } else {
+                None
+            }
+        }) {
             let matched_lines = lines[start..start + old_lines.len()].to_vec();
             let new_lines = preserve_matched_context_lines(&old_lines, &new_lines, &matched_lines);
             return Some((start, old_lines.len(), new_lines));
@@ -82,7 +93,15 @@ fn find_chunk_replacement(
             } else {
                 new_lines
             };
-            if let Some(start) = find_sequence(lines, &old_lines, cursor, chunk.eof) {
+            if let Some(start) = find_sequence(lines, &old_lines, cursor, chunk.eof).or_else(|| {
+                if allow_preserved_json_context {
+                    find_preserved_json_context_sequence(
+                        lines, &old_lines, &new_lines, cursor, chunk.eof,
+                    )
+                } else {
+                    None
+                }
+            }) {
                 let matched_lines = lines[start..start + old_lines.len()].to_vec();
                 let new_lines =
                     preserve_matched_context_lines(&old_lines, &new_lines, &matched_lines);
@@ -98,19 +117,86 @@ fn preserve_matched_context_lines(
     new_lines: &[String],
     matched_lines: &[String],
 ) -> Vec<String> {
-    let mut old_index = 0;
+    let mut old_search_start = 0;
     new_lines
         .iter()
         .map(|line| {
-            if old_index < old_lines.len() && lines_equivalent(line, &old_lines[old_index]) {
-                let matched = matched_lines[old_index].clone();
-                old_index += 1;
-                matched
-            } else {
-                line.clone()
-            }
+            let Some(relative_index) = old_lines[old_search_start..]
+                .iter()
+                .position(|old_line| lines_equivalent(line, old_line))
+            else {
+                return line.clone();
+            };
+            let old_index = old_search_start + relative_index;
+            old_search_start = old_index + 1;
+            matched_lines[old_index].clone()
         })
         .collect()
+}
+
+fn supports_preserved_json_context(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            extension.eq_ignore_ascii_case("json") || extension.eq_ignore_ascii_case("arb")
+        })
+}
+
+fn find_preserved_json_context_sequence(
+    lines: &[String],
+    old_lines: &[String],
+    new_lines: &[String],
+    start: usize,
+    eof: bool,
+) -> Option<usize> {
+    if old_lines.is_empty() || old_lines.len() > lines.len() {
+        return None;
+    }
+    let preserved = preserved_old_lines(old_lines, new_lines);
+    if !preserved.iter().any(|preserved| *preserved) {
+        return None;
+    }
+    let last_start = lines.len().saturating_sub(old_lines.len());
+    let matches_at = |index: usize| {
+        old_lines.iter().enumerate().all(|(offset, expected)| {
+            let actual = &lines[index + offset];
+            lines_equivalent(actual, expected)
+                || preserved[offset] && same_json_property_key(actual, expected)
+        })
+    };
+    if eof && matches_at(last_start) {
+        return Some(last_start);
+    }
+    (start..=last_start).find(|index| matches_at(*index))
+}
+
+fn preserved_old_lines(old_lines: &[String], new_lines: &[String]) -> Vec<bool> {
+    let mut preserved = vec![false; old_lines.len()];
+    let mut new_search_start = 0;
+    for (old_index, old_line) in old_lines.iter().enumerate() {
+        let Some(relative_index) = new_lines[new_search_start..]
+            .iter()
+            .position(|new_line| lines_equivalent(old_line, new_line))
+        else {
+            continue;
+        };
+        preserved[old_index] = true;
+        new_search_start += relative_index + 1;
+    }
+    preserved
+}
+
+fn same_json_property_key(left: &str, right: &str) -> bool {
+    json_property_key(left)
+        .zip(json_property_key(right))
+        .is_some_and(|(left, right)| left == right)
+}
+
+fn json_property_key(line: &str) -> Option<&str> {
+    let property = line.trim_start().strip_prefix('"')?;
+    let key_end = property.find("\":")?;
+    let key = &property[..key_end];
+    (!key.contains("\\\"")).then_some(key)
 }
 
 fn duplicated_edge_context_candidate(chunk: &UpdateChunk) -> Option<(Vec<String>, Vec<String>)> {
