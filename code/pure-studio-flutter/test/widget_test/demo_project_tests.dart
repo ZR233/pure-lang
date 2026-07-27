@@ -36,6 +36,31 @@ void registerDemoProjectTests() {
           .text,
       contains('Demo response for'),
     );
+    final reasoningGroup = state.selectedTimelineRows
+        .where(
+          (row) =>
+              row.reasoningGroup != null &&
+              row.messageId?.startsWith('demo-assistant-') == true,
+        )
+        .single
+        .reasoningGroup!;
+    expect(reasoningGroup.parts, hasLength(2));
+    expect(reasoningGroup.summaries, [
+      'Inspecting the request',
+      'Preparing the tool call',
+    ]);
+    expect(
+      state.selectedTimelineRows
+          .where(
+            (row) =>
+                row.toolGroup != null &&
+                row.messageId?.startsWith('demo-assistant-') == true,
+          )
+          .single
+          .toolGroup!
+          .status,
+      'completed',
+    );
   });
 
   test('demo API stores sample timeline as snapshots only', () async {

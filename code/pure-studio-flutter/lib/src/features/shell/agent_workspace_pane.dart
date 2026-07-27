@@ -79,6 +79,7 @@ class _AgentWorkspacePaneState extends ConsumerState<AgentWorkspacePane> {
                                   rows: workspace.isLoading
                                       ? const []
                                       : workspace.timelineRows,
+                                  turnPhase: workspace.turnPhase,
                                 ),
                               ),
                               if (workspace.isLoading)

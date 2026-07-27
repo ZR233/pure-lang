@@ -272,14 +272,46 @@ StudioState responsiveVisualState() {
       textChannel: TimelineTextChannel.user,
     ),
     TimelinePartSnapshot(
+      id: 'part-reasoning-1',
+      messageId: messages.last.id,
+      sessionId: session.id,
+      turnId: 'turn-1',
+      type: TimelinePartType.reasoning,
+      order: 0,
+      revision: 0,
+      sequence: 1,
+      text:
+          '## Inspecting the timeline\n\n'
+          'Checking how compact activity rows preserve conversation order.',
+      status: 'completed',
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    ),
+    TimelinePartSnapshot(
+      id: 'part-reasoning-2',
+      messageId: messages.last.id,
+      sessionId: session.id,
+      turnId: 'turn-1',
+      type: TimelinePartType.reasoning,
+      order: 1,
+      revision: 0,
+      sequence: 2,
+      text:
+          '## Verifying responsive behavior\n\n'
+          'Comparing wide and narrow timeline layouts.',
+      status: 'completed',
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    ),
+    TimelinePartSnapshot(
       id: 'part-assistant',
       messageId: messages.last.id,
       sessionId: session.id,
       turnId: 'turn-1',
       type: TimelinePartType.text,
-      order: 0,
+      order: 2,
       revision: 0,
-      sequence: 1,
+      sequence: 3,
       text:
           '### Responsive verification\n\n'
           '- Conversation content remains readable.\n'
@@ -357,5 +389,72 @@ StudioState responsiveVisualState() {
       ),
     },
     pendingInteractions: const [],
+  );
+}
+
+StudioState responsiveVisualReasoningState() {
+  final state = responsiveVisualState();
+  final sessionId = state.selectedSessionId!;
+  final snapshots = {...state.partSnapshotsBySession[sessionId]!}
+    ..remove('part-assistant');
+  final current = snapshots['part-reasoning-2']!;
+  snapshots[current.id] = TimelinePartSnapshot(
+    id: current.id,
+    messageId: current.messageId,
+    sessionId: current.sessionId,
+    turnId: current.turnId,
+    type: current.type,
+    order: current.order,
+    revision: current.revision + 1,
+    sequence: current.sequence,
+    text:
+        '## Updating the active reasoning summary\n\n'
+        'The latest section replaces the same compact activity line.',
+    status: 'streaming',
+    createdAt: current.createdAt,
+    updatedAt: current.updatedAt,
+  );
+  return state.copyWith(
+    partSnapshotsBySession: {
+      ...state.partSnapshotsBySession,
+      sessionId: snapshots,
+    },
+    turnPhasesBySession: {sessionId: TurnPhase.streaming},
+  );
+}
+
+StudioState responsiveVisualToolState() {
+  final state = responsiveVisualState();
+  final sessionId = state.selectedSessionId!;
+  final snapshots = {...state.partSnapshotsBySession[sessionId]!}
+    ..remove('part-assistant');
+  final reasoning = snapshots['part-reasoning-2']!;
+  snapshots['part-tool-active'] = TimelinePartSnapshot(
+    id: 'part-tool-active',
+    messageId: reasoning.messageId,
+    sessionId: sessionId,
+    turnId: reasoning.turnId,
+    type: TimelinePartType.tool,
+    order: 2,
+    revision: 0,
+    sequence: 3,
+    text: '',
+    status: 'running',
+    createdAt: reasoning.createdAt,
+    updatedAt: reasoning.updatedAt,
+    tool: const TimelineToolPart(
+      toolCallId: 'tool-call-active',
+      name: 'exec',
+      arguments:
+          '{"command":"flutter test test/widget_test.dart",'
+          '"workingDirectory":"code/pure-studio-flutter"}',
+    ),
+  );
+  return state.copyWith(
+    partSnapshotsBySession: {
+      ...state.partSnapshotsBySession,
+      sessionId: snapshots,
+    },
+    turnPhasesBySession: {sessionId: TurnPhase.runningTool},
   );
 }

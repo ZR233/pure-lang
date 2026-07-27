@@ -123,6 +123,57 @@ void registerTimelineScrollTests() {
     expect(_timelineExtentAfter(tester), lessThanOrEqualTo(80));
   });
 
+  testWidgets('streaming replacements do not count as new detached events', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(980, 520);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      _timelineHarness(
+        sessionId: 'session-stream-count',
+        messages: _scrollMessages('session-stream-count', 24),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(ListView), const Offset(0, 260));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('timeline-jump-to-latest:0')),
+      findsOneWidget,
+    );
+
+    await tester.pumpWidget(
+      _timelineHarness(
+        sessionId: 'session-stream-count',
+        messages: _scrollMessages(
+          'session-stream-count',
+          24,
+          expandedLast: true,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('timeline-jump-to-latest:0')),
+      findsOneWidget,
+    );
+
+    await tester.pumpWidget(
+      _timelineHarness(
+        sessionId: 'session-stream-count',
+        messages: _scrollMessages('session-stream-count', 25),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('timeline-jump-to-latest:1')),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('timeline keeps scroll state isolated per session', (
     tester,
   ) async {

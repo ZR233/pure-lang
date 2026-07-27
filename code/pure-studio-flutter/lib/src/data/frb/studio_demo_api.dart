@@ -441,6 +441,7 @@ class DemoStudioApi implements StudioApi {
         message: timelineMessageFromJson({
           'messageId': assistantMessageId,
           'sessionId': sessionId,
+          'turnId': assistantMessageId,
           'role': 'assistant',
           'createdAt': now + 1,
         }),
@@ -450,11 +451,165 @@ class DemoStudioApi implements StudioApi {
       sessionId: sessionId,
       payload: MessagePartUpdatedPayload(
         part: timelinePartSnapshotFromJson({
+          'partId': '$assistantMessageId:reasoning-1',
+          'messageId': assistantMessageId,
+          'sessionId': sessionId,
+          'turnId': assistantMessageId,
+          'type': 'reasoning',
+          'order': 0,
+          'revision': 0,
+          'status': 'streaming',
+          'createdAt': now + 1,
+          'updatedAt': now + 1,
+          'text': '## Inspecting the request',
+        }),
+      ),
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 350));
+    _emitSessionEvent(
+      sessionId: sessionId,
+      payload: MessagePartDeltaPayload(
+        delta: TimelinePartDelta(
+          partId: '$assistantMessageId:reasoning-1',
+          revision: 1,
+          field: 'reasoning.summary',
+          delta: '\n\nChecking the live timeline projection.',
+          chunkIndex: 0,
+        ),
+      ),
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 350));
+    _emitSessionEvent(
+      sessionId: sessionId,
+      payload: MessagePartUpdatedPayload(
+        part: timelinePartSnapshotFromJson({
+          'partId': '$assistantMessageId:reasoning-1',
+          'messageId': assistantMessageId,
+          'sessionId': sessionId,
+          'turnId': assistantMessageId,
+          'type': 'reasoning',
+          'order': 0,
+          'revision': 2,
+          'status': 'completed',
+          'createdAt': now + 1,
+          'updatedAt': now + 1,
+          'text':
+              '## Inspecting the request\n\n'
+              'Checking the live timeline projection.',
+        }),
+      ),
+    );
+    _emitSessionEvent(
+      sessionId: sessionId,
+      payload: MessagePartUpdatedPayload(
+        part: timelinePartSnapshotFromJson({
+          'partId': '$assistantMessageId:reasoning-2',
+          'messageId': assistantMessageId,
+          'sessionId': sessionId,
+          'turnId': assistantMessageId,
+          'type': 'reasoning',
+          'order': 1,
+          'revision': 0,
+          'status': 'streaming',
+          'createdAt': now + 1,
+          'updatedAt': now + 1,
+          'text': '## Preparing the tool call',
+        }),
+      ),
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 350));
+    _emitSessionEvent(
+      sessionId: sessionId,
+      payload: MessagePartUpdatedPayload(
+        part: timelinePartSnapshotFromJson({
+          'partId': '$assistantMessageId:reasoning-2',
+          'messageId': assistantMessageId,
+          'sessionId': sessionId,
+          'turnId': assistantMessageId,
+          'type': 'reasoning',
+          'order': 1,
+          'revision': 1,
+          'status': 'completed',
+          'createdAt': now + 1,
+          'updatedAt': now + 1,
+          'text':
+              '## Preparing the tool call\n\n'
+              'Selecting the smallest verification command.',
+        }),
+      ),
+    );
+    _emitSessionEvent(
+      sessionId: sessionId,
+      payload: TurnChangedPayload(
+        turn: StudioTurnView(sessionId: sessionId, status: 'runningTool'),
+      ),
+    );
+    _emitSessionEvent(
+      sessionId: sessionId,
+      payload: MessagePartUpdatedPayload(
+        part: timelinePartSnapshotFromJson({
+          'partId': '$assistantMessageId:tool',
+          'messageId': assistantMessageId,
+          'sessionId': sessionId,
+          'turnId': assistantMessageId,
+          'type': 'tool',
+          'order': 2,
+          'revision': 0,
+          'status': 'running',
+          'createdAt': now + 1,
+          'updatedAt': now + 1,
+          'tool': {
+            'toolCallId': '$assistantMessageId:tool-call',
+            'name': 'exec',
+            'arguments': jsonEncode({
+              'command': 'flutter test test/widget_test.dart',
+            }),
+          },
+        }),
+      ),
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+    _emitSessionEvent(
+      sessionId: sessionId,
+      payload: MessagePartUpdatedPayload(
+        part: timelinePartSnapshotFromJson({
+          'partId': '$assistantMessageId:tool',
+          'messageId': assistantMessageId,
+          'sessionId': sessionId,
+          'turnId': assistantMessageId,
+          'type': 'tool',
+          'order': 2,
+          'revision': 1,
+          'status': 'completed',
+          'createdAt': now + 1,
+          'updatedAt': now + 1,
+          'tool': {
+            'toolCallId': '$assistantMessageId:tool-call',
+            'name': 'exec',
+            'arguments': jsonEncode({
+              'command': 'flutter test test/widget_test.dart',
+            }),
+            'result': 'All widget tests passed.',
+          },
+        }),
+      ),
+    );
+    _emitSessionEvent(
+      sessionId: sessionId,
+      payload: TurnChangedPayload(
+        turn: StudioTurnView(sessionId: sessionId, status: 'streaming'),
+      ),
+    );
+    _emitSessionEvent(
+      sessionId: sessionId,
+      payload: MessagePartUpdatedPayload(
+        part: timelinePartSnapshotFromJson({
           'partId': '$assistantMessageId:text',
           'messageId': assistantMessageId,
           'sessionId': sessionId,
+          'turnId': assistantMessageId,
           'type': 'text',
-          'order': 1,
+          'order': 3,
           'revision': 0,
           'status': 'completed',
           'createdAt': now + 1,
@@ -462,8 +617,8 @@ class DemoStudioApi implements StudioApi {
           'textChannel': 'final',
           'text':
               'Demo response for: **$trimmed**\n\n'
-              '- FRB session stream is connected\n'
-              '- Markdown renders through the live timeline path',
+              '- Reasoning summaries update in one activity row\n'
+              '- Tool activity takes over without duplicating history',
         }),
       ),
     );

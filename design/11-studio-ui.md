@@ -249,7 +249,9 @@ Security 页是紧凑的权限配置页，不使用与 provider/MCP 相同的大
 - `messagePartDelta` 可以实时显示 text/reasoning/tool/plan 中间输出。
 - terminal snapshot 清除 overlay，snapshot/replay 与 live terminal UI 收敛。
 - 用户一次输入只出现一条用户消息。
-- 多个 reasoning part 不复用旧 row，不发生“新思考更新到旧信息上”。
+- reasoning part 保持各自稳定身份和 revision；Flutter 仅把同一 assistant message 内连续相邻的
+  reasoning part 投影为一个稳定展示组，不跨 tool、text、plan、agent 或消息边界合并，也不
+  发生“新思考更新到旧 part 上”。
 - 真实 UI 回归通过：项目/会话侧栏、输入、流式输出、停止、切换 session、Plan 确认、tool approval、user input、状态栏和全部设置页均可用。
 
 ## 6. 视觉与组件约定
@@ -263,7 +265,15 @@ Pure Studio UI 采用低对比、紧凑、可扫描的桌面工具风格：侧�
 
 Flutter 端使用 Material 3 的工具型界面表达同一信息架构：`NavigationRail`/紧凑侧栏承载项目和会话，主区承载 timeline、状态栏和 composer/dock，Settings 作为全窗口页面替换聊天页。Provider、Instructions、Skills、Roles、MCP、Security、General 以 tab 或分段导航组织；Security 页保持紧凑设置组，Provider/MCP 页允许更密集的表单和状态卡。图标按钮优先使用 Material Icons，按钮内文字必须在桌面和窄屏约束下不溢出。
 
-Flutter 主聊天界面视觉应靠拢 Codex 桌面版的工作台气质：中性色浅色主题、低对比侧栏、白色阅读面、单一聚焦 composer 托盘和轻量状态信息行。Timeline 中普通 assistant 正文不使用卡片背景；reasoning、plan、agent 等结构化 part 使用轻边框面板，tool 使用默认折叠的低对比内联摘要，避免高频工具调用形成连续卡片。用户消息使用窄宽度浅色气泡，避免大面积品牌色。状态栏默认只展示当前模式、planner 模型、上下文、费用与活动能力摘要，不重复显示已在模型选择控件中的 runtime model；高频或诊断信息通过 tooltip/popover 承载。
+Flutter 主聊天界面视觉应靠拢 Codex 桌面版的工作台气质：中性色浅色主题、低对比侧栏、白色阅读面、单一聚焦 composer 托盘和轻量状态信息行。Timeline 中普通 assistant 正文不使用卡片背景；plan、agent 等结构化 part 使用轻边框面板，reasoning 与 tool 使用默认折叠的低对比内联摘要，避免高频活动形成连续卡片。用户消息使用窄宽度浅色气泡，避免大面积品牌色。状态栏默认只展示当前模式、planner 模型、上下文、费用与活动能力摘要，不重复显示已在模型选择控件中的 runtime model；高频或诊断信息通过 tooltip/popover 承载。
+
+Timeline 尾部最多突出一个当前活动位。等待批准或运行中的 tool 优先于仍未终态的 reasoning；
+没有对应 part 时才按当前 turn phase 展示紧凑阶段占位。活动 reasoning 只显示最新 part 的单行
+摘要并随 delta 原地刷新；活动 tool 显示当前工具、命令、搜索词或路径。活动完成后使用同一稳定
+身份沉入低对比历史组，不复制第二行。连续 reasoning 历史组折叠为一行，摘要最多展示三个
+reasoning 段标题并标记剩余数量，展开后按原 part 顺序显示完整非空 Markdown。reasoning 和 tool
+活动行不使用 assistant 头像、卡片背景或常驻状态 pill；失败、拒绝、审批和预算受限仍明确展示
+结构化原因。
 
 Flutter shell 的二级视觉层级继续收敛：顶部 Header 明确分为两层，第一层只放大会话标题，
 第二层放项目末级名称、分支、Task 阶段、保存/同步状态和唯一 `n agents` compact 状态项；

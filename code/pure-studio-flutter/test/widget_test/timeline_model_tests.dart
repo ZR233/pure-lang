@@ -32,7 +32,7 @@ void registerTimelineModelTests() {
     );
   });
 
-  test('timeline reasoning part preserves text and render version', () {
+  test('timeline reasoning group preserves text and render version', () {
     final now = DateTime.fromMillisecondsSinceEpoch(0);
     final message = TimelineMessage(
       id: 'message-1',
@@ -66,8 +66,95 @@ void registerTimelineModelTests() {
 
     final first = rowForReasoning('alpha');
     final second = rowForReasoning('bravo');
-    expect(first.part!.text, 'alpha');
+    expect(first.reasoningGroup!.details, 'alpha');
+    expect(first.reasoningGroup!.latestSummary, 'alpha');
     expect(first.renderVersion, isNot(second.renderVersion));
+  });
+
+  test('timeline only groups adjacent reasoning parts', () {
+    final now = DateTime.fromMillisecondsSinceEpoch(0);
+    final message = TimelineMessage(
+      id: 'turn-1:assistant',
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      role: 'assistant',
+      createdAt: now,
+    );
+
+    TimelinePart reasoning({
+      required String id,
+      required int order,
+      required String text,
+      String status = 'completed',
+    }) {
+      return TimelinePart(
+        id: id,
+        messageId: message.id,
+        sessionId: message.sessionId,
+        turnId: message.turnId,
+        type: TimelinePartType.reasoning,
+        order: order,
+        text: text,
+        status: status,
+      );
+    }
+
+    final rows = timelineRowsFromMessages(
+      [message],
+      parts: [
+        reasoning(id: 'reasoning-a', order: 0, text: '## 检查输入'),
+        reasoning(id: 'reasoning-b', order: 1, text: '**确认边界**'),
+        _toolTimelinePart(
+          id: 'tool-a',
+          messageId: message.id,
+          turnId: message.turnId,
+          order: 2,
+          name: 'read_file',
+        ),
+        reasoning(
+          id: 'reasoning-c',
+          order: 3,
+          text: '<!-- -->',
+          status: 'streaming',
+        ),
+        reasoning(id: 'reasoning-d', order: 4, text: '- 继续分析'),
+        TimelinePart(
+          id: 'final-a',
+          messageId: message.id,
+          sessionId: message.sessionId,
+          turnId: message.turnId,
+          type: TimelinePartType.text,
+          order: 5,
+          text: 'answer',
+          textChannel: TimelineTextChannel.finalAnswer,
+        ),
+      ],
+    );
+
+    expect(rows.map((row) => row.type), [
+      TimelineRowType.reasoningSummary,
+      TimelineRowType.toolGroup,
+      TimelineRowType.reasoningSummary,
+      TimelineRowType.finalAnswer,
+    ]);
+    final firstGroup = rows.first.reasoningGroup!;
+    expect(
+      firstGroup.id,
+      'reasoning-group:session-1:turn-1:assistant:reasoning-a',
+    );
+    expect(firstGroup.parts.map((part) => part.id), [
+      'reasoning-a',
+      'reasoning-b',
+    ]);
+    expect(firstGroup.summaries, ['检查输入', '确认边界']);
+    final secondGroup = rows[2].reasoningGroup!;
+    expect(secondGroup.parts.map((part) => part.id), [
+      'reasoning-c',
+      'reasoning-d',
+    ]);
+    expect(secondGroup.summaries, ['继续分析']);
+    expect(secondGroup.latestSummary, '继续分析');
+    expect(secondGroup.isActive, isTrue);
   });
 
   test('timeline only groups adjacent tool parts', () {

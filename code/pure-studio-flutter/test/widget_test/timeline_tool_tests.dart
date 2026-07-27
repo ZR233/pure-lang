@@ -46,6 +46,7 @@ void registerTimelineToolTests() {
             height: 480,
             child: TimelineView(
               sessionId: 'session-1',
+              turnPhase: TurnPhase.completed,
               rows: timelineRowsFromMessages([message], parts: [part]),
             ),
           ),
@@ -55,7 +56,7 @@ void registerTimelineToolTests() {
     await tester.pump();
 
     expect(find.text('web_search running'), findsOneWidget);
-    expect(find.text('running'), findsOneWidget);
+    expect(find.text('running'), findsNothing);
     expect(find.text('Finding text on a page'), findsNothing);
     expect(find.textContaining('https://example.com/page'), findsNothing);
     expect(find.text('Result links'), findsNothing);
@@ -173,6 +174,7 @@ void registerTimelineToolTests() {
             height: 520,
             child: TimelineView(
               sessionId: 'session-1',
+              turnPhase: TurnPhase.completed,
               rows: timelineRowsFromMessages(messages, parts: [part]),
             ),
           ),
@@ -279,7 +281,11 @@ void registerTimelineToolTests() {
           body: SizedBox(
             width: 980,
             height: 520,
-            child: TimelineView(sessionId: 'session-1', rows: rows),
+            child: TimelineView(
+              sessionId: 'session-1',
+              rows: rows,
+              turnPhase: TurnPhase.completed,
+            ),
           ),
         ),
       ),
@@ -389,6 +395,7 @@ void registerTimelineToolTests() {
             height: 620,
             child: TimelineView(
               sessionId: 'session-1',
+              turnPhase: TurnPhase.completed,
               rows: timelineRowsFromMessages([message], parts: parts),
             ),
           ),
@@ -480,6 +487,7 @@ void registerTimelineToolTests() {
             height: 520,
             child: TimelineView(
               sessionId: 'session-1',
+              turnPhase: TurnPhase.completed,
               rows: timelineRowsFromMessages([message], parts: parts),
             ),
           ),
@@ -495,7 +503,7 @@ void registerTimelineToolTests() {
       ),
       findsOneWidget,
     );
-    expect(find.text('awaitingApproval'), findsOneWidget);
+    expect(find.text('awaitingApproval'), findsNothing);
 
     await tester.tap(
       find.text(
@@ -555,6 +563,7 @@ void registerTimelineToolTests() {
             height: 820,
             child: TimelineView(
               sessionId: 'session-1',
+              turnPhase: TurnPhase.completed,
               rows: timelineRowsFromMessages([message], parts: parts),
             ),
           ),
@@ -606,6 +615,7 @@ void registerTimelineToolTests() {
             height: 820,
             child: TimelineView(
               sessionId: 'session-1',
+              turnPhase: TurnPhase.completed,
               rows: timelineRowsFromMessages([message], parts: parts),
             ),
           ),
@@ -672,6 +682,7 @@ void registerTimelineToolTests() {
             height: 820,
             child: TimelineView(
               sessionId: 'session-1',
+              turnPhase: TurnPhase.completed,
               rows: timelineRowsFromMessages([message], parts: parts),
             ),
           ),
@@ -686,5 +697,99 @@ void registerTimelineToolTests() {
     expect(find.textContaining('└──<html>'), findsOneWidget);
     expect(find.textContaining('###整体层级```'), findsNothing);
     expect(find.textContaining('CSS组织```'), findsNothing);
+  });
+
+  testWidgets('timeline gives the current tool priority over reasoning', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 700);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final message = TimelineMessage(
+      id: 'message-current-tool',
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      role: 'assistant',
+      createdAt: DateTime.fromMillisecondsSinceEpoch(0),
+    );
+    final reasoning = TimelinePart(
+      id: 'reasoning-current',
+      messageId: message.id,
+      sessionId: message.sessionId,
+      turnId: message.turnId,
+      type: TimelinePartType.reasoning,
+      order: 0,
+      text: '## Inspecting the implementation',
+      status: 'streaming',
+    );
+
+    Widget timelineFor(TimelinePart tool, TurnPhase phase) {
+      return _timelineApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 980,
+            height: 520,
+            child: TimelineView(
+              sessionId: message.sessionId,
+              rows: timelineRowsFromMessages(
+                [message],
+                parts: [reasoning, tool],
+              ),
+              turnPhase: phase,
+            ),
+          ),
+        ),
+      );
+    }
+
+    final runningTool = _toolTimelinePart(
+      id: 'tool-current',
+      messageId: message.id,
+      turnId: message.turnId,
+      order: 1,
+      name: 'exec',
+      status: 'running',
+      arguments: jsonEncode({'command': 'flutter test test/widget_test.dart'}),
+    );
+    await tester.pumpWidget(timelineFor(runningTool, TurnPhase.runningTool));
+    await tester.pumpAndSettle();
+
+    final currentActivity = find.byKey(
+      const ValueKey('timeline-current-activity'),
+    );
+    expect(currentActivity, findsOneWidget);
+    expect(
+      find.descendant(
+        of: currentActivity,
+        matching: find.textContaining('flutter test test/widget_test.dart'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Inspecting the implementation'), findsOneWidget);
+
+    final completedTool = _toolTimelinePart(
+      id: 'tool-current',
+      messageId: message.id,
+      turnId: message.turnId,
+      order: 1,
+      name: 'exec',
+      status: 'completed',
+      arguments: jsonEncode({'command': 'flutter test test/widget_test.dart'}),
+      result: 'passed',
+    );
+    await tester.pumpWidget(timelineFor(completedTool, TurnPhase.streaming));
+    await tester.pumpAndSettle();
+
+    expect(currentActivity, findsOneWidget);
+    expect(
+      find.descendant(
+        of: currentActivity,
+        matching: find.text('Inspecting the implementation'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('exec completed'), findsOneWidget);
   });
 }

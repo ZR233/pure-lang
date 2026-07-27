@@ -1,6 +1,6 @@
 part of 'timeline_view.dart';
 
-enum _MarkdownSurface { assistant, user, panel }
+enum _MarkdownSurface { assistant, user, panel, reasoning }
 
 final List<MarkdownComponent> _studioMarkdownComponents = MarkdownComponent
     .globalComponents
@@ -28,7 +28,7 @@ class _AgentMarkdown extends StatelessWidget {
     return GptMarkdown(
       repaired,
       key: ValueKey('gpt-markdown-$id-$status'),
-      style: _markdownBodyStyle(context),
+      style: _markdownBodyStyle(context, surface),
       components: _studioMarkdownComponents,
       highlightBuilder: (context, text, style) {
         return _MarkdownInlineCode(text: text, style: style, surface: surface);
@@ -39,17 +39,22 @@ class _AgentMarkdown extends StatelessWidget {
         final codeBackground = surface == _MarkdownSurface.user
             ? scheme.surfaceContainerHigh
             : scheme.surfaceContainerLow;
+        final bodyStyle = surface == _MarkdownSurface.reasoning
+            ? textTheme.bodySmall
+            : textTheme.bodyMedium;
         return StudioCodeBlock(
           text: code,
           language: name,
           margin: const EdgeInsets.symmetric(vertical: 6),
           backgroundColor: codeBackground,
           borderColor: scheme.outlineVariant,
-          textStyle: textTheme.bodyMedium?.copyWith(
-            color: scheme.onSurface,
+          textStyle: bodyStyle?.copyWith(
+            color: surface == _MarkdownSurface.reasoning
+                ? context.studioInkSoft
+                : scheme.onSurface,
             fontFamily: 'JetBrains Mono',
             fontFamilyFallback: const ['Consolas', 'monospace'],
-            fontSize: (textTheme.bodyMedium?.fontSize ?? 14) * 0.92,
+            fontSize: (bodyStyle.fontSize ?? 14) * 0.92,
             height: 1.35,
           ),
         );
@@ -58,8 +63,14 @@ class _AgentMarkdown extends StatelessWidget {
   }
 }
 
-TextStyle? _markdownBodyStyle(BuildContext context) {
+TextStyle? _markdownBodyStyle(BuildContext context, _MarkdownSurface surface) {
   final theme = Theme.of(context);
+  if (surface == _MarkdownSurface.reasoning) {
+    return theme.textTheme.bodySmall?.copyWith(
+      color: context.studioInkSoft,
+      height: 1.48,
+    );
+  }
   return theme.textTheme.bodyMedium?.copyWith(
     color: theme.colorScheme.onSurface,
     height: 1.52,
