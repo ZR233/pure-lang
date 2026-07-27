@@ -117,8 +117,9 @@ provider 不含第二份 `default_model`。
 `pl-studio-runtime` 拥有 Studio 配置、SQLite repository 适配、product event、
 project/session/task/worktree、Simple/Task 策略和 Studio-only wire DTO。session timeline
 事件直接消费 `pl-protocol` 公共类型，不在 Studio 重做 trace mapping。`pl-studio-bridge`
-只依赖该 crate。Studio 配置与数据库独立演进；当前数据库版本为 5。旧数据库通过带备份的
-事务迁移升级，未来版本明确拒绝打开，任何迁移失败都不得删除或降级原数据库。
+只依赖该 crate。Studio 配置与数据库独立演进；当前数据库版本为 5。受支持的旧数据库通过
+带备份的事务迁移升级；未版本化且已有用户表的 legacy 数据库不做结构兼容，而是归档原库后
+重建当前 schema。未来版本明确拒绝打开，任何迁移失败都不得删除或降级原数据库。
 
 ## 17.9 Session 订阅不变量
 

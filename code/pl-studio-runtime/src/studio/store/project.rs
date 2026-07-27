@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectOptions, ConnectionTrait, Database,
     DatabaseBackend, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Statement,
@@ -39,13 +39,20 @@ impl StudioStore {
             if version == STUDIO_DATABASE_SCHEMA_VERSION {
                 false
             } else if version == 0 {
+                if database_has_user_tables(&db).await? {
+                    checkpoint_sqlite(&db).await?;
+                    db.close().await?;
+                    let backup = archive_incompatible_database(path).await?;
+                    eprintln!(
+                        "检测到不兼容的未版本化 Studio 数据库，已备份到 {} 并重建。",
+                        backup.display()
+                    );
+                    db = connect_sqlite(&url).await?;
+                    configure_sqlite(&db).await?;
+                }
                 true
             } else if version < STUDIO_DATABASE_SCHEMA_VERSION {
-                db.execute(Statement::from_string(
-                    DatabaseBackend::Sqlite,
-                    "PRAGMA wal_checkpoint(TRUNCATE)".to_string(),
-                ))
-                .await?;
+                checkpoint_sqlite(&db).await?;
                 db.close().await?;
                 backup_database(path, version).await?;
                 db = connect_sqlite(&url).await?;
@@ -243,6 +250,74 @@ async fn database_schema_version(db: &DatabaseConnection) -> Result<i64> {
         .await?
         .ok_or_else(|| anyhow::anyhow!("SQLite 未返回 user_version"))?;
     Ok(row.try_get("", "user_version")?)
+}
+
+async fn database_has_user_tables(db: &DatabaseConnection) -> Result<bool> {
+    let row = db
+        .query_one(Statement::from_string(
+            DatabaseBackend::Sqlite,
+            "SELECT EXISTS(
+                 SELECT 1
+                 FROM sqlite_schema
+                 WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+             ) AS has_user_tables"
+                .to_string(),
+        ))
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("SQLite 未返回用户表检查结果"))?;
+    Ok(row.try_get::<i64>("", "has_user_tables")? != 0)
+}
+
+async fn checkpoint_sqlite(db: &DatabaseConnection) -> Result<()> {
+    db.execute(Statement::from_string(
+        DatabaseBackend::Sqlite,
+        "PRAGMA wal_checkpoint(TRUNCATE)".to_string(),
+    ))
+    .await?;
+    Ok(())
+}
+
+async fn archive_incompatible_database(path: &Path) -> Result<PathBuf> {
+    let backup = next_legacy_backup_path(path).await?;
+    tokio::fs::rename(path, &backup).await.with_context(|| {
+        format!(
+            "无法将不兼容的 Studio 数据库 {} 归档到 {}",
+            path.display(),
+            backup.display()
+        )
+    })?;
+
+    for suffix in ["-wal", "-shm"] {
+        let sidecar = PathBuf::from(format!("{}{suffix}", path.display()));
+        if tokio::fs::try_exists(&sidecar).await? {
+            let backup_sidecar = PathBuf::from(format!("{}{suffix}", backup.display()));
+            tokio::fs::rename(&sidecar, &backup_sidecar)
+                .await
+                .with_context(|| {
+                    format!(
+                        "无法将 SQLite sidecar {} 归档到 {}",
+                        sidecar.display(),
+                        backup_sidecar.display()
+                    )
+                })?;
+        }
+    }
+    Ok(backup)
+}
+
+async fn next_legacy_backup_path(path: &Path) -> Result<PathBuf> {
+    let base = PathBuf::from(format!("{}.legacy-v0.bak", path.display()));
+    if !tokio::fs::try_exists(&base).await? {
+        return Ok(base);
+    }
+
+    for sequence in 1_u32.. {
+        let candidate = PathBuf::from(format!("{}.legacy-v0.{sequence}.bak", path.display()));
+        if !tokio::fs::try_exists(&candidate).await? {
+            return Ok(candidate);
+        }
+    }
+    unreachable!("u32 backup sequence space must not be exhausted")
 }
 
 async fn backup_database(path: &Path, version: i64) -> Result<PathBuf> {

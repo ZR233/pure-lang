@@ -6,6 +6,7 @@ use crate::StudioMode;
 use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
 
 mod attachment;
+mod database_rebuild;
 mod project_archive;
 mod schema;
 mod session_mode_visibility;
