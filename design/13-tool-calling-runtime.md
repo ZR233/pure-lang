@@ -120,6 +120,13 @@ Windows 本地 backend 上 `exec.command` 的默认宿主 shell 是 PowerShell�
 
 `spawn_agent`、`send_input`、`wait_agent`、`list_agents` 和 `close_agent` 的模型可见输出必须由 pl-core collaboration adapter 从 runtime typed snapshot 构造；宿主只通过 lifecycle、repository 与 event sink 提供产品资源和持久化事实，不手写共享状态形状。`send_input` 的模型 schema 只包含 `target/message/delivery/metadata`，不接受 `sessionId`；runtime resolver 将 target 解析为当前 owner session 并验证同一大会话树、权限、owner revision 与 lifecycle，不存在 caller-session fallback。`wait_agent` 在目标 `Idle` 且队列为空时返回 `{ target, timedOut: false, snapshot, lastTurn }`，超时仅返回 `{ target, timedOut: true }`；需要树级状态时调用 `list_agents` 获取 compact snapshot。timeout 是成功的非终态结果，运行时提示不得鼓励模型无条件立即重复相同轮询；普通 child 使用 lifecycle watcher 在终态写入一次幂等 `AgentResult`，只有父已有等待 continuation 时才唤醒。后续输入由 `send_input.delivery` 的 `QueueOnly | Start | InterruptThenStart` 明确表达，不存在单独的 resume 命令。Studio 把 owner lifecycle 投影到大会话级 Agent Directory；每个 agent session 的 `SubAgentActivity` 只记录该 owner 主动执行的协作事实，`TodoListUpdated` 作为完整 replacement 保存在该 session 的 canonical snapshot 中。`spawn_agent.forkTurns` 的历史继承只复制过滤后的父会话消息，不复制工具结果、工具调用 metadata、reasoning 内容或运行时调度提示。
 
+产品 harness 的 spawn 契约不扩展通用 `spawn_agent` schema。Task 的
+`task_spawn_executor` 以 required `taskName/message/ownedPaths` 建模安全和交付不变量，
+在 runtime spawn 前完成路径静态校验，并将可信内部 intent 交给 Studio lifecycle；
+`task_request_review` 同样固定 reviewer intent。两者都创建 fresh `AgentSession`，不使用
+`spawn_agent.forkTurns`，但仍复用 `AgentRuntime` 的容量、repository、lifecycle saga、
+turn 启动与失败补偿。
+
 `update_todo_list` 是 Codex `update_plan` 风格的内置 checklist 工具，root agent 与 subagent 都可用，且不代表 Plan Mode 的 `plan` part。工具输入是完整快照：`explanation?: string` 与 `items: [{ step, status }]`，其中 `status` 只允许 `pending | inProgress | completed`，且同一快照最多一个 `inProgress`。工具成功后只返回紧凑 `{ status: "updated" }` 给模型，同时提交 `TodoListUpdated` durable replacement；canonical session snapshot 保留最新 replacement，Flutter Todo selector 只展示最新值，不按 patch 增量合并，也不把历次更新渲染为 timeline row。
 
 会话笔记是独立于模型历史和 pinned context 的持久化文本。它作为隐藏的

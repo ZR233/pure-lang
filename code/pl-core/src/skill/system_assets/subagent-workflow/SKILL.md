@@ -14,6 +14,12 @@ Use `spawn_agent` for managed asynchronous work. The parent coordinates with `wa
 
 Avoid subagents when the task is small, strongly sequential, or requires one shared edit context.
 
+If the active product exposes a dedicated role or workflow spawn tool, use that tool for the
+managed role instead of emulating it with generic `spawn_agent` metadata. Product tools may enforce
+resource ownership, worktrees, delivery contracts, review authorization, or fresh-session rules that
+generic collaboration does not model. In Pure Studio Task mode, use `spawn_agent` only for
+explorers, `task_spawn_executor` for executors, and `task_request_review` for reviewers.
+
 ## Partitioning
 
 Give each child a narrow role and clear output contract:

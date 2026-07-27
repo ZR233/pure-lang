@@ -10,9 +10,10 @@ Studio 会话模式固定为 `simple | task`。新会话默认 `simple`；数据
   提交计划、更新设计、发起代理、消费结果、掌管当前分支、解决 merge 冲突、启动
   reviewer 和完成汇报。
 
-explorer、executor、reviewer 的 agent depth 固定为 1，不得派生后代。它们只能由
-planner 直接创建，或由 planner 调用 harness 后间接创建；所有终态结果必须回流
-planner。
+explorer、executor、reviewer 的 agent depth 固定为 1，不得派生后代。Task 根的通用
+`spawn_agent` 只允许创建 explorer；executor 必须由 planner 调用
+`task_spawn_executor { taskName, message, ownedPaths }` 创建，reviewer 必须由 planner
+调用 `task_request_review` 间接创建。所有终态结果必须回流 planner。
 
 ## 执行边界
 
@@ -124,6 +125,30 @@ directory、干净工作区及两条持久事实的 `expectedHead` 都与当前 
 同一工作单元的重试身份由排序后的规范 `ownedPaths` 集合确定，不依赖 planner 可改写的
 标题；同一任务内该身份最多分配三次。
 
+executor 分配使用专用、严格类型化的模型工具：
+
+```text
+task_spawn_executor {
+  taskName: string,
+  message: string,
+  ownedPaths: string[]
+}
+```
+
+三个字段全部必填，`ownedPaths` 至少一项。工具在调用通用 `AgentRuntime::spawn` 前用
+唯一的 `OwnedPath` 解析模型完成规范化、非法路径和重叠检查；静态校验失败不得创建
+Outcome、WorkUnit、worktree、Studio session 或 agent registry 条目。Studio 将通过校验的
+输入转换为内部 `StudioSpawnIntent`，lifecycle 只解析一次该类型；模型不能再用通用
+`spawn_agent.metadata` 构造 executor 分配。lifecycle 仍保留 harness kind、角色、
+session、路径范围和 call id 的最终不变量校验。
+
+executor 固定使用 fresh session，不暴露父历史继承参数。planner 必须在 `message` 中提供
+完整任务说明、设计提交和验收要求；Studio 另行生成有界 developer constraint，列出规范
+`ownedPaths`，要求只修改所属 worktree、提交并调用 `submit_delivery`，并禁止派生、合并
+或操作用户分支。成功结果只返回 `{ agentId, sessionId, turnId, ownedPaths }`，并立即结束
+当前 planner turn。planner 不在派生前快照中轮询、追派 executor 或读取子 worktree；
+delivery 提交或 executor terminal 事实会用最新 durable Task snapshot 唤醒 planner。
+
 ## Executor 交付
 
 executor 必须先自行 commit，并调用：
@@ -133,14 +158,18 @@ submit_delivery { headCommit, verificationSummary }
 ```
 
 每个 task executor outcome 持久化 `CompletionContract::DeliveryRequired`，包含 task run、
-work unit 与一次 recovery 上限。executor turn 进入 terminal 时 coordinator 必须检查合同，
-不能只按 actor Idle 视为任务完成：已有合法 delivery 时完成合同并通知 Planner；worktree
-无改动且 HEAD 未推进时以 `noDelivery` 失败；HEAD 已推进或仍有未提交修改时进入
+work unit 与一次 recovery 上限。合法 `submit_delivery` 在同一事务中写入 Completed outcome
+和 Delivered work unit，提交成功后显式请求 Planner continuation；它不得依赖稍后到达的
+terminal projector 间接唤醒，也不得清除已经持久化的 terminal observation。executor turn
+进入 terminal 时 coordinator 仍必须检查合同，不能只按 actor Idle 视为任务完成：
+worktree 无改动且 HEAD 未推进时以 `noDelivery` 失败；HEAD 已推进或仍有未提交修改时进入
 `WaitingForDelivery`，保留 session、worktree 和 lease，并向同一 executor 投递一次受控
 recovery，要求实际验证、提交并调用 `submit_delivery`。recovery 后仍未交付则明确失败并保留
 worktree 诊断，不自动合并、不伪造 verification summary。Task executor 始终注册持久
 completion watcher，合同终结后幂等唤醒已有 Planner continuation，不依赖高频 `wait_agent`
-轮询。recovery claim 与 runtime FIFO 之间使用由 outcome id 和 recovery count 生成的稳定
+轮询。continuation 去重同时识别 queued turn 和正在执行的 ephemeral 受管续轮；普通 root
+turn 不参与 running 去重，以免吞掉 child terminal 的后续输入。recovery claim 与 runtime
+FIFO 之间使用由 outcome id 和 recovery count 生成的稳定
 dispatch id；claim 提交后若进程退出，重启必须复用同一 claim。runtime durable turn metadata
 已存在该 dispatch id 时不得重复提交；该 turn 已终态但产品投影尚未完成时，恢复流程先重放
 terminal 投影再唤醒 Planner。这样 claim 提交、runtime submit 和产品 terminal 投影三个边界
@@ -304,10 +333,16 @@ branch mutation lock 的情况下 interrupt active turn 并等待 canonical term
 显式传入的 branch mutation guard 必须绑定创建它的 coordinator；其他 coordinator 的
 guard 不得授权 locked mutation API。
 
-当前编码轮全部交付合并后，planner 调用 `task_request_review` 间接创建只读 reviewer。
-reviewer 初始上下文包含 plan、任务 diff、代理结果、验证摘要和 design 文件索引，不
-预载 design 正文。系统提示词要求 reviewer 根据改动主动搜索并读取相关 design，再
-对照设计审查正确性、回归、安全和测试缺口。
+当前编码轮全部交付合并后，planner 必须先用 `task_update_design` 把 `designCommit`
+推进到当前 `expectedHead`，再调用 `task_request_review` 间接创建只读 reviewer。
+review harness 在创建 round 和派生 reviewer 前重新校验该不变量，使设计不一致在
+仍可更新设计的 `implementing/reworking` 阶段失败，不能进入只读 `reviewing` 后才暴露。
+reviewer 成功启动后同样结束当前 planner turn；reviewer terminal 事件以最新 review round
+和 HEAD 生成 continuation，planner 不在旧 turn 中等待或再次向 reviewer 发送输入。
+reviewer 使用 fresh session，不复制 planner 完整历史；harness 生成的自包含初始 prompt
+包含 plan、任务 diff、代理结果、验证摘要和 design 文件索引，不预载 design 正文。系统
+提示词要求 reviewer 根据改动主动搜索并读取相关 design，再对照设计审查正确性、回归、
+安全和测试缺口。
 
 审查创建以 `task_request_review` 的 provider call id 作为一次性持久授权。harness 消费
 该授权后，`ReviewRound`、reviewer `AgentOutcome`、`ownerPath=/root` 和
@@ -346,5 +381,7 @@ work unit、outcome 和 merge 都必须已收束。存在已接受 source merge 
 只有无可恢复成果时才在短锁事务中进入 `stopping`，将剩余 durable agent/work unit 收束为
 `cancelled`，最后重新进入 branch mutation lock。尚无 source merge 时，如已接受 design commit，
 必须先创建受控 revert commit；已有 source merge 时，必须先由 planner 更新 design 到当前
-实现。存在尚未安全 abort 的 merge/conflict 时停止操作拒绝终态写入，保留现场供 planner
-使用冲突工具处理。取消终态与 BranchLease 删除同样在一个事务中完成。
+实现。该设计一致性检查必须在写入 `StopRequested` 和进入不可逆 `stopping` 之前完成；
+检查失败时 run 保持原 phase 且仍可调用 `task_update_design`。存在尚未安全 abort 的
+merge/conflict 时停止操作拒绝终态写入，保留现场供 planner 使用冲突工具处理。取消终态与
+BranchLease 删除同样在一个事务中完成。

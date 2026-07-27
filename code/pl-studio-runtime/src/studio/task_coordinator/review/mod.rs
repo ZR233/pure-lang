@@ -7,11 +7,11 @@ use std::sync::Arc;
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
-use super::{TaskCoordinator, TaskRunPhase};
+use super::design::design_commit_is_current;
+use super::{StudioSpawnIntent, TaskCoordinator, TaskRunPhase, TaskRunRecord};
 use crate::tool::{RegisteredTool, ToolExecutionResult, strict_tool_input_schema};
 use crate::{
-    AgentRoleId, AgentRuntimeHandle, AgentSessionForkPolicy, AgentSessionState, AgentSpawnRequest,
-    SessionId, ToolEffect,
+    AgentRoleId, AgentRuntimeHandle, AgentSessionState, AgentSpawnRequest, SessionId, ToolEffect,
 };
 
 const REVIEWER_CONSTRAINT: &str = "你是只读代码审查者。先检查完整 plan、综合 diff 和受影响代码。工具顺序是强制门禁：在任何 design read_file 之前，必须先调用 search_files 或 list_files 定位相关 design 文档；然后用 read_file 阅读审查所需正文。对照实际读取的 design 检查一致性，同时检查 bug、回归、安全与测试缺口。所有设计结论必须引用实际读取的 design 路径和章节。最终必须成功调用 review_exit，普通文本结论不算完成；如果结论为 pass，findings 必须是空数组，不要把已通过的检查或 info 说明作为 finding；如果 review_exit 被拒绝，必须根据错误补齐 locator、重新 read_file 并再次调用 review_exit。只能调用只读工具与 review_exit；禁止修改、派生代理、修复、合并或宣布任务完成。";
@@ -54,17 +54,8 @@ impl TaskCoordinator {
                     let guard = coordinator.lock_branch_mutation().await;
                     coordinator.ensure_branch_mutation_guard(&guard)?;
                     let run = coordinator
-                        .store
-                        .read_active_task_run_for_session(&session_id)
+                        .preflight_task_review_locked(&session_id, &guard)
                         .await?;
-                    if !matches!(
-                        run.phase,
-                        TaskRunPhase::Implementing | TaskRunPhase::Reworking
-                    ) {
-                        bail!("task_request_review requires implementing or reworking");
-                    }
-                    coordinator.ensure_process_lease_owned(&run)?;
-                    validate_review_repository(&run).await?;
                     let prompt = prompt::build_review_prompt(&coordinator, &run).await?;
                     let round = coordinator
                         .store
@@ -72,33 +63,21 @@ impl TaskCoordinator {
                         .await?;
                     drop(guard);
                     let reviewer_session_id = SessionId::generate();
+                    let intent = StudioSpawnIntent::task_reviewer(
+                        &session_id,
+                        format!("review_round_{}", round.round),
+                        &call_id,
+                        context.workspace_root,
+                        REVIEWER_CONSTRAINT,
+                    );
                     let spawn = runtime
                         .spawn(AgentSpawnRequest {
                             parent_id: crate::studio::agent_host::root_agent_id(&session_id),
                             role: AgentRoleId::new("reviewer")
                                 .map_err(|error| anyhow::anyhow!(error.to_string()))?,
-                            session: AgentSessionState {
-                                id: reviewer_session_id,
-                                metadata: serde_json::json!({
-                                    "subagentConstraint": REVIEWER_CONSTRAINT,
-                                }),
-                                session: context
-                                    .parent_session
-                                    .fork(AgentSessionForkPolicy::AllMessages),
-                                usage: pl_model::TokenUsage::default(),
-                                last_context_tokens: None,
-                                trace_sequence: 0,
-                                session_event_sequence: 0,
-                            },
+                            session: AgentSessionState::empty(reviewer_session_id),
                             initial_message: Some(prompt),
-                            metadata: serde_json::json!({
-                                "studioSessionId": session_id,
-                                "taskName": format!("review_round_{}", round.round),
-                                "ownedPaths": [],
-                                "requestingToolCallId": call_id,
-                                "workspaceRoot": context.workspace_root,
-                                "subagentConstraint": REVIEWER_CONSTRAINT,
-                            }),
+                            metadata: serde_json::to_value(intent)?,
                         })
                         .await;
                     let handle = match spawn {
@@ -122,11 +101,39 @@ impl TaskCoordinator {
                         head_commit: round.head_commit,
                         round: round.round,
                     })
+                    .map(ToolExecutionResult::ending_turn)
                     .map_err(anyhow::Error::from)
                 }
             },
         )
         .with_effect(ToolEffect::BranchControl)
+    }
+
+    pub(super) async fn preflight_task_review_locked(
+        &self,
+        session_id: &str,
+        guard: &super::BranchMutationGuard<'_>,
+    ) -> Result<TaskRunRecord> {
+        self.ensure_branch_mutation_guard(guard)?;
+        let run = self
+            .store
+            .read_active_task_run_for_session(session_id)
+            .await?;
+        if !matches!(
+            run.phase,
+            TaskRunPhase::Implementing | TaskRunPhase::Reworking
+        ) {
+            bail!("task_request_review requires implementing or reworking");
+        }
+        self.ensure_process_lease_owned(&run)?;
+        validate_review_repository(&run).await?;
+        if !design_commit_is_current(&run) {
+            bail!(
+                "task_request_review requires task_update_design to commit final design \
+                 consistency for the current HEAD"
+            );
+        }
+        Ok(run)
     }
 }
 

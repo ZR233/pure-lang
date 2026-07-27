@@ -22,6 +22,63 @@ use crate::{
 struct TestRuntimeMarker;
 
 #[tokio::test]
+async fn invalid_executor_owned_paths_fail_before_product_allocation() {
+    let fixture = ReviewFixture::new("invalid-executor-owned-paths").await;
+    let worktree_root_existed = fixture.repository.join(".pure/worktrees").exists();
+    let branches_before = git_output(&fixture.repository, &["branch", "--list"]);
+    for (index, owned_paths) in [
+        Vec::<String>::new(),
+        vec!["../src".to_string()],
+        vec!["src/*".to_string()],
+        vec!["src/**".to_string(), "src/lib.rs".to_string()],
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let request = StudioTaskSpawnRequest {
+            agent_id: format!("invalid-executor-{index}"),
+            session_id: fixture.session_id.clone(),
+            task_name: "invalid executor".to_string(),
+            role: "executor".to_string(),
+            owned_paths,
+            requested_by_call_id: format!("call-invalid-{index}"),
+        };
+
+        fixture
+            .coordinator
+            .prepare_agent_spawn(&request)
+            .await
+            .expect_err("invalid ownedPaths must fail before allocation");
+    }
+
+    assert!(
+        fixture
+            .store
+            .list_work_units(&fixture.run_id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        fixture
+            .store
+            .list_agent_outcomes(&fixture.run_id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        fixture.repository.join(".pure/worktrees").exists(),
+        worktree_root_existed
+    );
+    assert_eq!(
+        git_output(&fixture.repository, &["branch", "--list"]),
+        branches_before
+    );
+    fixture.cleanup();
+}
+
+#[tokio::test]
 async fn reviewer_harness_authorization_is_one_shot_and_has_no_work_unit() {
     let fixture = ReviewFixture::new("review-harness-authorization").await;
     let round = fixture
@@ -103,6 +160,47 @@ async fn review_tools_have_role_visibility_and_prompt_only_indexes_design() {
     assert!(prompt.contains("review this implementation"));
     assert!(prompt.contains("- design/guide.md"));
     assert!(!prompt.contains("# Review design"));
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn review_preflight_requires_design_consistency_for_current_head() {
+    let fixture = ReviewFixture::new("review-design-consistency-preflight").await;
+    let branch_guard = fixture.coordinator.lock_branch_mutation().await;
+
+    let error = fixture
+        .coordinator
+        .preflight_task_review_locked(&fixture.session_id, &branch_guard)
+        .await
+        .expect_err("review must not start before final design consistency");
+    assert!(
+        error
+            .to_string()
+            .contains("task_update_design to commit final design consistency")
+    );
+
+    let run = fixture
+        .store
+        .read_task_run(&fixture.run_id)
+        .await
+        .unwrap()
+        .unwrap();
+    fixture
+        .store
+        .advance_task_design_head(&run.id, &run.expected_head, &run.expected_head)
+        .await
+        .unwrap();
+    let ready = fixture
+        .coordinator
+        .preflight_task_review_locked(&fixture.session_id, &branch_guard)
+        .await
+        .unwrap();
+    assert_eq!(
+        ready.design_commit.as_deref(),
+        Some(ready.expected_head.as_str())
+    );
+
+    drop(branch_guard);
     fixture.cleanup();
 }
 
@@ -499,6 +597,64 @@ async fn task_stop_settles_transient_agents_and_atomically_releases_lease() {
             .unwrap()
             .is_none()
     );
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn task_stop_preflight_rejects_stale_design_before_stopping() {
+    let fixture = ReviewFixture::new("task-stop-stale-design-preflight").await;
+    let run = fixture
+        .store
+        .read_task_run(&fixture.run_id)
+        .await
+        .unwrap()
+        .unwrap();
+    let merge = fixture
+        .store
+        .create_merge_record(CreateMergeRecord {
+            task_run_id: run.id.clone(),
+            agent_id: "agent-merged".to_string(),
+            expected_head: run.expected_head.clone(),
+            source_commit: run.expected_head.clone(),
+            conflict_files: Vec::new(),
+        })
+        .await
+        .unwrap();
+    fixture
+        .store
+        .update_merge_record(
+            &merge.id,
+            UpdateMergeRecord {
+                status: MergeStatus::Merged,
+                resolution_summary: None,
+                verification: Some(Vec::new()),
+                attempt: 1,
+            },
+        )
+        .await
+        .unwrap();
+    let branch_guard = fixture.coordinator.lock_branch_mutation().await;
+
+    let error = fixture
+        .coordinator
+        .preflight_task_stop_locked(&fixture.session_id, &branch_guard)
+        .await
+        .expect_err("stop must reject stale design before entering stopping");
+    assert!(
+        error
+            .to_string()
+            .contains("final design consistency update")
+    );
+    let unchanged = fixture
+        .store
+        .read_task_run(&fixture.run_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(unchanged.phase, TaskRunPhase::Implementing);
+    assert!(!unchanged.stop_requested);
+
+    drop(branch_guard);
     fixture.cleanup();
 }
 
@@ -3591,7 +3747,7 @@ async fn successful_delivery_terminal_is_changed_once_then_idempotent() {
 }
 
 #[tokio::test]
-async fn successful_delivery_reopens_terminal_observation_after_waiting() {
+async fn successful_delivery_preserves_terminal_observation_after_waiting() {
     let fixture = DeliveryFixture::new("delivery-after-waiting-terminal", vec!["src/**"]).await;
     let change = StudioAgentTerminalChange {
         agent_id: fixture.subagent.id.clone(),
@@ -3622,8 +3778,7 @@ async fn successful_delivery_reopens_terminal_observation_after_waiting() {
 
     assert!(matches!(
         delivered,
-        TerminalAgentStateRecording::Changed { task_run_id, .. }
-            if task_run_id == fixture.task_run_id
+        TerminalAgentStateRecording::Projected(_)
     ));
     assert!(matches!(
         duplicate,
@@ -4070,7 +4225,7 @@ async fn submit_delivery_tool_has_typed_schema_branch_effect_and_role_visibility
     let coordinator = Arc::new(TaskCoordinator::new(
         StudioStore::open_memory().await.unwrap(),
     ));
-    let tool = coordinator.submit_delivery_tool();
+    let tool = coordinator.submit_delivery_tool(|_| {});
 
     assert_eq!(tool.name(), "submit_delivery");
     assert_eq!(tool.effect(), Some(ToolEffect::BranchControl));
@@ -4093,7 +4248,7 @@ async fn child_dispatch_resolves_delivery_without_task_session_in_tool_input() {
     let fixture = DeliveryFixture::new("delivery-tool-handler", vec!["src/**"]).await;
     fixture.commit_file("src/lib.rs");
     let head = git_output(&fixture.worktree, &["rev-parse", "HEAD"]);
-    let tool = fixture.coordinator.submit_delivery_tool();
+    let tool = fixture.coordinator.submit_delivery_tool(|_| {});
     let (event_tx, _) = tokio::sync::broadcast::channel(16);
     let kernel = AgentKernel::builder(
         TurnEngineBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None)).unwrap(),
@@ -4120,6 +4275,86 @@ async fn child_dispatch_resolves_delivery_without_task_session_in_tool_input() {
     let delivery: AgentDelivery = serde_json::from_str(&output.description).unwrap();
 
     assert_eq!(delivery, fixture.outcome().await.delivery.unwrap());
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn submit_delivery_notifies_after_executor_terminal_was_already_observed() {
+    let fixture = DeliveryFixture::new("delivery-after-terminal-observed", vec!["src/**"]).await;
+    drain_agent_state(
+        &fixture,
+        crate::TurnOutcomeKind::Completed,
+        Some("implementation finished"),
+        None,
+    )
+    .await;
+    fixture.assert_waiting().await;
+    fixture.commit_file("src/lib.rs");
+    let head = git_output(&fixture.worktree, &["rev-parse", "HEAD"]);
+    let notifications = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let captured_notifications = notifications.clone();
+    let tool = fixture
+        .coordinator
+        .submit_delivery_tool(move |task_run_id| {
+            captured_notifications
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(task_run_id);
+        });
+    let (event_tx, _) = tokio::sync::broadcast::channel(16);
+    let kernel = AgentKernel::builder(
+        TurnEngineBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None)).unwrap(),
+    )
+    .with_profile(CoreAgentProfile::host_provided(fixture.worktree.clone()))
+    .with_registered_tool(tool)
+    .with_subagent_context(fixture.subagent.clone())
+    .build()
+    .await;
+
+    kernel
+        .execute_tool(AgentKernelToolRequest::new(
+            "submit_delivery",
+            serde_json::json!({
+                "headCommit": head,
+                "verificationSummary": "cargo test passed"
+            }),
+            "child-turn-after-terminal",
+            "call-submit-after-terminal",
+            event_tx,
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        *notifications
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+        vec![fixture.task_run_id.clone()]
+    );
+    assert_eq!(
+        fixture.outcome().await.status,
+        AgentOutcomeStatus::Completed
+    );
+    assert_eq!(fixture.work_unit().await.status, WorkUnitStatus::Delivered);
+    let terminal_observed = fixture
+        .store
+        .database()
+        .query_one(Statement::from_sql_and_values(
+            DatabaseBackend::Sqlite,
+            "SELECT terminal_observed
+             FROM agent_outcomes
+             WHERE id = ?",
+            [fixture.outcome_id.clone().into()],
+        ))
+        .await
+        .unwrap()
+        .unwrap()
+        .try_get::<i64>("", "terminal_observed")
+        .unwrap();
+    assert_eq!(
+        terminal_observed, 1,
+        "delivery must not erase an already-observed terminal event"
+    );
     fixture.cleanup();
 }
 
