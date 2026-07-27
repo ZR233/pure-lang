@@ -4,9 +4,10 @@ use serde_json::{Map, Value};
 use tokio_tungstenite::tungstenite::Error as TungsteniteError;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 
-use super::super::redact_secret_like_values;
+use super::super::provider_error::{
+    ProviderFailureMetadata, redact_secret_like_values, retryable_provider_status,
+};
 
-const CONNECTION_LIMIT_CODE: &str = "websocket_connection_limit_reached";
 const HANDSHAKE_TIMEOUT_MESSAGE: &str = "Responses WebSocket handshake timed out after 15 seconds; check WebSocket network access or switch this provider instance to HTTP explicitly in Studio settings";
 
 #[derive(Debug, Deserialize)]
@@ -20,6 +21,9 @@ struct WebSocketErrorDetail {
 
 #[derive(Debug, Deserialize)]
 struct WebSocketErrorEvent {
+    code: Option<String>,
+    message: Option<String>,
+    retry_after_ms: Option<u64>,
     #[serde(
         default,
         alias = "status_code",
@@ -32,11 +36,29 @@ struct WebSocketErrorEvent {
     headers: Map<String, Value>,
 }
 
+#[derive(Debug, Deserialize)]
+struct WebSocketTerminalEvent {
+    response: WebSocketTerminalResponse,
+}
+
+#[derive(Debug, Deserialize)]
+struct WebSocketTerminalResponse {
+    #[serde(default)]
+    error: Option<WebSocketErrorDetail>,
+    #[serde(default)]
+    incomplete_details: Option<WebSocketIncompleteDetails>,
+}
+
+#[derive(Debug, Deserialize)]
+struct WebSocketIncompleteDetails {
+    reason: Option<String>,
+}
+
 pub(super) fn handshake_error(error: TungsteniteError) -> PureError {
     if let TungsteniteError::Http(response) = &error {
         let status = response.status().as_u16();
         let detail = format!("Responses WebSocket handshake failed with HTTP {status}");
-        if retryable_status(status) {
+        if retryable_provider_status(status) {
             return transient(detail, retry_after_from_http_headers(response.headers()));
         }
         if status == 426 {
@@ -101,35 +123,34 @@ pub(super) fn protocol_error(detail: impl AsRef<str>) -> PureError {
 }
 
 pub(super) fn server_error(value: &Value) -> PureError {
-    let parsed = serde_json::from_value::<WebSocketErrorEvent>(value.clone()).ok();
-    let fallback_error = value.get("error").unwrap_or(value);
-    let code = parsed
-        .as_ref()
-        .and_then(|event| event.error.as_ref())
+    let parsed = match serde_json::from_value::<WebSocketErrorEvent>(value.clone()) {
+        Ok(parsed) => parsed,
+        Err(error) => return protocol_error(format!("invalid server error event: {error}")),
+    };
+    let nested = parsed.error.as_ref();
+    let code = nested
         .and_then(|error| error.code.as_deref())
-        .or_else(|| fallback_error.get("code").and_then(Value::as_str));
-    let message = parsed
-        .as_ref()
-        .and_then(|event| event.error.as_ref())
+        .or(parsed.code.as_deref());
+    let message = nested
         .and_then(|error| error.message.as_deref())
-        .or_else(|| fallback_error.get("message").and_then(Value::as_str))
+        .or(parsed.message.as_deref())
         .unwrap_or("Responses WebSocket returned an error");
-    let status = parsed.as_ref().and_then(|event| {
-        event
-            .status
-            .or_else(|| event.error.as_ref().and_then(|error| error.status))
-    });
+    let status = parsed
+        .status
+        .or_else(|| nested.and_then(|error| error.status));
     let detail = websocket_error_message(status, code, message);
-    let retry_after_ms = parsed.as_ref().and_then(|event| {
-        event
-            .error
-            .as_ref()
-            .and_then(|error| error.retry_after_ms)
-            .or_else(|| retry_after_from_json_headers(&event.headers))
-    });
+    let retry_after_ms = nested
+        .and_then(|error| error.retry_after_ms)
+        .or(parsed.retry_after_ms)
+        .or_else(|| retry_after_from_json_headers(&parsed.headers));
+    let metadata = ProviderFailureMetadata {
+        code,
+        http_status: status,
+        retry_after_ms,
+    };
 
-    if code.is_some_and(retryable_code) || status.is_some_and(retryable_status) {
-        return transient_provider_error(detail, retry_after_ms, code, status);
+    if metadata.is_retryable() {
+        return metadata.into_transient(detail);
     }
     match status {
         Some(_) => PureError::HttpError(detail),
@@ -138,45 +159,43 @@ pub(super) fn server_error(value: &Value) -> PureError {
 }
 
 pub(super) fn response_terminal_error(event: &Value) -> Option<PureError> {
-    let response = event.get("response")?;
-    let error = response.get("error");
-    let code = error
-        .and_then(|error| error.get("code"))
-        .and_then(Value::as_str)
-        .or_else(|| {
-            response
-                .get("incomplete_details")
-                .and_then(|details| details.get("reason"))
-                .and_then(Value::as_str)
-        });
-    let status = error
-        .and_then(|error| error.get("status"))
-        .and_then(json_u16);
-    if !code.is_some_and(retryable_code) && !status.is_some_and(retryable_status) {
+    let parsed = serde_json::from_value::<WebSocketTerminalEvent>(event.clone()).ok()?;
+    let error = parsed.response.error.as_ref();
+    let code = error.and_then(|error| error.code.as_deref()).or_else(|| {
+        parsed
+            .response
+            .incomplete_details
+            .as_ref()
+            .and_then(|details| details.reason.as_deref())
+    });
+    let status = error.and_then(|error| error.status);
+    let metadata = ProviderFailureMetadata {
+        code,
+        http_status: status,
+        retry_after_ms: error.and_then(|error| error.retry_after_ms),
+    };
+    if !metadata.is_retryable() {
         return None;
     }
     let message = error
-        .and_then(|error| error.get("message"))
-        .and_then(Value::as_str)
+        .and_then(|error| error.message.as_deref())
         .unwrap_or("Responses WebSocket response failed temporarily");
-    Some(transient_provider_error(
-        websocket_error_message(status, code, message),
-        None,
-        code,
-        status,
-    ))
+    Some(metadata.into_transient(websocket_error_message(status, code, message)))
 }
 
 pub(super) fn continuation_id_invalid(value: &Value) -> bool {
-    let error = value.get("error").unwrap_or(value);
-    let code = error
-        .get("code")
-        .and_then(Value::as_str)
+    let Ok(parsed) = serde_json::from_value::<WebSocketErrorEvent>(value.clone()) else {
+        return false;
+    };
+    let nested = parsed.error.as_ref();
+    let code = nested
+        .and_then(|error| error.code.as_deref())
+        .or(parsed.code.as_deref())
         .unwrap_or_default()
         .to_ascii_lowercase();
-    let message = error
-        .get("message")
-        .and_then(Value::as_str)
+    let message = nested
+        .and_then(|error| error.message.as_deref())
+        .or(parsed.message.as_deref())
         .unwrap_or_default()
         .to_ascii_lowercase();
     code.contains("previous_response")
@@ -187,37 +206,6 @@ pub(super) fn continuation_id_invalid(value: &Value) -> bool {
 
 fn transient(message: String, retry_after_ms: Option<u64>) -> PureError {
     PureError::transient_model_failure(message, retry_after_ms, None, None)
-}
-
-fn transient_provider_error(
-    message: String,
-    retry_after_ms: Option<u64>,
-    code: Option<&str>,
-    status: Option<u16>,
-) -> PureError {
-    PureError::transient_model_failure(
-        message,
-        retry_after_ms,
-        code.map(ToString::to_string),
-        status,
-    )
-}
-
-fn retryable_status(status: u16) -> bool {
-    matches!(status, 408 | 409 | 425 | 429 | 500..=599)
-}
-
-fn retryable_code(code: &str) -> bool {
-    matches!(
-        code.to_ascii_lowercase().as_str(),
-        CONNECTION_LIMIT_CODE
-            | "rate_limit_exceeded"
-            | "server_error"
-            | "temporarily_unavailable"
-            | "service_unavailable"
-            | "request_timeout"
-            | "server_is_overloaded"
-    )
 }
 
 fn websocket_error_message(status: Option<u16>, code: Option<&str>, message: &str) -> String {

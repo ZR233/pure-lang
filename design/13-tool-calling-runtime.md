@@ -72,9 +72,10 @@ provider code、HTTP status、用户可读消息与 `RetryDisposition`；可重�
 不得通过解析 `reason` 文本判断是否重试。provider 内部仅在工具副作用尚未发生时重放
 完整模型请求；重试耗尽后把原始瞬态语义交给宿主调度器。
 
-Responses WebSocket 的限流、连接容量、`server_is_overloaded`、408/409/425/429、5xx
-及瞬态网络错误统一映射为可重试 provider failure。鉴权、权限、输入验证和协议错误保持
-永久失败；错误正文仍用于展示和日志，但不再承担控制流协议。
+Responses WebSocket、Responses HTTP/SSE 与 Chat Completions HTTP 的限流、连接容量、
+`server_is_overloaded`、408/409/425/429、5xx 及瞬态网络错误统一映射为可重试 provider
+failure。HTTP 仅在流建立前有限重放完整请求；鉴权、权限、输入验证和协议错误保持永久失败；
+错误正文仍用于展示和日志，但不再承担控制流协议。
 
 工具调度层使用轻量 runtime envelope 统一执行结果：
 

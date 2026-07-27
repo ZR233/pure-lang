@@ -44,6 +44,28 @@ fn root_provider_429_is_transient_and_subagent_429_is_provider_capacity() {
 }
 
 #[test]
+fn structured_http_overload_preserves_capacity_and_retry_semantics() {
+    let (_, severity, failure) = normalize_provider_error(
+        None,
+        pl_protocol::PureError::transient_model_failure(
+            "API error 503 Service Unavailable",
+            Some(750),
+            Some("server_is_overloaded".to_string()),
+            Some(503),
+        ),
+    );
+
+    assert_eq!(severity, ErrorSeverity::Transient);
+    assert_eq!(
+        failure.category,
+        pl_protocol::TurnFailureCategory::ProviderCapacity
+    );
+    assert_eq!(failure.code.as_deref(), Some("server_is_overloaded"));
+    assert_eq!(failure.http_status, Some(503));
+    assert_eq!(failure.retry.retry_after_ms(), Some(750));
+}
+
+#[test]
 fn detects_unexecuted_tool_call_text() {
     assert!(looks_like_unexecuted_tool_call_text(
         "<｜｜DSML｜｜tool_calls>\n<｜｜DSML｜｜invoke name=\"spawn_agent\">"

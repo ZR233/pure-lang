@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use crate::{InteractionKind, InteractionPayload, InteractionScope, InteractionStatus};
-use pl_model::{ModelInfo, ProviderInfo};
+use pl_model::{ModelInfo, ProviderConnectionMode, ProviderInfo};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
@@ -12,15 +12,42 @@ use crate::{StudioMode, StudioRuntimeStatus};
 
 const TEST_RUNTIME_TIMEOUT: Duration = Duration::from_secs(20);
 
-async fn serve_sse_once(sse_body: String) -> (String, tokio::task::JoinHandle<()>) {
-    serve_sse_sequence(vec![sse_body]).await
+struct TestHttpResponse {
+    status_line: &'static str,
+    content_type: &'static str,
+    body: String,
 }
 
-async fn serve_sse_sequence(sse_bodies: Vec<String>) -> (String, tokio::task::JoinHandle<()>) {
+impl TestHttpResponse {
+    fn sse(body: String) -> Self {
+        Self {
+            status_line: "200 OK",
+            content_type: "text/event-stream",
+            body,
+        }
+    }
+
+    fn service_unavailable(body: String) -> Self {
+        Self {
+            status_line: "503 Service Unavailable",
+            content_type: "application/json",
+            body,
+        }
+    }
+}
+
+async fn serve_sse_once(sse_body: String) -> (String, tokio::task::JoinHandle<usize>) {
+    serve_http_sequence(vec![TestHttpResponse::sse(sse_body)]).await
+}
+
+async fn serve_http_sequence(
+    responses: Vec<TestHttpResponse>,
+) -> (String, tokio::task::JoinHandle<usize>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let handle = tokio::spawn(async move {
-        for sse_body in sse_bodies {
+        let response_count = responses.len();
+        for response in responses {
             let (mut socket, _) = listener.accept().await.unwrap();
             let mut buffer = Vec::new();
             let mut temp = [0_u8; 1024];
@@ -49,14 +76,17 @@ async fn serve_sse_sequence(sse_bodies: Vec<String>) -> (String, tokio::task::Jo
                 buffer.extend_from_slice(&temp[..n]);
             }
 
-            let response = format!(
-                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
-                sse_body.len(),
-                sse_body
+            let response_bytes = format!(
+                "HTTP/1.1 {}\r\ncontent-type: {}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                response.status_line,
+                response.content_type,
+                response.body.len(),
+                response.body
             );
-            socket.write_all(response.as_bytes()).await.unwrap();
+            socket.write_all(response_bytes.as_bytes()).await.unwrap();
             socket.shutdown().await.unwrap();
         }
+        response_count
     });
 
     (format!("http://{addr}"), handle)
@@ -120,6 +150,7 @@ fn test_config(base_url: String) -> StudioConfig {
         wire: std::collections::BTreeMap::new(),
     }];
     let mut info = ProviderInfo::openai(Some(base_url));
+    info.connection_mode = ProviderConnectionMode::Http;
     info.default_model = "local-responses".to_string();
     let provider = crate::ProviderConfig::from_provider_info(info, vec![model]);
     let provider_id = ProviderId::new("local").unwrap();
