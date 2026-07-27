@@ -21,13 +21,11 @@ class SessionTodoPanel extends StatelessWidget {
     final title = todo.explanation?.trim().isNotEmpty == true
         ? todo.explanation!.trim()
         : context.l10n.timelineTodoListFallback;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: context.studioPaper2,
-        border: inDrawer
-            ? null
-            : Border(left: BorderSide(color: context.studioLine)),
-      ),
+    return Material(
+      color: context.studioPaper2,
+      shape: inDrawer
+          ? null
+          : Border(left: BorderSide(color: context.studioLine)),
       child: SafeArea(
         left: false,
         child: Column(

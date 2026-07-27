@@ -29,6 +29,50 @@ void registerAgentWorkspaceTests() {
     },
   );
 
+  test('executor workspace keeps the planner timeline and todo snapshot', () {
+    final initial = _agentWorkspaceState(withTodo: true);
+    final root = initial.selectedRootSession!;
+    final executor = initial.sessions
+        .where((session) => session.isAgent)
+        .single
+        .copyWith(ownerRole: 'executor');
+    final rootMessage = TimelineMessage(
+      id: 'root-message',
+      sessionId: root.id,
+      role: 'assistant',
+      createdAt: DateTime.fromMillisecondsSinceEpoch(2000),
+    );
+    final executorMessage = TimelineMessage(
+      id: 'executor-message',
+      sessionId: executor.id,
+      role: 'assistant',
+      createdAt: DateTime.fromMillisecondsSinceEpoch(3000),
+    );
+    final state = initial.copyWith(
+      sessions: [root, executor],
+      selectedSessionId: executor.id,
+      messagesBySession: {
+        root.id: [rootMessage],
+        executor.id: [executorMessage],
+      },
+    );
+
+    expect(state.selectedAgentSessionId, executor.id);
+    expect(state.selectedTimelineSessionId, root.id);
+    expect(state.selectedMessages, [rootMessage]);
+    expect(state.selectedTodoList?.explanation, 'Agent workspace checklist');
+  });
+
+  test('non-executor agents keep their own timeline', () {
+    final initial = _agentWorkspaceState();
+    final reviewer = initial.sessions
+        .where((session) => session.isAgent)
+        .single;
+    final state = initial.copyWith(selectedSessionId: reviewer.id);
+
+    expect(state.selectedTimelineSessionId, reviewer.id);
+  });
+
   test(
     'directory refresh never switches away from the selected planner',
     () async {
