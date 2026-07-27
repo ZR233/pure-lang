@@ -167,7 +167,12 @@ worktree 无改动且 HEAD 未推进时以 `noDelivery` 失败；HEAD 已推进�
 recovery，要求实际验证、提交并调用 `submit_delivery`。recovery 后仍未交付则明确失败并保留
 worktree 诊断，不自动合并、不伪造 verification summary。Task executor 始终注册持久
 completion watcher，合同终结后幂等唤醒已有 Planner continuation，不依赖高频 `wait_agent`
-轮询。continuation 去重同时识别 queued turn 和正在执行的 ephemeral 受管续轮；普通 root
+轮询。单个 turn 因 `InterruptThenStart` 结束时，如果 agent 快照仍有 active turn 或 pending
+input，或者 activity 尚未回到 `Idle`，它只是同一 executor 的中间 turn，不得结算 completion
+contract、关闭 Outcome/WorkUnit 的 delivery scope 或唤醒 Planner。异步 terminal projector
+还必须在写入产品终态前重新读取 latest agent snapshot，并确认 latest last turn 与待投影 turn
+一致；只有 queue-drained canonical terminal 才进入上述交付检查与恢复。continuation 去重同时
+识别 queued turn 和正在执行的 ephemeral 受管续轮；普通 root
 turn 不参与 running 去重，以免吞掉 child terminal 的后续输入。recovery claim 与 runtime
 FIFO 之间使用由 outcome id 和 recovery count 生成的稳定
 dispatch id；claim 提交后若进程退出，重启必须复用同一 claim。runtime durable turn metadata

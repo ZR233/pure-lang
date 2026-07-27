@@ -21,6 +21,106 @@ async fn offline_task_flow_completes_through_worktree_merge_review_and_continuat
         .context("offline Task orchestration integration test timed out")?
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn interrupted_executor_can_deliver_from_queued_turn() -> Result<()> {
+    tokio::time::timeout(Duration::from_secs(120), run_interrupted_executor_flow())
+        .await
+        .context("interrupted executor Task integration test timed out")?
+}
+
+async fn run_interrupted_executor_flow() -> Result<()> {
+    let fixture = TaskFlowFixture::new_interrupted_executor().await?;
+    fixture
+        .runtime
+        .submit_prompt(StudioSubmitPromptRequest {
+            session_id: fixture.session_id.clone(),
+            prompt: format!(
+                "Create the interrupted executor integration fixture and carry it through review. \
+                 Unique parent marker: {PARENT_HISTORY_MARKER}"
+            ),
+            attachment_ids: Vec::new(),
+            options: StudioSubmitPromptOptions::default(),
+        })
+        .await?;
+    let confirmation = fixture.wait_for_plan_confirmation().await?;
+    fixture.wait_for_no_active_turns().await?;
+    fixture
+        .runtime
+        .resolve_interaction(
+            confirmation.interaction_id,
+            InteractionResolution::PlanConfirmation {
+                decision: PlanConfirmationResolution::ImplementFreshContext,
+                content: None,
+                reason: None,
+            },
+        )
+        .await?;
+
+    fixture.wait_for_interrupted_executor_request().await?;
+    fixture
+        .runtime
+        .submit_prompt(StudioSubmitPromptRequest {
+            session_id: fixture.session_id.clone(),
+            prompt: "Interrupt the running executor and queue the acceptance continuation."
+                .to_string(),
+            attachment_ids: Vec::new(),
+            options: StudioSubmitPromptOptions::default(),
+        })
+        .await?;
+
+    let task = fixture.wait_for_completed_task().await?;
+    fixture.wait_for_no_active_turns().await?;
+    fixture.assert_script_complete().await?;
+
+    assert_eq!(task.phase, "completed");
+    assert_eq!(task.work_units.len(), 1);
+    let work_unit = &task.work_units[0];
+    assert_eq!(work_unit.status, "merged");
+    let executor_id = work_unit
+        .agent_id
+        .as_deref()
+        .context("interrupted work unit has no executor")?;
+    assert_eq!(
+        fixture.successful_interrupt_target().await?.as_str(),
+        executor_id
+    );
+    let executors = task
+        .agents
+        .iter()
+        .filter(|agent| agent.role == "executor")
+        .collect::<Vec<_>>();
+    assert_eq!(executors.len(), 1);
+    assert_eq!(executors[0].agent_id, executor_id);
+    assert_eq!(executors[0].status, "completed");
+    assert!(executors[0].head_commit.is_some());
+    assert_eq!(task.merges.len(), 1);
+    assert_eq!(task.merges[0].agent_id, executor_id);
+    assert_eq!(task.merges[0].status, "merged");
+    assert_eq!(
+        task.reviews
+            .last()
+            .context("interrupted executor flow has no review")?
+            .verdict,
+        "pass"
+    );
+    assert!(!Path::new(&work_unit.worktree_path).exists());
+    assert!(
+        fixture
+            .store
+            .list_pending_interactions(&fixture.session_id)
+            .await?
+            .is_empty()
+    );
+    assert!(fixture.runtime.runtime_snapshot().active_turns.is_empty());
+    assert_eq!(
+        git_output(&fixture.workspace, &["rev-parse", "HEAD"])?,
+        task.expected_head
+    );
+    assert!(git_output(&fixture.workspace, &["status", "--porcelain"])?.is_empty());
+
+    fixture.shutdown().await
+}
+
 async fn run_offline_task_flow() -> Result<()> {
     let fixture = TaskFlowFixture::new().await?;
     assert!(!fixture.workspace.join(".git").exists());

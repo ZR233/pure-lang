@@ -14,7 +14,7 @@ use pl_studio_runtime::{
     StudioSubmitPromptOptions, StudioSubmitPromptRequest,
 };
 
-const LIVE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+const LIVE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "uses the installed Studio model configuration and incurs real model usage"]
@@ -22,7 +22,7 @@ async fn installed_config_task_mode_builds_headless_shooter() -> Result<()> {
     let fixture = LiveTaskFixture::new().await?;
     let result = tokio::time::timeout(LIVE_TIMEOUT, run_live_task_flow(&fixture))
         .await
-        .context("live Task integration test exceeded the 15 minute timeout")
+        .context("live Task integration test exceeded the 30 minute timeout")
         .and_then(|result| result);
     if let Err(error) = &result {
         eprintln!(
@@ -79,9 +79,24 @@ async fn run_live_task_flow(fixture: &LiveTaskFixture) -> Result<()> {
         );
     }
 
+    let interrupted_executor_id = fixture.wait_for_running_executor().await?;
+    fixture
+        .runtime
+        .submit_prompt(StudioSubmitPromptRequest {
+            session_id: fixture.session_id.clone(),
+            prompt: live_interrupt_prompt(&interrupted_executor_id),
+            attachment_ids: Vec::new(),
+            options: StudioSubmitPromptOptions::default(),
+        })
+        .await?;
+    let interrupt_target = fixture.wait_for_successful_interrupt_target().await?;
+    if interrupt_target != interrupted_executor_id {
+        bail!("send_input did not interrupt the expected executor `{interrupted_executor_id}`");
+    }
+
     let task = fixture.wait_for_completed_task().await?;
     fixture.wait_for_no_active_turns().await?;
-    assert_task_invariants(fixture, &task).await?;
+    assert_task_invariants(fixture, &task, &interrupted_executor_id).await?;
     assert_generated_project(fixture)?;
     Ok(())
 }
@@ -89,6 +104,7 @@ async fn run_live_task_flow(fixture: &LiveTaskFixture) -> Result<()> {
 async fn assert_task_invariants(
     fixture: &LiveTaskFixture,
     task: &pl_studio_runtime::StudioTaskRuntime,
+    interrupted_executor_id: &str,
 ) -> Result<()> {
     if task.phase != "completed" {
         bail!("Task phase is `{}` instead of `completed`", task.phase);
@@ -143,6 +159,20 @@ async fn assert_task_invariants(
             );
         }
     }
+    if !task.agents.iter().any(|agent| {
+        agent.agent_id == interrupted_executor_id
+            && agent.role == "executor"
+            && agent.status == "completed"
+    }) {
+        bail!("interrupted executor `{interrupted_executor_id}` did not complete its delivery");
+    }
+    if !task
+        .merges
+        .iter()
+        .any(|merge| merge.agent_id == interrupted_executor_id && merge.status == "merged")
+    {
+        bail!("interrupted executor `{interrupted_executor_id}` did not produce a merged delivery");
+    }
     if task.merges.iter().any(|merge| merge.status != "merged") {
         bail!("Task contains an unmerged delivery: {:#?}", task.merges);
     }
@@ -192,6 +222,15 @@ async fn assert_task_invariants(
     )
     .context("design/shooter.md was not committed at workspace HEAD")?;
     Ok(())
+}
+
+fn live_interrupt_prompt(executor_id: &str) -> String {
+    format!(
+        "这是 headless shooter 的中断续轮验收控制输入。只调用一次 send_input 工具：\
+         target 必须是 `{executor_id}`，delivery 必须是 `interruptThenStart`，message 要求该 \
+         executor 在 queued turn 中继续现有实现、完成实际验证、commit，并以 submit_delivery \
+         交付。不要创建新 executor，不要 merge，不要用文字代替工具调用。工具成功后只返回简短确认。"
+    )
 }
 
 fn assert_generated_project(fixture: &LiveTaskFixture) -> Result<()> {

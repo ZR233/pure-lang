@@ -293,25 +293,190 @@ fn enforce_finalization(
     let TurnFinalizationPolicy::RequiredTool { name } = &policy.finalization else {
         return;
     };
-    let finalized = result.trace_events.iter().any(|event| match &event.kind {
-        TraceEventKind::TracePartCompleted { item } => {
-            item.tool.as_ref().is_some_and(|tool| tool.name == *name)
-        }
-        TraceEventKind::TracePartStarted { .. }
-        | TraceEventKind::TracePartDelta { .. }
-        | TraceEventKind::TracePartFailed { .. }
-        | TraceEventKind::PlanLifecycleChanged { .. }
-        | TraceEventKind::InteractionChanged { .. }
-        | TraceEventKind::SkillActivated { .. }
-        | TraceEventKind::EnabledToolsRecorded { .. } => false,
+    if result.trace_events.iter().any(|event| {
+        matches!(
+            &event.kind,
+            TraceEventKind::TracePartCompleted { item }
+                if item.tool.as_ref().is_some_and(|tool| tool.name == *name)
+        )
+    }) {
+        return;
+    }
+    let failed_tool = result.trace_events.iter().rev().find_map(|event| {
+        let TraceEventKind::TracePartFailed { item, error } = &event.kind else {
+            return None;
+        };
+        item.tool
+            .as_ref()
+            .is_some_and(|tool| tool.name == *name)
+            .then_some(error.clone())
     });
-    if !finalized {
-        result.status = TurnResultStatus::Errored;
-        let message = format!("turn must finalize with tool `{name}`");
-        result.error = Some(message.clone());
-        result.failure = Some(pl_protocol::TurnFailure::permanent(
-            pl_protocol::TurnFailureCategory::Validation,
-            message,
-        ));
+    let (category, message) = failed_tool.map_or_else(
+        || {
+            (
+                pl_protocol::TurnFailureCategory::Validation,
+                format!("turn must finalize with tool `{name}`"),
+            )
+        },
+        |error| (pl_protocol::TurnFailureCategory::Tool, error),
+    );
+    result.status = TurnResultStatus::Errored;
+    result.error = Some(message.clone());
+    result.failure = Some(pl_protocol::TurnFailure::permanent(category, message));
+}
+
+#[cfg(test)]
+mod tests {
+    use pl_protocol::TurnFailureCategory;
+
+    use super::*;
+
+    #[test]
+    fn required_tool_finalization_accepts_completed_tool() {
+        let mut result = Ok(completed_result(vec![tool_event(
+            "submit_delivery",
+            ToolTraceOutcome::Completed,
+        )]));
+
+        enforce_finalization(&mut result, &required_tool_policy("submit_delivery"));
+
+        let result = result.unwrap();
+        assert_eq!(result.status, TurnResultStatus::Completed);
+        assert_eq!(result.error, None);
+        assert_eq!(result.failure, None);
+    }
+
+    #[test]
+    fn required_tool_finalization_preserves_matching_tool_failure() {
+        let mut result = Ok(completed_result(vec![tool_event(
+            "submit_delivery",
+            ToolTraceOutcome::Failed("delivery scope is not accepting a delivery"),
+        )]));
+
+        enforce_finalization(&mut result, &required_tool_policy("submit_delivery"));
+
+        let result = result.unwrap();
+        assert_eq!(result.status, TurnResultStatus::Errored);
+        assert_eq!(
+            result.error.as_deref(),
+            Some("delivery scope is not accepting a delivery")
+        );
+        assert_eq!(
+            result.failure.as_ref().map(|failure| failure.category),
+            Some(TurnFailureCategory::Tool)
+        );
+    }
+
+    #[test]
+    fn required_tool_finalization_uses_latest_matching_failure() {
+        let mut result = Ok(completed_result(vec![
+            tool_event(
+                "submit_delivery",
+                ToolTraceOutcome::Failed("first delivery failure"),
+            ),
+            tool_event(
+                "submit_delivery",
+                ToolTraceOutcome::Failed("latest delivery failure"),
+            ),
+        ]));
+
+        enforce_finalization(&mut result, &required_tool_policy("submit_delivery"));
+
+        assert_eq!(
+            result.unwrap().error.as_deref(),
+            Some("latest delivery failure")
+        );
+    }
+
+    #[test]
+    fn required_tool_finalization_ignores_other_tool_failure() {
+        let mut result = Ok(completed_result(vec![tool_event(
+            "exec",
+            ToolTraceOutcome::Failed("exec failed"),
+        )]));
+
+        enforce_finalization(&mut result, &required_tool_policy("submit_delivery"));
+
+        let result = result.unwrap();
+        assert_eq!(
+            result.error.as_deref(),
+            Some("turn must finalize with tool `submit_delivery`")
+        );
+        assert_eq!(
+            result.failure.as_ref().map(|failure| failure.category),
+            Some(TurnFailureCategory::Validation)
+        );
+    }
+
+    #[test]
+    fn required_tool_finalization_accepts_success_after_failure() {
+        let mut result = Ok(completed_result(vec![
+            tool_event(
+                "submit_delivery",
+                ToolTraceOutcome::Failed("transient failure"),
+            ),
+            tool_event("submit_delivery", ToolTraceOutcome::Completed),
+        ]));
+
+        enforce_finalization(&mut result, &required_tool_policy("submit_delivery"));
+
+        assert_eq!(result.unwrap().status, TurnResultStatus::Completed);
+    }
+
+    enum ToolTraceOutcome {
+        Completed,
+        Failed(&'static str),
+    }
+
+    fn required_tool_policy(name: &str) -> AgentExecutionPolicy {
+        AgentExecutionPolicy {
+            finalization: TurnFinalizationPolicy::RequiredTool {
+                name: name.to_string(),
+            },
+            ..AgentExecutionPolicy::default()
+        }
+    }
+
+    fn completed_result(trace_events: Vec<TraceEvent>) -> TurnResult {
+        TurnResult {
+            content: String::new(),
+            reasoning_content: None,
+            model: "test".to_string(),
+            usage: TokenUsage::default(),
+            last_context_tokens: None,
+            context_compactions: Vec::new(),
+            session_message_count: 0,
+            status: TurnResultStatus::Completed,
+            abort_reason: None,
+            error: None,
+            failure: None,
+            budget_limit_kind: None,
+            budget_usage: None,
+            trace_events,
+        }
+    }
+
+    fn tool_event(name: &str, outcome: ToolTraceOutcome) -> TraceEvent {
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(1);
+        let mut recorder = TraceRecorder::new("test-session".to_string(), event_tx, 0);
+        let mut item = recorder.tool_item(
+            "turn-1",
+            "call-1",
+            name.to_string(),
+            "{}".to_string(),
+            None,
+            None,
+        );
+        match outcome {
+            ToolTraceOutcome::Completed => {
+                item.status = pl_trace::TracePartStatus::Completed;
+                recorder.complete_item(item);
+            }
+            ToolTraceOutcome::Failed(error) => {
+                item.status = pl_trace::TracePartStatus::Failed;
+                recorder.fail_item(item, error.to_string());
+            }
+        }
+        recorder.drain().pop().unwrap()
     }
 }
