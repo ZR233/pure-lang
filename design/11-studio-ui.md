@@ -154,7 +154,11 @@ text、commentary、final、reasoning、plan、agent row 或 message 边界立�
 工具组 row 的 `order` 使用组内第一个工具 part 的 order，`sequence/renderVersion` 由组内所有
 工具 part 的 sequence、revision、status、arguments、result、工作目录、exit code、timeout、
 拒绝原因和 error 聚合计算；详情列表保持扫描顺序。工具状态以 part snapshot 为准，展示层
-不得改写 `StudioPart`。
+不得改写 `StudioPart`。所有工具组默认折叠为低对比的单行活动摘要，不使用常驻卡片底色或
+边框；摘要行以工具类型图标、工具名称和本地化状态表达实际动作，整行可点击并暴露展开
+语义。完成态不显示状态 pill，运行中、待授权、失败或拒绝等需要关注的状态仍应可见。
+展开后才按原始顺序展示命令、路径、结果和错误详情；展开状态只属于当前 row widget，
+不写回 part snapshot。
 
 Todo list 不进入 timeline。当前 agent snapshot 中最新的 `TodoListUpdated` 是唯一展示值，
 保持 runtime 原始顺序，并以 pending、inProgress、completed 三态使用 Material 3 dense
@@ -259,7 +263,7 @@ Pure Studio UI 采用低对比、紧凑、可扫描的桌面工具风格：侧�
 
 Flutter 端使用 Material 3 的工具型界面表达同一信息架构：`NavigationRail`/紧凑侧栏承载项目和会话，主区承载 timeline、状态栏和 composer/dock，Settings 作为全窗口页面替换聊天页。Provider、Instructions、Skills、Roles、MCP、Security、General 以 tab 或分段导航组织；Security 页保持紧凑设置组，Provider/MCP 页允许更密集的表单和状态卡。图标按钮优先使用 Material Icons，按钮内文字必须在桌面和窄屏约束下不溢出。
 
-Flutter 主聊天界面视觉应靠拢 Codex 桌面版的工作台气质：中性色浅色主题、低对比侧栏、白色阅读面、单一聚焦 composer 托盘和轻量状态信息行。Timeline 中普通 assistant 正文不使用卡片背景；只有 tool、reasoning、plan、agent 等结构化 part 使用轻边框面板。用户消息使用窄宽度浅色气泡，避免大面积品牌色。状态栏默认只展示当前模式、planner 模型、上下文、费用与活动能力摘要，不重复显示已在模型选择控件中的 runtime model；高频或诊断信息通过 tooltip/popover 承载。
+Flutter 主聊天界面视觉应靠拢 Codex 桌面版的工作台气质：中性色浅色主题、低对比侧栏、白色阅读面、单一聚焦 composer 托盘和轻量状态信息行。Timeline 中普通 assistant 正文不使用卡片背景；reasoning、plan、agent 等结构化 part 使用轻边框面板，tool 使用默认折叠的低对比内联摘要，避免高频工具调用形成连续卡片。用户消息使用窄宽度浅色气泡，避免大面积品牌色。状态栏默认只展示当前模式、planner 模型、上下文、费用与活动能力摘要，不重复显示已在模型选择控件中的 runtime model；高频或诊断信息通过 tooltip/popover 承载。
 
 Flutter shell 的二级视觉层级继续收敛：顶部 Header 明确分为两层，第一层只放大会话标题，
 第二层放项目末级名称、分支、Task 阶段、保存/同步状态和唯一 `n agents` compact 状态项；
@@ -298,4 +302,4 @@ Flutter 窗口 resize 时 UI 不应持续触发昂贵测量。Timeline 的贴底
 
 Web Search 作为 General 设置中的 typed 配置组展示 mode、context size、allowed domains、country、region、city 和 timezone，并展示后端自动解析的 provider/model 与 `available | disabled | missingCredential | unsupportedModel` 状态。configured mode 与 effective mode 必须同时保留：缺少凭据时显示不可用原因，但不能把用户保存的 `cached/indexed/live` 覆盖为 `disabled`。
 
-timeline 中 `tool.name == "web_search"` 使用搜索专用详情，不新增数据库 part 类型。卡片根据结构化 action 展示搜索词、打开 URL、页内查找 pattern、进行中/完成/失败状态以及 results 中可识别的链接；未知 results 字段保持不透明，不由 Dart reducer 重写。独立搜索与 hosted 搜索必须投影成相同 UI 形状。
+timeline 中 `tool.name == "web_search"` 在工具组展开后使用搜索专用详情，不新增数据库 part 类型；折叠态与其他工具保持相同的低对比摘要。搜索详情根据结构化 action 展示搜索词、打开 URL、页内查找 pattern、进行中/完成/失败状态以及 results 中可识别的链接；未知 results 字段保持不透明，不由 Dart reducer 重写。独立搜索与 hosted 搜索必须投影成相同 UI 形状。
