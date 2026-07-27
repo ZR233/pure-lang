@@ -180,24 +180,18 @@ class _MarkdownBubble extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final surface = isUser ? _MarkdownSurface.user : _MarkdownSurface.assistant;
-    final isCommentary =
-        part.textChannel == TimelineTextChannel.commentary && !isUser;
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: isUser
-            ? context.studioPaper2
-            : isCommentary
-            ? context.studioPaper2.withValues(alpha: 0.52)
-            : Colors.transparent,
-        border: isUser || isCommentary
+        color: isUser ? context.studioPaper2 : Colors.transparent,
+        border: isUser
             ? Border.all(color: scheme.outlineVariant.withValues(alpha: 0.72))
             : null,
         borderRadius: BorderRadius.circular(StudioRadii.md),
       ),
       child: Padding(
         padding: EdgeInsets.symmetric(
-          horizontal: isUser || isCommentary ? 14 : 0,
-          vertical: isUser || isCommentary ? 10 : 0,
+          horizontal: isUser ? 14 : 0,
+          vertical: isUser ? 10 : 0,
         ),
         child: SelectionArea(
           child: _AgentMarkdown(
