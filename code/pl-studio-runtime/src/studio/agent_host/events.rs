@@ -166,7 +166,11 @@ impl StudioAgentEventProjector {
                 if let Some(session_id) = studio_session_id.as_deref() {
                     // continuation 是 durable task orchestration，不得被后续 trace/UI
                     // projection 的非关键失败截断。
-                    if snapshot.identity.parent_id.is_some() {
+                    if snapshot.identity.parent_id.is_some()
+                        && self
+                            .is_canonical_child_terminal(&snapshot, outcome.turn_id.as_str())
+                            .await?
+                    {
                         let root_session_id = self
                             .store
                             .read_session(session_id)
@@ -200,6 +204,22 @@ impl StudioAgentEventProjector {
             }
         }
         Ok(())
+    }
+
+    async fn is_canonical_child_terminal(
+        &self,
+        event_snapshot: &AgentSnapshot,
+        turn_id: &str,
+    ) -> anyhow::Result<bool> {
+        if !snapshot_is_canonical_terminal(event_snapshot, turn_id) {
+            return Ok(false);
+        }
+        let runtime = wait_for_runtime(self.runtime.clone()).await?;
+        let latest = runtime
+            .snapshot(event_snapshot.identity.id.clone())
+            .await
+            .map_err(|error| anyhow::anyhow!(error))?;
+        Ok(snapshot_is_canonical_terminal(&latest, turn_id))
     }
 
     async fn project_traces(
@@ -464,5 +484,80 @@ fn agent_status_label(snapshot: &AgentSnapshot) -> &'static str {
                 None => "idle",
             },
         },
+    }
+}
+
+fn snapshot_is_canonical_terminal(snapshot: &AgentSnapshot, turn_id: &str) -> bool {
+    snapshot.activity == AgentActivityState::Idle
+        && snapshot.active_turn_id.is_none()
+        && snapshot.pending_inputs == 0
+        && snapshot
+            .last_turn
+            .as_ref()
+            .is_some_and(|outcome| outcome.turn_id.as_str() == turn_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use pl_core::{
+        AgentId, AgentIdentity, AgentLifecycleState, AgentRoleId, AgentTurnOutcome, SessionId,
+        TurnId,
+    };
+    use pl_model::TokenUsage;
+
+    use super::*;
+
+    #[test]
+    fn queued_follow_up_is_not_a_canonical_terminal() {
+        let mut snapshot = snapshot(AgentActivityState::Queued, 1, "turn-1");
+        snapshot.active_turn_id = None;
+
+        assert!(!snapshot_is_canonical_terminal(&snapshot, "turn-1"));
+    }
+
+    #[test]
+    fn idle_queue_drained_snapshot_is_a_canonical_terminal() {
+        let snapshot = snapshot(AgentActivityState::Idle, 0, "turn-1");
+
+        assert!(snapshot_is_canonical_terminal(&snapshot, "turn-1"));
+    }
+
+    #[test]
+    fn stale_terminal_event_does_not_match_latest_turn() {
+        let snapshot = snapshot(AgentActivityState::Idle, 0, "turn-2");
+
+        assert!(!snapshot_is_canonical_terminal(&snapshot, "turn-1"));
+    }
+
+    fn snapshot(
+        activity: AgentActivityState,
+        pending_inputs: usize,
+        last_turn_id: &str,
+    ) -> AgentSnapshot {
+        AgentSnapshot {
+            identity: AgentIdentity {
+                id: AgentId::new("agent-1").unwrap(),
+                parent_id: Some(AgentId::new("root").unwrap()),
+                role: AgentRoleId::new("executor").unwrap(),
+                depth: 1,
+            },
+            lifecycle: AgentLifecycleState::Active,
+            activity,
+            active_turn_id: None,
+            active_session_id: None,
+            pending_inputs,
+            last_turn: Some(AgentTurnOutcome {
+                turn_id: TurnId::new(last_turn_id).unwrap(),
+                session_id: SessionId::new("session-1").unwrap(),
+                kind: TurnOutcomeKind::Cancelled,
+                reason: Some("cancelled".to_string()),
+                failure: None,
+                usage: TokenUsage::default(),
+                finished_at: 1,
+            }),
+            revision: 1,
+            event_sequence: 1,
+            updated_at: 1,
+        }
     }
 }

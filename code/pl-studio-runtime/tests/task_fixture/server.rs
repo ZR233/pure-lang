@@ -30,11 +30,17 @@ const FEATURE_PATCH: &str = r#"*** Begin Patch
 +offline integration verified
 *** End Patch"#;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ScriptRole {
     Planner,
     Executor,
     Reviewer,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum TaskFlowScenario {
+    HappyPath,
+    InterruptedExecutor,
 }
 
 impl ScriptRole {
@@ -59,6 +65,7 @@ struct ScriptProgress {
 struct ScriptState {
     runtime: StudioRuntime,
     session_id: String,
+    scenario: TaskFlowScenario,
     progress: Mutex<ScriptProgress>,
 }
 
@@ -68,10 +75,16 @@ pub(super) struct ScriptedModelServer {
 }
 
 impl ScriptedModelServer {
-    pub(super) fn start(listener: TcpListener, runtime: StudioRuntime, session_id: String) -> Self {
+    pub(super) fn start(
+        listener: TcpListener,
+        runtime: StudioRuntime,
+        session_id: String,
+        scenario: TaskFlowScenario,
+    ) -> Self {
         let state = Arc::new(ScriptState {
             runtime,
             session_id,
+            scenario,
             progress: Mutex::new(ScriptProgress::default()),
         });
         let server_state = state.clone();
@@ -94,9 +107,13 @@ impl ScriptedModelServer {
         if !progress.errors.is_empty() {
             bail!("scripted model errors:\n{}", progress.errors.join("\n"));
         }
-        if (progress.planner, progress.executor, progress.reviewer) != (8, 5, 3) {
+        let expected = match self.state.scenario {
+            TaskFlowScenario::HappyPath => (8, 5, 3),
+            TaskFlowScenario::InterruptedExecutor => (10, 6, 3),
+        };
+        if (progress.planner, progress.executor, progress.reviewer) != expected {
             bail!(
-                "scripted model stopped at planner={}, executor={}, reviewer={}\n{}",
+                "scripted model stopped at planner={}, executor={}, reviewer={}; expected {expected:?}\n{}",
                 progress.planner,
                 progress.executor,
                 progress.reviewer,
@@ -104,6 +121,25 @@ impl ScriptedModelServer {
             );
         }
         Ok(())
+    }
+
+    pub(super) async fn wait_for_interrupted_executor_request(&self) -> Result<()> {
+        if self.state.scenario != TaskFlowScenario::InterruptedExecutor {
+            bail!("fixture is not configured for an interrupted executor");
+        }
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(60);
+        loop {
+            if self.state.progress.lock().await.executor > 0 {
+                return Ok(());
+            }
+            if tokio::time::Instant::now() >= deadline {
+                bail!(
+                    "executor did not enter the suspended first request\n{}",
+                    self.diagnostics().await
+                );
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
     }
 
     pub(super) async fn diagnostics(&self) -> String {
@@ -134,6 +170,7 @@ async fn serve_request(mut socket: TcpStream, state: Arc<ScriptState>) {
         let request = read_json_request(&mut socket).await?;
         let role = request_role(&request)?;
         let step = next_step(&state, role).await;
+        validate_request_step(&request, role, step)?;
         let (action, body) = scripted_response(&state, role, step).await?;
         state
             .progress
@@ -170,6 +207,48 @@ async fn scripted_response(
 }
 
 async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static str, String)> {
+    if state.scenario == TaskFlowScenario::InterruptedExecutor {
+        match step {
+            4 => {
+                let task = current_task(state).await?;
+                let executor = task
+                    .agents
+                    .iter()
+                    .find(|agent| agent.role == "executor" && agent.status == "running")
+                    .context("running executor is absent from task projection")?;
+                return Ok((
+                    "send_input(interruptThenStart)",
+                    tool_call(
+                        "interrupt-executor",
+                        "send_input",
+                        serde_json::json!({
+                            "target": executor.agent_id,
+                            "message": "Continue in the queued turn, commit the requested implementation, and finish with submit_delivery.",
+                            "delivery": "interruptThenStart",
+                            "metadata": {
+                                "acceptanceScenario": "interruptedExecutorDelivery"
+                            }
+                        }),
+                    ),
+                ));
+            }
+            5 => {
+                return Ok((
+                    "final(interrupt-dispatched)",
+                    final_text(
+                        "interrupt-dispatched",
+                        "The executor was interrupted and queued for continuation.",
+                    ),
+                ));
+            }
+            _ => {}
+        }
+    }
+    let step = if state.scenario == TaskFlowScenario::InterruptedExecutor && step >= 6 {
+        step - 2
+    } else {
+        step
+    };
     let response = match step {
         0 => (
             "plan_exit",
@@ -250,6 +329,14 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
 }
 
 async fn executor_response(state: &ScriptState, step: usize) -> Result<(&'static str, String)> {
+    if state.scenario == TaskFlowScenario::InterruptedExecutor && step == 0 {
+        return std::future::pending().await;
+    }
+    let step = if state.scenario == TaskFlowScenario::InterruptedExecutor {
+        step - 1
+    } else {
+        step
+    };
     let response = match step {
         0 => (
             "apply_patch",
@@ -383,10 +470,6 @@ fn request_role(request: &serde_json::Value) -> Result<ScriptRole> {
         .collect::<BTreeSet<_>>();
     if names.contains("submit_delivery") {
         ensure_fresh_task_child(request, "executor")?;
-        let request_text = request.to_string();
-        if !request_text.contains("src/**") || !request_text.contains("ownedPaths") {
-            bail!("executor instructions do not contain the normalized ownedPaths scope");
-        }
         return Ok(ScriptRole::Executor);
     }
     if names.contains("review_exit") {
@@ -398,6 +481,16 @@ fn request_role(request: &serde_json::Value) -> Result<ScriptRole> {
         return Ok(ScriptRole::Planner);
     }
     bail!("cannot identify scripted role from tools: {names:?}")
+}
+
+fn validate_request_step(request: &serde_json::Value, role: ScriptRole, step: usize) -> Result<()> {
+    if role == ScriptRole::Executor && step == 0 {
+        let request_text = request.to_string();
+        if !request_text.contains("src/**") || !request_text.contains("ownedPaths") {
+            bail!("executor instructions do not contain the normalized ownedPaths scope");
+        }
+    }
+    Ok(())
 }
 
 fn ensure_fresh_task_child(request: &serde_json::Value, role: &str) -> Result<()> {
