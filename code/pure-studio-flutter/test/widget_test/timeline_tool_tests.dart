@@ -112,6 +112,7 @@ void registerTimelineToolTests() {
     expect(find.byIcon(Icons.radio_button_checked), findsOneWidget);
     expect(find.byIcon(Icons.radio_button_unchecked), findsOneWidget);
     expect(find.textContaining('focused Rust and Flutter'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('timeline tool group defaults collapsed and expands details', (

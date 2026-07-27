@@ -104,7 +104,7 @@ class _StudioShellState extends ConsumerState<StudioShell> {
                             children: [
                               Expanded(
                                 child: TimelineView(
-                                  sessionId: state.selectedAgentSessionId,
+                                  sessionId: state.selectedTimelineSessionId,
                                   rows: state.selectedTimelineRows,
                                 ),
                               ),

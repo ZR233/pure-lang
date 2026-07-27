@@ -122,6 +122,18 @@ class StudioState {
     return null;
   }
 
+  String? get selectedTimelineSessionId {
+    final selected = selectedAgentSession;
+    if (selected == null) {
+      return null;
+    }
+    final role = selected.ownerRole.trim().toLowerCase();
+    if (selected.isAgent && role == 'executor') {
+      return selectedRootSession?.id ?? selected.id;
+    }
+    return selected.id;
+  }
+
   List<StudioSession> get agentSessionsForSelectedRoot {
     final root = selectedRootSession;
     if (root == null) {
@@ -162,7 +174,7 @@ class StudioState {
   }
 
   List<TimelineMessage> get selectedMessages {
-    final sessionId = selectedSessionId;
+    final sessionId = selectedTimelineSessionId;
     if (sessionId == null) {
       return const [];
     }
@@ -171,7 +183,7 @@ class StudioState {
   }
 
   List<TimelineRow> get selectedTimelineRows {
-    final sessionId = selectedSessionId;
+    final sessionId = selectedTimelineSessionId;
     if (sessionId == null) {
       return const [];
     }
@@ -188,7 +200,7 @@ class StudioState {
   }
 
   TimelineTodoListUpdate? get selectedTodoList {
-    final sessionId = selectedSessionId;
+    final sessionId = selectedTimelineSessionId;
     if (sessionId == null) {
       return null;
     }
