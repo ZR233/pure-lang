@@ -12,42 +12,90 @@ class _ToolGroupPart extends StatefulWidget {
 class _ToolGroupPartState extends State<_ToolGroupPart> {
   bool expanded = false;
 
+  void _toggleExpanded() {
+    setState(() => expanded = !expanded);
+  }
+
   @override
   Widget build(BuildContext context) {
     final group = widget.group;
-    if (group.items.length == 1 && _isWebSearch(group.items.first)) {
-      return _WebSearchToolCard(item: group.items.first);
-    }
-    return _TimelinePanel(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Material(
+    final activityLabel = _toolGroupActivityLabel(context, group);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Semantics(
+          container: true,
+          button: true,
+          expanded: expanded,
+          label: activityLabel,
+          onTap: _toggleExpanded,
+          excludeSemantics: true,
+          child: Material(
+            key: const ValueKey('timeline-tool-group-summary'),
             color: Colors.transparent,
             child: InkWell(
-              borderRadius: BorderRadius.circular(StudioRadii.md),
-              onTap: () => setState(() => expanded = !expanded),
-              child: _TimelineMetaRow(
-                icon: expanded
-                    ? Icons.keyboard_arrow_up_rounded
-                    : Icons.keyboard_arrow_down_rounded,
-                title: context.l10n.timelineToolGroupTitle,
-                subtitle: _toolGroupSubtitle(context, group),
-                trailing: _StatusPill(label: group.status),
+              borderRadius: BorderRadius.circular(StudioRadii.xs),
+              onTap: _toggleExpanded,
+              excludeFromSemantics: true,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: 32),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 2,
+                    vertical: 6,
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        _toolGroupIcon(group),
+                        size: 16,
+                        color: context.studioInkSoft.withValues(alpha: 0.76),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          activityLabel,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: context.text.bodySmall?.copyWith(
+                            color: context.studioInkSoft,
+                            height: 1.25,
+                          ),
+                        ),
+                      ),
+                      if (group.status != 'completed') ...[
+                        const SizedBox(width: 8),
+                        _StatusPill(label: group.status),
+                      ],
+                      const SizedBox(width: 4),
+                      Icon(
+                        expanded
+                            ? Icons.keyboard_arrow_up_rounded
+                            : Icons.keyboard_arrow_down_rounded,
+                        size: 17,
+                        color: context.studioInkSoft.withValues(alpha: 0.64),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ),
           ),
-          if (expanded)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(13, 0, 13, 13),
+        ),
+        if (expanded)
+          DecoratedBox(
+            key: const ValueKey('timeline-tool-group-details'),
+            decoration: BoxDecoration(
+              border: Border(
+                left: BorderSide(
+                  color: context.studioLine.withValues(alpha: 0.82),
+                ),
+              ),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 2, 6),
               child: Column(
                 children: [
-                  Divider(
-                    height: 14,
-                    color: Theme.of(
-                      context,
-                    ).colorScheme.outlineVariant.withValues(alpha: 0.5),
-                  ),
                   for (final item in group.items)
                     _isWebSearch(item)
                         ? _WebSearchToolCard(item: item, embedded: true)
@@ -55,43 +103,66 @@ class _ToolGroupPartState extends State<_ToolGroupPart> {
                 ],
               ),
             ),
-        ],
-      ),
+          ),
+      ],
     );
   }
 
-  String _toolGroupSubtitle(BuildContext context, TimelineToolGroup group) {
-    final issueCount = group.issueCount;
-    final runningCount = group.runningCount;
-    if (issueCount > 0 && runningCount > 0) {
-      return _withFirstIssue(
-        context.l10n.timelineToolGroupSummaryRunningWithIssues(
-          group.count,
-          runningCount,
-          issueCount,
-        ),
-        group,
-      );
+  String _toolGroupActivityLabel(
+    BuildContext context,
+    TimelineToolGroup group,
+  ) {
+    final visibleItems = group.items.take(3).toList();
+    final labels = [
+      for (final item in visibleItems)
+        _toolTitle(context, item.name, item.status),
+    ];
+    final hiddenCount = group.count - visibleItems.length;
+    if (hiddenCount > 0) {
+      labels.add(context.l10n.timelineToolGroupSummary(hiddenCount));
     }
-    if (issueCount > 0) {
-      return _withFirstIssue(
-        context.l10n.timelineToolGroupSummaryIssues(group.count, issueCount),
-        group,
-      );
+    final issueReason = group.firstIssueReason;
+    if (issueReason != null) {
+      labels.add(issueReason);
     }
-    if (runningCount > 0) {
-      return context.l10n.timelineToolGroupSummaryRunning(
-        group.count,
-        runningCount,
-      );
-    }
-    return context.l10n.timelineToolGroupSummary(group.count);
+    return labels.isEmpty
+        ? context.l10n.timelineToolGroupTitle
+        : labels.join(' · ');
   }
+}
 
-  String _withFirstIssue(String summary, TimelineToolGroup group) {
-    final reason = group.firstIssueReason;
-    return reason == null ? summary : '$summary · $reason';
+IconData _toolGroupIcon(TimelineToolGroup group) {
+  if (group.items.length != 1) {
+    return Icons.build_outlined;
   }
+  final name = group.items.first.name.toLowerCase();
+  if (name == 'web_search') {
+    return Icons.travel_explore;
+  }
+  if (name.contains('exec') ||
+      name.contains('command') ||
+      name.contains('shell') ||
+      name.contains('stdin')) {
+    return Icons.terminal;
+  }
+  if (name.contains('edit') ||
+      name.contains('write') ||
+      name.contains('patch') ||
+      name.contains('move') ||
+      name.contains('copy') ||
+      name.contains('delete') ||
+      name.contains('create')) {
+    return Icons.edit_outlined;
+  }
+  if (name.contains('read') ||
+      name.contains('search') ||
+      name.contains('list') ||
+      name.contains('stat') ||
+      name.contains('glob') ||
+      name.contains('grep')) {
+    return Icons.menu_book_outlined;
+  }
+  return Icons.build_outlined;
 }
 
 bool _isWebSearch(TimelineToolGroupItem item) {
@@ -426,20 +497,6 @@ class _ToolGroupItemRow extends StatelessWidget {
     );
   }
 
-  String _toolTitle(BuildContext context, String name, String status) {
-    return switch (status) {
-      'completed' => context.l10n.timelineToolCompleted(name),
-      'failed' => context.l10n.timelineToolFailed(name),
-      'denied' => context.l10n.timelineToolDenied(name),
-      'awaitingApproval' => context.l10n.timelineToolAwaitingApproval(name),
-      'running' ||
-      'streaming' ||
-      'approved' ||
-      'started' => context.l10n.timelineToolRunning(name),
-      _ => name,
-    };
-  }
-
   String? _resultDetail(String status, String? result) {
     if (result == null || result.trim().isEmpty) {
       return null;
@@ -449,4 +506,18 @@ class _ToolGroupItemRow extends StatelessWidget {
     }
     return result;
   }
+}
+
+String _toolTitle(BuildContext context, String name, String status) {
+  return switch (status) {
+    'completed' => context.l10n.timelineToolCompleted(name),
+    'failed' => context.l10n.timelineToolFailed(name),
+    'denied' => context.l10n.timelineToolDenied(name),
+    'awaitingApproval' => context.l10n.timelineToolAwaitingApproval(name),
+    'running' ||
+    'streaming' ||
+    'approved' ||
+    'started' => context.l10n.timelineToolRunning(name),
+    _ => name,
+  };
 }

@@ -54,13 +54,21 @@ void registerTimelineToolTests() {
     );
     await tester.pump();
 
+    expect(find.text('web_search running'), findsOneWidget);
+    expect(find.text('running'), findsOneWidget);
+    expect(find.text('Finding text on a page'), findsNothing);
+    expect(find.textContaining('https://example.com/page'), findsNothing);
+    expect(find.text('Result links'), findsNothing);
+    expect(find.text('Tool activity'), findsNothing);
+
+    await tester.tap(find.text('web_search running'));
+    await tester.pump();
+
     expect(find.text('Finding text on a page'), findsOneWidget);
     expect(find.textContaining('https://example.com/page'), findsOneWidget);
     expect(find.textContaining('needle'), findsOneWidget);
     expect(find.text('Result links'), findsOneWidget);
     expect(find.text('https://example.com/result'), findsOneWidget);
-    expect(find.text('streaming'), findsOneWidget);
-    expect(find.text('Tool activity'), findsNothing);
   });
 
   testWidgets('todo panel renders the latest flat checklist', (tester) async {
@@ -173,18 +181,138 @@ void registerTimelineToolTests() {
     );
     await tester.pump();
 
-    expect(find.text('Tool activity'), findsOneWidget);
-    expect(find.text('1 tools'), findsOneWidget);
+    expect(find.text('exec completed'), findsOneWidget);
+    final summary = find.byKey(const ValueKey('timeline-tool-group-summary'));
+    expect(tester.widget<Material>(summary).color, Colors.transparent);
+    expect(tester.getSize(summary).height, greaterThanOrEqualTo(32));
+    final summarySemantics = find.bySemanticsLabel('exec completed');
+    expect(summarySemantics, findsOneWidget);
+    var semanticsData = tester
+        .getSemantics(summarySemantics)
+        .getSemanticsData();
+    expect(semanticsData.flagsCollection.isButton, isTrue);
+    expect(semanticsData.flagsCollection.isExpanded, Tristate.isFalse);
+    expect(semanticsData.hasAction(SemanticsAction.tap), isTrue);
+    expect(
+      find.byKey(const ValueKey('timeline-tool-group-details')),
+      findsNothing,
+    );
     expect(find.textContaining('cargo test -p pl-model'), findsNothing);
     expect(find.textContaining('D:/work/project'), findsNothing);
     expect(find.textContaining('"command"'), findsNothing);
 
-    await tester.tap(find.text('Tool activity'));
+    await tester.tap(find.text('exec completed'));
     await tester.pump();
 
+    expect(
+      find.byKey(const ValueKey('timeline-tool-group-details')),
+      findsOneWidget,
+    );
+    semanticsData = tester.getSemantics(summarySemantics).getSemanticsData();
+    expect(semanticsData.flagsCollection.isExpanded, Tristate.isTrue);
     expect(find.textContaining('cargo test -p pl-model'), findsOneWidget);
     expect(find.textContaining('D:/work/project'), findsOneWidget);
     expect(find.textContaining('pl-core'), findsNothing);
+
+    await tester.tap(find.text('exec completed').first);
+    await tester.pump();
+
+    expect(
+      find.byKey(const ValueKey('timeline-tool-group-details')),
+      findsNothing,
+    );
+    expect(find.textContaining('cargo test -p pl-model'), findsNothing);
+  });
+
+  testWidgets('timeline merges adjacent mixed tool types in order', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 700);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final message = TimelineMessage(
+      id: 'message-mixed-tools',
+      sessionId: 'session-1',
+      role: 'assistant',
+      createdAt: DateTime.fromMillisecondsSinceEpoch(0),
+    );
+    final parts = [
+      _toolTimelinePart(
+        id: 'tool-edit',
+        messageId: message.id,
+        turnId: 'turn-mixed-tools',
+        name: 'edit_file',
+        arguments: jsonEncode({'path': 'lib/timeline.dart'}),
+      ),
+      _toolTimelinePart(
+        id: 'tool-read',
+        messageId: message.id,
+        turnId: 'turn-mixed-tools',
+        order: 1,
+        name: 'read_file',
+        arguments: jsonEncode({'path': 'test/timeline_test.dart'}),
+      ),
+      _toolTimelinePart(
+        id: 'tool-exec',
+        messageId: message.id,
+        turnId: 'turn-mixed-tools',
+        order: 2,
+        name: 'exec',
+        arguments: jsonEncode({'command': 'flutter test'}),
+        workingDirectory: 'code/pure-studio-flutter',
+      ),
+    ];
+    final rows = timelineRowsFromMessages([message], parts: parts);
+
+    expect(rows, hasLength(1));
+    expect(rows.single.type, TimelineRowType.toolGroup);
+    expect(
+      rows.single.toolGroup!.items.map((item) => item.name),
+      orderedEquals(['edit_file', 'read_file', 'exec']),
+    );
+
+    await tester.pumpWidget(
+      _timelineApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 980,
+            height: 520,
+            child: TimelineView(sessionId: 'session-1', rows: rows),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    const summary =
+        'edit_file completed · read_file completed · exec completed';
+    expect(find.text(summary), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('timeline-tool-group-summary')),
+      findsOneWidget,
+    );
+    expect(find.text('edit_file completed'), findsNothing);
+    expect(find.text('read_file completed'), findsNothing);
+    expect(find.textContaining('lib/timeline.dart'), findsNothing);
+    expect(find.textContaining('flutter test'), findsNothing);
+
+    await tester.tap(find.text(summary));
+    await tester.pump();
+
+    expect(
+      find.byKey(const ValueKey('timeline-tool-group-details')),
+      findsOneWidget,
+    );
+    expect(find.text('edit_file completed'), findsOneWidget);
+    expect(find.text('read_file completed'), findsOneWidget);
+    expect(find.text('exec completed'), findsOneWidget);
+    expect(find.textContaining('lib/timeline.dart'), findsOneWidget);
+    expect(find.textContaining('test/timeline_test.dart'), findsOneWidget);
+    expect(find.textContaining('flutter test'), findsOneWidget);
+    expect(find.textContaining('code/pure-studio-flutter'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('timeline renders separate tool groups around assistant text', (
@@ -269,26 +397,30 @@ void registerTimelineToolTests() {
     );
     await tester.pump();
 
-    expect(find.text('Tool activity'), findsNWidgets(2));
+    expect(
+      find.text('read_file completed · search_files completed'),
+      findsOneWidget,
+    );
+    expect(find.text('exec completed'), findsOneWidget);
     expect(find.text('先读取相关文件。'), findsOneWidget);
     expect(find.text('再跑一下测试。'), findsOneWidget);
     expect(find.textContaining('lib/a.dart'), findsNothing);
     expect(find.textContaining('flutter test'), findsNothing);
 
-    await tester.tap(find.text('Tool activity').first);
+    await tester.tap(find.text('read_file completed · search_files completed'));
     await tester.pump();
 
     expect(find.text('read_file completed'), findsOneWidget);
     expect(find.text('search_files completed'), findsOneWidget);
-    expect(find.text('exec completed'), findsNothing);
+    expect(find.text('exec completed'), findsOneWidget);
     expect(find.textContaining('lib/a.dart'), findsOneWidget);
     expect(find.textContaining('activityGroupId'), findsOneWidget);
     expect(find.textContaining('flutter test'), findsNothing);
 
-    await tester.tap(find.text('Tool activity').last);
+    await tester.tap(find.text('exec completed'));
     await tester.pump();
 
-    expect(find.text('exec completed'), findsOneWidget);
+    expect(find.text('exec completed'), findsNWidgets(2));
     expect(find.textContaining('flutter test'), findsOneWidget);
   });
 
@@ -356,14 +488,21 @@ void registerTimelineToolTests() {
     );
     await tester.pump();
 
-    expect(find.text('Tool activity'), findsOneWidget);
     expect(
-      find.text('3 tools, 1 running, 1 need attention · file missing'),
+      find.text(
+        'exec awaiting approval · read_file failed · '
+        'search_files running · file missing',
+      ),
       findsOneWidget,
     );
     expect(find.text('awaitingApproval'), findsOneWidget);
 
-    await tester.tap(find.text('Tool activity'));
+    await tester.tap(
+      find.text(
+        'exec awaiting approval · read_file failed · '
+        'search_files running · file missing',
+      ),
+    );
     await tester.pump();
 
     expect(find.text('exec awaiting approval'), findsOneWidget);
