@@ -376,6 +376,7 @@ fn test_options() -> AgentRuntimeOptions {
     AgentRuntimeOptions {
         command_capacity: 32,
         cancel_grace: Duration::from_millis(10),
+        child_inactivity_timeout: Duration::from_millis(50),
         restored_inputs: RestoredInputPolicy::Start,
         session_events: crate::SessionEventOptions::default(),
     }
@@ -385,9 +386,17 @@ fn child_spawn_request(parent_id: AgentId) -> AgentSpawnRequest {
     AgentSpawnRequest {
         parent_id,
         role: crate::AgentRoleId::new("worker").unwrap(),
+        wake_policy: AgentWakePolicy::RuntimeTerminal,
         session: AgentSessionState::empty(SessionId::new("child-chat").unwrap()),
         initial_message: None,
         metadata: serde_json::Value::Null,
+    }
+}
+
+fn managed_child_spawn_request(parent_id: AgentId) -> AgentSpawnRequest {
+    AgentSpawnRequest {
+        wake_policy: AgentWakePolicy::ProductGated,
+        ..child_spawn_request(parent_id)
     }
 }
 
@@ -402,6 +411,627 @@ async fn wait_for_prepared_messages(factory: &TestTurnFactory, expected: usize) 
     })
     .await
     .expect("turn factory should receive the expected inputs");
+}
+
+#[tokio::test]
+async fn product_gated_runtime_terminal_requires_product_signal() {
+    let parent = registration("root", "root-chat")
+        .into_durable_state()
+        .snapshot;
+    let mut child = AgentRegistration {
+        identity: AgentIdentity {
+            id: AgentId::new("child").unwrap(),
+            parent_id: Some(parent.identity.id.clone()),
+            role: crate::AgentRoleId::new("executor").unwrap(),
+            depth: 1,
+        },
+        wake_policy: AgentWakePolicy::ProductGated,
+        sessions: vec![AgentSessionState::empty(
+            SessionId::new("child-chat").unwrap(),
+        )],
+    }
+    .into_durable_state()
+    .snapshot;
+    let hub = super::event_hub::AgentEventHubHandle::new([parent.clone(), child.clone()]);
+    let mut subscription = hub.subscribe_parent(&parent.identity.id);
+    child.revision = child.revision.saturating_add(1);
+    child.event_sequence = child.event_sequence.saturating_add(1);
+    let outcome = AgentTurnOutcome {
+        turn_id: TurnId::new("child-turn").unwrap(),
+        session_id: SessionId::new("child-chat").unwrap(),
+        kind: TurnOutcomeKind::Completed,
+        reason: None,
+        failure: None,
+        usage: Default::default(),
+        finished_at: 1,
+    };
+    child.last_turn = Some(outcome.clone());
+    hub.publish_runtime_event(&AgentRuntimeEvent {
+        agent_id: child.identity.id.clone(),
+        sequence: child.event_sequence,
+        created_at: 1,
+        kind: AgentRuntimeEventKind::TurnFinished {
+            outcome,
+            snapshot: child.clone(),
+        },
+    });
+
+    assert!(
+        tokio::time::timeout(Duration::from_millis(20), subscription.recv())
+            .await
+            .is_err(),
+        "managed runtime terminal must not wake the parent before its product contract"
+    );
+
+    hub.publish_product_phase(
+        parent.identity.id,
+        child.identity.id,
+        "delivery:outcome-1".to_string(),
+        "deliveryCompleted".to_string(),
+        Some("delivery committed".to_string()),
+    )
+    .unwrap();
+    let update = tokio::time::timeout(Duration::from_secs(1), subscription.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    let AgentSubscriptionItem::Update(update) = update else {
+        panic!("expected a product phase update");
+    };
+    assert!(matches!(
+        update.kind,
+        AgentUpdateKind::ProductPhaseChanged { .. }
+    ));
+}
+
+#[tokio::test]
+async fn parent_subscription_only_delivers_direct_child_updates() {
+    let parent_a = registration("root-a", "root-a-chat")
+        .into_durable_state()
+        .snapshot;
+    let parent_b = registration("root-b", "root-b-chat")
+        .into_durable_state()
+        .snapshot;
+    let child_a = AgentRegistration {
+        identity: AgentIdentity {
+            id: AgentId::new("child-a").unwrap(),
+            parent_id: Some(parent_a.identity.id.clone()),
+            role: crate::AgentRoleId::new("executor").unwrap(),
+            depth: 1,
+        },
+        wake_policy: AgentWakePolicy::ProductGated,
+        sessions: vec![AgentSessionState::empty(
+            SessionId::new("child-a-chat").unwrap(),
+        )],
+    }
+    .into_durable_state()
+    .snapshot;
+    let child_b = AgentRegistration {
+        identity: AgentIdentity {
+            id: AgentId::new("child-b").unwrap(),
+            parent_id: Some(parent_b.identity.id.clone()),
+            role: crate::AgentRoleId::new("executor").unwrap(),
+            depth: 1,
+        },
+        wake_policy: AgentWakePolicy::ProductGated,
+        sessions: vec![AgentSessionState::empty(
+            SessionId::new("child-b-chat").unwrap(),
+        )],
+    }
+    .into_durable_state()
+    .snapshot;
+    let hub = super::event_hub::AgentEventHubHandle::new([
+        parent_a.clone(),
+        parent_b.clone(),
+        child_a.clone(),
+        child_b.clone(),
+    ]);
+    let mut subscription_a = hub.subscribe_parent(&parent_a.identity.id);
+
+    for sequence in 0..300 {
+        hub.publish_product_phase(
+            parent_b.identity.id.clone(),
+            child_b.identity.id.clone(),
+            format!("delivery:b:{sequence}"),
+            "deliveryCompleted".to_string(),
+            Some("b".repeat(3_000)),
+        )
+        .unwrap();
+    }
+
+    assert!(
+        tokio::time::timeout(Duration::from_millis(20), subscription_a.recv())
+            .await
+            .is_err(),
+        "a parent subscription must ignore sibling-tree updates"
+    );
+    let mut subscription_b = hub.subscribe_parent(&parent_b.identity.id);
+    hub.publish_product_phase(
+        parent_b.identity.id.clone(),
+        child_b.identity.id.clone(),
+        "delivery:b:final".to_string(),
+        "deliveryCompleted".to_string(),
+        Some("b".repeat(3_000)),
+    )
+    .unwrap();
+    let AgentSubscriptionItem::Update(update) =
+        tokio::time::timeout(Duration::from_secs(1), subscription_b.recv())
+            .await
+            .unwrap()
+            .unwrap()
+    else {
+        panic!("expected a direct-child update");
+    };
+    assert_eq!(update.agent_id, child_b.identity.id);
+    assert_eq!(update.summary.unwrap().chars().count(), 2_048);
+    assert_eq!(subscription_a.children, vec![child_a]);
+}
+
+#[tokio::test]
+async fn parent_subscription_reports_stale_after_channel_lag() {
+    let parent = registration("root", "root-chat")
+        .into_durable_state()
+        .snapshot;
+    let child = AgentRegistration {
+        identity: AgentIdentity {
+            id: AgentId::new("child").unwrap(),
+            parent_id: Some(parent.identity.id.clone()),
+            role: crate::AgentRoleId::new("worker").unwrap(),
+            depth: 1,
+        },
+        wake_policy: AgentWakePolicy::RuntimeTerminal,
+        sessions: vec![AgentSessionState::empty(
+            SessionId::new("child-chat").unwrap(),
+        )],
+    }
+    .into_durable_state()
+    .snapshot;
+    let hub = super::event_hub::AgentEventHubHandle::new([parent.clone(), child.clone()]);
+    let mut subscription = hub.subscribe_parent(&parent.identity.id);
+    for sequence in 0..300 {
+        hub.publish_progress(
+            &child.identity.id,
+            AgentUpdateKind::ProgressReported,
+            Some(format!("progress {sequence}")),
+            format!("progress:{sequence}"),
+        )
+        .unwrap();
+    }
+
+    assert_eq!(
+        subscription.recv().await.unwrap(),
+        AgentSubscriptionItem::Stale
+    );
+    let refreshed = hub.subscribe_parent(&parent.identity.id);
+    assert_eq!(refreshed.children, vec![child]);
+}
+
+#[tokio::test]
+async fn duplicate_pending_wake_id_reuses_the_existing_fifo_turn() {
+    let host = TestHost::new(TestRepository::empty(), FactoryMode::Block);
+    let runtime = AgentRuntime::start(host.clone(), test_options())
+        .await
+        .unwrap();
+    let handle = runtime.handle();
+    let root = AgentId::new("root").unwrap();
+    let session = SessionId::new("root-chat").unwrap();
+    handle
+        .register(registration(root.as_str(), session.as_str()))
+        .await
+        .unwrap();
+    handle
+        .submit(
+            root.clone(),
+            AgentSubmitRequest::start(session.clone(), "active planner turn"),
+        )
+        .await
+        .unwrap();
+    wait_for_prepared_messages(&host.turn_factory, 1).await;
+
+    let wake_id = AgentWakeId::new("agent-wake:root:delivery:1").unwrap();
+    let first = handle
+        .submit(
+            root.clone(),
+            AgentSubmitRequest::start(session.clone(), "wake").with_wake_id(wake_id.clone()),
+        )
+        .await
+        .unwrap();
+    let duplicate = handle
+        .submit(
+            root.clone(),
+            AgentSubmitRequest::start(session, "duplicate wake").with_wake_id(wake_id),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(duplicate, first);
+    assert_eq!(handle.snapshot(root).await.unwrap().pending_inputs, 1);
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn accepted_product_signal_does_not_create_a_second_turn_after_restart() {
+    let repository = TestRepository::empty();
+    let host = TestHost::new(repository.clone(), FactoryMode::Fail);
+    let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
+    let handle = runtime.handle();
+    let root = AgentId::new("root").unwrap();
+    let session = SessionId::new("root-chat").unwrap();
+    handle
+        .register(registration(root.as_str(), session.as_str()))
+        .await
+        .unwrap();
+
+    let first = handle
+        .submit(
+            root.clone(),
+            AgentSubmitRequest::start(session.clone(), "delivery wake")
+                .with_wake_id(AgentWakeId::new("agent-wake:root:delivery:1").unwrap())
+                .with_wake_signal_ids(vec!["delivery:outcome-1".to_string()]),
+        )
+        .await
+        .unwrap();
+    handle.wait_until_idle(root.clone()).await.unwrap();
+    runtime.shutdown().await.unwrap();
+
+    let restored_host = TestHost::new(repository.clone(), FactoryMode::Fail);
+    let restored = AgentRuntime::start(restored_host.clone(), test_options())
+        .await
+        .unwrap();
+    let duplicate = restored
+        .handle()
+        .submit(
+            root.clone(),
+            AgentSubmitRequest::start(session, "replayed delivery wake")
+                .with_wake_id(AgentWakeId::new("agent-wake:root:replay-batch").unwrap())
+                .with_wake_signal_ids(vec!["delivery:outcome-1".to_string()]),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(duplicate, first);
+    assert_eq!(
+        restored
+            .handle()
+            .snapshot(root.clone())
+            .await
+            .unwrap()
+            .pending_inputs,
+        0
+    );
+    assert_eq!(repository.state(&root).accepted_wakes.len(), 1);
+    assert!(
+        restored_host
+            .turn_factory
+            .prepared_messages
+            .lock()
+            .unwrap()
+            .is_empty()
+    );
+    restored.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn replayed_signal_is_filtered_without_blocking_a_later_wake() {
+    let mut parent = registration("root", "root-chat").into_durable_state();
+    let accepted_wake_id = AgentWakeId::new("agent-wake:root:original").unwrap();
+    parent.accepted_wakes.insert(
+        accepted_wake_id.clone(),
+        AcceptedAgentWake {
+            wake_id: accepted_wake_id,
+            turn_id: TurnId::new("turn-original").unwrap(),
+            signal_ids: vec!["delivery:old".to_string()],
+            accepted_at: 1,
+        },
+    );
+    let mut child = AgentRegistration {
+        identity: AgentIdentity {
+            id: AgentId::new("child").unwrap(),
+            parent_id: Some(parent.snapshot.identity.id.clone()),
+            role: crate::AgentRoleId::new("executor").unwrap(),
+            depth: 1,
+        },
+        wake_policy: AgentWakePolicy::ProductGated,
+        sessions: vec![AgentSessionState::empty(
+            SessionId::new("child-chat").unwrap(),
+        )],
+    }
+    .into_durable_state();
+    child.snapshot.activity = AgentActivityState::Running;
+    child.snapshot.active_turn_id = Some(TurnId::new("child-turn").unwrap());
+    child.snapshot.active_session_id = Some(SessionId::new("child-chat").unwrap());
+    let repository = TestRepository::empty();
+    repository
+        .states
+        .lock()
+        .unwrap()
+        .insert(parent.snapshot.identity.id.clone(), parent);
+    repository
+        .states
+        .lock()
+        .unwrap()
+        .insert(child.snapshot.identity.id.clone(), child);
+    let host = TestHost::new(repository, FactoryMode::Block);
+    let mut options = test_options();
+    options.child_inactivity_timeout = Duration::from_secs(10);
+    let runtime = AgentRuntime::start(host.clone(), options).await.unwrap();
+    let handle = runtime.handle();
+    let root = AgentId::new("root").unwrap();
+    let child = AgentId::new("child").unwrap();
+
+    handle
+        .publish_product_phase(
+            root.clone(),
+            child.clone(),
+            "delivery:old".to_string(),
+            "deliveryCompleted".to_string(),
+            None,
+        )
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    assert!(
+        host.turn_factory
+            .prepared_messages
+            .lock()
+            .unwrap()
+            .is_empty()
+    );
+
+    handle
+        .publish_product_phase(
+            root,
+            child,
+            "delivery:new".to_string(),
+            "deliveryCompleted".to_string(),
+            None,
+        )
+        .unwrap();
+    wait_for_prepared_messages(&host.turn_factory, 1).await;
+    assert!(host.turn_factory.prepared_messages.lock().unwrap()[0].contains("delivery:new"));
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn restored_idle_parent_with_live_child_waits_before_timeout_wake() {
+    let mut parent = registration("root", "root-chat").into_durable_state();
+    parent.snapshot.activity = AgentActivityState::Idle;
+    let mut child = AgentRegistration {
+        identity: AgentIdentity {
+            id: AgentId::new("child").unwrap(),
+            parent_id: Some(parent.snapshot.identity.id.clone()),
+            role: crate::AgentRoleId::new("executor").unwrap(),
+            depth: 1,
+        },
+        wake_policy: AgentWakePolicy::ProductGated,
+        sessions: vec![AgentSessionState::empty(
+            SessionId::new("child-chat").unwrap(),
+        )],
+    }
+    .into_durable_state();
+    child.snapshot.activity = AgentActivityState::Running;
+    child.snapshot.active_turn_id = Some(TurnId::new("child-turn").unwrap());
+    child.snapshot.active_session_id = Some(SessionId::new("child-chat").unwrap());
+    let repository = TestRepository::empty();
+    repository
+        .states
+        .lock()
+        .unwrap()
+        .insert(parent.snapshot.identity.id.clone(), parent);
+    repository
+        .states
+        .lock()
+        .unwrap()
+        .insert(child.snapshot.identity.id.clone(), child);
+    let host = TestHost::new(repository, FactoryMode::Block);
+    let runtime = AgentRuntime::start(host.clone(), test_options())
+        .await
+        .unwrap();
+    let handle = runtime.handle();
+    let root = AgentId::new("root").unwrap();
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            if handle.snapshot(root.clone()).await.unwrap().activity
+                == AgentActivityState::WaitingAgents
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(
+        tokio::time::timeout(
+            Duration::from_millis(20),
+            wait_for_prepared_messages(&host.turn_factory, 1)
+        )
+        .await
+        .is_err(),
+        "restored live state is a subscription baseline, not an immediate wake"
+    );
+    wait_for_prepared_messages(&host.turn_factory, 1).await;
+    assert!(host.turn_factory.prepared_messages.lock().unwrap()[0].contains("inactivityTimeout"));
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn child_update_does_not_preempt_running_parent() {
+    let host = TestHost::new(TestRepository::empty(), FactoryMode::Block);
+    let runtime = AgentRuntime::start(host.clone(), test_options())
+        .await
+        .unwrap();
+    let handle = runtime.handle();
+    let root = AgentId::new("root").unwrap();
+    handle
+        .register(registration("root", "root-chat"))
+        .await
+        .unwrap();
+    let child = handle
+        .spawn(managed_child_spawn_request(root.clone()))
+        .await
+        .unwrap()
+        .snapshot
+        .identity
+        .id;
+    handle
+        .submit(
+            root.clone(),
+            AgentSubmitRequest::start(SessionId::new("root-chat").unwrap(), "planner work"),
+        )
+        .await
+        .unwrap();
+    wait_for_prepared_messages(&host.turn_factory, 1).await;
+
+    handle
+        .publish_product_phase(
+            root.clone(),
+            child,
+            "delivery:outcome-1".to_string(),
+            "deliveryCompleted".to_string(),
+            None,
+        )
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    let running = handle.snapshot(root.clone()).await.unwrap();
+    assert_eq!(running.activity, AgentActivityState::Running);
+    assert_eq!(running.pending_inputs, 0);
+    assert_eq!(host.turn_factory.prepared_messages.lock().unwrap().len(), 1);
+
+    host.turn_factory.blocker.notify_one();
+    wait_for_prepared_messages(&host.turn_factory, 2).await;
+    let messages = host.turn_factory.prepared_messages.lock().unwrap().clone();
+    assert!(messages[1].contains("<agentWakeBatch>"));
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn child_progress_only_resets_that_child_inactivity_deadline() {
+    let host = TestHost::new(TestRepository::empty(), FactoryMode::Block);
+    let runtime = AgentRuntime::start(host.clone(), test_options())
+        .await
+        .unwrap();
+    let handle = runtime.handle();
+    let root = AgentId::new("root").unwrap();
+    handle
+        .register(registration("root", "root-chat"))
+        .await
+        .unwrap();
+    let child_a = handle
+        .spawn(managed_child_spawn_request(root.clone()))
+        .await
+        .unwrap()
+        .snapshot
+        .identity
+        .id;
+    let mut child_b_request = managed_child_spawn_request(root.clone());
+    child_b_request.session = AgentSessionState::empty(SessionId::new("child-b-chat").unwrap());
+    let child_b = handle
+        .spawn(child_b_request)
+        .await
+        .unwrap()
+        .snapshot
+        .identity
+        .id;
+    handle
+        .submit(
+            root.clone(),
+            AgentSubmitRequest::start(SessionId::new("root-chat").unwrap(), "planner work"),
+        )
+        .await
+        .unwrap();
+    wait_for_prepared_messages(&host.turn_factory, 1).await;
+    host.turn_factory.blocker.notify_one();
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            if handle.snapshot(root.clone()).await.unwrap().activity
+                == AgentActivityState::WaitingAgents
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    handle
+        .publish_progress(
+            &child_a,
+            AgentUpdateKind::ProgressReported,
+            Some("still working".to_string()),
+            "progress:child-a:1".to_string(),
+        )
+        .unwrap();
+    wait_for_prepared_messages(&host.turn_factory, 2).await;
+    host.turn_factory.blocker.notify_one();
+    wait_for_prepared_messages(&host.turn_factory, 3).await;
+
+    let messages = host.turn_factory.prepared_messages.lock().unwrap().clone();
+    let batch_json = messages[2]
+        .split_once("<agentWakeBatch>\n")
+        .and_then(|(_, tail)| tail.split_once("\n</agentWakeBatch>"))
+        .map(|(json, _)| json)
+        .expect("timeout wake should contain a typed batch");
+    let batch: AgentWakeBatch = serde_json::from_str(batch_json).unwrap();
+    assert_eq!(
+        batch.reason,
+        AgentWakeReason::InactivityTimeout {
+            timed_out_agent_ids: vec![child_b],
+        }
+    );
+    assert_ne!(
+        batch.reason,
+        AgentWakeReason::InactivityTimeout {
+            timed_out_agent_ids: vec![child_a],
+        }
+    );
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn silent_managed_child_enters_waiting_agents_then_times_out() {
+    let host = TestHost::new(TestRepository::empty(), FactoryMode::Block);
+    let runtime = AgentRuntime::start(host.clone(), test_options())
+        .await
+        .unwrap();
+    let handle = runtime.handle();
+    let root = AgentId::new("root").unwrap();
+    handle
+        .register(registration("root", "root-chat"))
+        .await
+        .unwrap();
+    handle
+        .spawn(managed_child_spawn_request(root.clone()))
+        .await
+        .unwrap();
+    handle
+        .submit(
+            root.clone(),
+            AgentSubmitRequest::start(SessionId::new("root-chat").unwrap(), "planner work"),
+        )
+        .await
+        .unwrap();
+    wait_for_prepared_messages(&host.turn_factory, 1).await;
+    host.turn_factory.blocker.notify_one();
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            if handle.snapshot(root.clone()).await.unwrap().activity
+                == AgentActivityState::WaitingAgents
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    wait_for_prepared_messages(&host.turn_factory, 2).await;
+    let messages = host.turn_factory.prepared_messages.lock().unwrap().clone();
+    assert!(messages[1].contains("inactivityTimeout"));
+    runtime.shutdown().await.unwrap();
 }
 
 #[tokio::test]
@@ -577,7 +1207,7 @@ async fn failed_turn_returns_agent_to_active_idle_and_commits_snapshot() {
         )
         .await
         .unwrap();
-    let waited = handle.wait(agent_id.clone()).await.unwrap();
+    let waited = handle.wait_until_idle(agent_id.clone()).await.unwrap();
 
     assert_eq!(waited.snapshot.lifecycle, AgentLifecycleState::Active);
     assert_eq!(waited.snapshot.activity, AgentActivityState::Idle);
@@ -633,7 +1263,7 @@ async fn current_session_submit_resolves_the_single_owned_session() {
         )
         .await
         .unwrap();
-    handle.wait(agent_id.clone()).await.unwrap();
+    handle.wait_until_idle(agent_id.clone()).await.unwrap();
 
     assert_eq!(
         repository
@@ -656,6 +1286,7 @@ async fn current_session_submit_rejects_ambiguous_idle_history() {
     let agent_id = AgentId::new("root").unwrap();
     let registration = AgentRegistration {
         identity: identity("root"),
+        wake_policy: AgentWakePolicy::RuntimeTerminal,
         sessions: vec![
             AgentSessionState::empty(SessionId::new("first").unwrap()),
             AgentSessionState::empty(SessionId::new("historical").unwrap()),
@@ -745,7 +1376,7 @@ async fn queue_only_inputs_preserve_fifo_when_a_later_input_starts_queue() {
         )
         .await
         .unwrap();
-    handle.wait(agent_id).await.unwrap();
+    handle.wait_until_idle(agent_id).await.unwrap();
 
     assert_eq!(
         host.turn_factory.prepared_messages.lock().unwrap().clone(),
@@ -787,7 +1418,7 @@ async fn concurrent_submits_are_serialized_without_losing_inputs() {
     for submit in submits {
         turn_ids.insert(submit.await.unwrap().to_string());
     }
-    handle.wait(agent_id).await.unwrap();
+    handle.wait_until_idle(agent_id).await.unwrap();
 
     let prepared = host.turn_factory.prepared_messages.lock().unwrap().clone();
     assert_eq!(turn_ids.len(), 16);
@@ -1045,10 +1676,15 @@ async fn trace_is_durable_before_broadcast_and_commit_failure_faults_actor() {
     let repository = TestRepository::with_state(state.clone());
     let host = TestHost::new(repository.clone(), FactoryMode::Block);
     let (runtime_sender, _runtime_receiver) = tokio::sync::mpsc::channel(1);
+    let agent_events = super::event_hub::AgentEventHubHandle::new([state.snapshot.clone()]);
     let actor = spawn_agent_actor(
         host.clone(),
         state,
-        AgentRuntimeHandle::new(runtime_sender, crate::SessionEventHub::default().handle()),
+        AgentRuntimeHandle::new(
+            runtime_sender,
+            crate::SessionEventHub::default().handle(),
+            agent_events,
+        ),
         Duration::from_millis(10),
         false,
         32,
@@ -1308,6 +1944,8 @@ async fn restart_recovery_replays_pending_inputs_in_fifo_order() {
     for (index, message) in ["first", "second"].into_iter().enumerate() {
         state.pending_inputs.push_back(PendingAgentInput {
             turn_id: TurnId::new(format!("turn-{index}")).unwrap(),
+            wake_id: None,
+            wake_signal_ids: Vec::new(),
             session_id: session_id.clone(),
             message: message.to_string(),
             metadata: serde_json::Value::Null,
@@ -1322,7 +1960,11 @@ async fn restart_recovery_replays_pending_inputs_in_fifo_order() {
     let runtime = AgentRuntime::start(host.clone(), test_options())
         .await
         .unwrap();
-    runtime.handle().wait(agent_id.clone()).await.unwrap();
+    runtime
+        .handle()
+        .wait_until_idle(agent_id.clone())
+        .await
+        .unwrap();
 
     assert_eq!(
         host.turn_factory.prepared_messages.lock().unwrap().clone(),
@@ -1339,6 +1981,8 @@ async fn restored_inputs_wait_for_host_resource_activation() {
     let mut state = registration("root", "chat").into_durable_state();
     state.pending_inputs.push_back(PendingAgentInput {
         turn_id: TurnId::new("restored-turn").unwrap(),
+        wake_id: None,
+        wake_signal_ids: Vec::new(),
         session_id,
         message: "after-resources-ready".to_string(),
         metadata: serde_json::Value::Null,
@@ -1361,7 +2005,7 @@ async fn restored_inputs_wait_for_host_resource_activation() {
     );
 
     runtime.handle().start_restored_inputs().await.unwrap();
-    runtime.handle().wait(agent_id).await.unwrap();
+    runtime.handle().wait_until_idle(agent_id).await.unwrap();
     assert_eq!(
         host.turn_factory
             .prepared_messages
@@ -1389,6 +2033,7 @@ async fn close_closes_descendants_from_deepest_to_root() {
         .spawn(AgentSpawnRequest {
             parent_id: root.clone(),
             role: crate::AgentRoleId::new("worker").unwrap(),
+            wake_policy: AgentWakePolicy::RuntimeTerminal,
             session: AgentSessionState::empty(SessionId::new("child-chat").unwrap()),
             initial_message: None,
             metadata: serde_json::Value::Null,
@@ -1402,6 +2047,7 @@ async fn close_closes_descendants_from_deepest_to_root() {
         .spawn(AgentSpawnRequest {
             parent_id: child.clone(),
             role: crate::AgentRoleId::new("worker").unwrap(),
+            wake_policy: AgentWakePolicy::RuntimeTerminal,
             session: AgentSessionState::empty(SessionId::new("grandchild-chat").unwrap()),
             initial_message: None,
             metadata: serde_json::Value::Null,
@@ -1654,7 +2300,12 @@ async fn failed_close_compensation_faults_agent_durably() {
         AgentLifecycleState::Faulted
     );
     assert_eq!(
-        handle.wait(root).await.unwrap().snapshot.lifecycle,
+        handle
+            .wait_until_idle(root)
+            .await
+            .unwrap()
+            .snapshot
+            .lifecycle,
         AgentLifecycleState::Faulted
     );
     runtime.shutdown().await.unwrap();

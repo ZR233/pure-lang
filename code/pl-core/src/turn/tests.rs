@@ -59,12 +59,12 @@ fn budget_tracker_records_observability() {
 
     tracker.record_model_step();
     tracker.record_tool_call("exec");
-    tracker.record_tool_call("wait_agent");
+    tracker.record_tool_call("list_agents");
 
     let usage = tracker.usage();
     assert_eq!(usage.model_steps, 1);
-    assert_eq!(usage.tool_calls, 1);
-    assert_eq!(usage.wait_calls, 1);
+    assert_eq!(usage.tool_calls, 2);
+    assert_eq!(usage.wait_calls, 0);
 }
 
 #[test]

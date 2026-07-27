@@ -34,20 +34,19 @@ struct DeliveryValidation<'a> {
 
 struct CommittedDelivery {
     task_run_id: String,
+    outcome_id: String,
+    agent_id: String,
     delivery: AgentDelivery,
 }
 
 impl TaskCoordinator {
-    pub(crate) fn install_tools<F>(
+    pub(crate) fn install_tools(
         self: &Arc<Self>,
         core: &mut TurnEngine,
         session_id: &str,
         runtime: AgentRuntimeHandle,
         snapshot: &AgentSnapshot,
-        delivery_continuation: F,
-    ) where
-        F: Fn(String) + Clone + Send + Sync + 'static,
-    {
+    ) {
         if snapshot.identity.parent_id.is_none() {
             core.register_tool(self.task_spawn_executor_tool(session_id, runtime.clone()));
             core.register_tool(self.task_update_design_tool(session_id));
@@ -60,9 +59,13 @@ impl TaskCoordinator {
         }
         match snapshot.identity.role.as_str() {
             "executor" => {
-                core.register_tool(self.submit_delivery_tool(delivery_continuation));
+                core.register_tool(
+                    self.submit_delivery_tool(session_id.to_string(), Some(runtime)),
+                );
             }
-            "reviewer" => core.register_tool(self.review_exit_tool(session_id)),
+            "reviewer" => {
+                core.register_tool(self.review_exit_tool(session_id, Some(runtime)));
+            }
             "explorer" | "planner" => {}
             _ => {}
         }
@@ -147,14 +150,17 @@ impl TaskCoordinator {
             .await?;
         Ok(CommittedDelivery {
             task_run_id: scope.run.id,
+            outcome_id: scope.outcome.id,
+            agent_id: scope.outcome.agent_id,
             delivery,
         })
     }
 
-    pub(crate) fn submit_delivery_tool<F>(self: &Arc<Self>, continuation: F) -> RegisteredTool
-    where
-        F: Fn(String) + Clone + Send + Sync + 'static,
-    {
+    pub(crate) fn submit_delivery_tool(
+        self: &Arc<Self>,
+        session_id: String,
+        runtime: Option<AgentRuntimeHandle>,
+    ) -> RegisteredTool {
         let coordinator = self.clone();
         RegisteredTool::from_typed_fallible_execution_result(
             "submit_delivery",
@@ -171,7 +177,8 @@ impl TaskCoordinator {
             ]),
             move |arguments: SubmitDeliveryInput, context| {
                 let coordinator = coordinator.clone();
-                let continuation = continuation.clone();
+                let runtime = runtime.clone();
+                let session_id = session_id.clone();
                 async move {
                     let subagent = context
                         .active_subagent
@@ -185,7 +192,24 @@ impl TaskCoordinator {
                             &arguments.verification_summary,
                         )
                         .await?;
-                    continuation(committed.task_run_id);
+                    if let Some(runtime) = runtime
+                        && let Err(error) = runtime.publish_product_phase(
+                            crate::studio::agent_host::root_agent_id(&session_id),
+                            pl_core::AgentId::new(committed.agent_id.clone())?,
+                            format!("delivery:{}", committed.outcome_id),
+                            "deliveryCompleted".to_string(),
+                            Some(format!(
+                                "executor delivery committed for task {}",
+                                committed.task_run_id
+                            )),
+                        )
+                    {
+                        tracing::warn!(
+                            task_run_id = %committed.task_run_id,
+                            %error,
+                            "delivery product signal will be recovered from durable facts"
+                        );
+                    }
                     ToolExecutionResult::<serde_json::Value>::json(committed.delivery)
                         .map_err(anyhow::Error::from)
                 }

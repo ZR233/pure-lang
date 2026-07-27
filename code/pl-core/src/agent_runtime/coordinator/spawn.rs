@@ -51,6 +51,7 @@ where
             });
         }
     }
+    runtime.agent_events.publish_runtime_event(&event);
     host.observer()
         .publish(AgentCommittedEvent::runtime(event))
         .await;
@@ -94,6 +95,7 @@ where
     };
     let mut state = AgentRegistration {
         identity,
+        wake_policy: request.wake_policy,
         sessions: vec![request.session.clone()],
     }
     .into_durable_state();
@@ -103,6 +105,8 @@ where
         let turn_id = TurnId::generate();
         state.pending_inputs.push_back(PendingAgentInput {
             turn_id: turn_id.clone(),
+            wake_id: None,
+            wake_signal_ids: Vec::new(),
             session_id: child_session_id.clone(),
             message,
             metadata: request.metadata,
@@ -174,7 +178,7 @@ where
                 (reason.clone(), SpawnCompensation::Faulted { reason })
             }
         };
-        let compensated = persist_spawn_compensation(host, state, compensation).await?;
+        let compensated = persist_spawn_compensation(host, runtime, state, compensation).await?;
         actors.insert(
             child_id,
             spawn_agent_actor(
@@ -188,6 +192,7 @@ where
         );
         return Err(AgentRuntimeError::Lifecycle(reason));
     }
+    runtime.agent_events.publish_runtime_event(&event);
     host.observer()
         .publish(AgentCommittedEvent::runtime(event))
         .await;
@@ -210,6 +215,7 @@ where
 
 async fn persist_spawn_compensation<H>(
     host: &H,
+    runtime: &AgentRuntimeHandle,
     mut state: AgentDurableState,
     compensation: SpawnCompensation,
 ) -> AgentRuntimeResult<AgentDurableState>
@@ -262,6 +268,7 @@ where
         .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
     match outcome {
         AgentCommitOutcome::Applied => {
+            runtime.agent_events.store_snapshot(state.snapshot.clone());
             host.observer()
                 .publish(AgentCommittedEvent::runtime(event))
                 .await;

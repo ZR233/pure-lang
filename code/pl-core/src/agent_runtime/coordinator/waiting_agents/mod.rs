@@ -1,0 +1,399 @@
+use std::collections::{BTreeMap, BTreeSet, BinaryHeap, VecDeque};
+use std::time::Duration;
+
+use tokio::time::Instant;
+
+mod timer;
+mod wake;
+use timer::{
+    TimerEntry, arm_all_child_timers, arm_child_timer, handle_due_timers, invalidate_timers,
+    wait_for_deadline,
+};
+use wake::{has_live_children, remember_signal, wake_parent};
+
+use super::super::{
+    AgentActivityState, AgentId, AgentLifecycleState, AgentRuntimeEvent, AgentRuntimeEventKind,
+    AgentRuntimeHandle, AgentSnapshot, AgentUpdateEnvelope, AgentUpdateKind, AgentWakePolicy,
+    AgentWakeReason,
+};
+
+#[derive(Default)]
+struct ParentWaitState {
+    pending: BTreeMap<String, AgentUpdateEnvelope>,
+    seen_signals: BTreeSet<String>,
+    seen_order: VecDeque<String>,
+    last_meaningful_updates: BTreeMap<AgentId, Instant>,
+    timer_generations: BTreeMap<AgentId, u64>,
+    product_terminal: BTreeSet<AgentId>,
+    waiting_epoch: u64,
+    wake_in_flight: bool,
+}
+
+pub(super) fn spawn_waiting_agents_supervisor(
+    runtime: AgentRuntimeHandle,
+    inactivity_timeout: Duration,
+) {
+    tokio::spawn(async move {
+        let mut updates = runtime.agent_events.subscribe_all();
+        let mut runtime_events = runtime.agent_events.subscribe_runtime();
+        let mut parents = BTreeMap::<AgentId, ParentWaitState>::new();
+        let mut timers = BinaryHeap::<TimerEntry>::new();
+        restore_waiting_parents(&runtime, &mut parents, &mut timers, inactivity_timeout);
+        reconcile_restored_parents(&runtime, &mut parents, &mut timers, inactivity_timeout).await;
+
+        loop {
+            let deadline = timers.peek().map(|entry| (entry.0).0);
+            tokio::select! {
+                update = updates.recv() => match update {
+                    Ok(update) => {
+                        handle_update(
+                            &runtime,
+                            &mut parents,
+                            &mut timers,
+                            inactivity_timeout,
+                            update,
+                        ).await;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                        reconcile_after_lag(
+                            &runtime,
+                            &mut parents,
+                            &mut timers,
+                            inactivity_timeout,
+                        ).await;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                },
+                event = runtime_events.recv() => match event {
+                    Ok(event) => {
+                        handle_runtime_event(
+                            &runtime,
+                            &mut parents,
+                            &mut timers,
+                            inactivity_timeout,
+                            event,
+                        ).await;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                        reconcile_after_lag(
+                            &runtime,
+                            &mut parents,
+                            &mut timers,
+                            inactivity_timeout,
+                        ).await;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                },
+                () = wait_for_deadline(deadline) => {
+                    handle_due_timers(&runtime, &mut parents, &mut timers).await;
+                }
+            }
+        }
+    });
+}
+
+async fn handle_update(
+    runtime: &AgentRuntimeHandle,
+    parents: &mut BTreeMap<AgentId, ParentWaitState>,
+    timers: &mut BinaryHeap<TimerEntry>,
+    inactivity_timeout: Duration,
+    update: AgentUpdateEnvelope,
+) {
+    if !update_triggers_parent_wake(&update.kind) {
+        return;
+    }
+    let parent_id = update.parent_agent_id.clone();
+    let child_id = update.agent_id.clone();
+    if runtime
+        .wake_accepted(parent_id.clone(), None, vec![update.signal_id.clone()])
+        .await
+        .unwrap_or(false)
+    {
+        return;
+    }
+    let state = parents.entry(parent_id.clone()).or_default();
+    if !remember_signal(state, &update.signal_id) {
+        return;
+    }
+    if matches!(update.kind, AgentUpdateKind::ProductPhaseChanged { .. }) {
+        state.product_terminal.insert(child_id.clone());
+    }
+    state
+        .last_meaningful_updates
+        .insert(child_id.clone(), Instant::now());
+    state.pending.insert(update.signal_id.clone(), update);
+
+    let Ok(parent) = runtime.agent_events.snapshot(&parent_id) else {
+        return;
+    };
+    if parent.activity == AgentActivityState::WaitingAgents {
+        arm_child_timer(
+            runtime,
+            state,
+            timers,
+            inactivity_timeout,
+            &parent_id,
+            &child_id,
+        );
+    }
+    if parent.lifecycle == AgentLifecycleState::Active
+        && matches!(
+            parent.activity,
+            AgentActivityState::Idle | AgentActivityState::WaitingAgents
+        )
+    {
+        wake_parent(runtime, parents, parent_id, AgentWakeReason::Updates).await;
+    }
+}
+
+fn update_triggers_parent_wake(kind: &AgentUpdateKind) -> bool {
+    matches!(
+        kind,
+        AgentUpdateKind::ProgressReported
+            | AgentUpdateKind::TodoPhaseChanged
+            | AgentUpdateKind::NeedsAttention
+            | AgentUpdateKind::RuntimeTerminal { .. }
+            | AgentUpdateKind::ProductPhaseChanged { .. }
+    )
+}
+
+async fn handle_runtime_event(
+    runtime: &AgentRuntimeHandle,
+    parents: &mut BTreeMap<AgentId, ParentWaitState>,
+    timers: &mut BinaryHeap<TimerEntry>,
+    inactivity_timeout: Duration,
+    event: AgentRuntimeEvent,
+) {
+    let snapshot = event_snapshot(&event);
+    let parent_id = snapshot.identity.id.clone();
+    let state = parents.entry(parent_id.clone()).or_default();
+    if snapshot.activity != AgentActivityState::WaitingAgents {
+        invalidate_timers(state);
+    }
+    match event.kind {
+        AgentRuntimeEventKind::TurnFinished { .. }
+        | AgentRuntimeEventKind::RecoveryCancelledTurn { .. } => {
+            state.wake_in_flight = false;
+            settle_parent(runtime, parents, parent_id).await;
+        }
+        AgentRuntimeEventKind::StateChanged { snapshot }
+            if snapshot.activity == AgentActivityState::WaitingAgents =>
+        {
+            let state = parents.entry(parent_id.clone()).or_default();
+            state.waiting_epoch = state.waiting_epoch.saturating_add(1);
+            arm_all_child_timers(runtime, state, timers, inactivity_timeout, &parent_id);
+        }
+        AgentRuntimeEventKind::Registered { .. }
+        | AgentRuntimeEventKind::StateChanged { .. }
+        | AgentRuntimeEventKind::TurnQueued { .. }
+        | AgentRuntimeEventKind::TurnStarted { .. }
+        | AgentRuntimeEventKind::SessionOpened { .. }
+        | AgentRuntimeEventKind::Faulted { .. } => {}
+    }
+}
+
+async fn settle_parent(
+    runtime: &AgentRuntimeHandle,
+    parents: &mut BTreeMap<AgentId, ParentWaitState>,
+    parent_id: AgentId,
+) {
+    let Ok(parent) = runtime.agent_events.snapshot(&parent_id) else {
+        return;
+    };
+    if parent.lifecycle != AgentLifecycleState::Active
+        || !matches!(
+            parent.activity,
+            AgentActivityState::Idle | AgentActivityState::WaitingAgents
+        )
+    {
+        return;
+    }
+    if parents
+        .get(&parent_id)
+        .is_some_and(|state| !state.pending.is_empty())
+    {
+        wake_parent(runtime, parents, parent_id, AgentWakeReason::Updates).await;
+        return;
+    }
+    let state = parents.entry(parent_id.clone()).or_default();
+    if has_live_children(runtime, state, &parent_id) {
+        let _ = runtime.enter_waiting_agents(parent_id).await;
+    }
+}
+
+fn restore_waiting_parents(
+    runtime: &AgentRuntimeHandle,
+    parents: &mut BTreeMap<AgentId, ParentWaitState>,
+    timers: &mut BinaryHeap<TimerEntry>,
+    inactivity_timeout: Duration,
+) {
+    for snapshot in runtime.agent_events.snapshots() {
+        if snapshot.lifecycle == AgentLifecycleState::Active
+            && snapshot.activity == AgentActivityState::WaitingAgents
+        {
+            let parent_id = snapshot.identity.id;
+            let state = parents.entry(parent_id.clone()).or_default();
+            state.waiting_epoch = state.waiting_epoch.saturating_add(1);
+            arm_all_child_timers(runtime, state, timers, inactivity_timeout, &parent_id);
+        }
+    }
+}
+
+async fn reconcile_after_lag(
+    runtime: &AgentRuntimeHandle,
+    parents: &mut BTreeMap<AgentId, ParentWaitState>,
+    timers: &mut BinaryHeap<TimerEntry>,
+    inactivity_timeout: Duration,
+) {
+    for child in runtime.agent_events.snapshots() {
+        let Some(parent_id) = child.identity.parent_id.clone() else {
+            continue;
+        };
+        if child.wake_policy == AgentWakePolicy::ProductGated {
+            continue;
+        }
+        let kind = if child.wake_policy == AgentWakePolicy::RuntimeTerminal
+            && child.activity == AgentActivityState::Idle
+            && child.last_turn.is_some()
+        {
+            AgentUpdateKind::RuntimeTerminal {
+                outcome: child.last_turn.clone(),
+            }
+        } else {
+            AgentUpdateKind::ActivityChanged {
+                activity: child.activity,
+            }
+        };
+        handle_update(
+            runtime,
+            parents,
+            timers,
+            inactivity_timeout,
+            AgentUpdateEnvelope {
+                signal_id: format!(
+                    "stale:{}:{}:{}",
+                    child.identity.id, child.revision, child.event_sequence
+                ),
+                parent_agent_id: parent_id,
+                agent_id: child.identity.id.clone(),
+                agent_revision: child.revision,
+                event_sequence: child.event_sequence,
+                occurred_at: child.updated_at,
+                kind,
+                snapshot: child,
+                summary: Some("subscription lagged; canonical child snapshot reloaded".to_string()),
+            },
+        )
+        .await;
+    }
+
+    let parent_snapshots = runtime.agent_events.snapshots();
+    for snapshot in &parent_snapshots {
+        if snapshot.lifecycle == AgentLifecycleState::Active
+            && snapshot.pending_inputs == 0
+            && matches!(
+                snapshot.activity,
+                AgentActivityState::Idle | AgentActivityState::WaitingAgents
+            )
+            && let Some(state) = parents.get_mut(&snapshot.identity.id)
+        {
+            state.wake_in_flight = false;
+        }
+    }
+    let idle_parents = parent_snapshots
+        .into_iter()
+        .filter(|snapshot| {
+            snapshot.lifecycle == AgentLifecycleState::Active
+                && matches!(
+                    snapshot.activity,
+                    AgentActivityState::Idle | AgentActivityState::WaitingAgents
+                )
+        })
+        .map(|snapshot| snapshot.identity.id)
+        .collect::<Vec<_>>();
+    for parent_id in idle_parents {
+        settle_parent(runtime, parents, parent_id).await;
+    }
+}
+
+async fn reconcile_restored_parents(
+    runtime: &AgentRuntimeHandle,
+    parents: &mut BTreeMap<AgentId, ParentWaitState>,
+    timers: &mut BinaryHeap<TimerEntry>,
+    inactivity_timeout: Duration,
+) {
+    for child in runtime.agent_events.snapshots() {
+        if child.wake_policy != AgentWakePolicy::RuntimeTerminal
+            || child.lifecycle != AgentLifecycleState::Active
+            || child.activity != AgentActivityState::Idle
+            || child.last_turn.is_none()
+        {
+            continue;
+        }
+        let Some(parent_id) = child.identity.parent_id.clone() else {
+            continue;
+        };
+        let Ok(parent) = runtime.agent_events.snapshot(&parent_id) else {
+            continue;
+        };
+        if parent.pending_inputs != 0
+            || !matches!(
+                parent.activity,
+                AgentActivityState::Idle | AgentActivityState::WaitingAgents
+            )
+        {
+            continue;
+        }
+        handle_update(
+            runtime,
+            parents,
+            timers,
+            inactivity_timeout,
+            AgentUpdateEnvelope {
+                signal_id: format!("runtime:{}:{}", child.identity.id, child.event_sequence),
+                parent_agent_id: parent_id,
+                agent_id: child.identity.id.clone(),
+                agent_revision: child.revision,
+                event_sequence: child.event_sequence,
+                occurred_at: child.updated_at,
+                kind: AgentUpdateKind::RuntimeTerminal {
+                    outcome: child.last_turn.clone(),
+                },
+                snapshot: child,
+                summary: Some("runtime restored a terminal direct-child snapshot".to_string()),
+            },
+        )
+        .await;
+    }
+
+    let idle_parents = runtime
+        .agent_events
+        .snapshots()
+        .into_iter()
+        .filter(|snapshot| {
+            snapshot.lifecycle == AgentLifecycleState::Active
+                && snapshot.pending_inputs == 0
+                && matches!(
+                    snapshot.activity,
+                    AgentActivityState::Idle | AgentActivityState::WaitingAgents
+                )
+        })
+        .map(|snapshot| snapshot.identity.id)
+        .collect::<Vec<_>>();
+    for parent_id in idle_parents {
+        settle_parent(runtime, parents, parent_id).await;
+    }
+}
+
+fn event_snapshot(event: &AgentRuntimeEvent) -> AgentSnapshot {
+    match &event.kind {
+        AgentRuntimeEventKind::Registered { snapshot }
+        | AgentRuntimeEventKind::StateChanged { snapshot }
+        | AgentRuntimeEventKind::TurnQueued { snapshot, .. }
+        | AgentRuntimeEventKind::TurnStarted { snapshot, .. }
+        | AgentRuntimeEventKind::SessionOpened { snapshot, .. }
+        | AgentRuntimeEventKind::TurnFinished { snapshot, .. }
+        | AgentRuntimeEventKind::RecoveryCancelledTurn { snapshot, .. }
+        | AgentRuntimeEventKind::Faulted { snapshot, .. } => snapshot.clone(),
+    }
+}

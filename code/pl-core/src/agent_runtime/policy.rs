@@ -24,7 +24,6 @@ pub struct AgentAccessPolicy {
     pub spawn_roles: BTreeSet<AgentRoleId>,
     pub list_targets: AgentTargetSelector,
     pub message_targets: AgentTargetSelector,
-    pub wait_targets: AgentTargetSelector,
     pub close_targets: AgentTargetSelector,
 }
 

@@ -72,12 +72,8 @@ impl BudgetTracker {
     }
 
     /// 记录一次工具调用（仅追踪，不限制）。
-    pub fn record_tool_call(&mut self, tool_name: &str) {
-        if tool_name == "wait_agent" {
-            self.usage.wait_calls += 1;
-        } else {
-            self.usage.tool_calls += 1;
-        }
+    pub fn record_tool_call(&mut self, _tool_name: &str) {
+        self.usage.tool_calls += 1;
     }
 
     /// 检查 wall-clock 安全上限。

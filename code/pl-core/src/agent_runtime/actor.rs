@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 use std::time::Duration;
 
-use pl_trace::TraceEvent;
+use pl_trace::{TraceEvent, TraceEventKind, TracePartKind, TraceTextChannel};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::AbortHandle;
 use tokio_util::sync::CancellationToken;
@@ -10,10 +10,10 @@ use super::execution::{TurnCompletion, execute_turn, turn_outcome};
 use super::host::{AgentCommitObserver, AgentStateRepository, SessionProjectionCommit};
 use super::state::{AgentRuntimeError, ResolvedAgentSessionTarget, unix_timestamp};
 use super::{
-    AgentActivityState, AgentCommit, AgentCommitOutcome, AgentCommittedEvent,
+    AcceptedAgentWake, AgentActivityState, AgentCommit, AgentCommitOutcome, AgentCommittedEvent,
     AgentCurrentSessionSubmitRequest, AgentDurableState, AgentLifecycleState, AgentRuntimeEvent,
     AgentRuntimeEventKind, AgentRuntimeHandle, AgentRuntimeHost, AgentRuntimeResult, AgentSnapshot,
-    AgentSubmitRequest, AgentTurnPreparationContext, AgentWaitResult, InputDelivery,
+    AgentSubmitRequest, AgentTurnPreparationContext, AgentUpdateKind, AgentWakeId, InputDelivery,
     PendingAgentInput, SessionId, TurnId,
 };
 use crate::session_event::{
@@ -59,8 +59,13 @@ pub(crate) enum ActorCommand {
     Snapshot {
         reply: oneshot::Sender<AgentRuntimeResult<AgentSnapshot>>,
     },
-    Wait {
-        reply: oneshot::Sender<AgentRuntimeResult<AgentWaitResult>>,
+    WakeAccepted {
+        wake_id: Option<AgentWakeId>,
+        signal_ids: Vec<String>,
+        reply: oneshot::Sender<AgentRuntimeResult<bool>>,
+    },
+    EnterWaitingAgents {
+        reply: oneshot::Sender<AgentRuntimeResult<()>>,
     },
     StartPendingInputs {
         reply: oneshot::Sender<AgentRuntimeResult<()>>,
@@ -123,7 +128,6 @@ where
     observation_receiver: mpsc::UnboundedReceiver<ObservedTurnEvent>,
     active: Option<ActiveTurn>,
     run_queue: bool,
-    waiters: Vec<oneshot::Sender<AgentRuntimeResult<AgentWaitResult>>>,
     cancel_grace: Duration,
 }
 
@@ -160,7 +164,6 @@ where
             observation_receiver,
             active: None,
             run_queue,
-            waiters: Vec::new(),
             cancel_grace,
         }
         .run(),
@@ -233,7 +236,20 @@ where
                         ActorCommand::Snapshot { reply } => {
                             let _ = reply.send(Ok(self.state.snapshot.clone()));
                         }
-                        ActorCommand::Wait { reply } => self.wait(reply),
+                        ActorCommand::WakeAccepted {
+                            wake_id,
+                            signal_ids,
+                            reply,
+                        } => {
+                            let accepted = self
+                                .accepted_wake_turn(wake_id.as_ref(), &signal_ids)
+                                .is_some();
+                            let _ = reply.send(Ok(accepted));
+                        }
+                        ActorCommand::EnterWaitingAgents { reply } => {
+                            let result = self.enter_waiting_agents().await;
+                            let _ = reply.send(result);
+                        }
                         ActorCommand::StartPendingInputs { reply } => {
                             self.run_queue = true;
                             self.begin_next_turn().await;
@@ -272,9 +288,6 @@ where
             }
         }
         self.stop_active_turn();
-        for waiter in self.waiters.drain(..) {
-            let _ = waiter.send(Err(AgentRuntimeError::ChannelClosed));
-        }
     }
 
     async fn submit(&mut self, request: AgentSubmitRequest) -> AgentRuntimeResult<TurnId> {
@@ -290,14 +303,35 @@ where
                 session_id: request.session_id,
             });
         }
+        let mut wake_signal_ids = request.wake_signal_ids;
+        wake_signal_ids.retain(|signal_id| !signal_id.trim().is_empty());
+        wake_signal_ids.sort();
+        wake_signal_ids.dedup();
+        if let Some(existing) = self.accepted_wake_turn(request.wake_id.as_ref(), &wake_signal_ids)
+        {
+            return Ok(existing);
+        }
         let input = PendingAgentInput {
             turn_id: TurnId::generate(),
+            wake_id: request.wake_id,
+            wake_signal_ids,
             session_id: request.session_id,
             message: request.message,
             metadata: request.metadata,
             queued_at: unix_timestamp(),
         };
         let mut next = self.state.clone();
+        if let Some(wake_id) = input.wake_id.clone() {
+            next.accepted_wakes.insert(
+                wake_id.clone(),
+                AcceptedAgentWake {
+                    wake_id,
+                    turn_id: input.turn_id.clone(),
+                    signal_ids: input.wake_signal_ids.clone(),
+                    accepted_at: input.queued_at,
+                },
+            );
+        }
         match request.delivery {
             InputDelivery::QueueOnly | InputDelivery::Start => {
                 next.pending_inputs.push_back(input.clone());
@@ -346,8 +380,30 @@ where
             message: request.message,
             metadata: request.metadata,
             delivery: request.delivery,
+            wake_id: request.wake_id,
+            wake_signal_ids: request.wake_signal_ids,
         })
         .await
+    }
+
+    fn accepted_wake_turn(
+        &self,
+        wake_id: Option<&AgentWakeId>,
+        signal_ids: &[String],
+    ) -> Option<TurnId> {
+        if let Some(receipt) = wake_id.and_then(|wake_id| self.state.accepted_wakes.get(wake_id)) {
+            return Some(receipt.turn_id.clone());
+        }
+        let mut accepted_turn = None;
+        for signal_id in signal_ids {
+            let receipt = self
+                .state
+                .accepted_wakes
+                .values()
+                .find(|receipt| receipt.signal_ids.iter().any(|stored| stored == signal_id))?;
+            accepted_turn.get_or_insert_with(|| receipt.turn_id.clone());
+        }
+        accepted_turn
     }
 
     fn resolve_current_session_target(
@@ -648,12 +704,20 @@ where
         }
     }
 
-    fn wait(&mut self, reply: oneshot::Sender<AgentRuntimeResult<AgentWaitResult>>) {
-        if self.is_idle_and_drained() {
-            let _ = reply.send(Ok(self.wait_result()));
-        } else {
-            self.waiters.push(reply);
+    async fn enter_waiting_agents(&mut self) -> AgentRuntimeResult<()> {
+        if self.state.snapshot.lifecycle != AgentLifecycleState::Active
+            || self.active.is_some()
+            || !self.state.pending_inputs.is_empty()
+            || self.state.snapshot.activity != AgentActivityState::Idle
+        {
+            return Ok(());
         }
+        let mut next = self.state.clone();
+        next.snapshot.activity = AgentActivityState::WaitingAgents;
+        self.commit_transition(next, Vec::new(), |snapshot| {
+            AgentRuntimeEventKind::StateChanged { snapshot }
+        })
+        .await
     }
 
     async fn begin_next_turn(&mut self) {
@@ -669,6 +733,16 @@ where
         };
         let mut next = self.state.clone();
         next.pending_inputs.pop_front();
+        if let Some(wake_id) = input.wake_id.clone() {
+            next.accepted_wakes
+                .entry(wake_id.clone())
+                .or_insert_with(|| AcceptedAgentWake {
+                    wake_id,
+                    turn_id: input.turn_id.clone(),
+                    signal_ids: input.wake_signal_ids.clone(),
+                    accepted_at: input.queued_at,
+                });
+        }
         next.snapshot.pending_inputs = next.pending_inputs.len();
         next.snapshot.activity = AgentActivityState::Running;
         next.snapshot.active_turn_id = Some(input.turn_id.clone());
@@ -810,6 +884,18 @@ where
         }
         let session_id = active.session_id.clone();
         let turn_id = active.turn_id.clone();
+        let todo_update = match &observed.observation {
+            crate::session_event::TurnObservation::TodoList(snapshot) => Some((
+                snapshot.call_id.clone(),
+                snapshot
+                    .items
+                    .iter()
+                    .find(|item| item.status == pl_protocol::TodoStatus::InProgress)
+                    .map(|item| item.step.chars().take(2_000).collect::<String>())
+                    .or_else(|| snapshot.explanation.clone()),
+            )),
+            _ => None,
+        };
         let expected_revision = self.state.snapshot.revision;
         let current = self
             .runtime
@@ -859,6 +945,17 @@ where
         match outcome {
             AgentCommitOutcome::Applied => {
                 self.state = next;
+                self.runtime
+                    .agent_events
+                    .store_snapshot(self.state.snapshot.clone());
+                if let Some((call_id, summary)) = todo_update {
+                    let _ = self.runtime.publish_progress(
+                        &self.state.snapshot.identity.id,
+                        AgentUpdateKind::TodoPhaseChanged,
+                        summary,
+                        format!("todo:{}:{call_id}", self.state.snapshot.identity.id),
+                    );
+                }
                 self.runtime
                     .session_events
                     .publish_batch(projected.events.clone())
@@ -972,6 +1069,24 @@ where
                 let agent_id = next.snapshot.identity.id.clone();
                 self.state = next;
                 self.runtime
+                    .agent_events
+                    .store_snapshot(self.state.snapshot.clone());
+                for trace in &committed_trace_events {
+                    if let TraceEventKind::TracePartCompleted { item } = &trace.kind
+                        && item.kind == TracePartKind::Text
+                        && item.text_channel == Some(TraceTextChannel::Commentary)
+                        && !item.content.trim().is_empty()
+                    {
+                        let summary = item.content.chars().take(2_000).collect::<String>();
+                        let _ = self.runtime.publish_progress(
+                            &agent_id,
+                            AgentUpdateKind::ProgressReported,
+                            Some(summary),
+                            format!("trace:{}:{}", agent_id, trace.sequence),
+                        );
+                    }
+                }
+                self.runtime
                     .session_events
                     .publish_batch(committed_session_events.clone())
                     .map_err(|error| AgentRuntimeError::SessionEvents(error.to_string()))?;
@@ -1068,6 +1183,7 @@ where
         match result {
             AgentCommitOutcome::Applied => {
                 self.state = next;
+                self.runtime.agent_events.publish_runtime_event(&event);
                 self.runtime
                     .session_events
                     .publish_batch(committed_session_events.clone())
@@ -1137,33 +1253,9 @@ where
         if fault_outcome.is_some() {
             self.state.snapshot.last_turn = fault_outcome;
         }
-        let result = self.wait_result();
-        for waiter in self.waiters.drain(..) {
-            let _ = waiter.send(Ok(result.clone()));
-        }
-    }
-
-    fn is_idle_and_drained(&self) -> bool {
-        self.state.snapshot.lifecycle != AgentLifecycleState::Active
-            || (self.state.snapshot.activity == AgentActivityState::Idle
-                && self.state.pending_inputs.is_empty())
-    }
-
-    fn wait_result(&self) -> AgentWaitResult {
-        AgentWaitResult {
-            snapshot: self.state.snapshot.clone(),
-            last_turn: self.state.snapshot.last_turn.clone(),
-        }
-    }
-
-    fn notify_waiters_if_ready(&mut self) {
-        if !self.is_idle_and_drained() {
-            return;
-        }
-        let result = self.wait_result();
-        for waiter in self.waiters.drain(..) {
-            let _ = waiter.send(Ok(result.clone()));
-        }
+        self.runtime
+            .agent_events
+            .store_snapshot(self.state.snapshot.clone());
     }
 }
 

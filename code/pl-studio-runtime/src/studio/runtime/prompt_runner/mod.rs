@@ -131,6 +131,7 @@ impl StudioRuntime {
                 role: role.id(),
                 depth: 0,
             },
+            wake_policy: pl_core::AgentWakePolicy::RuntimeTerminal,
             sessions: vec![pl_core::AgentSessionState {
                 id: session_id,
                 metadata: serde_json::json!({

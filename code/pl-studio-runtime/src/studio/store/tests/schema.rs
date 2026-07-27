@@ -27,7 +27,7 @@ async fn base_schema_contains_framework_and_task_tables() {
                AND name IN (
                  'agent_runtime_states', 'agent_runtime_sessions',
                  'agent_runtime_traces', 'agent_framework_events',
-                 'agent_pending_inputs', 'agent_turns',
+                 'agent_pending_inputs', 'agent_wake_receipts', 'agent_turns',
                  'session_event_journal', 'session_view_snapshots',
                  'task_runs', 'work_units', 'agent_outcomes',
                  'merge_records', 'review_rounds', 'branch_leases'
@@ -51,6 +51,7 @@ async fn base_schema_contains_framework_and_task_tables() {
             "agent_runtime_states",
             "agent_runtime_traces",
             "agent_turns",
+            "agent_wake_receipts",
             "branch_leases",
             "merge_records",
             "review_rounds",
@@ -269,6 +270,7 @@ async fn v2_schema_is_backed_up_and_migrated_without_losing_root_session() {
             role: AgentRoleId::new("executor").unwrap(),
             depth: 1,
         },
+        wake_policy: pl_core::AgentWakePolicy::RuntimeTerminal,
         lifecycle: AgentLifecycleState::Active,
         activity: AgentActivityState::Idle,
         active_turn_id: None,
@@ -570,6 +572,50 @@ async fn v3_schema_is_backed_up_and_migrated_with_delivery_contracts() {
     drop(store);
     remove_test_db_files(&db_path).await;
     let _ = tokio::fs::remove_file(format!("{}.v3.bak", db_path.display())).await;
+}
+
+#[tokio::test]
+async fn v4_schema_is_backed_up_and_migrated_with_wake_receipts() {
+    let db_path = unique_test_db_path("schema-v4-migration");
+    remove_test_db_files(&db_path).await;
+    let db = Database::connect(sqlite_url_for_test(&db_path))
+        .await
+        .unwrap();
+    execute_sql(
+        &db,
+        "CREATE TABLE agent_runtime_states (
+             agent_id TEXT PRIMARY KEY,
+             revision INTEGER NOT NULL,
+             snapshot_json TEXT NOT NULL,
+             updated_at INTEGER NOT NULL
+         );
+         PRAGMA user_version = 4;",
+    )
+    .await;
+    db.close().await.unwrap();
+
+    let store = StudioStore::open(&db_path).await.unwrap();
+    assert_eq!(
+        schema_version(&store.db).await,
+        STUDIO_DATABASE_SCHEMA_VERSION
+    );
+    assert_eq!(
+        table_columns(&store.db, "agent_wake_receipts").await,
+        vec![
+            "agent_id".to_string(),
+            "wake_id".to_string(),
+            "receipt_json".to_string(),
+            "accepted_at".to_string(),
+        ]
+    );
+    assert!(
+        PathBuf::from(format!("{}.v4.bak", db_path.display())).is_file(),
+        "v4 migration must preserve a recoverable backup"
+    );
+
+    drop(store);
+    remove_test_db_files(&db_path).await;
+    let _ = tokio::fs::remove_file(format!("{}.v4.bak", db_path.display())).await;
 }
 
 #[tokio::test]

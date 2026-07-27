@@ -292,6 +292,7 @@ impl StudioStore {
             }
             Ok(TerminalAgentStateRecording::Changed {
                 task_run_id: outcome.task_run_id.clone(),
+                outcome_id: outcome.id.clone(),
                 projection: projection_from_outcome(outcome)?,
             })
         }

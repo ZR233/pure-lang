@@ -37,6 +37,15 @@ CREATE TABLE agent_pending_inputs (
     PRIMARY KEY (agent_id, queue_position)
 );
 
+CREATE TABLE agent_wake_receipts (
+    agent_id TEXT NOT NULL,
+    wake_id TEXT NOT NULL,
+    receipt_json TEXT NOT NULL,
+    accepted_at INTEGER NOT NULL,
+    PRIMARY KEY (agent_id, wake_id),
+    FOREIGN KEY(agent_id) REFERENCES agent_runtime_states(agent_id) ON DELETE CASCADE
+);
+
 CREATE TABLE agent_runtime_sessions (
     agent_id TEXT NOT NULL,
     session_id TEXT NOT NULL,
@@ -260,6 +269,9 @@ CREATE UNIQUE INDEX idx_agent_outcomes_run_agent_attempt
 CREATE INDEX idx_agent_outcomes_run_status
     ON agent_outcomes(task_run_id, status, updated_at DESC, id DESC);
 
+CREATE INDEX idx_agent_wake_receipts_agent_accepted
+    ON agent_wake_receipts(agent_id, accepted_at, wake_id);
+
 CREATE INDEX idx_agent_runtime_sessions_session
     ON agent_runtime_sessions(session_id, updated_at);
 
@@ -316,4 +328,4 @@ CREATE INDEX idx_tool_approvals_session_created_at
 CREATE INDEX idx_work_units_run_status
     ON work_units(task_run_id, status, created_at ASC, id ASC);
 
-PRAGMA user_version = 4;
+PRAGMA user_version = 5;

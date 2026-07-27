@@ -114,17 +114,6 @@ pub(super) fn send_schema() -> Value {
     ])
 }
 
-pub(super) fn wait_schema() -> Value {
-    object_schema(vec![
-        ("target", json!({ "type": "string" }), true),
-        (
-            "timeoutMs",
-            json!({ "type": "integer", "minimum": 1 }),
-            false,
-        ),
-    ])
-}
-
 pub(super) fn target_schema(description: &str) -> Value {
     object_schema(vec![(
         "target",

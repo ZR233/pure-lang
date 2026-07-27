@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{AgentRoleId, AgentSession};
 
-use super::{AgentId, SessionId, TurnId};
+use super::{AgentId, AgentWakeId, SessionId, TurnId};
 
 /// agent 资源仍可执行工作的生命周期状态。
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -29,6 +29,18 @@ pub enum AgentActivityState {
     Running,
     WaitingTool,
     WaitingInteraction,
+    WaitingAgents,
+}
+
+/// 子代理 runtime 终态如何参与父代理唤醒。
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum AgentWakePolicy {
+    /// runtime turn 终态本身就是可执行的父代理事实。
+    #[default]
+    RuntimeTerminal,
+    /// runtime 终态仅供产品收束合同；产品 durable signal 才可唤醒父代理。
+    ProductGated,
 }
 
 /// 单轮执行结果，不用作 agent 生命周期。
@@ -70,6 +82,8 @@ pub struct AgentTurnOutcome {
 #[serde(rename_all = "camelCase")]
 pub struct AgentSnapshot {
     pub identity: AgentIdentity,
+    #[serde(default)]
+    pub wake_policy: AgentWakePolicy,
     pub lifecycle: AgentLifecycleState,
     pub activity: AgentActivityState,
     pub active_turn_id: Option<TurnId>,
@@ -126,11 +140,26 @@ pub enum InputDelivery {
 #[serde(rename_all = "camelCase")]
 pub struct PendingAgentInput {
     pub turn_id: TurnId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wake_id: Option<AgentWakeId>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub wake_signal_ids: Vec<String>,
     pub session_id: SessionId,
     pub message: String,
     #[serde(default)]
     pub metadata: serde_json::Value,
     pub queued_at: i64,
+}
+
+/// runtime 已接受的订阅唤醒凭据；用于跨重启抑制同一事实的重复续轮。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AcceptedAgentWake {
+    pub wake_id: AgentWakeId,
+    pub turn_id: TurnId,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub signal_ids: Vec<String>,
+    pub accepted_at: i64,
 }
 
 /// 产品提交给 runtime 的输入请求。
@@ -140,6 +169,8 @@ pub struct AgentSubmitRequest {
     pub message: String,
     pub metadata: serde_json::Value,
     pub delivery: InputDelivery,
+    pub wake_id: Option<AgentWakeId>,
+    pub wake_signal_ids: Vec<String>,
 }
 
 impl AgentSubmitRequest {
@@ -150,6 +181,8 @@ impl AgentSubmitRequest {
             message: message.into(),
             metadata: serde_json::Value::Null,
             delivery: InputDelivery::Start,
+            wake_id: None,
+            wake_signal_ids: Vec::new(),
         }
     }
 
@@ -162,6 +195,18 @@ impl AgentSubmitRequest {
     /// 设置明确的输入投递语义。
     pub fn with_delivery(mut self, delivery: InputDelivery) -> Self {
         self.delivery = delivery;
+        self
+    }
+
+    /// 标记此输入为可跨重试去重的订阅唤醒。
+    pub fn with_wake_id(mut self, wake_id: AgentWakeId) -> Self {
+        self.wake_id = Some(wake_id);
+        self
+    }
+
+    /// 记录组成该唤醒的 durable product signal，用于跨批次、跨重启去重。
+    pub fn with_wake_signal_ids(mut self, signal_ids: Vec<String>) -> Self {
+        self.wake_signal_ids = signal_ids;
         self
     }
 }
@@ -172,6 +217,8 @@ pub struct AgentCurrentSessionSubmitRequest {
     pub message: String,
     pub metadata: serde_json::Value,
     pub delivery: InputDelivery,
+    pub wake_id: Option<AgentWakeId>,
+    pub wake_signal_ids: Vec<String>,
 }
 
 impl AgentCurrentSessionSubmitRequest {
@@ -181,6 +228,8 @@ impl AgentCurrentSessionSubmitRequest {
             message: message.into(),
             metadata: serde_json::Value::Null,
             delivery: InputDelivery::Start,
+            wake_id: None,
+            wake_signal_ids: Vec::new(),
         }
     }
 
@@ -193,6 +242,18 @@ impl AgentCurrentSessionSubmitRequest {
     /// 设置明确的输入投递语义。
     pub fn with_delivery(mut self, delivery: InputDelivery) -> Self {
         self.delivery = delivery;
+        self
+    }
+
+    /// 标记此输入为可跨重试去重的订阅唤醒。
+    pub fn with_wake_id(mut self, wake_id: AgentWakeId) -> Self {
+        self.wake_id = Some(wake_id);
+        self
+    }
+
+    /// 记录组成该唤醒的 durable product signal，用于跨批次、跨重启去重。
+    pub fn with_wake_signal_ids(mut self, signal_ids: Vec<String>) -> Self {
+        self.wake_signal_ids = signal_ids;
         self
     }
 }
@@ -212,12 +273,14 @@ pub struct AgentDurableState {
     pub snapshot: AgentSnapshot,
     pub sessions: BTreeMap<SessionId, AgentSessionState>,
     pub pending_inputs: VecDeque<PendingAgentInput>,
+    pub accepted_wakes: BTreeMap<AgentWakeId, AcceptedAgentWake>,
 }
 
 /// 新 agent 注册输入；外部资源生命周期由产品或 spawn saga 准备。
 #[derive(Debug, Clone)]
 pub struct AgentRegistration {
     pub identity: AgentIdentity,
+    pub wake_policy: AgentWakePolicy,
     pub sessions: Vec<AgentSessionState>,
 }
 
@@ -226,6 +289,7 @@ pub struct AgentRegistration {
 pub struct AgentSpawnRequest {
     pub parent_id: AgentId,
     pub role: AgentRoleId,
+    pub wake_policy: AgentWakePolicy,
     pub session: AgentSessionState,
     pub initial_message: Option<String>,
     pub metadata: serde_json::Value,
@@ -243,6 +307,7 @@ impl AgentRegistration {
     pub fn with_session(identity: AgentIdentity, session_id: SessionId) -> Self {
         Self {
             identity,
+            wake_policy: AgentWakePolicy::RuntimeTerminal,
             sessions: vec![AgentSessionState::empty(session_id)],
         }
     }
@@ -252,6 +317,7 @@ impl AgentRegistration {
         AgentDurableState {
             snapshot: AgentSnapshot {
                 identity: self.identity,
+                wake_policy: self.wake_policy,
                 lifecycle: AgentLifecycleState::Active,
                 activity: AgentActivityState::Idle,
                 active_turn_id: None,
@@ -268,6 +334,7 @@ impl AgentRegistration {
                 .map(|session| (session.id.clone(), session))
                 .collect(),
             pending_inputs: VecDeque::new(),
+            accepted_wakes: BTreeMap::new(),
         }
     }
 }

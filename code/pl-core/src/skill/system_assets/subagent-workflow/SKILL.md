@@ -10,7 +10,9 @@ Use this skill when the user asks for subagents, parallel exploration, multi-cra
 
 ## When To Spawn
 
-Use `spawn_agent` for managed asynchronous work. The parent coordinates with `wait_agent` and `list_agents`, then synthesizes the child summaries.
+Use `spawn_agent` for managed asynchronous work. The runtime subscribes the parent to direct-child
+updates and starts a merged continuation when progress, attention, a usable terminal contract, or an
+inactivity timeout requires coordination. Use `list_agents` only when the current state is unclear.
 
 Avoid subagents when the task is small, strongly sequential, or requires one shared edit context.
 
@@ -36,10 +38,12 @@ For repository exploration, partition by crate, subsystem, risk area, or test su
 The parent owns coordination:
 
 1. Spawn only the agents needed.
-2. Use `wait_agent` to collect results.
-3. Use `list_agents` if state is unclear.
-4. Reconcile conflicts in child findings.
-5. Produce the final answer or implementation plan.
+2. Continue independent parent work while children run.
+3. End the current turn when no executable parent work remains; do not poll child state.
+4. On a subscribed continuation, use the attached canonical snapshots and `list_agents` only if
+   additional tree context is needed.
+5. Reconcile conflicts in child findings.
+6. Produce the final answer or implementation plan.
 
 ## Capacity Failures
 
