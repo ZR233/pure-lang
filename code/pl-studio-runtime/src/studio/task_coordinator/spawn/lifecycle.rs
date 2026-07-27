@@ -277,7 +277,7 @@ pub(crate) fn owned_paths_overlap(left: &[String], right: &[String]) -> Result<b
         .any(|left| right.iter().any(|right| left.overlaps(right))))
 }
 
-fn normalize_owned_paths(paths: &[String]) -> Result<Vec<String>> {
+pub(crate) fn normalize_owned_paths(paths: &[String]) -> Result<Vec<String>> {
     if paths.is_empty() {
         bail!("Task executor ownedPaths must not be empty");
     }
@@ -314,12 +314,28 @@ fn spawn_error(error: impl Into<String>) -> PureError {
 
 #[cfg(test)]
 mod tests {
-    use super::owned_paths_overlap;
+    use super::{normalize_owned_paths, owned_paths_overlap};
 
     #[test]
     fn owned_path_overlap_uses_product_path_rules() {
         assert!(owned_paths_overlap(&["src/**".into()], &["src/lib.rs".into()]).unwrap());
         assert!(!owned_paths_overlap(&["src".into()], &["src/lib.rs".into()]).unwrap());
         assert!(!owned_paths_overlap(&["src".into()], &["tests".into()]).unwrap());
+    }
+
+    #[test]
+    fn executor_owned_paths_are_validated_and_canonicalized_before_spawn() {
+        assert_eq!(
+            normalize_owned_paths(&["tests\\case.rs".into(), "src/**".into()]).unwrap(),
+            vec!["src/**", "tests/case.rs"]
+        );
+        for paths in [
+            Vec::<String>::new(),
+            vec!["../src".into()],
+            vec!["src/*".into()],
+            vec!["src/**".into(), "src/lib.rs".into()],
+        ] {
+            assert!(normalize_owned_paths(&paths).is_err(), "{paths:?}");
+        }
     }
 }

@@ -88,3 +88,9 @@ Skills 工具同样挂在 `pl-core` 默认工具集中。`skills_list` 和 `skil
 `resume_agent`。输入使用 `QueueOnly | Start | InterruptThenStart` 明确表达；角色、目标选择和工具
 effect 均来自产品编译出的 `AgentExecutionPolicy`。`wait_agent` 在目标 Idle 且 FIFO 队列为空时
 返回 last turn outcome。Studio 的 agent 展示继续以 durable snapshot 和 append-only timeline 为准。
+
+通用协作工具不承载 Studio 的任务分配协议。Task harness 另外注册
+`task_spawn_executor { taskName, message, ownedPaths }` 与 `task_request_review`，把强类型
+输入转换为内部 spawn intent 后调用同一个 `AgentRuntimeHandle`。Task 根的通用
+`spawn_agent` 只公开 explorer，避免模型通过自由 metadata 绕过 worktree、路径所有权和审查
+授权。
