@@ -16,7 +16,9 @@ mod types;
 pub(crate) use conflict_types::*;
 pub(crate) use continuation::*;
 pub(crate) use coordinator::*;
-pub(crate) use spawn::{StudioTaskSpawnPreparation, StudioTaskSpawnRequest, owned_paths_overlap};
+pub(crate) use spawn::{
+    StudioSpawnIntent, StudioTaskSpawnPreparation, StudioTaskSpawnRequest, owned_paths_overlap,
+};
 pub(crate) use terminal::*;
 pub(crate) use types::*;
 

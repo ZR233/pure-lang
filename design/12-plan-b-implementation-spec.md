@@ -86,7 +86,7 @@ config：
 3. 新 schema 启动切换可重复执行且有备份
 4. wall-clock 预算耗尽时必须写入 `TurnBudgetLimited`，并保留观测用量
 5. 用户显式要求子代理分工时，核心提示必须要求先用 `spawn_agent` 调度子代理，再由父会话汇总
-6. `spawn_agent`、`send_input`、`wait_agent`、`list_agents`、`close_agent` 形成完整协作闭环；工具层只持有 `AgentRuntimeHandle` 并提交命令，`AgentRuntime` 统一管理 actor、队列、活动 turn、取消和容量；后续输入使用 `InputDelivery`，不保留 `resume_agent`
+6. `spawn_agent`、`send_input`、`wait_agent`、`list_agents`、`close_agent` 形成通用协作闭环；工具层只持有 `AgentRuntimeHandle` 并提交命令，`AgentRuntime` 统一管理 actor、队列、活动 turn、取消和容量；产品 harness 可以通过严格类型化工具调用同一 runtime。Task 根的通用 spawn 只允许 explorer，executor/reviewer 分别由 `task_spawn_executor` / `task_request_review` 创建；后续输入使用 `InputDelivery`，不保留 `resume_agent`
 7. agent 状态正交拆为 lifecycle（`Active | Closing | Closed | Faulted`）与 activity（`Idle | Queued | Running | WaitingTool | WaitingInteraction`）；完成、失败、取消和预算限制属于 turn outcome，不污染 agent 生命周期
 8. `close_agent` 按产品层 `AgentAccessPolicy` 校验目标，并由 runtime 与 host lifecycle saga 级联收束 live descendants；普通 turn 中断、失败或预算限制不会隐式关闭仍可继续工作的 agent
 9. `wait_agent` 在目标 `Idle` 且队列为空时完成并返回 last turn outcome；完整 snapshot 通过 `list_agents` 读取，不向主 chat 泄漏子 agent 内部工具输出，也不使用工具结果字符串 marker
