@@ -144,7 +144,6 @@ impl StudioStore {
             outcome.summary = Set(Some(delivery.verification_summary.clone()));
             outcome.error = Set(None);
             outcome.delivery_json = Set(Some(serde_json::to_string(&delivery)?));
-            outcome.terminal_observed = Set(0);
             outcome.updated_at = Set(now);
             outcome.update(&tx).await?;
 

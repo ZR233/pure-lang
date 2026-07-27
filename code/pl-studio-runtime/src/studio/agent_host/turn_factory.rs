@@ -18,6 +18,7 @@ use crate::{McpRuntimeHandle, StudioMode, resolve_workspace_root};
 
 use super::policy::{StudioPolicyContext, studio_execution_policy};
 use super::resources::StudioAgentResources;
+use super::{StudioContinuationReason, StudioContinuationService};
 
 /// 使用 Studio 配置、project/session 和产品工具准备一次 framework turn。
 #[derive(Clone)]
@@ -28,6 +29,7 @@ pub(in crate::studio) struct StudioAgentTurnFactory {
     lsp_runtime: pl_lsp::LspRuntimeRegistry,
     interactions: InteractionRuntime,
     coordinator: Arc<TaskCoordinator>,
+    continuations: StudioContinuationService,
     resources: StudioAgentResources,
 }
 
@@ -40,6 +42,7 @@ impl StudioAgentTurnFactory {
         lsp_runtime: pl_lsp::LspRuntimeRegistry,
         interactions: InteractionRuntime,
         coordinator: Arc<TaskCoordinator>,
+        continuations: StudioContinuationService,
         resources: StudioAgentResources,
     ) -> Self {
         Self {
@@ -49,6 +52,7 @@ impl StudioAgentTurnFactory {
             lsp_runtime,
             interactions,
             coordinator,
+            continuations,
             resources,
         }
     }
@@ -147,11 +151,15 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         web_search.install(kernel.core_mut(), &config.web_search)?;
 
         if mode == StudioMode::Task {
+            let continuations = self.continuations.clone();
             self.coordinator.install_tools(
                 kernel.core_mut(),
                 &session_record.root_session_id,
                 context.runtime.clone(),
                 &context.snapshot,
+                move |task_run_id| {
+                    continuations.request(task_run_id, StudioContinuationReason::DeliveryCompleted);
+                },
             );
         }
         self.mcp_runtime

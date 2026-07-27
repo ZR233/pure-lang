@@ -32,15 +32,24 @@ struct DeliveryValidation<'a> {
     verification_summary: &'a str,
 }
 
+struct CommittedDelivery {
+    task_run_id: String,
+    delivery: AgentDelivery,
+}
+
 impl TaskCoordinator {
-    pub(crate) fn install_tools(
+    pub(crate) fn install_tools<F>(
         self: &Arc<Self>,
         core: &mut TurnEngine,
         session_id: &str,
         runtime: AgentRuntimeHandle,
         snapshot: &AgentSnapshot,
-    ) {
+        delivery_continuation: F,
+    ) where
+        F: Fn(String) + Clone + Send + Sync + 'static,
+    {
         if snapshot.identity.parent_id.is_none() {
+            core.register_tool(self.task_spawn_executor_tool(session_id, runtime.clone()));
             core.register_tool(self.task_update_design_tool(session_id));
             core.register_tool(self.task_merge_agent_tool(session_id, runtime.clone()));
             core.register_tool(self.task_request_review_tool(session_id, runtime.clone()));
@@ -50,13 +59,16 @@ impl TaskCoordinator {
             return;
         }
         match snapshot.identity.role.as_str() {
-            "executor" => core.register_tool(self.submit_delivery_tool()),
+            "executor" => {
+                core.register_tool(self.submit_delivery_tool(delivery_continuation));
+            }
             "reviewer" => core.register_tool(self.review_exit_tool(session_id)),
             "explorer" | "planner" => {}
             _ => {}
         }
     }
 
+    #[cfg(test)]
     pub(crate) async fn submit_delivery(
         &self,
         subagent: &SubagentContext,
@@ -64,6 +76,24 @@ impl TaskCoordinator {
         supplied_head: &str,
         verification_summary: &str,
     ) -> Result<AgentDelivery> {
+        Ok(self
+            .commit_delivery(
+                subagent,
+                caller_workspace,
+                supplied_head,
+                verification_summary,
+            )
+            .await?
+            .delivery)
+    }
+
+    async fn commit_delivery(
+        &self,
+        subagent: &SubagentContext,
+        caller_workspace: impl AsRef<Path>,
+        supplied_head: &str,
+        verification_summary: &str,
+    ) -> Result<CommittedDelivery> {
         let caller_workspace = caller_workspace.as_ref();
         let repository = inspect_repository(caller_workspace, false).await?;
         let canonical_caller = std::fs::canonicalize(caller_workspace)
@@ -115,10 +145,16 @@ impl TaskCoordinator {
         self.store
             .complete_agent_delivery(&scope.outcome.id, &scope.work_unit.id, delivery.clone())
             .await?;
-        Ok(delivery)
+        Ok(CommittedDelivery {
+            task_run_id: scope.run.id,
+            delivery,
+        })
     }
 
-    pub(crate) fn submit_delivery_tool(self: &Arc<Self>) -> RegisteredTool {
+    pub(crate) fn submit_delivery_tool<F>(self: &Arc<Self>, continuation: F) -> RegisteredTool
+    where
+        F: Fn(String) + Clone + Send + Sync + 'static,
+    {
         let coordinator = self.clone();
         RegisteredTool::from_typed_fallible_execution_result(
             "submit_delivery",
@@ -135,20 +171,22 @@ impl TaskCoordinator {
             ]),
             move |arguments: SubmitDeliveryInput, context| {
                 let coordinator = coordinator.clone();
+                let continuation = continuation.clone();
                 async move {
                     let subagent = context
                         .active_subagent
                         .as_ref()
                         .context("submit_delivery requires an active executor subagent")?;
-                    let delivery = coordinator
-                        .submit_delivery(
+                    let committed = coordinator
+                        .commit_delivery(
                             subagent,
                             &context.workspace_root,
                             &arguments.head_commit,
                             &arguments.verification_summary,
                         )
                         .await?;
-                    ToolExecutionResult::<serde_json::Value>::json(delivery)
+                    continuation(committed.task_run_id);
+                    ToolExecutionResult::<serde_json::Value>::json(committed.delivery)
                         .map_err(anyhow::Error::from)
                 }
             },

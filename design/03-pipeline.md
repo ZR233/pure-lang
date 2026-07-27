@@ -55,9 +55,9 @@ agent 的输入队列、活动 turn、取消和恢复由 `pl-core::AgentRuntime`
 - `full-access` 不能扩大 execution profile 的工具 effect；planner、explorer、reviewer 仍受角色白名单约束
 - Task planner 的探索和协调只使用 profile 允许的读取与 harness 工具；明确写入类工具不能通过权限模式绕过
 - 用户显式要求 `subagent`/子代理分工时，核心提示必须将异步 agent 调度作为强约束；普通 shell 或文件探索不能替代子代理调度
-- 多 agent 协作只通过 `spawn_agent`、`send_input`、`wait_agent`、`list_agents` 和 `close_agent` 组成；工具只持有非泛型 `AgentRuntimeHandle`，不接触 Studio host 或 actor 内部状态
+- 通用多 agent 协作由 `spawn_agent`、`send_input`、`wait_agent`、`list_agents` 和 `close_agent` 组成；工具只持有非泛型 `AgentRuntimeHandle`，不接触 Studio host 或 actor 内部状态。产品 harness 可以注册严格类型化的 spawn 工具并调用同一个 runtime；Task 根的通用 `spawn_agent` 只创建 explorer，executor 使用 `task_spawn_executor`，reviewer 使用 `task_request_review`
 - `request_user_input` 是 Codex 风格的阻塞交互工具，root agent 与 subagent 都可用；工具通过统一 `Interaction` 域创建 `userInput` 请求，等待前端 resolution 后把答案作为工具结果返回，不作为普通用户聊天消息写入历史
-- `simple` 根聊天使用 executor，`task` 根聊天与 continuation turn 使用 planner；task child role 由 planner 指定，所有 child 禁止继续派生
+- `simple` 根聊天使用 executor，`task` 根聊天与 continuation turn 使用 planner；Task child role 由产品工具固定，所有 child 禁止继续派生
 - agent 状态正交拆为 lifecycle（`Active | Closing | Closed | Faulted`）、activity（`Idle | Queued | Running | WaitingTool | WaitingInteraction`）和 last turn outcome（`Completed | Cancelled | Failed | BudgetLimited`）
 - turn 完成或失败后 agent 回到 `Active + Idle`；未关闭 agent 可继续接收输入，不存在 `resume_agent`
 - 输入使用 `QueueOnly | Start | InterruptThenStart`。actor 先持久化 FIFO queue/activity，再准备和执行 turn；取消先触发 token，超过 grace period 才 abort
@@ -113,7 +113,11 @@ commentary、final、reasoning、plan、agent row 或 message 边界都会结束
 
 子代理没有独立的压缩实现。`AgentRuntime` 为每个 agent 保存独立 `AgentSession` 集合，child turn 复用同一个 `TurnEngine` pipeline，因此每个子代理独立维护自己的压缩历史与 transport session；父会话不会替子代理压缩，也不会因为子代理压缩而改写父历史。
 
-子代理继承稳定 instruction context，但 execution profile 由角色决定，不直接继承父 turn 权限。explorer/reviewer 只读，executor 只写自己的 worktree；task child depth 固定为 1。
+子代理继承稳定 instruction context，但 execution profile 由角色决定，不直接继承父 turn
+权限。explorer/reviewer 只读，executor 只写自己的 worktree；task child depth 固定为 1。
+Task executor 和 reviewer 使用 fresh session：executor 的自包含任务由
+`task_spawn_executor.message` 提供，reviewer 的自包含审查上下文由 harness 构造，二者都不
+复制 planner 完整历史。
 
 子代理同样继承父 turn 的交互运行时。`request_user_input`、工具审批和计划确认统一表达为 `InteractionKind::{userInput, toolApproval, planConfirmation}`。每个 interaction 都带 `sessionId`、`turnId`、可选 `itemId/toolId/agentPath`，由 `InteractionRuntime` 创建、持久化、广播并等待 resolution。Studio 只渲染当前最高优先级 pending interaction；回答或审批只解除对应等待，不触发新 turn，也不写入普通聊天消息。UI 交互形态对齐 opencode dock prompt：pending question/permission/plan confirmation 在底部 dock 处理，timeline 只渲染 message/part 投影；`request_user_input` 的 completed tool part 可以显示 redacted 问题答案摘要。
 

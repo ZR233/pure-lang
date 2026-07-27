@@ -70,7 +70,7 @@ fn spawn_roles(is_root: bool, mode: StudioMode) -> BTreeSet<AgentRoleId> {
     }
     let roles: &[&str] = match mode {
         StudioMode::Simple => &["explorer"],
-        StudioMode::Task => &["explorer", "executor", "reviewer"],
+        StudioMode::Task => &["explorer"],
     };
     roles
         .iter()
@@ -222,6 +222,23 @@ mod tests {
         assert!(!ordinary.allowed_effects.contains(ToolEffect::ConflictWrite));
         assert!(conflict.visible_tools.contains("merge_resolve"));
         assert!(conflict.allowed_effects.contains(ToolEffect::ConflictWrite));
+    }
+
+    #[test]
+    fn task_root_generic_spawn_only_allows_explorer() {
+        let policy = policy(
+            root("planner"),
+            StudioMode::Task,
+            Some(TaskRunPhase::Implementing),
+            ["spawn_agent", "task_spawn_executor"],
+        );
+
+        assert_eq!(
+            policy.collaboration.spawn_roles,
+            BTreeSet::from([AgentRoleId::new("explorer").unwrap()])
+        );
+        assert!(policy.visible_tools.contains("spawn_agent"));
+        assert!(policy.visible_tools.contains("task_spawn_executor"));
     }
 
     #[test]

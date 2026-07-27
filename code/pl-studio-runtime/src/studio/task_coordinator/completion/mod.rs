@@ -309,6 +309,13 @@ impl TaskCoordinator {
         }) {
             bail!("task_stop requires all merge state to be settled");
         }
+        if merges
+            .iter()
+            .any(|record| record.status == MergeStatus::Merged)
+            && run.design_commit.as_deref() != Some(run.expected_head.as_str())
+        {
+            bail!("task_stop requires a final design consistency update after source merges");
+        }
         Ok(())
     }
 }

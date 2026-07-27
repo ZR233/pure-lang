@@ -56,6 +56,7 @@ impl StudioAgentHost {
                 lsp_runtime,
                 interactions.clone(),
                 coordinator.clone(),
+                continuations.clone(),
                 resources.clone(),
             ),
             lifecycle: StudioAgentLifecycle::new(store.clone(), coordinator, resources.clone()),

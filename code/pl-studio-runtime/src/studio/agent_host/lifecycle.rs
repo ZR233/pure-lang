@@ -6,7 +6,9 @@ use pl_core::{AgentLifecycleAdapter, CloseLifecycleRequest, SpawnLifecycleReques
 use crate::{CloseDisposition, PureError, Result, WorktreeHandle, WorktreeManager};
 
 use crate::studio::task_coordinator::TaskCoordinator;
-use crate::studio::task_coordinator::{StudioTaskSpawnPreparation, StudioTaskSpawnRequest};
+use crate::studio::task_coordinator::{
+    StudioSpawnIntent, StudioTaskSpawnPreparation, StudioTaskSpawnRequest,
+};
 use crate::studio::{AgentSessionSpec, StudioStore};
 
 use super::resources::{StudioAgentResource, StudioAgentResources};
@@ -49,18 +51,18 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
     type CloseLease = StudioCloseLease;
 
     async fn prepare_spawn(&self, request: SpawnLifecycleRequest) -> Result<Self::SpawnLease> {
+        let intent = StudioSpawnIntent::parse(request.metadata.clone())
+            .map_err(|error| lifecycle_error(error.to_string()))?;
+        let role = request.child.identity.role.as_str();
+        intent
+            .validate_role(role)
+            .map_err(|error| lifecycle_error(error.to_string()))?;
         let parent_session_id = request
             .parent
             .active_session_id
             .as_ref()
             .map(ToString::to_string)
-            .or_else(|| {
-                request
-                    .metadata
-                    .get("studioSessionId")
-                    .and_then(|value| value.as_str())
-                    .map(str::to_string)
-            })
+            .or_else(|| intent.studio_session_id.clone())
             .ok_or_else(|| lifecycle_error("spawn has no Studio session boundary"))?;
         let parent_session = self
             .store
@@ -69,54 +71,46 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
             .map_err(|error| lifecycle_error(error.to_string()))?
             .ok_or_else(|| lifecycle_error("spawn parent Studio session does not exist"))?;
         let root_session_id = parent_session.root_session_id.clone();
+        if intent.spawn_kind.is_some()
+            && intent.studio_session_id.as_deref() != Some(root_session_id.as_str())
+        {
+            return Err(lifecycle_error(
+                "Task spawn intent does not match the parent Studio session",
+            ));
+        }
         let child_session_id = request.child_session_id.to_string();
-        let task_name = request
-            .metadata
-            .get("taskName")
-            .or_else(|| request.metadata.get("name"))
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_else(|| request.child.identity.role.as_str())
-            .to_string();
-        let owned_paths = request
-            .metadata
-            .get("ownedPaths")
-            .and_then(serde_json::Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(serde_json::Value::as_str)
-            .map(str::to_string)
-            .collect();
-        let requested_by_call_id = request
-            .metadata
-            .get("requestingToolCallId")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("spawn_agent")
-            .to_string();
+        let task_name = intent.task_name(role);
         let studio_request = StudioTaskSpawnRequest {
             agent_id: request.child.identity.id.to_string(),
             session_id: root_session_id.clone(),
             task_name: task_name.clone(),
-            role: request.child.identity.role.to_string(),
-            owned_paths,
-            requested_by_call_id,
+            role: role.to_string(),
+            owned_paths: intent.owned_paths.clone(),
+            requested_by_call_id: intent.requesting_tool_call_id(),
         };
         let preparation = self
             .coordinator
             .prepare_agent_spawn(&studio_request)
             .await?;
-        let worktree = create_worktree(&preparation, &studio_request).await?;
+        let worktree = match create_worktree(&preparation, &studio_request).await {
+            Ok(worktree) => worktree,
+            Err(error) => {
+                return Err(rollback_prepared_spawn(
+                    &self.coordinator,
+                    &studio_request,
+                    &preparation,
+                    None,
+                    error.to_string(),
+                )
+                .await);
+            }
+        };
         let workspace_root = worktree
             .as_ref()
             .map(|(_, handle)| handle.path.clone())
-            .unwrap_or_else(|| {
-                request
-                    .metadata
-                    .get("workspaceRoot")
-                    .and_then(serde_json::Value::as_str)
-                    .map(std::path::PathBuf::from)
-                    .unwrap_or_default()
-            });
-        self.store
+            .unwrap_or_else(|| intent.workspace_root.clone().unwrap_or_default());
+        if let Err(error) = self
+            .store
             .create_agent_session(AgentSessionSpec {
                 id: child_session_id.clone(),
                 parent_session_id,
@@ -125,7 +119,16 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
                 title: task_name.clone(),
             })
             .await
-            .map_err(|error| lifecycle_error(error.to_string()))?;
+        {
+            return Err(rollback_prepared_spawn(
+                &self.coordinator,
+                &studio_request,
+                &preparation,
+                worktree.as_ref(),
+                format!("failed to create Studio child session: {error}"),
+            )
+            .await);
+        }
         Ok(StudioSpawnLease {
             agent_id: request.child.identity.id,
             resource: StudioAgentResource {
@@ -221,19 +224,41 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
     }
 }
 
+async fn rollback_prepared_spawn(
+    coordinator: &TaskCoordinator,
+    request: &StudioTaskSpawnRequest,
+    preparation: &StudioTaskSpawnPreparation,
+    worktree: Option<&(WorktreeManager, WorktreeHandle)>,
+    primary_error: String,
+) -> PureError {
+    let mut failures = vec![primary_error.clone()];
+    if let Err(error) = coordinator
+        .rollback_agent_spawn(request, preparation, &primary_error)
+        .await
+    {
+        failures.push(format!("spawn allocation rollback failed: {error}"));
+    }
+    if let Some((manager, handle)) = worktree
+        && let Err(error) = manager.close(handle, CloseDisposition::Discard).await
+    {
+        failures.push(format!("worktree cleanup failed: {error}"));
+    }
+    lifecycle_error(failures.join("; "))
+}
+
 async fn create_worktree(
     preparation: &StudioTaskSpawnPreparation,
     request: &StudioTaskSpawnRequest,
-) -> Result<Option<(WorktreeManager, WorktreeHandle)>> {
+) -> std::result::Result<Option<(WorktreeManager, WorktreeHandle)>, String> {
     let Some(spec) = preparation.worktree_spec().cloned() else {
         return Ok(None);
     };
     let manager = WorktreeManager::local(spec.repo_root.clone());
     let handle = manager.create_from_spec(spec).await.map_err(|error| {
-        lifecycle_error(format!(
+        format!(
             "failed to create worktree for {}: {error}",
             request.agent_id
-        ))
+        )
     })?;
     Ok(Some((manager, handle)))
 }
