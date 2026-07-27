@@ -143,24 +143,26 @@ StudioState _emptyState() {
     selectedProjectId: project.id,
     selectedSessionId: session.id,
     permissionMode: PermissionMode.requestApproval,
-    turnPhase: TurnPhase.idle,
-    runtime: const SessionRuntimeView(
-      model: '',
-      contextTokens: 0,
-      contextWindow: 0,
-      totalTokens: 0,
-      costLabel: '',
-      activeSkills: [],
-      activeMcpServers: [],
-      activeLspServers: [],
-      agentCount: 0,
-    ),
+    turnPhasesBySession: {session.id: TurnPhase.idle},
+    runtimesBySession: {
+      session.id: const SessionRuntimeView(
+        model: '',
+        contextTokens: 0,
+        contextWindow: 0,
+        totalTokens: 0,
+        costLabel: '',
+        activeSkills: [],
+        activeMcpServers: [],
+        activeLspServers: [],
+        agentCount: 0,
+      ),
+    },
     pendingInteractions: const [],
   );
 }
 
 StudioState _noProjectState() {
-  return const StudioState(
+  return StudioState(
     projects: [],
     sessions: [],
     messagesBySession: {},
@@ -170,18 +172,6 @@ StudioState _noProjectState() {
     selectedProjectId: null,
     selectedSessionId: null,
     permissionMode: PermissionMode.requestApproval,
-    turnPhase: TurnPhase.idle,
-    runtime: SessionRuntimeView(
-      model: '',
-      contextTokens: 0,
-      contextWindow: 0,
-      totalTokens: 0,
-      costLabel: '',
-      activeSkills: [],
-      activeMcpServers: [],
-      activeLspServers: [],
-      agentCount: 0,
-    ),
     pendingInteractions: [],
   );
 }
@@ -221,7 +211,7 @@ StudioState _twoProjectState({
     messagesBySession: {for (final session in sessions) session.id: const []},
     selectedProjectId: selectedProjectId,
     selectedSessionId: selectedSessionId,
-    turnPhase: turnPhase,
+    turnPhasesBySession: {selectedSessionId: turnPhase},
   );
 }
 
@@ -440,6 +430,10 @@ StudioState _stateWithPlannerModels() {
         effort: 'high',
       ),
     ],
-    runtime: state.runtime.copyWith(model: 'deepseek-v4-flash'),
+    runtimesBySession: {
+      state.selectedAgentSessionId!: state.runtime.copyWith(
+        model: 'deepseek-v4-flash',
+      ),
+    },
   );
 }

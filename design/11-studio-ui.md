@@ -49,6 +49,10 @@ lib/src/shared/
   状态栏和 Composer。
 - `AgentDirectoryProjection` 是 root 下轻量目录；`AgentWorkspaceProjection` 是当前
   agent session 的唯一工作区事实源。
+- Flutter 使用不可变 `AgentWorkspaceView` 聚合当前 agent 的 timeline、Todo、runtime、
+  turn phase、interaction、Composer 和状态栏投影，并由单一
+  `selectedAgentWorkspaceProvider` 交给 `AgentWorkspacePane`。这些区域不得分别读取
+  `StudioState` 后再拼接当前会话。
 - child 启动、完成、停止或故障只刷新目录状态，不自动切换当前 agent。
 
 `messageUpdated` upsert message snapshot；message snapshot 保留 `turnId/status/updatedAt/completedAt/error` 等 lifecycle 字段，但 message `createdAt` 首次创建后不可因后续 snapshot 回退或覆盖。message lifecycle 只更新 message snapshot，不驱动 part 终态，也不从 part 状态反推 message 状态。`messagePartUpdated` upsert 完整 part snapshot 并清除该 part 的 live delta；`messagePartDelta` payload 只携带 `partId/revision/field/delta/chunkIndex`，session 归属来自 envelope，message/turn 归属来自已有 part snapshot，不在 delta 内重复携带或信任第二套身份。`messagePartDelta` 只允许命中已有 part，orphan delta 直接丢弃。`messagePartDelta` 不推进 durable cursor，也不得覆盖 terminal snapshot。前端记录 part 的 snapshot sequence、delta sequence 和可选 `chunkIndex`，丢弃同 part stale delta、低序 delta 与重复/倒序 chunk。`messageRemoved`、`messagePartRemoved`、session reset 和 projection snapshot 替换必须清理相关 delta accum。
@@ -72,6 +76,10 @@ generation 不匹配的 frame 必须丢弃，不能污染当前会话。
 - `selectedSessionView` 从 `selectedAgentSessionId` 读取当前 owner、message、part、runtime、Todo、interaction、turn phase、busy、MCP/LSP active 列表和 Composer 草稿。
 - `visibleProjectSessions` 对 session list 做按 id 去重，只把 `visibility=active` 且 `sessionKind=root` 的大会话放入左侧栏；同一 root 下的 agent session 只出现在标题区 agent 菜单，并按父子层级和创建顺序稳定排列。
 - `SessionStatusBar` 只消费 `selectedSessionView.runtime/activeMcpServers/activeLspServers` 与当前 owner 身份，不得直接读后台 session 的 runtime event，也不得聚合其他 agent。
+
+`StudioState` 中 runtime、turn phase 和 Composer 草稿只按 session 归一化保存，不保留一套
+可独立写入的 selected-session 镜像。reducer、snapshot 和 controller action 都必须携带明确
+`sessionId`；selection 只决定读取哪个 `AgentWorkspaceView`，不能改变事件的归属。
 
 `sessionRuntimeChanged` 只能更新 `sessionRuntimeBySession[sessionId]`；MCP/LSP 的全局 health event 更新 server catalog，当前会话实际 active 列表来自 selected agent session runtime。大会话的 Agent Directory 使用独立轻量事件刷新 owner、session、父子关系、状态和 attention，不通过单 agent session 的 `AgentChanged` 聚合 agent tree。
 
@@ -174,6 +182,10 @@ root Planner 使用普通 Composer。child agent 默认显示只读 Composer“�
 agent 的 interaction dock。切换 agent 时整套 timeline、Todo、状态栏、interaction 与 Composer
 同帧切换，Planner 草稿不能显示在 child workspace。
 
+所有 agent（包括 executor）都展示自己的 session timeline 与 Todo，不再把 executor workspace
+重定向到 Planner timeline。目标 workspace 尚无缓存时先展示空的 loading workspace；首个
+snapshot/replay 到达后再原子替换完整 workspace，期间不得保留上一 agent 的内容。
+
 Studio runtime 的恢复语义必须保证 UI 不展示已经无法唤醒的等待态。应用启动时，未完成 turn 标记为取消，`userInput` 与 `toolApproval` 这类依赖内存 waiter 的 transient pending interaction 同步取消并发出 interaction snapshot；`planConfirmation` 可在 turn 完成后继续等待用户决策，因此不会被普通启动恢复或 turn 收尾清理取消。单个 session 的 active turn 只在对应后台 turn 未终止时出现在 runtime snapshot 中，完成、失败、中断和取消后必须从 snapshot 中移除。
 
 聊天底部只渲染一个最高优先级 pending interaction，优先级为 `toolApproval > userInput > planConfirmation`。普通 prompt 输入不再渲染 Simple/Task 二级按钮，模式切换只存在于状态栏；确认实施后保持 Task 并由 coordinator 推进。
@@ -184,7 +196,11 @@ Flutter 的 `planConfirmation` dock 对齐 Codex 桌面 app 的决策式提示�
 
 pending interaction 只替换普通 prompt 输入，不得隐藏当前 turn 的停止控制；只要当前 session 的 turn 仍处于非终态，footer 必须保留停止按钮并调用 `stop_prompt(sessionId)`。`busy` 与停止按钮状态必须按 `sessionId` 归属计算，后台 session 的 turn event 不能让当前 session 显示不可用的停止态。
 
-Flutter 状态栏保留当前 owner 身份、模式切换、当前根角色模型选择、reasoning effort、context/token/cost、active skills、MCP 和 LSP。Simple 编辑 executor role，Task 编辑 planner role；任务非终态期间禁用模式切换。状态栏所有数据来自当前 agent workspace，不显示 agent 数量或其他 agent 列表。
+Flutter 状态栏保留当前 owner 身份、模型、context/token/cost、active skills、MCP 和 LSP。root
+workspace 额外提供模式、当前根角色模型和 reasoning effort 选择：Simple 编辑 executor role，
+Task 编辑 planner role；任务非终态期间禁用模式切换。child workspace 不显示这些 root 专属
+编辑控件，只读展示该 session runtime 的实际模型；runtime 未提供 effort 时不得用根角色配置
+冒充。状态栏所有数据来自当前 agent workspace，不显示 agent 数量或其他 agent 列表。
 
 Flutter `SessionStatusBar` 展示同一组信息，并使用 Material 3 的 compact controls、tooltip 和 hover/focus 可达的弹层承载详情。Flutter 状态栏只消费 Riverpod selector，不直接订阅 bridge stream 或解析 raw JSON。
 

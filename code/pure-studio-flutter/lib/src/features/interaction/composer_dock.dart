@@ -13,13 +13,13 @@ import 'tool_approval_dock.dart';
 import 'user_input_dock.dart';
 
 class ComposerDock extends ConsumerWidget {
-  const ComposerDock({required this.state, super.key});
+  const ComposerDock({required this.workspace, super.key});
 
-  final StudioState state;
+  final AgentWorkspaceView workspace;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final interaction = state.activeInteraction;
+    final interaction = workspace.activeInteraction;
     return SafeArea(
       top: false,
       child: Padding(
@@ -31,10 +31,13 @@ class ComposerDock extends ConsumerWidget {
               maxWidth: StudioLayout.conversationWidth,
             ),
             child: interaction == null
-                ? state.selectedAgentSession?.isAgent == true
-                      ? _RuntimeDrivenAgentDock(state: state)
-                      : _PromptComposer(state: state)
-                : _InteractionDock(state: state, interaction: interaction),
+                ? workspace.composerMode == AgentComposerMode.runtimeDriven
+                      ? _RuntimeDrivenAgentDock(workspace: workspace)
+                      : _PromptComposer(workspace: workspace)
+                : _InteractionDock(
+                    workspace: workspace,
+                    interaction: interaction,
+                  ),
           ),
         ),
       ),
@@ -43,9 +46,9 @@ class ComposerDock extends ConsumerWidget {
 }
 
 class _RuntimeDrivenAgentDock extends StatelessWidget {
-  const _RuntimeDrivenAgentDock({required this.state});
+  const _RuntimeDrivenAgentDock({required this.workspace});
 
-  final StudioState state;
+  final AgentWorkspaceView workspace;
 
   @override
   Widget build(BuildContext context) {
@@ -70,7 +73,7 @@ class _RuntimeDrivenAgentDock extends StatelessWidget {
               ).textTheme.bodyMedium?.copyWith(color: context.studioInkSoft),
             ),
           ),
-          if (state.isBusy) const _StopButton(),
+          if (workspace.isBusy) _StopButton(sessionId: workspace.sessionId),
         ],
       ),
     );
@@ -78,9 +81,9 @@ class _RuntimeDrivenAgentDock extends StatelessWidget {
 }
 
 class _PromptComposer extends ConsumerStatefulWidget {
-  const _PromptComposer({required this.state});
+  const _PromptComposer({required this.workspace});
 
-  final StudioState state;
+  final AgentWorkspaceView workspace;
 
   @override
   ConsumerState<_PromptComposer> createState() => _PromptComposerState();
@@ -92,13 +95,13 @@ class _PromptComposerState extends ConsumerState<_PromptComposer> {
   @override
   void initState() {
     super.initState();
-    _controller = TextEditingController(text: widget.state.composerText);
+    _controller = TextEditingController(text: widget.workspace.composerText);
   }
 
   @override
   void didUpdateWidget(covariant _PromptComposer oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final nextText = widget.state.composerText;
+    final nextText = widget.workspace.composerText;
     if (nextText != _controller.text) {
       _controller.value = TextEditingValue(
         text: nextText,
@@ -117,9 +120,8 @@ class _PromptComposerState extends ConsumerState<_PromptComposer> {
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     final canSubmit =
-        widget.state.selectedSessionId != null &&
-        widget.state.composerText.trim().isNotEmpty &&
-        !widget.state.isBusy;
+        widget.workspace.composerText.trim().isNotEmpty &&
+        !widget.workspace.isBusy;
     return StudioPanel(
       backgroundColor: colors.surfaceContainerLowest,
       borderColor: colors.outlineVariant.withValues(alpha: 0.86),
@@ -147,24 +149,28 @@ class _PromptComposerState extends ConsumerState<_PromptComposer> {
               ),
               contentPadding: const EdgeInsets.symmetric(vertical: 8),
             ),
-            onChanged: ref
+            onChanged: (value) => ref
                 .read(studioControllerProvider.notifier)
-                .updateComposer,
+                .updateComposer(widget.workspace.sessionId, value),
             onSubmitted: (_) {
               if (canSubmit) {
-                ref.read(studioControllerProvider.notifier).submitComposer();
+                ref
+                    .read(studioControllerProvider.notifier)
+                    .submitComposer(widget.workspace.sessionId);
               }
             },
           ),
           Row(
             children: [
-              _PermissionSelector(mode: widget.state.permissionMode),
+              _PermissionSelector(mode: widget.workspace.permissionMode),
               const Spacer(),
-              if (widget.state.isBusy)
+              if (widget.workspace.isBusy)
                 IconButton.filledTonal(
                   tooltip: context.l10n.composerStop,
                   icon: const Icon(Icons.stop),
-                  onPressed: ref.read(studioControllerProvider.notifier).stop,
+                  onPressed: () => ref
+                      .read(studioControllerProvider.notifier)
+                      .stop(widget.workspace.sessionId),
                 )
               else
                 IconButton.filled(
@@ -175,9 +181,9 @@ class _PromptComposerState extends ConsumerState<_PromptComposer> {
                   ),
                   icon: const Icon(Icons.arrow_upward),
                   onPressed: canSubmit
-                      ? ref
+                      ? () => ref
                             .read(studioControllerProvider.notifier)
-                            .submitComposer
+                            .submitComposer(widget.workspace.sessionId)
                       : null,
                 ),
             ],
@@ -267,26 +273,31 @@ class _PermissionSelector extends ConsumerWidget {
 }
 
 class _InteractionDock extends StatelessWidget {
-  const _InteractionDock({required this.state, required this.interaction});
+  const _InteractionDock({required this.workspace, required this.interaction});
 
-  final StudioState state;
+  final AgentWorkspaceView workspace;
   final PendingInteraction interaction;
 
   @override
   Widget build(BuildContext context) {
     final payload = InteractionPayloadSnapshot.from(interaction);
-    final trailing = state.isBusy ? const _StopButton() : null;
+    final trailing = workspace.isBusy
+        ? _StopButton(sessionId: workspace.sessionId)
+        : null;
     return switch (interaction.kind) {
       InteractionKind.toolApproval => ToolApprovalDock(
+        sessionId: workspace.sessionId,
         payload: payload,
         trailing: trailing,
       ),
       InteractionKind.userInput => UserInputDock(
+        sessionId: workspace.sessionId,
         interactionId: interaction.id,
         payload: payload,
         trailing: trailing,
       ),
       InteractionKind.planConfirmation => PlanConfirmationDock(
+        sessionId: workspace.sessionId,
         trailing: trailing,
       ),
     };
@@ -294,14 +305,17 @@ class _InteractionDock extends StatelessWidget {
 }
 
 class _StopButton extends ConsumerWidget {
-  const _StopButton();
+  const _StopButton({required this.sessionId});
+
+  final String sessionId;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return IconButton.filledTonal(
       tooltip: context.l10n.composerStop,
       icon: const Icon(Icons.stop),
-      onPressed: ref.read(studioControllerProvider.notifier).stop,
+      onPressed: () =>
+          ref.read(studioControllerProvider.notifier).stop(sessionId),
     );
   }
 }

@@ -10,8 +10,13 @@ import '../../l10n/studio_l10n.dart';
 import 'interaction_widgets.dart';
 
 class PlanConfirmationDock extends ConsumerStatefulWidget {
-  const PlanConfirmationDock({this.trailing, super.key});
+  const PlanConfirmationDock({
+    required this.sessionId,
+    this.trailing,
+    super.key,
+  });
 
+  final String sessionId;
   final Widget? trailing;
 
   @override
@@ -114,7 +119,7 @@ class _PlanConfirmationDockState extends ConsumerState<PlanConfirmationDock> {
     try {
       await ref
           .read(studioControllerProvider.notifier)
-          .resolveActiveInteraction(resolution);
+          .resolveActiveInteraction(widget.sessionId, resolution);
     } catch (error) {
       if (mounted) {
         setState(() => _error = error.toString());

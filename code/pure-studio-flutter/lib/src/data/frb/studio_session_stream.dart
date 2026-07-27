@@ -187,12 +187,14 @@ StudioState applyCanonicalSessionSnapshot(
     }
   }
   final runtimeJson = _map(snapshot['runtime']);
+  final existingRuntime =
+      current.runtimesBySession[sessionId] ?? _emptyRuntimeView();
   final runtime =
       (runtimeJson.isEmpty
-              ? current.runtime
+              ? existingRuntime
               : sessionRuntimeFromJson(
                   runtimeJson,
-                ).copyWith(task: current.runtime.task))
+                ).copyWith(task: existingRuntime.task))
           .copyWith(agentCount: agents.length);
   final turn = _map(snapshot['turn']);
   return current.copyWith(
@@ -210,15 +212,22 @@ StudioState applyCanonicalSessionSnapshot(
       sessionId: timelineEvents,
     },
     agentsBySession: {...current.agentsBySession, sessionId: agents},
-    runtime: runtime,
+    runtimesBySession: {...current.runtimesBySession, sessionId: runtime},
     pendingInteractions: [
       for (final interaction in current.pendingInteractions)
         if (interaction.sessionId != sessionId) interaction,
       ...interactions,
     ],
-    turnPhase: turn.isEmpty
-        ? TurnPhase.idle
-        : _turnPhaseFromStatus(_string(turn['status'])),
+    turnPhasesBySession: {
+      ...current.turnPhasesBySession,
+      sessionId: turn.isEmpty
+          ? TurnPhase.idle
+          : _turnPhaseFromStatus(_string(turn['status'])),
+    },
+    workspaceSyncBySession: {
+      ...current.workspaceSyncBySession,
+      sessionId: AgentWorkspaceSyncState.ready,
+    },
     eventCursorsBySession: {
       ...current.eventCursorsBySession,
       sessionId: throughSequence,

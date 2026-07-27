@@ -11,9 +11,11 @@ void registerDemoProjectTests() {
     await container.read(studioControllerProvider.future);
     container
         .read(studioControllerProvider.notifier)
-        .updateComposer('demo hello');
+        .updateComposer('session-main', 'demo hello');
 
-    await container.read(studioControllerProvider.notifier).submitComposer();
+    await container
+        .read(studioControllerProvider.notifier)
+        .submitComposer('session-main');
     await pumpEventQueue();
 
     final state = container.read(studioControllerProvider).requireValue;

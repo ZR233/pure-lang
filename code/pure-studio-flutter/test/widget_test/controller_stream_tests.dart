@@ -11,9 +11,13 @@ void registerControllerStreamTests() {
       addTearDown(container.dispose);
 
       await container.read(studioControllerProvider.future);
-      container.read(studioControllerProvider.notifier).updateComposer('hello');
+      container
+          .read(studioControllerProvider.notifier)
+          .updateComposer('session-1', 'hello');
 
-      await container.read(studioControllerProvider.notifier).submitComposer();
+      await container
+          .read(studioControllerProvider.notifier)
+          .submitComposer('session-1');
 
       var state = container.read(studioControllerProvider).requireValue;
       expect(state.composerText, isEmpty);

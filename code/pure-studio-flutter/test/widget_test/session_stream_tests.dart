@@ -126,17 +126,19 @@ void registerSessionStreamTests() {
     () async {
       final api = _FakeStudioApi(
         _emptyState().copyWith(
-          runtime: const SessionRuntimeView(
-            model: 'planner/old',
-            contextTokens: 1,
-            contextWindow: 100,
-            totalTokens: 2,
-            costLabel: '',
-            activeSkills: ['old-skill'],
-            activeMcpServers: ['old-mcp'],
-            activeLspServers: ['old-lsp'],
-            agentCount: 2,
-          ),
+          runtimesBySession: const {
+            'session-1': SessionRuntimeView(
+              model: 'planner/old',
+              contextTokens: 1,
+              contextWindow: 100,
+              totalTokens: 2,
+              costLabel: '',
+              activeSkills: ['old-skill'],
+              activeMcpServers: ['old-mcp'],
+              activeLspServers: ['old-lsp'],
+              agentCount: 2,
+            ),
+          },
         ),
       );
       final container = ProviderContainer(

@@ -342,18 +342,20 @@ StudioState responsiveVisualState() {
     selectedProjectId: project.id,
     selectedSessionId: session.id,
     permissionMode: PermissionMode.requestApproval,
-    turnPhase: TurnPhase.idle,
-    runtime: const SessionRuntimeView(
-      model: 'deepseek-reasoner',
-      contextTokens: 42000,
-      contextWindow: 100000,
-      totalTokens: 128000,
-      costLabel: 'CNY 12.34',
-      activeSkills: ['flutter-ui'],
-      activeMcpServers: ['dart'],
-      activeLspServers: ['rust-analyzer'],
-      agentCount: 2,
-    ),
+    turnPhasesBySession: {session.id: TurnPhase.idle},
+    runtimesBySession: {
+      session.id: const SessionRuntimeView(
+        model: 'deepseek-reasoner',
+        contextTokens: 42000,
+        contextWindow: 100000,
+        totalTokens: 128000,
+        costLabel: 'CNY 12.34',
+        activeSkills: ['flutter-ui'],
+        activeMcpServers: ['dart'],
+        activeLspServers: ['rust-analyzer'],
+        agentCount: 2,
+      ),
+    },
     pendingInteractions: const [],
   );
 }

@@ -306,13 +306,13 @@ String _sessionSubtitle(BuildContext context, StudioSession session) {
 
 class _Footer extends StatelessWidget {
   const _Footer({
-    required this.state,
+    required this.workspace,
     required this.showTodo,
     required this.todoExpanded,
     required this.onToggleTodo,
   });
 
-  final StudioState state;
+  final AgentWorkspaceView workspace;
   final bool showTodo;
   final bool todoExpanded;
   final VoidCallback? onToggleTodo;
@@ -325,12 +325,12 @@ class _Footer extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           SessionStatusBar(
-            state: state,
+            workspace: workspace,
             showTodo: showTodo,
             todoExpanded: todoExpanded,
             onToggleTodo: onToggleTodo,
           ),
-          ComposerDock(state: state),
+          ComposerDock(workspace: workspace),
         ],
       ),
     );

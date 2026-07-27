@@ -1,4 +1,5 @@
 import 'agent_models.dart';
+import 'agent_workspace_view.dart';
 import 'collection_extensions.dart';
 import 'interaction_models.dart';
 import 'provider_models.dart';
@@ -26,7 +27,7 @@ const _emptySessionRuntime = SessionRuntimeView(
 );
 
 class StudioState {
-  const StudioState({
+  StudioState({
     required this.projects,
     required this.sessions,
     required this.messagesBySession,
@@ -48,15 +49,20 @@ class StudioState {
     required this.selectedSessionId,
     this.selectedRootSessionId,
     required this.permissionMode,
-    required this.turnPhase,
-    required this.runtime,
     this.turnPhasesBySession = const {},
     this.runtimesBySession = const {},
+    Map<String, AgentWorkspaceSyncState> workspaceSyncBySession = const {},
     required this.pendingInteractions,
     this.eventCursorsBySession = const {},
-    this.composerText = '',
     this.composerTextsBySession = const {},
-  });
+  }) : workspaceSyncBySession = _withInitialWorkspaceSync(
+         workspaceSyncBySession,
+         selectedSessionId,
+         selectedSessionId != null &&
+             (turnPhasesBySession.containsKey(selectedSessionId) ||
+                 runtimesBySession.containsKey(selectedSessionId) ||
+                 composerTextsBySession.containsKey(selectedSessionId)),
+       );
 
   final List<StudioProject> projects;
   final List<StudioSession> sessions;
@@ -80,16 +86,33 @@ class StudioState {
   final String? selectedSessionId;
   final String? selectedRootSessionId;
   final PermissionMode permissionMode;
-  final TurnPhase turnPhase;
-  final SessionRuntimeView runtime;
   final Map<String, TurnPhase> turnPhasesBySession;
   final Map<String, SessionRuntimeView> runtimesBySession;
+  final Map<String, AgentWorkspaceSyncState> workspaceSyncBySession;
   final List<PendingInteraction> pendingInteractions;
   final Map<String, int> eventCursorsBySession;
-  final String composerText;
   final Map<String, String> composerTextsBySession;
 
   String? get selectedAgentSessionId => selectedSessionId;
+
+  TurnPhase get turnPhase {
+    final sessionId = selectedSessionId;
+    return sessionId == null
+        ? TurnPhase.idle
+        : turnPhasesBySession[sessionId] ?? TurnPhase.idle;
+  }
+
+  SessionRuntimeView get runtime {
+    final sessionId = selectedSessionId;
+    return sessionId == null
+        ? _emptySessionRuntime
+        : runtimesBySession[sessionId] ?? _emptySessionRuntime;
+  }
+
+  String get composerText {
+    final sessionId = selectedSessionId;
+    return sessionId == null ? '' : composerTextsBySession[sessionId] ?? '';
+  }
 
   List<StudioSession> get rootSessions =>
       sessions.where((session) => session.isRoot).toList();
@@ -122,17 +145,7 @@ class StudioState {
     return null;
   }
 
-  String? get selectedTimelineSessionId {
-    final selected = selectedAgentSession;
-    if (selected == null) {
-      return null;
-    }
-    final role = selected.ownerRole.trim().toLowerCase();
-    if (selected.isAgent && role == 'executor') {
-      return selectedRootSession?.id ?? selected.id;
-    }
-    return selected.id;
-  }
+  String? get selectedTimelineSessionId => selectedAgentSession?.id;
 
   List<StudioSession> get agentSessionsForSelectedRoot {
     final root = selectedRootSession;
@@ -248,6 +261,33 @@ class StudioState {
     return agents;
   }
 
+  AgentWorkspaceView? get selectedAgentWorkspace {
+    final session = selectedAgentSession;
+    final rootSession = selectedRootSession;
+    if (session == null || rootSession == null) {
+      return null;
+    }
+    return AgentWorkspaceView(
+      session: session,
+      rootSession: rootSession,
+      syncState:
+          workspaceSyncBySession[session.id] ?? AgentWorkspaceSyncState.loading,
+      timelineRows: selectedTimelineRows,
+      todo: selectedTodoList,
+      runtime: runtime,
+      turnPhase: turnPhase,
+      activeInteraction: activeInteraction,
+      composerText: composerText,
+      composerMode: session.isAgent
+          ? AgentComposerMode.runtimeDriven
+          : AgentComposerMode.editable,
+      permissionMode: permissionMode,
+      providers: providers,
+      roles: roles,
+      agents: selectedAgents,
+    );
+  }
+
   RoleSettingsView? role(String key) {
     return roles.where((role) => role.key == key).firstOrNull;
   }
@@ -289,13 +329,11 @@ class StudioState {
     Object? selectedSessionId = _studioStateUnset,
     Object? selectedRootSessionId = _studioStateUnset,
     PermissionMode? permissionMode,
-    TurnPhase? turnPhase,
-    SessionRuntimeView? runtime,
     Map<String, TurnPhase>? turnPhasesBySession,
     Map<String, SessionRuntimeView>? runtimesBySession,
+    Map<String, AgentWorkspaceSyncState>? workspaceSyncBySession,
     List<PendingInteraction>? pendingInteractions,
     Map<String, int>? eventCursorsBySession,
-    String? composerText,
     Map<String, String>? composerTextsBySession,
   }) {
     final nextSelectedSessionId =
@@ -307,29 +345,14 @@ class StudioState {
       ...?turnPhasesBySession,
     };
     final nextRuntimes = {...this.runtimesBySession, ...?runtimesBySession};
-    final currentSessionId = this.selectedSessionId;
-    if (currentSessionId != null) {
-      nextTurnPhases[currentSessionId] = this.turnPhase;
-      nextRuntimes[currentSessionId] = this.runtime;
-    }
-    if (nextSelectedSessionId != null) {
-      if (turnPhase != null) {
-        nextTurnPhases[nextSelectedSessionId] = turnPhase;
-      }
-      if (runtime != null) {
-        nextRuntimes[nextSelectedSessionId] = runtime;
-      }
-    }
-    final selectedTurnPhase =
-        turnPhase ??
-        (nextSelectedSessionId == this.selectedSessionId
-            ? this.turnPhase
-            : nextTurnPhases[nextSelectedSessionId] ?? TurnPhase.idle);
-    final selectedRuntime =
-        runtime ??
-        (nextSelectedSessionId == this.selectedSessionId
-            ? this.runtime
-            : nextRuntimes[nextSelectedSessionId] ?? _emptySessionRuntime);
+    final nextWorkspaceSync = {
+      ...this.workspaceSyncBySession,
+      ...?workspaceSyncBySession,
+    };
+    final nextComposerTexts = {
+      ...this.composerTextsBySession,
+      ...?composerTextsBySession,
+    };
     return StudioState(
       projects: projects ?? this.projects,
       sessions: sessions ?? this.sessions,
@@ -361,18 +384,28 @@ class StudioState {
           ? this.selectedRootSessionId
           : selectedRootSessionId as String?,
       permissionMode: permissionMode ?? this.permissionMode,
-      turnPhase: selectedTurnPhase,
-      runtime: selectedRuntime,
       turnPhasesBySession: nextTurnPhases,
       runtimesBySession: nextRuntimes,
+      workspaceSyncBySession: nextWorkspaceSync,
       pendingInteractions: pendingInteractions ?? this.pendingInteractions,
       eventCursorsBySession:
           eventCursorsBySession ?? this.eventCursorsBySession,
-      composerText: composerText ?? this.composerText,
-      composerTextsBySession:
-          composerTextsBySession ?? this.composerTextsBySession,
+      composerTextsBySession: nextComposerTexts,
     );
   }
+}
+
+Map<String, AgentWorkspaceSyncState> _withInitialWorkspaceSync(
+  Map<String, AgentWorkspaceSyncState> values,
+  String? selectedSessionId,
+  bool hasSelectedWorkspace,
+) {
+  if (selectedSessionId == null ||
+      !hasSelectedWorkspace ||
+      values.containsKey(selectedSessionId)) {
+    return values;
+  }
+  return {...values, selectedSessionId: AgentWorkspaceSyncState.ready};
 }
 
 int _compareTimelineMessages(TimelineMessage left, TimelineMessage right) {
