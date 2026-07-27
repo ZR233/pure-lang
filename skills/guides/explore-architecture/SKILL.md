@@ -1,6 +1,6 @@
 ---
 name: explore-architecture
-description: Use when asked to understand, document, or summarize the Pure-Lang project architecture across all crates. Covers design doc pre-read, per-crate subagent partitioning, polling coordination, and fallback recovery.
+description: Use when asked to understand, document, or summarize the Pure-Lang project architecture across all crates. Covers design doc pre-read, per-crate subagent partitioning, subscription-driven coordination, and fallback recovery.
 category: guides
 platforms: ["windows"]
 ---
@@ -62,18 +62,16 @@ design/02-crates.md     # 每个 crate 的职责和边界
 
 **关于 `pl-core` 的特殊说明**：该 crate 最大、最复杂。其 explorer agent 可能会自己再分出一个子 explorer 探索目录结构。这是预期行为，父 agent 会负责汇总。
 
-### 3. 轮询收集结果
+### 3. 订阅式收集结果
 
-启动所有 agent 后，使用轮询循环等待完成：
+启动所有 agent 后继续处理父代理手上的独立工作。没有其他可执行工作时直接结束当前轮，
+runtime 会在 direct-child 出现有意义更新或无活动超时时，通过合并 continuation 唤醒父代理：
 
 ```rust
-// 伪代码循环
-loop {
-    wait_agent(timeout: 120_000..180_000);  // 慷慨超时
-    let agents = list_agents();
-    if all completed { break; }
-    if stalled { /* 见步骤 4 */ }
-}
+spawn_all_agents();
+continue_parent_work();
+finish_turn_when_only_child_work_remains();
+// 下一轮从 typed wake batch 与 canonical direct-child snapshots 继续。
 ```
 
 ### 4. 回退策略（重要）
@@ -107,8 +105,9 @@ loop {
 ### `pl-core` 探索不完整
 如果 `pl-core` agent 未能返回完整摘要，手动读取其 `lib.rs` 的 `pub use` 列表是最快获取关键导出的方式。配合 `list_files(depth: 2)` 可还原模块结构。
 
-### 等待超时
-`wait_agent` 的超时时间建议设在 120-180 秒。如果 `list_agents` 显示仍有 running agent，继续等待而非重新启动。
+### 无活动超时
+无活动超时由 runtime 按 direct child 独立管理。收到 timeout continuation 后，用附带的全部
+direct-child snapshots 判断是追问、停止还是继续等待；不要用短轮询，也不要重新创建仍在运行的 agent。
 
 ### Agent 数量限制
 如果 provider 或环境限制并发 agent 数量（收到 capacity error），可分批启动：先探索 `pl-protocol` + `pl-trace` + `pl-model` 三个较小的 crate，再探索 `pl-lsp` + `pl-core` + bridge。

@@ -8,13 +8,7 @@ use pl_core::{
 use crate::StudioMode;
 use crate::studio::task_coordinator::TaskRunPhase;
 
-const COLLABORATION_TOOLS: [&str; 5] = [
-    "spawn_agent",
-    "send_input",
-    "wait_agent",
-    "list_agents",
-    "close_agent",
-];
+const COLLABORATION_TOOLS: [&str; 4] = ["spawn_agent", "send_input", "list_agents", "close_agent"];
 const CONFLICT_TOOLS: [&str; 6] = [
     "merge_status",
     "merge_conflict_files",
@@ -42,7 +36,6 @@ pub(super) fn studio_execution_policy(
             spawn_roles,
             list_targets: AgentTargetSelector::Tree,
             message_targets: AgentTargetSelector::Tree,
-            wait_targets: AgentTargetSelector::Tree,
             close_targets: AgentTargetSelector::Tree,
         }
     } else {
@@ -288,6 +281,7 @@ mod tests {
                 role: AgentRoleId::new(role).unwrap(),
                 depth,
             },
+            wake_policy: pl_core::AgentWakePolicy::RuntimeTerminal,
             lifecycle: AgentLifecycleState::Active,
             activity: AgentActivityState::Idle,
             active_turn_id: None,

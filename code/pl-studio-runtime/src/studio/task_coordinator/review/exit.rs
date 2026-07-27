@@ -10,6 +10,7 @@ use super::super::{
 };
 use super::trace::validate_review_trace;
 use super::validate_review_repository;
+use crate::AgentRuntimeHandle;
 use crate::tool::{
     RegisteredTool, ToolExecutionResult, ToolInputSchemaField, strict_tool_input_schema,
 };
@@ -28,6 +29,7 @@ impl TaskCoordinator {
     pub(crate) fn review_exit_tool(
         self: &Arc<Self>,
         session_id: impl Into<String>,
+        runtime: Option<AgentRuntimeHandle>,
     ) -> RegisteredTool {
         let coordinator = self.clone();
         let session_id = session_id.into();
@@ -38,6 +40,7 @@ impl TaskCoordinator {
             move |input: ReviewExitInput, context| {
                 let coordinator = coordinator.clone();
                 let session_id = session_id.clone();
+                let runtime = runtime.clone();
                 async move {
                     let reviewer = context
                         .active_subagent
@@ -61,6 +64,21 @@ impl TaskCoordinator {
                         .store
                         .complete_task_review(&session_id, &reviewer.id, review)
                         .await?;
+                    if let Some(runtime) = runtime
+                        && let Err(error) = runtime.publish_product_phase(
+                            crate::studio::agent_host::root_agent_id(&session_id),
+                            pl_core::AgentId::new(reviewer.id.clone())?,
+                            format!("review:{}", round.id),
+                            "reviewReturned".to_string(),
+                            round.summary.clone(),
+                        )
+                    {
+                        tracing::warn!(
+                            task_run_id = %round.task_run_id,
+                            %error,
+                            "review product signal will be recovered from durable facts"
+                        );
+                    }
                     let mut output = ToolExecutionResult::<serde_json::Value>::json(round)
                         .map_err(anyhow::Error::from)?;
                     output.ends_turn = true;

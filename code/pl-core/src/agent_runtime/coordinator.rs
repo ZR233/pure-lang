@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use tokio::sync::{mpsc, oneshot};
 
 use super::actor::{ActorCommand, AgentActorHandle, spawn_agent_actor};
+use super::event_hub::AgentEventHubHandle;
 use super::host::{AgentCommitObserver, AgentLifecycleAdapter, AgentStateRepository};
 use super::runtime::{AgentRuntimeOptions, RestoredInputPolicy};
 use super::state::{AgentRuntimeError, unix_timestamp};
@@ -10,13 +11,14 @@ use super::{
     AgentCommit, AgentCommitOutcome, AgentCommittedEvent, AgentCurrentSessionSubmitRequest,
     AgentId, AgentRegistration, AgentRuntimeEvent, AgentRuntimeEventKind, AgentRuntimeHandle,
     AgentRuntimeHost, AgentRuntimeResult, AgentSnapshot, AgentSpawnRequest, AgentSpawnResult,
-    AgentSubmitRequest, AgentWaitResult, PendingAgentInput, RestoredAgentRuntime,
-    SpawnLifecycleRequest, TurnId,
+    AgentSubmitRequest, PendingAgentInput, RestoredAgentRuntime, SpawnLifecycleRequest, TurnId,
 };
 use crate::SessionEventHub;
 
 mod spawn;
+mod waiting_agents;
 use spawn::{register_agent, spawn_child_agent};
+use waiting_agents::spawn_waiting_agents_supervisor;
 
 pub(crate) enum CoordinatorCommand {
     Register {
@@ -72,12 +74,18 @@ pub(crate) enum CoordinatorCommand {
         agent_id: AgentId,
         reply: oneshot::Sender<AgentRuntimeResult<AgentSnapshot>>,
     },
+    WakeAccepted {
+        agent_id: AgentId,
+        wake_id: Option<super::AgentWakeId>,
+        signal_ids: Vec<String>,
+        reply: oneshot::Sender<AgentRuntimeResult<bool>>,
+    },
     List {
         reply: oneshot::Sender<AgentRuntimeResult<Vec<AgentSnapshot>>>,
     },
-    Wait {
+    EnterWaitingAgents {
         agent_id: AgentId,
-        reply: oneshot::Sender<AgentRuntimeResult<AgentWaitResult>>,
+        reply: oneshot::Sender<AgentRuntimeResult<()>>,
     },
     StartRestoredInputs {
         reply: oneshot::Sender<AgentRuntimeResult<()>>,
@@ -97,7 +105,9 @@ where
     H: AgentRuntimeHost,
 {
     let (sender, receiver) = mpsc::channel(options.command_capacity.max(1));
-    let handle = AgentRuntimeHandle::new(sender, session_events.handle());
+    let agent_events =
+        AgentEventHubHandle::new(restored.iter().map(|agent| agent.state.snapshot.clone()));
+    let handle = AgentRuntimeHandle::new(sender, session_events.handle(), agent_events);
     let mut actors = BTreeMap::new();
     for restored_agent in restored {
         let id = restored_agent.state.snapshot.identity.id.clone();
@@ -120,6 +130,7 @@ where
         receiver,
         options,
     ));
+    spawn_waiting_agents_supervisor(handle.clone(), options.child_inactivity_timeout);
     Ok(handle)
 }
 
@@ -254,8 +265,30 @@ async fn run_coordinator<H>(
             CoordinatorCommand::Snapshot { agent_id, reply } => {
                 route(&actors, &agent_id, ActorCommand::Snapshot { reply }).await;
             }
-            CoordinatorCommand::Wait { agent_id, reply } => {
-                route(&actors, &agent_id, ActorCommand::Wait { reply }).await;
+            CoordinatorCommand::WakeAccepted {
+                agent_id,
+                wake_id,
+                signal_ids,
+                reply,
+            } => {
+                route(
+                    &actors,
+                    &agent_id,
+                    ActorCommand::WakeAccepted {
+                        wake_id,
+                        signal_ids,
+                        reply,
+                    },
+                )
+                .await;
+            }
+            CoordinatorCommand::EnterWaitingAgents { agent_id, reply } => {
+                route(
+                    &actors,
+                    &agent_id,
+                    ActorCommand::EnterWaitingAgents { reply },
+                )
+                .await;
             }
             CoordinatorCommand::StartRestoredInputs { reply } => {
                 let _ = reply.send(start_pending_inputs(&actors).await);
@@ -481,7 +514,10 @@ fn reject_missing(command: ActorCommand, agent_id: AgentId) {
         ActorCommand::Snapshot { reply } => {
             let _ = reply.send(Err(error));
         }
-        ActorCommand::Wait { reply } => {
+        ActorCommand::WakeAccepted { reply, .. } => {
+            let _ = reply.send(Err(error));
+        }
+        ActorCommand::EnterWaitingAgents { reply } => {
             let _ = reply.send(Err(error));
         }
         ActorCommand::StartPendingInputs { reply } => {

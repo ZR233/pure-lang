@@ -38,7 +38,7 @@ impl ToolEffect {
             "write_file" | "apply_patch" | "create_directory" | "delete_path" | "copy_path"
             | "move_path" | "skill_manage" => Some(Self::WorkspaceWrite),
             "exec" | "write_stdin" => Some(Self::Process),
-            "spawn_agent" | "wait_agent" | "list_agents" | "send_input" | "close_agent" => {
+            "spawn_agent" | "list_agents" | "send_input" | "close_agent" => {
                 Some(Self::AgentControl)
             }
             "git_fetch"

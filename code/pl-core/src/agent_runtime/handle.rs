@@ -1,15 +1,17 @@
 use std::fmt;
 use std::time::Duration;
 
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{broadcast, mpsc, oneshot};
 
 use pl_protocol::{SessionSubscriptionRequest, SessionViewSnapshot};
 
 use super::coordinator::CoordinatorCommand;
+use super::event_hub::AgentEventHubHandle;
 use super::{
-    AgentActivityState, AgentCurrentSessionSubmitRequest, AgentId, AgentRegistration,
-    AgentRuntimeResult, AgentSessionState, AgentSnapshot, AgentSpawnRequest, AgentSpawnResult,
-    AgentSubmitRequest, AgentTurnCheckpoint, AgentWaitResult, SessionId, TurnId,
+    AgentActivityState, AgentCurrentSessionSubmitRequest, AgentId, AgentParentSubscription,
+    AgentRegistration, AgentRuntimeResult, AgentSessionState, AgentSnapshot, AgentSpawnRequest,
+    AgentSpawnResult, AgentSubmitRequest, AgentTurnCheckpoint, AgentUpdateKind, AgentWaitResult,
+    SessionId, TurnId,
 };
 use crate::agent_runtime::state::AgentRuntimeError;
 use crate::{SessionEventHubHandle, SessionEventSubscription};
@@ -21,16 +23,19 @@ use crate::{SessionEventHubHandle, SessionEventSubscription};
 pub struct AgentRuntimeHandle {
     pub(crate) sender: mpsc::Sender<CoordinatorCommand>,
     pub(crate) session_events: SessionEventHubHandle,
+    pub(crate) agent_events: AgentEventHubHandle,
 }
 
 impl AgentRuntimeHandle {
     pub(crate) fn new(
         sender: mpsc::Sender<CoordinatorCommand>,
         session_events: SessionEventHubHandle,
+        agent_events: AgentEventHubHandle,
     ) -> Self {
         Self {
             sender,
             session_events,
+            agent_events,
         }
     }
 
@@ -192,12 +197,57 @@ impl AgentRuntimeHandle {
         receive(receiver).await?
     }
 
-    /// 等待 agent 进入 Idle 且队列为空。
-    pub async fn wait(&self, agent_id: AgentId) -> AgentRuntimeResult<AgentWaitResult> {
+    /// 订阅 direct children；首帧为 canonical snapshots。
+    pub fn subscribe_children(&self, parent_agent_id: &AgentId) -> AgentParentSubscription {
+        self.agent_events.subscribe_parent(parent_agent_id)
+    }
+
+    pub(crate) async fn enter_waiting_agents(&self, agent_id: AgentId) -> AgentRuntimeResult<()> {
         let (reply, receiver) = oneshot::channel();
-        self.send(CoordinatorCommand::Wait { agent_id, reply })
+        self.send(CoordinatorCommand::EnterWaitingAgents { agent_id, reply })
             .await?;
         receive(receiver).await?
+    }
+
+    pub(crate) async fn wake_accepted(
+        &self,
+        agent_id: AgentId,
+        wake_id: Option<super::AgentWakeId>,
+        signal_ids: Vec<String>,
+    ) -> AgentRuntimeResult<bool> {
+        let (reply, receiver) = oneshot::channel();
+        self.send(CoordinatorCommand::WakeAccepted {
+            agent_id,
+            wake_id,
+            signal_ids,
+            reply,
+        })
+        .await?;
+        receive(receiver).await?
+    }
+
+    /// 等待 agent 进入 Idle 且队列为空；使用提交后事件订阅，不占用 actor waiter。
+    pub async fn wait_until_idle(&self, agent_id: AgentId) -> AgentRuntimeResult<AgentWaitResult> {
+        let mut receiver = self.agent_events.subscribe_snapshots();
+        loop {
+            let snapshot = self.agent_events.snapshot(&agent_id)?;
+            if snapshot.lifecycle != super::AgentLifecycleState::Active
+                || (snapshot.activity == AgentActivityState::Idle && snapshot.pending_inputs == 0)
+            {
+                return Ok(AgentWaitResult {
+                    last_turn: snapshot.last_turn.clone(),
+                    snapshot,
+                });
+            }
+            match receiver.recv().await {
+                Ok(snapshot) if snapshot.identity.id == agent_id => {}
+                Ok(_) => continue,
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => {
+                    return Err(AgentRuntimeError::ChannelClosed);
+                }
+            }
+        }
     }
 
     /// 有界等待 agent 进入 Idle 且队列为空。
@@ -206,9 +256,38 @@ impl AgentRuntimeHandle {
         agent_id: AgentId,
         timeout: Duration,
     ) -> AgentRuntimeResult<AgentWaitResult> {
-        tokio::time::timeout(timeout, self.wait(agent_id))
+        tokio::time::timeout(timeout, self.wait_until_idle(agent_id))
             .await
             .map_err(|_| AgentRuntimeError::TimedOut)?
+    }
+
+    /// 产品 durable 事实提交后发布 managed child 阶段更新。
+    pub fn publish_product_phase(
+        &self,
+        parent_agent_id: AgentId,
+        agent_id: AgentId,
+        signal_id: String,
+        phase: String,
+        summary: Option<String>,
+    ) -> AgentRuntimeResult<()> {
+        self.agent_events.publish_product_phase(
+            parent_agent_id,
+            agent_id,
+            signal_id,
+            phase,
+            summary,
+        )
+    }
+
+    pub(crate) fn publish_progress(
+        &self,
+        agent_id: &AgentId,
+        kind: AgentUpdateKind,
+        summary: Option<String>,
+        signal_id: String,
+    ) -> AgentRuntimeResult<()> {
+        self.agent_events
+            .publish_progress(agent_id, kind, summary, signal_id)
     }
 
     /// 订阅指定 session；首帧为 snapshot/replay，随后进入独立实时 channel。

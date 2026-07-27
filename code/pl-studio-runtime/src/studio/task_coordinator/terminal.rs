@@ -26,6 +26,7 @@ pub(crate) enum TerminalAgentStateRecording {
     Unhandled,
     Changed {
         task_run_id: String,
+        outcome_id: String,
         projection: StudioAgentOutcomeProjection,
     },
     Projected(StudioAgentOutcomeProjection),
@@ -63,9 +64,14 @@ impl TaskCoordinator {
         session_id: &str,
         change: &StudioAgentTerminalChange,
     ) -> Result<TerminalAgentStateRecording> {
-        self.store
+        let result = self
+            .store
             .record_terminal_agent_state(session_id, change)
-            .await
+            .await?;
+        if let TerminalAgentStateRecording::Changed { task_run_id, .. } = &result {
+            self.publish_terminal_fact(task_run_id);
+        }
+        Ok(result)
     }
 
     pub(crate) async fn block_terminal_persistence_failure(

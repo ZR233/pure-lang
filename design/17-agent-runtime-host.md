@@ -16,6 +16,10 @@ Pure Studio 的产品运行时位于独立 `pl-studio-runtime` crate。`pl-core`
 - `AgentSession`：有序上下文、压缩状态与 usage。
 - `AgentRuntime<H>`：协调 agent actor，并通过 `AgentRuntimeHost` 调用产品能力。
 - `AgentRuntimeHandle`：不含 host 泛型的命令 sender，供产品 facade 和协作工具使用。
+- `AgentEventHub`：保存 canonical agent snapshots，在 durable commit 后向 direct-parent
+  subscription 发布 typed meaningful update；lag 只发 stale，订阅者重读 snapshot。
+- `WaitingAgentsSupervisor`：合并 parent updates，并用单一 timer queue 管理每个 direct child
+  的独立 inactivity deadline。
 - `SessionEventProjector`：把 runtime/trace/working-set facts 投影为唯一公共 session 协议。
 - `SessionEventHub`：按 session 提供 snapshot、durable replay 和实时 channel。
 
@@ -44,14 +48,15 @@ trait object。
 状态正交拆分：
 
 - lifecycle：`Active | Closing | Closed | Faulted`
-- activity：`Idle | Queued | Running | WaitingTool | WaitingInteraction`
+- activity：`Idle | Queued | Running | WaitingTool | WaitingInteraction | WaitingAgents`
 - turn outcome：`Completed | Cancelled | Failed | BudgetLimited`
 
 turn 完成后回到 `Active + Idle`。turn 失败是结果而非 agent 生命周期失败；只有持久化
 终态失败或无法补偿的不变量破坏会进入 `Faulted`。
 
 `AgentRuntimeHandle` 提供 `register`、`submit`、`submit_current_session`、`cancel_turn`、`close`、`snapshot`、
-`list`、`wait`、`subscribe_session`、`session_snapshot` 和 `shutdown`。输入投递明确使用
+`list`、`subscribe_children`、内部 `wait_until_idle`、`subscribe_session`、`session_snapshot`
+和 `shutdown`。输入投递明确使用
 `QueueOnly | Start | InterruptThenStart`。
 未关闭 agent 可连续接收输入，不存在 `resume_agent`。
 
@@ -76,13 +81,24 @@ session，也不得在 actor 中自动插入空 session。协作工具只提交�
 
 重启时宿主先恢复容器/worktree 等资源，再恢复 actors、sessions 和 pending inputs。
 遗留 Running turn 收束为 `Cancelled(runtime_restarted)`；资源 ready 后按 FIFO 重放队列。
+direct-child subscription、未消费 live update 和 timer 不单独持久化，而是从 durable
+`parent_id`、snapshot、typed wake pending input 与 accepted wake receipts 重建。receipt
+同时保存 wake id 和组成批次的 durable signal ids；即使原 wake 已离开 FIFO 或正在恢复的
+批次边界不同，同一产品事实也不会产生第二个 turn。恢复中的 `WaitingAgents` 会重新挂载
+timeout；已有 queued/running Planner 不重复激活。
 
 ## 17.6 策略与协作
 
 `AgentExecutionPolicy` 数据化描述可见工具、允许 effect、协作目标和 turn finalizer。
-`AgentAccessPolicy` 明确可 spawn 的动态角色，以及 list/send/wait/close 的目标选择：
+`AgentAccessPolicy` 明确可 spawn 的动态角色，以及 list/send/close 的目标选择：
 `None | Tree | Explicit | All`。协作工具通过 `AgentRuntimeHandle` 调用 runtime；框架不依据
 产品角色、Simple/Task 模式或工具名前缀做授权。
+
+`AgentRegistration` 使用 `AgentWakePolicy::{RuntimeTerminal, ProductGated}`。普通 explorer
+可由 runtime terminal 唤醒父代理；managed executor/reviewer 的 runtime terminal 只报告底层
+状态，必须等产品 durable delivery/review/merge/recovery signal 才形成可执行 wake。父代理
+`Running/Queued` 时只合并更新不抢占；无更新但仍有 live direct child 时进入
+`WaitingAgents`，由 meaningful update 或独立 inactivity timeout 原子入队 synthetic wake。
 
 spawn/close 采用 prepare、durable transition、activate/commit、失败逆序补偿的 saga。
 补偿无法完成时保留诊断事实并把 agent 置为 `Faulted`。
@@ -101,7 +117,7 @@ provider 不含第二份 `default_model`。
 `pl-studio-runtime` 拥有 Studio 配置、SQLite repository 适配、product event、
 project/session/task/worktree、Simple/Task 策略和 Studio-only wire DTO。session timeline
 事件直接消费 `pl-protocol` 公共类型，不在 Studio 重做 trace mapping。`pl-studio-bridge`
-只依赖该 crate。Studio 配置与数据库独立演进；当前数据库版本为 4。旧数据库通过带备份的
+只依赖该 crate。Studio 配置与数据库独立演进；当前数据库版本为 5。旧数据库通过带备份的
 事务迁移升级，未来版本明确拒绝打开，任何迁移失败都不得删除或降级原数据库。
 
 ## 17.9 Session 订阅不变量

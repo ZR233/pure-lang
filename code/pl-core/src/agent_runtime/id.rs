@@ -84,3 +84,4 @@ macro_rules! runtime_id {
 runtime_id!(AgentId, "agent id", "agent");
 runtime_id!(SessionId, "session id", "session");
 runtime_id!(TurnId, "turn id", "turn");
+runtime_id!(AgentWakeId, "agent wake id", "wake");

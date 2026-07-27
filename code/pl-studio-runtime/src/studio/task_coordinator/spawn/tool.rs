@@ -9,7 +9,8 @@ use crate::tool::{
     RegisteredTool, ToolExecutionResult, ToolInputSchemaField, strict_tool_input_schema,
 };
 use crate::{
-    AgentRoleId, AgentRuntimeHandle, AgentSessionState, AgentSpawnRequest, SessionId, ToolEffect,
+    AgentRoleId, AgentRuntimeHandle, AgentSessionState, AgentSpawnRequest, AgentWakePolicy,
+    SessionId, ToolEffect,
 };
 
 const MAX_EXECUTOR_CONSTRAINT_BYTES: usize = 16 * 1024;
@@ -91,6 +92,7 @@ impl TaskCoordinator {
                             parent_id: crate::studio::agent_host::root_agent_id(&session_id),
                             role: AgentRoleId::new("executor")
                                 .map_err(|error| anyhow::anyhow!(error.to_string()))?,
+                            wake_policy: AgentWakePolicy::ProductGated,
                             session: AgentSessionState::empty(child_session_id.clone()),
                             initial_message: Some(arguments.message),
                             metadata: serde_json::to_value(intent)?,

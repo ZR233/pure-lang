@@ -12,13 +12,12 @@ use pl_core::{
 use pl_model::create_provider_with_catalog;
 
 use crate::config::ConfigStore;
-use crate::studio::task_coordinator::TaskCoordinator;
+use crate::studio::task_coordinator::{TaskContinuationResolution, TaskCoordinator};
 use crate::studio::{InteractionRuntime, StudioStore};
 use crate::{McpRuntimeHandle, StudioMode, resolve_workspace_root};
 
 use super::policy::{StudioPolicyContext, studio_execution_policy};
 use super::resources::StudioAgentResources;
-use super::{StudioContinuationReason, StudioContinuationService};
 
 /// 使用 Studio 配置、project/session 和产品工具准备一次 framework turn。
 #[derive(Clone)]
@@ -29,7 +28,6 @@ pub(in crate::studio) struct StudioAgentTurnFactory {
     lsp_runtime: pl_lsp::LspRuntimeRegistry,
     interactions: InteractionRuntime,
     coordinator: Arc<TaskCoordinator>,
-    continuations: StudioContinuationService,
     resources: StudioAgentResources,
 }
 
@@ -42,7 +40,6 @@ impl StudioAgentTurnFactory {
         lsp_runtime: pl_lsp::LspRuntimeRegistry,
         interactions: InteractionRuntime,
         coordinator: Arc<TaskCoordinator>,
-        continuations: StudioContinuationService,
         resources: StudioAgentResources,
     ) -> Self {
         Self {
@@ -52,7 +49,6 @@ impl StudioAgentTurnFactory {
             lsp_runtime,
             interactions,
             coordinator,
-            continuations,
             resources,
         }
     }
@@ -94,14 +90,38 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             load_workspace_instructions(&workspace_root).map_err(anyhow_error)?;
         let config = self.config_store.load_or_default()?;
         let mode = StudioMode::from_label(&session_record.mode);
-        let task_phase = if mode == StudioMode::Task {
+        let active_task_run = if mode == StudioMode::Task {
             self.store
                 .find_active_task_run_for_session(&session_record.root_session_id)
                 .await
                 .map_err(anyhow_error)?
-                .map(|run| run.phase)
         } else {
             None
+        };
+        let task_phase = active_task_run.as_ref().map(|run| run.phase);
+        let input_message = if context.snapshot.identity.parent_id.is_none() {
+            if let Some(wake_batch) = context.input.metadata.get("agentWakeBatch") {
+                match active_task_run.as_ref() {
+                    Some(run) => match self
+                        .store
+                        .load_task_continuation_resolution(&run.id)
+                        .await
+                        .map_err(anyhow_error)?
+                    {
+                        TaskContinuationResolution::Active(snapshot) => format!(
+                            "{}\n\n<agentWakeBatch>\n{}\n</agentWakeBatch>",
+                            snapshot.render_prompt().map_err(anyhow_error)?,
+                            serde_json::to_string_pretty(wake_batch).map_err(anyhow_error)?
+                        ),
+                        TaskContinuationResolution::Terminal(_) => context.input.message.clone(),
+                    },
+                    None => context.input.message.clone(),
+                }
+            } else {
+                context.input.message.clone()
+            }
+        } else {
+            context.input.message.clone()
         };
         let model_role = if context.snapshot.identity.parent_id.is_none() {
             match mode {
@@ -151,15 +171,11 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         web_search.install(kernel.core_mut(), &config.web_search)?;
 
         if mode == StudioMode::Task {
-            let continuations = self.continuations.clone();
             self.coordinator.install_tools(
                 kernel.core_mut(),
                 &session_record.root_session_id,
                 context.runtime.clone(),
                 &context.snapshot,
-                move |task_run_id| {
-                    continuations.request(task_run_id, StudioContinuationReason::DeliveryCompleted);
-                },
             );
         }
         self.mcp_runtime
@@ -207,7 +223,7 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             .materialize_session_attachments(&studio_session_id)
             .await
             .map_err(anyhow_error)?;
-        let user_content = prompt_content(&context.input.message, &attachments);
+        let user_content = prompt_content(&input_message, &attachments);
         let trace_attachments = attachments
             .iter()
             .map(crate::studio::store::attachment::trace_attachment)
@@ -225,7 +241,7 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
                 .get("subagentConstraint")
                 .and_then(serde_json::Value::as_str),
         )?;
-        let request = TurnRequest::new(context.input.message)
+        let request = TurnRequest::new(input_message)
             .with_turn_id(context.turn_id.to_string())
             .with_user_content(user_content)
             .with_materialized_attachments(materialized)

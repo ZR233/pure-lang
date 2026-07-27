@@ -85,6 +85,7 @@ impl TaskCoordinator {
                     if reason.is_empty() {
                         bail!("task_stop reason must not be empty");
                     }
+                    let mut terminal_facts = coordinator.subscribe_terminal_facts();
                     let requested = {
                         let branch_guard = coordinator.lock_branch_mutation().await;
                         coordinator.ensure_branch_mutation_guard(&branch_guard)?;
@@ -98,7 +99,8 @@ impl TaskCoordinator {
                             .await?
                     };
                     interrupt_task_children(&runtime, &session_id).await?;
-                    wait_for_terminal_outcomes(&coordinator, &requested.id).await?;
+                    wait_for_terminal_outcomes(&coordinator, &requested.id, &mut terminal_facts)
+                        .await?;
                     let run = coordinator
                         .store
                         .read_task_run(&requested.id)
@@ -358,6 +360,7 @@ async fn interrupt_task_children(runtime: &AgentRuntimeHandle, session_id: &str)
 async fn wait_for_terminal_outcomes(
     coordinator: &TaskCoordinator,
     task_run_id: &str,
+    terminal_facts: &mut tokio::sync::broadcast::Receiver<String>,
 ) -> Result<()> {
     tokio::time::timeout(std::time::Duration::from_secs(10), async {
         loop {
@@ -375,7 +378,13 @@ async fn wait_for_terminal_outcomes(
             if !active {
                 return Ok::<(), anyhow::Error>(());
             }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            match terminal_facts.recv().await {
+                Ok(changed_task_run_id) if changed_task_run_id == task_run_id => {}
+                Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                    bail!("task terminal fact subscription closed");
+                }
+            }
         }
     })
     .await

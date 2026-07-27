@@ -29,33 +29,4 @@ impl StudioStore {
         .transpose()
         .map(Option::flatten)
     }
-
-    /// 判断同一 task run 是否已有排队或正在执行的受管续轮。
-    ///
-    /// 普通 root turn 即使正在执行也不能阻止 child terminal 追加下一轮；只有
-    /// `historyPolicy=ephemeral` 的受管续轮在 live 状态时参与去重。
-    pub(in crate::studio) async fn has_live_task_continuation(
-        &self,
-        task_run_id: &str,
-    ) -> Result<bool> {
-        let row = self
-            .db
-            .query_one(Statement::from_sql_and_values(
-                DatabaseBackend::Sqlite,
-                "SELECT 1 AS present
-                 FROM agent_turns
-                 WHERE json_extract(metadata_json, '$.taskRunId') = ?
-                   AND (
-                     status = 'queued'
-                     OR (
-                       status IN ('running', 'waiting_tool', 'waiting_interaction')
-                       AND json_extract(metadata_json, '$.historyPolicy') = 'ephemeral'
-                     )
-                   )
-                 LIMIT 1",
-                [task_run_id.to_string().into()],
-            ))
-            .await?;
-        Ok(row.is_some())
-    }
 }

@@ -55,13 +55,13 @@ agent 的输入队列、活动 turn、取消和恢复由 `pl-core::AgentRuntime`
 - `full-access` 不能扩大 execution profile 的工具 effect；planner、explorer、reviewer 仍受角色白名单约束
 - Task planner 的探索和协调只使用 profile 允许的读取与 harness 工具；明确写入类工具不能通过权限模式绕过
 - 用户显式要求 `subagent`/子代理分工时，核心提示必须将异步 agent 调度作为强约束；普通 shell 或文件探索不能替代子代理调度
-- 通用多 agent 协作由 `spawn_agent`、`send_input`、`wait_agent`、`list_agents` 和 `close_agent` 组成；工具只持有非泛型 `AgentRuntimeHandle`，不接触 Studio host 或 actor 内部状态。产品 harness 可以注册严格类型化的 spawn 工具并调用同一个 runtime；Task 根的通用 `spawn_agent` 只创建 explorer，executor 使用 `task_spawn_executor`，reviewer 使用 `task_request_review`
+- 通用多 agent 协作由 `spawn_agent`、`send_input`、`list_agents` 和 `close_agent` 组成；工具只持有非泛型 `AgentRuntimeHandle`，不接触 Studio host 或 actor 内部状态。等待不暴露模型工具：`AgentEventHub` 自动订阅 direct children，合并有意义更新并在父代理没有其他工作时提交 ephemeral continuation。产品 harness 可以注册严格类型化的 spawn 工具并调用同一个 runtime；Task 根的通用 `spawn_agent` 只创建 explorer，executor 使用 `task_spawn_executor`，reviewer 使用 `task_request_review`
 - `request_user_input` 是 Codex 风格的阻塞交互工具，root agent 与 subagent 都可用；工具通过统一 `Interaction` 域创建 `userInput` 请求，等待前端 resolution 后把答案作为工具结果返回，不作为普通用户聊天消息写入历史
 - `simple` 根聊天使用 executor，`task` 根聊天与 continuation turn 使用 planner；Task child role 由产品工具固定，所有 child 禁止继续派生
-- agent 状态正交拆为 lifecycle（`Active | Closing | Closed | Faulted`）、activity（`Idle | Queued | Running | WaitingTool | WaitingInteraction`）和 last turn outcome（`Completed | Cancelled | Failed | BudgetLimited`）
+- agent 状态正交拆为 lifecycle（`Active | Closing | Closed | Faulted`）、activity（`Idle | Queued | Running | WaitingTool | WaitingInteraction | WaitingAgents`）和 last turn outcome（`Completed | Cancelled | Failed | BudgetLimited`）
 - turn 完成或失败后 agent 回到 `Active + Idle`；未关闭 agent 可继续接收输入，不存在 `resume_agent`
 - 输入使用 `QueueOnly | Start | InterruptThenStart`。actor 先持久化 FIFO queue/activity，再准备和执行 turn；取消先触发 token，超过 grace period 才 abort
-- `wait_agent` 在目标 Idle 且队列为空时完成并返回 last outcome；状态明细通过 `list_agents` 和实时 snapshot/timeline 获取
+- 父代理 `Running/Queued` 时 child 更新只合并不抢占；turn 收尾消费未处理更新，否则有 live direct child 时进入 `WaitingAgents`。该状态收到更新或 child 独立无活动超时后原子入队一个合并续轮；内部 close/stop/test 等待使用基于订阅 predicate 的 `wait_until_idle`
 - 关闭父 agent 时按产品策略级联关闭子树；终态 repository commit 失败才把 actor 置为 Faulted 并拒绝新输入
 - `AgentRuntime` actor 是 session、pending input、active turn、cancel token 和 revision 的唯一状态机；durable session cursor 只由 `SessionEventHub` 的 canonical projection 分配，actor/repository 中的 sequence 仅是提交后可修复的 checkpoint 镜像；宿主只能通过 CAS `AgentCommit` 与 lifecycle saga 持久化/管理外部资源
 - 协作输入先由 runtime resolver 把模型提供的 target 解析为 `ResolvedAgentSessionTarget { root, agent, currentSession, ownerRevision }`。模型工具不接受 `sessionId`，也不得回退到 caller session；coordinator 解析 root，actor 在同一条 submit 命令内从 active turn、durable pending FIFO 或唯一 owned session 原子解析 current session。多个 idle 历史 session 没有 current 指针时必须报歧义，不能用 `lastTurn` 猜测，也不能隐式创建空 session
@@ -131,7 +131,7 @@ Skills 管理工具同样以 `workspaceRoot` 为边界，但写入面收窄到 `
 
 - 工具调用或 provider 返回 `end_turn = false` 只表示 `needsFollowUp`，不是完成条件
 - root turn 和 child agent 默认只强制 `wallClockMs = 1800000`
-- 模型采样、普通工具调用和 `wait_agent` 调用只记录 `modelSteps`、`toolCalls`、`waitCalls` 观测计数，不触发 step/tool/wait 限制
+- 模型采样和普通工具调用只记录 `modelSteps`、`toolCalls` 观测计数，不触发 step/tool 限制
 - pending interaction 等待期间仍受当前 turn 的 cancellation token 和 wall-clock 预算约束；用户停止时 pending interaction 被标记为 `cancelled`，wall-clock 到期时标记为 `expired`
 - agent tree 默认限制为 `maxAgents = 16`、`maxDepth = 3`
 - 预算耗尽属于 `TurnAborted(reason=budgetLimited)`，必须写入 `TurnBudgetLimited` trace，不得伪装为 `failed` 或 `completed`
@@ -141,8 +141,8 @@ Skills 管理工具同样以 `workspaceRoot` 为边界，但写入面收窄到 `
 
 Agent 协作 timeline 与状态分层：
 
-- 每个 agent session 的 timeline 只记录该 owner 的 message/part/tool/interaction，以及它主动执行的 spawn、wait、message、followup、close 等协作事实
-- child 的内部模型输出、工具、Todo、skill 和 context 只进入 child session；root Planner timeline 只保留 Planner 自身协作工具调用和 child 返回的交付摘要
+- 每个 agent session 的 timeline 只记录该 owner 的 message/part/tool/interaction，以及它主动执行的 spawn、message/followup、close 等协作事实
+- child 的内部模型输出、工具、Todo、skill 和 context 只进入 child session；root Planner timeline 只保留 Planner 自身后续动作和订阅 continuation 携带的紧凑 child 摘要
 - agent directory 是大会话级 latest snapshot，只保存身份、父子关系、状态、最近活动和 attention，供顶部切换入口与 `list_agents` 使用
 - 前端不得用 latest snapshot 渲染 timeline；同一个 agent 的多次状态变化必须在 timeline 中保留为多条独立事件
 - `AgentStateChanged` 只更新大会话目录，不进入单 agent session stream。`update_todo_list` 是 Codex `update_plan` 风格的完整 checklist replacement，不是 Plan Mode plan part；当前 agent workspace 只展示 snapshot 中最新 Todo，不在 timeline 中保留 Todo 卡片历史。实时事件与历史 snapshot 都必须携带 canonical typed 语义，Flutter 不得读取 raw `AgentEvent`。

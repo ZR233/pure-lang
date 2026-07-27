@@ -150,9 +150,10 @@ GUI 命令从仓库根目录调用，但所有 Flutter 子命令都以 `code/pur
 
 ## 2.10 本地数据版本
 
-Studio SQLite 使用单一基础 schema（当前 `user_version = 2`）；版本不匹配时删除并重建，
-不维护数据库 migration chain。`config.toml` 当前 schema 为 10，继续由 Studio runtime 单点校验与
-升级；本次事件协议不改变配置结构。Flutter 不实现第二套迁移逻辑。
+Studio SQLite 的新库使用单一基础 schema（当前 `user_version = 5`）；旧版本通过先备份、
+再执行事务 migration chain 升级，未来版本明确拒绝打开，任何迁移失败都不得删除或降级原
+数据库。`config.toml` 当前 schema 为 10，继续由 Studio runtime 单点校验与升级；Flutter
+不实现第二套迁移逻辑。
 
 ## 2.11 Workspace
 

@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use anyhow::{Context, Result, bail};
-use tokio::sync::MutexGuard;
+use tokio::sync::{MutexGuard, broadcast};
 
 use super::git::{RepositorySnapshot, inspect_repository, prepare_repository_for_task};
 use super::{CreateTaskRun, TaskRunPhase, TaskRunRecord, TaskWorktreeOwnerSnapshot};
@@ -45,6 +45,7 @@ pub(crate) struct TaskCoordinator {
     pub(super) allocation_lock: tokio::sync::Mutex<()>,
     pub(super) branch_mutation_lock: tokio::sync::Mutex<()>,
     branch_mutation_owner: Arc<()>,
+    terminal_fact_tx: broadcast::Sender<String>,
     #[cfg(test)]
     pub(super) design_after_commit_barrier: Mutex<Option<super::design::DesignCommitTestBarrier>>,
     #[cfg(test)]
@@ -82,12 +83,14 @@ pub(crate) struct BranchMutationGuard<'a> {
 
 impl TaskCoordinator {
     pub(crate) fn new(store: StudioStore) -> Self {
+        let (terminal_fact_tx, _) = broadcast::channel(256);
         Self {
             store,
             owned_process_leases: Mutex::new(HashMap::new()),
             allocation_lock: tokio::sync::Mutex::new(()),
             branch_mutation_lock: tokio::sync::Mutex::new(()),
             branch_mutation_owner: Arc::new(()),
+            terminal_fact_tx,
             #[cfg(test)]
             design_after_commit_barrier: Mutex::new(None),
             #[cfg(test)]
@@ -113,6 +116,14 @@ impl TaskCoordinator {
             #[cfg(test)]
             merge_failure_point: Mutex::new(None),
         }
+    }
+
+    pub(super) fn subscribe_terminal_facts(&self) -> broadcast::Receiver<String> {
+        self.terminal_fact_tx.subscribe()
+    }
+
+    pub(super) fn publish_terminal_fact(&self, task_run_id: &str) {
+        let _ = self.terminal_fact_tx.send(task_run_id.to_string());
     }
 
     pub(crate) async fn lock_branch_mutation(&self) -> BranchMutationGuard<'_> {

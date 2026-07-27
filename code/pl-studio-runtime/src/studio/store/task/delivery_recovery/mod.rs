@@ -180,9 +180,11 @@ impl StudioStore {
             let status: String = row.try_get("", "status")?;
             let reason: Option<String> = row.try_get("", "reason")?;
             let dispatch = match status.as_str() {
-                "queued" | "running" | "waiting_tool" | "waiting_interaction" => {
-                    DeliveryRecoveryDispatch::Pending
-                }
+                "queued"
+                | "running"
+                | "waiting_tool"
+                | "waiting_interaction"
+                | "waiting_agents" => DeliveryRecoveryDispatch::Pending,
                 "completed" => DeliveryRecoveryDispatch::Terminal {
                     outcome: pl_core::TurnOutcomeKind::Completed,
                     reason,

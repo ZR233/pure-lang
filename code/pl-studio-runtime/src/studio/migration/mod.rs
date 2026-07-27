@@ -475,7 +475,9 @@ fn agent_status_label(snapshot: &AgentSnapshot) -> String {
             AgentActivityState::Idle => "idle",
             AgentActivityState::Queued => "queued",
             AgentActivityState::Running => "running",
-            AgentActivityState::WaitingTool | AgentActivityState::WaitingInteraction => "waiting",
+            AgentActivityState::WaitingTool
+            | AgentActivityState::WaitingInteraction
+            | AgentActivityState::WaitingAgents => "waiting",
         },
     }
     .to_string()
