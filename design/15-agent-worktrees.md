@@ -14,6 +14,11 @@
 必须显式提交 delivery；planner 消费结果后再选择 merge 或 discard。worktree 在交付
 被合并、丢弃或任务终结后释放，不再与单次 agent turn 终态绑定。
 
+Task executor 只能由 `task_spawn_executor { taskName, message, ownedPaths }` 创建。
+`ownedPaths` 是强类型工具输入和 lifecycle 最终不变量，不再接受模型通过通用
+`spawn_agent.metadata` 声明；静态路径校验必须早于 Outcome、WorkUnit、worktree、session
+和 agent registry 的任何副作用。
+
 ## 与既有约定的关系
 
 本设计是 `01-overview.md` 与 `06-phaces.md` 中「未来沙箱」方向的落地，但在文件系统

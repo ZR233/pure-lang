@@ -143,6 +143,60 @@ void registerMarkdownRenderTests() {
     expect(find.textContaining('Analyze'), findsOneWidget);
   });
 
+  testWidgets('timeline renders all agent text without bubble decoration', (
+    tester,
+  ) async {
+    final message = TimelineMessage(
+      id: 'message-agent-text',
+      sessionId: 'session-1',
+      role: 'assistant',
+      createdAt: DateTime.fromMillisecondsSinceEpoch(0),
+    );
+    const parts = [
+      TimelinePart(
+        id: 'commentary-text',
+        messageId: 'message-agent-text',
+        type: TimelinePartType.text,
+        textChannel: TimelineTextChannel.commentary,
+        text: '过程输出',
+      ),
+      TimelinePart(
+        id: 'final-text',
+        messageId: 'message-agent-text',
+        type: TimelinePartType.text,
+        textChannel: TimelineTextChannel.finalAnswer,
+        text: '最终输出',
+      ),
+    ];
+
+    await tester.pumpWidget(
+      _localizedApp(
+        home: Scaffold(
+          body: TimelineView(
+            sessionId: 'session-1',
+            rows: timelineRowsFromMessages([message], parts: parts),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    for (final part in parts) {
+      final bubble = find.byKey(ValueKey(part.id));
+      final decoratedBox = tester.widget<DecoratedBox>(
+        find.descendant(of: bubble, matching: find.byType(DecoratedBox)).first,
+      );
+      final decoration = decoratedBox.decoration as BoxDecoration;
+      final padding = tester.widget<Padding>(
+        find.descendant(of: bubble, matching: find.byType(Padding)).first,
+      );
+
+      expect(decoration.color, Colors.transparent);
+      expect(decoration.border, isNull);
+      expect(padding.padding, EdgeInsets.zero);
+    }
+  });
+
   testWidgets('timeline groups consecutive synthetic commentary rows', (
     tester,
   ) async {

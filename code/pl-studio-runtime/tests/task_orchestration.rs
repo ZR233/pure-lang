@@ -9,7 +9,8 @@ use pl_studio_runtime::{
     StudioSubmitPromptOptions, StudioSubmitPromptRequest,
 };
 use task_fixture::{
-    DESIGN_PATH, FEATURE_CONTENT, FEATURE_PATH, TaskFlowFixture, git_output, normalized_text,
+    DESIGN_PATH, FEATURE_CONTENT, FEATURE_PATH, PARENT_HISTORY_MARKER, TaskFlowFixture, git_output,
+    normalized_text,
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -28,8 +29,10 @@ async fn run_offline_task_flow() -> Result<()> {
         .runtime
         .submit_prompt(StudioSubmitPromptRequest {
             session_id: fixture.session_id.clone(),
-            prompt: "Create the offline task integration fixture and carry it through review."
-                .to_string(),
+            prompt: format!(
+                "Create the offline task integration fixture and carry it through review. \
+                 Unique parent marker: {PARENT_HISTORY_MARKER}"
+            ),
             attachment_ids: Vec::new(),
             options: StudioSubmitPromptOptions::default(),
         })
