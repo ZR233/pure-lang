@@ -141,6 +141,7 @@ fn build_gui_with_version(options: BuildGuiOptions, release_version: Option<&str
     print_context(&workspace_root, &app_dir);
 
     let build_result = (|| {
+        prepare_pubspec_lock_for_active_hosted_url(&lock_path)?;
         run_flutter(&workspace_root, &app_dir, &["pub", "get"], DemoMode::Native)?;
         match pubspec_lock::classify_change(&lock_path, original_lock.as_deref())? {
             LockfileChange::Unchanged => {}
@@ -180,6 +181,21 @@ fn build_gui_with_version(options: BuildGuiOptions, release_version: Option<&str
         (Err(error), _) => Err(error),
         (Ok(()), Err(error)) => Err(error),
     }
+}
+
+fn prepare_pubspec_lock_for_active_hosted_url(lock_path: &Path) -> Result<()> {
+    let hosted_url = match std::env::var("PUB_HOSTED_URL") {
+        Ok(hosted_url) => hosted_url,
+        Err(std::env::VarError::NotPresent) => return Ok(()),
+        Err(std::env::VarError::NotUnicode(_)) => {
+            bail!("PUB_HOSTED_URL must contain valid Unicode")
+        }
+    };
+
+    // Pub treats the hosted URL as part of a package's source identity. Align the
+    // temporary lockfile before resolution so switching mirrors does not upgrade
+    // otherwise locked dependencies.
+    pubspec_lock::rewrite_hosted_urls(lock_path, &hosted_url)
 }
 
 fn print_context(workspace_root: &Path, app_dir: &Path) {

@@ -32,6 +32,22 @@ pub(crate) fn restore_optional(path: &Path, content: Option<&str>) -> Result<()>
     Ok(())
 }
 
+pub(crate) fn rewrite_hosted_urls(path: &Path, hosted_url: &str) -> Result<()> {
+    let Some(content) = read_optional(path)? else {
+        return Ok(());
+    };
+    let mut value: Value =
+        serde_norway::from_str(&content).context("failed to parse pubspec.lock as YAML")?;
+    if !set_hosted_urls(&mut value, hosted_url) {
+        return Ok(());
+    }
+
+    let content =
+        serde_norway::to_string(&value).context("failed to serialize pubspec.lock as YAML")?;
+    fs::write(path, content)
+        .with_context(|| format!("failed to rewrite hosted URLs in {}", path.display()))
+}
+
 pub(crate) fn classify_change(path: &Path, original: Option<&str>) -> Result<LockfileChange> {
     let current = read_optional(path)?;
     if current.as_deref() == original {
@@ -46,6 +62,41 @@ pub(crate) fn classify_change(path: &Path, original: Option<&str>) -> Result<Loc
         "flutter pub get changed pubspec.lock beyond hosted source URLs. \
          Run flutter pub get manually and review the lockfile before building release artifacts."
     )
+}
+
+fn set_hosted_urls(value: &mut Value, hosted_url: &str) -> bool {
+    let Value::Mapping(root) = value else {
+        return false;
+    };
+    let Some(Value::Mapping(packages)) = root.get_mut("packages") else {
+        return false;
+    };
+
+    let mut changed = false;
+    for package in packages.values_mut() {
+        let Value::Mapping(package) = package else {
+            continue;
+        };
+        let is_hosted = matches!(
+            package.get("source"),
+            Some(Value::String(source)) if source == "hosted"
+        );
+        if !is_hosted {
+            continue;
+        }
+        let Some(Value::Mapping(description)) = package.get_mut("description") else {
+            continue;
+        };
+        let Some(url) = description.get_mut("url") else {
+            continue;
+        };
+        let replacement = Value::String(hosted_url.to_owned());
+        if *url != replacement {
+            *url = replacement;
+            changed = true;
+        }
+    }
+    changed
 }
 
 fn normalized_lockfile(content: Option<&str>) -> Result<Option<Value>> {
@@ -125,6 +176,46 @@ packages:
 "#;
         fs::write(&path, current)?;
         assert!(classify_change(&path, Some(original)).is_err());
+        let _ = fs::remove_file(path);
+        Ok(())
+    }
+
+    #[test]
+    fn rewrites_only_hosted_package_urls() -> Result<()> {
+        let path = temp_lockfile_path("rewrite-hosted-urls");
+        let original = r#"
+packages:
+  async:
+    description:
+      name: async
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.13.0"
+  local_package:
+    description:
+      path: "../local_package"
+      url: "https://example.invalid/metadata"
+    source: path
+    version: "1.0.0"
+"#;
+        fs::write(&path, original)?;
+
+        rewrite_hosted_urls(&path, "https://mirror.example")?;
+
+        let rewritten = fs::read_to_string(&path)?;
+        let value: Value = serde_norway::from_str(&rewritten)?;
+        assert_eq!(
+            value["packages"]["async"]["description"]["url"],
+            "https://mirror.example"
+        );
+        assert_eq!(
+            value["packages"]["local_package"]["description"]["url"],
+            "https://example.invalid/metadata"
+        );
+        assert_eq!(
+            classify_change(&path, Some(original))?,
+            LockfileChange::HostedUrlsOnly
+        );
         let _ = fs::remove_file(path);
         Ok(())
     }
