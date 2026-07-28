@@ -10,6 +10,14 @@
 - 涉及架构、接口、协议、运行时行为或长期约定时，先更新 `design/*`，实现后再回看文档是否一致。
 - 提 PR 或分支时，优先推送到用户账号 fork，并优先向 fork 源的默认分支提 PR。
 
+### Git 提交与 PR 标题
+
+- commit subject 和 PR 标题必须使用 Conventional Commit 格式：`<type>(<scope>): <description>`；`scope` 可省略，但应优先填写稳定的项目范围，例如 `studio`、`agent-runtime` 或 `release`。
+- 允许的 `type` 与 PR Quality Gate 保持一致：`build`、`chore`、`ci`、`docs`、`feat`、`fix`、`perf`、`refactor`、`revert`、`test`。
+- 中文描述可以使用，但类型、可选 scope 和英文冒号必须保留。例如：`fix(studio): 恢复计划确认并防止重复唤醒`。
+- 用户可见的缺陷修复优先使用 `fix`，新能力优先使用 `feat`；破坏性变更使用 `!` 或 `BREAKING CHANGE` footer，确保 Release Please 能正确计算版本。
+- squash 合并前必须同时检查 PR 标题和实际 commit subject。即使 PR 标题正确，也不能保留不符合规范的单提交标题；最终进入默认分支的 squash commit 必须可被 Release Please 解析。
+
 ## 项目结构与入口
 
 - Rust crate 名称统一以 `pl-` 开头，例如 `pl-core`、`pl-model`、`pl-studio-bridge`。
