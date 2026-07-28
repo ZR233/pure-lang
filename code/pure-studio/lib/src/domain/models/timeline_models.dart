@@ -418,7 +418,11 @@ TimelinePart timelinePartFromSnapshot(
   TimelinePartSnapshot snapshot, {
   TimelinePartOverlay? overlay,
 }) {
-  final text = overlay?.values['text'] ?? snapshot.text;
+  final text = snapshot.type == TimelinePartType.reasoning
+      ? overlay?.values['reasoning.summary'] ??
+            overlay?.values['text'] ??
+            snapshot.text
+      : overlay?.values['text'] ?? snapshot.text;
   final planContent = overlay?.values['planContent'] ?? snapshot.planContent;
   final snapshotTool = snapshot.tool;
   final tool = snapshotTool?.copyWith(

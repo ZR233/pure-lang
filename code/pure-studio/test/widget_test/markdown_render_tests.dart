@@ -525,6 +525,64 @@ void registerMarkdownRenderTests() {
   });
 
   testWidgets(
+    'timeline shows streaming reasoning content instead of active placeholder',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 700);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final now = DateTime.fromMillisecondsSinceEpoch(0);
+      final message = TimelineMessage(
+        id: 'message-reasoning-delta',
+        sessionId: 'session-1',
+        role: 'assistant',
+        createdAt: now,
+      );
+      final part = timelinePartFromSnapshot(
+        TimelinePartSnapshot(
+          id: 'reasoning-delta',
+          messageId: message.id,
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          type: TimelinePartType.reasoning,
+          order: 0,
+          revision: 0,
+          text: '',
+          status: 'streaming',
+          createdAt: now,
+          updatedAt: now,
+        ),
+        overlay: const TimelinePartOverlay(
+          values: {'reasoning.summary': '正在核对角色设置、状态类型与测试夹具。'},
+          lastRevisions: {'reasoning.summary': 1},
+        ),
+      );
+
+      await tester.pumpWidget(
+        _timelineApp(
+          locale: const Locale('zh', 'Hans'),
+          home: Scaffold(
+            body: SizedBox(
+              width: 980,
+              height: 520,
+              child: TimelineView(
+                sessionId: 'session-1',
+                turnPhase: TurnPhase.streaming,
+                rows: timelineRowsFromMessages([message], parts: [part]),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('正在核对角色设置、状态类型与测试夹具。'), findsOneWidget);
+      expect(find.text('思考中'), findsNothing);
+    },
+  );
+
+  testWidgets(
     'timeline groups consecutive reasoning and refreshes one current summary',
     (tester) async {
       tester.view.physicalSize = const Size(1280, 700);
