@@ -1,36 +1,34 @@
-use crate::{
-    InteractionKind, InteractionPayload, InteractionRequest, InteractionScope, InteractionStatus,
-    PlanLifecycleEvent, PlanLifecycleState, SessionEventFact, SessionEventKind,
-};
+use crate::{PlanLifecycleEvent, PlanLifecycleState, SessionEventFact, SessionEventKind};
 use anyhow::Context;
 use pl_core::{
     AgentActivityState, AgentCommitObserver, AgentCommittedEvent, AgentLifecycleState,
     AgentRuntimeEventKind, AgentRuntimeHandle, AgentSnapshot, SessionId, TurnOutcomeKind,
 };
-use pl_trace::{TraceEvent, TraceEventKind, TracePart, TracePartKind};
+use pl_trace::{TraceEvent, TraceEventKind, TracePartKind};
 use tokio::sync::{mpsc, watch};
 
 use crate::studio::{
     InteractionRuntime, StudioProductEventRuntime, StudioRuntimeState, StudioStore,
 };
 
-use super::StudioContinuationService;
 use super::resources::StudioAgentResources;
+use super::{StudioContinuationService, StudioPlanConfirmationProjector, wait_for_runtime};
 
 /// 把已提交的 framework event/trace 投影到 Studio durable event stream。
 #[derive(Clone)]
 pub(in crate::studio) struct StudioAgentCommitObserver {
     sender: mpsc::UnboundedSender<AgentCommittedEvent>,
     runtime: watch::Sender<Option<AgentRuntimeHandle>>,
+    plan_confirmations: StudioPlanConfirmationProjector,
     runtime_state: StudioRuntimeState,
 }
 
 struct StudioAgentEventProjector {
     store: StudioStore,
-    interactions: InteractionRuntime,
     resources: StudioAgentResources,
     continuations: StudioContinuationService,
     product_events: StudioProductEventRuntime,
+    plan_confirmations: StudioPlanConfirmationProjector,
     runtime: watch::Receiver<Option<AgentRuntimeHandle>>,
 }
 
@@ -45,12 +43,18 @@ impl StudioAgentCommitObserver {
     ) -> Self {
         let (runtime, runtime_receiver) = watch::channel(None);
         let (sender, mut receiver) = mpsc::unbounded_channel();
+        let plan_confirmations = StudioPlanConfirmationProjector::new(
+            store.clone(),
+            interactions.clone(),
+            product_events.clone(),
+            runtime_receiver.clone(),
+        );
         let projector = StudioAgentEventProjector {
             store,
-            interactions,
             resources,
             continuations,
             product_events,
+            plan_confirmations: plan_confirmations.clone(),
             runtime: runtime_receiver,
         };
         tokio::spawn(async move {
@@ -63,12 +67,16 @@ impl StudioAgentCommitObserver {
         Self {
             sender,
             runtime,
+            plan_confirmations,
             runtime_state,
         }
     }
 
     pub(super) async fn attach_runtime(&self, runtime: AgentRuntimeHandle) {
         self.runtime.send_replace(Some(runtime));
+        if let Err(error) = self.plan_confirmations.recover_missing().await {
+            tracing::warn!("failed to recover pending plan confirmations: {error:#}");
+        }
     }
 
     pub(super) async fn detach_runtime(&self) {
@@ -161,7 +169,9 @@ impl StudioAgentEventProjector {
                 self.emit_agent_snapshot(studio_session_id.as_deref(), snapshot)
                     .await?;
             }
-            AgentRuntimeEventKind::TurnFinished { outcome, snapshot }
+            AgentRuntimeEventKind::TurnFinished {
+                outcome, snapshot, ..
+            }
             | AgentRuntimeEventKind::RecoveryCancelledTurn { outcome, snapshot } => {
                 if let Some(session_id) = studio_session_id.as_deref() {
                     // continuation 是 durable task orchestration，不得被后续 trace/UI
@@ -231,7 +241,8 @@ impl StudioAgentEventProjector {
         for trace in traces {
             match trace.kind {
                 TraceEventKind::TracePartCompleted { item } if item.kind == TracePartKind::Plan => {
-                    self.project_plan_confirmation(agent_id, studio_session_id, &item)
+                    self.plan_confirmations
+                        .project(agent_id, studio_session_id, &item)
                         .await?;
                 }
                 TraceEventKind::TracePartStarted { .. }
@@ -244,113 +255,6 @@ impl StudioAgentEventProjector {
                 | TraceEventKind::EnabledToolsRecorded { .. } => {}
             }
         }
-        Ok(())
-    }
-
-    async fn project_plan_confirmation(
-        &self,
-        agent_id: &str,
-        studio_session_id: &str,
-        plan: &TracePart,
-    ) -> anyhow::Result<()> {
-        if plan.content.trim().is_empty() {
-            return Ok(());
-        }
-        let metadata = self
-            .store
-            .agent_turn_metadata(agent_id, &plan.turn_id)
-            .await?;
-        if metadata
-            .as_ref()
-            .and_then(|metadata| metadata.get("historyPolicy"))
-            .and_then(serde_json::Value::as_str)
-            == Some("ephemeral")
-        {
-            return Ok(());
-        }
-        let interaction_id = format!("plan-confirmation-{}", plan.item_id);
-        if self
-            .store
-            .read_interaction(&interaction_id)
-            .await?
-            .is_some()
-        {
-            return Ok(());
-        }
-        let now = crate::studio::ids::unix_seconds();
-        self.record_facts(
-            agent_id,
-            studio_session_id,
-            vec![SessionEventFact::durable(
-                Some(agent_id.to_string()),
-                Some(plan.turn_id.clone()),
-                now,
-                SessionEventKind::PlanChanged {
-                    event: PlanLifecycleEvent {
-                        plan_id: plan.item_id.clone(),
-                        state: PlanLifecycleState::PendingConfirmation,
-                        turn_id: Some(plan.turn_id.clone()),
-                        reason: None,
-                        updated_at: now,
-                    },
-                },
-            )],
-        )
-        .await?;
-        let interaction = InteractionRequest {
-            interaction_id,
-            kind: InteractionKind::PlanConfirmation,
-            status: InteractionStatus::Pending,
-            scope: InteractionScope {
-                session_id: studio_session_id.to_string(),
-                turn_id: plan.turn_id.clone(),
-                item_id: Some(plan.item_id.clone()),
-                tool_id: None,
-                agent_path: None,
-            },
-            payload: InteractionPayload::PlanConfirmation {
-                plan_id: plan.item_id.clone(),
-                content: plan.content.clone(),
-            },
-            created_at: now,
-            updated_at: now,
-            resolved_at: None,
-            resolution: None,
-        };
-        let runtime = self.runtime.clone();
-        let session_id = studio_session_id.to_string();
-        let owner_agent_id = agent_id.to_string();
-        let emitter: crate::studio::InteractionEmitter = std::sync::Arc::new(move |interaction| {
-            let runtime = runtime.clone();
-            let session_id = session_id.clone();
-            let owner_agent_id = owner_agent_id.clone();
-            Box::pin(async move {
-                let runtime = wait_for_runtime(runtime).await?;
-                let target_agent = pl_core::AgentId::new(owner_agent_id)?;
-                let target_session = SessionId::new(session_id)?;
-                tokio::spawn(async move {
-                    if let Err(error) = runtime
-                        .record_session_facts(
-                            target_agent,
-                            target_session,
-                            vec![SessionEventFact::durable(
-                                None,
-                                Some(interaction.scope.turn_id.clone()),
-                                interaction.updated_at,
-                                SessionEventKind::InteractionChanged {
-                                    event: Box::new(crate::InteractionChangedEvent { interaction }),
-                                },
-                            )],
-                        )
-                        .await
-                    {
-                        tracing::warn!("failed to record Studio interaction fact: {error}");
-                    }
-                });
-                Ok(())
-            })
-        });
-        self.interactions.create(interaction, emitter).await?;
         Ok(())
     }
 
@@ -452,20 +356,6 @@ impl StudioAgentEventProjector {
             )
             .await
             .map_err(Into::into)
-    }
-}
-
-async fn wait_for_runtime(
-    mut runtime: watch::Receiver<Option<AgentRuntimeHandle>>,
-) -> anyhow::Result<AgentRuntimeHandle> {
-    loop {
-        if let Some(runtime) = runtime.borrow_and_update().clone() {
-            return Ok(runtime);
-        }
-        runtime
-            .changed()
-            .await
-            .map_err(|_| anyhow::anyhow!("Studio agent runtime attachment channel closed"))?;
     }
 }
 

@@ -87,6 +87,10 @@ direct-child subscription、未消费 live update 和 timer 不单独持久化�
 批次边界不同，同一产品事实也不会产生第二个 turn。恢复中的 `WaitingAgents` 会重新挂载
 timeout；已有 queued/running Planner 不重复激活。
 
+Studio observer attach 后还会修复历史 Plan 投影缺口：以最新完整 Plan trace 为唯一内容证据，
+仅在确认 interaction 缺失、没有活动 TaskRun、且该 plan 尚未进入实施或终态时补建 durable
+plan lifecycle 与 confirmation。该步骤不重放模型 turn，也不修改用户项目资源。
+
 ## 17.6 策略与协作
 
 `AgentExecutionPolicy` 数据化描述可见工具、允许 effect、协作目标和 turn finalizer。
@@ -99,6 +103,9 @@ timeout；已有 queued/running Planner 不重复激活。
 状态，必须等产品 durable delivery/review/merge/recovery signal 才形成可执行 wake。父代理
 `Running/Queued` 时只合并更新不抢占；无更新但仍有 live direct child 时进入
 `WaitingAgents`，由 meaningful update 或独立 inactivity timeout 原子入队 synthetic wake。
+如果父 turn 通过 execution policy 要求的 finalizer 工具成功完成，`TurnFinished` 必须携带
+该 finalizer，并把执行期间已缓冲的 child signal ids 持久化为 accepted wake receipt；该
+finalizer 是当前阶段的消费屏障，旧信号不能再排入续轮，屏障之后的新事实仍按正常规则处理。
 
 spawn/close 采用 prepare、durable transition、activate/commit、失败逆序补偿的 saga。
 补偿无法完成时保留诊断事实并把 agent 置为 `Faulted`。

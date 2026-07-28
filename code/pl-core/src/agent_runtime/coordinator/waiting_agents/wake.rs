@@ -64,7 +64,7 @@ pub(super) async fn wake_parent(
         .unwrap_or(false)
     {
         for update in updates {
-            state.pending.remove(&update.signal_id);
+            state.remove_pending(&update.signal_id);
         }
         return;
     }
@@ -101,7 +101,7 @@ pub(super) async fn wake_parent(
     {
         Ok(_) => {
             for update in updates {
-                state.pending.remove(&update.signal_id);
+                state.remove_pending(&update.signal_id);
             }
             state.wake_in_flight = true;
             invalidate_timers(state);

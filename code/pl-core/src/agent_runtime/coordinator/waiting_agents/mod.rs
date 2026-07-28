@@ -14,12 +14,13 @@ use wake::{has_live_children, remember_signal, wake_parent};
 use super::super::{
     AgentActivityState, AgentId, AgentLifecycleState, AgentRuntimeEvent, AgentRuntimeEventKind,
     AgentRuntimeHandle, AgentSnapshot, AgentUpdateEnvelope, AgentUpdateKind, AgentWakePolicy,
-    AgentWakeReason,
+    AgentWakeReason, TurnId, TurnOutcomeKind,
 };
 
 #[derive(Default)]
 struct ParentWaitState {
     pending: BTreeMap<String, AgentUpdateEnvelope>,
+    pending_turns: BTreeMap<String, TurnId>,
     seen_signals: BTreeSet<String>,
     seen_order: VecDeque<String>,
     last_meaningful_updates: BTreeMap<AgentId, Instant>,
@@ -27,6 +28,13 @@ struct ParentWaitState {
     product_terminal: BTreeSet<AgentId>,
     waiting_epoch: u64,
     wake_in_flight: bool,
+}
+
+impl ParentWaitState {
+    fn remove_pending(&mut self, signal_id: &str) {
+        self.pending.remove(signal_id);
+        self.pending_turns.remove(signal_id);
+    }
 }
 
 pub(super) fn spawn_waiting_agents_supervisor(
@@ -111,6 +119,10 @@ async fn handle_update(
     {
         return;
     }
+    let Ok(parent) = runtime.agent_events.snapshot(&parent_id) else {
+        return;
+    };
+    let active_turn_id = parent.active_turn_id.clone();
     let state = parents.entry(parent_id.clone()).or_default();
     if !remember_signal(state, &update.signal_id) {
         return;
@@ -121,11 +133,13 @@ async fn handle_update(
     state
         .last_meaningful_updates
         .insert(child_id.clone(), Instant::now());
+    if let Some(turn_id) = active_turn_id {
+        state
+            .pending_turns
+            .insert(update.signal_id.clone(), turn_id);
+    }
     state.pending.insert(update.signal_id.clone(), update);
 
-    let Ok(parent) = runtime.agent_events.snapshot(&parent_id) else {
-        return;
-    };
     if parent.activity == AgentActivityState::WaitingAgents {
         arm_child_timer(
             runtime,
@@ -171,8 +185,18 @@ async fn handle_runtime_event(
         invalidate_timers(state);
     }
     match event.kind {
-        AgentRuntimeEventKind::TurnFinished { .. }
-        | AgentRuntimeEventKind::RecoveryCancelledTurn { .. } => {
+        AgentRuntimeEventKind::TurnFinished {
+            outcome,
+            finalized_with_tool,
+            ..
+        } => {
+            state.wake_in_flight = false;
+            if outcome.kind == TurnOutcomeKind::Completed && finalized_with_tool.is_some() {
+                accept_finalized_updates(runtime, parents, &parent_id, outcome.turn_id).await;
+            }
+            settle_parent(runtime, parents, parent_id).await;
+        }
+        AgentRuntimeEventKind::RecoveryCancelledTurn { .. } => {
             state.wake_in_flight = false;
             settle_parent(runtime, parents, parent_id).await;
         }
@@ -190,6 +214,48 @@ async fn handle_runtime_event(
         | AgentRuntimeEventKind::SessionOpened { .. }
         | AgentRuntimeEventKind::Faulted { .. } => {}
     }
+}
+
+async fn accept_finalized_updates(
+    runtime: &AgentRuntimeHandle,
+    parents: &mut BTreeMap<AgentId, ParentWaitState>,
+    parent_id: &AgentId,
+    turn_id: TurnId,
+) {
+    let Some(state) = parents.get(parent_id) else {
+        return;
+    };
+    let signal_ids = finalized_signal_ids(state, &turn_id);
+    if signal_ids.is_empty() {
+        return;
+    }
+    match runtime
+        .accept_wake_signals(parent_id.clone(), turn_id, signal_ids.clone())
+        .await
+    {
+        Ok(()) => {
+            let state = parents.entry(parent_id.clone()).or_default();
+            for signal_id in signal_ids {
+                state.remove_pending(&signal_id);
+            }
+        }
+        Err(error) => {
+            tracing::warn!(
+                parent_agent_id = %parent_id,
+                %error,
+                "failed to accept child updates at finalization barrier"
+            );
+        }
+    }
+}
+
+fn finalized_signal_ids(state: &ParentWaitState, turn_id: &TurnId) -> Vec<String> {
+    state
+        .pending_turns
+        .iter()
+        .filter(|(_, pending_turn_id)| *pending_turn_id == turn_id)
+        .map(|(signal_id, _)| signal_id.clone())
+        .collect()
 }
 
 async fn settle_parent(
@@ -395,5 +461,60 @@ fn event_snapshot(event: &AgentRuntimeEvent) -> AgentSnapshot {
         | AgentRuntimeEventKind::TurnFinished { snapshot, .. }
         | AgentRuntimeEventKind::RecoveryCancelledTurn { snapshot, .. }
         | AgentRuntimeEventKind::Faulted { snapshot, .. } => snapshot.clone(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::AgentRoleId;
+
+    use super::*;
+
+    #[test]
+    fn finalized_signal_ids_only_returns_signals_observed_during_that_turn() {
+        let turn_1 = TurnId::new("turn-1").unwrap();
+        let turn_2 = TurnId::new("turn-2").unwrap();
+        let mut state = ParentWaitState::default();
+        state
+            .pending_turns
+            .insert("signal-a".to_string(), turn_1.clone());
+        state.pending_turns.insert("signal-b".to_string(), turn_2);
+        state
+            .pending
+            .insert("signal-c".to_string(), pending_update("signal-c"));
+
+        assert_eq!(finalized_signal_ids(&state, &turn_1), vec!["signal-a"]);
+    }
+
+    fn pending_update(signal_id: &str) -> AgentUpdateEnvelope {
+        let agent_id = AgentId::new("child").unwrap();
+        AgentUpdateEnvelope {
+            signal_id: signal_id.to_string(),
+            parent_agent_id: AgentId::new("parent").unwrap(),
+            agent_id: agent_id.clone(),
+            agent_revision: 1,
+            event_sequence: 1,
+            occurred_at: 1,
+            kind: AgentUpdateKind::ProgressReported,
+            snapshot: AgentSnapshot {
+                identity: super::super::super::AgentIdentity {
+                    id: agent_id,
+                    parent_id: Some(AgentId::new("parent").unwrap()),
+                    role: AgentRoleId::new("worker").unwrap(),
+                    depth: 1,
+                },
+                wake_policy: AgentWakePolicy::RuntimeTerminal,
+                lifecycle: AgentLifecycleState::Active,
+                activity: AgentActivityState::Idle,
+                active_turn_id: None,
+                active_session_id: None,
+                pending_inputs: 0,
+                last_turn: None,
+                revision: 1,
+                event_sequence: 1,
+                updated_at: 1,
+            },
+            summary: None,
+        }
     }
 }

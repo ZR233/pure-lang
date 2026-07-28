@@ -44,12 +44,16 @@ where
             .take()
             .expect("validated active turn must still be present");
         let cancelled = active.cancellation_requested || completion.cancelled;
+        let finalized_with_tool = completion.finalized_with_tool;
         let (outcome, _, result) = turn_outcome(
             active.turn_id.clone(),
             active.session_id.clone(),
             completion.result,
             cancelled,
         );
+        let finalized_with_tool = (outcome.kind == super::super::TurnOutcomeKind::Completed)
+            .then_some(finalized_with_tool)
+            .flatten();
         let mut next = self.state.clone();
         if let Some(session) = next.sessions.get_mut(&active.session_id) {
             session.trace_sequence = session.trace_sequence.max(completion.next_trace_sequence);
@@ -74,6 +78,7 @@ where
                 AgentRuntimeEventKind::TurnFinished {
                     outcome: outcome.clone(),
                     snapshot,
+                    finalized_with_tool: finalized_with_tool.clone(),
                 }
             })
             .await;

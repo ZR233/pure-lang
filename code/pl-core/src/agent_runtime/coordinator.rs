@@ -80,6 +80,12 @@ pub(crate) enum CoordinatorCommand {
         signal_ids: Vec<String>,
         reply: oneshot::Sender<AgentRuntimeResult<bool>>,
     },
+    AcceptWakeSignals {
+        agent_id: AgentId,
+        turn_id: TurnId,
+        signal_ids: Vec<String>,
+        reply: oneshot::Sender<AgentRuntimeResult<()>>,
+    },
     List {
         reply: oneshot::Sender<AgentRuntimeResult<Vec<AgentSnapshot>>>,
     },
@@ -276,6 +282,23 @@ async fn run_coordinator<H>(
                     &agent_id,
                     ActorCommand::WakeAccepted {
                         wake_id,
+                        signal_ids,
+                        reply,
+                    },
+                )
+                .await;
+            }
+            CoordinatorCommand::AcceptWakeSignals {
+                agent_id,
+                turn_id,
+                signal_ids,
+                reply,
+            } => {
+                route(
+                    &actors,
+                    &agent_id,
+                    ActorCommand::AcceptWakeSignals {
+                        turn_id,
                         signal_ids,
                         reply,
                     },
@@ -515,6 +538,9 @@ fn reject_missing(command: ActorCommand, agent_id: AgentId) {
             let _ = reply.send(Err(error));
         }
         ActorCommand::WakeAccepted { reply, .. } => {
+            let _ = reply.send(Err(error));
+        }
+        ActorCommand::AcceptWakeSignals { reply, .. } => {
             let _ = reply.send(Err(error));
         }
         ActorCommand::EnterWaitingAgents { reply } => {

@@ -226,6 +226,23 @@ impl AgentRuntimeHandle {
         receive(receiver).await?
     }
 
+    pub(crate) async fn accept_wake_signals(
+        &self,
+        agent_id: AgentId,
+        turn_id: TurnId,
+        signal_ids: Vec<String>,
+    ) -> AgentRuntimeResult<()> {
+        let (reply, receiver) = oneshot::channel();
+        self.send(CoordinatorCommand::AcceptWakeSignals {
+            agent_id,
+            turn_id,
+            signal_ids,
+            reply,
+        })
+        .await?;
+        receive(receiver).await?
+    }
+
     /// 等待 agent 进入 Idle 且队列为空；使用提交后事件订阅，不占用 actor waiter。
     pub async fn wait_until_idle(&self, agent_id: AgentId) -> AgentRuntimeResult<AgentWaitResult> {
         let mut receiver = self.agent_events.subscribe_snapshots();

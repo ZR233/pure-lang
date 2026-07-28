@@ -453,6 +453,7 @@ async fn product_gated_runtime_terminal_requires_product_signal() {
         kind: AgentRuntimeEventKind::TurnFinished {
             outcome,
             snapshot: child.clone(),
+            finalized_with_tool: None,
         },
     });
 
@@ -903,6 +904,67 @@ async fn child_update_does_not_preempt_running_parent() {
     let messages = host.turn_factory.prepared_messages.lock().unwrap().clone();
     assert!(messages[1].contains("<agentWakeBatch>"));
     runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn finalizer_receipt_filters_replayed_signal_across_restart() {
+    let repository = TestRepository::empty();
+    let host = TestHost::new(repository.clone(), FactoryMode::Fail);
+    let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
+    let handle = runtime.handle();
+    let root = AgentId::new("root").unwrap();
+    handle
+        .register(registration("root", "root-chat"))
+        .await
+        .unwrap();
+    let turn_id = TurnId::new("turn-finalized-plan").unwrap();
+    handle
+        .accept_wake_signals(
+            root.clone(),
+            turn_id.clone(),
+            vec!["delivery:finalized".to_string()],
+        )
+        .await
+        .unwrap();
+    let receipt = repository
+        .state(&root)
+        .accepted_wakes
+        .into_values()
+        .find(|receipt| {
+            receipt
+                .signal_ids
+                .iter()
+                .any(|signal_id| signal_id == "delivery:finalized")
+        })
+        .unwrap();
+    assert_eq!(receipt.turn_id, turn_id);
+    runtime.shutdown().await.unwrap();
+
+    let restored_host = TestHost::new(repository.clone(), FactoryMode::Fail);
+    let restored = AgentRuntime::start(restored_host.clone(), test_options())
+        .await
+        .unwrap();
+    let duplicate = restored
+        .handle()
+        .submit(
+            root.clone(),
+            AgentSubmitRequest::start(SessionId::new("root-chat").unwrap(), "replayed signal")
+                .with_wake_id(AgentWakeId::new("agent-wake:root:replayed").unwrap())
+                .with_wake_signal_ids(vec!["delivery:finalized".to_string()]),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(duplicate, turn_id);
+    assert!(
+        restored_host
+            .turn_factory
+            .prepared_messages
+            .lock()
+            .unwrap()
+            .is_empty()
+    );
+    restored.shutdown().await.unwrap();
 }
 
 #[tokio::test]

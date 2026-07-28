@@ -64,6 +64,11 @@ pub(crate) enum ActorCommand {
         signal_ids: Vec<String>,
         reply: oneshot::Sender<AgentRuntimeResult<bool>>,
     },
+    AcceptWakeSignals {
+        turn_id: TurnId,
+        signal_ids: Vec<String>,
+        reply: oneshot::Sender<AgentRuntimeResult<()>>,
+    },
     EnterWaitingAgents {
         reply: oneshot::Sender<AgentRuntimeResult<()>>,
     },
@@ -246,6 +251,14 @@ where
                                 .is_some();
                             let _ = reply.send(Ok(accepted));
                         }
+                        ActorCommand::AcceptWakeSignals {
+                            turn_id,
+                            signal_ids,
+                            reply,
+                        } => {
+                            let result = self.accept_wake_signals(turn_id, signal_ids).await;
+                            let _ = reply.send(result);
+                        }
                         ActorCommand::EnterWaitingAgents { reply } => {
                             let result = self.enter_waiting_agents().await;
                             let _ = reply.send(result);
@@ -404,6 +417,43 @@ where
             accepted_turn.get_or_insert_with(|| receipt.turn_id.clone());
         }
         accepted_turn
+    }
+
+    async fn accept_wake_signals(
+        &mut self,
+        turn_id: TurnId,
+        mut signal_ids: Vec<String>,
+    ) -> AgentRuntimeResult<()> {
+        signal_ids.retain(|signal_id| !signal_id.trim().is_empty());
+        signal_ids.sort();
+        signal_ids.dedup();
+        if signal_ids.is_empty() || self.accepted_wake_turn(None, &signal_ids).is_some() {
+            return Ok(());
+        }
+        let Ok(wake_id) = AgentWakeId::new(format!(
+            "agent-wake-finalizer:{}:{turn_id}",
+            self.state.snapshot.identity.id
+        )) else {
+            return Ok(());
+        };
+        let accepted_at = unix_timestamp();
+        let mut next = self.state.clone();
+        let receipt = next
+            .accepted_wakes
+            .entry(wake_id.clone())
+            .or_insert_with(|| AcceptedAgentWake {
+                wake_id,
+                turn_id: turn_id.clone(),
+                signal_ids: Vec::new(),
+                accepted_at,
+            });
+        receipt.signal_ids.extend(signal_ids);
+        receipt.signal_ids.sort();
+        receipt.signal_ids.dedup();
+        self.commit_transition(next, Vec::new(), |snapshot| {
+            AgentRuntimeEventKind::StateChanged { snapshot }
+        })
+        .await
     }
 
     fn resolve_current_session_target(
@@ -805,6 +855,7 @@ where
                     start_revision,
                     session: None,
                     result: Err(format!("turn task join failed: {error}")),
+                    finalized_with_tool: None,
                     cancelled: completion_cancellation.is_cancelled() || error.is_cancelled(),
                     next_trace_sequence: initial_trace_sequence,
                 },

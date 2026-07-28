@@ -1,6 +1,7 @@
 mod continuation;
 mod events;
 mod lifecycle;
+mod plan_confirmation;
 mod policy;
 mod repository;
 mod resources;
@@ -20,6 +21,7 @@ use crate::studio::{
 pub(super) use continuation::StudioContinuationService;
 use events::StudioAgentCommitObserver;
 use lifecycle::StudioAgentLifecycle;
+use plan_confirmation::StudioPlanConfirmationProjector;
 use repository::StudioAgentRepository;
 pub(super) use resources::{StudioAgentResources, root_agent_id};
 use turn_factory::StudioAgentTurnFactory;
@@ -76,6 +78,20 @@ impl StudioAgentHost {
 
     pub(super) async fn detach_runtime(&self) {
         self.observer.detach_runtime().await;
+    }
+}
+
+async fn wait_for_runtime(
+    mut runtime: tokio::sync::watch::Receiver<Option<pl_core::AgentRuntimeHandle>>,
+) -> anyhow::Result<pl_core::AgentRuntimeHandle> {
+    loop {
+        if let Some(runtime) = runtime.borrow_and_update().clone() {
+            return Ok(runtime);
+        }
+        runtime
+            .changed()
+            .await
+            .map_err(|_| anyhow::anyhow!("Studio agent runtime attachment channel closed"))?;
     }
 }
 
