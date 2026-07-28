@@ -18,6 +18,7 @@ pub(crate) struct TurnCompletion {
     /// worker 正常返回时携带更新后的 session；任务被 abort 时必须保留 actor 中的原 session。
     pub(crate) session: Option<AgentSession>,
     pub(crate) result: std::result::Result<TurnResult, String>,
+    pub(crate) finalized_with_tool: Option<String>,
     pub(crate) cancelled: bool,
     pub(crate) next_trace_sequence: u64,
 }
@@ -46,7 +47,11 @@ where
         context.session_id.clone(),
     );
     let mut session = context.session.clone();
-    let (result, session_commit) = match host.turn_factory().prepare_turn(context).await {
+    let (result, session_commit, finalized_with_tool) = match host
+        .turn_factory()
+        .prepare_turn(context)
+        .await
+    {
         Ok(prepared) => {
             let prepared =
                 prepared.with_runtime_context(&turn_id, cancellation.clone(), checkpoint);
@@ -135,12 +140,13 @@ where
                 let _ = event_task.await;
                 break 'execute result;
             };
-            enforce_finalization(&mut result, &policy);
-            (result, session_commit)
+            let finalized_with_tool = enforce_finalization(&mut result, &policy);
+            (result, session_commit, finalized_with_tool)
         }
         Err(error) => (
             Err(error.to_string()),
             super::AgentSessionCommitPolicy::Persist,
+            None,
         ),
     };
     let next_trace_sequence = result
@@ -157,6 +163,7 @@ where
             super::AgentSessionCommitPolicy::DiscardTurn => None,
         },
         result,
+        finalized_with_tool,
         cancelled: cancellation.is_cancelled(),
         next_trace_sequence,
     }
@@ -283,15 +290,15 @@ pub(crate) fn add_usage(total: &mut TokenUsage, delta: &TokenUsage) {
 fn enforce_finalization(
     result: &mut std::result::Result<TurnResult, String>,
     policy: &AgentExecutionPolicy,
-) {
+) -> Option<String> {
     let Ok(result) = result else {
-        return;
+        return None;
     };
     if result.status != TurnResultStatus::Completed {
-        return;
+        return None;
     }
     let TurnFinalizationPolicy::RequiredTool { name } = &policy.finalization else {
-        return;
+        return None;
     };
     if result.trace_events.iter().any(|event| {
         matches!(
@@ -300,7 +307,7 @@ fn enforce_finalization(
                 if item.tool.as_ref().is_some_and(|tool| tool.name == *name)
         )
     }) {
-        return;
+        return Some(name.clone());
     }
     let failed_tool = result.trace_events.iter().rev().find_map(|event| {
         let TraceEventKind::TracePartFailed { item, error } = &event.kind else {
@@ -323,6 +330,7 @@ fn enforce_finalization(
     result.status = TurnResultStatus::Errored;
     result.error = Some(message.clone());
     result.failure = Some(pl_protocol::TurnFailure::permanent(category, message));
+    None
 }
 
 #[cfg(test)]
@@ -338,9 +346,10 @@ mod tests {
             ToolTraceOutcome::Completed,
         )]));
 
-        enforce_finalization(&mut result, &required_tool_policy("submit_delivery"));
+        let finalized = enforce_finalization(&mut result, &required_tool_policy("submit_delivery"));
 
         let result = result.unwrap();
+        assert_eq!(finalized.as_deref(), Some("submit_delivery"));
         assert_eq!(result.status, TurnResultStatus::Completed);
         assert_eq!(result.error, None);
         assert_eq!(result.failure, None);
@@ -353,9 +362,10 @@ mod tests {
             ToolTraceOutcome::Failed("delivery scope is not accepting a delivery"),
         )]));
 
-        enforce_finalization(&mut result, &required_tool_policy("submit_delivery"));
+        let finalized = enforce_finalization(&mut result, &required_tool_policy("submit_delivery"));
 
         let result = result.unwrap();
+        assert_eq!(finalized, None);
         assert_eq!(result.status, TurnResultStatus::Errored);
         assert_eq!(
             result.error.as_deref(),
@@ -380,8 +390,9 @@ mod tests {
             ),
         ]));
 
-        enforce_finalization(&mut result, &required_tool_policy("submit_delivery"));
+        let finalized = enforce_finalization(&mut result, &required_tool_policy("submit_delivery"));
 
+        assert_eq!(finalized, None);
         assert_eq!(
             result.unwrap().error.as_deref(),
             Some("latest delivery failure")
@@ -395,9 +406,10 @@ mod tests {
             ToolTraceOutcome::Failed("exec failed"),
         )]));
 
-        enforce_finalization(&mut result, &required_tool_policy("submit_delivery"));
+        let finalized = enforce_finalization(&mut result, &required_tool_policy("submit_delivery"));
 
         let result = result.unwrap();
+        assert_eq!(finalized, None);
         assert_eq!(
             result.error.as_deref(),
             Some("turn must finalize with tool `submit_delivery`")
@@ -418,8 +430,9 @@ mod tests {
             tool_event("submit_delivery", ToolTraceOutcome::Completed),
         ]));
 
-        enforce_finalization(&mut result, &required_tool_policy("submit_delivery"));
+        let finalized = enforce_finalization(&mut result, &required_tool_policy("submit_delivery"));
 
+        assert_eq!(finalized.as_deref(), Some("submit_delivery"));
         assert_eq!(result.unwrap().status, TurnResultStatus::Completed);
     }
 

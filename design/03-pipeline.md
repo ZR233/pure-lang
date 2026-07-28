@@ -61,7 +61,7 @@ agent 的输入队列、活动 turn、取消和恢复由 `pl-core::AgentRuntime`
 - agent 状态正交拆为 lifecycle（`Active | Closing | Closed | Faulted`）、activity（`Idle | Queued | Running | WaitingTool | WaitingInteraction | WaitingAgents`）和 last turn outcome（`Completed | Cancelled | Failed | BudgetLimited`）
 - turn 完成或失败后 agent 回到 `Active + Idle`；未关闭 agent 可继续接收输入，不存在 `resume_agent`
 - 输入使用 `QueueOnly | Start | InterruptThenStart`。actor 先持久化 FIFO queue/activity，再准备和执行 turn；取消先触发 token，超过 grace period 才 abort
-- 父代理 `Running/Queued` 时 child 更新只合并不抢占；turn 收尾消费未处理更新，否则有 live direct child 时进入 `WaitingAgents`。该状态收到更新或 child 独立无活动超时后原子入队一个合并续轮；内部 close/stop/test 等待使用基于订阅 predicate 的 `wait_until_idle`
+- 父代理 `Running/Queued` 时 child 更新只合并不抢占；turn 收尾消费未处理更新，否则有 live direct child 时进入 `WaitingAgents`。required finalizer 工具成功表示当前产品阶段已经完成交接，收尾必须把本轮执行期间已缓冲的 child 更新作为同一 turn 已消费事实持久确认，不能再为这些旧更新创建续轮；finalizer 之后新提交的产品事实仍可按新阶段唤醒。该状态收到更新或 child 独立无活动超时后原子入队一个合并续轮；内部 close/stop/test 等待使用基于订阅 predicate 的 `wait_until_idle`
 - 关闭父 agent 时按产品策略级联关闭子树；终态 repository commit 失败才把 actor 置为 Faulted 并拒绝新输入
 - `AgentRuntime` actor 是 session、pending input、active turn、cancel token 和 revision 的唯一状态机；durable session cursor 只由 `SessionEventHub` 的 canonical projection 分配，actor/repository 中的 sequence 仅是提交后可修复的 checkpoint 镜像；宿主只能通过 CAS `AgentCommit` 与 lifecycle saga 持久化/管理外部资源
 - 协作输入先由 runtime resolver 把模型提供的 target 解析为 `ResolvedAgentSessionTarget { root, agent, currentSession, ownerRevision }`。模型工具不接受 `sessionId`，也不得回退到 caller session；coordinator 解析 root，actor 在同一条 submit 命令内从 active turn、durable pending FIFO 或唯一 owned session 原子解析 current session。多个 idle 历史 session 没有 current 指针时必须报歧义，不能用 `lastTurn` 猜测，也不能隐式创建空 session
@@ -164,6 +164,7 @@ owner 冲突必须拒绝并输出诊断。大会话归档级联归档其 agent s
 - session 的 `instruction_snapshot_json` 保存稳定 base/user/project context 和非 mode-specific developer context；Simple/Task 与 execution profile overlay 每个 turn 重新注入。
 - Task 计划与实施状态通过 durable coordinator 和 plan lifecycle 事件表达；确认实施后在同一 session 进入 `designUpdating`，由 planner continuation turn 推进，不切换会话模式。
 - `interactions` 表保存所有 pending/resolved/cancelled/expired 交互，是刷新与 session 切换恢复 pending UI 的事实来源。`InteractionChanged` 通过 `StudioEventKind::InteractionChanged` 广播当前 interaction 最新状态；旧 `studio-user-input-*`、`studio-tool-approval-*`、`studio-interaction-changed` sideband 事件不再作为 Studio 协议入口
+- framework attach 时会检查活动 Task 根会话最新的完整 Plan trace；如果对应确认 interaction 缺失、没有活动 TaskRun，且同一计划尚未进入实施或终态，则幂等补写 `PendingConfirmation` lifecycle 与 `planConfirmation`。该恢复只修复已有完整计划证据的投影缺口，不从局部 delta、普通文本或旧计划猜测确认内容
 - `skill_view` 成功激活 skill 时，后端写入结构化 `SkillActivated` 事件并 upsert 会话级 skill runtime fact。Studio 当前会话的 `activeSkills` 只从 `session_skills` 等结构化持久层读取，不能再从 tool result JSON 文本反解析。
 - 如果 turn 内发生上下文压缩，`AgentSession` revision 会变化，Studio 以事务重写当前 session 的有序模型上下文项并追加本轮 trace；未发生压缩时继续使用追加写入。`messages.item_type` 区分普通 `message` 与加密 `compaction`。恢复时加载两类上下文项，Studio/Flutter 消息查询与 projection 只返回普通消息，绝不暴露 checkpoint 加密内容
 - StudioEvent 读取以 `sequence` 为 durable 单调游标；message/part snapshot projection 的 `sequence` 必须等于来源 `StudioEventEnvelope.sequence`。`messagePartDelta` 没有 durable sequence 语义，前端不得用它推进 cursor。

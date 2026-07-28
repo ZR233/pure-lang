@@ -471,7 +471,7 @@ async fn manual_cleanup_handles_complete_partial_and_absent_resources_idempotent
         disposition: DurableWorktreeDisposition::Cleanup,
     };
 
-    let first = cleanup_task_worktree_resources(&repo, &[complete_resource.clone()])
+    let first = cleanup_task_worktree_resources(&repo, std::slice::from_ref(&complete_resource))
         .await
         .unwrap();
     let second = cleanup_task_worktree_resources(&repo, &[complete_resource])

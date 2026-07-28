@@ -89,7 +89,9 @@ impl StudioRuntime {
         self.runtime_state.snapshot()
     }
 
-    pub(super) async fn agent_framework(&self) -> Result<std::sync::Arc<StudioAgentRuntime>> {
+    pub(in crate::studio) async fn agent_framework(
+        &self,
+    ) -> Result<std::sync::Arc<StudioAgentRuntime>> {
         let mut framework = self.agent_framework.lock().await;
         if let Some(runtime) = framework.as_ref() {
             return Ok(runtime.clone());

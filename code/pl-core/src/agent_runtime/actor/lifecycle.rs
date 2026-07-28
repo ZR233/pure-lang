@@ -60,7 +60,11 @@ where
         let event_outcome = close_outcome.clone();
         if let Err(error) = self
             .commit_transition(closing, Vec::new(), move |snapshot| match event_outcome {
-                Some(outcome) => AgentRuntimeEventKind::TurnFinished { outcome, snapshot },
+                Some(outcome) => AgentRuntimeEventKind::TurnFinished {
+                    outcome,
+                    snapshot,
+                    finalized_with_tool: None,
+                },
                 None => AgentRuntimeEventKind::StateChanged { snapshot },
             })
             .await
@@ -183,7 +187,11 @@ where
             AgentActivityState::Queued
         };
         self.commit_transition(next, Vec::new(), |snapshot| {
-            AgentRuntimeEventKind::TurnFinished { outcome, snapshot }
+            AgentRuntimeEventKind::TurnFinished {
+                outcome,
+                snapshot,
+                finalized_with_tool: None,
+            }
         })
         .await
         .inspect_err(|error| {

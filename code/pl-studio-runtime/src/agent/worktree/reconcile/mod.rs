@@ -587,13 +587,37 @@ fn leaf_directories(repository: &Path) -> Result<Vec<PathBuf>> {
 }
 
 fn normalize_path(path: &Path) -> String {
-    let path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let path = canonicalize_with_missing_suffix(path);
     let path = git_compatible_path(path);
     let value = path.to_string_lossy().replace('\\', "/");
     if cfg!(windows) {
         value.to_lowercase()
     } else {
         value
+    }
+}
+
+fn canonicalize_with_missing_suffix(path: &Path) -> PathBuf {
+    let mut existing = path.to_path_buf();
+    let mut missing = Vec::new();
+    loop {
+        match std::fs::canonicalize(&existing) {
+            Ok(mut canonical) => {
+                for component in missing.into_iter().rev() {
+                    canonical.push(component);
+                }
+                return canonical;
+            }
+            Err(_) => {
+                let Some(component) = existing.file_name().map(ToOwned::to_owned) else {
+                    return path.to_path_buf();
+                };
+                missing.push(component);
+                if !existing.pop() {
+                    return path.to_path_buf();
+                }
+            }
+        }
     }
 }
 
