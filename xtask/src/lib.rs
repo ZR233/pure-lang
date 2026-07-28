@@ -16,6 +16,7 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> Result<()> {
             cli::print_help(topic);
             Ok(())
         }
+        cli::Command::VerifyGui => flutter::verify_gui(),
         cli::Command::RunGui(options) => flutter::run_gui(options),
         cli::Command::BuildGui(options) => flutter::build_gui(options),
         cli::Command::ReleaseGui(options) => release::run(options),

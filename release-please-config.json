@@ -23,7 +23,7 @@
       "extra-files": [
         {
           "type": "generic",
-          "path": "code/pure-studio-flutter/pubspec.yaml"
+          "path": "code/pure-studio/pubspec.yaml"
         }
       ]
     }

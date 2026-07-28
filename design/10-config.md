@@ -14,7 +14,7 @@ Windows 下对应：
 %USERPROFILE%\.pure\config.toml
 ```
 
-`pure-studio-flutter` 的桌面端状态单独保存在：
+`pure-studio` 的桌面端状态单独保存在：
 
 ```text
 ~/.pure/studio/studio_2.sqlite
@@ -22,9 +22,9 @@ Windows 下对应：
 
 SQLite 只保存 Studio 状态，例如项目、会话、消息、统一 interaction、agent 状态事件和应用设置，并由 `pl-studio-runtime` 通过 SeaORM 纯异步访问。`pl-core` 的正常依赖树不包含 SeaORM。provider/model/role 配置仍只由 `~/.pure/config.toml` 表达。
 
-普通对话运行时读取配置；当配置文件不存在时，`pure-studio-flutter` 设置页展示默认配置。设置页不提供全局保存或重载操作，普通设置项在用户修改后即时写入配置。独立新增/编辑页面保留本地草稿，必须点击页面内保存按钮才写入配置，取消则丢弃草稿。schema 5/6/7 配置在写入版本化备份后迁到 schema 8；无法解析、更老或迁移后无法校验的配置先备份再重建。迁移只处理产品配置，不复制数据库或会话历史。
+普通对话运行时读取配置；当配置文件不存在时，`pure-studio` 设置页展示默认配置。设置页不提供全局保存或重载操作，普通设置项在用户修改后即时写入配置。独立新增/编辑页面保留本地草稿，必须点击页面内保存按钮才写入配置，取消则丢弃草稿。schema 5/6/7 配置在写入版本化备份后迁到 schema 8；无法解析、更老或迁移后无法校验的配置先备份再重建。迁移只处理产品配置，不复制数据库或会话历史。
 
-`pure-studio-flutter` 设置页的 typed 配置保存成功后必须返回 canonical config/bootstrap snapshot，由 Flutter store 合并。校验失败时只展示错误并保留当前页面状态，不覆盖原配置。Instructions 文本作为普通设置组展示时，在输入停止后自动写入 `~/.pure/config.toml`；Provider 新增/编辑等独立页面不自动保存。
+`pure-studio` 设置页的 typed 配置保存成功后必须返回 canonical config/bootstrap snapshot，由 Flutter store 合并。校验失败时只展示错误并保留当前页面状态，不覆盖原配置。Instructions 文本作为普通设置组展示时，在输入停止后自动写入 `~/.pure/config.toml`；Provider 新增/编辑等独立页面不自动保存。
 
 ## 10.2 配置职责
 
@@ -333,7 +333,7 @@ generation 在最后一个 lease 释放后异步关闭。
 ## 10.10 配置草稿
 
 通用 provider/model 值对象和解析属于 `pl-core`，`StudioConfig`、schema、默认角色和配置文件 IO
-属于 `pl-studio-runtime`。`pure-studio-flutter` 设置页先加载 canonical provider catalog，再构造产品草稿：
+属于 `pl-studio-runtime`。`pure-studio` 设置页先加载 canonical provider catalog，再构造产品草稿：
 
 - 默认选中 Studio 产品默认 preset，也可选择 catalog 返回的任意 preset 或 Custom provider。
 - 至少配置一个 provider。
@@ -354,9 +354,9 @@ generation 在最后一个 lease 释放后异步关闭。
 - 同一 provider 下模型 slug 不重复。
 - 角色引用的默认模型必须声明 `name = "effort"` 参数且至少一个候选值，用于生成角色 `effort`。
 
-## 10.11 pure-studio-flutter 设置页
+## 10.11 pure-studio 设置页
 
-`pure-studio-flutter` 设置页消费 Bridge 返回的 catalog/config projection，保存时由
+`pure-studio` 设置页消费 Bridge 返回的 catalog/config projection，保存时由
 `pl-studio-runtime` 组合 `StudioConfig` 并统一校验，覆盖：
 
 - catalog 中的全部 preset 与 Custom Responses/Chat provider。
@@ -396,14 +396,13 @@ Provider 标签页必须提供结构化编辑能力：
 
 Roles 标签页必须展示固定四个角色：探索者、计划者、执行者、审查者。每个角色将模型与“思考强度”作为两个独立下拉控件展示；模型选项同时表达 provider 和 model，思考强度候选值来自当前模型声明的 `supported_efforts()`。模型改变时，思考强度优先切换为该模型声明的默认 effort，没有显式默认时使用首个候选；仅改变思考强度时必须保持当前 provider 和 model 不变。模型与思考强度变更都即时保存，并以 bridge 返回的 canonical config snapshot 更新 Flutter 状态；`pl-core` 统一校验后写入 `~/.pure/config.toml`。
 
-桌面窗口必须支持自由缩放。`pure-studio-flutter` 只声明首选窗口尺寸，不把 UI 绑定到固定宽高；设置页内容跟随窗口尺寸自适应。Provider 标签页在常规桌面宽度使用单栏 provider 卡片列表，卡片内部承载摘要、操作和展开编辑内容；在窄窗口下保持单栏滚动并压缩卡片元信息，避免表格和编辑区域被裁剪。聊天状态栏在窄窗口下保留左侧高频控制，并把右侧只读状态按断点收入更多菜单。
+桌面窗口必须支持自由缩放。`pure-studio` 只声明首选窗口尺寸，不把 UI 绑定到固定宽高；设置页内容跟随窗口尺寸自适应。Provider 标签页在常规桌面宽度使用单栏 provider 卡片列表，卡片内部承载摘要、操作和展开编辑内容；在窄窗口下保持单栏滚动并压缩卡片元信息，避免表格和编辑区域被裁剪。聊天状态栏在窄窗口下保留左侧高频控制，并把右侧只读状态按断点收入更多菜单。
 
-为了支持设计验证，`pure-studio-flutter` 应通过 widget test 和 Windows 运行态截图验证设置页 fixture 状态。Provider 设置页的本地验证入口固定为：
+为了支持设计验证，`pure-studio` 应通过 widget test 和 Windows 运行态截图验证设置页 fixture 状态。Provider 设置页的本地验证入口固定为：
 
 ```powershell
-cd code/pure-studio-flutter
-flutter test
-flutter run -d windows
+cargo xtask verify-gui
+cargo xtask run-gui
 ```
 
 widget test 只用于布局和状态回归，最终应用行为仍以 Flutter Windows 运行结果为准。
@@ -418,7 +417,7 @@ Studio 交互状态统一保存在 SQLite `interactions` 表。工具审批、`r
 
 配置允许持久化明文 `bearer_token`，但这会把 API token 直接写入 `~/.pure/config.toml`。Provider 也可保存 `bearer_token_env` 环境变量名；运行时通过 `resolved_bearer_token()` 解析凭据，非空的显式 token 优先，其次读取非空环境变量值，空白值和缺失环境变量都视为无凭据。
 
-schema v4 不再保留旧的 `env_key`、`auth_command` 或 `env_http_headers` 字段。`pure-studio-flutter` 设置页按用户确认会把输入的 API key 明文写入对应 provider 的 `bearer_token`；手工配置可使用当前的 `bearer_token_env`。后续版本可以增加系统凭据库模式。
+schema v4 不再保留旧的 `env_key`、`auth_command` 或 `env_http_headers` 字段。`pure-studio` 设置页按用户确认会把输入的 API key 明文写入对应 provider 的 `bearer_token`；手工配置可使用当前的 `bearer_token_env`。后续版本可以增加系统凭据库模式。
 
 MCP stdio server 的 `env` 会按配置原样传给子进程，可能包含明文凭据。Streamable HTTP 的 `bearer_token_env_var` 只保存环境变量名，运行时从 Pure 进程环境读取对应 token 并构造 Authorization header。
 

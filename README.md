@@ -28,7 +28,7 @@ pl-core                   核心编译引擎与 Studio runtime
 pl-studio-bridge          Flutter Rust Bridge v2 桥接 crate
   ▲
   │
-pure-studio-flutter       Flutter Windows 桌面应用
+pure-studio       Flutter Windows 桌面应用
                           Material 3 + Riverpod + 会话级事件流
 ```
 
@@ -41,14 +41,14 @@ pure-studio-flutter       Flutter Windows 桌面应用
 | `pl-model` | `code/pl-model/` | LLM provider 抽象与适配：OpenAI 兼容 API、SSE 流式、模型元数据管理 |
 | `pl-lsp` | `code/pl-lsp/` | LSP 客户端：rust-analyzer 支持、代码智能查询 |
 | `pl-core` | `code/pl-core/` | 核心编译引擎与 Studio runtime：turn/session、配置、工具、MCP、SQLite projection，并通过 `interfaces` 等模块逐步端口化 |
-| `pl-studio-bridge` | `code/pure-studio-flutter/rust/` | Flutter Rust Bridge v2 桥接 crate：把 Flutter API 转为 `pl-core` runtime 调用 |
-| `pure-studio-flutter` | `code/pure-studio-flutter/` | Flutter Windows 桌面应用：Material 3、Riverpod、会话级事件订阅 |
-| `pl-xtask` | `xtask/` | 本仓库开发任务入口：GUI 运行、发布构建、Flutter Windows Rust bridge 构建 |
+| `pl-studio-bridge` | `code/pure-studio/rust/` | Flutter Rust Bridge v2 桥接 crate：把 Flutter API 转为 `pl-core` runtime 调用 |
+| `pure-studio` | `code/pure-studio/` | Flutter Windows 桌面应用：Material 3、Riverpod、会话级事件订阅 |
+| `pl-xtask` | `xtask/` | 本仓库开发任务入口：GUI 验证、运行、发布构建和 Flutter Windows Rust bridge 构建 |
 
 ### 依赖规则
 
 ```
-pl-protocol  ←  pl-trace  ←  pl-model  ←  pl-core  ←  pl-studio-bridge  ←  pure-studio-flutter
+pl-protocol  ←  pl-trace  ←  pl-model  ←  pl-core  ←  pl-studio-bridge  ←  pure-studio
                               pl-lsp    ←  pl-core
 （底层）                                                         （顶层）
 ```
@@ -66,11 +66,6 @@ pl-protocol  ←  pl-trace  ←  pl-model  ←  pl-core  ←  pl-studio-bridge  
 ```powershell
 # Windows（Flutter + flutter_rust_bridge v2）
 cargo xtask run-gui
-
-# 或手动启动
-cd code/pure-studio-flutter
-flutter pub get
-flutter run -d windows
 ```
 
 Flutter 端通过 `pl-studio-bridge` 调用 `pl-core` Studio runtime。每个打开的会话只订阅自己的高频 timeline/turn/interaction 流；MCP/LSP health、配置和项目列表等低频事件走全局流。
@@ -108,7 +103,7 @@ pure-lang/
 │   │   ├── src/skill/           # 技能目录与扫描
 │   │   ├── src/studio/          # Studio 运行时（SQLite、审批）
 │   │   └── migrations/          # SeaORM SQLite 迁移
-│   └── pure-studio-flutter/  # Flutter Windows 桌面应用
+│   └── pure-studio/  # Flutter Windows 桌面应用
 │       ├── lib/                # Material 3 + Riverpod UI
 │       ├── rust/               # pl-studio-bridge crate
 │       └── windows/            # Flutter Windows runner
@@ -196,18 +191,15 @@ cargo test --workspace
 
 ### Flutter 开发
 
-```bash
+```powershell
+# 从仓库根目录解析依赖、静态分析并运行非视觉测试
+cargo xtask verify-gui
+
 # 从仓库根目录运行 GUI
 cargo xtask run-gui
 
 # 从仓库根目录构建当前 OS 的 release 产物
 cargo xtask build-gui
-
-cd code/pure-studio-flutter
-flutter_rust_bridge_codegen generate
-flutter analyze
-flutter test
-flutter build windows
 ```
 
 Markdown/timeline 视觉检查可以使用本地 demo 数据启动，不连接 runtime：

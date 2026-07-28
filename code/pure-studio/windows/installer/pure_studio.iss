@@ -13,7 +13,7 @@
 
 #define MyAppName "Pure Studio"
 #define MyAppPublisher "Pure-Lang"
-#define MyAppExeName "pure_studio_flutter.exe"
+#define MyAppExeName "pure_studio.exe"
 
 [Setup]
 AppId={{B17C2A25-1255-4D18-8D8C-55CA4E8F06C4}

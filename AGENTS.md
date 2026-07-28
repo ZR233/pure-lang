@@ -13,8 +13,8 @@
 ## 项目结构与入口
 
 - Rust crate 名称统一以 `pl-` 开头，例如 `pl-core`、`pl-model`、`pl-studio-bridge`。
-- Flutter app 的 Dart package 名称是 `pure_studio_flutter`，不按 Cargo crate 规则命名。
-- Flutter 项目根目录是 `code/pure-studio-flutter`；运行 Flutter 命令必须在该目录下执行，或由 `xtask` 显式切换目录。
+- Flutter app 的 Dart package 名称是 `pure_studio`，不按 Cargo crate 规则命名。
+- Flutter 项目根目录是 `code/pure-studio`；运行 Flutter 命令必须在该目录下执行，或由 `xtask` 显式切换目录。
 - 桌面 GUI 入口使用：
   - `cargo xtask run-gui [--demo] [--demo-fallback]`
   - `cargo xtask build-gui [--demo] [--no-clean]`
@@ -1895,7 +1895,7 @@ flutter analyze
 flutter test
 ```
 
-- Flutter 命令必须在 `code/pure-studio-flutter` 目录执行。
+- Flutter 命令必须在 `code/pure-studio` 目录执行。
 - GUI smoke 优先使用 `cargo xtask run-gui --demo`，再结合窗口截图或日志确认不是白屏/崩溃。
 
 ### 代码质量检查清单

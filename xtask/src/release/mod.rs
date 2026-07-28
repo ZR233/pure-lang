@@ -46,7 +46,7 @@ fn validate_version(raw: &str) -> Result<Version> {
 }
 
 fn ensure_pubspec_version(workspace_root: &Path, version: &Version) -> Result<()> {
-    let actual = studio_version::read(&paths::flutter_app_dir(workspace_root))?;
+    let actual = studio_version::read(&paths::studio_app_dir(workspace_root))?;
     if &actual != version {
         bail!("release version {version} does not match pubspec.yaml version {actual}");
     }

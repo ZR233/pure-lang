@@ -1,5 +1,5 @@
-name: pure_studio_flutter
-description: Pure Studio Flutter desktop client.
+name: pure_studio
+description: Pure Studio desktop application.
 publish_to: 'none'
 
 # Release Please updates this stable SemVer in its reviewed Release PR.

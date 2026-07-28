@@ -263,7 +263,7 @@ void registerTimelineToolTests() {
         order: 2,
         name: 'exec',
         arguments: jsonEncode({'command': 'flutter test'}),
-        workingDirectory: 'code/pure-studio-flutter',
+        workingDirectory: 'code/pure-studio',
       ),
     ];
     final rows = timelineRowsFromMessages([message], parts: parts);
@@ -317,7 +317,7 @@ void registerTimelineToolTests() {
     expect(find.textContaining('lib/timeline.dart'), findsOneWidget);
     expect(find.textContaining('test/timeline_test.dart'), findsOneWidget);
     expect(find.textContaining('flutter test'), findsOneWidget);
-    expect(find.textContaining('code/pure-studio-flutter'), findsOneWidget);
+    expect(find.textContaining('code/pure-studio'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

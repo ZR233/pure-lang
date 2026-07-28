@@ -14,7 +14,7 @@ fn selector_keeps_production_commands_and_working_directories_auditable() {
         workspace,
         &[
             "code/pl-core/src/lib.rs".to_string(),
-            "code/pure-studio-flutter/windows/runner/main.cpp".to_string(),
+            "code/pure-studio/windows/runner/main.cpp".to_string(),
         ],
     );
 
@@ -31,7 +31,7 @@ fn selector_keeps_production_commands_and_working_directories_auditable() {
                 ],
             },
             MergeVerificationCommand {
-                working_directory: PathBuf::from("C:/repo/code/pure-studio-flutter"),
+                working_directory: PathBuf::from("C:/repo/code/pure-studio"),
                 command: vec![
                     "flutter".to_string(),
                     "--no-version-check".to_string(),

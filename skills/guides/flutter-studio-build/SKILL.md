@@ -1,11 +1,11 @@
 ---
 name: flutter-studio-build
-description: Use when building, debugging release builds, or troubleshooting flutter_rust_bridge code sync issues in Pure Studio Flutter.
+description: Use when building Pure Studio, debugging release builds, or troubleshooting flutter_rust_bridge code sync issues.
 category: guides
 platforms: [windows, linux, macos]
 ---
 
-# Pure Studio Flutter Release Build
+# Pure Studio Release Build
 
 ## 快速构建
 
@@ -17,13 +17,13 @@ cargo xtask build-gui --demo     # Demo 模式（无需 Rust 后端）
 cargo xtask build-gui --no-clean # 保留已存在的 release 输出目录
 ```
 
-`pl-xtask` 自动检测当前 OS，并在 `code/pure-studio-flutter/` 目录下执行对应 `flutter build <platform> --release`，产物收集到 `dist/pure-studio-flutter-release/`。
+`pl-xtask` 自动检测当前 OS，并在 `code/pure-studio/` 目录下执行对应 `flutter build <platform> --release`，产物收集到 `dist/pure-studio-release/`。
 
 ### 产物结构（Windows）
 
 ```
-dist/pure-studio-flutter-release/
-  pure_studio_flutter.exe     # Flutter 主程序
+dist/pure-studio-release/
+  pure_studio.exe     # Flutter 主程序
   flutter_windows.dll         # Flutter 引擎动态库
   pl_studio_bridge.dll        # Rust bridge DLL（通过 flutter_rust_bridge 生成）
   pl_studio_bridge.pdb        # Rust bridge 调试符号
@@ -37,9 +37,9 @@ dist/pure-studio-flutter-release/
 
 | 平台 | 构建命令 | 产物目录 |
 |------|---------|---------|
-| Windows | `flutter build windows --release` | `code/pure-studio-flutter/build/windows/x64/runner/Release/` |
-| macOS | `flutter build macos --release` | `code/pure-studio-flutter/build/macos/Build/Products/Release/` |
-| Linux | `flutter build linux --release` | `code/pure-studio-flutter/build/linux/x64/release/bundle/` |
+| Windows | `flutter build windows --release` | `code/pure-studio/build/windows/x64/runner/Release/` |
+| macOS | `flutter build macos --release` | `code/pure-studio/build/macos/Build/Products/Release/` |
+| Linux | `flutter build linux --release` | `code/pure-studio/build/linux/x64/release/bundle/` |
 
 ### Flutter 命令解析
 
@@ -57,11 +57,11 @@ lib/src/rust/frb_generated.dart: error: The type 'BridgeEventPayload' is not
   'BridgeEventPayload_SessionHandoffChanged()'
 ```
 
-**根因**：Rust 侧 `pl-studio-bridge` 的 API 或类型（在 `code/pure-studio-flutter/rust/src/api/` 中）发生变更后，flutter_rust_bridge 生成的 Dart 代码未同步更新。
+**根因**：Rust 侧 `pl-studio-bridge` 的 API 或类型（在 `code/pure-studio/rust/src/api/` 中）发生变更后，flutter_rust_bridge 生成的 Dart 代码未同步更新。
 
 **修复步骤**：
 ```powershell
-cd code/pure-studio-flutter
+cd code/pure-studio
 flutter_rust_bridge_codegen generate
 ```
 
@@ -78,7 +78,7 @@ flutter_rust_bridge_codegen generate
 `pl-studio-bridge` 作为 `cdylib` 输出，通过 CMake 集成到 Flutter Windows 构建中。如果 `cargo build -p pl-studio-bridge --release` 成功但在 Flutter 构建中失败，差异点通常是：
 
 - 不同工作目录下的 `.cargo/config.toml` 生效范围
-- Flutter 构建系统使用独立的 Rust target 目录：`code/pure-studio-flutter/build/windows/x64/rust-target/`
+- Flutter 构建系统使用独立的 Rust target 目录：`code/pure-studio/build/windows/x64/rust-target/`
 - 上游 workspace crate（`pl-core`、`pl-model`、`pl-protocol`）是否已提前编译
 
 先用独立 `cargo build -p pl-studio-bridge --release` 验证 Rust 侧能否单独通过，再确认 Flutter 构建。
@@ -98,14 +98,14 @@ flutter_rust_bridge_codegen generate
 
 ```yaml
 - name: flutter pub get
-  working-directory: code/pure-studio-flutter
+  working-directory: code/pure-studio
   run: flutter pub get
 - name: flutter build windows
-  working-directory: code/pure-studio-flutter
+  working-directory: code/pure-studio
   run: flutter build windows --release
 - name: pack artifact (windows)
   run: |
-    Copy-Item code\pure-studio-flutter\build\windows\x64\runner\Release\* dist -Recurse -Force
+    Copy-Item code\pure-studio\build\windows\x64\runner\Release\* dist -Recurse -Force
 ```
 
 ## 开发构建 vs Release 构建
@@ -114,5 +114,5 @@ flutter_rust_bridge_codegen generate
 |------|-------------------------------|----------------------------------------|
 | 用途 | 开发运行/调试 | 产出 release 包 |
 | 构建模式 | `flutter run -d windows`（debug） | `flutter build windows --release` |
-| 产物 | 不收集，在 `build/` 下就地运行 | 收集到 `dist/pure-studio-flutter-release/` |
+| 产物 | 不收集，在 `build/` 下就地运行 | 收集到 `dist/pure-studio-release/` |
 | Demo 回退 | 支持 `--demo-fallback` 自动回退 | 无回退，失败即报错 |

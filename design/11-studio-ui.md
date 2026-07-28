@@ -1,12 +1,12 @@
 # Pure Studio UI
 
-本文约束唯一的 `code/pure-studio-flutter` Flutter 桌面端。Flutter 端使用 Material 3 工具型设计、Riverpod 状态管理和 FRB session/global stream，覆盖 Studio 主路径功能。Flutter 视觉在统一事件迁移中保持不变；session stream 直接消费 `pl-protocol::SessionStreamFrame`，不再定义 Studio 私有 timeline 协议。
+本文约束唯一的 `code/pure-studio` Flutter 桌面端。Flutter 端使用 Material 3 工具型设计、Riverpod 状态管理和 FRB session/global stream，覆盖 Studio 主路径功能。Flutter 视觉在统一事件迁移中保持不变；session stream 直接消费 `pl-protocol::SessionStreamFrame`，不再定义 Studio 私有 timeline 协议。
 
 ## 1. 前端框架
 
 Timeline 直接对齐 opencode app：使用 `virtua` 虚拟列表，自写 message/part row algebra、stable row key、row cache、bottom spacer、bottom anchoring 和 jump-to-bottom 交互。允许复制 opencode MIT timeline/UI 子集；复制文件必须保留来源说明，并在仓库 notice 中标注。
 
-`code/pure-studio-flutter` 使用 Flutter Windows 桌面端。入口为 `MaterialApp.router`，页面栈由 `go_router` 管理；状态层使用 `flutter_riverpod`，数据入口只允许通过 `pl-studio-bridge`。Flutter UI 使用 Material 3 组件、紧凑桌面工具布局和响应式双栏/窄屏 rail，不做营销页或解释页。首版可以用 `ListView.builder` 实现 timeline，但必须保留 stable key、底部跟随、row cache、streaming Markdown overlay 和会话切换时取消旧订阅的语义；后续可再替换为虚拟列表。
+`code/pure-studio` 使用 Flutter Windows 桌面端。入口为 `MaterialApp.router`，页面栈由 `go_router` 管理；状态层使用 `flutter_riverpod`，数据入口只允许通过 `pl-studio-bridge`。Flutter UI 使用 Material 3 组件、紧凑桌面工具布局和响应式双栏/窄屏 rail，不做营销页或解释页。首版可以用 `ListView.builder` 实现 timeline，但必须保留 stable key、底部跟随、row cache、streaming Markdown overlay 和会话切换时取消旧订阅的语义；后续可再替换为虚拟列表。
 
 Flutter 推荐目录结构：
 
@@ -245,7 +245,7 @@ Security 页是紧凑的权限配置页，不使用与 provider/MCP 相同的大
 
 ## 5. 验收目标
 
-- `pure-studio-flutter` 可在 Windows 上 `flutter analyze`、`flutter test`、`flutter build windows`，并通过 FRB 调用 `pl-core` runtime。
+- `pure-studio` 可在 Windows 上 `flutter analyze`、`flutter test`、`flutter build windows`，并通过 FRB 调用 `pl-core` runtime。
 - `messagePartDelta` 可以实时显示 text/reasoning/tool/plan 中间输出。
 - terminal snapshot 清除 overlay，snapshot/replay 与 live terminal UI 收敛。
 - 用户一次输入只出现一条用户消息。

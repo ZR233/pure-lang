@@ -125,10 +125,10 @@ fn build_installer(
     version: &Version,
 ) -> Result<()> {
     let iscc = find_iscc()?;
-    let script = paths::flutter_app_dir(workspace_root)
+    let script = paths::studio_app_dir(workspace_root)
         .join("windows")
         .join("installer")
-        .join("PureStudio.iss");
+        .join("pure_studio.iss");
     let output_base = asset_name(version, "setup");
     let args = [
         OsString::from(format!("/DMyAppVersion={version}")),
@@ -166,7 +166,7 @@ fn sign_bundle_if_configured(bundle_dir: &Path) -> Result<()> {
         println!("Authenticode certificate not configured; continuing with Minisign protection.");
         return Ok(());
     };
-    let mut signable = vec![bundle_dir.join("pure_studio_flutter.exe")];
+    let mut signable = vec![bundle_dir.join("pure_studio.exe")];
     signable.extend(
         fs::read_dir(bundle_dir)?
             .filter_map(Result::ok)

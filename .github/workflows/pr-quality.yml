@@ -125,14 +125,5 @@ jobs:
           channel: stable
           cache: true
 
-      - name: flutter pub get
-        working-directory: code/pure-studio-flutter
-        run: flutter pub get
-
-      - name: flutter analyze
-        working-directory: code/pure-studio-flutter
-        run: flutter analyze --no-pub
-
-      - name: flutter test
-        working-directory: code/pure-studio-flutter
-        run: flutter test --no-pub --exclude-tags visual
+      - name: Verify Flutter application
+        run: cargo xtask verify-gui

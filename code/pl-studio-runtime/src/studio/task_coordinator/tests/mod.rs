@@ -666,8 +666,8 @@ fn production_merge_verifier_selects_repo_rust_fmt_and_flutter_project_analyze()
         Path::new("C:/repo"),
         &[
             "code/pl-core/src/lib.rs".to_string(),
-            "code/pure-studio-flutter/windows/runner/main.cpp".to_string(),
-            "code/pure-studio-flutter/lib/l10n/app_zh.arb".to_string(),
+            "code/pure-studio/windows/runner/main.cpp".to_string(),
+            "code/pure-studio/lib/l10n/app_zh.arb".to_string(),
         ],
     );
 
@@ -684,7 +684,7 @@ fn production_merge_verifier_selects_repo_rust_fmt_and_flutter_project_analyze()
                 ],
             },
             MergeVerificationCommand {
-                working_directory: PathBuf::from("C:/repo/code/pure-studio-flutter"),
+                working_directory: PathBuf::from("C:/repo/code/pure-studio"),
                 command: vec![
                     "flutter".to_string(),
                     "--no-version-check".to_string(),

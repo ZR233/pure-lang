@@ -11,7 +11,7 @@
 - `pl-core`：产品无关的 turn/session/agent 框架、模型配置值对象与通用工具
 - `pl-studio-runtime`：Pure Studio 配置、持久化、项目与任务编排
 - `pl-studio-bridge`：Flutter Rust Bridge v2 桥接 crate
-- `pure-studio-flutter`：Flutter Windows 桌面端
+- `pure-studio`：Flutter Windows 桌面端
 - `pl-xtask`：本仓库开发任务入口，不参与运行时依赖链
 
 ## 2.2 pl-protocol
@@ -90,7 +90,7 @@ Flutter bridge 只调用该 crate。
 
 ## 2.7 pl-studio-bridge（FRB 桥接）
 
-`pl-studio-bridge` 位于 `code/pure-studio-flutter/rust/`，crate 名称遵循 `pl-` 前缀。它是 Flutter Rust Bridge v2 的 native crate，只负责把 Dart 调用转换成 `pl-studio-runtime` API。
+`pl-studio-bridge` 位于 `code/pure-studio/rust/`，crate 名称遵循 `pl-` 前缀。它是 Flutter Rust Bridge v2 的 native crate，只负责把 Dart 调用转换成 `pl-studio-runtime` API。
 
 公开 API 以 Flutter 端需求为边界：
 
@@ -129,9 +129,9 @@ Flutter bridge 只调用该 crate。
 global event 继续使用独立 envelope。桥接层不得复制 session projection 规则，也不得把
 `serde_json::Value` 直接暴露为 FRB 类型。
 
-## 2.8 pure-studio-flutter（Flutter UI）
+## 2.8 pure-studio（Flutter UI）
 
-`pure-studio-flutter` 位于 `code/pure-studio-flutter/`，首版只承诺 Windows 桌面。UI 使用 Material 3 工具型设计、Riverpod 状态管理和 `go_router` 页面栈。功能覆盖 Studio 主路径：项目/会话侧栏、聊天 timeline、streaming markdown、reasoning/tool/plan part、composer、停止、权限模式、tool approval、user input、plan confirmation、状态栏，以及 Provider/Instructions/Skills/Roles/MCP/Security/General 设置页。
+`pure-studio` 位于 `code/pure-studio/`，首版只承诺 Windows 桌面。UI 使用 Material 3 工具型设计、Riverpod 状态管理和 `go_router` 页面栈。功能覆盖 Studio 主路径：项目/会话侧栏、聊天 timeline、streaming markdown、reasoning/tool/plan part、composer、停止、权限模式、tool approval、user input、plan confirmation、状态栏，以及 Provider/Instructions/Skills/Roles/MCP/Security/General 设置页。
 
 Flutter store 不直接读取 SQLite 或配置文件，只通过 `pl-studio-bridge` 调用
 `pl-studio-runtime`。打开会话时订阅该会话事件流，切换会话时取消旧订阅；全局事件流只承载低频配置、项目和 health 变化。
@@ -142,11 +142,14 @@ Flutter store 不直接读取 SQLite 或配置文件，只通过 `pl-studio-brid
 
 公开命令：
 
+- `cargo xtask verify-gui`
 - `cargo xtask run-gui [--demo] [--demo-fallback]`
 - `cargo xtask build-gui [--demo] [--no-clean]`
 - `cargo xtask build-rust-bridge --workspace-root <path> --configuration <Debug|Profile|Release> --output-dir <path> [--target-dir <path>]`
 
-GUI 命令从仓库根目录调用，但所有 Flutter 子命令都以 `code/pure-studio-flutter/` 为工作目录执行。`build-rust-bridge` 是 Flutter Windows CMake 内部入口，负责构建并复制 `pl_studio_bridge.dll`/`.pdb`。
+Studio 命令从仓库根目录调用；`verify-gui` 依次执行依赖解析、静态分析和非视觉测试，
+xtask 内部统一以 `code/pure-studio/` 为 Flutter 工作目录。`build-rust-bridge` 是 Flutter
+Windows CMake 内部入口，负责构建并复制 `pl_studio_bridge.dll`/`.pdb`。
 
 ## 2.10 本地数据版本
 
@@ -173,7 +176,7 @@ members = [
     "code/pl-skill-core",
     "code/pl-core",
     "code/pl-studio-runtime",
-    "code/pure-studio-flutter/rust",
+    "code/pure-studio/rust",
     "xtask",
 ]
 resolver = "3"

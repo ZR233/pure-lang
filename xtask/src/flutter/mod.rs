@@ -76,9 +76,29 @@ impl DesktopTarget {
     }
 }
 
+pub(crate) fn verify_gui() -> Result<()> {
+    let workspace_root = paths::workspace_root()?;
+    let app_dir = paths::studio_app_dir(&workspace_root);
+    print_context(&workspace_root, &app_dir);
+
+    run_flutter(&workspace_root, &app_dir, &["pub", "get"], DemoMode::Native)?;
+    run_flutter(
+        &workspace_root,
+        &app_dir,
+        &["analyze", "--no-pub"],
+        DemoMode::Native,
+    )?;
+    run_flutter(
+        &workspace_root,
+        &app_dir,
+        &["test", "--no-pub", "--exclude-tags", "visual"],
+        DemoMode::Native,
+    )
+}
+
 pub(crate) fn run_gui(options: RunGuiOptions) -> Result<()> {
     let workspace_root = paths::workspace_root()?;
-    let app_dir = paths::flutter_app_dir(&workspace_root);
+    let app_dir = paths::studio_app_dir(&workspace_root);
     let target = DesktopTarget::current()?;
     let app_version = studio_version::read(&app_dir)?;
     let version_define = format!("--dart-define=PURE_STUDIO_VERSION={app_version}");
@@ -129,7 +149,7 @@ pub(crate) fn build_gui_release(options: BuildGuiOptions, version: &str) -> Resu
 
 fn build_gui_with_version(options: BuildGuiOptions, release_version: Option<&str>) -> Result<()> {
     let workspace_root = paths::workspace_root()?;
-    let app_dir = paths::flutter_app_dir(&workspace_root);
+    let app_dir = paths::studio_app_dir(&workspace_root);
     let dist_dir = paths::release_dist_dir(&workspace_root);
     let target = DesktopTarget::current()?;
     let app_version = studio_version::read(&app_dir)?;
@@ -200,7 +220,7 @@ fn prepare_pubspec_lock_for_active_hosted_url(lock_path: &Path) -> Result<()> {
 
 fn print_context(workspace_root: &Path, app_dir: &Path) {
     println!("Workspace root: {}", workspace_root.display());
-    println!("Flutter app dir: {}", app_dir.display());
+    println!("Studio app dir: {}", app_dir.display());
 }
 
 fn run_flutter(
@@ -223,7 +243,7 @@ fn run_flutter(
     }
     process::run_checked(&mut command, &display).with_context(|| {
         format!(
-            "workspace root: {}, Flutter app dir: {}",
+            "workspace root: {}, Studio app dir: {}",
             workspace_root.display(),
             app_dir.display()
         )

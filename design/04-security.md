@@ -22,7 +22,7 @@ execution profile 的工具 effect 白名单优先于权限模式。即使当前
 
 安全边界按端口-适配器落位：
 
-- `pure-studio-flutter`：输入收集、事件展示、命令调用
+- `pure-studio`：输入收集、事件展示、命令调用
 - `pl-studio-runtime::StudioRuntime` / `StudioHost`：产品策略编译与资源约束
 - `pl-core::AgentRuntime` / `TurnEngine`：执行策略校验、actor 状态与通用 turn 约束
 - `pl-core::agent_runtime` host traits：repository、turn factory、lifecycle 与 event 端口

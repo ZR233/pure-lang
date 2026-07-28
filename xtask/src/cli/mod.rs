@@ -6,6 +6,7 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Command {
     Help(HelpTopic),
+    VerifyGui,
     RunGui(RunGuiOptions),
     BuildGui(BuildGuiOptions),
     ReleaseGui(ReleaseGuiOptions),
@@ -15,6 +16,7 @@ pub(crate) enum Command {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HelpTopic {
     Global,
+    VerifyGui,
     RunGui,
     BuildGui,
     ReleaseGui,
@@ -78,6 +80,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command>
 
     match command.as_str() {
         "-h" | "--help" | "help" => Ok(Command::Help(HelpTopic::Global)),
+        "verify-gui" => parse_verify_gui(args),
         "run-gui" => parse_run_gui(args),
         "build-gui" => parse_build_gui(args),
         "release-gui" => parse_release_gui(args),
@@ -96,13 +99,16 @@ pub(crate) fn print_help(topic: HelpTopic) {
 pub(crate) fn help_text(topic: HelpTopic) -> &'static str {
     match topic {
         HelpTopic::Global => {
-            "Usage: cargo xtask <command> [options]\n\nCommands:\n  run-gui             Run the Pure Studio Flutter desktop app.\n  build-gui           Build release artifacts for the current desktop OS.\n  release-gui         Stage, finalize, or verify a Windows stable release.\n  build-rust-bridge   Build the Windows Rust bridge DLL for Flutter CMake.\n\nRun `cargo xtask <command> --help` for command-specific options."
+            "Usage: cargo xtask <command> [options]\n\nCommands:\n  verify-gui          Resolve, analyze, and test the Pure Studio desktop app.\n  run-gui             Run the Pure Studio desktop app.\n  build-gui           Build release artifacts for the current desktop OS.\n  release-gui         Stage, finalize, or verify a Windows stable release.\n  build-rust-bridge   Build the Windows Rust bridge DLL for Flutter CMake.\n\nRun `cargo xtask <command> --help` for command-specific options."
+        }
+        HelpTopic::VerifyGui => {
+            "Usage: cargo xtask verify-gui\n\nRuns Flutter dependency resolution, static analysis, and non-visual tests from the repository task entrypoint.\n\nOptions:\n  -h, --help  Print help."
         }
         HelpTopic::RunGui => {
             "Usage: cargo xtask run-gui [--demo] [--demo-fallback]\n\nOptions:\n  --demo           Run with PURE_STUDIO_DEMO=true.\n  --demo-fallback  Retry in demo mode if the native run fails.\n  -h, --help       Print help."
         }
         HelpTopic::BuildGui => {
-            "Usage: cargo xtask build-gui [--demo] [--no-clean]\n\nOptions:\n  --demo      Build with PURE_STUDIO_DEMO=true.\n  --no-clean  Keep existing files in dist/pure-studio-flutter-release.\n  -h, --help  Print help."
+            "Usage: cargo xtask build-gui [--demo] [--no-clean]\n\nOptions:\n  --demo      Build with PURE_STUDIO_DEMO=true.\n  --no-clean  Keep existing files in dist/pure-studio-release.\n  -h, --help  Print help."
         }
         HelpTopic::ReleaseGui => {
             "Usage:\n  cargo xtask release-gui <stage|finalize|verify> --version <x.y.z>\n\nPackage versions must be stable SemVer and match pubspec.yaml. Signing uses the minisign executable and MINISIGN_SECRET_KEY_FILE for finalize."
@@ -110,6 +116,17 @@ pub(crate) fn help_text(topic: HelpTopic) -> &'static str {
         HelpTopic::BuildRustBridge => {
             "Usage: cargo xtask build-rust-bridge --workspace-root <path> --configuration <Debug|Profile|Release> --output-dir <path> [--target-dir <path>]\n\nOptions:\n  --workspace-root <path>              Pure-Lang workspace root.\n  --configuration <Debug|Profile|Release>\n  --output-dir <path>                  Directory that receives pl_studio_bridge.dll.\n  --target-dir <path>                  Optional Cargo target directory.\n  -h, --help                           Print help."
         }
+    }
+}
+
+fn parse_verify_gui(mut args: VecDeque<OsString>) -> Result<Command> {
+    match args.pop_front().map(into_string).transpose()?.as_deref() {
+        None => Ok(Command::VerifyGui),
+        Some("-h" | "--help") if args.is_empty() => Ok(Command::Help(HelpTopic::VerifyGui)),
+        Some(other) => bail!(
+            "unknown verify-gui option: {other}\n\n{}",
+            help_text(HelpTopic::VerifyGui)
+        ),
     }
 }
 
@@ -270,6 +287,16 @@ mod tests {
                 demo: true,
                 demo_fallback: true,
             })
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn parses_verify_gui() -> Result<()> {
+        assert_eq!(parse_words(&["xtask", "verify-gui"])?, Command::VerifyGui);
+        assert_eq!(
+            parse_words(&["xtask", "verify-gui", "--help"])?,
+            Command::Help(HelpTopic::VerifyGui)
         );
         Ok(())
     }

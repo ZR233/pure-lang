@@ -44,7 +44,7 @@ OpenAI 远程模式默认使用 v2 `compaction_trigger`，`/responses/compact` �
 
 扩展时保持入口层薄：
 
-- UI 输入只在 `pure-studio-flutter` 中收集。
+- UI 输入只在 `pure-studio` 中收集。
 - 进入核心层前转换为明确 enum 或 options struct。
 - 避免把 bool 参数暴露到核心 API。
 
@@ -53,10 +53,10 @@ OpenAI 远程模式默认使用 v2 `compaction_trigger`，`/responses/compact` �
 
 ## 5.3 前端扩展
 
-`pure-studio-flutter` 是当前桌面前端。后续可以增加 CLI、Web 或 IDE 前端；产品前端调用
+`pure-studio` 是当前桌面前端。后续可以增加 CLI、Web 或 IDE 前端；产品前端调用
 自己的宿主 runtime，宿主再接入 `pl-core` agent 框架。
 
-`pure-studio-flutter` 使用 Flutter Windows 桌面应用，UI 使用 Material 3、Riverpod 和
+`pure-studio` 使用 Flutter Windows 桌面应用，UI 使用 Material 3、Riverpod 和
 flutter_rust_bridge。桌面端状态和配置均由 `pl-studio-runtime` 持久化。
 
 ## 5.4 执行能力扩展

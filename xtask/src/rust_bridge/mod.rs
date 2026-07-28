@@ -21,7 +21,7 @@ pub(crate) fn build(options: BuildRustBridgeOptions) -> Result<()> {
     let target_dir = options.target_dir.unwrap_or_else(|| {
         workspace_root
             .join("code")
-            .join("pure-studio-flutter")
+            .join("pure-studio")
             .join("build")
             .join("rust-target")
     });

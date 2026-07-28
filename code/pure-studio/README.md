@@ -14,7 +14,7 @@ Windows-first Flutter desktop client for Pure Studio.
 
 ```powershell
 # Run from repository root. xtask invokes Flutter with
-# code/pure-studio-flutter as the working directory.
+# code/pure-studio as the working directory.
 cargo xtask run-gui
 cargo xtask build-gui
 

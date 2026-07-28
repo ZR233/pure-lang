@@ -3,7 +3,7 @@
 ## 9.1 Crate 命名
 
 - 库 crate 使用 `pl-` 前缀。
-- Flutter bridge crate 使用 `pl-studio-bridge`，Flutter app package 使用 `pure_studio_flutter`。
+- Flutter bridge crate 使用 `pl-studio-bridge`，Flutter app package 使用 `pure_studio`。
 - 公共协议类型放入 `pl-protocol`。
 
 ## 9.2 依赖方向
@@ -19,7 +19,7 @@ pl-core
     ↑
 pl-studio-bridge
     ↑
-pure-studio-flutter
+pure-studio
 ```
 
 允许 `pl-core` 同时直接依赖 `pl-protocol`、`pl-trace`、`pl-model` 和 `pl-lsp`。
@@ -43,7 +43,7 @@ pub trait ModelProvider: Send + Sync {
 
 核心 API 不暴露语义模糊的 `bool` 或 `Option<bool>`。
 
-前端输入应在 `pure-studio-flutter` 边界转换为明确类型，例如 `CompileMode`。
+前端输入应在 `pure-studio` 边界转换为明确类型，例如 `CompileMode`。
 
 ## 9.5 模块和导出
 
@@ -54,7 +54,7 @@ pub trait ModelProvider: Send + Sync {
 ## 9.6 文档口径
 
 - 项目名：Pure-Lang。
-- 桌面编译器前端：`pure-studio-flutter`。
+- 桌面编译器前端：`pure-studio`。
 - 核心逻辑层：`pl-core`。
 - LLM provider 层：`pl-model`。
 - 公共协议层：`pl-protocol`。

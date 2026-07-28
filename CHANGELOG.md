@@ -2,6 +2,9 @@
 
 Pure Studio release notes are generated from Conventional Commits by Release Please.
 
+> 从采用 `pure_studio.exe` 的版本开始，请先手动卸载旧版 Pure Studio，再安装新版。
+> 安装器允许直接覆盖，但不会检测或删除旧程序文件；跳过卸载可能留下旧文件。
+
 ## [1.0.3](https://github.com/ZR233/pure-lang/compare/v1.0.2...v1.0.3) (2026-07-23)
 
 

@@ -1,4 +1,4 @@
-import 'package:pure_studio_flutter/src/domain/models/studio_models.dart';
+import 'package:pure_studio/src/domain/models/studio_models.dart';
 
 const responsiveVisualSessionTitle =
     'Responsive layout audit for an intentionally long Pure Studio session '
@@ -447,7 +447,7 @@ StudioState responsiveVisualToolState() {
       name: 'exec',
       arguments:
           '{"command":"flutter test test/widget_test.dart",'
-          '"workingDirectory":"code/pure-studio-flutter"}',
+          '"workingDirectory":"code/pure-studio"}',
     ),
   );
   return state.copyWith(

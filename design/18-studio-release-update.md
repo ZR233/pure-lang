@@ -59,6 +59,11 @@ GitHub draft Release 只对具备仓库 push 权限的身份可见，因此负�
 包含 LICENSE 与 THIRD_PARTY_NOTICES。便携版只供手动分发；便携用户执行应用内升级时进入
 正式安装版，不对当前运行目录做原地覆盖。
 
+采用 `pure_studio.exe` 新文件名的首个版本要求用户先手动卸载旧版再安装。安装器继续使用
+同一 AppId、安装目录和用户数据目录，但允许直接覆盖安装，不检测也不删除旧 EXE 或旧 WER
+配置；跳过手动卸载时，旧文件可能残留。新版快捷方式、卸载项、WER 配置和 Authenticode
+检查只指向 `pure_studio.exe`。
+
 安装器与便携包继续排除 PDB；Windows 构建必须同时产生独立、带 release version、commit
 SHA 与 session protocol version 映射的 symbols artifact，收集 runner 和 Rust bridge 的匹配
 PDB。symbols artifact 只用于崩溃分析，不作为公开更新资产，也不能被安装器加载。

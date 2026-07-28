@@ -18,9 +18,9 @@ platforms: ["windows"]
   - `code/pl-model` — LLM Provider 运行时
   - `code/pl-lsp` — LSP 客户端
   - `code/pl-core` — 核心编译引擎
-  - `code/pure-studio-flutter/rust` — FRB 桥接 crate（包名 `pl-studio-bridge`）
+  - `code/pure-studio/rust` — FRB 桥接 crate（包名 `pl-studio-bridge`）
 - 依赖方向：`pl-protocol` ← `pl-trace` ← `pl-model` ← `pl-core` ← `pl-studio-bridge`
-- Flutter 前端在 `code/pure-studio-flutter/`（Dart 包名 `pure_studio_flutter`）
+- Flutter 前端在 `code/pure-studio/`（Dart 包名 `pure_studio`）
 
 ## 探索步骤
 
@@ -58,7 +58,7 @@ design/02-crates.md     # 每个 crate 的职责和边界
 | 3 | `code/pl-model` | ModelProvider trait、ProviderKind、支持的供应商 |
 | 4 | `code/pl-lsp` | LSP client、语言服务器管理、查询能力 |
 | 5 | `code/pl-core` | 所有模块、领域模型、Studio 运行时、SQLite 存储、工具系统 |
-| 6 | `code/pure-studio-flutter/rust` | FRB API 表面、事件订阅、brige 函数 |
+| 6 | `code/pure-studio/rust` | FRB API 表面、事件订阅、brige 函数 |
 
 **关于 `pl-core` 的特殊说明**：该 crate 最大、最复杂。其 explorer agent 可能会自己再分出一个子 explorer 探索目录结构。这是预期行为，父 agent 会负责汇总。
 

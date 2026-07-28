@@ -10,9 +10,9 @@
 | `pl-lsp` | LSP client、语言服务器进程与代码智能查询 |
 | `pl-core` | turn、session、Studio SQLite、角色化配置、工具审批、核心编译流程编排 |
 | `pl-studio-bridge` | Flutter Rust Bridge v2 native crate，转发 Flutter API 与 event stream |
-| `pure-studio-flutter` | Flutter Windows 桌面前端，负责 Material 3 UI、FRB 调用、事件订阅和输入回调 |
+| `pure-studio` | Flutter Windows 桌面前端，负责 Material 3 UI、FRB 调用、事件订阅和输入回调 |
 
-P0 不包含独立沙箱。`pure-studio-flutter` 接入工具系统时默认使用 `PermissionMode::RequestApproval`：workspace 内访问直接放行，workspace 外访问按权限模式请求用户审批、AI reviewer 审批或在 `full-access` 下放行。后续可以继续补充持久化授权和更强隔离，但不得把默认路径退回无边界的直接执行。
+P0 不包含独立沙箱。`pure-studio` 接入工具系统时默认使用 `PermissionMode::RequestApproval`：workspace 内访问直接放行，workspace 外访问按权限模式请求用户审批、AI reviewer 审批或在 `full-access` 下放行。后续可以继续补充持久化授权和更强隔离，但不得把默认路径退回无边界的直接执行。
 
 ## 6.2 P1：核心能力完善
 
@@ -20,7 +20,7 @@ P0 不包含独立沙箱。`pure-studio-flutter` 接入工具系统时默认使�
 - 完善 `AgentEvent` 的编译阶段事件。
 - 增加更多 provider 配置入口。
 - 完成 `pl-core` 的 SeaORM SQLite 会话存储。
-- 完成 `pure-studio-flutter` 的设置编辑器和流式 GUI。
+- 完成 `pure-studio` 的设置编辑器和流式 GUI。
 
 ## 6.3 P2：工具与执行策略
 
@@ -30,7 +30,7 @@ P0 不包含独立沙箱。`pure-studio-flutter` 接入工具系统时默认使�
 - 为执行输出建立统一事件流。
 - 为桌面端补充更细粒度的审批策略、持久化授权和沙箱实现。
 
-执行能力必须显式建模，不能隐式混入 `pure-studio-flutter` 或 `pl-model`。
+执行能力必须显式建模，不能隐式混入 `pure-studio` 或 `pl-model`。
 
 ## 6.4 验证命令
 
@@ -50,8 +50,6 @@ cargo test -p pl-model
 cargo test -p pl-lsp
 cargo test -p pl-core
 cargo test -p pl-studio-bridge
-cd code/pure-studio-flutter
-flutter analyze
-flutter test
-flutter build windows
+cargo xtask verify-gui
+cargo xtask build-gui
 ```

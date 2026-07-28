@@ -12,7 +12,7 @@ platforms: ["windows", "linux", "macos"]
 ## 前置知识
 
 - AGENTS.md 和 `design/09-conventions.md` 是审查的约定依据。
-- 所有 crate 在 `code/` 下：`pl-protocol`、`pl-trace`、`pl-model`、`pl-lsp`、`pl-core`、`pure-studio-flutter/rust`（pl-studio-bridge）。
+- 所有 crate 在 `code/` 下：`pl-protocol`、`pl-trace`、`pl-model`、`pl-lsp`、`pl-core`、`pure-studio/rust`（pl-studio-bridge）。
 - 跨 crate 依赖方向：`pl-protocol` ← `pl-trace` ← `pl-model` ← `pl-core` ← `pl-studio-bridge`。
 - 模块大小目标 ≤500 行（不含测试），超 800 行强制拆分。
 - `frb_generated.rs` 为自动生成文件，不参与审查。
@@ -187,7 +187,7 @@ rg 'TODO|FIXME|HACK|XXX' code/ --glob '*.rs'  -n
 | 1 | `pl-core/src/` | 模块大小、Studio 模块 anyhow 混用、错误处理、安全 |
 | 2 | `pl-model/src/` | SSE 健壮性、serde rename_all、unwrap/expect |
 | 3 | `pl-lsp/` + `pl-protocol/` + `pl-trace/` | 模块大小、format! 内联、死参数、LSP 资源管理 |
-| 4 | `pure-studio-flutter/rust/` (bridge) | 模块大小、FRB 错误转换、format! 内联 |
+| 4 | `pure-studio/rust/` (bridge) | 模块大小、FRB 错误转换、format! 内联 |
 
 父 agent 合取各子报告，交叉验证，输出汇总表和修复计划。
 

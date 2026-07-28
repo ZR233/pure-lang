@@ -69,10 +69,10 @@ pub(crate) fn select_merge_verification_commands(
     }
     if changed_files
         .iter()
-        .any(|path| path.starts_with("code/pure-studio-flutter/"))
+        .any(|path| path.starts_with("code/pure-studio/"))
     {
         commands.push(MergeVerificationCommand {
-            working_directory: workspace.join("code/pure-studio-flutter"),
+            working_directory: workspace.join("code/pure-studio"),
             command: vec![
                 "flutter".to_string(),
                 "--no-version-check".to_string(),
