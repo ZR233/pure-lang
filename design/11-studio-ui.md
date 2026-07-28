@@ -131,11 +131,11 @@ Timeline row 从 `messages + parts + partTextAccumDelta + agentTimelineEvents` �
 
 reasoning part 按 opencode 普通 assistant part 处理，参与 `groupParts`，不再把同 turn 的多个 reasoning part 合并成旧 thought entry。这样新 reasoning 的 `messageId + partId` 不会复用旧 row key，也不会把流式 delta 写回旧思考行。
 
-reasoning 默认折叠为“思考中 / 已思考”结构化行，只在 header 展示状态与可选耗时；展开后展示 `StudioPart.text` 中的完整 provider-emitted reasoning summary/thinking stream，并使用与普通 Markdown 相同的 stream-safe 渲染。provider replay metadata、后端诊断和未进入 `StudioPart.text` 的内部推理不进入 timeline 正文。`showReasoningSummaries` 只能控制是否显示 reasoning summary/row，不能把多个 reasoning part 合并成一个旧 thought row。
+reasoning 默认折叠为内容摘要结构化行：存在 `StudioPart.text` 或 live `reasoning.summary` 时，header 展示最新非空 reasoning 文本的单行摘要并随 delta 原地刷新；只有尚未收到任何可见 reasoning 内容时才显示“思考中”，终态仍无内容时显示“已思考”。展开后展示完整 provider-emitted reasoning summary/thinking stream，并使用与普通 Markdown 相同的 stream-safe 渲染。provider replay metadata、后端诊断和未进入 `StudioPart.text` 的内部推理不进入 timeline 正文。`showReasoningSummaries` 只能控制是否显示 reasoning summary/row，不能把多个 reasoning part 合并成一个旧 thought row。
 
 reasoning 展开/折叠是前端 UI 状态，不写回 `StudioPart` snapshot，也不参与 live overlay。Flutter 以 `sessionId + partId` 为 key 保存展开状态；row 重排、snapshot 刷新或 widget 重建时必须保持同一 reasoning part 的展开状态，切换到其他 session 时不得复用同名 part 的 UI 状态。
 
-text/reasoning 的显示文本读取 `partTextAccumDelta[partId] ?? part.text`。snapshot 到达后以 snapshot 为准并清 overlay；同一 frame 内同 part 的 snapshot 覆盖旧 delta。Flutter reducer 使用 frame callback 批处理 `messagePartDelta`；切换 session 或 durable snapshot 到达前必须先 flush 当前 pending delta。若 snapshot coalescing 替换了 start snapshot，同 part 的 pending delta 进入 stale set 并跳过，避免旧思考 chunk 倒灌到 terminal 文本。
+text 的显示文本读取 `text` live overlay，reasoning 的显示文本优先读取 `reasoning.summary` live overlay，并以 `text` overlay 作为兼容回退；没有 live overlay 时读取 `part.text`。snapshot 到达后以 snapshot 为准并清 overlay；同一 frame 内同 part 的 snapshot 覆盖旧 delta。Flutter reducer 使用 frame callback 批处理 `messagePartDelta`；切换 session 或 durable snapshot 到达前必须先 flush 当前 pending delta。若 snapshot coalescing 替换了 start snapshot，同 part 的 pending delta 进入 stale set 并跳过，避免旧思考 chunk 倒灌到 terminal 文本。
 
 阶段性文本输出使用普通 `text` part，`textChannel=commentary`。start snapshot 创建空 part，delta 追加到 live overlay，terminal snapshot 固化完整文本。即使终态 snapshot 很快到达，前端也必须能在流式期间显示 commentary/final 中间文本；不能把 commentary 合并进 final，也不能把工具后的新文本追加到工具前的 part。
 Provider stream adapter 必须在工具输入开始、工具调用就绪或新 step 开始前关闭当前可见文本段；对于 Chat/DeepSeek 这类通过 `<commentary>/<final>` 或未标记文本解析可见输出的 provider，文本段边界也必须在 stream projection 层产生，不能由 `pl-core` 事后补写兜底文本。
