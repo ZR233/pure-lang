@@ -589,6 +589,16 @@ async fn v4_schema_is_backed_up_and_migrated_with_wake_receipts() {
              snapshot_json TEXT NOT NULL,
              updated_at INTEGER NOT NULL
          );
+         CREATE TABLE work_units (
+             id TEXT PRIMARY KEY,
+             status TEXT NOT NULL
+         );
+         CREATE TABLE agent_outcomes (
+             id TEXT PRIMARY KEY,
+             work_unit_id TEXT,
+             status TEXT NOT NULL,
+             error TEXT
+         );
          PRAGMA user_version = 4;",
     )
     .await;
@@ -616,6 +626,78 @@ async fn v4_schema_is_backed_up_and_migrated_with_wake_receipts() {
     drop(store);
     remove_test_db_files(&db_path).await;
     let _ = tokio::fs::remove_file(format!("{}.v4.bak", db_path.display())).await;
+}
+
+#[tokio::test]
+async fn v5_migration_only_backfills_exact_legacy_discard_evidence() {
+    let db_path = unique_test_db_path("schema-v5-worktree-disposition");
+    remove_test_db_files(&db_path).await;
+    let db = Database::connect(sqlite_url_for_test(&db_path))
+        .await
+        .unwrap();
+    execute_sql(
+        &db,
+        "CREATE TABLE work_units (
+             id TEXT PRIMARY KEY,
+             status TEXT NOT NULL
+         );
+         CREATE TABLE agent_outcomes (
+             id TEXT PRIMARY KEY,
+             work_unit_id TEXT,
+             status TEXT NOT NULL,
+             error TEXT
+         );
+         INSERT INTO work_units (id, status) VALUES
+             ('exact', 'cancelled'),
+             ('legacy', 'cancelled'),
+             ('failed', 'failed');
+         INSERT INTO agent_outcomes (id, work_unit_id, status, error) VALUES
+             ('outcome-exact', 'exact', 'cancelled', 'executor discarded by planner'),
+             ('outcome-legacy', 'legacy', 'cancelled', 'executor stopped'),
+             ('outcome-failed', 'failed', 'cancelled', 'executor discarded by planner');
+         PRAGMA user_version = 5;",
+    )
+    .await;
+    db.close().await.unwrap();
+
+    let store = StudioStore::open(&db_path).await.unwrap();
+    let rows = store
+        .db
+        .query_all(Statement::from_string(
+            DatabaseBackend::Sqlite,
+            "SELECT id, worktree_disposition FROM work_units ORDER BY id".to_string(),
+        ))
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|row| {
+            (
+                row.try_get::<String>("", "id").unwrap(),
+                row.try_get::<String>("", "worktree_disposition").unwrap(),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        rows,
+        vec![
+            ("exact".to_string(), "cleanupRequested".to_string()),
+            ("failed".to_string(), "protect".to_string()),
+            ("legacy".to_string(), "protect".to_string()),
+        ]
+    );
+    assert_eq!(
+        schema_version(&store.db).await,
+        STUDIO_DATABASE_SCHEMA_VERSION
+    );
+    assert!(
+        PathBuf::from(format!("{}.v5.bak", db_path.display())).is_file(),
+        "v5 migration must preserve a recoverable backup"
+    );
+
+    drop(store);
+    remove_test_db_files(&db_path).await;
+    let _ = tokio::fs::remove_file(format!("{}.v5.bak", db_path.display())).await;
 }
 
 #[tokio::test]

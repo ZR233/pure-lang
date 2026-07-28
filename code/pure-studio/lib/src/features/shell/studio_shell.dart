@@ -20,6 +20,7 @@ import '../timeline/timeline_view.dart';
 import '../todo/session_todo_panel.dart';
 
 part 'studio_sidebar.dart';
+part 'recovery_cleanup_dialog.dart';
 part 'studio_shell_chrome.dart';
 part 'agent_workspace_pane.dart';
 part 'agent_workspace_preview.dart';
@@ -38,8 +39,7 @@ class _StudioShellState extends ConsumerState<StudioShell> {
     return asyncState.when(
       loading: () =>
           const Scaffold(body: Center(child: CircularProgressIndicator())),
-      error: (error, stackTrace) =>
-          Scaffold(body: Center(child: Text(error.toString()))),
+      error: (error, stackTrace) => _StudioFatalError(error: error),
       data: (state) => LayoutBuilder(
         builder: (context, constraints) {
           final compact = constraints.maxWidth < StudioLayout.compactBreakpoint;
@@ -55,6 +55,10 @@ class _StudioShellState extends ConsumerState<StudioShell> {
                     child: Column(
                       children: [
                         _Header(state: state),
+                        if (state.applicationRecoveryIssues.isNotEmpty)
+                          _ApplicationRecoveryBanner(
+                            issues: state.applicationRecoveryIssues,
+                          ),
                         const Divider(height: 1),
                         const Expanded(child: AgentWorkspacePane()),
                       ],

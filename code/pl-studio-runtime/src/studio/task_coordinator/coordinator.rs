@@ -3,11 +3,26 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use anyhow::{Context, Result, bail};
+use sha2::{Digest, Sha256};
 use tokio::sync::{MutexGuard, broadcast};
 
-use super::git::{RepositorySnapshot, inspect_repository, prepare_repository_for_task};
-use super::{CreateTaskRun, TaskRunPhase, TaskRunRecord, TaskWorktreeOwnerSnapshot};
+use super::git::{
+    RepositorySnapshot, inspect_repository, inspect_worktree_changes, prepare_repository_for_task,
+};
+use super::{
+    CreateTaskRun, TaskRunPhase, TaskRunRecord, TaskWorktreeOwnerSnapshot, WorkUnitRecord,
+};
+use crate::agent::worktree::{
+    DurableWorktreeDisposition, DurableWorktreePresence, DurableWorktreeResource,
+    DurableWorktreeResourcePresence, cleanup_task_worktree_resources,
+    inspect_task_worktree_resources, validate_task_worktree_resource_identities,
+};
 use crate::studio::ids::new_id;
+use crate::studio::runtime_state::{
+    StudioRecoveryCleanupPreview, StudioRecoveryCleanupResource, StudioRecoveryIssue,
+    StudioRecoveryIssueAction, StudioRecoveryIssueCategory, StudioRecoveryIssueScope,
+    StudioRecoveryResourcePresence,
+};
 use crate::studio::store::StudioStore;
 
 mod recovery;
@@ -22,6 +37,35 @@ struct BranchKey {
 struct WorktreeRecoveryGroup {
     repositories: Vec<PathBuf>,
     owners: Vec<TaskWorktreeOwnerSnapshot>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct TaskRecoveryReport {
+    pub(crate) recovered_runs: Vec<TaskRunRecord>,
+    pub(crate) issues: Vec<StudioRecoveryIssue>,
+}
+
+impl std::ops::Deref for TaskRecoveryReport {
+    type Target = [TaskRunRecord];
+
+    fn deref(&self) -> &Self::Target {
+        &self.recovered_runs
+    }
+}
+
+impl IntoIterator for TaskRecoveryReport {
+    type Item = TaskRunRecord;
+    type IntoIter = std::vec::IntoIter<TaskRunRecord>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.recovered_runs.into_iter()
+    }
+}
+
+impl PartialEq<Vec<TaskRunRecord>> for TaskRecoveryReport {
+    fn eq(&self, other: &Vec<TaskRunRecord>) -> bool {
+        self.recovered_runs == *other
+    }
 }
 
 impl BranchKey {
@@ -184,13 +228,24 @@ impl TaskCoordinator {
         Ok(run)
     }
 
-    pub(crate) async fn recover_active_tasks(&self) -> Result<Vec<TaskRunRecord>> {
+    pub(crate) async fn recover_active_tasks(&self) -> Result<TaskRecoveryReport> {
+        let mut report = TaskRecoveryReport::default();
         let mut prepared = Vec::new();
         let mut failed_agent_runs = HashSet::new();
         for run in self.store.list_active_task_runs().await? {
             let key = BranchKey::new(Path::new(&run.git_common_dir), &run.branch);
             if let Err(error) = acquire_process_lease(&key, &run.id) {
-                self.block_run(&run, error.to_string()).await?;
+                let message = error.to_string();
+                self.block_run(&run, message.clone()).await?;
+                self.push_recovery_issue(
+                    &mut report,
+                    &run,
+                    StudioRecoveryIssueScope::Session,
+                    StudioRecoveryIssueCategory::ProcessLease,
+                    StudioRecoveryIssueAction::CleanupSession,
+                    message,
+                )
+                .await?;
                 continue;
             }
             self.owned_process_leases
@@ -202,9 +257,15 @@ impl TaskCoordinator {
                 .reconcile_task_agents_after_restart(&run.id)
                 .await
             {
-                self.block_run(
+                let message = format!("agent restart reconciliation failed: {error}");
+                self.block_run(&run, message.clone()).await?;
+                self.push_recovery_issue(
+                    &mut report,
                     &run,
-                    format!("agent restart reconciliation failed: {error}"),
+                    StudioRecoveryIssueScope::Session,
+                    StudioRecoveryIssueCategory::AgentState,
+                    StudioRecoveryIssueAction::CleanupSession,
+                    message,
                 )
                 .await?;
                 failed_agent_runs.insert(run.id.clone());
@@ -214,7 +275,27 @@ impl TaskCoordinator {
         }
 
         let owners = self.store.list_all_task_worktree_owners().await?;
-        let (groups, run_groups) = resolve_worktree_recovery_groups(owners).await?;
+        let preflight = resolve_worktree_recovery_groups(owners).await;
+        let mut failed_preflight_runs = HashSet::new();
+        for failure in preflight.failures {
+            for run in &failure.runs {
+                failed_preflight_runs.insert(run.id.clone());
+                if !run.phase.is_terminal() {
+                    self.block_run(run, failure.message.clone()).await?;
+                }
+                self.push_recovery_issue(
+                    &mut report,
+                    run,
+                    StudioRecoveryIssueScope::Project,
+                    StudioRecoveryIssueCategory::Repository,
+                    StudioRecoveryIssueAction::RemoveProject,
+                    failure.message.clone(),
+                )
+                .await?;
+            }
+        }
+        let groups = preflight.groups;
+        let run_groups = preflight.run_groups;
         let skipped_groups = failed_agent_runs
             .iter()
             .filter_map(|run_id| run_groups.get(run_id).cloned())
@@ -228,18 +309,23 @@ impl TaskCoordinator {
                 .reconcile_durable_worktrees(&group.repositories, &group.owners)
                 .await
             {
+                let message = format!("worktree restart reconciliation failed: {error}");
                 let affected = prepared
                     .iter()
                     .filter(|run| run_groups.get(&run.id) == Some(&key))
                     .cloned()
                     .collect::<Vec<_>>();
-                if affected.is_empty() {
-                    return Err(error).context("worktree restart reconciliation failed");
+                for run in &affected {
+                    self.block_run(run, message.clone()).await?;
                 }
-                for run in affected {
-                    self.block_run(
-                        &run,
-                        format!("worktree restart reconciliation failed: {error}"),
+                for owner in &group.owners {
+                    self.push_recovery_issue(
+                        &mut report,
+                        &owner.run,
+                        StudioRecoveryIssueScope::Session,
+                        StudioRecoveryIssueCategory::Worktree,
+                        StudioRecoveryIssueAction::CleanupSession,
+                        message.clone(),
                     )
                     .await?;
                 }
@@ -248,8 +334,10 @@ impl TaskCoordinator {
             successful_groups.insert(key);
         }
 
-        let mut recovered = Vec::new();
         for run in prepared {
+            if failed_preflight_runs.contains(&run.id) {
+                continue;
+            }
             if !run_groups
                 .get(&run.id)
                 .is_some_and(|group| successful_groups.contains(group))
@@ -259,12 +347,31 @@ impl TaskCoordinator {
             if run.phase == TaskRunPhase::Merging {
                 match self.recover_merging_run(&run).await {
                     Ok(super::merge::MergeRestartRecovery::Resume(recovered_run)) => {
-                        recovered.push(*recovered_run);
+                        report.recovered_runs.push(*recovered_run);
                     }
-                    Ok(super::merge::MergeRestartRecovery::Blocked) => {}
+                    Ok(super::merge::MergeRestartRecovery::Blocked) => {
+                        self.push_recovery_issue(
+                            &mut report,
+                            &run,
+                            StudioRecoveryIssueScope::Session,
+                            StudioRecoveryIssueCategory::Merge,
+                            StudioRecoveryIssueAction::CleanupSession,
+                            "merge recovery blocked the task".to_string(),
+                        )
+                        .await?;
+                    }
                     Err(error) => {
-                        self.block_run(&run, format!("merge recovery failed: {error}"))
-                            .await?;
+                        let message = format!("merge recovery failed: {error}");
+                        self.block_run(&run, message.clone()).await?;
+                        self.push_recovery_issue(
+                            &mut report,
+                            &run,
+                            StudioRecoveryIssueScope::Session,
+                            StudioRecoveryIssueCategory::Merge,
+                            StudioRecoveryIssueAction::CleanupSession,
+                            message,
+                        )
+                        .await?;
                     }
                 }
                 continue;
@@ -274,13 +381,32 @@ impl TaskCoordinator {
             {
                 Ok(snapshot) => snapshot,
                 Err(error) => {
-                    self.block_run(&run, format!("repository recovery failed: {error}"))
-                        .await?;
+                    let message = format!("repository recovery failed: {error}");
+                    self.block_run(&run, message.clone()).await?;
+                    self.push_recovery_issue(
+                        &mut report,
+                        &run,
+                        StudioRecoveryIssueScope::Project,
+                        StudioRecoveryIssueCategory::Repository,
+                        StudioRecoveryIssueAction::RemoveProject,
+                        message,
+                    )
+                    .await?;
                     continue;
                 }
             };
             if let Err(reason) = validate_snapshot(&run, &snapshot) {
-                self.block_run(&run, reason.to_string()).await?;
+                let message = reason.to_string();
+                self.block_run(&run, message.clone()).await?;
+                self.push_recovery_issue(
+                    &mut report,
+                    &run,
+                    StudioRecoveryIssueScope::Project,
+                    StudioRecoveryIssueCategory::Repository,
+                    StudioRecoveryIssueAction::RemoveProject,
+                    message,
+                )
+                .await?;
                 continue;
             }
             if resolving_conflict {
@@ -299,14 +425,200 @@ impl TaskCoordinator {
                     )),
                 };
                 if let Err(error) = result {
-                    self.block_run(&run, format!("conflict recovery failed: {error}"))
-                        .await?;
+                    let message = format!("conflict recovery failed: {error}");
+                    self.block_run(&run, message.clone()).await?;
+                    self.push_recovery_issue(
+                        &mut report,
+                        &run,
+                        StudioRecoveryIssueScope::Session,
+                        StudioRecoveryIssueCategory::Conflict,
+                        StudioRecoveryIssueAction::CleanupSession,
+                        message,
+                    )
+                    .await?;
                     continue;
                 }
             }
-            recovered.push(run);
+            report.recovered_runs.push(run);
         }
-        Ok(recovered)
+        Ok(report)
+    }
+
+    async fn push_recovery_issue(
+        &self,
+        report: &mut TaskRecoveryReport,
+        run: &TaskRunRecord,
+        scope: StudioRecoveryIssueScope,
+        category: StudioRecoveryIssueCategory,
+        action: StudioRecoveryIssueAction,
+        message: String,
+    ) -> Result<()> {
+        let session = self.store.read_session(&run.session_id).await?;
+        let project_id = session.as_ref().map(|session| session.project_id.clone());
+        let category_key = match category {
+            StudioRecoveryIssueCategory::ProcessLease => "process-lease",
+            StudioRecoveryIssueCategory::AgentState => "agent-state",
+            StudioRecoveryIssueCategory::Worktree => "worktree",
+            StudioRecoveryIssueCategory::Repository => "repository",
+            StudioRecoveryIssueCategory::Merge => "merge",
+            StudioRecoveryIssueCategory::Conflict => "conflict",
+        };
+        let id = format!("recovery-issue-{category_key}-{}", run.id);
+        if report.issues.iter().any(|issue| issue.id == id) {
+            return Ok(());
+        }
+        report.issues.push(StudioRecoveryIssue {
+            id,
+            scope,
+            category,
+            action,
+            project_id,
+            session_id: Some(run.session_id.clone()),
+            task_run_id: Some(run.id.clone()),
+            message,
+        });
+        Ok(())
+    }
+
+    pub(crate) async fn preview_recovery_cleanup(
+        &self,
+        issue: &StudioRecoveryIssue,
+    ) -> Result<StudioRecoveryCleanupPreview> {
+        if !matches!(
+            issue.action,
+            StudioRecoveryIssueAction::CleanupSession | StudioRecoveryIssueAction::RemoveProject
+        ) {
+            bail!("recovery issue does not authorize destructive cleanup");
+        }
+        let task_run_id = issue
+            .task_run_id
+            .as_deref()
+            .context("recovery issue has no task run")?;
+        let run = self
+            .store
+            .read_task_run(task_run_id)
+            .await?
+            .context("recovery cleanup task run not found")?;
+        let work_units = self.store.list_work_units(task_run_id).await?;
+        let durable = work_units
+            .iter()
+            .map(|unit| DurableWorktreeResource {
+                task_run_id: task_run_id.to_string(),
+                path: unit.worktree_path.clone().into(),
+                branch: unit.branch.clone(),
+                expected_head: None,
+                presence: DurableWorktreePresence::MayBeUncreated,
+                disposition: DurableWorktreeDisposition::Cleanup,
+            })
+            .collect::<Vec<_>>();
+        validate_task_worktree_resource_identities(&run.workspace_root, &durable)?;
+        let inspections = match inspect_task_worktree_resources(&run.workspace_root, &durable).await
+        {
+            Ok(inspections) => Some(inspections),
+            Err(_) if issue.scope == StudioRecoveryIssueScope::Project => None,
+            Err(error) => return Err(error),
+        };
+        let mut resources = Vec::with_capacity(work_units.len());
+        for (index, unit) in work_units.iter().enumerate() {
+            let inspection = inspections
+                .as_ref()
+                .and_then(|inspections| inspections.get(index));
+            let changes = if inspection.is_some_and(|inspection| inspection.path_exists) {
+                inspect_worktree_changes(&unit.worktree_path, &unit.base_commit)
+                    .await
+                    .ok()
+            } else {
+                None
+            };
+            resources.push(StudioRecoveryCleanupResource {
+                work_unit_id: unit.id.clone(),
+                path: unit.worktree_path.clone(),
+                branch: unit.branch.clone(),
+                presence: match inspection.map(|inspection| inspection.presence) {
+                    Some(DurableWorktreeResourcePresence::Absent) => {
+                        StudioRecoveryResourcePresence::Absent
+                    }
+                    Some(DurableWorktreeResourcePresence::Complete) => {
+                        StudioRecoveryResourcePresence::Complete
+                    }
+                    Some(DurableWorktreeResourcePresence::Partial) | None => {
+                        StudioRecoveryResourcePresence::Partial
+                    }
+                },
+                registration_exists: inspection
+                    .is_some_and(|inspection| inspection.registration_exists),
+                path_exists: inspection.is_some_and(|inspection| inspection.path_exists),
+                branch_exists: inspection.is_some_and(|inspection| inspection.branch_exists),
+                branch_head: inspection.and_then(|inspection| inspection.branch_head.clone()),
+                dirty: changes.as_ref().is_some_and(|changes| changes.dirty),
+                ahead_by: changes.as_ref().map_or(0, |changes| changes.ahead_by),
+                changed_file_count: changes
+                    .as_ref()
+                    .map_or(0, |changes| changes.changed_file_count),
+            });
+        }
+        let expected_revision = recovery_cleanup_revision(issue, &run, &work_units, &resources);
+        Ok(StudioRecoveryCleanupPreview {
+            issue_id: issue.id.clone(),
+            expected_revision,
+            scope: issue.scope,
+            project_id: issue.project_id.clone(),
+            session_id: issue.session_id.clone(),
+            message: issue.message.clone(),
+            resources,
+        })
+    }
+
+    pub(crate) async fn cleanup_recovery_issue(
+        &self,
+        issue: &StudioRecoveryIssue,
+        expected_revision: &str,
+    ) -> Result<()> {
+        if !matches!(
+            issue.action,
+            StudioRecoveryIssueAction::CleanupSession | StudioRecoveryIssueAction::RemoveProject
+        ) {
+            bail!("recovery issue does not authorize destructive cleanup");
+        }
+        let preview = self.preview_recovery_cleanup(issue).await?;
+        if preview.expected_revision != expected_revision {
+            bail!("recovery cleanup state changed; refresh the preview before confirming");
+        }
+        let task_run_id = issue
+            .task_run_id
+            .as_deref()
+            .context("recovery issue has no task run")?;
+        let run = self
+            .store
+            .read_task_run(task_run_id)
+            .await?
+            .context("recovery cleanup task run not found")?;
+        let work_units = self.store.list_work_units(task_run_id).await?;
+        if issue.action == StudioRecoveryIssueAction::RemoveProject {
+            self.store.authorize_recovery_cleanup(task_run_id).await?;
+            self.release_owned_process_lease(task_run_id);
+            return Ok(());
+        }
+        let durable = work_units
+            .iter()
+            .map(|unit| DurableWorktreeResource {
+                task_run_id: task_run_id.to_string(),
+                path: unit.worktree_path.clone().into(),
+                branch: unit.branch.clone(),
+                expected_head: preview
+                    .resources
+                    .iter()
+                    .find(|resource| resource.work_unit_id == unit.id)
+                    .and_then(|resource| resource.branch_head.clone()),
+                presence: DurableWorktreePresence::MayBeUncreated,
+                disposition: DurableWorktreeDisposition::Cleanup,
+            })
+            .collect::<Vec<_>>();
+        validate_task_worktree_resource_identities(&run.workspace_root, &durable)?;
+        self.store.authorize_recovery_cleanup(task_run_id).await?;
+        cleanup_task_worktree_resources(&run.workspace_root, &durable).await?;
+        self.release_owned_process_lease(task_run_id);
+        Ok(())
     }
 
     #[cfg(test)]
@@ -438,6 +750,39 @@ impl Drop for TaskCoordinator {
     fn drop(&mut self) {
         self.suspend();
     }
+}
+
+fn recovery_cleanup_revision(
+    issue: &StudioRecoveryIssue,
+    run: &TaskRunRecord,
+    work_units: &[WorkUnitRecord],
+    resources: &[StudioRecoveryCleanupResource],
+) -> String {
+    let mut digest = Sha256::new();
+    digest.update(issue.id.as_bytes());
+    digest.update(run.id.as_bytes());
+    digest.update(run.updated_at.to_le_bytes());
+    for (unit, resource) in work_units.iter().zip(resources) {
+        digest.update(unit.id.as_bytes());
+        digest.update(unit.status.as_str().as_bytes());
+        digest.update(unit.worktree_disposition.as_str().as_bytes());
+        digest.update(resource.path.as_bytes());
+        digest.update(resource.branch.as_bytes());
+        digest.update([resource.registration_exists as u8]);
+        digest.update([resource.path_exists as u8]);
+        digest.update([resource.branch_exists as u8]);
+        digest.update(
+            resource
+                .branch_head
+                .as_deref()
+                .unwrap_or_default()
+                .as_bytes(),
+        );
+        digest.update([resource.dirty as u8]);
+        digest.update(resource.ahead_by.to_le_bytes());
+        digest.update(resource.changed_file_count.to_le_bytes());
+    }
+    format!("{:x}", digest.finalize())
 }
 
 fn validate_snapshot(run: &TaskRunRecord, snapshot: &RepositorySnapshot) -> Result<()> {

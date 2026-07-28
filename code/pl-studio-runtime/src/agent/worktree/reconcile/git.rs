@@ -12,6 +12,18 @@ pub(super) fn delete_branch(repository: &Path, branch: &str) -> Result<()> {
     git_status(repository, &["branch", "-D", branch])
 }
 
+pub(super) fn delete_task_branch_at_head(
+    repository: &Path,
+    branch: &str,
+    expected_head: &str,
+) -> Result<()> {
+    if !branch.starts_with("pure-task-") {
+        bail!("refusing to delete non-task recovery branch {branch}");
+    }
+    let reference = format!("refs/heads/{branch}");
+    git_status(repository, &["update-ref", "-d", &reference, expected_head])
+}
+
 pub(super) fn git_output(repository: &Path, args: &[&str]) -> Result<String> {
     let mut command = Command::new("git");
     command

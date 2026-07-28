@@ -3,6 +3,7 @@ import 'agent_workspace_view.dart';
 import 'collection_extensions.dart';
 import 'interaction_models.dart';
 import 'provider_models.dart';
+import 'recovery_models.dart';
 import 'runtime_models.dart';
 import 'session_models.dart';
 import 'settings_models.dart';
@@ -53,6 +54,7 @@ class StudioState {
     this.runtimesBySession = const {},
     Map<String, AgentWorkspaceSyncState> workspaceSyncBySession = const {},
     required this.pendingInteractions,
+    this.recoveryIssues = const [],
     this.eventCursorsBySession = const {},
     this.composerTextsBySession = const {},
   }) : workspaceSyncBySession = _withInitialWorkspaceSync(
@@ -90,10 +92,35 @@ class StudioState {
   final Map<String, SessionRuntimeView> runtimesBySession;
   final Map<String, AgentWorkspaceSyncState> workspaceSyncBySession;
   final List<PendingInteraction> pendingInteractions;
+  final List<StudioRecoveryIssue> recoveryIssues;
   final Map<String, int> eventCursorsBySession;
   final Map<String, String> composerTextsBySession;
 
   String? get selectedAgentSessionId => selectedSessionId;
+
+  List<StudioRecoveryIssue> get applicationRecoveryIssues => recoveryIssues
+      .where((issue) => issue.scope == RecoveryIssueScope.application)
+      .toList();
+
+  StudioRecoveryIssue? recoveryIssueForProject(String projectId) {
+    return recoveryIssues
+        .where(
+          (issue) =>
+              issue.scope == RecoveryIssueScope.project &&
+              issue.projectId == projectId,
+        )
+        .firstOrNull;
+  }
+
+  StudioRecoveryIssue? recoveryIssueForSession(String sessionId) {
+    return recoveryIssues
+        .where(
+          (issue) =>
+              issue.scope == RecoveryIssueScope.session &&
+              issue.sessionId == sessionId,
+        )
+        .firstOrNull;
+  }
 
   TurnPhase get turnPhase {
     final sessionId = selectedSessionId;
@@ -333,6 +360,7 @@ class StudioState {
     Map<String, SessionRuntimeView>? runtimesBySession,
     Map<String, AgentWorkspaceSyncState>? workspaceSyncBySession,
     List<PendingInteraction>? pendingInteractions,
+    List<StudioRecoveryIssue>? recoveryIssues,
     Map<String, int>? eventCursorsBySession,
     Map<String, String>? composerTextsBySession,
   }) {
@@ -388,6 +416,7 @@ class StudioState {
       runtimesBySession: nextRuntimes,
       workspaceSyncBySession: nextWorkspaceSync,
       pendingInteractions: pendingInteractions ?? this.pendingInteractions,
+      recoveryIssues: recoveryIssues ?? this.recoveryIssues,
       eventCursorsBySession:
           eventCursorsBySession ?? this.eventCursorsBySession,
       composerTextsBySession: nextComposerTexts,

@@ -12,6 +12,7 @@ StudioState _stateFromTypedSnapshot({
   Map<String, Map<String, TimelineAgentEvent>>? agentTimelineEventsBySession,
   required Iterable<StudioAgentView> agents,
   required List<PendingInteraction> interactions,
+  List<StudioRecoveryIssue> recoveryIssues = const [],
   required SessionRuntimeView runtime,
   required Map<String, Object?> config,
   required Map<String, Object?> generalSettings,
@@ -81,6 +82,7 @@ StudioState _stateFromTypedSnapshot({
           ? const {}
           : {selectedSessionId: runtime},
       pendingInteractions: interactions,
+      recoveryIssues: recoveryIssues,
       eventCursorsBySession: selectedSessionId == null || eventNextSequence <= 0
           ? const {}
           : {selectedSessionId: eventNextSequence - 1},

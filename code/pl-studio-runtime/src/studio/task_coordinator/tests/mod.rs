@@ -14,8 +14,9 @@ use crate::tool::{
     SubagentContext, Tool, ToolContext, ToolInput, WorkspaceAccess, strict_tool_input_schema,
 };
 use crate::{
-    AgentKernel, AgentKernelToolRequest, AgentSession, CoreAgentProfile, StudioMode, StudioStore,
-    ToolEffect, TurnEngineBuilder, TurnOptions, TurnToolCacheHandle, TurnWorkingSetHandle,
+    AgentKernel, AgentKernelToolRequest, AgentSession, CoreAgentProfile, StudioMode,
+    StudioRecoveryIssueCategory, StudioStore, ToolEffect, TurnEngineBuilder, TurnOptions,
+    TurnToolCacheHandle, TurnWorkingSetHandle,
 };
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -5400,6 +5401,120 @@ async fn recovery_preserves_restart_cancelled_worktree_and_cleans_orphan_leaf() 
 }
 
 #[tokio::test]
+async fn recovery_reports_legacy_absent_resources_and_preserves_ahead_worktree() {
+    let repository = init_repository("recovery-legacy-protect");
+    std::fs::write(repository.join(".gitignore"), ".pure/\n").unwrap();
+    git(&repository, &["add", ".gitignore"]);
+    git(&repository, &["commit", "-m", "ignore runtime"]);
+    let store = task_store(&repository).await;
+    let session = task_session(&store, &repository).await;
+    let coordinator = TaskCoordinator::new(store.clone());
+    let run = coordinator
+        .start_confirmed_task(&session.id, "plan", &repository)
+        .await
+        .unwrap();
+
+    for agent_id in ["agent-missing-a", "agent-missing-b", "agent-ahead"] {
+        let worktree = crate::agent::worktree::git_compatible_path(
+            repository
+                .join(".pure/worktrees")
+                .join(&run.id)
+                .join(agent_id),
+        );
+        let branch = format!("pure-task-{}-{agent_id}", run.id);
+        if agent_id == "agent-ahead" {
+            let worktree_arg = worktree.to_string_lossy().to_string();
+            git(
+                &repository,
+                &["worktree", "add", "-b", &branch, &worktree_arg, "HEAD"],
+            );
+            for index in 0..7 {
+                std::fs::write(
+                    worktree.join(format!("ahead-{index}.txt")),
+                    format!("ahead {index}\n"),
+                )
+                .unwrap();
+            }
+            git(&worktree, &["add", "-A"]);
+            git(&worktree, &["commit", "-m", "ahead by one"]);
+        }
+        let unit = store
+            .create_work_unit(CreateWorkUnit {
+                task_run_id: run.id.clone(),
+                title: agent_id.to_string(),
+                owned_paths: vec![format!("code/{agent_id}/**")],
+                base_commit: run.base_commit.clone(),
+                worktree_path: worktree.to_string_lossy().to_string(),
+                branch: branch.clone(),
+                attempt: 1,
+            })
+            .await
+            .unwrap();
+        store
+            .update_work_unit(
+                &unit.id,
+                WorkUnitStatus::Cancelled,
+                Some(agent_id.to_string()),
+            )
+            .await
+            .unwrap();
+        store
+            .create_agent_outcome(CreateAgentOutcome {
+                task_run_id: run.id.clone(),
+                work_unit_id: Some(unit.id),
+                agent_id: agent_id.to_string(),
+                owner_path: "/root".to_string(),
+                initiated_by: "planner".to_string(),
+                requested_by_call_id: format!("call-{agent_id}"),
+                role: "executor".to_string(),
+                status: AgentOutcomeStatus::Cancelled,
+                attempt: 1,
+            })
+            .await
+            .unwrap();
+    }
+    coordinator
+        .finish_task(&run.id, TaskRunPhase::Cancelled, None)
+        .await
+        .unwrap();
+
+    let report = TaskCoordinator::new(store)
+        .recover_active_tasks()
+        .await
+        .expect("legacy missing resources must degrade into a scoped issue");
+    let ahead_path = repository
+        .join(".pure/worktrees")
+        .join(&run.id)
+        .join("agent-ahead");
+    let ahead_branch = format!("pure-task-{}-agent-ahead", run.id);
+
+    assert!(report.recovered_runs.is_empty());
+    assert_eq!(report.issues.len(), 1);
+    assert_eq!(
+        report.issues[0].category,
+        StudioRecoveryIssueCategory::Worktree
+    );
+    assert_eq!(
+        report.issues[0].session_id.as_deref(),
+        Some(session.id.as_str())
+    );
+    assert!(ahead_path.is_dir());
+    assert_eq!(
+        git_output(
+            &repository,
+            &[
+                "rev-list",
+                "--count",
+                &format!("{}..{ahead_branch}", run.base_commit)
+            ]
+        ),
+        "1"
+    );
+    assert!(!git_output(&repository, &["branch", "--list", &ahead_branch]).is_empty());
+    remove_repository(repository);
+}
+
+#[tokio::test]
 async fn recovery_groups_linked_workspaces_by_canonical_git_common_directory() {
     let repository = init_repository("recovery-common-directory-group");
     std::fs::write(repository.join(".gitignore"), ".pure/\n").unwrap();
@@ -5474,7 +5589,7 @@ async fn recovery_groups_linked_workspaces_by_canonical_git_common_directory() {
 }
 
 #[tokio::test]
-async fn recovery_preflight_failure_preserves_all_worktrees_before_group_gc() {
+async fn recovery_preflight_failure_reports_issues_and_preserves_affected_group() {
     let repository = init_repository("recovery-common-directory-preflight");
     std::fs::write(repository.join(".gitignore"), ".pure/\n").unwrap();
     git(&repository, &["add", ".gitignore"]);
@@ -5577,16 +5692,69 @@ async fn recovery_preflight_failure_preserves_all_worktrees_before_group_gc() {
         ],
     );
 
-    let error = TaskCoordinator::new(store)
+    let safe_repository = init_repository("recovery-safe-common-directory");
+    std::fs::write(safe_repository.join(".gitignore"), ".pure/\n").unwrap();
+    git(&safe_repository, &["add", ".gitignore"]);
+    git(&safe_repository, &["commit", "-m", "ignore runtime"]);
+    let safe_session = task_session(&store, &safe_repository).await;
+    let safe_run = {
+        let coordinator = TaskCoordinator::new(store.clone());
+        coordinator
+            .start_confirmed_task(&safe_session.id, "safe plan", &safe_repository)
+            .await
+            .unwrap()
+    };
+    let safe_owned =
+        create_running_recovery_worktree(&store, &safe_run, "safe-owned", &safe_repository).await;
+    let safe_orphan = safe_repository.join(".pure/worktrees/orphan-run/safe-preflight-orphan");
+    let safe_orphan_arg = safe_orphan.to_string_lossy().to_string();
+    let safe_orphan_branch = "pure-task-orphan-run-safe-preflight";
+    git(
+        &safe_repository,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            safe_orphan_branch,
+            &safe_orphan_arg,
+            "HEAD",
+        ],
+    );
+
+    let report = TaskCoordinator::new(store)
         .recover_active_tasks()
         .await
-        .expect_err("an unresolved known workspace must stop reconciliation before GC");
+        .expect("an unresolved group must degrade into recovery issues");
 
-    assert!(error.to_string().contains("known task workspace"));
+    assert_eq!(
+        report
+            .recovered_runs
+            .iter()
+            .map(|run| run.id.as_str())
+            .collect::<Vec<_>>(),
+        vec![safe_run.id.as_str()]
+    );
+    assert_eq!(report.issues.len(), 2);
+    assert!(
+        report
+            .issues
+            .iter()
+            .all(|issue| issue.category == StudioRecoveryIssueCategory::Repository)
+    );
+    assert!(
+        report
+            .issues
+            .iter()
+            .all(|issue| issue.message.contains("known task workspace"))
+    );
     assert!(protected_path.is_dir());
     assert!(orphan_path.is_dir());
+    assert!(safe_owned.is_dir());
+    assert!(!safe_orphan.exists());
     assert!(!git_output(&repository, &["branch", "--list", &protected_branch]).is_empty());
     assert!(!git_output(&repository, &["branch", "--list", orphan_branch]).is_empty());
+    assert!(git_output(&safe_repository, &["branch", "--list", safe_orphan_branch]).is_empty());
+    remove_repository(safe_repository);
     remove_repository(repository);
 }
 

@@ -370,6 +370,30 @@ pub(crate) struct AgentDelivery {
     pub(crate) verification_summary: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum TaskWorktreeDisposition {
+    Protect,
+    CleanupRequested,
+}
+
+impl TaskWorktreeDisposition {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Protect => "protect",
+            Self::CleanupRequested => "cleanupRequested",
+        }
+    }
+
+    pub(crate) fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "protect" => Some(Self::Protect),
+            "cleanupRequested" => Some(Self::CleanupRequested),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
     tag = "kind",
@@ -433,6 +457,7 @@ pub(crate) struct WorkUnitRecord {
     pub(crate) base_commit: String,
     pub(crate) worktree_path: String,
     pub(crate) branch: String,
+    pub(crate) worktree_disposition: TaskWorktreeDisposition,
     pub(crate) attempt: u32,
     pub(crate) agent_id: Option<String>,
     pub(crate) created_at: i64,

@@ -12,7 +12,7 @@ use pl_core::path_safety::{remove_dir_all_no_follow, validate_existing_path};
 use super::git_compatible_path;
 
 mod git;
-use git::{delete_branch, git_output, remove_registration};
+use git::{delete_branch, delete_task_branch_at_head, git_output, remove_registration};
 
 const WORKTREE_ROOT: &str = ".pure/worktrees";
 const GIT_TIMEOUT: Duration = Duration::from_secs(120);
@@ -46,6 +46,25 @@ pub struct WorktreeReconciliation {
     pub cleaned_branches: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DurableWorktreeResourcePresence {
+    Absent,
+    Complete,
+    Partial,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DurableWorktreeInspection {
+    pub task_run_id: String,
+    pub path: PathBuf,
+    pub branch: String,
+    pub presence: DurableWorktreeResourcePresence,
+    pub registration_exists: bool,
+    pub path_exists: bool,
+    pub branch_exists: bool,
+    pub branch_head: Option<String>,
+}
+
 #[cfg(test)]
 pub(crate) async fn reconcile_task_worktrees(
     repository: impl AsRef<Path>,
@@ -63,6 +82,43 @@ pub async fn reconcile_task_worktree_group(
     tokio::task::spawn_blocking(move || reconcile_blocking(&repositories, &durable))
         .await
         .context("worktree reconciliation task failed")?
+}
+
+pub async fn inspect_task_worktree_resources(
+    repository: impl AsRef<Path>,
+    resources: &[DurableWorktreeResource],
+) -> Result<Vec<DurableWorktreeInspection>> {
+    let repository = repository.as_ref().to_path_buf();
+    let resources = resources.to_vec();
+    tokio::task::spawn_blocking(move || inspect_resources_blocking(&repository, &resources))
+        .await
+        .context("worktree inspection task failed")?
+}
+
+pub async fn cleanup_task_worktree_resources(
+    repository: impl AsRef<Path>,
+    resources: &[DurableWorktreeResource],
+) -> Result<WorktreeReconciliation> {
+    let repository = repository.as_ref().to_path_buf();
+    let resources = resources.to_vec();
+    tokio::task::spawn_blocking(move || cleanup_resources_blocking(&repository, &resources))
+        .await
+        .context("worktree cleanup task failed")?
+}
+
+pub fn validate_task_worktree_resource_identities(
+    repository: impl AsRef<Path>,
+    resources: &[DurableWorktreeResource],
+) -> Result<()> {
+    let repository = repository.as_ref();
+    let root = WorktreeRoot {
+        repository,
+        normalized: normalize_path(&repository.join(WORKTREE_ROOT)),
+    };
+    for resource in resources {
+        validate_resource_identity(resource, std::slice::from_ref(&root))?;
+    }
+    Ok(())
 }
 
 fn reconcile_blocking(
@@ -224,6 +280,217 @@ fn validate_durable(
         }
     }
     Ok(())
+}
+
+fn inspect_resources_blocking(
+    repository: &Path,
+    resources: &[DurableWorktreeResource],
+) -> Result<Vec<DurableWorktreeInspection>> {
+    let inventory = inventory(repository)?;
+    let root = WorktreeRoot {
+        repository,
+        normalized: normalize_path(&repository.join(WORKTREE_ROOT)),
+    };
+    resources
+        .iter()
+        .map(|resource| {
+            validate_resource_identity(resource, std::slice::from_ref(&root))?;
+            let path_key = normalize_path(&resource.path);
+            let registration_exists = inventory
+                .registrations
+                .get(&path_key)
+                .and_then(|registration| registration.branch.as_deref())
+                .is_some_and(|branch| branch == resource.branch);
+            let path_exists = resource.path.is_dir();
+            let branch_exists = inventory.branches.contains(&resource.branch);
+            if path_exists {
+                ensure_safe_existing_path(repository, &resource.path)?;
+            }
+            let presence = if !registration_exists && !path_exists && !branch_exists {
+                DurableWorktreeResourcePresence::Absent
+            } else if registration_exists && path_exists && branch_exists {
+                DurableWorktreeResourcePresence::Complete
+            } else {
+                DurableWorktreeResourcePresence::Partial
+            };
+            let branch_head = branch_exists
+                .then(|| git_output(repository, &["rev-parse", &resource.branch]))
+                .transpose()?
+                .map(|head| head.trim().to_string());
+            Ok(DurableWorktreeInspection {
+                task_run_id: resource.task_run_id.clone(),
+                path: resource.path.clone(),
+                branch: resource.branch.clone(),
+                presence,
+                registration_exists,
+                path_exists,
+                branch_exists,
+                branch_head,
+            })
+        })
+        .collect()
+}
+
+fn cleanup_resources_blocking(
+    repository: &Path,
+    resources: &[DurableWorktreeResource],
+) -> Result<WorktreeReconciliation> {
+    let initial_inventory = inventory(repository)?;
+    let root = WorktreeRoot {
+        repository,
+        normalized: normalize_path(&repository.join(WORKTREE_ROOT)),
+    };
+    let mut paths = HashSet::new();
+    let mut branches = HashSet::new();
+    for resource in resources {
+        validate_resource_identity(resource, std::slice::from_ref(&root))?;
+        let path_key = normalize_path(&resource.path);
+        if !paths.insert(path_key.clone()) || !branches.insert(resource.branch.clone()) {
+            bail!(
+                "duplicate recovery cleanup resource for task {}",
+                resource.task_run_id
+            );
+        }
+        if let Some(registration) = initial_inventory.registrations.get(&path_key)
+            && registration.branch.as_deref() != Some(resource.branch.as_str())
+        {
+            bail!(
+                "recovery cleanup registration identity changed for task {}",
+                resource.task_run_id
+            );
+        }
+        if initial_inventory
+            .registrations
+            .iter()
+            .any(|(registered_path, registration)| {
+                registered_path != &path_key
+                    && registration.branch.as_deref() == Some(resource.branch.as_str())
+            })
+        {
+            bail!(
+                "recovery cleanup branch belongs to another worktree for task {}",
+                resource.task_run_id
+            );
+        }
+        validate_cleanup_branch_head(repository, resource, &initial_inventory)?;
+    }
+
+    let mut summary = WorktreeReconciliation::default();
+    for resource in resources {
+        let path_key = normalize_path(&resource.path);
+        if let Some(registration) = initial_inventory.registrations.get(&path_key) {
+            ensure_safe_existing_path(repository, &registration.path)?;
+            remove_registration(repository, &registration.path)?;
+            pause_after_registration_remove(&registration.path);
+            summary.cleaned_registrations += 1;
+        }
+        let current = inventory(repository)?;
+        if current.registrations.contains_key(&path_key)
+            || current
+                .registrations
+                .iter()
+                .any(|(registered_path, registration)| {
+                    registered_path != &path_key
+                        && registration.branch.as_deref() == Some(resource.branch.as_str())
+                })
+        {
+            bail!(
+                "recovery cleanup registration identity changed for task {}",
+                resource.task_run_id
+            );
+        }
+        validate_cleanup_branch_head(repository, resource, &current)?;
+        if std::fs::symlink_metadata(&resource.path).is_ok() {
+            ensure_safe_existing_path(repository, &resource.path)?;
+            remove_dir_all_no_follow(&repository.join(WORKTREE_ROOT), &resource.path)
+                .with_context(|| {
+                    format!(
+                        "failed to remove recovery worktree leaf {}",
+                        resource.path.display()
+                    )
+                })?;
+            summary.cleaned_paths += 1;
+        }
+        if current.branches.contains(&resource.branch) {
+            let expected_head = resource.expected_head.as_deref().context(
+                "recovery cleanup branch appeared after preview; refresh before confirming",
+            )?;
+            delete_task_branch_at_head(repository, &resource.branch, expected_head)?;
+            summary.cleaned_branches += 1;
+        }
+    }
+    Ok(summary)
+}
+
+fn validate_cleanup_branch_head(
+    repository: &Path,
+    resource: &DurableWorktreeResource,
+    inventory: &Inventory,
+) -> Result<()> {
+    if !inventory.branches.contains(&resource.branch) {
+        return Ok(());
+    }
+    let expected_head = resource
+        .expected_head
+        .as_deref()
+        .context("recovery cleanup branch appeared after preview; refresh before confirming")?;
+    let actual_head = git_output(repository, &["rev-parse", &resource.branch])?;
+    if actual_head.trim() != expected_head {
+        bail!(
+            "recovery cleanup branch tip changed for task {}: expected {}, actual {}",
+            resource.task_run_id,
+            expected_head,
+            actual_head.trim()
+        );
+    }
+    Ok(())
+}
+
+fn validate_resource_identity(
+    resource: &DurableWorktreeResource,
+    roots: &[WorktreeRoot<'_>],
+) -> Result<()> {
+    if !is_single_path_component(&resource.task_run_id) {
+        bail!("invalid durable worktree owner {}", resource.task_run_id);
+    }
+    let branch_prefix = format!("pure-task-{}-", resource.task_run_id);
+    let agent_id = resource
+        .branch
+        .strip_prefix(&branch_prefix)
+        .filter(|agent_id| is_single_path_component(agent_id))
+        .with_context(|| {
+            format!(
+                "invalid recovery cleanup branch {} for task {}",
+                resource.branch, resource.task_run_id
+            )
+        })?;
+    let path_key = normalize_path(&resource.path);
+    let Some(root) = root_for_path(&path_key, roots) else {
+        bail!(
+            "unsafe durable worktree for {}: path={}",
+            resource.task_run_id,
+            path_key
+        );
+    };
+    let expected_path = root
+        .repository
+        .join(WORKTREE_ROOT)
+        .join(&resource.task_run_id)
+        .join(agent_id);
+    if path_key != normalize_path(&expected_path) {
+        bail!(
+            "recovery cleanup requires exact worktree leaf for task {}: path={}",
+            resource.task_run_id,
+            path_key
+        );
+    }
+    Ok(())
+}
+
+fn is_single_path_component(value: &str) -> bool {
+    let mut components = Path::new(value).components();
+    matches!(components.next(), Some(std::path::Component::Normal(_)))
+        && components.next().is_none()
 }
 
 struct WorktreeRoot<'a> {

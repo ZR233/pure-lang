@@ -177,16 +177,16 @@ impl StudioRuntime {
             .transition(StudioRuntimeStatus::Initializing, None)?;
         let initialization = async {
             self.cancel_recovered_transient_interactions().await?;
-            let recovered_runs = self.task_coordinator.recover_active_tasks().await?;
-            Ok(recovered_runs)
+            self.task_coordinator.recover_active_tasks().await
         }
         .await;
         match initialization {
-            Ok(recovered_runs) => {
+            Ok(report) => {
+                let _ = self.runtime_state.replace_recovery_issues(report.issues);
                 let ready = self
                     .runtime_state
                     .transition(StudioRuntimeStatus::Ready, None)?;
-                for run in recovered_runs {
+                for run in report.recovered_runs {
                     self.continuations.request_recovery(run.id);
                 }
                 Ok(ready)

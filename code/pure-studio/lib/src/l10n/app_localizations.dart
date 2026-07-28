@@ -147,6 +147,108 @@ abstract class AppLocalizations {
   /// **'Settings'**
   String get sidebarSettings;
 
+  /// No description provided for @runtimeFatalTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Pure Studio could not start'**
+  String get runtimeFatalTitle;
+
+  /// No description provided for @runtimeFatalRetry.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry'**
+  String get runtimeFatalRetry;
+
+  /// No description provided for @recoveryGlobalWarning.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} recovery issue(s) need attention'**
+  String recoveryGlobalWarning(int count);
+
+  /// No description provided for @recoveryCleanupTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Review safe cleanup'**
+  String get recoveryCleanupTooltip;
+
+  /// No description provided for @recoveryCleanupTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Clean up recovery issue?'**
+  String get recoveryCleanupTitle;
+
+  /// No description provided for @recoveryCleanupBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Pure Studio will only remove its own task resources. Review any work that may be lost before continuing.'**
+  String get recoveryCleanupBody;
+
+  /// No description provided for @recoveryCleanupNoResources.
+  ///
+  /// In en, this message translates to:
+  /// **'No remaining task resources were found.'**
+  String get recoveryCleanupNoResources;
+
+  /// No description provided for @recoveryCleanupPresenceAbsent.
+  ///
+  /// In en, this message translates to:
+  /// **'Missing'**
+  String get recoveryCleanupPresenceAbsent;
+
+  /// No description provided for @recoveryCleanupPresenceComplete.
+  ///
+  /// In en, this message translates to:
+  /// **'Complete'**
+  String get recoveryCleanupPresenceComplete;
+
+  /// No description provided for @recoveryCleanupPresencePartial.
+  ///
+  /// In en, this message translates to:
+  /// **'Partially missing'**
+  String get recoveryCleanupPresencePartial;
+
+  /// No description provided for @recoveryCleanupDirty.
+  ///
+  /// In en, this message translates to:
+  /// **'Uncommitted changes'**
+  String get recoveryCleanupDirty;
+
+  /// No description provided for @recoveryCleanupAhead.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} unmerged commit(s)'**
+  String recoveryCleanupAhead(int count);
+
+  /// No description provided for @recoveryCleanupChangedFiles.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} changed file(s)'**
+  String recoveryCleanupChangedFiles(int count);
+
+  /// No description provided for @recoveryCleanupCancel.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel'**
+  String get recoveryCleanupCancel;
+
+  /// No description provided for @recoveryCleanupConfirm.
+  ///
+  /// In en, this message translates to:
+  /// **'Clean up'**
+  String get recoveryCleanupConfirm;
+
+  /// No description provided for @recoveryCleanupRefreshPreview.
+  ///
+  /// In en, this message translates to:
+  /// **'Refresh preview'**
+  String get recoveryCleanupRefreshPreview;
+
+  /// No description provided for @recoveryCleanupFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Cleanup failed: {error}'**
+  String recoveryCleanupFailed(String error);
+
   /// No description provided for @sidebarNew.
   ///
   /// In en, this message translates to:

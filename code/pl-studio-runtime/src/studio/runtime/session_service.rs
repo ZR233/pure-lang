@@ -178,7 +178,7 @@ impl StudioRuntime {
         Ok(SkillCatalog::discover(&workspace_root, &config.skills)?)
     }
 
-    async fn session_is_busy(&self, session_id: &str) -> Result<bool> {
+    pub(super) async fn session_is_busy(&self, session_id: &str) -> Result<bool> {
         let runtime = self.agent_framework().await?;
         match runtime.handle().snapshot(root_agent_id(session_id)).await {
             Ok(snapshot) => Ok(snapshot.active_turn_id.is_some() || snapshot.pending_inputs > 0),

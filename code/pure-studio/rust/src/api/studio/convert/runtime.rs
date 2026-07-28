@@ -1,10 +1,13 @@
 use crate::api::studio::types::{
     BridgeActiveTurn, BridgeLspHealthDto, BridgeMcpHealthDto, BridgeMcpServerDto,
-    BridgeRuntimeStatus, BridgeTaskAgentDto, BridgeTaskMergeDto, BridgeTaskReviewDto,
-    BridgeTaskRuntimeDto, BridgeTaskWorkUnitDto, RuntimeSnapshot,
+    BridgeRecoveryCleanupPreviewDto, BridgeRecoveryCleanupResourceDto, BridgeRecoveryIssueAction,
+    BridgeRecoveryIssueCategory, BridgeRecoveryIssueScope, BridgeRecoveryResourcePresence,
+    BridgeRuntimeStatus, BridgeStudioRecoveryIssueDto, BridgeTaskAgentDto, BridgeTaskMergeDto,
+    BridgeTaskReviewDto, BridgeTaskRuntimeDto, BridgeTaskWorkUnitDto, RuntimeSnapshot,
 };
 use pl_studio_runtime::{
-    StudioLspHealth, StudioMcpHealth, StudioRuntimeSnapshot as CoreRuntimeSnapshot,
+    StudioLspHealth, StudioMcpHealth, StudioRecoveryCleanupPreview, StudioRecoveryIssue,
+    StudioRuntimeSnapshot as CoreRuntimeSnapshot,
 };
 // ── Core conversion functions ──
 
@@ -34,6 +37,103 @@ pub(crate) fn runtime_snapshot(snapshot: CoreRuntimeSnapshot) -> RuntimeSnapshot
             .collect(),
         updated_at: snapshot.updated_at,
         error: snapshot.error,
+        recovery_issues: snapshot
+            .recovery_issues
+            .into_iter()
+            .map(bridge_recovery_issue)
+            .collect(),
+    }
+}
+
+pub(crate) fn bridge_recovery_issue(issue: StudioRecoveryIssue) -> BridgeStudioRecoveryIssueDto {
+    BridgeStudioRecoveryIssueDto {
+        id: issue.id,
+        scope: bridge_recovery_issue_scope(issue.scope),
+        category: match issue.category {
+            pl_studio_runtime::StudioRecoveryIssueCategory::ProcessLease => {
+                BridgeRecoveryIssueCategory::ProcessLease
+            }
+            pl_studio_runtime::StudioRecoveryIssueCategory::AgentState => {
+                BridgeRecoveryIssueCategory::AgentState
+            }
+            pl_studio_runtime::StudioRecoveryIssueCategory::Worktree => {
+                BridgeRecoveryIssueCategory::Worktree
+            }
+            pl_studio_runtime::StudioRecoveryIssueCategory::Repository => {
+                BridgeRecoveryIssueCategory::Repository
+            }
+            pl_studio_runtime::StudioRecoveryIssueCategory::Merge => {
+                BridgeRecoveryIssueCategory::Merge
+            }
+            pl_studio_runtime::StudioRecoveryIssueCategory::Conflict => {
+                BridgeRecoveryIssueCategory::Conflict
+            }
+        },
+        available_actions: vec![match issue.action {
+            pl_studio_runtime::StudioRecoveryIssueAction::Retry => BridgeRecoveryIssueAction::Retry,
+            pl_studio_runtime::StudioRecoveryIssueAction::CleanupSession => {
+                BridgeRecoveryIssueAction::CleanupSession
+            }
+            pl_studio_runtime::StudioRecoveryIssueAction::RemoveProject => {
+                BridgeRecoveryIssueAction::RemoveProject
+            }
+        }],
+        project_id: issue.project_id,
+        session_id: issue.session_id,
+        task_run_id: issue.task_run_id,
+        detail: issue.message,
+    }
+}
+
+pub(crate) fn bridge_recovery_cleanup_preview(
+    preview: StudioRecoveryCleanupPreview,
+) -> BridgeRecoveryCleanupPreviewDto {
+    BridgeRecoveryCleanupPreviewDto {
+        issue_id: preview.issue_id,
+        expected_revision: preview.expected_revision,
+        scope: bridge_recovery_issue_scope(preview.scope),
+        project_id: preview.project_id,
+        session_id: preview.session_id,
+        detail: preview.message,
+        resources: preview
+            .resources
+            .into_iter()
+            .map(|resource| BridgeRecoveryCleanupResourceDto {
+                work_unit_id: resource.work_unit_id,
+                path: resource.path,
+                branch: resource.branch,
+                presence: match resource.presence {
+                    pl_studio_runtime::StudioRecoveryResourcePresence::Absent => {
+                        BridgeRecoveryResourcePresence::Absent
+                    }
+                    pl_studio_runtime::StudioRecoveryResourcePresence::Complete => {
+                        BridgeRecoveryResourcePresence::Complete
+                    }
+                    pl_studio_runtime::StudioRecoveryResourcePresence::Partial => {
+                        BridgeRecoveryResourcePresence::Partial
+                    }
+                },
+                registration_exists: resource.registration_exists,
+                path_exists: resource.path_exists,
+                branch_exists: resource.branch_exists,
+                branch_head: resource.branch_head,
+                dirty: resource.dirty,
+                ahead_by: resource.ahead_by,
+                changed_file_count: resource.changed_file_count,
+            })
+            .collect(),
+    }
+}
+
+fn bridge_recovery_issue_scope(
+    scope: pl_studio_runtime::StudioRecoveryIssueScope,
+) -> BridgeRecoveryIssueScope {
+    match scope {
+        pl_studio_runtime::StudioRecoveryIssueScope::Application => {
+            BridgeRecoveryIssueScope::Application
+        }
+        pl_studio_runtime::StudioRecoveryIssueScope::Project => BridgeRecoveryIssueScope::Project,
+        pl_studio_runtime::StudioRecoveryIssueScope::Session => BridgeRecoveryIssueScope::Session,
     }
 }
 

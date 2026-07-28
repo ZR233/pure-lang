@@ -328,6 +328,27 @@ class DemoStudioApi implements StudioApi {
   }) => bootstrap();
 
   @override
+  Future<RecoveryCleanupPreview> previewRecoveryIssueCleanup(
+    String issueId,
+  ) async {
+    return RecoveryCleanupPreview(
+      issueId: issueId,
+      expectedRevision: 'demo',
+      scope: RecoveryIssueScope.session,
+      detail: 'Demo recovery issue',
+      resources: const [],
+    );
+  }
+
+  @override
+  Future<StudioState> cleanupRecoveryIssue(
+    String issueId,
+    String expectedRevision, {
+    String? selectedProjectId,
+    String? selectedSessionId,
+  }) => bootstrap();
+
+  @override
   Future<StudioSession> setSessionMode(
     String sessionId,
     StudioMode mode,

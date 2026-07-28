@@ -80,6 +80,7 @@ void registerSnapshotJsonTests() {
       frb.BridgeStudioSnapshotResponse(
         projects: const [],
         selectedProjectId: 'project-1',
+        recoveryIssues: const [],
         sessions: const [
           frb.SessionDto(
             id: 'session-1',

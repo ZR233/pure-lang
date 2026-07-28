@@ -101,6 +101,7 @@ pub mod work_unit {
         pub base_commit: String,
         pub worktree_path: String,
         pub branch: String,
+        pub worktree_disposition: String,
         pub attempt: i32,
         pub agent_id: Option<String>,
         pub created_at: i64,

@@ -14,7 +14,8 @@ use super::{
 };
 use super::{
     DurableWorktreeDisposition, DurableWorktreePresence, DurableWorktreeResource,
-    reconcile_task_worktrees, set_after_registration_remove_barrier,
+    cleanup_task_worktree_resources, reconcile_task_worktrees,
+    set_after_registration_remove_barrier,
 };
 
 #[derive(Debug)]
@@ -374,6 +375,166 @@ async fn fallback_delete_revalidates_after_registration_remove_race() {
     fs::remove_dir(&linked_parent).ok();
     fs::remove_dir_all(repo).ok();
     fs::remove_dir_all(external).ok();
+}
+
+#[tokio::test]
+async fn manual_cleanup_requires_exact_task_leaf_and_task_branch() {
+    let repo = temp_git_repo();
+    let manager = WorktreeManager::local(repo.clone());
+    let spec = task_worktree_spec(&repo, "run-exact", "agent-exact");
+    manager.create_from_spec(spec.clone()).await.unwrap();
+    let expected_head = git_output(&repo, &["rev-parse", &spec.branch]);
+
+    let parent_error = cleanup_task_worktree_resources(
+        &repo,
+        &[DurableWorktreeResource {
+            task_run_id: "run-exact".to_string(),
+            path: spec.path.parent().unwrap().to_path_buf(),
+            branch: spec.branch.clone(),
+            expected_head: Some(expected_head.clone()),
+            presence: DurableWorktreePresence::MustExist,
+            disposition: DurableWorktreeDisposition::Cleanup,
+        }],
+    )
+    .await
+    .expect_err("manual cleanup must not accept a task-run parent");
+    assert!(parent_error.to_string().contains("exact worktree leaf"));
+    assert!(spec.path.is_dir());
+
+    let branch_error = cleanup_task_worktree_resources(
+        &repo,
+        &[DurableWorktreeResource {
+            task_run_id: "run-exact".to_string(),
+            path: spec.path.clone(),
+            branch: "pure-agent-agent-exact".to_string(),
+            expected_head: Some(expected_head),
+            presence: DurableWorktreePresence::MustExist,
+            disposition: DurableWorktreeDisposition::Cleanup,
+        }],
+    )
+    .await
+    .expect_err("manual cleanup must reject legacy agent branches");
+    assert!(
+        branch_error
+            .to_string()
+            .contains("invalid recovery cleanup branch")
+    );
+    assert!(spec.path.is_dir());
+    assert!(!git_output(&repo, &["branch", "--list", &spec.branch]).is_empty());
+    fs::remove_dir_all(repo).ok();
+}
+
+#[tokio::test]
+async fn manual_cleanup_rejects_branch_tip_drift_without_deleting_resources() {
+    let repo = temp_git_repo();
+    let manager = WorktreeManager::local(repo.clone());
+    let spec = task_worktree_spec(&repo, "run-drift", "agent-drift");
+    manager.create_from_spec(spec.clone()).await.unwrap();
+    let preview_head = git_output(&repo, &["rev-parse", &spec.branch]);
+    fs::write(spec.path.join("ahead.txt"), "ahead\n").unwrap();
+    run_git(&spec.path, &["add", "-A"]);
+    run_git(&spec.path, &["commit", "-m", "ahead"]);
+
+    let error = cleanup_task_worktree_resources(
+        &repo,
+        &[DurableWorktreeResource {
+            task_run_id: "run-drift".to_string(),
+            path: spec.path.clone(),
+            branch: spec.branch.clone(),
+            expected_head: Some(preview_head),
+            presence: DurableWorktreePresence::MustExist,
+            disposition: DurableWorktreeDisposition::Cleanup,
+        }],
+    )
+    .await
+    .expect_err("branch movement after preview must reject cleanup");
+
+    assert!(error.to_string().contains("branch tip changed"));
+    assert!(spec.path.is_dir());
+    assert!(!git_output(&repo, &["branch", "--list", &spec.branch]).is_empty());
+    fs::remove_dir_all(repo).ok();
+}
+
+#[tokio::test]
+async fn manual_cleanup_handles_complete_partial_and_absent_resources_idempotently() {
+    let repo = temp_git_repo();
+    let manager = WorktreeManager::local(repo.clone());
+    let complete = task_worktree_spec(&repo, "run-complete", "agent-complete");
+    manager.create_from_spec(complete.clone()).await.unwrap();
+    let complete_head = git_output(&repo, &["rev-parse", &complete.branch]);
+    let complete_resource = DurableWorktreeResource {
+        task_run_id: "run-complete".to_string(),
+        path: complete.path.clone(),
+        branch: complete.branch.clone(),
+        expected_head: Some(complete_head),
+        presence: DurableWorktreePresence::MustExist,
+        disposition: DurableWorktreeDisposition::Cleanup,
+    };
+
+    let first = cleanup_task_worktree_resources(&repo, &[complete_resource.clone()])
+        .await
+        .unwrap();
+    let second = cleanup_task_worktree_resources(&repo, &[complete_resource])
+        .await
+        .unwrap();
+    assert_eq!(first.cleaned_registrations, 1);
+    assert_eq!(first.cleaned_paths, 0);
+    assert_eq!(first.cleaned_branches, 1);
+    assert_eq!(second, Default::default());
+
+    let branch_only = task_worktree_spec(&repo, "run-branch", "agent-branch");
+    run_git(&repo, &["branch", &branch_only.branch]);
+    let branch_head = git_output(&repo, &["rev-parse", &branch_only.branch]);
+    let partial = cleanup_task_worktree_resources(
+        &repo,
+        &[DurableWorktreeResource {
+            task_run_id: "run-branch".to_string(),
+            path: branch_only.path,
+            branch: branch_only.branch,
+            expected_head: Some(branch_head),
+            presence: DurableWorktreePresence::MustExist,
+            disposition: DurableWorktreeDisposition::Cleanup,
+        }],
+    )
+    .await
+    .unwrap();
+    assert_eq!(partial.cleaned_branches, 1);
+
+    let path_only = task_worktree_spec(&repo, "run-path", "agent-path");
+    fs::create_dir_all(&path_only.path).unwrap();
+    fs::write(path_only.path.join("untracked.txt"), "keep until confirmed").unwrap();
+    let partial = cleanup_task_worktree_resources(
+        &repo,
+        &[DurableWorktreeResource {
+            task_run_id: "run-path".to_string(),
+            path: path_only.path.clone(),
+            branch: path_only.branch,
+            expected_head: None,
+            presence: DurableWorktreePresence::MustExist,
+            disposition: DurableWorktreeDisposition::Cleanup,
+        }],
+    )
+    .await
+    .unwrap();
+    assert_eq!(partial.cleaned_paths, 1);
+    assert!(!path_only.path.exists());
+
+    let absent = task_worktree_spec(&repo, "run-absent", "agent-absent");
+    let absent_summary = cleanup_task_worktree_resources(
+        &repo,
+        &[DurableWorktreeResource {
+            task_run_id: "run-absent".to_string(),
+            path: absent.path,
+            branch: absent.branch,
+            expected_head: None,
+            presence: DurableWorktreePresence::MayBeUncreated,
+            disposition: DurableWorktreeDisposition::Cleanup,
+        }],
+    )
+    .await
+    .unwrap();
+    assert_eq!(absent_summary, Default::default());
+    fs::remove_dir_all(repo).ok();
 }
 
 #[cfg(windows)]

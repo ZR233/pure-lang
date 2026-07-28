@@ -12,6 +12,14 @@ pub(super) struct RepositorySnapshot {
     pub(super) head: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct WorktreeChangeInspection {
+    pub(super) head: String,
+    pub(super) dirty: bool,
+    pub(super) ahead_by: u32,
+    pub(super) changed_file_count: u32,
+}
+
 const INITIAL_COMMIT_MESSAGE: &str = "chore: initialize Pure Studio workspace";
 pub(super) const STUDIO_GIT_NAME_CONFIG: &str = "user.name=Pure Studio";
 pub(super) const STUDIO_GIT_EMAIL_CONFIG: &str = "user.email=pure-studio@local";
@@ -154,6 +162,40 @@ pub(super) async fn inspect_executor_recovery(
     })
     .await
     .context("executor delivery recovery inspection task failed")?
+}
+
+pub(super) async fn inspect_worktree_changes(
+    path: impl AsRef<Path>,
+    base_commit: &str,
+) -> Result<WorktreeChangeInspection> {
+    let path = path.as_ref().to_path_buf();
+    let base_commit = base_commit.to_string();
+    tokio::task::spawn_blocking(move || {
+        let head = git_output(&path, &["rev-parse", "HEAD"])?;
+        let status = git_output(
+            &path,
+            &["status", "--porcelain=v1", "--untracked-files=all"],
+        )?;
+        let ahead_by = git_output(
+            &path,
+            &["rev-list", "--count", &format!("{base_commit}..{head}")],
+        )?
+        .parse::<u32>()
+        .context("git rev-list returned an invalid commit count")?;
+        let changed_file_count =
+            git_output(&path, &["diff", "--name-only", &base_commit, &head, "--"])?
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .count() as u32;
+        Ok(WorktreeChangeInspection {
+            head,
+            dirty: !status.is_empty(),
+            ahead_by,
+            changed_file_count,
+        })
+    })
+    .await
+    .context("worktree cleanup preview task failed")?
 }
 
 fn inspect_repository_blocking(path: &Path, require_clean: bool) -> Result<RepositorySnapshot> {

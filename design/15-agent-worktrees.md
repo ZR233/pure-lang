@@ -54,6 +54,13 @@ Studio 产品层的 `pl-studio-runtime::agent::worktree` 模块按端口-适配�
 Studio Task policy 显式提供 repo root 时才为 subagent 分配 worktree。创建过程只绑定主
 `workspace_root` 解析出的 repo root，不扫描或清理磁盘；孤儿对账只属于 Studio 启动恢复。
 
+每个 durable `WorkUnit` 还保存 typed `worktreeDisposition = protect |
+cleanupRequested`。默认与 legacy 回填均为 `protect`；migration 只有在旧记录存在精确
+`executor discarded by planner` 证据时才可回填 `cleanupRequested`。普通 Cancelled、
+Failed、blocked 或无证据的 terminal 记录继续保护，不能把状态枚举本身当成删除授权。
+Task executor discard 必须在释放物理资源之前事务性持久化 `cleanupRequested`；即使
+WorkUnit 已经 Failed/Cancelled，也必须幂等记录这次明确授权。
+
 ## 关键类型（接口契约）
 
 - `WorktreeHandle { path: PathBuf, branch: String }`：存入 Studio lifecycle resource lease，
@@ -110,21 +117,26 @@ released = git worktree remove + 删除分支 + 清空 durable lifecycle resourc
 启动对账必须逐个 leaf registration/path/branch 精确处理，禁止递归删除
 `.pure/worktrees/<taskRunId>` 父目录：
 
-- active、blocked、因重启收束为 cancelled、delivered 的资源继续保护；merged 但尚未
-  清理的资源进入 cleanup-pending 重试。
-- 只有没有 durable owner，或 durable owner 已终态且明确可清理的 leaf 才允许删除。
+- active、blocked、因重启收束为 cancelled、delivered 以及 disposition=`protect` 的资源
+  继续保护；只有 disposition=`cleanupRequested` 的 leaf 才进入 cleanup-pending 重试。
+- 没有 durable owner 的 leaf 只能在完整 ownership snapshot 已建立后按孤儿策略处理；
+  durable owner 已终态但未明确授权时仍禁止删除。
 - durable 记录声明资源存在而 registration、path、branch 部分缺失时，关联 run 进入
-  blocked，保留现场；无 owner 的清理失败使初始化显式失败，均不得吞错。
+  blocked，保留现场；无法归属的 orphan 清理失败形成应用降级 issue，均不得吞错或击穿
+  Runtime Ready。
 - `Pending/Queued` allocation 事务可能先于 worktree create 落盘；重启时仅这一 typed
   creation state 允许 registration、path、branch 三者全部不存在。三者全部存在仍保护，
   任意部分存在仍 block。`Running`、`WaitingForDelivery`、`Delivered` 不允许 all-absent。
 - 对账幂等；重复启动不得误删已保护资源，也不得重新报告已经观察过的 terminal 事件。
-- 启动先解析全部已知 Task workspace 的 canonical Git common directory，再按 common
+- 启动先读取完整 durable ownership snapshot，再解析全部已知 Task workspace 的 canonical
+  Git common directory，并按 common
   directory 聚合 durable owner；同组只读取一次 Git inventory，并同时覆盖组内所有
   canonical `.pure/worktrees` root。只有 blocked、terminal 或 cleanup-pending 记录时也必须
   执行；active run 只有在所属 common-directory group 对账成功后才能进入 Recovery
   continuation。任何已知 workspace（包括仅有 terminal owner 的 workspace）无法完成 Git
-  identity 预检时，必须在执行任一 group GC 前整体停止，禁止用不完整 owner 集清理。
+  identity 预检时，该 common-directory group 不执行 GC、不发布 continuation，并产生对应
+  项目/会话 issue；其他已完整识别 owner 且通过预检的安全 group 可以继续。SQLite、schema
+  或完整 ownership snapshot 本身无法读取时才是应用致命错误。
 - inventory、registration remove、leaf remove 每一步都重新拒绝 symlink、Windows junction
   与 reparse ancestor，并证明 canonical leaf 严格位于 canonical `.pure/worktrees` root。
   `git worktree remove` 返回后、任何 fallback 文件系统删除之前必须再次证明，覆盖 Git
@@ -132,6 +144,19 @@ released = git worktree remove + 删除分支 + 清空 durable lifecycle resourc
   上述检查与文件工具共享 `pl-core::path_safety`；fallback 递归删除不跟随 worktree
   子树里的链接，只解除链接入口并保留目标。
   Git 子进程禁用交互、设置有界超时并在超时后终止。
+
+用户确认的恢复清理使用精确 leaf API，不复用会扫描其他 orphan 的全局 GC。预览逐个检查
+registration、path、branch，报告 missing/partial/complete、dirty、相对 durable base 的
+ahead commit 与 changed-file 数，并对规范化事实计算 `expectedRevision`。执行前必须重新
+检查并比较 revision；stale revision、非规范 `.pure/worktrees/<taskRunId>/<agentId>` leaf、
+非 `pure-task-*` 分支、symlink、junction 或 reparse ancestor 均拒绝，且不得产生部分删除。
+清理绝不递归删除 `.pure/worktrees` 或 task-run 父目录，也不触碰主分支、用户仓库目录或
+不属于 Pure 的分支。
+
+确认操作先以事务终结故障 Task、删除 lease，并把相关资源标记为 `cleanupRequested`，再逐
+leaf 释放物理资源。进程在 durable 授权与物理清理之间退出时，下次恢复必须幂等续清理。
+完整存在、全部缺失和部分缺失资源都使用同一精确状态机：已缺失组件视为已完成，仍存在的
+安全组件继续处理；任何安全证明失败都保留 issue 与现场。
 
 subagent turn（`active_subagent.is_some()`）不再 enable；其 `workspace_root` 已被
 替换为自身 worktree 路径。

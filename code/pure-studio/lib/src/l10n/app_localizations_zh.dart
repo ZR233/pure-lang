@@ -33,6 +33,65 @@ class AppLocalizationsZh extends AppLocalizations {
   String get sidebarSettings => '设置';
 
   @override
+  String get runtimeFatalTitle => 'Pure Studio 无法启动';
+
+  @override
+  String get runtimeFatalRetry => '重试';
+
+  @override
+  String recoveryGlobalWarning(int count) {
+    return '有 $count 个恢复问题需要处理';
+  }
+
+  @override
+  String get recoveryCleanupTooltip => '查看安全清理';
+
+  @override
+  String get recoveryCleanupTitle => '清理恢复问题？';
+
+  @override
+  String get recoveryCleanupBody => 'Pure Studio 只会清理自身创建的任务资源。继续前请检查可能丢失的工作。';
+
+  @override
+  String get recoveryCleanupNoResources => '未发现仍存在的任务资源。';
+
+  @override
+  String get recoveryCleanupPresenceAbsent => '已缺失';
+
+  @override
+  String get recoveryCleanupPresenceComplete => '完整';
+
+  @override
+  String get recoveryCleanupPresencePartial => '部分缺失';
+
+  @override
+  String get recoveryCleanupDirty => '有未提交修改';
+
+  @override
+  String recoveryCleanupAhead(int count) {
+    return '$count 个未合并提交';
+  }
+
+  @override
+  String recoveryCleanupChangedFiles(int count) {
+    return '$count 个变更文件';
+  }
+
+  @override
+  String get recoveryCleanupCancel => '取消';
+
+  @override
+  String get recoveryCleanupConfirm => '清理';
+
+  @override
+  String get recoveryCleanupRefreshPreview => '刷新预览';
+
+  @override
+  String recoveryCleanupFailed(String error) {
+    return '清理失败：$error';
+  }
+
+  @override
   String get sidebarNew => '新建';
 
   @override
@@ -1236,6 +1295,65 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get sidebarSettings => '设置';
+
+  @override
+  String get runtimeFatalTitle => 'Pure Studio 无法启动';
+
+  @override
+  String get runtimeFatalRetry => '重试';
+
+  @override
+  String recoveryGlobalWarning(int count) {
+    return '有 $count 个恢复问题需要处理';
+  }
+
+  @override
+  String get recoveryCleanupTooltip => '查看安全清理';
+
+  @override
+  String get recoveryCleanupTitle => '清理恢复问题？';
+
+  @override
+  String get recoveryCleanupBody => 'Pure Studio 只会清理自身创建的任务资源。继续前请检查可能丢失的工作。';
+
+  @override
+  String get recoveryCleanupNoResources => '未发现仍存在的任务资源。';
+
+  @override
+  String get recoveryCleanupPresenceAbsent => '已缺失';
+
+  @override
+  String get recoveryCleanupPresenceComplete => '完整';
+
+  @override
+  String get recoveryCleanupPresencePartial => '部分缺失';
+
+  @override
+  String get recoveryCleanupDirty => '有未提交修改';
+
+  @override
+  String recoveryCleanupAhead(int count) {
+    return '$count 个未合并提交';
+  }
+
+  @override
+  String recoveryCleanupChangedFiles(int count) {
+    return '$count 个变更文件';
+  }
+
+  @override
+  String get recoveryCleanupCancel => '取消';
+
+  @override
+  String get recoveryCleanupConfirm => '清理';
+
+  @override
+  String get recoveryCleanupRefreshPreview => '刷新预览';
+
+  @override
+  String recoveryCleanupFailed(String error) {
+    return '清理失败：$error';
+  }
 
   @override
   String get sidebarNew => '新建';

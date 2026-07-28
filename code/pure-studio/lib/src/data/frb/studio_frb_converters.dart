@@ -161,6 +161,7 @@ StudioState studioStateFromFrbSnapshot(frb.BridgeStudioSnapshotResponse value) {
     parts: const [],
     agents: const [],
     interactions: const [],
+    recoveryIssues: value.recoveryIssues.map(_recoveryIssueFromFrb).toList(),
     runtime: _emptyRuntimeView().copyWith(
       task: value.selectedSessionTask == null
           ? null
@@ -170,6 +171,88 @@ StudioState studioStateFromFrbSnapshot(frb.BridgeStudioSnapshotResponse value) {
     generalSettings: _decodeJson(value.generalSettingsJson),
     webSearch: value.webSearch,
     eventNextSequence: 0,
+  );
+}
+
+StudioRecoveryIssue _recoveryIssueFromFrb(
+  frb.BridgeStudioRecoveryIssueDto issue,
+) {
+  return StudioRecoveryIssue(
+    id: issue.id,
+    scope: switch (issue.scope) {
+      frb.BridgeRecoveryIssueScope.application =>
+        RecoveryIssueScope.application,
+      frb.BridgeRecoveryIssueScope.project => RecoveryIssueScope.project,
+      frb.BridgeRecoveryIssueScope.session => RecoveryIssueScope.session,
+    },
+    category: switch (issue.category) {
+      frb.BridgeRecoveryIssueCategory.processLease =>
+        RecoveryIssueCategory.processLease,
+      frb.BridgeRecoveryIssueCategory.agentState =>
+        RecoveryIssueCategory.agentState,
+      frb.BridgeRecoveryIssueCategory.worktree =>
+        RecoveryIssueCategory.worktree,
+      frb.BridgeRecoveryIssueCategory.repository =>
+        RecoveryIssueCategory.repository,
+      frb.BridgeRecoveryIssueCategory.merge => RecoveryIssueCategory.merge,
+      frb.BridgeRecoveryIssueCategory.conflict =>
+        RecoveryIssueCategory.conflict,
+    },
+    availableActions: [
+      for (final action in issue.availableActions)
+        switch (action) {
+          frb.BridgeRecoveryIssueAction.retry => RecoveryIssueAction.retry,
+          frb.BridgeRecoveryIssueAction.cleanupSession =>
+            RecoveryIssueAction.cleanupSession,
+          frb.BridgeRecoveryIssueAction.removeProject =>
+            RecoveryIssueAction.removeProject,
+        },
+    ],
+    projectId: issue.projectId,
+    sessionId: issue.sessionId,
+    taskRunId: issue.taskRunId,
+    detail: issue.detail,
+  );
+}
+
+RecoveryCleanupPreview _recoveryCleanupPreviewFromFrb(
+  frb.BridgeRecoveryCleanupPreviewDto preview,
+) {
+  return RecoveryCleanupPreview(
+    issueId: preview.issueId,
+    expectedRevision: preview.expectedRevision,
+    scope: switch (preview.scope) {
+      frb.BridgeRecoveryIssueScope.application =>
+        RecoveryIssueScope.application,
+      frb.BridgeRecoveryIssueScope.project => RecoveryIssueScope.project,
+      frb.BridgeRecoveryIssueScope.session => RecoveryIssueScope.session,
+    },
+    projectId: preview.projectId,
+    sessionId: preview.sessionId,
+    detail: preview.detail,
+    resources: [
+      for (final resource in preview.resources)
+        RecoveryCleanupResource(
+          workUnitId: resource.workUnitId,
+          path: resource.path,
+          branch: resource.branch,
+          presence: switch (resource.presence) {
+            frb.BridgeRecoveryResourcePresence.absent =>
+              RecoveryResourcePresence.absent,
+            frb.BridgeRecoveryResourcePresence.complete =>
+              RecoveryResourcePresence.complete,
+            frb.BridgeRecoveryResourcePresence.partial =>
+              RecoveryResourcePresence.partial,
+          },
+          registrationExists: resource.registrationExists,
+          pathExists: resource.pathExists,
+          branchExists: resource.branchExists,
+          branchHead: resource.branchHead,
+          dirty: resource.dirty,
+          aheadBy: resource.aheadBy.toInt(),
+          changedFileCount: resource.changedFileCount.toInt(),
+        ),
+    ],
   );
 }
 

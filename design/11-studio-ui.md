@@ -222,6 +222,31 @@ Flutter context readout 使用紧凑圆形进度环，不显示百分比文字�
 
 会话列表是独立滚动区域，row 采用 opencode 式单行 flex 布局：图标/状态固定宽度，标题 `min-width:0` 且 `truncate`，列表项 `flex-shrink:0`。Sessions 区域过长时只滚动列表，不挤压 project 区、settings 按钮或相邻 session row。
 
+Studio 启动恢复错误分为三个 UI 层级，不能因为单个 Task/worktree 损坏而让整个应用白屏：
+
+- 应用致命错误表示 SQLite、schema、Bridge 或完整 canonical ownership snapshot 无法提供。
+  Flutter 显示独立错误页与“重试”操作；FRB runtime 初始化缓存不得永久保存 rejected
+  Future，重试必须重新建立初始化。
+- 应用降级错误表示无法归属到具体项目或会话的恢复/孤儿诊断。主界面继续使用 canonical
+  snapshot，侧栏展示全局警告，但不阻断健康项目和会话。
+- 项目或会话阻断错误通过 typed `StudioRecoveryIssue` 进入 bootstrap。故障条目仍保留在
+  侧栏并显示红色 `error_outline`；主行不可选择，tooltip 展示简短原因，trailing 清理入口
+  只在 issue 声明可用动作时出现。controller 与 Bridge 都必须拒绝选择故障目标，避免绕过
+  widget；当前 selection 指向故障项时，bootstrap 原子回退到健康项目/会话或空态。
+
+清理入口先调用 `previewRecoveryIssueCleanup(issueId)`，弹窗展示每个 Pure-owned 资源的
+path、branch、完整/缺失/部分缺失状态、dirty、未合并提交数和变更文件数。取消不产生副作用；
+确认时调用
+`cleanupRecoveryIssue(issueId, expectedRevision, selectedProjectId, selectedSessionId)`。
+Bridge 在执行前重新计算 revision；若现场已变化则拒绝并要求刷新预览。清理失败保留红色
+issue 并展示新诊断，成功后以返回的 canonical snapshot 原子刷新 sidebar 与 selection。
+紧凑 rail 仍必须保留错误图标、tooltip 和清理入口，不能仅在展开侧栏可操作。
+
+会话级恢复清理保留聊天历史，只终结故障 Task 并移除其 Pure worktree/branch，成功后会话
+重新可打开。项目级恢复清理归档会话历史、移除损坏 Task/runtime 元数据并从 Studio 登记中
+移除项目；它绝不删除、修改或递归清理用户项目目录。所有清理确认文案、资源状态、潜在丢失
+的未合并提交与文件数量都必须走中英文 i18n。
+
 项目和会话管理继续走 Studio store/runtime API，不能在组件里手动拼接状态。Flutter 使用 `pl-studio-bridge.openProject(path)`，该接口在 `pl-core` 内完成 open project、LSP reconcile、session ensure 和 bootstrap，然后返回新的 project/session/sidebar 快照。打开项目支持两种入口：系统目录选择器和手动路径输入。Flutter 选择项目调用 `selectProject(projectId)`，关闭项目调用 `archiveProject(projectId, selectedProjectId)`，新建会话调用 `createSession(projectId, title)`；所有返回 payload 都必须原子替换 `projects`、当前项目的 `sessions`、`selectedProjectId`、`selectedSessionId`、agent/runtime/interaction 快照，并通过 `sessionRuntime.activeMcpServers/activeLspServers` 恢复状态栏 active 能力；MCP/LSP server catalog 由 config snapshot 与全局 health event 更新。若有 `selectedSessionId`，前端必须立即用 `loadSessionState` 恢复会话历史 projection。若没有选中会话，timeline、状态栏和 composer 显示无会话空态。
 
 项目关闭和会话关闭都是归档语义，不删除磁盘内容、配置或历史会话。Project row 上的关闭按钮调用 `archiveProject(projectId, selectedProjectId)`；关闭当前项目后切换到后端返回的下一个可用项目/会话，关闭最后一个项目后清空当前 selection 并取消 session stream。Session row 上的关闭按钮调用 `archiveSession(sessionId, selectedSessionId)`；后端会拒绝 active turn，会取消该会话 pending interaction，并返回同项目的新 session selection。前端收到 payload 后删除/隐藏归档 session、切换到返回的 `selectedSessionId`，并用 `loadSessionState` 恢复新会话 projection；如果项目内没有剩余 session，状态栏与 composer 禁用，用户可以用新建会话按钮创建会话。会话列表只显示 `visibility=active && parentSessionId=null`，legacy handoff child/archived session 不作为 root row 出现。
@@ -252,6 +277,9 @@ Security 页是紧凑的权限配置页，不使用与 provider/MCP 相同的大
 - reasoning part 保持各自稳定身份和 revision；Flutter 仅把同一 assistant message 内连续相邻的
   reasoning part 投影为一个稳定展示组，不跨 tool、text、plan、agent 或消息边界合并，也不
   发生“新思考更新到旧 part 上”。
+- 项目/会话 recovery issue 下 bootstrap 仍为 `AsyncData`；故障条目红色且不可打开，健康
+  条目可切换，清理预览、取消、失败、成功与紧凑 rail 行为均有 widget test。
+- 真正的应用致命错误页可重试，首次 rejected FRB 初始化不会污染后续初始化。
 - 真实 UI 回归通过：项目/会话侧栏、输入、流式输出、停止、切换 session、Plan 确认、tool approval、user input、状态栏和全部设置页均可用。
 
 ## 6. 视觉与组件约定

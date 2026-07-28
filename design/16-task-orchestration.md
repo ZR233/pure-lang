@@ -87,6 +87,21 @@ continuation 副作用，也不得写入新 epoch 的 durable agent outcome 或�
 review round、merge evidence 和 recovery snapshot 重放稳定 product signal；accepted wake
 receipt 负责在 publish 前崩溃、乱序重放和重复 attach 下维持单次续轮。
 
+`recover_active_tasks` 返回
+`TaskRecoveryReport { recoveredRuns, issues }`，不再用任一局部错误击穿 Runtime 初始化。
+Git/worktree/agent/merge/active-run 配对等可归属失败转为 typed `StudioRecoveryIssue`，
+scope 为 project 或 session；无明确 owner 的恢复/孤儿失败转为 application degradation。
+对应 run 不清理、不续轮，其他通过完整 ownership 识别和 group preflight 的 run 继续恢复。
+仅 SQLite、schema、Bridge 或完整 ownership snapshot 无法读取属于应用致命错误。曾经
+`affected.isEmpty()` 时直接返回初始化错误的 terminal-only/blocked group，也必须保留为
+精确 issue，而不是让 Flutter bootstrap 失败。
+
+Runtime Ready snapshot 携带稳定 issue id、application/project/session scope、project/session/
+task ids、typed category、detail 和 available action。bootstrap 选择必须跳过带阻断 issue 的
+项目/会话；Bridge selector 与 Runtime controller 同样拒绝直接选择故障目标。局部 issue
+清理成功后以 canonical snapshot 原子移除 issue 并重新选择健康目标，失败则保留 issue 并
+更新诊断。
+
 同一 Git common directory 与分支只允许一个写入任务。`BranchLease` 是进程内所有权，
 `expectedHead` CAS 和工作区清洁检查负责检测用户或外部进程的变化。
 用户确认实施时，任务启动边界先准备项目 Git 基线：有效仓库继续要求 named branch、
@@ -214,6 +229,10 @@ Task executor 的通用 `close_agent merge=true` 必须在进入 worktree merge 
 Cancelled，并标记终态已观察；只有 durable 处置成功后 supervisor 才能释放 worktree。
 worktree 清理失败不回滚 Cancelled 事实，资源信息保留给恢复清理，但该 WorkUnit 不再占用
 ownedPaths。重复 discard 不得产生第二次状态迁移或 continuation。
+discard 在调用 supervisor 释放 worktree 前必须把对应 WorkUnit 的
+`worktreeDisposition` 持久化为 `cleanupRequested`；这项授权独立于 WorkUnit 当前状态，
+因此即使 WorkUnit 已经 Failed/Cancelled 也必须幂等写入。未带精确 discard 证据的 legacy
+Cancelled 记录保持 `protect`，不能因终态自动删除可能仍含未合并提交的 worktree。
 
 worktree 路径和分支包含 task run id：
 
@@ -221,6 +240,13 @@ worktree 路径和分支包含 task run id：
 .pure/worktrees/<taskRunId>/<agentId>
 pure-task-<runId>-<agentId>
 ```
+
+恢复 issue 的用户确认清理先返回 typed `RecoveryCleanupPreview`，包含 path、branch、
+missing/partial/complete、dirty、ahead commit、changed-file 及 `expectedRevision`。执行时
+以 revision 做 CAS，并在事务中终结精确故障 Task、删除 BranchLease、将相关 disposition
+写为 `cleanupRequested`；之后才幂等释放 Pure-owned leaf/branch。session scope 保留聊天
+历史；project scope 归档会话、删除损坏 Task/runtime 元数据并移除 Studio 项目登记，但绝不
+删除或修改用户项目目录。中断后恢复只续做已有 durable cleanup 授权，不扩大清理范围。
 
 ## Planner 合并与冲突
 

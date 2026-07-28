@@ -6,7 +6,7 @@
 import '../../../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 class BridgeActiveTurn {
   final String sessionId;
@@ -118,6 +118,123 @@ class BridgeMcpServerDto {
           availabilityKind == other.availabilityKind;
 }
 
+class BridgeRecoveryCleanupPreviewDto {
+  final String issueId;
+  final String expectedRevision;
+  final BridgeRecoveryIssueScope scope;
+  final String? projectId;
+  final String? sessionId;
+  final String detail;
+  final List<BridgeRecoveryCleanupResourceDto> resources;
+
+  const BridgeRecoveryCleanupPreviewDto({
+    required this.issueId,
+    required this.expectedRevision,
+    required this.scope,
+    this.projectId,
+    this.sessionId,
+    required this.detail,
+    required this.resources,
+  });
+
+  @override
+  int get hashCode =>
+      issueId.hashCode ^
+      expectedRevision.hashCode ^
+      scope.hashCode ^
+      projectId.hashCode ^
+      sessionId.hashCode ^
+      detail.hashCode ^
+      resources.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeRecoveryCleanupPreviewDto &&
+          runtimeType == other.runtimeType &&
+          issueId == other.issueId &&
+          expectedRevision == other.expectedRevision &&
+          scope == other.scope &&
+          projectId == other.projectId &&
+          sessionId == other.sessionId &&
+          detail == other.detail &&
+          resources == other.resources;
+}
+
+class BridgeRecoveryCleanupResourceDto {
+  final String workUnitId;
+  final String path;
+  final String branch;
+  final BridgeRecoveryResourcePresence presence;
+  final bool registrationExists;
+  final bool pathExists;
+  final bool branchExists;
+  final String? branchHead;
+  final bool dirty;
+  final int aheadBy;
+  final int changedFileCount;
+
+  const BridgeRecoveryCleanupResourceDto({
+    required this.workUnitId,
+    required this.path,
+    required this.branch,
+    required this.presence,
+    required this.registrationExists,
+    required this.pathExists,
+    required this.branchExists,
+    this.branchHead,
+    required this.dirty,
+    required this.aheadBy,
+    required this.changedFileCount,
+  });
+
+  @override
+  int get hashCode =>
+      workUnitId.hashCode ^
+      path.hashCode ^
+      branch.hashCode ^
+      presence.hashCode ^
+      registrationExists.hashCode ^
+      pathExists.hashCode ^
+      branchExists.hashCode ^
+      branchHead.hashCode ^
+      dirty.hashCode ^
+      aheadBy.hashCode ^
+      changedFileCount.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeRecoveryCleanupResourceDto &&
+          runtimeType == other.runtimeType &&
+          workUnitId == other.workUnitId &&
+          path == other.path &&
+          branch == other.branch &&
+          presence == other.presence &&
+          registrationExists == other.registrationExists &&
+          pathExists == other.pathExists &&
+          branchExists == other.branchExists &&
+          branchHead == other.branchHead &&
+          dirty == other.dirty &&
+          aheadBy == other.aheadBy &&
+          changedFileCount == other.changedFileCount;
+}
+
+enum BridgeRecoveryIssueAction { retry, cleanupSession, removeProject }
+
+enum BridgeRecoveryIssueCategory {
+  processLease,
+  agentState,
+  worktree,
+  repository,
+  merge,
+  conflict,
+}
+
+enum BridgeRecoveryIssueScope { application, project, session }
+
+enum BridgeRecoveryResourcePresence { absent, complete, partial }
+
 enum BridgeRuntimeStatus {
   uninitialized,
   initializing,
@@ -125,6 +242,53 @@ enum BridgeRuntimeStatus {
   shuttingDown,
   stopped,
   failed,
+}
+
+class BridgeStudioRecoveryIssueDto {
+  final String id;
+  final BridgeRecoveryIssueScope scope;
+  final BridgeRecoveryIssueCategory category;
+  final List<BridgeRecoveryIssueAction> availableActions;
+  final String? projectId;
+  final String? sessionId;
+  final String? taskRunId;
+  final String detail;
+
+  const BridgeStudioRecoveryIssueDto({
+    required this.id,
+    required this.scope,
+    required this.category,
+    required this.availableActions,
+    this.projectId,
+    this.sessionId,
+    this.taskRunId,
+    required this.detail,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      scope.hashCode ^
+      category.hashCode ^
+      availableActions.hashCode ^
+      projectId.hashCode ^
+      sessionId.hashCode ^
+      taskRunId.hashCode ^
+      detail.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeStudioRecoveryIssueDto &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          scope == other.scope &&
+          category == other.category &&
+          availableActions == other.availableActions &&
+          projectId == other.projectId &&
+          sessionId == other.sessionId &&
+          taskRunId == other.taskRunId &&
+          detail == other.detail;
 }
 
 class BridgeTaskAgentDto {
@@ -347,12 +511,14 @@ class RuntimeSnapshot {
   final List<BridgeActiveTurn> activeTurns;
   final PlatformInt64 updatedAt;
   final String? error;
+  final List<BridgeStudioRecoveryIssueDto> recoveryIssues;
 
   const RuntimeSnapshot({
     required this.status,
     required this.activeTurns,
     required this.updatedAt,
     this.error,
+    required this.recoveryIssues,
   });
 
   @override
@@ -360,7 +526,8 @@ class RuntimeSnapshot {
       status.hashCode ^
       activeTurns.hashCode ^
       updatedAt.hashCode ^
-      error.hashCode;
+      error.hashCode ^
+      recoveryIssues.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -370,5 +537,6 @@ class RuntimeSnapshot {
           status == other.status &&
           activeTurns == other.activeTurns &&
           updatedAt == other.updatedAt &&
-          error == other.error;
+          error == other.error &&
+          recoveryIssues == other.recoveryIssues;
 }

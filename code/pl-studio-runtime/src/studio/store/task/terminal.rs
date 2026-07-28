@@ -9,12 +9,65 @@ use crate::studio::ids::unix_seconds;
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
     AgentOutcomeStatus, CompletionContract, StudioAgentOutcomeProjection,
-    StudioAgentTerminalChange, TaskRunPhase, TerminalAgentStateRecording, WorkUnitStatus,
+    StudioAgentTerminalChange, TaskRunPhase, TaskWorktreeDisposition, TerminalAgentStateRecording,
+    WorkUnitStatus,
 };
 
 use super::outcome::agent_outcome_record;
 
 impl StudioStore {
+    pub(crate) async fn authorize_recovery_cleanup(&self, task_run_id: &str) -> Result<()> {
+        let tx = self.db.begin().await?;
+        let result = async {
+            let run = entities::task_run::Entity::find_by_id(task_run_id.to_string())
+                .one(&tx)
+                .await?
+                .context("recovery cleanup task run not found")?;
+            let phase = TaskRunPhase::from_str(&run.phase)
+                .with_context(|| format!("invalid task phase: {}", run.phase))?;
+            let now = unix_seconds();
+            if !matches!(
+                phase,
+                TaskRunPhase::Completed | TaskRunPhase::Failed | TaskRunPhase::Cancelled
+            ) {
+                let mut active: entities::task_run::ActiveModel = run.into();
+                active.phase = Set(TaskRunPhase::Cancelled.as_str().to_string());
+                active.status_message = Set(Some("recovery cleanup requested by user".to_string()));
+                active.updated_at = Set(now);
+                active.update(&tx).await?;
+            }
+
+            let work_units = entities::work_unit::Entity::find()
+                .filter(entities::work_unit::Column::TaskRunId.eq(task_run_id.to_string()))
+                .all(&tx)
+                .await?;
+            for work_unit in work_units {
+                let mut active: entities::work_unit::ActiveModel = work_unit.into();
+                active.worktree_disposition = Set(TaskWorktreeDisposition::CleanupRequested
+                    .as_str()
+                    .to_string());
+                active.updated_at = Set(now);
+                active.update(&tx).await?;
+            }
+            entities::branch_lease::Entity::delete_many()
+                .filter(entities::branch_lease::Column::TaskRunId.eq(task_run_id.to_string()))
+                .exec(&tx)
+                .await?;
+            Ok(())
+        }
+        .await;
+        match result {
+            Ok(()) => {
+                tx.commit().await?;
+                Ok(())
+            }
+            Err(error) => {
+                tx.rollback().await?;
+                Err(error)
+            }
+        }
+    }
+
     pub(crate) async fn cancel_executor_for_discard(
         &self,
         session_id: &str,
@@ -52,25 +105,20 @@ impl StudioStore {
                 .with_context(|| format!("invalid work unit status: {}", work_unit.status))?;
             let outcome_status = AgentOutcomeStatus::from_str(&outcome.status)
                 .with_context(|| format!("invalid agent outcome status: {}", outcome.status))?;
-            if work_status == WorkUnitStatus::Merged
-                && outcome_status == AgentOutcomeStatus::Completed
-            {
-                return Ok(());
-            }
             if work_status == WorkUnitStatus::Delivered
                 && outcome_status == AgentOutcomeStatus::Completed
             {
                 bail!("delivered executor must be handled by task_merge_agent before close");
             }
-            if matches!(
-                work_status,
-                WorkUnitStatus::Failed | WorkUnitStatus::Cancelled
-            ) && matches!(
-                outcome_status,
-                AgentOutcomeStatus::Failed | AgentOutcomeStatus::Cancelled
-            ) {
-                return Ok(());
-            }
+            let terminal_pair = (work_status == WorkUnitStatus::Merged
+                && outcome_status == AgentOutcomeStatus::Completed)
+                || (matches!(
+                    work_status,
+                    WorkUnitStatus::Failed | WorkUnitStatus::Cancelled
+                ) && matches!(
+                    outcome_status,
+                    AgentOutcomeStatus::Failed | AgentOutcomeStatus::Cancelled
+                ));
             let active_pair = matches!(
                 (work_status, outcome_status),
                 (WorkUnitStatus::Pending, AgentOutcomeStatus::Queued)
@@ -80,7 +128,7 @@ impl StudioStore {
                         AgentOutcomeStatus::WaitingForDelivery
                     )
             );
-            if !active_pair {
+            if !active_pair && !terminal_pair {
                 bail!(
                     "executor discard lifecycle state mismatch: workUnit={}, outcome={}",
                     work_unit.status,
@@ -90,16 +138,23 @@ impl StudioStore {
 
             let now = unix_seconds();
             let mut active_work_unit: entities::work_unit::ActiveModel = work_unit.into();
-            active_work_unit.status = Set(WorkUnitStatus::Cancelled.as_str().to_string());
+            if active_pair {
+                active_work_unit.status = Set(WorkUnitStatus::Cancelled.as_str().to_string());
+            }
+            active_work_unit.worktree_disposition = Set(TaskWorktreeDisposition::CleanupRequested
+                .as_str()
+                .to_string());
             active_work_unit.updated_at = Set(now);
             active_work_unit.update(&tx).await?;
 
-            let mut active_outcome: entities::agent_outcome::ActiveModel = outcome.into();
-            active_outcome.status = Set(AgentOutcomeStatus::Cancelled.as_str().to_string());
-            active_outcome.error = Set(Some("executor discarded by planner".to_string()));
-            active_outcome.terminal_observed = Set(1);
-            active_outcome.updated_at = Set(now);
-            active_outcome.update(&tx).await?;
+            if active_pair {
+                let mut active_outcome: entities::agent_outcome::ActiveModel = outcome.into();
+                active_outcome.status = Set(AgentOutcomeStatus::Cancelled.as_str().to_string());
+                active_outcome.error = Set(Some("executor discarded by planner".to_string()));
+                active_outcome.terminal_observed = Set(1);
+                active_outcome.updated_at = Set(now);
+                active_outcome.update(&tx).await?;
+            }
             Ok(())
         }
         .await;

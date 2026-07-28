@@ -4,6 +4,7 @@ export 'studio/handlers/events.dart';
 export 'studio/handlers/lifecycle.dart';
 export 'studio/handlers/prompt.dart';
 export 'studio/handlers/providers.dart';
+export 'studio/handlers/recovery.dart';
 export 'studio/handlers/session.dart';
 export 'studio/handlers/settings.dart';
 export 'studio/handlers/updater.dart';

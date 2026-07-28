@@ -256,6 +256,7 @@ CREATE TABLE work_units (
     base_commit TEXT NOT NULL,
     worktree_path TEXT NOT NULL,
     branch TEXT NOT NULL,
+    worktree_disposition TEXT NOT NULL DEFAULT 'protect',
     attempt INTEGER NOT NULL,
     agent_id TEXT,
     created_at INTEGER NOT NULL,
@@ -328,4 +329,4 @@ CREATE INDEX idx_tool_approvals_session_created_at
 CREATE INDEX idx_work_units_run_status
     ON work_units(task_run_id, status, created_at ASC, id ASC);
 
-PRAGMA user_version = 5;
+PRAGMA user_version = 6;

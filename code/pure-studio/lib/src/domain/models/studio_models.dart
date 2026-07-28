@@ -3,6 +3,7 @@ export 'agent_workspace_view.dart';
 export 'collection_extensions.dart';
 export 'interaction_models.dart';
 export 'provider_models.dart';
+export 'recovery_models.dart';
 export 'runtime_models.dart';
 export 'session_models.dart';
 export 'settings_models.dart';

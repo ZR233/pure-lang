@@ -18,8 +18,10 @@ pub use response::{
 };
 pub use runtime::{
     BridgeActiveTurn, BridgeLspHealthDto, BridgeMcpHealthDto, BridgeMcpServerDto,
-    BridgeRuntimeStatus, BridgeTaskAgentDto, BridgeTaskMergeDto, BridgeTaskReviewDto,
-    BridgeTaskRuntimeDto, BridgeTaskWorkUnitDto, RuntimeSnapshot,
+    BridgeRecoveryCleanupPreviewDto, BridgeRecoveryCleanupResourceDto, BridgeRecoveryIssueAction,
+    BridgeRecoveryIssueCategory, BridgeRecoveryIssueScope, BridgeRecoveryResourcePresence,
+    BridgeRuntimeStatus, BridgeStudioRecoveryIssueDto, BridgeTaskAgentDto, BridgeTaskMergeDto,
+    BridgeTaskReviewDto, BridgeTaskRuntimeDto, BridgeTaskWorkUnitDto, RuntimeSnapshot,
 };
 pub use settings::{
     BridgeModelCapabilities, BridgeModelCatalogDescriptor, BridgeModelDescriptor,

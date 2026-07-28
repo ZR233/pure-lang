@@ -9,7 +9,7 @@ use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 #[cfg(test)]
 use crate::studio::task_coordinator::CreateWorkUnit;
-use crate::studio::task_coordinator::{WorkUnitRecord, WorkUnitStatus};
+use crate::studio::task_coordinator::{TaskWorktreeDisposition, WorkUnitRecord, WorkUnitStatus};
 
 impl StudioStore {
     #[cfg(test)]
@@ -25,6 +25,7 @@ impl StudioStore {
                 base_commit: Set(input.base_commit),
                 worktree_path: Set(input.worktree_path),
                 branch: Set(input.branch),
+                worktree_disposition: Set(TaskWorktreeDisposition::Protect.as_str().to_string()),
                 attempt: Set(input.attempt as i32),
                 agent_id: Set(None),
                 created_at: Set(now),
@@ -88,6 +89,13 @@ pub(super) fn work_unit_record(model: entities::work_unit::Model) -> Result<Work
         base_commit: model.base_commit,
         worktree_path: model.worktree_path,
         branch: model.branch,
+        worktree_disposition: TaskWorktreeDisposition::from_str(&model.worktree_disposition)
+            .with_context(|| {
+                format!(
+                    "invalid task worktree disposition: {}",
+                    model.worktree_disposition
+                )
+            })?,
         attempt: model.attempt as u32,
         agent_id: model.agent_id,
         created_at: model.created_at,

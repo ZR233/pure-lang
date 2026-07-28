@@ -1,5 +1,5 @@
 use super::interaction::BridgeInteractionChangedDto;
-use super::runtime::BridgeTaskRuntimeDto;
+use super::runtime::{BridgeStudioRecoveryIssueDto, BridgeTaskRuntimeDto};
 use super::settings::BridgeWebSearchSettingsDto;
 use serde::{Deserialize, Serialize};
 // ── Response types ──
@@ -12,6 +12,7 @@ pub struct BridgeStudioSnapshotResponse {
     pub sessions: Vec<SessionDto>,
     pub selected_session_id: Option<String>,
     pub selected_session_task: Option<BridgeTaskRuntimeDto>,
+    pub recovery_issues: Vec<BridgeStudioRecoveryIssueDto>,
     pub config_json: String,
     pub general_settings_json: String,
     pub web_search: BridgeWebSearchSettingsDto,

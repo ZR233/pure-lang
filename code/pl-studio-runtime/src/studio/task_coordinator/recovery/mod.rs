@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use anyhow::{Result, bail};
 
 use super::{
-    AgentOutcomeRecord, TaskCoordinator, TaskRunPhase, TaskWorktreeCleanupState,
-    TaskWorktreeCreationState, TaskWorktreeOwnerSnapshot,
+    AgentOutcomeRecord, TaskCoordinator, TaskWorktreeCleanupState, TaskWorktreeCreationState,
+    TaskWorktreeDisposition, TaskWorktreeOwnerSnapshot,
 };
 use crate::agent::worktree::{
     DurableWorktreeDisposition, DurableWorktreePresence, DurableWorktreeResource,
@@ -19,24 +19,23 @@ impl TaskCoordinator {
     ) -> Result<()> {
         let mut resources = Vec::new();
         for owner in owners {
-            let terminal_cleanup = matches!(
-                owner.run.phase,
-                TaskRunPhase::Completed | TaskRunPhase::Failed | TaskRunPhase::Cancelled
-            );
             for resource in &owner.resources {
                 let unit = &resource.work_unit;
                 let outcome = resource.outcome.as_ref();
-                let disposition = match &resource.cleanup_state {
-                    TaskWorktreeCleanupState::Cleanup => DurableWorktreeDisposition::Cleanup,
-                    TaskWorktreeCleanupState::Replay { merge_id } => {
-                        self.replay_accepted_cleanup(merge_id).await?;
-                        DurableWorktreeDisposition::Cleanup
+                let disposition = if unit.worktree_disposition
+                    == TaskWorktreeDisposition::CleanupRequested
+                {
+                    DurableWorktreeDisposition::Cleanup
+                } else {
+                    match &resource.cleanup_state {
+                        TaskWorktreeCleanupState::Cleanup => DurableWorktreeDisposition::Cleanup,
+                        TaskWorktreeCleanupState::Replay { merge_id } => {
+                            self.replay_accepted_cleanup(merge_id).await?;
+                            DurableWorktreeDisposition::Cleanup
+                        }
+                        TaskWorktreeCleanupState::Protect => DurableWorktreeDisposition::Protect,
+                        TaskWorktreeCleanupState::NotMerged => DurableWorktreeDisposition::Protect,
                     }
-                    TaskWorktreeCleanupState::Protect => DurableWorktreeDisposition::Protect,
-                    TaskWorktreeCleanupState::NotMerged if terminal_cleanup => {
-                        DurableWorktreeDisposition::Cleanup
-                    }
-                    TaskWorktreeCleanupState::NotMerged => DurableWorktreeDisposition::Protect,
                 };
                 resources.push(DurableWorktreeResource {
                     task_run_id: owner.run.id.clone(),

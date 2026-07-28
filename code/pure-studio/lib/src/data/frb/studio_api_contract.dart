@@ -14,6 +14,13 @@ abstract class StudioApi {
     String sessionId, {
     String? selectedSessionId,
   });
+  Future<RecoveryCleanupPreview> previewRecoveryIssueCleanup(String issueId);
+  Future<StudioState> cleanupRecoveryIssue(
+    String issueId,
+    String expectedRevision, {
+    String? selectedProjectId,
+    String? selectedSessionId,
+  });
   Future<StudioSession> setSessionMode(String sessionId, StudioMode mode);
   Future<StudioState> setModelRole({
     required String roleKey,
@@ -54,16 +61,44 @@ abstract class StudioApi {
 
 class FrbStudioApi implements StudioApi {
   static Future<void>? _initFuture;
+  static Future<void> Function()? _initializationOverrideForTesting;
   ProviderCatalogView? _providerCatalogCache;
 
   static Future<void> ensureReady() => _ensureReady();
 
+  @visibleForTesting
+  static void debugOverrideInitialization(
+    Future<void> Function()? initialization,
+  ) {
+    _initFuture = null;
+    _initializationOverrideForTesting = initialization;
+  }
+
   static Future<void> _ensureReady() {
-    return _initFuture ??= () async {
-      await RustLib.init();
-      await frb.initializeRuntime();
-      await frb.startRuntime();
+    final existing = _initFuture;
+    if (existing != null) {
+      return existing;
+    }
+    late final Future<void> attempt;
+    attempt = () async {
+      try {
+        final initializationOverride = _initializationOverrideForTesting;
+        if (initializationOverride != null) {
+          await initializationOverride();
+        } else {
+          await RustLib.init();
+          await frb.initializeRuntime();
+          await frb.startRuntime();
+        }
+      } catch (error, stackTrace) {
+        if (identical(_initFuture, attempt)) {
+          _initFuture = null;
+        }
+        Error.throwWithStackTrace(error, stackTrace);
+      }
     }();
+    _initFuture = attempt;
+    return attempt;
   }
 
   @override
@@ -127,6 +162,34 @@ class FrbStudioApi implements StudioApi {
     return studioStateFromFrbSnapshot(
       await frb.archiveSession(
         sessionId: sessionId,
+        selectedSessionId: selectedSessionId,
+      ),
+    );
+  }
+
+  @override
+  Future<RecoveryCleanupPreview> previewRecoveryIssueCleanup(
+    String issueId,
+  ) async {
+    await _ensureReady();
+    return _recoveryCleanupPreviewFromFrb(
+      await frb.previewRecoveryIssueCleanup(issueId: issueId),
+    );
+  }
+
+  @override
+  Future<StudioState> cleanupRecoveryIssue(
+    String issueId,
+    String expectedRevision, {
+    String? selectedProjectId,
+    String? selectedSessionId,
+  }) async {
+    await _ensureReady();
+    return studioStateFromFrbSnapshot(
+      await frb.cleanupRecoveryIssue(
+        issueId: issueId,
+        expectedRevision: expectedRevision,
+        selectedProjectId: selectedProjectId,
         selectedSessionId: selectedSessionId,
       ),
     );

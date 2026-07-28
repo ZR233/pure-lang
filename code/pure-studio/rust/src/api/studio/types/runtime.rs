@@ -8,6 +8,7 @@ pub struct RuntimeSnapshot {
     pub active_turns: Vec<BridgeActiveTurn>,
     pub updated_at: i64,
     pub error: Option<String>,
+    pub recovery_issues: Vec<BridgeStudioRecoveryIssueDto>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -26,6 +27,82 @@ pub enum BridgeRuntimeStatus {
 pub struct BridgeActiveTurn {
     pub session_id: String,
     pub turn_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum BridgeRecoveryIssueScope {
+    Application,
+    Project,
+    Session,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum BridgeRecoveryIssueCategory {
+    ProcessLease,
+    AgentState,
+    Worktree,
+    Repository,
+    Merge,
+    Conflict,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum BridgeRecoveryIssueAction {
+    Retry,
+    CleanupSession,
+    RemoveProject,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeStudioRecoveryIssueDto {
+    pub id: String,
+    pub scope: BridgeRecoveryIssueScope,
+    pub category: BridgeRecoveryIssueCategory,
+    pub available_actions: Vec<BridgeRecoveryIssueAction>,
+    pub project_id: Option<String>,
+    pub session_id: Option<String>,
+    pub task_run_id: Option<String>,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum BridgeRecoveryResourcePresence {
+    Absent,
+    Complete,
+    Partial,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeRecoveryCleanupResourceDto {
+    pub work_unit_id: String,
+    pub path: String,
+    pub branch: String,
+    pub presence: BridgeRecoveryResourcePresence,
+    pub registration_exists: bool,
+    pub path_exists: bool,
+    pub branch_exists: bool,
+    pub branch_head: Option<String>,
+    pub dirty: bool,
+    pub ahead_by: u32,
+    pub changed_file_count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeRecoveryCleanupPreviewDto {
+    pub issue_id: String,
+    pub expected_revision: String,
+    pub scope: BridgeRecoveryIssueScope,
+    pub project_id: Option<String>,
+    pub session_id: Option<String>,
+    pub detail: String,
+    pub resources: Vec<BridgeRecoveryCleanupResourceDto>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

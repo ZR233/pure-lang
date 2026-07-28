@@ -68,6 +68,7 @@ class _Sidebar extends ConsumerWidget {
                       project: project,
                       compact: compact,
                       selected: project.id == state.selectedProjectId,
+                      recoveryIssue: state.recoveryIssueForProject(project.id),
                       canArchive:
                           !state.isBusy ||
                           project.id != state.selectedProjectId,
@@ -82,6 +83,7 @@ class _Sidebar extends ConsumerWidget {
                       session: session,
                       selected: session.id == state.selectedRootSession?.id,
                       compact: compact,
+                      recoveryIssue: state.recoveryIssueForSession(session.id),
                       canArchive: !state.isBusy,
                     ),
                 ],
@@ -126,51 +128,87 @@ class _ProjectTile extends ConsumerWidget {
     required this.project,
     required this.compact,
     required this.selected,
+    required this.recoveryIssue,
     required this.canArchive,
   });
 
   final StudioProject project;
   final bool compact;
   final bool selected;
+  final StudioRecoveryIssue? recoveryIssue;
   final bool canArchive;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final colors = Theme.of(context).colorScheme;
     final controller = ref.read(studioControllerProvider.notifier);
+    final issue = recoveryIssue;
     if (compact) {
       return _CompactSidebarTile(
         selected: selected,
-        tooltip: project.path.isEmpty ? project.name : project.path,
-        icon: selected ? Icons.folder : Icons.folder_open,
-        onTap: () => controller.selectProject(project.id),
-        actionTooltip: context.l10n.sidebarCloseProject,
-        actionIcon: Icons.close,
-        onAction: canArchive
+        tooltip:
+            issue?.detail ??
+            (project.path.isEmpty ? project.name : project.path),
+        icon: issue != null
+            ? Icons.error_outline
+            : selected
+            ? Icons.folder
+            : Icons.folder_open,
+        iconColor: issue == null ? null : colors.error,
+        onTap: issue == null
+            ? () => controller.selectProject(project.id)
+            : null,
+        actionTooltip: issue == null
+            ? context.l10n.sidebarCloseProject
+            : context.l10n.recoveryCleanupTooltip,
+        actionIcon: issue == null ? Icons.close : Icons.delete_sweep_outlined,
+        onAction: issue != null
+            ? issue.canCleanup
+                  ? () => _showRecoveryCleanupDialog(context, ref, issue)
+                  : null
+            : canArchive
             ? () => controller.archiveProject(project.id)
             : null,
       );
     }
-    return _SidebarTile(
+    final tile = _SidebarTile(
       selected: selected,
-      icon: selected ? Icons.folder : Icons.folder_open,
+      icon: issue != null
+          ? Icons.error_outline
+          : selected
+          ? Icons.folder
+          : Icons.folder_open,
       title: project.name,
       subtitle: project.path,
       dense: true,
-      iconColor: selected ? StudioColors.clayDeep : colors.onSurfaceVariant,
-      onTap: () => controller.selectProject(project.id),
+      iconColor: issue != null
+          ? colors.error
+          : selected
+          ? StudioColors.clayDeep
+          : colors.onSurfaceVariant,
+      onTap: issue == null ? () => controller.selectProject(project.id) : null,
       trailing: IconButton(
-        tooltip: context.l10n.sidebarCloseProject,
+        tooltip: issue == null
+            ? context.l10n.sidebarCloseProject
+            : context.l10n.recoveryCleanupTooltip,
         style: IconButton.styleFrom(
           minimumSize: const Size.square(30),
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         ),
-        icon: const Icon(Icons.close, size: 17),
-        onPressed: canArchive
+        icon: Icon(
+          issue == null ? Icons.close : Icons.delete_sweep_outlined,
+          size: 17,
+        ),
+        onPressed: issue != null
+            ? issue.canCleanup
+                  ? () => _showRecoveryCleanupDialog(context, ref, issue)
+                  : null
+            : canArchive
             ? () => controller.archiveProject(project.id)
             : null,
       ),
     );
+    return issue == null ? tile : Tooltip(message: issue.detail, child: tile);
   }
 }
 
@@ -179,12 +217,14 @@ class _SessionTile extends ConsumerWidget {
     required this.session,
     required this.selected,
     required this.compact,
+    required this.recoveryIssue,
     required this.canArchive,
   });
 
   final StudioSession session;
   final bool selected;
   final bool compact;
+  final StudioRecoveryIssue? recoveryIssue;
   final bool canArchive;
 
   @override
@@ -193,49 +233,80 @@ class _SessionTile extends ConsumerWidget {
         ? Icons.route
         : Icons.flash_on;
     final colors = Theme.of(context).colorScheme;
+    final issue = recoveryIssue;
     if (compact) {
       return _CompactSidebarTile(
         selected: selected,
-        tooltip: session.title,
-        icon: modeIcon,
-        onTap: () => ref
-            .read(studioControllerProvider.notifier)
-            .selectSession(session.id),
-        actionTooltip: context.l10n.sidebarArchiveSession,
-        actionIcon: Icons.archive_outlined,
-        onAction: canArchive
+        tooltip: issue?.detail ?? session.title,
+        icon: issue == null ? modeIcon : Icons.error_outline,
+        iconColor: issue == null ? null : colors.error,
+        onTap: issue == null
+            ? () => ref
+                  .read(studioControllerProvider.notifier)
+                  .selectSession(session.id)
+            : null,
+        actionTooltip: issue == null
+            ? context.l10n.sidebarArchiveSession
+            : context.l10n.recoveryCleanupTooltip,
+        actionIcon: issue == null
+            ? Icons.archive_outlined
+            : Icons.delete_sweep_outlined,
+        onAction: issue != null
+            ? issue.canCleanup
+                  ? () => _showRecoveryCleanupDialog(context, ref, issue)
+                  : null
+            : canArchive
             ? () => ref
                   .read(studioControllerProvider.notifier)
                   .archiveSession(session.id)
             : null,
       );
     }
-    return _SidebarTile(
+    final tile = _SidebarTile(
       selected: selected,
-      icon: modeIcon,
+      icon: issue == null ? modeIcon : Icons.error_outline,
       title: session.title,
       subtitle: _sessionSubtitle(context, session),
       dense: true,
-      iconColor: selected ? StudioColors.clayDeep : colors.onSurfaceVariant,
-      markerColor: session.mode == StudioMode.task
+      iconColor: issue != null
+          ? colors.error
+          : selected
+          ? StudioColors.clayDeep
+          : colors.onSurfaceVariant,
+      markerColor: issue != null
+          ? null
+          : session.mode == StudioMode.task
           ? StudioColors.clay
           : StudioColors.sage,
-      onTap: () =>
-          ref.read(studioControllerProvider.notifier).selectSession(session.id),
+      onTap: issue == null
+          ? () => ref
+                .read(studioControllerProvider.notifier)
+                .selectSession(session.id)
+          : null,
       trailing: IconButton(
-        tooltip: context.l10n.sidebarArchiveSession,
+        tooltip: issue == null
+            ? context.l10n.sidebarArchiveSession
+            : context.l10n.recoveryCleanupTooltip,
         style: IconButton.styleFrom(
           minimumSize: const Size.square(30),
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         ),
-        icon: const Icon(Icons.archive_outlined, size: 18),
-        onPressed: canArchive
+        icon: Icon(
+          issue == null ? Icons.archive_outlined : Icons.delete_sweep_outlined,
+          size: 18,
+        ),
+        onPressed: issue != null
+            ? issue.canCleanup
+                  ? () => _showRecoveryCleanupDialog(context, ref, issue)
+                  : null
+            : canArchive
             ? () => ref
                   .read(studioControllerProvider.notifier)
                   .archiveSession(session.id)
             : null,
       ),
     );
+    return issue == null ? tile : Tooltip(message: issue.detail, child: tile);
   }
 }
 
@@ -248,12 +319,14 @@ class _CompactSidebarTile extends StatefulWidget {
     required this.actionTooltip,
     required this.actionIcon,
     required this.onAction,
+    this.iconColor,
   });
 
   final bool selected;
   final String tooltip;
   final IconData icon;
-  final VoidCallback onTap;
+  final Color? iconColor;
+  final VoidCallback? onTap;
   final String actionTooltip;
   final IconData actionIcon;
   final VoidCallback? onAction;
@@ -281,7 +354,7 @@ class _CompactSidebarTileState extends State<_CompactSidebarTile> {
                 message: widget.tooltip,
                 child: IconButton(
                   isSelected: widget.selected,
-                  icon: Icon(widget.icon),
+                  icon: Icon(widget.icon, color: widget.iconColor),
                   onPressed: widget.onTap,
                 ),
               ),
@@ -334,7 +407,7 @@ class _SidebarTile extends StatefulWidget {
   final String title;
   final String subtitle;
   final bool dense;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
   final Widget trailing;
   final Color? markerColor;
 

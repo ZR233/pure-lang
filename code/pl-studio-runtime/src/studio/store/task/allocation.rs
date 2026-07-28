@@ -13,7 +13,7 @@ use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
     AgentOutcomeStatus, AllocateExecutor, CompletionContract, ExecutorAllocation, TaskRunPhase,
-    WorkUnitStatus, owned_paths_overlap,
+    TaskWorktreeDisposition, WorkUnitStatus, owned_paths_overlap,
 };
 
 const MAX_ACTIVE_EXECUTORS: usize = 4;
@@ -99,6 +99,7 @@ impl StudioStore {
                 base_commit: Set(run.expected_head.clone()),
                 worktree_path: Set(worktree_path),
                 branch: Set(branch),
+                worktree_disposition: Set(TaskWorktreeDisposition::Protect.as_str().to_string()),
                 attempt: Set(attempt as i32),
                 agent_id: Set(Some(input.agent_id.clone())),
                 created_at: Set(now),

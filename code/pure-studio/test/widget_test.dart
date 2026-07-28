@@ -30,6 +30,7 @@ import 'support/responsive_visual_fixture.dart';
 
 part 'widget_test/controller_stream_tests.dart';
 part 'widget_test/reducer_recovery_tests.dart';
+part 'widget_test/recovery_issue_tests.dart';
 part 'widget_test/timeline_model_tests.dart';
 part 'widget_test/snapshot_json_tests.dart';
 part 'widget_test/session_stream_tests.dart';
@@ -55,6 +56,7 @@ part 'widget_test/studio_update_tests.dart';
 void main() {
   registerControllerStreamTests();
   registerReducerRecoveryTests();
+  registerRecoveryIssueTests();
   registerTimelineModelTests();
   registerSnapshotJsonTests();
   registerSessionStreamTests();

@@ -1,5 +1,6 @@
 use super::snapshot::{
-    bootstrap_studio_inner, studio_snapshot_from_projects_inner, studio_snapshot_inner,
+    bootstrap_studio_inner, ensure_project_recovery_available, studio_snapshot_from_projects_inner,
+    studio_snapshot_inner,
 };
 use crate::api::studio::convert::runtime::runtime_snapshot;
 use crate::api::studio::runtime::bridge;
@@ -50,7 +51,10 @@ pub fn open_project(path: String) -> Result<BridgeStudioSnapshotResponse> {
 
 pub fn select_project(project_id: String) -> Result<BridgeStudioSnapshotResponse> {
     let bridge = bridge()?;
-    bridge.block_on(async { studio_snapshot_inner(bridge, Some(project_id), None).await })
+    bridge.block_on(async {
+        ensure_project_recovery_available(bridge, &project_id)?;
+        studio_snapshot_inner(bridge, Some(project_id), None).await
+    })
 }
 
 pub fn archive_project(

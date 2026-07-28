@@ -58,6 +58,86 @@ pub struct StudioActiveTurn {
     pub turn_id: String,
 }
 
+/// 恢复问题影响的最小 UI 范围。
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum StudioRecoveryIssueScope {
+    Application,
+    Project,
+    Session,
+}
+
+/// 恢复问题的稳定类别。
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum StudioRecoveryIssueCategory {
+    ProcessLease,
+    AgentState,
+    Worktree,
+    Repository,
+    Merge,
+    Conflict,
+}
+
+/// UI 可执行的恢复动作。
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum StudioRecoveryIssueAction {
+    Retry,
+    CleanupSession,
+    RemoveProject,
+}
+
+/// 单个项目或会话的可隔离恢复问题。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StudioRecoveryIssue {
+    pub id: String,
+    pub scope: StudioRecoveryIssueScope,
+    pub category: StudioRecoveryIssueCategory,
+    pub action: StudioRecoveryIssueAction,
+    pub project_id: Option<String>,
+    pub session_id: Option<String>,
+    pub task_run_id: Option<String>,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum StudioRecoveryResourcePresence {
+    Absent,
+    Complete,
+    Partial,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StudioRecoveryCleanupResource {
+    pub work_unit_id: String,
+    pub path: String,
+    pub branch: String,
+    pub presence: StudioRecoveryResourcePresence,
+    pub registration_exists: bool,
+    pub path_exists: bool,
+    pub branch_exists: bool,
+    pub branch_head: Option<String>,
+    pub dirty: bool,
+    pub ahead_by: u32,
+    pub changed_file_count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StudioRecoveryCleanupPreview {
+    pub issue_id: String,
+    pub expected_revision: String,
+    pub scope: StudioRecoveryIssueScope,
+    pub project_id: Option<String>,
+    pub session_id: Option<String>,
+    pub message: String,
+    pub resources: Vec<StudioRecoveryCleanupResource>,
+}
+
 /// UI 可读取的 Studio runtime 快照。
 ///
 /// 快照用于 Flutter/FRB 初始化、启动和关闭响应，也可用于状态栏展示 runtime
@@ -70,6 +150,8 @@ pub struct StudioRuntimeSnapshot {
     pub updated_at: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recovery_issues: Vec<StudioRecoveryIssue>,
 }
 
 #[derive(Debug, Clone)]
@@ -83,6 +165,7 @@ struct StudioRuntimeStateInner {
     active_turns: BTreeMap<String, String>,
     updated_at: i64,
     error: Option<String>,
+    recovery_issues: Vec<StudioRecoveryIssue>,
 }
 
 impl StudioRuntimeState {
@@ -93,6 +176,7 @@ impl StudioRuntimeState {
                 active_turns: BTreeMap::new(),
                 updated_at: unix_seconds(),
                 error: None,
+                recovery_issues: Vec::new(),
             })),
         }
     }
@@ -143,6 +227,42 @@ impl StudioRuntimeState {
         snapshot_from_inner(&inner)
     }
 
+    pub(crate) fn replace_recovery_issues(
+        &self,
+        recovery_issues: Vec<StudioRecoveryIssue>,
+    ) -> StudioRuntimeSnapshot {
+        let mut inner = self.inner.lock().expect("runtime state mutex poisoned");
+        inner.recovery_issues = recovery_issues;
+        inner.updated_at = unix_seconds();
+        snapshot_from_inner(&inner)
+    }
+
+    pub(crate) fn recovery_issue(&self, issue_id: &str) -> Option<StudioRecoveryIssue> {
+        self.inner
+            .lock()
+            .expect("runtime state mutex poisoned")
+            .recovery_issues
+            .iter()
+            .find(|issue| issue.id == issue_id)
+            .cloned()
+    }
+
+    pub(crate) fn remove_recovery_issue(&self, issue_id: &str) -> StudioRuntimeSnapshot {
+        let mut inner = self.inner.lock().expect("runtime state mutex poisoned");
+        inner.recovery_issues.retain(|issue| issue.id != issue_id);
+        inner.updated_at = unix_seconds();
+        snapshot_from_inner(&inner)
+    }
+
+    pub(crate) fn remove_project_recovery_issues(&self, project_id: &str) -> StudioRuntimeSnapshot {
+        let mut inner = self.inner.lock().expect("runtime state mutex poisoned");
+        inner
+            .recovery_issues
+            .retain(|issue| issue.project_id.as_deref() != Some(project_id));
+        inner.updated_at = unix_seconds();
+        snapshot_from_inner(&inner)
+    }
+
     pub fn clear_active_turn(&self, session_id: &str, turn_id: &str) -> StudioRuntimeSnapshot {
         let mut inner = self.inner.lock().expect("runtime state mutex poisoned");
         if inner
@@ -176,6 +296,7 @@ fn snapshot_from_inner(inner: &StudioRuntimeStateInner) -> StudioRuntimeSnapshot
             .collect(),
         updated_at: inner.updated_at,
         error: inner.error.clone(),
+        recovery_issues: inner.recovery_issues.clone(),
     }
 }
 

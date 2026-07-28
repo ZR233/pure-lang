@@ -10,6 +10,7 @@ import 'api/studio/handlers/events.dart';
 import 'api/studio/handlers/lifecycle.dart';
 import 'api/studio/handlers/prompt.dart';
 import 'api/studio/handlers/providers.dart';
+import 'api/studio/handlers/recovery.dart';
 import 'api/studio/handlers/session.dart';
 import 'api/studio/handlers/settings.dart';
 import 'api/studio/handlers/updater.dart';
@@ -172,10 +173,41 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   dco_decode_bridge_provider_transport_descriptor(dynamic raw);
 
   @protected
+  BridgeRecoveryCleanupPreviewDto
+  dco_decode_bridge_recovery_cleanup_preview_dto(dynamic raw);
+
+  @protected
+  BridgeRecoveryCleanupResourceDto
+  dco_decode_bridge_recovery_cleanup_resource_dto(dynamic raw);
+
+  @protected
+  BridgeRecoveryIssueAction dco_decode_bridge_recovery_issue_action(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeRecoveryIssueCategory dco_decode_bridge_recovery_issue_category(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeRecoveryIssueScope dco_decode_bridge_recovery_issue_scope(dynamic raw);
+
+  @protected
+  BridgeRecoveryResourcePresence dco_decode_bridge_recovery_resource_presence(
+    dynamic raw,
+  );
+
+  @protected
   BridgeRuntimeStatus dco_decode_bridge_runtime_status(dynamic raw);
 
   @protected
   BridgeSessionStreamFrame dco_decode_bridge_session_stream_frame(dynamic raw);
+
+  @protected
+  BridgeStudioRecoveryIssueDto dco_decode_bridge_studio_recovery_issue_dto(
+    dynamic raw,
+  );
 
   @protected
   BridgeStudioSnapshotResponse dco_decode_bridge_studio_snapshot_response(
@@ -270,6 +302,19 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   List<BridgeProviderPresetDescriptor>
   dco_decode_list_bridge_provider_preset_descriptor(dynamic raw);
+
+  @protected
+  List<BridgeRecoveryCleanupResourceDto>
+  dco_decode_list_bridge_recovery_cleanup_resource_dto(dynamic raw);
+
+  @protected
+  List<BridgeRecoveryIssueAction> dco_decode_list_bridge_recovery_issue_action(
+    dynamic raw,
+  );
+
+  @protected
+  List<BridgeStudioRecoveryIssueDto>
+  dco_decode_list_bridge_studio_recovery_issue_dto(dynamic raw);
 
   @protected
   List<BridgeTaskAgentDto> dco_decode_list_bridge_task_agent_dto(dynamic raw);
@@ -589,12 +634,45 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   sse_decode_bridge_provider_transport_descriptor(SseDeserializer deserializer);
 
   @protected
+  BridgeRecoveryCleanupPreviewDto
+  sse_decode_bridge_recovery_cleanup_preview_dto(SseDeserializer deserializer);
+
+  @protected
+  BridgeRecoveryCleanupResourceDto
+  sse_decode_bridge_recovery_cleanup_resource_dto(SseDeserializer deserializer);
+
+  @protected
+  BridgeRecoveryIssueAction sse_decode_bridge_recovery_issue_action(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeRecoveryIssueCategory sse_decode_bridge_recovery_issue_category(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeRecoveryIssueScope sse_decode_bridge_recovery_issue_scope(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeRecoveryResourcePresence sse_decode_bridge_recovery_resource_presence(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeRuntimeStatus sse_decode_bridge_runtime_status(
     SseDeserializer deserializer,
   );
 
   @protected
   BridgeSessionStreamFrame sse_decode_bridge_session_stream_frame(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeStudioRecoveryIssueDto sse_decode_bridge_studio_recovery_issue_dto(
     SseDeserializer deserializer,
   );
 
@@ -719,6 +797,23 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   List<BridgeProviderPresetDescriptor>
   sse_decode_list_bridge_provider_preset_descriptor(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<BridgeRecoveryCleanupResourceDto>
+  sse_decode_list_bridge_recovery_cleanup_resource_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<BridgeRecoveryIssueAction> sse_decode_list_bridge_recovery_issue_action(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<BridgeStudioRecoveryIssueDto>
+  sse_decode_list_bridge_studio_recovery_issue_dto(
     SseDeserializer deserializer,
   );
 
@@ -1105,6 +1200,42 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_bridge_recovery_cleanup_preview_dto(
+    BridgeRecoveryCleanupPreviewDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_recovery_cleanup_resource_dto(
+    BridgeRecoveryCleanupResourceDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_recovery_issue_action(
+    BridgeRecoveryIssueAction self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_recovery_issue_category(
+    BridgeRecoveryIssueCategory self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_recovery_issue_scope(
+    BridgeRecoveryIssueScope self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_recovery_resource_presence(
+    BridgeRecoveryResourcePresence self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_bridge_runtime_status(
     BridgeRuntimeStatus self,
     SseSerializer serializer,
@@ -1113,6 +1244,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_bridge_session_stream_frame(
     BridgeSessionStreamFrame self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_studio_recovery_issue_dto(
+    BridgeStudioRecoveryIssueDto self,
     SseSerializer serializer,
   );
 
@@ -1257,6 +1394,24 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_bridge_provider_preset_descriptor(
     List<BridgeProviderPresetDescriptor> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_bridge_recovery_cleanup_resource_dto(
+    List<BridgeRecoveryCleanupResourceDto> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_bridge_recovery_issue_action(
+    List<BridgeRecoveryIssueAction> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_bridge_studio_recovery_issue_dto(
+    List<BridgeStudioRecoveryIssueDto> self,
     SseSerializer serializer,
   );
 

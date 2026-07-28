@@ -2,6 +2,7 @@ pub mod events;
 pub mod lifecycle;
 pub mod prompt;
 pub mod providers;
+pub mod recovery;
 pub mod session;
 pub mod settings;
 mod snapshot;
@@ -14,6 +15,7 @@ pub use lifecycle::{
 };
 pub use prompt::{resolve_interaction, stop_prompt, submit_prompt};
 pub use providers::{list_discovered_skills, load_provider_usages};
+pub use recovery::{cleanup_recovery_issue, preview_recovery_issue_cleanup};
 pub use session::{archive_session, create_session, set_model_role, set_session_mode};
 pub use settings::{
     load_provider_catalog, load_web_search_settings, save_general_settings,

@@ -6,12 +6,13 @@ pub mod types;
 // Re-exports from submodules
 pub use self::handlers::{
     BridgeSessionStreamFrame, archive_project, archive_session, bootstrap_studio,
-    check_studio_update, create_session, initialize_runtime, install_studio_update,
-    list_discovered_skills, load_provider_catalog, load_provider_usages, load_web_search_settings,
-    open_project, resolve_interaction, save_general_settings, save_instructions_settings,
-    save_mcp_settings, save_provider_settings, save_runtime_permission_mode, save_skills_settings,
-    save_web_search_settings, select_project, set_model_role, set_session_mode, shutdown_runtime,
-    start_runtime, stop_prompt, submit_prompt, subscribe_product_events, subscribe_session_events,
+    check_studio_update, cleanup_recovery_issue, create_session, initialize_runtime,
+    install_studio_update, list_discovered_skills, load_provider_catalog, load_provider_usages,
+    load_web_search_settings, open_project, preview_recovery_issue_cleanup, resolve_interaction,
+    save_general_settings, save_instructions_settings, save_mcp_settings, save_provider_settings,
+    save_runtime_permission_mode, save_skills_settings, save_web_search_settings, select_project,
+    set_model_role, set_session_mode, shutdown_runtime, start_runtime, stop_prompt, submit_prompt,
+    subscribe_product_events, subscribe_session_events,
 };
 pub use self::types::{
     BridgeActiveTurn, BridgeInteractionChangedDto, BridgeInteractionPayloadDto, BridgeLspHealthDto,
@@ -19,16 +20,18 @@ pub use self::types::{
     BridgeModelDescriptor, BridgeModelPricing, BridgeModelReasoningDescriptor,
     BridgeProductEventEnvelope, BridgeProductEventPayload, BridgeProviderCatalogSnapshot,
     BridgeProviderConnectionModeDescriptor, BridgeProviderPresetDescriptor,
-    BridgeProviderServiceCapabilitiesDescriptor, BridgeRuntimeStatus, BridgeStudioSnapshotResponse,
-    BridgeStudioUpdateCheckDto, BridgeStudioUpdateDto, BridgeStudioUpdateEventDto,
-    BridgeUserQuestionDto, BridgeUserQuestionOptionDto,
-    BridgeWebSearchProviderCapabilitiesDescriptor, BridgeWebSearchSettingsDto, ConfigSavedResponse,
-    DeepSeekBalanceDto, DeepSeekBalanceInfoDto, InstructionsSettingsInput, McpServerInput,
-    McpSettingsInput, ProjectDto, ProviderInput, ProviderModelInput, ProviderSettingsInput,
-    ProviderUsageDto, ProviderUsagesResponse, ResolveInteractionResponse, RoleInput,
-    RuntimeSnapshot, SessionDto, SkillSummaryDto, SkillsResponse, SkillsSettingsInput,
-    StopPromptResponse, SubmitPromptResponse, WebSearchSettingsInput, ZhipuCodingPlanUsageDto,
-    ZhipuQuotaLimitDto, ZhipuToolUsageDetailDto,
+    BridgeProviderServiceCapabilitiesDescriptor, BridgeRecoveryCleanupPreviewDto,
+    BridgeRecoveryCleanupResourceDto, BridgeRecoveryIssueAction, BridgeRecoveryIssueCategory,
+    BridgeRecoveryIssueScope, BridgeRecoveryResourcePresence, BridgeRuntimeStatus,
+    BridgeStudioRecoveryIssueDto, BridgeStudioSnapshotResponse, BridgeStudioUpdateCheckDto,
+    BridgeStudioUpdateDto, BridgeStudioUpdateEventDto, BridgeUserQuestionDto,
+    BridgeUserQuestionOptionDto, BridgeWebSearchProviderCapabilitiesDescriptor,
+    BridgeWebSearchSettingsDto, ConfigSavedResponse, DeepSeekBalanceDto, DeepSeekBalanceInfoDto,
+    InstructionsSettingsInput, McpServerInput, McpSettingsInput, ProjectDto, ProviderInput,
+    ProviderModelInput, ProviderSettingsInput, ProviderUsageDto, ProviderUsagesResponse,
+    ResolveInteractionResponse, RoleInput, RuntimeSnapshot, SessionDto, SkillSummaryDto,
+    SkillsResponse, SkillsSettingsInput, StopPromptResponse, SubmitPromptResponse,
+    WebSearchSettingsInput, ZhipuCodingPlanUsageDto, ZhipuQuotaLimitDto, ZhipuToolUsageDetailDto,
 };
 
 #[cfg(test)]

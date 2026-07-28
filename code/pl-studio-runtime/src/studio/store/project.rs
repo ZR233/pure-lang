@@ -228,6 +228,50 @@ impl StudioStore {
         tx.commit().await?;
         Ok(Some(project_record(model)))
     }
+
+    pub(crate) async fn quarantine_project(
+        &self,
+        project_id: &str,
+    ) -> Result<Option<ProjectRecord>> {
+        use entities::{project, session, task_run};
+        let Some(project) = project::Entity::find_by_id(project_id.to_string())
+            .one(&self.db)
+            .await?
+        else {
+            return Ok(None);
+        };
+        let tx = self.db.begin().await?;
+        let session_ids = session::Entity::find()
+            .filter(session::Column::ProjectId.eq(project_id.to_string()))
+            .all(&tx)
+            .await?
+            .into_iter()
+            .map(|session| session.id)
+            .collect::<Vec<_>>();
+        for session_id in &session_ids {
+            task_run::Entity::delete_many()
+                .filter(task_run::Column::SessionId.eq(session_id.clone()))
+                .exec(&tx)
+                .await?;
+            let sessions = session::Entity::find()
+                .filter(session::Column::RootSessionId.eq(session_id.clone()))
+                .all(&tx)
+                .await?;
+            for session in sessions {
+                let mut active: session::ActiveModel = session.into();
+                active.archived = Set(1);
+                active.visibility = Set("archived".to_string());
+                active.updated_at = Set(unix_seconds());
+                active.update(&tx).await?;
+            }
+        }
+        let mut active: project::ActiveModel = project.into();
+        active.updated_at = Set(unix_seconds());
+        active.closed = Set(1);
+        let model = active.update(&tx).await?;
+        tx.commit().await?;
+        Ok(Some(project_record(model)))
+    }
 }
 
 async fn connect_sqlite(url: &str) -> Result<DatabaseConnection> {

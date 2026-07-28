@@ -33,6 +33,67 @@ class AppLocalizationsEn extends AppLocalizations {
   String get sidebarSettings => 'Settings';
 
   @override
+  String get runtimeFatalTitle => 'Pure Studio could not start';
+
+  @override
+  String get runtimeFatalRetry => 'Retry';
+
+  @override
+  String recoveryGlobalWarning(int count) {
+    return '$count recovery issue(s) need attention';
+  }
+
+  @override
+  String get recoveryCleanupTooltip => 'Review safe cleanup';
+
+  @override
+  String get recoveryCleanupTitle => 'Clean up recovery issue?';
+
+  @override
+  String get recoveryCleanupBody =>
+      'Pure Studio will only remove its own task resources. Review any work that may be lost before continuing.';
+
+  @override
+  String get recoveryCleanupNoResources =>
+      'No remaining task resources were found.';
+
+  @override
+  String get recoveryCleanupPresenceAbsent => 'Missing';
+
+  @override
+  String get recoveryCleanupPresenceComplete => 'Complete';
+
+  @override
+  String get recoveryCleanupPresencePartial => 'Partially missing';
+
+  @override
+  String get recoveryCleanupDirty => 'Uncommitted changes';
+
+  @override
+  String recoveryCleanupAhead(int count) {
+    return '$count unmerged commit(s)';
+  }
+
+  @override
+  String recoveryCleanupChangedFiles(int count) {
+    return '$count changed file(s)';
+  }
+
+  @override
+  String get recoveryCleanupCancel => 'Cancel';
+
+  @override
+  String get recoveryCleanupConfirm => 'Clean up';
+
+  @override
+  String get recoveryCleanupRefreshPreview => 'Refresh preview';
+
+  @override
+  String recoveryCleanupFailed(String error) {
+    return 'Cleanup failed: $error';
+  }
+
+  @override
   String get sidebarNew => 'New';
 
   @override

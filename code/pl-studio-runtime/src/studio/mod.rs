@@ -25,7 +25,10 @@ pub use runtime::{
     StudioSubmitPromptResponse, StudioUserPromptPresentation,
 };
 pub use runtime_state::{
-    StudioActiveTurn, StudioRuntimeSnapshot, StudioRuntimeState, StudioRuntimeStatus,
+    StudioActiveTurn, StudioRecoveryCleanupPreview, StudioRecoveryCleanupResource,
+    StudioRecoveryIssue, StudioRecoveryIssueAction, StudioRecoveryIssueCategory,
+    StudioRecoveryIssueScope, StudioRecoveryResourcePresence, StudioRuntimeSnapshot,
+    StudioRuntimeState, StudioRuntimeStatus,
 };
 pub(in crate::studio) use store::AgentSessionSpec;
 pub use store::StudioStore;

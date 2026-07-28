@@ -66,7 +66,9 @@ class StudioController extends AsyncNotifier<StudioState> {
 
   Future<void> selectProject(String projectId) async {
     final current = state.value;
-    if (current == null || current.selectedProjectId == projectId) {
+    if (current == null ||
+        current.selectedProjectId == projectId ||
+        current.recoveryIssueForProject(projectId) != null) {
       return;
     }
     final next = await _api.selectProject(projectId);
@@ -137,7 +139,9 @@ class StudioController extends AsyncNotifier<StudioState> {
 
   Future<void> selectSession(String sessionId) async {
     final current = state.value;
-    if (current == null || current.selectedSessionId == sessionId) {
+    if (current == null ||
+        current.selectedSessionId == sessionId ||
+        current.recoveryIssueForSession(sessionId) != null) {
       return;
     }
     final session = current.sessions
@@ -165,6 +169,9 @@ class StudioController extends AsyncNotifier<StudioState> {
         .where((session) => session.id == sessionId)
         .firstOrNull;
     if (target == null) {
+      return;
+    }
+    if (current.recoveryIssueForSession(sessionId) != null) {
       return;
     }
     final selectedRoot = current.selectedRootSession;
@@ -386,6 +393,31 @@ class StudioController extends AsyncNotifier<StudioState> {
     Map<String, Object?> draft,
   ) async {
     await _api.saveStudioSettingsDraft(section, draft);
+  }
+
+  Future<RecoveryCleanupPreview> previewRecoveryIssueCleanup(String issueId) {
+    return _api.previewRecoveryIssueCleanup(issueId);
+  }
+
+  Future<void> cleanupRecoveryIssue(
+    String issueId,
+    String expectedRevision,
+  ) async {
+    final current = state.value;
+    if (current == null) {
+      return;
+    }
+    final next = await _api.cleanupRecoveryIssue(
+      issueId,
+      expectedRevision,
+      selectedProjectId: current.selectedProjectId,
+      selectedSessionId: current.selectedSessionId,
+    );
+    await _adoptState(next);
+  }
+
+  void retryInitialization() {
+    ref.invalidateSelf();
   }
 
   Future<void> resolveActiveInteraction(

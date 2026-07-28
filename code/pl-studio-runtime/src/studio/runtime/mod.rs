@@ -9,7 +9,8 @@ use crate::studio::agent_host::{
 use crate::studio::records::SessionRecord;
 use crate::studio::task_coordinator::TaskCoordinator;
 use crate::studio::{
-    InteractionRuntime, StudioProductEventRuntime, StudioRuntimeState, StudioStore,
+    InteractionRuntime, StudioProductEventRuntime, StudioRecoveryCleanupPreview,
+    StudioRecoveryIssueAction, StudioRuntimeSnapshot, StudioRuntimeState, StudioStore,
 };
 
 mod lifecycle;
@@ -112,6 +113,54 @@ impl StudioRuntime {
         session_id: &str,
     ) -> Result<Option<crate::StudioTaskRuntime>> {
         super::task_projection::load_task_runtime(&self.store, session_id).await
+    }
+
+    pub async fn preview_recovery_issue_cleanup(
+        &self,
+        issue_id: &str,
+    ) -> Result<StudioRecoveryCleanupPreview> {
+        let issue = self
+            .runtime_state
+            .recovery_issue(issue_id)
+            .ok_or_else(|| anyhow::anyhow!("recovery issue is no longer active"))?;
+        self.task_coordinator.preview_recovery_cleanup(&issue).await
+    }
+
+    pub async fn cleanup_recovery_issue(
+        &self,
+        issue_id: &str,
+        expected_revision: &str,
+    ) -> Result<StudioRuntimeSnapshot> {
+        let issue = self
+            .runtime_state
+            .recovery_issue(issue_id)
+            .ok_or_else(|| anyhow::anyhow!("recovery issue is no longer active"))?;
+        if let Some(session_id) = issue.session_id.as_deref()
+            && self.session_is_busy(session_id).await?
+        {
+            anyhow::bail!("recovery cleanup requires an idle session");
+        }
+        if issue.action == StudioRecoveryIssueAction::RemoveProject
+            && let Some(project_id) = issue.project_id.as_deref()
+        {
+            for session_id in self.store.list_project_session_ids(project_id).await? {
+                if self.session_is_busy(&session_id).await? {
+                    anyhow::bail!("recovery cleanup requires an idle project");
+                }
+            }
+        }
+        self.task_coordinator
+            .cleanup_recovery_issue(&issue, expected_revision)
+            .await?;
+        if issue.action == StudioRecoveryIssueAction::RemoveProject
+            && let Some(project_id) = issue.project_id.as_deref()
+        {
+            self.store.quarantine_project(project_id).await?;
+            return Ok(self
+                .runtime_state
+                .remove_project_recovery_issues(project_id));
+        }
+        Ok(self.runtime_state.remove_recovery_issue(issue_id))
     }
 }
 

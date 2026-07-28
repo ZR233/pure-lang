@@ -1,13 +1,15 @@
 use anyhow::Result;
 use sea_orm::{ConnectionTrait, DatabaseBackend, DatabaseConnection, Statement, TransactionTrait};
 
-pub(super) const STUDIO_DATABASE_SCHEMA_VERSION: i64 = 5;
+pub(super) const STUDIO_DATABASE_SCHEMA_VERSION: i64 = 6;
 const BASE_SCHEMA: &str = include_str!("../../migrations/0001_base.sql");
 const AGENT_SESSIONS_MIGRATION: &str = include_str!("../../migrations/0002_agent_sessions.sql");
 const TASK_COMPLETION_CONTRACT_MIGRATION: &str =
     include_str!("../../migrations/0003_task_completion_contract.sql");
 const AGENT_WAKE_RECEIPTS_MIGRATION: &str =
     include_str!("../../migrations/0004_agent_wake_receipts.sql");
+const WORKTREE_DISPOSITION_MIGRATION: &str =
+    include_str!("../../migrations/0005_worktree_disposition.sql");
 
 pub(super) async fn configure_sqlite(db: &DatabaseConnection) -> Result<()> {
     for pragma in [
@@ -69,6 +71,10 @@ pub(super) async fn migrate_schema(db: &DatabaseConnection, from_version: i64) -
         if version == 4 {
             execute_sql(&tx, AGENT_WAKE_RECEIPTS_MIGRATION).await?;
             version = 5;
+        }
+        if version == 5 {
+            execute_sql(&tx, WORKTREE_DISPOSITION_MIGRATION).await?;
+            version = 6;
         }
         if version != STUDIO_DATABASE_SCHEMA_VERSION {
             anyhow::bail!(

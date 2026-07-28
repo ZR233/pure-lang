@@ -19,8 +19,10 @@ pub use manager::{
     WorktreeRef,
 };
 pub use reconcile::{
-    DurableWorktreeDisposition, DurableWorktreePresence, DurableWorktreeResource,
-    WorktreeReconciliation, reconcile_task_worktree_group,
+    DurableWorktreeDisposition, DurableWorktreeInspection, DurableWorktreePresence,
+    DurableWorktreeResource, DurableWorktreeResourcePresence, WorktreeReconciliation,
+    cleanup_task_worktree_resources, inspect_task_worktree_resources,
+    reconcile_task_worktree_group, validate_task_worktree_resource_identities,
 };
 
 /// Compares worktree paths using filesystem identity where available and

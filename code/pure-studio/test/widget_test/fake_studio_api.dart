@@ -20,6 +20,9 @@ class _FakeStudioApi implements StudioApi {
   final List<({String sessionId, int? afterSequence})> sessionSubscriptions =
       [];
   int createSessionCount = 0;
+  int bootstrapCount = 0;
+  Object? bootstrapError;
+  String? selectedProjectRequest;
   String? archivedProjectId;
   String? archiveSelectedProjectId;
   String? archivedSessionId;
@@ -40,6 +43,13 @@ class _FakeStudioApi implements StudioApi {
   List<String> discoveredSkills = const [];
   int loadProviderUsagesCount = 0;
   Completer<List<ProviderUsageView>>? blockedProviderUsageLoad;
+  final Map<String, RecoveryCleanupPreview> recoveryPreviews = {};
+  int previewRecoveryIssueCleanupCount = 0;
+  Object? previewRecoveryIssueCleanupError;
+  StudioState? recoveryCleanupState;
+  Object? recoveryCleanupError;
+  String? cleanedRecoveryIssueId;
+  String? cleanupExpectedRevision;
 
   void emitGlobal(StudioBridgeEvent event) => _global.add(event);
 
@@ -58,14 +68,22 @@ class _FakeStudioApi implements StudioApi {
   Future<ProviderCatalogView> loadProviderCatalog() async => providerCatalog;
 
   @override
-  Future<StudioState> bootstrap() async => initialState;
+  Future<StudioState> bootstrap() async {
+    bootstrapCount += 1;
+    if (bootstrapError case final error?) {
+      throw error;
+    }
+    return initialState;
+  }
 
   @override
   Future<StudioState> openProject(String path) async => initialState;
 
   @override
-  Future<StudioState> selectProject(String projectId) async =>
-      selectProjectStates[projectId] ?? initialState;
+  Future<StudioState> selectProject(String projectId) async {
+    selectedProjectRequest = projectId;
+    return selectProjectStates[projectId] ?? initialState;
+  }
 
   @override
   Future<StudioState> archiveProject(
@@ -90,6 +108,39 @@ class _FakeStudioApi implements StudioApi {
   }) async {
     archivedSessionId = sessionId;
     return initialState;
+  }
+
+  @override
+  Future<RecoveryCleanupPreview> previewRecoveryIssueCleanup(
+    String issueId,
+  ) async {
+    previewRecoveryIssueCleanupCount += 1;
+    if (previewRecoveryIssueCleanupError case final error?) {
+      throw error;
+    }
+    return recoveryPreviews[issueId] ??
+        RecoveryCleanupPreview(
+          issueId: issueId,
+          expectedRevision: 'revision-$issueId',
+          scope: RecoveryIssueScope.session,
+          detail: 'Recovery cleanup preview',
+          resources: const [],
+        );
+  }
+
+  @override
+  Future<StudioState> cleanupRecoveryIssue(
+    String issueId,
+    String expectedRevision, {
+    String? selectedProjectId,
+    String? selectedSessionId,
+  }) async {
+    if (recoveryCleanupError case final error?) {
+      throw error;
+    }
+    cleanedRecoveryIssueId = issueId;
+    cleanupExpectedRevision = expectedRevision;
+    return recoveryCleanupState ?? initialState;
   }
 
   @override

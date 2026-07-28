@@ -17,6 +17,7 @@ class BridgeStudioSnapshotResponse {
   final List<SessionDto> sessions;
   final String? selectedSessionId;
   final BridgeTaskRuntimeDto? selectedSessionTask;
+  final List<BridgeStudioRecoveryIssueDto> recoveryIssues;
   final String configJson;
   final String generalSettingsJson;
   final BridgeWebSearchSettingsDto webSearch;
@@ -27,6 +28,7 @@ class BridgeStudioSnapshotResponse {
     required this.sessions,
     this.selectedSessionId,
     this.selectedSessionTask,
+    required this.recoveryIssues,
     required this.configJson,
     required this.generalSettingsJson,
     required this.webSearch,
@@ -39,6 +41,7 @@ class BridgeStudioSnapshotResponse {
       sessions.hashCode ^
       selectedSessionId.hashCode ^
       selectedSessionTask.hashCode ^
+      recoveryIssues.hashCode ^
       configJson.hashCode ^
       generalSettingsJson.hashCode ^
       webSearch.hashCode;
@@ -53,6 +56,7 @@ class BridgeStudioSnapshotResponse {
           sessions == other.sessions &&
           selectedSessionId == other.selectedSessionId &&
           selectedSessionTask == other.selectedSessionTask &&
+          recoveryIssues == other.recoveryIssues &&
           configJson == other.configJson &&
           generalSettingsJson == other.generalSettingsJson &&
           webSearch == other.webSearch;

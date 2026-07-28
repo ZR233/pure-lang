@@ -15,6 +15,70 @@ fn create_input(session_id: &str) -> CreateTaskRun {
 }
 
 #[tokio::test]
+async fn executor_discard_persists_cleanup_disposition_for_active_and_terminal_units() {
+    for terminal_before_discard in [false, true] {
+        let (store, run, work_unit, outcome) = delivery_transition_fixture().await;
+        if terminal_before_discard {
+            store
+                .update_work_unit(
+                    &work_unit.id,
+                    WorkUnitStatus::Failed,
+                    Some("agent-1".to_string()),
+                )
+                .await
+                .unwrap();
+            store
+                .update_agent_outcome(
+                    &outcome.id,
+                    UpdateAgentOutcome {
+                        status: AgentOutcomeStatus::Failed,
+                        summary: None,
+                        error: Some("executor failed before discard".to_string()),
+                        delivery: None,
+                        review: None,
+                    },
+                )
+                .await
+                .unwrap();
+        }
+
+        store
+            .cancel_executor_for_discard(&run.session_id, &work_unit.id, "agent-1")
+            .await
+            .unwrap();
+
+        let persisted_unit = store.read_work_unit(&work_unit.id).await.unwrap().unwrap();
+        let persisted_outcome = store
+            .list_agent_outcomes(&run.id)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|record| record.id == outcome.id)
+            .unwrap();
+        assert_eq!(
+            persisted_unit.worktree_disposition,
+            TaskWorktreeDisposition::CleanupRequested
+        );
+        assert!(matches!(
+            persisted_unit.status,
+            WorkUnitStatus::Cancelled | WorkUnitStatus::Failed
+        ));
+        assert!(matches!(
+            persisted_outcome.status,
+            AgentOutcomeStatus::Cancelled | AgentOutcomeStatus::Failed
+        ));
+        assert_eq!(
+            persisted_outcome.error.as_deref(),
+            Some(if terminal_before_discard {
+                "executor failed before discard"
+            } else {
+                "executor discarded by planner"
+            })
+        );
+    }
+}
+
+#[tokio::test]
 async fn task_run_and_branch_lease_are_created_atomically() {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project("C:/work/task").await.unwrap();
