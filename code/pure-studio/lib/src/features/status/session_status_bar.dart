@@ -13,20 +13,23 @@ import 'task_runtime_detail.dart';
 
 class SessionStatusBar extends ConsumerWidget {
   const SessionStatusBar({
-    required this.workspace,
+    this.workspace,
+    this.view,
     this.showTodo = false,
     this.todoExpanded = false,
     this.onToggleTodo,
     super.key,
-  });
+  }) : assert(workspace != null || view != null);
 
-  final AgentWorkspaceView workspace;
+  final AgentWorkspaceView? workspace;
+  final StatusBarView? view;
   final bool showTodo;
   final bool todoExpanded;
   final VoidCallback? onToggleTodo;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final workspace = view ?? StatusBarView.fromWorkspace(this.workspace!);
     final runtime = workspace.runtime;
     final session = workspace.session;
     final activityLabel = _runtimeActivityLabel(context, runtime);
@@ -152,7 +155,7 @@ class SessionStatusBar extends ConsumerWidget {
                     const SizedBox(width: 8),
                     _PhaseReadout(
                       turnPhase: workspace.statusPhase,
-                      interactionKind: workspace.activeInteraction?.kind,
+                      interactionKind: workspace.activeInteractionKind,
                     ),
                   ],
                 );
@@ -178,7 +181,7 @@ String _runtimeActivityLabel(BuildContext context, SessionRuntimeView runtime) {
   return parts.join(' · ');
 }
 
-String? _selectedEffort(AgentWorkspaceView workspace, StudioMode mode) {
+String? _selectedEffort(StatusBarView workspace, StudioMode mode) {
   final effort = workspace.role(_roleKeyForMode(mode))?.effort.trim() ?? '';
   return effort.isEmpty ? null : effort;
 }
@@ -297,7 +300,7 @@ class _SessionModeSelector extends ConsumerWidget {
 class _ModeModelSelector extends ConsumerWidget {
   const _ModeModelSelector({required this.workspace, required this.mode});
 
-  final AgentWorkspaceView workspace;
+  final StatusBarView workspace;
   final StudioMode mode;
 
   @override
@@ -354,7 +357,7 @@ class _ModeModelSelector extends ConsumerWidget {
 class _ReasoningEffortSelector extends ConsumerWidget {
   const _ReasoningEffortSelector({required this.workspace, required this.mode});
 
-  final AgentWorkspaceView workspace;
+  final StatusBarView workspace;
   final StudioMode mode;
 
   @override
@@ -438,7 +441,7 @@ String _roleKeyForMode(StudioMode mode) {
   };
 }
 
-_ModeModelOption? _modelFor(AgentWorkspaceView workspace, StudioMode mode) {
+_ModeModelOption? _modelFor(StatusBarView workspace, StudioMode mode) {
   final role = workspace.role(_roleKeyForMode(mode));
   if (role == null) {
     return null;
@@ -454,10 +457,7 @@ _ModeModelOption? _modelFor(AgentWorkspaceView workspace, StudioMode mode) {
   );
 }
 
-List<String> _effortsForWorkspace(
-  AgentWorkspaceView workspace,
-  StudioMode mode,
-) {
+List<String> _effortsForWorkspace(StatusBarView workspace, StudioMode mode) {
   return _modelFor(workspace, mode)?.reasoningEfforts ?? const [];
 }
 

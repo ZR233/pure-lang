@@ -4,9 +4,13 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import '../../../frb_generated.dart';
+import '../types/error.dart';
 import '../types/interaction.dart';
 import '../types/response.dart';
+import '../types/session_stream.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
+
+// These functions are ignored because they are not marked as `pub`: `interaction_resolution`
 
 Future<SubmitPromptResponse> submitPrompt({
   required String sessionId,
@@ -25,8 +29,8 @@ Future<StopPromptResponse> stopPrompt({required String sessionId}) => RustLib
 
 Future<ResolveInteractionResponse> resolveInteraction({
   required String interactionId,
-  required String resolutionJson,
+  required BridgeInteractionResolution resolution,
 }) => RustLib.instance.api.crateApiStudioHandlersPromptResolveInteraction(
   interactionId: interactionId,
-  resolutionJson: resolutionJson,
+  resolution: resolution,
 );

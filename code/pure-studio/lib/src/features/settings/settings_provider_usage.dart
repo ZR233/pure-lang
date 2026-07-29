@@ -1,7 +1,15 @@
-part of 'settings_page.dart';
+import 'package:flutter/material.dart';
 
-class _ProviderUsagePanel extends StatelessWidget {
-  const _ProviderUsagePanel({
+import '../../app/theme/studio_tokens.dart';
+import '../../domain/models/studio_models.dart';
+import '../../l10n/studio_l10n.dart';
+import '../../shared/studio_chrome.dart';
+import 'settings_common.dart';
+import 'settings_provider_drafts.dart';
+
+class ProviderUsagePanel extends StatelessWidget {
+  const ProviderUsagePanel({
+    super.key,
     required this.provider,
     required this.usage,
     required this.loading,
@@ -45,7 +53,7 @@ class _ProviderUsagePanel extends StatelessWidget {
                 ),
               ),
               Text(
-                _usageUpdatedLabel(context, usage?.updatedAt),
+                usageUpdatedLabel(context, usage?.updatedAt),
                 style: Theme.of(context).textTheme.labelSmall?.copyWith(
                   color: colors.onSurfaceVariant,
                 ),
@@ -66,22 +74,22 @@ class _ProviderUsagePanel extends StatelessWidget {
           ),
           if (error != null && error!.isNotEmpty) ...[
             const SizedBox(height: 8),
-            _ProviderUsageMessage(
+            ProviderUsageMessage(
               icon: Icons.error_outline,
               message: error!,
-              tone: _UsageTone.failed,
+              tone: UsageTone.failed,
             ),
           ],
           const SizedBox(height: 8),
           if (usage == null)
-            _ProviderUsageMessage(
+            ProviderUsageMessage(
               icon: loading
                   ? Icons.hourglass_empty
                   : Icons.account_balance_wallet_outlined,
               message: loading
                   ? context.l10n.settingsUsageChecking
                   : context.l10n.settingsUsageNotLoaded,
-              tone: loading ? _UsageTone.neutral : _UsageTone.muted,
+              tone: loading ? UsageTone.neutral : UsageTone.muted,
             )
           else if (usage.status == 'ready' &&
               usage.usageKind == 'deepseekBalance' &&
@@ -92,18 +100,18 @@ class _ProviderUsagePanel extends StatelessWidget {
               usage.codingPlan != null)
             _ZhipuCodingPlanUsage(usage: usage.codingPlan!)
           else
-            _ProviderUsageMessage(
+            ProviderUsageMessage(
               icon:
                   usage.status == 'failed' ||
                       usage.status == 'missingCredential'
                   ? Icons.error_outline
                   : Icons.info_outline,
-              message: _providerUsageMessage(context, provider, usage),
+              message: providerUsageMessage(context, provider, usage),
               tone: usage.status == 'failed'
-                  ? _UsageTone.failed
+                  ? UsageTone.failed
                   : usage.status == 'missingCredential'
-                  ? _UsageTone.warning
-                  : _UsageTone.muted,
+                  ? UsageTone.warning
+                  : UsageTone.muted,
             ),
         ],
       ),
@@ -124,10 +132,10 @@ class _DeepSeekUsage extends StatelessWidget {
             .firstOrNull ??
         usage.balances.firstOrNull;
     if (primary == null) {
-      return _ProviderUsageMessage(
+      return ProviderUsageMessage(
         icon: Icons.info_outline,
         message: context.l10n.settingsUsageUnavailable,
-        tone: _UsageTone.muted,
+        tone: UsageTone.muted,
       );
     }
     final colors = Theme.of(context).colorScheme;
@@ -157,11 +165,11 @@ class _DeepSeekUsage extends StatelessWidget {
           spacing: 8,
           runSpacing: 6,
           children: [
-            _InfoPill(
+            SettingsInfoPill(
               icon: Icons.card_giftcard_outlined,
               label: context.l10n.settingsUsageGranted(primary.grantedBalance),
             ),
-            _InfoPill(
+            SettingsInfoPill(
               icon: Icons.payments_outlined,
               label: context.l10n.settingsUsageToppedUp(
                 primary.toppedUpBalance,
@@ -170,7 +178,7 @@ class _DeepSeekUsage extends StatelessWidget {
             for (final item in usage.balances.where(
               (item) => item.currency != primary.currency,
             ))
-              _InfoPill(
+              SettingsInfoPill(
                 icon: Icons.account_balance_wallet_outlined,
                 label: '${item.currency} ${item.totalBalance}',
               ),
@@ -189,26 +197,26 @@ class _ZhipuCodingPlanUsage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ordered = [
-      _findQuotaLimit(usage.limits, 'fiveHour'),
-      _findQuotaLimit(usage.limits, 'weekly'),
-      _findQuotaLimit(usage.limits, 'mcpMonthly'),
+      findQuotaLimit(usage.limits, 'fiveHour'),
+      findQuotaLimit(usage.limits, 'weekly'),
+      findQuotaLimit(usage.limits, 'mcpMonthly'),
       ...usage.limits.where((limit) => limit.window == 'other'),
     ].whereType<ZhipuQuotaLimitView>().toList();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (usage.level != null && usage.level!.isNotEmpty) ...[
-          _InfoPill(
+          SettingsInfoPill(
             icon: Icons.workspace_premium_outlined,
             label: usage.level!,
           ),
           const SizedBox(height: 8),
         ],
         if (ordered.isEmpty)
-          _ProviderUsageMessage(
+          ProviderUsageMessage(
             icon: Icons.info_outline,
             message: context.l10n.settingsUsageUnavailable,
-            tone: _UsageTone.muted,
+            tone: UsageTone.muted,
           )
         else
           LayoutBuilder(
@@ -241,7 +249,7 @@ class _QuotaCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final percent = _quotaRemainingPercent(limit);
+    final percent = quotaRemainingPercent(limit);
     return DecoratedBox(
       decoration: BoxDecoration(
         color: context.colors.surfaceContainerLowest,
@@ -257,14 +265,14 @@ class _QuotaCard extends StatelessWidget {
               children: [
                 Expanded(
                   child: Text(
-                    _quotaTitle(context, limit),
+                    quotaTitle(context, limit),
                     style: Theme.of(
                       context,
                     ).textTheme.labelLarge?.copyWith(color: context.studioInk),
                   ),
                 ),
                 Text(
-                  _resetLabel(context, limit.nextResetAt),
+                  quotaResetLabel(context, limit.nextResetAt),
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
                     color: context.studioInkSoft,
                   ),
@@ -273,14 +281,14 @@ class _QuotaCard extends StatelessWidget {
             ),
             const SizedBox(height: 7),
             Text(
-              _formatPercent(percent),
+              formatPercent(percent),
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
                 color: context.studioInk,
                 fontWeight: FontWeight.w600,
               ),
             ),
             Text(
-              _quotaDetail(context, limit),
+              quotaDetail(context, limit),
               style: Theme.of(
                 context,
               ).textTheme.bodySmall?.copyWith(color: context.studioInkSoft),
@@ -307,7 +315,7 @@ class _QuotaCard extends StatelessWidget {
                     Tooltip(
                       message: detail.name,
                       child: StudioPill(
-                        label: '${detail.name} ${_formatToolUsage(detail)}',
+                        label: '${detail.name} ${formatToolUsage(detail)}',
                         backgroundColor: context.studioPaper2,
                         borderColor: context.studioLine,
                       ),
@@ -322,8 +330,9 @@ class _QuotaCard extends StatelessWidget {
   }
 }
 
-class _ProviderUsageMessage extends StatelessWidget {
-  const _ProviderUsageMessage({
+class ProviderUsageMessage extends StatelessWidget {
+  const ProviderUsageMessage({
+    super.key,
     required this.icon,
     required this.message,
     required this.tone,
@@ -331,18 +340,18 @@ class _ProviderUsageMessage extends StatelessWidget {
 
   final IconData icon;
   final String message;
-  final _UsageTone tone;
+  final UsageTone tone;
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     final color = switch (tone) {
-      _UsageTone.failed => colors.error,
-      _UsageTone.warning => colors.tertiary,
-      _UsageTone.neutral || _UsageTone.muted => colors.onSurfaceVariant,
+      UsageTone.failed => colors.error,
+      UsageTone.warning => colors.tertiary,
+      UsageTone.neutral || UsageTone.muted => colors.onSurfaceVariant,
     };
     return StudioInlineMessage(icon: icon, message: message, color: color);
   }
 }
 
-enum _UsageTone { failed, warning, neutral, muted }
+enum UsageTone { failed, warning, neutral, muted }

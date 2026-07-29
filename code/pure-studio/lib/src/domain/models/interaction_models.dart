@@ -1,4 +1,71 @@
+import 'session_models.dart';
 import 'studio_enums.dart';
+
+sealed class InteractionPayload {
+  const InteractionPayload();
+}
+
+class UnknownInteractionPayload extends InteractionPayload {
+  const UnknownInteractionPayload();
+}
+
+class UserInputInteractionPayload extends InteractionPayload {
+  const UserInputInteractionPayload({required this.questions});
+
+  final List<UserQuestionView> questions;
+}
+
+class ToolApprovalInteractionPayload extends InteractionPayload {
+  const ToolApprovalInteractionPayload({
+    required this.toolName,
+    this.arguments,
+    required this.workingDirectory,
+    this.parentAgentId,
+  });
+
+  final String toolName;
+  final Object? arguments;
+  final String workingDirectory;
+  final String? parentAgentId;
+}
+
+class PlanConfirmationInteractionPayload extends InteractionPayload {
+  const PlanConfirmationInteractionPayload({
+    required this.planId,
+    required this.content,
+  });
+
+  final String planId;
+  final String content;
+}
+
+class UserQuestionView {
+  const UserQuestionView({
+    required this.id,
+    required this.header,
+    required this.question,
+    required this.isOther,
+    required this.isSecret,
+    required this.options,
+  });
+
+  final String id;
+  final String header;
+  final String question;
+  final bool isOther;
+  final bool isSecret;
+  final List<UserQuestionOptionView> options;
+}
+
+class UserQuestionOptionView {
+  const UserQuestionOptionView({
+    required this.label,
+    required this.description,
+  });
+
+  final String label;
+  final String description;
+}
 
 class PendingInteraction {
   const PendingInteraction({
@@ -7,7 +74,7 @@ class PendingInteraction {
     required this.kind,
     required this.title,
     required this.body,
-    this.payload = const {},
+    this.payload = const UnknownInteractionPayload(),
   });
 
   final String id;
@@ -15,7 +82,70 @@ class PendingInteraction {
   final InteractionKind kind;
   final String title;
   final String body;
-  final Map<String, Object?> payload;
+  final InteractionPayload payload;
+}
+
+class InteractionResolutionResult {
+  const InteractionResolutionResult({
+    required this.sessionId,
+    required this.interactionId,
+    required this.status,
+    required this.sessions,
+  });
+
+  final String sessionId;
+  final String interactionId;
+  final String status;
+  final List<StudioSession> sessions;
+
+  bool get isResolved => status != 'pending';
+}
+
+class UserInputAnswerCommand {
+  const UserInputAnswerCommand({
+    required this.questionId,
+    required this.answers,
+  });
+
+  final String questionId;
+  final List<String> answers;
+}
+
+sealed class InteractionResolutionCommand {
+  const InteractionResolutionCommand();
+}
+
+class UserInputResolutionCommand extends InteractionResolutionCommand {
+  const UserInputResolutionCommand({required this.answers});
+
+  final List<UserInputAnswerCommand> answers;
+}
+
+enum ToolApprovalDecision { approved, denied }
+
+class ToolApprovalResolutionCommand extends InteractionResolutionCommand {
+  const ToolApprovalResolutionCommand({required this.decision, this.reason});
+
+  final ToolApprovalDecision decision;
+  final String? reason;
+}
+
+enum PlanConfirmationDecision {
+  implementFreshContext,
+  continuePlanning,
+  dismiss,
+}
+
+class PlanConfirmationResolutionCommand extends InteractionResolutionCommand {
+  const PlanConfirmationResolutionCommand({
+    required this.decision,
+    this.content,
+    this.reason,
+  });
+
+  final PlanConfirmationDecision decision;
+  final String? content;
+  final String? reason;
 }
 
 int interactionPriority(InteractionKind kind) {

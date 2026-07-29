@@ -1,7 +1,12 @@
-part of 'settings_page.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-class _StudioUpdateSettingsRow extends ConsumerWidget {
-  const _StudioUpdateSettingsRow({required this.runtimeBusy});
+import '../../app/theme/studio_tokens.dart';
+import '../../l10n/studio_l10n.dart';
+import '../update/studio_update_controller.dart';
+
+class StudioUpdateSettingsRow extends ConsumerWidget {
+  const StudioUpdateSettingsRow({super.key, required this.runtimeBusy});
 
   final bool runtimeBusy;
 
@@ -86,15 +91,31 @@ class _StudioUpdateSettingsRow extends ConsumerWidget {
     StudioUpdateState state,
   ) {
     final controller = ref.read(studioUpdateControllerProvider.notifier);
-    if (state.phase == StudioUpdatePhase.checking ||
-        state.phase == StudioUpdatePhase.verifying) {
+    if (state.phase == StudioUpdatePhase.checking) {
       return const SizedBox.square(
         dimension: 22,
         child: CircularProgressIndicator(strokeWidth: 2),
       );
     }
     if (state.phase == StudioUpdatePhase.downloading ||
-        state.phase == StudioUpdatePhase.installerLaunched) {
+        state.phase == StudioUpdatePhase.verifying) {
+      return Wrap(
+        spacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          const SizedBox.square(
+            dimension: 22,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          TextButton(
+            key: const ValueKey('studio-update-cancel'),
+            onPressed: controller.cancelInstall,
+            child: Text(context.l10n.settingsCancel),
+          ),
+        ],
+      );
+    }
+    if (state.phase == StudioUpdatePhase.installerLaunched) {
       return null;
     }
     if (state.hasUpdate) {

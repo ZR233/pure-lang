@@ -115,6 +115,41 @@ session-list 继续只通过 product stream 或查询视图进入，不混入 se
 
 `lib/src/rust/**` 与 `frb_generated.dart` 是生成边界，业务代码不得手写修改；`lib/src/data/frb/studio_api.dart` 保持对外稳定 barrel，内部按 `StudioApi` 接口、FRB runtime adapter、typed bridge event、FRB DTO converter、legacy/demo converter 和 demo API 分文件维护。生产路径只从 FRB typed DTO/union 进入 domain model；legacy JSON 解析必须集中在明确命名的 legacy/demo adapter 中，不能混入实时 FRB stream reducer。
 
+FRB runtime adapter 的 ready 顺序固定为 `RustLib.init()`、`initializeRuntime()`、
+`startRuntime()`。Dart 可缓存初始化 Future，但失败时必须清除缓存并用原始 stack trace 重新
+抛出；Rust async cell 只在 runtime 完整构造成功后写入，因此下一次调用能真正重试。正常
+应用退出由 lifecycle coordinator best-effort await `shutdownRuntime()` 后调用
+`RustLib.dispose()`；update install 必须显式等待相同 shutdown 路径。Stopped 是 terminal，
+UI 只提示重启进程，不尝试在原进程复活 MCP/LSP/agent runtime。
+
+bridge failure 在 adapter 中映射为 domain `StudioFailure`，行为只读取稳定 code 与
+retryable。用户可见消息不得包含 token、敏感配置、完整本机路径或内部 cause chain；
+correlation ID 用于关联 Rust diagnostics。Settings 与 interaction 跨边界只使用 typed
+command/decision，secret 的 preserve/replace/clear 语义使用 enum 表达；保存成功后 controller
+只采用 bridge 返回的 canonical config/snapshot，不做 optimistic canonical state 写入。
+
+Riverpod provider 按生命周期分层：
+
+- Studio/update API、build flags、Studio controller 与 update controller 为 keepAlive；
+- shell/sidebar/header/settings/status selector 与 workspace family 为 autoDispose；
+- provider usage 是 autoDispose AsyncNotifier，并按 provider ID 保存 busy/error；
+- 表单草稿、选择、hover/focus、滚动和 timeline 展开状态保持 Widget-local。
+
+`StudioController` 只做 bootstrap、typed command dispatch、canonical snapshot adoption、
+subscription/coordinator 生命周期、delta batching、resync 副作用和 selected session 切换。
+event/snapshot/config/cursor/part/agent reducer 是不依赖 Riverpod、FRB、Timer、Stream 或 async
+的纯函数，只返回 state 与可选 resync reason。`PureStudioApp` 不直接 watch update state；
+独立 eager initializer 启动 controller 并返回稳定 child。shell/sidebar/header/settings 只
+watch 不可变 projection，使高频 part delta 只重建当前 workspace。
+
+Driver extension 只能由 `test_driver/driver_main.dart` 启用，该入口复用正式 `studio.main()`，
+并在 `dart.vm.product=true` 时拒绝启动。正式 `lib/main.dart`、build-gui 与 release-gui 不得
+导入 driver。Driver finder 只使用集中定义的 `StudioDriverKeys` 和领域 ID 动态 key，不依赖
+本地化文本、位置或 `.first/.last`。Windows 验收必须包含 native FRB 和 demo 两轮：每次导航
+后重新读取 widget tree，以 waitFor/waitForAbsent/getText 同步，最后确认 runtime errors 为空
+并保存 shell、Settings、streaming、Provider 与 interaction 截图。探索出的流程必须同步为
+持久 integration test。
+
 `StudioPartType::Turn` 与 `StudioPartType::Inference` 是后端 trace lifecycle synthetic part，只用于恢复 turn/inference 状态与诊断，不是 Studio timeline 可渲染 row。Flutter adapter 在 typed FRB 边界必须过滤历史 snapshot 中的这两类 part，并把实时 `messagePartUpdated` 中的这两类 part 归一为 no-op；其他未知 `partType` 仍应抛出协议错误。
 
 ## 3. Timeline Projection

@@ -1,4 +1,3 @@
-pub mod events;
 pub mod lifecycle;
 pub mod prompt;
 pub mod providers;
@@ -8,9 +7,8 @@ pub mod settings;
 mod snapshot;
 pub mod updater;
 
-pub use events::{BridgeSessionStreamFrame, subscribe_product_events, subscribe_session_events};
 pub use lifecycle::{
-    archive_project, bootstrap_studio, initialize_runtime, open_project, select_project,
+    archive_project, bootstrap_studio, init_app, initialize_runtime, open_project, select_project,
     shutdown_runtime, start_runtime,
 };
 pub use prompt::{resolve_interaction, stop_prompt, submit_prompt};
@@ -25,4 +23,4 @@ pub use settings::{
     save_instructions_settings, save_mcp_settings, save_provider_settings,
     save_runtime_permission_mode, save_skills_settings, save_web_search_settings,
 };
-pub use updater::{check_studio_update, install_studio_update};
+pub use updater::{BridgeStudioUpdateOperation, check_studio_update, install_studio_update};

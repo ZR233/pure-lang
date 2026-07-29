@@ -113,8 +113,8 @@ SessionRuntimeView _emptyRuntimeView() {
 PendingInteraction pendingInteractionFromJson(Object? value) {
   final json = _map(value);
   final scope = _map(json['scope']);
-  final payload = _map(json['payload']);
   final kind = _interactionKind(_string(json['kind']));
+  final payload = _interactionPayloadFromJson(kind, _map(json['payload']));
   return PendingInteraction(
     id: _string(json['interactionId']),
     sessionId: _string(scope['sessionId']),

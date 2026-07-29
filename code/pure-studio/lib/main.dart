@@ -30,9 +30,7 @@ void _recordDartError(Object error, StackTrace? stack) {
         : Directory('$localAppData${Platform.pathSeparator}Pure Studio');
     final logs = Directory('${root.path}${Platform.pathSeparator}logs')
       ..createSync(recursive: true);
-    final file = File(
-      '${logs.path}${Platform.pathSeparator}dart-errors.log',
-    );
+    final file = File('${logs.path}${Platform.pathSeparator}dart-errors.log');
     if (file.existsSync() && file.lengthSync() > 2 * 1024 * 1024) {
       final previous = File('${file.path}.1');
       if (previous.existsSync()) {

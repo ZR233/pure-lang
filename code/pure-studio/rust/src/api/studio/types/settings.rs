@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 // ── Input types ──
 
 #[derive(Debug, Clone, Deserialize)]
@@ -20,7 +20,7 @@ pub struct ProviderInput {
     pub connection_mode: String,
     pub name: String,
     pub base_url: String,
-    pub bearer_token: String,
+    pub secret: ProviderSecretInput,
     pub capability_source: String,
     pub hosted_web_search: bool,
     pub standalone_web_search: Option<String>,
@@ -82,6 +82,22 @@ pub struct McpServerInput {
     pub enabled: bool,
     pub transport: String,
     pub endpoint: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "action")]
+pub enum ProviderSecretInput {
+    Preserve,
+    Replace { value: String },
+    Clear,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeneralSettingsInput {
+    pub follow_system_theme: bool,
+    pub follow_active_turn: bool,
+    pub compact_timeline: bool,
 }
 
 /// Web 搜索设置的 typed bridge 输入。

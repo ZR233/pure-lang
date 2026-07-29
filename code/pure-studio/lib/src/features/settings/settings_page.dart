@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -8,26 +6,17 @@ import '../../app/theme/studio_tokens.dart';
 import '../../data/repositories/studio_repository.dart';
 import '../../domain/models/studio_models.dart';
 import '../../l10n/studio_l10n.dart';
-import '../../shared/studio_chrome.dart';
-import '../update/studio_update_controller.dart';
-
-part 'settings_provider_tab.dart';
-part 'settings_provider_list.dart';
-part 'settings_provider_usage.dart';
-part 'settings_provider_editor.dart';
-part 'settings_common.dart';
-part 'settings_provider_drafts.dart';
-part 'settings_tabs.dart';
-part 'settings_system_tabs.dart';
-part 'settings_web_search.dart';
-part 'settings_update_row.dart';
+import '../../shared/studio_driver_keys.dart';
+import 'settings_provider_tab.dart';
+import 'settings_system_tabs.dart';
+import 'settings_tabs.dart';
 
 class SettingsPage extends ConsumerWidget {
   const SettingsPage({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final asyncState = ref.watch(studioControllerProvider);
+    final asyncState = ref.watch(settingsPageProvider);
     return asyncState.when(
       loading: () =>
           const Scaffold(body: Center(child: CircularProgressIndicator())),
@@ -37,7 +26,10 @@ class SettingsPage extends ConsumerWidget {
         length: _settingsTabs.length,
         child: Scaffold(
           backgroundColor: context.studioPaper,
-          body: _SettingsScaffold(state: state),
+          body: KeyedSubtree(
+            key: StudioDriverKeys.settingsPage,
+            child: _SettingsScaffold(state: state),
+          ),
         ),
       ),
     );
@@ -86,28 +78,30 @@ enum _SettingsTab {
 class _SettingsScaffold extends StatelessWidget {
   const _SettingsScaffold({required this.state});
 
-  final StudioState state;
+  final SettingsPageView state;
 
   @override
   Widget build(BuildContext context) {
     final views = [
-      _ProvidersTab(providers: state.providers, roles: state.roles),
-      _InstructionsTab(settings: state.instructions),
-      _SkillsTab(
-        skills: {
-          ...state.runtime.activeSkills,
-          ...state.skills.disabled,
-        }.toList(),
+      ProvidersTab(
+        providers: state.providers,
+        providerCatalog: state.providerCatalog,
+        defaultProviderId: state.defaultProviderId,
+        roles: state.roles,
+      ),
+      InstructionsTab(settings: state.instructions),
+      SkillsTab(
+        skills: {...state.activeSkills, ...state.skills.disabled}.toList(),
         settings: state.skills,
         projectId: state.selectedProjectId,
       ),
-      _RolesTab(providers: state.providers, roles: state.roles),
-      _McpTab(servers: state.mcpServers),
-      _SecurityTab(mode: state.permissionMode),
-      _GeneralTab(
+      RolesTab(providers: state.providers, roles: state.roles),
+      McpTab(servers: state.mcpServers),
+      SecurityTab(mode: state.permissionMode),
+      GeneralTab(
         settings: state.general,
         webSearch: state.webSearch,
-        runtimeBusy: state.isBusy || state.runtime.hasActiveTask,
+        runtimeBusy: state.runtimeBusy,
       ),
     ];
     return LayoutBuilder(
@@ -233,6 +227,7 @@ class _SettingsBackTile extends StatelessWidget {
         color: Colors.transparent,
         borderRadius: BorderRadius.circular(StudioRadii.sm),
         child: InkWell(
+          key: StudioDriverKeys.settingsBack,
           borderRadius: BorderRadius.circular(StudioRadii.sm),
           onTap: () => context.go('/'),
           child: Padding(
@@ -297,6 +292,7 @@ class _SettingsNavItem extends StatelessWidget {
           ),
         ),
         child: InkWell(
+          key: StudioDriverKeys.settingsTab(tab.tab.name),
           borderRadius: BorderRadius.circular(StudioRadii.sm),
           onTap: onTap,
           child: Padding(
@@ -334,27 +330,6 @@ class _SettingsNavItem extends StatelessWidget {
               ],
             ),
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _SettingsPane extends StatelessWidget {
-  const _SettingsPane({required this.children, this.maxWidth = 980});
-
-  final List<Widget> children;
-  final double maxWidth;
-
-  @override
-  Widget build(BuildContext context) {
-    return Align(
-      alignment: Alignment.topCenter,
-      child: ConstrainedBox(
-        constraints: BoxConstraints(maxWidth: maxWidth),
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(28, 22, 28, 30),
-          children: children,
         ),
       ),
     );

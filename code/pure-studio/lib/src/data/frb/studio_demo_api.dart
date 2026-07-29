@@ -16,11 +16,18 @@ class DemoStudioApi implements StudioApi {
     model: 'gpt-5',
   );
   PermissionMode _permissionMode = PermissionMode.requestApproval;
+  StudioMode _sessionMode = StudioMode.simple;
   final Set<String> _archivedProjectIds = <String>{};
-  final Map<String, Map<String, Object?>> _settingsDrafts = {};
   final _globalEvents = StreamController<Object>.broadcast();
   final _sessionEvents = StreamController<SessionStreamFrame>.broadcast();
+  final Map<String, int> _promptGenerations = {};
   int _eventSequence = 0;
+
+  Duration get promptStartDelay => const Duration(milliseconds: 120);
+
+  Duration get promptActivityDelay => const Duration(milliseconds: 350);
+
+  Duration get promptToolDelay => const Duration(milliseconds: 500);
 
   @override
   Future<StudioState> bootstrap() async {
@@ -34,11 +41,37 @@ class DemoStudioApi implements StudioApi {
       id: 'session-main',
       projectId: project.id,
       title: 'Flutter + FRB 重构',
-      mode: StudioMode.simple,
+      mode: _sessionMode,
       updatedAt: now,
+    );
+    final alternateSession = StudioSession(
+      id: 'session-alt',
+      projectId: project.id,
+      title: 'Riverpod selector audit',
+      mode: _sessionMode,
+      createdAt: now.subtract(const Duration(minutes: 3)),
+      updatedAt: now.subtract(const Duration(minutes: 3)),
+    );
+    final agentSession = StudioSession(
+      id: 'session-agent-reviewer',
+      projectId: project.id,
+      title: 'Driver reviewer',
+      mode: _sessionMode,
+      createdAt: now.subtract(const Duration(minutes: 7)),
+      updatedAt: now.subtract(const Duration(minutes: 7)),
+      parentSessionId: session.id,
+      rootSessionId: session.id,
+      sessionKind: StudioSessionKind.agent,
+      ownerAgentId: 'driver-reviewer',
+      ownerRole: 'reviewer',
+      agentStatus: 'waiting',
+      agentSummary: 'Verifying Driver session switching.',
+      agentUpdatedAt: now.subtract(const Duration(minutes: 7)),
     );
     final userCreatedAt = now.subtract(const Duration(minutes: 9));
     final assistantCreatedAt = now.subtract(const Duration(minutes: 8));
+    final alternateCreatedAt = now.subtract(const Duration(minutes: 2));
+    final agentCreatedAt = now.subtract(const Duration(minutes: 6));
     final demoParts = [
       TimelinePartSnapshot(
         id: 'turn-demo:user-text',
@@ -145,6 +178,34 @@ class DemoStudioApi implements StudioApi {
         textChannel: TimelineTextChannel.finalAnswer,
       ),
     ];
+    final alternatePart = TimelinePartSnapshot(
+      id: 'turn-alt:text',
+      messageId: 'turn-alt:assistant',
+      sessionId: alternateSession.id,
+      turnId: 'turn-alt',
+      type: TimelinePartType.text,
+      order: 0,
+      revision: 0,
+      text: 'Riverpod selector boundary is isolated.',
+      status: 'completed',
+      createdAt: alternateCreatedAt,
+      updatedAt: alternateCreatedAt,
+      textChannel: TimelineTextChannel.finalAnswer,
+    );
+    final agentPart = TimelinePartSnapshot(
+      id: 'turn-agent:text',
+      messageId: 'turn-agent:assistant',
+      sessionId: agentSession.id,
+      turnId: 'turn-agent',
+      type: TimelinePartType.text,
+      order: 0,
+      revision: 0,
+      text: 'Driver agent workspace selected.',
+      status: 'completed',
+      createdAt: agentCreatedAt,
+      updatedAt: agentCreatedAt,
+      textChannel: TimelineTextChannel.finalAnswer,
+    );
     final preset = _providerCatalog.presets.first;
     final defaultModels = _providerCatalog.modelsFor(preset.modelCatalogId);
     final defaultProvider = preset
@@ -164,11 +225,15 @@ class DemoStudioApi implements StudioApi {
               '';
     final state = StudioState(
       projects: const [project],
-      sessions: [session],
+      sessions: [session, agentSession, alternateSession],
       selectedProjectId: project.id,
       selectedSessionId: session.id,
       permissionMode: _permissionMode,
-      turnPhasesBySession: {session.id: TurnPhase.idle},
+      turnPhasesBySession: {
+        session.id: TurnPhase.idle,
+        alternateSession.id: TurnPhase.idle,
+        agentSession.id: TurnPhase.idle,
+      },
       runtimesBySession: {
         session.id: const SessionRuntimeView(
           model: 'planner/local-responses',
@@ -183,6 +248,28 @@ class DemoStudioApi implements StudioApi {
           activeMcpServers: ['dart'],
           activeLspServers: ['rust-analyzer'],
           agentCount: 4,
+        ),
+        alternateSession.id: const SessionRuntimeView(
+          model: 'future-model',
+          contextTokens: 640,
+          contextWindow: 128000,
+          totalTokens: 1024,
+          costLabel: 'CNY 0.01',
+          activeSkills: ['riverpod-audit'],
+          activeMcpServers: ['dart'],
+          activeLspServers: [],
+          agentCount: 1,
+        ),
+        agentSession.id: const SessionRuntimeView(
+          model: 'reviewer/model',
+          contextTokens: 320,
+          contextWindow: 128000,
+          totalTokens: 512,
+          costLabel: 'CNY 0.01',
+          activeSkills: ['driver-verification'],
+          activeMcpServers: ['dart'],
+          activeLspServers: [],
+          agentCount: 0,
         ),
       },
       messagesBySession: {
@@ -200,9 +287,32 @@ class DemoStudioApi implements StudioApi {
             createdAt: assistantCreatedAt,
           ),
         ],
+        alternateSession.id: [
+          TimelineMessage(
+            id: 'turn-alt:assistant',
+            sessionId: alternateSession.id,
+            role: 'assistant',
+            createdAt: alternateCreatedAt,
+          ),
+        ],
+        agentSession.id: [
+          TimelineMessage(
+            id: 'turn-agent:assistant',
+            sessionId: agentSession.id,
+            role: 'assistant',
+            createdAt: agentCreatedAt,
+          ),
+        ],
       },
       partSnapshotsBySession: {
         session.id: {for (final part in demoParts) part.id: part},
+        alternateSession.id: {alternatePart.id: alternatePart},
+        agentSession.id: {agentPart.id: agentPart},
+      },
+      workspaceSyncBySession: {
+        session.id: AgentWorkspaceSyncState.ready,
+        alternateSession.id: AgentWorkspaceSyncState.ready,
+        agentSession.id: AgentWorkspaceSyncState.ready,
       },
       agentsBySession: {
         session.id: {
@@ -375,10 +485,9 @@ class DemoStudioApi implements StudioApi {
     String sessionId,
     StudioMode mode,
   ) async {
+    _sessionMode = mode;
     final state = await bootstrap();
-    return state.sessions
-        .firstWhere((session) => session.id == sessionId)
-        .copyWith(mode: mode);
+    return state.sessions.firstWhere((session) => session.id == sessionId);
   }
 
   @override
@@ -405,13 +514,30 @@ class DemoStudioApi implements StudioApi {
   }
 
   @override
-  Future<void> resolveInteraction(
+  Future<InteractionResolutionResult> resolveInteraction(
     String interactionId,
-    Map<String, Object?> resolution,
-  ) async {}
+    InteractionResolutionCommand resolution,
+  ) async {
+    if (resolution is PlanConfirmationResolutionCommand &&
+        resolution.decision == PlanConfirmationDecision.implementFreshContext) {
+      _sessionMode = StudioMode.task;
+    }
+    final state = await bootstrap();
+    return InteractionResolutionResult(
+      sessionId: state.selectedSessionId ?? '',
+      interactionId: interactionId,
+      status: 'resolved',
+      sessions: state.sessions,
+    );
+  }
 
   @override
   Future<void> stopPrompt(String sessionId) async {
+    _promptGenerations.update(
+      sessionId,
+      (value) => value + 1,
+      ifAbsent: () => 1,
+    );
     _emitSessionEvent(
       sessionId: sessionId,
       payload: TurnChangedPayload(
@@ -439,6 +565,11 @@ class DemoStudioApi implements StudioApi {
     if (trimmed.isEmpty) {
       return;
     }
+    final promptGeneration = _promptGenerations.update(
+      sessionId,
+      (value) => value + 1,
+      ifAbsent: () => 1,
+    );
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final userMessageId = 'demo-user-$_eventSequence';
     _emitSessionEvent(
@@ -476,7 +607,10 @@ class DemoStudioApi implements StudioApi {
         turn: StudioTurnView(sessionId: sessionId, status: 'streaming'),
       ),
     );
-    await Future<void>.delayed(const Duration(milliseconds: 120));
+    await Future<void>.delayed(promptStartDelay);
+    if (_promptGenerations[sessionId] != promptGeneration) {
+      return;
+    }
     final assistantMessageId = 'demo-assistant-$_eventSequence';
     _emitSessionEvent(
       sessionId: sessionId,
@@ -508,7 +642,10 @@ class DemoStudioApi implements StudioApi {
         }),
       ),
     );
-    await Future<void>.delayed(const Duration(milliseconds: 350));
+    await Future<void>.delayed(promptActivityDelay);
+    if (_promptGenerations[sessionId] != promptGeneration) {
+      return;
+    }
     _emitSessionEvent(
       sessionId: sessionId,
       payload: MessagePartDeltaPayload(
@@ -521,7 +658,10 @@ class DemoStudioApi implements StudioApi {
         ),
       ),
     );
-    await Future<void>.delayed(const Duration(milliseconds: 350));
+    await Future<void>.delayed(promptActivityDelay);
+    if (_promptGenerations[sessionId] != promptGeneration) {
+      return;
+    }
     _emitSessionEvent(
       sessionId: sessionId,
       payload: MessagePartUpdatedPayload(
@@ -560,7 +700,10 @@ class DemoStudioApi implements StudioApi {
         }),
       ),
     );
-    await Future<void>.delayed(const Duration(milliseconds: 350));
+    await Future<void>.delayed(promptActivityDelay);
+    if (_promptGenerations[sessionId] != promptGeneration) {
+      return;
+    }
     _emitSessionEvent(
       sessionId: sessionId,
       payload: MessagePartUpdatedPayload(
@@ -611,7 +754,10 @@ class DemoStudioApi implements StudioApi {
         }),
       ),
     );
-    await Future<void>.delayed(const Duration(milliseconds: 500));
+    await Future<void>.delayed(promptToolDelay);
+    if (_promptGenerations[sessionId] != promptGeneration) {
+      return;
+    }
     _emitSessionEvent(
       sessionId: sessionId,
       payload: MessagePartUpdatedPayload(
@@ -674,8 +820,9 @@ class DemoStudioApi implements StudioApi {
   }
 
   @override
-  Future<void> saveRuntimePermissionMode(PermissionMode mode) async {
+  Future<StudioState> saveRuntimePermissionMode(PermissionMode mode) async {
     _permissionMode = mode;
+    return bootstrap();
   }
 
   @override
@@ -683,59 +830,63 @@ class DemoStudioApi implements StudioApi {
 
   @override
   Future<StudioState> saveProviderSettings(
-    Map<String, Object?> settings,
+    ProviderSettingsCommand command,
   ) async {
     final current = await bootstrap();
-    _providers = _providersFromSettingsPayload(
-      settings,
+    _providers = _providersFromSettingsCommand(
+      command,
       previous: current.providers,
       catalog: _providerCatalog,
     );
-    _roles = _rolesFromSettingsPayload(settings);
+    _roles = _rolesFromSettingsCommand(command);
     return bootstrap();
   }
 
   @override
   Future<StudioState> saveInstructionsSettings(
-    Map<String, Object?> settings,
+    InstructionsSettingsCommand command,
   ) async {
-    _instructions = _instructionsFromSettingsPayload(settings);
+    _instructions = _instructionsFromSettingsCommand(command);
     return bootstrap();
   }
 
   @override
-  Future<StudioState> saveSkillsSettings(Map<String, Object?> settings) async {
-    _skills = _skillsFromSettingsPayload(settings);
+  Future<StudioState> saveSkillsSettings(SkillsSettingsCommand command) async {
+    _skills = _skillsFromSettingsCommand(command);
     return bootstrap();
   }
 
   @override
-  Future<StudioState> saveMcpSettings(Map<String, Object?> settings) async {
+  Future<StudioState> saveMcpSettings(McpSettingsCommand command) async {
     return bootstrap();
   }
 
   @override
-  Future<StudioState> saveGeneralSettings(Map<String, Object?> settings) async {
-    _general = _generalFromJson(settings);
+  Future<StudioState> saveGeneralSettings(
+    GeneralSettingsCommand command,
+  ) async {
+    _general = GeneralSettingsView(
+      followSystemTheme: command.followSystemTheme,
+      followActiveTurn: command.followActiveTurn,
+      compactTimeline: command.compactTimeline,
+    );
     return bootstrap();
   }
 
   @override
   Future<StudioState> saveWebSearchSettings(
-    WebSearchSettingsView settings,
+    WebSearchSettingsCommand command,
   ) async {
     _webSearch = WebSearchSettingsView(
-      configuredMode: settings.configuredMode,
-      effectiveMode: settings.configuredMode,
-      availability: settings.configuredMode == 'disabled'
-          ? 'disabled'
-          : 'available',
-      contextSize: settings.contextSize,
-      allowedDomains: settings.allowedDomains,
-      country: settings.country,
-      region: settings.region,
-      city: settings.city,
-      timezone: settings.timezone,
+      configuredMode: command.mode,
+      effectiveMode: command.mode,
+      availability: command.mode == 'disabled' ? 'disabled' : 'available',
+      contextSize: command.contextSize,
+      allowedDomains: command.allowedDomains,
+      country: command.country,
+      region: command.region,
+      city: command.city,
+      timezone: command.timezone,
       providerId: 'openai',
       model: 'gpt-5',
     );
@@ -758,19 +909,6 @@ class DemoStudioApi implements StudioApi {
     return const ['flutter-ui-polish', 'runtime-review', 'studio-settings'];
   }
 
-  @override
-  Future<void> saveStudioSettingsDraft(
-    String section,
-    Map<String, Object?> draft,
-  ) async {
-    _settingsDrafts[section] = Map<String, Object?>.from(draft);
-    _globalEvents.add(
-      StudioBridgeEvent(
-        payload: SettingsDraftSavedPayload(section: section, saved: true),
-      ),
-    );
-  }
-
   void _emitSessionEvent({
     required String sessionId,
     required StudioBridgeEventPayload payload,
@@ -785,6 +923,69 @@ class DemoStudioApi implements StudioApi {
           createdAt: DateTime.now(),
         ),
       ),
+    );
+  }
+}
+
+/// Deterministic demo fixture exposed only by the dedicated Driver build.
+///
+/// `cargo xtask run-gui --demo --driver` enables this fixture through the
+/// `PURE_STUDIO_DRIVER` compile-time define. Production and release entrypoints
+/// never set that define.
+class DriverDemoStudioApi extends DemoStudioApi {
+  @override
+  Duration get promptActivityDelay => const Duration(seconds: 3);
+
+  @override
+  Duration get promptToolDelay => const Duration(seconds: 3);
+
+  @override
+  Future<StudioState> bootstrap() async {
+    final state = await super.bootstrap();
+    return state.copyWith(
+      pendingInteractions: const [
+        PendingInteraction(
+          id: 'driver-tool',
+          sessionId: 'session-main',
+          kind: InteractionKind.toolApproval,
+          title: 'Approve demo tool',
+          body: 'Run a deterministic demo command.',
+          payload: ToolApprovalInteractionPayload(
+            toolName: 'demo_tool',
+            workingDirectory: r'C:\demo',
+          ),
+        ),
+        PendingInteraction(
+          id: 'driver-input',
+          sessionId: 'session-main',
+          kind: InteractionKind.userInput,
+          title: 'Demo question',
+          body: 'Choose a deterministic answer.',
+          payload: UserInputInteractionPayload(
+            questions: [
+              UserQuestionView(
+                id: 'driver-question',
+                header: 'Driver',
+                question: 'Continue?',
+                isOther: false,
+                isSecret: false,
+                options: [],
+              ),
+            ],
+          ),
+        ),
+        PendingInteraction(
+          id: 'driver-plan',
+          sessionId: 'session-main',
+          kind: InteractionKind.planConfirmation,
+          title: 'Confirm demo plan',
+          body: 'Implement the deterministic demo plan.',
+          payload: PlanConfirmationInteractionPayload(
+            planId: 'driver-plan',
+            content: '1. Verify stable Driver keys.',
+          ),
+        ),
+      ],
     );
   }
 }

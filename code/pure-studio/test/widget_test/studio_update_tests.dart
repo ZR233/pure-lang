@@ -141,6 +141,36 @@ void registerStudioUpdateTests() {
     expect(api.installCount, 0);
   });
 
+  test(
+    'active update operation can be cancelled before installer launch',
+    () async {
+      final api = _FakeStudioUpdateApi(
+        const StudioUpdateAvailable(_testStudioUpdate),
+      );
+      final container = _updateContainer(api);
+      addTearDown(container.dispose);
+      container.read(studioUpdateControllerProvider);
+      await _flushUpdateController();
+
+      final install = container
+          .read(studioUpdateControllerProvider.notifier)
+          .install();
+      await api.installStarted.future;
+      await _flushUpdateController();
+      await container
+          .read(studioUpdateControllerProvider.notifier)
+          .cancelInstall();
+
+      expect(api.operation.cancelled, isTrue);
+      expect(
+        container.read(studioUpdateControllerProvider).errorCode,
+        'cancelled',
+      );
+      await api.closeInstallEvents();
+      await install;
+    },
+  );
+
   testWidgets('General shows update actions and disables install while busy', (
     tester,
   ) async {
@@ -276,6 +306,7 @@ class _FakeStudioUpdateApi implements StudioUpdateApi {
   int checkCount = 0;
   int installCount = 0;
   String? openedNotesUrl;
+  late _FakeStudioUpdateOperation operation;
 
   @override
   Future<StudioUpdateCheckResult> check(String currentVersion) async {
@@ -285,10 +316,10 @@ class _FakeStudioUpdateApi implements StudioUpdateApi {
   }
 
   @override
-  Stream<StudioUpdateInstallEvent> install(StudioUpdateInfo update) async* {
+  Future<StudioUpdateOperation> startInstall(StudioUpdateInfo update) async {
     installCount += 1;
     if (!installStarted.isCompleted) installStarted.complete();
-    yield* _installEvents.stream;
+    return operation = _FakeStudioUpdateOperation(_installEvents);
   }
 
   @override
@@ -299,6 +330,24 @@ class _FakeStudioUpdateApi implements StudioUpdateApi {
   void emit(StudioUpdateInstallEvent event) => _installEvents.add(event);
 
   Future<void> closeInstallEvents() => _installEvents.close();
+}
+
+class _FakeStudioUpdateOperation implements StudioUpdateOperation {
+  _FakeStudioUpdateOperation(this._events);
+
+  final StreamController<StudioUpdateInstallEvent> _events;
+  bool cancelled = false;
+
+  @override
+  Stream<StudioUpdateInstallEvent> get events => _events.stream;
+
+  @override
+  Future<void> cancel() async {
+    cancelled = true;
+  }
+
+  @override
+  void dispose() {}
 }
 
 const _testStudioUpdate = StudioUpdateInfo(

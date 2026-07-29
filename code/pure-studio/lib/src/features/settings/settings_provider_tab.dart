@@ -1,37 +1,41 @@
-part of 'settings_page.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-class _ProvidersTab extends ConsumerStatefulWidget {
-  const _ProvidersTab({required this.providers, required this.roles});
+import '../../data/repositories/studio_repository.dart';
+import '../../domain/models/studio_models.dart';
+import 'provider_usage_controller.dart';
+import 'settings_provider_drafts.dart';
+import 'settings_provider_editor.dart';
+import 'settings_provider_list.dart';
+
+class ProvidersTab extends ConsumerStatefulWidget {
+  const ProvidersTab({
+    super.key,
+    required this.providers,
+    required this.providerCatalog,
+    required this.defaultProviderId,
+    required this.roles,
+  });
 
   final List<ProviderSettingsView> providers;
+  final ProviderCatalogView providerCatalog;
+  final String? defaultProviderId;
   final List<RoleSettingsView> roles;
 
   @override
-  ConsumerState<_ProvidersTab> createState() => _ProvidersTabState();
+  ConsumerState<ProvidersTab> createState() => ProvidersTabState();
 }
 
-class _ProvidersTabState extends ConsumerState<_ProvidersTab> {
+class ProvidersTabState extends ConsumerState<ProvidersTab> {
   String _query = '';
   String? _selectedProviderId;
-  _ProviderDraft? _draft;
+  ProviderDraft? _draft;
   bool _showDetails = false;
   bool _saving = false;
   String? _draftError;
-  final Set<String> _usageLoadingProviderIds = {};
-  String? _usageError;
 
   @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        unawaited(_refreshUsages());
-      }
-    });
-  }
-
-  @override
-  void didUpdateWidget(covariant _ProvidersTab oldWidget) {
+  void didUpdateWidget(covariant ProvidersTab oldWidget) {
     super.didUpdateWidget(oldWidget);
     final selected = _selectedProviderId;
     if (selected != null &&
@@ -43,10 +47,9 @@ class _ProvidersTabState extends ConsumerState<_ProvidersTab> {
 
   @override
   Widget build(BuildContext context) {
-    final state = ref.watch(studioControllerProvider).asData?.value;
-    final catalog = state?.providerCatalog ?? const ProviderCatalogView.empty();
+    final catalog = widget.providerCatalog;
     final defaultProviderId =
-        state?.defaultProviderId ?? widget.providers.firstOrNull?.id;
+        widget.defaultProviderId ?? widget.providers.firstOrNull?.id;
     final selectedId =
         _selectedProviderId ??
         defaultProviderId ??
@@ -55,17 +58,22 @@ class _ProvidersTabState extends ConsumerState<_ProvidersTab> {
         .where((provider) => provider.id == selectedId)
         .firstOrNull;
     final filtered = _filteredProviders();
+    final usageAsync = ref.watch(providerUsageControllerProvider);
+    final usageState = usageAsync.value;
     final usageByProvider = {
-      for (final usage in state?.providerUsages ?? const <ProviderUsageView>[])
+      for (final usage in usageState?.usages ?? const <ProviderUsageView>[])
         usage.providerId: usage,
     };
+    final loadingProviderIds = usageAsync.isLoading
+        ? widget.providers.map((provider) => provider.id).toSet()
+        : usageState?.loadingProviderIds ?? const <String>{};
     if (_draft != null) {
       return Padding(
         padding: const EdgeInsets.all(20),
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 980),
-            child: _ProviderEditor(
+            child: ProviderEditor(
               draft: _draft!,
               presets: catalog.presets,
               saving: _saving,
@@ -88,13 +96,15 @@ class _ProvidersTabState extends ConsumerState<_ProvidersTab> {
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 980),
-            child: _ProviderDetails(
+            child: ProviderDetails(
               provider: selected,
               usage: selected == null ? null : usageByProvider[selected.id],
               usageLoading: selected == null
                   ? false
-                  : _usageLoadingProviderIds.contains(selected.id),
-              usageError: _usageError,
+                  : loadingProviderIds.contains(selected.id),
+              usageError: selected == null
+                  ? null
+                  : usageState?.errorFor(selected.id),
               onBack: () => setState(() => _showDetails = false),
               onEdit: _startEdit,
               onRefreshUsage: selected == null
@@ -109,13 +119,13 @@ class _ProvidersTabState extends ConsumerState<_ProvidersTab> {
       builder: (context, constraints) {
         return Padding(
           padding: const EdgeInsets.all(20),
-          child: _ProviderList(
+          child: ProviderList(
             providers: filtered,
             defaultProviderId: defaultProviderId,
             filtering: _query.trim().isNotEmpty,
             usageByProvider: usageByProvider,
-            loadingProviderIds: _usageLoadingProviderIds,
-            usageError: _usageError,
+            loadingProviderIds: loadingProviderIds,
+            usageErrorsByProviderId: usageState?.errorsByProviderId ?? const {},
             onQueryChanged: (value) => setState(() => _query = value),
             onAdd: _startAdd,
             onSelect: (provider) => setState(() {
@@ -167,7 +177,7 @@ class _ProvidersTabState extends ConsumerState<_ProvidersTab> {
     setState(() {
       _selectedProviderId = id;
       _showDetails = false;
-      _draft = _ProviderDraft.create(
+      _draft = ProviderDraft.create(
         template.createProvider(id, catalog.modelsFor(template.modelCatalogId)),
       );
       _draftError = null;
@@ -178,7 +188,7 @@ class _ProvidersTabState extends ConsumerState<_ProvidersTab> {
     setState(() {
       _selectedProviderId = provider.id;
       _showDetails = false;
-      _draft = _ProviderDraft.edit(provider);
+      _draft = ProviderDraft.edit(provider);
       _draftError = null;
     });
   }
@@ -234,7 +244,7 @@ class _ProvidersTabState extends ConsumerState<_ProvidersTab> {
       return;
     }
     setState(() {
-      final id = current.mode == _ProviderDraftMode.create
+      final id = current.mode == ProviderDraftMode.create
           ? _suggestProviderId(template.id)
           : current.provider.id;
       _draft = current.copyWith(
@@ -317,8 +327,10 @@ class _ProvidersTabState extends ConsumerState<_ProvidersTab> {
       _draftError = null;
     });
     try {
-      final provider = _normalizedProvider(current.provider);
-      final providers = current.mode == _ProviderDraftMode.create
+      final provider = ProviderSettingsCommandBuilder.normalizeProvider(
+        current.provider,
+      );
+      final providers = current.mode == ProviderDraftMode.create
           ? [...widget.providers, provider]
           : [
               for (final item in widget.providers)
@@ -390,7 +402,7 @@ class _ProvidersTabState extends ConsumerState<_ProvidersTab> {
   }
 
   String? _defaultProviderIdAfterDraftSave(
-    _ProviderDraft draft,
+    ProviderDraft draft,
     ProviderSettingsView provider,
   ) {
     final currentDefaultId = ref
@@ -398,7 +410,7 @@ class _ProvidersTabState extends ConsumerState<_ProvidersTab> {
         .asData
         ?.value
         .defaultProviderId;
-    if (draft.mode == _ProviderDraftMode.create) {
+    if (draft.mode == ProviderDraftMode.create) {
       return provider.id;
     }
     if (currentDefaultId == draft.originalId) {
@@ -408,36 +420,9 @@ class _ProvidersTabState extends ConsumerState<_ProvidersTab> {
   }
 
   Future<void> _refreshUsages({String? providerId}) async {
-    if (!mounted) {
-      return;
-    }
-    setState(() {
-      _usageError = null;
-      if (providerId == null) {
-        _usageLoadingProviderIds
-          ..clear()
-          ..addAll(widget.providers.map((provider) => provider.id));
-      } else {
-        _usageLoadingProviderIds.add(providerId);
-      }
-    });
-    try {
-      await ref.read(studioControllerProvider.notifier).refreshProviderUsages();
-    } catch (error) {
-      if (mounted) {
-        setState(() => _usageError = error.toString());
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          if (providerId == null) {
-            _usageLoadingProviderIds.clear();
-          } else {
-            _usageLoadingProviderIds.remove(providerId);
-          }
-        });
-      }
-    }
+    await ref
+        .read(providerUsageControllerProvider.notifier)
+        .refresh(providerId: providerId);
   }
 
   Future<void> _saveProviders(
@@ -447,120 +432,18 @@ class _ProvidersTabState extends ConsumerState<_ProvidersTab> {
     String? renamedTo,
     String? removedProviderId,
   }) async {
-    final normalized = providers.map(_normalizedProvider).toList();
-    await ref.read(studioControllerProvider.notifier).saveProviderSettings({
-      'defaultProviderId': selectedProviderId ?? normalized.firstOrNull?.id,
-      'providers': [
-        for (final provider in normalized)
-          _providerPayload(
-            provider,
-            originalId: provider.id == renamedTo ? renamedFrom : null,
+    await ref
+        .read(studioControllerProvider.notifier)
+        .saveProviderSettings(
+          ProviderSettingsCommandBuilder.build(
+            providers: providers,
+            roles: widget.roles,
+            selectedProviderId: selectedProviderId,
+            renamedFrom: renamedFrom,
+            renamedTo: renamedTo,
+            removedProviderId: removedProviderId,
           ),
-      ],
-      'roles': _normalizedRolePayloads(
-        normalized,
-        renamedFrom: renamedFrom,
-        removedProviderId: removedProviderId,
-      ),
-    });
-  }
-
-  ProviderSettingsView _normalizedProvider(ProviderSettingsView provider) {
-    final models = provider.allModels
-        .where((model) => model.slug.trim().isNotEmpty)
-        .toList();
-    final defaultModel =
-        models.any((model) => model.slug == provider.defaultModel)
-        ? provider.defaultModel
-        : models.firstOrNull?.slug ?? provider.defaultModel;
-    return provider.copyWith(
-      id: provider.id.trim(),
-      name: provider.name.trim(),
-      baseUrl: provider.baseUrl.trim(),
-      defaultModel: defaultModel.trim(),
-      models: models,
-      customModels: provider.customModels
-          .where((model) => model.slug.trim().isNotEmpty)
-          .toList(),
-    );
-  }
-
-  List<Map<String, Object?>> _normalizedRolePayloads(
-    List<ProviderSettingsView> providers, {
-    String? renamedFrom,
-    String? removedProviderId,
-  }) {
-    final fallback = providers.firstOrNull;
-    if (fallback == null) {
-      return const [];
-    }
-    final providerIds = providers.map((provider) => provider.id).toSet();
-    return widget.roles.map((role) {
-      var providerId = role.providerId;
-      if (renamedFrom != null && providerId == renamedFrom) {
-        providerId = _draft?.provider.id ?? providerId;
-      }
-      if (removedProviderId != null && providerId == removedProviderId) {
-        providerId = fallback.id;
-      }
-      final provider = providers
-          .where((candidate) => candidate.id == providerId)
-          .firstOrNull;
-      final safeProvider = providerIds.contains(providerId) && provider != null
-          ? provider
-          : fallback;
-      final model =
-          safeProvider.allModels.any((item) => item.slug == role.model)
-          ? role.model
-          : safeProvider.defaultModel;
-      final selectedModel = safeProvider.allModels
-          .where((item) => item.slug == model)
-          .firstOrNull;
-      final effort =
-          selectedModel?.reasoningEfforts.contains(role.effort) == true
-          ? role.effort
-          : selectedModel?.defaultReasoningEffort.isNotEmpty == true
-          ? selectedModel!.defaultReasoningEffort
-          : selectedModel?.reasoningEfforts.firstOrNull ?? '';
-      return {
-        'key': role.key,
-        'provider': safeProvider.id,
-        'model': model,
-        'effort': effort,
-      };
-    }).toList();
-  }
-
-  Map<String, Object?> _providerPayload(
-    ProviderSettingsView provider, {
-    String? originalId,
-  }) {
-    return {
-      'id': provider.id,
-      'originalId': ?originalId,
-      'templateKind': provider.templateKind,
-      'connectionMode': provider.connectionMode,
-      'name': provider.name,
-      'baseUrl': provider.baseUrl,
-      'bearerToken': provider.bearerToken,
-      'defaultModel': provider.defaultModel,
-      'wireProtocol': provider.wireProtocol,
-      'capabilitySource': provider.capabilitySource,
-      'hostedWebSearch': provider.hostedWebSearch,
-      'standaloneWebSearch': provider.standaloneWebSearch.isEmpty
-          ? null
-          : provider.standaloneWebSearch,
-      'customModels': provider.customModels.map(_modelPayload).toList(),
-    };
-  }
-
-  Map<String, Object?> _modelPayload(ProviderModelView model) {
-    return {
-      'slug': model.slug,
-      'displayName': model.displayName,
-      'reasoningEfforts': model.reasoningEfforts,
-      'baseInstructions': model.baseInstructions,
-    };
+        );
   }
 
   String _suggestProviderId(String base) {

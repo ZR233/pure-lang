@@ -8,4 +8,5 @@ mod types;
 
 pub use client::StudioUpdater;
 pub use error::{StudioUpdateError, StudioUpdateErrorCode};
+pub use install::StudioUpdateCancellation;
 pub use types::{StudioUpdate, StudioUpdateAsset, StudioUpdateCheck, StudioUpdateEvent};

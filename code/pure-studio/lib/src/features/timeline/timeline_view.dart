@@ -2,8 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_riverpod/legacy.dart';
 import 'package:gpt_markdown/custom_widgets/markdown_config.dart';
 import 'package:gpt_markdown/gpt_markdown.dart';
 
@@ -11,6 +9,7 @@ import '../../app/theme/studio_tokens.dart';
 import '../../domain/models/studio_models.dart';
 import '../../l10n/studio_l10n.dart';
 import '../../shared/studio_chrome.dart';
+import '../../shared/studio_driver_keys.dart';
 import 'markdown_repair.dart';
 
 part 'timeline_blocks.dart';
@@ -18,30 +17,6 @@ part 'timeline_markdown_blocks.dart';
 part 'timeline_plan_agent_blocks.dart';
 part 'timeline_runtime_progress_blocks.dart';
 part 'timeline_tool_blocks.dart';
-
-final _reasoningExpandedProvider =
-    StateProvider.family<bool, _ReasoningExpansionKey>((ref, key) => false);
-
-@immutable
-class _ReasoningExpansionKey {
-  const _ReasoningExpansionKey({
-    required this.sessionId,
-    required this.groupId,
-  });
-
-  final String sessionId;
-  final String groupId;
-
-  @override
-  bool operator ==(Object other) {
-    return other is _ReasoningExpansionKey &&
-        other.sessionId == sessionId &&
-        other.groupId == groupId;
-  }
-
-  @override
-  int get hashCode => Object.hash(sessionId, groupId);
-}
 
 class TimelineView extends StatefulWidget {
   const TimelineView({
@@ -65,6 +40,7 @@ class _TimelineViewState extends State<TimelineView> {
 
   final ScrollController _controller = ScrollController();
   final Map<String, _TimelineScrollSnapshot> _sessionScroll = {};
+  final Set<String> _expandedReasoningGroups = {};
   bool _followingBottom = true;
   bool _detachedByUser = false;
   bool _programmaticScroll = false;
@@ -93,6 +69,7 @@ class _TimelineViewState extends State<TimelineView> {
     final sessionChanged = widget.sessionId != oldWidget.sessionId;
     if (sessionChanged) {
       _saveSessionState(oldWidget.sessionId);
+      _expandedReasoningGroups.clear();
       _restoreSessionState();
       _contentVersion = _timelineContentVersion(widget.rows, widget.turnPhase);
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -165,7 +142,7 @@ class _TimelineViewState extends State<TimelineView> {
               maxWidth: StudioLayout.conversationWidth,
             ),
             child: ListView.builder(
-              key: const ValueKey('timeline-scrollable'),
+              key: StudioDriverKeys.timeline,
               controller: _controller,
               padding: const EdgeInsets.fromLTRB(24, 28, 24, 38),
               itemCount: blocks.length + fallbackActivityCount + 1,
@@ -202,6 +179,10 @@ class _TimelineViewState extends State<TimelineView> {
                         key: ValueKey(block.id),
                         row: block.rows.single,
                         isCurrentActivity: block.isCurrentActivity,
+                        isReasoningExpanded: _expandedReasoningGroups.contains(
+                          block.rows.single.reasoningGroup?.id,
+                        ),
+                        onToggleReasoning: _toggleReasoning,
                       );
               },
             ),
@@ -317,6 +298,14 @@ class _TimelineViewState extends State<TimelineView> {
 
   void _jumpToLatest() {
     unawaited(_scrollToBottom(animated: true));
+  }
+
+  void _toggleReasoning(String groupId) {
+    setState(() {
+      if (!_expandedReasoningGroups.remove(groupId)) {
+        _expandedReasoningGroups.add(groupId);
+      }
+    });
   }
 
   void _restoreSessionState() {

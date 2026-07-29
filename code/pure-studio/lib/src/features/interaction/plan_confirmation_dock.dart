@@ -7,6 +7,7 @@ import '../../app/theme/studio_tokens.dart';
 import '../../data/repositories/studio_repository.dart';
 import '../../domain/models/studio_models.dart';
 import '../../l10n/studio_l10n.dart';
+import '../../shared/studio_driver_keys.dart';
 import 'interaction_widgets.dart';
 
 class PlanConfirmationDock extends ConsumerStatefulWidget {
@@ -76,10 +77,11 @@ class _PlanConfirmationDockState extends ConsumerState<PlanConfirmationDock> {
 
   void _resolveImplement() {
     unawaited(
-      _resolve({
-        'type': 'planConfirmation',
-        'decision': 'implementFreshContext',
-      }),
+      _resolve(
+        const PlanConfirmationResolutionCommand(
+          decision: PlanConfirmationDecision.implementFreshContext,
+        ),
+      ),
     );
   }
 
@@ -89,26 +91,28 @@ class _PlanConfirmationDockState extends ConsumerState<PlanConfirmationDock> {
       return;
     }
     unawaited(
-      _resolve({
-        'type': 'planConfirmation',
-        'decision': 'continuePlanning',
-        'content': content,
-        'reason': 'continue planning',
-      }),
+      _resolve(
+        PlanConfirmationResolutionCommand(
+          decision: PlanConfirmationDecision.continuePlanning,
+          content: content,
+          reason: 'continue planning',
+        ),
+      ),
     );
   }
 
   void _resolveDismiss() {
     unawaited(
-      _resolve({
-        'type': 'planConfirmation',
-        'decision': 'dismiss',
-        'reason': 'dismissed',
-      }),
+      _resolve(
+        const PlanConfirmationResolutionCommand(
+          decision: PlanConfirmationDecision.dismiss,
+          reason: 'dismissed',
+        ),
+      ),
     );
   }
 
-  Future<void> _resolve(Map<String, Object?> resolution) async {
+  Future<void> _resolve(InteractionResolutionCommand resolution) async {
     if (_submitting) {
       return;
     }
@@ -196,6 +200,7 @@ class _PlanDecisionActions extends StatelessWidget {
           onPressed: onDismiss,
         ),
         FilledButton.icon(
+          key: StudioDriverKeys.planImplement,
           icon: const Icon(Icons.play_arrow),
           label: Text(context.l10n.interactionPlanImplement),
           onPressed: onImplement,
@@ -271,6 +276,7 @@ class _PlanAdjustmentInput extends StatelessWidget {
           },
         );
         final submit = FilledButton.tonalIcon(
+          key: StudioDriverKeys.planContinue,
           icon: const Icon(Icons.send),
           label: Text(context.l10n.interactionPlanAdjustSubmit),
           onPressed: canSubmit ? onSubmit : null,

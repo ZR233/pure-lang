@@ -1,5 +1,5 @@
 use super::error::{StudioUpdateError, StudioUpdateErrorCode};
-use super::install;
+use super::install::{self, StudioUpdateCancellation};
 use super::manifest::{LATEST_MANIFEST_URL, evaluate_manifest, validate_redirect_url};
 use super::types::{StudioUpdate, StudioUpdateCheck, StudioUpdateEvent};
 use futures::StreamExt;
@@ -64,13 +64,14 @@ impl StudioUpdater {
         &self,
         update: StudioUpdate,
         progress: UnboundedSender<StudioUpdateEvent>,
+        cancellation: StudioUpdateCancellation,
         before_launch: F,
     ) -> Result<(), StudioUpdateError>
     where
         F: FnOnce() -> Fut,
         Fut: Future<Output = Result<(), StudioUpdateError>>,
     {
-        install::install_after(self, update, progress, before_launch).await
+        install::install_after(self, update, progress, cancellation, before_launch).await
     }
 
     /// 下载、验证并启动安装器。Bridge 应优先使用 [`Self::install_after`] 提供 busy guard。
@@ -79,8 +80,13 @@ impl StudioUpdater {
         update: StudioUpdate,
         progress: UnboundedSender<StudioUpdateEvent>,
     ) -> Result<(), StudioUpdateError> {
-        self.install_after(update, progress, || async { Ok(()) })
-            .await
+        self.install_after(
+            update,
+            progress,
+            StudioUpdateCancellation::new(),
+            || async { Ok(()) },
+        )
+        .await
     }
 
     pub(super) async fn request(&self, mut url: Url) -> Result<Response, StudioUpdateError> {

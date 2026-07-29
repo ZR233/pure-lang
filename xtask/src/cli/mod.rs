@@ -6,7 +6,8 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Command {
     Help(HelpTopic),
-    VerifyGui,
+    GenerateGui,
+    VerifyGui(VerifyGuiOptions),
     RunGui(RunGuiOptions),
     BuildGui(BuildGuiOptions),
     ReleaseGui(ReleaseGuiOptions),
@@ -16,11 +17,17 @@ pub(crate) enum Command {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HelpTopic {
     Global,
+    GenerateGui,
     VerifyGui,
     RunGui,
     BuildGui,
     ReleaseGui,
     BuildRustBridge,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct VerifyGuiOptions {
+    pub(crate) integration: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -81,6 +88,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command>
 
     match command.as_str() {
         "-h" | "--help" | "help" => Ok(Command::Help(HelpTopic::Global)),
+        "generate-gui" => parse_generate_gui(args),
         "verify-gui" => parse_verify_gui(args),
         "run-gui" => parse_run_gui(args),
         "build-gui" => parse_build_gui(args),
@@ -100,10 +108,13 @@ pub(crate) fn print_help(topic: HelpTopic) {
 pub(crate) fn help_text(topic: HelpTopic) -> &'static str {
     match topic {
         HelpTopic::Global => {
-            "Usage: cargo xtask <command> [options]\n\nCommands:\n  verify-gui          Resolve, analyze, and test the Pure Studio desktop app.\n  run-gui             Run the Pure Studio desktop app.\n  build-gui           Build release artifacts for the current desktop OS.\n  release-gui         Stage, finalize, or verify a Windows stable release.\n  build-rust-bridge   Build the Windows Rust bridge DLL for Flutter CMake.\n\nRun `cargo xtask <command> --help` for command-specific options."
+            "Usage: cargo xtask <command> [options]\n\nCommands:\n  generate-gui        Regenerate Riverpod, Freezed, l10n, and FRB bindings.\n  verify-gui          Generate, analyze, and test the Pure Studio desktop app.\n  run-gui             Run the Pure Studio desktop app.\n  build-gui           Build release artifacts for the current desktop OS.\n  release-gui         Stage, finalize, or verify a Windows stable release.\n  build-rust-bridge   Build the Windows Rust bridge DLL for Flutter CMake.\n\nRun `cargo xtask <command> --help` for command-specific options."
+        }
+        HelpTopic::GenerateGui => {
+            "Usage: cargo xtask generate-gui\n\nResolves Flutter dependencies and regenerates Riverpod, Freezed, l10n, and FRB 2.12.0 bindings.\n\nOptions:\n  -h, --help  Print help."
         }
         HelpTopic::VerifyGui => {
-            "Usage: cargo xtask verify-gui\n\nRuns Flutter dependency resolution, static analysis, and non-visual tests from the repository task entrypoint.\n\nOptions:\n  -h, --help  Print help."
+            "Usage: cargo xtask verify-gui [--integration]\n\nRegenerates bindings, checks generated diffs, formats, analyzes, and runs Rust/Flutter tests.\n\nOptions:\n  --integration  Run the Windows Flutter integration test through flutter drive.\n  -h, --help     Print help."
         }
         HelpTopic::RunGui => {
             "Usage: cargo xtask run-gui [--demo] [--demo-fallback] [--driver]\n\nOptions:\n  --demo           Run with PURE_STUDIO_DEMO=true.\n  --demo-fallback  Retry in demo mode if the native run fails.\n  --driver         Enable Flutter Driver through test_driver/driver_main.dart.\n  -h, --help       Print help."
@@ -120,15 +131,30 @@ pub(crate) fn help_text(topic: HelpTopic) -> &'static str {
     }
 }
 
-fn parse_verify_gui(mut args: VecDeque<OsString>) -> Result<Command> {
+fn parse_generate_gui(mut args: VecDeque<OsString>) -> Result<Command> {
     match args.pop_front().map(into_string).transpose()?.as_deref() {
-        None => Ok(Command::VerifyGui),
-        Some("-h" | "--help") if args.is_empty() => Ok(Command::Help(HelpTopic::VerifyGui)),
+        None => Ok(Command::GenerateGui),
+        Some("-h" | "--help") if args.is_empty() => Ok(Command::Help(HelpTopic::GenerateGui)),
         Some(other) => bail!(
-            "unknown verify-gui option: {other}\n\n{}",
-            help_text(HelpTopic::VerifyGui)
+            "unknown generate-gui option: {other}\n\n{}",
+            help_text(HelpTopic::GenerateGui)
         ),
     }
+}
+
+fn parse_verify_gui(mut args: VecDeque<OsString>) -> Result<Command> {
+    let mut options = VerifyGuiOptions { integration: false };
+    while let Some(arg) = args.pop_front() {
+        match into_string(arg)?.as_str() {
+            "-h" | "--help" => return Ok(Command::Help(HelpTopic::VerifyGui)),
+            "--integration" => options.integration = true,
+            other => bail!(
+                "unknown verify-gui option: {other}\n\n{}",
+                help_text(HelpTopic::VerifyGui)
+            ),
+        }
+    }
+    Ok(Command::VerifyGui(options))
 }
 
 fn parse_release_gui(mut args: VecDeque<OsString>) -> Result<Command> {
@@ -297,10 +323,26 @@ mod tests {
 
     #[test]
     fn parses_verify_gui() -> Result<()> {
-        assert_eq!(parse_words(&["xtask", "verify-gui"])?, Command::VerifyGui);
+        assert_eq!(
+            parse_words(&["xtask", "verify-gui"])?,
+            Command::VerifyGui(VerifyGuiOptions { integration: false })
+        );
+        assert_eq!(
+            parse_words(&["xtask", "verify-gui", "--integration"])?,
+            Command::VerifyGui(VerifyGuiOptions { integration: true })
+        );
         assert_eq!(
             parse_words(&["xtask", "verify-gui", "--help"])?,
             Command::Help(HelpTopic::VerifyGui)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn parses_generate_gui() -> Result<()> {
+        assert_eq!(
+            parse_words(&["xtask", "generate-gui"])?,
+            Command::GenerateGui
         );
         Ok(())
     }

@@ -294,26 +294,88 @@ String _partPlanContent(Map<String, Object?> json) {
   return _string(json['plan']);
 }
 
-String _interactionTitle(InteractionKind kind, Map<String, Object?> payload) {
-  return switch (kind) {
-    InteractionKind.toolApproval => _string(
-      payload['name'],
-      fallback: 'Tool approval',
-    ),
-    InteractionKind.userInput => 'User input requested',
-    InteractionKind.planConfirmation => 'Plan confirmation',
+String _interactionTitle(InteractionKind kind, InteractionPayload payload) {
+  return switch (payload) {
+    ToolApprovalInteractionPayload(:final toolName) =>
+      toolName.isEmpty ? 'Tool approval' : toolName,
+    UserInputInteractionPayload() => 'User input requested',
+    PlanConfirmationInteractionPayload() => 'Plan confirmation',
+    UnknownInteractionPayload() => switch (kind) {
+      InteractionKind.toolApproval => 'Tool approval',
+      InteractionKind.userInput => 'User input requested',
+      InteractionKind.planConfirmation => 'Plan confirmation',
+    },
   };
 }
 
-String _interactionBody(InteractionKind kind, Map<String, Object?> payload) {
-  return switch (kind) {
-    InteractionKind.toolApproval => _jsonText(payload['arguments']),
-    InteractionKind.userInput =>
-      _list(payload['questions'])
-          .map((question) => _string(_map(question)['prompt']))
-          .where((prompt) => prompt.isNotEmpty)
+String _interactionBody(InteractionKind kind, InteractionPayload payload) {
+  return switch (payload) {
+    ToolApprovalInteractionPayload(:final arguments) => _jsonText(arguments),
+    UserInputInteractionPayload(:final questions) =>
+      questions
+          .map((question) => question.question)
+          .where((question) => question.isNotEmpty)
           .join('\n'),
-    InteractionKind.planConfirmation => _string(payload['content']),
+    PlanConfirmationInteractionPayload(:final content) => content,
+    UnknownInteractionPayload() => '',
+  };
+}
+
+InteractionPayload _interactionPayloadFromJson(
+  InteractionKind kind,
+  Map<String, Object?> payload,
+) {
+  return switch (kind) {
+    InteractionKind.userInput => UserInputInteractionPayload(
+      questions: [
+        for (final value in _list(payload['questions']))
+          switch (_map(value)) {
+            final question => UserQuestionView(
+              id: _string(question['id']),
+              header: _string(question['header'], fallback: 'Input'),
+              question: _string(
+                question['question'],
+                fallback: _string(question['prompt']),
+              ),
+              isOther:
+                  _bool(question['isOther']) || _bool(question['is_other']),
+              isSecret:
+                  _bool(question['isSecret']) || _bool(question['is_secret']),
+              options: [
+                for (final optionValue in _list(question['options']))
+                  switch (_map(optionValue)) {
+                    final option => UserQuestionOptionView(
+                      label: _string(option['label']),
+                      description: _string(option['description']),
+                    ),
+                  },
+              ],
+            ),
+          },
+      ],
+    ),
+    InteractionKind.toolApproval => ToolApprovalInteractionPayload(
+      toolName: _string(
+        payload['name'],
+        fallback: _string(payload['toolName']),
+      ),
+      arguments: payload['arguments'] ?? payload['args'] ?? payload['input'],
+      workingDirectory: _string(
+        payload['workingDirectory'],
+        fallback: _string(
+          payload['working_directory'],
+          fallback: _string(payload['cwd']),
+        ),
+      ),
+      parentAgentId: _nullableString(payload['parentAgentId']),
+    ),
+    InteractionKind.planConfirmation => PlanConfirmationInteractionPayload(
+      planId: _string(payload['planId']),
+      content: _string(
+        payload['content'],
+        fallback: _string(payload['plan'], fallback: _string(payload['body'])),
+      ),
+    ),
   };
 }
 

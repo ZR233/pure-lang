@@ -1,13 +1,23 @@
-part of 'settings_page.dart';
+import 'package:flutter/material.dart';
 
-class _ProviderList extends StatelessWidget {
-  const _ProviderList({
+import '../../app/theme/studio_tokens.dart';
+import '../../domain/models/studio_models.dart';
+import '../../l10n/studio_l10n.dart';
+import '../../shared/studio_chrome.dart';
+import '../../shared/studio_driver_keys.dart';
+import 'settings_common.dart';
+import 'settings_provider_drafts.dart';
+import 'settings_provider_usage.dart';
+
+class ProviderList extends StatelessWidget {
+  const ProviderList({
+    super.key,
     required this.providers,
     required this.defaultProviderId,
     required this.filtering,
     required this.usageByProvider,
     required this.loadingProviderIds,
-    required this.usageError,
+    required this.usageErrorsByProviderId,
     required this.onQueryChanged,
     required this.onAdd,
     required this.onSelect,
@@ -23,7 +33,7 @@ class _ProviderList extends StatelessWidget {
   final bool filtering;
   final Map<String, ProviderUsageView> usageByProvider;
   final Set<String> loadingProviderIds;
-  final String? usageError;
+  final Map<String, String> usageErrorsByProviderId;
   final ValueChanged<String> onQueryChanged;
   final VoidCallback onAdd;
   final ValueChanged<ProviderSettingsView> onSelect;
@@ -38,7 +48,7 @@ class _ProviderList extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _SettingsHeader(
+        SettingsHeader(
           title: context.l10n.settingsProvidersTitle,
           subtitle: context.l10n.settingsProvidersSubtitle,
           trailing: Wrap(
@@ -59,7 +69,7 @@ class _ProviderList extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 14),
-        _SettingsSearchField(
+        SettingsSearchField(
           hintText: context.l10n.settingsSearchProviders,
           onChanged: onQueryChanged,
         ),
@@ -78,17 +88,19 @@ class _ProviderList extends StatelessWidget {
                   ),
                 )
               : SingleChildScrollView(
-                  child: _SettingsGroup(
+                  child: SettingsGroup(
                     children: [
                       for (final provider in providers)
-                        _ProviderListRow(
+                        ProviderListRow(
                           provider: provider,
                           isDefault: provider.id == defaultProviderId,
                           usage: usageByProvider[provider.id],
                           usageLoading: loadingProviderIds.contains(
                             provider.id,
                           ),
-                          usageError: usageError,
+                          usageError:
+                              usageErrorsByProviderId[provider.id] ??
+                              usageErrorsByProviderId['*'],
                           onOpen: () => onSelect(provider),
                           onSetDefault: () => onSetDefault(provider),
                           onRefreshUsage: () => onRefreshProvider(provider),
@@ -106,8 +118,9 @@ class _ProviderList extends StatelessWidget {
   }
 }
 
-class _ProviderListRow extends StatelessWidget {
-  const _ProviderListRow({
+class ProviderListRow extends StatelessWidget {
+  const ProviderListRow({
+    super.key,
     required this.provider,
     required this.isDefault,
     required this.usage,
@@ -134,6 +147,7 @@ class _ProviderListRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
+      key: StudioDriverKeys.providerRow(provider.id),
       color: Colors.transparent,
       child: InkWell(
         onTap: onOpen,
@@ -154,8 +168,11 @@ class _ProviderListRow extends StatelessWidget {
                       spacing: 6,
                       runSpacing: 6,
                       children: [
-                        _MiniMeta(icon: Icons.key_outlined, label: provider.id),
-                        _ProviderStatusChip(provider: provider),
+                        SettingsMiniMeta(
+                          icon: Icons.key_outlined,
+                          label: provider.id,
+                        ),
+                        SettingsProviderStatusChip(provider: provider),
                       ],
                     ),
                     if (provider.allModels.isNotEmpty) ...[
@@ -178,7 +195,7 @@ class _ProviderListRow extends StatelessWidget {
                       ),
                     ],
                     const SizedBox(height: 9),
-                    _ProviderListUsage(
+                    ProviderListUsage(
                       provider: provider,
                       usage: usage,
                       loading: usageLoading,
@@ -222,7 +239,7 @@ class _ProviderLogo extends StatelessWidget {
         ),
         child: Center(
           child: Text(
-            _initials(provider.name),
+            providerInitials(provider.name),
             style: Theme.of(context).textTheme.titleSmall?.copyWith(
               color: active ? Colors.white : context.studioInk,
               fontWeight: FontWeight.w800,
@@ -285,8 +302,9 @@ class _ProviderRowTitle extends StatelessWidget {
   }
 }
 
-class _ProviderListUsage extends StatelessWidget {
-  const _ProviderListUsage({
+class ProviderListUsage extends StatelessWidget {
+  const ProviderListUsage({
+    super.key,
     required this.provider,
     required this.usage,
     required this.loading,
@@ -302,29 +320,29 @@ class _ProviderListUsage extends StatelessWidget {
   Widget build(BuildContext context) {
     final usage = this.usage;
     if (error?.isNotEmpty ?? false) {
-      return _ProviderUsageMessage(
+      return ProviderUsageMessage(
         icon: Icons.error_outline,
         message: error!,
-        tone: _UsageTone.failed,
+        tone: UsageTone.failed,
       );
     }
     if (loading) {
-      return _ProviderUsageMessage(
+      return ProviderUsageMessage(
         icon: Icons.hourglass_empty,
         message: context.l10n.settingsUsageCheckingShort,
-        tone: _UsageTone.neutral,
+        tone: UsageTone.neutral,
       );
     }
     if (usage == null || usage.status != 'ready') {
       final message = usage == null
-          ? _providerUsageSummary(context, provider, null, loading)
-          : _providerUsageSummary(context, provider, usage, loading);
+          ? providerUsageSummary(context, provider, null, loading)
+          : providerUsageSummary(context, provider, usage, loading);
       final tone = usage?.status == 'failed'
-          ? _UsageTone.failed
+          ? UsageTone.failed
           : usage?.status == 'missingCredential'
-          ? _UsageTone.warning
-          : _UsageTone.muted;
-      return _ProviderUsageMessage(
+          ? UsageTone.warning
+          : UsageTone.muted;
+      return ProviderUsageMessage(
         icon: usage?.status == 'failed'
             ? Icons.error_outline
             : Icons.info_outline,
@@ -335,10 +353,10 @@ class _ProviderListUsage extends StatelessWidget {
     if (usage.usageKind == 'zhipuCodingPlan' && usage.codingPlan != null) {
       return _ProviderQuotaList(limits: usage.codingPlan!.limits);
     }
-    return _ProviderUsageMessage(
+    return ProviderUsageMessage(
       icon: Icons.account_balance_wallet_outlined,
-      message: _providerUsageSummary(context, provider, usage, loading),
-      tone: _UsageTone.muted,
+      message: providerUsageSummary(context, provider, usage, loading),
+      tone: UsageTone.muted,
     );
   }
 }
@@ -351,15 +369,15 @@ class _ProviderQuotaList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ordered = [
-      _findQuotaLimit(limits, 'fiveHour'),
-      _findQuotaLimit(limits, 'weekly'),
-      _findQuotaLimit(limits, 'mcpMonthly'),
+      findQuotaLimit(limits, 'fiveHour'),
+      findQuotaLimit(limits, 'weekly'),
+      findQuotaLimit(limits, 'mcpMonthly'),
     ].whereType<ZhipuQuotaLimitView>().toList();
     if (ordered.isEmpty) {
-      return _ProviderUsageMessage(
+      return ProviderUsageMessage(
         icon: Icons.info_outline,
         message: context.l10n.settingsUsageUnavailable,
-        tone: _UsageTone.muted,
+        tone: UsageTone.muted,
       );
     }
     return Column(
@@ -380,7 +398,7 @@ class _ProviderQuotaRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final percent = _quotaRemainingPercent(limit);
+    final percent = quotaRemainingPercent(limit);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -388,7 +406,7 @@ class _ProviderQuotaRow extends StatelessWidget {
           children: [
             Expanded(
               child: Text(
-                _quotaTitle(context, limit),
+                quotaTitle(context, limit),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: context.text.labelMedium?.copyWith(
@@ -400,17 +418,17 @@ class _ProviderQuotaRow extends StatelessWidget {
             const SizedBox(width: 10),
             Text(
               context.l10n.settingsUsagePercentRemaining(
-                _formatPercent(percent),
+                formatPercent(percent),
               ),
               style: context.text.labelMedium?.copyWith(
                 color: context.studioInk,
                 fontWeight: FontWeight.w600,
               ),
             ),
-            if (_resetLabel(context, limit.nextResetAt).isNotEmpty) ...[
+            if (quotaResetLabel(context, limit.nextResetAt).isNotEmpty) ...[
               const SizedBox(width: 10),
               Text(
-                _resetLabel(context, limit.nextResetAt),
+                quotaResetLabel(context, limit.nextResetAt),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: context.text.labelSmall?.copyWith(

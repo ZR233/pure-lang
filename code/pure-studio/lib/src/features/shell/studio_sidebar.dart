@@ -3,7 +3,7 @@ part of 'studio_shell.dart';
 class _Sidebar extends ConsumerWidget {
   const _Sidebar({required this.state, required this.compact});
 
-  final StudioState state;
+  final SidebarView state;
   final bool compact;
 
   @override
@@ -12,7 +12,7 @@ class _Sidebar extends ConsumerWidget {
         ? StudioLayout.compactRailWidth
         : StudioLayout.sidebarWidth;
     return SizedBox(
-      key: const ValueKey('studio-sidebar'),
+      key: StudioDriverKeys.sidebar,
       width: width,
       child: Material(
         color: context.studioPaper2,
@@ -78,7 +78,7 @@ class _Sidebar extends ConsumerWidget {
                   for (final session in state.rootSessions)
                     _SessionTile(
                       session: session,
-                      selected: session.id == state.selectedRootSession?.id,
+                      selected: session.id == state.selectedRootSessionId,
                       compact: compact,
                       recoveryIssue: state.recoveryIssueForSession(session.id),
                       canArchive: !state.isBusy,
@@ -139,29 +139,32 @@ class _ProjectTile extends ConsumerWidget {
     final controller = ref.read(studioControllerProvider.notifier);
     final issue = recoveryIssue;
     if (compact) {
-      return _CompactSidebarTile(
-        selected: selected,
-        tooltip:
-            issue?.detail ??
-            (project.path.isEmpty ? project.name : project.path),
-        icon: issue != null
-            ? Icons.error_outline
-            : selected
-            ? Icons.folder
-            : Icons.folder_open,
-        iconColor: issue == null ? null : colors.error,
-        onTap: issue == null
-            ? () => controller.selectProject(project.id)
-            : null,
-        actionTooltip: issue == null
-            ? context.l10n.sidebarCloseProject
-            : context.l10n.recoveryCleanupTooltip,
-        actionIcon: issue == null ? Icons.close : Icons.delete_sweep_outlined,
-        onAction: issue != null
-            ? issue.canCleanup
-                  ? () => _showRecoveryCleanupDialog(context, ref, issue)
-                  : null
-            : () => _showProjectCleanupDialog(context, ref, project),
+      return KeyedSubtree(
+        key: StudioDriverKeys.projectRow(project.id),
+        child: _CompactSidebarTile(
+          selected: selected,
+          tooltip:
+              issue?.detail ??
+              (project.path.isEmpty ? project.name : project.path),
+          icon: issue != null
+              ? Icons.error_outline
+              : selected
+              ? Icons.folder
+              : Icons.folder_open,
+          iconColor: issue == null ? null : colors.error,
+          onTap: issue == null
+              ? () => controller.selectProject(project.id)
+              : null,
+          actionTooltip: issue == null
+              ? context.l10n.sidebarCloseProject
+              : context.l10n.recoveryCleanupTooltip,
+          actionIcon: issue == null ? Icons.close : Icons.delete_sweep_outlined,
+          onAction: issue != null
+              ? issue.canCleanup
+                    ? () => _showRecoveryCleanupDialog(context, ref, issue)
+                    : null
+              : () => _showProjectCleanupDialog(context, ref, project),
+        ),
       );
     }
     final tile = _SidebarTile(
@@ -200,7 +203,10 @@ class _ProjectTile extends ConsumerWidget {
             : () => _showProjectCleanupDialog(context, ref, project),
       ),
     );
-    return issue == null ? tile : Tooltip(message: issue.detail, child: tile);
+    return KeyedSubtree(
+      key: StudioDriverKeys.projectRow(project.id),
+      child: issue == null ? tile : Tooltip(message: issue.detail, child: tile),
+    );
   }
 }
 
@@ -227,31 +233,34 @@ class _SessionTile extends ConsumerWidget {
     final colors = Theme.of(context).colorScheme;
     final issue = recoveryIssue;
     if (compact) {
-      return _CompactSidebarTile(
-        selected: selected,
-        tooltip: issue?.detail ?? session.title,
-        icon: issue == null ? modeIcon : Icons.error_outline,
-        iconColor: issue == null ? null : colors.error,
-        onTap: issue == null
-            ? () => ref
-                  .read(studioControllerProvider.notifier)
-                  .selectSession(session.id)
-            : null,
-        actionTooltip: issue == null
-            ? context.l10n.sidebarArchiveSession
-            : context.l10n.recoveryCleanupTooltip,
-        actionIcon: issue == null
-            ? Icons.archive_outlined
-            : Icons.delete_sweep_outlined,
-        onAction: issue != null
-            ? issue.canCleanup
-                  ? () => _showRecoveryCleanupDialog(context, ref, issue)
-                  : null
-            : canArchive
-            ? () => ref
-                  .read(studioControllerProvider.notifier)
-                  .archiveSession(session.id)
-            : null,
+      return KeyedSubtree(
+        key: StudioDriverKeys.sessionRow(session.id),
+        child: _CompactSidebarTile(
+          selected: selected,
+          tooltip: issue?.detail ?? session.title,
+          icon: issue == null ? modeIcon : Icons.error_outline,
+          iconColor: issue == null ? null : colors.error,
+          onTap: issue == null
+              ? () => ref
+                    .read(studioControllerProvider.notifier)
+                    .selectSession(session.id)
+              : null,
+          actionTooltip: issue == null
+              ? context.l10n.sidebarArchiveSession
+              : context.l10n.recoveryCleanupTooltip,
+          actionIcon: issue == null
+              ? Icons.archive_outlined
+              : Icons.delete_sweep_outlined,
+          onAction: issue != null
+              ? issue.canCleanup
+                    ? () => _showRecoveryCleanupDialog(context, ref, issue)
+                    : null
+              : canArchive
+              ? () => ref
+                    .read(studioControllerProvider.notifier)
+                    .archiveSession(session.id)
+              : null,
+        ),
       );
     }
     final tile = _SidebarTile(
@@ -298,7 +307,10 @@ class _SessionTile extends ConsumerWidget {
             : null,
       ),
     );
-    return issue == null ? tile : Tooltip(message: issue.detail, child: tile);
+    return KeyedSubtree(
+      key: StudioDriverKeys.sessionRow(session.id),
+      child: issue == null ? tile : Tooltip(message: issue.detail, child: tile),
+    );
   }
 }
 
@@ -519,7 +531,7 @@ class _SidebarTileState extends State<_SidebarTile> {
 class _SidebarActions extends ConsumerWidget {
   const _SidebarActions({required this.state, required this.compact});
 
-  final StudioState state;
+  final SidebarView state;
   final bool compact;
 
   @override
@@ -556,6 +568,7 @@ class _SidebarActions extends ConsumerWidget {
                 ),
                 const SizedBox(height: 4),
                 _SidebarActionButton(
+                  key: StudioDriverKeys.settingsOpen,
                   tooltip: context.l10n.sidebarSettings,
                   icon: Icons.settings,
                   showIndicator: hasUpdate,
@@ -582,6 +595,7 @@ class _SidebarActions extends ConsumerWidget {
                 ),
                 const Spacer(),
                 _SidebarActionButton(
+                  key: StudioDriverKeys.settingsOpen,
                   tooltip: context.l10n.sidebarSettings,
                   icon: Icons.settings,
                   showIndicator: hasUpdate,
@@ -607,6 +621,7 @@ class _SidebarActionButton extends StatelessWidget {
     required this.tooltip,
     required this.onPressed,
     this.showIndicator = false,
+    super.key,
   });
 
   final IconData icon;

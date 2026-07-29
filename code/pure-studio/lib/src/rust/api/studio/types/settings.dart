@@ -5,9 +5,10 @@
 
 import '../../../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
+import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
+part 'settings.freezed.dart';
 
-// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `InstructionsSettingsInput`, `McpServerInput`, `McpSettingsInput`, `ProviderInput`, `ProviderModelInput`, `ProviderSettingsInput`, `RoleInput`, `SkillsSettingsInput`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`
 
 class BridgeModelCapabilities {
   final bool streaming;
@@ -424,6 +425,320 @@ class BridgeWebSearchSettingsDto {
           timezone == other.timezone &&
           providerId == other.providerId &&
           model == other.model;
+}
+
+class GeneralSettingsInput {
+  final bool followSystemTheme;
+  final bool followActiveTurn;
+  final bool compactTimeline;
+
+  const GeneralSettingsInput({
+    required this.followSystemTheme,
+    required this.followActiveTurn,
+    required this.compactTimeline,
+  });
+
+  @override
+  int get hashCode =>
+      followSystemTheme.hashCode ^
+      followActiveTurn.hashCode ^
+      compactTimeline.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is GeneralSettingsInput &&
+          runtimeType == other.runtimeType &&
+          followSystemTheme == other.followSystemTheme &&
+          followActiveTurn == other.followActiveTurn &&
+          compactTimeline == other.compactTimeline;
+}
+
+class InstructionsSettingsInput {
+  final String baseOverride;
+  final String developer;
+  final String user;
+  final BigInt projectDocMaxBytes;
+  final List<String> projectDocFallbackFilenames;
+
+  const InstructionsSettingsInput({
+    required this.baseOverride,
+    required this.developer,
+    required this.user,
+    required this.projectDocMaxBytes,
+    required this.projectDocFallbackFilenames,
+  });
+
+  @override
+  int get hashCode =>
+      baseOverride.hashCode ^
+      developer.hashCode ^
+      user.hashCode ^
+      projectDocMaxBytes.hashCode ^
+      projectDocFallbackFilenames.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is InstructionsSettingsInput &&
+          runtimeType == other.runtimeType &&
+          baseOverride == other.baseOverride &&
+          developer == other.developer &&
+          user == other.user &&
+          projectDocMaxBytes == other.projectDocMaxBytes &&
+          projectDocFallbackFilenames == other.projectDocFallbackFilenames;
+}
+
+class McpServerInput {
+  final String id;
+  final bool enabled;
+  final String transport;
+  final String endpoint;
+
+  const McpServerInput({
+    required this.id,
+    required this.enabled,
+    required this.transport,
+    required this.endpoint,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^ enabled.hashCode ^ transport.hashCode ^ endpoint.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is McpServerInput &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          enabled == other.enabled &&
+          transport == other.transport &&
+          endpoint == other.endpoint;
+}
+
+class McpSettingsInput {
+  final List<McpServerInput> servers;
+
+  const McpSettingsInput({required this.servers});
+
+  @override
+  int get hashCode => servers.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is McpSettingsInput &&
+          runtimeType == other.runtimeType &&
+          servers == other.servers;
+}
+
+class ProviderInput {
+  final String id;
+  final String? originalId;
+  final String templateKind;
+  final String wireProtocol;
+  final String connectionMode;
+  final String name;
+  final String baseUrl;
+  final ProviderSecretInput secret;
+  final String capabilitySource;
+  final bool hostedWebSearch;
+  final String? standaloneWebSearch;
+  final String defaultModel;
+  final List<ProviderModelInput> customModels;
+
+  const ProviderInput({
+    required this.id,
+    this.originalId,
+    required this.templateKind,
+    required this.wireProtocol,
+    required this.connectionMode,
+    required this.name,
+    required this.baseUrl,
+    required this.secret,
+    required this.capabilitySource,
+    required this.hostedWebSearch,
+    this.standaloneWebSearch,
+    required this.defaultModel,
+    required this.customModels,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      originalId.hashCode ^
+      templateKind.hashCode ^
+      wireProtocol.hashCode ^
+      connectionMode.hashCode ^
+      name.hashCode ^
+      baseUrl.hashCode ^
+      secret.hashCode ^
+      capabilitySource.hashCode ^
+      hostedWebSearch.hashCode ^
+      standaloneWebSearch.hashCode ^
+      defaultModel.hashCode ^
+      customModels.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ProviderInput &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          originalId == other.originalId &&
+          templateKind == other.templateKind &&
+          wireProtocol == other.wireProtocol &&
+          connectionMode == other.connectionMode &&
+          name == other.name &&
+          baseUrl == other.baseUrl &&
+          secret == other.secret &&
+          capabilitySource == other.capabilitySource &&
+          hostedWebSearch == other.hostedWebSearch &&
+          standaloneWebSearch == other.standaloneWebSearch &&
+          defaultModel == other.defaultModel &&
+          customModels == other.customModels;
+}
+
+class ProviderModelInput {
+  final String slug;
+  final String displayName;
+  final List<String> reasoningEfforts;
+  final String? baseInstructions;
+
+  const ProviderModelInput({
+    required this.slug,
+    required this.displayName,
+    required this.reasoningEfforts,
+    this.baseInstructions,
+  });
+
+  @override
+  int get hashCode =>
+      slug.hashCode ^
+      displayName.hashCode ^
+      reasoningEfforts.hashCode ^
+      baseInstructions.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ProviderModelInput &&
+          runtimeType == other.runtimeType &&
+          slug == other.slug &&
+          displayName == other.displayName &&
+          reasoningEfforts == other.reasoningEfforts &&
+          baseInstructions == other.baseInstructions;
+}
+
+@freezed
+sealed class ProviderSecretInput with _$ProviderSecretInput {
+  const ProviderSecretInput._();
+
+  const factory ProviderSecretInput.preserve() = ProviderSecretInput_Preserve;
+  const factory ProviderSecretInput.replace({required String value}) =
+      ProviderSecretInput_Replace;
+  const factory ProviderSecretInput.clear() = ProviderSecretInput_Clear;
+}
+
+class ProviderSettingsInput {
+  final String defaultProviderId;
+  final List<ProviderInput> providers;
+  final List<RoleInput> roles;
+
+  const ProviderSettingsInput({
+    required this.defaultProviderId,
+    required this.providers,
+    required this.roles,
+  });
+
+  @override
+  int get hashCode =>
+      defaultProviderId.hashCode ^ providers.hashCode ^ roles.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ProviderSettingsInput &&
+          runtimeType == other.runtimeType &&
+          defaultProviderId == other.defaultProviderId &&
+          providers == other.providers &&
+          roles == other.roles;
+}
+
+class RoleInput {
+  final String key;
+  final String provider;
+  final String model;
+  final String effort;
+
+  const RoleInput({
+    required this.key,
+    required this.provider,
+    required this.model,
+    required this.effort,
+  });
+
+  @override
+  int get hashCode =>
+      key.hashCode ^ provider.hashCode ^ model.hashCode ^ effort.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is RoleInput &&
+          runtimeType == other.runtimeType &&
+          key == other.key &&
+          provider == other.provider &&
+          model == other.model &&
+          effort == other.effort;
+}
+
+class SkillsSettingsInput {
+  final bool enabled;
+  final bool autoLearn;
+  final bool systemEnabled;
+  final String projectDir;
+  final String userDir;
+  final List<String> externalDirs;
+  final List<String> disabled;
+  final int autoLearnMinToolCalls;
+
+  const SkillsSettingsInput({
+    required this.enabled,
+    required this.autoLearn,
+    required this.systemEnabled,
+    required this.projectDir,
+    required this.userDir,
+    required this.externalDirs,
+    required this.disabled,
+    required this.autoLearnMinToolCalls,
+  });
+
+  @override
+  int get hashCode =>
+      enabled.hashCode ^
+      autoLearn.hashCode ^
+      systemEnabled.hashCode ^
+      projectDir.hashCode ^
+      userDir.hashCode ^
+      externalDirs.hashCode ^
+      disabled.hashCode ^
+      autoLearnMinToolCalls.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is SkillsSettingsInput &&
+          runtimeType == other.runtimeType &&
+          enabled == other.enabled &&
+          autoLearn == other.autoLearn &&
+          systemEnabled == other.systemEnabled &&
+          projectDir == other.projectDir &&
+          userDir == other.userDir &&
+          externalDirs == other.externalDirs &&
+          disabled == other.disabled &&
+          autoLearnMinToolCalls == other.autoLearnMinToolCalls;
 }
 
 /// Web 搜索设置的 typed bridge 输入。

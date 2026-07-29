@@ -4,10 +4,13 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import '../../../frb_generated.dart';
+import '../types/error.dart';
 import '../types/updater.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `bridge_event`, `bridge_update`, `runtime_error`, `runtime_update`, `updater`
+// These functions are ignored because they are not marked as `pub`: `bridge_event`, `bridge_update`, `cancel_all_update_operations`, `runtime_error`, `runtime_update`, `update_operations`, `updater`, `wait`
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `BridgeStudioUpdateOperationInner`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `drop`
 
 Future<BridgeStudioUpdateCheckDto> checkStudioUpdate({
   required String currentVersion,
@@ -15,8 +18,15 @@ Future<BridgeStudioUpdateCheckDto> checkStudioUpdate({
   currentVersion: currentVersion,
 );
 
-Stream<BridgeStudioUpdateEventDto> installStudioUpdate({
+Future<BridgeStudioUpdateOperation> installStudioUpdate({
   required BridgeStudioUpdateDto update,
 }) => RustLib.instance.api.crateApiStudioHandlersUpdaterInstallStudioUpdate(
   update: update,
 );
+
+// Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<BridgeStudioUpdateOperation>>
+abstract class BridgeStudioUpdateOperation implements RustOpaqueInterface {
+  Future<void> cancel();
+
+  Stream<BridgeStudioUpdateEventDto> progressStream();
+}

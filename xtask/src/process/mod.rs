@@ -56,7 +56,7 @@ fn ensure_success(status: ExitStatus, display: &str) -> Result<()> {
 }
 
 pub(crate) fn path_command(program: &'static str, args: &[OsString]) -> Command {
-    if cfg!(windows) && program == "flutter" {
+    if cfg!(windows) && matches!(program, "flutter" | "dart") {
         let mut command = Command::new("cmd");
         command.arg("/c").arg(program);
         command.args(args);

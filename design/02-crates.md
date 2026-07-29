@@ -129,6 +129,35 @@ Flutter bridge 只调用该 crate。
 global event 继续使用独立 envelope。桥接层不得复制 session projection 规则，也不得把
 `serde_json::Value` 直接暴露为 FRB 类型。
 
+`pl-studio-bridge` 是 protocol → FRB DTO 的机械边界。它只公开 bridge-local struct/enum，
+不得把 `pl-protocol`、provider、store 或 runtime crate 的类型直接暴露给 Dart。session frame
+使用 `Snapshot/Event/ResyncRequired` sealed union；message、part、turn、interaction、plan、
+agent、Todo、usage、cost、context、MCP health 和 agent directory 均使用 typed DTO。协议中
+刻意开放的动态叶子在此边界序列化成语义明确的 `*_json` 字段：
+
+- message metadata 使用 `metadata_json`；
+- tool arguments 和 tool approval arguments 使用 `arguments_json`；
+- tool output artifacts 使用 `output_artifacts_json`。
+
+整帧 JSON、未命名的 `serde_json::Value` 和业务 handler 的 JSON request body 均不属于稳定
+FRB surface。Dart 只能在 FRB adapter 的单一 JSON leaf decoder 中解析上述开放叶子，并在
+进入 reducer 前转换为 domain value。
+
+bridge 不拥有 Tokio runtime，也不提供同步 `block_on` wrapper。`#[frb(init)]` 只执行
+diagnostics 等不可失败或可安全重复的一次性初始化；应用 runtime 由显式 async
+`initializeRuntime` 创建。初始化使用可失败且不缓存失败结果的 async cell，生命周期为
+`Initialized -> Started -> ShuttingDown -> Stopped`。Stopped 是进程内终态，重复 shutdown
+幂等，但后续 start、订阅和业务请求返回稳定的 `RuntimeStopped` 错误。
+
+FRB subscription 是 automatic opaque handle。handle 拥有 cancellation token 与 task，
+Dart adapter 取消 StreamController 时必须依次取消 Dart subscription、await Rust
+`cancel()` 并 dispose handle；Rust runtime shutdown 同时取消并等待 registry 中所有 handle。
+不得只依赖下一次 `StreamSink.add` 失败来回收无事件订阅。
+
+所有公开业务 API 返回 typed `Result<T, BridgeError>`。`BridgeError` 至少包含稳定 code、
+用户安全的 message、retryable、correlation ID 和可选 `details_json`。完整 source chain 只写
+Rust diagnostics；Dart/UI 不得解析 message 来决定控制流。
+
 ## 2.8 pure-studio（Flutter UI）
 
 `pure-studio` 位于 `code/pure-studio/`，首版只承诺 Windows 桌面。UI 使用 Material 3 工具型设计、Riverpod 状态管理和 `go_router` 页面栈。功能覆盖 Studio 主路径：项目/会话侧栏、聊天 timeline、streaming markdown、reasoning/tool/plan part、composer、停止、权限模式、tool approval、user input、plan confirmation、状态栏，以及 Provider/Instructions/Skills/Roles/MCP/Security/General 设置页。
@@ -143,13 +172,22 @@ Flutter store 不直接读取 SQLite 或配置文件，只通过 `pl-studio-brid
 公开命令：
 
 - `cargo xtask verify-gui`
-- `cargo xtask run-gui [--demo] [--demo-fallback]`
+- `cargo xtask generate-gui`
+- `cargo xtask run-gui [--demo] [--demo-fallback] [--driver]`
 - `cargo xtask build-gui [--demo] [--no-clean]`
 - `cargo xtask build-rust-bridge --workspace-root <path> --configuration <Debug|Profile|Release> --output-dir <path> [--target-dir <path>]`
 
-Studio 命令从仓库根目录调用；`verify-gui` 依次执行依赖解析、静态分析和非视觉测试，
-xtask 内部统一以 `code/pure-studio/` 为 Flutter 工作目录。`build-rust-bridge` 是 Flutter
-Windows CMake 内部入口，负责构建并复制 `pl_studio_bridge.dll`/`.pdb`。
+Studio 命令从仓库根目录调用；`generate-gui` 统一执行 Flutter dependency resolution、
+Riverpod/Freezed build runner、l10n 和 FRB codegen。FRB Dart/Rust runtime 与 codegen binary
+精确锁定 2.12.0，版本不匹配时生成命令立即失败。`lib/src/rust/**` 与
+`rust/src/frb_generated.rs` 提交版本库但禁止手改，CI 重新生成后执行
+`git diff --exit-code`。
+
+`verify-gui` 在生成一致性检查后执行格式化、Rust bridge tests、Riverpod lint、Flutter
+analyze 和非视觉测试；`verify-gui --integration` 额外在 Windows 上运行 desktop
+integration test。xtask 内部统一以 `code/pure-studio/` 为 Flutter 工作目录。
+`build-rust-bridge` 是 Flutter Windows CMake 内部入口，负责构建并复制
+`pl_studio_bridge.dll`/`.pdb`。
 
 ## 2.10 本地数据版本
 

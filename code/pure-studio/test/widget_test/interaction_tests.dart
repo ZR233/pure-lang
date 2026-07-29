@@ -62,34 +62,48 @@ void registerInteractionTests() {
           kind: InteractionKind.userInput,
           title: 'Need input',
           body: 'Choose implementation details',
-          payload: {
-            'questions': [
-              {
-                'id': 'scope',
-                'header': 'Scope',
-                'question': 'Pick the areas to update',
-                'options': [
-                  {'label': 'UI', 'description': 'Polish the dock'},
-                  {'label': 'Tests', 'description': 'Add widget coverage'},
+          payload: UserInputInteractionPayload(
+            questions: [
+              UserQuestionView(
+                id: 'scope',
+                header: 'Scope',
+                question: 'Pick the areas to update',
+                isOther: false,
+                isSecret: false,
+                options: [
+                  UserQuestionOptionView(
+                    label: 'UI',
+                    description: 'Polish the dock',
+                  ),
+                  UserQuestionOptionView(
+                    label: 'Tests',
+                    description: 'Add widget coverage',
+                  ),
                 ],
-              },
-              {
-                'id': 'notes',
-                'header': 'Notes',
-                'question': 'Anything else?',
-                'isOther': true,
-                'options': [
-                  {'label': 'Docs', 'description': 'Update design notes'},
+              ),
+              UserQuestionView(
+                id: 'notes',
+                header: 'Notes',
+                question: 'Anything else?',
+                isOther: true,
+                isSecret: false,
+                options: [
+                  UserQuestionOptionView(
+                    label: 'Docs',
+                    description: 'Update design notes',
+                  ),
                 ],
-              },
-              {
-                'id': 'secret',
-                'header': 'Secret',
-                'question': 'Secret value?',
-                'isSecret': true,
-              },
+              ),
+              UserQuestionView(
+                id: 'secret',
+                header: 'Secret',
+                question: 'Secret value?',
+                isOther: false,
+                isSecret: true,
+                options: [],
+              ),
             ],
-          },
+          ),
         ),
       ],
       turnPhasesBySession: const {'session-1': TurnPhase.waitingForInteraction},
@@ -155,11 +169,18 @@ void registerInteractionTests() {
       kind: InteractionKind.userInput,
       title: 'Need input',
       body: 'First question',
-      payload: {
-        'questions': [
-          {'header': 'First', 'question': 'First free text?'},
+      payload: UserInputInteractionPayload(
+        questions: [
+          UserQuestionView(
+            id: '',
+            header: 'First',
+            question: 'First free text?',
+            isOther: false,
+            isSecret: false,
+            options: [],
+          ),
         ],
-      },
+      ),
     );
     final secondInteraction = const PendingInteraction(
       id: 'interaction-second',
@@ -167,11 +188,18 @@ void registerInteractionTests() {
       kind: InteractionKind.userInput,
       title: 'Need input',
       body: 'Second question',
-      payload: {
-        'questions': [
-          {'header': 'Second', 'question': 'Second free text?'},
+      payload: UserInputInteractionPayload(
+        questions: [
+          UserQuestionView(
+            id: '',
+            header: 'Second',
+            question: 'Second free text?',
+            isOther: false,
+            isSecret: false,
+            options: [],
+          ),
         ],
-      },
+      ),
     );
     final api = _FakeStudioApi(
       _emptyState().copyWith(
@@ -244,10 +272,10 @@ void registerInteractionTests() {
           kind: InteractionKind.planConfirmation,
           title: 'Confirm plan',
           body: '## Plan\n- Implement',
-          payload: {
-            'type': 'planConfirmation',
-            'content': '## Plan\n- Implement',
-          },
+          payload: PlanConfirmationInteractionPayload(
+            planId: 'plan-1',
+            content: '## Plan\n- Implement',
+          ),
         ),
       ],
       turnPhasesBySession: const {'session-1': TurnPhase.completed},
@@ -292,10 +320,10 @@ void registerInteractionTests() {
           kind: InteractionKind.planConfirmation,
           title: 'Confirm plan',
           body: '## Plan\n- Implement',
-          payload: {
-            'type': 'planConfirmation',
-            'content': '## Plan\n- Implement',
-          },
+          payload: PlanConfirmationInteractionPayload(
+            planId: 'plan-1',
+            content: '## Plan\n- Implement',
+          ),
         ),
       ],
       turnPhasesBySession: const {'session-1': TurnPhase.completed},

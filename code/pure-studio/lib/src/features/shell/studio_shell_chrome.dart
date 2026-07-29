@@ -3,15 +3,12 @@ part of 'studio_shell.dart';
 class _Header extends StatelessWidget {
   const _Header({required this.state});
 
-  final StudioState state;
+  final HeaderView state;
 
   @override
   Widget build(BuildContext context) {
     final session = state.selectedRootSession;
-    final projectId = session?.projectId ?? state.selectedProjectId;
-    final project = state.projects
-        .where((project) => project.id == projectId)
-        .firstOrNull;
+    final project = state.selectedProject;
     final projectLabel = project?.name.trim() ?? '';
     final taskPhase = state.runtime.task?.phase;
     return SizedBox(
@@ -72,7 +69,7 @@ class _Header extends StatelessWidget {
                         ),
                       ),
                     const Spacer(),
-                    if (state.agentSessionsForSelectedRoot.isNotEmpty)
+                    if (state.agentSessions.isNotEmpty)
                       _AgentSwitcher(state: state),
                   ],
                 ),
@@ -88,7 +85,7 @@ class _Header extends StatelessWidget {
 class _AgentSwitcher extends ConsumerStatefulWidget {
   const _AgentSwitcher({required this.state});
 
-  final StudioState state;
+  final HeaderView state;
 
   @override
   ConsumerState<_AgentSwitcher> createState() => _AgentSwitcherState();
@@ -106,7 +103,7 @@ class _AgentSwitcherState extends ConsumerState<_AgentSwitcher> {
 
   @override
   Widget build(BuildContext context) {
-    final sessions = widget.state.agentSessionsForSelectedRoot;
+    final sessions = widget.state.agentSessions;
     final aggregateColor = _aggregateAgentColor(widget.state, sessions);
     final viewport = MediaQuery.sizeOf(context);
     final availableWidth = (viewport.width - 24)
@@ -133,7 +130,7 @@ class _AgentSwitcherState extends ConsumerState<_AgentSwitcher> {
       menuChildren: [
         for (final session in sessions)
           MenuItemButton(
-            key: ValueKey('agent-session-${session.id}'),
+            key: StudioDriverKeys.agentRow(session.id),
             leadingIcon: Padding(
               padding: EdgeInsets.only(
                 left: _agentDepth(session, sessions) * 12,
@@ -208,7 +205,7 @@ class _AgentSwitcherState extends ConsumerState<_AgentSwitcher> {
               }
             },
             child: ActionChip(
-              key: const ValueKey('agent-switcher'),
+              key: StudioDriverKeys.agentSwitcher,
               avatar: Icon(Icons.hub_outlined, size: 16, color: aggregateColor),
               label: Text(context.l10n.statusAgentsCount(sessions.length)),
               tooltip: context.l10n.statusAgentsCount(sessions.length),
@@ -240,7 +237,7 @@ int _agentDepth(StudioSession session, List<StudioSession> sessions) {
   return depth;
 }
 
-Color _aggregateAgentColor(StudioState state, List<StudioSession> sessions) {
+Color _aggregateAgentColor(HeaderView state, List<StudioSession> sessions) {
   if (sessions.any((session) => _isFaultedAgentStatus(session.agentStatus))) {
     return StudioColors.rose;
   }
@@ -256,7 +253,7 @@ Color _aggregateAgentColor(StudioState state, List<StudioSession> sessions) {
   return StudioColors.sage;
 }
 
-Color _agentStatusColor(StudioState state, StudioSession session) {
+Color _agentStatusColor(HeaderView state, StudioSession session) {
   if (_isFaultedAgentStatus(session.agentStatus)) {
     return StudioColors.rose;
   }
@@ -306,13 +303,11 @@ String _sessionSubtitle(BuildContext context, StudioSession session) {
 
 class _Footer extends StatelessWidget {
   const _Footer({
-    required this.workspace,
     required this.showTodo,
     required this.todoExpanded,
     required this.onToggleTodo,
   });
 
-  final AgentWorkspaceView workspace;
   final bool showTodo;
   final bool todoExpanded;
   final VoidCallback? onToggleTodo;
@@ -324,15 +319,65 @@ class _Footer extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          SessionStatusBar(
-            workspace: workspace,
+          _StatusBarHost(
             showTodo: showTodo,
             todoExpanded: todoExpanded,
             onToggleTodo: onToggleTodo,
           ),
-          ComposerDock(workspace: workspace),
+          const _ComposerHost(),
         ],
       ),
+    );
+  }
+}
+
+class _StatusBarHost extends ConsumerWidget {
+  const _StatusBarHost({
+    required this.showTodo,
+    required this.todoExpanded,
+    required this.onToggleTodo,
+  });
+
+  final bool showTodo;
+  final bool todoExpanded;
+  final VoidCallback? onToggleTodo;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final asyncStatus = ref.watch(statusBarProvider);
+    return asyncStatus.when(
+      loading: () => const SizedBox.shrink(),
+      error: (error, stackTrace) => const SizedBox.shrink(),
+      data: (status) {
+        if (status == null) {
+          return const SizedBox.shrink();
+        }
+        return SessionStatusBar(
+          view: status,
+          showTodo: showTodo,
+          todoExpanded: todoExpanded,
+          onToggleTodo: onToggleTodo,
+        );
+      },
+    );
+  }
+}
+
+class _ComposerHost extends ConsumerWidget {
+  const _ComposerHost();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final asyncWorkspace = ref.watch(selectedWorkspaceControlsProvider);
+    return asyncWorkspace.when(
+      loading: () => const SizedBox.shrink(),
+      error: (error, stackTrace) => const SizedBox.shrink(),
+      data: (workspace) {
+        if (workspace == null) {
+          return const SizedBox.shrink();
+        }
+        return ComposerDock(workspace: workspace);
+      },
     );
   }
 }

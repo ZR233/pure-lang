@@ -4,26 +4,19 @@ sealed class SessionStreamFrame {
   const SessionStreamFrame();
 
   factory SessionStreamFrame.fromFrb(frb.BridgeSessionStreamFrame frame) {
-    final json = _decodeJson(frame.payloadJson);
-    return switch (_string(json['type'])) {
-      'snapshot' => SessionSnapshotFrame(snapshot: _map(json['snapshot'])),
-      'event' => SessionEventFrame(
-        event: StudioBridgeEvent.fromCanonicalJson(_map(json['event'])),
-      ),
-      'resyncRequired' => SessionResyncRequiredFrame(
-        reason: _map(json['reason']),
-      ),
-      final type => throw FormatException(
-        'Unknown session stream frame: $type',
-      ),
-    };
+    return frame.when(
+      snapshot: (snapshot) =>
+          SessionSnapshotFrame(snapshot: _sessionSnapshotFromFrb(snapshot)),
+      event: (event) => SessionEventFrame(event: _sessionEventFromFrb(event)),
+      resyncRequired: (reason) => SessionResyncRequiredFrame(reason: reason),
+    );
   }
 }
 
 final class SessionSnapshotFrame extends SessionStreamFrame {
   const SessionSnapshotFrame({required this.snapshot});
 
-  final Map<String, Object?> snapshot;
+  final StudioSessionSnapshot snapshot;
 }
 
 final class SessionEventFrame extends SessionStreamFrame {
@@ -35,127 +28,595 @@ final class SessionEventFrame extends SessionStreamFrame {
 final class SessionResyncRequiredFrame extends SessionStreamFrame {
   const SessionResyncRequiredFrame({required this.reason});
 
-  final Map<String, Object?> reason;
+  final frb.BridgeSessionResyncReason reason;
 }
 
-StudioBridgeEventPayload _canonicalEventPayload(
-  Map<String, Object?> kind, {
-  required int sequence,
-  required String sessionId,
-}) {
-  return switch (_string(kind['type'])) {
-    'turnChanged' => switch (_map(kind['turn'])) {
-      final turn => TurnChangedPayload(
+class StudioSessionSnapshot {
+  const StudioSessionSnapshot({
+    required this.sessionId,
+    required this.throughSequence,
+    required this.messages,
+    required this.parts,
+    required this.interactions,
+    required this.agents,
+    required this.timelineEvents,
+    required this.runtime,
+    required this.turnStatus,
+  });
+
+  @visibleForTesting
+  factory StudioSessionSnapshot.fromLegacyJson(Map<String, Object?> snapshot) =>
+      _legacySessionSnapshot(snapshot);
+
+  final String sessionId;
+  final int throughSequence;
+  final List<TimelineMessage> messages;
+  final Map<String, TimelinePartSnapshot> parts;
+  final List<PendingInteraction> interactions;
+  final Map<String, StudioAgentView> agents;
+  final Map<String, TimelineAgentEvent> timelineEvents;
+  final SessionRuntimeView? runtime;
+  final String? turnStatus;
+}
+
+StudioSessionSnapshot _sessionSnapshotFromFrb(
+  frb.BridgeSessionViewSnapshot snapshot,
+) {
+  final parts = <String, TimelinePartSnapshot>{};
+  for (final value in snapshot.parts) {
+    final part = _timelinePartFromFrb(value);
+    if (!_isIgnoredTimelinePartType(part.type.name) && part.id.isNotEmpty) {
+      parts[part.id] = part;
+    }
+  }
+  final agents = <String, StudioAgentView>{};
+  for (final value in snapshot.agents) {
+    final agent = _agentFromFrb(value);
+    if (agent.id.isNotEmpty) {
+      agents[agent.id] = agent;
+    }
+  }
+  final timelineEvents = <String, TimelineAgentEvent>{};
+  for (final value in snapshot.timelineEvents) {
+    final event = _timelineEventFromFrb(value);
+    if (event.eventId.isNotEmpty) {
+      timelineEvents[event.eventId] = event;
+    }
+  }
+  return StudioSessionSnapshot(
+    sessionId: snapshot.sessionId,
+    throughSequence: snapshot.throughSequence.toInt(),
+    messages: snapshot.messages.map(_timelineMessageFromFrb).toList(),
+    parts: parts,
+    interactions: snapshot.interactions
+        .where(
+          (interaction) =>
+              interaction.status == frb.BridgeInteractionStatus.pending,
+        )
+        .map(_interactionFromFrb)
+        .toList(),
+    agents: agents,
+    timelineEvents: timelineEvents,
+    runtime: snapshot.runtime == null
+        ? null
+        : _sessionRuntimeFromFrb(snapshot.runtime!),
+    turnStatus: snapshot.turn?.status.name,
+  );
+}
+
+StudioBridgeEvent _sessionEventFromFrb(frb.BridgeSessionEventEnvelope event) {
+  final sequence = event.position.when(
+    durable: (sequence) => sequence,
+    transient: (_) => null,
+  );
+  return StudioBridgeEvent(
+    eventId: event.eventId,
+    sessionId: event.sessionId,
+    turnId: event.turnId,
+    sequence: sequence,
+    createdAt: _dateFromUnix(event.emittedAt),
+    payload: event.kind.when(
+      turnChanged: (turn) => TurnChangedPayload(
         turn: StudioTurnView(
-          sessionId: _string(turn['sessionId'], fallback: sessionId),
-          status: _string(turn['status']),
+          sessionId: turn.sessionId,
+          status: turn.status.name,
         ),
       ),
-    },
-    'messageChanged' => MessageUpdatedPayload(
-      message: timelineMessageFromJson(kind['message'], sequence: sequence),
-    ),
-    'messageRemoved' => MessageRemovedPayload(
-      messageId: _string(kind['messageId']),
-    ),
-    'partChanged' => switch (_canonicalPartJson(kind['part'])) {
-      final part when _isIgnoredTimelinePartType(part['type']) =>
-        const IgnoredBridgeEventPayload(),
-      final part => MessagePartUpdatedPayload(
-        part: timelinePartSnapshotFromJson(part, sequence: sequence),
+      messageChanged: (message) => MessageUpdatedPayload(
+        message: _timelineMessageFromFrb(
+          message,
+          sequence: sequence?.toInt() ?? 0,
+        ),
       ),
-    },
-    'partRemoved' => MessagePartRemovedPayload(
-      messageId: _string(kind['messageId']),
-      partId: _string(kind['partId']),
+      messageRemoved: (messageId) =>
+          MessageRemovedPayload(messageId: messageId),
+      partChanged: (part) {
+        final converted = _timelinePartFromFrb(
+          part,
+          sequence: sequence?.toInt() ?? 0,
+        );
+        return _isIgnoredTimelinePartType(converted.type.name)
+            ? const IgnoredBridgeEventPayload()
+            : MessagePartUpdatedPayload(part: converted);
+      },
+      partRemoved: (messageId, partId) =>
+          MessagePartRemovedPayload(messageId: messageId, partId: partId),
+      partDelta: (delta) =>
+          MessagePartDeltaPayload(delta: _timelineDeltaFromFrb(delta)),
+      interactionChanged: (interaction) => InteractionChangedPayload(
+        interaction: _interactionFromFrb(interaction),
+        status: interaction.status.name,
+      ),
+      agentChanged: (agent) => AgentChangedPayload(agent: _agentFromFrb(agent)),
+      timelineEventAppended: (timelineEvent) => AgentTimelineChangedPayload(
+        event: _timelineEventFromFrb(timelineEvent),
+      ),
+      runtimeChanged: (runtime) => SessionRuntimeChangedPayload(
+        runtime: _sessionRuntimeFromFrb(runtime),
+        sessionId: runtime.sessionId,
+        agentCount: runtime.agentCount,
+      ),
+      skillActivated: (activation) =>
+          SkillActivatedPayload(name: activation.name),
+      planChanged: (planEvent) =>
+          PlanLifecycleChangedPayload(state: planEvent.state.name),
+      contextCompacted: (_) => const IgnoredBridgeEventPayload(),
+      errorOccurred: (_, _) => const IgnoredBridgeEventPayload(),
     ),
-    'partDelta' => MessagePartDeltaPayload(
-      delta: timelinePartDeltaFromJson(kind['delta']),
-    ),
-    'interactionChanged' => _canonicalInteractionPayload(kind['event']),
-    'agentChanged' => AgentChangedPayload(
-      agent: _canonicalAgentView(kind['agent']),
-    ),
-    'timelineEventAppended' => AgentTimelineChangedPayload(
-      event: timelineAgentEventFromPayload(kind['event']),
-    ),
-    'runtimeChanged' => SessionRuntimeChangedPayload(
-      runtime: sessionRuntimeFromJson(kind['runtime']),
-      sessionId: sessionId,
-      agentCount: _int(_map(kind['runtime'])['agentCount']),
-    ),
-    'skillActivated' => SkillActivatedPayload(
-      name: _string(_map(kind['activation'])['name']),
-    ),
-    'planChanged' => PlanLifecycleChangedPayload(
-      state: _string(_map(kind['event'])['state']),
-    ),
-    'contextCompacted' || 'errorOccurred' => const IgnoredBridgeEventPayload(),
-    final type => throw FormatException('Unknown session event kind: $type'),
-  };
-}
-
-Map<String, Object?> _canonicalPartJson(Object? value) {
-  final part = _map(value);
-  final content = _map(part['content']);
-  final type = _string(content['type']);
-  return {
-    ...part,
-    'type': type,
-    'text': switch (type) {
-      'text' || 'reasoning' => _string(content['text']),
-      _ => '',
-    },
-    'textChannel': content['channel'],
-    'tool': content['tool'],
-    'agent': content['agent'],
-    'planContent': content['content'],
-    'activityGroupId': _map(content['tool'])['activityGroupId'],
-  };
-}
-
-InteractionChangedPayload _canonicalInteractionPayload(Object? value) {
-  final interaction = _map(_map(value)['interaction']);
-  return InteractionChangedPayload(
-    interaction: pendingInteractionFromJson(interaction),
-    status: _string(interaction['status']),
   );
 }
 
-StudioAgentView _canonicalAgentView(Object? value) {
-  final agent = _map(value);
+TimelineMessage _timelineMessageFromFrb(
+  frb.BridgeSessionMessage value, {
+  int sequence = 0,
+}) {
+  JsonLeafDecoder.decodeObject(value.metadataJson);
+  return TimelineMessage(
+    id: value.messageId,
+    sessionId: value.sessionId,
+    turnId: value.turnId,
+    role: value.role.name,
+    status: value.status.name,
+    createdAt: _dateFromUnix(value.createdAt),
+    updatedAt: _dateFromUnix(value.updatedAt),
+    completedAt: value.completedAt == null
+        ? null
+        : _dateFromUnix(value.completedAt!),
+    error: value.error,
+    sequence: sequence,
+  );
+}
+
+TimelinePartSnapshot _timelinePartFromFrb(
+  frb.BridgeSessionPart value, {
+  int sequence = 0,
+}) {
+  return value.content.when(
+    text: (channel, text, _) => _partSnapshot(
+      value,
+      type: TimelinePartType.text,
+      text: text,
+      textChannel: switch (channel) {
+        frb.BridgeSessionTextChannel.user => TimelineTextChannel.user,
+        frb.BridgeSessionTextChannel.commentary =>
+          TimelineTextChannel.commentary,
+        frb.BridgeSessionTextChannel.final_ => TimelineTextChannel.finalAnswer,
+      },
+      sequence: sequence,
+    ),
+    reasoning: (text) => _partSnapshot(
+      value,
+      type: TimelinePartType.reasoning,
+      text: text,
+      sequence: sequence,
+    ),
+    tool: (tool) => _partSnapshot(
+      value,
+      type: TimelinePartType.tool,
+      text: '',
+      activityGroupId: tool.activityGroupId,
+      tool: TimelineToolPart(
+        toolCallId: tool.toolCallId,
+        callId: tool.callId,
+        providerItemId: tool.providerItemId,
+        name: tool.name,
+        arguments: tool.argumentsJson,
+        result: tool.result,
+        outputArtifacts: tool.outputArtifactsJson
+            .map(JsonLeafDecoder.decode)
+            .toList(),
+        exitCode: tool.exitCode,
+        timedOut: tool.timedOut,
+        workingDirectory: tool.workingDirectory,
+        denialReason: tool.denialReason,
+      ),
+      sequence: sequence,
+    ),
+    agent: (agent) => _partSnapshot(
+      value,
+      type: TimelinePartType.agent,
+      text: '',
+      agent: TimelineAgentPart(
+        id: agent.id,
+        path: agent.path,
+        parentPath: agent.parentPath,
+        role: agent.role,
+        task: agent.task,
+        status: agent.status.name,
+        summary: agent.summary,
+        depth: agent.depth,
+        error: agent.error,
+        reason: agent.reason,
+      ),
+      sequence: sequence,
+    ),
+    turn: () => _partSnapshot(
+      value,
+      type: TimelinePartType.turn,
+      text: '',
+      sequence: sequence,
+    ),
+    inference: (_, _) => _partSnapshot(
+      value,
+      type: TimelinePartType.inference,
+      text: '',
+      sequence: sequence,
+    ),
+    plan: (content) => _partSnapshot(
+      value,
+      type: TimelinePartType.plan,
+      text: '',
+      planContent: content,
+      sequence: sequence,
+    ),
+    file: (_, _) => _partSnapshot(
+      value,
+      type: TimelinePartType.file,
+      text: '',
+      sequence: sequence,
+    ),
+  );
+}
+
+TimelinePartSnapshot _partSnapshot(
+  frb.BridgeSessionPart value, {
+  required TimelinePartType type,
+  required String text,
+  required int sequence,
+  TimelineTextChannel? textChannel,
+  String? activityGroupId,
+  TimelineToolPart? tool,
+  TimelineAgentPart? agent,
+  String? planContent,
+}) {
+  return TimelinePartSnapshot(
+    id: value.partId,
+    messageId: value.messageId,
+    sessionId: value.sessionId,
+    turnId: value.turnId,
+    type: type,
+    order: value.order.toInt(),
+    revision: value.revision.toInt(),
+    sequence: sequence,
+    text: text,
+    status: value.status.name,
+    createdAt: _dateFromUnix(value.createdAt),
+    updatedAt: _dateFromUnix(value.updatedAt),
+    completedAt: value.completedAt == null
+        ? null
+        : _dateFromUnix(value.completedAt!),
+    error: value.error,
+    textChannel: textChannel,
+    activityGroupId: activityGroupId,
+    tool: tool,
+    agent: agent,
+    planContent: planContent,
+    synthetic: value.synthetic,
+    ignored: value.ignored,
+  );
+}
+
+TimelinePartDelta _timelineDeltaFromFrb(frb.BridgeSessionPartDelta value) {
+  final field = switch (value.field) {
+    frb.BridgeSessionPartDeltaField.text => 'text',
+    frb.BridgeSessionPartDeltaField.reasoningSummary => 'reasoning.summary',
+    frb.BridgeSessionPartDeltaField.planContent => 'planContent',
+    frb.BridgeSessionPartDeltaField.toolArguments => 'tool.arguments',
+    frb.BridgeSessionPartDeltaField.toolResult => 'tool.result',
+  };
+  return TimelinePartDelta(
+    partId: value.partId,
+    revision: value.revision.toInt(),
+    field: field,
+    delta: value.delta,
+    chunkIndex: value.chunkIndex,
+  );
+}
+
+StudioAgentView _agentFromFrb(frb.BridgeSessionAgentSnapshot value) {
   return StudioAgentView(
-    id: _string(agent['id']),
-    sessionId: _string(agent['sessionId']),
-    path: _string(agent['path']),
-    parentPath: _nullableString(agent['parentPath']),
-    role: _string(agent['role'], fallback: 'agent'),
-    task: _string(agent['task']),
-    status: _string(agent['status']),
-    summary: _nullableString(agent['summary']),
-    depth: _int(agent['depth']),
-    error: _nullableString(agent['error']),
-    reason: _nullableString(agent['reason']),
-    updatedAt: _dateFromUnix(_int(agent['updatedAt'])),
+    id: value.id,
+    sessionId: value.sessionId,
+    path: value.path,
+    parentPath: value.parentPath,
+    role: value.role,
+    task: value.task,
+    status: value.status.name,
+    summary: value.summary,
+    depth: value.depth,
+    error: value.error,
+    reason: value.reason,
+    updatedAt: _dateFromUnix(value.updatedAt),
   );
+}
+
+TimelineAgentEvent _timelineEventFromFrb(frb.BridgeSessionTimelineEvent value) {
+  return TimelineAgentEvent(
+    eventId: value.eventId,
+    sessionId: value.sessionId,
+    sequence: value.sequence.toInt(),
+    createdAt: _dateFromUnix(value.createdAt),
+    payload: value.kind.when(
+      subAgentActivity:
+          (
+            callId,
+            agentId,
+            path,
+            parentPath,
+            kind,
+            status,
+            message,
+            timedOut,
+            error,
+          ) => TimelineSubAgentActivity(
+            callId: callId,
+            kind: kind.name,
+            timedOut: timedOut ?? false,
+            agentId: agentId,
+            path: path,
+            parentPath: parentPath,
+            statusValue: status?.name,
+            message: message,
+            error: error,
+          ),
+      todoListChanged: (snapshot) => TimelineTodoListUpdate(
+        callId: snapshot.callId,
+        agentId: snapshot.agentId,
+        path: snapshot.path,
+        parentPath: snapshot.parentPath,
+        explanation: snapshot.explanation,
+        items: snapshot.items
+            .map(
+              (item) =>
+                  TimelineTodoItem(step: item.step, status: item.status.name),
+            )
+            .toList(),
+      ),
+    ),
+  );
+}
+
+SessionRuntimeView _sessionRuntimeFromFrb(
+  frb.BridgeSessionRuntimeSnapshot value,
+) {
+  final usage = value.usage;
+  final costLabel = usage.estimatedCosts
+      .map(
+        (cost) => [
+          cost.currency,
+          _compactAmount(cost.amount.toString()),
+        ].where((part) => part.isNotEmpty).join(' '),
+      )
+      .where((label) => label.isNotEmpty)
+      .join(', ');
+  return SessionRuntimeView(
+    model: usage.model,
+    contextTokens: usage.latestContextTokens.toInt(),
+    contextWindow: usage.contextWindow?.toInt() ?? 0,
+    totalTokens: usage.totalTokens.toInt(),
+    costLabel: costLabel.isEmpty && usage.hasUnpricedUsage
+        ? 'unpriced usage'
+        : costLabel,
+    activeSkills: value.activeSkills,
+    activeMcpServers: value.activeMcpServers,
+    activeLspServers: value.activeLspServers,
+    agentCount: value.agentCount,
+  );
+}
+
+PendingInteraction _interactionFromFrb(frb.BridgeInteractionRequest value) {
+  final kind = switch (value.kind) {
+    frb.BridgeInteractionKind.userInput => InteractionKind.userInput,
+    frb.BridgeInteractionKind.toolApproval => InteractionKind.toolApproval,
+    frb.BridgeInteractionKind.planConfirmation =>
+      InteractionKind.planConfirmation,
+  };
+  final payload = value.payload.when<InteractionPayload>(
+    userInput: (questions) => UserInputInteractionPayload(
+      questions: [
+        for (final question in questions)
+          UserQuestionView(
+            id: question.id,
+            header: question.header,
+            question: question.question,
+            isOther: question.isOther,
+            isSecret: question.isSecret,
+            options: [
+              for (final option in question.options ?? const [])
+                UserQuestionOptionView(
+                  label: option.label,
+                  description: option.description,
+                ),
+            ],
+          ),
+      ],
+    ),
+    toolApproval: (name, argumentsJson, workingDirectory, parentAgentId) =>
+        ToolApprovalInteractionPayload(
+          toolName: name,
+          arguments: JsonLeafDecoder.decode(argumentsJson),
+          workingDirectory: workingDirectory ?? '',
+          parentAgentId: parentAgentId,
+        ),
+    planConfirmation: (planId, content) =>
+        PlanConfirmationInteractionPayload(planId: planId, content: content),
+  );
+  return PendingInteraction(
+    id: value.interactionId,
+    sessionId: value.scope.sessionId,
+    kind: kind,
+    title: _interactionTitle(kind, payload),
+    body: _interactionBody(kind, payload),
+    payload: payload,
+  );
+}
+
+abstract final class JsonLeafDecoder {
+  static Object? decode(String json) {
+    try {
+      return jsonDecode(json);
+    } on FormatException catch (error) {
+      throw FormatException('Invalid typed bridge JSON leaf: ${error.message}');
+    }
+  }
+
+  static Map<String, Object?> decodeObject(String json) {
+    final value = decode(json);
+    if (value is Map<String, Object?>) {
+      return value;
+    }
+    if (value is Map) {
+      return value.map((key, value) => MapEntry(key.toString(), value));
+    }
+    throw const FormatException('Typed bridge JSON leaf must be an object');
+  }
+}
+
+Object _studioFailure(Object error) {
+  if (error is! frb.BridgeError) {
+    return error;
+  }
+  return StudioFailure(
+    code: StudioFailureCode.values.byName(error.code.name),
+    message: error.message,
+    retryable: error.retryable,
+    correlationId: error.correlationId,
+    detailsJson: error.detailsJson,
+  );
+}
+
+frb.BridgeInteractionResolution _interactionResolutionFromDomain(
+  InteractionResolutionCommand resolution,
+) {
+  return switch (resolution) {
+    UserInputResolutionCommand(:final answers) =>
+      frb.BridgeInteractionResolution.userInput(
+        answers: [
+          for (final answer in answers)
+            frb.BridgeUserInputAnswer(
+              questionId: answer.questionId,
+              answers: answer.answers,
+            ),
+        ],
+      ),
+    ToolApprovalResolutionCommand(:final decision, :final reason) =>
+      frb.BridgeInteractionResolution.toolApproval(
+        decision: switch (decision) {
+          ToolApprovalDecision.approved =>
+            frb.BridgeToolApprovalResolution.approved,
+          ToolApprovalDecision.denied =>
+            frb.BridgeToolApprovalResolution.denied,
+        },
+        reason: reason,
+      ),
+    PlanConfirmationResolutionCommand(
+      :final decision,
+      :final content,
+      :final reason,
+    ) =>
+      frb.BridgeInteractionResolution.planConfirmation(
+        decision: switch (decision) {
+          PlanConfirmationDecision.implementFreshContext =>
+            frb.BridgePlanConfirmationResolution.implementFreshContext,
+          PlanConfirmationDecision.continuePlanning =>
+            frb.BridgePlanConfirmationResolution.continuePlanning,
+          PlanConfirmationDecision.dismiss =>
+            frb.BridgePlanConfirmationResolution.dismiss,
+        },
+        content: content,
+        reason: reason,
+      ),
+  };
 }
 
 StudioState applyCanonicalSessionSnapshot(
   StudioState current,
-  Map<String, Object?> snapshot,
+  Object snapshot,
 ) {
-  final sessionId = _string(snapshot['sessionId']);
+  final typed = switch (snapshot) {
+    StudioSessionSnapshot value => value,
+    Map<String, Object?> value => _legacySessionSnapshot(value),
+    Map value => _legacySessionSnapshot(
+      value.map((key, value) => MapEntry(key.toString(), value)),
+    ),
+    _ => throw ArgumentError.value(snapshot, 'snapshot'),
+  };
+  final sessionId = typed.sessionId;
   if (sessionId.isEmpty || current.selectedSessionId != sessionId) {
     return current;
   }
-  final throughSequence = _int(snapshot['throughSequence']);
-  final messages = _list(snapshot['messages'])
-      .map((message) => timelineMessageFromJson(message))
-      .where((message) => message.id.isNotEmpty)
-      .toList();
+  final existingRuntime =
+      current.runtimesBySession[sessionId] ?? _emptyRuntimeView();
+  final runtime = (typed.runtime ?? existingRuntime).copyWith(
+    task: existingRuntime.task,
+    agentCount: typed.agents.length,
+  );
+  return current.copyWith(
+    messagesBySession: {
+      ...current.messagesBySession,
+      sessionId: typed.messages,
+    },
+    partSnapshotsBySession: {
+      ...current.partSnapshotsBySession,
+      sessionId: typed.parts,
+    },
+    partOverlaysBySession: {
+      ...current.partOverlaysBySession,
+      sessionId: const {},
+    },
+    agentTimelineEventsBySession: {
+      ...current.agentTimelineEventsBySession,
+      sessionId: typed.timelineEvents,
+    },
+    agentsBySession: {...current.agentsBySession, sessionId: typed.agents},
+    runtimesBySession: {...current.runtimesBySession, sessionId: runtime},
+    pendingInteractions: [
+      for (final interaction in current.pendingInteractions)
+        if (interaction.sessionId != sessionId) interaction,
+      ...typed.interactions,
+    ],
+    turnPhasesBySession: {
+      ...current.turnPhasesBySession,
+      sessionId: typed.turnStatus == null
+          ? TurnPhase.idle
+          : _turnPhaseFromStatus(typed.turnStatus!),
+    },
+    workspaceSyncBySession: {
+      ...current.workspaceSyncBySession,
+      sessionId: AgentWorkspaceSyncState.ready,
+    },
+    eventCursorsBySession: {
+      ...current.eventCursorsBySession,
+      sessionId: typed.throughSequence,
+    },
+  );
+}
+
+StudioSessionSnapshot _legacySessionSnapshot(Map<String, Object?> snapshot) {
+  final sessionId = _string(snapshot['sessionId']);
   final parts = <String, TimelinePartSnapshot>{};
   for (final value in _list(snapshot['parts'])) {
-    final partJson = _canonicalPartJson(value);
+    final partJson = _canonicalLegacyPartJson(value);
     if (_isIgnoredTimelinePartType(partJson['type'])) {
       continue;
     }
@@ -174,7 +635,21 @@ StudioState applyCanonicalSessionSnapshot(
   }
   final agents = <String, StudioAgentView>{};
   for (final value in _list(snapshot['agents'])) {
-    final agent = _canonicalAgentView(value);
+    final json = _map(value);
+    final agent = StudioAgentView(
+      id: _string(json['id']),
+      sessionId: _string(json['sessionId']),
+      path: _string(json['path']),
+      parentPath: _nullableString(json['parentPath']),
+      role: _string(json['role'], fallback: 'agent'),
+      task: _string(json['task']),
+      status: _string(json['status']),
+      summary: _nullableString(json['summary']),
+      depth: _int(json['depth']),
+      error: _nullableString(json['error']),
+      reason: _nullableString(json['reason']),
+      updatedAt: _dateFromUnix(_int(json['updatedAt'])),
+    );
     if (agent.id.isNotEmpty) {
       agents[agent.id] = agent;
     }
@@ -187,50 +662,38 @@ StudioState applyCanonicalSessionSnapshot(
     }
   }
   final runtimeJson = _map(snapshot['runtime']);
-  final existingRuntime =
-      current.runtimesBySession[sessionId] ?? _emptyRuntimeView();
-  final runtime =
-      (runtimeJson.isEmpty
-              ? existingRuntime
-              : sessionRuntimeFromJson(
-                  runtimeJson,
-                ).copyWith(task: existingRuntime.task))
-          .copyWith(agentCount: agents.length);
   final turn = _map(snapshot['turn']);
-  return current.copyWith(
-    messagesBySession: {...current.messagesBySession, sessionId: messages},
-    partSnapshotsBySession: {
-      ...current.partSnapshotsBySession,
-      sessionId: parts,
-    },
-    partOverlaysBySession: {
-      ...current.partOverlaysBySession,
-      sessionId: const {},
-    },
-    agentTimelineEventsBySession: {
-      ...current.agentTimelineEventsBySession,
-      sessionId: timelineEvents,
-    },
-    agentsBySession: {...current.agentsBySession, sessionId: agents},
-    runtimesBySession: {...current.runtimesBySession, sessionId: runtime},
-    pendingInteractions: [
-      for (final interaction in current.pendingInteractions)
-        if (interaction.sessionId != sessionId) interaction,
-      ...interactions,
-    ],
-    turnPhasesBySession: {
-      ...current.turnPhasesBySession,
-      sessionId: turn.isEmpty
-          ? TurnPhase.idle
-          : _turnPhaseFromStatus(_string(turn['status'])),
-    },
-    workspaceSyncBySession: {
-      ...current.workspaceSyncBySession,
-      sessionId: AgentWorkspaceSyncState.ready,
-    },
-    eventCursorsBySession: {
-      ...current.eventCursorsBySession,
-      sessionId: throughSequence,
-    },
+  return StudioSessionSnapshot(
+    sessionId: sessionId,
+    throughSequence: _int(snapshot['throughSequence']),
+    messages: _list(snapshot['messages'])
+        .map((message) => timelineMessageFromJson(message))
+        .where((message) => message.id.isNotEmpty)
+        .toList(),
+    parts: parts,
+    interactions: interactions,
+    agents: agents,
+    timelineEvents: timelineEvents,
+    runtime: runtimeJson.isEmpty ? null : sessionRuntimeFromJson(runtimeJson),
+    turnStatus: turn.isEmpty ? null : _string(turn['status']),
   );
+}
+
+Map<String, Object?> _canonicalLegacyPartJson(Object? value) {
+  final part = _map(value);
+  final content = _map(part['content']);
+  final type = _string(content['type']);
+  return {
+    ...part,
+    'type': type,
+    'text': switch (type) {
+      'text' || 'reasoning' => _string(content['text']),
+      _ => '',
+    },
+    'textChannel': content['channel'],
+    'tool': content['tool'],
+    'agent': content['agent'],
+    'planContent': content['content'],
+    'activityGroupId': _map(content['tool'])['activityGroupId'],
+  };
 }

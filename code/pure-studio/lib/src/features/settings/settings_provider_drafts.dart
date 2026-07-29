@@ -1,36 +1,39 @@
-part of 'settings_page.dart';
+import 'package:flutter/material.dart';
 
-enum _ProviderDraftMode { create, edit }
+import '../../domain/models/studio_models.dart';
+import '../../l10n/studio_l10n.dart';
 
-class _ProviderDraft {
-  const _ProviderDraft({
+enum ProviderDraftMode { create, edit }
+
+class ProviderDraft {
+  const ProviderDraft({
     required this.mode,
     required this.originalId,
     required this.provider,
   });
 
-  factory _ProviderDraft.create(ProviderSettingsView provider) {
-    return _ProviderDraft(
-      mode: _ProviderDraftMode.create,
+  factory ProviderDraft.create(ProviderSettingsView provider) {
+    return ProviderDraft(
+      mode: ProviderDraftMode.create,
       originalId: provider.id,
       provider: provider,
     );
   }
 
-  factory _ProviderDraft.edit(ProviderSettingsView provider) {
-    return _ProviderDraft(
-      mode: _ProviderDraftMode.edit,
+  factory ProviderDraft.edit(ProviderSettingsView provider) {
+    return ProviderDraft(
+      mode: ProviderDraftMode.edit,
       originalId: provider.id,
       provider: provider,
     );
   }
 
-  final _ProviderDraftMode mode;
+  final ProviderDraftMode mode;
   final String originalId;
   final ProviderSettingsView provider;
 
-  _ProviderDraft copyWith({ProviderSettingsView? provider}) {
-    return _ProviderDraft(
+  ProviderDraft copyWith({ProviderSettingsView? provider}) {
+    return ProviderDraft(
       mode: mode,
       originalId: originalId,
       provider: provider ?? this.provider,
@@ -38,7 +41,7 @@ class _ProviderDraft {
   }
 }
 
-String _initials(String value) {
+String providerInitials(String value) {
   final words = value.trim().split(RegExp(r'\s+'));
   if (words.isEmpty || words.first.isEmpty) {
     return '?';
@@ -54,7 +57,7 @@ String _initials(String value) {
       .toUpperCase();
 }
 
-String _modelPriceLabel(ProviderModelView model) {
+String providerModelPriceLabel(ProviderModelView model) {
   if (model.currency.isEmpty ||
       model.inputPricePerMTok == null ||
       model.outputPricePerMTok == null) {
@@ -73,7 +76,7 @@ String _trimNumber(double value) {
       .replaceFirst(RegExp(r'\.$'), '');
 }
 
-String _providerUsageSummary(
+String providerUsageSummary(
   BuildContext context,
   ProviderSettingsView provider,
   ProviderUsageView? usage,
@@ -106,16 +109,16 @@ String _readyProviderUsageSummary(ProviderUsageView usage) {
         : '${primary.currency} ${primary.totalBalance}';
   }
   if (usage.usageKind == 'zhipuCodingPlan' && usage.codingPlan != null) {
-    final fiveHour = _findQuotaLimit(usage.codingPlan!.limits, 'fiveHour');
-    final weekly = _findQuotaLimit(usage.codingPlan!.limits, 'weekly');
+    final fiveHour = findQuotaLimit(usage.codingPlan!.limits, 'fiveHour');
+    final weekly = findQuotaLimit(usage.codingPlan!.limits, 'weekly');
     if (fiveHour != null && weekly != null) {
-      return '5h ${_formatPercent(_quotaRemainingPercent(fiveHour))} · 7d ${_formatPercent(_quotaRemainingPercent(weekly))}';
+      return '5h ${formatPercent(quotaRemainingPercent(fiveHour))} · 7d ${formatPercent(quotaRemainingPercent(weekly))}';
     }
   }
   return 'Usage unavailable';
 }
 
-String _providerUsageMessage(
+String providerUsageMessage(
   BuildContext context,
   ProviderSettingsView provider,
   ProviderUsageView usage,
@@ -131,21 +134,21 @@ String _providerUsageMessage(
   };
 }
 
-String _usageUpdatedLabel(BuildContext context, int? seconds) {
+String usageUpdatedLabel(BuildContext context, int? seconds) {
   if (seconds == null || seconds <= 0) {
     return context.l10n.settingsUsageNotChecked;
   }
   return context.l10n.settingsUsageUpdated(_formatUnixShort(seconds));
 }
 
-ZhipuQuotaLimitView? _findQuotaLimit(
+ZhipuQuotaLimitView? findQuotaLimit(
   List<ZhipuQuotaLimitView> limits,
   String window,
 ) {
   return limits.where((limit) => limit.window == window).firstOrNull;
 }
 
-double _quotaRemainingPercent(ZhipuQuotaLimitView limit) {
+double quotaRemainingPercent(ZhipuQuotaLimitView limit) {
   final remaining = limit.remaining;
   final total = limit.total;
   if (remaining != null && total != null && total > 0) {
@@ -154,7 +157,7 @@ double _quotaRemainingPercent(ZhipuQuotaLimitView limit) {
   return _clampPercent(100 - limit.percentage);
 }
 
-String _quotaTitle(BuildContext context, ZhipuQuotaLimitView limit) {
+String quotaTitle(BuildContext context, ZhipuQuotaLimitView limit) {
   return switch (limit.window) {
     'fiveHour' => context.l10n.settingsUsageFiveHourQuota,
     'weekly' => context.l10n.settingsUsageWeeklyQuota,
@@ -163,7 +166,7 @@ String _quotaTitle(BuildContext context, ZhipuQuotaLimitView limit) {
   };
 }
 
-String _quotaDetail(BuildContext context, ZhipuQuotaLimitView limit) {
+String quotaDetail(BuildContext context, ZhipuQuotaLimitView limit) {
   final remaining = limit.remaining;
   final currentValue = limit.currentValue;
   final total = limit.total;
@@ -180,18 +183,18 @@ String _quotaDetail(BuildContext context, ZhipuQuotaLimitView limit) {
     );
   }
   return context.l10n.settingsUsagePercentRemaining(
-    _formatPercent(_quotaRemainingPercent(limit)),
+    formatPercent(quotaRemainingPercent(limit)),
   );
 }
 
-String _resetLabel(BuildContext context, int? seconds) {
+String quotaResetLabel(BuildContext context, int? seconds) {
   if (seconds == null || seconds <= 0) {
     return '';
   }
   return context.l10n.settingsUsageReset(_formatUnixShort(seconds));
 }
 
-String _formatToolUsage(ZhipuToolUsageDetailView detail) {
+String formatToolUsage(ZhipuToolUsageDetailView detail) {
   final currentValue = detail.currentValue;
   final total = detail.total;
   if (currentValue != null && total != null) {
@@ -201,7 +204,7 @@ String _formatToolUsage(ZhipuToolUsageDetailView detail) {
     return _formatCompactNumber(currentValue);
   }
   if (detail.percentage != null) {
-    return _formatPercent(_clampPercent(100 - detail.percentage!));
+    return formatPercent(_clampPercent(100 - detail.percentage!));
   }
   return '';
 }
@@ -225,7 +228,7 @@ String _formatCompactNumber(num value) {
   return _trimNumber(number);
 }
 
-String _formatPercent(double value) => '${_trimNumber(value)}%';
+String formatPercent(double value) => '${_trimNumber(value)}%';
 
 double _clampPercent(double value) {
   if (!value.isFinite) {

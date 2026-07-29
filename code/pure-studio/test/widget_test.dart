@@ -54,6 +54,7 @@ part 'widget_test/state_fixtures.dart';
 part 'widget_test/fake_studio_api.dart';
 part 'widget_test/settings_helpers.dart';
 part 'widget_test/studio_update_tests.dart';
+part 'widget_test/provider_lifecycle_tests.dart';
 
 void main() {
   registerControllerStreamTests();
@@ -75,4 +76,5 @@ void main() {
   registerInteractionTests();
   registerSkillsTests();
   registerStudioUpdateTests();
+  registerProviderLifecycleTests();
 }
