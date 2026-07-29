@@ -5697,6 +5697,203 @@ async fn recovery_reports_legacy_absent_resources_and_preserves_ahead_worktree()
 }
 
 #[tokio::test]
+async fn project_cleanup_previews_all_runs_and_discards_only_pure_worktrees() {
+    let repository = init_repository("project-cleanup-all-runs");
+    std::fs::write(repository.join(".gitignore"), ".pure/\n").unwrap();
+    git(&repository, &["add", ".gitignore"]);
+    git(&repository, &["commit", "-m", "ignore runtime"]);
+    git(&repository, &["branch", "user-feature"]);
+    let main_readme = std::fs::read_to_string(repository.join("README.md")).unwrap();
+    let store = task_store(&repository).await;
+    let first_session = task_session(&store, &repository).await;
+    let second_session = task_session(&store, &repository).await;
+    let coordinator = TaskCoordinator::new(store.clone());
+
+    let first_run = coordinator
+        .start_confirmed_task(&first_session.id, "first plan", &repository)
+        .await
+        .unwrap();
+    let first_worktree =
+        create_running_recovery_worktree(&store, &first_run, "first-agent", &repository).await;
+    std::fs::write(first_worktree.join("first-dirty.txt"), "first dirty\n").unwrap();
+    coordinator
+        .finish_task(&first_run.id, TaskRunPhase::Cancelled, None)
+        .await
+        .unwrap();
+
+    let second_run = coordinator
+        .start_confirmed_task(&second_session.id, "second plan", &repository)
+        .await
+        .unwrap();
+    let second_worktree =
+        create_running_recovery_worktree(&store, &second_run, "second-agent", &repository).await;
+    std::fs::write(second_worktree.join("second-dirty.txt"), "second dirty\n").unwrap();
+    let first_branch = format!("pure-task-{}-first-agent", first_run.id);
+    let second_branch = format!("pure-task-{}-second-agent", second_run.id);
+
+    let issue = coordinator
+        .project_cleanup_issue(&first_session.project_id)
+        .await
+        .unwrap();
+    let preview = coordinator.preview_recovery_cleanup(&issue).await.unwrap();
+
+    assert_eq!(preview.resources.len(), 2);
+    assert!(preview.resources.iter().all(|resource| resource.dirty));
+    assert!(
+        preview
+            .resources
+            .iter()
+            .any(|resource| resource.path == first_worktree.to_string_lossy())
+    );
+    assert!(
+        preview
+            .resources
+            .iter()
+            .any(|resource| resource.path == second_worktree.to_string_lossy())
+    );
+
+    git(&second_worktree, &["add", "-A"]);
+    git(&second_worktree, &["commit", "-m", "change after preview"]);
+    let stale_error = coordinator
+        .cleanup_recovery_issue(&issue, &preview.expected_revision)
+        .await
+        .expect_err("changed worktree facts must invalidate project cleanup preview");
+    assert!(
+        stale_error
+            .to_string()
+            .contains("refresh the preview before confirming")
+    );
+    assert!(first_worktree.is_dir());
+    assert!(second_worktree.is_dir());
+
+    let refreshed = coordinator.preview_recovery_cleanup(&issue).await.unwrap();
+    let authorization = coordinator
+        .validate_recovery_cleanup(&issue, &refreshed.expected_revision)
+        .await
+        .unwrap();
+    std::fs::write(
+        first_worktree.join("changed-after-confirmation.txt"),
+        "changed after confirmation\n",
+    )
+    .unwrap();
+    git(&first_worktree, &["add", "-A"]);
+    git(
+        &first_worktree,
+        &["commit", "-m", "change after confirmation"],
+    );
+    let execution_error = coordinator
+        .execute_recovery_cleanup(&issue, &authorization)
+        .await
+        .expect_err("resource changes after confirmation must stop cleanup execution");
+    assert!(
+        execution_error
+            .to_string()
+            .contains("refresh the preview before confirming")
+    );
+    assert!(first_worktree.is_dir());
+    assert!(second_worktree.is_dir());
+
+    let refreshed = coordinator.preview_recovery_cleanup(&issue).await.unwrap();
+    coordinator
+        .cleanup_recovery_issue(&issue, &refreshed.expected_revision)
+        .await
+        .unwrap();
+
+    assert!(!first_worktree.exists());
+    assert!(!second_worktree.exists());
+    assert!(git_output(&repository, &["branch", "--list", &first_branch]).is_empty());
+    assert!(git_output(&repository, &["branch", "--list", &second_branch]).is_empty());
+    assert!(!git_output(&repository, &["branch", "--list", "user-feature"]).is_empty());
+    assert_eq!(
+        std::fs::read_to_string(repository.join("README.md")).unwrap(),
+        main_readme
+    );
+    assert!(
+        store
+            .read_project(&first_session.project_id)
+            .await
+            .unwrap()
+            .is_some(),
+        "coordinator cleanup must not remove the Studio project registration"
+    );
+    assert_eq!(
+        store
+            .read_task_run(&second_run.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .phase,
+        TaskRunPhase::Cancelled
+    );
+    assert!(
+        store
+            .read_branch_lease(&second_run.id)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    remove_repository(repository);
+}
+
+#[tokio::test]
+async fn project_cleanup_rechecks_zero_unit_runs_and_project_version_before_execution() {
+    let repository = init_repository("project-cleanup-execution-cas");
+    let store = task_store(&repository).await;
+    let session = task_session(&store, &repository).await;
+    let coordinator = TaskCoordinator::new(store.clone());
+    let issue = coordinator
+        .project_cleanup_issue(&session.project_id)
+        .await
+        .unwrap();
+
+    let preview = coordinator.preview_recovery_cleanup(&issue).await.unwrap();
+    let authorization = coordinator
+        .validate_recovery_cleanup(&issue, &preview.expected_revision)
+        .await
+        .unwrap();
+    let run = coordinator
+        .start_confirmed_task(&session.id, "new zero-unit run", &repository)
+        .await
+        .unwrap();
+    let run_set_error = coordinator
+        .execute_recovery_cleanup(&issue, &authorization)
+        .await
+        .expect_err("a new run without work units must invalidate cleanup authorization");
+    assert!(
+        run_set_error
+            .to_string()
+            .contains("refresh the preview before confirming")
+    );
+    coordinator
+        .finish_task(&run.id, TaskRunPhase::Cancelled, None)
+        .await
+        .unwrap();
+
+    let preview = coordinator.preview_recovery_cleanup(&issue).await.unwrap();
+    let authorization = coordinator
+        .validate_recovery_cleanup(&issue, &preview.expected_revision)
+        .await
+        .unwrap();
+    store
+        .execute_test_sql(&format!(
+            "UPDATE projects SET updated_at = updated_at + 1 WHERE id = '{}'",
+            session.project_id
+        ))
+        .await;
+    let project_version_error = coordinator
+        .execute_recovery_cleanup(&issue, &authorization)
+        .await
+        .expect_err("a changed project version must invalidate cleanup authorization");
+    assert!(
+        project_version_error
+            .to_string()
+            .contains("refresh the preview before confirming")
+    );
+    assert!(repository.is_dir());
+    remove_repository(repository);
+}
+
+#[tokio::test]
 async fn recovery_groups_linked_workspaces_by_canonical_git_common_directory() {
     let repository = init_repository("recovery-common-directory-group");
     std::fs::write(repository.join(".gitignore"), ".pure/\n").unwrap();

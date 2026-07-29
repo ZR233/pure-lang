@@ -125,6 +125,89 @@ void registerRecoveryIssueTests() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets(
+    'project close previews all Pure worktrees and remains available while busy',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final state = _twoProjectState(
+        selectedProjectId: 'project-a',
+        turnPhase: TurnPhase.streaming,
+      );
+      final api = _FakeStudioApi(state);
+      api.projectCleanupPreviews['project-a'] = const RecoveryCleanupPreview(
+        issueId: 'project-cleanup-project-a',
+        expectedRevision: 'project-revision-1',
+        scope: RecoveryIssueScope.project,
+        projectId: 'project-a',
+        detail: 'This fixed diagnostic is intentionally not displayed.',
+        resources: [
+          RecoveryCleanupResource(
+            workUnitId: 'work-unit-a',
+            path: r'C:\repo\.pure\worktrees\task-a\agent-a',
+            branch: 'pure-task-task-a-agent-a',
+            presence: RecoveryResourcePresence.complete,
+            registrationExists: true,
+            pathExists: true,
+            branchExists: true,
+            dirty: true,
+            aheadBy: 2,
+            changedFileCount: 3,
+          ),
+        ],
+      );
+      api.projectCleanupState = _twoProjectState(
+        selectedProjectId: 'project-b',
+        projects: const [
+          StudioProject(id: 'project-b', name: 'Project B', path: 'b'),
+        ],
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [studioApiProvider.overrideWithValue(api)],
+          child: _localizedApp(home: const StudioShell()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final cleanupButton = find.byKey(
+        const ValueKey('project-cleanup-project-a'),
+      );
+      expect(tester.widget<IconButton>(cleanupButton).onPressed, isNotNull);
+      await tester.tap(cleanupButton);
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Remove project and clean up Pure worktrees?'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('main workspace'), findsOneWidget);
+      expect(find.textContaining('Uncommitted changes'), findsOneWidget);
+      expect(
+        find.text('This fixed diagnostic is intentionally not displayed.'),
+        findsNothing,
+      );
+
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(api.cleanedProjectId, isNull);
+
+      await tester.tap(cleanupButton);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('project-cleanup-confirm')));
+      await tester.pumpAndSettle();
+
+      expect(api.cleanedProjectId, 'project-a');
+      expect(api.projectCleanupExpectedRevision, 'project-revision-1');
+      expect(find.text('Project A'), findsNothing);
+      expect(find.text('Project B'), findsWidgets);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('failed recovery cleanup can refresh stale preview and retry', (
     tester,
   ) async {

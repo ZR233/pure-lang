@@ -53,6 +53,11 @@ impl StudioTaskSpawnPreparation {
     pub(crate) fn lifecycle_token(&self) -> Option<&str> {
         self.lifecycle_token.as_deref()
     }
+
+    #[cfg(test)]
+    pub(crate) fn test_without_worktree() -> Self {
+        Self::without_worktree()
+    }
 }
 
 impl TaskCoordinator {

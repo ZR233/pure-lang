@@ -97,10 +97,27 @@ Future<void> _showRecoveryCleanupDialog(
   );
 }
 
-class _RecoveryCleanupDialog extends ConsumerStatefulWidget {
-  const _RecoveryCleanupDialog({required this.issue});
+Future<void> _showProjectCleanupDialog(
+  BuildContext context,
+  WidgetRef ref,
+  StudioProject project,
+) {
+  return showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (context) => _RecoveryCleanupDialog.project(project: project),
+  );
+}
 
-  final StudioRecoveryIssue issue;
+class _RecoveryCleanupDialog extends ConsumerStatefulWidget {
+  const _RecoveryCleanupDialog({required this.issue}) : project = null;
+
+  const _RecoveryCleanupDialog.project({required this.project}) : issue = null;
+
+  final StudioRecoveryIssue? issue;
+  final StudioProject? project;
+
+  bool get isProjectCleanup => project != null;
 
   @override
   ConsumerState<_RecoveryCleanupDialog> createState() =>
@@ -120,9 +137,12 @@ class _RecoveryCleanupDialogState
   }
 
   Future<RecoveryCleanupPreview> _loadPreview() {
-    return ref
-        .read(studioControllerProvider.notifier)
-        .previewRecoveryIssueCleanup(widget.issue.id);
+    final controller = ref.read(studioControllerProvider.notifier);
+    final project = widget.project;
+    if (project != null) {
+      return controller.previewProjectCleanup(project.id);
+    }
+    return controller.previewRecoveryIssueCleanup(widget.issue!.id);
   }
 
   void _refreshPreview() {
@@ -134,8 +154,13 @@ class _RecoveryCleanupDialogState
 
   @override
   Widget build(BuildContext context) {
+    final projectCleanup = widget.isProjectCleanup;
     return AlertDialog(
-      title: Text(context.l10n.recoveryCleanupTitle),
+      title: Text(
+        projectCleanup
+            ? context.l10n.projectCleanupTitle
+            : context.l10n.recoveryCleanupTitle,
+      ),
       content: SizedBox(
         width: 600,
         child: FutureBuilder<RecoveryCleanupPreview>(
@@ -156,6 +181,10 @@ class _RecoveryCleanupDialogState
             final preview = snapshot.requireData;
             return _RecoveryPreviewContent(
               preview: preview,
+              body: projectCleanup
+                  ? context.l10n.projectCleanupBody
+                  : context.l10n.recoveryCleanupBody,
+              showDetail: !projectCleanup,
               cleanupError: _cleanupError,
               onRefresh: _refreshPreview,
             );
@@ -171,7 +200,11 @@ class _RecoveryCleanupDialogState
           future: _preview,
           builder: (context, snapshot) {
             return FilledButton(
-              key: const ValueKey('recovery-cleanup-confirm'),
+              key: ValueKey(
+                projectCleanup
+                    ? 'project-cleanup-confirm'
+                    : 'recovery-cleanup-confirm',
+              ),
               onPressed: !_cleaning && snapshot.hasData
                   ? () => _confirm(snapshot.requireData)
                   : null,
@@ -180,7 +213,11 @@ class _RecoveryCleanupDialogState
                       dimension: 16,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : Text(context.l10n.recoveryCleanupConfirm),
+                  : Text(
+                      projectCleanup
+                          ? context.l10n.projectCleanupConfirm
+                          : context.l10n.recoveryCleanupConfirm,
+                    ),
             );
           },
         ),
@@ -194,9 +231,16 @@ class _RecoveryCleanupDialogState
       _cleanupError = null;
     });
     try {
-      await ref
-          .read(studioControllerProvider.notifier)
-          .cleanupRecoveryIssue(widget.issue.id, preview.expectedRevision);
+      final controller = ref.read(studioControllerProvider.notifier);
+      final project = widget.project;
+      if (project != null) {
+        await controller.cleanupProject(project.id, preview.expectedRevision);
+      } else {
+        await controller.cleanupRecoveryIssue(
+          widget.issue!.id,
+          preview.expectedRevision,
+        );
+      }
       if (mounted) {
         Navigator.of(context).pop();
       }
@@ -215,11 +259,15 @@ class _RecoveryCleanupDialogState
 class _RecoveryPreviewContent extends StatelessWidget {
   const _RecoveryPreviewContent({
     required this.preview,
+    required this.body,
+    required this.showDetail,
     required this.cleanupError,
     required this.onRefresh,
   });
 
   final RecoveryCleanupPreview preview;
+  final String body;
+  final bool showDetail;
   final String? cleanupError;
   final VoidCallback onRefresh;
 
@@ -231,14 +279,16 @@ class _RecoveryPreviewContent extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(context.l10n.recoveryCleanupBody),
-          const SizedBox(height: 8),
-          Text(
-            preview.detail,
-            style: context.text.bodySmall?.copyWith(
-              color: context.studioInkSoft,
+          Text(body),
+          if (showDetail) ...[
+            const SizedBox(height: 8),
+            Text(
+              preview.detail,
+              style: context.text.bodySmall?.copyWith(
+                color: context.studioInkSoft,
+              ),
             ),
-          ),
+          ],
           const SizedBox(height: 12),
           if (preview.resources.isEmpty)
             Text(context.l10n.recoveryCleanupNoResources)

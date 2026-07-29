@@ -44,6 +44,13 @@ class _FakeStudioApi implements StudioApi {
   int loadProviderUsagesCount = 0;
   Completer<List<ProviderUsageView>>? blockedProviderUsageLoad;
   final Map<String, RecoveryCleanupPreview> recoveryPreviews = {};
+  final Map<String, RecoveryCleanupPreview> projectCleanupPreviews = {};
+  int previewProjectCleanupCount = 0;
+  Object? previewProjectCleanupError;
+  StudioState? projectCleanupState;
+  Object? projectCleanupError;
+  String? cleanedProjectId;
+  String? projectCleanupExpectedRevision;
   int previewRecoveryIssueCleanupCount = 0;
   Object? previewRecoveryIssueCleanupError;
   StudioState? recoveryCleanupState;
@@ -93,6 +100,37 @@ class _FakeStudioApi implements StudioApi {
     archivedProjectId = projectId;
     archiveSelectedProjectId = selectedProjectId;
     return archiveProjectStates[projectId] ?? initialState;
+  }
+
+  @override
+  Future<RecoveryCleanupPreview> previewProjectCleanup(String projectId) async {
+    previewProjectCleanupCount += 1;
+    if (previewProjectCleanupError case final error?) {
+      throw error;
+    }
+    return projectCleanupPreviews[projectId] ??
+        RecoveryCleanupPreview(
+          issueId: 'project-cleanup-$projectId',
+          expectedRevision: 'revision-$projectId',
+          scope: RecoveryIssueScope.project,
+          projectId: projectId,
+          detail: 'Project cleanup preview',
+          resources: const [],
+        );
+  }
+
+  @override
+  Future<StudioState> cleanupProject(
+    String projectId,
+    String expectedRevision, {
+    String? selectedProjectId,
+  }) async {
+    if (projectCleanupError case final error?) {
+      throw error;
+    }
+    cleanedProjectId = projectId;
+    projectCleanupExpectedRevision = expectedRevision;
+    return projectCleanupState ?? initialState;
   }
 
   @override

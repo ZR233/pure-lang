@@ -69,9 +69,6 @@ class _Sidebar extends ConsumerWidget {
                       compact: compact,
                       selected: project.id == state.selectedProjectId,
                       recoveryIssue: state.recoveryIssueForProject(project.id),
-                      canArchive:
-                          !state.isBusy ||
-                          project.id != state.selectedProjectId,
                     ),
                   const SizedBox(height: 12),
                   if (!compact) ...[
@@ -129,14 +126,12 @@ class _ProjectTile extends ConsumerWidget {
     required this.compact,
     required this.selected,
     required this.recoveryIssue,
-    required this.canArchive,
   });
 
   final StudioProject project;
   final bool compact;
   final bool selected;
   final StudioRecoveryIssue? recoveryIssue;
-  final bool canArchive;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -166,9 +161,7 @@ class _ProjectTile extends ConsumerWidget {
             ? issue.canCleanup
                   ? () => _showRecoveryCleanupDialog(context, ref, issue)
                   : null
-            : canArchive
-            ? () => controller.archiveProject(project.id)
-            : null,
+            : () => _showProjectCleanupDialog(context, ref, project),
       );
     }
     final tile = _SidebarTile(
@@ -188,6 +181,7 @@ class _ProjectTile extends ConsumerWidget {
           : colors.onSurfaceVariant,
       onTap: issue == null ? () => controller.selectProject(project.id) : null,
       trailing: IconButton(
+        key: ValueKey('project-cleanup-${project.id}'),
         tooltip: issue == null
             ? context.l10n.sidebarCloseProject
             : context.l10n.recoveryCleanupTooltip,
@@ -203,9 +197,7 @@ class _ProjectTile extends ConsumerWidget {
             ? issue.canCleanup
                   ? () => _showRecoveryCleanupDialog(context, ref, issue)
                   : null
-            : canArchive
-            ? () => controller.archiveProject(project.id)
-            : null,
+            : () => _showProjectCleanupDialog(context, ref, project),
       ),
     );
     return issue == null ? tile : Tooltip(message: issue.detail, child: tile);

@@ -210,7 +210,7 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
                 .await
                 .map_err(|error| lifecycle_error(error.to_string()))?;
         }
-        self.resources.remove(&lease.agent_id).await;
+        self.resources.release_after_close(&lease.agent_id).await;
         Ok(())
     }
 

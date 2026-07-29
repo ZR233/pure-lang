@@ -249,6 +249,24 @@ abstract class AppLocalizations {
   /// **'Cleanup failed: {error}'**
   String recoveryCleanupFailed(String error);
 
+  /// No description provided for @projectCleanupTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove project and clean up Pure worktrees?'**
+  String get projectCleanupTitle;
+
+  /// No description provided for @projectCleanupBody.
+  ///
+  /// In en, this message translates to:
+  /// **'This removes the project from Studio and permanently discards uncommitted changes and unmerged commits in every Pure-owned task worktree. The main workspace will not be deleted or modified.'**
+  String get projectCleanupBody;
+
+  /// No description provided for @projectCleanupConfirm.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove project and clean up'**
+  String get projectCleanupConfirm;
+
   /// No description provided for @sidebarNew.
   ///
   /// In en, this message translates to:

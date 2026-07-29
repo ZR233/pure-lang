@@ -77,42 +77,50 @@ void registerShellSettingsTests() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('project close buttons respect current session busy state', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(1280, 800);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
+  testWidgets(
+    'project cleanup remains available while current session is busy',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
 
-    final api = _FakeStudioApi(
-      _twoProjectState(
-        selectedProjectId: 'project-a',
-        turnPhase: TurnPhase.streaming,
-      ),
-    );
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [studioApiProvider.overrideWithValue(api)],
-        child: _localizedApp(home: const StudioShell()),
-      ),
-    );
-    await tester.pump();
-    await tester.pump();
+      final api = _FakeStudioApi(
+        _twoProjectState(
+          selectedProjectId: 'project-a',
+          turnPhase: TurnPhase.streaming,
+        ),
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [studioApiProvider.overrideWithValue(api)],
+          child: _localizedApp(home: const StudioShell()),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
 
-    final closeProjectButtons = find.widgetWithIcon(IconButton, Icons.close);
-    final closeButtons = tester
-        .widgetList<IconButton>(closeProjectButtons)
-        .toList();
-    expect(closeButtons.length, 2);
-    expect(closeButtons.first.onPressed, isNull);
-    expect(closeButtons.last.onPressed, isNotNull);
+      final closeProjectButtons = find.widgetWithIcon(IconButton, Icons.close);
+      final closeButtons = tester
+          .widgetList<IconButton>(closeProjectButtons)
+          .toList();
+      expect(closeButtons.length, 2);
+      expect(closeButtons.first.onPressed, isNotNull);
+      expect(closeButtons.last.onPressed, isNotNull);
 
-    await tester.tap(closeProjectButtons.last);
-    await tester.pump();
-    await tester.pump();
-    expect(api.archivedProjectId, 'project-b');
-  });
+      await tester.tap(closeProjectButtons.first);
+      await tester.pumpAndSettle();
+      expect(api.previewProjectCleanupCount, 1);
+      expect(
+        find.text('Remove project and clean up Pure worktrees?'),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(api.archivedProjectId, isNull);
+      expect(api.cleanedProjectId, isNull);
+    },
+  );
 
   testWidgets('status bar routes model controls by session mode', (
     tester,

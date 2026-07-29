@@ -16,6 +16,12 @@ Future<BridgeRecoveryCleanupPreviewDto> previewRecoveryIssueCleanup({
       issueId: issueId,
     );
 
+Future<BridgeRecoveryCleanupPreviewDto> previewProjectCleanup({
+  required String projectId,
+}) => RustLib.instance.api.crateApiStudioHandlersRecoveryPreviewProjectCleanup(
+  projectId: projectId,
+);
+
 Future<BridgeStudioSnapshotResponse> cleanupRecoveryIssue({
   required String issueId,
   required String expectedRevision,
@@ -26,4 +32,14 @@ Future<BridgeStudioSnapshotResponse> cleanupRecoveryIssue({
   expectedRevision: expectedRevision,
   selectedProjectId: selectedProjectId,
   selectedSessionId: selectedSessionId,
+);
+
+Future<BridgeStudioSnapshotResponse> cleanupProject({
+  required String projectId,
+  required String expectedRevision,
+  String? selectedProjectId,
+}) => RustLib.instance.api.crateApiStudioHandlersRecoveryCleanupProject(
+  projectId: projectId,
+  expectedRevision: expectedRevision,
+  selectedProjectId: selectedProjectId,
 );

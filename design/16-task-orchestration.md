@@ -264,12 +264,24 @@ worktree 路径和分支包含 task run id：
 pure-task-<runId>-<agentId>
 ```
 
-恢复 issue 的用户确认清理先返回 typed `RecoveryCleanupPreview`，包含 path、branch、
-missing/partial/complete、dirty、ahead commit、changed-file 及 `expectedRevision`。执行时
-以 revision 做 CAS，并在事务中终结精确故障 Task、删除 BranchLease、将相关 disposition
-写为 `cleanupRequested`；之后才幂等释放 Pure-owned leaf/branch。session scope 保留聊天
-历史；project scope 归档会话、删除损坏 Task/runtime 元数据并移除 Studio 项目登记，但绝不
-删除或修改用户项目目录。中断后恢复只续做已有 durable cleanup 授权，不扩大清理范围。
+恢复 issue 与项目关闭的用户确认清理都先返回 typed `RecoveryCleanupPreview`，包含 path、
+branch、missing/partial/complete、dirty、ahead commit、changed-file 及
+`expectedRevision`。项目级预览必须聚合该项目全部 session 的全部 Task run，不能只展示触发
+issue 的单个 run。执行时以 revision 做 CAS，先递归关闭该项目的 root agent tree，再在事务中
+终结全部关联 Task、删除 BranchLease、将相关 disposition 写为 `cleanupRequested`；之后才
+幂等释放预览中经 durable ownership 验证的 Pure-owned leaf/branch。该确认明确授权放弃这些
+Pure worktree 中的未提交修改和未合并提交，但不授权触碰用户主工作区、非 `pure-task-*`
+分支或 `.pure/worktrees/<taskRunId>/<agentId>` 之外的路径。session scope 保留聊天历史；
+project scope 归档会话、删除损坏 Task/runtime 元数据并移除 Studio 项目登记，但绝不删除或
+修改用户项目目录。
+
+项目清理关闭 agent tree 时由 durable cleanup 临时接管内存资源 ownership；普通 agent close
+不得抢先释放 worktree 或移除 ownership 映射。关闭或后续清理失败时保留该接管和映射供重试，
+仅在 durable worktree 清理及项目 quarantine 都完成后最终 detach。实际删除前必须再次核对
+确认时的项目版本、完整 Task run 集合（包括零 work-unit run）、work-unit identity 集合和
+worktree HEAD/dirty/存在性事实；agent close 合法产生的 Task 状态变化不作为失效条件。任一
+资源事实漂移都终止执行并要求刷新预览。中断后恢复只续做已有 durable cleanup 授权，不扩大
+清理范围。
 
 ## Planner 合并与冲突
 

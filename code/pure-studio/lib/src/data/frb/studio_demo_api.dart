@@ -318,6 +318,28 @@ class DemoStudioApi implements StudioApi {
   }
 
   @override
+  Future<RecoveryCleanupPreview> previewProjectCleanup(String projectId) async {
+    return RecoveryCleanupPreview(
+      issueId: 'project-cleanup-$projectId',
+      expectedRevision: 'demo-project',
+      scope: RecoveryIssueScope.project,
+      projectId: projectId,
+      detail: 'Remove the project and its Pure-owned task worktrees.',
+      resources: const [],
+    );
+  }
+
+  @override
+  Future<StudioState> cleanupProject(
+    String projectId,
+    String expectedRevision, {
+    String? selectedProjectId,
+  }) {
+    _archivedProjectIds.add(projectId);
+    return bootstrap();
+  }
+
+  @override
   Future<StudioState> createSession(String projectId, {String? title}) =>
       bootstrap();
 

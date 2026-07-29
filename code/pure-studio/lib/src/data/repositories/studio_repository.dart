@@ -90,6 +90,23 @@ class StudioController extends AsyncNotifier<StudioState> {
     await _adoptState(next);
   }
 
+  Future<RecoveryCleanupPreview> previewProjectCleanup(String projectId) {
+    return _api.previewProjectCleanup(projectId);
+  }
+
+  Future<void> cleanupProject(String projectId, String expectedRevision) async {
+    final current = state.value;
+    if (current == null) {
+      return;
+    }
+    final next = await _api.cleanupProject(
+      projectId,
+      expectedRevision,
+      selectedProjectId: current.selectedProjectId,
+    );
+    await _adoptState(next);
+  }
+
   Future<void> createSession() async {
     final current = state.value;
     final projectId = current?.selectedProjectId;

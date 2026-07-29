@@ -94,6 +94,17 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get projectCleanupTitle =>
+      'Remove project and clean up Pure worktrees?';
+
+  @override
+  String get projectCleanupBody =>
+      'This removes the project from Studio and permanently discards uncommitted changes and unmerged commits in every Pure-owned task worktree. The main workspace will not be deleted or modified.';
+
+  @override
+  String get projectCleanupConfirm => 'Remove project and clean up';
+
+  @override
   String get sidebarNew => 'New';
 
   @override
