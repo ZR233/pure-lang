@@ -3,7 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/theme/studio_tokens.dart';
 import '../../data/repositories/studio_repository.dart';
+import '../../domain/models/studio_models.dart';
 import '../../l10n/studio_l10n.dart';
+import '../../shared/studio_driver_keys.dart';
 import 'interaction_payload.dart';
 import 'interaction_widgets.dart';
 
@@ -102,6 +104,7 @@ class _UserInputDockState extends ConsumerState<UserInputDock> {
               onPressed: () => setState(() => _index -= 1),
             ),
           FilledButton.icon(
+            key: StudioDriverKeys.userInputSubmit,
             icon: Icon(isLast ? Icons.check : Icons.chevron_right),
             label: Text(
               isLast
@@ -185,8 +188,8 @@ class _UserInputDockState extends ConsumerState<UserInputDock> {
     return selected.isNotEmpty || text.isNotEmpty;
   }
 
-  Map<String, Object> _answers() {
-    final answers = <String, Object>{};
+  List<UserInputAnswerCommand> _answers() {
+    final answers = <UserInputAnswerCommand>[];
     for (final entry in widget.payload.questions.indexed) {
       final index = entry.$1;
       final question = entry.$2;
@@ -196,7 +199,7 @@ class _UserInputDockState extends ConsumerState<UserInputDock> {
       if ((question.isOther || question.options.isEmpty) && text.isNotEmpty) {
         values.add(text);
       }
-      answers[key] = {'answers': values};
+      answers.add(UserInputAnswerCommand(questionId: key, answers: values));
     }
     return answers;
   }
@@ -206,24 +209,25 @@ class _UserInputDockState extends ConsumerState<UserInputDock> {
     if (text.isEmpty) {
       return;
     }
-    ref.read(studioControllerProvider.notifier).resolveActiveInteraction(
-      widget.sessionId,
-      {
-        'type': 'userInput',
-        'answers': {
-          'answer': {
-            'answers': [text],
-          },
-        },
-      },
-    );
+    ref
+        .read(studioControllerProvider.notifier)
+        .resolveActiveInteraction(
+          widget.sessionId,
+          UserInputResolutionCommand(
+            answers: [
+              UserInputAnswerCommand(questionId: 'answer', answers: [text]),
+            ],
+          ),
+        );
   }
 
   void _submitAnswers() {
-    ref.read(studioControllerProvider.notifier).resolveActiveInteraction(
-      widget.sessionId,
-      {'type': 'userInput', 'answers': _answers()},
-    );
+    ref
+        .read(studioControllerProvider.notifier)
+        .resolveActiveInteraction(
+          widget.sessionId,
+          UserInputResolutionCommand(answers: _answers()),
+        );
   }
 }
 

@@ -1,39 +1,54 @@
-use std::future::Future;
-use std::sync::OnceLock;
-
 use anyhow::{Context, Result};
 use pl_studio_runtime::StudioRuntime;
+use tokio::sync::{Mutex, Notify, OnceCell};
+use tokio_util::sync::CancellationToken;
 
-static BRIDGE: OnceLock<BridgeRuntime> = OnceLock::new();
+use super::subscription::BridgeTaskRegistry;
+use super::types::BridgeError;
+
+static BRIDGE: OnceCell<BridgeRuntime> = OnceCell::const_new();
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BridgeLifecycle {
+    Initialized,
+    Started,
+    ShuttingDown,
+    Stopped,
+}
 
 pub(crate) struct BridgeRuntime {
-    pub(crate) tokio: tokio::runtime::Runtime,
     pub(crate) studio: StudioRuntime,
+    pub(crate) subscriptions: BridgeTaskRegistry,
+    pub(crate) shutdown: CancellationToken,
+    pub(crate) shutdown_complete: Notify,
+    pub(crate) lifecycle: Mutex<BridgeLifecycle>,
 }
 
 impl BridgeRuntime {
-    fn new() -> Result<Self> {
-        crate::diagnostics::initialize();
-        let tokio = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .thread_name("pl-studio-bridge")
-            .build()?;
-        let studio = tokio.block_on(StudioRuntime::default_app())?;
-        Ok(Self { tokio, studio })
-    }
-
-    pub(crate) fn block_on<T>(&self, future: impl Future<Output = T>) -> T {
-        self.tokio.block_on(future)
+    async fn new() -> Result<Self> {
+        Ok(Self {
+            studio: StudioRuntime::default_app().await?,
+            subscriptions: BridgeTaskRegistry::new(),
+            shutdown: CancellationToken::new(),
+            shutdown_complete: Notify::new(),
+            lifecycle: Mutex::new(BridgeLifecycle::Initialized),
+        })
     }
 }
 
-pub(crate) fn bridge() -> Result<&'static BridgeRuntime> {
-    if let Some(runtime) = BRIDGE.get() {
-        return Ok(runtime);
-    }
-    let runtime = BridgeRuntime::new()?;
-    let _ = BRIDGE.set(runtime);
+pub(crate) async fn bridge() -> Result<&'static BridgeRuntime> {
     BRIDGE
-        .get()
+        .get_or_try_init(BridgeRuntime::new)
+        .await
         .context("Studio bridge runtime was not initialized")
+}
+
+pub(crate) async fn active_bridge() -> Result<&'static BridgeRuntime, BridgeError> {
+    let bridge = bridge().await?;
+    match *bridge.lifecycle.lock().await {
+        BridgeLifecycle::Initialized | BridgeLifecycle::Started => Ok(bridge),
+        BridgeLifecycle::ShuttingDown | BridgeLifecycle::Stopped => {
+            Err(BridgeError::runtime_stopped())
+        }
+    }
 }

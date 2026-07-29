@@ -1,12 +1,15 @@
 export 'agent_models.dart';
 export 'agent_workspace_view.dart';
 export 'collection_extensions.dart';
+export 'failure_models.dart';
 export 'interaction_models.dart';
 export 'provider_models.dart';
 export 'recovery_models.dart';
 export 'runtime_models.dart';
 export 'session_models.dart';
 export 'settings_models.dart';
+export 'studio_commands.dart';
 export 'studio_enums.dart';
+export 'studio_projection_models.dart';
 export 'studio_state.dart';
 export 'timeline_models.dart';

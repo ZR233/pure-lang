@@ -254,22 +254,6 @@ String? studioEventSessionId(StudioBridgeEvent event) {
   return event.payload.sessionId;
 }
 
-List<RoleSettingsView> replaceStudioRole(
-  List<RoleSettingsView> roles,
-  RoleSettingsView replacement,
-) {
-  var replaced = false;
-  final next = [
-    for (final role in roles)
-      if (role.key == replacement.key) ...[replacement] else role,
-  ];
-  replaced = roles.any((role) => role.key == replacement.key);
-  if (!replaced) {
-    next.add(replacement);
-  }
-  return next;
-}
-
 String defaultEffortForModel(
   StudioState current,
   String providerId,
@@ -290,17 +274,28 @@ String defaultEffortForModel(
 
 String planFollowUpPrompt(
   PendingInteraction interaction,
-  Map<String, Object?> resolution,
+  InteractionResolutionCommand resolution,
 ) {
-  final content = resolution['content']?.toString().trim() ?? '';
+  final content = resolution is PlanConfirmationResolutionCommand
+      ? resolution.content?.trim() ?? ''
+      : '';
   if (content.isNotEmpty) {
     return content;
   }
-  final reason = resolution['reason']?.toString().trim() ?? '';
+  final reason = resolution is PlanConfirmationResolutionCommand
+      ? resolution.reason?.trim() ?? ''
+      : resolution is ToolApprovalResolutionCommand
+      ? resolution.reason?.trim() ?? ''
+      : '';
   if (reason.isNotEmpty) {
     return reason;
   }
-  return (interaction.payload['content'] ?? interaction.body).toString().trim();
+  return switch (interaction.payload) {
+    PlanConfirmationInteractionPayload(:final content)
+        when content.trim().isNotEmpty =>
+      content.trim(),
+    _ => interaction.body.trim(),
+  };
 }
 
 StudioState _mergeSessionListChanged(

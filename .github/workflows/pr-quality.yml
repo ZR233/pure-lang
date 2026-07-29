@@ -125,5 +125,8 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Install FRB code generator
+        run: cargo install flutter_rust_bridge_codegen --version 2.12.0 --locked
+
       - name: Verify Flutter application
-        run: cargo xtask verify-gui
+        run: cargo xtask verify-gui --integration

@@ -1,38 +1,44 @@
 mod convert;
 pub mod handlers;
 mod runtime;
+pub mod subscription;
 pub mod types;
 
 // Re-exports from submodules
 pub use self::handlers::{
-    BridgeSessionStreamFrame, archive_project, archive_session, bootstrap_studio,
-    check_studio_update, cleanup_project, cleanup_recovery_issue, create_session,
+    BridgeStudioUpdateOperation, archive_project, archive_session, bootstrap_studio,
+    check_studio_update, cleanup_project, cleanup_recovery_issue, create_session, init_app,
     initialize_runtime, install_studio_update, list_discovered_skills, load_provider_catalog,
     load_provider_usages, load_web_search_settings, open_project, preview_project_cleanup,
     preview_recovery_issue_cleanup, resolve_interaction, save_general_settings,
     save_instructions_settings, save_mcp_settings, save_provider_settings,
     save_runtime_permission_mode, save_skills_settings, save_web_search_settings, select_project,
     set_model_role, set_session_mode, shutdown_runtime, start_runtime, stop_prompt, submit_prompt,
-    subscribe_product_events, subscribe_session_events,
+};
+pub use self::subscription::{
+    BridgeEventSubscription, BridgeProductStreamEnvelope, BridgeSessionStreamEnvelope,
+    create_product_subscription, create_session_subscription,
 };
 pub use self::types::{
-    BridgeActiveTurn, BridgeInteractionChangedDto, BridgeInteractionPayloadDto, BridgeLspHealthDto,
-    BridgeMcpHealthDto, BridgeMcpServerDto, BridgeModelCapabilities, BridgeModelCatalogDescriptor,
-    BridgeModelDescriptor, BridgeModelPricing, BridgeModelReasoningDescriptor,
-    BridgeProductEventEnvelope, BridgeProductEventPayload, BridgeProviderCatalogSnapshot,
+    BridgeActiveTurn, BridgeError, BridgeErrorCode, BridgeInteractionChangedDto,
+    BridgeInteractionPayloadDto, BridgeLspHealthDto, BridgeMcpHealthDto, BridgeMcpServerDto,
+    BridgeModelCapabilities, BridgeModelCatalogDescriptor, BridgeModelDescriptor,
+    BridgeModelPricing, BridgeModelReasoningDescriptor, BridgeProductEventEnvelope,
+    BridgeProductEventPayload, BridgeProviderCatalogSnapshot,
     BridgeProviderConnectionModeDescriptor, BridgeProviderPresetDescriptor,
     BridgeProviderServiceCapabilitiesDescriptor, BridgeRecoveryCleanupPreviewDto,
     BridgeRecoveryCleanupResourceDto, BridgeRecoveryIssueAction, BridgeRecoveryIssueCategory,
     BridgeRecoveryIssueScope, BridgeRecoveryResourcePresence, BridgeRuntimeStatus,
-    BridgeStudioRecoveryIssueDto, BridgeStudioSnapshotResponse, BridgeStudioUpdateCheckDto,
-    BridgeStudioUpdateDto, BridgeStudioUpdateEventDto, BridgeUserQuestionDto,
-    BridgeUserQuestionOptionDto, BridgeWebSearchProviderCapabilitiesDescriptor,
-    BridgeWebSearchSettingsDto, ConfigSavedResponse, DeepSeekBalanceDto, DeepSeekBalanceInfoDto,
-    InstructionsSettingsInput, McpServerInput, McpSettingsInput, ProjectDto, ProviderInput,
-    ProviderModelInput, ProviderSettingsInput, ProviderUsageDto, ProviderUsagesResponse,
-    ResolveInteractionResponse, RoleInput, RuntimeSnapshot, SessionDto, SkillSummaryDto,
-    SkillsResponse, SkillsSettingsInput, StopPromptResponse, SubmitPromptResponse,
-    WebSearchSettingsInput, ZhipuCodingPlanUsageDto, ZhipuQuotaLimitDto, ZhipuToolUsageDetailDto,
+    BridgeSessionStreamFrame, BridgeStudioRecoveryIssueDto, BridgeStudioSnapshotResponse,
+    BridgeStudioUpdateCheckDto, BridgeStudioUpdateDto, BridgeStudioUpdateEventDto,
+    BridgeUserQuestionDto, BridgeUserQuestionOptionDto,
+    BridgeWebSearchProviderCapabilitiesDescriptor, BridgeWebSearchSettingsDto, DeepSeekBalanceDto,
+    DeepSeekBalanceInfoDto, GeneralSettingsInput, InstructionsSettingsInput, McpServerInput,
+    McpSettingsInput, ProjectDto, ProviderInput, ProviderModelInput, ProviderSecretInput,
+    ProviderSettingsInput, ProviderUsageDto, ProviderUsagesResponse, ResolveInteractionResponse,
+    RoleInput, RuntimeSnapshot, SessionDto, SkillSummaryDto, SkillsResponse, SkillsSettingsInput,
+    StopPromptResponse, SubmitPromptResponse, WebSearchSettingsInput, ZhipuCodingPlanUsageDto,
+    ZhipuQuotaLimitDto, ZhipuToolUsageDetailDto,
 };
 
 #[cfg(test)]
@@ -41,11 +47,7 @@ mod tests {
     use pl_studio_runtime::StudioProductEventKind;
     use pretty_assertions::assert_eq;
 
-    use super::{
-        BridgeProductEventPayload, BridgeStudioSnapshotResponse, ConfigSavedResponse,
-        ProviderUsagesResponse, ResolveInteractionResponse, SkillsResponse, StopPromptResponse,
-        SubmitPromptResponse,
-    };
+    use super::BridgeProductEventPayload;
 
     #[test]
     fn bridge_product_event_uses_typed_payload() {
@@ -74,45 +76,31 @@ mod tests {
 
     #[test]
     fn archive_project_api_is_exposed_to_flutter() {
-        let _api: fn(String, Option<String>) -> anyhow::Result<BridgeStudioSnapshotResponse> =
-            super::archive_project;
-        let _preview: fn(String) -> anyhow::Result<super::BridgeRecoveryCleanupPreviewDto> =
-            super::preview_project_cleanup;
-        let _cleanup: fn(
-            String,
-            String,
-            Option<String>,
-        ) -> anyhow::Result<BridgeStudioSnapshotResponse> = super::cleanup_project;
+        let _archive = super::archive_project;
+        let _preview = super::preview_project_cleanup;
+        let _cleanup = super::cleanup_project;
     }
 
     #[test]
     fn list_discovered_skills_api_is_exposed_to_flutter() {
-        let _api: fn(String) -> anyhow::Result<SkillsResponse> = super::list_discovered_skills;
+        let _api = super::list_discovered_skills;
     }
 
     #[test]
     fn small_command_responses_are_typed_for_flutter() {
-        let _runtime_permission: fn(String) -> anyhow::Result<ConfigSavedResponse> =
-            super::save_runtime_permission_mode;
-        let _provider_usages: fn() -> anyhow::Result<ProviderUsagesResponse> =
-            super::load_provider_usages;
-        let _submit: fn(String, String, Vec<String>) -> anyhow::Result<SubmitPromptResponse> =
-            super::submit_prompt;
-        let _stop: fn(String) -> anyhow::Result<StopPromptResponse> = super::stop_prompt;
-        let _resolve: fn(String, String) -> anyhow::Result<ResolveInteractionResponse> =
-            super::resolve_interaction;
+        let _runtime_permission = super::save_runtime_permission_mode;
+        let _provider_usages = super::load_provider_usages;
+        let _submit = super::submit_prompt;
+        let _stop = super::stop_prompt;
+        let _resolve = super::resolve_interaction;
     }
 
     #[test]
     fn typed_settings_apis_are_exposed_to_flutter() {
-        let _instructions: fn(String) -> anyhow::Result<BridgeStudioSnapshotResponse> =
-            super::save_instructions_settings;
-        let _skills: fn(String) -> anyhow::Result<BridgeStudioSnapshotResponse> =
-            super::save_skills_settings;
-        let _mcp: fn(String) -> anyhow::Result<BridgeStudioSnapshotResponse> =
-            super::save_mcp_settings;
-        let _general: fn(String) -> anyhow::Result<BridgeStudioSnapshotResponse> =
-            super::save_general_settings;
+        let _instructions = super::save_instructions_settings;
+        let _skills = super::save_skills_settings;
+        let _mcp = super::save_mcp_settings;
+        let _general = super::save_general_settings;
     }
 
     #[test]

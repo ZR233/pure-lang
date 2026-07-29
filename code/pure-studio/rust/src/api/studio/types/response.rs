@@ -145,9 +145,3 @@ pub struct SkillsResponse {
 pub struct SkillSummaryDto {
     pub name: String,
 }
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct ConfigSavedResponse {
-    pub saved: bool,
-}

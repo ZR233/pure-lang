@@ -1,30 +1,59 @@
-part of 'settings_page.dart';
+import 'dart:async';
 
-class _RolesTab extends ConsumerStatefulWidget {
-  const _RolesTab({required this.providers, required this.roles});
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../app/theme/studio_tokens.dart';
+import '../../data/repositories/studio_repository.dart';
+import '../../domain/models/studio_models.dart';
+import '../../l10n/studio_l10n.dart';
+import 'settings_common.dart';
+import 'settings_update_row.dart';
+import 'settings_web_search.dart';
+
+class RolesTab extends ConsumerStatefulWidget {
+  const RolesTab({super.key, required this.providers, required this.roles});
 
   final List<ProviderSettingsView> providers;
   final List<RoleSettingsView> roles;
 
   @override
-  ConsumerState<_RolesTab> createState() => _RolesTabState();
+  ConsumerState<RolesTab> createState() => RolesTabState();
 }
 
-class _RolesTabState extends ConsumerState<_RolesTab> {
+class RolesTabState extends ConsumerState<RolesTab> {
   final Map<String, String> _selectionByRole = {};
+
+  @override
+  void didUpdateWidget(covariant RolesTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final validSelections = _roleModelOptions(
+      widget.providers,
+    ).map((option) => option.key).toSet();
+    final configuredSelections = {
+      for (final role in widget.roles)
+        if (role.providerId.isNotEmpty && role.model.isNotEmpty)
+          role.key: '${role.providerId}::${role.model}',
+    };
+    _selectionByRole.removeWhere(
+      (role, selection) =>
+          !validSelections.contains(selection) ||
+          configuredSelections[role] == selection,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     const roles = ['explorer', 'planner', 'executor', 'reviewer'];
     final options = _roleModelOptions(widget.providers);
-    return _SettingsPane(
+    return SettingsPane(
       children: [
-        _SettingsHeader(
+        SettingsHeader(
           title: context.l10n.settingsRolesTitle,
           subtitle: context.l10n.settingsRolesSubtitle,
         ),
         const SizedBox(height: 16),
-        _SettingsGroup(
+        SettingsGroup(
           children: [
             for (final role in roles)
               _RoleSettingsRow(
@@ -236,20 +265,36 @@ class _RoleModelOption {
   String get key => '$providerId::$model';
 }
 
-class _McpTab extends ConsumerStatefulWidget {
-  const _McpTab({required this.servers});
+class McpTab extends ConsumerStatefulWidget {
+  const McpTab({super.key, required this.servers});
 
   final List<McpServerSettingsView> servers;
 
   @override
-  ConsumerState<_McpTab> createState() => _McpTabState();
+  ConsumerState<McpTab> createState() => McpTabState();
 }
 
-class _McpTabState extends ConsumerState<_McpTab> {
+class McpTabState extends ConsumerState<McpTab> {
   final Map<String, bool> _enabledByServer = {};
   final Map<String, String> _endpointByServer = {};
   Timer? _saveTimer;
   String? _error;
+
+  @override
+  void didUpdateWidget(covariant McpTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final serversById = {
+      for (final server in widget.servers) server.id: server,
+    };
+    _enabledByServer.removeWhere(
+      (id, enabled) =>
+          serversById[id] == null || serversById[id]!.enabled == enabled,
+    );
+    _endpointByServer.removeWhere(
+      (id, endpoint) =>
+          serversById[id] == null || serversById[id]!.endpoint == endpoint,
+    );
+  }
 
   @override
   void dispose() {
@@ -259,15 +304,15 @@ class _McpTabState extends ConsumerState<_McpTab> {
 
   @override
   Widget build(BuildContext context) {
-    return _SettingsPane(
+    return SettingsPane(
       children: [
-        _SettingsHeader(
+        SettingsHeader(
           title: context.l10n.settingsMcpTitle,
           subtitle: context.l10n.settingsMcpSubtitle,
         ),
         const SizedBox(height: 16),
         if (widget.servers.isNotEmpty)
-          _SettingsGroup(
+          SettingsGroup(
             children: [
               for (final server in widget.servers)
                 _McpSettingsRow(
@@ -286,7 +331,7 @@ class _McpTabState extends ConsumerState<_McpTab> {
                 ),
             ],
           ),
-        if (_error != null) _InlineError(message: _error!),
+        if (_error != null) SettingsInlineError(message: _error!),
       ],
     );
   }
@@ -301,19 +346,23 @@ class _McpTabState extends ConsumerState<_McpTab> {
   Future<void> _save() async {
     try {
       setState(() => _error = null);
-      await ref.read(studioControllerProvider.notifier).saveMcpSettings({
-        'servers': [
-          for (final server in widget.servers)
-            {
-              'id': server.id,
-              'enabled': _enabledByServer[server.id] ?? server.enabled,
-              'transport': server.transport,
-              'endpoint': server.hasLockedIdentity
-                  ? server.endpoint
-                  : _endpointByServer[server.id] ?? server.endpoint,
-            },
-        ],
-      });
+      await ref
+          .read(studioControllerProvider.notifier)
+          .saveMcpSettings(
+            McpSettingsCommand(
+              servers: [
+                for (final server in widget.servers)
+                  McpServerCommand(
+                    id: server.id,
+                    enabled: _enabledByServer[server.id] ?? server.enabled,
+                    transport: server.transport,
+                    endpoint: server.hasLockedIdentity
+                        ? server.endpoint
+                        : _endpointByServer[server.id] ?? server.endpoint,
+                  ),
+              ],
+            ),
+          );
     } catch (error) {
       if (mounted) {
         setState(() => _error = error.toString());
@@ -362,8 +411,14 @@ class _McpSettingsRow extends StatelessWidget {
             spacing: 8,
             runSpacing: 6,
             children: [
-              _InfoPill(icon: Icons.hub_outlined, label: server.transport),
-              _InfoPill(icon: Icons.circle_outlined, label: server.status),
+              SettingsInfoPill(
+                icon: Icons.hub_outlined,
+                label: server.transport,
+              ),
+              SettingsInfoPill(
+                icon: Icons.circle_outlined,
+                label: server.status,
+              ),
             ],
           ),
           const SizedBox(height: 9),
@@ -385,22 +440,22 @@ class _McpSettingsRow extends StatelessWidget {
   }
 }
 
-class _SecurityTab extends ConsumerWidget {
-  const _SecurityTab({required this.mode});
+class SecurityTab extends ConsumerWidget {
+  const SecurityTab({super.key, required this.mode});
 
   final PermissionMode mode;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return _SettingsPane(
+    return SettingsPane(
       maxWidth: 620,
       children: [
-        _SettingsHeader(
+        SettingsHeader(
           title: context.l10n.settingsSecurityTitle,
           subtitle: context.l10n.settingsSecurityModeSubtitle,
         ),
         const SizedBox(height: 16),
-        _SettingsGroup(
+        SettingsGroup(
           children: [
             Padding(
               padding: const EdgeInsets.all(14),
@@ -469,8 +524,9 @@ class _SecurityTab extends ConsumerWidget {
   }
 }
 
-class _GeneralTab extends ConsumerStatefulWidget {
-  const _GeneralTab({
+class GeneralTab extends ConsumerStatefulWidget {
+  const GeneralTab({
+    super.key,
     required this.settings,
     required this.webSearch,
     required this.runtimeBusy,
@@ -481,24 +537,24 @@ class _GeneralTab extends ConsumerStatefulWidget {
   final bool runtimeBusy;
 
   @override
-  ConsumerState<_GeneralTab> createState() => _GeneralTabState();
+  ConsumerState<GeneralTab> createState() => GeneralTabState();
 }
 
-class _GeneralTabState extends ConsumerState<_GeneralTab> {
+class GeneralTabState extends ConsumerState<GeneralTab> {
   String? _error;
 
   @override
   Widget build(BuildContext context) {
-    return _SettingsPane(
+    return SettingsPane(
       children: [
-        _SettingsHeader(
+        SettingsHeader(
           title: context.l10n.settingsGeneralTitle,
           subtitle: context.l10n.settingsGeneralSubtitle,
         ),
         const SizedBox(height: 16),
-        _SettingsGroup(
+        SettingsGroup(
           children: [
-            _SettingsToggleRow(
+            SettingsToggleRow(
               icon: Icons.dark_mode_outlined,
               title: context.l10n.settingsFollowSystemTheme,
               subtitle: context.l10n.settingsFollowSystemThemeSubtitle,
@@ -506,7 +562,7 @@ class _GeneralTabState extends ConsumerState<_GeneralTab> {
               onChanged: (value) =>
                   _save(widget.settings.copyWith(followSystemTheme: value)),
             ),
-            _SettingsToggleRow(
+            SettingsToggleRow(
               icon: Icons.vertical_align_bottom,
               title: context.l10n.settingsFollowActiveTurn,
               subtitle: context.l10n.settingsFollowActiveTurnSubtitle,
@@ -514,7 +570,7 @@ class _GeneralTabState extends ConsumerState<_GeneralTab> {
               onChanged: (value) =>
                   _save(widget.settings.copyWith(followActiveTurn: value)),
             ),
-            _SettingsToggleRow(
+            SettingsToggleRow(
               icon: Icons.view_agenda_outlined,
               title: context.l10n.settingsCompactTimeline,
               subtitle: context.l10n.settingsCompactTimelineSubtitle,
@@ -522,11 +578,11 @@ class _GeneralTabState extends ConsumerState<_GeneralTab> {
               onChanged: (value) =>
                   _save(widget.settings.copyWith(compactTimeline: value)),
             ),
-            _WebSearchSettingsCard(settings: widget.webSearch),
-            _StudioUpdateSettingsRow(runtimeBusy: widget.runtimeBusy),
+            WebSearchSettingsCard(settings: widget.webSearch),
+            StudioUpdateSettingsRow(runtimeBusy: widget.runtimeBusy),
           ],
         ),
-        if (_error != null) _InlineError(message: _error!),
+        if (_error != null) SettingsInlineError(message: _error!),
       ],
     );
   }
@@ -534,34 +590,19 @@ class _GeneralTabState extends ConsumerState<_GeneralTab> {
   Future<void> _save(GeneralSettingsView settings) async {
     try {
       setState(() => _error = null);
-      await ref.read(studioControllerProvider.notifier).saveGeneralSettings({
-        'followSystemTheme': settings.followSystemTheme,
-        'followActiveTurn': settings.followActiveTurn,
-        'compactTimeline': settings.compactTimeline,
-      });
+      await ref
+          .read(studioControllerProvider.notifier)
+          .saveGeneralSettings(
+            GeneralSettingsCommand(
+              followSystemTheme: settings.followSystemTheme,
+              followActiveTurn: settings.followActiveTurn,
+              compactTimeline: settings.compactTimeline,
+            ),
+          );
     } catch (error) {
       if (mounted) {
         setState(() => _error = error.toString());
       }
     }
-  }
-}
-
-class _ReadonlyField extends StatelessWidget {
-  const _ReadonlyField({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: TextFormField(
-        initialValue: value,
-        readOnly: true,
-        decoration: InputDecoration(labelText: label),
-      ),
-    );
   }
 }

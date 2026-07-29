@@ -114,11 +114,15 @@ class _TimelineRowBlock extends StatelessWidget {
   const _TimelineRowBlock({
     required this.row,
     required this.isCurrentActivity,
+    required this.isReasoningExpanded,
+    required this.onToggleReasoning,
     super.key,
   });
 
   final TimelineRow row;
   final bool isCurrentActivity;
+  final bool isReasoningExpanded;
+  final ValueChanged<String> onToggleReasoning;
 
   @override
   Widget build(BuildContext context) {
@@ -148,6 +152,8 @@ class _TimelineRowBlock extends StatelessWidget {
                     key: ValueKey(row.id),
                     row: row,
                     isCurrentActivity: isCurrentActivity,
+                    isReasoningExpanded: isReasoningExpanded,
+                    onToggleReasoning: onToggleReasoning,
                   ),
                 ],
               ),
@@ -189,11 +195,15 @@ class _RowCard extends StatelessWidget {
   const _RowCard({
     required this.row,
     required this.isCurrentActivity,
+    required this.isReasoningExpanded,
+    required this.onToggleReasoning,
     super.key,
   });
 
   final TimelineRow row;
   final bool isCurrentActivity;
+  final bool isReasoningExpanded;
+  final ValueChanged<String> onToggleReasoning;
 
   @override
   Widget build(BuildContext context) {
@@ -214,6 +224,8 @@ class _RowCard extends StatelessWidget {
         sessionId: row.sessionId,
         group: row.reasoningGroup!,
         isCurrentActivity: isCurrentActivity,
+        expanded: isReasoningExpanded,
+        onToggle: () => onToggleReasoning(row.reasoningGroup!.id),
       ),
       TimelineRowType.toolGroup => _ToolGroupPart(
         key: ValueKey(row.toolGroup!.id),
@@ -271,31 +283,26 @@ class _MarkdownBubble extends StatelessWidget {
   }
 }
 
-class _ReasoningPart extends ConsumerWidget {
+class _ReasoningPart extends StatelessWidget {
   const _ReasoningPart({
     required this.sessionId,
     required this.group,
     required this.isCurrentActivity,
+    required this.expanded,
+    required this.onToggle,
     super.key,
   });
 
   final String sessionId;
   final TimelineReasoningGroup group;
   final bool isCurrentActivity;
+  final bool expanded;
+  final VoidCallback onToggle;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final expansionKey = _ReasoningExpansionKey(
-      sessionId: sessionId,
-      groupId: group.id,
-    );
-    final expanded = ref.watch(_reasoningExpandedProvider(expansionKey));
+  Widget build(BuildContext context) {
     final label = _reasoningGroupLabel(context, group, isCurrentActivity);
     final details = group.details;
-    void toggleExpanded() {
-      ref.read(_reasoningExpandedProvider(expansionKey).notifier).state =
-          !expanded;
-    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -305,14 +312,14 @@ class _ReasoningPart extends ConsumerWidget {
           button: true,
           expanded: expanded,
           label: label,
-          onTap: toggleExpanded,
+          onTap: onToggle,
           excludeSemantics: true,
           child: Material(
             key: ValueKey('reasoning:$sessionId:${group.id}:$expanded'),
             color: Colors.transparent,
             child: InkWell(
               borderRadius: BorderRadius.circular(StudioRadii.xs),
-              onTap: toggleExpanded,
+              onTap: onToggle,
               excludeFromSemantics: true,
               child: _TimelineActivitySummary(
                 icon: Icons.psychology_alt_outlined,

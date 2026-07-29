@@ -1,17 +1,23 @@
-part of 'settings_page.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-class _WebSearchSettingsCard extends ConsumerStatefulWidget {
-  const _WebSearchSettingsCard({required this.settings});
+import '../../app/theme/studio_tokens.dart';
+import '../../data/repositories/studio_repository.dart';
+import '../../domain/models/studio_models.dart';
+import '../../l10n/studio_l10n.dart';
+import 'settings_common.dart';
+
+class WebSearchSettingsCard extends ConsumerStatefulWidget {
+  const WebSearchSettingsCard({super.key, required this.settings});
 
   final WebSearchSettingsView settings;
 
   @override
-  ConsumerState<_WebSearchSettingsCard> createState() =>
-      _WebSearchSettingsCardState();
+  ConsumerState<WebSearchSettingsCard> createState() =>
+      WebSearchSettingsCardState();
 }
 
-class _WebSearchSettingsCardState
-    extends ConsumerState<_WebSearchSettingsCard> {
+class WebSearchSettingsCardState extends ConsumerState<WebSearchSettingsCard> {
   late String _mode;
   String? _contextSize;
   late final TextEditingController _domainsController;
@@ -37,7 +43,7 @@ class _WebSearchSettingsCardState
   }
 
   @override
-  void didUpdateWidget(covariant _WebSearchSettingsCard oldWidget) {
+  void didUpdateWidget(covariant WebSearchSettingsCard oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (_saving || oldWidget.settings == widget.settings) {
       return;
@@ -247,7 +253,7 @@ class _WebSearchSettingsCardState
               ),
               if (_error != null) ...[
                 const SizedBox(width: 12),
-                Expanded(child: _InlineError(message: _error!)),
+                Expanded(child: SettingsInlineError(message: _error!)),
               ],
             ],
           ),
@@ -265,8 +271,8 @@ class _WebSearchSettingsCardState
       await ref
           .read(studioControllerProvider.notifier)
           .saveWebSearchSettings(
-            widget.settings.withConfiguredValues(
-              configuredMode: _mode,
+            WebSearchSettingsCommand(
+              mode: _mode,
               contextSize: _contextSize,
               allowedDomains: _domainsController.text
                   .split(RegExp(r'[,\n]'))

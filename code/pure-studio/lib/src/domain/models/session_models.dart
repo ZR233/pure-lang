@@ -55,7 +55,8 @@ class StudioSession {
 
   bool get isAgent => sessionKind == StudioSessionKind.agent;
 
-  String get effectiveRootSessionId => rootSessionId.isEmpty ? id : rootSessionId;
+  String get effectiveRootSessionId =>
+      rootSessionId.isEmpty ? id : rootSessionId;
 
   DateTime get effectiveCreatedAt => createdAt ?? updatedAt;
 

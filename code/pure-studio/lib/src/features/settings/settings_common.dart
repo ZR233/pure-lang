@@ -1,7 +1,12 @@
-part of 'settings_page.dart';
+import 'package:flutter/material.dart';
 
-class _SettingsHeader extends StatelessWidget {
-  const _SettingsHeader({
+import '../../app/theme/studio_tokens.dart';
+import '../../domain/models/studio_models.dart';
+import '../../shared/studio_chrome.dart';
+
+class SettingsHeader extends StatelessWidget {
+  const SettingsHeader({
+    super.key,
     required this.title,
     required this.subtitle,
     this.trailing,
@@ -66,8 +71,9 @@ class _SettingsHeader extends StatelessWidget {
   }
 }
 
-class _SectionPanel extends StatelessWidget {
-  const _SectionPanel({
+class SettingsSectionPanel extends StatelessWidget {
+  const SettingsSectionPanel({
+    super.key,
     required this.title,
     required this.children,
     this.trailing,
@@ -108,8 +114,8 @@ class _SectionPanel extends StatelessWidget {
   }
 }
 
-class _SettingsGroup extends StatelessWidget {
-  const _SettingsGroup({required this.children});
+class SettingsGroup extends StatelessWidget {
+  const SettingsGroup({super.key, required this.children});
 
   final List<Widget> children;
 
@@ -132,8 +138,9 @@ class _SettingsGroup extends StatelessWidget {
   }
 }
 
-class _TextEdit extends StatelessWidget {
-  const _TextEdit({
+class SettingsTextEdit extends StatelessWidget {
+  const SettingsTextEdit({
+    super.key,
     required this.label,
     required this.value,
     required this.onChanged,
@@ -175,8 +182,8 @@ class _TextEdit extends StatelessWidget {
   }
 }
 
-class _ResponsiveFieldGrid extends StatelessWidget {
-  const _ResponsiveFieldGrid({required this.children});
+class SettingsResponsiveFieldGrid extends StatelessWidget {
+  const SettingsResponsiveFieldGrid({super.key, required this.children});
 
   final List<Widget> children;
 
@@ -209,8 +216,8 @@ class _ResponsiveFieldGrid extends StatelessWidget {
   }
 }
 
-class _Readout extends StatelessWidget {
-  const _Readout({required this.label, required this.value});
+class SettingsReadout extends StatelessWidget {
+  const SettingsReadout({super.key, required this.label, required this.value});
 
   final String label;
   final String value;
@@ -239,8 +246,8 @@ class _Readout extends StatelessWidget {
   }
 }
 
-class _ProviderStatusChip extends StatelessWidget {
-  const _ProviderStatusChip({required this.provider});
+class SettingsProviderStatusChip extends StatelessWidget {
+  const SettingsProviderStatusChip({super.key, required this.provider});
 
   final ProviderSettingsView provider;
 
@@ -262,8 +269,8 @@ class _ProviderStatusChip extends StatelessWidget {
   }
 }
 
-class _MiniMeta extends StatelessWidget {
-  const _MiniMeta({required this.icon, required this.label});
+class SettingsMiniMeta extends StatelessWidget {
+  const SettingsMiniMeta({super.key, required this.icon, required this.label});
 
   final IconData icon;
   final String label;
@@ -280,8 +287,8 @@ class _MiniMeta extends StatelessWidget {
   }
 }
 
-class _InfoPill extends StatelessWidget {
-  const _InfoPill({required this.icon, required this.label});
+class SettingsInfoPill extends StatelessWidget {
+  const SettingsInfoPill({super.key, required this.icon, required this.label});
 
   final IconData icon;
   final String label;
@@ -298,8 +305,8 @@ class _InfoPill extends StatelessWidget {
   }
 }
 
-class _InlineError extends StatelessWidget {
-  const _InlineError({required this.message});
+class SettingsInlineError extends StatelessWidget {
+  const SettingsInlineError({super.key, required this.message});
 
   final String message;
 
@@ -314,8 +321,12 @@ class _InlineError extends StatelessWidget {
   }
 }
 
-class _SettingsSearchField extends StatelessWidget {
-  const _SettingsSearchField({required this.hintText, required this.onChanged});
+class SettingsSearchField extends StatelessWidget {
+  const SettingsSearchField({
+    super.key,
+    required this.hintText,
+    required this.onChanged,
+  });
 
   final String hintText;
   final ValueChanged<String> onChanged;
@@ -417,8 +428,9 @@ class _SettingsRow extends StatelessWidget {
   }
 }
 
-class _SettingsToggleRow extends StatelessWidget {
-  const _SettingsToggleRow({
+class SettingsToggleRow extends StatelessWidget {
+  const SettingsToggleRow({
+    super.key,
     required this.icon,
     required this.title,
     required this.value,
@@ -444,8 +456,9 @@ class _SettingsToggleRow extends StatelessWidget {
   }
 }
 
-class _EmptySettingsMessage extends StatelessWidget {
-  const _EmptySettingsMessage({
+class SettingsEmptyMessage extends StatelessWidget {
+  const SettingsEmptyMessage({
+    super.key,
     required this.icon,
     required this.title,
     required this.body,
@@ -462,6 +475,50 @@ class _EmptySettingsMessage extends StatelessWidget {
       title: title,
       message: body,
       padding: const EdgeInsets.all(16),
+    );
+  }
+}
+
+class SettingsPane extends StatelessWidget {
+  const SettingsPane({required this.children, this.maxWidth = 980, super.key});
+
+  final List<Widget> children;
+  final double maxWidth;
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: Alignment.topCenter,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: maxWidth),
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(28, 22, 28, 30),
+          children: children,
+        ),
+      ),
+    );
+  }
+}
+
+class SettingsReadonlyField extends StatelessWidget {
+  const SettingsReadonlyField({
+    required this.label,
+    required this.value,
+    super.key,
+  });
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: TextFormField(
+        initialValue: value,
+        readOnly: true,
+        decoration: InputDecoration(labelText: label),
+      ),
     );
   }
 }

@@ -4,6 +4,7 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import '../../../frb_generated.dart';
+import '../types/error.dart';
 import '../types/response.dart';
 import '../types/runtime.dart';
 import '../types/settings.dart';
@@ -21,37 +22,36 @@ Future<BridgeStudioSnapshotResponse> saveWebSearchSettings({
   input: input,
 );
 
-Future<ConfigSavedResponse> saveRuntimePermissionMode({required String mode}) =>
-    RustLib.instance.api
-        .crateApiStudioHandlersSettingsSaveRuntimePermissionMode(mode: mode);
+Future<BridgeStudioSnapshotResponse> saveRuntimePermissionMode({
+  required String mode,
+}) => RustLib.instance.api
+    .crateApiStudioHandlersSettingsSaveRuntimePermissionMode(mode: mode);
 
 Future<BridgeStudioSnapshotResponse> saveProviderSettings({
-  required String settingsJson,
+  required ProviderSettingsInput input,
 }) => RustLib.instance.api.crateApiStudioHandlersSettingsSaveProviderSettings(
-  settingsJson: settingsJson,
+  input: input,
 );
 
 Future<BridgeStudioSnapshotResponse> saveInstructionsSettings({
-  required String settingsJson,
-}) =>
-    RustLib.instance.api.crateApiStudioHandlersSettingsSaveInstructionsSettings(
-      settingsJson: settingsJson,
-    );
+  required InstructionsSettingsInput input,
+}) => RustLib.instance.api
+    .crateApiStudioHandlersSettingsSaveInstructionsSettings(input: input);
 
 Future<BridgeStudioSnapshotResponse> saveSkillsSettings({
-  required String settingsJson,
+  required SkillsSettingsInput input,
 }) => RustLib.instance.api.crateApiStudioHandlersSettingsSaveSkillsSettings(
-  settingsJson: settingsJson,
+  input: input,
 );
 
 Future<BridgeStudioSnapshotResponse> saveMcpSettings({
-  required String settingsJson,
+  required McpSettingsInput input,
 }) => RustLib.instance.api.crateApiStudioHandlersSettingsSaveMcpSettings(
-  settingsJson: settingsJson,
+  input: input,
 );
 
 Future<BridgeStudioSnapshotResponse> saveGeneralSettings({
-  required String settingsJson,
+  required GeneralSettingsInput input,
 }) => RustLib.instance.api.crateApiStudioHandlersSettingsSaveGeneralSettings(
-  settingsJson: settingsJson,
+  input: input,
 );

@@ -13,6 +13,7 @@ import '../../domain/models/studio_models.dart';
 import '../../l10n/app_localizations.dart';
 import '../../l10n/studio_l10n.dart';
 import '../../shared/studio_chrome.dart';
+import '../../shared/studio_driver_keys.dart';
 import '../update/studio_update_controller.dart';
 import '../interaction/composer_dock.dart';
 import '../status/session_status_bar.dart';
@@ -35,41 +36,54 @@ class StudioShell extends ConsumerStatefulWidget {
 class _StudioShellState extends ConsumerState<StudioShell> {
   @override
   Widget build(BuildContext context) {
-    final asyncState = ref.watch(studioControllerProvider);
-    return asyncState.when(
+    final asyncChrome = ref.watch(shellChromeProvider);
+    final asyncSidebar = ref.watch(sidebarProvider);
+    final asyncHeader = ref.watch(studioHeaderProvider);
+    return asyncChrome.when(
       loading: () =>
           const Scaffold(body: Center(child: CircularProgressIndicator())),
       error: (error, stackTrace) => _StudioFatalError(error: error),
-      data: (state) => LayoutBuilder(
-        builder: (context, constraints) {
-          final compact = constraints.maxWidth < StudioLayout.compactBreakpoint;
-          return Scaffold(
-            backgroundColor: context.studioPaper,
-            body: Row(
-              children: [
-                _Sidebar(state: state, compact: compact),
-                VerticalDivider(width: 1, color: context.studioLine),
-                Expanded(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(color: context.studioPaper),
-                    child: Column(
-                      children: [
-                        _Header(state: state),
-                        if (state.applicationRecoveryIssues.isNotEmpty)
-                          _ApplicationRecoveryBanner(
-                            issues: state.applicationRecoveryIssues,
-                          ),
-                        const Divider(height: 1),
-                        const Expanded(child: AgentWorkspacePane()),
-                      ],
+      data: (chrome) {
+        final sidebar = asyncSidebar.value;
+        final header = asyncHeader.value;
+        if (sidebar == null || header == null) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            final compact =
+                constraints.maxWidth < StudioLayout.compactBreakpoint;
+            return Scaffold(
+              key: StudioDriverKeys.shell,
+              backgroundColor: context.studioPaper,
+              body: Row(
+                children: [
+                  _Sidebar(state: sidebar, compact: compact),
+                  VerticalDivider(width: 1, color: context.studioLine),
+                  Expanded(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(color: context.studioPaper),
+                      child: Column(
+                        children: [
+                          _Header(state: header),
+                          if (chrome.applicationRecoveryIssues.isNotEmpty)
+                            _ApplicationRecoveryBanner(
+                              issues: chrome.applicationRecoveryIssues,
+                            ),
+                          const Divider(height: 1),
+                          const Expanded(child: AgentWorkspacePane()),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-              ],
-            ),
-          );
-        },
-      ),
+                ],
+              ),
+            );
+          },
+        );
+      },
     );
   }
 }

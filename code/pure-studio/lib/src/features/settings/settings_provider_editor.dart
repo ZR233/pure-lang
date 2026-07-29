@@ -1,7 +1,17 @@
-part of 'settings_page.dart';
+import 'package:flutter/material.dart';
 
-class _ProviderDetails extends StatelessWidget {
-  const _ProviderDetails({
+import '../../app/theme/studio_tokens.dart';
+import '../../domain/models/studio_models.dart';
+import '../../l10n/studio_l10n.dart';
+import '../../shared/studio_chrome.dart';
+import '../../shared/studio_driver_keys.dart';
+import 'settings_common.dart';
+import 'settings_provider_drafts.dart';
+import 'settings_provider_usage.dart';
+
+class ProviderDetails extends StatelessWidget {
+  const ProviderDetails({
+    super.key,
     required this.provider,
     required this.usage,
     required this.usageLoading,
@@ -38,6 +48,7 @@ class _ProviderDetails extends StatelessWidget {
       );
     }
     return ListView(
+      key: StudioDriverKeys.providerEditor,
       children: [
         Align(
           alignment: Alignment.centerLeft,
@@ -48,17 +59,18 @@ class _ProviderDetails extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 4),
-        _SettingsHeader(
+        SettingsHeader(
           title: provider.name,
           subtitle: provider.baseUrl,
           trailing: FilledButton.tonalIcon(
+            key: StudioDriverKeys.providerEdit,
             icon: const Icon(Icons.edit_outlined),
             label: Text(context.l10n.settingsEdit),
             onPressed: () => onEdit(provider),
           ),
         ),
         const SizedBox(height: 12),
-        _ProviderUsagePanel(
+        ProviderUsagePanel(
           provider: provider,
           usage: usage,
           loading: usageLoading,
@@ -70,30 +82,36 @@ class _ProviderDetails extends StatelessWidget {
           spacing: 8,
           runSpacing: 8,
           children: [
-            _InfoPill(icon: Icons.key_outlined, label: provider.status),
-            _InfoPill(icon: Icons.hub_outlined, label: provider.wireProtocol),
-            _InfoPill(icon: Icons.memory_outlined, label: provider.modelCount),
+            SettingsInfoPill(icon: Icons.key_outlined, label: provider.status),
+            SettingsInfoPill(
+              icon: Icons.hub_outlined,
+              label: provider.wireProtocol,
+            ),
+            SettingsInfoPill(
+              icon: Icons.memory_outlined,
+              label: provider.modelCount,
+            ),
           ],
         ),
         const SizedBox(height: 16),
-        _SectionPanel(
+        SettingsSectionPanel(
           title: context.l10n.settingsProviderTitle,
           children: [
-            _Readout(
+            SettingsReadout(
               label: context.l10n.settingsProviderKey,
               value: provider.id,
             ),
-            _Readout(
+            SettingsReadout(
               label: context.l10n.settingsTemplate,
               value: provider.templateKind.isEmpty
                   ? context.l10n.settingsCustomProvider
                   : provider.templateKind,
             ),
-            _Readout(
+            SettingsReadout(
               label: context.l10n.settingsDefaultModel,
               value: provider.defaultModel,
             ),
-            _Readout(
+            SettingsReadout(
               label: context.l10n.settingsApiKey,
               value: provider.hasBearerToken
                   ? context.l10n.settingsConfigured
@@ -102,7 +120,7 @@ class _ProviderDetails extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 12),
-        _SectionPanel(
+        SettingsSectionPanel(
           title: context.l10n.settingsProviderModelsTitle,
           children: [
             for (final model in provider.allModels)
@@ -114,8 +132,9 @@ class _ProviderDetails extends StatelessWidget {
   }
 }
 
-class _ProviderEditor extends StatelessWidget {
-  const _ProviderEditor({
+class ProviderEditor extends StatelessWidget {
+  const ProviderEditor({
+    super.key,
     required this.draft,
     required this.presets,
     required this.saving,
@@ -129,7 +148,7 @@ class _ProviderEditor extends StatelessWidget {
     required this.onRemoveCustomModel,
   });
 
-  final _ProviderDraft draft;
+  final ProviderDraft draft;
   final List<ProviderPresetView> presets;
   final bool saving;
   final String? error;
@@ -172,8 +191,8 @@ class _ProviderEditor extends StatelessWidget {
     }.toList();
     return ListView(
       children: [
-        _SettingsHeader(
-          title: draft.mode == _ProviderDraftMode.create
+        SettingsHeader(
+          title: draft.mode == ProviderDraftMode.create
               ? context.l10n.settingsNewProvider
               : provider.name,
           subtitle: provider.baseUrl,
@@ -181,11 +200,13 @@ class _ProviderEditor extends StatelessWidget {
             spacing: 8,
             children: [
               OutlinedButton.icon(
+                key: StudioDriverKeys.providerCancel,
                 icon: const Icon(Icons.close),
                 label: Text(context.l10n.settingsCancel),
                 onPressed: saving ? null : onCancel,
               ),
               FilledButton.icon(
+                key: StudioDriverKeys.providerSave,
                 icon: const Icon(Icons.save_outlined),
                 label: Text(context.l10n.settingsSave),
                 onPressed: saving ? null : onSave,
@@ -195,15 +216,15 @@ class _ProviderEditor extends StatelessWidget {
         ),
         if (error != null) ...[
           const SizedBox(height: 12),
-          _InlineError(message: error!),
+          SettingsInlineError(message: error!),
         ],
         const SizedBox(height: 12),
-        _SectionPanel(
+        SettingsSectionPanel(
           title: context.l10n.settingsProviderConnectionTitle,
           children: [
-            _ResponsiveFieldGrid(
+            SettingsResponsiveFieldGrid(
               children: [
-                _TextEdit(
+                SettingsTextEdit(
                   label: context.l10n.settingsProviderKey,
                   value: provider.id,
                   enabled: !saving,
@@ -234,7 +255,7 @@ class _ProviderEditor extends StatelessWidget {
                           }
                         },
                 ),
-                _TextEdit(
+                SettingsTextEdit(
                   label: context.l10n.settingsDisplayName,
                   value: provider.name,
                   enabled: !saving,
@@ -280,7 +301,7 @@ class _ProviderEditor extends StatelessWidget {
                           },
                   )
                 else
-                  _ReadonlyField(
+                  SettingsReadonlyField(
                     label: context.l10n.settingsProtocolType,
                     value: provider.wireProtocol,
                   ),
@@ -318,7 +339,7 @@ class _ProviderEditor extends StatelessWidget {
               ),
               const SizedBox(height: 10),
             ],
-            _TextEdit(
+            SettingsTextEdit(
               label: context.l10n.settingsBaseUrl,
               value: provider.baseUrl,
               enabled: !saving,
@@ -326,7 +347,7 @@ class _ProviderEditor extends StatelessWidget {
                   onUpdate((item) => item.copyWith(baseUrl: value)),
             ),
             const SizedBox(height: 10),
-            _TextEdit(
+            SettingsTextEdit(
               label: provider.hasBearerToken
                   ? context.l10n.settingsApiKeyKeepCurrent
                   : provider.credentialLabel,
@@ -370,7 +391,7 @@ class _ProviderEditor extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 12),
-        _SectionPanel(
+        SettingsSectionPanel(
           title: 'Service capabilities',
           children: [
             DropdownButtonFormField<String>(
@@ -406,7 +427,7 @@ class _ProviderEditor extends StatelessWidget {
             ),
             const SizedBox(height: 10),
             if (provider.capabilitySource == 'explicit')
-              _ResponsiveFieldGrid(
+              SettingsResponsiveFieldGrid(
                 children: [
                   DropdownButtonFormField<bool>(
                     initialValue: provider.hostedWebSearch,
@@ -450,11 +471,11 @@ class _ProviderEditor extends StatelessWidget {
                 ],
               )
             else ...[
-              _ReadonlyField(
+              SettingsReadonlyField(
                 label: 'Hosted Web Search',
                 value: provider.hostedWebSearch ? 'Enabled' : 'Disabled',
               ),
-              _ReadonlyField(
+              SettingsReadonlyField(
                 label: 'Standalone Web Search',
                 value: provider.standaloneWebSearch.isEmpty
                     ? 'Disabled'
@@ -464,7 +485,7 @@ class _ProviderEditor extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 12),
-        _SectionPanel(
+        SettingsSectionPanel(
           title: context.l10n.settingsProviderDefaultModelsTitle,
           trailing: Text(
             context.l10n.settingsBundledModels(provider.defaultModels.length),
@@ -475,7 +496,7 @@ class _ProviderEditor extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 12),
-        _SectionPanel(
+        SettingsSectionPanel(
           title: context.l10n.settingsProviderCustomModelsTitle,
           trailing: OutlinedButton.icon(
             icon: const Icon(Icons.add),
@@ -534,7 +555,7 @@ class _CustomModelEditor extends StatelessWidget {
               Row(
                 children: [
                   Expanded(
-                    child: _TextEdit(
+                    child: SettingsTextEdit(
                       label: context.l10n.settingsModelSlug,
                       value: model.slug,
                       enabled: enabled,
@@ -544,7 +565,7 @@ class _CustomModelEditor extends StatelessWidget {
                   ),
                   const SizedBox(width: 10),
                   Expanded(
-                    child: _TextEdit(
+                    child: SettingsTextEdit(
                       label: context.l10n.settingsDisplayName,
                       value: model.displayName,
                       enabled: enabled,
@@ -561,7 +582,7 @@ class _CustomModelEditor extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 10),
-              _TextEdit(
+              SettingsTextEdit(
                 label: context.l10n.settingsReasoningEfforts,
                 value: model.reasoningEfforts.join(', '),
                 enabled: enabled,
@@ -591,7 +612,7 @@ class _ModelReadout extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final price = _modelPriceLabel(model);
+    final price = providerModelPriceLabel(model);
     final traits = [...model.modalities, ...model.capabilities];
     final row = Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),

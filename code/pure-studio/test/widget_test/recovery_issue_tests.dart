@@ -281,7 +281,8 @@ void registerRecoveryIssueTests() {
       await tester.tap(cleanupButton);
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('project-cleanup-confirm')));
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
 
       expect(api.cleanedProjectId, 'project-a');
       expect(api.projectCleanupExpectedRevision, 'project-revision-1');

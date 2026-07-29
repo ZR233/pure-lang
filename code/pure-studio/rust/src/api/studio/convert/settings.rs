@@ -1,7 +1,7 @@
 use crate::api::studio::types::{
     DeepSeekBalanceDto, DeepSeekBalanceInfoDto, ProviderInput, ProviderModelInput,
-    ProviderSettingsInput, ProviderUsageDto, RoleInput, ZhipuCodingPlanUsageDto,
-    ZhipuQuotaLimitDto, ZhipuToolUsageDetailDto,
+    ProviderSecretInput, ProviderSettingsInput, ProviderUsageDto, RoleInput,
+    ZhipuCodingPlanUsageDto, ZhipuQuotaLimitDto, ZhipuToolUsageDetailDto,
 };
 use anyhow::{Context, Result};
 use pl_studio_runtime::{
@@ -241,10 +241,16 @@ fn provider_edit(
         .providers
         .get(&pl_studio_runtime::ProviderId::new(current_id)?)
         .and_then(|provider| provider.bearer_token.clone());
-    let bearer_token = if input.bearer_token.trim().is_empty() {
-        current_token
-    } else {
-        Some(input.bearer_token)
+    let bearer_token = match input.secret {
+        ProviderSecretInput::Preserve => current_token,
+        ProviderSecretInput::Replace { value } => {
+            let value = value.trim();
+            if value.is_empty() {
+                anyhow::bail!("replacement provider credential cannot be empty");
+            }
+            Some(value.to_string())
+        }
+        ProviderSecretInput::Clear => None,
     };
     let capabilities = match input.capability_source.as_str() {
         "preset_defaults" if preset.is_some() => ProviderCapabilitySelection::PresetDefaults,
@@ -444,7 +450,7 @@ mod tests {
                 connection_mode: "web_socket".to_string(),
                 name: "OpenAI Team".to_string(),
                 base_url: "https://api.openai.com/v1".to_string(),
-                bearer_token: String::new(),
+                secret: ProviderSecretInput::Preserve,
                 capability_source: "preset_defaults".to_string(),
                 hosted_web_search: true,
                 standalone_web_search: Some("open_ai_search_api".to_string()),

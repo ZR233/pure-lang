@@ -12,6 +12,8 @@ pub enum StudioUpdateErrorCode {
     SignatureInvalid,
     RuntimeBusy,
     InstallInProgress,
+    Cancelled,
+    CancellationTooLate,
     InstallerLaunchFailed,
     Io,
 }
@@ -28,6 +30,8 @@ impl StudioUpdateErrorCode {
             Self::SignatureInvalid => "signatureInvalid",
             Self::RuntimeBusy => "runtimeBusy",
             Self::InstallInProgress => "installInProgress",
+            Self::Cancelled => "cancelled",
+            Self::CancellationTooLate => "cancellationTooLate",
             Self::InstallerLaunchFailed => "installerLaunchFailed",
             Self::Io => "io",
         }

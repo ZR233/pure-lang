@@ -17,18 +17,18 @@ class _AgentWorkspacePaneState extends ConsumerState<AgentWorkspacePane> {
 
   @override
   Widget build(BuildContext context) {
-    final asyncWorkspace = ref.watch(selectedAgentWorkspaceProvider);
-    return asyncWorkspace.when(
+    final asyncLayout = ref.watch(selectedWorkspaceLayoutProvider);
+    return asyncLayout.when(
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (error, stackTrace) => Center(child: Text(error.toString())),
-      data: (workspace) {
-        if (workspace == null) {
+      data: (layout) {
+        if (layout == null) {
           return const SizedBox.shrink();
         }
         return LayoutBuilder(
           builder: (context, constraints) {
-            final todo = workspace.todo;
-            final sessionId = workspace.sessionId;
+            final todo = layout.todo;
+            final sessionId = layout.sessionId;
             final todoInDrawer =
                 constraints.maxWidth < _todoPanelWidth + _minimumTimelineWidth;
             final todoExpanded = _todoExpandedBySession[sessionId] ?? false;
@@ -37,7 +37,10 @@ class _AgentWorkspacePaneState extends ConsumerState<AgentWorkspacePane> {
                 _todoAutoOpened.add(sessionId)) {
               WidgetsBinding.instance.addPostFrameCallback((_) {
                 if (!mounted ||
-                    ref.read(selectedAgentWorkspaceProvider).value?.sessionId !=
+                    ref
+                            .read(selectedWorkspaceLayoutProvider)
+                            .value
+                            ?.sessionId !=
                         sessionId) {
                   return;
                 }
@@ -74,15 +77,9 @@ class _AgentWorkspacePaneState extends ConsumerState<AgentWorkspacePane> {
                           child: Stack(
                             children: [
                               Positioned.fill(
-                                child: TimelineView(
-                                  sessionId: workspace.sessionId,
-                                  rows: workspace.isLoading
-                                      ? const []
-                                      : workspace.timelineRows,
-                                  turnPhase: workspace.turnPhase,
-                                ),
+                                child: _AgentTimelineHost(sessionId: sessionId),
                               ),
-                              if (workspace.isLoading)
+                              if (layout.isLoading)
                                 const Positioned.fill(
                                   child: ColoredBox(
                                     key: ValueKey('agent-workspace-loading'),
@@ -107,7 +104,6 @@ class _AgentWorkspacePaneState extends ConsumerState<AgentWorkspacePane> {
                     ),
                   ),
                   _Footer(
-                    workspace: workspace,
                     showTodo: todo != null,
                     todoExpanded: todoExpanded,
                     onToggleTodo: todo == null
@@ -127,6 +123,31 @@ class _AgentWorkspacePaneState extends ConsumerState<AgentWorkspacePane> {
               ),
             );
           },
+        );
+      },
+    );
+  }
+}
+
+class _AgentTimelineHost extends ConsumerWidget {
+  const _AgentTimelineHost({required this.sessionId});
+
+  final String sessionId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final asyncTimeline = ref.watch(agentTimelineProvider(sessionId));
+    return asyncTimeline.when(
+      loading: () => const SizedBox.shrink(),
+      error: (error, stackTrace) => Center(child: Text(error.toString())),
+      data: (timeline) {
+        if (timeline == null) {
+          return const SizedBox.shrink();
+        }
+        return TimelineView(
+          sessionId: sessionId,
+          rows: timeline.isLoading ? const [] : timeline.rows,
+          turnPhase: timeline.turnPhase,
         );
       },
     );

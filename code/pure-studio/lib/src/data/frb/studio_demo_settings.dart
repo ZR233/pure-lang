@@ -55,40 +55,47 @@ ProviderUsageView _demoProviderUsage(ProviderSettingsView provider) {
   );
 }
 
-List<ProviderSettingsView> _providersFromSettingsPayload(
-  Map<String, Object?> settings, {
+List<ProviderSettingsView> _providersFromSettingsCommand(
+  ProviderSettingsCommand command, {
   List<ProviderSettingsView> previous = const [],
   required ProviderCatalogView catalog,
 }) {
-  return _list(settings['providers']).map((value) {
-    final provider = _map(value);
-    final customModels = _list(provider['customModels'])
-        .map(_providerSettingsModelFromJson)
+  return command.providers.map((provider) {
+    final customModels = provider.customModels
+        .map(
+          (model) => ProviderModelView(
+            slug: model.slug,
+            displayName: model.displayName,
+            reasoningEfforts: model.reasoningEfforts,
+            baseInstructions: model.baseInstructions ?? '',
+          ),
+        )
         .where((model) => model.slug.isNotEmpty)
         .toList();
     final template =
-        catalog.preset(_string(provider['templateKind'])) ??
-        catalog.presets.first;
+        catalog.preset(provider.templateKind) ?? catalog.presets.first;
     final defaultModels = catalog.modelsFor(template.modelCatalogId);
     final models = [...defaultModels, ...customModels];
-    final token = _string(provider['bearerToken']);
     final previousProvider = previous
-        .where((item) => item.id == _string(provider['id']))
+        .where((item) => item.id == (provider.originalId ?? provider.id))
         .firstOrNull;
-    final hasToken =
-        token.trim().isNotEmpty || (previousProvider?.hasBearerToken ?? false);
+    final hasToken = switch (provider.secret.action) {
+      ProviderSecretAction.preserve =>
+        previousProvider?.hasBearerToken ?? false,
+      ProviderSecretAction.replace => true,
+      ProviderSecretAction.clear => false,
+    };
     return ProviderSettingsView(
-      id: _string(provider['id']),
+      id: provider.id,
       templateKind: template.id,
-      name: _string(provider['name'], fallback: template.displayName),
-      subtitle: _string(provider['name'], fallback: template.displayName),
-      baseUrl: _string(provider['baseUrl'], fallback: template.baseUrl),
+      name: provider.name.isEmpty ? template.displayName : provider.name,
+      subtitle: provider.name.isEmpty ? template.displayName : provider.name,
+      baseUrl: provider.baseUrl.isEmpty ? template.baseUrl : provider.baseUrl,
       bearerToken: '',
       hasBearerToken: hasToken,
-      defaultModel: _string(
-        provider['defaultModel'],
-        fallback: template.suggestedModel,
-      ),
+      defaultModel: provider.defaultModel.isEmpty
+          ? template.suggestedModel
+          : provider.defaultModel,
       models: models,
       defaultModels: defaultModels,
       customModels: customModels,
@@ -97,78 +104,57 @@ List<ProviderSettingsView> _providersFromSettingsPayload(
       modelCount: '${models.length}',
       updatedAt: 'Preview',
       wireProtocol: template.wireProtocol,
-      connectionMode: _string(
-        provider['connectionMode'],
-        fallback: template.defaultConnectionMode,
-      ),
+      connectionMode: provider.connectionMode.isEmpty
+          ? template.defaultConnectionMode
+          : provider.connectionMode,
       catalogId: template.modelCatalogId,
       credentialLabel: template.credentialLabel,
       credentialEnv: template.credentialEnv,
-      capabilitySource: _string(
-        provider['capabilitySource'],
-        fallback: 'preset_defaults',
-      ),
-      hostedWebSearch: _boolWithDefault(
-        provider['hostedWebSearch'],
-        template.hostedWebSearch,
-      ),
-      standaloneWebSearch: _string(
-        provider['standaloneWebSearch'],
-        fallback: template.standaloneWebSearch,
-      ),
+      capabilitySource: provider.capabilitySource.isEmpty
+          ? 'preset_defaults'
+          : provider.capabilitySource,
+      hostedWebSearch: provider.hostedWebSearch,
+      standaloneWebSearch:
+          provider.standaloneWebSearch ?? template.standaloneWebSearch,
       iconKey: template.iconKey,
     );
   }).toList();
 }
 
-ProviderModelView _providerSettingsModelFromJson(Object? value) {
-  final model = _map(value);
-  final slug = _string(model['slug']);
-  return ProviderModelView(
-    slug: slug,
-    displayName: _string(model['displayName'], fallback: slug),
-    reasoningEfforts: _stringList(model['reasoningEfforts']),
-    baseInstructions: _string(model['baseInstructions']),
-  );
-}
-
-List<RoleSettingsView> _rolesFromSettingsPayload(
-  Map<String, Object?> settings,
+List<RoleSettingsView> _rolesFromSettingsCommand(
+  ProviderSettingsCommand command,
 ) {
-  return _list(settings['roles']).map((value) {
-    final role = _map(value);
+  return command.roles.map((role) {
     return RoleSettingsView(
-      key: _string(role['key']),
-      providerId: _string(role['provider']),
-      model: _string(role['model']),
-      effort: _string(role['effort']),
+      key: role.key,
+      providerId: role.providerId,
+      model: role.model,
+      effort: role.effort,
     );
   }).toList();
 }
 
-InstructionsSettingsView _instructionsFromSettingsPayload(
-  Map<String, Object?> settings,
+InstructionsSettingsView _instructionsFromSettingsCommand(
+  InstructionsSettingsCommand command,
 ) {
   return InstructionsSettingsView(
-    baseOverride: _string(settings['baseOverride']),
-    developer: _string(settings['developer']),
-    user: _string(settings['user']),
-    projectDocMaxBytes: _int(settings['projectDocMaxBytes'], fallback: 65536),
-    projectDocFallbackFilenames: _stringList(
-      settings['projectDocFallbackFilenames'],
-    ),
+    baseOverride: command.baseOverride,
+    developer: command.developer,
+    user: command.user,
+    projectDocMaxBytes: command.projectDocMaxBytes,
+    projectDocFallbackFilenames: command.projectDocFallbackFilenames,
   );
 }
 
-SkillsSettingsView _skillsFromSettingsPayload(Map<String, Object?> settings) {
+SkillsSettingsView _skillsFromSettingsCommand(SkillsSettingsCommand command) {
   return SkillsSettingsView(
-    enabled: _boolWithDefault(settings['enabled'], true),
-    autoLearn: _boolWithDefault(settings['autoLearn'], true),
-    systemEnabled: _boolWithDefault(settings['systemEnabled'], true),
-    projectDir: _string(settings['projectDir'], fallback: 'skills'),
-    userDir: _string(settings['userDir'], fallback: '~/.pure/skills'),
-    externalDirs: _stringList(settings['externalDirs']),
-    disabled: _stringList(settings['disabled']),
-    autoLearnMinToolCalls: _int(settings['autoLearnMinToolCalls'], fallback: 5),
+    enabled: command.enabled,
+    autoLearn: command.autoLearn,
+    systemEnabled: command.systemEnabled,
+    projectDir: command.projectDir,
+    userDir: command.userDir,
+    externalDirs: command.externalDirs,
+    disabled: command.disabled,
+    autoLearnMinToolCalls: command.autoLearnMinToolCalls,
   );
 }

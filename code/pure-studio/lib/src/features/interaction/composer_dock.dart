@@ -6,6 +6,7 @@ import '../../data/repositories/studio_repository.dart';
 import '../../domain/models/studio_models.dart';
 import '../../l10n/studio_l10n.dart';
 import '../../shared/studio_chrome.dart';
+import '../../shared/studio_driver_keys.dart';
 import '../../shared/upward_popup_menu.dart';
 import 'interaction_payload.dart';
 import 'plan_confirmation_dock.dart';
@@ -132,6 +133,7 @@ class _PromptComposerState extends ConsumerState<_PromptComposer> {
         mainAxisSize: MainAxisSize.min,
         children: [
           TextField(
+            key: StudioDriverKeys.composerInput,
             controller: _controller,
             minLines: 1,
             maxLines: 6,
@@ -166,6 +168,7 @@ class _PromptComposerState extends ConsumerState<_PromptComposer> {
               const Spacer(),
               if (widget.workspace.isBusy)
                 IconButton.filledTonal(
+                  key: StudioDriverKeys.composerStop,
                   tooltip: context.l10n.composerStop,
                   icon: const Icon(Icons.stop),
                   onPressed: () => ref
@@ -174,6 +177,7 @@ class _PromptComposerState extends ConsumerState<_PromptComposer> {
                 )
               else
                 IconButton.filled(
+                  key: StudioDriverKeys.composerSubmit,
                   tooltip: context.l10n.composerSend,
                   style: IconButton.styleFrom(
                     backgroundColor: StudioColors.clay,

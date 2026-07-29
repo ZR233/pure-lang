@@ -1,15 +1,25 @@
-part of 'settings_page.dart';
+import 'dart:async';
 
-class _InstructionsTab extends ConsumerStatefulWidget {
-  const _InstructionsTab({required this.settings});
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../app/theme/studio_tokens.dart';
+import '../../data/repositories/studio_repository.dart';
+import '../../domain/models/studio_models.dart';
+import '../../l10n/studio_l10n.dart';
+import '../../shared/studio_chrome.dart';
+import 'settings_common.dart';
+
+class InstructionsTab extends ConsumerStatefulWidget {
+  const InstructionsTab({super.key, required this.settings});
 
   final InstructionsSettingsView settings;
 
   @override
-  ConsumerState<_InstructionsTab> createState() => _InstructionsTabState();
+  ConsumerState<InstructionsTab> createState() => InstructionsTabState();
 }
 
-class _InstructionsTabState extends ConsumerState<_InstructionsTab> {
+class InstructionsTabState extends ConsumerState<InstructionsTab> {
   late final TextEditingController _baseController;
   late final TextEditingController _developerController;
   late final TextEditingController _userController;
@@ -28,7 +38,7 @@ class _InstructionsTabState extends ConsumerState<_InstructionsTab> {
   }
 
   @override
-  void didUpdateWidget(covariant _InstructionsTab oldWidget) {
+  void didUpdateWidget(covariant InstructionsTab oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (_saving) {
       return;
@@ -58,9 +68,9 @@ class _InstructionsTabState extends ConsumerState<_InstructionsTab> {
 
   @override
   Widget build(BuildContext context) {
-    return _SettingsPane(
+    return SettingsPane(
       children: [
-        _SettingsHeader(
+        SettingsHeader(
           title: context.l10n.settingsInstructionsTitle,
           subtitle: context.l10n.settingsInstructionsSubtitle,
         ),
@@ -88,7 +98,7 @@ class _InstructionsTabState extends ConsumerState<_InstructionsTab> {
         if (_saving || _error != null) ...[
           const SizedBox(height: 12),
           if (_saving) const LinearProgressIndicator(),
-          if (_error != null) _InlineError(message: _error!),
+          if (_error != null) SettingsInlineError(message: _error!),
         ],
       ],
     );
@@ -109,14 +119,16 @@ class _InstructionsTabState extends ConsumerState<_InstructionsTab> {
     try {
       await ref
           .read(studioControllerProvider.notifier)
-          .saveInstructionsSettings({
-            'baseOverride': _baseController.text,
-            'developer': _developerController.text,
-            'user': _userController.text,
-            'projectDocMaxBytes': widget.settings.projectDocMaxBytes,
-            'projectDocFallbackFilenames':
-                widget.settings.projectDocFallbackFilenames,
-          });
+          .saveInstructionsSettings(
+            InstructionsSettingsCommand(
+              baseOverride: _baseController.text,
+              developer: _developerController.text,
+              user: _userController.text,
+              projectDocMaxBytes: widget.settings.projectDocMaxBytes,
+              projectDocFallbackFilenames:
+                  widget.settings.projectDocFallbackFilenames,
+            ),
+          );
     } catch (error) {
       if (mounted) {
         setState(() => _error = error.toString());
@@ -201,8 +213,9 @@ class _InstructionEditor extends StatelessWidget {
   }
 }
 
-class _SkillsTab extends ConsumerStatefulWidget {
-  const _SkillsTab({
+class SkillsTab extends ConsumerStatefulWidget {
+  const SkillsTab({
+    super.key,
     required this.skills,
     required this.settings,
     required this.projectId,
@@ -213,10 +226,10 @@ class _SkillsTab extends ConsumerStatefulWidget {
   final String? projectId;
 
   @override
-  ConsumerState<_SkillsTab> createState() => _SkillsTabState();
+  ConsumerState<SkillsTab> createState() => SkillsTabState();
 }
 
-class _SkillsTabState extends ConsumerState<_SkillsTab> {
+class SkillsTabState extends ConsumerState<SkillsTab> {
   String _query = '';
   final Set<String> _discoveredSkills = {};
   bool _discovering = false;
@@ -230,7 +243,7 @@ class _SkillsTabState extends ConsumerState<_SkillsTab> {
   }
 
   @override
-  void didUpdateWidget(covariant _SkillsTab oldWidget) {
+  void didUpdateWidget(covariant SkillsTab oldWidget) {
     super.didUpdateWidget(oldWidget);
     _discoveredSkills.addAll(widget.skills);
   }
@@ -242,9 +255,9 @@ class _SkillsTabState extends ConsumerState<_SkillsTab> {
     final filteredSkills = skills
         .where((skill) => skill.toLowerCase().contains(_query.toLowerCase()))
         .toList();
-    return _SettingsPane(
+    return SettingsPane(
       children: [
-        _SettingsHeader(
+        SettingsHeader(
           title: context.l10n.settingsSkillsTitle,
           subtitle: context.l10n.settingsSkillsSubtitle,
           trailing: FilledButton.icon(
@@ -265,16 +278,16 @@ class _SkillsTabState extends ConsumerState<_SkillsTab> {
           ),
         ),
         const SizedBox(height: 16),
-        _SettingsSearchField(
+        SettingsSearchField(
           hintText: context.l10n.settingsFilterSkills,
           onChanged: (value) => setState(() => _query = value),
         ),
         const SizedBox(height: 14),
         if (filteredSkills.isNotEmpty)
-          _SettingsGroup(
+          SettingsGroup(
             children: [
               for (final skill in filteredSkills)
-                _SettingsToggleRow(
+                SettingsToggleRow(
                   icon: Icons.extension_outlined,
                   title: skill,
                   subtitle: disabledSkills.contains(skill)
@@ -295,7 +308,7 @@ class _SkillsTabState extends ConsumerState<_SkillsTab> {
           ),
         if (filteredSkills.isEmpty) ...[
           const SizedBox(height: 12),
-          _EmptySettingsMessage(
+          SettingsEmptyMessage(
             icon: Icons.extension_outlined,
             title: widget.projectId == null
                 ? context.l10n.settingsOpenProjectToDiscoverSkills
@@ -307,11 +320,11 @@ class _SkillsTabState extends ConsumerState<_SkillsTab> {
         ],
         if (_discoverError != null) ...[
           const SizedBox(height: 12),
-          _InlineError(message: _discoverError!),
+          SettingsInlineError(message: _discoverError!),
         ],
         if (_saveError != null) ...[
           const SizedBox(height: 12),
-          _InlineError(message: _saveError!),
+          SettingsInlineError(message: _saveError!),
         ],
       ],
     );
@@ -320,16 +333,20 @@ class _SkillsTabState extends ConsumerState<_SkillsTab> {
   Future<void> _saveDisabled(Set<String> disabled) async {
     try {
       setState(() => _saveError = null);
-      await ref.read(studioControllerProvider.notifier).saveSkillsSettings({
-        'enabled': widget.settings.enabled,
-        'autoLearn': widget.settings.autoLearn,
-        'systemEnabled': widget.settings.systemEnabled,
-        'projectDir': widget.settings.projectDir,
-        'userDir': widget.settings.userDir,
-        'externalDirs': widget.settings.externalDirs,
-        'disabled': disabled.toList()..sort(),
-        'autoLearnMinToolCalls': widget.settings.autoLearnMinToolCalls,
-      });
+      await ref
+          .read(studioControllerProvider.notifier)
+          .saveSkillsSettings(
+            SkillsSettingsCommand(
+              enabled: widget.settings.enabled,
+              autoLearn: widget.settings.autoLearn,
+              systemEnabled: widget.settings.systemEnabled,
+              projectDir: widget.settings.projectDir,
+              userDir: widget.settings.userDir,
+              externalDirs: widget.settings.externalDirs,
+              disabled: disabled.toList()..sort(),
+              autoLearnMinToolCalls: widget.settings.autoLearnMinToolCalls,
+            ),
+          );
     } catch (error) {
       if (mounted) {
         setState(() => _saveError = error.toString());

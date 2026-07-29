@@ -150,6 +150,21 @@ FRB stream 的 `onError`、`onDone`、lagged 与 `ResyncRequired` 使用同一�
 建立无 cursor subscription 并先请求 authoritative snapshot。旧 generation 的 error/done
 不得影响新 workspace；只有 reconnecting、stale 或 resync 时 UI 才显示 freshness 提示。
 
+Studio session 切换必须按固定顺序执行：
+
+1. flush 当前 pending delta batch；
+2. 增加 generation；
+3. cancel 并 await 旧 opaque subscription；
+4. 创建新 subscription handle；
+5. 应用首个 snapshot 或 resync frame；
+6. 只接收同 generation 的 live event。
+
+FRB stream item 使用 `Data(T)/Failure(BridgeErrorDto)/Closed` typed envelope。可恢复的业务失败
+必须通过 `Failure` 发送稳定 code；只有 FFI transport failure 或 panic 才表现为 Dart stream
+exception。Dart StreamController 的 `onCancel` 负责关闭底层 Dart subscription、await Rust
+handle cancellation 并 dispose opaque handle；Rust handle Drop 与 runtime shutdown 也会触发
+取消，因此静默 session 不会留下永久 task。
+
 ## 8.7 产品事件
 
 session stream 之外保留独立低频 product stream：
@@ -169,9 +184,13 @@ Todo、interaction 内容或 context，也不得再通过单 session 的 `AgentC
 
 Flutter Rust Bridge 与 Mai HTTP SSE 都传输 `SessionStreamFrame`：
 
-- FRB 直接把 canonical Rust 类型机械转换为 Dart DTO。
+- FRB 把 canonical Rust 类型穷尽映射为 bridge-local typed DTO/union，不直接暴露外部 crate
+  类型或 `serde_json::Value`。
 - SSE 首帧为 snapshot 或 replay；只有 durable event 设置 SSE `id`。
 - SSE 重连读取 `Last-Event-ID`；无法 replay 时发送 snapshot。
 - keepalive、HTTP disconnect 或浏览器重连不能改变 PL session event 语义。
 
-HTTP 与 FRB 必须使用同一 canonical JSON fixture 做契约测试。
+SSE 与 FRB 共享 canonical 语义，不要求共享传输实现：SSE 保持 canonical JSON wire，FRB
+使用 generated typed union。HTTP 与 FRB 必须使用同一 canonical fixture 做契约测试；动态
+metadata、tool arguments 和 artifacts 只允许作为命名 `*_json` 叶子跨 FRB，并按 JSON 结构
+相等测试，不依赖 object key 顺序。

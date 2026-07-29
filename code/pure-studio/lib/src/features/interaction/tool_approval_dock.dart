@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/repositories/studio_repository.dart';
+import '../../domain/models/studio_models.dart';
 import '../../l10n/studio_l10n.dart';
+import '../../shared/studio_driver_keys.dart';
 import 'interaction_payload.dart';
 import 'interaction_widgets.dart';
 
@@ -50,14 +52,16 @@ class _ToolApprovalDockState extends ConsumerState<ToolApprovalDock> {
       footer: DockActions(
         children: [
           OutlinedButton.icon(
+            key: StudioDriverKeys.toolDeny,
             icon: const Icon(Icons.close),
             label: Text(context.l10n.interactionReject),
-            onPressed: () => _resolve('denied'),
+            onPressed: () => _resolve(ToolApprovalDecision.denied),
           ),
           FilledButton.icon(
+            key: StudioDriverKeys.toolApprove,
             icon: const Icon(Icons.check),
             label: Text(context.l10n.interactionApprove),
-            onPressed: () => _resolve('approved'),
+            onPressed: () => _resolve(ToolApprovalDecision.approved),
           ),
         ],
       ),
@@ -97,14 +101,16 @@ class _ToolApprovalDockState extends ConsumerState<ToolApprovalDock> {
     );
   }
 
-  void _resolve(String decision) {
+  void _resolve(ToolApprovalDecision decision) {
     final reason = _reasonController.text.trim();
     ref
         .read(studioControllerProvider.notifier)
-        .resolveActiveInteraction(widget.sessionId, {
-          'type': 'toolApproval',
-          'decision': decision,
-          if (reason.isNotEmpty) 'reason': reason,
-        });
+        .resolveActiveInteraction(
+          widget.sessionId,
+          ToolApprovalResolutionCommand(
+            decision: decision,
+            reason: reason.isEmpty ? null : reason,
+          ),
+        );
   }
 }

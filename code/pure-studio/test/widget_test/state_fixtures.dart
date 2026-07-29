@@ -272,7 +272,7 @@ SessionSnapshotFrame _sessionSnapshotFrame(StudioState state) {
   final sessionId = state.selectedSessionId!;
   final runtime = state.runtime;
   return SessionSnapshotFrame(
-    snapshot: {
+    snapshot: StudioSessionSnapshot.fromLegacyJson({
       'schemaVersion': 1,
       'sessionId': sessionId,
       'throughSequence': state.eventCursorsBySession[sessionId] ?? 0,
@@ -339,7 +339,7 @@ SessionSnapshotFrame _sessionSnapshotFrame(StudioState state) {
       },
       'activatedSkills': const <Object?>[],
       'planEvents': const <Object?>[],
-    },
+    }),
   );
 }
 

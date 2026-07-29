@@ -955,21 +955,27 @@ void registerShellSettingsTests() {
     await container.read(studioControllerProvider.future);
     await container
         .read(studioControllerProvider.notifier)
-        .saveProviderSettings({
-          'defaultProviderId': 'deepseek',
-          'providers': [
-            {
-              'id': 'deepseek',
-              'templateKind': 'deepseek',
-              'name': 'DeepSeek',
-              'baseUrl': 'https://api.deepseek.com',
-              'defaultModel': 'deepseek-v4-flash',
-              'models': [
-                {'slug': 'deepseek-v4-flash'},
-              ],
-            },
-          ],
-        });
+        .saveProviderSettings(
+          const ProviderSettingsCommand(
+            defaultProviderId: 'deepseek',
+            providers: [
+              ProviderCommand(
+                id: 'deepseek',
+                templateKind: 'deepseek',
+                wireProtocol: 'chat_completions',
+                connectionMode: 'http',
+                name: 'DeepSeek',
+                baseUrl: 'https://api.deepseek.com',
+                secret: ProviderSecretCommand.preserve(),
+                capabilitySource: 'preset_defaults',
+                hostedWebSearch: false,
+                defaultModel: 'deepseek-v4-flash',
+                customModels: [],
+              ),
+            ],
+            roles: [],
+          ),
+        );
 
     final state = container.read(studioControllerProvider).requireValue;
     expect(state.defaultProviderId, 'deepseek');
@@ -1537,7 +1543,7 @@ void registerShellSettingsTests() {
     await tester.pumpAndSettle();
 
     final saved = api.savedWebSearchSettings;
-    expect(saved?.configuredMode, 'live');
+    expect(saved?.mode, 'live');
     expect(saved?.allowedDomains, ['example.com', 'docs.example.com']);
     expect(saved?.country, 'US');
     expect(saved?.timezone, 'America/New_York');

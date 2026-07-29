@@ -10,16 +10,115 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::Ordering;
+use std::sync::{Arc, Mutex};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc::UnboundedSender;
+use tokio_util::sync::CancellationToken;
 use url::Url;
 
 const MAX_SIGNATURE_BYTES: u64 = 16 * 1024;
+
+#[derive(Clone)]
+pub struct StudioUpdateCancellation {
+    inner: Arc<StudioUpdateCancellationInner>,
+}
+
+struct StudioUpdateCancellationInner {
+    token: CancellationToken,
+    phase: Mutex<StudioUpdateCancellationPhase>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum StudioUpdateCancellationPhase {
+    Downloading,
+    Cancelled,
+    Launching,
+    Finished,
+}
+
+impl StudioUpdateCancellation {
+    pub fn new() -> Self {
+        Self {
+            inner: Arc::new(StudioUpdateCancellationInner {
+                token: CancellationToken::new(),
+                phase: Mutex::new(StudioUpdateCancellationPhase::Downloading),
+            }),
+        }
+    }
+
+    pub fn cancel(&self) -> Result<(), StudioUpdateError> {
+        let mut phase = self
+            .inner
+            .phase
+            .lock()
+            .expect("update cancellation phase lock must not be poisoned");
+        match *phase {
+            StudioUpdateCancellationPhase::Downloading => {
+                *phase = StudioUpdateCancellationPhase::Cancelled;
+                self.inner.token.cancel();
+                Ok(())
+            }
+            StudioUpdateCancellationPhase::Cancelled => Ok(()),
+            StudioUpdateCancellationPhase::Launching | StudioUpdateCancellationPhase::Finished => {
+                Err(StudioUpdateError::new(
+                    StudioUpdateErrorCode::CancellationTooLate,
+                    "the verified installer is already launching",
+                ))
+            }
+        }
+    }
+
+    fn check(&self) -> Result<(), StudioUpdateError> {
+        if self.inner.token.is_cancelled() {
+            return Err(cancelled_error());
+        }
+        Ok(())
+    }
+
+    fn begin_launch(&self) -> Result<(), StudioUpdateError> {
+        let mut phase = self
+            .inner
+            .phase
+            .lock()
+            .expect("update cancellation phase lock must not be poisoned");
+        match *phase {
+            StudioUpdateCancellationPhase::Downloading => {
+                *phase = StudioUpdateCancellationPhase::Launching;
+                Ok(())
+            }
+            StudioUpdateCancellationPhase::Cancelled => Err(cancelled_error()),
+            StudioUpdateCancellationPhase::Launching | StudioUpdateCancellationPhase::Finished => {
+                Err(StudioUpdateError::new(
+                    StudioUpdateErrorCode::CancellationTooLate,
+                    "the verified installer is already launching",
+                ))
+            }
+        }
+    }
+
+    fn finish(&self) {
+        let mut phase = self
+            .inner
+            .phase
+            .lock()
+            .expect("update cancellation phase lock must not be poisoned");
+        if *phase == StudioUpdateCancellationPhase::Launching {
+            *phase = StudioUpdateCancellationPhase::Finished;
+        }
+    }
+}
+
+impl Default for StudioUpdateCancellation {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 pub(super) async fn install_after<F, Fut>(
     updater: &StudioUpdater,
     update: StudioUpdate,
     progress: UnboundedSender<StudioUpdateEvent>,
+    cancellation: StudioUpdateCancellation,
     before_launch: F,
 ) -> Result<(), StudioUpdateError>
 where
@@ -29,12 +128,16 @@ where
     let guard = InstallGuard::acquire(updater)?;
     let result: Result<(), StudioUpdateError> = async {
         validate_update(&update)?;
+        cancellation.check()?;
         let _ = progress.send(StudioUpdateEvent::Started {
             total: update.installer.size,
         });
-        let installer = prepare_installer(updater, &update, &progress).await?;
+        let installer = prepare_installer(updater, &update, &progress, &cancellation).await?;
+        cancellation.check()?;
         before_launch().await?;
+        cancellation.begin_launch()?;
         launch_installer(&installer)?;
+        cancellation.finish();
         let _ = progress.send(StudioUpdateEvent::InstallerLaunched);
         Ok(())
     }
@@ -53,7 +156,9 @@ async fn prepare_installer(
     updater: &StudioUpdater,
     update: &StudioUpdate,
     progress: &UnboundedSender<StudioUpdateEvent>,
+    cancellation: &StudioUpdateCancellation,
 ) -> Result<PathBuf, StudioUpdateError> {
+    cancellation.check()?;
     let version_dir = updater.cache_dir.join(&update.version);
     tokio::fs::create_dir_all(&version_dir)
         .await
@@ -64,7 +169,15 @@ async fn prepare_installer(
 
     if installer.is_file()
         && signature.is_file()
-        && verify_cached(updater, update, &installer, &signature, progress).await?
+        && verify_cached(
+            updater,
+            update,
+            &installer,
+            &signature,
+            progress,
+            cancellation,
+        )
+        .await?
     {
         return Ok(installer);
     }
@@ -77,9 +190,11 @@ async fn prepare_installer(
             format!("invalid signature URL: {error}"),
         )
     })?;
-    let signature_bytes = updater
-        .request_bytes(signature_url, MAX_SIGNATURE_BYTES)
-        .await?;
+    let signature_bytes = tokio::select! {
+        _ = cancellation.inner.token.cancelled() => return Err(cancelled_error()),
+        result = updater.request_bytes(signature_url, MAX_SIGNATURE_BYTES) => result?,
+    };
+    cancellation.check()?;
     let signature_partial = PathBuf::from(format!("{}.partial", signature.display()));
     remove_if_exists(&signature_partial).await?;
     let signature_result = async {
@@ -95,7 +210,8 @@ async fn prepare_installer(
     let partial = PathBuf::from(format!("{}.partial", installer.display()));
     remove_if_exists(&partial).await?;
     let prepare_result = async {
-        download_installer(updater, update, &partial, progress).await?;
+        download_installer(updater, update, &partial, progress, cancellation).await?;
+        cancellation.check()?;
         let _ = progress.send(StudioUpdateEvent::Verifying);
         verify_file(updater.public_key, &signature, &partial).await
     }
@@ -114,7 +230,9 @@ async fn verify_cached(
     installer: &Path,
     signature: &Path,
     progress: &UnboundedSender<StudioUpdateEvent>,
+    cancellation: &StudioUpdateCancellation,
 ) -> Result<bool, StudioUpdateError> {
+    cancellation.check()?;
     if tokio::fs::metadata(installer)
         .await
         .map_err(io_error)?
@@ -124,6 +242,7 @@ async fn verify_cached(
         return Ok(false);
     }
     let actual_hash = hash_file(installer).await?;
+    cancellation.check()?;
     if actual_hash != update.installer.sha256 {
         return Ok(false);
     }
@@ -139,6 +258,7 @@ async fn download_installer(
     update: &StudioUpdate,
     partial: &Path,
     progress: &UnboundedSender<StudioUpdateEvent>,
+    cancellation: &StudioUpdateCancellation,
 ) -> Result<(), StudioUpdateError> {
     let url = Url::parse(&update.installer.url).map_err(|error| {
         StudioUpdateError::new(
@@ -146,7 +266,10 @@ async fn download_installer(
             format!("invalid installer URL: {error}"),
         )
     })?;
-    let response = updater.request(url).await?;
+    let response = tokio::select! {
+        _ = cancellation.inner.token.cancelled() => return Err(cancelled_error()),
+        result = updater.request(url) => result?,
+    };
     if response
         .content_length()
         .is_some_and(|size| size != update.installer.size)
@@ -161,6 +284,7 @@ async fn download_installer(
     let mut downloaded = 0_u64;
     let mut hasher = Sha256::new();
     while let Some(chunk) = stream.next().await {
+        cancellation.check()?;
         let chunk = chunk.map_err(|error| {
             StudioUpdateError::new(
                 StudioUpdateErrorCode::Network,
@@ -206,6 +330,13 @@ async fn download_installer(
         ));
     }
     Ok(())
+}
+
+fn cancelled_error() -> StudioUpdateError {
+    StudioUpdateError::new(
+        StudioUpdateErrorCode::Cancelled,
+        "Studio update installation was cancelled",
+    )
 }
 
 async fn verify_file(
@@ -420,9 +551,16 @@ mod tests {
         let (progress, mut events) = tokio::sync::mpsc::unbounded_channel();
 
         assert!(
-            verify_cached(&updater, &update, &installer, &signature, &progress)
-                .await
-                .unwrap()
+            verify_cached(
+                &updater,
+                &update,
+                &installer,
+                &signature,
+                &progress,
+                &StudioUpdateCancellation::new(),
+            )
+            .await
+            .unwrap()
         );
         assert_eq!(events.recv().await, Some(StudioUpdateEvent::Verifying));
         std::fs::remove_dir_all(cache_dir).unwrap();
@@ -458,5 +596,34 @@ mod tests {
         assert_eq!(second.code(), StudioUpdateErrorCode::InstallInProgress);
         drop(first);
         assert!(InstallGuard::acquire(&updater).is_ok());
+    }
+
+    #[test]
+    fn cancellation_is_idempotent_before_installer_launch() {
+        let cancellation = StudioUpdateCancellation::new();
+
+        cancellation.cancel().unwrap();
+        cancellation.cancel().unwrap();
+
+        assert_eq!(
+            cancellation.check().unwrap_err().code(),
+            StudioUpdateErrorCode::Cancelled
+        );
+        assert_eq!(
+            cancellation.begin_launch().unwrap_err().code(),
+            StudioUpdateErrorCode::Cancelled
+        );
+    }
+
+    #[test]
+    fn cancellation_is_too_late_after_installer_launch_begins() {
+        let cancellation = StudioUpdateCancellation::new();
+
+        cancellation.begin_launch().unwrap();
+
+        assert_eq!(
+            cancellation.cancel().unwrap_err().code(),
+            StudioUpdateErrorCode::CancellationTooLate
+        );
     }
 }

@@ -33,7 +33,7 @@ class _FakeStudioApi implements StudioApi {
   Map<String, Object?>? savedSkillsSettings;
   Map<String, Object?>? savedMcpSettings;
   Map<String, Object?>? savedGeneralSettings;
-  WebSearchSettingsView? savedWebSearchSettings;
+  WebSearchSettingsCommand? savedWebSearchSettings;
   PermissionMode? savedPermissionMode;
   String? resolvedInteractionId;
   Map<String, Object?>? resolvedInteraction;
@@ -222,17 +222,33 @@ class _FakeStudioApi implements StudioApi {
   }
 
   @override
-  Future<void> resolveInteraction(
+  Future<InteractionResolutionResult> resolveInteraction(
     String interactionId,
-    Map<String, Object?> resolution,
+    InteractionResolutionCommand resolution,
   ) async {
-    jsonEncode(resolution);
     resolveInteractionCount += 1;
     if (resolveInteractionError case final error?) {
       throw error;
     }
     resolvedInteractionId = interactionId;
-    resolvedInteraction = resolution;
+    resolvedInteraction = _interactionResolutionJson(resolution);
+    final sessions =
+        resolution is PlanConfirmationResolutionCommand &&
+            resolution.decision ==
+                PlanConfirmationDecision.implementFreshContext
+        ? [
+            for (final session in initialState.sessions)
+              session.id == initialState.selectedSessionId
+                  ? session.copyWith(mode: StudioMode.task)
+                  : session,
+          ]
+        : initialState.sessions;
+    return InteractionResolutionResult(
+      sessionId: initialState.selectedSessionId ?? '',
+      interactionId: interactionId,
+      status: 'resolved',
+      sessions: sessions,
+    );
   }
 
   @override
@@ -261,8 +277,9 @@ class _FakeStudioApi implements StudioApi {
   ) async {}
 
   @override
-  Future<void> saveRuntimePermissionMode(PermissionMode mode) async {
+  Future<StudioState> saveRuntimePermissionMode(PermissionMode mode) async {
     savedPermissionMode = mode;
+    return initialState.copyWith(permissionMode: mode);
   }
 
   @override
@@ -273,9 +290,9 @@ class _FakeStudioApi implements StudioApi {
 
   @override
   Future<StudioState> saveProviderSettings(
-    Map<String, Object?> settings,
+    ProviderSettingsCommand command,
   ) async {
-    jsonEncode(settings);
+    final settings = _providerSettingsCommandJson(command);
     savedProviderSettings = settings;
     return initialState.copyWith(
       defaultProviderId: settings['defaultProviderId'] as String?,
@@ -288,9 +305,15 @@ class _FakeStudioApi implements StudioApi {
 
   @override
   Future<StudioState> saveInstructionsSettings(
-    Map<String, Object?> settings,
+    InstructionsSettingsCommand command,
   ) async {
-    jsonEncode(settings);
+    final settings = <String, Object?>{
+      'baseOverride': command.baseOverride,
+      'developer': command.developer,
+      'user': command.user,
+      'projectDocMaxBytes': command.projectDocMaxBytes,
+      'projectDocFallbackFilenames': command.projectDocFallbackFilenames,
+    };
     savedInstructionsSettings = settings;
     return initialState.copyWith(
       instructions: InstructionsSettingsView(
@@ -309,8 +332,17 @@ class _FakeStudioApi implements StudioApi {
   }
 
   @override
-  Future<StudioState> saveSkillsSettings(Map<String, Object?> settings) async {
-    jsonEncode(settings);
+  Future<StudioState> saveSkillsSettings(SkillsSettingsCommand command) async {
+    final settings = <String, Object?>{
+      'enabled': command.enabled,
+      'autoLearn': command.autoLearn,
+      'systemEnabled': command.systemEnabled,
+      'projectDir': command.projectDir,
+      'userDir': command.userDir,
+      'externalDirs': command.externalDirs,
+      'disabled': command.disabled,
+      'autoLearnMinToolCalls': command.autoLearnMinToolCalls,
+    };
     savedSkillsSettings = settings;
     return initialState.copyWith(
       skills: initialState.skills.copyWith(
@@ -324,15 +356,31 @@ class _FakeStudioApi implements StudioApi {
   }
 
   @override
-  Future<StudioState> saveMcpSettings(Map<String, Object?> settings) async {
-    jsonEncode(settings);
+  Future<StudioState> saveMcpSettings(McpSettingsCommand command) async {
+    final settings = <String, Object?>{
+      'servers': [
+        for (final server in command.servers)
+          {
+            'id': server.id,
+            'enabled': server.enabled,
+            'transport': server.transport,
+            'endpoint': server.endpoint,
+          },
+      ],
+    };
     savedMcpSettings = settings;
     return initialState;
   }
 
   @override
-  Future<StudioState> saveGeneralSettings(Map<String, Object?> settings) async {
-    jsonEncode(settings);
+  Future<StudioState> saveGeneralSettings(
+    GeneralSettingsCommand command,
+  ) async {
+    final settings = <String, Object?>{
+      'followSystemTheme': command.followSystemTheme,
+      'followActiveTurn': command.followActiveTurn,
+      'compactTimeline': command.compactTimeline,
+    };
     savedGeneralSettings = settings;
     return initialState.copyWith(
       general: GeneralSettingsView(
@@ -345,10 +393,20 @@ class _FakeStudioApi implements StudioApi {
 
   @override
   Future<StudioState> saveWebSearchSettings(
-    WebSearchSettingsView settings,
+    WebSearchSettingsCommand command,
   ) async {
-    savedWebSearchSettings = settings;
-    return initialState.copyWith(webSearch: settings);
+    savedWebSearchSettings = command;
+    return initialState.copyWith(
+      webSearch: initialState.webSearch.withConfiguredValues(
+        configuredMode: command.mode,
+        contextSize: command.contextSize,
+        allowedDomains: command.allowedDomains,
+        country: command.country,
+        region: command.region,
+        city: command.city,
+        timezone: command.timezone,
+      ),
+    );
   }
 
   @override
@@ -357,12 +415,79 @@ class _FakeStudioApi implements StudioApi {
     final blocked = blockedProviderUsageLoad;
     return blocked == null ? providerUsages : blocked.future;
   }
+}
 
-  @override
-  Future<void> saveStudioSettingsDraft(
-    String section,
-    Map<String, Object?> draft,
-  ) async {}
+Map<String, Object?> _providerSettingsCommandJson(
+  ProviderSettingsCommand command,
+) {
+  return {
+    'defaultProviderId': command.defaultProviderId,
+    'providers': [
+      for (final provider in command.providers)
+        {
+          'id': provider.id,
+          'originalId': provider.originalId,
+          'templateKind': provider.templateKind,
+          'wireProtocol': provider.wireProtocol,
+          'connectionMode': provider.connectionMode,
+          'name': provider.name,
+          'baseUrl': provider.baseUrl,
+          'bearerToken': provider.secret.value ?? '',
+          'capabilitySource': provider.capabilitySource,
+          'hostedWebSearch': provider.hostedWebSearch,
+          'standaloneWebSearch': provider.standaloneWebSearch,
+          'defaultModel': provider.defaultModel,
+          'customModels': [
+            for (final model in provider.customModels)
+              {
+                'slug': model.slug,
+                'displayName': model.displayName,
+                'reasoningEfforts': model.reasoningEfforts,
+                'baseInstructions': model.baseInstructions,
+              },
+          ],
+        },
+    ],
+    'roles': [
+      for (final role in command.roles)
+        {
+          'key': role.key,
+          'provider': role.providerId,
+          'model': role.model,
+          'effort': role.effort,
+        },
+    ],
+  };
+}
+
+Map<String, Object?> _interactionResolutionJson(
+  InteractionResolutionCommand resolution,
+) {
+  return switch (resolution) {
+    UserInputResolutionCommand(:final answers) => {
+      'type': 'userInput',
+      'answers': {
+        for (final answer in answers)
+          answer.questionId: {'answers': answer.answers},
+      },
+    },
+    ToolApprovalResolutionCommand(:final decision, :final reason) => {
+      'type': 'toolApproval',
+      'decision': decision.name,
+      'reason': ?reason,
+    },
+    PlanConfirmationResolutionCommand(
+      :final decision,
+      :final content,
+      :final reason,
+    ) =>
+      {
+        'type': 'planConfirmation',
+        'decision': decision.name,
+        'content': ?content,
+        'reason': ?reason,
+      },
+  };
 }
 
 const _defaultProviderUsages = [

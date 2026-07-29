@@ -1,10 +1,13 @@
 import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../data/frb/studio_api.dart' show FrbStudioApi;
 import '../../data/repositories/studio_repository.dart';
 import '../../rust/api/studio.dart' as frb;
+
+part 'studio_update_controller.g.dart';
 
 const _isDemoBuild = bool.fromEnvironment('PURE_STUDIO_DEMO');
 const _isReleaseBuild = bool.fromEnvironment('dart.vm.product');
@@ -27,11 +30,6 @@ final studioRuntimeBusyProvider = Provider<bool>((ref) {
   final studio = ref.watch(studioControllerProvider).value;
   return studio?.isBusy == true || studio?.runtime.hasActiveTask == true;
 });
-
-final studioUpdateControllerProvider =
-    NotifierProvider<StudioUpdateController, StudioUpdateState>(
-      StudioUpdateController.new,
-    );
 
 enum StudioUpdatePhase {
   disabled,
@@ -134,9 +132,17 @@ class StudioUpdateInstallEvent {
 abstract class StudioUpdateApi {
   Future<StudioUpdateCheckResult> check(String currentVersion);
 
-  Stream<StudioUpdateInstallEvent> install(StudioUpdateInfo update);
+  Future<StudioUpdateOperation> startInstall(StudioUpdateInfo update);
 
   Future<void> openReleaseNotes(String url);
+}
+
+abstract class StudioUpdateOperation {
+  Stream<StudioUpdateInstallEvent> get events;
+
+  Future<void> cancel();
+
+  void dispose();
 }
 
 class FrbStudioUpdateApi implements StudioUpdateApi {
@@ -154,11 +160,11 @@ class FrbStudioUpdateApi implements StudioUpdateApi {
   }
 
   @override
-  Stream<StudioUpdateInstallEvent> install(StudioUpdateInfo update) async* {
+  Future<StudioUpdateOperation> startInstall(StudioUpdateInfo update) async {
     await FrbStudioApi.ensureReady();
-    yield* frb
-        .installStudioUpdate(update: _toBridge(update))
-        .map(_installEventFromBridge);
+    return _FrbStudioUpdateOperation(
+      await frb.installStudioUpdate(update: _toBridge(update)),
+    );
   }
 
   @override
@@ -229,13 +235,55 @@ class FrbStudioUpdateApi implements StudioUpdateApi {
   }
 }
 
-class StudioUpdateController extends Notifier<StudioUpdateState> {
+class _FrbStudioUpdateOperation implements StudioUpdateOperation {
+  _FrbStudioUpdateOperation(this._handle);
+
+  final frb.BridgeStudioUpdateOperation _handle;
+  bool _disposed = false;
+
+  @override
+  Stream<StudioUpdateInstallEvent> get events => _events();
+
+  Stream<StudioUpdateInstallEvent> _events() async* {
+    try {
+      yield* _handle.progressStream().map(
+        FrbStudioUpdateApi._installEventFromBridge,
+      );
+    } finally {
+      dispose();
+    }
+  }
+
+  @override
+  Future<void> cancel() => _handle.cancel();
+
+  @override
+  void dispose() {
+    if (_disposed) {
+      return;
+    }
+    _disposed = true;
+    _handle.dispose();
+  }
+}
+
+@Riverpod(keepAlive: true)
+class StudioUpdateController extends _$StudioUpdateController {
+  StudioUpdateOperation? _activeOperation;
+
   StudioUpdateApi get _api => ref.read(studioUpdateApiProvider);
 
   bool get _enabled => ref.read(studioUpdateEnabledProvider);
 
   @override
   StudioUpdateState build() {
+    ref.onDispose(() {
+      final operation = _activeOperation;
+      _activeOperation = null;
+      if (operation != null) {
+        operation.dispose();
+      }
+    });
     final currentVersion = ref.watch(studioVersionProvider);
     final enabled = ref.watch(studioUpdateEnabledProvider);
     if (enabled) {
@@ -285,11 +333,30 @@ class StudioUpdateController extends Notifier<StudioUpdateState> {
       total: update.installerSize,
     );
     try {
-      await for (final event in _api.install(update)) {
+      final operation = await _api.startInstall(update);
+      _activeOperation = operation;
+      await for (final event in operation.events) {
         _applyInstallEvent(event);
       }
     } catch (error) {
       _fail('installFailed', error.toString());
+    } finally {
+      final operation = _activeOperation;
+      _activeOperation = null;
+      operation?.dispose();
+    }
+  }
+
+  Future<void> cancelInstall() async {
+    final operation = _activeOperation;
+    if (operation == null) {
+      return;
+    }
+    try {
+      await operation.cancel();
+      _fail('cancelled', 'Studio update installation was cancelled');
+    } catch (error) {
+      _fail('cancellationTooLate', error.toString());
     }
   }
 

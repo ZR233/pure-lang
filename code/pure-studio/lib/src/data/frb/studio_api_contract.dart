@@ -46,28 +46,27 @@ abstract class StudioApi {
     List<String> attachmentIds,
   );
   Future<void> stopPrompt(String sessionId);
-  Future<void> resolveInteraction(
+  Future<InteractionResolutionResult> resolveInteraction(
     String interactionId,
-    Map<String, Object?> resolution,
+    InteractionResolutionCommand resolution,
   );
-  Future<void> saveRuntimePermissionMode(PermissionMode mode);
-  Future<StudioState> saveProviderSettings(Map<String, Object?> settings);
-  Future<StudioState> saveInstructionsSettings(Map<String, Object?> settings);
-  Future<StudioState> saveSkillsSettings(Map<String, Object?> settings);
-  Future<StudioState> saveMcpSettings(Map<String, Object?> settings);
-  Future<StudioState> saveGeneralSettings(Map<String, Object?> settings);
-  Future<StudioState> saveWebSearchSettings(WebSearchSettingsView settings);
+  Future<StudioState> saveRuntimePermissionMode(PermissionMode mode);
+  Future<StudioState> saveProviderSettings(ProviderSettingsCommand command);
+  Future<StudioState> saveInstructionsSettings(
+    InstructionsSettingsCommand command,
+  );
+  Future<StudioState> saveSkillsSettings(SkillsSettingsCommand command);
+  Future<StudioState> saveMcpSettings(McpSettingsCommand command);
+  Future<StudioState> saveGeneralSettings(GeneralSettingsCommand command);
+  Future<StudioState> saveWebSearchSettings(WebSearchSettingsCommand command);
   Future<List<ProviderUsageView>> loadProviderUsages();
   Future<List<String>> listDiscoveredSkills(String projectId);
-  Future<void> saveStudioSettingsDraft(
-    String section,
-    Map<String, Object?> draft,
-  );
 }
 
 class FrbStudioApi implements StudioApi {
   static Future<void>? _initFuture;
   static Future<void> Function()? _initializationOverrideForTesting;
+  static bool _rustInitialized = false;
   ProviderCatalogView? _providerCatalogCache;
 
   static Future<void> ensureReady() => _ensureReady();
@@ -93,6 +92,7 @@ class FrbStudioApi implements StudioApi {
           await initializationOverride();
         } else {
           await RustLib.init();
+          _rustInitialized = true;
           await frb.initializeRuntime();
           await frb.startRuntime();
         }
@@ -100,11 +100,29 @@ class FrbStudioApi implements StudioApi {
         if (identical(_initFuture, attempt)) {
           _initFuture = null;
         }
-        Error.throwWithStackTrace(error, stackTrace);
+        Error.throwWithStackTrace(_studioFailure(error), stackTrace);
       }
     }();
     _initFuture = attempt;
     return attempt;
+  }
+
+  static Future<void> shutdownAndDispose() async {
+    if (!_rustInitialized) {
+      return;
+    }
+    try {
+      final initialization = _initFuture;
+      if (initialization != null) {
+        await initialization;
+      }
+      await frb.shutdownRuntime();
+    } on Object {
+      // Process teardown is best effort; Rust diagnostics retain the cause.
+    } finally {
+      RustLib.dispose();
+      _rustInitialized = false;
+    }
   }
 
   @override
@@ -112,7 +130,9 @@ class FrbStudioApi implements StudioApi {
     final cached = _providerCatalogCache;
     if (cached != null) return cached;
     await _ensureReady();
-    final catalog = providerCatalogFromFrb(await frb.loadProviderCatalog());
+    final catalog = providerCatalogFromFrb(
+      await _bridgeCall(frb.loadProviderCatalog),
+    );
     _providerCatalogCache = catalog;
     return catalog;
   }
@@ -120,20 +140,22 @@ class FrbStudioApi implements StudioApi {
   @override
   Future<StudioState> bootstrap() async {
     await _ensureReady();
-    return studioStateFromFrbSnapshot(await frb.bootstrapStudio());
+    return studioStateFromFrbSnapshot(await _bridgeCall(frb.bootstrapStudio));
   }
 
   @override
   Future<StudioState> openProject(String path) async {
     await _ensureReady();
-    return studioStateFromFrbSnapshot(await frb.openProject(path: path));
+    return studioStateFromFrbSnapshot(
+      await _bridgeCall(() => frb.openProject(path: path)),
+    );
   }
 
   @override
   Future<StudioState> selectProject(String projectId) async {
     await _ensureReady();
     return studioStateFromFrbSnapshot(
-      await frb.selectProject(projectId: projectId),
+      await _bridgeCall(() => frb.selectProject(projectId: projectId)),
     );
   }
 
@@ -144,9 +166,11 @@ class FrbStudioApi implements StudioApi {
   }) async {
     await _ensureReady();
     return studioStateFromFrbSnapshot(
-      await frb.archiveProject(
-        projectId: projectId,
-        selectedProjectId: selectedProjectId,
+      await _bridgeCall(
+        () => frb.archiveProject(
+          projectId: projectId,
+          selectedProjectId: selectedProjectId,
+        ),
       ),
     );
   }
@@ -155,7 +179,7 @@ class FrbStudioApi implements StudioApi {
   Future<RecoveryCleanupPreview> previewProjectCleanup(String projectId) async {
     await _ensureReady();
     return _recoveryCleanupPreviewFromFrb(
-      await frb.previewProjectCleanup(projectId: projectId),
+      await _bridgeCall(() => frb.previewProjectCleanup(projectId: projectId)),
     );
   }
 
@@ -167,10 +191,12 @@ class FrbStudioApi implements StudioApi {
   }) async {
     await _ensureReady();
     return studioStateFromFrbSnapshot(
-      await frb.cleanupProject(
-        projectId: projectId,
-        expectedRevision: expectedRevision,
-        selectedProjectId: selectedProjectId,
+      await _bridgeCall(
+        () => frb.cleanupProject(
+          projectId: projectId,
+          expectedRevision: expectedRevision,
+          selectedProjectId: selectedProjectId,
+        ),
       ),
     );
   }
@@ -179,7 +205,9 @@ class FrbStudioApi implements StudioApi {
   Future<StudioState> createSession(String projectId, {String? title}) async {
     await _ensureReady();
     return studioStateFromFrbSnapshot(
-      await frb.createSession(projectId: projectId, title: title),
+      await _bridgeCall(
+        () => frb.createSession(projectId: projectId, title: title),
+      ),
     );
   }
 
@@ -190,9 +218,11 @@ class FrbStudioApi implements StudioApi {
   }) async {
     await _ensureReady();
     return studioStateFromFrbSnapshot(
-      await frb.archiveSession(
-        sessionId: sessionId,
-        selectedSessionId: selectedSessionId,
+      await _bridgeCall(
+        () => frb.archiveSession(
+          sessionId: sessionId,
+          selectedSessionId: selectedSessionId,
+        ),
       ),
     );
   }
@@ -203,7 +233,9 @@ class FrbStudioApi implements StudioApi {
   ) async {
     await _ensureReady();
     return _recoveryCleanupPreviewFromFrb(
-      await frb.previewRecoveryIssueCleanup(issueId: issueId),
+      await _bridgeCall(
+        () => frb.previewRecoveryIssueCleanup(issueId: issueId),
+      ),
     );
   }
 
@@ -216,11 +248,13 @@ class FrbStudioApi implements StudioApi {
   }) async {
     await _ensureReady();
     return studioStateFromFrbSnapshot(
-      await frb.cleanupRecoveryIssue(
-        issueId: issueId,
-        expectedRevision: expectedRevision,
-        selectedProjectId: selectedProjectId,
-        selectedSessionId: selectedSessionId,
+      await _bridgeCall(
+        () => frb.cleanupRecoveryIssue(
+          issueId: issueId,
+          expectedRevision: expectedRevision,
+          selectedProjectId: selectedProjectId,
+          selectedSessionId: selectedSessionId,
+        ),
       ),
     );
   }
@@ -232,9 +266,11 @@ class FrbStudioApi implements StudioApi {
   ) async {
     await _ensureReady();
     return _sessionFromFrb(
-      await frb.setSessionMode(
-        sessionId: sessionId,
-        mode: _compileModeLabel(mode),
+      await _bridgeCall(
+        () => frb.setSessionMode(
+          sessionId: sessionId,
+          mode: _compileModeLabel(mode),
+        ),
       ),
     );
   }
@@ -249,54 +285,157 @@ class FrbStudioApi implements StudioApi {
   }) async {
     await _ensureReady();
     return studioStateFromFrbSnapshot(
-      await frb.setModelRole(
-        roleKey: roleKey,
-        providerId: providerId,
-        model: model,
-        effort: effort,
-        selectedSessionId: selectedSessionId,
+      await _bridgeCall(
+        () => frb.setModelRole(
+          roleKey: roleKey,
+          providerId: providerId,
+          model: model,
+          effort: effort,
+          selectedSessionId: selectedSessionId,
+        ),
       ),
     );
   }
 
   @override
-  Future<void> resolveInteraction(
+  Future<InteractionResolutionResult> resolveInteraction(
     String interactionId,
-    Map<String, Object?> resolution,
+    InteractionResolutionCommand resolution,
   ) async {
     await _ensureReady();
-    await frb.resolveInteraction(
-      interactionId: interactionId,
-      resolutionJson: jsonEncode(resolution),
+    final response = await _bridgeCall(
+      () => frb.resolveInteraction(
+        interactionId: interactionId,
+        resolution: _interactionResolutionFromDomain(resolution),
+      ),
     );
+    return InteractionResolutionResult(
+      sessionId: response.sessionId,
+      interactionId: response.interaction.interactionId,
+      status: response.interaction.status,
+      sessions: response.sessions.map(_sessionFromFrb).toList(),
+    );
+  }
+
+  static Future<T> _bridgeCall<T>(Future<T> Function() call) async {
+    try {
+      return await call();
+    } catch (error, stackTrace) {
+      Error.throwWithStackTrace(_studioFailure(error), stackTrace);
+    }
   }
 
   @override
   Future<void> stopPrompt(String sessionId) async {
     await _ensureReady();
-    await frb.stopPrompt(sessionId: sessionId);
+    await _bridgeCall(() => frb.stopPrompt(sessionId: sessionId));
   }
 
   @override
-  Stream<Object> subscribeProductEvents() async* {
-    await _ensureReady();
-    yield* frb.subscribeProductEvents().map(StudioBridgeEvent.fromProduct);
+  Stream<Object> subscribeProductEvents() {
+    late final StreamController<Object> controller;
+    frb.BridgeEventSubscription? handle;
+    StreamSubscription<frb.BridgeProductStreamEnvelope>? subscription;
+    var cancelled = false;
+
+    Future<void> start() async {
+      try {
+        await _ensureReady();
+        final created = await _bridgeCall(frb.createProductSubscription);
+        if (cancelled) {
+          await created.cancel();
+          created.dispose();
+          return;
+        }
+        handle = created;
+        subscription = created.productStream().listen(
+          (envelope) => envelope.when(
+            data: (event) =>
+                controller.add(StudioBridgeEvent.fromProduct(event)),
+            failure: (error) => controller.addError(_studioFailure(error)),
+            closed: controller.close,
+          ),
+          onError: (Object error, StackTrace stackTrace) =>
+              controller.addError(_studioFailure(error), stackTrace),
+          onDone: controller.close,
+        );
+      } catch (error, stackTrace) {
+        controller.addError(_studioFailure(error), stackTrace);
+        await controller.close();
+      }
+    }
+
+    controller = StreamController<Object>(
+      onListen: () => unawaited(start()),
+      onCancel: () async {
+        cancelled = true;
+        await subscription?.cancel();
+        final activeHandle = handle;
+        if (activeHandle != null) {
+          await activeHandle.cancel();
+          activeHandle.dispose();
+        }
+      },
+    );
+    return controller.stream;
   }
 
   @override
   Stream<SessionStreamFrame> subscribeSessionEvents(
     String sessionId, {
     int? afterSequence,
-  }) async* {
-    await _ensureReady();
-    yield* frb
-        .subscribeSessionEvents(
-          sessionId: sessionId,
-          afterSequence: afterSequence == null
-              ? null
-              : BigInt.from(afterSequence),
-        )
-        .map(SessionStreamFrame.fromFrb);
+  }) {
+    late final StreamController<SessionStreamFrame> controller;
+    frb.BridgeEventSubscription? handle;
+    StreamSubscription<frb.BridgeSessionStreamEnvelope>? subscription;
+    var cancelled = false;
+
+    Future<void> start() async {
+      try {
+        await _ensureReady();
+        final created = await _bridgeCall(
+          () => frb.createSessionSubscription(
+            sessionId: sessionId,
+            afterSequence: afterSequence == null
+                ? null
+                : BigInt.from(afterSequence),
+          ),
+        );
+        if (cancelled) {
+          await created.cancel();
+          created.dispose();
+          return;
+        }
+        handle = created;
+        subscription = created.sessionStream().listen(
+          (envelope) => envelope.when(
+            data: (frame) => controller.add(SessionStreamFrame.fromFrb(frame)),
+            failure: (error) => controller.addError(_studioFailure(error)),
+            closed: controller.close,
+          ),
+          onError: (Object error, StackTrace stackTrace) =>
+              controller.addError(_studioFailure(error), stackTrace),
+          onDone: controller.close,
+        );
+      } catch (error, stackTrace) {
+        controller.addError(_studioFailure(error), stackTrace);
+        await controller.close();
+      }
+    }
+
+    controller = StreamController<SessionStreamFrame>(
+      onListen: () => unawaited(start()),
+      onCancel: () async {
+        cancelled = true;
+        await subscription?.cancel();
+        final activeHandle = handle;
+        if (activeHandle != null) {
+          await activeHandle.cancel();
+          activeHandle.dispose();
+        }
+      },
+    );
+    return controller.stream;
   }
 
   @override
@@ -306,78 +445,183 @@ class FrbStudioApi implements StudioApi {
     List<String> attachmentIds,
   ) async {
     await _ensureReady();
-    await frb.submitPrompt(
-      sessionId: sessionId,
-      prompt: prompt,
-      attachmentIds: attachmentIds,
+    await _bridgeCall(
+      () => frb.submitPrompt(
+        sessionId: sessionId,
+        prompt: prompt,
+        attachmentIds: attachmentIds,
+      ),
     );
   }
 
   @override
-  Future<void> saveRuntimePermissionMode(PermissionMode mode) async {
+  Future<StudioState> saveRuntimePermissionMode(PermissionMode mode) async {
     await _ensureReady();
-    await frb.saveRuntimePermissionMode(mode: _permissionModeLabel(mode));
+    return studioStateFromFrbSnapshot(
+      await _bridgeCall(
+        () => frb.saveRuntimePermissionMode(mode: _permissionModeLabel(mode)),
+      ),
+    );
   }
 
   @override
   Future<StudioState> saveProviderSettings(
-    Map<String, Object?> settings,
+    ProviderSettingsCommand command,
   ) async {
     await _ensureReady();
     return studioStateFromFrbSnapshot(
-      await frb.saveProviderSettings(settingsJson: jsonEncode(settings)),
+      await _bridgeCall(
+        () => frb.saveProviderSettings(
+          input: frb.ProviderSettingsInput(
+            defaultProviderId: command.defaultProviderId,
+            providers: [
+              for (final provider in command.providers)
+                frb.ProviderInput(
+                  id: provider.id,
+                  originalId: provider.originalId,
+                  templateKind: provider.templateKind,
+                  wireProtocol: provider.wireProtocol,
+                  connectionMode: provider.connectionMode,
+                  name: provider.name,
+                  baseUrl: provider.baseUrl,
+                  secret: switch (provider.secret.action) {
+                    ProviderSecretAction.preserve =>
+                      const frb.ProviderSecretInput.preserve(),
+                    ProviderSecretAction.replace =>
+                      frb.ProviderSecretInput.replace(
+                        value: provider.secret.value!,
+                      ),
+                    ProviderSecretAction.clear =>
+                      const frb.ProviderSecretInput.clear(),
+                  },
+                  capabilitySource: provider.capabilitySource,
+                  hostedWebSearch: provider.hostedWebSearch,
+                  standaloneWebSearch: provider.standaloneWebSearch,
+                  defaultModel: provider.defaultModel,
+                  customModels: [
+                    for (final model in provider.customModels)
+                      frb.ProviderModelInput(
+                        slug: model.slug,
+                        displayName: model.displayName,
+                        reasoningEfforts: model.reasoningEfforts,
+                        baseInstructions: model.baseInstructions,
+                      ),
+                  ],
+                ),
+            ],
+            roles: [
+              for (final role in command.roles)
+                frb.RoleInput(
+                  key: role.key,
+                  provider: role.providerId,
+                  model: role.model,
+                  effort: role.effort,
+                ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
   @override
   Future<StudioState> saveInstructionsSettings(
-    Map<String, Object?> settings,
+    InstructionsSettingsCommand command,
   ) async {
     await _ensureReady();
     return studioStateFromFrbSnapshot(
-      await frb.saveInstructionsSettings(settingsJson: jsonEncode(settings)),
+      await _bridgeCall(
+        () => frb.saveInstructionsSettings(
+          input: frb.InstructionsSettingsInput(
+            baseOverride: command.baseOverride,
+            developer: command.developer,
+            user: command.user,
+            projectDocMaxBytes: BigInt.from(command.projectDocMaxBytes),
+            projectDocFallbackFilenames: command.projectDocFallbackFilenames,
+          ),
+        ),
+      ),
     );
   }
 
   @override
-  Future<StudioState> saveSkillsSettings(Map<String, Object?> settings) async {
+  Future<StudioState> saveSkillsSettings(SkillsSettingsCommand command) async {
     await _ensureReady();
     return studioStateFromFrbSnapshot(
-      await frb.saveSkillsSettings(settingsJson: jsonEncode(settings)),
+      await _bridgeCall(
+        () => frb.saveSkillsSettings(
+          input: frb.SkillsSettingsInput(
+            enabled: command.enabled,
+            autoLearn: command.autoLearn,
+            systemEnabled: command.systemEnabled,
+            projectDir: command.projectDir,
+            userDir: command.userDir,
+            externalDirs: command.externalDirs,
+            disabled: command.disabled,
+            autoLearnMinToolCalls: command.autoLearnMinToolCalls,
+          ),
+        ),
+      ),
     );
   }
 
   @override
-  Future<StudioState> saveMcpSettings(Map<String, Object?> settings) async {
+  Future<StudioState> saveMcpSettings(McpSettingsCommand command) async {
     await _ensureReady();
     return studioStateFromFrbSnapshot(
-      await frb.saveMcpSettings(settingsJson: jsonEncode(settings)),
+      await _bridgeCall(
+        () => frb.saveMcpSettings(
+          input: frb.McpSettingsInput(
+            servers: [
+              for (final server in command.servers)
+                frb.McpServerInput(
+                  id: server.id,
+                  enabled: server.enabled,
+                  transport: server.transport,
+                  endpoint: server.endpoint,
+                ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
   @override
-  Future<StudioState> saveGeneralSettings(Map<String, Object?> settings) async {
+  Future<StudioState> saveGeneralSettings(
+    GeneralSettingsCommand command,
+  ) async {
     await _ensureReady();
     return studioStateFromFrbSnapshot(
-      await frb.saveGeneralSettings(settingsJson: jsonEncode(settings)),
+      await _bridgeCall(
+        () => frb.saveGeneralSettings(
+          input: frb.GeneralSettingsInput(
+            followSystemTheme: command.followSystemTheme,
+            followActiveTurn: command.followActiveTurn,
+            compactTimeline: command.compactTimeline,
+          ),
+        ),
+      ),
     );
   }
 
   @override
   Future<StudioState> saveWebSearchSettings(
-    WebSearchSettingsView settings,
+    WebSearchSettingsCommand command,
   ) async {
     await _ensureReady();
     return studioStateFromFrbSnapshot(
-      await frb.saveWebSearchSettings(
-        input: frb.WebSearchSettingsInput(
-          mode: settings.configuredMode,
-          contextSize: settings.contextSize,
-          allowedDomains: settings.allowedDomains,
-          country: settings.country,
-          region: settings.region,
-          city: settings.city,
-          timezone: settings.timezone,
+      await _bridgeCall(
+        () => frb.saveWebSearchSettings(
+          input: frb.WebSearchSettingsInput(
+            mode: command.mode,
+            contextSize: command.contextSize,
+            allowedDomains: command.allowedDomains,
+            country: command.country,
+            region: command.region,
+            city: command.city,
+            timezone: command.timezone,
+          ),
         ),
       ),
     );
@@ -386,26 +630,20 @@ class FrbStudioApi implements StudioApi {
   @override
   Future<List<ProviderUsageView>> loadProviderUsages() async {
     await _ensureReady();
-    final response = await frb.loadProviderUsages();
+    final response = await _bridgeCall(frb.loadProviderUsages);
     return response.usages.map(_providerUsageFromFrb).toList();
   }
 
   @override
   Future<List<String>> listDiscoveredSkills(String projectId) async {
     await _ensureReady();
-    final response = await frb.listDiscoveredSkills(projectId: projectId);
+    final response = await _bridgeCall(
+      () => frb.listDiscoveredSkills(projectId: projectId),
+    );
     return response.skills
         .map((skill) => skill.name)
         .where((name) => name.isNotEmpty)
         .toList()
       ..sort();
-  }
-
-  @override
-  Future<void> saveStudioSettingsDraft(
-    String section,
-    Map<String, Object?> draft,
-  ) async {
-    return;
   }
 }
