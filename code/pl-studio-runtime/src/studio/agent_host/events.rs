@@ -439,6 +439,9 @@ mod tests {
             active_turn_id: None,
             active_session_id: None,
             pending_inputs,
+            pending_trigger_inputs: pending_inputs,
+            mailbox_delivery_phase: pl_core::MailboxDeliveryPhase::CurrentTurn,
+            dispatch_generation: 0,
             last_turn: Some(AgentTurnOutcome {
                 turn_id: TurnId::new(last_turn_id).unwrap(),
                 session_id: SessionId::new("session-1").unwrap(),

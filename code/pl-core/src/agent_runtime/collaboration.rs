@@ -80,7 +80,9 @@ impl CollaborationToolKind {
     fn description(self) -> &'static str {
         match self {
             Self::Spawn => "Spawn a child agent using one of the roles allowed for this turn.",
-            Self::Send => "Submit input to an accessible agent using an explicit delivery mode.",
+            Self::Send => {
+                "Send input to an accessible agent; interrupt only for an explicit redirect."
+            }
             Self::List => "List agents visible to the current collaboration policy.",
             Self::Close => "Close an accessible child agent and its product resources.",
         }
@@ -210,9 +212,13 @@ impl CollaborationTool {
             .runtime
             .submit_current_session(
                 target.clone(),
-                super::AgentCurrentSessionSubmitRequest::start(args.message)
-                    .with_metadata(args.metadata)
-                    .with_delivery(args.delivery),
+                super::AgentCurrentSessionSubmitRequest::start(args.message).with_delivery(
+                    if args.interrupt {
+                        InputDelivery::InterruptThenStart
+                    } else {
+                        InputDelivery::Start
+                    },
+                ),
             )
             .await
             .map_err(|error| tool_error(TOOL_SEND_INPUT, error.to_string()))?;
@@ -289,9 +295,7 @@ struct SendArgs {
     target: String,
     message: String,
     #[serde(default)]
-    delivery: InputDelivery,
-    #[serde(default)]
-    metadata: Value,
+    interrupt: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -318,7 +322,9 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
-    use crate::{AgentActivityState, AgentIdentity, AgentLifecycleState, AgentSnapshot};
+    use crate::{
+        AgentActivityState, AgentIdentity, AgentLifecycleState, AgentSnapshot, MailboxDeliveryPhase,
+    };
 
     #[test]
     fn spawn_schema_uses_policy_roles() {
@@ -342,6 +348,9 @@ mod tests {
 
         assert!(schema["properties"]["target"].is_object());
         assert!(schema["properties"]["message"].is_object());
+        assert!(schema["properties"]["interrupt"].is_object());
+        assert!(schema["properties"].get("delivery").is_none());
+        assert!(schema["properties"].get("metadata").is_none());
         assert!(schema["properties"].get("sessionId").is_none());
         assert!(
             serde_json::from_value::<SendArgs>(json!({
@@ -386,6 +395,9 @@ mod tests {
             active_turn_id: None,
             active_session_id: None,
             pending_inputs: 0,
+            pending_trigger_inputs: 0,
+            mailbox_delivery_phase: MailboxDeliveryPhase::CurrentTurn,
+            dispatch_generation: 0,
             last_turn: None,
             revision: 1,
             event_sequence: 1,

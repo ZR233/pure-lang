@@ -8,7 +8,8 @@ use crate::studio::entities;
 use crate::studio::ids::unix_seconds;
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    AgentOutcomeStatus, MergeStatus, ReviewVerdict, TaskRunPhase, TaskRunRecord, WorkUnitStatus,
+    AgentOutcomeStatus, MergeStatus, ReviewVerdict, TaskRunPhase, TaskRunRecord, TaskStopOrigin,
+    TaskStopReason, WorkUnitStatus,
 };
 
 impl StudioStore {
@@ -16,7 +17,8 @@ impl StudioStore {
         &self,
         task_run_id: &str,
         expected_head: &str,
-        reason: &str,
+        origin: TaskStopOrigin,
+        reason: &TaskStopReason,
     ) -> Result<TaskRunRecord> {
         let tx = self.db.begin().await?;
         let result = async {
@@ -29,18 +31,29 @@ impl StudioStore {
             if run.expected_head != expected_head || phase.is_terminal() {
                 bail!("task stop no longer matches the active task HEAD");
             }
+            if run.terminal_generation.is_some() {
+                bail!("active task already has a terminal generation");
+            }
             validate_lease(&tx, &run, expected_head).await?;
             if run.stop_requested != 0 {
                 return super::task_run_record(run);
             }
             let now = unix_seconds();
+            let next_generation = run
+                .task_generation
+                .checked_add(1)
+                .context("task generation overflow while requesting stop")?;
             let mut active: entities::task_run::ActiveModel = run.into();
             active.stop_requested = Set(1);
-            active.stop_requested_reason = Set(Some(reason.to_string()));
+            active.stop_requested_origin = Set(Some(origin.as_str().to_string()));
+            active.stop_requested_reason = Set(Some(reason.as_str().to_string()));
             active.stop_requested_at = Set(Some(now));
-            active.status_message = Set(Some(
-                "task stop requested; settling active turns".to_string(),
-            ));
+            active.task_generation = Set(next_generation);
+            active.terminal_generation = Set(None);
+            active.status_message = Set(Some(format!(
+                "task stop requested by {}; settling active turns",
+                origin.as_str()
+            )));
             active.updated_at = Set(now);
             super::task_run_record(active.update(&tx).await?)
         }
@@ -52,6 +65,7 @@ impl StudioStore {
         &self,
         task_run_id: &str,
         expected_head: &str,
+        expected_generation: u64,
     ) -> Result<TaskRunRecord> {
         let tx = self.db.begin().await?;
         let result = async {
@@ -66,6 +80,9 @@ impl StudioStore {
             }
             if run.stop_requested == 0 {
                 bail!("task stop must be requested before entering stopping");
+            }
+            if run.task_generation != i64::try_from(expected_generation)? {
+                bail!("task stop generation changed before entering stopping");
             }
             validate_lease(&tx, &run, expected_head).await?;
             if phase == TaskRunPhase::Stopping {
@@ -103,11 +120,14 @@ impl StudioStore {
             if !phase.can_transition_to(TaskRunPhase::Blocked) {
                 bail!("task phase cannot transition to blocked");
             }
-            let mut active: entities::task_run::ActiveModel = run.into();
-            active.phase = Set(TaskRunPhase::Blocked.as_str().to_string());
-            active.status_message = Set(Some(reason.to_string()));
-            active.updated_at = Set(unix_seconds());
-            let blocked = active.update(&tx).await?;
+            let blocked = super::write_task_terminal_fact(
+                &tx,
+                run,
+                TaskRunPhase::Blocked,
+                Some(reason.to_string()),
+                None,
+            )
+            .await?;
             super::delete_blocked_branch_lease(&tx, task_run_id).await?;
             super::task_run_record(blocked)
         }
@@ -135,12 +155,14 @@ impl StudioStore {
             }
             validate_lease(&tx, &run, expected_head).await?;
             validate_completion_children(&tx, &run).await?;
-            let now = unix_seconds();
-            let mut active: entities::task_run::ActiveModel = run.into();
-            active.phase = Set(TaskRunPhase::Completed.as_str().to_string());
-            active.status_message = Set(Some(verification_summary.to_string()));
-            active.updated_at = Set(now);
-            let completed = active.update(&tx).await?;
+            let completed = super::write_task_terminal_fact(
+                &tx,
+                run,
+                TaskRunPhase::Completed,
+                Some(verification_summary.to_string()),
+                None,
+            )
+            .await?;
             delete_lease(&tx, &completed.id).await?;
             super::task_run_record(completed)
         }
@@ -151,6 +173,7 @@ impl StudioStore {
     pub(crate) async fn settle_agents_for_task_stop(
         &self,
         task_run_id: &str,
+        expected_generation: u64,
         reason: &str,
     ) -> Result<()> {
         let tx = self.db.begin().await?;
@@ -161,6 +184,9 @@ impl StudioStore {
                 .context("task run not found while stopping agents")?;
             if run.phase != TaskRunPhase::Stopping.as_str() || run.stop_requested == 0 {
                 bail!("task agents can only be settled after entering requested stopping");
+            }
+            if run.task_generation != i64::try_from(expected_generation)? {
+                bail!("task stop generation changed before settling agents");
             }
             let now = unix_seconds();
             for unit in entities::work_unit::Entity::find()
@@ -225,6 +251,7 @@ impl StudioStore {
         &self,
         task_run_id: &str,
         expected_head: &str,
+        expected_generation: u64,
         reason: &str,
     ) -> Result<TaskRunRecord> {
         let tx = self.db.begin().await?;
@@ -235,11 +262,22 @@ impl StudioStore {
                 .context("task run not found")?;
             let phase = TaskRunPhase::from_str(&run.phase)
                 .with_context(|| format!("invalid task phase: {}", run.phase))?;
-            if phase.is_terminal() || run.expected_head != expected_head {
+            if phase.is_terminal() {
+                if phase == TaskRunPhase::Cancelled
+                    && run.terminal_generation == Some(i64::try_from(expected_generation)?)
+                {
+                    return super::task_run_record(run);
+                }
+                bail!("task terminal fact belongs to another generation");
+            }
+            if run.expected_head != expected_head {
                 bail!("task stop no longer matches the active task HEAD");
             }
             if phase != TaskRunPhase::Stopping || run.stop_requested == 0 {
                 bail!("task cancellation requires requested stopping phase");
+            }
+            if run.task_generation != i64::try_from(expected_generation)? {
+                bail!("task stop generation changed before cancellation");
             }
             validate_lease(&tx, &run, expected_head).await?;
             let merges = entities::merge_record::Entity::find()
@@ -254,12 +292,14 @@ impl StudioStore {
             }) {
                 bail!("task stop requires all merge state to be settled");
             }
-            let now = unix_seconds();
-            let mut active: entities::task_run::ActiveModel = run.into();
-            active.phase = Set(TaskRunPhase::Cancelled.as_str().to_string());
-            active.status_message = Set(Some(reason.to_string()));
-            active.updated_at = Set(now);
-            let cancelled = active.update(&tx).await?;
+            let cancelled = super::write_task_terminal_fact(
+                &tx,
+                run,
+                TaskRunPhase::Cancelled,
+                Some(reason.to_string()),
+                Some(expected_generation),
+            )
+            .await?;
             delete_lease(&tx, task_run_id).await?;
             super::task_run_record(cancelled)
         }

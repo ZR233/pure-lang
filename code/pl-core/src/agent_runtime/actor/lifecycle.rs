@@ -54,6 +54,10 @@ where
         closing.snapshot.activity = AgentActivityState::Idle;
         closing.snapshot.active_turn_id = None;
         closing.snapshot.active_session_id = None;
+        closing.snapshot.dispatch_generation =
+            closing.snapshot.dispatch_generation.saturating_add(1);
+        closing.snapshot.mailbox_delivery_phase = super::super::MailboxDeliveryPhase::NextTurn;
+        closing.active_input = None;
         if let Some(outcome) = &close_outcome {
             closing.snapshot.last_turn = Some(outcome.clone());
         }
@@ -93,11 +97,13 @@ where
         }
         let mut closed = self.state.clone();
         closed.pending_inputs.clear();
+        closed.active_input = None;
         closed.snapshot.lifecycle = AgentLifecycleState::Closed;
         closed.snapshot.activity = AgentActivityState::Idle;
         closed.snapshot.active_turn_id = None;
         closed.snapshot.active_session_id = None;
         closed.snapshot.pending_inputs = 0;
+        closed.snapshot.pending_trigger_inputs = 0;
         if let Err(error) = self
             .commit_transition(closed, Vec::new(), |snapshot| {
                 AgentRuntimeEventKind::StateChanged { snapshot }
@@ -132,7 +138,7 @@ where
             CloseCompensation::Faulted { .. } => AgentLifecycleState::Faulted,
         };
         next.snapshot.activity = match &compensation {
-            CloseCompensation::Restored if self.run_queue && !next.pending_inputs.is_empty() => {
+            CloseCompensation::Restored if self.dispatch_enabled && next.has_triggering_input() => {
                 AgentActivityState::Queued
             }
             CloseCompensation::Restored | CloseCompensation::Faulted { .. } => {
@@ -152,7 +158,7 @@ where
             self.fault_in_memory(error.to_string());
             return Err(error);
         }
-        if restored && self.run_queue && !self.state.pending_inputs.is_empty() {
+        if restored && self.dispatch_enabled && self.state.has_triggering_input() {
             self.begin_next_turn().await;
         }
         Ok(())
@@ -180,11 +186,14 @@ where
         let mut next = self.state.clone();
         next.snapshot.active_turn_id = None;
         next.snapshot.active_session_id = None;
+        next.active_input = None;
+        next.refresh_mailbox_snapshot();
         next.snapshot.last_turn = Some(outcome.clone());
-        next.snapshot.activity = if next.pending_inputs.is_empty() {
-            AgentActivityState::Idle
-        } else {
+        next.snapshot.mailbox_delivery_phase = super::super::MailboxDeliveryPhase::NextTurn;
+        next.snapshot.activity = if next.has_triggering_input() {
             AgentActivityState::Queued
+        } else {
+            AgentActivityState::Idle
         };
         self.commit_transition(next, Vec::new(), |snapshot| {
             AgentRuntimeEventKind::TurnFinished {

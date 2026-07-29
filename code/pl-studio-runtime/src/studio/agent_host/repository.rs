@@ -42,6 +42,7 @@ impl AgentStateRepository for StudioAgentRepository {
             let snapshot = serde_json::from_str(&text(&row, "snapshot_json")?)?;
             let sessions = self.restore_sessions(&agent_id).await?;
             let pending_inputs = self.restore_pending_inputs(&agent_id).await?;
+            let active_input = self.restore_active_input(&agent_id).await?;
             let accepted_wakes = self.restore_accepted_wakes(&agent_id).await?;
             let session_projections = self.restore_session_projections(&agent_id).await?;
             restored.push(RestoredAgentRuntime {
@@ -49,6 +50,7 @@ impl AgentStateRepository for StudioAgentRepository {
                     snapshot,
                     sessions,
                     pending_inputs,
+                    active_input,
                     accepted_wakes,
                 },
                 session_projections,
@@ -94,6 +96,7 @@ impl AgentStateRepository for StudioAgentRepository {
 
         replace_sessions(&tx, &agent_id, &commit.next_state).await?;
         replace_pending_inputs(&tx, &agent_id, &commit.next_state).await?;
+        replace_active_input(&tx, &agent_id, &commit.next_state).await?;
         replace_accepted_wakes(&tx, &agent_id, &commit.next_state).await?;
         upsert_turns(&tx, &agent_id, &commit.next_state).await?;
         for event in &commit.events {
@@ -233,6 +236,22 @@ impl StudioAgentRepository {
             .into_iter()
             .map(|row| serde_json::from_str(&text(&row, "input_json")?).map_err(Into::into))
             .collect()
+    }
+
+    async fn restore_active_input(
+        &self,
+        agent_id: &str,
+    ) -> Result<Option<PendingAgentInput>, PureError> {
+        self.store
+            .database()
+            .query_one(statement(
+                "SELECT input_json FROM agent_active_inputs WHERE agent_id = ?",
+                [agent_id.to_string().into()],
+            ))
+            .await
+            .map_err(store_error)?
+            .map(|row| serde_json::from_str(&text(&row, "input_json")?).map_err(Into::into))
+            .transpose()
     }
 
     async fn restore_accepted_wakes(
@@ -375,6 +394,40 @@ async fn replace_pending_inputs(
         ))
         .await
         .map_err(store_error)?;
+    }
+    Ok(())
+}
+
+async fn replace_active_input(
+    tx: &sea_orm::DatabaseTransaction,
+    agent_id: &str,
+    state: &AgentDurableState,
+) -> Result<(), PureError> {
+    match &state.active_input {
+        Some(input) => {
+            tx.execute(statement(
+                "INSERT INTO agent_active_inputs (agent_id, input_json, updated_at)
+                 VALUES (?, ?, ?)
+                 ON CONFLICT(agent_id) DO UPDATE SET
+                   input_json = excluded.input_json,
+                   updated_at = excluded.updated_at",
+                [
+                    agent_id.to_string().into(),
+                    serde_json::to_string(input)?.into(),
+                    state.snapshot.updated_at.into(),
+                ],
+            ))
+            .await
+            .map_err(store_error)?;
+        }
+        None => {
+            tx.execute(statement(
+                "DELETE FROM agent_active_inputs WHERE agent_id = ?",
+                [agent_id.to_string().into()],
+            ))
+            .await
+            .map_err(store_error)?;
+        }
     }
     Ok(())
 }
@@ -577,6 +630,9 @@ mod tests {
                 active_turn_id: None,
                 active_session_id: None,
                 pending_inputs: 0,
+                pending_trigger_inputs: 0,
+                mailbox_delivery_phase: pl_core::MailboxDeliveryPhase::CurrentTurn,
+                dispatch_generation: 0,
                 last_turn: None,
                 revision: 1,
                 event_sequence: 1,
@@ -584,6 +640,7 @@ mod tests {
             },
             sessions: BTreeMap::new(),
             pending_inputs: VecDeque::new(),
+            active_input: None,
             accepted_wakes: BTreeMap::from([(wake_id.clone(), receipt.clone())]),
         };
 
@@ -610,6 +667,101 @@ mod tests {
             Some(&receipt)
         );
         assert_eq!(restored[0].state.accepted_wakes[&wake_id].turn_id, turn_id);
+    }
+
+    #[tokio::test]
+    async fn active_mailbox_input_is_restored_and_removed_with_runtime_state() {
+        let store = StudioStore::open_memory().await.unwrap();
+        let repository = StudioAgentRepository::new(store);
+        let agent_id = pl_core::AgentId::new("agent-active-mailbox").unwrap();
+        let turn_id = pl_core::TurnId::new("turn-active-mailbox").unwrap();
+        let session_id = pl_core::SessionId::new("session-active-mailbox").unwrap();
+        let active_input = pl_core::DurableMailboxEnvelope {
+            mail_id: "mail-active-1".to_string(),
+            turn_id: turn_id.clone(),
+            wake_id: None,
+            wake_signal_ids: Vec::new(),
+            session_id,
+            message: "durable active input".to_string(),
+            metadata: serde_json::json!({"source": "test"}),
+            trigger: pl_core::MailboxTurnTrigger::StartIfIdle,
+            delivery_state: pl_core::MailboxDeliveryState::Consumed {
+                turn_id,
+                checkpoint_seq: 3,
+            },
+            dispatch_generation: 7,
+            queued_at: 10,
+        };
+        let state = AgentDurableState {
+            snapshot: pl_core::AgentSnapshot {
+                identity: pl_core::AgentIdentity {
+                    id: agent_id.clone(),
+                    parent_id: None,
+                    role: pl_core::AgentRoleId::new("executor").unwrap(),
+                    depth: 0,
+                },
+                wake_policy: pl_core::AgentWakePolicy::RuntimeTerminal,
+                lifecycle: pl_core::AgentLifecycleState::Active,
+                activity: AgentActivityState::Running,
+                active_turn_id: Some(active_input.turn_id.clone()),
+                active_session_id: Some(active_input.session_id.clone()),
+                pending_inputs: 0,
+                pending_trigger_inputs: 0,
+                mailbox_delivery_phase: pl_core::MailboxDeliveryPhase::CurrentTurn,
+                dispatch_generation: 7,
+                last_turn: None,
+                revision: 1,
+                event_sequence: 0,
+                updated_at: 10,
+            },
+            sessions: BTreeMap::new(),
+            pending_inputs: VecDeque::new(),
+            active_input: Some(active_input.clone()),
+            accepted_wakes: BTreeMap::new(),
+        };
+
+        assert_eq!(
+            repository
+                .commit(AgentCommit {
+                    agent_id: agent_id.clone(),
+                    expected_revision: None,
+                    next_state: state,
+                    events: Vec::new(),
+                    trace_events: Vec::new(),
+                    session_projection: None,
+                    mutation: pl_core::AgentStateMutation::SnapshotAndQueue,
+                })
+                .await
+                .unwrap(),
+            AgentCommitOutcome::Applied
+        );
+        let restored = repository.restore_runtime().await.unwrap();
+        assert_eq!(restored[0].state.active_input, Some(active_input));
+
+        let mut cleared = restored[0].state.clone();
+        cleared.snapshot.revision = 2;
+        cleared.active_input = None;
+        assert_eq!(
+            repository
+                .commit(AgentCommit {
+                    agent_id: agent_id.clone(),
+                    expected_revision: Some(1),
+                    next_state: cleared,
+                    events: Vec::new(),
+                    trace_events: Vec::new(),
+                    session_projection: None,
+                    mutation: pl_core::AgentStateMutation::SnapshotAndQueue,
+                })
+                .await
+                .unwrap(),
+            AgentCommitOutcome::Applied
+        );
+        assert_eq!(
+            repository.restore_runtime().await.unwrap()[0]
+                .state
+                .active_input,
+            None
+        );
     }
 
     #[tokio::test]
@@ -648,6 +800,9 @@ mod tests {
                 active_turn_id: None,
                 active_session_id: None,
                 pending_inputs: 0,
+                pending_trigger_inputs: 0,
+                mailbox_delivery_phase: pl_core::MailboxDeliveryPhase::CurrentTurn,
+                dispatch_generation: 0,
                 last_turn: None,
                 revision: 1,
                 event_sequence: 0,
@@ -655,6 +810,7 @@ mod tests {
             },
             sessions: BTreeMap::from([(session_id.clone(), session_state)]),
             pending_inputs: VecDeque::new(),
+            active_input: None,
             accepted_wakes: BTreeMap::new(),
         };
 

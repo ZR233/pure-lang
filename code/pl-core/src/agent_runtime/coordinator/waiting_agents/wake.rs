@@ -4,20 +4,26 @@ use super::ParentWaitState;
 use super::timer::invalidate_timers;
 use crate::agent_runtime::{
     AgentActivityState, AgentCurrentSessionSubmitRequest, AgentId, AgentLifecycleState,
-    AgentRuntimeHandle, AgentSnapshot, AgentWakeBatch, AgentWakeId, AgentWakePolicy,
-    AgentWakeReason, InputDelivery,
+    AgentRuntimeHandle, AgentSnapshot, AgentUpdateKind, AgentWakeBatch, AgentWakeContext,
+    AgentWakeId, AgentWakePolicy, AgentWakeReason, InputDelivery,
 };
 
 const MAX_SEEN_SIGNALS: usize = 4_096;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum WakeParentOutcome {
+    Accepted,
+    NotAccepted,
+}
 
 pub(super) async fn wake_parent(
     runtime: &AgentRuntimeHandle,
     parents: &mut BTreeMap<AgentId, ParentWaitState>,
     parent_id: AgentId,
     reason: AgentWakeReason,
-) {
+) -> WakeParentOutcome {
     let Ok(parent) = runtime.agent_events.snapshot(&parent_id) else {
-        return;
+        return WakeParentOutcome::NotAccepted;
     };
     if parent.lifecycle != AgentLifecycleState::Active
         || !matches!(
@@ -25,11 +31,11 @@ pub(super) async fn wake_parent(
             AgentActivityState::Idle | AgentActivityState::WaitingAgents
         )
     {
-        return;
+        return WakeParentOutcome::NotAccepted;
     }
     let state = parents.entry(parent_id.clone()).or_default();
     if state.wake_in_flight {
-        return;
+        return WakeParentOutcome::NotAccepted;
     }
     let updates = state.pending.values().cloned().collect::<Vec<_>>();
     let wake_key = match &reason {
@@ -38,7 +44,7 @@ pub(super) async fn wake_parent(
             .map(|update| update.signal_id.as_str())
             .collect::<Vec<_>>()
             .join("|"),
-        AgentWakeReason::InactivityTimeout {
+        AgentWakeReason::InactivityDiagnostic {
             timed_out_agent_ids,
         } => format!(
             "timeout:{}:{}:{}",
@@ -52,7 +58,7 @@ pub(super) async fn wake_parent(
         ),
     };
     let Ok(wake_id) = AgentWakeId::new(format!("agent-wake:{parent_id}:{wake_key}")) else {
-        return;
+        return WakeParentOutcome::NotAccepted;
     };
     let signal_ids = updates
         .iter()
@@ -66,20 +72,50 @@ pub(super) async fn wake_parent(
         for update in updates {
             state.remove_pending(&update.signal_id);
         }
-        return;
+        return WakeParentOutcome::Accepted;
     }
+    let children = runtime.agent_events.children(&parent_id);
+    let diagnostic_only =
+        matches!(&reason, AgentWakeReason::InactivityDiagnostic { .. }) && updates.is_empty();
+    let terminal_facts = updates
+        .iter()
+        .filter(|update| {
+            matches!(
+                update.kind,
+                AgentUpdateKind::RuntimeTerminal { .. }
+                    | AgentUpdateKind::ProductPhaseChanged { .. }
+            )
+        })
+        .cloned()
+        .collect();
+    let context = AgentWakeContext {
+        current_agent_states: children.clone(),
+        wake_reason: reason.clone(),
+        last_activity_at: state.last_activity_at.clone(),
+        recent_progress: state.recent_progress.iter().cloned().collect(),
+        latest_commentary: state.latest_commentary.clone(),
+        terminal_facts,
+        user_stop_requested: false,
+        signal_revision: parent.revision,
+        lag_reconciled: state.lag_reconciled,
+        diagnostic_only,
+    };
     let batch = AgentWakeBatch {
         wake_id: wake_id.clone(),
         parent_agent_id: parent_id.clone(),
         reason,
         updates: updates.clone(),
-        children: runtime.agent_events.children(&parent_id),
+        children,
+        context,
     };
     let Ok(batch_json) = serde_json::to_string_pretty(&batch) else {
-        return;
+        return WakeParentOutcome::NotAccepted;
     };
     let request = AgentCurrentSessionSubmitRequest::start(format!(
-        "子代理状态已更新。请根据以下规范快照继续协调；若仍无可执行工作，结束本轮并等待下一次订阅通知。\n\n<agentWakeBatch>\n{batch_json}\n</agentWakeBatch>"
+        "子代理状态已更新。只把 needsAttention、真实终态或 durable product phase 视为可执行事实。\
+普通 progress/commentary 与 inactivityDiagnostic 都不表示失败、完成或停止授权，不得仅据此\
+中断执行者或调用 task_stop。请使用 typed wake context 判断；若仍无可执行工作，结束本轮并\
+等待下一次订阅通知。\n\n<agentWakeBatch>\n{batch_json}\n</agentWakeBatch>"
     ))
     .with_delivery(InputDelivery::Start)
     .with_wake_id(wake_id.clone())
@@ -104,10 +140,13 @@ pub(super) async fn wake_parent(
                 state.remove_pending(&update.signal_id);
             }
             state.wake_in_flight = true;
+            state.lag_reconciled = false;
             invalidate_timers(state);
+            WakeParentOutcome::Accepted
         }
         Err(error) => {
             tracing::warn!(parent_agent_id = %parent_id, %error, "failed to wake parent agent");
+            WakeParentOutcome::NotAccepted
         }
     }
 }

@@ -24,6 +24,16 @@ class TaskRuntimeDetail extends StatelessWidget {
               value: task.statusMessage ?? task.runId,
               valueMaxLines: 2,
             ),
+            StatusDetailRow(label: 'Task ID', value: task.runId),
+            if (task.stopRequestedOrigin case final origin?)
+              StatusDetailRow(
+                key: const ValueKey('task-stop-origin'),
+                label: 'Stop · generation ${task.taskGeneration}',
+                value:
+                    '${_stopOriginLabel(origin)}: '
+                    '${task.stopRequestedReason ?? '-'}',
+                valueMaxLines: 2,
+              ),
             StatusDetailRow(
               label: context.l10n.statusTaskBranch,
               value: task.branch,
@@ -293,3 +303,11 @@ class _SectionDivider extends StatelessWidget {
 
 String _shortCommit(String value) =>
     value.length <= 10 ? value : value.substring(0, 10);
+
+String _stopOriginLabel(String origin) => switch (origin) {
+  'userRequest' => 'UserRequest',
+  'plannerDecision' => 'PlannerDecision',
+  'runtimeFailure' => 'RuntimeFailure',
+  'applicationShutdown' => 'ApplicationShutdown',
+  _ => origin,
+};

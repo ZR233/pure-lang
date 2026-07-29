@@ -301,12 +301,12 @@ impl LiveTaskFixture {
                 let arguments: serde_json::Value = serde_json::from_str(&tool.arguments)
                     .context("headless shooter send_input arguments are not JSON")?;
                 if arguments
-                    .get("delivery")
-                    .and_then(serde_json::Value::as_str)
-                    != Some("interruptThenStart")
+                    .get("interrupt")
+                    .and_then(serde_json::Value::as_bool)
+                    != Some(true)
                 {
                     bail!(
-                        "headless shooter send_input did not use interruptThenStart: {}",
+                        "headless shooter send_input did not request an interrupt: {}",
                         tool.arguments
                     );
                 }

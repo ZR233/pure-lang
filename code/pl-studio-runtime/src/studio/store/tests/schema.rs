@@ -27,7 +27,8 @@ async fn base_schema_contains_framework_and_task_tables() {
                AND name IN (
                  'agent_runtime_states', 'agent_runtime_sessions',
                  'agent_runtime_traces', 'agent_framework_events',
-                 'agent_pending_inputs', 'agent_wake_receipts', 'agent_turns',
+                 'agent_pending_inputs', 'agent_active_inputs',
+                 'agent_wake_receipts', 'agent_turns',
                  'session_event_journal', 'session_view_snapshots',
                  'task_runs', 'work_units', 'agent_outcomes',
                  'merge_records', 'review_rounds', 'branch_leases'
@@ -44,6 +45,7 @@ async fn base_schema_contains_framework_and_task_tables() {
     assert_eq!(
         names,
         vec![
+            "agent_active_inputs",
             "agent_framework_events",
             "agent_outcomes",
             "agent_pending_inputs",
@@ -96,8 +98,11 @@ async fn base_schema_has_only_canonical_session_projection_tables() {
     let task_run_columns = table_columns(&store.db, "task_runs").await;
     for required in [
         "stop_requested",
+        "stop_requested_origin",
         "stop_requested_reason",
         "stop_requested_at",
+        "task_generation",
+        "terminal_generation",
     ] {
         assert!(task_run_columns.iter().any(|column| column == required));
     }
@@ -276,6 +281,9 @@ async fn v2_schema_is_backed_up_and_migrated_without_losing_root_session() {
         active_turn_id: None,
         active_session_id: None,
         pending_inputs: 0,
+        pending_trigger_inputs: 0,
+        mailbox_delivery_phase: pl_core::MailboxDeliveryPhase::CurrentTurn,
+        dispatch_generation: 0,
         last_turn: None,
         revision: 1,
         event_sequence: 1,
@@ -589,6 +597,9 @@ async fn v4_schema_is_backed_up_and_migrated_with_wake_receipts() {
              snapshot_json TEXT NOT NULL,
              updated_at INTEGER NOT NULL
          );
+         CREATE TABLE task_runs (
+             id TEXT PRIMARY KEY
+         );
          CREATE TABLE work_units (
              id TEXT PRIMARY KEY,
              status TEXT NOT NULL
@@ -637,7 +648,16 @@ async fn v5_migration_only_backfills_exact_legacy_discard_evidence() {
         .unwrap();
     execute_sql(
         &db,
-        "CREATE TABLE work_units (
+        "CREATE TABLE agent_runtime_states (
+             agent_id TEXT PRIMARY KEY,
+             revision INTEGER NOT NULL,
+             snapshot_json TEXT NOT NULL,
+             updated_at INTEGER NOT NULL
+         );
+         CREATE TABLE task_runs (
+             id TEXT PRIMARY KEY
+         );
+         CREATE TABLE work_units (
              id TEXT PRIMARY KEY,
              status TEXT NOT NULL
          );
@@ -698,6 +718,138 @@ async fn v5_migration_only_backfills_exact_legacy_discard_evidence() {
     drop(store);
     remove_test_db_files(&db_path).await;
     let _ = tokio::fs::remove_file(format!("{}.v5.bak", db_path.display())).await;
+}
+
+#[tokio::test]
+async fn v6_schema_initializes_empty_active_mailbox_and_task_generation() {
+    let db_path = unique_test_db_path("schema-v6-mailbox-task-stop");
+    remove_test_db_files(&db_path).await;
+    let db = Database::connect(sqlite_url_for_test(&db_path))
+        .await
+        .unwrap();
+    execute_sql(
+        &db,
+        "CREATE TABLE agent_runtime_states (
+             agent_id TEXT PRIMARY KEY,
+             revision INTEGER NOT NULL,
+             snapshot_json TEXT NOT NULL,
+             updated_at INTEGER NOT NULL
+         );
+         CREATE TABLE agent_wake_receipts (
+             agent_id TEXT NOT NULL,
+             wake_id TEXT NOT NULL,
+             receipt_json TEXT NOT NULL,
+             accepted_at INTEGER NOT NULL,
+             PRIMARY KEY (agent_id, wake_id)
+         );
+         CREATE TABLE task_runs (
+             id TEXT PRIMARY KEY,
+             phase TEXT NOT NULL,
+             stop_requested INTEGER NOT NULL DEFAULT 0,
+             stop_requested_reason TEXT,
+             stop_requested_at INTEGER
+         );
+         INSERT INTO agent_runtime_states
+             (agent_id, revision, snapshot_json, updated_at)
+             VALUES ('agent-existing', 1, '{}', 10);
+         INSERT INTO agent_wake_receipts
+             (agent_id, wake_id, receipt_json, accepted_at)
+             VALUES ('agent-existing', 'wake-existing', '{}', 11);
+         INSERT INTO task_runs
+             (id, phase, stop_requested, stop_requested_reason, stop_requested_at)
+             VALUES ('run-existing', 'implementing', 0, NULL, NULL);
+         INSERT INTO task_runs
+             (id, phase, stop_requested, stop_requested_reason, stop_requested_at)
+             VALUES ('run-terminal', 'blocked', 0, NULL, NULL);
+         PRAGMA user_version = 6;",
+    )
+    .await;
+    db.close().await.unwrap();
+
+    let store = StudioStore::open(&db_path).await.unwrap();
+    assert_eq!(
+        schema_version(&store.db).await,
+        STUDIO_DATABASE_SCHEMA_VERSION
+    );
+    assert_eq!(
+        table_columns(&store.db, "agent_active_inputs").await,
+        vec![
+            "agent_id".to_string(),
+            "input_json".to_string(),
+            "updated_at".to_string(),
+        ]
+    );
+
+    let active_input_count = store
+        .db
+        .query_one(Statement::from_string(
+            DatabaseBackend::Sqlite,
+            "SELECT COUNT(*) AS count FROM agent_active_inputs".to_string(),
+        ))
+        .await
+        .unwrap()
+        .unwrap()
+        .try_get::<i64>("", "count")
+        .unwrap();
+    assert_eq!(active_input_count, 0);
+
+    let task = store
+        .db
+        .query_one(Statement::from_string(
+            DatabaseBackend::Sqlite,
+            "SELECT stop_requested_origin, task_generation, terminal_generation
+             FROM task_runs WHERE id = 'run-existing'"
+                .to_string(),
+        ))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        task.try_get::<Option<String>>("", "stop_requested_origin")
+            .unwrap(),
+        None
+    );
+    assert_eq!(task.try_get::<i64>("", "task_generation").unwrap(), 0);
+    assert_eq!(
+        task.try_get::<Option<i64>>("", "terminal_generation")
+            .unwrap(),
+        None
+    );
+    let terminal_generation = store
+        .db
+        .query_one(Statement::from_string(
+            DatabaseBackend::Sqlite,
+            "SELECT terminal_generation
+             FROM task_runs WHERE id = 'run-terminal'"
+                .to_string(),
+        ))
+        .await
+        .unwrap()
+        .unwrap()
+        .try_get::<Option<i64>>("", "terminal_generation")
+        .unwrap();
+    assert_eq!(terminal_generation, Some(0));
+
+    let wake_receipt_count = store
+        .db
+        .query_one(Statement::from_string(
+            DatabaseBackend::Sqlite,
+            "SELECT COUNT(*) AS count FROM agent_wake_receipts".to_string(),
+        ))
+        .await
+        .unwrap()
+        .unwrap()
+        .try_get::<i64>("", "count")
+        .unwrap();
+    assert_eq!(wake_receipt_count, 1);
+    assert!(
+        PathBuf::from(format!("{}.v6.bak", db_path.display())).is_file(),
+        "v6 migration must preserve a recoverable backup"
+    );
+
+    drop(store);
+    remove_test_db_files(&db_path).await;
+    let _ = tokio::fs::remove_file(format!("{}.v6.bak", db_path.display())).await;
 }
 
 #[tokio::test]

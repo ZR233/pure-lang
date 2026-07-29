@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::time::Duration;
 
 use super::coordinator::spawn_coordinator;
@@ -6,7 +7,8 @@ use super::state::{AgentRuntimeError, unix_timestamp};
 use super::{
     AgentActivityState, AgentCommit, AgentCommitOutcome, AgentCommittedEvent, AgentLifecycleState,
     AgentRuntimeEvent, AgentRuntimeEventKind, AgentRuntimeHandle, AgentRuntimeHost,
-    AgentRuntimeResult, AgentTurnOutcome, RestoredAgentRuntime, SessionId, TurnId, TurnOutcomeKind,
+    AgentRuntimeResult, AgentTurnOutcome, MailboxDeliveryPhase, MailboxDeliveryState,
+    RestoredAgentRuntime, SessionId, TurnId, TurnOutcomeKind,
 };
 use crate::session_event::{project_runtime_event, runtime_event_session_id};
 use crate::{SessionEventHub, SessionEventHubHandle, SessionEventOptions};
@@ -127,8 +129,32 @@ where
 {
     let mut recovered = Vec::with_capacity(restored.len());
     for mut agent in restored {
+        let interrupted_turn_id = agent.state.snapshot.active_turn_id.clone();
+        let recovered_generation = agent.state.snapshot.dispatch_generation.saturating_add(1);
+        let mut pending_inputs = VecDeque::new();
+        while let Some(mut input) = agent.state.pending_inputs.pop_front() {
+            if input.mail_id.trim().is_empty() {
+                input.mail_id = format!("mail:{}", input.turn_id);
+            }
+            match input.delivery_state {
+                MailboxDeliveryState::Pending => pending_inputs.push_back(input),
+                MailboxDeliveryState::Claimed { .. } => {
+                    input.delivery_state = MailboxDeliveryState::Pending;
+                    input.dispatch_generation = recovered_generation;
+                    if interrupted_turn_id.as_ref() == Some(&input.turn_id) {
+                        input.turn_id = TurnId::generate();
+                    }
+                    pending_inputs.push_back(input);
+                }
+                MailboxDeliveryState::Consumed { .. } => {}
+            }
+        }
+        agent.state.pending_inputs = pending_inputs;
+        agent.state.refresh_mailbox_snapshot();
+        let had_active_input = agent.state.active_input.is_some();
         let interrupted = agent.state.snapshot.active_turn_id.is_some()
             || agent.state.snapshot.active_session_id.is_some()
+            || had_active_input
             || matches!(
                 agent.state.snapshot.activity,
                 AgentActivityState::Running
@@ -138,6 +164,20 @@ where
         if !interrupted {
             recovered.push(agent);
             continue;
+        }
+        if let Some(mut active_input) = agent.state.active_input.take() {
+            if active_input.mail_id.trim().is_empty() {
+                active_input.mail_id = format!("mail:{}", active_input.turn_id);
+            }
+            if matches!(
+                active_input.delivery_state,
+                MailboxDeliveryState::Pending | MailboxDeliveryState::Claimed { .. }
+            ) {
+                active_input.delivery_state = MailboxDeliveryState::Pending;
+                active_input.dispatch_generation = recovered_generation;
+                active_input.turn_id = TurnId::generate();
+                agent.state.pending_inputs.push_front(active_input);
+            }
         }
         let turn_id = agent
             .state
@@ -166,11 +206,14 @@ where
         agent.state.snapshot.event_sequence = agent.state.snapshot.event_sequence.saturating_add(1);
         agent.state.snapshot.active_turn_id = None;
         agent.state.snapshot.active_session_id = None;
+        agent.state.snapshot.dispatch_generation = recovered_generation;
+        agent.state.snapshot.mailbox_delivery_phase = MailboxDeliveryPhase::NextTurn;
         agent.state.snapshot.last_turn = Some(outcome.clone());
-        agent.state.snapshot.activity = if agent.state.pending_inputs.is_empty() {
-            AgentActivityState::Idle
-        } else {
+        agent.state.refresh_mailbox_snapshot();
+        agent.state.snapshot.activity = if agent.state.has_triggering_input() {
             AgentActivityState::Queued
+        } else {
+            AgentActivityState::Idle
         };
         if agent.state.snapshot.lifecycle != AgentLifecycleState::Active {
             agent.state.snapshot.activity = AgentActivityState::Idle;

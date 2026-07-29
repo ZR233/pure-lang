@@ -115,6 +115,77 @@ impl TaskRunPhase {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum TaskStopOrigin {
+    UserRequest,
+    PlannerDecision,
+    RuntimeFailure,
+    ApplicationShutdown,
+}
+
+impl TaskStopOrigin {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::UserRequest => "userRequest",
+            Self::PlannerDecision => "plannerDecision",
+            Self::RuntimeFailure => "runtimeFailure",
+            Self::ApplicationShutdown => "applicationShutdown",
+        }
+    }
+
+    pub(crate) fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "userRequest" => Some(Self::UserRequest),
+            "plannerDecision" => Some(Self::PlannerDecision),
+            "runtimeFailure" => Some(Self::RuntimeFailure),
+            "applicationShutdown" => Some(Self::ApplicationShutdown),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn stops_root_turn(self) -> bool {
+        !matches!(self, Self::PlannerDecision)
+    }
+
+    pub(crate) fn display_label(self) -> &'static str {
+        match self {
+            Self::UserRequest => "用户请求",
+            Self::PlannerDecision => "Planner 决策",
+            Self::RuntimeFailure => "运行时故障",
+            Self::ApplicationShutdown => "应用关闭",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub(crate) struct TaskStopReason(String);
+
+impl TaskStopReason {
+    pub(crate) fn new(value: impl Into<String>) -> Option<Self> {
+        let value = value.into();
+        let value = value.trim();
+        (!value.is_empty()).then(|| Self(value.to_string()))
+    }
+
+    pub(crate) fn from_stored(value: String) -> Self {
+        Self(value)
+    }
+
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::ops::Deref for TaskStopReason {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        self.as_str()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct TaskRunRecord {
@@ -130,8 +201,11 @@ pub(crate) struct TaskRunRecord {
     pub(crate) design_commit: Option<String>,
     pub(crate) status_message: Option<String>,
     pub(crate) stop_requested: bool,
-    pub(crate) stop_requested_reason: Option<String>,
+    pub(crate) stop_requested_origin: Option<TaskStopOrigin>,
+    pub(crate) stop_requested_reason: Option<TaskStopReason>,
     pub(crate) stop_requested_at: Option<i64>,
+    pub(crate) task_generation: u64,
+    pub(crate) terminal_generation: Option<u64>,
     pub(crate) created_at: i64,
     pub(crate) updated_at: i64,
 }
@@ -503,6 +577,7 @@ pub(crate) enum DeliveryScopeResolution {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DeliveryRecoveryClaim {
     pub(crate) task_run_id: String,
+    pub(crate) task_generation: u64,
     pub(crate) outcome_id: String,
     pub(crate) work_unit_id: String,
     pub(crate) agent_id: String,
@@ -529,6 +604,12 @@ pub(crate) enum DeliveryRecoveryDispatch {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DeliveryRecoveryNeed {
-    NoDelivery,
+    NoDelivery { task_generation: u64 },
     Recoverable,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DeliveryRecoveryFailureRecording {
+    Recorded,
+    Suppressed,
 }

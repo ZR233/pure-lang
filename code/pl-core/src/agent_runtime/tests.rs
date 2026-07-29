@@ -34,6 +34,7 @@ struct TestRepository {
     fail_terminal: Arc<Mutex<bool>>,
     fail_registration: Arc<Mutex<bool>>,
     fail_lifecycle: Arc<Mutex<Option<AgentLifecycleState>>>,
+    fail_turn_queue: Arc<Mutex<bool>>,
 }
 
 impl TestRepository {
@@ -45,6 +46,7 @@ impl TestRepository {
             fail_terminal: Arc::new(Mutex::new(false)),
             fail_registration: Arc::new(Mutex::new(false)),
             fail_lifecycle: Arc::new(Mutex::new(None)),
+            fail_turn_queue: Arc::new(Mutex::new(false)),
         }
     }
 
@@ -72,6 +74,14 @@ impl TestRepository {
 
     fn fail_next_lifecycle_commit(&self, lifecycle: AgentLifecycleState) {
         *self.fail_lifecycle.lock().unwrap() = Some(lifecycle);
+    }
+
+    fn fail_next_turn_queue_commit(&self) {
+        *self.fail_turn_queue.lock().unwrap() = true;
+    }
+
+    fn turn_queue_failure_is_pending(&self) -> bool {
+        *self.fail_turn_queue.lock().unwrap()
     }
 
     fn state(&self, id: &AgentId) -> AgentDurableState {
@@ -126,6 +136,14 @@ impl AgentStateRepository for TestRepository {
         {
             return Err(TestError("terminal commit failed".to_string()));
         }
+        if commit
+            .events
+            .iter()
+            .any(|event| matches!(event.kind, AgentRuntimeEventKind::TurnQueued { .. }))
+            && std::mem::take(&mut *self.fail_turn_queue.lock().unwrap())
+        {
+            return Err(TestError("turn queue commit failed".to_string()));
+        }
         let mut states = self.states.lock().unwrap();
         let actual = states
             .get(&commit.agent_id)
@@ -145,6 +163,7 @@ impl AgentStateRepository for TestRepository {
 struct TestTurnFactory {
     mode: FactoryMode,
     prepared_messages: Arc<Mutex<Vec<String>>>,
+    prepared_batches: Arc<Mutex<Vec<Vec<String>>>>,
     blocker: Arc<Notify>,
 }
 
@@ -153,6 +172,7 @@ impl TestTurnFactory {
         Self {
             mode,
             prepared_messages: Arc::new(Mutex::new(Vec::new())),
+            prepared_batches: Arc::new(Mutex::new(Vec::new())),
             blocker: Arc::new(Notify::new()),
         }
     }
@@ -165,6 +185,13 @@ impl AgentTurnFactory for TestTurnFactory {
         &self,
         context: AgentTurnPreparationContext,
     ) -> std::result::Result<PreparedAgentTurn, Self::Error> {
+        let mut batch = context
+            .leading_inputs
+            .iter()
+            .map(|input| input.message.clone())
+            .collect::<Vec<_>>();
+        batch.push(context.input.message.clone());
+        self.prepared_batches.lock().unwrap().push(batch);
         self.prepared_messages
             .lock()
             .unwrap()
@@ -413,6 +440,24 @@ async fn wait_for_prepared_messages(factory: &TestTurnFactory, expected: usize) 
     .expect("turn factory should receive the expected inputs");
 }
 
+async fn wait_for_activity(
+    handle: &AgentRuntimeHandle,
+    agent_id: &AgentId,
+    activity: AgentActivityState,
+) -> AgentSnapshot {
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            let snapshot = handle.snapshot(agent_id.clone()).await.unwrap();
+            if snapshot.activity == activity {
+                break snapshot;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("agent should reach the expected activity")
+}
+
 #[tokio::test]
 async fn product_gated_runtime_terminal_requires_product_signal() {
     let parent = registration("root", "root-chat")
@@ -483,6 +528,114 @@ async fn product_gated_runtime_terminal_requires_product_signal() {
         update.kind,
         AgentUpdateKind::ProductPhaseChanged { .. }
     ));
+}
+
+#[tokio::test]
+async fn unregistered_product_completion_only_queues_a_non_triggering_notification() {
+    let host = TestHost::new(TestRepository::empty(), FactoryMode::Fail);
+    let runtime = AgentRuntime::start(host.clone(), test_options())
+        .await
+        .unwrap();
+    let handle = runtime.handle();
+    let root = AgentId::new("root").unwrap();
+    handle
+        .register(registration("root", "root-chat"))
+        .await
+        .unwrap();
+    let child = handle
+        .spawn(managed_child_spawn_request(root.clone()))
+        .await
+        .unwrap()
+        .snapshot
+        .identity
+        .id;
+
+    handle
+        .publish_product_phase(
+            root.clone(),
+            child,
+            "delivery:unregistered".to_string(),
+            "deliveryCompleted".to_string(),
+            None,
+        )
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            if handle.snapshot(root.clone()).await.unwrap().pending_inputs == 1 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+
+    let snapshot = handle.snapshot(root).await.unwrap();
+    assert_eq!(snapshot.activity, AgentActivityState::Idle);
+    assert_eq!(snapshot.pending_inputs, 1);
+    assert_eq!(snapshot.pending_trigger_inputs, 0);
+    assert!(
+        host.turn_factory
+            .prepared_messages
+            .lock()
+            .unwrap()
+            .is_empty()
+    );
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn registered_product_completion_coalesces_notification_and_wake_into_one_turn() {
+    let repository = TestRepository::empty();
+    let host = TestHost::new(repository.clone(), FactoryMode::Block);
+    let runtime = AgentRuntime::start(host.clone(), test_options())
+        .await
+        .unwrap();
+    let handle = runtime.handle();
+    let root = AgentId::new("root").unwrap();
+    handle
+        .register(registration("root", "root-chat"))
+        .await
+        .unwrap();
+    let child = handle
+        .spawn(managed_child_spawn_request(root.clone()))
+        .await
+        .unwrap()
+        .snapshot
+        .identity
+        .id;
+    handle.enter_waiting_agents(root.clone()).await.unwrap();
+
+    handle
+        .publish_product_phase(
+            root.clone(),
+            child,
+            "delivery:registered".to_string(),
+            "deliveryCompleted".to_string(),
+            None,
+        )
+        .unwrap();
+    wait_for_prepared_messages(&host.turn_factory, 1).await;
+    let durable = repository.state(&root);
+    assert_eq!(
+        durable.active_input.as_ref().map(|input| input.trigger),
+        Some(MailboxTurnTrigger::StartIfIdle)
+    );
+    assert_eq!(durable.pending_inputs.len(), 1);
+    assert_eq!(
+        durable.pending_inputs[0].trigger,
+        MailboxTurnTrigger::DoNotStart
+    );
+    assert_eq!(durable.accepted_wakes.len(), 1);
+    host.turn_factory.blocker.notify_one();
+    wait_for_activity(&handle, &root, AgentActivityState::Idle).await;
+
+    let batches = host.turn_factory.prepared_batches.lock().unwrap().clone();
+    assert_eq!(batches.len(), 1);
+    assert_eq!(batches[0].len(), 2);
+    assert!(batches[0][0].contains("<agentResultNotification>"));
+    assert!(batches[0][1].contains("<agentWakeBatch>"));
+    runtime.shutdown().await.unwrap();
 }
 
 #[tokio::test]
@@ -852,7 +1005,9 @@ async fn restored_idle_parent_with_live_child_waits_before_timeout_wake() {
         "restored live state is a subscription baseline, not an immediate wake"
     );
     wait_for_prepared_messages(&host.turn_factory, 1).await;
-    assert!(host.turn_factory.prepared_messages.lock().unwrap()[0].contains("inactivityTimeout"));
+    assert!(
+        host.turn_factory.prepared_messages.lock().unwrap()[0].contains("inactivityDiagnostic")
+    );
     runtime.shutdown().await.unwrap();
 }
 
@@ -896,13 +1051,64 @@ async fn child_update_does_not_preempt_running_parent() {
     tokio::time::sleep(Duration::from_millis(20)).await;
     let running = handle.snapshot(root.clone()).await.unwrap();
     assert_eq!(running.activity, AgentActivityState::Running);
-    assert_eq!(running.pending_inputs, 0);
+    assert_eq!(running.pending_inputs, 1);
     assert_eq!(host.turn_factory.prepared_messages.lock().unwrap().len(), 1);
 
     host.turn_factory.blocker.notify_one();
     wait_for_prepared_messages(&host.turn_factory, 2).await;
-    let messages = host.turn_factory.prepared_messages.lock().unwrap().clone();
-    assert!(messages[1].contains("<agentWakeBatch>"));
+    let batches = host.turn_factory.prepared_batches.lock().unwrap().clone();
+    assert_eq!(batches[1].len(), 2);
+    assert!(batches[1][0].contains("<agentResultNotification>"));
+    assert!(batches[1][1].contains("<agentWakeBatch>"));
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn non_interrupting_input_steers_the_active_turn_and_survives_cancellation() {
+    let repository = TestRepository::empty();
+    let host = TestHost::new(repository.clone(), FactoryMode::Block);
+    let runtime = AgentRuntime::start(host.clone(), test_options())
+        .await
+        .unwrap();
+    let handle = runtime.handle();
+    let root = AgentId::new("root").unwrap();
+    let session = SessionId::new("root-chat").unwrap();
+    handle
+        .register(registration(root.as_str(), session.as_str()))
+        .await
+        .unwrap();
+    let active_turn = handle
+        .submit(
+            root.clone(),
+            AgentSubmitRequest::start(session.clone(), "initial"),
+        )
+        .await
+        .unwrap();
+    wait_for_prepared_messages(&host.turn_factory, 1).await;
+
+    let steered_turn = handle
+        .submit(
+            root.clone(),
+            AgentSubmitRequest::start(session, "steer without interrupt"),
+        )
+        .await
+        .unwrap();
+    assert_eq!(steered_turn, active_turn);
+    let durable = repository.state(&root);
+    assert_eq!(
+        durable.snapshot.mailbox_delivery_phase,
+        MailboxDeliveryPhase::CurrentTurn
+    );
+    assert_eq!(durable.pending_inputs.len(), 1);
+    assert!(matches!(
+        &durable.pending_inputs[0].delivery_state,
+        MailboxDeliveryState::Claimed { turn_id, .. } if turn_id == &active_turn
+    ));
+
+    handle.cancel_turn(root.clone(), active_turn).await.unwrap();
+    let settled = wait_for_activity(&handle, &root, AgentActivityState::Idle).await;
+    assert_eq!(settled.pending_inputs, 1);
+    assert_eq!(settled.pending_trigger_inputs, 0);
     runtime.shutdown().await.unwrap();
 }
 
@@ -1026,12 +1232,16 @@ async fn child_progress_only_resets_that_child_inactivity_deadline() {
             "progress:child-a:1".to_string(),
         )
         .unwrap();
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    assert_eq!(
+        host.turn_factory.prepared_messages.lock().unwrap().len(),
+        1,
+        "progress must refresh context without waking the planner"
+    );
     wait_for_prepared_messages(&host.turn_factory, 2).await;
-    host.turn_factory.blocker.notify_one();
-    wait_for_prepared_messages(&host.turn_factory, 3).await;
 
     let messages = host.turn_factory.prepared_messages.lock().unwrap().clone();
-    let batch_json = messages[2]
+    let batch_json = messages[1]
         .split_once("<agentWakeBatch>\n")
         .and_then(|(_, tail)| tail.split_once("\n</agentWakeBatch>"))
         .map(|(json, _)| json)
@@ -1039,15 +1249,170 @@ async fn child_progress_only_resets_that_child_inactivity_deadline() {
     let batch: AgentWakeBatch = serde_json::from_str(batch_json).unwrap();
     assert_eq!(
         batch.reason,
-        AgentWakeReason::InactivityTimeout {
+        AgentWakeReason::InactivityDiagnostic {
             timed_out_agent_ids: vec![child_b],
         }
     );
     assert_ne!(
         batch.reason,
-        AgentWakeReason::InactivityTimeout {
+        AgentWakeReason::InactivityDiagnostic {
             timed_out_agent_ids: vec![child_a],
         }
+    );
+    assert!(batch.context.diagnostic_only);
+    assert!(
+        batch
+            .context
+            .recent_progress
+            .iter()
+            .any(|update| update.summary.as_deref() == Some("still working"))
+    );
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test(start_paused = true)]
+async fn inactivity_deadline_is_event_driven_single_shot_and_keeps_eight_updates() {
+    let host = TestHost::new(TestRepository::empty(), FactoryMode::Block);
+    let mut options = test_options();
+    options.child_inactivity_timeout = Duration::from_secs(30);
+    let runtime = AgentRuntime::start(host.clone(), options).await.unwrap();
+    let handle = runtime.handle();
+    let root = AgentId::new("root").unwrap();
+    handle
+        .register(registration("root", "root-chat"))
+        .await
+        .unwrap();
+    let child = handle
+        .spawn(managed_child_spawn_request(root.clone()))
+        .await
+        .unwrap()
+        .snapshot
+        .identity
+        .id;
+    handle.enter_waiting_agents(root.clone()).await.unwrap();
+
+    tokio::time::advance(Duration::from_secs(29)).await;
+    tokio::task::yield_now().await;
+    assert!(
+        host.turn_factory
+            .prepared_messages
+            .lock()
+            .unwrap()
+            .is_empty()
+    );
+    for index in 0..10 {
+        handle
+            .publish_progress(
+                &child,
+                AgentUpdateKind::ProgressReported,
+                Some(format!("progress-{index}")),
+                format!("progress:{index}"),
+            )
+            .unwrap();
+        tokio::task::yield_now().await;
+    }
+    tokio::time::advance(Duration::from_secs(29)).await;
+    tokio::task::yield_now().await;
+    assert!(
+        host.turn_factory
+            .prepared_messages
+            .lock()
+            .unwrap()
+            .is_empty(),
+        "progress must reset the inactivity deadline without waking the parent"
+    );
+
+    tokio::time::advance(Duration::from_secs(1)).await;
+    wait_for_prepared_messages(&host.turn_factory, 1).await;
+    let messages = host.turn_factory.prepared_messages.lock().unwrap().clone();
+    let batch_json = messages[0]
+        .split_once("<agentWakeBatch>\n")
+        .and_then(|(_, tail)| tail.split_once("\n</agentWakeBatch>"))
+        .map(|(json, _)| json)
+        .expect("timeout wake should contain a typed batch");
+    let batch: AgentWakeBatch = serde_json::from_str(batch_json).unwrap();
+    assert_eq!(batch.context.recent_progress.len(), 8);
+    assert_eq!(
+        batch.context.recent_progress[0].summary.as_deref(),
+        Some("progress-2")
+    );
+    assert_eq!(
+        batch.context.latest_commentary.as_deref(),
+        Some("progress-9")
+    );
+
+    tokio::time::advance(Duration::from_secs(60)).await;
+    tokio::task::yield_now().await;
+    assert_eq!(
+        host.turn_factory.prepared_messages.lock().unwrap().len(),
+        1,
+        "the same waiting epoch must emit only one inactivity diagnostic"
+    );
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test(start_paused = true)]
+async fn failed_inactivity_wake_retries_on_a_new_deadline() {
+    let repository = TestRepository::empty();
+    let host = TestHost::new(repository.clone(), FactoryMode::Block);
+    let mut options = test_options();
+    options.child_inactivity_timeout = Duration::from_secs(30);
+    let runtime = AgentRuntime::start(host.clone(), options).await.unwrap();
+    let handle = runtime.handle();
+    let root = AgentId::new("root").unwrap();
+    handle
+        .register(registration("root", "root-chat"))
+        .await
+        .unwrap();
+    handle
+        .spawn(managed_child_spawn_request(root.clone()))
+        .await
+        .unwrap();
+    handle.enter_waiting_agents(root).await.unwrap();
+    repository.fail_next_turn_queue_commit();
+
+    tokio::time::advance(Duration::from_secs(30)).await;
+    for _ in 0..100 {
+        if !repository.turn_queue_failure_is_pending() {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    assert!(
+        !repository.turn_queue_failure_is_pending(),
+        "the first inactivity wake must reach the injected durable queue failure"
+    );
+    assert!(
+        host.turn_factory
+            .prepared_messages
+            .lock()
+            .unwrap()
+            .is_empty(),
+        "a rejected wake is not an accepted diagnostic"
+    );
+
+    tokio::time::advance(Duration::from_secs(29)).await;
+    tokio::task::yield_now().await;
+    assert!(
+        host.turn_factory
+            .prepared_messages
+            .lock()
+            .unwrap()
+            .is_empty(),
+        "diagnostic transport retry must use a deadline instead of short polling"
+    );
+
+    tokio::time::advance(Duration::from_secs(1)).await;
+    wait_for_prepared_messages(&host.turn_factory, 1).await;
+    assert!(
+        host.turn_factory.prepared_messages.lock().unwrap()[0].contains("inactivityDiagnostic")
+    );
+    tokio::time::advance(Duration::from_secs(60)).await;
+    tokio::task::yield_now().await;
+    assert_eq!(
+        host.turn_factory.prepared_messages.lock().unwrap().len(),
+        1,
+        "the accepted retry must remain single-shot in the waiting epoch"
     );
     runtime.shutdown().await.unwrap();
 }
@@ -1092,7 +1457,7 @@ async fn silent_managed_child_enters_waiting_agents_then_times_out() {
     .unwrap();
     wait_for_prepared_messages(&host.turn_factory, 2).await;
     let messages = host.turn_factory.prepared_messages.lock().unwrap().clone();
-    assert!(messages[1].contains("inactivityTimeout"));
+    assert!(messages[1].contains("inactivityDiagnostic"));
     runtime.shutdown().await.unwrap();
 }
 
@@ -1441,12 +1806,12 @@ async fn queue_only_inputs_preserve_fifo_when_a_later_input_starts_queue() {
     handle.wait_until_idle(agent_id).await.unwrap();
 
     assert_eq!(
-        host.turn_factory.prepared_messages.lock().unwrap().clone(),
-        vec![
+        host.turn_factory.prepared_batches.lock().unwrap().clone(),
+        vec![vec![
             "first".to_string(),
             "second".to_string(),
             "third".to_string()
-        ]
+        ]]
     );
     runtime.shutdown().await.unwrap();
 }
@@ -1491,7 +1856,8 @@ async fn concurrent_submits_are_serialized_without_losing_inputs() {
 
 #[tokio::test]
 async fn interrupt_then_start_preempts_the_existing_fifo_queue() {
-    let host = TestHost::new(TestRepository::empty(), FactoryMode::Block);
+    let repository = TestRepository::empty();
+    let host = TestHost::new(repository.clone(), FactoryMode::Block);
     let runtime = AgentRuntime::start(host.clone(), test_options())
         .await
         .unwrap();
@@ -1525,22 +1891,24 @@ async fn interrupt_then_start_preempts_the_existing_fifo_queue() {
         .unwrap();
 
     wait_for_prepared_messages(&host.turn_factory, 2).await;
+    let durable = repository.state(&agent_id);
+    assert_eq!(durable.snapshot.dispatch_generation, 1);
+    assert_eq!(durable.pending_inputs.len(), 1);
+    assert_eq!(durable.pending_inputs[0].message, "later");
+    assert_eq!(durable.pending_inputs[0].dispatch_generation, 0);
+    assert_eq!(durable.snapshot.pending_trigger_inputs, 0);
     host.turn_factory.blocker.notify_one();
-    wait_for_prepared_messages(&host.turn_factory, 3).await;
-    host.turn_factory.blocker.notify_one();
-    handle
+    let settled = handle
         .wait_timeout(agent_id, Duration::from_secs(1))
         .await
         .unwrap();
 
     assert_eq!(
         host.turn_factory.prepared_messages.lock().unwrap().clone(),
-        vec![
-            "first".to_string(),
-            "urgent".to_string(),
-            "later".to_string()
-        ]
+        vec!["first".to_string(), "urgent".to_string()]
     );
+    assert_eq!(settled.snapshot.pending_inputs, 1);
+    assert_eq!(settled.snapshot.pending_trigger_inputs, 0);
     runtime.shutdown().await.unwrap();
 }
 
@@ -1653,6 +2021,7 @@ async fn checkpoint_survives_cancel_and_stale_sequences_are_ignored() {
                 sequence: 1,
                 session: checkpoint_session,
                 reason: TurnCheckpointReason::WorkingSetChanged,
+                consumed_mail_ids: Vec::new(),
             },
         )
         .await
@@ -1668,6 +2037,7 @@ async fn checkpoint_survives_cancel_and_stale_sequences_are_ignored() {
                 sequence: 1,
                 session: AgentSession::new(),
                 reason: TurnCheckpointReason::BeforeInference,
+                consumed_mail_ids: Vec::new(),
             },
         )
         .await
@@ -1709,6 +2079,7 @@ async fn checkpoint_survives_cancel_and_stale_sequences_are_ignored() {
                 sequence: 2,
                 session: AgentSession::new(),
                 reason: TurnCheckpointReason::Terminal,
+                consumed_mail_ids: Vec::new(),
             },
         )
         .await
@@ -2005,12 +2376,16 @@ async fn restart_recovery_replays_pending_inputs_in_fifo_order() {
     let mut state = registration("root", "chat").into_durable_state();
     for (index, message) in ["first", "second"].into_iter().enumerate() {
         state.pending_inputs.push_back(PendingAgentInput {
+            mail_id: format!("mail:turn-{index}"),
             turn_id: TurnId::new(format!("turn-{index}")).unwrap(),
             wake_id: None,
             wake_signal_ids: Vec::new(),
             session_id: session_id.clone(),
             message: message.to_string(),
             metadata: serde_json::Value::Null,
+            trigger: MailboxTurnTrigger::StartIfIdle,
+            delivery_state: Default::default(),
+            dispatch_generation: 0,
             queued_at: index as i64,
         });
     }
@@ -2042,12 +2417,16 @@ async fn restored_inputs_wait_for_host_resource_activation() {
     let session_id = SessionId::new("chat").unwrap();
     let mut state = registration("root", "chat").into_durable_state();
     state.pending_inputs.push_back(PendingAgentInput {
+        mail_id: "mail:restored-turn".to_string(),
         turn_id: TurnId::new("restored-turn").unwrap(),
         wake_id: None,
         wake_signal_ids: Vec::new(),
         session_id,
         message: "after-resources-ready".to_string(),
         metadata: serde_json::Value::Null,
+        trigger: MailboxTurnTrigger::StartIfIdle,
+        delivery_state: Default::default(),
+        dispatch_generation: 0,
         queued_at: 1,
     });
     state.snapshot.activity = AgentActivityState::Queued;

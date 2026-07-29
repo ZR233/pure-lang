@@ -422,6 +422,9 @@ class BridgeTaskRuntimeDto {
   final String branch;
   final String expectedHead;
   final String? statusMessage;
+  final String? stopRequestedOrigin;
+  final String? stopRequestedReason;
+  final BigInt taskGeneration;
   final List<BridgeTaskWorkUnitDto> workUnits;
   final List<BridgeTaskAgentDto> agents;
   final List<BridgeTaskMergeDto> merges;
@@ -433,6 +436,9 @@ class BridgeTaskRuntimeDto {
     required this.branch,
     required this.expectedHead,
     this.statusMessage,
+    this.stopRequestedOrigin,
+    this.stopRequestedReason,
+    required this.taskGeneration,
     required this.workUnits,
     required this.agents,
     required this.merges,
@@ -446,6 +452,9 @@ class BridgeTaskRuntimeDto {
       branch.hashCode ^
       expectedHead.hashCode ^
       statusMessage.hashCode ^
+      stopRequestedOrigin.hashCode ^
+      stopRequestedReason.hashCode ^
+      taskGeneration.hashCode ^
       workUnits.hashCode ^
       agents.hashCode ^
       merges.hashCode ^
@@ -461,6 +470,9 @@ class BridgeTaskRuntimeDto {
           branch == other.branch &&
           expectedHead == other.expectedHead &&
           statusMessage == other.statusMessage &&
+          stopRequestedOrigin == other.stopRequestedOrigin &&
+          stopRequestedReason == other.stopRequestedReason &&
+          taskGeneration == other.taskGeneration &&
           workUnits == other.workUnits &&
           agents == other.agents &&
           merges == other.merges &&

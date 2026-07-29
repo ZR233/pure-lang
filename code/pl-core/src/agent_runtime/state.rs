@@ -32,6 +32,44 @@ pub enum AgentActivityState {
     WaitingAgents,
 }
 
+/// 当前 turn 是否仍接受 mailbox 输入。
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum MailboxDeliveryPhase {
+    #[default]
+    CurrentTurn,
+    NextTurn,
+}
+
+/// mailbox 输入是否可以在 agent 空闲时启动 turn。
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum MailboxTurnTrigger {
+    DoNotStart,
+    #[default]
+    StartIfIdle,
+}
+
+/// mailbox envelope 与模型上下文 checkpoint 的持久投递状态。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "state"
+)]
+pub enum MailboxDeliveryState {
+    #[default]
+    Pending,
+    Claimed {
+        turn_id: TurnId,
+        checkpoint_seq: u64,
+    },
+    Consumed {
+        turn_id: TurnId,
+        checkpoint_seq: u64,
+    },
+}
+
 /// 子代理 runtime 终态如何参与父代理唤醒。
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -89,6 +127,12 @@ pub struct AgentSnapshot {
     pub active_turn_id: Option<TurnId>,
     pub active_session_id: Option<SessionId>,
     pub pending_inputs: usize,
+    #[serde(default)]
+    pub pending_trigger_inputs: usize,
+    #[serde(default)]
+    pub mailbox_delivery_phase: MailboxDeliveryPhase,
+    #[serde(default)]
+    pub dispatch_generation: u64,
     pub last_turn: Option<AgentTurnOutcome>,
     pub revision: u64,
     pub event_sequence: u64,
@@ -135,10 +179,12 @@ pub enum InputDelivery {
     InterruptThenStart,
 }
 
-/// 已分配 turn id、可持久化和恢复的输入。
+/// 已分配 turn id、可持久化和恢复的 mailbox envelope。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct PendingAgentInput {
+pub struct DurableMailboxEnvelope {
+    #[serde(default)]
+    pub mail_id: String,
     pub turn_id: TurnId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wake_id: Option<AgentWakeId>,
@@ -148,7 +194,33 @@ pub struct PendingAgentInput {
     pub message: String,
     #[serde(default)]
     pub metadata: serde_json::Value,
+    #[serde(default)]
+    pub trigger: MailboxTurnTrigger,
+    #[serde(default)]
+    pub delivery_state: MailboxDeliveryState,
+    #[serde(default)]
+    pub dispatch_generation: u64,
     pub queued_at: i64,
+}
+
+/// 兼容既有 runtime/repository API 的 mailbox envelope 别名。
+pub type PendingAgentInput = DurableMailboxEnvelope;
+
+impl DurableMailboxEnvelope {
+    pub(crate) fn claim(&mut self, turn_id: TurnId, dispatch_generation: u64) {
+        self.dispatch_generation = dispatch_generation;
+        self.delivery_state = MailboxDeliveryState::Claimed {
+            turn_id,
+            checkpoint_seq: 0,
+        };
+    }
+
+    pub(crate) fn consume(&mut self, checkpoint_seq: u64) {
+        self.delivery_state = MailboxDeliveryState::Consumed {
+            turn_id: self.turn_id.clone(),
+            checkpoint_seq,
+        };
+    }
 }
 
 /// runtime 已接受的订阅唤醒凭据；用于跨重启抑制同一事实的重复续轮。
@@ -169,6 +241,7 @@ pub struct AgentSubmitRequest {
     pub message: String,
     pub metadata: serde_json::Value,
     pub delivery: InputDelivery,
+    pub mail_id: Option<String>,
     pub wake_id: Option<AgentWakeId>,
     pub wake_signal_ids: Vec<String>,
 }
@@ -181,6 +254,7 @@ impl AgentSubmitRequest {
             message: message.into(),
             metadata: serde_json::Value::Null,
             delivery: InputDelivery::Start,
+            mail_id: None,
             wake_id: None,
             wake_signal_ids: Vec::new(),
         }
@@ -195,6 +269,12 @@ impl AgentSubmitRequest {
     /// 设置明确的输入投递语义。
     pub fn with_delivery(mut self, delivery: InputDelivery) -> Self {
         self.delivery = delivery;
+        self
+    }
+
+    /// 指定传输重试使用的稳定 mailbox id；不会被模型看到。
+    pub fn with_mail_id(mut self, mail_id: impl Into<String>) -> Self {
+        self.mail_id = Some(mail_id.into());
         self
     }
 
@@ -217,6 +297,7 @@ pub struct AgentCurrentSessionSubmitRequest {
     pub message: String,
     pub metadata: serde_json::Value,
     pub delivery: InputDelivery,
+    pub mail_id: Option<String>,
     pub wake_id: Option<AgentWakeId>,
     pub wake_signal_ids: Vec<String>,
 }
@@ -228,6 +309,7 @@ impl AgentCurrentSessionSubmitRequest {
             message: message.into(),
             metadata: serde_json::Value::Null,
             delivery: InputDelivery::Start,
+            mail_id: None,
             wake_id: None,
             wake_signal_ids: Vec::new(),
         }
@@ -242,6 +324,12 @@ impl AgentCurrentSessionSubmitRequest {
     /// 设置明确的输入投递语义。
     pub fn with_delivery(mut self, delivery: InputDelivery) -> Self {
         self.delivery = delivery;
+        self
+    }
+
+    /// 指定传输重试使用的稳定 mailbox id；不会被模型看到。
+    pub fn with_mail_id(mut self, mail_id: impl Into<String>) -> Self {
+        self.mail_id = Some(mail_id.into());
         self
     }
 
@@ -273,7 +361,35 @@ pub struct AgentDurableState {
     pub snapshot: AgentSnapshot,
     pub sessions: BTreeMap<SessionId, AgentSessionState>,
     pub pending_inputs: VecDeque<PendingAgentInput>,
+    pub active_input: Option<DurableMailboxEnvelope>,
     pub accepted_wakes: BTreeMap<AgentWakeId, AcceptedAgentWake>,
+}
+
+impl AgentDurableState {
+    pub(crate) fn has_triggering_input(&self) -> bool {
+        self.triggering_input_position().is_some()
+    }
+
+    pub(crate) fn triggering_input_position(&self) -> Option<usize> {
+        self.pending_inputs.iter().position(|input| {
+            input.trigger == MailboxTurnTrigger::StartIfIdle
+                && input.dispatch_generation == self.snapshot.dispatch_generation
+                && matches!(input.delivery_state, MailboxDeliveryState::Pending)
+        })
+    }
+
+    pub(crate) fn refresh_mailbox_snapshot(&mut self) {
+        self.snapshot.pending_inputs = self.pending_inputs.len();
+        self.snapshot.pending_trigger_inputs = self
+            .pending_inputs
+            .iter()
+            .filter(|input| {
+                input.trigger == MailboxTurnTrigger::StartIfIdle
+                    && input.dispatch_generation == self.snapshot.dispatch_generation
+                    && matches!(input.delivery_state, MailboxDeliveryState::Pending)
+            })
+            .count();
+    }
 }
 
 /// 新 agent 注册输入；外部资源生命周期由产品或 spawn saga 准备。
@@ -323,6 +439,9 @@ impl AgentRegistration {
                 active_turn_id: None,
                 active_session_id: None,
                 pending_inputs: 0,
+                pending_trigger_inputs: 0,
+                mailbox_delivery_phase: MailboxDeliveryPhase::CurrentTurn,
+                dispatch_generation: 0,
                 last_turn: None,
                 revision: 1,
                 event_sequence: 1,
@@ -334,6 +453,7 @@ impl AgentRegistration {
                 .map(|session| (session.id.clone(), session))
                 .collect(),
             pending_inputs: VecDeque::new(),
+            active_input: None,
             accepted_wakes: BTreeMap::new(),
         }
     }
@@ -370,6 +490,8 @@ pub enum AgentRuntimeEventKind {
     TurnStarted {
         turn_id: TurnId,
         session_id: SessionId,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        claimed_inputs: Vec<PendingAgentInput>,
         snapshot: AgentSnapshot,
     },
     SessionOpened {

@@ -41,6 +41,13 @@ fn studio_task_runtime(
         branch: run.branch,
         expected_head: run.expected_head,
         status_message: run.status_message,
+        stop_requested_origin: run
+            .stop_requested_origin
+            .map(|origin| origin.as_str().to_string()),
+        stop_requested_reason: run
+            .stop_requested_reason
+            .map(|reason| reason.as_str().to_string()),
+        task_generation: run.task_generation,
         work_units: work_units
             .into_iter()
             .map(|unit| StudioTaskWorkUnitRuntime {

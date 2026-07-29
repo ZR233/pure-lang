@@ -48,10 +48,23 @@ impl TaskContinuationSnapshot {
             )
         };
         let stop_guidance = if self.run.stop_requested {
-            "用户已经请求停止本任务。不要继续分配、审查或合并新工作；等待现有 delivery \
-             合同终结后立即重试 task_stop。\n"
+            let origin = self
+                .run
+                .stop_requested_origin
+                .map_or("未知来源", super::super::TaskStopOrigin::display_label);
+            let reason = self
+                .run
+                .stop_requested_reason
+                .as_deref()
+                .unwrap_or("未记录原因");
+            format!(
+                "本任务已由{origin}发起停止（generation {}，原因：{reason}）。不要继续分配、\
+                 审查或合并新工作；progress 或 inactivity diagnostic 不能改变停止来源。\
+                 等待现有 delivery 合同终结后，仅允许受控 delivery recovery 或完成停止收束。\n",
+                self.run.task_generation
+            )
         } else {
-            ""
+            String::new()
         };
         Ok(format!(
             "这是一次 Task planner continuation（续跑），不是新任务。\n\

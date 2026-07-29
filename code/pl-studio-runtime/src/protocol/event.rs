@@ -37,6 +37,6 @@ pub enum StudioProductEventKind {
     },
     SessionTaskChanged {
         session_id: String,
-        task: Option<StudioTaskRuntime>,
+        task: Option<Box<StudioTaskRuntime>>,
     },
 }

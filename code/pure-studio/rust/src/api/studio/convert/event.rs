@@ -32,7 +32,7 @@ pub(crate) fn bridge_product_event(
             StudioProductEventKind::SessionTaskChanged { session_id, task } => {
                 BridgeProductEventPayload::SessionTaskChanged {
                     session_id,
-                    task: task.map(bridge_task_runtime),
+                    task: task.map(|task| Box::new(bridge_task_runtime(*task))),
                 }
             }
         },

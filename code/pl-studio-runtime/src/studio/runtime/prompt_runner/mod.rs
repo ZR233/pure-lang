@@ -10,6 +10,7 @@ use crate::StudioMode;
 use crate::config::StudioRole;
 use crate::studio::agent_host::root_agent_id;
 use crate::studio::ids::unix_seconds;
+use crate::studio::task_coordinator::{TaskStopOrigin, TaskStopReason};
 use crate::studio::{InteractionEmitter, resolution_matches_kind};
 
 use super::{
@@ -64,6 +65,26 @@ impl StudioRuntime {
     pub async fn stop_prompt(&self, session_id: String) -> Result<StudioStopPromptResponse> {
         let framework = self.agent_framework().await?;
         let handle = framework.handle();
+        if self
+            .store
+            .find_active_task_run_for_session(&session_id)
+            .await?
+            .is_some()
+        {
+            let reason = TaskStopReason::new("用户在 Studio 中请求停止任务")
+                .expect("fixed user stop reason must not be empty");
+            self.task_coordinator
+                .stop_task(&session_id, &handle, TaskStopOrigin::UserRequest, reason)
+                .await?;
+            let emitter = self.interaction_emitter(session_id.clone());
+            self.interactions
+                .cancel_session(&session_id, "interrupted by user", emitter)
+                .await?;
+            return Ok(StudioStopPromptResponse {
+                session_id,
+                stopped: true,
+            });
+        }
         let agent_id = root_agent_id(&session_id);
         let snapshot = match handle.snapshot(agent_id.clone()).await {
             Ok(snapshot) => snapshot,

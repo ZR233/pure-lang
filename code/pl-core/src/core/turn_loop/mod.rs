@@ -130,7 +130,13 @@ pub(super) async fn run_turn_with_trace(
     let mut provider_prompt_tokens_for_compaction = None;
     let mut last_compacted_state = None;
     let mut iteration = 0_u32;
+    let mut terminal_checkpointed = false;
+    persist_mailbox_checkpoint_if_needed(&options, session).await?;
     loop {
+        if drain_mailbox_inputs(&options, session, recorder, &turn_id).await? {
+            safe_message_count = session.len();
+            session_message_count = safe_message_count;
+        }
         if working_set.sync_session(session)? {
             persist_checkpoint(
                 &options,
@@ -438,6 +444,13 @@ pub(super) async fn run_turn_with_trace(
             last_reasoning_content = reasoning_content;
             session_message_count = session.len();
             safe_message_count = session_message_count;
+            if finish_mailbox_window(&options, session, recorder, &turn_id).await? {
+                safe_message_count = session.len();
+                session_message_count = safe_message_count;
+                iteration = iteration.saturating_add(1);
+                continue;
+            }
+            terminal_checkpointed = true;
             break;
         }
 
@@ -571,6 +584,13 @@ pub(super) async fn run_turn_with_trace(
         session_message_count = session.len();
         safe_message_count = session_message_count;
         if should_end_turn {
+            if finish_mailbox_window(&options, session, recorder, &turn_id).await? {
+                safe_message_count = session.len();
+                session_message_count = safe_message_count;
+                iteration = iteration.saturating_add(1);
+                continue;
+            }
+            terminal_checkpointed = true;
             break;
         }
         if budget_limit.is_some() {
@@ -620,7 +640,9 @@ pub(super) async fn run_turn_with_trace(
     });
     recorder.complete_item(completed_turn_item);
     progress.milestone("本轮已完成。");
-    persist_checkpoint(&options, session, crate::TurnCheckpointReason::Terminal).await?;
+    if !terminal_checkpointed {
+        persist_checkpoint(&options, session, crate::TurnCheckpointReason::Terminal).await?;
+    }
     recorder.broadcast(AgentEvent::Done);
 
     Ok(TurnResult {
@@ -649,10 +671,80 @@ async fn persist_checkpoint(
     let Some(checkpoint) = &options.checkpoint else {
         return Ok(());
     };
+    let consumed_mail_ids = match &options.mailbox {
+        Some(mailbox) => mailbox.pending_acknowledgements().await,
+        None => Vec::new(),
+    };
     checkpoint
-        .checkpoint(session.clone(), reason)
+        .checkpoint_mailbox(session.clone(), reason, consumed_mail_ids.clone())
         .await
-        .map_err(|error| pl_protocol::PureError::MemoryError(error.to_string()))
+        .map_err(|error| pl_protocol::PureError::MemoryError(error.to_string()))?;
+    if let Some(mailbox) = &options.mailbox {
+        mailbox.acknowledge(&consumed_mail_ids).await;
+    }
+    Ok(())
+}
+
+async fn persist_mailbox_checkpoint_if_needed(
+    options: &TurnOptions,
+    session: &AgentSession,
+) -> Result<()> {
+    let Some(mailbox) = &options.mailbox else {
+        return Ok(());
+    };
+    if mailbox.pending_acknowledgements().await.is_empty() {
+        return Ok(());
+    }
+    persist_checkpoint(
+        options,
+        session,
+        crate::TurnCheckpointReason::MailboxInputConsumed,
+    )
+    .await
+}
+
+async fn drain_mailbox_inputs(
+    options: &TurnOptions,
+    session: &mut AgentSession,
+    recorder: &mut TraceRecorder,
+    turn_id: &str,
+) -> Result<bool> {
+    let Some(mailbox) = &options.mailbox else {
+        return Ok(false);
+    };
+    let inputs = mailbox.drain().await;
+    if inputs.is_empty() {
+        return Ok(false);
+    }
+    for input in inputs {
+        session.push_user_prompt(input.message.clone());
+        recorder.user_text_item_with_id(
+            turn_id,
+            format!("{turn_id}-mail-{}", input.mail_id),
+            input.message,
+            Vec::new(),
+        );
+    }
+    persist_checkpoint(
+        options,
+        session,
+        crate::TurnCheckpointReason::MailboxInputConsumed,
+    )
+    .await?;
+    Ok(true)
+}
+
+async fn finish_mailbox_window(
+    options: &TurnOptions,
+    session: &mut AgentSession,
+    recorder: &mut TraceRecorder,
+    turn_id: &str,
+) -> Result<bool> {
+    if drain_mailbox_inputs(options, session, recorder, turn_id).await? {
+        return Ok(true);
+    }
+    persist_checkpoint(options, session, crate::TurnCheckpointReason::Terminal).await?;
+    drain_mailbox_inputs(options, session, recorder, turn_id).await
 }
 
 fn tool_result_receipt(result: &super::tool_dispatch::ToolExecutionRecord) -> ToolResultReceipt {

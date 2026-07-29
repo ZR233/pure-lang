@@ -37,6 +37,13 @@ CREATE TABLE agent_pending_inputs (
     PRIMARY KEY (agent_id, queue_position)
 );
 
+CREATE TABLE agent_active_inputs (
+    agent_id TEXT PRIMARY KEY,
+    input_json TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    FOREIGN KEY(agent_id) REFERENCES agent_runtime_states(agent_id) ON DELETE CASCADE
+);
+
 CREATE TABLE agent_wake_receipts (
     agent_id TEXT NOT NULL,
     wake_id TEXT NOT NULL,
@@ -227,8 +234,11 @@ CREATE TABLE task_runs (
     design_commit TEXT,
     status_message TEXT,
     stop_requested INTEGER NOT NULL DEFAULT 0,
+    stop_requested_origin TEXT,
     stop_requested_reason TEXT,
     stop_requested_at INTEGER,
+    task_generation INTEGER NOT NULL DEFAULT 0,
+    terminal_generation INTEGER,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
@@ -329,4 +339,4 @@ CREATE INDEX idx_tool_approvals_session_created_at
 CREATE INDEX idx_work_units_run_status
     ON work_units(task_run_id, status, created_at ASC, id ASC);
 
-PRAGMA user_version = 6;
+PRAGMA user_version = 7;

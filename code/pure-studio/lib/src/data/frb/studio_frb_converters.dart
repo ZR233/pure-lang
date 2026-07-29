@@ -40,6 +40,9 @@ TaskRuntimeView _taskRuntimeFromFrb(frb.BridgeTaskRuntimeDto task) {
     branch: task.branch,
     expectedHead: task.expectedHead,
     statusMessage: task.statusMessage,
+    stopRequestedOrigin: task.stopRequestedOrigin,
+    stopRequestedReason: task.stopRequestedReason,
+    taskGeneration: task.taskGeneration.toInt(),
     workUnits: [
       for (final unit in task.workUnits)
         TaskWorkUnitView(

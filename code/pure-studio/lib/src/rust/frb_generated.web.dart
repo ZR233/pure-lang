@@ -100,6 +100,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeTaskRuntimeDto dco_decode_box_bridge_task_runtime_dto(dynamic raw);
+
+  @protected
   BridgeActiveTurn dco_decode_bridge_active_turn(dynamic raw);
 
   @protected
@@ -403,6 +406,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   dco_decode_opt_box_autoadd_zhipu_coding_plan_usage_dto(dynamic raw);
 
   @protected
+  BridgeTaskRuntimeDto? dco_decode_opt_box_bridge_task_runtime_dto(dynamic raw);
+
+  @protected
   List<BridgeUserQuestionOptionDto>?
   dco_decode_opt_list_bridge_user_question_option_dto(dynamic raw);
 
@@ -541,6 +547,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ZhipuCodingPlanUsageDto sse_decode_box_autoadd_zhipu_coding_plan_usage_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeTaskRuntimeDto sse_decode_box_bridge_task_runtime_dto(
     SseDeserializer deserializer,
   );
 
@@ -920,6 +931,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeTaskRuntimeDto? sse_decode_opt_box_bridge_task_runtime_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<BridgeUserQuestionOptionDto>?
   sse_decode_opt_list_bridge_user_question_option_dto(
     SseDeserializer deserializer,
@@ -1088,6 +1104,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_zhipu_coding_plan_usage_dto(
     ZhipuCodingPlanUsageDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_bridge_task_runtime_dto(
+    BridgeTaskRuntimeDto self,
     SseSerializer serializer,
   );
 
@@ -1541,6 +1563,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_zhipu_coding_plan_usage_dto(
     ZhipuCodingPlanUsageDto? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_bridge_task_runtime_dto(
+    BridgeTaskRuntimeDto? self,
     SseSerializer serializer,
   );
 

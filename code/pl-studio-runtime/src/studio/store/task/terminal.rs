@@ -9,8 +9,8 @@ use crate::studio::ids::unix_seconds;
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
     AgentOutcomeStatus, CompletionContract, StudioAgentOutcomeProjection,
-    StudioAgentTerminalChange, TaskRunPhase, TaskWorktreeDisposition, TerminalAgentStateRecording,
-    WorkUnitStatus,
+    StudioAgentTerminalChange, TaskRunPhase, TaskStopOrigin, TaskWorktreeDisposition,
+    TerminalAgentStateRecording, WorkUnitStatus,
 };
 
 use super::outcome::agent_outcome_record;
@@ -26,15 +26,29 @@ impl StudioStore {
             let phase = TaskRunPhase::from_str(&run.phase)
                 .with_context(|| format!("invalid task phase: {}", run.phase))?;
             let now = unix_seconds();
-            if !matches!(
-                phase,
-                TaskRunPhase::Completed | TaskRunPhase::Failed | TaskRunPhase::Cancelled
-            ) {
+            if !phase.is_terminal() {
+                let next_generation = run
+                    .task_generation
+                    .checked_add(1)
+                    .context("task generation overflow while authorizing recovery cleanup")?;
                 let mut active: entities::task_run::ActiveModel = run.into();
-                active.phase = Set(TaskRunPhase::Cancelled.as_str().to_string());
-                active.status_message = Set(Some("recovery cleanup requested by user".to_string()));
+                active.stop_requested = Set(1);
+                active.stop_requested_origin =
+                    Set(Some(TaskStopOrigin::UserRequest.as_str().to_string()));
+                active.stop_requested_reason =
+                    Set(Some("recovery cleanup requested by user".to_string()));
+                active.stop_requested_at = Set(Some(now));
+                active.task_generation = Set(next_generation);
                 active.updated_at = Set(now);
-                active.update(&tx).await?;
+                let run = active.update(&tx).await?;
+                super::write_task_terminal_fact(
+                    &tx,
+                    run,
+                    TaskRunPhase::Cancelled,
+                    Some("recovery cleanup requested by user".to_string()),
+                    Some(u64::try_from(next_generation)?),
+                )
+                .await?;
             }
 
             let work_units = entities::work_unit::Entity::find()

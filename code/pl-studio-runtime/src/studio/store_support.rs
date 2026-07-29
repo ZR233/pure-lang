@@ -1,7 +1,7 @@
 use anyhow::Result;
 use sea_orm::{ConnectionTrait, DatabaseBackend, DatabaseConnection, Statement, TransactionTrait};
 
-pub(super) const STUDIO_DATABASE_SCHEMA_VERSION: i64 = 6;
+pub(super) const STUDIO_DATABASE_SCHEMA_VERSION: i64 = 7;
 const BASE_SCHEMA: &str = include_str!("../../migrations/0001_base.sql");
 const AGENT_SESSIONS_MIGRATION: &str = include_str!("../../migrations/0002_agent_sessions.sql");
 const TASK_COMPLETION_CONTRACT_MIGRATION: &str =
@@ -10,6 +10,8 @@ const AGENT_WAKE_RECEIPTS_MIGRATION: &str =
     include_str!("../../migrations/0004_agent_wake_receipts.sql");
 const WORKTREE_DISPOSITION_MIGRATION: &str =
     include_str!("../../migrations/0005_worktree_disposition.sql");
+const MAILBOX_AND_TASK_STOP_MIGRATION: &str =
+    include_str!("../../migrations/0006_mailbox_and_task_stop.sql");
 
 pub(super) async fn configure_sqlite(db: &DatabaseConnection) -> Result<()> {
     for pragma in [
@@ -76,6 +78,11 @@ pub(super) async fn migrate_schema(db: &DatabaseConnection, from_version: i64) -
             execute_sql(&tx, WORKTREE_DISPOSITION_MIGRATION).await?;
             version = 6;
         }
+        if version == 6 {
+            execute_sql(&tx, MAILBOX_AND_TASK_STOP_MIGRATION).await?;
+            backfill_terminal_generations(&tx).await?;
+            version = 7;
+        }
         if version != STUDIO_DATABASE_SCHEMA_VERSION {
             anyhow::bail!(
                 "不支持从 Studio 数据库版本 {from_version} 迁移到 {STUDIO_DATABASE_SCHEMA_VERSION}"
@@ -128,17 +135,7 @@ async fn ensure_column(
     column: &str,
     declaration: &str,
 ) -> Result<()> {
-    let rows = connection
-        .query_all(Statement::from_string(
-            DatabaseBackend::Sqlite,
-            format!("PRAGMA table_info(\"{table}\")"),
-        ))
-        .await?;
-    let exists = rows.iter().any(|row| {
-        row.try_get::<String>("", "name")
-            .is_ok_and(|stored| stored == column)
-    });
-    if !exists {
+    if !table_has_column(connection, table, column).await? {
         connection
             .execute(Statement::from_string(
                 DatabaseBackend::Sqlite,
@@ -146,6 +143,39 @@ async fn ensure_column(
             ))
             .await?;
     }
+    Ok(())
+}
+
+async fn table_has_column(
+    connection: &impl ConnectionTrait,
+    table: &str,
+    column: &str,
+) -> Result<bool> {
+    let rows = connection
+        .query_all(Statement::from_string(
+            DatabaseBackend::Sqlite,
+            format!("PRAGMA table_info(\"{table}\")"),
+        ))
+        .await?;
+    Ok(rows.iter().any(|row| {
+        row.try_get::<String>("", "name")
+            .is_ok_and(|stored| stored == column)
+    }))
+}
+
+async fn backfill_terminal_generations(connection: &impl ConnectionTrait) -> Result<()> {
+    if !table_has_column(connection, "task_runs", "phase").await? {
+        return Ok(());
+    }
+    connection
+        .execute(Statement::from_string(
+            DatabaseBackend::Sqlite,
+            "UPDATE task_runs
+             SET terminal_generation = task_generation
+             WHERE phase IN ('completed', 'blocked', 'failed', 'cancelled')"
+                .to_string(),
+        ))
+        .await?;
     Ok(())
 }
 

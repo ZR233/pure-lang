@@ -1,8 +1,9 @@
 use pl_core::{AgentCurrentSessionSubmitRequest, InputDelivery, TurnOutcomeKind};
 
 use crate::studio::task_coordinator::{
-    AgentOutcomeStatus, DeliveryRecoveryClaim, DeliveryRecoveryDispatch, DeliveryRecoveryNeed,
-    StudioAgentTerminalChange, TerminalAgentStateRecording,
+    AgentOutcomeStatus, DeliveryRecoveryClaim, DeliveryRecoveryDispatch,
+    DeliveryRecoveryFailureRecording, DeliveryRecoveryNeed, StudioAgentTerminalChange,
+    TerminalAgentStateRecording,
 };
 
 use super::StudioContinuationService;
@@ -29,17 +30,25 @@ impl StudioContinuationService {
             .inspect_delivery_recovery_need(task_run_id, agent_id)
             .await
         {
-            Ok(DeliveryRecoveryNeed::NoDelivery) => {
-                if let Err(error) = self
+            Ok(DeliveryRecoveryNeed::NoDelivery { task_generation }) => {
+                match self
                     .store
-                    .fail_executor_without_delivery(task_run_id, agent_id)
+                    .fail_executor_without_delivery(task_run_id, agent_id, task_generation)
                     .await
                 {
-                    self.fail(task_run_id, error).await;
-                    return;
+                    Ok(DeliveryRecoveryFailureRecording::Recorded) => {
+                        self.publish_outcome_signal(
+                            task_run_id,
+                            agent_id,
+                            "deliveryRecoveryFailed",
+                        )
+                        .await;
+                    }
+                    Ok(DeliveryRecoveryFailureRecording::Suppressed) => {}
+                    Err(error) => {
+                        self.fail(task_run_id, error).await;
+                    }
                 }
-                self.publish_outcome_signal(task_run_id, agent_id, "deliveryRecoveryFailed")
-                    .await;
                 return;
             }
             Ok(DeliveryRecoveryNeed::Recoverable) => {}
@@ -86,20 +95,28 @@ impl StudioContinuationService {
                 return;
             }
         }
-        if let Err(error) = self.submit_delivery_recovery(&claim).await {
-            let diagnostic =
-                format!("executor delivery recovery submit failed for {agent_id}: {error:#}");
-            if let Err(store_error) = self.store.fail_delivery_recovery(&claim, &diagnostic).await {
-                self.fail(
-                    task_run_id,
-                    anyhow::anyhow!("{diagnostic}; durable failure update failed: {store_error:#}"),
-                )
-                .await;
-                return;
+        match self.submit_delivery_recovery(&claim).await {
+            Ok(true) => {}
+            Ok(false) => {}
+            Err(error) => {
+                let diagnostic =
+                    format!("executor delivery recovery submit failed for {agent_id}: {error:#}");
+                if let Err(store_error) =
+                    self.store.fail_delivery_recovery(&claim, &diagnostic).await
+                {
+                    self.fail(
+                        task_run_id,
+                        anyhow::anyhow!(
+                            "{diagnostic}; durable failure update failed: {store_error:#}"
+                        ),
+                    )
+                    .await;
+                    return;
+                }
+                self.emit_error(studio_session_id, diagnostic);
+                self.publish_outcome_signal(task_run_id, agent_id, "deliveryRecoveryFailed")
+                    .await;
             }
-            self.emit_error(studio_session_id, diagnostic);
-            self.publish_outcome_signal(task_run_id, agent_id, "deliveryRecoveryFailed")
-                .await;
         }
     }
 
@@ -159,7 +176,13 @@ impl StudioContinuationService {
         }
     }
 
-    async fn submit_delivery_recovery(&self, claim: &DeliveryRecoveryClaim) -> anyhow::Result<()> {
+    async fn submit_delivery_recovery(
+        &self,
+        claim: &DeliveryRecoveryClaim,
+    ) -> anyhow::Result<bool> {
+        if !self.store.validate_delivery_recovery_claim(claim).await? {
+            return Ok(false);
+        }
         let runtime = self
             .runtime
             .read()
@@ -176,8 +199,10 @@ impl StudioContinuationService {
                      不要只返回文字总结，也不要伪造验证结果。",
                 )
                 .with_delivery(InputDelivery::Start)
+                .with_mail_id(claim.dispatch_id())
                 .with_metadata(serde_json::json!({
                     "taskRunId": claim.task_run_id,
+                    "taskGeneration": claim.task_generation,
                     "workUnitId": claim.work_unit_id,
                     "deliveryRecoveryCount": claim.recovery_count,
                     "deliveryRecoveryDispatchId": claim.dispatch_id(),
@@ -192,7 +217,7 @@ impl StudioContinuationService {
             )
             .await
             .map_err(|error| anyhow::anyhow!(error))?;
-        Ok(())
+        Ok(true)
     }
 
     pub(super) async fn resume_pending_delivery_recoveries(&self) -> anyhow::Result<()> {

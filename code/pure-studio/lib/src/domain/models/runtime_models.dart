@@ -59,6 +59,9 @@ class TaskRuntimeView {
     required this.branch,
     required this.expectedHead,
     required this.statusMessage,
+    required this.stopRequestedOrigin,
+    required this.stopRequestedReason,
+    required this.taskGeneration,
     required this.workUnits,
     required this.agents,
     required this.merges,
@@ -70,6 +73,9 @@ class TaskRuntimeView {
   final String branch;
   final String expectedHead;
   final String? statusMessage;
+  final String? stopRequestedOrigin;
+  final String? stopRequestedReason;
+  final int taskGeneration;
   final List<TaskWorkUnitView> workUnits;
   final List<TaskAgentOutcomeView> agents;
   final List<TaskMergeView> merges;

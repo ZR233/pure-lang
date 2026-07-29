@@ -12,10 +12,13 @@ use timer::{
 use wake::{has_live_children, remember_signal, wake_parent};
 
 use super::super::{
-    AgentActivityState, AgentId, AgentLifecycleState, AgentRuntimeEvent, AgentRuntimeEventKind,
-    AgentRuntimeHandle, AgentSnapshot, AgentUpdateEnvelope, AgentUpdateKind, AgentWakePolicy,
-    AgentWakeReason, TurnId, TurnOutcomeKind,
+    AgentActivityState, AgentCurrentSessionSubmitRequest, AgentId, AgentLifecycleState,
+    AgentRuntimeEvent, AgentRuntimeEventKind, AgentRuntimeHandle, AgentSnapshot,
+    AgentUpdateEnvelope, AgentUpdateKind, AgentWakePolicy, AgentWakeReason, InputDelivery, TurnId,
+    TurnOutcomeKind,
 };
+
+const MAX_RECENT_PROGRESS: usize = 8;
 
 #[derive(Default)]
 struct ParentWaitState {
@@ -24,10 +27,15 @@ struct ParentWaitState {
     seen_signals: BTreeSet<String>,
     seen_order: VecDeque<String>,
     last_meaningful_updates: BTreeMap<AgentId, Instant>,
+    last_activity_at: BTreeMap<AgentId, i64>,
+    recent_progress: VecDeque<AgentUpdateEnvelope>,
+    latest_commentary: Option<String>,
+    diagnosed_in_epoch: BTreeSet<AgentId>,
     timer_generations: BTreeMap<AgentId, u64>,
     product_terminal: BTreeSet<AgentId>,
     waiting_epoch: u64,
     wake_in_flight: bool,
+    lag_reconciled: bool,
 }
 
 impl ParentWaitState {
@@ -93,7 +101,12 @@ pub(super) fn spawn_waiting_agents_supervisor(
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 },
                 () = wait_for_deadline(deadline) => {
-                    handle_due_timers(&runtime, &mut parents, &mut timers).await;
+                    handle_due_timers(
+                        &runtime,
+                        &mut parents,
+                        &mut timers,
+                        inactivity_timeout,
+                    ).await;
                 }
             }
         }
@@ -107,11 +120,42 @@ async fn handle_update(
     inactivity_timeout: Duration,
     update: AgentUpdateEnvelope,
 ) {
-    if !update_triggers_parent_wake(&update.kind) {
-        return;
-    }
+    let actionable = update_triggers_parent_wake(&update.kind);
     let parent_id = update.parent_agent_id.clone();
     let child_id = update.agent_id.clone();
+    let Ok(parent) = runtime.agent_events.snapshot(&parent_id) else {
+        return;
+    };
+    let active_turn_id = parent.active_turn_id.clone();
+    {
+        let state = parents.entry(parent_id.clone()).or_default();
+        if !remember_signal(state, &update.signal_id) {
+            return;
+        }
+        if matches!(update.kind, AgentUpdateKind::ProductPhaseChanged { .. }) {
+            state.product_terminal.insert(child_id.clone());
+        }
+        record_child_activity(state, &update);
+        if parent.activity == AgentActivityState::WaitingAgents {
+            arm_child_timer(
+                runtime,
+                state,
+                timers,
+                inactivity_timeout,
+                &parent_id,
+                &child_id,
+            );
+        }
+    }
+    if matches!(
+        &update.kind,
+        AgentUpdateKind::RuntimeTerminal { .. } | AgentUpdateKind::ProductPhaseChanged { .. }
+    ) {
+        queue_result_notification(runtime, &parent_id, &update).await;
+    }
+    if !actionable {
+        return;
+    }
     if runtime
         .wake_accepted(parent_id.clone(), None, vec![update.signal_id.clone()])
         .await
@@ -119,20 +163,7 @@ async fn handle_update(
     {
         return;
     }
-    let Ok(parent) = runtime.agent_events.snapshot(&parent_id) else {
-        return;
-    };
-    let active_turn_id = parent.active_turn_id.clone();
     let state = parents.entry(parent_id.clone()).or_default();
-    if !remember_signal(state, &update.signal_id) {
-        return;
-    }
-    if matches!(update.kind, AgentUpdateKind::ProductPhaseChanged { .. }) {
-        state.product_terminal.insert(child_id.clone());
-    }
-    state
-        .last_meaningful_updates
-        .insert(child_id.clone(), Instant::now());
     if let Some(turn_id) = active_turn_id {
         state
             .pending_turns
@@ -140,35 +171,83 @@ async fn handle_update(
     }
     state.pending.insert(update.signal_id.clone(), update);
 
-    if parent.activity == AgentActivityState::WaitingAgents {
-        arm_child_timer(
-            runtime,
-            state,
-            timers,
-            inactivity_timeout,
-            &parent_id,
-            &child_id,
-        );
-    }
     if parent.lifecycle == AgentLifecycleState::Active
-        && matches!(
-            parent.activity,
-            AgentActivityState::Idle | AgentActivityState::WaitingAgents
-        )
+        && parent.activity == AgentActivityState::WaitingAgents
     {
         wake_parent(runtime, parents, parent_id, AgentWakeReason::Updates).await;
+    }
+}
+
+async fn queue_result_notification(
+    runtime: &AgentRuntimeHandle,
+    parent_id: &AgentId,
+    update: &AgentUpdateEnvelope,
+) {
+    let Ok(update_json) = serde_json::to_string(update) else {
+        return;
+    };
+    let request = AgentCurrentSessionSubmitRequest::start(format!(
+        "子代理产生了 durable 结果通知；该通知本身不启动 Planner turn。\n\
+<agentResultNotification>{update_json}</agentResultNotification>"
+    ))
+    .with_delivery(InputDelivery::QueueOnly)
+    .with_mail_id(format!("agent-result:{}", update.signal_id))
+    .with_metadata(serde_json::json!({
+        "agentResultNotification": update,
+        "attachmentIds": [],
+        "historyPolicy": "ephemeral",
+        "userPrompt": {
+            "visiblePrompt": "子代理结果通知",
+            "synthetic": true,
+            "ignored": true,
+        },
+    }));
+    if let Err(error) = runtime
+        .submit_current_session(parent_id.clone(), request)
+        .await
+    {
+        tracing::warn!(
+            parent_agent_id = %parent_id,
+            signal_id = %update.signal_id,
+            %error,
+            "failed to queue durable child result notification"
+        );
     }
 }
 
 fn update_triggers_parent_wake(kind: &AgentUpdateKind) -> bool {
     matches!(
         kind,
-        AgentUpdateKind::ProgressReported
-            | AgentUpdateKind::TodoPhaseChanged
-            | AgentUpdateKind::NeedsAttention
+        AgentUpdateKind::NeedsAttention
             | AgentUpdateKind::RuntimeTerminal { .. }
             | AgentUpdateKind::ProductPhaseChanged { .. }
     )
+}
+
+fn record_child_activity(state: &mut ParentWaitState, update: &AgentUpdateEnvelope) {
+    state
+        .last_meaningful_updates
+        .insert(update.agent_id.clone(), Instant::now());
+    state
+        .last_activity_at
+        .insert(update.agent_id.clone(), update.occurred_at);
+    state.diagnosed_in_epoch.remove(&update.agent_id);
+    if matches!(
+        update.kind,
+        AgentUpdateKind::ActivityChanged { .. }
+            | AgentUpdateKind::ProgressReported
+            | AgentUpdateKind::TodoPhaseChanged
+    ) {
+        if matches!(update.kind, AgentUpdateKind::ProgressReported)
+            && let Some(summary) = update.summary.clone()
+        {
+            state.latest_commentary = Some(summary);
+        }
+        state.recent_progress.push_back(update.clone());
+        while state.recent_progress.len() > MAX_RECENT_PROGRESS {
+            state.recent_progress.pop_front();
+        }
+    }
 }
 
 async fn handle_runtime_event(
@@ -205,6 +284,13 @@ async fn handle_runtime_event(
         {
             let state = parents.entry(parent_id.clone()).or_default();
             state.waiting_epoch = state.waiting_epoch.saturating_add(1);
+            let restarted_at = Instant::now();
+            for child_id in &state.diagnosed_in_epoch {
+                state
+                    .last_meaningful_updates
+                    .insert(child_id.clone(), restarted_at);
+            }
+            state.diagnosed_in_epoch.clear();
             arm_all_child_timers(runtime, state, timers, inactivity_timeout, &parent_id);
         }
         AgentRuntimeEventKind::Registered { .. }
@@ -300,6 +386,13 @@ fn restore_waiting_parents(
             let parent_id = snapshot.identity.id;
             let state = parents.entry(parent_id.clone()).or_default();
             state.waiting_epoch = state.waiting_epoch.saturating_add(1);
+            let restarted_at = Instant::now();
+            for child_id in &state.diagnosed_in_epoch {
+                state
+                    .last_meaningful_updates
+                    .insert(child_id.clone(), restarted_at);
+            }
+            state.diagnosed_in_epoch.clear();
             arm_all_child_timers(runtime, state, timers, inactivity_timeout, &parent_id);
         }
     }
@@ -315,9 +408,7 @@ async fn reconcile_after_lag(
         let Some(parent_id) = child.identity.parent_id.clone() else {
             continue;
         };
-        if child.wake_policy == AgentWakePolicy::ProductGated {
-            continue;
-        }
+        parents.entry(parent_id.clone()).or_default().lag_reconciled = true;
         let kind = if child.wake_policy == AgentWakePolicy::RuntimeTerminal
             && child.activity == AgentActivityState::Idle
             && child.last_turn.is_some()
@@ -356,7 +447,7 @@ async fn reconcile_after_lag(
     let parent_snapshots = runtime.agent_events.snapshots();
     for snapshot in &parent_snapshots {
         if snapshot.lifecycle == AgentLifecycleState::Active
-            && snapshot.pending_inputs == 0
+            && snapshot.pending_trigger_inputs == 0
             && matches!(
                 snapshot.activity,
                 AgentActivityState::Idle | AgentActivityState::WaitingAgents
@@ -402,7 +493,7 @@ async fn reconcile_restored_parents(
         let Ok(parent) = runtime.agent_events.snapshot(&parent_id) else {
             continue;
         };
-        if parent.pending_inputs != 0
+        if parent.pending_trigger_inputs != 0
             || !matches!(
                 parent.activity,
                 AgentActivityState::Idle | AgentActivityState::WaitingAgents
@@ -438,7 +529,7 @@ async fn reconcile_restored_parents(
         .into_iter()
         .filter(|snapshot| {
             snapshot.lifecycle == AgentLifecycleState::Active
-                && snapshot.pending_inputs == 0
+                && snapshot.pending_trigger_inputs == 0
                 && matches!(
                     snapshot.activity,
                     AgentActivityState::Idle | AgentActivityState::WaitingAgents
@@ -509,6 +600,9 @@ mod tests {
                 active_turn_id: None,
                 active_session_id: None,
                 pending_inputs: 0,
+                pending_trigger_inputs: 0,
+                mailbox_delivery_phase: crate::MailboxDeliveryPhase::CurrentTurn,
+                dispatch_generation: 0,
                 last_turn: None,
                 revision: 1,
                 event_sequence: 1,

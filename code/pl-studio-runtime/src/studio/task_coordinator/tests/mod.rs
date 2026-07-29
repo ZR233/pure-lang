@@ -534,7 +534,12 @@ async fn task_complete_rejects_a_durable_stop_request() {
         .unwrap();
     fixture
         .store
-        .request_task_stop(&fixture.run_id, &run.expected_head, "user requested stop")
+        .request_task_stop(
+            &fixture.run_id,
+            &run.expected_head,
+            TaskStopOrigin::UserRequest,
+            &TaskStopReason::new("user requested stop").unwrap(),
+        )
         .await
         .unwrap();
 
@@ -566,24 +571,34 @@ async fn task_stop_settles_transient_agents_and_atomically_releases_lease() {
         .unwrap()
         .unwrap();
 
-    fixture
+    let requested = fixture
         .store
-        .request_task_stop(&run.id, &run.expected_head, "user stopped task")
+        .request_task_stop(
+            &run.id,
+            &run.expected_head,
+            TaskStopOrigin::UserRequest,
+            &TaskStopReason::new("user stopped task").unwrap(),
+        )
         .await
         .unwrap();
     fixture
         .store
-        .begin_task_stop(&run.id, &run.expected_head)
+        .begin_task_stop(&run.id, &run.expected_head, requested.task_generation)
         .await
         .unwrap();
     fixture
         .store
-        .settle_agents_for_task_stop(&run.id, "user stopped task")
+        .settle_agents_for_task_stop(&run.id, requested.task_generation, "user stopped task")
         .await
         .unwrap();
     let cancelled = fixture
         .store
-        .cancel_task_and_release_lease(&run.id, &run.expected_head, "user stopped task")
+        .cancel_task_and_release_lease(
+            &run.id,
+            &run.expected_head,
+            requested.task_generation,
+            "user stopped task",
+        )
         .await
         .unwrap();
 
@@ -1096,6 +1111,10 @@ async fn accepted_merge_final_scope_drift_blocks_without_downgrading_or_cleanup(
             .pop()
             .unwrap();
         assert_eq!(durable_run.phase, TaskRunPhase::Blocked);
+        assert_eq!(
+            durable_run.terminal_generation,
+            Some(durable_run.task_generation)
+        );
         assert_eq!(record.status, MergeStatus::Merged);
         assert_eq!(fixture.work_unit().await.status, WorkUnitStatus::Merged);
         assert_eq!(
@@ -1154,6 +1173,10 @@ async fn accepted_merge_task_run_read_failure_blocks_and_defers_cleanup() {
         .pop()
         .unwrap();
     assert_eq!(durable_run.phase, TaskRunPhase::Blocked);
+    assert_eq!(
+        durable_run.terminal_generation,
+        Some(durable_run.task_generation)
+    );
     assert_eq!(record.status, MergeStatus::Merged);
     assert_eq!(fixture.work_unit().await.status, WorkUnitStatus::Merged);
     assert_eq!(
@@ -1526,6 +1549,10 @@ async fn verifier_failure_aborts_to_exact_prestate_blocks_and_preserves_delivery
         .unwrap()
         .unwrap();
     assert_eq!(durable_run.phase, TaskRunPhase::Blocked);
+    assert_eq!(
+        durable_run.terminal_generation,
+        Some(durable_run.task_generation)
+    );
     assert_eq!(fixture.work_unit().await.status, WorkUnitStatus::Delivered);
     assert_eq!(
         fixture.outcome().await.status,
@@ -2564,6 +2591,7 @@ async fn third_conflict_verification_failure_aborts_restores_and_blocks() {
         .unwrap()
         .unwrap();
     assert_eq!(run.phase, TaskRunPhase::Blocked);
+    assert_eq!(run.terminal_generation, Some(run.task_generation));
     assert_eq!(
         git_output(&fixture.repository, &["rev-parse", "HEAD"]),
         fixture.expected_head
@@ -3420,6 +3448,7 @@ async fn delivery_recovery_is_claimed_once_and_second_terminal_fails() {
         .unwrap()
         .expect("first terminal must reserve the single recovery");
     assert_eq!(claim.recovery_count, 1);
+    assert_eq!(claim.task_generation, 0);
     let replayed = fixture
         .store
         .claim_delivery_recovery(&fixture.task_run_id, &fixture.subagent.id)
@@ -3447,6 +3476,68 @@ async fn delivery_recovery_is_claimed_once_and_second_terminal_fails() {
         Some("executor delivery recovery finished without submit_delivery")
     );
     assert_eq!(fixture.work_unit().await.status, WorkUnitStatus::Failed);
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn stop_requested_delivery_recovery_rebinds_one_receipt_to_the_new_generation() {
+    let fixture = DeliveryFixture::new("stop-delivery-recovery-generation", vec!["src/**"]).await;
+    drain_agent_state(
+        &fixture,
+        crate::TurnOutcomeKind::Completed,
+        Some("implementation finished"),
+        None,
+    )
+    .await;
+    let stale = fixture
+        .store
+        .claim_delivery_recovery(&fixture.task_run_id, &fixture.subagent.id)
+        .await
+        .unwrap()
+        .unwrap();
+    let run = fixture
+        .store
+        .read_task_run(&fixture.task_run_id)
+        .await
+        .unwrap()
+        .unwrap();
+    let requested = fixture
+        .store
+        .request_task_stop(
+            &run.id,
+            &run.expected_head,
+            TaskStopOrigin::UserRequest,
+            &TaskStopReason::new("stop while recovering delivery").unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(requested.task_generation, stale.task_generation + 1);
+    assert!(
+        !fixture
+            .store
+            .validate_delivery_recovery_claim(&stale)
+            .await
+            .unwrap()
+    );
+    let rebound = fixture
+        .store
+        .claim_delivery_recovery(&fixture.task_run_id, &fixture.subagent.id)
+        .await
+        .unwrap()
+        .expect("the existing recovery receipt must be rebound after stop");
+    assert_eq!(rebound.task_generation, requested.task_generation);
+    assert_eq!(rebound.recovery_count, 1);
+    assert_eq!(rebound.dispatch_id(), stale.dispatch_id());
+    assert_eq!(
+        fixture
+            .store
+            .claim_delivery_recovery(&fixture.task_run_id, &fixture.subagent.id)
+            .await
+            .unwrap(),
+        Some(rebound),
+        "replay must reuse the same stop-generation receipt"
+    );
     fixture.cleanup();
 }
 
@@ -3489,6 +3580,7 @@ async fn delivery_recovery_dispatch_is_deduplicated_by_durable_turn_metadata() {
                 fixture.session_id.clone().into(),
                 serde_json::json!({
                     "deliveryRecoveryDispatchId": claim.dispatch_id(),
+                    "taskGeneration": claim.task_generation,
                 })
                 .to_string()
                 .into(),
@@ -3598,13 +3690,16 @@ async fn unchanged_executor_worktree_fails_without_consuming_recovery() {
             .inspect_delivery_recovery_need(&fixture.task_run_id, &fixture.subagent.id)
             .await
             .unwrap(),
-        DeliveryRecoveryNeed::NoDelivery
+        DeliveryRecoveryNeed::NoDelivery { task_generation: 0 }
     );
-    fixture
-        .store
-        .fail_executor_without_delivery(&fixture.task_run_id, &fixture.subagent.id)
-        .await
-        .unwrap();
+    assert_eq!(
+        fixture
+            .store
+            .fail_executor_without_delivery(&fixture.task_run_id, &fixture.subagent.id, 0)
+            .await
+            .unwrap(),
+        DeliveryRecoveryFailureRecording::Recorded
+    );
 
     let outcome = fixture.outcome().await;
     assert_eq!(outcome.status, AgentOutcomeStatus::Failed);
@@ -3616,6 +3711,88 @@ async fn unchanged_executor_worktree_fails_without_consuming_recovery() {
             .is_some_and(|error| error.contains("without delivery"))
     );
     assert_eq!(fixture.work_unit().await.status, WorkUnitStatus::Failed);
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn terminal_task_suppresses_a_stale_no_delivery_failure() {
+    let fixture = DeliveryFixture::new("terminal-suppresses-no-delivery", vec!["src/**"]).await;
+    drain_agent_state(
+        &fixture,
+        crate::TurnOutcomeKind::Completed,
+        Some("finished without implementation"),
+        None,
+    )
+    .await;
+    let task_generation = match fixture
+        .coordinator
+        .inspect_delivery_recovery_need(&fixture.task_run_id, &fixture.subagent.id)
+        .await
+        .unwrap()
+    {
+        DeliveryRecoveryNeed::NoDelivery { task_generation } => task_generation,
+        DeliveryRecoveryNeed::Recoverable => panic!("unchanged worktree must not be recoverable"),
+    };
+    let run = fixture
+        .store
+        .read_task_run(&fixture.task_run_id)
+        .await
+        .unwrap()
+        .unwrap();
+    let requested = fixture
+        .store
+        .request_task_stop(
+            &run.id,
+            &run.expected_head,
+            TaskStopOrigin::UserRequest,
+            &TaskStopReason::new("stop before no-delivery persistence").unwrap(),
+        )
+        .await
+        .unwrap();
+    fixture
+        .store
+        .begin_task_stop(&run.id, &run.expected_head, requested.task_generation)
+        .await
+        .unwrap();
+    let cancelled = fixture
+        .store
+        .cancel_task_and_release_lease(
+            &run.id,
+            &run.expected_head,
+            requested.task_generation,
+            "user requested stop",
+        )
+        .await
+        .unwrap();
+    assert_eq!(cancelled.phase, TaskRunPhase::Cancelled);
+    assert_eq!(
+        fixture
+            .store
+            .fail_executor_without_delivery(
+                &fixture.task_run_id,
+                &fixture.subagent.id,
+                task_generation,
+            )
+            .await
+            .unwrap(),
+        DeliveryRecoveryFailureRecording::Suppressed
+    );
+    assert_eq!(
+        fixture.outcome().await.status,
+        AgentOutcomeStatus::WaitingForDelivery
+    );
+    assert_eq!(
+        fixture.work_unit().await.status,
+        WorkUnitStatus::WaitingForDelivery
+    );
+    let durable = fixture
+        .store
+        .read_task_run(&fixture.task_run_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(durable.phase, TaskRunPhase::Cancelled);
+    assert_eq!(durable.terminal_generation, Some(requested.task_generation));
     fixture.cleanup();
 }
 
@@ -3633,7 +3810,12 @@ async fn stop_request_preserves_lease_and_accepts_existing_executor_delivery() {
 
     let requested = fixture
         .store
-        .request_task_stop(&run.id, &run.expected_head, "user requested stop")
+        .request_task_stop(
+            &run.id,
+            &run.expected_head,
+            TaskStopOrigin::UserRequest,
+            &TaskStopReason::new("user requested stop").unwrap(),
+        )
         .await
         .unwrap();
 

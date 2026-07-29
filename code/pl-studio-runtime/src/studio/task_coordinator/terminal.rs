@@ -39,6 +39,11 @@ impl TaskCoordinator {
         task_run_id: &str,
         agent_id: &str,
     ) -> Result<DeliveryRecoveryNeed> {
+        let run = self
+            .store
+            .read_task_run(task_run_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("task run not found for delivery recovery"))?;
         let outcome = self
             .store
             .list_agent_outcomes(task_run_id)
@@ -55,8 +60,21 @@ impl TaskCoordinator {
             .read_work_unit(work_unit_id)
             .await?
             .ok_or_else(|| anyhow::anyhow!("executor delivery recovery work unit not found"))?;
-        super::git::inspect_executor_recovery(&work_unit.worktree_path, &work_unit.base_commit)
-            .await
+        match super::git::inspect_executor_recovery(
+            &work_unit.worktree_path,
+            &work_unit.base_commit,
+        )
+        .await?
+        {
+            super::git::ExecutorRecoveryInspection::NoDelivery => {
+                Ok(DeliveryRecoveryNeed::NoDelivery {
+                    task_generation: run.task_generation,
+                })
+            }
+            super::git::ExecutorRecoveryInspection::Recoverable => {
+                Ok(DeliveryRecoveryNeed::Recoverable)
+            }
+        }
     }
 
     pub(crate) async fn record_terminal_agent_state(
