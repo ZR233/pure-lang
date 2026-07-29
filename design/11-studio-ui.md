@@ -218,6 +218,15 @@ Flutter context readout 使用紧凑圆形进度环，不显示百分比文字�
 
 状态栏的 waiting 状态以 active interaction 为一等输入。`busy` 表示 turn 是否仍在运行，`activeInteraction` 表示 UI 是否必须等待用户响应；Plan confirmation 可以在 `busy=false` 时仍阻塞 composer。状态栏 phase 优先级为 `toolApproval -> userInput -> planConfirmation -> turnPhase`。
 
+历史 turn outcome 与 agent workspace activity 是正交状态。Flutter 保留 wire 中真实的
+`SessionTurnStatus::Completed`，同时由 `AgentWorkspaceView.statusPhase` 提供展示态：
+仅当选中 root session 的 canonical `agentStatus == waiting`，且原始 `turnPhase` 为
+`idle | completed` 时显示 `waitingForAgents`（“等待子代理 / Waiting for agents”）。
+活动 interaction、活动 turn phase 和 child workspace 状态优先，不做该映射。`turnPhase`、
+`busy`、停止按钮与 Composer 仍只依据真实活动 turn 计算，不能因展示为等待子代理而把已经
+完成的 Planner turn 伪装成可停止的运行中 turn；agent 恢复 completed 后展示重新回到
+`completed`。
+
 状态栏 phase 必须对 `TurnPhase` 与 `InteractionKind` 使用穷尽的本地化映射，不得直接展示协议或 Dart enum 的 `.name`。英文使用自然短语，简体中文使用简洁状态说明；active interaction 的本地化标签仍按上述优先级覆盖 turn phase。
 
 会话列表是独立滚动区域，row 采用 opencode 式单行 flex 布局：图标/状态固定宽度，标题 `min-width:0` 且 `truncate`，列表项 `flex-shrink:0`。Sessions 区域过长时只滚动列表，不挤压 project 区、settings 按钮或相邻 session row。

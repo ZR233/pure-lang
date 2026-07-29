@@ -10,7 +10,8 @@ use tokio_util::sync::CancellationToken;
 use crate::{AgentKernel, AgentSession, TurnOptions, TurnRequest};
 
 use super::{
-    AgentExecutionPolicy, AgentRuntimeHandle, AgentSnapshot, PendingAgentInput, SessionId, TurnId,
+    AgentExecutionPolicy, AgentRuntimeHandle, AgentSnapshot, AgentWakeContext, PendingAgentInput,
+    SessionId, TurnId,
 };
 
 /// turn 完成后对 canonical session 的提交策略。
@@ -31,6 +32,8 @@ pub struct AgentTurnPreparationContext {
     pub session_id: SessionId,
     pub input: PendingAgentInput,
     pub leading_inputs: Vec<PendingAgentInput>,
+    /// 由 runtime 验证 wake receipt 后解析出的 typed continuation 上下文。
+    pub wake_context: Option<AgentWakeContext>,
     pub session: AgentSession,
     pub trace_sequence: u64,
     pub runtime: AgentRuntimeHandle,

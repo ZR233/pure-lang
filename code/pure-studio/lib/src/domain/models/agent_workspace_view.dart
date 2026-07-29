@@ -50,6 +50,15 @@ class AgentWorkspaceView {
 
   bool get isLoading => syncState == AgentWorkspaceSyncState.loading;
 
+  TurnPhase get statusPhase {
+    if (isRoot &&
+        session.agentStatus.trim() == 'waiting' &&
+        (turnPhase == TurnPhase.idle || turnPhase == TurnPhase.completed)) {
+      return TurnPhase.waitingForAgents;
+    }
+    return turnPhase;
+  }
+
   bool get isBusy {
     return switch (turnPhase) {
       TurnPhase.queued ||
@@ -59,6 +68,7 @@ class AgentWorkspaceView {
       TurnPhase.waitingForInteraction ||
       TurnPhase.runningTool => true,
       TurnPhase.idle ||
+      TurnPhase.waitingForAgents ||
       TurnPhase.completed ||
       TurnPhase.failed ||
       TurnPhase.cancelled => false,

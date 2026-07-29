@@ -328,6 +328,7 @@ class StudioState {
       TurnPhase.waitingForInteraction ||
       TurnPhase.runningTool => true,
       TurnPhase.idle ||
+      TurnPhase.waitingForAgents ||
       TurnPhase.completed ||
       TurnPhase.failed ||
       TurnPhase.cancelled => false,

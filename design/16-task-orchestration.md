@@ -54,6 +54,15 @@ activity 与普通 progress 只更新有界进展摘要并重置 child deadline�
 连续 30 秒无活动只产生一次 `InactivityDiagnostic`，其中必须包含当前 canonical status、
 最后活动时间和最近进展，但该诊断不能单独授权 interrupt、`task_stop` 或把 Running executor
 判定为失败。只有新活动或 Planner 明确重新进入等待后才能重新计时，不形成周期查询。
+Core 必须把 typed wake context 编译为本轮确定性的 execution policy：对仍为
+`Queued | Running | WaitingTool | WaitingInteraction` 且拥有 active turn 或可启动 pending
+turn 的超时 child，协作工具 schema 与实际 dispatch 都不得允许 `send_input` 或
+`close_agent`。纯诊断轮只保留读取 canonical 状态所需的 `list_agents` 和只读能力，不得派生
+agent、停止任务或执行其他任务控制动作；混合批次仍可处理真实 actionable fact，但不得借此
+控制受保护的健康 child。诊断轮结束且仍有 live child 时重新进入 `WaitingAgents`，从进入时刻
+重新获得完整 30 秒 deadline。诊断期间到达的终态、`NeedsAttention` 或 durable product phase
+继续进入下一 continuation；显式用户输入会取代诊断轮并恢复普通策略，用户明确请求的
+`interrupt=true` 仍按正常取消语义执行。
 
 completion watcher 只观察终态，并把结果作为 `trigger=false` notification 写入 durable
 mailbox；父级确有等待注册时，再由 `WaitingAgents` 通过 accepted wake receipt 原子创建

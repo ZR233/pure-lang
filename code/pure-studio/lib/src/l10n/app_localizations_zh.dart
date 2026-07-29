@@ -217,6 +217,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get statusTurnRunningTool => '运行工具';
 
   @override
+  String get statusTurnWaitingForAgents => '等待子代理';
+
+  @override
   String get statusTurnCompleted => '已完成';
 
   @override
@@ -1479,6 +1482,9 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get statusTurnRunningTool => '运行工具';
+
+  @override
+  String get statusTurnWaitingForAgents => '等待子代理';
 
   @override
   String get statusTurnCompleted => '已完成';

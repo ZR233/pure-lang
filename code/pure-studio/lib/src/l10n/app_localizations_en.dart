@@ -219,6 +219,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get statusTurnRunningTool => 'Running tool';
 
   @override
+  String get statusTurnWaitingForAgents => 'Waiting for agents';
+
+  @override
   String get statusTurnCompleted => 'Completed';
 
   @override

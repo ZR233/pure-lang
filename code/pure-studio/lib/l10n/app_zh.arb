@@ -65,6 +65,7 @@
   "statusTurnStreaming": "正在生成",
   "statusTurnWaitingForInteraction": "等待交互",
   "statusTurnRunningTool": "运行工具",
+  "statusTurnWaitingForAgents": "等待子代理",
   "statusTurnCompleted": "已完成",
   "statusTurnFailed": "失败",
   "statusTurnCancelled": "已取消",

@@ -495,6 +495,12 @@ abstract class AppLocalizations {
   /// **'Running tool'**
   String get statusTurnRunningTool;
 
+  /// No description provided for @statusTurnWaitingForAgents.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for agents'**
+  String get statusTurnWaitingForAgents;
+
   /// No description provided for @statusTurnCompleted.
   ///
   /// In en, this message translates to:

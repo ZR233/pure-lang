@@ -10,6 +10,7 @@ enum TurnPhase {
   streaming,
   waitingForInteraction,
   runningTool,
+  waitingForAgents,
   completed,
   failed,
   cancelled,

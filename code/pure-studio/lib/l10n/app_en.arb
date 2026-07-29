@@ -75,6 +75,7 @@
   "statusTurnStreaming": "Streaming",
   "statusTurnWaitingForInteraction": "Waiting for interaction",
   "statusTurnRunningTool": "Running tool",
+  "statusTurnWaitingForAgents": "Waiting for agents",
   "statusTurnCompleted": "Completed",
   "statusTurnFailed": "Failed",
   "statusTurnCancelled": "Cancelled",

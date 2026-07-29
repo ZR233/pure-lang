@@ -227,7 +227,7 @@ async fn assert_task_invariants(
 fn live_interrupt_prompt(executor_id: &str) -> String {
     format!(
         "这是 headless shooter 的中断续轮验收控制输入。只调用一次 send_input 工具：\
-         target 必须是 `{executor_id}`，delivery 必须是 `interruptThenStart`，message 要求该 \
+         target 必须是 `{executor_id}`，interrupt 必须为 true，message 要求该 \
          executor 在 queued turn 中继续现有实现、完成实际验证、commit，并以 submit_delivery \
          交付。不要创建新 executor，不要 merge，不要用文字代替工具调用。工具成功后只返回简短确认。"
     )

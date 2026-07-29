@@ -109,9 +109,11 @@ impl Tool for CollaborationTool {
     fn input_schema(&self) -> Value {
         match self.kind {
             CollaborationToolKind::Spawn => spawn_schema(&self.policy),
-            CollaborationToolKind::Send => send_schema(),
+            CollaborationToolKind::Send => send_schema(&self.policy.message_targets),
             CollaborationToolKind::List => object_schema(Vec::new()),
-            CollaborationToolKind::Close => target_schema("Agent id to close."),
+            CollaborationToolKind::Close => {
+                target_schema(&self.policy.close_targets, "Agent id to close.")
+            }
         }
     }
 
@@ -344,7 +346,7 @@ mod tests {
 
     #[test]
     fn send_schema_resolves_target_session_in_runtime() {
-        let schema = send_schema();
+        let schema = send_schema(&AgentTargetSelector::Tree);
 
         assert!(schema["properties"]["target"].is_object());
         assert!(schema["properties"]["message"].is_object());
@@ -359,6 +361,24 @@ mod tests {
                 "sessionId": "caller-session",
             }))
             .is_err()
+        );
+    }
+
+    #[test]
+    fn explicit_target_policy_is_compiled_into_send_and_close_schemas() {
+        let allowed = AgentId::new("allowed").unwrap();
+        let selector = AgentTargetSelector::Explicit(BTreeSet::from([allowed]));
+
+        let send = send_schema(&selector);
+        let close = target_schema(&selector, "Agent id to close.");
+
+        assert_eq!(
+            send["properties"]["target"]["enum"],
+            serde_json::json!(["allowed"])
+        );
+        assert_eq!(
+            close["properties"]["target"]["enum"],
+            serde_json::json!(["allowed"])
         );
     }
 
