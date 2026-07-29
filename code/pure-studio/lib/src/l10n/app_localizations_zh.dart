@@ -92,6 +92,16 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
+  String get projectCleanupTitle => '移除项目并清理 Pure worktree？';
+
+  @override
+  String get projectCleanupBody =>
+      '这会从 Studio 移除项目，并永久放弃所有 Pure 自建任务 worktree 中的未提交修改和未合并提交。用户主工作区不会被删除或修改。';
+
+  @override
+  String get projectCleanupConfirm => '移除项目并清理';
+
+  @override
   String get sidebarNew => '新建';
 
   @override
@@ -215,6 +225,9 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get statusTurnRunningTool => '运行工具';
+
+  @override
+  String get statusTurnWaitingForAgents => '等待子代理';
 
   @override
   String get statusTurnCompleted => '已完成';
@@ -1356,6 +1369,16 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   }
 
   @override
+  String get projectCleanupTitle => '移除项目并清理 Pure worktree？';
+
+  @override
+  String get projectCleanupBody =>
+      '这会从 Studio 移除项目，并永久放弃所有 Pure 自建任务 worktree 中的未提交修改和未合并提交。用户主工作区不会被删除或修改。';
+
+  @override
+  String get projectCleanupConfirm => '移除项目并清理';
+
+  @override
   String get sidebarNew => '新建';
 
   @override
@@ -1479,6 +1502,9 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get statusTurnRunningTool => '运行工具';
+
+  @override
+  String get statusTurnWaitingForAgents => '等待子代理';
 
   @override
   String get statusTurnCompleted => '已完成';

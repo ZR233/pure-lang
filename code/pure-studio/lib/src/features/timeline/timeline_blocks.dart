@@ -50,6 +50,7 @@ IconData _phaseActivityIcon(TurnPhase phase) {
     TurnPhase.waitingForInteraction => Icons.pending_actions_outlined,
     TurnPhase.runningTool => Icons.build_outlined,
     TurnPhase.idle ||
+    TurnPhase.waitingForAgents ||
     TurnPhase.completed ||
     TurnPhase.failed ||
     TurnPhase.cancelled => Icons.check_circle_outline,
@@ -429,10 +430,7 @@ class _TimelineActivitySummary extends StatelessWidget {
                 layoutBuilder: (currentChild, previousChildren) {
                   return Stack(
                     alignment: AlignmentDirectional.centerStart,
-                    children: [
-                      ...previousChildren,
-                      ?currentChild,
-                    ],
+                    children: [...previousChildren, ?currentChild],
                   );
                 },
                 child: Text(

@@ -54,6 +54,15 @@ activity 与普通 progress 只更新有界进展摘要并重置 child deadline�
 连续 30 秒无活动只产生一次 `InactivityDiagnostic`，其中必须包含当前 canonical status、
 最后活动时间和最近进展，但该诊断不能单独授权 interrupt、`task_stop` 或把 Running executor
 判定为失败。只有新活动或 Planner 明确重新进入等待后才能重新计时，不形成周期查询。
+Core 必须把 typed wake context 编译为本轮确定性的 execution policy：对仍为
+`Queued | Running | WaitingTool | WaitingInteraction` 且拥有 active turn 或可启动 pending
+turn 的超时 child，协作工具 schema 与实际 dispatch 都不得允许 `send_input` 或
+`close_agent`。纯诊断轮只保留读取 canonical 状态所需的 `list_agents` 和只读能力，不得派生
+agent、停止任务或执行其他任务控制动作；混合批次仍可处理真实 actionable fact，但不得借此
+控制受保护的健康 child。诊断轮结束且仍有 live child 时重新进入 `WaitingAgents`，从进入时刻
+重新获得完整 30 秒 deadline。诊断期间到达的终态、`NeedsAttention` 或 durable product phase
+继续进入下一 continuation；显式用户输入会取代诊断轮并恢复普通策略，用户明确请求的
+`interrupt=true` 仍按正常取消语义执行。
 
 completion watcher 只观察终态，并把结果作为 `trigger=false` notification 写入 durable
 mailbox；父级确有等待注册时，再由 `WaitingAgents` 通过 accepted wake receipt 原子创建
@@ -255,12 +264,24 @@ worktree 路径和分支包含 task run id：
 pure-task-<runId>-<agentId>
 ```
 
-恢复 issue 的用户确认清理先返回 typed `RecoveryCleanupPreview`，包含 path、branch、
-missing/partial/complete、dirty、ahead commit、changed-file 及 `expectedRevision`。执行时
-以 revision 做 CAS，并在事务中终结精确故障 Task、删除 BranchLease、将相关 disposition
-写为 `cleanupRequested`；之后才幂等释放 Pure-owned leaf/branch。session scope 保留聊天
-历史；project scope 归档会话、删除损坏 Task/runtime 元数据并移除 Studio 项目登记，但绝不
-删除或修改用户项目目录。中断后恢复只续做已有 durable cleanup 授权，不扩大清理范围。
+恢复 issue 与项目关闭的用户确认清理都先返回 typed `RecoveryCleanupPreview`，包含 path、
+branch、missing/partial/complete、dirty、ahead commit、changed-file 及
+`expectedRevision`。项目级预览必须聚合该项目全部 session 的全部 Task run，不能只展示触发
+issue 的单个 run。执行时以 revision 做 CAS，先递归关闭该项目的 root agent tree，再在事务中
+终结全部关联 Task、删除 BranchLease、将相关 disposition 写为 `cleanupRequested`；之后才
+幂等释放预览中经 durable ownership 验证的 Pure-owned leaf/branch。该确认明确授权放弃这些
+Pure worktree 中的未提交修改和未合并提交，但不授权触碰用户主工作区、非 `pure-task-*`
+分支或 `.pure/worktrees/<taskRunId>/<agentId>` 之外的路径。session scope 保留聊天历史；
+project scope 归档会话、删除损坏 Task/runtime 元数据并移除 Studio 项目登记，但绝不删除或
+修改用户项目目录。
+
+项目清理关闭 agent tree 时由 durable cleanup 临时接管内存资源 ownership；普通 agent close
+不得抢先释放 worktree 或移除 ownership 映射。关闭或后续清理失败时保留该接管和映射供重试，
+仅在 durable worktree 清理及项目 quarantine 都完成后最终 detach。实际删除前必须再次核对
+确认时的项目版本、完整 Task run 集合（包括零 work-unit run）、work-unit identity 集合和
+worktree HEAD/dirty/存在性事实；agent close 合法产生的 Task 状态变化不作为失效条件。任一
+资源事实漂移都终止执行并要求刷新预览。中断后恢复只续做已有 durable cleanup 授权，不扩大
+清理范围。
 
 ## Planner 合并与冲突
 

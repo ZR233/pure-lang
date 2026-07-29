@@ -14,8 +14,8 @@ use super::{
     AgentCurrentSessionSubmitRequest, AgentDurableState, AgentLifecycleState, AgentRuntimeEvent,
     AgentRuntimeEventKind, AgentRuntimeHandle, AgentRuntimeHost, AgentRuntimeResult, AgentSnapshot,
     AgentSubmitRequest, AgentTurnMailboxHandle, AgentTurnPreparationContext, AgentUpdateKind,
-    AgentWakeId, InputDelivery, MailboxDeliveryPhase, MailboxDeliveryState, MailboxTurnTrigger,
-    PendingAgentInput, SessionId, TurnId,
+    AgentWakeBatch, AgentWakeContext, AgentWakeId, InputDelivery, MailboxDeliveryPhase,
+    MailboxDeliveryState, MailboxTurnTrigger, PendingAgentInput, SessionId, TurnId,
 };
 use crate::session_event::{
     ObservedTurnEvent, TurnObservation, project_observation, project_runtime_event,
@@ -322,6 +322,17 @@ where
                 session_id: request.session_id,
             });
         }
+        let supersedes_diagnostic_turn = request.delivery == InputDelivery::Start
+            && request.wake_id.is_none()
+            && !request
+                .metadata
+                .pointer("/userPrompt/synthetic")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+            && self.state.active_input.as_ref().is_some_and(|input| {
+                trusted_wake_context(input, &self.state.snapshot.identity.id)
+                    .is_some_and(|context| context.diagnostic_only)
+            });
         let mut wake_signal_ids = request.wake_signal_ids;
         wake_signal_ids.retain(|signal_id| !signal_id.trim().is_empty());
         wake_signal_ids.sort();
@@ -340,7 +351,11 @@ where
         }) {
             return Ok(existing);
         }
-        let delivery = request.delivery;
+        let delivery = if supersedes_diagnostic_turn {
+            InputDelivery::InterruptThenStart
+        } else {
+            request.delivery
+        };
         let live_turn = if delivery == InputDelivery::InterruptThenStart
             || self.state.snapshot.mailbox_delivery_phase != MailboxDeliveryPhase::CurrentTurn
         {
@@ -972,12 +987,14 @@ where
                 .map(|input| input.mail_id.clone())
                 .collect(),
         );
+        let wake_context = trusted_wake_context(&input, &self.state.snapshot.identity.id);
         let context = AgentTurnPreparationContext {
             snapshot: self.state.snapshot.clone(),
             turn_id: input.turn_id.clone(),
             session_id: input.session_id.clone(),
             input,
             leading_inputs: claimed_inputs,
+            wake_context,
             session: self.state.sessions[&self.state.snapshot.active_session_id.clone().unwrap()]
                 .session
                 .clone(),
@@ -1478,6 +1495,18 @@ where
             .agent_events
             .store_snapshot(self.state.snapshot.clone());
     }
+}
+
+fn trusted_wake_context(
+    input: &PendingAgentInput,
+    parent_agent_id: &super::AgentId,
+) -> Option<AgentWakeContext> {
+    let wake_id = input.wake_id.as_ref()?;
+    let batch =
+        serde_json::from_value::<AgentWakeBatch>(input.metadata.get("agentWakeBatch")?.clone())
+            .ok()?;
+    (batch.wake_id == *wake_id && batch.parent_agent_id == *parent_agent_id)
+        .then_some(batch.context)
 }
 
 fn request_cancellation(active: &mut ActiveTurn, grace: Duration) {

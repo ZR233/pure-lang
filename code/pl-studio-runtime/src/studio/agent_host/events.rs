@@ -336,7 +336,9 @@ impl StudioAgentEventProjector {
                 .await?;
         }
         if snapshot.lifecycle == AgentLifecycleState::Closed {
-            self.resources.remove(&snapshot.identity.id).await;
+            self.resources
+                .release_after_close(&snapshot.identity.id)
+                .await;
         }
         Ok(())
     }

@@ -143,6 +143,17 @@ delivery/review/merge/recovery phase 才能唤醒父 agent。30 秒无活动只�
 新活动或 Planner 明确重新等待后才重新计时。channel lag 时从 canonical durable snapshot
 对账并清除过期 wake-in-flight，不把丢失的 commentary 推断成失败。
 
+`InactivityDiagnostic` 不是提示词约定，而是 typed turn purpose。Core 根据 wake context
+收窄 `AgentExecutionPolicy`：仍处于 `Queued | Running | WaitingTool |
+WaitingInteraction` 且具有 active turn 或可启动 pending turn 的超时 child 是受保护目标，
+`send_input`/`close_agent` 必须同时在工具 schema 和 dispatch 授权中排除这些目标。纯诊断轮
+不得 spawn、`task_stop` 或执行其他任务控制工具；`list_agents` 仍可读取 canonical snapshot。
+含真实 actionable update 的混合批次可保留对应产品操作，但不能解除健康 child 的目标保护。
+诊断轮正常结束后若仍有 live child，父 agent 重新进入 `WaitingAgents` 并从当时重置完整
+inactivity deadline；其间到达的 actionable update 保留到下一 continuation。非 synthetic
+用户输入到达活动诊断轮时必须以普通策略启动新 turn，而不能 steer 进受限诊断策略；用户显式
+`interrupt=true` 的合法中断流程不受影响。
+
 每个 wake 使用 typed `WakeContext`，固定包含当前 agent 状态、wake reason、最后活动时间、
 最近最多 8 个重要 progress/tool 阶段、一份最新 commentary 摘要、终态事实、用户停止请求、
 signal revision 与 lag reconciliation 结果。completion watcher 只观察终态并写入

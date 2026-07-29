@@ -35,6 +35,7 @@ where
     H: AgentRuntimeHost,
 {
     let leading_inputs = context.leading_inputs.clone();
+    let wake_context = context.wake_context.clone();
     for input in &leading_inputs {
         context.session.push_user_prompt(input.message.clone());
     }
@@ -59,7 +60,10 @@ where
         .prepare_turn(context)
         .await
     {
-        Ok(prepared) => {
+        Ok(mut prepared) => {
+            if let Some(wake_context) = wake_context.as_ref() {
+                prepared.policy.constrain_for_agent_wake(wake_context);
+            }
             let prepared =
                 prepared.with_runtime_context(&turn_id, cancellation.clone(), checkpoint, mailbox);
             for section in &prepared.pinned_context {

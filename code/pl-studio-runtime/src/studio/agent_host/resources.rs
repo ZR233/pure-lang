@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -22,6 +22,7 @@ pub(super) struct StudioAgentResource {
 pub(in crate::studio) struct StudioAgentResources {
     entries: Arc<RwLock<BTreeMap<AgentId, StudioAgentResource>>>,
     session_bindings: Arc<RwLock<BTreeMap<AgentId, String>>>,
+    cleanup_takeovers: Arc<RwLock<BTreeSet<String>>>,
 }
 
 impl StudioAgentResources {
@@ -39,6 +40,53 @@ impl StudioAgentResources {
 
     pub(super) async fn remove(&self, id: &AgentId) -> Option<StudioAgentResource> {
         self.entries.write().await.remove(id)
+    }
+
+    pub(in crate::studio) async fn begin_cleanup_takeover(
+        &self,
+        root_session_ids: &BTreeSet<String>,
+    ) {
+        self.cleanup_takeovers
+            .write()
+            .await
+            .extend(root_session_ids.iter().cloned());
+    }
+
+    pub(super) async fn release_after_close(&self, id: &AgentId) {
+        let takeovers = self.cleanup_takeovers.read().await;
+        let mut entries = self.entries.write().await;
+        let preserve = entries
+            .get(id)
+            .is_some_and(|resource| takeovers.contains(&resource.request.session_id));
+        if !preserve {
+            entries.remove(id);
+        }
+    }
+
+    pub(in crate::studio) async fn complete_cleanup_takeover(
+        &self,
+        root_session_ids: &BTreeSet<String>,
+    ) {
+        let mut takeovers = self.cleanup_takeovers.write().await;
+        let removed_agent_ids = {
+            let mut entries = self.entries.write().await;
+            let removed = entries
+                .iter()
+                .filter(|(_, resource)| root_session_ids.contains(&resource.request.session_id))
+                .map(|(agent_id, _)| agent_id.clone())
+                .collect::<Vec<_>>();
+            for agent_id in &removed {
+                entries.remove(agent_id);
+            }
+            removed
+        };
+        let mut bindings = self.session_bindings.write().await;
+        for agent_id in removed_agent_ids {
+            bindings.remove(&agent_id);
+        }
+        for session_id in root_session_ids {
+            takeovers.remove(session_id);
+        }
     }
 
     pub(in crate::studio) async fn restore_bindings(
@@ -80,4 +128,53 @@ pub(super) fn root_session_id(agent_id: &AgentId) -> Option<String> {
         .as_str()
         .strip_prefix("studio:")
         .map(str::to_string)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn cleanup_takeover_preserves_resource_until_durable_cleanup_completes() {
+        let resources = StudioAgentResources::default();
+        let agent_id = AgentId::new("executor-cleanup-test").unwrap();
+        let root_session_id = "root-cleanup-test".to_string();
+        resources
+            .insert(
+                agent_id.clone(),
+                StudioAgentResource {
+                    studio_session_id: "child-cleanup-test".to_string(),
+                    workspace_root: PathBuf::from("C:\\workspace"),
+                    task_name: "cleanup test".to_string(),
+                    request: StudioTaskSpawnRequest {
+                        agent_id: agent_id.to_string(),
+                        session_id: root_session_id.clone(),
+                        task_name: "cleanup test".to_string(),
+                        role: "explorer".to_string(),
+                        owned_paths: Vec::new(),
+                        requested_by_call_id: "call-cleanup-test".to_string(),
+                    },
+                    preparation: StudioTaskSpawnPreparation::test_without_worktree(),
+                    worktree: None,
+                },
+            )
+            .await;
+        let root_session_ids = BTreeSet::from([root_session_id]);
+
+        resources.begin_cleanup_takeover(&root_session_ids).await;
+        resources.release_after_close(&agent_id).await;
+
+        assert!(
+            resources.get(&agent_id).await.is_some(),
+            "a close or close failure during project cleanup must retain durable ownership"
+        );
+        assert_eq!(
+            resources.studio_session_id(&agent_id).await.as_deref(),
+            Some("child-cleanup-test")
+        );
+
+        resources.complete_cleanup_takeover(&root_session_ids).await;
+        assert!(resources.get(&agent_id).await.is_none());
+        assert!(resources.studio_session_id(&agent_id).await.is_none());
+    }
 }

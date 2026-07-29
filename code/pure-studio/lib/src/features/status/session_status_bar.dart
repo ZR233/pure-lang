@@ -151,7 +151,7 @@ class SessionStatusBar extends ConsumerWidget {
                     const Spacer(),
                     const SizedBox(width: 8),
                     _PhaseReadout(
-                      turnPhase: workspace.turnPhase,
+                      turnPhase: workspace.statusPhase,
                       interactionKind: workspace.activeInteraction?.kind,
                     ),
                   ],

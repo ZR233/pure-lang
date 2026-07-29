@@ -107,6 +107,23 @@ impl StudioStore {
         models.into_iter().map(task_run_record).collect()
     }
 
+    pub(crate) async fn list_task_runs_for_project(
+        &self,
+        project_id: &str,
+    ) -> Result<Vec<TaskRunRecord>> {
+        let session_ids = self.list_project_session_ids(project_id).await?;
+        if session_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let models = entities::task_run::Entity::find()
+            .filter(entities::task_run::Column::SessionId.is_in(session_ids))
+            .order_by_asc(entities::task_run::Column::CreatedAt)
+            .order_by_asc(entities::task_run::Column::Id)
+            .all(&self.db)
+            .await?;
+        models.into_iter().map(task_run_record).collect()
+    }
+
     pub(crate) async fn read_active_task_run_for_session(
         &self,
         session_id: &str,

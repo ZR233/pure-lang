@@ -218,6 +218,15 @@ Flutter context readout 使用紧凑圆形进度环，不显示百分比文字�
 
 状态栏的 waiting 状态以 active interaction 为一等输入。`busy` 表示 turn 是否仍在运行，`activeInteraction` 表示 UI 是否必须等待用户响应；Plan confirmation 可以在 `busy=false` 时仍阻塞 composer。状态栏 phase 优先级为 `toolApproval -> userInput -> planConfirmation -> turnPhase`。
 
+历史 turn outcome 与 agent workspace activity 是正交状态。Flutter 保留 wire 中真实的
+`SessionTurnStatus::Completed`，同时由 `AgentWorkspaceView.statusPhase` 提供展示态：
+仅当选中 root session 的 canonical `agentStatus == waiting`，且原始 `turnPhase` 为
+`idle | completed` 时显示 `waitingForAgents`（“等待子代理 / Waiting for agents”）。
+活动 interaction、活动 turn phase 和 child workspace 状态优先，不做该映射。`turnPhase`、
+`busy`、停止按钮与 Composer 仍只依据真实活动 turn 计算，不能因展示为等待子代理而把已经
+完成的 Planner turn 伪装成可停止的运行中 turn；agent 恢复 completed 后展示重新回到
+`completed`。
+
 状态栏 phase 必须对 `TurnPhase` 与 `InteractionKind` 使用穷尽的本地化映射，不得直接展示协议或 Dart enum 的 `.name`。英文使用自然短语，简体中文使用简洁状态说明；active interaction 的本地化标签仍按上述优先级覆盖 turn phase。
 
 会话列表是独立滚动区域，row 采用 opencode 式单行 flex 布局：图标/状态固定宽度，标题 `min-width:0` 且 `truncate`，列表项 `flex-shrink:0`。Sessions 区域过长时只滚动列表，不挤压 project 区、settings 按钮或相邻 session row。
@@ -234,7 +243,7 @@ Studio 启动恢复错误分为三个 UI 层级，不能因为单个 Task/worktr
   只在 issue 声明可用动作时出现。controller 与 Bridge 都必须拒绝选择故障目标，避免绕过
   widget；当前 selection 指向故障项时，bootstrap 原子回退到健康项目/会话或空态。
 
-清理入口先调用 `previewRecoveryIssueCleanup(issueId)`，弹窗展示每个 Pure-owned 资源的
+恢复清理入口先调用 `previewRecoveryIssueCleanup(issueId)`，弹窗展示每个 Pure-owned 资源的
 path、branch、完整/缺失/部分缺失状态、dirty、未合并提交数和变更文件数。取消不产生副作用；
 确认时调用
 `cleanupRecoveryIssue(issueId, expectedRevision, selectedProjectId, selectedSessionId)`。
@@ -247,9 +256,20 @@ issue 并展示新诊断，成功后以返回的 canonical snapshot 原子刷新
 移除项目；它绝不删除、修改或递归清理用户项目目录。所有清理确认文案、资源状态、潜在丢失
 的未合并提交与文件数量都必须走中英文 i18n。
 
-项目和会话管理继续走 Studio store/runtime API，不能在组件里手动拼接状态。Flutter 使用 `pl-studio-bridge.openProject(path)`，该接口在 `pl-core` 内完成 open project、LSP reconcile、session ensure 和 bootstrap，然后返回新的 project/session/sidebar 快照。打开项目支持两种入口：系统目录选择器和手动路径输入。Flutter 选择项目调用 `selectProject(projectId)`，关闭项目调用 `archiveProject(projectId, selectedProjectId)`，新建会话调用 `createSession(projectId, title)`；所有返回 payload 都必须原子替换 `projects`、当前项目的 `sessions`、`selectedProjectId`、`selectedSessionId`、agent/runtime/interaction 快照，并通过 `sessionRuntime.activeMcpServers/activeLspServers` 恢复状态栏 active 能力；MCP/LSP server catalog 由 config snapshot 与全局 health event 更新。若有 `selectedSessionId`，前端必须立即用 `loadSessionState` 恢复会话历史 projection。若没有选中会话，timeline、状态栏和 composer 显示无会话空态。
+项目和会话管理继续走 Studio store/runtime API，不能在组件里手动拼接状态。Flutter 使用 `pl-studio-bridge.openProject(path)`，该接口在 `pl-core` 内完成 open project、LSP reconcile、session ensure 和 bootstrap，然后返回新的 project/session/sidebar 快照。打开项目支持两种入口：系统目录选择器和手动路径输入。Flutter 选择项目调用 `selectProject(projectId)`；项目行关闭入口先调用 `previewProjectCleanup(projectId)`，确认后携带 `expectedRevision` 调用 `cleanupProject(projectId, expectedRevision, selectedProjectId)`；新建会话调用 `createSession(projectId, title)`。所有返回 payload 都必须原子替换 `projects`、当前项目的 `sessions`、`selectedProjectId`、`selectedSessionId`、agent/runtime/interaction 快照，并通过 `sessionRuntime.activeMcpServers/activeLspServers` 恢复状态栏 active 能力；MCP/LSP server catalog 由 config snapshot 与全局 health event 更新。若有 `selectedSessionId`，前端必须立即用 `loadSessionState` 恢复会话历史 projection。若没有选中会话，timeline、状态栏和 composer 显示无会话空态。
 
-项目关闭和会话关闭都是归档语义，不删除磁盘内容、配置或历史会话。Project row 上的关闭按钮调用 `archiveProject(projectId, selectedProjectId)`；关闭当前项目后切换到后端返回的下一个可用项目/会话，关闭最后一个项目后清空当前 selection 并取消 session stream。Session row 上的关闭按钮调用 `archiveSession(sessionId, selectedSessionId)`；后端会拒绝 active turn，会取消该会话 pending interaction，并返回同项目的新 session selection。前端收到 payload 后删除/隐藏归档 session、切换到返回的 `selectedSessionId`，并用 `loadSessionState` 恢复新会话 projection；如果项目内没有剩余 session，状态栏与 composer 禁用，用户可以用新建会话按钮创建会话。会话列表只显示 `visibility=active && parentSessionId=null`，legacy handoff child/archived session 不作为 root row 出现。
+项目关闭是显式清理语义：Project row 上的关闭按钮始终先打开项目级清理预览，列出该项目
+全部 Pure-owned worktree，并明确说明确认后会放弃其中未提交修改和未合并提交；用户确认前
+不产生写操作。后端确认时先停止关联 agent，再只删除经 durable identity 验证的 Pure
+worktree/branch，随后归档历史并移除 Studio 项目登记，绝不删除用户主工作区。关闭当前项目
+后切换到后端返回的下一个可用项目/会话，关闭最后一个项目后清空当前 selection 并取消
+session stream。Session row 上的关闭按钮仍是归档语义，调用
+`archiveSession(sessionId, selectedSessionId)`；后端会拒绝 active turn，会取消该会话
+pending interaction，并返回同项目的新 session selection。前端收到 payload 后删除/隐藏归档
+session、切换到返回的 `selectedSessionId`，并用 `loadSessionState` 恢复新会话 projection；
+如果项目内没有剩余 session，状态栏与 composer 禁用，用户可以用新建会话按钮创建会话。
+会话列表只显示 `visibility=active && parentSessionId=null`，legacy handoff child/archived
+session 不作为 root row 出现。
 
 Settings 是独立页面栈中的配置编辑入口。它必须覆盖 Providers、Instructions、Skills、Roles、MCP、Security 和 General 页签。App bootstrap/first-run 先调用 `loadProviderCatalog()`，目录只按 revision 做进程内缓存；加载失败显示错误与重试，不回退本地常量。普通设置项改完即保存；Provider 新增/编辑使用独立本地草稿，点击保存后调用 `saveProviderSettings(settingsJson)`。Provider payload 为 `defaultProviderId`、`providers[]`、`roles[]`，实例字段为 `id`、可选 `originalId`、`templateKind`、`wireProtocol`、`connectionMode`、`name`、`baseUrl`、`bearerToken`、`defaultModel`、`customModels[]`；model 字段为 `slug/displayName/reasoningEfforts/baseInstructions`。空 bearer token 保留已存 secret；重命名用 `originalId` 关联原实例。所有 typed save 成功后必须用返回的 canonical config 更新 providers、roles、instructions、skills、MCP servers、permission mode 和 config 状态。
 

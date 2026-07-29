@@ -131,6 +131,68 @@ async fn ui_submit_and_stop_are_core_runtime_apis() {
 }
 
 #[tokio::test]
+async fn project_cleanup_closes_active_root_and_quarantines_project() {
+    let (base_url, handle, accepted_rx, release_tx) = serve_delayed_sse().await;
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let home = std::env::temp_dir().join(format!("pure-project-cleanup-home-{unique}"));
+    let workspace = std::env::temp_dir().join(format!("pure-project-cleanup-workspace-{unique}"));
+    tokio::fs::create_dir_all(&workspace).await.unwrap();
+    let config_store = ConfigStore::new(crate::config::ConfigPaths::from_home(&home));
+    config_store.save(&test_config(base_url)).unwrap();
+    let store = StudioStore::open_memory().await.unwrap();
+    let runtime = StudioRuntime::new(store.clone(), config_store);
+    let project = runtime.open_project(&workspace).await.unwrap();
+    let session = store
+        .create_session(&project.id, "Project cleanup", StudioMode::Simple)
+        .await
+        .unwrap();
+
+    runtime
+        .submit_prompt(StudioSubmitPromptRequest {
+            session_id: session.id.clone(),
+            prompt: "stay active until project cleanup".to_string(),
+            attachment_ids: Vec::new(),
+            options: StudioSubmitPromptOptions::default(),
+        })
+        .await
+        .unwrap();
+    tokio::time::timeout(TEST_RUNTIME_TIMEOUT, accepted_rx)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let preview = runtime.preview_project_cleanup(&project.id).await.unwrap();
+    let snapshot = runtime
+        .cleanup_project(&project.id, &preview.expected_revision)
+        .await
+        .unwrap();
+    let framework = runtime.agent_framework().await.unwrap();
+    let root = framework
+        .handle()
+        .snapshot(crate::studio::agent_host::root_agent_id(&session.id))
+        .await
+        .unwrap();
+
+    assert_eq!(root.lifecycle, crate::AgentLifecycleState::Closed);
+    assert!(snapshot.active_turns.is_empty());
+    assert!(runtime.list_projects().await.unwrap().is_empty());
+    assert!(
+        store
+            .list_pending_interactions(&session.id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    let _ = release_tx.send(());
+    handle.await.unwrap();
+    let _ = tokio::fs::remove_dir_all(home).await;
+    let _ = tokio::fs::remove_dir_all(workspace).await;
+}
+
+#[tokio::test]
 async fn ui_submit_clears_active_runtime_snapshot_after_completion() {
     let sse_body = concat!(
         "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"delta\":\"done\"}\n\n",

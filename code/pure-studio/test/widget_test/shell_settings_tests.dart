@@ -77,42 +77,50 @@ void registerShellSettingsTests() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('project close buttons respect current session busy state', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(1280, 800);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
+  testWidgets(
+    'project cleanup remains available while current session is busy',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
 
-    final api = _FakeStudioApi(
-      _twoProjectState(
-        selectedProjectId: 'project-a',
-        turnPhase: TurnPhase.streaming,
-      ),
-    );
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [studioApiProvider.overrideWithValue(api)],
-        child: _localizedApp(home: const StudioShell()),
-      ),
-    );
-    await tester.pump();
-    await tester.pump();
+      final api = _FakeStudioApi(
+        _twoProjectState(
+          selectedProjectId: 'project-a',
+          turnPhase: TurnPhase.streaming,
+        ),
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [studioApiProvider.overrideWithValue(api)],
+          child: _localizedApp(home: const StudioShell()),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
 
-    final closeProjectButtons = find.widgetWithIcon(IconButton, Icons.close);
-    final closeButtons = tester
-        .widgetList<IconButton>(closeProjectButtons)
-        .toList();
-    expect(closeButtons.length, 2);
-    expect(closeButtons.first.onPressed, isNull);
-    expect(closeButtons.last.onPressed, isNotNull);
+      final closeProjectButtons = find.widgetWithIcon(IconButton, Icons.close);
+      final closeButtons = tester
+          .widgetList<IconButton>(closeProjectButtons)
+          .toList();
+      expect(closeButtons.length, 2);
+      expect(closeButtons.first.onPressed, isNotNull);
+      expect(closeButtons.last.onPressed, isNotNull);
 
-    await tester.tap(closeProjectButtons.last);
-    await tester.pump();
-    await tester.pump();
-    expect(api.archivedProjectId, 'project-b');
-  });
+      await tester.tap(closeProjectButtons.first);
+      await tester.pumpAndSettle();
+      expect(api.previewProjectCleanupCount, 1);
+      expect(
+        find.text('Remove project and clean up Pure worktrees?'),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(api.archivedProjectId, isNull);
+      expect(api.cleanedProjectId, isNull);
+    },
+  );
 
   testWidgets('status bar routes model controls by session mode', (
     tester,
@@ -280,6 +288,7 @@ void registerShellSettingsTests() {
         TurnPhase.streaming: 'Streaming',
         TurnPhase.waitingForInteraction: 'Waiting for interaction',
         TurnPhase.runningTool: 'Running tool',
+        TurnPhase.waitingForAgents: 'Waiting for agents',
         TurnPhase.completed: 'Completed',
         TurnPhase.failed: 'Failed',
         TurnPhase.cancelled: 'Cancelled',
@@ -292,6 +301,7 @@ void registerShellSettingsTests() {
         TurnPhase.streaming: '正在生成',
         TurnPhase.waitingForInteraction: '等待交互',
         TurnPhase.runningTool: '运行工具',
+        TurnPhase.waitingForAgents: '等待子代理',
         TurnPhase.completed: '已完成',
         TurnPhase.failed: '失败',
         TurnPhase.cancelled: '已取消',
@@ -325,6 +335,77 @@ void registerShellSettingsTests() {
       }
     }
   });
+
+  testWidgets(
+    'root completed turn projects waiting agent status without becoming busy',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final base = _emptyState();
+      final waiting = base.copyWith(
+        sessions: [base.sessions.single.copyWith(agentStatus: 'waiting')],
+        turnPhasesBySession: const {'session-1': TurnPhase.completed},
+      );
+      final workspace = waiting.selectedAgentWorkspace!;
+
+      expect(workspace.turnPhase, TurnPhase.completed);
+      expect(workspace.statusPhase, TurnPhase.waitingForAgents);
+      expect(workspace.isBusy, isFalse);
+      expect(waiting.isBusy, isFalse);
+
+      await tester.pumpWidget(
+        ProviderScope(
+          child: _localizedApp(home: SessionStatusBar(workspace: workspace)),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Waiting for agents'), findsOneWidget);
+      expect(find.text('Completed'), findsNothing);
+
+      final completed = waiting.copyWith(
+        sessions: [waiting.sessions.single.copyWith(agentStatus: 'completed')],
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          child: _localizedApp(
+            home: SessionStatusBar(
+              workspace: completed.selectedAgentWorkspace!,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Completed'), findsOneWidget);
+      expect(find.text('Waiting for agents'), findsNothing);
+    },
+  );
+
+  test(
+    'waiting status phase keeps active turns and child workspaces unchanged',
+    () {
+      final base = _emptyState();
+      final streaming = base.copyWith(
+        sessions: [base.sessions.single.copyWith(agentStatus: 'waiting')],
+        turnPhasesBySession: const {'session-1': TurnPhase.streaming},
+      );
+      expect(
+        streaming.selectedAgentWorkspace!.statusPhase,
+        TurnPhase.streaming,
+      );
+      expect(streaming.selectedAgentWorkspace!.isBusy, isTrue);
+
+      final child = _agentWorkspaceState(cacheChild: true).copyWith(
+        selectedSessionId: 'agent-session-1',
+        turnPhasesBySession: const {'agent-session-1': TurnPhase.completed},
+      );
+      expect(child.selectedAgentWorkspace!.isRoot, isFalse);
+      expect(child.selectedAgentWorkspace!.statusPhase, TurnPhase.completed);
+    },
+  );
 
   testWidgets('header does not duplicate the localized running phase', (
     tester,
@@ -374,8 +455,10 @@ void registerShellSettingsTests() {
 
     for (final localeEntry in labelsByLocale.entries) {
       for (final interactionEntry in localeEntry.value.entries) {
-        final state = _emptyState().copyWith(
-          turnPhasesBySession: const {'session-1': TurnPhase.streaming},
+        final base = _emptyState();
+        final state = base.copyWith(
+          sessions: [base.sessions.single.copyWith(agentStatus: 'waiting')],
+          turnPhasesBySession: const {'session-1': TurnPhase.completed},
           pendingInteractions: [
             PendingInteraction(
               id: 'interaction-${interactionEntry.key.name}',
@@ -402,8 +485,8 @@ void registerShellSettingsTests() {
           reason: '${localeEntry.key} ${interactionEntry.key}',
         );
         expect(find.text(interactionEntry.key.name), findsNothing);
-        expect(find.text('Streaming'), findsNothing);
-        expect(find.text('正在生成'), findsNothing);
+        expect(find.text('Waiting for agents'), findsNothing);
+        expect(find.text('等待子代理'), findsNothing);
       }
     }
   });

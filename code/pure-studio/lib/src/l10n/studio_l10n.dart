@@ -30,6 +30,7 @@ extension StudioLocalizationsX on BuildContext {
       TurnPhase.streaming => l10n.statusTurnStreaming,
       TurnPhase.waitingForInteraction => l10n.statusTurnWaitingForInteraction,
       TurnPhase.runningTool => l10n.statusTurnRunningTool,
+      TurnPhase.waitingForAgents => l10n.statusTurnWaitingForAgents,
       TurnPhase.completed => l10n.statusTurnCompleted,
       TurnPhase.failed => l10n.statusTurnFailed,
       TurnPhase.cancelled => l10n.statusTurnCancelled,

@@ -9,6 +9,12 @@ abstract class StudioApi {
     String projectId, {
     String? selectedProjectId,
   });
+  Future<RecoveryCleanupPreview> previewProjectCleanup(String projectId);
+  Future<StudioState> cleanupProject(
+    String projectId,
+    String expectedRevision, {
+    String? selectedProjectId,
+  });
   Future<StudioState> createSession(String projectId, {String? title});
   Future<StudioState> archiveSession(
     String sessionId, {
@@ -140,6 +146,30 @@ class FrbStudioApi implements StudioApi {
     return studioStateFromFrbSnapshot(
       await frb.archiveProject(
         projectId: projectId,
+        selectedProjectId: selectedProjectId,
+      ),
+    );
+  }
+
+  @override
+  Future<RecoveryCleanupPreview> previewProjectCleanup(String projectId) async {
+    await _ensureReady();
+    return _recoveryCleanupPreviewFromFrb(
+      await frb.previewProjectCleanup(projectId: projectId),
+    );
+  }
+
+  @override
+  Future<StudioState> cleanupProject(
+    String projectId,
+    String expectedRevision, {
+    String? selectedProjectId,
+  }) async {
+    await _ensureReady();
+    return studioStateFromFrbSnapshot(
+      await frb.cleanupProject(
+        projectId: projectId,
+        expectedRevision: expectedRevision,
         selectedProjectId: selectedProjectId,
       ),
     );

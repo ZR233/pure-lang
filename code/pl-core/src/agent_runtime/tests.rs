@@ -7,7 +7,10 @@ use pretty_assertions::assert_eq;
 use tokio::sync::Notify;
 
 use super::*;
-use crate::AgentSession;
+use crate::{
+    AgentSession, ToolContext, ToolEffect, ToolInput, ToolVisibilitySet, TurnOptions,
+    TurnWorkingSetHandle, WorkspaceAccess,
+};
 
 #[derive(Debug, Clone)]
 struct TestError(String);
@@ -456,6 +459,33 @@ async fn wait_for_activity(
     })
     .await
     .expect("agent should reach the expected activity")
+}
+
+fn wake_batch_from_message(message: &str) -> AgentWakeBatch {
+    let batch_json = message
+        .split_once("<agentWakeBatch>\n")
+        .and_then(|(_, tail)| tail.split_once("\n</agentWakeBatch>"))
+        .map(|(json, _)| json)
+        .expect("wake message should contain a typed batch");
+    serde_json::from_str(batch_json).expect("wake batch should be valid JSON")
+}
+
+fn test_tool_context() -> ToolContext {
+    let (event_tx, _) = tokio::sync::broadcast::channel(8);
+    ToolContext {
+        event_tx,
+        options: TurnOptions::default(),
+        workspace_access: WorkspaceAccess::WorkspaceOnly,
+        workspace_root: std::env::temp_dir(),
+        workspace_instructions: None,
+        instruction_snapshot: None,
+        provider_call_id: None,
+        active_subagent: None,
+        lsp_runtime: None,
+        parent_session: Arc::new(AgentSession::new()),
+        working_set: TurnWorkingSetHandle::default(),
+        tool_cache: crate::TurnToolCacheHandle::default(),
+    }
 }
 
 #[tokio::test]
@@ -1347,6 +1377,261 @@ async fn inactivity_deadline_is_event_driven_single_shot_and_keeps_eight_updates
         host.turn_factory.prepared_messages.lock().unwrap().len(),
         1,
         "the same waiting epoch must emit only one inactivity diagnostic"
+    );
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test(start_paused = true)]
+async fn inactivity_diagnostic_cannot_interrupt_a_healthy_executor_and_resets_full_deadline() {
+    let repository = TestRepository::empty();
+    let host = TestHost::new(repository.clone(), FactoryMode::Block);
+    let mut options = test_options();
+    options.child_inactivity_timeout = Duration::from_secs(30);
+    let runtime = AgentRuntime::start(host.clone(), options).await.unwrap();
+    let handle = runtime.handle();
+    let root = AgentId::new("root").unwrap();
+    handle
+        .register(registration("root", "root-chat"))
+        .await
+        .unwrap();
+    let mut child_request = managed_child_spawn_request(root.clone());
+    child_request.initial_message = Some("executor work".to_string());
+    let spawned = handle.spawn(child_request).await.unwrap();
+    let child = spawned.snapshot.identity.id;
+    let executor_turn = spawned.initial_turn_id.unwrap();
+    wait_for_prepared_messages(&host.turn_factory, 1).await;
+    let executor_before = repository.state(&child);
+
+    handle.enter_waiting_agents(root.clone()).await.unwrap();
+    tokio::time::advance(Duration::from_secs(30)).await;
+    wait_for_prepared_messages(&host.turn_factory, 2).await;
+    let diagnostic =
+        wake_batch_from_message(&host.turn_factory.prepared_messages.lock().unwrap()[1]);
+    let mut policy = AgentExecutionPolicy {
+        visible_tools: ToolVisibilitySet::from_tool_names([
+            "list_agents",
+            "send_input",
+            "close_agent",
+            "task_stop",
+        ]),
+        allowed_effects: ToolEffectSet::from_effects([
+            ToolEffect::Read,
+            ToolEffect::AgentControl,
+            ToolEffect::BranchControl,
+        ]),
+        collaboration: AgentAccessPolicy {
+            spawn_roles: BTreeSet::from([crate::AgentRoleId::new("explorer").unwrap()]),
+            list_targets: AgentTargetSelector::Tree,
+            message_targets: AgentTargetSelector::Tree,
+            close_targets: AgentTargetSelector::Tree,
+        },
+        finalization: TurnFinalizationPolicy::Direct,
+    };
+    policy.constrain_for_agent_wake(&diagnostic.context);
+    assert!(policy.visible_tools.contains("list_agents"));
+    assert!(!policy.visible_tools.contains("send_input"));
+    assert!(!policy.visible_tools.contains("close_agent"));
+    assert!(!policy.visible_tools.contains("task_stop"));
+
+    let collaboration =
+        AgentCollaborationTools::new(handle.clone(), root.clone(), policy.collaboration);
+    let send_input = collaboration
+        .tools()
+        .into_iter()
+        .find(|tool| tool.name() == "send_input")
+        .unwrap();
+    assert_eq!(
+        send_input.input_schema()["properties"]["target"]["enum"],
+        serde_json::json!([])
+    );
+    let denied = send_input
+        .execute(
+            ToolInput {
+                arguments: serde_json::json!({
+                    "target": child,
+                    "message": "interrupt the executor",
+                    "interrupt": true,
+                }),
+                session_id: "root-chat".to_string(),
+                tool_id: "diagnostic-send".to_string(),
+                revision_base: 0,
+            },
+            test_tool_context(),
+        )
+        .await;
+    assert!(denied.is_err());
+    let executor_after_attempt = repository.state(&child);
+    assert_eq!(
+        executor_after_attempt.snapshot.active_turn_id,
+        Some(executor_turn.clone())
+    );
+    assert_eq!(
+        executor_after_attempt.snapshot.dispatch_generation,
+        executor_before.snapshot.dispatch_generation
+    );
+    assert_eq!(
+        executor_after_attempt.pending_inputs,
+        executor_before.pending_inputs
+    );
+    assert_eq!(
+        executor_after_attempt.active_input,
+        executor_before.active_input
+    );
+
+    let diagnostic_turn = handle
+        .snapshot(root.clone())
+        .await
+        .unwrap()
+        .active_turn_id
+        .unwrap();
+    handle
+        .cancel_turn(root.clone(), diagnostic_turn)
+        .await
+        .unwrap();
+    tokio::time::advance(Duration::from_millis(10)).await;
+    wait_for_activity(&handle, &root, AgentActivityState::WaitingAgents).await;
+    tokio::time::advance(Duration::from_secs(29)).await;
+    tokio::task::yield_now().await;
+    assert_eq!(
+        host.turn_factory.prepared_messages.lock().unwrap().len(),
+        2,
+        "diagnostic completion must restart a full inactivity deadline"
+    );
+    tokio::time::advance(Duration::from_secs(1)).await;
+    wait_for_prepared_messages(&host.turn_factory, 3).await;
+
+    let executor_after_retry = repository.state(&child);
+    assert_eq!(
+        executor_after_retry.snapshot.active_turn_id,
+        Some(executor_turn)
+    );
+    assert_eq!(
+        executor_after_retry.snapshot.dispatch_generation,
+        executor_before.snapshot.dispatch_generation
+    );
+    assert_eq!(
+        executor_after_retry.pending_inputs,
+        executor_before.pending_inputs
+    );
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test(start_paused = true)]
+async fn explicit_user_input_supersedes_an_active_inactivity_diagnostic() {
+    let host = TestHost::new(TestRepository::empty(), FactoryMode::Block);
+    let mut options = test_options();
+    options.child_inactivity_timeout = Duration::from_secs(30);
+    let runtime = AgentRuntime::start(host.clone(), options).await.unwrap();
+    let handle = runtime.handle();
+    let root = AgentId::new("root").unwrap();
+    let root_session = SessionId::new("root-chat").unwrap();
+    handle
+        .register(registration(root.as_str(), root_session.as_str()))
+        .await
+        .unwrap();
+    let mut child_request = managed_child_spawn_request(root.clone());
+    child_request.initial_message = Some("executor work".to_string());
+    let child = handle
+        .spawn(child_request)
+        .await
+        .unwrap()
+        .snapshot
+        .identity
+        .id;
+    wait_for_prepared_messages(&host.turn_factory, 1).await;
+    let child_before = handle.snapshot(child.clone()).await.unwrap();
+    handle.enter_waiting_agents(root.clone()).await.unwrap();
+    tokio::time::advance(Duration::from_secs(30)).await;
+    wait_for_prepared_messages(&host.turn_factory, 2).await;
+    let diagnostic_turn = handle
+        .snapshot(root.clone())
+        .await
+        .unwrap()
+        .active_turn_id
+        .unwrap();
+
+    let user_turn = handle
+        .submit(
+            root.clone(),
+            AgentSubmitRequest::start(root_session, "user override").with_metadata(
+                serde_json::json!({
+                    "userPrompt": {
+                        "synthetic": false,
+                        "ignored": false,
+                    }
+                }),
+            ),
+        )
+        .await
+        .unwrap();
+    assert_ne!(user_turn, diagnostic_turn);
+    tokio::time::advance(Duration::from_millis(10)).await;
+    wait_for_prepared_messages(&host.turn_factory, 3).await;
+    assert_eq!(
+        host.turn_factory.prepared_messages.lock().unwrap()[2],
+        "user override"
+    );
+    let root_snapshot = handle.snapshot(root).await.unwrap();
+    assert_eq!(root_snapshot.active_turn_id, Some(user_turn));
+    assert_eq!(
+        handle.snapshot(child).await.unwrap().active_turn_id,
+        child_before.active_turn_id
+    );
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test(start_paused = true)]
+async fn actionable_update_arriving_during_diagnostic_runs_in_the_next_continuation() {
+    let host = TestHost::new(TestRepository::empty(), FactoryMode::Block);
+    let mut options = test_options();
+    options.child_inactivity_timeout = Duration::from_secs(30);
+    let runtime = AgentRuntime::start(host.clone(), options).await.unwrap();
+    let handle = runtime.handle();
+    let root = AgentId::new("root").unwrap();
+    handle
+        .register(registration("root", "root-chat"))
+        .await
+        .unwrap();
+    let mut child_request = managed_child_spawn_request(root.clone());
+    child_request.initial_message = Some("executor work".to_string());
+    let child = handle
+        .spawn(child_request)
+        .await
+        .unwrap()
+        .snapshot
+        .identity
+        .id;
+    wait_for_prepared_messages(&host.turn_factory, 1).await;
+    handle.enter_waiting_agents(root.clone()).await.unwrap();
+    tokio::time::advance(Duration::from_secs(30)).await;
+    wait_for_prepared_messages(&host.turn_factory, 2).await;
+    let diagnostic_turn = handle
+        .snapshot(root.clone())
+        .await
+        .unwrap()
+        .active_turn_id
+        .unwrap();
+
+    handle
+        .publish_product_phase(
+            root.clone(),
+            child,
+            "delivery:during-diagnostic".to_string(),
+            "deliveryCompleted".to_string(),
+            Some("executor delivered while planner diagnosed".to_string()),
+        )
+        .unwrap();
+    handle.cancel_turn(root, diagnostic_turn).await.unwrap();
+    tokio::time::advance(Duration::from_millis(10)).await;
+    wait_for_prepared_messages(&host.turn_factory, 3).await;
+
+    let messages = host.turn_factory.prepared_messages.lock().unwrap().clone();
+    assert!(messages[1].contains("inactivityDiagnostic"));
+    assert!(messages[2].contains("delivery:during-diagnostic"));
+    assert!(
+        !wake_batch_from_message(&messages[2])
+            .context
+            .diagnostic_only
     );
     runtime.shutdown().await.unwrap();
 }

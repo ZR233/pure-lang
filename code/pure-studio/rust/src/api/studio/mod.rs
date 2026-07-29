@@ -6,10 +6,11 @@ pub mod types;
 // Re-exports from submodules
 pub use self::handlers::{
     BridgeSessionStreamFrame, archive_project, archive_session, bootstrap_studio,
-    check_studio_update, cleanup_recovery_issue, create_session, initialize_runtime,
-    install_studio_update, list_discovered_skills, load_provider_catalog, load_provider_usages,
-    load_web_search_settings, open_project, preview_recovery_issue_cleanup, resolve_interaction,
-    save_general_settings, save_instructions_settings, save_mcp_settings, save_provider_settings,
+    check_studio_update, cleanup_project, cleanup_recovery_issue, create_session,
+    initialize_runtime, install_studio_update, list_discovered_skills, load_provider_catalog,
+    load_provider_usages, load_web_search_settings, open_project, preview_project_cleanup,
+    preview_recovery_issue_cleanup, resolve_interaction, save_general_settings,
+    save_instructions_settings, save_mcp_settings, save_provider_settings,
     save_runtime_permission_mode, save_skills_settings, save_web_search_settings, select_project,
     set_model_role, set_session_mode, shutdown_runtime, start_runtime, stop_prompt, submit_prompt,
     subscribe_product_events, subscribe_session_events,
@@ -75,6 +76,13 @@ mod tests {
     fn archive_project_api_is_exposed_to_flutter() {
         let _api: fn(String, Option<String>) -> anyhow::Result<BridgeStudioSnapshotResponse> =
             super::archive_project;
+        let _preview: fn(String) -> anyhow::Result<super::BridgeRecoveryCleanupPreviewDto> =
+            super::preview_project_cleanup;
+        let _cleanup: fn(
+            String,
+            String,
+            Option<String>,
+        ) -> anyhow::Result<BridgeStudioSnapshotResponse> = super::cleanup_project;
     }
 
     #[test]

@@ -1,10 +1,12 @@
+use std::collections::{BTreeMap, BTreeSet};
+
 use crate::InteractionRequest;
 use anyhow::Result;
 
 use crate::McpRuntimeHandle;
 use crate::config::ConfigStore;
 use crate::studio::agent_host::{
-    StudioAgentResources, StudioAgentRuntime, StudioContinuationService,
+    StudioAgentResources, StudioAgentRuntime, StudioContinuationService, root_agent_id,
 };
 use crate::studio::records::SessionRecord;
 use crate::studio::task_coordinator::TaskCoordinator;
@@ -126,6 +128,27 @@ impl StudioRuntime {
         self.task_coordinator.preview_recovery_cleanup(&issue).await
     }
 
+    pub async fn preview_project_cleanup(
+        &self,
+        project_id: &str,
+    ) -> Result<StudioRecoveryCleanupPreview> {
+        self.task_coordinator
+            .preview_project_cleanup(project_id)
+            .await
+    }
+
+    pub async fn cleanup_project(
+        &self,
+        project_id: &str,
+        expected_revision: &str,
+    ) -> Result<StudioRuntimeSnapshot> {
+        let issue = self
+            .task_coordinator
+            .project_cleanup_issue(project_id)
+            .await?;
+        self.cleanup_project_issue(issue, expected_revision).await
+    }
+
     pub async fn cleanup_recovery_issue(
         &self,
         issue_id: &str,
@@ -135,33 +158,128 @@ impl StudioRuntime {
             .runtime_state
             .recovery_issue(issue_id)
             .ok_or_else(|| anyhow::anyhow!("recovery issue is no longer active"))?;
+        if issue.action == StudioRecoveryIssueAction::RemoveProject {
+            return self.cleanup_project_issue(issue, expected_revision).await;
+        }
         if let Some(session_id) = issue.session_id.as_deref()
             && self.session_is_busy(session_id).await?
         {
             anyhow::bail!("recovery cleanup requires an idle session");
         }
-        if issue.action == StudioRecoveryIssueAction::RemoveProject
-            && let Some(project_id) = issue.project_id.as_deref()
-        {
-            for session_id in self.store.list_project_session_ids(project_id).await? {
-                if self.session_is_busy(&session_id).await? {
-                    anyhow::bail!("recovery cleanup requires an idle project");
-                }
-            }
-        }
         self.task_coordinator
             .cleanup_recovery_issue(&issue, expected_revision)
             .await?;
-        if issue.action == StudioRecoveryIssueAction::RemoveProject
-            && let Some(project_id) = issue.project_id.as_deref()
-        {
-            self.store.quarantine_project(project_id).await?;
-            return Ok(self
-                .runtime_state
-                .remove_project_recovery_issues(project_id));
-        }
         Ok(self.runtime_state.remove_recovery_issue(issue_id))
     }
+
+    async fn cleanup_project_issue(
+        &self,
+        issue: crate::StudioRecoveryIssue,
+        expected_revision: &str,
+    ) -> Result<StudioRuntimeSnapshot> {
+        let _lifecycle_guard = self.lifecycle_lock.lock().await;
+        let project_id = issue
+            .project_id
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("project cleanup has no project"))?;
+        let preview = self
+            .task_coordinator
+            .validate_recovery_cleanup(&issue, expected_revision)
+            .await?;
+        let mut session_ids = self.store.list_project_session_ids(project_id).await?;
+        session_ids.sort();
+        session_ids.dedup();
+        let root_session_ids = session_ids.iter().cloned().collect::<BTreeSet<_>>();
+        self.agent_resources
+            .begin_cleanup_takeover(&root_session_ids)
+            .await;
+        self.close_project_agent_trees(&session_ids).await?;
+        for session_id in &session_ids {
+            let emitter = self.interaction_emitter(session_id.clone());
+            self.interactions
+                .cancel_session(session_id, "project cleaned up", emitter)
+                .await?;
+        }
+        self.task_coordinator
+            .execute_recovery_cleanup(&issue, &preview)
+            .await?;
+        self.store.quarantine_project(project_id).await?;
+        self.agent_resources
+            .complete_cleanup_takeover(&root_session_ids)
+            .await;
+        Ok(self
+            .runtime_state
+            .remove_project_recovery_issues(project_id))
+    }
+
+    async fn close_project_agent_trees(&self, session_ids: &[String]) -> Result<()> {
+        let runtime = self.agent_framework().await?.handle();
+        let root_agent_ids = session_ids
+            .iter()
+            .map(|session_id| root_agent_id(session_id))
+            .collect::<BTreeSet<_>>();
+        for root_agent_id in &root_agent_ids {
+            close_agent_if_present(&runtime, root_agent_id.clone()).await?;
+        }
+
+        let snapshots = runtime
+            .list()
+            .await
+            .map_err(|error| anyhow::anyhow!(error))?;
+        let parents = snapshots
+            .iter()
+            .map(|snapshot| {
+                (
+                    snapshot.identity.id.clone(),
+                    snapshot.identity.parent_id.clone(),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        let mut descendants = snapshots
+            .into_iter()
+            .filter(|snapshot| {
+                !matches!(
+                    snapshot.lifecycle,
+                    pl_core::AgentLifecycleState::Closing | pl_core::AgentLifecycleState::Closed
+                ) && has_project_root(&parents, &snapshot.identity.id, &root_agent_ids)
+            })
+            .collect::<Vec<_>>();
+        descendants.sort_by_key(|snapshot| snapshot.identity.depth);
+        for descendant in descendants {
+            close_agent_if_present(&runtime, descendant.identity.id).await?;
+        }
+        Ok(())
+    }
+}
+
+async fn close_agent_if_present(
+    runtime: &pl_core::AgentRuntimeHandle,
+    agent_id: pl_core::AgentId,
+) -> Result<()> {
+    match runtime.close(agent_id).await {
+        Ok(_) | Err(pl_core::AgentRuntimeError::NotFound(_)) => Ok(()),
+        Err(error) => Err(anyhow::anyhow!(error)),
+    }
+}
+
+fn has_project_root(
+    parents: &BTreeMap<pl_core::AgentId, Option<pl_core::AgentId>>,
+    agent_id: &pl_core::AgentId,
+    roots: &BTreeSet<pl_core::AgentId>,
+) -> bool {
+    let mut current = Some(agent_id.clone());
+    let mut remaining = parents.len().saturating_add(1);
+    while let Some(agent_id) = current {
+        if roots.contains(&agent_id) {
+            return true;
+        }
+        if remaining == 0 {
+            return false;
+        }
+        remaining -= 1;
+        current = parents.get(&agent_id).cloned().flatten();
+    }
+    false
 }
 
 #[cfg(test)]

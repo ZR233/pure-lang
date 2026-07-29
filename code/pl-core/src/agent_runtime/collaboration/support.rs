@@ -101,9 +101,9 @@ pub(super) fn spawn_schema(policy: &AgentAccessPolicy) -> Value {
     ])
 }
 
-pub(super) fn send_schema() -> Value {
+pub(super) fn send_schema(selector: &AgentTargetSelector) -> Value {
     object_schema(vec![
-        ("target", json!({ "type": "string" }), true),
+        ("target", target_property_schema(selector, None), true),
         ("message", json!({ "type": "string" }), true),
         (
             "interrupt",
@@ -117,12 +117,37 @@ pub(super) fn send_schema() -> Value {
     ])
 }
 
-pub(super) fn target_schema(description: &str) -> Value {
+pub(super) fn target_schema(selector: &AgentTargetSelector, description: &str) -> Value {
     object_schema(vec![(
         "target",
-        json!({ "type": "string", "description": description }),
+        target_property_schema(selector, Some(description)),
         true,
     )])
+}
+
+fn target_property_schema(selector: &AgentTargetSelector, description: Option<&str>) -> Value {
+    let mut schema =
+        serde_json::Map::from_iter([("type".to_string(), Value::String("string".to_string()))]);
+    if let Some(description) = description {
+        schema.insert(
+            "description".to_string(),
+            Value::String(description.to_string()),
+        );
+    }
+    if let AgentTargetSelector::Explicit(agent_ids) = selector {
+        schema.insert(
+            "enum".to_string(),
+            Value::Array(
+                agent_ids
+                    .iter()
+                    .map(|agent_id| Value::String(agent_id.to_string()))
+                    .collect(),
+            ),
+        );
+    } else if matches!(selector, AgentTargetSelector::None) {
+        schema.insert("enum".to_string(), Value::Array(Vec::new()));
+    }
+    Value::Object(schema)
 }
 
 pub(super) fn object_schema(fields: Vec<(&str, Value, bool)>) -> Value {

@@ -201,6 +201,9 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             ToolVisibilitySet::from_tool_names(kernel.tool_names()),
         );
         policy.visible_tools = web_search.constrain_visibility(policy.visible_tools);
+        if let Some(wake_context) = context.wake_context.as_ref() {
+            policy.constrain_for_agent_wake(wake_context);
+        }
         let collaboration = AgentCollaborationTools::new(
             context.runtime.clone(),
             context.snapshot.identity.id.clone(),
