@@ -13,7 +13,8 @@ use super::{
     AcceptedAgentWake, AgentActivityState, AgentCommit, AgentCommitOutcome, AgentCommittedEvent,
     AgentCurrentSessionSubmitRequest, AgentDurableState, AgentLifecycleState, AgentRuntimeEvent,
     AgentRuntimeEventKind, AgentRuntimeHandle, AgentRuntimeHost, AgentRuntimeResult, AgentSnapshot,
-    AgentSubmitRequest, AgentTurnPreparationContext, AgentUpdateKind, AgentWakeId, InputDelivery,
+    AgentSubmitRequest, AgentTurnMailboxHandle, AgentTurnPreparationContext, AgentUpdateKind,
+    AgentWakeId, InputDelivery, MailboxDeliveryPhase, MailboxDeliveryState, MailboxTurnTrigger,
     PendingAgentInput, SessionId, TurnId,
 };
 use crate::session_event::{
@@ -111,11 +112,13 @@ struct ActiveTurn {
     turn_id: TurnId,
     session_id: SessionId,
     start_revision: u64,
+    dispatch_generation: u64,
     cancellation: CancellationToken,
     abort_handle: AbortHandle,
     settled: oneshot::Receiver<()>,
     cancellation_requested: bool,
     checkpoint_sequence: u64,
+    steer_sender: mpsc::UnboundedSender<PendingAgentInput>,
 }
 
 struct AgentActor<H>
@@ -132,7 +135,7 @@ where
     observation_sender: mpsc::UnboundedSender<ObservedTurnEvent>,
     observation_receiver: mpsc::UnboundedReceiver<ObservedTurnEvent>,
     active: Option<ActiveTurn>,
-    run_queue: bool,
+    dispatch_enabled: bool,
     cancel_grace: Duration,
 }
 
@@ -155,7 +158,7 @@ where
         #[cfg(test)]
         trace_sender: trace_sender.clone(),
     };
-    let run_queue = start_pending_inputs && !state.pending_inputs.is_empty();
+    let dispatch_enabled = start_pending_inputs;
     tokio::spawn(
         AgentActor {
             host,
@@ -168,7 +171,7 @@ where
             observation_sender,
             observation_receiver,
             active: None,
-            run_queue,
+            dispatch_enabled,
             cancel_grace,
         }
         .run(),
@@ -181,7 +184,10 @@ where
     H: AgentRuntimeHost,
 {
     async fn run(mut self) {
-        if self.run_queue && self.state.snapshot.lifecycle == AgentLifecycleState::Active {
+        if self.dispatch_enabled
+            && self.state.snapshot.lifecycle == AgentLifecycleState::Active
+            && self.state.has_triggering_input()
+        {
             self.begin_next_turn().await;
         }
         loop {
@@ -205,7 +211,7 @@ where
                             let _ = reply.send(result);
                         }
                         ActorCommand::CancelTurn { turn_id, reply } => {
-                            let result = self.cancel_turn(turn_id);
+                            let result = self.cancel_turn(turn_id).await;
                             let _ = reply.send(result);
                         }
                         ActorCommand::SetActivity {
@@ -264,7 +270,7 @@ where
                             let _ = reply.send(result);
                         }
                         ActorCommand::StartPendingInputs { reply } => {
-                            self.run_queue = true;
+                            self.dispatch_enabled = true;
                             self.begin_next_turn().await;
                             let _ = reply.send(Ok(()));
                         }
@@ -324,16 +330,68 @@ where
         {
             return Ok(existing);
         }
-        let input = PendingAgentInput {
-            turn_id: TurnId::generate(),
+        if let Some(existing) = request.mail_id.as_deref().and_then(|mail_id| {
+            self.state
+                .active_input
+                .iter()
+                .chain(self.state.pending_inputs.iter())
+                .find(|input| input.mail_id == mail_id)
+                .map(|input| input.turn_id.clone())
+        }) {
+            return Ok(existing);
+        }
+        let delivery = request.delivery;
+        let live_turn = if delivery == InputDelivery::InterruptThenStart
+            || self.state.snapshot.mailbox_delivery_phase != MailboxDeliveryPhase::CurrentTurn
+        {
+            None
+        } else {
+            self.active.as_ref().and_then(|active| {
+                (!active.cancellation_requested && active.session_id == request.session_id).then(
+                    || {
+                        (
+                            active.turn_id.clone(),
+                            active.dispatch_generation,
+                            active.steer_sender.clone(),
+                        )
+                    },
+                )
+            })
+        };
+        let turn_id = live_turn
+            .as_ref()
+            .map_or_else(TurnId::generate, |(turn_id, _, _)| turn_id.clone());
+        let mail_id = request.mail_id.unwrap_or_else(|| {
+            request.wake_id.as_ref().map_or_else(
+                || format!("mail:{}", TurnId::generate()),
+                |wake_id| format!("wake:{wake_id}"),
+            )
+        });
+        let mut next = self.state.clone();
+        if delivery == InputDelivery::InterruptThenStart {
+            next.snapshot.dispatch_generation = next.snapshot.dispatch_generation.saturating_add(1);
+        }
+        let mut input = PendingAgentInput {
+            mail_id,
+            turn_id: turn_id.clone(),
             wake_id: request.wake_id,
             wake_signal_ids,
             session_id: request.session_id,
             message: request.message,
             metadata: request.metadata,
+            trigger: match delivery {
+                InputDelivery::QueueOnly => MailboxTurnTrigger::DoNotStart,
+                InputDelivery::Start | InputDelivery::InterruptThenStart => {
+                    MailboxTurnTrigger::StartIfIdle
+                }
+            },
+            delivery_state: Default::default(),
+            dispatch_generation: next.snapshot.dispatch_generation,
             queued_at: unix_timestamp(),
         };
-        let mut next = self.state.clone();
+        if live_turn.is_some() {
+            input.claim(turn_id.clone(), next.snapshot.dispatch_generation);
+        }
         if let Some(wake_id) = input.wake_id.clone() {
             next.accepted_wakes.insert(
                 wake_id.clone(),
@@ -345,19 +403,22 @@ where
                 },
             );
         }
-        match request.delivery {
-            InputDelivery::QueueOnly | InputDelivery::Start => {
-                next.pending_inputs.push_back(input.clone());
-            }
-            InputDelivery::InterruptThenStart => {
-                next.pending_inputs.push_front(input.clone());
-                if let Some(active) = &mut self.active {
-                    request_cancellation(active, self.cancel_grace);
+        if live_turn.is_some() {
+            next.pending_inputs.push_back(input.clone());
+        } else {
+            match delivery {
+                InputDelivery::QueueOnly | InputDelivery::Start => {
+                    next.pending_inputs.push_back(input.clone());
+                }
+                InputDelivery::InterruptThenStart => {
+                    next.pending_inputs.push_front(input.clone());
                 }
             }
         }
-        next.snapshot.pending_inputs = next.pending_inputs.len();
-        if self.active.is_none() {
+        next.refresh_mailbox_snapshot();
+        if live_turn.is_some() {
+            next.snapshot.mailbox_delivery_phase = MailboxDeliveryPhase::CurrentTurn;
+        } else if self.active.is_none() && next.has_triggering_input() {
             next.snapshot.activity = AgentActivityState::Queued;
         }
         self.commit_transition(next, Vec::new(), |snapshot| {
@@ -367,14 +428,48 @@ where
             }
         })
         .await?;
-        if request.delivery != InputDelivery::QueueOnly {
-            self.run_queue = true;
+        if let Some((_, _, steer_sender)) = live_turn {
+            if steer_sender.send(input.clone()).is_err() {
+                self.release_undelivered_steer(&input.mail_id).await?;
+            }
+            return Ok(turn_id);
         }
-        let turn_id = input.turn_id.clone();
-        if self.active.is_none() && self.run_queue {
+        if delivery == InputDelivery::InterruptThenStart
+            && let Some(active) = &mut self.active
+        {
+            request_cancellation(active, self.cancel_grace);
+        }
+        if delivery != InputDelivery::QueueOnly {
+            self.dispatch_enabled = true;
+        }
+        if self.active.is_none() && self.dispatch_enabled && self.state.has_triggering_input() {
             self.begin_next_turn().await;
         }
         Ok(turn_id)
+    }
+
+    async fn release_undelivered_steer(&mut self, mail_id: &str) -> AgentRuntimeResult<()> {
+        let mut next = self.state.clone();
+        let mut released = false;
+        for input in &mut next.pending_inputs {
+            if input.mail_id != mail_id
+                || !matches!(input.delivery_state, MailboxDeliveryState::Claimed { .. })
+            {
+                continue;
+            }
+            input.delivery_state = MailboxDeliveryState::Pending;
+            input.turn_id = TurnId::generate();
+            released = true;
+            break;
+        }
+        if !released {
+            return Ok(());
+        }
+        next.refresh_mailbox_snapshot();
+        self.commit_transition(next, Vec::new(), |snapshot| {
+            AgentRuntimeEventKind::StateChanged { snapshot }
+        })
+        .await
     }
 
     async fn submit_current_session(
@@ -393,6 +488,7 @@ where
             message: request.message,
             metadata: request.metadata,
             delivery: request.delivery,
+            mail_id: request.mail_id,
             wake_id: request.wake_id,
             wake_signal_ids: request.wake_signal_ids,
         })
@@ -515,8 +611,8 @@ where
         })
     }
 
-    fn cancel_turn(&mut self, turn_id: TurnId) -> AgentRuntimeResult<()> {
-        let Some(active) = &mut self.active else {
+    async fn cancel_turn(&mut self, turn_id: TurnId) -> AgentRuntimeResult<()> {
+        let Some(active) = &self.active else {
             return Err(AgentRuntimeError::NoActiveTurn(
                 self.state.snapshot.identity.id.clone(),
             ));
@@ -527,7 +623,15 @@ where
                 actual: turn_id,
             });
         }
-        request_cancellation(active, self.cancel_grace);
+        let mut next = self.state.clone();
+        next.snapshot.dispatch_generation = next.snapshot.dispatch_generation.saturating_add(1);
+        self.commit_transition(next, Vec::new(), |snapshot| {
+            AgentRuntimeEventKind::StateChanged { snapshot }
+        })
+        .await?;
+        if let Some(active) = &mut self.active {
+            request_cancellation(active, self.cancel_grace);
+        }
         Ok(())
     }
 
@@ -573,6 +677,38 @@ where
         let mut next = self.state.clone();
         next.snapshot.revision = expected_revision.saturating_add(1);
         next.snapshot.updated_at = unix_timestamp();
+        if let Some(active_input) = next.active_input.as_mut()
+            && active_input.turn_id == checkpoint.turn_id
+        {
+            active_input.consume(checkpoint.sequence);
+        }
+        if !checkpoint.consumed_mail_ids.is_empty() {
+            let consumed = checkpoint
+                .consumed_mail_ids
+                .iter()
+                .map(String::as_str)
+                .collect::<BTreeSet<_>>();
+            next.pending_inputs.retain(|input| {
+                !consumed.contains(input.mail_id.as_str())
+                    || !matches!(
+                        &input.delivery_state,
+                        MailboxDeliveryState::Claimed { turn_id, .. }
+                            if turn_id == &checkpoint.turn_id
+                    )
+            });
+            next.refresh_mailbox_snapshot();
+        }
+        match checkpoint.reason {
+            super::TurnCheckpointReason::Terminal => {
+                next.snapshot.mailbox_delivery_phase = MailboxDeliveryPhase::NextTurn;
+            }
+            super::TurnCheckpointReason::MailboxInputConsumed => {
+                next.snapshot.mailbox_delivery_phase = MailboxDeliveryPhase::CurrentTurn;
+            }
+            super::TurnCheckpointReason::WorkingSetChanged
+            | super::TurnCheckpointReason::BeforeInference
+            | super::TurnCheckpointReason::ContextCompacted => {}
+        }
         let Some(session) = next.sessions.get_mut(&checkpoint.session_id) else {
             return Err(AgentRuntimeError::Repository(format!(
                 "active session {} is missing for checkpoint",
@@ -757,7 +893,7 @@ where
     async fn enter_waiting_agents(&mut self) -> AgentRuntimeResult<()> {
         if self.state.snapshot.lifecycle != AgentLifecycleState::Active
             || self.active.is_some()
-            || !self.state.pending_inputs.is_empty()
+            || self.state.has_triggering_input()
             || self.state.snapshot.activity != AgentActivityState::Idle
         {
             return Ok(());
@@ -772,17 +908,32 @@ where
 
     async fn begin_next_turn(&mut self) {
         if self.active.is_some()
-            || !self.run_queue
+            || !self.dispatch_enabled
             || self.state.snapshot.lifecycle != AgentLifecycleState::Active
+            || !self.state.has_triggering_input()
         {
             return;
         }
-        let Some(input) = self.state.pending_inputs.front().cloned() else {
-            self.run_queue = false;
+        let Some(trigger_position) = self.state.triggering_input_position() else {
             return;
         };
         let mut next = self.state.clone();
-        next.pending_inputs.pop_front();
+        let Some(mut input) = next.pending_inputs.remove(trigger_position) else {
+            return;
+        };
+        let turn_id = input.turn_id.clone();
+        let session_id = input.session_id.clone();
+        let mut claimed_inputs = Vec::new();
+        for queued in next.pending_inputs.iter_mut().take(trigger_position) {
+            if queued.session_id == session_id
+                && matches!(queued.delivery_state, MailboxDeliveryState::Pending)
+            {
+                queued.claim(turn_id.clone(), next.snapshot.dispatch_generation);
+                claimed_inputs.push(queued.clone());
+            }
+        }
+        input.claim(turn_id.clone(), next.snapshot.dispatch_generation);
+        next.active_input = Some(input.clone());
         if let Some(wake_id) = input.wake_id.clone() {
             next.accepted_wakes
                 .entry(wake_id.clone())
@@ -793,30 +944,40 @@ where
                     accepted_at: input.queued_at,
                 });
         }
-        next.snapshot.pending_inputs = next.pending_inputs.len();
+        next.refresh_mailbox_snapshot();
         next.snapshot.activity = AgentActivityState::Running;
         next.snapshot.active_turn_id = Some(input.turn_id.clone());
         next.snapshot.active_session_id = Some(input.session_id.clone());
+        next.snapshot.mailbox_delivery_phase = MailboxDeliveryPhase::CurrentTurn;
         let committed = self
             .commit_transition(next, Vec::new(), |snapshot| {
                 AgentRuntimeEventKind::TurnStarted {
                     turn_id: input.turn_id.clone(),
                     session_id: input.session_id.clone(),
+                    claimed_inputs: claimed_inputs.clone(),
                     snapshot,
                 }
             })
             .await;
         if committed.is_err() {
-            self.run_queue = false;
             return;
         }
 
         let cancellation = CancellationToken::new();
+        let (steer_sender, steer_receiver) = mpsc::unbounded_channel();
+        let mailbox = AgentTurnMailboxHandle::new(
+            steer_receiver,
+            claimed_inputs
+                .iter()
+                .map(|input| input.mail_id.clone())
+                .collect(),
+        );
         let context = AgentTurnPreparationContext {
             snapshot: self.state.snapshot.clone(),
             turn_id: input.turn_id.clone(),
             session_id: input.session_id.clone(),
             input,
+            leading_inputs: claimed_inputs,
             session: self.state.sessions[&self.state.snapshot.active_session_id.clone().unwrap()]
                 .session
                 .clone(),
@@ -825,8 +986,10 @@ where
                 .trace_sequence,
             runtime: self.runtime.clone(),
             cancellation_token: cancellation.clone(),
+            mailbox,
         };
         let start_revision = self.state.snapshot.revision;
+        let dispatch_generation = self.state.snapshot.dispatch_generation;
         let initial_trace_sequence = context.trace_sequence;
         let worker_host = self.host.clone();
         let worker_cancellation = cancellation.clone();
@@ -853,6 +1016,7 @@ where
                 Err(error) => TurnCompletion {
                     turn_id: completion_turn_id,
                     start_revision,
+                    dispatch_generation,
                     session: None,
                     result: Err(format!("turn task join failed: {error}")),
                     finalized_with_tool: None,
@@ -869,11 +1033,13 @@ where
             turn_id: self.state.snapshot.active_turn_id.clone().unwrap(),
             session_id: self.state.snapshot.active_session_id.clone().unwrap(),
             start_revision,
+            dispatch_generation,
             cancellation,
             abort_handle,
             settled,
             cancellation_requested: false,
             checkpoint_sequence: 0,
+            steer_sender,
         });
     }
 
@@ -1301,6 +1467,10 @@ where
         self.state.snapshot.activity = AgentActivityState::Idle;
         self.state.snapshot.active_turn_id = None;
         self.state.snapshot.active_session_id = None;
+        self.state.snapshot.dispatch_generation =
+            self.state.snapshot.dispatch_generation.saturating_add(1);
+        self.state.snapshot.mailbox_delivery_phase = MailboxDeliveryPhase::NextTurn;
+        self.state.active_input = None;
         if fault_outcome.is_some() {
             self.state.snapshot.last_turn = fault_outcome;
         }

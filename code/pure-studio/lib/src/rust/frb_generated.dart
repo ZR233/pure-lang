@@ -1484,6 +1484,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeTaskRuntimeDto dco_decode_box_bridge_task_runtime_dto(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_bridge_task_runtime_dto(raw);
+  }
+
+  @protected
   BridgeActiveTurn dco_decode_bridge_active_turn(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -1710,7 +1716,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       case 3:
         return BridgeProductEventPayload_SessionTaskChanged(
           sessionId: dco_decode_String(raw[1]),
-          task: dco_decode_opt_box_autoadd_bridge_task_runtime_dto(raw[2]),
+          task: dco_decode_opt_box_bridge_task_runtime_dto(raw[2]),
         );
       case 4:
         return BridgeProductEventPayload_Stale(
@@ -2048,18 +2054,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeTaskRuntimeDto dco_decode_bridge_task_runtime_dto(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 9)
-      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
+    if (arr.length != 12)
+      throw Exception('unexpected arr length: expect 12 but see ${arr.length}');
     return BridgeTaskRuntimeDto(
       runId: dco_decode_String(arr[0]),
       phase: dco_decode_String(arr[1]),
       branch: dco_decode_String(arr[2]),
       expectedHead: dco_decode_String(arr[3]),
       statusMessage: dco_decode_opt_String(arr[4]),
-      workUnits: dco_decode_list_bridge_task_work_unit_dto(arr[5]),
-      agents: dco_decode_list_bridge_task_agent_dto(arr[6]),
-      merges: dco_decode_list_bridge_task_merge_dto(arr[7]),
-      reviews: dco_decode_list_bridge_task_review_dto(arr[8]),
+      stopRequestedOrigin: dco_decode_opt_String(arr[5]),
+      stopRequestedReason: dco_decode_opt_String(arr[6]),
+      taskGeneration: dco_decode_u_64(arr[7]),
+      workUnits: dco_decode_list_bridge_task_work_unit_dto(arr[8]),
+      agents: dco_decode_list_bridge_task_agent_dto(arr[9]),
+      merges: dco_decode_list_bridge_task_merge_dto(arr[10]),
+      reviews: dco_decode_list_bridge_task_review_dto(arr[11]),
     );
   }
 
@@ -2469,6 +2478,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeTaskRuntimeDto? dco_decode_opt_box_bridge_task_runtime_dto(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_bridge_task_runtime_dto(raw);
+  }
+
+  @protected
   List<BridgeUserQuestionOptionDto>?
   dco_decode_opt_list_bridge_user_question_option_dto(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
@@ -2844,6 +2861,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeTaskRuntimeDto sse_decode_box_bridge_task_runtime_dto(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_bridge_task_runtime_dto(deserializer));
+  }
+
+  @protected
   BridgeActiveTurn sse_decode_bridge_active_turn(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_sessionId = sse_decode_String(deserializer);
@@ -3120,9 +3145,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         return BridgeProductEventPayload_LspHealthChanged(health: var_health);
       case 3:
         var var_sessionId = sse_decode_String(deserializer);
-        var var_task = sse_decode_opt_box_autoadd_bridge_task_runtime_dto(
-          deserializer,
-        );
+        var var_task = sse_decode_opt_box_bridge_task_runtime_dto(deserializer);
         return BridgeProductEventPayload_SessionTaskChanged(
           sessionId: var_sessionId,
           task: var_task,
@@ -3563,6 +3586,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_branch = sse_decode_String(deserializer);
     var var_expectedHead = sse_decode_String(deserializer);
     var var_statusMessage = sse_decode_opt_String(deserializer);
+    var var_stopRequestedOrigin = sse_decode_opt_String(deserializer);
+    var var_stopRequestedReason = sse_decode_opt_String(deserializer);
+    var var_taskGeneration = sse_decode_u_64(deserializer);
     var var_workUnits = sse_decode_list_bridge_task_work_unit_dto(deserializer);
     var var_agents = sse_decode_list_bridge_task_agent_dto(deserializer);
     var var_merges = sse_decode_list_bridge_task_merge_dto(deserializer);
@@ -3573,6 +3599,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       branch: var_branch,
       expectedHead: var_expectedHead,
       statusMessage: var_statusMessage,
+      stopRequestedOrigin: var_stopRequestedOrigin,
+      stopRequestedReason: var_stopRequestedReason,
+      taskGeneration: var_taskGeneration,
       workUnits: var_workUnits,
       agents: var_agents,
       merges: var_merges,
@@ -4184,6 +4213,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeTaskRuntimeDto? sse_decode_opt_box_bridge_task_runtime_dto(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_bridge_task_runtime_dto(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
   List<BridgeUserQuestionOptionDto>?
   sse_decode_opt_list_bridge_user_question_option_dto(
     SseDeserializer deserializer,
@@ -4635,6 +4677,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_box_bridge_task_runtime_dto(
+    BridgeTaskRuntimeDto self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bridge_task_runtime_dto(self, serializer);
+  }
+
+  @protected
   void sse_encode_bridge_active_turn(
     BridgeActiveTurn self,
     SseSerializer serializer,
@@ -4842,7 +4893,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       ):
         sse_encode_i_32(3, serializer);
         sse_encode_String(sessionId, serializer);
-        sse_encode_opt_box_autoadd_bridge_task_runtime_dto(task, serializer);
+        sse_encode_opt_box_bridge_task_runtime_dto(task, serializer);
       case BridgeProductEventPayload_Stale(laggedEvents: final laggedEvents):
         sse_encode_i_32(4, serializer);
         sse_encode_u_64(laggedEvents, serializer);
@@ -5171,6 +5222,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.branch, serializer);
     sse_encode_String(self.expectedHead, serializer);
     sse_encode_opt_String(self.statusMessage, serializer);
+    sse_encode_opt_String(self.stopRequestedOrigin, serializer);
+    sse_encode_opt_String(self.stopRequestedReason, serializer);
+    sse_encode_u_64(self.taskGeneration, serializer);
     sse_encode_list_bridge_task_work_unit_dto(self.workUnits, serializer);
     sse_encode_list_bridge_task_agent_dto(self.agents, serializer);
     sse_encode_list_bridge_task_merge_dto(self.merges, serializer);
@@ -5687,6 +5741,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self != null, serializer);
     if (self != null) {
       sse_encode_box_autoadd_zhipu_coding_plan_usage_dto(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_bridge_task_runtime_dto(
+    BridgeTaskRuntimeDto? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_bridge_task_runtime_dto(self, serializer);
     }
   }
 

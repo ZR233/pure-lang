@@ -74,8 +74,11 @@ pub mod task_run {
         pub design_commit: Option<String>,
         pub status_message: Option<String>,
         pub stop_requested: i32,
+        pub stop_requested_origin: Option<String>,
         pub stop_requested_reason: Option<String>,
         pub stop_requested_at: Option<i64>,
+        pub task_generation: i64,
+        pub terminal_generation: Option<i64>,
         pub created_at: i64,
         pub updated_at: i64,
     }

@@ -27,6 +27,7 @@ pub(crate) enum HelpTopic {
 pub(crate) struct RunGuiOptions {
     pub(crate) demo: bool,
     pub(crate) demo_fallback: bool,
+    pub(crate) driver: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -105,7 +106,7 @@ pub(crate) fn help_text(topic: HelpTopic) -> &'static str {
             "Usage: cargo xtask verify-gui\n\nRuns Flutter dependency resolution, static analysis, and non-visual tests from the repository task entrypoint.\n\nOptions:\n  -h, --help  Print help."
         }
         HelpTopic::RunGui => {
-            "Usage: cargo xtask run-gui [--demo] [--demo-fallback]\n\nOptions:\n  --demo           Run with PURE_STUDIO_DEMO=true.\n  --demo-fallback  Retry in demo mode if the native run fails.\n  -h, --help       Print help."
+            "Usage: cargo xtask run-gui [--demo] [--demo-fallback] [--driver]\n\nOptions:\n  --demo           Run with PURE_STUDIO_DEMO=true.\n  --demo-fallback  Retry in demo mode if the native run fails.\n  --driver         Enable Flutter Driver through test_driver/driver_main.dart.\n  -h, --help       Print help."
         }
         HelpTopic::BuildGui => {
             "Usage: cargo xtask build-gui [--demo] [--no-clean]\n\nOptions:\n  --demo      Build with PURE_STUDIO_DEMO=true.\n  --no-clean  Keep existing files in dist/pure-studio-release.\n  -h, --help  Print help."
@@ -169,12 +170,14 @@ fn parse_run_gui(mut args: VecDeque<OsString>) -> Result<Command> {
     let mut options = RunGuiOptions {
         demo: false,
         demo_fallback: false,
+        driver: false,
     };
     while let Some(arg) = args.pop_front() {
         match into_string(arg)?.as_str() {
             "-h" | "--help" => return Ok(Command::Help(HelpTopic::RunGui)),
             "--demo" => options.demo = true,
             "--demo-fallback" => options.demo_fallback = true,
+            "--driver" => options.driver = true,
             other => bail!(
                 "unknown run-gui option: {other}\n\n{}",
                 help_text(HelpTopic::RunGui)
@@ -282,10 +285,11 @@ mod tests {
     #[test]
     fn parses_run_gui_flags() -> Result<()> {
         assert_eq!(
-            parse_words(&["xtask", "run-gui", "--demo", "--demo-fallback"])?,
+            parse_words(&["xtask", "run-gui", "--demo", "--demo-fallback", "--driver",])?,
             Command::RunGui(RunGuiOptions {
                 demo: true,
                 demo_fallback: true,
+                driver: true,
             })
         );
         Ok(())

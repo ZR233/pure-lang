@@ -48,6 +48,20 @@ ephemeral wake continuation。没有更新但仍有 direct child 时，Planner �
 模型层等待工具。应用重启后从持久事实、agent snapshots 与 pending input FIFO 恢复；
 Git 状态与 `expectedHead` 不一致时进入 `blocked`。
 
+等待注册、status watch 和 deadline 只由 Core `WaitingAgents` 拥有。commentary、tool
+activity 与普通 progress 只更新有界进展摘要并重置 child deadline，不能直接唤醒 Planner；
+`NeedsAttention`、真实终态和 ProductGated durable phase 才是 actionable wake。每个 child
+连续 30 秒无活动只产生一次 `InactivityDiagnostic`，其中必须包含当前 canonical status、
+最后活动时间和最近进展，但该诊断不能单独授权 interrupt、`task_stop` 或把 Running executor
+判定为失败。只有新活动或 Planner 明确重新进入等待后才能重新计时，不形成周期查询。
+
+completion watcher 只观察终态，并把结果作为 `trigger=false` notification 写入 durable
+mailbox；父级确有等待注册时，再由 `WaitingAgents` 通过 accepted wake receipt 原子创建
+`trigger=true` continuation。channel lag 必须从 durable agent/task snapshot 对账，不能因
+缺失中间事件推导终态。Planner continuation 固定消费 typed `WakeContext`：当前 agent 状态、
+wake reason、最后活动时间、最近最多 8 个重要阶段事件、一份最新 commentary 摘要、终态
+事实、是否存在用户停止请求、signal revision 与 lag reconciliation 结果。
+
 Studio 为每个 Task session 持有一个私有 `AgentRuntime<StudioHost>`（actor coordinator、repository identity、
 task generation 与 lifecycle epoch）。同一 session 的用户 root turn 与 continuation
 复用该 runtime，因此后续 planner 能继续 list、send 和 close 先前 turn 创建的
@@ -379,6 +393,20 @@ durable completion predicate，保留 10 秒总上限且不使用短轮询，再
 显式传入的 branch mutation guard 必须绑定创建它的 coordinator；其他 coordinator 的
 guard 不得授权 locked mutation API。
 
+停止意图使用服务端确定的
+`TaskStopOrigin::{UserRequest, PlannerDecision, RuntimeFailure, ApplicationShutdown}`，并将
+“谁发起停止”与独立的 `TaskStopReason` 持久化。模型工具 `task_stop` 只能形成
+`PlannerDecision`，用户点击停止只能形成 `UserRequest`，模型输入不得伪造 origin。UI、
+timeline 和 continuation prompt 都按 durable origin 渲染，不得把任意 `StopRequested`
+固定描述成“用户请求停止”。
+
+Task quiesce 在写入 `StopRequested` 的同一原子边界递增 task generation，阻止新的
+executor/reviewer turn，并使旧 wake、defer 与 start receipt 失效；随后取消活动 turn。所有
+完成、失败和取消路径汇入单一 durable terminal-fact barrier，同一 generation 只能提交一个
+task/session/queue/event 终态。`StopRequested` 后只允许一个带 receipt 的
+`DeliveryRecovery` turn，用于 executor 已产生可恢复结果但 durable delivery 尚未完成的
+情况；不得重新启动通用 Planner 或 executor。
+
 当前编码轮全部交付合并后，planner 必须先用 `task_update_design` 把 `designCommit`
 推进到当前 `expectedHead`，再调用 `task_request_review` 间接创建只读 reviewer。
 review harness 在创建 round 和派生 reviewer 前重新校验该不变量，使设计不一致在
@@ -422,7 +450,8 @@ work unit、outcome 和 merge 都必须已收束。存在已接受 source merge 
 一旦 `StopRequested` 已持久化，`task_complete` 在 coordinator 预检和 store 事务两层都必须
 拒绝，不能绕过停止合同完成任务或释放 lease。
 
-`task_stop` 先持久化 `StopRequested`，再终止并等待当前任务的内存代理到 canonical terminal，
+`task_stop` 先以 typed origin 持久化 `StopRequested` 并递增 task generation，再终止并等待
+当前任务的内存代理到 canonical terminal，
 随后检查 delivery-required 合同和精确 worktree。可恢复提交或修改使停止返回 `deferred`，
 不得关闭 delivery scope、取消 outcome 或释放 worktree；完成最多一次 recovery 后重新评估。
 只有无可恢复成果时才在短锁事务中进入 `stopping`，将剩余 durable agent/work unit 收束为

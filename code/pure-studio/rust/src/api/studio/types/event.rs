@@ -30,7 +30,7 @@ pub enum BridgeProductEventPayload {
     },
     SessionTaskChanged {
         session_id: String,
-        task: Option<BridgeTaskRuntimeDto>,
+        task: Option<Box<BridgeTaskRuntimeDto>>,
     },
     Stale {
         lagged_events: u64,

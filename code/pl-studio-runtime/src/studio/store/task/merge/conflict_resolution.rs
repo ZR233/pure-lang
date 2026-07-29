@@ -100,11 +100,14 @@ impl StudioStore {
             merge_active.verification_json = Set(Some(serde_json::to_string(&evidence)?));
             merge_active.updated_at = Set(now);
             let merge = merge_record(merge_active.update(&tx).await?)?;
-            let mut run_active: entities::task_run::ActiveModel = run.into();
-            run_active.phase = Set(TaskRunPhase::Blocked.as_str().to_string());
-            run_active.status_message = Set(Some(input.reason));
-            run_active.updated_at = Set(now);
-            run_active.update(&tx).await?;
+            super::super::write_task_terminal_fact(
+                &tx,
+                run,
+                TaskRunPhase::Blocked,
+                Some(input.reason),
+                None,
+            )
+            .await?;
             super::super::delete_blocked_branch_lease(&tx, &task_run_id).await?;
             Ok(merge)
         }

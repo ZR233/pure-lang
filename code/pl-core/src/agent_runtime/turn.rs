@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use pl_protocol::{
     McpHealthSnapshot, SessionRuntimeSnapshot, SessionRuntimeUsage, SessionViewSnapshot,
 };
+use tokio::sync::{Mutex, mpsc};
 use tokio_util::sync::CancellationToken;
 
 use crate::{AgentKernel, AgentSession, TurnOptions, TurnRequest};
@@ -29,10 +30,76 @@ pub struct AgentTurnPreparationContext {
     pub turn_id: TurnId,
     pub session_id: SessionId,
     pub input: PendingAgentInput,
+    pub leading_inputs: Vec<PendingAgentInput>,
     pub session: AgentSession,
     pub trace_sequence: u64,
     pub runtime: AgentRuntimeHandle,
     pub cancellation_token: CancellationToken,
+    pub(crate) mailbox: AgentTurnMailboxHandle,
+}
+
+struct AgentTurnMailboxState {
+    receiver: mpsc::UnboundedReceiver<PendingAgentInput>,
+    unacknowledged_mail_ids: Vec<String>,
+}
+
+/// 活动 turn 的进程内接收端；durable truth 仍由 actor mailbox 与 checkpoint CAS 持有。
+#[derive(Clone)]
+pub(crate) struct AgentTurnMailboxHandle {
+    state: Arc<Mutex<AgentTurnMailboxState>>,
+}
+
+impl AgentTurnMailboxHandle {
+    pub(crate) fn new(
+        receiver: mpsc::UnboundedReceiver<PendingAgentInput>,
+        initial_mail_ids: Vec<String>,
+    ) -> Self {
+        Self {
+            state: Arc::new(Mutex::new(AgentTurnMailboxState {
+                receiver,
+                unacknowledged_mail_ids: initial_mail_ids,
+            })),
+        }
+    }
+
+    pub(crate) async fn drain(&self) -> Vec<PendingAgentInput> {
+        let mut state = self.state.lock().await;
+        let mut inputs = Vec::new();
+        while let Ok(input) = state.receiver.try_recv() {
+            if !state
+                .unacknowledged_mail_ids
+                .iter()
+                .any(|mail_id| mail_id == &input.mail_id)
+            {
+                state.unacknowledged_mail_ids.push(input.mail_id.clone());
+            }
+            inputs.push(input);
+        }
+        inputs
+    }
+
+    pub(crate) async fn pending_acknowledgements(&self) -> Vec<String> {
+        self.state.lock().await.unacknowledged_mail_ids.clone()
+    }
+
+    pub(crate) async fn acknowledge(&self, mail_ids: &[String]) {
+        if mail_ids.is_empty() {
+            return;
+        }
+        self.state
+            .lock()
+            .await
+            .unacknowledged_mail_ids
+            .retain(|mail_id| !mail_ids.iter().any(|acknowledged| acknowledged == mail_id));
+    }
+}
+
+impl std::fmt::Debug for AgentTurnMailboxHandle {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("AgentTurnMailboxHandle")
+            .finish_non_exhaustive()
+    }
 }
 
 /// 宿主为 runtime 准备好的可执行 turn。
@@ -92,11 +159,13 @@ impl PreparedAgentTurn {
         turn_id: &TurnId,
         cancellation: CancellationToken,
         checkpoint: AgentTurnCheckpointHandle,
+        mailbox: AgentTurnMailboxHandle,
     ) -> Self {
         self.request.turn_id = Some(turn_id.to_string());
         self.options.cancellation_token = Some(cancellation);
         self.options.execution_policy = Some(self.policy.clone());
         self.options.checkpoint = Some(checkpoint);
+        self.options.mailbox = Some(mailbox);
         self
     }
 }
@@ -260,6 +329,7 @@ pub enum TurnCheckpointReason {
     WorkingSetChanged,
     BeforeInference,
     ContextCompacted,
+    MailboxInputConsumed,
     Terminal,
 }
 
@@ -271,6 +341,7 @@ pub struct AgentTurnCheckpoint {
     pub sequence: u64,
     pub session: AgentSession,
     pub reason: TurnCheckpointReason,
+    pub consumed_mail_ids: Vec<String>,
 }
 
 /// TurnEngine 使用的 durable checkpoint 命令句柄。
@@ -304,6 +375,15 @@ impl AgentTurnCheckpointHandle {
         session: AgentSession,
         reason: TurnCheckpointReason,
     ) -> super::AgentRuntimeResult<()> {
+        self.checkpoint_mailbox(session, reason, Vec::new()).await
+    }
+
+    pub(crate) async fn checkpoint_mailbox(
+        &self,
+        session: AgentSession,
+        reason: TurnCheckpointReason,
+        consumed_mail_ids: Vec<String>,
+    ) -> super::AgentRuntimeResult<()> {
         let sequence = self
             .sequence
             .fetch_add(1, Ordering::Relaxed)
@@ -317,6 +397,7 @@ impl AgentTurnCheckpointHandle {
                     sequence,
                     session,
                     reason,
+                    consumed_mail_ids,
                 },
             )
             .await

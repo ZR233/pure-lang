@@ -14,6 +14,7 @@ where
         };
         if active.turn_id != completion.turn_id
             || active.start_revision != completion.start_revision
+            || active.dispatch_generation != completion.dispatch_generation
         {
             return;
         }
@@ -67,11 +68,27 @@ where
         }
         next.snapshot.active_turn_id = None;
         next.snapshot.active_session_id = None;
+        for input in &mut next.pending_inputs {
+            if !matches!(
+                &input.delivery_state,
+                super::super::MailboxDeliveryState::Claimed { turn_id, .. }
+                    if turn_id == &active.turn_id
+            ) {
+                continue;
+            }
+            input.delivery_state = super::super::MailboxDeliveryState::Pending;
+            if input.turn_id == active.turn_id {
+                input.turn_id = super::super::TurnId::generate();
+            }
+        }
+        next.active_input = None;
+        next.refresh_mailbox_snapshot();
         next.snapshot.last_turn = Some(outcome.clone());
-        next.snapshot.activity = if next.pending_inputs.is_empty() {
-            AgentActivityState::Idle
-        } else {
+        next.snapshot.mailbox_delivery_phase = super::super::MailboxDeliveryPhase::NextTurn;
+        next.snapshot.activity = if next.has_triggering_input() {
             AgentActivityState::Queued
+        } else {
+            AgentActivityState::Idle
         };
         let committed = self
             .commit_transition(next, Vec::new(), |snapshot| {
@@ -86,7 +103,7 @@ where
             self.fault_in_memory(error.to_string());
             return;
         }
-        if !self.state.pending_inputs.is_empty() && self.run_queue {
+        if self.dispatch_enabled && self.state.has_triggering_input() {
             self.begin_next_turn().await;
         }
     }

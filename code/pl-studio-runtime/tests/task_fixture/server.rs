@@ -217,17 +217,14 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                     .find(|agent| agent.role == "executor" && agent.status == "running")
                     .context("running executor is absent from task projection")?;
                 return Ok((
-                    "send_input(interruptThenStart)",
+                    "send_input(interrupt)",
                     tool_call(
                         "interrupt-executor",
                         "send_input",
                         serde_json::json!({
                             "target": executor.agent_id,
                             "message": "Continue in the queued turn, commit the requested implementation, and finish with submit_delivery.",
-                            "delivery": "interruptThenStart",
-                            "metadata": {
-                                "acceptanceScenario": "interruptedExecutorDelivery"
-                            }
+                            "interrupt": true,
                         }),
                     ),
                 ));

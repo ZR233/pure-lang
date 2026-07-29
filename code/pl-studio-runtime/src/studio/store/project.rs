@@ -190,6 +190,10 @@ impl StudioStore {
                 .await?;
 
             for sql in [
+                "DELETE FROM agent_active_inputs
+                 WHERE agent_id IN (
+                     SELECT agent_id FROM agent_runtime_sessions WHERE session_id = ?
+                 )",
                 "DELETE FROM agent_pending_inputs
                  WHERE agent_id IN (
                      SELECT agent_id FROM agent_runtime_sessions WHERE session_id = ?

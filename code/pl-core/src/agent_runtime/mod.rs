@@ -19,7 +19,7 @@ mod tests;
 pub use collaboration::AgentCollaborationTools;
 pub use event_hub::{
     AgentParentSubscription, AgentSubscriptionItem, AgentUpdateEnvelope, AgentUpdateKind,
-    AgentWakeBatch, AgentWakeReason,
+    AgentWakeBatch, AgentWakeContext, AgentWakeReason,
 };
 pub use handle::AgentRuntimeHandle;
 pub use host::{
@@ -39,8 +39,10 @@ pub use state::{
     AgentIdentity, AgentLifecycleState, AgentRegistration, AgentRuntimeError, AgentRuntimeEvent,
     AgentRuntimeEventKind, AgentRuntimeResult, AgentSessionState, AgentSnapshot, AgentSpawnRequest,
     AgentSpawnResult, AgentSubmitRequest, AgentTurnOutcome, AgentWaitResult, AgentWakePolicy,
-    InputDelivery, PendingAgentInput, TurnOutcomeKind,
+    DurableMailboxEnvelope, InputDelivery, MailboxDeliveryPhase, MailboxDeliveryState,
+    MailboxTurnTrigger, PendingAgentInput, TurnOutcomeKind,
 };
+pub(crate) use turn::AgentTurnMailboxHandle;
 pub use turn::{
     AgentSessionCommitPolicy, AgentTurnCheckpoint, AgentTurnCheckpointHandle,
     AgentTurnPreparationContext, PreparedAgentTurn, PreparedSessionRuntime, TurnCheckpointReason,

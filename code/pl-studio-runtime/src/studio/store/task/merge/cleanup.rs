@@ -181,11 +181,14 @@ impl StudioStore {
                 .one(&tx)
                 .await?
                 .context("accepted task run not found")?;
-            let mut run_active: entities::task_run::ActiveModel = run.into();
-            run_active.phase = Set(TaskRunPhase::Blocked.as_str().to_string());
-            run_active.status_message = Set(Some(reason.to_string()));
-            run_active.updated_at = Set(now);
-            run_active.update(&tx).await?;
+            super::super::write_task_terminal_fact(
+                &tx,
+                run,
+                TaskRunPhase::Blocked,
+                Some(reason.to_string()),
+                None,
+            )
+            .await?;
             super::super::delete_blocked_branch_lease(&tx, &task_run_id).await?;
             Ok(merge)
         }

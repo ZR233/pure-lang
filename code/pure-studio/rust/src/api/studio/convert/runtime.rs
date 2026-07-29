@@ -146,6 +146,9 @@ pub(crate) fn bridge_task_runtime(
         branch: task.branch,
         expected_head: task.expected_head,
         status_message: task.status_message,
+        stop_requested_origin: task.stop_requested_origin,
+        stop_requested_reason: task.stop_requested_reason,
+        task_generation: task.task_generation,
         work_units: task
             .work_units
             .into_iter()

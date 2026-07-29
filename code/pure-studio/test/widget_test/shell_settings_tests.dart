@@ -488,6 +488,9 @@ void registerShellSettingsTests() {
               branch: 'codex/task-mode',
               expectedHead: '1234567890abcdef',
               statusMessage: 'Executor delivery ready',
+              stopRequestedOrigin: null,
+              stopRequestedReason: null,
+              taskGeneration: 0,
               workUnits: [
                 TaskWorkUnitView(
                   id: 'unit-1',

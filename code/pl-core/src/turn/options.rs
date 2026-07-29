@@ -117,6 +117,7 @@ pub struct TurnOptions {
     pub user_input_mode: UserInputMode,
     pub execution_policy: Option<crate::AgentExecutionPolicy>,
     pub(crate) checkpoint: Option<crate::AgentTurnCheckpointHandle>,
+    pub(crate) mailbox: Option<crate::agent_runtime::AgentTurnMailboxHandle>,
 }
 
 impl TurnOptions {
@@ -131,6 +132,7 @@ impl TurnOptions {
             user_input_mode: UserInputMode::AwaitResponse,
             execution_policy: None,
             checkpoint: None,
+            mailbox: None,
         }
     }
 
@@ -208,6 +210,7 @@ impl std::fmt::Debug for TurnOptions {
             .field("user_input_mode", &self.user_input_mode)
             .field("execution_policy", &self.execution_policy)
             .field("checkpoint", &self.checkpoint)
+            .field("mailbox", &self.mailbox)
             .finish()
     }
 }

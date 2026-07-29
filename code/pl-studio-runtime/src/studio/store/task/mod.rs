@@ -22,7 +22,7 @@ use crate::studio::entities;
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    BranchLeaseRecord, CreateTaskRun, TaskRunPhase, TaskRunRecord,
+    BranchLeaseRecord, CreateTaskRun, TaskRunPhase, TaskRunRecord, TaskStopOrigin, TaskStopReason,
 };
 
 impl StudioStore {
@@ -54,8 +54,11 @@ impl StudioStore {
             design_commit: Set(None),
             status_message: Set(None),
             stop_requested: Set(0),
+            stop_requested_origin: Set(None),
             stop_requested_reason: Set(None),
             stop_requested_at: Set(None),
+            task_generation: Set(0),
+            terminal_generation: Set(None),
             created_at: Set(now),
             updated_at: Set(now),
         }
@@ -181,9 +184,13 @@ impl StudioStore {
                 next.as_str()
             );
         }
+        let terminal_generation = current.task_generation;
         let mut active: entities::task_run::ActiveModel = current.into();
         active.phase = Set(next.as_str().to_string());
         active.status_message = Set(status_message);
+        if next.is_terminal() {
+            active.terminal_generation = Set(Some(terminal_generation));
+        }
         active.updated_at = Set(unix_seconds());
         task_run_record(active.update(&self.db).await?)
     }
@@ -323,6 +330,20 @@ fn validate_create_task_run(input: &CreateTaskRun) -> Result<()> {
 pub(super) fn task_run_record(model: entities::task_run::Model) -> Result<TaskRunRecord> {
     let phase = TaskRunPhase::from_str(&model.phase)
         .with_context(|| format!("invalid stored task phase: {}", model.phase))?;
+    let stop_requested_origin = match model.stop_requested_origin.as_deref() {
+        Some(value) => Some(
+            TaskStopOrigin::from_str(value)
+                .with_context(|| format!("invalid stored task stop origin: {value}"))?,
+        ),
+        None => None,
+    };
+    let task_generation = u64::try_from(model.task_generation)
+        .context("stored task generation must not be negative")?;
+    let terminal_generation = model
+        .terminal_generation
+        .map(u64::try_from)
+        .transpose()
+        .context("stored terminal generation must not be negative")?;
     Ok(TaskRunRecord {
         id: model.id,
         session_id: model.session_id,
@@ -336,8 +357,11 @@ pub(super) fn task_run_record(model: entities::task_run::Model) -> Result<TaskRu
         design_commit: model.design_commit,
         status_message: model.status_message,
         stop_requested: model.stop_requested != 0,
-        stop_requested_reason: model.stop_requested_reason,
+        stop_requested_origin,
+        stop_requested_reason: model.stop_requested_reason.map(TaskStopReason::from_stored),
         stop_requested_at: model.stop_requested_at,
+        task_generation,
+        terminal_generation,
         created_at: model.created_at,
         updated_at: model.updated_at,
     })
@@ -353,6 +377,50 @@ fn branch_lease_record(model: entities::branch_lease::Model) -> BranchLeaseRecor
         acquired_at: model.acquired_at,
         updated_at: model.updated_at,
     }
+}
+
+pub(super) async fn write_task_terminal_fact(
+    tx: &sea_orm::DatabaseTransaction,
+    run: entities::task_run::Model,
+    next_phase: TaskRunPhase,
+    status_message: Option<String>,
+    expected_generation: Option<u64>,
+) -> Result<entities::task_run::Model> {
+    if !next_phase.is_terminal() {
+        bail!("task terminal fact requires a terminal phase");
+    }
+    let current_phase = TaskRunPhase::from_str(&run.phase)
+        .with_context(|| format!("invalid stored task phase: {}", run.phase))?;
+    let task_generation = u64::try_from(run.task_generation)
+        .context("stored task generation must not be negative")?;
+    if expected_generation.is_some_and(|expected| expected != task_generation) {
+        bail!("task terminal fact belongs to another generation");
+    }
+    if let Some(terminal_generation) = run.terminal_generation {
+        let terminal_generation = u64::try_from(terminal_generation)
+            .context("stored terminal generation must not be negative")?;
+        if current_phase == next_phase && terminal_generation == task_generation {
+            return Ok(run);
+        }
+        bail!("task already has a terminal fact for another phase or generation");
+    }
+    if current_phase.is_terminal() {
+        bail!("stored terminal task is missing its terminal generation");
+    }
+    if !current_phase.can_transition_to(next_phase) {
+        bail!(
+            "invalid task terminal transition: {} -> {}",
+            current_phase.as_str(),
+            next_phase.as_str()
+        );
+    }
+
+    let mut active: entities::task_run::ActiveModel = run.into();
+    active.phase = Set(next_phase.as_str().to_string());
+    active.status_message = Set(status_message);
+    active.terminal_generation = Set(Some(i64::try_from(task_generation)?));
+    active.updated_at = Set(unix_seconds());
+    Ok(active.update(tx).await?)
 }
 
 async fn delete_blocked_branch_lease(

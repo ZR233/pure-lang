@@ -155,10 +155,20 @@ impl TraceRecorder {
         content: String,
         attachments: Vec<pl_trace::TraceAttachment>,
     ) {
+        self.user_text_item_with_id(turn_id, format!("{turn_id}-user"), content, attachments);
+    }
+
+    pub(crate) fn user_text_item_with_id(
+        &mut self,
+        turn_id: &str,
+        item_id: String,
+        content: String,
+        attachments: Vec<pl_trace::TraceAttachment>,
+    ) {
         let timestamp = unix_seconds();
         let mut item = TracePart::text(
             turn_id,
-            format!("{turn_id}-user"),
+            item_id,
             self.sequence,
             TraceTextChannel::User,
             content,

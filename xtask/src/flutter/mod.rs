@@ -22,6 +22,12 @@ enum DemoMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DriverMode {
+    Disabled,
+    Enabled,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DistCleanMode {
     Clean,
     KeepExisting,
@@ -111,12 +117,13 @@ pub(crate) fn run_gui(options: RunGuiOptions) -> Result<()> {
     } else {
         DemoMode::Native
     };
-    let run_result = run_flutter(
-        &workspace_root,
-        &app_dir,
-        &["run", "-d", target.flutter_name(), &version_define],
-        demo_mode,
-    );
+    let driver_mode = if options.driver {
+        DriverMode::Enabled
+    } else {
+        DriverMode::Disabled
+    };
+    let run_args = run_gui_args(target, &version_define, driver_mode);
+    let run_result = run_flutter(&workspace_root, &app_dir, &run_args, demo_mode);
 
     if run_result.is_err() && options.demo_fallback && !options.demo {
         eprintln!(
@@ -128,15 +135,18 @@ pub(crate) fn run_gui(options: RunGuiOptions) -> Result<()> {
             fs::remove_dir_all(&build_dir)
                 .with_context(|| format!("failed to remove {}", build_dir.display()))?;
         }
-        return run_flutter(
-            &workspace_root,
-            &app_dir,
-            &["run", "-d", target.flutter_name(), &version_define],
-            DemoMode::Demo,
-        );
+        return run_flutter(&workspace_root, &app_dir, &run_args, DemoMode::Demo);
     }
 
     run_result
+}
+
+fn run_gui_args(target: DesktopTarget, version_define: &str, driver_mode: DriverMode) -> Vec<&str> {
+    let mut args = vec!["run", "-d", target.flutter_name(), version_define];
+    if matches!(driver_mode, DriverMode::Enabled) {
+        args.extend(["-t", "test_driver/driver_main.dart"]);
+    }
+    args
 }
 
 pub(crate) fn build_gui(options: BuildGuiOptions) -> Result<()> {
@@ -352,6 +362,27 @@ mod tests {
                 OsString::from("windows"),
                 OsString::from("--dart-define=PURE_STUDIO_DEMO=true"),
             ]
+        );
+    }
+
+    #[test]
+    fn driver_mode_selects_dedicated_entrypoint() {
+        let version_define = "--dart-define=PURE_STUDIO_VERSION=1.2.3";
+
+        assert_eq!(
+            run_gui_args(DesktopTarget::Windows, version_define, DriverMode::Enabled),
+            vec![
+                "run",
+                "-d",
+                "windows",
+                version_define,
+                "-t",
+                "test_driver/driver_main.dart",
+            ]
+        );
+        assert_eq!(
+            run_gui_args(DesktopTarget::Windows, version_define, DriverMode::Disabled,),
+            vec!["run", "-d", "windows", version_define]
         );
     }
 }

@@ -18,6 +18,10 @@ Windows-first Flutter desktop client for Pure Studio.
 cargo xtask run-gui
 cargo xtask build-gui
 
+# Run the native app through the dedicated test_driver entrypoint for Dart MCP
+# interaction and GUI acceptance. Release builds never use it.
+cargo xtask run-gui --driver
+
 # Run from this Flutter project directory.
 flutter pub get
 flutter_rust_bridge_codegen generate

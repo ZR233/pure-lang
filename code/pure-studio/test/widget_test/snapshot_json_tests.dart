@@ -301,12 +301,13 @@ void registerSnapshotJsonTests() {
         createdAt: 1,
         payload: frb.BridgeProductEventPayload.sessionTaskChanged(
           sessionId: 'session-1',
-          task: const frb.BridgeTaskRuntimeDto(
+          task: frb.BridgeTaskRuntimeDto(
             runId: 'run-1',
             phase: 'reviewing',
             branch: 'codex/task',
             expectedHead: 'abcdef123456',
             statusMessage: 'Review returned',
+            taskGeneration: BigInt.zero,
             workUnits: [],
             agents: [],
             merges: [],

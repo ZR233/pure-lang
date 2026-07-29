@@ -53,7 +53,27 @@ pub struct AgentUpdateEnvelope {
 )]
 pub enum AgentWakeReason {
     Updates,
-    InactivityTimeout { timed_out_agent_ids: Vec<AgentId> },
+    #[serde(alias = "inactivityTimeout")]
+    InactivityDiagnostic {
+        timed_out_agent_ids: Vec<AgentId>,
+    },
+}
+
+/// Planner continuation 使用的有界、typed 子代理上下文。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentWakeContext {
+    pub current_agent_states: Vec<AgentSnapshot>,
+    pub wake_reason: AgentWakeReason,
+    pub last_activity_at: BTreeMap<AgentId, i64>,
+    pub recent_progress: Vec<AgentUpdateEnvelope>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_commentary: Option<String>,
+    pub terminal_facts: Vec<AgentUpdateEnvelope>,
+    pub user_stop_requested: bool,
+    pub signal_revision: u64,
+    pub lag_reconciled: bool,
+    pub diagnostic_only: bool,
 }
 
 /// 一次 Planner 续轮消费的全部子代理更新。
@@ -65,6 +85,7 @@ pub struct AgentWakeBatch {
     pub reason: AgentWakeReason,
     pub updates: Vec<AgentUpdateEnvelope>,
     pub children: Vec<AgentSnapshot>,
+    pub context: AgentWakeContext,
 }
 
 /// 父代理订阅的首帧与实时接收端。

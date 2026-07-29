@@ -6,7 +6,7 @@ use std::time::Duration;
 use tokio::time::Instant;
 
 use super::ParentWaitState;
-use super::wake::{child_needs_wait, wake_parent};
+use super::wake::{WakeParentOutcome, child_needs_wait, wake_parent};
 use crate::agent_runtime::{AgentActivityState, AgentId, AgentRuntimeHandle, AgentWakeReason};
 
 pub(super) type TimerEntry = Reverse<(Instant, u64, AgentId, AgentId, u64)>;
@@ -58,6 +58,9 @@ pub(super) fn arm_child_timer(
     if !child_needs_wait(state, &child) {
         return;
     }
+    if state.diagnosed_in_epoch.contains(child_id) {
+        return;
+    }
     let generation = state
         .timer_generations
         .entry(child_id.clone())
@@ -80,6 +83,7 @@ pub(super) async fn handle_due_timers(
     runtime: &AgentRuntimeHandle,
     parents: &mut BTreeMap<AgentId, ParentWaitState>,
     timers: &mut BinaryHeap<TimerEntry>,
+    inactivity_timeout: Duration,
 ) {
     let now = Instant::now();
     let mut timed_out = BTreeMap::<AgentId, Vec<AgentId>>::new();
@@ -98,6 +102,7 @@ pub(super) async fn handle_due_timers(
         if state.waiting_epoch != epoch
             || state.timer_generations.get(&child_id) != Some(&generation)
             || state.wake_in_flight
+            || state.diagnosed_in_epoch.contains(&child_id)
         {
             continue;
         }
@@ -118,24 +123,50 @@ pub(super) async fn handle_due_timers(
         }
     }
     for (parent_id, timed_out_agent_ids) in timed_out {
-        if let Some(state) = parents.get_mut(&parent_id) {
-            let timed_out_at = Instant::now();
-            for child_id in &timed_out_agent_ids {
-                state
-                    .last_meaningful_updates
-                    .insert(child_id.clone(), timed_out_at);
-            }
-        }
-        wake_parent(
+        let wake_outcome = wake_parent(
             runtime,
             parents,
-            parent_id,
-            AgentWakeReason::InactivityTimeout {
-                timed_out_agent_ids,
+            parent_id.clone(),
+            AgentWakeReason::InactivityDiagnostic {
+                timed_out_agent_ids: timed_out_agent_ids.clone(),
             },
         )
         .await;
+        let Some(state) = parents.get_mut(&parent_id) else {
+            continue;
+        };
+        match wake_outcome {
+            WakeParentOutcome::Accepted => {
+                state.diagnosed_in_epoch.extend(timed_out_agent_ids);
+            }
+            WakeParentOutcome::NotAccepted => {
+                for child_id in timed_out_agent_ids {
+                    rearm_diagnostic_retry(state, timers, inactivity_timeout, &parent_id, child_id);
+                }
+            }
+        }
     }
+}
+
+fn rearm_diagnostic_retry(
+    state: &mut ParentWaitState,
+    timers: &mut BinaryHeap<TimerEntry>,
+    inactivity_timeout: Duration,
+    parent_id: &AgentId,
+    child_id: AgentId,
+) {
+    let generation = state
+        .timer_generations
+        .entry(child_id.clone())
+        .and_modify(|value| *value = value.saturating_add(1))
+        .or_insert(1);
+    timers.push(Reverse((
+        Instant::now() + inactivity_timeout,
+        state.waiting_epoch,
+        parent_id.clone(),
+        child_id,
+        *generation,
+    )));
 }
 
 pub(super) fn invalidate_timers(state: &mut ParentWaitState) {

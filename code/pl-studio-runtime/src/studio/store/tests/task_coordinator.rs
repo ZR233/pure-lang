@@ -124,7 +124,12 @@ async fn task_stop_gate_is_durable_and_keeps_lease_for_terminalization() {
     let (run, _) = store.create_task_run_with_lease(input).await.unwrap();
 
     let requested = store
-        .request_task_stop(&run.id, &run.expected_head, "test stop")
+        .request_task_stop(
+            &run.id,
+            &run.expected_head,
+            TaskStopOrigin::UserRequest,
+            &TaskStopReason::new("test stop").unwrap(),
+        )
         .await
         .unwrap();
     assert!(requested.stop_requested);
@@ -150,7 +155,7 @@ async fn task_stop_gate_is_durable_and_keeps_lease_for_terminalization() {
             .contains("after task stop was requested")
     );
     let stopping = store
-        .begin_task_stop(&run.id, &run.expected_head)
+        .begin_task_stop(&run.id, &run.expected_head, requested.task_generation)
         .await
         .unwrap();
 
@@ -171,17 +176,80 @@ async fn task_stop_gate_is_durable_and_keeps_lease_for_terminalization() {
         Err(error) => error,
     };
     assert!(error.to_string().contains("task stop was requested"));
+    let cancelled = store
+        .cancel_task_and_release_lease(
+            &run.id,
+            &run.expected_head,
+            requested.task_generation,
+            "test stop",
+        )
+        .await
+        .unwrap();
+    assert_eq!(cancelled.phase, TaskRunPhase::Cancelled);
+    assert_eq!(
+        cancelled.terminal_generation,
+        Some(requested.task_generation)
+    );
+    assert_eq!(
+        store
+            .cancel_task_and_release_lease(
+                &run.id,
+                &run.expected_head,
+                requested.task_generation,
+                "duplicate stop",
+            )
+            .await
+            .unwrap()
+            .terminal_generation,
+        Some(requested.task_generation),
+        "the same generation must reuse its one durable terminal fact"
+    );
+}
+
+#[tokio::test]
+async fn recovery_cleanup_records_one_user_stop_terminal_generation() {
+    let store = StudioStore::open_memory().await.unwrap();
+    let project = store
+        .upsert_project("C:/work/recovery-cleanup-terminal")
+        .await
+        .unwrap();
+    let session = store
+        .create_session(&project.id, "Task", StudioMode::Task)
+        .await
+        .unwrap();
+    let mut input = create_input(&session.id);
+    input.workspace_root = "C:/work/recovery-cleanup-terminal".to_string();
+    input.git_common_dir = "C:/work/recovery-cleanup-terminal/.git".to_string();
+    let (run, _) = store.create_task_run_with_lease(input).await.unwrap();
+
+    store.authorize_recovery_cleanup(&run.id).await.unwrap();
+    let cancelled = store.read_task_run(&run.id).await.unwrap().unwrap();
+
+    assert_eq!(cancelled.phase, TaskRunPhase::Cancelled);
+    assert!(cancelled.stop_requested);
+    assert_eq!(
+        cancelled.stop_requested_origin,
+        Some(TaskStopOrigin::UserRequest)
+    );
+    assert_eq!(cancelled.task_generation, 1);
+    assert_eq!(cancelled.terminal_generation, Some(1));
+    assert!(store.read_branch_lease(&run.id).await.unwrap().is_none());
 }
 
 #[tokio::test]
 async fn stopping_task_rejects_executor_delivery_without_mutating_records() {
     let (store, run, work_unit, outcome) = delivery_transition_fixture().await;
-    store
-        .request_task_stop(&run.id, &run.expected_head, "test stop")
+    let requested = store
+        .request_task_stop(
+            &run.id,
+            &run.expected_head,
+            TaskStopOrigin::UserRequest,
+            &TaskStopReason::new("test stop").unwrap(),
+        )
         .await
         .unwrap();
     store
-        .begin_task_stop(&run.id, &run.expected_head)
+        .begin_task_stop(&run.id, &run.expected_head, requested.task_generation)
         .await
         .unwrap();
 
@@ -219,12 +287,17 @@ async fn stopping_task_rejects_new_explorer_outcome() {
     input.workspace_root = "C:/work/task-stop-explorer".to_string();
     input.git_common_dir = "C:/work/task-stop-explorer/.git".to_string();
     let (run, _) = store.create_task_run_with_lease(input).await.unwrap();
-    store
-        .request_task_stop(&run.id, &run.expected_head, "test stop")
+    let requested = store
+        .request_task_stop(
+            &run.id,
+            &run.expected_head,
+            TaskStopOrigin::UserRequest,
+            &TaskStopReason::new("test stop").unwrap(),
+        )
         .await
         .unwrap();
     store
-        .begin_task_stop(&run.id, &run.expected_head)
+        .begin_task_stop(&run.id, &run.expected_head, requested.task_generation)
         .await
         .unwrap();
 

@@ -104,15 +104,19 @@ where
     let initial_turn_id = request.initial_message.map(|message| {
         let turn_id = TurnId::generate();
         state.pending_inputs.push_back(PendingAgentInput {
+            mail_id: format!("mail:{turn_id}"),
             turn_id: turn_id.clone(),
             wake_id: None,
             wake_signal_ids: Vec::new(),
             session_id: child_session_id.clone(),
             message,
             metadata: request.metadata,
+            trigger: super::super::MailboxTurnTrigger::StartIfIdle,
+            delivery_state: Default::default(),
+            dispatch_generation: state.snapshot.dispatch_generation,
             queued_at: unix_timestamp(),
         });
-        state.snapshot.pending_inputs = 1;
+        state.refresh_mailbox_snapshot();
         state.snapshot.activity = AgentActivityState::Queued;
         turn_id
     });
@@ -231,7 +235,8 @@ where
     match &compensation {
         SpawnCompensation::RolledBack => {
             state.pending_inputs.clear();
-            state.snapshot.pending_inputs = 0;
+            state.active_input = None;
+            state.refresh_mailbox_snapshot();
             state.snapshot.lifecycle = AgentLifecycleState::Closed;
         }
         SpawnCompensation::Faulted { .. } => {

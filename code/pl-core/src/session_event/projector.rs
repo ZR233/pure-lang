@@ -9,7 +9,10 @@ use pl_trace::{
     TraceDelta, TraceEvent, TraceEventKind, TracePart, TracePartDeltaEvent, TraceTextChannel,
 };
 
-use crate::agent_runtime::{AgentRuntimeEvent, AgentRuntimeEventKind, TurnOutcomeKind};
+use crate::agent_runtime::{
+    AgentRuntimeEvent, AgentRuntimeEventKind, MailboxDeliveryState, MailboxTurnTrigger,
+    PendingAgentInput, TurnOutcomeKind,
+};
 
 use super::trace_part::session_part;
 
@@ -112,6 +115,38 @@ pub(crate) fn project_runtime_event(
     let mut projector = Projector::new(source_agent_id, session_id, through_sequence);
     match &event.kind {
         AgentRuntimeEventKind::TurnQueued { input, .. } => {
+            if matches!(input.delivery_state, MailboxDeliveryState::Claimed { .. }) {
+                project_user_input(
+                    &mut projector,
+                    input,
+                    turn_id,
+                    &format!("{turn_id}:mail:{}", input.mail_id),
+                    event.created_at,
+                );
+            } else if input.trigger == MailboxTurnTrigger::StartIfIdle {
+                projector.durable(
+                    Some(turn_id.to_string()),
+                    event.created_at,
+                    SessionEventKind::TurnChanged {
+                        turn: SessionTurn {
+                            turn_id: turn_id.to_string(),
+                            session_id: session_id.to_string(),
+                            status: SessionTurnStatus::Queued,
+                            reason: None,
+                            updated_at: event.created_at,
+                        },
+                    },
+                );
+                project_user_input(
+                    &mut projector,
+                    input,
+                    turn_id,
+                    &format!("{turn_id}:user"),
+                    event.created_at,
+                );
+            }
+        }
+        AgentRuntimeEventKind::TurnStarted { claimed_inputs, .. } => {
             projector.durable(
                 Some(turn_id.to_string()),
                 event.created_at,
@@ -119,71 +154,39 @@ pub(crate) fn project_runtime_event(
                     turn: SessionTurn {
                         turn_id: turn_id.to_string(),
                         session_id: session_id.to_string(),
-                        status: SessionTurnStatus::Queued,
+                        status: SessionTurnStatus::ContextLoading,
                         reason: None,
                         updated_at: event.created_at,
                     },
                 },
             );
-            projector.durable(
-                Some(turn_id.to_string()),
-                event.created_at,
-                SessionEventKind::MessageChanged {
-                    message: Box::new(SessionMessage {
-                        message_id: format!("{turn_id}:user"),
-                        session_id: session_id.to_string(),
-                        turn_id: turn_id.to_string(),
-                        role: SessionMessageRole::User,
-                        status: SessionMessageStatus::Completed,
-                        created_at: input.queued_at,
-                        updated_at: input.queued_at,
-                        completed_at: Some(input.queued_at),
-                        error: None,
-                        metadata: input.metadata.clone(),
-                    }),
-                },
-            );
-            projector.durable(
-                Some(turn_id.to_string()),
-                event.created_at,
-                SessionEventKind::PartChanged {
-                    part: Box::new(SessionPart {
-                        part_id: format!("{turn_id}:user-text"),
-                        message_id: format!("{turn_id}:user"),
-                        session_id: session_id.to_string(),
-                        turn_id: turn_id.to_string(),
-                        order: 0,
-                        revision: 0,
-                        status: SessionPartStatus::Completed,
-                        created_at: input.queued_at,
-                        updated_at: input.queued_at,
-                        completed_at: Some(input.queued_at),
-                        error: None,
-                        content: SessionPartContent::Text {
-                            channel: SessionTextChannel::User,
-                            text: input.message.clone(),
-                            attachments: Vec::new(),
+            for input in claimed_inputs {
+                if input.trigger == MailboxTurnTrigger::StartIfIdle
+                    && input.turn_id.as_str() != turn_id
+                {
+                    projector.durable(
+                        Some(input.turn_id.to_string()),
+                        event.created_at,
+                        SessionEventKind::TurnChanged {
+                            turn: SessionTurn {
+                                turn_id: input.turn_id.to_string(),
+                                session_id: session_id.to_string(),
+                                status: SessionTurnStatus::Cancelled,
+                                reason: Some(format!("coalesced_into_turn:{turn_id}")),
+                                updated_at: event.created_at,
+                            },
                         },
-                        usage: None,
-                        synthetic: false,
-                        ignored: false,
-                    }),
-                },
-            );
+                    );
+                }
+                project_user_input(
+                    &mut projector,
+                    input,
+                    turn_id,
+                    &format!("{turn_id}:mail:{}", input.mail_id),
+                    event.created_at,
+                );
+            }
         }
-        AgentRuntimeEventKind::TurnStarted { .. } => projector.durable(
-            Some(turn_id.to_string()),
-            event.created_at,
-            SessionEventKind::TurnChanged {
-                turn: SessionTurn {
-                    turn_id: turn_id.to_string(),
-                    session_id: session_id.to_string(),
-                    status: SessionTurnStatus::ContextLoading,
-                    reason: None,
-                    updated_at: event.created_at,
-                },
-            },
-        ),
         AgentRuntimeEventKind::TurnFinished { outcome, .. }
         | AgentRuntimeEventKind::RecoveryCancelledTurn { outcome, .. } => {
             let (turn_status, message_status) = match outcome.kind {
@@ -250,6 +253,61 @@ pub(crate) fn project_runtime_event(
         | AgentRuntimeEventKind::Faulted { .. } => {}
     }
     projector.finish()
+}
+
+fn project_user_input(
+    projector: &mut Projector,
+    input: &PendingAgentInput,
+    turn_id: &str,
+    message_id: &str,
+    emitted_at: i64,
+) {
+    let session_id = input.session_id.as_str();
+    projector.durable(
+        Some(turn_id.to_string()),
+        emitted_at,
+        SessionEventKind::MessageChanged {
+            message: Box::new(SessionMessage {
+                message_id: message_id.to_string(),
+                session_id: session_id.to_string(),
+                turn_id: turn_id.to_string(),
+                role: SessionMessageRole::User,
+                status: SessionMessageStatus::Completed,
+                created_at: input.queued_at,
+                updated_at: input.queued_at,
+                completed_at: Some(input.queued_at),
+                error: None,
+                metadata: input.metadata.clone(),
+            }),
+        },
+    );
+    projector.durable(
+        Some(turn_id.to_string()),
+        emitted_at,
+        SessionEventKind::PartChanged {
+            part: Box::new(SessionPart {
+                part_id: format!("{message_id}:text"),
+                message_id: message_id.to_string(),
+                session_id: session_id.to_string(),
+                turn_id: turn_id.to_string(),
+                order: 0,
+                revision: 0,
+                status: SessionPartStatus::Completed,
+                created_at: input.queued_at,
+                updated_at: input.queued_at,
+                completed_at: Some(input.queued_at),
+                error: None,
+                content: SessionPartContent::Text {
+                    channel: SessionTextChannel::User,
+                    text: input.message.clone(),
+                    attachments: Vec::new(),
+                },
+                usage: None,
+                synthetic: false,
+                ignored: false,
+            }),
+        },
+    );
 }
 
 pub(crate) fn runtime_event_session_id(event: &AgentRuntimeEvent) -> Option<&str> {

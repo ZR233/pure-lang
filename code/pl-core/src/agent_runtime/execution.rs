@@ -15,6 +15,7 @@ use crate::{AgentSession, TraceRecorder, TurnResult, TurnResultStatus};
 pub(crate) struct TurnCompletion {
     pub(crate) turn_id: TurnId,
     pub(crate) start_revision: u64,
+    pub(crate) dispatch_generation: u64,
     /// worker 正常返回时携带更新后的 session；任务被 abort 时必须保留 actor 中的原 session。
     pub(crate) session: Option<AgentSession>,
     pub(crate) result: std::result::Result<TurnResult, String>,
@@ -25,7 +26,7 @@ pub(crate) struct TurnCompletion {
 
 pub(crate) async fn execute_turn<H>(
     host: H,
-    context: AgentTurnPreparationContext,
+    mut context: AgentTurnPreparationContext,
     cancellation: CancellationToken,
     durable_trace_tx: tokio::sync::mpsc::UnboundedSender<TraceEvent>,
     observation_tx: tokio::sync::mpsc::UnboundedSender<ObservedTurnEvent>,
@@ -33,8 +34,13 @@ pub(crate) async fn execute_turn<H>(
 where
     H: AgentRuntimeHost,
 {
+    let leading_inputs = context.leading_inputs.clone();
+    for input in &leading_inputs {
+        context.session.push_user_prompt(input.message.clone());
+    }
     let turn_id = context.turn_id.clone();
     let start_revision = context.snapshot.revision;
+    let dispatch_generation = context.snapshot.dispatch_generation;
     let framework_session_id = context.session_id.clone();
     let trace_session_id = context.session_id.to_string();
     let initial_trace_sequence = context.trace_sequence;
@@ -46,6 +52,7 @@ where
         context.turn_id.clone(),
         context.session_id.clone(),
     );
+    let mailbox = context.mailbox.clone();
     let mut session = context.session.clone();
     let (result, session_commit, finalized_with_tool) = match host
         .turn_factory()
@@ -54,7 +61,7 @@ where
     {
         Ok(prepared) => {
             let prepared =
-                prepared.with_runtime_context(&turn_id, cancellation.clone(), checkpoint);
+                prepared.with_runtime_context(&turn_id, cancellation.clone(), checkpoint, mailbox);
             for section in &prepared.pinned_context {
                 session.upsert_pinned_context(section.clone());
             }
@@ -126,6 +133,14 @@ where
                     initial_trace_sequence,
                     durable_trace_tx,
                 );
+                for input in &leading_inputs {
+                    recorder.user_text_item_with_id(
+                        turn_id.as_str(),
+                        format!("{turn_id}-mail-{}", input.mail_id),
+                        input.message.clone(),
+                        Vec::new(),
+                    );
+                }
                 let result = prepared
                     .kernel
                     .run_turn_with_trace(
@@ -158,6 +173,7 @@ where
     TurnCompletion {
         turn_id,
         start_revision,
+        dispatch_generation,
         session: match session_commit {
             super::AgentSessionCommitPolicy::Persist => Some(session),
             super::AgentSessionCommitPolicy::DiscardTurn => None,

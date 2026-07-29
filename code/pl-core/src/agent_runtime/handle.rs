@@ -249,7 +249,8 @@ impl AgentRuntimeHandle {
         loop {
             let snapshot = self.agent_events.snapshot(&agent_id)?;
             if snapshot.lifecycle != super::AgentLifecycleState::Active
-                || (snapshot.activity == AgentActivityState::Idle && snapshot.pending_inputs == 0)
+                || (snapshot.activity == AgentActivityState::Idle
+                    && snapshot.pending_trigger_inputs == 0)
             {
                 return Ok(AgentWaitResult {
                     last_turn: snapshot.last_turn.clone(),

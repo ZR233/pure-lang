@@ -1338,6 +1338,15 @@ impl SseDecode for bool {
     }
 }
 
+impl SseDecode for Box<crate::api::studio::types::runtime::BridgeTaskRuntimeDto> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        return Box::new(
+            <crate::api::studio::types::runtime::BridgeTaskRuntimeDto>::sse_decode(deserializer),
+        );
+    }
+}
+
 impl SseDecode for crate::api::studio::types::runtime::BridgeActiveTurn {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -1621,10 +1630,9 @@ impl SseDecode for crate::api::studio::types::event::BridgeProductEventPayload {
             }
             3 => {
                 let mut var_sessionId = <String>::sse_decode(deserializer);
-                let mut var_task =
-                    <Option<crate::api::studio::types::runtime::BridgeTaskRuntimeDto>>::sse_decode(
-                        deserializer,
-                    );
+                let mut var_task = <Option<
+                    Box<crate::api::studio::types::runtime::BridgeTaskRuntimeDto>,
+                >>::sse_decode(deserializer);
                 return crate::api::studio::types::event::BridgeProductEventPayload::SessionTaskChanged{session_id: var_sessionId, task: var_task};
             }
             4 => {
@@ -2102,6 +2110,9 @@ impl SseDecode for crate::api::studio::types::runtime::BridgeTaskRuntimeDto {
         let mut var_branch = <String>::sse_decode(deserializer);
         let mut var_expectedHead = <String>::sse_decode(deserializer);
         let mut var_statusMessage = <Option<String>>::sse_decode(deserializer);
+        let mut var_stopRequestedOrigin = <Option<String>>::sse_decode(deserializer);
+        let mut var_stopRequestedReason = <Option<String>>::sse_decode(deserializer);
+        let mut var_taskGeneration = <u64>::sse_decode(deserializer);
         let mut var_workUnits =
             <Vec<crate::api::studio::types::runtime::BridgeTaskWorkUnitDto>>::sse_decode(
                 deserializer,
@@ -2120,6 +2131,9 @@ impl SseDecode for crate::api::studio::types::runtime::BridgeTaskRuntimeDto {
             branch: var_branch,
             expected_head: var_expectedHead,
             status_message: var_statusMessage,
+            stop_requested_origin: var_stopRequestedOrigin,
+            stop_requested_reason: var_stopRequestedReason,
+            task_generation: var_taskGeneration,
             work_units: var_workUnits,
             agents: var_agents,
             merges: var_merges,
@@ -2742,6 +2756,19 @@ impl SseDecode for Option<crate::api::studio::types::response::ZhipuCodingPlanUs
                     deserializer,
                 ),
             );
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<Box<crate::api::studio::types::runtime::BridgeTaskRuntimeDto>> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<Box<
+                crate::api::studio::types::runtime::BridgeTaskRuntimeDto,
+            >>::sse_decode(deserializer));
         } else {
             return None;
         }
@@ -4236,6 +4263,9 @@ impl flutter_rust_bridge::IntoDart for crate::api::studio::types::runtime::Bridg
             self.branch.into_into_dart().into_dart(),
             self.expected_head.into_into_dart().into_dart(),
             self.status_message.into_into_dart().into_dart(),
+            self.stop_requested_origin.into_into_dart().into_dart(),
+            self.stop_requested_reason.into_into_dart().into_dart(),
+            self.task_generation.into_into_dart().into_dart(),
             self.work_units.into_into_dart().into_dart(),
             self.agents.into_into_dart().into_dart(),
             self.merges.into_into_dart().into_dart(),
@@ -4842,6 +4872,13 @@ impl SseEncode for bool {
     }
 }
 
+impl SseEncode for Box<crate::api::studio::types::runtime::BridgeTaskRuntimeDto> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <crate::api::studio::types::runtime::BridgeTaskRuntimeDto>::sse_encode(*self, serializer);
+    }
+}
+
 impl SseEncode for crate::api::studio::types::runtime::BridgeActiveTurn {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -5042,7 +5079,7 @@ impl SseEncode for crate::api::studio::types::event::BridgeProductEventPayload {
             } => {
                 <i32>::sse_encode(3, serializer);
                 <String>::sse_encode(session_id, serializer);
-                <Option<crate::api::studio::types::runtime::BridgeTaskRuntimeDto>>::sse_encode(
+                <Option<Box<crate::api::studio::types::runtime::BridgeTaskRuntimeDto>>>::sse_encode(
                     task, serializer,
                 );
             }
@@ -5427,6 +5464,9 @@ impl SseEncode for crate::api::studio::types::runtime::BridgeTaskRuntimeDto {
         <String>::sse_encode(self.branch, serializer);
         <String>::sse_encode(self.expected_head, serializer);
         <Option<String>>::sse_encode(self.status_message, serializer);
+        <Option<String>>::sse_encode(self.stop_requested_origin, serializer);
+        <Option<String>>::sse_encode(self.stop_requested_reason, serializer);
+        <u64>::sse_encode(self.task_generation, serializer);
         <Vec<crate::api::studio::types::runtime::BridgeTaskWorkUnitDto>>::sse_encode(
             self.work_units,
             serializer,
@@ -5912,6 +5952,18 @@ impl SseEncode for Option<crate::api::studio::types::response::ZhipuCodingPlanUs
         <bool>::sse_encode(self.is_some(), serializer);
         if let Some(value) = self {
             <crate::api::studio::types::response::ZhipuCodingPlanUsageDto>::sse_encode(
+                value, serializer,
+            );
+        }
+    }
+}
+
+impl SseEncode for Option<Box<crate::api::studio::types::runtime::BridgeTaskRuntimeDto>> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <Box<crate::api::studio::types::runtime::BridgeTaskRuntimeDto>>::sse_encode(
                 value, serializer,
             );
         }

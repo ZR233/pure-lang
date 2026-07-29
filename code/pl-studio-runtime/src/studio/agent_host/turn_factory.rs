@@ -99,6 +99,13 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             None
         };
         let task_phase = active_task_run.as_ref().map(|run| run.phase);
+        if let Some(run) = active_task_run.as_ref() {
+            validate_task_turn_generation(
+                &context.snapshot.identity,
+                &context.input.metadata,
+                run,
+            )?;
+        }
         let input_message = if context.snapshot.identity.parent_id.is_none() {
             if let Some(wake_batch) = context.input.metadata.get("agentWakeBatch") {
                 match active_task_run.as_ref() {
@@ -361,6 +368,109 @@ fn turn_error(error: impl Into<String>) -> PureError {
     PureError::MemoryError(error.into())
 }
 
+fn validate_task_turn_generation(
+    identity: &pl_core::AgentIdentity,
+    metadata: &serde_json::Value,
+    run: &crate::studio::task_coordinator::TaskRunRecord,
+) -> Result<()> {
+    let continuation_reason = metadata
+        .get("continuationReason")
+        .and_then(serde_json::Value::as_str);
+    let input_generation = metadata
+        .get("taskGeneration")
+        .and_then(serde_json::Value::as_u64);
+    let delivery_recovery = continuation_reason == Some("deliveryRecovery")
+        && identity.parent_id.is_some()
+        && identity.role.as_str() == "executor";
+    if delivery_recovery && input_generation != Some(run.task_generation) {
+        return Err(turn_error(
+            "delivery recovery belongs to a stale task generation",
+        ));
+    }
+    if run.stop_requested && !delivery_recovery {
+        return Err(turn_error(
+            "task is quiescing; only its generation-bound delivery recovery may start",
+        ));
+    }
+    Ok(())
+}
+
 fn anyhow_error(error: impl std::fmt::Display) -> PureError {
     PureError::MemoryError(error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::studio::task_coordinator::{
+        TaskRunPhase, TaskRunRecord, TaskStopOrigin, TaskStopReason,
+    };
+
+    #[test]
+    fn stop_requested_turn_gate_only_accepts_generation_bound_executor_recovery() {
+        let run = stopped_run();
+        let root = identity("root", "planner", None);
+        let executor = identity("executor", "executor", Some("root"));
+
+        assert!(
+            validate_task_turn_generation(&root, &serde_json::json!({}), &run).is_err(),
+            "a stopped task must not start a generic planner continuation"
+        );
+        assert!(
+            validate_task_turn_generation(
+                &executor,
+                &serde_json::json!({
+                    "continuationReason": "deliveryRecovery",
+                    "taskGeneration": run.task_generation - 1,
+                }),
+                &run,
+            )
+            .is_err(),
+            "a stale delivery recovery generation must be rejected"
+        );
+        assert!(
+            validate_task_turn_generation(
+                &executor,
+                &serde_json::json!({
+                    "continuationReason": "deliveryRecovery",
+                    "taskGeneration": run.task_generation,
+                }),
+                &run,
+            )
+            .is_ok()
+        );
+    }
+
+    fn identity(id: &str, role: &str, parent_id: Option<&str>) -> pl_core::AgentIdentity {
+        pl_core::AgentIdentity {
+            id: pl_core::AgentId::new(id).unwrap(),
+            parent_id: parent_id.map(|parent| pl_core::AgentId::new(parent).unwrap()),
+            role: crate::AgentRoleId::new(role).unwrap(),
+            depth: u32::from(parent_id.is_some()),
+        }
+    }
+
+    fn stopped_run() -> TaskRunRecord {
+        TaskRunRecord {
+            id: "task-run".to_string(),
+            session_id: "session".to_string(),
+            phase: TaskRunPhase::Implementing,
+            plan: "plan".to_string(),
+            workspace_root: "C:/workspace".to_string(),
+            git_common_dir: "C:/workspace/.git".to_string(),
+            branch: "main".to_string(),
+            base_commit: "base".to_string(),
+            expected_head: "head".to_string(),
+            design_commit: Some("head".to_string()),
+            status_message: None,
+            stop_requested: true,
+            stop_requested_origin: Some(TaskStopOrigin::UserRequest),
+            stop_requested_reason: TaskStopReason::new("stop"),
+            stop_requested_at: Some(1),
+            task_generation: 7,
+            terminal_generation: None,
+            created_at: 1,
+            updated_at: 1,
+        }
+    }
 }

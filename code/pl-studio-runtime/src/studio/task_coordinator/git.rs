@@ -20,6 +20,12 @@ pub(super) struct WorktreeChangeInspection {
     pub(super) changed_file_count: u32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ExecutorRecoveryInspection {
+    NoDelivery,
+    Recoverable,
+}
+
 const INITIAL_COMMIT_MESSAGE: &str = "chore: initialize Pure Studio workspace";
 pub(super) const STUDIO_GIT_NAME_CONFIG: &str = "user.name=Pure Studio";
 pub(super) const STUDIO_GIT_EMAIL_CONFIG: &str = "user.email=pure-studio@local";
@@ -145,7 +151,7 @@ pub(super) async fn is_ancestor(
 pub(super) async fn inspect_executor_recovery(
     path: impl AsRef<Path>,
     base_commit: &str,
-) -> Result<super::DeliveryRecoveryNeed> {
+) -> Result<ExecutorRecoveryInspection> {
     let path = path.as_ref().to_path_buf();
     let base_commit = base_commit.to_string();
     tokio::task::spawn_blocking(move || {
@@ -155,9 +161,9 @@ pub(super) async fn inspect_executor_recovery(
             &["status", "--porcelain=v1", "--untracked-files=all"],
         )?;
         Ok(if head != base_commit || !status.is_empty() {
-            super::DeliveryRecoveryNeed::Recoverable
+            ExecutorRecoveryInspection::Recoverable
         } else {
-            super::DeliveryRecoveryNeed::NoDelivery
+            ExecutorRecoveryInspection::NoDelivery
         })
     })
     .await

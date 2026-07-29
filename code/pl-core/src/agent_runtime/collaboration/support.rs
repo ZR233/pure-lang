@@ -106,11 +106,14 @@ pub(super) fn send_schema() -> Value {
         ("target", json!({ "type": "string" }), true),
         ("message", json!({ "type": "string" }), true),
         (
-            "delivery",
-            json!({ "type": "string", "enum": ["queueOnly", "start", "interruptThenStart"] }),
+            "interrupt",
+            json!({
+                "type": "boolean",
+                "default": false,
+                "description": "Cancel the active turn before delivering this input."
+            }),
             false,
         ),
-        ("metadata", json!({ "type": "object" }), false),
     ])
 }
 

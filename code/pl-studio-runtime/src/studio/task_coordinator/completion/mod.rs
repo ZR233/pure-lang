@@ -6,7 +6,10 @@ use serde::{Deserialize, Serialize};
 
 use super::git::changed_files_between;
 use super::merge::{ProductionMergeVerifier, select_merge_verification_commands};
-use super::{AgentOutcomeStatus, MergeStatus, TaskCoordinator, TaskRunPhase, TaskRunRecord};
+use super::{
+    AgentOutcomeStatus, MergeStatus, TaskCoordinator, TaskRunPhase, TaskRunRecord, TaskStopOrigin,
+    TaskStopReason,
+};
 use crate::tool::{
     RegisteredTool, ToolExecutionResult, ToolInputSchemaField, strict_tool_input_schema,
 };
@@ -31,7 +34,7 @@ struct TaskCompletionOutput {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TaskStopOutput {
+pub(crate) struct TaskStopOutput {
     status: &'static str,
     run: TaskRunRecord,
     deferred_agent_id: Option<String>,
@@ -81,72 +84,88 @@ impl TaskCoordinator {
                 let session_id = session_id.clone();
                 let runtime = runtime.clone();
                 async move {
-                    let reason = input.reason.trim();
-                    if reason.is_empty() {
+                    let Some(reason) = TaskStopReason::new(input.reason) else {
                         bail!("task_stop reason must not be empty");
-                    }
-                    let mut terminal_facts = coordinator.subscribe_terminal_facts();
-                    let requested = {
-                        let branch_guard = coordinator.lock_branch_mutation().await;
-                        coordinator.ensure_branch_mutation_guard(&branch_guard)?;
-                        let _allocation_guard = coordinator.allocation_lock.lock().await;
-                        let run = coordinator
-                            .preflight_task_stop_request_locked(&session_id, &branch_guard)
-                            .await?;
-                        coordinator
-                            .store
-                            .request_task_stop(&run.id, &run.expected_head, reason)
-                            .await?
                     };
-                    interrupt_task_children(&runtime, &session_id).await?;
-                    wait_for_terminal_outcomes(&coordinator, &requested.id, &mut terminal_facts)
+                    let output = coordinator
+                        .stop_task(
+                            &session_id,
+                            &runtime,
+                            TaskStopOrigin::PlannerDecision,
+                            reason,
+                        )
                         .await?;
-                    let run = coordinator
-                        .store
-                        .read_task_run(&requested.id)
-                        .await?
-                        .context("task run disappeared after stop request")?;
-                    if let Some(outcome) = coordinator.waiting_delivery_outcome(&run).await? {
-                        return ToolExecutionResult::<serde_json::Value>::json(TaskStopOutput {
-                            status: "deferred",
-                            run,
-                            deferred_agent_id: Some(outcome.agent_id),
-                        })
+                    ToolExecutionResult::<serde_json::Value>::json(output)
                         .map(ToolExecutionResult::ending_turn)
-                        .map_err(anyhow::Error::from);
-                    }
-                    let run = {
-                        let branch_guard = coordinator.lock_branch_mutation().await;
-                        coordinator.ensure_branch_mutation_guard(&branch_guard)?;
-                        let _allocation_guard = coordinator.allocation_lock.lock().await;
-                        let run = coordinator
-                            .preflight_task_stop_locked(&session_id, &branch_guard)
-                            .await?;
-                        coordinator
-                            .store
-                            .begin_task_stop(&run.id, &run.expected_head)
-                            .await?
-                    };
-                    close_task_children(&runtime, &session_id).await?;
-                    coordinator
-                        .store
-                        .settle_agents_for_task_stop(&run.id, reason)
-                        .await?;
-                    let branch_guard = coordinator.lock_branch_mutation().await;
-                    let stopped = coordinator
-                        .stop_task_locked(&run.id, reason, &branch_guard)
-                        .await?;
-                    ToolExecutionResult::<serde_json::Value>::json(TaskStopOutput {
-                        status: "cancelled",
-                        run: stopped,
-                        deferred_agent_id: None,
-                    })
-                    .map(ToolExecutionResult::ending_turn)
-                    .map_err(anyhow::Error::from)
+                        .map_err(anyhow::Error::from)
                 }
             },
         )
         .with_effect(ToolEffect::BranchControl)
+    }
+
+    pub(crate) async fn stop_task(
+        &self,
+        session_id: &str,
+        runtime: &AgentRuntimeHandle,
+        origin: TaskStopOrigin,
+        reason: TaskStopReason,
+    ) -> Result<TaskStopOutput> {
+        let mut terminal_facts = self.subscribe_terminal_facts();
+        let requested = {
+            let branch_guard = self.lock_branch_mutation().await;
+            self.ensure_branch_mutation_guard(&branch_guard)?;
+            let _allocation_guard = self.allocation_lock.lock().await;
+            let run = self
+                .preflight_task_stop_request_locked(session_id, &branch_guard)
+                .await?;
+            self.store
+                .request_task_stop(&run.id, &run.expected_head, origin, &reason)
+                .await?
+        };
+        interrupt_task_agents(runtime, session_id, origin).await?;
+        wait_for_terminal_outcomes(self, &requested.id, &mut terminal_facts).await?;
+        let run = self
+            .store
+            .read_task_run(&requested.id)
+            .await?
+            .context("task run disappeared after stop request")?;
+        if let Some(outcome) = self.waiting_delivery_outcome(&run).await? {
+            return Ok(TaskStopOutput {
+                status: "deferred",
+                run,
+                deferred_agent_id: Some(outcome.agent_id),
+            });
+        }
+        let run = {
+            let branch_guard = self.lock_branch_mutation().await;
+            self.ensure_branch_mutation_guard(&branch_guard)?;
+            let _allocation_guard = self.allocation_lock.lock().await;
+            let run = self
+                .preflight_task_stop_locked(session_id, &branch_guard)
+                .await?;
+            self.store
+                .begin_task_stop(&run.id, &run.expected_head, requested.task_generation)
+                .await?
+        };
+        close_task_children(runtime, session_id).await?;
+        self.store
+            .settle_agents_for_task_stop(&run.id, requested.task_generation, reason.as_str())
+            .await?;
+        let branch_guard = self.lock_branch_mutation().await;
+        let stopped = self
+            .stop_task_locked(
+                &run.id,
+                requested.task_generation,
+                reason.as_str(),
+                &branch_guard,
+            )
+            .await?;
+        Ok(TaskStopOutput {
+            status: "cancelled",
+            run: stopped,
+            deferred_agent_id: None,
+        })
     }
 
     async fn complete_task(&self, session_id: &str) -> Result<TaskCompletionOutput> {
@@ -233,6 +252,7 @@ impl TaskCoordinator {
     async fn stop_task_locked(
         &self,
         task_run_id: &str,
+        expected_generation: u64,
         reason: &str,
         guard: &super::BranchMutationGuard<'_>,
     ) -> Result<TaskRunRecord> {
@@ -271,7 +291,7 @@ impl TaskCoordinator {
         super::review::validate_review_repository(&run).await?;
         let cancelled = self
             .store
-            .cancel_task_and_release_lease(&run.id, &run.expected_head, reason)
+            .cancel_task_and_release_lease(&run.id, &run.expected_head, expected_generation, reason)
             .await?;
         self.release_owned_process_lease(&run.id);
         Ok(cancelled)
@@ -322,14 +342,21 @@ impl TaskCoordinator {
     }
 }
 
-async fn interrupt_task_children(runtime: &AgentRuntimeHandle, session_id: &str) -> Result<()> {
+async fn interrupt_task_agents(
+    runtime: &AgentRuntimeHandle,
+    session_id: &str,
+    origin: TaskStopOrigin,
+) -> Result<()> {
     let root = crate::studio::agent_host::root_agent_id(session_id);
     let children = runtime
         .list()
         .await
         .map_err(|error| anyhow::anyhow!(error.to_string()))?
         .into_iter()
-        .filter(|snapshot| snapshot.identity.parent_id.as_ref() == Some(&root))
+        .filter(|snapshot| {
+            snapshot.identity.parent_id.as_ref() == Some(&root)
+                || (origin.stops_root_turn() && snapshot.identity.id == root)
+        })
         .filter(|snapshot| {
             !matches!(
                 snapshot.lifecycle,

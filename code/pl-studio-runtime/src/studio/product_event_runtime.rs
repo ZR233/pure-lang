@@ -107,7 +107,7 @@ impl StudioProductEventRuntime {
             None,
             StudioProductEventKind::SessionTaskChanged {
                 session_id: session_id.to_string(),
-                task,
+                task: task.map(Box::new),
             },
         )))
     }
