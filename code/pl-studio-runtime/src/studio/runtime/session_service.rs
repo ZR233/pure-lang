@@ -12,6 +12,8 @@ use super::StudioRuntime;
 
 impl StudioRuntime {
     pub async fn open_project(&self, path: impl AsRef<Path>) -> Result<ProjectRecord> {
+        let path = path.as_ref();
+        let _ = resolve_workspace_root(path)?;
         self.store.upsert_project(path).await
     }
 

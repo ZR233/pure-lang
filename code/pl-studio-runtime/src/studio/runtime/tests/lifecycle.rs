@@ -1,6 +1,131 @@
 use super::*;
-use crate::StudioProductEventKind;
+use crate::{
+    StudioProductEventKind, StudioRecoveryIssue, StudioRecoveryIssueCategory,
+    StudioRecoveryIssueScope,
+};
 use pretty_assertions::assert_eq;
+
+#[tokio::test]
+async fn initialize_runtime_isolates_unavailable_registered_project() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let missing_workspace = std::env::temp_dir().join(format!("pure-missing-project-{unique}"));
+    let healthy_workspace = std::env::temp_dir().join(format!("pure-healthy-project-{unique}"));
+    let home = std::env::temp_dir().join(format!("pure-missing-project-home-{unique}"));
+    tokio::fs::create_dir_all(&healthy_workspace).await.unwrap();
+    let store = StudioStore::open_memory().await.unwrap();
+    let healthy_project = store.upsert_project(&healthy_workspace).await.unwrap();
+    let project = store.upsert_project(&missing_workspace).await.unwrap();
+    let runtime = StudioRuntime::with_runtime_state(
+        store,
+        ConfigStore::new(crate::config::ConfigPaths::from_home(&home)),
+        StudioRuntimeState::new(),
+    );
+
+    let snapshot = runtime.initialize_runtime().await.unwrap();
+
+    assert_eq!(snapshot.status, StudioRuntimeStatus::Ready);
+    assert_eq!(snapshot.recovery_issues.len(), 1);
+    let issue = &snapshot.recovery_issues[0];
+    assert_eq!(issue.scope, StudioRecoveryIssueScope::Project);
+    assert_eq!(issue.category, StudioRecoveryIssueCategory::Repository);
+    assert_eq!(issue.action, StudioRecoveryIssueAction::RemoveProject);
+    assert_eq!(issue.project_id.as_deref(), Some(project.id.as_str()));
+    assert_eq!(issue.session_id, None);
+    assert_eq!(issue.task_run_id, None);
+    assert!(issue.message.contains("Project workspace is unavailable"));
+    assert!(
+        issue
+            .message
+            .contains(&missing_workspace.display().to_string())
+    );
+    assert_ne!(
+        issue.project_id.as_deref(),
+        Some(healthy_project.id.as_str())
+    );
+    let _ = tokio::fs::remove_dir_all(healthy_workspace).await;
+    let _ = tokio::fs::remove_dir_all(home).await;
+}
+
+#[tokio::test]
+async fn unavailable_project_does_not_duplicate_existing_project_issue() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let missing_workspace = std::env::temp_dir().join(format!("pure-duplicate-project-{unique}"));
+    let home = std::env::temp_dir().join(format!("pure-duplicate-project-home-{unique}"));
+    let store = StudioStore::open_memory().await.unwrap();
+    let project = store.upsert_project(&missing_workspace).await.unwrap();
+    let runtime = StudioRuntime::new(
+        store,
+        ConfigStore::new(crate::config::ConfigPaths::from_home(&home)),
+    );
+    let mut issues = vec![StudioRecoveryIssue {
+        id: "existing-project-issue".to_string(),
+        scope: StudioRecoveryIssueScope::Project,
+        category: StudioRecoveryIssueCategory::Repository,
+        action: StudioRecoveryIssueAction::RemoveProject,
+        project_id: Some(project.id),
+        session_id: None,
+        task_run_id: Some("task-existing".to_string()),
+        message: "existing issue".to_string(),
+    }];
+
+    runtime
+        .append_unavailable_project_recovery_issues(&mut issues)
+        .await
+        .unwrap();
+
+    assert_eq!(issues.len(), 1);
+    assert_eq!(issues[0].id, "existing-project-issue");
+    let _ = tokio::fs::remove_dir_all(home).await;
+}
+
+#[tokio::test]
+async fn open_project_validates_path_before_persisting() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("pure-open-project-{unique}"));
+    let missing_workspace = root.join("missing");
+    let file_path = root.join("file.txt");
+    let valid_workspace = root.join("workspace");
+    let home = root.join("home");
+    tokio::fs::create_dir_all(&valid_workspace).await.unwrap();
+    tokio::fs::write(&file_path, "not a workspace")
+        .await
+        .unwrap();
+    let store = StudioStore::open_memory().await.unwrap();
+    let runtime = StudioRuntime::new(
+        store.clone(),
+        ConfigStore::new(crate::config::ConfigPaths::from_home(&home)),
+    );
+
+    let missing_error = runtime.open_project(&missing_workspace).await.unwrap_err();
+    let file_error = runtime.open_project(&file_path).await.unwrap_err();
+
+    assert!(
+        missing_error
+            .to_string()
+            .contains("workspace directory not found")
+    );
+    assert!(
+        file_error
+            .to_string()
+            .contains("workspace path is not a directory")
+    );
+    assert!(store.list_projects().await.unwrap().is_empty());
+
+    let project = runtime.open_project(&valid_workspace).await.unwrap();
+
+    assert_eq!(project.path, valid_workspace.to_string_lossy());
+    assert_eq!(store.list_projects().await.unwrap(), vec![project]);
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
 
 #[tokio::test]
 async fn update_shutdown_refuses_active_task_and_stops_idle_runtime() {

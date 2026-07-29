@@ -10,8 +10,9 @@ use crate::studio::agent_host::{
 };
 use crate::studio::task_coordinator::TaskCoordinator;
 use crate::studio::{
-    InteractionRuntime, StudioProductEventRuntime, StudioRuntimeSnapshot, StudioRuntimeState,
-    StudioRuntimeStatus, StudioStore,
+    InteractionRuntime, StudioProductEventRuntime, StudioRecoveryIssue, StudioRecoveryIssueAction,
+    StudioRecoveryIssueCategory, StudioRecoveryIssueScope, StudioRuntimeSnapshot,
+    StudioRuntimeState, StudioRuntimeStatus, StudioStore,
 };
 use crate::{LocalMcpRuntimeHost, McpRuntime, McpRuntimeHandle};
 
@@ -179,7 +180,10 @@ impl StudioRuntime {
             .transition(StudioRuntimeStatus::Initializing, None)?;
         let initialization = async {
             self.cancel_recovered_transient_interactions().await?;
-            self.task_coordinator.recover_active_tasks().await
+            let mut report = self.task_coordinator.recover_active_tasks().await?;
+            self.append_unavailable_project_recovery_issues(&mut report.issues)
+                .await?;
+            Ok::<_, anyhow::Error>(report)
         }
         .await;
         match initialization {
@@ -265,6 +269,34 @@ impl StudioRuntime {
             .context("selected project not found")?;
         let workspace_root = resolve_workspace_root(Path::new(&project.path))?;
         self.lsp_runtime.reconcile_workspace(workspace_root).await;
+        Ok(())
+    }
+
+    pub(super) async fn append_unavailable_project_recovery_issues(
+        &self,
+        recovery_issues: &mut Vec<StudioRecoveryIssue>,
+    ) -> Result<()> {
+        for project in self.store.list_projects().await? {
+            let Err(error) = resolve_workspace_root(Path::new(&project.path)) else {
+                continue;
+            };
+            if recovery_issues.iter().any(|issue| {
+                issue.scope == StudioRecoveryIssueScope::Project
+                    && issue.project_id.as_deref() == Some(project.id.as_str())
+            }) {
+                continue;
+            }
+            recovery_issues.push(StudioRecoveryIssue {
+                id: format!("recovery-issue-project-path-{}", project.id),
+                scope: StudioRecoveryIssueScope::Project,
+                category: StudioRecoveryIssueCategory::Repository,
+                action: StudioRecoveryIssueAction::RemoveProject,
+                project_id: Some(project.id),
+                session_id: None,
+                task_run_id: None,
+                message: format!("Project workspace is unavailable: {error}"),
+            });
+        }
         Ok(())
     }
 }

@@ -54,6 +54,89 @@ void registerRecoveryIssueTests() {
     },
   );
 
+  testWidgets('zero-project bootstrap renders a healthy empty shell', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _FakeStudioApi(_noProjectState());
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('studio-sidebar')), findsOneWidget);
+    expect(find.byTooltip('Open project'), findsOneWidget);
+    expect(find.text('Pure Studio could not start'), findsNothing);
+    expect(find.byIcon(Icons.error_outline), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('cleaning the last broken project returns to empty state', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    const brokenProject = StudioProject(
+      id: 'project-broken',
+      name: 'Broken Project',
+      path: r'C:\missing',
+    );
+    final state = _noProjectState().copyWith(
+      projects: const [brokenProject],
+      recoveryIssues: const [
+        StudioRecoveryIssue(
+          id: 'issue-project',
+          scope: RecoveryIssueScope.project,
+          category: RecoveryIssueCategory.repository,
+          availableActions: [RecoveryIssueAction.removeProject],
+          projectId: 'project-broken',
+          detail: 'Project workspace is unavailable.',
+        ),
+      ],
+    );
+    final api = _FakeStudioApi(state)
+      ..recoveryPreviews['issue-project'] = const RecoveryCleanupPreview(
+        issueId: 'issue-project',
+        expectedRevision: 'revision-project',
+        scope: RecoveryIssueScope.project,
+        projectId: 'project-broken',
+        detail: 'Remove the unavailable project from Studio.',
+        resources: [],
+      )
+      ..recoveryCleanupState = _noProjectState();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(
+      find.byKey(const ValueKey('project-cleanup-project-broken')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('recovery-cleanup-confirm')));
+    await tester.pumpAndSettle();
+
+    expect(api.cleanedRecoveryIssueId, 'issue-project');
+    expect(api.cleanupExpectedRevision, 'revision-project');
+    expect(find.text('Broken Project'), findsNothing);
+    expect(find.byTooltip('Open project'), findsOneWidget);
+    expect(find.byIcon(Icons.error_outline), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('recovery cleanup preview can cancel then confirm', (
     tester,
   ) async {

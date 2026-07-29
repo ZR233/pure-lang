@@ -233,6 +233,9 @@ Flutter context readout 使用紧凑圆形进度环，不显示百分比文字�
 
 Studio 启动恢复错误分为三个 UI 层级，不能因为单个 Task/worktree 损坏而让整个应用白屏：
 
+- 首次启动或全部项目均已关闭时，Bridge 返回零项目、零会话且 selection 为空的 canonical
+  snapshot；不得把进程当前目录自动登记为项目。用户只能通过目录选择器或手动路径明确打开
+  项目。
 - 应用致命错误表示 SQLite、schema、Bridge 或完整 canonical ownership snapshot 无法提供。
   Flutter 显示独立错误页与“重试”操作；FRB runtime 初始化缓存不得永久保存 rejected
   Future，重试必须重新建立初始化。
@@ -242,6 +245,9 @@ Studio 启动恢复错误分为三个 UI 层级，不能因为单个 Task/worktr
   侧栏并显示红色 `error_outline`；主行不可选择，tooltip 展示简短原因，trailing 清理入口
   只在 issue 声明可用动作时出现。controller 与 Bridge 都必须拒绝选择故障目标，避免绕过
   widget；当前 selection 指向故障项时，bootstrap 原子回退到健康项目/会话或空态。
+  已登记但路径不存在、不可访问或不再是目录的项目属于这一层级；runtime 初始化时将其归一
+  为 project-scoped repository issue，不得继续执行该项目的 LSP reconcile，也不得升级为
+  应用致命错误。
 
 恢复清理入口先调用 `previewRecoveryIssueCleanup(issueId)`，弹窗展示每个 Pure-owned 资源的
 path、branch、完整/缺失/部分缺失状态、dirty、未合并提交数和变更文件数。取消不产生副作用；

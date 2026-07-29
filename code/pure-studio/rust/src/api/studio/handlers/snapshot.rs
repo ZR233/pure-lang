@@ -4,18 +4,13 @@ use crate::api::studio::convert::settings::{studio_config_projection, web_search
 use crate::api::studio::runtime::BridgeRuntime;
 use crate::api::studio::types::BridgeStudioSnapshotResponse;
 use anyhow::Result;
+use std::collections::HashSet;
 // ── Inner async helpers ──
 
 pub(super) async fn bootstrap_studio_inner(
     bridge: &'static BridgeRuntime,
 ) -> Result<BridgeStudioSnapshotResponse> {
-    let mut projects = bridge.studio.list_projects().await?;
-    if projects.is_empty()
-        && !bridge.studio.store().has_projects().await?
-        && let Ok(cwd) = std::env::current_dir()
-    {
-        projects.push(bridge.studio.open_project(cwd).await?);
-    }
+    let projects = bridge.studio.list_projects().await?;
     let selected_project_id = projects.first().map(|project| project.id.clone());
     studio_snapshot_from_projects_inner(bridge, projects, selected_project_id, None).await
 }
@@ -46,28 +41,18 @@ pub(super) async fn studio_snapshot_from_projects_inner(
         .iter()
         .filter(|issue| issue.scope == pl_studio_runtime::StudioRecoveryIssueScope::Project)
         .filter_map(|issue| issue.project_id.as_deref())
-        .collect::<std::collections::HashSet<_>>();
+        .map(ToOwned::to_owned)
+        .collect::<HashSet<_>>();
     let blocked_session_ids = recovery_issues
         .iter()
         .filter(|issue| issue.scope == pl_studio_runtime::StudioRecoveryIssueScope::Session)
         .filter_map(|issue| issue.session_id.as_deref())
         .collect::<std::collections::HashSet<_>>();
-    let selected_project = requested_project_id
-        .as_ref()
-        .and_then(|project_id| {
-            projects
-                .iter()
-                .find(|project| {
-                    project.id == *project_id && !blocked_project_ids.contains(project.id.as_str())
-                })
-                .cloned()
-        })
-        .or_else(|| {
-            projects
-                .iter()
-                .find(|project| !blocked_project_ids.contains(project.id.as_str()))
-                .cloned()
-        });
+    let selected_project = select_available_project(
+        &projects,
+        requested_project_id.as_deref(),
+        &blocked_project_ids,
+    );
     let selected_project_id = selected_project.as_ref().map(|project| project.id.clone());
     let mut sessions = Vec::new();
     let mut selected_session_id = None;
@@ -135,6 +120,28 @@ pub(super) async fn studio_snapshot_from_projects_inner(
     })
 }
 
+fn select_available_project(
+    projects: &[pl_studio_runtime::ProjectRecord],
+    requested_project_id: Option<&str>,
+    blocked_project_ids: &HashSet<String>,
+) -> Option<pl_studio_runtime::ProjectRecord> {
+    requested_project_id
+        .and_then(|project_id| {
+            projects
+                .iter()
+                .find(|project| {
+                    project.id == project_id && !blocked_project_ids.contains(&project.id)
+                })
+                .cloned()
+        })
+        .or_else(|| {
+            projects
+                .iter()
+                .find(|project| !blocked_project_ids.contains(&project.id))
+                .cloned()
+        })
+}
+
 pub(super) fn ensure_project_recovery_available(
     bridge: &'static BridgeRuntime,
     project_id: &str,
@@ -152,4 +159,50 @@ pub(super) fn ensure_project_recovery_available(
         anyhow::bail!("selected project is blocked by a recovery issue");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::select_available_project;
+    use pl_studio_runtime::ProjectRecord;
+    use std::collections::HashSet;
+
+    #[test]
+    fn blocked_requested_project_falls_back_to_healthy_project() {
+        let projects = vec![project("broken"), project("healthy")];
+        let blocked = HashSet::from(["broken".to_string()]);
+
+        let selected = select_available_project(&projects, Some("broken"), &blocked).unwrap();
+
+        assert_eq!(selected.id, "healthy");
+    }
+
+    #[test]
+    fn all_blocked_projects_leave_selection_empty() {
+        let projects = vec![project("broken")];
+        let blocked = HashSet::from(["broken".to_string()]);
+
+        let selected = select_available_project(&projects, Some("broken"), &blocked);
+
+        assert_eq!(selected, None);
+    }
+
+    #[test]
+    fn requested_healthy_project_takes_precedence() {
+        let projects = vec![project("first"), project("requested")];
+
+        let selected =
+            select_available_project(&projects, Some("requested"), &HashSet::new()).unwrap();
+
+        assert_eq!(selected.id, "requested");
+    }
+
+    fn project(id: &str) -> ProjectRecord {
+        ProjectRecord {
+            id: id.to_string(),
+            name: id.to_string(),
+            path: format!("C:/work/{id}"),
+            updated_at: 0,
+        }
+    }
 }

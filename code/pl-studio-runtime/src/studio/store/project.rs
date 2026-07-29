@@ -128,11 +128,6 @@ impl StudioStore {
         Ok(projects.into_iter().map(project_record).collect())
     }
 
-    pub async fn has_projects(&self) -> Result<bool> {
-        use entities::project;
-        Ok(project::Entity::find().one(&self.db).await?.is_some())
-    }
-
     pub async fn mark_project_opened(&self, project_id: &str) -> Result<()> {
         use entities::project;
         if let Some(project) = project::Entity::find_by_id(project_id.to_string())
