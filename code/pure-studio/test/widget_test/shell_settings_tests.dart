@@ -88,7 +88,9 @@ void registerShellSettingsTests() {
       final api = _FakeStudioApi(
         _twoProjectState(
           selectedProjectId: 'project-a',
-          turnPhase: TurnPhase.streaming,
+          turnState: const StudioTurnState.inProgress(
+            StudioTurnActivity.responding,
+          ),
         ),
       );
       await tester.pumpWidget(
@@ -273,141 +275,7 @@ void registerShellSettingsTests() {
     expect(api.roleUpdate?.effort, 'max');
   });
 
-  testWidgets('status bar localizes every turn phase', (tester) async {
-    tester.view.physicalSize = const Size(1280, 800);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-
-    final labelsByLocale = {
-      const Locale('en'): const {
-        TurnPhase.idle: 'Idle',
-        TurnPhase.queued: 'Queued',
-        TurnPhase.contextLoading: 'Loading context',
-        TurnPhase.waitingForModel: 'Waiting for model',
-        TurnPhase.streaming: 'Streaming',
-        TurnPhase.waitingForInteraction: 'Waiting for interaction',
-        TurnPhase.runningTool: 'Running tool',
-        TurnPhase.waitingForAgents: 'Waiting for agents',
-        TurnPhase.completed: 'Completed',
-        TurnPhase.failed: 'Failed',
-        TurnPhase.cancelled: 'Cancelled',
-      },
-      const Locale('zh', 'Hans'): const {
-        TurnPhase.idle: '空闲',
-        TurnPhase.queued: '排队中',
-        TurnPhase.contextLoading: '加载上下文',
-        TurnPhase.waitingForModel: '等待模型',
-        TurnPhase.streaming: '正在生成',
-        TurnPhase.waitingForInteraction: '等待交互',
-        TurnPhase.runningTool: '运行工具',
-        TurnPhase.waitingForAgents: '等待子代理',
-        TurnPhase.completed: '已完成',
-        TurnPhase.failed: '失败',
-        TurnPhase.cancelled: '已取消',
-      },
-    };
-
-    for (final localeEntry in labelsByLocale.entries) {
-      for (final phaseEntry in localeEntry.value.entries) {
-        await tester.pumpWidget(
-          ProviderScope(
-            child: _localizedApp(
-              locale: localeEntry.key,
-              home: SessionStatusBar(
-                workspace: _emptyState()
-                    .copyWith(
-                      turnPhasesBySession: {'session-1': phaseEntry.key},
-                    )
-                    .selectedAgentWorkspace!,
-              ),
-            ),
-          ),
-        );
-        await tester.pumpAndSettle();
-
-        expect(
-          find.text(phaseEntry.value),
-          findsOneWidget,
-          reason: '${localeEntry.key} ${phaseEntry.key}',
-        );
-        expect(find.text(phaseEntry.key.name), findsNothing);
-      }
-    }
-  });
-
-  testWidgets(
-    'root completed turn projects waiting agent status without becoming busy',
-    (tester) async {
-      tester.view.physicalSize = const Size(1280, 800);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-
-      final base = _emptyState();
-      final waiting = base.copyWith(
-        sessions: [base.sessions.single.copyWith(agentStatus: 'waiting')],
-        turnPhasesBySession: const {'session-1': TurnPhase.completed},
-      );
-      final workspace = waiting.selectedAgentWorkspace!;
-
-      expect(workspace.turnPhase, TurnPhase.completed);
-      expect(workspace.statusPhase, TurnPhase.waitingForAgents);
-      expect(workspace.isBusy, isFalse);
-      expect(waiting.isBusy, isFalse);
-
-      await tester.pumpWidget(
-        ProviderScope(
-          child: _localizedApp(home: SessionStatusBar(workspace: workspace)),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      expect(find.text('Waiting for agents'), findsOneWidget);
-      expect(find.text('Completed'), findsNothing);
-
-      final completed = waiting.copyWith(
-        sessions: [waiting.sessions.single.copyWith(agentStatus: 'completed')],
-      );
-      await tester.pumpWidget(
-        ProviderScope(
-          child: _localizedApp(
-            home: SessionStatusBar(
-              workspace: completed.selectedAgentWorkspace!,
-            ),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      expect(find.text('Completed'), findsOneWidget);
-      expect(find.text('Waiting for agents'), findsNothing);
-    },
-  );
-
-  test(
-    'waiting status phase keeps active turns and child workspaces unchanged',
-    () {
-      final base = _emptyState();
-      final streaming = base.copyWith(
-        sessions: [base.sessions.single.copyWith(agentStatus: 'waiting')],
-        turnPhasesBySession: const {'session-1': TurnPhase.streaming},
-      );
-      expect(
-        streaming.selectedAgentWorkspace!.statusPhase,
-        TurnPhase.streaming,
-      );
-      expect(streaming.selectedAgentWorkspace!.isBusy, isTrue);
-
-      final child = _agentWorkspaceState(cacheChild: true).copyWith(
-        selectedSessionId: 'agent-session-1',
-        turnPhasesBySession: const {'agent-session-1': TurnPhase.completed},
-      );
-      expect(child.selectedAgentWorkspace!.isRoot, isFalse);
-      expect(child.selectedAgentWorkspace!.statusPhase, TurnPhase.completed);
-    },
-  );
-
-  testWidgets('header does not duplicate the localized running phase', (
+  testWidgets('status bar omits turn and interaction activity readouts', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(1280, 800);
@@ -415,80 +283,40 @@ void registerShellSettingsTests() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    final api = _FakeStudioApi(
-      _stateWithPlannerModels().copyWith(
-        turnPhasesBySession: const {'session-1': TurnPhase.streaming},
-      ),
-    );
     await tester.pumpWidget(
       ProviderScope(
-        overrides: [studioApiProvider.overrideWithValue(api)],
-        child: _localizedApp(home: const StudioShell()),
+        child: _localizedApp(
+          locale: const Locale('en'),
+          home: SessionStatusBar(
+            workspace: _emptyState()
+                .copyWith(
+                  turnsBySession: {
+                    'session-1': _testTurn(
+                      sessionId: 'session-1',
+                      state: const StudioTurnState.inProgress(
+                        StudioTurnActivity.waitingForUserInput,
+                      ),
+                    ),
+                  },
+                  pendingInteractions: const [
+                    PendingInteraction(
+                      id: 'interaction-1',
+                      sessionId: 'session-1',
+                      kind: InteractionKind.userInput,
+                      title: 'Pending',
+                      body: 'Pending interaction',
+                    ),
+                  ],
+                )
+                .selectedAgentWorkspace!,
+          ),
+        ),
       ),
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Streaming'), findsOneWidget);
-    expect(find.text(TurnPhase.streaming.name), findsNothing);
-  });
-
-  testWidgets('status bar localizes active interaction before turn phase', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(1280, 800);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-
-    final labelsByLocale = {
-      const Locale('en'): const {
-        InteractionKind.toolApproval: 'Waiting for tool approval',
-        InteractionKind.userInput: 'Waiting for input',
-        InteractionKind.planConfirmation: 'Waiting for plan confirmation',
-      },
-      const Locale('zh', 'Hans'): const {
-        InteractionKind.toolApproval: '等待工具授权',
-        InteractionKind.userInput: '等待输入',
-        InteractionKind.planConfirmation: '等待计划确认',
-      },
-    };
-
-    for (final localeEntry in labelsByLocale.entries) {
-      for (final interactionEntry in localeEntry.value.entries) {
-        final base = _emptyState();
-        final state = base.copyWith(
-          sessions: [base.sessions.single.copyWith(agentStatus: 'waiting')],
-          turnPhasesBySession: const {'session-1': TurnPhase.completed},
-          pendingInteractions: [
-            PendingInteraction(
-              id: 'interaction-${interactionEntry.key.name}',
-              sessionId: 'session-1',
-              kind: interactionEntry.key,
-              title: 'Pending',
-              body: 'Pending interaction',
-            ),
-          ],
-        );
-        await tester.pumpWidget(
-          ProviderScope(
-            child: _localizedApp(
-              locale: localeEntry.key,
-              home: SessionStatusBar(workspace: state.selectedAgentWorkspace!),
-            ),
-          ),
-        );
-        await tester.pumpAndSettle();
-
-        expect(
-          find.text(interactionEntry.value),
-          findsOneWidget,
-          reason: '${localeEntry.key} ${interactionEntry.key}',
-        );
-        expect(find.text(interactionEntry.key.name), findsNothing);
-        expect(find.text('Waiting for agents'), findsNothing);
-        expect(find.text('等待子代理'), findsNothing);
-      }
-    }
+    expect(find.text('Waiting for input'), findsNothing);
+    expect(find.text('Responding'), findsNothing);
   });
 
   testWidgets('dense shell uses a compact rail without overflow', (
@@ -544,7 +372,7 @@ void registerShellSettingsTests() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('active task locks mode and exposes durable coordinator detail', (
+  testWidgets('active task locks mode without a status phase readout', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(760, 720);
@@ -639,43 +467,18 @@ void registerShellSettingsTests() {
     );
     await tester.pumpAndSettle();
 
-    final taskActivity = find.text('Implementing');
-    expect(taskActivity, findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(SessionStatusBar),
+        matching: find.text('Implementing'),
+      ),
+      findsNothing,
+    );
     expect(tester.takeException(), isNull);
     await tester.tap(find.byTooltip('Session mode'));
     await tester.pumpAndSettle();
     expect(find.text('Task'), findsNothing);
     expect(api.sessionModeUpdate, isNull);
-
-    await tester.tap(find.byKey(const ValueKey('status-overflow')));
-    await tester.pumpAndSettle();
-    final taskActivityMenuItem = find
-        .ancestor(
-          of: find.text('Implementing').last,
-          matching: find.byWidgetPredicate((widget) => widget is PopupMenuItem),
-        )
-        .last;
-    await tester.ensureVisible(taskActivityMenuItem);
-    await tester.pumpAndSettle();
-    await tester.tap(taskActivityMenuItem);
-    await tester.pumpAndSettle();
-    expect(find.text('TASK COORDINATOR'), findsOneWidget);
-    expect(find.text('codex/task-mode'), findsOneWidget);
-    expect(find.text('Implement coordinator UI'), findsOneWidget);
-    expect(find.text('.pure/worktrees/task-run-1/agent-1'), findsOneWidget);
-    expect(find.text('abcdef1234'), findsNWidgets(2));
-    expect(find.text('lib/status.dart'), findsOneWidget);
-    expect(find.text('Delivered'), findsOneWidget);
-    expect(find.text('Conflicted'), findsOneWidget);
-    expect(find.text('Changes required'), findsOneWidget);
-    expect(find.text('changesRequired'), findsNothing);
-    expect(find.text('explorer · agent-explorer'), findsOneWidget);
-    expect(find.text('call-explore-1'), findsOneWidget);
-    expect(find.text('Inspecting design constraints'), findsOneWidget);
-    expect(
-      find.text('design/16-task-orchestration.md#UI 与兼容性'),
-      findsOneWidget,
-    );
     expect(tester.takeException(), isNull);
   });
 

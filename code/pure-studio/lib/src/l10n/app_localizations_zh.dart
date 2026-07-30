@@ -206,37 +206,31 @@ class AppLocalizationsZh extends AppLocalizations {
   String get statusContextLabel => '上下文';
 
   @override
-  String get statusTurnIdle => '空闲';
-
-  @override
   String get statusTurnQueued => '排队中';
 
   @override
-  String get statusTurnContextLoading => '加载上下文';
+  String get statusTurnPreparing => '准备上下文';
 
   @override
-  String get statusTurnWaitingForModel => '等待模型';
+  String get statusTurnResponding => '回复中';
 
   @override
-  String get statusTurnStreaming => '正在生成';
-
-  @override
-  String get statusTurnWaitingForInteraction => '等待交互';
+  String get statusTurnPlanning => '规划中';
 
   @override
   String get statusTurnRunningTool => '运行工具';
 
   @override
-  String get statusTurnWaitingForAgents => '等待子代理';
+  String get statusTurnWaitingForApproval => '等待工具授权';
 
   @override
-  String get statusTurnCompleted => '已完成';
+  String get statusTurnWaitingForUserInput => '等待输入';
 
   @override
-  String get statusTurnFailed => '失败';
+  String get statusTurnWaitingForPlanConfirmation => '等待计划确认';
 
   @override
-  String get statusTurnCancelled => '已取消';
+  String get statusTurnPersisting => '保存本轮结果';
 
   @override
   String get statusInteractionToolApproval => '等待工具授权';
@@ -1483,37 +1477,31 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String get statusContextLabel => '上下文';
 
   @override
-  String get statusTurnIdle => '空闲';
-
-  @override
   String get statusTurnQueued => '排队中';
 
   @override
-  String get statusTurnContextLoading => '加载上下文';
+  String get statusTurnPreparing => '准备上下文';
 
   @override
-  String get statusTurnWaitingForModel => '等待模型';
+  String get statusTurnResponding => '回复中';
 
   @override
-  String get statusTurnStreaming => '正在生成';
-
-  @override
-  String get statusTurnWaitingForInteraction => '等待交互';
+  String get statusTurnPlanning => '规划中';
 
   @override
   String get statusTurnRunningTool => '运行工具';
 
   @override
-  String get statusTurnWaitingForAgents => '等待子代理';
+  String get statusTurnWaitingForApproval => '等待工具授权';
 
   @override
-  String get statusTurnCompleted => '已完成';
+  String get statusTurnWaitingForUserInput => '等待输入';
 
   @override
-  String get statusTurnFailed => '失败';
+  String get statusTurnWaitingForPlanConfirmation => '等待计划确认';
 
   @override
-  String get statusTurnCancelled => '已取消';
+  String get statusTurnPersisting => '保存本轮结果';
 
   @override
   String get statusInteractionToolApproval => '等待工具授权';

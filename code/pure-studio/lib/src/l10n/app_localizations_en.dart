@@ -209,37 +209,32 @@ class AppLocalizationsEn extends AppLocalizations {
   String get statusContextLabel => 'Context';
 
   @override
-  String get statusTurnIdle => 'Idle';
-
-  @override
   String get statusTurnQueued => 'Queued';
 
   @override
-  String get statusTurnContextLoading => 'Loading context';
+  String get statusTurnPreparing => 'Preparing context';
 
   @override
-  String get statusTurnWaitingForModel => 'Waiting for model';
+  String get statusTurnResponding => 'Responding';
 
   @override
-  String get statusTurnStreaming => 'Streaming';
-
-  @override
-  String get statusTurnWaitingForInteraction => 'Waiting for interaction';
+  String get statusTurnPlanning => 'Planning';
 
   @override
   String get statusTurnRunningTool => 'Running tool';
 
   @override
-  String get statusTurnWaitingForAgents => 'Waiting for agents';
+  String get statusTurnWaitingForApproval => 'Waiting for tool approval';
 
   @override
-  String get statusTurnCompleted => 'Completed';
+  String get statusTurnWaitingForUserInput => 'Waiting for input';
 
   @override
-  String get statusTurnFailed => 'Failed';
+  String get statusTurnWaitingForPlanConfirmation =>
+      'Waiting for plan confirmation';
 
   @override
-  String get statusTurnCancelled => 'Cancelled';
+  String get statusTurnPersisting => 'Saving turn';
 
   @override
   String get statusInteractionToolApproval => 'Waiting for tool approval';

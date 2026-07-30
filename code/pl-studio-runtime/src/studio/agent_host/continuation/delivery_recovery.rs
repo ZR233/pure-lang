@@ -1,4 +1,6 @@
-use pl_core::{AgentCurrentSessionSubmitRequest, InputDelivery, TurnOutcomeKind};
+use pl_core::{
+    AgentCurrentSessionSubmitRequest, InputDelivery, MailboxPresentation, TurnOutcomeKind,
+};
 
 use crate::studio::task_coordinator::{
     AgentOutcomeStatus, DeliveryRecoveryClaim, DeliveryRecoveryDispatch,
@@ -199,6 +201,7 @@ impl StudioContinuationService {
                      不要只返回文字总结，也不要伪造验证结果。",
                 )
                 .with_delivery(InputDelivery::Start)
+                .with_presentation(MailboxPresentation::SyntheticHidden)
                 .with_mail_id(claim.dispatch_id())
                 .with_metadata(serde_json::json!({
                     "taskRunId": claim.task_run_id,
@@ -208,11 +211,6 @@ impl StudioContinuationService {
                     "deliveryRecoveryDispatchId": claim.dispatch_id(),
                     "continuationReason": "deliveryRecovery",
                     "attachmentIds": [],
-                    "userPrompt": {
-                        "visiblePrompt": "恢复未完成的 executor 交付",
-                        "synthetic": true,
-                        "ignored": true,
-                    },
                 })),
             )
             .await

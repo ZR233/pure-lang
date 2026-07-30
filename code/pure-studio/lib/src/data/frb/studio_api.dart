@@ -41,21 +41,6 @@ PermissionMode _permissionMode(Object? value) {
   };
 }
 
-TurnPhase _turnPhaseFromStatus(String status) {
-  return switch (status) {
-    'queued' => TurnPhase.queued,
-    'contextLoading' => TurnPhase.contextLoading,
-    'waitingForModel' => TurnPhase.waitingForModel,
-    'streaming' => TurnPhase.streaming,
-    'waitingForInteraction' => TurnPhase.waitingForInteraction,
-    'runningTool' => TurnPhase.runningTool,
-    'completed' => TurnPhase.completed,
-    'failed' => TurnPhase.failed,
-    'cancelled' => TurnPhase.cancelled,
-    _ => TurnPhase.idle,
-  };
-}
-
 String _permissionModeLabel(PermissionMode mode) {
   return switch (mode) {
     PermissionMode.requestApproval => 'request-approval',

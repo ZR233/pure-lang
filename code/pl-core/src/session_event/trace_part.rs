@@ -52,10 +52,15 @@ fn session_part_content(item: &TracePart) -> SessionPartContent {
                 .collect(),
         },
         TracePartKind::Thinking => SessionPartContent::Reasoning {
-            text: item
+            summary: item
                 .thinking_chunks
                 .iter()
-                .map(|chunk| chunk.content.as_str())
+                .map(|chunk| chunk.content.clone())
+                .collect(),
+            content: item
+                .reasoning_content_chunks
+                .iter()
+                .map(|chunk| chunk.content.clone())
                 .collect(),
         },
         TracePartKind::Tool => SessionPartContent::Tool {

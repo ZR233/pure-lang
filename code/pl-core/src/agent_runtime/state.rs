@@ -179,6 +179,22 @@ pub enum InputDelivery {
     InterruptThenStart,
 }
 
+/// 决定 mailbox 输入是否以及如何投影到用户可见 Timeline。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "type"
+)]
+pub enum MailboxPresentation {
+    #[default]
+    User,
+    SyntheticVisible {
+        prompt: String,
+    },
+    SyntheticHidden,
+}
+
 /// 已分配 turn id、可持久化和恢复的 mailbox envelope。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -192,6 +208,8 @@ pub struct DurableMailboxEnvelope {
     pub wake_signal_ids: Vec<String>,
     pub session_id: SessionId,
     pub message: String,
+    #[serde(default)]
+    pub presentation: MailboxPresentation,
     #[serde(default)]
     pub metadata: serde_json::Value,
     #[serde(default)]
@@ -239,6 +257,7 @@ pub struct AcceptedAgentWake {
 pub struct AgentSubmitRequest {
     pub session_id: SessionId,
     pub message: String,
+    pub presentation: MailboxPresentation,
     pub metadata: serde_json::Value,
     pub delivery: InputDelivery,
     pub mail_id: Option<String>,
@@ -252,6 +271,7 @@ impl AgentSubmitRequest {
         Self {
             session_id,
             message: message.into(),
+            presentation: MailboxPresentation::User,
             metadata: serde_json::Value::Null,
             delivery: InputDelivery::Start,
             mail_id: None,
@@ -263,6 +283,12 @@ impl AgentSubmitRequest {
     /// 设置产品自定义、可持久化的输入元数据。
     pub fn with_metadata(mut self, metadata: serde_json::Value) -> Self {
         self.metadata = metadata;
+        self
+    }
+
+    /// 设置此输入在 Timeline 中的展示语义。
+    pub fn with_presentation(mut self, presentation: MailboxPresentation) -> Self {
+        self.presentation = presentation;
         self
     }
 
@@ -295,6 +321,7 @@ impl AgentSubmitRequest {
 #[derive(Debug, Clone, PartialEq)]
 pub struct AgentCurrentSessionSubmitRequest {
     pub message: String,
+    pub presentation: MailboxPresentation,
     pub metadata: serde_json::Value,
     pub delivery: InputDelivery,
     pub mail_id: Option<String>,
@@ -307,6 +334,7 @@ impl AgentCurrentSessionSubmitRequest {
     pub fn start(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
+            presentation: MailboxPresentation::User,
             metadata: serde_json::Value::Null,
             delivery: InputDelivery::Start,
             mail_id: None,
@@ -318,6 +346,12 @@ impl AgentCurrentSessionSubmitRequest {
     /// 设置产品自定义、可持久化的输入元数据。
     pub fn with_metadata(mut self, metadata: serde_json::Value) -> Self {
         self.metadata = metadata;
+        self
+    }
+
+    /// 设置此输入在 Timeline 中的展示语义。
+    pub fn with_presentation(mut self, presentation: MailboxPresentation) -> Self {
+        self.presentation = presentation;
         self
     }
 

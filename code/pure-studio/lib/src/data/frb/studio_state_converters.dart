@@ -75,9 +75,7 @@ StudioState _stateFromTypedSnapshot({
           'permission_mode',
         ]),
       ),
-      turnPhasesBySession: selectedSessionId == null
-          ? const {}
-          : {selectedSessionId: TurnPhase.idle},
+      turnsBySession: const {},
       runtimesBySession: selectedSessionId == null
           ? const {}
           : {selectedSessionId: runtime},
@@ -117,7 +115,7 @@ Map<String, Map<String, TimelineAgentEvent>> _agentTimelineEventsFromTyped(
 StudioState _applySnapshotEvent(StudioState state, StudioBridgeEvent event) {
   return switch (event.payload) {
     TurnChangedPayload(:final turn) => state.copyWith(
-      turnPhasesBySession: {turn.sessionId: _turnPhaseFromStatus(turn.status)},
+      turnsBySession: {turn.sessionId: turn},
     ),
     InteractionChangedPayload(:final interaction, :final status) =>
       _withInteraction(state, interaction, status),
@@ -176,7 +174,10 @@ StudioState _withInteraction(
   String status,
 ) {
   final interactions = [...state.pendingInteractions];
-  final index = interactions.indexWhere((item) => item.id == interaction.id);
+  final index = interactions.indexWhere(
+    (item) =>
+        item.id == interaction.id && item.sessionId == interaction.sessionId,
+  );
   if (status == 'pending') {
     if (index >= 0) {
       interactions[index] = interaction;

@@ -214,13 +214,13 @@ impl CollaborationTool {
             .runtime
             .submit_current_session(
                 target.clone(),
-                super::AgentCurrentSessionSubmitRequest::start(args.message).with_delivery(
-                    if args.interrupt {
+                super::AgentCurrentSessionSubmitRequest::start(args.message)
+                    .with_delivery(if args.interrupt {
                         InputDelivery::InterruptThenStart
                     } else {
                         InputDelivery::Start
-                    },
-                ),
+                    })
+                    .with_presentation(super::MailboxPresentation::SyntheticHidden),
             )
             .await
             .map_err(|error| tool_error(TOOL_SEND_INPUT, error.to_string()))?;

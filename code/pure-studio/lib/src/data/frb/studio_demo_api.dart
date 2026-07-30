@@ -229,11 +229,6 @@ class DemoStudioApi implements StudioApi {
       selectedProjectId: project.id,
       selectedSessionId: session.id,
       permissionMode: _permissionMode,
-      turnPhasesBySession: {
-        session.id: TurnPhase.idle,
-        alternateSession.id: TurnPhase.idle,
-        agentSession.id: TurnPhase.idle,
-      },
       runtimesBySession: {
         session.id: const SessionRuntimeView(
           model: 'planner/local-responses',
@@ -538,10 +533,16 @@ class DemoStudioApi implements StudioApi {
       (value) => value + 1,
       ifAbsent: () => 1,
     );
+    final now = DateTime.now();
     _emitSessionEvent(
       sessionId: sessionId,
       payload: TurnChangedPayload(
-        turn: StudioTurnView(sessionId: sessionId, status: 'cancelled'),
+        turn: StudioTurnView(
+          turnId: 'demo-turn-$_eventSequence',
+          sessionId: sessionId,
+          state: const StudioTurnState.cancelled('Stopped in demo mode'),
+          updatedAt: now,
+        ),
       ),
     );
   }
@@ -571,6 +572,7 @@ class DemoStudioApi implements StudioApi {
       ifAbsent: () => 1,
     );
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final turnId = 'demo-turn-$_eventSequence';
     final userMessageId = 'demo-user-$_eventSequence';
     _emitSessionEvent(
       sessionId: sessionId,
@@ -578,6 +580,7 @@ class DemoStudioApi implements StudioApi {
         message: timelineMessageFromJson({
           'messageId': userMessageId,
           'sessionId': sessionId,
+          'turnId': turnId,
           'role': 'user',
           'createdAt': now,
         }),
@@ -590,6 +593,7 @@ class DemoStudioApi implements StudioApi {
           'partId': '$userMessageId:text',
           'messageId': userMessageId,
           'sessionId': sessionId,
+          'turnId': turnId,
           'type': 'text',
           'order': 0,
           'revision': 0,
@@ -604,7 +608,12 @@ class DemoStudioApi implements StudioApi {
     _emitSessionEvent(
       sessionId: sessionId,
       payload: TurnChangedPayload(
-        turn: StudioTurnView(sessionId: sessionId, status: 'streaming'),
+        turn: StudioTurnView(
+          turnId: turnId,
+          sessionId: sessionId,
+          state: const StudioTurnState.inProgress(StudioTurnActivity.thinking),
+          updatedAt: DateTime.fromMillisecondsSinceEpoch(now * 1000),
+        ),
       ),
     );
     await Future<void>.delayed(promptStartDelay);
@@ -618,7 +627,7 @@ class DemoStudioApi implements StudioApi {
         message: timelineMessageFromJson({
           'messageId': assistantMessageId,
           'sessionId': sessionId,
-          'turnId': assistantMessageId,
+          'turnId': turnId,
           'role': 'assistant',
           'createdAt': now + 1,
         }),
@@ -631,14 +640,14 @@ class DemoStudioApi implements StudioApi {
           'partId': '$assistantMessageId:reasoning-1',
           'messageId': assistantMessageId,
           'sessionId': sessionId,
-          'turnId': assistantMessageId,
+          'turnId': turnId,
           'type': 'reasoning',
           'order': 0,
           'revision': 0,
           'status': 'streaming',
           'createdAt': now + 1,
           'updatedAt': now + 1,
-          'text': '## Inspecting the request',
+          'reasoningSummary': ['## Inspecting the request'],
         }),
       ),
     );
@@ -669,16 +678,17 @@ class DemoStudioApi implements StudioApi {
           'partId': '$assistantMessageId:reasoning-1',
           'messageId': assistantMessageId,
           'sessionId': sessionId,
-          'turnId': assistantMessageId,
+          'turnId': turnId,
           'type': 'reasoning',
           'order': 0,
           'revision': 2,
           'status': 'completed',
           'createdAt': now + 1,
           'updatedAt': now + 1,
-          'text':
-              '## Inspecting the request\n\n'
-              'Checking the live timeline projection.',
+          'reasoningSummary': [
+            '## Inspecting the request',
+            'Checking the live timeline projection.',
+          ],
         }),
       ),
     );
@@ -689,14 +699,14 @@ class DemoStudioApi implements StudioApi {
           'partId': '$assistantMessageId:reasoning-2',
           'messageId': assistantMessageId,
           'sessionId': sessionId,
-          'turnId': assistantMessageId,
+          'turnId': turnId,
           'type': 'reasoning',
           'order': 1,
           'revision': 0,
           'status': 'streaming',
           'createdAt': now + 1,
           'updatedAt': now + 1,
-          'text': '## Preparing the tool call',
+          'reasoningContent': ['## Preparing the tool call'],
         }),
       ),
     );
@@ -711,23 +721,31 @@ class DemoStudioApi implements StudioApi {
           'partId': '$assistantMessageId:reasoning-2',
           'messageId': assistantMessageId,
           'sessionId': sessionId,
-          'turnId': assistantMessageId,
+          'turnId': turnId,
           'type': 'reasoning',
           'order': 1,
           'revision': 1,
           'status': 'completed',
           'createdAt': now + 1,
           'updatedAt': now + 1,
-          'text':
-              '## Preparing the tool call\n\n'
-              'Selecting the smallest verification command.',
+          'reasoningSummary': [
+            '## Preparing the tool call',
+            'Selecting the smallest verification command.',
+          ],
         }),
       ),
     );
     _emitSessionEvent(
       sessionId: sessionId,
       payload: TurnChangedPayload(
-        turn: StudioTurnView(sessionId: sessionId, status: 'runningTool'),
+        turn: StudioTurnView(
+          turnId: turnId,
+          sessionId: sessionId,
+          state: const StudioTurnState.inProgress(
+            StudioTurnActivity.runningTool,
+          ),
+          updatedAt: DateTime.fromMillisecondsSinceEpoch(now * 1000),
+        ),
       ),
     );
     _emitSessionEvent(
@@ -737,7 +755,7 @@ class DemoStudioApi implements StudioApi {
           'partId': '$assistantMessageId:tool',
           'messageId': assistantMessageId,
           'sessionId': sessionId,
-          'turnId': assistantMessageId,
+          'turnId': turnId,
           'type': 'tool',
           'order': 2,
           'revision': 0,
@@ -758,64 +776,80 @@ class DemoStudioApi implements StudioApi {
     if (_promptGenerations[sessionId] != promptGeneration) {
       return;
     }
-    _emitSessionEvent(
-      sessionId: sessionId,
-      payload: MessagePartUpdatedPayload(
-        part: timelinePartSnapshotFromJson({
-          'partId': '$assistantMessageId:tool',
-          'messageId': assistantMessageId,
-          'sessionId': sessionId,
-          'turnId': assistantMessageId,
-          'type': 'tool',
-          'order': 2,
-          'revision': 1,
-          'status': 'completed',
-          'createdAt': now + 1,
-          'updatedAt': now + 1,
-          'tool': {
-            'toolCallId': '$assistantMessageId:tool-call',
-            'name': 'exec',
-            'arguments': jsonEncode({
-              'command': 'flutter test test/widget_test.dart',
+    unawaited(
+      Future<void>.delayed(Duration.zero, () {
+        _emitSessionEvent(
+          sessionId: sessionId,
+          payload: MessagePartUpdatedPayload(
+            part: timelinePartSnapshotFromJson({
+              'partId': '$assistantMessageId:tool',
+              'messageId': assistantMessageId,
+              'sessionId': sessionId,
+              'turnId': turnId,
+              'type': 'tool',
+              'order': 2,
+              'revision': 1,
+              'status': 'completed',
+              'createdAt': now + 1,
+              'updatedAt': now + 1,
+              'tool': {
+                'toolCallId': '$assistantMessageId:tool-call',
+                'name': 'exec',
+                'arguments': jsonEncode({
+                  'command': 'flutter test test/widget_test.dart',
+                }),
+                'result': 'All widget tests passed.',
+              },
             }),
-            'result': 'All widget tests passed.',
-          },
-        }),
-      ),
-    );
-    _emitSessionEvent(
-      sessionId: sessionId,
-      payload: TurnChangedPayload(
-        turn: StudioTurnView(sessionId: sessionId, status: 'streaming'),
-      ),
-    );
-    _emitSessionEvent(
-      sessionId: sessionId,
-      payload: MessagePartUpdatedPayload(
-        part: timelinePartSnapshotFromJson({
-          'partId': '$assistantMessageId:text',
-          'messageId': assistantMessageId,
-          'sessionId': sessionId,
-          'turnId': assistantMessageId,
-          'type': 'text',
-          'order': 3,
-          'revision': 0,
-          'status': 'completed',
-          'createdAt': now + 1,
-          'updatedAt': now + 1,
-          'textChannel': 'final',
-          'text':
-              'Demo response for: **$trimmed**\n\n'
-              '- Reasoning summaries update in one activity row\n'
-              '- Tool activity takes over without duplicating history',
-        }),
-      ),
-    );
-    _emitSessionEvent(
-      sessionId: sessionId,
-      payload: TurnChangedPayload(
-        turn: StudioTurnView(sessionId: sessionId, status: 'completed'),
-      ),
+          ),
+        );
+        _emitSessionEvent(
+          sessionId: sessionId,
+          payload: TurnChangedPayload(
+            turn: StudioTurnView(
+              turnId: turnId,
+              sessionId: sessionId,
+              state: const StudioTurnState.inProgress(
+                StudioTurnActivity.responding,
+              ),
+              updatedAt: DateTime.fromMillisecondsSinceEpoch(now * 1000),
+            ),
+          ),
+        );
+        _emitSessionEvent(
+          sessionId: sessionId,
+          payload: MessagePartUpdatedPayload(
+            part: timelinePartSnapshotFromJson({
+              'partId': '$assistantMessageId:text',
+              'messageId': assistantMessageId,
+              'sessionId': sessionId,
+              'turnId': turnId,
+              'type': 'text',
+              'order': 3,
+              'revision': 0,
+              'status': 'completed',
+              'createdAt': now + 1,
+              'updatedAt': now + 1,
+              'textChannel': 'final',
+              'text':
+                  'Demo response for: **$trimmed**\n\n'
+                  '- Reasoning summaries update in one activity row\n'
+                  '- Tool activity takes over without duplicating history',
+            }),
+          ),
+        );
+        _emitSessionEvent(
+          sessionId: sessionId,
+          payload: TurnChangedPayload(
+            turn: StudioTurnView(
+              turnId: turnId,
+              sessionId: sessionId,
+              state: const StudioTurnState.completed(),
+              updatedAt: DateTime.fromMillisecondsSinceEpoch(now * 1000),
+            ),
+          ),
+        );
+      }),
     );
   }
 

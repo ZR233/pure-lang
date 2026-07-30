@@ -311,6 +311,8 @@ int _timelineRowRenderVersion(TimelinePart part) {
     part.textChannel,
     part.title,
     part.text,
+    ...part.reasoningSummary,
+    ...part.reasoningContent,
     part.planContent,
     part.createdAt?.millisecondsSinceEpoch,
     part.updatedAt?.millisecondsSinceEpoch,

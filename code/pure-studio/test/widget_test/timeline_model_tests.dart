@@ -555,28 +555,31 @@ void registerTimelineModelTests() {
   test(
     'canonical session snapshot restores agent timeline events for projection',
     () {
-      final state = applyCanonicalSessionSnapshot(_emptyState(), {
-        'sessionId': 'session-1',
-        'throughSequence': 7,
-        'timelineEvents': [
-          {
-            'eventId': 'agent-event-1',
-            'sessionId': 'session-1',
-            'sequence': 7,
-            'createdAt': 3,
-            'kind': {
-              'type': 'subAgentActivity',
-              'callId': 'call-2',
-              'path': 'root/worker',
-              'parentPath': 'root',
-              'kind': 'messageQueued',
-              'status': 'waiting',
-              'message': 'status',
-              'timedOut': false,
+      final state = applyCanonicalSessionSnapshot(
+        _emptyState(),
+        StudioSessionSnapshot.fromLegacyJson({
+          'sessionId': 'session-1',
+          'throughSequence': 7,
+          'timelineEvents': [
+            {
+              'eventId': 'agent-event-1',
+              'sessionId': 'session-1',
+              'sequence': 7,
+              'createdAt': 3,
+              'kind': {
+                'type': 'subAgentActivity',
+                'callId': 'call-2',
+                'path': 'root/worker',
+                'parentPath': 'root',
+                'kind': 'messageQueued',
+                'status': 'waiting',
+                'message': 'status',
+                'timedOut': false,
+              },
             },
-          },
-        ],
-      });
+          ],
+        }),
+      );
 
       expect(state.agentTimelineEventsBySession['session-1']!.keys, {
         'agent-event-1',
@@ -594,31 +597,34 @@ void registerTimelineModelTests() {
   );
 
   test('canonical session snapshot restores the latest todo list', () {
-    final state = applyCanonicalSessionSnapshot(_emptyState(), {
-      'sessionId': 'session-1',
-      'throughSequence': 8,
-      'timelineEvents': [
-        {
-          'eventId': 'todo-event-1',
-          'sessionId': 'session-1',
-          'sequence': 8,
-          'createdAt': 4,
-          'kind': {
-            'type': 'todoListChanged',
-            'snapshot': {
-              'callId': 'call-3',
-              'path': '/root/worker',
-              'parentPath': '/root',
-              'explanation': 'Todo restore',
-              'items': [
-                {'step': 'Restore payload', 'status': 'completed'},
-                {'step': 'Render row', 'status': 'pending'},
-              ],
+    final state = applyCanonicalSessionSnapshot(
+      _emptyState(),
+      StudioSessionSnapshot.fromLegacyJson({
+        'sessionId': 'session-1',
+        'throughSequence': 8,
+        'timelineEvents': [
+          {
+            'eventId': 'todo-event-1',
+            'sessionId': 'session-1',
+            'sequence': 8,
+            'createdAt': 4,
+            'kind': {
+              'type': 'todoListChanged',
+              'snapshot': {
+                'callId': 'call-3',
+                'path': '/root/worker',
+                'parentPath': '/root',
+                'explanation': 'Todo restore',
+                'items': [
+                  {'step': 'Restore payload', 'status': 'completed'},
+                  {'step': 'Render row', 'status': 'pending'},
+                ],
+              },
             },
           },
-        },
-      ],
-    });
+        ],
+      }),
+    );
 
     expect(state.selectedTimelineRows, isEmpty);
     final update = state.selectedTodoList;
@@ -632,23 +638,26 @@ void registerTimelineModelTests() {
   });
 
   test('canonical session snapshot restores agent status state', () {
-    final state = applyCanonicalSessionSnapshot(_emptyState(), {
-      'sessionId': 'session-1',
-      'throughSequence': 1,
-      'agents': [
-        {
-          'id': 'agent-1',
-          'sessionId': 'session-1',
-          'path': 'root/worker',
-          'role': 'worker',
-          'task': 'Implement',
-          'status': 'running',
-          'summary': 'halfway',
-          'depth': 1,
-          'updatedAt': 4,
-        },
-      ],
-    });
+    final state = applyCanonicalSessionSnapshot(
+      _emptyState(),
+      StudioSessionSnapshot.fromLegacyJson({
+        'sessionId': 'session-1',
+        'throughSequence': 1,
+        'agents': [
+          {
+            'id': 'agent-1',
+            'sessionId': 'session-1',
+            'path': 'root/worker',
+            'role': 'worker',
+            'task': 'Implement',
+            'status': 'running',
+            'summary': 'halfway',
+            'depth': 1,
+            'updatedAt': 4,
+          },
+        ],
+      }),
+    );
 
     expect(state.runtime.agentCount, 1);
     expect(state.selectedTimelineRows, isEmpty);

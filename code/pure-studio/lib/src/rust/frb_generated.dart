@@ -3126,7 +3126,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         );
       case 1:
         return BridgeSessionPartContent_Reasoning(
-          text: dco_decode_String(raw[1]),
+          summary: dco_decode_list_String(raw[1]),
+          content: dco_decode_list_String(raw[2]),
         );
       case 2:
         return BridgeSessionPartContent_Tool(
@@ -3384,21 +3385,45 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeSessionTurn dco_decode_bridge_session_turn(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 5)
-      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
     return BridgeSessionTurn(
       turnId: dco_decode_String(arr[0]),
       sessionId: dco_decode_String(arr[1]),
-      status: dco_decode_bridge_session_turn_status(arr[2]),
-      reason: dco_decode_opt_String(arr[3]),
-      updatedAt: dco_decode_i_64(arr[4]),
+      state: dco_decode_bridge_session_turn_state(arr[2]),
+      updatedAt: dco_decode_i_64(arr[3]),
     );
   }
 
   @protected
-  BridgeSessionTurnStatus dco_decode_bridge_session_turn_status(dynamic raw) {
+  BridgeSessionTurnActivity dco_decode_bridge_session_turn_activity(
+    dynamic raw,
+  ) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
-    return BridgeSessionTurnStatus.values[raw as int];
+    return BridgeSessionTurnActivity.values[raw as int];
+  }
+
+  @protected
+  BridgeSessionTurnState dco_decode_bridge_session_turn_state(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    switch (raw[0]) {
+      case 0:
+        return BridgeSessionTurnState_Queued();
+      case 1:
+        return BridgeSessionTurnState_InProgress(
+          activity: dco_decode_bridge_session_turn_activity(raw[1]),
+        );
+      case 2:
+        return BridgeSessionTurnState_Completed();
+      case 3:
+        return BridgeSessionTurnState_Failed(reason: dco_decode_String(raw[1]));
+      case 4:
+        return BridgeSessionTurnState_Cancelled(
+          reason: dco_decode_String(raw[1]),
+        );
+      default:
+        throw Exception("unreachable");
+    }
   }
 
   @protected
@@ -6487,8 +6512,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           attachments: var_attachments,
         );
       case 1:
-        var var_text = sse_decode_String(deserializer);
-        return BridgeSessionPartContent_Reasoning(text: var_text);
+        var var_summary = sse_decode_list_String(deserializer);
+        var var_content = sse_decode_list_String(deserializer);
+        return BridgeSessionPartContent_Reasoning(
+          summary: var_summary,
+          content: var_content,
+        );
       case 2:
         var var_tool = sse_decode_box_autoadd_bridge_session_tool_part(
           deserializer,
@@ -6827,25 +6856,51 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_turnId = sse_decode_String(deserializer);
     var var_sessionId = sse_decode_String(deserializer);
-    var var_status = sse_decode_bridge_session_turn_status(deserializer);
-    var var_reason = sse_decode_opt_String(deserializer);
+    var var_state = sse_decode_bridge_session_turn_state(deserializer);
     var var_updatedAt = sse_decode_i_64(deserializer);
     return BridgeSessionTurn(
       turnId: var_turnId,
       sessionId: var_sessionId,
-      status: var_status,
-      reason: var_reason,
+      state: var_state,
       updatedAt: var_updatedAt,
     );
   }
 
   @protected
-  BridgeSessionTurnStatus sse_decode_bridge_session_turn_status(
+  BridgeSessionTurnActivity sse_decode_bridge_session_turn_activity(
     SseDeserializer deserializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var inner = sse_decode_i_32(deserializer);
-    return BridgeSessionTurnStatus.values[inner];
+    return BridgeSessionTurnActivity.values[inner];
+  }
+
+  @protected
+  BridgeSessionTurnState sse_decode_bridge_session_turn_state(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var tag_ = sse_decode_i_32(deserializer);
+    switch (tag_) {
+      case 0:
+        return BridgeSessionTurnState_Queued();
+      case 1:
+        var var_activity = sse_decode_bridge_session_turn_activity(
+          deserializer,
+        );
+        return BridgeSessionTurnState_InProgress(activity: var_activity);
+      case 2:
+        return BridgeSessionTurnState_Completed();
+      case 3:
+        var var_reason = sse_decode_String(deserializer);
+        return BridgeSessionTurnState_Failed(reason: var_reason);
+      case 4:
+        var var_reason = sse_decode_String(deserializer);
+        return BridgeSessionTurnState_Cancelled(reason: var_reason);
+      default:
+        throw UnimplementedError('');
+    }
   }
 
   @protected
@@ -10275,9 +10330,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_bridge_session_text_channel(channel, serializer);
         sse_encode_String(text, serializer);
         sse_encode_list_bridge_session_attachment(attachments, serializer);
-      case BridgeSessionPartContent_Reasoning(text: final text):
+      case BridgeSessionPartContent_Reasoning(
+        summary: final summary,
+        content: final content,
+      ):
         sse_encode_i_32(1, serializer);
-        sse_encode_String(text, serializer);
+        sse_encode_list_String(summary, serializer);
+        sse_encode_list_String(content, serializer);
       case BridgeSessionPartContent_Tool(tool: final tool):
         sse_encode_i_32(2, serializer);
         sse_encode_box_autoadd_bridge_session_tool_part(tool, serializer);
@@ -10542,18 +10601,40 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.turnId, serializer);
     sse_encode_String(self.sessionId, serializer);
-    sse_encode_bridge_session_turn_status(self.status, serializer);
-    sse_encode_opt_String(self.reason, serializer);
+    sse_encode_bridge_session_turn_state(self.state, serializer);
     sse_encode_i_64(self.updatedAt, serializer);
   }
 
   @protected
-  void sse_encode_bridge_session_turn_status(
-    BridgeSessionTurnStatus self,
+  void sse_encode_bridge_session_turn_activity(
+    BridgeSessionTurnActivity self,
     SseSerializer serializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self.index, serializer);
+  }
+
+  @protected
+  void sse_encode_bridge_session_turn_state(
+    BridgeSessionTurnState self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    switch (self) {
+      case BridgeSessionTurnState_Queued():
+        sse_encode_i_32(0, serializer);
+      case BridgeSessionTurnState_InProgress(activity: final activity):
+        sse_encode_i_32(1, serializer);
+        sse_encode_bridge_session_turn_activity(activity, serializer);
+      case BridgeSessionTurnState_Completed():
+        sse_encode_i_32(2, serializer);
+      case BridgeSessionTurnState_Failed(reason: final reason):
+        sse_encode_i_32(3, serializer);
+        sse_encode_String(reason, serializer);
+      case BridgeSessionTurnState_Cancelled(reason: final reason):
+        sse_encode_i_32(4, serializer);
+        sse_encode_String(reason, serializer);
+    }
   }
 
   @protected

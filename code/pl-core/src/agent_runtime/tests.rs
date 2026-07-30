@@ -1553,14 +1553,8 @@ async fn explicit_user_input_supersedes_an_active_inactivity_diagnostic() {
     let user_turn = handle
         .submit(
             root.clone(),
-            AgentSubmitRequest::start(root_session, "user override").with_metadata(
-                serde_json::json!({
-                    "userPrompt": {
-                        "synthetic": false,
-                        "ignored": false,
-                    }
-                }),
-            ),
+            AgentSubmitRequest::start(root_session, "user override")
+                .with_presentation(MailboxPresentation::User),
         )
         .await
         .unwrap();
@@ -2668,6 +2662,7 @@ async fn restart_recovery_replays_pending_inputs_in_fifo_order() {
             session_id: session_id.clone(),
             message: message.to_string(),
             metadata: serde_json::Value::Null,
+            presentation: MailboxPresentation::User,
             trigger: MailboxTurnTrigger::StartIfIdle,
             delivery_state: Default::default(),
             dispatch_generation: 0,
@@ -2709,6 +2704,7 @@ async fn restored_inputs_wait_for_host_resource_activation() {
         session_id,
         message: "after-resources-ready".to_string(),
         metadata: serde_json::Value::Null,
+        presentation: MailboxPresentation::User,
         trigger: MailboxTurnTrigger::StartIfIdle,
         delivery_state: Default::default(),
         dispatch_generation: 0,

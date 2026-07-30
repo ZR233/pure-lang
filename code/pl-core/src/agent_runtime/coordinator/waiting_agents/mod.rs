@@ -191,16 +191,12 @@ async fn queue_result_notification(
 <agentResultNotification>{update_json}</agentResultNotification>"
     ))
     .with_delivery(InputDelivery::QueueOnly)
+    .with_presentation(super::super::MailboxPresentation::SyntheticHidden)
     .with_mail_id(format!("agent-result:{}", update.signal_id))
     .with_metadata(serde_json::json!({
         "agentResultNotification": update,
         "attachmentIds": [],
         "historyPolicy": "ephemeral",
-        "userPrompt": {
-            "visiblePrompt": "子代理结果通知",
-            "synthetic": true,
-            "ignored": true,
-        },
     }));
     if let Err(error) = runtime
         .submit_current_session(parent_id.clone(), request)

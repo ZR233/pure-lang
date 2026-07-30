@@ -1,7 +1,7 @@
 use anyhow::Result;
 use sea_orm::{ConnectionTrait, DatabaseBackend, DatabaseConnection, Statement, TransactionTrait};
 
-pub(super) const STUDIO_DATABASE_SCHEMA_VERSION: i64 = 7;
+pub(super) const STUDIO_DATABASE_SCHEMA_VERSION: i64 = 8;
 const BASE_SCHEMA: &str = include_str!("../../migrations/0001_base.sql");
 const AGENT_SESSIONS_MIGRATION: &str = include_str!("../../migrations/0002_agent_sessions.sql");
 const TASK_COMPLETION_CONTRACT_MIGRATION: &str =
@@ -12,6 +12,7 @@ const WORKTREE_DISPOSITION_MIGRATION: &str =
     include_str!("../../migrations/0005_worktree_disposition.sql");
 const MAILBOX_AND_TASK_STOP_MIGRATION: &str =
     include_str!("../../migrations/0006_mailbox_and_task_stop.sql");
+const SESSION_EVENT_V3_MIGRATION: &str = include_str!("../../migrations/0007_session_event_v3.sql");
 
 pub(super) async fn configure_sqlite(db: &DatabaseConnection) -> Result<()> {
     for pragma in [
@@ -82,6 +83,11 @@ pub(super) async fn migrate_schema(db: &DatabaseConnection, from_version: i64) -
             execute_sql(&tx, MAILBOX_AND_TASK_STOP_MIGRATION).await?;
             backfill_terminal_generations(&tx).await?;
             version = 7;
+        }
+        if version == 7 {
+            super::migration::migrate_session_event_v3(&tx).await?;
+            execute_sql(&tx, SESSION_EVENT_V3_MIGRATION).await?;
+            version = 8;
         }
         if version != STUDIO_DATABASE_SCHEMA_VERSION {
             anyhow::bail!(

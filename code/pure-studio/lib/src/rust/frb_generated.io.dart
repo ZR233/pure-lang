@@ -573,7 +573,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeSessionTurn dco_decode_bridge_session_turn(dynamic raw);
 
   @protected
-  BridgeSessionTurnStatus dco_decode_bridge_session_turn_status(dynamic raw);
+  BridgeSessionTurnActivity dco_decode_bridge_session_turn_activity(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeSessionTurnState dco_decode_bridge_session_turn_state(dynamic raw);
 
   @protected
   BridgeSessionViewSnapshot dco_decode_bridge_session_view_snapshot(
@@ -1687,7 +1692,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  BridgeSessionTurnStatus sse_decode_bridge_session_turn_status(
+  BridgeSessionTurnActivity sse_decode_bridge_session_turn_activity(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeSessionTurnState sse_decode_bridge_session_turn_state(
     SseDeserializer deserializer,
   );
 
@@ -3042,8 +3052,14 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  void sse_encode_bridge_session_turn_status(
-    BridgeSessionTurnStatus self,
+  void sse_encode_bridge_session_turn_activity(
+    BridgeSessionTurnActivity self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_session_turn_state(
+    BridgeSessionTurnState self,
     SseSerializer serializer,
   );
 

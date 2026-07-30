@@ -128,7 +128,7 @@ fn stream_accumulator_streams_commentary_without_content() {
 }
 
 #[test]
-fn stream_accumulator_keeps_tagged_raw_reasoning_hidden() {
+fn stream_accumulator_projects_tagged_raw_reasoning_without_visible_text() {
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
     let mut accumulator = StreamCompletionAccumulator::new(Some(CompletionTraceContext {
         session_id: "session-1".to_string(),
@@ -163,12 +163,17 @@ fn stream_accumulator_keeps_tagged_raw_reasoning_hidden() {
         response.reasoning_content.as_deref(),
         Some("<commentary>正在分析日志。</commentary><final>完成。</final>")
     );
+    assert!(response.trace_events.iter().any(|event| matches!(
+        &event.kind,
+        TraceEventKind::TracePartCompleted { item }
+            if item.kind == TracePartKind::Thinking
+                && trace_part_text(item)
+                    == "<commentary>正在分析日志。</commentary><final>完成。</final>"
+    )));
     assert!(!response.trace_events.iter().any(|event| matches!(
         &event.kind,
         TraceEventKind::TracePartCompleted { item }
-            if item.kind == TracePartKind::Text
-                || item.kind == TracePartKind::Plan
-                || item.kind == TracePartKind::Thinking
+            if item.kind == TracePartKind::Text || item.kind == TracePartKind::Plan
     )));
 }
 
@@ -250,7 +255,7 @@ fn stream_accumulator_splits_repeated_tagged_commentary_and_final_blocks() {
 }
 
 #[test]
-fn stream_accumulator_keeps_untagged_reasoning_hidden() {
+fn stream_accumulator_projects_untagged_reasoning_without_visible_text() {
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
     let mut accumulator = StreamCompletionAccumulator::new(Some(CompletionTraceContext {
         session_id: "session-1".to_string(),
@@ -279,12 +284,16 @@ fn stream_accumulator_keeps_untagged_reasoning_hidden() {
         response.reasoning_content.as_deref(),
         Some("先比较整数位。")
     );
+    assert!(response.trace_events.iter().any(|event| matches!(
+        &event.kind,
+        TraceEventKind::TracePartCompleted { item }
+            if item.kind == TracePartKind::Thinking
+                && trace_part_text(item) == "先比较整数位。"
+    )));
     assert!(!response.trace_events.iter().any(|event| matches!(
         &event.kind,
         TraceEventKind::TracePartCompleted { item }
-            if item.kind == TracePartKind::Text
-                || item.kind == TracePartKind::Plan
-                || item.kind == TracePartKind::Thinking
+            if item.kind == TracePartKind::Text || item.kind == TracePartKind::Plan
     )));
 }
 

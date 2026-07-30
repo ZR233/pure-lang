@@ -374,7 +374,6 @@ StudioState responsiveVisualState() {
     selectedProjectId: project.id,
     selectedSessionId: session.id,
     permissionMode: PermissionMode.requestApproval,
-    turnPhasesBySession: {session.id: TurnPhase.idle},
     runtimesBySession: {
       session.id: const SessionRuntimeView(
         model: 'deepseek-reasoner',
@@ -407,9 +406,11 @@ StudioState responsiveVisualReasoningState() {
     order: current.order,
     revision: current.revision + 1,
     sequence: current.sequence,
-    text:
-        '## Updating the active reasoning summary\n\n'
-        'The latest section replaces the same compact activity line.',
+    text: '',
+    reasoningSummary: const ['## Updating the active reasoning summary'],
+    reasoningContent: const [
+      'The latest section replaces the same compact activity line.',
+    ],
     status: 'streaming',
     createdAt: current.createdAt,
     updatedAt: current.updatedAt,
@@ -419,7 +420,14 @@ StudioState responsiveVisualReasoningState() {
       ...state.partSnapshotsBySession,
       sessionId: snapshots,
     },
-    turnPhasesBySession: {sessionId: TurnPhase.streaming},
+    turnsBySession: {
+      sessionId: StudioTurnView(
+        turnId: current.turnId,
+        sessionId: sessionId,
+        state: const StudioTurnState.inProgress(StudioTurnActivity.thinking),
+        updatedAt: current.updatedAt,
+      ),
+    },
   );
 }
 
@@ -455,6 +463,13 @@ StudioState responsiveVisualToolState() {
       ...state.partSnapshotsBySession,
       sessionId: snapshots,
     },
-    turnPhasesBySession: {sessionId: TurnPhase.runningTool},
+    turnsBySession: {
+      sessionId: StudioTurnView(
+        turnId: reasoning.turnId,
+        sessionId: sessionId,
+        state: const StudioTurnState.inProgress(StudioTurnActivity.runningTool),
+        updatedAt: reasoning.updatedAt,
+      ),
+    },
   );
 }

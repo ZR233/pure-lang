@@ -43,7 +43,7 @@ class StudioController extends _$StudioController {
       catalog,
     );
     final sessionId = bootstrapped.selectedSessionId;
-    await _subscribe(sessionId);
+    await _subscribe(sessionId, forceSnapshot: true);
     return bootstrapped;
   }
 
@@ -152,7 +152,7 @@ class StudioController extends _$StudioController {
         workspaceSyncBySession: syncStates,
       ),
     );
-    await _subscribe(sessionId);
+    await _subscribe(sessionId, forceSnapshot: true);
   }
 
   Future<void> selectAgentSession(String sessionId) async {
@@ -184,7 +184,7 @@ class StudioController extends _$StudioController {
         workspaceSyncBySession: syncStates,
       ),
     );
-    await _subscribe(target.id);
+    await _subscribe(target.id, forceSnapshot: true);
   }
 
   void updateComposer(String sessionId, String value) {
@@ -206,13 +206,11 @@ class StudioController extends _$StudioController {
       return;
     }
     final composerTexts = {...current.composerTextsBySession}..[sessionId] = '';
-    state = AsyncData(
-      current.copyWith(
-        composerTextsBySession: composerTexts,
-        turnPhasesBySession: {sessionId: TurnPhase.waitingForModel},
-      ),
-    );
+    state = AsyncData(current.copyWith(composerTextsBySession: composerTexts));
     await _actions.submitPrompt(sessionId, prompt);
+    if (state.value?.selectedSessionId == sessionId) {
+      await _subscribe(sessionId, forceSnapshot: true);
+    }
   }
 
   Future<void> stop(String sessionId) async {
@@ -221,9 +219,6 @@ class StudioController extends _$StudioController {
       return;
     }
     await _actions.stopPrompt(sessionId);
-    state = AsyncData(
-      current.copyWith(turnPhasesBySession: {sessionId: TurnPhase.cancelled}),
-    );
   }
 
   Future<void> setPermissionMode(PermissionMode mode) async {
@@ -431,6 +426,11 @@ class StudioController extends _$StudioController {
         interaction.sessionId.isNotEmpty) {
       await _actions.submitPrompt(interaction.sessionId, followUpPrompt);
     }
+    if (result.isResolved &&
+        interaction.sessionId.isNotEmpty &&
+        state.value?.selectedAgentSessionId == interaction.sessionId) {
+      await _subscribe(interaction.sessionId, forceSnapshot: true);
+    }
   }
 
   void _handleEvent(Object event) {
@@ -541,17 +541,14 @@ class StudioController extends _$StudioController {
     }
     if (current != null) {
       final composerTexts = _composerTextsAfterLeaving(current);
-      final turnPhases = {
-        ...current.turnPhasesBySession,
-        ...next.turnPhasesBySession,
-      };
+      final turns = {...current.turnsBySession, ...next.turnsBySession};
       final runtimes = {
         ...current.runtimesBySession,
         ...next.runtimesBySession,
       };
       next = next.copyWith(
         composerTextsBySession: composerTexts,
-        turnPhasesBySession: turnPhases,
+        turnsBySession: turns,
         runtimesBySession: runtimes,
         workspaceSyncBySession: {
           ...current.workspaceSyncBySession,

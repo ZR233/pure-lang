@@ -35,21 +35,8 @@ pub struct StudioSubmitPromptRequest {
 /// Studio UI 提交 prompt 的附加选项。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StudioSubmitPromptOptions {
-    pub user_prompt: StudioUserPromptPresentation,
+    pub presentation: pl_core::MailboxPresentation,
     pub lifecycle: Option<StudioPlanImplementationLifecycle>,
-}
-
-/// 用户 prompt 在 Studio timeline 中的展示方式。
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub enum StudioUserPromptPresentation {
-    #[default]
-    Normal,
-    SyntheticVisible {
-        visible_prompt: String,
-    },
-    SyntheticIgnored {
-        visible_prompt: String,
-    },
 }
 
 /// 计划实施 turn 的生命周期关联。

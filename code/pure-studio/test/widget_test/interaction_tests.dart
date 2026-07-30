@@ -19,7 +19,14 @@ void registerInteractionTests() {
           body: 'Tell me which branch to use',
         ),
       ],
-      turnPhasesBySession: const {'session-1': TurnPhase.waitingForInteraction},
+      turnsBySession: {
+        'session-1': _testTurn(
+          sessionId: 'session-1',
+          state: const StudioTurnState.inProgress(
+            StudioTurnActivity.waitingForUserInput,
+          ),
+        ),
+      },
     );
     final api = _FakeStudioApi(state);
     await tester.pumpWidget(
@@ -106,7 +113,14 @@ void registerInteractionTests() {
           ),
         ),
       ],
-      turnPhasesBySession: const {'session-1': TurnPhase.waitingForInteraction},
+      turnsBySession: {
+        'session-1': _testTurn(
+          sessionId: 'session-1',
+          state: const StudioTurnState.inProgress(
+            StudioTurnActivity.waitingForUserInput,
+          ),
+        ),
+      },
     );
     final api = _FakeStudioApi(state);
     await tester.pumpWidget(
@@ -204,8 +218,13 @@ void registerInteractionTests() {
     final api = _FakeStudioApi(
       _emptyState().copyWith(
         pendingInteractions: [firstInteraction],
-        turnPhasesBySession: const {
-          'session-1': TurnPhase.waitingForInteraction,
+        turnsBySession: {
+          'session-1': _testTurn(
+            sessionId: 'session-1',
+            state: const StudioTurnState.inProgress(
+              StudioTurnActivity.waitingForUserInput,
+            ),
+          ),
         },
       ),
     );
@@ -278,7 +297,14 @@ void registerInteractionTests() {
           ),
         ),
       ],
-      turnPhasesBySession: const {'session-1': TurnPhase.completed},
+      turnsBySession: {
+        'session-1': _testTurn(
+          sessionId: 'session-1',
+          state: const StudioTurnState.inProgress(
+            StudioTurnActivity.waitingForPlanConfirmation,
+          ),
+        ),
+      },
     );
     final api = _FakeStudioApi(state);
     await tester.pumpWidget(
@@ -326,7 +352,14 @@ void registerInteractionTests() {
           ),
         ),
       ],
-      turnPhasesBySession: const {'session-1': TurnPhase.completed},
+      turnsBySession: {
+        'session-1': _testTurn(
+          sessionId: 'session-1',
+          state: const StudioTurnState.inProgress(
+            StudioTurnActivity.waitingForPlanConfirmation,
+          ),
+        ),
+      },
     );
     final api = _FakeStudioApi(state);
     await tester.pumpWidget(
@@ -383,7 +416,14 @@ void registerInteractionTests() {
           body: '## Plan\n- Implement',
         ),
       ],
-      turnPhasesBySession: const {'session-1': TurnPhase.completed},
+      turnsBySession: {
+        'session-1': _testTurn(
+          sessionId: 'session-1',
+          state: const StudioTurnState.inProgress(
+            StudioTurnActivity.waitingForPlanConfirmation,
+          ),
+        ),
+      },
     );
     final api = _FakeStudioApi(state)
       ..resolveInteractionError = StateError(
@@ -413,7 +453,7 @@ void registerInteractionTests() {
 
     api.resolveInteractionError = null;
     await tester.tap(implementButton);
-    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pumpAndSettle();
 
     expect(api.resolveInteractionCount, 2);
     expect(api.resolvedInteractionId, 'interaction-plan-failure');

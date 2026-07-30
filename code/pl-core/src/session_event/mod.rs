@@ -9,6 +9,7 @@ use pl_protocol::{
 use tokio::sync::broadcast;
 
 mod fact;
+mod interaction;
 mod observation;
 mod projector;
 mod reducer;

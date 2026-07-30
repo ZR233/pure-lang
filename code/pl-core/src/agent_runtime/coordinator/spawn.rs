@@ -110,6 +110,7 @@ where
             wake_signal_ids: Vec::new(),
             session_id: child_session_id.clone(),
             message,
+            presentation: super::super::MailboxPresentation::SyntheticHidden,
             metadata: request.metadata,
             trigger: super::super::MailboxTurnTrigger::StartIfIdle,
             delivery_state: Default::default(),

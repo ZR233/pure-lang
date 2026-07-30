@@ -20,7 +20,7 @@ void registerAgentWorkspaceTests() {
       expect(state.selectedAgentSessionId, 'agent-session-1');
       expect(state.composerText, isEmpty);
       expect(state.runtime.model, isEmpty);
-      expect(state.turnPhase, TurnPhase.idle);
+      expect(state.turn, isNull);
       expect(
         state.selectedAgentWorkspace?.syncState,
         AgentWorkspaceSyncState.loading,
@@ -530,8 +530,16 @@ StudioState _agentWorkspaceState({
           agentCount: 0,
         ),
     },
-    turnPhasesBySession: cacheChild
-        ? {child.id: TurnPhase.waitingForModel}
+    turnsBySession: cacheChild
+        ? {
+            child.id: _testTurn(
+              sessionId: child.id,
+              state: const StudioTurnState.inProgress(
+                StudioTurnActivity.thinking,
+              ),
+              turnId: 'child-turn',
+            ),
+          }
         : const {},
     workspaceSyncBySession: cacheChild
         ? {child.id: AgentWorkspaceSyncState.ready}

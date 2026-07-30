@@ -284,6 +284,8 @@ pub struct TracePart {
     pub attachments: Vec<TraceAttachment>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub thinking_chunks: Vec<TraceThinkingChunk>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reasoning_content_chunks: Vec<TraceThinkingChunk>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool: Option<TraceToolPart>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -318,6 +320,7 @@ impl TracePart {
             content: content.into(),
             attachments: Vec::new(),
             thinking_chunks: Vec::new(),
+            reasoning_content_chunks: Vec::new(),
             tool: None,
             agent: None,
             inference: None,
@@ -346,6 +349,7 @@ impl TracePart {
             content: content.into(),
             attachments: Vec::new(),
             thinking_chunks: Vec::new(),
+            reasoning_content_chunks: Vec::new(),
             tool: None,
             agent: None,
             inference: None,
@@ -366,6 +370,10 @@ pub enum TraceDelta {
         delta: String,
     },
     Thinking {
+        chunk_index: u32,
+        delta: String,
+    },
+    ReasoningContent {
         chunk_index: u32,
         delta: String,
     },

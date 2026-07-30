@@ -6,7 +6,7 @@ use crate::{
     SubAgentActivityKind, TodoListSnapshot, TokenUsageSnapshot,
 };
 
-pub const SESSION_EVENT_SCHEMA_VERSION: u32 = 2;
+pub const SESSION_EVENT_SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -293,8 +293,10 @@ pub enum SessionPartContent {
         attachments: Vec<SessionAttachment>,
     },
     Reasoning {
-        #[serde(default, skip_serializing_if = "String::is_empty")]
-        text: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        summary: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        content: Vec<String>,
     },
     Tool {
         tool: SessionToolPart,
@@ -420,6 +422,8 @@ pub enum SessionPartDeltaField {
     Text,
     #[serde(rename = "reasoning.summary")]
     ReasoningSummary,
+    #[serde(rename = "reasoning.content")]
+    ReasoningContent,
     PlanContent,
     #[serde(rename = "tool.arguments")]
     ToolArguments,
@@ -432,25 +436,36 @@ pub enum SessionPartDeltaField {
 pub struct SessionTurn {
     pub turn_id: String,
     pub session_id: String,
-    pub status: SessionTurnStatus,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
+    pub state: SessionTurnState,
     pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "status"
+)]
+pub enum SessionTurnState {
+    Queued,
+    InProgress { activity: SessionTurnActivity },
+    Completed,
+    Failed { reason: String },
+    Cancelled { reason: String },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub enum SessionTurnStatus {
-    Queued,
-    ContextLoading,
-    WaitingForModel,
-    Streaming,
-    WaitingForInteraction,
+pub enum SessionTurnActivity {
+    Preparing,
+    Thinking,
+    Responding,
+    Planning,
     RunningTool,
+    WaitingForApproval,
+    WaitingForUserInput,
+    WaitingForPlanConfirmation,
     Persisting,
-    Completed,
-    Failed,
-    Cancelled,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

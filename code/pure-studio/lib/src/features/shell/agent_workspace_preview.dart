@@ -203,9 +203,18 @@ StudioState _agentWorkspacePreviewState({
     selectedSessionId: selected.id,
     selectedRootSessionId: root.id,
     permissionMode: PermissionMode.requestApproval,
-    turnPhasesBySession: childLoading
+    turnsBySession: childLoading || !selectChild
         ? const {}
-        : {selected.id: selectChild ? TurnPhase.streaming : TurnPhase.idle},
+        : {
+            selected.id: StudioTurnView(
+              turnId: '${selected.id}-turn',
+              sessionId: selected.id,
+              state: const StudioTurnState.inProgress(
+                StudioTurnActivity.responding,
+              ),
+              updatedAt: timestamp,
+            ),
+          },
     runtimesBySession: childLoading ? const {} : {selected.id: runtime},
     workspaceSyncBySession: {
       selected.id: childLoading

@@ -174,6 +174,8 @@ session stream 之外保留独立低频 product stream：
 
 product stream 有自己的全局 sequence 和 replay，不承载 message/tool/Todo/context delta，也不能
 以“收到任意事件后重拉整个详情”代替 session reducer。
+Flutter 必须保留事件来源；product sequence 只用于 product stream 自身排序，绝不能推进
+任一 session durable cursor，也不能参与 session event 的重复判定。
 
 Studio 的 session list 同时承担 `AgentDirectorySnapshot/Event`：每项只包含
 `rootSessionId/sessionId/parentSessionId/ownerAgentId/ownerRole/displayName`、稳定创建顺序、

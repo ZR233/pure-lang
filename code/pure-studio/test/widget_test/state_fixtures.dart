@@ -143,7 +143,6 @@ StudioState _emptyState() {
     selectedProjectId: project.id,
     selectedSessionId: session.id,
     permissionMode: PermissionMode.requestApproval,
-    turnPhasesBySession: {session.id: TurnPhase.idle},
     runtimesBySession: {
       session.id: const SessionRuntimeView(
         model: '',
@@ -182,7 +181,7 @@ StudioState _twoProjectState({
     StudioProject(id: 'project-a', name: 'Project A', path: 'a'),
     StudioProject(id: 'project-b', name: 'Project B', path: 'b'),
   ],
-  TurnPhase turnPhase = TurnPhase.idle,
+  StudioTurnState? turnState,
 }) {
   final sessions = [
     if (projects.any((project) => project.id == 'project-a'))
@@ -211,7 +210,14 @@ StudioState _twoProjectState({
     messagesBySession: {for (final session in sessions) session.id: const []},
     selectedProjectId: selectedProjectId,
     selectedSessionId: selectedSessionId,
-    turnPhasesBySession: {selectedSessionId: turnPhase},
+    turnsBySession: turnState == null
+        ? const {}
+        : {
+            selectedSessionId: _testTurn(
+              sessionId: selectedSessionId,
+              state: turnState,
+            ),
+          },
   );
 }
 
@@ -356,7 +362,11 @@ Map<String, Object?> _canonicalPartContent(TimelinePartSnapshot part) {
       'text': part.text,
       'attachments': const <Object?>[],
     },
-    TimelinePartType.reasoning => {'type': 'reasoning', 'text': part.text},
+    TimelinePartType.reasoning => {
+      'type': 'reasoning',
+      'summary': part.reasoningSummary,
+      'content': part.reasoningContent,
+    },
     TimelinePartType.tool => {
       'type': 'tool',
       'tool': {
@@ -389,6 +399,20 @@ Map<String, Object?> _canonicalPartContent(TimelinePartSnapshot part) {
     },
     TimelinePartType.file => {'type': 'file', 'path': part.text},
   };
+}
+
+StudioTurnView _testTurn({
+  required String sessionId,
+  required StudioTurnState state,
+  String turnId = 'turn-1',
+  int updatedAt = 1,
+}) {
+  return StudioTurnView(
+    turnId: turnId,
+    sessionId: sessionId,
+    state: state,
+    updatedAt: DateTime.fromMillisecondsSinceEpoch(updatedAt),
+  );
 }
 
 StudioState _stateWithPlannerModels() {

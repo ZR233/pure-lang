@@ -88,6 +88,59 @@ fn reasoning_summary_sections_get_distinct_part_ids() {
 }
 
 #[test]
+fn raw_reasoning_starts_the_part_and_later_summary_updates_the_same_part() {
+    let mut trace = trace();
+
+    let raw = trace.append_reasoning_content_delta("thinking", 0, "raw".to_string());
+    let summary = trace.append_thinking_delta("thinking", 0, "summary".to_string());
+    let completed = trace
+        .complete_thinking("thinking", Some(vec!["summary done".to_string()]))
+        .into_iter()
+        .find_map(completed_thinking_item)
+        .expect("completed reasoning part");
+
+    assert_eq!(
+        raw.into_iter().find_map(delta_item_id),
+        Some("inference-1-reasoning-1".to_string())
+    );
+    assert_eq!(
+        summary.into_iter().find_map(delta_item_id),
+        Some("inference-1-reasoning-1".to_string())
+    );
+    assert_eq!(trace_part_text(&completed), "summary done");
+    assert_eq!(
+        completed
+            .reasoning_content_chunks
+            .iter()
+            .map(|chunk| chunk.content.as_str())
+            .collect::<String>(),
+        "raw"
+    );
+}
+
+#[test]
+fn raw_only_reasoning_is_preserved_in_the_authoritative_part() {
+    let mut trace = trace();
+
+    let _ = trace.append_reasoning_content_delta("thinking", 0, "raw only".to_string());
+    let completed = trace
+        .complete_thinking("thinking", None)
+        .into_iter()
+        .find_map(completed_thinking_item)
+        .expect("completed reasoning part");
+
+    assert!(completed.thinking_chunks.is_empty());
+    assert_eq!(
+        completed
+            .reasoning_content_chunks
+            .iter()
+            .map(|chunk| chunk.content.as_str())
+            .collect::<String>(),
+        "raw only"
+    );
+}
+
+#[test]
 fn generated_part_ids_are_scoped_to_inference() {
     let mut first = trace();
     let mut second = TraceProjection::new(CompletionTraceContext {

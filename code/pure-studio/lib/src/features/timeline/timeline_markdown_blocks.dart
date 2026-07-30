@@ -1,6 +1,6 @@
 part of 'timeline_view.dart';
 
-enum _MarkdownSurface { assistant, user, panel, reasoning }
+enum _MarkdownSurface { assistant, user, panel, reasoning, error }
 
 final List<MarkdownComponent> _studioMarkdownComponents = MarkdownComponent
     .globalComponents
@@ -51,6 +51,8 @@ class _AgentMarkdown extends StatelessWidget {
           textStyle: bodyStyle?.copyWith(
             color: surface == _MarkdownSurface.reasoning
                 ? context.studioInkSoft
+                : surface == _MarkdownSurface.error
+                ? scheme.error
                 : scheme.onSurface,
             fontFamily: 'JetBrains Mono',
             fontFamilyFallback: const ['Consolas', 'monospace'],
@@ -69,6 +71,12 @@ TextStyle? _markdownBodyStyle(BuildContext context, _MarkdownSurface surface) {
     return theme.textTheme.bodySmall?.copyWith(
       color: context.studioInkSoft,
       height: 1.48,
+    );
+  }
+  if (surface == _MarkdownSurface.error) {
+    return theme.textTheme.bodyMedium?.copyWith(
+      color: theme.colorScheme.error,
+      height: 1.52,
     );
   }
   return theme.textTheme.bodyMedium?.copyWith(

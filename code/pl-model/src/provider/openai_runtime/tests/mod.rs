@@ -76,12 +76,23 @@ fn summary_started(id: &str) -> StreamEvent {
 fn trace_part_text(item: &pl_trace::TracePart) -> String {
     match item.kind {
         TracePartKind::Text | TracePartKind::Plan | TracePartKind::Turn => item.content.clone(),
-        TracePartKind::Thinking => item
-            .thinking_chunks
-            .iter()
-            .map(|chunk| chunk.content.as_str())
-            .collect::<Vec<_>>()
-            .join(""),
+        TracePartKind::Thinking => {
+            let summary = item
+                .thinking_chunks
+                .iter()
+                .map(|chunk| chunk.content.as_str())
+                .collect::<Vec<_>>()
+                .join("");
+            if summary.is_empty() {
+                item.reasoning_content_chunks
+                    .iter()
+                    .map(|chunk| chunk.content.as_str())
+                    .collect::<Vec<_>>()
+                    .join("")
+            } else {
+                summary
+            }
+        }
         TracePartKind::Tool => item
             .tool
             .as_ref()
@@ -95,6 +106,7 @@ fn trace_delta_text(delta: &pl_trace::TraceDelta) -> String {
     match delta {
         pl_trace::TraceDelta::Text { delta, .. }
         | pl_trace::TraceDelta::Thinking { delta, .. }
+        | pl_trace::TraceDelta::ReasoningContent { delta, .. }
         | pl_trace::TraceDelta::ToolArguments { delta }
         | pl_trace::TraceDelta::ToolResult { delta }
         | pl_trace::TraceDelta::Plan { delta } => delta.clone(),

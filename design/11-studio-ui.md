@@ -40,7 +40,7 @@ lib/src/shared/
 - `planStates[planId]`
 - `agentDirectoryByRoot/sessionRuntimeBySession/agentTimelineEventsBySession`
 - `mcpServers/lspServers`
-- `turnPhase/turnStartedAt`
+- `turnsBySession[sessionId]`
 
 大会话与 agent 工作区分层保存：
 
@@ -50,7 +50,7 @@ lib/src/shared/
 - `AgentDirectoryProjection` 是 root 下轻量目录；`AgentWorkspaceProjection` 是当前
   agent session 的唯一工作区事实源。
 - Flutter 使用不可变 `AgentWorkspaceView` 聚合当前 agent 的 timeline、Todo、runtime、
-  turn phase、interaction、Composer 和状态栏投影，并由单一
+  typed current turn、interaction、Composer 和状态栏投影，并由单一
   `selectedAgentWorkspaceProvider` 交给 `AgentWorkspacePane`。这些区域不得分别读取
   `StudioState` 后再拼接当前会话。
 - child 启动、完成、停止或故障只刷新目录状态，不自动切换当前 agent。
@@ -65,7 +65,8 @@ snapshot、durable replay 和 live event 都进入同一个 event reducer。`sub
 
 Flutter 解析层必须接受 Studio 协议内的所有 part type。当前不直接渲染的 lifecycle/internal/file part 可以进入 normalized snapshot 后由 row projection 过滤，或在 bridge payload 层忽略，但不能把协议内类型当未知类型抛出导致 timeline 白屏。真正未知的 part type 仍应 fail fast。
 
-切换或恢复选中 session 时先增加 generation、取消旧 stream，再订阅目标 `sessionId`。PL runtime
+切换或恢复选中 session 时先增加 generation、请求取消旧 stream，并立即订阅目标
+`sessionId`；不得等待旧 FRB transport teardown 才建立新订阅。PL runtime
 已经按“先注册 receiver、再读取 snapshot/replay”建立 load barrier；Flutter 只需原子应用首个
 bootstrap frame，再处理同 generation live frame。durable event 不大于 snapshot cursor 时丢弃；
 transient delta 不推进 cursor，只按 part revision 处理。旧订阅迟到事件、缺失 sessionId 或
@@ -73,21 +74,26 @@ generation 不匹配的 frame 必须丢弃，不能污染当前会话。
 
 状态管理对齐 opencode `global-sync`：Flutter Riverpod store 只保存归一化 entity 表和少量 UI 本地状态，组件不得直接把多个表临时拼成业务状态。选中会话、状态栏、timeline、交互 dock 和会话列表都必须通过 selector/view model 派生：
 
-- `selectedSessionView` 从 `selectedAgentSessionId` 读取当前 owner、message、part、runtime、Todo、interaction、turn phase、busy、MCP/LSP active 列表和 Composer 草稿。
+- `selectedSessionView` 从 `selectedAgentSessionId` 读取当前 owner、message、part、runtime、Todo、interaction、typed current turn、busy、MCP/LSP active 列表和 Composer 草稿。
 - `visibleProjectSessions` 对 session list 做按 id 去重，只把 `visibility=active` 且 `sessionKind=root` 的大会话放入左侧栏；同一 root 下的 agent session 只出现在标题区 agent 菜单，并按父子层级和创建顺序稳定排列。
 - `SessionStatusBar` 只消费 `selectedSessionView.runtime/activeMcpServers/activeLspServers` 与当前 owner 身份，不得直接读后台 session 的 runtime event，也不得聚合其他 agent。
 
-`StudioState` 中 runtime、turn phase 和 Composer 草稿只按 session 归一化保存，不保留一套
+`StudioState` 中 runtime、typed current turn 和 Composer 草稿只按 session 归一化保存，不保留一套
 可独立写入的 selected-session 镜像。reducer、snapshot 和 controller action 都必须携带明确
 `sessionId`；selection 只决定读取哪个 `AgentWorkspaceView`，不能改变事件的归属。
 
 `sessionRuntimeChanged` 只能更新 `sessionRuntimeBySession[sessionId]`；MCP/LSP 的全局 health event 更新 server catalog，当前会话实际 active 列表来自 selected agent session runtime。大会话的 Agent Directory 使用独立轻量事件刷新 owner、session、父子关系、状态和 attention，不通过单 agent session 的 `AgentChanged` 聚合 agent tree。
 
-Flutter Riverpod store 使用同一归一化状态结构：`StudioController` 负责 bootstrap、session stream 切换和全局 stream 生命周期；`timelineRowsProvider(sessionId)`、`selectedSessionViewProvider`、`statusBarViewProvider`、`settingsPageProvider` 等 selector 只派生 view model，不直接发起 bridge 调用。`subscribeSessionEvents(sessionId, afterSequence)` 的取消必须跟随选中会话变化，避免后台会话继续接收高频 delta。
+Flutter Riverpod store 使用同一归一化状态结构：`StudioController` 负责 bootstrap、session stream 切换和全局 stream 生命周期；`timelineRowsProvider(sessionId)`、`selectedSessionViewProvider`、`statusBarViewProvider`、`settingsPageProvider` 等 selector 只派生 view model，不直接发起 bridge 调用。`subscribeSessionEvents(sessionId, afterSequence)` 的取消必须跟随选中会话变化，避免后台会话继续接收高频 delta。显式切换 session/agent workspace 时使用无 cursor subscription 原子取得 authoritative snapshot；同 generation 的断流恢复才从已应用 cursor 继续。
 
 Flutter 数据层必须保持编排与归约分离：`StudioController` 只负责桥接 API 调用、订阅生命周期、bootstrap frame、frame 批处理和 resync 副作用；事件归约、session/config snapshot merge、durable cursor、part overlay 与 agent timeline projection 逻辑放在纯 reducer 模块。纯 reducer 不访问 Riverpod、不调用 bridge、不调度异步任务；需要 resync 时只返回明确原因给 controller 重新订阅。
+提交 prompt 或解决 interaction 的命令响应不携带 Timeline 事实；命令注册成功后 controller
+应以无 cursor 的当前 session subscription 重新建立 load barrier，避免创建会话、切换模式或
+interaction continuation 与旧订阅 generation 竞态。
 
 Flutter reducer 必须按 `sessionId` 过滤实时事件，旧 session stream 取消后迟到的事件不得覆盖当前会话。每个 session 维护 durable event cursor；收到 `ResyncRequired` 时关闭旧 stream 并以无 cursor subscription 获取 authoritative snapshot。`messagePartDelta` 不推进 durable cursor，但只能追加到已有且未 terminal 的 part 字段。
+product stream 使用独立的全局 sequence；即使 product payload 携带 `sessionId`，该 sequence
+也不得写入 `eventCursorsBySession` 或抑制 session stream 的 canonical event。
 
 `StudioState.copyWith` 必须支持对 nullable selection/config 字段显式置空。`selectedProjectId`、`selectedSessionId`、`defaultProviderId` 等字段的 `null` 表示清空领域状态，而不是“保持不变”；需要保持原值时调用方应省略对应参数。
 
@@ -164,13 +170,13 @@ Timeline row 从 `messages + parts + partTextAccumDelta + agentTimelineEvents` �
 
 `timeline_models.dart` 是对外稳定导出入口，调用方继续通过 `studio_models.dart` 或该入口读取 timeline 类型。内部可按实体模型、agent timeline payload、row projection/grouping/sorting 拆成 `part` 文件，但不得改变公开类型名、构造参数和 projection 函数语义。UI 渲染块也应按消息、runtime progress、tool、plan/agent 和 Markdown renderer 分文件维护，仍由 `TimelineView` 作为唯一 widget 入口消费 `TimelineRow`。
 
-reasoning part 按 opencode 普通 assistant part 处理，参与 `groupParts`，不再把同 turn 的多个 reasoning part 合并成旧 thought entry。这样新 reasoning 的 `messageId + partId` 不会复用旧 row key，也不会把流式 delta 写回旧思考行。
+reasoning part 按 opencode 普通 assistant part 处理，参与 `groupParts`，不再把同 turn 的多个 reasoning part 合并成旧 thought entry。这样新 reasoning 的 `messageId + partId` 不会复用旧 row key，也不会把流式 delta 写回旧思考行。每个 reasoning snapshot 同时保存 `summary: List<String>` 与 `content: List<String>`；两种 delta 都更新同一个稳定 part。
 
-reasoning 默认折叠为内容摘要结构化行：存在 `StudioPart.text` 或 live `reasoning.summary` 时，header 展示最新非空 reasoning 文本的单行摘要并随 delta 原地刷新；只有尚未收到任何可见 reasoning 内容时才显示“思考中”，终态仍无内容时显示“已思考”。展开后展示完整 provider-emitted reasoning summary/thinking stream，并使用与普通 Markdown 相同的 stream-safe 渲染。provider replay metadata、后端诊断和未进入 `StudioPart.text` 的内部推理不进入 timeline 正文。`showReasoningSummaries` 只能控制是否显示 reasoning summary/row，不能把多个 reasoning part 合并成一个旧 thought row。
+reasoning 默认折叠为内容摘要结构化行：有非空 summary 时展示 summary；否则展示 raw content；只有两者都没有时才显示“思考中”，终态仍无内容时显示“已思考”。summary 首次到达后立即替换同一活动行中的 raw 回退，不产生重复思考行。展开后按相同优先级展示完整 provider-emitted reasoning，并使用与普通 Markdown 相同的 stream-safe 渲染。所有非错误 reasoning 标题、摘要、raw 回退和占位均使用辅助浅色；错误仍使用错误色。provider replay metadata 和后端诊断不进入 timeline 正文。`showReasoningSummaries` 只能控制是否显示 reasoning row，不能把多个 reasoning part 合并成一个旧 thought row。
 
 reasoning 展开/折叠是前端 UI 状态，不写回 `StudioPart` snapshot，也不参与 live overlay。Flutter 以 `sessionId + partId` 为 key 保存展开状态；row 重排、snapshot 刷新或 widget 重建时必须保持同一 reasoning part 的展开状态，切换到其他 session 时不得复用同名 part 的 UI 状态。
 
-text 的显示文本读取 `text` live overlay，reasoning 的显示文本优先读取 `reasoning.summary` live overlay，并以 `text` overlay 作为兼容回退；没有 live overlay 时读取 `part.text`。snapshot 到达后以 snapshot 为准并清 overlay；同一 frame 内同 part 的 snapshot 覆盖旧 delta。Flutter reducer 使用 frame callback 批处理 `messagePartDelta`；切换 session 或 durable snapshot 到达前必须先 flush 当前 pending delta。若 snapshot coalescing 替换了 start snapshot，同 part 的 pending delta 进入 stale set 并跳过，避免旧思考 chunk 倒灌到 terminal 文本。
+text 的显示文本读取 `text` live overlay；reasoning 分别累计 `reasoning.summary` 与 `reasoning.content` overlay，并按 summary、raw content、snapshot summary、snapshot content 的优先级显示。snapshot 到达后以 snapshot 为准并清除该 part 的两组 overlay；同一 frame 内同 part 的 snapshot 覆盖旧 delta。Flutter reducer 使用 frame callback 批处理 `messagePartDelta`；切换 session 或 durable snapshot 到达前必须先 flush 当前 pending delta。若 snapshot coalescing 替换了 start snapshot，同 part 的 pending delta 进入 stale set 并跳过，避免旧思考 chunk 倒灌到 terminal 文本。
 
 阶段性文本输出使用普通 `text` part，`textChannel=commentary`。start snapshot 创建空 part，delta 追加到 live overlay，terminal snapshot 固化完整文本。即使终态 snapshot 很快到达，前端也必须能在流式期间显示 commentary/final 中间文本；不能把 commentary 合并进 final，也不能把工具后的新文本追加到工具前的 part。
 Provider stream adapter 必须在工具输入开始、工具调用就绪或新 step 开始前关闭当前可见文本段；对于 Chat/DeepSeek 这类通过 `<commentary>/<final>` 或未标记文本解析可见输出的 provider，文本段边界也必须在 stream projection 层产生，不能由 `pl-core` 事后补写兜底文本。
@@ -243,26 +249,21 @@ Task 编辑 planner role；任务非终态期间禁用模式切换。child works
 
 Flutter `SessionStatusBar` 展示同一组信息，并使用 Material 3 的 compact controls、tooltip 和 hover/focus 可达的弹层承载详情。Flutter 状态栏只消费 Riverpod selector，不直接订阅 bridge stream 或解析 raw JSON。
 
-状态栏使用 `LayoutBuilder` 按优先级保留 agent 身份、Todo、mode/model、context 与 turn/
-interaction 状态；低优先级的 effort、skills/MCP/LSP、费用进入 overflow menu。不得用水平
+状态栏使用 `LayoutBuilder` 按优先级保留 agent 身份、Todo、mode/model 与 context；
+低优先级的 effort、skills/MCP/LSP、费用进入 overflow menu。turn/interaction activity
+只在 Timeline 尾部展示，状态栏不得再提供 phase readout。不得用水平
 滚动把控件藏到视口外，也不得显示大会话 agent 数量。
 
 Flutter context readout 使用紧凑圆形进度环，不显示百分比文字，也不直接显示 `contextTokens/contextWindow`；hover/focus 详情继续使用圆形进度，并展示上下文数字、百分比、总 token 和模型。费用继续作为独立文字 readout；active skills、MCP 与 LSP 进入当前 agent 的能力摘要和分区弹层，不能合并进 context 或费用详情。其他 agent 的状态只在标题区 `n agents` 菜单展示。
 
 状态栏、interaction dock、timeline 工具/计划/提问摘要中的 UI 文案必须走 i18n；模型名称、provider 名称、模型 slug、tool 名称、agent 路径、reasoning effort 等来自配置或运行时的领域值按原始字符串透传展示，不做翻译或本地化映射。这样 zh-CN/en 只负责固定 UI 标签与状态说明，不改变用户配置、provider 返回值或协议枚举的可辨识性。
 
-状态栏的 waiting 状态以 active interaction 为一等输入。`busy` 表示 turn 是否仍在运行，`activeInteraction` 表示 UI 是否必须等待用户响应；Plan confirmation 可以在 `busy=false` 时仍阻塞 composer。状态栏 phase 优先级为 `toolApproval -> userInput -> planConfirmation -> turnPhase`。
+`busy` 表示 typed current turn 是否仍在运行，`activeInteraction` 表示 UI 是否必须等待用户响应；Plan confirmation 可以在 `busy=false` 时仍阻塞 composer。interaction 仍驱动 dock，但不得在状态栏重复 turn 或 interaction activity。
 
-历史 turn outcome 与 agent workspace activity 是正交状态。Flutter 保留 wire 中真实的
-`SessionTurnStatus::Completed`，同时由 `AgentWorkspaceView.statusPhase` 提供展示态：
-仅当选中 root session 的 canonical `agentStatus == waiting`，且原始 `turnPhase` 为
-`idle | completed` 时显示 `waitingForAgents`（“等待子代理 / Waiting for agents”）。
-活动 interaction、活动 turn phase 和 child workspace 状态优先，不做该映射。`turnPhase`、
-`busy`、停止按钮与 Composer 仍只依据真实活动 turn 计算，不能因展示为等待子代理而把已经
-完成的 Planner turn 伪装成可停止的运行中 turn；agent 恢复 completed 后展示重新回到
-`completed`。
-
-状态栏 phase 必须对 `TurnPhase` 与 `InteractionKind` 使用穷尽的本地化映射，不得直接展示协议或 Dart enum 的 `.name`。英文使用自然短语，简体中文使用简洁状态说明；active interaction 的本地化标签仍按上述优先级覆盖 turn phase。
+历史 turn outcome 与 agent workspace activity 是正交状态。Planner 等待子代理时继续保留
+canonical `agentStatus == waiting`，但不得把已完成的 turn 改写成活动 turn，也不得因此让
+`busy`、停止按钮或 Composer 误判为仍可停止；等待中的 agent activity 由 Timeline 的
+agent 语义行呈现，不重新引入状态栏 phase。
 
 会话列表是独立滚动区域，row 采用 opencode 式单行 flex 布局：图标/状态固定宽度，标题 `min-width:0` 且 `truncate`，列表项 `flex-shrink:0`。Sessions 区域过长时只滚动列表，不挤压 project 区、settings 按钮或相邻 session row。
 
@@ -356,13 +357,14 @@ Flutter 端使用 Material 3 的工具型界面表达同一信息架构：`Navig
 
 Flutter 主聊天界面视觉应靠拢 Codex 桌面版的工作台气质：中性色浅色主题、低对比侧栏、白色阅读面、单一聚焦 composer 托盘和轻量状态信息行。Timeline 中普通 assistant 正文不使用卡片背景；plan、agent 等结构化 part 使用轻边框面板，reasoning 与 tool 使用默认折叠的低对比内联摘要，避免高频活动形成连续卡片。用户消息使用窄宽度浅色气泡，避免大面积品牌色。状态栏默认只展示当前模式、planner 模型、上下文、费用与活动能力摘要，不重复显示已在模型选择控件中的 runtime model；高频或诊断信息通过 tooltip/popover 承载。
 
-Timeline 尾部最多突出一个当前活动位。等待批准或运行中的 tool 优先于仍未终态的 reasoning；
-没有对应 part 时才按当前 turn phase 展示紧凑阶段占位。活动 reasoning 只显示最新 part 的单行
-摘要并随 delta 原地刷新；活动 tool 显示当前工具、命令、搜索词或路径。活动完成后使用同一稳定
-身份沉入低对比历史组，不复制第二行。连续 reasoning 历史组折叠为一行，摘要最多展示三个
-reasoning 段标题并标记剩余数量，展开后按原 part 顺序显示完整非空 Markdown。reasoning 和 tool
-活动行不使用 assistant 头像、卡片背景或常驻状态 pill；失败、拒绝、审批和预算受限仍明确展示
-结构化原因。
+Timeline 尾部只追加一个由 typed current turn 驱动的活动块。`preparing`、`thinking`、
+`responding`、`planning`、`runningTool`、三类 interaction waiting 和 `persisting` 均在这一个
+稳定位置原地更新；等待模型与 reasoning 统一为 `thinking`。`thinking` 优先显示最新 summary，
+其次 raw content，最后才显示“思考中”；`runningTool` 复用当前工具组摘要；`responding` 保留正在
+增长的正文并显示轻量“回复中”。当前 reasoning/tool row 并入活动块，不能与历史 row 重复。
+Completed 移除活动块；Failed/Cancelled 把原因投影为持久历史结果。连续 reasoning 历史组折叠为
+一行，展开后按原 part 顺序显示完整非空 Markdown。所有非用户普通行不再使用外层通用 sparkle
+头像；仅保留用户头像以及 reasoning/tool/agent activity 自带的语义图标。
 
 Flutter shell 的二级视觉层级继续收敛：顶部 Header 明确分为两层，第一层只放大会话标题，
 第二层放项目末级名称、分支、Task 阶段、保存/同步状态和唯一 `n agents` compact 状态项；
@@ -375,7 +377,7 @@ Planner/Executor/Reviewer 分类横条或第二套 agent 切换控件；底部�
 
 Studio 采用紧凑控制台密度，但紧凑不等于堆叠入口。面板圆角不得超过 `8px`，阴影只用于 Composer、interaction dock 和 popover；普通设置分组、timeline 结构化行与 Provider 列表使用单层边框，不在卡片中继续嵌套卡片。聊天阅读流、状态区和 Composer 共享同一内容宽度，侧栏与设置导航使用统一布局 token，窗口变窄时按可用宽度切换为 icon rail。
 
-状态栏使用无边框、无常驻底色的紧凑控件和读数。模式、Planner 模型与 reasoning effort 是可点击选择器，只在 hover/focus 时显示轻背景；context 使用无文字圆形进度环，费用、能力与 phase 使用文字读数，并通过 popover 展示详情。Skills、MCP 与 LSP 只保留一个当前 agent 能力摘要入口；agent 目录只保留标题区 `n agents` 入口。header 不再重复显示 phase 或 busy spinner。权限模式仍可在 Composer 快捷切换，Security 页提供完整配置说明，但不得再用第二张“当前模式”卡片重复同一状态。
+状态栏使用无边框、无常驻底色的紧凑控件和读数。模式、Planner 模型与 reasoning effort 是可点击选择器，只在 hover/focus 时显示轻背景；context 使用无文字圆形进度环，费用与能力使用文字读数，并通过 popover 展示详情。Skills、MCP 与 LSP 只保留一个当前 agent 能力摘要入口；agent 目录只保留标题区 `n agents` 入口。header 和状态栏都不重复显示 turn phase 或 busy spinner。权限模式仍可在 Composer 快捷切换，Security 页提供完整配置说明，但不得再用第二张“当前模式”卡片重复同一状态。
 
 设置页保持 Providers、Instructions、Skills、Roles、MCP、Security、General 七个领域入口。普通设置使用单层 group + divider；重复实体才使用紧凑列表。Provider 使用紧凑单列列表，整行进入详情，不再额外显示“打开”按钮，默认、刷新、编辑、删除统一进入 row overflow menu。列表只承载可扫描摘要，完整模型、凭据和工具明细留在详情页；Zhipu Coding Plan 例外地在列表中直接按 `fiveHour -> weekly -> mcpMonthly` 展示三条细进度，包括剩余比例和重置时间，缺失的 quota 不得伪造。
 
