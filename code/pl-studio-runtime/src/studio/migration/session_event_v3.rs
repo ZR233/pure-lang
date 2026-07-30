@@ -235,7 +235,7 @@ fn migrated_turn_state(
             "status": "cancelled",
             "reason": reason.unwrap_or_else(|| "turn cancelled".to_string()),
         }),
-        "failed" | _ => json!({
+        _ => json!({
             "status": "failed",
             "reason": reason.unwrap_or_else(|| format!("legacy turn status: {status}")),
         }),

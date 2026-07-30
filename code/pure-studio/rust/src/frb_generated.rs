@@ -1691,6 +1691,17 @@ impl SseDecode for bool {
     }
 }
 
+impl SseDecode for Box<crate::api::studio::types::session_stream::BridgeSessionStreamFrame> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        return Box::new(
+            <crate::api::studio::types::session_stream::BridgeSessionStreamFrame>::sse_decode(
+                deserializer,
+            ),
+        );
+    }
+}
+
 impl SseDecode for Box<crate::api::studio::types::runtime::BridgeTaskRuntimeDto> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -3226,7 +3237,9 @@ impl SseDecode for crate::api::studio::subscription::BridgeSessionStreamEnvelope
         let mut tag_ = <i32>::sse_decode(deserializer);
         match tag_ {
             0 => {
-                let mut var_frame = <crate::api::studio::types::session_stream::BridgeSessionStreamFrame>::sse_decode(deserializer);
+                let mut var_frame = <Box<
+                    crate::api::studio::types::session_stream::BridgeSessionStreamFrame,
+                >>::sse_decode(deserializer);
                 return crate::api::studio::subscription::BridgeSessionStreamEnvelope::Data {
                     frame: var_frame,
                 };
@@ -9285,6 +9298,15 @@ impl SseEncode for bool {
     }
 }
 
+impl SseEncode for Box<crate::api::studio::types::session_stream::BridgeSessionStreamFrame> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <crate::api::studio::types::session_stream::BridgeSessionStreamFrame>::sse_encode(
+            *self, serializer,
+        );
+    }
+}
+
 impl SseEncode for Box<crate::api::studio::types::runtime::BridgeTaskRuntimeDto> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -10427,9 +10449,7 @@ impl SseEncode for crate::api::studio::subscription::BridgeSessionStreamEnvelope
         match self {
             crate::api::studio::subscription::BridgeSessionStreamEnvelope::Data { frame } => {
                 <i32>::sse_encode(0, serializer);
-                <crate::api::studio::types::session_stream::BridgeSessionStreamFrame>::sse_encode(
-                    frame, serializer,
-                );
+                <Box<crate::api::studio::types::session_stream::BridgeSessionStreamFrame>>::sse_encode(frame, serializer);
             }
             crate::api::studio::subscription::BridgeSessionStreamEnvelope::Failure { error } => {
                 <i32>::sse_encode(1, serializer);

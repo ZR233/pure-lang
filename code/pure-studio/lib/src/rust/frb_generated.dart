@@ -2018,14 +2018,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgeSessionStreamFrame dco_decode_box_autoadd_bridge_session_stream_frame(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return dco_decode_bridge_session_stream_frame(raw);
-  }
-
-  @protected
   BridgeSessionTimelineEvent
   dco_decode_box_autoadd_bridge_session_timeline_event(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
@@ -2182,6 +2174,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_zhipu_coding_plan_usage_dto(raw);
+  }
+
+  @protected
+  BridgeSessionStreamFrame dco_decode_box_bridge_session_stream_frame(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_bridge_session_stream_frame(raw);
   }
 
   @protected
@@ -3275,7 +3275,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     switch (raw[0]) {
       case 0:
         return BridgeSessionStreamEnvelope_Data(
-          frame: dco_decode_box_autoadd_bridge_session_stream_frame(raw[1]),
+          frame: dco_decode_box_bridge_session_stream_frame(raw[1]),
         );
       case 1:
         return BridgeSessionStreamEnvelope_Failure(
@@ -5139,14 +5139,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgeSessionStreamFrame sse_decode_box_autoadd_bridge_session_stream_frame(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return (sse_decode_bridge_session_stream_frame(deserializer));
-  }
-
-  @protected
   BridgeSessionTimelineEvent
   sse_decode_box_autoadd_bridge_session_timeline_event(
     SseDeserializer deserializer,
@@ -5311,6 +5303,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_zhipu_coding_plan_usage_dto(deserializer));
+  }
+
+  @protected
+  BridgeSessionStreamFrame sse_decode_box_bridge_session_stream_frame(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_bridge_session_stream_frame(deserializer));
   }
 
   @protected
@@ -6703,7 +6703,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var tag_ = sse_decode_i_32(deserializer);
     switch (tag_) {
       case 0:
-        var var_frame = sse_decode_box_autoadd_bridge_session_stream_frame(
+        var var_frame = sse_decode_box_bridge_session_stream_frame(
           deserializer,
         );
         return BridgeSessionStreamEnvelope_Data(frame: var_frame);
@@ -9222,15 +9222,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  void sse_encode_box_autoadd_bridge_session_stream_frame(
-    BridgeSessionStreamFrame self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bridge_session_stream_frame(self, serializer);
-  }
-
-  @protected
   void sse_encode_box_autoadd_bridge_session_timeline_event(
     BridgeSessionTimelineEvent self,
     SseSerializer serializer,
@@ -9414,6 +9405,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_zhipu_coding_plan_usage_dto(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_bridge_session_stream_frame(
+    BridgeSessionStreamFrame self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bridge_session_stream_frame(self, serializer);
   }
 
   @protected
@@ -10484,7 +10484,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     switch (self) {
       case BridgeSessionStreamEnvelope_Data(frame: final frame):
         sse_encode_i_32(0, serializer);
-        sse_encode_box_autoadd_bridge_session_stream_frame(frame, serializer);
+        sse_encode_box_bridge_session_stream_frame(frame, serializer);
       case BridgeSessionStreamEnvelope_Failure(error: final error):
         sse_encode_i_32(1, serializer);
         sse_encode_box_autoadd_bridge_error(error, serializer);

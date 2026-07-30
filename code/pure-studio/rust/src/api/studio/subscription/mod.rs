@@ -16,8 +16,12 @@ use crate::frb_generated::StreamSink;
 
 #[derive(Debug, Clone)]
 pub enum BridgeSessionStreamEnvelope {
-    Data { frame: BridgeSessionStreamFrame },
-    Failure { error: BridgeError },
+    Data {
+        frame: Box<BridgeSessionStreamFrame>,
+    },
+    Failure {
+        error: BridgeError,
+    },
     Closed,
 }
 
@@ -224,7 +228,9 @@ pub async fn create_session_subscription(
                     match bridge_session_frame(frame) {
                         Ok(frame) => {
                             if sender
-                                .send(BridgeSessionStreamEnvelope::Data { frame })
+                                .send(BridgeSessionStreamEnvelope::Data {
+                                    frame: Box::new(frame),
+                                })
                                 .await
                                 .is_err()
                             {
