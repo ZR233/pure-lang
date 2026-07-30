@@ -3,6 +3,7 @@ part of 'studio_api.dart';
 class StudioBridgeEvent {
   const StudioBridgeEvent({
     required this.payload,
+    this.origin = StudioBridgeEventOrigin.session,
     this.eventId,
     this.sessionId,
     this.turnId,
@@ -12,6 +13,7 @@ class StudioBridgeEvent {
 
   factory StudioBridgeEvent.fromProduct(frb.BridgeProductEventEnvelope event) {
     return StudioBridgeEvent(
+      origin: StudioBridgeEventOrigin.product,
       eventId: event.eventId,
       sequence: event.sequence,
       createdAt: _dateFromUnix(event.createdAt),
@@ -40,12 +42,15 @@ class StudioBridgeEvent {
   }
 
   final String? eventId;
+  final StudioBridgeEventOrigin origin;
   final String? sessionId;
   final String? turnId;
   final BigInt? sequence;
   final DateTime? createdAt;
   final StudioBridgeEventPayload payload;
 }
+
+enum StudioBridgeEventOrigin { product, session }
 
 sealed class StudioBridgeEventPayload {
   const StudioBridgeEventPayload();
@@ -210,13 +215,6 @@ final class SettingsDraftSavedPayload extends StudioBridgeEventPayload {
   final bool saved;
 }
 
-class StudioTurnView {
-  const StudioTurnView({required this.sessionId, required this.status});
-
-  final String sessionId;
-  final String status;
-}
-
 StudioBridgeEventPayload _canonicalEventPayload(
   Map<String, Object?> kind, {
   required int sequence,
@@ -225,10 +223,7 @@ StudioBridgeEventPayload _canonicalEventPayload(
   return switch (_string(kind['type'])) {
     'turnChanged' => switch (_map(kind['turn'])) {
       final turn => TurnChangedPayload(
-        turn: StudioTurnView(
-          sessionId: _string(turn['sessionId'], fallback: sessionId),
-          status: _string(turn['status']),
-        ),
+        turn: _studioTurnViewFromJson(turn, fallbackSessionId: sessionId),
       ),
     },
     'messageChanged' => MessageUpdatedPayload(

@@ -305,9 +305,8 @@ impl StreamCompletionAccumulator {
                 content_index,
                 delta,
             } => {
-                let _ = id;
-                let _ = content_index;
-                self.raw_reasoning_parts.push(delta);
+                self.raw_reasoning_parts.push(delta.clone());
+                self.record_reasoning_content_delta(&id, content_index, delta, event_tx);
             }
             ModelStreamEvent::ToolInputStarted {
                 stream_id,
@@ -619,6 +618,21 @@ impl StreamCompletionAccumulator {
             return;
         };
         for event in trace.append_thinking_delta(item_id, chunk_index, delta) {
+            let _ = event_tx.send(event);
+        }
+    }
+
+    fn record_reasoning_content_delta(
+        &mut self,
+        item_id: &str,
+        chunk_index: u32,
+        delta: String,
+        event_tx: &AgentEventSender,
+    ) {
+        let Some(trace) = self.trace.as_mut() else {
+            return;
+        };
+        for event in trace.append_reasoning_content_delta(item_id, chunk_index, delta) {
             let _ = event_tx.send(event);
         }
     }

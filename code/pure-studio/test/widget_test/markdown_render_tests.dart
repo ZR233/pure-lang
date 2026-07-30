@@ -120,7 +120,7 @@ void registerMarkdownRenderTests() {
             height: 820,
             child: TimelineView(
               sessionId: 'session-1',
-              turnPhase: TurnPhase.completed,
+              turn: null,
               rows: timelineRowsFromMessages([message], parts: parts),
             ),
           ),
@@ -181,7 +181,7 @@ void registerMarkdownRenderTests() {
         home: Scaffold(
           body: TimelineView(
             sessionId: 'session-1',
-            turnPhase: TurnPhase.completed,
+            turn: null,
             rows: timelineRowsFromMessages([message], parts: parts),
           ),
         ),
@@ -296,7 +296,7 @@ void registerMarkdownRenderTests() {
             height: 820,
             child: TimelineView(
               sessionId: 'session-1',
-              turnPhase: TurnPhase.completed,
+              turn: null,
               rows: timelineRowsFromMessages([message], parts: parts),
             ),
           ),
@@ -366,7 +366,7 @@ void registerMarkdownRenderTests() {
               height: 820,
               child: TimelineView(
                 sessionId: sessionId,
-                turnPhase: TurnPhase.completed,
+                turn: null,
                 rows: timelineRowsFromMessages([
                   TimelineMessage(
                     id: message.id,
@@ -490,7 +490,9 @@ void registerMarkdownRenderTests() {
         type: TimelinePartType.reasoning,
         order: 0,
         revision: 0,
-        text: '## 分析调用结果\n\n正在分析调用结果。',
+        text: '',
+        reasoningSummary: const ['## 分析调用结果'],
+        reasoningContent: const ['正在分析调用结果。'],
         status: 'streaming',
         createdAt: now,
         updatedAt: now,
@@ -506,7 +508,13 @@ void registerMarkdownRenderTests() {
             height: 520,
             child: TimelineView(
               sessionId: 'session-1',
-              turnPhase: TurnPhase.streaming,
+              turn: _testTurn(
+                sessionId: 'session-1',
+                turnId: 'turn-1',
+                state: const StudioTurnState.inProgress(
+                  StudioTurnActivity.thinking,
+                ),
+              ),
               rows: timelineRowsFromMessages([message], parts: [part]),
             ),
           ),
@@ -568,7 +576,13 @@ void registerMarkdownRenderTests() {
               height: 520,
               child: TimelineView(
                 sessionId: 'session-1',
-                turnPhase: TurnPhase.streaming,
+                turn: _testTurn(
+                  sessionId: 'session-1',
+                  turnId: 'turn-1',
+                  state: const StudioTurnState.inProgress(
+                    StudioTurnActivity.thinking,
+                  ),
+                ),
                 rows: timelineRowsFromMessages([message], parts: [part]),
               ),
             ),
@@ -618,7 +632,7 @@ void registerMarkdownRenderTests() {
 
       Widget timelineFor({
         required List<TimelinePart> parts,
-        required TurnPhase phase,
+        required StudioTurnState? turnState,
       }) {
         return _timelineApp(
           home: Scaffold(
@@ -628,7 +642,13 @@ void registerMarkdownRenderTests() {
               child: TimelineView(
                 sessionId: message.sessionId,
                 rows: timelineRowsFromMessages([message], parts: parts),
-                turnPhase: phase,
+                turn: turnState == null
+                    ? null
+                    : _testTurn(
+                        sessionId: message.sessionId,
+                        turnId: message.turnId,
+                        state: turnState,
+                      ),
               ),
             ),
           ),
@@ -648,7 +668,12 @@ void registerMarkdownRenderTests() {
         status: 'streaming',
       );
       await tester.pumpWidget(
-        timelineFor(parts: [first, latest], phase: TurnPhase.streaming),
+        timelineFor(
+          parts: [first, latest],
+          turnState: const StudioTurnState.inProgress(
+            StudioTurnActivity.thinking,
+          ),
+        ),
       );
       await tester.pumpAndSettle();
 
@@ -667,7 +692,12 @@ void registerMarkdownRenderTests() {
         status: 'streaming',
       );
       await tester.pumpWidget(
-        timelineFor(parts: [first, latest], phase: TurnPhase.streaming),
+        timelineFor(
+          parts: [first, latest],
+          turnState: const StudioTurnState.inProgress(
+            StudioTurnActivity.thinking,
+          ),
+        ),
       );
       await tester.pumpAndSettle();
 
@@ -685,7 +715,7 @@ void registerMarkdownRenderTests() {
         status: 'completed',
       );
       await tester.pumpWidget(
-        timelineFor(parts: [first, completed], phase: TurnPhase.completed),
+        timelineFor(parts: [first, completed], turnState: null),
       );
       await tester.pumpAndSettle();
 
@@ -734,7 +764,7 @@ void registerMarkdownRenderTests() {
             child: TimelineView(
               sessionId: message.sessionId,
               rows: timelineRowsFromMessages([message], parts: parts),
-              turnPhase: TurnPhase.completed,
+              turn: null,
             ),
           ),
         ),

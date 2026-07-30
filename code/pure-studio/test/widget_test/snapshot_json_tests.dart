@@ -2,74 +2,77 @@ part of '../widget_test.dart';
 
 void registerSnapshotJsonTests() {
   test('canonical session snapshot filters synthetic lifecycle parts', () {
-    final state = applyCanonicalSessionSnapshot(_emptyState(), {
-      'sessionId': 'session-1',
-      'throughSequence': 4,
-      'messages': [
-        {
-          'messageId': 'turn-1:assistant',
-          'sessionId': 'session-1',
-          'turnId': 'turn-1',
-          'role': 'assistant',
-          'status': 'completed',
-          'createdAt': 1,
-          'updatedAt': 1,
-        },
-      ],
-      'parts': [
-        {
-          'partId': 'turn-1',
-          'messageId': 'turn-1:assistant',
-          'sessionId': 'session-1',
-          'turnId': 'turn-1',
-          'order': 0,
-          'revision': 0,
-          'status': 'completed',
-          'createdAt': 1,
-          'updatedAt': 1,
-          'content': {'type': 'turn'},
-          'synthetic': true,
-          'ignored': false,
-        },
-        {
-          'partId': 'turn-1-inf-1',
-          'messageId': 'turn-1:assistant',
-          'sessionId': 'session-1',
-          'turnId': 'turn-1',
-          'order': 1,
-          'revision': 0,
-          'status': 'completed',
-          'createdAt': 1,
-          'updatedAt': 1,
-          'content': {
-            'type': 'inference',
-            'inferenceId': 'inf-1',
-            'model': 'model',
+    final state = applyCanonicalSessionSnapshot(
+      _emptyState(),
+      StudioSessionSnapshot.fromLegacyJson({
+        'sessionId': 'session-1',
+        'throughSequence': 4,
+        'messages': [
+          {
+            'messageId': 'turn-1:assistant',
+            'sessionId': 'session-1',
+            'turnId': 'turn-1',
+            'role': 'assistant',
+            'status': 'completed',
+            'createdAt': 1,
+            'updatedAt': 1,
           },
-          'synthetic': true,
-          'ignored': false,
-        },
-        {
-          'partId': 'turn-1-final',
-          'messageId': 'turn-1:assistant',
-          'sessionId': 'session-1',
-          'turnId': 'turn-1',
-          'order': 2,
-          'revision': 0,
-          'status': 'completed',
-          'createdAt': 1,
-          'updatedAt': 1,
-          'content': {
-            'type': 'text',
-            'channel': 'final',
-            'text': 'visible answer',
-            'attachments': <Object?>[],
+        ],
+        'parts': [
+          {
+            'partId': 'turn-1',
+            'messageId': 'turn-1:assistant',
+            'sessionId': 'session-1',
+            'turnId': 'turn-1',
+            'order': 0,
+            'revision': 0,
+            'status': 'completed',
+            'createdAt': 1,
+            'updatedAt': 1,
+            'content': {'type': 'turn'},
+            'synthetic': true,
+            'ignored': false,
           },
-          'synthetic': false,
-          'ignored': false,
-        },
-      ],
-    });
+          {
+            'partId': 'turn-1-inf-1',
+            'messageId': 'turn-1:assistant',
+            'sessionId': 'session-1',
+            'turnId': 'turn-1',
+            'order': 1,
+            'revision': 0,
+            'status': 'completed',
+            'createdAt': 1,
+            'updatedAt': 1,
+            'content': {
+              'type': 'inference',
+              'inferenceId': 'inf-1',
+              'model': 'model',
+            },
+            'synthetic': true,
+            'ignored': false,
+          },
+          {
+            'partId': 'turn-1-final',
+            'messageId': 'turn-1:assistant',
+            'sessionId': 'session-1',
+            'turnId': 'turn-1',
+            'order': 2,
+            'revision': 0,
+            'status': 'completed',
+            'createdAt': 1,
+            'updatedAt': 1,
+            'content': {
+              'type': 'text',
+              'channel': 'final',
+              'text': 'visible answer',
+              'attachments': <Object?>[],
+            },
+            'synthetic': false,
+            'ignored': false,
+          },
+        ],
+      }),
+    );
 
     expect(state.partSnapshotsBySession['session-1']!.keys, {'turn-1-final'});
     expect(state.selectedTimelineRows.single.part!.text, 'visible answer');
@@ -269,6 +272,56 @@ void registerSnapshotJsonTests() {
 
     final state = container.read(studioControllerProvider).requireValue;
     expect(state.eventCursorsBySession['session-1'], 1);
+  });
+
+  test('product sequence does not suppress canonical session events', () async {
+    final api = _FakeStudioApi(
+      _emptyState().copyWith(eventCursorsBySession: const {'session-1': 1}),
+    );
+    final container = ProviderContainer(
+      overrides: [studioApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+
+    await container.read(studioControllerProvider.future);
+    api.emitGlobal(
+      StudioBridgeEvent.fromProduct(
+        frb.BridgeProductEventEnvelope(
+          eventId: 'product-task-99',
+          projectId: 'project-1',
+          sequence: BigInt.from(99),
+          createdAt: 1,
+          payload: const frb.BridgeProductEventPayload.sessionTaskChanged(
+            sessionId: 'session-1',
+          ),
+        ),
+      ),
+    );
+    api.emitSession(
+      _canonicalSessionEvent(
+        sessionId: 'session-1',
+        sequence: 2,
+        turnId: 'turn-2',
+        kind: {
+          'type': 'turnChanged',
+          'turn': {
+            'turnId': 'turn-2',
+            'sessionId': 'session-1',
+            'state': {'status': 'inProgress', 'activity': 'thinking'},
+            'updatedAt': 2,
+          },
+        },
+      ),
+    );
+    await pumpEventQueue();
+
+    final state = container.read(studioControllerProvider).requireValue;
+    expect(state.eventCursorsBySession['session-1'], 2);
+    expect(state.turnsBySession['session-1']?.turnId, 'turn-2');
+    expect(
+      state.turnsBySession['session-1']?.state,
+      const StudioTurnState.inProgress(StudioTurnActivity.thinking),
+    );
   });
 
   test('studio bridge event normalizes canonical session delta', () {

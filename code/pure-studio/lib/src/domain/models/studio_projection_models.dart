@@ -152,8 +152,6 @@ abstract class StatusBarView with _$StatusBarView {
     required List<ProviderSettingsView> providers,
     required List<RoleSettingsView> roles,
     required bool isBusy,
-    required TurnPhase statusPhase,
-    required InteractionKind? activeInteractionKind,
   }) = _StatusBarView;
 
   factory StatusBarView.fromWorkspace(AgentWorkspaceView workspace) {
@@ -164,8 +162,6 @@ abstract class StatusBarView with _$StatusBarView {
       providers: workspace.providers,
       roles: workspace.roles,
       isBusy: workspace.isBusy,
-      statusPhase: workspace.statusPhase,
-      activeInteractionKind: workspace.activeInteraction?.kind,
     );
   }
 

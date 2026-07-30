@@ -230,7 +230,12 @@ class TimelineReasoningGroup {
   }
 
   String get details => parts
-      .map((part) => part.text.trim())
+      .map((part) {
+        final raw = part.reasoningContent
+            .where((value) => value.trim().isNotEmpty)
+            .join('\n\n');
+        return raw.isNotEmpty ? raw : part.text.trim();
+      })
       .where((text) => text.isNotEmpty)
       .join('\n\n');
 
@@ -282,6 +287,8 @@ class TimelinePartSnapshot {
     required this.revision,
     this.sequence = 0,
     required this.text,
+    this.reasoningSummary = const [],
+    this.reasoningContent = const [],
     required this.status,
     required this.createdAt,
     required this.updatedAt,
@@ -305,6 +312,8 @@ class TimelinePartSnapshot {
   final int revision;
   final int sequence;
   final String text;
+  final List<String> reasoningSummary;
+  final List<String> reasoningContent;
   final String status;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -368,6 +377,8 @@ class TimelinePart {
     required this.messageId,
     required this.type,
     required this.text,
+    this.reasoningSummary = const [],
+    this.reasoningContent = const [],
     this.sessionId = '',
     this.turnId = '',
     this.order = 0,
@@ -397,6 +408,8 @@ class TimelinePart {
   final int order;
   final int sequence;
   final String text;
+  final List<String> reasoningSummary;
+  final List<String> reasoningContent;
   final String? title;
   final String status;
   final int revision;
@@ -419,9 +432,7 @@ TimelinePart timelinePartFromSnapshot(
   TimelinePartOverlay? overlay,
 }) {
   final text = snapshot.type == TimelinePartType.reasoning
-      ? overlay?.values['reasoning.summary'] ??
-            overlay?.values['text'] ??
-            snapshot.text
+      ? _reasoningText(snapshot, overlay)
       : overlay?.values['text'] ?? snapshot.text;
   final planContent = overlay?.values['planContent'] ?? snapshot.planContent;
   final snapshotTool = snapshot.tool;
@@ -456,6 +467,8 @@ TimelinePart timelinePartFromSnapshot(
     error: snapshot.error,
     title: _partTitleFromSnapshot(snapshot),
     text: visibleText,
+    reasoningSummary: _reasoningSummary(snapshot, overlay),
+    reasoningContent: _reasoningContent(snapshot, overlay),
     status: snapshot.status,
     textChannel: snapshot.textChannel,
     activityGroupId: snapshot.activityGroupId,
@@ -466,6 +479,46 @@ TimelinePart timelinePartFromSnapshot(
     synthetic: snapshot.synthetic,
     ignored: snapshot.ignored,
   );
+}
+
+String _reasoningText(
+  TimelinePartSnapshot snapshot,
+  TimelinePartOverlay? overlay,
+) {
+  final liveSummary = overlay?.values['reasoning.summary']?.trim();
+  if (liveSummary != null && liveSummary.isNotEmpty) {
+    return liveSummary;
+  }
+  final liveContent = overlay?.values['reasoning.content']?.trim();
+  if (liveContent != null && liveContent.isNotEmpty) {
+    return liveContent;
+  }
+  final summary = snapshot.reasoningSummary
+      .where((value) => value.trim().isNotEmpty)
+      .join('\n\n');
+  if (summary.isNotEmpty) {
+    return summary;
+  }
+  final content = snapshot.reasoningContent
+      .where((value) => value.trim().isNotEmpty)
+      .join('\n\n');
+  return content.isNotEmpty ? content : snapshot.text;
+}
+
+List<String> _reasoningSummary(
+  TimelinePartSnapshot snapshot,
+  TimelinePartOverlay? overlay,
+) {
+  final live = overlay?.values['reasoning.summary']?.trim();
+  return live != null && live.isNotEmpty ? [live] : snapshot.reasoningSummary;
+}
+
+List<String> _reasoningContent(
+  TimelinePartSnapshot snapshot,
+  TimelinePartOverlay? overlay,
+) {
+  final live = overlay?.values['reasoning.content']?.trim();
+  return live != null && live.isNotEmpty ? [live] : snapshot.reasoningContent;
 }
 
 String _partTitleFromSnapshot(TimelinePartSnapshot snapshot) {

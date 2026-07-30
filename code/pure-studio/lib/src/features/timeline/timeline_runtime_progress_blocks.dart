@@ -9,17 +9,9 @@ class _TimelineProgressGroupBlock extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 18),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const _Avatar(icon: Icons.auto_awesome),
-          Flexible(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 700),
-              child: _RuntimeProgressGroup(rows: block.rows),
-            ),
-          ),
-        ],
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 700),
+        child: _RuntimeProgressGroup(rows: block.rows),
       ),
     );
   }

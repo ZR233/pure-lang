@@ -152,11 +152,10 @@ pub async fn install_studio_update(
 pub(crate) async fn cancel_all_update_operations() {
     let operations = {
         let mut registry = update_operations().lock().await;
-        let operations = registry
+        registry
             .drain(..)
             .filter_map(|operation| operation.upgrade())
-            .collect::<Vec<_>>();
-        operations
+            .collect::<Vec<_>>()
     };
     for operation in operations {
         let _ = operation.cancellation.cancel();

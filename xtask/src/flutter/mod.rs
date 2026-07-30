@@ -425,7 +425,7 @@ fn build_gui_with_version(options: BuildGuiOptions, release_version: Option<&str
     }
 }
 
-fn build_gui_args<'a>(target: DesktopTarget, version_define: &'a str, demo: bool) -> Vec<&'a str> {
+fn build_gui_args(target: DesktopTarget, version_define: &str, demo: bool) -> Vec<&str> {
     let mut args = vec!["build", target.flutter_name(), "--release", version_define];
     if demo {
         args.push("--dart-define=PURE_STUDIO_DEMO=true");

@@ -288,6 +288,7 @@ mod tests {
             content: "# Plan\n\nImplement the fix.".to_string(),
             attachments: Vec::new(),
             thinking_chunks: Vec::new(),
+            reasoning_content_chunks: Vec::new(),
             tool: None,
             agent: None,
             inference: None,

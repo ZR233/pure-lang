@@ -36,11 +36,11 @@ pub use agent_runtime::{
     AgentTurnCheckpointHandle, AgentTurnFactory, AgentTurnOutcome, AgentTurnPreparationContext,
     AgentUpdateEnvelope, AgentUpdateKind, AgentWaitResult, AgentWakeBatch, AgentWakeContext,
     AgentWakeId, AgentWakePolicy, AgentWakeReason, CloseLifecycleRequest, DurableMailboxEnvelope,
-    InputDelivery, MailboxDeliveryPhase, MailboxDeliveryState, MailboxTurnTrigger,
-    PendingAgentInput, PreparedAgentTurn, PreparedSessionRuntime, RestoredAgentRuntime,
-    RestoredInputPolicy, RestoredSessionProjection, SessionId, SessionProjectionCommit,
-    SpawnLifecycleRequest, ToolEffectSet, TurnCheckpointReason, TurnFinalizationPolicy, TurnId,
-    TurnOutcomeKind,
+    InputDelivery, MailboxDeliveryPhase, MailboxDeliveryState, MailboxPresentation,
+    MailboxTurnTrigger, PendingAgentInput, PreparedAgentTurn, PreparedSessionRuntime,
+    RestoredAgentRuntime, RestoredInputPolicy, RestoredSessionProjection, SessionId,
+    SessionProjectionCommit, SpawnLifecycleRequest, ToolEffectSet, TurnCheckpointReason,
+    TurnFinalizationPolicy, TurnId, TurnOutcomeKind,
 };
 pub use attachment::MaterializedAttachment;
 pub use config::{

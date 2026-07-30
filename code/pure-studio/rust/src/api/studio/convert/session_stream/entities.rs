@@ -3,8 +3,8 @@ use pl_protocol::{
     AgentStatus, BudgetLimitKind, SessionAgentPart, SessionAgentSnapshot, SessionAttachment,
     SessionContextCompaction, SessionMessage, SessionMessageRole, SessionMessageStatus,
     SessionPart, SessionPartContent, SessionPartDelta, SessionPartDeltaField, SessionPartStatus,
-    SessionTextChannel, SessionToolPart, SessionTurn, SessionTurnStatus, SessionViewSnapshot,
-    TokenUsageSnapshot,
+    SessionTextChannel, SessionToolPart, SessionTurn, SessionTurnActivity, SessionTurnState,
+    SessionViewSnapshot, TokenUsageSnapshot,
 };
 
 use crate::api::studio::types::*;
@@ -110,7 +110,9 @@ fn part_content(value: SessionPartContent) -> Result<BridgeSessionPartContent> {
             text,
             attachments: attachments.into_iter().map(attachment).collect(),
         },
-        SessionPartContent::Reasoning { text } => BridgeSessionPartContent::Reasoning { text },
+        SessionPartContent::Reasoning { summary, content } => {
+            BridgeSessionPartContent::Reasoning { summary, content }
+        }
         SessionPartContent::Tool { tool } => BridgeSessionPartContent::Tool {
             tool: tool_part(tool)?,
         },
@@ -187,6 +189,9 @@ pub(super) fn part_delta(value: SessionPartDelta) -> BridgeSessionPartDelta {
             SessionPartDeltaField::ReasoningSummary => {
                 BridgeSessionPartDeltaField::ReasoningSummary
             }
+            SessionPartDeltaField::ReasoningContent => {
+                BridgeSessionPartDeltaField::ReasoningContent
+            }
             SessionPartDeltaField::PlanContent => BridgeSessionPartDeltaField::PlanContent,
             SessionPartDeltaField::ToolArguments => BridgeSessionPartDeltaField::ToolArguments,
             SessionPartDeltaField::ToolResult => BridgeSessionPartDeltaField::ToolResult,
@@ -200,22 +205,32 @@ pub(super) fn turn(value: SessionTurn) -> BridgeSessionTurn {
     BridgeSessionTurn {
         turn_id: value.turn_id,
         session_id: value.session_id,
-        status: match value.status {
-            SessionTurnStatus::Queued => BridgeSessionTurnStatus::Queued,
-            SessionTurnStatus::ContextLoading => BridgeSessionTurnStatus::ContextLoading,
-            SessionTurnStatus::WaitingForModel => BridgeSessionTurnStatus::WaitingForModel,
-            SessionTurnStatus::Streaming => BridgeSessionTurnStatus::Streaming,
-            SessionTurnStatus::WaitingForInteraction => {
-                BridgeSessionTurnStatus::WaitingForInteraction
-            }
-            SessionTurnStatus::RunningTool => BridgeSessionTurnStatus::RunningTool,
-            SessionTurnStatus::Persisting => BridgeSessionTurnStatus::Persisting,
-            SessionTurnStatus::Completed => BridgeSessionTurnStatus::Completed,
-            SessionTurnStatus::Failed => BridgeSessionTurnStatus::Failed,
-            SessionTurnStatus::Cancelled => BridgeSessionTurnStatus::Cancelled,
+        state: match value.state {
+            SessionTurnState::Queued => BridgeSessionTurnState::Queued,
+            SessionTurnState::InProgress { activity } => BridgeSessionTurnState::InProgress {
+                activity: turn_activity(activity),
+            },
+            SessionTurnState::Completed => BridgeSessionTurnState::Completed,
+            SessionTurnState::Failed { reason } => BridgeSessionTurnState::Failed { reason },
+            SessionTurnState::Cancelled { reason } => BridgeSessionTurnState::Cancelled { reason },
         },
-        reason: value.reason,
         updated_at: value.updated_at,
+    }
+}
+
+fn turn_activity(value: SessionTurnActivity) -> BridgeSessionTurnActivity {
+    match value {
+        SessionTurnActivity::Preparing => BridgeSessionTurnActivity::Preparing,
+        SessionTurnActivity::Thinking => BridgeSessionTurnActivity::Thinking,
+        SessionTurnActivity::Responding => BridgeSessionTurnActivity::Responding,
+        SessionTurnActivity::Planning => BridgeSessionTurnActivity::Planning,
+        SessionTurnActivity::RunningTool => BridgeSessionTurnActivity::RunningTool,
+        SessionTurnActivity::WaitingForApproval => BridgeSessionTurnActivity::WaitingForApproval,
+        SessionTurnActivity::WaitingForUserInput => BridgeSessionTurnActivity::WaitingForUserInput,
+        SessionTurnActivity::WaitingForPlanConfirmation => {
+            BridgeSessionTurnActivity::WaitingForPlanConfirmation
+        }
+        SessionTurnActivity::Persisting => BridgeSessionTurnActivity::Persisting,
     }
 }
 

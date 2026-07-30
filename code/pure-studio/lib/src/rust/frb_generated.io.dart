@@ -199,11 +199,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  BridgeSessionStreamFrame dco_decode_box_autoadd_bridge_session_stream_frame(
-    dynamic raw,
-  );
-
-  @protected
   BridgeSessionTimelineEvent
   dco_decode_box_autoadd_bridge_session_timeline_event(dynamic raw);
 
@@ -291,6 +286,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ZhipuCodingPlanUsageDto dco_decode_box_autoadd_zhipu_coding_plan_usage_dto(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeSessionStreamFrame dco_decode_box_bridge_session_stream_frame(
     dynamic raw,
   );
 
@@ -573,7 +573,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeSessionTurn dco_decode_bridge_session_turn(dynamic raw);
 
   @protected
-  BridgeSessionTurnStatus dco_decode_bridge_session_turn_status(dynamic raw);
+  BridgeSessionTurnActivity dco_decode_bridge_session_turn_activity(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeSessionTurnState dco_decode_bridge_session_turn_state(dynamic raw);
 
   @protected
   BridgeSessionViewSnapshot dco_decode_bridge_session_view_snapshot(
@@ -1229,11 +1234,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  BridgeSessionStreamFrame sse_decode_box_autoadd_bridge_session_stream_frame(
-    SseDeserializer deserializer,
-  );
-
-  @protected
   BridgeSessionTimelineEvent
   sse_decode_box_autoadd_bridge_session_timeline_event(
     SseDeserializer deserializer,
@@ -1331,6 +1331,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ZhipuCodingPlanUsageDto sse_decode_box_autoadd_zhipu_coding_plan_usage_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeSessionStreamFrame sse_decode_box_bridge_session_stream_frame(
     SseDeserializer deserializer,
   );
 
@@ -1687,7 +1692,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  BridgeSessionTurnStatus sse_decode_bridge_session_turn_status(
+  BridgeSessionTurnActivity sse_decode_bridge_session_turn_activity(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeSessionTurnState sse_decode_bridge_session_turn_state(
     SseDeserializer deserializer,
   );
 
@@ -2487,12 +2497,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  void sse_encode_box_autoadd_bridge_session_stream_frame(
-    BridgeSessionStreamFrame self,
-    SseSerializer serializer,
-  );
-
-  @protected
   void sse_encode_box_autoadd_bridge_session_timeline_event(
     BridgeSessionTimelineEvent self,
     SseSerializer serializer,
@@ -2609,6 +2613,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_zhipu_coding_plan_usage_dto(
     ZhipuCodingPlanUsageDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_bridge_session_stream_frame(
+    BridgeSessionStreamFrame self,
     SseSerializer serializer,
   );
 
@@ -3042,8 +3052,14 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  void sse_encode_bridge_session_turn_status(
-    BridgeSessionTurnStatus self,
+  void sse_encode_bridge_session_turn_activity(
+    BridgeSessionTurnActivity self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_session_turn_state(
+    BridgeSessionTurnState self,
     SseSerializer serializer,
   );
 

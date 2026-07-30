@@ -19,7 +19,7 @@ void registerDemoProjectTests() {
     await pumpEventQueue();
 
     final state = container.read(studioControllerProvider).requireValue;
-    expect(state.turnPhase, TurnPhase.completed);
+    expect(state.turn?.state, const StudioTurnState.completed());
     expect(
       state.selectedTimelineRows
           .where((row) => row.role == 'user')

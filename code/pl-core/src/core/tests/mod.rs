@@ -87,6 +87,7 @@ fn live_tool_result_deltas(events: &[AgentEvent], item_id: &str) -> Vec<String> 
                     pl_trace::TraceDelta::ToolResult { delta } => Some(delta.clone()),
                     pl_trace::TraceDelta::Text { .. }
                     | pl_trace::TraceDelta::Thinking { .. }
+                    | pl_trace::TraceDelta::ReasoningContent { .. }
                     | pl_trace::TraceDelta::ToolArguments { .. }
                     | pl_trace::TraceDelta::Plan { .. } => None,
                 }

@@ -1691,6 +1691,17 @@ impl SseDecode for bool {
     }
 }
 
+impl SseDecode for Box<crate::api::studio::types::session_stream::BridgeSessionStreamFrame> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        return Box::new(
+            <crate::api::studio::types::session_stream::BridgeSessionStreamFrame>::sse_decode(
+                deserializer,
+            ),
+        );
+    }
+}
+
 impl SseDecode for Box<crate::api::studio::types::runtime::BridgeTaskRuntimeDto> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -3015,8 +3026,9 @@ impl SseDecode for crate::api::studio::types::session_stream::BridgeSessionPartC
                 };
             }
             1 => {
-                let mut var_text = <String>::sse_decode(deserializer);
-                return crate::api::studio::types::session_stream::BridgeSessionPartContent::Reasoning{text: var_text};
+                let mut var_summary = <Vec<String>>::sse_decode(deserializer);
+                let mut var_content = <Vec<String>>::sse_decode(deserializer);
+                return crate::api::studio::types::session_stream::BridgeSessionPartContent::Reasoning{summary: var_summary, content: var_content};
             }
             2 => {
                 let mut var_tool =
@@ -3091,9 +3103,10 @@ impl SseDecode for crate::api::studio::types::session_stream::BridgeSessionPartD
         return match inner {
             0 => crate::api::studio::types::session_stream::BridgeSessionPartDeltaField::Text,
 1 => crate::api::studio::types::session_stream::BridgeSessionPartDeltaField::ReasoningSummary,
-2 => crate::api::studio::types::session_stream::BridgeSessionPartDeltaField::PlanContent,
-3 => crate::api::studio::types::session_stream::BridgeSessionPartDeltaField::ToolArguments,
-4 => crate::api::studio::types::session_stream::BridgeSessionPartDeltaField::ToolResult,
+2 => crate::api::studio::types::session_stream::BridgeSessionPartDeltaField::ReasoningContent,
+3 => crate::api::studio::types::session_stream::BridgeSessionPartDeltaField::PlanContent,
+4 => crate::api::studio::types::session_stream::BridgeSessionPartDeltaField::ToolArguments,
+5 => crate::api::studio::types::session_stream::BridgeSessionPartDeltaField::ToolResult,
             _ => unreachable!("Invalid variant for BridgeSessionPartDeltaField: {}", inner),
         };
     }
@@ -3224,7 +3237,9 @@ impl SseDecode for crate::api::studio::subscription::BridgeSessionStreamEnvelope
         let mut tag_ = <i32>::sse_decode(deserializer);
         match tag_ {
             0 => {
-                let mut var_frame = <crate::api::studio::types::session_stream::BridgeSessionStreamFrame>::sse_decode(deserializer);
+                let mut var_frame = <Box<
+                    crate::api::studio::types::session_stream::BridgeSessionStreamFrame,
+                >>::sse_decode(deserializer);
                 return crate::api::studio::subscription::BridgeSessionStreamEnvelope::Data {
                     frame: var_frame,
                 };
@@ -3374,39 +3389,68 @@ impl SseDecode for crate::api::studio::types::session_stream::BridgeSessionTurn 
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_turnId = <String>::sse_decode(deserializer);
         let mut var_sessionId = <String>::sse_decode(deserializer);
-        let mut var_status =
-            <crate::api::studio::types::session_stream::BridgeSessionTurnStatus>::sse_decode(
+        let mut var_state =
+            <crate::api::studio::types::session_stream::BridgeSessionTurnState>::sse_decode(
                 deserializer,
             );
-        let mut var_reason = <Option<String>>::sse_decode(deserializer);
         let mut var_updatedAt = <i64>::sse_decode(deserializer);
         return crate::api::studio::types::session_stream::BridgeSessionTurn {
             turn_id: var_turnId,
             session_id: var_sessionId,
-            status: var_status,
-            reason: var_reason,
+            state: var_state,
             updated_at: var_updatedAt,
         };
     }
 }
 
-impl SseDecode for crate::api::studio::types::session_stream::BridgeSessionTurnStatus {
+impl SseDecode for crate::api::studio::types::session_stream::BridgeSessionTurnActivity {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut inner = <i32>::sse_decode(deserializer);
         return match inner {
-            0 => crate::api::studio::types::session_stream::BridgeSessionTurnStatus::Queued,
-1 => crate::api::studio::types::session_stream::BridgeSessionTurnStatus::ContextLoading,
-2 => crate::api::studio::types::session_stream::BridgeSessionTurnStatus::WaitingForModel,
-3 => crate::api::studio::types::session_stream::BridgeSessionTurnStatus::Streaming,
-4 => crate::api::studio::types::session_stream::BridgeSessionTurnStatus::WaitingForInteraction,
-5 => crate::api::studio::types::session_stream::BridgeSessionTurnStatus::RunningTool,
-6 => crate::api::studio::types::session_stream::BridgeSessionTurnStatus::Persisting,
-7 => crate::api::studio::types::session_stream::BridgeSessionTurnStatus::Completed,
-8 => crate::api::studio::types::session_stream::BridgeSessionTurnStatus::Failed,
-9 => crate::api::studio::types::session_stream::BridgeSessionTurnStatus::Cancelled,
-            _ => unreachable!("Invalid variant for BridgeSessionTurnStatus: {}", inner),
+            0 => crate::api::studio::types::session_stream::BridgeSessionTurnActivity::Preparing,
+1 => crate::api::studio::types::session_stream::BridgeSessionTurnActivity::Thinking,
+2 => crate::api::studio::types::session_stream::BridgeSessionTurnActivity::Responding,
+3 => crate::api::studio::types::session_stream::BridgeSessionTurnActivity::Planning,
+4 => crate::api::studio::types::session_stream::BridgeSessionTurnActivity::RunningTool,
+5 => crate::api::studio::types::session_stream::BridgeSessionTurnActivity::WaitingForApproval,
+6 => crate::api::studio::types::session_stream::BridgeSessionTurnActivity::WaitingForUserInput,
+7 => crate::api::studio::types::session_stream::BridgeSessionTurnActivity::WaitingForPlanConfirmation,
+8 => crate::api::studio::types::session_stream::BridgeSessionTurnActivity::Persisting,
+            _ => unreachable!("Invalid variant for BridgeSessionTurnActivity: {}", inner),
         };
+    }
+}
+
+impl SseDecode for crate::api::studio::types::session_stream::BridgeSessionTurnState {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut tag_ = <i32>::sse_decode(deserializer);
+        match tag_ {
+            0 => {
+                return crate::api::studio::types::session_stream::BridgeSessionTurnState::Queued;
+            }
+            1 => {
+                let mut var_activity = <crate::api::studio::types::session_stream::BridgeSessionTurnActivity>::sse_decode(deserializer);
+                return crate::api::studio::types::session_stream::BridgeSessionTurnState::InProgress{activity: var_activity};
+            }
+            2 => {
+                return crate::api::studio::types::session_stream::BridgeSessionTurnState::Completed;
+            }
+            3 => {
+                let mut var_reason = <String>::sse_decode(deserializer);
+                return crate::api::studio::types::session_stream::BridgeSessionTurnState::Failed {
+                    reason: var_reason,
+                };
+            }
+            4 => {
+                let mut var_reason = <String>::sse_decode(deserializer);
+                return crate::api::studio::types::session_stream::BridgeSessionTurnState::Cancelled{reason: var_reason};
+            }
+            _ => {
+                unimplemented!("");
+            }
+        }
     }
 }
 
@@ -7264,8 +7308,14 @@ impl flutter_rust_bridge::IntoDart
             ]
             .into_dart(),
             crate::api::studio::types::session_stream::BridgeSessionPartContent::Reasoning {
-                text,
-            } => [1.into_dart(), text.into_into_dart().into_dart()].into_dart(),
+                summary,
+                content,
+            } => [
+                1.into_dart(),
+                summary.into_into_dart().into_dart(),
+                content.into_into_dart().into_dart(),
+            ]
+            .into_dart(),
             crate::api::studio::types::session_stream::BridgeSessionPartContent::Tool { tool } => {
                 [2.into_dart(), tool.into_into_dart().into_dart()].into_dart()
             }
@@ -7351,9 +7401,10 @@ impl flutter_rust_bridge::IntoDart
         match self {
             Self::Text => 0.into_dart(),
             Self::ReasoningSummary => 1.into_dart(),
-            Self::PlanContent => 2.into_dart(),
-            Self::ToolArguments => 3.into_dart(),
-            Self::ToolResult => 4.into_dart(),
+            Self::ReasoningContent => 2.into_dart(),
+            Self::PlanContent => 3.into_dart(),
+            Self::ToolArguments => 4.into_dart(),
+            Self::ToolResult => 5.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -7706,8 +7757,7 @@ impl flutter_rust_bridge::IntoDart
         [
             self.turn_id.into_into_dart().into_dart(),
             self.session_id.into_into_dart().into_dart(),
-            self.status.into_into_dart().into_dart(),
-            self.reason.into_into_dart().into_dart(),
+            self.state.into_into_dart().into_dart(),
             self.updated_at.into_into_dart().into_dart(),
         ]
         .into_dart()
@@ -7726,34 +7776,75 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::session_stream
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart
-    for crate::api::studio::types::session_stream::BridgeSessionTurnStatus
+    for crate::api::studio::types::session_stream::BridgeSessionTurnActivity
 {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         match self {
-            Self::Queued => 0.into_dart(),
-            Self::ContextLoading => 1.into_dart(),
-            Self::WaitingForModel => 2.into_dart(),
-            Self::Streaming => 3.into_dart(),
-            Self::WaitingForInteraction => 4.into_dart(),
-            Self::RunningTool => 5.into_dart(),
-            Self::Persisting => 6.into_dart(),
-            Self::Completed => 7.into_dart(),
-            Self::Failed => 8.into_dart(),
-            Self::Cancelled => 9.into_dart(),
+            Self::Preparing => 0.into_dart(),
+            Self::Thinking => 1.into_dart(),
+            Self::Responding => 2.into_dart(),
+            Self::Planning => 3.into_dart(),
+            Self::RunningTool => 4.into_dart(),
+            Self::WaitingForApproval => 5.into_dart(),
+            Self::WaitingForUserInput => 6.into_dart(),
+            Self::WaitingForPlanConfirmation => 7.into_dart(),
+            Self::Persisting => 8.into_dart(),
             _ => unreachable!(),
         }
     }
 }
 impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
-    for crate::api::studio::types::session_stream::BridgeSessionTurnStatus
+    for crate::api::studio::types::session_stream::BridgeSessionTurnActivity
 {
 }
 impl
     flutter_rust_bridge::IntoIntoDart<
-        crate::api::studio::types::session_stream::BridgeSessionTurnStatus,
-    > for crate::api::studio::types::session_stream::BridgeSessionTurnStatus
+        crate::api::studio::types::session_stream::BridgeSessionTurnActivity,
+    > for crate::api::studio::types::session_stream::BridgeSessionTurnActivity
 {
-    fn into_into_dart(self) -> crate::api::studio::types::session_stream::BridgeSessionTurnStatus {
+    fn into_into_dart(
+        self,
+    ) -> crate::api::studio::types::session_stream::BridgeSessionTurnActivity {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart
+    for crate::api::studio::types::session_stream::BridgeSessionTurnState
+{
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            crate::api::studio::types::session_stream::BridgeSessionTurnState::Queued => {
+                [0.into_dart()].into_dart()
+            }
+            crate::api::studio::types::session_stream::BridgeSessionTurnState::InProgress {
+                activity,
+            } => [1.into_dart(), activity.into_into_dart().into_dart()].into_dart(),
+            crate::api::studio::types::session_stream::BridgeSessionTurnState::Completed => {
+                [2.into_dart()].into_dart()
+            }
+            crate::api::studio::types::session_stream::BridgeSessionTurnState::Failed {
+                reason,
+            } => [3.into_dart(), reason.into_into_dart().into_dart()].into_dart(),
+            crate::api::studio::types::session_stream::BridgeSessionTurnState::Cancelled {
+                reason,
+            } => [4.into_dart(), reason.into_into_dart().into_dart()].into_dart(),
+            _ => {
+                unimplemented!("");
+            }
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::session_stream::BridgeSessionTurnState
+{
+}
+impl
+    flutter_rust_bridge::IntoIntoDart<
+        crate::api::studio::types::session_stream::BridgeSessionTurnState,
+    > for crate::api::studio::types::session_stream::BridgeSessionTurnState
+{
+    fn into_into_dart(self) -> crate::api::studio::types::session_stream::BridgeSessionTurnState {
         self
     }
 }
@@ -9207,6 +9298,15 @@ impl SseEncode for bool {
     }
 }
 
+impl SseEncode for Box<crate::api::studio::types::session_stream::BridgeSessionStreamFrame> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <crate::api::studio::types::session_stream::BridgeSessionStreamFrame>::sse_encode(
+            *self, serializer,
+        );
+    }
+}
+
 impl SseEncode for Box<crate::api::studio::types::runtime::BridgeTaskRuntimeDto> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -10190,10 +10290,12 @@ impl SseEncode for crate::api::studio::types::session_stream::BridgeSessionPartC
                 <Vec<crate::api::studio::types::session_stream::BridgeSessionAttachment>>::sse_encode(attachments, serializer);
             }
             crate::api::studio::types::session_stream::BridgeSessionPartContent::Reasoning {
-                text,
+                summary,
+                content,
             } => {
                 <i32>::sse_encode(1, serializer);
-                <String>::sse_encode(text, serializer);
+                <Vec<String>>::sse_encode(summary, serializer);
+                <Vec<String>>::sse_encode(content, serializer);
             }
             crate::api::studio::types::session_stream::BridgeSessionPartContent::Tool { tool } => {
                 <i32>::sse_encode(2, serializer);
@@ -10259,9 +10361,10 @@ impl SseEncode for crate::api::studio::types::session_stream::BridgeSessionPartD
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <i32>::sse_encode(match self {crate::api::studio::types::session_stream::BridgeSessionPartDeltaField::Text => { 0 }
 crate::api::studio::types::session_stream::BridgeSessionPartDeltaField::ReasoningSummary => { 1 }
-crate::api::studio::types::session_stream::BridgeSessionPartDeltaField::PlanContent => { 2 }
-crate::api::studio::types::session_stream::BridgeSessionPartDeltaField::ToolArguments => { 3 }
-crate::api::studio::types::session_stream::BridgeSessionPartDeltaField::ToolResult => { 4 }
+crate::api::studio::types::session_stream::BridgeSessionPartDeltaField::ReasoningContent => { 2 }
+crate::api::studio::types::session_stream::BridgeSessionPartDeltaField::PlanContent => { 3 }
+crate::api::studio::types::session_stream::BridgeSessionPartDeltaField::ToolArguments => { 4 }
+crate::api::studio::types::session_stream::BridgeSessionPartDeltaField::ToolResult => { 5 }
  _ => { unimplemented!(""); }}, serializer);
     }
 }
@@ -10346,9 +10449,7 @@ impl SseEncode for crate::api::studio::subscription::BridgeSessionStreamEnvelope
         match self {
             crate::api::studio::subscription::BridgeSessionStreamEnvelope::Data { frame } => {
                 <i32>::sse_encode(0, serializer);
-                <crate::api::studio::types::session_stream::BridgeSessionStreamFrame>::sse_encode(
-                    frame, serializer,
-                );
+                <Box<crate::api::studio::types::session_stream::BridgeSessionStreamFrame>>::sse_encode(frame, serializer);
             }
             crate::api::studio::subscription::BridgeSessionStreamEnvelope::Failure { error } => {
                 <i32>::sse_encode(1, serializer);
@@ -10451,29 +10552,63 @@ impl SseEncode for crate::api::studio::types::session_stream::BridgeSessionTurn 
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <String>::sse_encode(self.turn_id, serializer);
         <String>::sse_encode(self.session_id, serializer);
-        <crate::api::studio::types::session_stream::BridgeSessionTurnStatus>::sse_encode(
-            self.status,
-            serializer,
+        <crate::api::studio::types::session_stream::BridgeSessionTurnState>::sse_encode(
+            self.state, serializer,
         );
-        <Option<String>>::sse_encode(self.reason, serializer);
         <i64>::sse_encode(self.updated_at, serializer);
     }
 }
 
-impl SseEncode for crate::api::studio::types::session_stream::BridgeSessionTurnStatus {
+impl SseEncode for crate::api::studio::types::session_stream::BridgeSessionTurnActivity {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <i32>::sse_encode(match self {crate::api::studio::types::session_stream::BridgeSessionTurnStatus::Queued => { 0 }
-crate::api::studio::types::session_stream::BridgeSessionTurnStatus::ContextLoading => { 1 }
-crate::api::studio::types::session_stream::BridgeSessionTurnStatus::WaitingForModel => { 2 }
-crate::api::studio::types::session_stream::BridgeSessionTurnStatus::Streaming => { 3 }
-crate::api::studio::types::session_stream::BridgeSessionTurnStatus::WaitingForInteraction => { 4 }
-crate::api::studio::types::session_stream::BridgeSessionTurnStatus::RunningTool => { 5 }
-crate::api::studio::types::session_stream::BridgeSessionTurnStatus::Persisting => { 6 }
-crate::api::studio::types::session_stream::BridgeSessionTurnStatus::Completed => { 7 }
-crate::api::studio::types::session_stream::BridgeSessionTurnStatus::Failed => { 8 }
-crate::api::studio::types::session_stream::BridgeSessionTurnStatus::Cancelled => { 9 }
+        <i32>::sse_encode(match self {crate::api::studio::types::session_stream::BridgeSessionTurnActivity::Preparing => { 0 }
+crate::api::studio::types::session_stream::BridgeSessionTurnActivity::Thinking => { 1 }
+crate::api::studio::types::session_stream::BridgeSessionTurnActivity::Responding => { 2 }
+crate::api::studio::types::session_stream::BridgeSessionTurnActivity::Planning => { 3 }
+crate::api::studio::types::session_stream::BridgeSessionTurnActivity::RunningTool => { 4 }
+crate::api::studio::types::session_stream::BridgeSessionTurnActivity::WaitingForApproval => { 5 }
+crate::api::studio::types::session_stream::BridgeSessionTurnActivity::WaitingForUserInput => { 6 }
+crate::api::studio::types::session_stream::BridgeSessionTurnActivity::WaitingForPlanConfirmation => { 7 }
+crate::api::studio::types::session_stream::BridgeSessionTurnActivity::Persisting => { 8 }
  _ => { unimplemented!(""); }}, serializer);
+    }
+}
+
+impl SseEncode for crate::api::studio::types::session_stream::BridgeSessionTurnState {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        match self {
+            crate::api::studio::types::session_stream::BridgeSessionTurnState::Queued => {
+                <i32>::sse_encode(0, serializer);
+            }
+            crate::api::studio::types::session_stream::BridgeSessionTurnState::InProgress {
+                activity,
+            } => {
+                <i32>::sse_encode(1, serializer);
+                <crate::api::studio::types::session_stream::BridgeSessionTurnActivity>::sse_encode(
+                    activity, serializer,
+                );
+            }
+            crate::api::studio::types::session_stream::BridgeSessionTurnState::Completed => {
+                <i32>::sse_encode(2, serializer);
+            }
+            crate::api::studio::types::session_stream::BridgeSessionTurnState::Failed {
+                reason,
+            } => {
+                <i32>::sse_encode(3, serializer);
+                <String>::sse_encode(reason, serializer);
+            }
+            crate::api::studio::types::session_stream::BridgeSessionTurnState::Cancelled {
+                reason,
+            } => {
+                <i32>::sse_encode(4, serializer);
+                <String>::sse_encode(reason, serializer);
+            }
+            _ => {
+                unimplemented!("");
+            }
+        }
     }
 }
 

@@ -471,41 +471,29 @@ abstract class AppLocalizations {
   /// **'Context'**
   String get statusContextLabel;
 
-  /// No description provided for @statusTurnIdle.
-  ///
-  /// In en, this message translates to:
-  /// **'Idle'**
-  String get statusTurnIdle;
-
   /// No description provided for @statusTurnQueued.
   ///
   /// In en, this message translates to:
   /// **'Queued'**
   String get statusTurnQueued;
 
-  /// No description provided for @statusTurnContextLoading.
+  /// No description provided for @statusTurnPreparing.
   ///
   /// In en, this message translates to:
-  /// **'Loading context'**
-  String get statusTurnContextLoading;
+  /// **'Preparing context'**
+  String get statusTurnPreparing;
 
-  /// No description provided for @statusTurnWaitingForModel.
+  /// No description provided for @statusTurnResponding.
   ///
   /// In en, this message translates to:
-  /// **'Waiting for model'**
-  String get statusTurnWaitingForModel;
+  /// **'Responding'**
+  String get statusTurnResponding;
 
-  /// No description provided for @statusTurnStreaming.
+  /// No description provided for @statusTurnPlanning.
   ///
   /// In en, this message translates to:
-  /// **'Streaming'**
-  String get statusTurnStreaming;
-
-  /// No description provided for @statusTurnWaitingForInteraction.
-  ///
-  /// In en, this message translates to:
-  /// **'Waiting for interaction'**
-  String get statusTurnWaitingForInteraction;
+  /// **'Planning'**
+  String get statusTurnPlanning;
 
   /// No description provided for @statusTurnRunningTool.
   ///
@@ -513,29 +501,29 @@ abstract class AppLocalizations {
   /// **'Running tool'**
   String get statusTurnRunningTool;
 
-  /// No description provided for @statusTurnWaitingForAgents.
+  /// No description provided for @statusTurnWaitingForApproval.
   ///
   /// In en, this message translates to:
-  /// **'Waiting for agents'**
-  String get statusTurnWaitingForAgents;
+  /// **'Waiting for tool approval'**
+  String get statusTurnWaitingForApproval;
 
-  /// No description provided for @statusTurnCompleted.
+  /// No description provided for @statusTurnWaitingForUserInput.
   ///
   /// In en, this message translates to:
-  /// **'Completed'**
-  String get statusTurnCompleted;
+  /// **'Waiting for input'**
+  String get statusTurnWaitingForUserInput;
 
-  /// No description provided for @statusTurnFailed.
+  /// No description provided for @statusTurnWaitingForPlanConfirmation.
   ///
   /// In en, this message translates to:
-  /// **'Failed'**
-  String get statusTurnFailed;
+  /// **'Waiting for plan confirmation'**
+  String get statusTurnWaitingForPlanConfirmation;
 
-  /// No description provided for @statusTurnCancelled.
+  /// No description provided for @statusTurnPersisting.
   ///
   /// In en, this message translates to:
-  /// **'Cancelled'**
-  String get statusTurnCancelled;
+  /// **'Saving turn'**
+  String get statusTurnPersisting;
 
   /// No description provided for @statusInteractionToolApproval.
   ///

@@ -2,20 +2,6 @@ enum PermissionMode { requestApproval, autoReview, fullAccess }
 
 enum StudioMode { simple, task }
 
-enum TurnPhase {
-  idle,
-  queued,
-  contextLoading,
-  waitingForModel,
-  streaming,
-  waitingForInteraction,
-  runningTool,
-  waitingForAgents,
-  completed,
-  failed,
-  cancelled,
-}
-
 enum TimelinePartType {
   text,
   reasoning,

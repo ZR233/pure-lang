@@ -3,7 +3,7 @@ part of '../widget_test.dart';
 Widget _timelineHarness({
   required String sessionId,
   required List<_ProjectedMessageFixture> messages,
-  TurnPhase turnPhase = TurnPhase.completed,
+  StudioTurnState turnState = const StudioTurnState.completed(),
 }) {
   return _timelineApp(
     home: Scaffold(
@@ -13,7 +13,7 @@ Widget _timelineHarness({
         child: TimelineView(
           sessionId: sessionId,
           rows: _rowsFromProjectedMessages(messages),
-          turnPhase: turnPhase,
+          turn: _testTurn(sessionId: sessionId, state: turnState),
         ),
       ),
     ),

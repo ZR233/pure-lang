@@ -9,7 +9,6 @@ import '../../shared/upward_popup_menu.dart';
 import 'context_usage_readout.dart';
 import 'status_bar_item.dart';
 import 'status_detail_popover.dart';
-import 'task_runtime_detail.dart';
 
 class SessionStatusBar extends ConsumerWidget {
   const SessionStatusBar({
@@ -32,7 +31,7 @@ class SessionStatusBar extends ConsumerWidget {
     final workspace = view ?? StatusBarView.fromWorkspace(this.workspace!);
     final runtime = workspace.runtime;
     final session = workspace.session;
-    final activityLabel = _runtimeActivityLabel(context, runtime);
+    final capabilityLabel = _runtimeCapabilityLabel(context, runtime);
     return DecoratedBox(
       decoration: BoxDecoration(
         color: context.studioPaper,
@@ -49,7 +48,7 @@ class SessionStatusBar extends ConsumerWidget {
                 final showModel = constraints.maxWidth >= 610;
                 final showEffort = constraints.maxWidth >= 720;
                 final showCost = constraints.maxWidth >= 790;
-                final showActivity = constraints.maxWidth >= 840;
+                final showCapabilities = constraints.maxWidth >= 840;
                 final hasOverflow =
                     (!showEffort &&
                         session.isRoot &&
@@ -58,7 +57,7 @@ class SessionStatusBar extends ConsumerWidget {
                           session.mode,
                         ).isNotEmpty) ||
                     (!showCost && runtime.costLabel.isNotEmpty) ||
-                    (!showActivity && activityLabel.isNotEmpty);
+                    (!showCapabilities && capabilityLabel.isNotEmpty);
                 return Row(
                   children: [
                     if (showTodo)
@@ -131,16 +130,16 @@ class SessionStatusBar extends ConsumerWidget {
                         detailBuilder: (context) =>
                             _CostDetail(runtime: runtime),
                       ),
-                    if (showActivity && activityLabel.isNotEmpty)
+                    if (showCapabilities && capabilityLabel.isNotEmpty)
                       _StatusReadout(
                         icon: Icons.tune_outlined,
-                        label: activityLabel,
+                        label: capabilityLabel,
                         tooltip: context.l10n.statusCapabilitiesTitle,
                         detailWidth: 520,
                         maxWidth: 160,
                         interactive: true,
                         detailBuilder: (context) =>
-                            _ActivityDetail(runtime: runtime),
+                            _CapabilityDetail(runtime: runtime),
                       ),
                     if (hasOverflow)
                       _StatusOverflow(
@@ -148,15 +147,11 @@ class SessionStatusBar extends ConsumerWidget {
                             ? null
                             : _selectedEffort(workspace, session.mode),
                         cost: runtime.costLabel,
-                        activity: activityLabel,
+                        capabilities: capabilityLabel,
                         runtime: runtime,
                       ),
                     const Spacer(),
                     const SizedBox(width: 8),
-                    _PhaseReadout(
-                      turnPhase: workspace.statusPhase,
-                      interactionKind: workspace.activeInteractionKind,
-                    ),
                   ],
                 );
               },
@@ -168,9 +163,11 @@ class SessionStatusBar extends ConsumerWidget {
   }
 }
 
-String _runtimeActivityLabel(BuildContext context, SessionRuntimeView runtime) {
+String _runtimeCapabilityLabel(
+  BuildContext context,
+  SessionRuntimeView runtime,
+) {
   final parts = [
-    if (runtime.task case final task?) context.taskPhaseLabel(task.phase),
     if (runtime.activeSkills.isNotEmpty)
       context.l10n.statusSkillsCount(runtime.activeSkills.length),
     if (runtime.activeMcpServers.isNotEmpty)
@@ -190,13 +187,13 @@ class _StatusOverflow extends StatelessWidget {
   const _StatusOverflow({
     required this.effort,
     required this.cost,
-    required this.activity,
+    required this.capabilities,
     required this.runtime,
   });
 
   final String? effort;
   final String cost;
-  final String activity;
+  final String capabilities;
   final SessionRuntimeView runtime;
 
   @override
@@ -228,10 +225,14 @@ class _StatusOverflow extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
             ),
           ),
-        if (activity.isNotEmpty)
+        if (capabilities.isNotEmpty)
           PopupMenuItem<_StatusOverflowAction>(
-            value: _StatusOverflowAction.activity,
-            child: Text(activity, maxLines: 2, overflow: TextOverflow.ellipsis),
+            value: _StatusOverflowAction.capabilities,
+            child: Text(
+              capabilities,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
       ],
     );
@@ -240,7 +241,7 @@ class _StatusOverflow extends StatelessWidget {
   void _showDetail(BuildContext context, _StatusOverflowAction action) {
     final detail = switch (action) {
       _StatusOverflowAction.cost => _CostDetail(runtime: runtime),
-      _StatusOverflowAction.activity => _ActivityDetail(runtime: runtime),
+      _StatusOverflowAction.capabilities => _CapabilityDetail(runtime: runtime),
     };
     showDialog<void>(
       context: context,
@@ -254,7 +255,7 @@ class _StatusOverflow extends StatelessWidget {
   }
 }
 
-enum _StatusOverflowAction { cost, activity }
+enum _StatusOverflowAction { cost, capabilities }
 
 class _SessionModeSelector extends ConsumerWidget {
   const _SessionModeSelector({required this.mode, required this.enabled});
@@ -556,42 +557,6 @@ class _CostDetail extends StatelessWidget {
   }
 }
 
-class _ActivityDetail extends StatelessWidget {
-  const _ActivityDetail({required this.runtime});
-
-  final SessionRuntimeView runtime;
-
-  @override
-  Widget build(BuildContext context) {
-    final hasCapabilities =
-        runtime.activeSkills.isNotEmpty ||
-        runtime.activeMcpServers.isNotEmpty ||
-        runtime.activeLspServers.isNotEmpty;
-    final task = runtime.task;
-    if (task == null) {
-      return _CapabilityDetail(runtime: runtime);
-    }
-    return ConstrainedBox(
-      constraints: const BoxConstraints(maxHeight: 480),
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            TaskRuntimeDetail(task: task),
-            if (hasCapabilities)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                child: Divider(height: 1, color: context.studioLine),
-              ),
-            if (hasCapabilities) _CapabilityDetail(runtime: runtime),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class _CapabilityDetail extends StatelessWidget {
   const _CapabilityDetail({required this.runtime});
 
@@ -641,52 +606,4 @@ String _formatStatusCount(int value) {
     buffer.write(text[index]);
   }
   return buffer.toString();
-}
-
-class _PhaseReadout extends StatelessWidget {
-  const _PhaseReadout({required this.turnPhase, required this.interactionKind});
-
-  final TurnPhase turnPhase;
-  final InteractionKind? interactionKind;
-
-  @override
-  Widget build(BuildContext context) {
-    final idle = interactionKind == null && turnPhase == TurnPhase.idle;
-    final label = interactionKind == null
-        ? context.turnPhaseLabel(turnPhase)
-        : context.interactionKindLabel(interactionKind!);
-    final foreground = idle ? context.studioInkSoft : StudioColors.clayDeep;
-    return SizedBox(
-      height: 26,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 7),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            DecoratedBox(
-              decoration: BoxDecoration(
-                color: idle ? context.studioInkSoft : StudioColors.clay,
-                borderRadius: BorderRadius.circular(StudioRadii.pill),
-              ),
-              child: const SizedBox.square(dimension: 5),
-            ),
-            const SizedBox(width: 7),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 120),
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: context.text.labelSmall?.copyWith(
-                  color: foreground,
-                  fontWeight: FontWeight.w500,
-                  height: 1,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 }

@@ -70,12 +70,12 @@ StudioBridgeEvent _partDeltaEvent({
 
 StudioBridgeEvent _turnChangedEvent({
   required String sessionId,
-  required String status,
+  required StudioTurnState state,
 }) {
   return StudioBridgeEvent(
     sessionId: sessionId,
     payload: TurnChangedPayload(
-      turn: StudioTurnView(sessionId: sessionId, status: status),
+      turn: _testTurn(sessionId: sessionId, state: state),
     ),
   );
 }

@@ -236,7 +236,8 @@ mod tests {
                 attachments: Vec::new(),
             },
             SessionPartContent::Reasoning {
-                text: "reasoning".to_string(),
+                summary: vec!["reasoning summary".to_string()],
+                content: vec!["reasoning content".to_string()],
             },
             SessionPartContent::Tool {
                 tool: SessionToolPart {

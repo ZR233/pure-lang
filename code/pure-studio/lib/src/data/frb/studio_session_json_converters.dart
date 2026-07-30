@@ -36,6 +36,8 @@ TimelinePartSnapshot timelinePartSnapshotFromJson(
     revision: _int(json['revision']),
     sequence: sequence,
     text: _partText(json, type),
+    reasoningSummary: _stringList(json['reasoningSummary']),
+    reasoningContent: _stringList(json['reasoningContent']),
     status: _string(json['status'], fallback: 'completed'),
     createdAt: _dateFromUnix(_int(json['createdAt'])),
     updatedAt: _dateFromUnix(_int(json['updatedAt'])),
@@ -69,6 +71,7 @@ String _timelineDeltaField(Object? value) {
   return switch (field) {
     'text' ||
     'reasoning.summary' ||
+    'reasoning.content' ||
     'planContent' ||
     'tool.arguments' ||
     'tool.result' => field,

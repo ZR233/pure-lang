@@ -43,10 +43,12 @@ impl StudioRuntime {
         let (handle, agent_id) = self.ensure_root_agent(&session_id).await?;
         let session = pl_core::SessionId::new(session_id.clone())?;
         let metadata = submit_metadata(&attachment_ids, &options);
+        let presentation = options.presentation.clone();
         let turn_id = handle
             .submit(
                 agent_id.clone(),
                 pl_core::AgentSubmitRequest::start(session.clone(), prompt.clone())
+                    .with_presentation(presentation)
                     .with_metadata(metadata),
             )
             .await
@@ -300,15 +302,6 @@ fn submit_metadata(
     attachment_ids: &[String],
     options: &StudioSubmitPromptOptions,
 ) -> serde_json::Value {
-    let (visible_prompt, synthetic, ignored) = match &options.user_prompt {
-        super::StudioUserPromptPresentation::Normal => (None, false, false),
-        super::StudioUserPromptPresentation::SyntheticVisible { visible_prompt } => {
-            (Some(visible_prompt.clone()), true, false)
-        }
-        super::StudioUserPromptPresentation::SyntheticIgnored { visible_prompt } => {
-            (Some(visible_prompt.clone()), true, true)
-        }
-    };
     let lifecycle = options.lifecycle.as_ref().map(|lifecycle| {
         serde_json::json!({
             "sessionId": lifecycle.session_id,
@@ -317,11 +310,6 @@ fn submit_metadata(
     });
     serde_json::json!({
         "attachmentIds": attachment_ids,
-        "userPrompt": {
-            "visiblePrompt": visible_prompt,
-            "synthetic": synthetic,
-            "ignored": ignored,
-        },
         "historyPolicy": "persist",
         "planLifecycle": lifecycle,
     })

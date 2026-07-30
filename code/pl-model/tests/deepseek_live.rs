@@ -92,6 +92,7 @@ async fn run_turn(api_key: &str, messages: Vec<Message>, turn_id: &str) -> TurnO
                 Ok(AgentEvent::TracePartDelta { event }) => match event.delta {
                     TraceDelta::Text { .. } => text_delta_count += 1,
                     TraceDelta::Thinking { .. }
+                    | TraceDelta::ReasoningContent { .. }
                     | TraceDelta::ToolArguments { .. }
                     | TraceDelta::ToolResult { .. }
                     | TraceDelta::Plan { .. } => {}

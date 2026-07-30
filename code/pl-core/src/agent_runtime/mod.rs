@@ -40,7 +40,7 @@ pub use state::{
     AgentRuntimeEventKind, AgentRuntimeResult, AgentSessionState, AgentSnapshot, AgentSpawnRequest,
     AgentSpawnResult, AgentSubmitRequest, AgentTurnOutcome, AgentWaitResult, AgentWakePolicy,
     DurableMailboxEnvelope, InputDelivery, MailboxDeliveryPhase, MailboxDeliveryState,
-    MailboxTurnTrigger, PendingAgentInput, TurnOutcomeKind,
+    MailboxPresentation, MailboxTurnTrigger, PendingAgentInput, TurnOutcomeKind,
 };
 pub(crate) use turn::AgentTurnMailboxHandle;
 pub use turn::{

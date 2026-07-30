@@ -118,6 +118,7 @@ pub(super) async fn wake_parent(
 等待下一次订阅通知。\n\n<agentWakeBatch>\n{batch_json}\n</agentWakeBatch>"
     ))
     .with_delivery(InputDelivery::Start)
+    .with_presentation(super::super::super::MailboxPresentation::SyntheticHidden)
     .with_wake_id(wake_id.clone())
     .with_wake_signal_ids(signal_ids)
     .with_metadata(serde_json::json!({
@@ -125,11 +126,6 @@ pub(super) async fn wake_parent(
         "agentWakeId": wake_id,
         "attachmentIds": [],
         "historyPolicy": "ephemeral",
-        "userPrompt": {
-            "visiblePrompt": "子代理状态更新",
-            "synthetic": true,
-            "ignored": true,
-        },
     }));
     match runtime
         .submit_current_session(parent_id.clone(), request)

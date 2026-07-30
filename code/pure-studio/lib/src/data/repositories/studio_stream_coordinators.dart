@@ -49,7 +49,7 @@ class SessionStreamCoordinator {
     final operation = _switchBarrier.then((_) async {
       final oldSubscription = _subscription;
       _subscription = null;
-      await oldSubscription?.cancel();
+      unawaited(oldSubscription?.cancel());
       if (_disposed || generation != _generation || sessionId == null) {
         return;
       }

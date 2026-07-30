@@ -8,7 +8,7 @@ use anyhow::{Context, Result, bail};
 
 use super::{
     StudioPlanImplementationLifecycle, StudioResolveInteractionResponse, StudioRuntime,
-    StudioSubmitPromptOptions, StudioSubmitPromptRequest, StudioUserPromptPresentation,
+    StudioSubmitPromptOptions, StudioSubmitPromptRequest,
 };
 
 const IMPLEMENT_PLAN_CURRENT_SESSION_PREFIX: &str = "A previous agent produced the plan below to accomplish the user's task. Implement the plan in the current session. Treat the plan as the source of user intent, re-read files as needed, and carry the work through implementation and verification.";
@@ -107,9 +107,7 @@ impl StudioRuntime {
                             prompt,
                             attachment_ids: Vec::new(),
                             options: StudioSubmitPromptOptions {
-                                user_prompt: StudioUserPromptPresentation::SyntheticIgnored {
-                                    visible_prompt: "实施计划".to_string(),
-                                },
+                                presentation: pl_core::MailboxPresentation::SyntheticHidden,
                                 lifecycle: Some(StudioPlanImplementationLifecycle {
                                     session_id: session_id.clone(),
                                     plan_id: plan_id.clone(),

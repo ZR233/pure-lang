@@ -339,4 +339,4 @@ CREATE INDEX idx_tool_approvals_session_created_at
 CREATE INDEX idx_work_units_run_status
     ON work_units(task_run_id, status, created_at ASC, id ASC);
 
-PRAGMA user_version = 7;
+PRAGMA user_version = 8;

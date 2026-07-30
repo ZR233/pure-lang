@@ -43,6 +43,7 @@ class _FakeStudioApi implements StudioApi {
   List<String> discoveredSkills = const [];
   int loadProviderUsagesCount = 0;
   Completer<List<ProviderUsageView>>? blockedProviderUsageLoad;
+  Completer<void>? blockedSessionCancellation;
   final Map<String, RecoveryCleanupPreview> recoveryPreviews = {};
   final Map<String, RecoveryCleanupPreview> projectCleanupPreviews = {};
   int previewProjectCleanupCount = 0;
@@ -266,7 +267,26 @@ class _FakeStudioApi implements StudioApi {
       sessionId: sessionId,
       afterSequence: afterSequence,
     ));
-    return _session.stream;
+    final blockedCancellation = blockedSessionCancellation;
+    if (blockedCancellation == null) {
+      return _session.stream;
+    }
+    late final StreamController<SessionStreamFrame> controller;
+    StreamSubscription<SessionStreamFrame>? forwarding;
+    controller = StreamController<SessionStreamFrame>(
+      onListen: () {
+        forwarding = _session.stream.listen(
+          controller.add,
+          onError: controller.addError,
+          onDone: controller.close,
+        );
+      },
+      onCancel: () async {
+        await forwarding?.cancel();
+        await blockedCancellation.future;
+      },
+    );
+    return controller.stream;
   }
 
   @override

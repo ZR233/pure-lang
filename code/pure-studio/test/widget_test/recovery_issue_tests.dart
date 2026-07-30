@@ -218,7 +218,9 @@ void registerRecoveryIssueTests() {
 
       final state = _twoProjectState(
         selectedProjectId: 'project-a',
-        turnPhase: TurnPhase.streaming,
+        turnState: const StudioTurnState.inProgress(
+          StudioTurnActivity.responding,
+        ),
       );
       final api = _FakeStudioApi(state);
       api.projectCleanupPreviews['project-a'] = const RecoveryCleanupPreview(

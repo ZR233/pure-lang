@@ -22,7 +22,7 @@ pub use records::{AttachmentRecord, ProjectRecord, SessionKind, SessionRecord, S
 pub use runtime::{
     StudioPlanImplementationLifecycle, StudioResolveInteractionResponse, StudioRuntime,
     StudioStopPromptResponse, StudioSubmitPromptOptions, StudioSubmitPromptRequest,
-    StudioSubmitPromptResponse, StudioUserPromptPresentation,
+    StudioSubmitPromptResponse,
 };
 pub use runtime_state::{
     StudioActiveTurn, StudioRecoveryCleanupPreview, StudioRecoveryCleanupResource,

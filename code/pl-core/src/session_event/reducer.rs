@@ -75,7 +75,7 @@ pub(super) fn apply_session_event(
                     actual: delta.revision,
                 });
             }
-            apply_delta(part, delta.field, &delta.delta)?;
+            apply_delta(part, delta.field, delta.chunk_index, &delta.delta)?;
             part.revision = delta.revision;
             if let SessionEventPosition::Transient { revision } = event.position
                 && revision != delta.revision
@@ -132,13 +132,21 @@ pub(super) fn apply_session_event(
 fn apply_delta(
     part: &mut pl_protocol::SessionPart,
     field: SessionPartDeltaField,
+    chunk_index: Option<u32>,
     delta: &str,
 ) -> Result<(), SessionEventError> {
     match (&mut part.content, field) {
-        (SessionPartContent::Text { text, .. }, SessionPartDeltaField::Text)
-        | (SessionPartContent::Reasoning { text }, SessionPartDeltaField::ReasoningSummary) => {
+        (SessionPartContent::Text { text, .. }, SessionPartDeltaField::Text) => {
             text.push_str(delta)
         }
+        (
+            SessionPartContent::Reasoning { summary, .. },
+            SessionPartDeltaField::ReasoningSummary,
+        ) => append_reasoning_chunk(summary, chunk_index, delta),
+        (
+            SessionPartContent::Reasoning { content, .. },
+            SessionPartDeltaField::ReasoningContent,
+        ) => append_reasoning_chunk(content, chunk_index, delta),
         (SessionPartContent::Plan { content }, SessionPartDeltaField::PlanContent) => {
             content.push_str(delta)
         }
@@ -155,6 +163,14 @@ fn apply_delta(
         }
     }
     Ok(())
+}
+
+fn append_reasoning_chunk(chunks: &mut Vec<String>, chunk_index: Option<u32>, delta: &str) {
+    let index = chunk_index.unwrap_or_default() as usize;
+    if chunks.len() <= index {
+        chunks.resize(index + 1, String::new());
+    }
+    chunks[index].push_str(delta);
 }
 
 fn upsert_by<T, F>(items: &mut Vec<T>, replacement: T, key: F)

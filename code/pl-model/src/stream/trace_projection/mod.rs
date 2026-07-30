@@ -71,6 +71,7 @@ impl TraceProjection {
                 content: String::new(),
                 attachments: Vec::new(),
                 thinking_chunks: Vec::new(),
+                reasoning_content_chunks: Vec::new(),
                 tool: None,
                 agent: None,
                 inference: None,
@@ -164,6 +165,7 @@ impl TraceProjection {
                 content: String::new(),
                 attachments: Vec::new(),
                 thinking_chunks: Vec::new(),
+                reasoning_content_chunks: Vec::new(),
                 tool: None,
                 agent: None,
                 inference: None,
@@ -217,6 +219,59 @@ impl TraceProjection {
             created_at: now,
             updated_at: now,
             delta: TraceDelta::Thinking { chunk_index, delta },
+        };
+        self.record(
+            TraceEventKind::TracePartDelta {
+                event: event.clone(),
+            },
+            now,
+        );
+        events.push(AgentEvent::TracePartDelta { event });
+        events
+    }
+
+    pub(crate) fn append_reasoning_content_delta(
+        &mut self,
+        item_id: &str,
+        chunk_index: u32,
+        delta: String,
+    ) -> Vec<AgentEvent> {
+        let now = unix_seconds();
+        let mut events = self.start_thinking(item_id, chunk_index);
+        let item_id = self.active_thinking_item_id(item_id, chunk_index);
+        if let Some(item) = self.started.get_mut(&item_id) {
+            item.revision += 1;
+            item.status = TracePartStatus::Streaming;
+            item.updated_at = now;
+            match item
+                .reasoning_content_chunks
+                .iter_mut()
+                .find(|chunk| chunk.chunk_index == chunk_index)
+            {
+                Some(chunk) => chunk.content.push_str(&delta),
+                None => item.reasoning_content_chunks.push(TraceThinkingChunk {
+                    chunk_index,
+                    content: delta.clone(),
+                }),
+            }
+            item.reasoning_content_chunks
+                .sort_by_key(|chunk| chunk.chunk_index);
+        }
+        let revision = self
+            .started
+            .get(&item_id)
+            .map(|item| item.revision)
+            .unwrap_or_default();
+        let event = TracePartDeltaEvent {
+            turn_id: self.turn_id.clone(),
+            item_id,
+            started_sequence: self.sequence,
+            revision,
+            kind: TracePartKind::Thinking,
+            status: TracePartStatus::Streaming,
+            created_at: now,
+            updated_at: now,
+            delta: TraceDelta::ReasoningContent { chunk_index, delta },
         };
         self.record(
             TraceEventKind::TracePartDelta {
@@ -290,6 +345,7 @@ impl TraceProjection {
             content: String::new(),
             attachments: Vec::new(),
             thinking_chunks: Vec::new(),
+            reasoning_content_chunks: Vec::new(),
             tool: Some(TraceToolPart {
                 tool_call_id: item_id.clone(),
                 call_id: snapshot.call_id.clone(),
@@ -344,6 +400,7 @@ impl TraceProjection {
             content: String::new(),
             attachments: Vec::new(),
             thinking_chunks: Vec::new(),
+            reasoning_content_chunks: Vec::new(),
             tool: Some(TraceToolPart {
                 tool_call_id: item_id.clone(),
                 call_id: None,
@@ -544,6 +601,7 @@ impl TraceProjection {
                 content: String::new(),
                 attachments: Vec::new(),
                 thinking_chunks: Vec::new(),
+                reasoning_content_chunks: Vec::new(),
                 tool: Some(TraceToolPart {
                     tool_call_id: item_id.clone(),
                     call_id: call.call_id.clone(),

@@ -184,7 +184,14 @@ void registerStudioUpdateTests() {
           studioApiProvider.overrideWithValue(
             _FakeStudioApi(
               _stateWithPlannerModels().copyWith(
-                turnPhasesBySession: const {'session-1': TurnPhase.streaming},
+                turnsBySession: {
+                  'session-1': _testTurn(
+                    sessionId: 'session-1',
+                    state: const StudioTurnState.inProgress(
+                      StudioTurnActivity.responding,
+                    ),
+                  ),
+                },
               ),
             ),
           ),

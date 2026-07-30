@@ -8,7 +8,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'session_stream.freezed.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 enum BridgeAgentStatus {
   queued,
@@ -821,8 +821,10 @@ sealed class BridgeSessionPartContent with _$BridgeSessionPartContent {
     required String text,
     required List<BridgeSessionAttachment> attachments,
   }) = BridgeSessionPartContent_Text;
-  const factory BridgeSessionPartContent.reasoning({required String text}) =
-      BridgeSessionPartContent_Reasoning;
+  const factory BridgeSessionPartContent.reasoning({
+    required List<String> summary,
+    required List<String> content,
+  }) = BridgeSessionPartContent_Reasoning;
   const factory BridgeSessionPartContent.tool({
     required BridgeSessionToolPart tool,
   }) = BridgeSessionPartContent_Tool;
@@ -880,6 +882,7 @@ class BridgeSessionPartDelta {
 enum BridgeSessionPartDeltaField {
   text,
   reasoningSummary,
+  reasoningContent,
   planContent,
   toolArguments,
   toolResult,
@@ -1167,15 +1170,13 @@ class BridgeSessionToolPart {
 class BridgeSessionTurn {
   final String turnId;
   final String sessionId;
-  final BridgeSessionTurnStatus status;
-  final String? reason;
+  final BridgeSessionTurnState state;
   final PlatformInt64 updatedAt;
 
   const BridgeSessionTurn({
     required this.turnId,
     required this.sessionId,
-    required this.status,
-    this.reason,
+    required this.state,
     required this.updatedAt,
   });
 
@@ -1183,8 +1184,7 @@ class BridgeSessionTurn {
   int get hashCode =>
       turnId.hashCode ^
       sessionId.hashCode ^
-      status.hashCode ^
-      reason.hashCode ^
+      state.hashCode ^
       updatedAt.hashCode;
 
   @override
@@ -1194,22 +1194,36 @@ class BridgeSessionTurn {
           runtimeType == other.runtimeType &&
           turnId == other.turnId &&
           sessionId == other.sessionId &&
-          status == other.status &&
-          reason == other.reason &&
+          state == other.state &&
           updatedAt == other.updatedAt;
 }
 
-enum BridgeSessionTurnStatus {
-  queued,
-  contextLoading,
-  waitingForModel,
-  streaming,
-  waitingForInteraction,
+enum BridgeSessionTurnActivity {
+  preparing,
+  thinking,
+  responding,
+  planning,
   runningTool,
+  waitingForApproval,
+  waitingForUserInput,
+  waitingForPlanConfirmation,
   persisting,
-  completed,
-  failed,
-  cancelled,
+}
+
+@freezed
+sealed class BridgeSessionTurnState with _$BridgeSessionTurnState {
+  const BridgeSessionTurnState._();
+
+  const factory BridgeSessionTurnState.queued() = BridgeSessionTurnState_Queued;
+  const factory BridgeSessionTurnState.inProgress({
+    required BridgeSessionTurnActivity activity,
+  }) = BridgeSessionTurnState_InProgress;
+  const factory BridgeSessionTurnState.completed() =
+      BridgeSessionTurnState_Completed;
+  const factory BridgeSessionTurnState.failed({required String reason}) =
+      BridgeSessionTurnState_Failed;
+  const factory BridgeSessionTurnState.cancelled({required String reason}) =
+      BridgeSessionTurnState_Cancelled;
 }
 
 class BridgeSessionViewSnapshot {

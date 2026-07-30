@@ -1,6 +1,6 @@
 use super::*;
 use crate::studio::task_coordinator::TaskRunPhase;
-use pl_protocol::SessionTurnStatus;
+use pl_protocol::SessionTurnState;
 use pretty_assertions::assert_eq;
 
 #[tokio::test]
@@ -293,8 +293,8 @@ async fn ui_submit_retries_http_overload_and_completes_session() {
 
     assert_eq!(request_count, 2);
     assert_eq!(
-        snapshot.turn.as_ref().map(|turn| turn.status),
-        Some(SessionTurnStatus::Completed),
+        snapshot.turn.as_ref().map(|turn| turn.state.clone()),
+        Some(SessionTurnState::Completed),
         "{snapshot:#?}"
     );
     let _ = tokio::fs::remove_dir_all(home).await;

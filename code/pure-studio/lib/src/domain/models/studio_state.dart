@@ -9,6 +9,7 @@ import 'session_models.dart';
 import 'settings_models.dart';
 import 'studio_enums.dart';
 import 'timeline_models.dart';
+import 'turn_models.dart';
 
 class _StudioStateUnset {
   const _StudioStateUnset();
@@ -50,7 +51,7 @@ class StudioState {
     required this.selectedSessionId,
     this.selectedRootSessionId,
     required this.permissionMode,
-    this.turnPhasesBySession = const {},
+    this.turnsBySession = const {},
     this.runtimesBySession = const {},
     Map<String, AgentWorkspaceSyncState> workspaceSyncBySession = const {},
     required this.pendingInteractions,
@@ -61,7 +62,7 @@ class StudioState {
          workspaceSyncBySession,
          selectedSessionId,
          selectedSessionId != null &&
-             (turnPhasesBySession.containsKey(selectedSessionId) ||
+             (turnsBySession.containsKey(selectedSessionId) ||
                  runtimesBySession.containsKey(selectedSessionId) ||
                  composerTextsBySession.containsKey(selectedSessionId)),
        );
@@ -88,7 +89,7 @@ class StudioState {
   final String? selectedSessionId;
   final String? selectedRootSessionId;
   final PermissionMode permissionMode;
-  final Map<String, TurnPhase> turnPhasesBySession;
+  final Map<String, StudioTurnView> turnsBySession;
   final Map<String, SessionRuntimeView> runtimesBySession;
   final Map<String, AgentWorkspaceSyncState> workspaceSyncBySession;
   final List<PendingInteraction> pendingInteractions;
@@ -122,11 +123,9 @@ class StudioState {
         .firstOrNull;
   }
 
-  TurnPhase get turnPhase {
+  StudioTurnView? get turn {
     final sessionId = selectedSessionId;
-    return sessionId == null
-        ? TurnPhase.idle
-        : turnPhasesBySession[sessionId] ?? TurnPhase.idle;
+    return sessionId == null ? null : turnsBySession[sessionId];
   }
 
   SessionRuntimeView get runtime {
@@ -302,7 +301,7 @@ class StudioState {
       timelineRows: selectedTimelineRows,
       todo: selectedTodoList,
       runtime: runtime,
-      turnPhase: turnPhase,
+      turn: turn,
       activeInteraction: activeInteraction,
       composerText: composerText,
       composerMode: session.isAgent
@@ -320,19 +319,7 @@ class StudioState {
   }
 
   bool get isBusy {
-    return switch (turnPhase) {
-      TurnPhase.queued ||
-      TurnPhase.contextLoading ||
-      TurnPhase.waitingForModel ||
-      TurnPhase.streaming ||
-      TurnPhase.waitingForInteraction ||
-      TurnPhase.runningTool => true,
-      TurnPhase.idle ||
-      TurnPhase.waitingForAgents ||
-      TurnPhase.completed ||
-      TurnPhase.failed ||
-      TurnPhase.cancelled => false,
-    };
+    return turn?.state.isBusy ?? false;
   }
 
   StudioState copyWith({
@@ -357,7 +344,8 @@ class StudioState {
     Object? selectedSessionId = _studioStateUnset,
     Object? selectedRootSessionId = _studioStateUnset,
     PermissionMode? permissionMode,
-    Map<String, TurnPhase>? turnPhasesBySession,
+    Map<String, StudioTurnView>? turnsBySession,
+    Set<String> removeTurnSessionIds = const {},
     Map<String, SessionRuntimeView>? runtimesBySession,
     Map<String, AgentWorkspaceSyncState>? workspaceSyncBySession,
     List<PendingInteraction>? pendingInteractions,
@@ -369,10 +357,10 @@ class StudioState {
         identical(selectedSessionId, _studioStateUnset)
         ? this.selectedSessionId
         : selectedSessionId as String?;
-    final nextTurnPhases = {
-      ...this.turnPhasesBySession,
-      ...?turnPhasesBySession,
-    };
+    final nextTurns = {...this.turnsBySession, ...?turnsBySession};
+    for (final sessionId in removeTurnSessionIds) {
+      nextTurns.remove(sessionId);
+    }
     final nextRuntimes = {...this.runtimesBySession, ...?runtimesBySession};
     final nextWorkspaceSync = {
       ...this.workspaceSyncBySession,
@@ -413,7 +401,7 @@ class StudioState {
           ? this.selectedRootSessionId
           : selectedRootSessionId as String?,
       permissionMode: permissionMode ?? this.permissionMode,
-      turnPhasesBySession: nextTurnPhases,
+      turnsBySession: nextTurns,
       runtimesBySession: nextRuntimes,
       workspaceSyncBySession: nextWorkspaceSync,
       pendingInteractions: pendingInteractions ?? this.pendingInteractions,

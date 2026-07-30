@@ -35,11 +35,7 @@ StudioReduceResult reduceStudioEvent(
       delta,
     ),
     TurnChangedPayload(:final turn) => StudioReduceResult(
-      _withTurnPhase(
-        current,
-        studioEventSessionId(event) ?? turn.sessionId,
-        _turnPhase(turn),
-      ),
+      _withTurn(current, studioEventSessionId(event) ?? turn.sessionId, turn),
     ),
     InteractionChangedPayload(:final interaction, :final status) =>
       StudioReduceResult(_upsertInteraction(current, interaction, status)),
@@ -99,13 +95,7 @@ StudioReduceResult reduceStudioEvent(
         activeLspServers,
       ),
     ),
-    PlanLifecycleChangedPayload(:final state) => StudioReduceResult(
-      _applyPlanLifecycle(
-        current,
-        studioEventSessionId(event) ?? current.selectedSessionId,
-        state,
-      ),
-    ),
+    PlanLifecycleChangedPayload() => StudioReduceResult(current),
     StalePayload() ||
     IgnoredBridgeEventPayload() ||
     SettingsDraftSavedPayload() => StudioReduceResult(current),
@@ -207,7 +197,8 @@ bool targetsSelectedSession(StudioState current, StudioBridgeEvent event) {
 }
 
 bool isDuplicateDurableEvent(StudioState current, StudioBridgeEvent event) {
-  if (isLiveOnlyStudioEvent(event)) {
+  if (event.origin != StudioBridgeEventOrigin.session ||
+      isLiveOnlyStudioEvent(event)) {
     return false;
   }
   final sessionId = studioEventSessionId(event);
@@ -222,7 +213,8 @@ StudioState withStudioEventCursor(
   StudioState current,
   StudioBridgeEvent event,
 ) {
-  if (isLiveOnlyStudioEvent(event)) {
+  if (event.origin != StudioBridgeEventOrigin.session ||
+      isLiveOnlyStudioEvent(event)) {
     return current;
   }
   final sessionId = studioEventSessionId(event);
@@ -462,24 +454,6 @@ StudioState _applyLspHealth(
         );
 }
 
-StudioState _applyPlanLifecycle(
-  StudioState current,
-  String? sessionId,
-  String planState,
-) {
-  if (sessionId == null) {
-    return current;
-  }
-  return _withTurnPhase(current, sessionId, switch (planState) {
-    'pendingConfirmation' => TurnPhase.waitingForInteraction,
-    'accepted' || 'implementing' => TurnPhase.runningTool,
-    'implementationFailed' => TurnPhase.failed,
-    'cancelled' => TurnPhase.cancelled,
-    'implemented' || 'continuedPlanning' || 'dismissed' => TurnPhase.completed,
-    _ => current.turnPhasesBySession[sessionId] ?? TurnPhase.idle,
-  });
-}
-
 StudioState _upsertInteraction(
   StudioState current,
   PendingInteraction interaction,
@@ -613,30 +587,15 @@ StudioState _withRuntime(
   );
 }
 
-StudioState _withTurnPhase(
+StudioState _withTurn(
   StudioState state,
   String sessionId,
-  TurnPhase turnPhase,
+  StudioTurnView turn,
 ) {
   if (sessionId.isEmpty) {
     return state;
   }
   return state.copyWith(
-    turnPhasesBySession: {...state.turnPhasesBySession, sessionId: turnPhase},
+    turnsBySession: {...state.turnsBySession, sessionId: turn},
   );
-}
-
-TurnPhase _turnPhase(StudioTurnView turn) {
-  return switch (turn.status) {
-    'queued' => TurnPhase.queued,
-    'contextLoading' => TurnPhase.contextLoading,
-    'waitingForModel' => TurnPhase.waitingForModel,
-    'streaming' => TurnPhase.streaming,
-    'waitingForInteraction' => TurnPhase.waitingForInteraction,
-    'runningTool' => TurnPhase.runningTool,
-    'completed' => TurnPhase.completed,
-    'failed' => TurnPhase.failed,
-    'cancelled' => TurnPhase.cancelled,
-    _ => TurnPhase.idle,
-  };
 }

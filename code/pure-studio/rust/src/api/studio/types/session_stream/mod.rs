@@ -179,7 +179,8 @@ pub enum BridgeSessionPartContent {
         attachments: Vec<BridgeSessionAttachment>,
     },
     Reasoning {
-        text: String,
+        summary: Vec<String>,
+        content: Vec<String>,
     },
     Tool {
         tool: BridgeSessionToolPart,
@@ -276,6 +277,7 @@ pub struct BridgeSessionPartDelta {
 pub enum BridgeSessionPartDeltaField {
     Text,
     ReasoningSummary,
+    ReasoningContent,
     PlanContent,
     ToolArguments,
     ToolResult,
@@ -285,23 +287,30 @@ pub enum BridgeSessionPartDeltaField {
 pub struct BridgeSessionTurn {
     pub turn_id: String,
     pub session_id: String,
-    pub status: BridgeSessionTurnStatus,
-    pub reason: Option<String>,
+    pub state: BridgeSessionTurnState,
     pub updated_at: i64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BridgeSessionTurnStatus {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BridgeSessionTurnState {
     Queued,
-    ContextLoading,
-    WaitingForModel,
-    Streaming,
-    WaitingForInteraction,
-    RunningTool,
-    Persisting,
+    InProgress { activity: BridgeSessionTurnActivity },
     Completed,
-    Failed,
-    Cancelled,
+    Failed { reason: String },
+    Cancelled { reason: String },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BridgeSessionTurnActivity {
+    Preparing,
+    Thinking,
+    Responding,
+    Planning,
+    RunningTool,
+    WaitingForApproval,
+    WaitingForUserInput,
+    WaitingForPlanConfirmation,
+    Persisting,
 }
 
 #[derive(Debug, Clone, PartialEq)]

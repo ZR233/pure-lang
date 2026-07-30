@@ -14,7 +14,7 @@ typedef WorkspaceLayoutView = ({
 
 typedef TimelinePaneView = ({
   List<TimelineRow> rows,
-  TurnPhase turnPhase,
+  StudioTurnView? turn,
   bool isLoading,
 });
 
@@ -124,7 +124,7 @@ AsyncValue<TimelinePaneView?> agentTimeline(Ref ref, String sessionId) {
         }
         return (
           rows: workspace.timelineRows,
-          turnPhase: workspace.turnPhase,
+          turn: workspace.turn,
           isLoading: workspace.isLoading,
         );
       }),

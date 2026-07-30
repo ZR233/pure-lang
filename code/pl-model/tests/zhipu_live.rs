@@ -97,6 +97,7 @@ async fn collect_trace_delta_counts(
             Ok(AgentEvent::TracePartDelta { event }) => match event.delta {
                 TraceDelta::Text { .. } => counts.text += 1,
                 TraceDelta::Thinking { .. }
+                | TraceDelta::ReasoningContent { .. }
                 | TraceDelta::ToolArguments { .. }
                 | TraceDelta::ToolResult { .. }
                 | TraceDelta::Plan { .. } => {}

@@ -46,7 +46,7 @@ void registerTimelineToolTests() {
             height: 480,
             child: TimelineView(
               sessionId: 'session-1',
-              turnPhase: TurnPhase.completed,
+              turn: null,
               rows: timelineRowsFromMessages([message], parts: [part]),
             ),
           ),
@@ -174,7 +174,7 @@ void registerTimelineToolTests() {
             height: 520,
             child: TimelineView(
               sessionId: 'session-1',
-              turnPhase: TurnPhase.completed,
+              turn: null,
               rows: timelineRowsFromMessages(messages, parts: [part]),
             ),
           ),
@@ -281,11 +281,7 @@ void registerTimelineToolTests() {
           body: SizedBox(
             width: 980,
             height: 520,
-            child: TimelineView(
-              sessionId: 'session-1',
-              rows: rows,
-              turnPhase: TurnPhase.completed,
-            ),
+            child: TimelineView(sessionId: 'session-1', rows: rows, turn: null),
           ),
         ),
       ),
@@ -395,7 +391,7 @@ void registerTimelineToolTests() {
             height: 620,
             child: TimelineView(
               sessionId: 'session-1',
-              turnPhase: TurnPhase.completed,
+              turn: null,
               rows: timelineRowsFromMessages([message], parts: parts),
             ),
           ),
@@ -487,7 +483,7 @@ void registerTimelineToolTests() {
             height: 520,
             child: TimelineView(
               sessionId: 'session-1',
-              turnPhase: TurnPhase.completed,
+              turn: null,
               rows: timelineRowsFromMessages([message], parts: parts),
             ),
           ),
@@ -563,7 +559,7 @@ void registerTimelineToolTests() {
             height: 820,
             child: TimelineView(
               sessionId: 'session-1',
-              turnPhase: TurnPhase.completed,
+              turn: null,
               rows: timelineRowsFromMessages([message], parts: parts),
             ),
           ),
@@ -615,7 +611,7 @@ void registerTimelineToolTests() {
             height: 820,
             child: TimelineView(
               sessionId: 'session-1',
-              turnPhase: TurnPhase.completed,
+              turn: null,
               rows: timelineRowsFromMessages([message], parts: parts),
             ),
           ),
@@ -682,7 +678,7 @@ void registerTimelineToolTests() {
             height: 820,
             child: TimelineView(
               sessionId: 'session-1',
-              turnPhase: TurnPhase.completed,
+              turn: null,
               rows: timelineRowsFromMessages([message], parts: parts),
             ),
           ),
@@ -725,7 +721,7 @@ void registerTimelineToolTests() {
       status: 'streaming',
     );
 
-    Widget timelineFor(TimelinePart tool, TurnPhase phase) {
+    Widget timelineFor(TimelinePart tool, StudioTurnActivity activity) {
       return _timelineApp(
         home: Scaffold(
           body: SizedBox(
@@ -737,7 +733,11 @@ void registerTimelineToolTests() {
                 [message],
                 parts: [reasoning, tool],
               ),
-              turnPhase: phase,
+              turn: _testTurn(
+                sessionId: message.sessionId,
+                turnId: message.turnId,
+                state: StudioTurnState.inProgress(activity),
+              ),
             ),
           ),
         ),
@@ -753,7 +753,9 @@ void registerTimelineToolTests() {
       status: 'running',
       arguments: jsonEncode({'command': 'flutter test test/widget_test.dart'}),
     );
-    await tester.pumpWidget(timelineFor(runningTool, TurnPhase.runningTool));
+    await tester.pumpWidget(
+      timelineFor(runningTool, StudioTurnActivity.runningTool),
+    );
     await tester.pumpAndSettle();
 
     final currentActivity = find.byKey(
@@ -779,7 +781,9 @@ void registerTimelineToolTests() {
       arguments: jsonEncode({'command': 'flutter test test/widget_test.dart'}),
       result: 'passed',
     );
-    await tester.pumpWidget(timelineFor(completedTool, TurnPhase.streaming));
+    await tester.pumpWidget(
+      timelineFor(completedTool, StudioTurnActivity.thinking),
+    );
     await tester.pumpAndSettle();
 
     expect(currentActivity, findsOneWidget);

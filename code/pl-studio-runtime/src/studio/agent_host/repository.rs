@@ -684,6 +684,7 @@ mod tests {
             session_id,
             message: "durable active input".to_string(),
             metadata: serde_json::json!({"source": "test"}),
+            presentation: pl_core::MailboxPresentation::User,
             trigger: pl_core::MailboxTurnTrigger::StartIfIdle,
             delivery_state: pl_core::MailboxDeliveryState::Consumed {
                 turn_id,

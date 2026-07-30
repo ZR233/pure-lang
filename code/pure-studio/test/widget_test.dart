@@ -39,6 +39,7 @@ part 'widget_test/agent_workspace_tests.dart';
 part 'widget_test/demo_project_tests.dart';
 part 'widget_test/markdown_render_tests.dart';
 part 'widget_test/timeline_tool_tests.dart';
+part 'widget_test/timeline_turn_activity_tests.dart';
 part 'widget_test/timeline_scroll_tests.dart';
 part 'widget_test/visual_foundation_tests.dart';
 part 'widget_test/responsive_layout_tests.dart';
@@ -67,6 +68,7 @@ void main() {
   registerDemoProjectTests();
   registerMarkdownRenderTests();
   registerTimelineToolTests();
+  registerTimelineTurnActivityTests();
   registerTimelineScrollTests();
   registerVisualFoundationTests();
   registerResponsiveLayoutTests();

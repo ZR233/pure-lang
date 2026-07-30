@@ -15,45 +15,80 @@ class _EmptyTimeline extends StatelessWidget {
   }
 }
 
-class _TimelinePhaseActivityBlock extends StatelessWidget {
-  const _TimelinePhaseActivityBlock({required this.phase, super.key});
+class _TurnActivityBlock extends StatelessWidget {
+  const _TurnActivityBlock({
+    required this.turn,
+    required this.reasoningExpanded,
+    required this.onToggleReasoning,
+    this.reasoningGroup,
+    this.toolGroup,
+    super.key,
+  });
 
-  final TurnPhase phase;
+  final StudioTurnView turn;
+  final bool reasoningExpanded;
+  final VoidCallback onToggleReasoning;
+  final TimelineReasoningGroup? reasoningGroup;
+  final TimelineToolGroup? toolGroup;
 
   @override
   Widget build(BuildContext context) {
+    final activity = turn.state.activity;
+    final reasoning = reasoningGroup;
+    if (activity == StudioTurnActivity.thinking && reasoning != null) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: _ReasoningPart(
+          sessionId: turn.sessionId,
+          group: reasoning,
+          isCurrentActivity: true,
+          expanded: reasoningExpanded,
+          onToggle: onToggleReasoning,
+        ),
+      );
+    }
+    final tools = toolGroup;
+    if (activity == StudioTurnActivity.runningTool && tools != null) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: _ToolGroupPart(group: tools, isCurrentActivity: true),
+      );
+    }
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: _TimelineActivitySummary(
-        icon: _phaseActivityIcon(phase),
-        label: _phaseActivityLabel(context, phase),
+        icon: _turnActivityIcon(activity),
+        label: _turnActivityLabel(context, turn.state),
         isCurrentActivity: true,
+        muted: activity == StudioTurnActivity.thinking,
       ),
     );
   }
 }
 
-String _phaseActivityLabel(BuildContext context, TurnPhase phase) {
-  return switch (phase) {
-    TurnPhase.waitingForModel ||
-    TurnPhase.streaming => context.l10n.timelineReasoningActive,
-    _ => context.turnPhaseLabel(phase),
+String _turnActivityLabel(BuildContext context, StudioTurnState state) {
+  return switch (state.status) {
+    StudioTurnStatus.queued => context.l10n.statusTurnQueued,
+    StudioTurnStatus.inProgress => context.turnActivityLabel(state.activity!),
+    StudioTurnStatus.completed ||
+    StudioTurnStatus.failed ||
+    StudioTurnStatus.cancelled => '',
   };
 }
 
-IconData _phaseActivityIcon(TurnPhase phase) {
-  return switch (phase) {
-    TurnPhase.queued => Icons.schedule_outlined,
-    TurnPhase.contextLoading => Icons.menu_book_outlined,
-    TurnPhase.waitingForModel ||
-    TurnPhase.streaming => Icons.psychology_alt_outlined,
-    TurnPhase.waitingForInteraction => Icons.pending_actions_outlined,
-    TurnPhase.runningTool => Icons.build_outlined,
-    TurnPhase.idle ||
-    TurnPhase.waitingForAgents ||
-    TurnPhase.completed ||
-    TurnPhase.failed ||
-    TurnPhase.cancelled => Icons.check_circle_outline,
+IconData _turnActivityIcon(StudioTurnActivity? activity) {
+  return switch (activity) {
+    null => Icons.schedule_outlined,
+    StudioTurnActivity.preparing => Icons.menu_book_outlined,
+    StudioTurnActivity.thinking => Icons.psychology_alt_outlined,
+    StudioTurnActivity.responding => Icons.edit_note_outlined,
+    StudioTurnActivity.planning => Icons.route_outlined,
+    StudioTurnActivity.runningTool => Icons.build_outlined,
+    StudioTurnActivity.waitingForApproval ||
+    StudioTurnActivity.waitingForUserInput ||
+    StudioTurnActivity.waitingForPlanConfirmation =>
+      Icons.pending_actions_outlined,
+    StudioTurnActivity.persisting => Icons.save_outlined,
   };
 }
 
@@ -138,8 +173,6 @@ class _TimelineRowBlock extends StatelessWidget {
             ? MainAxisAlignment.end
             : MainAxisAlignment.start,
         children: [
-          if (!isUser && !isCompactActivity)
-            const _Avatar(icon: Icons.auto_awesome),
           Flexible(
             child: ConstrainedBox(
               constraints: BoxConstraints(maxWidth: isUser ? 560 : 700),
@@ -256,7 +289,20 @@ class _MarkdownBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final surface = isUser ? _MarkdownSurface.user : _MarkdownSurface.assistant;
+    final isIssue =
+        !isUser &&
+        const {
+          'failed',
+          'interrupted',
+          'cancelled',
+          'denied',
+          'budgetLimited',
+        }.contains(part.status);
+    final surface = isUser
+        ? _MarkdownSurface.user
+        : isIssue
+        ? _MarkdownSurface.error
+        : _MarkdownSurface.assistant;
     return DecoratedBox(
       decoration: BoxDecoration(
         color: isUser ? context.studioPaper2 : Colors.transparent,
@@ -325,6 +371,7 @@ class _ReasoningPart extends StatelessWidget {
                 icon: Icons.psychology_alt_outlined,
                 label: label,
                 isCurrentActivity: isCurrentActivity,
+                muted: true,
                 isIssue: const {
                   'failed',
                   'interrupted',
@@ -398,6 +445,7 @@ class _TimelineActivitySummary extends StatelessWidget {
     required this.label,
     required this.isCurrentActivity,
     this.isIssue = false,
+    this.muted = false,
     this.expanded,
   });
 
@@ -405,12 +453,15 @@ class _TimelineActivitySummary extends StatelessWidget {
   final String label;
   final bool isCurrentActivity;
   final bool isIssue;
+  final bool muted;
   final bool? expanded;
 
   @override
   Widget build(BuildContext context) {
     final color = isIssue
         ? Theme.of(context).colorScheme.error
+        : muted
+        ? context.studioInkSoft
         : isCurrentActivity
         ? context.studioInk
         : context.studioInkSoft;
@@ -447,7 +498,7 @@ class _TimelineActivitySummary extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: context.text.bodySmall?.copyWith(
                     color: color,
-                    fontWeight: isCurrentActivity || isIssue
+                    fontWeight: (isCurrentActivity && !muted) || isIssue
                         ? FontWeight.w600
                         : FontWeight.w400,
                     height: 1.25,

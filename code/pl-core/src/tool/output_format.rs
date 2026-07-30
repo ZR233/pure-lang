@@ -1321,6 +1321,7 @@ mod tests {
             content: String::new(),
             attachments: Vec::new(),
             thinking_chunks: Vec::new(),
+            reasoning_content_chunks: Vec::new(),
             tool: Some(TraceToolPart {
                 tool_call_id: "trace-call".to_string(),
                 call_id: Some("call-1".to_string()),

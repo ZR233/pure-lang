@@ -147,7 +147,7 @@ class _AgentTimelineHost extends ConsumerWidget {
         return TimelineView(
           sessionId: sessionId,
           rows: timeline.isLoading ? const [] : timeline.rows,
-          turnPhase: timeline.turnPhase,
+          turn: timeline.turn,
         );
       },
     );

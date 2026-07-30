@@ -1,4 +1,4 @@
-// @generated from pl-protocol. Do not edit by hand.
+// Canonical TypeScript declarations for the pl-protocol session event wire.
 
 export type SessionEventPosition =
   | { persistence: "durable"; sequence: number }
@@ -46,6 +46,7 @@ export interface SessionViewSnapshot {
   schemaVersion: number
   sessionId: string
   throughSequence: number
+  owner?: SessionOwnerSnapshot
   turn?: SessionTurn
   messages: SessionMessage[]
   parts: SessionPart[]
@@ -57,13 +58,35 @@ export interface SessionViewSnapshot {
   planEvents: PlanLifecycleEvent[]
 }
 
+export interface SessionOwnerSnapshot {
+  agentId: string
+  role?: string
+}
+
 export interface SessionTurn {
   turnId: string
   sessionId: string
-  status: "queued" | "contextLoading" | "waitingForModel" | "streaming" | "waitingForInteraction" | "runningTool" | "persisting" | "completed" | "failed" | "cancelled"
-  reason?: string
+  state: SessionTurnState
   updatedAt: number
 }
+
+export type SessionTurnState =
+  | { status: "queued" }
+  | { status: "inProgress"; activity: SessionTurnActivity }
+  | { status: "completed" }
+  | { status: "failed"; reason: string }
+  | { status: "cancelled"; reason: string }
+
+export type SessionTurnActivity =
+  | "preparing"
+  | "thinking"
+  | "responding"
+  | "planning"
+  | "runningTool"
+  | "waitingForApproval"
+  | "waitingForUserInput"
+  | "waitingForPlanConfirmation"
+  | "persisting"
 
 export interface SessionMessage {
   messageId: string
@@ -80,7 +103,7 @@ export interface SessionMessage {
 
 export type SessionPartContent =
   | { type: "text"; channel: "user" | "commentary" | "final"; text?: string; attachments?: SessionAttachment[] }
-  | { type: "reasoning"; text?: string }
+  | { type: "reasoning"; summary?: string[]; content?: string[] }
   | { type: "tool"; tool: SessionToolPart }
   | { type: "agent"; agent: SessionAgentPart }
   | { type: "turn" }
@@ -109,7 +132,7 @@ export interface SessionPart {
 export interface SessionPartDelta {
   partId: string
   revision: number
-  field: "text" | "reasoning.summary" | "planContent" | "tool.arguments" | "tool.result"
+  field: "text" | "reasoning.summary" | "reasoning.content" | "planContent" | "tool.arguments" | "tool.result"
   delta: string
   chunkIndex?: number
 }

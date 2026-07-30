@@ -41,7 +41,7 @@ class StudioSessionSnapshot {
     required this.agents,
     required this.timelineEvents,
     required this.runtime,
-    required this.turnStatus,
+    required this.turn,
   });
 
   @visibleForTesting
@@ -56,7 +56,7 @@ class StudioSessionSnapshot {
   final Map<String, StudioAgentView> agents;
   final Map<String, TimelineAgentEvent> timelineEvents;
   final SessionRuntimeView? runtime;
-  final String? turnStatus;
+  final StudioTurnView? turn;
 }
 
 StudioSessionSnapshot _sessionSnapshotFromFrb(
@@ -100,7 +100,7 @@ StudioSessionSnapshot _sessionSnapshotFromFrb(
     runtime: snapshot.runtime == null
         ? null
         : _sessionRuntimeFromFrb(snapshot.runtime!),
-    turnStatus: snapshot.turn?.status.name,
+    turn: snapshot.turn == null ? null : _turnFromFrb(snapshot.turn!),
   );
 }
 
@@ -116,12 +116,7 @@ StudioBridgeEvent _sessionEventFromFrb(frb.BridgeSessionEventEnvelope event) {
     sequence: sequence,
     createdAt: _dateFromUnix(event.emittedAt),
     payload: event.kind.when(
-      turnChanged: (turn) => TurnChangedPayload(
-        turn: StudioTurnView(
-          sessionId: turn.sessionId,
-          status: turn.status.name,
-        ),
-      ),
+      turnChanged: (turn) => TurnChangedPayload(turn: _turnFromFrb(turn)),
       messageChanged: (message) => MessageUpdatedPayload(
         message: _timelineMessageFromFrb(
           message,
@@ -204,10 +199,12 @@ TimelinePartSnapshot _timelinePartFromFrb(
       },
       sequence: sequence,
     ),
-    reasoning: (text) => _partSnapshot(
+    reasoning: (summary, content) => _partSnapshot(
       value,
       type: TimelinePartType.reasoning,
-      text: text,
+      text: '',
+      reasoningSummary: summary,
+      reasoningContent: content,
       sequence: sequence,
     ),
     tool: (tool) => _partSnapshot(
@@ -288,6 +285,8 @@ TimelinePartSnapshot _partSnapshot(
   TimelineToolPart? tool,
   TimelineAgentPart? agent,
   String? planContent,
+  List<String> reasoningSummary = const [],
+  List<String> reasoningContent = const [],
 }) {
   return TimelinePartSnapshot(
     id: value.partId,
@@ -311,6 +310,8 @@ TimelinePartSnapshot _partSnapshot(
     tool: tool,
     agent: agent,
     planContent: planContent,
+    reasoningSummary: reasoningSummary,
+    reasoningContent: reasoningContent,
     synthetic: value.synthetic,
     ignored: value.ignored,
   );
@@ -320,6 +321,7 @@ TimelinePartDelta _timelineDeltaFromFrb(frb.BridgeSessionPartDelta value) {
   final field = switch (value.field) {
     frb.BridgeSessionPartDeltaField.text => 'text',
     frb.BridgeSessionPartDeltaField.reasoningSummary => 'reasoning.summary',
+    frb.BridgeSessionPartDeltaField.reasoningContent => 'reasoning.content',
     frb.BridgeSessionPartDeltaField.planContent => 'planContent',
     frb.BridgeSessionPartDeltaField.toolArguments => 'tool.arguments',
     frb.BridgeSessionPartDeltaField.toolResult => 'tool.result',
@@ -331,6 +333,41 @@ TimelinePartDelta _timelineDeltaFromFrb(frb.BridgeSessionPartDelta value) {
     delta: value.delta,
     chunkIndex: value.chunkIndex,
   );
+}
+
+StudioTurnView _turnFromFrb(frb.BridgeSessionTurn value) {
+  return StudioTurnView(
+    turnId: value.turnId,
+    sessionId: value.sessionId,
+    state: value.state.when(
+      queued: () => const StudioTurnState.queued(),
+      inProgress: (activity) =>
+          StudioTurnState.inProgress(_turnActivityFromFrb(activity)),
+      completed: () => const StudioTurnState.completed(),
+      failed: (reason) => StudioTurnState.failed(reason),
+      cancelled: (reason) => StudioTurnState.cancelled(reason),
+    ),
+    updatedAt: _dateFromUnix(value.updatedAt),
+  );
+}
+
+StudioTurnActivity _turnActivityFromFrb(
+  frb.BridgeSessionTurnActivity activity,
+) {
+  return switch (activity) {
+    frb.BridgeSessionTurnActivity.preparing => StudioTurnActivity.preparing,
+    frb.BridgeSessionTurnActivity.thinking => StudioTurnActivity.thinking,
+    frb.BridgeSessionTurnActivity.responding => StudioTurnActivity.responding,
+    frb.BridgeSessionTurnActivity.planning => StudioTurnActivity.planning,
+    frb.BridgeSessionTurnActivity.runningTool => StudioTurnActivity.runningTool,
+    frb.BridgeSessionTurnActivity.waitingForApproval =>
+      StudioTurnActivity.waitingForApproval,
+    frb.BridgeSessionTurnActivity.waitingForUserInput =>
+      StudioTurnActivity.waitingForUserInput,
+    frb.BridgeSessionTurnActivity.waitingForPlanConfirmation =>
+      StudioTurnActivity.waitingForPlanConfirmation,
+    frb.BridgeSessionTurnActivity.persisting => StudioTurnActivity.persisting,
+  };
 }
 
 StudioAgentView _agentFromFrb(frb.BridgeSessionAgentSnapshot value) {
@@ -551,34 +588,26 @@ frb.BridgeInteractionResolution _interactionResolutionFromDomain(
 
 StudioState applyCanonicalSessionSnapshot(
   StudioState current,
-  Object snapshot,
+  StudioSessionSnapshot snapshot,
 ) {
-  final typed = switch (snapshot) {
-    StudioSessionSnapshot value => value,
-    Map<String, Object?> value => _legacySessionSnapshot(value),
-    Map value => _legacySessionSnapshot(
-      value.map((key, value) => MapEntry(key.toString(), value)),
-    ),
-    _ => throw ArgumentError.value(snapshot, 'snapshot'),
-  };
-  final sessionId = typed.sessionId;
+  final sessionId = snapshot.sessionId;
   if (sessionId.isEmpty || current.selectedSessionId != sessionId) {
     return current;
   }
   final existingRuntime =
       current.runtimesBySession[sessionId] ?? _emptyRuntimeView();
-  final runtime = (typed.runtime ?? existingRuntime).copyWith(
+  final runtime = (snapshot.runtime ?? existingRuntime).copyWith(
     task: existingRuntime.task,
-    agentCount: typed.agents.length,
+    agentCount: snapshot.agents.length,
   );
   return current.copyWith(
     messagesBySession: {
       ...current.messagesBySession,
-      sessionId: typed.messages,
+      sessionId: snapshot.messages,
     },
     partSnapshotsBySession: {
       ...current.partSnapshotsBySession,
-      sessionId: typed.parts,
+      sessionId: snapshot.parts,
     },
     partOverlaysBySession: {
       ...current.partOverlaysBySession,
@@ -586,28 +615,26 @@ StudioState applyCanonicalSessionSnapshot(
     },
     agentTimelineEventsBySession: {
       ...current.agentTimelineEventsBySession,
-      sessionId: typed.timelineEvents,
+      sessionId: snapshot.timelineEvents,
     },
-    agentsBySession: {...current.agentsBySession, sessionId: typed.agents},
+    agentsBySession: {...current.agentsBySession, sessionId: snapshot.agents},
     runtimesBySession: {...current.runtimesBySession, sessionId: runtime},
     pendingInteractions: [
       for (final interaction in current.pendingInteractions)
         if (interaction.sessionId != sessionId) interaction,
-      ...typed.interactions,
+      ...snapshot.interactions,
     ],
-    turnPhasesBySession: {
-      ...current.turnPhasesBySession,
-      sessionId: typed.turnStatus == null
-          ? TurnPhase.idle
-          : _turnPhaseFromStatus(typed.turnStatus!),
-    },
+    turnsBySession: snapshot.turn == null
+        ? const {}
+        : {sessionId: snapshot.turn!},
+    removeTurnSessionIds: snapshot.turn == null ? {sessionId} : const {},
     workspaceSyncBySession: {
       ...current.workspaceSyncBySession,
       sessionId: AgentWorkspaceSyncState.ready,
     },
     eventCursorsBySession: {
       ...current.eventCursorsBySession,
-      sessionId: typed.throughSequence,
+      sessionId: snapshot.throughSequence,
     },
   );
 }
@@ -662,7 +689,7 @@ StudioSessionSnapshot _legacySessionSnapshot(Map<String, Object?> snapshot) {
     }
   }
   final runtimeJson = _map(snapshot['runtime']);
-  final turn = _map(snapshot['turn']);
+  final turnJson = _map(snapshot['turn']);
   return StudioSessionSnapshot(
     sessionId: sessionId,
     throughSequence: _int(snapshot['throughSequence']),
@@ -675,7 +702,9 @@ StudioSessionSnapshot _legacySessionSnapshot(Map<String, Object?> snapshot) {
     agents: agents,
     timelineEvents: timelineEvents,
     runtime: runtimeJson.isEmpty ? null : sessionRuntimeFromJson(runtimeJson),
-    turnStatus: turn.isEmpty ? null : _string(turn['status']),
+    turn: turnJson.isEmpty
+        ? null
+        : _studioTurnViewFromJson(turnJson, fallbackSessionId: sessionId),
   );
 }
 
@@ -687,13 +716,53 @@ Map<String, Object?> _canonicalLegacyPartJson(Object? value) {
     ...part,
     'type': type,
     'text': switch (type) {
-      'text' || 'reasoning' => _string(content['text']),
+      'text' => _string(content['text']),
       _ => '',
     },
+    'reasoningSummary': content['summary'],
+    'reasoningContent': content['content'],
     'textChannel': content['channel'],
     'tool': content['tool'],
     'agent': content['agent'],
     'planContent': content['content'],
     'activityGroupId': _map(content['tool'])['activityGroupId'],
+  };
+}
+
+StudioTurnView _studioTurnViewFromJson(
+  Map<String, Object?> json, {
+  required String fallbackSessionId,
+}) {
+  final state = _map(json['state']);
+  return StudioTurnView(
+    turnId: _string(json['turnId']),
+    sessionId: _string(json['sessionId'], fallback: fallbackSessionId),
+    state: switch (_string(state['status'])) {
+      'queued' => const StudioTurnState.queued(),
+      'inProgress' => StudioTurnState.inProgress(
+        _studioTurnActivity(state['activity']),
+      ),
+      'completed' => const StudioTurnState.completed(),
+      'failed' => StudioTurnState.failed(_string(state['reason'])),
+      'cancelled' => StudioTurnState.cancelled(_string(state['reason'])),
+      final status => throw FormatException('Unknown turn state: $status'),
+    },
+    updatedAt: _dateFromUnix(_int(json['updatedAt'])),
+  );
+}
+
+StudioTurnActivity _studioTurnActivity(Object? value) {
+  return switch (_string(value)) {
+    'preparing' => StudioTurnActivity.preparing,
+    'thinking' => StudioTurnActivity.thinking,
+    'responding' => StudioTurnActivity.responding,
+    'planning' => StudioTurnActivity.planning,
+    'runningTool' => StudioTurnActivity.runningTool,
+    'waitingForApproval' => StudioTurnActivity.waitingForApproval,
+    'waitingForUserInput' => StudioTurnActivity.waitingForUserInput,
+    'waitingForPlanConfirmation' =>
+      StudioTurnActivity.waitingForPlanConfirmation,
+    'persisting' => StudioTurnActivity.persisting,
+    final activity => throw FormatException('Unknown turn activity: $activity'),
   };
 }

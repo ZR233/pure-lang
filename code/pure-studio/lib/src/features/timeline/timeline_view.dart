@@ -22,13 +22,13 @@ class TimelineView extends StatefulWidget {
   const TimelineView({
     required this.sessionId,
     required this.rows,
-    required this.turnPhase,
+    required this.turn,
     super.key,
   });
 
   final String? sessionId;
   final List<TimelineRow> rows;
-  final TurnPhase turnPhase;
+  final StudioTurnView? turn;
 
   @override
   State<TimelineView> createState() => _TimelineViewState();
@@ -53,7 +53,7 @@ class _TimelineViewState extends State<TimelineView> {
   @override
   void initState() {
     super.initState();
-    _contentVersion = _timelineContentVersion(widget.rows, widget.turnPhase);
+    _contentVersion = _timelineContentVersion(widget.rows, widget.turn);
     _restoreSessionState();
     _controller.addListener(_handleScrollPositionChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -71,7 +71,7 @@ class _TimelineViewState extends State<TimelineView> {
       _saveSessionState(oldWidget.sessionId);
       _expandedReasoningGroups.clear();
       _restoreSessionState();
-      _contentVersion = _timelineContentVersion(widget.rows, widget.turnPhase);
+      _contentVersion = _timelineContentVersion(widget.rows, widget.turn);
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
           _restorePendingPosition();
@@ -82,7 +82,7 @@ class _TimelineViewState extends State<TimelineView> {
 
     final nextContentVersion = _timelineContentVersion(
       widget.rows,
-      widget.turnPhase,
+      widget.turn,
     );
     if (nextContentVersion == _contentVersion) {
       return;
@@ -117,22 +117,16 @@ class _TimelineViewState extends State<TimelineView> {
 
   @override
   Widget build(BuildContext context) {
-    final currentActivityRow = _currentActivityRow(
-      widget.rows,
-      widget.turnPhase,
-    );
-    final fallbackPhase =
-        currentActivityRow == null && _isActiveTurnPhase(widget.turnPhase)
-        ? widget.turnPhase
-        : null;
-    if (widget.rows.isEmpty && fallbackPhase == null) {
+    final activeTurn = widget.turn?.state.isBusy == true ? widget.turn : null;
+    final currentActivityRow = _currentActivityRow(widget.rows, activeTurn);
+    if (widget.rows.isEmpty && activeTurn == null) {
       return const _EmptyTimeline();
     }
     final blocks = _timelineDisplayBlocks(
       widget.rows,
       currentActivityRowId: currentActivityRow?.id,
     );
-    final fallbackActivityCount = fallbackPhase == null ? 0 : 1;
+    final activityCount = activeTurn == null ? 0 : 1;
     return Stack(
       children: [
         Align(
@@ -145,13 +139,13 @@ class _TimelineViewState extends State<TimelineView> {
               key: StudioDriverKeys.timeline,
               controller: _controller,
               padding: const EdgeInsets.fromLTRB(24, 28, 24, 38),
-              itemCount: blocks.length + fallbackActivityCount + 1,
+              itemCount: blocks.length + activityCount + 1,
               findChildIndexCallback: (key) {
                 if (key is! ValueKey<String>) {
                   return null;
                 }
-                if (fallbackPhase != null &&
-                    key.value == _phaseActivityId(widget.sessionId)) {
+                if (activeTurn != null &&
+                    key.value == _turnActivityId(activeTurn)) {
                   return blocks.length;
                 }
                 final index = blocks.indexWhere(
@@ -160,13 +154,24 @@ class _TimelineViewState extends State<TimelineView> {
                 return index == -1 ? null : index;
               },
               itemBuilder: (context, index) {
-                if (fallbackPhase != null && index == blocks.length) {
-                  return _TimelinePhaseActivityBlock(
-                    key: ValueKey(_phaseActivityId(widget.sessionId)),
-                    phase: fallbackPhase,
+                if (activeTurn != null && index == blocks.length) {
+                  return _TurnActivityBlock(
+                    key: ValueKey(_turnActivityId(activeTurn)),
+                    turn: activeTurn,
+                    reasoningGroup: currentActivityRow?.reasoningGroup,
+                    toolGroup: currentActivityRow?.toolGroup,
+                    reasoningExpanded: _expandedReasoningGroups.contains(
+                      currentActivityRow?.reasoningGroup?.id,
+                    ),
+                    onToggleReasoning: () {
+                      final group = currentActivityRow?.reasoningGroup;
+                      if (group != null) {
+                        _toggleReasoning(group.id);
+                      }
+                    },
                   );
                 }
-                if (index == blocks.length + fallbackActivityCount) {
+                if (index == blocks.length + activityCount) {
                   return const SizedBox(height: 24);
                 }
                 final block = blocks[index];
@@ -393,9 +398,9 @@ class _TimelineScrollSnapshot {
   final int pendingNewEvents;
 }
 
-int _timelineContentVersion(List<TimelineRow> rows, TurnPhase turnPhase) {
+int _timelineContentVersion(List<TimelineRow> rows, StudioTurnView? turn) {
   return Object.hashAll([
-    turnPhase,
+    turn,
     rows.length,
     for (final row in rows) ...[row.id, row.role, row.type, row.renderVersion],
   ]);
@@ -468,8 +473,7 @@ List<_TimelineDisplayBlock> _timelineDisplayBlocks(
       (block) => block.rows.any((row) => row.id == currentActivityRowId),
     );
     if (activityIndex != -1) {
-      final activity = blocks.removeAt(activityIndex);
-      blocks.add(activity.asCurrentActivity());
+      blocks.removeAt(activityIndex);
     }
   }
 
@@ -486,39 +490,27 @@ bool _sameRuntimeProgressGroup(TimelineRow left, TimelineRow right) {
       left.turnId == right.turnId;
 }
 
-TimelineRow? _currentActivityRow(List<TimelineRow> rows, TurnPhase turnPhase) {
-  if (!_isActiveTurnPhase(turnPhase)) {
+TimelineRow? _currentActivityRow(List<TimelineRow> rows, StudioTurnView? turn) {
+  final activity = turn?.state.activity;
+  if (turn == null || activity == null) {
     return null;
   }
-  TimelineRow? activeTool;
-  TimelineRow? activeReasoning;
-  for (final row in rows) {
-    final toolGroup = row.toolGroup;
-    if (toolGroup != null &&
-        const {'awaitingApproval', 'running'}.contains(toolGroup.status)) {
-      activeTool = row;
+  for (final row in rows.reversed) {
+    if (row.turnId != turn.turnId) {
+      continue;
     }
-    if (row.reasoningGroup?.isActive == true) {
-      activeReasoning = row;
+    if (activity == StudioTurnActivity.thinking && row.reasoningGroup != null) {
+      return row;
+    }
+    if ((activity == StudioTurnActivity.runningTool ||
+            activity == StudioTurnActivity.waitingForApproval ||
+            activity == StudioTurnActivity.waitingForUserInput ||
+            activity == StudioTurnActivity.waitingForPlanConfirmation) &&
+        row.toolGroup != null) {
+      return row;
     }
   }
-  return activeTool ?? activeReasoning;
-}
-
-bool _isActiveTurnPhase(TurnPhase phase) {
-  return switch (phase) {
-    TurnPhase.queued ||
-    TurnPhase.contextLoading ||
-    TurnPhase.waitingForModel ||
-    TurnPhase.streaming ||
-    TurnPhase.waitingForInteraction ||
-    TurnPhase.runningTool => true,
-    TurnPhase.idle ||
-    TurnPhase.waitingForAgents ||
-    TurnPhase.completed ||
-    TurnPhase.failed ||
-    TurnPhase.cancelled => false,
-  };
+  return null;
 }
 
 bool _hasNewTimelineEvent(TimelineView oldWidget, TimelineView newWidget) {
@@ -528,23 +520,29 @@ bool _hasNewTimelineEvent(TimelineView oldWidget, TimelineView newWidget) {
   }
   final previousActivity = _timelineActivityIdentity(
     oldWidget.rows,
-    oldWidget.turnPhase,
+    oldWidget.turn,
   );
   final nextActivity = _timelineActivityIdentity(
     newWidget.rows,
-    newWidget.turnPhase,
+    newWidget.turn,
   );
   return nextActivity != null && nextActivity != previousActivity;
 }
 
-String? _timelineActivityIdentity(List<TimelineRow> rows, TurnPhase turnPhase) {
-  final row = _currentActivityRow(rows, turnPhase);
-  if (row != null) {
-    return row.id;
+String? _timelineActivityIdentity(
+  List<TimelineRow> rows,
+  StudioTurnView? turn,
+) {
+  if (turn?.state.isBusy != true) {
+    return null;
   }
-  return _isActiveTurnPhase(turnPhase) ? 'phase-activity' : null;
+  final row = _currentActivityRow(rows, turn);
+  if (row != null) {
+    return '${row.id}:${row.renderVersion}';
+  }
+  return '${turn!.turnId}:${turn.state.hashCode}';
 }
 
-String _phaseActivityId(String? sessionId) {
-  return 'phase-activity:${sessionId ?? 'none'}';
+String _turnActivityId(StudioTurnView turn) {
+  return 'turn-activity:${turn.sessionId}:${turn.turnId}';
 }

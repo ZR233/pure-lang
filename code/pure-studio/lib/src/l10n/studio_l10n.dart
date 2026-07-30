@@ -1,6 +1,7 @@
 import 'package:flutter/widgets.dart';
 
 import '../domain/models/studio_enums.dart';
+import '../domain/models/turn_models.dart';
 import 'app_localizations.dart';
 
 extension StudioLocalizationsX on BuildContext {
@@ -21,19 +22,20 @@ extension StudioLocalizationsX on BuildContext {
     };
   }
 
-  String turnPhaseLabel(TurnPhase phase) {
-    return switch (phase) {
-      TurnPhase.idle => l10n.statusTurnIdle,
-      TurnPhase.queued => l10n.statusTurnQueued,
-      TurnPhase.contextLoading => l10n.statusTurnContextLoading,
-      TurnPhase.waitingForModel => l10n.statusTurnWaitingForModel,
-      TurnPhase.streaming => l10n.statusTurnStreaming,
-      TurnPhase.waitingForInteraction => l10n.statusTurnWaitingForInteraction,
-      TurnPhase.runningTool => l10n.statusTurnRunningTool,
-      TurnPhase.waitingForAgents => l10n.statusTurnWaitingForAgents,
-      TurnPhase.completed => l10n.statusTurnCompleted,
-      TurnPhase.failed => l10n.statusTurnFailed,
-      TurnPhase.cancelled => l10n.statusTurnCancelled,
+  String turnActivityLabel(StudioTurnActivity activity) {
+    return switch (activity) {
+      StudioTurnActivity.preparing => l10n.statusTurnPreparing,
+      StudioTurnActivity.thinking => l10n.timelineReasoningActive,
+      StudioTurnActivity.responding => l10n.statusTurnResponding,
+      StudioTurnActivity.planning => l10n.statusTurnPlanning,
+      StudioTurnActivity.runningTool => l10n.statusTurnRunningTool,
+      StudioTurnActivity.waitingForApproval =>
+        l10n.statusTurnWaitingForApproval,
+      StudioTurnActivity.waitingForUserInput =>
+        l10n.statusTurnWaitingForUserInput,
+      StudioTurnActivity.waitingForPlanConfirmation =>
+        l10n.statusTurnWaitingForPlanConfirmation,
+      StudioTurnActivity.persisting => l10n.statusTurnPersisting,
     };
   }
 

@@ -54,7 +54,7 @@ fn stream_accumulator_rejects_events_after_completed() {
 }
 
 #[test]
-fn stream_accumulator_keeps_raw_reasoning_out_of_trace() {
+fn stream_accumulator_projects_raw_reasoning_into_thinking_trace() {
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
     let mut accumulator = StreamCompletionAccumulator::new(Some(CompletionTraceContext {
         session_id: "session-1".to_string(),
@@ -78,12 +78,10 @@ fn stream_accumulator_keeps_raw_reasoning_out_of_trace() {
     let response = accumulator.finish(&event_tx).unwrap();
 
     assert_eq!(response.reasoning_content.as_deref(), Some("raw only"));
-    assert!(response.trace_events.iter().all(|event| !matches!(
+    assert!(response.trace_events.iter().any(|event| matches!(
         &event.kind,
-        TraceEventKind::TracePartStarted { item }
-            | TraceEventKind::TracePartCompleted { item }
-            | TraceEventKind::TracePartFailed { item, .. }
-            if item.kind == TracePartKind::Thinking
+        TraceEventKind::TracePartCompleted { item }
+            if item.kind == TracePartKind::Thinking && trace_part_text(item) == "raw only"
     )));
 }
 

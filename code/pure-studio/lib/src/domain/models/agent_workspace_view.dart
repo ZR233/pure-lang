@@ -8,6 +8,7 @@ import 'session_models.dart';
 import 'settings_models.dart';
 import 'studio_enums.dart';
 import 'timeline_models.dart';
+import 'turn_models.dart';
 
 part 'agent_workspace_view.freezed.dart';
 
@@ -26,7 +27,7 @@ abstract class AgentWorkspaceView with _$AgentWorkspaceView {
     required List<TimelineRow> timelineRows,
     required TimelineTodoListUpdate? todo,
     required SessionRuntimeView runtime,
-    required TurnPhase turnPhase,
+    required StudioTurnView? turn,
     required PendingInteraction? activeInteraction,
     required String composerText,
     required AgentComposerMode composerMode,
@@ -42,30 +43,7 @@ abstract class AgentWorkspaceView with _$AgentWorkspaceView {
 
   bool get isLoading => syncState == AgentWorkspaceSyncState.loading;
 
-  TurnPhase get statusPhase {
-    if (isRoot &&
-        session.agentStatus.trim() == 'waiting' &&
-        (turnPhase == TurnPhase.idle || turnPhase == TurnPhase.completed)) {
-      return TurnPhase.waitingForAgents;
-    }
-    return turnPhase;
-  }
-
-  bool get isBusy {
-    return switch (turnPhase) {
-      TurnPhase.queued ||
-      TurnPhase.contextLoading ||
-      TurnPhase.waitingForModel ||
-      TurnPhase.streaming ||
-      TurnPhase.waitingForInteraction ||
-      TurnPhase.runningTool => true,
-      TurnPhase.idle ||
-      TurnPhase.waitingForAgents ||
-      TurnPhase.completed ||
-      TurnPhase.failed ||
-      TurnPhase.cancelled => false,
-    };
-  }
+  bool get isBusy => turn?.state.isBusy ?? false;
 
   RoleSettingsView? role(String key) {
     for (final role in roles) {

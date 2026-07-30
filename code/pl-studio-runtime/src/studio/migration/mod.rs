@@ -7,6 +7,10 @@ use sea_orm::{
     ConnectionTrait, DatabaseBackend, DatabaseTransaction, QueryResult, Statement, Value,
 };
 
+mod session_event_v3;
+
+pub(super) use session_event_v3::migrate_session_event_v3;
+
 pub(super) async fn split_v2_agent_sessions(tx: &DatabaseTransaction) -> Result<()> {
     let roots = load_root_sessions(tx).await?;
     let snapshots = load_agent_snapshots(tx).await?;

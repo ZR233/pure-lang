@@ -50,7 +50,7 @@ pub use session::{
     SessionPartContent, SessionPartDelta, SessionPartDeltaField, SessionPartStatus,
     SessionResyncReason, SessionRuntimeSnapshot, SessionRuntimeUsage, SessionStreamFrame,
     SessionSubscriptionRequest, SessionTextChannel, SessionTimelineEvent, SessionTimelineEventKind,
-    SessionToolPart, SessionTurn, SessionTurnStatus, SessionViewSnapshot,
+    SessionToolPart, SessionTurn, SessionTurnActivity, SessionTurnState, SessionViewSnapshot,
 };
 pub use turn_failure::{RetryDisposition, TurnFailure, TurnFailureCategory};
 #[cfg(feature = "typescript")]

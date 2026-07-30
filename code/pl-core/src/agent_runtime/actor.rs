@@ -15,7 +15,8 @@ use super::{
     AgentRuntimeEventKind, AgentRuntimeHandle, AgentRuntimeHost, AgentRuntimeResult, AgentSnapshot,
     AgentSubmitRequest, AgentTurnMailboxHandle, AgentTurnPreparationContext, AgentUpdateKind,
     AgentWakeBatch, AgentWakeContext, AgentWakeId, InputDelivery, MailboxDeliveryPhase,
-    MailboxDeliveryState, MailboxTurnTrigger, PendingAgentInput, SessionId, TurnId,
+    MailboxDeliveryState, MailboxPresentation, MailboxTurnTrigger, PendingAgentInput, SessionId,
+    TurnId,
 };
 use crate::session_event::{
     ObservedTurnEvent, TurnObservation, project_observation, project_runtime_event,
@@ -324,11 +325,7 @@ where
         }
         let supersedes_diagnostic_turn = request.delivery == InputDelivery::Start
             && request.wake_id.is_none()
-            && !request
-                .metadata
-                .pointer("/userPrompt/synthetic")
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false)
+            && matches!(&request.presentation, &MailboxPresentation::User)
             && self.state.active_input.as_ref().is_some_and(|input| {
                 trusted_wake_context(input, &self.state.snapshot.identity.id)
                     .is_some_and(|context| context.diagnostic_only)
@@ -393,6 +390,7 @@ where
             wake_signal_ids,
             session_id: request.session_id,
             message: request.message,
+            presentation: request.presentation,
             metadata: request.metadata,
             trigger: match delivery {
                 InputDelivery::QueueOnly => MailboxTurnTrigger::DoNotStart,
@@ -501,6 +499,7 @@ where
         self.submit(AgentSubmitRequest {
             session_id: target.session_id,
             message: request.message,
+            presentation: request.presentation,
             metadata: request.metadata,
             delivery: request.delivery,
             mail_id: request.mail_id,
