@@ -196,7 +196,7 @@ Studio SQLite 的新库使用单一基础 schema（当前 `user_version = 8`）�
 备份，再通过事务 migration chain 升级；`user_version = 0` 且已经包含用户表的数据库属于
 不兼容 legacy schema，不进入 migration chain，而是完整归档为唯一备份后重建当前数据库。
 空的未版本化数据库可直接初始化。未来版本明确拒绝打开，迁移失败不得删除或降级原数据库。
-`config.toml` 当前 schema 为 10，继续由 Studio runtime 单点校验与升级；Flutter 不实现
+`config.toml` 当前 schema 为 11，继续由 Studio runtime 单点校验与升级；Flutter 不实现
 第二套迁移逻辑。
 
 ## 2.11 Workspace
