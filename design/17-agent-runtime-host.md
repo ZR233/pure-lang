@@ -119,6 +119,22 @@ direct-child subscription、未消费 live update 和 timer 不单独持久化�
 批次边界不同，同一产品事实也不会产生第二个 turn。恢复中的 `WaitingAgents` 会重新挂载
 timeout；已有 queued/running Planner 不重复激活。
 
+Studio session owner 只从 durable `sessions.owner_agent_id` 恢复。宿主对 session 提交输入、
+取消 turn、记录外部 fact 或取消重启前 transient interaction 时，必须使用该 canonical
+owner；只有 `session_kind = root` 的会话才允许使用 `studio:{sessionId}` root identity。
+repository 恢复 actors 前可以清除严格可证明的 ghost registration：该 agent 没有任何
+canonical owned session，且其全部 runtime session claim 都与 durable owner 冲突。混合
+ownership、缺少足够证据或共享 projection 的情况必须拒绝恢复，不能靠覆盖 snapshot 或
+猜测 owner 继续启动。
+
+`request_user_input` 的 callback/waiter 是进程内资源，durable interaction record 才是重启
+事实源。重启不恢复旧 waiter，也不把答案伪装成普通用户 prompt：pending `userInput` 继续
+展示；回答时若 origin turn 已终止，宿主使用 interaction id 作为幂等 mailbox id，提交
+`SyntheticHidden` typed continuation。重启前 pending `toolApproval` 一律拒绝，因为无法仅凭
+checkpoint 证明外部工具尚未产生副作用。对旧运行时已经取消的 restart user input，只允许
+在 turn 明确为 `Cancelled(runtime_restarted)`、没有更新 pending 请求且尚无 recovery receipt
+时恢复最新一条。
+
 Studio observer attach 后还会修复历史 Plan 投影缺口：以最新完整 Plan trace 为唯一内容证据，
 仅在确认 interaction 缺失、没有活动 TaskRun、且该 plan 尚未进入实施或终态时补建 durable
 plan lifecycle 与 confirmation。该步骤不重放模型 turn，也不修改用户项目资源。

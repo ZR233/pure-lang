@@ -17,6 +17,8 @@ use crate::{
 
 const DESIGN_PATCH: &str =
     "*** Begin Patch\n*** Update File: design/spec.md\n@@\n-before\n+after\n*** End Patch";
+const MULTI_DESIGN_PLAN: &str =
+    "Update `design/spec.md` and add `design/runtime.md` before implementation.";
 
 #[tokio::test]
 async fn design_patch_commits_and_atomically_opens_executor_gate() {
@@ -71,6 +73,114 @@ async fn design_patch_commits_and_atomically_opens_executor_gate() {
         .allocate_executor(allocation(&fixture.session_id, "after-design"))
         .await
         .expect("executor allocation should open immediately after durable design");
+    fixture.cleanup().await;
+}
+
+#[tokio::test]
+async fn initial_design_patch_must_cover_every_confirmed_plan_target_before_writing() {
+    let fixture = DesignFixture::new_with_plan("complete-plan-design", MULTI_DESIGN_PLAN).await;
+    let before = fixture.head();
+
+    let error = fixture
+        .update(DESIGN_PATCH)
+        .await
+        .expect_err("partial confirmed-plan design must be rejected");
+    let message = error.to_string();
+    assert!(message.contains("missing paths: design/runtime.md"));
+    assert!(message.contains("no files were modified"));
+    assert_eq!(fixture.head(), before);
+    assert_eq!(fixture.design_text(), "before\n");
+    assert!(!fixture.repository.join("design/runtime.md").exists());
+    assert!(fixture.status().is_empty());
+    let run = fixture
+        .store
+        .read_task_run(&fixture.run.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(run.phase, TaskRunPhase::DesignUpdating);
+    assert_eq!(run.design_commit, None);
+
+    let output = fixture
+        .update(
+            "*** Begin Patch\n*** Update File: design/spec.md\n@@\n-before\n+after\n*** Add File: design/runtime.md\n+# Runtime\n*** End Patch",
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        output.changed_files,
+        vec![
+            "design/runtime.md".to_string(),
+            "design/spec.md".to_string(),
+        ]
+    );
+    fixture.cleanup().await;
+}
+
+#[tokio::test]
+async fn executor_spawn_rechecks_confirmed_plan_design_coverage_before_allocation() {
+    let fixture = DesignFixture::new_with_plan("spawn-design-gate", MULTI_DESIGN_PLAN).await;
+    std::fs::write(fixture.repository.join("design/spec.md"), "after\n").unwrap();
+    git(&fixture.repository, &["add", "design/spec.md"]);
+    git(
+        &fixture.repository,
+        &["commit", "-m", "partial design fixture"],
+    );
+    let partial_design_commit = fixture.head();
+    assert!(
+        fixture
+            .store
+            .advance_task_design_head(
+                &fixture.run.id,
+                &fixture.run.expected_head,
+                &partial_design_commit,
+            )
+            .await
+            .unwrap()
+    );
+    let request = StudioTaskSpawnRequest {
+        agent_id: "agent-partial-design".to_string(),
+        session_id: fixture.session_id.clone(),
+        task_name: "must not allocate".to_string(),
+        role: "executor".to_string(),
+        owned_paths: vec!["src/lib.rs".to_string()],
+        requested_by_call_id: "call-partial-design".to_string(),
+    };
+    let before_spawn_head = fixture.head();
+
+    let error = fixture
+        .coordinator
+        .prepare_agent_spawn(&request)
+        .await
+        .expect_err("partial design commit must not allocate an executor");
+
+    assert!(
+        error
+            .to_string()
+            .contains("missing paths: design/runtime.md")
+    );
+    assert!(
+        fixture
+            .store
+            .list_work_units(&fixture.run.id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        fixture
+            .store
+            .list_agent_outcomes(&fixture.run.id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(fixture.head(), before_spawn_head);
+    assert_eq!(
+        git_output(&fixture.repository, &["branch", "--list", "pure-task-*"]),
+        ""
+    );
+    assert!(!fixture.repository.join(".pure/worktrees").exists());
     fixture.cleanup().await;
 }
 
@@ -303,6 +413,27 @@ async fn empty_noop_and_later_hunk_failure_restore_exact_state() {
         assert_eq!(fixture.design_text(), "before\n");
         assert!(fixture.status().is_empty());
     }
+    fixture.cleanup().await;
+}
+
+#[tokio::test]
+async fn failed_design_patch_reports_applied_hunks_as_rolled_back_not_committed() {
+    let fixture = DesignFixture::new("rollback-message").await;
+
+    let error = fixture
+        .update(
+            "*** Begin Patch\n*** Update File: design/spec.md\n@@\n-before\n+temporary\n*** Update File: design/missing.md\n@@\n-missing\n+changed\n*** End Patch",
+        )
+        .await
+        .expect_err("later stale hunk must fail");
+    let message = format!("{error:#}");
+
+    assert!(message.contains("Changes applied before failure"));
+    assert!(message.contains("did not record a design commit"));
+    assert!(message.contains("restored the validated design paths and index"));
+    assert!(!message.contains("Committed changes"));
+    assert_eq!(fixture.design_text(), "before\n");
+    assert!(fixture.status().is_empty());
     fixture.cleanup().await;
 }
 
@@ -1257,6 +1388,10 @@ struct DesignFixture {
 
 impl DesignFixture {
     async fn new(name: &str) -> Self {
+        Self::new_with_plan(name, "plan").await
+    }
+
+    async fn new_with_plan(name: &str, plan: &str) -> Self {
         let repository = init_repository(name);
         std::fs::create_dir_all(repository.join("design")).unwrap();
         std::fs::write(repository.join("design/spec.md"), "before\n").unwrap();
@@ -1271,7 +1406,7 @@ impl DesignFixture {
             .unwrap();
         let coordinator = Arc::new(TaskCoordinator::new(store.clone()));
         let run = coordinator
-            .start_confirmed_task(&session.id, "plan", &repository)
+            .start_confirmed_task(&session.id, plan, &repository)
             .await
             .unwrap();
         Self {

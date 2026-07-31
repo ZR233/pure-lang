@@ -34,7 +34,7 @@ impl StudioRuntime {
         *watcher = Some(tokio::spawn(async move {
             while let Ok(()) | Err(RecvError::Lagged(_)) = updates.recv().await {
                 if let Err(error) = runtime.emit_mcp_health_snapshot().await {
-                    eprintln!("[pl-core] failed to emit MCP health: {error:#}");
+                    tracing::warn!(error = %error, "failed to emit MCP health snapshot");
                 }
             }
         }));

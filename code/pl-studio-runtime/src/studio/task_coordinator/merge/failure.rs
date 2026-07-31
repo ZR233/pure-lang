@@ -67,7 +67,6 @@ impl TaskCoordinator {
                 "{reason}; Git recovery: {recovery}; merge failure persistence also failed: {persistence_error:#}"
             );
             let block = self.block_run(&scope.run, fallback_reason.clone()).await;
-            self.release_owned_process_lease(&scope.run.id);
             return match block {
                 Ok(()) => Err(operation).context(fallback_reason),
                 Err(block_error) => Err(operation).context(format!(
@@ -75,7 +74,7 @@ impl TaskCoordinator {
                 )),
             };
         }
-        self.release_owned_process_lease(&scope.run.id);
+        self.finish_blocked_transition(&scope.run.id).await?;
         Err(operation).context(format!("{reason}; Git recovery: {recovery}"))
     }
 }

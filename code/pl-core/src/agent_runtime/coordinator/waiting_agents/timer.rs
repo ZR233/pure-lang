@@ -96,6 +96,10 @@ pub(super) async fn handle_due_timers(
         let child_id = child_id.clone();
         let generation = *generation;
         timers.pop();
+        if runtime.agent_events.parent_wait_is_suspended(&parent_id) {
+            parents.remove(&parent_id);
+            continue;
+        }
         let Some(state) = parents.get(&parent_id) else {
             continue;
         };

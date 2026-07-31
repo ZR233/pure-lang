@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -96,13 +98,13 @@ class _PromptComposerState extends ConsumerState<_PromptComposer> {
   @override
   void initState() {
     super.initState();
-    _controller = TextEditingController(text: widget.workspace.composerText);
+    _controller = TextEditingController(text: widget.workspace.composer.draft);
   }
 
   @override
   void didUpdateWidget(covariant _PromptComposer oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final nextText = widget.workspace.composerText;
+    final nextText = widget.workspace.composer.draft;
     if (nextText != _controller.text) {
       _controller.value = TextEditingValue(
         text: nextText,
@@ -120,9 +122,11 @@ class _PromptComposerState extends ConsumerState<_PromptComposer> {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
+    final composer = widget.workspace.composer;
     final canSubmit =
-        widget.workspace.composerText.trim().isNotEmpty &&
-        !widget.workspace.isBusy;
+        composer.draft.trim().isNotEmpty &&
+        !widget.workspace.isBusy &&
+        !composer.isSubmissionPending;
     return StudioPanel(
       backgroundColor: colors.surfaceContainerLowest,
       borderColor: colors.outlineVariant.withValues(alpha: 0.86),
@@ -135,6 +139,7 @@ class _PromptComposerState extends ConsumerState<_PromptComposer> {
           TextField(
             key: StudioDriverKeys.composerInput,
             controller: _controller,
+            enabled: !composer.isSubmissionPending,
             minLines: 1,
             maxLines: 6,
             decoration: InputDecoration(
@@ -156,12 +161,28 @@ class _PromptComposerState extends ConsumerState<_PromptComposer> {
                 .updateComposer(widget.workspace.sessionId, value),
             onSubmitted: (_) {
               if (canSubmit) {
-                ref
-                    .read(studioControllerProvider.notifier)
-                    .submitComposer(widget.workspace.sessionId);
+                unawaited(
+                  ref
+                      .read(studioControllerProvider.notifier)
+                      .submitComposer(widget.workspace.sessionId),
+                );
               }
             },
           ),
+          if (composer.error case final error?)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 2, 8, 6),
+                child: Text(
+                  error,
+                  key: StudioDriverKeys.composerError,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: colors.error),
+                ),
+              ),
+            ),
           Row(
             children: [
               _PermissionSelector(mode: widget.workspace.permissionMode),
@@ -183,11 +204,19 @@ class _PromptComposerState extends ConsumerState<_PromptComposer> {
                     backgroundColor: StudioColors.clay,
                     foregroundColor: Colors.white,
                   ),
-                  icon: const Icon(Icons.arrow_upward),
+                  icon: composer.isSubmissionPending
+                      ? const SizedBox.square(
+                          key: StudioDriverKeys.composerPending,
+                          dimension: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.arrow_upward),
                   onPressed: canSubmit
-                      ? () => ref
-                            .read(studioControllerProvider.notifier)
-                            .submitComposer(widget.workspace.sessionId)
+                      ? () => unawaited(
+                          ref
+                              .read(studioControllerProvider.notifier)
+                              .submitComposer(widget.workspace.sessionId),
+                        )
                       : null,
                 ),
             ],

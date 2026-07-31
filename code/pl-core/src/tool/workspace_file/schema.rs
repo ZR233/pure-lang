@@ -52,7 +52,7 @@ impl WorkspaceFileToolKind {
                 "List files from the agent workspace with an optional glob and bounded result count. A missing workspace directory returns an empty list."
             }
             Self::SearchFiles => {
-                "Search workspace file contents and return structured matches with path, line, column, and text."
+                "Search workspace file contents using the required query field and return structured matches with path, line, column, and text."
             }
             Self::ApplyPatch => {
                 "Apply a Codex-style patch to workspace files. The input field must contain a complete patch beginning with *** Begin Patch and ending with *** End Patch."
@@ -119,7 +119,7 @@ impl WorkspaceFileToolKind {
                     "query",
                     json!({
                         "type": "string",
-                        "description": "Text or pattern to search for."
+                        "description": "Literal text or regular expression to search for. This required field is named query."
                     }),
                     true,
                 ),

@@ -1,6 +1,69 @@
 part of '../widget_test.dart';
 
 void registerInteractionTests() {
+  testWidgets('composer exposes pending and failures through driver keys', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _FakeStudioApi(
+      _emptyState().copyWith(
+        composersBySession: const {
+          'session-1': ComposerSessionState.idle(
+            draft: 'retry prompt',
+            error: 'bridge submit failed',
+          ),
+        },
+      ),
+    );
+    final blocked = Completer<SubmitPromptReceipt>();
+    api.blockedPromptSubmit = blocked;
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(find.byKey(StudioDriverKeys.composerError), findsOneWidget);
+    expect(find.text('bridge submit failed'), findsOneWidget);
+
+    await tester.enterText(
+      find.byKey(StudioDriverKeys.composerInput),
+      'fixed prompt',
+    );
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(find.byKey(StudioDriverKeys.composerError), findsNothing);
+
+    await tester.tap(find.byKey(StudioDriverKeys.composerSubmit));
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(find.byKey(StudioDriverKeys.composerPending), findsOneWidget);
+    expect(api.submitPromptCount, 1);
+
+    blocked.complete(
+      const SubmitPromptReceipt(
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        cursor: 1,
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(find.byKey(StudioDriverKeys.composerPending), findsOneWidget);
+
+    api.emitSession(
+      _turnChangedEvent(
+        sessionId: 'session-1',
+        state: const StudioTurnState.inProgress(StudioTurnActivity.preparing),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(find.byKey(StudioDriverKeys.composerPending), findsNothing);
+  });
+
   testWidgets('user input interaction accepts freeform fallback answers', (
     tester,
   ) async {
@@ -133,15 +196,27 @@ void registerInteractionTests() {
 
     expect(find.text('A few questions'), findsOneWidget);
     expect(find.text('Question 1 / 3'), findsOneWidget);
-    await tester.tap(find.text('UI'));
+    expect(
+      find.byKey(StudioDriverKeys.userInputOption('scope', 0)),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(StudioDriverKeys.userInputOption('scope', 1)),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(StudioDriverKeys.userInputOption('scope', 0)));
     await tester.pump(const Duration(milliseconds: 50));
-    await tester.tap(find.text('Tests'));
+    await tester.tap(find.byKey(StudioDriverKeys.userInputOption('scope', 1)));
     await tester.pump(const Duration(milliseconds: 50));
     await tester.tap(find.widgetWithText(FilledButton, 'Next'));
     await tester.pump(const Duration(milliseconds: 50));
 
     expect(find.text('Question 2 / 3'), findsOneWidget);
-    await tester.tap(find.text('Docs'));
+    expect(
+      find.byKey(StudioDriverKeys.userInputOption('notes', 0)),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(StudioDriverKeys.userInputOption('notes', 0)));
     await tester.pump(const Duration(milliseconds: 50));
     await tester.enterText(find.byType(TextField).last, 'also mention risk');
     await tester.pump(const Duration(milliseconds: 50));

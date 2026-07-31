@@ -202,7 +202,7 @@ impl InstructionAssembler {
                 }
                 Ok(None) => {}
                 Err(error) => {
-                    eprintln!("[pl-core] failed to load skills prompt: {error}");
+                    tracing::warn!(%error, "failed to load skills prompt");
                 }
             }
         }

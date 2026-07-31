@@ -33,7 +33,7 @@ final class StudioControllerProvider
   StudioController create() => StudioController();
 }
 
-String _$studioControllerHash() => r'a06030f87a5127dbf9dbb90a6ec646fcccac522a';
+String _$studioControllerHash() => r'aebbba2491031efedb782ba4a6801ac8e3254e32';
 
 abstract class _$StudioController extends $AsyncNotifier<StudioState> {
   FutureOr<StudioState> build();

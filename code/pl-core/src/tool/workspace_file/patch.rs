@@ -41,6 +41,7 @@ struct PatchProgress {
     updated: Vec<String>,
     deleted: Vec<String>,
     moved: Vec<WorkspacePatchMove>,
+    in_flight: Option<String>,
 }
 
 impl PatchProgress {
@@ -62,28 +63,49 @@ impl PatchProgress {
     }
 
     fn failure_suffix(&self) -> String {
-        if self.added.is_empty()
-            && self.updated.is_empty()
-            && self.deleted.is_empty()
-            && self.moved.is_empty()
-        {
+        let completed_changes = !self.added.is_empty()
+            || !self.updated.is_empty()
+            || !self.deleted.is_empty()
+            || !self.moved.is_empty();
+        if !completed_changes && self.in_flight.is_none() {
             return "\nNo files were modified before failure.".to_string();
         }
 
-        let mut output = String::from("\nCommitted changes before failure:\n");
-        for path in &self.added {
-            output.push_str(&format!("A {path}\n"));
-        }
-        for path in &self.updated {
-            output.push_str(&format!("M {path}\n"));
-        }
-        for path in &self.deleted {
-            output.push_str(&format!("D {path}\n"));
-        }
-        for item in &self.moved {
-            output.push_str(&format!("M {} -> {}\n", item.from, item.to));
+        let mut output = if completed_changes {
+            let mut output = String::from("\nChanges applied before failure:\n");
+            for path in &self.added {
+                output.push_str(&format!("A {path}\n"));
+            }
+            for path in &self.updated {
+                output.push_str(&format!("M {path}\n"));
+            }
+            for path in &self.deleted {
+                output.push_str(&format!("D {path}\n"));
+            }
+            for item in &self.moved {
+                output.push_str(&format!("M {} -> {}\n", item.from, item.to));
+            }
+            output
+        } else {
+            "\nNo changes completed before failure.\n".to_string()
+        };
+        if let Some(change) = &self.in_flight {
+            output.push_str(
+                "An in-flight operation may have partially applied this additional change:\n",
+            );
+            output.push_str(&format!("? {change}\n"));
         }
         output
+    }
+
+    fn begin_change(&mut self, change: String) {
+        debug_assert!(self.in_flight.is_none());
+        self.in_flight = Some(change);
+    }
+
+    fn complete_change(&mut self) {
+        debug_assert!(self.in_flight.is_some());
+        self.in_flight = None;
     }
 
     fn output(self, cwd: String) -> WorkspacePatchOutput {
@@ -142,6 +164,7 @@ where
 {
     match hunk {
         crate::tool::file::apply_patch::Hunk::Add { path, content } => {
+            progress.begin_change(format!("A {path}"));
             backend
                 .write_text(WorkspaceFileWriteRequest {
                     path: path.clone(),
@@ -149,6 +172,7 @@ where
                     content,
                 })
                 .await?;
+            progress.complete_change();
             progress.added.push(path);
         }
         crate::tool::file::apply_patch::Hunk::Delete { path } => {
@@ -158,12 +182,14 @@ where
                     cwd: Some(cwd.to_string()),
                 })
                 .await?;
+            progress.begin_change(format!("D {path}"));
             backend
                 .remove_file(WorkspaceFileRemoveRequest {
                     path: path.clone(),
                     cwd: Some(cwd.to_string()),
                 })
                 .await?;
+            progress.complete_change();
             progress.deleted.push(path);
         }
         crate::tool::file::apply_patch::Hunk::Update {
@@ -183,6 +209,12 @@ where
                 apply_chunks(&old_content, Path::new(&path), &chunks)?
             };
             let target = move_path.unwrap_or_else(|| path.clone());
+            let change = if target == path {
+                format!("M {path}")
+            } else {
+                format!("M {path} -> {target}")
+            };
+            progress.begin_change(change);
             backend
                 .write_text(WorkspaceFileWriteRequest {
                     path: target.clone(),
@@ -202,6 +234,7 @@ where
                     to: target,
                 });
             }
+            progress.complete_change();
             progress.updated.push(path);
         }
     }
@@ -212,5 +245,26 @@ fn error_message(error: PureError) -> String {
     match error {
         PureError::ToolExecutionFailed { error, .. } => error,
         error => error.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PatchProgress;
+
+    #[test]
+    fn failure_suffix_reports_completed_and_in_flight_changes_separately() {
+        let progress = PatchProgress {
+            added: vec!["created.txt".to_string()],
+            in_flight: Some("M source.txt -> target.txt".to_string()),
+            ..PatchProgress::default()
+        };
+
+        let suffix = progress.failure_suffix();
+
+        assert!(suffix.contains("Changes applied before failure:\nA created.txt"));
+        assert!(suffix.contains("in-flight operation may have partially applied"));
+        assert!(suffix.contains("? M source.txt -> target.txt"));
+        assert!(!suffix.contains("Committed changes"));
     }
 }

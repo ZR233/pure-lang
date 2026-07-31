@@ -14,7 +14,8 @@ pub(crate) fn initialize() {
         let root = diagnostics_root();
         let log_dir = root.join("logs");
         if let Err(error) = std::fs::create_dir_all(&log_dir) {
-            eprintln!(
+            let _ = writeln!(
+                std::io::stderr().lock(),
                 "Pure Studio cannot create diagnostics directory {}: {error}",
                 log_dir.display()
             );
@@ -48,7 +49,7 @@ pub(crate) fn initialize() {
 }
 
 fn install_panic_hook(crash_dir: PathBuf) {
-    let previous = std::panic::take_hook();
+    drop(std::panic::take_hook());
     std::panic::set_hook(Box::new(move |info| {
         let _ = std::fs::create_dir_all(&crash_dir);
         let marker = crash_dir.join(format!(
@@ -72,7 +73,6 @@ fn install_panic_hook(crash_dir: PathBuf) {
             panic = %info,
             "Rust panic"
         );
-        previous(info);
     }));
 }
 

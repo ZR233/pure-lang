@@ -4,12 +4,17 @@ abstract final class StudioDriverKeys {
   static const shell = ValueKey<String>('studio-shell');
   static const sidebar = ValueKey<String>('studio-sidebar');
   static const timeline = ValueKey<String>('timeline-scrollable');
+  static const newSession = ValueKey<String>('sidebar-new-session');
   static const settingsOpen = ValueKey<String>('settings-open');
   static const settingsPage = ValueKey<String>('settings-page');
   static const settingsBack = ValueKey<String>('settings-back');
+  static const sessionMode = ValueKey<String>('session-mode-selector');
+  static const reasoningEffort = ValueKey<String>('reasoning-effort-selector');
   static const composerInput = ValueKey<String>('composer-input');
   static const composerSubmit = ValueKey<String>('composer-submit');
   static const composerStop = ValueKey<String>('composer-stop');
+  static const composerPending = ValueKey<String>('composer-pending');
+  static const composerError = ValueKey<String>('composer-error');
   static const agentSwitcher = ValueKey<String>('agent-switcher');
   static const providerEditor = ValueKey<String>('provider-editor');
   static const providerEdit = ValueKey<String>('provider-edit');
@@ -29,6 +34,12 @@ abstract final class StudioDriverKeys {
 
   static ValueKey<String> sessionRow(String id) =>
       ValueKey<String>('session-row-$id');
+
+  static ValueKey<String> sessionModeOption(String mode) =>
+      ValueKey<String>('session-mode-$mode');
+
+  static ValueKey<String> userInputOption(String questionId, int optionIndex) =>
+      ValueKey<String>('user-input-option-$questionId-$optionIndex');
 
   static ValueKey<String> agentRow(String id) =>
       ValueKey<String>('agent-session-$id');

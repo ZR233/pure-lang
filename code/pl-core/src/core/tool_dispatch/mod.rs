@@ -188,9 +188,10 @@ pub(super) async fn execute_tool_calls(
         }
         let Some(tool) = registered_tool else {
             let available: Vec<&str> = context.core.tools.names();
-            eprintln!(
-                "[pl-core] Unknown tool: {:?}, available: {:?}",
-                tool_call.name, available
+            tracing::warn!(
+                tool = %tool_call.name,
+                available = ?available,
+                "model requested an unknown tool"
             );
             emit_tool_snapshot(recorder, &mut item, TracePartStatus::Failed);
             let name = &tool_call.name;

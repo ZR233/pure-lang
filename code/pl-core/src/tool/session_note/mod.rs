@@ -382,6 +382,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn search_treats_blank_cursor_as_the_first_page() {
+        let context = context();
+        execute(
+            SessionNoteToolKind::Write,
+            json!({"content": "TODO first\nTODO second", "expectedRevision": 0}),
+            context.clone(),
+        )
+        .await;
+
+        let result = execute(
+            SessionNoteToolKind::Search,
+            json!({"query": "TODO", "literal": true, "limit": 1, "cursor": "  "}),
+            context,
+        )
+        .await;
+
+        assert_eq!(result["count"], 1);
+        assert_eq!(result["matches"][0]["line"], 1);
+        assert!(result["nextCursor"].is_string());
+    }
+
+    #[tokio::test]
+    async fn search_rejects_page_numbers_with_actionable_cursor_guidance() {
+        let error = SessionNoteTool::new(SessionNoteToolKind::Search)
+            .execute(input(json!({"query": "TODO", "cursor": "0"})), context())
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("omit cursor on the first page"));
+        assert!(error.to_string().contains("exact nextCursor"));
+    }
+
+    #[tokio::test]
     async fn search_supports_regex_crlf_and_more_than_two_full_pages() {
         let content = (1..=450)
             .map(|line| format!("Item-{line:03}\r\n"))

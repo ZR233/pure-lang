@@ -70,7 +70,13 @@ impl SessionNoteToolKind {
                         "limit",
                         json!({"type": "integer", "minimum": 1, "maximum": 200}),
                     ),
-                    ("cursor", json!({"type": "string"})),
+                    (
+                        "cursor",
+                        json!({
+                            "type": "string",
+                            "description": "Omit on the first page. For later pages, pass the exact nextCursor returned by the previous search; page numbers and offsets are invalid."
+                        }),
+                    ),
                 ],
                 &["query"],
             ),

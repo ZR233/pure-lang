@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, RwLock};
 
 use serde::{Deserialize, Serialize};
@@ -120,8 +120,10 @@ pub(crate) struct AgentEventHubHandle {
 #[derive(Debug)]
 struct AgentEventHubInner {
     snapshots: RwLock<BTreeMap<AgentId, AgentSnapshot>>,
+    quiesced_parent_waits: RwLock<BTreeSet<AgentId>>,
     sender: broadcast::Sender<AgentUpdateEnvelope>,
     parent_senders: RwLock<BTreeMap<AgentId, broadcast::Sender<AgentUpdateEnvelope>>>,
+    parent_wait_sender: broadcast::Sender<AgentId>,
     runtime_sender: broadcast::Sender<AgentRuntimeEvent>,
     snapshot_sender: broadcast::Sender<AgentSnapshot>,
 }
@@ -129,6 +131,7 @@ struct AgentEventHubInner {
 impl AgentEventHubHandle {
     pub(crate) fn new(restored: impl IntoIterator<Item = AgentSnapshot>) -> Self {
         let (sender, _) = broadcast::channel(EVENT_CAPACITY);
+        let (parent_wait_sender, _) = broadcast::channel(EVENT_CAPACITY);
         let (runtime_sender, _) = broadcast::channel(EVENT_CAPACITY);
         let (snapshot_sender, _) = broadcast::channel(EVENT_CAPACITY);
         Self {
@@ -139,8 +142,10 @@ impl AgentEventHubHandle {
                         .map(|snapshot| (snapshot.identity.id.clone(), snapshot))
                         .collect(),
                 ),
+                quiesced_parent_waits: RwLock::new(BTreeSet::new()),
                 sender,
                 parent_senders: RwLock::new(BTreeMap::new()),
+                parent_wait_sender,
                 runtime_sender,
                 snapshot_sender,
             }),
@@ -249,6 +254,35 @@ impl AgentEventHubHandle {
             summary,
         });
         Ok(())
+    }
+
+    pub(crate) fn suspend_parent_wait(&self, parent_agent_id: AgentId) {
+        self.inner
+            .quiesced_parent_waits
+            .write()
+            .expect("quiesced parent waits lock poisoned")
+            .insert(parent_agent_id.clone());
+        let _ = self.inner.parent_wait_sender.send(parent_agent_id);
+    }
+
+    pub(crate) fn resume_parent_wait(&self, parent_agent_id: &AgentId) {
+        self.inner
+            .quiesced_parent_waits
+            .write()
+            .expect("quiesced parent waits lock poisoned")
+            .remove(parent_agent_id);
+    }
+
+    pub(crate) fn parent_wait_is_suspended(&self, parent_agent_id: &AgentId) -> bool {
+        self.inner
+            .quiesced_parent_waits
+            .read()
+            .expect("quiesced parent waits lock poisoned")
+            .contains(parent_agent_id)
+    }
+
+    pub(crate) fn subscribe_parent_wait_controls(&self) -> broadcast::Receiver<AgentId> {
+        self.inner.parent_wait_sender.subscribe()
     }
 
     pub(crate) fn publish_product_phase(

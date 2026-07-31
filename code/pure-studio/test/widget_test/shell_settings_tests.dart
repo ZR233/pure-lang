@@ -16,7 +16,8 @@ void registerShellSettingsTests() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('New session'));
+    expect(find.byKey(StudioDriverKeys.newSession), findsOneWidget);
+    await tester.tap(find.byKey(StudioDriverKeys.newSession));
     await tester.pump();
     expect(api.createSessionCount, 1);
 
@@ -183,9 +184,20 @@ void registerShellSettingsTests() {
     await tester.pumpAndSettle();
 
     expect(find.byTooltip('Session mode'), findsOneWidget);
-    expect(find.byTooltip('Executor model'), findsOneWidget);
-    expect(find.byTooltip('Planner model'), findsNothing);
+    expect(find.byKey(StudioDriverKeys.sessionMode), findsOneWidget);
+    await tester.tap(find.byKey(StudioDriverKeys.sessionMode));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(StudioDriverKeys.sessionModeOption('task')),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(StudioDriverKeys.sessionModeOption('task')));
+    await tester.pumpAndSettle();
+    expect(api.sessionModeUpdate, StudioMode.task);
+    expect(find.byTooltip('Executor model'), findsNothing);
+    expect(find.byTooltip('Planner model'), findsOneWidget);
     expect(find.byTooltip('Reasoning effort'), findsOneWidget);
+    expect(find.byKey(StudioDriverKeys.reasoningEffort), findsOneWidget);
     expect(find.byType(StatusBarItem), findsWidgets);
     final contextReadout = find.bySemanticsLabel('Context');
     expect(contextReadout, findsOneWidget);

@@ -253,7 +253,7 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 "plan",
                 "plan_exit",
                 serde_json::json!({
-                    "content": "# Offline task plan\n\n1. Record the design contract.\n2. Implement in an executor worktree.\n3. Merge, review, and complete the task."
+                    "content": "# Offline task plan\n\n1. Record the contract in `design/task-flow.md`.\n2. Implement in an executor worktree.\n3. Merge, review, and complete the task."
                 }),
             ),
         ),

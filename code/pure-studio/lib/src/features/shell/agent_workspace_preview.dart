@@ -222,8 +222,12 @@ StudioState _agentWorkspacePreviewState({
           : AgentWorkspaceSyncState.ready,
     },
     pendingInteractions: const [],
-    composerTextsBySession: selectChild
+    composersBySession: selectChild
         ? const {}
-        : {root.id: 'Refine the implementation plan'},
+        : {
+            root.id: const ComposerSessionState.idle(
+              draft: 'Refine the implementation plan',
+            ),
+          },
   );
 }

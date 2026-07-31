@@ -1,6 +1,7 @@
 export 'agent_models.dart';
 export 'agent_workspace_view.dart';
 export 'collection_extensions.dart';
+export 'composer_models.dart';
 export 'failure_models.dart';
 export 'interaction_models.dart';
 export 'provider_models.dart';

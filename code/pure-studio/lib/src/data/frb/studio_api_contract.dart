@@ -40,7 +40,7 @@ abstract class StudioApi {
     String sessionId, {
     int? afterSequence,
   });
-  Future<void> submitPrompt(
+  Future<SubmitPromptReceipt> submitPrompt(
     String sessionId,
     String prompt,
     List<String> attachmentIds,
@@ -439,18 +439,23 @@ class FrbStudioApi implements StudioApi {
   }
 
   @override
-  Future<void> submitPrompt(
+  Future<SubmitPromptReceipt> submitPrompt(
     String sessionId,
     String prompt,
     List<String> attachmentIds,
   ) async {
     await _ensureReady();
-    await _bridgeCall(
+    final response = await _bridgeCall(
       () => frb.submitPrompt(
         sessionId: sessionId,
         prompt: prompt,
         attachmentIds: attachmentIds,
       ),
+    );
+    return SubmitPromptReceipt(
+      sessionId: response.sessionId,
+      turnId: response.turnId,
+      cursor: response.cursor.toInt(),
     );
   }
 

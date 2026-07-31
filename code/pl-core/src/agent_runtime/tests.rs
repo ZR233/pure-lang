@@ -1517,6 +1517,69 @@ async fn inactivity_diagnostic_cannot_interrupt_a_healthy_executor_and_resets_fu
 }
 
 #[tokio::test(start_paused = true)]
+async fn quiesced_parent_drops_old_waits_until_explicit_user_input() {
+    let host = TestHost::new(TestRepository::empty(), FactoryMode::Block);
+    let mut options = test_options();
+    options.child_inactivity_timeout = Duration::from_secs(30);
+    let runtime = AgentRuntime::start(host.clone(), options).await.unwrap();
+    let handle = runtime.handle();
+    let root = AgentId::new("root").unwrap();
+    let root_session = SessionId::new("root-chat").unwrap();
+    handle
+        .register(registration(root.as_str(), root_session.as_str()))
+        .await
+        .unwrap();
+    let child = handle
+        .spawn(managed_child_spawn_request(root.clone()))
+        .await
+        .unwrap()
+        .snapshot
+        .identity
+        .id;
+    handle.enter_waiting_agents(root.clone()).await.unwrap();
+
+    handle.suspend_parent_continuations(root.clone());
+    let quiesced = handle.quiesce_parent_wait(root.clone()).await.unwrap();
+    assert_eq!(quiesced.activity, AgentActivityState::Idle);
+    assert_eq!(quiesced.pending_inputs, 0);
+
+    handle
+        .publish_product_phase(
+            root.clone(),
+            child,
+            "delivery:late".to_string(),
+            "deliveryCompleted".to_string(),
+            None,
+        )
+        .unwrap();
+    tokio::time::advance(Duration::from_secs(120)).await;
+    tokio::task::yield_now().await;
+    assert!(
+        host.turn_factory
+            .prepared_messages
+            .lock()
+            .unwrap()
+            .is_empty(),
+        "late product facts and inactivity deadlines must not revive a quiesced parent"
+    );
+
+    handle
+        .submit(
+            root,
+            AgentSubmitRequest::start(root_session, "new user task")
+                .with_presentation(MailboxPresentation::User),
+        )
+        .await
+        .unwrap();
+    wait_for_prepared_messages(&host.turn_factory, 1).await;
+    assert_eq!(
+        host.turn_factory.prepared_messages.lock().unwrap()[0],
+        "new user task"
+    );
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test(start_paused = true)]
 async fn explicit_user_input_supersedes_an_active_inactivity_diagnostic() {
     let host = TestHost::new(TestRepository::empty(), FactoryMode::Block);
     let mut options = test_options();

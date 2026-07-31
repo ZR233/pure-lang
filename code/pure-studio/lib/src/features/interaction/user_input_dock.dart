@@ -136,6 +136,7 @@ class _UserInputDockState extends ConsumerState<UserInputDock> {
           const SizedBox(height: 12),
           _QuestionStep(
             question: question,
+            questionKey: key,
             controller: _textControllers[key]!,
             selected: _selectedOptions[key] ?? <String>{},
             onOptionChanged: (label, selected) {
@@ -388,6 +389,7 @@ class _ProgressDot extends StatelessWidget {
 class _QuestionStep extends StatelessWidget {
   const _QuestionStep({
     required this.question,
+    required this.questionKey,
     required this.controller,
     required this.selected,
     required this.onOptionChanged,
@@ -395,6 +397,7 @@ class _QuestionStep extends StatelessWidget {
   });
 
   final UserQuestionView question;
+  final String questionKey;
   final TextEditingController controller;
   final Set<String> selected;
   final void Function(String label, bool selected) onOptionChanged;
@@ -418,10 +421,11 @@ class _QuestionStep extends StatelessWidget {
         ],
         if (question.options.isNotEmpty) ...[
           const SizedBox(height: 10),
-          for (final option in question.options)
+          for (final (optionIndex, option) in question.options.indexed)
             Padding(
               padding: const EdgeInsets.only(bottom: 7),
               child: _QuestionOptionRow(
+                key: StudioDriverKeys.userInputOption(questionKey, optionIndex),
                 option: option,
                 selected: selected.contains(option.label),
                 onChanged: (value) => onOptionChanged(option.label, value),
@@ -461,6 +465,7 @@ class _QuestionOptionRow extends StatelessWidget {
     required this.option,
     required this.selected,
     required this.onChanged,
+    super.key,
   });
 
   final UserQuestionOptionView option;

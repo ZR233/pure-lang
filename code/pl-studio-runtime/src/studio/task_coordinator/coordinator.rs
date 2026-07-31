@@ -177,7 +177,7 @@ impl TaskCoordinator {
         }
     }
 
-    pub(super) fn subscribe_terminal_facts(&self) -> broadcast::Receiver<String> {
+    pub(in crate::studio) fn subscribe_terminal_facts(&self) -> broadcast::Receiver<String> {
         self.terminal_fact_tx.subscribe()
     }
 
@@ -843,14 +843,39 @@ impl TaskCoordinator {
     }
 
     pub(super) async fn block_run(&self, run: &TaskRunRecord, reason: String) -> Result<()> {
-        self.store
+        let blocked = self
+            .store
             .block_task_and_release_lease(&run.id, &reason)
             .await?;
+        self.publish_blocked_terminal(&blocked)?;
+        Ok(())
+    }
+
+    pub(super) async fn finish_blocked_transition(
+        &self,
+        task_run_id: &str,
+    ) -> Result<TaskRunRecord> {
+        let blocked = self
+            .store
+            .read_task_run(task_run_id)
+            .await?
+            .context("blocked task run not found after durable terminal commit")?;
+        self.publish_blocked_terminal(&blocked)?;
+        Ok(blocked)
+    }
+
+    fn publish_blocked_terminal(&self, run: &TaskRunRecord) -> Result<()> {
+        if run.phase != TaskRunPhase::Blocked
+            || run.terminal_generation != Some(run.task_generation)
+        {
+            bail!("blocked task terminal fact is not canonical for its task generation");
+        }
         self.release_owned_process_lease(&run.id);
         release_process_lease(
             &BranchKey::new(Path::new(&run.git_common_dir), &run.branch),
             &run.id,
         );
+        self.publish_terminal_fact(&run.id);
         Ok(())
     }
 

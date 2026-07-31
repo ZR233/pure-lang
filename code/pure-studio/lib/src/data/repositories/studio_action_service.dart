@@ -52,7 +52,7 @@ class StudioActionService {
     return _api.archiveSession(sessionId, selectedSessionId: selectedSessionId);
   }
 
-  Future<void> submitPrompt(String sessionId, String prompt) {
+  Future<SubmitPromptReceipt> submitPrompt(String sessionId, String prompt) {
     return _api.submitPrompt(sessionId, prompt, const []);
   }
 

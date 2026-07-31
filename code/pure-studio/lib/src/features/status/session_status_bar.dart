@@ -5,6 +5,7 @@ import '../../data/repositories/studio_repository.dart';
 import '../../domain/models/studio_models.dart';
 import '../../app/theme/studio_tokens.dart';
 import '../../l10n/studio_l10n.dart';
+import '../../shared/studio_driver_keys.dart';
 import '../../shared/upward_popup_menu.dart';
 import 'context_usage_readout.dart';
 import 'status_bar_item.dart';
@@ -266,6 +267,7 @@ class _SessionModeSelector extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return UpwardPopupMenu<StudioMode>(
+      key: StudioDriverKeys.sessionMode,
       tooltip: context.l10n.statusSessionMode,
       enabled: enabled,
       initialValue: mode,
@@ -273,6 +275,7 @@ class _SessionModeSelector extends ConsumerWidget {
       itemBuilder: (context) => [
         for (final option in StudioMode.values)
           PopupMenuItem(
+            key: StudioDriverKeys.sessionModeOption(option.name),
             value: option,
             child: Row(
               children: [
@@ -372,6 +375,7 @@ class _ReasoningEffortSelector extends ConsumerWidget {
     }
     final current = efforts.contains(role.effort) ? role.effort : efforts.first;
     return UpwardPopupMenu<String>(
+      key: StudioDriverKeys.reasoningEffort,
       tooltip: context.l10n.statusReasoningEffort,
       initialValue: current,
       onSelected: (effort) {

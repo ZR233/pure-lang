@@ -552,6 +552,7 @@ class _SidebarActions extends ConsumerWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 _SidebarActionButton(
+                  key: StudioDriverKeys.newSession,
                   tooltip: context.l10n.sidebarNewSession,
                   icon: Icons.add_comment_outlined,
                   onPressed: state.selectedProjectId == null || state.isBusy
@@ -579,6 +580,7 @@ class _SidebarActions extends ConsumerWidget {
           : Row(
               children: [
                 _SidebarActionButton(
+                  key: StudioDriverKeys.newSession,
                   icon: Icons.add_comment_outlined,
                   tooltip: context.l10n.sidebarNewSession,
                   onPressed: state.selectedProjectId == null || state.isBusy

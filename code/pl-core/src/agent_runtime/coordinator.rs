@@ -93,6 +93,10 @@ pub(crate) enum CoordinatorCommand {
         agent_id: AgentId,
         reply: oneshot::Sender<AgentRuntimeResult<()>>,
     },
+    QuiesceParentWait {
+        agent_id: AgentId,
+        reply: oneshot::Sender<AgentRuntimeResult<AgentSnapshot>>,
+    },
     StartRestoredInputs {
         reply: oneshot::Sender<AgentRuntimeResult<()>>,
     },
@@ -310,6 +314,14 @@ async fn run_coordinator<H>(
                     &actors,
                     &agent_id,
                     ActorCommand::EnterWaitingAgents { reply },
+                )
+                .await;
+            }
+            CoordinatorCommand::QuiesceParentWait { agent_id, reply } => {
+                route(
+                    &actors,
+                    &agent_id,
+                    ActorCommand::QuiesceParentWait { reply },
                 )
                 .await;
             }
@@ -544,6 +556,9 @@ fn reject_missing(command: ActorCommand, agent_id: AgentId) {
             let _ = reply.send(Err(error));
         }
         ActorCommand::EnterWaitingAgents { reply } => {
+            let _ = reply.send(Err(error));
+        }
+        ActorCommand::QuiesceParentWait { reply } => {
             let _ = reply.send(Err(error));
         }
         ActorCommand::StartPendingInputs { reply } => {

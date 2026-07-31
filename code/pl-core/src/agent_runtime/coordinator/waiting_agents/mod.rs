@@ -52,6 +52,7 @@ pub(super) fn spawn_waiting_agents_supervisor(
     tokio::spawn(async move {
         let mut updates = runtime.agent_events.subscribe_all();
         let mut runtime_events = runtime.agent_events.subscribe_runtime();
+        let mut parent_wait_controls = runtime.agent_events.subscribe_parent_wait_controls();
         let mut parents = BTreeMap::<AgentId, ParentWaitState>::new();
         let mut timers = BinaryHeap::<TimerEntry>::new();
         restore_waiting_parents(&runtime, &mut parents, &mut timers, inactivity_timeout);
@@ -100,6 +101,17 @@ pub(super) fn spawn_waiting_agents_supervisor(
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 },
+                control = parent_wait_controls.recv() => match control {
+                    Ok(parent_id) => {
+                        parents.remove(&parent_id);
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                        parents.retain(|parent_id, _| {
+                            !runtime.agent_events.parent_wait_is_suspended(parent_id)
+                        });
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                },
                 () = wait_for_deadline(deadline) => {
                     handle_due_timers(
                         &runtime,
@@ -122,6 +134,9 @@ async fn handle_update(
 ) {
     let actionable = update_triggers_parent_wake(&update.kind);
     let parent_id = update.parent_agent_id.clone();
+    if runtime.agent_events.parent_wait_is_suspended(&parent_id) {
+        return;
+    }
     let child_id = update.agent_id.clone();
     let Ok(parent) = runtime.agent_events.snapshot(&parent_id) else {
         return;
@@ -255,6 +270,18 @@ async fn handle_runtime_event(
 ) {
     let snapshot = event_snapshot(&event);
     let parent_id = snapshot.identity.id.clone();
+    if let AgentRuntimeEventKind::TurnQueued { input, .. } = &event.kind
+        && matches!(
+            &input.presentation,
+            super::super::MailboxPresentation::User
+        )
+    {
+        runtime.agent_events.resume_parent_wait(&parent_id);
+    }
+    if runtime.agent_events.parent_wait_is_suspended(&parent_id) {
+        parents.remove(&parent_id);
+        return;
+    }
     let state = parents.entry(parent_id.clone()).or_default();
     if snapshot.activity != AgentActivityState::WaitingAgents {
         invalidate_timers(state);
@@ -345,6 +372,10 @@ async fn settle_parent(
     parents: &mut BTreeMap<AgentId, ParentWaitState>,
     parent_id: AgentId,
 ) {
+    if runtime.agent_events.parent_wait_is_suspended(&parent_id) {
+        parents.remove(&parent_id);
+        return;
+    }
     let Ok(parent) = runtime.agent_events.snapshot(&parent_id) else {
         return;
     };
@@ -378,6 +409,9 @@ fn restore_waiting_parents(
     for snapshot in runtime.agent_events.snapshots() {
         if snapshot.lifecycle == AgentLifecycleState::Active
             && snapshot.activity == AgentActivityState::WaitingAgents
+            && !runtime
+                .agent_events
+                .parent_wait_is_suspended(&snapshot.identity.id)
         {
             let parent_id = snapshot.identity.id;
             let state = parents.entry(parent_id.clone()).or_default();

@@ -43,9 +43,9 @@ impl StudioStore {
                     checkpoint_sqlite(&db).await?;
                     db.close().await?;
                     let backup = archive_incompatible_database(path).await?;
-                    eprintln!(
-                        "检测到不兼容的未版本化 Studio 数据库，已备份到 {} 并重建。",
-                        backup.display()
+                    tracing::warn!(
+                        backup = %backup.display(),
+                        "检测到不兼容的未版本化 Studio 数据库，已备份并重建"
                     );
                     db = connect_sqlite(&url).await?;
                     configure_sqlite(&db).await?;

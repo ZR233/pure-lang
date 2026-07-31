@@ -128,14 +128,14 @@ pub trait PatchBackend: PatchPathDisplay {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PatchOutcome {
-    committed: Vec<CommittedChange>,
+    applied: Vec<AppliedChange>,
     exact: bool,
 }
 
 impl Default for PatchOutcome {
     fn default() -> Self {
         Self {
-            committed: Vec::new(),
+            applied: Vec::new(),
             exact: true,
         }
     }
@@ -143,17 +143,17 @@ impl Default for PatchOutcome {
 
 impl PatchOutcome {
     pub fn file_changes(&self) -> Vec<PatchFileChange> {
-        self.committed
+        self.applied
             .iter()
             .map(|change| match change {
-                CommittedChange::Add { path, .. } => PatchFileChange::Add { path: path.clone() },
-                CommittedChange::Update { path, .. } => {
+                AppliedChange::Add { path, .. } => PatchFileChange::Add { path: path.clone() },
+                AppliedChange::Update { path, .. } => {
                     PatchFileChange::Update { path: path.clone() }
                 }
-                CommittedChange::Delete { path, .. } => {
+                AppliedChange::Delete { path, .. } => {
                     PatchFileChange::Delete { path: path.clone() }
                 }
-                CommittedChange::Move { source, target, .. } => PatchFileChange::Move {
+                AppliedChange::Move { source, target, .. } => PatchFileChange::Move {
                     source: source.clone(),
                     target: target.clone(),
                 },
@@ -163,38 +163,38 @@ impl PatchOutcome {
 
     pub fn summary(&self, paths: &impl PatchPathDisplay) -> String {
         let mut output = String::from("Success. Updated the following files:\n");
-        for change in &self.committed {
+        for change in &self.applied {
             output.push_str(&change.summary_line(paths));
         }
         output
     }
 
     pub fn changed_paths(&self) -> Vec<PathBuf> {
-        self.committed
+        self.applied
             .iter()
             .filter_map(|change| match change {
-                CommittedChange::Add { path, .. } | CommittedChange::Update { path, .. } => {
+                AppliedChange::Add { path, .. } | AppliedChange::Update { path, .. } => {
                     Some(path.clone())
                 }
-                CommittedChange::Move { target, .. } => Some(target.clone()),
-                CommittedChange::Delete { .. } => None,
+                AppliedChange::Move { target, .. } => Some(target.clone()),
+                AppliedChange::Delete { .. } => None,
             })
             .collect()
     }
 
     pub fn deleted_paths(&self) -> Vec<PathBuf> {
-        self.committed
+        self.applied
             .iter()
             .filter_map(|change| match change {
-                CommittedChange::Delete { path, .. } => Some(path.clone()),
-                CommittedChange::Move { source, .. } => Some(source.clone()),
-                CommittedChange::Add { .. } | CommittedChange::Update { .. } => None,
+                AppliedChange::Delete { path, .. } => Some(path.clone()),
+                AppliedChange::Move { source, .. } => Some(source.clone()),
+                AppliedChange::Add { .. } | AppliedChange::Update { .. } => None,
             })
             .collect()
     }
 
     fn failure_suffix(&self, paths: &impl PatchPathDisplay) -> String {
-        if self.committed.is_empty() {
+        if self.applied.is_empty() {
             let mut output = "\nNo files were modified before failure.".to_string();
             if !self.exact {
                 output.push_str("\nA write may have partially modified a file before failure.");
@@ -202,12 +202,12 @@ impl PatchOutcome {
             return output;
         }
 
-        let mut output = String::from("\nCommitted changes before failure:\n");
-        for change in &self.committed {
+        let mut output = String::from("\nChanges applied before failure:\n");
+        for change in &self.applied {
             output.push_str(&change.failure_line(paths));
         }
         if !self.exact {
-            output.push_str("Committed changes may be incomplete because a write failed.\n");
+            output.push_str("Applied changes may be incomplete because a write failed.\n");
         }
         output
     }
@@ -222,7 +222,7 @@ pub enum PatchFileChange {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum CommittedChange {
+enum AppliedChange {
     Add {
         path: PathBuf,
         content: String,
@@ -246,7 +246,7 @@ enum CommittedChange {
     },
 }
 
-impl CommittedChange {
+impl AppliedChange {
     fn summary_line(&self, paths: &impl PatchPathDisplay) -> String {
         match self {
             Self::Add { path, .. } => format!("A {}\n", paths.display_path(path)),
@@ -366,7 +366,7 @@ async fn apply_hunk(
             let overwritten_content = backend.read_optional_text(&target).await?;
             backend.create_parent_dirs(&target).await?;
             write_text(backend, &target, &content, outcome).await?;
-            outcome.committed.push(CommittedChange::Add {
+            outcome.applied.push(AppliedChange::Add {
                 path: target,
                 content,
                 overwritten_content,
@@ -378,7 +378,7 @@ async fn apply_hunk(
             backend.ensure_file(&target).await?;
             let content = backend.read_to_string(&target).await?;
             backend.remove_file(&target).await?;
-            outcome.committed.push(CommittedChange::Delete {
+            outcome.applied.push(AppliedChange::Delete {
                 path: target,
                 content,
             });
@@ -402,7 +402,7 @@ async fn apply_hunk(
                 backend.reject_symlink_write(&target).await?;
                 if target == source {
                     write_text(backend, &source, &new_content, outcome).await?;
-                    outcome.committed.push(CommittedChange::Update {
+                    outcome.applied.push(AppliedChange::Update {
                         path: source,
                         old_content,
                         new_content,
@@ -412,14 +412,14 @@ async fn apply_hunk(
                 let overwritten_target_content = backend.read_optional_text(&target).await?;
                 backend.create_parent_dirs(&target).await?;
                 write_text(backend, &target, &new_content, outcome).await?;
-                let target_commit_index = outcome.committed.len();
-                outcome.committed.push(CommittedChange::Add {
+                let target_change_index = outcome.applied.len();
+                outcome.applied.push(AppliedChange::Add {
                     path: target.clone(),
                     content: new_content.clone(),
                     overwritten_content: overwritten_target_content.clone(),
                 });
                 backend.remove_file(&source).await?;
-                outcome.committed[target_commit_index] = CommittedChange::Move {
+                outcome.applied[target_change_index] = AppliedChange::Move {
                     source,
                     target,
                     old_content,
@@ -428,7 +428,7 @@ async fn apply_hunk(
                 };
             } else {
                 write_text(backend, &source, &new_content, outcome).await?;
-                outcome.committed.push(CommittedChange::Update {
+                outcome.applied.push(AppliedChange::Update {
                     path: source,
                     old_content,
                     new_content,
@@ -1192,7 +1192,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn failure_reports_committed_prefix() {
+    async fn failure_reports_applied_changes() {
         let backend = MemoryBackend::default();
         let patch = "*** Begin Patch\n*** Add File: created.txt\n+hello\n*** Update File: missing.txt\n@@\n-old\n+new\n*** End Patch";
 
@@ -1203,7 +1203,8 @@ mod tests {
                 .message()
                 .contains("failed to resolve path 'missing.txt'")
         );
-        assert!(error.message().contains("Committed changes before failure"));
+        assert!(error.message().contains("Changes applied before failure"));
+        assert!(!error.message().contains("Committed changes"));
         assert!(error.message().contains("A created.txt"));
         assert_eq!(backend.read("created.txt"), Some("hello\n".to_string()));
     }

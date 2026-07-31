@@ -1,4 +1,5 @@
 mod cancel;
+mod contract;
 mod git;
 mod patch;
 
@@ -63,6 +64,10 @@ enum OriginalPath {
 }
 
 impl TaskCoordinator {
+    pub(crate) fn validate_confirmed_plan_design_contract(&self, plan: &str) -> Result<()> {
+        contract::ensure_plan_declares_design_targets(plan)
+    }
+
     #[cfg(test)]
     pub(crate) fn set_design_after_commit_barrier(&self, barrier: DesignCommitTestBarrier) {
         *self
@@ -161,7 +166,7 @@ impl TaskCoordinator {
         let studio_session_id = studio_session_id.into();
         RegisteredTool::from_fallible_execution_result(
             "task_update_design",
-            "Apply and commit exactly one complete Codex-style design-only patch for the current Task run. The patch must begin with `*** Begin Patch` and end with `*** End Patch`. For a new file, use `*** Add File: design/<path>` and prefix every content line with `+`, without an `@@` hunk. Complete example: `*** Begin Patch\n*** Add File: design/spec.md\n+# Design\n*** End Patch`. Use `*** Update File:` only for an existing file. After a failed patch, follow the reported cause, read an existing target again when needed, and retry with a smaller complete patch; never use `*** New File`.",
+            "Apply and commit exactly one complete Codex-style design-only patch for the current Task run. The initial patch must cover every `design/**/*.md` target declared in the confirmed plan. The patch must begin with `*** Begin Patch` and end with `*** End Patch`. For a new file, use `*** Add File: design/<path>` and prefix every content line with `+`, without an `@@` hunk. Complete example: `*** Begin Patch\n*** Add File: design/spec.md\n+# Design\n*** End Patch`. Use `*** Update File:` only for an existing file. After a failed patch, follow the reported cause, read stale targets again when needed, and retry with one complete logical patch covering the full confirmed design target set; applied hunks from a failed call are rolled back. Never use `*** New File`.",
             strict_tool_input_schema([ToolInputSchemaField::required(
                 "patch",
                 serde_json::json!({ "type": "string" }),
@@ -200,6 +205,7 @@ impl TaskCoordinator {
             .await?;
         ensure_design_phase(run.phase)?;
         let validated = validate_design_patch(caller_workspace, patch).await?;
+        contract::ensure_initial_patch_covers_plan(&run, &validated.paths)?;
         let originals = snapshot_paths(caller_workspace, &validated.paths).await?;
         self.apply_and_commit_design(&run, validated, &originals)
             .await
@@ -316,7 +322,9 @@ impl TaskCoordinator {
                         "design update failed: {operation_error}; repository was not clean after rollback and the task run was blocked: {cleanliness_error}"
                     );
                 }
-                return Err(operation_error);
+                bail!(
+                    "task_update_design did not record a design commit: {operation_error:#}; the coordinator restored the validated design paths and index to their pre-call state; retry with one complete logical patch covering every confirmed-plan design target"
+                );
             }
         };
 
@@ -521,6 +529,10 @@ impl TaskCoordinator {
         )
         .await?;
         bail!("{reason}; task run was blocked because compensation was unsafe")
+    }
+
+    pub(super) async fn ensure_executor_design_contract(&self, run: &TaskRunRecord) -> Result<()> {
+        contract::ensure_committed_design_covers_plan(run).await
     }
 }
 

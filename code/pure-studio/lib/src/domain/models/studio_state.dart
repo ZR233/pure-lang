@@ -1,6 +1,7 @@
 import 'agent_models.dart';
 import 'agent_workspace_view.dart';
 import 'collection_extensions.dart';
+import 'composer_models.dart';
 import 'interaction_models.dart';
 import 'provider_models.dart';
 import 'recovery_models.dart';
@@ -57,14 +58,14 @@ class StudioState {
     required this.pendingInteractions,
     this.recoveryIssues = const [],
     this.eventCursorsBySession = const {},
-    this.composerTextsBySession = const {},
+    this.composersBySession = const {},
   }) : workspaceSyncBySession = _withInitialWorkspaceSync(
          workspaceSyncBySession,
          selectedSessionId,
          selectedSessionId != null &&
              (turnsBySession.containsKey(selectedSessionId) ||
                  runtimesBySession.containsKey(selectedSessionId) ||
-                 composerTextsBySession.containsKey(selectedSessionId)),
+                 composersBySession.containsKey(selectedSessionId)),
        );
 
   final List<StudioProject> projects;
@@ -95,7 +96,7 @@ class StudioState {
   final List<PendingInteraction> pendingInteractions;
   final List<StudioRecoveryIssue> recoveryIssues;
   final Map<String, int> eventCursorsBySession;
-  final Map<String, String> composerTextsBySession;
+  final Map<String, ComposerSessionState> composersBySession;
 
   String? get selectedAgentSessionId => selectedSessionId;
 
@@ -135,9 +136,11 @@ class StudioState {
         : runtimesBySession[sessionId] ?? _emptySessionRuntime;
   }
 
-  String get composerText {
+  ComposerSessionState get composer {
     final sessionId = selectedSessionId;
-    return sessionId == null ? '' : composerTextsBySession[sessionId] ?? '';
+    return sessionId == null
+        ? const ComposerSessionState.idle()
+        : composersBySession[sessionId] ?? const ComposerSessionState.idle();
   }
 
   List<StudioSession> get rootSessions =>
@@ -303,7 +306,7 @@ class StudioState {
       runtime: runtime,
       turn: turn,
       activeInteraction: activeInteraction,
-      composerText: composerText,
+      composer: composer,
       composerMode: session.isAgent
           ? AgentComposerMode.runtimeDriven
           : AgentComposerMode.editable,
@@ -351,7 +354,7 @@ class StudioState {
     List<PendingInteraction>? pendingInteractions,
     List<StudioRecoveryIssue>? recoveryIssues,
     Map<String, int>? eventCursorsBySession,
-    Map<String, String>? composerTextsBySession,
+    Map<String, ComposerSessionState>? composersBySession,
   }) {
     final nextSelectedSessionId =
         identical(selectedSessionId, _studioStateUnset)
@@ -366,9 +369,9 @@ class StudioState {
       ...this.workspaceSyncBySession,
       ...?workspaceSyncBySession,
     };
-    final nextComposerTexts = {
-      ...this.composerTextsBySession,
-      ...?composerTextsBySession,
+    final nextComposers = {
+      ...this.composersBySession,
+      ...?composersBySession,
     };
     return StudioState(
       projects: projects ?? this.projects,
@@ -408,7 +411,7 @@ class StudioState {
       recoveryIssues: recoveryIssues ?? this.recoveryIssues,
       eventCursorsBySession:
           eventCursorsBySession ?? this.eventCursorsBySession,
-      composerTextsBySession: nextComposerTexts,
+      composersBySession: nextComposers,
     );
   }
 }

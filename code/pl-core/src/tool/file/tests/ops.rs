@@ -172,6 +172,10 @@ fn file_tool_schemas_use_unified_camel_case_inputs() {
     assert!(search_schema["properties"].get("pattern").is_none());
     assert!(search_schema["properties"].get("filePattern").is_none());
     assert_eq!(search_schema["required"], serde_json::json!(["query"]));
+    assert_eq!(
+        search_schema["properties"]["query"]["description"],
+        "Literal text or regular expression to search for. This required field is named query."
+    );
 }
 
 #[tokio::test]

@@ -26,6 +26,7 @@ import 'package:pure_studio/src/features/update/studio_update_controller.dart';
 import 'package:pure_studio/src/l10n/app_localizations.dart';
 import 'package:pure_studio/src/rust/api/studio.dart' as frb;
 import 'package:pure_studio/src/shared/studio_chrome.dart';
+import 'package:pure_studio/src/shared/studio_driver_keys.dart';
 
 import 'support/responsive_visual_fixture.dart';
 

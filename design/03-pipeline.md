@@ -127,6 +127,15 @@ Task executor 和 reviewer 使用 fresh session：executor 的自包含任务由
 
 子代理同样继承父 turn 的交互运行时。`request_user_input`、工具审批和计划确认统一表达为 `InteractionKind::{userInput, toolApproval, planConfirmation}`。每个 interaction 都带 `sessionId`、`turnId`、可选 `itemId/toolId/agentPath`，由 `InteractionRuntime` 创建、持久化、广播并等待 resolution。Studio 只渲染当前最高优先级 pending interaction；回答或审批只解除对应等待，不触发新 turn，也不写入普通聊天消息。UI 交互形态对齐 opencode dock prompt：pending question/permission/plan confirmation 在底部 dock 处理，timeline 只渲染 message/part 投影；`request_user_input` 的 completed tool part 可以显示 redacted 问题答案摘要。
 
+进程重启会丢失 interaction 的进程内 waiter，但不会丢失 durable `userInput`。恢复时
+`userInput` 保持 pending；`toolApproval` 因外部副作用是否已经发生无法可靠判断，必须拒绝并
+取消。若用户回答时原 turn 已以 `runtime_restarted` 终止，Studio 以 interaction id 派生稳定
+mail id，把完整问题与答案作为 typed `SyntheticHidden` continuation 提交给 canonical
+session owner；该输入进入模型上下文但不生成普通用户 timeline。旧 harness 已经随
+`runtime_restarted` 取消的最新 `userInput` 可以按 turn 终态证据恢复一次，并在 turn metadata
+写入 recovery receipt；已经存在 receipt、存在更新的 pending 请求或 ownership 不明确时不得
+再次恢复。
+
 Simple 模式主 turn 保存完成后，如果 `[skills].auto_learn = true` 且本轮达到自学习触发条件，`StudioRuntime` 启动后台 reviewer。reviewer 只开放 skills 工具，复盘结果只写项目 skills 目录；失败只记录日志，不改变本轮响应。Task 模式从规划开始由 coordinator 独占工作区写入，既不启动后台自学习 reviewer，也不允许只读的 `skill_view` 更新项目使用统计，避免计划确认前出现绕过 TaskRun 的 workspace 修改。
 
 文件、shell 和 LSP 查询工具都以有效 `workspaceRoot` 为默认边界。工具输入不要求全部使用绝对路径；相对路径一律按 `workspaceRoot` 解析，而不是按 Pure Studio 进程 cwd。执行前，核心层用统一路径策略把输入解析为规范化绝对路径，并用同一结果做权限预判和实际执行。`exec` 默认在 workspace root 下执行，`cwd` 也按 workspace root 解析并拒绝逃逸；文件工具默认只允许访问 workspace root 内的路径；`lsp_query_*` 的 `filePath` 解析后才交给 `pl-lsp` 生成 file URI。`full-access` 模式会放宽本地 backend 的该边界，允许文件路径和 `exec.cwd` 指向 workspace 外，但仍要求 existing 或 existing-parent 可解析，不绕过工具自身校验、写锁、超时、输出截断和 timeline 记录。宿主 backend 可以施加更严格的隔离边界。
@@ -158,6 +167,13 @@ spawn 使用 runtime 原生 child `SessionId` 创建 Studio agent session，先�
 root Studio session。恢复顺序固定为先恢复 session owner 和 agent directory，再挂载 runtime；
 owner 冲突必须拒绝并输出诊断。大会话归档级联归档其 agent sessions，但不删除历史。
 
+所有面向 session 的宿主操作都必须从 `sessions.owner_agent_id` 解析 canonical owner，包括
+prompt 提交、停止、外部 session fact 和重启后的 transient interaction 取消；不得根据
+`sessionId` 临时派生 `studio:{sessionId}` 并把 child session rootify。启动恢复可在事务中
+清除严格可证明的 ghost runtime registration：该 runtime agent 没有任何 canonical owned
+session，且其全部 session claim 均已由其他 owner 持有。只要同一 agent 同时存在有效与冲突
+claim，恢复必须拒绝并保留诊断，不能猜测或删除共享 session projection。
+
 持久化原则：
 
 - 消息和内部 `pl-trace` 诊断事件采用事务批量写入，避免逐条写放大；旧 `timeline_events` 表的 entity、运行期写入、读取和清理路径均已删除，迁移历史按 append-only 保留（不再有运行期代码读写该表）
@@ -170,6 +186,7 @@ owner 冲突必须拒绝并输出诊断。大会话归档级联归档其 agent s
 - session 的 `instruction_snapshot_json` 保存稳定 base/user/project context 和非 mode-specific developer context；Simple/Task 与 execution profile overlay 每个 turn 重新注入。
 - Task 计划与实施状态通过 durable coordinator 和 plan lifecycle 事件表达；确认实施后在同一 session 进入 `designUpdating`，由 planner continuation turn 推进，不切换会话模式。
 - `interactions` 表保存所有 pending/resolved/cancelled/expired 交互，是刷新与 session 切换恢复 pending UI 的事实来源。`InteractionChanged` 通过 `StudioEventKind::InteractionChanged` 广播当前 interaction 最新状态；旧 `studio-user-input-*`、`studio-tool-approval-*`、`studio-interaction-changed` sideband 事件不再作为 Studio 协议入口
+- `userInput` 的 durable record 与进程内 waiter 是两层状态：同进程回答直接唤醒 waiter；重启后回答通过稳定 mail id 的 hidden continuation 恢复语义。`toolApproval` 不做跨进程恢复，避免把不确定的外部副作用重复执行
 - framework attach 时会检查活动 Task 根会话最新的完整 Plan trace；如果对应确认 interaction 缺失、没有活动 TaskRun，且同一计划尚未进入实施或终态，则幂等补写 `PendingConfirmation` lifecycle 与 `planConfirmation`。该恢复只修复已有完整计划证据的投影缺口，不从局部 delta、普通文本或旧计划猜测确认内容
 - `skill_view` 成功激活 skill 时，后端写入结构化 `SkillActivated` 事件并 upsert 会话级 skill runtime fact。Studio 当前会话的 `activeSkills` 只从 `session_skills` 等结构化持久层读取，不能再从 tool result JSON 文本反解析。
 - 如果 turn 内发生上下文压缩，`AgentSession` revision 会变化，Studio 以事务重写当前 session 的有序模型上下文项并追加本轮 trace；未发生压缩时继续使用追加写入。`messages.item_type` 区分普通 `message` 与加密 `compaction`。恢复时加载两类上下文项，Studio/Flutter 消息查询与 projection 只返回普通消息，绝不暴露 checkpoint 加密内容

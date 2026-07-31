@@ -795,7 +795,7 @@ async fn apply_patch_move_overwrites_existing_target() {
 }
 
 #[tokio::test]
-async fn apply_patch_failure_keeps_committed_prefix() {
+async fn apply_patch_failure_reports_applied_changes() {
     let root = unique_temp_dir("patch-prefix-failure");
     tokio::fs::create_dir_all(&root).await.unwrap();
     let tool = apply_patch_tool();
@@ -811,7 +811,8 @@ async fn apply_patch_failure_keeps_committed_prefix() {
 
     let error = result.to_string();
     assert!(error.contains("failed to resolve path 'missing.txt'"));
-    assert!(error.contains("Committed changes before failure"));
+    assert!(error.contains("Changes applied before failure"));
+    assert!(!error.contains("Committed changes"));
     assert!(error.contains("A created.txt"));
     assert_eq!(
         tokio::fs::read_to_string(root.join("created.txt"))

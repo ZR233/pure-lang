@@ -18,7 +18,7 @@ void registerAgentWorkspaceTests() {
       await controller.selectAgentSession('agent-session-1');
       var state = container.read(studioControllerProvider).requireValue;
       expect(state.selectedAgentSessionId, 'agent-session-1');
-      expect(state.composerText, isEmpty);
+      expect(state.composer.draft, isEmpty);
       expect(state.runtime.model, isEmpty);
       expect(state.turn, isNull);
       expect(
@@ -106,7 +106,7 @@ void registerAgentWorkspaceTests() {
 
       await controller.selectAgentSession('session-1');
       state = container.read(studioControllerProvider).requireValue;
-      expect(state.composerText, 'Planner draft');
+      expect(state.composer.draft, 'Planner draft');
       expect(state.runtime.model, 'planner/model');
     },
   );

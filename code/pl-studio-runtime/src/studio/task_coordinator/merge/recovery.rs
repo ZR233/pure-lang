@@ -119,7 +119,7 @@ impl TaskCoordinator {
                 ),
             })
             .await?;
-        self.release_owned_process_lease(&run.id);
+        self.finish_blocked_transition(&run.id).await?;
         Ok(MergeRestartRecovery::Blocked)
     }
 
@@ -185,7 +185,7 @@ impl TaskCoordinator {
                 ),
             })
             .await?;
-        self.release_owned_process_lease(&run.id);
+        self.finish_blocked_transition(&run.id).await?;
         Ok(MergeRestartRecovery::Blocked)
     }
 }

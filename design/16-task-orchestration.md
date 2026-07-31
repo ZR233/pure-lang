@@ -150,6 +150,25 @@ working tree 或其他启动预检失败，Flutter 必须捕获并展示错误�
 重试，不得让 bridge 异常成为未捕获的 UI 异步异常。
 任务进入 `blocked` 时必须在同一 SQLite 事务中更新 `TaskRun` 并删除 durable
 `BranchLease`，随后释放进程 lease；诊断事实保留，但不得永久阻塞同一分支的新任务。
+任何 merge、conflict、design 或恢复路径写入 `blocked` 后，都必须汇入 coordinator 的同一
+terminal barrier，不得只在 store 内结束 durable phase。barrier 以 task run id 与 generation
+为身份发布终态事实，并终止该 generation 的内存 continuation：取消仍在执行的 Planner
+synthetic turn，关闭 direct children，清除旧 generation 的 synthetic mailbox、accepted wake
+与 `WaitingAgents` deadline/等待 epoch，再把可复用的 root agent 收束到 `Idle`。终态之后
+迟到的 child update 和 inactivity deadline 不得重新建立等待或创建模型 turn；下一条明确的
+用户输入才允许开启新一轮 root 工作。runtime attach 必须在放行 restored input 前，用最新
+durable TaskRun 对账并补做同一 quiesce，因此进程在 terminal commit 与内存收束之间退出也
+不会恢复旧 continuation。
+
+Composer 对每个 session 维护一个 typed state，同时拥有 draft 与
+`idle | submitting | pendingStart` 提交阶段；不得用 UI 控件本地文本、全局
+`AsyncError` 或多个无关联 bool 表示同一次提交。点击发送先冻结完整 draft 并进入
+`submitting`，Bridge 返回已经进入 canonical runtime queue 的 typed turn receipt 后才清空
+draft，并以该 turn id 保持 `pendingStart`；session event 或 snapshot 观察到同一 turn 后才
+解除 pending gate。提交失败时恢复完整 draft、回到 `idle` 并在 Composer 内展示可重试错误，
+用户继续编辑会清除旧错误。`submitting | pendingStart` 期间键盘提交和发送按钮共享同一
+single-flight gate，避免重复 turn；回调必须显式持有 Future，不能因 Widget callback 丢弃
+尚未完成的 Bridge 调用。错误与 pending 状态都提供稳定 Driver key，供真实 GUI 验收。
 
 所有会改变任务分支的操作（设计提交、交付合并、冲突继续、完成和取消）共享同一
 branch mutation lock；该锁不与 scheduler 或 supervisor 锁嵌套。持锁后必须重新读取
@@ -354,7 +373,14 @@ planner 只能修改冲突清单中的文件。continue 前必须没有 unmerged
 ## 设计与审查门禁
 
 用户确认实施后，planner 先调用 `task_update_design` 修改并提交 `design/**`；成功前
-不得创建 executor。任务取消或部分失败时，design 必须回退或更新到与当前实现一致。
+不得创建 executor。最终计划必须用 inline code 包裹规范的 workspace-relative
+`design/**/*.md` 路径，显式列出初始设计目标。coordinator 从已持久化的 confirmed plan
+确定性提取这些路径；没有至少一个具体目标、只写 glob 或只在普通正文提及路径的计划
+不能进入实施，确认交互保持 pending。初次
+`task_update_design` 的完整 patch 必须覆盖全部目标，否则在任何文件写入前拒绝。创建
+executor 前，harness 再以 Git diff 证明 focused design commit 已覆盖同一目标集合，并在
+创建 WorkUnit、AgentOutcome 或 worktree 前拒绝不完整设计。任务取消或部分失败时，design
+必须回退或更新到与当前实现一致。
 `task_update_design` 的 patch 必须是从 `*** Begin Patch` 到 `*** End Patch` 的完整
 Codex patch；新增文件的每一行内容都必须带 `+` 前缀。工具说明必须给出完整示例，
 执行失败时必须向模型保留解析、路径或 Git 操作的具体根因，不能只返回通用重试提示，
@@ -365,7 +391,10 @@ Codex patch；新增文件的每一行内容都必须带 `+` 前缀。工具说�
 该工具只对 Task 根 planner 可见，先完整解析并验证 patch 的所有 source 和 move
 destination 都是规范、非 ignored、且不会经 symlink 逃逸的 workspace-relative
 `design/**` 路径，再进行首次写入。应用与提交是 all-or-nothing：失败时精确恢复所有
-已触及的 design 路径和暂存区，不影响其他路径。
+已触及的 design 路径和暂存区，不影响其他路径。失败结果必须明确说明 coordinator 没有
+记录 design commit、已经完成回滚，并要求下一次调用重新提交覆盖完整计划目标的逻辑
+patch；patch engine 列出的 applied changes 只描述失败前短暂写入的 hunk，不能暗示它们
+已经成为 Git commit 或仍保留在工作区。
 
 focused design commit 成功后，SQLite 在一个事务中以旧 HEAD 为 CAS，同时推进
 `TaskRun.expectedHead` 与 `BranchLease.expectedHead`、记录 `designCommit`，并将初始

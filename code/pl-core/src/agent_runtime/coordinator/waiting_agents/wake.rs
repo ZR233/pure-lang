@@ -22,6 +22,10 @@ pub(super) async fn wake_parent(
     parent_id: AgentId,
     reason: AgentWakeReason,
 ) -> WakeParentOutcome {
+    if runtime.agent_events.parent_wait_is_suspended(&parent_id) {
+        parents.remove(&parent_id);
+        return WakeParentOutcome::NotAccepted;
+    }
     let Ok(parent) = runtime.agent_events.snapshot(&parent_id) else {
         return WakeParentOutcome::NotAccepted;
     };

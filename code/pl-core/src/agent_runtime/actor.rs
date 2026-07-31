@@ -74,6 +74,9 @@ pub(crate) enum ActorCommand {
     EnterWaitingAgents {
         reply: oneshot::Sender<AgentRuntimeResult<()>>,
     },
+    QuiesceParentWait {
+        reply: oneshot::Sender<AgentRuntimeResult<AgentSnapshot>>,
+    },
     StartPendingInputs {
         reply: oneshot::Sender<AgentRuntimeResult<()>>,
     },
@@ -268,6 +271,10 @@ where
                         }
                         ActorCommand::EnterWaitingAgents { reply } => {
                             let result = self.enter_waiting_agents().await;
+                            let _ = reply.send(result);
+                        }
+                        ActorCommand::QuiesceParentWait { reply } => {
+                            let result = self.quiesce_parent_wait().await;
                             let _ = reply.send(result);
                         }
                         ActorCommand::StartPendingInputs { reply } => {
@@ -918,6 +925,39 @@ where
             AgentRuntimeEventKind::StateChanged { snapshot }
         })
         .await
+    }
+
+    async fn quiesce_parent_wait(&mut self) -> AgentRuntimeResult<AgentSnapshot> {
+        if self.state.snapshot.lifecycle != AgentLifecycleState::Active {
+            return Err(AgentRuntimeError::NotActive(
+                self.state.snapshot.identity.id.clone(),
+                self.state.snapshot.lifecycle,
+            ));
+        }
+        let has_active_turn = self.active.is_some();
+        let mut next = self.state.clone();
+        next.pending_inputs
+            .retain(|input| matches!(&input.presentation, MailboxPresentation::User));
+        next.accepted_wakes.clear();
+        if !has_active_turn {
+            next.active_input = None;
+        }
+        next.refresh_mailbox_snapshot();
+        if !has_active_turn {
+            next.snapshot.activity = if next.has_triggering_input() {
+                AgentActivityState::Queued
+            } else {
+                AgentActivityState::Idle
+            };
+            next.snapshot.active_turn_id = None;
+            next.snapshot.active_session_id = None;
+            next.snapshot.mailbox_delivery_phase = MailboxDeliveryPhase::CurrentTurn;
+        }
+        self.commit_transition(next, Vec::new(), |snapshot| {
+            AgentRuntimeEventKind::StateChanged { snapshot }
+        })
+        .await?;
+        Ok(self.state.snapshot.clone())
     }
 
     async fn begin_next_turn(&mut self) {

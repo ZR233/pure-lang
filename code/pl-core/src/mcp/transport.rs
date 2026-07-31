@@ -129,8 +129,11 @@ impl StdioMcpClient {
                 while let Ok(Some(line)) = lines.next_line().await {
                     match classify_mcp_stderr_line(&line) {
                         McpStderrSeverity::Info => {}
-                        McpStderrSeverity::Warning | McpStderrSeverity::Error => {
-                            eprintln!("[pl-core] mcp stderr: {line}");
+                        McpStderrSeverity::Warning => {
+                            tracing::warn!(message = %line, "MCP server stderr");
+                        }
+                        McpStderrSeverity::Error => {
+                            tracing::error!(message = %line, "MCP server stderr");
                         }
                     }
                 }
@@ -252,7 +255,11 @@ async fn read_stdio_responses<R>(
     let mut lines = BufReader::new(stdout).lines();
     while let Ok(Some(line)) = lines.next_line().await {
         let Ok(response) = serde_json::from_str::<JsonRpcResponse>(&line) else {
-            eprintln!("[pl-core] mcp server '{server_id}' returned invalid JSON: {line}");
+            tracing::warn!(
+                server_id,
+                response = %line,
+                "MCP server returned invalid JSON"
+            );
             continue;
         };
         let Some(id) = response.id else {

@@ -209,6 +209,23 @@ impl AgentRuntimeHandle {
         receive(receiver).await?
     }
 
+    /// 在产品终态提交后立即禁止父代理接受旧 continuation。
+    pub fn suspend_parent_continuations(&self, agent_id: AgentId) {
+        self.agent_events.suspend_parent_wait(agent_id);
+    }
+
+    /// 清除父代理的 synthetic mailbox 与 accepted wake，并收束到可复用 idle 状态。
+    pub async fn quiesce_parent_wait(
+        &self,
+        agent_id: AgentId,
+    ) -> AgentRuntimeResult<AgentSnapshot> {
+        self.agent_events.suspend_parent_wait(agent_id.clone());
+        let (reply, receiver) = oneshot::channel();
+        self.send(CoordinatorCommand::QuiesceParentWait { agent_id, reply })
+            .await?;
+        receive(receiver).await?
+    }
+
     pub(crate) async fn wake_accepted(
         &self,
         agent_id: AgentId,

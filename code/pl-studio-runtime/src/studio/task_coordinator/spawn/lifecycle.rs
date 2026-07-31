@@ -120,6 +120,14 @@ impl TaskCoordinator {
             .map_err(|error| spawn_error(error.to_string()))?;
         let _mutation_guard = self.lock_branch_mutation().await;
         let _allocation_guard = self.allocation_lock.lock().await;
+        let run = self
+            .store
+            .read_active_task_run_for_session(&request.session_id)
+            .await
+            .map_err(store_spawn_error)?;
+        self.ensure_executor_design_contract(&run)
+            .await
+            .map_err(store_spawn_error)?;
         let allocation = self
             .store
             .allocate_executor(AllocateExecutor {

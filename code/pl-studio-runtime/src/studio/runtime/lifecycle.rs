@@ -97,6 +97,16 @@ impl StudioRuntime {
         if let Some(runtime) = framework.as_ref() {
             return Ok(runtime.clone());
         }
+        for agent_id in self
+            .store
+            .reconcile_runtime_session_ownership()
+            .await?
+        {
+            tracing::warn!(
+                agent_id,
+                "removed runtime registration that no longer owns its claimed Studio sessions"
+            );
+        }
         self.agent_resources
             .restore_bindings(self.store.list_active_agent_sessions().await?)
             .await;
@@ -179,7 +189,7 @@ impl StudioRuntime {
             .runtime_state
             .transition(StudioRuntimeStatus::Initializing, None)?;
         let initialization = async {
-            self.cancel_recovered_transient_interactions().await?;
+            self.recover_interactions_after_restart().await?;
             let mut report = self.task_coordinator.recover_active_tasks().await?;
             self.append_unavailable_project_recovery_issues(&mut report.issues)
                 .await?;

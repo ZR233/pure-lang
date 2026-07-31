@@ -17,14 +17,14 @@ use crate::studio::ids::unix_seconds;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum InteractionCancelScope {
     All,
-    TransientOnly,
+    ToolApprovalOnly,
 }
 
 impl InteractionCancelScope {
     fn includes(self, interaction: &InteractionRequest) -> bool {
         match self {
             Self::All => true,
-            Self::TransientOnly => interaction.kind != InteractionKind::PlanConfirmation,
+            Self::ToolApprovalOnly => interaction.kind == InteractionKind::ToolApproval,
         }
     }
 }
@@ -70,6 +70,25 @@ impl InteractionRuntime {
         Ok(interaction)
     }
 
+    pub async fn recover_user_input(
+        &self,
+        mut interaction: InteractionRequest,
+        emitter: InteractionEmitter,
+    ) -> Result<InteractionRequest> {
+        anyhow::ensure!(
+            interaction.kind == InteractionKind::UserInput
+                && interaction.status == InteractionStatus::Cancelled,
+            "only a cancelled user input can be recovered"
+        );
+        let now = unix_seconds();
+        interaction.status = InteractionStatus::Pending;
+        interaction.updated_at = now;
+        interaction.resolved_at = None;
+        interaction.resolution = None;
+        self.persist_and_emit(interaction.clone(), emitter).await?;
+        Ok(interaction)
+    }
+
     pub async fn resolve(
         &self,
         interaction_id: &str,
@@ -111,7 +130,7 @@ impl InteractionRuntime {
             .await
     }
 
-    pub async fn cancel_transient_interactions(
+    pub async fn cancel_recovered_tool_approvals(
         &self,
         session_id: &str,
         reason: &str,
@@ -121,7 +140,7 @@ impl InteractionRuntime {
             session_id,
             reason,
             emitter,
-            InteractionCancelScope::TransientOnly,
+            InteractionCancelScope::ToolApprovalOnly,
         )
         .await
     }
@@ -183,7 +202,11 @@ impl InteractionRuntime {
         }
         if let Err(error) = self.persist_and_emit(request.clone(), emitter).await {
             self.waiters.lock().await.remove(&interaction_id);
-            eprintln!("[pl-core] failed to persist interaction: {error}");
+            tracing::error!(
+                interaction_id,
+                %error,
+                "failed to persist Studio interaction"
+            );
             return cancelled_resolution(&request.kind, "interaction persistence failed");
         }
         receiver
@@ -447,7 +470,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cancel_transient_interactions_preserves_plan_confirmation() {
+    async fn restart_cancellation_preserves_user_input_and_plan_confirmation() {
         let (store, session_id) = store_with_session().await;
         let runtime = InteractionRuntime::new(store.clone());
         let events = Arc::new(Mutex::new(Vec::new()));
@@ -460,6 +483,7 @@ mod tests {
             plan_id: "turn-1-plan".to_string(),
             content: "1. Inspect\n2. Implement".to_string(),
         };
+        let approval = tool_approval_interaction(&session_id, "approval-1");
 
         runtime
             .create(user_input.clone(), emitter(events.clone()))
@@ -470,17 +494,38 @@ mod tests {
             .await
             .unwrap();
         runtime
-            .cancel_transient_interactions(&session_id, "turn completed", emitter(events.clone()))
+            .create(approval.clone(), emitter(events.clone()))
+            .await
+            .unwrap();
+        runtime
+            .cancel_recovered_tool_approvals(
+                &session_id,
+                "application restarted",
+                emitter(events.clone()),
+            )
             .await
             .unwrap();
 
         let ask = store.read_interaction("ask-1").await.unwrap().unwrap();
         let stored_plan = store.read_interaction("plan-1").await.unwrap().unwrap();
+        let stored_approval = store
+            .read_interaction("approval-1")
+            .await
+            .unwrap()
+            .unwrap();
         let pending = store.list_pending_interactions(&session_id).await.unwrap();
 
-        assert_eq!(ask.status, InteractionStatus::Cancelled);
+        assert_eq!(ask.status, InteractionStatus::Pending);
         assert_eq!(stored_plan.status, InteractionStatus::Pending);
-        assert_eq!(pending, vec![stored_plan]);
+        assert_eq!(stored_approval.status, InteractionStatus::Cancelled);
+        assert_eq!(
+            stored_approval.resolution,
+            Some(InteractionResolution::ToolApproval {
+                decision: ToolApprovalResolution::Denied,
+                reason: Some("application restarted".to_string()),
+            })
+        );
+        assert_eq!(pending, vec![stored_plan, ask]);
     }
 
     #[tokio::test]

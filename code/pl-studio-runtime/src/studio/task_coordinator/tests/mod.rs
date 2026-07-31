@@ -1589,6 +1589,7 @@ async fn abort_failure_still_persists_failed_blocked_evidence_and_releases_lease
         .transition_task_run(&fixture.task_run_id, TaskRunPhase::Implementing, None)
         .await
         .unwrap();
+    let mut terminal_facts = fixture.coordinator.subscribe_terminal_facts();
     let (event_tx, _) = tokio::sync::broadcast::channel(16);
 
     fixture
@@ -1604,6 +1605,13 @@ async fn abort_failure_still_persists_failed_blocked_evidence_and_releases_lease
         )
         .await
         .expect_err("sabotaged abort must still fail durably");
+    let terminal_task_run_id = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        terminal_facts.recv(),
+    )
+    .await
+    .expect("blocked transition must publish a terminal fact")
+    .unwrap();
 
     let durable_run = fixture
         .store
@@ -1618,6 +1626,7 @@ async fn abort_failure_still_persists_failed_blocked_evidence_and_releases_lease
         .unwrap()
         .pop()
         .unwrap();
+    assert_eq!(terminal_task_run_id, fixture.task_run_id);
     assert_eq!(durable_run.phase, TaskRunPhase::Blocked);
     assert_eq!(record.status, MergeStatus::Failed);
     assert!(
@@ -4068,7 +4077,6 @@ async fn terminal_recording_reports_only_committed_durable_changes() {
         changed,
         TerminalAgentStateRecording::Changed {
             task_run_id,
-            projection: _,
             ..
         } if task_run_id == fixture.task_run_id
     ));
