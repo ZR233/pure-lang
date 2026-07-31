@@ -7,6 +7,7 @@ license.workspace = true
 [features]
 default = []
 docker-tools = []
+live-tests = []
 
 [dependencies]
 pl-protocol = { workspace = true }
@@ -37,3 +38,18 @@ grep-searcher = { workspace = true }
 [dev-dependencies]
 pretty_assertions = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
+
+[[test]]
+name = "apply_patch_live"
+path = "tests/apply_patch_live.rs"
+required-features = ["live-tests"]
+
+[[test]]
+name = "context_compaction_live"
+path = "tests/context_compaction_live.rs"
+required-features = ["live-tests"]
+
+[[test]]
+name = "trace_live"
+path = "tests/trace_live.rs"
+required-features = ["live-tests"]

@@ -2,14 +2,9 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use async_openai::Client;
-use async_openai::config::Config;
 use async_openai::types::stream::StreamResponse;
 use futures::StreamExt;
-use pl_protocol::{
-    ContentPart, ImageSource, Message, MessageContent, MessageRole, ModelContextItem, PureError,
-    Result,
-};
-use serde::Deserialize;
+use pl_protocol::{ModelContextItem, PureError, Result};
 use serde_json::{Map, Value};
 
 use super::provider_error::openai_error_to_pure;
@@ -36,53 +31,10 @@ pub(super) async fn compact_context(
     }
     match request.mode {
         OpenAiCompactionMode::RemoteV2 => compact_v2(provider, request).await,
-        OpenAiCompactionMode::RemoteLegacy => compact_legacy(provider, request).await,
         OpenAiCompactionMode::Local => Err(PureError::ConfigError(
             "local context compaction must be orchestrated by pl-core".to_string(),
         )),
     }
-}
-
-async fn compact_legacy(
-    provider: &OpenAiProvider,
-    request: ModelCompactionRequest,
-) -> Result<ModelCompactionResponse> {
-    let (mut body, model_headers) = build_compaction_body(provider, &request)?;
-    body.remove("stream");
-    let token = get_auth_token(provider.info.bearer_token.clone()).await?;
-    let config = PureOpenAiConfig::new(
-        provider.resolve_base_url(),
-        token,
-        provider.info.http_headers.as_ref(),
-        &model_headers,
-    )?;
-    let url = format!("{}/responses/compact", provider.resolve_base_url());
-    let response = provider
-        .http_client
-        .post(url)
-        .headers(config.headers())
-        .json(&body)
-        .send()
-        .await
-        .map_err(|error| PureError::HttpError(error.to_string()))?;
-    let status = response.status();
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|error| PureError::HttpError(error.to_string()))?;
-    if !status.is_success() {
-        let text = String::from_utf8_lossy(&bytes);
-        return Err(PureError::LlmError(format!(
-            "OpenAI compact endpoint returned {status}: {text}"
-        )));
-    }
-    let response: CompactHistoryResponse = serde_json::from_slice(&bytes).map_err(|error| {
-        PureError::HttpError(format!("failed to decode OpenAI compact response: {error}"))
-    })?;
-    Ok(ModelCompactionResponse {
-        input: parse_output_items(response.output)?,
-        usage: None,
-    })
 }
 
 async fn compact_v2(
@@ -248,24 +200,9 @@ fn append_beta_feature(
     model_headers.insert(HEADER.to_string(), features.join(","));
 }
 
-#[derive(Debug, Deserialize)]
-struct CompactHistoryResponse {
-    output: Vec<Value>,
-}
-
-fn parse_output_items(items: Vec<Value>) -> Result<Vec<ModelContextItem>> {
-    let mut parsed = Vec::new();
-    for item in items {
-        if let Some(item) = parse_output_item(item)? {
-            parsed.push(item);
-        }
-    }
-    Ok(parsed)
-}
-
 fn parse_output_item(item: Value) -> Result<Option<ModelContextItem>> {
     match item.get("type").and_then(Value::as_str) {
-        Some("compaction" | "compaction_summary" | "context_compaction") => {
+        Some("compaction") => {
             let encrypted_content = item
                 .get("encrypted_content")
                 .and_then(Value::as_str)
@@ -278,70 +215,8 @@ fn parse_output_item(item: Value) -> Result<Option<ModelContextItem>> {
                 encrypted_content: encrypted_content.to_string(),
             }))
         }
-        Some("message") => parse_message_item(&item).map(|message| message.map(Into::into)),
         _ => Ok(None),
     }
-}
-
-fn parse_message_item(item: &Value) -> Result<Option<Message>> {
-    let role = match item.get("role").and_then(Value::as_str) {
-        Some("developer" | "system") => MessageRole::System,
-        Some("user") => MessageRole::User,
-        Some("assistant") => MessageRole::Assistant,
-        _ => return Ok(None),
-    };
-    let content = item
-        .get("content")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(parse_content_part)
-        .collect::<Vec<_>>();
-    let content = if content.len() == 1 {
-        match content.into_iter().next() {
-            Some(ContentPart::Text { text }) => MessageContent::Text(text),
-            Some(part) => MessageContent::MultiPart(vec![part]),
-            None => MessageContent::Text(String::new()),
-        }
-    } else {
-        MessageContent::MultiPart(content)
-    };
-    Ok(Some(Message {
-        role,
-        content,
-        reasoning_content: None,
-        metadata: HashMap::new(),
-    }))
-}
-
-fn parse_content_part(value: &Value) -> Option<ContentPart> {
-    match value.get("type").and_then(Value::as_str) {
-        Some("input_text" | "output_text") => {
-            value
-                .get("text")
-                .and_then(Value::as_str)
-                .map(|text| ContentPart::Text {
-                    text: text.to_string(),
-                })
-        }
-        Some("input_image") => value
-            .get("image_url")
-            .and_then(Value::as_str)
-            .and_then(parse_data_url),
-        _ => None,
-    }
-}
-
-fn parse_data_url(url: &str) -> Option<ContentPart> {
-    let value = url.strip_prefix("data:")?;
-    let (media_type, data) = value.split_once(";base64,")?;
-    Some(ContentPart::Image {
-        source: ImageSource::InlineBase64 {
-            data: data.to_string(),
-        },
-        media_type: media_type.to_string(),
-        filename: None,
-    })
 }
 
 fn token_usage(value: &Value) -> Result<TokenUsage> {
@@ -388,28 +263,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_compaction_and_message_output_items() {
-        let output = vec![
-            serde_json::json!({
-                "type": "message",
-                "role": "user",
-                "content": [{ "type": "input_text", "text": "hello" }]
-            }),
-            serde_json::json!({
-                "type": "compaction",
-                "encrypted_content": "encrypted"
-            }),
-        ];
+    fn parses_compaction_output_item() {
+        let parsed = parse_output_item(serde_json::json!({
+            "type": "compaction",
+            "encrypted_content": "encrypted"
+        }))
+        .unwrap();
 
-        let parsed = parse_output_items(output).unwrap();
-
-        assert_eq!(parsed.len(), 2);
-        assert!(matches!(parsed[0], ModelContextItem::Message { .. }));
         assert_eq!(
-            parsed[1],
-            ModelContextItem::Compaction {
+            parsed,
+            Some(ModelContextItem::Compaction {
                 encrypted_content: "encrypted".to_string()
-            }
+            })
         );
     }
 }

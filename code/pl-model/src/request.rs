@@ -48,7 +48,6 @@ pub struct CompletionRequest {
 pub enum OpenAiCompactionMode {
     #[default]
     RemoteV2,
-    RemoteLegacy,
     Local,
 }
 

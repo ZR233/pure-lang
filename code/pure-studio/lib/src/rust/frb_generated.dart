@@ -3363,8 +3363,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeSessionToolPart dco_decode_bridge_session_tool_part(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 12)
-      throw Exception('unexpected arr length: expect 12 but see ${arr.length}');
+    if (arr.length != 11)
+      throw Exception('unexpected arr length: expect 11 but see ${arr.length}');
     return BridgeSessionToolPart(
       toolCallId: dco_decode_String(arr[0]),
       callId: dco_decode_opt_String(arr[1]),
@@ -3377,7 +3377,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       timedOut: dco_decode_bool(arr[8]),
       workingDirectory: dco_decode_opt_String(arr[9]),
       denialReason: dco_decode_opt_String(arr[10]),
-      activityGroupId: dco_decode_opt_String(arr[11]),
     );
   }
 
@@ -6832,7 +6831,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_timedOut = sse_decode_bool(deserializer);
     var var_workingDirectory = sse_decode_opt_String(deserializer);
     var var_denialReason = sse_decode_opt_String(deserializer);
-    var var_activityGroupId = sse_decode_opt_String(deserializer);
     return BridgeSessionToolPart(
       toolCallId: var_toolCallId,
       callId: var_callId,
@@ -6845,7 +6843,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       timedOut: var_timedOut,
       workingDirectory: var_workingDirectory,
       denialReason: var_denialReason,
-      activityGroupId: var_activityGroupId,
     );
   }
 
@@ -10590,7 +10587,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self.timedOut, serializer);
     sse_encode_opt_String(self.workingDirectory, serializer);
     sse_encode_opt_String(self.denialReason, serializer);
-    sse_encode_opt_String(self.activityGroupId, serializer);
   }
 
   @protected

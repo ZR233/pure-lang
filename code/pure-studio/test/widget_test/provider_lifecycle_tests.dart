@@ -97,34 +97,26 @@ void registerProviderLifecycleTests() {
     api.emitSession(
       _messageUpdatedEvent(
         sessionId: 'session-1',
-        message: {
-          'messageId': 'turn-1:assistant',
-          'sessionId': 'session-1',
-          'turnId': 'turn-1',
-          'role': 'assistant',
-          'status': 'streaming',
-          'createdAt': 1,
-          'updatedAt': 1,
-        },
+        message: _timelineMessageFixture(
+          id: 'turn-1:assistant',
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          status: 'streaming',
+        ),
       ),
     );
     api.emitSession(
       _partUpdatedEvent(
         sessionId: 'session-1',
-        part: {
-          'partId': 'part-1',
-          'messageId': 'turn-1:assistant',
-          'sessionId': 'session-1',
-          'turnId': 'turn-1',
-          'type': 'text',
-          'order': 0,
-          'revision': 0,
-          'status': 'streaming',
-          'createdAt': 1,
-          'updatedAt': 1,
-          'textChannel': 'final',
-          'text': '',
-        },
+        part: _timelinePartFixture(
+          id: 'part-1',
+          messageId: 'turn-1:assistant',
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          type: TimelinePartType.text,
+          status: 'streaming',
+          textChannel: TimelineTextChannel.finalAnswer,
+        ),
       ),
     );
     await pumpEventQueue();
@@ -167,14 +159,12 @@ void registerProviderLifecycleTests() {
     api.emitSession(
       _partDeltaEvent(
         sessionId: 'session-1',
-        delta: {
-          'sessionId': 'session-1',
-          'messageId': 'turn-1:assistant',
-          'partId': 'part-1',
-          'revision': 1,
-          'field': 'text',
-          'delta': 'partial',
-        },
+        delta: _timelineDeltaFixture(
+          partId: 'part-1',
+          revision: 1,
+          field: 'text',
+          delta: 'partial',
+        ),
       ),
     );
     await _pumpFrameBatch();

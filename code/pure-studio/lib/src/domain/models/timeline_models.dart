@@ -295,7 +295,6 @@ class TimelinePartSnapshot {
     this.completedAt,
     this.error,
     this.textChannel,
-    this.activityGroupId,
     this.tool,
     this.agent,
     this.planContent,
@@ -320,7 +319,6 @@ class TimelinePartSnapshot {
   final DateTime? completedAt;
   final String? error;
   final TimelineTextChannel? textChannel;
-  final String? activityGroupId;
   final TimelineToolPart? tool;
   final TimelineAgentPart? agent;
   final String? planContent;
@@ -391,7 +389,6 @@ class TimelinePart {
     this.error,
     this.title,
     this.textChannel,
-    this.activityGroupId,
     this.tool,
     this.agent,
     this.planContent,
@@ -418,7 +415,6 @@ class TimelinePart {
   final DateTime? completedAt;
   final String? error;
   final TimelineTextChannel? textChannel;
-  final String? activityGroupId;
   final TimelineToolPart? tool;
   final TimelineAgentPart? agent;
   final String? planContent;
@@ -471,7 +467,6 @@ TimelinePart timelinePartFromSnapshot(
     reasoningContent: _reasoningContent(snapshot, overlay),
     status: snapshot.status,
     textChannel: snapshot.textChannel,
-    activityGroupId: snapshot.activityGroupId,
     tool: tool,
     agent: snapshot.agent,
     planContent: planContent,
@@ -681,48 +676,4 @@ class TimelineMessage {
       sequence: sequence ?? this.sequence,
     );
   }
-}
-
-String _nonEmpty(String? preferred, String? fallback) {
-  if (preferred != null && preferred.isNotEmpty) {
-    return preferred;
-  }
-  return fallback ?? '';
-}
-
-int _intValue(Object? value) {
-  if (value is int) {
-    return value;
-  }
-  if (value is BigInt) {
-    return value.toInt();
-  }
-  return int.tryParse(_stringValue(value) ?? '') ?? 0;
-}
-
-bool _boolValue(Object? value) {
-  if (value is bool) {
-    return value;
-  }
-  return value.toString() == 'true';
-}
-
-Map<String, Object?> _objectMap(Object? value) {
-  if (value is Map<String, Object?>) {
-    return value;
-  }
-  if (value is Map) {
-    return value.map((key, value) => MapEntry(key.toString(), value));
-  }
-  return const {};
-}
-
-List<Object?> _listValue(Object? value) {
-  if (value is List<Object?>) {
-    return value;
-  }
-  if (value is Iterable) {
-    return value.cast<Object?>().toList(growable: false);
-  }
-  return const [];
 }

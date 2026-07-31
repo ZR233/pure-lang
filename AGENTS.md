@@ -24,7 +24,7 @@
 - Flutter app 的 Dart package 名称是 `pure_studio`，不按 Cargo crate 规则命名。
 - Flutter 项目根目录是 `code/pure-studio`；运行 Flutter 命令必须在该目录下执行，或由 `xtask` 显式切换目录。
 - 桌面 GUI 入口使用：
-  - `cargo xtask run-gui [--demo] [--demo-fallback]`
+  - `cargo xtask run-gui [--demo] [--driver]`
   - `cargo xtask build-gui [--demo] [--no-clean]`
 - 不再新增 PowerShell GUI wrapper；需要构建/运行 GUI 时优先使用 `xtask`。
 

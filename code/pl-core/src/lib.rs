@@ -175,9 +175,9 @@ pub use tool::{
 pub use trace::TraceRecorder;
 pub use turn::{
     AGENT_MAX_COUNT, AGENT_MAX_DEPTH, DEFAULT_WALL_CLOCK_MS, InteractionCallback,
-    InteractionFuture, PermissionMode, ToolApprovalDecision, ToolApprovalPolicy,
-    ToolApprovalRequest, ToolEffect, ToolExecutionMode, TurnAbortReason, TurnBudget, TurnOptions,
-    TurnRequest, TurnResult, TurnResultStatus, UserInputMode,
+    InteractionFuture, PermissionMode, ToolApprovalDecision, ToolApprovalRequest, ToolEffect,
+    ToolExecutionMode, TurnAbortReason, TurnBudget, TurnOptions, TurnRequest, TurnResult,
+    TurnResultStatus, UserInputMode,
 };
 pub use web_search::{
     ToolVisibilityConstraint, WebSearchAvailability, WebSearchBackend, WebSearchPath,

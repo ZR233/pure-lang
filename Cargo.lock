@@ -1960,7 +1960,6 @@ name = "pl-trace"
 version = "0.1.0"
 dependencies = [
  "pl-protocol",
- "pretty_assertions",
  "serde",
  "serde_json",
  "tokio",

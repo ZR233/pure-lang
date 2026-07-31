@@ -1,27 +1,7 @@
 part of 'studio_api.dart';
 
 String? _defaultProviderIdFromConfig(Map<String, Object?> config) {
-  final value = _string(
-    _firstValue(config, const [
-      'defaultProviderId',
-      'default_provider_id',
-      'defaultProvider',
-      'default_provider',
-    ]),
-  ).trim();
-  if (value.isNotEmpty) {
-    return value;
-  }
-  final roles = _map(config['roles']);
-  final planner = _map(roles['planner']);
-  final plannerProvider = _string(
-    _firstValue(planner, const ['provider', 'providerId', 'provider_id']),
-  ).trim();
-  if (plannerProvider.isNotEmpty) {
-    return plannerProvider;
-  }
-  final providers = _map(config['providers']);
-  return providers.keys.firstOrNull;
+  return _nullableString(config['defaultProviderId']);
 }
 
 List<ProviderSettingsView> _providersFromConfig(Map<String, Object?> config) {
@@ -30,47 +10,31 @@ List<ProviderSettingsView> _providersFromConfig(Map<String, Object?> config) {
     final value = _map(entry.value);
     final templateKind = _providerTemplateKind(value);
     final providerModels = _providerModels(value['models']);
-    final projectedCustomModels = _providerModels(
-      _firstValue(value, const ['customModels', 'custom_models']),
-    );
+    final projectedCustomModels = _providerModels(value['customModels']);
     final customSlugs = projectedCustomModels
         .map((model) => model.slug)
         .toSet();
     final defaultModels = providerModels
         .where((model) => !customSlugs.contains(model.slug))
         .toList();
-    final customModels = projectedCustomModels.isEmpty
-        ? providerModels
-              .where((model) => customSlugs.contains(model.slug))
-              .toList()
-        : projectedCustomModels;
+    final customModels = projectedCustomModels;
     final visibleModels = providerModels;
-    final defaultModel = _string(
-      _firstValue(value, const ['defaultModel', 'default_model']),
-    );
-    final hasBearerToken = _boolWithDefault(
-      _firstValue(value, const ['hasBearerToken', 'has_bearer_token']),
-      _string(
-        _firstValue(value, const ['bearerToken', 'bearer_token']),
-      ).trim().isNotEmpty,
-    );
-    final name = _string(
-      _firstValue(value, const ['displayName', 'display_name', 'name']),
-      fallback: entry.key,
-    );
+    final defaultModel = _string(value['defaultModel']);
+    final hasBearerToken = _bool(value['hasBearerToken']);
+    final name = _string(value['name']);
     final capabilities = _map(value['serviceCapabilities']);
-    final webSearchCapabilities = _map(capabilities['web_search']);
+    final webSearchCapabilities = _map(capabilities['webSearch']);
     return ProviderSettingsView(
       id: entry.key,
       templateKind: templateKind,
       name: name,
       subtitle: '$name Platform',
-      baseUrl: _string(_firstValue(value, const ['baseUrl', 'base_url'])),
+      baseUrl: _string(value['baseUrl']),
       bearerToken: '',
       hasBearerToken: hasBearerToken,
       defaultModel: defaultModel,
       models: visibleModels,
-      defaultModels: defaultModels.isEmpty ? providerModels : defaultModels,
+      defaultModels: defaultModels,
       customModels: customModels,
       status: hasBearerToken ? 'ready' : 'missingCredential',
       usageLabel: visibleModels.isEmpty
@@ -78,29 +42,11 @@ List<ProviderSettingsView> _providersFromConfig(Map<String, Object?> config) {
           : '${visibleModels.length} models',
       modelCount: '${visibleModels.length}',
       updatedAt: 'Loaded',
-      wireProtocol: _string(
-        value['wireProtocol'],
-        fallback: 'chat_completions',
-      ),
-      connectionMode: _string(
-        _firstValue(value, const ['connectionMode', 'connection_mode']),
-        fallback: 'http',
-      ),
-      catalogId: _string(
-        _firstValue(_map(value['catalog']), const [
-          'catalog',
-          'catalogId',
-          'catalog_id',
-        ]),
-      ),
-      capabilitySource: _string(
-        value['capabilitySource'],
-        fallback: templateKind.isEmpty ? 'explicit' : 'preset_defaults',
-      ),
-      hostedWebSearch: _boolWithDefault(
-        webSearchCapabilities['hosted_responses'],
-        false,
-      ),
+      wireProtocol: _string(value['wireProtocol']),
+      connectionMode: _string(value['connectionMode']),
+      catalogId: _string(value['catalogId']),
+      capabilitySource: _string(value['capabilitySource']),
+      hostedWebSearch: _bool(webSearchCapabilities['hostedResponses']),
       standaloneWebSearch: _string(webSearchCapabilities['standalone']),
     );
   }).toList();
@@ -113,40 +59,18 @@ List<ProviderModelView> _providerModels(Object? value) {
         final slug = _string(model['slug']);
         return ProviderModelView(
           slug: slug,
-          displayName: _string(
-            _firstValue(model, const ['displayName', 'display_name']),
-            fallback: slug,
-          ),
+          displayName: _string(model['displayName']),
           description: _string(model['description']),
-          contextWindow: _nullableInt(
-            _firstValue(model, const ['contextWindow', 'context_window']),
-          ),
-          maxOutputTokens: _nullableInt(
-            _firstValue(model, const ['maxOutputTokens', 'max_output_tokens']),
-          ),
+          contextWindow: _nullableInt(model['contextWindow']),
+          maxOutputTokens: _nullableInt(model['maxOutputTokens']),
           currency: _string(model['currency']),
-          inputPricePerMTok: _nullableDouble(
-            _firstValue(model, const [
-              'inputPricePerMTok',
-              'input_price_per_mtok',
-            ]),
-          ),
-          outputPricePerMTok: _nullableDouble(
-            _firstValue(model, const [
-              'outputPricePerMTok',
-              'output_price_per_mtok',
-            ]),
-          ),
+          inputPricePerMTok: _nullableDouble(model['inputPricePerMTok']),
+          outputPricePerMTok: _nullableDouble(model['outputPricePerMTok']),
           cacheReadPricePerMTok: _nullableDouble(
-            _firstValue(model, const [
-              'cacheReadPricePerMTok',
-              'cache_read_price_per_mtok',
-            ]),
+            model['cacheReadPricePerMTok'],
           ),
-          baseInstructions: _string(
-            _firstValue(model, const ['baseInstructions', 'base_instructions']),
-          ),
-          reasoningEfforts: _modelReasoningEfforts(model),
+          baseInstructions: _string(model['baseInstructions']),
+          reasoningEfforts: _stringList(model['reasoningEfforts']),
         );
       })
       .where((model) => model.slug.isNotEmpty)
@@ -154,32 +78,7 @@ List<ProviderModelView> _providerModels(Object? value) {
 }
 
 String _providerTemplateKind(Map<String, Object?> provider) {
-  return _string(
-    _firstValue(provider, const [
-      'presetId',
-      'preset_id',
-      'templateKind',
-      'template_kind',
-    ]),
-  );
-}
-
-List<String> _modelReasoningEfforts(Map<String, Object?> model) {
-  final direct = _stringList(
-    _firstValue(model, const ['reasoningEfforts', 'reasoning_efforts']),
-  );
-  if (direct.isNotEmpty) {
-    return direct;
-  }
-  final efforts = <String>{};
-  for (final parameterValue in _list(model['parameters'])) {
-    final parameter = _map(parameterValue);
-    if (_string(parameter['name']) != 'effort') {
-      continue;
-    }
-    efforts.addAll(_stringList(parameter['candidates']));
-  }
-  return efforts.toList();
+  return _string(provider['presetId']);
 }
 
 List<RoleSettingsView> _rolesFromConfig(Map<String, Object?> config) {
@@ -200,23 +99,12 @@ List<RoleSettingsView> _rolesFromConfig(Map<String, Object?> config) {
 InstructionsSettingsView _instructionsFromConfig(Map<String, Object?> config) {
   final instructions = _map(config['instructions']);
   return InstructionsSettingsView(
-    baseOverride: _string(
-      _firstValue(instructions, const ['baseOverride', 'base_override']),
-    ),
+    baseOverride: _string(instructions['baseOverride']),
     developer: _string(instructions['developer']),
     user: _string(instructions['user']),
-    projectDocMaxBytes: _int(
-      _firstValue(instructions, const [
-        'projectDocMaxBytes',
-        'project_doc_max_bytes',
-      ]),
-      fallback: 65536,
-    ),
+    projectDocMaxBytes: _int(instructions['projectDocMaxBytes']),
     projectDocFallbackFilenames: _stringList(
-      _firstValue(instructions, const [
-        'projectDocFallbackFilenames',
-        'project_doc_fallback_filenames',
-      ]),
+      instructions['projectDocFallbackFilenames'],
     ),
   );
 }
@@ -225,31 +113,14 @@ SkillsSettingsView _skillsFromConfig(Map<String, Object?> config) {
   final skills = _map(config['skills']);
   final system = _map(skills['system']);
   return SkillsSettingsView(
-    enabled: _boolWithDefault(skills['enabled'], true),
-    autoLearn: _boolWithDefault(
-      _firstValue(skills, const ['autoLearn', 'auto_learn']),
-      true,
-    ),
-    systemEnabled: _boolWithDefault(system['enabled'], true),
-    projectDir: _string(
-      _firstValue(skills, const ['projectDir', 'project_dir']),
-      fallback: 'skills',
-    ),
-    userDir: _string(
-      _firstValue(skills, const ['userDir', 'user_dir']),
-      fallback: '~/.pure/skills',
-    ),
-    externalDirs: _stringList(
-      _firstValue(skills, const ['externalDirs', 'external_dirs']),
-    ),
+    enabled: _bool(skills['enabled']),
+    autoLearn: _bool(skills['autoLearn']),
+    systemEnabled: _bool(system['enabled']),
+    projectDir: _string(skills['projectDir']),
+    userDir: _string(skills['userDir']),
+    externalDirs: _stringList(skills['externalDirs']),
     disabled: _stringList(skills['disabled']),
-    autoLearnMinToolCalls: _int(
-      _firstValue(skills, const [
-        'autoLearnMinToolCalls',
-        'auto_learn_min_tool_calls',
-      ]),
-      fallback: 5,
-    ),
+    autoLearnMinToolCalls: _int(skills['autoLearnMinToolCalls']),
   );
 }
 
@@ -269,23 +140,16 @@ List<McpServerSettingsView> _mcpServersFromConfig(Map<String, Object?> config) {
     for (final entry in _map(value).entries) {
       final server = _map(entry.value);
       final builtinEndpoint = builtin ? _builtinMcpEndpoint(entry.key) : '';
-      final transport = _string(
-        server['transport'],
-        fallback: _string(server['type']),
-      );
+      final transport = builtin
+          ? _builtinMcpTransport(entry.key)
+          : _mcpTransport(server['transport']);
       final command = _string(server['command']);
-      final url = _string(server['url'], fallback: _string(server['endpoint']));
-      final enabled = builtin
-          ? _boolWithDefault(server['enabled'], true)
-          : !_bool(server['disabled']) &&
-                _boolWithDefault(server['enabled'], true) &&
-                _string(server['status'], fallback: 'enabled') != 'disabled';
+      final url = _string(server['url']);
+      final enabled = _bool(server['enabled']);
       servers.add(
         McpServerSettingsView(
           id: entry.key,
-          transport: transport.isEmpty
-              ? (builtin ? _builtinMcpTransport(entry.key) : 'stdio')
-              : transport,
+          transport: transport,
           endpoint: builtinEndpoint.isNotEmpty
               ? builtinEndpoint
               : (url.isEmpty ? command : url),
@@ -300,15 +164,17 @@ List<McpServerSettingsView> _mcpServersFromConfig(Map<String, Object?> config) {
     }
   }
 
-  addServers(
-    _firstValue(config, const ['mcpServers', 'mcp_servers']),
-    builtin: false,
-  );
-  addServers(
-    _firstValue(config, const ['builtinMcpServers', 'builtin_mcp_servers']),
-    builtin: true,
-  );
+  addServers(config['mcpServers'], builtin: false);
+  addServers(config['builtinMcpServers'], builtin: true);
   return servers;
+}
+
+String _mcpTransport(Object? value) {
+  return switch (_string(value)) {
+    'stdio' => 'stdio',
+    'streamableHttp' => 'streamableHttp',
+    final label => throw FormatException('Unknown MCP transport: $label'),
+  };
 }
 
 String _builtinMcpEndpoint(String serverId) {

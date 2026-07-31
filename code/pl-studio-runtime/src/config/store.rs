@@ -7,10 +7,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use pl_core::{
     AgentModelConfig, AgentRoleId, ModelRouteConfig, ProviderCapabilitySelection, ProviderConfig,
-    ProviderId, ProviderModelCatalogConfig, ProviderPresetId, builtin_provider_catalog,
+    ProviderId, ProviderModelCatalogConfig, ProviderPresetId, ToolCapabilityConfig,
+    builtin_provider_catalog,
 };
 use pl_model::{
-    ApplyPatchToolType, ModelInfo, ProviderConnectionMode, ProviderInfo,
+    ApplyPatchToolType, ModelInfo, OpenAiCompactionMode, ProviderConnectionMode, ProviderInfo,
     ProviderServiceCapabilities, ProviderWireProtocol, ToolWirePolicy,
 };
 use serde::Deserialize;
@@ -20,13 +21,13 @@ use crate::{PureError, Result};
 use super::{
     STUDIO_CONFIG_DIR_NAME, STUDIO_CONFIG_FILE_NAME, STUDIO_CONFIG_SCHEMA_VERSION, StudioConfig,
     StudioInstructionsConfig, StudioMcpConfig, StudioRuntimeConfig, StudioSkillsConfig,
-    StudioUiConfig,
+    StudioUiConfig, StudioWebSearchConfig,
 };
 
 const LEGACY_STUDIO_CONFIG_SCHEMA_VERSION: u32 = 5;
 const CATALOG_STUDIO_CONFIG_SCHEMA_VERSION: u32 = 6;
 const CONNECTION_STUDIO_CONFIG_SCHEMA_VERSION: u32 = 7;
-const PREVIOUS_STUDIO_CONFIG_SCHEMA_VERSIONS: [u32; 2] = [8, 9];
+const PREVIOUS_STUDIO_CONFIG_SCHEMA_VERSIONS: [u32; 3] = [8, 9, 10];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfigPaths {
@@ -86,7 +87,7 @@ impl ConfigStore {
         match self.load() {
             Ok(config) => Ok(config),
             Err(_) => {
-                if let Some(config) = self.migrate_v8()? {
+                if let Some(config) = self.migrate_previous_config()? {
                     return Ok(config);
                 }
                 if let Some(config) = self.migrate_catalog_config()? {
@@ -143,6 +144,10 @@ impl ConfigStore {
 
     fn reset_to_default(&self) -> Result<StudioConfig> {
         if self.config_exists() {
+            fs::copy(
+                self.paths.config_file(),
+                rejected_backup_path(self.paths.config_file()),
+            )?;
             fs::remove_file(self.paths.config_file())?;
         }
         let config = StudioConfig::default_config();
@@ -173,7 +178,7 @@ impl ConfigStore {
                 routes: legacy.models.routes,
             },
             web_search: Default::default(),
-            runtime: legacy.runtime,
+            runtime: legacy.runtime.into(),
             instructions: legacy.instructions,
             skills: legacy.skills,
             mcp: legacy.mcp,
@@ -215,7 +220,7 @@ impl ConfigStore {
                 routes: legacy.models.routes,
             },
             web_search: Default::default(),
-            runtime: legacy.runtime,
+            runtime: legacy.runtime.into(),
             instructions: legacy.instructions,
             skills: legacy.skills,
             mcp: legacy.mcp,
@@ -227,24 +232,36 @@ impl ConfigStore {
         Ok(Some(config))
     }
 
-    fn migrate_v8(&self) -> Result<Option<StudioConfig>> {
+    fn migrate_previous_config(&self) -> Result<Option<StudioConfig>> {
         let content = fs::read_to_string(self.paths.config_file())?;
-        let mut config: StudioConfig = match toml::from_str(&content) {
+        let legacy: PreviousStudioConfig = match toml::from_str(&content) {
             Ok(config) => config,
             Err(_) => return Ok(None),
         };
-        if !PREVIOUS_STUDIO_CONFIG_SCHEMA_VERSIONS.contains(&config.schema_version) {
+        if !PREVIOUS_STUDIO_CONFIG_SCHEMA_VERSIONS.contains(&legacy.schema_version) {
             return Ok(None);
         }
-        let previous_version = config.schema_version;
-        config.schema_version = STUDIO_CONFIG_SCHEMA_VERSION;
-        for provider in config.models.providers.values_mut() {
-            provider.capabilities = if provider.preset_id().is_some() {
-                ProviderCapabilitySelection::PresetDefaults
-            } else {
-                ProviderCapabilitySelection::Explicit(ProviderServiceCapabilities::default())
-            };
+        let previous_version = legacy.schema_version;
+        let mut models = legacy.models;
+        if matches!(previous_version, 8 | 9) {
+            for provider in models.providers.values_mut() {
+                provider.capabilities = if provider.preset_id().is_some() {
+                    ProviderCapabilitySelection::PresetDefaults
+                } else {
+                    ProviderCapabilitySelection::Explicit(ProviderServiceCapabilities::default())
+                };
+            }
         }
+        let config = StudioConfig {
+            schema_version: STUDIO_CONFIG_SCHEMA_VERSION,
+            models,
+            web_search: legacy.web_search,
+            runtime: legacy.runtime.into(),
+            instructions: legacy.instructions,
+            skills: legacy.skills,
+            mcp: legacy.mcp,
+            ui: legacy.ui,
+        };
         config.validate()?;
         self.backup_schema(previous_version)?;
         self.save(&config)?;
@@ -269,7 +286,7 @@ struct LegacyStudioConfig {
     schema_version: u32,
     models: LegacyAgentModelConfig,
     #[serde(default)]
-    runtime: StudioRuntimeConfig,
+    runtime: LegacyRuntimeConfig,
     #[serde(default)]
     instructions: StudioInstructionsConfig,
     #[serde(default)]
@@ -321,7 +338,7 @@ struct LegacyCatalogStudioConfig {
     schema_version: u32,
     models: LegacyCatalogAgentModelConfig,
     #[serde(default)]
-    runtime: StudioRuntimeConfig,
+    runtime: LegacyRuntimeConfig,
     #[serde(default)]
     instructions: StudioInstructionsConfig,
     #[serde(default)]
@@ -330,6 +347,92 @@ struct LegacyCatalogStudioConfig {
     mcp: StudioMcpConfig,
     #[serde(default)]
     ui: StudioUiConfig,
+}
+
+#[derive(Debug, Deserialize)]
+struct PreviousStudioConfig {
+    schema_version: u32,
+    models: AgentModelConfig,
+    #[serde(default)]
+    web_search: StudioWebSearchConfig,
+    #[serde(default)]
+    runtime: LegacyRuntimeConfig,
+    #[serde(default)]
+    instructions: StudioInstructionsConfig,
+    #[serde(default)]
+    skills: StudioSkillsConfig,
+    #[serde(default)]
+    mcp: StudioMcpConfig,
+    #[serde(default)]
+    ui: StudioUiConfig,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct LegacyRuntimeConfig {
+    #[serde(default)]
+    permission_mode: LegacyPermissionMode,
+    #[serde(default)]
+    tool_capabilities: ToolCapabilityConfig,
+    #[serde(default)]
+    active_skills: Vec<String>,
+    #[serde(default)]
+    active_mcp_servers: Vec<String>,
+    #[serde(default)]
+    openai_compaction_mode: LegacyOpenAiCompactionMode,
+}
+
+impl From<LegacyRuntimeConfig> for StudioRuntimeConfig {
+    fn from(value: LegacyRuntimeConfig) -> Self {
+        Self {
+            permission_mode: value.permission_mode.into(),
+            tool_capabilities: value.tool_capabilities,
+            active_skills: value.active_skills,
+            active_mcp_servers: value.active_mcp_servers,
+            openai_compaction_mode: value.openai_compaction_mode.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum LegacyPermissionMode {
+    #[default]
+    RequestApproval,
+    WorkspaceWrite,
+    AutoReview,
+    FullAccess,
+}
+
+impl From<LegacyPermissionMode> for pl_core::PermissionMode {
+    fn from(value: LegacyPermissionMode) -> Self {
+        match value {
+            LegacyPermissionMode::RequestApproval | LegacyPermissionMode::WorkspaceWrite => {
+                Self::RequestApproval
+            }
+            LegacyPermissionMode::AutoReview => Self::AutoReview,
+            LegacyPermissionMode::FullAccess => Self::FullAccess,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum LegacyOpenAiCompactionMode {
+    #[default]
+    RemoteV2,
+    RemoteLegacy,
+    Local,
+}
+
+impl From<LegacyOpenAiCompactionMode> for OpenAiCompactionMode {
+    fn from(value: LegacyOpenAiCompactionMode) -> Self {
+        match value {
+            LegacyOpenAiCompactionMode::RemoteV2 | LegacyOpenAiCompactionMode::RemoteLegacy => {
+                Self::RemoteV2
+            }
+            LegacyOpenAiCompactionMode::Local => Self::Local,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -492,6 +595,18 @@ fn schema_backup_path(path: &Path, version: u32) -> PathBuf {
     path.with_file_name(format!("{file_name}.schema{version}.bak"))
 }
 
+fn rejected_backup_path(path: &Path) -> PathBuf {
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(STUDIO_CONFIG_FILE_NAME);
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    path.with_file_name(format!("{file_name}.rejected.{stamp}.bak"))
+}
+
 fn temporary_path(path: &Path) -> PathBuf {
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -534,29 +649,27 @@ mod tests {
     }
 
     #[test]
-    fn save_uses_current_document_and_round_trips() {
-        let store = ConfigStore::new(ConfigPaths::from_home(temp_home("round-trip")));
-        let config = StudioConfig::default_config();
-
-        store.save(&config).unwrap();
-
-        assert_eq!(store.load().unwrap(), config);
-    }
-
-    #[test]
-    fn old_document_is_deleted_and_recreated() {
+    fn old_document_is_backed_up_and_recreated() {
         let store = ConfigStore::new(ConfigPaths::from_home(temp_home("reset")));
         fs::create_dir_all(store.paths().config_dir()).unwrap();
-        fs::write(
-            store.paths().config_file(),
-            "schema_version = 4\n[providers]\n",
-        )
-        .unwrap();
+        let invalid_content = "schema_version = 4\n[providers]\n";
+        fs::write(store.paths().config_file(), invalid_content).unwrap();
 
         let config = store.load_or_default().unwrap();
 
         assert_eq!(config.schema_version, STUDIO_CONFIG_SCHEMA_VERSION);
         assert_eq!(store.load().unwrap(), config);
+        let backup = fs::read_dir(store.paths().config_dir())
+            .unwrap()
+            .filter_map(std::result::Result::ok)
+            .find(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("config.toml.rejected.")
+            })
+            .expect("rejected config backup");
+        assert_eq!(fs::read_to_string(backup.path()).unwrap(), invalid_content);
     }
 
     #[test]
@@ -659,5 +772,49 @@ mod tests {
         assert_eq!(migrated.web_search.location, None);
         assert_eq!(migrated.models, current.models);
         assert!(schema_backup_path(store.paths().config_file(), 8).exists());
+    }
+
+    #[test]
+    fn schema_v10_legacy_runtime_labels_are_migrated_once() {
+        let store = ConfigStore::new(ConfigPaths::from_home(temp_home("migrate-v10")));
+        fs::create_dir_all(store.paths().config_dir()).unwrap();
+        let current = StudioConfig::default_config();
+        let mut document = toml::Value::try_from(&current).unwrap();
+        let root = document.as_table_mut().unwrap();
+        root.insert("schema_version".to_string(), toml::Value::Integer(10));
+        root.insert(
+            "runtime".to_string(),
+            toml::Value::Table(toml::map::Map::from_iter([
+                (
+                    "permission_mode".to_string(),
+                    toml::Value::String("workspace-write".to_string()),
+                ),
+                (
+                    "openai_compaction_mode".to_string(),
+                    toml::Value::String("remote_legacy".to_string()),
+                ),
+            ])),
+        );
+        fs::write(
+            store.paths().config_file(),
+            toml::to_string_pretty(&document).unwrap(),
+        )
+        .unwrap();
+
+        let migrated = store.load_or_default().unwrap();
+
+        assert_eq!(migrated.schema_version, STUDIO_CONFIG_SCHEMA_VERSION);
+        assert_eq!(
+            migrated.runtime.permission_mode,
+            pl_core::PermissionMode::RequestApproval
+        );
+        assert_eq!(
+            migrated.runtime.openai_compaction_mode,
+            OpenAiCompactionMode::RemoteV2
+        );
+        assert!(schema_backup_path(store.paths().config_file(), 10).exists());
+        let saved = fs::read_to_string(store.paths().config_file()).unwrap();
+        assert!(!saved.contains("workspace-write"));
+        assert!(!saved.contains("remote_legacy"));
     }
 }

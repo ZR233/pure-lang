@@ -7,27 +7,6 @@ use tokio::sync::Mutex;
 
 use super::*;
 
-#[test]
-fn agent_kernel_uses_registered_tools_as_product_extension_point() {
-    let kernel_source = include_str!("../kernel.rs");
-
-    assert!(
-        kernel_source.contains(&format!("{}{}", "Registered", "Tool")),
-        "AgentKernel 必须通过动态 RegisteredTool 暴露产品工具扩展点"
-    );
-    for old_extension in [
-        format!("{}{}", "ProductTool", "Router"),
-        format!("{}{}", "ProductTool", "Definition"),
-        format!("{}{}", "ProductTool", "Request"),
-        format!("{}{}", "with_product_tool", "_router"),
-    ] {
-        assert!(
-            !kernel_source.contains(&old_extension),
-            "AgentKernel 不应继续暴露旧产品工具扩展层 `{old_extension}`"
-        );
-    }
-}
-
 #[tokio::test]
 async fn agent_kernel_registers_dynamic_tools() {
     let calls = Arc::new(Mutex::new(Vec::new()));

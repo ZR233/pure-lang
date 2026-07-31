@@ -123,31 +123,6 @@ class TimelineTodoItem {
   final String status;
 }
 
-TimelineAgentEvent timelineAgentEventFromPayload(
-  Object? value, {
-  String? eventId,
-  String? sessionId,
-  int sequence = 0,
-  DateTime? createdAt,
-  String? kindType,
-}) {
-  final payload = _objectMap(value);
-  final kind = _objectMap(payload['kind']);
-  final eventKind = kind.isEmpty ? payload : kind;
-  final resolvedKindType = _nonEmpty(kindType, _stringValue(eventKind['type']));
-  return TimelineAgentEvent(
-    eventId: _nonEmpty(eventId, _stringValue(payload['eventId'])),
-    sessionId: _nonEmpty(sessionId, _stringValue(payload['sessionId'])),
-    sequence: sequence == 0 ? _intValue(payload['sequence']) : sequence,
-    payload: _agentEventPayloadFromMap(resolvedKindType, eventKind),
-    createdAt:
-        createdAt ??
-        DateTime.fromMillisecondsSinceEpoch(
-          _intValue(payload['createdAt']) * 1000,
-        ),
-  );
-}
-
 TimelineRow timelineRowFromAgentEvent(TimelineAgentEvent event) {
   return TimelineRow.agentActivity(event);
 }
@@ -204,45 +179,6 @@ int _timelineAgentEventRenderVersion(TimelineAgentEvent event) {
       for (final item in items) ...[item.step, item.status],
     event.createdAt.millisecondsSinceEpoch,
   ]);
-}
-
-TimelineAgentEventPayload _agentEventPayloadFromMap(
-  String kindType,
-  Map<String, Object?> kind,
-) {
-  return switch (kindType) {
-    'subAgentActivity' => TimelineSubAgentActivity(
-      callId: _stringValue(kind['callId']) ?? '',
-      agentId: _stringValue(kind['agentId']),
-      path: _stringValue(kind['path']),
-      parentPath: _stringValue(kind['parentPath']),
-      kind: _stringValue(kind['kind']) ?? 'spawned',
-      statusValue: _stringValue(kind['status']),
-      message: _stringValue(kind['message']),
-      timedOut: _boolValue(kind['timedOut']),
-      error: _stringValue(kind['error']),
-    ),
-    'todoListChanged' => _todoListPayloadFromMap(kind),
-    _ => throw FormatException('Unknown agent timeline event type: $kindType'),
-  };
-}
-
-TimelineTodoListUpdate _todoListPayloadFromMap(Map<String, Object?> kind) {
-  final snapshot = _objectMap(kind['snapshot']);
-  return TimelineTodoListUpdate(
-    callId: _stringValue(snapshot['callId']) ?? '',
-    agentId: _stringValue(snapshot['agentId']),
-    path: _stringValue(snapshot['path']),
-    parentPath: _stringValue(snapshot['parentPath']),
-    explanation: _stringValue(snapshot['explanation']),
-    items: [
-      for (final item in _listValue(snapshot['items']))
-        TimelineTodoItem(
-          step: _stringValue(_objectMap(item)['step']) ?? '',
-          status: _stringValue(_objectMap(item)['status']) ?? 'pending',
-        ),
-    ],
-  );
 }
 
 String _agentActivityText(Iterable<String?> parts) {

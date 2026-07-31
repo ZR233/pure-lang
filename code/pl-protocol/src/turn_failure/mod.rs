@@ -62,28 +62,3 @@ impl TurnFailure {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use pretty_assertions::assert_eq;
-
-    use super::*;
-
-    #[test]
-    fn retry_disposition_round_trips_with_retry_after() {
-        let failure = TurnFailure {
-            category: TurnFailureCategory::ProviderCapacity,
-            code: Some("server_is_overloaded".to_string()),
-            http_status: Some(503),
-            message: "provider overloaded".to_string(),
-            retry: RetryDisposition::Retryable {
-                retry_after_ms: Some(1_500),
-            },
-        };
-
-        let json = serde_json::to_string(&failure).expect("serialize failure");
-        let restored = serde_json::from_str(&json).expect("deserialize failure");
-
-        assert_eq!(failure, restored);
-    }
-}

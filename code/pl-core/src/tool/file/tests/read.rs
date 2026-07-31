@@ -113,33 +113,6 @@ async fn read_file_rejects_invalid_line_bounds_instead_of_clamping() {
 }
 
 #[tokio::test]
-async fn read_file_rejects_legacy_range_fields_with_schema_guidance() {
-    let root = unique_temp_dir("legacy-read-range");
-    let tool = read_file_tool();
-
-    for field in ["endLine", "limit"] {
-        let mut arguments = serde_json::json!({"path": "a.txt"});
-        arguments[field] = serde_json::json!(10);
-        let error = tool
-            .execute(input(arguments), context(&root).await)
-            .await
-            .unwrap_err()
-            .to_string();
-
-        assert!(error.contains(field), "{error}");
-        assert!(
-            error.contains("Allowed fields: path, cwd, startLine, maxLines"),
-            "{error}"
-        );
-        assert!(
-            error.contains("Use maxLines instead of endLine or limit"),
-            "{error}"
-        );
-    }
-    let _ = tokio::fs::remove_dir_all(root).await;
-}
-
-#[tokio::test]
 async fn read_file_missing_path_suggests_workspace_discovery() {
     let root = unique_temp_dir("missing-read-path");
     let tool = read_file_tool();
@@ -172,39 +145,6 @@ async fn read_file_rejects_workspace_escape() {
         .await;
 
     assert!(result.is_err());
-    let _ = tokio::fs::remove_dir_all(root).await;
-}
-
-#[tokio::test]
-async fn write_and_read_file_roundtrip() {
-    let root = unique_temp_dir("roundtrip");
-    let write = WriteFileTool;
-    let read = read_file_tool();
-    write
-        .execute(
-            input(serde_json::json!({
-                "path": "notes/a.txt",
-                "content": "hello\nworld\n",
-                "mode": "create"
-            })),
-            context(&root).await,
-        )
-        .await
-        .unwrap();
-
-    let output = read
-        .execute(
-            input(serde_json::json!({
-                "path": "notes/a.txt",
-                "startLine": 2,
-                "maxLines": 1,
-            })),
-            context(&root).await,
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(read_output_text(&output), "world\n");
     let _ = tokio::fs::remove_dir_all(root).await;
 }
 

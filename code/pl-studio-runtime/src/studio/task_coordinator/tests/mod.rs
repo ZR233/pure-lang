@@ -6,8 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
 
 use super::merge::{
-    MergeCleanupTestBarrier, MergeCommitTestBarrier, MergeFailureTestPoint,
-    MergeVerificationCommand, MergeVerifier, select_merge_verification_commands,
+    MergeCleanupTestBarrier, MergeCommitTestBarrier, MergeFailureTestPoint, MergeVerifier,
 };
 use super::*;
 use crate::tool::{
@@ -674,41 +673,6 @@ async fn task_stop_preflight_rejects_stale_design_before_stopping() {
 
     drop(branch_guard);
     fixture.cleanup();
-}
-
-#[test]
-fn production_merge_verifier_selects_repo_rust_fmt_and_flutter_project_analyze() {
-    let selected = select_merge_verification_commands(
-        Path::new("C:/repo"),
-        &[
-            "code/pl-core/src/lib.rs".to_string(),
-            "code/pure-studio/windows/runner/main.cpp".to_string(),
-            "code/pure-studio/lib/l10n/app_zh.arb".to_string(),
-        ],
-    );
-
-    assert_eq!(
-        selected,
-        vec![
-            MergeVerificationCommand {
-                working_directory: PathBuf::from("C:/repo"),
-                command: vec![
-                    "cargo".to_string(),
-                    "fmt".to_string(),
-                    "--all".to_string(),
-                    "--check".to_string(),
-                ],
-            },
-            MergeVerificationCommand {
-                working_directory: PathBuf::from("C:/repo/code/pure-studio"),
-                command: vec![
-                    "flutter".to_string(),
-                    "--no-version-check".to_string(),
-                    "analyze".to_string(),
-                ],
-            },
-        ]
-    );
 }
 
 #[tokio::test]
@@ -4068,7 +4032,6 @@ async fn terminal_recording_reports_only_committed_durable_changes() {
         changed,
         TerminalAgentStateRecording::Changed {
             task_run_id,
-            projection: _,
             ..
         } if task_run_id == fixture.task_run_id
     ));

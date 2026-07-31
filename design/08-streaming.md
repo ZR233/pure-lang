@@ -33,9 +33,8 @@ session。
 每个 message snapshot 携带 `messageId/sessionId/turnId/role/status/createdAt/updatedAt`。
 每个 part snapshot 携带 `partId/messageId/sessionId/turnId/type/order/revision/status` 和
 对应内容。消息与 part 首次创建后身份字段和展示顺序不可改变，终态不可回退。
-`activityGroupId` 是 deprecated 兼容字段，不再由新事件生成，也不参与 canonical 归约或
-展示分组。展示层只把排序后相邻的可见 tool part 合并；任何其他可见 part 或 message 边界
-都会切断工具组。
+展示层只把排序后相邻的可见 tool part 合并；任何其他可见 part 或 message 边界都会切断
+工具组，协议不携带第二套分组身份。
 
 part 类型固定为：
 

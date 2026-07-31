@@ -43,12 +43,8 @@ TimelinePart _toolTimelinePart({
   String? denialReason,
   int? exitCode,
   bool timedOut = false,
-  String? activityGroupId = '',
 }) {
   final now = DateTime.fromMillisecondsSinceEpoch(0);
-  final resolvedActivityGroupId = activityGroupId == ''
-      ? 'tool-group:$turnId:$order'
-      : activityGroupId;
   return timelinePartFromSnapshot(
     TimelinePartSnapshot(
       id: id,
@@ -63,7 +59,6 @@ TimelinePart _toolTimelinePart({
       status: status,
       createdAt: now,
       updatedAt: now,
-      activityGroupId: resolvedActivityGroupId,
       tool: TimelineToolPart(
         toolCallId: id,
         name: name,

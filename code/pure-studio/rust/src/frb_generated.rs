@@ -3366,7 +3366,6 @@ impl SseDecode for crate::api::studio::types::session_stream::BridgeSessionToolP
         let mut var_timedOut = <bool>::sse_decode(deserializer);
         let mut var_workingDirectory = <Option<String>>::sse_decode(deserializer);
         let mut var_denialReason = <Option<String>>::sse_decode(deserializer);
-        let mut var_activityGroupId = <Option<String>>::sse_decode(deserializer);
         return crate::api::studio::types::session_stream::BridgeSessionToolPart {
             tool_call_id: var_toolCallId,
             call_id: var_callId,
@@ -3379,7 +3378,6 @@ impl SseDecode for crate::api::studio::types::session_stream::BridgeSessionToolP
             timed_out: var_timedOut,
             working_directory: var_workingDirectory,
             denial_reason: var_denialReason,
-            activity_group_id: var_activityGroupId,
         };
     }
 }
@@ -7731,7 +7729,6 @@ impl flutter_rust_bridge::IntoDart
             self.timed_out.into_into_dart().into_dart(),
             self.working_directory.into_into_dart().into_dart(),
             self.denial_reason.into_into_dart().into_dart(),
-            self.activity_group_id.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -10543,7 +10540,6 @@ impl SseEncode for crate::api::studio::types::session_stream::BridgeSessionToolP
         <bool>::sse_encode(self.timed_out, serializer);
         <Option<String>>::sse_encode(self.working_directory, serializer);
         <Option<String>>::sse_encode(self.denial_reason, serializer);
-        <Option<String>>::sse_encode(self.activity_group_id, serializer);
     }
 }
 

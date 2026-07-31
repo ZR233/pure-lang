@@ -54,7 +54,6 @@ fn session_kind_from_label(label: &str) -> SessionKind {
 fn session_visibility_from_label(label: &str) -> SessionVisibility {
     match label {
         "active" => SessionVisibility::Active,
-        "handoffOrigin" => SessionVisibility::HandoffOrigin,
         "archived" => SessionVisibility::Archived,
         _ => SessionVisibility::Archived,
     }

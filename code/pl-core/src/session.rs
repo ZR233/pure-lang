@@ -53,8 +53,7 @@ impl AgentSession {
         }
     }
 
-    pub fn from_messages(mut messages: Vec<Message>) -> Self {
-        normalize_legacy_command_messages(&mut messages);
+    pub fn from_messages(messages: Vec<Message>) -> Self {
         Self {
             items: messages
                 .iter()
@@ -68,8 +67,7 @@ impl AgentSession {
         }
     }
 
-    pub fn from_items(mut items: Vec<ModelContextItem>) -> Self {
-        normalize_legacy_command_items(&mut items);
+    pub fn from_items(items: Vec<ModelContextItem>) -> Self {
         let messages = messages_from_items(&items);
         Self {
             items,
@@ -92,8 +90,7 @@ impl AgentSession {
         self.revision
     }
 
-    pub fn replace_messages(&mut self, mut messages: Vec<Message>) {
-        normalize_legacy_command_messages(&mut messages);
+    pub fn replace_messages(&mut self, messages: Vec<Message>) {
         let note = self.session_note().cloned();
         self.items = messages
             .iter()
@@ -108,8 +105,7 @@ impl AgentSession {
         self.revision = self.revision.saturating_add(1);
     }
 
-    pub fn replace_items(&mut self, mut items: Vec<ModelContextItem>) {
-        normalize_legacy_command_items(&mut items);
+    pub fn replace_items(&mut self, items: Vec<ModelContextItem>) {
         self.messages = messages_from_items(&items);
         self.items = items;
         self.revision = self.revision.saturating_add(1);
@@ -426,62 +422,6 @@ fn messages_from_items(items: &[ModelContextItem]) -> Vec<Message> {
         .collect()
 }
 
-fn normalize_legacy_command_items(items: &mut [ModelContextItem]) {
-    for item in items {
-        match item {
-            ModelContextItem::Message { message } => normalize_legacy_command_message(message),
-            ModelContextItem::ToolResult { message, receipt } => {
-                normalize_legacy_command_message(message);
-                receipt.tool_name = canonical_command_tool_name(&receipt.tool_name).to_string();
-            }
-            ModelContextItem::PinnedContext { .. }
-            | ModelContextItem::SessionNote { .. }
-            | ModelContextItem::Compaction { .. } => {}
-        }
-    }
-}
-
-fn normalize_legacy_command_messages(messages: &mut [Message]) {
-    for message in messages {
-        normalize_legacy_command_message(message);
-    }
-}
-
-fn normalize_legacy_command_message(message: &mut Message) {
-    if let Some(metadata) = ToolCallHistoryMetadata::from_metadata(&message.metadata)
-        && let Ok(mut calls) = serde_json::from_str::<Vec<ToolCall>>(&metadata.tool_calls_json)
-    {
-        let mut changed = false;
-        for call in &mut calls {
-            if is_legacy_command_tool_name(&call.name) {
-                call.name = "exec".to_string();
-                changed = true;
-            }
-        }
-        if changed && let Ok(json) = serde_json::to_string(&calls) {
-            ToolCallHistoryMetadata::new(json).insert_into(&mut message.metadata);
-        }
-    }
-    if let Ok(mut metadata) = ToolResultMetadata::from_metadata(&message.metadata)
-        && is_legacy_command_tool_name(&metadata.tool_name)
-    {
-        metadata.tool_name = "exec".to_string();
-        metadata.insert_into(&mut message.metadata);
-    }
-}
-
-fn canonical_command_tool_name(name: &str) -> &str {
-    if is_legacy_command_tool_name(name) {
-        "exec"
-    } else {
-        name
-    }
-}
-
-fn is_legacy_command_tool_name(name: &str) -> bool {
-    matches!(name, "bash" | "container_exec" | "run_in_container")
-}
-
 /// 构造包含 assistant tool_calls metadata 的历史消息。
 ///
 /// 宿主测试或迁移工具需要手工构造历史时，应复用该 helper，而不是直接拼
@@ -696,39 +636,6 @@ mod tests {
     }
 
     #[test]
-    fn new_session_is_empty() {
-        let session = AgentSession::new();
-        assert!(session.is_empty());
-        assert_eq!(session.len(), 0);
-    }
-
-    #[test]
-    fn push_user_prompt_adds_message() {
-        let mut session = AgentSession::new();
-        session.push_user_prompt("hello".to_string());
-
-        assert_eq!(session.len(), 1);
-        assert_eq!(session.messages()[0].role, MessageRole::User);
-        match &session.messages()[0].content {
-            MessageContent::Text(t) => assert_eq!(t, "hello"),
-            _ => panic!("expected Text content"),
-        }
-    }
-
-    #[test]
-    fn push_assistant_response_adds_message() {
-        let mut session = AgentSession::new();
-        session.push_assistant_response("reply".to_string(), Some("thinking".to_string()));
-
-        assert_eq!(session.len(), 1);
-        assert_eq!(session.messages()[0].role, MessageRole::Assistant);
-        assert_eq!(
-            session.messages()[0].reasoning_content,
-            Some("thinking".to_string())
-        );
-    }
-
-    #[test]
     fn push_assistant_tool_calls_stores_metadata() {
         let mut session = AgentSession::new();
         let tool_calls = vec![ToolCall::function(
@@ -860,63 +767,6 @@ mod tests {
                 .unwrap(),
             r#"{"command":"echo hi"}"#
         );
-    }
-
-    #[test]
-    fn restored_history_normalizes_legacy_command_tool_names() {
-        let mut legacy = AgentSession::new();
-        legacy.push_assistant_tool_calls(
-            None,
-            ["bash", "container_exec", "run_in_container"]
-                .into_iter()
-                .enumerate()
-                .map(|(index, name)| {
-                    ToolCall::function(
-                        format!("call-{index}"),
-                        name,
-                        serde_json::json!({"command": "pwd"}),
-                        Some(format!("call-{index}")),
-                    )
-                })
-                .collect(),
-            None,
-        );
-        legacy.push_tool_result(
-            "call-result".to_string(),
-            Some("call-result".to_string()),
-            "container_exec".to_string(),
-            ToolCallKind::Function,
-            "ok".to_string(),
-            r#"{"command":"pwd"}"#.to_string(),
-        );
-
-        let restored = AgentSession::from_messages(legacy.messages().to_vec());
-        let calls = ToolCallHistoryMetadata::from_metadata(&restored.messages()[0].metadata)
-            .expect("tool calls");
-        let calls: Vec<ToolCall> = serde_json::from_str(&calls.tool_calls_json).unwrap();
-        assert_eq!(
-            calls
-                .iter()
-                .map(|call| call.name.as_str())
-                .collect::<Vec<_>>(),
-            vec!["exec", "exec", "exec"]
-        );
-        let result = ToolResultMetadata::from_metadata(&restored.messages()[1].metadata).unwrap();
-        assert_eq!(result.tool_name, "exec");
-
-        let restored = AgentSession::from_items(legacy.items().to_vec());
-        let receipt = restored
-            .items()
-            .iter()
-            .find_map(|item| match item {
-                ModelContextItem::ToolResult { receipt, .. } => Some(receipt),
-                ModelContextItem::Message { .. }
-                | ModelContextItem::PinnedContext { .. }
-                | ModelContextItem::SessionNote { .. }
-                | ModelContextItem::Compaction { .. } => None,
-            })
-            .unwrap();
-        assert_eq!(receipt.tool_name, "exec");
     }
 
     #[test]

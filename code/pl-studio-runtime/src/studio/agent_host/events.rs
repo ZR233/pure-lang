@@ -122,7 +122,6 @@ impl StudioAgentEventProjector {
             agent_id,
             runtime_events,
             trace_events,
-            session_events: _,
             ..
         } = committed;
         let studio_session_id = self.resources.studio_session_id(&agent_id).await;

@@ -75,35 +75,6 @@ mod tests {
     }
 
     #[test]
-    fn archive_project_api_is_exposed_to_flutter() {
-        let _archive = super::archive_project;
-        let _preview = super::preview_project_cleanup;
-        let _cleanup = super::cleanup_project;
-    }
-
-    #[test]
-    fn list_discovered_skills_api_is_exposed_to_flutter() {
-        let _api = super::list_discovered_skills;
-    }
-
-    #[test]
-    fn small_command_responses_are_typed_for_flutter() {
-        let _runtime_permission = super::save_runtime_permission_mode;
-        let _provider_usages = super::load_provider_usages;
-        let _submit = super::submit_prompt;
-        let _stop = super::stop_prompt;
-        let _resolve = super::resolve_interaction;
-    }
-
-    #[test]
-    fn typed_settings_apis_are_exposed_to_flutter() {
-        let _instructions = super::save_instructions_settings;
-        let _skills = super::save_skills_settings;
-        let _mcp = super::save_mcp_settings;
-        let _general = super::save_general_settings;
-    }
-
-    #[test]
     fn provider_catalog_bridge_projects_the_canonical_pl_snapshot() {
         let canonical = pl_studio_runtime::builtin_provider_catalog()
             .snapshot()
@@ -201,35 +172,15 @@ mod tests {
     }
 
     #[test]
-    fn mcp_transport_label_accepts_ui_values() {
+    fn mcp_transport_label_accepts_only_canonical_ui_values() {
         assert_eq!(
-            super::convert::settings::mcp_transport_from_label("streamableHttp"),
+            super::convert::settings::mcp_transport_from_label("streamableHttp").unwrap(),
             McpServerTransport::StreamableHttp
         );
         assert_eq!(
-            super::convert::settings::mcp_transport_from_label("streamable_http"),
-            McpServerTransport::StreamableHttp
-        );
-        assert_eq!(
-            super::convert::settings::mcp_transport_from_label("http"),
-            McpServerTransport::StreamableHttp
-        );
-        assert_eq!(
-            super::convert::settings::mcp_transport_from_label("stdio"),
+            super::convert::settings::mcp_transport_from_label("stdio").unwrap(),
             McpServerTransport::Stdio
         );
-    }
-
-    #[test]
-    fn normalized_string_list_trims_sorts_and_deduplicates() {
-        assert_eq!(
-            super::convert::settings::normalized_string_list(vec![
-                " beta ".to_string(),
-                String::new(),
-                "alpha".to_string(),
-                "beta".to_string(),
-            ]),
-            vec!["alpha".to_string(), "beta".to_string()]
-        );
+        assert!(super::convert::settings::mcp_transport_from_label("streamable_http").is_err());
     }
 }

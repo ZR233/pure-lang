@@ -47,7 +47,6 @@ impl SessionKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionVisibility {
     Active,
-    HandoffOrigin,
     Archived,
 }
 
@@ -55,7 +54,6 @@ impl SessionVisibility {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Active => "active",
-            Self::HandoffOrigin => "handoffOrigin",
             Self::Archived => "archived",
         }
     }

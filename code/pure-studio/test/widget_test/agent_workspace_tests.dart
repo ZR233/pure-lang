@@ -233,15 +233,12 @@ void registerAgentWorkspaceTests() {
       api.emitSession(
         _messageUpdatedEvent(
           sessionId: 'session-1',
-          message: {
-            'messageId': 'late-root-message',
-            'sessionId': 'session-1',
-            'turnId': 'late-root-turn',
-            'role': 'assistant',
-            'status': 'completed',
-            'createdAt': 2,
-            'updatedAt': 2,
-          },
+          message: _timelineMessageFixture(
+            id: 'late-root-message',
+            sessionId: 'session-1',
+            turnId: 'late-root-turn',
+            createdAt: 2,
+          ),
         ),
       );
       api.emitSession(

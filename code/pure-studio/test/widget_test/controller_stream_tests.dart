@@ -31,45 +31,37 @@ void registerControllerStreamTests() {
       api.emitSession(
         _messageUpdatedEvent(
           sessionId: 'session-1',
-          message: {
-            'messageId': 'turn-1:assistant',
-            'sessionId': 'session-1',
-            'turnId': 'turn-1',
-            'role': 'assistant',
-            'status': 'streaming',
-            'createdAt': 1,
-            'updatedAt': 1,
-          },
+          message: _timelineMessageFixture(
+            id: 'turn-1:assistant',
+            sessionId: 'session-1',
+            turnId: 'turn-1',
+            status: 'streaming',
+          ),
         ),
       );
       api.emitSession(
         _partUpdatedEvent(
           sessionId: 'session-1',
-          part: {
-            'partId': 'part-1',
-            'messageId': 'turn-1:assistant',
-            'sessionId': 'session-1',
-            'turnId': 'turn-1',
-            'type': 'text',
-            'order': 0,
-            'status': 'streaming',
-            'createdAt': 1,
-            'updatedAt': 1,
-            'text': 'hel',
-          },
+          part: _timelinePartFixture(
+            id: 'part-1',
+            messageId: 'turn-1:assistant',
+            sessionId: 'session-1',
+            turnId: 'turn-1',
+            type: TimelinePartType.text,
+            status: 'streaming',
+            text: 'hel',
+          ),
         ),
       );
       api.emitSession(
         _partDeltaEvent(
           sessionId: 'session-1',
-          delta: {
-            'sessionId': 'session-1',
-            'messageId': 'turn-1:assistant',
-            'partId': 'part-1',
-            'revision': 1,
-            'field': 'text',
-            'delta': 'lo',
-          },
+          delta: _timelineDeltaFixture(
+            partId: 'part-1',
+            revision: 1,
+            field: 'text',
+            delta: 'lo',
+          ),
         ),
       );
       await _pumpFrameBatch();
@@ -91,61 +83,50 @@ void registerControllerStreamTests() {
     api.emitSession(
       _messageUpdatedEvent(
         sessionId: 'session-1',
-        message: {
-          'messageId': 'turn-1:assistant',
-          'sessionId': 'session-1',
-          'turnId': 'turn-1',
-          'role': 'assistant',
-          'status': 'streaming',
-          'createdAt': 1,
-          'updatedAt': 1,
-        },
+        message: _timelineMessageFixture(
+          id: 'turn-1:assistant',
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          status: 'streaming',
+        ),
       ),
     );
     api.emitSession(
       _partUpdatedEvent(
         sessionId: 'session-1',
-        part: {
-          'partId': 'part-1',
-          'messageId': 'turn-1:assistant',
-          'sessionId': 'session-1',
-          'turnId': 'turn-1',
-          'type': 'text',
-          'order': 7,
-          'revision': 0,
-          'status': 'streaming',
-          'createdAt': 1,
-          'updatedAt': 1,
-          'textChannel': 'commentary',
-          'text': '',
-        },
+        part: _timelinePartFixture(
+          id: 'part-1',
+          messageId: 'turn-1:assistant',
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          type: TimelinePartType.text,
+          order: 7,
+          status: 'streaming',
+          textChannel: TimelineTextChannel.commentary,
+        ),
       ),
     );
     api.emitSession(
       _partDeltaEvent(
         sessionId: 'session-1',
-        delta: {
-          'sessionId': 'session-1',
-          'messageId': 'turn-1:assistant',
-          'partId': 'part-1',
-          'revision': 0,
-          'field': 'text',
-          'delta': 'legacy',
-        },
+        delta: _timelineDeltaFixture(
+          partId: 'part-1',
+          revision: 0,
+          field: 'text',
+          delta: 'stale',
+        ),
       ),
     );
     for (final revision in [1, 1, 2]) {
       api.emitSession(
         _partDeltaEvent(
           sessionId: 'session-1',
-          delta: {
-            'sessionId': 'session-1',
-            'messageId': 'turn-1:assistant',
-            'partId': 'part-1',
-            'revision': revision,
-            'field': 'text',
-            'delta': revision == 1 ? 'a' : 'b',
-          },
+          delta: _timelineDeltaFixture(
+            partId: 'part-1',
+            revision: revision,
+            field: 'text',
+            delta: revision == 1 ? 'a' : 'b',
+          ),
         ),
       );
     }
@@ -161,33 +142,29 @@ void registerControllerStreamTests() {
     api.emitSession(
       _partUpdatedEvent(
         sessionId: 'session-1',
-        part: {
-          'partId': 'part-1',
-          'messageId': 'turn-1:assistant',
-          'sessionId': 'session-1',
-          'turnId': 'turn-1',
-          'type': 'text',
-          'order': 7,
-          'revision': 2,
-          'status': 'completed',
-          'createdAt': 1,
-          'updatedAt': 2,
-          'textChannel': 'commentary',
-          'text': 'snapshot',
-        },
+        part: _timelinePartFixture(
+          id: 'part-1',
+          messageId: 'turn-1:assistant',
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          type: TimelinePartType.text,
+          order: 7,
+          revision: 2,
+          updatedAt: 2,
+          textChannel: TimelineTextChannel.commentary,
+          text: 'snapshot',
+        ),
       ),
     );
     api.emitSession(
       _partDeltaEvent(
         sessionId: 'session-1',
-        delta: {
-          'sessionId': 'session-1',
-          'messageId': 'turn-1:assistant',
-          'partId': 'part-1',
-          'revision': 3,
-          'field': 'text',
-          'delta': 'late',
-        },
+        delta: _timelineDeltaFixture(
+          partId: 'part-1',
+          revision: 3,
+          field: 'text',
+          delta: 'late',
+        ),
       ),
     );
     await _pumpFrameBatch();
@@ -209,47 +186,37 @@ void registerControllerStreamTests() {
     api.emitSession(
       _messageUpdatedEvent(
         sessionId: 'session-1',
-        message: {
-          'messageId': 'turn-1:assistant',
-          'sessionId': 'session-1',
-          'turnId': 'turn-1',
-          'role': 'assistant',
-          'status': 'streaming',
-          'createdAt': 1,
-          'updatedAt': 1,
-        },
+        message: _timelineMessageFixture(
+          id: 'turn-1:assistant',
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          status: 'streaming',
+        ),
       ),
     );
     api.emitSession(
       _partUpdatedEvent(
         sessionId: 'session-1',
-        part: {
-          'partId': 'part-1',
-          'messageId': 'turn-1:assistant',
-          'sessionId': 'session-1',
-          'turnId': 'turn-1',
-          'type': 'text',
-          'order': 0,
-          'revision': 0,
-          'status': 'streaming',
-          'createdAt': 1,
-          'updatedAt': 1,
-          'textChannel': 'final',
-          'text': '',
-        },
+        part: _timelinePartFixture(
+          id: 'part-1',
+          messageId: 'turn-1:assistant',
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          type: TimelinePartType.text,
+          status: 'streaming',
+          textChannel: TimelineTextChannel.finalAnswer,
+        ),
       ),
     );
     api.emitSession(
       _partDeltaEvent(
         sessionId: 'session-1',
-        delta: {
-          'sessionId': 'session-1',
-          'messageId': 'turn-1:assistant',
-          'partId': 'part-1',
-          'revision': 1,
-          'field': 'text',
-          'delta': 'live',
-        },
+        delta: _timelineDeltaFixture(
+          partId: 'part-1',
+          revision: 1,
+          field: 'text',
+          delta: 'live',
+        ),
       ),
     );
     api.emitSession(
@@ -283,59 +250,49 @@ void registerControllerStreamTests() {
     api.emitSession(
       _messageUpdatedEvent(
         sessionId: 'session-1',
-        message: {
-          'messageId': 'turn-1:assistant',
-          'sessionId': 'session-1',
-          'turnId': 'turn-1',
-          'role': 'assistant',
-          'status': 'streaming',
-          'createdAt': 1,
-          'updatedAt': 1,
-        },
+        message: _timelineMessageFixture(
+          id: 'turn-1:assistant',
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          status: 'streaming',
+        ),
       ),
     );
     api.emitSession(
       _partUpdatedEvent(
         sessionId: 'session-1',
-        part: {
-          'partId': 'part-1',
-          'messageId': 'turn-1:assistant',
-          'sessionId': 'session-1',
-          'turnId': 'turn-1',
-          'type': 'text',
-          'order': 0,
-          'revision': 0,
-          'status': 'streaming',
-          'createdAt': 1,
-          'updatedAt': 1,
-          'textChannel': 'commentary',
-          'text': '',
-        },
+        part: _timelinePartFixture(
+          id: 'part-1',
+          messageId: 'turn-1:assistant',
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          type: TimelinePartType.text,
+          status: 'streaming',
+          textChannel: TimelineTextChannel.commentary,
+        ),
       ),
     );
 
     api.emitSession(
       _partDeltaEvent(
         sessionId: 'session-1',
-        delta: {
-          'partId': 'part-1',
-          'revision': 1,
-          'field': 'text',
-          'delta': 'v2',
-        },
+        delta: _timelineDeltaFixture(
+          partId: 'part-1',
+          revision: 1,
+          field: 'text',
+          delta: 'v2',
+        ),
       ),
     );
     api.emitSession(
       _partDeltaEvent(
         sessionId: 'session-1',
-        delta: {
-          'sessionId': 'other-session',
-          'messageId': 'other-message',
-          'partId': 'part-1',
-          'revision': 2,
-          'field': 'text',
-          'delta': '-safe',
-        },
+        delta: _timelineDeltaFixture(
+          partId: 'part-1',
+          revision: 2,
+          field: 'text',
+          delta: '-safe',
+        ),
       ),
     );
     await _pumpFrameBatch();
@@ -357,15 +314,13 @@ void registerControllerStreamTests() {
       _messageUpdatedEvent(
         sessionId: 'session-1',
         sequence: BigInt.from(3),
-        message: {
-          'messageId': 'turn-1:assistant',
-          'sessionId': 'session-1',
-          'turnId': 'turn-1',
-          'role': 'assistant',
-          'status': 'streaming',
-          'createdAt': 10,
-          'updatedAt': 10,
-        },
+        message: _timelineMessageFixture(
+          id: 'turn-1:assistant',
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          status: 'streaming',
+          createdAt: 10,
+        ),
       ),
     );
     await _pumpFrameBatch();
@@ -379,33 +334,28 @@ void registerControllerStreamTests() {
     api.emitSession(
       _partUpdatedEvent(
         sessionId: 'session-1',
-        part: {
-          'partId': 'part-1',
-          'messageId': 'turn-1:assistant',
-          'sessionId': 'session-1',
-          'turnId': 'turn-1',
-          'type': 'text',
-          'order': 1,
-          'revision': 0,
-          'status': 'streaming',
-          'createdAt': 20,
-          'updatedAt': 20,
-          'textChannel': 'final',
-          'text': '',
-        },
+        part: _timelinePartFixture(
+          id: 'part-1',
+          messageId: 'turn-1:assistant',
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          type: TimelinePartType.text,
+          order: 1,
+          status: 'streaming',
+          createdAt: 20,
+          textChannel: TimelineTextChannel.finalAnswer,
+        ),
       ),
     );
     api.emitSession(
       _partDeltaEvent(
         sessionId: 'session-1',
-        delta: {
-          'sessionId': 'session-1',
-          'messageId': 'turn-1:assistant',
-          'partId': 'part-1',
-          'revision': 1,
-          'field': 'text',
-          'delta': 'projected only',
-        },
+        delta: _timelineDeltaFixture(
+          partId: 'part-1',
+          revision: 1,
+          field: 'text',
+          delta: 'projected only',
+        ),
       ),
     );
     await _pumpFrameBatch();

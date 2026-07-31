@@ -4,6 +4,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+default = []
+live-tests = []
+
 [dependencies]
 pl-core = { workspace = true }
 pl-protocol = { workspace = true }
@@ -37,3 +41,8 @@ minisign-verify = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
+
+[[test]]
+name = "task_live"
+path = "tests/task_live.rs"
+required-features = ["live-tests"]

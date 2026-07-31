@@ -141,39 +141,6 @@ async fn copy_and_move_collision_modes_are_explicit() {
     let _ = tokio::fs::remove_dir_all(root).await;
 }
 
-#[test]
-fn file_tool_schemas_do_not_expose_legacy_bool_fields() {
-    let delete_schema = DeletePathTool.input_schema();
-    let copy_schema = CopyPathTool.input_schema();
-    let move_schema = MovePathTool.input_schema();
-
-    assert!(delete_schema["properties"].get("mode").is_some());
-    assert!(delete_schema["properties"].get("recursive").is_none());
-    assert!(copy_schema["properties"].get("collision").is_some());
-    assert!(copy_schema["properties"].get("overwrite").is_none());
-    assert!(move_schema["properties"].get("collision").is_some());
-    assert!(move_schema["properties"].get("overwrite").is_none());
-}
-
-#[test]
-fn file_tool_schemas_use_unified_camel_case_inputs() {
-    let read_schema = read_file_tool().input_schema();
-    let list_schema = list_files_tool().input_schema();
-    let search_schema = search_files_tool().input_schema();
-
-    assert!(read_schema["properties"].get("startLine").is_some());
-    assert!(read_schema["properties"].get("maxLines").is_some());
-    assert!(read_schema["properties"].get("line_start").is_none());
-    assert!(list_schema["properties"].get("limit").is_some());
-    assert!(list_schema["properties"].get("max_files").is_none());
-    assert!(list_schema["properties"].get("depth").is_none());
-    assert!(search_schema["properties"].get("query").is_some());
-    assert!(search_schema["properties"].get("glob").is_some());
-    assert!(search_schema["properties"].get("pattern").is_none());
-    assert!(search_schema["properties"].get("filePattern").is_none());
-    assert_eq!(search_schema["required"], serde_json::json!(["query"]));
-}
-
 #[tokio::test]
 async fn list_files_returns_empty_for_missing_workspace_directory() {
     let root = unique_temp_dir("list-missing-directory");

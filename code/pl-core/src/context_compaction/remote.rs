@@ -73,9 +73,6 @@ pub(super) async fn compact_remote(
         .await?;
     let replacement = match config.openai_mode {
         OpenAiCompactionMode::RemoteV2 => build_v2_replacement(session.messages(), response.input)?,
-        OpenAiCompactionMode::RemoteLegacy => {
-            filter_legacy_replacement(session.messages(), response.input)?
-        }
         OpenAiCompactionMode::Local => {
             return Err(PureError::ConfigError(
                 "remote compaction received local mode".to_string(),
@@ -106,36 +103,6 @@ fn build_v2_replacement(
         .collect::<Vec<_>>();
     retained.push(compaction);
     Ok(retained)
-}
-
-fn filter_legacy_replacement(
-    original_messages: &[Message],
-    output: Vec<ModelContextItem>,
-) -> Result<Vec<ModelContextItem>> {
-    let canonical_users = original_messages
-        .iter()
-        .filter(|message| message.role == MessageRole::User && !is_compaction_summary(message))
-        .map(|message| message.content.clone())
-        .collect::<Vec<_>>();
-    let replacement = output
-        .into_iter()
-        .filter(|item| match item {
-            ModelContextItem::Compaction { .. } => true,
-            ModelContextItem::Message { message }
-            | ModelContextItem::ToolResult { message, .. } => match message.role {
-                MessageRole::User => canonical_users.contains(&message.content),
-                MessageRole::Assistant => true,
-                MessageRole::System | MessageRole::Tool => false,
-            },
-            ModelContextItem::PinnedContext { .. } | ModelContextItem::SessionNote { .. } => false,
-        })
-        .collect::<Vec<_>>();
-    if !replacement.iter().any(ModelContextItem::is_compaction) {
-        return Err(PureError::LlmError(
-            "OpenAI compact endpoint returned no compaction checkpoint".to_string(),
-        ));
-    }
-    Ok(replacement)
 }
 
 fn retain_recent_user_messages(messages: &[Message], max_tokens: u64) -> Vec<Message> {
@@ -290,53 +257,6 @@ mod tests {
                 .last()
                 .is_some_and(ModelContextItem::is_compaction)
         );
-    }
-
-    #[test]
-    fn legacy_replacement_filters_prelude_tools_and_unknown_history() {
-        let original = vec![user("real user")];
-        let replacement = filter_legacy_replacement(
-            &original,
-            vec![
-                ModelContextItem::from(Message {
-                    role: MessageRole::System,
-                    content: MessageContent::Text("developer".to_string()),
-                    reasoning_content: None,
-                    metadata: HashMap::new(),
-                }),
-                ModelContextItem::from(user("prelude user")),
-                ModelContextItem::from(user("real user")),
-                ModelContextItem::from(Message {
-                    role: MessageRole::Assistant,
-                    content: MessageContent::Text("summary note".to_string()),
-                    reasoning_content: None,
-                    metadata: HashMap::new(),
-                }),
-                ModelContextItem::from(Message {
-                    role: MessageRole::Tool,
-                    content: MessageContent::Text("tool output".to_string()),
-                    reasoning_content: None,
-                    metadata: HashMap::new(),
-                }),
-                ModelContextItem::Compaction {
-                    encrypted_content: "encrypted".to_string(),
-                },
-            ],
-        )
-        .unwrap();
-
-        assert_eq!(replacement.len(), 3);
-        assert!(matches!(
-            &replacement[0],
-            ModelContextItem::Message { message }
-                if message.role == MessageRole::User
-                    && message.content == MessageContent::Text("real user".to_string())
-        ));
-        assert!(matches!(
-            &replacement[1],
-            ModelContextItem::Message { message } if message.role == MessageRole::Assistant
-        ));
-        assert!(replacement[2].is_compaction());
     }
 
     #[test]

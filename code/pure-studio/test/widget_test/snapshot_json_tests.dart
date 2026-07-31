@@ -1,83 +1,6 @@
 part of '../widget_test.dart';
 
 void registerSnapshotJsonTests() {
-  test('canonical session snapshot filters synthetic lifecycle parts', () {
-    final state = applyCanonicalSessionSnapshot(
-      _emptyState(),
-      StudioSessionSnapshot.fromLegacyJson({
-        'sessionId': 'session-1',
-        'throughSequence': 4,
-        'messages': [
-          {
-            'messageId': 'turn-1:assistant',
-            'sessionId': 'session-1',
-            'turnId': 'turn-1',
-            'role': 'assistant',
-            'status': 'completed',
-            'createdAt': 1,
-            'updatedAt': 1,
-          },
-        ],
-        'parts': [
-          {
-            'partId': 'turn-1',
-            'messageId': 'turn-1:assistant',
-            'sessionId': 'session-1',
-            'turnId': 'turn-1',
-            'order': 0,
-            'revision': 0,
-            'status': 'completed',
-            'createdAt': 1,
-            'updatedAt': 1,
-            'content': {'type': 'turn'},
-            'synthetic': true,
-            'ignored': false,
-          },
-          {
-            'partId': 'turn-1-inf-1',
-            'messageId': 'turn-1:assistant',
-            'sessionId': 'session-1',
-            'turnId': 'turn-1',
-            'order': 1,
-            'revision': 0,
-            'status': 'completed',
-            'createdAt': 1,
-            'updatedAt': 1,
-            'content': {
-              'type': 'inference',
-              'inferenceId': 'inf-1',
-              'model': 'model',
-            },
-            'synthetic': true,
-            'ignored': false,
-          },
-          {
-            'partId': 'turn-1-final',
-            'messageId': 'turn-1:assistant',
-            'sessionId': 'session-1',
-            'turnId': 'turn-1',
-            'order': 2,
-            'revision': 0,
-            'status': 'completed',
-            'createdAt': 1,
-            'updatedAt': 1,
-            'content': {
-              'type': 'text',
-              'channel': 'final',
-              'text': 'visible answer',
-              'attachments': <Object?>[],
-            },
-            'synthetic': false,
-            'ignored': false,
-          },
-        ],
-      }),
-    );
-
-    expect(state.partSnapshotsBySession['session-1']!.keys, {'turn-1-final'});
-    expect(state.selectedTimelineRows.single.part!.text, 'visible answer');
-  });
-
   test('config snapshot restores built-in Zhipu MCP metadata', () {
     final state = studioStateFromFrbSnapshot(
       frb.BridgeStudioSnapshotResponse(
@@ -107,6 +30,7 @@ void registerSnapshotJsonTests() {
         selectedSessionId: 'session-1',
         selectedSessionTask: null,
         configJson: jsonEncode({
+          'defaultProviderId': 'zhipu-coding-plan',
           'providers': {
             'zhipu-coding-plan': {
               'presetId': 'zhipu-coding-plan',
@@ -117,8 +41,19 @@ void registerSnapshotJsonTests() {
               'name': 'Zhipu Coding Plan',
               'defaultModel': 'glm-5',
               'models': [],
+              'customModels': [],
+              'catalogId': 'zhipu',
+              'capabilitySource': 'preset_defaults',
+              'serviceCapabilities': {
+                'webSearch': {'hostedResponses': false, 'standalone': null},
+              },
             },
           },
+          'roles': {},
+          'runtime': {'permissionMode': 'request-approval'},
+          'instructions': {},
+          'skills': {},
+          'mcpServers': {},
           'builtinMcpServers': {
             'zhipu_search': {'enabled': true},
             'zhipu_vision': {'enabled': false},
@@ -153,66 +88,6 @@ void registerSnapshotJsonTests() {
     expect(vision.status, 'disabled');
   });
 
-  test('timeline parser accepts internal parts and rejects unknown values', () {
-    final base = {
-      'partId': 'part-1',
-      'messageId': 'turn-1:assistant',
-      'sessionId': 'session-1',
-      'turnId': 'turn-1',
-      'order': 0,
-      'revision': 0,
-      'status': 'completed',
-      'createdAt': 1,
-      'updatedAt': 2,
-      'text': 'hello',
-    };
-
-    final message = TimelineMessage(
-      id: 'turn-1:assistant',
-      sessionId: 'session-1',
-      role: 'assistant',
-      createdAt: DateTime.fromMillisecondsSinceEpoch(1000),
-    );
-    for (final internalType in ['file', 'turn', 'inference']) {
-      final internalPart = timelinePartSnapshotFromJson({
-        ...base,
-        'type': internalType,
-      });
-      expect(isInternalTimelinePartType(internalPart.type), isTrue);
-      expect(
-        timelineRowsFromMessages(
-          [message],
-          parts: [timelinePartFromSnapshot(internalPart)],
-        ),
-        isEmpty,
-      );
-    }
-    expect(
-      () => timelinePartSnapshotFromJson({...base, 'type': 'widget'}),
-      throwsA(
-        isA<FormatException>().having(
-          (error) => error.message,
-          'message',
-          contains('Unknown timeline part type'),
-        ),
-      ),
-    );
-    expect(
-      () => timelinePartSnapshotFromJson({
-        ...base,
-        'type': 'text',
-        'textChannel': 'draft',
-      }),
-      throwsA(
-        isA<FormatException>().having(
-          (error) => error.message,
-          'message',
-          contains('Unknown text channel'),
-        ),
-      ),
-    );
-  });
-
   test('realtime synthetic lifecycle part updates are ignored', () async {
     final api = _FakeStudioApi(_emptyState());
     final container = ProviderContainer(
@@ -222,25 +97,20 @@ void registerSnapshotJsonTests() {
 
     await container.read(studioControllerProvider.future);
     api.emitSession(
-      _canonicalSessionEvent(
+      StudioBridgeEvent(
         sessionId: 'session-1',
-        kind: {
-          'type': 'partChanged',
-          'part': {
-            'partId': 'turn-1',
-            'messageId': 'turn-1:assistant',
-            'sessionId': 'session-1',
-            'turnId': 'turn-1',
-            'order': 0,
-            'revision': 0,
-            'status': 'completed',
-            'createdAt': 1,
-            'updatedAt': 1,
-            'content': {'type': 'turn'},
-            'synthetic': true,
-            'ignored': false,
-          },
-        },
+        sequence: BigInt.one,
+        createdAt: _fixtureDate(1),
+        payload: MessagePartUpdatedPayload(
+          part: _timelinePartFixture(
+            id: 'turn-1',
+            messageId: 'turn-1:assistant',
+            sessionId: 'session-1',
+            turnId: 'turn-1',
+            type: TimelinePartType.turn,
+            synthetic: true,
+          ),
+        ),
       ),
     );
     await pumpEventQueue();
@@ -298,19 +168,21 @@ void registerSnapshotJsonTests() {
       ),
     );
     api.emitSession(
-      _canonicalSessionEvent(
+      StudioBridgeEvent(
         sessionId: 'session-1',
-        sequence: 2,
         turnId: 'turn-2',
-        kind: {
-          'type': 'turnChanged',
-          'turn': {
-            'turnId': 'turn-2',
-            'sessionId': 'session-1',
-            'state': {'status': 'inProgress', 'activity': 'thinking'},
-            'updatedAt': 2,
-          },
-        },
+        sequence: BigInt.two,
+        createdAt: _fixtureDate(2),
+        payload: TurnChangedPayload(
+          turn: StudioTurnView(
+            turnId: 'turn-2',
+            sessionId: 'session-1',
+            state: const StudioTurnState.inProgress(
+              StudioTurnActivity.thinking,
+            ),
+            updatedAt: _fixtureDate(2),
+          ),
+        ),
       ),
     );
     await pumpEventQueue();
@@ -322,27 +194,6 @@ void registerSnapshotJsonTests() {
       state.turnsBySession['session-1']?.state,
       const StudioTurnState.inProgress(StudioTurnActivity.thinking),
     );
-  });
-
-  test('studio bridge event normalizes canonical session delta', () {
-    final event = _canonicalSessionEvent(
-      sessionId: 'session-1',
-      sequence: 9,
-      kind: {
-        'type': 'partDelta',
-        'delta': {
-          'partId': 'part-1',
-          'revision': 4,
-          'field': 'text',
-          'delta': 'typed',
-        },
-      },
-    );
-
-    final payload = event.payload;
-    expect(payload, isA<MessagePartDeltaPayload>());
-    expect((payload as MessagePartDeltaPayload).delta.delta, 'typed');
-    expect(payload.delta.revision, 4);
   });
 
   test('product event projects typed task coordinator detail', () {
@@ -385,62 +236,5 @@ void registerSnapshotJsonTests() {
     expect(payload.task?.reviews.single.designReferences, [
       'design/16-task-orchestration.md#UI',
     ]);
-  });
-
-  test('canonical message part events reject unknown part types', () {
-    expect(
-      () => _canonicalSessionEvent(
-        sessionId: 'session-1',
-        kind: {
-          'type': 'partChanged',
-          'part': {
-            'partId': 'part-1',
-            'messageId': 'turn-1:assistant',
-            'sessionId': 'session-1',
-            'turnId': 'turn-1',
-            'order': 0,
-            'revision': 0,
-            'status': 'completed',
-            'createdAt': 1,
-            'updatedAt': 1,
-            'content': {'type': 'widget'},
-            'synthetic': false,
-            'ignored': false,
-          },
-        },
-      ),
-      throwsA(
-        isA<FormatException>().having(
-          (error) => error.message,
-          'message',
-          contains('Unknown timeline part type'),
-        ),
-      ),
-    );
-  });
-
-  test('timeline delta parser accepts only v2 fields', () {
-    final base = {
-      'sessionId': 'session-1',
-      'messageId': 'message-1',
-      'partId': 'part-1',
-      'revision': 1,
-      'delta': 'summary',
-    };
-
-    expect(
-      timelinePartDeltaFromJson({...base, 'field': 'reasoning.summary'}).field,
-      'reasoning.summary',
-    );
-    expect(
-      () => timelinePartDeltaFromJson({...base, 'field': 'reasoningText'}),
-      throwsA(
-        isA<FormatException>().having(
-          (error) => error.message,
-          'message',
-          contains('Unknown timeline delta field'),
-        ),
-      ),
-    );
   });
 }

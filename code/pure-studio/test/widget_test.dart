@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
@@ -41,7 +40,6 @@ part 'widget_test/markdown_render_tests.dart';
 part 'widget_test/timeline_tool_tests.dart';
 part 'widget_test/timeline_turn_activity_tests.dart';
 part 'widget_test/timeline_scroll_tests.dart';
-part 'widget_test/visual_foundation_tests.dart';
 part 'widget_test/responsive_layout_tests.dart';
 part 'widget_test/status_accessibility_tests.dart';
 part 'widget_test/task_runtime_detail_tests.dart';
@@ -70,7 +68,6 @@ void main() {
   registerTimelineToolTests();
   registerTimelineTurnActivityTests();
   registerTimelineScrollTests();
-  registerVisualFoundationTests();
   registerResponsiveLayoutTests();
   registerStatusAccessibilityTests();
   registerTaskRuntimeDetailTests();

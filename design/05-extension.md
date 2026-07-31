@@ -40,7 +40,7 @@ MCP 执行环境通过 `McpRuntimeHost` 扩展。PL 拥有配置 fingerprint、�
 
 上下文压缩的编排属于 `pl-core` 扩展点：turn pipeline 负责自动/手动触发、pre-turn/mid-turn/standalone phase、原子替换 `AgentSession` 有序上下文项，并由宿主同步持久化。`pl-model::ModelProvider::compact_context` 只暴露统一压缩请求/响应，provider runtime 内部封装私有 wire。远程压缩能力由 `ProviderWireProtocol::Responses` 与显式 compaction 配置共同决定，不依赖 preset 或厂商 ID；Chat Completions 始终使用本地摘要。
 
-OpenAI 远程模式默认使用 v2 `compaction_trigger`，`/responses/compact` 只作为显式 legacy 兼容模式，不做运行期自动回退。扩展压缩 wire 时必须保持 `ModelContextItem::Compaction` 的 provider 无关边界，不得把加密 checkpoint 伪装成普通 system/user 消息，也不得让 Chat Completions 消费该项。
+OpenAI 远程模式只使用 v2 `compaction_trigger`；本地模式使用摘要压缩，两者由显式配置选择，不做运行期自动回退。扩展压缩 wire 时必须保持 `ModelContextItem::Compaction` 的 provider 无关边界，不得把加密 checkpoint 伪装成普通 system/user 消息，也不得让 Chat Completions 消费该项。
 
 扩展时保持入口层薄：
 
@@ -63,7 +63,7 @@ flutter_rust_bridge。桌面端状态和配置均由 `pl-studio-runtime` 持久�
 
 命令执行、文件编辑、工具系统和沙箱能力必须以独立策略接入，并通过权限模型和事件流暴露给核心流程。
 
-桌面端允许注册 `exec`、完整 agent 协作工具和文件工具。当前 Studio 运行路径默认使用 `PermissionMode::RequestApproval`：workspace 内访问按工具策略直接放行，workspace 外访问请求用户审批；`auto-review` 会把 workspace 外访问交给 reviewer，`full-access` 在策略层放行已暴露工具。旧 `ToolApprovalPolicy::Manual` 和 `DenyAll` 只作为兼容构造保留；审批和交互结果通过统一 `Interaction` 与 Studio event/projection 记录，拒绝时将拒绝原因作为 tool result 写回会话。
+桌面端允许注册 `exec`、完整 agent 协作工具和文件工具。当前 Studio 运行路径默认使用 `PermissionMode::RequestApproval`：workspace 内访问按工具策略直接放行，workspace 外访问请求用户审批；`auto-review` 会把 workspace 外访问交给 reviewer，`full-access` 在策略层放行已暴露工具。审批和交互结果通过统一 `Interaction` 与 Studio event/projection 记录，拒绝时将拒绝原因作为 tool result 写回会话。
 
 文件工具作为 `pl-core` 工具系统的一部分注册，当前不新增独立 `pl-tool` crate。文件工具包括读取、写入、列目录、搜索、stat、建目录、删除、复制、移动和 `apply_patch`。工具 schema 不强制模型提供绝对路径；workspace-relative 路径按 `workspaceRoot` 解析，执行层统一转换为规范化绝对路径后再校验、审批和执行。只读工具仍受工作区路径边界限制；修改工具进入现有工具审批流程。
 

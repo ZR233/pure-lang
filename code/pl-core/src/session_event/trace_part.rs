@@ -79,7 +79,6 @@ fn session_part_content(item: &TracePart) -> SessionPartContent {
                     timed_out: tool.timed_out,
                     working_directory: tool.working_directory.clone(),
                     denial_reason: tool.denial_reason.clone(),
-                    activity_group_id: None,
                 })
                 .unwrap_or_else(|| SessionToolPart {
                     tool_call_id: item.item_id.clone(),
@@ -93,7 +92,6 @@ fn session_part_content(item: &TracePart) -> SessionPartContent {
                     timed_out: false,
                     working_directory: None,
                     denial_reason: None,
-                    activity_group_id: None,
                 }),
         },
         TracePartKind::Agent => SessionPartContent::Agent {

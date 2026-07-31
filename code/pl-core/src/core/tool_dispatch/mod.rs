@@ -291,12 +291,6 @@ pub(super) async fn execute_tool_calls(
                     }
                     decision
                 }
-                PermissionDecision::Denied { reason } => {
-                    if let Some(tool) = &mut item.tool {
-                        tool.denial_reason = Some(reason.clone());
-                    }
-                    ToolApprovalDecision::Denied { reason }
-                }
             };
         if is_cancelled(context.options) {
             emit_tool_snapshot(recorder, &mut item, TracePartStatus::Interrupted);

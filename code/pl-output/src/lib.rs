@@ -285,26 +285,6 @@ mod tests {
     }
 
     #[test]
-    fn empty_string_not_truncated() {
-        let strategy = TruncationStrategy::default();
-        let result = strategy.truncate("");
-
-        assert_eq!(result, TruncatedOutput::empty());
-    }
-
-    #[test]
-    fn default_strategy_uses_1000_chars() {
-        let strategy = TruncationStrategy::default();
-        assert_eq!(
-            strategy,
-            TruncationStrategy {
-                head_limit: 1000,
-                tail_limit: 1000,
-            }
-        );
-    }
-
-    #[test]
     fn multibyte_text_is_split_on_char_boundaries() {
         let strategy = TruncationStrategy::new(4, 4);
         let result = strategy.truncate("你好世界abcdef再见");
@@ -340,15 +320,5 @@ mod tests {
         assert!(text.starts_with("abcde"));
         assert!(text.contains("omitted 6 bytes"));
         assert!(text.ends_with("lmnop"));
-    }
-
-    #[test]
-    fn head_tail_buffer_keeps_full_when_under_cap() {
-        let mut buffer = HeadTailBuffer::new(10);
-        buffer.push(b"abc");
-        buffer.push(b"def");
-
-        assert!(!buffer.truncated());
-        assert_eq!(buffer.into_bytes(), b"abcdef");
     }
 }

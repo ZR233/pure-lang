@@ -12,66 +12,53 @@ void registerSessionStreamTests() {
     api.emitSession(
       _messageUpdatedEvent(
         sessionId: 'session-1',
-        message: {
-          'messageId': 'turn-1:assistant',
-          'sessionId': 'session-1',
-          'turnId': 'turn-1',
-          'role': 'assistant',
-          'status': 'streaming',
-          'createdAt': 1,
-          'updatedAt': 1,
-        },
+        message: _timelineMessageFixture(
+          id: 'turn-1:assistant',
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          status: 'streaming',
+        ),
       ),
     );
     api.emitSession(
       _partUpdatedEvent(
         sessionId: 'session-1',
-        part: {
-          'partId': 'part-1',
-          'messageId': 'turn-1:assistant',
-          'sessionId': 'session-1',
-          'turnId': 'turn-1',
-          'type': 'text',
-          'order': 0,
-          'revision': 0,
-          'status': 'streaming',
-          'createdAt': 1,
-          'updatedAt': 1,
-          'textChannel': 'final',
-          'text': '',
-        },
+        part: _timelinePartFixture(
+          id: 'part-1',
+          messageId: 'turn-1:assistant',
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          type: TimelinePartType.text,
+          status: 'streaming',
+          textChannel: TimelineTextChannel.finalAnswer,
+        ),
       ),
     );
     api.emitSession(
       _partDeltaEvent(
         sessionId: 'session-1',
-        delta: {
-          'sessionId': 'session-1',
-          'messageId': 'turn-1:assistant',
-          'partId': 'part-1',
-          'revision': 1,
-          'field': 'text',
-          'delta': 'partial',
-        },
+        delta: _timelineDeltaFixture(
+          partId: 'part-1',
+          revision: 1,
+          field: 'text',
+          delta: 'partial',
+        ),
       ),
     );
     api.emitSession(
       _partUpdatedEvent(
         sessionId: 'session-1',
-        part: {
-          'partId': 'part-1',
-          'messageId': 'turn-1:assistant',
-          'sessionId': 'session-1',
-          'turnId': 'turn-1',
-          'type': 'text',
-          'order': 0,
-          'revision': 1,
-          'status': 'completed',
-          'createdAt': 1,
-          'updatedAt': 2,
-          'textChannel': 'final',
-          'text': 'authoritative',
-        },
+        part: _timelinePartFixture(
+          id: 'part-1',
+          messageId: 'turn-1:assistant',
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          type: TimelinePartType.text,
+          revision: 1,
+          updatedAt: 2,
+          textChannel: TimelineTextChannel.finalAnswer,
+          text: 'authoritative',
+        ),
       ),
     );
     await pumpEventQueue();
@@ -150,27 +137,17 @@ void registerSessionStreamTests() {
       api.emitSession(
         _sessionRuntimeChangedEvent(
           sessionId: 'session-1',
-          runtime: sessionRuntimeFromJson({
-            'sessionId': 'session-1',
-            'usage': {
-              'model': 'planner/new',
-              'latestContextTokens': 42,
-              'contextWindow': 128000,
-              'promptTokens': 21,
-              'completionTokens': 21,
-              'cachedPromptTokens': 0,
-              'totalTokens': 42,
-              'estimatedCosts': [
-                {'currency': 'CNY', 'amount': '0.1600'},
-              ],
-              'hasUnpricedUsage': false,
-              'updatedAt': 2,
-            },
-            'activeSkills': ['new-skill'],
-            'activeMcpServers': ['new-mcp'],
-            'activeLspServers': ['new-lsp'],
-            'updatedAt': 2,
-          }),
+          runtime: const SessionRuntimeView(
+            model: 'planner/new',
+            contextTokens: 42,
+            contextWindow: 128000,
+            totalTokens: 42,
+            costLabel: 'CNY 0.16',
+            activeSkills: ['new-skill'],
+            activeMcpServers: ['new-mcp'],
+            activeLspServers: ['new-lsp'],
+            agentCount: 0,
+          ),
         ),
       );
       await pumpEventQueue();
@@ -190,25 +167,17 @@ void registerSessionStreamTests() {
       api.emitSession(
         _sessionRuntimeChangedEvent(
           sessionId: 'other-session',
-          runtime: sessionRuntimeFromJson({
-            'sessionId': 'other-session',
-            'usage': {
-              'model': 'planner/other',
-              'latestContextTokens': 7,
-              'contextWindow': 128000,
-              'promptTokens': 7,
-              'completionTokens': 0,
-              'cachedPromptTokens': 0,
-              'totalTokens': 7,
-              'estimatedCosts': <Object?>[],
-              'hasUnpricedUsage': false,
-              'updatedAt': 3,
-            },
-            'activeSkills': ['other-skill'],
-            'activeMcpServers': ['other-mcp'],
-            'activeLspServers': ['other-lsp'],
-            'updatedAt': 3,
-          }),
+          runtime: const SessionRuntimeView(
+            model: 'planner/other',
+            contextTokens: 7,
+            contextWindow: 128000,
+            totalTokens: 7,
+            costLabel: '',
+            activeSkills: ['other-skill'],
+            activeMcpServers: ['other-mcp'],
+            activeLspServers: ['other-lsp'],
+            agentCount: 0,
+          ),
         ),
       );
       await pumpEventQueue();

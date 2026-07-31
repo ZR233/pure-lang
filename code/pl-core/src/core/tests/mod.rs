@@ -1,7 +1,7 @@
 use super::*;
 use crate::ContextCompactionTrigger;
 use crate::tool::{OutputTruncation, Tool, ToolInput, ToolOutput};
-use crate::turn::{PermissionMode, ToolApprovalPolicy};
+use crate::turn::PermissionMode;
 use pl_model::{OpenAiCompactionMode, ToolCall};
 use pl_protocol::{InteractionPayload, InteractionResolution, ToolApprovalResolution};
 use pl_trace::{TraceEventKind, TracePartKind, TracePartSource, TraceTextChannel};

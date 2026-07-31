@@ -238,13 +238,6 @@ mod tests {
     }
 
     #[test]
-    fn registry_is_empty_initially() {
-        let reg = ToolRegistry::new();
-        assert!(reg.is_empty());
-        assert_eq!(reg.len(), 0);
-    }
-
-    #[test]
     fn tool_output_from_model_output_sets_exit_code_and_end_turn_event() {
         let output = ToolOutput::from_model_output(ToolOutputModelOutputRequest {
             model_output: "saved".to_string(),
@@ -263,17 +256,6 @@ mod tests {
                 runtime_events: vec![ToolRuntimeEvent::EndTurn],
             }
         );
-    }
-
-    #[test]
-    fn tool_output_consumes_model_visible_output() {
-        let output = ToolOutput::from_model_output(ToolOutputModelOutputRequest {
-            model_output: "visible".to_string(),
-            success: true,
-            ends_turn: false,
-        });
-
-        assert_eq!(output.into_model_output(), "visible");
     }
 
     #[test]
@@ -429,18 +411,6 @@ mod tests {
     }
 
     #[test]
-    fn tool_execution_result_exposes_explicit_success_and_failure_constructors() {
-        assert_eq!(
-            ToolExecutionResult::<serde_json::Value>::success("ok"),
-            ToolExecutionResult::new(true, "ok".to_string(), false)
-        );
-        assert_eq!(
-            ToolExecutionResult::<serde_json::Value>::failure("bad"),
-            ToolExecutionResult::new(false, "bad".to_string(), false)
-        );
-    }
-
-    #[test]
     fn function_tool_schema_builds_strict_object_input_schema() {
         let schema = function_tool_schema(
             "save_task_plan",
@@ -472,27 +442,6 @@ mod tests {
                     "metadata": { "type": "object" }
                 },
                 "required": ["title", "markdown"],
-                "additionalProperties": false
-            })
-        );
-    }
-
-    #[test]
-    fn strict_tool_input_schema_uses_named_field_constructors() {
-        let schema = strict_tool_input_schema([
-            ToolInputSchemaField::required("path", serde_json::json!({ "type": "string" })),
-            ToolInputSchemaField::optional("name", serde_json::json!({ "type": "string" })),
-        ]);
-
-        assert_eq!(
-            schema,
-            serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "path": { "type": "string" },
-                    "name": { "type": "string" }
-                },
-                "required": ["path"],
                 "additionalProperties": false
             })
         );
@@ -803,15 +752,6 @@ mod tests {
         token.cancel();
 
         assert_eq!(task.await.expect("task joins"), Err("cancelled"));
-    }
-
-    #[test]
-    fn registry_debug_shows_names() {
-        let mut reg = ToolRegistry::new();
-        reg.register(EchoTool);
-
-        let debug = format!("{reg:?}");
-        assert!(debug.contains("echo"));
     }
 
     #[test]

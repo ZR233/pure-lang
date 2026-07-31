@@ -65,47 +65,37 @@ void registerReducerRecoveryTests() {
       api.emitSession(
         _messageUpdatedEvent(
           sessionId: 'session-1',
-          message: {
-            'messageId': 'turn-1:assistant',
-            'sessionId': 'session-1',
-            'turnId': 'turn-1',
-            'role': 'assistant',
-            'status': 'streaming',
-            'createdAt': 1,
-            'updatedAt': 1,
-          },
+          message: _timelineMessageFixture(
+            id: 'turn-1:assistant',
+            sessionId: 'session-1',
+            turnId: 'turn-1',
+            status: 'streaming',
+          ),
         ),
       );
       api.emitSession(
         _partUpdatedEvent(
           sessionId: 'session-1',
-          part: {
-            'partId': 'part-1',
-            'messageId': 'turn-1:assistant',
-            'sessionId': 'session-1',
-            'turnId': 'turn-1',
-            'type': 'text',
-            'order': 0,
-            'revision': 0,
-            'status': 'streaming',
-            'createdAt': 1,
-            'updatedAt': 1,
-            'textChannel': 'final',
-            'text': '',
-          },
+          part: _timelinePartFixture(
+            id: 'part-1',
+            messageId: 'turn-1:assistant',
+            sessionId: 'session-1',
+            turnId: 'turn-1',
+            type: TimelinePartType.text,
+            status: 'streaming',
+            textChannel: TimelineTextChannel.finalAnswer,
+          ),
         ),
       );
       api.emitSession(
         _partDeltaEvent(
           sessionId: 'session-1',
-          delta: {
-            'sessionId': 'session-1',
-            'messageId': 'turn-1:assistant',
-            'partId': 'part-1',
-            'revision': 2,
-            'field': 'text',
-            'delta': 'skipped',
-          },
+          delta: _timelineDeltaFixture(
+            partId: 'part-1',
+            revision: 2,
+            field: 'text',
+            delta: 'skipped',
+          ),
         ),
       );
       await _pumpFrameBatch();
@@ -168,35 +158,29 @@ void registerReducerRecoveryTests() {
     api.emitSession(
       _messageUpdatedEvent(
         sessionId: 'session-1',
-        message: {
-          'messageId': 'turn-1:assistant',
-          'sessionId': 'session-1',
-          'turnId': 'turn-1',
-          'role': 'assistant',
-          'status': 'streaming',
-          'createdAt': 1,
-          'updatedAt': 1,
-        },
+        message: _timelineMessageFixture(
+          id: 'turn-1:assistant',
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          status: 'streaming',
+        ),
       ),
     );
     api.emitSession(
       _partUpdatedEvent(
         sessionId: 'session-1',
-        part: {
-          'partId': 'part-1',
-          'messageId': 'turn-1:assistant',
-          'sessionId': 'session-1',
-          'turnId': 'turn-1',
-          'type': 'text',
-          'order': 0,
-          'revision': 2,
-          'status': 'completed',
-          'createdAt': 1,
-          'updatedAt': 2,
-          'completedAt': 2,
-          'textChannel': 'final',
-          'text': 'stable',
-        },
+        part: _timelinePartFixture(
+          id: 'part-1',
+          messageId: 'turn-1:assistant',
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          type: TimelinePartType.text,
+          revision: 2,
+          updatedAt: 2,
+          completedAt: 2,
+          textChannel: TimelineTextChannel.finalAnswer,
+          text: 'stable',
+        ),
       ),
     );
     await pumpEventQueue();
@@ -204,61 +188,53 @@ void registerReducerRecoveryTests() {
     api.emitSession(
       _partUpdatedEvent(
         sessionId: 'session-1',
-        part: {
-          'partId': 'part-1',
-          'messageId': 'turn-1:assistant',
-          'sessionId': 'session-1',
-          'turnId': 'turn-1',
-          'type': 'text',
-          'order': 9,
-          'revision': 2,
-          'status': 'completed',
-          'createdAt': 1,
-          'updatedAt': 2,
-          'completedAt': 2,
-          'textChannel': 'final',
-          'text': 'wrong order',
-        },
+        part: _timelinePartFixture(
+          id: 'part-1',
+          messageId: 'turn-1:assistant',
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          type: TimelinePartType.text,
+          order: 9,
+          revision: 2,
+          updatedAt: 2,
+          completedAt: 2,
+          textChannel: TimelineTextChannel.finalAnswer,
+          text: 'wrong order',
+        ),
       ),
     );
     api.emitSession(
       _partUpdatedEvent(
         sessionId: 'session-1',
-        part: {
-          'partId': 'part-1',
-          'messageId': 'turn-1:assistant',
-          'sessionId': 'session-1',
-          'turnId': 'turn-1',
-          'type': 'text',
-          'order': 0,
-          'revision': 1,
-          'status': 'completed',
-          'createdAt': 1,
-          'updatedAt': 2,
-          'completedAt': 2,
-          'textChannel': 'final',
-          'text': 'low revision',
-        },
+        part: _timelinePartFixture(
+          id: 'part-1',
+          messageId: 'turn-1:assistant',
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          type: TimelinePartType.text,
+          revision: 1,
+          updatedAt: 2,
+          completedAt: 2,
+          textChannel: TimelineTextChannel.finalAnswer,
+          text: 'low revision',
+        ),
       ),
     );
     api.emitSession(
       _partUpdatedEvent(
         sessionId: 'session-1',
-        part: {
-          'partId': 'part-1',
-          'messageId': 'turn-1:assistant',
-          'sessionId': 'session-1',
-          'turnId': 'turn-1',
-          'type': 'text',
-          'order': 0,
-          'revision': 2,
-          'status': 'completed',
-          'createdAt': 1,
-          'updatedAt': 2,
-          'completedAt': 2,
-          'textChannel': 'final',
-          'text': 'changed terminal',
-        },
+        part: _timelinePartFixture(
+          id: 'part-1',
+          messageId: 'turn-1:assistant',
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          type: TimelinePartType.text,
+          revision: 2,
+          updatedAt: 2,
+          completedAt: 2,
+          textChannel: TimelineTextChannel.finalAnswer,
+          text: 'changed terminal',
+        ),
       ),
     );
     await pumpEventQueue();
@@ -290,50 +266,42 @@ void registerReducerRecoveryTests() {
       _messageUpdatedEvent(
         sessionId: 'session-1',
         sequence: BigInt.one,
-        message: {
-          'messageId': 'turn-1:assistant',
-          'sessionId': 'session-1',
-          'turnId': 'turn-1',
-          'role': 'assistant',
-          'status': 'streaming',
-          'createdAt': 10,
-          'updatedAt': 10,
-        },
+        message: _timelineMessageFixture(
+          id: 'turn-1:assistant',
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          status: 'streaming',
+          createdAt: 10,
+        ),
       ),
     );
     api.emitSession(
       _messageUpdatedEvent(
         sessionId: 'session-1',
         sequence: BigInt.two,
-        message: {
-          'messageId': 'turn-1:assistant',
-          'sessionId': 'session-1',
-          'turnId': 'turn-1',
-          'role': 'assistant',
-          'status': 'completed',
-          'createdAt': 20,
-          'updatedAt': 20,
-          'completedAt': 20,
-        },
+        message: _timelineMessageFixture(
+          id: 'turn-1:assistant',
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          createdAt: 20,
+          completedAt: 20,
+        ),
       ),
     );
     api.emitSession(
       _partUpdatedEvent(
         sessionId: 'session-1',
-        part: {
-          'partId': 'part-1',
-          'messageId': 'turn-1:assistant',
-          'sessionId': 'session-1',
-          'turnId': 'turn-1',
-          'type': 'text',
-          'order': 0,
-          'revision': 0,
-          'status': 'streaming',
-          'createdAt': 10,
-          'updatedAt': 10,
-          'textChannel': 'final',
-          'text': 'still streaming',
-        },
+        part: _timelinePartFixture(
+          id: 'part-1',
+          messageId: 'turn-1:assistant',
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          type: TimelinePartType.text,
+          status: 'streaming',
+          createdAt: 10,
+          textChannel: TimelineTextChannel.finalAnswer,
+          text: 'still streaming',
+        ),
       ),
     );
     await pumpEventQueue();
@@ -360,19 +328,15 @@ void registerReducerRecoveryTests() {
     api.emitSession(
       _partUpdatedEvent(
         sessionId: 'session-1',
-        part: {
-          'partId': 'part-orphan',
-          'messageId': 'missing-message',
-          'sessionId': 'session-1',
-          'turnId': 'turn-1',
-          'type': 'text',
-          'order': 0,
-          'revision': 0,
-          'status': 'streaming',
-          'createdAt': 1,
-          'updatedAt': 1,
-          'text': 'orphan',
-        },
+        part: _timelinePartFixture(
+          id: 'part-orphan',
+          messageId: 'missing-message',
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          type: TimelinePartType.text,
+          status: 'streaming',
+          text: 'orphan',
+        ),
       ),
     );
     await pumpEventQueue();

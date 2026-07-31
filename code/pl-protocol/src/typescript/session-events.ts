@@ -159,7 +159,6 @@ export interface SessionToolPart {
   timedOut?: boolean
   workingDirectory?: string
   denialReason?: string
-  activityGroupId?: string
 }
 
 export interface SessionAgentPart {

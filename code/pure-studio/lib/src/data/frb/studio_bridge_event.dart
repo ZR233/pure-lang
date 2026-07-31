@@ -21,26 +21,6 @@ class StudioBridgeEvent {
     );
   }
 
-  factory StudioBridgeEvent.fromCanonicalJson(Map<String, Object?> event) {
-    final position = _map(event['position']);
-    final sequence = _string(position['persistence']) == 'durable'
-        ? _int(position['sequence'])
-        : 0;
-    final sessionId = _string(event['sessionId']);
-    return StudioBridgeEvent(
-      eventId: _nullableString(event['eventId']),
-      sessionId: sessionId,
-      turnId: _nullableString(event['turnId']),
-      sequence: sequence <= 0 ? null : BigInt.from(sequence),
-      createdAt: _dateFromUnix(_int(event['emittedAt'])),
-      payload: _canonicalEventPayload(
-        _map(event['kind']),
-        sequence: sequence,
-        sessionId: sessionId,
-      ),
-    );
-  }
-
   final String? eventId;
   final StudioBridgeEventOrigin origin;
   final String? sessionId;
@@ -213,78 +193,4 @@ final class SettingsDraftSavedPayload extends StudioBridgeEventPayload {
 
   final String section;
   final bool saved;
-}
-
-StudioBridgeEventPayload _canonicalEventPayload(
-  Map<String, Object?> kind, {
-  required int sequence,
-  required String sessionId,
-}) {
-  return switch (_string(kind['type'])) {
-    'turnChanged' => switch (_map(kind['turn'])) {
-      final turn => TurnChangedPayload(
-        turn: _studioTurnViewFromJson(turn, fallbackSessionId: sessionId),
-      ),
-    },
-    'messageChanged' => MessageUpdatedPayload(
-      message: timelineMessageFromJson(kind['message'], sequence: sequence),
-    ),
-    'messageRemoved' => MessageRemovedPayload(
-      messageId: _string(kind['messageId']),
-    ),
-    'partChanged' => switch (_canonicalLegacyPartJson(kind['part'])) {
-      final part when _isIgnoredTimelinePartType(part['type']) =>
-        const IgnoredBridgeEventPayload(),
-      final part => MessagePartUpdatedPayload(
-        part: timelinePartSnapshotFromJson(part, sequence: sequence),
-      ),
-    },
-    'partRemoved' => MessagePartRemovedPayload(
-      messageId: _string(kind['messageId']),
-      partId: _string(kind['partId']),
-    ),
-    'partDelta' => MessagePartDeltaPayload(
-      delta: timelinePartDeltaFromJson(kind['delta']),
-    ),
-    'interactionChanged' => switch (_map(_map(kind['event'])['interaction'])) {
-      final interaction => InteractionChangedPayload(
-        interaction: pendingInteractionFromJson(interaction),
-        status: _string(interaction['status']),
-      ),
-    },
-    'agentChanged' => switch (_map(kind['agent'])) {
-      final agent => AgentChangedPayload(
-        agent: StudioAgentView(
-          id: _string(agent['id']),
-          sessionId: _string(agent['sessionId']),
-          path: _string(agent['path']),
-          parentPath: _nullableString(agent['parentPath']),
-          role: _string(agent['role'], fallback: 'agent'),
-          task: _string(agent['task']),
-          status: _string(agent['status']),
-          summary: _nullableString(agent['summary']),
-          depth: _int(agent['depth']),
-          error: _nullableString(agent['error']),
-          reason: _nullableString(agent['reason']),
-          updatedAt: _dateFromUnix(_int(agent['updatedAt'])),
-        ),
-      ),
-    },
-    'timelineEventAppended' => AgentTimelineChangedPayload(
-      event: timelineAgentEventFromPayload(kind['event']),
-    ),
-    'runtimeChanged' => SessionRuntimeChangedPayload(
-      runtime: sessionRuntimeFromJson(kind['runtime']),
-      sessionId: sessionId,
-      agentCount: _int(_map(kind['runtime'])['agentCount']),
-    ),
-    'skillActivated' => SkillActivatedPayload(
-      name: _string(_map(kind['activation'])['name']),
-    ),
-    'planChanged' => PlanLifecycleChangedPayload(
-      state: _string(_map(kind['event'])['state']),
-    ),
-    'contextCompacted' || 'errorOccurred' => const IgnoredBridgeEventPayload(),
-    final type => throw FormatException('Unknown session event kind: $type'),
-  };
 }

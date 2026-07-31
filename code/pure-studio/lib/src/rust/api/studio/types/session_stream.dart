@@ -1116,7 +1116,6 @@ class BridgeSessionToolPart {
   final bool timedOut;
   final String? workingDirectory;
   final String? denialReason;
-  final String? activityGroupId;
 
   const BridgeSessionToolPart({
     required this.toolCallId,
@@ -1130,7 +1129,6 @@ class BridgeSessionToolPart {
     required this.timedOut,
     this.workingDirectory,
     this.denialReason,
-    this.activityGroupId,
   });
 
   @override
@@ -1145,8 +1143,7 @@ class BridgeSessionToolPart {
       exitCode.hashCode ^
       timedOut.hashCode ^
       workingDirectory.hashCode ^
-      denialReason.hashCode ^
-      activityGroupId.hashCode;
+      denialReason.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -1163,8 +1160,7 @@ class BridgeSessionToolPart {
           exitCode == other.exitCode &&
           timedOut == other.timedOut &&
           workingDirectory == other.workingDirectory &&
-          denialReason == other.denialReason &&
-          activityGroupId == other.activityGroupId;
+          denialReason == other.denialReason;
 }
 
 class BridgeSessionTurn {

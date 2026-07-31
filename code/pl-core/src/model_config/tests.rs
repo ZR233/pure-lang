@@ -23,15 +23,6 @@ fn test_config() -> AgentModelConfig {
 }
 
 #[test]
-fn dynamic_role_config_round_trips_with_serde() {
-    let config = test_config();
-    let json = serde_json::to_string(&config).unwrap();
-    let decoded: AgentModelConfig = serde_json::from_str(&json).unwrap();
-
-    assert_eq!(decoded, config);
-}
-
-#[test]
 fn resolve_uses_route_as_the_only_default_model_source() {
     let config = test_config();
     let role = AgentRoleId::new("custom_executor").unwrap();

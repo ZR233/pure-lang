@@ -40,7 +40,7 @@ Chat Completions provider 如果没有 Responses 风格的 completed event，pro
 
 路径类工具不要求模型提供绝对路径。运行时把相对路径按 `workspaceRoot` 解析，规范化为绝对路径后再进入权限判断和实际执行；文件工具、`apply_patch`、`exec.cwd`、`lsp_query_*` 的 `filePath` 和权限 precheck 必须复用同一个 resolver，避免审批看到 workspace 内而执行时解析到 workspace 外。`WorkspaceOnly` 模式拒绝 `..`、Windows drive-relative、越界绝对路径、越界 UNC / verbatim 路径和符号链接越界；`full-access` 允许本地 backend 解析 workspace 外路径，但宿主注入的容器或远程 backend 可以保持更严格的隔离边界。
 
-模型只看到环境无关的 `exec`、`write_stdin`、`read_file`、`search_files` 和 `apply_patch`。`ToolSetBuilder` 分别接收 `CommandBackend` 与 `WorkspaceFileBackend`；Studio 注入本地实现，Mai 等宿主注入容器或远程实现。PL 统一拥有 schema、权限、进程表、stdin、超时、取消、输出截断和 turn 清理，backend 只负责 cwd 映射、启动/终止进程、发布完整输出和生成宿主 artifact。低层容器复制能力只服务文件 backend 与输出同步，不注册为模型工具。新请求不得暴露 `bash`、`container_exec`、`run_in_container` 或 `container_copy`；恢复旧会话时仅在持久化历史边界把前三种旧命令调用名称规范化为 `exec`。
+模型只看到环境无关的 `exec`、`write_stdin`、`read_file`、`search_files` 和 `apply_patch`。`ToolSetBuilder` 分别接收 `CommandBackend` 与 `WorkspaceFileBackend`；Studio 注入本地实现，Mai 等宿主注入容器或远程实现。PL 统一拥有 schema、权限、进程表、stdin、超时、取消、输出截断和 turn 清理，backend 只负责 cwd 映射、启动/终止进程、发布完整输出和生成宿主 artifact。低层容器复制能力只服务文件 backend 与输出同步，不注册为模型工具。命令工具唯一名称是 `exec`，不注册或运行期改写其他命令工具别名。
 
 `list_files` 的 `glob` 既可以匹配 workspace-relative 路径，也可以匹配 `path` 参数之下的相对条目；`includeDirs=true` 时目录候选按带尾随 `/` 的形式参与匹配。`**/` 表示零层或多层目录，因此 `**/Cargo.toml` 必须同时匹配 workspace 根下和子目录下的 `Cargo.toml`。
 
@@ -158,7 +158,7 @@ MCP tool 成功结果写回紧凑字符串。文本内容按 MCP content 顺序�
 
 ## Studio 展示
 
-Studio timeline 以 message/part projection 派生的 ordered conversation item 为准。后端不创建聚合工具 part；每个工具调用仍作为独立 `StudioPartType::Tool` snapshot/delta 持久化。`partId` 首次出现时固定身份、类型、order 与位置，后续更新只替换可变内容和状态。新事件停止生成 `activityGroupId`，wire 与 `message_parts.activity_group_id` 暂时保留为 deprecated 兼容入口，旧数据不迁移且 Flutter 不再用它分组。Flutter 对排序后的可见 item 单次扫描，只合并相邻 tool part；text、commentary、final、reasoning、plan、agent row 和 message 边界立即结束工具组，隐藏 inference 不制造视觉断点。工具组详情必须显示工具名称、状态、关键路径或命令摘要。非失败组默认折叠；失败、拒绝、中断和预算受限时必须在组摘要和详情中展示结构化原因，避免用户只看到“工具调用失败”而无法定位原因。
+Studio timeline 以 message/part projection 派生的 ordered conversation item 为准。后端不创建聚合工具 part；每个工具调用仍作为独立 `StudioPartType::Tool` snapshot/delta 持久化。`partId` 首次出现时固定身份、类型、order 与位置，后续更新只替换可变内容和状态。工具 part 不携带分组 id。Flutter 对排序后的可见 item 单次扫描，只合并相邻 tool part；text、commentary、final、reasoning、plan、agent row 和 message 边界立即结束工具组，隐藏 inference 不制造视觉断点。工具组详情必须显示工具名称、状态、关键路径或命令摘要。非失败组默认折叠；失败、拒绝、中断和预算受限时必须在组摘要和详情中展示结构化原因，避免用户只看到“工具调用失败”而无法定位原因。
 
 工具、命令、文件修改和子代理协作活动的用户可读文本由前端 projection 根据结构化 `StudioPart.tool`、`StudioPart.agent` 与 agent timeline typed payload 生成；Todo replacement 由独立侧栏按结构化 item 渲染。后端不新增 `activityText` 之类的本地化文案字段；如果展示层缺少必要事实，应补充结构化字段而不是补一段后端写死文本。固定标签和状态说明由 Flutter i18n 负责，工具名、agent path、工作目录、路径、命令摘要和模型名按原始领域值展示。工具运行时的单工具 start/end/approval/review commentary 属于 verbose/debug 诊断信息，普通模式只保留 turn 级工具批次 commentary，避免 timeline 在已有工具组之外重复出现每个工具的进展文本。
 

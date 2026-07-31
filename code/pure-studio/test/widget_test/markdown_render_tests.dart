@@ -49,20 +49,6 @@ void registerMarkdownRenderTests() {
     );
   });
 
-  test('timeline uses gpt markdown directly without renderer facade', () {
-    final timelineSource = File(
-      'lib/src/features/timeline/timeline_view.dart',
-    ).readAsStringSync();
-    final facadeFile = File(
-      'lib/src/features/timeline/streaming_markdown.dart',
-    );
-
-    expect(timelineSource, contains("package:gpt_markdown/gpt_markdown.dart"));
-    expect(timelineSource, isNot(contains("import 'streaming_markdown.dart'")));
-    expect(timelineSource, isNot(contains('AgentMarkdown(')));
-    expect(facadeFile.existsSync(), isFalse);
-  });
-
   testWidgets('timeline renders streaming markdown blocks', (tester) async {
     tester.view.physicalSize = const Size(1280, 900);
     tester.view.devicePixelRatio = 1;
