@@ -7,7 +7,7 @@ platforms: ["windows", "linux", "macos"]
 
 # Add a New Built-in Tool
 
-在 Pure-Lang 中添加新内置工具时，工具系统位于 `pl-core` 内部（`code/pl-core/src/tool/`），目前没有独立的 `pl-tool` crate。所有工具最终通过 `PureCore::register_default_tools()` 注册到 `ToolRegistry`。
+在 Pure-Lang 中添加新内置工具时，工具系统位于 `pl-core` 内部（`code/pl-core/src/tool/`），目前没有独立的 `pl-tool` crate。共享工具由 `ToolSetBuilder` 按 capability、backend 和可见性统一组装，再注册到 `TurnEngine` 的 `ToolRegistry`；产品专用工具由宿主显式注入，不另建兼容注册链。
 
 ## 前置确认
 
@@ -15,11 +15,11 @@ platforms: ["windows", "linux", "macos"]
 
 1. **确定工具名**：snake_case，全局唯一（`ToolRegistry::register()` 同名断言防止重复）。
 2. **确定输入 schema**：参数通过 `serde_json::Value` 传递；结构化输入类型放在工具文件内。
-3. **确定是否支持并行调用**：`supports_parallel_tool_calls()` 默认 `false`。
+3. **确定并行与缓存语义**：`supports_parallel_tool_calls()` 默认 `false`；只读工具按需声明 `ToolCachePolicy`，写入或进程工具必须正确声明 cache invalidation。
 4. **确定工具类型**：绝大多数工具是 `ToolSchema::Function`（JSON Schema 参数）；`apply_patch` 是唯一的 `ToolSchema::Custom`（Lark grammar）。
-5. **确定权限策略**：是否需要审批？在 Plan mode 是否可用？是否需要 `workspace_write_lock`？
-6. **确定是否需要回调**：如需要等待用户输入，参考 `ToolApprovalCallback` 模式创建新的回调类型。
-7. **确定是否发事件**：需要前端通信时，在 `AgentEvent` 中添加新变体。
+5. **确定 effect 与权限边界**：为工具声明 `ToolEffect`；涉及路径或 cwd 时同步更新统一的路径提取和风险说明；写工具是否需要 `workspace_write_lock`？
+6. **确定是否需要交互**：复用 `TurnOptions::interaction_callback`、`InteractionRequest` 和 `InteractionResolution`，不要新增工具私有 callback 或第二套审批通道。
+7. **确定是否发运行时事件**：工具结果内的结束回合、artifact 等语义使用 `ToolRuntimeEvent`；只有跨运行时的稳定事实才扩展共享协议。
 
 ## 修改清单
 
@@ -28,24 +28,22 @@ platforms: ["windows", "linux", "macos"]
 创建新文件，实现 `Tool` trait：
 
 ```rust
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
+use pl_protocol::PureError;
+use serde::Deserialize;
 
-use pl_protocol::{AgentEvent, PureError};
-use serde::{Deserialize, Serialize};
+use crate::tool::{
+    BoxFuture, Tool, ToolContext, ToolInput, ToolInputSchemaField, ToolOutput,
+    strict_tool_input_schema,
+};
 
-use crate::tool::{ToolContext, ToolInput, ToolOutput};
-use crate::Tool;
-
+#[derive(Debug, Default)]
 pub struct MyNewTool;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct MyNewToolInput {
-    // 工具参数（可根据需要选择是否去前导下划线）
-    pub query: String,
-    pub options: Option<Vec<String>>,
+struct MyNewToolInput {
+    query: String,
+    options: Option<Vec<String>>,
 }
 
 impl Tool for MyNewTool {
@@ -58,55 +56,52 @@ impl Tool for MyNewTool {
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "query": {
+        strict_tool_input_schema([
+            ToolInputSchemaField::required(
+                "query",
+                serde_json::json!({
                     "type": "string",
                     "description": "What to search for"
-                },
-                "options": {
+                }),
+            ),
+            ToolInputSchemaField::optional(
+                "options",
+                serde_json::json!({
                     "type": "array",
                     "items": { "type": "string" },
                     "description": "Optional predefined choices"
-                }
-            },
-            "required": ["query"]
-        })
+                }),
+            ),
+        ])
     }
 
     fn supports_parallel_tool_calls(&self) -> bool {
-        false
+        true
     }
 
     fn execute<'a>(
         &'a self,
         input: ToolInput,
         context: ToolContext,
-    ) -> Pin<Box<dyn Future<Output = Result<ToolOutput, PureError>> + Send + 'a>> {
+    ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
         Box::pin(async move {
-            // 1. 从 input.arguments 中解析参数
-            // 2. 需要用户交互时：
-            //    - 发送 AgentEvent（如 UserQuestionAsked）
-            //    - 调用回调等待用户响应
-            // 3. 构造 ToolOutput 返回
+            let args: MyNewToolInput =
+                serde_json::from_value(input.arguments).map_err(|error| {
+                    PureError::ToolExecutionFailed {
+                        tool: self.name().to_string(),
+                        error: format!("invalid input: {error}"),
+                    }
+                })?;
+            let result = run_query(
+                &context.workspace_root,
+                &args.query,
+                args.options.as_deref().unwrap_or_default(),
+            )
+            .await?;
 
-            // 发送事件示例：
-            let _ = context.event_tx.send(AgentEvent::UserQuestionAsked {
-                tool_id: input.tool_id.clone(),
-                question: parsed_question,
-            });
-
-            // 等待回调示例（需要 ToolEventCallback 类型）：
-            // let answer = context.options.user_question_callback(parsed_question).await;
-
-            Ok(ToolOutput {
-                description: result_text,
-                truncated: Default::default(),
-                output_file: PathBuf::new(),
-                exit_code: Some(0),
-                timed_out: false,
-            })
+            ToolOutput::json(serde_json::json!({
+                "result": result,
+            }))
         })
     }
 }
@@ -117,70 +112,44 @@ impl Tool for MyNewTool {
 - 添加 `mod <new_tool>;`
 - 添加 `pub use <new_tool>::MyNewTool;`（如果需要，同时也 `pub use` 输入类型）
 
-### 3. `pl-core/src/turn.rs` — 回调类型（仅需要等待用户交互时）
+### 3. `pl-core/src/core/tool_set.rs` — 进入唯一共享注册链
 
-如果工具需要等待用户输入（类似 `AskUserTool`），新增回调类型：
+- 在 `ToolSetBuilder::register()` 中按现有 capability 注册工具。
+- 在 `shared_tool_schemas()` 对应的 schema 集合中同步加入模型可见 schema。
+- 如果工具依赖可选 backend，为 `ToolCapabilityConfig` / `SharedToolSchemaOptions` 添加一个明确 capability；不要在 `TurnEngine`、Studio 和子代理入口各维护一份注册列表。
+- `TurnEngine::register_tool()` 只用于产品专用工具、测试或宿主显式注入，不作为共享默认工具的第二条注册路径。
 
-```rust
-pub type UserQuestionFuture = Pin<Box<dyn Future<Output = Option<String>> + Send>>;
-pub type UserQuestionCallback =
-    Arc<dyn Fn(String) -> UserQuestionFuture + Send + Sync>;
-```
+### 4. `pl-core/src/turn/execution.rs` — 声明工具 effect
 
-并在 `TurnOptions` 中添加字段：
-
-```rust
-pub user_question_callback: Option<UserQuestionCallback>,
-```
-
-### 4. `pl-protocol/src/event.rs` — 事件类型（仅需要前端通信时）
-
-在 `AgentEvent` 枚举中添加新变体：
+在 `ToolEffect::for_builtin_name()` 中加入新内置工具，或在实现中覆盖 `effect()`：
 
 ```rust
-UserQuestionAsked {
-    tool_id: String,
-    question: String,
-},
-UserQuestionAnswered {
-    tool_id: String,
-    answer: String,
-},
-```
-
-### 5. `pl-core/src/core/mod.rs` — 注册到 PureCore
-
-在 `PureCore::register_default_tools()` 中注册：
-
-```rust
-self.register_tool(MyNewTool);
-```
-
-### 6. `pl-core/src/core/turn_result.rs` — Plan mode 白名单
-
-在 `tool_allowed_in_mode()` 函数中，如果工具在 Plan mode 下应可用，将其加入白名单：
-
-```rust
-// 只读/纯信息工具在 Plan mode 可用
-"my_new_tool" | "ask_user" | "read_file" | "list_files" // ...
-```
-
-### 7. `pl-core/src/permission.rs` — 权限策略
-
-在 `decide_tool_permission()` 中，如果工具不需要审批（纯信息类），添加特殊处理：
-
-```rust
-// 纯信息工具直接放行
-if matches!(request.name, "my_new_tool" | "ask_user") {
-    return PermissionDecision::Approved {
-        workspace_access: WorkspaceAccess::WorkspaceOnly,
-    };
+fn effect(&self) -> Option<ToolEffect> {
+    Some(ToolEffect::Read)
 }
 ```
 
-### 8. `pl-core/src/lib.rs` — 公开导出
+角色和阶段权限由 `AgentExecutionPolicy.allowed_effects` 与 `ToolVisibilitySet` 统一限制，不再维护 Plan mode 工具名白名单。
 
-在 `pub use tool::` 块中添加 `MyNewTool`（如果上层需要直接访问）。
+### 5. `pl-core/src/core/permission.rs` — 路径和审批边界
+
+工具本身不决定是否审批。若参数包含路径或 cwd：
+
+- 在 `requested_paths_for_tool()` 中提取所有可能越过 workspace 的路径。
+- 在 `permission_risk_summary()` 中提供稳定、准确的风险说明。
+- 执行时仍通过 `ToolPathPolicy` 解析路径；写工具在真正写入前获取 `context.workspace_write_lock().await`。
+
+workspace 内外访问由 `PermissionMode` 与统一 `tool_dispatch` 决定；不要为单个工具新增 `auto allow`、旧审批事件或兼容 policy。
+
+### 6. 交互和运行时事件（按需）
+
+- 需要用户输入时，优先复用 `request_user_input`。确实需要新交互类型时，扩展 `pl-protocol/src/interaction.rs` 的 typed payload/resolution，并同步 Studio bridge、projection 与设计文档。
+- artifact、结束当前 turn 等工具结果语义放入 `ToolOutput.runtime_events`，复用 `ToolRuntimeEvent`。
+- 不新增工具私有 callback；宿主交互统一从 `TurnOptions::interaction_callback` 进入。
+
+### 7. `pl-core/src/lib.rs` — 稳定边界导出
+
+只有上层 crate 确实需要直接构造该工具时，才在 `pub use tool::` 块导出；内部实现和输入类型默认保持私有。
 
 ## 现有工具参考
 
@@ -188,87 +157,33 @@ if matches!(request.name, "my_new_tool" | "ask_user") {
 
 | 模块 | 工具 | 特点 |
 |------|------|------|
-| **file/read.rs** | `read_file`, `list_files`, `search_files`, `stat_path` | 只读，Plan mode 可用 |
-| **file/write.rs** | `write_file`, `create_directory`, `delete_path`, `copy_path`, `move_path` | 写操作，需 `workspace_write_lock()` |
-| **file/mod.rs** | `apply_patch` | 唯一的 `ToolSchema::Custom`，Lark grammar |
-| **bash.rs** | `bash` | 异步进程执行，截断策略，后台命令支持 |
-| **skill.rs** | `skills_list`, `skill_view`, `skill_manage` | 技能目录访问，严格输入解析 |
+| **workspace_file/**、**file/** | `read_file`, `list_files`, `search_files`, `apply_patch` 等 | 共享 schema + local/host backend；写操作持有 workspace 写锁 |
+| **exec/mod.rs** | `exec`, `write_stdin` | 唯一命令工具协议，共享 `CommandProcessManager`；`command/` 是 backend 与进程管理实现 |
+| **skill/** | `skills_list`, `skill_view`, `skill_manage` | 技能目录访问，严格输入解析 |
 | **agent_runtime/collaboration.rs** | `spawn_agent`, `send_input`, `list_agents`, `close_agent` | 子代理树管理；等待由 runtime direct-child 订阅与合并 continuation 处理 |
-| **command/mod.rs** | `bash`, `write_stdin` | Shell 执行 + 后台进程 stdin 写入，共享 `CommandProcessManager` |
-| **ask_user.rs** | `request_user_input` | 回调等待用户输入（结构化问题/选项/自由文本），纯信息收集 |
+| **ask_user.rs** | `request_user_input` | 通过 typed interaction 等待结构化用户输入 |
 | **lsp.rs** | `lsp_query_*` | 按语言动态注册的 LSP 代码智能查询（定义跳转、引用查找），依赖 `pl-lsp` crate |
 
 ## 条件与动态工具注册
 
-部分工具依赖可选的运行时服务（如 LSP、MCP），只有在对应服务可用时才应注册给 LLM。这涉及两种模式：
+部分工具依赖可选运行时，只能通过当前工具集合组装：
 
-### 1. 条件注册（静态，在 `register_default_tools` 中）
-
-当工具依赖一个 `Option<...Registry>`，且在创建 `PureCore` 时已知是否可用：
-
-```rust
-// code/pl-core/src/core/mod.rs — register_default_tools()
-// LSP 工具：仅当 lsp_runtime 存在且有可用语言时注册
-if let Some(registry) = self.lsp_runtime.clone() {
-    self.tools.register_lsp_languages(&registry).await;
-}
-```
-
-```rust
-// MCP 工具：异步探测后批量注册
-pub async fn register_available_mcp_tools(&mut self) -> Result<()> {
-    let Some(registry) = self.mcp_runtime.clone() else {
-        return Ok(());
-    };
-    registry.register_available_tools(self).await
-}
-```
-
-关键点：
-- `PureCore` 持有 `Option<LspRuntimeRegistry>` 和 `Option<McpRuntimeRegistry>`，通过 builder 方法 `with_lsp_runtime()` / `with_mcp_runtime()` 注入。
-- 子代理（`SpawnAgentTool` / `FollowupTaskTool`）通过构造参数将 `lsp_runtime` / `mcp_runtime` 传递给子 `PureCore`，自动继承相同的工具集。
-- `ToolContext` 也携带 `lsp_runtime: Option<LspRuntimeRegistry>`，供文件工具在写入后通知 LSP 同步。
-
-### 2. 动态注册（运行时增减）
-
-当运行时服务状态在会话生命周期内变化（如 LSP 服务器从不可用变为可用），需要在 turn 之间同步工具列表：
-
-```rust
-// ToolRegistry 扩展
-pub fn unregister(&mut self, name: &str) -> bool { ... }
-
-// 按运行时语言服务器生成工具
-pub async fn register_lsp_languages(&mut self, registry: &LspRuntimeRegistry) -> Vec<String> {
-    // 1. 查询 registry.available_languages()
-    // 2. 移除已不存在的语言工具（unregister）
-    // 3. 注册新可用的语言工具
-}
-```
-
-适用场景：
-- **LSP 按语言拆分工具**：`lsp_query_rust`、`lsp_query_typescript` 等，仅在对应语言服务器 `Available` 时注册。
-- **未来其他运行时服务**：任何需要根据运行时状态动态暴露/隐藏的工具。
-
-工具命名约定：`{base_name}_{variant_id}`，如 `lsp_query_rust`。变体 ID 使用小写 snake_case（如 `rust`、`typescript`），与 LSP 协议 LanguageIdentifier 一致。
-
-### 3. `pl-lsp` 关键路由机制
-
-`LspRuntimeRegistry` 通过两种方式将查询路由到正确的语言服务器：
-- **文件扩展名匹配**：`server_id_for_path()` 按文件 `.rs` 等扩展名查找对应 server。
-- **显式 language_id**：语言工具会向 `LspQuery.language_id` 注入目标语言，优先按语言路由，缺省时才按扩展名推断。
-
-`LspServerSnapshot` 已包含 `extensions` 和 `language_ids` 字段，可直接用于生成语言特定工具的元信息。
+- `ToolSetBuilder::from_capabilities()` 使用本地 backend；`host_provided()` 只使用宿主显式注入的 backend。
+- LSP 在 registry 可用时由 `register_lsp_languages()` 同步语言工具；工具名采用 `lsp_query_<language_id>`。
+- MCP schema 和 backend 由 `ToolSetBuilder::with_mcp_tools()` 注入；租约或服务变化时更新当前 schema 集合，不为旧 MCP runtime 保留平行入口。
+- `ToolVisibilitySet` 决定本轮模型可见工具，`AgentExecutionPolicy` 再按 tool name 和 `ToolEffect` 收紧执行权限。可见性与执行授权必须同时满足。
 
 ## 测试模式
 
-- **单元测试**：在工具文件中用 `#[cfg(test)]` 添加，测试输入解析、输出构造、边界条件。
-- **集成测试**：通过 `PureCore::default_provider()` 构建 `ToolRegistry`，用 `get()` 获取工具测试执行。
-- **回调测试**：使用 mock callback 验证回调被正确调用和响应。
+- **保留关键节点**：测试输入业务校验、workspace 越界、写锁、取消、backend 错误映射、运行时事件和注册/权限边界。
+- **不测外部库本身**：不为 serde 正常 round-trip、JSON Schema 字符串拼装、常量 getter 或简单工具名映射重复写测试。
+- **注册测试**：通过 `TurnEngine::default_provider()` 与 `register_default_tools()` 验证工具是否进入唯一注册链及 capability 关闭行为。
+- **交互测试**：使用 typed `InteractionCallback` 验证请求、回答、取消和结束回合语义，不测试旧事件兼容形状。
 
 ## 跨 crate 协调提示
 
-- `Tool` trait 使用原生 RPITIT，不需要 `#[async_trait]`。`execute()` 返回 `BoxFuture<'a, ...>`（`Pin<Box<dyn Future<...> + Send + 'a>>`）。
+- `Tool` 是 dyn-compatible trait；`execute()` 返回 `BoxFuture<'a, ...>`，不要引入 `#[async_trait]`。
 - 写工具必须在执行前调用 `context.workspace_write_lock().await` 获取互斥锁。
-- `ToolContext` 的字段：`event_tx`、`options`、`workspace_access`、`mode`、`workspace_root`、`workspace_instructions`、`active_subagent`、`agent_control`。
-- `ToolOutput` 的 `description` 字段是返回给 LLM 的文本内容（会被截断），`output_file` 路径为 `target/pure/{session_id}/{tool_id}/output.log`。
-- 工具本身不处理审批，也不发送旧的审批事件；`tool_dispatch.rs` 统一调度权限判断，需要用户确认时通过 `InteractionRuntime` 创建 `toolApproval` interaction。
+- `ToolContext` 只消费 canonical turn/runtime 状态；不要向它加入旧字段、原始 JSON projection 或产品专用兼容入口。
+- 优先用 `ToolOutput::json()`、`ToolOutput::from_model_output()` 或 `ToolExecutionResult` 构造输出；命令工具的完整输出文件由 `CommandProcessManager` 管理，不是所有工具的固定契约。
+- 工具本身不处理审批，也不发送旧审批事件；`tool_dispatch` 统一执行 effect、visibility、路径访问与 interaction 审批。

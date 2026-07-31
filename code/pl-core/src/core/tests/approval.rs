@@ -2,52 +2,11 @@ use super::*;
 use pretty_assertions::assert_eq;
 
 #[test]
-fn default_turn_options_auto_allow_tools() {
+fn default_turn_options_request_approval_for_workspace_escape() {
     let options = TurnOptions::default();
 
-    assert_eq!(options.tool_approval_policy, ToolApprovalPolicy::AutoAllow);
     assert_eq!(options.permission_mode, PermissionMode::RequestApproval);
     assert!(options.interaction_callback.is_none());
-}
-
-#[tokio::test]
-async fn manual_tool_approval_can_approve_through_interaction() {
-    let seen_interaction = std::sync::Arc::new(std::sync::Mutex::new(None));
-    let seen_interaction_for_callback = seen_interaction.clone();
-    let options = TurnOptions::new(ToolApprovalPolicy::Manual).with_interaction_callback(
-        std::sync::Arc::new(move |interaction| {
-            let seen_interaction = seen_interaction_for_callback.clone();
-            Box::pin(async move {
-                assert_eq!(interaction.kind, pl_protocol::InteractionKind::ToolApproval);
-                match &interaction.payload {
-                    InteractionPayload::ToolApproval { name, .. } => assert_eq!(name, "exec"),
-                    other => panic!("unexpected payload: {other:?}"),
-                }
-                *seen_interaction.lock().unwrap() = Some(interaction);
-                InteractionResolution::ToolApproval {
-                    decision: ToolApprovalResolution::Approved,
-                    reason: None,
-                }
-            })
-        }),
-    );
-    let request = ToolApprovalRequest {
-        id: "call-1".to_string(),
-        name: "exec".to_string(),
-        arguments: serde_json::json!({"command": "echo hi"}),
-        working_directory: None,
-        parent_agent_id: None,
-    };
-    let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(8);
-    let context = test_tool_context(event_tx.clone());
-
-    let decision = approve_tool_call(&options, &request, &context).await;
-
-    assert_eq!(decision, ToolApprovalDecision::Approved);
-    assert!(event_rx.try_recv().is_err());
-    let interaction = seen_interaction.lock().unwrap().clone().unwrap();
-    assert_eq!(interaction.interaction_id, "call-1");
-    assert_eq!(interaction.status, pl_protocol::InteractionStatus::Pending);
 }
 
 #[tokio::test]
@@ -262,59 +221,6 @@ async fn execution_policy_denied_tool_records_one_terminal_event_and_tool_result
 }
 
 #[tokio::test]
-async fn policy_denied_tool_records_one_terminal_event_and_tool_result() {
-    let mut core = TurnEngine::default_provider().unwrap();
-    core.register_tool(LocalWorkspaceFileTool::new(WorkspaceFileToolKind::ReadFile));
-    let tool_call = ToolCall::function(
-        "provider-item-1",
-        "read_file",
-        serde_json::json!({"path": "note.txt"}),
-        Some("call-1".to_string()),
-    );
-    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
-    let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
-    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(60_000));
-
-    let records = execute_tool_calls(
-        &[tool_call],
-        &mut budget,
-        &mut recorder,
-        ToolExecutionContext {
-            core: &core,
-            options: &TurnOptions::deny_all(),
-            session_id: "turn-1",
-            workspace_root: &std::env::temp_dir(),
-            workspace_instructions: None,
-            instruction_snapshot: None,
-            active_subagent: None,
-            parent_session: std::sync::Arc::new(AgentSession::new()),
-            working_set: crate::TurnWorkingSetHandle::default(),
-            tool_cache: crate::TurnToolCacheHandle::default(),
-        },
-    )
-    .await
-    .unwrap();
-    let events = recorder.drain();
-
-    assert_eq!(records.len(), 1);
-    assert_eq!(records[0].status, TracePartStatus::Denied);
-    assert!(
-        records[0]
-            .result
-            .contains("Tool execution denied: tool execution denied by policy")
-    );
-    assert_eq!(terminal_tool_event_count(&events), 1);
-    assert_eq!(
-        tool_statuses(&events, "turn-1-provider-item-1"),
-        vec![
-            TracePartStatus::Started,
-            TracePartStatus::Denied,
-            TracePartStatus::Denied,
-        ]
-    );
-}
-
-#[tokio::test]
 async fn cancelling_running_tool_records_interrupted_terminal_event() {
     let mut core = TurnEngine::default_provider().unwrap();
     core.register_tool(SleepingTool);
@@ -383,30 +289,6 @@ async fn cancelling_running_tool_records_interrupted_terminal_event() {
         })
         .expect("interrupted tool item");
     assert_eq!(terminal.status, TracePartStatus::Interrupted);
-}
-
-#[tokio::test]
-async fn deny_all_tool_approval_denies_without_request_event() {
-    let options = TurnOptions::deny_all();
-    let request = ToolApprovalRequest {
-        id: "call-1".to_string(),
-        name: "exec".to_string(),
-        arguments: serde_json::json!({"command": "echo hi"}),
-        working_directory: None,
-        parent_agent_id: None,
-    };
-    let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(8);
-    let context = test_tool_context(event_tx.clone());
-
-    let decision = approve_tool_call(&options, &request, &context).await;
-
-    assert_eq!(
-        decision,
-        ToolApprovalDecision::Denied {
-            reason: "tool execution denied by policy".to_string()
-        }
-    );
-    assert!(event_rx.try_recv().is_err());
 }
 
 #[test]

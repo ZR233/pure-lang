@@ -49,7 +49,7 @@ agent 的输入队列、活动 turn、取消和恢复由 `pl-core::AgentRuntime`
 策略约束：
 
 - 方案乙不保留旧命令别名和旧字段兜底
-- `PermissionMode::RequestApproval` 为默认且主路径；旧 `ToolApprovalPolicy` 仅作为兼容构造
+- `PermissionMode::RequestApproval` 为默认且主路径；工具权限不再维护独立审批策略
 - 手动审批接口保留在系统能力中，但不作为默认流程；`request-approval` 模式只在工具请求 workspace 外访问时弹出用户审批，workspace 内读写直接放行
 - `auto-review` 模式使用 reviewer 角色模型审批 workspace 外访问。reviewer 只返回批准或拒绝，不执行工具；解析失败、provider 失败或非明确批准均按拒绝处理
 - `full-access` 不能扩大 execution profile 的工具 effect；planner、explorer、reviewer 仍受角色白名单约束
@@ -105,17 +105,16 @@ Reasoning part 使用 Codex 式双通道内容：`summary: Vec<String>` 保存 p
 message/part 是有序 item，而不是按 turn 聚合后的展示块。`partId` 首次插入时固定
 `messageId/sessionId/turnId/type/order/createdAt/textChannel`；后续 streaming/terminal
 snapshot 只能替换内容、revision 和状态，不能移动首次位置或改变身份。批内同一 part 的多次
-更新只发布最终 snapshot。`activityGroupId` 仅保留为旧 wire/数据库兼容字段，新事件停止
-生成，Flutter 不把它当作分组事实；展示层只合并排序后相邻的可见 tool part，任何 text、
+更新只发布最终 snapshot。工具 part 不携带分组 id；展示层只合并排序后相邻的可见 tool part，任何 text、
 commentary、final、reasoning、plan、agent row 或 message 边界都会结束当前工具组。
 
 模型输出的 `commentary` 只进入 timeline，用于让用户看到阶段性进展，不写入 `AgentSession`。只有 `final` 输出会作为 assistant response 写入会话历史；带工具调用的中间轮次如果只输出 commentary，也不得把 commentary 当作 assistant tool-call content 写回 provider 历史。
 
 `TurnEngine` 在每次模型请求前执行自动上下文压缩检查。首次请求使用完整 assembled request 的估算 token；工具调用后的后续请求优先使用 provider 上一响应报告的实际上下文 token。同一 session revision 与上下文项长度没有变化时不得重复压缩。压缩阈值来自当前模型的 `autoCompactTokenLimit`，未配置时使用有效上下文窗口的 90%；模型没有上下文窗口信息时不触发自动压缩。`TurnEngine::compact_session` 和 trace 版本提供忽略阈值的 standalone 手动入口；空上下文或只有既有 checkpoint 时不修改会话。
 
-压缩实现由 wire protocol 和配置共同决定。Chat Completions 始终本地压缩；Responses provider 可读取 `runtime.openai_compaction_mode = "remote_v2" | "remote_legacy" | "local"`，默认 `remote_v2`。远程压缩始终使用独立 Responses HTTP 请求，不复用常规 WS 连接，也不改变 provider 实例选择的连接模式。远程失败不得自动回退本地，也不得安装局部结果；只有完整校验成功后才原子替换 session，并使 transport session 的旧 continuation 失效。
+压缩实现由 wire protocol 和配置共同决定。Chat Completions 始终本地压缩；Responses provider 可读取 `runtime.openai_compaction_mode = "remote_v2" | "local"`，默认 `remote_v2`。远程压缩始终使用独立 Responses HTTP 请求，不复用常规 WS 连接，也不改变 provider 实例选择的连接模式。远程失败不得自动回退本地，也不得安装局部结果；只有完整校验成功后才原子替换 session，并使 transport session 的旧 continuation 失效。
 
-本地压缩使用当前 turn 的 canonical instructions，把 compact prompt 作为最后一条 synthetic user 输入，请求不携带工具；遇到不支持 max output 参数或 context pressure 时按压缩规则重试。替换历史过滤旧摘要，按 20k token 预算保留最近真实用户消息，边界消息按 token 截断，最后追加新摘要。OpenAI v2 按 64k token 预算保留最近真实用户消息及图片，最后追加唯一的加密 compaction item；legacy 只安装真实用户、assistant 与 compaction item。instruction prelude 参与压缩请求但不进入替换历史，下一次模型调用重新生成 canonical prelude。含加密 checkpoint 的会话若切换到非 OpenAI provider，当前轮必须在请求前失败并提示继续使用 OpenAI 或新建会话。
+本地压缩使用当前 turn 的 canonical instructions，把 compact prompt 作为最后一条 synthetic user 输入，请求不携带工具；遇到不支持 max output 参数或 context pressure 时按压缩规则重试。替换历史过滤旧摘要，按 20k token 预算保留最近真实用户消息，边界消息按 token 截断，最后追加新摘要。OpenAI v2 按 64k token 预算保留最近真实用户消息及图片，最后追加唯一的加密 compaction item。instruction prelude 参与压缩请求但不进入替换历史，下一次模型调用重新生成 canonical prelude。含加密 checkpoint 的会话若切换到非 OpenAI provider，当前轮必须在请求前失败并提示继续使用 OpenAI 或新建会话。
 
 子代理没有独立的压缩实现。`AgentRuntime` 为每个 agent 保存独立 `AgentSession` 集合，child turn 复用同一个 `TurnEngine` pipeline，因此每个子代理独立维护自己的压缩历史与 transport session；父会话不会替子代理压缩，也不会因为子代理压缩而改写父历史。
 

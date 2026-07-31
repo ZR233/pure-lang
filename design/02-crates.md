@@ -86,7 +86,8 @@
 产品级事件、项目、会话、任务、worktree、Simple/Task 产品策略与 Studio-only DTO。
 Flutter bridge 只调用该 crate。
 
-默认权限模式固定为 `PermissionMode::RequestApproval`。旧 `ToolApprovalPolicy::AutoAllow | Manual | DenyAll` 只作为兼容构造保留，核心执行前统一以 `PermissionMode` 和工具路径访问分类做策略判断。
+默认权限模式固定为 `PermissionMode::RequestApproval`。工具权限只由 `PermissionMode`、
+execution policy 和工具路径访问分类共同决定，不保留第二套审批策略。
 
 ## 2.7 pl-studio-bridge（FRB 桥接）
 
@@ -173,7 +174,7 @@ Flutter store 不直接读取 SQLite 或配置文件，只通过 `pl-studio-brid
 
 - `cargo xtask verify-gui`
 - `cargo xtask generate-gui`
-- `cargo xtask run-gui [--demo] [--demo-fallback] [--driver]`
+- `cargo xtask run-gui [--demo] [--driver]`
 - `cargo xtask build-gui [--demo] [--no-clean]`
 - `cargo xtask build-rust-bridge --workspace-root <path> --configuration <Debug|Profile|Release> --output-dir <path> [--target-dir <path>]`
 
@@ -191,7 +192,7 @@ integration test。xtask 内部统一以 `code/pure-studio/` 为 Flutter 工作�
 
 ## 2.10 本地数据版本
 
-Studio SQLite 的新库使用单一基础 schema（当前 `user_version = 5`）。受支持的旧版本先
+Studio SQLite 的新库使用单一基础 schema（当前 `user_version = 8`）。受支持的旧版本先
 备份，再通过事务 migration chain 升级；`user_version = 0` 且已经包含用户表的数据库属于
 不兼容 legacy schema，不进入 migration chain，而是完整归档为唯一备份后重建当前数据库。
 空的未版本化数据库可直接初始化。未来版本明确拒绝打开，迁移失败不得删除或降级原数据库。

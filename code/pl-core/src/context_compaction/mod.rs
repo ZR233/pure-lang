@@ -177,7 +177,6 @@ impl ContextCompactionTrigger {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ContextCompactionImplementation {
     Local,
-    RemoteLegacy,
     RemoteV2,
 }
 
@@ -329,7 +328,6 @@ pub(crate) async fn maybe_compact_session(
         .await?;
         let implementation = match config.openai_mode {
             OpenAiCompactionMode::RemoteV2 => ContextCompactionImplementation::RemoteV2,
-            OpenAiCompactionMode::RemoteLegacy => ContextCompactionImplementation::RemoteLegacy,
             OpenAiCompactionMode::Local => unreachable!("local mode was excluded"),
         };
         (replacement, usage, None, implementation, None)

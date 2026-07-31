@@ -145,7 +145,6 @@ void registerTimelineToolTests() {
         status: 'completed',
         createdAt: DateTime.fromMillisecondsSinceEpoch(0),
         updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
-        activityGroupId: 'tool-group:turn-tool:0',
         tool: TimelineToolPart(
           toolCallId: 'tool-call-1',
           name: 'exec',
@@ -351,7 +350,6 @@ void registerTimelineToolTests() {
         order: 1,
         name: 'read_file',
         arguments: jsonEncode({'path': 'lib/a.dart'}),
-        activityGroupId: 'tool-group:turn-1:1',
       ),
       _toolTimelinePart(
         id: 'tool-b',
@@ -359,8 +357,7 @@ void registerTimelineToolTests() {
         turnId: 'turn-1',
         order: 2,
         name: 'search_files',
-        arguments: jsonEncode({'query': 'activityGroupId'}),
-        activityGroupId: 'tool-group:turn-1:1',
+        arguments: jsonEncode({'query': 'TimelineToolGroup'}),
       ),
       TimelinePart(
         id: 'text-middle',
@@ -379,7 +376,6 @@ void registerTimelineToolTests() {
         order: 4,
         name: 'exec',
         arguments: jsonEncode({'command': 'flutter test'}),
-        activityGroupId: 'tool-group:turn-1:4',
       ),
     ];
 
@@ -417,7 +413,7 @@ void registerTimelineToolTests() {
     expect(find.text('search_files completed'), findsOneWidget);
     expect(find.text('exec completed'), findsOneWidget);
     expect(find.textContaining('lib/a.dart'), findsOneWidget);
-    expect(find.textContaining('activityGroupId'), findsOneWidget);
+    expect(find.textContaining('TimelineToolGroup'), findsOneWidget);
     expect(find.textContaining('flutter test'), findsNothing);
 
     await tester.tap(find.text('exec completed'));
@@ -449,7 +445,6 @@ void registerTimelineToolTests() {
         status: 'awaitingApproval',
         name: 'exec',
         arguments: jsonEncode({'command': 'cargo test -p pl-core'}),
-        activityGroupId: 'tool-group:turn-tool:0',
       ),
       _toolTimelinePart(
         id: 'tool-failed',
@@ -461,7 +456,6 @@ void registerTimelineToolTests() {
         arguments: jsonEncode({'path': 'lib/main.dart'}),
         result: 'file missing',
         exitCode: 2,
-        activityGroupId: 'tool-group:turn-tool:0',
       ),
       _toolTimelinePart(
         id: 'tool-running',
@@ -471,7 +465,6 @@ void registerTimelineToolTests() {
         status: 'running',
         name: 'search_files',
         arguments: jsonEncode({'query': 'TimelineToolGroup'}),
-        activityGroupId: 'tool-group:turn-tool:0',
       ),
     ];
 

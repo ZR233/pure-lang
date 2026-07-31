@@ -5,8 +5,6 @@ use pl_protocol::{
     InteractionScope, InteractionStatus, ToolApprovalResolution,
 };
 
-#[cfg(test)]
-use crate::permission::{PermissionDecision, decide_tool_permission};
 use crate::tool::{PathAccess, ToolContext, ToolPathPolicy, WorkspaceAccess};
 use crate::turn::{ToolApprovalDecision, ToolApprovalRequest, TurnOptions};
 
@@ -137,24 +135,6 @@ pub(super) fn permission_risk_summary(tool_name: &str) -> &'static str {
         "lsp_query" => "read-only LSP code intelligence query",
         "skill_manage" => "project skill write or management",
         _ => "read-only or coordination tool",
-    }
-}
-
-#[cfg(test)]
-pub(super) async fn approve_tool_call(
-    options: &TurnOptions,
-    request: &ToolApprovalRequest,
-    context: &ToolContext,
-) -> ToolApprovalDecision {
-    match decide_tool_permission(options, request, context.workspace_access) {
-        PermissionDecision::Approved { .. } => ToolApprovalDecision::Approved,
-        PermissionDecision::NeedsUserApproval { .. } => {
-            request_user_approval(options, request, "").await
-        }
-        PermissionDecision::NeedsAiReview { .. } => ToolApprovalDecision::Denied {
-            reason: "AI reviewer approval requires the core execution path".to_string(),
-        },
-        PermissionDecision::Denied { reason } => ToolApprovalDecision::Denied { reason },
     }
 }
 

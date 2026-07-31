@@ -53,10 +53,7 @@ pub struct AgentUpdateEnvelope {
 )]
 pub enum AgentWakeReason {
     Updates,
-    #[serde(alias = "inactivityTimeout")]
-    InactivityDiagnostic {
-        timed_out_agent_ids: Vec<AgentId>,
-    },
+    InactivityDiagnostic { timed_out_agent_ids: Vec<AgentId> },
 }
 
 /// Planner continuation 使用的有界、typed 子代理上下文。

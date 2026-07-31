@@ -11,19 +11,22 @@ part 'studio_bridge_event.dart';
 part 'studio_session_stream.dart';
 part 'studio_api_contract.dart';
 part 'studio_frb_converters.dart';
-part 'studio_session_json_converters.dart';
 part 'studio_state_converters.dart';
 part 'studio_config_converters.dart';
 part 'studio_provider_catalog_converters.dart';
 part 'studio_demo_api.dart';
 part 'studio_demo_settings.dart';
 
-bool _isIgnoredTimelinePartType(Object? value) {
-  return isInternalTimelinePartType(_partType(value));
+bool _isIgnoredTimelinePartType(TimelinePartType type) {
+  return isInternalTimelinePartType(type);
 }
 
 StudioMode _compileMode(Object? value) {
-  return _string(value) == 'task' ? StudioMode.task : StudioMode.simple;
+  return switch (_string(value)) {
+    'simple' => StudioMode.simple,
+    'task' => StudioMode.task,
+    final label => throw FormatException('Unknown Studio mode: $label'),
+  };
 }
 
 String _compileModeLabel(StudioMode mode) {
@@ -35,9 +38,10 @@ String _compileModeLabel(StudioMode mode) {
 
 PermissionMode _permissionMode(Object? value) {
   return switch (_string(value)) {
-    'autoReview' || 'auto-review' => PermissionMode.autoReview,
-    'fullAccess' || 'full-access' => PermissionMode.fullAccess,
-    _ => PermissionMode.requestApproval,
+    'request-approval' => PermissionMode.requestApproval,
+    'auto-review' => PermissionMode.autoReview,
+    'full-access' => PermissionMode.fullAccess,
+    final label => throw FormatException('Unknown permission mode: $label'),
   };
 }
 
@@ -47,32 +51,6 @@ String _permissionModeLabel(PermissionMode mode) {
     PermissionMode.autoReview => 'auto-review',
     PermissionMode.fullAccess => 'full-access',
   };
-}
-
-InteractionKind _interactionKind(String value) {
-  return switch (value) {
-    'userInput' => InteractionKind.userInput,
-    'planConfirmation' => InteractionKind.planConfirmation,
-    _ => InteractionKind.toolApproval,
-  };
-}
-
-String _costLabel(Object? value, bool hasUnpricedUsage) {
-  final costs = _list(value);
-  if (costs.isEmpty) {
-    return hasUnpricedUsage ? 'unpriced usage' : '';
-  }
-  return costs
-      .map((cost) {
-        final map = _map(cost);
-        final amount = _compactAmount(
-          _string(map['amount'], fallback: _string(map['value'])),
-        );
-        final currency = _string(map['currency']);
-        return [currency, amount].where((part) => part.isNotEmpty).join(' ');
-      })
-      .where((label) => label.isNotEmpty)
-      .join(', ');
 }
 
 String _compactAmount(String value) {
@@ -110,15 +88,6 @@ List<String> _stringList(Object? value) {
   return _list(value).map(_string).where((item) => item.isNotEmpty).toList();
 }
 
-Object? _firstValue(Map<String, Object?> json, List<String> keys) {
-  for (final key in keys) {
-    if (json.containsKey(key)) {
-      return json[key];
-    }
-  }
-  return null;
-}
-
 String _string(Object? value, {String fallback = ''}) {
   if (value == null) {
     return fallback;
@@ -127,20 +96,6 @@ String _string(Object? value, {String fallback = ''}) {
     return value.isEmpty ? fallback : value;
   }
   return value.toString();
-}
-
-String _normalizedWireLabel(Object? value) {
-  final label = _string(value).trim();
-  if (label.isEmpty) {
-    return '';
-  }
-  return label
-      .replaceAllMapped(
-        RegExp(r'([a-z0-9])([A-Z])'),
-        (match) => '${match.group(1)}_${match.group(2)}',
-      )
-      .replaceAll('-', '_')
-      .toLowerCase();
 }
 
 String? _nullableString(Object? value) {
@@ -210,6 +165,20 @@ int? _frbNullableInt(Object? value) {
 
 DateTime _dateFromUnix(Object seconds) {
   return DateTime.fromMillisecondsSinceEpoch(_frbInt(seconds) * 1000);
+}
+
+SessionRuntimeView _emptyRuntimeView() {
+  return const SessionRuntimeView(
+    model: '',
+    contextTokens: 0,
+    contextWindow: 0,
+    totalTokens: 0,
+    costLabel: '',
+    activeSkills: [],
+    activeMcpServers: [],
+    activeLspServers: [],
+    agentCount: 0,
+  );
 }
 
 String _jsonText(Object? value) {

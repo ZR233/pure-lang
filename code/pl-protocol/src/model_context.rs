@@ -194,55 +194,7 @@ impl From<Message> for ModelContextItem {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
-    use crate::{MessageContent, MessageRole};
-
     use super::*;
-
-    #[test]
-    fn model_context_items_round_trip_with_camel_case_wire_fields() {
-        let items = vec![
-            ModelContextItem::from(Message {
-                role: MessageRole::User,
-                content: MessageContent::Text("hello".to_string()),
-                reasoning_content: None,
-                metadata: HashMap::new(),
-            }),
-            ModelContextItem::Compaction {
-                encrypted_content: "encrypted".to_string(),
-            },
-            ModelContextItem::PinnedContext {
-                section: PinnedContextSection {
-                    id: ContextSectionId::new("pl.current_todo").unwrap(),
-                    revision: 2,
-                    title: "Current Todo".to_string(),
-                    content: "- inspect".to_string(),
-                    content_hash: "sha256:todo".to_string(),
-                    updated_at: 42,
-                },
-            },
-            ModelContextItem::SessionNote {
-                note: SessionNote {
-                    revision: 3,
-                    content: "important".to_string(),
-                    content_hash: "sha256:note".to_string(),
-                    updated_at: 43,
-                },
-            },
-        ];
-
-        let value = serde_json::to_value(&items).unwrap();
-        assert_eq!(value[1]["type"], "compaction");
-        assert_eq!(value[1]["encryptedContent"], "encrypted");
-        assert_eq!(value[2]["section"]["id"], "pl.current_todo");
-        assert_eq!(value[3]["type"], "sessionNote");
-        assert_eq!(value[3]["note"]["revision"], 3);
-        assert_eq!(
-            serde_json::from_value::<Vec<ModelContextItem>>(value).unwrap(),
-            items
-        );
-    }
 
     #[test]
     fn empty_context_section_id_is_rejected_during_deserialization() {

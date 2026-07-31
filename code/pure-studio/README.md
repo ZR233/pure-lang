@@ -30,4 +30,4 @@ flutter test
 flutter build windows
 ```
 
-The default app path initializes the native FRB runtime and subscribes only to the selected session stream. `DemoStudioApi` remains available for widget tests and emergency fallback wiring, but production UI state is driven by `pl-studio-bridge`.
+The default app path initializes the native FRB runtime and subscribes only to the selected session stream. `DemoStudioApi` is selected only by an explicit demo build flag or a test override; native runtime failures are surfaced instead of switching implementations.

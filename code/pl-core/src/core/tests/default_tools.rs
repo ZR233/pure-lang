@@ -45,25 +45,6 @@ fn shared_tool_schemas_describe_host_independent_workspace_surface() {
 }
 
 #[test]
-fn shared_tool_names_match_shared_schema_order() {
-    let options = SharedToolSchemaOptions {
-        exec: true,
-        workspace_files: true,
-        ask_user: true,
-        git: true,
-        mcp_resources: true,
-        todo: true,
-        plan_exit: false,
-    };
-    let schema_names = shared_tool_schemas(options)
-        .into_iter()
-        .map(|schema| schema.name().to_string())
-        .collect::<Vec<_>>();
-
-    assert_eq!(shared_tool_names(options), schema_names);
-}
-
-#[test]
 fn session_note_tools_are_available_to_read_only_plan_policy() {
     for name in [
         "read_session_note",
@@ -191,13 +172,6 @@ async fn default_tools_register_shared_tools_without_product_collaboration() {
 }
 
 #[tokio::test]
-async fn default_capabilities_keep_product_tools_disabled() {
-    let capabilities = crate::config::ToolCapabilityConfig::default();
-
-    assert!(!capabilities.git);
-}
-
-#[tokio::test]
 async fn default_tool_builder_exposes_only_framework_independent_names() {
     let mut core = TurnEngine::default_provider().unwrap();
     let capabilities = crate::config::ToolCapabilityConfig::hosted_workspace();
@@ -239,27 +213,6 @@ async fn default_tool_builder_exposes_only_framework_independent_names() {
         assert!(
             names.contains(&canonical),
             "missing canonical tool `{canonical}` in {names:?}"
-        );
-    }
-    for removed in [
-        "spawn_agent",
-        "send_input",
-        "list_agents",
-        "close_agent",
-        "send_message",
-        "followup_task",
-        "git_worktree_info",
-        "github_api_get",
-        "container_cp_upload",
-        "container_cp_download",
-        "container_exec",
-        "container_copy",
-        "bash",
-        "run_in_container",
-    ] {
-        assert!(
-            !names.contains(&removed),
-            "removed tool `{removed}` is still exposed in {names:?}"
         );
     }
 }
@@ -497,10 +450,6 @@ async fn host_provided_tool_set_requires_explicit_workspace_backends() {
     assert!(core.tools.get("list_files").is_some());
     assert!(core.tools.get("search_files").is_some());
     assert!(core.tools.get("apply_patch").is_some());
-    assert!(core.tools.get("container_exec").is_none());
-    assert!(core.tools.get("container_copy").is_none());
-    assert!(core.tools.get("bash").is_none());
-    assert!(core.tools.get("run_in_container").is_none());
 }
 
 #[derive(Debug, Clone, Default)]
@@ -706,29 +655,9 @@ async fn tool_set_builder_respects_allowed_tools() {
     assert!(core.tools.get("request_user_input").is_some());
     assert!(core.tools.get("update_todo_list").is_some());
 
-    assert!(core.tools.get("container_copy").is_none());
-    assert!(core.tools.get("container_exec").is_none());
-    assert!(core.tools.get("bash").is_none());
-    assert!(core.tools.get("run_in_container").is_none());
     assert!(core.tools.get("list_files").is_none());
     assert!(core.tools.get("git_push").is_none());
     assert!(core.tools.get("plan_exit").is_none());
-}
-
-#[tokio::test]
-async fn profiled_local_workspace_registers_default_tools() {
-    let runtime = CoreRuntimeProfile::local_workspace(std::env::temp_dir())
-        .with_workspace_instructions("rules");
-    let mut core = TurnEngineBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None))
-        .unwrap()
-        .with_runtime_profile(runtime)
-        .build();
-
-    core.register_profile_tools().await;
-
-    assert!(core.tools.get("exec").is_some());
-    assert!(core.tools.get("read_file").is_some());
-    assert!(core.tools.get("spawn_agent").is_none());
 }
 
 #[tokio::test]

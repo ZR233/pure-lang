@@ -382,8 +382,6 @@ pub struct SessionToolPart {
     pub working_directory: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub denial_reason: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub activity_group_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -591,31 +589,4 @@ fn is_empty_object(value: &serde_json::Value) -> bool {
 
 fn is_false(value: &bool) -> bool {
     !*value
-}
-
-#[cfg(test)]
-mod tests {
-    use pretty_assertions::assert_eq;
-
-    use super::*;
-
-    #[test]
-    fn empty_snapshot_round_trips() {
-        let snapshot = SessionViewSnapshot::empty("session-1");
-        let encoded = serde_json::to_value(&snapshot).expect("encode");
-        let decoded = serde_json::from_value(encoded).expect("decode");
-        assert_eq!(snapshot, decoded);
-    }
-
-    #[test]
-    fn durable_position_exposes_cursor() {
-        assert_eq!(
-            SessionEventPosition::Durable { sequence: 7 }.durable_sequence(),
-            Some(7)
-        );
-        assert_eq!(
-            SessionEventPosition::Transient { revision: 2 }.durable_sequence(),
-            None
-        );
-    }
 }

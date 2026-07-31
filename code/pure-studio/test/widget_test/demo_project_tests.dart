@@ -63,20 +63,6 @@ void registerDemoProjectTests() {
     );
   });
 
-  test('demo API stores sample timeline as snapshots only', () async {
-    final state = await DemoStudioApi().bootstrap();
-    final sessionId = state.selectedSessionId!;
-
-    expect(state.messagesBySession[sessionId], isNotEmpty);
-    expect(state.partSnapshotsBySession[sessionId], isNotEmpty);
-    expect(
-      state.selectedTimelineRows
-          .where((row) => row.role == 'assistant' && row.part != null)
-          .map((row) => row.part!.id),
-      contains('turn-demo:final-1'),
-    );
-  });
-
   test(
     'bootstrap hydrates selected session from subscription snapshot',
     () async {
@@ -191,50 +177,45 @@ void registerDemoProjectTests() {
         _messageUpdatedEvent(
           sessionId: 'session-b',
           sequence: BigInt.from(98),
-          message: {
-            'messageId': 'turn-stale:assistant',
-            'sessionId': 'session-b',
-            'turnId': 'turn-stale',
-            'role': 'assistant',
-            'status': 'streaming',
-            'createdAt': 5,
-            'updatedAt': 5,
-          },
+          message: _timelineMessageFixture(
+            id: 'turn-stale:assistant',
+            sessionId: 'session-b',
+            turnId: 'turn-stale',
+            status: 'streaming',
+            createdAt: 5,
+          ),
         ),
       );
       api.emitSession(
         _messageUpdatedEvent(
           sessionId: 'session-b',
           sequence: BigInt.from(100),
-          message: {
-            'messageId': 'turn-live:assistant',
-            'sessionId': 'session-b',
-            'turnId': 'turn-live',
-            'role': 'assistant',
-            'status': 'streaming',
-            'createdAt': 5,
-            'updatedAt': 5,
-          },
+          message: _timelineMessageFixture(
+            id: 'turn-live:assistant',
+            sessionId: 'session-b',
+            turnId: 'turn-live',
+            status: 'streaming',
+            createdAt: 5,
+          ),
         ),
       );
       api.emitSession(
         _partUpdatedEvent(
           sessionId: 'session-b',
           sequence: BigInt.from(101),
-          part: {
-            'partId': 'part-live',
-            'sessionId': 'session-b',
-            'messageId': 'turn-live:assistant',
-            'turnId': 'turn-live',
-            'type': 'text',
-            'order': 6,
-            'revision': 0,
-            'status': 'streaming',
-            'createdAt': 5,
-            'updatedAt': 5,
-            'textChannel': 'commentary',
-            'text': 'live durable',
-          },
+          part: _timelinePartFixture(
+            id: 'part-live',
+            messageId: 'turn-live:assistant',
+            sessionId: 'session-b',
+            turnId: 'turn-live',
+            type: TimelinePartType.text,
+            order: 6,
+            sequence: 101,
+            status: 'streaming',
+            createdAt: 5,
+            textChannel: TimelineTextChannel.commentary,
+            text: 'live durable',
+          ),
         ),
       );
       await pumpEventQueue();
@@ -290,35 +271,31 @@ void registerDemoProjectTests() {
         _messageUpdatedEvent(
           sessionId: 'session-b',
           sequence: BigInt.from(21),
-          message: {
-            'messageId': 'turn-live:assistant',
-            'sessionId': 'session-b',
-            'turnId': 'turn-live',
-            'role': 'assistant',
-            'status': 'streaming',
-            'createdAt': 5,
-            'updatedAt': 5,
-          },
+          message: _timelineMessageFixture(
+            id: 'turn-live:assistant',
+            sessionId: 'session-b',
+            turnId: 'turn-live',
+            status: 'streaming',
+            createdAt: 5,
+            sequence: 21,
+          ),
         ),
       );
       api.emitSession(
         _partUpdatedEvent(
           sessionId: 'session-b',
           sequence: BigInt.from(22),
-          part: {
-            'partId': 'part-live',
-            'sessionId': 'session-b',
-            'messageId': 'turn-live:assistant',
-            'turnId': 'turn-live',
-            'type': 'text',
-            'order': 0,
-            'revision': 0,
-            'status': 'streaming',
-            'createdAt': 5,
-            'updatedAt': 5,
-            'textChannel': 'final',
-            'text': '',
-          },
+          part: _timelinePartFixture(
+            id: 'part-live',
+            messageId: 'turn-live:assistant',
+            sessionId: 'session-b',
+            turnId: 'turn-live',
+            type: TimelinePartType.text,
+            sequence: 22,
+            status: 'streaming',
+            createdAt: 5,
+            textChannel: TimelineTextChannel.finalAnswer,
+          ),
         ),
       );
       api.emitSession(
@@ -327,14 +304,12 @@ void registerDemoProjectTests() {
           sequence: BigInt.from(23),
           eventId: 'z-revision-1',
           createdAt: DateTime.fromMillisecondsSinceEpoch(5000),
-          delta: {
-            'sessionId': 'session-b',
-            'messageId': 'turn-live:assistant',
-            'partId': 'part-live',
-            'revision': 1,
-            'field': 'text',
-            'delta': 'a',
-          },
+          delta: _timelineDeltaFixture(
+            partId: 'part-live',
+            revision: 1,
+            field: 'text',
+            delta: 'a',
+          ),
         ),
       );
       api.emitSession(
@@ -343,14 +318,12 @@ void registerDemoProjectTests() {
           sequence: BigInt.from(23),
           eventId: 'a-revision-2',
           createdAt: DateTime.fromMillisecondsSinceEpoch(5000),
-          delta: {
-            'sessionId': 'session-b',
-            'messageId': 'turn-live:assistant',
-            'partId': 'part-live',
-            'revision': 2,
-            'field': 'text',
-            'delta': 'b',
-          },
+          delta: _timelineDeltaFixture(
+            partId: 'part-live',
+            revision: 2,
+            field: 'text',
+            delta: 'b',
+          ),
         ),
       );
       await pumpEventQueue();

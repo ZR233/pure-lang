@@ -247,7 +247,6 @@ pub struct BridgeSessionToolPart {
     pub timed_out: bool,
     pub working_directory: Option<String>,
     pub denial_reason: Option<String>,
-    pub activity_group_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

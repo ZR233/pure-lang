@@ -266,7 +266,6 @@ pub struct TraceAttachment {
 pub struct TracePart {
     pub turn_id: String,
     pub item_id: String,
-    #[serde(alias = "sequence")]
     pub started_sequence: u64,
     #[serde(default)]
     pub revision: u64,
@@ -393,7 +392,6 @@ pub enum TraceDelta {
 pub struct TracePartDeltaEvent {
     pub turn_id: String,
     pub item_id: String,
-    #[serde(alias = "sequence")]
     pub started_sequence: u64,
     #[serde(default)]
     pub revision: u64,
@@ -462,6 +460,3 @@ pub enum TraceEventKind {
     SkillActivated { activation: SkillActivation },
     EnabledToolsRecorded { event: EnabledToolsEvent },
 }
-
-#[cfg(test)]
-mod tests;

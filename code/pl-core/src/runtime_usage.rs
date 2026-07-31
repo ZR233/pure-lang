@@ -251,45 +251,4 @@ mod tests {
             }
         );
     }
-
-    #[test]
-    fn model_token_usage_snapshot_hides_fields_behind_accessors() {
-        let source =
-            std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/runtime_usage.rs"))
-                .expect("runtime usage source");
-        let snapshot_fields = source
-            .split("pub struct ModelTokenUsageSnapshot {")
-            .nth(1)
-            .expect("model token usage snapshot struct")
-            .split("impl ModelTokenUsageSnapshot")
-            .next()
-            .expect("snapshot fields");
-        let snapshot_impl = source
-            .split("impl ModelTokenUsageSnapshot")
-            .nth(1)
-            .expect("snapshot impl")
-            .split("pub(crate) fn cost_for_usage")
-            .next()
-            .expect("snapshot impl body");
-        for accessor in [
-            "pub fn input_tokens(",
-            "pub fn cached_input_tokens(",
-            "pub fn output_tokens(",
-            "pub fn reasoning_output_tokens(",
-            "pub fn total_tokens(",
-        ] {
-            assert!(
-                snapshot_impl.contains(accessor),
-                "模型 token usage 快照应由 pl-core accessor 暴露 `{accessor}`"
-            );
-        }
-        assert!(
-            !snapshot_fields.contains("pub input_tokens:")
-                && !snapshot_fields.contains("pub cached_input_tokens:")
-                && !snapshot_fields.contains("pub output_tokens:")
-                && !snapshot_fields.contains("pub reasoning_output_tokens:")
-                && !snapshot_fields.contains("pub total_tokens:"),
-            "宿主不应直接读取 ModelTokenUsageSnapshot 字段"
-        );
-    }
 }

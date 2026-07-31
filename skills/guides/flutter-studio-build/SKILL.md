@@ -90,7 +90,7 @@ flutter_rust_bridge_codegen generate
 - 后端 bridge 代码尚未完成时预览 UI
 - CI 中分离前后端验证
 
-`cargo xtask run-gui --demo-fallback` 提供自动回退：优先尝试 native 运行，失败时自动切到 Demo 模式并清理当前平台的 `build/<platform>/` 缓存。
+需要 Demo 数据时显式运行 `cargo xtask run-gui --demo`。Native 运行失败会直接报错，不会切换到另一套运行路径。
 
 ## CI 参考
 
@@ -115,4 +115,4 @@ flutter_rust_bridge_codegen generate
 | 用途 | 开发运行/调试 | 产出 release 包 |
 | 构建模式 | `flutter run -d windows`（debug） | `flutter build windows --release` |
 | 产物 | 不收集，在 `build/` 下就地运行 | 收集到 `dist/pure-studio-release/` |
-| Demo 回退 | 支持 `--demo-fallback` 自动回退 | 无回退，失败即报错 |
+| Demo 模式 | 使用 `--demo` 显式选择 | Native 失败即报错 |

@@ -11,7 +11,7 @@ pub(crate) use budget::{BudgetLimit, BudgetTracker};
 pub use execution::ToolEffect;
 pub use options::{
     InteractionCallback, InteractionFuture, PermissionMode, ToolApprovalDecision,
-    ToolApprovalPolicy, ToolApprovalRequest, ToolExecutionMode, TurnOptions, UserInputMode,
+    ToolApprovalRequest, ToolExecutionMode, TurnOptions, UserInputMode,
 };
 pub use request::TurnRequest;
 pub use result::{TurnAbortReason, TurnResult, TurnResultStatus};

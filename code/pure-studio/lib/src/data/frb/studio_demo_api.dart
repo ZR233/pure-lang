@@ -582,32 +582,31 @@ class DemoStudioApi implements StudioApi {
     _emitSessionEvent(
       sessionId: sessionId,
       payload: MessageUpdatedPayload(
-        message: timelineMessageFromJson({
-          'messageId': userMessageId,
-          'sessionId': sessionId,
-          'turnId': turnId,
-          'role': 'user',
-          'createdAt': now,
-        }),
+        message: _demoTimelineMessage(
+          id: userMessageId,
+          sessionId: sessionId,
+          turnId: turnId,
+          role: 'user',
+          createdAt: now,
+        ),
       ),
     );
     _emitSessionEvent(
       sessionId: sessionId,
       payload: MessagePartUpdatedPayload(
-        part: timelinePartSnapshotFromJson({
-          'partId': '$userMessageId:text',
-          'messageId': userMessageId,
-          'sessionId': sessionId,
-          'turnId': turnId,
-          'type': 'text',
-          'order': 0,
-          'revision': 0,
-          'status': 'completed',
-          'createdAt': now,
-          'updatedAt': now,
-          'textChannel': 'user',
-          'text': trimmed,
-        }),
+        part: _demoTimelinePart(
+          id: '$userMessageId:text',
+          messageId: userMessageId,
+          sessionId: sessionId,
+          turnId: turnId,
+          type: TimelinePartType.text,
+          order: 0,
+          revision: 0,
+          status: 'completed',
+          createdAt: now,
+          textChannel: TimelineTextChannel.user,
+          text: trimmed,
+        ),
       ),
     );
     _emitSessionEvent(
@@ -629,31 +628,30 @@ class DemoStudioApi implements StudioApi {
     _emitSessionEvent(
       sessionId: sessionId,
       payload: MessageUpdatedPayload(
-        message: timelineMessageFromJson({
-          'messageId': assistantMessageId,
-          'sessionId': sessionId,
-          'turnId': turnId,
-          'role': 'assistant',
-          'createdAt': now + 1,
-        }),
+        message: _demoTimelineMessage(
+          id: assistantMessageId,
+          sessionId: sessionId,
+          turnId: turnId,
+          role: 'assistant',
+          createdAt: now + 1,
+        ),
       ),
     );
     _emitSessionEvent(
       sessionId: sessionId,
       payload: MessagePartUpdatedPayload(
-        part: timelinePartSnapshotFromJson({
-          'partId': '$assistantMessageId:reasoning-1',
-          'messageId': assistantMessageId,
-          'sessionId': sessionId,
-          'turnId': turnId,
-          'type': 'reasoning',
-          'order': 0,
-          'revision': 0,
-          'status': 'streaming',
-          'createdAt': now + 1,
-          'updatedAt': now + 1,
-          'reasoningSummary': ['## Inspecting the request'],
-        }),
+        part: _demoTimelinePart(
+          id: '$assistantMessageId:reasoning-1',
+          messageId: assistantMessageId,
+          sessionId: sessionId,
+          turnId: turnId,
+          type: TimelinePartType.reasoning,
+          order: 0,
+          revision: 0,
+          status: 'streaming',
+          createdAt: now + 1,
+          reasoningSummary: const ['## Inspecting the request'],
+        ),
       ),
     );
     await Future<void>.delayed(promptActivityDelay);
@@ -679,40 +677,38 @@ class DemoStudioApi implements StudioApi {
     _emitSessionEvent(
       sessionId: sessionId,
       payload: MessagePartUpdatedPayload(
-        part: timelinePartSnapshotFromJson({
-          'partId': '$assistantMessageId:reasoning-1',
-          'messageId': assistantMessageId,
-          'sessionId': sessionId,
-          'turnId': turnId,
-          'type': 'reasoning',
-          'order': 0,
-          'revision': 2,
-          'status': 'completed',
-          'createdAt': now + 1,
-          'updatedAt': now + 1,
-          'reasoningSummary': [
+        part: _demoTimelinePart(
+          id: '$assistantMessageId:reasoning-1',
+          messageId: assistantMessageId,
+          sessionId: sessionId,
+          turnId: turnId,
+          type: TimelinePartType.reasoning,
+          order: 0,
+          revision: 2,
+          status: 'completed',
+          createdAt: now + 1,
+          reasoningSummary: const [
             '## Inspecting the request',
             'Checking the live timeline projection.',
           ],
-        }),
+        ),
       ),
     );
     _emitSessionEvent(
       sessionId: sessionId,
       payload: MessagePartUpdatedPayload(
-        part: timelinePartSnapshotFromJson({
-          'partId': '$assistantMessageId:reasoning-2',
-          'messageId': assistantMessageId,
-          'sessionId': sessionId,
-          'turnId': turnId,
-          'type': 'reasoning',
-          'order': 1,
-          'revision': 0,
-          'status': 'streaming',
-          'createdAt': now + 1,
-          'updatedAt': now + 1,
-          'reasoningContent': ['## Preparing the tool call'],
-        }),
+        part: _demoTimelinePart(
+          id: '$assistantMessageId:reasoning-2',
+          messageId: assistantMessageId,
+          sessionId: sessionId,
+          turnId: turnId,
+          type: TimelinePartType.reasoning,
+          order: 1,
+          revision: 0,
+          status: 'streaming',
+          createdAt: now + 1,
+          reasoningContent: const ['## Preparing the tool call'],
+        ),
       ),
     );
     await Future<void>.delayed(promptActivityDelay);
@@ -722,22 +718,21 @@ class DemoStudioApi implements StudioApi {
     _emitSessionEvent(
       sessionId: sessionId,
       payload: MessagePartUpdatedPayload(
-        part: timelinePartSnapshotFromJson({
-          'partId': '$assistantMessageId:reasoning-2',
-          'messageId': assistantMessageId,
-          'sessionId': sessionId,
-          'turnId': turnId,
-          'type': 'reasoning',
-          'order': 1,
-          'revision': 1,
-          'status': 'completed',
-          'createdAt': now + 1,
-          'updatedAt': now + 1,
-          'reasoningSummary': [
+        part: _demoTimelinePart(
+          id: '$assistantMessageId:reasoning-2',
+          messageId: assistantMessageId,
+          sessionId: sessionId,
+          turnId: turnId,
+          type: TimelinePartType.reasoning,
+          order: 1,
+          revision: 1,
+          status: 'completed',
+          createdAt: now + 1,
+          reasoningSummary: const [
             '## Preparing the tool call',
             'Selecting the smallest verification command.',
           ],
-        }),
+        ),
       ),
     );
     _emitSessionEvent(
@@ -756,25 +751,24 @@ class DemoStudioApi implements StudioApi {
     _emitSessionEvent(
       sessionId: sessionId,
       payload: MessagePartUpdatedPayload(
-        part: timelinePartSnapshotFromJson({
-          'partId': '$assistantMessageId:tool',
-          'messageId': assistantMessageId,
-          'sessionId': sessionId,
-          'turnId': turnId,
-          'type': 'tool',
-          'order': 2,
-          'revision': 0,
-          'status': 'running',
-          'createdAt': now + 1,
-          'updatedAt': now + 1,
-          'tool': {
-            'toolCallId': '$assistantMessageId:tool-call',
-            'name': 'exec',
-            'arguments': jsonEncode({
+        part: _demoTimelinePart(
+          id: '$assistantMessageId:tool',
+          messageId: assistantMessageId,
+          sessionId: sessionId,
+          turnId: turnId,
+          type: TimelinePartType.tool,
+          order: 2,
+          revision: 0,
+          status: 'running',
+          createdAt: now + 1,
+          tool: TimelineToolPart(
+            toolCallId: '$assistantMessageId:tool-call',
+            name: 'exec',
+            arguments: jsonEncode({
               'command': 'flutter test test/widget_test.dart',
             }),
-          },
-        }),
+          ),
+        ),
       ),
     );
     await Future<void>.delayed(promptToolDelay);
@@ -786,26 +780,25 @@ class DemoStudioApi implements StudioApi {
         _emitSessionEvent(
           sessionId: sessionId,
           payload: MessagePartUpdatedPayload(
-            part: timelinePartSnapshotFromJson({
-              'partId': '$assistantMessageId:tool',
-              'messageId': assistantMessageId,
-              'sessionId': sessionId,
-              'turnId': turnId,
-              'type': 'tool',
-              'order': 2,
-              'revision': 1,
-              'status': 'completed',
-              'createdAt': now + 1,
-              'updatedAt': now + 1,
-              'tool': {
-                'toolCallId': '$assistantMessageId:tool-call',
-                'name': 'exec',
-                'arguments': jsonEncode({
+            part: _demoTimelinePart(
+              id: '$assistantMessageId:tool',
+              messageId: assistantMessageId,
+              sessionId: sessionId,
+              turnId: turnId,
+              type: TimelinePartType.tool,
+              order: 2,
+              revision: 1,
+              status: 'completed',
+              createdAt: now + 1,
+              tool: TimelineToolPart(
+                toolCallId: '$assistantMessageId:tool-call',
+                name: 'exec',
+                arguments: jsonEncode({
                   'command': 'flutter test test/widget_test.dart',
                 }),
-                'result': 'All widget tests passed.',
-              },
-            }),
+                result: 'All widget tests passed.',
+              ),
+            ),
           ),
         );
         _emitSessionEvent(
@@ -824,23 +817,22 @@ class DemoStudioApi implements StudioApi {
         _emitSessionEvent(
           sessionId: sessionId,
           payload: MessagePartUpdatedPayload(
-            part: timelinePartSnapshotFromJson({
-              'partId': '$assistantMessageId:text',
-              'messageId': assistantMessageId,
-              'sessionId': sessionId,
-              'turnId': turnId,
-              'type': 'text',
-              'order': 3,
-              'revision': 0,
-              'status': 'completed',
-              'createdAt': now + 1,
-              'updatedAt': now + 1,
-              'textChannel': 'final',
-              'text':
+            part: _demoTimelinePart(
+              id: '$assistantMessageId:text',
+              messageId: assistantMessageId,
+              sessionId: sessionId,
+              turnId: turnId,
+              type: TimelinePartType.text,
+              order: 3,
+              revision: 0,
+              status: 'completed',
+              createdAt: now + 1,
+              textChannel: TimelineTextChannel.finalAnswer,
+              text:
                   'Demo response for: **$trimmed**\n\n'
                   '- Reasoning summaries update in one activity row\n'
                   '- Tool activity takes over without duplicating history',
-            }),
+            ),
           ),
         );
         _emitSessionEvent(
@@ -965,6 +957,60 @@ class DemoStudioApi implements StudioApi {
       ),
     );
   }
+}
+
+TimelineMessage _demoTimelineMessage({
+  required String id,
+  required String sessionId,
+  required String turnId,
+  required String role,
+  required int createdAt,
+}) {
+  final timestamp = DateTime.fromMillisecondsSinceEpoch(createdAt * 1000);
+  return TimelineMessage(
+    id: id,
+    sessionId: sessionId,
+    turnId: turnId,
+    role: role,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  );
+}
+
+TimelinePartSnapshot _demoTimelinePart({
+  required String id,
+  required String messageId,
+  required String sessionId,
+  required String turnId,
+  required TimelinePartType type,
+  required int order,
+  required int revision,
+  required String status,
+  required int createdAt,
+  String text = '',
+  List<String> reasoningSummary = const [],
+  List<String> reasoningContent = const [],
+  TimelineTextChannel? textChannel,
+  TimelineToolPart? tool,
+}) {
+  final timestamp = DateTime.fromMillisecondsSinceEpoch(createdAt * 1000);
+  return TimelinePartSnapshot(
+    id: id,
+    messageId: messageId,
+    sessionId: sessionId,
+    turnId: turnId,
+    type: type,
+    order: order,
+    revision: revision,
+    text: text,
+    reasoningSummary: reasoningSummary,
+    reasoningContent: reasoningContent,
+    status: status,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    textChannel: textChannel,
+    tool: tool,
+  );
 }
 
 /// Deterministic demo fixture exposed only by the dedicated Driver build.

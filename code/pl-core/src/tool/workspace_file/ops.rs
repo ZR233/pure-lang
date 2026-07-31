@@ -411,9 +411,7 @@ fn parse_input<T: serde::de::DeserializeOwned>(arguments: Value, tool: &str) -> 
 
 fn input_guidance(tool: &str) -> &'static str {
     match tool {
-        TOOL_READ_FILE => {
-            "Allowed fields: path, cwd, startLine, maxLines. Use maxLines instead of endLine or limit"
-        }
+        TOOL_READ_FILE => "Allowed fields: path, cwd, startLine, maxLines",
         TOOL_LIST_FILES => "Allowed fields: path, cwd, glob, limit, cursor, includeDirs",
         TOOL_SEARCH_FILES => {
             "Allowed fields: query, path, cwd, glob, caseSensitive, literal, limit, cursor, contextLines"

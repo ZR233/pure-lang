@@ -177,7 +177,6 @@ void registerTimelineModelTests() {
           order: 2,
           sequence: 3,
           name: 'read_file',
-          activityGroupId: 'legacy-whole-turn-group',
           result: 'ok',
         ),
         _toolTimelinePart(
@@ -187,7 +186,6 @@ void registerTimelineModelTests() {
           order: 3,
           sequence: 4,
           name: 'search_files',
-          activityGroupId: 'another-legacy-group',
           result: 'matches',
         ),
         TimelinePart(
@@ -208,7 +206,6 @@ void registerTimelineModelTests() {
           order: 6,
           sequence: 7,
           name: 'write_file',
-          activityGroupId: 'legacy-whole-turn-group',
           status: 'denied',
         ),
       ],
@@ -230,84 +227,7 @@ void registerTimelineModelTests() {
     expect(toolGroups[1].toolGroup!.status, 'denied');
   });
 
-  test(
-    'timeline keeps different activityGroupId separate inside one message',
-    () {
-      final now = DateTime.fromMillisecondsSinceEpoch(0);
-      final message = TimelineMessage(
-        id: 'turn-1:assistant',
-        sessionId: 'session-1',
-        turnId: 'turn-1',
-        role: 'assistant',
-        createdAt: now,
-      );
-      final rows = timelineRowsFromMessages(
-        [message],
-        parts: [
-          TimelinePart(
-            id: 'text-before',
-            messageId: message.id,
-            sessionId: 'session-1',
-            turnId: 'turn-1',
-            type: TimelinePartType.text,
-            text: '先看一下。',
-            textChannel: TimelineTextChannel.commentary,
-            order: 0,
-          ),
-          _toolTimelinePart(
-            id: 'tool-a',
-            messageId: message.id,
-            turnId: 'turn-1',
-            order: 1,
-            name: 'read_file',
-            activityGroupId: 'tool-group:turn-1:1',
-          ),
-          _toolTimelinePart(
-            id: 'tool-b',
-            messageId: message.id,
-            turnId: 'turn-1',
-            order: 2,
-            name: 'search_files',
-            activityGroupId: 'tool-group:turn-1:1',
-          ),
-          TimelinePart(
-            id: 'text-middle',
-            messageId: message.id,
-            sessionId: 'session-1',
-            turnId: 'turn-1',
-            type: TimelinePartType.text,
-            text: '我再查一个点。',
-            textChannel: TimelineTextChannel.commentary,
-            order: 3,
-          ),
-          _toolTimelinePart(
-            id: 'tool-c',
-            messageId: message.id,
-            turnId: 'turn-1',
-            order: 4,
-            name: 'exec',
-            activityGroupId: 'tool-group:turn-1:4',
-          ),
-        ],
-      );
-
-      expect(rows.map((row) => row.type), [
-        TimelineRowType.commentary,
-        TimelineRowType.toolGroup,
-        TimelineRowType.commentary,
-        TimelineRowType.toolGroup,
-      ]);
-      expect(rows[1].id, 'tool-group:session-1:turn-1:assistant:tool-a');
-      expect(rows[1].toolGroup!.items.map((item) => item.id), [
-        'tool-a',
-        'tool-b',
-      ]);
-      expect(rows[3].id, 'tool-group:session-1:turn-1:assistant:tool-c');
-      expect(rows[3].toolGroup!.items.single.id, 'tool-c');
-    },
-  );
-
-  test('timeline groups adjacent tools without activityGroupId', () {
+  test('timeline commentary separates adjacent tool groups', () {
     final now = DateTime.fromMillisecondsSinceEpoch(0);
     final message = TimelineMessage(
       id: 'turn-1:assistant',
@@ -319,13 +239,22 @@ void registerTimelineModelTests() {
     final rows = timelineRowsFromMessages(
       [message],
       parts: [
+        TimelinePart(
+          id: 'text-before',
+          messageId: message.id,
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          type: TimelinePartType.text,
+          text: '先看一下。',
+          textChannel: TimelineTextChannel.commentary,
+          order: 0,
+        ),
         _toolTimelinePart(
           id: 'tool-a',
           messageId: message.id,
           turnId: 'turn-1',
           order: 1,
           name: 'read_file',
-          activityGroupId: null,
         ),
         _toolTimelinePart(
           id: 'tool-b',
@@ -333,16 +262,40 @@ void registerTimelineModelTests() {
           turnId: 'turn-1',
           order: 2,
           name: 'search_files',
-          activityGroupId: null,
+        ),
+        TimelinePart(
+          id: 'text-middle',
+          messageId: message.id,
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          type: TimelinePartType.text,
+          text: '我再查一个点。',
+          textChannel: TimelineTextChannel.commentary,
+          order: 3,
+        ),
+        _toolTimelinePart(
+          id: 'tool-c',
+          messageId: message.id,
+          turnId: 'turn-1',
+          order: 4,
+          name: 'exec',
         ),
       ],
     );
 
-    expect(rows, hasLength(1));
-    expect(rows.single.toolGroup!.items.map((item) => item.id), [
+    expect(rows.map((row) => row.type), [
+      TimelineRowType.commentary,
+      TimelineRowType.toolGroup,
+      TimelineRowType.commentary,
+      TimelineRowType.toolGroup,
+    ]);
+    expect(rows[1].id, 'tool-group:session-1:turn-1:assistant:tool-a');
+    expect(rows[1].toolGroup!.items.map((item) => item.id), [
       'tool-a',
       'tool-b',
     ]);
+    expect(rows[3].id, 'tool-group:session-1:turn-1:assistant:tool-c');
+    expect(rows[3].toolGroup!.items.single.id, 'tool-c');
   });
 
   test('timeline tool group render version tracks tool result changes', () {
@@ -387,43 +340,41 @@ void registerTimelineModelTests() {
     api.emitSession(
       _agentTimelineEvent(
         sessionId: 'session-1',
-        event: {
-          'eventId': 'agent-event-1',
-          'sessionId': 'session-1',
-          'sequence': 1,
-          'createdAt': 1,
-          'kind': {
-            'type': 'subAgentActivity',
-            'callId': 'call-1',
-            'path': 'root/reviewer',
-            'parentPath': 'root',
-            'kind': 'spawned',
-            'status': 'queued',
-            'message': 'check',
-            'timedOut': false,
-          },
-        },
+        event: TimelineAgentEvent(
+          eventId: 'agent-event-1',
+          sessionId: 'session-1',
+          sequence: 1,
+          createdAt: _fixtureDate(1),
+          payload: const TimelineSubAgentActivity(
+            callId: 'call-1',
+            path: 'root/reviewer',
+            parentPath: 'root',
+            kind: 'spawned',
+            statusValue: 'queued',
+            message: 'check',
+            timedOut: false,
+          ),
+        ),
       ),
     );
     api.emitSession(
       _agentTimelineEvent(
         sessionId: 'session-1',
-        event: {
-          'eventId': 'agent-event-2',
-          'sessionId': 'session-1',
-          'sequence': 2,
-          'createdAt': 2,
-          'kind': {
-            'type': 'subAgentActivity',
-            'callId': 'call-1',
-            'path': 'root/reviewer',
-            'parentPath': 'root',
-            'kind': 'spawned',
-            'status': 'completed',
-            'message': 'check',
-            'timedOut': false,
-          },
-        },
+        event: TimelineAgentEvent(
+          eventId: 'agent-event-2',
+          sessionId: 'session-1',
+          sequence: 2,
+          createdAt: _fixtureDate(2),
+          payload: const TimelineSubAgentActivity(
+            callId: 'call-1',
+            path: 'root/reviewer',
+            parentPath: 'root',
+            kind: 'spawned',
+            statusValue: 'completed',
+            message: 'check',
+            timedOut: false,
+          ),
+        ),
       ),
     );
     await pumpEventQueue();
@@ -498,44 +449,44 @@ void registerTimelineModelTests() {
 
     await container.read(studioControllerProvider.future);
     api.emitSession(
-      _canonicalSessionEvent(
-        sessionId: 'session-1',
+      StudioBridgeEvent(
         eventId: 'agent-snapshot-1',
-        kind: {
-          'type': 'agentChanged',
-          'agent': {
-            'id': 'agent-1',
-            'sessionId': 'session-1',
-            'path': 'root/reviewer',
-            'role': 'reviewer',
-            'task': 'Audit timeline',
-            'status': 'running',
-            'depth': 1,
-            'updatedAt': 1,
-          },
-        },
+        sessionId: 'session-1',
+        sequence: BigInt.one,
+        createdAt: _fixtureDate(1),
+        payload: AgentChangedPayload(
+          agent: StudioAgentView(
+            id: 'agent-1',
+            sessionId: 'session-1',
+            path: 'root/reviewer',
+            role: 'reviewer',
+            task: 'Audit timeline',
+            status: 'running',
+            depth: 1,
+            updatedAt: _fixtureDate(1),
+          ),
+        ),
       ),
     );
     api.emitSession(
-      _canonicalSessionEvent(
-        sessionId: 'session-1',
+      StudioBridgeEvent(
         eventId: 'agent-snapshot-2',
-        sequence: 2,
-        emittedAt: 2,
-        kind: {
-          'type': 'agentChanged',
-          'agent': {
-            'id': 'agent-1',
-            'sessionId': 'session-1',
-            'path': 'root/reviewer',
-            'role': 'reviewer',
-            'task': 'Audit timeline',
-            'status': 'completed',
-            'summary': 'done',
-            'depth': 1,
-            'updatedAt': 2,
-          },
-        },
+        sessionId: 'session-1',
+        sequence: BigInt.two,
+        createdAt: _fixtureDate(2),
+        payload: AgentChangedPayload(
+          agent: StudioAgentView(
+            id: 'agent-1',
+            sessionId: 'session-1',
+            path: 'root/reviewer',
+            role: 'reviewer',
+            task: 'Audit timeline',
+            status: 'completed',
+            summary: 'done',
+            depth: 1,
+            updatedAt: _fixtureDate(2),
+          ),
+        ),
       ),
     );
     await pumpEventQueue();
@@ -557,28 +508,33 @@ void registerTimelineModelTests() {
     () {
       final state = applyCanonicalSessionSnapshot(
         _emptyState(),
-        StudioSessionSnapshot.fromLegacyJson({
-          'sessionId': 'session-1',
-          'throughSequence': 7,
-          'timelineEvents': [
-            {
-              'eventId': 'agent-event-1',
-              'sessionId': 'session-1',
-              'sequence': 7,
-              'createdAt': 3,
-              'kind': {
-                'type': 'subAgentActivity',
-                'callId': 'call-2',
-                'path': 'root/worker',
-                'parentPath': 'root',
-                'kind': 'messageQueued',
-                'status': 'waiting',
-                'message': 'status',
-                'timedOut': false,
-              },
-            },
-          ],
-        }),
+        StudioSessionSnapshot(
+          sessionId: 'session-1',
+          throughSequence: 7,
+          messages: const [],
+          parts: const {},
+          interactions: const [],
+          agents: const {},
+          timelineEvents: {
+            'agent-event-1': TimelineAgentEvent(
+              eventId: 'agent-event-1',
+              sessionId: 'session-1',
+              sequence: 7,
+              createdAt: _fixtureDate(3),
+              payload: const TimelineSubAgentActivity(
+                callId: 'call-2',
+                path: 'root/worker',
+                parentPath: 'root',
+                kind: 'messageQueued',
+                statusValue: 'waiting',
+                message: 'status',
+                timedOut: false,
+              ),
+            ),
+          },
+          runtime: null,
+          turn: null,
+        ),
       );
 
       expect(state.agentTimelineEventsBySession['session-1']!.keys, {
@@ -599,31 +555,34 @@ void registerTimelineModelTests() {
   test('canonical session snapshot restores the latest todo list', () {
     final state = applyCanonicalSessionSnapshot(
       _emptyState(),
-      StudioSessionSnapshot.fromLegacyJson({
-        'sessionId': 'session-1',
-        'throughSequence': 8,
-        'timelineEvents': [
-          {
-            'eventId': 'todo-event-1',
-            'sessionId': 'session-1',
-            'sequence': 8,
-            'createdAt': 4,
-            'kind': {
-              'type': 'todoListChanged',
-              'snapshot': {
-                'callId': 'call-3',
-                'path': '/root/worker',
-                'parentPath': '/root',
-                'explanation': 'Todo restore',
-                'items': [
-                  {'step': 'Restore payload', 'status': 'completed'},
-                  {'step': 'Render row', 'status': 'pending'},
-                ],
-              },
-            },
-          },
-        ],
-      }),
+      StudioSessionSnapshot(
+        sessionId: 'session-1',
+        throughSequence: 8,
+        messages: const [],
+        parts: const {},
+        interactions: const [],
+        agents: const {},
+        timelineEvents: {
+          'todo-event-1': TimelineAgentEvent(
+            eventId: 'todo-event-1',
+            sessionId: 'session-1',
+            sequence: 8,
+            createdAt: _fixtureDate(4),
+            payload: const TimelineTodoListUpdate(
+              callId: 'call-3',
+              path: '/root/worker',
+              parentPath: '/root',
+              explanation: 'Todo restore',
+              items: [
+                TimelineTodoItem(step: 'Restore payload', status: 'completed'),
+                TimelineTodoItem(step: 'Render row', status: 'pending'),
+              ],
+            ),
+          ),
+        },
+        runtime: null,
+        turn: null,
+      ),
     );
 
     expect(state.selectedTimelineRows, isEmpty);
@@ -640,23 +599,29 @@ void registerTimelineModelTests() {
   test('canonical session snapshot restores agent status state', () {
     final state = applyCanonicalSessionSnapshot(
       _emptyState(),
-      StudioSessionSnapshot.fromLegacyJson({
-        'sessionId': 'session-1',
-        'throughSequence': 1,
-        'agents': [
-          {
-            'id': 'agent-1',
-            'sessionId': 'session-1',
-            'path': 'root/worker',
-            'role': 'worker',
-            'task': 'Implement',
-            'status': 'running',
-            'summary': 'halfway',
-            'depth': 1,
-            'updatedAt': 4,
-          },
-        ],
-      }),
+      StudioSessionSnapshot(
+        sessionId: 'session-1',
+        throughSequence: 1,
+        messages: const [],
+        parts: const {},
+        interactions: const [],
+        agents: {
+          'agent-1': StudioAgentView(
+            id: 'agent-1',
+            sessionId: 'session-1',
+            path: 'root/worker',
+            role: 'worker',
+            task: 'Implement',
+            status: 'running',
+            summary: 'halfway',
+            depth: 1,
+            updatedAt: _fixtureDate(4),
+          ),
+        },
+        timelineEvents: const {},
+        runtime: null,
+        turn: null,
+      ),
     );
 
     expect(state.runtime.agentCount, 1);
@@ -664,18 +629,5 @@ void registerTimelineModelTests() {
     expect(state.selectedAgents.single.id, 'agent-1');
     expect(state.selectedAgents.single.path, 'root/worker');
     expect(state.selectedAgents.single.summary, 'halfway');
-  });
-
-  test('unknown agent timeline kinds fail protocol projection', () {
-    expect(
-      () => timelineAgentEventFromPayload({
-        'eventId': 'agent-event-unknown',
-        'sessionId': 'session-1',
-        'sequence': 1,
-        'createdAt': 1,
-        'kind': {'type': 'mystery', 'callId': 'call-1'},
-      }),
-      throwsA(isA<FormatException>()),
-    );
   });
 }

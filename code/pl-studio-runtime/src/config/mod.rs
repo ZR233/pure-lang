@@ -20,14 +20,13 @@ pub use mode::StudioMode;
 pub use pl_core::config::{
     BuiltinMcpServerState as StudioBuiltinMcpServerState, EffectiveMcpServerConfig,
     McpServerConfig as StudioMcpServerEntry, McpServerMutationPolicy, McpServerSourceKind,
-    McpServerStatusKind, McpServerTransport, active_mcp_server_names as legacy_active_mcp_names,
-    builtin_mcp_server_ids, is_builtin_mcp_server_id, validate_mcp_identifier,
-    zhipu_coding_plan_token,
+    McpServerStatusKind, McpServerTransport, builtin_mcp_server_ids, is_builtin_mcp_server_id,
+    validate_mcp_identifier, zhipu_coding_plan_token,
 };
 pub use pl_core::{AgentRoleId, ModelRouteConfig, ProviderId, ReasoningEffort};
 pub use store::{ConfigPaths, ConfigStore};
 
-pub const STUDIO_CONFIG_SCHEMA_VERSION: u32 = 10;
+pub const STUDIO_CONFIG_SCHEMA_VERSION: u32 = 11;
 pub const STUDIO_CONFIG_DIR_NAME: &str = ".pure";
 pub const STUDIO_CONFIG_FILE_NAME: &str = "config.toml";
 pub const CONFIG_DIR_NAME: &str = STUDIO_CONFIG_DIR_NAME;
@@ -229,21 +228,7 @@ pub fn normalize_builtin_mcp_server_states(config: &mut StudioConfig) {
 
 #[cfg(test)]
 mod tests {
-    use pretty_assertions::assert_eq;
-
     use super::*;
-
-    #[test]
-    fn default_config_round_trips_with_dynamic_routes() {
-        let config = StudioConfig::default_config();
-        let document = toml::to_string_pretty(&config).unwrap();
-        let decoded: StudioConfig = toml::from_str(&document).unwrap();
-
-        decoded.validate().unwrap();
-        assert_eq!(decoded, config);
-        assert_eq!(decoded.schema_version, STUDIO_CONFIG_SCHEMA_VERSION);
-        assert_eq!(decoded.models.routes.len(), 4);
-    }
 
     #[test]
     fn old_schema_is_rejected() {

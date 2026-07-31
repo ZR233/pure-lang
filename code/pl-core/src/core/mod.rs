@@ -464,7 +464,7 @@ impl TurnEngine {
 
 // Re-export for tests
 #[cfg(test)]
-use permission::{approval_request, approve_tool_call};
+use permission::approval_request;
 #[cfg(test)]
 use pl_model::TokenUsage;
 #[cfg(test)]

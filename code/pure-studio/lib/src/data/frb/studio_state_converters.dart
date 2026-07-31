@@ -70,10 +70,7 @@ StudioState _stateFromTypedSnapshot({
           .firstOrNull
           ?.effectiveRootSessionId,
       permissionMode: _permissionMode(
-        _firstValue(_map(config['runtime']), const [
-          'permissionMode',
-          'permission_mode',
-        ]),
+        _map(config['runtime'])['permissionMode'],
       ),
       turnsBySession: const {},
       runtimesBySession: selectedSessionId == null
@@ -206,95 +203,6 @@ WebSearchSettingsView _webSearchFromFrb(frb.BridgeWebSearchSettingsDto value) {
   );
 }
 
-String _partText(Map<String, Object?> json, TimelinePartType type) {
-  final text = _string(json['text']);
-  if (text.isNotEmpty) {
-    return text;
-  }
-  return switch (type) {
-    TimelinePartType.tool => [
-      _string(_map(json['tool'])['arguments']),
-      _string(_map(json['tool'])['result']),
-    ].where((part) => part.isNotEmpty).join('\n'),
-    TimelinePartType.plan => _partPlanContent(json),
-    TimelinePartType.agent => _string(
-      _map(json['agent'])['summary'],
-      fallback: _string(_map(json['agent'])['task']),
-    ),
-    TimelinePartType.reasoning ||
-    TimelinePartType.text ||
-    TimelinePartType.turn ||
-    TimelinePartType.inference ||
-    TimelinePartType.file => '',
-  };
-}
-
-TimelineTextChannel? _textChannel(Object? value) {
-  final label = _normalizedWireLabel(value);
-  if (label.isEmpty) {
-    return null;
-  }
-  return switch (label) {
-    'user' => TimelineTextChannel.user,
-    'commentary' => TimelineTextChannel.commentary,
-    'final' ||
-    'finalanswer' ||
-    'final_answer' => TimelineTextChannel.finalAnswer,
-    _ => throw FormatException('Unknown text channel: $label'),
-  };
-}
-
-TimelineToolPart? _toolPart(Object? value) {
-  final json = _map(value);
-  if (json.isEmpty) {
-    return null;
-  }
-  return TimelineToolPart(
-    toolCallId: _string(json['toolCallId']),
-    callId: _nullableString(json['callId']),
-    providerItemId: _nullableString(json['providerItemId']),
-    name: _string(json['name'], fallback: 'tool'),
-    arguments: _string(json['arguments']),
-    result: _nullableString(json['result']),
-    outputArtifacts: _list(json['outputArtifacts']),
-    exitCode: _nullableInt(json['exitCode']),
-    timedOut: _bool(json['timedOut']),
-    workingDirectory: _nullableString(json['workingDirectory']),
-    denialReason: _nullableString(json['denialReason']),
-  );
-}
-
-TimelineAgentPart? _agentPart(Object? value) {
-  final json = _map(value);
-  if (json.isEmpty) {
-    return null;
-  }
-  return TimelineAgentPart(
-    id: _string(json['id']),
-    path: _string(json['path']),
-    parentPath: _nullableString(json['parentPath']),
-    role: _string(json['role'], fallback: 'agent'),
-    task: _string(json['task']),
-    status: _string(json['status']),
-    summary: _nullableString(json['summary']),
-    depth: _int(json['depth']),
-    error: _nullableString(json['error']),
-    reason: _nullableString(json['reason']),
-  );
-}
-
-String _partPlanContent(Map<String, Object?> json) {
-  final direct = _string(json['planContent']);
-  if (direct.isNotEmpty) {
-    return direct;
-  }
-  final plan = _map(json['plan']);
-  if (plan.isNotEmpty) {
-    return _string(plan['content']);
-  }
-  return _string(json['plan']);
-}
-
 String _interactionTitle(InteractionKind kind, InteractionPayload payload) {
   return switch (payload) {
     ToolApprovalInteractionPayload(:final toolName) =>
@@ -319,78 +227,5 @@ String _interactionBody(InteractionKind kind, InteractionPayload payload) {
           .join('\n'),
     PlanConfirmationInteractionPayload(:final content) => content,
     UnknownInteractionPayload() => '',
-  };
-}
-
-InteractionPayload _interactionPayloadFromJson(
-  InteractionKind kind,
-  Map<String, Object?> payload,
-) {
-  return switch (kind) {
-    InteractionKind.userInput => UserInputInteractionPayload(
-      questions: [
-        for (final value in _list(payload['questions']))
-          switch (_map(value)) {
-            final question => UserQuestionView(
-              id: _string(question['id']),
-              header: _string(question['header'], fallback: 'Input'),
-              question: _string(
-                question['question'],
-                fallback: _string(question['prompt']),
-              ),
-              isOther:
-                  _bool(question['isOther']) || _bool(question['is_other']),
-              isSecret:
-                  _bool(question['isSecret']) || _bool(question['is_secret']),
-              options: [
-                for (final optionValue in _list(question['options']))
-                  switch (_map(optionValue)) {
-                    final option => UserQuestionOptionView(
-                      label: _string(option['label']),
-                      description: _string(option['description']),
-                    ),
-                  },
-              ],
-            ),
-          },
-      ],
-    ),
-    InteractionKind.toolApproval => ToolApprovalInteractionPayload(
-      toolName: _string(
-        payload['name'],
-        fallback: _string(payload['toolName']),
-      ),
-      arguments: payload['arguments'] ?? payload['args'] ?? payload['input'],
-      workingDirectory: _string(
-        payload['workingDirectory'],
-        fallback: _string(
-          payload['working_directory'],
-          fallback: _string(payload['cwd']),
-        ),
-      ),
-      parentAgentId: _nullableString(payload['parentAgentId']),
-    ),
-    InteractionKind.planConfirmation => PlanConfirmationInteractionPayload(
-      planId: _string(payload['planId']),
-      content: _string(
-        payload['content'],
-        fallback: _string(payload['plan'], fallback: _string(payload['body'])),
-      ),
-    ),
-  };
-}
-
-TimelinePartType _partType(Object? value) {
-  final label = _normalizedWireLabel(value);
-  return switch (label) {
-    'text' => TimelinePartType.text,
-    'reasoning' || 'reasoning_summary' => TimelinePartType.reasoning,
-    'tool' || 'tool_activity' => TimelinePartType.tool,
-    'plan' => TimelinePartType.plan,
-    'agent' || 'agent_activity' => TimelinePartType.agent,
-    'turn' || 'turn_lifecycle' => TimelinePartType.turn,
-    'inference' || 'inference_lifecycle' => TimelinePartType.inference,
-    'file' => TimelinePartType.file,
-    _ => throw FormatException('Unknown timeline part type: $label'),
   };
 }

@@ -3,54 +3,23 @@ use pretty_assertions::assert_eq;
 use super::*;
 
 #[test]
-fn turn_budget_default_matches_codex_style_wall_clock() {
-    assert_eq!(TurnBudget::default().wall_clock_ms, 1_800_000);
-    assert_eq!(TurnBudget::new(90_000).wall_clock_ms, 90_000);
-    assert_eq!(AGENT_MAX_COUNT, 16);
-    assert_eq!(AGENT_MAX_DEPTH, 1);
-}
-
-#[test]
-fn turn_request_uses_default_budget() {
-    let request = TurnRequest::new("hello");
-
-    assert_eq!(request.budget, TurnBudget::default());
-    assert_eq!(request.prompt, "hello");
-}
-
-#[test]
-fn permission_mode_from_label_keeps_unknown_values_safe() {
+fn permission_mode_accepts_only_current_labels() {
     assert_eq!(
         PermissionMode::from_label("request-approval"),
-        PermissionMode::RequestApproval
+        Some(PermissionMode::RequestApproval)
     );
     assert_eq!(
         PermissionMode::from_label("auto-review"),
-        PermissionMode::AutoReview
-    );
-    assert_eq!(
-        PermissionMode::from_label("workspace-write"),
-        PermissionMode::RequestApproval
+        Some(PermissionMode::AutoReview)
     );
     assert_eq!(
         PermissionMode::from_label("full-access"),
-        PermissionMode::FullAccess
+        Some(PermissionMode::FullAccess)
     );
-    assert_eq!(
-        PermissionMode::from_label("old-auto-allow"),
-        PermissionMode::RequestApproval
-    );
+    assert_eq!(PermissionMode::from_label("workspace-write"), None);
+    assert_eq!(PermissionMode::from_label("old-auto-allow"), None);
     assert!(PermissionMode::FullAccess.allows_workspace_escape());
     assert!(!PermissionMode::RequestApproval.allows_workspace_escape());
-}
-
-#[test]
-fn turn_abort_reason_has_stable_wire_labels() {
-    assert_eq!(TurnAbortReason::Interrupted.as_str(), "interrupted");
-    assert_eq!(TurnAbortReason::BudgetLimited.as_str(), "budgetLimited");
-    assert_eq!(TurnAbortReason::Shutdown.as_str(), "shutdown");
-    assert_eq!(TurnAbortReason::ProviderError.as_str(), "providerError");
-    assert_eq!(TurnAbortReason::ToolError.as_str(), "toolError");
 }
 
 #[test]

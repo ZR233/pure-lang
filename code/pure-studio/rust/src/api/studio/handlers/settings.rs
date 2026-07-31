@@ -46,7 +46,9 @@ pub async fn save_runtime_permission_mode(
 ) -> Result<BridgeStudioSnapshotResponse, BridgeError> {
     let bridge = active_bridge().await?;
     let mut config = bridge.studio.config_store().load_or_default()?;
-    config.runtime.permission_mode = PermissionMode::from_label(&mode);
+    config.runtime.permission_mode = PermissionMode::from_label(&mode).ok_or_else(|| {
+        pl_studio_runtime::PureError::ConfigError(format!("unsupported permission mode: {mode}"))
+    })?;
     bridge.studio.config_store().save(&config)?;
     Ok(studio_snapshot_inner(bridge, None, None).await?)
 }
@@ -117,16 +119,15 @@ pub async fn save_mcp_settings(
             );
             continue;
         }
+        let transport = mcp_transport_from_label(&server.transport)?;
         let mut mcp_config = next_servers
             .remove(&server_id)
             .unwrap_or_else(|| McpServerConfig {
-                transport: mcp_transport_from_label(&server.transport),
+                transport,
                 ..Default::default()
             });
         mcp_config.enabled = server.enabled;
-        if !server.transport.trim().is_empty() {
-            mcp_config.transport = mcp_transport_from_label(&server.transport);
-        }
+        mcp_config.transport = transport;
         let endpoint = server.endpoint.trim();
         match mcp_config.transport {
             McpServerTransport::Stdio => {

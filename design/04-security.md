@@ -6,7 +6,9 @@
 
 - `PermissionMode::RequestApproval`
 
-这是破坏性升级后的默认行为，不再根据旧 UI 选择分支切换默认值。旧 `ToolApprovalPolicy::AutoAllow | Manual | DenyAll` 保留为兼容构造，但核心执行前统一以 `PermissionMode` 做策略判断。手动审批能力保留为可选能力，不是默认控制面。
+这是破坏性升级后的默认行为，不再根据旧 UI 选择分支切换默认值，也不保留独立的
+`ToolApprovalPolicy`。手动审批能力由 `PermissionMode::RequestApproval` 在 workspace
+外访问时触发，不是第二套控制面。
 
 Pure v1 的权限模式是本地策略层，不是 OS 沙箱、网络沙箱或系统级进程隔离。策略层只决定 Pure 已注册工具是否放行、请求用户审批、请求 AI reviewer 审批或拒绝；直接放行也不会绕过工具自身 schema 校验、工作区写锁、超时、输出截断和 timeline 记录。
 

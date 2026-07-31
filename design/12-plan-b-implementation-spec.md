@@ -66,7 +66,7 @@ config：
 ## 5. 安全默认
 
 - 默认权限模式固定 `PermissionMode::RequestApproval`
-- 旧 `ToolApprovalPolicy::AutoAllow | Manual | DenyAll` 只作为兼容构造保留，核心执行前统一以 `PermissionMode` 做策略判断
+- 工具权限只由 `PermissionMode`、execution policy 和访问分类决定
 - Flutter/FRB 桥接层不暴露 raw provider 私有结构
 - token 不在 UI 和日志明文扩散
 

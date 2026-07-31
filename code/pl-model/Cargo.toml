@@ -4,6 +4,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+default = []
+live-tests = []
+
 [dependencies]
 pl-protocol = { workspace = true }
 pl-trace = { workspace = true }
@@ -20,3 +24,18 @@ secrecy = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
+
+[[test]]
+name = "deepseek_live"
+path = "tests/deepseek_live.rs"
+required-features = ["live-tests"]
+
+[[test]]
+name = "openai_live"
+path = "tests/openai_live.rs"
+required-features = ["live-tests"]
+
+[[test]]
+name = "zhipu_live"
+path = "tests/zhipu_live.rs"
+required-features = ["live-tests"]

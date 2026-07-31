@@ -119,7 +119,7 @@ FRB 入口抛出。FRB adapter 必须把公共事件归一为 typed app payload 
 不得读取 `payloadJson`/Map 或用 `_ => current` 静默忽略未知事件。Studio-only handoff/task/
 session-list 继续只通过 product stream 或查询视图进入，不混入 session stream。
 
-`lib/src/rust/**` 与 `frb_generated.dart` 是生成边界，业务代码不得手写修改；`lib/src/data/frb/studio_api.dart` 保持对外稳定 barrel，内部按 `StudioApi` 接口、FRB runtime adapter、typed bridge event、FRB DTO converter、legacy/demo converter 和 demo API 分文件维护。生产路径只从 FRB typed DTO/union 进入 domain model；legacy JSON 解析必须集中在明确命名的 legacy/demo adapter 中，不能混入实时 FRB stream reducer。
+`lib/src/rust/**` 与 `frb_generated.dart` 是生成边界，业务代码不得手写修改；`lib/src/data/frb/studio_api.dart` 保持对外稳定 barrel，内部按 `StudioApi` 接口、FRB runtime adapter、typed bridge event、FRB DTO converter 和 demo API 分文件维护。生产、fixture 与 reducer 测试都从 typed DTO/domain model 进入，不保留 legacy session/event JSON parser。Demo 只由显式 build flag 或测试 override 选择，不作为 native runtime 失败后的自动 fallback。
 
 FRB runtime adapter 的 ready 顺序固定为 `RustLib.init()`、`initializeRuntime()`、
 `startRuntime()`。Dart 可缓存初始化 Future，但失败时必须清除缓存并用原始 stack trace 重新
@@ -190,8 +190,7 @@ plan、commentary、reasoning 和普通 text 的 live overlay 必须使用 strea
 工具展示使用 ordered item 上的相邻 coalescing：Studio store 仍保存逐工具 `StudioPart`，
 timeline selector 先按 message 与 part order 得到可见阅读流，再单次扫描合并相邻 tool part。
 text、commentary、final、reasoning、plan、agent row 或 message 边界立即结束当前工具组；
-隐藏 inference 不制造分组边界。`activityGroupId` 只保留为 deprecated wire/数据库兼容字段，
-新事件不生成，旧值也不参与展示。这样 `tool, tool, text, tool` 必须投影为两个工具组。
+隐藏 inference 不制造分组边界。工具 part 不携带分组 id；`tool, tool, text, tool` 必须投影为两个工具组。
 工具组 row 的 `order` 使用组内第一个工具 part 的 order，`sequence/renderVersion` 由组内所有
 工具 part 的 sequence、revision、status、arguments、result、工作目录、exit code、timeout、
 拒绝原因和 error 聚合计算；详情列表保持扫描顺序。工具状态以 part snapshot 为准，展示层
@@ -220,7 +219,7 @@ Flutter 首版 `ListView.builder` 必须实现同一滚动语义。Timeline 以 
 
 ## 4. Interaction 与状态栏
 
-普通 prompt、Plan 确认、tool approval、ask-user、legacy session handoff、agent latest snapshot、agent timeline event 和 runtime usage 都以 `sessionId` 为边界。切换会话时用后端当前 session snapshot 替换当前 view；后台 session 事件只更新对应 view，不污染当前 timeline 或状态栏。Plan 确认的实施动作必须留在当前 session 内，不能改变 `selectedSessionId`。
+普通 prompt、Plan 确认、tool approval、ask-user、agent latest snapshot、agent timeline event 和 runtime usage 都以 `sessionId` 为边界。切换会话时用后端当前 session snapshot 替换当前 view；后台 session 事件只更新对应 view，不污染当前 timeline 或状态栏。Plan 确认的实施动作必须留在当前 session 内，不能改变 `selectedSessionId`。
 
 root Planner 使用普通 Composer。child agent 默认显示只读 Composer“此 Agent 会话由运行时驱动”，
 不允许直接发送普通 prompt；tool approval、user input、plan confirmation 与停止操作仍使用当前
@@ -310,7 +309,7 @@ session stream。Session row 上的关闭按钮仍是归档语义，调用
 pending interaction，并返回同项目的新 session selection。前端收到 payload 后删除/隐藏归档
 session、切换到返回的 `selectedSessionId`，并用 `loadSessionState` 恢复新会话 projection；
 如果项目内没有剩余 session，状态栏与 composer 禁用，用户可以用新建会话按钮创建会话。
-会话列表只显示 `visibility=active && parentSessionId=null`，legacy handoff child/archived
+会话列表只显示 `visibility=active && parentSessionId=null`；agent child 与 archived
 session 不作为 root row 出现。
 
 Settings 是独立页面栈中的配置编辑入口。它必须覆盖 Providers、Instructions、Skills、Roles、MCP、Security 和 General 页签。App bootstrap/first-run 先调用 `loadProviderCatalog()`，目录只按 revision 做进程内缓存；加载失败显示错误与重试，不回退本地常量。普通设置项改完即保存；Provider 新增/编辑使用独立本地草稿，点击保存后调用 `saveProviderSettings(settingsJson)`。Provider payload 为 `defaultProviderId`、`providers[]`、`roles[]`，实例字段为 `id`、可选 `originalId`、`templateKind`、`wireProtocol`、`connectionMode`、`name`、`baseUrl`、`bearerToken`、`defaultModel`、`customModels[]`；model 字段为 `slug/displayName/reasoningEfforts/baseInstructions`。空 bearer token 保留已存 secret；重命名用 `originalId` 关联原实例。所有 typed save 成功后必须用返回的 canonical config 更新 providers、roles、instructions、skills、MCP servers、permission mode 和 config 状态。

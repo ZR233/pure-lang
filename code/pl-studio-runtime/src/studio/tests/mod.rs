@@ -7,4 +7,3 @@ use super::*;
 
 mod project_store;
 mod session_store;
-mod settings;

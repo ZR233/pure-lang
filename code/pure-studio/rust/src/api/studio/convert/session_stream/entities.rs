@@ -152,7 +152,6 @@ fn tool_part(value: SessionToolPart) -> Result<BridgeSessionToolPart> {
         timed_out: value.timed_out,
         working_directory: value.working_directory,
         denial_reason: value.denial_reason,
-        activity_group_id: value.activity_group_id,
     })
 }
 

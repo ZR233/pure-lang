@@ -5,10 +5,10 @@ use crate::api::studio::types::{
 };
 use anyhow::{Context, Result};
 use pl_studio_runtime::{
-    McpServerTransport, ProviderCapabilitySelection, ProviderEdit, ProviderModelEdit,
-    ProviderPresetId, ProviderServiceCapabilities, ProviderSettingsEdit, ProviderUsageData,
-    ProviderUsageState, ProviderWireProtocol, RoleEdit, StandaloneWebSearchDialect,
-    WebSearchProviderCapabilities, ZhipuQuotaWindow,
+    McpServerTransport, ModelInfo, ProviderCapabilitySelection, ProviderEdit,
+    ProviderModelCatalogConfig, ProviderModelEdit, ProviderPresetId, ProviderServiceCapabilities,
+    ProviderSettingsEdit, ProviderUsageData, ProviderUsageState, ProviderWireProtocol, RoleEdit,
+    StandaloneWebSearchDialect, WebSearchProviderCapabilities, ZhipuQuotaWindow,
 };
 use serde_json::{Map, Value, json};
 // ── Utility functions ──
@@ -24,10 +24,11 @@ pub(crate) fn normalized_string_list(values: Vec<String>) -> Vec<String> {
     values
 }
 
-pub(crate) fn mcp_transport_from_label(label: &str) -> McpServerTransport {
+pub(crate) fn mcp_transport_from_label(label: &str) -> Result<McpServerTransport> {
     match label.trim() {
-        "streamableHttp" | "streamable_http" | "http" => McpServerTransport::StreamableHttp,
-        _ => McpServerTransport::Stdio,
+        "stdio" => Ok(McpServerTransport::Stdio),
+        "streamableHttp" => Ok(McpServerTransport::StreamableHttp),
+        label => anyhow::bail!("unsupported MCP transport: {label}"),
     }
 }
 
@@ -44,11 +45,15 @@ pub(crate) fn studio_config_projection(config: &pl_studio_runtime::StudioConfig)
             .map(|route| route.model.clone())
             .or_else(|| models.first().map(|model| model.slug.clone()))
             .unwrap_or_default();
+        let service_capabilities = provider.service_capabilities()?;
+        let catalog_id = match &provider.catalog {
+            ProviderModelCatalogConfig::Bundled { catalog, .. } => Some(catalog.to_string()),
+            ProviderModelCatalogConfig::Explicit { .. } => None,
+        };
         providers.insert(
             id.to_string(),
             json!({
                 "presetId": provider.preset_id().map(ToString::to_string),
-                "templateKind": provider.preset_id().map(ToString::to_string),
                 "wireProtocol": protocol_label(provider.protocol()?),
                 "connectionMode": connection_mode_label(provider.connection_mode()),
                 "name": provider.name,
@@ -58,13 +63,23 @@ pub(crate) fn studio_config_projection(config: &pl_studio_runtime::StudioConfig)
                     ProviderCapabilitySelection::PresetDefaults => "preset_defaults",
                     ProviderCapabilitySelection::Explicit(_) => "explicit",
                 },
-                "serviceCapabilities": pl_studio_runtime::provider_service_capabilities_descriptor(
-                    &provider.service_capabilities()?,
-                ),
+                "serviceCapabilities": {
+                    "webSearch": {
+                        "hostedResponses": service_capabilities.web_search.hosted_responses,
+                        "standalone": service_capabilities
+                            .web_search
+                            .standalone
+                            .map(|dialect| dialect.as_str()),
+                    },
+                },
                 "defaultModel": default_model,
-                "models": models,
-                "customModels": provider.editable_models(),
-                "catalog": provider.catalog,
+                "models": models.iter().map(model_projection).collect::<Vec<_>>(),
+                "customModels": provider
+                    .editable_models()
+                    .iter()
+                    .map(model_projection)
+                    .collect::<Vec<_>>(),
+                "catalogId": catalog_id,
             }),
         );
     }
@@ -83,17 +98,125 @@ pub(crate) fn studio_config_projection(config: &pl_studio_runtime::StudioConfig)
             )
         })
         .collect::<Map<_, _>>();
+    let default_provider_id = config
+        .models
+        .routes
+        .get(&pl_studio_runtime::StudioRole::Planner.id())
+        .map(|route| route.provider.to_string());
+    let mcp_servers = config
+        .mcp
+        .servers
+        .iter()
+        .map(|(id, server)| {
+            (
+                id.clone(),
+                json!({
+                    "enabled": server.enabled,
+                    "transport": mcp_transport_label(server.transport),
+                    "command": server.command,
+                    "url": server.url,
+                }),
+            )
+        })
+        .collect::<Map<_, _>>();
+    let builtin_mcp_servers = config
+        .mcp
+        .builtin_servers
+        .iter()
+        .map(|(id, server)| {
+            (
+                id.clone(),
+                json!({
+                    "enabled": server.enabled,
+                }),
+            )
+        })
+        .collect::<Map<_, _>>();
     Ok(json!({
         "schemaVersion": config.schema_version,
+        "defaultProviderId": default_provider_id,
         "providers": providers,
         "roles": roles,
-        "runtime": config.runtime,
-        "instructions": config.instructions,
-        "skills": config.skills,
-        "mcpServers": config.mcp.servers,
-        "builtinMcpServers": config.mcp.builtin_servers,
-        "webSearch": config.web_search,
+        "runtime": {
+            "permissionMode": config.runtime.permission_mode.label(),
+            "activeSkills": config.runtime.active_skills,
+            "activeMcpServers": config.runtime.active_mcp_servers,
+            "openAiCompactionMode": openai_compaction_mode_label(
+                config.runtime.openai_compaction_mode,
+            ),
+        },
+        "instructions": {
+            "baseOverride": config.instructions.base_override,
+            "developer": config.instructions.developer,
+            "user": config.instructions.user,
+            "projectDocMaxBytes": config.instructions.project_doc_max_bytes,
+            "projectDocFallbackFilenames": config.instructions.project_doc_fallback_filenames,
+        },
+        "skills": {
+            "enabled": config.skills.enabled,
+            "autoLearn": config.skills.auto_learn,
+            "system": {
+                "enabled": config.skills.system.enabled,
+            },
+            "projectDir": config.skills.project_dir,
+            "userDir": config.skills.user_dir,
+            "externalDirs": config.skills.external_dirs,
+            "disabled": config.skills.disabled,
+            "autoLearnMinToolCalls": config.skills.auto_learn_min_tool_calls,
+        },
+        "mcpServers": mcp_servers,
+        "builtinMcpServers": builtin_mcp_servers,
+        "webSearch": {
+            "mode": web_search_mode_label(config.web_search.mode),
+            "contextSize": config
+                .web_search
+                .context_size
+                .map(web_search_context_size_label),
+            "allowedDomains": config.web_search.allowed_domains,
+            "location": config.web_search.location.as_ref().map(|location| json!({
+                "country": location.country,
+                "region": location.region,
+                "city": location.city,
+                "timezone": location.timezone,
+            })),
+        },
     }))
+}
+
+fn model_projection(model: &ModelInfo) -> Value {
+    let reasoning_efforts = model
+        .parameters
+        .iter()
+        .find(|parameter| parameter.name == "effort")
+        .map(|parameter| parameter.candidates.as_slice())
+        .unwrap_or_default();
+    json!({
+        "slug": model.slug,
+        "displayName": model.display_name,
+        "description": model.description,
+        "contextWindow": model.context_window,
+        "maxOutputTokens": model.max_output_tokens,
+        "currency": model.currency,
+        "inputPricePerMTok": model.input_price_per_mtok,
+        "outputPricePerMTok": model.output_price_per_mtok,
+        "cacheReadPricePerMTok": model.cache_read_price_per_mtok,
+        "reasoningEfforts": reasoning_efforts,
+        "baseInstructions": model.base_instructions,
+    })
+}
+
+fn mcp_transport_label(transport: McpServerTransport) -> &'static str {
+    match transport {
+        McpServerTransport::Stdio => "stdio",
+        McpServerTransport::StreamableHttp => "streamableHttp",
+    }
+}
+
+fn openai_compaction_mode_label(mode: pl_studio_runtime::OpenAiCompactionMode) -> &'static str {
+    match mode {
+        pl_studio_runtime::OpenAiCompactionMode::RemoteV2 => "remoteV2",
+        pl_studio_runtime::OpenAiCompactionMode::Local => "local",
+    }
 }
 
 pub(crate) fn web_search_settings_dto(

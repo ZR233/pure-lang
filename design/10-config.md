@@ -22,7 +22,7 @@ Windows 下对应：
 
 SQLite 只保存 Studio 状态，例如项目、会话、消息、统一 interaction、agent 状态事件和应用设置，并由 `pl-studio-runtime` 通过 SeaORM 纯异步访问。`pl-core` 的正常依赖树不包含 SeaORM。provider/model/role 配置仍只由 `~/.pure/config.toml` 表达。
 
-普通对话运行时读取配置；当配置文件不存在时，`pure-studio` 设置页展示默认配置。设置页不提供全局保存或重载操作，普通设置项在用户修改后即时写入配置。独立新增/编辑页面保留本地草稿，必须点击页面内保存按钮才写入配置，取消则丢弃草稿。schema 5/6/7 配置在写入版本化备份后迁到 schema 8；无法解析、更老或迁移后无法校验的配置先备份再重建。迁移只处理产品配置，不复制数据库或会话历史。
+普通对话运行时读取配置；当配置文件不存在时，`pure-studio` 设置页展示默认配置。设置页不提供全局保存或重载操作，普通设置项在用户修改后即时写入配置。独立新增/编辑页面保留本地草稿，必须点击页面内保存按钮才写入配置，取消则丢弃草稿。schema 5–10 配置在写入版本化备份后迁到 schema 11；无法解析、更老或迁移后无法校验的配置先备份再重建。迁移只处理产品配置，不复制数据库或会话历史。schema 10 的 `remote_legacy` 压缩模式在迁移时一次性收口为 `remote_v2`。
 
 `pure-studio` 设置页的 typed 配置保存成功后必须返回 canonical config/bootstrap snapshot，由 Flutter store 合并。校验失败时只展示错误并保留当前页面状态，不覆盖原配置。Instructions 文本作为普通设置组展示时，在输入停止后自动写入 `~/.pure/config.toml`；Provider 新增/编辑等独立页面不自动保存。
 
@@ -36,7 +36,7 @@ SQLite 只保存 Studio 状态，例如项目、会话、消息、统一 interac
 
 `pl-studio-runtime` 负责：
 
-- `StudioConfig` 与 schema version 8。
+- `StudioConfig` 与 schema version 11。
 - `~/.pure/config.toml` 路径、serde TOML 解析、原子保存和默认值。
 - Studio instructions、skills、MCP、runtime 和 UI 配置。
 - 生成 session 级 instruction snapshot。
@@ -73,7 +73,7 @@ route 决定。旧版本、缺失必需路由或无效引用会触发 Studio 配
 本地 TOML 使用 `snake_case`，不同于 API wire 格式。
 
 ```toml
-schema_version = 8
+schema_version = 11
 
 [runtime]
 permission_mode = "request-approval"
@@ -166,7 +166,7 @@ catalog = "openai"
 ## 10.5 Provider 和 Model
 
 `models.providers` 可保存多个 provider，相同 preset 可重复使用；唯一性只约束 map key
-`ProviderId`。当前 StudioConfig schema 为 10，provider catalog snapshot schema 为 4。
+`ProviderId`。当前 StudioConfig schema 为 11，provider catalog snapshot schema 为 4。
 
 每个 provider 实例持久化：
 

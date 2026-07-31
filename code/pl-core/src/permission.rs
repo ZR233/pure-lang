@@ -1,16 +1,13 @@
 use serde::Deserialize;
 
 use crate::tool::WorkspaceAccess;
-use crate::turn::{
-    PermissionMode, ToolApprovalDecision, ToolApprovalPolicy, ToolApprovalRequest, TurnOptions,
-};
+use crate::turn::{PermissionMode, ToolApprovalDecision, ToolApprovalRequest, TurnOptions};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PermissionDecision {
     Approved { workspace_access: WorkspaceAccess },
     NeedsUserApproval { workspace_access: WorkspaceAccess },
     NeedsAiReview { workspace_access: WorkspaceAccess },
-    Denied { reason: String },
 }
 
 pub(crate) fn decide_tool_permission(
@@ -18,12 +15,6 @@ pub(crate) fn decide_tool_permission(
     request: &ToolApprovalRequest,
     requested_access: WorkspaceAccess,
 ) -> PermissionDecision {
-    if matches!(options.tool_approval_policy, ToolApprovalPolicy::DenyAll) {
-        return PermissionDecision::Denied {
-            reason: "tool execution denied by policy".to_string(),
-        };
-    }
-
     if crate::mcp::is_mcp_tool_name(&request.name) {
         return PermissionDecision::Approved {
             workspace_access: WorkspaceAccess::ExternalAllowed,
@@ -39,12 +30,6 @@ pub(crate) fn decide_tool_permission(
     if matches!(options.permission_mode, PermissionMode::FullAccess) {
         return PermissionDecision::Approved {
             workspace_access: WorkspaceAccess::ExternalAllowed,
-        };
-    }
-
-    if matches!(options.tool_approval_policy, ToolApprovalPolicy::Manual) {
-        return PermissionDecision::NeedsUserApproval {
-            workspace_access: requested_access,
         };
     }
 
@@ -147,48 +132,12 @@ mod tests {
     }
 
     #[test]
-    fn legacy_manual_and_deny_all_still_wrap_permission_mode() {
-        let read = request("read_file");
-        let write_stdin = request("write_stdin");
-        let manual = TurnOptions {
-            tool_approval_policy: ToolApprovalPolicy::Manual,
-            ..Default::default()
-        };
-        assert_eq!(
-            decide_tool_permission(&manual, &read, WorkspaceAccess::WorkspaceOnly,),
-            PermissionDecision::NeedsUserApproval {
-                workspace_access: WorkspaceAccess::WorkspaceOnly
-            }
-        );
-        assert_eq!(
-            decide_tool_permission(&manual, &write_stdin, WorkspaceAccess::WorkspaceOnly,),
-            PermissionDecision::Approved {
-                workspace_access: WorkspaceAccess::WorkspaceOnly
-            }
-        );
-
-        assert_eq!(
-            decide_tool_permission(
-                &TurnOptions::deny_all(),
-                &read,
-                WorkspaceAccess::WorkspaceOnly,
-            ),
-            PermissionDecision::Denied {
-                reason: "tool execution denied by policy".to_string()
-            }
-        );
-    }
-
-    #[test]
     fn mcp_tool_is_trusted_without_extra_approval() {
-        let manual = TurnOptions {
-            tool_approval_policy: ToolApprovalPolicy::Manual,
-            ..Default::default()
-        };
+        let options = TurnOptions::default();
 
         assert_eq!(
             decide_tool_permission(
-                &manual,
+                &options,
                 &request("mcp__github__search_issues"),
                 WorkspaceAccess::ExternalAllowed,
             ),

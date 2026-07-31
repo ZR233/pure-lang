@@ -252,7 +252,6 @@ mod tests {
                     timed_out: false,
                     working_directory: None,
                     denial_reason: None,
-                    activity_group_id: None,
                 },
             },
             SessionPartContent::Agent {

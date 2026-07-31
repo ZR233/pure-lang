@@ -18,7 +18,6 @@ pub type InteractionCallback =
 #[serde(rename_all = "kebab-case")]
 pub enum PermissionMode {
     #[default]
-    #[serde(alias = "workspace-write")]
     RequestApproval,
     AutoReview,
     FullAccess,
@@ -33,13 +32,12 @@ impl PermissionMode {
         }
     }
 
-    pub fn from_label(label: &str) -> Self {
+    pub fn from_label(label: &str) -> Option<Self> {
         match label {
-            "request-approval" => Self::RequestApproval,
-            "auto-review" => Self::AutoReview,
-            "workspace-write" => Self::RequestApproval,
-            "full-access" => Self::FullAccess,
-            _ => Self::RequestApproval,
+            "request-approval" => Some(Self::RequestApproval),
+            "auto-review" => Some(Self::AutoReview),
+            "full-access" => Some(Self::FullAccess),
+            _ => None,
         }
     }
 
@@ -50,15 +48,6 @@ impl PermissionMode {
     pub fn is_default(&self) -> bool {
         matches!(self, Self::RequestApproval)
     }
-}
-
-/// 工具审批策略。
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum ToolApprovalPolicy {
-    #[default]
-    AutoAllow,
-    Manual,
-    DenyAll,
 }
 
 /// 单次工具调用审批请求。
@@ -108,7 +97,6 @@ pub enum UserInputMode {
 /// workspace 外访问按权限模式请求审批。
 #[derive(Clone)]
 pub struct TurnOptions {
-    pub tool_approval_policy: ToolApprovalPolicy,
     pub permission_mode: PermissionMode,
     pub interaction_callback: Option<InteractionCallback>,
     pub cancellation_token: Option<CancellationToken>,
@@ -121,25 +109,6 @@ pub struct TurnOptions {
 }
 
 impl TurnOptions {
-    pub fn new(tool_approval_policy: ToolApprovalPolicy) -> Self {
-        Self {
-            tool_approval_policy,
-            permission_mode: PermissionMode::RequestApproval,
-            interaction_callback: None,
-            cancellation_token: None,
-            tool_execution_mode: ToolExecutionMode::ModelDefault,
-            prompt_cache_key: None,
-            user_input_mode: UserInputMode::AwaitResponse,
-            execution_policy: None,
-            checkpoint: None,
-            mailbox: None,
-        }
-    }
-
-    pub fn deny_all() -> Self {
-        Self::new(ToolApprovalPolicy::DenyAll)
-    }
-
     pub fn with_cancellation(mut self, cancellation_token: CancellationToken) -> Self {
         self.cancellation_token = Some(cancellation_token);
         self
@@ -182,20 +151,28 @@ impl TurnOptions {
 
     pub fn requires_user_approval_callback(&self) -> bool {
         matches!(self.permission_mode, PermissionMode::RequestApproval)
-            || matches!(self.tool_approval_policy, ToolApprovalPolicy::Manual)
     }
 }
 
 impl Default for TurnOptions {
     fn default() -> Self {
-        Self::new(ToolApprovalPolicy::AutoAllow)
+        Self {
+            permission_mode: PermissionMode::RequestApproval,
+            interaction_callback: None,
+            cancellation_token: None,
+            tool_execution_mode: ToolExecutionMode::ModelDefault,
+            prompt_cache_key: None,
+            user_input_mode: UserInputMode::AwaitResponse,
+            execution_policy: None,
+            checkpoint: None,
+            mailbox: None,
+        }
     }
 }
 
 impl std::fmt::Debug for TurnOptions {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TurnOptions")
-            .field("tool_approval_policy", &self.tool_approval_policy)
             .field("permission_mode", &self.permission_mode)
             .field(
                 "interaction_callback",

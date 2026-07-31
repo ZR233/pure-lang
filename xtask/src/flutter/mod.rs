@@ -64,10 +64,6 @@ impl DesktopTarget {
         }
     }
 
-    fn build_cache_dir(self, app_dir: &Path) -> PathBuf {
-        app_dir.join("build").join(self.flutter_name())
-    }
-
     fn release_artifact_dir(self, app_dir: &Path) -> PathBuf {
         match self {
             Self::Windows => app_dir
@@ -335,22 +331,7 @@ pub(crate) fn run_gui(options: RunGuiOptions) -> Result<()> {
         DriverMode::Disabled
     };
     let run_args = run_gui_args(target, &version_define, driver_mode);
-    let run_result = run_flutter(&workspace_root, &app_dir, &run_args, demo_mode);
-
-    if run_result.is_err() && options.demo_fallback && !options.demo {
-        eprintln!(
-            "Native Studio run failed. Falling back to PURE_STUDIO_DEMO=true. Original error: {}",
-            run_result.as_ref().expect_err("checked is_err")
-        );
-        let build_dir = target.build_cache_dir(&app_dir);
-        if build_dir.exists() {
-            fs::remove_dir_all(&build_dir)
-                .with_context(|| format!("failed to remove {}", build_dir.display()))?;
-        }
-        return run_flutter(&workspace_root, &app_dir, &run_args, DemoMode::Demo);
-    }
-
-    run_result
+    run_flutter(&workspace_root, &app_dir, &run_args, demo_mode)
 }
 
 fn run_gui_args(target: DesktopTarget, version_define: &str, driver_mode: DriverMode) -> Vec<&str> {

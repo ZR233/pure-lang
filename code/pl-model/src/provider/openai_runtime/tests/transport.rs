@@ -731,46 +731,6 @@ async fn responses_websocket_does_not_commit_unconsumed_completion() {
 }
 
 #[tokio::test]
-async fn legacy_compaction_uses_compact_endpoint_and_common_request_fields() {
-    let body = serde_json::json!({
-        "output": [
-            {
-                "type": "message",
-                "role": "assistant",
-                "content": [{"type": "output_text", "text": "summary"}]
-            },
-            {"type": "compaction", "encrypted_content": "encrypted"},
-            {"type": "reasoning", "summary": []}
-        ]
-    })
-    .to_string();
-    let (base_url, handle) = serve_sse_once(body).await;
-    let provider = openai_provider(base_url);
-
-    let response = provider
-        .compact_context(compaction_request(OpenAiCompactionMode::RemoteLegacy))
-        .await
-        .unwrap();
-    let captured = handle.await.unwrap();
-
-    assert_eq!(captured.request_line, "POST /responses/compact HTTP/1.1");
-    assert_eq!(captured.headers["authorization"], "Bearer test-token");
-    assert_eq!(captured.headers["x-provider-test"], "present");
-    assert_eq!(captured.body["instructions"], "canonical instructions");
-    assert_eq!(captured.body["parallel_tool_calls"], true);
-    assert_eq!(captured.body["prompt_cache_key"], "cache-key");
-    assert_eq!(captured.body["reasoning"]["effort"], "medium");
-    assert_eq!(captured.body["tools"][0]["name"], "read_file");
-    assert_eq!(response.input.len(), 2);
-    assert!(
-        response
-            .input
-            .last()
-            .is_some_and(ModelContextItem::is_compaction)
-    );
-}
-
-#[tokio::test]
 async fn v2_compaction_uses_responses_trigger_feature_and_completed_usage() {
     let sse_body = concat!(
         "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"ignored\"}]}}\n\n",

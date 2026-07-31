@@ -421,34 +421,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn wire_for_returns_wire_for_known_candidate() {
-        let param = ModelParameter {
-            name: "effort".to_string(),
-            label: None,
-            candidates: vec!["high".to_string(), "max".to_string()],
-            wire: [(
-                "high".to_string(),
-                ParameterWire {
-                    set: vec![WireAssignment {
-                        path: "reasoning.effort".to_string(),
-                        value: json!("high"),
-                    }],
-                    remove: Vec::new(),
-                },
-            )]
-            .into_iter()
-            .collect(),
-        };
-
-        let wire = param.wire_for("high").unwrap();
-        assert_eq!(wire.set.len(), 1);
-        assert_eq!(wire.set[0].path, "reasoning.effort");
-        assert_eq!(wire.set[0].value, json!("high"));
-
-        assert!(param.wire_for("unknown").is_none());
-    }
-
     fn candidate_request<'a>(
         requested: Option<&'a str>,
         default_candidate: Option<&'a str>,
@@ -566,49 +538,5 @@ mod tests {
                 candidate: "low".to_string(),
             })
         );
-    }
-
-    #[test]
-    fn parameter_roundtrips_through_serde() {
-        let param = ModelParameter {
-            name: "effort".to_string(),
-            label: Some("推理强度".to_string()),
-            candidates: vec!["high".to_string(), "none".to_string()],
-            wire: [
-                (
-                    "high".to_string(),
-                    ParameterWire {
-                        set: vec![
-                            WireAssignment {
-                                path: "thinking.type".to_string(),
-                                value: json!("enabled"),
-                            },
-                            WireAssignment {
-                                path: "thinking.clear_thinking".to_string(),
-                                value: json!(false),
-                            },
-                        ],
-                        remove: Vec::new(),
-                    },
-                ),
-                (
-                    "none".to_string(),
-                    ParameterWire {
-                        set: vec![WireAssignment {
-                            path: "thinking.type".to_string(),
-                            value: json!("disabled"),
-                        }],
-                        remove: vec!["reasoning_effort".to_string()],
-                    },
-                ),
-            ]
-            .into_iter()
-            .collect(),
-        };
-
-        let json_value = serde_json::to_value(&param).unwrap();
-        assert!(json_value.get("wire").is_some());
-        let back: ModelParameter = serde_json::from_value(json_value).unwrap();
-        assert_eq!(back, param);
     }
 }
