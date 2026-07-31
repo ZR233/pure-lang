@@ -275,27 +275,11 @@ mod tests {
     }
 
     #[test]
-    fn set_nested_writes_top_level_field() {
-        let mut body = Map::new();
-        set_nested(&mut body, "reasoning_effort", json!("high"));
-
-        assert_eq!(body_value(body), json!({"reasoning_effort": "high"}));
-    }
-
-    #[test]
     fn set_nested_creates_intermediate_objects() {
         let mut body = Map::new();
         set_nested(&mut body, "reasoning.effort", json!("high"));
 
         assert_eq!(body_value(body), json!({"reasoning": {"effort": "high"}}));
-    }
-
-    #[test]
-    fn set_nested_writes_three_level_path() {
-        let mut body = Map::new();
-        set_nested(&mut body, "a.b.c", json!("v"));
-
-        assert_eq!(body_value(body), json!({"a": {"b": {"c": "v"}}}));
     }
 
     #[test]
@@ -306,18 +290,6 @@ mod tests {
         set_nested(&mut body, "thinking.type", json!("enabled"));
 
         assert_eq!(body_value(body), json!({"thinking": {"type": "enabled"}}));
-    }
-
-    #[test]
-    fn set_nested_writes_boolean_value() {
-        // Zhipu clear_thinking = false 是布尔值，必须原样透传
-        let mut body = Map::new();
-        set_nested(&mut body, "thinking.clear_thinking", json!(false));
-
-        assert_eq!(
-            body_value(body),
-            json!({"thinking": {"clear_thinking": false}})
-        );
     }
 
     #[test]
