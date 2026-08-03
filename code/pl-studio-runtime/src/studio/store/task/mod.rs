@@ -1,15 +1,11 @@
 mod allocation;
 mod completion;
-mod continuation;
-#[cfg(test)]
-pub(crate) use continuation::ContinuationSnapshotTestBarrier;
-mod delivery;
-mod delivery_recovery;
+mod discard;
 mod merge;
 mod outcome;
 mod recovery;
 mod review;
-mod terminal;
+mod work_completion;
 mod work_unit;
 
 use anyhow::{Context, Result, bail};
@@ -188,28 +184,57 @@ impl StudioStore {
         next: TaskRunPhase,
         status_message: Option<String>,
     ) -> Result<TaskRunRecord> {
+        self.transition_task_run_after_read(task_run_id, next, status_message, None)
+            .await
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn transition_task_run_after_read(
+        &self,
+        task_run_id: &str,
+        next: TaskRunPhase,
+        status_message: Option<String>,
+        read_barrier: Option<&tokio::sync::Barrier>,
+    ) -> Result<TaskRunRecord> {
         let current = entities::task_run::Entity::find_by_id(task_run_id.to_string())
             .one(&self.db)
             .await?
             .context("task run not found")?;
         let current_phase = TaskRunPhase::from_str(&current.phase)
             .with_context(|| format!("invalid stored task phase: {}", current.phase))?;
-        if !current_phase.can_transition_to(next) {
+        if current_phase != next && !current_phase.can_transition_to(next) {
             bail!(
                 "invalid task phase transition: {} -> {}",
                 current_phase.as_str(),
                 next.as_str()
             );
         }
+        if let Some(read_barrier) = read_barrier {
+            read_barrier.wait().await;
+        }
         let terminal_generation = current.task_generation;
-        let mut active: entities::task_run::ActiveModel = current.into();
-        active.phase = Set(next.as_str().to_string());
-        active.status_message = Set(status_message);
+        let expected_phase = current.phase;
+        let mut active = entities::task_run::ActiveModel {
+            phase: Set(next.as_str().to_string()),
+            status_message: Set(status_message),
+            updated_at: Set(unix_seconds()),
+            ..Default::default()
+        };
         if next.is_terminal() {
             active.terminal_generation = Set(Some(terminal_generation));
         }
-        active.updated_at = Set(unix_seconds());
-        task_run_record(active.update(&self.db).await?)
+        let updated = entities::task_run::Entity::update_many()
+            .set(active)
+            .filter(entities::task_run::Column::Id.eq(task_run_id.to_string()))
+            .filter(entities::task_run::Column::Phase.eq(expected_phase))
+            .exec(&self.db)
+            .await?;
+        if updated.rows_affected != 1 {
+            bail!("task phase changed concurrently");
+        }
+        self.read_task_run(task_run_id)
+            .await?
+            .context("task run disappeared after phase transition")
     }
 
     pub(crate) async fn compare_and_set_task_head(

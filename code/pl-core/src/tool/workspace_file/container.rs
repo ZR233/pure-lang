@@ -244,10 +244,12 @@ where
                 ),
             ));
         }
+        let listed_root = request.path.trim_end_matches('/');
         let mut files = output
             .stdout
             .lines()
             .filter(|line| !line.trim().is_empty())
+            .filter(|line| line.trim_end_matches('/') != listed_root)
             .map(str::to_string)
             .collect::<std::collections::BTreeSet<_>>()
             .into_iter()

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -32,7 +34,10 @@ class ComposerDock extends ConsumerWidget {
               maxWidth: StudioLayout.conversationWidth,
             ),
             child: interaction == null
-                ? workspace.composerMode == AgentComposerMode.runtimeDriven
+                ? workspace.isTaskPaused
+                      ? _TaskResumeDock(workspace: workspace)
+                      : workspace.composerMode ==
+                            AgentComposerMode.runtimeDriven
                       ? _RuntimeDrivenAgentDock(workspace: workspace)
                       : _PromptComposer(workspace: workspace)
                 : _InteractionDock(
@@ -81,6 +86,87 @@ class _RuntimeDrivenAgentDock extends StatelessWidget {
   }
 }
 
+class _TaskResumeDock extends ConsumerWidget {
+  const _TaskResumeDock({required this.workspace});
+
+  final AgentWorkspaceView workspace;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final composer = workspace.composer;
+    final colors = Theme.of(context).colorScheme;
+    return StudioPanel(
+      key: StudioDriverKeys.taskPaused,
+      backgroundColor: context.studioPaper2,
+      borderColor: context.studioLine,
+      radius: StudioRadii.lg,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.pause_circle_outline,
+                size: 20,
+                color: context.studioInkSoft,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      context.l10n.taskResumeTitle,
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      context.l10n.taskResumeBody,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: context.studioInkSoft,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              FilledButton.icon(
+                key: StudioDriverKeys.taskResume,
+                onPressed: composer.isSubmissionPending
+                    ? null
+                    : () => unawaited(
+                        ref
+                            .read(studioControllerProvider.notifier)
+                            .resumeTask(workspace.sessionId),
+                      ),
+                icon: composer.isSubmissionPending
+                    ? const SizedBox.square(
+                        dimension: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.play_arrow),
+                label: Text(context.l10n.taskResumeAction),
+              ),
+            ],
+          ),
+          if (composer.error case final error?)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                error,
+                key: StudioDriverKeys.composerError,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: colors.error),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 class _PromptComposer extends ConsumerStatefulWidget {
   const _PromptComposer({required this.workspace});
 
@@ -96,13 +182,13 @@ class _PromptComposerState extends ConsumerState<_PromptComposer> {
   @override
   void initState() {
     super.initState();
-    _controller = TextEditingController(text: widget.workspace.composerText);
+    _controller = TextEditingController(text: widget.workspace.composer.draft);
   }
 
   @override
   void didUpdateWidget(covariant _PromptComposer oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final nextText = widget.workspace.composerText;
+    final nextText = widget.workspace.composer.draft;
     if (nextText != _controller.text) {
       _controller.value = TextEditingValue(
         text: nextText,
@@ -120,9 +206,11 @@ class _PromptComposerState extends ConsumerState<_PromptComposer> {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
+    final composer = widget.workspace.composer;
     final canSubmit =
-        widget.workspace.composerText.trim().isNotEmpty &&
-        !widget.workspace.isBusy;
+        composer.draft.trim().isNotEmpty &&
+        !widget.workspace.isBusy &&
+        !composer.isSubmissionPending;
     return StudioPanel(
       backgroundColor: colors.surfaceContainerLowest,
       borderColor: colors.outlineVariant.withValues(alpha: 0.86),
@@ -135,6 +223,7 @@ class _PromptComposerState extends ConsumerState<_PromptComposer> {
           TextField(
             key: StudioDriverKeys.composerInput,
             controller: _controller,
+            enabled: !composer.isSubmissionPending,
             minLines: 1,
             maxLines: 6,
             decoration: InputDecoration(
@@ -156,12 +245,28 @@ class _PromptComposerState extends ConsumerState<_PromptComposer> {
                 .updateComposer(widget.workspace.sessionId, value),
             onSubmitted: (_) {
               if (canSubmit) {
-                ref
-                    .read(studioControllerProvider.notifier)
-                    .submitComposer(widget.workspace.sessionId);
+                unawaited(
+                  ref
+                      .read(studioControllerProvider.notifier)
+                      .submitComposer(widget.workspace.sessionId),
+                );
               }
             },
           ),
+          if (composer.error case final error?)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 2, 8, 6),
+                child: Text(
+                  error,
+                  key: StudioDriverKeys.composerError,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: colors.error),
+                ),
+              ),
+            ),
           Row(
             children: [
               _PermissionSelector(mode: widget.workspace.permissionMode),
@@ -183,11 +288,19 @@ class _PromptComposerState extends ConsumerState<_PromptComposer> {
                     backgroundColor: StudioColors.clay,
                     foregroundColor: Colors.white,
                   ),
-                  icon: const Icon(Icons.arrow_upward),
+                  icon: composer.isSubmissionPending
+                      ? const SizedBox.square(
+                          key: StudioDriverKeys.composerPending,
+                          dimension: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.arrow_upward),
                   onPressed: canSubmit
-                      ? () => ref
-                            .read(studioControllerProvider.notifier)
-                            .submitComposer(widget.workspace.sessionId)
+                      ? () => unawaited(
+                          ref
+                              .read(studioControllerProvider.notifier)
+                              .submitComposer(widget.workspace.sessionId),
+                        )
                       : null,
                 ),
             ],

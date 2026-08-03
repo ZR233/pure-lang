@@ -130,7 +130,7 @@ impl TaskCoordinator {
             .read_task_run(&requested.id)
             .await?
             .context("task run disappeared after stop request")?;
-        if let Some(outcome) = self.waiting_delivery_outcome(&run).await? {
+        if let Some(outcome) = self.awaiting_completion_outcome(&run).await? {
             return Ok(TaskStopOutput {
                 status: "deferred",
                 run,
@@ -148,10 +148,10 @@ impl TaskCoordinator {
                 .begin_task_stop(&run.id, &run.expected_head, requested.task_generation)
                 .await?
         };
-        close_task_children(runtime, session_id).await?;
         self.store
             .settle_agents_for_task_stop(&run.id, requested.task_generation, reason.as_str())
             .await?;
+        close_task_children(runtime, session_id).await?;
         let branch_guard = self.lock_branch_mutation().await;
         let stopped = self
             .stop_task_locked(
@@ -225,10 +225,10 @@ impl TaskCoordinator {
             .read_active_task_run_for_session(session_id)
             .await?;
         self.validate_stop_request(&run).await?;
-        if let Some(outcome) = self.waiting_delivery_outcome(&run).await? {
+        if let Some(outcome) = self.awaiting_completion_outcome(&run).await? {
             bail!(
-                "task_stop deferred: executor {} finished without submit_delivery; \
-                 recover that agent delivery before stopping the task",
+                "task_stop deferred: executor {} finished without report_completion; \
+                 request an explicit completion before stopping the task",
                 outcome.agent_id
             );
         }
@@ -249,7 +249,7 @@ impl TaskCoordinator {
         Ok(run)
     }
 
-    async fn stop_task_locked(
+    pub(super) async fn stop_task_locked(
         &self,
         task_run_id: &str,
         expected_generation: u64,
@@ -263,9 +263,9 @@ impl TaskCoordinator {
             .await?
             .context("task run not found while stopping")?;
         self.validate_stop_request(&run).await?;
-        if let Some(outcome) = self.waiting_delivery_outcome(&run).await? {
+        if let Some(outcome) = self.awaiting_completion_outcome(&run).await? {
             bail!(
-                "task_stop deferred: executor {} still requires delivery recovery",
+                "task_stop deferred: executor {} still requires report_completion",
                 outcome.agent_id
             );
         }
@@ -294,13 +294,23 @@ impl TaskCoordinator {
             .cancel_task_and_release_lease(&run.id, &run.expected_head, expected_generation, reason)
             .await?;
         self.release_owned_process_lease(&run.id);
+        self.publish_terminal_fact(&cancelled.id);
         Ok(cancelled)
     }
 
-    async fn waiting_delivery_outcome(
+    async fn awaiting_completion_outcome(
         &self,
         run: &TaskRunRecord,
     ) -> Result<Option<super::AgentOutcomeRecord>> {
+        let work_unit = self
+            .store
+            .list_work_units(&run.id)
+            .await?
+            .into_iter()
+            .find(|work_unit| work_unit.status == super::WorkUnitStatus::AwaitingCompletion);
+        let Some(work_unit) = work_unit else {
+            return Ok(None);
+        };
         Ok(self
             .store
             .list_agent_outcomes(&run.id)
@@ -308,8 +318,7 @@ impl TaskCoordinator {
             .into_iter()
             .find(|outcome| {
                 outcome.role == "executor"
-                    && outcome.status == AgentOutcomeStatus::WaitingForDelivery
-                    && outcome.delivery.is_none()
+                    && outcome.work_unit_id.as_deref() == Some(work_unit.id.as_str())
             }))
     }
 
@@ -365,21 +374,12 @@ async fn interrupt_task_agents(
         })
         .collect::<Vec<_>>();
     for child in &children {
-        if let (Some(turn_id), Some(_)) = (
-            child.active_turn_id.clone(),
-            child.active_session_id.as_ref(),
-        ) {
+        if let Some(turn_id) = child.active_turn_id.clone() {
             runtime
                 .cancel_turn(child.identity.id.clone(), turn_id)
                 .await
                 .map_err(|error| anyhow::anyhow!(error.to_string()))?;
         }
-    }
-    for child in children {
-        runtime
-            .wait_timeout(child.identity.id, std::time::Duration::from_secs(10))
-            .await
-            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
     }
     Ok(())
 }

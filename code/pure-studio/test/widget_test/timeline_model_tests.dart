@@ -503,6 +503,103 @@ void registerTimelineModelTests() {
     );
   });
 
+  test('background agent snapshots stay normalized by their own session', () {
+    final state = reduceStudioEvent(
+      _emptyState(),
+      StudioBridgeEvent(
+        eventId: 'background-agent-snapshot',
+        sessionId: 'session-2',
+        sequence: BigInt.one,
+        createdAt: _fixtureDate(1),
+        payload: AgentChangedPayload(
+          agent: StudioAgentView(
+            id: 'agent-background',
+            sessionId: 'session-2',
+            path: 'root/executor',
+            role: 'executor',
+            task: 'Implement in background',
+            status: 'running',
+            updatedAt: _fixtureDate(1),
+          ),
+        ),
+      ),
+    ).state;
+
+    expect(state.selectedSessionId, 'session-1');
+    expect(state.selectedAgents, isEmpty);
+    expect(
+      state.agentsBySession['session-2']!['agent-background']!.status,
+      'running',
+    );
+    expect(state.runtimesBySession['session-2']!.agentCount, 1);
+  });
+
+  test(
+    'agent directory product event updates root and canonical sessions',
+    () async {
+      final api = _FakeStudioApi(_emptyState());
+      final container = ProviderContainer(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+      );
+      addTearDown(container.dispose);
+
+      await container.read(studioControllerProvider.future);
+      api.emitGlobal(
+        StudioBridgeEvent.fromProduct(
+          frb.BridgeProductEventEnvelope(
+            eventId: 'agent-directory-1',
+            projectId: 'project-1',
+            sequence: BigInt.from(12),
+            createdAt: 12,
+            payload: frb.BridgeProductEventPayload.agentDirectoryChanged(
+              rootSessionId: 'session-1',
+              agent: frb.BridgeAgentDirectoryEntryDto(
+                id: 'agent-background',
+                sessionId: 'session-2',
+                rootSessionId: 'session-1',
+                path: 'root/executor',
+                role: 'executor',
+                task: 'Implement in background',
+                status: 'running',
+                summary: 'Implemented the runtime boundary',
+                depth: 1,
+                lifecycle: 'active',
+                activity: 'waiting',
+                progress: frb.BridgeAgentProgressDto(
+                  stage: 'readyForReview',
+                  summary: 'Implementation complete',
+                  nextStep: 'Await delivery review',
+                  revision: BigInt.two,
+                  updatedAt: 10,
+                ),
+                updatedAt: 10,
+                summaryAgeSeconds: BigInt.two,
+              ),
+            ),
+          ),
+        ),
+      );
+      await pumpEventQueue();
+
+      final state = container.read(studioControllerProvider).requireValue;
+      final rootAgent =
+          state.agentsBySession['session-1']!['agent-background']!;
+      final canonicalAgent =
+          state.agentsBySession['session-2']!['agent-background']!;
+      expect(state.selectedSessionId, 'session-1');
+      expect(identical(rootAgent, canonicalAgent), isTrue);
+      expect(rootAgent.rootSessionId, 'session-1');
+      expect(rootAgent.lifecycle, 'active');
+      expect(rootAgent.activity, 'waiting');
+      expect(rootAgent.progress?.stage, 'readyForReview');
+      expect(rootAgent.progress?.revision, 2);
+      expect(rootAgent.summaryAgeSeconds, 2);
+      expect(state.runtimesBySession['session-1']!.agentCount, 1);
+      expect(state.runtimesBySession['session-2']!.agentCount, 1);
+      expect(state.eventCursorsBySession['session-2'], isNull);
+    },
+  );
+
   test(
     'canonical session snapshot restores agent timeline events for projection',
     () {
@@ -629,5 +726,45 @@ void registerTimelineModelTests() {
     expect(state.selectedAgents.single.id, 'agent-1');
     expect(state.selectedAgents.single.path, 'root/worker');
     expect(state.selectedAgents.single.summary, 'halfway');
+  });
+
+  test('canonical snapshot updates a background agent session', () {
+    final state = applyCanonicalSessionSnapshot(
+      _emptyState(),
+      StudioSessionSnapshot(
+        sessionId: 'session-background',
+        throughSequence: 9,
+        messages: const [],
+        parts: const {},
+        interactions: const [],
+        agents: {
+          'agent-background': StudioAgentView(
+            id: 'agent-background',
+            sessionId: 'session-background',
+            path: '/root/executor',
+            role: 'executor',
+            task: 'Implement',
+            status: 'running',
+            summary: 'working',
+            depth: 1,
+            updatedAt: _fixtureDate(5),
+          ),
+        },
+        timelineEvents: const {},
+        runtime: null,
+        turn: null,
+      ),
+    );
+
+    expect(state.selectedSessionId, 'session-1');
+    expect(state.agentsBySession['session-background']!.keys, {
+      'agent-background',
+    });
+    expect(state.runtimesBySession['session-background']!.agentCount, 1);
+    expect(state.eventCursorsBySession['session-background'], 9);
+    expect(
+      state.workspaceSyncBySession['session-background'],
+      AgentWorkspaceSyncState.ready,
+    );
   });
 }

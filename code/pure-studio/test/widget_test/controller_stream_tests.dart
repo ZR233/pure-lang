@@ -20,7 +20,7 @@ void registerControllerStreamTests() {
           .submitComposer('session-1');
 
       var state = container.read(studioControllerProvider).requireValue;
-      expect(state.composerText, isEmpty);
+      expect(state.composer.draft, isEmpty);
       expect(state.turn, isNull);
       expect(state.selectedMessages, isEmpty);
       expect(api.sessionSubscriptions, [
@@ -71,6 +71,259 @@ void registerControllerStreamTests() {
       expect(state.selectedTimelineRows.single.part!.text, 'hello');
     },
   );
+
+  test(
+    'composer keeps one submit in flight until canonical turn start',
+    () async {
+      final api = _FakeStudioApi(_emptyState());
+      final blocked = Completer<SubmitPromptReceipt>();
+      api.blockedPromptSubmit = blocked;
+      final container = ProviderContainer(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+      );
+      addTearDown(container.dispose);
+
+      await container.read(studioControllerProvider.future);
+      final controller = container.read(studioControllerProvider.notifier);
+      controller.updateComposer('session-1', 'hello');
+
+      final first = controller.submitComposer('session-1');
+      await pumpEventQueue();
+      var state = container.read(studioControllerProvider).requireValue;
+      expect(state.composer.draft, 'hello');
+      expect(state.composer.phase, ComposerSubmissionPhase.submitting);
+
+      await controller.submitComposer('session-1');
+      expect(api.submitPromptCount, 1);
+
+      blocked.complete(
+        const SubmitPromptReceipt(
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          cursor: 1,
+        ),
+      );
+      await first;
+      state = container.read(studioControllerProvider).requireValue;
+      expect(state.composer.draft, isEmpty);
+      expect(state.composer.phase, ComposerSubmissionPhase.pendingStart);
+
+      api.emitSession(
+        _turnChangedEvent(
+          sessionId: 'session-1',
+          state: const StudioTurnState.inProgress(StudioTurnActivity.preparing),
+        ),
+      );
+      await pumpEventQueue();
+      state = container.read(studioControllerProvider).requireValue;
+      expect(state.composer.phase, ComposerSubmissionPhase.idle);
+    },
+  );
+
+  test(
+    'composer restores the exact draft and exposes submit failure',
+    () async {
+      final api = _FakeStudioApi(_emptyState())
+        ..submitPromptError = Exception('bridge submit failed');
+      final container = ProviderContainer(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+      );
+      addTearDown(container.dispose);
+
+      await container.read(studioControllerProvider.future);
+      final controller = container.read(studioControllerProvider.notifier);
+      controller.updateComposer('session-1', '  exact prompt  ');
+      await controller.submitComposer('session-1');
+
+      var state = container.read(studioControllerProvider).requireValue;
+      expect(state.composer.draft, '  exact prompt  ');
+      expect(state.composer.phase, ComposerSubmissionPhase.idle);
+      expect(state.composer.error, contains('bridge submit failed'));
+
+      controller.updateComposer('session-1', 'retry prompt');
+      state = container.read(studioControllerProvider).requireValue;
+      expect(state.composer.draft, 'retry prompt');
+      expect(state.composer.error, isNull);
+    },
+  );
+
+  test('composer ignores stale submission revisions', () {
+    final first = const ComposerSessionState.idle(
+      draft: 'first',
+    ).beginSubmission();
+    final firstRevision = first.submissionRevision;
+    final accepted = first.accept(
+      const SubmitPromptReceipt(
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        cursor: 1,
+      ),
+      submissionRevision: firstRevision,
+    );
+    final settled = accepted.observeTurn(
+      _testTurn(
+        sessionId: 'session-1',
+        state: const StudioTurnState.inProgress(StudioTurnActivity.preparing),
+      ),
+    );
+    final second = settled.updateDraft('second').beginSubmission();
+
+    expect(second.submissionRevision, firstRevision + 1);
+    expect(
+      second.fail(
+        Exception('stale failure'),
+        submissionRevision: firstRevision,
+      ),
+      same(second),
+    );
+    expect(
+      second.accept(
+        const SubmitPromptReceipt(
+          sessionId: 'session-1',
+          turnId: 'stale-turn',
+          cursor: 2,
+        ),
+        submissionRevision: firstRevision,
+      ),
+      same(second),
+    );
+  });
+
+  test('composer rejects a receipt for another session', () async {
+    final api = _FakeStudioApi(_emptyState())
+      ..submitReceiptSessionId = 'session-other';
+    final container = ProviderContainer(
+      overrides: [studioApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+
+    await container.read(studioControllerProvider.future);
+    final controller = container.read(studioControllerProvider.notifier);
+    controller.updateComposer('session-1', 'exact prompt');
+    await controller.submitComposer('session-1');
+
+    final composer = container
+        .read(studioControllerProvider)
+        .requireValue
+        .composer;
+    expect(composer.phase, ComposerSubmissionPhase.idle);
+    expect(composer.draft, 'exact prompt');
+    expect(composer.error, contains('does not match session-1'));
+  });
+
+  test('paused Task resume is explicit and single-flight', () async {
+    final api = _FakeStudioApi(_pausedTaskState());
+    final blocked = Completer<SubmitPromptReceipt>();
+    api.blockedTaskResume = blocked;
+    final container = ProviderContainer(
+      overrides: [studioApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+
+    await container.read(studioControllerProvider.future);
+    final controller = container.read(studioControllerProvider.notifier);
+    var state = container.read(studioControllerProvider).requireValue;
+    expect(
+      state.selectedAgentWorkspace!.rootSession.agentStatus,
+      'interrupted',
+    );
+    expect(state.selectedAgentWorkspace!.runtime.task!.phase, 'implementing');
+    expect(state.selectedAgentWorkspace!.isTaskPaused, isTrue);
+
+    final first = controller.resumeTask('session-1');
+    await pumpEventQueue();
+
+    state = container.read(studioControllerProvider).requireValue;
+    expect(state.composer.phase, ComposerSubmissionPhase.submitting);
+    expect(api.resumeTaskCount, 1);
+    expect(api.resumedTaskSessionIds, ['session-1']);
+    expect(api.submittedPrompts, isEmpty);
+
+    await controller.resumeTask('session-1');
+    expect(api.resumeTaskCount, 1);
+
+    blocked.complete(
+      const SubmitPromptReceipt(
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        cursor: 1,
+      ),
+    );
+    await first;
+    state = container.read(studioControllerProvider).requireValue;
+    expect(state.composer.phase, ComposerSubmissionPhase.pendingStart);
+
+    api.emitSession(
+      _turnChangedEvent(
+        sessionId: 'session-1',
+        state: const StudioTurnState.inProgress(StudioTurnActivity.preparing),
+      ),
+    );
+    await pumpEventQueue();
+    state = container.read(studioControllerProvider).requireValue;
+    expect(state.composer.phase, ComposerSubmissionPhase.idle);
+  });
+
+  test('canonical events reconcile composers for every session', () async {
+    final childSubmitting = const ComposerSessionState.idle(
+      draft: 'child prompt',
+    ).beginSubmission();
+    final childPending = childSubmitting.accept(
+      const SubmitPromptReceipt(
+        sessionId: 'session-2',
+        turnId: 'turn-child',
+        cursor: 1,
+      ),
+      submissionRevision: childSubmitting.submissionRevision,
+    );
+    final api = _FakeStudioApi(
+      _emptyState().copyWith(
+        composersBySession: {
+          'session-1': const ComposerSessionState.idle(draft: 'planner draft'),
+          'session-2': childPending,
+        },
+        turnsBySession: {
+          'session-2': _testTurn(
+            sessionId: 'session-2',
+            turnId: 'turn-child',
+            state: const StudioTurnState.inProgress(
+              StudioTurnActivity.thinking,
+            ),
+          ),
+        },
+      ),
+    );
+    final container = ProviderContainer(
+      overrides: [studioApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+
+    await container.read(studioControllerProvider.future);
+    api.emitSession(
+      _turnChangedEvent(
+        sessionId: 'session-1',
+        state: const StudioTurnState.inProgress(StudioTurnActivity.preparing),
+      ),
+    );
+    await pumpEventQueue();
+
+    expect(
+      container
+          .read(studioControllerProvider)
+          .requireValue
+          .composersBySession['session-2']!
+          .phase,
+      ComposerSubmissionPhase.idle,
+    );
+    expect(
+      container
+          .read(studioControllerProvider)
+          .requireValue
+          .composersBySession['session-1']!
+          .draft,
+      'planner draft',
+    );
+  });
 
   test('timeline deltas use overlay revision guards', () async {
     final api = _FakeStudioApi(_emptyState());

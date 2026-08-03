@@ -14,9 +14,7 @@ StudioState _stateFromTypedSnapshot({
   required List<PendingInteraction> interactions,
   List<StudioRecoveryIssue> recoveryIssues = const [],
   required SessionRuntimeView runtime,
-  required Map<String, Object?> config,
-  required Map<String, Object?> generalSettings,
-  frb.BridgeWebSearchSettingsDto? webSearch,
+  required frb.BridgeStudioSettingsDto settings,
   required int eventNextSequence,
 }) {
   final messagesBySession = <String, List<TimelineMessage>>{};
@@ -53,25 +51,21 @@ StudioState _stateFromTypedSnapshot({
       partOverlaysBySession: const {},
       agentTimelineEventsBySession: agentEventsBySession,
       agentsBySession: agentsBySession,
-      providers: _providersFromConfig(config),
-      defaultProviderId: _defaultProviderIdFromConfig(config),
-      roles: _rolesFromConfig(config),
-      mcpServers: _mcpServersFromConfig(config),
-      instructions: _instructionsFromConfig(config),
-      skills: _skillsFromConfig(config),
-      general: _generalFromJson(generalSettings),
-      webSearch: webSearch == null
-          ? const WebSearchSettingsView()
-          : _webSearchFromFrb(webSearch),
+      providers: settings.providers.map(_providerSettingsFromFrb).toList(),
+      defaultProviderId: settings.defaultProviderId,
+      roles: settings.roles.map(_roleSettingsFromFrb).toList(),
+      mcpServers: settings.mcpServers.map(_mcpSettingsFromFrb).toList(),
+      instructions: _instructionsSettingsFromFrb(settings.instructions),
+      skills: _skillsSettingsFromFrb(settings.skills),
+      general: _generalSettingsFromFrb(settings.general),
+      webSearch: _webSearchFromFrb(settings.webSearch),
       selectedProjectId: selectedProjectId,
       selectedSessionId: selectedSessionId,
       selectedRootSessionId: sessions
           .where((session) => session.id == selectedSessionId)
           .firstOrNull
           ?.effectiveRootSessionId,
-      permissionMode: _permissionMode(
-        _map(config['runtime'])['permissionMode'],
-      ),
+      permissionMode: _permissionMode(settings.permissionMode),
       turnsBySession: const {},
       runtimesBySession: selectedSessionId == null
           ? const {}

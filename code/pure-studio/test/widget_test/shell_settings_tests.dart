@@ -16,13 +16,103 @@ void registerShellSettingsTests() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('New session'));
+    expect(find.byKey(StudioDriverKeys.newSession), findsOneWidget);
+    await tester.tap(find.byKey(StudioDriverKeys.newSession));
     await tester.pump();
     expect(api.createSessionCount, 1);
 
     await tester.tap(find.byTooltip('Archive session'));
     await tester.pump();
     expect(api.archivedSessionId, 'session-1');
+  });
+
+  testWidgets('driver project path dialog opens the entered project', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _FakeStudioApi(_emptyState());
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          studioApiProvider.overrideWithValue(api),
+          projectDirectoryPickerProvider.overrideWithValue(
+            showDriverProjectPathDialog,
+          ),
+        ],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(StudioDriverKeys.openProject));
+    await tester.pumpAndSettle();
+    expect(find.byKey(StudioDriverKeys.projectPathDialog), findsOneWidget);
+
+    const path = r'C:\workspace\shooter';
+    await tester.enterText(find.byKey(StudioDriverKeys.projectPathInput), path);
+    await tester.pump();
+    expect(
+      tester
+          .widget<TextField>(find.byKey(StudioDriverKeys.projectPathInput))
+          .controller
+          ?.text,
+      path,
+    );
+
+    await tester.tap(find.byKey(StudioDriverKeys.projectPathSubmit));
+    await tester.pumpAndSettle();
+    expect(api.openedProjectPath, path);
+    expect(find.byKey(StudioDriverKeys.projectPathDialog), findsNothing);
+  });
+
+  testWidgets('busy session does not block creating another session', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _FakeStudioApi(
+      _emptyState().copyWith(
+        turnsBySession: {
+          'session-1': _testTurn(
+            sessionId: 'session-1',
+            state: const StudioTurnState.inProgress(
+              StudioTurnActivity.waitingForUserInput,
+            ),
+          ),
+        },
+      ),
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final newSession = tester.widget<IconButton>(
+      find.descendant(
+        of: find.byKey(StudioDriverKeys.newSession),
+        matching: find.byType(IconButton),
+      ),
+    );
+    expect(newSession.onPressed, isNotNull);
+
+    await tester.tap(find.byKey(StudioDriverKeys.newSession));
+    await tester.pump();
+    expect(api.createSessionCount, 1);
+
+    final archiveSession = tester.widget<IconButton>(
+      find.widgetWithIcon(IconButton, Icons.archive_outlined),
+    );
+    expect(archiveSession.onPressed, isNull);
   });
 
   testWidgets('sidebar footer uses aligned icon actions in zh Hans', (
@@ -57,6 +147,7 @@ void registerShellSettingsTests() {
     final settings = find.widgetWithIcon(IconButton, Icons.settings);
 
     expect(sidebar, findsOneWidget);
+    expect(find.byKey(StudioDriverKeys.openProject), findsOneWidget);
     expect(find.byTooltip('新建会话'), findsOneWidget);
     expect(find.byTooltip('打开项目'), findsOneWidget);
     expect(find.byTooltip('设置'), findsOneWidget);
@@ -135,7 +226,7 @@ void registerShellSettingsTests() {
     final updatedAt = DateTime.fromMillisecondsSinceEpoch(1);
     final api = _FakeStudioApi(
       _stateWithPlannerModels().copyWith(
-        runtimesBySession: const {
+        runtimesBySession: {
           'session-1': SessionRuntimeView(
             model: 'planner/local',
             contextTokens: 42,
@@ -183,9 +274,20 @@ void registerShellSettingsTests() {
     await tester.pumpAndSettle();
 
     expect(find.byTooltip('Session mode'), findsOneWidget);
-    expect(find.byTooltip('Executor model'), findsOneWidget);
-    expect(find.byTooltip('Planner model'), findsNothing);
+    expect(find.byKey(StudioDriverKeys.sessionMode), findsOneWidget);
+    await tester.tap(find.byKey(StudioDriverKeys.sessionMode));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(StudioDriverKeys.sessionModeOption('task')),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(StudioDriverKeys.sessionModeOption('task')));
+    await tester.pumpAndSettle();
+    expect(api.sessionModeUpdate, StudioMode.task);
+    expect(find.byTooltip('Executor model'), findsNothing);
+    expect(find.byTooltip('Planner model'), findsOneWidget);
     expect(find.byTooltip('Reasoning effort'), findsOneWidget);
+    expect(find.byKey(StudioDriverKeys.reasoningEffort), findsOneWidget);
     expect(find.byType(StatusBarItem), findsWidgets);
     final contextReadout = find.bySemanticsLabel('Context');
     expect(contextReadout, findsOneWidget);
@@ -329,7 +431,7 @@ void registerShellSettingsTests() {
 
     final api = _FakeStudioApi(
       _stateWithPlannerModels().copyWith(
-        runtimesBySession: const {
+        runtimesBySession: {
           'session-1': SessionRuntimeView(
             model: 'planner/local',
             contextTokens: 42000,
@@ -382,7 +484,7 @@ void registerShellSettingsTests() {
 
     final api = _FakeStudioApi(
       _stateWithPlannerModels().copyWith(
-        runtimesBySession: const {
+        runtimesBySession: {
           'session-1': SessionRuntimeView(
             model: 'planner/local',
             contextTokens: 1200,
@@ -406,7 +508,7 @@ void registerShellSettingsTests() {
                 TaskWorkUnitView(
                   id: 'unit-1',
                   title: 'Implement coordinator UI',
-                  status: 'delivered',
+                  status: 'readyForReview',
                   worktreePath: '.pure/worktrees/task-run-1/agent-1',
                   branch: 'pure-task-run-1-agent-1',
                   agentId: 'agent-1',
@@ -422,6 +524,23 @@ void registerShellSettingsTests() {
                   summary: 'Implemented UI',
                   error: null,
                   headCommit: 'abcdef1234567890',
+                  lifecycle: 'active',
+                  activity: 'idle',
+                  progress: AgentProgressView(
+                    stage: 'readyForReview',
+                    summary: 'Implementation is ready for review',
+                    nextStep: 'Wait for the delivery reviewer',
+                    revision: 3,
+                    updatedAt: DateTime.fromMillisecondsSinceEpoch(
+                      1000,
+                      isUtc: true,
+                    ),
+                  ),
+                  updatedAt: DateTime.fromMillisecondsSinceEpoch(
+                    1000,
+                    isUtc: true,
+                  ),
+                  summaryAgeSeconds: 5,
                 ),
                 TaskAgentOutcomeView(
                   agentId: 'agent-explorer',
@@ -432,6 +551,38 @@ void registerShellSettingsTests() {
                   summary: 'Inspecting design constraints',
                   error: null,
                   headCommit: null,
+                  lifecycle: 'active',
+                  activity: 'running',
+                  progress: null,
+                  updatedAt: DateTime.fromMillisecondsSinceEpoch(
+                    1000,
+                    isUtc: true,
+                  ),
+                  summaryAgeSeconds: 5,
+                ),
+              ],
+              completions: [
+                TaskCompletionView(
+                  id: 'completion-1',
+                  workUnitId: 'unit-1',
+                  executorAgentId: 'agent-1',
+                  revision: 2,
+                  kind: 'delivery',
+                  status: 'readyForReview',
+                  baseCommit: '1234567890abcdef',
+                  headCommit: 'abcdef1234567890',
+                  changedFiles: const ['lib/status.dart'],
+                  verificationSummary: 'flutter test passed',
+                  worktreePath: '.pure/worktrees/task-run-1/agent-1',
+                  branch: 'pure-task-run-1-agent-1',
+                  createdAt: DateTime.fromMillisecondsSinceEpoch(
+                    1000,
+                    isUtc: true,
+                  ),
+                  updatedAt: DateTime.fromMillisecondsSinceEpoch(
+                    1000,
+                    isUtc: true,
+                  ),
                 ),
               ],
               merges: [
@@ -446,12 +597,41 @@ void registerShellSettingsTests() {
               ],
               reviews: [
                 TaskReviewView(
+                  id: 'review-1',
                   round: 1,
-                  headCommit: '1234567890abcdef',
+                  scope: 'delivery',
+                  workUnitId: 'unit-1',
+                  completionId: 'completion-1',
+                  completionRevision: 2,
+                  reviewedHead: '1234567890abcdef',
                   verdict: 'changesRequired',
+                  requestedByCallId: 'call-review-1',
                   reviewerAgentId: 'reviewer-1',
                   summary: 'One issue remains',
-                  designReferences: ['design/16-task-orchestration.md#UI 与兼容性'],
+                  designReferences: const [
+                    TaskDesignReferenceView(
+                      path: 'design/16-task-orchestration.md',
+                      section: 'UI 与兼容性',
+                    ),
+                  ],
+                  findings: const [
+                    TaskReviewFindingView(
+                      severity: 'major',
+                      title: 'Missing projection',
+                      body: 'Project the completion revision.',
+                      path: 'lib/status.dart',
+                      line: 42,
+                      designReferences: [],
+                    ),
+                  ],
+                  createdAt: DateTime.fromMillisecondsSinceEpoch(
+                    1000,
+                    isUtc: true,
+                  ),
+                  updatedAt: DateTime.fromMillisecondsSinceEpoch(
+                    1000,
+                    isUtc: true,
+                  ),
                 ),
               ],
             ),
@@ -641,13 +821,23 @@ void registerShellSettingsTests() {
     expect(find.text('gpt-5.6-luna'), findsOneWidget);
     expect(find.text('WebSocket'), findsOneWidget);
     expect(find.text('HTTP'), findsOneWidget);
+    expect(
+      find.byKey(StudioDriverKeys.providerConnectionMode('openai')),
+      findsOneWidget,
+    );
+    final httpMode = find.byKey(
+      StudioDriverKeys.providerConnectionModeOption('openai', 'http'),
+    );
+    expect(httpMode.hitTestable(), findsOneWidget);
+    await tester.tap(httpMode);
+    await tester.pumpAndSettle();
 
     await tester.tap(find.widgetWithText(FilledButton, 'Save'));
     await tester.pumpAndSettle();
 
     final providers = api.savedProviderSettings!['providers'] as List<Object?>;
     final openai = providers.last! as Map<String, Object?>;
-    expect(openai['connectionMode'], 'web_socket');
+    expect(openai['connectionMode'], 'http');
     expect(openai['wireProtocol'], 'responses');
   });
 
@@ -1243,11 +1433,69 @@ void registerShellSettingsTests() {
 
       await tester.tap(find.text('Roles'));
       await tester.pumpAndSettle();
-      await tester.tap(find.byType(DropdownButtonFormField<String>).first);
+      for (final role in const [
+        'explorer',
+        'planner',
+        'executor',
+        'reviewer',
+      ]) {
+        expect(
+          find.byKey(StudioDriverKeys.settingsRoleModel(role)),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(StudioDriverKeys.settingsRoleEffort(role)),
+          findsOneWidget,
+        );
+      }
+
+      await tester.tap(
+        find.byKey(StudioDriverKeys.settingsRoleModel('explorer')),
+      );
       await tester.pumpAndSettle();
-      await tester.tap(find.textContaining('DeepSeek Reasoner').last);
+      expect(
+        find
+            .byKey(
+              StudioDriverKeys.settingsRoleModelOption(
+                'explorer',
+                'deepseek',
+                'deepseek-reasoner',
+              ),
+            )
+            .hitTestable(),
+        findsOneWidget,
+      );
+      await tester.tap(
+        find.byKey(
+          StudioDriverKeys.settingsRoleModelOption(
+            'explorer',
+            'deepseek',
+            'deepseek-reasoner',
+          ),
+        ),
+      );
       await tester.pumpAndSettle();
       expect(api.roleUpdate?.roleKey, 'explorer');
+      expect(api.roleUpdate?.model, 'deepseek-reasoner');
+
+      await tester.tap(
+        find.byKey(StudioDriverKeys.settingsRoleEffort('planner')),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find
+            .byKey(StudioDriverKeys.settingsRoleEffortOption('planner', 'max'))
+            .hitTestable(),
+        findsOneWidget,
+      );
+      await tester.tap(
+        find.byKey(StudioDriverKeys.settingsRoleEffortOption('planner', 'max')),
+      );
+      await tester.pumpAndSettle();
+      expect(api.roleUpdate?.roleKey, 'planner');
+      expect(api.roleUpdate?.providerId, 'deepseek');
+      expect(api.roleUpdate?.model, 'deepseek-v4-flash');
+      expect(api.roleUpdate?.effort, 'max');
 
       await tester.tap(find.text('Skills'));
       await tester.pumpAndSettle();

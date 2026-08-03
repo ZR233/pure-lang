@@ -58,7 +58,7 @@ reviewer 只暴露 effect 策略明确允许的动态工具，未知 effect 默�
 
 每个 turn 开始时，运行时会把经过当前模式过滤后实际暴露给模型的工具名快照保留为 core 内部 `TracePart`，并在需要时通过 typed Studio part snapshot 展示。该记录只包含 turn id、模式和工具名列表，用于诊断工具可见性，不进入模型上下文；旧 `timeline_events` 表及其 migration、运行期读写路径均已删除。
 
-`plan_exit` 是 Task planning 阶段专用的内置协调工具，schema 只包含 `content: string`。它表示“计划已完成，请 Studio 发起确认交互”，不是执行工具；确认实施后会话保持 Task，由 coordinator 推进后续阶段。`<proposed_plan>` 不再是协议入口。Planner 可以在普通用户 turn 或订阅 synthetic wake turn 中完成计划；wake 输入的 ephemeral history policy 只丢弃该 turn 对模型上下文的修改，不得阻止成功 `plan_exit` 生成 durable plan lifecycle 与确认 interaction。
+`plan_exit` 是 Task planning 阶段专用的内置协调工具，schema 只包含 `content: string`。它表示“计划已完成，请 Studio 发起确认交互”，不是执行工具；确认实施后会话保持 Task，由 coordinator 通过显式 durable 输入推进后续阶段。`<proposed_plan>` 不再是协议入口。`plan_exit` 生成 durable plan lifecycle 与确认 interaction。
 
 Studio framework attach 会对活动 Task 根会话执行一次有证据门禁的投影修复：只读取每个会话最新的完整 `TracePartCompleted(Plan)`，并在没有对应 interaction、没有活动 TaskRun、且该 plan 未进入实施或终态时补建确认。重复 attach 必须幂等，不能复活旧计划或制造多个 pending confirmation。
 
@@ -100,7 +100,7 @@ provider 输出的 function tool arguments 必须是合法 JSON，并由 `pl-mod
 
 这些结果必须作为 tool result 写入会话历史，即使工具被禁用、未知或拒绝。后续模型可以据此恢复、改用其他工具或向用户解释失败原因。
 
-`apply_patch` 的解析或上下文匹配失败属于本地执行错误，仍使用 `Tool execution error: {error}` 前缀写回模型上下文。错误文本应包含可恢复提示：不要重复同一个失败 patch；先重新读取目标文件当前内容，再生成更小、更精确的 Codex 风格 patch 重试。成功前已提交的 hunk 必须在错误文本中列出 committed delta，方便后续模型只处理剩余改动。
+`apply_patch` 的解析或上下文匹配失败属于本地执行错误，仍使用 `Tool execution error: {error}` 前缀写回模型上下文。错误文本应包含可恢复提示：不要重复同一个失败 patch；先重新读取目标文件当前内容，再生成更小、更精确的 Codex 风格 patch 重试。失败前已经应用到工作区的 hunk 必须在错误文本中列出 applied changes，不能使用会被误解为 Git commit 的 committed 表述，方便后续模型只处理仍未应用的改动。
 
 `exec` 和 `write_stdin` 成功执行时，写回模型上下文的 result 是一个紧凑 JSON 字符串，而不是完整原始输出。字段包括：
 
@@ -120,19 +120,25 @@ Studio runtime 的 live-only event 通道只允许发送 `MessagePartDelta` 和 
 
 Windows 本地 backend 上 `exec.command` 的默认宿主 shell 是 PowerShell：运行时先查找 `pwsh.exe`，再查找 `powershell.exe`，都不可用时才使用 `cmd.exe /C`。PowerShell 命令以 `-NoProfile -Command` 执行，并注入 UTF-8 输出设置；这只影响命令字符串的宿主 shell，不改变 `exec` / `write_stdin` 的公开 schema、审批策略或 JSON 结果字段。
 
-`spawn_agent`、`send_input`、`list_agents` 和 `close_agent` 的模型可见输出必须由 pl-core collaboration adapter 从 runtime typed snapshot 构造；宿主只通过 lifecycle、repository 与 event sink 提供产品资源和持久化事实，不手写共享状态形状。`send_input` 的模型 schema 只包含 `target/message/delivery/metadata`，不接受 `sessionId`；runtime resolver 将 target 解析为当前 owner session 并验证同一大会话树、权限、owner revision 与 lifecycle，不存在 caller-session fallback。模型不调用等待工具：`AgentEventHub` 在 durable commit 后发布 direct-child typed update，父代理活跃时只合并，进入 `WaitingAgents` 后由 meaningful update 或每 child 独立 inactivity timeout 提交一个 `AgentWakeBatch`。channel lag 时订阅者重读 canonical snapshots；内部 close/stop/test 使用 `wait_until_idle` subscription predicate。后续输入由 `send_input.delivery` 的 `QueueOnly | Start | InterruptThenStart` 明确表达，不存在单独的 resume 命令。Studio 把 owner lifecycle 投影到大会话级 Agent Directory；每个 agent session 的 `SubAgentActivity` 只记录该 owner 主动执行的协作事实，`TodoListUpdated` 作为完整 replacement 保存在该 session 的 canonical snapshot 中。`spawn_agent.forkTurns` 的历史继承只复制过滤后的父会话消息，不复制工具结果、工具调用 metadata、reasoning 内容或运行时调度提示。
-
-required finalizer 成功是一次 typed 协作阶段屏障。runtime 在提交 `TurnFinished` 时必须携带
-成功 finalizer 名称，并把该 turn 运行期间已经缓冲的 direct-child signal ids 写入 durable
-accepted wake receipt；这些旧信号不得在 finalizer 后重复触发 synthetic wake。普通 direct
-完成没有该屏障语义，仍按未消费更新继续协调。
+`spawn_agent`、`report_progress`、`send_message`、`interrupt_agent`、`list_agents`、
+`wait_agents`、`read_agent_session` 和 `close_agent` 的模型可见输出必须由 pl-core
+collaboration adapter 从 runtime typed snapshot 构造；宿主只通过 lifecycle、repository 与
+event sink 提供产品资源和持久化事实，不手写共享状态形状。协作工具不接受 sessionId；
+runtime 从目标 agent 的唯一 canonical session 解析并验证同一大会话树、权限与 lifecycle。
+`send_message` 永不取消：运行中作为 steer，空闲时启动明确的新 turn；`interrupt_agent`
+只取消当前 turn。`wait_agents` 先订阅 Agent Directory watch 再读取 canonical snapshot，
+没有 timeout 或轮询，只由目标 progress、interaction、terminal 或调用方取消结束。Studio
+把 owner lifecycle/progress 投影到大会话级 Agent Directory；每个 agent session 的
+`SubAgentActivity` 只记录该 owner 主动执行的协作事实，`TodoListUpdated` 作为完整
+replacement 保存在该 session 的 canonical snapshot 中。
 
 产品 harness 的 spawn 契约不扩展通用 `spawn_agent` schema。Task 的
 `task_spawn_executor` 以 required `taskName/message/ownedPaths` 建模安全和交付不变量，
 在 runtime spawn 前完成路径静态校验，并将可信内部 intent 交给 Studio lifecycle；
-`task_request_review` 同样固定 reviewer intent。两者都创建 fresh `AgentSession`，不使用
-`spawn_agent.forkTurns`，但仍复用 `AgentRuntime` 的容量、repository、lifecycle saga、
-turn 启动与失败补偿。
+`task_request_delivery_review` 与 `task_request_integrated_review` 分别固定 completion
+revision 和 Task HEAD 的 reviewer intent。这些工具都创建只属于新 agent 的 canonical
+`AgentSession`，不使用 `spawn_agent.forkTurns`，但仍复用 `AgentRuntime` 的容量、
+repository、lifecycle saga、turn 启动与失败补偿。
 
 `update_todo_list` 是 Codex `update_plan` 风格的内置 checklist 工具，root agent 与 subagent 都可用，且不代表 Plan Mode 的 `plan` part。工具输入是完整快照：`explanation?: string` 与 `items: [{ step, status }]`，其中 `status` 只允许 `pending | inProgress | completed`，且同一快照最多一个 `inProgress`。工具成功后只返回紧凑 `{ status: "updated" }` 给模型，同时提交 `TodoListUpdated` durable replacement；canonical session snapshot 保留最新 replacement，Flutter Todo selector 只展示最新值，不按 patch 增量合并，也不把历次更新渲染为 timeline row。
 
@@ -162,12 +168,11 @@ Studio timeline 以 message/part projection 派生的 ordered conversation item 
 
 工具、命令、文件修改和子代理协作活动的用户可读文本由前端 projection 根据结构化 `StudioPart.tool`、`StudioPart.agent` 与 agent timeline typed payload 生成；Todo replacement 由独立侧栏按结构化 item 渲染。后端不新增 `activityText` 之类的本地化文案字段；如果展示层缺少必要事实，应补充结构化字段而不是补一段后端写死文本。固定标签和状态说明由 Flutter i18n 负责，工具名、agent path、工作目录、路径、命令摘要和模型名按原始领域值展示。工具运行时的单工具 start/end/approval/review commentary 属于 verbose/debug 诊断信息，普通模式只保留 turn 级工具批次 commentary，避免 timeline 在已有工具组之外重复出现每个工具的进展文本。
 
-父 timeline 默认只展示 Planner 自己执行的子代理高层协作事实，例如 spawn、send/followup 和 close，以及订阅 wake batch 中的紧凑 child 摘要。synthetic wake 输入使用 ephemeral history policy，不进入用户消息历史，也不复制 executor timeline。子代理协作活动可按 `callId` 合并 begin/end 状态；Todo replacement 只进入执行该调用的 agent session 的最新 Todo 侧栏。子代理内部普通工具 trace 不自动灌入父 timeline，这些细节保留在 child 自己的 session。owner lifecycle/status 只更新大会话级 Agent Directory，不作为单 agent timeline row。
-
-ephemeral 只约束 synthetic wake 对 `AgentSession` 模型上下文的提交，不降低该 turn 产生的
-durable 产品事实。Task Planner 在订阅续轮中成功调用 `plan_exit` 时，plan part、plan
-lifecycle 和 `planConfirmation` interaction 必须照常持久化；不得因为输入是 ephemeral
-而丢弃计划确认。
+父 timeline 默认只展示 Planner 自己执行的子代理高层协作事实，例如 spawn、send、
+interrupt、list、read、wait 和 close。子代理协作活动可按 `callId` 合并 begin/end 状态；
+Todo replacement 只进入执行该调用的 agent session 的最新 Todo 侧栏。子代理内部普通工具
+trace 不自动灌入父 timeline，这些细节保留在 child 自己的 session。owner lifecycle/status/
+progress 只更新大会话级 Agent Directory，不作为单 agent timeline row。
 
 ## Web 搜索工具规划
 

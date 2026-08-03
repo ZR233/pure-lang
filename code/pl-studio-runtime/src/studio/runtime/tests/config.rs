@@ -38,10 +38,7 @@ async fn set_model_role_persists_planner_model_and_default_effort() {
     let next_route = next.models.routes.get(&StudioRole::Planner.id()).unwrap();
     assert_eq!(next_route.provider.as_str(), "local");
     assert_eq!(next_route.model, "local-fast");
-    assert_eq!(
-        next_route.reasoning_effort.as_ref().unwrap().as_str(),
-        "low"
-    );
+    assert_eq!(next_route.effort.as_ref().unwrap().as_str(), "low");
     let saved = runtime.config_store().load_or_default().unwrap();
     assert_eq!(
         saved.models.routes.get(&StudioRole::Planner.id()),

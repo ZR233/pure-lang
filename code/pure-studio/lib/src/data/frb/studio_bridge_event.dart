@@ -109,6 +109,19 @@ final class AgentChangedPayload extends StudioBridgeEventPayload {
   String get sessionId => agent.sessionId;
 }
 
+final class AgentDirectoryChangedPayload extends StudioBridgeEventPayload {
+  const AgentDirectoryChangedPayload({
+    required this.rootSessionId,
+    required this.agent,
+  });
+
+  final String rootSessionId;
+  final StudioAgentView agent;
+
+  @override
+  String get sessionId => agent.sessionId;
+}
+
 final class AgentTimelineChangedPayload extends StudioBridgeEventPayload {
   const AgentTimelineChangedPayload({required this.event});
 

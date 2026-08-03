@@ -34,11 +34,13 @@ impl ToolEffect {
             | "read_mcp_resource"
             | "git_workspace_info"
             | "git_status"
-            | "git_diff" => Some(Self::Read),
+            | "git_diff"
+            | "task_status" => Some(Self::Read),
             "write_file" | "apply_patch" | "create_directory" | "delete_path" | "copy_path"
             | "move_path" | "skill_manage" => Some(Self::WorkspaceWrite),
             "exec" | "write_stdin" => Some(Self::Process),
-            "spawn_agent" | "list_agents" | "send_input" | "close_agent" => {
+            "spawn_agent" | "report_progress" | "send_message" | "interrupt_agent"
+            | "list_agents" | "wait_agents" | "read_agent_session" | "close_agent" => {
                 Some(Self::AgentControl)
             }
             "git_fetch"
@@ -46,10 +48,11 @@ impl ToolEffect {
             | "git_sync_default_branch"
             | "git_branch"
             | "git_commit"
-            | "submit_delivery"
+            | "report_completion"
             | "task_merge_agent"
             | "task_update_design"
-            | "task_request_review"
+            | "task_request_delivery_review"
+            | "task_request_integrated_review"
             | "task_complete"
             | "task_stop" => Some(Self::BranchControl),
             "review_exit" => Some(Self::Read),

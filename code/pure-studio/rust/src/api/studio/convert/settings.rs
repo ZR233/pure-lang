@@ -1,16 +1,18 @@
 use crate::api::studio::types::{
-    DeepSeekBalanceDto, DeepSeekBalanceInfoDto, ProviderInput, ProviderModelInput,
-    ProviderSecretInput, ProviderSettingsInput, ProviderUsageDto, RoleInput,
-    ZhipuCodingPlanUsageDto, ZhipuQuotaLimitDto, ZhipuToolUsageDetailDto,
+    BridgeGeneralSettingsDto, BridgeInstructionsSettingsDto, BridgeMcpServerSettingsDto,
+    BridgeProviderModelSettingsDto, BridgeProviderSettingsDto, BridgeRoleSettingsDto,
+    BridgeSkillsSettingsDto, BridgeStudioSettingsDto, DeepSeekBalanceDto, DeepSeekBalanceInfoDto,
+    ProviderInput, ProviderModelInput, ProviderSecretInput, ProviderSettingsInput,
+    ProviderUsageDto, RoleInput, ZhipuCodingPlanUsageDto, ZhipuQuotaLimitDto,
+    ZhipuToolUsageDetailDto,
 };
 use anyhow::{Context, Result};
 use pl_studio_runtime::{
     McpServerTransport, ModelInfo, ProviderCapabilitySelection, ProviderEdit,
     ProviderModelCatalogConfig, ProviderModelEdit, ProviderPresetId, ProviderServiceCapabilities,
     ProviderSettingsEdit, ProviderUsageData, ProviderUsageState, ProviderWireProtocol, RoleEdit,
-    StandaloneWebSearchDialect, WebSearchProviderCapabilities, ZhipuQuotaWindow,
+    StandaloneWebSearchDialect, StudioRole, WebSearchProviderCapabilities, ZhipuQuotaWindow,
 };
-use serde_json::{Map, Value, json};
 // ── Utility functions ──
 
 pub(crate) fn normalized_string_list(values: Vec<String>) -> Vec<String> {
@@ -32,190 +34,150 @@ pub(crate) fn mcp_transport_from_label(label: &str) -> Result<McpServerTransport
     }
 }
 
-/// 构造 Flutter 使用的无 secret 配置 projection，并注入服务端解析后的模型目录。
-pub(crate) fn studio_config_projection(config: &pl_studio_runtime::StudioConfig) -> Result<Value> {
-    let mut providers = Map::new();
-    for (id, provider) in &config.models.providers {
-        let models = provider.effective_models()?;
-        let default_model = config
-            .models
-            .routes
-            .values()
-            .find(|route| route.provider == *id)
-            .map(|route| route.model.clone())
-            .or_else(|| models.first().map(|model| model.slug.clone()))
-            .unwrap_or_default();
-        let service_capabilities = provider.service_capabilities()?;
-        let catalog_id = match &provider.catalog {
-            ProviderModelCatalogConfig::Bundled { catalog, .. } => Some(catalog.to_string()),
-            ProviderModelCatalogConfig::Explicit { .. } => None,
-        };
-        providers.insert(
-            id.to_string(),
-            json!({
-                "presetId": provider.preset_id().map(ToString::to_string),
-                "wireProtocol": protocol_label(provider.protocol()?),
-                "connectionMode": connection_mode_label(provider.connection_mode()),
-                "name": provider.name,
-                "baseUrl": provider.base_url,
-                "hasBearerToken": provider.resolved_bearer_token().is_some(),
-                "capabilitySource": match &provider.capabilities {
+/// 构造 Flutter 使用的无 secret canonical typed 设置快照。
+pub(crate) fn studio_settings_dto(
+    config: &pl_studio_runtime::StudioConfig,
+    general: BridgeGeneralSettingsDto,
+    web_search_role: StudioRole,
+) -> Result<BridgeStudioSettingsDto> {
+    let providers = config
+        .models
+        .providers
+        .iter()
+        .map(|(id, provider)| {
+            let models = provider.effective_models()?;
+            let default_model = config
+                .models
+                .routes
+                .values()
+                .find(|route| route.provider == *id)
+                .map(|route| route.model.clone())
+                .or_else(|| models.first().map(|model| model.slug.clone()))
+                .unwrap_or_default();
+            let service_capabilities = provider.service_capabilities()?;
+            let catalog_id = match &provider.catalog {
+                ProviderModelCatalogConfig::Bundled { catalog, .. } => Some(catalog.to_string()),
+                ProviderModelCatalogConfig::Explicit { .. } => None,
+            };
+            Ok(BridgeProviderSettingsDto {
+                id: id.to_string(),
+                template_kind: provider
+                    .preset_id()
+                    .map(|preset| preset.to_string())
+                    .unwrap_or_default(),
+                wire_protocol: protocol_label(provider.protocol()?).to_string(),
+                connection_mode: connection_mode_label(provider.connection_mode()).to_string(),
+                name: provider.name.clone(),
+                base_url: provider.base_url.clone(),
+                has_bearer_token: provider.resolved_bearer_token().is_some(),
+                capability_source: match &provider.capabilities {
                     ProviderCapabilitySelection::PresetDefaults => "preset_defaults",
                     ProviderCapabilitySelection::Explicit(_) => "explicit",
-                },
-                "serviceCapabilities": {
-                    "webSearch": {
-                        "hostedResponses": service_capabilities.web_search.hosted_responses,
-                        "standalone": service_capabilities
-                            .web_search
-                            .standalone
-                            .map(|dialect| dialect.as_str()),
-                    },
-                },
-                "defaultModel": default_model,
-                "models": models.iter().map(model_projection).collect::<Vec<_>>(),
-                "customModels": provider
+                }
+                .to_string(),
+                hosted_web_search: service_capabilities.web_search.hosted_responses,
+                standalone_web_search: service_capabilities
+                    .web_search
+                    .standalone
+                    .map(|dialect| dialect.as_str().to_string()),
+                default_model,
+                models: models.iter().map(model_settings_dto).collect(),
+                custom_models: provider
                     .editable_models()
                     .iter()
-                    .map(model_projection)
-                    .collect::<Vec<_>>(),
-                "catalogId": catalog_id,
-            }),
-        );
-    }
-    let roles = config
-        .models
-        .routes
-        .iter()
-        .map(|(role, route)| {
-            (
-                role.to_string(),
-                json!({
-                    "provider": route.provider,
-                    "model": route.model,
-                    "effort": route.reasoning_effort.as_ref().map(|effort| effort.as_str()),
-                }),
-            )
+                    .map(model_settings_dto)
+                    .collect(),
+                catalog_id,
+            })
         })
-        .collect::<Map<_, _>>();
-    let default_provider_id = config
-        .models
-        .routes
-        .get(&pl_studio_runtime::StudioRole::Planner.id())
-        .map(|route| route.provider.to_string());
-    let mcp_servers = config
-        .mcp
-        .servers
-        .iter()
-        .map(|(id, server)| {
-            (
-                id.clone(),
-                json!({
-                    "enabled": server.enabled,
-                    "transport": mcp_transport_label(server.transport),
-                    "command": server.command,
-                    "url": server.url,
-                }),
-            )
+        .collect::<Result<Vec<_>>>()?;
+    let roles = StudioRole::all()
+        .into_iter()
+        .map(|role| {
+            let route = config
+                .models
+                .routes
+                .get(&role.id())
+                .with_context(|| format!("missing Studio role route: {}", role.key()))?;
+            Ok(BridgeRoleSettingsDto {
+                key: role.key().to_string(),
+                provider_id: route.provider.to_string(),
+                model: route.model.clone(),
+                effort: route
+                    .effort
+                    .as_ref()
+                    .map(|effort| effort.as_str().to_string())
+                    .unwrap_or_default(),
+            })
         })
-        .collect::<Map<_, _>>();
-    let builtin_mcp_servers = config
-        .mcp
-        .builtin_servers
-        .iter()
-        .map(|(id, server)| {
-            (
-                id.clone(),
-                json!({
-                    "enabled": server.enabled,
-                }),
-            )
+        .collect::<Result<Vec<_>>>()?;
+    let mcp_servers = pl_studio_runtime::config::effective_mcp_servers(config)
+        .into_values()
+        .map(|server| BridgeMcpServerSettingsDto {
+            id: server.id,
+            transport: server.config.transport.as_str().to_string(),
+            endpoint: server.config.endpoint_summary(),
+            enabled: server.config.enabled,
+            status: server.status_kind.as_str().to_string(),
+            source_kind: server.source_kind.as_str().to_string(),
+            mutation_policy: server.mutation_policy.as_str().to_string(),
         })
-        .collect::<Map<_, _>>();
-    Ok(json!({
-        "schemaVersion": config.schema_version,
-        "defaultProviderId": default_provider_id,
-        "providers": providers,
-        "roles": roles,
-        "runtime": {
-            "permissionMode": config.runtime.permission_mode.label(),
-            "activeSkills": config.runtime.active_skills,
-            "activeMcpServers": config.runtime.active_mcp_servers,
-            "openAiCompactionMode": openai_compaction_mode_label(
-                config.runtime.openai_compaction_mode,
-            ),
+        .collect();
+
+    Ok(BridgeStudioSettingsDto {
+        default_provider_id: config
+            .models
+            .routes
+            .get(&StudioRole::Planner.id())
+            .map(|route| route.provider.to_string()),
+        providers,
+        roles,
+        permission_mode: config.runtime.permission_mode.label().to_string(),
+        instructions: BridgeInstructionsSettingsDto {
+            base_override: config.instructions.base_override.clone(),
+            developer: config.instructions.developer.clone(),
+            user: config.instructions.user.clone(),
+            project_doc_max_bytes: config.instructions.project_doc_max_bytes as u64,
+            project_doc_fallback_filenames: config
+                .instructions
+                .project_doc_fallback_filenames
+                .clone(),
         },
-        "instructions": {
-            "baseOverride": config.instructions.base_override,
-            "developer": config.instructions.developer,
-            "user": config.instructions.user,
-            "projectDocMaxBytes": config.instructions.project_doc_max_bytes,
-            "projectDocFallbackFilenames": config.instructions.project_doc_fallback_filenames,
+        skills: BridgeSkillsSettingsDto {
+            enabled: config.skills.enabled,
+            auto_learn: config.skills.auto_learn,
+            system_enabled: config.skills.system.enabled,
+            project_dir: config.skills.project_dir.clone(),
+            user_dir: config.skills.user_dir.clone(),
+            external_dirs: config.skills.external_dirs.clone(),
+            disabled: config.skills.disabled.clone(),
+            auto_learn_min_tool_calls: config.skills.auto_learn_min_tool_calls,
         },
-        "skills": {
-            "enabled": config.skills.enabled,
-            "autoLearn": config.skills.auto_learn,
-            "system": {
-                "enabled": config.skills.system.enabled,
-            },
-            "projectDir": config.skills.project_dir,
-            "userDir": config.skills.user_dir,
-            "externalDirs": config.skills.external_dirs,
-            "disabled": config.skills.disabled,
-            "autoLearnMinToolCalls": config.skills.auto_learn_min_tool_calls,
-        },
-        "mcpServers": mcp_servers,
-        "builtinMcpServers": builtin_mcp_servers,
-        "webSearch": {
-            "mode": web_search_mode_label(config.web_search.mode),
-            "contextSize": config
-                .web_search
-                .context_size
-                .map(web_search_context_size_label),
-            "allowedDomains": config.web_search.allowed_domains,
-            "location": config.web_search.location.as_ref().map(|location| json!({
-                "country": location.country,
-                "region": location.region,
-                "city": location.city,
-                "timezone": location.timezone,
-            })),
-        },
-    }))
+        mcp_servers,
+        general,
+        web_search: web_search_settings_dto(config, web_search_role)?,
+    })
 }
 
-fn model_projection(model: &ModelInfo) -> Value {
+fn model_settings_dto(model: &ModelInfo) -> BridgeProviderModelSettingsDto {
     let reasoning_efforts = model
         .parameters
         .iter()
         .find(|parameter| parameter.name == "effort")
         .map(|parameter| parameter.candidates.as_slice())
         .unwrap_or_default();
-    json!({
-        "slug": model.slug,
-        "displayName": model.display_name,
-        "description": model.description,
-        "contextWindow": model.context_window,
-        "maxOutputTokens": model.max_output_tokens,
-        "currency": model.currency,
-        "inputPricePerMTok": model.input_price_per_mtok,
-        "outputPricePerMTok": model.output_price_per_mtok,
-        "cacheReadPricePerMTok": model.cache_read_price_per_mtok,
-        "reasoningEfforts": reasoning_efforts,
-        "baseInstructions": model.base_instructions,
-    })
-}
-
-fn mcp_transport_label(transport: McpServerTransport) -> &'static str {
-    match transport {
-        McpServerTransport::Stdio => "stdio",
-        McpServerTransport::StreamableHttp => "streamableHttp",
-    }
-}
-
-fn openai_compaction_mode_label(mode: pl_studio_runtime::OpenAiCompactionMode) -> &'static str {
-    match mode {
-        pl_studio_runtime::OpenAiCompactionMode::RemoteV2 => "remoteV2",
-        pl_studio_runtime::OpenAiCompactionMode::Local => "local",
+    BridgeProviderModelSettingsDto {
+        slug: model.slug.clone(),
+        display_name: model.display_name.clone(),
+        description: model.description.clone().unwrap_or_default(),
+        context_window: model.context_window,
+        max_output_tokens: model.max_output_tokens,
+        currency: model.currency.clone().unwrap_or_default(),
+        input_price_per_m_tok: model.input_price_per_mtok,
+        output_price_per_m_tok: model.output_price_per_mtok,
+        cache_read_price_per_m_tok: model.cache_read_price_per_mtok,
+        reasoning_efforts: reasoning_efforts.to_vec(),
+        base_instructions: model.base_instructions.clone(),
     }
 }
 
@@ -421,7 +383,7 @@ fn provider_model_edit(input: ProviderModelInput) -> ProviderModelEdit {
     ProviderModelEdit {
         slug: input.slug,
         display_name: input.display_name,
-        reasoning_efforts: input.reasoning_efforts,
+        efforts: input.reasoning_efforts,
         base_instructions: input.base_instructions.unwrap_or_default(),
     }
 }

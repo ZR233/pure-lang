@@ -34,6 +34,16 @@ pub async fn submit_prompt(
     })
 }
 
+pub async fn resume_task(session_id: String) -> Result<SubmitPromptResponse, BridgeError> {
+    let bridge = active_bridge().await?;
+    let response = bridge.studio.resume_task(session_id).await?;
+    Ok(SubmitPromptResponse {
+        session_id: response.session_id,
+        turn_id: response.turn_id,
+        cursor: response.cursor,
+    })
+}
+
 pub async fn stop_prompt(session_id: String) -> Result<StopPromptResponse, BridgeError> {
     let bridge = active_bridge().await?;
     let response = bridge.studio.stop_prompt(session_id).await?;

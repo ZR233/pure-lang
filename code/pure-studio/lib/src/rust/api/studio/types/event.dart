@@ -75,6 +75,10 @@ sealed class BridgeProductEventPayload with _$BridgeProductEventPayload {
     required String sessionId,
     BridgeTaskRuntimeDto? task,
   }) = BridgeProductEventPayload_SessionTaskChanged;
+  const factory BridgeProductEventPayload.agentDirectoryChanged({
+    required String rootSessionId,
+    required BridgeAgentDirectoryEntryDto agent,
+  }) = BridgeProductEventPayload_AgentDirectoryChanged;
   const factory BridgeProductEventPayload.stale({
     required BigInt laggedEvents,
   }) = BridgeProductEventPayload_Stale;

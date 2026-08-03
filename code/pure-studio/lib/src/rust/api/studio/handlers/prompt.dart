@@ -22,6 +22,11 @@ Future<SubmitPromptResponse> submitPrompt({
   attachmentIds: attachmentIds,
 );
 
+Future<SubmitPromptResponse> resumeTask({required String sessionId}) => RustLib
+    .instance
+    .api
+    .crateApiStudioHandlersPromptResumeTask(sessionId: sessionId);
+
 Future<StopPromptResponse> stopPrompt({required String sessionId}) => RustLib
     .instance
     .api

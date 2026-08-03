@@ -22,6 +22,7 @@ class _FakeStudioApi implements StudioApi {
   int createSessionCount = 0;
   int bootstrapCount = 0;
   Object? bootstrapError;
+  String? openedProjectPath;
   String? selectedProjectRequest;
   String? archivedProjectId;
   String? archiveSelectedProjectId;
@@ -44,6 +45,16 @@ class _FakeStudioApi implements StudioApi {
   int loadProviderUsagesCount = 0;
   Completer<List<ProviderUsageView>>? blockedProviderUsageLoad;
   Completer<void>? blockedSessionCancellation;
+  int submitPromptCount = 0;
+  final List<({String sessionId, String prompt})> submittedPrompts = [];
+  Completer<SubmitPromptReceipt>? blockedPromptSubmit;
+  Exception? submitPromptError;
+  int resumeTaskCount = 0;
+  final List<String> resumedTaskSessionIds = [];
+  Completer<SubmitPromptReceipt>? blockedTaskResume;
+  Exception? resumeTaskError;
+  String? submitReceiptSessionId;
+  String submitTurnId = 'turn-1';
   final Map<String, RecoveryCleanupPreview> recoveryPreviews = {};
   final Map<String, RecoveryCleanupPreview> projectCleanupPreviews = {};
   int previewProjectCleanupCount = 0;
@@ -85,7 +96,10 @@ class _FakeStudioApi implements StudioApi {
   }
 
   @override
-  Future<StudioState> openProject(String path) async => initialState;
+  Future<StudioState> openProject(String path) async {
+    openedProjectPath = path;
+    return initialState;
+  }
 
   @override
   Future<StudioState> selectProject(String projectId) async {
@@ -290,11 +304,44 @@ class _FakeStudioApi implements StudioApi {
   }
 
   @override
-  Future<void> submitPrompt(
+  Future<SubmitPromptReceipt> submitPrompt(
     String sessionId,
     String prompt,
     List<String> attachmentIds,
-  ) async {}
+  ) async {
+    submitPromptCount += 1;
+    submittedPrompts.add((sessionId: sessionId, prompt: prompt));
+    if (submitPromptError case final error?) {
+      throw error;
+    }
+    final blocked = blockedPromptSubmit;
+    if (blocked != null) {
+      return blocked.future;
+    }
+    return SubmitPromptReceipt(
+      sessionId: submitReceiptSessionId ?? sessionId,
+      turnId: submitTurnId,
+      cursor: submitPromptCount,
+    );
+  }
+
+  @override
+  Future<SubmitPromptReceipt> resumeTask(String sessionId) async {
+    resumeTaskCount += 1;
+    resumedTaskSessionIds.add(sessionId);
+    if (resumeTaskError case final error?) {
+      throw error;
+    }
+    final blocked = blockedTaskResume;
+    if (blocked != null) {
+      return blocked.future;
+    }
+    return SubmitPromptReceipt(
+      sessionId: submitReceiptSessionId ?? sessionId,
+      turnId: submitTurnId,
+      cursor: resumeTaskCount,
+    );
+  }
 
   @override
   Future<StudioState> saveRuntimePermissionMode(PermissionMode mode) async {

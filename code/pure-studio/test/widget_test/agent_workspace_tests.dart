@@ -18,7 +18,7 @@ void registerAgentWorkspaceTests() {
       await controller.selectAgentSession('agent-session-1');
       var state = container.read(studioControllerProvider).requireValue;
       expect(state.selectedAgentSessionId, 'agent-session-1');
-      expect(state.composerText, isEmpty);
+      expect(state.composer.draft, isEmpty);
       expect(state.runtime.model, isEmpty);
       expect(state.turn, isNull);
       expect(
@@ -84,6 +84,7 @@ void registerAgentWorkspaceTests() {
       expect(workspace.runtime.activeMcpServers, ['review-mcp']);
       expect(workspace.timelineRows, isNotEmpty);
       expect(state.selectedMessages.single.sessionId, 'agent-session-1');
+      controller.updateComposer('agent-session-1', 'Reviewer draft');
 
       api.emitSession(
         _interactionChangedEvent(
@@ -106,8 +107,12 @@ void registerAgentWorkspaceTests() {
 
       await controller.selectAgentSession('session-1');
       state = container.read(studioControllerProvider).requireValue;
-      expect(state.composerText, 'Planner draft');
+      expect(state.composer.draft, 'Planner draft');
       expect(state.runtime.model, 'planner/model');
+
+      await controller.selectAgentSession('agent-session-1');
+      state = container.read(studioControllerProvider).requireValue;
+      expect(state.composer.draft, 'Reviewer draft');
     },
   );
 

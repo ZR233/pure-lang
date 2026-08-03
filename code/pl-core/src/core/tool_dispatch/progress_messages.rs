@@ -14,8 +14,12 @@ pub(super) fn tool_start_progress_message(name: &str) -> String {
         "request_user_input" => "正在等待用户输入。".to_string(),
         "update_todo_list" => "正在更新 todo list。".to_string(),
         "spawn_agent" => "正在创建子代理。".to_string(),
+        "report_progress" => "正在记录执行进度。".to_string(),
         "list_agents" => "正在检查子代理状态。".to_string(),
-        "send_input" => "正在给子代理发送输入。".to_string(),
+        "wait_agents" => "正在等待子代理进度。".to_string(),
+        "read_agent_session" => "正在读取子代理会话摘要。".to_string(),
+        "send_message" => "正在给子代理发送消息。".to_string(),
+        "interrupt_agent" => "正在中断子代理当前轮次。".to_string(),
         "close_agent" => "正在关闭子代理。".to_string(),
         _ => format!("正在执行工具 `{name}`。"),
     }
@@ -29,8 +33,12 @@ pub(super) fn tool_terminal_progress_message(record: &ToolExecutionRecord) -> St
             "request_user_input" => "用户输入已收到。".to_string(),
             "update_todo_list" => "Todo list 已更新。".to_string(),
             "spawn_agent" => "子代理已创建。".to_string(),
+            "report_progress" => "执行进度已记录。".to_string(),
             "list_agents" => "子代理状态已更新。".to_string(),
-            "send_input" => "子代理输入已发送。".to_string(),
+            "wait_agents" => "子代理有了新进度。".to_string(),
+            "read_agent_session" => "子代理会话摘要已读取。".to_string(),
+            "send_message" => "子代理消息已发送。".to_string(),
+            "interrupt_agent" => "子代理当前轮次已中断。".to_string(),
             "close_agent" => "子代理已关闭。".to_string(),
             _ => format!("工具 `{name}` 已完成。"),
         },
@@ -39,7 +47,8 @@ pub(super) fn tool_terminal_progress_message(record: &ToolExecutionRecord) -> St
             "plan_exit" => "计划提交失败。".to_string(),
             "request_user_input" => "用户输入请求失败。".to_string(),
             "update_todo_list" => "Todo list 更新失败。".to_string(),
-            "spawn_agent" | "list_agents" | "send_input" | "close_agent" => {
+            "spawn_agent" | "report_progress" | "list_agents" | "wait_agents"
+            | "read_agent_session" | "send_message" | "interrupt_agent" | "close_agent" => {
                 format!("子代理工具 `{name}` 执行失败。")
             }
             _ => format!("工具 `{name}` 执行失败。"),

@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use anyhow::{Result, bail};
 
 use super::{
-    AgentOutcomeRecord, TaskCoordinator, TaskWorktreeCleanupState, TaskWorktreeCreationState,
-    TaskWorktreeDisposition, TaskWorktreeOwnerSnapshot,
+    TaskCoordinator, TaskWorktreeCleanupState, TaskWorktreeCreationState, TaskWorktreeDisposition,
+    TaskWorktreeOwnerSnapshot, WorkCompletionRecord,
 };
 use crate::agent::worktree::{
     DurableWorktreeDisposition, DurableWorktreePresence, DurableWorktreeResource,
@@ -21,7 +21,6 @@ impl TaskCoordinator {
         for owner in owners {
             for resource in &owner.resources {
                 let unit = &resource.work_unit;
-                let outcome = resource.outcome.as_ref();
                 let disposition = if unit.worktree_disposition
                     == TaskWorktreeDisposition::CleanupRequested
                 {
@@ -41,7 +40,10 @@ impl TaskCoordinator {
                     task_run_id: owner.run.id.clone(),
                     path: unit.worktree_path.clone().into(),
                     branch: unit.branch.clone(),
-                    expected_head: protected_expected_head(disposition, outcome),
+                    expected_head: protected_expected_head(
+                        disposition,
+                        resource.completion.as_ref(),
+                    ),
                     presence: if disposition == DurableWorktreeDisposition::Cleanup {
                         DurableWorktreePresence::MayBeUncreated
                     } else {
@@ -86,12 +88,10 @@ impl TaskCoordinator {
 
 fn protected_expected_head(
     disposition: DurableWorktreeDisposition,
-    outcome: Option<&AgentOutcomeRecord>,
+    completion: Option<&WorkCompletionRecord>,
 ) -> Option<String> {
     if disposition == DurableWorktreeDisposition::Cleanup {
         return None;
     }
-    outcome
-        .and_then(|outcome| outcome.delivery.as_ref())
-        .map(|delivery| delivery.head_commit.clone())
+    completion.and_then(|completion| completion.head_commit.clone())
 }

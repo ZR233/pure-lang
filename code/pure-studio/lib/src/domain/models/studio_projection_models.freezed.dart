@@ -207,7 +207,7 @@ return $default(_that.applicationRecoveryIssues);case _:
 
 class _ShellChromeView implements ShellChromeView {
   const _ShellChromeView({required final  List<StudioRecoveryIssue> applicationRecoveryIssues}): _applicationRecoveryIssues = applicationRecoveryIssues;
-  
+
 
  final  List<StudioRecoveryIssue> _applicationRecoveryIssues;
 @override List<StudioRecoveryIssue> get applicationRecoveryIssues {
@@ -475,7 +475,7 @@ return $default(_that.projects,_that.rootSessions,_that.selectedProjectId,_that.
 
 class _SidebarView extends SidebarView {
   const _SidebarView({required final  List<StudioProject> projects, required final  List<StudioSession> rootSessions, required this.selectedProjectId, required this.selectedRootSessionId, required this.isBusy, required final  List<StudioRecoveryIssue> recoveryIssues}): _projects = projects,_rootSessions = rootSessions,_recoveryIssues = recoveryIssues,super._();
-  
+
 
  final  List<StudioProject> _projects;
 @override List<StudioProject> get projects {
@@ -766,7 +766,7 @@ return $default(_that.selectedRootSession,_that.selectedProject,_that.selectedPr
 
 class _HeaderView implements HeaderView {
   const _HeaderView({required this.selectedRootSession, required this.selectedProject, required this.selectedProjectId, required final  List<StudioSession> agentSessions, required this.selectedAgentSessionId, required this.runtime, required final  List<PendingInteraction> pendingInteractions}): _agentSessions = agentSessions,_pendingInteractions = pendingInteractions;
-  
+
 
 @override final  StudioSession? selectedRootSession;
 @override final  StudioProject? selectedProject;
@@ -1059,7 +1059,7 @@ return $default(_that.providers,_that.providerCatalog,_that.defaultProviderId,_t
 
 class _SettingsPageView implements SettingsPageView {
   const _SettingsPageView({required final  List<ProviderSettingsView> providers, required this.providerCatalog, required this.defaultProviderId, required final  List<RoleSettingsView> roles, required this.instructions, required this.skills, required final  List<String> activeSkills, required this.selectedProjectId, required final  List<McpServerSettingsView> mcpServers, required this.permissionMode, required this.general, required this.webSearch, required this.runtimeBusy}): _providers = providers,_roles = roles,_activeSkills = activeSkills,_mcpServers = mcpServers;
-  
+
 
  final  List<ProviderSettingsView> _providers;
 @override List<ProviderSettingsView> get providers {
@@ -1369,7 +1369,7 @@ return $default(_that.session,_that.runtime,_that.permissionMode,_that.providers
 
 class _StatusBarView extends StatusBarView {
   const _StatusBarView({required this.session, required this.runtime, required this.permissionMode, required final  List<ProviderSettingsView> providers, required final  List<RoleSettingsView> roles, required this.isBusy}): _providers = providers,_roles = roles,super._();
-  
+
 
 @override final  StudioSession session;
 @override final  SessionRuntimeView runtime;

@@ -7,8 +7,8 @@ use super::state::{AgentRuntimeError, unix_timestamp};
 use super::{
     AgentActivityState, AgentCommit, AgentCommitOutcome, AgentCommittedEvent, AgentLifecycleState,
     AgentRuntimeEvent, AgentRuntimeEventKind, AgentRuntimeHandle, AgentRuntimeHost,
-    AgentRuntimeResult, AgentTurnOutcome, MailboxDeliveryPhase, MailboxDeliveryState,
-    RestoredAgentRuntime, SessionId, TurnId, TurnOutcomeKind,
+    AgentRuntimeResult, AgentTurnOutcome, MailboxDeliveryState, RestoredAgentRuntime, SessionId,
+    TurnId, TurnOutcomeKind,
 };
 use crate::session_event::{project_runtime_event, runtime_event_session_id};
 use crate::{SessionEventHub, SessionEventHubHandle, SessionEventOptions};
@@ -28,7 +28,6 @@ pub enum RestoredInputPolicy {
 pub struct AgentRuntimeOptions {
     pub command_capacity: usize,
     pub cancel_grace: Duration,
-    pub child_inactivity_timeout: Duration,
     pub restored_inputs: RestoredInputPolicy,
     pub session_events: SessionEventOptions,
 }
@@ -38,7 +37,6 @@ impl Default for AgentRuntimeOptions {
         Self {
             command_capacity: 128,
             cancel_grace: Duration::from_millis(500),
-            child_inactivity_timeout: Duration::from_secs(30),
             restored_inputs: RestoredInputPolicy::Start,
             session_events: SessionEventOptions::default(),
         }
@@ -71,7 +69,7 @@ where
         let session_events = SessionEventHub::new(options.session_events);
         let session_event_handle = session_events.handle();
         for agent in &mut restored {
-            for projection in &agent.session_projections {
+            if let Some(projection) = &agent.session_projection {
                 session_event_handle
                     .replace_snapshot(
                         projection.snapshot.clone(),
@@ -80,21 +78,25 @@ where
                     .map_err(|error| AgentRuntimeError::SessionEvents(error.to_string()))?;
                 let session_id = SessionId::new(projection.snapshot.session_id.clone())
                     .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
-                let session = agent.state.sessions.get_mut(&session_id).ok_or_else(|| {
-                    AgentRuntimeError::SessionNotOwned {
+                if agent.state.session.id != session_id {
+                    return Err(AgentRuntimeError::SessionMismatch {
                         agent_id: agent.state.snapshot.identity.id.clone(),
-                        session_id: session_id.clone(),
-                    }
-                })?;
-                if session.session_event_sequence != projection.snapshot.through_sequence {
+                        expected: agent.state.session.id.clone(),
+                        actual: session_id,
+                    });
+                }
+                if agent.state.session.session_event_sequence
+                    != projection.snapshot.through_sequence
+                {
                     tracing::warn!(
                         agent_id = %agent.state.snapshot.identity.id,
-                        session_id = %session_id,
-                        checkpoint = session.session_event_sequence,
+                        session_id = %agent.state.session.id,
+                        checkpoint = agent.state.session.session_event_sequence,
                         canonical = projection.snapshot.through_sequence,
                         "repairing stale session event checkpoint during restore"
                     );
-                    session.session_event_sequence = projection.snapshot.through_sequence;
+                    agent.state.session.session_event_sequence =
+                        projection.snapshot.through_sequence;
                 }
             }
         }
@@ -130,7 +132,6 @@ where
     let mut recovered = Vec::with_capacity(restored.len());
     for mut agent in restored {
         let interrupted_turn_id = agent.state.snapshot.active_turn_id.clone();
-        let recovered_generation = agent.state.snapshot.dispatch_generation.saturating_add(1);
         let mut pending_inputs = VecDeque::new();
         while let Some(mut input) = agent.state.pending_inputs.pop_front() {
             if input.mail_id.trim().is_empty() {
@@ -140,7 +141,6 @@ where
                 MailboxDeliveryState::Pending => pending_inputs.push_back(input),
                 MailboxDeliveryState::Claimed { .. } => {
                     input.delivery_state = MailboxDeliveryState::Pending;
-                    input.dispatch_generation = recovered_generation;
                     if interrupted_turn_id.as_ref() == Some(&input.turn_id) {
                         input.turn_id = TurnId::generate();
                     }
@@ -153,45 +153,26 @@ where
         agent.state.refresh_mailbox_snapshot();
         let had_active_input = agent.state.active_input.is_some();
         let interrupted = agent.state.snapshot.active_turn_id.is_some()
-            || agent.state.snapshot.active_session_id.is_some()
             || had_active_input
             || matches!(
                 agent.state.snapshot.activity,
                 AgentActivityState::Running
                     | AgentActivityState::WaitingTool
                     | AgentActivityState::WaitingInteraction
+                    | AgentActivityState::Cancelling
             );
         if !interrupted {
             recovered.push(agent);
             continue;
         }
-        if let Some(mut active_input) = agent.state.active_input.take() {
-            if active_input.mail_id.trim().is_empty() {
-                active_input.mail_id = format!("mail:{}", active_input.turn_id);
-            }
-            if matches!(
-                active_input.delivery_state,
-                MailboxDeliveryState::Pending | MailboxDeliveryState::Claimed { .. }
-            ) {
-                active_input.delivery_state = MailboxDeliveryState::Pending;
-                active_input.dispatch_generation = recovered_generation;
-                active_input.turn_id = TurnId::generate();
-                agent.state.pending_inputs.push_front(active_input);
-            }
-        }
+        agent.state.active_input = None;
         let turn_id = agent
             .state
             .snapshot
             .active_turn_id
             .clone()
             .unwrap_or_else(TurnId::generate);
-        let session_id = agent
-            .state
-            .snapshot
-            .active_session_id
-            .clone()
-            .or_else(|| agent.state.sessions.keys().next().cloned())
-            .unwrap_or_else(SessionId::generate);
+        let session_id = agent.state.session.id.clone();
         let outcome = AgentTurnOutcome {
             turn_id,
             session_id,
@@ -205,9 +186,6 @@ where
         agent.state.snapshot.revision = expected_revision.saturating_add(1);
         agent.state.snapshot.event_sequence = agent.state.snapshot.event_sequence.saturating_add(1);
         agent.state.snapshot.active_turn_id = None;
-        agent.state.snapshot.active_session_id = None;
-        agent.state.snapshot.dispatch_generation = recovered_generation;
-        agent.state.snapshot.mailbox_delivery_phase = MailboxDeliveryPhase::NextTurn;
         agent.state.snapshot.last_turn = Some(outcome.clone());
         agent.state.refresh_mailbox_snapshot();
         agent.state.snapshot.activity = if agent.state.has_triggering_input() {
@@ -245,9 +223,14 @@ where
                 .map_err(|error| AgentRuntimeError::SessionEvents(error.to_string()))?,
             durable_events: durable_session_events,
         };
-        if let Some(session) = agent.state.sessions.get_mut(&session_key) {
-            session.session_event_sequence = projected.through_sequence;
+        if agent.state.session.id != session_key {
+            return Err(AgentRuntimeError::SessionMismatch {
+                agent_id: agent.state.snapshot.identity.id.clone(),
+                expected: agent.state.session.id.clone(),
+                actual: session_key,
+            });
         }
+        agent.state.session.session_event_sequence = projected.through_sequence;
         let commit_outcome = host
             .repository()
             .commit(AgentCommit {
@@ -289,22 +272,16 @@ where
                 });
             }
         }
-        if let Some(restored_projection) = agent
-            .session_projections
-            .iter_mut()
-            .find(|restored| restored.snapshot.session_id == session_id)
-        {
+        if let Some(restored_projection) = agent.session_projection.as_mut() {
             restored_projection.snapshot = projection.snapshot;
             restored_projection
                 .durable_events
                 .extend(projection.durable_events);
         } else {
-            agent
-                .session_projections
-                .push(super::RestoredSessionProjection {
-                    snapshot: projection.snapshot,
-                    durable_events: projection.durable_events,
-                });
+            agent.session_projection = Some(super::RestoredSessionProjection {
+                snapshot: projection.snapshot,
+                durable_events: projection.durable_events,
+            });
         }
         recovered.push(agent);
     }

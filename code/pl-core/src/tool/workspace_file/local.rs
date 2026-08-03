@@ -247,7 +247,8 @@ async fn collect_entries(
                 continue;
             }
             let display = paths.display_relative(&path);
-            if include_dirs && matches_list_entry(root, &path, &display, glob, true) {
+            if include_dirs && path != root && matches_list_entry(root, &path, &display, glob, true)
+            {
                 output.push(format!("{display}/"));
             }
             for entry in real_directory_entries_async(&path)

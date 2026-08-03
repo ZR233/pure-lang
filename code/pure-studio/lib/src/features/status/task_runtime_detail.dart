@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../app/theme/studio_tokens.dart';
 import '../../domain/models/runtime_models.dart';
 import '../../l10n/studio_l10n.dart';
+import '../../shared/studio_driver_keys.dart';
 import 'status_detail_popover.dart';
 
 class TaskRuntimeDetail extends StatelessWidget {
@@ -12,76 +13,92 @@ class TaskRuntimeDetail extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        StatusDetailPanel(
-          title: context.l10n.statusTaskSection,
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxHeight: 520),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            StatusDetailRow(
-              label: context.taskPhaseLabel(task.phase),
-              value: task.statusMessage ?? task.runId,
-              valueMaxLines: 2,
+            StatusDetailPanel(
+              title: context.l10n.statusTaskSection,
+              children: [
+                StatusDetailRow(
+                  label: context.taskPhaseLabel(task.phase),
+                  value: task.statusMessage ?? task.runId,
+                  valueMaxLines: 2,
+                ),
+                StatusDetailRow(label: 'Task ID', value: task.runId),
+                if (task.stopRequestedOrigin case final origin?)
+                  StatusDetailRow(
+                    key: const ValueKey('task-stop-origin'),
+                    label: 'Stop · generation ${task.taskGeneration}',
+                    value:
+                        '${_stopOriginLabel(origin)}: '
+                        '${task.stopRequestedReason ?? '-'}',
+                    valueMaxLines: 2,
+                  ),
+                StatusDetailRow(
+                  label: context.l10n.statusTaskBranch,
+                  value: task.branch,
+                ),
+                StatusDetailRow(
+                  label: context.l10n.statusTaskHead,
+                  value: _shortCommit(task.expectedHead),
+                ),
+              ],
             ),
-            StatusDetailRow(label: 'Task ID', value: task.runId),
-            if (task.stopRequestedOrigin case final origin?)
-              StatusDetailRow(
-                key: const ValueKey('task-stop-origin'),
-                label: 'Stop · generation ${task.taskGeneration}',
-                value:
-                    '${_stopOriginLabel(origin)}: '
-                    '${task.stopRequestedReason ?? '-'}',
-                valueMaxLines: 2,
+            if (task.agents.isNotEmpty) ...[
+              const _SectionDivider(),
+              StatusDetailPanel(
+                title: context.l10n.statusTaskAgents,
+                children: [
+                  for (final agent in task.agents) _AgentDetail(agent: agent),
+                ],
               ),
-            StatusDetailRow(
-              label: context.l10n.statusTaskBranch,
-              value: task.branch,
-            ),
-            StatusDetailRow(
-              label: context.l10n.statusTaskHead,
-              value: _shortCommit(task.expectedHead),
-            ),
+            ],
+            if (task.workUnits.isNotEmpty) ...[
+              const _SectionDivider(),
+              StatusDetailPanel(
+                title: context.l10n.statusTaskWorkUnits,
+                children: [
+                  for (final unit in task.workUnits)
+                    _WorkUnitDetail(task: task, unit: unit),
+                ],
+              ),
+            ],
+            if (task.completions.isNotEmpty) ...[
+              const _SectionDivider(),
+              StatusDetailPanel(
+                title: context.l10n.statusTaskCompletions,
+                children: [
+                  for (final completion in task.completions)
+                    _CompletionDetail(completion: completion),
+                ],
+              ),
+            ],
+            if (task.merges.isNotEmpty) ...[
+              const _SectionDivider(),
+              StatusDetailPanel(
+                title: context.l10n.statusTaskMerges,
+                children: [
+                  for (final merge in task.merges) _MergeDetail(merge: merge),
+                ],
+              ),
+            ],
+            if (task.reviews.isNotEmpty) ...[
+              const _SectionDivider(),
+              StatusDetailPanel(
+                title: context.l10n.statusTaskReviews,
+                children: [
+                  for (final review in task.reviews)
+                    _ReviewDetail(review: review),
+                ],
+              ),
+            ],
           ],
         ),
-        if (task.agents.isNotEmpty) ...[
-          const _SectionDivider(),
-          StatusDetailPanel(
-            title: context.l10n.statusTaskAgents,
-            children: [
-              for (final agent in task.agents) _AgentDetail(agent: agent),
-            ],
-          ),
-        ],
-        if (task.workUnits.isNotEmpty) ...[
-          const _SectionDivider(),
-          StatusDetailPanel(
-            title: context.l10n.statusTaskWorkUnits,
-            children: [
-              for (final unit in task.workUnits)
-                _WorkUnitDetail(task: task, unit: unit),
-            ],
-          ),
-        ],
-        if (task.merges.isNotEmpty) ...[
-          const _SectionDivider(),
-          StatusDetailPanel(
-            title: context.l10n.statusTaskMerges,
-            children: [
-              for (final merge in task.merges) _MergeDetail(merge: merge),
-            ],
-          ),
-        ],
-        if (task.reviews.isNotEmpty) ...[
-          const _SectionDivider(),
-          StatusDetailPanel(
-            title: context.l10n.statusTaskReviews,
-            children: [
-              for (final review in task.reviews) _ReviewDetail(review: review),
-            ],
-          ),
-        ],
-      ],
+      ),
     );
   }
 }
@@ -94,6 +111,7 @@ class _AgentDetail extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
+      key: StudioDriverKeys.taskAgent(agent.agentId),
       padding: const EdgeInsets.only(bottom: 9),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -101,6 +119,7 @@ class _AgentDetail extends StatelessWidget {
           _ItemHeading(
             title: '${agent.role} · ${agent.agentId}',
             status: context.taskStatusLabel(agent.status),
+            statusKey: StudioDriverKeys.taskAgentStatus(agent.agentId),
           ),
           StatusDetailRow(
             label: context.l10n.statusTaskSource,
@@ -109,6 +128,27 @@ class _AgentDetail extends StatelessWidget {
           StatusDetailRow(
             label: context.l10n.statusTaskRequest,
             value: agent.requestedByCallId,
+          ),
+          if (agent.progress case final progress?) ...[
+            StatusDetailRow(
+              label: context.l10n.statusTaskStage,
+              value: progress.stage,
+            ),
+            StatusDetailRow(
+              label: context.l10n.statusTaskSummary,
+              value: progress.summary,
+              valueMaxLines: 3,
+            ),
+            StatusDetailRow(
+              label: context.l10n.statusTaskNextStep,
+              value: progress.nextStep,
+              valueMaxLines: 3,
+            ),
+          ],
+          StatusDetailRow(
+            key: StudioDriverKeys.taskAgentSummaryAge(agent.agentId),
+            label: context.l10n.statusTaskSummaryAge,
+            value: '${agent.summaryAgeSeconds}s',
           ),
           if (agent.summary case final summary?)
             StatusDetailRow(
@@ -123,6 +163,49 @@ class _AgentDetail extends StatelessWidget {
               valueMaxLines: 3,
             ),
           if (agent.headCommit case final commit?)
+            StatusDetailRow(
+              label: context.l10n.statusTaskCommit,
+              value: _shortCommit(commit),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CompletionDetail extends StatelessWidget {
+  const _CompletionDetail({required this.completion});
+
+  final TaskCompletionView completion;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      key: StudioDriverKeys.taskCompletion(completion.id),
+      padding: const EdgeInsets.only(bottom: 9),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _ItemHeading(
+            title: '${completion.kind} · ${completion.executorAgentId}',
+            status: context.taskStatusLabel(completion.status),
+            titleKey: StudioDriverKeys.taskCompletionExecutor(completion.id),
+            statusKey: StudioDriverKeys.taskCompletionStatus(completion.id),
+          ),
+          StatusDetailRow(
+            key: StudioDriverKeys.taskCompletionRevision(
+              completion.id,
+              completion.revision,
+            ),
+            label: context.l10n.statusTaskCompletionRevision,
+            value: '${completion.revision}',
+          ),
+          StatusDetailRow(
+            label: context.l10n.statusTaskVerification,
+            value: completion.verificationSummary,
+            valueMaxLines: 3,
+          ),
+          if (completion.headCommit case final commit?)
             StatusDetailRow(
               label: context.l10n.statusTaskCommit,
               value: _shortCommit(commit),
@@ -222,17 +305,34 @@ class _ReviewDetail extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
+      key: StudioDriverKeys.taskReview(review.id),
       padding: const EdgeInsets.only(bottom: 9),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _ItemHeading(
-            title: '#${review.round}',
+            title: '${review.scope} · #${review.round}',
             status: context.taskStatusLabel(review.verdict),
+            statusKey: StudioDriverKeys.taskReviewVerdict(review.id),
           ),
+          if (review.reviewerAgentId case final reviewerAgentId?)
+            StatusDetailRow(
+              key: StudioDriverKeys.taskReviewReviewer(review.id),
+              label: context.l10n.statusTaskReviews,
+              value: reviewerAgentId,
+            ),
+          StatusDetailRow(
+            label: context.l10n.statusTaskScope,
+            value: review.scope,
+          ),
+          if (review.completionRevision case final revision?)
+            StatusDetailRow(
+              label: context.l10n.statusTaskCompletionRevision,
+              value: '$revision',
+            ),
           StatusDetailRow(
             label: context.l10n.statusTaskHead,
-            value: _shortCommit(review.headCommit),
+            value: _shortCommit(review.reviewedHead),
           ),
           if (review.summary case final summary?)
             StatusDetailRow(
@@ -243,8 +343,39 @@ class _ReviewDetail extends StatelessWidget {
           for (final reference in review.designReferences)
             StatusDetailRow(
               label: 'design',
-              value: reference,
+              value: '${reference.path}#${reference.section}',
               valueMaxLines: 2,
+            ),
+          for (final (index, finding) in review.findings.indexed)
+            Padding(
+              key: StudioDriverKeys.taskFinding(review.id, index),
+              padding: const EdgeInsets.only(top: 4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _ItemHeading(
+                    title: finding.title,
+                    status: finding.severity,
+                    statusKey: StudioDriverKeys.taskFindingSeverity(
+                      review.id,
+                      index,
+                    ),
+                  ),
+                  StatusDetailRow(
+                    label: context.l10n.statusTaskFindings,
+                    value: finding.body,
+                    valueMaxLines: 4,
+                  ),
+                  if (finding.path case final path?)
+                    StatusDetailRow(
+                      label: context.l10n.statusTaskSource,
+                      value: finding.line == null
+                          ? path
+                          : '$path:${finding.line}',
+                      valueMaxLines: 2,
+                    ),
+                ],
+              ),
             ),
         ],
       ),
@@ -253,10 +384,17 @@ class _ReviewDetail extends StatelessWidget {
 }
 
 class _ItemHeading extends StatelessWidget {
-  const _ItemHeading({required this.title, required this.status});
+  const _ItemHeading({
+    required this.title,
+    required this.status,
+    this.titleKey,
+    this.statusKey,
+  });
 
   final String title;
   final String status;
+  final Key? titleKey;
+  final Key? statusKey;
 
   @override
   Widget build(BuildContext context) {
@@ -267,6 +405,7 @@ class _ItemHeading extends StatelessWidget {
           Expanded(
             child: Text(
               title,
+              key: titleKey,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: context.text.bodySmall?.copyWith(
@@ -277,6 +416,7 @@ class _ItemHeading extends StatelessWidget {
           const SizedBox(width: 10),
           Text(
             status,
+            key: statusKey,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: context.text.labelSmall?.copyWith(

@@ -8,8 +8,6 @@ use crate::studio::entities;
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 #[cfg(test)]
-use crate::studio::task_coordinator::CompletionContract;
-#[cfg(test)]
 use crate::studio::task_coordinator::UpdateAgentOutcome;
 use crate::studio::task_coordinator::{
     AgentOutcomeRecord, AgentOutcomeStatus, CreateAgentOutcome, TaskRunPhase,
@@ -62,11 +60,6 @@ impl StudioStore {
                 attempt: Set(input.attempt as i32),
                 summary: Set(None),
                 error: Set(None),
-                delivery_json: Set(None),
-                review_json: Set(None),
-                completion_contract_json: Set(None),
-                delivery_recovery_count: Set(0),
-                terminal_observed: Set(0),
                 created_at: Set(now),
                 updated_at: Set(now),
             }
@@ -103,17 +96,6 @@ impl StudioStore {
         input: CreateAgentOutcome,
     ) -> Result<AgentOutcomeRecord> {
         let now = unix_seconds();
-        let completion_contract = input
-            .work_unit_id
-            .as_ref()
-            .filter(|_| input.role == "executor")
-            .map(|work_unit_id| {
-                serde_json::to_string(&CompletionContract::delivery_required(
-                    input.task_run_id.clone(),
-                    work_unit_id.clone(),
-                ))
-            })
-            .transpose()?;
         agent_outcome_record(
             entities::agent_outcome::ActiveModel {
                 id: Set(new_id("agent-outcome")),
@@ -128,11 +110,6 @@ impl StudioStore {
                 attempt: Set(input.attempt as i32),
                 summary: Set(None),
                 error: Set(None),
-                delivery_json: Set(None),
-                review_json: Set(None),
-                completion_contract_json: Set(completion_contract),
-                delivery_recovery_count: Set(0),
-                terminal_observed: Set(0),
                 created_at: Set(now),
                 updated_at: Set(now),
             }
@@ -155,14 +132,6 @@ impl StudioStore {
         active.status = Set(update.status.as_str().to_string());
         active.summary = Set(update.summary);
         active.error = Set(update.error);
-        active.delivery_json = Set(update
-            .delivery
-            .map(|value| serde_json::to_string(&value))
-            .transpose()?);
-        active.review_json = Set(update
-            .review
-            .map(|value| serde_json::to_string(&value))
-            .transpose()?);
         active.updated_at = Set(unix_seconds());
         agent_outcome_record(active.update(&self.db).await?)
     }
@@ -200,19 +169,6 @@ pub(super) fn agent_outcome_record(
         attempt: model.attempt as u32,
         summary: model.summary,
         error: model.error,
-        delivery: model
-            .delivery_json
-            .map(|json| serde_json::from_str(&json))
-            .transpose()?,
-        review: model
-            .review_json
-            .map(|json| serde_json::from_str(&json))
-            .transpose()?,
-        completion_contract: model
-            .completion_contract_json
-            .map(|json| serde_json::from_str(&json))
-            .transpose()?,
-        delivery_recovery_count: model.delivery_recovery_count.max(0) as u32,
         created_at: model.created_at,
         updated_at: model.updated_at,
     })

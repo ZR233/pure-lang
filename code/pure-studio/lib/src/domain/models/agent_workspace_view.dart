@@ -1,6 +1,7 @@
 import 'package:freezed_annotation/freezed_annotation.dart';
 
 import 'agent_models.dart';
+import 'composer_models.dart';
 import 'interaction_models.dart';
 import 'provider_models.dart';
 import 'runtime_models.dart';
@@ -29,7 +30,7 @@ abstract class AgentWorkspaceView with _$AgentWorkspaceView {
     required SessionRuntimeView runtime,
     required StudioTurnView? turn,
     required PendingInteraction? activeInteraction,
-    required String composerText,
+    required ComposerSessionState composer,
     required AgentComposerMode composerMode,
     required PermissionMode permissionMode,
     required List<ProviderSettingsView> providers,
@@ -44,6 +45,12 @@ abstract class AgentWorkspaceView with _$AgentWorkspaceView {
   bool get isLoading => syncState == AgentWorkspaceSyncState.loading;
 
   bool get isBusy => turn?.state.isBusy ?? false;
+
+  bool get isTaskPaused =>
+      isRoot &&
+      runtime.hasActiveTask &&
+      rootSession.agentStatus == 'interrupted' &&
+      !isBusy;
 
   RoleSettingsView? role(String key) {
     for (final role in roles) {

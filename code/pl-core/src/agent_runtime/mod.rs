@@ -1,10 +1,9 @@
 //! 产品无关的 agent actor runtime。
 
-mod actor;
+mod agent_loop;
 mod collaboration;
 mod coordinator;
-mod event_hub;
-mod execution;
+mod directory;
 mod handle;
 mod host;
 mod id;
@@ -17,10 +16,7 @@ mod turn;
 mod tests;
 
 pub use collaboration::AgentCollaborationTools;
-pub use event_hub::{
-    AgentParentSubscription, AgentSubscriptionItem, AgentUpdateEnvelope, AgentUpdateKind,
-    AgentWakeBatch, AgentWakeContext, AgentWakeReason,
-};
+pub use directory::{AgentDirectorySnapshot, AgentDirectorySubscription};
 pub use handle::AgentRuntimeHandle;
 pub use host::{
     AgentCommit, AgentCommitObserver, AgentCommitOutcome, AgentCommittedEvent,
@@ -28,19 +24,21 @@ pub use host::{
     AgentTurnFactory, CloseLifecycleRequest, RestoredAgentRuntime, RestoredSessionProjection,
     SessionProjectionCommit, SpawnLifecycleRequest,
 };
-pub use id::{AgentId, AgentWakeId, SessionId, TurnId};
+pub use id::{AgentId, SessionId, TurnId};
 pub use policy::{
     AgentAccessPolicy, AgentExecutionPolicy, AgentTargetSelector, ToolEffectSet,
     TurnFinalizationPolicy,
 };
 pub use runtime::{AgentRuntime, AgentRuntimeOptions, RestoredInputPolicy};
 pub use state::{
-    AcceptedAgentWake, AgentActivityState, AgentCurrentSessionSubmitRequest, AgentDurableState,
-    AgentIdentity, AgentLifecycleState, AgentRegistration, AgentRuntimeError, AgentRuntimeEvent,
-    AgentRuntimeEventKind, AgentRuntimeResult, AgentSessionState, AgentSnapshot, AgentSpawnRequest,
-    AgentSpawnResult, AgentSubmitRequest, AgentTurnOutcome, AgentWaitResult, AgentWakePolicy,
-    DurableMailboxEnvelope, InputDelivery, MailboxDeliveryPhase, MailboxDeliveryState,
-    MailboxPresentation, MailboxTurnTrigger, PendingAgentInput, TurnOutcomeKind,
+    AgentActivityState, AgentCurrentSessionSubmitRequest, AgentDirectoryWaitReason,
+    AgentDirectoryWaitResult, AgentDurableState, AgentIdentity, AgentLifecycleState,
+    AgentProgressCheckpoint, AgentProgressStage, AgentRegistration, AgentRuntimeError,
+    AgentRuntimeEvent, AgentRuntimeEventKind, AgentRuntimeResult, AgentSessionDigest,
+    AgentSessionDigestMessage, AgentSessionDigestRole, AgentSessionState, AgentSnapshot,
+    AgentSpawnRequest, AgentSpawnResult, AgentSubmitRequest, AgentTurnOutcome, AgentWaitResult,
+    DurableMailboxEnvelope, MailboxDeliveryState, MailboxPresentation, PendingAgentInput,
+    TurnOutcomeKind,
 };
 pub(crate) use turn::AgentTurnMailboxHandle;
 pub use turn::{

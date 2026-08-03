@@ -81,7 +81,9 @@ class _Sidebar extends ConsumerWidget {
                       selected: session.id == state.selectedRootSessionId,
                       compact: compact,
                       recoveryIssue: state.recoveryIssueForSession(session.id),
-                      canArchive: !state.isBusy,
+                      canArchive:
+                          session.id != state.selectedRootSessionId ||
+                          !state.isBusy,
                     ),
                 ],
               ),
@@ -552,9 +554,10 @@ class _SidebarActions extends ConsumerWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 _SidebarActionButton(
+                  key: StudioDriverKeys.newSession,
                   tooltip: context.l10n.sidebarNewSession,
                   icon: Icons.add_comment_outlined,
-                  onPressed: state.selectedProjectId == null || state.isBusy
+                  onPressed: state.selectedProjectId == null
                       ? null
                       : ref
                             .read(studioControllerProvider.notifier)
@@ -562,9 +565,10 @@ class _SidebarActions extends ConsumerWidget {
                 ),
                 const SizedBox(height: 4),
                 _SidebarActionButton(
+                  key: StudioDriverKeys.openProject,
                   tooltip: context.l10n.sidebarOpenProject,
                   icon: Icons.create_new_folder,
-                  onPressed: () => _openProject(ref),
+                  onPressed: () => _openProject(context, ref),
                 ),
                 const SizedBox(height: 4),
                 _SidebarActionButton(
@@ -579,9 +583,10 @@ class _SidebarActions extends ConsumerWidget {
           : Row(
               children: [
                 _SidebarActionButton(
+                  key: StudioDriverKeys.newSession,
                   icon: Icons.add_comment_outlined,
                   tooltip: context.l10n.sidebarNewSession,
-                  onPressed: state.selectedProjectId == null || state.isBusy
+                  onPressed: state.selectedProjectId == null
                       ? null
                       : ref
                             .read(studioControllerProvider.notifier)
@@ -589,9 +594,10 @@ class _SidebarActions extends ConsumerWidget {
                 ),
                 const SizedBox(width: 4),
                 _SidebarActionButton(
+                  key: StudioDriverKeys.openProject,
                   icon: Icons.create_new_folder,
                   tooltip: context.l10n.sidebarOpenProject,
-                  onPressed: () => _openProject(ref),
+                  onPressed: () => _openProject(context, ref),
                 ),
                 const Spacer(),
                 _SidebarActionButton(
@@ -606,12 +612,68 @@ class _SidebarActions extends ConsumerWidget {
     );
   }
 
-  Future<void> _openProject(WidgetRef ref) async {
-    final path = await FilePicker.getDirectoryPath();
+  Future<void> _openProject(BuildContext context, WidgetRef ref) async {
+    final path = await ref.read(projectDirectoryPickerProvider)(context);
     if (path == null || path.isEmpty) {
       return;
     }
     await ref.read(studioControllerProvider.notifier).openProject(path);
+  }
+}
+
+class _DriverProjectPathDialog extends StatefulWidget {
+  const _DriverProjectPathDialog();
+
+  @override
+  State<_DriverProjectPathDialog> createState() =>
+      _DriverProjectPathDialogState();
+}
+
+class _DriverProjectPathDialogState extends State<_DriverProjectPathDialog> {
+  final _controller = TextEditingController();
+
+  String get _path => _controller.text.trim();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      key: StudioDriverKeys.projectPathDialog,
+      title: Text(context.l10n.sidebarOpenProject),
+      content: TextField(
+        key: StudioDriverKeys.projectPathInput,
+        controller: _controller,
+        autofocus: true,
+        decoration: InputDecoration(
+          labelText: context.l10n.agentDetailPathLabel,
+        ),
+        onChanged: (_) => setState(() {}),
+        onSubmitted: (_) => _submit(),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(context.l10n.settingsCancel),
+        ),
+        FilledButton(
+          key: StudioDriverKeys.projectPathSubmit,
+          onPressed: _path.isEmpty ? null : _submit,
+          child: Text(context.l10n.sidebarOpen),
+        ),
+      ],
+    );
+  }
+
+  void _submit() {
+    final path = _path;
+    if (path.isNotEmpty) {
+      Navigator.of(context).pop(path);
+    }
   }
 }
 

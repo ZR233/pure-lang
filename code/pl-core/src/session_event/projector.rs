@@ -12,7 +12,7 @@ use pl_trace::{
 
 use crate::agent_runtime::{
     AgentRuntimeEvent, AgentRuntimeEventKind, MailboxDeliveryState, MailboxPresentation,
-    MailboxTurnTrigger, PendingAgentInput, TurnOutcomeKind,
+    PendingAgentInput, TurnOutcomeKind,
 };
 
 use super::{interaction::turn_activity_for_interaction, trace_part::session_part};
@@ -124,7 +124,7 @@ pub(crate) fn project_runtime_event(
                     &format!("{turn_id}:mail:{}", input.mail_id),
                     event.created_at,
                 );
-            } else if input.trigger == MailboxTurnTrigger::StartIfIdle {
+            } else {
                 projector.durable(
                     Some(turn_id.to_string()),
                     event.created_at,
@@ -162,9 +162,7 @@ pub(crate) fn project_runtime_event(
                 },
             );
             for input in claimed_inputs {
-                if input.trigger == MailboxTurnTrigger::StartIfIdle
-                    && input.turn_id.as_str() != turn_id
-                {
+                if input.turn_id.as_str() != turn_id {
                     projector.durable(
                         Some(input.turn_id.to_string()),
                         event.created_at,
@@ -315,10 +313,9 @@ fn project_user_input(
     message_id: &str,
     emitted_at: i64,
 ) {
-    let (text, synthetic) = match &input.presentation {
-        MailboxPresentation::User => (input.message.as_str(), false),
-        MailboxPresentation::SyntheticVisible { prompt } => (prompt.as_str(), true),
-        MailboxPresentation::SyntheticHidden => return,
+    let text = match &input.presentation {
+        MailboxPresentation::User => input.message.as_str(),
+        MailboxPresentation::Hidden => return,
     };
     let session_id = input.session_id.as_str();
     projector.durable(
@@ -361,7 +358,7 @@ fn project_user_input(
                     attachments: Vec::new(),
                 },
                 usage: None,
-                synthetic,
+                synthetic: false,
                 ignored: false,
             }),
         },
@@ -717,19 +714,7 @@ mod tests {
                 ) && !part.synthetic
         ));
 
-        let visible = projected_mailbox_events(MailboxPresentation::SyntheticVisible {
-            prompt: "visible".to_string(),
-        });
-        assert!(matches!(
-            &visible[1].kind,
-            SessionEventKind::PartChanged { part }
-                if matches!(
-                    &part.content,
-                    SessionPartContent::Text { text, .. } if text == "visible"
-                ) && part.synthetic
-        ));
-
-        let hidden = projected_mailbox_events(MailboxPresentation::SyntheticHidden);
+        let hidden = projected_mailbox_events(MailboxPresentation::Hidden);
         assert!(hidden.is_empty());
     }
 
@@ -838,15 +823,11 @@ mod tests {
         let input = PendingAgentInput {
             mail_id: "mail-1".to_string(),
             turn_id: TurnId::new("turn").expect("turn id"),
-            wake_id: None,
-            wake_signal_ids: Vec::new(),
             session_id: SessionId::new("session").expect("session id"),
             message: "internal".to_string(),
             metadata: serde_json::json!({}),
             presentation,
-            trigger: MailboxTurnTrigger::StartIfIdle,
             delivery_state: MailboxDeliveryState::Pending,
-            dispatch_generation: 0,
             queued_at: 1,
         };
         let mut projector = Projector::new("agent", "session", 0);

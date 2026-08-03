@@ -3,16 +3,16 @@ use std::sync::Arc;
 
 use crate::{ContentPart, ImageSource, MessageContent, PureError, Result};
 use pl_core::{
-    AgentCollaborationTools, AgentKernel, AgentTurnFactory, AgentTurnPreparationContext,
-    CoreAgentProfile, ExecutionInstructionProfile, InstructionAssembler,
-    InstructionAssemblyRequest, PreparedAgentTurn, PreparedSessionRuntime, SubagentContext,
-    ToolVisibilitySet, TurnEngineBuilder, TurnOptions, TurnRequest, load_workspace_instructions,
-    plan_web_search,
+    AgentCollaborationTools, AgentIdentity, AgentKernel, AgentTurnFactory,
+    AgentTurnPreparationContext, CoreAgentProfile, ExecutionInstructionProfile,
+    InstructionAssembler, InstructionAssemblyRequest, PreparedAgentTurn, PreparedSessionRuntime,
+    SubagentContext, ToolVisibilitySet, TurnEngineBuilder, TurnOptions, TurnRequest,
+    load_workspace_instructions, plan_web_search,
 };
 use pl_model::create_provider_with_catalog;
 
 use crate::config::ConfigStore;
-use crate::studio::task_coordinator::{TaskContinuationResolution, TaskCoordinator};
+use crate::studio::task_coordinator::TaskCoordinator;
 use crate::studio::{InteractionRuntime, StudioStore};
 use crate::{McpRuntimeHandle, StudioMode, resolve_workspace_root};
 
@@ -100,36 +100,17 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         };
         let task_phase = active_task_run.as_ref().map(|run| run.phase);
         if let Some(run) = active_task_run.as_ref() {
-            validate_task_turn_generation(
-                &context.snapshot.identity,
-                &context.input.metadata,
-                run,
-            )?;
+            ensure_task_accepts_turn(run)?;
         }
-        let input_message = if context.snapshot.identity.parent_id.is_none() {
-            if let Some(wake_batch) = context.input.metadata.get("agentWakeBatch") {
-                match active_task_run.as_ref() {
-                    Some(run) => match self
-                        .store
-                        .load_task_continuation_resolution(&run.id)
-                        .await
-                        .map_err(anyhow_error)?
-                    {
-                        TaskContinuationResolution::Active(snapshot) => format!(
-                            "{}\n\n<agentWakeBatch>\n{}\n</agentWakeBatch>",
-                            snapshot.render_prompt().map_err(anyhow_error)?,
-                            serde_json::to_string_pretty(wake_batch).map_err(anyhow_error)?
-                        ),
-                        TaskContinuationResolution::Terminal(_) => context.input.message.clone(),
-                    },
-                    None => context.input.message.clone(),
-                }
-            } else {
-                context.input.message.clone()
-            }
-        } else {
-            context.input.message.clone()
-        };
+        if mode == StudioMode::Task
+            && context.snapshot.identity.role.as_str() == crate::config::StudioRole::Executor.key()
+        {
+            self.store
+                .mark_executor_turn_started(context.snapshot.identity.id.as_str())
+                .await
+                .map_err(anyhow_error)?;
+        }
+        let input_message = context.input.message.clone();
         let model_role = if context.snapshot.identity.parent_id.is_none() {
             match mode {
                 StudioMode::Simple => crate::config::StudioRole::Executor.id(),
@@ -145,30 +126,18 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             .with_tool_capabilities(config.runtime.tool_capabilities.clone())
             .with_skills_config(config.skills.clone())
             .with_lsp_runtime(self.lsp_runtime.clone());
-        if let Some(effort) = route.reasoning_effort {
-            builder = builder.with_reasoning_effort(effort);
+        if let Some(effort) = route.effort {
+            builder = builder.with_effort(effort);
         }
         let profile = CoreAgentProfile::local_workspace(workspace_root.clone())
             .with_workspace_instructions(workspace_instructions.clone());
-        let subagent_context = if context.snapshot.identity.parent_id.is_some() {
-            Some(SubagentContext {
-                id: context.snapshot.identity.id.to_string(),
-                // TaskCoordinator 的 durable owner boundary 是 Studio 逻辑树路径；
-                // framework parent AgentId 只用于 runtime 协作授权，不能混入产品记录。
-                parent_id: Some("/root".to_string()),
-                agent_path: Some(format!("/root/{}", context.snapshot.identity.id)),
-                role: context.snapshot.identity.role.to_string(),
-                task: self
-                    .resources
-                    .get(&context.snapshot.identity.id)
-                    .await
-                    .map(|resource| resource.task_name)
-                    .unwrap_or_else(|| context.snapshot.identity.role.to_string()),
-                depth: context.snapshot.identity.depth,
-            })
-        } else {
-            None
-        };
+        let task_name = self
+            .resources
+            .get(&context.snapshot.identity.id)
+            .await
+            .map(|resource| resource.task_name)
+            .unwrap_or_else(|| context.snapshot.identity.role.to_string());
+        let subagent_context = runtime_subagent_context(&context.snapshot.identity, task_name);
         let kernel_builder = AgentKernel::builder(builder).with_profile(profile);
         let mut kernel = match subagent_context {
             Some(subagent) => kernel_builder.with_subagent_context(subagent).build().await,
@@ -201,15 +170,18 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             ToolVisibilitySet::from_tool_names(kernel.tool_names()),
         );
         policy.visible_tools = web_search.constrain_visibility(policy.visible_tools);
-        if let Some(wake_context) = context.wake_context.as_ref() {
-            policy.constrain_for_agent_wake(wake_context);
-        }
         let collaboration = AgentCollaborationTools::new(
             context.runtime.clone(),
             context.snapshot.identity.id.clone(),
             policy.collaboration.clone(),
         );
-        for tool in collaboration.tools() {
+        let collaboration_tools =
+            if mode == StudioMode::Task && context.snapshot.identity.parent_id.is_none() {
+                collaboration.tools_without_send_message()
+            } else {
+                collaboration.tools()
+            };
+        for tool in collaboration_tools {
             kernel.core_mut().register_tool(tool);
         }
 
@@ -371,29 +343,21 @@ fn turn_error(error: impl Into<String>) -> PureError {
     PureError::MemoryError(error.into())
 }
 
-fn validate_task_turn_generation(
-    identity: &pl_core::AgentIdentity,
-    metadata: &serde_json::Value,
-    run: &crate::studio::task_coordinator::TaskRunRecord,
-) -> Result<()> {
-    let continuation_reason = metadata
-        .get("continuationReason")
-        .and_then(serde_json::Value::as_str);
-    let input_generation = metadata
-        .get("taskGeneration")
-        .and_then(serde_json::Value::as_u64);
-    let delivery_recovery = continuation_reason == Some("deliveryRecovery")
-        && identity.parent_id.is_some()
-        && identity.role.as_str() == "executor";
-    if delivery_recovery && input_generation != Some(run.task_generation) {
-        return Err(turn_error(
-            "delivery recovery belongs to a stale task generation",
-        ));
-    }
-    if run.stop_requested && !delivery_recovery {
-        return Err(turn_error(
-            "task is quiescing; only its generation-bound delivery recovery may start",
-        ));
+fn runtime_subagent_context(identity: &AgentIdentity, task: String) -> Option<SubagentContext> {
+    let parent_id = identity.parent_id.as_ref()?.to_string();
+    Some(SubagentContext {
+        id: identity.id.to_string(),
+        parent_id: Some(parent_id),
+        agent_path: Some(format!("/root/{}", identity.id)),
+        role: identity.role.to_string(),
+        task,
+        depth: identity.depth,
+    })
+}
+
+fn ensure_task_accepts_turn(run: &crate::studio::task_coordinator::TaskRunRecord) -> Result<()> {
+    if run.stop_requested {
+        return Err(turn_error("task is quiescing; no new turn may start"));
     }
     Ok(())
 }
@@ -410,47 +374,28 @@ mod tests {
     };
 
     #[test]
-    fn stop_requested_turn_gate_only_accepts_generation_bound_executor_recovery() {
+    fn stop_requested_task_rejects_every_new_turn() {
         let run = stopped_run();
-        let root = identity("root", "planner", None);
-        let executor = identity("executor", "executor", Some("root"));
-
-        assert!(
-            validate_task_turn_generation(&root, &serde_json::json!({}), &run).is_err(),
-            "a stopped task must not start a generic planner continuation"
-        );
-        assert!(
-            validate_task_turn_generation(
-                &executor,
-                &serde_json::json!({
-                    "continuationReason": "deliveryRecovery",
-                    "taskGeneration": run.task_generation - 1,
-                }),
-                &run,
-            )
-            .is_err(),
-            "a stale delivery recovery generation must be rejected"
-        );
-        assert!(
-            validate_task_turn_generation(
-                &executor,
-                &serde_json::json!({
-                    "continuationReason": "deliveryRecovery",
-                    "taskGeneration": run.task_generation,
-                }),
-                &run,
-            )
-            .is_ok()
-        );
+        assert!(ensure_task_accepts_turn(&run).is_err());
     }
 
-    fn identity(id: &str, role: &str, parent_id: Option<&str>) -> pl_core::AgentIdentity {
-        pl_core::AgentIdentity {
-            id: pl_core::AgentId::new(id).unwrap(),
-            parent_id: parent_id.map(|parent| pl_core::AgentId::new(parent).unwrap()),
-            role: crate::AgentRoleId::new(role).unwrap(),
-            depth: u32::from(parent_id.is_some()),
-        }
+    #[test]
+    fn subagent_context_preserves_the_runtime_parent_identity() -> anyhow::Result<()> {
+        let parent_id = pl_core::AgentId::new("studio:session-1")?;
+        let identity = AgentIdentity {
+            id: pl_core::AgentId::new("agent-reviewer")?,
+            parent_id: Some(parent_id.clone()),
+            role: pl_core::AgentRoleId::new("reviewer")?,
+            depth: 1,
+        };
+
+        let context = runtime_subagent_context(&identity, "delivery review".to_string())
+            .expect("child agent should produce a subagent context");
+
+        assert_eq!(context.parent_id.as_deref(), Some(parent_id.as_str()));
+        assert_eq!(context.role, "reviewer");
+        assert_eq!(context.depth, 1);
+        Ok(())
     }
 
     fn stopped_run() -> TaskRunRecord {

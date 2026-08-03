@@ -135,7 +135,7 @@ impl CoreRuntimeProfile {
 #[derive(Debug, Clone)]
 pub struct TurnEngineBuilder {
     provider: SharedModelProvider,
-    reasoning_effort: Option<ReasoningEffort>,
+    effort: Option<ReasoningEffort>,
     tool_capabilities: ToolCapabilityConfig,
     skills: Option<SkillsConfig>,
     lsp_runtime: Option<pl_lsp::LspRuntimeRegistry>,
@@ -146,7 +146,7 @@ impl TurnEngineBuilder {
     pub fn new(provider: SharedModelProvider) -> Self {
         Self {
             provider,
-            reasoning_effort: None,
+            effort: None,
             tool_capabilities: ToolCapabilityConfig::default(),
             skills: None,
             lsp_runtime: None,
@@ -165,8 +165,8 @@ impl TurnEngineBuilder {
         Ok(Self::new(create_provider_with_catalog(info, models)?))
     }
 
-    pub fn with_reasoning_effort(mut self, reasoning_effort: ReasoningEffort) -> Self {
-        self.reasoning_effort = Some(reasoning_effort);
+    pub fn with_effort(mut self, effort: ReasoningEffort) -> Self {
+        self.effort = Some(effort);
         self
     }
 
@@ -200,7 +200,7 @@ impl TurnEngineBuilder {
         } = self.runtime_profile;
         TurnEngine {
             provider: self.provider,
-            reasoning_effort: self.reasoning_effort,
+            effort: self.effort,
             skills: self.skills,
             lsp_runtime: self.lsp_runtime,
             workspace_root: workspace_profile.root,

@@ -426,9 +426,11 @@ impl TaskCoordinator {
                 },
             )
             .await;
-        self.release_owned_process_lease(&scope.run.id);
         match block {
-            Ok(_) => Err(error).context(reason),
+            Ok(_) => {
+                self.finish_blocked_transition(&scope.run.id).await?;
+                Err(error).context(reason)
+            }
             Err(block_error) => Err(error).context(format!(
                 "{reason}; accepted-merge block persistence also failed: {block_error:#}"
             )),

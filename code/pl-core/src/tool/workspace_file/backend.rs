@@ -31,6 +31,7 @@ pub trait WorkspaceFileBackend: fmt::Debug + Send + Sync {
         request: WorkspaceFileRemoveRequest,
     ) -> impl Future<Output = Result<()>> + Send;
 
+    /// Lists matching descendants without returning the requested directory itself.
     fn list(
         &self,
         request: WorkspaceFileListRequest,

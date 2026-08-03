@@ -40,6 +40,12 @@ enum DriverMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FlutterProcessMode {
+    Batch,
+    ResidentDriver,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DistCleanMode {
     Clean,
     KeepExisting,
@@ -96,17 +102,89 @@ pub(crate) fn generate_gui() -> Result<()> {
     print_context(&workspace_root, &app_dir);
 
     run_flutter(&workspace_root, &app_dir, &["pub", "get"], DemoMode::Native)?;
+    run_flutter(&workspace_root, &app_dir, &["gen-l10n"], DemoMode::Native)?;
+    ensure_frb_codegen_version()?;
+    run_frb_codegen(&workspace_root, &app_dir)?;
     run_flutter(
         &workspace_root,
         &app_dir,
         &["pub", "run", "build_runner", "build"],
         DemoMode::Native,
     )?;
-    run_flutter(&workspace_root, &app_dir, &["gen-l10n"], DemoMode::Native)?;
-    ensure_frb_codegen_version()?;
-    run_frb_codegen(&workspace_root, &app_dir)?;
+    normalize_generated_dart_whitespace(&app_dir.join("lib"))?;
     run_tool("dart", &["format", "lib"], &app_dir)?;
     run_tool("cargo", &["fmt", "--all"], &workspace_root)
+}
+
+fn normalize_generated_dart_whitespace(root: &Path) -> Result<()> {
+    let mut directories = vec![root.to_path_buf()];
+    while let Some(directory) = directories.pop() {
+        for entry in fs::read_dir(&directory)
+            .with_context(|| format!("failed to read {}", directory.display()))?
+        {
+            let entry = entry
+                .with_context(|| format!("failed to read entry in {}", directory.display()))?;
+            let path = entry.path();
+            if entry
+                .file_type()
+                .with_context(|| format!("failed to inspect {}", path.display()))?
+                .is_dir()
+            {
+                directories.push(path);
+                continue;
+            }
+            if !is_generated_dart_path(root, &path) {
+                continue;
+            }
+            let content = fs::read_to_string(&path)
+                .with_context(|| format!("failed to read {}", path.display()))?;
+            let normalized = trim_trailing_horizontal_whitespace(&content);
+            if normalized != content {
+                fs::write(&path, normalized)
+                    .with_context(|| format!("failed to normalize {}", path.display()))?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn is_generated_dart_path(root: &Path, path: &Path) -> bool {
+    let Ok(relative) = path.strip_prefix(root) else {
+        return false;
+    };
+    let Some(file_name) = relative.file_name().and_then(|value| value.to_str()) else {
+        return false;
+    };
+    if file_name.ends_with(".g.dart") || file_name.ends_with(".freezed.dart") {
+        return true;
+    }
+
+    let rust_root = Path::new("src").join("rust");
+    if relative.starts_with(rust_root)
+        && path.extension().and_then(|value| value.to_str()) == Some("dart")
+    {
+        return true;
+    }
+
+    relative.parent() == Some(Path::new("src").join("l10n").as_path())
+        && file_name.starts_with("app_localizations")
+        && path.extension().and_then(|value| value.to_str()) == Some("dart")
+}
+
+fn trim_trailing_horizontal_whitespace(content: &str) -> String {
+    let mut normalized = String::with_capacity(content.len());
+    for chunk in content.split_inclusive('\n') {
+        let (line, newline) = chunk
+            .strip_suffix('\n')
+            .map_or((chunk, ""), |line| (line, "\n"));
+        let (line, carriage_return) = line
+            .strip_suffix('\r')
+            .map_or((line, ""), |line| (line, "\r"));
+        normalized.push_str(line.trim_end_matches([' ', '\t']));
+        normalized.push_str(carriage_return);
+        normalized.push_str(newline);
+    }
+    normalized
 }
 
 pub(crate) fn verify_gui(options: VerifyGuiOptions) -> Result<()> {
@@ -284,7 +362,7 @@ fn prepare_freezed_prerelease_for_frb(lock_path: &Path) -> Result<()> {
             let stable = line.split_once("-dev.").map_or(line, |(prefix, _)| {
                 // FRB 2.12 rejects prerelease semver in pubspec.lock even though
                 // the installed Freezed build is compatible. Codegen does not
-                // execute the package because build_runner already ran above.
+                // execute the package because build_runner runs after FRB codegen.
                 prefix
             });
             output.push_str(stable);
@@ -332,7 +410,17 @@ pub(crate) fn run_gui(options: RunGuiOptions) -> Result<()> {
         DriverMode::Disabled
     };
     let run_args = run_gui_args(target, &version_define, driver_mode);
-    run_flutter(&workspace_root, &app_dir, &run_args, demo_mode)
+    let process_mode = match driver_mode {
+        DriverMode::Disabled => FlutterProcessMode::Batch,
+        DriverMode::Enabled => FlutterProcessMode::ResidentDriver,
+    };
+    run_flutter_with_process_mode(
+        &workspace_root,
+        &app_dir,
+        &run_args,
+        demo_mode,
+        process_mode,
+    )
 }
 
 fn run_gui_args(target: DesktopTarget, version_define: &str, driver_mode: DriverMode) -> Vec<&str> {
@@ -348,6 +436,8 @@ fn run_gui_args(target: DesktopTarget, version_define: &str, driver_mode: Driver
             "-t",
             "test_driver/driver_main.dart",
             "--dart-define=PURE_STUDIO_DRIVER=true",
+            "--disable-service-auth-codes",
+            "--verbose",
         ]);
     }
     args
@@ -520,6 +610,22 @@ fn run_flutter(
     args: &[&str],
     demo_mode: DemoMode,
 ) -> Result<()> {
+    run_flutter_with_process_mode(
+        workspace_root,
+        app_dir,
+        args,
+        demo_mode,
+        FlutterProcessMode::Batch,
+    )
+}
+
+fn run_flutter_with_process_mode(
+    workspace_root: &Path,
+    app_dir: &Path,
+    args: &[&str],
+    demo_mode: DemoMode,
+    process_mode: FlutterProcessMode,
+) -> Result<()> {
     let args = flutter_args(args, demo_mode);
     let display = process::display_command("flutter", &args);
     let mut command = process::path_command("flutter", &args);
@@ -532,7 +638,11 @@ fn run_flutter(
             command.env("PURE_STUDIO_DEMO", "true");
         }
     }
-    process::run_checked(&mut command, &display).with_context(|| {
+    let result = match process_mode {
+        FlutterProcessMode::Batch => process::run_checked(&mut command, &display),
+        FlutterProcessMode::ResidentDriver => process::run_resident_checked(&mut command, &display),
+    };
+    result.with_context(|| {
         format!(
             "workspace root: {}, Studio app dir: {}",
             workspace_root.display(),
@@ -661,6 +771,8 @@ mod tests {
                 "-t",
                 "test_driver/driver_main.dart",
                 "--dart-define=PURE_STUDIO_DRIVER=true",
+                "--disable-service-auth-codes",
+                "--verbose",
             ]
         );
         assert_eq!(
@@ -679,8 +791,45 @@ mod tests {
 
         assert!(!args.contains(&"test_driver/driver_main.dart"));
         assert!(!args.contains(&"--dart-define=PURE_STUDIO_DRIVER=true"));
+        assert!(!args.contains(&"--disable-service-auth-codes"));
+        assert!(!args.contains(&"--verbose"));
         assert!(!args.contains(&"-t"));
         assert!(args.contains(&"--no-pub"));
+    }
+
+    #[test]
+    fn generated_whitespace_normalization_preserves_line_endings() {
+        assert_eq!(
+            trim_trailing_horizontal_whitespace("alpha  \r\nbeta\t\ngamma  "),
+            "alpha\r\nbeta\ngamma"
+        );
+    }
+
+    #[test]
+    fn generated_whitespace_normalization_excludes_handwritten_dart() {
+        let root = Path::new("lib");
+
+        assert!(is_generated_dart_path(root, &root.join("models.g.dart")));
+        assert!(is_generated_dart_path(
+            root,
+            &root.join("models.freezed.dart")
+        ));
+        assert!(is_generated_dart_path(
+            root,
+            &root.join("src/rust/frb_generated.dart")
+        ));
+        assert!(is_generated_dart_path(
+            root,
+            &root.join("src/l10n/app_localizations_en.dart")
+        ));
+        assert!(!is_generated_dart_path(
+            root,
+            &root.join("src/features/settings/editor.dart")
+        ));
+        assert!(!is_generated_dart_path(
+            root,
+            &root.join("src/l10n/studio_l10n.dart")
+        ));
     }
 
     #[test]

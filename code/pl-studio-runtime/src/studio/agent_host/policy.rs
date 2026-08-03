@@ -8,7 +8,15 @@ use pl_core::{
 use crate::StudioMode;
 use crate::studio::task_coordinator::TaskRunPhase;
 
-const COLLABORATION_TOOLS: [&str; 4] = ["spawn_agent", "send_input", "list_agents", "close_agent"];
+const COLLABORATION_CONTROL_TOOLS: [&str; 7] = [
+    "spawn_agent",
+    "send_message",
+    "interrupt_agent",
+    "list_agents",
+    "wait_agents",
+    "read_agent_session",
+    "close_agent",
+];
 const CONFLICT_TOOLS: [&str; 6] = [
     "merge_status",
     "merge_conflict_files",
@@ -42,9 +50,10 @@ pub(super) fn studio_execution_policy(
         AgentAccessPolicy::default()
     };
     if is_root {
-        visible_tools.extend_tool_names(COLLABORATION_TOOLS);
+        visible_tools.extend_tool_names(COLLABORATION_CONTROL_TOOLS);
     } else {
-        visible_tools = without_tools(visible_tools, &COLLABORATION_TOOLS);
+        visible_tools = without_tools(visible_tools, &COLLABORATION_CONTROL_TOOLS);
+        visible_tools.extend_tool_names(["report_progress"]);
     }
     if context.task_phase != Some(TaskRunPhase::ResolvingConflict) {
         visible_tools = without_tools(visible_tools, &CONFLICT_TOOLS);
@@ -104,11 +113,12 @@ fn allowed_effects(snapshot: &AgentSnapshot, context: StudioPolicyContext) -> Ve
         };
     }
     match snapshot.identity.role.as_str() {
-        "explorer" | "reviewer" => vec![ToolEffect::Read],
+        "explorer" | "reviewer" => vec![ToolEffect::Read, ToolEffect::AgentControl],
         "executor" => vec![
             ToolEffect::Read,
             ToolEffect::WorkspaceWrite,
             ToolEffect::Process,
+            ToolEffect::AgentControl,
             ToolEffect::BranchControl,
         ],
         "planner" => vec![ToolEffect::Read],
@@ -122,7 +132,7 @@ fn finalization(snapshot: &AgentSnapshot, context: StudioPolicyContext) -> TurnF
     }
     if snapshot.identity.parent_id.is_some() {
         return match snapshot.identity.role.as_str() {
-            "executor" => required_tool("submit_delivery"),
+            "executor" => required_tool("report_completion"),
             "reviewer" => required_tool("review_exit"),
             "explorer" | "planner" => TurnFinalizationPolicy::Direct,
             _ => TurnFinalizationPolicy::Direct,
@@ -180,8 +190,11 @@ mod tests {
     }
 
     #[test]
-    fn task_children_have_role_finalizers_without_agent_control() {
-        for (role, tool) in [("executor", "submit_delivery"), ("reviewer", "review_exit")] {
+    fn task_children_have_role_finalizers_and_progress_control() {
+        for (role, tool) in [
+            ("executor", "report_completion"),
+            ("reviewer", "review_exit"),
+        ] {
             let policy = policy(
                 child(role),
                 StudioMode::Task,
@@ -191,7 +204,8 @@ mod tests {
 
             assert!(policy.collaboration.spawn_roles.is_empty());
             assert!(!policy.visible_tools.contains("spawn_agent"));
-            assert!(!policy.allowed_effects.contains(ToolEffect::AgentControl));
+            assert!(policy.allowed_effects.contains(ToolEffect::AgentControl));
+            assert!(policy.visible_tools.contains("report_progress"));
             assert_eq!(policy.finalization, required_tool(tool));
         }
     }
@@ -281,15 +295,11 @@ mod tests {
                 role: AgentRoleId::new(role).unwrap(),
                 depth,
             },
-            wake_policy: pl_core::AgentWakePolicy::RuntimeTerminal,
             lifecycle: AgentLifecycleState::Active,
             activity: AgentActivityState::Idle,
             active_turn_id: None,
-            active_session_id: None,
             pending_inputs: 0,
-            pending_trigger_inputs: 0,
-            mailbox_delivery_phase: pl_core::MailboxDeliveryPhase::CurrentTurn,
-            dispatch_generation: 0,
+            progress: None,
             last_turn: None,
             revision: 1,
             event_sequence: 1,

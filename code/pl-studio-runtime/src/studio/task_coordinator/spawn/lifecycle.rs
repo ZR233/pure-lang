@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::{PureError, Result as PureResult, WorktreeCreateSpec};
 use anyhow::{Result, bail};
@@ -120,6 +120,15 @@ impl TaskCoordinator {
             .map_err(|error| spawn_error(error.to_string()))?;
         let _mutation_guard = self.lock_branch_mutation().await;
         let _allocation_guard = self.allocation_lock.lock().await;
+        let run = self
+            .store
+            .read_active_task_run_for_session(&request.session_id)
+            .await
+            .map_err(store_spawn_error)?;
+        reject_bare_existing_directories(Path::new(&run.workspace_root), &owned_paths)
+            .map_err(|error| spawn_error(error.to_string()))?;
+        self.ensure_executor_design_contract(&run)
+            .map_err(store_spawn_error)?;
         let allocation = self
             .store
             .allocate_executor(AllocateExecutor {
@@ -254,15 +263,32 @@ impl TaskCoordinator {
         &self,
         request: &StudioTaskSpawnRequest,
         preparation: &StudioTaskSpawnPreparation,
-    ) -> PureResult<()> {
+    ) -> PureResult<super::super::ExecutorCloseDisposition> {
         if request.role != "executor" {
-            return Ok(());
+            return Ok(super::super::ExecutorCloseDisposition::Discard);
         }
         let token = preparation
             .lifecycle_token()
             .ok_or_else(|| spawn_error("task executor close requires an exact lifecycle token"))?;
         self.store
-            .cancel_executor_for_discard(&request.session_id, token, &request.agent_id)
+            .settle_executor_close(&request.session_id, token, &request.agent_id)
+            .await
+            .map_err(store_spawn_error)
+    }
+
+    pub(crate) async fn prepare_agent_close(
+        &self,
+        request: &StudioTaskSpawnRequest,
+        preparation: &StudioTaskSpawnPreparation,
+    ) -> PureResult<super::super::ExecutorCloseDisposition> {
+        if request.role != "executor" {
+            return Ok(super::super::ExecutorCloseDisposition::Discard);
+        }
+        let token = preparation
+            .lifecycle_token()
+            .ok_or_else(|| spawn_error("task executor close requires an exact lifecycle token"))?;
+        self.store
+            .preflight_executor_close(&request.session_id, token, &request.agent_id)
             .await
             .map_err(store_spawn_error)
     }
@@ -306,6 +332,17 @@ pub(crate) fn normalize_owned_paths(paths: &[String]) -> Result<Vec<String>> {
     Ok(canonical)
 }
 
+fn reject_bare_existing_directories(workspace_root: &Path, owned_paths: &[String]) -> Result<()> {
+    for owned_path in owned_paths {
+        if !owned_path.ends_with("/**") && workspace_root.join(owned_path).is_dir() {
+            bail!(
+                "owned path `{owned_path}` names an existing directory; use `{owned_path}/**` to own its descendants"
+            );
+        }
+    }
+    Ok(())
+}
+
 fn store_spawn_error(error: impl std::fmt::Display) -> PureError {
     spawn_error(error.to_string())
 }
@@ -319,7 +356,8 @@ fn spawn_error(error: impl Into<String>) -> PureError {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_owned_paths, owned_paths_overlap};
+    use super::{normalize_owned_paths, owned_paths_overlap, reject_bare_existing_directories};
+    use std::path::Path;
 
     #[test]
     fn owned_path_overlap_uses_product_path_rules() {
@@ -342,5 +380,20 @@ mod tests {
         ] {
             assert!(normalize_owned_paths(&paths).is_err(), "{paths:?}");
         }
+    }
+
+    #[test]
+    fn existing_directories_require_an_explicit_recursive_scope() {
+        let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let error = reject_bare_existing_directories(workspace_root, &["src".into()])
+            .expect_err("a bare existing directory must not be accepted as an exact file");
+        assert!(
+            error.to_string().contains("use `src/**`"),
+            "unexpected error: {error}"
+        );
+        reject_bare_existing_directories(workspace_root, &["src/**".into()])
+            .expect("an explicit recursive directory scope must be accepted");
+        reject_bare_existing_directories(workspace_root, &["future.rs".into()])
+            .expect("an exact path may name a file that does not exist yet");
     }
 }

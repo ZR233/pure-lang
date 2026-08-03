@@ -2,6 +2,7 @@ use sea_orm::DatabaseConnection;
 
 mod agent_framework;
 pub(super) mod attachment;
+mod error;
 mod interaction;
 mod project;
 mod session;
@@ -13,8 +14,8 @@ pub struct StudioStore {
     db: DatabaseConnection,
 }
 
+pub use error::StudioDatabaseError;
 pub(in crate::studio) use session::AgentSessionSpec;
-
 impl StudioStore {
     pub(crate) fn database(&self) -> &DatabaseConnection {
         &self.db

@@ -27,6 +27,14 @@ StudioBridgeEventPayload _productPayloadFromFrb(
         sessionId: sessionId,
         task: task == null ? null : _taskRuntimeFromFrb(task),
       ),
+    frb.BridgeProductEventPayload_AgentDirectoryChanged(
+      :final rootSessionId,
+      :final agent,
+    ) =>
+      AgentDirectoryChangedPayload(
+        rootSessionId: rootSessionId,
+        agent: _agentDirectoryEntryFromFrb(agent),
+      ),
     frb.BridgeProductEventPayload_Stale(:final laggedEvents) => StalePayload(
       laggedEvents: laggedEvents.toInt(),
     ),
@@ -65,6 +73,30 @@ TaskRuntimeView _taskRuntimeFromFrb(frb.BridgeTaskRuntimeDto task) {
           summary: agent.summary,
           error: agent.error,
           headCommit: agent.headCommit,
+          lifecycle: agent.lifecycle,
+          activity: agent.activity,
+          progress: _agentProgressFromFrb(agent.progress),
+          updatedAt: _dateFromUnix(agent.updatedAt),
+          summaryAgeSeconds: agent.summaryAgeSeconds.toInt(),
+        ),
+    ],
+    completions: [
+      for (final completion in task.completions)
+        TaskCompletionView(
+          id: completion.id,
+          workUnitId: completion.workUnitId,
+          executorAgentId: completion.executorAgentId,
+          revision: completion.revision,
+          kind: completion.kind,
+          status: completion.status,
+          baseCommit: completion.baseCommit,
+          headCommit: completion.headCommit,
+          changedFiles: completion.changedFiles,
+          verificationSummary: completion.verificationSummary,
+          worktreePath: completion.worktreePath,
+          branch: completion.branch,
+          createdAt: _dateFromUnix(completion.createdAt),
+          updatedAt: _dateFromUnix(completion.updatedAt),
         ),
     ],
     merges: [
@@ -81,14 +113,82 @@ TaskRuntimeView _taskRuntimeFromFrb(frb.BridgeTaskRuntimeDto task) {
     reviews: [
       for (final review in task.reviews)
         TaskReviewView(
-          round: review.round.toInt(),
-          headCommit: review.headCommit,
+          id: review.id,
+          round: review.round,
+          scope: review.scope,
+          workUnitId: review.workUnitId,
+          completionId: review.completionId,
+          completionRevision: review.completionRevision,
+          reviewedHead: review.reviewedHead,
           verdict: review.verdict,
+          requestedByCallId: review.requestedByCallId,
           reviewerAgentId: review.reviewerAgentId,
           summary: review.summary,
-          designReferences: review.designReferences,
+          designReferences: [
+            for (final reference in review.designReferences)
+              TaskDesignReferenceView(
+                path: reference.path,
+                section: reference.section,
+              ),
+          ],
+          findings: [
+            for (final finding in review.findings)
+              TaskReviewFindingView(
+                severity: finding.severity,
+                title: finding.title,
+                body: finding.body,
+                path: finding.path,
+                line: finding.line,
+                designReferences: [
+                  for (final reference in finding.designReferences)
+                    TaskDesignReferenceView(
+                      path: reference.path,
+                      section: reference.section,
+                    ),
+                ],
+              ),
+          ],
+          createdAt: _dateFromUnix(review.createdAt),
+          updatedAt: _dateFromUnix(review.updatedAt),
         ),
     ],
+  );
+}
+
+StudioAgentView _agentDirectoryEntryFromFrb(
+  frb.BridgeAgentDirectoryEntryDto agent,
+) {
+  return StudioAgentView(
+    id: agent.id,
+    sessionId: agent.sessionId,
+    rootSessionId: agent.rootSessionId,
+    path: agent.path,
+    parentPath: agent.parentPath,
+    role: agent.role,
+    task: agent.task,
+    status: agent.status,
+    summary: agent.summary,
+    depth: agent.depth,
+    error: agent.error,
+    reason: agent.reason,
+    lifecycle: agent.lifecycle,
+    activity: agent.activity,
+    progress: _agentProgressFromFrb(agent.progress),
+    updatedAt: _dateFromUnix(agent.updatedAt),
+    summaryAgeSeconds: agent.summaryAgeSeconds.toInt(),
+  );
+}
+
+AgentProgressView? _agentProgressFromFrb(frb.BridgeAgentProgressDto? progress) {
+  if (progress == null) {
+    return null;
+  }
+  return AgentProgressView(
+    stage: progress.stage,
+    summary: progress.summary,
+    nextStep: progress.nextStep,
+    revision: progress.revision.toInt(),
+    updatedAt: _dateFromUnix(progress.updatedAt),
   );
 }
 
@@ -170,9 +270,7 @@ StudioState studioStateFromFrbSnapshot(frb.BridgeStudioSnapshotResponse value) {
           ? null
           : _taskRuntimeFromFrb(value.selectedSessionTask!),
     ),
-    config: _decodeJson(value.configJson),
-    generalSettings: _decodeJson(value.generalSettingsJson),
-    webSearch: value.webSearch,
+    settings: value.settings,
     eventNextSequence: 0,
   );
 }

@@ -45,7 +45,7 @@ pub(super) async fn run_turn_with_trace(
 ) -> Result<TurnResult> {
     let provider = core.provider.clone();
     ensure_provider_can_consume_session(provider.info().protocol, session)?;
-    let reasoning_effort = core.reasoning_effort.clone();
+    let effort = core.effort.clone();
     let workspace_root = core
         .workspace_root
         .clone()
@@ -118,7 +118,7 @@ pub(super) async fn run_turn_with_trace(
         }
     };
     let turn_instruction_snapshot = instruction_snapshot.clone();
-    let reasoning = reasoning_effort.as_ref().map(|effort| ReasoningConfig {
+    let reasoning = effort.as_ref().map(|effort| ReasoningConfig {
         effort: Some(effort.as_str().to_string()),
         summary: Some(if effort.is_none() {
             ReasoningSummary::Disabled

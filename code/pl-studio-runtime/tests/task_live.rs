@@ -79,24 +79,9 @@ async fn run_live_task_flow(fixture: &LiveTaskFixture) -> Result<()> {
         );
     }
 
-    let interrupted_executor_id = fixture.wait_for_running_executor().await?;
-    fixture
-        .runtime
-        .submit_prompt(StudioSubmitPromptRequest {
-            session_id: fixture.session_id.clone(),
-            prompt: live_interrupt_prompt(&interrupted_executor_id),
-            attachment_ids: Vec::new(),
-            options: StudioSubmitPromptOptions::default(),
-        })
-        .await?;
-    let interrupt_target = fixture.wait_for_successful_interrupt_target().await?;
-    if interrupt_target != interrupted_executor_id {
-        bail!("send_input did not interrupt the expected executor `{interrupted_executor_id}`");
-    }
-
     let task = fixture.wait_for_completed_task().await?;
     fixture.wait_for_no_active_turns().await?;
-    assert_task_invariants(fixture, &task, &interrupted_executor_id).await?;
+    assert_task_invariants(fixture, &task).await?;
     assert_generated_project(fixture)?;
     Ok(())
 }
@@ -104,7 +89,6 @@ async fn run_live_task_flow(fixture: &LiveTaskFixture) -> Result<()> {
 async fn assert_task_invariants(
     fixture: &LiveTaskFixture,
     task: &pl_studio_runtime::StudioTaskRuntime,
-    interrupted_executor_id: &str,
 ) -> Result<()> {
     if task.phase != "completed" {
         bail!("Task phase is `{}` instead of `completed`", task.phase);
@@ -159,39 +143,31 @@ async fn assert_task_invariants(
             );
         }
     }
-    if !task.agents.iter().any(|agent| {
-        agent.agent_id == interrupted_executor_id
-            && agent.role == "executor"
-            && agent.status == "completed"
-    }) {
-        bail!("interrupted executor `{interrupted_executor_id}` did not complete its delivery");
-    }
-    if !task
-        .merges
-        .iter()
-        .any(|merge| merge.agent_id == interrupted_executor_id && merge.status == "merged")
-    {
-        bail!("interrupted executor `{interrupted_executor_id}` did not produce a merged delivery");
-    }
     if task.merges.iter().any(|merge| merge.status != "merged") {
         bail!("Task contains an unmerged delivery: {:#?}", task.merges);
     }
 
     let review = task.reviews.last().context("Task has no reviewer result")?;
+    if review.scope != "integrated" {
+        bail!(
+            "latest reviewer scope is `{}` instead of `integrated`",
+            review.scope
+        );
+    }
     if review.verdict != "pass" {
         bail!("latest reviewer verdict is `{}`", review.verdict);
     }
-    if review.head_commit != task.expected_head {
+    if review.reviewed_head != task.expected_head {
         bail!(
             "latest reviewer checked `{}` instead of expected HEAD `{}`",
-            review.head_commit,
+            review.reviewed_head,
             task.expected_head
         );
     }
     if !review
         .design_references
         .iter()
-        .any(|reference| reference.starts_with("design/shooter.md#"))
+        .any(|reference| reference.path == "design/shooter.md")
     {
         bail!(
             "latest reviewer did not cite design/shooter.md: {:?}",
@@ -222,15 +198,6 @@ async fn assert_task_invariants(
     )
     .context("design/shooter.md was not committed at workspace HEAD")?;
     Ok(())
-}
-
-fn live_interrupt_prompt(executor_id: &str) -> String {
-    format!(
-        "这是 headless shooter 的中断续轮验收控制输入。只调用一次 send_input 工具：\
-         target 必须是 `{executor_id}`，interrupt 必须为 true，message 要求该 \
-         executor 在 queued turn 中继续现有实现、完成实际验证、commit，并以 submit_delivery \
-         交付。不要创建新 executor，不要 merge，不要用文字代替工具调用。工具成功后只返回简短确认。"
-    )
 }
 
 fn assert_generated_project(fixture: &LiveTaskFixture) -> Result<()> {

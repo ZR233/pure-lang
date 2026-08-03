@@ -81,6 +81,11 @@ generation 不匹配的 frame 必须丢弃，不能污染当前会话。
 `StudioState` 中 runtime、typed current turn 和 Composer 草稿只按 session 归一化保存，不保留一套
 可独立写入的 selected-session 镜像。reducer、snapshot 和 controller action 都必须携带明确
 `sessionId`；selection 只决定读取哪个 `AgentWorkspaceView`，不能改变事件的归属。
+Composer 的异步提交同样按 session 保存单调 submission revision。success/failure 只能作用于
+仍处于相同 revision 的 `submitting` 状态，receipt 还必须匹配目标 session；旧 Future 不得
+覆盖后续 draft、错误或 canonical turn 已经收束的状态。每次 snapshot、event 或 canonical
+state adoption 后，controller 对 `composersBySession` 全表与 `turnsBySession` 对账，而不是
+只处理当前 selection。
 
 `sessionRuntimeChanged` 只能更新 `sessionRuntimeBySession[sessionId]`；MCP/LSP 的全局 health event 更新 server catalog，当前会话实际 active 列表来自 selected agent session runtime。大会话的 Agent Directory 使用独立轻量事件刷新 owner、session、父子关系、状态和 attention，不通过单 agent session 的 `AgentChanged` 聚合 agent tree。
 
@@ -89,7 +94,7 @@ Flutter Riverpod store 使用同一归一化状态结构：`StudioController` �
 Flutter 数据层必须保持编排与归约分离：`StudioController` 只负责桥接 API 调用、订阅生命周期、bootstrap frame、frame 批处理和 resync 副作用；事件归约、session/config snapshot merge、durable cursor、part overlay 与 agent timeline projection 逻辑放在纯 reducer 模块。纯 reducer 不访问 Riverpod、不调用 bridge、不调度异步任务；需要 resync 时只返回明确原因给 controller 重新订阅。
 提交 prompt 或解决 interaction 的命令响应不携带 Timeline 事实；命令注册成功后 controller
 应以无 cursor 的当前 session subscription 重新建立 load barrier，避免创建会话、切换模式或
-interaction continuation 与旧订阅 generation 竞态。
+interaction 显式输入与旧订阅 generation 竞态。
 
 Flutter reducer 必须按 `sessionId` 过滤实时事件，旧 session stream 取消后迟到的事件不得覆盖当前会话。每个 session 维护 durable event cursor；收到 `ResyncRequired` 时关闭旧 stream 并以无 cursor subscription 获取 authoritative snapshot。`messagePartDelta` 不推进 durable cursor，但只能追加到已有且未 terminal 的 part 字段。
 product stream 使用独立的全局 sequence；即使 product payload 携带 `sessionId`，该 sequence
@@ -151,10 +156,15 @@ watch 不可变 projection，使高频 part delta 只重建当前 workspace。
 Driver extension 只能由 `test_driver/driver_main.dart` 启用，该入口复用正式 `studio.main()`，
 并在 `dart.vm.product=true` 时拒绝启动。正式 `lib/main.dart`、build-gui 与 release-gui 不得
 导入 driver。Driver finder 只使用集中定义的 `StudioDriverKeys` 和领域 ID 动态 key，不依赖
-本地化文本、位置或 `.first/.last`。Windows 验收必须包含 native FRB 和 demo 两轮：每次导航
+本地化文本、位置或 `.first/.last`；selector key 必须挂在真实可命中的触发控件上，overlay
+option key 必须挂在实际可点击菜单项上，不得挂在闭合态仍存在的声明式 item 数据子树。Windows
+验收必须包含 native FRB 和 demo 两轮：每次导航
 后重新读取 widget tree，以 waitFor/waitForAbsent/getText 同步，最后确认 runtime errors 为空
 并保存 shell、Settings、streaming、Provider 与 interaction 截图。探索出的流程必须同步为
-持久 integration test。
+持久 integration test。`run-gui --driver` 使用专用 resident 进程生命周期：xtask 保持
+Flutter tool 的控制 stdin 打开，避免无交互宿主的 EOF 让 DTD 提前退出；Windows 下 xtask
+与其 Flutter、DTD、GUI 子孙属于同一个 kill-on-close Job Object，宿主退出后不得留下孤儿
+GUI 或模型工具进程。普通 `run-gui` 与 build/generate/verify 命令仍使用批处理生命周期。
 
 `StudioPartType::Turn` 与 `StudioPartType::Inference` 是后端 trace lifecycle synthetic part，只用于恢复 turn/inference 状态与诊断，不是 Studio timeline 可渲染 row。Flutter adapter 在 typed FRB 边界必须过滤历史 snapshot 中的这两类 part，并把实时 `messagePartUpdated` 中的这两类 part 归一为 no-op；其他未知 `partType` 仍应抛出协议错误。
 
@@ -209,7 +219,7 @@ Todo list 不进入 timeline。当前 agent snapshot 中最新的 `TodoListUpdat
 宽度计算，不使用全局固定 breakpoint；侧栏目标宽度约 300px，空间不足时 drawer 覆盖而不
 压缩阅读流。
 
-工具组 header 显示工具数量和聚合状态：存在审批等待时为 `awaitingApproval`，存在 started/streaming/approved/running 时为 `running`，否则按 failed、denied、interrupted、budgetLimited、completed 的优先级折叠。header 中突出失败/拒绝数量；成功工具默认只占这一条折叠 row，展开后展示每个工具的工具名、状态、命令/路径/查询摘要、工作目录、exit code、timeout、拒绝原因和失败结果。工具、命令、文件修改和 subagent 活动文本由 Flutter timeline projection 基于结构化事实确定性生成，不在 `pl-core` 或 `pl-protocol` 中新增本地化文案字段。固定 UI 文案走 i18n；tool 名称、agent path、model slug、路径、命令摘要和 provider 返回值按领域值原样展示。`AgentTimelineChanged` 承载当前 owner 主动执行的单条协作事实：`SubAgentActivity` row identity 优先使用 `callId`，无 `callId` 时使用 event id；`TodoListUpdated` 不生成 row。Agent Directory 事件只更新标题区 agent 列表或 attention，不进入单 agent timeline。父 timeline 默认不展开子代理内部工具 trace；`spawn_agent`、`send_input`、`list_agents`、`close_agent` 等 tool part 只作为父 turn 工具组详情项展示，不额外生成逐工具 timeline row。订阅唤醒输入为 synthetic ephemeral continuation，不生成用户消息或 executor timeline 副本。
+工具组 header 显示工具数量和聚合状态：存在审批等待时为 `awaitingApproval`，存在 started/streaming/approved/running 时为 `running`，否则按 failed、denied、interrupted、budgetLimited、completed 的优先级折叠。header 中突出失败/拒绝数量；成功工具默认只占这一条折叠 row，展开后展示每个工具的工具名、状态、命令/路径/查询摘要、工作目录、exit code、timeout、拒绝原因和失败结果。工具、命令、文件修改和 subagent 活动文本由 Flutter timeline projection 基于结构化事实确定性生成，不在 `pl-core` 或 `pl-protocol` 中新增本地化文案字段。固定 UI 文案走 i18n；tool 名称、agent path、model slug、路径、命令摘要和 provider 返回值按领域值原样展示。`AgentTimelineChanged` 承载当前 owner 主动执行的单条协作事实：`SubAgentActivity` row identity 优先使用 `callId`，无 `callId` 时使用 event id；`TodoListUpdated` 不生成 row。Agent Directory 事件只更新标题区 agent 列表或 attention，不进入单 agent timeline。父 timeline 默认不展开子代理内部工具 trace；`spawn_agent`、`send_message`、`interrupt_agent`、`list_agents`、`wait_agents`、`read_agent_session`、`close_agent` 等 tool part 只作为父 turn 工具组详情项展示，不额外生成逐工具 timeline row，也不生成 synthetic user message 或 executor timeline 副本。
 
 Timeline 虚拟滚动必须监听 opencode 同款 active assistant content version：当前 active assistant message 的完成状态、错误、text/reasoning 展示长度、tool status、tool result/metadata 长度变化都要触发 `virtua.measure()` 和底部锚定。row key 不变但内容增长时，仍要保持底部跟随；切换 session 时写入/读取 row cache，并用 keep-mounted 行避免 active turn 被虚拟列表过早卸载。
 
@@ -308,11 +318,12 @@ session stream。Session row 上的关闭按钮仍是归档语义，调用
 `archiveSession(sessionId, selectedSessionId)`；后端会拒绝 active turn，会取消该会话
 pending interaction，并返回同项目的新 session selection。前端收到 payload 后删除/隐藏归档
 session、切换到返回的 `selectedSessionId`，并用 `loadSessionState` 恢复新会话 projection；
-如果项目内没有剩余 session，状态栏与 composer 禁用，用户可以用新建会话按钮创建会话。
+当前选中会话忙碌时只禁用该会话自身的归档入口，不得阻塞其他会话的归档或新建会话；
+如果项目内没有剩余 session，状态栏与 composer 禁用，用户仍可用新建会话按钮创建会话。
 会话列表只显示 `visibility=active && parentSessionId=null`；agent child 与 archived
 session 不作为 root row 出现。
 
-Settings 是独立页面栈中的配置编辑入口。它必须覆盖 Providers、Instructions、Skills、Roles、MCP、Security 和 General 页签。App bootstrap/first-run 先调用 `loadProviderCatalog()`，目录只按 revision 做进程内缓存；加载失败显示错误与重试，不回退本地常量。普通设置项改完即保存；Provider 新增/编辑使用独立本地草稿，点击保存后调用 `saveProviderSettings(settingsJson)`。Provider payload 为 `defaultProviderId`、`providers[]`、`roles[]`，实例字段为 `id`、可选 `originalId`、`templateKind`、`wireProtocol`、`connectionMode`、`name`、`baseUrl`、`bearerToken`、`defaultModel`、`customModels[]`；model 字段为 `slug/displayName/reasoningEfforts/baseInstructions`。空 bearer token 保留已存 secret；重命名用 `originalId` 关联原实例。所有 typed save 成功后必须用返回的 canonical config 更新 providers、roles、instructions、skills、MCP servers、permission mode 和 config 状态。
+Settings 是独立页面栈中的配置编辑入口。它必须覆盖 Providers、Instructions、Skills、Roles、MCP、Security 和 General 页签。App bootstrap/first-run 先调用 `loadProviderCatalog()`，目录只按 revision 做进程内缓存；加载失败显示错误与重试，不回退本地常量。普通设置项改完即保存；Provider 新增/编辑使用独立本地草稿，点击保存后调用 typed `saveProviderSettings`。Provider input 包含 `defaultProviderId`、`providers[]`、`roles[]`，实例字段为 `id`、可选 `originalId`、`templateKind`、`wireProtocol`、`connectionMode`、`name`、`baseUrl`、typed secret action、`defaultModel`、`customModels[]`；custom model 不接收独立 reasoning effort 候选，避免产生没有 parameter wire 的伪能力。空 bearer token 保留已存 secret；重命名用 `originalId` 关联原实例。所有 typed save 成功后必须用返回的 canonical settings snapshot 原子更新 providers、roles、instructions、skills、MCP servers、permission mode 和 General settings；bootstrap 和保存响应不保留 `configJson`、`generalSettingsJson`、raw JSON converter 或兼容解析路径。
 
 General 页现有单一 settings group 内展示应用版本和稳定更新状态：最新时显示当前版本与
 “检查更新”，可升级时显示目标版本、Release Notes 与“下载并安装”，下载时显示进度，
@@ -325,7 +336,12 @@ Flutter Provider 页采用页面栈式互斥视图：列表页、详情页、新
 
 Settings 不作为悬浮 modal、popover、fixed overlay 或右侧嵌入页展示。Studio shell 采用页面栈语义：chat 页面和 settings 页面互斥，打开设置时压入 settings 页面并替换整个窗口，包括左侧项目/会话栏；设置页顶部提供返回聊天入口，返回后恢复当前会话的 sidebar、timeline、状态栏和 composer。设置页不得模糊、遮罩或覆盖聊天背景，而是作为独立页面参与导航。
 
-Provider 设置支持搜索、刷新用量、选择默认 provider、新增/编辑/删除 provider、切换 provider template、编辑 base URL/API key/default model，以及追加/删除 custom model。Provider 卡片必须消费 `load_provider_usages` 的 typed 结果展示查询状态：打开 Providers 页时自动进行一次过期刷新；全局刷新和单卡刷新都走同一 store action，单卡刷新只在该卡展示 busy/retry 状态，保存 provider 配置后要重新刷新用量，并同步触发 MCP health 刷新。默认 provider 身份来自 config/settings payload 的 `defaultProviderId`，不得用当前详情页、编辑页或列表焦点状态推断。DeepSeek 显示余额与赠送/充值拆分，Zhipu Coding Plan 显示 5 小时、周额度和 MCP 额度的剩余进度、重置时间与完整工具明细；缺 key、失败、不支持、未查询、更新时间和重试入口都必须在卡片内可见。保存 Zhipu Coding Plan token 后，内置 Zhipu MCP 列表和状态栏应随 `mcpHealthChanged` 立即进入 checking/available/unavailable，而不是等待下一轮 prompt。Role 设置固定展示 explorer/planner/executor/reviewer 四个角色，下拉选择后立即写回；provider/model 删除或不可用时规范化到可用 provider/model/effort。MCP 设置支持 stdio 和 streamable HTTP，保留 built-in/locked server metadata，只允许可编辑 server 修改身份；内置 server 的 endpoint 只读、启用开关可用，inline 修改即时保存，内置 server 的启用开关也通过 typed MCP save 写入并立即影响 runtime 暴露，新增或完整编辑 server 若进入独立页面则使用保存/取消模型。Instructions、Security、Skills 和 General 设置不能绕过 store 直接写 UI-only 状态。
+Provider 设置支持搜索、刷新用量、选择默认 provider、新增/编辑/删除 provider、切换 provider template、编辑 base URL/API key/default model，以及追加/删除 custom model。Provider 卡片必须消费 `load_provider_usages` 的 typed 结果展示查询状态：打开 Providers 页时自动进行一次过期刷新；全局刷新和单卡刷新都走同一 store action，单卡刷新只在该卡展示 busy/retry 状态，保存 provider 配置后要重新刷新用量，并同步触发 MCP health 刷新。默认 provider 身份来自 typed canonical settings 的 `defaultProviderId`，不得用当前详情页、编辑页或列表焦点状态推断。DeepSeek 显示余额与赠送/充值拆分，Zhipu Coding Plan 显示 5 小时、周额度和 MCP 额度的剩余进度、重置时间与完整工具明细；缺 key、失败、不支持、未查询、更新时间和重试入口都必须在卡片内可见。保存 Zhipu Coding Plan token 后，内置 Zhipu MCP 列表和状态栏应随 `mcpHealthChanged` 立即进入 checking/available/unavailable，而不是等待下一轮 prompt。Role 设置固定展示 explorer/planner/executor/reviewer 四个角色，每行分别显示模型与思考强度：模型切换按目录默认值提交，强度切换不得改变模型；无 effort 候选时控件禁用并提交空选择。inline 设置不得用本地 selection 假装保存成功，provider/model 删除或不可用时由后端规范化后返回 canonical provider/model/effort。MCP 设置支持 stdio 和 streamable HTTP，保留 built-in/locked server metadata，只允许可编辑 server 修改身份；内置 server 的 endpoint 只读、启用开关可用，inline 修改即时保存，内置 server 的启用开关也通过 typed MCP save 写入并立即影响 runtime 暴露，新增或完整编辑 server 若进入独立页面则使用保存/取消模型。Instructions、Security、Skills 和 General 设置不能绕过 store 直接写 UI-only 状态。
+
+角色思考强度的 Windows native 验收使用隔离的用户目录和本地 OpenAI-compatible capture
+server，运行真实 bridge 而非 Demo backend：在 Roles 页保存四角色选择，退出并重启验证
+schema 12 配置恢复，再分别触发 planner、executor、explorer、reviewer 请求并检查 capture
+body 的 effort wire。保存失败时磁盘、重启后的配置和当前 canonical UI 均不得改变。
 
 Security 页是紧凑的权限配置页，不使用与 provider/MCP 相同的大卡片网格来填充空间。权限模式应作为单个设置组展示：标题、当前状态、三项可选模式和简短说明保持在可扫描的窄宽度内，避免大面积空白。
 
@@ -395,7 +411,7 @@ Flutter 窗口 resize 时 UI 不应持续触发昂贵测量。Timeline 的贴底
 活动摘要只显示本地化 task phase；弹层按 coordinator、work unit、merge/conflict 和 review
 分区展示 worktree、commit、来源与实际读取的 design 引用。存在 durable task 快照时不再
 重复叠加内存 agent 详情面板；长列表在单一、限高的滚动区内展示，760px 窗口不得溢出。
-活动摘要中的 durable agent 数只统计 `queued | running | waitingForDelivery`，内存 agent
+活动摘要中的 durable agent 数只统计 `queued | running`，内存 agent
 只统计 `queued | running | waiting`；详情的 durable agent
 分区展示全部历史 outcome，包括角色、来源 call、summary、error 和交付 commit，确保摘要
 中的活动代理都能在弹层中定位。

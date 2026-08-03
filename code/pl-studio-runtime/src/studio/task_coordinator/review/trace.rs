@@ -43,19 +43,19 @@ pub(super) async fn validate_review_trace(
                 .as_deref()
                 .context("read_file history has no structured arguments")?,
         )?;
-        if arguments
-            .get("cwd")
-            .and_then(serde_json::Value::as_str)
-            .is_some_and(|cwd| !matches!(cwd, "" | "."))
-        {
-            bail!("reviewer design read must use workspace-root relative paths");
-        }
         let path = arguments
             .get("path")
             .and_then(serde_json::Value::as_str)
             .context("read_file history has no path")?;
         if !is_design_read_candidate(path) {
             continue;
+        }
+        if arguments
+            .get("cwd")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|cwd| !matches!(cwd, "" | "."))
+        {
+            bail!("reviewer design read must use workspace-root relative paths");
         }
         let normalized = validate_design_read_path(workspace, path).await?;
         let returned: serde_json::Value = serde_json::from_str(&output)?;
@@ -200,6 +200,44 @@ mod tests {
                 "call-read-source".to_string(),
                 "read_file".to_string(),
                 r#"{"path":"src/lib.rs"}"#.to_string(),
+                r##"{"path":"src/lib.rs","text":"pub fn live() {}\n"}"##.to_string(),
+            ),
+        ]);
+
+        let trace = validate_review_trace(&session, &root).await.unwrap();
+
+        assert_eq!(trace.read_design["design/guide.md"], "# Guide\n");
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[tokio::test]
+    async fn source_read_may_use_a_worktree_cwd_after_design_read() {
+        let root = std::env::temp_dir().join(format!(
+            "pure-review-trace-source-cwd-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("design")).unwrap();
+        std::fs::write(root.join("design/guide.md"), "# Guide\n").unwrap();
+        let session = crate::AgentSession::from_messages(vec![
+            crate::tool_result_history_message(
+                "call-list".to_string(),
+                "list_files".to_string(),
+                r#"{"cwd":".","path":"design"}"#.to_string(),
+                r#"{"files":["design/guide.md"]}"#.to_string(),
+            ),
+            crate::tool_result_history_message(
+                "call-read-design".to_string(),
+                "read_file".to_string(),
+                r#"{"cwd":".","path":"design/guide.md"}"#.to_string(),
+                r##"{"path":"design/guide.md","text":"# Guide\n"}"##.to_string(),
+            ),
+            crate::tool_result_history_message(
+                "call-read-source".to_string(),
+                "read_file".to_string(),
+                r#"{"cwd":".pure/worktrees/task/agent","path":"src/lib.rs"}"#.to_string(),
                 r##"{"path":"src/lib.rs","text":"pub fn live() {}\n"}"##.to_string(),
             ),
         ]);

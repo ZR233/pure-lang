@@ -1,5 +1,7 @@
 use super::response::SessionDto;
-use super::runtime::{BridgeLspHealthDto, BridgeMcpHealthDto, BridgeTaskRuntimeDto};
+use super::runtime::{
+    BridgeAgentDirectoryEntryDto, BridgeLspHealthDto, BridgeMcpHealthDto, BridgeTaskRuntimeDto,
+};
 use serde::{Deserialize, Serialize};
 
 /// Flutter Bridge 的 Studio 产品事件信封。
@@ -31,6 +33,10 @@ pub enum BridgeProductEventPayload {
     SessionTaskChanged {
         session_id: String,
         task: Option<Box<BridgeTaskRuntimeDto>>,
+    },
+    AgentDirectoryChanged {
+        root_session_id: String,
+        agent: Box<BridgeAgentDirectoryEntryDto>,
     },
     Stale {
         lagged_events: u64,

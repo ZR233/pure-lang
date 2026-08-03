@@ -119,7 +119,7 @@ impl TaskCoordinator {
                 ),
             })
             .await?;
-        self.release_owned_process_lease(&run.id);
+        self.finish_blocked_transition(&run.id).await?;
         Ok(MergeRestartRecovery::Blocked)
     }
 
@@ -149,10 +149,16 @@ impl TaskCoordinator {
             .into_iter()
             .find(|outcome| outcome.id == evidence.outcome_id)
             .context("merge outcome not found")?;
-        let delivery = outcome
-            .delivery
-            .clone()
-            .context("merge outcome delivery disappeared")?;
+        let completion = self
+            .store
+            .read_approved_work_completion(&evidence.work_unit_id)
+            .await?;
+        if completion.id != evidence.completion_id
+            || completion.revision != evidence.completion_revision
+        {
+            bail!("merge recovery completion identity drifted");
+        }
+        let delivery = super::scope::delivery_from_completion(&completion)?;
         Ok(TaskMergeScope {
             #[cfg(test)]
             origin_phase: evidence.origin_phase,
@@ -160,6 +166,7 @@ impl TaskCoordinator {
             lease,
             work_unit,
             outcome,
+            completion,
             delivery,
             merge: record.clone(),
         })
@@ -185,7 +192,7 @@ impl TaskCoordinator {
                 ),
             })
             .await?;
-        self.release_owned_process_lease(&run.id);
+        self.finish_blocked_transition(&run.id).await?;
         Ok(MergeRestartRecovery::Blocked)
     }
 }

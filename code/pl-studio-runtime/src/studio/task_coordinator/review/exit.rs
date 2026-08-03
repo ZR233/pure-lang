@@ -33,6 +33,7 @@ impl TaskCoordinator {
     ) -> RegisteredTool {
         let coordinator = self.clone();
         let session_id = session_id.into();
+        let _runtime = runtime;
         RegisteredTool::from_typed_fallible_execution_result(
             "review_exit",
             "Submit trace-validated read-only review findings and end the reviewer turn.",
@@ -40,15 +41,15 @@ impl TaskCoordinator {
             move |input: ReviewExitInput, context| {
                 let coordinator = coordinator.clone();
                 let session_id = session_id.clone();
-                let runtime = runtime.clone();
                 async move {
+                    let root_agent_id = crate::studio::agent_host::root_agent_id(&session_id);
                     let reviewer = context
                         .active_subagent
                         .as_ref()
                         .filter(|agent| {
                             agent.role == "reviewer"
                                 && agent.depth == 1
-                                && agent.parent_id.as_deref() == Some("/root")
+                                && agent.parent_id.as_deref() == Some(root_agent_id.as_str())
                         })
                         .context("review_exit requires the harness-owned depth-1 reviewer")?;
                     let trace =
@@ -64,21 +65,6 @@ impl TaskCoordinator {
                         .store
                         .complete_task_review(&session_id, &reviewer.id, review)
                         .await?;
-                    if let Some(runtime) = runtime
-                        && let Err(error) = runtime.publish_product_phase(
-                            crate::studio::agent_host::root_agent_id(&session_id),
-                            pl_core::AgentId::new(reviewer.id.clone())?,
-                            format!("review:{}", round.id),
-                            "reviewReturned".to_string(),
-                            round.summary.clone(),
-                        )
-                    {
-                        tracing::warn!(
-                            task_run_id = %round.task_run_id,
-                            %error,
-                            "review product signal will be recovered from durable facts"
-                        );
-                    }
                     let mut output = ToolExecutionResult::<serde_json::Value>::json(round)
                         .map_err(anyhow::Error::from)?;
                     output.ends_turn = true;

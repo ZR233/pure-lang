@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-use super::{StudioLspHealth, StudioMcpHealth, StudioSessionSummary, StudioTaskRuntime};
+use super::{
+    StudioAgentDirectoryEntry, StudioLspHealth, StudioMcpHealth, StudioSessionSummary,
+    StudioTaskRuntime,
+};
 
 /// Studio 产品级事件信封。
 ///
@@ -38,5 +41,9 @@ pub enum StudioProductEventKind {
     SessionTaskChanged {
         session_id: String,
         task: Option<Box<StudioTaskRuntime>>,
+    },
+    AgentDirectoryChanged {
+        root_session_id: String,
+        agent: Box<StudioAgentDirectoryEntry>,
     },
 }

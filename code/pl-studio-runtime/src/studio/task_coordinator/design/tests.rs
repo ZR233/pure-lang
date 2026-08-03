@@ -17,6 +17,8 @@ use crate::{
 
 const DESIGN_PATCH: &str =
     "*** Begin Patch\n*** Update File: design/spec.md\n@@\n-before\n+after\n*** End Patch";
+const MULTI_DESIGN_PLAN: &str =
+    "Update `design/spec.md` and add `design/runtime.md` before implementation.";
 
 #[tokio::test]
 async fn design_patch_commits_and_atomically_opens_executor_gate() {
@@ -75,6 +77,28 @@ async fn design_patch_commits_and_atomically_opens_executor_gate() {
 }
 
 #[tokio::test]
+async fn plan_document_references_do_not_expand_the_design_patch_scope() {
+    let fixture = DesignFixture::new_with_plan("plan-references", MULTI_DESIGN_PLAN).await;
+    let output = fixture.update(DESIGN_PATCH).await.unwrap();
+    assert_eq!(output.changed_files, vec!["design/spec.md".to_string()]);
+    assert!(!fixture.repository.join("design/runtime.md").exists());
+    let request = StudioTaskSpawnRequest {
+        agent_id: "agent-plan-reference".to_string(),
+        session_id: fixture.session_id.clone(),
+        task_name: "plan reference is not a patch target".to_string(),
+        role: "executor".to_string(),
+        owned_paths: vec!["src/lib.rs".to_string()],
+        requested_by_call_id: "call-plan-reference".to_string(),
+    };
+    fixture
+        .coordinator
+        .prepare_agent_spawn(&request)
+        .await
+        .expect("a current focused design commit must open the executor gate");
+    fixture.cleanup().await;
+}
+
+#[tokio::test]
 async fn design_commit_uses_studio_identity_without_changing_repository_config() {
     let fixture = DesignFixture::new("studio-commit-identity").await;
     git(&fixture.repository, &["config", "user.name", ""]);
@@ -104,11 +128,11 @@ async fn design_commit_uses_studio_identity_without_changing_repository_config()
 }
 
 #[tokio::test]
-async fn executor_retry_limit_uses_owned_paths_instead_of_mutable_title() {
+async fn executor_attempts_are_monotonic_beyond_three_for_owned_paths() {
     let fixture = DesignFixture::new("stable-retry-identity").await;
     fixture.update(DESIGN_PATCH).await.unwrap();
 
-    for attempt in 1..=3 {
+    for attempt in 1..=4 {
         let agent_id = format!("agent-retry-{attempt}");
         let allocation = fixture
             .store
@@ -129,28 +153,11 @@ async fn executor_retry_limit_uses_owned_paths_instead_of_mutable_title() {
             .await
             .unwrap();
     }
-
-    let result = fixture
-        .store
-        .allocate_executor(AllocateExecutor {
-            session_id: fixture.session_id.clone(),
-            title: "another renamed work unit".to_string(),
-            owned_paths: vec!["src/shared.rs".to_string()],
-            agent_id: "agent-retry-4".to_string(),
-            owner_path: "/root".to_string(),
-            requested_by_call_id: "call-retry-4".to_string(),
-        })
-        .await;
-    let error = match result {
-        Ok(_) => panic!("renaming a work unit must not reset its retry budget"),
-        Err(error) => error,
-    };
-    assert!(error.to_string().contains("attempt must be within 1..=3"));
     fixture.cleanup().await;
 }
 
 #[tokio::test]
-async fn root_tool_uses_captured_studio_session_and_reports_patch_cause() {
+async fn task_update_design_root_tool_uses_session_and_reports_exact_patch_cause() {
     let fixture = DesignFixture::new("captured-session").await;
     let tool = fixture
         .coordinator
@@ -181,6 +188,28 @@ async fn root_tool_uses_captured_studio_session_and_reports_patch_cause() {
         message.contains("first line must be '*** Begin Patch'"),
         "missing parser cause in tool error: {message}"
     );
+
+    let before_head = fixture.head();
+    let before_design = fixture.design_text();
+    let error = kernel
+        .execute_tool(AgentKernelToolRequest::new(
+            "task_update_design",
+            serde_json::json!({
+                "patch": "*** Begin Patch\n*** Begin Patch\n*** Add File: design/duplicate-wrapper.md\n+content\n*** End Patch"
+            }),
+            "turn-id-is-not-studio-session-id",
+            "call-duplicate-wrapper",
+            event_tx.clone(),
+        ))
+        .await
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("multiple patch blocks"),
+        "missing multiple-block cause: {error}"
+    );
+    assert_eq!(fixture.head(), before_head);
+    assert_eq!(fixture.design_text(), before_design);
+    assert!(fixture.status().is_empty());
 
     let output = kernel
         .execute_tool(AgentKernelToolRequest::new(
@@ -303,6 +332,27 @@ async fn empty_noop_and_later_hunk_failure_restore_exact_state() {
         assert_eq!(fixture.design_text(), "before\n");
         assert!(fixture.status().is_empty());
     }
+    fixture.cleanup().await;
+}
+
+#[tokio::test]
+async fn failed_design_patch_reports_applied_hunks_as_rolled_back_not_committed() {
+    let fixture = DesignFixture::new("rollback-message").await;
+
+    let error = fixture
+        .update(
+            "*** Begin Patch\n*** Update File: design/spec.md\n@@\n-before\n+temporary\n*** Update File: design/missing.md\n@@\n-missing\n+changed\n*** End Patch",
+        )
+        .await
+        .expect_err("later stale hunk must fail");
+    let message = format!("{error:#}");
+
+    assert!(message.contains("Changes applied before failure"));
+    assert!(message.contains("did not record a design commit"));
+    assert!(message.contains("restored the validated design paths and index"));
+    assert!(!message.contains("Committed changes"));
+    assert_eq!(fixture.design_text(), "before\n");
+    assert!(fixture.status().is_empty());
     fixture.cleanup().await;
 }
 
@@ -1257,6 +1307,10 @@ struct DesignFixture {
 
 impl DesignFixture {
     async fn new(name: &str) -> Self {
+        Self::new_with_plan(name, "plan").await
+    }
+
+    async fn new_with_plan(name: &str, plan: &str) -> Self {
         let repository = init_repository(name);
         std::fs::create_dir_all(repository.join("design")).unwrap();
         std::fs::write(repository.join("design/spec.md"), "before\n").unwrap();
@@ -1271,7 +1325,7 @@ impl DesignFixture {
             .unwrap();
         let coordinator = Arc::new(TaskCoordinator::new(store.clone()));
         let run = coordinator
-            .start_confirmed_task(&session.id, "plan", &repository)
+            .start_confirmed_task(&session.id, plan, &repository)
             .await
             .unwrap();
         Self {

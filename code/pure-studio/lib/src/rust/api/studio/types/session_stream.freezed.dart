@@ -182,7 +182,7 @@ return planConfirmation(_that.planId,_that.content);case _:
 
 class BridgeInteractionPayload_UserInput extends BridgeInteractionPayload {
   const BridgeInteractionPayload_UserInput({required final  List<BridgeUserQuestion> questions}): _questions = questions,super._();
-  
+
 
  final  List<BridgeUserQuestion> _questions;
  List<BridgeUserQuestion> get questions {
@@ -254,7 +254,7 @@ as List<BridgeUserQuestion>,
 
 class BridgeInteractionPayload_ToolApproval extends BridgeInteractionPayload {
   const BridgeInteractionPayload_ToolApproval({required this.name, required this.argumentsJson, this.workingDirectory, this.parentAgentId}): super._();
-  
+
 
  final  String name;
  final  String argumentsJson;
@@ -326,7 +326,7 @@ as String?,
 
 class BridgeInteractionPayload_PlanConfirmation extends BridgeInteractionPayload {
   const BridgeInteractionPayload_PlanConfirmation({required this.planId, required this.content}): super._();
-  
+
 
  final  String planId;
  final  String content;
@@ -560,7 +560,7 @@ return planConfirmation(_that.decision,_that.content,_that.reason);case _:
 
 class BridgeInteractionResolution_UserInput extends BridgeInteractionResolution {
   const BridgeInteractionResolution_UserInput({required final  List<BridgeUserInputAnswer> answers}): _answers = answers,super._();
-  
+
 
  final  List<BridgeUserInputAnswer> _answers;
  List<BridgeUserInputAnswer> get answers {
@@ -632,7 +632,7 @@ as List<BridgeUserInputAnswer>,
 
 class BridgeInteractionResolution_ToolApproval extends BridgeInteractionResolution {
   const BridgeInteractionResolution_ToolApproval({required this.decision, this.reason}): super._();
-  
+
 
  final  BridgeToolApprovalResolution decision;
  final  String? reason;
@@ -700,7 +700,7 @@ as String?,
 
 class BridgeInteractionResolution_PlanConfirmation extends BridgeInteractionResolution {
   const BridgeInteractionResolution_PlanConfirmation({required this.decision, this.content, this.reason}): super._();
-  
+
 
  final  BridgePlanConfirmationResolution decision;
  final  String? content;
@@ -1002,7 +1002,7 @@ return errorOccurred(_that.message,_that.severity);case _:
 
 class BridgeSessionEventKind_TurnChanged extends BridgeSessionEventKind {
   const BridgeSessionEventKind_TurnChanged({required this.turn}): super._();
-  
+
 
  final  BridgeSessionTurn turn;
 
@@ -1068,7 +1068,7 @@ as BridgeSessionTurn,
 
 class BridgeSessionEventKind_MessageChanged extends BridgeSessionEventKind {
   const BridgeSessionEventKind_MessageChanged({required this.message}): super._();
-  
+
 
  final  BridgeSessionMessage message;
 
@@ -1134,7 +1134,7 @@ as BridgeSessionMessage,
 
 class BridgeSessionEventKind_MessageRemoved extends BridgeSessionEventKind {
   const BridgeSessionEventKind_MessageRemoved({required this.messageId}): super._();
-  
+
 
  final  String messageId;
 
@@ -1200,7 +1200,7 @@ as String,
 
 class BridgeSessionEventKind_PartChanged extends BridgeSessionEventKind {
   const BridgeSessionEventKind_PartChanged({required this.part_}): super._();
-  
+
 
  final  BridgeSessionPart part_;
 
@@ -1266,7 +1266,7 @@ as BridgeSessionPart,
 
 class BridgeSessionEventKind_PartRemoved extends BridgeSessionEventKind {
   const BridgeSessionEventKind_PartRemoved({required this.messageId, required this.partId}): super._();
-  
+
 
  final  String messageId;
  final  String partId;
@@ -1334,7 +1334,7 @@ as String,
 
 class BridgeSessionEventKind_PartDelta extends BridgeSessionEventKind {
   const BridgeSessionEventKind_PartDelta({required this.delta}): super._();
-  
+
 
  final  BridgeSessionPartDelta delta;
 
@@ -1400,7 +1400,7 @@ as BridgeSessionPartDelta,
 
 class BridgeSessionEventKind_InteractionChanged extends BridgeSessionEventKind {
   const BridgeSessionEventKind_InteractionChanged({required this.interaction}): super._();
-  
+
 
  final  BridgeInteractionRequest interaction;
 
@@ -1466,7 +1466,7 @@ as BridgeInteractionRequest,
 
 class BridgeSessionEventKind_AgentChanged extends BridgeSessionEventKind {
   const BridgeSessionEventKind_AgentChanged({required this.agent}): super._();
-  
+
 
  final  BridgeSessionAgentSnapshot agent;
 
@@ -1532,7 +1532,7 @@ as BridgeSessionAgentSnapshot,
 
 class BridgeSessionEventKind_TimelineEventAppended extends BridgeSessionEventKind {
   const BridgeSessionEventKind_TimelineEventAppended({required this.event}): super._();
-  
+
 
  final  BridgeSessionTimelineEvent event;
 
@@ -1598,7 +1598,7 @@ as BridgeSessionTimelineEvent,
 
 class BridgeSessionEventKind_RuntimeChanged extends BridgeSessionEventKind {
   const BridgeSessionEventKind_RuntimeChanged({required this.runtime}): super._();
-  
+
 
  final  BridgeSessionRuntimeSnapshot runtime;
 
@@ -1664,7 +1664,7 @@ as BridgeSessionRuntimeSnapshot,
 
 class BridgeSessionEventKind_SkillActivated extends BridgeSessionEventKind {
   const BridgeSessionEventKind_SkillActivated({required this.activation}): super._();
-  
+
 
  final  BridgeSkillActivation activation;
 
@@ -1730,7 +1730,7 @@ as BridgeSkillActivation,
 
 class BridgeSessionEventKind_PlanChanged extends BridgeSessionEventKind {
   const BridgeSessionEventKind_PlanChanged({required this.event}): super._();
-  
+
 
  final  BridgePlanLifecycleEvent event;
 
@@ -1796,7 +1796,7 @@ as BridgePlanLifecycleEvent,
 
 class BridgeSessionEventKind_ContextCompacted extends BridgeSessionEventKind {
   const BridgeSessionEventKind_ContextCompacted({required this.compaction}): super._();
-  
+
 
  final  BridgeSessionContextCompaction compaction;
 
@@ -1862,7 +1862,7 @@ as BridgeSessionContextCompaction,
 
 class BridgeSessionEventKind_ErrorOccurred extends BridgeSessionEventKind {
   const BridgeSessionEventKind_ErrorOccurred({required this.message, required this.severity}): super._();
-  
+
 
  final  String message;
  final  BridgeErrorSeverity severity;
@@ -2090,7 +2090,7 @@ return transient(_that.revision);case _:
 
 class BridgeSessionEventPosition_Durable extends BridgeSessionEventPosition {
   const BridgeSessionEventPosition_Durable({required this.sequence}): super._();
-  
+
 
  final  BigInt sequence;
 
@@ -2156,7 +2156,7 @@ as BigInt,
 
 class BridgeSessionEventPosition_Transient extends BridgeSessionEventPosition {
   const BridgeSessionEventPosition_Transient({required this.revision}): super._();
-  
+
 
  final  BigInt revision;
 
@@ -2418,7 +2418,7 @@ return file(_that.path,_that.mediaType);case _:
 
 class BridgeSessionPartContent_Text extends BridgeSessionPartContent {
   const BridgeSessionPartContent_Text({required this.channel, required this.text, required final  List<BridgeSessionAttachment> attachments}): _attachments = attachments,super._();
-  
+
 
  final  BridgeSessionTextChannel channel;
  final  String text;
@@ -2494,7 +2494,7 @@ as List<BridgeSessionAttachment>,
 
 class BridgeSessionPartContent_Reasoning extends BridgeSessionPartContent {
   const BridgeSessionPartContent_Reasoning({required final  List<String> summary, required final  List<String> content}): _summary = summary,_content = content,super._();
-  
+
 
  final  List<String> _summary;
  List<String> get summary {
@@ -2574,7 +2574,7 @@ as List<String>,
 
 class BridgeSessionPartContent_Tool extends BridgeSessionPartContent {
   const BridgeSessionPartContent_Tool({required this.tool}): super._();
-  
+
 
  final  BridgeSessionToolPart tool;
 
@@ -2640,7 +2640,7 @@ as BridgeSessionToolPart,
 
 class BridgeSessionPartContent_Agent extends BridgeSessionPartContent {
   const BridgeSessionPartContent_Agent({required this.agent}): super._();
-  
+
 
  final  BridgeSessionAgentPart agent;
 
@@ -2706,7 +2706,7 @@ as BridgeSessionAgentPart,
 
 class BridgeSessionPartContent_Turn extends BridgeSessionPartContent {
   const BridgeSessionPartContent_Turn(): super._();
-  
+
 
 
 
@@ -2738,7 +2738,7 @@ String toString() {
 
 class BridgeSessionPartContent_Inference extends BridgeSessionPartContent {
   const BridgeSessionPartContent_Inference({required this.inferenceId, required this.model}): super._();
-  
+
 
  final  String inferenceId;
  final  String model;
@@ -2806,7 +2806,7 @@ as String,
 
 class BridgeSessionPartContent_Plan extends BridgeSessionPartContent {
   const BridgeSessionPartContent_Plan({required this.content}): super._();
-  
+
 
  final  String content;
 
@@ -2872,7 +2872,7 @@ as String,
 
 class BridgeSessionPartContent_File extends BridgeSessionPartContent {
   const BridgeSessionPartContent_File({required this.path, this.mediaType}): super._();
-  
+
 
  final  String path;
  final  String? mediaType;
@@ -3118,7 +3118,7 @@ return projectionInvariant(_that.message);case _:
 
 class BridgeSessionResyncReason_Lagged extends BridgeSessionResyncReason {
   const BridgeSessionResyncReason_Lagged({required this.events}): super._();
-  
+
 
  final  BigInt events;
 
@@ -3184,7 +3184,7 @@ as BigInt,
 
 class BridgeSessionResyncReason_CursorExpired extends BridgeSessionResyncReason {
   const BridgeSessionResyncReason_CursorExpired({required this.requested, required this.oldestAvailable}): super._();
-  
+
 
  final  BigInt requested;
  final  BigInt oldestAvailable;
@@ -3252,7 +3252,7 @@ as BigInt,
 
 class BridgeSessionResyncReason_ReplayLimitExceeded extends BridgeSessionResyncReason {
   const BridgeSessionResyncReason_ReplayLimitExceeded({required this.available, required this.limit}): super._();
-  
+
 
  final  BigInt available;
  final  BigInt limit;
@@ -3320,7 +3320,7 @@ as BigInt,
 
 class BridgeSessionResyncReason_RevisionGap extends BridgeSessionResyncReason {
   const BridgeSessionResyncReason_RevisionGap({required this.partId, required this.expected, required this.actual}): super._();
-  
+
 
  final  String partId;
  final  BigInt expected;
@@ -3390,7 +3390,7 @@ as BigInt,
 
 class BridgeSessionResyncReason_ProjectionInvariant extends BridgeSessionResyncReason {
   const BridgeSessionResyncReason_ProjectionInvariant({required this.message}): super._();
-  
+
 
  final  String message;
 
@@ -3622,7 +3622,7 @@ return resyncRequired(_that.reason);case _:
 
 class BridgeSessionStreamFrame_Snapshot extends BridgeSessionStreamFrame {
   const BridgeSessionStreamFrame_Snapshot({required this.snapshot}): super._();
-  
+
 
  final  BridgeSessionViewSnapshot snapshot;
 
@@ -3688,7 +3688,7 @@ as BridgeSessionViewSnapshot,
 
 class BridgeSessionStreamFrame_Event extends BridgeSessionStreamFrame {
   const BridgeSessionStreamFrame_Event({required this.event}): super._();
-  
+
 
  final  BridgeSessionEventEnvelope event;
 
@@ -3754,7 +3754,7 @@ as BridgeSessionEventEnvelope,
 
 class BridgeSessionStreamFrame_ResyncRequired extends BridgeSessionStreamFrame {
   const BridgeSessionStreamFrame_ResyncRequired({required this.reason}): super._();
-  
+
 
  final  BridgeSessionResyncReason reason;
 
@@ -3817,7 +3817,7 @@ as BridgeSessionResyncReason,
 @override
 @pragma('vm:prefer-inline')
 $BridgeSessionResyncReasonCopyWith<$Res> get reason {
-  
+
   return $BridgeSessionResyncReasonCopyWith<$Res>(_self.reason, (value) {
     return _then(_self.copyWith(reason: value));
   });
@@ -3989,7 +3989,7 @@ return todoListChanged(_that.snapshot);case _:
 
 class BridgeSessionTimelineEventKind_SubAgentActivity extends BridgeSessionTimelineEventKind {
   const BridgeSessionTimelineEventKind_SubAgentActivity({required this.callId, this.agentId, this.path, this.parentPath, required this.kind, this.status, this.message, this.timedOut, this.error}): super._();
-  
+
 
  final  String callId;
  final  String? agentId;
@@ -4071,7 +4071,7 @@ as String?,
 
 class BridgeSessionTimelineEventKind_TodoListChanged extends BridgeSessionTimelineEventKind {
   const BridgeSessionTimelineEventKind_TodoListChanged({required this.snapshot}): super._();
-  
+
 
  final  BridgeTodoListSnapshot snapshot;
 
@@ -4315,7 +4315,7 @@ return cancelled(_that.reason);case _:
 
 class BridgeSessionTurnState_Queued extends BridgeSessionTurnState {
   const BridgeSessionTurnState_Queued(): super._();
-  
+
 
 
 
@@ -4347,7 +4347,7 @@ String toString() {
 
 class BridgeSessionTurnState_InProgress extends BridgeSessionTurnState {
   const BridgeSessionTurnState_InProgress({required this.activity}): super._();
-  
+
 
  final  BridgeSessionTurnActivity activity;
 
@@ -4413,7 +4413,7 @@ as BridgeSessionTurnActivity,
 
 class BridgeSessionTurnState_Completed extends BridgeSessionTurnState {
   const BridgeSessionTurnState_Completed(): super._();
-  
+
 
 
 
@@ -4445,7 +4445,7 @@ String toString() {
 
 class BridgeSessionTurnState_Failed extends BridgeSessionTurnState {
   const BridgeSessionTurnState_Failed({required this.reason}): super._();
-  
+
 
  final  String reason;
 
@@ -4511,7 +4511,7 @@ as String,
 
 class BridgeSessionTurnState_Cancelled extends BridgeSessionTurnState {
   const BridgeSessionTurnState_Cancelled({required this.reason}): super._();
-  
+
 
  final  String reason;
 

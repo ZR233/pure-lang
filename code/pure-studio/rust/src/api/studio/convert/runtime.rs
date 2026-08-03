@@ -1,13 +1,15 @@
 use crate::api::studio::types::{
-    BridgeActiveTurn, BridgeLspHealthDto, BridgeMcpHealthDto, BridgeMcpServerDto,
-    BridgeRecoveryCleanupPreviewDto, BridgeRecoveryCleanupResourceDto, BridgeRecoveryIssueAction,
-    BridgeRecoveryIssueCategory, BridgeRecoveryIssueScope, BridgeRecoveryResourcePresence,
-    BridgeRuntimeStatus, BridgeStudioRecoveryIssueDto, BridgeTaskAgentDto, BridgeTaskMergeDto,
-    BridgeTaskReviewDto, BridgeTaskRuntimeDto, BridgeTaskWorkUnitDto, RuntimeSnapshot,
+    BridgeActiveTurn, BridgeAgentDirectoryEntryDto, BridgeAgentProgressDto, BridgeLspHealthDto,
+    BridgeMcpHealthDto, BridgeMcpServerDto, BridgeRecoveryCleanupPreviewDto,
+    BridgeRecoveryCleanupResourceDto, BridgeRecoveryIssueAction, BridgeRecoveryIssueCategory,
+    BridgeRecoveryIssueScope, BridgeRecoveryResourcePresence, BridgeRuntimeStatus,
+    BridgeStudioRecoveryIssueDto, BridgeTaskAgentDto, BridgeTaskCompletionDto,
+    BridgeTaskDesignReferenceDto, BridgeTaskMergeDto, BridgeTaskReviewDto,
+    BridgeTaskReviewFindingDto, BridgeTaskRuntimeDto, BridgeTaskWorkUnitDto, RuntimeSnapshot,
 };
 use pl_studio_runtime::{
-    StudioLspHealth, StudioMcpHealth, StudioRecoveryCleanupPreview, StudioRecoveryIssue,
-    StudioRuntimeSnapshot as CoreRuntimeSnapshot,
+    StudioAgentDirectoryEntry, StudioLspHealth, StudioMcpHealth, StudioRecoveryCleanupPreview,
+    StudioRecoveryIssue, StudioRuntimeSnapshot as CoreRuntimeSnapshot,
 };
 // ── Core conversion functions ──
 
@@ -173,6 +175,37 @@ pub(crate) fn bridge_task_runtime(
                 summary: agent.summary,
                 error: agent.error,
                 head_commit: agent.head_commit,
+                lifecycle: agent.lifecycle,
+                activity: agent.activity,
+                progress: agent.progress.map(|progress| BridgeAgentProgressDto {
+                    stage: progress.stage,
+                    summary: progress.summary,
+                    next_step: progress.next_step,
+                    revision: progress.revision,
+                    updated_at: progress.updated_at,
+                }),
+                updated_at: agent.updated_at,
+                summary_age_seconds: agent.summary_age_seconds,
+            })
+            .collect(),
+        completions: task
+            .completions
+            .into_iter()
+            .map(|completion| BridgeTaskCompletionDto {
+                id: completion.id,
+                work_unit_id: completion.work_unit_id,
+                executor_agent_id: completion.executor_agent_id,
+                revision: completion.revision,
+                kind: completion.kind,
+                status: completion.status,
+                base_commit: completion.base_commit,
+                head_commit: completion.head_commit,
+                changed_files: completion.changed_files,
+                verification_summary: completion.verification_summary,
+                worktree_path: completion.worktree_path,
+                branch: completion.branch,
+                created_at: completion.created_at,
+                updated_at: completion.updated_at,
             })
             .collect(),
         merges: task
@@ -191,14 +224,78 @@ pub(crate) fn bridge_task_runtime(
             .reviews
             .into_iter()
             .map(|review| BridgeTaskReviewDto {
+                id: review.id,
                 round: review.round,
-                head_commit: review.head_commit,
+                scope: review.scope,
+                work_unit_id: review.work_unit_id,
+                completion_id: review.completion_id,
+                completion_revision: review.completion_revision,
+                reviewed_head: review.reviewed_head,
                 verdict: review.verdict,
+                requested_by_call_id: review.requested_by_call_id,
                 reviewer_agent_id: review.reviewer_agent_id,
                 summary: review.summary,
-                design_references: review.design_references,
+                design_references: review
+                    .design_references
+                    .into_iter()
+                    .map(|reference| BridgeTaskDesignReferenceDto {
+                        path: reference.path,
+                        section: reference.section,
+                    })
+                    .collect(),
+                findings: review
+                    .findings
+                    .into_iter()
+                    .map(|finding| BridgeTaskReviewFindingDto {
+                        severity: finding.severity,
+                        title: finding.title,
+                        body: finding.body,
+                        path: finding.path,
+                        line: finding.line,
+                        design_references: finding
+                            .design_references
+                            .into_iter()
+                            .map(|reference| BridgeTaskDesignReferenceDto {
+                                path: reference.path,
+                                section: reference.section,
+                            })
+                            .collect(),
+                    })
+                    .collect(),
+                created_at: review.created_at,
+                updated_at: review.updated_at,
             })
             .collect(),
+    }
+}
+
+pub(crate) fn bridge_agent_directory_entry(
+    agent: StudioAgentDirectoryEntry,
+) -> BridgeAgentDirectoryEntryDto {
+    BridgeAgentDirectoryEntryDto {
+        id: agent.id,
+        session_id: agent.session_id,
+        root_session_id: agent.root_session_id,
+        path: agent.path,
+        parent_path: agent.parent_path,
+        role: agent.role,
+        task: agent.task,
+        status: agent.status,
+        summary: agent.summary,
+        depth: agent.depth,
+        error: agent.error,
+        reason: agent.reason,
+        lifecycle: agent.lifecycle,
+        activity: agent.activity,
+        progress: agent.progress.map(|progress| BridgeAgentProgressDto {
+            stage: progress.stage,
+            summary: progress.summary,
+            next_step: progress.next_step,
+            revision: progress.revision,
+            updated_at: progress.updated_at,
+        }),
+        updated_at: agent.updated_at,
+        summary_age_seconds: agent.summary_age_seconds,
     }
 }
 

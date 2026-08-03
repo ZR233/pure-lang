@@ -1,6 +1,6 @@
 part of '../widget_test.dart';
 
-void registerSnapshotJsonTests() {
+void registerSnapshotSettingsTests() {
   test('config snapshot restores built-in Zhipu MCP metadata', () {
     final state = studioStateFromFrbSnapshot(
       frb.BridgeStudioSnapshotResponse(
@@ -29,42 +29,75 @@ void registerSnapshotJsonTests() {
         ],
         selectedSessionId: 'session-1',
         selectedSessionTask: null,
-        configJson: jsonEncode({
-          'defaultProviderId': 'zhipu-coding-plan',
-          'providers': {
-            'zhipu-coding-plan': {
-              'presetId': 'zhipu-coding-plan',
-              'wireProtocol': 'chat_completions',
-              'connectionMode': 'http',
-              'baseUrl': 'https://open.bigmodel.cn/api/coding/paas/v4',
-              'hasBearerToken': true,
-              'name': 'Zhipu Coding Plan',
-              'defaultModel': 'glm-5',
-              'models': [],
-              'customModels': [],
-              'catalogId': 'zhipu',
-              'capabilitySource': 'preset_defaults',
-              'serviceCapabilities': {
-                'webSearch': {'hostedResponses': false, 'standalone': null},
-              },
-            },
-          },
-          'roles': {},
-          'runtime': {'permissionMode': 'request-approval'},
-          'instructions': {},
-          'skills': {},
-          'mcpServers': {},
-          'builtinMcpServers': {
-            'zhipu_search': {'enabled': true},
-            'zhipu_vision': {'enabled': false},
-          },
-        }),
-        generalSettingsJson: '{}',
-        webSearch: const frb.BridgeWebSearchSettingsDto(
-          configuredMode: 'disabled',
-          effectiveMode: 'disabled',
-          availability: 'disabled',
-          allowedDomains: [],
+        settings: frb.BridgeStudioSettingsDto(
+          defaultProviderId: 'zhipu-coding-plan',
+          providers: [
+            frb.BridgeProviderSettingsDto(
+              id: 'zhipu-coding-plan',
+              templateKind: 'zhipu-coding-plan',
+              wireProtocol: 'chat_completions',
+              connectionMode: 'http',
+              name: 'Zhipu Coding Plan',
+              baseUrl: 'https://open.bigmodel.cn/api/coding/paas/v4',
+              hasBearerToken: true,
+              capabilitySource: 'preset_defaults',
+              hostedWebSearch: false,
+              defaultModel: 'glm-5',
+              models: [],
+              customModels: [],
+              catalogId: 'zhipu',
+            ),
+          ],
+          roles: [],
+          permissionMode: 'request-approval',
+          instructions: frb.BridgeInstructionsSettingsDto(
+            baseOverride: '',
+            developer: '',
+            user: '',
+            projectDocMaxBytes: BigInt.from(65536),
+            projectDocFallbackFilenames: [],
+          ),
+          skills: frb.BridgeSkillsSettingsDto(
+            enabled: true,
+            autoLearn: true,
+            systemEnabled: true,
+            projectDir: 'skills',
+            userDir: '~/.pure/skills',
+            externalDirs: [],
+            disabled: [],
+            autoLearnMinToolCalls: 5,
+          ),
+          mcpServers: [
+            frb.BridgeMcpServerSettingsDto(
+              id: 'zhipu_search',
+              transport: 'streamableHttp',
+              endpoint: 'https://open.bigmodel.cn/api/mcp/web_search_prime/mcp',
+              enabled: true,
+              status: 'enabled',
+              sourceKind: 'builtIn',
+              mutationPolicy: 'lockedIdentity',
+            ),
+            frb.BridgeMcpServerSettingsDto(
+              id: 'zhipu_vision',
+              transport: 'stdio',
+              endpoint: 'npx',
+              enabled: false,
+              status: 'disabled',
+              sourceKind: 'builtIn',
+              mutationPolicy: 'lockedIdentity',
+            ),
+          ],
+          general: frb.BridgeGeneralSettingsDto(
+            followSystemTheme: true,
+            followActiveTurn: true,
+            compactTimeline: false,
+          ),
+          webSearch: frb.BridgeWebSearchSettingsDto(
+            configuredMode: 'disabled',
+            effectiveMode: 'disabled',
+            availability: 'disabled',
+            allowedDomains: [],
+          ),
         ),
       ),
     );
@@ -214,15 +247,27 @@ void registerSnapshotJsonTests() {
             taskGeneration: BigInt.zero,
             workUnits: [],
             agents: [],
+            completions: [],
             merges: [],
             reviews: [
               frb.BridgeTaskReviewDto(
+                id: 'review-1',
                 round: 1,
-                headCommit: 'abcdef123456',
+                scope: 'integrated',
+                reviewedHead: 'abcdef123456',
                 verdict: 'pass',
+                requestedByCallId: 'call-review-1',
                 reviewerAgentId: 'reviewer-1',
                 summary: 'Passed',
-                designReferences: ['design/16-task-orchestration.md#UI'],
+                designReferences: const [
+                  frb.BridgeTaskDesignReferenceDto(
+                    path: 'design/16-task-orchestration.md',
+                    section: 'UI',
+                  ),
+                ],
+                findings: const [],
+                createdAt: 1,
+                updatedAt: 1,
               ),
             ],
           ),
@@ -233,8 +278,9 @@ void registerSnapshotJsonTests() {
     final payload = event.payload as SessionTaskChangedPayload;
     expect(payload.task?.phase, 'reviewing');
     expect(payload.task?.branch, 'codex/task');
-    expect(payload.task?.reviews.single.designReferences, [
-      'design/16-task-orchestration.md#UI',
-    ]);
+    expect(
+      payload.task?.reviews.single.designReferences.single.path,
+      'design/16-task-orchestration.md',
+    );
   });
 }

@@ -3,7 +3,6 @@ pub mod entities;
 mod ids;
 mod interaction_runtime;
 mod mappers;
-mod migration;
 mod paths;
 mod product_event_runtime;
 mod records;
@@ -31,7 +30,7 @@ pub use runtime_state::{
     StudioRuntimeState, StudioRuntimeStatus,
 };
 pub(in crate::studio) use store::AgentSessionSpec;
-pub use store::StudioStore;
+pub use store::{StudioDatabaseError, StudioStore};
 
 #[cfg(test)]
 mod tests;

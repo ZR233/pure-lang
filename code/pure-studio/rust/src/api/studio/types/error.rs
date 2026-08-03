@@ -61,7 +61,16 @@ impl BridgeError {
     fn from_anyhow(error: anyhow::Error) -> Self {
         let diagnostic = format!("{error:#}");
         let normalized = diagnostic.to_ascii_lowercase();
-        let (code, message, retryable) = if normalized.contains("not initialized") {
+        let (code, message, retryable) = if error
+            .downcast_ref::<pl_studio_runtime::StudioDatabaseError>()
+            .is_some()
+        {
+            (
+                BridgeErrorCode::Storage,
+                "Studio storage is unavailable",
+                false,
+            )
+        } else if normalized.contains("not initialized") {
             (
                 BridgeErrorCode::NotInitialized,
                 "Studio runtime is not initialized",
@@ -100,6 +109,7 @@ impl BridgeError {
         } else if normalized.contains("sqlite")
             || normalized.contains("database")
             || normalized.contains("storage")
+            || normalized.contains("数据库")
         {
             (
                 BridgeErrorCode::Storage,
@@ -237,6 +247,21 @@ mod tests {
         assert!(storage.retryable);
         assert_eq!(not_found.code, BridgeErrorCode::NotFound);
         assert!(!not_found.retryable);
+    }
+
+    #[test]
+    fn startup_storage_failure_is_not_misclassified_as_uninitialized() {
+        let source = pl_studio_runtime::StudioDatabaseError::UnsupportedSchema {
+            found: 11,
+            supported: 10,
+        };
+        let error = BridgeError::from(
+            anyhow::Error::new(source).context("Studio bridge runtime was not initialized"),
+        );
+
+        assert_eq!(error.code, BridgeErrorCode::Storage);
+        assert!(!error.retryable);
+        assert_ne!(error.message, "Studio runtime is not initialized");
     }
 
     #[test]

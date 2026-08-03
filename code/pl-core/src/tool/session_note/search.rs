@@ -160,7 +160,7 @@ fn cursor_key(request: &SearchRequest) -> String {
 }
 
 fn decode_cursor(cursor: Option<&str>, revision: u64, key: &str) -> Result<usize, PureError> {
-    let Some(cursor) = cursor else {
+    let Some(cursor) = cursor.map(str::trim).filter(|cursor| !cursor.is_empty()) else {
         return Ok(0);
     };
     let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
@@ -168,13 +168,13 @@ fn decode_cursor(cursor: Option<&str>, revision: u64, key: &str) -> Result<usize
         .map_err(|_| {
             tool_error(
                 TOOL_SEARCH_SESSION_NOTE,
-                "invalid session note search cursor",
+                "invalid session note search cursor; omit cursor on the first page or pass the exact nextCursor returned by the previous search",
             )
         })?;
     let cursor: SearchCursor = serde_json::from_slice(&bytes).map_err(|_| {
         tool_error(
             TOOL_SEARCH_SESSION_NOTE,
-            "invalid session note search cursor",
+            "invalid session note search cursor; omit cursor on the first page or pass the exact nextCursor returned by the previous search",
         )
     })?;
     if cursor.revision != revision {

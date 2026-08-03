@@ -21,7 +21,7 @@ pub(super) fn fork_session(
             "forkTurns.last must be greater than zero".to_string(),
         )),
         ForkTurns::Last(turns) => Ok(parent.fork(AgentSessionForkPolicy::LastUserTurns(
-            NonZeroUsize::new(turns).expect("非零 fork turn 数已经校验"),
+            NonZeroUsize::new(turns).expect("non-zero fork turn count was validated"),
         ))),
     }
 }
@@ -40,15 +40,7 @@ pub(super) fn filter_visible(
             .cloned()
             .collect(),
         AgentTargetSelector::Tree => {
-            let parents: BTreeMap<_, _> = snapshots
-                .iter()
-                .map(|snapshot| {
-                    (
-                        snapshot.identity.id.clone(),
-                        snapshot.identity.parent_id.clone(),
-                    )
-                })
-                .collect();
+            let parents = parent_map(snapshots);
             let caller_root = root_id(caller, &parents);
             snapshots
                 .iter()
@@ -59,7 +51,36 @@ pub(super) fn filter_visible(
     }
 }
 
-pub(super) fn root_id(id: &AgentId, parents: &BTreeMap<AgentId, Option<AgentId>>) -> AgentId {
+pub(super) fn agent_path(id: &AgentId, snapshots: &[AgentSnapshot]) -> Vec<AgentId> {
+    let parents = parent_map(snapshots);
+    let mut path = vec![id.clone()];
+    let mut current = id.clone();
+    let mut remaining = parents.len();
+    while remaining > 0 {
+        let Some(Some(parent)) = parents.get(&current) else {
+            break;
+        };
+        path.push(parent.clone());
+        current = parent.clone();
+        remaining -= 1;
+    }
+    path.reverse();
+    path
+}
+
+fn parent_map(snapshots: &[AgentSnapshot]) -> BTreeMap<AgentId, Option<AgentId>> {
+    snapshots
+        .iter()
+        .map(|snapshot| {
+            (
+                snapshot.identity.id.clone(),
+                snapshot.identity.parent_id.clone(),
+            )
+        })
+        .collect()
+}
+
+fn root_id(id: &AgentId, parents: &BTreeMap<AgentId, Option<AgentId>>) -> AgentId {
     let mut current = id.clone();
     let mut remaining = parents.len();
     while remaining > 0 {
@@ -73,11 +94,11 @@ pub(super) fn root_id(id: &AgentId, parents: &BTreeMap<AgentId, Option<AgentId>>
 }
 
 pub(super) fn spawn_schema(policy: &AgentAccessPolicy) -> Value {
-    let roles: Vec<_> = policy
+    let roles = policy
         .spawn_roles
         .iter()
         .map(|role| Value::String(role.to_string()))
-        .collect();
+        .collect::<Vec<_>>();
     object_schema(vec![
         ("message", json!({ "type": "string" }), true),
         ("role", json!({ "type": "string", "enum": roles }), true),
@@ -101,20 +122,56 @@ pub(super) fn spawn_schema(policy: &AgentAccessPolicy) -> Value {
     ])
 }
 
-pub(super) fn send_schema(selector: &AgentTargetSelector) -> Value {
+pub(super) fn progress_schema() -> Value {
+    object_schema(vec![
+        (
+            "stage",
+            json!({
+                "type": "string",
+                "enum": [
+                    "exploring",
+                    "implementing",
+                    "verifying",
+                    "blocked",
+                    "readyForCompletion"
+                ]
+            }),
+            true,
+        ),
+        (
+            "summary",
+            json!({ "type": "string", "maxLength": 1200 }),
+            true,
+        ),
+        (
+            "nextStep",
+            json!({ "type": "string", "maxLength": 500 }),
+            true,
+        ),
+    ])
+}
+
+pub(super) fn send_message_schema(selector: &AgentTargetSelector) -> Value {
     object_schema(vec![
         ("target", target_property_schema(selector, None), true),
         ("message", json!({ "type": "string" }), true),
-        (
-            "interrupt",
-            json!({
-                "type": "boolean",
-                "default": false,
-                "description": "Cancel the active turn before delivering this input."
-            }),
-            false,
-        ),
     ])
+}
+
+pub(super) fn wait_schema(selector: &AgentTargetSelector) -> Value {
+    object_schema(vec![(
+        "targets",
+        json!({
+            "type": "array",
+            "items": target_property_schema(
+                selector,
+                Some("Agent id whose next directory change should end the wait.")
+            ),
+            "minItems": 1,
+            "uniqueItems": true
+        }),
+        false,
+    )])
 }
 
 pub(super) fn target_schema(selector: &AgentTargetSelector, description: &str) -> Value {
@@ -151,15 +208,15 @@ fn target_property_schema(selector: &AgentTargetSelector, description: Option<&s
 }
 
 pub(super) fn object_schema(fields: Vec<(&str, Value, bool)>) -> Value {
-    let properties: serde_json::Map<_, _> = fields
+    let properties = fields
         .iter()
         .map(|(name, schema, _)| ((*name).to_string(), schema.clone()))
-        .collect();
-    let required: Vec<_> = fields
+        .collect::<serde_json::Map<_, _>>();
+    let required = fields
         .into_iter()
         .filter(|(_, _, required)| *required)
         .map(|(name, _, _)| Value::String(name.to_string()))
-        .collect();
+        .collect::<Vec<_>>();
     json!({
         "type": "object",
         "properties": properties,

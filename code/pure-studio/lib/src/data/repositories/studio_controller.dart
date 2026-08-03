@@ -107,7 +107,8 @@ class StudioController extends _$StudioController {
 
   Future<void> archiveSession(String sessionId) async {
     final current = state.value;
-    if (current == null || current.isBusy) {
+    if (current == null ||
+        (current.isBusy && current.selectedRootSession?.id == sessionId)) {
       return;
     }
     final next = await _actions.archiveSession(
@@ -142,13 +143,11 @@ class StudioController extends _$StudioController {
     final session = current.sessions
         .where((session) => session.id == sessionId)
         .firstOrNull;
-    final composerTexts = _composerTextsAfterLeaving(current);
     final syncStates = _workspaceSyncAfterSelecting(current, sessionId);
     state = AsyncData(
       current.copyWith(
         selectedRootSessionId: session?.effectiveRootSessionId ?? sessionId,
         selectedSessionId: sessionId,
-        composerTextsBySession: composerTexts,
         workspaceSyncBySession: syncStates,
       ),
     );
@@ -174,13 +173,11 @@ class StudioController extends _$StudioController {
         target.effectiveRootSessionId != selectedRoot.id) {
       return;
     }
-    final composerTexts = _composerTextsAfterLeaving(current);
     final syncStates = _workspaceSyncAfterSelecting(current, target.id);
     state = AsyncData(
       current.copyWith(
         selectedRootSessionId: target.effectiveRootSessionId,
         selectedSessionId: target.id,
-        composerTextsBySession: composerTexts,
         workspaceSyncBySession: syncStates,
       ),
     );
@@ -192,22 +189,102 @@ class StudioController extends _$StudioController {
     if (current == null || current.selectedAgentSessionId != sessionId) {
       return;
     }
-    final composerTexts = {...current.composerTextsBySession};
-    composerTexts[sessionId] = value;
-    state = AsyncData(current.copyWith(composerTextsBySession: composerTexts));
+    final composer =
+        current.composersBySession[sessionId] ??
+        const ComposerSessionState.idle();
+    state = AsyncData(
+      _withComposer(current, sessionId, composer.updateDraft(value)),
+    );
   }
 
   Future<void> submitComposer(String sessionId) async {
     final current = state.value;
-    final prompt = current?.composerText.trim() ?? '';
+    final composer =
+        current?.composersBySession[sessionId] ??
+        const ComposerSessionState.idle();
+    final prompt = composer.draft.trim();
     if (current == null ||
         current.selectedAgentSessionId != sessionId ||
-        prompt.isEmpty) {
+        prompt.isEmpty ||
+        composer.isSubmissionPending) {
       return;
     }
-    final composerTexts = {...current.composerTextsBySession}..[sessionId] = '';
-    state = AsyncData(current.copyWith(composerTextsBySession: composerTexts));
-    await _actions.submitPrompt(sessionId, prompt);
+    final submitting = composer.beginSubmission();
+    await _submitSessionInput(
+      current,
+      sessionId,
+      submitting,
+      () => _actions.submitPrompt(sessionId, prompt),
+    );
+  }
+
+  Future<void> resumeTask(String sessionId) async {
+    final current = state.value;
+    final composer =
+        current?.composersBySession[sessionId] ??
+        const ComposerSessionState.idle();
+    if (current == null ||
+        current.selectedAgentSessionId != sessionId ||
+        current.selectedAgentWorkspace?.isTaskPaused != true ||
+        composer.isSubmissionPending) {
+      return;
+    }
+    final submitting = composer.beginCommandSubmission();
+    await _submitSessionInput(
+      current,
+      sessionId,
+      submitting,
+      () => _actions.resumeTask(sessionId),
+    );
+  }
+
+  Future<void> _submitSessionInput(
+    StudioState current,
+    String sessionId,
+    ComposerSessionState submitting,
+    Future<SubmitPromptReceipt> Function() submit,
+  ) async {
+    final submissionRevision = submitting.submissionRevision;
+    state = AsyncData(_withComposer(current, sessionId, submitting));
+    final SubmitPromptReceipt receipt;
+    try {
+      receipt = await submit();
+    } catch (error) {
+      final latest = state.value;
+      final active = latest?.composersBySession[sessionId];
+      if (latest == null || active == null) {
+        return;
+      }
+      final failed = active.fail(error, submissionRevision: submissionRevision);
+      if (!identical(failed, active)) {
+        state = AsyncData(_withComposer(latest, sessionId, failed));
+      }
+      return;
+    }
+    final latest = state.value;
+    final active = latest?.composersBySession[sessionId];
+    if (latest == null || active == null) {
+      return;
+    }
+    if (receipt.sessionId != sessionId) {
+      final failed = active.fail(
+        StateError(
+          'submit receipt session ${receipt.sessionId} does not match $sessionId',
+        ),
+        submissionRevision: submissionRevision,
+      );
+      if (!identical(failed, active)) {
+        state = AsyncData(_withComposer(latest, sessionId, failed));
+      }
+      return;
+    }
+    final accepted = active
+        .accept(receipt, submissionRevision: submissionRevision)
+        .observeTurn(latest.turnsBySession[sessionId]);
+    if (identical(accepted, active)) {
+      return;
+    }
+    state = AsyncData(_withComposer(latest, sessionId, accepted));
     if (state.value?.selectedSessionId == sessionId) {
       await _subscribe(sessionId, forceSnapshot: true);
     }
@@ -475,7 +552,11 @@ class StudioController extends _$StudioController {
         _partDeltaBatcher.flush();
         final current = state.value;
         if (current != null) {
-          state = AsyncData(applyCanonicalSessionSnapshot(current, snapshot));
+          state = AsyncData(
+            _reconcileComposerTurns(
+              applyCanonicalSessionSnapshot(current, snapshot),
+            ),
+          );
         }
       case SessionEventFrame(:final event):
         final eventSessionId = studioEventSessionId(event);
@@ -540,14 +621,13 @@ class StudioController extends _$StudioController {
       next = _attachProviderCatalog(next, catalog);
     }
     if (current != null) {
-      final composerTexts = _composerTextsAfterLeaving(current);
       final turns = {...current.turnsBySession, ...next.turnsBySession};
       final runtimes = {
         ...current.runtimesBySession,
         ...next.runtimesBySession,
       };
       next = next.copyWith(
-        composerTextsBySession: composerTexts,
+        composersBySession: current.composersBySession,
         turnsBySession: turns,
         runtimesBySession: runtimes,
         workspaceSyncBySession: {
@@ -561,6 +641,7 @@ class StudioController extends _$StudioController {
       selectedRootSessionId:
           selected?.effectiveRootSessionId ?? next.rootSessions.firstOrNull?.id,
     );
+    next = _reconcileComposerTurns(next);
     state = AsyncData(next);
     if (previousSessionId != next.selectedSessionId) {
       await _subscribe(next.selectedSessionId);
@@ -580,17 +661,34 @@ class StudioController extends _$StudioController {
     if (staleSessionId != null) {
       _resubscribeSnapshot(staleSessionId, _sessionCoordinator.generation);
     }
-    return reduced.state;
+    return _reconcileComposerTurns(reduced.state);
   }
 }
 
-Map<String, String> _composerTextsAfterLeaving(StudioState state) {
-  final composerTexts = {...state.composerTextsBySession};
-  final sessionId = state.selectedAgentSessionId;
-  if (sessionId != null) {
-    composerTexts[sessionId] = state.composerText;
+StudioState _reconcileComposerTurns(StudioState state) {
+  final updates = <String, ComposerSessionState>{};
+  for (final entry in state.composersBySession.entries) {
+    final reconciled = entry.value.observeTurn(state.turnsBySession[entry.key]);
+    if (!identical(reconciled, entry.value)) {
+      updates[entry.key] = reconciled;
+    }
   }
-  return composerTexts;
+  if (updates.isEmpty) {
+    return state;
+  }
+  return state.copyWith(
+    composersBySession: {...state.composersBySession, ...updates},
+  );
+}
+
+StudioState _withComposer(
+  StudioState state,
+  String sessionId,
+  ComposerSessionState composer,
+) {
+  return state.copyWith(
+    composersBySession: {...state.composersBySession, sessionId: composer},
+  );
 }
 
 Map<String, AgentWorkspaceSyncState> _workspaceSyncAfterSelecting(

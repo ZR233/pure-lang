@@ -11,7 +11,7 @@ pub use lifecycle::{
     archive_project, bootstrap_studio, init_app, initialize_runtime, open_project, select_project,
     shutdown_runtime, start_runtime,
 };
-pub use prompt::{resolve_interaction, stop_prompt, submit_prompt};
+pub use prompt::{resolve_interaction, resume_task, stop_prompt, submit_prompt};
 pub use providers::{list_discovered_skills, load_provider_usages};
 pub use recovery::{
     cleanup_project, cleanup_recovery_issue, preview_project_cleanup,

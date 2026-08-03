@@ -13,9 +13,9 @@ use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::mappers::project_record;
 use crate::studio::paths::{default_db_path, project_name, sqlite_url};
 use crate::studio::records::ProjectRecord;
-use crate::studio::store::StudioStore;
+use crate::studio::store::{StudioDatabaseError, StudioStore};
 use crate::studio::store_support::{
-    STUDIO_DATABASE_SCHEMA_VERSION, configure_sqlite, initialize_schema, migrate_schema,
+    STUDIO_DATABASE_SCHEMA_VERSION, configure_sqlite, initialize_schema,
 };
 
 impl StudioStore {
@@ -38,33 +38,27 @@ impl StudioStore {
             let version = database_schema_version(&db).await?;
             if version == STUDIO_DATABASE_SCHEMA_VERSION {
                 false
-            } else if version == 0 {
-                if database_has_user_tables(&db).await? {
-                    checkpoint_sqlite(&db).await?;
-                    db.close().await?;
-                    let backup = archive_incompatible_database(path).await?;
-                    eprintln!(
-                        "检测到不兼容的未版本化 Studio 数据库，已备份到 {} 并重建。",
-                        backup.display()
-                    );
-                    db = connect_sqlite(&url).await?;
-                    configure_sqlite(&db).await?;
+            } else if version > STUDIO_DATABASE_SCHEMA_VERSION {
+                db.close().await?;
+                return Err(StudioDatabaseError::UnsupportedSchema {
+                    found: version,
+                    supported: STUDIO_DATABASE_SCHEMA_VERSION,
                 }
+                .into());
+            } else if version == 0 && !database_has_user_tables(&db).await? {
                 true
-            } else if version < STUDIO_DATABASE_SCHEMA_VERSION {
+            } else {
                 checkpoint_sqlite(&db).await?;
                 db.close().await?;
-                backup_database(path, version).await?;
+                let backup = archive_database(path, version).await?;
+                tracing::warn!(
+                    backup = %backup.display(),
+                    version,
+                    "检测到旧版 Studio 数据库，已完整归档并重建 schema v10"
+                );
                 db = connect_sqlite(&url).await?;
                 configure_sqlite(&db).await?;
-                migrate_schema(&db, version).await?;
-                false
-            } else {
-                db.close().await?;
-                anyhow::bail!(
-                    "Studio 数据库版本 {version} 高于当前支持版本 \
-                     {STUDIO_DATABASE_SCHEMA_VERSION}，已保留原数据库"
-                );
+                true
             }
         } else {
             true
@@ -320,53 +314,63 @@ async fn checkpoint_sqlite(db: &DatabaseConnection) -> Result<()> {
     Ok(())
 }
 
-async fn archive_incompatible_database(path: &Path) -> Result<PathBuf> {
-    let backup = next_legacy_backup_path(path).await?;
-    tokio::fs::rename(path, &backup).await.with_context(|| {
-        format!(
-            "无法将不兼容的 Studio 数据库 {} 归档到 {}",
-            path.display(),
-            backup.display()
-        )
-    })?;
-
+async fn archive_database(path: &Path, version: i64) -> Result<PathBuf> {
+    let backup = next_legacy_backup_path(path, version).await?;
+    let mut files = vec![(path.to_path_buf(), backup.clone())];
     for suffix in ["-wal", "-shm"] {
-        let sidecar = PathBuf::from(format!("{}{suffix}", path.display()));
-        if tokio::fs::try_exists(&sidecar).await? {
-            let backup_sidecar = PathBuf::from(format!("{}{suffix}", backup.display()));
-            tokio::fs::rename(&sidecar, &backup_sidecar)
-                .await
-                .with_context(|| {
-                    format!(
-                        "无法将 SQLite sidecar {} 归档到 {}",
-                        sidecar.display(),
-                        backup_sidecar.display()
-                    )
-                })?;
+        let source = PathBuf::from(format!("{}{suffix}", path.display()));
+        if tokio::fs::try_exists(&source).await? {
+            files.push((
+                source,
+                PathBuf::from(format!("{}{suffix}", backup.display())),
+            ));
         }
+    }
+    if files.iter().any(|(_, destination)| destination.exists()) {
+        anyhow::bail!("Studio 数据库归档目标已存在，未修改原数据库");
+    }
+
+    let mut moved: Vec<(PathBuf, PathBuf)> = Vec::with_capacity(files.len());
+    for (source, destination) in files {
+        if let Err(error) = tokio::fs::rename(&source, &destination).await {
+            for (moved_source, moved_destination) in moved.into_iter().rev() {
+                if let Err(rollback_error) =
+                    tokio::fs::rename(&moved_destination, &moved_source).await
+                {
+                    return Err(anyhow::anyhow!(
+                        "归档 {} 失败：{error}；回滚 {} 失败：{rollback_error}",
+                        source.display(),
+                        moved_destination.display()
+                    ));
+                }
+            }
+            return Err(error).with_context(|| {
+                format!(
+                    "无法将旧版 Studio 数据库文件 {} 归档到 {}",
+                    source.display(),
+                    destination.display()
+                )
+            });
+        }
+        moved.push((source, destination));
     }
     Ok(backup)
 }
 
-async fn next_legacy_backup_path(path: &Path) -> Result<PathBuf> {
-    let base = PathBuf::from(format!("{}.legacy-v0.bak", path.display()));
+async fn next_legacy_backup_path(path: &Path, version: i64) -> Result<PathBuf> {
+    let base = PathBuf::from(format!("{}.legacy-v{version}.bak", path.display()));
     if !tokio::fs::try_exists(&base).await? {
         return Ok(base);
     }
 
     for sequence in 1_u32.. {
-        let candidate = PathBuf::from(format!("{}.legacy-v0.{sequence}.bak", path.display()));
+        let candidate = PathBuf::from(format!(
+            "{}.legacy-v{version}.{sequence}.bak",
+            path.display()
+        ));
         if !tokio::fs::try_exists(&candidate).await? {
             return Ok(candidate);
         }
     }
     unreachable!("u32 backup sequence space must not be exhausted")
-}
-
-async fn backup_database(path: &Path, version: i64) -> Result<PathBuf> {
-    let backup = PathBuf::from(format!("{}.v{version}.bak", path.display()));
-    if !tokio::fs::try_exists(&backup).await? {
-        tokio::fs::copy(path, &backup).await?;
-    }
-    Ok(backup)
 }

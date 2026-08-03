@@ -18,13 +18,6 @@ pub(crate) struct MergeRecord {
     pub(crate) updated_at: i64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct TaskProductSignalClaim {
-    pub(crate) task_run_id: String,
-    pub(crate) agent_id: String,
-    pub(crate) signal_id: String,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct MergeEvidence {
@@ -32,6 +25,8 @@ pub(crate) struct MergeEvidence {
     pub(crate) origin_phase: TaskRunPhase,
     pub(crate) work_unit_id: String,
     pub(crate) outcome_id: String,
+    pub(crate) completion_id: String,
+    pub(crate) completion_revision: u32,
     pub(crate) delivery_head: String,
     pub(crate) pre_index_tree: String,
     pub(crate) changed_files: Vec<String>,
@@ -41,10 +36,6 @@ pub(crate) struct MergeEvidence {
     pub(crate) merge_commit: Option<String>,
     #[serde(default)]
     pub(crate) conflict_manifest: Option<ConflictManifest>,
-    #[serde(default)]
-    pub(crate) conflict_continuation_requested: bool,
-    #[serde(default)]
-    pub(crate) merge_completion_continuation_requested: bool,
     #[serde(default)]
     pub(crate) conflict_verification: Option<ConflictVerificationEvidence>,
     #[serde(default)]
@@ -136,6 +127,7 @@ pub(crate) struct TaskMergeScope {
     pub(crate) lease: BranchLeaseRecord,
     pub(crate) work_unit: WorkUnitRecord,
     pub(crate) outcome: AgentOutcomeRecord,
+    pub(crate) completion: WorkCompletionRecord,
     pub(crate) delivery: AgentDelivery,
     pub(crate) merge: MergeRecord,
 }
@@ -186,14 +178,43 @@ pub(crate) struct ReviewRoundRecord {
     pub(crate) id: String,
     pub(crate) task_run_id: String,
     pub(crate) round: u32,
-    pub(crate) head_commit: String,
+    pub(crate) scope: ReviewScope,
+    pub(crate) work_unit_id: Option<String>,
+    pub(crate) completion_id: Option<String>,
+    pub(crate) completion_revision: Option<u32>,
+    pub(crate) reviewed_head: String,
     pub(crate) verdict: ReviewVerdict,
+    pub(crate) requested_by_call_id: String,
     pub(crate) reviewer_agent_id: Option<String>,
     pub(crate) summary: Option<String>,
     pub(crate) design_references: Vec<ReviewDesignReference>,
     pub(crate) findings: Vec<ReviewFinding>,
     pub(crate) created_at: i64,
     pub(crate) updated_at: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum ReviewScope {
+    Delivery,
+    Integrated,
+}
+
+impl ReviewScope {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Delivery => "delivery",
+            Self::Integrated => "integrated",
+        }
+    }
+
+    pub(crate) fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "delivery" => Some(Self::Delivery),
+            "integrated" => Some(Self::Integrated),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -248,8 +269,6 @@ pub(crate) struct UpdateAgentOutcome {
     pub(crate) status: AgentOutcomeStatus,
     pub(crate) summary: Option<String>,
     pub(crate) error: Option<String>,
-    pub(crate) delivery: Option<AgentDelivery>,
-    pub(crate) review: Option<AgentReview>,
 }
 
 #[cfg(test)]
@@ -258,20 +277,4 @@ pub(crate) struct UpdateMergeRecord {
     pub(crate) resolution_summary: Option<String>,
     pub(crate) verification: Option<Vec<String>>,
     pub(crate) attempt: u32,
-}
-
-#[cfg(test)]
-pub(crate) struct CreateReviewRound {
-    pub(crate) task_run_id: String,
-    pub(crate) round: u32,
-    pub(crate) head_commit: String,
-    pub(crate) reviewer_agent_id: Option<String>,
-}
-
-#[cfg(test)]
-pub(crate) struct CompleteReviewRound {
-    pub(crate) verdict: ReviewVerdict,
-    pub(crate) summary: String,
-    pub(crate) design_references: Vec<ReviewDesignReference>,
-    pub(crate) findings: Vec<ReviewFinding>,
 }

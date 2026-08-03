@@ -25,6 +25,7 @@ import 'package:pure_studio/src/features/update/studio_update_controller.dart';
 import 'package:pure_studio/src/l10n/app_localizations.dart';
 import 'package:pure_studio/src/rust/api/studio.dart' as frb;
 import 'package:pure_studio/src/shared/studio_chrome.dart';
+import 'package:pure_studio/src/shared/studio_driver_keys.dart';
 
 import 'support/responsive_visual_fixture.dart';
 
@@ -32,7 +33,7 @@ part 'widget_test/controller_stream_tests.dart';
 part 'widget_test/reducer_recovery_tests.dart';
 part 'widget_test/recovery_issue_tests.dart';
 part 'widget_test/timeline_model_tests.dart';
-part 'widget_test/snapshot_json_tests.dart';
+part 'widget_test/snapshot_settings_tests.dart';
 part 'widget_test/session_stream_tests.dart';
 part 'widget_test/agent_workspace_tests.dart';
 part 'widget_test/demo_project_tests.dart';
@@ -60,7 +61,7 @@ void main() {
   registerReducerRecoveryTests();
   registerRecoveryIssueTests();
   registerTimelineModelTests();
-  registerSnapshotJsonTests();
+  registerSnapshotSettingsTests();
   registerSessionStreamTests();
   registerAgentWorkspaceTests();
   registerDemoProjectTests();

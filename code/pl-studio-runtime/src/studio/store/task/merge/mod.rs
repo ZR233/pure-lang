@@ -1,16 +1,18 @@
 mod cleanup;
 mod conflict_resolution;
-mod continuation;
 mod record;
 
 pub(super) use record::{merge_record, parse_required_evidence};
 
 use anyhow::{Context, Result, bail};
+use pl_core::{AgentLifecycleState, AgentSnapshot};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait,
+    QueryFilter, QueryOrder, Statement, TransactionTrait,
 };
 
 use super::outcome::agent_outcome_record;
+use super::work_completion::{delivery_from_completion, work_completion_record};
 use super::work_unit::work_unit_record;
 use super::{branch_lease_record, task_run_record};
 use crate::agent::worktree::same_worktree_path;
@@ -18,9 +20,9 @@ use crate::studio::entities;
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    AgentDelivery, AgentOutcomeStatus, BeginTaskMerge, CompleteTaskMerge, ConflictTaskMerge,
-    FailTaskMerge, MergeEvidence, MergeRecord, MergeStatus, TaskMergeScope, TaskRunPhase,
-    TaskRunRecord, WorkUnitStatus,
+    AgentOutcomeStatus, BeginTaskMerge, CompleteTaskMerge, ConflictTaskMerge, FailTaskMerge,
+    MergeEvidence, MergeRecord, MergeStatus, TaskMergeScope, TaskRunPhase, TaskRunRecord,
+    WorkCompletionStatus, WorkUnitStatus,
 };
 
 impl StudioStore {
@@ -86,7 +88,7 @@ impl StudioStore {
                 .await?;
             let outcome_model = match outcomes.as_slice() {
                 [outcome] => outcome.clone(),
-                [] => bail!("delivered executor outcome not found for agent"),
+                [] => bail!("approved executor outcome not found for agent"),
                 _ => bail!("ambiguous executor outcome for agent"),
             };
             if outcome_model.role != "executor"
@@ -95,6 +97,23 @@ impl StudioStore {
                 || outcome_model.status != AgentOutcomeStatus::Completed.as_str()
             {
                 bail!("agent outcome is not a planner-owned completed executor delivery");
+            }
+            let runtime_row = tx
+                .query_one(Statement::from_sql_and_values(
+                    DatabaseBackend::Sqlite,
+                    "SELECT snapshot_json FROM agent_runtime_states WHERE agent_id = ?",
+                    [input.agent_id.clone().into()],
+                ))
+                .await?
+                .context("executor canonical runtime snapshot not found")?;
+            let snapshot: AgentSnapshot =
+                serde_json::from_str(&runtime_row.try_get::<String>("", "snapshot_json")?)
+                    .context("executor canonical runtime snapshot is invalid")?;
+            if snapshot.identity.id.as_str() != input.agent_id
+                || snapshot.identity.role.as_str() != "executor"
+                || snapshot.lifecycle != AgentLifecycleState::Closed
+            {
+                bail!("executor must be canonically closed before merge");
             }
             let work_unit_id = outcome_model
                 .work_unit_id
@@ -106,18 +125,27 @@ impl StudioStore {
                 .context("executor work unit not found")?;
             if work_unit_model.task_run_id != run_model.id
                 || work_unit_model.agent_id.as_deref() != Some(input.agent_id.as_str())
-                || work_unit_model.status != WorkUnitStatus::Delivered.as_str()
+                || work_unit_model.status != WorkUnitStatus::Approved.as_str()
                 || work_unit_model.attempt != outcome_model.attempt
-                || !(1..=3).contains(&work_unit_model.attempt)
+                || work_unit_model.attempt <= 0
             {
-                bail!("work unit does not match the delivered executor outcome");
+                bail!("work unit does not match an approved executor completion");
             }
-            let delivery: AgentDelivery = outcome_model
-                .delivery_json
-                .as_deref()
-                .map(serde_json::from_str)
-                .transpose()?
-                .context("completed executor outcome has no delivery")?;
+            let completion_model = entities::work_completion::Entity::find()
+                .filter(
+                    entities::work_completion::Column::WorkUnitId.eq(work_unit_model.id.clone()),
+                )
+                .order_by_desc(entities::work_completion::Column::Revision)
+                .one(&tx)
+                .await?
+                .context("approved work unit has no completion")?;
+            if completion_model.executor_agent_id != input.agent_id
+                || completion_model.status != WorkCompletionStatus::Approved.as_str()
+            {
+                bail!("latest executor completion is not approved");
+            }
+            let completion = work_completion_record(completion_model)?;
+            let delivery = delivery_from_completion(&completion)?;
             if !same_worktree_path(&delivery.worktree.path, &work_unit_model.worktree_path)
                 || delivery.worktree.branch != work_unit_model.branch
                 || delivery.base_commit != work_unit_model.base_commit
@@ -140,14 +168,14 @@ impl StudioStore {
                 origin_phase,
                 work_unit_id: work_unit_id.clone(),
                 outcome_id: outcome_model.id.clone(),
+                completion_id: completion.id.clone(),
+                completion_revision: completion.revision,
                 delivery_head: delivery.head_commit.clone(),
                 pre_index_tree: input.pre_index_tree,
                 changed_files: input.changed_files,
                 verification_steps: Vec::new(),
                 merge_commit: None,
                 conflict_manifest: None,
-                conflict_continuation_requested: false,
-                merge_completion_continuation_requested: false,
                 conflict_verification: None,
                 compensation: None,
                 cleanup: None,
@@ -174,6 +202,11 @@ impl StudioStore {
             run_active.status_message = Set(None);
             run_active.updated_at = Set(now);
             let run_model = run_active.update(&tx).await?;
+            let mut work_unit_active: entities::work_unit::ActiveModel =
+                work_unit_model.clone().into();
+            work_unit_active.status = Set(WorkUnitStatus::Merging.as_str().to_string());
+            work_unit_active.updated_at = Set(now);
+            let work_unit_model = work_unit_active.update(&tx).await?;
 
             Ok(TaskMergeScope {
                 #[cfg(test)]
@@ -182,6 +215,7 @@ impl StudioStore {
                 lease: branch_lease_record(lease_model),
                 work_unit: work_unit_record(work_unit_model)?,
                 outcome: agent_outcome_record(outcome_model)?,
+                completion,
                 delivery,
                 merge: merge_record(merge_model)?,
             })
@@ -250,7 +284,19 @@ impl StudioStore {
                 "pending merge recovered before Git started; planner may retry".to_string(),
             ));
             run_active.updated_at = Set(now);
-            task_run_record(run_active.update(&tx).await?)
+            let run = task_run_record(run_active.update(&tx).await?)?;
+            let work_unit = entities::work_unit::Entity::find_by_id(evidence.work_unit_id.clone())
+                .one(&tx)
+                .await?
+                .context("pending merge work unit not found")?;
+            if work_unit.status != WorkUnitStatus::Merging.as_str() {
+                bail!("pending merge work unit left merging");
+            }
+            let mut work_unit_active: entities::work_unit::ActiveModel = work_unit.into();
+            work_unit_active.status = Set(WorkUnitStatus::Approved.as_str().to_string());
+            work_unit_active.updated_at = Set(now);
+            work_unit_active.update(&tx).await?;
+            Ok(run)
         }
         .await;
         match result {
@@ -309,24 +355,29 @@ impl StudioStore {
                 .one(&tx)
                 .await?
                 .context("merge agent outcome not found")?;
+            let completion =
+                entities::work_completion::Entity::find_by_id(evidence.completion_id.clone())
+                    .one(&tx)
+                    .await?
+                    .context("merge work completion not found")?;
             if work_unit.task_run_id != run.id
                 || work_unit.agent_id.as_deref() != Some(merge.agent_id.as_str())
-                || work_unit.status != WorkUnitStatus::Delivered.as_str()
+                || work_unit.status != WorkUnitStatus::Merging.as_str()
                 || outcome.task_run_id != run.id
                 || outcome.work_unit_id.as_deref() != Some(work_unit.id.as_str())
                 || outcome.agent_id != merge.agent_id
                 || outcome.status != AgentOutcomeStatus::Completed.as_str()
-                || outcome.delivery_json.is_none()
+                || completion.task_run_id != run.id
+                || completion.work_unit_id != work_unit.id
+                || completion.executor_agent_id != merge.agent_id
+                || completion.revision != i32::try_from(evidence.completion_revision)?
+                || completion.status != WorkCompletionStatus::Approved.as_str()
                 || evidence.delivery_head != merge.source_commit
             {
-                bail!("delivered executor identity changed before merge acceptance");
+                bail!("approved executor completion identity changed before merge acceptance");
             }
-            let delivery: AgentDelivery = serde_json::from_str(
-                outcome
-                    .delivery_json
-                    .as_deref()
-                    .context("completed outcome delivery disappeared")?,
-            )?;
+            let completion = work_completion_record(completion)?;
+            let delivery = delivery_from_completion(&completion)?;
             if delivery.head_commit != merge.source_commit {
                 bail!("delivery source commit changed before merge acceptance");
             }
@@ -456,7 +507,6 @@ impl StudioStore {
             conflict_files.sort();
             conflict_files.dedup();
             evidence.conflict_manifest = Some(input.manifest);
-            evidence.conflict_continuation_requested = false;
             let now = unix_seconds();
             let task_run_id = merge.task_run_id.clone();
             let mut merge_active: entities::merge_record::ActiveModel = merge.into();

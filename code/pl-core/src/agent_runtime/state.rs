@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::VecDeque;
 use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{AgentRoleId, AgentSession};
 
-use super::{AgentId, AgentWakeId, SessionId, TurnId};
+use super::{AgentId, SessionId, TurnId};
 
 /// agent 资源仍可执行工作的生命周期状态。
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -29,25 +29,7 @@ pub enum AgentActivityState {
     Running,
     WaitingTool,
     WaitingInteraction,
-    WaitingAgents,
-}
-
-/// 当前 turn 是否仍接受 mailbox 输入。
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum MailboxDeliveryPhase {
-    #[default]
-    CurrentTurn,
-    NextTurn,
-}
-
-/// mailbox 输入是否可以在 agent 空闲时启动 turn。
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum MailboxTurnTrigger {
-    DoNotStart,
-    #[default]
-    StartIfIdle,
+    Cancelling,
 }
 
 /// mailbox envelope 与模型上下文 checkpoint 的持久投递状态。
@@ -68,17 +50,6 @@ pub enum MailboxDeliveryState {
         turn_id: TurnId,
         checkpoint_seq: u64,
     },
-}
-
-/// 子代理 runtime 终态如何参与父代理唤醒。
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum AgentWakePolicy {
-    /// runtime turn 终态本身就是可执行的父代理事实。
-    #[default]
-    RuntimeTerminal,
-    /// runtime 终态仅供产品收束合同；产品 durable signal 才可唤醒父代理。
-    ProductGated,
 }
 
 /// 单轮执行结果，不用作 agent 生命周期。
@@ -115,24 +86,83 @@ pub struct AgentTurnOutcome {
     pub finished_at: i64,
 }
 
+/// agent 最新进度阶段；`ReadyForReview` 仅由产品的 durable completion 路径提升。
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum AgentProgressStage {
+    Exploring,
+    Implementing,
+    Verifying,
+    Blocked,
+    ReadyForCompletion,
+    ReadyForReview,
+}
+
+/// agent 最新的显式进度 checkpoint。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentProgressCheckpoint {
+    pub stage: AgentProgressStage,
+    pub summary: String,
+    pub next_step: String,
+    pub revision: u64,
+    pub updated_at: i64,
+}
+
+/// `read_agent_session` 可返回的公开消息角色。
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum AgentSessionDigestRole {
+    User,
+    Assistant,
+}
+
+/// `read_agent_session` 的单条有界文本。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSessionDigestMessage {
+    pub role: AgentSessionDigestRole,
+    pub text: String,
+}
+
+/// `read_agent_session` 的过滤结果。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSessionDigest {
+    pub through_sequence: u64,
+    pub truncated: bool,
+    pub messages: Vec<AgentSessionDigestMessage>,
+    pub tool_names: Vec<String>,
+}
+
+/// `wait_agents` 返回的真实 directory 变化原因。
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum AgentDirectoryWaitReason {
+    Progress,
+    Interaction,
+    Terminal,
+}
+
+/// `wait_agents` 的 canonical 结果。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentDirectoryWaitResult {
+    pub reason: AgentDirectoryWaitReason,
+    pub agents: Vec<AgentSnapshot>,
+}
+
 /// 可直接投影到产品协议的 agent latest snapshot。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSnapshot {
     pub identity: AgentIdentity,
-    #[serde(default)]
-    pub wake_policy: AgentWakePolicy,
     pub lifecycle: AgentLifecycleState,
     pub activity: AgentActivityState,
     pub active_turn_id: Option<TurnId>,
-    pub active_session_id: Option<SessionId>,
     pub pending_inputs: usize,
-    #[serde(default)]
-    pub pending_trigger_inputs: usize,
-    #[serde(default)]
-    pub mailbox_delivery_phase: MailboxDeliveryPhase,
-    #[serde(default)]
-    pub dispatch_generation: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub progress: Option<AgentProgressCheckpoint>,
     pub last_turn: Option<AgentTurnOutcome>,
     pub revision: u64,
     pub event_sequence: u64,
@@ -169,16 +199,6 @@ impl AgentSessionState {
     }
 }
 
-/// 输入到达繁忙 agent 时的投递语义。
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum InputDelivery {
-    QueueOnly,
-    #[default]
-    Start,
-    InterruptThenStart,
-}
-
 /// 决定 mailbox 输入是否以及如何投影到用户可见 Timeline。
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(
@@ -189,10 +209,7 @@ pub enum InputDelivery {
 pub enum MailboxPresentation {
     #[default]
     User,
-    SyntheticVisible {
-        prompt: String,
-    },
-    SyntheticHidden,
+    Hidden,
 }
 
 /// 已分配 turn id、可持久化和恢复的 mailbox envelope。
@@ -202,10 +219,6 @@ pub struct DurableMailboxEnvelope {
     #[serde(default)]
     pub mail_id: String,
     pub turn_id: TurnId,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub wake_id: Option<AgentWakeId>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub wake_signal_ids: Vec<String>,
     pub session_id: SessionId,
     pub message: String,
     #[serde(default)]
@@ -213,11 +226,7 @@ pub struct DurableMailboxEnvelope {
     #[serde(default)]
     pub metadata: serde_json::Value,
     #[serde(default)]
-    pub trigger: MailboxTurnTrigger,
-    #[serde(default)]
     pub delivery_state: MailboxDeliveryState,
-    #[serde(default)]
-    pub dispatch_generation: u64,
     pub queued_at: i64,
 }
 
@@ -225,8 +234,7 @@ pub struct DurableMailboxEnvelope {
 pub type PendingAgentInput = DurableMailboxEnvelope;
 
 impl DurableMailboxEnvelope {
-    pub(crate) fn claim(&mut self, turn_id: TurnId, dispatch_generation: u64) {
-        self.dispatch_generation = dispatch_generation;
+    pub(crate) fn claim(&mut self, turn_id: TurnId) {
         self.delivery_state = MailboxDeliveryState::Claimed {
             turn_id,
             checkpoint_seq: 0,
@@ -241,17 +249,6 @@ impl DurableMailboxEnvelope {
     }
 }
 
-/// runtime 已接受的订阅唤醒凭据；用于跨重启抑制同一事实的重复续轮。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct AcceptedAgentWake {
-    pub wake_id: AgentWakeId,
-    pub turn_id: TurnId,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub signal_ids: Vec<String>,
-    pub accepted_at: i64,
-}
-
 /// 产品提交给 runtime 的输入请求。
 #[derive(Debug, Clone, PartialEq)]
 pub struct AgentSubmitRequest {
@@ -259,10 +256,7 @@ pub struct AgentSubmitRequest {
     pub message: String,
     pub presentation: MailboxPresentation,
     pub metadata: serde_json::Value,
-    pub delivery: InputDelivery,
     pub mail_id: Option<String>,
-    pub wake_id: Option<AgentWakeId>,
-    pub wake_signal_ids: Vec<String>,
 }
 
 impl AgentSubmitRequest {
@@ -273,10 +267,7 @@ impl AgentSubmitRequest {
             message: message.into(),
             presentation: MailboxPresentation::User,
             metadata: serde_json::Value::Null,
-            delivery: InputDelivery::Start,
             mail_id: None,
-            wake_id: None,
-            wake_signal_ids: Vec::new(),
         }
     }
 
@@ -292,27 +283,9 @@ impl AgentSubmitRequest {
         self
     }
 
-    /// 设置明确的输入投递语义。
-    pub fn with_delivery(mut self, delivery: InputDelivery) -> Self {
-        self.delivery = delivery;
-        self
-    }
-
     /// 指定传输重试使用的稳定 mailbox id；不会被模型看到。
     pub fn with_mail_id(mut self, mail_id: impl Into<String>) -> Self {
         self.mail_id = Some(mail_id.into());
-        self
-    }
-
-    /// 标记此输入为可跨重试去重的订阅唤醒。
-    pub fn with_wake_id(mut self, wake_id: AgentWakeId) -> Self {
-        self.wake_id = Some(wake_id);
-        self
-    }
-
-    /// 记录组成该唤醒的 durable product signal，用于跨批次、跨重启去重。
-    pub fn with_wake_signal_ids(mut self, signal_ids: Vec<String>) -> Self {
-        self.wake_signal_ids = signal_ids;
         self
     }
 }
@@ -323,10 +296,7 @@ pub struct AgentCurrentSessionSubmitRequest {
     pub message: String,
     pub presentation: MailboxPresentation,
     pub metadata: serde_json::Value,
-    pub delivery: InputDelivery,
     pub mail_id: Option<String>,
-    pub wake_id: Option<AgentWakeId>,
-    pub wake_signal_ids: Vec<String>,
 }
 
 impl AgentCurrentSessionSubmitRequest {
@@ -336,10 +306,7 @@ impl AgentCurrentSessionSubmitRequest {
             message: message.into(),
             presentation: MailboxPresentation::User,
             metadata: serde_json::Value::Null,
-            delivery: InputDelivery::Start,
             mail_id: None,
-            wake_id: None,
-            wake_signal_ids: Vec::new(),
         }
     }
 
@@ -355,48 +322,20 @@ impl AgentCurrentSessionSubmitRequest {
         self
     }
 
-    /// 设置明确的输入投递语义。
-    pub fn with_delivery(mut self, delivery: InputDelivery) -> Self {
-        self.delivery = delivery;
-        self
-    }
-
     /// 指定传输重试使用的稳定 mailbox id；不会被模型看到。
     pub fn with_mail_id(mut self, mail_id: impl Into<String>) -> Self {
         self.mail_id = Some(mail_id.into());
         self
     }
-
-    /// 标记此输入为可跨重试去重的订阅唤醒。
-    pub fn with_wake_id(mut self, wake_id: AgentWakeId) -> Self {
-        self.wake_id = Some(wake_id);
-        self
-    }
-
-    /// 记录组成该唤醒的 durable product signal，用于跨批次、跨重启去重。
-    pub fn with_wake_signal_ids(mut self, signal_ids: Vec<String>) -> Self {
-        self.wake_signal_ids = signal_ids;
-        self
-    }
-}
-
-/// actor 内部解析出的 owner-bound current session capability。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ResolvedAgentSessionTarget {
-    pub(crate) root_agent_id: AgentId,
-    pub(crate) agent_id: AgentId,
-    pub(crate) session_id: SessionId,
-    pub(crate) owner_revision: u64,
 }
 
 /// repository 原子提交和恢复使用的 agent 全量 durable state。
 #[derive(Debug, Clone)]
 pub struct AgentDurableState {
     pub snapshot: AgentSnapshot,
-    pub sessions: BTreeMap<SessionId, AgentSessionState>,
+    pub session: AgentSessionState,
     pub pending_inputs: VecDeque<PendingAgentInput>,
     pub active_input: Option<DurableMailboxEnvelope>,
-    pub accepted_wakes: BTreeMap<AgentWakeId, AcceptedAgentWake>,
 }
 
 impl AgentDurableState {
@@ -405,24 +344,13 @@ impl AgentDurableState {
     }
 
     pub(crate) fn triggering_input_position(&self) -> Option<usize> {
-        self.pending_inputs.iter().position(|input| {
-            input.trigger == MailboxTurnTrigger::StartIfIdle
-                && input.dispatch_generation == self.snapshot.dispatch_generation
-                && matches!(input.delivery_state, MailboxDeliveryState::Pending)
-        })
+        self.pending_inputs
+            .iter()
+            .position(|input| matches!(input.delivery_state, MailboxDeliveryState::Pending))
     }
 
     pub(crate) fn refresh_mailbox_snapshot(&mut self) {
         self.snapshot.pending_inputs = self.pending_inputs.len();
-        self.snapshot.pending_trigger_inputs = self
-            .pending_inputs
-            .iter()
-            .filter(|input| {
-                input.trigger == MailboxTurnTrigger::StartIfIdle
-                    && input.dispatch_generation == self.snapshot.dispatch_generation
-                    && matches!(input.delivery_state, MailboxDeliveryState::Pending)
-            })
-            .count();
     }
 }
 
@@ -430,8 +358,7 @@ impl AgentDurableState {
 #[derive(Debug, Clone)]
 pub struct AgentRegistration {
     pub identity: AgentIdentity,
-    pub wake_policy: AgentWakePolicy,
-    pub sessions: Vec<AgentSessionState>,
+    pub session: AgentSessionState,
 }
 
 /// runtime 负责 lifecycle saga 的 child agent 创建请求。
@@ -439,7 +366,6 @@ pub struct AgentRegistration {
 pub struct AgentSpawnRequest {
     pub parent_id: AgentId,
     pub role: AgentRoleId,
-    pub wake_policy: AgentWakePolicy,
     pub session: AgentSessionState,
     pub initial_message: Option<String>,
     pub metadata: serde_json::Value,
@@ -457,8 +383,7 @@ impl AgentRegistration {
     pub fn with_session(identity: AgentIdentity, session_id: SessionId) -> Self {
         Self {
             identity,
-            wake_policy: AgentWakePolicy::RuntimeTerminal,
-            sessions: vec![AgentSessionState::empty(session_id)],
+            session: AgentSessionState::empty(session_id),
         }
     }
 
@@ -467,28 +392,19 @@ impl AgentRegistration {
         AgentDurableState {
             snapshot: AgentSnapshot {
                 identity: self.identity,
-                wake_policy: self.wake_policy,
                 lifecycle: AgentLifecycleState::Active,
                 activity: AgentActivityState::Idle,
                 active_turn_id: None,
-                active_session_id: None,
                 pending_inputs: 0,
-                pending_trigger_inputs: 0,
-                mailbox_delivery_phase: MailboxDeliveryPhase::CurrentTurn,
-                dispatch_generation: 0,
+                progress: None,
                 last_turn: None,
                 revision: 1,
                 event_sequence: 1,
                 updated_at: now,
             },
-            sessions: self
-                .sessions
-                .into_iter()
-                .map(|session| (session.id.clone(), session))
-                .collect(),
+            session: self.session,
             pending_inputs: VecDeque::new(),
             active_input: None,
-            accepted_wakes: BTreeMap::new(),
         }
     }
 }
@@ -566,14 +482,12 @@ pub enum AgentRuntimeError {
         expected: TurnId,
         actual: TurnId,
     },
-    SessionNotOwned {
+    SessionMismatch {
         agent_id: AgentId,
-        session_id: SessionId,
+        expected: SessionId,
+        actual: SessionId,
     },
-    CurrentSessionUnavailable {
-        agent_id: AgentId,
-        session_count: usize,
-    },
+    InvalidInput(String),
     Repository(String),
     RevisionConflict {
         expected: Option<u64>,
@@ -600,20 +514,15 @@ impl fmt::Display for AgentRuntimeError {
                     "active turn mismatch: expected {expected}, got {actual}"
                 )
             }
-            Self::SessionNotOwned {
+            Self::SessionMismatch {
                 agent_id,
-                session_id,
+                expected,
+                actual,
             } => write!(
                 formatter,
-                "agent {agent_id} does not own session {session_id}"
+                "agent {agent_id} canonical session mismatch: expected {expected}, got {actual}"
             ),
-            Self::CurrentSessionUnavailable {
-                agent_id,
-                session_count,
-            } => write!(
-                formatter,
-                "agent {agent_id} has no unambiguous current session ({session_count} owned)"
-            ),
+            Self::InvalidInput(reason) => write!(formatter, "invalid agent input: {reason}"),
             Self::Repository(error) => write!(formatter, "agent repository failed: {error}"),
             Self::RevisionConflict { expected, actual } => write!(
                 formatter,

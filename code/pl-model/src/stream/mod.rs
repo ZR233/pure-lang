@@ -725,9 +725,10 @@ impl VisibleOutputDecoder {
         if diagnostics.untagged_visible_text_segments == 0 {
             return;
         }
-        eprintln!(
-            "[pl-model] tagged visible output contained {} untagged visible text segment(s), {} char(s); using fallback final text",
-            diagnostics.untagged_visible_text_segments, diagnostics.untagged_visible_text_chars
+        tracing::warn!(
+            segments = diagnostics.untagged_visible_text_segments,
+            chars = diagnostics.untagged_visible_text_chars,
+            "tagged visible output contained untagged visible text; using fallback final text"
         );
     }
 }

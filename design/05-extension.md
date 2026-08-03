@@ -85,15 +85,17 @@ JSON/ARB 属性行只有在 patch 的 old/new 两侧保持不变时才属于保�
 
 Skills 工具同样挂在 `pl-core` 默认工具集中。`skills_list` 和 `skill_view` 是只读工具；`skill_manage` 是写入工具，但只能修改当前项目的 `<workspace_root>/skills/`，不能修改用户级、系统或外部只读 skills。subagent 通过同一默认工具注册入口继承 skills 能力。
 
-协作工具通过 `spawn_agent`、`send_input`、`list_agents` 和 `close_agent` 暴露，并只持有
-非泛型 `AgentRuntimeHandle`。未关闭 agent 可连续接收输入，不存在 `resume_agent`。输入使用
-`QueueOnly | Start | InterruptThenStart` 明确表达；角色、目标选择和工具 effect 均来自产品
-编译出的 `AgentExecutionPolicy`。等待由 runtime 的 direct-child `AgentEventHub` 订阅、
-`WaitingAgents` 状态机和独立 inactivity timer 管理，不向模型暴露轮询工具。Studio 的 agent
-展示继续以 durable snapshot 和 append-only timeline 为准。
+协作工具通过 `spawn_agent`、`report_progress`、`send_message`、`interrupt_agent`、
+`list_agents`、`wait_agents`、`read_agent_session` 和 `close_agent` 暴露，并只持有非泛型
+`AgentRuntimeHandle`。未关闭 agent 可连续接收输入，不存在 `resume_agent`。`send_message`
+在目标运行时 steer、空闲时启动明确的新 turn；`interrupt_agent` 只取消当前 turn。等待由
+`wait_agents` 订阅 Agent Directory watch，不使用 inactivity timer、轮询或后台续轮。Studio
+的 agent 展示继续以 durable snapshot 和 append-only timeline 为准。
 
 通用协作工具不承载 Studio 的任务分配协议。Task harness 另外注册
-`task_spawn_executor { taskName, message, ownedPaths }` 与 `task_request_review`，把强类型
-输入转换为内部 spawn intent 后调用同一个 `AgentRuntimeHandle`。Task 根的通用
+`task_spawn_executor { taskName, message, ownedPaths }`、
+`task_request_delivery_review { executorAgentId }` 与
+`task_request_integrated_review {}`，把强类型输入转换为内部 spawn intent 后调用同一个
+`AgentRuntimeHandle`。Task 根的通用
 `spawn_agent` 只公开 explorer，避免模型通过自由 metadata 绕过 worktree、路径所有权和审查
 授权。

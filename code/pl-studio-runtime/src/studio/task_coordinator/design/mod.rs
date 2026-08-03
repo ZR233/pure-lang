@@ -161,10 +161,13 @@ impl TaskCoordinator {
         let studio_session_id = studio_session_id.into();
         RegisteredTool::from_fallible_execution_result(
             "task_update_design",
-            "Apply and commit exactly one complete Codex-style design-only patch for the current Task run. The patch must begin with `*** Begin Patch` and end with `*** End Patch`. For a new file, use `*** Add File: design/<path>` and prefix every content line with `+`, without an `@@` hunk. Complete example: `*** Begin Patch\n*** Add File: design/spec.md\n+# Design\n*** End Patch`. Use `*** Update File:` only for an existing file. After a failed patch, follow the reported cause, read an existing target again when needed, and retry with a smaller complete patch; never use `*** New File`.",
+            "Apply and commit one design-only Codex patch for the current Task run. The patch argument must contain exactly one complete block: one `*** Begin Patch` wrapper, one matching `*** End Patch` wrapper, and nothing outside them. Do not prepend a template, append another block, use Markdown fences, or include any previous failed attempt. The patch itself declares the changed design files; plan prose is reading context only. Use `*** Add File: design/<path>` for a new file and prefix every content line with `+`, without an `@@` hunk. Use `*** Update File:` only for an existing file. After failure, follow the reported cause, reread stale targets when needed, then replace the entire argument with one corrected block. Applied hunks from a failed call are rolled back. Never use `*** New File`.",
             strict_tool_input_schema([ToolInputSchemaField::required(
                 "patch",
-                serde_json::json!({ "type": "string" }),
+                serde_json::json!({
+                    "type": "string",
+                    "description": "Exactly one complete Codex patch block for design/**. Do not include prose, Markdown fences, templates, or a previous attempt."
+                }),
             )]),
             move |input, context| {
                 let coordinator = coordinator.clone();
@@ -316,7 +319,9 @@ impl TaskCoordinator {
                         "design update failed: {operation_error}; repository was not clean after rollback and the task run was blocked: {cleanliness_error}"
                     );
                 }
-                return Err(operation_error);
+                bail!(
+                    "task_update_design did not record a design commit: {operation_error:#}; the coordinator restored the validated design paths and index to their pre-call state; retry with one complete logical patch"
+                );
             }
         };
 
@@ -521,6 +526,13 @@ impl TaskCoordinator {
         )
         .await?;
         bail!("{reason}; task run was blocked because compensation was unsafe")
+    }
+
+    pub(super) fn ensure_executor_design_contract(&self, run: &TaskRunRecord) -> Result<()> {
+        if design_commit_is_current(run) {
+            return Ok(());
+        }
+        bail!("task_spawn_executor requires a durable design commit at the current task HEAD")
     }
 }
 

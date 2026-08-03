@@ -1,4 +1,3 @@
-mod continuation;
 mod events;
 mod lifecycle;
 mod plan_confirmation;
@@ -18,7 +17,6 @@ use crate::studio::{
     InteractionRuntime, StudioProductEventRuntime, StudioRuntimeState, StudioStore,
 };
 
-pub(super) use continuation::StudioContinuationService;
 use events::StudioAgentCommitObserver;
 use lifecycle::StudioAgentLifecycle;
 use plan_confirmation::StudioPlanConfirmationProjector;
@@ -44,7 +42,6 @@ impl StudioAgentHost {
         lsp_runtime: pl_lsp::LspRuntimeRegistry,
         interactions: InteractionRuntime,
         runtime_state: StudioRuntimeState,
-        continuations: StudioContinuationService,
         coordinator: Arc<TaskCoordinator>,
         resources: StudioAgentResources,
         product_events: StudioProductEventRuntime,
@@ -66,7 +63,6 @@ impl StudioAgentHost {
                 interactions,
                 runtime_state,
                 resources,
-                continuations,
                 product_events,
             ),
         }

@@ -10,7 +10,7 @@ pub use self::handlers::{
     check_studio_update, cleanup_project, cleanup_recovery_issue, create_session, init_app,
     initialize_runtime, install_studio_update, list_discovered_skills, load_provider_catalog,
     load_provider_usages, load_web_search_settings, open_project, preview_project_cleanup,
-    preview_recovery_issue_cleanup, resolve_interaction, save_general_settings,
+    preview_recovery_issue_cleanup, resolve_interaction, resume_task, save_general_settings,
     save_instructions_settings, save_mcp_settings, save_provider_settings,
     save_runtime_permission_mode, save_skills_settings, save_web_search_settings, select_project,
     set_model_role, set_session_mode, shutdown_runtime, start_runtime, stop_prompt, submit_prompt,

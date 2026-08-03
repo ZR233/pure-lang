@@ -4,6 +4,7 @@ use crate::{
     StudioRecoveryIssueScope,
 };
 use pretty_assertions::assert_eq;
+use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
 
 #[tokio::test]
 async fn initialize_runtime_isolates_unavailable_registered_project() {
@@ -277,7 +278,7 @@ async fn assert_failed_task_preflight_keeps_confirmation_pending(
         InteractionKind::PlanConfirmation,
         InteractionPayload::PlanConfirmation {
             plan_id: format!("plan-{suffix}"),
-            content: "Implement the plan".to_string(),
+            content: "Implement the plan after updating `design/task.md`.".to_string(),
         },
     );
     store.upsert_interaction(&interaction).await.unwrap();
@@ -326,7 +327,7 @@ fn make_hook_executable(path: &std::path::Path) {
 fn make_hook_executable(_path: &std::path::Path) {}
 
 #[tokio::test]
-async fn initialize_runtime_cancels_recovered_transient_interactions() {
+async fn initialize_runtime_recovers_user_input_and_cancels_tool_approval() {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project("C:/work/recovered").await.unwrap();
     let session = store
@@ -400,7 +401,7 @@ async fn initialize_runtime_cancels_recovered_transient_interactions() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(ask.status, InteractionStatus::Cancelled);
+    assert_eq!(ask.status, InteractionStatus::Pending);
     assert_eq!(approval.status, InteractionStatus::Cancelled);
     assert_eq!(plan.status, InteractionStatus::Pending);
     let canonical = runtime.session_event_snapshot(&session.id).await.unwrap();
@@ -425,7 +426,257 @@ async fn initialize_runtime_cancels_recovered_transient_interactions() {
             cancelled_interactions += 1;
         }
     }
-    assert_eq!(cancelled_interactions, 2);
+    assert_eq!(cancelled_interactions, 1);
+    let _ = tokio::fs::remove_dir_all(home).await;
+}
+
+#[tokio::test]
+async fn detached_user_input_resolution_queues_one_hidden_explicit_input() {
+    let (base_url, server, accepted_rx, release_tx) = serve_delayed_sse().await;
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let home = std::env::temp_dir().join(format!("pure-detached-input-home-{unique}"));
+    let workspace = std::env::temp_dir().join(format!("pure-detached-input-workspace-{unique}"));
+    tokio::fs::create_dir_all(&workspace).await.unwrap();
+    let config_store = ConfigStore::new(crate::config::ConfigPaths::from_home(&home));
+    config_store.save(&test_config(base_url)).unwrap();
+    let store = StudioStore::open_memory().await.unwrap();
+    let runtime = StudioRuntime::new(store.clone(), config_store);
+    let project = runtime.open_project(&workspace).await.unwrap();
+    let session = store
+        .create_session(&project.id, "Detached input", StudioMode::Simple)
+        .await
+        .unwrap();
+    let interaction = pending_interaction(
+        "ask-detached",
+        &session.id,
+        InteractionKind::UserInput,
+        InteractionPayload::UserInput {
+            questions: vec![crate::UserQuestion {
+                id: "architecture".to_string(),
+                header: "架构".to_string(),
+                question: "选择配置边界".to_string(),
+                is_other: false,
+                is_secret: false,
+                options: None,
+            }],
+        },
+    );
+    store.upsert_interaction(&interaction).await.unwrap();
+    let resolution = crate::InteractionResolution::UserInput {
+        answers: std::collections::HashMap::from([(
+            "architecture".to_string(),
+            crate::UserInputAnswer {
+                answers: vec!["typed canonical route".to_string()],
+            },
+        )]),
+    };
+
+    runtime
+        .resolve_interaction(interaction.interaction_id.clone(), resolution.clone())
+        .await
+        .unwrap();
+    tokio::time::timeout(TEST_RUNTIME_TIMEOUT, accepted_rx)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let owner = crate::studio::agent_host::root_agent_id(&session.id);
+    let row = store
+        .database()
+        .query_one(Statement::from_sql_and_values(
+            DatabaseBackend::Sqlite,
+            "SELECT input_json FROM agent_active_inputs WHERE agent_id = ?",
+            [owner.to_string().into()],
+        ))
+        .await
+        .unwrap()
+        .expect("hidden explicit input should be active");
+    let input_json: String = row.try_get("", "input_json").unwrap();
+    let input: serde_json::Value = serde_json::from_str(&input_json).unwrap();
+    assert_eq!(
+        input["mailId"],
+        format!("interaction-resolution:{}", interaction.interaction_id)
+    );
+    assert_eq!(input["presentation"]["type"], "hidden");
+    assert_eq!(
+        input["metadata"]["interactionResolutionId"],
+        interaction.interaction_id
+    );
+    let message: serde_json::Value =
+        serde_json::from_str(input["message"].as_str().unwrap()).unwrap();
+    assert_eq!(message["type"], "studioInteractionResolution");
+    assert_eq!(message["interactionId"], interaction.interaction_id);
+    assert_eq!(message["originTurnId"], interaction.scope.turn_id);
+    assert_eq!(
+        message["resolution"]["answers"]["architecture"]["answers"][0],
+        "typed canonical route"
+    );
+    assert!(
+        runtime
+            .session_event_snapshot(&session.id)
+            .await
+            .unwrap()
+            .messages
+            .iter()
+            .all(|message| message.role != crate::SessionMessageRole::User)
+    );
+
+    runtime
+        .resolve_interaction(interaction.interaction_id.clone(), resolution)
+        .await
+        .unwrap();
+    let active_input_count = store
+        .database()
+        .query_one(Statement::from_sql_and_values(
+            DatabaseBackend::Sqlite,
+            "SELECT COUNT(*) AS count FROM agent_active_inputs WHERE agent_id = ?",
+            [owner.to_string().into()],
+        ))
+        .await
+        .unwrap()
+        .unwrap()
+        .try_get::<i64>("", "count")
+        .unwrap();
+    assert_eq!(active_input_count, 1);
+
+    let _ = release_tx.send(());
+    wait_for_no_active_turn(&runtime).await;
+    server.await.unwrap();
+    runtime.shutdown().await;
+    let _ = tokio::fs::remove_dir_all(workspace).await;
+    let _ = tokio::fs::remove_dir_all(home).await;
+}
+
+#[tokio::test]
+async fn initialize_runtime_recovers_child_interaction_with_canonical_owner() {
+    let store = StudioStore::open_memory().await.unwrap();
+    let project = store
+        .upsert_project("C:/work/recovered-child")
+        .await
+        .unwrap();
+    let root = store
+        .create_session(&project.id, "Recovered root", StudioMode::Simple)
+        .await
+        .unwrap();
+    let child_owner = pl_core::AgentId::new("agent-recovered-child").unwrap();
+    let child = store
+        .create_agent_session(crate::studio::AgentSessionSpec {
+            id: "session-recovered-child".to_string(),
+            parent_session_id: root.id.clone(),
+            owner_agent_id: child_owner.to_string(),
+            owner_role: "explorer".to_string(),
+            title: "Recovered child".to_string(),
+        })
+        .await
+        .unwrap();
+    store
+        .upsert_interaction(&pending_interaction(
+            "approval-recovered-child",
+            &child.id,
+            InteractionKind::ToolApproval,
+            InteractionPayload::ToolApproval {
+                name: "exec".to_string(),
+                arguments: serde_json::json!({"command": "echo hi"}),
+                working_directory: None,
+                parent_agent_id: Some(root.id.clone()),
+            },
+        ))
+        .await
+        .unwrap();
+
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let home = std::env::temp_dir().join(format!("pure-recovered-child-home-{unique}"));
+    let seeding_runtime = StudioRuntime::new(
+        store.clone(),
+        ConfigStore::new(crate::config::ConfigPaths::from_home(&home)),
+    );
+    let handle = seeding_runtime.agent_framework().await.unwrap().handle();
+    let root_owner = crate::studio::agent_host::root_agent_id(&root.id);
+    handle
+        .register(pl_core::AgentRegistration {
+            identity: pl_core::AgentIdentity {
+                id: root_owner.clone(),
+                parent_id: None,
+                role: StudioRole::Executor.id(),
+                depth: 0,
+            },
+            session: pl_core::AgentSessionState::empty(
+                pl_core::SessionId::new(root.id.clone()).unwrap(),
+            ),
+        })
+        .await
+        .unwrap();
+    handle
+        .register(pl_core::AgentRegistration {
+            identity: pl_core::AgentIdentity {
+                id: child_owner.clone(),
+                parent_id: Some(root_owner),
+                role: StudioRole::Explorer.id(),
+                depth: 1,
+            },
+            session: pl_core::AgentSessionState::empty(
+                pl_core::SessionId::new(child.id.clone()).unwrap(),
+            ),
+        })
+        .await
+        .unwrap();
+    seeding_runtime.shutdown_runtime().await.unwrap();
+
+    let runtime = StudioRuntime::with_runtime_state(
+        store.clone(),
+        ConfigStore::new(crate::config::ConfigPaths::from_home(&home)),
+        StudioRuntimeState::new(),
+    );
+    let snapshot = runtime.initialize_runtime().await.unwrap();
+
+    assert_eq!(snapshot.status, StudioRuntimeStatus::Ready);
+    let interaction = store
+        .read_interaction("approval-recovered-child")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(interaction.status, InteractionStatus::Cancelled);
+    let canonical = runtime.session_event_snapshot(&child.id).await.unwrap();
+    assert_eq!(
+        canonical
+            .owner
+            .as_ref()
+            .map(|owner| owner.agent_id.as_str()),
+        Some(child_owner.as_str())
+    );
+    let mut subscription = runtime
+        .subscribe_session_events(pl_protocol::SessionSubscriptionRequest {
+            session_id: child.id.clone(),
+            after_sequence: Some(0),
+        })
+        .await
+        .unwrap();
+    let mut cancellation_source = None;
+    for _ in 0..canonical.through_sequence {
+        let Some(pl_protocol::SessionStreamFrame::Event { event }) = subscription.recv().await
+        else {
+            continue;
+        };
+        if matches!(
+            &event.kind,
+            pl_protocol::SessionEventKind::InteractionChanged { event }
+                if event.interaction.status == InteractionStatus::Cancelled
+        ) {
+            cancellation_source = event.source_agent_id;
+        }
+    }
+    assert_eq!(cancellation_source.as_deref(), Some(child_owner.as_str()));
+
+    let handle = runtime.agent_framework().await.unwrap().handle();
+    assert!(handle.snapshot(child_owner).await.is_ok());
+
+    runtime.shutdown().await;
     let _ = tokio::fs::remove_dir_all(home).await;
 }
 

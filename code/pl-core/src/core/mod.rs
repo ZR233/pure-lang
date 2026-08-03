@@ -80,7 +80,7 @@ fn generate_turn_id() -> String {
 #[derive(Debug)]
 pub struct TurnEngine {
     provider: SharedModelProvider,
-    reasoning_effort: Option<ReasoningEffort>,
+    effort: Option<ReasoningEffort>,
     skills: Option<SkillsConfig>,
     lsp_runtime: Option<pl_lsp::LspRuntimeRegistry>,
     workspace_root: Option<PathBuf>,
@@ -98,7 +98,7 @@ impl TurnEngine {
     pub fn new(provider: SharedModelProvider) -> Self {
         Self {
             provider,
-            reasoning_effort: None,
+            effort: None,
             skills: None,
             lsp_runtime: None,
             workspace_root: None,
@@ -113,13 +113,10 @@ impl TurnEngine {
         }
     }
 
-    pub fn with_reasoning_effort(
-        provider: SharedModelProvider,
-        reasoning_effort: ReasoningEffort,
-    ) -> Self {
+    pub fn with_effort(provider: SharedModelProvider, effort: ReasoningEffort) -> Self {
         Self {
             provider,
-            reasoning_effort: Some(reasoning_effort),
+            effort: Some(effort),
             skills: None,
             lsp_runtime: None,
             workspace_root: None,
@@ -260,8 +257,8 @@ impl TurnEngine {
         context: &ToolContext,
     ) -> ToolApprovalDecision {
         let provider = self.provider.clone();
-        let reasoning_effort = self.reasoning_effort.clone();
-        let reasoning = reasoning_effort.as_ref().map(|effort| ReasoningConfig {
+        let effort = self.effort.clone();
+        let reasoning = effort.as_ref().map(|effort| ReasoningConfig {
             effort: Some(effort.as_str().to_string()),
             summary: Some(ReasoningSummary::Enabled),
         });
@@ -419,17 +416,14 @@ impl TurnEngine {
         );
         let capabilities = self.provider.effective_model_capabilities(&model);
         let parallel_tool_calls = capabilities.supports_parallel_tool_calls();
-        let reasoning = self
-            .reasoning_effort
-            .as_ref()
-            .map(|effort| ReasoningConfig {
-                effort: Some(effort.as_str().to_string()),
-                summary: Some(if effort.is_none() {
-                    ReasoningSummary::Disabled
-                } else {
-                    ReasoningSummary::Enabled
-                }),
-            });
+        let reasoning = self.effort.as_ref().map(|effort| ReasoningConfig {
+            effort: Some(effort.as_str().to_string()),
+            summary: Some(if effort.is_none() {
+                ReasoningSummary::Disabled
+            } else {
+                ReasoningSummary::Enabled
+            }),
+        });
         let turn_id = request.turn_id.unwrap_or_else(generate_turn_id);
         let mut progress = ProgressEmitter::new(
             recorder.sender().clone(),

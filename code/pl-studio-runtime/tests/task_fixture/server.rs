@@ -37,12 +37,6 @@ enum ScriptRole {
     Reviewer,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum TaskFlowScenario {
-    HappyPath,
-    InterruptedExecutor,
-}
-
 impl ScriptRole {
     fn label(self) -> &'static str {
         match self {
@@ -65,7 +59,6 @@ struct ScriptProgress {
 struct ScriptState {
     runtime: StudioRuntime,
     session_id: String,
-    scenario: TaskFlowScenario,
     progress: Mutex<ScriptProgress>,
 }
 
@@ -75,16 +68,10 @@ pub(super) struct ScriptedModelServer {
 }
 
 impl ScriptedModelServer {
-    pub(super) fn start(
-        listener: TcpListener,
-        runtime: StudioRuntime,
-        session_id: String,
-        scenario: TaskFlowScenario,
-    ) -> Self {
+    pub(super) fn start(listener: TcpListener, runtime: StudioRuntime, session_id: String) -> Self {
         let state = Arc::new(ScriptState {
             runtime,
             session_id,
-            scenario,
             progress: Mutex::new(ScriptProgress::default()),
         });
         let server_state = state.clone();
@@ -107,10 +94,7 @@ impl ScriptedModelServer {
         if !progress.errors.is_empty() {
             bail!("scripted model errors:\n{}", progress.errors.join("\n"));
         }
-        let expected = match self.state.scenario {
-            TaskFlowScenario::HappyPath => (8, 5, 3),
-            TaskFlowScenario::InterruptedExecutor => (10, 6, 3),
-        };
+        let expected = (22, 7, 6);
         if (progress.planner, progress.executor, progress.reviewer) != expected {
             bail!(
                 "scripted model stopped at planner={}, executor={}, reviewer={}; expected {expected:?}\n{}",
@@ -121,25 +105,6 @@ impl ScriptedModelServer {
             );
         }
         Ok(())
-    }
-
-    pub(super) async fn wait_for_interrupted_executor_request(&self) -> Result<()> {
-        if self.state.scenario != TaskFlowScenario::InterruptedExecutor {
-            bail!("fixture is not configured for an interrupted executor");
-        }
-        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(60);
-        loop {
-            if self.state.progress.lock().await.executor > 0 {
-                return Ok(());
-            }
-            if tokio::time::Instant::now() >= deadline {
-                bail!(
-                    "executor did not enter the suspended first request\n{}",
-                    self.diagnostics().await
-                );
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
     }
 
     pub(super) async fn diagnostics(&self) -> String {
@@ -171,7 +136,14 @@ async fn serve_request(mut socket: TcpStream, state: Arc<ScriptState>) {
         let role = request_role(&request)?;
         let step = next_step(&state, role).await;
         validate_request_step(&request, role, step)?;
-        let (action, body) = scripted_response(&state, role, step).await?;
+        let (action, body) = scripted_response(&state, role, step)
+            .await
+            .with_context(|| {
+                latest_function_call_output(&request).map_or_else(
+                    || "model request has no prior function_call_output".to_string(),
+                    |output| format!("latest function_call_output: {output}"),
+                )
+            })?;
         state
             .progress
             .lock()
@@ -207,45 +179,6 @@ async fn scripted_response(
 }
 
 async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static str, String)> {
-    if state.scenario == TaskFlowScenario::InterruptedExecutor {
-        match step {
-            4 => {
-                let task = current_task(state).await?;
-                let executor = task
-                    .agents
-                    .iter()
-                    .find(|agent| agent.role == "executor" && agent.status == "running")
-                    .context("running executor is absent from task projection")?;
-                return Ok((
-                    "send_input(interrupt)",
-                    tool_call(
-                        "interrupt-executor",
-                        "send_input",
-                        serde_json::json!({
-                            "target": executor.agent_id,
-                            "message": "Continue in the queued turn, commit the requested implementation, and finish with submit_delivery.",
-                            "interrupt": true,
-                        }),
-                    ),
-                ));
-            }
-            5 => {
-                return Ok((
-                    "final(interrupt-dispatched)",
-                    final_text(
-                        "interrupt-dispatched",
-                        "The executor was interrupted and queued for continuation.",
-                    ),
-                ));
-            }
-            _ => {}
-        }
-    }
-    let step = if state.scenario == TaskFlowScenario::InterruptedExecutor && step >= 6 {
-        step - 2
-    } else {
-        step
-    };
     let response = match step {
         0 => (
             "plan_exit",
@@ -253,7 +186,7 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 "plan",
                 "plan_exit",
                 serde_json::json!({
-                    "content": "# Offline task plan\n\n1. Record the design contract.\n2. Implement in an executor worktree.\n3. Merge, review, and complete the task."
+                    "content": "# Offline task plan\n\n1. Record the contract in `design/task-flow.md`.\n2. Implement in an executor worktree.\n3. Review the completion, merge it, then review the integrated Task HEAD."
                 }),
             ),
         ),
@@ -276,31 +209,91 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 "task_spawn_executor",
                 serde_json::json!({
                     "taskName": "offline_executor",
-                    "message": "Create src/feature.txt with the exact required content, commit it, and submit the committed delivery.",
+                    "message": "Create src/feature.txt with the exact required content, commit it, verify it, and report the completion for review.",
                     "ownedPaths": ["src/**"]
                 }),
             ),
         ),
-        4 => {
+        4..=7 => {
+            let executor_id = executor_agent_id(state).await?;
+            (
+                "wait_agents(executor)",
+                tool_call(
+                    "wait-executor",
+                    "wait_agents",
+                    serde_json::json!({"targets": [executor_id]}),
+                ),
+            )
+        }
+        8 => (
+            "list_agents(executor)",
+            tool_call("list-executor", "list_agents", serde_json::json!({})),
+        ),
+        9 => (
+            "task_status(completion)",
+            tool_call("status-completion", "task_status", serde_json::json!({})),
+        ),
+        10 => {
+            let executor_id = executor_agent_id(state).await?;
+            (
+                "task_request_delivery_review",
+                tool_call(
+                    "request-delivery-review",
+                    "task_request_delivery_review",
+                    serde_json::json!({"executorAgentId": executor_id}),
+                ),
+            )
+        }
+        11 => {
+            let reviewer_id = latest_reviewer_agent_id(state).await?;
+            (
+                "wait_agents(delivery-reviewer)",
+                tool_call(
+                    "wait-delivery-reviewer",
+                    "wait_agents",
+                    serde_json::json!({"targets": [reviewer_id]}),
+                ),
+            )
+        }
+        12 => (
+            "list_agents(delivery-review)",
+            tool_call("list-delivery-review", "list_agents", serde_json::json!({})),
+        ),
+        13 => (
+            "task_status(delivery-review)",
+            tool_call(
+                "status-delivery-review",
+                "task_status",
+                serde_json::json!({}),
+            ),
+        ),
+        14 => {
+            let executor_id = executor_agent_id(state).await?;
+            (
+                "close_agent(executor)",
+                tool_call(
+                    "close-executor",
+                    "close_agent",
+                    serde_json::json!({"target": executor_id}),
+                ),
+            )
+        }
+        15 => {
             let task = current_task(state).await?;
-            let executor = task
-                .agents
-                .iter()
-                .find(|agent| agent.role == "executor" && agent.head_commit.is_some())
-                .context("delivered executor is absent from task projection")?;
+            let executor_id = executor_agent_id(state).await?;
             (
                 "task_merge_agent",
                 tool_call(
                     "merge-executor",
                     "task_merge_agent",
                     serde_json::json!({
-                        "agentId": executor.agent_id,
+                        "agentId": executor_id,
                         "expectedHeadCommit": task.expected_head
                     }),
                 ),
             )
         }
-        5 => (
+        16 => (
             "task_update_design(consistency)",
             tool_call(
                 "design-consistency",
@@ -308,15 +301,42 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 serde_json::json!({"patch": CONSISTENCY_DESIGN_PATCH}),
             ),
         ),
-        6 => (
-            "task_request_review",
+        17 => (
+            "task_request_integrated_review",
             tool_call(
-                "request-review",
-                "task_request_review",
+                "request-integrated-review",
+                "task_request_integrated_review",
                 serde_json::json!({}),
             ),
         ),
-        7 => (
+        18 => {
+            let reviewer_id = latest_reviewer_agent_id(state).await?;
+            (
+                "wait_agents(integrated-reviewer)",
+                tool_call(
+                    "wait-integrated-reviewer",
+                    "wait_agents",
+                    serde_json::json!({"targets": [reviewer_id]}),
+                ),
+            )
+        }
+        19 => (
+            "list_agents(integrated-review)",
+            tool_call(
+                "list-integrated-review",
+                "list_agents",
+                serde_json::json!({}),
+            ),
+        ),
+        20 => (
+            "task_status(integrated-review)",
+            tool_call(
+                "status-integrated-review",
+                "task_status",
+                serde_json::json!({}),
+            ),
+        ),
+        21 => (
             "task_complete",
             tool_call("complete-task", "task_complete", serde_json::json!({})),
         ),
@@ -326,16 +346,20 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
 }
 
 async fn executor_response(state: &ScriptState, step: usize) -> Result<(&'static str, String)> {
-    if state.scenario == TaskFlowScenario::InterruptedExecutor && step == 0 {
-        return std::future::pending().await;
-    }
-    let step = if state.scenario == TaskFlowScenario::InterruptedExecutor {
-        step - 1
-    } else {
-        step
-    };
     let response = match step {
         0 => (
+            "report_progress(exploring)",
+            tool_call(
+                "executor-progress-exploring",
+                "report_progress",
+                serde_json::json!({
+                    "stage": "exploring",
+                    "summary": "Located the owned path and design contract.",
+                    "nextStep": "Create the required feature file."
+                }),
+            ),
+        ),
+        1 => (
             "apply_patch",
             tool_call(
                 "executor-patch",
@@ -343,7 +367,19 @@ async fn executor_response(state: &ScriptState, step: usize) -> Result<(&'static
                 serde_json::json!({"input": FEATURE_PATCH}),
             ),
         ),
-        1 => (
+        2 => (
+            "report_progress(implementing)",
+            tool_call(
+                "executor-progress-implementing",
+                "report_progress",
+                serde_json::json!({
+                    "stage": "implementing",
+                    "summary": "Created src/feature.txt with the required content.",
+                    "nextStep": "Commit and verify the change."
+                }),
+            ),
+        ),
+        3 => (
             "exec(git add)",
             tool_call(
                 "executor-add",
@@ -351,7 +387,7 @@ async fn executor_response(state: &ScriptState, step: usize) -> Result<(&'static
                 serde_json::json!({"command": "git add -- src/feature.txt"}),
             ),
         ),
-        2 => (
+        4 => (
             "exec(git commit)",
             tool_call(
                 "executor-commit",
@@ -361,7 +397,19 @@ async fn executor_response(state: &ScriptState, step: usize) -> Result<(&'static
                 }),
             ),
         ),
-        3 => {
+        5 => (
+            "report_progress(verifying)",
+            tool_call(
+                "executor-progress-verifying",
+                "report_progress",
+                serde_json::json!({
+                    "stage": "verifying",
+                    "summary": "Committed the exact owned-path change.",
+                    "nextStep": "Report the verified completion for review."
+                }),
+            ),
+        ),
+        6 => {
             let task = current_task(state).await?;
             let work_unit = task
                 .work_units
@@ -370,28 +418,27 @@ async fn executor_response(state: &ScriptState, step: usize) -> Result<(&'static
                 .context("executor work unit is absent from task projection")?;
             let head = git_output(Path::new(&work_unit.worktree_path), &["rev-parse", "HEAD"])?;
             (
-                "submit_delivery",
+                "report_completion",
                 tool_call(
-                    "executor-delivery",
-                    "submit_delivery",
+                    "executor-completion",
+                    "report_completion",
                     serde_json::json!({
-                        "headCommit": head,
-                        "verificationSummary": "offline fixture content committed"
+                        "result": {
+                            "kind": "delivery",
+                            "headCommit": head,
+                            "verificationSummary": "offline fixture content committed"
+                        }
                     }),
                 ),
             )
         }
-        4 => (
-            "final",
-            final_text("executor-complete", "Delivery submitted."),
-        ),
         _ => bail!("unexpected executor request step {step}"),
     };
     Ok(response)
 }
 
 fn reviewer_response(step: usize) -> Result<(&'static str, String)> {
-    let response = match step {
+    let response = match step % 3 {
         0 => (
             "list_files(design)",
             tool_call(
@@ -437,6 +484,26 @@ async fn current_task(state: &ScriptState) -> Result<StudioTaskRuntime> {
         .context("task projection is not available")
 }
 
+async fn executor_agent_id(state: &ScriptState) -> Result<String> {
+    current_task(state)
+        .await?
+        .agents
+        .into_iter()
+        .find(|agent| agent.role == "executor")
+        .map(|agent| agent.agent_id)
+        .context("executor is absent from task projection")
+}
+
+async fn latest_reviewer_agent_id(state: &ScriptState) -> Result<String> {
+    current_task(state)
+        .await?
+        .reviews
+        .into_iter()
+        .rev()
+        .find_map(|review| review.reviewer_agent_id)
+        .context("reviewer is absent from task projection")
+}
+
 async fn next_step(state: &ScriptState, role: ScriptRole) -> usize {
     let mut progress = state.progress.lock().await;
     let next = match role {
@@ -468,7 +535,7 @@ fn request_role(request: &serde_json::Value) -> Result<ScriptRole> {
     if names.contains("wait_agent") {
         bail!("model-visible wait_agent must not be installed");
     }
-    if names.contains("submit_delivery") {
+    if names.contains("report_completion") {
         ensure_fresh_task_child(request, "executor")?;
         return Ok(ScriptRole::Executor);
     }
@@ -549,6 +616,19 @@ fn tool_parameters(tool: &serde_json::Value) -> Option<&serde_json::Value> {
         tool.get("function")
             .and_then(|function| function.get("parameters"))
     })
+}
+
+fn latest_function_call_output(request: &serde_json::Value) -> Option<&str> {
+    request
+        .get("input")?
+        .as_array()?
+        .iter()
+        .rev()
+        .find(|item| {
+            item.get("type").and_then(serde_json::Value::as_str) == Some("function_call_output")
+        })
+        .and_then(|item| item.get("output"))
+        .and_then(serde_json::Value::as_str)
 }
 
 async fn read_json_request(socket: &mut TcpStream) -> Result<serde_json::Value> {

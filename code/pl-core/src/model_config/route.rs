@@ -34,7 +34,7 @@ pub struct ModelRouteConfig {
     pub provider: ProviderId,
     pub model: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reasoning_effort: Option<ReasoningEffort>,
+    pub effort: Option<ReasoningEffort>,
 }
 
 /// 可嵌入任意产品配置文档的模型配置。
@@ -52,7 +52,7 @@ pub struct ResolvedModelRoute {
     pub provider_info: ProviderInfo,
     pub models: Vec<ModelInfo>,
     pub model: ModelInfo,
-    pub reasoning_effort: Option<ReasoningEffort>,
+    pub effort: Option<ReasoningEffort>,
 }
 
 impl AgentModelConfig {
@@ -99,18 +99,33 @@ impl AgentModelConfig {
                     route.provider, route.model
                 ))
             })?;
-        if let Some(effort) = &route.reasoning_effort
-            && !model
-                .supported_efforts()
-                .iter()
-                .any(|candidate| candidate == effort.as_str())
-        {
-            return Err(PureError::ConfigError(format!(
-                "role {role} uses unsupported effort '{}' for model {}.{}",
-                effort.as_str(),
-                route.provider,
-                route.model
-            )));
+        let candidates = model.supported_efforts();
+        match (&route.effort, candidates.is_empty()) {
+            (Some(_), true) => {
+                return Err(PureError::ConfigError(format!(
+                    "role {role} sets effort for model without an effort parameter: {}.{}",
+                    route.provider, route.model
+                )));
+            }
+            (None, false) => {
+                return Err(PureError::ConfigError(format!(
+                    "role {role} must select an effort for model {}.{}",
+                    route.provider, route.model
+                )));
+            }
+            (Some(effort), false)
+                if !candidates
+                    .iter()
+                    .any(|candidate| candidate == effort.as_str()) =>
+            {
+                return Err(PureError::ConfigError(format!(
+                    "role {role} uses unsupported effort '{}' for model {}.{}",
+                    effort.as_str(),
+                    route.provider,
+                    route.model
+                )));
+            }
+            _ => {}
         }
         Ok(ResolvedModelRoute {
             role: role.clone(),
@@ -118,7 +133,7 @@ impl AgentModelConfig {
             provider_info: provider.to_provider_info(&route.model)?,
             models,
             model,
-            reasoning_effort: route.reasoning_effort.clone(),
+            effort: route.effort.clone(),
         })
     }
 }

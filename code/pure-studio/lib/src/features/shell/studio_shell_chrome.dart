@@ -268,12 +268,8 @@ Color _agentStatusColor(HeaderView state, StudioSession session) {
   return StudioColors.sage;
 }
 
-bool _isRunningAgentStatus(String status) => const {
-  'queued',
-  'running',
-  'waiting',
-  'waitingForDelivery',
-}.contains(status);
+bool _isRunningAgentStatus(String status) =>
+    const {'queued', 'running', 'waiting'}.contains(status);
 
 bool _isFaultedAgentStatus(String status) =>
     const {'faulted', 'failed', 'errored', 'error'}.contains(status);

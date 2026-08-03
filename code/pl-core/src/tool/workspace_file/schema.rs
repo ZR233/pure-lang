@@ -49,10 +49,10 @@ impl WorkspaceFileToolKind {
                 "Read a UTF-8 text file by 1-based source lines. Use startLine and nextStartLine for deterministic paging; each call returns at most 500 lines."
             }
             Self::ListFiles => {
-                "List files from the agent workspace with an optional glob and bounded result count. A missing workspace directory returns an empty list."
+                "List descendants from the agent workspace with an optional glob and bounded result count. Omit path or use `.` for the workspace root. A missing or empty workspace directory returns an empty list."
             }
             Self::SearchFiles => {
-                "Search workspace file contents and return structured matches with path, line, column, and text."
+                "Search workspace file contents using the required query field and return structured matches with path, line, column, and text."
             }
             Self::ApplyPatch => {
                 "Apply a Codex-style patch to workspace files. The input field must contain a complete patch beginning with *** Begin Patch and ending with *** End Patch."
@@ -88,7 +88,7 @@ impl WorkspaceFileToolKind {
                     "glob",
                     json!({
                         "type": "string",
-                        "description": "Optional file glob filter, such as `*.rs`."
+                        "description": "Optional file glob filter, such as `*.rs`. Omitted or blank uses `*`."
                     }),
                     false,
                 ),
@@ -119,7 +119,7 @@ impl WorkspaceFileToolKind {
                     "query",
                     json!({
                         "type": "string",
-                        "description": "Text or pattern to search for."
+                        "description": "Literal text or regular expression to search for. This required field is named query."
                     }),
                     true,
                 ),

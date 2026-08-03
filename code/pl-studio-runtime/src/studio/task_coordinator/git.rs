@@ -20,13 +20,8 @@ pub(super) struct WorktreeChangeInspection {
     pub(super) changed_file_count: u32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ExecutorRecoveryInspection {
-    NoDelivery,
-    Recoverable,
-}
-
 const INITIAL_COMMIT_MESSAGE: &str = "chore: initialize Pure Studio workspace";
+const MINIMUM_ABBREVIATED_COMMIT_LENGTH: usize = 7;
 pub(super) const STUDIO_GIT_NAME_CONFIG: &str = "user.name=Pure Studio";
 pub(super) const STUDIO_GIT_EMAIL_CONFIG: &str = "user.email=pure-studio@local";
 const TASK_RUNTIME_EXCLUDES: &[&str] = &[".pure/worktrees/", "target/pure/"];
@@ -148,26 +143,40 @@ pub(super) async fn is_ancestor(
     .context("git ancestry inspection task failed")?
 }
 
-pub(super) async fn inspect_executor_recovery(
+pub(super) async fn resolve_commit_oid(
     path: impl AsRef<Path>,
-    base_commit: &str,
-) -> Result<ExecutorRecoveryInspection> {
+    abbreviated_oid: &str,
+) -> Result<String> {
     let path = path.as_ref().to_path_buf();
-    let base_commit = base_commit.to_string();
+    let abbreviated_oid = abbreviated_oid.trim().to_ascii_lowercase();
+    if abbreviated_oid.len() < MINIMUM_ABBREVIATED_COMMIT_LENGTH
+        || !abbreviated_oid.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        bail!(
+            "headCommit must be a hexadecimal commit id or an unambiguous abbreviation of at least {MINIMUM_ABBREVIATED_COMMIT_LENGTH} characters"
+        );
+    }
     tokio::task::spawn_blocking(move || {
-        let head = git_output(&path, &["rev-parse", "HEAD"])?;
-        let status = git_output(
+        let commit_revision = format!("{abbreviated_oid}^{{commit}}");
+        let resolved = git_output(
             &path,
-            &["status", "--porcelain=v1", "--untracked-files=all"],
-        )?;
-        Ok(if head != base_commit || !status.is_empty() {
-            ExecutorRecoveryInspection::Recoverable
-        } else {
-            ExecutorRecoveryInspection::NoDelivery
-        })
+            &[
+                "rev-parse",
+                "--verify",
+                "--end-of-options",
+                &commit_revision,
+            ],
+        )
+        .with_context(|| {
+            format!("headCommit `{abbreviated_oid}` is not an unambiguous commit id")
+        })?;
+        if !resolved.starts_with(&abbreviated_oid) {
+            bail!("headCommit `{abbreviated_oid}` does not identify a commit by object id");
+        }
+        Ok(resolved)
     })
     .await
-    .context("executor delivery recovery inspection task failed")?
+    .context("git commit resolution task failed")?
 }
 
 pub(super) async fn inspect_worktree_changes(

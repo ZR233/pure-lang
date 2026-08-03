@@ -2,7 +2,7 @@
 
 ## 动机
 
-未启用 Studio worktree lifecycle 时，subagent（`AgentRuntime` 管理的 child actor）与父 agent 共享同一个
+未启用 Studio worktree lifecycle 时，subagent（`AgentRuntime` 管理的 child AgentLoop）与父 agent 共享同一个
 `workspace_root`，所有 file / git / lsp 工具在同一目录操作，仅靠进程内写锁做软隔离。
 这带来三个问题：
 
@@ -11,8 +11,9 @@
 - 没有「交付 → 合并」的结构化边界，父 agent 难以审查 subagent 的修改后再决定是否接受。
 
 本设计为每个 subagent 分配独立的 git worktree，使其修改物理隔离。Task executor
-必须显式提交 delivery；planner 消费结果后再选择 merge 或 discard。worktree 在交付
-被合并、丢弃或任务终结后释放，不再与单次 agent turn 终态绑定。
+必须通过 `report_completion` 创建不可变 completion；delivery reviewer 通过后，planner
+显式关闭 executor 并 merge。worktree 在交付被合并、明确丢弃或任务终结后释放，不再与
+单次 agent turn 终态绑定。
 
 Task executor 只能由 `task_spawn_executor { taskName, message, ownedPaths }` 创建。
 `ownedPaths` 是强类型工具输入和 lifecycle 最终不变量，不再接受模型通过通用
@@ -55,8 +56,7 @@ Studio Task policy 显式提供 repo root 时才为 subagent 分配 worktree。�
 `workspace_root` 解析出的 repo root，不扫描或清理磁盘；孤儿对账只属于 Studio 启动恢复。
 
 每个 durable `WorkUnit` 还保存 typed `worktreeDisposition = protect |
-cleanupRequested`。默认与 legacy 回填均为 `protect`；migration 只有在旧记录存在精确
-`executor discarded by planner` 证据时才可回填 `cleanupRequested`。普通 Cancelled、
+cleanupRequested`。新记录默认 `protect`；v10 不导入旧记录或运行 backfill。普通 Cancelled、
 Failed、blocked 或无证据的 terminal 记录继续保护，不能把状态枚举本身当成删除授权。
 Task executor discard 必须在释放物理资源之前事务性持久化 `cleanupRequested`；即使
 WorkUnit 已经 Failed/Cancelled，也必须幂等记录这次明确授权。
@@ -77,19 +77,27 @@ WorkUnit 已经 Failed/Cancelled，也必须幂等记录这次明确授权。
 ## 生命周期状态机
 
 ```
-spawn -> running -> waitingForDelivery -> delivered -> planner merge -> released
-                                   \-> discard / task terminal -> released
+spawn -> running -> awaitingCompletion -> readyForReview
+                    ^                    |
+                    |                    v
+                    +---- changesRequested
+                                         |
+                                         v
+                                   approved -> close(preserve) -> planner merge -> released
+                                         \-> noDelivery -> close(discard) -> released
 
 released = git worktree remove + 删除分支 + 清空 durable lifecycle resource
 ```
 
 要点：
 
-- worktree 生命周期 = agent 生命周期。`close_agent` 是唯一释放点，且必须带
-  `CloseDisposition`。单次 turn 完成不释放 worktree（agent 可经 `send_input`
-  多轮），与既有「turn 完成 ≠ agent 释放」语义一致。
+- 单次 turn 完成不释放 worktree（agent 可经 `send_message` 多轮），与既有
+  「turn 完成 ≠ agent 释放」语义一致。approved executor 关闭后进入
+  `PreserveForMerge`，由成功 merge 清理；noDelivery、明确 discard 与已合并资源才允许
+  走 cleanup。
 - runtime 不兜底 `git add -A` 或 commit。executor 必须自行提交并用
-  `submit_delivery` 交付干净 worktree；planner 通过 task coordinator 合并。
+  `report_completion` 报告干净 worktree 与验证摘要；delivery reviewer 通过后 planner
+  才能关闭 executor 并交给 task coordinator 合并。
 - `close(Discard)` 或级联关闭：`git worktree remove --force` + 删除 subagent 分支。
 - spawn 失败回滚（包括 worktree 创建部分成功、持久化激活失败或
   `start_agent_turn` 失败）必须同步尝试移除 worktree、删除分支并撤销宿主生命周期
@@ -117,8 +125,9 @@ released = git worktree remove + 删除分支 + 清空 durable lifecycle resourc
 启动对账必须逐个 leaf registration/path/branch 精确处理，禁止递归删除
 `.pure/worktrees/<taskRunId>` 父目录：
 
-- active、blocked、因重启收束为 cancelled、delivered 以及 disposition=`protect` 的资源
-  继续保护；只有 disposition=`cleanupRequested` 的 leaf 才进入 cleanup-pending 重试。
+- active、blocked、因重启收束为 cancelled、awaitingCompletion、readyForReview、
+  reviewing、changesRequested、approved 以及 disposition=`protect` 的资源继续保护；
+  只有 disposition=`cleanupRequested` 的 leaf 才进入 cleanup-pending 重试。
 - 没有 durable owner 的 leaf 只能在完整 ownership snapshot 已建立后按孤儿策略处理；
   durable owner 已终态但未明确授权时仍禁止删除。
 - durable 记录声明资源存在而 registration、path、branch 部分缺失时，关联 run 进入
@@ -126,7 +135,8 @@ released = git worktree remove + 删除分支 + 清空 durable lifecycle resourc
   Runtime Ready。
 - `Pending/Queued` allocation 事务可能先于 worktree create 落盘；重启时仅这一 typed
   creation state 允许 registration、path、branch 三者全部不存在。三者全部存在仍保护，
-  任意部分存在仍 block。`Running`、`WaitingForDelivery`、`Delivered` 不允许 all-absent。
+  任意部分存在仍 block。`Running`、`AwaitingCompletion`、`ReadyForReview`、
+  `Reviewing`、`ChangesRequested`、`Approved` 不允许 all-absent。
 - 对账幂等；重复启动不得误删已保护资源，也不得重新报告已经观察过的 terminal 事件。
 - 启动先读取完整 durable ownership snapshot，再解析全部已知 Task workspace 的 canonical
   Git common directory，并按 common
@@ -134,7 +144,7 @@ released = git worktree remove + 删除分支 + 清空 durable lifecycle resourc
   canonical `.pure/worktrees` root。只有 blocked、terminal 或 cleanup-pending 记录时也必须
   执行；active run 只有在所属 common-directory group 对账成功后才能进入 Recovery
   continuation。任何已知 workspace（包括仅有 terminal owner 的 workspace）无法完成 Git
-  identity 预检时，该 common-directory group 不执行 GC、不发布 continuation，并产生对应
+  identity 预检时，该 common-directory group 不执行 GC、不恢复 agent，并产生对应
   项目/会话 issue；其他已完整识别 owner 且通过预检的安全 group 可以继续。SQLite、schema
   或完整 ownership snapshot 本身无法读取时才是应用致命错误。
 - inventory、registration remove、leaf remove 每一步都重新拒绝 symlink、Windows junction

@@ -182,7 +182,7 @@ return closed();case _:
 
 class BridgeProductStreamEnvelope_Data extends BridgeProductStreamEnvelope {
   const BridgeProductStreamEnvelope_Data({required this.event}): super._();
-  
+
 
  final  BridgeProductEventEnvelope event;
 
@@ -248,7 +248,7 @@ as BridgeProductEventEnvelope,
 
 class BridgeProductStreamEnvelope_Failure extends BridgeProductStreamEnvelope {
   const BridgeProductStreamEnvelope_Failure({required this.error}): super._();
-  
+
 
  final  BridgeError error;
 
@@ -314,7 +314,7 @@ as BridgeError,
 
 class BridgeProductStreamEnvelope_Closed extends BridgeProductStreamEnvelope {
   const BridgeProductStreamEnvelope_Closed(): super._();
-  
+
 
 
 
@@ -512,7 +512,7 @@ return closed();case _:
 
 class BridgeSessionStreamEnvelope_Data extends BridgeSessionStreamEnvelope {
   const BridgeSessionStreamEnvelope_Data({required this.frame}): super._();
-  
+
 
  final  BridgeSessionStreamFrame frame;
 
@@ -575,7 +575,7 @@ as BridgeSessionStreamFrame,
 @override
 @pragma('vm:prefer-inline')
 $BridgeSessionStreamFrameCopyWith<$Res> get frame {
-  
+
   return $BridgeSessionStreamFrameCopyWith<$Res>(_self.frame, (value) {
     return _then(_self.copyWith(frame: value));
   });
@@ -587,7 +587,7 @@ $BridgeSessionStreamFrameCopyWith<$Res> get frame {
 
 class BridgeSessionStreamEnvelope_Failure extends BridgeSessionStreamEnvelope {
   const BridgeSessionStreamEnvelope_Failure({required this.error}): super._();
-  
+
 
  final  BridgeError error;
 
@@ -653,7 +653,7 @@ as BridgeError,
 
 class BridgeSessionStreamEnvelope_Closed extends BridgeSessionStreamEnvelope {
   const BridgeSessionStreamEnvelope_Closed(): super._();
-  
+
 
 
 

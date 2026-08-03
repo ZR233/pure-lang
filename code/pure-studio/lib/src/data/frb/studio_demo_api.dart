@@ -557,14 +557,42 @@ class DemoStudioApi implements StudioApi {
   }) => _sessionEvents.stream;
 
   @override
-  Future<void> submitPrompt(
+  Future<SubmitPromptReceipt> resumeTask(String sessionId) async {
+    _promptGenerations.update(
+      sessionId,
+      (value) => value + 1,
+      ifAbsent: () => 1,
+    );
+    final now = DateTime.now();
+    final turnId = 'demo-turn-$_eventSequence';
+    final receipt = SubmitPromptReceipt(
+      sessionId: sessionId,
+      turnId: turnId,
+      cursor: _eventSequence,
+    );
+    _emitSessionEvent(
+      sessionId: sessionId,
+      payload: TurnChangedPayload(
+        turn: StudioTurnView(
+          turnId: turnId,
+          sessionId: sessionId,
+          state: const StudioTurnState.inProgress(StudioTurnActivity.preparing),
+          updatedAt: now,
+        ),
+      ),
+    );
+    return receipt;
+  }
+
+  @override
+  Future<SubmitPromptReceipt> submitPrompt(
     String sessionId,
     String prompt,
     List<String> attachmentIds,
   ) async {
     final trimmed = prompt.trim();
     if (trimmed.isEmpty) {
-      return;
+      throw Exception('prompt is empty');
     }
     final promptGeneration = _promptGenerations.update(
       sessionId,
@@ -573,6 +601,11 @@ class DemoStudioApi implements StudioApi {
     );
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final turnId = 'demo-turn-$_eventSequence';
+    final receipt = SubmitPromptReceipt(
+      sessionId: sessionId,
+      turnId: turnId,
+      cursor: _eventSequence,
+    );
     final userMessageId = 'demo-user-$_eventSequence';
     _emitSessionEvent(
       sessionId: sessionId,
@@ -617,7 +650,7 @@ class DemoStudioApi implements StudioApi {
     );
     await Future<void>.delayed(promptStartDelay);
     if (_promptGenerations[sessionId] != promptGeneration) {
-      return;
+      return receipt;
     }
     final assistantMessageId = 'demo-assistant-$_eventSequence';
     _emitSessionEvent(
@@ -651,7 +684,7 @@ class DemoStudioApi implements StudioApi {
     );
     await Future<void>.delayed(promptActivityDelay);
     if (_promptGenerations[sessionId] != promptGeneration) {
-      return;
+      return receipt;
     }
     _emitSessionEvent(
       sessionId: sessionId,
@@ -667,7 +700,7 @@ class DemoStudioApi implements StudioApi {
     );
     await Future<void>.delayed(promptActivityDelay);
     if (_promptGenerations[sessionId] != promptGeneration) {
-      return;
+      return receipt;
     }
     _emitSessionEvent(
       sessionId: sessionId,
@@ -708,7 +741,7 @@ class DemoStudioApi implements StudioApi {
     );
     await Future<void>.delayed(promptActivityDelay);
     if (_promptGenerations[sessionId] != promptGeneration) {
-      return;
+      return receipt;
     }
     _emitSessionEvent(
       sessionId: sessionId,
@@ -768,7 +801,7 @@ class DemoStudioApi implements StudioApi {
     );
     await Future<void>.delayed(promptToolDelay);
     if (_promptGenerations[sessionId] != promptGeneration) {
-      return;
+      return receipt;
     }
     unawaited(
       Future<void>.delayed(Duration.zero, () {
@@ -843,6 +876,7 @@ class DemoStudioApi implements StudioApi {
         );
       }),
     );
+    return receipt;
   }
 
   @override

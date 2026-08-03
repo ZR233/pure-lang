@@ -10,9 +10,10 @@ Use this skill when the user asks for subagents, parallel exploration, multi-cra
 
 ## When To Spawn
 
-Use `spawn_agent` for managed asynchronous work. The runtime subscribes the parent to direct-child
-updates and starts a merged continuation when progress, attention, a usable terminal contract, or an
-inactivity timeout requires coordination. Use `list_agents` only when the current state is unclear.
+Use `spawn_agent` for managed asynchronous work. Children report meaningful checkpoints with
+`report_progress`; the runtime never wakes the parent, starts a continuation, or infers failure from
+silence. Use `list_agents` to read canonical summaries and `wait_agents` when the parent has no other
+work.
 
 Avoid subagents when the task is small, strongly sequential, or requires one shared edit context.
 
@@ -20,7 +21,9 @@ If the active product exposes a dedicated role or workflow spawn tool, use that 
 managed role instead of emulating it with generic `spawn_agent` metadata. Product tools may enforce
 resource ownership, worktrees, delivery contracts, review authorization, or fresh-session rules that
 generic collaboration does not model. In Pure Studio Task mode, use `spawn_agent` only for
-explorers, `task_spawn_executor` for executors, and `task_request_review` for reviewers.
+explorers and `task_spawn_executor` for executors. Request review with
+`task_request_delivery_review` for an exact executor completion or
+`task_request_integrated_review` for the current integrated Task HEAD.
 
 ## Partitioning
 
@@ -39,15 +42,18 @@ The parent owns coordination:
 
 1. Spawn only the agents needed.
 2. Continue independent parent work while children run.
-3. End the current turn when no executable parent work remains; do not poll child state.
-4. On a subscribed continuation, use the attached canonical snapshots and `list_agents` only if
-   additional tree context is needed.
-5. Reconcile conflicts in child findings.
-6. Produce the final answer or implementation plan.
+3. When no executable parent work remains, call `wait_agents`; do not poll `list_agents`.
+4. After a wait returns, call `list_agents` or a product status tool to read canonical state.
+5. If a child has not updated its progress for five minutes, use `read_agent_session` only as bounded
+   evidence before deciding whether to `send_message` with a concrete alternative or
+   `interrupt_agent`.
+6. Reconcile conflicts in child findings.
+7. Close agents only when their work is no longer needed; in Task mode, follow the product review and
+   merge contract before closing an executor.
 
 ## Capacity Failures
 
-If `spawn_agent` or `send_input` returns a structured capacity error, stop spawning or retrying child agents. Continue the remaining task in the parent agent and explain that provider or agent capacity limited subagent execution only when relevant.
+If `spawn_agent` or `send_message` returns a structured capacity error, stop spawning or retrying child agents. Continue the remaining task in the parent agent and explain that provider or agent capacity limited subagent execution only when relevant.
 
 ## Validation Pattern
 

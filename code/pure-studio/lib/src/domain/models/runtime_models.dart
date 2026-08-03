@@ -1,3 +1,5 @@
+import 'agent_models.dart';
+
 class SessionRuntimeView {
   const SessionRuntimeView({
     required this.model,
@@ -64,6 +66,7 @@ class TaskRuntimeView {
     required this.taskGeneration,
     required this.workUnits,
     required this.agents,
+    required this.completions,
     required this.merges,
     required this.reviews,
   });
@@ -78,6 +81,7 @@ class TaskRuntimeView {
   final int taskGeneration;
   final List<TaskWorkUnitView> workUnits;
   final List<TaskAgentOutcomeView> agents;
+  final List<TaskCompletionView> completions;
   final List<TaskMergeView> merges;
   final List<TaskReviewView> reviews;
 
@@ -113,6 +117,11 @@ class TaskAgentOutcomeView {
     required this.summary,
     required this.error,
     required this.headCommit,
+    required this.lifecycle,
+    required this.activity,
+    required this.progress,
+    required this.updatedAt,
+    required this.summaryAgeSeconds,
   });
 
   final String agentId;
@@ -123,6 +132,45 @@ class TaskAgentOutcomeView {
   final String? summary;
   final String? error;
   final String? headCommit;
+  final String? lifecycle;
+  final String? activity;
+  final AgentProgressView? progress;
+  final DateTime updatedAt;
+  final int summaryAgeSeconds;
+}
+
+class TaskCompletionView {
+  const TaskCompletionView({
+    required this.id,
+    required this.workUnitId,
+    required this.executorAgentId,
+    required this.revision,
+    required this.kind,
+    required this.status,
+    required this.baseCommit,
+    required this.headCommit,
+    required this.changedFiles,
+    required this.verificationSummary,
+    required this.worktreePath,
+    required this.branch,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+
+  final String id;
+  final String workUnitId;
+  final String executorAgentId;
+  final int revision;
+  final String kind;
+  final String status;
+  final String baseCommit;
+  final String? headCommit;
+  final List<String> changedFiles;
+  final String verificationSummary;
+  final String worktreePath;
+  final String branch;
+  final DateTime createdAt;
+  final DateTime updatedAt;
 }
 
 class TaskMergeView {
@@ -145,18 +193,61 @@ class TaskMergeView {
 
 class TaskReviewView {
   const TaskReviewView({
+    required this.id,
     required this.round,
-    required this.headCommit,
+    required this.scope,
+    required this.workUnitId,
+    required this.completionId,
+    required this.completionRevision,
+    required this.reviewedHead,
     required this.verdict,
+    required this.requestedByCallId,
     required this.reviewerAgentId,
     required this.summary,
     required this.designReferences,
+    required this.findings,
+    required this.createdAt,
+    required this.updatedAt,
   });
 
+  final String id;
   final int round;
-  final String headCommit;
+  final String scope;
+  final String? workUnitId;
+  final String? completionId;
+  final int? completionRevision;
+  final String reviewedHead;
   final String verdict;
+  final String requestedByCallId;
   final String? reviewerAgentId;
   final String? summary;
-  final List<String> designReferences;
+  final List<TaskDesignReferenceView> designReferences;
+  final List<TaskReviewFindingView> findings;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+}
+
+class TaskDesignReferenceView {
+  const TaskDesignReferenceView({required this.path, required this.section});
+
+  final String path;
+  final String section;
+}
+
+class TaskReviewFindingView {
+  const TaskReviewFindingView({
+    required this.severity,
+    required this.title,
+    required this.body,
+    required this.path,
+    required this.line,
+    required this.designReferences,
+  });
+
+  final String severity;
+  final String title;
+  final String body;
+  final String? path;
+  final int? line;
+  final List<TaskDesignReferenceView> designReferences;
 }

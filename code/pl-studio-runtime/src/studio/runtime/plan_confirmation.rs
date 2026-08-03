@@ -107,7 +107,7 @@ impl StudioRuntime {
                             prompt,
                             attachment_ids: Vec::new(),
                             options: StudioSubmitPromptOptions {
-                                presentation: pl_core::MailboxPresentation::SyntheticHidden,
+                                presentation: pl_core::MailboxPresentation::Hidden,
                                 lifecycle: Some(StudioPlanImplementationLifecycle {
                                     session_id: session_id.clone(),
                                     plan_id: plan_id.clone(),

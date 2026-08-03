@@ -2,23 +2,22 @@ use std::collections::BTreeMap;
 
 use tokio::sync::{mpsc, oneshot};
 
-use super::actor::{ActorCommand, AgentActorHandle, spawn_agent_actor};
-use super::event_hub::AgentEventHubHandle;
+use super::agent_loop::{AgentLoopCommand, AgentLoopHandle, spawn_agent_loop};
+use super::directory::AgentDirectoryHandle;
 use super::host::{AgentCommitObserver, AgentLifecycleAdapter, AgentStateRepository};
 use super::runtime::{AgentRuntimeOptions, RestoredInputPolicy};
 use super::state::{AgentRuntimeError, unix_timestamp};
 use super::{
     AgentCommit, AgentCommitOutcome, AgentCommittedEvent, AgentCurrentSessionSubmitRequest,
-    AgentId, AgentRegistration, AgentRuntimeEvent, AgentRuntimeEventKind, AgentRuntimeHandle,
-    AgentRuntimeHost, AgentRuntimeResult, AgentSnapshot, AgentSpawnRequest, AgentSpawnResult,
-    AgentSubmitRequest, PendingAgentInput, RestoredAgentRuntime, SpawnLifecycleRequest, TurnId,
+    AgentId, AgentProgressCheckpoint, AgentProgressStage, AgentRegistration, AgentRuntimeEvent,
+    AgentRuntimeEventKind, AgentRuntimeHandle, AgentRuntimeHost, AgentRuntimeResult,
+    AgentSessionDigest, AgentSnapshot, AgentSpawnRequest, AgentSpawnResult, AgentSubmitRequest,
+    PendingAgentInput, RestoredAgentRuntime, SpawnLifecycleRequest, TurnId,
 };
 use crate::SessionEventHub;
 
 mod spawn;
-mod waiting_agents;
 use spawn::{register_agent, spawn_child_agent};
-use waiting_agents::spawn_waiting_agents_supervisor;
 
 pub(crate) enum CoordinatorCommand {
     Register {
@@ -55,16 +54,22 @@ pub(crate) enum CoordinatorCommand {
         checkpoint: super::AgentTurnCheckpoint,
         reply: oneshot::Sender<AgentRuntimeResult<()>>,
     },
-    OpenSession {
-        agent_id: AgentId,
-        session: super::AgentSessionState,
-        reply: oneshot::Sender<AgentRuntimeResult<()>>,
-    },
     RecordSessionFacts {
         agent_id: AgentId,
         session_id: super::SessionId,
         facts: Vec<crate::SessionEventFact>,
         reply: oneshot::Sender<AgentRuntimeResult<()>>,
+    },
+    ReportProgress {
+        agent_id: AgentId,
+        stage: AgentProgressStage,
+        summary: String,
+        next_step: String,
+        reply: oneshot::Sender<AgentRuntimeResult<AgentProgressCheckpoint>>,
+    },
+    ReadSession {
+        agent_id: AgentId,
+        reply: oneshot::Sender<AgentRuntimeResult<AgentSessionDigest>>,
     },
     Close {
         agent_id: AgentId,
@@ -74,24 +79,8 @@ pub(crate) enum CoordinatorCommand {
         agent_id: AgentId,
         reply: oneshot::Sender<AgentRuntimeResult<AgentSnapshot>>,
     },
-    WakeAccepted {
-        agent_id: AgentId,
-        wake_id: Option<super::AgentWakeId>,
-        signal_ids: Vec<String>,
-        reply: oneshot::Sender<AgentRuntimeResult<bool>>,
-    },
-    AcceptWakeSignals {
-        agent_id: AgentId,
-        turn_id: TurnId,
-        signal_ids: Vec<String>,
-        reply: oneshot::Sender<AgentRuntimeResult<()>>,
-    },
     List {
         reply: oneshot::Sender<AgentRuntimeResult<Vec<AgentSnapshot>>>,
-    },
-    EnterWaitingAgents {
-        agent_id: AgentId,
-        reply: oneshot::Sender<AgentRuntimeResult<()>>,
     },
     StartRestoredInputs {
         reply: oneshot::Sender<AgentRuntimeResult<()>>,
@@ -111,15 +100,15 @@ where
     H: AgentRuntimeHost,
 {
     let (sender, receiver) = mpsc::channel(options.command_capacity.max(1));
-    let agent_events =
-        AgentEventHubHandle::new(restored.iter().map(|agent| agent.state.snapshot.clone()));
-    let handle = AgentRuntimeHandle::new(sender, session_events.handle(), agent_events);
+    let directory =
+        AgentDirectoryHandle::new(restored.iter().map(|agent| agent.state.snapshot.clone()));
+    let handle = AgentRuntimeHandle::new(sender, session_events.handle(), directory);
     let mut actors = BTreeMap::new();
     for restored_agent in restored {
         let id = restored_agent.state.snapshot.identity.id.clone();
         actors.insert(
             id,
-            spawn_agent_actor(
+            spawn_agent_loop(
                 host.clone(),
                 restored_agent.state,
                 handle.clone(),
@@ -136,14 +125,13 @@ where
         receiver,
         options,
     ));
-    spawn_waiting_agents_supervisor(handle.clone(), options.child_inactivity_timeout);
     Ok(handle)
 }
 
 async fn run_coordinator<H>(
     host: H,
     runtime: AgentRuntimeHandle,
-    mut actors: BTreeMap<AgentId, AgentActorHandle>,
+    mut actors: BTreeMap<AgentId, AgentLoopHandle>,
     mut receiver: mpsc::Receiver<CoordinatorCommand>,
     options: AgentRuntimeOptions,
 ) where
@@ -164,7 +152,12 @@ async fn run_coordinator<H>(
                 request,
                 reply,
             } => {
-                route(&actors, &agent_id, ActorCommand::Submit { request, reply }).await;
+                route(
+                    &actors,
+                    &agent_id,
+                    AgentLoopCommand::Submit { request, reply },
+                )
+                .await;
             }
             CoordinatorCommand::SubmitCurrentSession {
                 agent_id,
@@ -181,7 +174,7 @@ async fn run_coordinator<H>(
                 route(
                     &actors,
                     &agent_id,
-                    ActorCommand::SubmitCurrentSession {
+                    AgentLoopCommand::SubmitCurrentSession {
                         root_agent_id,
                         request,
                         reply,
@@ -202,7 +195,7 @@ async fn run_coordinator<H>(
                 route(
                     &actors,
                     &agent_id,
-                    ActorCommand::CancelTurn { turn_id, reply },
+                    AgentLoopCommand::CancelTurn { turn_id, reply },
                 )
                 .await;
             }
@@ -215,7 +208,7 @@ async fn run_coordinator<H>(
                 route(
                     &actors,
                     &agent_id,
-                    ActorCommand::SetActivity {
+                    AgentLoopCommand::SetActivity {
                         turn_id,
                         activity,
                         reply,
@@ -231,19 +224,7 @@ async fn run_coordinator<H>(
                 route(
                     &actors,
                     &agent_id,
-                    ActorCommand::Checkpoint { checkpoint, reply },
-                )
-                .await;
-            }
-            CoordinatorCommand::OpenSession {
-                agent_id,
-                session,
-                reply,
-            } => {
-                route(
-                    &actors,
-                    &agent_id,
-                    ActorCommand::OpenSession { session, reply },
+                    AgentLoopCommand::Checkpoint { checkpoint, reply },
                 )
                 .await;
             }
@@ -256,7 +237,7 @@ async fn run_coordinator<H>(
                 route(
                     &actors,
                     &agent_id,
-                    ActorCommand::RecordSessionFacts {
+                    AgentLoopCommand::RecordSessionFacts {
                         session_id,
                         facts,
                         reply,
@@ -264,60 +245,40 @@ async fn run_coordinator<H>(
                 )
                 .await;
             }
+            CoordinatorCommand::ReportProgress {
+                agent_id,
+                stage,
+                summary,
+                next_step,
+                reply,
+            } => {
+                route(
+                    &actors,
+                    &agent_id,
+                    AgentLoopCommand::ReportProgress {
+                        stage,
+                        summary,
+                        next_step,
+                        reply,
+                    },
+                )
+                .await;
+            }
+            CoordinatorCommand::ReadSession { agent_id, reply } => {
+                route(&actors, &agent_id, AgentLoopCommand::ReadSession { reply }).await;
+            }
             CoordinatorCommand::Close { agent_id, reply } => {
                 let result = close_agent_tree(&actors, &agent_id).await;
                 let _ = reply.send(result);
             }
             CoordinatorCommand::Snapshot { agent_id, reply } => {
-                route(&actors, &agent_id, ActorCommand::Snapshot { reply }).await;
-            }
-            CoordinatorCommand::WakeAccepted {
-                agent_id,
-                wake_id,
-                signal_ids,
-                reply,
-            } => {
-                route(
-                    &actors,
-                    &agent_id,
-                    ActorCommand::WakeAccepted {
-                        wake_id,
-                        signal_ids,
-                        reply,
-                    },
-                )
-                .await;
-            }
-            CoordinatorCommand::AcceptWakeSignals {
-                agent_id,
-                turn_id,
-                signal_ids,
-                reply,
-            } => {
-                route(
-                    &actors,
-                    &agent_id,
-                    ActorCommand::AcceptWakeSignals {
-                        turn_id,
-                        signal_ids,
-                        reply,
-                    },
-                )
-                .await;
-            }
-            CoordinatorCommand::EnterWaitingAgents { agent_id, reply } => {
-                route(
-                    &actors,
-                    &agent_id,
-                    ActorCommand::EnterWaitingAgents { reply },
-                )
-                .await;
-            }
-            CoordinatorCommand::StartRestoredInputs { reply } => {
-                let _ = reply.send(start_pending_inputs(&actors).await);
+                route(&actors, &agent_id, AgentLoopCommand::Snapshot { reply }).await;
             }
             CoordinatorCommand::List { reply } => {
                 let _ = reply.send(list_snapshots(&actors).await);
+            }
+            CoordinatorCommand::StartRestoredInputs { reply } => {
+                let _ = reply.send(start_pending_inputs(&actors).await);
             }
             CoordinatorCommand::Shutdown { reply } => {
                 let result = shutdown_agents(&actors).await;
@@ -329,15 +290,15 @@ async fn run_coordinator<H>(
     }
     for actor in actors.values() {
         let (reply, _receiver) = oneshot::channel();
-        let _ = actor.send(ActorCommand::Shutdown { reply }).await;
+        let _ = actor.send(AgentLoopCommand::Shutdown { reply }).await;
     }
 }
 
-async fn shutdown_agents(actors: &BTreeMap<AgentId, AgentActorHandle>) -> AgentRuntimeResult<()> {
+async fn shutdown_agents(actors: &BTreeMap<AgentId, AgentLoopHandle>) -> AgentRuntimeResult<()> {
     let mut first_error = None;
     for actor in actors.values() {
         let (reply, receiver) = oneshot::channel();
-        let result = match actor.send(ActorCommand::Shutdown { reply }).await {
+        let result = match actor.send(AgentLoopCommand::Shutdown { reply }).await {
             Ok(()) => receiver
                 .await
                 .map_err(|_| AgentRuntimeError::ChannelClosed)
@@ -352,12 +313,12 @@ async fn shutdown_agents(actors: &BTreeMap<AgentId, AgentActorHandle>) -> AgentR
 }
 
 async fn start_pending_inputs(
-    actors: &BTreeMap<AgentId, AgentActorHandle>,
+    actors: &BTreeMap<AgentId, AgentLoopHandle>,
 ) -> AgentRuntimeResult<()> {
     for actor in actors.values() {
         let (reply, receiver) = oneshot::channel();
         actor
-            .send(ActorCommand::StartPendingInputs { reply })
+            .send(AgentLoopCommand::StartPendingInputs { reply })
             .await?;
         receiver
             .await
@@ -367,21 +328,21 @@ async fn start_pending_inputs(
 }
 
 async fn snapshot_for(
-    actors: &BTreeMap<AgentId, AgentActorHandle>,
+    actors: &BTreeMap<AgentId, AgentLoopHandle>,
     agent_id: &AgentId,
 ) -> AgentRuntimeResult<AgentSnapshot> {
     let actor = actors
         .get(agent_id)
         .ok_or_else(|| AgentRuntimeError::NotFound(agent_id.clone()))?;
     let (reply, receiver) = oneshot::channel();
-    actor.send(ActorCommand::Snapshot { reply }).await?;
+    actor.send(AgentLoopCommand::Snapshot { reply }).await?;
     receiver
         .await
         .map_err(|_| AgentRuntimeError::ChannelClosed)?
 }
 
 async fn close_agent_tree(
-    actors: &BTreeMap<AgentId, AgentActorHandle>,
+    actors: &BTreeMap<AgentId, AgentLoopHandle>,
     agent_id: &AgentId,
 ) -> AgentRuntimeResult<AgentSnapshot> {
     let snapshots = list_snapshots(actors).await?;
@@ -426,7 +387,7 @@ async fn close_agent_tree(
 }
 
 async fn root_agent_id_for(
-    actors: &BTreeMap<AgentId, AgentActorHandle>,
+    actors: &BTreeMap<AgentId, AgentLoopHandle>,
     agent_id: &AgentId,
 ) -> AgentRuntimeResult<AgentId> {
     let snapshots = list_snapshots(actors).await?;
@@ -483,23 +444,23 @@ fn has_ancestor(
 }
 
 async fn close_actor(
-    actors: &BTreeMap<AgentId, AgentActorHandle>,
+    actors: &BTreeMap<AgentId, AgentLoopHandle>,
     agent_id: &AgentId,
 ) -> AgentRuntimeResult<AgentSnapshot> {
     let actor = actors
         .get(agent_id)
         .ok_or_else(|| AgentRuntimeError::NotFound(agent_id.clone()))?;
     let (reply, receiver) = oneshot::channel();
-    actor.send(ActorCommand::Close { reply }).await?;
+    actor.send(AgentLoopCommand::Close { reply }).await?;
     receiver
         .await
         .map_err(|_| AgentRuntimeError::ChannelClosed)?
 }
 
 async fn route(
-    actors: &BTreeMap<AgentId, AgentActorHandle>,
+    actors: &BTreeMap<AgentId, AgentLoopHandle>,
     agent_id: &AgentId,
-    command: ActorCommand,
+    command: AgentLoopCommand,
 ) {
     let Some(actor) = actors.get(agent_id) else {
         reject_missing(command, agent_id.clone());
@@ -510,59 +471,53 @@ async fn route(
     }
 }
 
-fn reject_missing(command: ActorCommand, agent_id: AgentId) {
+fn reject_missing(command: AgentLoopCommand, agent_id: AgentId) {
     let error = AgentRuntimeError::NotFound(agent_id);
     match command {
-        ActorCommand::Submit { reply, .. } => {
+        AgentLoopCommand::Submit { reply, .. } => {
             let _ = reply.send(Err(error));
         }
-        ActorCommand::SubmitCurrentSession { reply, .. } => {
+        AgentLoopCommand::SubmitCurrentSession { reply, .. } => {
             let _ = reply.send(Err(error));
         }
-        ActorCommand::CancelTurn { reply, .. } => {
+        AgentLoopCommand::CancelTurn { reply, .. } => {
             let _ = reply.send(Err(error));
         }
-        ActorCommand::SetActivity { reply, .. } => {
+        AgentLoopCommand::SetActivity { reply, .. } => {
             let _ = reply.send(Err(error));
         }
-        ActorCommand::Checkpoint { reply, .. } => {
+        AgentLoopCommand::Checkpoint { reply, .. } => {
             let _ = reply.send(Err(error));
         }
-        ActorCommand::OpenSession { reply, .. } => {
+        AgentLoopCommand::RecordSessionFacts { reply, .. } => {
             let _ = reply.send(Err(error));
         }
-        ActorCommand::RecordSessionFacts { reply, .. } => {
+        AgentLoopCommand::ReportProgress { reply, .. } => {
             let _ = reply.send(Err(error));
         }
-        ActorCommand::Snapshot { reply } => {
+        AgentLoopCommand::ReadSession { reply } => {
             let _ = reply.send(Err(error));
         }
-        ActorCommand::WakeAccepted { reply, .. } => {
+        AgentLoopCommand::Snapshot { reply } => {
             let _ = reply.send(Err(error));
         }
-        ActorCommand::AcceptWakeSignals { reply, .. } => {
+        AgentLoopCommand::StartPendingInputs { reply } => {
             let _ = reply.send(Err(error));
         }
-        ActorCommand::EnterWaitingAgents { reply } => {
+        AgentLoopCommand::Close { reply } => {
             let _ = reply.send(Err(error));
         }
-        ActorCommand::StartPendingInputs { reply } => {
-            let _ = reply.send(Err(error));
-        }
-        ActorCommand::Close { reply } => {
-            let _ = reply.send(Err(error));
-        }
-        ActorCommand::TurnFinished(_) | ActorCommand::Shutdown { .. } => {}
+        AgentLoopCommand::TurnFinished(_) | AgentLoopCommand::Shutdown { .. } => {}
     }
 }
 
 async fn list_snapshots(
-    actors: &BTreeMap<AgentId, AgentActorHandle>,
+    actors: &BTreeMap<AgentId, AgentLoopHandle>,
 ) -> AgentRuntimeResult<Vec<AgentSnapshot>> {
     let mut snapshots = Vec::with_capacity(actors.len());
     for actor in actors.values() {
         let (reply, receiver) = oneshot::channel();
-        actor.send(ActorCommand::Snapshot { reply }).await?;
+        actor.send(AgentLoopCommand::Snapshot { reply }).await?;
         snapshots.push(
             receiver
                 .await
