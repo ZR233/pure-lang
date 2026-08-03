@@ -7,45 +7,21 @@ import '../../app/theme/studio_tokens.dart';
 import '../../data/repositories/studio_repository.dart';
 import '../../domain/models/studio_models.dart';
 import '../../l10n/studio_l10n.dart';
+import '../../shared/studio_driver_keys.dart';
 import 'settings_common.dart';
 import 'settings_update_row.dart';
 import 'settings_web_search.dart';
 
-class RolesTab extends ConsumerStatefulWidget {
+class RolesTab extends ConsumerWidget {
   const RolesTab({super.key, required this.providers, required this.roles});
 
   final List<ProviderSettingsView> providers;
   final List<RoleSettingsView> roles;
 
   @override
-  ConsumerState<RolesTab> createState() => RolesTabState();
-}
-
-class RolesTabState extends ConsumerState<RolesTab> {
-  final Map<String, String> _selectionByRole = {};
-
-  @override
-  void didUpdateWidget(covariant RolesTab oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    final validSelections = _roleModelOptions(
-      widget.providers,
-    ).map((option) => option.key).toSet();
-    final configuredSelections = {
-      for (final role in widget.roles)
-        if (role.providerId.isNotEmpty && role.model.isNotEmpty)
-          role.key: '${role.providerId}::${role.model}',
-    };
-    _selectionByRole.removeWhere(
-      (role, selection) =>
-          !validSelections.contains(selection) ||
-          configuredSelections[role] == selection,
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    const roles = ['explorer', 'planner', 'executor', 'reviewer'];
-    final options = _roleModelOptions(widget.providers);
+  Widget build(BuildContext context, WidgetRef ref) {
+    const roleKeys = ['explorer', 'planner', 'executor', 'reviewer'];
+    final options = _roleModelOptions(providers);
     return SettingsPane(
       children: [
         SettingsHeader(
@@ -55,37 +31,73 @@ class RolesTabState extends ConsumerState<RolesTab> {
         const SizedBox(height: 16),
         SettingsGroup(
           children: [
-            for (final role in roles)
-              _RoleSettingsRow(
-                role: role,
-                selectedValue: _selectedRoleModelKey(role, options),
-                options: options,
-                onChanged: (value) {
-                  if (value == null) {
-                    return;
-                  }
-                  setState(() => _selectionByRole[role] = value);
-                  final option = options.firstWhere(
-                    (option) => option.key == value,
-                  );
-                  ref
-                      .read(studioControllerProvider.notifier)
-                      .setModelRole(
-                        roleKey: role,
-                        providerId: option.providerId,
-                        model: option.model,
-                        effort: option.effort,
-                      );
-                },
-              ),
+            for (final role in roleKeys) _buildRoleRow(ref, role, options),
           ],
         ),
       ],
     );
   }
 
+  Widget _buildRoleRow(
+    WidgetRef ref,
+    String role,
+    List<_RoleModelOption> options,
+  ) {
+    final selectedModel = _selectedRoleModelKey(role, options);
+    final selectedOption = options
+        .where((option) => option.key == selectedModel)
+        .firstOrNull;
+    final option = selectedOption ?? const _RoleModelOption.defaultOption();
+    final configuredRole = roles
+        .where((candidate) => candidate.key == role)
+        .firstOrNull;
+    final canonicalEffort = configuredRole?.effort;
+    final selectedEffort =
+        option.key == _roleSelectionKey(role) &&
+            option.efforts.contains(canonicalEffort)
+        ? canonicalEffort
+        : option.defaultEffort;
+
+    return _RoleSettingsRow(
+      role: role,
+      selectedModel: selectedModel,
+      selectedEffort: selectedEffort,
+      options: options,
+      efforts: option.efforts,
+      onModelChanged: (value) {
+        if (value == null) {
+          return;
+        }
+        final selected = options.firstWhere(
+          (candidate) => candidate.key == value,
+        );
+        ref
+            .read(studioControllerProvider.notifier)
+            .setModelRole(
+              roleKey: role,
+              providerId: selected.providerId,
+              model: selected.model,
+              effort: selected.defaultEffort,
+            );
+      },
+      onEffortChanged: (value) {
+        if (value == null) {
+          return;
+        }
+        ref
+            .read(studioControllerProvider.notifier)
+            .setModelRole(
+              roleKey: role,
+              providerId: option.providerId,
+              model: option.model,
+              effort: value,
+            );
+      },
+    );
+  }
+
   String? _roleSelectionKey(String roleKey) {
-    final role = widget.roles.where((role) => role.key == roleKey).firstOrNull;
+    final role = roles.where((role) => role.key == roleKey).firstOrNull;
     if (role == null || role.providerId.isEmpty || role.model.isEmpty) {
       return null;
     }
@@ -93,10 +105,6 @@ class RolesTabState extends ConsumerState<RolesTab> {
   }
 
   String _selectedRoleModelKey(String role, List<_RoleModelOption> options) {
-    final selected = _selectionByRole[role];
-    if (selected != null && options.any((option) => option.key == selected)) {
-      return selected;
-    }
     final configured = _roleSelectionKey(role);
     if (configured != null &&
         options.any((option) => option.key == configured)) {
@@ -129,7 +137,8 @@ class RolesTabState extends ConsumerState<RolesTab> {
             model: model.slug,
             label:
                 '${provider.name} / ${model.displayName.isEmpty ? model.slug : model.displayName}',
-            effort: model.defaultReasoningEffort.isNotEmpty
+            efforts: model.reasoningEfforts,
+            defaultEffort: model.defaultReasoningEffort.isNotEmpty
                 ? model.defaultReasoningEffort
                 : model.reasoningEfforts.firstOrNull,
           ),
@@ -143,15 +152,21 @@ class RolesTabState extends ConsumerState<RolesTab> {
 class _RoleSettingsRow extends StatelessWidget {
   const _RoleSettingsRow({
     required this.role,
-    required this.selectedValue,
+    required this.selectedModel,
+    required this.selectedEffort,
     required this.options,
-    required this.onChanged,
+    required this.efforts,
+    required this.onModelChanged,
+    required this.onEffortChanged,
   });
 
   final String role;
-  final String selectedValue;
+  final String selectedModel;
+  final String? selectedEffort;
   final List<_RoleModelOption> options;
-  final ValueChanged<String?> onChanged;
+  final List<String> efforts;
+  final ValueChanged<String?> onModelChanged;
+  final ValueChanged<String?> onEffortChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -172,59 +187,104 @@ class _RoleSettingsRow extends StatelessWidget {
         ),
       ],
     );
-    final selector = DropdownButtonFormField<String>(
-      initialValue: selectedValue,
-      isExpanded: true,
-      decoration: InputDecoration(
-        labelText: context.l10n.settingsModelField,
-        isDense: true,
-      ),
-      selectedItemBuilder: (context) {
-        final entries = options.isEmpty
-            ? const [_RoleModelOption.defaultOption()]
-            : options;
-        return [
-          for (final option in entries)
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                option.label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+    final modelSelector = KeyedSubtree(
+      key: StudioDriverKeys.settingsRoleModel(role),
+      child: DropdownButtonFormField<String>(
+        key: ValueKey<String>('settings-role-$role-model-value-$selectedModel'),
+        initialValue: selectedModel,
+        isExpanded: true,
+        decoration: InputDecoration(
+          labelText: context.l10n.settingsModelField,
+          isDense: true,
+        ),
+        selectedItemBuilder: (context) {
+          final entries = options.isEmpty
+              ? const [_RoleModelOption.defaultOption()]
+              : options;
+          return [
+            for (final option in entries)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  option.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
-            ),
-        ];
-      },
-      items: [
-        if (options.isEmpty)
-          const DropdownMenuItem(
-            value: 'default::default',
-            child: Text('default'),
-          )
-        else
-          for (final option in options)
+          ];
+        },
+        items: [
+          if (options.isEmpty)
             DropdownMenuItem(
-              value: option.key,
-              child: Text(option.label, overflow: TextOverflow.ellipsis),
+              key: StudioDriverKeys.settingsRoleModelOption(
+                role,
+                'default',
+                'default',
+              ),
+              value: 'default::default',
+              child: const Text('default'),
+            )
+          else
+            for (final option in options)
+              DropdownMenuItem(
+                key: StudioDriverKeys.settingsRoleModelOption(
+                  role,
+                  option.providerId,
+                  option.model,
+                ),
+                value: option.key,
+                child: Text(option.label, overflow: TextOverflow.ellipsis),
+              ),
+        ],
+        onChanged: options.isEmpty ? null : onModelChanged,
+      ),
+    );
+    final effortSelector = KeyedSubtree(
+      key: StudioDriverKeys.settingsRoleEffort(role),
+      child: DropdownButtonFormField<String>(
+        key: ValueKey<String>(
+          'settings-role-$role-effort-value-${selectedEffort ?? 'none'}',
+        ),
+        initialValue: selectedEffort,
+        isExpanded: true,
+        decoration: InputDecoration(
+          labelText: context.l10n.statusReasoningEffort,
+          isDense: true,
+        ),
+        items: [
+          for (final effort in efforts)
+            DropdownMenuItem(
+              key: StudioDriverKeys.settingsRoleEffortOption(role, effort),
+              value: effort,
+              child: Text(effort, overflow: TextOverflow.ellipsis),
             ),
-      ],
-      onChanged: onChanged,
+        ],
+        onChanged: efforts.isEmpty ? null : onEffortChanged,
+      ),
     );
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       child: LayoutBuilder(
         builder: (context, constraints) {
-          if (constraints.maxWidth < 620) {
+          if (constraints.maxWidth < 760) {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [title, const SizedBox(height: 10), selector],
+              children: [
+                title,
+                const SizedBox(height: 10),
+                modelSelector,
+                const SizedBox(height: 10),
+                effortSelector,
+              ],
             );
           }
           return Row(
             children: [
               Expanded(child: title),
               const SizedBox(width: 20),
-              SizedBox(width: 380, child: selector),
+              SizedBox(width: 280, child: modelSelector),
+              const SizedBox(width: 12),
+              SizedBox(width: 140, child: effortSelector),
             ],
           );
         },
@@ -248,19 +308,22 @@ class _RoleModelOption {
     required this.providerId,
     required this.model,
     required this.label,
-    required this.effort,
+    required this.efforts,
+    required this.defaultEffort,
   });
 
   const _RoleModelOption.defaultOption()
     : providerId = 'default',
       model = 'default',
       label = 'default',
-      effort = null;
+      efforts = const [],
+      defaultEffort = null;
 
   final String providerId;
   final String model;
   final String label;
-  final String? effort;
+  final List<String> efforts;
+  final String? defaultEffort;
 
   String get key => '$providerId::$model';
 }

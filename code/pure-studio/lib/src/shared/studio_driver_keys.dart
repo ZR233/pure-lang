@@ -44,6 +44,23 @@ abstract final class StudioDriverKeys {
   static ValueKey<String> sessionModeOption(String mode) =>
       ValueKey<String>('session-mode-$mode');
 
+  static ValueKey<String> settingsRoleModel(String role) =>
+      ValueKey<String>('settings-role-$role-model');
+
+  static ValueKey<String> settingsRoleModelOption(
+    String role,
+    String providerId,
+    String model,
+  ) => ValueKey<String>('settings-role-$role-model-$providerId-$model');
+
+  static ValueKey<String> settingsRoleEffort(String role) =>
+      ValueKey<String>('settings-role-$role-effort');
+
+  static ValueKey<String> settingsRoleEffortOption(
+    String role,
+    String effort,
+  ) => ValueKey<String>('settings-role-$role-effort-$effort');
+
   static ValueKey<String> userInputOption(String questionId, int optionIndex) =>
       ValueKey<String>('user-input-option-$questionId-$optionIndex');
 

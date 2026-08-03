@@ -1423,11 +1423,51 @@ void registerShellSettingsTests() {
 
       await tester.tap(find.text('Roles'));
       await tester.pumpAndSettle();
-      await tester.tap(find.byType(DropdownButtonFormField<String>).first);
+      for (final role in const [
+        'explorer',
+        'planner',
+        'executor',
+        'reviewer',
+      ]) {
+        expect(
+          find.byKey(StudioDriverKeys.settingsRoleModel(role)),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(StudioDriverKeys.settingsRoleEffort(role)),
+          findsOneWidget,
+        );
+      }
+
+      await tester.tap(
+        find.byKey(StudioDriverKeys.settingsRoleModel('explorer')),
+      );
       await tester.pumpAndSettle();
-      await tester.tap(find.textContaining('DeepSeek Reasoner').last);
+      await tester.tap(
+        find.byKey(
+          StudioDriverKeys.settingsRoleModelOption(
+            'explorer',
+            'deepseek',
+            'deepseek-reasoner',
+          ),
+        ),
+      );
       await tester.pumpAndSettle();
       expect(api.roleUpdate?.roleKey, 'explorer');
+      expect(api.roleUpdate?.model, 'deepseek-reasoner');
+
+      await tester.tap(
+        find.byKey(StudioDriverKeys.settingsRoleEffort('planner')),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(StudioDriverKeys.settingsRoleEffortOption('planner', 'max')),
+      );
+      await tester.pumpAndSettle();
+      expect(api.roleUpdate?.roleKey, 'planner');
+      expect(api.roleUpdate?.providerId, 'deepseek');
+      expect(api.roleUpdate?.model, 'deepseek-v4-flash');
+      expect(api.roleUpdate?.effort, 'max');
 
       await tester.tap(find.text('Skills'));
       await tester.pumpAndSettle();
