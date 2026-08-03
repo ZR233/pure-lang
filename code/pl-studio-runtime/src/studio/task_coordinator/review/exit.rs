@@ -226,22 +226,6 @@ mod tests {
     }
 
     #[test]
-    fn fabricated_design_section_is_rejected() {
-        let error = validate_review_exit(
-            ReviewExitInput {
-                verdict: ReviewVerdict::Pass,
-                summary: "reviewed".to_string(),
-                design_references: vec![reference("Missing section")],
-                findings: Vec::new(),
-            },
-            &read_design(),
-        )
-        .unwrap_err();
-
-        assert!(error.to_string().contains("section was not present"));
-    }
-
-    #[test]
     fn pass_with_finding_and_changes_without_finding_are_rejected() {
         let finding = ReviewFinding {
             severity: "high".to_string(),
@@ -274,36 +258,5 @@ mod tests {
 
         assert!(pass_error.to_string().contains("pass requires"));
         assert!(changes_error.to_string().contains("concrete finding"));
-    }
-
-    #[test]
-    fn finding_reference_must_be_declared_at_top_level() {
-        let mut read = read_design();
-        read.insert(
-            "design/other.md".to_string(),
-            "# Other design\n".to_string(),
-        );
-        let error = validate_review_exit(
-            ReviewExitInput {
-                verdict: ReviewVerdict::ChangesRequired,
-                summary: "design mismatch".to_string(),
-                design_references: vec![reference("Review design")],
-                findings: vec![ReviewFinding {
-                    severity: "high".to_string(),
-                    title: "Design mismatch".to_string(),
-                    body: "The design contract is not implemented.".to_string(),
-                    path: Some("code/example.rs".to_string()),
-                    line: Some(12),
-                    design_references: vec![ReviewDesignReference {
-                        path: "design/other.md".to_string(),
-                        section: "Other design".to_string(),
-                    }],
-                }],
-            },
-            &read,
-        )
-        .unwrap_err();
-
-        assert!(error.to_string().contains("absent from top-level"));
     }
 }

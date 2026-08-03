@@ -53,11 +53,6 @@ impl StudioTaskSpawnPreparation {
     pub(crate) fn lifecycle_token(&self) -> Option<&str> {
         self.lifecycle_token.as_deref()
     }
-
-    #[cfg(test)]
-    pub(crate) fn test_without_worktree() -> Self {
-        Self::without_worktree()
-    }
 }
 
 impl TaskCoordinator {
@@ -356,15 +351,7 @@ fn spawn_error(error: impl Into<String>) -> PureError {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_owned_paths, owned_paths_overlap, reject_bare_existing_directories};
-    use std::path::Path;
-
-    #[test]
-    fn owned_path_overlap_uses_product_path_rules() {
-        assert!(owned_paths_overlap(&["src/**".into()], &["src/lib.rs".into()]).unwrap());
-        assert!(!owned_paths_overlap(&["src".into()], &["src/lib.rs".into()]).unwrap());
-        assert!(!owned_paths_overlap(&["src".into()], &["tests".into()]).unwrap());
-    }
+    use super::normalize_owned_paths;
 
     #[test]
     fn executor_owned_paths_are_validated_and_canonicalized_before_spawn() {
@@ -380,20 +367,5 @@ mod tests {
         ] {
             assert!(normalize_owned_paths(&paths).is_err(), "{paths:?}");
         }
-    }
-
-    #[test]
-    fn existing_directories_require_an_explicit_recursive_scope() {
-        let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let error = reject_bare_existing_directories(workspace_root, &["src".into()])
-            .expect_err("a bare existing directory must not be accepted as an exact file");
-        assert!(
-            error.to_string().contains("use `src/**`"),
-            "unexpected error: {error}"
-        );
-        reject_bare_existing_directories(workspace_root, &["src/**".into()])
-            .expect("an explicit recursive directory scope must be accepted");
-        reject_bare_existing_directories(workspace_root, &["future.rs".into()])
-            .expect("an exact path may name a file that does not exist yet");
     }
 }

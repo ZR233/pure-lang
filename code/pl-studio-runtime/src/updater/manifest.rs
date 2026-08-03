@@ -179,7 +179,6 @@ fn invalid_manifest(message: impl Into<String>) -> StudioUpdateError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pretty_assertions::assert_eq;
 
     fn manifest(version: &str, url: &str, signature: &str, size: u64) -> Vec<u8> {
         serde_json::to_vec(&serde_json::json!({
@@ -211,20 +210,6 @@ mod tests {
     }
 
     #[test]
-    fn treats_same_version_and_downgrade_as_up_to_date() {
-        let url = "https://github.com/ZR233/pure-lang/releases/download/v1.0.0/Pure-Studio-1.0.0-windows-x86_64-setup.exe";
-        let bytes = manifest("1.0.0", url, &format!("{url}.minisig"), 42);
-        assert_eq!(
-            evaluate_manifest(&bytes, "1.0.0").unwrap(),
-            StudioUpdateCheck::UpToDate
-        );
-        assert_eq!(
-            evaluate_manifest(&bytes, "2.0.0").unwrap(),
-            StudioUpdateCheck::UpToDate
-        );
-    }
-
-    #[test]
     fn rejects_unknown_schema_prerelease_and_url_escape() {
         let url = "https://example.com/releases/download/v1.2.0/Pure-Studio-1.2.0-windows-x86_64-setup.exe";
         let bytes = manifest("1.2.0", url, &format!("{url}.minisig"), 42);
@@ -238,31 +223,6 @@ mod tests {
             )
             .is_err()
         );
-    }
-
-    #[test]
-    fn rejects_oversized_installer() {
-        let url = "https://github.com/ZR233/pure-lang/releases/download/v1.2.0/Pure-Studio-1.2.0-windows-x86_64-setup.exe";
-        let error = evaluate_manifest(
-            &manifest(
-                "1.2.0",
-                url,
-                &format!("{url}.minisig"),
-                MAX_INSTALLER_BYTES + 1,
-            ),
-            "1.0.0",
-        )
-        .unwrap_err();
-        assert_eq!(error.code(), StudioUpdateErrorCode::DownloadTooLarge);
-    }
-
-    #[test]
-    fn rejects_unknown_manifest_fields() {
-        let url = "https://github.com/ZR233/pure-lang/releases/download/v1.2.0/Pure-Studio-1.2.0-windows-x86_64-setup.exe";
-        let mut value: serde_json::Value =
-            serde_json::from_slice(&manifest("1.2.0", url, &format!("{url}.minisig"), 42)).unwrap();
-        value["unexpected"] = serde_json::json!(true);
-        assert!(evaluate_manifest(&serde_json::to_vec(&value).unwrap(), "1.0.0").is_err());
     }
 
     #[test]

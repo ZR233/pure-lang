@@ -101,8 +101,6 @@ impl TaskCoordinator {
         let delivery = super::super::scope::delivery_from_completion(&completion)?;
         Ok((
             TaskMergeScope {
-                #[cfg(test)]
-                origin_phase: evidence.origin_phase,
                 run,
                 lease,
                 work_unit,

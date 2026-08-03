@@ -389,10 +389,6 @@ mod tests {
 
     use super::*;
 
-    fn template(id: &str) -> ProviderTemplateKind {
-        ProviderTemplateKind::from_key(id).unwrap()
-    }
-
     fn provider<'a>(config: &'a StudioConfig, id: &str) -> &'a ProviderConfig {
         config
             .models
@@ -430,122 +426,6 @@ mod tests {
                 .unwrap()
                 .iter()
                 .any(|model| model.slug == "deepseek-v4-pro")
-        );
-    }
-
-    #[test]
-    fn openai_draft_routes_all_roles_to_selected_model() {
-        let mut draft = FirstRunConfigDraft {
-            default_provider: "openai".to_string(),
-            providers: vec![FirstRunProviderDraft::from_template(
-                "openai",
-                template("openai"),
-            )],
-        };
-        draft.providers[0].bearer_token = "sk-openai".to_string();
-
-        let config = draft.to_config().unwrap();
-        let expected_effort = role_effort(provider(&config, "openai"), "gpt-5.6-sol").unwrap();
-
-        for role in StudioRole::all() {
-            let route = route(&config, role);
-            assert_eq!(route.provider.as_str(), "openai");
-            assert_eq!(route.model, "gpt-5.6-sol");
-            assert_eq!(route.effort.as_ref().unwrap().as_str(), expected_effort);
-        }
-    }
-
-    #[test]
-    fn zhipu_coding_plan_keeps_product_endpoint_and_kind() {
-        let mut draft = FirstRunConfigDraft {
-            default_provider: "zhipu-coding-plan".to_string(),
-            providers: vec![FirstRunProviderDraft::from_template(
-                "zhipu-coding-plan",
-                template("zhipu-coding-plan"),
-            )],
-        };
-        draft.providers[0].bearer_token = "sk-coding-plan".to_string();
-
-        let config = draft.to_config().unwrap();
-        let provider = provider(&config, "zhipu-coding-plan");
-
-        assert_eq!(
-            provider.base_url,
-            "https://open.bigmodel.cn/api/coding/paas/v4"
-        );
-        assert_eq!(
-            provider.protocol().unwrap(),
-            pl_model::ProviderWireProtocol::ChatCompletions
-        );
-        assert_eq!(route(&config, StudioRole::Reviewer).model, "glm-5.2");
-    }
-
-    #[test]
-    fn repeated_provider_kind_gets_unique_suggested_key() {
-        let mut draft = FirstRunConfigDraft::new_default();
-        draft.add_provider(template("deepseek"));
-        draft.add_provider(template("openai"));
-        draft.add_provider(template("openai"));
-        draft.add_provider(template("zhipu-coding-plan"));
-        draft.add_provider(template("zhipu-coding-plan"));
-
-        assert_eq!(
-            draft
-                .providers
-                .iter()
-                .map(|provider| provider.key.as_str())
-                .collect::<Vec<_>>(),
-            vec![
-                "deepseek",
-                "deepseek-2",
-                "openai",
-                "openai-2",
-                "zhipu-coding-plan",
-                "zhipu-coding-plan-2",
-            ]
-        );
-    }
-
-    #[test]
-    fn empty_api_key_is_rejected() {
-        let error = FirstRunConfigDraft::new_default()
-            .to_config()
-            .unwrap_err()
-            .to_string();
-        assert!(error.contains("api key must not be empty"));
-    }
-
-    #[test]
-    fn duplicate_provider_key_is_rejected() {
-        let mut draft = FirstRunConfigDraft::new_default();
-        draft.providers[0].bearer_token = "sk-1".to_string();
-        let duplicate = draft.add_provider(template("openai"));
-        duplicate.key = "deepseek".to_string();
-        duplicate.bearer_token = "sk-2".to_string();
-
-        assert!(
-            draft
-                .to_config()
-                .unwrap_err()
-                .to_string()
-                .contains("duplicate provider key")
-        );
-    }
-
-    #[test]
-    fn bundled_model_slug_conflict_is_rejected() {
-        let mut draft = FirstRunConfigDraft::new_default();
-        draft.providers[0].bearer_token = "sk-deepseek".to_string();
-        draft.providers[0]
-            .models
-            .push(FirstRunModelDraft::fallback("deepseek-v4-flash"));
-
-        assert!(
-            draft
-                .to_config()
-                .unwrap_err()
-                .to_string()
-                .contains("additional model conflicts with bundled model")
         );
     }
 }

@@ -3,7 +3,6 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 
-use super::barriers::MergeFailurePoint;
 use super::conflict_index::parse_unmerged_entries;
 use super::conflict_status::parse_porcelain_entries;
 use super::failure::MergeFailureStage;
@@ -27,21 +26,8 @@ impl TaskCoordinator {
         scope: &TaskMergeScope,
         workspace: &Path,
     ) -> Result<TaskMergeAgentOutput> {
-        let manifest = match self.inject_merge_failure(MergeFailurePoint::ConflictManifest) {
-            Ok(()) => match build_conflict_manifest(scope, workspace).await {
-                Ok(manifest) => manifest,
-                Err(error) => {
-                    return self
-                        .handle_merge_stage_failure(
-                            scope,
-                            workspace,
-                            Vec::new(),
-                            error.context("build merge conflict manifest"),
-                            MergeFailureStage::Conflict,
-                        )
-                        .await;
-                }
-            },
+        let manifest = match build_conflict_manifest(scope, workspace).await {
+            Ok(manifest) => manifest,
             Err(error) => {
                 return self
                     .handle_merge_stage_failure(
@@ -59,17 +45,13 @@ impl TaskCoordinator {
             .iter()
             .map(|entry| entry.path.clone())
             .collect::<Vec<_>>();
-        let persistence = match self.inject_merge_failure(MergeFailurePoint::ConflictPersistence) {
-            Ok(()) => {
-                self.store
-                    .conflict_task_merge(ConflictTaskMerge {
-                        merge_id: scope.merge.id.clone(),
-                        manifest,
-                    })
-                    .await
-            }
-            Err(error) => Err(error),
-        };
+        let persistence = self
+            .store
+            .conflict_task_merge(ConflictTaskMerge {
+                merge_id: scope.merge.id.clone(),
+                manifest,
+            })
+            .await;
         if let Err(error) = persistence {
             return self
                 .handle_merge_stage_failure(

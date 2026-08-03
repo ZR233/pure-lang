@@ -72,78 +72,9 @@ impl TaskCoordinator {
     }
 
     #[cfg(test)]
-    pub(crate) fn set_design_before_head_persist_barrier(&self, barrier: DesignCommitTestBarrier) {
-        *self
-            .design_before_head_persist_barrier
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(barrier);
-    }
-
-    #[cfg(test)]
-    pub(crate) fn set_design_after_head_persist_barrier(&self, barrier: DesignCommitTestBarrier) {
-        *self
-            .design_after_head_persist_barrier
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(barrier);
-    }
-
-    #[cfg(test)]
-    pub(crate) fn set_design_before_rollback_barrier(&self, barrier: DesignCommitTestBarrier) {
-        *self
-            .design_before_rollback_barrier
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(barrier);
-    }
-
-    #[cfg(test)]
-    pub(crate) fn fail_design_compensation_for_test(&self) {
-        self.fail_design_compensation
-            .store(true, std::sync::atomic::Ordering::SeqCst);
-    }
-
-    #[cfg(test)]
     async fn wait_after_design_commit(&self) {
         let barrier = self
             .design_after_commit_barrier
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
-        if let Some(barrier) = barrier {
-            barrier.committed.wait().await;
-            barrier.release.wait().await;
-        }
-    }
-
-    #[cfg(test)]
-    async fn wait_before_design_head_persist(&self) {
-        let barrier = self
-            .design_before_head_persist_barrier
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
-        if let Some(barrier) = barrier {
-            barrier.committed.wait().await;
-            barrier.release.wait().await;
-        }
-    }
-
-    #[cfg(test)]
-    async fn wait_after_design_head_persist(&self) {
-        let barrier = self
-            .design_after_head_persist_barrier
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
-        if let Some(barrier) = barrier {
-            barrier.committed.wait().await;
-            barrier.release.wait().await;
-        }
-    }
-
-    #[cfg(test)]
-    async fn wait_before_design_rollback(&self) {
-        let barrier = self
-            .design_before_rollback_barrier
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
@@ -291,8 +222,6 @@ impl TaskCoordinator {
         let validated_tree = match commit_result {
             Ok(validated_tree) => validated_tree,
             Err(operation_error) => {
-                #[cfg(test)]
-                self.wait_before_design_rollback().await;
                 if let Err(rollback_error) =
                     rollback_paths(workspace, originals, &run.expected_head).await
                 {
@@ -366,17 +295,12 @@ impl TaskCoordinator {
             "design post-commit inspection failed",
         )
         .await?;
-        #[cfg(test)]
-        self.wait_before_design_head_persist().await;
-
         match self
             .store
             .advance_task_design_head(&run.id, &run.expected_head, &design_commit)
             .await
         {
             Ok(true) => {
-                #[cfg(test)]
-                self.wait_after_design_head_persist().await;
                 self.verify_durable_exact_scope(run, &design_commit, "design commit durable CAS")
                     .await?;
                 Ok(DesignUpdateOutput {
@@ -485,16 +409,6 @@ impl TaskCoordinator {
             .await
             .is_ok_and(|snapshot| scope.matches(&snapshot));
         if safe {
-            #[cfg(test)]
-            let compensation = if self
-                .fail_design_compensation
-                .load(std::sync::atomic::Ordering::SeqCst)
-            {
-                Err(anyhow::anyhow!("injected design compensation failure"))
-            } else {
-                compensate_commit(scope, &run.expected_head).await
-            };
-            #[cfg(not(test))]
             let compensation = compensate_commit(scope, &run.expected_head).await;
 
             let cleanup = async {

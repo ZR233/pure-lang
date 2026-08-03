@@ -121,8 +121,6 @@ pub(crate) struct BeginTaskMerge {
 }
 
 pub(crate) struct TaskMergeScope {
-    #[cfg(test)]
-    pub(crate) origin_phase: TaskRunPhase,
     pub(crate) run: TaskRunRecord,
     pub(crate) lease: BranchLeaseRecord,
     pub(crate) work_unit: WorkUnitRecord,

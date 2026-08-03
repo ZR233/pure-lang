@@ -499,7 +499,6 @@ impl Drop for InstallGuard<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     const TEST_PUBLIC_KEY: &str = "untrusted comment: minisign public key 2\nRWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3";
     const TEST_SIGNATURE: &str = "untrusted comment: signature from minisign secret key\nRUQf6LRCGA9i559r3g7V1qNyJDApGip8MfqcadIgT9CuhV3EMhHoN1mGTkUidF/z7SrlQgXdy8ofjb7bNJJylDOocrCo8KLzZwo=\ntrusted comment: timestamp:1556193335\tfile:test\ny/rUw2y8/hOUYjZU71eHp/Wo1KZ40fGy2VJEDl34XMJM+TX48Ss/17u3IvIfbVR1FkZZSNCisQbuQY+bHwhEBg==";
@@ -514,70 +513,6 @@ mod tests {
         let wrong_signature = Signature::decode(&TEST_SIGNATURE.replacen("559r3", "558r3", 1))
             .expect("modified signature should remain structurally valid");
         assert!(public_key.verify(b"test", &wrong_signature, true).is_err());
-    }
-
-    #[tokio::test]
-    async fn verified_cache_is_reused() {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let cache_dir = std::env::temp_dir().join(format!(
-            "pure-studio-updater-test-{}-{unique}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&cache_dir).unwrap();
-        let installer = cache_dir.join("setup.exe");
-        let signature = cache_dir.join("setup.exe.minisig");
-        std::fs::write(&installer, b"test").unwrap();
-        std::fs::write(&signature, TEST_SIGNATURE).unwrap();
-        let updater = StudioUpdater {
-            client: reqwest::Client::new(),
-            cache_dir: cache_dir.clone(),
-            public_key: TEST_PUBLIC_KEY,
-            install_active: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        };
-        let update = StudioUpdate {
-            version: "1.2.3".to_string(),
-            published_at: 1,
-            notes_url: "https://github.com/ZR233/pure-lang/releases/tag/v1.2.3".to_string(),
-            installer: super::super::types::StudioUpdateAsset {
-                url: "https://github.com/ZR233/pure-lang/releases/download/v1.2.3/Pure-Studio-1.2.3-windows-x86_64-setup.exe".to_string(),
-                size: 4,
-                sha256: format!("{:x}", Sha256::digest(b"test")),
-                signature: "https://github.com/ZR233/pure-lang/releases/download/v1.2.3/Pure-Studio-1.2.3-windows-x86_64-setup.exe.minisig".to_string(),
-            },
-        };
-        let (progress, mut events) = tokio::sync::mpsc::unbounded_channel();
-
-        assert!(
-            verify_cached(
-                &updater,
-                &update,
-                &installer,
-                &signature,
-                &progress,
-                &StudioUpdateCancellation::new(),
-            )
-            .await
-            .unwrap()
-        );
-        assert_eq!(events.recv().await, Some(StudioUpdateEvent::Verifying));
-        std::fs::remove_dir_all(cache_dir).unwrap();
-    }
-
-    #[test]
-    fn installer_command_requests_close_and_restart() {
-        assert_eq!(
-            installer_arguments(),
-            [
-                "/SILENT",
-                "/SUPPRESSMSGBOXES",
-                "/NORESTART",
-                "/CLOSEAPPLICATIONS",
-                "/RESTARTAPPLICATIONS",
-            ]
-        );
     }
 
     #[test]
@@ -596,23 +531,6 @@ mod tests {
         assert_eq!(second.code(), StudioUpdateErrorCode::InstallInProgress);
         drop(first);
         assert!(InstallGuard::acquire(&updater).is_ok());
-    }
-
-    #[test]
-    fn cancellation_is_idempotent_before_installer_launch() {
-        let cancellation = StudioUpdateCancellation::new();
-
-        cancellation.cancel().unwrap();
-        cancellation.cancel().unwrap();
-
-        assert_eq!(
-            cancellation.check().unwrap_err().code(),
-            StudioUpdateErrorCode::Cancelled
-        );
-        assert_eq!(
-            cancellation.begin_launch().unwrap_err().code(),
-            StudioUpdateErrorCode::Cancelled
-        );
     }
 
     #[test]

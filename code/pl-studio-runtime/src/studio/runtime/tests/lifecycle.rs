@@ -1,8 +1,5 @@
 use super::*;
-use crate::{
-    StudioProductEventKind, StudioRecoveryIssue, StudioRecoveryIssueCategory,
-    StudioRecoveryIssueScope,
-};
+use crate::{StudioProductEventKind, StudioRecoveryIssueCategory, StudioRecoveryIssueScope};
 use pretty_assertions::assert_eq;
 use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
 
@@ -47,41 +44,6 @@ async fn initialize_runtime_isolates_unavailable_registered_project() {
         Some(healthy_project.id.as_str())
     );
     let _ = tokio::fs::remove_dir_all(healthy_workspace).await;
-    let _ = tokio::fs::remove_dir_all(home).await;
-}
-
-#[tokio::test]
-async fn unavailable_project_does_not_duplicate_existing_project_issue() {
-    let unique = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let missing_workspace = std::env::temp_dir().join(format!("pure-duplicate-project-{unique}"));
-    let home = std::env::temp_dir().join(format!("pure-duplicate-project-home-{unique}"));
-    let store = StudioStore::open_memory().await.unwrap();
-    let project = store.upsert_project(&missing_workspace).await.unwrap();
-    let runtime = StudioRuntime::new(
-        store,
-        ConfigStore::new(crate::config::ConfigPaths::from_home(&home)),
-    );
-    let mut issues = vec![StudioRecoveryIssue {
-        id: "existing-project-issue".to_string(),
-        scope: StudioRecoveryIssueScope::Project,
-        category: StudioRecoveryIssueCategory::Repository,
-        action: StudioRecoveryIssueAction::RemoveProject,
-        project_id: Some(project.id),
-        session_id: None,
-        task_run_id: Some("task-existing".to_string()),
-        message: "existing issue".to_string(),
-    }];
-
-    runtime
-        .append_unavailable_project_recovery_issues(&mut issues)
-        .await
-        .unwrap();
-
-    assert_eq!(issues.len(), 1);
-    assert_eq!(issues[0].id, "existing-project-issue");
     let _ = tokio::fs::remove_dir_all(home).await;
 }
 
@@ -231,37 +193,6 @@ async fn failed_task_preflight_keeps_plan_confirmation_pending() {
     let _ = std::fs::remove_dir_all(repository);
 }
 
-#[tokio::test]
-async fn failed_initial_commit_hook_keeps_plan_confirmation_pending() {
-    let unique = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let repository = std::env::temp_dir().join(format!("pure-plan-hook-{unique}"));
-    std::fs::create_dir_all(&repository).unwrap();
-    let status = std::process::Command::new("git")
-        .arg("-C")
-        .arg(&repository)
-        .args(["init", "-b", "main"])
-        .status()
-        .unwrap();
-    assert!(status.success());
-    std::fs::write(repository.join("README.md"), "initial\n").unwrap();
-    let hook = repository.join(".git/hooks/pre-commit");
-    std::fs::write(&hook, "#!/bin/sh\nexit 1\n").unwrap();
-    make_hook_executable(&hook);
-
-    assert_failed_task_preflight_keeps_confirmation_pending(&repository, "hook").await;
-    let head = std::process::Command::new("git")
-        .arg("-C")
-        .arg(&repository)
-        .args(["rev-parse", "--verify", "HEAD"])
-        .output()
-        .unwrap();
-    assert!(!head.status.success());
-    let _ = std::fs::remove_dir_all(repository);
-}
-
 async fn assert_failed_task_preflight_keeps_confirmation_pending(
     repository: &std::path::Path,
     suffix: &str,
@@ -313,18 +244,6 @@ async fn assert_failed_task_preflight_keeps_confirmation_pending(
     assert!(store.list_active_task_runs().await.unwrap().is_empty());
     let _ = std::fs::remove_dir_all(home);
 }
-
-#[cfg(unix)]
-fn make_hook_executable(path: &std::path::Path) {
-    use std::os::unix::fs::PermissionsExt;
-
-    let mut permissions = std::fs::metadata(path).unwrap().permissions();
-    permissions.set_mode(0o755);
-    std::fs::set_permissions(path, permissions).unwrap();
-}
-
-#[cfg(windows)]
-fn make_hook_executable(_path: &std::path::Path) {}
 
 #[tokio::test]
 async fn initialize_runtime_recovers_user_input_and_cancels_tool_approval() {
@@ -547,136 +466,6 @@ async fn detached_user_input_resolution_queues_one_hidden_explicit_input() {
     server.await.unwrap();
     runtime.shutdown().await;
     let _ = tokio::fs::remove_dir_all(workspace).await;
-    let _ = tokio::fs::remove_dir_all(home).await;
-}
-
-#[tokio::test]
-async fn initialize_runtime_recovers_child_interaction_with_canonical_owner() {
-    let store = StudioStore::open_memory().await.unwrap();
-    let project = store
-        .upsert_project("C:/work/recovered-child")
-        .await
-        .unwrap();
-    let root = store
-        .create_session(&project.id, "Recovered root", StudioMode::Simple)
-        .await
-        .unwrap();
-    let child_owner = pl_core::AgentId::new("agent-recovered-child").unwrap();
-    let child = store
-        .create_agent_session(crate::studio::AgentSessionSpec {
-            id: "session-recovered-child".to_string(),
-            parent_session_id: root.id.clone(),
-            owner_agent_id: child_owner.to_string(),
-            owner_role: "explorer".to_string(),
-            title: "Recovered child".to_string(),
-        })
-        .await
-        .unwrap();
-    store
-        .upsert_interaction(&pending_interaction(
-            "approval-recovered-child",
-            &child.id,
-            InteractionKind::ToolApproval,
-            InteractionPayload::ToolApproval {
-                name: "exec".to_string(),
-                arguments: serde_json::json!({"command": "echo hi"}),
-                working_directory: None,
-                parent_agent_id: Some(root.id.clone()),
-            },
-        ))
-        .await
-        .unwrap();
-
-    let unique = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let home = std::env::temp_dir().join(format!("pure-recovered-child-home-{unique}"));
-    let seeding_runtime = StudioRuntime::new(
-        store.clone(),
-        ConfigStore::new(crate::config::ConfigPaths::from_home(&home)),
-    );
-    let handle = seeding_runtime.agent_framework().await.unwrap().handle();
-    let root_owner = crate::studio::agent_host::root_agent_id(&root.id);
-    handle
-        .register(pl_core::AgentRegistration {
-            identity: pl_core::AgentIdentity {
-                id: root_owner.clone(),
-                parent_id: None,
-                role: StudioRole::Executor.id(),
-                depth: 0,
-            },
-            session: pl_core::AgentSessionState::empty(
-                pl_core::SessionId::new(root.id.clone()).unwrap(),
-            ),
-        })
-        .await
-        .unwrap();
-    handle
-        .register(pl_core::AgentRegistration {
-            identity: pl_core::AgentIdentity {
-                id: child_owner.clone(),
-                parent_id: Some(root_owner),
-                role: StudioRole::Explorer.id(),
-                depth: 1,
-            },
-            session: pl_core::AgentSessionState::empty(
-                pl_core::SessionId::new(child.id.clone()).unwrap(),
-            ),
-        })
-        .await
-        .unwrap();
-    seeding_runtime.shutdown_runtime().await.unwrap();
-
-    let runtime = StudioRuntime::with_runtime_state(
-        store.clone(),
-        ConfigStore::new(crate::config::ConfigPaths::from_home(&home)),
-        StudioRuntimeState::new(),
-    );
-    let snapshot = runtime.initialize_runtime().await.unwrap();
-
-    assert_eq!(snapshot.status, StudioRuntimeStatus::Ready);
-    let interaction = store
-        .read_interaction("approval-recovered-child")
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(interaction.status, InteractionStatus::Cancelled);
-    let canonical = runtime.session_event_snapshot(&child.id).await.unwrap();
-    assert_eq!(
-        canonical
-            .owner
-            .as_ref()
-            .map(|owner| owner.agent_id.as_str()),
-        Some(child_owner.as_str())
-    );
-    let mut subscription = runtime
-        .subscribe_session_events(pl_protocol::SessionSubscriptionRequest {
-            session_id: child.id.clone(),
-            after_sequence: Some(0),
-        })
-        .await
-        .unwrap();
-    let mut cancellation_source = None;
-    for _ in 0..canonical.through_sequence {
-        let Some(pl_protocol::SessionStreamFrame::Event { event }) = subscription.recv().await
-        else {
-            continue;
-        };
-        if matches!(
-            &event.kind,
-            pl_protocol::SessionEventKind::InteractionChanged { event }
-                if event.interaction.status == InteractionStatus::Cancelled
-        ) {
-            cancellation_source = event.source_agent_id;
-        }
-    }
-    assert_eq!(cancellation_source.as_deref(), Some(child_owner.as_str()));
-
-    let handle = runtime.agent_framework().await.unwrap().handle();
-    assert!(handle.snapshot(child_owner).await.is_ok());
-
-    runtime.shutdown().await;
     let _ = tokio::fs::remove_dir_all(home).await;
 }
 

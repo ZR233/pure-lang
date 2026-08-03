@@ -209,8 +209,6 @@ impl StudioStore {
             let work_unit_model = work_unit_active.update(&tx).await?;
 
             Ok(TaskMergeScope {
-                #[cfg(test)]
-                origin_phase,
                 run: task_run_record(run_model)?,
                 lease: branch_lease_record(lease_model),
                 work_unit: work_unit_record(work_unit_model)?,

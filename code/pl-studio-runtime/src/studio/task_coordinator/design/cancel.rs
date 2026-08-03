@@ -137,8 +137,6 @@ impl TaskCoordinator {
             .await
         {
             Ok(true) => {
-                #[cfg(test)]
-                self.wait_after_design_head_persist().await;
                 self.verify_durable_exact_scope(&run, &revert_commit, "design revert durable CAS")
                     .await?;
                 Ok(DesignCancellationRevert {

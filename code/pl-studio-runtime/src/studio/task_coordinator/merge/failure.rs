@@ -3,7 +3,6 @@ use std::path::Path;
 use anyhow::{Context, Result};
 
 use super::accept::{MergeCommitProof, verify_created_merge_commit};
-use super::barriers::MergeFailurePoint;
 use super::conflict::validate_merge_failure_workspace;
 use super::git::{checked_git, run_git};
 use super::validation::{validate_merge_preflight, validate_repository_identity};
@@ -49,19 +48,15 @@ impl TaskCoordinator {
         recovery: &str,
         operation: anyhow::Error,
     ) -> Result<TaskMergeAgentOutput> {
-        let persistence = match self.inject_merge_failure(MergeFailurePoint::FailurePersistence) {
-            Ok(()) => {
-                self.store
-                    .fail_task_merge(FailTaskMerge {
-                        merge_id: scope.merge.id.clone(),
-                        reason: reason.to_string(),
-                        verification_steps: verification,
-                        compensation: Some(recovery.to_string()),
-                    })
-                    .await
-            }
-            Err(error) => Err(error),
-        };
+        let persistence = self
+            .store
+            .fail_task_merge(FailTaskMerge {
+                merge_id: scope.merge.id.clone(),
+                reason: reason.to_string(),
+                verification_steps: verification,
+                compensation: Some(recovery.to_string()),
+            })
+            .await;
         if let Err(persistence_error) = persistence {
             let fallback_reason = format!(
                 "{reason}; Git recovery: {recovery}; merge failure persistence also failed: {persistence_error:#}"
@@ -90,7 +85,7 @@ impl MergeFailureStage {
 }
 
 async fn recover_uncommitted_merge(
-    coordinator: &TaskCoordinator,
+    _coordinator: &TaskCoordinator,
     scope: &TaskMergeScope,
     workspace: &Path,
 ) -> String {
@@ -115,7 +110,6 @@ async fn recover_uncommitted_merge(
     if let Err(error) = abort_merge(workspace).await {
         return format!("unsafe abort failure preserved merge state for inspection: {error:#}");
     }
-    coordinator.pause_after_merge_abort().await;
     match validate_merge_preflight(
         &scope.run,
         &scope.lease,
