@@ -250,6 +250,9 @@ class StudioController extends _$StudioController {
     try {
       receipt = await submit();
     } catch (error) {
+      if (!ref.mounted) {
+        return;
+      }
       final latest = state.value;
       final active = latest?.composersBySession[sessionId];
       if (latest == null || active == null) {
@@ -259,6 +262,9 @@ class StudioController extends _$StudioController {
       if (!identical(failed, active)) {
         state = AsyncData(_withComposer(latest, sessionId, failed));
       }
+      return;
+    }
+    if (!ref.mounted) {
       return;
     }
     final latest = state.value;
