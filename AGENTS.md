@@ -26,7 +26,12 @@
 - 桌面 GUI 入口使用：
   - `cargo xtask run-gui [--demo] [--driver]`
   - `cargo xtask build-gui [--demo] [--no-clean]`
-- 不再新增 PowerShell GUI wrapper；需要构建/运行 GUI 时优先使用 `xtask`。
+- Windows GUI 构建和运行必须使用 xtask；不支持直接执行 `flutter build windows` 或
+  `flutter run -d windows`。不再新增 PowerShell GUI wrapper。
+- `cargo xtask run-gui --driver` 使用 `test_driver/driver_main.dart` 启用 Flutter Driver
+  extension，供 Dart MCP 的 `flutter_driver_command` 操作 GUI；xtask 不负责启动实验性的
+  `dart mcp-server`。需要确定性数据时使用 `cargo xtask run-gui --demo --driver`。driver 命令
+  结束后，其 Flutter、DTD 和 GUI 子进程必须随 Windows Job Object 一起退出，不得残留。
 
 ## 工程边界与协议
 
@@ -1903,8 +1908,10 @@ flutter analyze
 flutter test
 ```
 
-- Flutter 命令必须在 `code/pure-studio` 目录执行。
-- GUI smoke 优先使用 `cargo xtask run-gui --demo`，再结合窗口截图或日志确认不是白屏/崩溃。
+- `flutter analyze/test` 必须在 `code/pure-studio` 目录执行；Windows GUI build/run 必须从仓库
+  根目录通过 xtask 执行。
+- GUI smoke 优先使用 `cargo xtask run-gui --demo`；需要 Dart MCP 操作时使用
+  `cargo xtask run-gui --demo --driver`，再结合 widget tree、窗口截图和日志验收。
 
 ### 代码质量检查清单
 

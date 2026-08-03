@@ -65,13 +65,6 @@ pub(crate) enum BridgeConfiguration {
 }
 
 impl BridgeConfiguration {
-    pub(crate) fn profile_dir(self) -> &'static str {
-        match self {
-            Self::Debug => "debug",
-            Self::Profile | Self::Release => "release",
-        }
-    }
-
     pub(crate) fn uses_release_profile(self) -> bool {
         matches!(self, Self::Profile | Self::Release)
     }
@@ -107,7 +100,7 @@ pub(crate) fn print_help(topic: HelpTopic) {
 pub(crate) fn help_text(topic: HelpTopic) -> &'static str {
     match topic {
         HelpTopic::Global => {
-            "Usage: cargo xtask <command> [options]\n\nCommands:\n  generate-gui        Regenerate Riverpod, Freezed, l10n, and FRB bindings.\n  verify-gui          Generate, analyze, and test the Pure Studio desktop app.\n  run-gui             Run the Pure Studio desktop app.\n  build-gui           Build release artifacts for the current desktop OS.\n  release-gui         Stage, finalize, or verify a Windows stable release.\n  build-rust-bridge   Build the Windows Rust bridge DLL for Flutter CMake.\n\nRun `cargo xtask <command> --help` for command-specific options."
+            "Usage: cargo xtask <command> [options]\n\nCommands:\n  generate-gui        Regenerate Riverpod, Freezed, l10n, and FRB bindings.\n  verify-gui          Generate, analyze, and test the Pure Studio desktop app.\n  run-gui             Run the Pure Studio desktop app.\n  build-gui           Build release artifacts for the current desktop OS.\n  release-gui         Stage, finalize, or verify a Windows stable release.\n  build-rust-bridge   Build and copy Windows Rust bridge artifacts.\n\nRun `cargo xtask <command> --help` for command-specific options."
         }
         HelpTopic::GenerateGui => {
             "Usage: cargo xtask generate-gui\n\nResolves Flutter dependencies and regenerates Riverpod, Freezed, l10n, and FRB 2.12.0 bindings.\n\nOptions:\n  -h, --help  Print help."
@@ -125,7 +118,7 @@ pub(crate) fn help_text(topic: HelpTopic) -> &'static str {
             "Usage:\n  cargo xtask release-gui <stage|finalize|verify> --version <x.y.z>\n\nPackage versions must be stable SemVer and match pubspec.yaml. Signing uses the minisign executable and MINISIGN_SECRET_KEY_FILE for finalize."
         }
         HelpTopic::BuildRustBridge => {
-            "Usage: cargo xtask build-rust-bridge --workspace-root <path> --configuration <Debug|Profile|Release> --output-dir <path> [--target-dir <path>]\n\nOptions:\n  --workspace-root <path>              Pure-Lang workspace root.\n  --configuration <Debug|Profile|Release>\n  --output-dir <path>                  Directory that receives pl_studio_bridge.dll.\n  --target-dir <path>                  Optional Cargo target directory.\n  -h, --help                           Print help."
+            "Usage: cargo xtask build-rust-bridge --workspace-root <path> --configuration <Debug|Profile|Release> --output-dir <path> [--target-dir <path>]\n\nOptions:\n  --workspace-root <path>              Pure-Lang workspace root.\n  --configuration <Debug|Profile|Release>\n  --output-dir <path>                  Directory that receives bridge DLL/PDB artifacts.\n  --target-dir <path>                  Optional Cargo target directory.\n  -h, --help                           Print help."
         }
     }
 }

@@ -180,7 +180,10 @@ Flutter store 不直接读取 SQLite 或配置文件，只通过 `pl-studio-brid
 - `cargo xtask build-gui [--demo] [--no-clean]`
 - `cargo xtask build-rust-bridge --workspace-root <path> --configuration <Debug|Profile|Release> --output-dir <path> [--target-dir <path>]`
 
-Studio 命令从仓库根目录调用；`generate-gui` 统一执行 Flutter dependency resolution、
+Studio 命令从仓库根目录调用；Windows GUI 运行和构建只支持上述 xtask 入口，不支持在
+`code/pure-studio` 中直接执行 `flutter run/build windows`。`pl-xtask` 自身使用独立 Cargo
+target，GUI 入口先在 workspace target 中构建 bridge，再把 Cargo JSON 报告的动态库和可选
+调试符号路径传给 Flutter。`generate-gui` 统一执行 Flutter dependency resolution、
 Riverpod/Freezed build runner、l10n 和 FRB codegen。FRB Dart/Rust runtime 与 codegen binary
 精确锁定 2.12.0，版本不匹配时生成命令立即失败。`lib/src/rust/**` 与
 `rust/src/frb_generated.rs` 提交版本库但禁止手改，CI 重新生成后执行
@@ -189,10 +192,11 @@ Riverpod/Freezed build runner、l10n 和 FRB codegen。FRB Dart/Rust runtime 与
 `verify-gui` 在生成一致性检查后执行格式化、Rust bridge tests、Riverpod lint、Flutter
 analyze 和非视觉测试；`verify-gui --integration` 额外在 Windows 上运行 desktop
 integration test。xtask 内部统一以 `code/pure-studio/` 为 Flutter 工作目录。
-`build-rust-bridge` 是 Flutter Windows CMake 内部入口，负责构建并复制
-`pl_studio_bridge.dll`/`.pdb`。GUI 运行和构建命令由 Flutter 按需解析依赖；Windows
-CMake 必须把 bridge DLL 及其 Rust 源码、manifest 和编译期嵌入资源声明为增量构建输入，
-无输入变化时不得重复启动 bridge Cargo 构建。
+`build-rust-bridge` 保留为显式构建和复制 bridge artifact 的诊断入口；未提供
+`--target-dir` 时沿用 workspace Cargo target。Windows CMake 不启动 Cargo，只校验并复制
+xtask 提供的 `pl_studio_bridge.dll`/`.pdb`。`run-gui --driver` 通过专用入口启用 Flutter
+Driver extension，供 Dart MCP 的 `flutter_driver_command` 使用，并由 resident xtask 统一管理
+Flutter、DTD 和 GUI 子进程生命周期。
 
 ## 2.10 本地数据版本
 
