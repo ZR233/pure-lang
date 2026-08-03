@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use crate::{
-    InteractionChangedEvent, InteractionKind, InteractionPayload, InteractionRequest,
-    InteractionResolution, InteractionStatus, PlanLifecycleEvent, PlanLifecycleState,
+    InteractionChangedEvent, InteractionKind, InteractionResolution, InteractionStatus,
+    PlanLifecycleEvent, PlanLifecycleState,
 };
 use anyhow::{Context, Result, bail};
 
@@ -10,14 +10,16 @@ use crate::StudioMode;
 use crate::config::StudioRole;
 use crate::studio::agent_host::root_agent_id;
 use crate::studio::ids::unix_seconds;
-use crate::studio::{SessionKind, SessionRecord};
 use crate::studio::task_coordinator::{TaskStopOrigin, TaskStopReason};
 use crate::studio::{InteractionEmitter, resolution_matches_kind};
+use crate::studio::{SessionKind, SessionRecord};
 
 use super::{
     StudioResolveInteractionResponse, StudioRuntime, StudioStopPromptResponse,
     StudioSubmitPromptOptions, StudioSubmitPromptRequest, StudioSubmitPromptResponse,
 };
+
+const TASK_RESUME_MESSAGE: &str = "Resume the active Task from canonical durable state. Read task_status and list_agents before choosing the next state-machine transition. Do not recreate completed work or infer review outcomes from pre-restart context.";
 
 impl StudioRuntime {
     pub async fn submit_prompt(
@@ -51,6 +53,75 @@ impl StudioRuntime {
                 pl_core::AgentSubmitRequest::start(session.clone(), prompt.clone())
                     .with_presentation(presentation)
                     .with_metadata(metadata),
+            )
+            .await
+            .map_err(|error| anyhow::anyhow!(error))?;
+        let cursor = handle
+            .session_snapshot(&session)
+            .map_err(|error| anyhow::anyhow!(error))?
+            .through_sequence;
+        Ok(StudioSubmitPromptResponse {
+            session_id,
+            turn_id: turn_id.into_string(),
+            cursor,
+        })
+    }
+
+    /// Resumes a paused Task after an explicit user action without projecting a
+    /// synthetic user message into the Planner timeline.
+    pub async fn resume_task(&self, session_id: String) -> Result<StudioSubmitPromptResponse> {
+        let _lifecycle_guard = self.lifecycle_lock.lock().await;
+        if !matches!(
+            self.runtime_snapshot().status,
+            crate::StudioRuntimeStatus::Ready
+        ) {
+            bail!("Studio runtime is not ready");
+        }
+        let session_record = self
+            .store
+            .read_session(&session_id)
+            .await?
+            .context("resume Task session not found")?;
+        if session_record.session_kind != SessionKind::Root {
+            bail!("only a root Task session can be resumed");
+        }
+        if session_record.agent_status != "interrupted" {
+            bail!("Task session is not paused");
+        }
+        let run = self
+            .store
+            .find_active_task_run_for_session(&session_id)
+            .await?
+            .context("active Task run not found")?;
+        let (handle, agent_id) = self.ensure_session_agent(&session_id).await?;
+        let snapshot = handle
+            .snapshot(agent_id.clone())
+            .await
+            .map_err(|error| anyhow::anyhow!(error))?;
+        if snapshot.active_turn_id.is_some()
+            || snapshot.pending_inputs > 0
+            || snapshot.activity != pl_core::AgentActivityState::Idle
+        {
+            bail!("Task Planner is already active or has pending input");
+        }
+
+        let session = pl_core::SessionId::new(session_id.clone())?;
+        let resume_revision = session_record
+            .agent_updated_at
+            .unwrap_or(session_record.updated_at);
+        let mail_id = format!("task-resume:{}:{resume_revision}", run.id);
+        let metadata = serde_json::json!({
+            "kind": "taskResume",
+            "taskRunId": run.id,
+            "source": "user",
+        });
+        let turn_id = handle
+            .submit(
+                agent_id,
+                pl_core::AgentSubmitRequest::start(session.clone(), TASK_RESUME_MESSAGE)
+                    .with_presentation(pl_core::MailboxPresentation::Hidden)
+                    .with_metadata(metadata)
+                    .with_mail_id(mail_id),
             )
             .await
             .map_err(|error| anyhow::anyhow!(error))?;
@@ -173,7 +244,7 @@ impl StudioRuntime {
         session_record: SessionRecord,
     ) -> Result<pl_core::AgentRegistration> {
         let agent_id = pl_core::AgentId::new(session_record.owner_agent_id.clone())?;
-        let (parent_id, role, depth, wake_policy) = match session_record.session_kind {
+        let (parent_id, role, depth) = match session_record.session_kind {
             SessionKind::Root => {
                 anyhow::ensure!(
                     session_record.parent_session_id.is_none()
@@ -185,12 +256,7 @@ impl StudioRuntime {
                     StudioMode::Simple => StudioRole::Executor,
                     StudioMode::Task => StudioRole::Planner,
                 };
-                (
-                    None,
-                    role,
-                    0,
-                    pl_core::AgentWakePolicy::RuntimeTerminal,
-                )
+                (None, role, 0)
             }
             SessionKind::Agent => {
                 anyhow::ensure!(
@@ -210,20 +276,7 @@ impl StudioRuntime {
                     .map_err(|error| anyhow::anyhow!(error))?;
                 let role = StudioRole::from_key(&session_record.owner_role)
                     .context("child Studio session has an unsupported owner role")?;
-                let wake_policy = match role {
-                    StudioRole::Executor | StudioRole::Reviewer => {
-                        pl_core::AgentWakePolicy::ProductGated
-                    }
-                    StudioRole::Explorer | StudioRole::Planner => {
-                        pl_core::AgentWakePolicy::RuntimeTerminal
-                    }
-                };
-                (
-                    Some(parent_id),
-                    role,
-                    parent_snapshot.identity.depth + 1,
-                    wake_policy,
-                )
+                (Some(parent_id), role, parent_snapshot.identity.depth + 1)
             }
         };
         let session_id = pl_core::SessionId::new(session_record.id.clone())?;
@@ -234,8 +287,7 @@ impl StudioRuntime {
                 role: role.id(),
                 depth,
             },
-            wake_policy,
-            sessions: vec![pl_core::AgentSessionState {
+            session: pl_core::AgentSessionState {
                 id: session_id,
                 metadata: serde_json::json!({
                     "projectId": session_record.project_id,
@@ -246,7 +298,7 @@ impl StudioRuntime {
                 last_context_tokens: None,
                 trace_sequence: 0,
                 session_event_sequence: 0,
-            }],
+            },
         };
         Ok(registration)
     }
@@ -292,7 +344,7 @@ impl StudioRuntime {
                 sessions: Vec::new(),
             });
         }
-        let detached_user_input = if current.kind == InteractionKind::UserInput {
+        let detached_user_input_owner = if current.kind == InteractionKind::UserInput {
             let (handle, owner_agent_id) = self.ensure_session_agent(&session_id).await?;
             let snapshot = handle
                 .snapshot(owner_agent_id.clone())
@@ -302,23 +354,46 @@ impl StudioRuntime {
                 .active_turn_id
                 .as_ref()
                 .is_some_and(|turn_id| turn_id.as_str() == current.scope.turn_id.as_str());
-            (!origin_turn_is_active).then_some((handle, owner_agent_id))
+            (!origin_turn_is_active).then_some(owner_agent_id)
         } else {
             None
         };
-        let resolved = self
-            .interactions
-            .resolve(&interaction_id, resolution.clone(), emitter)
-            .await?;
-        if let Some((handle, owner_agent_id)) = detached_user_input {
-            self.submit_recovered_user_input_continuation(
-                &handle,
-                owner_agent_id,
-                &current,
-                &resolution,
-            )
-            .await?;
-        }
+        let resolved = if let Some(owner_agent_id) = detached_user_input_owner {
+            let (handle, canonical_owner) = self.ensure_session_agent(&session_id).await?;
+            anyhow::ensure!(
+                canonical_owner == owner_agent_id,
+                "interaction answer resolved to a different canonical owner"
+            );
+            let mail_id = format!("interaction-resolution:{interaction_id}");
+            let message = serde_json::to_string_pretty(&serde_json::json!({
+                "type": "studioInteractionResolution",
+                "interactionId": interaction_id,
+                "originTurnId": current.scope.turn_id,
+                "payload": current.payload,
+                "resolution": resolution,
+            }))?;
+            handle
+                .submit_current_session(
+                    canonical_owner,
+                    pl_core::AgentCurrentSessionSubmitRequest::start(message)
+                        .with_presentation(pl_core::MailboxPresentation::Hidden)
+                        .with_mail_id(mail_id.clone())
+                        .with_metadata(serde_json::json!({
+                            "interactionResolutionId": interaction_id,
+                            "mailId": mail_id,
+                            "attachmentIds": [],
+                        })),
+                )
+                .await
+                .map_err(|error| anyhow::anyhow!(error))?;
+            self.interactions
+                .resolve(&interaction_id, resolution, emitter)
+                .await?
+        } else {
+            self.interactions
+                .resolve(&interaction_id, resolution, emitter)
+                .await?
+        };
         Ok(StudioResolveInteractionResponse {
             session_id,
             interaction: resolved,
@@ -397,43 +472,6 @@ impl StudioRuntime {
         })
     }
 
-    async fn submit_recovered_user_input_continuation(
-        &self,
-        handle: &pl_core::AgentRuntimeHandle,
-        owner_agent_id: pl_core::AgentId,
-        interaction: &InteractionRequest,
-        resolution: &InteractionResolution,
-    ) -> Result<()> {
-        let continuation = RecoveredUserInputContinuation {
-            continuation_type: "studioInteractionResolution",
-            interaction_id: &interaction.interaction_id,
-            origin_turn_id: &interaction.scope.turn_id,
-            payload: &interaction.payload,
-            resolution,
-        };
-        let message = serde_json::to_string_pretty(&continuation)?;
-        let recovered_interaction = serde_json::to_value(&continuation)?;
-        handle
-            .submit_current_session(
-                owner_agent_id,
-                pl_core::AgentCurrentSessionSubmitRequest::start(message)
-                    .with_delivery(pl_core::InputDelivery::Start)
-                    .with_presentation(pl_core::MailboxPresentation::SyntheticHidden)
-                    .with_mail_id(format!(
-                        "interaction-resolution:{}",
-                        interaction.interaction_id
-                    ))
-                    .with_metadata(serde_json::json!({
-                        "continuationReason": "interactionResolution",
-                        "recoveredInteraction": recovered_interaction,
-                        "attachmentIds": [],
-                    })),
-            )
-            .await
-            .map_err(|error| anyhow::anyhow!(error))?;
-        Ok(())
-    }
-
     pub(super) async fn recover_interactions_after_restart(&self) -> Result<()> {
         for interaction in self.store.list_restart_recoverable_user_inputs().await? {
             let session_id = interaction.scope.session_id.clone();
@@ -469,17 +507,6 @@ impl StudioRuntime {
         }
         Ok(())
     }
-}
-
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct RecoveredUserInputContinuation<'a> {
-    #[serde(rename = "type")]
-    continuation_type: &'static str,
-    interaction_id: &'a str,
-    origin_turn_id: &'a str,
-    payload: &'a InteractionPayload,
-    resolution: &'a InteractionResolution,
 }
 
 fn submit_metadata(

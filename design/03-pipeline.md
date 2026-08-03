@@ -11,7 +11,7 @@ Flutter action
   -> StudioConversationSink / StudioEventRuntime
   -> interfaces ports
   -> studio/config/tool/mcp adapters (sqlite/config/fs/event/tool)
-  -> pl-core AgentRuntime actor
+  -> pl-core AgentRuntime registry / AgentLoop
   -> TurnEngine turn pipeline
   -> pl-trace AgentEvent / TraceEvent / TracePart
   -> StudioEventRuntime canonical message/part snapshot + live part delta
@@ -55,16 +55,31 @@ agent 的输入队列、活动 turn、取消和恢复由 `pl-core::AgentRuntime`
 - `full-access` 不能扩大 execution profile 的工具 effect；planner、explorer、reviewer 仍受角色白名单约束
 - Task planner 的探索和协调只使用 profile 允许的读取与 harness 工具；明确写入类工具不能通过权限模式绕过
 - 用户显式要求 `subagent`/子代理分工时，核心提示必须将异步 agent 调度作为强约束；普通 shell 或文件探索不能替代子代理调度
-- 通用多 agent 协作由 `spawn_agent`、`send_input`、`list_agents` 和 `close_agent` 组成；工具只持有非泛型 `AgentRuntimeHandle`，不接触 Studio host 或 actor 内部状态。等待不暴露模型工具：`AgentEventHub` 自动订阅 direct children，合并有意义更新并在父代理没有其他工作时提交 ephemeral continuation。产品 harness 可以注册严格类型化的 spawn 工具并调用同一个 runtime；Task 根的通用 `spawn_agent` 只创建 explorer，executor 使用 `task_spawn_executor`，reviewer 使用 `task_request_review`
+- 通用多 agent 协作由 `spawn_agent`、`report_progress`、`send_message`、
+  `interrupt_agent`、`list_agents`、`wait_agents`、`read_agent_session` 和
+  `close_agent` 组成；工具只持有非泛型 `AgentRuntimeHandle`，不接触 Studio host 或
+  AgentLoop 内部状态。`wait_agents` 订阅单一 Agent Directory watch，随后重读 canonical
+  snapshot，并只因真实 progress、interaction 或 terminal 变化返回；它没有 timeout、
+  轮询或自动续轮。产品 harness 可以注册严格类型化的 spawn 工具并调用同一个 runtime；
+  Task 根的通用 `spawn_agent` 只创建 explorer，executor 使用 `task_spawn_executor`；
+  delivery reviewer 与 integrated reviewer 分别使用 `task_request_delivery_review` 和
+  `task_request_integrated_review`
 - `request_user_input` 是 Codex 风格的阻塞交互工具，root agent 与 subagent 都可用；工具通过统一 `Interaction` 域创建 `userInput` 请求，等待前端 resolution 后把答案作为工具结果返回，不作为普通用户聊天消息写入历史
-- `simple` 根聊天使用 executor，`task` 根聊天与 continuation turn 使用 planner；Task child role 由产品工具固定，所有 child 禁止继续派生
-- agent 状态正交拆为 lifecycle（`Active | Closing | Closed | Faulted`）、activity（`Idle | Queued | Running | WaitingTool | WaitingInteraction | WaitingAgents`）和 last turn outcome（`Completed | Cancelled | Failed | BudgetLimited`）
+- `simple` 根聊天使用 executor，`task` 根聊天使用 planner；Task child role 由产品工具固定，所有 child 禁止继续派生
+- agent 状态正交拆为 lifecycle（`Active | Closing | Closed | Faulted`）、activity（`Idle | Queued | Running | WaitingTool | WaitingInteraction | Cancelling`）和 last turn outcome（`Completed | Cancelled | Failed | BudgetLimited`）
 - turn 完成或失败后 agent 回到 `Active + Idle`；未关闭 agent 可继续接收输入，不存在 `resume_agent`
-- 输入使用 `QueueOnly | Start | InterruptThenStart`。actor 先持久化 FIFO queue/activity，再准备和执行 turn；取消先触发 token，超过 grace period 才 abort
-- 父代理 `Running/Queued` 时 child 更新只合并不抢占；turn 收尾消费未处理更新，否则有 live direct child 时进入 `WaitingAgents`。required finalizer 工具成功表示当前产品阶段已经完成交接，收尾必须把本轮执行期间已缓冲的 child 更新作为同一 turn 已消费事实持久确认，不能再为这些旧更新创建续轮；finalizer 之后新提交的产品事实仍可按新阶段唤醒。该状态收到更新或 child 独立无活动超时后原子入队一个合并续轮；内部 close/stop/test 等待使用基于订阅 predicate 的 `wait_until_idle`
-- 关闭父 agent 时按产品策略级联关闭子树；终态 repository commit 失败才把 actor 置为 Faulted 并拒绝新输入
-- `AgentRuntime` actor 是 session、pending input、active turn、cancel token 和 revision 的唯一状态机；durable session cursor 只由 `SessionEventHub` 的 canonical projection 分配，actor/repository 中的 sequence 仅是提交后可修复的 checkpoint 镜像；宿主只能通过 CAS `AgentCommit` 与 lifecycle saga 持久化/管理外部资源
-- 协作输入先由 runtime resolver 把模型提供的 target 解析为 `ResolvedAgentSessionTarget { root, agent, currentSession, ownerRevision }`。模型工具不接受 `sessionId`，也不得回退到 caller session；coordinator 解析 root，actor 在同一条 submit 命令内从 active turn、durable pending FIFO 或唯一 owned session 原子解析 current session。多个 idle 历史 session 没有 current 指针时必须报歧义，不能用 `lastTurn` 猜测，也不能隐式创建空 session
+- `send_message` 是唯一 follow-up 投递：目标运行时进入 steer channel，空闲时进入 durable
+  FIFO 并启动新 turn；`interrupt_agent` 只中断当前 turn，不附带下一条 prompt。AgentLoop
+  先持久化输入，再准备和执行 turn；取消先触发 token，最多等待一秒清理，超时才 abort
+- child 的 durable commit 更新 Agent Directory snapshot 与 watch revision，但不自动抢占、
+  唤醒或启动父 agent。Planner 没有其他工作时调用 `wait_agents`，从新 progress、interaction
+  或 terminal snapshot 恢复同一工具调用；用户输入、中断或关闭会取消等待
+- 关闭父 agent 时按产品策略级联关闭子树；终态 repository commit 失败才把 AgentLoop 置为 Faulted 并拒绝新输入
+- `AgentRuntime` 只维护 registry、容量和 spawn/close saga；每个 `AgentLoop` 是自身 canonical session、pending input、active turn、cancel token 和 revision 的唯一状态机。durable session cursor 只由 `SessionEventHub` 的 canonical projection 分配，AgentLoop/repository 中的 sequence 仅是提交后可修复的 checkpoint 镜像；宿主只能通过 CAS `AgentCommit` 与 lifecycle saga 持久化/管理外部资源
+- 协作输入先由 runtime resolver 把模型提供的 target 解析为 agent id；模型工具不接受
+  `sessionId`，也不得回退到 caller session。目标 AgentLoop 在同一条 submit 命令内读取
+  自己唯一的 canonical session 并复核 lifecycle；显式携带 session id 的产品入口只能与该
+  session 精确相等，不解析 current pointer、不保留多 session 容器，也不隐式创建空 session
 
 ## 3.3 核心 turn 编排
 
@@ -76,7 +91,7 @@ Uninitialized -> Initializing -> Ready -> ShuttingDown -> Stopped
                          └──────────────► Failed ◄──┘
 ```
 
-`initializeRuntime()` 完成配置、store、projection 恢复和非终态 turn 收敛；`startRuntime()` 启动后台 health、事件桥接和 `pl-core::AgentRuntime`；`shutdownRuntime()` 通过 runtime handle 取消活动 turn、停止后台任务并返回最终 snapshot。active turn、FIFO、cancellation 与 session 归 PL actor，interaction projection 和 Studio 产品资源归 `pl-studio-runtime`。
+`initializeRuntime()` 完成配置、store、projection 恢复和非终态 turn 收敛；`startRuntime()` 启动后台 health、事件桥接和 `pl-core::AgentRuntime`；`shutdownRuntime()` 通过 runtime handle 取消活动 turn、停止后台任务并返回最终 snapshot。active turn、FIFO、cancellation 与 canonical session 归对应 AgentLoop，interaction projection 和 Studio 产品资源归 `pl-studio-runtime`。
 
 核心编排步骤：
 
@@ -92,7 +107,13 @@ Uninitialized -> Initializing -> Ready -> ShuttingDown -> Stopped
 
 Rust projection 必须按真实事件推进当前 turn：排队后进入 `preparing`，模型等待与 reasoning 都进入 `thinking`，可见正文、计划和工具分别进入 `responding`、`planning`、`runningTool`，typed interaction 直接映射到三个具体等待 activity，提交终态前进入 `persisting`，最后进入 terminal state。Flutter 不得从 repository 回调、Plan lifecycle、message/part 或 pending interaction 本地反推 turn 状态；`turnChanged` 是唯一事实源。
 
-计划确认选择实施时，`resolve_interaction` 在当前 `sessionId` 内解决 interaction、写入 `accepted/implementing` lifecycle，并启动同会话实施 turn；不得创建或切换 target child session，也不得依赖 `sessionHandoffChanged` 展示实施过程。mailbox 输入使用 typed `MailboxPresentation::{User,SyntheticVisible,SyntheticHidden}` 决定 timeline 投影：普通用户 prompt 使用 `User`；只有产品明确要求展示的合成输入使用 `SyntheticVisible`；计划实施、spawn 初始任务、send/followup、内部 wake 和 continuation 全部使用 `SyntheticHidden`，不得生成用户 message/part。
+计划确认选择实施时，`resolve_interaction` 在当前 `sessionId` 内解决 interaction、写入
+`accepted/implementing` lifecycle，并以稳定 input id 向同一 canonical agent queue 提交
+显式实施输入；不得创建或切换 target child session，也不得依赖
+`sessionHandoffChanged` 展示实施过程。mailbox 输入使用 typed
+`MailboxPresentation::{User,SyntheticVisible,SyntheticHidden}` 决定 timeline 投影：普通
+用户 prompt 使用 `User`；只有产品明确要求展示的合成输入使用 `SyntheticVisible`；计划实施、
+spawn 初始任务和 `send_message` follow-up 使用 `SyntheticHidden`，不得生成用户 message/part。
 
 `TurnEngine` 在每次模型请求前用 `InstructionAssembler` 解析当前提示词快照。base/system 写入 `CompletionRequest.instructions`；developer 块作为临时 system 消息置于历史消息之前；user context 块作为临时 user 消息置于 developer 块之后、真实历史之前。临时前置消息只用于本次 provider request，不写入 `AgentSession`，因此压缩和持久化只处理真实对话历史。
 
@@ -128,12 +149,12 @@ Task executor 和 reviewer 使用 fresh session：executor 的自包含任务由
 
 进程重启会丢失 interaction 的进程内 waiter，但不会丢失 durable `userInput`。恢复时
 `userInput` 保持 pending；`toolApproval` 因外部副作用是否已经发生无法可靠判断，必须拒绝并
-取消。若用户回答时原 turn 已以 `runtime_restarted` 终止，Studio 以 interaction id 派生稳定
-mail id，把完整问题与答案作为 typed `SyntheticHidden` continuation 提交给 canonical
-session owner；该输入进入模型上下文但不生成普通用户 timeline。旧 harness 已经随
-`runtime_restarted` 取消的最新 `userInput` 可以按 turn 终态证据恢复一次，并在 turn metadata
-写入 recovery receipt；已经存在 receipt、存在更新的 pending 请求或 ownership 不明确时不得
-再次恢复。
+取消。若用户回答时原 turn 已以 `runtime_restarted` 终止，Studio 以
+`mail_id = interaction:<id>` 把完整问题与答案作为 typed `SyntheticHidden` 输入提交到
+canonical agent queue。queue 对稳定 id 的幂等接受与 interaction resolved receipt 使用同一
+durable transaction；崩溃恢复只对账 input receipt 和 interaction projection，不使用
+continuation outbox、wake receipt 或 detached 自动续轮。没有 pending 显式输入的活动 Task
+显示 paused，由用户继续；attach 不启动模型。
 
 Simple 模式主 turn 保存完成后，如果 `[skills].auto_learn = true` 且本轮达到自学习触发条件，`StudioRuntime` 启动后台 reviewer。reviewer 只开放 skills 工具，复盘结果只写项目 skills 目录；失败只记录日志，不改变本轮响应。Task 模式从规划开始由 coordinator 独占工作区写入，既不启动后台自学习 reviewer，也不允许只读的 `skill_view` 更新项目使用统计，避免计划确认前出现绕过 TaskRun 的 workspace 修改。
 
@@ -156,7 +177,8 @@ Skills 管理工具同样以 `workspaceRoot` 为边界，但写入面收窄到 `
 Agent 协作 timeline 与状态分层：
 
 - 每个 agent session 的 timeline 只记录该 owner 的 message/part/tool/interaction，以及它主动执行的 spawn、message/followup、close 等协作事实
-- child 的内部模型输出、工具、Todo、skill 和 context 只进入 child session；root Planner timeline 只保留 Planner 自身后续动作和订阅 continuation 携带的紧凑 child 摘要
+- child 的内部模型输出、工具、Todo、skill 和 context 只进入 child session；root Planner
+  timeline 只保留 Planner 自己的 spawn、send、interrupt、list、read 和 wait 工具事实
 - agent directory 是大会话级 latest snapshot，只保存身份、父子关系、状态、最近活动和 attention，供顶部切换入口与 `list_agents` 使用
 - 前端不得用 latest snapshot 渲染 timeline；同一个 agent 的多次状态变化必须在 timeline 中保留为多条独立事件
 - `AgentStateChanged` 只更新大会话目录，不进入单 agent session stream。`update_todo_list` 是 Codex `update_plan` 风格的完整 checklist replacement，不是 Plan Mode plan part；当前 agent workspace 只展示 snapshot 中最新 Todo，不在 timeline 中保留 Todo 卡片历史。实时事件与历史 snapshot 都必须携带 canonical typed 语义，Flutter 不得读取 raw `AgentEvent`。
@@ -183,9 +205,11 @@ claim，恢复必须拒绝并保留诊断，不能猜测或删除共享 session 
 - `message_parts.part_order` 在 part 首次 durable snapshot 时由 `StudioEventEnvelope.sequence` 固化；后续同 part snapshot 即使携带旧 order，也必须保留既有 order，禁止终态 snapshot 或 backfill 改变首次展示位置。
 - session 的 `mode` 表示下一轮默认协作模式，由 Studio 模式切换命令持久化；运行时按 session 当前 `mode` 构造 `TurnRequest`
 - session 的 `instruction_snapshot_json` 保存稳定 base/user/project context 和非 mode-specific developer context；Simple/Task 与 execution profile overlay 每个 turn 重新注入。
-- Task 计划与实施状态通过 durable coordinator 和 plan lifecycle 事件表达；确认实施后在同一 session 进入 `designUpdating`，由 planner continuation turn 推进，不切换会话模式。
+- Task 计划与实施状态通过 durable coordinator 和 plan lifecycle 事件表达；确认实施后在同一 session 进入 `designUpdating`，由明确实施输入推进，不切换会话模式。
 - `interactions` 表保存所有 pending/resolved/cancelled/expired 交互，是刷新与 session 切换恢复 pending UI 的事实来源。`InteractionChanged` 通过 `StudioEventKind::InteractionChanged` 广播当前 interaction 最新状态；旧 `studio-user-input-*`、`studio-tool-approval-*`、`studio-interaction-changed` sideband 事件不再作为 Studio 协议入口
-- `userInput` 的 durable record 与进程内 waiter 是两层状态：同进程回答直接唤醒 waiter；重启后回答通过稳定 mail id 的 hidden continuation 恢复语义。`toolApproval` 不做跨进程恢复，避免把不确定的外部副作用重复执行
+- `userInput` 的 durable record 与进程内 waiter 是两层状态：同进程回答直接唤醒 waiter；
+  重启后回答通过稳定 mail id 进入 canonical queue。`toolApproval` 不做跨进程恢复，避免把
+  不确定的外部副作用重复执行
 - framework attach 时会检查活动 Task 根会话最新的完整 Plan trace；如果对应确认 interaction 缺失、没有活动 TaskRun，且同一计划尚未进入实施或终态，则幂等补写 `PendingConfirmation` lifecycle 与 `planConfirmation`。该恢复只修复已有完整计划证据的投影缺口，不从局部 delta、普通文本或旧计划猜测确认内容
 - `skill_view` 成功激活 skill 时，后端写入结构化 `SkillActivated` 事件并 upsert 会话级 skill runtime fact。Studio 当前会话的 `activeSkills` 只从 `session_skills` 等结构化持久层读取，不能再从 tool result JSON 文本反解析。
 - 如果 turn 内发生上下文压缩，`AgentSession` revision 会变化，Studio 以事务重写当前 session 的有序模型上下文项并追加本轮 trace；未发生压缩时继续使用追加写入。`messages.item_type` 区分普通 `message` 与加密 `compaction`。恢复时加载两类上下文项，Studio/Flutter 消息查询与 projection 只返回普通消息，绝不暴露 checkpoint 加密内容

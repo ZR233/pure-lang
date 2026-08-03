@@ -7,7 +7,7 @@ use crate::{CloseDisposition, PureError, Result, WorktreeHandle, WorktreeManager
 
 use crate::studio::task_coordinator::TaskCoordinator;
 use crate::studio::task_coordinator::{
-    StudioSpawnIntent, StudioTaskSpawnPreparation, StudioTaskSpawnRequest,
+    ExecutorCloseDisposition, StudioSpawnIntent, StudioTaskSpawnPreparation, StudioTaskSpawnRequest,
 };
 use crate::studio::{AgentSessionSpec, StudioStore};
 
@@ -26,9 +26,9 @@ pub(in crate::studio) struct StudioSpawnLease {
 }
 
 pub(in crate::studio) struct StudioCloseLease {
-    agent_id: pl_core::AgentId,
     resource: Option<StudioAgentResource>,
-    commit_started: AtomicBool,
+    disposition: ExecutorCloseDisposition,
+    durable_discard_committed: AtomicBool,
 }
 
 impl StudioAgentLifecycle {
@@ -57,11 +57,10 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
         intent
             .validate_role(role)
             .map_err(|error| lifecycle_error(error.to_string()))?;
-        let parent_session_id = request
-            .parent
-            .active_session_id
-            .as_ref()
-            .map(ToString::to_string)
+        let parent_session_id = self
+            .resources
+            .studio_session_id(&request.parent.identity.id)
+            .await
             .or_else(|| intent.studio_session_id.clone())
             .ok_or_else(|| lifecycle_error("spawn has no Studio session boundary"))?;
         let parent_session = self
@@ -189,35 +188,55 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
     }
 
     async fn prepare_close(&self, request: CloseLifecycleRequest) -> Result<Self::CloseLease> {
+        let resource = self.resources.get(&request.agent.identity.id).await;
+        let disposition = match resource.as_ref() {
+            Some(resource) => {
+                self.coordinator
+                    .prepare_agent_close(&resource.request, &resource.preparation)
+                    .await?
+            }
+            None => ExecutorCloseDisposition::Discard,
+        };
         Ok(StudioCloseLease {
-            agent_id: request.agent.identity.id.clone(),
-            resource: self.resources.get(&request.agent.identity.id).await,
-            commit_started: AtomicBool::new(false),
+            resource,
+            disposition,
+            durable_discard_committed: AtomicBool::new(false),
         })
     }
 
     async fn commit_close(&self, lease: &Self::CloseLease) -> Result<()> {
-        lease.commit_started.store(true, Ordering::Release);
         let Some(resource) = &lease.resource else {
             return Ok(());
         };
-        self.coordinator
+        let disposition = self
+            .coordinator
             .commit_agent_close(&resource.request, &resource.preparation)
             .await?;
-        if let Some((manager, handle)) = &resource.worktree {
+        if disposition != lease.disposition {
+            return Err(lifecycle_error(
+                "Studio agent close disposition changed after preflight",
+            ));
+        }
+        if disposition == ExecutorCloseDisposition::Discard && resource.request.role == "executor" {
+            lease
+                .durable_discard_committed
+                .store(true, Ordering::Release);
+        }
+        if disposition == ExecutorCloseDisposition::Discard
+            && let Some((manager, handle)) = &resource.worktree
+        {
             manager
                 .close(handle, CloseDisposition::Discard)
                 .await
                 .map_err(|error| lifecycle_error(error.to_string()))?;
         }
-        self.resources.release_after_close(&lease.agent_id).await;
         Ok(())
     }
 
     async fn rollback_close(&self, lease: Self::CloseLease) -> Result<()> {
-        if lease.commit_started.load(Ordering::Acquire) && lease.resource.is_some() {
+        if lease.durable_discard_committed.load(Ordering::Acquire) {
             return Err(lifecycle_error(
-                "Studio agent close cannot restore a committed worktree cleanup",
+                "Studio agent close cannot restore a committed executor discard",
             ));
         }
         Ok(())

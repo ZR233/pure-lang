@@ -508,11 +508,7 @@ mod tests {
 
         let ask = store.read_interaction("ask-1").await.unwrap().unwrap();
         let stored_plan = store.read_interaction("plan-1").await.unwrap().unwrap();
-        let stored_approval = store
-            .read_interaction("approval-1")
-            .await
-            .unwrap()
-            .unwrap();
+        let stored_approval = store.read_interaction("approval-1").await.unwrap().unwrap();
         let pending = store.list_pending_interactions(&session_id).await.unwrap();
 
         assert_eq!(ask.status, InteractionStatus::Pending);

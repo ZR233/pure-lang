@@ -165,12 +165,10 @@ impl LiveTaskFixture {
                         self.diagnostics().await
                     );
                 }
-                child_is_active = task.agents.iter().any(|agent| {
-                    matches!(
-                        agent.status.as_str(),
-                        "queued" | "running" | "waitingForDelivery"
-                    )
-                });
+                child_is_active = task
+                    .agents
+                    .iter()
+                    .any(|agent| matches!(agent.status.as_str(), "queued" | "running"));
             }
 
             if self.runtime.runtime_snapshot().active_turns.is_empty() && !child_is_active {
@@ -183,35 +181,6 @@ impl LiveTaskFixture {
                 }
             } else {
                 idle_since = None;
-            }
-            tokio::time::sleep(POLL_INTERVAL).await;
-        }
-    }
-
-    pub async fn wait_for_running_executor(&self) -> Result<String> {
-        let deadline = Instant::now() + Duration::from_secs(5 * 60);
-        loop {
-            if let Some(task) = self.runtime.session_task_view(&self.session_id).await? {
-                if let Some(executor) = task
-                    .agents
-                    .iter()
-                    .find(|agent| agent.role == "executor" && agent.status == "running")
-                {
-                    return Ok(executor.agent_id.clone());
-                }
-                if is_failed_phase(&task.phase) {
-                    bail!(
-                        "Task entered terminal phase `{}` before an executor was running\n{}",
-                        task.phase,
-                        self.diagnostics().await
-                    );
-                }
-            }
-            if Instant::now() >= deadline {
-                bail!(
-                    "Task did not expose a running executor before timeout\n{}",
-                    self.diagnostics().await
-                );
             }
             tokio::time::sleep(POLL_INTERVAL).await;
         }
@@ -274,56 +243,6 @@ impl LiveTaskFixture {
                     .collect::<Result<Vec<_>>>()
             })
             .collect()
-    }
-
-    pub async fn wait_for_successful_interrupt_target(&self) -> Result<String> {
-        let deadline = Instant::now() + Duration::from_secs(5 * 60);
-        loop {
-            let snapshot = self
-                .runtime
-                .session_event_snapshot(&self.session_id)
-                .await?;
-            if let Some(tool) = snapshot
-                .parts
-                .into_iter()
-                .find_map(|part| match part.content {
-                    pl_studio_runtime::SessionPartContent::Tool { tool }
-                        if part.status == pl_studio_runtime::SessionPartStatus::Completed
-                            && part.error.is_none()
-                            && tool.name == "send_input"
-                            && tool.result.is_some() =>
-                    {
-                        Some(tool)
-                    }
-                    _ => None,
-                })
-            {
-                let arguments: serde_json::Value = serde_json::from_str(&tool.arguments)
-                    .context("headless shooter send_input arguments are not JSON")?;
-                if arguments
-                    .get("interrupt")
-                    .and_then(serde_json::Value::as_bool)
-                    != Some(true)
-                {
-                    bail!(
-                        "headless shooter send_input did not request an interrupt: {}",
-                        tool.arguments
-                    );
-                }
-                return arguments
-                    .get("target")
-                    .and_then(serde_json::Value::as_str)
-                    .map(ToOwned::to_owned)
-                    .context("headless shooter send_input arguments do not contain a target");
-            }
-            if Instant::now() >= deadline {
-                bail!(
-                    "headless shooter did not record a successful send_input call before timeout\n{}",
-                    self.diagnostics().await
-                );
-            }
-            tokio::time::sleep(POLL_INTERVAL).await;
-        }
     }
 
     pub async fn diagnostics(&self) -> String {

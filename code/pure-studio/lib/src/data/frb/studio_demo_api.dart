@@ -557,6 +557,34 @@ class DemoStudioApi implements StudioApi {
   }) => _sessionEvents.stream;
 
   @override
+  Future<SubmitPromptReceipt> resumeTask(String sessionId) async {
+    _promptGenerations.update(
+      sessionId,
+      (value) => value + 1,
+      ifAbsent: () => 1,
+    );
+    final now = DateTime.now();
+    final turnId = 'demo-turn-$_eventSequence';
+    final receipt = SubmitPromptReceipt(
+      sessionId: sessionId,
+      turnId: turnId,
+      cursor: _eventSequence,
+    );
+    _emitSessionEvent(
+      sessionId: sessionId,
+      payload: TurnChangedPayload(
+        turn: StudioTurnView(
+          turnId: turnId,
+          sessionId: sessionId,
+          state: const StudioTurnState.inProgress(StudioTurnActivity.preparing),
+          updatedAt: now,
+        ),
+      ),
+    );
+    return receipt;
+  }
+
+  @override
   Future<SubmitPromptReceipt> submitPrompt(
     String sessionId,
     String prompt,

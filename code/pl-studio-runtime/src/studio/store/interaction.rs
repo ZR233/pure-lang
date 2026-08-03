@@ -159,10 +159,7 @@ impl StudioStore {
             }
             let interaction_id: String = row.try_get("", "interaction_id")?;
             if let Some(interaction) = self.read_interaction(&interaction_id).await? {
-                if self
-                    .restart_user_input_was_recovered(&interaction)
-                    .await?
-                {
+                if self.restart_user_input_was_recovered(&interaction).await? {
                     continue;
                 }
                 recoverable.push(interaction);
@@ -205,19 +202,18 @@ impl StudioStore {
                 .as_object_mut()
                 .ok_or_else(|| anyhow::anyhow!("agent turn metadata must be a JSON object"))?;
             metadata.insert("recoveredInteraction".to_string(), receipt.clone());
-            tx
-                .execute(Statement::from_sql_and_values(
-                    DatabaseBackend::Sqlite,
-                    "UPDATE agent_turns
+            tx.execute(Statement::from_sql_and_values(
+                DatabaseBackend::Sqlite,
+                "UPDATE agent_turns
                      SET metadata_json = ?
                      WHERE agent_id = ? AND turn_id = ?",
-                    [
-                        serde_json::to_string(metadata)?.into(),
-                        agent_id.into(),
-                        interaction.scope.turn_id.clone().into(),
-                    ],
-                ))
-                .await?;
+                [
+                    serde_json::to_string(metadata)?.into(),
+                    agent_id.into(),
+                    interaction.scope.turn_id.clone().into(),
+                ],
+            ))
+            .await?;
         }
         tx.commit().await?;
         Ok(())
@@ -369,8 +365,7 @@ mod tests {
     #[tokio::test]
     async fn restart_recovery_receipt_on_any_owner_prevents_recovery() {
         let (store, session_id) = store_with_session("C:/work/restart-owner").await;
-        let interaction =
-            cancelled_user_input("ask-receipted", &session_id, "turn-receipted", 1);
+        let interaction = cancelled_user_input("ask-receipted", &session_id, "turn-receipted", 1);
         store.upsert_interaction(&interaction).await.unwrap();
         insert_cancelled_turn(
             &store,

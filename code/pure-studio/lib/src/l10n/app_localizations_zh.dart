@@ -301,6 +301,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get statusTaskAgents => '代理';
 
   @override
+  String get statusTaskCompletions => '完成报告';
+
+  @override
   String get statusTaskMerges => '合并与冲突';
 
   @override
@@ -323,6 +326,27 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get statusTaskSummary => '摘要';
+
+  @override
+  String get statusTaskStage => '阶段';
+
+  @override
+  String get statusTaskNextStep => '下一步';
+
+  @override
+  String get statusTaskSummaryAge => '摘要更新时间';
+
+  @override
+  String get statusTaskVerification => '验证';
+
+  @override
+  String get statusTaskScope => '范围';
+
+  @override
+  String get statusTaskCompletionRevision => '完成版本';
+
+  @override
+  String get statusTaskFindings => '审查发现';
 
   @override
   String get statusTaskError => '错误';
@@ -376,13 +400,28 @@ class AppLocalizationsZh extends AppLocalizations {
   String get statusTaskStatusRunning => '运行中';
 
   @override
-  String get statusTaskStatusWaitingForDelivery => '等待交付';
+  String get statusTaskStatusAwaitingCompletion => '等待完成报告';
 
   @override
-  String get statusTaskStatusDelivered => '已交付';
+  String get statusTaskStatusReadyForReview => '等待审查';
+
+  @override
+  String get statusTaskStatusReviewing => '审查中';
+
+  @override
+  String get statusTaskStatusChangesRequested => '等待修改';
+
+  @override
+  String get statusTaskStatusApproved => '已批准';
+
+  @override
+  String get statusTaskStatusMerging => '合并中';
 
   @override
   String get statusTaskStatusMerged => '已合并';
+
+  @override
+  String get statusTaskStatusNoDelivery => '无需交付';
 
   @override
   String get statusTaskStatusCompleted => '已完成';
@@ -598,6 +637,15 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get interactionContinueAfterAnswer => '回答后继续';
+
+  @override
+  String get taskResumeTitle => '任务已在重启后暂停';
+
+  @override
+  String get taskResumeBody => '从 canonical Task 与 agent 状态继续，不追加新的提示词。';
+
+  @override
+  String get taskResumeAction => '继续任务';
 
   @override
   String get interactionSubmitEmptyAnswersHint => '提交后未答问题保留空数组。';
@@ -1572,6 +1620,9 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String get statusTaskAgents => '代理';
 
   @override
+  String get statusTaskCompletions => '完成报告';
+
+  @override
   String get statusTaskMerges => '合并与冲突';
 
   @override
@@ -1594,6 +1645,27 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get statusTaskSummary => '摘要';
+
+  @override
+  String get statusTaskStage => '阶段';
+
+  @override
+  String get statusTaskNextStep => '下一步';
+
+  @override
+  String get statusTaskSummaryAge => '摘要更新时间';
+
+  @override
+  String get statusTaskVerification => '验证';
+
+  @override
+  String get statusTaskScope => '范围';
+
+  @override
+  String get statusTaskCompletionRevision => '完成版本';
+
+  @override
+  String get statusTaskFindings => '审查发现';
 
   @override
   String get statusTaskError => '错误';
@@ -1647,13 +1719,28 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String get statusTaskStatusRunning => '运行中';
 
   @override
-  String get statusTaskStatusWaitingForDelivery => '等待交付';
+  String get statusTaskStatusAwaitingCompletion => '等待完成报告';
 
   @override
-  String get statusTaskStatusDelivered => '已交付';
+  String get statusTaskStatusReadyForReview => '等待审查';
+
+  @override
+  String get statusTaskStatusReviewing => '审查中';
+
+  @override
+  String get statusTaskStatusChangesRequested => '等待修改';
+
+  @override
+  String get statusTaskStatusApproved => '已批准';
+
+  @override
+  String get statusTaskStatusMerging => '合并中';
 
   @override
   String get statusTaskStatusMerged => '已合并';
+
+  @override
+  String get statusTaskStatusNoDelivery => '无需交付';
 
   @override
   String get statusTaskStatusCompleted => '已完成';
@@ -1869,6 +1956,15 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get interactionContinueAfterAnswer => '回答后继续';
+
+  @override
+  String get taskResumeTitle => '任务已在重启后暂停';
+
+  @override
+  String get taskResumeBody => '从 canonical Task 与 agent 状态继续，不追加新的提示词。';
+
+  @override
+  String get taskResumeAction => '继续任务';
 
   @override
   String get interactionSubmitEmptyAnswersHint => '提交后未答问题保留空数组。';

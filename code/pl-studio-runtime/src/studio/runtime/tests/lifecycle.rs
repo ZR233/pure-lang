@@ -262,65 +262,6 @@ async fn failed_initial_commit_hook_keeps_plan_confirmation_pending() {
     let _ = std::fs::remove_dir_all(repository);
 }
 
-#[tokio::test]
-async fn plan_without_explicit_design_targets_cannot_enter_implementation() {
-    let unique = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let repository = std::env::temp_dir().join(format!("pure-plan-contract-{unique}"));
-    let home = std::env::temp_dir().join(format!("pure-plan-contract-home-{unique}"));
-    tokio::fs::create_dir_all(&repository).await.unwrap();
-    let store = StudioStore::open_memory().await.unwrap();
-    let project = store.upsert_project(&repository).await.unwrap();
-    let session = store
-        .create_session(&project.id, "Task", StudioMode::Task)
-        .await
-        .unwrap();
-    let interaction = pending_interaction(
-        "plan-confirm-missing-design",
-        &session.id,
-        InteractionKind::PlanConfirmation,
-        InteractionPayload::PlanConfirmation {
-            plan_id: "plan-missing-design".to_string(),
-            content: "Implement the task after updating the relevant design docs.".to_string(),
-        },
-    );
-    store.upsert_interaction(&interaction).await.unwrap();
-    let runtime = StudioRuntime::with_runtime_state(
-        store.clone(),
-        ConfigStore::new(crate::config::ConfigPaths::from_home(&home)),
-        StudioRuntimeState::new(),
-    );
-
-    let error = runtime
-        .resolve_interaction(
-            interaction.interaction_id.clone(),
-            crate::InteractionResolution::PlanConfirmation {
-                decision: crate::PlanConfirmationResolution::ImplementFreshContext,
-                content: None,
-                reason: None,
-            },
-        )
-        .await
-        .expect_err("plan without a concrete design target must remain pending");
-
-    assert!(
-        error
-            .to_string()
-            .contains("confirmed Task plan must list at least one initial design target")
-    );
-    let stored = store
-        .read_interaction(&interaction.interaction_id)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(stored.status, InteractionStatus::Pending);
-    assert!(store.list_active_task_runs().await.unwrap().is_empty());
-    let _ = tokio::fs::remove_dir_all(repository).await;
-    let _ = tokio::fs::remove_dir_all(home).await;
-}
-
 async fn assert_failed_task_preflight_keeps_confirmation_pending(
     repository: &std::path::Path,
     suffix: &str,
@@ -490,96 +431,7 @@ async fn initialize_runtime_recovers_user_input_and_cancels_tool_approval() {
 }
 
 #[tokio::test]
-async fn initialize_runtime_recovers_legacy_restart_user_input_once() {
-    let store = StudioStore::open_memory().await.unwrap();
-    let project = store
-        .upsert_project("C:/work/recovered-legacy-input")
-        .await
-        .unwrap();
-    let session = store
-        .create_session(&project.id, "Recovered legacy input", StudioMode::Simple)
-        .await
-        .unwrap();
-    let mut interaction = pending_interaction(
-        "ask-legacy-restart",
-        &session.id,
-        InteractionKind::UserInput,
-        InteractionPayload::UserInput {
-            questions: Vec::new(),
-        },
-    );
-    interaction.status = InteractionStatus::Cancelled;
-    interaction.updated_at = 2;
-    interaction.resolved_at = Some(2);
-    interaction.resolution = Some(crate::InteractionResolution::UserInput {
-        answers: Default::default(),
-    });
-    store.upsert_interaction(&interaction).await.unwrap();
-    let owner = crate::studio::agent_host::root_agent_id(&session.id);
-    store
-        .execute_test_sql(&format!(
-            "INSERT INTO agent_turns (
-                 agent_id, turn_id, session_id, status, reason, usage_json,
-                 metadata_json, started_at, finished_at
-             ) VALUES (
-                 '{owner}', '{}', '{}', 'cancelled', 'runtime_restarted',
-                 '{{}}', '{{\"existing\":\"kept\"}}', 1, 2
-             )",
-            interaction.scope.turn_id, session.id
-        ))
-        .await;
-    let unique = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let home = std::env::temp_dir().join(format!("pure-recovered-legacy-home-{unique}"));
-    let runtime = StudioRuntime::with_runtime_state(
-        store.clone(),
-        ConfigStore::new(crate::config::ConfigPaths::from_home(&home)),
-        StudioRuntimeState::new(),
-    );
-
-    runtime.initialize_runtime().await.unwrap();
-
-    let recovered = store
-        .read_interaction(&interaction.interaction_id)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(recovered.status, InteractionStatus::Pending);
-    assert_eq!(recovered.resolution, None);
-    assert_eq!(recovered.resolved_at, None);
-    let metadata = store
-        .agent_turn_metadata(owner.as_str(), &interaction.scope.turn_id)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(metadata["existing"], "kept");
-    assert_eq!(
-        metadata["recoveredInteraction"]["interactionId"],
-        interaction.interaction_id
-    );
-
-    runtime.shutdown_runtime().await.unwrap();
-    let restarted = StudioRuntime::with_runtime_state(
-        store.clone(),
-        ConfigStore::new(crate::config::ConfigPaths::from_home(&home)),
-        StudioRuntimeState::new(),
-    );
-    restarted.initialize_runtime().await.unwrap();
-    let still_pending = store
-        .read_interaction(&interaction.interaction_id)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(still_pending.status, InteractionStatus::Pending);
-
-    restarted.shutdown().await;
-    let _ = tokio::fs::remove_dir_all(home).await;
-}
-
-#[tokio::test]
-async fn detached_user_input_resolution_starts_one_hidden_continuation() {
+async fn detached_user_input_resolution_queues_one_hidden_explicit_input() {
     let (base_url, server, accepted_rx, release_tx) = serve_delayed_sse().await;
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -641,17 +493,17 @@ async fn detached_user_input_resolution_starts_one_hidden_continuation() {
         ))
         .await
         .unwrap()
-        .expect("hidden continuation should be the active input");
+        .expect("hidden explicit input should be active");
     let input_json: String = row.try_get("", "input_json").unwrap();
     let input: serde_json::Value = serde_json::from_str(&input_json).unwrap();
     assert_eq!(
         input["mailId"],
         format!("interaction-resolution:{}", interaction.interaction_id)
     );
-    assert_eq!(input["presentation"]["type"], "syntheticHidden");
+    assert_eq!(input["presentation"]["type"], "hidden");
     assert_eq!(
-        input["metadata"]["continuationReason"],
-        "interactionResolution"
+        input["metadata"]["interactionResolutionId"],
+        interaction.interaction_id
     );
     let message: serde_json::Value =
         serde_json::from_str(input["message"].as_str().unwrap()).unwrap();
@@ -754,10 +606,9 @@ async fn initialize_runtime_recovers_child_interaction_with_canonical_owner() {
                 role: StudioRole::Executor.id(),
                 depth: 0,
             },
-            wake_policy: pl_core::AgentWakePolicy::RuntimeTerminal,
-            sessions: vec![pl_core::AgentSessionState::empty(
+            session: pl_core::AgentSessionState::empty(
                 pl_core::SessionId::new(root.id.clone()).unwrap(),
-            )],
+            ),
         })
         .await
         .unwrap();
@@ -769,10 +620,9 @@ async fn initialize_runtime_recovers_child_interaction_with_canonical_owner() {
                 role: StudioRole::Explorer.id(),
                 depth: 1,
             },
-            wake_policy: pl_core::AgentWakePolicy::RuntimeTerminal,
-            sessions: vec![pl_core::AgentSessionState::empty(
+            session: pl_core::AgentSessionState::empty(
                 pl_core::SessionId::new(child.id.clone()).unwrap(),
-            )],
+            ),
         })
         .await
         .unwrap();
@@ -785,10 +635,9 @@ async fn initialize_runtime_recovers_child_interaction_with_canonical_owner() {
                 role: StudioRole::Planner.id(),
                 depth: 0,
             },
-            wake_policy: pl_core::AgentWakePolicy::RuntimeTerminal,
-            sessions: vec![pl_core::AgentSessionState::empty(
+            session: pl_core::AgentSessionState::empty(
                 pl_core::SessionId::new(child.id.clone()).unwrap(),
-            )],
+            ),
         })
         .await
         .unwrap();
@@ -810,7 +659,10 @@ async fn initialize_runtime_recovers_child_interaction_with_canonical_owner() {
     assert_eq!(interaction.status, InteractionStatus::Cancelled);
     let canonical = runtime.session_event_snapshot(&child.id).await.unwrap();
     assert_eq!(
-        canonical.owner.as_ref().map(|owner| owner.agent_id.as_str()),
+        canonical
+            .owner
+            .as_ref()
+            .map(|owner| owner.agent_id.as_str()),
         Some(child_owner.as_str())
     );
     let mut subscription = runtime

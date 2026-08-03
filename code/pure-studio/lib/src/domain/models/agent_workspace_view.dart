@@ -46,6 +46,12 @@ abstract class AgentWorkspaceView with _$AgentWorkspaceView {
 
   bool get isBusy => turn?.state.isBusy ?? false;
 
+  bool get isTaskPaused =>
+      isRoot &&
+      runtime.hasActiveTask &&
+      rootSession.agentStatus == 'interrupted' &&
+      !isBusy;
+
   RoleSettingsView? role(String key) {
     for (final role in roles) {
       if (role.key == key) {

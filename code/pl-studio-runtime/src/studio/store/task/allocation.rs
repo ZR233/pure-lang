@@ -12,12 +12,11 @@ use crate::studio::entities;
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    AgentOutcomeStatus, AllocateExecutor, CompletionContract, ExecutorAllocation, TaskRunPhase,
+    AgentOutcomeStatus, AllocateExecutor, ExecutorAllocation, TaskRunPhase,
     TaskWorktreeDisposition, WorkUnitStatus, owned_paths_overlap,
 };
 
 const MAX_ACTIVE_EXECUTORS: usize = 4;
-const MAX_EXECUTOR_ATTEMPTS: u32 = 3;
 
 impl StudioStore {
     pub(crate) async fn allocate_executor(
@@ -72,10 +71,10 @@ impl StudioStore {
             .map(|unit| unit.attempt.max(0) as u32)
             .max()
             .unwrap_or(0)
-            .saturating_add(1);
-        if attempt > MAX_EXECUTOR_ATTEMPTS {
-            bail!("executor attempt must be within 1..=3");
-        }
+            .checked_add(1)
+            .context("executor attempt overflow")?;
+        let attempt_i32 =
+            i32::try_from(attempt).context("executor attempt exceeds storage range")?;
 
         let now = unix_seconds();
         let work_unit_id = new_id("work-unit");
@@ -100,7 +99,7 @@ impl StudioStore {
                 worktree_path: Set(worktree_path),
                 branch: Set(branch),
                 worktree_disposition: Set(TaskWorktreeDisposition::Protect.as_str().to_string()),
-                attempt: Set(attempt as i32),
+                attempt: Set(attempt_i32),
                 agent_id: Set(Some(input.agent_id.clone())),
                 created_at: Set(now),
                 updated_at: Set(now),
@@ -119,16 +118,9 @@ impl StudioStore {
                 requested_by_call_id: Set(input.requested_by_call_id),
                 role: Set("executor".to_string()),
                 status: Set(AgentOutcomeStatus::Queued.as_str().to_string()),
-                attempt: Set(attempt as i32),
+                attempt: Set(attempt_i32),
                 summary: Set(None),
                 error: Set(None),
-                delivery_json: Set(None),
-                review_json: Set(None),
-                completion_contract_json: Set(Some(serde_json::to_string(
-                    &CompletionContract::delivery_required(run.id.clone(), work_unit_id.clone()),
-                )?)),
-                delivery_recovery_count: Set(0),
-                terminal_observed: Set(0),
                 created_at: Set(now),
                 updated_at: Set(now),
             }
@@ -212,7 +204,14 @@ fn is_active_work_unit(status: &str) -> bool {
     matches!(
         WorkUnitStatus::from_str(status),
         Some(
-            WorkUnitStatus::Pending | WorkUnitStatus::Running | WorkUnitStatus::WaitingForDelivery
+            WorkUnitStatus::Pending
+                | WorkUnitStatus::Running
+                | WorkUnitStatus::AwaitingCompletion
+                | WorkUnitStatus::ReadyForReview
+                | WorkUnitStatus::Reviewing
+                | WorkUnitStatus::ChangesRequested
+                | WorkUnitStatus::Approved
+                | WorkUnitStatus::Merging
         )
     )
 }

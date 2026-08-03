@@ -13,6 +13,7 @@ pub struct StudioTaskRuntime {
     pub task_generation: u64,
     pub work_units: Vec<StudioTaskWorkUnitRuntime>,
     pub agents: Vec<StudioTaskAgentRuntime>,
+    pub completions: Vec<StudioTaskCompletionRuntime>,
     pub merges: Vec<StudioTaskMergeRuntime>,
     pub reviews: Vec<StudioTaskReviewRuntime>,
 }
@@ -39,6 +40,62 @@ pub struct StudioTaskAgentRuntime {
     pub summary: Option<String>,
     pub error: Option<String>,
     pub head_commit: Option<String>,
+    pub lifecycle: Option<String>,
+    pub activity: Option<String>,
+    pub progress: Option<StudioAgentProgressRuntime>,
+    pub updated_at: i64,
+    pub summary_age_seconds: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StudioAgentProgressRuntime {
+    pub stage: String,
+    pub summary: String,
+    pub next_step: String,
+    pub revision: u64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StudioAgentDirectoryEntry {
+    pub id: String,
+    pub session_id: String,
+    pub root_session_id: String,
+    pub path: String,
+    pub parent_path: Option<String>,
+    pub role: String,
+    pub task: String,
+    pub status: String,
+    pub summary: Option<String>,
+    pub depth: u32,
+    pub error: Option<String>,
+    pub reason: Option<String>,
+    pub lifecycle: String,
+    pub activity: String,
+    pub progress: Option<StudioAgentProgressRuntime>,
+    pub updated_at: i64,
+    pub summary_age_seconds: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StudioTaskCompletionRuntime {
+    pub id: String,
+    pub work_unit_id: String,
+    pub executor_agent_id: String,
+    pub revision: u32,
+    pub kind: String,
+    pub status: String,
+    pub base_commit: String,
+    pub head_commit: Option<String>,
+    pub changed_files: Vec<String>,
+    pub verification_summary: String,
+    pub worktree_path: String,
+    pub branch: String,
+    pub created_at: i64,
+    pub updated_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -55,12 +112,39 @@ pub struct StudioTaskMergeRuntime {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct StudioTaskReviewRuntime {
+    pub id: String,
     pub round: u32,
-    pub head_commit: String,
+    pub scope: String,
+    pub work_unit_id: Option<String>,
+    pub completion_id: Option<String>,
+    pub completion_revision: Option<u32>,
+    pub reviewed_head: String,
     pub verdict: String,
+    pub requested_by_call_id: String,
     pub reviewer_agent_id: Option<String>,
     pub summary: Option<String>,
-    pub design_references: Vec<String>,
+    pub design_references: Vec<StudioTaskDesignReferenceRuntime>,
+    pub findings: Vec<StudioTaskReviewFindingRuntime>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StudioTaskDesignReferenceRuntime {
+    pub path: String,
+    pub section: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StudioTaskReviewFindingRuntime {
+    pub severity: String,
+    pub title: String,
+    pub body: String,
+    pub path: Option<String>,
+    pub line: Option<u32>,
+    pub design_references: Vec<StudioTaskDesignReferenceRuntime>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

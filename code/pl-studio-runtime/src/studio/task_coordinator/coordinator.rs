@@ -286,6 +286,31 @@ impl TaskCoordinator {
                 failed_agent_runs.insert(run.id.clone());
                 continue;
             }
+            if run.phase == TaskRunPhase::Stopping {
+                let reason = run
+                    .stop_requested_reason
+                    .as_ref()
+                    .map_or("task stop resumed after restart", |reason| reason.as_str());
+                if let Err(error) = self
+                    .store
+                    .settle_agents_for_task_stop(&run.id, run.task_generation, reason)
+                    .await
+                {
+                    let message = format!("task stop recovery settlement failed: {error}");
+                    self.block_run(&run, message.clone()).await?;
+                    self.push_recovery_issue(
+                        &mut report,
+                        &run,
+                        StudioRecoveryIssueScope::Session,
+                        StudioRecoveryIssueCategory::AgentState,
+                        StudioRecoveryIssueAction::CleanupSession,
+                        message,
+                    )
+                    .await?;
+                    failed_agent_runs.insert(run.id.clone());
+                    continue;
+                }
+            }
             prepared.push(run);
         }
 
@@ -422,6 +447,31 @@ impl TaskCoordinator {
                     message,
                 )
                 .await?;
+                continue;
+            }
+            if run.phase == TaskRunPhase::Stopping {
+                let reason = run
+                    .stop_requested_reason
+                    .as_ref()
+                    .map_or("task stop resumed after restart", |reason| reason.as_str());
+                let guard = self.lock_branch_mutation().await;
+                if let Err(error) = self
+                    .stop_task_locked(&run.id, run.task_generation, reason, &guard)
+                    .await
+                {
+                    drop(guard);
+                    let message = format!("task stop recovery failed: {error}");
+                    self.block_run(&run, message.clone()).await?;
+                    self.push_recovery_issue(
+                        &mut report,
+                        &run,
+                        StudioRecoveryIssueScope::Session,
+                        StudioRecoveryIssueCategory::AgentState,
+                        StudioRecoveryIssueAction::CleanupSession,
+                        message,
+                    )
+                    .await?;
+                }
                 continue;
             }
             if resolving_conflict {

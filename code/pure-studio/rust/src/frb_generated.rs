@@ -40,7 +40,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.12.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 640900166;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1371241909;
 
 // Section: executor
 
@@ -1003,6 +1003,44 @@ let api_resolution = <crate::api::studio::types::session_stream::BridgeInteracti
                     })().await)
                 } })
 }
+fn wire__crate__api__studio__handlers__prompt__resume_task_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "resume_task",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_session_id = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, crate::api::studio::types::error::BridgeError>(
+                    (move || async move {
+                        let output_ok =
+                            crate::api::studio::handlers::prompt::resume_task(api_session_id)
+                                .await?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
 fn wire__crate__api__studio__handlers__settings__save_general_settings_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -1723,6 +1761,69 @@ impl SseDecode for crate::api::studio::types::runtime::BridgeActiveTurn {
     }
 }
 
+impl SseDecode for crate::api::studio::types::runtime::BridgeAgentDirectoryEntryDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_id = <String>::sse_decode(deserializer);
+        let mut var_sessionId = <String>::sse_decode(deserializer);
+        let mut var_rootSessionId = <String>::sse_decode(deserializer);
+        let mut var_path = <String>::sse_decode(deserializer);
+        let mut var_parentPath = <Option<String>>::sse_decode(deserializer);
+        let mut var_role = <String>::sse_decode(deserializer);
+        let mut var_task = <String>::sse_decode(deserializer);
+        let mut var_status = <String>::sse_decode(deserializer);
+        let mut var_summary = <Option<String>>::sse_decode(deserializer);
+        let mut var_depth = <u32>::sse_decode(deserializer);
+        let mut var_error = <Option<String>>::sse_decode(deserializer);
+        let mut var_reason = <Option<String>>::sse_decode(deserializer);
+        let mut var_lifecycle = <String>::sse_decode(deserializer);
+        let mut var_activity = <String>::sse_decode(deserializer);
+        let mut var_progress =
+            <Option<crate::api::studio::types::runtime::BridgeAgentProgressDto>>::sse_decode(
+                deserializer,
+            );
+        let mut var_updatedAt = <i64>::sse_decode(deserializer);
+        let mut var_summaryAgeSeconds = <u64>::sse_decode(deserializer);
+        return crate::api::studio::types::runtime::BridgeAgentDirectoryEntryDto {
+            id: var_id,
+            session_id: var_sessionId,
+            root_session_id: var_rootSessionId,
+            path: var_path,
+            parent_path: var_parentPath,
+            role: var_role,
+            task: var_task,
+            status: var_status,
+            summary: var_summary,
+            depth: var_depth,
+            error: var_error,
+            reason: var_reason,
+            lifecycle: var_lifecycle,
+            activity: var_activity,
+            progress: var_progress,
+            updated_at: var_updatedAt,
+            summary_age_seconds: var_summaryAgeSeconds,
+        };
+    }
+}
+
+impl SseDecode for crate::api::studio::types::runtime::BridgeAgentProgressDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_stage = <String>::sse_decode(deserializer);
+        let mut var_summary = <String>::sse_decode(deserializer);
+        let mut var_nextStep = <String>::sse_decode(deserializer);
+        let mut var_revision = <u64>::sse_decode(deserializer);
+        let mut var_updatedAt = <i64>::sse_decode(deserializer);
+        return crate::api::studio::types::runtime::BridgeAgentProgressDto {
+            stage: var_stage,
+            summary: var_summary,
+            next_step: var_nextStep,
+            revision: var_revision,
+            updated_at: var_updatedAt,
+        };
+    }
+}
+
 impl SseDecode for crate::api::studio::types::session_stream::BridgeAgentStatus {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -2304,6 +2405,14 @@ impl SseDecode for crate::api::studio::types::event::BridgeProductEventPayload {
                 return crate::api::studio::types::event::BridgeProductEventPayload::SessionTaskChanged{session_id: var_sessionId, task: var_task};
             }
             4 => {
+                let mut var_rootSessionId = <String>::sse_decode(deserializer);
+                let mut var_agent =
+                    <crate::api::studio::types::runtime::BridgeAgentDirectoryEntryDto>::sse_decode(
+                        deserializer,
+                    );
+                return crate::api::studio::types::event::BridgeProductEventPayload::AgentDirectoryChanged{root_session_id: var_rootSessionId, agent: var_agent};
+            }
+            5 => {
                 let mut var_laggedEvents = <u64>::sse_decode(deserializer);
                 return crate::api::studio::types::event::BridgeProductEventPayload::Stale {
                     lagged_events: var_laggedEvents,
@@ -3708,6 +3817,14 @@ impl SseDecode for crate::api::studio::types::runtime::BridgeTaskAgentDto {
         let mut var_summary = <Option<String>>::sse_decode(deserializer);
         let mut var_error = <Option<String>>::sse_decode(deserializer);
         let mut var_headCommit = <Option<String>>::sse_decode(deserializer);
+        let mut var_lifecycle = <Option<String>>::sse_decode(deserializer);
+        let mut var_activity = <Option<String>>::sse_decode(deserializer);
+        let mut var_progress =
+            <Option<crate::api::studio::types::runtime::BridgeAgentProgressDto>>::sse_decode(
+                deserializer,
+            );
+        let mut var_updatedAt = <i64>::sse_decode(deserializer);
+        let mut var_summaryAgeSeconds = <u64>::sse_decode(deserializer);
         return crate::api::studio::types::runtime::BridgeTaskAgentDto {
             agent_id: var_agentId,
             role: var_role,
@@ -3717,6 +3834,59 @@ impl SseDecode for crate::api::studio::types::runtime::BridgeTaskAgentDto {
             summary: var_summary,
             error: var_error,
             head_commit: var_headCommit,
+            lifecycle: var_lifecycle,
+            activity: var_activity,
+            progress: var_progress,
+            updated_at: var_updatedAt,
+            summary_age_seconds: var_summaryAgeSeconds,
+        };
+    }
+}
+
+impl SseDecode for crate::api::studio::types::runtime::BridgeTaskCompletionDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_id = <String>::sse_decode(deserializer);
+        let mut var_workUnitId = <String>::sse_decode(deserializer);
+        let mut var_executorAgentId = <String>::sse_decode(deserializer);
+        let mut var_revision = <u32>::sse_decode(deserializer);
+        let mut var_kind = <String>::sse_decode(deserializer);
+        let mut var_status = <String>::sse_decode(deserializer);
+        let mut var_baseCommit = <String>::sse_decode(deserializer);
+        let mut var_headCommit = <Option<String>>::sse_decode(deserializer);
+        let mut var_changedFiles = <Vec<String>>::sse_decode(deserializer);
+        let mut var_verificationSummary = <String>::sse_decode(deserializer);
+        let mut var_worktreePath = <String>::sse_decode(deserializer);
+        let mut var_branch = <String>::sse_decode(deserializer);
+        let mut var_createdAt = <i64>::sse_decode(deserializer);
+        let mut var_updatedAt = <i64>::sse_decode(deserializer);
+        return crate::api::studio::types::runtime::BridgeTaskCompletionDto {
+            id: var_id,
+            work_unit_id: var_workUnitId,
+            executor_agent_id: var_executorAgentId,
+            revision: var_revision,
+            kind: var_kind,
+            status: var_status,
+            base_commit: var_baseCommit,
+            head_commit: var_headCommit,
+            changed_files: var_changedFiles,
+            verification_summary: var_verificationSummary,
+            worktree_path: var_worktreePath,
+            branch: var_branch,
+            created_at: var_createdAt,
+            updated_at: var_updatedAt,
+        };
+    }
+}
+
+impl SseDecode for crate::api::studio::types::runtime::BridgeTaskDesignReferenceDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_path = <String>::sse_decode(deserializer);
+        let mut var_section = <String>::sse_decode(deserializer);
+        return crate::api::studio::types::runtime::BridgeTaskDesignReferenceDto {
+            path: var_path,
+            section: var_section,
         };
     }
 }
@@ -3744,18 +3914,63 @@ impl SseDecode for crate::api::studio::types::runtime::BridgeTaskMergeDto {
 impl SseDecode for crate::api::studio::types::runtime::BridgeTaskReviewDto {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_id = <String>::sse_decode(deserializer);
         let mut var_round = <u32>::sse_decode(deserializer);
-        let mut var_headCommit = <String>::sse_decode(deserializer);
+        let mut var_scope = <String>::sse_decode(deserializer);
+        let mut var_workUnitId = <Option<String>>::sse_decode(deserializer);
+        let mut var_completionId = <Option<String>>::sse_decode(deserializer);
+        let mut var_completionRevision = <Option<u32>>::sse_decode(deserializer);
+        let mut var_reviewedHead = <String>::sse_decode(deserializer);
         let mut var_verdict = <String>::sse_decode(deserializer);
+        let mut var_requestedByCallId = <String>::sse_decode(deserializer);
         let mut var_reviewerAgentId = <Option<String>>::sse_decode(deserializer);
         let mut var_summary = <Option<String>>::sse_decode(deserializer);
-        let mut var_designReferences = <Vec<String>>::sse_decode(deserializer);
+        let mut var_designReferences = <Vec<
+            crate::api::studio::types::runtime::BridgeTaskDesignReferenceDto,
+        >>::sse_decode(deserializer);
+        let mut var_findings =
+            <Vec<crate::api::studio::types::runtime::BridgeTaskReviewFindingDto>>::sse_decode(
+                deserializer,
+            );
+        let mut var_createdAt = <i64>::sse_decode(deserializer);
+        let mut var_updatedAt = <i64>::sse_decode(deserializer);
         return crate::api::studio::types::runtime::BridgeTaskReviewDto {
+            id: var_id,
             round: var_round,
-            head_commit: var_headCommit,
+            scope: var_scope,
+            work_unit_id: var_workUnitId,
+            completion_id: var_completionId,
+            completion_revision: var_completionRevision,
+            reviewed_head: var_reviewedHead,
             verdict: var_verdict,
+            requested_by_call_id: var_requestedByCallId,
             reviewer_agent_id: var_reviewerAgentId,
             summary: var_summary,
+            design_references: var_designReferences,
+            findings: var_findings,
+            created_at: var_createdAt,
+            updated_at: var_updatedAt,
+        };
+    }
+}
+
+impl SseDecode for crate::api::studio::types::runtime::BridgeTaskReviewFindingDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_severity = <String>::sse_decode(deserializer);
+        let mut var_title = <String>::sse_decode(deserializer);
+        let mut var_body = <String>::sse_decode(deserializer);
+        let mut var_path = <Option<String>>::sse_decode(deserializer);
+        let mut var_line = <Option<u32>>::sse_decode(deserializer);
+        let mut var_designReferences = <Vec<
+            crate::api::studio::types::runtime::BridgeTaskDesignReferenceDto,
+        >>::sse_decode(deserializer);
+        return crate::api::studio::types::runtime::BridgeTaskReviewFindingDto {
+            severity: var_severity,
+            title: var_title,
+            body: var_body,
+            path: var_path,
+            line: var_line,
             design_references: var_designReferences,
         };
     }
@@ -3778,6 +3993,10 @@ impl SseDecode for crate::api::studio::types::runtime::BridgeTaskRuntimeDto {
             );
         let mut var_agents =
             <Vec<crate::api::studio::types::runtime::BridgeTaskAgentDto>>::sse_decode(deserializer);
+        let mut var_completions =
+            <Vec<crate::api::studio::types::runtime::BridgeTaskCompletionDto>>::sse_decode(
+                deserializer,
+            );
         let mut var_merges =
             <Vec<crate::api::studio::types::runtime::BridgeTaskMergeDto>>::sse_decode(deserializer);
         let mut var_reviews =
@@ -3795,6 +4014,7 @@ impl SseDecode for crate::api::studio::types::runtime::BridgeTaskRuntimeDto {
             task_generation: var_taskGeneration,
             work_units: var_workUnits,
             agents: var_agents,
+            completions: var_completions,
             merges: var_merges,
             reviews: var_reviews,
         };
@@ -4428,6 +4648,38 @@ impl SseDecode for Vec<crate::api::studio::types::runtime::BridgeTaskAgentDto> {
     }
 }
 
+impl SseDecode for Vec<crate::api::studio::types::runtime::BridgeTaskCompletionDto> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(
+                <crate::api::studio::types::runtime::BridgeTaskCompletionDto>::sse_decode(
+                    deserializer,
+                ),
+            );
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::api::studio::types::runtime::BridgeTaskDesignReferenceDto> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(
+                <crate::api::studio::types::runtime::BridgeTaskDesignReferenceDto>::sse_decode(
+                    deserializer,
+                ),
+            );
+        }
+        return ans_;
+    }
+}
+
 impl SseDecode for Vec<crate::api::studio::types::runtime::BridgeTaskMergeDto> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -4450,6 +4702,22 @@ impl SseDecode for Vec<crate::api::studio::types::runtime::BridgeTaskReviewDto> 
         for idx_ in 0..len_ {
             ans_.push(
                 <crate::api::studio::types::runtime::BridgeTaskReviewDto>::sse_decode(deserializer),
+            );
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::api::studio::types::runtime::BridgeTaskReviewFindingDto> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(
+                <crate::api::studio::types::runtime::BridgeTaskReviewFindingDto>::sse_decode(
+                    deserializer,
+                ),
             );
         }
         return ans_;
@@ -4775,6 +5043,21 @@ impl SseDecode for Option<bool> {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         if (<bool>::sse_decode(deserializer)) {
             return Some(<bool>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<crate::api::studio::types::runtime::BridgeAgentProgressDto> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(
+                <crate::api::studio::types::runtime::BridgeAgentProgressDto>::sse_decode(
+                    deserializer,
+                ),
+            );
         } else {
             return None;
         }
@@ -5546,20 +5829,21 @@ fn pde_ffi_dispatcher_primary_impl(
 24 => wire__crate__api__studio__handlers__recovery__preview_project_cleanup_impl(port, ptr, rust_vec_len, data_len),
 25 => wire__crate__api__studio__handlers__recovery__preview_recovery_issue_cleanup_impl(port, ptr, rust_vec_len, data_len),
 26 => wire__crate__api__studio__handlers__prompt__resolve_interaction_impl(port, ptr, rust_vec_len, data_len),
-27 => wire__crate__api__studio__handlers__settings__save_general_settings_impl(port, ptr, rust_vec_len, data_len),
-28 => wire__crate__api__studio__handlers__settings__save_instructions_settings_impl(port, ptr, rust_vec_len, data_len),
-29 => wire__crate__api__studio__handlers__settings__save_mcp_settings_impl(port, ptr, rust_vec_len, data_len),
-30 => wire__crate__api__studio__handlers__settings__save_provider_settings_impl(port, ptr, rust_vec_len, data_len),
-31 => wire__crate__api__studio__handlers__settings__save_runtime_permission_mode_impl(port, ptr, rust_vec_len, data_len),
-32 => wire__crate__api__studio__handlers__settings__save_skills_settings_impl(port, ptr, rust_vec_len, data_len),
-33 => wire__crate__api__studio__handlers__settings__save_web_search_settings_impl(port, ptr, rust_vec_len, data_len),
-34 => wire__crate__api__studio__handlers__lifecycle__select_project_impl(port, ptr, rust_vec_len, data_len),
-35 => wire__crate__api__studio__handlers__session__set_model_role_impl(port, ptr, rust_vec_len, data_len),
-36 => wire__crate__api__studio__handlers__session__set_session_mode_impl(port, ptr, rust_vec_len, data_len),
-37 => wire__crate__api__studio__handlers__lifecycle__shutdown_runtime_impl(port, ptr, rust_vec_len, data_len),
-38 => wire__crate__api__studio__handlers__lifecycle__start_runtime_impl(port, ptr, rust_vec_len, data_len),
-39 => wire__crate__api__studio__handlers__prompt__stop_prompt_impl(port, ptr, rust_vec_len, data_len),
-40 => wire__crate__api__studio__handlers__prompt__submit_prompt_impl(port, ptr, rust_vec_len, data_len),
+27 => wire__crate__api__studio__handlers__prompt__resume_task_impl(port, ptr, rust_vec_len, data_len),
+28 => wire__crate__api__studio__handlers__settings__save_general_settings_impl(port, ptr, rust_vec_len, data_len),
+29 => wire__crate__api__studio__handlers__settings__save_instructions_settings_impl(port, ptr, rust_vec_len, data_len),
+30 => wire__crate__api__studio__handlers__settings__save_mcp_settings_impl(port, ptr, rust_vec_len, data_len),
+31 => wire__crate__api__studio__handlers__settings__save_provider_settings_impl(port, ptr, rust_vec_len, data_len),
+32 => wire__crate__api__studio__handlers__settings__save_runtime_permission_mode_impl(port, ptr, rust_vec_len, data_len),
+33 => wire__crate__api__studio__handlers__settings__save_skills_settings_impl(port, ptr, rust_vec_len, data_len),
+34 => wire__crate__api__studio__handlers__settings__save_web_search_settings_impl(port, ptr, rust_vec_len, data_len),
+35 => wire__crate__api__studio__handlers__lifecycle__select_project_impl(port, ptr, rust_vec_len, data_len),
+36 => wire__crate__api__studio__handlers__session__set_model_role_impl(port, ptr, rust_vec_len, data_len),
+37 => wire__crate__api__studio__handlers__session__set_session_mode_impl(port, ptr, rust_vec_len, data_len),
+38 => wire__crate__api__studio__handlers__lifecycle__shutdown_runtime_impl(port, ptr, rust_vec_len, data_len),
+39 => wire__crate__api__studio__handlers__lifecycle__start_runtime_impl(port, ptr, rust_vec_len, data_len),
+40 => wire__crate__api__studio__handlers__prompt__stop_prompt_impl(port, ptr, rust_vec_len, data_len),
+41 => wire__crate__api__studio__handlers__prompt__submit_prompt_impl(port, ptr, rust_vec_len, data_len),
                         _ => unreachable!(),
                     }
 }
@@ -5636,6 +5920,70 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::runtime::Bridg
     for crate::api::studio::types::runtime::BridgeActiveTurn
 {
     fn into_into_dart(self) -> crate::api::studio::types::runtime::BridgeActiveTurn {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart
+    for crate::api::studio::types::runtime::BridgeAgentDirectoryEntryDto
+{
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.id.into_into_dart().into_dart(),
+            self.session_id.into_into_dart().into_dart(),
+            self.root_session_id.into_into_dart().into_dart(),
+            self.path.into_into_dart().into_dart(),
+            self.parent_path.into_into_dart().into_dart(),
+            self.role.into_into_dart().into_dart(),
+            self.task.into_into_dart().into_dart(),
+            self.status.into_into_dart().into_dart(),
+            self.summary.into_into_dart().into_dart(),
+            self.depth.into_into_dart().into_dart(),
+            self.error.into_into_dart().into_dart(),
+            self.reason.into_into_dart().into_dart(),
+            self.lifecycle.into_into_dart().into_dart(),
+            self.activity.into_into_dart().into_dart(),
+            self.progress.into_into_dart().into_dart(),
+            self.updated_at.into_into_dart().into_dart(),
+            self.summary_age_seconds.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::runtime::BridgeAgentDirectoryEntryDto
+{
+}
+impl
+    flutter_rust_bridge::IntoIntoDart<
+        crate::api::studio::types::runtime::BridgeAgentDirectoryEntryDto,
+    > for crate::api::studio::types::runtime::BridgeAgentDirectoryEntryDto
+{
+    fn into_into_dart(self) -> crate::api::studio::types::runtime::BridgeAgentDirectoryEntryDto {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::studio::types::runtime::BridgeAgentProgressDto {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.stage.into_into_dart().into_dart(),
+            self.summary.into_into_dart().into_dart(),
+            self.next_step.into_into_dart().into_dart(),
+            self.revision.into_into_dart().into_dart(),
+            self.updated_at.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::runtime::BridgeAgentProgressDto
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::runtime::BridgeAgentProgressDto>
+    for crate::api::studio::types::runtime::BridgeAgentProgressDto
+{
+    fn into_into_dart(self) -> crate::api::studio::types::runtime::BridgeAgentProgressDto {
         self
     }
 }
@@ -6365,38 +6713,22 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::event::BridgeP
 // Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::studio::types::event::BridgeProductEventPayload {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
-        match self {
-            crate::api::studio::types::event::BridgeProductEventPayload::SessionListChanged {
-                project_id,
-                sessions,
-            } => [
-                0.into_dart(),
-                project_id.into_into_dart().into_dart(),
-                sessions.into_into_dart().into_dart(),
-            ]
-            .into_dart(),
-            crate::api::studio::types::event::BridgeProductEventPayload::McpHealthChanged {
-                health,
-            } => [1.into_dart(), health.into_into_dart().into_dart()].into_dart(),
-            crate::api::studio::types::event::BridgeProductEventPayload::LspHealthChanged {
-                health,
-            } => [2.into_dart(), health.into_into_dart().into_dart()].into_dart(),
-            crate::api::studio::types::event::BridgeProductEventPayload::SessionTaskChanged {
-                session_id,
-                task,
-            } => [
-                3.into_dart(),
-                session_id.into_into_dart().into_dart(),
-                task.into_into_dart().into_dart(),
-            ]
-            .into_dart(),
-            crate::api::studio::types::event::BridgeProductEventPayload::Stale {
-                lagged_events,
-            } => [4.into_dart(), lagged_events.into_into_dart().into_dart()].into_dart(),
-            _ => {
-                unimplemented!("");
-            }
-        }
+        match self {crate::api::studio::types::event::BridgeProductEventPayload::SessionListChanged{project_id,sessions} => { [0.into_dart(),
+project_id.into_into_dart().into_dart(),
+sessions.into_into_dart().into_dart()].into_dart() }
+crate::api::studio::types::event::BridgeProductEventPayload::McpHealthChanged{health} => { [1.into_dart(),
+health.into_into_dart().into_dart()].into_dart() }
+crate::api::studio::types::event::BridgeProductEventPayload::LspHealthChanged{health} => { [2.into_dart(),
+health.into_into_dart().into_dart()].into_dart() }
+crate::api::studio::types::event::BridgeProductEventPayload::SessionTaskChanged{session_id,task} => { [3.into_dart(),
+session_id.into_into_dart().into_dart(),
+task.into_into_dart().into_dart()].into_dart() }
+crate::api::studio::types::event::BridgeProductEventPayload::AgentDirectoryChanged{root_session_id,agent} => { [4.into_dart(),
+root_session_id.into_into_dart().into_dart(),
+agent.into_into_dart().into_dart()].into_dart() }
+crate::api::studio::types::event::BridgeProductEventPayload::Stale{lagged_events} => { [5.into_dart(),
+lagged_events.into_into_dart().into_dart()].into_dart() }
+ _ => { unimplemented!(""); }}
     }
 }
 impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
@@ -8126,6 +8458,11 @@ impl flutter_rust_bridge::IntoDart for crate::api::studio::types::runtime::Bridg
             self.summary.into_into_dart().into_dart(),
             self.error.into_into_dart().into_dart(),
             self.head_commit.into_into_dart().into_dart(),
+            self.lifecycle.into_into_dart().into_dart(),
+            self.activity.into_into_dart().into_dart(),
+            self.progress.into_into_dart().into_dart(),
+            self.updated_at.into_into_dart().into_dart(),
+            self.summary_age_seconds.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -8138,6 +8475,64 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::runtime::Bridg
     for crate::api::studio::types::runtime::BridgeTaskAgentDto
 {
     fn into_into_dart(self) -> crate::api::studio::types::runtime::BridgeTaskAgentDto {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::studio::types::runtime::BridgeTaskCompletionDto {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.id.into_into_dart().into_dart(),
+            self.work_unit_id.into_into_dart().into_dart(),
+            self.executor_agent_id.into_into_dart().into_dart(),
+            self.revision.into_into_dart().into_dart(),
+            self.kind.into_into_dart().into_dart(),
+            self.status.into_into_dart().into_dart(),
+            self.base_commit.into_into_dart().into_dart(),
+            self.head_commit.into_into_dart().into_dart(),
+            self.changed_files.into_into_dart().into_dart(),
+            self.verification_summary.into_into_dart().into_dart(),
+            self.worktree_path.into_into_dart().into_dart(),
+            self.branch.into_into_dart().into_dart(),
+            self.created_at.into_into_dart().into_dart(),
+            self.updated_at.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::runtime::BridgeTaskCompletionDto
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::runtime::BridgeTaskCompletionDto>
+    for crate::api::studio::types::runtime::BridgeTaskCompletionDto
+{
+    fn into_into_dart(self) -> crate::api::studio::types::runtime::BridgeTaskCompletionDto {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart
+    for crate::api::studio::types::runtime::BridgeTaskDesignReferenceDto
+{
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.path.into_into_dart().into_dart(),
+            self.section.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::runtime::BridgeTaskDesignReferenceDto
+{
+}
+impl
+    flutter_rust_bridge::IntoIntoDart<
+        crate::api::studio::types::runtime::BridgeTaskDesignReferenceDto,
+    > for crate::api::studio::types::runtime::BridgeTaskDesignReferenceDto
+{
+    fn into_into_dart(self) -> crate::api::studio::types::runtime::BridgeTaskDesignReferenceDto {
         self
     }
 }
@@ -8170,12 +8565,21 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::runtime::Bridg
 impl flutter_rust_bridge::IntoDart for crate::api::studio::types::runtime::BridgeTaskReviewDto {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
+            self.id.into_into_dart().into_dart(),
             self.round.into_into_dart().into_dart(),
-            self.head_commit.into_into_dart().into_dart(),
+            self.scope.into_into_dart().into_dart(),
+            self.work_unit_id.into_into_dart().into_dart(),
+            self.completion_id.into_into_dart().into_dart(),
+            self.completion_revision.into_into_dart().into_dart(),
+            self.reviewed_head.into_into_dart().into_dart(),
             self.verdict.into_into_dart().into_dart(),
+            self.requested_by_call_id.into_into_dart().into_dart(),
             self.reviewer_agent_id.into_into_dart().into_dart(),
             self.summary.into_into_dart().into_dart(),
             self.design_references.into_into_dart().into_dart(),
+            self.findings.into_into_dart().into_dart(),
+            self.created_at.into_into_dart().into_dart(),
+            self.updated_at.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -8188,6 +8592,35 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::runtime::Bridg
     for crate::api::studio::types::runtime::BridgeTaskReviewDto
 {
     fn into_into_dart(self) -> crate::api::studio::types::runtime::BridgeTaskReviewDto {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart
+    for crate::api::studio::types::runtime::BridgeTaskReviewFindingDto
+{
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.severity.into_into_dart().into_dart(),
+            self.title.into_into_dart().into_dart(),
+            self.body.into_into_dart().into_dart(),
+            self.path.into_into_dart().into_dart(),
+            self.line.into_into_dart().into_dart(),
+            self.design_references.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::runtime::BridgeTaskReviewFindingDto
+{
+}
+impl
+    flutter_rust_bridge::IntoIntoDart<
+        crate::api::studio::types::runtime::BridgeTaskReviewFindingDto,
+    > for crate::api::studio::types::runtime::BridgeTaskReviewFindingDto
+{
+    fn into_into_dart(self) -> crate::api::studio::types::runtime::BridgeTaskReviewFindingDto {
         self
     }
 }
@@ -8205,6 +8638,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::studio::types::runtime::Bridg
             self.task_generation.into_into_dart().into_dart(),
             self.work_units.into_into_dart().into_dart(),
             self.agents.into_into_dart().into_dart(),
+            self.completions.into_into_dart().into_dart(),
             self.merges.into_into_dart().into_dart(),
             self.reviews.into_into_dart().into_dart(),
         ]
@@ -9319,6 +9753,43 @@ impl SseEncode for crate::api::studio::types::runtime::BridgeActiveTurn {
     }
 }
 
+impl SseEncode for crate::api::studio::types::runtime::BridgeAgentDirectoryEntryDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.id, serializer);
+        <String>::sse_encode(self.session_id, serializer);
+        <String>::sse_encode(self.root_session_id, serializer);
+        <String>::sse_encode(self.path, serializer);
+        <Option<String>>::sse_encode(self.parent_path, serializer);
+        <String>::sse_encode(self.role, serializer);
+        <String>::sse_encode(self.task, serializer);
+        <String>::sse_encode(self.status, serializer);
+        <Option<String>>::sse_encode(self.summary, serializer);
+        <u32>::sse_encode(self.depth, serializer);
+        <Option<String>>::sse_encode(self.error, serializer);
+        <Option<String>>::sse_encode(self.reason, serializer);
+        <String>::sse_encode(self.lifecycle, serializer);
+        <String>::sse_encode(self.activity, serializer);
+        <Option<crate::api::studio::types::runtime::BridgeAgentProgressDto>>::sse_encode(
+            self.progress,
+            serializer,
+        );
+        <i64>::sse_encode(self.updated_at, serializer);
+        <u64>::sse_encode(self.summary_age_seconds, serializer);
+    }
+}
+
+impl SseEncode for crate::api::studio::types::runtime::BridgeAgentProgressDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.stage, serializer);
+        <String>::sse_encode(self.summary, serializer);
+        <String>::sse_encode(self.next_step, serializer);
+        <u64>::sse_encode(self.revision, serializer);
+        <i64>::sse_encode(self.updated_at, serializer);
+    }
+}
+
 impl SseEncode for crate::api::studio::types::session_stream::BridgeAgentStatus {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -9723,53 +10194,22 @@ impl SseEncode for crate::api::studio::types::event::BridgeProductEventEnvelope 
 impl SseEncode for crate::api::studio::types::event::BridgeProductEventPayload {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        match self {
-            crate::api::studio::types::event::BridgeProductEventPayload::SessionListChanged {
-                project_id,
-                sessions,
-            } => {
-                <i32>::sse_encode(0, serializer);
-                <String>::sse_encode(project_id, serializer);
-                <Vec<crate::api::studio::types::response::SessionDto>>::sse_encode(
-                    sessions, serializer,
-                );
-            }
-            crate::api::studio::types::event::BridgeProductEventPayload::McpHealthChanged {
-                health,
-            } => {
-                <i32>::sse_encode(1, serializer);
-                <crate::api::studio::types::runtime::BridgeMcpHealthDto>::sse_encode(
-                    health, serializer,
-                );
-            }
-            crate::api::studio::types::event::BridgeProductEventPayload::LspHealthChanged {
-                health,
-            } => {
-                <i32>::sse_encode(2, serializer);
-                <crate::api::studio::types::runtime::BridgeLspHealthDto>::sse_encode(
-                    health, serializer,
-                );
-            }
-            crate::api::studio::types::event::BridgeProductEventPayload::SessionTaskChanged {
-                session_id,
-                task,
-            } => {
-                <i32>::sse_encode(3, serializer);
-                <String>::sse_encode(session_id, serializer);
-                <Option<Box<crate::api::studio::types::runtime::BridgeTaskRuntimeDto>>>::sse_encode(
-                    task, serializer,
-                );
-            }
-            crate::api::studio::types::event::BridgeProductEventPayload::Stale {
-                lagged_events,
-            } => {
-                <i32>::sse_encode(4, serializer);
-                <u64>::sse_encode(lagged_events, serializer);
-            }
-            _ => {
-                unimplemented!("");
-            }
-        }
+        match self {crate::api::studio::types::event::BridgeProductEventPayload::SessionListChanged{project_id,sessions} => { <i32>::sse_encode(0, serializer); <String>::sse_encode(project_id, serializer);
+<Vec<crate::api::studio::types::response::SessionDto>>::sse_encode(sessions, serializer);
+ }
+crate::api::studio::types::event::BridgeProductEventPayload::McpHealthChanged{health} => { <i32>::sse_encode(1, serializer); <crate::api::studio::types::runtime::BridgeMcpHealthDto>::sse_encode(health, serializer);
+ }
+crate::api::studio::types::event::BridgeProductEventPayload::LspHealthChanged{health} => { <i32>::sse_encode(2, serializer); <crate::api::studio::types::runtime::BridgeLspHealthDto>::sse_encode(health, serializer);
+ }
+crate::api::studio::types::event::BridgeProductEventPayload::SessionTaskChanged{session_id,task} => { <i32>::sse_encode(3, serializer); <String>::sse_encode(session_id, serializer);
+<Option<Box<crate::api::studio::types::runtime::BridgeTaskRuntimeDto>>>::sse_encode(task, serializer);
+ }
+crate::api::studio::types::event::BridgeProductEventPayload::AgentDirectoryChanged{root_session_id,agent} => { <i32>::sse_encode(4, serializer); <String>::sse_encode(root_session_id, serializer);
+<crate::api::studio::types::runtime::BridgeAgentDirectoryEntryDto>::sse_encode(agent, serializer);
+ }
+crate::api::studio::types::event::BridgeProductEventPayload::Stale{lagged_events} => { <i32>::sse_encode(5, serializer); <u64>::sse_encode(lagged_events, serializer);
+ }
+ _ => { unimplemented!(""); }}
     }
 }
 
@@ -10810,6 +11250,42 @@ impl SseEncode for crate::api::studio::types::runtime::BridgeTaskAgentDto {
         <Option<String>>::sse_encode(self.summary, serializer);
         <Option<String>>::sse_encode(self.error, serializer);
         <Option<String>>::sse_encode(self.head_commit, serializer);
+        <Option<String>>::sse_encode(self.lifecycle, serializer);
+        <Option<String>>::sse_encode(self.activity, serializer);
+        <Option<crate::api::studio::types::runtime::BridgeAgentProgressDto>>::sse_encode(
+            self.progress,
+            serializer,
+        );
+        <i64>::sse_encode(self.updated_at, serializer);
+        <u64>::sse_encode(self.summary_age_seconds, serializer);
+    }
+}
+
+impl SseEncode for crate::api::studio::types::runtime::BridgeTaskCompletionDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.id, serializer);
+        <String>::sse_encode(self.work_unit_id, serializer);
+        <String>::sse_encode(self.executor_agent_id, serializer);
+        <u32>::sse_encode(self.revision, serializer);
+        <String>::sse_encode(self.kind, serializer);
+        <String>::sse_encode(self.status, serializer);
+        <String>::sse_encode(self.base_commit, serializer);
+        <Option<String>>::sse_encode(self.head_commit, serializer);
+        <Vec<String>>::sse_encode(self.changed_files, serializer);
+        <String>::sse_encode(self.verification_summary, serializer);
+        <String>::sse_encode(self.worktree_path, serializer);
+        <String>::sse_encode(self.branch, serializer);
+        <i64>::sse_encode(self.created_at, serializer);
+        <i64>::sse_encode(self.updated_at, serializer);
+    }
+}
+
+impl SseEncode for crate::api::studio::types::runtime::BridgeTaskDesignReferenceDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.path, serializer);
+        <String>::sse_encode(self.section, serializer);
     }
 }
 
@@ -10828,12 +11304,42 @@ impl SseEncode for crate::api::studio::types::runtime::BridgeTaskMergeDto {
 impl SseEncode for crate::api::studio::types::runtime::BridgeTaskReviewDto {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.id, serializer);
         <u32>::sse_encode(self.round, serializer);
-        <String>::sse_encode(self.head_commit, serializer);
+        <String>::sse_encode(self.scope, serializer);
+        <Option<String>>::sse_encode(self.work_unit_id, serializer);
+        <Option<String>>::sse_encode(self.completion_id, serializer);
+        <Option<u32>>::sse_encode(self.completion_revision, serializer);
+        <String>::sse_encode(self.reviewed_head, serializer);
         <String>::sse_encode(self.verdict, serializer);
+        <String>::sse_encode(self.requested_by_call_id, serializer);
         <Option<String>>::sse_encode(self.reviewer_agent_id, serializer);
         <Option<String>>::sse_encode(self.summary, serializer);
-        <Vec<String>>::sse_encode(self.design_references, serializer);
+        <Vec<crate::api::studio::types::runtime::BridgeTaskDesignReferenceDto>>::sse_encode(
+            self.design_references,
+            serializer,
+        );
+        <Vec<crate::api::studio::types::runtime::BridgeTaskReviewFindingDto>>::sse_encode(
+            self.findings,
+            serializer,
+        );
+        <i64>::sse_encode(self.created_at, serializer);
+        <i64>::sse_encode(self.updated_at, serializer);
+    }
+}
+
+impl SseEncode for crate::api::studio::types::runtime::BridgeTaskReviewFindingDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.severity, serializer);
+        <String>::sse_encode(self.title, serializer);
+        <String>::sse_encode(self.body, serializer);
+        <Option<String>>::sse_encode(self.path, serializer);
+        <Option<u32>>::sse_encode(self.line, serializer);
+        <Vec<crate::api::studio::types::runtime::BridgeTaskDesignReferenceDto>>::sse_encode(
+            self.design_references,
+            serializer,
+        );
     }
 }
 
@@ -10854,6 +11360,10 @@ impl SseEncode for crate::api::studio::types::runtime::BridgeTaskRuntimeDto {
         );
         <Vec<crate::api::studio::types::runtime::BridgeTaskAgentDto>>::sse_encode(
             self.agents,
+            serializer,
+        );
+        <Vec<crate::api::studio::types::runtime::BridgeTaskCompletionDto>>::sse_encode(
+            self.completions,
             serializer,
         );
         <Vec<crate::api::studio::types::runtime::BridgeTaskMergeDto>>::sse_encode(
@@ -11321,6 +11831,30 @@ impl SseEncode for Vec<crate::api::studio::types::runtime::BridgeTaskAgentDto> {
     }
 }
 
+impl SseEncode for Vec<crate::api::studio::types::runtime::BridgeTaskCompletionDto> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::studio::types::runtime::BridgeTaskCompletionDto>::sse_encode(
+                item, serializer,
+            );
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::api::studio::types::runtime::BridgeTaskDesignReferenceDto> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::studio::types::runtime::BridgeTaskDesignReferenceDto>::sse_encode(
+                item, serializer,
+            );
+        }
+    }
+}
+
 impl SseEncode for Vec<crate::api::studio::types::runtime::BridgeTaskMergeDto> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -11337,6 +11871,18 @@ impl SseEncode for Vec<crate::api::studio::types::runtime::BridgeTaskReviewDto> 
         <i32>::sse_encode(self.len() as _, serializer);
         for item in self {
             <crate::api::studio::types::runtime::BridgeTaskReviewDto>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::api::studio::types::runtime::BridgeTaskReviewFindingDto> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::studio::types::runtime::BridgeTaskReviewFindingDto>::sse_encode(
+                item, serializer,
+            );
         }
     }
 }
@@ -11585,6 +12131,18 @@ impl SseEncode for Option<bool> {
         <bool>::sse_encode(self.is_some(), serializer);
         if let Some(value) = self {
             <bool>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<crate::api::studio::types::runtime::BridgeAgentProgressDto> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::studio::types::runtime::BridgeAgentProgressDto>::sse_encode(
+                value, serializer,
+            );
         }
     }
 }

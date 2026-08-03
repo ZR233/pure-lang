@@ -39,11 +39,6 @@ async fn archive_project_removes_canonical_session_state() {
              VALUES ('{agent_id}', '{{}}', 1)"
         ),
         format!(
-            "INSERT INTO agent_wake_receipts
-             (agent_id, wake_id, receipt_json, accepted_at)
-             VALUES ('{agent_id}', 'wake-1', '{{}}', 1)"
-        ),
-        format!(
             "INSERT INTO agent_turns
              (agent_id, turn_id, session_id, status, usage_json)
              VALUES ('{agent_id}', 'turn-1', '{}', 'running', '{{}}')",
@@ -84,7 +79,6 @@ async fn archive_project_removes_canonical_session_state() {
         "agent_framework_events",
         "agent_pending_inputs",
         "agent_active_inputs",
-        "agent_wake_receipts",
         "agent_turns",
         "agent_runtime_traces",
         "session_event_journal",
@@ -112,7 +106,6 @@ async fn archive_project_removes_canonical_session_state() {
             ("agent_framework_events", 0),
             ("agent_pending_inputs", 0),
             ("agent_active_inputs", 0),
-            ("agent_wake_receipts", 0),
             ("agent_turns", 0),
             ("agent_runtime_traces", 0),
             ("session_event_journal", 0),

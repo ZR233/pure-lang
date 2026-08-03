@@ -5,7 +5,8 @@ use super::output::empty_preflight_merge;
 use super::validation::ensure_preflight_delivery_identity;
 use crate::AgentRuntimeHandle;
 use crate::studio::task_coordinator::{
-    TaskCoordinator, TaskMergeAgentOutput, TaskMergeScope, TaskRunPhase,
+    AgentDelivery, AgentWorktreeDelivery, TaskCoordinator, TaskMergeAgentOutput, TaskMergeScope,
+    TaskRunPhase, WorkCompletionRecord,
 };
 
 impl TaskCoordinator {
@@ -38,7 +39,7 @@ impl TaskCoordinator {
             .collect::<Vec<_>>();
         let outcome = match outcomes.as_slice() {
             [outcome] => outcome.clone(),
-            [] => bail!("delivered executor outcome not found for agent"),
+            [] => bail!("approved executor outcome not found for agent"),
             _ => bail!("ambiguous executor outcome for agent"),
         };
         let work_unit_id = outcome
@@ -50,11 +51,19 @@ impl TaskCoordinator {
             .read_work_unit(work_unit_id)
             .await?
             .context("executor work unit not found")?;
-        let delivery = outcome
-            .delivery
-            .clone()
-            .context("completed executor outcome has no delivery")?;
-        ensure_preflight_delivery_identity(&run.id, agent_id, &work_unit, &outcome, &delivery)?;
+        let completion = self
+            .store
+            .read_approved_work_completion(work_unit_id)
+            .await?;
+        let delivery = delivery_from_completion(&completion)?;
+        ensure_preflight_delivery_identity(
+            &run.id,
+            agent_id,
+            &work_unit,
+            &outcome,
+            &completion,
+            &delivery,
+        )?;
         Ok(TaskMergeScope {
             #[cfg(test)]
             origin_phase: run.phase,
@@ -62,6 +71,7 @@ impl TaskCoordinator {
             lease,
             work_unit,
             outcome,
+            completion,
             delivery,
             merge: empty_preflight_merge(),
         })
@@ -94,4 +104,20 @@ impl TaskCoordinator {
         output.cleanup = cleanup;
         Ok(output)
     }
+}
+
+pub(super) fn delivery_from_completion(completion: &WorkCompletionRecord) -> Result<AgentDelivery> {
+    Ok(AgentDelivery {
+        worktree: AgentWorktreeDelivery {
+            path: completion.worktree_path.clone(),
+            branch: completion.branch.clone(),
+        },
+        base_commit: completion.base_commit.clone(),
+        head_commit: completion
+            .head_commit
+            .clone()
+            .context("approved delivery completion has no head commit")?,
+        changed_files: completion.changed_files.clone(),
+        verification_summary: completion.verification_summary.clone(),
+    })
 }

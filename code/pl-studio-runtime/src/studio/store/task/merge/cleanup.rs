@@ -4,6 +4,7 @@ use sea_orm::{
 };
 
 use super::super::outcome::agent_outcome_record;
+use super::super::work_completion::{delivery_from_completion, work_completion_record};
 use super::super::work_unit::work_unit_record;
 use super::super::{branch_lease_record, task_run_record};
 use super::{merge_record, parse_required_evidence};
@@ -11,7 +12,8 @@ use crate::studio::entities;
 use crate::studio::ids::unix_seconds;
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    AgentDelivery, MergeCleanupEvidence, MergeRecord, MergeStatus, TaskMergeScope, TaskRunPhase,
+    MergeCleanupEvidence, MergeRecord, MergeStatus, TaskMergeScope, TaskRunPhase,
+    WorkCompletionStatus, WorkUnitStatus,
 };
 
 impl StudioStore {
@@ -91,20 +93,29 @@ impl StudioStore {
             .one(&self.db)
             .await?
             .context("accepted merge outcome not found")?;
-        let delivery: AgentDelivery = serde_json::from_str(
-            outcome
-                .delivery_json
-                .as_deref()
-                .context("accepted merge delivery disappeared")?,
-        )?;
+        let completion =
+            entities::work_completion::Entity::find_by_id(evidence.completion_id.clone())
+                .one(&self.db)
+                .await?
+                .context("accepted merge completion not found")?;
         if work_unit.task_run_id != run.id
             || outcome.task_run_id != run.id
             || outcome.work_unit_id.as_deref() != Some(work_unit.id.as_str())
             || outcome.agent_id != merge.agent_id
             || work_unit.agent_id.as_deref() != Some(merge.agent_id.as_str())
-            || delivery.head_commit != evidence.delivery_head
+            || work_unit.status != WorkUnitStatus::Merged.as_str()
+            || completion.task_run_id != run.id
+            || completion.work_unit_id != work_unit.id
+            || completion.executor_agent_id != merge.agent_id
+            || completion.revision != i32::try_from(evidence.completion_revision)?
+            || completion.status != WorkCompletionStatus::Approved.as_str()
         {
-            bail!("accepted merge work unit, outcome, and delivery identity drifted");
+            bail!("accepted merge work unit, outcome, and completion identity drifted");
+        }
+        let completion = work_completion_record(completion)?;
+        let delivery = delivery_from_completion(&completion)?;
+        if delivery.head_commit != evidence.delivery_head {
+            bail!("accepted merge delivery head drifted");
         }
         Ok(TaskMergeScope {
             #[cfg(test)]
@@ -114,6 +125,7 @@ impl StudioStore {
             lease: branch_lease_record(lease),
             work_unit: work_unit_record(work_unit)?,
             outcome: agent_outcome_record(outcome)?,
+            completion,
             delivery,
             merge: merge_record(merge)?,
         })

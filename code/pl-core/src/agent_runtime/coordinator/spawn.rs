@@ -9,7 +9,7 @@ enum SpawnCompensation {
 pub(super) async fn register_agent<H>(
     host: &H,
     runtime: &AgentRuntimeHandle,
-    actors: &mut BTreeMap<AgentId, AgentActorHandle>,
+    actors: &mut BTreeMap<AgentId, AgentLoopHandle>,
     registration: AgentRegistration,
     options: AgentRuntimeOptions,
 ) -> AgentRuntimeResult<AgentSnapshot>
@@ -51,13 +51,13 @@ where
             });
         }
     }
-    runtime.agent_events.publish_runtime_event(&event);
+    runtime.directory.publish_runtime_event(&event);
     host.observer()
         .publish(AgentCommittedEvent::runtime(event))
         .await;
     actors.insert(
         id,
-        spawn_agent_actor(
+        spawn_agent_loop(
             host.clone(),
             state.clone(),
             runtime.clone(),
@@ -72,7 +72,7 @@ where
 pub(super) async fn spawn_child_agent<H>(
     host: &H,
     runtime: &AgentRuntimeHandle,
-    actors: &mut BTreeMap<AgentId, AgentActorHandle>,
+    actors: &mut BTreeMap<AgentId, AgentLoopHandle>,
     request: AgentSpawnRequest,
     options: AgentRuntimeOptions,
 ) -> AgentRuntimeResult<AgentSpawnResult>
@@ -95,8 +95,7 @@ where
     };
     let mut state = AgentRegistration {
         identity,
-        wake_policy: request.wake_policy,
-        sessions: vec![request.session.clone()],
+        session: request.session.clone(),
     }
     .into_durable_state();
     let child_session_id = request.session.id.clone();
@@ -106,15 +105,11 @@ where
         state.pending_inputs.push_back(PendingAgentInput {
             mail_id: format!("mail:{turn_id}"),
             turn_id: turn_id.clone(),
-            wake_id: None,
-            wake_signal_ids: Vec::new(),
             session_id: child_session_id.clone(),
             message,
-            presentation: super::super::MailboxPresentation::SyntheticHidden,
+            presentation: super::super::MailboxPresentation::Hidden,
             metadata: request.metadata,
-            trigger: super::super::MailboxTurnTrigger::StartIfIdle,
             delivery_state: Default::default(),
-            dispatch_generation: state.snapshot.dispatch_generation,
             queued_at: unix_timestamp(),
         });
         state.refresh_mailbox_snapshot();
@@ -186,7 +181,7 @@ where
         let compensated = persist_spawn_compensation(host, runtime, state, compensation).await?;
         actors.insert(
             child_id,
-            spawn_agent_actor(
+            spawn_agent_loop(
                 host.clone(),
                 compensated,
                 runtime.clone(),
@@ -197,13 +192,13 @@ where
         );
         return Err(AgentRuntimeError::Lifecycle(reason));
     }
-    runtime.agent_events.publish_runtime_event(&event);
+    runtime.directory.publish_runtime_event(&event);
     host.observer()
         .publish(AgentCommittedEvent::runtime(event))
         .await;
     actors.insert(
         child_id,
-        spawn_agent_actor(
+        spawn_agent_loop(
             host.clone(),
             state.clone(),
             runtime.clone(),
@@ -232,7 +227,6 @@ where
     state.snapshot.event_sequence = state.snapshot.event_sequence.saturating_add(1);
     state.snapshot.activity = AgentActivityState::Idle;
     state.snapshot.active_turn_id = None;
-    state.snapshot.active_session_id = None;
     match &compensation {
         SpawnCompensation::RolledBack => {
             state.pending_inputs.clear();
@@ -274,7 +268,7 @@ where
         .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
     match outcome {
         AgentCommitOutcome::Applied => {
-            runtime.agent_events.store_snapshot(state.snapshot.clone());
+            runtime.directory.store_snapshot(state.snapshot.clone());
             host.observer()
                 .publish(AgentCommittedEvent::runtime(event))
                 .await;

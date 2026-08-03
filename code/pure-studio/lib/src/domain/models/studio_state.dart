@@ -369,10 +369,7 @@ class StudioState {
       ...this.workspaceSyncBySession,
       ...?workspaceSyncBySession,
     };
-    final nextComposers = {
-      ...this.composersBySession,
-      ...?composersBySession,
-    };
+    final nextComposers = {...this.composersBySession, ...?composersBySession};
     return StudioState(
       projects: projects ?? this.projects,
       sessions: sessions ?? this.sessions,

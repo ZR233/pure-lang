@@ -1,18 +1,17 @@
-use super::super::execution::turn_outcome;
 use super::super::host::AgentLifecycleAdapter;
 use super::super::state::AgentRuntimeError;
 use super::super::{
     AgentActivityState, AgentLifecycleState, AgentRuntimeEventKind, AgentRuntimeHost,
     AgentRuntimeResult, AgentSnapshot, CloseLifecycleRequest,
 };
-use super::AgentActor;
+use super::AgentLoop;
 
 enum CloseCompensation {
     Restored,
     Faulted { reason: String },
 }
 
-impl<H> AgentActor<H>
+impl<H> AgentLoop<H>
 where
     H: AgentRuntimeHost,
 {
@@ -28,7 +27,19 @@ where
             })
             .await
             .map_err(|error| AgentRuntimeError::Lifecycle(error.to_string()))?;
-        self.abort_and_settle_active_turn().await;
+        if self.active.is_some()
+            && let Err(error) = self.interrupt_active_turn("agent_close_requested").await
+        {
+            let rollback = self.host.lifecycle().rollback_close(lease).await;
+            let reason = match rollback {
+                Ok(()) => error.to_string(),
+                Err(rollback_error) => {
+                    format!("{error}; close rollback failed: {rollback_error}")
+                }
+            };
+            self.fault_in_memory(reason.clone());
+            return Err(AgentRuntimeError::Repository(reason));
+        }
         if let Err(error) = self.flush_pending_traces().await {
             let rollback = self.host.lifecycle().rollback_close(lease).await;
             let reason = match rollback {
@@ -40,36 +51,14 @@ where
             self.fault_in_memory(reason.clone());
             return Err(AgentRuntimeError::Repository(reason));
         }
-        let close_outcome = self.active.as_ref().map(|active| {
-            turn_outcome(
-                active.turn_id.clone(),
-                active.session_id.clone(),
-                Err("agent_close_requested".to_string()),
-                true,
-            )
-            .0
-        });
         let mut closing = self.state.clone();
         closing.snapshot.lifecycle = AgentLifecycleState::Closing;
         closing.snapshot.activity = AgentActivityState::Idle;
         closing.snapshot.active_turn_id = None;
-        closing.snapshot.active_session_id = None;
-        closing.snapshot.dispatch_generation =
-            closing.snapshot.dispatch_generation.saturating_add(1);
-        closing.snapshot.mailbox_delivery_phase = super::super::MailboxDeliveryPhase::NextTurn;
         closing.active_input = None;
-        if let Some(outcome) = &close_outcome {
-            closing.snapshot.last_turn = Some(outcome.clone());
-        }
-        let event_outcome = close_outcome.clone();
         if let Err(error) = self
-            .commit_transition(closing, Vec::new(), move |snapshot| match event_outcome {
-                Some(outcome) => AgentRuntimeEventKind::TurnFinished {
-                    outcome,
-                    snapshot,
-                    finalized_with_tool: None,
-                },
-                None => AgentRuntimeEventKind::StateChanged { snapshot },
+            .commit_transition(closing, Vec::new(), |snapshot| {
+                AgentRuntimeEventKind::StateChanged { snapshot }
             })
             .await
         {
@@ -101,9 +90,7 @@ where
         closed.snapshot.lifecycle = AgentLifecycleState::Closed;
         closed.snapshot.activity = AgentActivityState::Idle;
         closed.snapshot.active_turn_id = None;
-        closed.snapshot.active_session_id = None;
         closed.snapshot.pending_inputs = 0;
-        closed.snapshot.pending_trigger_inputs = 0;
         if let Err(error) = self
             .commit_transition(closed, Vec::new(), |snapshot| {
                 AgentRuntimeEventKind::StateChanged { snapshot }
@@ -132,7 +119,6 @@ where
         let restored = matches!(compensation, CloseCompensation::Restored);
         let mut next = self.state.clone();
         next.snapshot.active_turn_id = None;
-        next.snapshot.active_session_id = None;
         next.snapshot.lifecycle = match &compensation {
             CloseCompensation::Restored => AgentLifecycleState::Active,
             CloseCompensation::Faulted { .. } => AgentLifecycleState::Faulted,
@@ -168,43 +154,8 @@ where
         if self.active.is_none() {
             return Ok(());
         }
-        self.abort_and_settle_active_turn().await;
-        if let Err(error) = self.flush_pending_traces().await {
-            self.fault_in_memory(error.to_string());
-            return Err(error);
-        }
-        let active = self
-            .active
-            .take()
-            .expect("active turn must remain until trace flush completes");
-        let (outcome, _, _) = turn_outcome(
-            active.turn_id,
-            active.session_id,
-            Err("runtime_shutdown".to_string()),
-            true,
-        );
-        let mut next = self.state.clone();
-        next.snapshot.active_turn_id = None;
-        next.snapshot.active_session_id = None;
-        next.active_input = None;
-        next.refresh_mailbox_snapshot();
-        next.snapshot.last_turn = Some(outcome.clone());
-        next.snapshot.mailbox_delivery_phase = super::super::MailboxDeliveryPhase::NextTurn;
-        next.snapshot.activity = if next.has_triggering_input() {
-            AgentActivityState::Queued
-        } else {
-            AgentActivityState::Idle
-        };
-        self.commit_transition(next, Vec::new(), |snapshot| {
-            AgentRuntimeEventKind::TurnFinished {
-                outcome,
-                snapshot,
-                finalized_with_tool: None,
-            }
-        })
-        .await
-        .inspect_err(|error| {
-            self.fault_in_memory(error.to_string());
-        })
+        self.interrupt_active_turn("runtime_shutdown")
+            .await
+            .inspect_err(|error| self.fault_in_memory(error.to_string()))
     }
 }

@@ -20,11 +20,13 @@ pub use response::{
     ZhipuCodingPlanUsageDto, ZhipuQuotaLimitDto, ZhipuToolUsageDetailDto,
 };
 pub use runtime::{
-    BridgeActiveTurn, BridgeLspHealthDto, BridgeMcpHealthDto, BridgeMcpServerDto,
-    BridgeRecoveryCleanupPreviewDto, BridgeRecoveryCleanupResourceDto, BridgeRecoveryIssueAction,
-    BridgeRecoveryIssueCategory, BridgeRecoveryIssueScope, BridgeRecoveryResourcePresence,
-    BridgeRuntimeStatus, BridgeStudioRecoveryIssueDto, BridgeTaskAgentDto, BridgeTaskMergeDto,
-    BridgeTaskReviewDto, BridgeTaskRuntimeDto, BridgeTaskWorkUnitDto, RuntimeSnapshot,
+    BridgeActiveTurn, BridgeAgentDirectoryEntryDto, BridgeAgentProgressDto, BridgeLspHealthDto,
+    BridgeMcpHealthDto, BridgeMcpServerDto, BridgeRecoveryCleanupPreviewDto,
+    BridgeRecoveryCleanupResourceDto, BridgeRecoveryIssueAction, BridgeRecoveryIssueCategory,
+    BridgeRecoveryIssueScope, BridgeRecoveryResourcePresence, BridgeRuntimeStatus,
+    BridgeStudioRecoveryIssueDto, BridgeTaskAgentDto, BridgeTaskCompletionDto,
+    BridgeTaskDesignReferenceDto, BridgeTaskMergeDto, BridgeTaskReviewDto,
+    BridgeTaskReviewFindingDto, BridgeTaskRuntimeDto, BridgeTaskWorkUnitDto, RuntimeSnapshot,
 };
 pub use session_stream::*;
 pub use settings::{

@@ -13,7 +13,7 @@ use super::{
 #[derive(Debug, Clone)]
 pub struct RestoredAgentRuntime {
     pub state: AgentDurableState,
-    pub session_projections: Vec<RestoredSessionProjection>,
+    pub session_projection: Option<RestoredSessionProjection>,
 }
 
 /// 进程恢复时用于重建 session hub 的已提交 projection 与有界 journal。
@@ -25,7 +25,7 @@ pub struct RestoredSessionProjection {
 
 /// repository 一次原子提交的完整输入。
 ///
-/// 实现必须在同一个事务中校验 revision，并写入 snapshot、sessions、turn、queue、
+/// 实现必须在同一个事务中校验 revision，并写入 snapshot、canonical session、turn、queue、
 /// durable events 与 traces。只有返回 `Applied` 后 runtime 才更新内存状态和广播事件。
 #[derive(Debug, Clone)]
 pub struct AgentCommit {

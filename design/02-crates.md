@@ -54,10 +54,12 @@
 ## 2.6 pl-core（Agent 框架）
 
 `pl-core` 是产品无关的 agent 框架，不再拥有 Pure Studio。它提供 `TurnEngine`、
-`AgentSession`、`AgentRuntime<H>`、非泛型 `AgentRuntimeHandle`、host 端口、动态执行策略和
-通用工具。详细边界见 `17-agent-runtime-host.md`。
+`AgentSession`、`AgentRuntime<H>`、非泛型 `AgentRuntimeHandle`、`AgentLoop`、
+`AgentDirectory`、host 端口、动态执行策略和通用工具。详细边界见
+`17-agent-runtime-host.md`。
 
-- `agent_runtime`：actor、命令句柄、host 端口、commit 与恢复
+- `agent_runtime`：agent registry、命令句柄、单 agent loop、running turn、host 端口、
+  commit 与恢复
 - `session_event`：公共 session projection、per-session channel、snapshot/replay 与 reducer
 - `core`：turn pipeline、工具调度和结果归一化
 - `tool`：通用工具、effect 与执行策略
@@ -70,7 +72,6 @@
 - `AgentStateRepository`
 - `AgentTurnFactory`
 - `AgentLifecycleAdapter`
-- `AgentCommitObserver`
 
 约束：
 
@@ -188,14 +189,17 @@ Riverpod/Freezed build runner、l10n 和 FRB codegen。FRB Dart/Rust runtime 与
 analyze 和非视觉测试；`verify-gui --integration` 额外在 Windows 上运行 desktop
 integration test。xtask 内部统一以 `code/pure-studio/` 为 Flutter 工作目录。
 `build-rust-bridge` 是 Flutter Windows CMake 内部入口，负责构建并复制
-`pl_studio_bridge.dll`/`.pdb`。
+`pl_studio_bridge.dll`/`.pdb`。GUI 运行和构建命令由 Flutter 按需解析依赖；Windows
+CMake 必须把 bridge DLL 及其 Rust 源码、manifest 和编译期嵌入资源声明为增量构建输入，
+无输入变化时不得重复启动 bridge Cargo 构建。
 
 ## 2.10 本地数据版本
 
-Studio SQLite 的新库使用单一基础 schema（当前 `user_version = 8`）。受支持的旧版本先
-备份，再通过事务 migration chain 升级；`user_version = 0` 且已经包含用户表的数据库属于
-不兼容 legacy schema，不进入 migration chain，而是完整归档为唯一备份后重建当前数据库。
-空的未版本化数据库可直接初始化。未来版本明确拒绝打开，迁移失败不得删除或降级原数据库。
+Studio SQLite 的新库使用单一基础 schema（当前 `user_version = 10`）。运行期只接受精确
+版本；v1-v9 或未版本化且包含用户表的数据库必须先关闭连接，完整归档数据库及 `-wal`、
+`-shm` sidecar，再创建新的 v10 数据库。空的未版本化数据库可直接初始化。高于 v10 的
+数据库明确拒绝打开并保留原文件；损坏、锁定或归档失败必须停止启动，不得覆盖原数据库。
+运行期不保留 migration dispatcher、backfill 或旧版本兼容读取。
 `config.toml` 当前 schema 为 11，继续由 Studio runtime 单点校验与升级；Flutter 不实现
 第二套迁移逻辑。
 

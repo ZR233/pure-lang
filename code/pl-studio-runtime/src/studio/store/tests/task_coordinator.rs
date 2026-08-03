@@ -1,80 +1,15 @@
 use super::*;
-use crate::studio::store::task::ContinuationSnapshotTestBarrier;
 use crate::studio::task_coordinator::*;
 
-fn create_input(session_id: &str) -> CreateTaskRun {
+fn create_input(session_id: &str, phase: TaskRunPhase) -> CreateTaskRun {
     CreateTaskRun {
         session_id: session_id.to_string(),
-        phase: TaskRunPhase::Planning,
+        phase,
         plan: "# Plan\n\nImplement it".to_string(),
         workspace_root: "C:/work/task".to_string(),
         git_common_dir: "C:/work/task/.git".to_string(),
         branch: "main".to_string(),
         head_commit: "1111111".to_string(),
-    }
-}
-
-#[tokio::test]
-async fn executor_discard_persists_cleanup_disposition_for_active_and_terminal_units() {
-    for terminal_before_discard in [false, true] {
-        let (store, run, work_unit, outcome) = delivery_transition_fixture().await;
-        if terminal_before_discard {
-            store
-                .update_work_unit(
-                    &work_unit.id,
-                    WorkUnitStatus::Failed,
-                    Some("agent-1".to_string()),
-                )
-                .await
-                .unwrap();
-            store
-                .update_agent_outcome(
-                    &outcome.id,
-                    UpdateAgentOutcome {
-                        status: AgentOutcomeStatus::Failed,
-                        summary: None,
-                        error: Some("executor failed before discard".to_string()),
-                        delivery: None,
-                        review: None,
-                    },
-                )
-                .await
-                .unwrap();
-        }
-
-        store
-            .cancel_executor_for_discard(&run.session_id, &work_unit.id, "agent-1")
-            .await
-            .unwrap();
-
-        let persisted_unit = store.read_work_unit(&work_unit.id).await.unwrap().unwrap();
-        let persisted_outcome = store
-            .list_agent_outcomes(&run.id)
-            .await
-            .unwrap()
-            .into_iter()
-            .find(|record| record.id == outcome.id)
-            .unwrap();
-        assert_eq!(
-            persisted_unit.worktree_disposition,
-            TaskWorktreeDisposition::CleanupRequested
-        );
-        assert!(matches!(
-            persisted_unit.status,
-            WorkUnitStatus::Cancelled | WorkUnitStatus::Failed
-        ));
-        assert!(matches!(
-            persisted_outcome.status,
-            AgentOutcomeStatus::Cancelled | AgentOutcomeStatus::Failed
-        ));
-        assert_eq!(
-            persisted_outcome.error.as_deref(),
-            Some(if terminal_before_discard {
-                "executor failed before discard"
-            } else {
-                "executor discarded by planner"
-            })
-        );
     }
 }
 
@@ -92,11 +27,11 @@ async fn task_run_and_branch_lease_are_created_atomically() {
         .unwrap();
 
     let (run, lease) = store
-        .create_task_run_with_lease(create_input(&session.id))
+        .create_task_run_with_lease(create_input(&session.id, TaskRunPhase::Planning))
         .await
         .unwrap();
     let error = store
-        .create_task_run_with_lease(create_input(&competing_session.id))
+        .create_task_run_with_lease(create_input(&competing_session.id, TaskRunPhase::Planning))
         .await
         .expect_err("same branch must have one lease");
 
@@ -117,10 +52,9 @@ async fn task_stop_gate_is_durable_and_keeps_lease_for_terminalization() {
         .create_session(&project.id, "Task", StudioMode::Task)
         .await
         .unwrap();
-    let mut input = create_input(&session.id);
+    let mut input = create_input(&session.id, TaskRunPhase::Implementing);
     input.workspace_root = "C:/work/task-stop".to_string();
     input.git_common_dir = "C:/work/task-stop/.git".to_string();
-    input.phase = TaskRunPhase::Implementing;
     let (run, _) = store.create_task_run_with_lease(input).await.unwrap();
 
     let requested = store
@@ -135,7 +69,7 @@ async fn task_stop_gate_is_durable_and_keeps_lease_for_terminalization() {
     assert!(requested.stop_requested);
     assert_eq!(requested.phase, TaskRunPhase::Implementing);
     assert!(store.read_branch_lease(&run.id).await.unwrap().is_some());
-    let requested_allocation = store
+    let allocation = store
         .allocate_executor(AllocateExecutor {
             session_id: session.id.clone(),
             title: "must not start after request".to_string(),
@@ -145,37 +79,19 @@ async fn task_stop_gate_is_durable_and_keeps_lease_for_terminalization() {
             requested_by_call_id: "call-after-request".to_string(),
         })
         .await;
-    let requested_allocation = match requested_allocation {
+    let error = match allocation {
         Ok(_) => panic!("stop request must reject executor allocation"),
         Err(error) => error,
     };
-    assert!(
-        requested_allocation
-            .to_string()
-            .contains("after task stop was requested")
-    );
+    assert!(error.to_string().contains("after task stop was requested"));
+
     let stopping = store
         .begin_task_stop(&run.id, &run.expected_head, requested.task_generation)
         .await
         .unwrap();
-
     assert_eq!(stopping.phase, TaskRunPhase::Stopping);
     assert!(store.read_branch_lease(&run.id).await.unwrap().is_some());
-    let allocation = store
-        .allocate_executor(AllocateExecutor {
-            session_id: session.id,
-            title: "must not start".to_string(),
-            owned_paths: vec!["src/**".to_string()],
-            agent_id: "agent-after-stop".to_string(),
-            owner_path: "/root".to_string(),
-            requested_by_call_id: "call-after-stop".to_string(),
-        })
-        .await;
-    let error = match allocation {
-        Ok(_) => panic!("stopping gate must reject executor allocation"),
-        Err(error) => error,
-    };
-    assert!(error.to_string().contains("task stop was requested"));
+
     let cancelled = store
         .cancel_task_and_release_lease(
             &run.id,
@@ -207,7 +123,7 @@ async fn task_stop_gate_is_durable_and_keeps_lease_for_terminalization() {
 }
 
 #[tokio::test]
-async fn recovery_cleanup_records_one_user_stop_terminal_generation() {
+async fn recovery_cleanup_records_one_terminal_generation_and_releases_the_lease() {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store
         .upsert_project("C:/work/recovery-cleanup-terminal")
@@ -217,7 +133,7 @@ async fn recovery_cleanup_records_one_user_stop_terminal_generation() {
         .create_session(&project.id, "Task", StudioMode::Task)
         .await
         .unwrap();
-    let mut input = create_input(&session.id);
+    let mut input = create_input(&session.id, TaskRunPhase::Implementing);
     input.workspace_root = "C:/work/recovery-cleanup-terminal".to_string();
     input.git_common_dir = "C:/work/recovery-cleanup-terminal/.git".to_string();
     let (run, _) = store.create_task_run_with_lease(input).await.unwrap();
@@ -237,260 +153,939 @@ async fn recovery_cleanup_records_one_user_stop_terminal_generation() {
 }
 
 #[tokio::test]
-async fn stopping_task_rejects_executor_delivery_without_mutating_records() {
-    let (store, run, work_unit, outcome) = delivery_transition_fixture().await;
-    let requested = store
+async fn stopping_task_rejects_completion_without_mutating_executor_records() {
+    let fixture = ExecutorFixture::new("stopping-completion").await;
+    let requested = fixture
+        .store
         .request_task_stop(
-            &run.id,
-            &run.expected_head,
+            &fixture.run.id,
+            &fixture.run.expected_head,
             TaskStopOrigin::UserRequest,
             &TaskStopReason::new("test stop").unwrap(),
         )
         .await
         .unwrap();
-    store
-        .begin_task_stop(&run.id, &run.expected_head, requested.task_generation)
-        .await
-        .unwrap();
-
-    let error = store
-        .complete_agent_delivery(&outcome.id, &work_unit.id, delivery_receipt())
-        .await
-        .expect_err("stopping task must reject executor delivery");
-
-    assert!(error.to_string().contains("not accepting agent delivery"));
-    let persisted_outcome = store
-        .list_agent_outcomes(&run.id)
-        .await
-        .unwrap()
-        .into_iter()
-        .find(|record| record.id == outcome.id)
-        .unwrap();
-    let persisted_work_unit = store.read_work_unit(&work_unit.id).await.unwrap().unwrap();
-    assert_eq!(persisted_outcome.status, AgentOutcomeStatus::Running);
-    assert_eq!(persisted_outcome.delivery, None);
-    assert_eq!(persisted_work_unit.status, WorkUnitStatus::Running);
-}
-
-#[tokio::test]
-async fn stopping_task_rejects_new_explorer_outcome() {
-    let store = StudioStore::open_memory().await.unwrap();
-    let project = store
-        .upsert_project("C:/work/task-stop-explorer")
-        .await
-        .unwrap();
-    let session = store
-        .create_session(&project.id, "Task", StudioMode::Task)
-        .await
-        .unwrap();
-    let mut input = create_input(&session.id);
-    input.workspace_root = "C:/work/task-stop-explorer".to_string();
-    input.git_common_dir = "C:/work/task-stop-explorer/.git".to_string();
-    let (run, _) = store.create_task_run_with_lease(input).await.unwrap();
-    let requested = store
-        .request_task_stop(
-            &run.id,
-            &run.expected_head,
-            TaskStopOrigin::UserRequest,
-            &TaskStopReason::new("test stop").unwrap(),
-        )
-        .await
-        .unwrap();
-    store
-        .begin_task_stop(&run.id, &run.expected_head, requested.task_generation)
-        .await
-        .unwrap();
-
-    let outcome = store
-        .create_explorer_outcome(
-            &session.id,
-            CreateAgentOutcome {
-                task_run_id: run.id.clone(),
-                work_unit_id: None,
-                agent_id: "agent-after-stop".to_string(),
-                owner_path: "/root".to_string(),
-                initiated_by: "planner".to_string(),
-                requested_by_call_id: "call-after-stop".to_string(),
-                role: "explorer".to_string(),
-                status: AgentOutcomeStatus::Queued,
-                attempt: 1,
-            },
+    fixture
+        .store
+        .begin_task_stop(
+            &fixture.run.id,
+            &fixture.run.expected_head,
+            requested.task_generation,
         )
         .await
         .unwrap();
 
-    assert_eq!(outcome, None);
-    assert!(store.list_agent_outcomes(&run.id).await.unwrap().is_empty());
+    let error = fixture
+        .store
+        .create_work_completion(
+            &fixture.outcome.id,
+            &fixture.work_unit.id,
+            WorkCompletionKind::Delivery,
+            Some(&fixture.delivery("2222222")),
+            "cargo test passed",
+        )
+        .await
+        .expect_err("stopping task must reject executor completion");
+
+    assert!(
+        error
+            .to_string()
+            .contains("not accepting executor completion")
+    );
+    assert_eq!(fixture.outcome().await.status, AgentOutcomeStatus::Running);
+    assert_eq!(fixture.work_unit().await.status, WorkUnitStatus::Running);
+    assert!(
+        fixture
+            .store
+            .list_work_completions(&fixture.run.id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[tokio::test]
-async fn worktree_owner_queries_aggregate_common_directory_and_all_runs() {
-    let store = StudioStore::open_memory().await.unwrap();
-    let mut runs = Vec::new();
-    for (index, (workspace_root, git_common_dir)) in [
-        ("C:/work/main", "C:/work/main/.git"),
-        ("C:/work/linked", "C:/work/main/.git"),
-        ("C:/other/main", "C:/other/main/.git"),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        let project = store.upsert_project(workspace_root).await.unwrap();
-        let session = store
-            .create_session(&project.id, &format!("Task {index}"), StudioMode::Task)
+async fn executor_discard_preserves_terminal_evidence_and_marks_cleanup() {
+    for terminal_before_discard in [false, true] {
+        let fixture = ExecutorFixture::new(if terminal_before_discard {
+            "discard-terminal"
+        } else {
+            "discard-active"
+        })
+        .await;
+        if terminal_before_discard {
+            fixture
+                .store
+                .update_work_unit(
+                    &fixture.work_unit.id,
+                    WorkUnitStatus::Failed,
+                    Some(fixture.agent_id.clone()),
+                )
+                .await
+                .unwrap();
+            fixture
+                .store
+                .update_agent_outcome(
+                    &fixture.outcome.id,
+                    UpdateAgentOutcome {
+                        status: AgentOutcomeStatus::Failed,
+                        summary: None,
+                        error: Some("executor failed before discard".to_string()),
+                    },
+                )
+                .await
+                .unwrap();
+        }
+
+        fixture
+            .store
+            .settle_executor_close(
+                &fixture.run.session_id,
+                &fixture.work_unit.id,
+                &fixture.agent_id,
+            )
             .await
             .unwrap();
-        let mut input = create_input(&session.id);
-        input.workspace_root = workspace_root.to_string();
-        input.git_common_dir = git_common_dir.to_string();
-        input.branch = format!("task-{index}");
-        runs.push(store.create_task_run_with_lease(input).await.unwrap().0);
+
+        let unit = fixture.work_unit().await;
+        let outcome = fixture.outcome().await;
+        assert_eq!(
+            unit.worktree_disposition,
+            TaskWorktreeDisposition::CleanupRequested
+        );
+        assert!(matches!(
+            unit.status,
+            WorkUnitStatus::Cancelled | WorkUnitStatus::Failed
+        ));
+        assert!(matches!(
+            outcome.status,
+            AgentOutcomeStatus::Cancelled | AgentOutcomeStatus::Failed
+        ));
+        assert_eq!(
+            outcome.error.as_deref(),
+            Some(if terminal_before_discard {
+                "executor failed before discard"
+            } else {
+                "executor discarded by planner"
+            })
+        );
     }
-
-    let common = store
-        .list_task_worktree_owners_by_git_common_dir("C:/work/main/.git")
-        .await
-        .unwrap();
-    let all = store.list_all_task_worktree_owners().await.unwrap();
-    let mut common_ids = common
-        .into_iter()
-        .map(|owner| owner.run.id)
-        .collect::<Vec<_>>();
-    let mut all_ids = all
-        .into_iter()
-        .map(|owner| owner.run.id)
-        .collect::<Vec<_>>();
-    let mut expected_common = vec![runs[0].id.clone(), runs[1].id.clone()];
-    let mut expected_all = runs.into_iter().map(|run| run.id).collect::<Vec<_>>();
-    common_ids.sort();
-    all_ids.sort();
-    expected_common.sort();
-    expected_all.sort();
-
-    assert_eq!(common_ids, expected_common);
-    assert_eq!(all_ids, expected_all);
 }
 
 #[tokio::test]
-async fn restart_reconciliation_cancels_transient_agents_and_preserves_delivery() {
+async fn executor_close_preflight_rejects_reviewing_delivery_without_side_effects() {
+    let fixture = ExecutorFixture::new("close-preflight-reviewing").await;
+    let completion = fixture
+        .store
+        .create_work_completion(
+            &fixture.outcome.id,
+            &fixture.work_unit.id,
+            WorkCompletionKind::Delivery,
+            Some(&fixture.delivery("2222222")),
+            "cargo test passed",
+        )
+        .await
+        .unwrap();
+
+    let error = fixture
+        .store
+        .preflight_executor_close(
+            &fixture.run.session_id,
+            &fixture.work_unit.id,
+            &fixture.agent_id,
+        )
+        .await
+        .expect_err("ready-for-review executor must not begin closing");
+
+    assert!(error.to_string().contains("cannot close"));
+    assert_eq!(
+        fixture.work_unit().await.status,
+        WorkUnitStatus::ReadyForReview
+    );
+    assert_eq!(
+        fixture.work_unit().await.worktree_disposition,
+        TaskWorktreeDisposition::Protect
+    );
+    assert_eq!(
+        fixture.outcome().await.status,
+        AgentOutcomeStatus::Completed
+    );
+    assert_eq!(
+        fixture
+            .store
+            .list_work_completions(&fixture.run.id)
+            .await
+            .unwrap(),
+        vec![completion]
+    );
+}
+
+#[tokio::test]
+async fn approved_executor_close_preserves_resources_until_merge() {
+    let fixture = ExecutorFixture::new("close-approved").await;
+    fixture
+        .store
+        .create_work_completion(
+            &fixture.outcome.id,
+            &fixture.work_unit.id,
+            WorkCompletionKind::Delivery,
+            Some(&fixture.delivery("2222222")),
+            "cargo test passed",
+        )
+        .await
+        .unwrap();
+    fixture
+        .finish_delivery_review(
+            "reviewer-approved-close",
+            "review-call-approved-close",
+            AgentReview {
+                verdict: ReviewVerdict::Pass,
+                summary: "delivery is ready".to_string(),
+                design_references: Vec::new(),
+                findings: Vec::new(),
+            },
+        )
+        .await;
+
+    assert_eq!(
+        fixture
+            .store
+            .preflight_executor_close(
+                &fixture.run.session_id,
+                &fixture.work_unit.id,
+                &fixture.agent_id,
+            )
+            .await
+            .unwrap(),
+        ExecutorCloseDisposition::PreserveForMerge
+    );
+    assert_eq!(
+        fixture
+            .store
+            .settle_executor_close(
+                &fixture.run.session_id,
+                &fixture.work_unit.id,
+                &fixture.agent_id,
+            )
+            .await
+            .unwrap(),
+        ExecutorCloseDisposition::PreserveForMerge
+    );
+    assert_eq!(fixture.work_unit().await.status, WorkUnitStatus::Approved);
+    assert_eq!(
+        fixture.work_unit().await.worktree_disposition,
+        TaskWorktreeDisposition::Protect
+    );
+    assert_eq!(
+        fixture.outcome().await.status,
+        AgentOutcomeStatus::Completed
+    );
+}
+
+#[tokio::test]
+async fn executor_message_admission_reopens_only_after_review_findings() {
+    let fixture = ExecutorFixture::new("message-admission").await;
+    fixture
+        .store
+        .create_work_completion(
+            &fixture.outcome.id,
+            &fixture.work_unit.id,
+            WorkCompletionKind::Delivery,
+            Some(&fixture.delivery("2222222")),
+            "cargo test passed",
+        )
+        .await
+        .unwrap();
+
+    let error = fixture
+        .store
+        .authorize_executor_message(&fixture.run.session_id, &fixture.agent_id)
+        .await
+        .expect_err("ready-for-review executor must not receive another prompt");
+    assert!(error.to_string().contains("readyForReview"));
+    let error = fixture
+        .store
+        .mark_executor_turn_started(&fixture.agent_id)
+        .await
+        .expect_err("turn preparation must independently reject ready-for-review executors");
+    assert!(error.to_string().contains("readyForReview"));
+
+    fixture
+        .finish_delivery_review(
+            "reviewer-message-admission",
+            "review-call-message-admission",
+            AgentReview {
+                verdict: ReviewVerdict::ChangesRequired,
+                summary: "one correction is required".to_string(),
+                design_references: Vec::new(),
+                findings: vec![ReviewFinding {
+                    severity: "major".to_string(),
+                    title: "fix behavior".to_string(),
+                    body: "apply the reviewed correction".to_string(),
+                    path: Some("src/lib.rs".to_string()),
+                    line: Some(1),
+                    design_references: Vec::new(),
+                }],
+            },
+        )
+        .await;
+
+    fixture
+        .store
+        .authorize_executor_message(&fixture.run.session_id, &fixture.agent_id)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn task_stop_settlement_cancels_unmerged_completion_and_authorizes_cleanup() {
+    let fixture = ExecutorFixture::new("stop-ready-for-review").await;
+    let completion = fixture
+        .store
+        .create_work_completion(
+            &fixture.outcome.id,
+            &fixture.work_unit.id,
+            WorkCompletionKind::Delivery,
+            Some(&fixture.delivery("2222222")),
+            "cargo test passed",
+        )
+        .await
+        .unwrap();
+    let requested = fixture
+        .store
+        .request_task_stop(
+            &fixture.run.id,
+            &fixture.run.expected_head,
+            TaskStopOrigin::PlannerDecision,
+            &TaskStopReason::new("review infrastructure failed").unwrap(),
+        )
+        .await
+        .unwrap();
+    fixture
+        .store
+        .begin_task_stop(
+            &fixture.run.id,
+            &fixture.run.expected_head,
+            requested.task_generation,
+        )
+        .await
+        .unwrap();
+
+    fixture
+        .store
+        .settle_agents_for_task_stop(
+            &fixture.run.id,
+            requested.task_generation,
+            "review infrastructure failed",
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(fixture.work_unit().await.status, WorkUnitStatus::Cancelled);
+    assert_eq!(
+        fixture.work_unit().await.worktree_disposition,
+        TaskWorktreeDisposition::CleanupRequested
+    );
+    assert_eq!(
+        fixture.outcome().await.status,
+        AgentOutcomeStatus::Cancelled
+    );
+    assert_eq!(
+        fixture
+            .store
+            .list_work_completions(&fixture.run.id)
+            .await
+            .unwrap(),
+        vec![completion],
+        "immutable completion evidence must remain available"
+    );
+}
+
+#[tokio::test]
+async fn completion_review_rework_loop_keeps_every_revision_immutable() {
+    let fixture = ExecutorFixture::new("review-loop").await;
+
+    for revision in 1..=4 {
+        let head = format!("{revision}222222");
+        let completion = fixture
+            .store
+            .create_work_completion(
+                &fixture.outcome.id,
+                &fixture.work_unit.id,
+                WorkCompletionKind::Delivery,
+                Some(&fixture.delivery(&head)),
+                &format!("verification revision {revision}"),
+            )
+            .await
+            .unwrap();
+        assert_eq!(completion.revision, revision);
+        assert_eq!(completion.status, WorkCompletionStatus::ReadyForReview);
+
+        let finding = ReviewFinding {
+            severity: "major".to_string(),
+            title: format!("revision {revision} needs work"),
+            body: "apply the requested correction".to_string(),
+            path: Some("src/lib.rs".to_string()),
+            line: Some(revision),
+            design_references: Vec::new(),
+        };
+        fixture
+            .finish_delivery_review(
+                &format!("reviewer-{revision}"),
+                &format!("review-call-{revision}"),
+                AgentReview {
+                    verdict: ReviewVerdict::ChangesRequired,
+                    summary: format!("revision {revision} has a finding"),
+                    design_references: Vec::new(),
+                    findings: vec![finding],
+                },
+            )
+            .await;
+
+        assert_eq!(
+            fixture.work_unit().await.status,
+            WorkUnitStatus::ChangesRequested
+        );
+        fixture
+            .store
+            .mark_executor_turn_started(&fixture.agent_id)
+            .await
+            .unwrap();
+        assert_eq!(fixture.outcome().await.status, AgentOutcomeStatus::Running);
+    }
+
+    let final_completion = fixture
+        .store
+        .create_work_completion(
+            &fixture.outcome.id,
+            &fixture.work_unit.id,
+            WorkCompletionKind::Delivery,
+            Some(&fixture.delivery("9222222")),
+            "final verification passed",
+        )
+        .await
+        .unwrap();
+    assert_eq!(final_completion.revision, 5);
+    fixture
+        .finish_delivery_review(
+            "reviewer-pass",
+            "review-call-pass",
+            AgentReview {
+                verdict: ReviewVerdict::Pass,
+                summary: "delivery is ready".to_string(),
+                design_references: Vec::new(),
+                findings: Vec::new(),
+            },
+        )
+        .await;
+
+    let completions = fixture
+        .store
+        .list_work_completions(&fixture.run.id)
+        .await
+        .unwrap();
+    assert_eq!(completions.len(), 5);
+    assert!(
+        completions[..4]
+            .iter()
+            .all(|completion| completion.status == WorkCompletionStatus::ChangesRequired)
+    );
+    assert_eq!(completions[4].status, WorkCompletionStatus::Approved);
+    assert_eq!(fixture.work_unit().await.status, WorkUnitStatus::Approved);
+}
+
+#[tokio::test]
+async fn no_delivery_requires_review_and_stale_integrated_head_is_rejected() {
+    let fixture = ExecutorFixture::new("no-delivery").await;
+    let completion = fixture
+        .store
+        .create_work_completion(
+            &fixture.outcome.id,
+            &fixture.work_unit.id,
+            WorkCompletionKind::NoDelivery,
+            None,
+            "inspection proved no source change was needed",
+        )
+        .await
+        .unwrap();
+    assert_eq!(completion.status, WorkCompletionStatus::ReadyForReview);
+    assert_eq!(
+        fixture.work_unit().await.status,
+        WorkUnitStatus::ReadyForReview
+    );
+
+    fixture
+        .finish_delivery_review(
+            "reviewer-no-delivery",
+            "review-call-no-delivery",
+            AgentReview {
+                verdict: ReviewVerdict::Pass,
+                summary: "no-delivery result is valid".to_string(),
+                design_references: Vec::new(),
+                findings: Vec::new(),
+            },
+        )
+        .await;
+    assert_eq!(fixture.work_unit().await.status, WorkUnitStatus::NoDelivery);
+
+    let round = fixture
+        .store
+        .begin_integrated_review(&fixture.run.session_id, "integrated-call")
+        .await
+        .unwrap();
+    assert_eq!(round.scope, ReviewScope::Integrated);
+    let (_, reviewer) = fixture
+        .store
+        .authorize_reviewer_spawn(
+            &fixture.run.session_id,
+            "integrated-call",
+            "integrated-reviewer",
+        )
+        .await
+        .unwrap();
+    fixture
+        .store
+        .update_agent_outcome(
+            &reviewer.id,
+            UpdateAgentOutcome {
+                status: AgentOutcomeStatus::Running,
+                summary: None,
+                error: None,
+            },
+        )
+        .await
+        .unwrap();
+    assert!(
+        fixture
+            .store
+            .compare_and_set_task_head(&fixture.run.id, "1111111", "3333333")
+            .await
+            .unwrap()
+    );
+
+    let error = fixture
+        .store
+        .complete_task_review(
+            &fixture.run.session_id,
+            "integrated-reviewer",
+            AgentReview {
+                verdict: ReviewVerdict::Pass,
+                summary: "stale review must not pass".to_string(),
+                design_references: Vec::new(),
+                findings: Vec::new(),
+            },
+        )
+        .await
+        .expect_err("integrated review must be bound to its exact Task HEAD");
+    assert!(
+        error
+            .to_string()
+            .contains("no longer matches current Task HEAD")
+    );
+    let reviews = fixture
+        .store
+        .list_review_rounds(&fixture.run.id)
+        .await
+        .unwrap();
+    assert_eq!(reviews.len(), 2);
+    assert_eq!(reviews[1].verdict, ReviewVerdict::Pending);
+}
+
+#[tokio::test]
+async fn delivery_review_rejects_a_stale_completion_revision() {
+    let fixture = ExecutorFixture::new("stale-delivery-review").await;
+    let completion = fixture
+        .store
+        .create_work_completion(
+            &fixture.outcome.id,
+            &fixture.work_unit.id,
+            WorkCompletionKind::Delivery,
+            Some(&fixture.delivery("2222222")),
+            "verification passed",
+        )
+        .await
+        .unwrap();
+    let round = fixture
+        .store
+        .begin_delivery_review(
+            &fixture.run.session_id,
+            &fixture.agent_id,
+            "stale-review-call",
+        )
+        .await
+        .unwrap();
+    let (_, reviewer) = fixture
+        .store
+        .authorize_reviewer_spawn(
+            &fixture.run.session_id,
+            "stale-review-call",
+            "stale-reviewer",
+        )
+        .await
+        .unwrap();
+    fixture
+        .store
+        .update_agent_outcome(
+            &reviewer.id,
+            UpdateAgentOutcome {
+                status: AgentOutcomeStatus::Running,
+                summary: None,
+                error: None,
+            },
+        )
+        .await
+        .unwrap();
+
+    fixture
+        .store
+        .execute_test_sql(&format!(
+            "UPDATE work_completions SET revision = 99 WHERE id = '{}'",
+            completion.id
+        ))
+        .await;
+
+    let error = fixture
+        .store
+        .complete_task_review(
+            &fixture.run.session_id,
+            "stale-reviewer",
+            AgentReview {
+                verdict: ReviewVerdict::Pass,
+                summary: "must not approve a stale completion".to_string(),
+                design_references: Vec::new(),
+                findings: Vec::new(),
+            },
+        )
+        .await
+        .expect_err("review must stay bound to the completion revision it was created for");
+    assert!(
+        error
+            .to_string()
+            .contains("delivery review target changed after reviewer creation")
+    );
+
+    let stored_round = fixture
+        .store
+        .list_review_rounds(&fixture.run.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|candidate| candidate.id == round.id)
+        .unwrap();
+    assert_eq!(stored_round.verdict, ReviewVerdict::Pending);
+    assert_eq!(fixture.work_unit().await.status, WorkUnitStatus::Reviewing);
+    let reviewer_outcome = fixture
+        .store
+        .list_agent_outcomes(&fixture.run.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|outcome| outcome.agent_id == "stale-reviewer")
+        .unwrap();
+    assert_eq!(reviewer_outcome.status, AgentOutcomeStatus::Running);
+}
+
+#[tokio::test]
+async fn duplicate_reviewer_terminal_settlement_preserves_the_first_failure() {
+    let fixture = ExecutorFixture::new("duplicate-reviewer-terminal").await;
+    fixture
+        .store
+        .create_work_completion(
+            &fixture.outcome.id,
+            &fixture.work_unit.id,
+            WorkCompletionKind::Delivery,
+            Some(&fixture.delivery("2222222")),
+            "verification passed",
+        )
+        .await
+        .unwrap();
+    let round = fixture
+        .store
+        .begin_delivery_review(
+            &fixture.run.session_id,
+            &fixture.agent_id,
+            "terminal-review-call",
+        )
+        .await
+        .unwrap();
+    let (_, reviewer) = fixture
+        .store
+        .authorize_reviewer_spawn(
+            &fixture.run.session_id,
+            "terminal-review-call",
+            "terminal-reviewer",
+        )
+        .await
+        .unwrap();
+    fixture
+        .store
+        .update_agent_outcome(
+            &reviewer.id,
+            UpdateAgentOutcome {
+                status: AgentOutcomeStatus::Running,
+                summary: None,
+                error: None,
+            },
+        )
+        .await
+        .unwrap();
+
+    fixture
+        .store
+        .settle_reviewer_turn_finished(
+            "terminal-reviewer",
+            crate::TurnOutcomeKind::Failed,
+            Some("first reviewer failure"),
+        )
+        .await
+        .unwrap();
+    fixture
+        .store
+        .settle_reviewer_turn_finished(
+            "terminal-reviewer",
+            crate::TurnOutcomeKind::Cancelled,
+            Some("late duplicate terminal event"),
+        )
+        .await
+        .unwrap();
+
+    let stored_round = fixture
+        .store
+        .list_review_rounds(&fixture.run.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|candidate| candidate.id == round.id)
+        .unwrap();
+    assert_eq!(stored_round.verdict, ReviewVerdict::Failed);
+    assert_eq!(
+        stored_round.summary.as_deref(),
+        Some("first reviewer failure")
+    );
+    let reviewer_outcome = fixture
+        .store
+        .list_agent_outcomes(&fixture.run.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|outcome| outcome.agent_id == "terminal-reviewer")
+        .unwrap();
+    assert_eq!(reviewer_outcome.status, AgentOutcomeStatus::Failed);
+    assert_eq!(
+        reviewer_outcome.error.as_deref(),
+        Some("first reviewer failure")
+    );
+    assert_eq!(
+        fixture.work_unit().await.status,
+        WorkUnitStatus::ReadyForReview
+    );
+}
+
+#[tokio::test]
+async fn failed_delivery_reviewer_allows_a_fresh_round_for_the_same_completion() {
+    let fixture = ExecutorFixture::new("delivery-review-retry").await;
+    let completion = fixture
+        .store
+        .create_work_completion(
+            &fixture.outcome.id,
+            &fixture.work_unit.id,
+            WorkCompletionKind::Delivery,
+            Some(&fixture.delivery("2222222")),
+            "verification passed",
+        )
+        .await
+        .unwrap();
+    let first_round = fixture
+        .store
+        .begin_delivery_review(
+            &fixture.run.session_id,
+            &fixture.agent_id,
+            "first-review-call",
+        )
+        .await
+        .unwrap();
+    let (_, first_reviewer) = fixture
+        .store
+        .authorize_reviewer_spawn(
+            &fixture.run.session_id,
+            "first-review-call",
+            "first-reviewer",
+        )
+        .await
+        .unwrap();
+    fixture
+        .store
+        .update_agent_outcome(
+            &first_reviewer.id,
+            UpdateAgentOutcome {
+                status: AgentOutcomeStatus::Running,
+                summary: None,
+                error: None,
+            },
+        )
+        .await
+        .unwrap();
+    fixture
+        .store
+        .settle_reviewer_turn_finished(
+            "first-reviewer",
+            crate::TurnOutcomeKind::Failed,
+            Some("review_exit validation failed"),
+        )
+        .await
+        .unwrap();
+
+    let replay_error = fixture
+        .store
+        .begin_delivery_review(
+            &fixture.run.session_id,
+            &fixture.agent_id,
+            "first-review-call",
+        )
+        .await
+        .expect_err("one provider call must not authorize two review rounds");
+    assert!(
+        replay_error
+            .to_string()
+            .contains("provider call already authorized a review")
+    );
+
+    let retry_round = fixture
+        .store
+        .begin_delivery_review(
+            &fixture.run.session_id,
+            &fixture.agent_id,
+            "retry-review-call",
+        )
+        .await
+        .unwrap();
+    assert_eq!(retry_round.round, first_round.round + 1);
+    assert_eq!(retry_round.completion_id.as_deref(), Some(completion.id.as_str()));
+    assert_eq!(
+        retry_round.completion_revision,
+        Some(completion.revision)
+    );
+    assert_eq!(retry_round.reviewed_head, first_round.reviewed_head);
+
+    let (_, retry_reviewer) = fixture
+        .store
+        .authorize_reviewer_spawn(
+            &fixture.run.session_id,
+            "retry-review-call",
+            "retry-reviewer",
+        )
+        .await
+        .unwrap();
+    fixture
+        .store
+        .update_agent_outcome(
+            &retry_reviewer.id,
+            UpdateAgentOutcome {
+                status: AgentOutcomeStatus::Running,
+                summary: None,
+                error: None,
+            },
+        )
+        .await
+        .unwrap();
+    let completed_round = fixture
+        .store
+        .complete_task_review(
+            &fixture.run.session_id,
+            "retry-reviewer",
+            AgentReview {
+                verdict: ReviewVerdict::Pass,
+                summary: "fresh review passed".to_string(),
+                design_references: Vec::new(),
+                findings: Vec::new(),
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(completed_round.id, retry_round.id);
+    assert_eq!(completed_round.verdict, ReviewVerdict::Pass);
+    assert_eq!(fixture.work_unit().await.status, WorkUnitStatus::Approved);
+    let stored_completion = fixture
+        .store
+        .list_work_completions(&fixture.run.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|candidate| candidate.id == completion.id)
+        .unwrap();
+    assert_eq!(stored_completion.status, WorkCompletionStatus::Approved);
+    let rounds = fixture
+        .store
+        .list_review_rounds(&fixture.run.id)
+        .await
+        .unwrap();
+    assert_eq!(rounds.len(), 2);
+    assert_eq!(rounds[0].verdict, ReviewVerdict::Failed);
+    assert_eq!(rounds[1].verdict, ReviewVerdict::Pass);
+}
+
+#[tokio::test]
+async fn restart_reconciliation_pauses_explicit_completion_states_without_starting_models() {
     let store = StudioStore::open_memory().await.unwrap();
-    let project = store.upsert_project("C:/work/task").await.unwrap();
+    let project = store.upsert_project("C:/work/restart").await.unwrap();
     let session = store
         .create_session(&project.id, "Task", StudioMode::Task)
         .await
         .unwrap();
-    let (run, _) = store
-        .create_task_run_with_lease(create_input(&session.id))
-        .await
-        .unwrap();
+    let mut input = create_input(&session.id, TaskRunPhase::Implementing);
+    input.workspace_root = "C:/work/restart".to_string();
+    input.git_common_dir = "C:/work/restart/.git".to_string();
+    let (run, _) = store.create_task_run_with_lease(input).await.unwrap();
 
-    for (name, unit_status, outcome_status) in [
-        (
-            "pending",
-            WorkUnitStatus::Pending,
-            AgentOutcomeStatus::Queued,
-        ),
-        (
-            "running",
-            WorkUnitStatus::Running,
-            AgentOutcomeStatus::Running,
-        ),
-        (
-            "waiting",
-            WorkUnitStatus::WaitingForDelivery,
-            AgentOutcomeStatus::WaitingForDelivery,
-        ),
-    ] {
-        create_recovery_executor(&store, &run, name, unit_status, outcome_status, None).await;
-    }
-    let delivery = AgentDelivery {
-        worktree: AgentWorktreeDelivery {
-            path: "C:/work/task/.pure/worktrees/run/delivered".to_string(),
-            branch: "pure-task-run-delivered".to_string(),
-        },
-        base_commit: run.base_commit.clone(),
-        head_commit: "2222222".to_string(),
-        changed_files: vec!["code/pl-core/src/lib.rs".to_string()],
-        verification_summary: "passed".to_string(),
-    };
     create_recovery_executor(
         &store,
         &run,
-        "delivered",
-        WorkUnitStatus::Delivered,
-        AgentOutcomeStatus::Completed,
-        Some(delivery.clone()),
+        "pending",
+        WorkUnitStatus::Pending,
+        AgentOutcomeStatus::Queued,
     )
     .await;
     create_recovery_executor(
         &store,
         &run,
-        "merged",
-        WorkUnitStatus::Merged,
-        AgentOutcomeStatus::Completed,
-        Some(AgentDelivery {
-            worktree: AgentWorktreeDelivery {
-                path: "C:/work/task/.pure/worktrees/run/merged".to_string(),
-                branch: "pure-task-run-merged".to_string(),
-            },
-            ..delivery.clone()
-        }),
+        "running",
+        WorkUnitStatus::Running,
+        AgentOutcomeStatus::Running,
     )
     .await;
     create_recovery_executor(
         &store,
         &run,
-        "failed",
-        WorkUnitStatus::Failed,
+        "awaiting-failed",
+        WorkUnitStatus::AwaitingCompletion,
         AgentOutcomeStatus::Failed,
-        None,
     )
     .await;
     create_recovery_executor(
         &store,
         &run,
-        "cancelled",
-        WorkUnitStatus::Cancelled,
-        AgentOutcomeStatus::Cancelled,
-        None,
+        "ready",
+        WorkUnitStatus::ReadyForReview,
+        AgentOutcomeStatus::Completed,
     )
     .await;
-    let explorer = store
-        .create_explorer_outcome(
-            &session.id,
-            CreateAgentOutcome {
-                task_run_id: run.id.clone(),
-                work_unit_id: None,
-                agent_id: "agent-explorer".to_string(),
-                owner_path: "/root".to_string(),
-                initiated_by: "planner".to_string(),
-                requested_by_call_id: "call-explorer".to_string(),
-                role: "explorer".to_string(),
-                status: AgentOutcomeStatus::Running,
-                attempt: 1,
-            },
-        )
-        .await
-        .unwrap()
-        .unwrap();
-    let queued_explorer = store
-        .create_explorer_outcome(
-            &session.id,
-            CreateAgentOutcome {
-                task_run_id: run.id.clone(),
-                work_unit_id: None,
-                agent_id: "agent-explorer-queued".to_string(),
-                owner_path: "/root".to_string(),
-                initiated_by: "planner".to_string(),
-                requested_by_call_id: "call-explorer-queued".to_string(),
-                role: "explorer".to_string(),
-                status: AgentOutcomeStatus::Queued,
-                attempt: 1,
-            },
-        )
-        .await
-        .unwrap()
-        .unwrap();
+    create_recovery_executor(
+        &store,
+        &run,
+        "changes",
+        WorkUnitStatus::ChangesRequested,
+        AgentOutcomeStatus::Completed,
+    )
+    .await;
+    create_recovery_executor(
+        &store,
+        &run,
+        "no-delivery",
+        WorkUnitStatus::NoDelivery,
+        AgentOutcomeStatus::Completed,
+    )
+    .await;
 
     let first = store
         .reconcile_task_agents_after_restart(&run.id)
@@ -503,191 +1098,216 @@ async fn restart_reconciliation_cancels_transient_agents_and_preserves_delivery(
     let units = store.list_work_units(&run.id).await.unwrap();
     let outcomes = store.list_agent_outcomes(&run.id).await.unwrap();
 
-    assert_eq!(first.cancelled_work_units, 3);
-    assert_eq!(first.cancelled_outcomes, 5);
+    assert_eq!(first.cancelled_work_units, 1);
+    assert_eq!(first.cancelled_outcomes, 2);
     assert_eq!(second.cancelled_work_units, 0);
     assert_eq!(second.cancelled_outcomes, 0);
+    assert_eq!(units[0].status, WorkUnitStatus::Cancelled);
+    assert_eq!(units[1].status, WorkUnitStatus::AwaitingCompletion);
+    assert_eq!(units[2].status, WorkUnitStatus::AwaitingCompletion);
+    assert_eq!(units[3].status, WorkUnitStatus::ReadyForReview);
+    assert_eq!(units[4].status, WorkUnitStatus::ChangesRequested);
+    assert_eq!(units[5].status, WorkUnitStatus::NoDelivery);
+    assert_eq!(outcomes[0].status, AgentOutcomeStatus::Cancelled);
+    assert_eq!(outcomes[1].status, AgentOutcomeStatus::Cancelled);
+    assert_eq!(outcomes[2].status, AgentOutcomeStatus::Failed);
     assert!(
-        units
+        outcomes[3..]
             .iter()
-            .take(3)
-            .all(|unit| unit.status == WorkUnitStatus::Cancelled)
+            .all(|outcome| outcome.status == AgentOutcomeStatus::Completed)
     );
-    assert_eq!(units[3].status, WorkUnitStatus::Delivered);
-    assert_eq!(outcomes[3].delivery, Some(delivery));
-    assert_eq!(outcomes[3].status, AgentOutcomeStatus::Completed);
-    assert_eq!(units[4].status, WorkUnitStatus::Merged);
-    assert_eq!(outcomes[4].status, AgentOutcomeStatus::Completed);
-    assert_eq!(outcomes[5].status, AgentOutcomeStatus::Failed);
-    assert_eq!(outcomes[6].status, AgentOutcomeStatus::Cancelled);
-    assert_eq!(
-        outcomes
-            .iter()
-            .find(|outcome| outcome.id == explorer.id)
-            .unwrap()
-            .status,
-        AgentOutcomeStatus::Cancelled
-    );
-    assert_eq!(
-        outcomes
-            .iter()
-            .find(|outcome| outcome.id == queued_explorer.id)
-            .unwrap()
-            .status,
-        AgentOutcomeStatus::Cancelled
-    );
-    assert!(matches!(
-        store
-            .record_terminal_agent_state(
-                &session.id,
-                &StudioAgentTerminalChange {
-                    agent_id: "agent-running".to_string(),
-                    role: "executor".to_string(),
-                    outcome: crate::TurnOutcomeKind::Cancelled,
-                    summary: None,
-                    error: None,
-                },
-            )
-            .await
-            .unwrap(),
-        TerminalAgentStateRecording::Projected(_)
-    ));
 }
 
 #[tokio::test]
-async fn restart_reconciliation_rolls_back_every_change_on_pair_mismatch() {
-    let store = StudioStore::open_memory().await.unwrap();
-    let project = store.upsert_project("C:/work/task").await.unwrap();
-    let session = store
-        .create_session(&project.id, "Task", StudioMode::Task)
-        .await
-        .unwrap();
-    let (run, _) = store
-        .create_task_run_with_lease(create_input(&session.id))
-        .await
-        .unwrap();
-    create_recovery_executor(
-        &store,
-        &run,
-        "valid",
-        WorkUnitStatus::Running,
-        AgentOutcomeStatus::Running,
-        None,
-    )
-    .await;
-    let mismatch = store
-        .create_work_unit(CreateWorkUnit {
-            task_run_id: run.id.clone(),
-            title: "mismatch".to_string(),
-            owned_paths: vec!["code/mismatch/**".to_string()],
-            base_commit: run.base_commit.clone(),
-            worktree_path: "C:/work/task/.pure/worktrees/run/mismatch".to_string(),
-            branch: "pure-task-run-mismatch".to_string(),
-            attempt: 1,
-        })
-        .await
-        .unwrap();
-    store
-        .update_work_unit(
-            &mismatch.id,
-            WorkUnitStatus::Running,
-            Some("agent-mismatch-a".to_string()),
+async fn restart_reconciliation_fails_delivery_reviewer_and_reopens_exact_completion() {
+    let fixture = ExecutorFixture::new("restart-delivery-review").await;
+    let completion = fixture
+        .store
+        .create_work_completion(
+            &fixture.outcome.id,
+            &fixture.work_unit.id,
+            WorkCompletionKind::Delivery,
+            Some(&fixture.delivery("2222222")),
+            "cargo test passed",
         )
         .await
         .unwrap();
-    store
-        .create_agent_outcome(CreateAgentOutcome {
-            task_run_id: run.id.clone(),
-            work_unit_id: Some(mismatch.id),
-            agent_id: "agent-mismatch-b".to_string(),
-            owner_path: "/root".to_string(),
-            initiated_by: "planner".to_string(),
-            requested_by_call_id: "call-mismatch".to_string(),
-            role: "executor".to_string(),
-            status: AgentOutcomeStatus::Running,
-            attempt: 1,
-        })
+    let round = fixture
+        .store
+        .begin_delivery_review(
+            &fixture.run.session_id,
+            &fixture.agent_id,
+            "restart-delivery-review-call",
+        )
+        .await
+        .unwrap();
+    let (_, reviewer) = fixture
+        .store
+        .authorize_reviewer_spawn(
+            &fixture.run.session_id,
+            "restart-delivery-review-call",
+            "restart-delivery-reviewer",
+        )
+        .await
+        .unwrap();
+    fixture
+        .store
+        .update_agent_outcome(
+            &reviewer.id,
+            UpdateAgentOutcome {
+                status: AgentOutcomeStatus::Running,
+                summary: None,
+                error: None,
+            },
+        )
         .await
         .unwrap();
 
-    let error = store
-        .reconcile_task_agents_after_restart(&run.id)
+    let first = fixture
+        .store
+        .reconcile_task_agents_after_restart(&fixture.run.id)
         .await
-        .expect_err("mismatch must roll back the run-scoped transaction");
+        .unwrap();
+    let second = fixture
+        .store
+        .reconcile_task_agents_after_restart(&fixture.run.id)
+        .await
+        .unwrap();
 
-    assert!(error.to_string().contains("do not match"));
-    assert!(
-        store
-            .list_work_units(&run.id)
-            .await
-            .unwrap()
-            .iter()
-            .all(|unit| unit.status == WorkUnitStatus::Running)
+    assert_eq!(first.cancelled_outcomes, 1);
+    assert_eq!(second.cancelled_outcomes, 0);
+    assert_eq!(
+        fixture.work_unit().await.status,
+        WorkUnitStatus::ReadyForReview
     );
-    assert!(
-        store
-            .list_agent_outcomes(&run.id)
-            .await
-            .unwrap()
-            .iter()
-            .all(|outcome| outcome.status == AgentOutcomeStatus::Running)
+    let stored_completion = fixture
+        .store
+        .list_work_completions(&fixture.run.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|candidate| candidate.id == completion.id)
+        .unwrap();
+    assert_eq!(
+        stored_completion.status,
+        WorkCompletionStatus::ReadyForReview
     );
+    let stored_round = fixture
+        .store
+        .list_review_rounds(&fixture.run.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|candidate| candidate.id == round.id)
+        .unwrap();
+    assert_eq!(stored_round.verdict, ReviewVerdict::Failed);
+    assert_eq!(
+        stored_round.summary.as_deref(),
+        Some("reviewer interrupted by application restart before review_exit")
+    );
+    let reviewer = fixture
+        .store
+        .list_agent_outcomes(&fixture.run.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|outcome| outcome.agent_id == "restart-delivery-reviewer")
+        .unwrap();
+    assert_eq!(reviewer.status, AgentOutcomeStatus::Cancelled);
 }
 
-async fn create_recovery_executor(
-    store: &StudioStore,
-    run: &TaskRunRecord,
-    name: &str,
-    unit_status: WorkUnitStatus,
-    outcome_status: AgentOutcomeStatus,
-    delivery: Option<AgentDelivery>,
-) {
-    let agent_id = format!("agent-{name}");
-    let unit = store
-        .create_work_unit(CreateWorkUnit {
-            task_run_id: run.id.clone(),
-            title: name.to_string(),
-            owned_paths: vec![format!("code/{name}/**")],
-            base_commit: run.base_commit.clone(),
-            worktree_path: format!("C:/work/task/.pure/worktrees/run/{name}"),
-            branch: format!("pure-task-run-{name}"),
-            attempt: 1,
-        })
+#[tokio::test]
+async fn restart_reconciliation_fails_integrated_reviewer_and_enters_reworking() {
+    let fixture = ExecutorFixture::new("restart-integrated-review").await;
+    fixture
+        .store
+        .create_work_completion(
+            &fixture.outcome.id,
+            &fixture.work_unit.id,
+            WorkCompletionKind::NoDelivery,
+            None,
+            "no changes required",
+        )
         .await
         .unwrap();
-    store
-        .update_work_unit(&unit.id, unit_status, Some(agent_id.clone()))
+    fixture
+        .finish_delivery_review(
+            "no-delivery-reviewer",
+            "no-delivery-review-call",
+            AgentReview {
+                verdict: ReviewVerdict::Pass,
+                summary: "no delivery is correct".to_string(),
+                design_references: vec![ReviewDesignReference {
+                    path: "design/16-task-orchestration.md".to_string(),
+                    section: "Executor 完成与交付审查".to_string(),
+                }],
+                findings: Vec::new(),
+            },
+        )
+        .await;
+    let round = fixture
+        .store
+        .begin_integrated_review(&fixture.run.session_id, "restart-integrated-review-call")
         .await
         .unwrap();
-    let outcome = store
-        .create_agent_outcome(CreateAgentOutcome {
-            task_run_id: run.id.clone(),
-            work_unit_id: Some(unit.id),
-            agent_id,
-            owner_path: "/root".to_string(),
-            initiated_by: "planner".to_string(),
-            requested_by_call_id: format!("call-{name}"),
-            role: "executor".to_string(),
-            status: outcome_status,
-            attempt: 1,
-        })
+    let (_, reviewer) = fixture
+        .store
+        .authorize_reviewer_spawn(
+            &fixture.run.session_id,
+            "restart-integrated-review-call",
+            "restart-integrated-reviewer",
+        )
         .await
         .unwrap();
-    if delivery.is_some() {
-        store
-            .update_agent_outcome(
-                &outcome.id,
-                UpdateAgentOutcome {
-                    status: outcome_status,
-                    summary: Some(name.to_string()),
-                    error: None,
-                    delivery,
-                    review: None,
-                },
-            )
-            .await
-            .unwrap();
-    }
+    fixture
+        .store
+        .update_agent_outcome(
+            &reviewer.id,
+            UpdateAgentOutcome {
+                status: AgentOutcomeStatus::Running,
+                summary: None,
+                error: None,
+            },
+        )
+        .await
+        .unwrap();
+
+    fixture
+        .store
+        .reconcile_task_agents_after_restart(&fixture.run.id)
+        .await
+        .unwrap();
+    fixture
+        .store
+        .reconcile_task_agents_after_restart(&fixture.run.id)
+        .await
+        .unwrap();
+
+    let run = fixture
+        .store
+        .read_task_run(&fixture.run.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(run.phase, TaskRunPhase::Reworking);
+    let stored_round = fixture
+        .store
+        .list_review_rounds(&fixture.run.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|candidate| candidate.id == round.id)
+        .unwrap();
+    assert_eq!(stored_round.verdict, ReviewVerdict::Failed);
+    let reviewer = fixture
+        .store
+        .list_agent_outcomes(&fixture.run.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|outcome| outcome.agent_id == "restart-integrated-reviewer")
+        .unwrap();
+    assert_eq!(reviewer.status, AgentOutcomeStatus::Cancelled);
 }
 
 #[tokio::test]
@@ -699,7 +1319,7 @@ async fn task_phase_and_expected_head_updates_are_guarded() {
         .await
         .unwrap();
     let (run, _) = store
-        .create_task_run_with_lease(create_input(&session.id))
+        .create_task_run_with_lease(create_input(&session.id, TaskRunPhase::Planning))
         .await
         .unwrap();
 
@@ -717,7 +1337,6 @@ async fn task_phase_and_expected_head_updates_are_guarded() {
             .contains("invalid task phase transition")
     );
     assert_eq!(pending.phase, TaskRunPhase::PendingConfirmation);
-
     assert!(
         store
             .compare_and_set_task_head(&run.id, "1111111", "2222222")
@@ -741,536 +1360,179 @@ async fn task_phase_and_expected_head_updates_are_guarded() {
     );
 }
 
-#[tokio::test]
-async fn coordinator_child_records_round_trip_typed_payloads() {
-    let store = StudioStore::open_memory().await.unwrap();
-    let project = store.upsert_project("C:/work/task").await.unwrap();
-    let session = store
-        .create_session(&project.id, "Task", StudioMode::Task)
-        .await
-        .unwrap();
-    let (run, _) = store
-        .create_task_run_with_lease(create_input(&session.id))
-        .await
-        .unwrap();
+struct ExecutorFixture {
+    store: StudioStore,
+    run: TaskRunRecord,
+    work_unit: WorkUnitRecord,
+    outcome: AgentOutcomeRecord,
+    agent_id: String,
+}
 
-    let work_unit = store
-        .create_work_unit(CreateWorkUnit {
-            task_run_id: run.id.clone(),
-            title: "Implement core".to_string(),
-            owned_paths: vec!["code/pl-core/**".to_string()],
-            base_commit: "1111111".to_string(),
-            worktree_path: "C:/work/task/.pure/worktrees/run/agent-1".to_string(),
-            branch: "pure-task-run-agent-1".to_string(),
-            attempt: 1,
-        })
-        .await
-        .unwrap();
-    let work_unit = store
-        .update_work_unit(
-            &work_unit.id,
-            WorkUnitStatus::Running,
-            Some("agent-1".to_string()),
-        )
-        .await
-        .unwrap();
-    assert_eq!(
-        store.list_work_units(&run.id).await.unwrap(),
-        vec![work_unit.clone()]
-    );
-    assert_eq!(work_unit.base_commit, "1111111");
-    assert_eq!(
-        work_unit.worktree_path,
-        "C:/work/task/.pure/worktrees/run/agent-1"
-    );
-    assert_eq!(work_unit.branch, "pure-task-run-agent-1");
-
-    let outcome = store
-        .create_agent_outcome(CreateAgentOutcome {
-            task_run_id: run.id.clone(),
-            work_unit_id: Some(work_unit.id),
-            agent_id: "agent-1".to_string(),
-            owner_path: "root".to_string(),
-            initiated_by: "planner".to_string(),
-            requested_by_call_id: "call-spawn".to_string(),
-            role: "executor".to_string(),
-            status: AgentOutcomeStatus::Running,
-            attempt: 1,
-        })
-        .await
-        .unwrap();
-    let delivery = AgentDelivery {
-        worktree: AgentWorktreeDelivery {
-            path: "C:/work/task/.pure/worktrees/run/agent-1".to_string(),
-            branch: "pure-task-run-agent-1".to_string(),
-        },
-        base_commit: "1111111".to_string(),
-        head_commit: "2222222".to_string(),
-        changed_files: vec!["code/pl-core/src/lib.rs".to_string()],
-        verification_summary: "cargo test passed".to_string(),
-    };
-    let outcome = store
-        .update_agent_outcome(
-            &outcome.id,
-            UpdateAgentOutcome {
-                status: AgentOutcomeStatus::Completed,
-                summary: Some("implemented".to_string()),
-                error: None,
-                delivery: Some(delivery.clone()),
-                review: None,
-            },
-        )
-        .await
-        .unwrap();
-    assert_eq!(outcome.delivery, Some(delivery));
-    assert_eq!(
-        store.list_agent_outcomes(&run.id).await.unwrap(),
-        vec![outcome]
-    );
-
-    let merge = store
-        .create_merge_record(CreateMergeRecord {
-            task_run_id: run.id.clone(),
-            agent_id: "agent-1".to_string(),
-            expected_head: "1111111".to_string(),
-            source_commit: "2222222".to_string(),
-            conflict_files: vec!["code/pl-core/src/lib.rs".to_string()],
-        })
-        .await
-        .unwrap();
-    let merge = store
-        .update_merge_record(
-            &merge.id,
-            UpdateMergeRecord {
-                status: MergeStatus::Merged,
-                resolution_summary: Some("kept both changes".to_string()),
-                verification: Some(vec!["cargo test".to_string()]),
+impl ExecutorFixture {
+    async fn new(name: &str) -> Self {
+        let store = StudioStore::open_memory().await.unwrap();
+        let project = store
+            .upsert_project(&format!("C:/work/{name}"))
+            .await
+            .unwrap();
+        let session = store
+            .create_session(&project.id, "Task", StudioMode::Task)
+            .await
+            .unwrap();
+        let mut input = create_input(&session.id, TaskRunPhase::Implementing);
+        input.workspace_root = format!("C:/work/{name}");
+        input.git_common_dir = format!("C:/work/{name}/.git");
+        let (run, _) = store.create_task_run_with_lease(input).await.unwrap();
+        let agent_id = format!("agent-{name}");
+        let work_unit = store
+            .create_work_unit(CreateWorkUnit {
+                task_run_id: run.id.clone(),
+                title: "Implement core".to_string(),
+                owned_paths: vec!["src/**".to_string()],
+                base_commit: run.base_commit.clone(),
+                worktree_path: format!("C:/work/{name}/.pure/worktrees/{}", run.id),
+                branch: format!("pure-task-{}-{name}", run.id),
                 attempt: 1,
-            },
-        )
-        .await
-        .unwrap();
-    assert_eq!(
-        store.list_merge_records(&run.id).await.unwrap(),
-        vec![merge]
-    );
-
-    let review = store
-        .create_review_round(CreateReviewRound {
-            task_run_id: run.id.clone(),
-            round: 1,
-            head_commit: "3333333".to_string(),
-            reviewer_agent_id: Some("agent-reviewer".to_string()),
-        })
-        .await
-        .unwrap();
-    let reference = ReviewDesignReference {
-        path: "design/16-task-orchestration.md".to_string(),
-        section: "Reviewer".to_string(),
-    };
-    let review = store
-        .update_review_round(
-            &review.id,
-            CompleteReviewRound {
-                verdict: ReviewVerdict::Pass,
-                summary: "matches design".to_string(),
-                design_references: vec![reference.clone()],
-                findings: Vec::new(),
-            },
-        )
-        .await
-        .unwrap();
-    assert_eq!(review.design_references, vec![reference]);
-    assert_eq!(
-        store.list_review_rounds(&run.id).await.unwrap(),
-        vec![review]
-    );
-}
-
-#[tokio::test]
-async fn continuation_snapshot_contains_exact_durable_task_state() {
-    let store = StudioStore::open_memory().await.unwrap();
-    let project = store.upsert_project("C:/work/task").await.unwrap();
-    let session = store
-        .create_session(&project.id, "Task", StudioMode::Task)
-        .await
-        .unwrap();
-    let (run, lease) = store
-        .create_task_run_with_lease(create_input(&session.id))
-        .await
-        .unwrap();
-    let run = store
-        .transition_task_run(
-            &run.id,
-            TaskRunPhase::PendingConfirmation,
-            Some("waiting".into()),
-        )
-        .await
-        .unwrap();
-    let work_unit = store
-        .create_work_unit(CreateWorkUnit {
-            task_run_id: run.id.clone(),
-            title: "Implement continuation".to_string(),
-            owned_paths: vec!["code/pl-core/**".to_string()],
-            base_commit: run.base_commit.clone(),
-            worktree_path: "C:/work/task/.pure/worktrees/run/agent-1".to_string(),
-            branch: "pure-task-run-agent-1".to_string(),
-            attempt: 2,
-        })
-        .await
-        .unwrap();
-    let work_unit = store
-        .update_work_unit(
-            &work_unit.id,
-            WorkUnitStatus::Delivered,
-            Some("agent-1".to_string()),
-        )
-        .await
-        .unwrap();
-    let outcome = store
-        .create_agent_outcome(CreateAgentOutcome {
-            task_run_id: run.id.clone(),
-            work_unit_id: Some(work_unit.id.clone()),
-            agent_id: "agent-1".to_string(),
-            owner_path: "root".to_string(),
-            initiated_by: "planner".to_string(),
-            requested_by_call_id: "call-spawn".to_string(),
-            role: "executor".to_string(),
-            status: AgentOutcomeStatus::Running,
-            attempt: 2,
-        })
-        .await
-        .unwrap();
-    let delivery = AgentDelivery {
-        worktree: AgentWorktreeDelivery {
-            path: work_unit.worktree_path.clone(),
-            branch: work_unit.branch.clone(),
-        },
-        base_commit: run.base_commit.clone(),
-        head_commit: "2222222".to_string(),
-        changed_files: vec!["code/pl-core/src/studio/runtime/mod.rs".to_string()],
-        verification_summary: "cargo test passed".to_string(),
-    };
-    let outcome = store
-        .update_agent_outcome(
-            &outcome.id,
-            UpdateAgentOutcome {
-                status: AgentOutcomeStatus::Completed,
-                summary: Some("implemented continuation".to_string()),
-                error: None,
-                delivery: Some(delivery),
-                review: None,
-            },
-        )
-        .await
-        .unwrap();
-    let merge = store
-        .create_merge_record(CreateMergeRecord {
-            task_run_id: run.id.clone(),
-            agent_id: "agent-1".to_string(),
-            expected_head: run.expected_head.clone(),
-            source_commit: "2222222".to_string(),
-            conflict_files: vec!["code/pl-core/src/studio/runtime/mod.rs".to_string()],
-        })
-        .await
-        .unwrap();
-    let review = store
-        .create_review_round(CreateReviewRound {
-            task_run_id: run.id.clone(),
-            round: 2,
-            head_commit: run.expected_head.clone(),
-            reviewer_agent_id: Some("agent-reviewer".to_string()),
-        })
-        .await
-        .unwrap();
-
-    let resolution = store
-        .load_task_continuation_resolution(&run.id)
-        .await
-        .unwrap();
-    let TaskContinuationResolution::Active(snapshot) = resolution else {
-        panic!("active task must resolve to a continuation snapshot");
-    };
-    let prompt = snapshot.render_prompt().unwrap();
-
-    assert_eq!(snapshot.run, run);
-    assert_eq!(snapshot.branch_lease, lease);
-    assert_eq!(snapshot.work_units, vec![work_unit]);
-    assert_eq!(snapshot.agent_outcomes, vec![outcome]);
-    assert_eq!(snapshot.merge_records, vec![merge]);
-    assert_eq!(snapshot.review_rounds, vec![review]);
-    for child_run_id in snapshot
-        .work_units
-        .iter()
-        .map(|record| record.task_run_id.as_str())
-        .chain(
-            snapshot
-                .agent_outcomes
-                .iter()
-                .map(|record| record.task_run_id.as_str()),
-        )
-        .chain(
-            snapshot
-                .merge_records
-                .iter()
-                .map(|record| record.task_run_id.as_str()),
-        )
-        .chain(
-            snapshot
-                .review_rounds
-                .iter()
-                .map(|record| record.task_run_id.as_str()),
-        )
-    {
-        assert_eq!(child_run_id, run.id);
-    }
-    assert!(prompt.contains("continuation"));
-    assert!(prompt.contains("pendingConfirmation"));
-    assert!(prompt.contains("main"));
-    assert!(prompt.contains("1111111"));
-    assert!(prompt.contains("implemented continuation"));
-    assert!(prompt.contains("pure-task-run-agent-1"));
-    assert!(prompt.contains("mergeRecords"));
-    assert!(prompt.contains("reviewRounds"));
-    assert!(prompt.contains("不要无限等待代理"));
-}
-
-#[tokio::test]
-async fn terminal_continuation_resolution_does_not_require_branch_lease() {
-    let store = StudioStore::open_memory().await.unwrap();
-    let project = store
-        .upsert_project("C:/work/terminal-snapshot")
-        .await
-        .unwrap();
-    let session = store
-        .create_session(&project.id, "Terminal snapshot", StudioMode::Task)
-        .await
-        .unwrap();
-    let (run, _) = store
-        .create_task_run_with_lease(create_input(&session.id))
-        .await
-        .unwrap();
-    let terminal_run = store
-        .transition_task_run(
-            &run.id,
-            TaskRunPhase::Blocked,
-            Some("terminal before continuation".to_string()),
-        )
-        .await
-        .unwrap();
-    store.release_branch_lease(&run.id).await.unwrap();
-
-    let resolution = store
-        .load_task_continuation_resolution(&run.id)
-        .await
-        .expect("terminal continuation resolution must not require a branch lease");
-
-    assert_eq!(
-        resolution,
-        TaskContinuationResolution::Terminal(Box::new(terminal_run))
-    );
-}
-
-#[tokio::test]
-async fn concurrent_terminal_transition_resolves_active_snapshot_or_typed_terminal() {
-    let store = StudioStore::open_memory().await.unwrap();
-    let project = store
-        .upsert_project("C:/work/concurrent-terminal-snapshot")
-        .await
-        .unwrap();
-    let session = store
-        .create_session(&project.id, "Concurrent snapshot", StudioMode::Task)
-        .await
-        .unwrap();
-    let (run, lease) = store
-        .create_task_run_with_lease(create_input(&session.id))
-        .await
-        .unwrap();
-    let barrier = ContinuationSnapshotTestBarrier::new();
-    let reader_store = store.clone();
-    let reader_run_id = run.id.clone();
-    let reader_barrier = barrier.clone();
-    let reader = tokio::spawn(async move {
-        reader_store
-            .load_task_continuation_resolution_with_barrier(&reader_run_id, &reader_barrier)
+            })
             .await
-    });
-    barrier.wait_until_entered().await;
-
-    let writer_store = store.clone();
-    let writer_run_id = run.id.clone();
-    let (writer_started_tx, writer_started_rx) = tokio::sync::oneshot::channel();
-    let writer = tokio::spawn(async move {
-        let _ = writer_started_tx.send(());
-        writer_store
-            .terminalize_task_and_release_lease_for_test(&writer_run_id)
+            .unwrap();
+        let work_unit = store
+            .update_work_unit(
+                &work_unit.id,
+                WorkUnitStatus::Running,
+                Some(agent_id.clone()),
+            )
             .await
-    });
-    writer_started_rx.await.unwrap();
-    barrier.release().await;
-
-    let resolution = reader.await.unwrap().unwrap();
-    match resolution {
-        TaskContinuationResolution::Active(snapshot) => {
-            assert_eq!(snapshot.run, run);
-            assert_eq!(snapshot.branch_lease, lease);
-        }
-        TaskContinuationResolution::Terminal(terminal) => {
-            assert_eq!(terminal.id, run.id);
-            assert!(terminal.phase.is_terminal());
+            .unwrap();
+        let outcome = store
+            .create_agent_outcome(CreateAgentOutcome {
+                task_run_id: run.id.clone(),
+                work_unit_id: Some(work_unit.id.clone()),
+                agent_id: agent_id.clone(),
+                owner_path: "/root".to_string(),
+                initiated_by: "planner".to_string(),
+                requested_by_call_id: "spawn-call".to_string(),
+                role: "executor".to_string(),
+                status: AgentOutcomeStatus::Running,
+                attempt: 1,
+            })
+            .await
+            .unwrap();
+        Self {
+            store,
+            run,
+            work_unit,
+            outcome,
+            agent_id,
         }
     }
-    writer.await.unwrap().unwrap();
-    let final_resolution = store
-        .load_task_continuation_resolution(&run.id)
-        .await
-        .unwrap();
-    assert!(matches!(
-        final_resolution,
-        TaskContinuationResolution::Terminal(terminal) if terminal.id == run.id
-    ));
+
+    fn delivery(&self, head_commit: &str) -> AgentDelivery {
+        AgentDelivery {
+            worktree: AgentWorktreeDelivery {
+                path: self.work_unit.worktree_path.clone(),
+                branch: self.work_unit.branch.clone(),
+            },
+            base_commit: self.work_unit.base_commit.clone(),
+            head_commit: head_commit.to_string(),
+            changed_files: vec!["src/lib.rs".to_string()],
+            verification_summary: "cargo test passed".to_string(),
+        }
+    }
+
+    async fn finish_delivery_review(
+        &self,
+        reviewer_agent_id: &str,
+        requested_by_call_id: &str,
+        review: AgentReview,
+    ) -> ReviewRoundRecord {
+        let round = self
+            .store
+            .begin_delivery_review(&self.run.session_id, &self.agent_id, requested_by_call_id)
+            .await
+            .unwrap();
+        assert_eq!(round.scope, ReviewScope::Delivery);
+        let (_, reviewer) = self
+            .store
+            .authorize_reviewer_spawn(
+                &self.run.session_id,
+                requested_by_call_id,
+                reviewer_agent_id,
+            )
+            .await
+            .unwrap();
+        self.store
+            .update_agent_outcome(
+                &reviewer.id,
+                UpdateAgentOutcome {
+                    status: AgentOutcomeStatus::Running,
+                    summary: None,
+                    error: None,
+                },
+            )
+            .await
+            .unwrap();
+        self.store
+            .complete_task_review(&self.run.session_id, reviewer_agent_id, review)
+            .await
+            .unwrap()
+    }
+
+    async fn work_unit(&self) -> WorkUnitRecord {
+        self.store
+            .read_work_unit(&self.work_unit.id)
+            .await
+            .unwrap()
+            .unwrap()
+    }
+
+    async fn outcome(&self) -> AgentOutcomeRecord {
+        self.store
+            .list_agent_outcomes(&self.run.id)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|outcome| outcome.id == self.outcome.id)
+            .unwrap()
+    }
 }
 
-#[tokio::test]
-async fn completed_delivery_rolls_back_outcome_when_work_unit_update_fails() {
-    let (store, run, work_unit, outcome) = delivery_transition_fixture().await;
-    install_work_unit_transition_failure(&store, "delivered").await;
-
-    let error = store
-        .complete_agent_delivery(&outcome.id, &work_unit.id, delivery_receipt())
-        .await
-        .expect_err("work unit update failure must roll back outcome update");
-
-    assert!(
-        error
-            .to_string()
-            .contains("injected work unit transition failure")
-    );
-    let persisted_outcome = store
-        .list_agent_outcomes(&run.id)
-        .await
-        .unwrap()
-        .into_iter()
-        .find(|record| record.id == outcome.id)
-        .unwrap();
-    let persisted_work_unit = store.read_work_unit(&work_unit.id).await.unwrap().unwrap();
-    assert_eq!(persisted_outcome.status, AgentOutcomeStatus::Running);
-    assert_eq!(persisted_outcome.delivery, None);
-    assert_eq!(persisted_work_unit.status, WorkUnitStatus::Running);
-}
-
-#[tokio::test]
-async fn waiting_delivery_rolls_back_outcome_when_work_unit_update_fails() {
-    let (store, run, work_unit, outcome) = delivery_transition_fixture().await;
-    install_work_unit_transition_failure(&store, "waitingForDelivery").await;
-
-    let error = store
-        .mark_agent_delivery_waiting(
-            &outcome.id,
-            Some(work_unit.id.as_str()),
-            "validation failed",
-        )
-        .await
-        .expect_err("work unit update failure must roll back outcome update");
-
-    assert!(
-        error
-            .to_string()
-            .contains("injected work unit transition failure")
-    );
-    let persisted_outcome = store
-        .list_agent_outcomes(&run.id)
-        .await
-        .unwrap()
-        .into_iter()
-        .find(|record| record.id == outcome.id)
-        .unwrap();
-    let persisted_work_unit = store.read_work_unit(&work_unit.id).await.unwrap().unwrap();
-    assert_eq!(persisted_outcome.status, AgentOutcomeStatus::Running);
-    assert_eq!(persisted_outcome.error, None);
-    assert_eq!(persisted_work_unit.status, WorkUnitStatus::Running);
-}
-
-async fn delivery_transition_fixture() -> (
-    StudioStore,
-    TaskRunRecord,
-    WorkUnitRecord,
-    AgentOutcomeRecord,
+async fn create_recovery_executor(
+    store: &StudioStore,
+    run: &TaskRunRecord,
+    name: &str,
+    unit_status: WorkUnitStatus,
+    outcome_status: AgentOutcomeStatus,
 ) {
-    let store = StudioStore::open_memory().await.unwrap();
-    let project = store.upsert_project("C:/work/task").await.unwrap();
-    let session = store
-        .create_session(&project.id, "Task", StudioMode::Task)
-        .await
-        .unwrap();
-    let (run, _) = store
-        .create_task_run_with_lease(create_input(&session.id))
-        .await
-        .unwrap();
-    let work_unit = store
+    let agent_id = format!("agent-{name}");
+    let unit = store
         .create_work_unit(CreateWorkUnit {
             task_run_id: run.id.clone(),
-            title: "Implement core".to_string(),
-            owned_paths: vec!["code/pl-core/**".to_string()],
-            base_commit: "1111111".to_string(),
-            worktree_path: "C:/work/task/.pure/worktrees/run/agent-1".to_string(),
-            branch: "pure-task-run-agent-1".to_string(),
+            title: name.to_string(),
+            owned_paths: vec![format!("code/{name}/**")],
+            base_commit: run.base_commit.clone(),
+            worktree_path: format!("C:/work/restart/.pure/worktrees/run/{name}"),
+            branch: format!("pure-task-run-{name}"),
             attempt: 1,
         })
         .await
         .unwrap();
-    let work_unit = store
-        .update_work_unit(
-            &work_unit.id,
-            WorkUnitStatus::Running,
-            Some("agent-1".to_string()),
-        )
+    store
+        .update_work_unit(&unit.id, unit_status, Some(agent_id.clone()))
         .await
         .unwrap();
-    let outcome = store
+    store
         .create_agent_outcome(CreateAgentOutcome {
             task_run_id: run.id.clone(),
-            work_unit_id: Some(work_unit.id.clone()),
-            agent_id: "agent-1".to_string(),
-            owner_path: "root".to_string(),
+            work_unit_id: Some(unit.id),
+            agent_id,
+            owner_path: "/root".to_string(),
             initiated_by: "planner".to_string(),
-            requested_by_call_id: "call-spawn".to_string(),
+            requested_by_call_id: format!("call-{name}"),
             role: "executor".to_string(),
-            status: AgentOutcomeStatus::Running,
+            status: outcome_status,
             attempt: 1,
         })
-        .await
-        .unwrap();
-    (store, run, work_unit, outcome)
-}
-
-fn delivery_receipt() -> AgentDelivery {
-    AgentDelivery {
-        worktree: AgentWorktreeDelivery {
-            path: "C:/work/task/.pure/worktrees/run/agent-1".to_string(),
-            branch: "pure-task-run-agent-1".to_string(),
-        },
-        base_commit: "1111111".to_string(),
-        head_commit: "2222222".to_string(),
-        changed_files: vec!["code/pl-core/src/lib.rs".to_string()],
-        verification_summary: "cargo test passed".to_string(),
-    }
-}
-
-async fn install_work_unit_transition_failure(store: &StudioStore, status: &str) {
-    store
-        .db
-        .execute(Statement::from_string(
-            DatabaseBackend::Sqlite,
-            format!(
-                "CREATE TRIGGER fail_work_unit_transition
-                 BEFORE UPDATE OF status ON work_units
-                 WHEN NEW.status = '{status}'
-                 BEGIN
-                   SELECT RAISE(ABORT, 'injected work unit transition failure');
-                 END;"
-            ),
-        ))
         .await
         .unwrap();
 }

@@ -6,7 +6,7 @@ use super::git::{checked_git, run_git};
 use crate::agent::worktree::same_worktree_path;
 use crate::studio::task_coordinator::{
     AgentDelivery, AgentOutcomeRecord, AgentOutcomeStatus, BranchLeaseRecord, TaskRunRecord,
-    WorkUnitRecord, WorkUnitStatus,
+    WorkCompletionKind, WorkCompletionRecord, WorkCompletionStatus, WorkUnitRecord, WorkUnitStatus,
 };
 
 pub(super) struct MergePreflight {
@@ -19,6 +19,7 @@ pub(super) fn ensure_preflight_delivery_identity(
     agent_id: &str,
     work_unit: &WorkUnitRecord,
     outcome: &AgentOutcomeRecord,
+    completion: &WorkCompletionRecord,
     delivery: &AgentDelivery,
 ) -> Result<()> {
     let mut mismatches = Vec::new();
@@ -35,15 +36,23 @@ pub(super) fn ensure_preflight_delivery_identity(
         mismatches.push("role");
     }
     if outcome.status != AgentOutcomeStatus::Completed
-        || work_unit.status != WorkUnitStatus::Delivered
+        || work_unit.status != WorkUnitStatus::Approved
     {
         mismatches.push("delivery status");
     }
     if outcome.work_unit_id.as_deref() != Some(work_unit.id.as_str()) {
         mismatches.push("workUnitId");
     }
-    if work_unit.attempt != outcome.attempt || !(1..=3).contains(&work_unit.attempt) {
+    if work_unit.attempt != outcome.attempt || work_unit.attempt == 0 {
         mismatches.push("attempt");
+    }
+    if completion.task_run_id != task_run_id
+        || completion.work_unit_id != work_unit.id
+        || completion.executor_agent_id != agent_id
+        || completion.kind != WorkCompletionKind::Delivery
+        || completion.status != WorkCompletionStatus::Approved
+    {
+        mismatches.push("completion");
     }
     if !same_worktree_path(&delivery.worktree.path, &work_unit.worktree_path) {
         mismatches.push("worktree path");
@@ -54,9 +63,17 @@ pub(super) fn ensure_preflight_delivery_identity(
     if delivery.base_commit != work_unit.base_commit {
         mismatches.push("base commit");
     }
+    if completion.head_commit.as_deref() != Some(delivery.head_commit.as_str())
+        || completion.changed_files != delivery.changed_files
+        || completion.worktree_path != delivery.worktree.path
+        || completion.branch != delivery.worktree.branch
+        || completion.base_commit != delivery.base_commit
+    {
+        mismatches.push("completion delivery");
+    }
     if !mismatches.is_empty() {
         bail!(
-            "agent delivery does not match the planner-owned delivered work unit: {}",
+            "agent delivery does not match the planner-owned approved completion: {}",
             mismatches.join(", ")
         );
     }

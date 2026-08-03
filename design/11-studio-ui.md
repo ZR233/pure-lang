@@ -81,6 +81,11 @@ generation 不匹配的 frame 必须丢弃，不能污染当前会话。
 `StudioState` 中 runtime、typed current turn 和 Composer 草稿只按 session 归一化保存，不保留一套
 可独立写入的 selected-session 镜像。reducer、snapshot 和 controller action 都必须携带明确
 `sessionId`；selection 只决定读取哪个 `AgentWorkspaceView`，不能改变事件的归属。
+Composer 的异步提交同样按 session 保存单调 submission revision。success/failure 只能作用于
+仍处于相同 revision 的 `submitting` 状态，receipt 还必须匹配目标 session；旧 Future 不得
+覆盖后续 draft、错误或 canonical turn 已经收束的状态。每次 snapshot、event 或 canonical
+state adoption 后，controller 对 `composersBySession` 全表与 `turnsBySession` 对账，而不是
+只处理当前 selection。
 
 `sessionRuntimeChanged` 只能更新 `sessionRuntimeBySession[sessionId]`；MCP/LSP 的全局 health event 更新 server catalog，当前会话实际 active 列表来自 selected agent session runtime。大会话的 Agent Directory 使用独立轻量事件刷新 owner、session、父子关系、状态和 attention，不通过单 agent session 的 `AgentChanged` 聚合 agent tree。
 
@@ -89,7 +94,7 @@ Flutter Riverpod store 使用同一归一化状态结构：`StudioController` �
 Flutter 数据层必须保持编排与归约分离：`StudioController` 只负责桥接 API 调用、订阅生命周期、bootstrap frame、frame 批处理和 resync 副作用；事件归约、session/config snapshot merge、durable cursor、part overlay 与 agent timeline projection 逻辑放在纯 reducer 模块。纯 reducer 不访问 Riverpod、不调用 bridge、不调度异步任务；需要 resync 时只返回明确原因给 controller 重新订阅。
 提交 prompt 或解决 interaction 的命令响应不携带 Timeline 事实；命令注册成功后 controller
 应以无 cursor 的当前 session subscription 重新建立 load barrier，避免创建会话、切换模式或
-interaction continuation 与旧订阅 generation 竞态。
+interaction 显式输入与旧订阅 generation 竞态。
 
 Flutter reducer 必须按 `sessionId` 过滤实时事件，旧 session stream 取消后迟到的事件不得覆盖当前会话。每个 session 维护 durable event cursor；收到 `ResyncRequired` 时关闭旧 stream 并以无 cursor subscription 获取 authoritative snapshot。`messagePartDelta` 不推进 durable cursor，但只能追加到已有且未 terminal 的 part 字段。
 product stream 使用独立的全局 sequence；即使 product payload 携带 `sessionId`，该 sequence
@@ -154,7 +159,10 @@ Driver extension 只能由 `test_driver/driver_main.dart` 启用，该入口复�
 本地化文本、位置或 `.first/.last`。Windows 验收必须包含 native FRB 和 demo 两轮：每次导航
 后重新读取 widget tree，以 waitFor/waitForAbsent/getText 同步，最后确认 runtime errors 为空
 并保存 shell、Settings、streaming、Provider 与 interaction 截图。探索出的流程必须同步为
-持久 integration test。
+持久 integration test。`run-gui --driver` 使用专用 resident 进程生命周期：xtask 保持
+Flutter tool 的控制 stdin 打开，避免无交互宿主的 EOF 让 DTD 提前退出；Windows 下 xtask
+与其 Flutter、DTD、GUI 子孙属于同一个 kill-on-close Job Object，宿主退出后不得留下孤儿
+GUI 或模型工具进程。普通 `run-gui` 与 build/generate/verify 命令仍使用批处理生命周期。
 
 `StudioPartType::Turn` 与 `StudioPartType::Inference` 是后端 trace lifecycle synthetic part，只用于恢复 turn/inference 状态与诊断，不是 Studio timeline 可渲染 row。Flutter adapter 在 typed FRB 边界必须过滤历史 snapshot 中的这两类 part，并把实时 `messagePartUpdated` 中的这两类 part 归一为 no-op；其他未知 `partType` 仍应抛出协议错误。
 
@@ -209,7 +217,7 @@ Todo list 不进入 timeline。当前 agent snapshot 中最新的 `TodoListUpdat
 宽度计算，不使用全局固定 breakpoint；侧栏目标宽度约 300px，空间不足时 drawer 覆盖而不
 压缩阅读流。
 
-工具组 header 显示工具数量和聚合状态：存在审批等待时为 `awaitingApproval`，存在 started/streaming/approved/running 时为 `running`，否则按 failed、denied、interrupted、budgetLimited、completed 的优先级折叠。header 中突出失败/拒绝数量；成功工具默认只占这一条折叠 row，展开后展示每个工具的工具名、状态、命令/路径/查询摘要、工作目录、exit code、timeout、拒绝原因和失败结果。工具、命令、文件修改和 subagent 活动文本由 Flutter timeline projection 基于结构化事实确定性生成，不在 `pl-core` 或 `pl-protocol` 中新增本地化文案字段。固定 UI 文案走 i18n；tool 名称、agent path、model slug、路径、命令摘要和 provider 返回值按领域值原样展示。`AgentTimelineChanged` 承载当前 owner 主动执行的单条协作事实：`SubAgentActivity` row identity 优先使用 `callId`，无 `callId` 时使用 event id；`TodoListUpdated` 不生成 row。Agent Directory 事件只更新标题区 agent 列表或 attention，不进入单 agent timeline。父 timeline 默认不展开子代理内部工具 trace；`spawn_agent`、`send_input`、`list_agents`、`close_agent` 等 tool part 只作为父 turn 工具组详情项展示，不额外生成逐工具 timeline row。订阅唤醒输入为 synthetic ephemeral continuation，不生成用户消息或 executor timeline 副本。
+工具组 header 显示工具数量和聚合状态：存在审批等待时为 `awaitingApproval`，存在 started/streaming/approved/running 时为 `running`，否则按 failed、denied、interrupted、budgetLimited、completed 的优先级折叠。header 中突出失败/拒绝数量；成功工具默认只占这一条折叠 row，展开后展示每个工具的工具名、状态、命令/路径/查询摘要、工作目录、exit code、timeout、拒绝原因和失败结果。工具、命令、文件修改和 subagent 活动文本由 Flutter timeline projection 基于结构化事实确定性生成，不在 `pl-core` 或 `pl-protocol` 中新增本地化文案字段。固定 UI 文案走 i18n；tool 名称、agent path、model slug、路径、命令摘要和 provider 返回值按领域值原样展示。`AgentTimelineChanged` 承载当前 owner 主动执行的单条协作事实：`SubAgentActivity` row identity 优先使用 `callId`，无 `callId` 时使用 event id；`TodoListUpdated` 不生成 row。Agent Directory 事件只更新标题区 agent 列表或 attention，不进入单 agent timeline。父 timeline 默认不展开子代理内部工具 trace；`spawn_agent`、`send_message`、`interrupt_agent`、`list_agents`、`wait_agents`、`read_agent_session`、`close_agent` 等 tool part 只作为父 turn 工具组详情项展示，不额外生成逐工具 timeline row，也不生成 synthetic user message 或 executor timeline 副本。
 
 Timeline 虚拟滚动必须监听 opencode 同款 active assistant content version：当前 active assistant message 的完成状态、错误、text/reasoning 展示长度、tool status、tool result/metadata 长度变化都要触发 `virtua.measure()` 和底部锚定。row key 不变但内容增长时，仍要保持底部跟随；切换 session 时写入/读取 row cache，并用 keep-mounted 行避免 active turn 被虚拟列表过早卸载。
 
@@ -308,7 +316,8 @@ session stream。Session row 上的关闭按钮仍是归档语义，调用
 `archiveSession(sessionId, selectedSessionId)`；后端会拒绝 active turn，会取消该会话
 pending interaction，并返回同项目的新 session selection。前端收到 payload 后删除/隐藏归档
 session、切换到返回的 `selectedSessionId`，并用 `loadSessionState` 恢复新会话 projection；
-如果项目内没有剩余 session，状态栏与 composer 禁用，用户可以用新建会话按钮创建会话。
+当前选中会话忙碌时只禁用该会话自身的归档入口，不得阻塞其他会话的归档或新建会话；
+如果项目内没有剩余 session，状态栏与 composer 禁用，用户仍可用新建会话按钮创建会话。
 会话列表只显示 `visibility=active && parentSessionId=null`；agent child 与 archived
 session 不作为 root row 出现。
 
@@ -395,7 +404,7 @@ Flutter 窗口 resize 时 UI 不应持续触发昂贵测量。Timeline 的贴底
 活动摘要只显示本地化 task phase；弹层按 coordinator、work unit、merge/conflict 和 review
 分区展示 worktree、commit、来源与实际读取的 design 引用。存在 durable task 快照时不再
 重复叠加内存 agent 详情面板；长列表在单一、限高的滚动区内展示，760px 窗口不得溢出。
-活动摘要中的 durable agent 数只统计 `queued | running | waitingForDelivery`，内存 agent
+活动摘要中的 durable agent 数只统计 `queued | running`，内存 agent
 只统计 `queued | running | waiting`；详情的 durable agent
 分区展示全部历史 outcome，包括角色、来源 call、summary、error 和交付 commit，确保摘要
 中的活动代理都能在弹层中定位。

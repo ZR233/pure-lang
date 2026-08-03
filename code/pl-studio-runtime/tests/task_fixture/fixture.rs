@@ -10,7 +10,7 @@ use tokio::net::TcpListener;
 
 use super::config::task_test_config;
 use super::git::git_output;
-use super::server::{ScriptedModelServer, TaskFlowScenario};
+use super::server::ScriptedModelServer;
 
 pub const DESIGN_PATH: &str = "design/task-flow.md";
 pub const FEATURE_PATH: &str = "src/feature.txt";
@@ -29,14 +29,6 @@ pub struct TaskFlowFixture {
 
 impl TaskFlowFixture {
     pub async fn new() -> Result<Self> {
-        Self::new_with_scenario(TaskFlowScenario::HappyPath).await
-    }
-
-    pub async fn new_interrupted_executor() -> Result<Self> {
-        Self::new_with_scenario(TaskFlowScenario::InterruptedExecutor).await
-    }
-
-    async fn new_with_scenario(scenario: TaskFlowScenario) -> Result<Self> {
         let root = unique_temp_path("pure-task-orchestration-integration");
         let home = root.join("home");
         let workspace = root.join("workspace");
@@ -59,8 +51,7 @@ impl TaskFlowFixture {
             .set_session_mode(&session.id, StudioMode::Task)
             .await?;
         runtime.start_runtime().await?;
-        let server =
-            ScriptedModelServer::start(listener, runtime.clone(), session.id.clone(), scenario);
+        let server = ScriptedModelServer::start(listener, runtime.clone(), session.id.clone());
 
         Ok(Self {
             runtime,
@@ -130,49 +121,6 @@ impl TaskFlowFixture {
 
     pub async fn assert_script_complete(&self) -> Result<()> {
         self.server.assert_complete().await
-    }
-
-    pub async fn wait_for_interrupted_executor_request(&self) -> Result<()> {
-        self.server.wait_for_interrupted_executor_request().await
-    }
-
-    pub async fn successful_interrupt_target(&self) -> Result<String> {
-        let snapshot = self
-            .runtime
-            .session_event_snapshot(&self.session_id)
-            .await?;
-        let tool = snapshot
-            .parts
-            .into_iter()
-            .find_map(|part| match part.content {
-                pl_studio_runtime::SessionPartContent::Tool { tool }
-                    if part.status == pl_studio_runtime::SessionPartStatus::Completed
-                        && part.error.is_none()
-                        && tool.name == "send_input"
-                        && tool.result.is_some() =>
-                {
-                    Some(tool)
-                }
-                _ => None,
-            })
-            .context("successful send_input call was not projected")?;
-        let arguments: serde_json::Value =
-            serde_json::from_str(&tool.arguments).context("send_input arguments are not JSON")?;
-        if arguments
-            .get("interrupt")
-            .and_then(serde_json::Value::as_bool)
-            != Some(true)
-        {
-            bail!(
-                "send_input did not request an interrupt: {}",
-                tool.arguments
-            );
-        }
-        arguments
-            .get("target")
-            .and_then(serde_json::Value::as_str)
-            .map(ToOwned::to_owned)
-            .context("send_input arguments do not contain a target")
     }
 
     pub async fn shutdown(&self) -> Result<()> {

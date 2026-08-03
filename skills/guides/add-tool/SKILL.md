@@ -160,7 +160,7 @@ workspace 内外访问由 `PermissionMode` 与统一 `tool_dispatch` 决定；�
 | **workspace_file/**、**file/** | `read_file`, `list_files`, `search_files`, `apply_patch` 等 | 共享 schema + local/host backend；写操作持有 workspace 写锁 |
 | **exec/mod.rs** | `exec`, `write_stdin` | 唯一命令工具协议，共享 `CommandProcessManager`；`command/` 是 backend 与进程管理实现 |
 | **skill/** | `skills_list`, `skill_view`, `skill_manage` | 技能目录访问，严格输入解析 |
-| **agent_runtime/collaboration.rs** | `spawn_agent`, `send_input`, `list_agents`, `close_agent` | 子代理树管理；等待由 runtime direct-child 订阅与合并 continuation 处理 |
+| **agent_runtime/collaboration.rs** | `spawn_agent`, `report_progress`, `send_message`, `interrupt_agent`, `list_agents`, `wait_agents`, `read_agent_session`, `close_agent` | 子代理树、显式进度和事件驱动等待 |
 | **ask_user.rs** | `request_user_input` | 通过 typed interaction 等待结构化用户输入 |
 | **lsp.rs** | `lsp_query_*` | 按语言动态注册的 LSP 代码智能查询（定义跳转、引用查找），依赖 `pl-lsp` crate |
 

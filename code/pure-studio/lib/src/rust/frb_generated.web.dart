@@ -104,6 +104,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   bool dco_decode_box_autoadd_bool(dynamic raw);
 
   @protected
+  BridgeAgentDirectoryEntryDto
+  dco_decode_box_autoadd_bridge_agent_directory_entry_dto(dynamic raw);
+
+  @protected
+  BridgeAgentProgressDto dco_decode_box_autoadd_bridge_agent_progress_dto(
+    dynamic raw,
+  );
+
+  @protected
   BridgeAgentStatus dco_decode_box_autoadd_bridge_agent_status(dynamic raw);
 
   @protected
@@ -301,6 +310,14 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeActiveTurn dco_decode_bridge_active_turn(dynamic raw);
+
+  @protected
+  BridgeAgentDirectoryEntryDto dco_decode_bridge_agent_directory_entry_dto(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeAgentProgressDto dco_decode_bridge_agent_progress_dto(dynamic raw);
 
   @protected
   BridgeAgentStatus dco_decode_bridge_agent_status(dynamic raw);
@@ -622,10 +639,23 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeTaskAgentDto dco_decode_bridge_task_agent_dto(dynamic raw);
 
   @protected
+  BridgeTaskCompletionDto dco_decode_bridge_task_completion_dto(dynamic raw);
+
+  @protected
+  BridgeTaskDesignReferenceDto dco_decode_bridge_task_design_reference_dto(
+    dynamic raw,
+  );
+
+  @protected
   BridgeTaskMergeDto dco_decode_bridge_task_merge_dto(dynamic raw);
 
   @protected
   BridgeTaskReviewDto dco_decode_bridge_task_review_dto(dynamic raw);
+
+  @protected
+  BridgeTaskReviewFindingDto dco_decode_bridge_task_review_finding_dto(
+    dynamic raw,
+  );
 
   @protected
   BridgeTaskRuntimeDto dco_decode_bridge_task_runtime_dto(dynamic raw);
@@ -785,10 +815,23 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<BridgeTaskAgentDto> dco_decode_list_bridge_task_agent_dto(dynamic raw);
 
   @protected
+  List<BridgeTaskCompletionDto> dco_decode_list_bridge_task_completion_dto(
+    dynamic raw,
+  );
+
+  @protected
+  List<BridgeTaskDesignReferenceDto>
+  dco_decode_list_bridge_task_design_reference_dto(dynamic raw);
+
+  @protected
   List<BridgeTaskMergeDto> dco_decode_list_bridge_task_merge_dto(dynamic raw);
 
   @protected
   List<BridgeTaskReviewDto> dco_decode_list_bridge_task_review_dto(dynamic raw);
+
+  @protected
+  List<BridgeTaskReviewFindingDto>
+  dco_decode_list_bridge_task_review_finding_dto(dynamic raw);
 
   @protected
   List<BridgeTaskWorkUnitDto> dco_decode_list_bridge_task_work_unit_dto(
@@ -871,6 +914,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   bool? dco_decode_opt_box_autoadd_bool(dynamic raw);
+
+  @protected
+  BridgeAgentProgressDto? dco_decode_opt_box_autoadd_bridge_agent_progress_dto(
+    dynamic raw,
+  );
 
   @protected
   BridgeAgentStatus? dco_decode_opt_box_autoadd_bridge_agent_status(
@@ -1107,6 +1155,17 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   bool sse_decode_box_autoadd_bool(SseDeserializer deserializer);
+
+  @protected
+  BridgeAgentDirectoryEntryDto
+  sse_decode_box_autoadd_bridge_agent_directory_entry_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeAgentProgressDto sse_decode_box_autoadd_bridge_agent_progress_dto(
+    SseDeserializer deserializer,
+  );
 
   @protected
   BridgeAgentStatus sse_decode_box_autoadd_bridge_agent_status(
@@ -1348,6 +1407,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeActiveTurn sse_decode_bridge_active_turn(SseDeserializer deserializer);
+
+  @protected
+  BridgeAgentDirectoryEntryDto sse_decode_bridge_agent_directory_entry_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeAgentProgressDto sse_decode_bridge_agent_progress_dto(
+    SseDeserializer deserializer,
+  );
 
   @protected
   BridgeAgentStatus sse_decode_bridge_agent_status(
@@ -1749,12 +1818,27 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeTaskCompletionDto sse_decode_bridge_task_completion_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeTaskDesignReferenceDto sse_decode_bridge_task_design_reference_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeTaskMergeDto sse_decode_bridge_task_merge_dto(
     SseDeserializer deserializer,
   );
 
   @protected
   BridgeTaskReviewDto sse_decode_bridge_task_review_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeTaskReviewFindingDto sse_decode_bridge_task_review_finding_dto(
     SseDeserializer deserializer,
   );
 
@@ -1960,6 +2044,17 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  List<BridgeTaskCompletionDto> sse_decode_list_bridge_task_completion_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<BridgeTaskDesignReferenceDto>
+  sse_decode_list_bridge_task_design_reference_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<BridgeTaskMergeDto> sse_decode_list_bridge_task_merge_dto(
     SseDeserializer deserializer,
   );
@@ -1968,6 +2063,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<BridgeTaskReviewDto> sse_decode_list_bridge_task_review_dto(
     SseDeserializer deserializer,
   );
+
+  @protected
+  List<BridgeTaskReviewFindingDto>
+  sse_decode_list_bridge_task_review_finding_dto(SseDeserializer deserializer);
 
   @protected
   List<BridgeTaskWorkUnitDto> sse_decode_list_bridge_task_work_unit_dto(
@@ -2066,6 +2165,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   bool? sse_decode_opt_box_autoadd_bool(SseDeserializer deserializer);
+
+  @protected
+  BridgeAgentProgressDto? sse_decode_opt_box_autoadd_bridge_agent_progress_dto(
+    SseDeserializer deserializer,
+  );
 
   @protected
   BridgeAgentStatus? sse_decode_opt_box_autoadd_bridge_agent_status(
@@ -2355,6 +2459,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_box_autoadd_bool(bool self, SseSerializer serializer);
 
   @protected
+  void sse_encode_box_autoadd_bridge_agent_directory_entry_dto(
+    BridgeAgentDirectoryEntryDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_bridge_agent_progress_dto(
+    BridgeAgentProgressDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_bridge_agent_status(
     BridgeAgentStatus self,
     SseSerializer serializer,
@@ -2633,6 +2749,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_bridge_active_turn(
     BridgeActiveTurn self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_agent_directory_entry_dto(
+    BridgeAgentDirectoryEntryDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_agent_progress_dto(
+    BridgeAgentProgressDto self,
     SseSerializer serializer,
   );
 
@@ -3120,6 +3248,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_bridge_task_completion_dto(
+    BridgeTaskCompletionDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_task_design_reference_dto(
+    BridgeTaskDesignReferenceDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_bridge_task_merge_dto(
     BridgeTaskMergeDto self,
     SseSerializer serializer,
@@ -3128,6 +3268,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_bridge_task_review_dto(
     BridgeTaskReviewDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_task_review_finding_dto(
+    BridgeTaskReviewFindingDto self,
     SseSerializer serializer,
   );
 
@@ -3372,6 +3518,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_bridge_task_completion_dto(
+    List<BridgeTaskCompletionDto> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_bridge_task_design_reference_dto(
+    List<BridgeTaskDesignReferenceDto> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_bridge_task_merge_dto(
     List<BridgeTaskMergeDto> self,
     SseSerializer serializer,
@@ -3380,6 +3538,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_bridge_task_review_dto(
     List<BridgeTaskReviewDto> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_bridge_task_review_finding_dto(
+    List<BridgeTaskReviewFindingDto> self,
     SseSerializer serializer,
   );
 
@@ -3514,6 +3678,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_opt_box_autoadd_bool(bool? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_box_autoadd_bridge_agent_progress_dto(
+    BridgeAgentProgressDto? self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_opt_box_autoadd_bridge_agent_status(

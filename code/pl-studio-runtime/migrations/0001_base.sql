@@ -19,13 +19,8 @@ CREATE TABLE agent_outcomes (
     attempt INTEGER NOT NULL,
     summary TEXT,
     error TEXT,
-    delivery_json TEXT,
-    review_json TEXT,
-    completion_contract_json TEXT,
-    delivery_recovery_count INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
-    terminal_observed INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY(task_run_id) REFERENCES task_runs(id) ON DELETE CASCADE,
     FOREIGN KEY(work_unit_id) REFERENCES work_units(id) ON DELETE SET NULL
 );
@@ -44,26 +39,16 @@ CREATE TABLE agent_active_inputs (
     FOREIGN KEY(agent_id) REFERENCES agent_runtime_states(agent_id) ON DELETE CASCADE
 );
 
-CREATE TABLE agent_wake_receipts (
-    agent_id TEXT NOT NULL,
-    wake_id TEXT NOT NULL,
-    receipt_json TEXT NOT NULL,
-    accepted_at INTEGER NOT NULL,
-    PRIMARY KEY (agent_id, wake_id),
-    FOREIGN KEY(agent_id) REFERENCES agent_runtime_states(agent_id) ON DELETE CASCADE
-);
-
 CREATE TABLE agent_runtime_sessions (
-    agent_id TEXT NOT NULL,
-    session_id TEXT NOT NULL,
+    agent_id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL UNIQUE,
     metadata_json TEXT NOT NULL,
     context_json TEXT NOT NULL,
     usage_json TEXT NOT NULL,
     last_context_tokens INTEGER,
     trace_sequence INTEGER NOT NULL DEFAULT 0,
     session_event_sequence INTEGER NOT NULL DEFAULT 0,
-    updated_at INTEGER NOT NULL,
-    PRIMARY KEY (agent_id, session_id)
+    updated_at INTEGER NOT NULL
 );
 
 CREATE TABLE agent_runtime_states (
@@ -188,15 +173,22 @@ CREATE TABLE review_rounds (
     id TEXT PRIMARY KEY,
     task_run_id TEXT NOT NULL,
     round INTEGER NOT NULL,
-    head_commit TEXT NOT NULL,
+    scope TEXT NOT NULL,
+    work_unit_id TEXT,
+    completion_id TEXT,
+    completion_revision INTEGER,
+    reviewed_head TEXT NOT NULL,
     status TEXT NOT NULL,
+    requested_by_call_id TEXT NOT NULL,
     reviewer_agent_id TEXT,
     summary TEXT,
     design_references_json TEXT NOT NULL,
     findings_json TEXT NOT NULL,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
-    FOREIGN KEY(task_run_id) REFERENCES task_runs(id) ON DELETE CASCADE
+    FOREIGN KEY(task_run_id) REFERENCES task_runs(id) ON DELETE CASCADE,
+    FOREIGN KEY(work_unit_id) REFERENCES work_units(id) ON DELETE CASCADE,
+    FOREIGN KEY(completion_id) REFERENCES work_completions(id) ON DELETE CASCADE
 );
 
 CREATE TABLE sessions (
@@ -274,17 +266,31 @@ CREATE TABLE work_units (
     FOREIGN KEY(task_run_id) REFERENCES task_runs(id) ON DELETE CASCADE
 );
 
+CREATE TABLE work_completions (
+    id TEXT PRIMARY KEY,
+    task_run_id TEXT NOT NULL,
+    work_unit_id TEXT NOT NULL,
+    executor_agent_id TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    status TEXT NOT NULL,
+    base_commit TEXT NOT NULL,
+    head_commit TEXT,
+    changed_files_json TEXT NOT NULL,
+    verification_summary TEXT NOT NULL,
+    worktree_path TEXT NOT NULL,
+    branch TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    FOREIGN KEY(task_run_id) REFERENCES task_runs(id) ON DELETE CASCADE,
+    FOREIGN KEY(work_unit_id) REFERENCES work_units(id) ON DELETE CASCADE
+);
+
 CREATE UNIQUE INDEX idx_agent_outcomes_run_agent_attempt
     ON agent_outcomes(task_run_id, agent_id, attempt);
 
 CREATE INDEX idx_agent_outcomes_run_status
     ON agent_outcomes(task_run_id, status, updated_at DESC, id DESC);
-
-CREATE INDEX idx_agent_wake_receipts_agent_accepted
-    ON agent_wake_receipts(agent_id, accepted_at, wake_id);
-
-CREATE INDEX idx_agent_runtime_sessions_session
-    ON agent_runtime_sessions(session_id, updated_at);
 
 CREATE INDEX idx_agent_runtime_traces_session
     ON agent_runtime_traces(session_id, sequence);
@@ -315,6 +321,21 @@ CREATE INDEX idx_projects_updated_at ON projects(updated_at DESC, id DESC);
 CREATE UNIQUE INDEX idx_review_rounds_run_round
     ON review_rounds(task_run_id, round);
 
+CREATE INDEX idx_review_rounds_completion_revision
+    ON review_rounds(completion_id, completion_revision)
+    WHERE completion_id IS NOT NULL;
+
+CREATE UNIQUE INDEX idx_review_rounds_active_delivery
+    ON review_rounds(work_unit_id)
+    WHERE scope = 'delivery' AND status = 'pending';
+
+CREATE UNIQUE INDEX idx_review_rounds_active_integrated
+    ON review_rounds(task_run_id)
+    WHERE scope = 'integrated' AND status = 'pending';
+
+CREATE UNIQUE INDEX idx_review_rounds_run_call
+    ON review_rounds(task_run_id, requested_by_call_id);
+
 CREATE INDEX idx_sessions_parent_session
     ON sessions(parent_session_id);
 
@@ -339,4 +360,10 @@ CREATE INDEX idx_tool_approvals_session_created_at
 CREATE INDEX idx_work_units_run_status
     ON work_units(task_run_id, status, created_at ASC, id ASC);
 
-PRAGMA user_version = 8;
+CREATE UNIQUE INDEX idx_work_completions_unit_revision
+    ON work_completions(work_unit_id, revision);
+
+CREATE INDEX idx_work_completions_run_status
+    ON work_completions(task_run_id, status, created_at ASC, id ASC);
+
+PRAGMA user_version = 10;

@@ -1,16 +1,17 @@
+use std::collections::BTreeMap;
 use std::fmt;
-use std::time::Duration;
 
-use tokio::sync::{broadcast, mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot};
 
 use pl_protocol::{SessionSubscriptionRequest, SessionViewSnapshot};
 
 use super::coordinator::CoordinatorCommand;
-use super::event_hub::AgentEventHubHandle;
+use super::directory::{AgentDirectoryHandle, AgentDirectorySnapshot, AgentDirectorySubscription};
 use super::{
-    AgentActivityState, AgentCurrentSessionSubmitRequest, AgentId, AgentParentSubscription,
-    AgentRegistration, AgentRuntimeResult, AgentSessionState, AgentSnapshot, AgentSpawnRequest,
-    AgentSpawnResult, AgentSubmitRequest, AgentTurnCheckpoint, AgentUpdateKind, AgentWaitResult,
+    AgentActivityState, AgentCurrentSessionSubmitRequest, AgentDirectoryWaitReason,
+    AgentDirectoryWaitResult, AgentId, AgentLifecycleState, AgentProgressCheckpoint,
+    AgentProgressStage, AgentRegistration, AgentRuntimeResult, AgentSessionDigest, AgentSnapshot,
+    AgentSpawnRequest, AgentSpawnResult, AgentSubmitRequest, AgentTurnCheckpoint, AgentWaitResult,
     SessionId, TurnId,
 };
 use crate::agent_runtime::state::AgentRuntimeError;
@@ -18,24 +19,24 @@ use crate::{SessionEventHubHandle, SessionEventSubscription};
 
 /// 不包含 host 泛型的 cloneable runtime 命令句柄。
 ///
-/// 产品 facade 与协作工具只能通过该句柄访问 agent 状态机，不能直接持有 actor state。
+/// 产品 facade 与协作工具只能通过该句柄访问 agent 状态机，不能直接持有 loop state。
 #[derive(Clone)]
 pub struct AgentRuntimeHandle {
     pub(crate) sender: mpsc::Sender<CoordinatorCommand>,
     pub(crate) session_events: SessionEventHubHandle,
-    pub(crate) agent_events: AgentEventHubHandle,
+    pub(crate) directory: AgentDirectoryHandle,
 }
 
 impl AgentRuntimeHandle {
     pub(crate) fn new(
         sender: mpsc::Sender<CoordinatorCommand>,
         session_events: SessionEventHubHandle,
-        agent_events: AgentEventHubHandle,
+        directory: AgentDirectoryHandle,
     ) -> Self {
         Self {
             sender,
             session_events,
-            agent_events,
+            directory,
         }
     }
 
@@ -53,7 +54,7 @@ impl AgentRuntimeHandle {
         receive(receiver).await?
     }
 
-    /// 向 agent 提交输入并返回预分配的 turn id。
+    /// 向 agent 提交显式输入；活动 turn 收到 steer，空闲 agent 启动下一 turn。
     pub async fn submit(
         &self,
         agent_id: AgentId,
@@ -69,7 +70,7 @@ impl AgentRuntimeHandle {
         receive(receiver).await?
     }
 
-    /// 由目标 actor 原子解析 owner-bound current session 后提交输入。
+    /// 由目标 loop 原子解析唯一 canonical session 后提交输入。
     pub async fn submit_current_session(
         &self,
         agent_id: AgentId,
@@ -93,7 +94,7 @@ impl AgentRuntimeHandle {
         receive(receiver).await?
     }
 
-    /// 取消与 id 精确匹配的活动 turn。
+    /// 中断与 id 精确匹配的活动 turn。
     pub async fn cancel_turn(&self, agent_id: AgentId, turn_id: TurnId) -> AgentRuntimeResult<()> {
         let (reply, receiver) = oneshot::channel();
         self.send(CoordinatorCommand::CancelTurn {
@@ -137,26 +138,7 @@ impl AgentRuntimeHandle {
         receive(receiver).await?
     }
 
-    /// 把新的空或已导入 session 纳入 agent canonical state；重复调用保持幂等。
-    pub async fn open_session(
-        &self,
-        agent_id: AgentId,
-        session: AgentSessionState,
-    ) -> AgentRuntimeResult<()> {
-        let (reply, receiver) = oneshot::channel();
-        self.send(CoordinatorCommand::OpenSession {
-            agent_id,
-            session,
-            reply,
-        })
-        .await?;
-        receive(receiver).await?
-    }
-
     /// 将产品关联出的公共事实交给目标 agent 串行持久化和投影。
-    ///
-    /// 调用端不能自行分配 sequence 或广播；事实 source 必须是目标 session owner。
-    /// 产品触发的 interaction/plan 等事实未提供 source 时由 actor 补为 owner。
     pub async fn record_session_facts(
         &self,
         agent_id: AgentId,
@@ -171,6 +153,37 @@ impl AgentRuntimeHandle {
             reply,
         })
         .await?;
+        receive(receiver).await?
+    }
+
+    /// 更新调用 agent 的显式进度 checkpoint。
+    pub async fn report_progress(
+        &self,
+        agent_id: AgentId,
+        stage: AgentProgressStage,
+        summary: String,
+        next_step: String,
+    ) -> AgentRuntimeResult<AgentProgressCheckpoint> {
+        let (reply, receiver) = oneshot::channel();
+        self.send(CoordinatorCommand::ReportProgress {
+            agent_id,
+            stage,
+            summary,
+            next_step,
+            reply,
+        })
+        .await?;
+        receive(receiver).await?
+    }
+
+    /// 读取目标 agent 唯一 canonical session 的有界、过滤摘要。
+    pub async fn read_agent_session(
+        &self,
+        agent_id: AgentId,
+    ) -> AgentRuntimeResult<AgentSessionDigest> {
+        let (reply, receiver) = oneshot::channel();
+        self.send(CoordinatorCommand::ReadSession { agent_id, reply })
+            .await?;
         receive(receiver).await?
     }
 
@@ -197,132 +210,56 @@ impl AgentRuntimeHandle {
         receive(receiver).await?
     }
 
-    /// 订阅 direct children；首帧为 canonical snapshots。
-    pub fn subscribe_children(&self, parent_agent_id: &AgentId) -> AgentParentSubscription {
-        self.agent_events.subscribe_parent(parent_agent_id)
+    /// 读取 Agent Directory 的 canonical snapshot。
+    pub fn directory_snapshot(&self) -> AgentDirectorySnapshot {
+        self.directory.directory_snapshot()
     }
 
-    pub(crate) async fn enter_waiting_agents(&self, agent_id: AgentId) -> AgentRuntimeResult<()> {
-        let (reply, receiver) = oneshot::channel();
-        self.send(CoordinatorCommand::EnterWaitingAgents { agent_id, reply })
-            .await?;
-        receive(receiver).await?
+    /// 订阅 Agent Directory 的单一 revision watch。
+    pub fn subscribe_directory(&self) -> AgentDirectorySubscription {
+        self.directory.subscribe()
     }
 
-    /// 在产品终态提交后立即禁止父代理接受旧 continuation。
-    pub fn suspend_parent_continuations(&self, agent_id: AgentId) {
-        self.agent_events.suspend_parent_wait(agent_id);
-    }
-
-    /// 清除父代理的 synthetic mailbox 与 accepted wake，并收束到可复用 idle 状态。
-    pub async fn quiesce_parent_wait(
+    /// 等待任一目标出现新 progress、interaction 或 terminal 事实。
+    pub async fn wait_agents(
         &self,
-        agent_id: AgentId,
-    ) -> AgentRuntimeResult<AgentSnapshot> {
-        self.agent_events.suspend_parent_wait(agent_id.clone());
-        let (reply, receiver) = oneshot::channel();
-        self.send(CoordinatorCommand::QuiesceParentWait { agent_id, reply })
-            .await?;
-        receive(receiver).await?
-    }
+        targets: Vec<AgentId>,
+    ) -> AgentRuntimeResult<AgentDirectoryWaitResult> {
+        if targets.is_empty() {
+            return Err(AgentRuntimeError::InvalidInput(
+                "wait_agents requires at least one target".to_string(),
+            ));
+        }
+        let mut subscription = self.directory.subscribe();
+        let baseline = target_snapshots(&self.directory.directory_snapshot(), &targets)?;
+        if let Some(result) = current_wait_result(baseline.values()) {
+            return Ok(result);
+        }
 
-    pub(crate) async fn wake_accepted(
-        &self,
-        agent_id: AgentId,
-        wake_id: Option<super::AgentWakeId>,
-        signal_ids: Vec<String>,
-    ) -> AgentRuntimeResult<bool> {
-        let (reply, receiver) = oneshot::channel();
-        self.send(CoordinatorCommand::WakeAccepted {
-            agent_id,
-            wake_id,
-            signal_ids,
-            reply,
-        })
-        .await?;
-        receive(receiver).await?
-    }
-
-    pub(crate) async fn accept_wake_signals(
-        &self,
-        agent_id: AgentId,
-        turn_id: TurnId,
-        signal_ids: Vec<String>,
-    ) -> AgentRuntimeResult<()> {
-        let (reply, receiver) = oneshot::channel();
-        self.send(CoordinatorCommand::AcceptWakeSignals {
-            agent_id,
-            turn_id,
-            signal_ids,
-            reply,
-        })
-        .await?;
-        receive(receiver).await?
-    }
-
-    /// 等待 agent 进入 Idle 且队列为空；使用提交后事件订阅，不占用 actor waiter。
-    pub async fn wait_until_idle(&self, agent_id: AgentId) -> AgentRuntimeResult<AgentWaitResult> {
-        let mut receiver = self.agent_events.subscribe_snapshots();
         loop {
-            let snapshot = self.agent_events.snapshot(&agent_id)?;
-            if snapshot.lifecycle != super::AgentLifecycleState::Active
-                || (snapshot.activity == AgentActivityState::Idle
-                    && snapshot.pending_trigger_inputs == 0)
+            subscription.changed().await?;
+            let current = target_snapshots(&self.directory.directory_snapshot(), &targets)?;
+            if let Some(result) = changed_wait_result(&baseline, &current) {
+                return Ok(result);
+            }
+        }
+    }
+
+    /// 等待 agent 进入 Idle 且队列为空；只由 directory watch 驱动。
+    pub async fn wait_until_idle(&self, agent_id: AgentId) -> AgentRuntimeResult<AgentWaitResult> {
+        let mut subscription = self.directory.subscribe();
+        loop {
+            let snapshot = self.directory.snapshot(&agent_id)?;
+            if snapshot.lifecycle != AgentLifecycleState::Active
+                || (snapshot.activity == AgentActivityState::Idle && snapshot.pending_inputs == 0)
             {
                 return Ok(AgentWaitResult {
                     last_turn: snapshot.last_turn.clone(),
                     snapshot,
                 });
             }
-            match receiver.recv().await {
-                Ok(snapshot) if snapshot.identity.id == agent_id => {}
-                Ok(_) => continue,
-                Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                Err(broadcast::error::RecvError::Closed) => {
-                    return Err(AgentRuntimeError::ChannelClosed);
-                }
-            }
+            subscription.changed().await?;
         }
-    }
-
-    /// 有界等待 agent 进入 Idle 且队列为空。
-    pub async fn wait_timeout(
-        &self,
-        agent_id: AgentId,
-        timeout: Duration,
-    ) -> AgentRuntimeResult<AgentWaitResult> {
-        tokio::time::timeout(timeout, self.wait_until_idle(agent_id))
-            .await
-            .map_err(|_| AgentRuntimeError::TimedOut)?
-    }
-
-    /// 产品 durable 事实提交后发布 managed child 阶段更新。
-    pub fn publish_product_phase(
-        &self,
-        parent_agent_id: AgentId,
-        agent_id: AgentId,
-        signal_id: String,
-        phase: String,
-        summary: Option<String>,
-    ) -> AgentRuntimeResult<()> {
-        self.agent_events.publish_product_phase(
-            parent_agent_id,
-            agent_id,
-            signal_id,
-            phase,
-            summary,
-        )
-    }
-
-    pub(crate) fn publish_progress(
-        &self,
-        agent_id: &AgentId,
-        kind: AgentUpdateKind,
-        summary: Option<String>,
-        signal_id: String,
-    ) -> AgentRuntimeResult<()> {
-        self.agent_events
-            .publish_progress(agent_id, kind, summary, signal_id)
     }
 
     /// 订阅指定 session；首帧为 snapshot/replay，随后进入独立实时 channel。
@@ -353,7 +290,7 @@ impl AgentRuntimeHandle {
         receive(receiver).await?
     }
 
-    /// 停止 coordinator 和全部 actor。
+    /// 停止 coordinator 和全部 agent loop。
     pub async fn shutdown(&self) -> AgentRuntimeResult<()> {
         let (reply, receiver) = oneshot::channel();
         self.send(CoordinatorCommand::Shutdown { reply }).await?;
@@ -374,6 +311,98 @@ impl fmt::Debug for AgentRuntimeHandle {
             .debug_struct("AgentRuntimeHandle")
             .finish_non_exhaustive()
     }
+}
+
+fn target_snapshots(
+    directory: &AgentDirectorySnapshot,
+    targets: &[AgentId],
+) -> AgentRuntimeResult<BTreeMap<AgentId, AgentSnapshot>> {
+    let snapshots = directory
+        .agents
+        .iter()
+        .map(|snapshot| (snapshot.identity.id.clone(), snapshot.clone()))
+        .collect::<BTreeMap<_, _>>();
+    targets
+        .iter()
+        .map(|target| {
+            snapshots
+                .get(target)
+                .cloned()
+                .map(|snapshot| (target.clone(), snapshot))
+                .ok_or_else(|| AgentRuntimeError::NotFound(target.clone()))
+        })
+        .collect()
+}
+
+fn current_wait_result<'a>(
+    snapshots: impl Iterator<Item = &'a AgentSnapshot>,
+) -> Option<AgentDirectoryWaitResult> {
+    let snapshots = snapshots.cloned().collect::<Vec<_>>();
+    let terminal = snapshots
+        .iter()
+        .filter(|snapshot| {
+            snapshot.lifecycle != AgentLifecycleState::Active
+                || (snapshot.activity == AgentActivityState::Idle
+                    && snapshot.pending_inputs == 0
+                    && snapshot.last_turn.is_some())
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    if !terminal.is_empty() {
+        return Some(AgentDirectoryWaitResult {
+            reason: AgentDirectoryWaitReason::Terminal,
+            agents: terminal,
+        });
+    }
+    let interactions = snapshots
+        .into_iter()
+        .filter(|snapshot| snapshot.activity == AgentActivityState::WaitingInteraction)
+        .collect::<Vec<_>>();
+    (!interactions.is_empty()).then_some(AgentDirectoryWaitResult {
+        reason: AgentDirectoryWaitReason::Interaction,
+        agents: interactions,
+    })
+}
+
+fn changed_wait_result(
+    baseline: &BTreeMap<AgentId, AgentSnapshot>,
+    current: &BTreeMap<AgentId, AgentSnapshot>,
+) -> Option<AgentDirectoryWaitResult> {
+    let changed = current
+        .iter()
+        .filter_map(|(id, snapshot)| {
+            let previous = baseline.get(id)?;
+            let reason = if snapshot.lifecycle != previous.lifecycle
+                || snapshot.last_turn != previous.last_turn
+            {
+                AgentDirectoryWaitReason::Terminal
+            } else if snapshot.activity == AgentActivityState::WaitingInteraction
+                && previous.activity != AgentActivityState::WaitingInteraction
+            {
+                AgentDirectoryWaitReason::Interaction
+            } else if snapshot.progress != previous.progress {
+                AgentDirectoryWaitReason::Progress
+            } else {
+                return None;
+            };
+            Some((reason, snapshot.clone()))
+        })
+        .collect::<Vec<_>>();
+    let reason = changed
+        .iter()
+        .map(|(reason, _)| *reason)
+        .min_by_key(|reason| match reason {
+            AgentDirectoryWaitReason::Terminal => 0,
+            AgentDirectoryWaitReason::Interaction => 1,
+            AgentDirectoryWaitReason::Progress => 2,
+        })?;
+    Some(AgentDirectoryWaitResult {
+        reason,
+        agents: changed
+            .into_iter()
+            .filter_map(|(candidate, snapshot)| (candidate == reason).then_some(snapshot))
+            .collect(),
+    })
 }
 
 async fn receive<T>(receiver: oneshot::Receiver<T>) -> AgentRuntimeResult<T> {

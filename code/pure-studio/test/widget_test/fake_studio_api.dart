@@ -22,6 +22,7 @@ class _FakeStudioApi implements StudioApi {
   int createSessionCount = 0;
   int bootstrapCount = 0;
   Object? bootstrapError;
+  String? openedProjectPath;
   String? selectedProjectRequest;
   String? archivedProjectId;
   String? archiveSelectedProjectId;
@@ -48,6 +49,11 @@ class _FakeStudioApi implements StudioApi {
   final List<({String sessionId, String prompt})> submittedPrompts = [];
   Completer<SubmitPromptReceipt>? blockedPromptSubmit;
   Exception? submitPromptError;
+  int resumeTaskCount = 0;
+  final List<String> resumedTaskSessionIds = [];
+  Completer<SubmitPromptReceipt>? blockedTaskResume;
+  Exception? resumeTaskError;
+  String? submitReceiptSessionId;
   String submitTurnId = 'turn-1';
   final Map<String, RecoveryCleanupPreview> recoveryPreviews = {};
   final Map<String, RecoveryCleanupPreview> projectCleanupPreviews = {};
@@ -90,7 +96,10 @@ class _FakeStudioApi implements StudioApi {
   }
 
   @override
-  Future<StudioState> openProject(String path) async => initialState;
+  Future<StudioState> openProject(String path) async {
+    openedProjectPath = path;
+    return initialState;
+  }
 
   @override
   Future<StudioState> selectProject(String projectId) async {
@@ -310,9 +319,27 @@ class _FakeStudioApi implements StudioApi {
       return blocked.future;
     }
     return SubmitPromptReceipt(
-      sessionId: sessionId,
+      sessionId: submitReceiptSessionId ?? sessionId,
       turnId: submitTurnId,
       cursor: submitPromptCount,
+    );
+  }
+
+  @override
+  Future<SubmitPromptReceipt> resumeTask(String sessionId) async {
+    resumeTaskCount += 1;
+    resumedTaskSessionIds.add(sessionId);
+    if (resumeTaskError case final error?) {
+      throw error;
+    }
+    final blocked = blockedTaskResume;
+    if (blocked != null) {
+      return blocked.future;
+    }
+    return SubmitPromptReceipt(
+      sessionId: submitReceiptSessionId ?? sessionId,
+      turnId: submitTurnId,
+      cursor: resumeTaskCount,
     );
   }
 

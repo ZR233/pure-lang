@@ -1,10 +1,9 @@
 use std::path::Path;
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 
 use super::super::git::checked_git;
 use super::super::verifier::{MergeVerifier, ProductionMergeVerifier};
-use super::complete::abort_conflict_scope;
 use super::resolve::reject_conflict_markers;
 use crate::studio::task_coordinator::{
     ConflictVerificationOutput, MergeVerificationRequest, RecordConflictVerification,
@@ -22,9 +21,6 @@ impl TaskCoordinator {
         let (scope, unmerged) = self
             .load_active_conflict_scope(session_id, merge_id)
             .await?;
-        if scope.merge.attempt >= 3 {
-            bail!("conflict resolution exceeded the three-attempt limit");
-        }
         let manifest = scope
             .merge
             .evidence
@@ -86,23 +82,13 @@ impl TaskCoordinator {
                 diagnostic: (!diagnostics.is_empty()).then(|| diagnostics.join("; ")),
             })
             .await?;
-        let mut aborted = false;
-        if !success && record.attempt == 3 {
-            abort_conflict_scope(
-                self,
-                &scope,
-                "conflict resolution failed verification three times",
-            )
-            .await?;
-            aborted = true;
-        }
         Ok(ConflictVerificationOutput {
             merge_id: scope.merge.id,
             attempt: record.attempt,
             success,
             diagnostics,
             verification,
-            aborted,
+            aborted: false,
         })
     }
 }

@@ -1,8 +1,12 @@
-use crate::{PlanLifecycleEvent, PlanLifecycleState, SessionEventFact, SessionEventKind};
-use anyhow::Context;
+use crate::config::StudioRole;
+use crate::{
+    PlanLifecycleEvent, PlanLifecycleState, SessionEventFact, SessionEventKind,
+    StudioAgentDirectoryEntry, StudioAgentProgressRuntime,
+};
 use pl_core::{
-    AgentActivityState, AgentCommitObserver, AgentCommittedEvent, AgentLifecycleState,
-    AgentRuntimeEventKind, AgentRuntimeHandle, AgentSnapshot, SessionId, TurnOutcomeKind,
+    AgentActivityState, AgentCommitObserver, AgentCommittedEvent, AgentId, AgentLifecycleState,
+    AgentProgressStage, AgentRuntimeEventKind, AgentRuntimeHandle, AgentSnapshot, SessionId,
+    TurnOutcomeKind,
 };
 use pl_trace::{TraceEvent, TraceEventKind, TracePartKind};
 use tokio::sync::{mpsc, watch};
@@ -12,7 +16,7 @@ use crate::studio::{
 };
 
 use super::resources::StudioAgentResources;
-use super::{StudioContinuationService, StudioPlanConfirmationProjector, wait_for_runtime};
+use super::{StudioPlanConfirmationProjector, wait_for_runtime};
 
 /// 把已提交的 framework event/trace 投影到 Studio durable event stream。
 #[derive(Clone)]
@@ -26,7 +30,6 @@ pub(in crate::studio) struct StudioAgentCommitObserver {
 struct StudioAgentEventProjector {
     store: StudioStore,
     resources: StudioAgentResources,
-    continuations: StudioContinuationService,
     product_events: StudioProductEventRuntime,
     plan_confirmations: StudioPlanConfirmationProjector,
     runtime: watch::Receiver<Option<AgentRuntimeHandle>>,
@@ -38,7 +41,6 @@ impl StudioAgentCommitObserver {
         interactions: InteractionRuntime,
         runtime_state: StudioRuntimeState,
         resources: StudioAgentResources,
-        continuations: StudioContinuationService,
         product_events: StudioProductEventRuntime,
     ) -> Self {
         let (runtime, runtime_receiver) = watch::channel(None);
@@ -52,7 +54,6 @@ impl StudioAgentCommitObserver {
         let projector = StudioAgentEventProjector {
             store,
             resources,
-            continuations,
             product_events,
             plan_confirmations: plan_confirmations.clone(),
             runtime: runtime_receiver,
@@ -165,6 +166,11 @@ impl StudioAgentEventProjector {
                     .await?;
             }
             AgentRuntimeEventKind::TurnStarted { snapshot, .. } => {
+                if snapshot.identity.role.as_str() == StudioRole::Executor.key() {
+                    self.store
+                        .mark_executor_turn_started(event.agent_id.as_str())
+                        .await?;
+                }
                 self.emit_agent_snapshot(studio_session_id.as_deref(), snapshot)
                     .await?;
             }
@@ -172,33 +178,26 @@ impl StudioAgentEventProjector {
                 outcome, snapshot, ..
             }
             | AgentRuntimeEventKind::RecoveryCancelledTurn { outcome, snapshot } => {
+                let is_executor = snapshot.identity.role.as_str() == StudioRole::Executor.key();
+                let is_reviewer = snapshot.identity.role.as_str() == StudioRole::Reviewer.key();
+                if is_executor {
+                    self.store
+                        .settle_executor_turn_finished(
+                            event.agent_id.as_str(),
+                            outcome.kind,
+                            outcome.reason.as_deref(),
+                        )
+                        .await?;
+                } else if is_reviewer {
+                    self.store
+                        .settle_reviewer_turn_finished(
+                            event.agent_id.as_str(),
+                            outcome.kind,
+                            outcome.reason.as_deref(),
+                        )
+                        .await?;
+                }
                 if let Some(session_id) = studio_session_id.as_deref() {
-                    // continuation 是 durable task orchestration，不得被后续 trace/UI
-                    // projection 的非关键失败截断。
-                    if snapshot.identity.parent_id.is_some()
-                        && self
-                            .is_canonical_child_terminal(&snapshot, outcome.turn_id.as_str())
-                            .await?
-                    {
-                        let root_session_id = self
-                            .store
-                            .read_session(session_id)
-                            .await?
-                            .context("child agent Studio session not found")?
-                            .root_session_id;
-                        self.continuations
-                            .record_child_terminal(
-                                &root_session_id,
-                                snapshot.identity.id.as_str(),
-                                snapshot.identity.role.as_str(),
-                                outcome.session_id.as_str(),
-                                outcome.kind,
-                                outcome.reason.clone(),
-                            )
-                            .await;
-                    } else {
-                        self.continuations.request_merge_follow_up(session_id).await;
-                    }
                     self.project_plan_lifecycle(
                         event.agent_id.as_str(),
                         session_id,
@@ -210,25 +209,15 @@ impl StudioAgentEventProjector {
                 }
                 self.emit_agent_snapshot(studio_session_id.as_deref(), snapshot)
                     .await?;
+                if is_reviewer {
+                    let runtime = wait_for_runtime(self.runtime.clone()).await?;
+                    runtime
+                        .close(AgentId::new(event.agent_id.to_string())?)
+                        .await?;
+                }
             }
         }
         Ok(())
-    }
-
-    async fn is_canonical_child_terminal(
-        &self,
-        event_snapshot: &AgentSnapshot,
-        turn_id: &str,
-    ) -> anyhow::Result<bool> {
-        if !snapshot_is_canonical_terminal(event_snapshot, turn_id) {
-            return Ok(false);
-        }
-        let runtime = wait_for_runtime(self.runtime.clone()).await?;
-        let latest = runtime
-            .snapshot(event_snapshot.identity.id.clone())
-            .await
-            .map_err(|error| anyhow::anyhow!(error))?;
-        Ok(snapshot_is_canonical_terminal(&latest, turn_id))
     }
 
     async fn project_traces(
@@ -330,6 +319,71 @@ impl StudioAgentEventProjector {
             .update_agent_session_status(session_id, status, summary, error, snapshot.updated_at)
             .await?;
         if let Some(session) = self.store.read_session(session_id).await? {
+            let progress = snapshot
+                .progress
+                .as_ref()
+                .map(|progress| StudioAgentProgressRuntime {
+                    stage: progress_stage_label(progress.stage).to_string(),
+                    summary: progress.summary.clone(),
+                    next_step: progress.next_step.clone(),
+                    revision: progress.revision,
+                    updated_at: progress.updated_at,
+                });
+            let summary_age_seconds = u64::try_from(
+                crate::studio::ids::unix_seconds()
+                    .saturating_sub(
+                        snapshot
+                            .progress
+                            .as_ref()
+                            .map_or(snapshot.updated_at, |progress| progress.updated_at),
+                    )
+                    .max(0),
+            )
+            .unwrap_or_default();
+            self.product_events.emit_agent_directory(
+                &session.project_id,
+                StudioAgentDirectoryEntry {
+                    id: snapshot.identity.id.to_string(),
+                    session_id: session.id.clone(),
+                    root_session_id: session.root_session_id.clone(),
+                    path: snapshot.identity.id.to_string(),
+                    parent_path: snapshot
+                        .identity
+                        .parent_id
+                        .as_ref()
+                        .map(ToString::to_string),
+                    role: snapshot.identity.role.to_string(),
+                    task: resource.as_ref().map_or_else(
+                        || session.title.clone(),
+                        |resource| resource.task_name.clone(),
+                    ),
+                    status: status.to_string(),
+                    summary: snapshot
+                        .progress
+                        .as_ref()
+                        .map(|progress| progress.summary.clone()),
+                    depth: snapshot.identity.depth,
+                    error: snapshot
+                        .last_turn
+                        .as_ref()
+                        .filter(|outcome| {
+                            matches!(
+                                outcome.kind,
+                                TurnOutcomeKind::Failed | TurnOutcomeKind::BudgetLimited
+                            )
+                        })
+                        .and_then(|outcome| outcome.reason.clone()),
+                    reason: snapshot
+                        .last_turn
+                        .as_ref()
+                        .and_then(|outcome| outcome.reason.clone()),
+                    lifecycle: lifecycle_label(snapshot.lifecycle).to_string(),
+                    activity: activity_label(snapshot.activity).to_string(),
+                    progress,
+                    updated_at: snapshot.updated_at,
+                    summary_age_seconds,
+                },
+            );
             self.product_events
                 .emit_session_list(&session.project_id)
                 .await?;
@@ -369,7 +423,7 @@ fn agent_status_label(snapshot: &AgentSnapshot) -> &'static str {
             AgentActivityState::Running => "running",
             AgentActivityState::WaitingTool
             | AgentActivityState::WaitingInteraction
-            | AgentActivityState::WaitingAgents => "waiting",
+            | AgentActivityState::Cancelling => "waiting",
             AgentActivityState::Idle => match snapshot.last_turn.as_ref().map(|turn| turn.kind) {
                 Some(TurnOutcomeKind::Completed) => "completed",
                 Some(TurnOutcomeKind::Cancelled) => "interrupted",
@@ -380,81 +434,32 @@ fn agent_status_label(snapshot: &AgentSnapshot) -> &'static str {
     }
 }
 
-fn snapshot_is_canonical_terminal(snapshot: &AgentSnapshot, turn_id: &str) -> bool {
-    snapshot.activity == AgentActivityState::Idle
-        && snapshot.active_turn_id.is_none()
-        && snapshot.pending_inputs == 0
-        && snapshot
-            .last_turn
-            .as_ref()
-            .is_some_and(|outcome| outcome.turn_id.as_str() == turn_id)
+const fn lifecycle_label(lifecycle: AgentLifecycleState) -> &'static str {
+    match lifecycle {
+        AgentLifecycleState::Active => "active",
+        AgentLifecycleState::Closing => "closing",
+        AgentLifecycleState::Closed => "closed",
+        AgentLifecycleState::Faulted => "faulted",
+    }
 }
 
-#[cfg(test)]
-mod tests {
-    use pl_core::{
-        AgentId, AgentIdentity, AgentLifecycleState, AgentRoleId, AgentTurnOutcome, SessionId,
-        TurnId,
-    };
-    use pl_model::TokenUsage;
-
-    use super::*;
-
-    #[test]
-    fn queued_follow_up_is_not_a_canonical_terminal() {
-        let mut snapshot = snapshot(AgentActivityState::Queued, 1, "turn-1");
-        snapshot.active_turn_id = None;
-
-        assert!(!snapshot_is_canonical_terminal(&snapshot, "turn-1"));
+const fn activity_label(activity: AgentActivityState) -> &'static str {
+    match activity {
+        AgentActivityState::Idle => "idle",
+        AgentActivityState::Queued => "queued",
+        AgentActivityState::Running => "running",
+        AgentActivityState::WaitingTool => "waitingTool",
+        AgentActivityState::WaitingInteraction => "waitingInteraction",
+        AgentActivityState::Cancelling => "cancelling",
     }
+}
 
-    #[test]
-    fn idle_queue_drained_snapshot_is_a_canonical_terminal() {
-        let snapshot = snapshot(AgentActivityState::Idle, 0, "turn-1");
-
-        assert!(snapshot_is_canonical_terminal(&snapshot, "turn-1"));
-    }
-
-    #[test]
-    fn stale_terminal_event_does_not_match_latest_turn() {
-        let snapshot = snapshot(AgentActivityState::Idle, 0, "turn-2");
-
-        assert!(!snapshot_is_canonical_terminal(&snapshot, "turn-1"));
-    }
-
-    fn snapshot(
-        activity: AgentActivityState,
-        pending_inputs: usize,
-        last_turn_id: &str,
-    ) -> AgentSnapshot {
-        AgentSnapshot {
-            identity: AgentIdentity {
-                id: AgentId::new("agent-1").unwrap(),
-                parent_id: Some(AgentId::new("root").unwrap()),
-                role: AgentRoleId::new("executor").unwrap(),
-                depth: 1,
-            },
-            wake_policy: pl_core::AgentWakePolicy::ProductGated,
-            lifecycle: AgentLifecycleState::Active,
-            activity,
-            active_turn_id: None,
-            active_session_id: None,
-            pending_inputs,
-            pending_trigger_inputs: pending_inputs,
-            mailbox_delivery_phase: pl_core::MailboxDeliveryPhase::CurrentTurn,
-            dispatch_generation: 0,
-            last_turn: Some(AgentTurnOutcome {
-                turn_id: TurnId::new(last_turn_id).unwrap(),
-                session_id: SessionId::new("session-1").unwrap(),
-                kind: TurnOutcomeKind::Cancelled,
-                reason: Some("cancelled".to_string()),
-                failure: None,
-                usage: TokenUsage::default(),
-                finished_at: 1,
-            }),
-            revision: 1,
-            event_sequence: 1,
-            updated_at: 1,
-        }
+const fn progress_stage_label(stage: AgentProgressStage) -> &'static str {
+    match stage {
+        AgentProgressStage::Exploring => "exploring",
+        AgentProgressStage::Implementing => "implementing",
+        AgentProgressStage::Verifying => "verifying",
+        AgentProgressStage::Blocked => "blocked",
+        AgentProgressStage::ReadyForReview => "readyForReview",
     }
 }

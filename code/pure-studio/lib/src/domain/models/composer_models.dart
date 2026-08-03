@@ -18,16 +18,27 @@ class ComposerSessionState {
   const ComposerSessionState._({
     required this.draft,
     required this.phase,
+    required this.submissionRevision,
     this.pendingTurnId,
-    this.error,
-  });
+  }) : error = null;
 
-  const ComposerSessionState.idle({this.draft = '', this.error})
-    : phase = ComposerSubmissionPhase.idle,
-      pendingTurnId = null;
+  const ComposerSessionState.idle({
+    this.draft = '',
+    this.submissionRevision = 0,
+  }) : phase = ComposerSubmissionPhase.idle,
+       pendingTurnId = null,
+       error = null;
+
+  const ComposerSessionState.failure({
+    required this.error,
+    this.draft = '',
+    this.submissionRevision = 0,
+  }) : phase = ComposerSubmissionPhase.idle,
+       pendingTurnId = null;
 
   final String draft;
   final ComposerSubmissionPhase phase;
+  final int submissionRevision;
   final String? pendingTurnId;
   final String? error;
 
@@ -37,31 +48,57 @@ class ComposerSessionState {
     if (isSubmissionPending) {
       return this;
     }
-    return ComposerSessionState.idle(draft: value);
+    return ComposerSessionState.idle(
+      draft: value,
+      submissionRevision: submissionRevision,
+    );
   }
 
   ComposerSessionState beginSubmission() {
     if (isSubmissionPending || draft.trim().isEmpty) {
       return this;
     }
+    return _startSubmission();
+  }
+
+  ComposerSessionState beginCommandSubmission() {
+    if (isSubmissionPending) {
+      return this;
+    }
+    return _startSubmission();
+  }
+
+  ComposerSessionState _startSubmission() {
     return ComposerSessionState._(
       draft: draft,
       phase: ComposerSubmissionPhase.submitting,
+      submissionRevision: submissionRevision + 1,
     );
   }
 
-  ComposerSessionState accept(SubmitPromptReceipt receipt) {
+  ComposerSessionState accept(
+    SubmitPromptReceipt receipt, {
+    required int submissionRevision,
+  }) {
+    if (!_matchesSubmittingRevision(submissionRevision)) {
+      return this;
+    }
     return ComposerSessionState._(
       draft: '',
       phase: ComposerSubmissionPhase.pendingStart,
+      submissionRevision: this.submissionRevision,
       pendingTurnId: receipt.turnId,
     );
   }
 
-  ComposerSessionState fail(Exception exception) {
-    return ComposerSessionState.idle(
+  ComposerSessionState fail(Object error, {required int submissionRevision}) {
+    if (!_matchesSubmittingRevision(submissionRevision)) {
+      return this;
+    }
+    return ComposerSessionState.failure(
       draft: draft,
-      error: exception.toString(),
+      error: error.toString(),
+      submissionRevision: this.submissionRevision,
     );
   }
 
@@ -70,6 +107,10 @@ class ComposerSessionState {
         turn?.turnId != pendingTurnId) {
       return this;
     }
-    return const ComposerSessionState.idle();
+    return ComposerSessionState.idle(submissionRevision: submissionRevision);
   }
+
+  bool _matchesSubmittingRevision(int revision) =>
+      phase == ComposerSubmissionPhase.submitting &&
+      submissionRevision == revision;
 }

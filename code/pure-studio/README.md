@@ -19,7 +19,8 @@ cargo xtask run-gui
 cargo xtask build-gui
 
 # Run the native app through the dedicated test_driver entrypoint for Dart MCP
-# interaction and GUI acceptance. Release builds never use it.
+# interaction and GUI acceptance. The driver command owns the resident process
+# tree and keeps Flutter's control pipe open. Release builds never use it.
 cargo xtask run-gui --driver
 
 # Run from this Flutter project directory.

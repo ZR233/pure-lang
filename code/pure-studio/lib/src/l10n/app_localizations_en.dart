@@ -319,6 +319,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get statusTaskAgents => 'Agents';
 
   @override
+  String get statusTaskCompletions => 'Completions';
+
+  @override
   String get statusTaskMerges => 'Merges and conflicts';
 
   @override
@@ -341,6 +344,27 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get statusTaskSummary => 'Summary';
+
+  @override
+  String get statusTaskStage => 'Stage';
+
+  @override
+  String get statusTaskNextStep => 'Next step';
+
+  @override
+  String get statusTaskSummaryAge => 'Summary age';
+
+  @override
+  String get statusTaskVerification => 'Verification';
+
+  @override
+  String get statusTaskScope => 'Scope';
+
+  @override
+  String get statusTaskCompletionRevision => 'Completion revision';
+
+  @override
+  String get statusTaskFindings => 'Findings';
 
   @override
   String get statusTaskError => 'Error';
@@ -394,13 +418,28 @@ class AppLocalizationsEn extends AppLocalizations {
   String get statusTaskStatusRunning => 'Running';
 
   @override
-  String get statusTaskStatusWaitingForDelivery => 'Waiting for delivery';
+  String get statusTaskStatusAwaitingCompletion => 'Awaiting completion';
 
   @override
-  String get statusTaskStatusDelivered => 'Delivered';
+  String get statusTaskStatusReadyForReview => 'Ready for review';
+
+  @override
+  String get statusTaskStatusReviewing => 'Reviewing';
+
+  @override
+  String get statusTaskStatusChangesRequested => 'Changes requested';
+
+  @override
+  String get statusTaskStatusApproved => 'Approved';
+
+  @override
+  String get statusTaskStatusMerging => 'Merging';
 
   @override
   String get statusTaskStatusMerged => 'Merged';
+
+  @override
+  String get statusTaskStatusNoDelivery => 'No delivery';
 
   @override
   String get statusTaskStatusCompleted => 'Completed';
@@ -623,6 +662,16 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get interactionContinueAfterAnswer => 'Continue after answering';
+
+  @override
+  String get taskResumeTitle => 'Task paused after restart';
+
+  @override
+  String get taskResumeBody =>
+      'Continue from canonical Task and agent state without adding a new prompt.';
+
+  @override
+  String get taskResumeAction => 'Continue task';
 
   @override
   String get interactionSubmitEmptyAnswersHint =>

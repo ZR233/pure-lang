@@ -9,19 +9,21 @@ use crate::studio::entities;
 use crate::studio::ids::unix_seconds;
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    AgentOutcomeStatus, RestartAgentReconciliation, TaskWorktreeCleanupState,
-    TaskWorktreeCreationState, TaskWorktreeOwnerResource, TaskWorktreeOwnerSnapshot,
-    WorkUnitStatus,
+    AgentOutcomeStatus, RestartAgentReconciliation, ReviewScope, ReviewVerdict, TaskRunPhase,
+    TaskWorktreeCleanupState, TaskWorktreeCreationState, TaskWorktreeOwnerResource,
+    TaskWorktreeOwnerSnapshot, WorkCompletionStatus, WorkUnitStatus,
 };
 
 use super::{
     merge::parse_required_evidence, outcome::agent_outcome_record, task_run_record,
-    work_unit::work_unit_record,
+    work_completion::work_completion_record, work_unit::work_unit_record,
 };
 
 const RESTART_DIAGNOSTIC: &str = "agent interrupted by application restart";
 const RESTART_BEFORE_CREATE_DIAGNOSTIC: &str =
     "agent interrupted by application restart before worktree creation";
+const REVIEW_RESTART_DIAGNOSTIC: &str =
+    "reviewer interrupted by application restart before review_exit";
 
 impl StudioStore {
     pub(crate) async fn list_all_task_worktree_owners(
@@ -80,6 +82,10 @@ impl StudioStore {
                 .filter(entities::merge_record::Column::TaskRunId.eq(run.id.clone()))
                 .all(&self.db)
                 .await?;
+            let completions = entities::work_completion::Entity::find()
+                .filter(entities::work_completion::Column::TaskRunId.eq(run.id.clone()))
+                .all(&self.db)
+                .await?;
             let resources = work_units
                 .into_iter()
                 .map(|work_unit| -> Result<_> {
@@ -96,10 +102,18 @@ impl StudioStore {
                     } else {
                         TaskWorktreeCreationState::MustExist
                     };
+                    let completion = completions
+                        .iter()
+                        .filter(|completion| completion.work_unit_id == work_unit.id)
+                        .max_by_key(|completion| completion.revision)
+                        .cloned()
+                        .map(work_completion_record)
+                        .transpose()?;
                     let cleanup_state = merge_cleanup_state(&work_unit, &merges)?;
                     Ok(TaskWorktreeOwnerResource {
                         work_unit,
                         outcome,
+                        completion,
                         creation_state,
                         cleanup_state,
                     })
@@ -119,7 +133,7 @@ impl StudioStore {
     ) -> Result<RestartAgentReconciliation> {
         let tx = self.db.begin().await?;
         let result = async {
-            entities::task_run::Entity::find_by_id(task_run_id.to_string())
+            let run = entities::task_run::Entity::find_by_id(task_run_id.to_string())
                 .one(&tx)
                 .await?
                 .context("task run not found during agent restart reconciliation")?;
@@ -134,30 +148,35 @@ impl StudioStore {
 
             validate_pairs(task_run_id, &work_units, &outcomes)?;
 
+            let now = unix_seconds();
+            reconcile_pending_reviews_after_restart(&tx, &run, &work_units, &outcomes, now).await?;
             let pending_work_units = work_units
                 .iter()
                 .filter(|unit| unit.status == WorkUnitStatus::Pending.as_str())
                 .map(|unit| unit.id.clone())
                 .collect::<std::collections::HashSet<_>>();
-            let now = unix_seconds();
             let mut summary = RestartAgentReconciliation::default();
             for work_unit in work_units {
                 let status = WorkUnitStatus::from_str(&work_unit.status)
                     .with_context(|| format!("invalid work unit status: {}", work_unit.status))?;
-                if is_transient_work_unit(status) {
+                if status == WorkUnitStatus::Pending {
                     let mut active: entities::work_unit::ActiveModel = work_unit.into();
                     active.status = Set(WorkUnitStatus::Cancelled.as_str().to_string());
                     active.updated_at = Set(now);
                     active.update(&tx).await?;
                     summary.cancelled_work_units += 1;
+                } else if status == WorkUnitStatus::Running {
+                    let mut active: entities::work_unit::ActiveModel = work_unit.into();
+                    active.status = Set(WorkUnitStatus::AwaitingCompletion.as_str().to_string());
+                    active.updated_at = Set(now);
+                    active.update(&tx).await?;
                 }
             }
             for outcome in outcomes {
                 let status = AgentOutcomeStatus::from_str(&outcome.status)
                     .with_context(|| format!("invalid agent outcome status: {}", outcome.status))?;
                 let cancel = is_transient_outcome(status);
-                let already_observed = outcome.terminal_observed != 0;
-                if cancel || !already_observed {
+                if cancel {
                     let before_create = outcome
                         .work_unit_id
                         .as_deref()
@@ -176,7 +195,6 @@ impl StudioStore {
                         ));
                         summary.cancelled_outcomes += 1;
                     }
-                    active.terminal_observed = Set(1);
                     active.updated_at = Set(now);
                     active.update(&tx).await?;
                 }
@@ -195,6 +213,127 @@ impl StudioStore {
             }
         }
     }
+}
+
+async fn reconcile_pending_reviews_after_restart(
+    tx: &sea_orm::DatabaseTransaction,
+    run: &entities::task_run::Model,
+    work_units: &[entities::work_unit::Model],
+    outcomes: &[entities::agent_outcome::Model],
+    now: i64,
+) -> Result<()> {
+    let rounds = entities::review_round::Entity::find()
+        .filter(entities::review_round::Column::TaskRunId.eq(run.id.clone()))
+        .filter(entities::review_round::Column::Status.eq(ReviewVerdict::Pending.as_str()))
+        .all(tx)
+        .await?;
+    for round in rounds {
+        validate_restart_reviewer(&round, outcomes)?;
+        match ReviewScope::from_str(&round.scope).context("invalid stored review scope")? {
+            ReviewScope::Delivery => {
+                restore_delivery_review_after_restart(tx, &round, work_units, now).await?;
+            }
+            ReviewScope::Integrated => {
+                if round.work_unit_id.is_some()
+                    || round.completion_id.is_some()
+                    || round.completion_revision.is_some()
+                    || round.reviewed_head != run.expected_head
+                    || run.phase != TaskRunPhase::Reviewing.as_str()
+                {
+                    bail!("pending integrated review does not match the task run");
+                }
+                let mut active: entities::task_run::ActiveModel = run.clone().into();
+                active.phase = Set(TaskRunPhase::Reworking.as_str().to_string());
+                active.status_message = Set(Some(REVIEW_RESTART_DIAGNOSTIC.to_string()));
+                active.updated_at = Set(now);
+                active.update(tx).await?;
+            }
+        }
+        let mut active: entities::review_round::ActiveModel = round.into();
+        active.status = Set(ReviewVerdict::Failed.as_str().to_string());
+        active.summary = Set(Some(REVIEW_RESTART_DIAGNOSTIC.to_string()));
+        active.updated_at = Set(now);
+        active.update(tx).await?;
+    }
+    Ok(())
+}
+
+fn validate_restart_reviewer(
+    round: &entities::review_round::Model,
+    outcomes: &[entities::agent_outcome::Model],
+) -> Result<()> {
+    let Some(reviewer_agent_id) = round.reviewer_agent_id.as_deref() else {
+        return Ok(());
+    };
+    let matching = outcomes
+        .iter()
+        .filter(|outcome| outcome.agent_id == reviewer_agent_id)
+        .collect::<Vec<_>>();
+    let outcome = match matching.as_slice() {
+        [outcome] => *outcome,
+        [] => bail!("pending review has no reviewer outcome"),
+        _ => bail!("pending review has multiple reviewer outcomes"),
+    };
+    if outcome.task_run_id != round.task_run_id
+        || outcome.work_unit_id != round.work_unit_id
+        || outcome.role != "reviewer"
+        || outcome.owner_path != "/root"
+        || outcome.initiated_by != "planner"
+        || outcome.requested_by_call_id != round.requested_by_call_id
+        || outcome.attempt != round.round
+        || !matches!(
+            AgentOutcomeStatus::from_str(&outcome.status),
+            Some(AgentOutcomeStatus::Queued | AgentOutcomeStatus::Running)
+        )
+    {
+        bail!("pending review and reviewer outcome do not match");
+    }
+    Ok(())
+}
+
+async fn restore_delivery_review_after_restart(
+    tx: &sea_orm::DatabaseTransaction,
+    round: &entities::review_round::Model,
+    work_units: &[entities::work_unit::Model],
+    now: i64,
+) -> Result<()> {
+    let work_unit_id = round
+        .work_unit_id
+        .as_deref()
+        .context("pending delivery review has no work unit")?;
+    let completion_id = round
+        .completion_id
+        .as_deref()
+        .context("pending delivery review has no completion")?;
+    let completion_revision = round
+        .completion_revision
+        .context("pending delivery review has no completion revision")?;
+    let work_unit = work_units
+        .iter()
+        .find(|unit| unit.id == work_unit_id)
+        .context("pending delivery review work unit not found")?;
+    let completion = entities::work_completion::Entity::find_by_id(completion_id)
+        .one(tx)
+        .await?
+        .context("pending delivery review completion not found")?;
+    let reviewed_head = completion
+        .head_commit
+        .as_deref()
+        .unwrap_or(work_unit.base_commit.as_str());
+    if work_unit.status != WorkUnitStatus::Reviewing.as_str()
+        || completion.task_run_id != round.task_run_id
+        || completion.work_unit_id != work_unit.id
+        || completion.revision != completion_revision
+        || completion.status != WorkCompletionStatus::ReadyForReview.as_str()
+        || round.reviewed_head != reviewed_head
+    {
+        bail!("pending delivery review target does not match its completion");
+    }
+    let mut active: entities::work_unit::ActiveModel = work_unit.clone().into();
+    active.status = Set(WorkUnitStatus::ReadyForReview.as_str().to_string());
+    active.updated_at = Set(now);
+    active.update(tx).await?;
+    Ok(())
 }
 
 fn merge_cleanup_state(
@@ -253,6 +392,9 @@ fn validate_pairs(
             }
             continue;
         };
+        if outcome.role != "executor" {
+            continue;
+        }
         let unit = units_by_id
             .get(work_unit_id)
             .context("agent outcome work unit does not exist")?;
@@ -292,39 +434,42 @@ fn validate_status_pair(
         (WorkUnitStatus::Pending, AgentOutcomeStatus::Queued)
             | (WorkUnitStatus::Running, AgentOutcomeStatus::Running)
             | (
-                WorkUnitStatus::WaitingForDelivery,
-                AgentOutcomeStatus::WaitingForDelivery
+                WorkUnitStatus::AwaitingCompletion,
+                AgentOutcomeStatus::Completed
             )
-            | (WorkUnitStatus::Delivered, AgentOutcomeStatus::Completed)
+            | (
+                WorkUnitStatus::AwaitingCompletion,
+                AgentOutcomeStatus::Failed
+            )
+            | (
+                WorkUnitStatus::AwaitingCompletion,
+                AgentOutcomeStatus::Cancelled
+            )
+            | (
+                WorkUnitStatus::ReadyForReview,
+                AgentOutcomeStatus::Completed
+            )
+            | (WorkUnitStatus::Reviewing, AgentOutcomeStatus::Completed)
+            | (
+                WorkUnitStatus::ChangesRequested,
+                AgentOutcomeStatus::Completed
+            )
+            | (WorkUnitStatus::Approved, AgentOutcomeStatus::Completed)
+            | (WorkUnitStatus::Merging, AgentOutcomeStatus::Completed)
             | (WorkUnitStatus::Merged, AgentOutcomeStatus::Completed)
+            | (WorkUnitStatus::NoDelivery, AgentOutcomeStatus::Completed)
             | (WorkUnitStatus::Failed, AgentOutcomeStatus::Failed)
             | (WorkUnitStatus::Cancelled, AgentOutcomeStatus::Cancelled)
     );
     if !valid {
         bail!("agent outcome and work unit statuses do not match");
     }
-    if matches!(
-        unit_status,
-        WorkUnitStatus::Delivered | WorkUnitStatus::Merged
-    ) && outcome.delivery_json.is_none()
-    {
-        bail!("delivered work unit has no durable delivery");
-    }
     Ok(())
-}
-
-fn is_transient_work_unit(status: WorkUnitStatus) -> bool {
-    matches!(
-        status,
-        WorkUnitStatus::Pending | WorkUnitStatus::Running | WorkUnitStatus::WaitingForDelivery
-    )
 }
 
 fn is_transient_outcome(status: AgentOutcomeStatus) -> bool {
     matches!(
         status,
-        AgentOutcomeStatus::Queued
-            | AgentOutcomeStatus::Running
-            | AgentOutcomeStatus::WaitingForDelivery
+        AgentOutcomeStatus::Queued | AgentOutcomeStatus::Running
     )
 }

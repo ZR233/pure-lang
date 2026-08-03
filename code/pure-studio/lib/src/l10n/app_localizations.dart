@@ -626,6 +626,12 @@ abstract class AppLocalizations {
   /// **'Agents'**
   String get statusTaskAgents;
 
+  /// No description provided for @statusTaskCompletions.
+  ///
+  /// In en, this message translates to:
+  /// **'Completions'**
+  String get statusTaskCompletions;
+
   /// No description provided for @statusTaskMerges.
   ///
   /// In en, this message translates to:
@@ -673,6 +679,48 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Summary'**
   String get statusTaskSummary;
+
+  /// No description provided for @statusTaskStage.
+  ///
+  /// In en, this message translates to:
+  /// **'Stage'**
+  String get statusTaskStage;
+
+  /// No description provided for @statusTaskNextStep.
+  ///
+  /// In en, this message translates to:
+  /// **'Next step'**
+  String get statusTaskNextStep;
+
+  /// No description provided for @statusTaskSummaryAge.
+  ///
+  /// In en, this message translates to:
+  /// **'Summary age'**
+  String get statusTaskSummaryAge;
+
+  /// No description provided for @statusTaskVerification.
+  ///
+  /// In en, this message translates to:
+  /// **'Verification'**
+  String get statusTaskVerification;
+
+  /// No description provided for @statusTaskScope.
+  ///
+  /// In en, this message translates to:
+  /// **'Scope'**
+  String get statusTaskScope;
+
+  /// No description provided for @statusTaskCompletionRevision.
+  ///
+  /// In en, this message translates to:
+  /// **'Completion revision'**
+  String get statusTaskCompletionRevision;
+
+  /// No description provided for @statusTaskFindings.
+  ///
+  /// In en, this message translates to:
+  /// **'Findings'**
+  String get statusTaskFindings;
 
   /// No description provided for @statusTaskError.
   ///
@@ -776,23 +824,53 @@ abstract class AppLocalizations {
   /// **'Running'**
   String get statusTaskStatusRunning;
 
-  /// No description provided for @statusTaskStatusWaitingForDelivery.
+  /// No description provided for @statusTaskStatusAwaitingCompletion.
   ///
   /// In en, this message translates to:
-  /// **'Waiting for delivery'**
-  String get statusTaskStatusWaitingForDelivery;
+  /// **'Awaiting completion'**
+  String get statusTaskStatusAwaitingCompletion;
 
-  /// No description provided for @statusTaskStatusDelivered.
+  /// No description provided for @statusTaskStatusReadyForReview.
   ///
   /// In en, this message translates to:
-  /// **'Delivered'**
-  String get statusTaskStatusDelivered;
+  /// **'Ready for review'**
+  String get statusTaskStatusReadyForReview;
+
+  /// No description provided for @statusTaskStatusReviewing.
+  ///
+  /// In en, this message translates to:
+  /// **'Reviewing'**
+  String get statusTaskStatusReviewing;
+
+  /// No description provided for @statusTaskStatusChangesRequested.
+  ///
+  /// In en, this message translates to:
+  /// **'Changes requested'**
+  String get statusTaskStatusChangesRequested;
+
+  /// No description provided for @statusTaskStatusApproved.
+  ///
+  /// In en, this message translates to:
+  /// **'Approved'**
+  String get statusTaskStatusApproved;
+
+  /// No description provided for @statusTaskStatusMerging.
+  ///
+  /// In en, this message translates to:
+  /// **'Merging'**
+  String get statusTaskStatusMerging;
 
   /// No description provided for @statusTaskStatusMerged.
   ///
   /// In en, this message translates to:
   /// **'Merged'**
   String get statusTaskStatusMerged;
+
+  /// No description provided for @statusTaskStatusNoDelivery.
+  ///
+  /// In en, this message translates to:
+  /// **'No delivery'**
+  String get statusTaskStatusNoDelivery;
 
   /// No description provided for @statusTaskStatusCompleted.
   ///
@@ -1175,6 +1253,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Continue after answering'**
   String get interactionContinueAfterAnswer;
+
+  /// No description provided for @taskResumeTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Task paused after restart'**
+  String get taskResumeTitle;
+
+  /// No description provided for @taskResumeBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Continue from canonical Task and agent state without adding a new prompt.'**
+  String get taskResumeBody;
+
+  /// No description provided for @taskResumeAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Continue task'**
+  String get taskResumeAction;
 
   /// No description provided for @interactionSubmitEmptyAnswersHint.
   ///

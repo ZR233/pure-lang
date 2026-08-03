@@ -160,6 +160,37 @@ StudioState _emptyState() {
   );
 }
 
+StudioState _pausedTaskState() {
+  final state = _emptyState();
+  final session = state.sessions.single.copyWith(
+    mode: StudioMode.task,
+    agentStatus: 'interrupted',
+  );
+  final runtime = state.runtimesBySession[session.id]!;
+  return state.copyWith(
+    sessions: [session],
+    runtimesBySession: {
+      session.id: runtime.copyWith(
+        task: const TaskRuntimeView(
+          runId: 'task-run-1',
+          phase: 'implementing',
+          branch: 'codex/task-1',
+          expectedHead: '0123456789abcdef',
+          statusMessage: null,
+          stopRequestedOrigin: null,
+          stopRequestedReason: null,
+          taskGeneration: 1,
+          workUnits: [],
+          agents: [],
+          completions: [],
+          merges: [],
+          reviews: [],
+        ),
+      ),
+    },
+  );
+}
+
 StudioState _noProjectState() {
   return StudioState(
     projects: [],

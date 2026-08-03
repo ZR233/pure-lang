@@ -12,6 +12,33 @@ pub(in crate::studio) struct RecoverableTaskPlan {
 }
 
 impl StudioStore {
+    pub(in crate::studio) async fn list_task_agent_snapshots(
+        &self,
+        task_run_id: &str,
+    ) -> Result<Vec<pl_core::AgentSnapshot>> {
+        self.db
+            .query_all(Statement::from_sql_and_values(
+                DatabaseBackend::Sqlite,
+                "SELECT state.snapshot_json AS snapshot_json
+                 FROM agent_runtime_states state
+                 WHERE EXISTS (
+                     SELECT 1
+                     FROM agent_outcomes outcome
+                     WHERE outcome.task_run_id = ?
+                       AND outcome.agent_id = state.agent_id
+                 )
+                 ORDER BY state.agent_id",
+                [task_run_id.to_string().into()],
+            ))
+            .await?
+            .into_iter()
+            .map(|row| {
+                let snapshot_json: String = row.try_get("", "snapshot_json")?;
+                serde_json::from_str(&snapshot_json).map_err(Into::into)
+            })
+            .collect()
+    }
+
     /// 清除严格可证明不再拥有任何 Studio session 的错误 runtime registration。
     ///
     /// 共享的 session journal/snapshot 不属于 runtime agent，不能在这里删除。
@@ -66,7 +93,6 @@ impl StudioStore {
             for sql in [
                 "DELETE FROM agent_active_inputs WHERE agent_id = ?",
                 "DELETE FROM agent_pending_inputs WHERE agent_id = ?",
-                "DELETE FROM agent_wake_receipts WHERE agent_id = ?",
                 "DELETE FROM agent_framework_events WHERE agent_id = ?",
                 "DELETE FROM agent_turns WHERE agent_id = ?",
                 "DELETE FROM agent_runtime_traces WHERE agent_id = ?",

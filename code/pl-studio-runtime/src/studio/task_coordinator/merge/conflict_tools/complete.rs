@@ -39,10 +39,7 @@ impl TaskCoordinator {
                 .as_ref()
                 .and_then(|evidence| evidence.conflict_verification.as_ref())
                 .context("merge_continue requires a successful current merge_verify")?;
-            if !verification.success
-                || verification.attempt != scope.merge.attempt
-                || verification.attempt > 3
-            {
+            if !verification.success || verification.attempt != scope.merge.attempt {
                 bail!("merge_continue requires a successful current merge_verify");
             }
             let expected_tree = verification
@@ -216,8 +213,6 @@ pub(super) async fn abort_conflict_scope(
                 .to_string(),
         })
         .await?;
-    coordinator
-        .finish_blocked_transition(&scope.run.id)
-        .await?;
+    coordinator.finish_blocked_transition(&scope.run.id).await?;
     Ok(record)
 }

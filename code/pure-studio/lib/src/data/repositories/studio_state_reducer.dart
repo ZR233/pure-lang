@@ -69,6 +69,10 @@ StudioReduceResult reduceStudioEvent(
     AgentChangedPayload(:final agent) => StudioReduceResult(
       _applyAgentChanged(current, agent),
     ),
+    AgentDirectoryChangedPayload(:final rootSessionId, :final agent) =>
+      StudioReduceResult(
+        _applyAgentDirectoryChanged(current, rootSessionId, agent),
+      ),
     AgentTimelineChangedPayload(:final event) => StudioReduceResult(
       _upsertAgentTimelineEvent(current, event),
     ),
@@ -190,6 +194,9 @@ StudioState mergeStudioConfigState(StudioState current, StudioState next) {
 }
 
 bool targetsSelectedSession(StudioState current, StudioBridgeEvent event) {
+  if (event.payload is AgentDirectoryChangedPayload) {
+    return true;
+  }
   final sessionId = studioEventSessionId(event);
   return sessionId == null ||
       current.selectedSessionId == null ||
@@ -362,10 +369,6 @@ Map<String, int> _mergeEventCursors(
 }
 
 StudioState _applyAgentChanged(StudioState current, StudioAgentView agent) {
-  if (agent.sessionId.isNotEmpty &&
-      agent.sessionId != current.selectedSessionId) {
-    return current;
-  }
   final sessionId = agent.sessionId;
   if (sessionId.isEmpty || agent.id.isEmpty) {
     return current;
@@ -383,6 +386,33 @@ StudioState _applyAgentChanged(StudioState current, StudioAgentView agent) {
     sessionId,
     agents,
   );
+}
+
+StudioState _applyAgentDirectoryChanged(
+  StudioState current,
+  String rootSessionId,
+  StudioAgentView agent,
+) {
+  if (agent.id.isEmpty || agent.sessionId.isEmpty || rootSessionId.isEmpty) {
+    return current;
+  }
+  var next = current;
+  for (final sessionId in {rootSessionId, agent.sessionId}) {
+    final agents = <String, StudioAgentView>{
+      ...(next.agentsBySession[sessionId] ?? const {}),
+      agent.id: agent,
+    };
+    next = _withAgents(
+      _withRuntime(
+        next,
+        sessionId,
+        _runtimeFor(next, sessionId).copyWith(agentCount: agents.length),
+      ),
+      sessionId,
+      agents,
+    );
+  }
+  return next;
 }
 
 StudioState _upsertAgentTimelineEvent(

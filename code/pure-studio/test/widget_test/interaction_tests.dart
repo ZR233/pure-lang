@@ -1,6 +1,32 @@
 part of '../widget_test.dart';
 
 void registerInteractionTests() {
+  testWidgets('paused Task exposes explicit resume controls', (tester) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _FakeStudioApi(_pausedTaskState());
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(find.byKey(StudioDriverKeys.taskPaused), findsOneWidget);
+    expect(find.byKey(StudioDriverKeys.taskResume), findsOneWidget);
+    expect(find.byKey(StudioDriverKeys.composerInput), findsNothing);
+
+    await tester.tap(find.byKey(StudioDriverKeys.taskResume));
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(api.resumeTaskCount, 1);
+    expect(api.submittedPrompts, isEmpty);
+  });
+
   testWidgets('composer exposes pending and failures through driver keys', (
     tester,
   ) async {
@@ -12,7 +38,7 @@ void registerInteractionTests() {
     final api = _FakeStudioApi(
       _emptyState().copyWith(
         composersBySession: const {
-          'session-1': ComposerSessionState.idle(
+          'session-1': ComposerSessionState.failure(
             draft: 'retry prompt',
             error: 'bridge submit failed',
           ),

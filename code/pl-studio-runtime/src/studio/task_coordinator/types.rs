@@ -147,15 +147,6 @@ impl TaskStopOrigin {
     pub(crate) fn stops_root_turn(self) -> bool {
         !matches!(self, Self::PlannerDecision)
     }
-
-    pub(crate) fn display_label(self) -> &'static str {
-        match self {
-            Self::UserRequest => "用户请求",
-            Self::PlannerDecision => "Planner 决策",
-            Self::RuntimeFailure => "运行时故障",
-            Self::ApplicationShutdown => "应用关闭",
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -252,6 +243,7 @@ pub(crate) enum TaskWorktreeCleanupState {
 pub(crate) struct TaskWorktreeOwnerResource {
     pub(crate) work_unit: WorkUnitRecord,
     pub(crate) outcome: Option<AgentOutcomeRecord>,
+    pub(crate) completion: Option<WorkCompletionRecord>,
     pub(crate) creation_state: TaskWorktreeCreationState,
     pub(crate) cleanup_state: TaskWorktreeCleanupState,
 }
@@ -288,9 +280,14 @@ pub(crate) struct CreateTaskRun {
 pub(crate) enum WorkUnitStatus {
     Pending,
     Running,
-    WaitingForDelivery,
-    Delivered,
+    AwaitingCompletion,
+    ReadyForReview,
+    Reviewing,
+    ChangesRequested,
+    Approved,
+    Merging,
     Merged,
+    NoDelivery,
     Failed,
     Cancelled,
 }
@@ -300,9 +297,14 @@ impl WorkUnitStatus {
         match self {
             Self::Pending => "pending",
             Self::Running => "running",
-            Self::WaitingForDelivery => "waitingForDelivery",
-            Self::Delivered => "delivered",
+            Self::AwaitingCompletion => "awaitingCompletion",
+            Self::ReadyForReview => "readyForReview",
+            Self::Reviewing => "reviewing",
+            Self::ChangesRequested => "changesRequested",
+            Self::Approved => "approved",
+            Self::Merging => "merging",
             Self::Merged => "merged",
+            Self::NoDelivery => "noDelivery",
             Self::Failed => "failed",
             Self::Cancelled => "cancelled",
         }
@@ -312,9 +314,14 @@ impl WorkUnitStatus {
         match value {
             "pending" => Some(Self::Pending),
             "running" => Some(Self::Running),
-            "waitingForDelivery" => Some(Self::WaitingForDelivery),
-            "delivered" => Some(Self::Delivered),
+            "awaitingCompletion" => Some(Self::AwaitingCompletion),
+            "readyForReview" => Some(Self::ReadyForReview),
+            "reviewing" => Some(Self::Reviewing),
+            "changesRequested" => Some(Self::ChangesRequested),
+            "approved" => Some(Self::Approved),
+            "merging" => Some(Self::Merging),
             "merged" => Some(Self::Merged),
+            "noDelivery" => Some(Self::NoDelivery),
             "failed" => Some(Self::Failed),
             "cancelled" => Some(Self::Cancelled),
             _ => None,
@@ -327,10 +334,15 @@ impl WorkUnitStatus {
 pub(crate) enum AgentOutcomeStatus {
     Queued,
     Running,
-    WaitingForDelivery,
     Completed,
     Failed,
     Cancelled,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ExecutorCloseDisposition {
+    PreserveForMerge,
+    Discard,
 }
 
 impl AgentOutcomeStatus {
@@ -338,7 +350,6 @@ impl AgentOutcomeStatus {
         match self {
             Self::Queued => "queued",
             Self::Running => "running",
-            Self::WaitingForDelivery => "waitingForDelivery",
             Self::Completed => "completed",
             Self::Failed => "failed",
             Self::Cancelled => "cancelled",
@@ -349,7 +360,6 @@ impl AgentOutcomeStatus {
         match value {
             "queued" => Some(Self::Queued),
             "running" => Some(Self::Running),
-            "waitingForDelivery" => Some(Self::WaitingForDelivery),
             "completed" => Some(Self::Completed),
             "failed" => Some(Self::Failed),
             "cancelled" => Some(Self::Cancelled),
@@ -468,28 +478,75 @@ impl TaskWorktreeDisposition {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(
-    tag = "kind",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase"
-)]
-pub(crate) enum CompletionContract {
-    DeliveryRequired {
-        task_run_id: String,
-        work_unit_id: String,
-        recovery_limit: u32,
-    },
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum WorkCompletionKind {
+    Delivery,
+    NoDelivery,
 }
 
-impl CompletionContract {
-    pub(crate) fn delivery_required(task_run_id: String, work_unit_id: String) -> Self {
-        Self::DeliveryRequired {
-            task_run_id,
-            work_unit_id,
-            recovery_limit: 1,
+impl WorkCompletionKind {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Delivery => "delivery",
+            Self::NoDelivery => "noDelivery",
         }
     }
+
+    pub(crate) fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "delivery" => Some(Self::Delivery),
+            "noDelivery" => Some(Self::NoDelivery),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum WorkCompletionStatus {
+    ReadyForReview,
+    ChangesRequired,
+    Approved,
+}
+
+impl WorkCompletionStatus {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::ReadyForReview => "readyForReview",
+            Self::ChangesRequired => "changesRequired",
+            Self::Approved => "approved",
+        }
+    }
+
+    pub(crate) fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "readyForReview" => Some(Self::ReadyForReview),
+            "changesRequired" => Some(Self::ChangesRequired),
+            "approved" => Some(Self::Approved),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WorkCompletionRecord {
+    pub(crate) id: String,
+    pub(crate) task_run_id: String,
+    pub(crate) work_unit_id: String,
+    pub(crate) executor_agent_id: String,
+    pub(crate) revision: u32,
+    pub(crate) kind: WorkCompletionKind,
+    pub(crate) status: WorkCompletionStatus,
+    pub(crate) base_commit: String,
+    pub(crate) head_commit: Option<String>,
+    pub(crate) changed_files: Vec<String>,
+    pub(crate) verification_summary: String,
+    pub(crate) worktree_path: String,
+    pub(crate) branch: String,
+    pub(crate) created_at: i64,
+    pub(crate) updated_at: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -553,10 +610,6 @@ pub(crate) struct AgentOutcomeRecord {
     pub(crate) attempt: u32,
     pub(crate) summary: Option<String>,
     pub(crate) error: Option<String>,
-    pub(crate) delivery: Option<AgentDelivery>,
-    pub(crate) review: Option<AgentReview>,
-    pub(crate) completion_contract: Option<CompletionContract>,
-    pub(crate) delivery_recovery_count: u32,
     pub(crate) created_at: i64,
     pub(crate) updated_at: i64,
 }
@@ -572,44 +625,4 @@ pub(crate) struct DeliveryScope {
 pub(crate) enum DeliveryScopeResolution {
     Resolved(Box<DeliveryScope>),
     MissingWorkUnit(Box<AgentOutcomeRecord>),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct DeliveryRecoveryClaim {
-    pub(crate) task_run_id: String,
-    pub(crate) task_generation: u64,
-    pub(crate) outcome_id: String,
-    pub(crate) work_unit_id: String,
-    pub(crate) agent_id: String,
-    pub(crate) recovery_count: u32,
-}
-
-impl DeliveryRecoveryClaim {
-    pub(crate) fn dispatch_id(&self) -> String {
-        format!(
-            "delivery-recovery:{}:{}",
-            self.outcome_id, self.recovery_count
-        )
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum DeliveryRecoveryDispatch {
-    Pending,
-    Terminal {
-        outcome: pl_core::TurnOutcomeKind,
-        reason: Option<String>,
-    },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum DeliveryRecoveryNeed {
-    NoDelivery { task_generation: u64 },
-    Recoverable,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum DeliveryRecoveryFailureRecording {
-    Recorded,
-    Suppressed,
 }

@@ -26,6 +26,22 @@ part 'studio_shell_chrome.dart';
 part 'agent_workspace_pane.dart';
 part 'agent_workspace_preview.dart';
 
+typedef ProjectDirectoryPicker = Future<String?> Function(BuildContext context);
+
+final projectDirectoryPickerProvider = Provider<ProjectDirectoryPicker>((ref) {
+  if (const bool.fromEnvironment('PURE_STUDIO_DRIVER')) {
+    return showDriverProjectPathDialog;
+  }
+  return (_) => FilePicker.getDirectoryPath();
+});
+
+Future<String?> showDriverProjectPathDialog(BuildContext context) {
+  return showDialog<String>(
+    context: context,
+    builder: (_) => const _DriverProjectPathDialog(),
+  );
+}
+
 class StudioShell extends ConsumerStatefulWidget {
   const StudioShell({super.key});
 

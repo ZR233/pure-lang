@@ -9,8 +9,7 @@ use crate::tool::{
     RegisteredTool, ToolExecutionResult, ToolInputSchemaField, strict_tool_input_schema,
 };
 use crate::{
-    AgentRoleId, AgentRuntimeHandle, AgentSessionState, AgentSpawnRequest, AgentWakePolicy,
-    SessionId, ToolEffect,
+    AgentRoleId, AgentRuntimeHandle, AgentSessionState, AgentSpawnRequest, SessionId, ToolEffect,
 };
 
 const MAX_EXECUTOR_CONSTRAINT_BYTES: usize = 16 * 1024;
@@ -56,7 +55,12 @@ impl TaskCoordinator {
                     serde_json::json!({
                         "type": "array",
                         "minItems": 1,
-                        "items": { "type": "string" }
+                        "description": "Non-overlapping relative ownership scopes. A file path is exact; every directory scope must end with `/**`, for example `code/pl-core/**`. A bare directory name does not include descendants.",
+                        "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "An exact relative file path or a relative directory path ending in `/**`."
+                        }
                     }),
                 ),
             ]),
@@ -92,7 +96,6 @@ impl TaskCoordinator {
                             parent_id: crate::studio::agent_host::root_agent_id(&session_id),
                             role: AgentRoleId::new("executor")
                                 .map_err(|error| anyhow::anyhow!(error.to_string()))?,
-                            wake_policy: AgentWakePolicy::ProductGated,
                             session: AgentSessionState::empty(child_session_id.clone()),
                             initial_message: Some(arguments.message),
                             metadata: serde_json::to_value(intent)?,
@@ -108,7 +111,6 @@ impl TaskCoordinator {
                         turn_id: turn_id.to_string(),
                         owned_paths,
                     })
-                    .map(ToolExecutionResult::ending_turn)
                     .map_err(anyhow::Error::from)
                 }
             },
@@ -126,8 +128,10 @@ fn executor_constraint(owned_paths: &[String]) -> Result<String> {
     let constraint = format!(
         "你是 Task executor，只能在系统分配给你的独立 worktree 中工作。\
 \n你只能修改以下 ownedPaths 覆盖的文件：\n{paths}\
-\n不得修改范围外文件。完成后必须自行验证、提交所有变更，并调用 \
-submit_delivery 提交实际 HEAD 与验证摘要；普通文本回复不算交付。\
+\n不得修改范围外文件。完成定位、开始实现、开始验证、遇到阻塞和准备审查时，调用 \
+report_progress 记录准确摘要与下一步；它不是心跳。完成后必须自行验证、提交所有变更，\
+并调用 report_completion 提交实际 HEAD 与验证摘要；普通文本回复不算完成。\
+\n工具失败后先读取当前状态，修复根因或换一种方案，不得原样重复同一个失败调用。\
 \n不得派生代理、合并分支、切换/创建/删除分支、操作 planner 或用户工作区，\
 也不得自行把提交合入任务分支。"
     );

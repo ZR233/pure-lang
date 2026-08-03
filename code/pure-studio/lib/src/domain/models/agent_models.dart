@@ -12,6 +12,11 @@ class StudioAgentView {
     this.depth = 0,
     this.error,
     this.reason,
+    this.rootSessionId,
+    this.lifecycle,
+    this.activity,
+    this.progress,
+    this.summaryAgeSeconds,
   });
 
   final String id;
@@ -25,5 +30,26 @@ class StudioAgentView {
   final int depth;
   final String? error;
   final String? reason;
+  final String? rootSessionId;
+  final String? lifecycle;
+  final String? activity;
+  final AgentProgressView? progress;
+  final int? summaryAgeSeconds;
+  final DateTime updatedAt;
+}
+
+class AgentProgressView {
+  const AgentProgressView({
+    required this.stage,
+    required this.summary,
+    required this.nextStep,
+    required this.revision,
+    required this.updatedAt,
+  });
+
+  final String stage;
+  final String summary;
+  final String nextStep;
+  final int revision;
   final DateTime updatedAt;
 }

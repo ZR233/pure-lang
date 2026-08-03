@@ -229,9 +229,7 @@ mod tests {
     use crate::StudioMode;
     use crate::config::{ConfigPaths, ConfigStore};
     use crate::studio::{StudioRuntime, StudioStore};
-    use pl_core::{
-        AgentIdentity, AgentRegistration, AgentRoleId, AgentSessionState, AgentWakePolicy,
-    };
+    use pl_core::{AgentIdentity, AgentRegistration, AgentRoleId, AgentSessionState};
     use pl_trace::{
         TraceEvent, TraceEventKind, TracePart, TracePartKind, TracePartSource, TracePartStatus,
     };
@@ -267,10 +265,9 @@ mod tests {
                     role: AgentRoleId::new("planner").unwrap(),
                     depth: 0,
                 },
-                wake_policy: AgentWakePolicy::RuntimeTerminal,
-                sessions: vec![AgentSessionState::empty(
+                session: AgentSessionState::empty(
                     pl_core::SessionId::new(session.id.clone()).unwrap(),
-                )],
+                ),
             })
             .await
             .unwrap();

@@ -5,137 +5,165 @@ use pretty_assertions::assert_eq;
 use sea_orm::{ConnectionTrait, Database, DatabaseBackend, DatabaseConnection, Statement};
 
 use super::*;
-use crate::SessionKind;
 use crate::studio::store_support::STUDIO_DATABASE_SCHEMA_VERSION;
-use pl_core::{
-    AgentActivityState, AgentId, AgentIdentity, AgentLifecycleState, AgentRoleId, AgentSnapshot,
-};
-use pl_protocol::{
-    SessionEventEnvelope, SessionEventKind, SessionEventPosition, SessionMessage,
-    SessionMessageRole, SessionMessageStatus,
-};
 
 #[tokio::test]
-async fn base_schema_contains_framework_and_task_tables() {
+async fn base_schema_contains_only_v10_runtime_and_task_contracts() {
     let store = StudioStore::open_memory().await.unwrap();
-    let names = store
-        .db
-        .query_all(Statement::from_string(
-            DatabaseBackend::Sqlite,
-            "SELECT name FROM sqlite_master
-             WHERE type = 'table'
-               AND name IN (
-                 'agent_runtime_states', 'agent_runtime_sessions',
-                 'agent_runtime_traces', 'agent_framework_events',
-                 'agent_pending_inputs', 'agent_active_inputs',
-                 'agent_wake_receipts', 'agent_turns',
-                 'session_event_journal', 'session_view_snapshots',
-                 'task_runs', 'work_units', 'agent_outcomes',
-                 'merge_records', 'review_rounds', 'branch_leases'
-               )
-             ORDER BY name"
-                .to_string(),
-        ))
-        .await
-        .unwrap()
-        .into_iter()
-        .map(|row| row.try_get::<String>("", "name").unwrap())
-        .collect::<Vec<_>>();
+    let names = table_names(&store.db).await;
 
-    assert_eq!(
-        names,
-        vec![
-            "agent_active_inputs",
-            "agent_framework_events",
-            "agent_outcomes",
-            "agent_pending_inputs",
-            "agent_runtime_sessions",
-            "agent_runtime_states",
-            "agent_runtime_traces",
-            "agent_turns",
-            "agent_wake_receipts",
-            "branch_leases",
-            "merge_records",
-            "review_rounds",
-            "session_event_journal",
-            "session_view_snapshots",
-            "task_runs",
-            "work_units",
-        ]
-    );
+    for required in [
+        "agent_runtime_states",
+        "agent_runtime_sessions",
+        "agent_runtime_traces",
+        "agent_framework_events",
+        "agent_pending_inputs",
+        "agent_active_inputs",
+        "agent_turns",
+        "session_event_journal",
+        "session_view_snapshots",
+        "task_runs",
+        "work_units",
+        "work_completions",
+        "agent_outcomes",
+        "merge_records",
+        "review_rounds",
+        "branch_leases",
+    ] {
+        assert!(names.iter().any(|name| name == required), "{required}");
+    }
+    for removed in [
+        "agent_wake_receipts",
+        "interaction_continuation_outbox",
+        "timeline_events",
+        "migration_history",
+    ] {
+        assert!(!names.iter().any(|name| name == removed), "{removed}");
+    }
     assert_eq!(
         schema_version(&store.db).await,
         STUDIO_DATABASE_SCHEMA_VERSION
     );
-}
 
-#[tokio::test]
-async fn base_schema_has_only_canonical_session_projection_tables() {
-    let store = StudioStore::open_memory().await.unwrap();
-
+    let outcome_columns = table_columns(&store.db, "agent_outcomes").await;
     for removed in [
-        "agent_events",
-        "agent_runtime_events",
-        "agent_runtime_snapshots",
-        "agents",
-        "messages",
-        "session_runtime_snapshots",
-        "session_skills",
-        "trace_events",
-        "turns",
+        "delivery_json",
+        "review_json",
+        "completion_contract_json",
+        "delivery_recovery_count",
+        "terminal_observed",
     ] {
-        assert_eq!(
-            table_columns(&store.db, removed).await,
-            Vec::<String>::new()
+        assert!(!outcome_columns.iter().any(|column| column == removed));
+    }
+
+    let completion_columns = table_columns(&store.db, "work_completions").await;
+    for required in [
+        "work_unit_id",
+        "executor_agent_id",
+        "revision",
+        "kind",
+        "status",
+        "verification_summary",
+    ] {
+        assert!(
+            completion_columns.iter().any(|column| column == required),
+            "{required}"
         );
     }
 
-    let work_unit_columns = table_columns(&store.db, "work_units").await;
-    for required in ["base_commit", "worktree_path", "branch"] {
-        assert!(work_unit_columns.iter().any(|column| column == required));
-    }
-
-    let task_run_columns = table_columns(&store.db, "task_runs").await;
+    let review_columns = table_columns(&store.db, "review_rounds").await;
     for required in [
-        "stop_requested",
-        "stop_requested_origin",
-        "stop_requested_reason",
-        "stop_requested_at",
-        "task_generation",
-        "terminal_generation",
+        "scope",
+        "completion_id",
+        "completion_revision",
+        "reviewed_head",
+        "findings_json",
     ] {
-        assert!(task_run_columns.iter().any(|column| column == required));
+        assert!(
+            review_columns.iter().any(|column| column == required),
+            "{required}"
+        );
     }
 
-    let outcome_columns = table_columns(&store.db, "agent_outcomes").await;
-    for required in ["completion_contract_json", "delivery_recovery_count"] {
-        assert!(outcome_columns.iter().any(|column| column == required));
+    let review_indexes = index_definitions(&store.db, "review_rounds").await;
+    for required in [
+        "idx_review_rounds_completion_revision",
+        "idx_review_rounds_active_delivery",
+        "idx_review_rounds_active_integrated",
+        "idx_review_rounds_run_call",
+    ] {
+        assert!(
+            review_indexes.iter().any(|(name, _)| name == required),
+            "{required}"
+        );
     }
-
-    let runtime_session_columns = table_columns(&store.db, "agent_runtime_sessions").await;
+    let completion_index = review_indexes
+        .iter()
+        .find(|(name, _)| name == "idx_review_rounds_completion_revision")
+        .unwrap();
     assert!(
-        runtime_session_columns
-            .iter()
-            .any(|column| column == "trace_sequence")
-    );
-    assert!(
-        runtime_session_columns
-            .iter()
-            .any(|column| column == "session_event_sequence")
+        !completion_index
+            .1
+            .to_ascii_uppercase()
+            .starts_with("CREATE UNIQUE INDEX")
     );
 }
 
 #[tokio::test]
-async fn future_schema_is_rejected_without_deleting_database() {
+async fn schema_v9_is_archived_and_rebuilt_without_importing_rows() {
+    let db_path = unique_test_db_path("schema-v9-rebuild");
+    remove_test_db_files(&db_path).await;
+    let legacy = Database::connect(sqlite_url(&db_path, "rwc"))
+        .await
+        .unwrap();
+    execute_sql(
+        &legacy,
+        "CREATE TABLE legacy_only (id TEXT PRIMARY KEY);
+         INSERT INTO legacy_only (id) VALUES ('preserve-in-backup');
+         PRAGMA user_version = 9;",
+    )
+    .await;
+    legacy.close().await.unwrap();
+
+    let store = StudioStore::open(&db_path).await.unwrap();
+    assert_eq!(
+        schema_version(store.database()).await,
+        STUDIO_DATABASE_SCHEMA_VERSION
+    );
+    assert!(!table_exists(store.database(), "legacy_only").await);
+    drop(store);
+
+    let backup = PathBuf::from(format!("{}.legacy-v9.bak", db_path.display()));
+    let archived = Database::connect(sqlite_url(&backup, "ro")).await.unwrap();
+    assert_eq!(schema_version(&archived).await, 9);
+    let preserved = archived
+        .query_one(Statement::from_string(
+            DatabaseBackend::Sqlite,
+            "SELECT id FROM legacy_only".to_string(),
+        ))
+        .await
+        .unwrap()
+        .unwrap()
+        .try_get::<String>("", "id")
+        .unwrap();
+    assert_eq!(preserved, "preserve-in-backup");
+    archived.close().await.unwrap();
+
+    remove_test_db_files(&db_path).await;
+    remove_test_db_files(&backup).await;
+}
+
+#[tokio::test]
+async fn future_schema_is_rejected_without_modifying_database() {
     let db_path = unique_test_db_path("future-schema");
     remove_test_db_files(&db_path).await;
-    let db = Database::connect(sqlite_url_for_test(&db_path))
+    let db = Database::connect(sqlite_url(&db_path, "rwc"))
         .await
         .unwrap();
     execute_sql(
         &db,
-        "CREATE TABLE legacy_only (id TEXT PRIMARY KEY);
-         INSERT INTO legacy_only (id) VALUES ('must-disappear');
+        "CREATE TABLE future_only (id TEXT PRIMARY KEY);
+         INSERT INTO future_only (id) VALUES ('must-remain');
          PRAGMA user_version = 999;",
     )
     .await;
@@ -147,738 +175,26 @@ async fn future_schema_is_rejected_without_deleting_database() {
     };
     assert!(error.to_string().contains("高于当前支持版本"));
 
-    let preserved = Database::connect(sqlite_url_for_test(&db_path))
-        .await
-        .unwrap();
-    let legacy_table = preserved
-        .query_one(Statement::from_string(
-            DatabaseBackend::Sqlite,
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'legacy_only'"
-                .to_string(),
-        ))
-        .await
-        .unwrap();
-    assert!(legacy_table.is_some());
+    let preserved = Database::connect(sqlite_url(&db_path, "ro")).await.unwrap();
     assert_eq!(schema_version(&preserved).await, 999);
-
+    assert!(table_exists(&preserved, "future_only").await);
     preserved.close().await.unwrap();
     remove_test_db_files(&db_path).await;
 }
 
-#[tokio::test]
-async fn v2_schema_is_backed_up_and_migrated_without_losing_root_session() {
-    let db_path = unique_test_db_path("schema-v2-migration");
-    remove_test_db_files(&db_path).await;
-    let db = Database::connect(sqlite_url_for_test(&db_path))
-        .await
-        .unwrap();
-    execute_sql(
-        &db,
-        "CREATE TABLE projects (
-             id TEXT PRIMARY KEY,
-             name TEXT NOT NULL,
-             path TEXT NOT NULL UNIQUE,
-             created_at INTEGER NOT NULL,
-             updated_at INTEGER NOT NULL,
-             last_opened_at INTEGER,
-             closed INTEGER NOT NULL DEFAULT 0
-         );
-         CREATE TABLE sessions (
-             id TEXT PRIMARY KEY,
-             project_id TEXT NOT NULL,
-             title TEXT NOT NULL,
-             mode TEXT NOT NULL,
-             created_at INTEGER NOT NULL,
-             updated_at INTEGER NOT NULL,
-             archived INTEGER NOT NULL DEFAULT 0,
-             instruction_snapshot_json TEXT,
-             visibility TEXT NOT NULL DEFAULT 'active',
-             parent_session_id TEXT
-         );
-         CREATE TABLE agent_runtime_states (
-             agent_id TEXT PRIMARY KEY,
-             revision INTEGER NOT NULL,
-             snapshot_json TEXT NOT NULL,
-             updated_at INTEGER NOT NULL
-         );
-         CREATE TABLE agent_runtime_sessions (
-             agent_id TEXT NOT NULL,
-             session_id TEXT NOT NULL,
-             metadata_json TEXT NOT NULL,
-             context_json TEXT NOT NULL,
-             usage_json TEXT NOT NULL,
-             last_context_tokens INTEGER,
-             trace_sequence INTEGER NOT NULL DEFAULT 0,
-             session_event_sequence INTEGER NOT NULL DEFAULT 0,
-             updated_at INTEGER NOT NULL,
-             PRIMARY KEY (agent_id, session_id)
-         );
-         CREATE TABLE agent_turns (
-             agent_id TEXT NOT NULL,
-             turn_id TEXT NOT NULL,
-             session_id TEXT NOT NULL,
-             status TEXT NOT NULL,
-             reason TEXT,
-             usage_json TEXT NOT NULL,
-             metadata_json TEXT,
-             started_at INTEGER,
-             finished_at INTEGER,
-             PRIMARY KEY (agent_id, turn_id)
-         );
-         CREATE TABLE session_event_journal (
-             session_id TEXT NOT NULL,
-             sequence INTEGER NOT NULL,
-             event_json TEXT NOT NULL,
-             emitted_at INTEGER NOT NULL,
-             PRIMARY KEY (session_id, sequence)
-         );
-         CREATE TABLE session_view_snapshots (
-             session_id TEXT PRIMARY KEY,
-             through_sequence INTEGER NOT NULL,
-             snapshot_json TEXT NOT NULL,
-             updated_at INTEGER NOT NULL
-         );
-         CREATE TABLE interactions (
-             id TEXT PRIMARY KEY,
-             session_id TEXT NOT NULL,
-             turn_id TEXT NOT NULL,
-             item_id TEXT,
-             tool_id TEXT,
-             agent_path TEXT,
-             kind TEXT NOT NULL,
-             status TEXT NOT NULL,
-             payload_json TEXT NOT NULL,
-             resolution_json TEXT,
-             created_at INTEGER NOT NULL,
-             updated_at INTEGER NOT NULL,
-             resolved_at INTEGER
-         );
-         INSERT INTO projects (
-             id, name, path, created_at, updated_at, closed
-         ) VALUES (
-             'project-v2', 'V2 project', 'C:/fixture', 10, 11, 0
-         );
-         INSERT INTO sessions (
-             id, project_id, title, mode, created_at, updated_at,
-             archived, visibility
-         ) VALUES (
-             'session-v2', 'project-v2', 'Preserved session', 'task',
-             12, 13, 0, 'active'
-         );
-         PRAGMA user_version = 2;",
-    )
-    .await;
-    let child_snapshot = AgentSnapshot {
-        identity: AgentIdentity {
-            id: AgentId::new("child-v2").unwrap(),
-            parent_id: Some(AgentId::new("studio:session-v2").unwrap()),
-            role: AgentRoleId::new("executor").unwrap(),
-            depth: 1,
-        },
-        wake_policy: pl_core::AgentWakePolicy::RuntimeTerminal,
-        lifecycle: AgentLifecycleState::Active,
-        activity: AgentActivityState::Idle,
-        active_turn_id: None,
-        active_session_id: None,
-        pending_inputs: 0,
-        pending_trigger_inputs: 0,
-        mailbox_delivery_phase: pl_core::MailboxDeliveryPhase::CurrentTurn,
-        dispatch_generation: 0,
-        last_turn: None,
-        revision: 1,
-        event_sequence: 1,
-        updated_at: 20,
-    };
-    db.execute(Statement::from_sql_and_values(
+async fn table_names(db: &DatabaseConnection) -> Vec<String> {
+    db.query_all(Statement::from_string(
         DatabaseBackend::Sqlite,
-        "INSERT INTO agent_runtime_states
-         (agent_id, revision, snapshot_json, updated_at) VALUES (?, ?, ?, ?)",
-        [
-            "child-v2".into(),
-            1_i64.into(),
-            serde_json::to_string(&child_snapshot).unwrap().into(),
-            20_i64.into(),
-        ],
+        "SELECT name FROM sqlite_schema
+         WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+         ORDER BY name"
+            .to_string(),
     ))
     .await
-    .unwrap();
-    db.execute(Statement::from_sql_and_values(
-        DatabaseBackend::Sqlite,
-        "INSERT INTO agent_runtime_sessions (
-             agent_id, session_id, metadata_json, context_json, usage_json,
-             trace_sequence, session_event_sequence, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        [
-            "child-v2".into(),
-            "child-session-v2".into(),
-            r#"{"taskName":"V2 executor"}"#.into(),
-            "[]".into(),
-            "{}".into(),
-            0_i64.into(),
-            1_i64.into(),
-            20_i64.into(),
-        ],
-    ))
-    .await
-    .unwrap();
-    db.execute(Statement::from_sql_and_values(
-        DatabaseBackend::Sqlite,
-        "INSERT INTO agent_turns (
-             agent_id, turn_id, session_id, status, usage_json, started_at, finished_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        [
-            "child-v2".into(),
-            "turn-child-v2".into(),
-            "child-session-v2".into(),
-            "completed".into(),
-            "{}".into(),
-            20_i64.into(),
-            21_i64.into(),
-        ],
-    ))
-    .await
-    .unwrap();
-    let planner_event = message_event(
-        "root-event-v2",
-        "session-v2",
-        "studio:session-v2",
-        "turn-root-v2",
-        1,
-        "root-message-v2",
-    );
-    let child_event = message_event(
-        "child-event-v2",
-        "session-v2",
-        "child-v2",
-        "turn-child-v2",
-        2,
-        "child-message-v2",
-    );
-    for event in [planner_event, child_event] {
-        db.execute(Statement::from_sql_and_values(
-            DatabaseBackend::Sqlite,
-            "INSERT INTO session_event_journal
-             (session_id, sequence, event_json, emitted_at) VALUES (?, ?, ?, ?)",
-            [
-                "session-v2".into(),
-                i64::try_from(event.position.durable_sequence().unwrap())
-                    .unwrap()
-                    .into(),
-                serde_json::to_string(&event).unwrap().into(),
-                event.emitted_at.into(),
-            ],
-        ))
-        .await
-        .unwrap();
-    }
-    db.execute(Statement::from_sql_and_values(
-        DatabaseBackend::Sqlite,
-        "INSERT INTO interactions (
-             id, session_id, turn_id, kind, status, payload_json, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        [
-            "interaction-child-v2".into(),
-            "session-v2".into(),
-            "turn-child-v2".into(),
-            "userInput".into(),
-            "pending".into(),
-            "{}".into(),
-            20_i64.into(),
-            20_i64.into(),
-        ],
-    ))
-    .await
-    .unwrap();
-    db.close().await.unwrap();
-
-    let store = StudioStore::open(&db_path).await.unwrap();
-    let session = store.read_session("session-v2").await.unwrap().unwrap();
-    assert_eq!(session.root_session_id, "session-v2");
-    assert_eq!(session.owner_agent_id, "studio:session-v2");
-    assert_eq!(session.owner_role, "planner");
-    assert_eq!(session.session_kind, SessionKind::Root);
-    let child = store
-        .read_session("child-session-v2")
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(child.root_session_id, "session-v2");
-    assert_eq!(child.parent_session_id.as_deref(), Some("session-v2"));
-    assert_eq!(child.owner_agent_id, "child-v2");
-    assert_eq!(child.owner_role, "executor");
-    let root_journal = journal_events(&store.db, "session-v2").await;
-    assert_eq!(root_journal.len(), 1);
-    assert_eq!(
-        root_journal[0].source_agent_id.as_deref(),
-        Some("studio:session-v2")
-    );
-    let child_journal = journal_events(&store.db, "child-session-v2").await;
-    assert_eq!(child_journal.len(), 1);
-    assert_eq!(child_journal[0].session_id, "child-session-v2");
-    assert_eq!(
-        child_journal[0].source_agent_id.as_deref(),
-        Some("child-v2")
-    );
-    let child_message = match &child_journal[0].kind {
-        SessionEventKind::MessageChanged { message } => message,
-        other => panic!("expected migrated child message, got {other:?}"),
-    };
-    assert_eq!(child_message.session_id, "child-session-v2");
-    let interaction_session = store
-        .db
-        .query_one(Statement::from_string(
-            DatabaseBackend::Sqlite,
-            "SELECT session_id FROM interactions WHERE id = 'interaction-child-v2'".to_string(),
-        ))
-        .await
-        .unwrap()
-        .unwrap()
-        .try_get::<String>("", "session_id")
-        .unwrap();
-    assert_eq!(interaction_session, "child-session-v2");
-    assert_eq!(
-        schema_version(&store.db).await,
-        STUDIO_DATABASE_SCHEMA_VERSION
-    );
-    assert!(
-        PathBuf::from(format!("{}.v2.bak", db_path.display())).is_file(),
-        "v2 migration must preserve a recoverable backup"
-    );
-
-    drop(store);
-    remove_test_db_files(&db_path).await;
-    let _ = tokio::fs::remove_file(format!("{}.v2.bak", db_path.display())).await;
-}
-
-#[tokio::test]
-async fn v3_schema_is_backed_up_and_migrated_with_delivery_contracts() {
-    let db_path = unique_test_db_path("schema-v3-migration");
-    remove_test_db_files(&db_path).await;
-    let db = Database::connect(sqlite_url_for_test(&db_path))
-        .await
-        .unwrap();
-    execute_sql(
-        &db,
-        "CREATE TABLE sessions (id TEXT PRIMARY KEY);
-         CREATE TABLE task_runs (
-             id TEXT PRIMARY KEY,
-             session_id TEXT NOT NULL,
-             phase TEXT NOT NULL,
-             plan TEXT NOT NULL,
-             workspace_root TEXT NOT NULL,
-             git_common_dir TEXT NOT NULL,
-             branch TEXT NOT NULL,
-             base_commit TEXT NOT NULL,
-             expected_head TEXT NOT NULL,
-             design_commit TEXT,
-             status_message TEXT,
-             created_at INTEGER NOT NULL,
-             updated_at INTEGER NOT NULL
-         );
-         CREATE TABLE work_units (
-             id TEXT PRIMARY KEY,
-             task_run_id TEXT NOT NULL,
-             title TEXT NOT NULL,
-             status TEXT NOT NULL,
-             owned_paths_json TEXT NOT NULL,
-             base_commit TEXT NOT NULL,
-             worktree_path TEXT NOT NULL,
-             branch TEXT NOT NULL,
-             attempt INTEGER NOT NULL,
-             agent_id TEXT,
-             created_at INTEGER NOT NULL,
-             updated_at INTEGER NOT NULL
-         );
-         CREATE TABLE agent_outcomes (
-             id TEXT PRIMARY KEY,
-             task_run_id TEXT NOT NULL,
-             work_unit_id TEXT,
-             agent_id TEXT NOT NULL,
-             owner_path TEXT NOT NULL,
-             initiated_by TEXT NOT NULL,
-             requested_by_call_id TEXT NOT NULL,
-             role TEXT NOT NULL,
-             status TEXT NOT NULL,
-             attempt INTEGER NOT NULL,
-             summary TEXT,
-             error TEXT,
-             delivery_json TEXT,
-             review_json TEXT,
-             created_at INTEGER NOT NULL,
-             updated_at INTEGER NOT NULL,
-             terminal_observed INTEGER NOT NULL DEFAULT 0
-         );
-         INSERT INTO task_runs (
-             id, session_id, phase, plan, workspace_root, git_common_dir,
-             branch, base_commit, expected_head, created_at, updated_at
-         ) VALUES (
-             'run-v3', 'session-v3', 'implementing', 'plan', 'C:/fixture',
-             'C:/fixture/.git', 'main', 'base', 'base', 10, 11
-         );
-         INSERT INTO work_units (
-             id, task_run_id, title, status, owned_paths_json, base_commit,
-             worktree_path, branch, attempt, agent_id, created_at, updated_at
-         ) VALUES (
-             'work-v3', 'run-v3', 'Implement', 'waitingForDelivery', '[\"src/**\"]',
-             'base', 'C:/fixture/worktree', 'pure-task-v3', 1, 'executor-v3', 10, 11
-         );
-         INSERT INTO agent_outcomes (
-             id, task_run_id, work_unit_id, agent_id, owner_path, initiated_by,
-             requested_by_call_id, role, status, attempt, created_at, updated_at
-         ) VALUES (
-             'outcome-v3', 'run-v3', 'work-v3', 'executor-v3', '/root', 'planner',
-             'call-v3', 'executor', 'waitingForDelivery', 1, 10, 11
-         );
-         PRAGMA user_version = 3;",
-    )
-    .await;
-    db.close().await.unwrap();
-
-    let store = StudioStore::open(&db_path).await.unwrap();
-    assert_eq!(
-        schema_version(&store.db).await,
-        STUDIO_DATABASE_SCHEMA_VERSION
-    );
-    assert!(
-        table_columns(&store.db, "task_runs")
-            .await
-            .iter()
-            .any(|column| column == "stop_requested")
-    );
-    let row = store
-        .db
-        .query_one(Statement::from_string(
-            DatabaseBackend::Sqlite,
-            "SELECT completion_contract_json, delivery_recovery_count
-             FROM agent_outcomes WHERE id = 'outcome-v3'"
-                .to_string(),
-        ))
-        .await
-        .unwrap()
-        .unwrap();
-    let contract = row
-        .try_get::<String>("", "completion_contract_json")
-        .unwrap();
-    assert_eq!(
-        serde_json::from_str::<serde_json::Value>(&contract).unwrap(),
-        serde_json::json!({
-            "kind": "deliveryRequired",
-            "taskRunId": "run-v3",
-            "workUnitId": "work-v3",
-            "recoveryLimit": 1,
-        })
-    );
-    assert_eq!(
-        row.try_get::<i64>("", "delivery_recovery_count").unwrap(),
-        0
-    );
-    assert!(
-        PathBuf::from(format!("{}.v3.bak", db_path.display())).is_file(),
-        "v3 migration must preserve a recoverable backup"
-    );
-
-    drop(store);
-    remove_test_db_files(&db_path).await;
-    let _ = tokio::fs::remove_file(format!("{}.v3.bak", db_path.display())).await;
-}
-
-#[tokio::test]
-async fn v4_schema_is_backed_up_and_migrated_with_wake_receipts() {
-    let db_path = unique_test_db_path("schema-v4-migration");
-    remove_test_db_files(&db_path).await;
-    let db = Database::connect(sqlite_url_for_test(&db_path))
-        .await
-        .unwrap();
-    execute_sql(
-        &db,
-        "CREATE TABLE agent_runtime_states (
-             agent_id TEXT PRIMARY KEY,
-             revision INTEGER NOT NULL,
-             snapshot_json TEXT NOT NULL,
-             updated_at INTEGER NOT NULL
-         );
-         CREATE TABLE task_runs (
-             id TEXT PRIMARY KEY
-         );
-         CREATE TABLE work_units (
-             id TEXT PRIMARY KEY,
-             status TEXT NOT NULL
-         );
-         CREATE TABLE agent_outcomes (
-             id TEXT PRIMARY KEY,
-             work_unit_id TEXT,
-             status TEXT NOT NULL,
-             error TEXT
-         );
-         PRAGMA user_version = 4;",
-    )
-    .await;
-    db.close().await.unwrap();
-
-    let store = StudioStore::open(&db_path).await.unwrap();
-    assert_eq!(
-        schema_version(&store.db).await,
-        STUDIO_DATABASE_SCHEMA_VERSION
-    );
-    assert_eq!(
-        table_columns(&store.db, "agent_wake_receipts").await,
-        vec![
-            "agent_id".to_string(),
-            "wake_id".to_string(),
-            "receipt_json".to_string(),
-            "accepted_at".to_string(),
-        ]
-    );
-    assert!(
-        PathBuf::from(format!("{}.v4.bak", db_path.display())).is_file(),
-        "v4 migration must preserve a recoverable backup"
-    );
-
-    drop(store);
-    remove_test_db_files(&db_path).await;
-    let _ = tokio::fs::remove_file(format!("{}.v4.bak", db_path.display())).await;
-}
-
-#[tokio::test]
-async fn v5_migration_only_backfills_exact_legacy_discard_evidence() {
-    let db_path = unique_test_db_path("schema-v5-worktree-disposition");
-    remove_test_db_files(&db_path).await;
-    let db = Database::connect(sqlite_url_for_test(&db_path))
-        .await
-        .unwrap();
-    execute_sql(
-        &db,
-        "CREATE TABLE agent_runtime_states (
-             agent_id TEXT PRIMARY KEY,
-             revision INTEGER NOT NULL,
-             snapshot_json TEXT NOT NULL,
-             updated_at INTEGER NOT NULL
-         );
-         CREATE TABLE task_runs (
-             id TEXT PRIMARY KEY
-         );
-         CREATE TABLE work_units (
-             id TEXT PRIMARY KEY,
-             status TEXT NOT NULL
-         );
-         CREATE TABLE agent_outcomes (
-             id TEXT PRIMARY KEY,
-             work_unit_id TEXT,
-             status TEXT NOT NULL,
-             error TEXT
-         );
-         INSERT INTO work_units (id, status) VALUES
-             ('exact', 'cancelled'),
-             ('legacy', 'cancelled'),
-             ('failed', 'failed');
-         INSERT INTO agent_outcomes (id, work_unit_id, status, error) VALUES
-             ('outcome-exact', 'exact', 'cancelled', 'executor discarded by planner'),
-             ('outcome-legacy', 'legacy', 'cancelled', 'executor stopped'),
-             ('outcome-failed', 'failed', 'cancelled', 'executor discarded by planner');
-         PRAGMA user_version = 5;",
-    )
-    .await;
-    db.close().await.unwrap();
-
-    let store = StudioStore::open(&db_path).await.unwrap();
-    let rows = store
-        .db
-        .query_all(Statement::from_string(
-            DatabaseBackend::Sqlite,
-            "SELECT id, worktree_disposition FROM work_units ORDER BY id".to_string(),
-        ))
-        .await
-        .unwrap()
-        .into_iter()
-        .map(|row| {
-            (
-                row.try_get::<String>("", "id").unwrap(),
-                row.try_get::<String>("", "worktree_disposition").unwrap(),
-            )
-        })
-        .collect::<Vec<_>>();
-
-    assert_eq!(
-        rows,
-        vec![
-            ("exact".to_string(), "cleanupRequested".to_string()),
-            ("failed".to_string(), "protect".to_string()),
-            ("legacy".to_string(), "protect".to_string()),
-        ]
-    );
-    assert_eq!(
-        schema_version(&store.db).await,
-        STUDIO_DATABASE_SCHEMA_VERSION
-    );
-    assert!(
-        PathBuf::from(format!("{}.v5.bak", db_path.display())).is_file(),
-        "v5 migration must preserve a recoverable backup"
-    );
-
-    drop(store);
-    remove_test_db_files(&db_path).await;
-    let _ = tokio::fs::remove_file(format!("{}.v5.bak", db_path.display())).await;
-}
-
-#[tokio::test]
-async fn v6_schema_initializes_empty_active_mailbox_and_task_generation() {
-    let db_path = unique_test_db_path("schema-v6-mailbox-task-stop");
-    remove_test_db_files(&db_path).await;
-    let db = Database::connect(sqlite_url_for_test(&db_path))
-        .await
-        .unwrap();
-    execute_sql(
-        &db,
-        "CREATE TABLE agent_runtime_states (
-             agent_id TEXT PRIMARY KEY,
-             revision INTEGER NOT NULL,
-             snapshot_json TEXT NOT NULL,
-             updated_at INTEGER NOT NULL
-         );
-         CREATE TABLE agent_wake_receipts (
-             agent_id TEXT NOT NULL,
-             wake_id TEXT NOT NULL,
-             receipt_json TEXT NOT NULL,
-             accepted_at INTEGER NOT NULL,
-             PRIMARY KEY (agent_id, wake_id)
-         );
-         CREATE TABLE task_runs (
-             id TEXT PRIMARY KEY,
-             phase TEXT NOT NULL,
-             stop_requested INTEGER NOT NULL DEFAULT 0,
-             stop_requested_reason TEXT,
-             stop_requested_at INTEGER
-         );
-         INSERT INTO agent_runtime_states
-             (agent_id, revision, snapshot_json, updated_at)
-             VALUES ('agent-existing', 1, '{}', 10);
-         INSERT INTO agent_wake_receipts
-             (agent_id, wake_id, receipt_json, accepted_at)
-             VALUES ('agent-existing', 'wake-existing', '{}', 11);
-         INSERT INTO task_runs
-             (id, phase, stop_requested, stop_requested_reason, stop_requested_at)
-             VALUES ('run-existing', 'implementing', 0, NULL, NULL);
-         INSERT INTO task_runs
-             (id, phase, stop_requested, stop_requested_reason, stop_requested_at)
-             VALUES ('run-terminal', 'blocked', 0, NULL, NULL);
-         PRAGMA user_version = 6;",
-    )
-    .await;
-    db.close().await.unwrap();
-
-    let store = StudioStore::open(&db_path).await.unwrap();
-    assert_eq!(
-        schema_version(&store.db).await,
-        STUDIO_DATABASE_SCHEMA_VERSION
-    );
-    assert_eq!(
-        table_columns(&store.db, "agent_active_inputs").await,
-        vec![
-            "agent_id".to_string(),
-            "input_json".to_string(),
-            "updated_at".to_string(),
-        ]
-    );
-
-    let active_input_count = store
-        .db
-        .query_one(Statement::from_string(
-            DatabaseBackend::Sqlite,
-            "SELECT COUNT(*) AS count FROM agent_active_inputs".to_string(),
-        ))
-        .await
-        .unwrap()
-        .unwrap()
-        .try_get::<i64>("", "count")
-        .unwrap();
-    assert_eq!(active_input_count, 0);
-
-    let task = store
-        .db
-        .query_one(Statement::from_string(
-            DatabaseBackend::Sqlite,
-            "SELECT stop_requested_origin, task_generation, terminal_generation
-             FROM task_runs WHERE id = 'run-existing'"
-                .to_string(),
-        ))
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(
-        task.try_get::<Option<String>>("", "stop_requested_origin")
-            .unwrap(),
-        None
-    );
-    assert_eq!(task.try_get::<i64>("", "task_generation").unwrap(), 0);
-    assert_eq!(
-        task.try_get::<Option<i64>>("", "terminal_generation")
-            .unwrap(),
-        None
-    );
-    let terminal_generation = store
-        .db
-        .query_one(Statement::from_string(
-            DatabaseBackend::Sqlite,
-            "SELECT terminal_generation
-             FROM task_runs WHERE id = 'run-terminal'"
-                .to_string(),
-        ))
-        .await
-        .unwrap()
-        .unwrap()
-        .try_get::<Option<i64>>("", "terminal_generation")
-        .unwrap();
-    assert_eq!(terminal_generation, Some(0));
-
-    let wake_receipt_count = store
-        .db
-        .query_one(Statement::from_string(
-            DatabaseBackend::Sqlite,
-            "SELECT COUNT(*) AS count FROM agent_wake_receipts".to_string(),
-        ))
-        .await
-        .unwrap()
-        .unwrap()
-        .try_get::<i64>("", "count")
-        .unwrap();
-    assert_eq!(wake_receipt_count, 1);
-    assert!(
-        PathBuf::from(format!("{}.v6.bak", db_path.display())).is_file(),
-        "v6 migration must preserve a recoverable backup"
-    );
-
-    drop(store);
-    remove_test_db_files(&db_path).await;
-    let _ = tokio::fs::remove_file(format!("{}.v6.bak", db_path.display())).await;
-}
-
-#[tokio::test]
-async fn base_schema_has_no_migration_bookkeeping() {
-    let store = StudioStore::open_memory().await.unwrap();
-    let migration_table = store
-        .db
-        .query_one(Statement::from_string(
-            DatabaseBackend::Sqlite,
-            "SELECT name FROM sqlite_master
-             WHERE type = 'table' AND name = 'studio_schema_migrations'"
-                .to_string(),
-        ))
-        .await
-        .unwrap();
-    let migration_settings = store
-        .db
-        .query_one(Statement::from_string(
-            DatabaseBackend::Sqlite,
-            "SELECT COUNT(*) AS count FROM app_settings WHERE key LIKE 'migration:%'".to_string(),
-        ))
-        .await
-        .unwrap()
-        .unwrap()
-        .try_get::<i64>("", "count")
-        .unwrap();
-
-    assert_eq!(migration_table.is_none(), true);
-    assert_eq!(migration_settings, 0);
+    .unwrap()
+    .into_iter()
+    .map(|row| row.try_get("", "name").unwrap())
+    .collect()
 }
 
 async fn table_columns(db: &DatabaseConnection, table: &str) -> Vec<String> {
@@ -889,8 +205,39 @@ async fn table_columns(db: &DatabaseConnection, table: &str) -> Vec<String> {
     .await
     .unwrap()
     .into_iter()
-    .map(|row| row.try_get::<String>("", "name").unwrap())
+    .map(|row| row.try_get("", "name").unwrap())
     .collect()
+}
+
+async fn index_definitions(db: &DatabaseConnection, table: &str) -> Vec<(String, String)> {
+    db.query_all(Statement::from_sql_and_values(
+        DatabaseBackend::Sqlite,
+        "SELECT name, sql FROM sqlite_schema
+         WHERE type = 'index' AND tbl_name = ? AND sql IS NOT NULL
+         ORDER BY name",
+        [table.into()],
+    ))
+    .await
+    .unwrap()
+    .into_iter()
+    .map(|row| {
+        (
+            row.try_get("", "name").unwrap(),
+            row.try_get("", "sql").unwrap(),
+        )
+    })
+    .collect()
+}
+
+async fn table_exists(db: &DatabaseConnection, table: &str) -> bool {
+    db.query_one(Statement::from_sql_and_values(
+        DatabaseBackend::Sqlite,
+        "SELECT name FROM sqlite_schema WHERE type = 'table' AND name = ?",
+        [table.into()],
+    ))
+    .await
+    .unwrap()
+    .is_some()
 }
 
 async fn schema_version(db: &DatabaseConnection) -> i64 {
@@ -911,58 +258,6 @@ async fn execute_sql(db: &DatabaseConnection, sql: impl Into<String>) {
         .unwrap();
 }
 
-fn message_event(
-    event_id: &str,
-    session_id: &str,
-    source_agent_id: &str,
-    turn_id: &str,
-    sequence: u64,
-    message_id: &str,
-) -> SessionEventEnvelope {
-    SessionEventEnvelope {
-        event_id: event_id.to_string(),
-        session_id: session_id.to_string(),
-        source_agent_id: Some(source_agent_id.to_string()),
-        turn_id: Some(turn_id.to_string()),
-        emitted_at: i64::try_from(sequence).unwrap() + 20,
-        position: SessionEventPosition::Durable { sequence },
-        kind: SessionEventKind::MessageChanged {
-            message: Box::new(SessionMessage {
-                message_id: message_id.to_string(),
-                session_id: session_id.to_string(),
-                turn_id: turn_id.to_string(),
-                role: SessionMessageRole::Assistant,
-                status: SessionMessageStatus::Completed,
-                created_at: 20,
-                updated_at: 21,
-                completed_at: Some(21),
-                error: None,
-                metadata: serde_json::json!({}),
-            }),
-        },
-    }
-}
-
-async fn journal_events(db: &DatabaseConnection, session_id: &str) -> Vec<SessionEventEnvelope> {
-    db.query_all(Statement::from_sql_and_values(
-        DatabaseBackend::Sqlite,
-        "SELECT event_json FROM session_event_journal
-         WHERE session_id = ? ORDER BY sequence",
-        [session_id.into()],
-    ))
-    .await
-    .unwrap()
-    .into_iter()
-    .map(|row| {
-        serde_json::from_str(
-            &row.try_get::<String>("", "event_json")
-                .expect("journal event json"),
-        )
-        .expect("valid journal event")
-    })
-    .collect()
-}
-
 fn unique_test_db_path(name: &str) -> PathBuf {
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -974,9 +269,9 @@ fn unique_test_db_path(name: &str) -> PathBuf {
     ))
 }
 
-fn sqlite_url_for_test(path: &Path) -> String {
+fn sqlite_url(path: &Path, mode: &str) -> String {
     let path = path.to_string_lossy().replace('\\', "/");
-    format!("sqlite://{path}?mode=rwc")
+    format!("sqlite://{path}?mode={mode}")
 }
 
 async fn remove_test_db_files(path: &Path) {

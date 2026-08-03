@@ -88,7 +88,7 @@ impl StudioSpawnIntent {
                 bail!("Task executor must be created with task_spawn_executor")
             }
             "reviewer" if self.spawn_kind != Some(StudioSpawnKind::TaskReviewer) => {
-                bail!("Task reviewer must be created with task_request_review")
+                bail!("Task reviewer must be created by a Task review request")
             }
             "explorer" if self.spawn_kind.is_some() => {
                 bail!("explorer must be created with spawn_agent")
@@ -162,7 +162,7 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             error.to_string(),
-            "Task reviewer must be created with task_request_review"
+            "Task reviewer must be created by a Task review request"
         );
     }
 

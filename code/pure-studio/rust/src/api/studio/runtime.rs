@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use pl_studio_runtime::StudioRuntime;
 use tokio::sync::{Mutex, Notify, OnceCell};
 use tokio_util::sync::CancellationToken;
@@ -37,10 +37,7 @@ impl BridgeRuntime {
 }
 
 pub(crate) async fn bridge() -> Result<&'static BridgeRuntime> {
-    BRIDGE
-        .get_or_try_init(BridgeRuntime::new)
-        .await
-        .context("Studio bridge runtime was not initialized")
+    BRIDGE.get_or_try_init(BridgeRuntime::new).await
 }
 
 pub(crate) async fn active_bridge() -> Result<&'static BridgeRuntime, BridgeError> {

@@ -5,9 +5,7 @@ use anyhow::Result;
 
 use crate::McpRuntimeHandle;
 use crate::config::ConfigStore;
-use crate::studio::agent_host::{
-    StudioAgentResources, StudioAgentRuntime, StudioContinuationService, root_agent_id,
-};
+use crate::studio::agent_host::{StudioAgentResources, StudioAgentRuntime, root_agent_id};
 use crate::studio::records::SessionRecord;
 use crate::studio::task_coordinator::TaskCoordinator;
 use crate::studio::{
@@ -81,7 +79,6 @@ pub struct StudioRuntime {
     runtime_state: StudioRuntimeState,
     agent_framework: std::sync::Arc<tokio::sync::Mutex<Option<std::sync::Arc<StudioAgentRuntime>>>>,
     agent_resources: StudioAgentResources,
-    continuations: StudioContinuationService,
     task_coordinator: std::sync::Arc<TaskCoordinator>,
     lifecycle_lock: std::sync::Arc<tokio::sync::Mutex<()>>,
     #[cfg(test)]

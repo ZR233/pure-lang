@@ -1,11 +1,10 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::VecDeque;
 
 use crate::{ModelContextItem, PureError};
 use pl_core::{
-    AcceptedAgentWake, AgentActivityState, AgentCommit, AgentCommitOutcome, AgentDurableState,
-    AgentSession, AgentSessionState, AgentStateRepository, AgentWakeId, PendingAgentInput,
-    RestoredAgentRuntime, RestoredSessionProjection, SessionId, SessionProjectionCommit,
-    TurnOutcomeKind,
+    AgentActivityState, AgentCommit, AgentCommitOutcome, AgentDurableState, AgentSession,
+    AgentSessionState, AgentStateRepository, PendingAgentInput, RestoredAgentRuntime,
+    RestoredSessionProjection, SessionId, SessionProjectionCommit, TurnOutcomeKind,
 };
 use sea_orm::{ConnectionTrait, DatabaseBackend, QueryResult, Statement, TransactionTrait};
 
@@ -40,20 +39,18 @@ impl AgentStateRepository for StudioAgentRepository {
         for row in states {
             let agent_id = text(&row, "agent_id")?;
             let snapshot = serde_json::from_str(&text(&row, "snapshot_json")?)?;
-            let sessions = self.restore_sessions(&agent_id).await?;
+            let session = self.restore_session(&agent_id).await?;
             let pending_inputs = self.restore_pending_inputs(&agent_id).await?;
             let active_input = self.restore_active_input(&agent_id).await?;
-            let accepted_wakes = self.restore_accepted_wakes(&agent_id).await?;
-            let session_projections = self.restore_session_projections(&agent_id).await?;
+            let session_projection = self.restore_session_projection(&agent_id).await?;
             restored.push(RestoredAgentRuntime {
                 state: AgentDurableState {
                     snapshot,
-                    sessions,
+                    session,
                     pending_inputs,
                     active_input,
-                    accepted_wakes,
                 },
-                session_projections,
+                session_projection,
             });
         }
         Ok(restored)
@@ -94,10 +91,9 @@ impl AgentStateRepository for StudioAgentRepository {
         .await
         .map_err(store_error)?;
 
-        replace_sessions(&tx, &agent_id, &commit.next_state).await?;
+        upsert_session(&tx, &agent_id, &commit.next_state).await?;
         replace_pending_inputs(&tx, &agent_id, &commit.next_state).await?;
         replace_active_input(&tx, &agent_id, &commit.next_state).await?;
-        replace_accepted_wakes(&tx, &agent_id, &commit.next_state).await?;
         upsert_turns(&tx, &agent_id, &commit.next_state).await?;
         for event in &commit.events {
             tx.execute(statement(
@@ -138,22 +134,19 @@ impl AgentStateRepository for StudioAgentRepository {
 }
 
 impl StudioAgentRepository {
-    async fn restore_sessions(
-        &self,
-        agent_id: &str,
-    ) -> Result<BTreeMap<SessionId, AgentSessionState>, PureError> {
+    async fn restore_session(&self, agent_id: &str) -> Result<AgentSessionState, PureError> {
         self.store
             .database()
-            .query_all(statement(
+            .query_one(statement(
                 "SELECT session_id, metadata_json, context_json, usage_json, last_context_tokens,
                         trace_sequence, session_event_sequence
-                 FROM agent_runtime_sessions WHERE agent_id = ? ORDER BY session_id",
+                 FROM agent_runtime_sessions WHERE agent_id = ?",
                 [agent_id.to_string().into()],
             ))
             .await
             .map_err(store_error)?
-            .into_iter()
-            .map(|row| {
+            .ok_or_else(|| store_error(format!("agent {agent_id} has no canonical session")))
+            .and_then(|row| {
                 let id = SessionId::new(text(&row, "session_id")?)?;
                 let items: Vec<ModelContextItem> =
                     serde_json::from_str(&text(&row, "context_json")?)?;
@@ -161,63 +154,57 @@ impl StudioAgentRepository {
                     .map(u64::try_from)
                     .transpose()
                     .map_err(|error| store_error(error.to_string()))?;
-                Ok((
-                    id.clone(),
-                    AgentSessionState {
-                        id,
-                        metadata: serde_json::from_str(&text(&row, "metadata_json")?)?,
-                        session: AgentSession::from_items(items),
-                        usage: serde_json::from_str(&text(&row, "usage_json")?)?,
-                        last_context_tokens,
-                        trace_sequence: integer_u64(&row, "trace_sequence")?,
-                        session_event_sequence: integer_u64(&row, "session_event_sequence")?,
-                    },
-                ))
+                Ok(AgentSessionState {
+                    id,
+                    metadata: serde_json::from_str(&text(&row, "metadata_json")?)?,
+                    session: AgentSession::from_items(items),
+                    usage: serde_json::from_str(&text(&row, "usage_json")?)?,
+                    last_context_tokens,
+                    trace_sequence: integer_u64(&row, "trace_sequence")?,
+                    session_event_sequence: integer_u64(&row, "session_event_sequence")?,
+                })
             })
-            .collect()
     }
 
-    async fn restore_session_projections(
+    async fn restore_session_projection(
         &self,
         agent_id: &str,
-    ) -> Result<Vec<RestoredSessionProjection>, PureError> {
-        let rows = self
+    ) -> Result<Option<RestoredSessionProjection>, PureError> {
+        let row = self
             .store
             .database()
-            .query_all(statement(
+            .query_one(statement(
                 "SELECT projection.session_id, projection.snapshot_json
                  FROM session_view_snapshots projection
                  INNER JOIN agent_runtime_sessions runtime_session
                    ON runtime_session.session_id = projection.session_id
-                 WHERE runtime_session.agent_id = ?
-                 ORDER BY projection.session_id",
+                 WHERE runtime_session.agent_id = ?",
                 [agent_id.to_string().into()],
             ))
             .await
             .map_err(store_error)?;
-        let mut projections = Vec::with_capacity(rows.len());
-        for row in rows {
-            let session_id = text(&row, "session_id")?;
-            let snapshot = serde_json::from_str(&text(&row, "snapshot_json")?)?;
-            let durable_events = self
-                .store
-                .database()
-                .query_all(statement(
-                    "SELECT event_json FROM session_event_journal
-                     WHERE session_id = ? ORDER BY sequence",
-                    [session_id.into()],
-                ))
-                .await
-                .map_err(store_error)?
-                .into_iter()
-                .map(|event| serde_json::from_str(&text(&event, "event_json")?).map_err(Into::into))
-                .collect::<Result<_, PureError>>()?;
-            projections.push(RestoredSessionProjection {
-                snapshot,
-                durable_events,
-            });
-        }
-        Ok(projections)
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let session_id = text(&row, "session_id")?;
+        let snapshot = serde_json::from_str(&text(&row, "snapshot_json")?)?;
+        let durable_events = self
+            .store
+            .database()
+            .query_all(statement(
+                "SELECT event_json FROM session_event_journal
+                 WHERE session_id = ? ORDER BY sequence",
+                [session_id.into()],
+            ))
+            .await
+            .map_err(store_error)?
+            .into_iter()
+            .map(|event| serde_json::from_str(&text(&event, "event_json")?).map_err(Into::into))
+            .collect::<Result<_, PureError>>()?;
+        Ok(Some(RestoredSessionProjection {
+            snapshot,
+            durable_events,
+        }))
     }
 
     async fn restore_pending_inputs(
@@ -252,28 +239,6 @@ impl StudioAgentRepository {
             .map_err(store_error)?
             .map(|row| serde_json::from_str(&text(&row, "input_json")?).map_err(Into::into))
             .transpose()
-    }
-
-    async fn restore_accepted_wakes(
-        &self,
-        agent_id: &str,
-    ) -> Result<BTreeMap<AgentWakeId, AcceptedAgentWake>, PureError> {
-        self.store
-            .database()
-            .query_all(statement(
-                "SELECT receipt_json FROM agent_wake_receipts
-                 WHERE agent_id = ? ORDER BY accepted_at, wake_id",
-                [agent_id.to_string().into()],
-            ))
-            .await
-            .map_err(store_error)?
-            .into_iter()
-            .map(|row| {
-                let receipt: AcceptedAgentWake =
-                    serde_json::from_str(&text(&row, "receipt_json")?)?;
-                Ok((receipt.wake_id.clone(), receipt))
-            })
-            .collect()
     }
 }
 
@@ -330,42 +295,44 @@ async fn persist_session_projection(
     Ok(())
 }
 
-async fn replace_sessions(
+async fn upsert_session(
     tx: &sea_orm::DatabaseTransaction,
     agent_id: &str,
     state: &AgentDurableState,
 ) -> Result<(), PureError> {
+    let session = &state.session;
     tx.execute(statement(
-        "DELETE FROM agent_runtime_sessions WHERE agent_id = ?",
-        [agent_id.to_string().into()],
+        "INSERT INTO agent_runtime_sessions
+         (agent_id, session_id, metadata_json, context_json, usage_json,
+          last_context_tokens, trace_sequence, session_event_sequence, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(agent_id) DO UPDATE SET
+           session_id = excluded.session_id,
+           metadata_json = excluded.metadata_json,
+           context_json = excluded.context_json,
+           usage_json = excluded.usage_json,
+           last_context_tokens = excluded.last_context_tokens,
+           trace_sequence = excluded.trace_sequence,
+           session_event_sequence = excluded.session_event_sequence,
+           updated_at = excluded.updated_at",
+        [
+            agent_id.to_string().into(),
+            session.id.to_string().into(),
+            serde_json::to_string(&session.metadata)?.into(),
+            serde_json::to_string(session.session.items())?.into(),
+            serde_json::to_string(&session.usage)?.into(),
+            session
+                .last_context_tokens
+                .map(i64_from_u64)
+                .transpose()?
+                .into(),
+            i64_from_u64(session.trace_sequence)?.into(),
+            i64_from_u64(session.session_event_sequence)?.into(),
+            state.snapshot.updated_at.into(),
+        ],
     ))
     .await
     .map_err(store_error)?;
-    for session in state.sessions.values() {
-        tx.execute(statement(
-            "INSERT INTO agent_runtime_sessions
-             (agent_id, session_id, metadata_json, context_json, usage_json,
-              last_context_tokens, trace_sequence, session_event_sequence, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            [
-                agent_id.to_string().into(),
-                session.id.to_string().into(),
-                serde_json::to_string(&session.metadata)?.into(),
-                serde_json::to_string(session.session.items())?.into(),
-                serde_json::to_string(&session.usage)?.into(),
-                session
-                    .last_context_tokens
-                    .map(i64_from_u64)
-                    .transpose()?
-                    .into(),
-                i64_from_u64(session.trace_sequence)?.into(),
-                i64_from_u64(session.session_event_sequence)?.into(),
-                state.snapshot.updated_at.into(),
-            ],
-        ))
-        .await
-        .map_err(store_error)?;
-    }
     Ok(())
 }
 
@@ -432,28 +399,6 @@ async fn replace_active_input(
     Ok(())
 }
 
-async fn replace_accepted_wakes(
-    tx: &sea_orm::DatabaseTransaction,
-    agent_id: &str,
-    state: &AgentDurableState,
-) -> Result<(), PureError> {
-    for receipt in state.accepted_wakes.values() {
-        tx.execute(statement(
-            "INSERT OR IGNORE INTO agent_wake_receipts
-             (agent_id, wake_id, receipt_json, accepted_at) VALUES (?, ?, ?, ?)",
-            [
-                agent_id.to_string().into(),
-                receipt.wake_id.to_string().into(),
-                serde_json::to_string(receipt)?.into(),
-                receipt.accepted_at.into(),
-            ],
-        ))
-        .await
-        .map_err(store_error)?;
-    }
-    Ok(())
-}
-
 async fn upsert_turns(
     tx: &sea_orm::DatabaseTransaction,
     agent_id: &str,
@@ -474,15 +419,12 @@ async fn upsert_turns(
         )
         .await?;
     }
-    if let (Some(turn_id), Some(session_id)) = (
-        state.snapshot.active_turn_id.as_ref(),
-        state.snapshot.active_session_id.as_ref(),
-    ) {
+    if let Some(turn_id) = state.snapshot.active_turn_id.as_ref() {
         upsert_turn(
             tx,
             agent_id,
             turn_id.as_str(),
-            session_id.as_str(),
+            state.session.id.as_str(),
             activity_label(state.snapshot.activity),
             None,
             &pl_model::TokenUsage::default(),
@@ -559,7 +501,7 @@ fn activity_label(activity: AgentActivityState) -> &'static str {
         AgentActivityState::Running => "running",
         AgentActivityState::WaitingTool => "waiting_tool",
         AgentActivityState::WaitingInteraction => "waiting_interaction",
-        AgentActivityState::WaitingAgents => "waiting_agents",
+        AgentActivityState::Cancelling => "cancelling",
     }
 }
 
@@ -604,72 +546,6 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn accepted_wake_receipt_is_restored_with_runtime_state() {
-        let store = StudioStore::open_memory().await.unwrap();
-        let repository = StudioAgentRepository::new(store);
-        let agent_id = pl_core::AgentId::new("agent-wake-receipt").unwrap();
-        let wake_id = AgentWakeId::new("wake-delivery-1").unwrap();
-        let turn_id = pl_core::TurnId::new("turn-delivery-1").unwrap();
-        let receipt = AcceptedAgentWake {
-            wake_id: wake_id.clone(),
-            turn_id: turn_id.clone(),
-            signal_ids: vec!["delivery:outcome-1".to_string()],
-            accepted_at: 10,
-        };
-        let state = AgentDurableState {
-            snapshot: pl_core::AgentSnapshot {
-                identity: pl_core::AgentIdentity {
-                    id: agent_id.clone(),
-                    parent_id: None,
-                    role: pl_core::AgentRoleId::new("planner").unwrap(),
-                    depth: 0,
-                },
-                wake_policy: pl_core::AgentWakePolicy::RuntimeTerminal,
-                lifecycle: pl_core::AgentLifecycleState::Active,
-                activity: AgentActivityState::Idle,
-                active_turn_id: None,
-                active_session_id: None,
-                pending_inputs: 0,
-                pending_trigger_inputs: 0,
-                mailbox_delivery_phase: pl_core::MailboxDeliveryPhase::CurrentTurn,
-                dispatch_generation: 0,
-                last_turn: None,
-                revision: 1,
-                event_sequence: 1,
-                updated_at: 10,
-            },
-            sessions: BTreeMap::new(),
-            pending_inputs: VecDeque::new(),
-            active_input: None,
-            accepted_wakes: BTreeMap::from([(wake_id.clone(), receipt.clone())]),
-        };
-
-        assert_eq!(
-            repository
-                .commit(AgentCommit {
-                    agent_id: agent_id.clone(),
-                    expected_revision: None,
-                    next_state: state,
-                    events: Vec::new(),
-                    trace_events: Vec::new(),
-                    session_projection: None,
-                    mutation: pl_core::AgentStateMutation::SnapshotAndQueue,
-                })
-                .await
-                .unwrap(),
-            AgentCommitOutcome::Applied
-        );
-        let restored = repository.restore_runtime().await.unwrap();
-
-        assert_eq!(restored.len(), 1);
-        assert_eq!(
-            restored[0].state.accepted_wakes.get(&wake_id),
-            Some(&receipt)
-        );
-        assert_eq!(restored[0].state.accepted_wakes[&wake_id].turn_id, turn_id);
-    }
-
-    #[tokio::test]
     async fn active_mailbox_input_is_restored_and_removed_with_runtime_state() {
         let store = StudioStore::open_memory().await.unwrap();
         let repository = StudioAgentRepository::new(store);
@@ -679,18 +555,14 @@ mod tests {
         let active_input = pl_core::DurableMailboxEnvelope {
             mail_id: "mail-active-1".to_string(),
             turn_id: turn_id.clone(),
-            wake_id: None,
-            wake_signal_ids: Vec::new(),
-            session_id,
+            session_id: session_id.clone(),
             message: "durable active input".to_string(),
             metadata: serde_json::json!({"source": "test"}),
             presentation: pl_core::MailboxPresentation::User,
-            trigger: pl_core::MailboxTurnTrigger::StartIfIdle,
             delivery_state: pl_core::MailboxDeliveryState::Consumed {
                 turn_id,
                 checkpoint_seq: 3,
             },
-            dispatch_generation: 7,
             queued_at: 10,
         };
         let state = AgentDurableState {
@@ -701,24 +573,19 @@ mod tests {
                     role: pl_core::AgentRoleId::new("executor").unwrap(),
                     depth: 0,
                 },
-                wake_policy: pl_core::AgentWakePolicy::RuntimeTerminal,
                 lifecycle: pl_core::AgentLifecycleState::Active,
                 activity: AgentActivityState::Running,
                 active_turn_id: Some(active_input.turn_id.clone()),
-                active_session_id: Some(active_input.session_id.clone()),
                 pending_inputs: 0,
-                pending_trigger_inputs: 0,
-                mailbox_delivery_phase: pl_core::MailboxDeliveryPhase::CurrentTurn,
-                dispatch_generation: 7,
+                progress: None,
                 last_turn: None,
                 revision: 1,
                 event_sequence: 0,
                 updated_at: 10,
             },
-            sessions: BTreeMap::new(),
+            session: AgentSessionState::empty(session_id),
             pending_inputs: VecDeque::new(),
             active_input: Some(active_input.clone()),
-            accepted_wakes: BTreeMap::new(),
         };
 
         assert_eq!(
@@ -766,7 +633,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn session_note_is_restored_and_removed_with_its_session() {
+    async fn canonical_session_note_is_restored() {
         let store = StudioStore::open_memory().await.unwrap();
         let repository = StudioAgentRepository::new(store.clone());
         let agent_id = pl_core::AgentId::new("agent-note").unwrap();
@@ -787,7 +654,7 @@ mod tests {
             trace_sequence: 0,
             session_event_sequence: 0,
         };
-        let mut state = AgentDurableState {
+        let state = AgentDurableState {
             snapshot: pl_core::AgentSnapshot {
                 identity: pl_core::AgentIdentity {
                     id: agent_id.clone(),
@@ -795,57 +662,31 @@ mod tests {
                     role: pl_core::AgentRoleId::new("executor").unwrap(),
                     depth: 0,
                 },
-                wake_policy: pl_core::AgentWakePolicy::RuntimeTerminal,
                 lifecycle: pl_core::AgentLifecycleState::Active,
                 activity: AgentActivityState::Idle,
                 active_turn_id: None,
-                active_session_id: None,
                 pending_inputs: 0,
-                pending_trigger_inputs: 0,
-                mailbox_delivery_phase: pl_core::MailboxDeliveryPhase::CurrentTurn,
-                dispatch_generation: 0,
+                progress: None,
                 last_turn: None,
                 revision: 1,
                 event_sequence: 0,
                 updated_at: 1,
             },
-            sessions: BTreeMap::from([(session_id.clone(), session_state)]),
+            session: session_state,
             pending_inputs: VecDeque::new(),
             active_input: None,
-            accepted_wakes: BTreeMap::new(),
         };
 
         let tx = store.database().begin().await.unwrap();
-        replace_sessions(&tx, agent_id.as_str(), &state)
+        upsert_session(&tx, agent_id.as_str(), &state)
             .await
             .unwrap();
         tx.commit().await.unwrap();
-        let restored = repository
-            .restore_sessions(agent_id.as_str())
-            .await
-            .unwrap();
+        let restored = repository.restore_session(agent_id.as_str()).await.unwrap();
         assert_eq!(
-            restored[&session_id]
-                .session
-                .session_note()
-                .unwrap()
-                .content,
+            restored.session.session_note().unwrap().content,
             "durable note"
         );
-
-        state.sessions.clear();
-        let tx = store.database().begin().await.unwrap();
-        replace_sessions(&tx, agent_id.as_str(), &state)
-            .await
-            .unwrap();
-        tx.commit().await.unwrap();
-
-        assert!(
-            repository
-                .restore_sessions(agent_id.as_str())
-                .await
-                .unwrap()
-                .is_empty()
-        );
+        assert_eq!(restored.id, session_id);
     }
 }

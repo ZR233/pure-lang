@@ -3,15 +3,16 @@ use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait,
 };
 
+use super::super::work_completion::{delivery_from_completion, work_completion_record};
 use super::{merge_record, parse_required_evidence};
 use crate::agent::worktree::same_worktree_path;
 use crate::studio::entities;
 use crate::studio::ids::unix_seconds;
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    AbortConflictMerge, AgentDelivery, AgentOutcomeStatus, CompleteConflictMerge,
-    ConflictVerificationEvidence, MergeRecord, MergeStatus, RecordConflictVerification,
-    TaskRunPhase, WorkUnitStatus,
+    AbortConflictMerge, AgentOutcomeStatus, CompleteConflictMerge, ConflictVerificationEvidence,
+    MergeRecord, MergeStatus, RecordConflictVerification, TaskRunPhase, WorkCompletionStatus,
+    WorkUnitStatus,
 };
 
 impl StudioStore {
@@ -40,10 +41,9 @@ impl StudioStore {
             {
                 bail!("task run no longer matches the conflict verification scope");
             }
-            let attempt = u32::try_from(merge.attempt)? + 1;
-            if attempt > 3 {
-                bail!("conflict resolution exceeded the three-attempt limit");
-            }
+            let attempt = u32::try_from(merge.attempt)?
+                .checked_add(1)
+                .context("conflict verification attempt overflow")?;
             let mut evidence = parse_required_evidence(merge.verification_json.as_deref())?;
             if evidence.conflict_manifest.is_none() {
                 bail!("conflicted merge has no durable manifest");
@@ -146,7 +146,6 @@ async fn complete_conflict_merge_transaction(
     if !verification.success
         || verification.index_tree.is_none()
         || verification.attempt != u32::try_from(merge.attempt)?
-        || verification.attempt > 3
     {
         bail!("conflict merge does not have a current successful verification");
     }
@@ -178,32 +177,38 @@ async fn complete_conflict_merge_transaction(
         .one(tx)
         .await?
         .context("merge outcome not found")?;
-    let delivery: AgentDelivery = serde_json::from_str(
-        outcome
-            .delivery_json
-            .as_deref()
-            .context("completed outcome delivery disappeared")?,
-    )?;
+    let completion = entities::work_completion::Entity::find_by_id(evidence.completion_id.clone())
+        .one(tx)
+        .await?
+        .context("merge completion not found")?;
     if work_unit.task_run_id != run.id
         || work_unit.agent_id.as_deref() != Some(merge.agent_id.as_str())
-        || work_unit.status != WorkUnitStatus::Delivered.as_str()
+        || work_unit.status != WorkUnitStatus::Merging.as_str()
         || outcome.task_run_id != run.id
         || outcome.work_unit_id.as_deref() != Some(work_unit.id.as_str())
         || outcome.agent_id != merge.agent_id
         || outcome.status != AgentOutcomeStatus::Completed.as_str()
-        || delivery.head_commit != merge.source_commit
+        || completion.task_run_id != run.id
+        || completion.work_unit_id != work_unit.id
+        || completion.executor_agent_id != merge.agent_id
+        || completion.revision != i32::try_from(evidence.completion_revision)?
+        || completion.status != WorkCompletionStatus::Approved.as_str()
         || evidence.delivery_head != merge.source_commit
+    {
+        bail!("approved executor completion changed before conflict merge acceptance");
+    }
+    let completion = work_completion_record(completion)?;
+    let delivery = delivery_from_completion(&completion)?;
+    if delivery.head_commit != merge.source_commit
         || !same_worktree_path(&delivery.worktree.path, &work_unit.worktree_path)
         || delivery.worktree.branch != work_unit.branch
         || delivery.base_commit != work_unit.base_commit
         || delivery.changed_files != evidence.changed_files
     {
-        bail!("delivered executor identity changed before conflict merge acceptance");
+        bail!("approved delivery payload changed before conflict merge acceptance");
     }
     let now = unix_seconds();
     evidence.merge_commit = Some(input.merge_commit.clone());
-    evidence.conflict_continuation_requested = false;
-    evidence.merge_completion_continuation_requested = false;
     let mut merge_active: entities::merge_record::ActiveModel = merge.into();
     merge_active.status = Set(MergeStatus::Merged.as_str().to_string());
     merge_active.resolution_summary = Set(Some(input.resolution_summary));

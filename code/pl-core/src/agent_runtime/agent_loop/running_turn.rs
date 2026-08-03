@@ -1,21 +1,253 @@
+use std::sync::Arc;
+use std::time::Duration;
+
 use pl_model::TokenUsage;
 use pl_protocol::SessionEventKind;
 use pl_trace::{AgentEvent, TraceEvent, TraceEventKind, TracePartKind};
+use tokio::sync::{mpsc, oneshot};
+use tokio::task::AbortHandle;
 use tokio_util::sync::CancellationToken;
 
-use super::host::AgentTurnFactory;
-use super::state::unix_timestamp;
-use super::{
-    AgentActivityState, AgentExecutionPolicy, AgentRuntimeHost, AgentTurnOutcome,
-    AgentTurnPreparationContext, SessionId, TurnFinalizationPolicy, TurnId, TurnOutcomeKind,
+use super::super::host::AgentTurnFactory;
+use super::super::state::{AgentRuntimeError, unix_timestamp};
+use super::super::{
+    AgentActivityState, AgentExecutionPolicy, AgentRuntimeEventKind, AgentRuntimeHost,
+    AgentRuntimeResult, AgentSessionCommitPolicy, AgentTurnCheckpointHandle,
+    AgentTurnMailboxHandle, AgentTurnOutcome, AgentTurnPreparationContext, MailboxDeliveryState,
+    SessionId, TurnFinalizationPolicy, TurnId, TurnOutcomeKind,
 };
+use super::{AgentLoop, AgentLoopCommand};
 use crate::session_event::{ObservedTurnEvent, observation_from_agent_event};
 use crate::{AgentSession, TraceRecorder, TurnResult, TurnResultStatus};
 
+pub(super) struct RunningTurn {
+    pub(super) turn_id: TurnId,
+    pub(super) session_id: SessionId,
+    pub(super) identity: std::sync::Arc<()>,
+    pub(super) start_revision: u64,
+    pub(super) cancellation: CancellationToken,
+    pub(super) abort_handle: AbortHandle,
+    pub(super) settled: oneshot::Receiver<()>,
+    pub(super) cancelling: bool,
+    pub(super) checkpoint_sequence: u64,
+    pub(super) steer_sender: mpsc::UnboundedSender<super::super::PendingAgentInput>,
+}
+
+impl<H> AgentLoop<H>
+where
+    H: AgentRuntimeHost,
+{
+    pub(super) async fn begin_next_turn(&mut self) {
+        if self.active.is_some()
+            || !self.dispatch_enabled
+            || self.state.snapshot.lifecycle != super::super::AgentLifecycleState::Active
+            || !self.state.has_triggering_input()
+        {
+            return;
+        }
+        if self
+            .state
+            .pending_inputs
+            .front()
+            .is_some_and(|input| input.session_id != self.state.session.id)
+        {
+            self.fault_in_memory(
+                AgentRuntimeError::SessionMismatch {
+                    agent_id: self.state.snapshot.identity.id.clone(),
+                    expected: self.state.session.id.clone(),
+                    actual: self.state.pending_inputs[0].session_id.clone(),
+                }
+                .to_string(),
+            );
+            return;
+        }
+        let mut next = self.state.clone();
+        let Some(mut input) = next.pending_inputs.pop_front() else {
+            return;
+        };
+        input.claim(input.turn_id.clone());
+        next.active_input = Some(input.clone());
+        next.refresh_mailbox_snapshot();
+        next.snapshot.activity = AgentActivityState::Running;
+        next.snapshot.active_turn_id = Some(input.turn_id.clone());
+        let committed = self
+            .commit_transition(next, Vec::new(), |snapshot| {
+                AgentRuntimeEventKind::TurnStarted {
+                    turn_id: input.turn_id.clone(),
+                    session_id: input.session_id.clone(),
+                    claimed_inputs: Vec::new(),
+                    snapshot,
+                }
+            })
+            .await;
+        if committed.is_err() {
+            return;
+        }
+
+        let cancellation = CancellationToken::new();
+        let (steer_sender, steer_receiver) = mpsc::unbounded_channel();
+        let mailbox = AgentTurnMailboxHandle::new(steer_receiver, Vec::new());
+        let session_id = self.state.session.id.clone();
+        let context = AgentTurnPreparationContext {
+            snapshot: self.state.snapshot.clone(),
+            turn_id: input.turn_id.clone(),
+            session_id: input.session_id.clone(),
+            input,
+            leading_inputs: Vec::new(),
+            session: self.state.session.session.clone(),
+            trace_sequence: self.state.session.trace_sequence,
+            runtime: self.runtime.clone(),
+            cancellation_token: cancellation.clone(),
+            mailbox,
+        };
+        let start_revision = self.state.snapshot.revision;
+        let identity = Arc::new(());
+        let initial_trace_sequence = context.trace_sequence;
+        let worker_host = self.host.clone();
+        let worker_cancellation = cancellation.clone();
+        let worker_identity = identity.clone();
+        let durable_trace_tx = self.trace_sender.clone();
+        let observation_tx = self.observation_sender.clone();
+        let worker = tokio::spawn(async move {
+            execute_turn(
+                worker_host,
+                context,
+                worker_identity,
+                worker_cancellation,
+                durable_trace_tx,
+                observation_tx,
+            )
+            .await
+        });
+        let abort_handle = worker.abort_handle();
+        let (settled_sender, settled) = oneshot::channel();
+        let completion_sender = self.sender.clone();
+        let completion_turn_id = self
+            .state
+            .snapshot
+            .active_turn_id
+            .clone()
+            .expect("started turn must have an id");
+        let completion_cancellation = cancellation.clone();
+        let completion_identity = identity.clone();
+        tokio::spawn(async move {
+            let completion = match worker.await {
+                Ok(completion) => completion,
+                Err(error) => TurnCompletion {
+                    turn_id: completion_turn_id,
+                    identity: completion_identity,
+                    start_revision,
+                    session: None,
+                    result: Err(format!("turn task join failed: {error}")),
+                    finalized_with_tool: None,
+                    cancelled: completion_cancellation.is_cancelled() || error.is_cancelled(),
+                    next_trace_sequence: initial_trace_sequence,
+                },
+            };
+            let _ = settled_sender.send(());
+            let _ = completion_sender
+                .send(AgentLoopCommand::TurnFinished(Box::new(completion)))
+                .await;
+        });
+        self.active = Some(RunningTurn {
+            turn_id: self
+                .state
+                .snapshot
+                .active_turn_id
+                .clone()
+                .expect("started turn must have an id"),
+            session_id,
+            identity,
+            start_revision,
+            cancellation,
+            abort_handle,
+            settled,
+            cancelling: false,
+            checkpoint_sequence: 0,
+            steer_sender,
+        });
+    }
+
+    pub(super) async fn interrupt_active_turn(&mut self, reason: &str) -> AgentRuntimeResult<()> {
+        let Some(active) = &mut self.active else {
+            return Err(AgentRuntimeError::NoActiveTurn(
+                self.state.snapshot.identity.id.clone(),
+            ));
+        };
+        if active.cancelling {
+            return Ok(());
+        }
+        active.cancelling = true;
+        active.cancellation.cancel();
+        let mut next = self.state.clone();
+        next.snapshot.activity = AgentActivityState::Cancelling;
+        self.commit_transition(next, Vec::new(), |snapshot| {
+            AgentRuntimeEventKind::StateChanged { snapshot }
+        })
+        .await?;
+
+        let active = self
+            .active
+            .as_mut()
+            .expect("running turn must remain while cancelling");
+        let grace = self.cancel_grace.min(Duration::from_secs(1));
+        if tokio::time::timeout(grace, &mut active.settled)
+            .await
+            .is_err()
+        {
+            active.abort_handle.abort();
+            let _ = (&mut active.settled).await;
+        }
+        self.flush_pending_traces().await?;
+        self.flush_pending_observations().await?;
+        let active = self
+            .active
+            .take()
+            .expect("running turn must remain until cancellation is committed");
+        let (outcome, _, _) = turn_outcome(
+            active.turn_id.clone(),
+            active.session_id,
+            Err(reason.to_string()),
+            true,
+        );
+        let mut next = self.state.clone();
+        for input in &mut next.pending_inputs {
+            if matches!(
+                &input.delivery_state,
+                MailboxDeliveryState::Claimed { turn_id, .. } if turn_id == &active.turn_id
+            ) {
+                input.delivery_state = MailboxDeliveryState::Pending;
+                input.turn_id = TurnId::generate();
+            }
+        }
+        next.active_input = None;
+        next.refresh_mailbox_snapshot();
+        next.snapshot.active_turn_id = None;
+        next.snapshot.last_turn = Some(outcome.clone());
+        next.snapshot.activity = if next.has_triggering_input() {
+            AgentActivityState::Queued
+        } else {
+            AgentActivityState::Idle
+        };
+        self.commit_transition(next, Vec::new(), |snapshot| {
+            AgentRuntimeEventKind::TurnFinished {
+                outcome,
+                snapshot,
+                finalized_with_tool: None,
+            }
+        })
+        .await?;
+        if self.dispatch_enabled && self.state.has_triggering_input() {
+            self.begin_next_turn().await;
+        }
+        Ok(())
+    }
+}
+
 pub(crate) struct TurnCompletion {
     pub(crate) turn_id: TurnId,
+    pub(crate) identity: std::sync::Arc<()>,
     pub(crate) start_revision: u64,
-    pub(crate) dispatch_generation: u64,
     /// worker 正常返回时携带更新后的 session；任务被 abort 时必须保留 actor 中的原 session。
     pub(crate) session: Option<AgentSession>,
     pub(crate) result: std::result::Result<TurnResult, String>,
@@ -27,6 +259,7 @@ pub(crate) struct TurnCompletion {
 pub(crate) async fn execute_turn<H>(
     host: H,
     mut context: AgentTurnPreparationContext,
+    identity: std::sync::Arc<()>,
     cancellation: CancellationToken,
     durable_trace_tx: tokio::sync::mpsc::UnboundedSender<TraceEvent>,
     observation_tx: tokio::sync::mpsc::UnboundedSender<ObservedTurnEvent>,
@@ -35,19 +268,17 @@ where
     H: AgentRuntimeHost,
 {
     let leading_inputs = context.leading_inputs.clone();
-    let wake_context = context.wake_context.clone();
     for input in &leading_inputs {
         context.session.push_user_prompt(input.message.clone());
     }
     let turn_id = context.turn_id.clone();
     let start_revision = context.snapshot.revision;
-    let dispatch_generation = context.snapshot.dispatch_generation;
     let framework_session_id = context.session_id.clone();
     let trace_session_id = context.session_id.to_string();
     let initial_trace_sequence = context.trace_sequence;
     let activity_runtime = context.runtime.clone();
     let activity_agent_id = context.snapshot.identity.id.clone();
-    let checkpoint = super::AgentTurnCheckpointHandle::new(
+    let checkpoint = AgentTurnCheckpointHandle::new(
         context.runtime.clone(),
         context.snapshot.identity.id.clone(),
         context.turn_id.clone(),
@@ -60,10 +291,7 @@ where
         .prepare_turn(context)
         .await
     {
-        Ok(mut prepared) => {
-            if let Some(wake_context) = wake_context.as_ref() {
-                prepared.policy.constrain_for_agent_wake(wake_context);
-            }
+        Ok(prepared) => {
             let prepared =
                 prepared.with_runtime_context(&turn_id, cancellation.clone(), checkpoint, mailbox);
             for section in &prepared.pinned_context {
@@ -164,7 +392,7 @@ where
         }
         Err(error) => (
             Err(error.to_string()),
-            super::AgentSessionCommitPolicy::Persist,
+            AgentSessionCommitPolicy::Persist,
             None,
         ),
     };
@@ -176,11 +404,11 @@ where
         .unwrap_or(initial_trace_sequence);
     TurnCompletion {
         turn_id,
+        identity,
         start_revision,
-        dispatch_generation,
         session: match session_commit {
-            super::AgentSessionCommitPolicy::Persist => Some(session),
-            super::AgentSessionCommitPolicy::DiscardTurn => None,
+            AgentSessionCommitPolicy::Persist => Some(session),
+            AgentSessionCommitPolicy::DiscardTurn => None,
         },
         result,
         finalized_with_tool,
@@ -320,25 +548,34 @@ fn enforce_finalization(
     let TurnFinalizationPolicy::RequiredTool { name } = &policy.finalization else {
         return None;
     };
-    if result.trace_events.iter().any(|event| {
-        matches!(
-            &event.kind,
+    let latest_tool = result
+        .trace_events
+        .iter()
+        .rev()
+        .find_map(|event| match &event.kind {
             TraceEventKind::TracePartCompleted { item }
-                if item.tool.as_ref().is_some_and(|tool| tool.name == *name)
-        )
-    }) {
+                if item.tool.as_ref().is_some_and(|tool| tool.name == *name) =>
+            {
+                Some(Ok(()))
+            }
+            TraceEventKind::TracePartFailed { item, error }
+                if item.tool.as_ref().is_some_and(|tool| tool.name == *name) =>
+            {
+                Some(Err(error.clone()))
+            }
+            TraceEventKind::TracePartStarted { .. }
+            | TraceEventKind::TracePartDelta { .. }
+            | TraceEventKind::TracePartCompleted { .. }
+            | TraceEventKind::TracePartFailed { .. }
+            | TraceEventKind::PlanLifecycleChanged { .. }
+            | TraceEventKind::InteractionChanged { .. }
+            | TraceEventKind::SkillActivated { .. }
+            | TraceEventKind::EnabledToolsRecorded { .. } => None,
+        });
+    if matches!(latest_tool, Some(Ok(()))) {
         return Some(name.clone());
     }
-    let failed_tool = result.trace_events.iter().rev().find_map(|event| {
-        let TraceEventKind::TracePartFailed { item, error } = &event.kind else {
-            return None;
-        };
-        item.tool
-            .as_ref()
-            .is_some_and(|tool| tool.name == *name)
-            .then_some(error.clone())
-    });
-    let (category, message) = failed_tool.map_or_else(
+    let (category, message) = latest_tool.and_then(Result::err).map_or_else(
         || {
             (
                 pl_protocol::TurnFailureCategory::Validation,
@@ -362,14 +599,15 @@ mod tests {
     #[test]
     fn required_tool_finalization_accepts_completed_tool() {
         let mut result = Ok(completed_result(vec![tool_event(
-            "submit_delivery",
+            "report_completion",
             ToolTraceOutcome::Completed,
         )]));
 
-        let finalized = enforce_finalization(&mut result, &required_tool_policy("submit_delivery"));
+        let finalized =
+            enforce_finalization(&mut result, &required_tool_policy("report_completion"));
 
         let result = result.unwrap();
-        assert_eq!(finalized.as_deref(), Some("submit_delivery"));
+        assert_eq!(finalized.as_deref(), Some("report_completion"));
         assert_eq!(result.status, TurnResultStatus::Completed);
         assert_eq!(result.error, None);
         assert_eq!(result.failure, None);
@@ -378,18 +616,19 @@ mod tests {
     #[test]
     fn required_tool_finalization_preserves_matching_tool_failure() {
         let mut result = Ok(completed_result(vec![tool_event(
-            "submit_delivery",
-            ToolTraceOutcome::Failed("delivery scope is not accepting a delivery"),
+            "report_completion",
+            ToolTraceOutcome::Failed("completion scope is not ready for review"),
         )]));
 
-        let finalized = enforce_finalization(&mut result, &required_tool_policy("submit_delivery"));
+        let finalized =
+            enforce_finalization(&mut result, &required_tool_policy("report_completion"));
 
         let result = result.unwrap();
         assert_eq!(finalized, None);
         assert_eq!(result.status, TurnResultStatus::Errored);
         assert_eq!(
             result.error.as_deref(),
-            Some("delivery scope is not accepting a delivery")
+            Some("completion scope is not ready for review")
         );
         assert_eq!(
             result.failure.as_ref().map(|failure| failure.category),
@@ -401,21 +640,22 @@ mod tests {
     fn required_tool_finalization_uses_latest_matching_failure() {
         let mut result = Ok(completed_result(vec![
             tool_event(
-                "submit_delivery",
-                ToolTraceOutcome::Failed("first delivery failure"),
+                "report_completion",
+                ToolTraceOutcome::Failed("first completion failure"),
             ),
             tool_event(
-                "submit_delivery",
-                ToolTraceOutcome::Failed("latest delivery failure"),
+                "report_completion",
+                ToolTraceOutcome::Failed("latest completion failure"),
             ),
         ]));
 
-        let finalized = enforce_finalization(&mut result, &required_tool_policy("submit_delivery"));
+        let finalized =
+            enforce_finalization(&mut result, &required_tool_policy("report_completion"));
 
         assert_eq!(finalized, None);
         assert_eq!(
             result.unwrap().error.as_deref(),
-            Some("latest delivery failure")
+            Some("latest completion failure")
         );
     }
 
@@ -426,13 +666,14 @@ mod tests {
             ToolTraceOutcome::Failed("exec failed"),
         )]));
 
-        let finalized = enforce_finalization(&mut result, &required_tool_policy("submit_delivery"));
+        let finalized =
+            enforce_finalization(&mut result, &required_tool_policy("report_completion"));
 
         let result = result.unwrap();
         assert_eq!(finalized, None);
         assert_eq!(
             result.error.as_deref(),
-            Some("turn must finalize with tool `submit_delivery`")
+            Some("turn must finalize with tool `report_completion`")
         );
         assert_eq!(
             result.failure.as_ref().map(|failure| failure.category),
@@ -444,16 +685,40 @@ mod tests {
     fn required_tool_finalization_accepts_success_after_failure() {
         let mut result = Ok(completed_result(vec![
             tool_event(
-                "submit_delivery",
+                "report_completion",
                 ToolTraceOutcome::Failed("transient failure"),
             ),
-            tool_event("submit_delivery", ToolTraceOutcome::Completed),
+            tool_event("report_completion", ToolTraceOutcome::Completed),
         ]));
 
-        let finalized = enforce_finalization(&mut result, &required_tool_policy("submit_delivery"));
+        let finalized =
+            enforce_finalization(&mut result, &required_tool_policy("report_completion"));
 
-        assert_eq!(finalized.as_deref(), Some("submit_delivery"));
+        assert_eq!(finalized.as_deref(), Some("report_completion"));
         assert_eq!(result.unwrap().status, TurnResultStatus::Completed);
+    }
+
+    #[test]
+    fn required_tool_finalization_rejects_failure_after_success() {
+        let mut result = Ok(completed_result(vec![
+            tool_event("report_completion", ToolTraceOutcome::Completed),
+            tool_event(
+                "report_completion",
+                ToolTraceOutcome::Failed("latest completion failure"),
+            ),
+        ]));
+
+        let finalized =
+            enforce_finalization(&mut result, &required_tool_policy("report_completion"));
+
+        assert_eq!(finalized, None);
+        let result = result.unwrap();
+        assert_eq!(result.status, TurnResultStatus::Errored);
+        assert_eq!(result.error.as_deref(), Some("latest completion failure"));
+        assert_eq!(
+            result.failure.as_ref().map(|failure| failure.category),
+            Some(TurnFailureCategory::Tool)
+        );
     }
 
     enum ToolTraceOutcome {

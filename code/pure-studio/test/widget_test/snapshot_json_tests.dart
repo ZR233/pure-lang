@@ -214,15 +214,27 @@ void registerSnapshotJsonTests() {
             taskGeneration: BigInt.zero,
             workUnits: [],
             agents: [],
+            completions: [],
             merges: [],
             reviews: [
               frb.BridgeTaskReviewDto(
+                id: 'review-1',
                 round: 1,
-                headCommit: 'abcdef123456',
+                scope: 'integrated',
+                reviewedHead: 'abcdef123456',
                 verdict: 'pass',
+                requestedByCallId: 'call-review-1',
                 reviewerAgentId: 'reviewer-1',
                 summary: 'Passed',
-                designReferences: ['design/16-task-orchestration.md#UI'],
+                designReferences: const [
+                  frb.BridgeTaskDesignReferenceDto(
+                    path: 'design/16-task-orchestration.md',
+                    section: 'UI',
+                  ),
+                ],
+                findings: const [],
+                createdAt: 1,
+                updatedAt: 1,
               ),
             ],
           ),
@@ -233,8 +245,9 @@ void registerSnapshotJsonTests() {
     final payload = event.payload as SessionTaskChangedPayload;
     expect(payload.task?.phase, 'reviewing');
     expect(payload.task?.branch, 'codex/task');
-    expect(payload.task?.reviews.single.designReferences, [
-      'design/16-task-orchestration.md#UI',
-    ]);
+    expect(
+      payload.task?.reviews.single.designReferences.single.path,
+      'design/16-task-orchestration.md',
+    );
   });
 }

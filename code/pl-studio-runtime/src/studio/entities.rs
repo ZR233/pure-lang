@@ -136,11 +136,6 @@ pub mod agent_outcome {
         pub attempt: i32,
         pub summary: Option<String>,
         pub error: Option<String>,
-        pub delivery_json: Option<String>,
-        pub review_json: Option<String>,
-        pub completion_contract_json: Option<String>,
-        pub delivery_recovery_count: i32,
-        pub terminal_observed: i32,
         pub created_at: i64,
         pub updated_at: i64,
     }
@@ -188,12 +183,47 @@ pub mod review_round {
         pub id: String,
         pub task_run_id: String,
         pub round: i32,
-        pub head_commit: String,
+        pub scope: String,
+        pub work_unit_id: Option<String>,
+        pub completion_id: Option<String>,
+        pub completion_revision: Option<i32>,
+        pub reviewed_head: String,
         pub status: String,
+        pub requested_by_call_id: String,
         pub reviewer_agent_id: Option<String>,
         pub summary: Option<String>,
         pub design_references_json: String,
         pub findings_json: String,
+        pub created_at: i64,
+        pub updated_at: i64,
+    }
+
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+pub mod work_completion {
+    use super::*;
+
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
+    #[sea_orm(table_name = "work_completions")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: String,
+        pub task_run_id: String,
+        pub work_unit_id: String,
+        pub executor_agent_id: String,
+        pub revision: i32,
+        pub kind: String,
+        pub status: String,
+        pub base_commit: String,
+        pub head_commit: Option<String>,
+        pub changed_files_json: String,
+        pub verification_summary: String,
+        pub worktree_path: String,
+        pub branch: String,
         pub created_at: i64,
         pub updated_at: i64,
     }

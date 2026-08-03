@@ -1,10 +1,10 @@
-use super::super::execution::{TurnCompletion, add_usage, turn_outcome};
 use super::super::{AgentActivityState, AgentRuntimeEventKind, AgentRuntimeHost};
-use super::AgentActor;
+use super::AgentLoop;
+use super::running_turn::{TurnCompletion, add_usage, turn_outcome};
 use crate::agent_runtime::state::unix_timestamp;
 use crate::session_event::compaction_observation;
 
-impl<H> AgentActor<H>
+impl<H> AgentLoop<H>
 where
     H: AgentRuntimeHost,
 {
@@ -14,7 +14,7 @@ where
         };
         if active.turn_id != completion.turn_id
             || active.start_revision != completion.start_revision
-            || active.dispatch_generation != completion.dispatch_generation
+            || !std::sync::Arc::ptr_eq(&active.identity, &completion.identity)
         {
             return;
         }
@@ -44,7 +44,7 @@ where
             .active
             .take()
             .expect("validated active turn must still be present");
-        let cancelled = active.cancellation_requested || completion.cancelled;
+        let cancelled = active.cancelling || completion.cancelled;
         let finalized_with_tool = completion.finalized_with_tool;
         let (outcome, _, result) = turn_outcome(
             active.turn_id.clone(),
@@ -56,18 +56,18 @@ where
             .then_some(finalized_with_tool)
             .flatten();
         let mut next = self.state.clone();
-        if let Some(session) = next.sessions.get_mut(&active.session_id) {
-            session.trace_sequence = session.trace_sequence.max(completion.next_trace_sequence);
-            if let Some(completed_session) = completion.session {
-                session.session = completed_session;
-            }
-            if let Some(result) = &result {
-                add_usage(&mut session.usage, &result.usage);
-                session.last_context_tokens = result.last_context_tokens;
-            }
+        next.session.trace_sequence = next
+            .session
+            .trace_sequence
+            .max(completion.next_trace_sequence);
+        if let Some(completed_session) = completion.session {
+            next.session.session = completed_session;
+        }
+        if let Some(result) = &result {
+            add_usage(&mut next.session.usage, &result.usage);
+            next.session.last_context_tokens = result.last_context_tokens;
         }
         next.snapshot.active_turn_id = None;
-        next.snapshot.active_session_id = None;
         for input in &mut next.pending_inputs {
             if !matches!(
                 &input.delivery_state,
@@ -84,7 +84,6 @@ where
         next.active_input = None;
         next.refresh_mailbox_snapshot();
         next.snapshot.last_turn = Some(outcome.clone());
-        next.snapshot.mailbox_delivery_phase = super::super::MailboxDeliveryPhase::NextTurn;
         next.snapshot.activity = if next.has_triggering_input() {
             AgentActivityState::Queued
         } else {

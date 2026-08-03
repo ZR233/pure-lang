@@ -2,6 +2,7 @@ use super::*;
 use crate::studio::task_coordinator::TaskRunPhase;
 use pl_protocol::SessionTurnState;
 use pretty_assertions::assert_eq;
+use sea_orm::ConnectionTrait;
 
 #[tokio::test]
 async fn active_task_locks_session_mode_and_projects_coordinator_runtime() {
@@ -128,6 +129,144 @@ async fn ui_submit_and_stop_are_core_runtime_apis() {
     handle.await.unwrap();
     let _ = tokio::fs::remove_dir_all(home).await;
     let _ = tokio::fs::remove_dir_all(workspace).await;
+}
+
+#[tokio::test]
+async fn paused_task_resume_submits_one_hidden_durable_input() {
+    let (base_url, server, accepted_rx, release_tx) = serve_delayed_sse().await;
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let home = std::env::temp_dir().join(format!("pure-task-resume-home-{unique}"));
+    let workspace = std::env::temp_dir().join(format!("pure-task-resume-workspace-{unique}"));
+    std::fs::create_dir_all(&workspace).unwrap();
+    for arguments in [
+        vec!["init", "-b", "main"],
+        vec!["config", "user.email", "pure@example.com"],
+        vec!["config", "user.name", "Pure Tests"],
+    ] {
+        assert!(
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(&workspace)
+                .args(arguments)
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+    std::fs::write(workspace.join("README.md"), "task resume\n").unwrap();
+    for arguments in [vec!["add", "README.md"], vec!["commit", "-m", "init"]] {
+        assert!(
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(&workspace)
+                .args(arguments)
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+
+    let config_store = ConfigStore::new(crate::config::ConfigPaths::from_home(&home));
+    config_store.save(&test_config(base_url)).unwrap();
+    let store = StudioStore::open_memory().await.unwrap();
+    let runtime = StudioRuntime::new(store.clone(), config_store);
+    let project = runtime.open_project(&workspace).await.unwrap();
+    let session = store
+        .create_session(&project.id, "Paused Task", StudioMode::Task)
+        .await
+        .unwrap();
+    let run = runtime
+        .task_coordinator
+        .start_confirmed_task(&session.id, "resume canonical task", &workspace)
+        .await
+        .unwrap();
+    store
+        .update_agent_session_status(
+            &session.id,
+            "interrupted",
+            None,
+            None,
+            crate::studio::ids::unix_seconds(),
+        )
+        .await
+        .unwrap();
+
+    let resumed = runtime.resume_task(session.id.clone()).await.unwrap();
+    assert_eq!(resumed.session_id, session.id);
+    tokio::time::timeout(TEST_RUNTIME_TIMEOUT, accepted_rx)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let owner = crate::studio::agent_host::root_agent_id(&session.id);
+    let input = store
+        .database()
+        .query_one(sea_orm::Statement::from_sql_and_values(
+            sea_orm::DatabaseBackend::Sqlite,
+            "SELECT input_json FROM agent_active_inputs WHERE agent_id = ?",
+            [owner.to_string().into()],
+        ))
+        .await
+        .unwrap()
+        .unwrap();
+    let input_json = input.try_get::<String>("", "input_json").unwrap();
+    let input: serde_json::Value = serde_json::from_str(&input_json).unwrap();
+    assert!(
+        input["mailId"]
+            .as_str()
+            .unwrap()
+            .starts_with(&format!("task-resume:{}:", run.id))
+    );
+    assert_eq!(input["presentation"]["type"], "hidden");
+    assert_eq!(input["metadata"]["kind"], "taskResume");
+    assert_eq!(input["metadata"]["taskRunId"], run.id);
+    assert!(
+        input["message"]
+            .as_str()
+            .unwrap()
+            .contains("Read task_status and list_agents")
+    );
+    assert!(
+        runtime
+            .session_event_snapshot(&session.id)
+            .await
+            .unwrap()
+            .messages
+            .iter()
+            .all(|message| message.role != crate::SessionMessageRole::User)
+    );
+    runtime
+        .resume_task(session.id.clone())
+        .await
+        .expect_err("a running or no-longer-paused Planner must reject duplicate resume");
+    let active_input_count = store
+        .database()
+        .query_one(sea_orm::Statement::from_sql_and_values(
+            sea_orm::DatabaseBackend::Sqlite,
+            "SELECT COUNT(*) AS count FROM agent_active_inputs WHERE agent_id = ?",
+            [owner.to_string().into()],
+        ))
+        .await
+        .unwrap()
+        .unwrap()
+        .try_get::<i64>("", "count")
+        .unwrap();
+    assert_eq!(active_input_count, 1);
+
+    let _ = release_tx.send(());
+    wait_for_no_active_turn(&runtime).await;
+    server.await.unwrap();
+    runtime
+        .task_coordinator
+        .finish_task(&run.id, TaskRunPhase::Cancelled, None)
+        .await
+        .unwrap();
+    runtime.shutdown().await;
+    let _ = std::fs::remove_dir_all(home);
+    let _ = std::fs::remove_dir_all(workspace);
 }
 
 #[tokio::test]

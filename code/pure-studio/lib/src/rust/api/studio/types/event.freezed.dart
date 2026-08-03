@@ -55,14 +55,15 @@ extension BridgeProductEventPayloadPatterns on BridgeProductEventPayload {
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( BridgeProductEventPayload_SessionListChanged value)?  sessionListChanged,TResult Function( BridgeProductEventPayload_McpHealthChanged value)?  mcpHealthChanged,TResult Function( BridgeProductEventPayload_LspHealthChanged value)?  lspHealthChanged,TResult Function( BridgeProductEventPayload_SessionTaskChanged value)?  sessionTaskChanged,TResult Function( BridgeProductEventPayload_Stale value)?  stale,required TResult orElse(),}){
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( BridgeProductEventPayload_SessionListChanged value)?  sessionListChanged,TResult Function( BridgeProductEventPayload_McpHealthChanged value)?  mcpHealthChanged,TResult Function( BridgeProductEventPayload_LspHealthChanged value)?  lspHealthChanged,TResult Function( BridgeProductEventPayload_SessionTaskChanged value)?  sessionTaskChanged,TResult Function( BridgeProductEventPayload_AgentDirectoryChanged value)?  agentDirectoryChanged,TResult Function( BridgeProductEventPayload_Stale value)?  stale,required TResult orElse(),}){
 final _that = this;
 switch (_that) {
 case BridgeProductEventPayload_SessionListChanged() when sessionListChanged != null:
 return sessionListChanged(_that);case BridgeProductEventPayload_McpHealthChanged() when mcpHealthChanged != null:
 return mcpHealthChanged(_that);case BridgeProductEventPayload_LspHealthChanged() when lspHealthChanged != null:
 return lspHealthChanged(_that);case BridgeProductEventPayload_SessionTaskChanged() when sessionTaskChanged != null:
-return sessionTaskChanged(_that);case BridgeProductEventPayload_Stale() when stale != null:
+return sessionTaskChanged(_that);case BridgeProductEventPayload_AgentDirectoryChanged() when agentDirectoryChanged != null:
+return agentDirectoryChanged(_that);case BridgeProductEventPayload_Stale() when stale != null:
 return stale(_that);case _:
   return orElse();
 
@@ -81,14 +82,15 @@ return stale(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( BridgeProductEventPayload_SessionListChanged value)  sessionListChanged,required TResult Function( BridgeProductEventPayload_McpHealthChanged value)  mcpHealthChanged,required TResult Function( BridgeProductEventPayload_LspHealthChanged value)  lspHealthChanged,required TResult Function( BridgeProductEventPayload_SessionTaskChanged value)  sessionTaskChanged,required TResult Function( BridgeProductEventPayload_Stale value)  stale,}){
+@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( BridgeProductEventPayload_SessionListChanged value)  sessionListChanged,required TResult Function( BridgeProductEventPayload_McpHealthChanged value)  mcpHealthChanged,required TResult Function( BridgeProductEventPayload_LspHealthChanged value)  lspHealthChanged,required TResult Function( BridgeProductEventPayload_SessionTaskChanged value)  sessionTaskChanged,required TResult Function( BridgeProductEventPayload_AgentDirectoryChanged value)  agentDirectoryChanged,required TResult Function( BridgeProductEventPayload_Stale value)  stale,}){
 final _that = this;
 switch (_that) {
 case BridgeProductEventPayload_SessionListChanged():
 return sessionListChanged(_that);case BridgeProductEventPayload_McpHealthChanged():
 return mcpHealthChanged(_that);case BridgeProductEventPayload_LspHealthChanged():
 return lspHealthChanged(_that);case BridgeProductEventPayload_SessionTaskChanged():
-return sessionTaskChanged(_that);case BridgeProductEventPayload_Stale():
+return sessionTaskChanged(_that);case BridgeProductEventPayload_AgentDirectoryChanged():
+return agentDirectoryChanged(_that);case BridgeProductEventPayload_Stale():
 return stale(_that);}
 }
 /// A variant of `map` that fallback to returning `null`.
@@ -103,14 +105,15 @@ return stale(_that);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( BridgeProductEventPayload_SessionListChanged value)?  sessionListChanged,TResult? Function( BridgeProductEventPayload_McpHealthChanged value)?  mcpHealthChanged,TResult? Function( BridgeProductEventPayload_LspHealthChanged value)?  lspHealthChanged,TResult? Function( BridgeProductEventPayload_SessionTaskChanged value)?  sessionTaskChanged,TResult? Function( BridgeProductEventPayload_Stale value)?  stale,}){
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( BridgeProductEventPayload_SessionListChanged value)?  sessionListChanged,TResult? Function( BridgeProductEventPayload_McpHealthChanged value)?  mcpHealthChanged,TResult? Function( BridgeProductEventPayload_LspHealthChanged value)?  lspHealthChanged,TResult? Function( BridgeProductEventPayload_SessionTaskChanged value)?  sessionTaskChanged,TResult? Function( BridgeProductEventPayload_AgentDirectoryChanged value)?  agentDirectoryChanged,TResult? Function( BridgeProductEventPayload_Stale value)?  stale,}){
 final _that = this;
 switch (_that) {
 case BridgeProductEventPayload_SessionListChanged() when sessionListChanged != null:
 return sessionListChanged(_that);case BridgeProductEventPayload_McpHealthChanged() when mcpHealthChanged != null:
 return mcpHealthChanged(_that);case BridgeProductEventPayload_LspHealthChanged() when lspHealthChanged != null:
 return lspHealthChanged(_that);case BridgeProductEventPayload_SessionTaskChanged() when sessionTaskChanged != null:
-return sessionTaskChanged(_that);case BridgeProductEventPayload_Stale() when stale != null:
+return sessionTaskChanged(_that);case BridgeProductEventPayload_AgentDirectoryChanged() when agentDirectoryChanged != null:
+return agentDirectoryChanged(_that);case BridgeProductEventPayload_Stale() when stale != null:
 return stale(_that);case _:
   return null;
 
@@ -128,13 +131,14 @@ return stale(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( String projectId,  List<SessionDto> sessions)?  sessionListChanged,TResult Function( BridgeMcpHealthDto health)?  mcpHealthChanged,TResult Function( BridgeLspHealthDto health)?  lspHealthChanged,TResult Function( String sessionId,  BridgeTaskRuntimeDto? task)?  sessionTaskChanged,TResult Function( BigInt laggedEvents)?  stale,required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( String projectId,  List<SessionDto> sessions)?  sessionListChanged,TResult Function( BridgeMcpHealthDto health)?  mcpHealthChanged,TResult Function( BridgeLspHealthDto health)?  lspHealthChanged,TResult Function( String sessionId,  BridgeTaskRuntimeDto? task)?  sessionTaskChanged,TResult Function( String rootSessionId,  BridgeAgentDirectoryEntryDto agent)?  agentDirectoryChanged,TResult Function( BigInt laggedEvents)?  stale,required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case BridgeProductEventPayload_SessionListChanged() when sessionListChanged != null:
 return sessionListChanged(_that.projectId,_that.sessions);case BridgeProductEventPayload_McpHealthChanged() when mcpHealthChanged != null:
 return mcpHealthChanged(_that.health);case BridgeProductEventPayload_LspHealthChanged() when lspHealthChanged != null:
 return lspHealthChanged(_that.health);case BridgeProductEventPayload_SessionTaskChanged() when sessionTaskChanged != null:
-return sessionTaskChanged(_that.sessionId,_that.task);case BridgeProductEventPayload_Stale() when stale != null:
+return sessionTaskChanged(_that.sessionId,_that.task);case BridgeProductEventPayload_AgentDirectoryChanged() when agentDirectoryChanged != null:
+return agentDirectoryChanged(_that.rootSessionId,_that.agent);case BridgeProductEventPayload_Stale() when stale != null:
 return stale(_that.laggedEvents);case _:
   return orElse();
 
@@ -153,13 +157,14 @@ return stale(_that.laggedEvents);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( String projectId,  List<SessionDto> sessions)  sessionListChanged,required TResult Function( BridgeMcpHealthDto health)  mcpHealthChanged,required TResult Function( BridgeLspHealthDto health)  lspHealthChanged,required TResult Function( String sessionId,  BridgeTaskRuntimeDto? task)  sessionTaskChanged,required TResult Function( BigInt laggedEvents)  stale,}) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( String projectId,  List<SessionDto> sessions)  sessionListChanged,required TResult Function( BridgeMcpHealthDto health)  mcpHealthChanged,required TResult Function( BridgeLspHealthDto health)  lspHealthChanged,required TResult Function( String sessionId,  BridgeTaskRuntimeDto? task)  sessionTaskChanged,required TResult Function( String rootSessionId,  BridgeAgentDirectoryEntryDto agent)  agentDirectoryChanged,required TResult Function( BigInt laggedEvents)  stale,}) {final _that = this;
 switch (_that) {
 case BridgeProductEventPayload_SessionListChanged():
 return sessionListChanged(_that.projectId,_that.sessions);case BridgeProductEventPayload_McpHealthChanged():
 return mcpHealthChanged(_that.health);case BridgeProductEventPayload_LspHealthChanged():
 return lspHealthChanged(_that.health);case BridgeProductEventPayload_SessionTaskChanged():
-return sessionTaskChanged(_that.sessionId,_that.task);case BridgeProductEventPayload_Stale():
+return sessionTaskChanged(_that.sessionId,_that.task);case BridgeProductEventPayload_AgentDirectoryChanged():
+return agentDirectoryChanged(_that.rootSessionId,_that.agent);case BridgeProductEventPayload_Stale():
 return stale(_that.laggedEvents);}
 }
 /// A variant of `when` that fallback to returning `null`
@@ -174,13 +179,14 @@ return stale(_that.laggedEvents);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( String projectId,  List<SessionDto> sessions)?  sessionListChanged,TResult? Function( BridgeMcpHealthDto health)?  mcpHealthChanged,TResult? Function( BridgeLspHealthDto health)?  lspHealthChanged,TResult? Function( String sessionId,  BridgeTaskRuntimeDto? task)?  sessionTaskChanged,TResult? Function( BigInt laggedEvents)?  stale,}) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( String projectId,  List<SessionDto> sessions)?  sessionListChanged,TResult? Function( BridgeMcpHealthDto health)?  mcpHealthChanged,TResult? Function( BridgeLspHealthDto health)?  lspHealthChanged,TResult? Function( String sessionId,  BridgeTaskRuntimeDto? task)?  sessionTaskChanged,TResult? Function( String rootSessionId,  BridgeAgentDirectoryEntryDto agent)?  agentDirectoryChanged,TResult? Function( BigInt laggedEvents)?  stale,}) {final _that = this;
 switch (_that) {
 case BridgeProductEventPayload_SessionListChanged() when sessionListChanged != null:
 return sessionListChanged(_that.projectId,_that.sessions);case BridgeProductEventPayload_McpHealthChanged() when mcpHealthChanged != null:
 return mcpHealthChanged(_that.health);case BridgeProductEventPayload_LspHealthChanged() when lspHealthChanged != null:
 return lspHealthChanged(_that.health);case BridgeProductEventPayload_SessionTaskChanged() when sessionTaskChanged != null:
-return sessionTaskChanged(_that.sessionId,_that.task);case BridgeProductEventPayload_Stale() when stale != null:
+return sessionTaskChanged(_that.sessionId,_that.task);case BridgeProductEventPayload_AgentDirectoryChanged() when agentDirectoryChanged != null:
+return agentDirectoryChanged(_that.rootSessionId,_that.agent);case BridgeProductEventPayload_Stale() when stale != null:
 return stale(_that.laggedEvents);case _:
   return null;
 
@@ -457,6 +463,74 @@ class _$BridgeProductEventPayload_SessionTaskChangedCopyWithImpl<$Res>
 sessionId: null == sessionId ? _self.sessionId : sessionId // ignore: cast_nullable_to_non_nullable
 as String,task: freezed == task ? _self.task : task // ignore: cast_nullable_to_non_nullable
 as BridgeTaskRuntimeDto?,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class BridgeProductEventPayload_AgentDirectoryChanged extends BridgeProductEventPayload {
+  const BridgeProductEventPayload_AgentDirectoryChanged({required this.rootSessionId, required this.agent}): super._();
+
+
+ final  String rootSessionId;
+ final  BridgeAgentDirectoryEntryDto agent;
+
+/// Create a copy of BridgeProductEventPayload
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgeProductEventPayload_AgentDirectoryChangedCopyWith<BridgeProductEventPayload_AgentDirectoryChanged> get copyWith => _$BridgeProductEventPayload_AgentDirectoryChangedCopyWithImpl<BridgeProductEventPayload_AgentDirectoryChanged>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_AgentDirectoryChanged&&(identical(other.rootSessionId, rootSessionId) || other.rootSessionId == rootSessionId)&&(identical(other.agent, agent) || other.agent == agent));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,rootSessionId,agent);
+
+@override
+String toString() {
+  return 'BridgeProductEventPayload.agentDirectoryChanged(rootSessionId: $rootSessionId, agent: $agent)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgeProductEventPayload_AgentDirectoryChangedCopyWith<$Res> implements $BridgeProductEventPayloadCopyWith<$Res> {
+  factory $BridgeProductEventPayload_AgentDirectoryChangedCopyWith(BridgeProductEventPayload_AgentDirectoryChanged value, $Res Function(BridgeProductEventPayload_AgentDirectoryChanged) _then) = _$BridgeProductEventPayload_AgentDirectoryChangedCopyWithImpl;
+@useResult
+$Res call({
+ String rootSessionId, BridgeAgentDirectoryEntryDto agent
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgeProductEventPayload_AgentDirectoryChangedCopyWithImpl<$Res>
+    implements $BridgeProductEventPayload_AgentDirectoryChangedCopyWith<$Res> {
+  _$BridgeProductEventPayload_AgentDirectoryChangedCopyWithImpl(this._self, this._then);
+
+  final BridgeProductEventPayload_AgentDirectoryChanged _self;
+  final $Res Function(BridgeProductEventPayload_AgentDirectoryChanged) _then;
+
+/// Create a copy of BridgeProductEventPayload
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? rootSessionId = null,Object? agent = null,}) {
+  return _then(BridgeProductEventPayload_AgentDirectoryChanged(
+rootSessionId: null == rootSessionId ? _self.rootSessionId : rootSessionId // ignore: cast_nullable_to_non_nullable
+as String,agent: null == agent ? _self.agent : agent // ignore: cast_nullable_to_non_nullable
+as BridgeAgentDirectoryEntryDto,
   ));
 }
 

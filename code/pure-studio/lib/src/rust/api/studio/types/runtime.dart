@@ -6,7 +6,7 @@
 import '../../../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 class BridgeActiveTurn {
   final String sessionId;
@@ -24,6 +24,124 @@ class BridgeActiveTurn {
           runtimeType == other.runtimeType &&
           sessionId == other.sessionId &&
           turnId == other.turnId;
+}
+
+class BridgeAgentDirectoryEntryDto {
+  final String id;
+  final String sessionId;
+  final String rootSessionId;
+  final String path;
+  final String? parentPath;
+  final String role;
+  final String task;
+  final String status;
+  final String? summary;
+  final int depth;
+  final String? error;
+  final String? reason;
+  final String lifecycle;
+  final String activity;
+  final BridgeAgentProgressDto? progress;
+  final PlatformInt64 updatedAt;
+  final BigInt summaryAgeSeconds;
+
+  const BridgeAgentDirectoryEntryDto({
+    required this.id,
+    required this.sessionId,
+    required this.rootSessionId,
+    required this.path,
+    this.parentPath,
+    required this.role,
+    required this.task,
+    required this.status,
+    this.summary,
+    required this.depth,
+    this.error,
+    this.reason,
+    required this.lifecycle,
+    required this.activity,
+    this.progress,
+    required this.updatedAt,
+    required this.summaryAgeSeconds,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      sessionId.hashCode ^
+      rootSessionId.hashCode ^
+      path.hashCode ^
+      parentPath.hashCode ^
+      role.hashCode ^
+      task.hashCode ^
+      status.hashCode ^
+      summary.hashCode ^
+      depth.hashCode ^
+      error.hashCode ^
+      reason.hashCode ^
+      lifecycle.hashCode ^
+      activity.hashCode ^
+      progress.hashCode ^
+      updatedAt.hashCode ^
+      summaryAgeSeconds.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeAgentDirectoryEntryDto &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          sessionId == other.sessionId &&
+          rootSessionId == other.rootSessionId &&
+          path == other.path &&
+          parentPath == other.parentPath &&
+          role == other.role &&
+          task == other.task &&
+          status == other.status &&
+          summary == other.summary &&
+          depth == other.depth &&
+          error == other.error &&
+          reason == other.reason &&
+          lifecycle == other.lifecycle &&
+          activity == other.activity &&
+          progress == other.progress &&
+          updatedAt == other.updatedAt &&
+          summaryAgeSeconds == other.summaryAgeSeconds;
+}
+
+class BridgeAgentProgressDto {
+  final String stage;
+  final String summary;
+  final String nextStep;
+  final BigInt revision;
+  final PlatformInt64 updatedAt;
+
+  const BridgeAgentProgressDto({
+    required this.stage,
+    required this.summary,
+    required this.nextStep,
+    required this.revision,
+    required this.updatedAt,
+  });
+
+  @override
+  int get hashCode =>
+      stage.hashCode ^
+      summary.hashCode ^
+      nextStep.hashCode ^
+      revision.hashCode ^
+      updatedAt.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeAgentProgressDto &&
+          runtimeType == other.runtimeType &&
+          stage == other.stage &&
+          summary == other.summary &&
+          nextStep == other.nextStep &&
+          revision == other.revision &&
+          updatedAt == other.updatedAt;
 }
 
 class BridgeLspHealthDto {
@@ -300,6 +418,11 @@ class BridgeTaskAgentDto {
   final String? summary;
   final String? error;
   final String? headCommit;
+  final String? lifecycle;
+  final String? activity;
+  final BridgeAgentProgressDto? progress;
+  final PlatformInt64 updatedAt;
+  final BigInt summaryAgeSeconds;
 
   const BridgeTaskAgentDto({
     required this.agentId,
@@ -310,6 +433,11 @@ class BridgeTaskAgentDto {
     this.summary,
     this.error,
     this.headCommit,
+    this.lifecycle,
+    this.activity,
+    this.progress,
+    required this.updatedAt,
+    required this.summaryAgeSeconds,
   });
 
   @override
@@ -321,7 +449,12 @@ class BridgeTaskAgentDto {
       requestedByCallId.hashCode ^
       summary.hashCode ^
       error.hashCode ^
-      headCommit.hashCode;
+      headCommit.hashCode ^
+      lifecycle.hashCode ^
+      activity.hashCode ^
+      progress.hashCode ^
+      updatedAt.hashCode ^
+      summaryAgeSeconds.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -335,7 +468,104 @@ class BridgeTaskAgentDto {
           requestedByCallId == other.requestedByCallId &&
           summary == other.summary &&
           error == other.error &&
-          headCommit == other.headCommit;
+          headCommit == other.headCommit &&
+          lifecycle == other.lifecycle &&
+          activity == other.activity &&
+          progress == other.progress &&
+          updatedAt == other.updatedAt &&
+          summaryAgeSeconds == other.summaryAgeSeconds;
+}
+
+class BridgeTaskCompletionDto {
+  final String id;
+  final String workUnitId;
+  final String executorAgentId;
+  final int revision;
+  final String kind;
+  final String status;
+  final String baseCommit;
+  final String? headCommit;
+  final List<String> changedFiles;
+  final String verificationSummary;
+  final String worktreePath;
+  final String branch;
+  final PlatformInt64 createdAt;
+  final PlatformInt64 updatedAt;
+
+  const BridgeTaskCompletionDto({
+    required this.id,
+    required this.workUnitId,
+    required this.executorAgentId,
+    required this.revision,
+    required this.kind,
+    required this.status,
+    required this.baseCommit,
+    this.headCommit,
+    required this.changedFiles,
+    required this.verificationSummary,
+    required this.worktreePath,
+    required this.branch,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      workUnitId.hashCode ^
+      executorAgentId.hashCode ^
+      revision.hashCode ^
+      kind.hashCode ^
+      status.hashCode ^
+      baseCommit.hashCode ^
+      headCommit.hashCode ^
+      changedFiles.hashCode ^
+      verificationSummary.hashCode ^
+      worktreePath.hashCode ^
+      branch.hashCode ^
+      createdAt.hashCode ^
+      updatedAt.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeTaskCompletionDto &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          workUnitId == other.workUnitId &&
+          executorAgentId == other.executorAgentId &&
+          revision == other.revision &&
+          kind == other.kind &&
+          status == other.status &&
+          baseCommit == other.baseCommit &&
+          headCommit == other.headCommit &&
+          changedFiles == other.changedFiles &&
+          verificationSummary == other.verificationSummary &&
+          worktreePath == other.worktreePath &&
+          branch == other.branch &&
+          createdAt == other.createdAt &&
+          updatedAt == other.updatedAt;
+}
+
+class BridgeTaskDesignReferenceDto {
+  final String path;
+  final String section;
+
+  const BridgeTaskDesignReferenceDto({
+    required this.path,
+    required this.section,
+  });
+
+  @override
+  int get hashCode => path.hashCode ^ section.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeTaskDesignReferenceDto &&
+          runtimeType == other.runtimeType &&
+          path == other.path &&
+          section == other.section;
 }
 
 class BridgeTaskMergeDto {
@@ -378,41 +608,116 @@ class BridgeTaskMergeDto {
 }
 
 class BridgeTaskReviewDto {
+  final String id;
   final int round;
-  final String headCommit;
+  final String scope;
+  final String? workUnitId;
+  final String? completionId;
+  final int? completionRevision;
+  final String reviewedHead;
   final String verdict;
+  final String requestedByCallId;
   final String? reviewerAgentId;
   final String? summary;
-  final List<String> designReferences;
+  final List<BridgeTaskDesignReferenceDto> designReferences;
+  final List<BridgeTaskReviewFindingDto> findings;
+  final PlatformInt64 createdAt;
+  final PlatformInt64 updatedAt;
 
   const BridgeTaskReviewDto({
+    required this.id,
     required this.round,
-    required this.headCommit,
+    required this.scope,
+    this.workUnitId,
+    this.completionId,
+    this.completionRevision,
+    required this.reviewedHead,
     required this.verdict,
+    required this.requestedByCallId,
     this.reviewerAgentId,
     this.summary,
     required this.designReferences,
+    required this.findings,
+    required this.createdAt,
+    required this.updatedAt,
   });
 
   @override
   int get hashCode =>
+      id.hashCode ^
       round.hashCode ^
-      headCommit.hashCode ^
+      scope.hashCode ^
+      workUnitId.hashCode ^
+      completionId.hashCode ^
+      completionRevision.hashCode ^
+      reviewedHead.hashCode ^
       verdict.hashCode ^
+      requestedByCallId.hashCode ^
       reviewerAgentId.hashCode ^
       summary.hashCode ^
-      designReferences.hashCode;
+      designReferences.hashCode ^
+      findings.hashCode ^
+      createdAt.hashCode ^
+      updatedAt.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is BridgeTaskReviewDto &&
           runtimeType == other.runtimeType &&
+          id == other.id &&
           round == other.round &&
-          headCommit == other.headCommit &&
+          scope == other.scope &&
+          workUnitId == other.workUnitId &&
+          completionId == other.completionId &&
+          completionRevision == other.completionRevision &&
+          reviewedHead == other.reviewedHead &&
           verdict == other.verdict &&
+          requestedByCallId == other.requestedByCallId &&
           reviewerAgentId == other.reviewerAgentId &&
           summary == other.summary &&
+          designReferences == other.designReferences &&
+          findings == other.findings &&
+          createdAt == other.createdAt &&
+          updatedAt == other.updatedAt;
+}
+
+class BridgeTaskReviewFindingDto {
+  final String severity;
+  final String title;
+  final String body;
+  final String? path;
+  final int? line;
+  final List<BridgeTaskDesignReferenceDto> designReferences;
+
+  const BridgeTaskReviewFindingDto({
+    required this.severity,
+    required this.title,
+    required this.body,
+    this.path,
+    this.line,
+    required this.designReferences,
+  });
+
+  @override
+  int get hashCode =>
+      severity.hashCode ^
+      title.hashCode ^
+      body.hashCode ^
+      path.hashCode ^
+      line.hashCode ^
+      designReferences.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeTaskReviewFindingDto &&
+          runtimeType == other.runtimeType &&
+          severity == other.severity &&
+          title == other.title &&
+          body == other.body &&
+          path == other.path &&
+          line == other.line &&
           designReferences == other.designReferences;
 }
 
@@ -427,6 +732,7 @@ class BridgeTaskRuntimeDto {
   final BigInt taskGeneration;
   final List<BridgeTaskWorkUnitDto> workUnits;
   final List<BridgeTaskAgentDto> agents;
+  final List<BridgeTaskCompletionDto> completions;
   final List<BridgeTaskMergeDto> merges;
   final List<BridgeTaskReviewDto> reviews;
 
@@ -441,6 +747,7 @@ class BridgeTaskRuntimeDto {
     required this.taskGeneration,
     required this.workUnits,
     required this.agents,
+    required this.completions,
     required this.merges,
     required this.reviews,
   });
@@ -457,6 +764,7 @@ class BridgeTaskRuntimeDto {
       taskGeneration.hashCode ^
       workUnits.hashCode ^
       agents.hashCode ^
+      completions.hashCode ^
       merges.hashCode ^
       reviews.hashCode;
 
@@ -475,6 +783,7 @@ class BridgeTaskRuntimeDto {
           taskGeneration == other.taskGeneration &&
           workUnits == other.workUnits &&
           agents == other.agents &&
+          completions == other.completions &&
           merges == other.merges &&
           reviews == other.reviews;
 }

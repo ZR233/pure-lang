@@ -29,6 +29,12 @@ pub(super) fn merged_output(scope: &TaskMergeScope) -> Result<TaskMergeAgentOutp
         .evidence
         .as_ref()
         .context("accepted merge has no versioned evidence")?;
+    if scope.completion.id != evidence.completion_id
+        || scope.completion.revision != evidence.completion_revision
+        || scope.completion.head_commit.as_deref() != Some(evidence.delivery_head.as_str())
+    {
+        anyhow::bail!("accepted merge completion no longer matches its durable evidence");
+    }
     let merge_commit = evidence
         .merge_commit
         .clone()

@@ -56,6 +56,10 @@ class StudioActionService {
     return _api.submitPrompt(sessionId, prompt, const []);
   }
 
+  Future<SubmitPromptReceipt> resumeTask(String sessionId) {
+    return _api.resumeTask(sessionId);
+  }
+
   Future<void> stopPrompt(String sessionId) => _api.stopPrompt(sessionId);
 
   Future<StudioState> saveRuntimePermissionMode(PermissionMode mode) {

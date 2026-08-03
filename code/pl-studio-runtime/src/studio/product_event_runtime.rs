@@ -7,7 +7,10 @@ use std::sync::{
 use anyhow::Result;
 use tokio::sync::{Mutex, broadcast};
 
-use crate::{StudioProductEventEnvelope, StudioProductEventKind, StudioSessionSummary};
+use crate::{
+    StudioAgentDirectoryEntry, StudioProductEventEnvelope, StudioProductEventKind,
+    StudioSessionSummary,
+};
 
 use super::{StudioStore, ids::unix_seconds};
 
@@ -87,6 +90,21 @@ impl StudioProductEventRuntime {
                 sessions,
             },
         ))
+    }
+
+    pub fn emit_agent_directory(
+        &self,
+        project_id: &str,
+        agent: StudioAgentDirectoryEntry,
+    ) -> StudioProductEventEnvelope {
+        let root_session_id = agent.root_session_id.clone();
+        self.emit(
+            Some(project_id.to_string()),
+            StudioProductEventKind::AgentDirectoryChanged {
+                root_session_id,
+                agent,
+            },
+        )
     }
 
     /// 重新读取并在内容真正变化时发布 Studio task 快照。

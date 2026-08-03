@@ -1,5 +1,7 @@
 use super::records::session_summary_dto;
-use super::runtime::{bridge_lsp_health, bridge_mcp_health, bridge_task_runtime};
+use super::runtime::{
+    bridge_agent_directory_entry, bridge_lsp_health, bridge_mcp_health, bridge_task_runtime,
+};
 use crate::api::studio::types::{BridgeProductEventEnvelope, BridgeProductEventPayload};
 use pl_studio_runtime::{StudioProductEventEnvelope, StudioProductEventKind};
 
@@ -35,6 +37,13 @@ pub(crate) fn bridge_product_event(
                     task: task.map(|task| Box::new(bridge_task_runtime(*task))),
                 }
             }
+            StudioProductEventKind::AgentDirectoryChanged {
+                root_session_id,
+                agent,
+            } => BridgeProductEventPayload::AgentDirectoryChanged {
+                root_session_id,
+                agent: bridge_agent_directory_entry(agent),
+            },
         },
     }
 }

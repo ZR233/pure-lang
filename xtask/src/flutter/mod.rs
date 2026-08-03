@@ -4,12 +4,14 @@ use crate::process;
 use crate::pubspec_lock::{self, LockfileChange};
 use crate::studio_version;
 use anyhow::{Context, Result, bail};
+use sha2::{Digest, Sha256};
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const FRB_CODEGEN_VERSION: &str = "2.12.0";
+const PUB_FINGERPRINT_FILE: &str = "pure-xtask-pub.sha256";
 const GENERATED_PATHS: &[&str] = &[
     ":(glob)code/pure-studio/lib/**/*.g.dart",
     ":(glob)code/pure-studio/lib/**/*.freezed.dart",
@@ -35,6 +37,12 @@ enum DemoMode {
 enum DriverMode {
     Disabled,
     Enabled,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FlutterProcessMode {
+    Batch,
+    ResidentDriver,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -94,15 +102,15 @@ pub(crate) fn generate_gui() -> Result<()> {
     print_context(&workspace_root, &app_dir);
 
     run_flutter(&workspace_root, &app_dir, &["pub", "get"], DemoMode::Native)?;
+    run_flutter(&workspace_root, &app_dir, &["gen-l10n"], DemoMode::Native)?;
+    ensure_frb_codegen_version()?;
+    run_frb_codegen(&workspace_root, &app_dir)?;
     run_flutter(
         &workspace_root,
         &app_dir,
         &["pub", "run", "build_runner", "build"],
         DemoMode::Native,
     )?;
-    run_flutter(&workspace_root, &app_dir, &["gen-l10n"], DemoMode::Native)?;
-    ensure_frb_codegen_version()?;
-    run_frb_codegen(&workspace_root, &app_dir)?;
     run_tool("dart", &["format", "lib"], &app_dir)?;
     run_tool("cargo", &["fmt", "--all"], &workspace_root)
 }
@@ -282,7 +290,7 @@ fn prepare_freezed_prerelease_for_frb(lock_path: &Path) -> Result<()> {
             let stable = line.split_once("-dev.").map_or(line, |(prefix, _)| {
                 // FRB 2.12 rejects prerelease semver in pubspec.lock even though
                 // the installed Freezed build is compatible. Codegen does not
-                // execute the package because build_runner already ran above.
+                // execute the package because build_runner runs after FRB codegen.
                 prefix
             });
             output.push_str(stable);
@@ -317,8 +325,7 @@ pub(crate) fn run_gui(options: RunGuiOptions) -> Result<()> {
     let app_version = studio_version::read(&app_dir)?;
     let version_define = format!("--dart-define=PURE_STUDIO_VERSION={app_version}");
     print_context(&workspace_root, &app_dir);
-
-    run_flutter(&workspace_root, &app_dir, &["pub", "get"], DemoMode::Native)?;
+    ensure_flutter_dependencies(&workspace_root, &app_dir)?;
 
     let demo_mode = if options.demo {
         DemoMode::Demo
@@ -331,16 +338,34 @@ pub(crate) fn run_gui(options: RunGuiOptions) -> Result<()> {
         DriverMode::Disabled
     };
     let run_args = run_gui_args(target, &version_define, driver_mode);
-    run_flutter(&workspace_root, &app_dir, &run_args, demo_mode)
+    let process_mode = match driver_mode {
+        DriverMode::Disabled => FlutterProcessMode::Batch,
+        DriverMode::Enabled => FlutterProcessMode::ResidentDriver,
+    };
+    run_flutter_with_process_mode(
+        &workspace_root,
+        &app_dir,
+        &run_args,
+        demo_mode,
+        process_mode,
+    )
 }
 
 fn run_gui_args(target: DesktopTarget, version_define: &str, driver_mode: DriverMode) -> Vec<&str> {
-    let mut args = vec!["run", "-d", target.flutter_name(), version_define];
+    let mut args = vec![
+        "run",
+        "-d",
+        target.flutter_name(),
+        version_define,
+        "--no-pub",
+    ];
     if matches!(driver_mode, DriverMode::Enabled) {
         args.extend([
             "-t",
             "test_driver/driver_main.dart",
             "--dart-define=PURE_STUDIO_DRIVER=true",
+            "--disable-service-auth-codes",
+            "--verbose",
         ]);
     }
     args
@@ -363,70 +388,143 @@ fn build_gui_with_version(options: BuildGuiOptions, release_version: Option<&str
     if release_version.is_some_and(|version| version != app_version.to_string()) {
         bail!("release version does not match pubspec.yaml version {app_version}");
     }
-    let lock_path = app_dir.join("pubspec.lock");
-    let original_lock = pubspec_lock::read_optional(&lock_path)?;
     print_context(&workspace_root, &app_dir);
+    ensure_flutter_dependencies(&workspace_root, &app_dir)?;
 
-    let build_result = (|| {
-        prepare_pubspec_lock_for_active_hosted_url(&lock_path)?;
-        run_flutter(&workspace_root, &app_dir, &["pub", "get"], DemoMode::Native)?;
-        match pubspec_lock::classify_change(&lock_path, original_lock.as_deref())? {
-            LockfileChange::Unchanged => {}
-            LockfileChange::HostedUrlsOnly => {
-                println!("pubspec.lock hosted URLs changed during pub get; restoring after build.");
-            }
-        }
+    let version_define = format!("--dart-define=PURE_STUDIO_VERSION={app_version}");
+    let args = build_gui_args(target, &version_define, options.demo);
+    let demo_mode = if options.demo {
+        DemoMode::Demo
+    } else {
+        DemoMode::Native
+    };
+    run_flutter(&workspace_root, &app_dir, &args, demo_mode)?;
 
-        let version_define = format!("--dart-define=PURE_STUDIO_VERSION={app_version}");
-        let args = build_gui_args(target, &version_define, options.demo);
-        let demo_mode = if options.demo {
-            DemoMode::Demo
-        } else {
-            DemoMode::Native
-        };
-        run_flutter(&workspace_root, &app_dir, &args, demo_mode)?;
-
-        let clean_mode = if options.no_clean {
-            DistCleanMode::KeepExisting
-        } else {
-            DistCleanMode::Clean
-        };
-        copy_release_artifacts(
-            &target.release_artifact_dir(&app_dir),
-            &dist_dir,
-            clean_mode,
-        )
-    })();
-
-    let restore_result = pubspec_lock::restore_optional(&lock_path, original_lock.as_deref());
-    match (build_result, restore_result) {
-        (Ok(()), Ok(())) => Ok(()),
-        (Err(error), _) => Err(error),
-        (Ok(()), Err(error)) => Err(error),
-    }
+    let clean_mode = if options.no_clean {
+        DistCleanMode::KeepExisting
+    } else {
+        DistCleanMode::Clean
+    };
+    copy_release_artifacts(
+        &target.release_artifact_dir(&app_dir),
+        &dist_dir,
+        clean_mode,
+    )
 }
 
 fn build_gui_args(target: DesktopTarget, version_define: &str, demo: bool) -> Vec<&str> {
-    let mut args = vec!["build", target.flutter_name(), "--release", version_define];
+    let mut args = vec![
+        "build",
+        target.flutter_name(),
+        "--release",
+        version_define,
+        "--no-pub",
+    ];
     if demo {
         args.push("--dart-define=PURE_STUDIO_DEMO=true");
     }
     args
 }
 
-fn prepare_pubspec_lock_for_active_hosted_url(lock_path: &Path) -> Result<()> {
+fn ensure_flutter_dependencies(workspace_root: &Path, app_dir: &Path) -> Result<()> {
     let hosted_url = match std::env::var("PUB_HOSTED_URL") {
-        Ok(hosted_url) => hosted_url,
-        Err(std::env::VarError::NotPresent) => return Ok(()),
+        Ok(hosted_url) => Some(hosted_url),
+        Err(std::env::VarError::NotPresent) => None,
         Err(std::env::VarError::NotUnicode(_)) => {
             bail!("PUB_HOSTED_URL must contain valid Unicode")
         }
+    };
+    let fingerprint = flutter_dependency_fingerprint(app_dir, hosted_url.as_deref())?;
+    if has_cached_flutter_dependencies(app_dir, &fingerprint)? {
+        println!("Flutter dependencies unchanged; reusing .dart_tool package configuration.");
+        return Ok(());
+    }
+
+    let lock_path = app_dir.join("pubspec.lock");
+    let original_lock = pubspec_lock::read_optional(&lock_path)?;
+    let resolution_result = (|| {
+        prepare_pubspec_lock_for_active_hosted_url(&lock_path, hosted_url.as_deref())?;
+        run_flutter(workspace_root, app_dir, &["pub", "get"], DemoMode::Native)?;
+        match pubspec_lock::classify_change(&lock_path, original_lock.as_deref())? {
+            LockfileChange::Unchanged => {}
+            LockfileChange::HostedUrlsOnly => {
+                println!(
+                    "Restoring canonical pubspec.lock hosted URLs after dependency resolution."
+                );
+            }
+        }
+        Ok(())
+    })();
+    let restore_result = pubspec_lock::restore_optional(&lock_path, original_lock.as_deref());
+    match (resolution_result, restore_result) {
+        (Err(error), _) => return Err(error),
+        (Ok(()), Err(error)) => return Err(error),
+        (Ok(()), Ok(())) => {}
+    }
+
+    let stamp_path = flutter_dependency_stamp_path(app_dir);
+    let stamp_dir = stamp_path
+        .parent()
+        .context("Flutter dependency stamp has no parent directory")?;
+    fs::create_dir_all(stamp_dir)
+        .with_context(|| format!("failed to create {}", stamp_dir.display()))?;
+    fs::write(&stamp_path, format!("{fingerprint}\n"))
+        .with_context(|| format!("failed to write {}", stamp_path.display()))
+}
+
+fn prepare_pubspec_lock_for_active_hosted_url(
+    lock_path: &Path,
+    hosted_url: Option<&str>,
+) -> Result<()> {
+    let Some(hosted_url) = hosted_url else {
+        return Ok(());
     };
 
     // Pub treats the hosted URL as part of a package's source identity. Align the
     // temporary lockfile before resolution so switching mirrors does not upgrade
     // otherwise locked dependencies.
-    pubspec_lock::rewrite_hosted_urls(lock_path, &hosted_url)
+    pubspec_lock::rewrite_hosted_urls(lock_path, hosted_url)
+}
+
+fn flutter_dependency_fingerprint(app_dir: &Path, hosted_url: Option<&str>) -> Result<String> {
+    let mut hasher = Sha256::new();
+    for file_name in ["pubspec.yaml", "pubspec.lock", "pubspec_overrides.yaml"] {
+        hasher.update(file_name.as_bytes());
+        hasher.update([0]);
+        match fs::read(app_dir.join(file_name)) {
+            Ok(content) => hasher.update(content),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                hasher.update(b"<missing>")
+            }
+            Err(error) => {
+                return Err(error).with_context(|| {
+                    format!("failed to read {}", app_dir.join(file_name).display())
+                });
+            }
+        }
+        hasher.update([0]);
+    }
+    hasher.update(hosted_url.unwrap_or("<default-hosted-url>").as_bytes());
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+fn has_cached_flutter_dependencies(app_dir: &Path, fingerprint: &str) -> Result<bool> {
+    if !app_dir
+        .join(".dart_tool")
+        .join("package_config.json")
+        .is_file()
+    {
+        return Ok(false);
+    }
+    match fs::read_to_string(flutter_dependency_stamp_path(app_dir)) {
+        Ok(cached) => Ok(cached.trim() == fingerprint),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error).context("failed to read Flutter dependency fingerprint"),
+    }
+}
+
+fn flutter_dependency_stamp_path(app_dir: &Path) -> PathBuf {
+    app_dir.join(".dart_tool").join(PUB_FINGERPRINT_FILE)
 }
 
 fn print_context(workspace_root: &Path, app_dir: &Path) {
@@ -440,6 +538,22 @@ fn run_flutter(
     args: &[&str],
     demo_mode: DemoMode,
 ) -> Result<()> {
+    run_flutter_with_process_mode(
+        workspace_root,
+        app_dir,
+        args,
+        demo_mode,
+        FlutterProcessMode::Batch,
+    )
+}
+
+fn run_flutter_with_process_mode(
+    workspace_root: &Path,
+    app_dir: &Path,
+    args: &[&str],
+    demo_mode: DemoMode,
+    process_mode: FlutterProcessMode,
+) -> Result<()> {
     let args = flutter_args(args, demo_mode);
     let display = process::display_command("flutter", &args);
     let mut command = process::path_command("flutter", &args);
@@ -452,7 +566,11 @@ fn run_flutter(
             command.env("PURE_STUDIO_DEMO", "true");
         }
     }
-    process::run_checked(&mut command, &display).with_context(|| {
+    let result = match process_mode {
+        FlutterProcessMode::Batch => process::run_checked(&mut command, &display),
+        FlutterProcessMode::ResidentDriver => process::run_resident_checked(&mut command, &display),
+    };
+    result.with_context(|| {
         format!(
             "workspace root: {}, Studio app dir: {}",
             workspace_root.display(),
@@ -577,14 +695,17 @@ mod tests {
                 "-d",
                 "windows",
                 version_define,
+                "--no-pub",
                 "-t",
                 "test_driver/driver_main.dart",
                 "--dart-define=PURE_STUDIO_DRIVER=true",
+                "--disable-service-auth-codes",
+                "--verbose",
             ]
         );
         assert_eq!(
             run_gui_args(DesktopTarget::Windows, version_define, DriverMode::Disabled,),
-            vec!["run", "-d", "windows", version_define]
+            vec!["run", "-d", "windows", version_define, "--no-pub"]
         );
     }
 
@@ -598,6 +719,49 @@ mod tests {
 
         assert!(!args.contains(&"test_driver/driver_main.dart"));
         assert!(!args.contains(&"--dart-define=PURE_STUDIO_DRIVER=true"));
+        assert!(!args.contains(&"--disable-service-auth-codes"));
+        assert!(!args.contains(&"--verbose"));
         assert!(!args.contains(&"-t"));
+        assert!(args.contains(&"--no-pub"));
+    }
+
+    #[test]
+    fn dependency_fingerprint_invalidates_cached_package_configuration() -> Result<()> {
+        let app_dir = std::env::temp_dir().join(format!(
+            "pl-xtask-flutter-dependencies-{}",
+            std::process::id()
+        ));
+        let dart_tool_dir = app_dir.join(".dart_tool");
+        fs::create_dir_all(&dart_tool_dir)?;
+        fs::write(app_dir.join("pubspec.yaml"), "name: fixture\n")?;
+        fs::write(app_dir.join("pubspec.lock"), "packages: {}\n")?;
+        fs::write(dart_tool_dir.join("package_config.json"), "{}\n")?;
+
+        let fingerprint = flutter_dependency_fingerprint(&app_dir, None)?;
+        assert!(!has_cached_flutter_dependencies(&app_dir, &fingerprint)?);
+        fs::write(
+            flutter_dependency_stamp_path(&app_dir),
+            format!("{fingerprint}\n"),
+        )?;
+        assert!(has_cached_flutter_dependencies(&app_dir, &fingerprint)?);
+
+        let mirror_fingerprint =
+            flutter_dependency_fingerprint(&app_dir, Some("https://mirror.example"))?;
+        assert_ne!(fingerprint, mirror_fingerprint);
+        assert!(!has_cached_flutter_dependencies(
+            &app_dir,
+            &mirror_fingerprint
+        )?);
+
+        fs::write(app_dir.join("pubspec.yaml"), "name: changed_fixture\n")?;
+        let changed_fingerprint = flutter_dependency_fingerprint(&app_dir, None)?;
+        assert_ne!(fingerprint, changed_fingerprint);
+        assert!(!has_cached_flutter_dependencies(
+            &app_dir,
+            &changed_fingerprint
+        )?);
+
+        fs::remove_dir_all(app_dir)?;
+        Ok(())
     }
 }

@@ -77,110 +77,24 @@ async fn design_patch_commits_and_atomically_opens_executor_gate() {
 }
 
 #[tokio::test]
-async fn initial_design_patch_must_cover_every_confirmed_plan_target_before_writing() {
-    let fixture = DesignFixture::new_with_plan("complete-plan-design", MULTI_DESIGN_PLAN).await;
-    let before = fixture.head();
-
-    let error = fixture
-        .update(DESIGN_PATCH)
-        .await
-        .expect_err("partial confirmed-plan design must be rejected");
-    let message = error.to_string();
-    assert!(message.contains("missing paths: design/runtime.md"));
-    assert!(message.contains("no files were modified"));
-    assert_eq!(fixture.head(), before);
-    assert_eq!(fixture.design_text(), "before\n");
+async fn plan_document_references_do_not_expand_the_design_patch_scope() {
+    let fixture = DesignFixture::new_with_plan("plan-references", MULTI_DESIGN_PLAN).await;
+    let output = fixture.update(DESIGN_PATCH).await.unwrap();
+    assert_eq!(output.changed_files, vec!["design/spec.md".to_string()]);
     assert!(!fixture.repository.join("design/runtime.md").exists());
-    assert!(fixture.status().is_empty());
-    let run = fixture
-        .store
-        .read_task_run(&fixture.run.id)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(run.phase, TaskRunPhase::DesignUpdating);
-    assert_eq!(run.design_commit, None);
-
-    let output = fixture
-        .update(
-            "*** Begin Patch\n*** Update File: design/spec.md\n@@\n-before\n+after\n*** Add File: design/runtime.md\n+# Runtime\n*** End Patch",
-        )
-        .await
-        .unwrap();
-    assert_eq!(
-        output.changed_files,
-        vec![
-            "design/runtime.md".to_string(),
-            "design/spec.md".to_string(),
-        ]
-    );
-    fixture.cleanup().await;
-}
-
-#[tokio::test]
-async fn executor_spawn_rechecks_confirmed_plan_design_coverage_before_allocation() {
-    let fixture = DesignFixture::new_with_plan("spawn-design-gate", MULTI_DESIGN_PLAN).await;
-    std::fs::write(fixture.repository.join("design/spec.md"), "after\n").unwrap();
-    git(&fixture.repository, &["add", "design/spec.md"]);
-    git(
-        &fixture.repository,
-        &["commit", "-m", "partial design fixture"],
-    );
-    let partial_design_commit = fixture.head();
-    assert!(
-        fixture
-            .store
-            .advance_task_design_head(
-                &fixture.run.id,
-                &fixture.run.expected_head,
-                &partial_design_commit,
-            )
-            .await
-            .unwrap()
-    );
     let request = StudioTaskSpawnRequest {
-        agent_id: "agent-partial-design".to_string(),
+        agent_id: "agent-plan-reference".to_string(),
         session_id: fixture.session_id.clone(),
-        task_name: "must not allocate".to_string(),
+        task_name: "plan reference is not a patch target".to_string(),
         role: "executor".to_string(),
         owned_paths: vec!["src/lib.rs".to_string()],
-        requested_by_call_id: "call-partial-design".to_string(),
+        requested_by_call_id: "call-plan-reference".to_string(),
     };
-    let before_spawn_head = fixture.head();
-
-    let error = fixture
+    fixture
         .coordinator
         .prepare_agent_spawn(&request)
         .await
-        .expect_err("partial design commit must not allocate an executor");
-
-    assert!(
-        error
-            .to_string()
-            .contains("missing paths: design/runtime.md")
-    );
-    assert!(
-        fixture
-            .store
-            .list_work_units(&fixture.run.id)
-            .await
-            .unwrap()
-            .is_empty()
-    );
-    assert!(
-        fixture
-            .store
-            .list_agent_outcomes(&fixture.run.id)
-            .await
-            .unwrap()
-            .is_empty()
-    );
-    assert_eq!(fixture.head(), before_spawn_head);
-    assert_eq!(
-        git_output(&fixture.repository, &["branch", "--list", "pure-task-*"]),
-        ""
-    );
-    assert!(!fixture.repository.join(".pure/worktrees").exists());
+        .expect("a current focused design commit must open the executor gate");
     fixture.cleanup().await;
 }
 
@@ -214,11 +128,11 @@ async fn design_commit_uses_studio_identity_without_changing_repository_config()
 }
 
 #[tokio::test]
-async fn executor_retry_limit_uses_owned_paths_instead_of_mutable_title() {
+async fn executor_attempts_are_monotonic_beyond_three_for_owned_paths() {
     let fixture = DesignFixture::new("stable-retry-identity").await;
     fixture.update(DESIGN_PATCH).await.unwrap();
 
-    for attempt in 1..=3 {
+    for attempt in 1..=4 {
         let agent_id = format!("agent-retry-{attempt}");
         let allocation = fixture
             .store
@@ -239,23 +153,6 @@ async fn executor_retry_limit_uses_owned_paths_instead_of_mutable_title() {
             .await
             .unwrap();
     }
-
-    let result = fixture
-        .store
-        .allocate_executor(AllocateExecutor {
-            session_id: fixture.session_id.clone(),
-            title: "another renamed work unit".to_string(),
-            owned_paths: vec!["src/shared.rs".to_string()],
-            agent_id: "agent-retry-4".to_string(),
-            owner_path: "/root".to_string(),
-            requested_by_call_id: "call-retry-4".to_string(),
-        })
-        .await;
-    let error = match result {
-        Ok(_) => panic!("renaming a work unit must not reset its retry budget"),
-        Err(error) => error,
-    };
-    assert!(error.to_string().contains("attempt must be within 1..=3"));
     fixture.cleanup().await;
 }
 

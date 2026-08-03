@@ -8,8 +8,8 @@ use crate::studio::entities;
 use crate::studio::ids::unix_seconds;
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    AgentOutcomeStatus, MergeStatus, ReviewVerdict, TaskRunPhase, TaskRunRecord, TaskStopOrigin,
-    TaskStopReason, WorkUnitStatus,
+    AgentOutcomeStatus, MergeStatus, ReviewScope, ReviewVerdict, TaskRunPhase, TaskRunRecord,
+    TaskStopOrigin, TaskStopReason, TaskWorktreeDisposition, WorkUnitStatus,
 };
 
 impl StudioStore {
@@ -189,6 +189,7 @@ impl StudioStore {
                 bail!("task stop generation changed before settling agents");
             }
             let now = unix_seconds();
+            let mut cancelled_work_units = std::collections::HashSet::new();
             for unit in entities::work_unit::Entity::find()
                 .filter(entities::work_unit::Column::TaskRunId.eq(task_run_id.to_string()))
                 .all(&tx)
@@ -196,14 +197,30 @@ impl StudioStore {
             {
                 let status = WorkUnitStatus::from_str(&unit.status)
                     .with_context(|| format!("invalid work unit status: {}", unit.status))?;
-                if matches!(
+                let cancel = matches!(
                     status,
                     WorkUnitStatus::Pending
                         | WorkUnitStatus::Running
-                        | WorkUnitStatus::WaitingForDelivery
-                ) {
+                        | WorkUnitStatus::AwaitingCompletion
+                        | WorkUnitStatus::ReadyForReview
+                        | WorkUnitStatus::Reviewing
+                        | WorkUnitStatus::ChangesRequested
+                        | WorkUnitStatus::Approved
+                );
+                let authorize_cleanup = status != WorkUnitStatus::Merged;
+                if cancel || authorize_cleanup {
+                    let work_unit_id = unit.id.clone();
                     let mut active: entities::work_unit::ActiveModel = unit.into();
-                    active.status = Set(WorkUnitStatus::Cancelled.as_str().to_string());
+                    if cancel {
+                        cancelled_work_units.insert(work_unit_id);
+                        active.status = Set(WorkUnitStatus::Cancelled.as_str().to_string());
+                    }
+                    if authorize_cleanup {
+                        active.worktree_disposition =
+                            Set(TaskWorktreeDisposition::CleanupRequested
+                                .as_str()
+                                .to_string());
+                    }
                     active.updated_at = Set(now);
                     active.update(&tx).await?;
                 }
@@ -215,17 +232,20 @@ impl StudioStore {
             {
                 let status = AgentOutcomeStatus::from_str(&outcome.status)
                     .with_context(|| format!("invalid agent outcome status: {}", outcome.status))?;
+                let executor_cancelled = outcome
+                    .work_unit_id
+                    .as_ref()
+                    .is_some_and(|work_unit_id| cancelled_work_units.contains(work_unit_id));
                 let mut active: entities::agent_outcome::ActiveModel = outcome.into();
-                if matches!(
-                    status,
-                    AgentOutcomeStatus::Queued
-                        | AgentOutcomeStatus::Running
-                        | AgentOutcomeStatus::WaitingForDelivery
-                ) {
+                if executor_cancelled
+                    || matches!(
+                        status,
+                        AgentOutcomeStatus::Queued | AgentOutcomeStatus::Running
+                    )
+                {
                     active.status = Set(AgentOutcomeStatus::Cancelled.as_str().to_string());
                     active.error = Set(Some(reason.to_string()));
                 }
-                active.terminal_observed = Set(1);
                 active.updated_at = Set(now);
                 active.update(&tx).await?;
             }
@@ -318,7 +338,8 @@ async fn validate_completion_children(
         .one(tx)
         .await?
         .context("task completion requires a review round")?;
-    if latest_review.head_commit != run.expected_head
+    if latest_review.scope != ReviewScope::Integrated.as_str()
+        || latest_review.reviewed_head != run.expected_head
         || latest_review.status != ReviewVerdict::Pass.as_str()
     {
         bail!("latest review must pass for the current task HEAD");
@@ -328,14 +349,9 @@ async fn validate_completion_children(
         .all(tx)
         .await?;
     if units.iter().any(|unit| {
-        matches!(
+        !matches!(
             WorkUnitStatus::from_str(&unit.status),
-            Some(
-                WorkUnitStatus::Pending
-                    | WorkUnitStatus::Running
-                    | WorkUnitStatus::WaitingForDelivery
-                    | WorkUnitStatus::Delivered
-            )
+            Some(WorkUnitStatus::Merged | WorkUnitStatus::NoDelivery)
         )
     }) {
         bail!("all executor deliveries must be terminal and consumed before completion");
@@ -347,11 +363,7 @@ async fn validate_completion_children(
     if outcomes.iter().any(|outcome| {
         matches!(
             AgentOutcomeStatus::from_str(&outcome.status),
-            Some(
-                AgentOutcomeStatus::Queued
-                    | AgentOutcomeStatus::Running
-                    | AgentOutcomeStatus::WaitingForDelivery
-            )
+            Some(AgentOutcomeStatus::Queued | AgentOutcomeStatus::Running)
         )
     }) {
         bail!("all task agents must be terminal before completion");

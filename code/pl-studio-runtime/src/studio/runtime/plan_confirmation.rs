@@ -53,8 +53,6 @@ impl StudioRuntime {
                 if plan_content.is_empty() {
                     bail!("plan content is empty");
                 }
-                self.task_coordinator
-                    .validate_confirmed_plan_design_contract(&plan_content)?;
                 let session = self
                     .store
                     .read_session(&session_id)
@@ -109,7 +107,7 @@ impl StudioRuntime {
                             prompt,
                             attachment_ids: Vec::new(),
                             options: StudioSubmitPromptOptions {
-                                presentation: pl_core::MailboxPresentation::SyntheticHidden,
+                                presentation: pl_core::MailboxPresentation::Hidden,
                                 lifecycle: Some(StudioPlanImplementationLifecycle {
                                     session_id: session_id.clone(),
                                     plan_id: plan_id.clone(),

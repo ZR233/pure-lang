@@ -1,15 +1,11 @@
 mod allocation;
 mod completion;
-mod continuation;
-#[cfg(test)]
-pub(crate) use continuation::ContinuationSnapshotTestBarrier;
-mod delivery;
-mod delivery_recovery;
+mod discard;
 mod merge;
 mod outcome;
 mod recovery;
 mod review;
-mod terminal;
+mod work_completion;
 mod work_unit;
 
 use anyhow::{Context, Result, bail};
@@ -194,7 +190,7 @@ impl StudioStore {
             .context("task run not found")?;
         let current_phase = TaskRunPhase::from_str(&current.phase)
             .with_context(|| format!("invalid stored task phase: {}", current.phase))?;
-        if !current_phase.can_transition_to(next) {
+        if current_phase != next && !current_phase.can_transition_to(next) {
             bail!(
                 "invalid task phase transition: {} -> {}",
                 current_phase.as_str(),

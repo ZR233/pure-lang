@@ -45,6 +45,7 @@ abstract class StudioApi {
     String prompt,
     List<String> attachmentIds,
   );
+  Future<SubmitPromptReceipt> resumeTask(String sessionId);
   Future<void> stopPrompt(String sessionId);
   Future<InteractionResolutionResult> resolveInteraction(
     String interactionId,
@@ -451,6 +452,19 @@ class FrbStudioApi implements StudioApi {
         prompt: prompt,
         attachmentIds: attachmentIds,
       ),
+    );
+    return SubmitPromptReceipt(
+      sessionId: response.sessionId,
+      turnId: response.turnId,
+      cursor: response.cursor.toInt(),
+    );
+  }
+
+  @override
+  Future<SubmitPromptReceipt> resumeTask(String sessionId) async {
+    await _ensureReady();
+    final response = await _bridgeCall(
+      () => frb.resumeTask(sessionId: sessionId),
     );
     return SubmitPromptReceipt(
       sessionId: response.sessionId,

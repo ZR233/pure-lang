@@ -839,7 +839,7 @@ mod tests {
             None,
             vec![ToolCall::function(
                 "call-1",
-                "task_request_review",
+                "task_request_delivery_review",
                 serde_json::json!({}),
                 Some("call-1".to_string()),
             )],
@@ -848,7 +848,7 @@ mod tests {
         parent.push_tool_result(
             "call-1".to_string(),
             Some("call-1".to_string()),
-            "task_request_review".to_string(),
+            "task_request_delivery_review".to_string(),
             ToolCallKind::Function,
             "ok".to_string(),
             "{}".to_string(),

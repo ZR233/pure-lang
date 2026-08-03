@@ -5,8 +5,7 @@ use anyhow::{Context, Result};
 use crate::config::ConfigStore;
 use crate::resolve_workspace_root;
 use crate::studio::agent_host::{
-    StudioAgentHost, StudioAgentResources, StudioAgentRuntime, StudioContinuationService,
-    runtime_options,
+    StudioAgentHost, StudioAgentResources, StudioAgentRuntime, runtime_options,
 };
 use crate::studio::task_coordinator::TaskCoordinator;
 use crate::studio::{
@@ -42,7 +41,6 @@ impl StudioRuntime {
         let task_coordinator = std::sync::Arc::new(TaskCoordinator::new(store.clone()));
         let interactions = InteractionRuntime::new(store.clone());
         let product_events = StudioProductEventRuntime::new(store.clone());
-        let continuations = StudioContinuationService::new(store.clone(), task_coordinator.clone());
         Self {
             interactions,
             product_events,
@@ -54,7 +52,6 @@ impl StudioRuntime {
             runtime_state,
             agent_framework: Default::default(),
             agent_resources: StudioAgentResources::default(),
-            continuations,
             task_coordinator,
             lifecycle_lock: std::sync::Arc::new(tokio::sync::Mutex::new(())),
             #[cfg(test)]
@@ -97,11 +94,7 @@ impl StudioRuntime {
         if let Some(runtime) = framework.as_ref() {
             return Ok(runtime.clone());
         }
-        for agent_id in self
-            .store
-            .reconcile_runtime_session_ownership()
-            .await?
-        {
+        for agent_id in self.store.reconcile_runtime_session_ownership().await? {
             tracing::warn!(
                 agent_id,
                 "removed runtime registration that no longer owns its claimed Studio sessions"
@@ -117,7 +110,6 @@ impl StudioRuntime {
             self.lsp_runtime.clone(),
             self.interactions.clone(),
             self.runtime_state.clone(),
-            self.continuations.clone(),
             self.task_coordinator.clone(),
             self.agent_resources.clone(),
             self.product_events.clone(),
@@ -129,7 +121,6 @@ impl StudioRuntime {
         );
         let handle = runtime.handle();
         runtime.host().attach_runtime(handle.clone()).await;
-        self.continuations.attach(handle.clone()).await?;
         handle
             .start_restored_inputs()
             .await
@@ -164,7 +155,6 @@ impl StudioRuntime {
     }
 
     async fn shutdown_agent_framework(&self) -> Result<()> {
-        self.continuations.detach().await;
         let framework = self.agent_framework.lock().await.take();
         if let Some(framework) = framework {
             framework.host().detach_runtime().await;
@@ -199,13 +189,8 @@ impl StudioRuntime {
         match initialization {
             Ok(report) => {
                 let _ = self.runtime_state.replace_recovery_issues(report.issues);
-                let ready = self
-                    .runtime_state
-                    .transition(StudioRuntimeStatus::Ready, None)?;
-                for run in report.recovered_runs {
-                    self.continuations.request_recovery(run.id);
-                }
-                Ok(ready)
+                self.runtime_state
+                    .transition(StudioRuntimeStatus::Ready, None)
             }
             Err(error) => {
                 let message = format!("{error:#}");

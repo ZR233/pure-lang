@@ -584,7 +584,7 @@ StudioState applyCanonicalSessionSnapshot(
   StudioSessionSnapshot snapshot,
 ) {
   final sessionId = snapshot.sessionId;
-  if (sessionId.isEmpty || current.selectedSessionId != sessionId) {
+  if (sessionId.isEmpty) {
     return current;
   }
   final existingRuntime =
