@@ -174,8 +174,11 @@ async fn delivery_review_prompt_keeps_sibling_work_out_of_scope() {
         .to_string_lossy()
         .to_string();
 
-    std::fs::write(fixture.repository.join("index.html"), "<main id=\"game\"></main>\n")
-        .unwrap();
+    std::fs::write(
+        fixture.repository.join("index.html"),
+        "<main id=\"game\"></main>\n",
+    )
+    .unwrap();
     git(&fixture.repository, &["add", "index.html"]);
     git(&fixture.repository, &["commit", "-m", "implement ui shell"]);
     let head_commit = git_output(&fixture.repository, &["rev-parse", "HEAD"]);
@@ -4375,6 +4378,52 @@ async fn coordinator_recovers_active_task_after_restart() {
 }
 
 #[tokio::test]
+async fn recovery_reports_canonical_phase_after_integrated_review_interruption() {
+    let fixture = ReviewFixture::new("recovery-integrated-review-phase").await;
+    fixture
+        .store
+        .begin_integrated_review(&fixture.session_id, "call-recovery-review")
+        .await
+        .unwrap();
+    let (_, reviewer) = fixture
+        .store
+        .authorize_reviewer_spawn(
+            &fixture.session_id,
+            "call-recovery-review",
+            "agent-recovery-reviewer",
+        )
+        .await
+        .unwrap();
+    fixture
+        .store
+        .update_spawned_outcome(
+            &reviewer.id,
+            "agent-recovery-reviewer",
+            AgentOutcomeStatus::Running,
+            None,
+        )
+        .await
+        .unwrap();
+    fixture.coordinator.suspend();
+
+    let recovered_coordinator = TaskCoordinator::new(fixture.store.clone());
+    let report = recovered_coordinator.recover_active_tasks().await.unwrap();
+
+    assert!(report.issues.is_empty());
+    assert_eq!(report.recovered_runs.len(), 1);
+    assert_eq!(report.recovered_runs[0].phase, TaskRunPhase::Reworking);
+    assert_eq!(
+        report.recovered_runs[0].status_message.as_deref(),
+        Some("reviewer interrupted by application restart before review_exit")
+    );
+    recovered_coordinator
+        .finish_task(&fixture.run_id, TaskRunPhase::Cancelled, None)
+        .await
+        .unwrap();
+    fixture.cleanup();
+}
+
+#[tokio::test]
 async fn recovery_blocks_run_before_continuation_when_agent_pairs_are_invalid() {
     let repository = init_repository("recovery-agent-mismatch");
     let store = task_store(&repository).await;
@@ -4551,8 +4600,16 @@ async fn recovery_preserves_restart_cancelled_worktree_and_cleans_orphan_leaf() 
             .unwrap()
             .unwrap()
             .status,
-        WorkUnitStatus::Cancelled
+        WorkUnitStatus::AwaitingCompletion
     );
+    let outcome = store
+        .list_agent_outcomes(&run.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|outcome| outcome.agent_id == "agent-owned")
+        .unwrap();
+    assert_eq!(outcome.status, AgentOutcomeStatus::Cancelled);
     remove_repository(repository);
 }
 

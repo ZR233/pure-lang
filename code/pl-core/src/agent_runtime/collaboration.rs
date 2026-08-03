@@ -600,9 +600,11 @@ mod tests {
 
         assert!(stages.iter().any(|stage| stage == "readyForCompletion"));
         assert!(!stages.iter().any(|stage| stage == "readyForReview"));
-        assert!(CollaborationToolKind::ReportProgress
-            .description()
-            .contains("never creates a durable completion"));
+        assert!(
+            CollaborationToolKind::ReportProgress
+                .description()
+                .contains("never creates a durable completion")
+        );
     }
 
     #[test]

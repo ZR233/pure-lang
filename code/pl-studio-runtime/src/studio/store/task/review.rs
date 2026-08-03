@@ -51,16 +51,19 @@ impl StudioStore {
             ensure_no_pending_delivery_review(&tx, &run.id, &work_unit.id).await?;
             let round = insert_review_round(
                 &tx,
-                &run.id,
-                ReviewScope::Delivery,
-                Some(&work_unit.id),
-                Some(&completion.id),
-                Some(completion.revision),
-                completion
-                    .head_commit
-                    .as_deref()
-                    .unwrap_or(work_unit.base_commit.as_str()),
-                requested_by_call_id,
+                NewReviewRound {
+                    task_run_id: &run.id,
+                    target: NewReviewTarget::Delivery {
+                        work_unit_id: &work_unit.id,
+                        completion_id: &completion.id,
+                        completion_revision: completion.revision,
+                        reviewed_head: completion
+                            .head_commit
+                            .as_deref()
+                            .unwrap_or(work_unit.base_commit.as_str()),
+                    },
+                    requested_by_call_id,
+                },
             )
             .await?;
             let mut unit_active: entities::work_unit::ActiveModel = work_unit.into();
@@ -97,13 +100,13 @@ impl StudioStore {
             ensure_no_pending_review(&tx, &run.id).await?;
             let round = insert_review_round(
                 &tx,
-                &run.id,
-                ReviewScope::Integrated,
-                None,
-                None,
-                None,
-                &run.expected_head,
-                requested_by_call_id,
+                NewReviewRound {
+                    task_run_id: &run.id,
+                    target: NewReviewTarget::Integrated {
+                        reviewed_head: &run.expected_head,
+                    },
+                    requested_by_call_id,
+                },
             )
             .await?;
             let mut run_active: entities::task_run::ActiveModel = run.into();
@@ -590,33 +593,63 @@ async fn complete_delivery_review(
     Ok(())
 }
 
+struct NewReviewRound<'a> {
+    task_run_id: &'a str,
+    target: NewReviewTarget<'a>,
+    requested_by_call_id: &'a str,
+}
+
+enum NewReviewTarget<'a> {
+    Delivery {
+        work_unit_id: &'a str,
+        completion_id: &'a str,
+        completion_revision: i32,
+        reviewed_head: &'a str,
+    },
+    Integrated {
+        reviewed_head: &'a str,
+    },
+}
+
 async fn insert_review_round(
     tx: &sea_orm::DatabaseTransaction,
-    task_run_id: &str,
-    scope: ReviewScope,
-    work_unit_id: Option<&str>,
-    completion_id: Option<&str>,
-    completion_revision: Option<i32>,
-    reviewed_head: &str,
-    requested_by_call_id: &str,
+    request: NewReviewRound<'_>,
 ) -> Result<ReviewRoundRecord> {
     let count = entities::review_round::Entity::find()
-        .filter(entities::review_round::Column::TaskRunId.eq(task_run_id.to_string()))
+        .filter(entities::review_round::Column::TaskRunId.eq(request.task_run_id.to_string()))
         .count(tx)
         .await?;
+    let (scope, work_unit_id, completion_id, completion_revision, reviewed_head) =
+        match request.target {
+            NewReviewTarget::Delivery {
+                work_unit_id,
+                completion_id,
+                completion_revision,
+                reviewed_head,
+            } => (
+                ReviewScope::Delivery,
+                Some(work_unit_id.to_string()),
+                Some(completion_id.to_string()),
+                Some(completion_revision),
+                reviewed_head,
+            ),
+            NewReviewTarget::Integrated { reviewed_head } => {
+                (ReviewScope::Integrated, None, None, None, reviewed_head)
+            }
+        };
     let now = unix_seconds();
     review_round_record(
         entities::review_round::ActiveModel {
             id: Set(new_id("review")),
-            task_run_id: Set(task_run_id.to_string()),
+            task_run_id: Set(request.task_run_id.to_string()),
             round: Set(i32::try_from(count + 1)?),
             scope: Set(scope.as_str().to_string()),
-            work_unit_id: Set(work_unit_id.map(str::to_string)),
-            completion_id: Set(completion_id.map(str::to_string)),
+            work_unit_id: Set(work_unit_id),
+            completion_id: Set(completion_id),
             completion_revision: Set(completion_revision),
             reviewed_head: Set(reviewed_head.to_string()),
             status: Set(ReviewVerdict::Pending.as_str().to_string()),
-            requested_by_call_id: Set(requested_by_call_id.to_string()),
+            requested_by_call_id: Set(request.requested_by_call_id.to_string()),
             reviewer_agent_id: Set(None),
             summary: Set(None),
             design_references_json: Set("[]".to_string()),
@@ -718,8 +751,7 @@ async fn ensure_review_call_unused(
     if entities::review_round::Entity::find()
         .filter(entities::review_round::Column::TaskRunId.eq(task_run_id.to_string()))
         .filter(
-            entities::review_round::Column::RequestedByCallId
-                .eq(requested_by_call_id.to_string()),
+            entities::review_round::Column::RequestedByCallId.eq(requested_by_call_id.to_string()),
         )
         .one(tx)
         .await?

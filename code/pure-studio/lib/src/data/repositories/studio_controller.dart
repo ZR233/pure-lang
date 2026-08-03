@@ -193,9 +193,7 @@ class StudioController extends _$StudioController {
         current.composersBySession[sessionId] ??
         const ComposerSessionState.idle();
     state = AsyncData(
-      current.copyWith(
-        composersBySession: {sessionId: composer.updateDraft(value)},
-      ),
+      _withComposer(current, sessionId, composer.updateDraft(value)),
     );
   }
 
@@ -247,9 +245,7 @@ class StudioController extends _$StudioController {
     Future<SubmitPromptReceipt> Function() submit,
   ) async {
     final submissionRevision = submitting.submissionRevision;
-    state = AsyncData(
-      current.copyWith(composersBySession: {sessionId: submitting}),
-    );
+    state = AsyncData(_withComposer(current, sessionId, submitting));
     final SubmitPromptReceipt receipt;
     try {
       receipt = await submit();
@@ -261,9 +257,7 @@ class StudioController extends _$StudioController {
       }
       final failed = active.fail(error, submissionRevision: submissionRevision);
       if (!identical(failed, active)) {
-        state = AsyncData(
-          latest.copyWith(composersBySession: {sessionId: failed}),
-        );
+        state = AsyncData(_withComposer(latest, sessionId, failed));
       }
       return;
     }
@@ -280,9 +274,7 @@ class StudioController extends _$StudioController {
         submissionRevision: submissionRevision,
       );
       if (!identical(failed, active)) {
-        state = AsyncData(
-          latest.copyWith(composersBySession: {sessionId: failed}),
-        );
+        state = AsyncData(_withComposer(latest, sessionId, failed));
       }
       return;
     }
@@ -292,9 +284,7 @@ class StudioController extends _$StudioController {
     if (identical(accepted, active)) {
       return;
     }
-    state = AsyncData(
-      latest.copyWith(composersBySession: {sessionId: accepted}),
-    );
+    state = AsyncData(_withComposer(latest, sessionId, accepted));
     if (state.value?.selectedSessionId == sessionId) {
       await _subscribe(sessionId, forceSnapshot: true);
     }
@@ -686,7 +676,19 @@ StudioState _reconcileComposerTurns(StudioState state) {
   if (updates.isEmpty) {
     return state;
   }
-  return state.copyWith(composersBySession: updates);
+  return state.copyWith(
+    composersBySession: {...state.composersBySession, ...updates},
+  );
+}
+
+StudioState _withComposer(
+  StudioState state,
+  String sessionId,
+  ComposerSessionState composer,
+) {
+  return state.copyWith(
+    composersBySession: {...state.composersBySession, sessionId: composer},
+  );
 }
 
 Map<String, AgentWorkspaceSyncState> _workspaceSyncAfterSelecting(

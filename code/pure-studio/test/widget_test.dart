@@ -33,7 +33,7 @@ part 'widget_test/controller_stream_tests.dart';
 part 'widget_test/reducer_recovery_tests.dart';
 part 'widget_test/recovery_issue_tests.dart';
 part 'widget_test/timeline_model_tests.dart';
-part 'widget_test/snapshot_json_tests.dart';
+part 'widget_test/snapshot_settings_tests.dart';
 part 'widget_test/session_stream_tests.dart';
 part 'widget_test/agent_workspace_tests.dart';
 part 'widget_test/demo_project_tests.dart';
@@ -61,7 +61,7 @@ void main() {
   registerReducerRecoveryTests();
   registerRecoveryIssueTests();
   registerTimelineModelTests();
-  registerSnapshotJsonTests();
+  registerSnapshotSettingsTests();
   registerSessionStreamTests();
   registerAgentWorkspaceTests();
   registerDemoProjectTests();

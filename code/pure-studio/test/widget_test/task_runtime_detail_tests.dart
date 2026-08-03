@@ -23,7 +23,10 @@ void registerTaskRuntimeDetailTests() {
     expect(find.text('Stop · generation 3'), findsOneWidget);
     expect(find.text('UserRequest: 用户点击停止'), findsOneWidget);
     expect(find.textContaining('PlannerDecision'), findsNothing);
-    expect(find.byKey(StudioDriverKeys.taskAgent('executor-1')), findsOneWidget);
+    expect(
+      find.byKey(StudioDriverKeys.taskAgent('executor-1')),
+      findsOneWidget,
+    );
     expect(
       find.byKey(StudioDriverKeys.taskAgentStatus('executor-1')),
       findsOneWidget,
@@ -45,9 +48,7 @@ void registerTaskRuntimeDetailTests() {
       findsOneWidget,
     );
     expect(
-      find.byKey(
-        StudioDriverKeys.taskCompletionRevision('completion-1', 2),
-      ),
+      find.byKey(StudioDriverKeys.taskCompletionRevision('completion-1', 2)),
       findsOneWidget,
     );
     expect(find.byKey(StudioDriverKeys.taskReview('review-1')), findsOneWidget);

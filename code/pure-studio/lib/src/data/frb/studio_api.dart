@@ -12,7 +12,7 @@ part 'studio_session_stream.dart';
 part 'studio_api_contract.dart';
 part 'studio_frb_converters.dart';
 part 'studio_state_converters.dart';
-part 'studio_config_converters.dart';
+part 'studio_settings_converters.dart';
 part 'studio_provider_catalog_converters.dart';
 part 'studio_demo_api.dart';
 part 'studio_demo_settings.dart';
@@ -62,32 +62,6 @@ String _compactAmount(String value) {
   return fixed.replaceFirst(RegExp(r'\.?0+$'), '');
 }
 
-Map<String, Object?> _decodeJson(String json) {
-  final value = jsonDecode(json);
-  return _map(value);
-}
-
-Map<String, Object?> _map(Object? value) {
-  if (value is Map<String, Object?>) {
-    return value;
-  }
-  if (value is Map) {
-    return value.map((key, value) => MapEntry(key.toString(), value));
-  }
-  return const {};
-}
-
-List<Object?> _list(Object? value) {
-  if (value is List) {
-    return value.cast<Object?>();
-  }
-  return const [];
-}
-
-List<String> _stringList(Object? value) {
-  return _list(value).map(_string).where((item) => item.isNotEmpty).toList();
-}
-
 String _string(Object? value, {String fallback = ''}) {
   if (value == null) {
     return fallback;
@@ -96,51 +70,6 @@ String _string(Object? value, {String fallback = ''}) {
     return value.isEmpty ? fallback : value;
   }
   return value.toString();
-}
-
-String? _nullableString(Object? value) {
-  final string = _string(value);
-  return string.isEmpty ? null : string;
-}
-
-int _int(Object? value, {int fallback = 0}) {
-  if (value is int) {
-    return value;
-  }
-  if (value is BigInt) {
-    return value.toInt();
-  }
-  return int.tryParse(_string(value)) ?? fallback;
-}
-
-int? _nullableInt(Object? value) {
-  final string = _string(value);
-  if (string.isEmpty) {
-    return null;
-  }
-  return _int(value);
-}
-
-double? _nullableDouble(Object? value) {
-  if (value is num) {
-    return value.toDouble();
-  }
-  final string = _string(value);
-  return string.isEmpty ? null : double.tryParse(string);
-}
-
-bool _bool(Object? value) {
-  if (value is bool) {
-    return value;
-  }
-  return _string(value) == 'true';
-}
-
-bool _boolWithDefault(Object? value, bool fallback) {
-  if (value == null) {
-    return fallback;
-  }
-  return _bool(value);
 }
 
 int _frbInt(Object value) {

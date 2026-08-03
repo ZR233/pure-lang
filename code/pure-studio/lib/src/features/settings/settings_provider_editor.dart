@@ -320,11 +320,18 @@ class ProviderEditor extends StatelessWidget {
               Align(
                 alignment: Alignment.centerLeft,
                 child: SegmentedButton<String>(
+                  key: StudioDriverKeys.providerConnectionMode(provider.id),
                   segments: [
                     for (final mode in connectionModes)
                       ButtonSegment<String>(
                         value: mode.id,
-                        label: Text(mode.displayName),
+                        label: KeyedSubtree(
+                          key: StudioDriverKeys.providerConnectionModeOption(
+                            provider.id,
+                            mode.id,
+                          ),
+                          child: Text(mode.displayName),
+                        ),
                       ),
                   ],
                   selected: {selectedConnectionMode},

@@ -65,9 +65,6 @@ class RolesTab extends ConsumerWidget {
       options: options,
       efforts: option.efforts,
       onModelChanged: (value) {
-        if (value == null) {
-          return;
-        }
         final selected = options.firstWhere(
           (candidate) => candidate.key == value,
         );
@@ -81,9 +78,6 @@ class RolesTab extends ConsumerWidget {
             );
       },
       onEffortChanged: (value) {
-        if (value == null) {
-          return;
-        }
         ref
             .read(studioControllerProvider.notifier)
             .setModelRole(
@@ -165,8 +159,8 @@ class _RoleSettingsRow extends StatelessWidget {
   final String? selectedEffort;
   final List<_RoleModelOption> options;
   final List<String> efforts;
-  final ValueChanged<String?> onModelChanged;
-  final ValueChanged<String?> onEffortChanged;
+  final ValueChanged<String> onModelChanged;
+  final ValueChanged<String> onEffortChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -187,80 +181,40 @@ class _RoleSettingsRow extends StatelessWidget {
         ),
       ],
     );
-    final modelSelector = KeyedSubtree(
-      key: StudioDriverKeys.settingsRoleModel(role),
-      child: DropdownButtonFormField<String>(
-        key: ValueKey<String>('settings-role-$role-model-value-$selectedModel'),
-        initialValue: selectedModel,
-        isExpanded: true,
-        decoration: InputDecoration(
-          labelText: context.l10n.settingsModelField,
-          isDense: true,
-        ),
-        selectedItemBuilder: (context) {
-          final entries = options.isEmpty
-              ? const [_RoleModelOption.defaultOption()]
-              : options;
-          return [
-            for (final option in entries)
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  option.label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-          ];
-        },
-        items: [
-          if (options.isEmpty)
-            DropdownMenuItem(
-              key: StudioDriverKeys.settingsRoleModelOption(
-                role,
-                'default',
-                'default',
-              ),
-              value: 'default::default',
-              child: const Text('default'),
-            )
-          else
-            for (final option in options)
-              DropdownMenuItem(
-                key: StudioDriverKeys.settingsRoleModelOption(
-                  role,
-                  option.providerId,
-                  option.model,
-                ),
-                value: option.key,
-                child: Text(option.label, overflow: TextOverflow.ellipsis),
-              ),
-        ],
-        onChanged: options.isEmpty ? null : onModelChanged,
-      ),
-    );
-    final effortSelector = KeyedSubtree(
-      key: StudioDriverKeys.settingsRoleEffort(role),
-      child: DropdownButtonFormField<String>(
-        key: ValueKey<String>(
-          'settings-role-$role-effort-value-${selectedEffort ?? 'none'}',
-        ),
-        initialValue: selectedEffort,
-        isExpanded: true,
-        decoration: InputDecoration(
-          labelText: context.l10n.statusReasoningEffort,
-          isDense: true,
-        ),
-        items: [
-          for (final effort in efforts)
-            DropdownMenuItem(
-              key: StudioDriverKeys.settingsRoleEffortOption(role, effort),
-              value: effort,
-              child: Text(effort, overflow: TextOverflow.ellipsis),
+    final modelEntries = options.isEmpty
+        ? const [_RoleModelOption.defaultOption()]
+        : options;
+    final modelSelector = _RoleSelectField(
+      selectorKey: StudioDriverKeys.settingsRoleModel(role),
+      label: context.l10n.settingsModelField,
+      value: selectedModel,
+      options: [
+        for (final option in modelEntries)
+          _RoleSelectOption(
+            key: StudioDriverKeys.settingsRoleModelOption(
+              role,
+              option.providerId,
+              option.model,
             ),
-        ],
-        onChanged: efforts.isEmpty ? null : onEffortChanged,
-      ),
+            value: option.key,
+            label: option.label,
+          ),
+      ],
+      onChanged: options.isEmpty ? null : onModelChanged,
+    );
+    final effortSelector = _RoleSelectField(
+      selectorKey: StudioDriverKeys.settingsRoleEffort(role),
+      label: context.l10n.statusReasoningEffort,
+      value: selectedEffort,
+      options: [
+        for (final effort in efforts)
+          _RoleSelectOption(
+            key: StudioDriverKeys.settingsRoleEffortOption(role, effort),
+            value: effort,
+            label: effort,
+          ),
+      ],
+      onChanged: efforts.isEmpty ? null : onEffortChanged,
     );
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -291,6 +245,77 @@ class _RoleSettingsRow extends StatelessWidget {
       ),
     );
   }
+}
+
+class _RoleSelectField extends StatelessWidget {
+  const _RoleSelectField({
+    required this.selectorKey,
+    required this.label,
+    required this.value,
+    required this.options,
+    required this.onChanged,
+  });
+
+  final Key selectorKey;
+  final String label;
+  final String? value;
+  final List<_RoleSelectOption> options;
+  final ValueChanged<String>? onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onChanged != null && options.isNotEmpty;
+    final selectedLabel = options
+        .where((option) => option.value == value)
+        .firstOrNull
+        ?.label;
+    return MenuAnchor(
+      menuChildren: [
+        for (final option in options)
+          MenuItemButton(
+            key: option.key,
+            onPressed: enabled ? () => onChanged!(option.value) : null,
+            child: Text(option.label, overflow: TextOverflow.ellipsis),
+          ),
+      ],
+      builder: (context, controller, child) {
+        return InkWell(
+          key: selectorKey,
+          onTap: enabled
+              ? () => controller.isOpen ? controller.close() : controller.open()
+              : null,
+          borderRadius: BorderRadius.circular(4),
+          child: InputDecorator(
+            isEmpty: selectedLabel == null,
+            isFocused: controller.isOpen,
+            decoration: InputDecoration(
+              labelText: label,
+              isDense: true,
+              enabled: enabled,
+              suffixIcon: const Icon(Icons.arrow_drop_down),
+            ),
+            child: Text(
+              selectedLabel ?? '',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _RoleSelectOption {
+  const _RoleSelectOption({
+    required this.key,
+    required this.value,
+    required this.label,
+  });
+
+  final Key key;
+  final String value;
+  final String label;
 }
 
 String _roleDescription(BuildContext context, String role) {

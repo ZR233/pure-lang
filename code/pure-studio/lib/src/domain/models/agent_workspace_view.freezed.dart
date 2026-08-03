@@ -220,7 +220,7 @@ return $default(_that.session,_that.rootSession,_that.syncState,_that.timelineRo
 
 class _AgentWorkspaceView extends AgentWorkspaceView {
   const _AgentWorkspaceView({required this.session, required this.rootSession, required this.syncState, required final  List<TimelineRow> timelineRows, required this.todo, required this.runtime, required this.turn, required this.activeInteraction, required this.composer, required this.composerMode, required this.permissionMode, required final  List<ProviderSettingsView> providers, required final  List<RoleSettingsView> roles, required final  List<StudioAgentView> agents}): _timelineRows = timelineRows,_providers = providers,_roles = roles,_agents = agents,super._();
-  
+
 
 @override final  StudioSession session;
 @override final  StudioSession rootSession;

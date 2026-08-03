@@ -821,13 +821,23 @@ void registerShellSettingsTests() {
     expect(find.text('gpt-5.6-luna'), findsOneWidget);
     expect(find.text('WebSocket'), findsOneWidget);
     expect(find.text('HTTP'), findsOneWidget);
+    expect(
+      find.byKey(StudioDriverKeys.providerConnectionMode('openai')),
+      findsOneWidget,
+    );
+    final httpMode = find.byKey(
+      StudioDriverKeys.providerConnectionModeOption('openai', 'http'),
+    );
+    expect(httpMode.hitTestable(), findsOneWidget);
+    await tester.tap(httpMode);
+    await tester.pumpAndSettle();
 
     await tester.tap(find.widgetWithText(FilledButton, 'Save'));
     await tester.pumpAndSettle();
 
     final providers = api.savedProviderSettings!['providers'] as List<Object?>;
     final openai = providers.last! as Map<String, Object?>;
-    expect(openai['connectionMode'], 'web_socket');
+    expect(openai['connectionMode'], 'http');
     expect(openai['wireProtocol'], 'responses');
   });
 
@@ -1443,6 +1453,18 @@ void registerShellSettingsTests() {
         find.byKey(StudioDriverKeys.settingsRoleModel('explorer')),
       );
       await tester.pumpAndSettle();
+      expect(
+        find
+            .byKey(
+              StudioDriverKeys.settingsRoleModelOption(
+                'explorer',
+                'deepseek',
+                'deepseek-reasoner',
+              ),
+            )
+            .hitTestable(),
+        findsOneWidget,
+      );
       await tester.tap(
         find.byKey(
           StudioDriverKeys.settingsRoleModelOption(
@@ -1460,6 +1482,12 @@ void registerShellSettingsTests() {
         find.byKey(StudioDriverKeys.settingsRoleEffort('planner')),
       );
       await tester.pumpAndSettle();
+      expect(
+        find
+            .byKey(StudioDriverKeys.settingsRoleEffortOption('planner', 'max'))
+            .hitTestable(),
+        findsOneWidget,
+      );
       await tester.tap(
         find.byKey(StudioDriverKeys.settingsRoleEffortOption('planner', 'max')),
       );

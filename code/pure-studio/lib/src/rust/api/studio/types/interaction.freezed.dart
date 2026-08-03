@@ -182,7 +182,7 @@ return planConfirmation(_that.planId,_that.content);case _:
 
 class BridgeInteractionPayloadDto_UserInput extends BridgeInteractionPayloadDto {
   const BridgeInteractionPayloadDto_UserInput({required final  List<BridgeUserQuestionDto> questions}): _questions = questions,super._();
-  
+
 
  final  List<BridgeUserQuestionDto> _questions;
  List<BridgeUserQuestionDto> get questions {
@@ -254,7 +254,7 @@ as List<BridgeUserQuestionDto>,
 
 class BridgeInteractionPayloadDto_ToolApproval extends BridgeInteractionPayloadDto {
   const BridgeInteractionPayloadDto_ToolApproval({required this.name, required this.argumentsJson, this.workingDirectory, this.parentAgentId}): super._();
-  
+
 
  final  String name;
  final  String argumentsJson;
@@ -326,7 +326,7 @@ as String?,
 
 class BridgeInteractionPayloadDto_PlanConfirmation extends BridgeInteractionPayloadDto {
   const BridgeInteractionPayloadDto_PlanConfirmation({required this.planId, required this.content}): super._();
-  
+
 
  final  String planId;
  final  String content;

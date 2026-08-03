@@ -111,8 +111,80 @@ pub(crate) fn generate_gui() -> Result<()> {
         &["pub", "run", "build_runner", "build"],
         DemoMode::Native,
     )?;
+    normalize_generated_dart_whitespace(&app_dir.join("lib"))?;
     run_tool("dart", &["format", "lib"], &app_dir)?;
     run_tool("cargo", &["fmt", "--all"], &workspace_root)
+}
+
+fn normalize_generated_dart_whitespace(root: &Path) -> Result<()> {
+    let mut directories = vec![root.to_path_buf()];
+    while let Some(directory) = directories.pop() {
+        for entry in fs::read_dir(&directory)
+            .with_context(|| format!("failed to read {}", directory.display()))?
+        {
+            let entry = entry
+                .with_context(|| format!("failed to read entry in {}", directory.display()))?;
+            let path = entry.path();
+            if entry
+                .file_type()
+                .with_context(|| format!("failed to inspect {}", path.display()))?
+                .is_dir()
+            {
+                directories.push(path);
+                continue;
+            }
+            if !is_generated_dart_path(root, &path) {
+                continue;
+            }
+            let content = fs::read_to_string(&path)
+                .with_context(|| format!("failed to read {}", path.display()))?;
+            let normalized = trim_trailing_horizontal_whitespace(&content);
+            if normalized != content {
+                fs::write(&path, normalized)
+                    .with_context(|| format!("failed to normalize {}", path.display()))?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn is_generated_dart_path(root: &Path, path: &Path) -> bool {
+    let Ok(relative) = path.strip_prefix(root) else {
+        return false;
+    };
+    let Some(file_name) = relative.file_name().and_then(|value| value.to_str()) else {
+        return false;
+    };
+    if file_name.ends_with(".g.dart") || file_name.ends_with(".freezed.dart") {
+        return true;
+    }
+
+    let rust_root = Path::new("src").join("rust");
+    if relative.starts_with(rust_root)
+        && path.extension().and_then(|value| value.to_str()) == Some("dart")
+    {
+        return true;
+    }
+
+    relative.parent() == Some(Path::new("src").join("l10n").as_path())
+        && file_name.starts_with("app_localizations")
+        && path.extension().and_then(|value| value.to_str()) == Some("dart")
+}
+
+fn trim_trailing_horizontal_whitespace(content: &str) -> String {
+    let mut normalized = String::with_capacity(content.len());
+    for chunk in content.split_inclusive('\n') {
+        let (line, newline) = chunk
+            .strip_suffix('\n')
+            .map_or((chunk, ""), |line| (line, "\n"));
+        let (line, carriage_return) = line
+            .strip_suffix('\r')
+            .map_or((line, ""), |line| (line, "\r"));
+        normalized.push_str(line.trim_end_matches([' ', '\t']));
+        normalized.push_str(carriage_return);
+        normalized.push_str(newline);
+    }
+    normalized
 }
 
 pub(crate) fn verify_gui(options: VerifyGuiOptions) -> Result<()> {
@@ -723,6 +795,41 @@ mod tests {
         assert!(!args.contains(&"--verbose"));
         assert!(!args.contains(&"-t"));
         assert!(args.contains(&"--no-pub"));
+    }
+
+    #[test]
+    fn generated_whitespace_normalization_preserves_line_endings() {
+        assert_eq!(
+            trim_trailing_horizontal_whitespace("alpha  \r\nbeta\t\ngamma  "),
+            "alpha\r\nbeta\ngamma"
+        );
+    }
+
+    #[test]
+    fn generated_whitespace_normalization_excludes_handwritten_dart() {
+        let root = Path::new("lib");
+
+        assert!(is_generated_dart_path(root, &root.join("models.g.dart")));
+        assert!(is_generated_dart_path(
+            root,
+            &root.join("models.freezed.dart")
+        ));
+        assert!(is_generated_dart_path(
+            root,
+            &root.join("src/rust/frb_generated.dart")
+        ));
+        assert!(is_generated_dart_path(
+            root,
+            &root.join("src/l10n/app_localizations_en.dart")
+        ));
+        assert!(!is_generated_dart_path(
+            root,
+            &root.join("src/features/settings/editor.dart")
+        ));
+        assert!(!is_generated_dart_path(
+            root,
+            &root.join("src/l10n/studio_l10n.dart")
+        ));
     }
 
     #[test]

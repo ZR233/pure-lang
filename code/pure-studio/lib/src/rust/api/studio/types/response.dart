@@ -18,9 +18,7 @@ class BridgeStudioSnapshotResponse {
   final String? selectedSessionId;
   final BridgeTaskRuntimeDto? selectedSessionTask;
   final List<BridgeStudioRecoveryIssueDto> recoveryIssues;
-  final String configJson;
-  final String generalSettingsJson;
-  final BridgeWebSearchSettingsDto webSearch;
+  final BridgeStudioSettingsDto settings;
 
   const BridgeStudioSnapshotResponse({
     required this.projects,
@@ -29,9 +27,7 @@ class BridgeStudioSnapshotResponse {
     this.selectedSessionId,
     this.selectedSessionTask,
     required this.recoveryIssues,
-    required this.configJson,
-    required this.generalSettingsJson,
-    required this.webSearch,
+    required this.settings,
   });
 
   @override
@@ -42,9 +38,7 @@ class BridgeStudioSnapshotResponse {
       selectedSessionId.hashCode ^
       selectedSessionTask.hashCode ^
       recoveryIssues.hashCode ^
-      configJson.hashCode ^
-      generalSettingsJson.hashCode ^
-      webSearch.hashCode;
+      settings.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -57,9 +51,7 @@ class BridgeStudioSnapshotResponse {
           selectedSessionId == other.selectedSessionId &&
           selectedSessionTask == other.selectedSessionTask &&
           recoveryIssues == other.recoveryIssues &&
-          configJson == other.configJson &&
-          generalSettingsJson == other.generalSettingsJson &&
-          webSearch == other.webSearch;
+          settings == other.settings;
 }
 
 class DeepSeekBalanceDto {

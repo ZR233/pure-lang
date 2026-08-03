@@ -44,6 +44,6 @@ pub enum StudioProductEventKind {
     },
     AgentDirectoryChanged {
         root_session_id: String,
-        agent: StudioAgentDirectoryEntry,
+        agent: Box<StudioAgentDirectoryEntry>,
     },
 }

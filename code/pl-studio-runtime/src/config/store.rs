@@ -150,10 +150,7 @@ struct ProviderCredentials {
     bearer_token_env: Option<String>,
 }
 
-fn restore_provider_credentials(
-    config: &mut StudioConfig,
-    credentials: RejectedConfigCredentials,
-) {
+fn restore_provider_credentials(config: &mut StudioConfig, credentials: RejectedConfigCredentials) {
     let presets = builtin_provider_catalog().presets;
     for (provider_id, credentials) in credentials.models.providers {
         let Ok(provider_id) = ProviderId::new(provider_id) else {

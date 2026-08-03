@@ -1,9 +1,9 @@
 use crate::api::studio::convert::records::{project_dto, session_dto};
 use crate::api::studio::convert::runtime::{bridge_recovery_issue, bridge_task_runtime};
-use crate::api::studio::convert::settings::{studio_config_projection, web_search_settings_dto};
+use crate::api::studio::convert::settings::studio_settings_dto;
 use crate::api::studio::runtime::BridgeRuntime;
-use crate::api::studio::types::BridgeStudioSnapshotResponse;
-use anyhow::Result;
+use crate::api::studio::types::{BridgeGeneralSettingsDto, BridgeStudioSnapshotResponse};
+use anyhow::{Context, Result};
 use std::collections::HashSet;
 // ── Inner async helpers ──
 
@@ -93,16 +93,18 @@ pub(super) async fn studio_snapshot_from_projects_inner(
             pl_studio_runtime::StudioMode::Simple => pl_studio_runtime::StudioRole::Executor,
             pl_studio_runtime::StudioMode::Task => pl_studio_runtime::StudioRole::Planner,
         });
-    let web_search = web_search_settings_dto(&config, web_search_role)?;
-    let config_json = serde_json::to_string(&studio_config_projection(&config)?)?;
     let general_settings = bridge
         .studio
         .store()
         .load_setting("flutterSettings:general")
         .await?
-        .and_then(|value| serde_json::from_str::<serde_json::Value>(&value).ok())
-        .unwrap_or_else(|| serde_json::json!({}));
-    let general_settings_json = serde_json::to_string(&general_settings)?;
+        .map(|value| {
+            serde_json::from_str::<BridgeGeneralSettingsDto>(&value)
+                .context("invalid stored Flutter general settings")
+        })
+        .transpose()?
+        .unwrap_or_default();
+    let settings = studio_settings_dto(&config, general_settings, web_search_role)?;
 
     Ok(BridgeStudioSnapshotResponse {
         projects: projects.into_iter().map(project_dto).collect(),
@@ -114,9 +116,7 @@ pub(super) async fn studio_snapshot_from_projects_inner(
             .into_iter()
             .map(bridge_recovery_issue)
             .collect(),
-        config_json,
-        general_settings_json,
-        web_search,
+        settings,
     })
 }
 

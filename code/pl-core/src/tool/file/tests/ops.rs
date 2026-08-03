@@ -190,11 +190,13 @@ async fn list_files_empty_fields_use_workspace_defaults_without_listing_root() {
     let value: serde_json::Value = serde_json::from_str(&output.description).unwrap();
     assert_eq!(value["path"], serde_json::json!("."));
     assert_eq!(value["glob"], serde_json::json!("*"));
-    assert_eq!(
-        value["files"],
-        serde_json::json!(["README.md", "src/"])
+    assert_eq!(value["files"], serde_json::json!(["README.md", "src/"]));
+    assert!(
+        !value["files"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("/"))
     );
-    assert!(!value["files"].as_array().unwrap().contains(&serde_json::json!("/")));
     let _ = tokio::fs::remove_dir_all(root).await;
 }
 

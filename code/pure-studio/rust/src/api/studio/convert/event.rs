@@ -42,7 +42,7 @@ pub(crate) fn bridge_product_event(
                 agent,
             } => BridgeProductEventPayload::AgentDirectoryChanged {
                 root_session_id,
-                agent: bridge_agent_directory_entry(agent),
+                agent: Box::new(bridge_agent_directory_entry(*agent)),
             },
         },
     }

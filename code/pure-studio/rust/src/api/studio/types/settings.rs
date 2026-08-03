@@ -131,6 +131,125 @@ pub struct BridgeWebSearchSettingsDto {
     pub model: Option<String>,
 }
 
+/// Studio 配置与本地界面设置的 canonical typed 快照。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeStudioSettingsDto {
+    pub default_provider_id: Option<String>,
+    pub providers: Vec<BridgeProviderSettingsDto>,
+    pub roles: Vec<BridgeRoleSettingsDto>,
+    pub permission_mode: String,
+    pub instructions: BridgeInstructionsSettingsDto,
+    pub skills: BridgeSkillsSettingsDto,
+    pub mcp_servers: Vec<BridgeMcpServerSettingsDto>,
+    pub general: BridgeGeneralSettingsDto,
+    pub web_search: BridgeWebSearchSettingsDto,
+}
+
+/// 不含 secret 的 Provider canonical 设置视图。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeProviderSettingsDto {
+    pub id: String,
+    pub template_kind: String,
+    pub wire_protocol: String,
+    pub connection_mode: String,
+    pub name: String,
+    pub base_url: String,
+    pub has_bearer_token: bool,
+    pub capability_source: String,
+    pub hosted_web_search: bool,
+    pub standalone_web_search: Option<String>,
+    pub default_model: String,
+    pub models: Vec<BridgeProviderModelSettingsDto>,
+    pub custom_models: Vec<BridgeProviderModelSettingsDto>,
+    pub catalog_id: Option<String>,
+}
+
+/// Provider 设置页使用的模型视图。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeProviderModelSettingsDto {
+    pub slug: String,
+    pub display_name: String,
+    pub description: String,
+    pub context_window: Option<u64>,
+    pub max_output_tokens: Option<u64>,
+    pub currency: String,
+    pub input_price_per_m_tok: Option<f64>,
+    pub output_price_per_m_tok: Option<f64>,
+    pub cache_read_price_per_m_tok: Option<f64>,
+    pub reasoning_efforts: Vec<String>,
+    pub base_instructions: String,
+}
+
+/// 角色到 provider/model/effort 的 canonical 路由。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeRoleSettingsDto {
+    pub key: String,
+    pub provider_id: String,
+    pub model: String,
+    pub effort: String,
+}
+
+/// Instructions 页的 canonical 设置。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeInstructionsSettingsDto {
+    pub base_override: String,
+    pub developer: String,
+    pub user: String,
+    pub project_doc_max_bytes: u64,
+    pub project_doc_fallback_filenames: Vec<String>,
+}
+
+/// Skills 页的 canonical 设置。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeSkillsSettingsDto {
+    pub enabled: bool,
+    pub auto_learn: bool,
+    pub system_enabled: bool,
+    pub project_dir: String,
+    pub user_dir: String,
+    pub external_dirs: Vec<String>,
+    pub disabled: Vec<String>,
+    pub auto_learn_min_tool_calls: u32,
+}
+
+/// MCP 设置页的 canonical server 视图。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeMcpServerSettingsDto {
+    pub id: String,
+    pub transport: String,
+    pub endpoint: String,
+    pub enabled: bool,
+    pub status: String,
+    pub source_kind: String,
+    pub mutation_policy: String,
+}
+
+/// Flutter 本地通用设置的 typed 快照。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeGeneralSettingsDto {
+    pub follow_system_theme: bool,
+    pub follow_active_turn: bool,
+    pub compact_timeline: bool,
+}
+
+impl Default for BridgeGeneralSettingsDto {
+    fn default() -> Self {
+        Self {
+            follow_system_theme: true,
+            follow_active_turn: true,
+            compact_timeline: false,
+        }
+    }
+}
+
 // ── Provider catalog output ──
 
 #[derive(Debug, Clone)]

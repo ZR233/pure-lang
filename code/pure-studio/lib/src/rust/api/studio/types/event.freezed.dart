@@ -200,7 +200,7 @@ return stale(_that.laggedEvents);case _:
 
 class BridgeProductEventPayload_SessionListChanged extends BridgeProductEventPayload {
   const BridgeProductEventPayload_SessionListChanged({required this.projectId, required final  List<SessionDto> sessions}): _sessions = sessions,super._();
-  
+
 
  final  String projectId;
  final  List<SessionDto> _sessions;
@@ -274,7 +274,7 @@ as List<SessionDto>,
 
 class BridgeProductEventPayload_McpHealthChanged extends BridgeProductEventPayload {
   const BridgeProductEventPayload_McpHealthChanged({required this.health}): super._();
-  
+
 
  final  BridgeMcpHealthDto health;
 
@@ -340,7 +340,7 @@ as BridgeMcpHealthDto,
 
 class BridgeProductEventPayload_LspHealthChanged extends BridgeProductEventPayload {
   const BridgeProductEventPayload_LspHealthChanged({required this.health}): super._();
-  
+
 
  final  BridgeLspHealthDto health;
 
@@ -406,7 +406,7 @@ as BridgeLspHealthDto,
 
 class BridgeProductEventPayload_SessionTaskChanged extends BridgeProductEventPayload {
   const BridgeProductEventPayload_SessionTaskChanged({required this.sessionId, this.task}): super._();
-  
+
 
  final  String sessionId;
  final  BridgeTaskRuntimeDto? task;
@@ -542,7 +542,7 @@ as BridgeAgentDirectoryEntryDto,
 
 class BridgeProductEventPayload_Stale extends BridgeProductEventPayload {
   const BridgeProductEventPayload_Stale({required this.laggedEvents}): super._();
-  
+
 
  final  BigInt laggedEvents;
 

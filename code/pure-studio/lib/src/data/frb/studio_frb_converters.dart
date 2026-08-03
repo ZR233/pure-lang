@@ -270,9 +270,7 @@ StudioState studioStateFromFrbSnapshot(frb.BridgeStudioSnapshotResponse value) {
           ? null
           : _taskRuntimeFromFrb(value.selectedSessionTask!),
     ),
-    config: _decodeJson(value.configJson),
-    generalSettings: _decodeJson(value.generalSettingsJson),
-    webSearch: value.webSearch,
+    settings: value.settings,
     eventNextSequence: 0,
   );
 }

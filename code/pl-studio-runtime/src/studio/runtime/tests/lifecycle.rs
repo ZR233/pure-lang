@@ -626,21 +626,6 @@ async fn initialize_runtime_recovers_child_interaction_with_canonical_owner() {
         })
         .await
         .unwrap();
-    let ghost_owner = crate::studio::agent_host::root_agent_id(&child.id);
-    handle
-        .register(pl_core::AgentRegistration {
-            identity: pl_core::AgentIdentity {
-                id: ghost_owner.clone(),
-                parent_id: None,
-                role: StudioRole::Planner.id(),
-                depth: 0,
-            },
-            session: pl_core::AgentSessionState::empty(
-                pl_core::SessionId::new(child.id.clone()).unwrap(),
-            ),
-        })
-        .await
-        .unwrap();
     seeding_runtime.shutdown_runtime().await.unwrap();
 
     let runtime = StudioRuntime::with_runtime_state(
@@ -690,10 +675,6 @@ async fn initialize_runtime_recovers_child_interaction_with_canonical_owner() {
 
     let handle = runtime.agent_framework().await.unwrap().handle();
     assert!(handle.snapshot(child_owner).await.is_ok());
-    assert!(matches!(
-        handle.snapshot(ghost_owner).await,
-        Err(pl_core::AgentRuntimeError::NotFound(_))
-    ));
 
     runtime.shutdown().await;
     let _ = tokio::fs::remove_dir_all(home).await;

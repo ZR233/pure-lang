@@ -30,10 +30,13 @@ pub use runtime::{
 };
 pub use session_stream::*;
 pub use settings::{
+    BridgeGeneralSettingsDto, BridgeInstructionsSettingsDto, BridgeMcpServerSettingsDto,
     BridgeModelCapabilities, BridgeModelCatalogDescriptor, BridgeModelDescriptor,
     BridgeModelPricing, BridgeModelReasoningDescriptor, BridgeProviderCatalogSnapshot,
-    BridgeProviderConnectionModeDescriptor, BridgeProviderPresetDescriptor,
-    BridgeProviderServiceCapabilitiesDescriptor, BridgeProviderTransportDescriptor,
+    BridgeProviderConnectionModeDescriptor, BridgeProviderModelSettingsDto,
+    BridgeProviderPresetDescriptor, BridgeProviderServiceCapabilitiesDescriptor,
+    BridgeProviderSettingsDto, BridgeProviderTransportDescriptor, BridgeRoleSettingsDto,
+    BridgeSkillsSettingsDto, BridgeStudioSettingsDto,
     BridgeWebSearchProviderCapabilitiesDescriptor, BridgeWebSearchSettingsDto,
     GeneralSettingsInput, InstructionsSettingsInput, McpServerInput, McpSettingsInput,
     ProviderInput, ProviderModelInput, ProviderSecretInput, ProviderSettingsInput, RoleInput,

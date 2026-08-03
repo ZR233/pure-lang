@@ -176,7 +176,7 @@ return available(_that.update);case _:
 
 class BridgeStudioUpdateCheckDto_UpToDate extends BridgeStudioUpdateCheckDto {
   const BridgeStudioUpdateCheckDto_UpToDate(): super._();
-  
+
 
 
 
@@ -208,7 +208,7 @@ String toString() {
 
 class BridgeStudioUpdateCheckDto_Available extends BridgeStudioUpdateCheckDto {
   const BridgeStudioUpdateCheckDto_Available({required this.update}): super._();
-  
+
 
  final  BridgeStudioUpdateDto update;
 
@@ -452,7 +452,7 @@ return failed(_that.code,_that.message);case _:
 
 class BridgeStudioUpdateEventDto_Started extends BridgeStudioUpdateEventDto {
   const BridgeStudioUpdateEventDto_Started({required this.total}): super._();
-  
+
 
  final  BigInt total;
 
@@ -518,7 +518,7 @@ as BigInt,
 
 class BridgeStudioUpdateEventDto_Progress extends BridgeStudioUpdateEventDto {
   const BridgeStudioUpdateEventDto_Progress({required this.downloaded, required this.total}): super._();
-  
+
 
  final  BigInt downloaded;
  final  BigInt total;
@@ -586,7 +586,7 @@ as BigInt,
 
 class BridgeStudioUpdateEventDto_Verifying extends BridgeStudioUpdateEventDto {
   const BridgeStudioUpdateEventDto_Verifying(): super._();
-  
+
 
 
 
@@ -618,7 +618,7 @@ String toString() {
 
 class BridgeStudioUpdateEventDto_InstallerLaunched extends BridgeStudioUpdateEventDto {
   const BridgeStudioUpdateEventDto_InstallerLaunched(): super._();
-  
+
 
 
 
@@ -650,7 +650,7 @@ String toString() {
 
 class BridgeStudioUpdateEventDto_Failed extends BridgeStudioUpdateEventDto {
   const BridgeStudioUpdateEventDto_Failed({required this.code, required this.message}): super._();
-  
+
 
  final  String code;
  final  String message;

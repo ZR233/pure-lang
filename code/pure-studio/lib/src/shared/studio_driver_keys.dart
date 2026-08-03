@@ -105,4 +105,12 @@ abstract final class StudioDriverKeys {
 
   static ValueKey<String> providerRow(String id) =>
       ValueKey<String>('provider-row-$id');
+
+  static ValueKey<String> providerConnectionMode(String providerId) =>
+      ValueKey<String>('provider-$providerId-connection-mode');
+
+  static ValueKey<String> providerConnectionModeOption(
+    String providerId,
+    String mode,
+  ) => ValueKey<String>('provider-$providerId-connection-mode-$mode');
 }

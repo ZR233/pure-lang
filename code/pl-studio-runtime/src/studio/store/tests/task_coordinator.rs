@@ -960,11 +960,11 @@ async fn failed_delivery_reviewer_allows_a_fresh_round_for_the_same_completion()
         .await
         .unwrap();
     assert_eq!(retry_round.round, first_round.round + 1);
-    assert_eq!(retry_round.completion_id.as_deref(), Some(completion.id.as_str()));
     assert_eq!(
-        retry_round.completion_revision,
-        Some(completion.revision)
+        retry_round.completion_id.as_deref(),
+        Some(completion.id.as_str())
     );
+    assert_eq!(retry_round.completion_revision, Some(completion.revision));
     assert_eq!(retry_round.reviewed_head, first_round.reviewed_head);
 
     let (_, retry_reviewer) = fixture
@@ -1357,6 +1357,48 @@ async fn task_phase_and_expected_head_updates_are_guarded() {
             .unwrap()
             .expected_head,
         "2222222"
+    );
+}
+
+#[tokio::test]
+async fn concurrent_task_phase_transition_rejects_the_stale_writer() {
+    let store = StudioStore::open_memory().await.unwrap();
+    let project = store.upsert_project("C:/work/task-cas").await.unwrap();
+    let session = store
+        .create_session(&project.id, "Task", StudioMode::Task)
+        .await
+        .unwrap();
+    let (run, _) = store
+        .create_task_run_with_lease(create_input(&session.id, TaskRunPhase::Planning))
+        .await
+        .unwrap();
+    let read_barrier = tokio::sync::Barrier::new(2);
+
+    let (first, second) = tokio::join!(
+        store.transition_task_run_after_read(
+            &run.id,
+            TaskRunPhase::PendingConfirmation,
+            None,
+            Some(&read_barrier),
+        ),
+        store.transition_task_run_after_read(
+            &run.id,
+            TaskRunPhase::PendingConfirmation,
+            None,
+            Some(&read_barrier),
+        ),
+    );
+
+    assert_eq!(usize::from(first.is_ok()) + usize::from(second.is_ok()), 1);
+    let conflict = first.err().or_else(|| second.err()).unwrap();
+    assert!(
+        conflict
+            .to_string()
+            .contains("task phase changed concurrently")
+    );
+    assert_eq!(
+        store.read_task_run(&run.id).await.unwrap().unwrap().phase,
+        TaskRunPhase::PendingConfirmation
     );
 }
 

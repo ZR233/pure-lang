@@ -84,6 +84,7 @@ void registerAgentWorkspaceTests() {
       expect(workspace.runtime.activeMcpServers, ['review-mcp']);
       expect(workspace.timelineRows, isNotEmpty);
       expect(state.selectedMessages.single.sessionId, 'agent-session-1');
+      controller.updateComposer('agent-session-1', 'Reviewer draft');
 
       api.emitSession(
         _interactionChangedEvent(
@@ -108,6 +109,10 @@ void registerAgentWorkspaceTests() {
       state = container.read(studioControllerProvider).requireValue;
       expect(state.composer.draft, 'Planner draft');
       expect(state.runtime.model, 'planner/model');
+
+      await controller.selectAgentSession('agent-session-1');
+      state = container.read(studioControllerProvider).requireValue;
+      expect(state.composer.draft, 'Reviewer draft');
     },
   );
 

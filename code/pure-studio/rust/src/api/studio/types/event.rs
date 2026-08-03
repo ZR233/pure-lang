@@ -36,7 +36,7 @@ pub enum BridgeProductEventPayload {
     },
     AgentDirectoryChanged {
         root_session_id: String,
-        agent: BridgeAgentDirectoryEntryDto,
+        agent: Box<BridgeAgentDirectoryEntryDto>,
     },
     Stale {
         lagged_events: u64,

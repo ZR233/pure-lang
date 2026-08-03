@@ -278,7 +278,10 @@ void registerControllerStreamTests() {
     );
     final api = _FakeStudioApi(
       _emptyState().copyWith(
-        composersBySession: {'session-2': childPending},
+        composersBySession: {
+          'session-1': const ComposerSessionState.idle(draft: 'planner draft'),
+          'session-2': childPending,
+        },
         turnsBySession: {
           'session-2': _testTurn(
             sessionId: 'session-2',
@@ -311,6 +314,14 @@ void registerControllerStreamTests() {
           .composersBySession['session-2']!
           .phase,
       ComposerSubmissionPhase.idle,
+    );
+    expect(
+      container
+          .read(studioControllerProvider)
+          .requireValue
+          .composersBySession['session-1']!
+          .draft,
+      'planner draft',
     );
   });
 

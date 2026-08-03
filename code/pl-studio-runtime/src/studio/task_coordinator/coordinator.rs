@@ -286,6 +286,11 @@ impl TaskCoordinator {
                 failed_agent_runs.insert(run.id.clone());
                 continue;
             }
+            let run = self
+                .store
+                .read_task_run(&run.id)
+                .await?
+                .context("task run disappeared after agent restart reconciliation")?;
             if run.phase == TaskRunPhase::Stopping {
                 let reason = run
                     .stop_requested_reason

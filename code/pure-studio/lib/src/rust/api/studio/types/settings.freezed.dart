@@ -182,7 +182,7 @@ return clear();case _:
 
 class ProviderSecretInput_Preserve extends ProviderSecretInput {
   const ProviderSecretInput_Preserve(): super._();
-  
+
 
 
 
@@ -214,7 +214,7 @@ String toString() {
 
 class ProviderSecretInput_Replace extends ProviderSecretInput {
   const ProviderSecretInput_Replace({required this.value}): super._();
-  
+
 
  final  String value;
 
@@ -280,7 +280,7 @@ as String,
 
 class ProviderSecretInput_Clear extends ProviderSecretInput {
   const ProviderSecretInput_Clear(): super._();
-  
+
 
 
 

@@ -37,7 +37,10 @@ pub(crate) fn run_resident_checked(command: &mut Command, display: &str) -> Resu
         .wait()
         .with_context(|| format!("failed to wait for resident command: {display}"))?;
     drop(control);
-    eprintln!("resident command exited: pid={}, status={status}", child.id());
+    eprintln!(
+        "resident command exited: pid={}, status={status}",
+        child.id()
+    );
     ensure_success(status, display)
 }
 

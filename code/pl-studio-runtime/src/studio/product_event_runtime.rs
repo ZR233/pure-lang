@@ -102,7 +102,7 @@ impl StudioProductEventRuntime {
             Some(project_id.to_string()),
             StudioProductEventKind::AgentDirectoryChanged {
                 root_session_id,
-                agent,
+                agent: Box::new(agent),
             },
         )
     }

@@ -8,7 +8,118 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'settings.freezed.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`
+
+/// Flutter 本地通用设置的 typed 快照。
+class BridgeGeneralSettingsDto {
+  final bool followSystemTheme;
+  final bool followActiveTurn;
+  final bool compactTimeline;
+
+  const BridgeGeneralSettingsDto({
+    required this.followSystemTheme,
+    required this.followActiveTurn,
+    required this.compactTimeline,
+  });
+
+  static Future<BridgeGeneralSettingsDto> default_() => RustLib.instance.api
+      .crateApiStudioTypesSettingsBridgeGeneralSettingsDtoDefault();
+
+  @override
+  int get hashCode =>
+      followSystemTheme.hashCode ^
+      followActiveTurn.hashCode ^
+      compactTimeline.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeGeneralSettingsDto &&
+          runtimeType == other.runtimeType &&
+          followSystemTheme == other.followSystemTheme &&
+          followActiveTurn == other.followActiveTurn &&
+          compactTimeline == other.compactTimeline;
+}
+
+/// Instructions 页的 canonical 设置。
+class BridgeInstructionsSettingsDto {
+  final String baseOverride;
+  final String developer;
+  final String user;
+  final BigInt projectDocMaxBytes;
+  final List<String> projectDocFallbackFilenames;
+
+  const BridgeInstructionsSettingsDto({
+    required this.baseOverride,
+    required this.developer,
+    required this.user,
+    required this.projectDocMaxBytes,
+    required this.projectDocFallbackFilenames,
+  });
+
+  @override
+  int get hashCode =>
+      baseOverride.hashCode ^
+      developer.hashCode ^
+      user.hashCode ^
+      projectDocMaxBytes.hashCode ^
+      projectDocFallbackFilenames.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeInstructionsSettingsDto &&
+          runtimeType == other.runtimeType &&
+          baseOverride == other.baseOverride &&
+          developer == other.developer &&
+          user == other.user &&
+          projectDocMaxBytes == other.projectDocMaxBytes &&
+          projectDocFallbackFilenames == other.projectDocFallbackFilenames;
+}
+
+/// MCP 设置页的 canonical server 视图。
+class BridgeMcpServerSettingsDto {
+  final String id;
+  final String transport;
+  final String endpoint;
+  final bool enabled;
+  final String status;
+  final String sourceKind;
+  final String mutationPolicy;
+
+  const BridgeMcpServerSettingsDto({
+    required this.id,
+    required this.transport,
+    required this.endpoint,
+    required this.enabled,
+    required this.status,
+    required this.sourceKind,
+    required this.mutationPolicy,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      transport.hashCode ^
+      endpoint.hashCode ^
+      enabled.hashCode ^
+      status.hashCode ^
+      sourceKind.hashCode ^
+      mutationPolicy.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeMcpServerSettingsDto &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          transport == other.transport &&
+          endpoint == other.endpoint &&
+          enabled == other.enabled &&
+          status == other.status &&
+          sourceKind == other.sourceKind &&
+          mutationPolicy == other.mutationPolicy;
+}
 
 class BridgeModelCapabilities {
   final bool streaming;
@@ -244,6 +355,66 @@ class BridgeProviderConnectionModeDescriptor {
           displayName == other.displayName;
 }
 
+/// Provider 设置页使用的模型视图。
+class BridgeProviderModelSettingsDto {
+  final String slug;
+  final String displayName;
+  final String description;
+  final BigInt? contextWindow;
+  final BigInt? maxOutputTokens;
+  final String currency;
+  final double? inputPricePerMTok;
+  final double? outputPricePerMTok;
+  final double? cacheReadPricePerMTok;
+  final List<String> reasoningEfforts;
+  final String baseInstructions;
+
+  const BridgeProviderModelSettingsDto({
+    required this.slug,
+    required this.displayName,
+    required this.description,
+    this.contextWindow,
+    this.maxOutputTokens,
+    required this.currency,
+    this.inputPricePerMTok,
+    this.outputPricePerMTok,
+    this.cacheReadPricePerMTok,
+    required this.reasoningEfforts,
+    required this.baseInstructions,
+  });
+
+  @override
+  int get hashCode =>
+      slug.hashCode ^
+      displayName.hashCode ^
+      description.hashCode ^
+      contextWindow.hashCode ^
+      maxOutputTokens.hashCode ^
+      currency.hashCode ^
+      inputPricePerMTok.hashCode ^
+      outputPricePerMTok.hashCode ^
+      cacheReadPricePerMTok.hashCode ^
+      reasoningEfforts.hashCode ^
+      baseInstructions.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeProviderModelSettingsDto &&
+          runtimeType == other.runtimeType &&
+          slug == other.slug &&
+          displayName == other.displayName &&
+          description == other.description &&
+          contextWindow == other.contextWindow &&
+          maxOutputTokens == other.maxOutputTokens &&
+          currency == other.currency &&
+          inputPricePerMTok == other.inputPricePerMTok &&
+          outputPricePerMTok == other.outputPricePerMTok &&
+          cacheReadPricePerMTok == other.cacheReadPricePerMTok &&
+          reasoningEfforts == other.reasoningEfforts &&
+          baseInstructions == other.baseInstructions;
+}
+
 class BridgeProviderPresetDescriptor {
   final String id;
   final String displayName;
@@ -319,6 +490,78 @@ class BridgeProviderServiceCapabilitiesDescriptor {
           webSearch == other.webSearch;
 }
 
+/// 不含 secret 的 Provider canonical 设置视图。
+class BridgeProviderSettingsDto {
+  final String id;
+  final String templateKind;
+  final String wireProtocol;
+  final String connectionMode;
+  final String name;
+  final String baseUrl;
+  final bool hasBearerToken;
+  final String capabilitySource;
+  final bool hostedWebSearch;
+  final String? standaloneWebSearch;
+  final String defaultModel;
+  final List<BridgeProviderModelSettingsDto> models;
+  final List<BridgeProviderModelSettingsDto> customModels;
+  final String? catalogId;
+
+  const BridgeProviderSettingsDto({
+    required this.id,
+    required this.templateKind,
+    required this.wireProtocol,
+    required this.connectionMode,
+    required this.name,
+    required this.baseUrl,
+    required this.hasBearerToken,
+    required this.capabilitySource,
+    required this.hostedWebSearch,
+    this.standaloneWebSearch,
+    required this.defaultModel,
+    required this.models,
+    required this.customModels,
+    this.catalogId,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      templateKind.hashCode ^
+      wireProtocol.hashCode ^
+      connectionMode.hashCode ^
+      name.hashCode ^
+      baseUrl.hashCode ^
+      hasBearerToken.hashCode ^
+      capabilitySource.hashCode ^
+      hostedWebSearch.hashCode ^
+      standaloneWebSearch.hashCode ^
+      defaultModel.hashCode ^
+      models.hashCode ^
+      customModels.hashCode ^
+      catalogId.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeProviderSettingsDto &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          templateKind == other.templateKind &&
+          wireProtocol == other.wireProtocol &&
+          connectionMode == other.connectionMode &&
+          name == other.name &&
+          baseUrl == other.baseUrl &&
+          hasBearerToken == other.hasBearerToken &&
+          capabilitySource == other.capabilitySource &&
+          hostedWebSearch == other.hostedWebSearch &&
+          standaloneWebSearch == other.standaloneWebSearch &&
+          defaultModel == other.defaultModel &&
+          models == other.models &&
+          customModels == other.customModels &&
+          catalogId == other.catalogId;
+}
+
 class BridgeProviderTransportDescriptor {
   final String protocol;
   final List<BridgeProviderConnectionModeDescriptor> connectionModes;
@@ -344,6 +587,135 @@ class BridgeProviderTransportDescriptor {
           protocol == other.protocol &&
           connectionModes == other.connectionModes &&
           defaultConnectionMode == other.defaultConnectionMode;
+}
+
+/// 角色到 provider/model/effort 的 canonical 路由。
+class BridgeRoleSettingsDto {
+  final String key;
+  final String providerId;
+  final String model;
+  final String effort;
+
+  const BridgeRoleSettingsDto({
+    required this.key,
+    required this.providerId,
+    required this.model,
+    required this.effort,
+  });
+
+  @override
+  int get hashCode =>
+      key.hashCode ^ providerId.hashCode ^ model.hashCode ^ effort.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeRoleSettingsDto &&
+          runtimeType == other.runtimeType &&
+          key == other.key &&
+          providerId == other.providerId &&
+          model == other.model &&
+          effort == other.effort;
+}
+
+/// Skills 页的 canonical 设置。
+class BridgeSkillsSettingsDto {
+  final bool enabled;
+  final bool autoLearn;
+  final bool systemEnabled;
+  final String projectDir;
+  final String userDir;
+  final List<String> externalDirs;
+  final List<String> disabled;
+  final int autoLearnMinToolCalls;
+
+  const BridgeSkillsSettingsDto({
+    required this.enabled,
+    required this.autoLearn,
+    required this.systemEnabled,
+    required this.projectDir,
+    required this.userDir,
+    required this.externalDirs,
+    required this.disabled,
+    required this.autoLearnMinToolCalls,
+  });
+
+  @override
+  int get hashCode =>
+      enabled.hashCode ^
+      autoLearn.hashCode ^
+      systemEnabled.hashCode ^
+      projectDir.hashCode ^
+      userDir.hashCode ^
+      externalDirs.hashCode ^
+      disabled.hashCode ^
+      autoLearnMinToolCalls.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeSkillsSettingsDto &&
+          runtimeType == other.runtimeType &&
+          enabled == other.enabled &&
+          autoLearn == other.autoLearn &&
+          systemEnabled == other.systemEnabled &&
+          projectDir == other.projectDir &&
+          userDir == other.userDir &&
+          externalDirs == other.externalDirs &&
+          disabled == other.disabled &&
+          autoLearnMinToolCalls == other.autoLearnMinToolCalls;
+}
+
+/// Studio 配置与本地界面设置的 canonical typed 快照。
+class BridgeStudioSettingsDto {
+  final String? defaultProviderId;
+  final List<BridgeProviderSettingsDto> providers;
+  final List<BridgeRoleSettingsDto> roles;
+  final String permissionMode;
+  final BridgeInstructionsSettingsDto instructions;
+  final BridgeSkillsSettingsDto skills;
+  final List<BridgeMcpServerSettingsDto> mcpServers;
+  final BridgeGeneralSettingsDto general;
+  final BridgeWebSearchSettingsDto webSearch;
+
+  const BridgeStudioSettingsDto({
+    this.defaultProviderId,
+    required this.providers,
+    required this.roles,
+    required this.permissionMode,
+    required this.instructions,
+    required this.skills,
+    required this.mcpServers,
+    required this.general,
+    required this.webSearch,
+  });
+
+  @override
+  int get hashCode =>
+      defaultProviderId.hashCode ^
+      providers.hashCode ^
+      roles.hashCode ^
+      permissionMode.hashCode ^
+      instructions.hashCode ^
+      skills.hashCode ^
+      mcpServers.hashCode ^
+      general.hashCode ^
+      webSearch.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeStudioSettingsDto &&
+          runtimeType == other.runtimeType &&
+          defaultProviderId == other.defaultProviderId &&
+          providers == other.providers &&
+          roles == other.roles &&
+          permissionMode == other.permissionMode &&
+          instructions == other.instructions &&
+          skills == other.skills &&
+          mcpServers == other.mcpServers &&
+          general == other.general &&
+          webSearch == other.webSearch;
 }
 
 class BridgeWebSearchProviderCapabilitiesDescriptor {

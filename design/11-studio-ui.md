@@ -156,7 +156,9 @@ watch 不可变 projection，使高频 part delta 只重建当前 workspace。
 Driver extension 只能由 `test_driver/driver_main.dart` 启用，该入口复用正式 `studio.main()`，
 并在 `dart.vm.product=true` 时拒绝启动。正式 `lib/main.dart`、build-gui 与 release-gui 不得
 导入 driver。Driver finder 只使用集中定义的 `StudioDriverKeys` 和领域 ID 动态 key，不依赖
-本地化文本、位置或 `.first/.last`。Windows 验收必须包含 native FRB 和 demo 两轮：每次导航
+本地化文本、位置或 `.first/.last`；selector key 必须挂在真实可命中的触发控件上，overlay
+option key 必须挂在实际可点击菜单项上，不得挂在闭合态仍存在的声明式 item 数据子树。Windows
+验收必须包含 native FRB 和 demo 两轮：每次导航
 后重新读取 widget tree，以 waitFor/waitForAbsent/getText 同步，最后确认 runtime errors 为空
 并保存 shell、Settings、streaming、Provider 与 interaction 截图。探索出的流程必须同步为
 持久 integration test。`run-gui --driver` 使用专用 resident 进程生命周期：xtask 保持

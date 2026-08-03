@@ -757,10 +757,9 @@ void registerTimelineModelTests() {
     );
 
     expect(state.selectedSessionId, 'session-1');
-    expect(
-      state.agentsBySession['session-background']!.keys,
-      {'agent-background'},
-    );
+    expect(state.agentsBySession['session-background']!.keys, {
+      'agent-background',
+    });
     expect(state.runtimesBySession['session-background']!.agentCount, 1);
     expect(state.eventCursorsBySession['session-background'], 9);
     expect(
