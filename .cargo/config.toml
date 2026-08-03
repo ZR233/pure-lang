@@ -5,4 +5,4 @@ include = [{ path = "config.local.toml", optional = true }]
 RUST_TEST_THREADS = { value = "4", force = false }
 
 [alias]
-xtask = "run -p pl-xtask --"
+xtask = "run --target-dir target/xtask -p pl-xtask --"

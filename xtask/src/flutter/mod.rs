@@ -1,7 +1,8 @@
-use crate::cli::{BuildGuiOptions, RunGuiOptions, VerifyGuiOptions};
+use crate::cli::{BridgeConfiguration, BuildGuiOptions, RunGuiOptions, VerifyGuiOptions};
 use crate::paths;
 use crate::process;
 use crate::pubspec_lock::{self, LockfileChange};
+use crate::rust_bridge::{self, BRIDGE_DEBUG_SYMBOLS_ENV, BRIDGE_LIBRARY_ENV, RustBridgeArtifacts};
 use crate::studio_version;
 use anyhow::{Context, Result, bail};
 use sha2::{Digest, Sha256};
@@ -43,6 +44,13 @@ enum DriverMode {
 enum FlutterProcessMode {
     Batch,
     ResidentDriver,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct FlutterInvocation<'a> {
+    demo_mode: DemoMode,
+    process_mode: FlutterProcessMode,
+    bridge_artifacts: Option<&'a RustBridgeArtifacts>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -414,12 +422,21 @@ pub(crate) fn run_gui(options: RunGuiOptions) -> Result<()> {
         DriverMode::Disabled => FlutterProcessMode::Batch,
         DriverMode::Enabled => FlutterProcessMode::ResidentDriver,
     };
+    let bridge_artifacts = prepare_bridge_artifacts(
+        &workspace_root,
+        target,
+        demo_mode,
+        BridgeConfiguration::Debug,
+    )?;
     run_flutter_with_process_mode(
         &workspace_root,
         &app_dir,
         &run_args,
-        demo_mode,
-        process_mode,
+        FlutterInvocation {
+            demo_mode,
+            process_mode,
+            bridge_artifacts: bridge_artifacts.as_ref(),
+        },
     )
 }
 
@@ -470,7 +487,22 @@ fn build_gui_with_version(options: BuildGuiOptions, release_version: Option<&str
     } else {
         DemoMode::Native
     };
-    run_flutter(&workspace_root, &app_dir, &args, demo_mode)?;
+    let bridge_artifacts = prepare_bridge_artifacts(
+        &workspace_root,
+        target,
+        demo_mode,
+        BridgeConfiguration::Release,
+    )?;
+    run_flutter_with_process_mode(
+        &workspace_root,
+        &app_dir,
+        &args,
+        FlutterInvocation {
+            demo_mode,
+            process_mode: FlutterProcessMode::Batch,
+            bridge_artifacts: bridge_artifacts.as_ref(),
+        },
+    )?;
 
     let clean_mode = if options.no_clean {
         DistCleanMode::KeepExisting
@@ -604,6 +636,25 @@ fn print_context(workspace_root: &Path, app_dir: &Path) {
     println!("Studio app dir: {}", app_dir.display());
 }
 
+fn prepare_bridge_artifacts(
+    workspace_root: &Path,
+    target: DesktopTarget,
+    demo_mode: DemoMode,
+    configuration: BridgeConfiguration,
+) -> Result<Option<RustBridgeArtifacts>> {
+    if needs_bridge_artifacts(target, demo_mode) {
+        return rust_bridge::build_workspace_artifacts(workspace_root, configuration).map(Some);
+    }
+    Ok(None)
+}
+
+fn needs_bridge_artifacts(target: DesktopTarget, demo_mode: DemoMode) -> bool {
+    matches!(
+        (target, demo_mode),
+        (DesktopTarget::Windows, DemoMode::Native)
+    )
+}
+
 fn run_flutter(
     workspace_root: &Path,
     app_dir: &Path,
@@ -614,8 +665,11 @@ fn run_flutter(
         workspace_root,
         app_dir,
         args,
-        demo_mode,
-        FlutterProcessMode::Batch,
+        FlutterInvocation {
+            demo_mode,
+            process_mode: FlutterProcessMode::Batch,
+            bridge_artifacts: None,
+        },
     )
 }
 
@@ -623,22 +677,14 @@ fn run_flutter_with_process_mode(
     workspace_root: &Path,
     app_dir: &Path,
     args: &[&str],
-    demo_mode: DemoMode,
-    process_mode: FlutterProcessMode,
+    invocation: FlutterInvocation<'_>,
 ) -> Result<()> {
-    let args = flutter_args(args, demo_mode);
+    let args = flutter_args(args, invocation.demo_mode);
     let display = process::display_command("flutter", &args);
     let mut command = process::path_command("flutter", &args);
     command.current_dir(app_dir);
-    match demo_mode {
-        DemoMode::Native => {
-            command.env_remove("PURE_STUDIO_DEMO");
-        }
-        DemoMode::Demo => {
-            command.env("PURE_STUDIO_DEMO", "true");
-        }
-    }
-    let result = match process_mode {
+    configure_flutter_environment(&mut command, invocation);
+    let result = match invocation.process_mode {
         FlutterProcessMode::Batch => process::run_checked(&mut command, &display),
         FlutterProcessMode::ResidentDriver => process::run_resident_checked(&mut command, &display),
     };
@@ -649,6 +695,25 @@ fn run_flutter_with_process_mode(
             app_dir.display()
         )
     })
+}
+
+fn configure_flutter_environment(command: &mut Command, invocation: FlutterInvocation<'_>) {
+    command.env_remove(BRIDGE_LIBRARY_ENV);
+    command.env_remove(BRIDGE_DEBUG_SYMBOLS_ENV);
+    match invocation.demo_mode {
+        DemoMode::Native => {
+            command.env_remove("PURE_STUDIO_DEMO");
+        }
+        DemoMode::Demo => {
+            command.env("PURE_STUDIO_DEMO", "true");
+        }
+    }
+    if let Some(artifacts) = invocation.bridge_artifacts {
+        command.env(BRIDGE_LIBRARY_ENV, artifacts.dynamic_library());
+        if let Some(debug_symbols) = artifacts.debug_symbols() {
+            command.env(BRIDGE_DEBUG_SYMBOLS_ENV, debug_symbols);
+        }
+    }
 }
 
 fn flutter_args(args: &[&str], demo_mode: DemoMode) -> Vec<OsString> {
@@ -731,6 +796,7 @@ fn copy_dir_contents(source: &Path, destination: &Path) -> Result<()> {
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
+    use std::ffi::OsStr;
 
     #[test]
     fn demo_mode_adds_dart_define_once() {
@@ -795,6 +861,82 @@ mod tests {
         assert!(!args.contains(&"--verbose"));
         assert!(!args.contains(&"-t"));
         assert!(args.contains(&"--no-pub"));
+    }
+
+    #[test]
+    fn native_windows_requires_bridge_but_demo_and_other_platforms_do_not() {
+        assert!(needs_bridge_artifacts(
+            DesktopTarget::Windows,
+            DemoMode::Native
+        ));
+        assert!(!needs_bridge_artifacts(
+            DesktopTarget::Windows,
+            DemoMode::Demo
+        ));
+        assert!(!needs_bridge_artifacts(
+            DesktopTarget::Macos,
+            DemoMode::Native
+        ));
+        assert!(!needs_bridge_artifacts(
+            DesktopTarget::Linux,
+            DemoMode::Native
+        ));
+    }
+
+    #[test]
+    fn flutter_environment_passes_native_bridge_artifacts() {
+        let artifacts = RustBridgeArtifacts::for_test(
+            PathBuf::from(r"C:\artifacts\pl_studio_bridge.dll"),
+            Some(PathBuf::from(r"C:\artifacts\pl_studio_bridge.pdb")),
+        );
+        let mut command = Command::new("flutter");
+
+        configure_flutter_environment(
+            &mut command,
+            FlutterInvocation {
+                demo_mode: DemoMode::Native,
+                process_mode: FlutterProcessMode::Batch,
+                bridge_artifacts: Some(&artifacts),
+            },
+        );
+
+        assert_eq!(
+            command_env(&command, BRIDGE_LIBRARY_ENV),
+            Some(Some(OsString::from(r"C:\artifacts\pl_studio_bridge.dll")))
+        );
+        assert_eq!(
+            command_env(&command, BRIDGE_DEBUG_SYMBOLS_ENV),
+            Some(Some(OsString::from(r"C:\artifacts\pl_studio_bridge.pdb")))
+        );
+        assert_eq!(command_env(&command, "PURE_STUDIO_DEMO"), Some(None));
+    }
+
+    #[test]
+    fn flutter_environment_clears_bridge_artifacts_for_demo() {
+        let mut command = Command::new("flutter");
+
+        configure_flutter_environment(
+            &mut command,
+            FlutterInvocation {
+                demo_mode: DemoMode::Demo,
+                process_mode: FlutterProcessMode::ResidentDriver,
+                bridge_artifacts: None,
+            },
+        );
+
+        assert_eq!(command_env(&command, BRIDGE_LIBRARY_ENV), Some(None));
+        assert_eq!(command_env(&command, BRIDGE_DEBUG_SYMBOLS_ENV), Some(None));
+        assert_eq!(
+            command_env(&command, "PURE_STUDIO_DEMO"),
+            Some(Some(OsString::from("true")))
+        );
+    }
+
+    fn command_env(command: &Command, name: &str) -> Option<Option<OsString>> {
+        command
+            .get_envs()
+            .find(|(key, _)| *key == OsStr::new(name))
+            .map(|(_, value)| value.map(OsString::from))
     }
 
     #[test]

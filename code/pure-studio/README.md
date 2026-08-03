@@ -22,13 +22,14 @@ cargo xtask build-gui
 # interaction and GUI acceptance. The driver command owns the resident process
 # tree and keeps Flutter's control pipe open. Release builds never use it.
 cargo xtask run-gui --driver
+cargo xtask run-gui --demo --driver # deterministic demo data
 
-# Run from this Flutter project directory.
+# Auxiliary commands may run from this Flutter project directory. Windows GUI
+# run/build must use xtask so CMake receives the prebuilt Rust bridge artifact.
 flutter pub get
 flutter_rust_bridge_codegen generate
 flutter analyze
 flutter test
-flutter build windows
 ```
 
 The default app path initializes the native FRB runtime and subscribes only to the selected session stream. `DemoStudioApi` is selected only by an explicit demo build flag or a test override; native runtime failures are surfaced instead of switching implementations.

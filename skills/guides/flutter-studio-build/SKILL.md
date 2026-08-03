@@ -21,6 +21,9 @@ cargo xtask build-gui --no-clean # 保留已存在的 release 输出目录
 `run-gui` 和 `build-gui` 会在 `.dart_tool/pure-xtask-pub.sha256` 记录 `pubspec.yaml`、
 `pubspec.lock`、`pubspec_overrides.yaml` 和 `PUB_HOSTED_URL` 的依赖指纹；指纹未变时使用
 Flutter `--no-pub` 热路径，不重复解析依赖或改写 lockfile。
+Windows 下 xtask 先在 workspace Cargo target 中构建 `pl-studio-bridge`，从 Cargo JSON
+定位 DLL/PDB，再交给 CMake 复制。CMake 不再启动 Cargo；直接执行 `flutter build/run windows`
+会因缺少预编译 artifact 明确失败。
 
 ### 产物结构（Windows）
 
@@ -40,7 +43,7 @@ dist/pure-studio-release/
 
 | 平台 | 构建命令 | 产物目录 |
 |------|---------|---------|
-| Windows | `flutter build windows --release` | `code/pure-studio/build/windows/x64/runner/Release/` |
+| Windows | `cargo xtask build-gui` | `code/pure-studio/build/windows/x64/runner/Release/` |
 | macOS | `flutter build macos --release` | `code/pure-studio/build/macos/Build/Products/Release/` |
 | Linux | `flutter build linux --release` | `code/pure-studio/build/linux/x64/release/bundle/` |
 
@@ -78,40 +81,39 @@ flutter_rust_bridge_codegen generate
 
 ### 2. Rust 编译失败（release 模式）
 
-`pl-studio-bridge` 作为 `cdylib` 输出，通过 CMake 集成到 Flutter Windows 构建中。如果 `cargo build -p pl-studio-bridge --release` 成功但在 Flutter 构建中失败，差异点通常是：
+`pl-studio-bridge` 作为 `cdylib` 输出，由 xtask 预编译后通过 CMake 集成到 Flutter Windows
+构建中。如果 `cargo build -p pl-studio-bridge --release` 成功但 GUI 构建失败，重点检查：
 
 - 不同工作目录下的 `.cargo/config.toml` 生效范围
-- Flutter 构建系统使用独立的 Rust target 目录：`code/pure-studio/build/windows/x64/rust-target/`
-- 上游 workspace crate（`pl-core`、`pl-model`、`pl-protocol`）是否已提前编译
+- `PURE_STUDIO_BRIDGE_LIBRARY` 是否是 xtask 从 Cargo JSON 取得的绝对 DLL 路径
+- `PURE_STUDIO_BRIDGE_DEBUG_SYMBOLS` 指向的可选 PDB 是否仍存在
+- 上游 workspace crate（`pl-core`、`pl-model`、`pl-protocol`）是否能在同一 target 中编译
 
-该 target 目录按 Debug/Release 保留 Cargo 缓存。CMake 跟踪 Rust 源码、Cargo manifest/lockfile、
-migration、prompt 和其他编译期嵌入资源；这些输入未变时，重复 GUI 构建不会再启动 bridge Cargo 构建。
+`pl-xtask` 自身位于独立的 `target/xtask`，避免运行中的外层 Cargo 锁住 workspace target；
+bridge 仍使用 workspace 默认 target，并尊重调用方的 `CARGO_TARGET_DIR`。重复 GUI 构建由
+Cargo 自身判断 artifact 是否 fresh，CMake 只执行 `copy_if_different`。
 
 先用独立 `cargo build -p pl-studio-bridge --release` 验证 Rust 侧能否单独通过，再确认 Flutter 构建。
 
 ### 3. Demo 模式构建
 
-`flutter build windows --release --dart-define=PURE_STUDIO_DEMO=true` 会在编译时注入 `PURE_STUDIO_DEMO` 常量，使 Flutter app 在无 Rust 后端时以纯 UI 演示模式运行。用于：
+`cargo xtask build-gui --demo` 会注入 `PURE_STUDIO_DEMO` 常量，使 Flutter app 在无 Rust 后端时
+以纯 UI 演示模式运行。用于：
 - 前端开发调试
 - 后端 bridge 代码尚未完成时预览 UI
 - CI 中分离前后端验证
 
-需要 Demo 数据时显式运行 `cargo xtask run-gui --demo`。Native 运行失败会直接报错，不会切换到另一套运行路径。
+需要 Demo 数据时显式运行 `cargo xtask run-gui --demo`。Dart MCP GUI 验收使用
+`cargo xtask run-gui --driver`；需要确定性数据时追加 `--demo`。driver 使用 resident 生命周期，
+退出 xtask 后 Flutter、DTD 与 GUI 子进程必须一并结束。Native 运行失败会直接报错，不会切换到另一套运行路径。
 
 ## CI 参考
 
 `.github/workflows/rc-build.yml` 展示了 CI 中的 release 构建流程：
 
 ```yaml
-- name: flutter pub get
-  working-directory: code/pure-studio
-  run: flutter pub get
-- name: flutter build windows
-  working-directory: code/pure-studio
-  run: flutter build windows --release
-- name: pack artifact (windows)
-  run: |
-    Copy-Item code\pure-studio\build\windows\x64\runner\Release\* dist -Recurse -Force
+- name: build Pure Studio
+  run: cargo xtask build-gui
 ```
 
 ## 开发构建 vs Release 构建
@@ -119,6 +121,6 @@ migration、prompt 和其他编译期嵌入资源；这些输入未变时，重�
 | 方面 | `cargo xtask run-gui` | `cargo xtask build-gui` |
 |------|-------------------------------|----------------------------------------|
 | 用途 | 开发运行/调试 | 产出 release 包 |
-| 构建模式 | `flutter run -d windows`（debug） | `flutter build windows --release` |
+| xtask 内部 Flutter 模式 | Windows debug run | Windows release build |
 | 产物 | 不收集，在 `build/` 下就地运行 | 收集到 `dist/pure-studio-release/` |
 | Demo 模式 | 使用 `--demo` 显式选择 | Native 失败即报错 |

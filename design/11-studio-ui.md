@@ -161,7 +161,9 @@ option key 必须挂在实际可点击菜单项上，不得挂在闭合态仍存
 验收必须包含 native FRB 和 demo 两轮：每次导航
 后重新读取 widget tree，以 waitFor/waitForAbsent/getText 同步，最后确认 runtime errors 为空
 并保存 shell、Settings、streaming、Provider 与 interaction 截图。探索出的流程必须同步为
-持久 integration test。`run-gui --driver` 使用专用 resident 进程生命周期：xtask 保持
+持久 integration test。Dart MCP 的 `flutter_driver_command` 只通过
+`cargo xtask run-gui --driver` 启动的 driver extension 操作 Studio；不由 xtask 启动独立的
+`dart mcp-server`。该命令使用专用 resident 进程生命周期：xtask 保持
 Flutter tool 的控制 stdin 打开，避免无交互宿主的 EOF 让 DTD 提前退出；Windows 下 xtask
 与其 Flutter、DTD、GUI 子孙属于同一个 kill-on-close Job Object，宿主退出后不得留下孤儿
 GUI 或模型工具进程。普通 `run-gui` 与 build/generate/verify 命令仍使用批处理生命周期。
@@ -347,7 +349,8 @@ Security 页是紧凑的权限配置页，不使用与 provider/MCP 相同的大
 
 ## 5. 验收目标
 
-- `pure-studio` 可在 Windows 上 `flutter analyze`、`flutter test`、`flutter build windows`，并通过 FRB 调用 `pl-core` runtime。
+- `pure-studio` 可执行 `flutter analyze`、`flutter test`，并通过 `cargo xtask build-gui` 完成
+  Windows 构建和 FRB `pl-core` runtime 集成；不得直接执行 `flutter build/run windows`。
 - `messagePartDelta` 可以实时显示 text/reasoning/tool/plan 中间输出。
 - terminal snapshot 清除 overlay，snapshot/replay 与 live terminal UI 收敛。
 - 用户一次输入只出现一条用户消息。
