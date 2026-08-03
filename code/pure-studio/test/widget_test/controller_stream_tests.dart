@@ -120,6 +120,52 @@ void registerControllerStreamTests() {
     },
   );
 
+  test('composer ignores a completed submit after provider disposal', () async {
+    final api = _FakeStudioApi(_emptyState());
+    final blocked = Completer<SubmitPromptReceipt>();
+    api.blockedPromptSubmit = blocked;
+    final container = ProviderContainer(
+      overrides: [studioApiProvider.overrideWithValue(api)],
+    );
+
+    await container.read(studioControllerProvider.future);
+    final controller = container.read(studioControllerProvider.notifier);
+    controller.updateComposer('session-1', 'hello');
+    final submission = controller.submitComposer('session-1');
+    await pumpEventQueue();
+
+    container.dispose();
+    blocked.complete(
+      const SubmitPromptReceipt(
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        cursor: 1,
+      ),
+    );
+
+    await expectLater(submission, completes);
+  });
+
+  test('composer ignores a failed submit after provider disposal', () async {
+    final api = _FakeStudioApi(_emptyState());
+    final blocked = Completer<SubmitPromptReceipt>();
+    api.blockedPromptSubmit = blocked;
+    final container = ProviderContainer(
+      overrides: [studioApiProvider.overrideWithValue(api)],
+    );
+
+    await container.read(studioControllerProvider.future);
+    final controller = container.read(studioControllerProvider.notifier);
+    controller.updateComposer('session-1', 'hello');
+    final submission = controller.submitComposer('session-1');
+    await pumpEventQueue();
+
+    container.dispose();
+    blocked.completeError(Exception('bridge submit failed'));
+
+    await expectLater(submission, completes);
+  });
+
   test(
     'composer restores the exact draft and exposes submit failure',
     () async {
