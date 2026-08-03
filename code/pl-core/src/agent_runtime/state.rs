@@ -86,7 +86,7 @@ pub struct AgentTurnOutcome {
     pub finished_at: i64,
 }
 
-/// executor 主动汇报的交付阶段；不是 heartbeat 或运行时推断。
+/// agent 最新进度阶段；`ReadyForReview` 仅由产品的 durable completion 路径提升。
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum AgentProgressStage {
@@ -94,6 +94,7 @@ pub enum AgentProgressStage {
     Implementing,
     Verifying,
     Blocked,
+    ReadyForCompletion,
     ReadyForReview,
 }
 

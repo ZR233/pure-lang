@@ -133,7 +133,7 @@ pub(super) fn progress_schema() -> Value {
                     "implementing",
                     "verifying",
                     "blocked",
-                    "readyForReview"
+                    "readyForCompletion"
                 ]
             }),
             true,

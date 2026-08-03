@@ -4,8 +4,20 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use pl_core::path_safety::{metadata_if_real, real_directory_entries};
+use serde::Serialize;
 
-use super::super::{ReviewRoundRecord, ReviewScope, TaskCoordinator};
+use super::super::{
+    ReviewRoundRecord, ReviewScope, TaskCoordinator, WorkUnitRecord, WorkUnitStatus,
+};
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReviewOwnership {
+    work_unit_id: String,
+    title: String,
+    status: WorkUnitStatus,
+    owned_paths: Vec<String>,
+}
 
 pub(crate) async fn build_review_prompt(
     coordinator: &TaskCoordinator,
@@ -31,6 +43,17 @@ pub(crate) async fn build_review_prompt(
                 .into_iter()
                 .find(|completion| completion.id == completion_id)
                 .context("delivery review completion not found")?;
+            let work_units = coordinator.store.list_work_units(&run.id).await?;
+            let target_work_unit = work_units
+                .iter()
+                .find(|work_unit| work_unit.id == completion.work_unit_id)
+                .context("delivery review work unit not found")?;
+            let target_ownership = ReviewOwnership::from(target_work_unit);
+            let sibling_ownership = work_units
+                .iter()
+                .filter(|work_unit| work_unit.id != completion.work_unit_id)
+                .map(ReviewOwnership::from)
+                .collect::<Vec<_>>();
             let diff = match completion.head_commit.as_deref() {
                 Some(head) => {
                     git_diff(
@@ -44,7 +67,9 @@ pub(crate) async fn build_review_prompt(
                 None => String::new(),
             };
             format!(
-                "## Scope\nDelivery\n\n## Completion\n```json\n{}\n```\n\n## Exact completion diff\n```diff\n{}\n```",
+                "## Scope\nDelivery\n\n## Delivery review boundary\nOnly the exact completion diff and the target WorkUnit ownedPaths are review scope. Sibling WorkUnits are deferred integration context only: do not report their unmerged or missing files, cross-WorkUnit integration, or task-wide completeness as delivery findings. Those concerns belong to the integrated review after merge.\n\n## Target WorkUnit ownership\n```json\n{}\n```\n\n## Sibling WorkUnit ownership (deferred integration context only)\n```json\n{}\n```\n\n## Completion\n```json\n{}\n```\n\n## Exact completion diff\n```diff\n{}\n```",
+                serde_json::to_string_pretty(&target_ownership)?,
+                serde_json::to_string_pretty(&sibling_ownership)?,
                 serde_json::to_string_pretty(&completion)?,
                 diff
             )
@@ -79,6 +104,17 @@ pub(crate) async fn build_review_prompt(
             .collect::<Vec<_>>()
             .join("\n")
     ))
+}
+
+impl From<&WorkUnitRecord> for ReviewOwnership {
+    fn from(work_unit: &WorkUnitRecord) -> Self {
+        Self {
+            work_unit_id: work_unit.id.clone(),
+            title: work_unit.title.clone(),
+            status: work_unit.status,
+            owned_paths: work_unit.owned_paths.clone(),
+        }
+    }
 }
 
 async fn git_diff(workspace: &str, base: &str, head: &str, exclude_design: bool) -> Result<String> {

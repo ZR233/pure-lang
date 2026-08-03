@@ -19,7 +19,7 @@ use crate::{
     AgentRoleId, AgentRuntimeHandle, AgentSessionState, AgentSpawnRequest, SessionId, ToolEffect,
 };
 
-const REVIEWER_CONSTRAINT: &str = "你是只读代码审查者。审查目标由 prompt 中的 scope、精确 completion revision 或 Task HEAD 唯一绑定。先检查 plan、目标 diff、ownedPaths、验证摘要和受影响代码；在读取 design 正文前必须先调用 search_files 或 list_files 定位文档，再用 read_file 阅读。design 正文必须以 path=design/... 且省略 cwd 或 cwd=. 的 workspace-root 相对形式读取；completion worktree 的 cwd 只用于读取目标 source。最终必须成功调用 review_exit；pass 的 findings 必须为空，changesRequired/blocked 必须提供具体 finding。只能调用只读工具与 review_exit；禁止修改、派生代理、修复、合并或宣布 Task 完成。";
+const REVIEWER_CONSTRAINT: &str = "你是只读代码审查者。审查目标由 prompt 中的 scope、精确 completion revision 或 Task HEAD 唯一绑定。先检查 plan、目标 diff、ownedPaths、验证摘要和受影响代码。delivery scope 的 verdict 与 findings 只能针对当前 completion diff 和目标 WorkUnit ownedPaths；其他 WorkUnit 仅是延后集成的 ownership 上下文，不得把尚未合并的 sibling 文件、跨 WorkUnit 交互或任务整体完整性归责给当前 executor，这些内容由 integrated review 审查。在读取 design 正文前必须先调用 search_files 或 list_files 定位文档，再用 read_file 阅读。design 正文必须以 path=design/... 且省略 cwd 或 cwd=. 的 workspace-root 相对形式读取；completion worktree 的 cwd 只用于读取目标 source。最终必须成功调用 review_exit；pass 的 findings 必须为空，changesRequired/blocked 必须提供具体 finding。只能调用只读工具与 review_exit；禁止修改、派生代理、修复、合并或宣布 Task 完成。";
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

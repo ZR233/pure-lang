@@ -212,7 +212,8 @@ executor 固定使用 fresh session，不暴露父历史继承参数。planner �
 完整任务说明、设计提交和验收要求；Studio 另行生成有界 developer constraint，列出规范
 `ownedPaths`，要求只修改所属 worktree、提交并调用 `report_completion`，并禁止派生、合并
 或操作用户分支。developer prompt 还必须要求 executor 在完成定位、开始实现、开始验证、
-遇到阻塞和准备交付时调用 `report_progress`，工具失败后先读取现状并修复根因或更换方案，
+遇到阻塞和准备提交 completion 时调用 `report_progress`；最后一个主动 checkpoint 使用
+`readyForCompletion`，它不表示已完成或可审查。工具失败后先读取现状并修复根因或更换方案，
 不得重复完全相同的失败调用。成功结果只返回
 `{ agentId, sessionId, turnId, ownedPaths }`，不结束当前 Planner turn。Planner 可继续派发
 独立工作；没有其他工作时调用 `wait_agents`，不轮询或主动催促。
@@ -237,6 +238,9 @@ noDelivery 要求非空验证摘要、clean worktree 且 HEAD 未推进。成功
 不可变 `WorkCompletion`，递增 completion revision，把 WorkUnit 置为 `ReadyForReview`，
 把 progress 置为 `readyForReview`，并以 Completed 结束当前 executor turn。历史
 completion 永不覆盖；每个 review 精确绑定 completion id、revision 和 full HEAD。
+executor 不能通过 `report_progress` 主动写入 `readyForReview`；该 checkpoint 只能由上述
+durable completion 成功路径产生。Planner 只能以 `task_status` 中的 WorkUnit 状态和
+completion revision 作为发起审查的授权，不能把 progress 文本或阶段当作产品事实。
 
 executor 普通文本结束而未成功调用 `report_completion` 时，WorkUnit 进入
 `AwaitingCompletion`，保留 agent、session、worktree、branch 和 lease。runtime 不创建
@@ -276,6 +280,12 @@ reviewer 只读精确 completion commit、base diff、ownedPaths、验证摘要�
 `review_exit` 写入 `scope=delivery` 的不可变 ReviewRound。review pass 将 delivery
 WorkUnit 置为 `Approved`，noDelivery WorkUnit 置为 `NoDelivery`；findings 将 completion
 与 round 标为 `ChangesRequired`，WorkUnit 置为 `ChangesRequested`。
+
+delivery reviewer 只对当前 completion revision 的精确 diff 以及目标 WorkUnit 的
+`ownedPaths` 内代码负责。prompt 同时提供其他 WorkUnit 的 ownership 摘要，但这些 sibling
+只作为延后集成的范围上下文；尚未合并的 sibling 文件缺失、跨 WorkUnit 交互、任务整体
+完整性和依赖全部交付的端到端验证不得成为当前 delivery verdict 或 finding。这些问题统一在
+全部交付合并后的 integrated review 中审查，避免 executor 被要求修改其无权拥有的路径。
 
 Planner 在 reviewer terminal 后调用 `list_agents` 与 `task_status`。有 findings 时，必须用
 `send_message` 把具体 finding 发给原 executor；同一 executor 在原 worktree 修复后创建新
@@ -409,8 +419,9 @@ planner/reviewer 阅读上下文，不构成机器可执行的文件集合；coo
 `design/**`、提交 diff 精确等于已验证路径、focused commit 与 branch HEAD/lease CAS
 一致。创建 executor 前必须存在指向当前 `expectedHead` 的 durable design commit；任务取消
 或部分失败时，design 必须回退或更新到与当前实现一致。
-`task_update_design` 的 patch 必须是从 `*** Begin Patch` 到 `*** End Patch` 的完整
-Codex patch；新增文件的每一行内容都必须带 `+` 前缀。工具说明必须给出完整示例，
+`task_update_design` 的 patch 必须是从 `*** Begin Patch` 到 `*** End Patch` 的单一完整
+Codex patch；新增文件的每一行内容都必须带 `+` 前缀。工具说明必须明确只允许一个 block，
+不得内嵌一份可被模型与真实参数或失败重试拼接的完整 patch 示例，
 执行失败时必须向模型保留解析、路径或 Git 操作的具体根因，不能只返回通用重试提示，
 否则模型无法根据失败类型修正下一次调用。
 处理“实施”确认时必须先完成 plan、session、repository 与 branch lease 校验并创建

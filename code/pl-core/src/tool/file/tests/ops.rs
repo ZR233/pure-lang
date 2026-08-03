@@ -166,6 +166,39 @@ async fn list_files_returns_empty_for_missing_workspace_directory() {
 }
 
 #[tokio::test]
+async fn list_files_empty_fields_use_workspace_defaults_without_listing_root() {
+    let root = unique_temp_dir("list-empty-fields");
+    tokio::fs::create_dir_all(root.join("src")).await.unwrap();
+    tokio::fs::write(root.join("README.md"), "workspace\n")
+        .await
+        .unwrap();
+    let tool = list_files_tool();
+
+    let output = tool
+        .execute(
+            input(serde_json::json!({
+                "path": "",
+                "cwd": "",
+                "glob": "",
+                "includeDirs": true,
+            })),
+            context(&root).await,
+        )
+        .await
+        .unwrap();
+
+    let value: serde_json::Value = serde_json::from_str(&output.description).unwrap();
+    assert_eq!(value["path"], serde_json::json!("."));
+    assert_eq!(value["glob"], serde_json::json!("*"));
+    assert_eq!(
+        value["files"],
+        serde_json::json!(["README.md", "src/"])
+    );
+    assert!(!value["files"].as_array().unwrap().contains(&serde_json::json!("/")));
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
 async fn list_files_directory_glob_matches_entries_relative_to_path() {
     let root = unique_temp_dir("list-path-relative-dirs");
     tokio::fs::create_dir_all(root.join("code/pl-core/src"))

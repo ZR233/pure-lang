@@ -118,7 +118,7 @@ worker 被取消后不得提交普通 completion。终态事件必须在 durable
 `report_progress` 由 agent 更新自己的 typed checkpoint：
 
 ```text
-stage: exploring | implementing | verifying | blocked | readyForReview
+stage: exploring | implementing | verifying | blocked | readyForCompletion
 summary
 nextStep
 revision
@@ -126,7 +126,9 @@ updatedAt
 ```
 
 相同 checkpoint 不推进 revision。progress 只描述事实、当前结论、下一步和阻塞，不包含
-隐藏推理。
+隐藏推理。`readyForCompletion` 只表示 executor 准备调用产品层 required ending tool，
+不表示 durable completion 已存在，也不授权审查。产品层只有在 completion 事务成功后，
+才可把 canonical checkpoint 提升为 `readyForReview`。
 
 `list_agents` 返回可见 agent 的稳定排序 snapshot，以及调用时根据 `updatedAt` 计算的
 `summaryAgeSeconds`。派生 age 不持久化。

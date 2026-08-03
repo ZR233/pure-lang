@@ -73,6 +73,7 @@ extension StudioLocalizationsX on BuildContext {
       'queued' => l10n.statusTaskStatusQueued,
       'running' => l10n.statusTaskStatusRunning,
       'awaitingCompletion' => l10n.statusTaskStatusAwaitingCompletion,
+      'readyForCompletion' => l10n.statusTaskStatusAwaitingCompletion,
       'readyForReview' => l10n.statusTaskStatusReadyForReview,
       'reviewing' => l10n.statusTaskStatusReviewing,
       'changesRequested' => l10n.statusTaskStatusChangesRequested,

@@ -161,10 +161,13 @@ impl TaskCoordinator {
         let studio_session_id = studio_session_id.into();
         RegisteredTool::from_fallible_execution_result(
             "task_update_design",
-            "Apply and commit exactly one complete Codex-style design-only patch for the current Task run. The patch itself declares the design files changed by this update; references in plan prose are reading context, not an executable file list. The patch must begin with `*** Begin Patch` and end with `*** End Patch`. For a new file, use `*** Add File: design/<path>` and prefix every content line with `+`, without an `@@` hunk. Complete example: `*** Begin Patch\n*** Add File: design/spec.md\n+# Design\n*** End Patch`. Use `*** Update File:` only for an existing file. After a failed patch, follow the reported cause, read stale targets again when needed, and retry with one complete logical patch; applied hunks from a failed call are rolled back. Never use `*** New File`.",
+            "Apply and commit one design-only Codex patch for the current Task run. The patch argument must contain exactly one complete block: one `*** Begin Patch` wrapper, one matching `*** End Patch` wrapper, and nothing outside them. Do not prepend a template, append another block, use Markdown fences, or include any previous failed attempt. The patch itself declares the changed design files; plan prose is reading context only. Use `*** Add File: design/<path>` for a new file and prefix every content line with `+`, without an `@@` hunk. Use `*** Update File:` only for an existing file. After failure, follow the reported cause, reread stale targets when needed, then replace the entire argument with one corrected block. Applied hunks from a failed call are rolled back. Never use `*** New File`.",
             strict_tool_input_schema([ToolInputSchemaField::required(
                 "patch",
-                serde_json::json!({ "type": "string" }),
+                serde_json::json!({
+                    "type": "string",
+                    "description": "Exactly one complete Codex patch block for design/**. Do not include prose, Markdown fences, templates, or a previous attempt."
+                }),
             )]),
             move |input, context| {
                 let coordinator = coordinator.clone();

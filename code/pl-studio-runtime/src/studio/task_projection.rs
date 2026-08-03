@@ -238,6 +238,7 @@ const fn progress_stage_label(stage: AgentProgressStage) -> &'static str {
         AgentProgressStage::Implementing => "implementing",
         AgentProgressStage::Verifying => "verifying",
         AgentProgressStage::Blocked => "blocked",
+        AgentProgressStage::ReadyForCompletion => "readyForCompletion",
         AgentProgressStage::ReadyForReview => "readyForReview",
     }
 }

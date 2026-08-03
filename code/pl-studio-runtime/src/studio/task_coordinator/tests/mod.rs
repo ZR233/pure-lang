@@ -165,6 +165,130 @@ async fn review_tools_have_role_visibility_and_prompt_only_indexes_design() {
 }
 
 #[tokio::test]
+async fn delivery_review_prompt_keeps_sibling_work_out_of_scope() {
+    let fixture = ReviewFixture::new("delivery-review-ownership-boundary").await;
+    let base_commit = git_output(&fixture.repository, &["rev-parse", "HEAD"]);
+    let branch = git_output(&fixture.repository, &["branch", "--show-current"]);
+    let workspace = std::fs::canonicalize(&fixture.repository)
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+
+    std::fs::write(fixture.repository.join("index.html"), "<main id=\"game\"></main>\n")
+        .unwrap();
+    git(&fixture.repository, &["add", "index.html"]);
+    git(&fixture.repository, &["commit", "-m", "implement ui shell"]);
+    let head_commit = git_output(&fixture.repository, &["rev-parse", "HEAD"]);
+
+    let target = fixture
+        .store
+        .create_work_unit(CreateWorkUnit {
+            task_run_id: fixture.run_id.clone(),
+            title: "Implement UI shell".to_string(),
+            owned_paths: vec!["index.html".to_string(), "style.css".to_string()],
+            base_commit: base_commit.clone(),
+            worktree_path: workspace.clone(),
+            branch: branch.clone(),
+            attempt: 1,
+        })
+        .await
+        .unwrap();
+    fixture
+        .store
+        .update_work_unit(
+            &target.id,
+            WorkUnitStatus::Running,
+            Some("agent-ui-shell".to_string()),
+        )
+        .await
+        .unwrap();
+    let outcome = fixture
+        .store
+        .create_agent_outcome(CreateAgentOutcome {
+            task_run_id: fixture.run_id.clone(),
+            work_unit_id: Some(target.id.clone()),
+            agent_id: "agent-ui-shell".to_string(),
+            owner_path: "/root".to_string(),
+            initiated_by: "planner".to_string(),
+            requested_by_call_id: "call-ui-shell".to_string(),
+            role: "executor".to_string(),
+            status: AgentOutcomeStatus::Running,
+            attempt: 1,
+        })
+        .await
+        .unwrap();
+    fixture
+        .store
+        .create_work_completion(
+            &outcome.id,
+            &target.id,
+            WorkCompletionKind::Delivery,
+            Some(&AgentDelivery {
+                worktree: AgentWorktreeDelivery {
+                    path: workspace.clone(),
+                    branch: branch.clone(),
+                },
+                base_commit: base_commit.clone(),
+                head_commit,
+                changed_files: vec!["index.html".to_string()],
+                verification_summary: "UI shell test passed".to_string(),
+            }),
+            "UI shell test passed",
+        )
+        .await
+        .unwrap();
+    fixture
+        .store
+        .create_work_unit(CreateWorkUnit {
+            task_run_id: fixture.run_id.clone(),
+            title: "Implement game engine".to_string(),
+            owned_paths: vec!["game.js".to_string()],
+            base_commit,
+            worktree_path: workspace,
+            branch,
+            attempt: 1,
+        })
+        .await
+        .unwrap();
+
+    let round = fixture
+        .store
+        .begin_delivery_review(
+            &fixture.session_id,
+            "agent-ui-shell",
+            "call-review-ui-shell",
+        )
+        .await
+        .unwrap();
+    let prompt = super::review::prompt::build_review_prompt(&fixture.coordinator, &round)
+        .await
+        .unwrap();
+    let target_section = prompt
+        .split("## Target WorkUnit ownership")
+        .nth(1)
+        .unwrap()
+        .split("## Sibling WorkUnit ownership")
+        .next()
+        .unwrap();
+    let sibling_section = prompt
+        .split("## Sibling WorkUnit ownership (deferred integration context only)")
+        .nth(1)
+        .unwrap()
+        .split("## Completion")
+        .next()
+        .unwrap();
+
+    assert!(prompt.contains("Only the exact completion diff"));
+    assert!(prompt.contains("do not report their unmerged or missing files"));
+    assert!(target_section.contains("index.html"));
+    assert!(target_section.contains("style.css"));
+    assert!(!target_section.contains("game.js"));
+    assert!(sibling_section.contains("game.js"));
+    assert!(prompt.contains("+<main id=\"game\"></main>"));
+    fixture.cleanup();
+}
+
+#[tokio::test]
 async fn integrated_review_preflight_requires_design_consistency_for_current_head() {
     let fixture = ReviewFixture::new("review-design-consistency-preflight").await;
     let branch_guard = fixture.coordinator.lock_branch_mutation().await;
@@ -3242,14 +3366,20 @@ async fn task_update_design_tool_has_typed_schema_branch_effect_and_planner_only
     let tool = coordinator.task_update_design_tool("studio-session");
 
     assert_eq!(tool.name(), "task_update_design");
-    assert!(tool.description().contains("*** Begin Patch"));
-    assert!(tool.description().contains("+# Design"));
+    assert_eq!(tool.description().matches("*** Begin Patch").count(), 1);
+    assert!(tool.description().contains("exactly one complete block"));
+    assert!(!tool.description().contains("Complete example"));
     assert_eq!(tool.effect(), Some(ToolEffect::BranchControl));
     assert_eq!(
         tool.input_schema(),
         serde_json::json!({
             "type": "object",
-            "properties": { "patch": { "type": "string" } },
+            "properties": {
+                "patch": {
+                    "type": "string",
+                    "description": "Exactly one complete Codex patch block for design/**. Do not include prose, Markdown fences, templates, or a previous attempt."
+                }
+            },
             "required": ["patch"],
             "additionalProperties": false
         })

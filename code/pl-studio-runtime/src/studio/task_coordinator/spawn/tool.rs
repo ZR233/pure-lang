@@ -128,9 +128,10 @@ fn executor_constraint(owned_paths: &[String]) -> Result<String> {
     let constraint = format!(
         "你是 Task executor，只能在系统分配给你的独立 worktree 中工作。\
 \n你只能修改以下 ownedPaths 覆盖的文件：\n{paths}\
-\n不得修改范围外文件。完成定位、开始实现、开始验证、遇到阻塞和准备审查时，调用 \
-report_progress 记录准确摘要与下一步；它不是心跳。完成后必须自行验证、提交所有变更，\
-并调用 report_completion 提交实际 HEAD 与验证摘要；普通文本回复不算完成。\
+\n不得修改范围外文件。完成定位、开始实现、开始验证、遇到阻塞和准备提交完成报告时，调用 \
+report_progress 记录准确摘要与下一步；它不是心跳。准备提交时使用 readyForCompletion，\
+该 checkpoint 不表示已完成或可审查。完成后必须自行验证、提交所有变更，并调用 \
+report_completion 提交实际 HEAD 与验证摘要；只有该工具成功才产生 readyForReview，普通文本回复不算完成。\
 \n工具失败后先读取当前状态，修复根因或换一种方案，不得原样重复同一个失败调用。\
 \n不得派生代理、合并分支、切换/创建/删除分支、操作 planner 或用户工作区，\
 也不得自行把提交合入任务分支。"

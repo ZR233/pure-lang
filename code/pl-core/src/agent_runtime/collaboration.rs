@@ -116,7 +116,7 @@ impl CollaborationToolKind {
         match self {
             Self::Spawn => "Spawn a child agent using one of the roles allowed for this turn.",
             Self::ReportProgress => {
-                "Record the caller's current execution stage, concise summary, and next step."
+                "Record the caller's current execution stage, concise summary, and next step. This is a checkpoint only and never creates a durable completion or review authorization."
             }
             Self::SendMessage => {
                 "Send a message to an accessible agent without interrupting its active turn."
@@ -540,7 +540,7 @@ enum ProgressStage {
     Implementing,
     Verifying,
     Blocked,
-    ReadyForReview,
+    ReadyForCompletion,
 }
 
 impl From<ProgressStage> for AgentProgressStage {
@@ -550,7 +550,7 @@ impl From<ProgressStage> for AgentProgressStage {
             ProgressStage::Implementing => Self::Implementing,
             ProgressStage::Verifying => Self::Verifying,
             ProgressStage::Blocked => Self::Blocked,
-            ProgressStage::ReadyForReview => Self::ReadyForReview,
+            ProgressStage::ReadyForCompletion => Self::ReadyForCompletion,
         }
     }
 }
@@ -590,6 +590,20 @@ enum ForkTurns {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn report_progress_exposes_pre_completion_stage_without_review_authorization() {
+        let schema = progress_schema();
+        let stages = schema["properties"]["stage"]["enum"]
+            .as_array()
+            .expect("progress stages must be an array");
+
+        assert!(stages.iter().any(|stage| stage == "readyForCompletion"));
+        assert!(!stages.iter().any(|stage| stage == "readyForReview"));
+        assert!(CollaborationToolKind::ReportProgress
+            .description()
+            .contains("never creates a durable completion"));
+    }
 
     #[test]
     fn read_session_age_gate_only_applies_while_agent_has_active_work() {

@@ -157,7 +157,7 @@ async fn executor_attempts_are_monotonic_beyond_three_for_owned_paths() {
 }
 
 #[tokio::test]
-async fn root_tool_uses_captured_studio_session_and_reports_patch_cause() {
+async fn task_update_design_root_tool_uses_session_and_reports_exact_patch_cause() {
     let fixture = DesignFixture::new("captured-session").await;
     let tool = fixture
         .coordinator
@@ -188,6 +188,28 @@ async fn root_tool_uses_captured_studio_session_and_reports_patch_cause() {
         message.contains("first line must be '*** Begin Patch'"),
         "missing parser cause in tool error: {message}"
     );
+
+    let before_head = fixture.head();
+    let before_design = fixture.design_text();
+    let error = kernel
+        .execute_tool(AgentKernelToolRequest::new(
+            "task_update_design",
+            serde_json::json!({
+                "patch": "*** Begin Patch\n*** Begin Patch\n*** Add File: design/duplicate-wrapper.md\n+content\n*** End Patch"
+            }),
+            "turn-id-is-not-studio-session-id",
+            "call-duplicate-wrapper",
+            event_tx.clone(),
+        ))
+        .await
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("multiple patch blocks"),
+        "missing multiple-block cause: {error}"
+    );
+    assert_eq!(fixture.head(), before_head);
+    assert_eq!(fixture.design_text(), before_design);
+    assert!(fixture.status().is_empty());
 
     let output = kernel
         .execute_tool(AgentKernelToolRequest::new(

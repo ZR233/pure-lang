@@ -164,7 +164,10 @@ where
 {
     let input: ListFilesInput = parse_input(arguments, TOOL_LIST_FILES)?;
     let path = path_or_current(input.path);
-    let glob = input.glob.unwrap_or_else(|| "*".to_string());
+    let glob = input
+        .glob
+        .filter(|glob| !glob.trim().is_empty())
+        .unwrap_or_else(|| "*".to_string());
     let include_dirs = input.include_dirs.unwrap_or(false);
     let limit = input.limit.unwrap_or(DEFAULT_LIST_FILES_LIMIT);
     if !(1..=MAX_LIST_FILES_LIMIT).contains(&limit) {
