@@ -4315,7 +4315,7 @@ return cancelled(_that.reason);case _:
 
 class BridgeSessionTurnState_Queued extends BridgeSessionTurnState {
   const BridgeSessionTurnState_Queued(): super._();
-
+  
 
 
 
@@ -4347,7 +4347,7 @@ String toString() {
 
 class BridgeSessionTurnState_InProgress extends BridgeSessionTurnState {
   const BridgeSessionTurnState_InProgress({required this.activity}): super._();
-
+  
 
  final  BridgeSessionTurnActivity activity;
 
@@ -4413,7 +4413,7 @@ as BridgeSessionTurnActivity,
 
 class BridgeSessionTurnState_Completed extends BridgeSessionTurnState {
   const BridgeSessionTurnState_Completed(): super._();
-
+  
 
 
 
@@ -4445,7 +4445,7 @@ String toString() {
 
 class BridgeSessionTurnState_Failed extends BridgeSessionTurnState {
   const BridgeSessionTurnState_Failed({required this.reason}): super._();
-
+  
 
  final  String reason;
 
@@ -4511,7 +4511,7 @@ as String,
 
 class BridgeSessionTurnState_Cancelled extends BridgeSessionTurnState {
   const BridgeSessionTurnState_Cancelled({required this.reason}): super._();
-
+  
 
  final  String reason;
 
