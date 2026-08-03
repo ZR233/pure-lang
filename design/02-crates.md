@@ -188,7 +188,9 @@ Riverpod/Freezed build runner、l10n 和 FRB codegen。FRB Dart/Rust runtime 与
 analyze 和非视觉测试；`verify-gui --integration` 额外在 Windows 上运行 desktop
 integration test。xtask 内部统一以 `code/pure-studio/` 为 Flutter 工作目录。
 `build-rust-bridge` 是 Flutter Windows CMake 内部入口，负责构建并复制
-`pl_studio_bridge.dll`/`.pdb`。
+`pl_studio_bridge.dll`/`.pdb`。GUI 运行和构建命令由 Flutter 按需解析依赖；Windows
+CMake 必须把 bridge DLL 及其 Rust 源码、manifest 和编译期嵌入资源声明为增量构建输入，
+无输入变化时不得重复启动 bridge Cargo 构建。
 
 ## 2.10 本地数据版本
 

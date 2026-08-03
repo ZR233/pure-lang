@@ -18,6 +18,9 @@ cargo xtask build-gui --no-clean # 保留已存在的 release 输出目录
 ```
 
 `pl-xtask` 自动检测当前 OS，并在 `code/pure-studio/` 目录下执行对应 `flutter build <platform> --release`，产物收集到 `dist/pure-studio-release/`。
+`run-gui` 和 `build-gui` 会在 `.dart_tool/pure-xtask-pub.sha256` 记录 `pubspec.yaml`、
+`pubspec.lock`、`pubspec_overrides.yaml` 和 `PUB_HOSTED_URL` 的依赖指纹；指纹未变时使用
+Flutter `--no-pub` 热路径，不重复解析依赖或改写 lockfile。
 
 ### 产物结构（Windows）
 
@@ -80,6 +83,9 @@ flutter_rust_bridge_codegen generate
 - 不同工作目录下的 `.cargo/config.toml` 生效范围
 - Flutter 构建系统使用独立的 Rust target 目录：`code/pure-studio/build/windows/x64/rust-target/`
 - 上游 workspace crate（`pl-core`、`pl-model`、`pl-protocol`）是否已提前编译
+
+该 target 目录按 Debug/Release 保留 Cargo 缓存。CMake 跟踪 Rust 源码、Cargo manifest/lockfile、
+migration、prompt 和其他编译期嵌入资源；这些输入未变时，重复 GUI 构建不会再启动 bridge Cargo 构建。
 
 先用独立 `cargo build -p pl-studio-bridge --release` 验证 Rust 侧能否单独通过，再确认 Flutter 构建。
 
