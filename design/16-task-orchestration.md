@@ -16,6 +16,11 @@ explorer、executor、reviewer 的 agent depth 固定为 1，不得派生后代�
 调用 `task_request_delivery_review` 或 `task_request_integrated_review` 间接创建。所有
 完成和审查事实都由 planner 通过 Agent Directory 与 `task_status` 主动读取。
 
+每次 turn 准备都从同一份 canonical Studio role route 解析模型参数：Simple 根使用
+executor，Task 根使用 planner，子 agent 按 explorer、executor 或 reviewer 身份解析。
+provider、model 与可选 effort 一起进入该 turn 的 kernel；不得从父角色、Flutter draft 或
+硬编码默认值继承 effort。
+
 ## 执行边界
 
 核心层使用 `TurnExecutionProfile` 与工具 effect 强制角色边界。effect 分为

@@ -16,7 +16,7 @@ fn test_config() -> AgentModelConfig {
             ModelRouteConfig {
                 provider: provider_id,
                 model: "deepseek-v4-flash".to_string(),
-                reasoning_effort: Some(ReasoningEffort::new("high")),
+                effort: Some(ReasoningEffort::new("high")),
             },
         )]),
     }
@@ -32,10 +32,7 @@ fn resolve_uses_route_as_the_only_default_model_source() {
     assert_eq!(resolved.provider_id, ProviderId::new("deepseek").unwrap());
     assert_eq!(resolved.model.slug, "deepseek-v4-flash");
     assert_eq!(resolved.provider_info.default_model, "deepseek-v4-flash");
-    assert_eq!(
-        resolved.reasoning_effort,
-        Some(ReasoningEffort::new("high"))
-    );
+    assert_eq!(resolved.effort, Some(ReasoningEffort::new("high")));
 }
 
 #[test]
@@ -69,8 +66,7 @@ fn validate_rejects_missing_provider_model_and_effort() {
     );
 
     let mut config = test_config();
-    config.routes.get_mut(&role).unwrap().reasoning_effort =
-        Some(ReasoningEffort::new("unsupported"));
+    config.routes.get_mut(&role).unwrap().effort = Some(ReasoningEffort::new("unsupported"));
     assert!(
         config
             .validate()
@@ -151,7 +147,7 @@ fn same_preset_can_back_multiple_independent_provider_instances() {
                 ModelRouteConfig {
                     provider: websocket_id.clone(),
                     model: "gpt-5.6-sol".to_string(),
-                    reasoning_effort: None,
+                    effort: Some(ReasoningEffort::new("low")),
                 },
             ),
             (
@@ -159,7 +155,7 @@ fn same_preset_can_back_multiple_independent_provider_instances() {
                 ModelRouteConfig {
                     provider: http_id.clone(),
                     model: "gpt-5.6-sol".to_string(),
-                    reasoning_effort: None,
+                    effort: Some(ReasoningEffort::new("low")),
                 },
             ),
         ]),

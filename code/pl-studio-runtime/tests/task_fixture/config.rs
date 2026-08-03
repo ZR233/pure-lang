@@ -23,7 +23,7 @@ pub(super) fn task_test_config(base_url: String) -> StudioConfig {
     let route = ModelRouteConfig {
         provider: provider_id.clone(),
         model: "local-responses".to_string(),
-        reasoning_effort: Some(ReasoningEffort::new("none")),
+        effort: Some(ReasoningEffort::new("none")),
     };
     let mut config = StudioConfig::default_config();
     config.models = AgentModelConfig {

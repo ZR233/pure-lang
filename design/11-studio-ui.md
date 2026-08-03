@@ -321,7 +321,7 @@ session、切换到返回的 `selectedSessionId`，并用 `loadSessionState` 恢
 会话列表只显示 `visibility=active && parentSessionId=null`；agent child 与 archived
 session 不作为 root row 出现。
 
-Settings 是独立页面栈中的配置编辑入口。它必须覆盖 Providers、Instructions、Skills、Roles、MCP、Security 和 General 页签。App bootstrap/first-run 先调用 `loadProviderCatalog()`，目录只按 revision 做进程内缓存；加载失败显示错误与重试，不回退本地常量。普通设置项改完即保存；Provider 新增/编辑使用独立本地草稿，点击保存后调用 `saveProviderSettings(settingsJson)`。Provider payload 为 `defaultProviderId`、`providers[]`、`roles[]`，实例字段为 `id`、可选 `originalId`、`templateKind`、`wireProtocol`、`connectionMode`、`name`、`baseUrl`、`bearerToken`、`defaultModel`、`customModels[]`；model 字段为 `slug/displayName/reasoningEfforts/baseInstructions`。空 bearer token 保留已存 secret；重命名用 `originalId` 关联原实例。所有 typed save 成功后必须用返回的 canonical config 更新 providers、roles、instructions、skills、MCP servers、permission mode 和 config 状态。
+Settings 是独立页面栈中的配置编辑入口。它必须覆盖 Providers、Instructions、Skills、Roles、MCP、Security 和 General 页签。App bootstrap/first-run 先调用 `loadProviderCatalog()`，目录只按 revision 做进程内缓存；加载失败显示错误与重试，不回退本地常量。普通设置项改完即保存；Provider 新增/编辑使用独立本地草稿，点击保存后调用 typed `saveProviderSettings`。Provider input 包含 `defaultProviderId`、`providers[]`、`roles[]`，实例字段为 `id`、可选 `originalId`、`templateKind`、`wireProtocol`、`connectionMode`、`name`、`baseUrl`、typed secret action、`defaultModel`、`customModels[]`；custom model 不接收独立 reasoning effort 候选，避免产生没有 parameter wire 的伪能力。空 bearer token 保留已存 secret；重命名用 `originalId` 关联原实例。所有 typed save 成功后必须用返回的 canonical settings snapshot 原子更新 providers、roles、instructions、skills、MCP servers、permission mode 和 General settings；bootstrap 和保存响应不保留 `configJson`、`generalSettingsJson`、raw JSON converter 或兼容解析路径。
 
 General 页现有单一 settings group 内展示应用版本和稳定更新状态：最新时显示当前版本与
 “检查更新”，可升级时显示目标版本、Release Notes 与“下载并安装”，下载时显示进度，
@@ -334,7 +334,12 @@ Flutter Provider 页采用页面栈式互斥视图：列表页、详情页、新
 
 Settings 不作为悬浮 modal、popover、fixed overlay 或右侧嵌入页展示。Studio shell 采用页面栈语义：chat 页面和 settings 页面互斥，打开设置时压入 settings 页面并替换整个窗口，包括左侧项目/会话栏；设置页顶部提供返回聊天入口，返回后恢复当前会话的 sidebar、timeline、状态栏和 composer。设置页不得模糊、遮罩或覆盖聊天背景，而是作为独立页面参与导航。
 
-Provider 设置支持搜索、刷新用量、选择默认 provider、新增/编辑/删除 provider、切换 provider template、编辑 base URL/API key/default model，以及追加/删除 custom model。Provider 卡片必须消费 `load_provider_usages` 的 typed 结果展示查询状态：打开 Providers 页时自动进行一次过期刷新；全局刷新和单卡刷新都走同一 store action，单卡刷新只在该卡展示 busy/retry 状态，保存 provider 配置后要重新刷新用量，并同步触发 MCP health 刷新。默认 provider 身份来自 config/settings payload 的 `defaultProviderId`，不得用当前详情页、编辑页或列表焦点状态推断。DeepSeek 显示余额与赠送/充值拆分，Zhipu Coding Plan 显示 5 小时、周额度和 MCP 额度的剩余进度、重置时间与完整工具明细；缺 key、失败、不支持、未查询、更新时间和重试入口都必须在卡片内可见。保存 Zhipu Coding Plan token 后，内置 Zhipu MCP 列表和状态栏应随 `mcpHealthChanged` 立即进入 checking/available/unavailable，而不是等待下一轮 prompt。Role 设置固定展示 explorer/planner/executor/reviewer 四个角色，下拉选择后立即写回；provider/model 删除或不可用时规范化到可用 provider/model/effort。MCP 设置支持 stdio 和 streamable HTTP，保留 built-in/locked server metadata，只允许可编辑 server 修改身份；内置 server 的 endpoint 只读、启用开关可用，inline 修改即时保存，内置 server 的启用开关也通过 typed MCP save 写入并立即影响 runtime 暴露，新增或完整编辑 server 若进入独立页面则使用保存/取消模型。Instructions、Security、Skills 和 General 设置不能绕过 store 直接写 UI-only 状态。
+Provider 设置支持搜索、刷新用量、选择默认 provider、新增/编辑/删除 provider、切换 provider template、编辑 base URL/API key/default model，以及追加/删除 custom model。Provider 卡片必须消费 `load_provider_usages` 的 typed 结果展示查询状态：打开 Providers 页时自动进行一次过期刷新；全局刷新和单卡刷新都走同一 store action，单卡刷新只在该卡展示 busy/retry 状态，保存 provider 配置后要重新刷新用量，并同步触发 MCP health 刷新。默认 provider 身份来自 typed canonical settings 的 `defaultProviderId`，不得用当前详情页、编辑页或列表焦点状态推断。DeepSeek 显示余额与赠送/充值拆分，Zhipu Coding Plan 显示 5 小时、周额度和 MCP 额度的剩余进度、重置时间与完整工具明细；缺 key、失败、不支持、未查询、更新时间和重试入口都必须在卡片内可见。保存 Zhipu Coding Plan token 后，内置 Zhipu MCP 列表和状态栏应随 `mcpHealthChanged` 立即进入 checking/available/unavailable，而不是等待下一轮 prompt。Role 设置固定展示 explorer/planner/executor/reviewer 四个角色，每行分别显示模型与思考强度：模型切换按目录默认值提交，强度切换不得改变模型；无 effort 候选时控件禁用并提交空选择。inline 设置不得用本地 selection 假装保存成功，provider/model 删除或不可用时由后端规范化后返回 canonical provider/model/effort。MCP 设置支持 stdio 和 streamable HTTP，保留 built-in/locked server metadata，只允许可编辑 server 修改身份；内置 server 的 endpoint 只读、启用开关可用，inline 修改即时保存，内置 server 的启用开关也通过 typed MCP save 写入并立即影响 runtime 暴露，新增或完整编辑 server 若进入独立页面则使用保存/取消模型。Instructions、Security、Skills 和 General 设置不能绕过 store 直接写 UI-only 状态。
+
+角色思考强度的 Windows native 验收使用隔离的用户目录和本地 OpenAI-compatible capture
+server，运行真实 bridge 而非 Demo backend：在 Roles 页保存四角色选择，退出并重启验证
+schema 12 配置恢复，再分别触发 planner、executor、explorer、reviewer 请求并检查 capture
+body 的 effort wire。保存失败时磁盘、重启后的配置和当前 canonical UI 均不得改变。
 
 Security 页是紧凑的权限配置页，不使用与 provider/MCP 相同的大卡片网格来填充空间。权限模式应作为单个设置组展示：标题、当前状态、三项可选模式和简短说明保持在可扫描的窄宽度内，避免大面积空白。
 

@@ -20,7 +20,7 @@ use crate::{
 pub struct ProviderModelEdit {
     pub slug: String,
     pub display_name: String,
-    pub reasoning_efforts: Vec<String>,
+    pub efforts: Vec<String>,
     pub base_instructions: String,
 }
 
@@ -68,7 +68,7 @@ impl ProviderModelEdit {
             .cloned()
             .unwrap_or_else(|| ModelInfo::fallback(&slug));
         model.display_name = non_empty_trimmed(&self.display_name, "model display_name")?;
-        let efforts = normalized_efforts(&self.reasoning_efforts);
+        let efforts = normalized_efforts(&self.efforts);
         let existing_effort = model
             .parameters
             .iter()
@@ -81,12 +81,14 @@ impl ProviderModelEdit {
         model
             .parameters
             .retain(|parameter| parameter.name != "effort");
-        model.parameters.push(ModelParameter {
-            name: "effort".to_string(),
-            label: effort_label,
-            candidates: efforts,
-            wire: effort_wire,
-        });
+        if !efforts.is_empty() {
+            model.parameters.push(ModelParameter {
+                name: "effort".to_string(),
+                label: effort_label,
+                candidates: efforts,
+                wire: effort_wire,
+            });
+        }
         model.base_instructions = self.base_instructions.trim().to_string();
         Ok(model)
     }
@@ -375,7 +377,7 @@ fn role_edit_to_route(
     Ok(ModelRouteConfig {
         provider: provider_id,
         model: model_slug,
-        reasoning_effort: Some(ReasoningEffort::new(effort)),
+        effort: Some(ReasoningEffort::new(effort)),
     })
 }
 
@@ -390,7 +392,7 @@ fn reconciled_route(
         && let Ok(models) = provider.effective_models()
         && let Some(model) = models.iter().find(|model| model.slug == route.model)
     {
-        if route.reasoning_effort.as_ref().is_none_or(|configured| {
+        if route.effort.as_ref().is_none_or(|configured| {
             model
                 .supported_efforts()
                 .iter()
@@ -402,7 +404,7 @@ fn reconciled_route(
             return Ok(ModelRouteConfig {
                 provider: route.provider.clone(),
                 model: route.model.clone(),
-                reasoning_effort: Some(ReasoningEffort::new(effort)),
+                effort: Some(ReasoningEffort::new(effort)),
             });
         }
     }
@@ -445,7 +447,7 @@ fn route_for_provider_default(
     Ok(ModelRouteConfig {
         provider: provider_key.clone(),
         model: default_model.clone(),
-        reasoning_effort: Some(ReasoningEffort::new(effort)),
+        effort: Some(ReasoningEffort::new(effort)),
     })
 }
 
@@ -584,7 +586,7 @@ mod tests {
         edit.custom_models.push(ProviderModelEdit {
             slug: "gpt-custom".to_string(),
             display_name: "GPT Custom".to_string(),
-            reasoning_efforts: vec!["high".to_string()],
+            efforts: vec!["high".to_string()],
             base_instructions: "custom base".to_string(),
         });
 
@@ -662,10 +664,7 @@ mod tests {
         let planner = route(&config, StudioRole::Planner);
         assert_eq!(planner.provider.as_str(), "openai");
         assert_eq!(planner.model, "gpt-5.4-mini");
-        assert_eq!(
-            planner.reasoning_effort.as_ref().unwrap().as_str(),
-            "medium"
-        );
+        assert_eq!(planner.effort.as_ref().unwrap().as_str(), "medium");
     }
 
     #[test]
@@ -711,7 +710,7 @@ mod tests {
                     ModelRouteConfig {
                         provider: current_id.clone(),
                         model: "gateway-model".to_string(),
-                        reasoning_effort: Some(ReasoningEffort::new("high")),
+                        effort: Some(ReasoningEffort::new("high")),
                     },
                 )
             })
@@ -732,7 +731,7 @@ mod tests {
             custom_models: vec![ProviderModelEdit {
                 slug: "gateway-model".to_string(),
                 display_name: "Gateway Model".to_string(),
-                reasoning_efforts: vec!["high".to_string()],
+                efforts: vec!["high".to_string()],
                 base_instructions: String::new(),
             }],
         };
@@ -774,7 +773,7 @@ mod tests {
         edit.custom_models.push(ProviderModelEdit {
             slug: "gpt-5.5".to_string(),
             display_name: "Duplicate".to_string(),
-            reasoning_efforts: vec!["high".to_string()],
+            efforts: vec!["high".to_string()],
             base_instructions: String::new(),
         });
 

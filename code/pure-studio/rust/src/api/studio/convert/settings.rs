@@ -93,7 +93,7 @@ pub(crate) fn studio_config_projection(config: &pl_studio_runtime::StudioConfig)
                 json!({
                     "provider": route.provider,
                     "model": route.model,
-                    "effort": route.reasoning_effort.as_ref().map(|effort| effort.as_str()),
+                    "effort": route.effort.as_ref().map(|effort| effort.as_str()),
                 }),
             )
         })
@@ -421,7 +421,7 @@ fn provider_model_edit(input: ProviderModelInput) -> ProviderModelEdit {
     ProviderModelEdit {
         slug: input.slug,
         display_name: input.display_name,
-        reasoning_efforts: input.reasoning_efforts,
+        efforts: input.reasoning_efforts,
         base_instructions: input.base_instructions.unwrap_or_default(),
     }
 }

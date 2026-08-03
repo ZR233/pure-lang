@@ -5,29 +5,12 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use pl_core::{
-    AgentModelConfig, AgentRoleId, ModelRouteConfig, ProviderCapabilitySelection, ProviderConfig,
-    ProviderId, ProviderModelCatalogConfig, ProviderPresetId, ToolCapabilityConfig,
-    builtin_provider_catalog,
-};
-use pl_model::{
-    ApplyPatchToolType, ModelInfo, OpenAiCompactionMode, ProviderConnectionMode, ProviderInfo,
-    ProviderServiceCapabilities, ProviderWireProtocol, ToolWirePolicy,
-};
+use pl_core::{ProviderId, builtin_provider_catalog};
 use serde::Deserialize;
 
 use crate::{PureError, Result};
 
-use super::{
-    STUDIO_CONFIG_DIR_NAME, STUDIO_CONFIG_FILE_NAME, STUDIO_CONFIG_SCHEMA_VERSION, StudioConfig,
-    StudioInstructionsConfig, StudioMcpConfig, StudioRuntimeConfig, StudioSkillsConfig,
-    StudioUiConfig, StudioWebSearchConfig,
-};
-
-const LEGACY_STUDIO_CONFIG_SCHEMA_VERSION: u32 = 5;
-const CATALOG_STUDIO_CONFIG_SCHEMA_VERSION: u32 = 6;
-const CONNECTION_STUDIO_CONFIG_SCHEMA_VERSION: u32 = 7;
-const PREVIOUS_STUDIO_CONFIG_SCHEMA_VERSIONS: [u32; 3] = [8, 9, 10];
+use super::{STUDIO_CONFIG_DIR_NAME, STUDIO_CONFIG_FILE_NAME, StudioConfig};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfigPaths {
@@ -86,18 +69,7 @@ impl ConfigStore {
         }
         match self.load() {
             Ok(config) => Ok(config),
-            Err(_) => {
-                if let Some(config) = self.migrate_previous_config()? {
-                    return Ok(config);
-                }
-                if let Some(config) = self.migrate_catalog_config()? {
-                    return Ok(config);
-                }
-                match self.migrate_v5()? {
-                    Some(config) => Ok(config),
-                    None => self.reset_to_default(),
-                }
-            }
+            Err(_) => self.replace_rejected_config(),
         }
     }
 
@@ -142,457 +114,71 @@ impl ConfigStore {
         Ok(config)
     }
 
-    fn reset_to_default(&self) -> Result<StudioConfig> {
-        if self.config_exists() {
-            fs::copy(
-                self.paths.config_file(),
-                rejected_backup_path(self.paths.config_file()),
-            )?;
-            fs::remove_file(self.paths.config_file())?;
+    fn replace_rejected_config(&self) -> Result<StudioConfig> {
+        let rejected_content = fs::read_to_string(self.paths.config_file())?;
+        let credentials = toml::from_str::<RejectedConfigCredentials>(&rejected_content).ok();
+        let backup = rejected_backup_path(self.paths.config_file());
+        fs::copy(self.paths.config_file(), &backup)?;
+        fs::remove_file(self.paths.config_file())?;
+
+        let mut config = StudioConfig::default_config();
+        if let Some(credentials) = credentials {
+            restore_provider_credentials(&mut config, credentials);
         }
-        let config = StudioConfig::default_config();
         self.save(&config)?;
         Ok(config)
     }
-
-    fn migrate_v5(&self) -> Result<Option<StudioConfig>> {
-        let content = fs::read_to_string(self.paths.config_file())?;
-        let legacy: LegacyStudioConfig = match toml::from_str(&content) {
-            Ok(config) => config,
-            Err(_) => return Ok(None),
-        };
-        if legacy.schema_version != LEGACY_STUDIO_CONFIG_SCHEMA_VERSION {
-            return Ok(None);
-        }
-
-        let providers = legacy
-            .models
-            .providers
-            .into_iter()
-            .map(|(id, provider)| Ok((id.clone(), migrate_provider(&id, provider)?)))
-            .collect::<Result<BTreeMap<_, _>>>()?;
-        let config = StudioConfig {
-            schema_version: STUDIO_CONFIG_SCHEMA_VERSION,
-            models: AgentModelConfig {
-                providers,
-                routes: legacy.models.routes,
-            },
-            web_search: Default::default(),
-            runtime: legacy.runtime.into(),
-            instructions: legacy.instructions,
-            skills: legacy.skills,
-            mcp: legacy.mcp,
-            ui: legacy.ui,
-        };
-        config.validate()?;
-        self.backup_v5()?;
-        self.save(&config)?;
-        Ok(Some(config))
-    }
-
-    fn migrate_catalog_config(&self) -> Result<Option<StudioConfig>> {
-        let content = fs::read_to_string(self.paths.config_file())?;
-        let legacy: LegacyCatalogStudioConfig = match toml::from_str(&content) {
-            Ok(config) => config,
-            Err(_) => return Ok(None),
-        };
-        if ![
-            CATALOG_STUDIO_CONFIG_SCHEMA_VERSION,
-            CONNECTION_STUDIO_CONFIG_SCHEMA_VERSION,
-        ]
-        .contains(&legacy.schema_version)
-        {
-            return Ok(None);
-        }
-        let version = legacy.schema_version;
-        let providers = legacy
-            .models
-            .providers
-            .into_iter()
-            .map(|(id, provider)| {
-                migrate_catalog_provider(&id, provider).map(|provider| (id, provider))
-            })
-            .collect::<Result<BTreeMap<_, _>>>()?;
-        let config = StudioConfig {
-            schema_version: STUDIO_CONFIG_SCHEMA_VERSION,
-            models: AgentModelConfig {
-                providers,
-                routes: legacy.models.routes,
-            },
-            web_search: Default::default(),
-            runtime: legacy.runtime.into(),
-            instructions: legacy.instructions,
-            skills: legacy.skills,
-            mcp: legacy.mcp,
-            ui: legacy.ui,
-        };
-        config.validate()?;
-        self.backup_schema(version)?;
-        self.save(&config)?;
-        Ok(Some(config))
-    }
-
-    fn migrate_previous_config(&self) -> Result<Option<StudioConfig>> {
-        let content = fs::read_to_string(self.paths.config_file())?;
-        let legacy: PreviousStudioConfig = match toml::from_str(&content) {
-            Ok(config) => config,
-            Err(_) => return Ok(None),
-        };
-        if !PREVIOUS_STUDIO_CONFIG_SCHEMA_VERSIONS.contains(&legacy.schema_version) {
-            return Ok(None);
-        }
-        let previous_version = legacy.schema_version;
-        let mut models = legacy.models;
-        if matches!(previous_version, 8 | 9) {
-            for provider in models.providers.values_mut() {
-                provider.capabilities = if provider.preset_id().is_some() {
-                    ProviderCapabilitySelection::PresetDefaults
-                } else {
-                    ProviderCapabilitySelection::Explicit(ProviderServiceCapabilities::default())
-                };
-            }
-        }
-        let config = StudioConfig {
-            schema_version: STUDIO_CONFIG_SCHEMA_VERSION,
-            models,
-            web_search: legacy.web_search,
-            runtime: legacy.runtime.into(),
-            instructions: legacy.instructions,
-            skills: legacy.skills,
-            mcp: legacy.mcp,
-            ui: legacy.ui,
-        };
-        config.validate()?;
-        self.backup_schema(previous_version)?;
-        self.save(&config)?;
-        Ok(Some(config))
-    }
-
-    fn backup_v5(&self) -> Result<()> {
-        self.backup_schema(LEGACY_STUDIO_CONFIG_SCHEMA_VERSION)
-    }
-
-    fn backup_schema(&self, version: u32) -> Result<()> {
-        let backup = schema_backup_path(self.paths.config_file(), version);
-        if !backup.exists() {
-            fs::copy(self.paths.config_file(), backup)?;
-        }
-        Ok(())
-    }
-}
-
-#[derive(Debug, Deserialize)]
-struct LegacyStudioConfig {
-    schema_version: u32,
-    models: LegacyAgentModelConfig,
-    #[serde(default)]
-    runtime: LegacyRuntimeConfig,
-    #[serde(default)]
-    instructions: StudioInstructionsConfig,
-    #[serde(default)]
-    skills: StudioSkillsConfig,
-    #[serde(default)]
-    mcp: StudioMcpConfig,
-    #[serde(default)]
-    ui: StudioUiConfig,
-}
-
-#[derive(Debug, Deserialize)]
-struct LegacyAgentModelConfig {
-    providers: BTreeMap<ProviderId, LegacyProviderConfig>,
-    routes: BTreeMap<AgentRoleId, ModelRouteConfig>,
-}
-
-#[derive(Debug, Deserialize)]
-struct LegacyProviderConfig {
-    #[serde(default)]
-    preset: Option<ProviderPresetId>,
-    provider_kind: LegacyProviderKind,
-    name: String,
-    base_url: String,
-    #[serde(default)]
-    bearer_token: Option<String>,
-    #[serde(default)]
-    bearer_token_env: Option<String>,
-    #[serde(default)]
-    http_headers: Option<std::collections::HashMap<String, String>>,
-    #[serde(default)]
-    tool_wire_policy: ToolWirePolicy,
-    #[serde(default)]
-    apply_patch_tool_type: Option<ApplyPatchToolType>,
-    #[serde(default)]
-    models: Vec<ModelInfo>,
-}
-
-#[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum LegacyProviderKind {
-    OpenAi,
-    OpenAiCompatibleChat,
-    DeepSeek,
-    Zhipu,
-}
-
-#[derive(Debug, Deserialize)]
-struct LegacyCatalogStudioConfig {
-    schema_version: u32,
-    models: LegacyCatalogAgentModelConfig,
-    #[serde(default)]
-    runtime: LegacyRuntimeConfig,
-    #[serde(default)]
-    instructions: StudioInstructionsConfig,
-    #[serde(default)]
-    skills: StudioSkillsConfig,
-    #[serde(default)]
-    mcp: StudioMcpConfig,
-    #[serde(default)]
-    ui: StudioUiConfig,
-}
-
-#[derive(Debug, Deserialize)]
-struct PreviousStudioConfig {
-    schema_version: u32,
-    models: AgentModelConfig,
-    #[serde(default)]
-    web_search: StudioWebSearchConfig,
-    #[serde(default)]
-    runtime: LegacyRuntimeConfig,
-    #[serde(default)]
-    instructions: StudioInstructionsConfig,
-    #[serde(default)]
-    skills: StudioSkillsConfig,
-    #[serde(default)]
-    mcp: StudioMcpConfig,
-    #[serde(default)]
-    ui: StudioUiConfig,
 }
 
 #[derive(Debug, Default, Deserialize)]
-struct LegacyRuntimeConfig {
+struct RejectedConfigCredentials {
     #[serde(default)]
-    permission_mode: LegacyPermissionMode,
-    #[serde(default)]
-    tool_capabilities: ToolCapabilityConfig,
-    #[serde(default)]
-    active_skills: Vec<String>,
-    #[serde(default)]
-    active_mcp_servers: Vec<String>,
-    #[serde(default)]
-    openai_compaction_mode: LegacyOpenAiCompactionMode,
+    models: RejectedModelCredentials,
 }
 
-impl From<LegacyRuntimeConfig> for StudioRuntimeConfig {
-    fn from(value: LegacyRuntimeConfig) -> Self {
-        Self {
-            permission_mode: value.permission_mode.into(),
-            tool_capabilities: value.tool_capabilities,
-            active_skills: value.active_skills,
-            active_mcp_servers: value.active_mcp_servers,
-            openai_compaction_mode: value.openai_compaction_mode.into(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-enum LegacyPermissionMode {
-    #[default]
-    RequestApproval,
-    WorkspaceWrite,
-    AutoReview,
-    FullAccess,
-}
-
-impl From<LegacyPermissionMode> for pl_core::PermissionMode {
-    fn from(value: LegacyPermissionMode) -> Self {
-        match value {
-            LegacyPermissionMode::RequestApproval | LegacyPermissionMode::WorkspaceWrite => {
-                Self::RequestApproval
-            }
-            LegacyPermissionMode::AutoReview => Self::AutoReview,
-            LegacyPermissionMode::FullAccess => Self::FullAccess,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum LegacyOpenAiCompactionMode {
-    #[default]
-    RemoteV2,
-    RemoteLegacy,
-    Local,
-}
-
-impl From<LegacyOpenAiCompactionMode> for OpenAiCompactionMode {
-    fn from(value: LegacyOpenAiCompactionMode) -> Self {
-        match value {
-            LegacyOpenAiCompactionMode::RemoteV2 | LegacyOpenAiCompactionMode::RemoteLegacy => {
-                Self::RemoteV2
-            }
-            LegacyOpenAiCompactionMode::Local => Self::Local,
-        }
-    }
-}
-
-#[derive(Debug, Deserialize)]
-struct LegacyCatalogAgentModelConfig {
-    providers: BTreeMap<ProviderId, LegacyCatalogProviderConfig>,
-    routes: BTreeMap<AgentRoleId, ModelRouteConfig>,
-}
-
-#[derive(Debug, Deserialize)]
-struct LegacyCatalogProviderConfig {
+#[derive(Debug, Default, Deserialize)]
+struct RejectedModelCredentials {
     #[serde(default)]
-    preset: Option<ProviderPresetId>,
-    provider_kind: LegacyProviderKind,
-    #[serde(default)]
-    connection_mode: Option<ProviderConnectionMode>,
-    name: String,
-    base_url: String,
+    providers: BTreeMap<String, ProviderCredentials>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct ProviderCredentials {
     #[serde(default)]
     bearer_token: Option<String>,
     #[serde(default)]
     bearer_token_env: Option<String>,
-    #[serde(default)]
-    http_headers: Option<std::collections::HashMap<String, String>>,
-    #[serde(default)]
-    tool_wire_policy: ToolWirePolicy,
-    #[serde(default)]
-    apply_patch_tool_type: Option<ApplyPatchToolType>,
-    catalog: ProviderModelCatalogConfig,
 }
 
-fn migrate_provider(id: &ProviderId, legacy: LegacyProviderConfig) -> Result<ProviderConfig> {
-    let info = ProviderInfo {
-        protocol: legacy_protocol(legacy.provider_kind),
-        connection_mode: default_connection_mode(legacy.preset.as_ref()),
-        name: legacy.name,
-        base_url: legacy.base_url,
-        default_model: String::new(),
-        bearer_token: legacy.bearer_token,
-        http_headers: legacy.http_headers,
-        tool_wire_policy: legacy.tool_wire_policy,
-        apply_patch_tool_type: legacy.apply_patch_tool_type,
-        service_capabilities: Default::default(),
-    };
-    let registry = builtin_provider_catalog();
-    let preset = registry.presets.into_iter().find(|preset| {
-        legacy.preset.as_ref() == Some(&preset.id)
-            || preset.id.as_str() == id.as_str()
-            || (preset.protocol == info.protocol
-                && normalized_url(&preset.provider.base_url) == normalized_url(&info.base_url))
-    });
-    let Some(preset) = preset else {
-        let mut provider = ProviderConfig::from_explicit_models(info, legacy.models);
-        provider.bearer_token_env = legacy.bearer_token_env;
-        return Ok(provider);
-    };
-
-    let bundled_slugs = preset
-        .provider
-        .effective_models()?
-        .into_iter()
-        .map(|model| model.slug)
-        .collect::<std::collections::BTreeSet<_>>();
-    let additional_models = legacy
-        .models
-        .into_iter()
-        .filter(|model| !bundled_slugs.contains(&model.slug))
-        .collect();
-    let mut provider = preset.provider;
-    provider.name = info.name;
-    provider.base_url = info.base_url;
-    provider.bearer_token = info.bearer_token;
-    provider.bearer_token_env = legacy.bearer_token_env.or(provider.bearer_token_env);
-    provider.http_headers = info.http_headers;
-    provider.tool_wire_policy = info.tool_wire_policy;
-    provider.apply_patch_tool_type = info.apply_patch_tool_type;
-    if let ProviderModelCatalogConfig::Bundled {
-        additional_models: configured,
-        ..
-    } = &mut provider.catalog
-    {
-        *configured = additional_models;
-    }
-    Ok(provider)
-}
-
-fn migrate_catalog_provider(
-    id: &ProviderId,
-    legacy: LegacyCatalogProviderConfig,
-) -> Result<ProviderConfig> {
-    let protocol = legacy_protocol(legacy.provider_kind);
-    let connection_mode = legacy
-        .connection_mode
-        .unwrap_or_else(|| default_connection_mode(legacy.preset.as_ref()));
-    let info = ProviderInfo {
-        protocol,
-        connection_mode,
-        name: legacy.name,
-        base_url: legacy.base_url,
-        default_model: String::new(),
-        bearer_token: legacy.bearer_token,
-        http_headers: legacy.http_headers,
-        tool_wire_policy: legacy.tool_wire_policy,
-        apply_patch_tool_type: legacy.apply_patch_tool_type,
-        service_capabilities: Default::default(),
-    };
-    let mut provider = match legacy.catalog {
-        ProviderModelCatalogConfig::Bundled {
-            catalog,
-            additional_models,
-        } => ProviderConfig::from_bundled_catalog(info, catalog, additional_models),
-        ProviderModelCatalogConfig::Explicit { models } => {
-            ProviderConfig::from_explicit_models(info, models)
+fn restore_provider_credentials(
+    config: &mut StudioConfig,
+    credentials: RejectedConfigCredentials,
+) {
+    let presets = builtin_provider_catalog().presets;
+    for (provider_id, credentials) in credentials.models.providers {
+        let Ok(provider_id) = ProviderId::new(provider_id) else {
+            continue;
+        };
+        if !config.models.providers.contains_key(&provider_id)
+            && let Some(preset) = presets
+                .iter()
+                .find(|preset| preset.id.as_str() == provider_id.as_str())
+        {
+            config
+                .models
+                .providers
+                .insert(provider_id.clone(), preset.provider.clone());
         }
-    };
-    provider.bearer_token_env = legacy.bearer_token_env;
-    let preset = legacy.preset.or_else(|| {
-        builtin_provider_catalog()
-            .presets
-            .into_iter()
-            .find(|preset| {
-                preset.id.as_str() == id.as_str()
-                    || (preset.protocol == protocol
-                        && normalized_url(&preset.provider.base_url)
-                            == normalized_url(&provider.base_url))
-            })
-            .map(|preset| preset.id)
-    });
-    if let Some(preset) = preset {
-        provider = provider.with_preset(preset);
+        let Some(provider) = config.models.providers.get_mut(&provider_id) else {
+            continue;
+        };
+        if credentials.bearer_token.is_some() {
+            provider.bearer_token = credentials.bearer_token;
+        }
+        if credentials.bearer_token_env.is_some() {
+            provider.bearer_token_env = credentials.bearer_token_env;
+        }
     }
-    Ok(provider)
-}
-
-fn legacy_protocol(kind: LegacyProviderKind) -> ProviderWireProtocol {
-    match kind {
-        LegacyProviderKind::OpenAi => ProviderWireProtocol::Responses,
-        LegacyProviderKind::OpenAiCompatibleChat
-        | LegacyProviderKind::DeepSeek
-        | LegacyProviderKind::Zhipu => ProviderWireProtocol::ChatCompletions,
-    }
-}
-
-fn default_connection_mode(preset: Option<&ProviderPresetId>) -> ProviderConnectionMode {
-    if preset.is_some_and(|preset| preset.as_str() == "openai") {
-        ProviderConnectionMode::WebSocket
-    } else {
-        ProviderConnectionMode::Http
-    }
-}
-
-fn normalized_url(value: &str) -> &str {
-    value.trim().trim_end_matches('/')
-}
-
-fn schema_backup_path(path: &Path, version: u32) -> PathBuf {
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or(STUDIO_CONFIG_FILE_NAME);
-    path.with_file_name(format!("{file_name}.schema{version}.bak"))
 }
 
 fn rejected_backup_path(path: &Path) -> PathBuf {
@@ -612,13 +198,10 @@ fn temporary_path(path: &Path) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_nanos())
         .unwrap_or_default();
-    path.with_extension(format!("toml.tmp.{}.{stamp}", std::process::id()))
+    path.with_extension(format!("tmp-{}-{stamp}", std::process::id()))
 }
 
 fn user_home_dir() -> Result<PathBuf> {
-    #[cfg(windows)]
-    const HOME_VARS: &[&str] = &["USERPROFILE", "HOME"];
-    #[cfg(not(windows))]
     const HOME_VARS: &[&str] = &["HOME", "USERPROFILE"];
 
     HOME_VARS
@@ -636,11 +219,12 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::*;
+    use crate::config::STUDIO_CONFIG_SCHEMA_VERSION;
 
     fn temp_home(name: &str) -> PathBuf {
         let stamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .expect("system clock must be after Unix epoch")
             .as_nanos();
         env::temp_dir().join(format!(
             "pl-studio-config-{name}-{}-{stamp}",
@@ -649,16 +233,47 @@ mod tests {
     }
 
     #[test]
-    fn old_document_is_backed_up_and_recreated() {
-        let store = ConfigStore::new(ConfigPaths::from_home(temp_home("reset")));
+    fn current_document_round_trips() {
+        let store = ConfigStore::new(ConfigPaths::from_home(temp_home("current")));
+        let config = StudioConfig::default_config();
+        store.save(&config).unwrap();
+
+        assert_eq!(store.load_or_default().unwrap(), config);
+    }
+
+    #[test]
+    fn rejected_document_is_archived_and_only_provider_credentials_are_restored() {
+        let store = ConfigStore::new(ConfigPaths::from_home(temp_home("rejected")));
         fs::create_dir_all(store.paths().config_dir()).unwrap();
-        let invalid_content = "schema_version = 4\n[providers]\n";
-        fs::write(store.paths().config_file(), invalid_content).unwrap();
+        let rejected = r#"
+schema_version = 11
+
+[models.providers.openai]
+bearer_token = "existing-secret"
+bearer_token_env = "ORIGINAL_OPENAI_API_KEY"
+
+[models.routes.planner]
+provider = "openai"
+model = "obsolete-model"
+reasoning_effort = "medium"
+"#;
+        fs::write(store.paths().config_file(), rejected).unwrap();
 
         let config = store.load_or_default().unwrap();
 
         assert_eq!(config.schema_version, STUDIO_CONFIG_SCHEMA_VERSION);
+        let openai = &config.models.providers[&ProviderId::new("openai").unwrap()];
+        assert_eq!(openai.bearer_token.as_deref(), Some("existing-secret"));
+        assert_eq!(
+            openai.bearer_token_env.as_deref(),
+            Some("ORIGINAL_OPENAI_API_KEY")
+        );
+        assert_ne!(
+            config.models.routes[&crate::StudioRole::Planner.id()].model,
+            "obsolete-model"
+        );
         assert_eq!(store.load().unwrap(), config);
+
         let backup = fs::read_dir(store.paths().config_dir())
             .unwrap()
             .filter_map(std::result::Result::ok)
@@ -669,152 +284,18 @@ mod tests {
                     .starts_with("config.toml.rejected.")
             })
             .expect("rejected config backup");
-        assert_eq!(fs::read_to_string(backup.path()).unwrap(), invalid_content);
+        assert_eq!(fs::read_to_string(backup.path()).unwrap(), rejected);
     }
 
     #[test]
-    fn schema_v5_document_is_backed_up_and_migrated_to_bundled_catalog() {
-        let store = ConfigStore::new(ConfigPaths::from_home(temp_home("migrate-v5")));
+    fn malformed_document_is_archived_without_inventing_credentials() {
+        let store = ConfigStore::new(ConfigPaths::from_home(temp_home("malformed")));
         fs::create_dir_all(store.paths().config_dir()).unwrap();
-        let mut current = StudioConfig::default_config();
-        let openai = builtin_provider_catalog()
-            .presets
-            .into_iter()
-            .find(|preset| preset.id.as_str() == "openai")
-            .unwrap()
-            .provider;
-        current
-            .models
-            .providers
-            .insert(ProviderId::new("openai").unwrap(), openai);
-        let provider_models = current.models.providers[&ProviderId::new("deepseek").unwrap()]
-            .effective_models()
-            .unwrap();
-        let mut document = toml::Value::try_from(&current).unwrap();
-        let root = document.as_table_mut().unwrap();
-        root.insert(
-            "schema_version".to_string(),
-            toml::Value::Integer(i64::from(LEGACY_STUDIO_CONFIG_SCHEMA_VERSION)),
-        );
-        let providers = root["models"].as_table_mut().unwrap()["providers"]
-            .as_table_mut()
-            .unwrap();
-        for (provider_id, provider) in providers.iter_mut() {
-            let provider = provider.as_table_mut().unwrap();
-            let transport = provider.remove("transport").unwrap();
-            let transport = transport.as_table().unwrap();
-            if transport["source"].as_str() == Some("preset") {
-                provider.insert("preset".to_string(), transport["preset"].clone());
-            }
-            let provider_kind = match provider_id.as_str() {
-                "openai" => "open_ai",
-                "deepseek" => "deep_seek",
-                "zhipu" => "zhipu",
-                other => panic!("unexpected built-in provider in v5 fixture: {other}"),
-            };
-            provider.insert(
-                "provider_kind".to_string(),
-                toml::Value::String(provider_kind.to_string()),
-            );
-        }
-        let provider = providers["deepseek"].as_table_mut().unwrap();
-        provider.remove("catalog");
-        provider.insert(
-            "models".to_string(),
-            toml::Value::try_from(provider_models).unwrap(),
-        );
-        fs::write(
-            store.paths().config_file(),
-            toml::to_string_pretty(&document).unwrap(),
-        )
-        .unwrap();
+        fs::write(store.paths().config_file(), "not = [valid").unwrap();
 
-        let migrated = store.load_or_default().unwrap();
+        let config = store.load_or_default().unwrap();
 
-        assert_eq!(migrated.schema_version, STUDIO_CONFIG_SCHEMA_VERSION);
-        assert!(schema_backup_path(store.paths().config_file(), 5).exists());
-        assert_eq!(
-            migrated.models.providers[&ProviderId::new("openai").unwrap()].connection_mode(),
-            ProviderConnectionMode::WebSocket
-        );
-        assert!(matches!(
-            migrated.models.providers[&ProviderId::new("deepseek").unwrap()].catalog,
-            ProviderModelCatalogConfig::Bundled { .. }
-        ));
-        assert!(
-            migrated.models.providers[&ProviderId::new("deepseek").unwrap()]
-                .editable_models()
-                .is_empty()
-        );
-    }
-
-    #[test]
-    fn schema_v8_document_defaults_web_search_to_cached_and_is_backed_up() {
-        let store = ConfigStore::new(ConfigPaths::from_home(temp_home("migrate-v8")));
-        fs::create_dir_all(store.paths().config_dir()).unwrap();
-        let current = StudioConfig::default_config();
-        let mut document = toml::Value::try_from(&current).unwrap();
-        let root = document.as_table_mut().unwrap();
-        root.insert("schema_version".to_string(), toml::Value::Integer(8));
-        root.remove("web_search");
-        fs::write(
-            store.paths().config_file(),
-            toml::to_string_pretty(&document).unwrap(),
-        )
-        .unwrap();
-
-        let migrated = store.load_or_default().unwrap();
-
-        assert_eq!(migrated.schema_version, STUDIO_CONFIG_SCHEMA_VERSION);
-        assert_eq!(migrated.web_search.mode, pl_model::WebSearchMode::Cached);
-        assert_eq!(migrated.web_search.context_size, None);
-        assert!(migrated.web_search.allowed_domains.is_empty());
-        assert_eq!(migrated.web_search.location, None);
-        assert_eq!(migrated.models, current.models);
-        assert!(schema_backup_path(store.paths().config_file(), 8).exists());
-    }
-
-    #[test]
-    fn schema_v10_legacy_runtime_labels_are_migrated_once() {
-        let store = ConfigStore::new(ConfigPaths::from_home(temp_home("migrate-v10")));
-        fs::create_dir_all(store.paths().config_dir()).unwrap();
-        let current = StudioConfig::default_config();
-        let mut document = toml::Value::try_from(&current).unwrap();
-        let root = document.as_table_mut().unwrap();
-        root.insert("schema_version".to_string(), toml::Value::Integer(10));
-        root.insert(
-            "runtime".to_string(),
-            toml::Value::Table(toml::map::Map::from_iter([
-                (
-                    "permission_mode".to_string(),
-                    toml::Value::String("workspace-write".to_string()),
-                ),
-                (
-                    "openai_compaction_mode".to_string(),
-                    toml::Value::String("remote_legacy".to_string()),
-                ),
-            ])),
-        );
-        fs::write(
-            store.paths().config_file(),
-            toml::to_string_pretty(&document).unwrap(),
-        )
-        .unwrap();
-
-        let migrated = store.load_or_default().unwrap();
-
-        assert_eq!(migrated.schema_version, STUDIO_CONFIG_SCHEMA_VERSION);
-        assert_eq!(
-            migrated.runtime.permission_mode,
-            pl_core::PermissionMode::RequestApproval
-        );
-        assert_eq!(
-            migrated.runtime.openai_compaction_mode,
-            OpenAiCompactionMode::RemoteV2
-        );
-        assert!(schema_backup_path(store.paths().config_file(), 10).exists());
-        let saved = fs::read_to_string(store.paths().config_file()).unwrap();
-        assert!(!saved.contains("workspace-write"));
-        assert!(!saved.contains("remote_legacy"));
+        assert_eq!(config, StudioConfig::default_config());
+        assert_eq!(store.load().unwrap(), config);
     }
 }

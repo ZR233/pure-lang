@@ -143,20 +143,15 @@ impl StudioRuntime {
                             value
                         );
                     }
-                    value.to_string()
+                    Some(value.to_string())
                 }
-                None => model.default_effort().with_context(|| {
-                    format!(
-                        "role {} model {provider_id}.{model_slug} must define effort",
-                        role.key()
-                    )
-                })?,
+                None => model.default_effort(),
             }
         };
         let next_route = ModelRouteConfig {
             provider: provider_key,
             model: model_slug.to_string(),
-            reasoning_effort: Some(ReasoningEffort::new(resolved_effort)),
+            effort: resolved_effort.map(ReasoningEffort::new),
         };
         config.models.routes.insert(role.id(), next_route);
         config.validate()?;

@@ -164,6 +164,12 @@ Bundled catalog 只读，配置只能通过 `additional_models` 追加不冲突 
 
 effort（推理强度）不再是固定的全局枚举，而是「模型声明的可调参数」。该机制是通用的——effort 是首个应用，类型设计可容纳未来 thinking、verbosity 等参数。各供应商自由定义候选值域，并由模型自身声明选中值如何写入 API 请求体，协议层据此通用透传，不包含任何供应商特定代码。
 
+模型目录独占参数的候选值、显示名、默认候选与 wire 规则；角色路由只保存当前选择，
+不得复制或重新定义候选。模型声明非空 effort 候选时，产品角色必须保存其中一个候选；
+模型没有声明 effort 参数时，角色选择必须为空，`CompletionRequest` 不携带 effort，最终
+请求体也不得制造默认字符串或字段。当前选择从角色路由进入统一 `ReasoningConfig`，
+Responses 与 Chat Completions 均只由下述 `ParameterWire` 写入供应商请求体。
+
 `ModelInfo` 的 `reasoning_efforts: Vec<String>` 字段被替换为：
 
 - `parameters: Vec<ModelParameter>`：模型声明的可调参数列表。

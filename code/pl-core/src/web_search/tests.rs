@@ -4,7 +4,7 @@ use pretty_assertions::assert_eq;
 use super::*;
 use crate::{
     AgentRoleId, ModelRouteConfig, ProviderCapabilitySelection, ProviderConfig,
-    ProviderModelCatalogConfig, ProviderTransportSelection,
+    ProviderModelCatalogConfig, ProviderTransportSelection, ReasoningEffort,
 };
 
 fn provider_id(value: &str) -> ProviderId {
@@ -17,6 +17,7 @@ fn role_id(value: &str) -> AgentRoleId {
 
 fn models_with_current(provider: ProviderConfig, model: ModelInfo) -> AgentModelConfig {
     let current = provider_id("current");
+    let effort = model.default_effort().map(ReasoningEffort::new);
     AgentModelConfig {
         providers: [(current.clone(), provider)].into_iter().collect(),
         routes: [(
@@ -24,7 +25,7 @@ fn models_with_current(provider: ProviderConfig, model: ModelInfo) -> AgentModel
             ModelRouteConfig {
                 provider: current,
                 model: model.slug,
-                reasoning_effort: None,
+                effort,
             },
         )]
         .into_iter()
@@ -164,7 +165,7 @@ fn standalone_backend_can_be_selected_from_another_routed_provider() {
                 ModelRouteConfig {
                     provider: current_id,
                     model: current_model.slug,
-                    reasoning_effort: None,
+                    effort: None,
                 },
             ),
             (
@@ -172,7 +173,7 @@ fn standalone_backend_can_be_selected_from_another_routed_provider() {
                 ModelRouteConfig {
                     provider: search_id.clone(),
                     model: search_model.slug.clone(),
-                    reasoning_effort: None,
+                    effort: None,
                 },
             ),
         ]

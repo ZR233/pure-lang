@@ -22,9 +22,9 @@ Windows 下对应：
 
 SQLite 只保存 Studio 状态，例如项目、会话、消息、统一 interaction、agent 状态事件和应用设置，并由 `pl-studio-runtime` 通过 SeaORM 纯异步访问。`pl-core` 的正常依赖树不包含 SeaORM。provider/model/role 配置仍只由 `~/.pure/config.toml` 表达。
 
-普通对话运行时读取配置；当配置文件不存在时，`pure-studio` 设置页展示默认配置。设置页不提供全局保存或重载操作，普通设置项在用户修改后即时写入配置。独立新增/编辑页面保留本地草稿，必须点击页面内保存按钮才写入配置，取消则丢弃草稿。schema 5–10 配置在写入版本化备份后迁到 schema 11；无法解析、更老或迁移后无法校验的配置先备份再重建。迁移只处理产品配置，不复制数据库或会话历史。schema 10 的 `remote_legacy` 压缩模式在迁移时一次性收口为 `remote_v2`。
+普通对话运行时读取配置；当配置文件不存在时，`pure-studio` 设置页展示默认配置。设置页不提供全局保存或重载操作，普通设置项在用户修改后即时写入配置。独立新增/编辑页面保留本地草稿，必须点击页面内保存按钮才写入配置，取消则丢弃草稿。当前格式为 schema 12；任何非 schema 12、无法解析或无法校验的配置都先完整写入拒绝备份，再用 schema 12 默认配置重建。系统不迁移 schema 5–11，不接受旧字段 alias，也不复制数据库、会话或其他旧配置状态。重建时只按当前 bundled preset ID 恢复已有的 `bearer_token` 与 `bearer_token_env`，避免破坏性重建静默覆盖用户凭据；未知或自定义 provider 仍只保留在拒绝备份中。
 
-`pure-studio` 设置页的 typed 配置保存成功后必须返回 canonical config/bootstrap snapshot，由 Flutter store 合并。校验失败时只展示错误并保留当前页面状态，不覆盖原配置。Instructions 文本作为普通设置组展示时，在输入停止后自动写入 `~/.pure/config.toml`；Provider 新增/编辑等独立页面不自动保存。
+`pure-studio` 设置页的 typed 配置保存成功后必须返回 canonical settings/bootstrap snapshot，由 Flutter store 原子替换对应配置状态。bootstrap 与设置保存响应不得携带 `configJson`、`generalSettingsJson` 或 raw map；FRB typed DTO 是 Flutter 配置状态的唯一入口。校验失败时只展示错误并保留当前 canonical 状态，不覆盖原配置。Instructions 文本作为普通设置组展示时，在输入停止后自动写入 `~/.pure/config.toml`；Provider 新增/编辑等独立页面不自动保存。
 
 ## 10.2 配置职责
 
@@ -36,7 +36,7 @@ SQLite 只保存 Studio 状态，例如项目、会话、消息、统一 interac
 
 `pl-studio-runtime` 负责：
 
-- `StudioConfig` 与 schema version 11。
+- `StudioConfig` 与 schema version 12。
 - `~/.pure/config.toml` 路径、serde TOML 解析、原子保存和默认值。
 - Studio instructions、skills、MCP、runtime 和 UI 配置。
 - 生成 session 级 instruction snapshot。
@@ -61,9 +61,9 @@ SQLite 只保存 Studio 状态，例如项目、会话、消息、统一 interac
 
 - `provider`
 - `model`
-- `effort`
+- 可选的 `effort`
 
-`effort` 使用字符串，校验 against 对应模型 `parameters` 中 `name = "effort"` 参数的候选值（即 `supported_efforts()`）。
+`effort` 使用字符串，校验 against 对应模型 `parameters` 中 `name = "effort"` 参数的候选值（即 `supported_efforts()`）。模型声明非空候选时，角色必须选择一个合法候选；模型没有声明 effort 参数时，角色必须省略 `effort`。候选、默认值和 wire 规则只来自模型目录，角色配置不保存第二份候选或默认值。
 
 Studio 默认配置必须显式提供所需角色路由。provider 不保存 `default_model`；模型选择只由
 route 决定。旧版本、缺失必需路由或无效引用会触发 Studio 配置重建，不进行兼容补齐。
@@ -73,7 +73,7 @@ route 决定。旧版本、缺失必需路由或无效引用会触发 Studio 配
 本地 TOML 使用 `snake_case`，不同于 API wire 格式。
 
 ```toml
-schema_version = 11
+schema_version = 12
 
 [runtime]
 permission_mode = "request-approval"
@@ -166,7 +166,7 @@ catalog = "openai"
 ## 10.5 Provider 和 Model
 
 `models.providers` 可保存多个 provider，相同 preset 可重复使用；唯一性只约束 map key
-`ProviderId`。当前 StudioConfig schema 为 11，provider catalog snapshot schema 为 4。
+`ProviderId`。当前 StudioConfig schema 为 12，provider catalog snapshot schema 为 4。
 
 每个 provider 实例持久化：
 
@@ -394,7 +394,7 @@ Provider 标签页必须提供结构化编辑能力：
 - Zhipu 请求固定使用流式 `chat/completions`；effort 由模型 `parameters` 声明驱动（见 07-model.md 7.8）。默认模型 effort 候选值为 `enabled` / `none`，直接映射到 `thinking.type`，不发送 wire-level `reasoning_effort`。`glm-5.2` 候选值为 `high` / `max` / `none`，其中 `high` / `max` 会作为 `reasoning_effort` 透传给 API 并设置 `thinking.type = enabled` 与 `clear_thinking = false`，`none` 设置 `thinking.type = disabled` 并移除 `reasoning_effort`。历史回放仍通过 assistant message 的 `reasoning_content` 字段保留。
 - 写入前由 `pl-studio-runtime` 构造 `StudioConfig` 并执行完整校验；校验失败时只在 UI 中展示错误，不写入磁盘。更新 API key 时，空输入表示保留现有 secret；provider key 重命名必须携带 `originalId`，以便服务端保留 secret、headers、catalog metadata 和模型能力。
 
-Roles 标签页必须展示固定四个角色：探索者、计划者、执行者、审查者。每个角色将模型与“思考强度”作为两个独立下拉控件展示；模型选项同时表达 provider 和 model，思考强度候选值来自当前模型声明的 `supported_efforts()`。模型改变时，思考强度优先切换为该模型声明的默认 effort，没有显式默认时使用首个候选；仅改变思考强度时必须保持当前 provider 和 model 不变。模型与思考强度变更都即时保存，并以 bridge 返回的 canonical config snapshot 更新 Flutter 状态；`pl-core` 统一校验后写入 `~/.pure/config.toml`。
+Roles 标签页必须展示固定四个角色：探索者、计划者、执行者、审查者。每个角色将模型与“思考强度”作为两个独立下拉控件展示；模型选项同时表达 provider 和 model，思考强度候选值来自当前模型声明的 `supported_efforts()`。模型改变时，有候选的模型切换为其声明的默认 effort，没有显式默认时使用首个候选；无候选模型保存空选择并禁用强度控件。仅改变思考强度时必须保持当前 provider 和 model 不变。模型与思考强度变更都即时保存，但 Flutter 不进行持久 optimistic 更新，也不保存第二份 selection；成功后以 bridge 返回的 typed canonical settings snapshot 更新 store，失败时保持原 canonical 状态。`pl-studio-runtime` 统一校验后写入 `~/.pure/config.toml`。
 
 桌面窗口必须支持自由缩放。`pure-studio` 只声明首选窗口尺寸，不把 UI 绑定到固定宽高；设置页内容跟随窗口尺寸自适应。Provider 标签页在常规桌面宽度使用单栏 provider 卡片列表，卡片内部承载摘要、操作和展开编辑内容；在窄窗口下保持单栏滚动并压缩卡片元信息，避免表格和编辑区域被裁剪。聊天状态栏在窄窗口下保留左侧高频控制，并把右侧只读状态按断点收入更多菜单。
 
@@ -423,7 +423,7 @@ MCP stdio server 的 `env` 会按配置原样传给子进程，可能包含明�
 
 ## 10.13 Web 搜索配置与凭据门控
 
-Studio 配置 schema v9 增加顶层 `web_search`：`mode` 为 `disabled | cached | indexed | live`，默认 `cached`；`context_size`、`allowed_domains` 和近似位置 `country/region/city/timezone` 均可省略。v8 配置迁移到 v9 时只补默认 mode，不虚构位置、域名或 context size。
+Studio 配置的顶层 `web_search` 包含：`mode` 为 `disabled | cached | indexed | live`，默认 `cached`；`context_size`、`allowed_domains` 和近似位置 `country/region/city/timezone` 均可省略。不兼容 schema 按 10.1 的拒绝备份与重建合同处理，不迁移旧 web search 状态，也不虚构位置、域名或 context size。
 
 配置值与生效值必须分离：没有有凭据的 OpenAI preset 时保留 configured mode，但 effective mode 为 `disabled`。此状态下工具规划不得注册独立搜索或 hosted 搜索，且运行时不得创建 `/alpha/search` 客户端。可用账户优先当前 turn 的 OpenAI provider；否则按 provider id 稳定排序，并按 `explorer -> planner -> executor -> reviewer` 选择首个指向该 provider 的有效模型，最后才回退到目录首个模型。
 

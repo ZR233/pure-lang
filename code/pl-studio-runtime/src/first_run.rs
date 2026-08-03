@@ -277,7 +277,7 @@ impl FirstRunConfigDraft {
         let route = ModelRouteConfig {
             provider: default_provider_id,
             model: default_model,
-            reasoning_effort: Some(ReasoningEffort::new(default_effort)),
+            effort: Some(ReasoningEffort::new(default_effort)),
         };
 
         let config = StudioConfig {
@@ -451,10 +451,7 @@ mod tests {
             let route = route(&config, role);
             assert_eq!(route.provider.as_str(), "openai");
             assert_eq!(route.model, "gpt-5.6-sol");
-            assert_eq!(
-                route.reasoning_effort.as_ref().unwrap().as_str(),
-                expected_effort
-            );
+            assert_eq!(route.effort.as_ref().unwrap().as_str(), expected_effort);
         }
     }
 

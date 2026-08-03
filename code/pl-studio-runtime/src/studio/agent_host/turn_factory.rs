@@ -126,8 +126,8 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             .with_tool_capabilities(config.runtime.tool_capabilities.clone())
             .with_skills_config(config.skills.clone())
             .with_lsp_runtime(self.lsp_runtime.clone());
-        if let Some(effort) = route.reasoning_effort {
-            builder = builder.with_reasoning_effort(effort);
+        if let Some(effort) = route.effort {
+            builder = builder.with_effort(effort);
         }
         let profile = CoreAgentProfile::local_workspace(workspace_root.clone())
             .with_workspace_instructions(workspace_instructions.clone());

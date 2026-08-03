@@ -26,7 +26,7 @@ pub use pl_core::config::{
 pub use pl_core::{AgentRoleId, ModelRouteConfig, ProviderId, ReasoningEffort};
 pub use store::{ConfigPaths, ConfigStore};
 
-pub const STUDIO_CONFIG_SCHEMA_VERSION: u32 = 11;
+pub const STUDIO_CONFIG_SCHEMA_VERSION: u32 = 12;
 pub const STUDIO_CONFIG_DIR_NAME: &str = ".pure";
 pub const STUDIO_CONFIG_FILE_NAME: &str = "config.toml";
 pub const CONFIG_DIR_NAME: &str = STUDIO_CONFIG_DIR_NAME;
@@ -34,7 +34,6 @@ pub const CONFIG_DIR_NAME: &str = STUDIO_CONFIG_DIR_NAME;
 const DEFAULT_PROVIDER_ID: &str = "deepseek";
 const DEFAULT_MODEL_ID: &str = "deepseek-v4-flash";
 const STUDIO_USER_SKILLS_DIR: &str = "~/.pure/skills";
-const DEFAULT_REASONING_EFFORT: &str = "high";
 const STUDIO_ROLES: [&str; 4] = ["explorer", "planner", "executor", "reviewer"];
 
 /// Studio 产品定义的固定角色；框架层仍通过动态 `AgentRoleId` 接收它们。
@@ -141,7 +140,7 @@ impl StudioConfig {
         let route = ModelRouteConfig {
             provider: provider_id.clone(),
             model: DEFAULT_MODEL_ID.to_string(),
-            reasoning_effort: Some(ReasoningEffort::new(DEFAULT_REASONING_EFFORT)),
+            effort: Some(ReasoningEffort::new("high")),
         };
         let routes = STUDIO_ROLES
             .into_iter()

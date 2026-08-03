@@ -109,12 +109,11 @@ execution policy 和工具路径访问分类共同决定，不保留第二套审
 - `setSessionMode(sessionId, mode) -> BridgeSessionStateResponse`
 - `setModelRole(roleKey, providerId, model, effort, selectedSessionId) -> BridgeStudioSnapshotResponse`
 - `saveRuntimePermissionMode(mode) -> ConfigSavedResponse`
-- `saveProviderSettings(settingsJson) -> BridgeStudioSnapshotResponse`
-- `saveInstructionsSettings(settingsJson) -> BridgeStudioSnapshotResponse`
-- `saveSkillsSettings(settingsJson) -> BridgeStudioSnapshotResponse`
-- `saveMcpSettings(settingsJson) -> BridgeStudioSnapshotResponse`
-- `saveGeneralSettings(settingsJson) -> BridgeStudioSnapshotResponse`
-- `saveStudioSettingsDraft(section, draftJson) -> SettingsDraftResponse`
+- `saveProviderSettings(input) -> BridgeStudioSnapshotResponse`
+- `saveInstructionsSettings(input) -> BridgeStudioSnapshotResponse`
+- `saveSkillsSettings(input) -> BridgeStudioSnapshotResponse`
+- `saveMcpSettings(input) -> BridgeStudioSnapshotResponse`
+- `saveGeneralSettings(input) -> BridgeStudioSnapshotResponse`
 - `loadProviderUsages() -> ProviderUsagesResponse`
 - `submitPrompt(sessionId, prompt, attachmentIds) -> SubmitPromptResponse`
 - `stopPrompt(sessionId) -> StopPromptResponse`
@@ -135,6 +134,8 @@ global event 继续使用独立 envelope。桥接层不得复制 session project
 不得把 `pl-protocol`、provider、store 或 runtime crate 的类型直接暴露给 Dart。session frame
 使用 `Snapshot/Event/ResyncRequired` sealed union；message、part、turn、interaction、plan、
 agent、Todo、usage、cost、context、MCP health 和 agent directory 均使用 typed DTO。协议中
+Studio bootstrap 与全部设置保存响应携带同一个 typed canonical settings snapshot；该约定同样适用于角色模型或思考强度的即时保存响应；配置、
+角色路由与 General settings 不通过整帧 JSON 或 raw map 跨越 FRB。协议中
 刻意开放的动态叶子在此边界序列化成语义明确的 `*_json` 字段：
 
 - message metadata 使用 `metadata_json`；
@@ -200,8 +201,9 @@ Studio SQLite 的新库使用单一基础 schema（当前 `user_version = 10`）
 `-shm` sidecar，再创建新的 v10 数据库。空的未版本化数据库可直接初始化。高于 v10 的
 数据库明确拒绝打开并保留原文件；损坏、锁定或归档失败必须停止启动，不得覆盖原数据库。
 运行期不保留 migration dispatcher、backfill 或旧版本兼容读取。
-`config.toml` 当前 schema 为 11，继续由 Studio runtime 单点校验与升级；Flutter 不实现
-第二套迁移逻辑。
+`config.toml` 当前 schema 为 12，由 Studio runtime 单点校验。非当前 schema 或无效文档
+完整归档后按当前默认值重建，不保留 migration dispatcher、旧字段 alias 或兼容 DTO；重建
+只从当前 bundled preset ID 恢复 provider token/env 凭据。Flutter 不实现第二套读取或迁移逻辑。
 
 ## 2.11 Workspace
 

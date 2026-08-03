@@ -157,7 +157,7 @@ fn test_config(base_url: String) -> StudioConfig {
     let route = ModelRouteConfig {
         provider: provider_id.clone(),
         model: "local-responses".to_string(),
-        reasoning_effort: Some(ReasoningEffort::new("none")),
+        effort: Some(ReasoningEffort::new("none")),
     };
     test_product_config(provider_id, provider, route)
 }
