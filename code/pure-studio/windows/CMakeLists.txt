@@ -1,5 +1,5 @@
 # Project-level configuration.
-cmake_minimum_required(VERSION 3.14)
+cmake_minimum_required(VERSION 3.20)
 project(pure_studio LANGUAGES CXX)
 
 # The name of the executable created for the application. Change this to change
@@ -56,15 +56,42 @@ set(PURE_LANG_WORKSPACE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../..")
 if("$ENV{PURE_STUDIO_DEMO}" STREQUAL "true")
   message(STATUS "PURE_STUDIO_DEMO=true; skipping Rust bridge DLL build.")
 else()
-  add_custom_target(pl_studio_bridge_dll
+  file(GLOB_RECURSE PURE_STUDIO_BRIDGE_INPUTS
+    CONFIGURE_DEPENDS
+    LIST_DIRECTORIES false
+    "${PURE_LANG_WORKSPACE_ROOT}/code/pl-*/src/*"
+    "${PURE_LANG_WORKSPACE_ROOT}/code/pl-core/prompts/*"
+    "${PURE_LANG_WORKSPACE_ROOT}/code/pl-studio-runtime/migrations/*"
+    "${PURE_LANG_WORKSPACE_ROOT}/code/pure-studio/rust/src/*"
+    "${PURE_LANG_WORKSPACE_ROOT}/third_party/minisign-verify/src/*"
+    "${PURE_LANG_WORKSPACE_ROOT}/xtask/src/*"
+    "${PURE_LANG_WORKSPACE_ROOT}/code/*/Cargo.toml"
+    "${PURE_LANG_WORKSPACE_ROOT}/code/pure-studio/rust/Cargo.toml"
+    "${PURE_LANG_WORKSPACE_ROOT}/third_party/minisign-verify/Cargo.toml"
+    "${PURE_LANG_WORKSPACE_ROOT}/xtask/Cargo.toml"
+  )
+  list(APPEND PURE_STUDIO_BRIDGE_INPUTS
+    "${PURE_LANG_WORKSPACE_ROOT}/Cargo.lock"
+    "${PURE_LANG_WORKSPACE_ROOT}/Cargo.toml"
+    "${PURE_LANG_WORKSPACE_ROOT}/.cargo/config.toml"
+  )
+
+  set(PURE_STUDIO_BRIDGE_DLL
+    "${CMAKE_BINARY_DIR}/runner/$<CONFIG>/pl_studio_bridge.dll")
+  add_custom_command(
+    OUTPUT "${PURE_STUDIO_BRIDGE_DLL}"
     COMMAND cargo xtask build-rust-bridge
       --workspace-root "${PURE_LANG_WORKSPACE_ROOT}"
       --configuration "$<CONFIG>"
       --output-dir "${CMAKE_BINARY_DIR}/runner/$<CONFIG>"
       --target-dir "${CMAKE_BINARY_DIR}/rust-target"
+    COMMAND "${CMAKE_COMMAND}" -E touch "${PURE_STUDIO_BRIDGE_DLL}"
+    DEPENDS ${PURE_STUDIO_BRIDGE_INPUTS}
     WORKING_DIRECTORY "${PURE_LANG_WORKSPACE_ROOT}"
+    COMMENT "Building Rust bridge DLL"
     VERBATIM
   )
+  add_custom_target(pl_studio_bridge_dll DEPENDS "${PURE_STUDIO_BRIDGE_DLL}")
   add_dependencies(${BINARY_NAME} pl_studio_bridge_dll)
 endif()
 
