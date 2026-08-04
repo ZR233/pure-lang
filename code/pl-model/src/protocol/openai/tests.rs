@@ -742,6 +742,148 @@ fn responses_parse_response_reads_custom_tool_call() {
 }
 
 #[test]
+fn responses_parse_response_canonicalizes_id_only_tool_identity() {
+    let response = OpenAiProtocol::responses()
+        .parse_response(serde_json::json!({
+            "model": "gpt-5.5",
+            "output": [
+                {
+                    "type": "function_call",
+                    "id": "fc_1",
+                    "name": "read_file",
+                    "arguments": "{}"
+                },
+                {
+                    "type": "custom_tool_call",
+                    "id": "ctc_1",
+                    "name": "apply_patch",
+                    "input": "*** Begin Patch\n*** End Patch"
+                }
+            ]
+        }))
+        .unwrap();
+
+    assert_eq!(response.tool_calls[0].id, "fc_1");
+    assert_eq!(response.tool_calls[0].call_id.as_deref(), Some("fc_1"));
+    assert_eq!(response.tool_calls[1].id, "ctc_1");
+    assert_eq!(response.tool_calls[1].call_id.as_deref(), Some("ctc_1"));
+}
+
+#[test]
+fn responses_parse_response_uses_call_id_as_missing_item_id() {
+    let response = OpenAiProtocol::responses()
+        .parse_response(serde_json::json!({
+            "model": "gpt-5.5",
+            "output": [
+                {
+                    "type": "function_call",
+                    "call_id": "call_1",
+                    "name": "read_file",
+                    "arguments": "{}"
+                },
+                {
+                    "type": "custom_tool_call",
+                    "call_id": "call_2",
+                    "name": "apply_patch",
+                    "input": "*** Begin Patch\n*** End Patch"
+                }
+            ]
+        }))
+        .unwrap();
+
+    assert_eq!(response.tool_calls[0].id, "call_1");
+    assert_eq!(response.tool_calls[0].call_id.as_deref(), Some("call_1"));
+    assert_eq!(response.tool_calls[1].id, "call_2");
+    assert_eq!(response.tool_calls[1].call_id.as_deref(), Some("call_2"));
+}
+
+#[test]
+fn responses_parse_response_rejects_empty_tool_identity() {
+    let error = OpenAiProtocol::responses()
+        .parse_response(serde_json::json!({
+            "model": "gpt-5.5",
+            "output": [{
+                "type": "function_call",
+                "id": "",
+                "call_id": "",
+                "name": "read_file",
+                "arguments": "{}"
+            }]
+        }))
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        PureError::LlmError(message) if message.contains("missing id and call_id")
+    ));
+}
+
+#[test]
+fn responses_id_only_tool_identity_survives_strict_history_replay() {
+    let response = OpenAiProtocol::responses()
+        .parse_response(serde_json::json!({
+            "model": "gpt-5.5",
+            "output": [{
+                "type": "function_call",
+                "id": "fc_1",
+                "name": "read_file",
+                "arguments": "{}"
+            }]
+        }))
+        .unwrap();
+    let mut assistant_metadata = HashMap::new();
+    assistant_metadata.insert(
+        "tool_calls".to_string(),
+        serde_json::to_string(&response.tool_calls).unwrap(),
+    );
+    let mut tool_metadata = HashMap::new();
+    tool_metadata.insert("tool_call_id".to_string(), "fc_1".to_string());
+    tool_metadata.insert("tool_call_call_id".to_string(), "fc_1".to_string());
+    tool_metadata.insert("tool_call_kind".to_string(), "function".to_string());
+    tool_metadata.insert("tool_name".to_string(), "read_file".to_string());
+    let request = CompletionRequest {
+        model: "gpt-5.5".to_string(),
+        instructions: None,
+        input: context_items(vec![
+            Message {
+                role: MessageRole::Assistant,
+                content: MessageContent::Text(String::new()),
+                reasoning_content: None,
+                metadata: assistant_metadata,
+            },
+            Message {
+                role: MessageRole::Tool,
+                content: MessageContent::Text("ok".to_string()),
+                reasoning_content: None,
+                metadata: tool_metadata,
+            },
+        ]),
+        tools: Vec::new(),
+        tool_choice: "auto".to_string(),
+        parallel_tool_calls: false,
+        temperature: None,
+        max_tokens: None,
+        store: None,
+        previous_response_id: None,
+        prompt_cache_key: None,
+        reasoning: None,
+        stream: true,
+        trace: None,
+        transport_session: Default::default(),
+    };
+
+    let body = serde_json::to_value(
+        OpenAiProtocol::responses()
+            .build_request(&request, &ModelInfo::fallback(&request.model))
+            .unwrap(),
+    )
+    .unwrap();
+
+    assert_eq!(body["input"][0]["call_id"], "fc_1");
+    assert_eq!(body["input"][1]["call_id"], "fc_1");
+}
+
+#[test]
 fn responses_parse_response_preserves_hosted_web_search_actions_and_results() {
     let response = OpenAiProtocol::responses()
         .parse_response(serde_json::json!({

@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Instant;
 
 use futures::future::BoxFuture;
 use futures::stream::{FuturesUnordered, StreamExt};
@@ -12,8 +13,8 @@ use tokio::sync::RwLock;
 use crate::permission::{PermissionDecision, decide_tool_permission};
 use crate::session::AgentSession;
 use crate::tool::{
-    SubagentContext, ToolContext, ToolInput, ToolRuntimeEvent, ToolRuntimeLockPolicy,
-    WorkspaceAccess,
+    SubagentContext, ToolBudgetTiming, ToolContext, ToolInput, ToolRuntimeEvent,
+    ToolRuntimeLockPolicy, WorkspaceAccess,
 };
 use crate::turn::{BudgetTracker, ToolApprovalDecision, ToolExecutionMode, TurnOptions};
 
@@ -51,6 +52,7 @@ pub(super) struct ScheduledToolExecution<'a> {
     pub(super) tool_call: pl_model::ToolCall,
     pub(super) item: pl_trace::TracePart,
     pub(super) future: BoxFuture<'a, Result<ToolExecutionRecord, ToolExecutionError>>,
+    pub(super) budget_timing: ToolBudgetTiming,
 }
 
 #[derive(Debug, Clone)]
@@ -153,6 +155,7 @@ pub(super) async fn execute_tool_calls(
                     None,
                     false,
                 )),
+                budget_timing: ToolBudgetTiming::Count,
             });
             continue;
         }
@@ -183,6 +186,7 @@ pub(super) async fn execute_tool_calls(
                     None,
                     false,
                 )),
+                budget_timing: ToolBudgetTiming::Count,
             });
             continue;
         }
@@ -205,6 +209,7 @@ pub(super) async fn execute_tool_calls(
                     None,
                     false,
                 )),
+                budget_timing: ToolBudgetTiming::Count,
             });
             continue;
         };
@@ -305,6 +310,7 @@ pub(super) async fn execute_tool_calls(
                     None,
                     false,
                 )),
+                budget_timing: ToolBudgetTiming::Count,
             });
             break;
         }
@@ -340,6 +346,7 @@ pub(super) async fn execute_tool_calls(
                 let cache_workspace_root = context.workspace_root.to_path_buf();
                 let cache_call_id = tool_call.stable_call_id().to_string();
                 let tool_effect = effect;
+                let budget_timing = tool.budget_timing();
                 scheduled.push(ScheduledToolExecution {
                     tool_call: tool_call.clone(),
                     item,
@@ -371,6 +378,7 @@ pub(super) async fn execute_tool_calls(
                         cache.record_effect(tool_effect, result.is_ok());
                         tool_execution_record(tool_call_for_task, tool_name, result)
                     }),
+                    budget_timing,
                 });
             }
             ToolApprovalDecision::Denied { reason } => {
@@ -390,12 +398,25 @@ pub(super) async fn execute_tool_calls(
                         None,
                         false,
                     )),
+                    budget_timing: ToolBudgetTiming::Count,
                 });
             }
         }
     }
 
-    collect_scheduled_tools(scheduled, recorder, context.options, &mut progress).await
+    let pause_started_at = matches!(
+        scheduled.as_slice(),
+        [ScheduledToolExecution {
+            budget_timing: ToolBudgetTiming::PauseWhenOnlyScheduledTool,
+            ..
+        }]
+    )
+    .then(Instant::now);
+    let result = collect_scheduled_tools(scheduled, recorder, context.options, &mut progress).await;
+    if let Some(started_at) = pause_started_at {
+        budget_tracker.exclude_wall_clock(started_at.elapsed());
+    }
+    result
 }
 
 pub(super) fn namespaced_tool_trace_part_id(turn_id: &str, tool_call_id: &str) -> String {

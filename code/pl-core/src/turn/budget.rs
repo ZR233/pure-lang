@@ -1,4 +1,4 @@
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use pl_protocol::{BudgetLimitKind, BudgetUsage};
 use serde::{Deserialize, Serialize};
@@ -49,6 +49,7 @@ pub(crate) struct BudgetTracker {
     wall_clock_ms: u64,
     usage: BudgetUsage,
     started_at: Instant,
+    excluded_wall_clock: Duration,
 }
 
 impl BudgetTracker {
@@ -57,12 +58,17 @@ impl BudgetTracker {
             wall_clock_ms: budget.wall_clock_ms,
             usage: BudgetUsage::default(),
             started_at: Instant::now(),
+            excluded_wall_clock: Duration::ZERO,
         }
     }
 
     pub fn usage(&self) -> BudgetUsage {
         let mut usage = self.usage;
-        usage.elapsed_ms = self.started_at.elapsed().as_millis() as u64;
+        usage.elapsed_ms = self
+            .started_at
+            .elapsed()
+            .saturating_sub(self.excluded_wall_clock)
+            .as_millis() as u64;
         usage
     }
 
@@ -72,14 +78,22 @@ impl BudgetTracker {
     }
 
     /// 记录一次工具调用（仅追踪，不限制）。
-    pub fn record_tool_call(&mut self, _tool_name: &str) {
+    pub fn record_tool_call(&mut self, tool_name: &str) {
         self.usage.tool_calls += 1;
+        if tool_name == "wait_agents" {
+            self.usage.wait_calls += 1;
+        }
+    }
+
+    /// 从活跃 wall-clock 中扣除单独 `wait_agents` 的阻塞区间。
+    pub fn exclude_wall_clock(&mut self, duration: Duration) {
+        self.excluded_wall_clock = self.excluded_wall_clock.saturating_add(duration);
     }
 
     /// 检查 wall-clock 安全上限。
     pub fn check_wall_clock(&self) -> std::result::Result<(), BudgetLimit> {
         let usage = self.usage();
-        if usage.elapsed_ms > self.wall_clock_ms {
+        if usage.elapsed_ms >= self.wall_clock_ms {
             return Err(BudgetLimit {
                 kind: BudgetLimitKind::WallClock,
                 usage,

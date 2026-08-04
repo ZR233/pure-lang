@@ -17,10 +17,11 @@ pub(super) fn session_part(
         turn_id: item.turn_id.clone(),
         order: item.started_sequence,
         revision: item.revision,
-        status: failure.map_or_else(
-            || session_part_status(item.status),
-            |_| SessionPartStatus::Failed,
-        ),
+        status: if failure.is_some() && item.status != TracePartStatus::BudgetLimited {
+            SessionPartStatus::Failed
+        } else {
+            session_part_status(item.status)
+        },
         created_at: item.created_at,
         updated_at: item.updated_at,
         completed_at: is_terminal(item.status).then_some(item.updated_at),
@@ -173,4 +174,33 @@ fn is_terminal(status: TracePartStatus) -> bool {
             | TracePartStatus::BudgetLimited
             | TracePartStatus::Denied
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn failed_trace_event_preserves_budget_limited_terminal_status() {
+        let item = TracePart::text(
+            "turn-1",
+            "turn-1-turn",
+            1,
+            TraceTextChannel::Final,
+            "budget reached",
+            TracePartStatus::BudgetLimited,
+            7,
+        );
+
+        let part = session_part(
+            "session-1",
+            "turn-1:assistant",
+            &item,
+            Some("budget reached"),
+        );
+
+        assert_eq!(part.status, SessionPartStatus::BudgetLimited);
+        assert_eq!(part.error.as_deref(), Some("budget reached"));
+        assert_eq!(part.completed_at, Some(7));
+    }
 }

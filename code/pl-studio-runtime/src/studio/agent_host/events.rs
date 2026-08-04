@@ -265,11 +265,8 @@ impl StudioAgentEventProjector {
         let Some(plan_id) = lifecycle.get("planId").and_then(serde_json::Value::as_str) else {
             return Ok(());
         };
-        let (state, reason) = match outcome {
-            TurnOutcomeKind::Completed => (PlanLifecycleState::Implemented, None),
-            TurnOutcomeKind::Cancelled
-            | TurnOutcomeKind::Failed
-            | TurnOutcomeKind::BudgetLimited => (PlanLifecycleState::ImplementationFailed, reason),
+        let Some((state, reason)) = plan_terminal_projection(outcome, reason) else {
+            return Ok(());
         };
         let updated_at = crate::studio::ids::unix_seconds();
         self.record_facts(
@@ -304,16 +301,7 @@ impl StudioAgentEventProjector {
         };
         let resource = self.resources.get(&snapshot.identity.id).await;
         let status = agent_status_label(&snapshot);
-        let error = snapshot
-            .last_turn
-            .as_ref()
-            .filter(|outcome| {
-                matches!(
-                    outcome.kind,
-                    TurnOutcomeKind::Failed | TurnOutcomeKind::BudgetLimited
-                )
-            })
-            .and_then(|outcome| outcome.reason.clone());
+        let error = agent_error(&snapshot);
         let summary = resource.as_ref().map(|resource| resource.task_name.clone());
         self.store
             .update_agent_session_status(session_id, status, summary, error, snapshot.updated_at)
@@ -363,16 +351,7 @@ impl StudioAgentEventProjector {
                         .as_ref()
                         .map(|progress| progress.summary.clone()),
                     depth: snapshot.identity.depth,
-                    error: snapshot
-                        .last_turn
-                        .as_ref()
-                        .filter(|outcome| {
-                            matches!(
-                                outcome.kind,
-                                TurnOutcomeKind::Failed | TurnOutcomeKind::BudgetLimited
-                            )
-                        })
-                        .and_then(|outcome| outcome.reason.clone()),
+                    error: agent_error(&snapshot),
                     reason: snapshot
                         .last_turn
                         .as_ref()
@@ -426,11 +405,32 @@ fn agent_status_label(snapshot: &AgentSnapshot) -> &'static str {
             | AgentActivityState::Cancelling => "waiting",
             AgentActivityState::Idle => match snapshot.last_turn.as_ref().map(|turn| turn.kind) {
                 Some(TurnOutcomeKind::Completed) => "completed",
-                Some(TurnOutcomeKind::Cancelled) => "interrupted",
-                Some(TurnOutcomeKind::Failed | TurnOutcomeKind::BudgetLimited) => "errored",
+                Some(TurnOutcomeKind::Cancelled | TurnOutcomeKind::BudgetLimited) => "interrupted",
+                Some(TurnOutcomeKind::Failed) => "errored",
                 None => "idle",
             },
         },
+    }
+}
+
+fn agent_error(snapshot: &AgentSnapshot) -> Option<String> {
+    snapshot
+        .last_turn
+        .as_ref()
+        .filter(|outcome| outcome.kind == TurnOutcomeKind::Failed)
+        .and_then(|outcome| outcome.reason.clone())
+}
+
+fn plan_terminal_projection(
+    outcome: TurnOutcomeKind,
+    reason: Option<String>,
+) -> Option<(PlanLifecycleState, Option<String>)> {
+    match outcome {
+        TurnOutcomeKind::Completed => Some((PlanLifecycleState::Implemented, None)),
+        TurnOutcomeKind::Cancelled | TurnOutcomeKind::Failed => {
+            Some((PlanLifecycleState::ImplementationFailed, reason))
+        }
+        TurnOutcomeKind::BudgetLimited => None,
     }
 }
 
@@ -462,5 +462,66 @@ const fn progress_stage_label(stage: AgentProgressStage) -> &'static str {
         AgentProgressStage::Blocked => "blocked",
         AgentProgressStage::ReadyForCompletion => "readyForCompletion",
         AgentProgressStage::ReadyForReview => "readyForReview",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use pl_core::{AgentIdentity, AgentRoleId, AgentTurnOutcome, TurnId};
+
+    use super::*;
+
+    #[test]
+    fn budget_limited_agent_is_interrupted_without_agent_error() {
+        let snapshot = snapshot_with_outcome(TurnOutcomeKind::BudgetLimited);
+
+        assert_eq!(agent_status_label(&snapshot), "interrupted");
+        assert_eq!(agent_error(&snapshot), None);
+    }
+
+    #[test]
+    fn budget_limited_plan_keeps_implementing_lifecycle() {
+        assert_eq!(
+            plan_terminal_projection(
+                TurnOutcomeKind::BudgetLimited,
+                Some("budget reached".to_string()),
+            ),
+            None
+        );
+        assert_eq!(
+            plan_terminal_projection(TurnOutcomeKind::Failed, Some("failed".to_string())),
+            Some((
+                PlanLifecycleState::ImplementationFailed,
+                Some("failed".to_string()),
+            ))
+        );
+    }
+
+    fn snapshot_with_outcome(kind: TurnOutcomeKind) -> AgentSnapshot {
+        AgentSnapshot {
+            identity: AgentIdentity {
+                id: AgentId::new("agent-1").expect("agent id"),
+                parent_id: None,
+                role: AgentRoleId::new("planner").expect("role id"),
+                depth: 0,
+            },
+            lifecycle: AgentLifecycleState::Active,
+            activity: AgentActivityState::Idle,
+            active_turn_id: None,
+            pending_inputs: 0,
+            progress: None,
+            last_turn: Some(AgentTurnOutcome {
+                turn_id: TurnId::new("turn-1").expect("turn id"),
+                session_id: SessionId::new("session-1").expect("session id"),
+                kind,
+                reason: Some("budget reached".to_string()),
+                failure: None,
+                usage: Default::default(),
+                finished_at: 7,
+            }),
+            revision: 1,
+            event_sequence: 1,
+            updated_at: 7,
+        }
     }
 }

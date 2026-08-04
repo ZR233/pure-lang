@@ -1,4 +1,5 @@
 use super::*;
+use crate::tool::ToolBudgetTiming;
 use pretty_assertions::assert_eq;
 
 #[derive(Debug)]
@@ -38,6 +39,55 @@ impl Tool for ProviderCallIdEchoTool {
                 truncated: OutputTruncation::empty(),
                 output_file: PathBuf::new(),
                 exit_code: None,
+                timed_out: false,
+                runtime_events: Vec::new(),
+            })
+        })
+    }
+}
+
+#[derive(Debug)]
+struct BudgetPausedWaitTool;
+
+impl Tool for BudgetPausedWaitTool {
+    fn name(&self) -> &str {
+        "wait_agents"
+    }
+
+    fn description(&self) -> &str {
+        "Test-only blocking wait"
+    }
+
+    fn input_schema(&self) -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+        })
+    }
+
+    fn budget_timing(&self) -> ToolBudgetTiming {
+        ToolBudgetTiming::PauseWhenOnlyScheduledTool
+    }
+
+    fn execute<'a>(
+        &'a self,
+        _input: ToolInput,
+        _context: ToolContext,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = std::result::Result<ToolOutput, PureError>>
+                + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async {
+            tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+            Ok(ToolOutput {
+                description: "progress".to_string(),
+                truncated: OutputTruncation::empty(),
+                output_file: PathBuf::new(),
+                exit_code: Some(0),
                 timed_out: false,
                 runtime_events: Vec::new(),
             })
@@ -92,6 +142,81 @@ async fn invalid_function_arguments_are_returned_to_the_model_without_running_th
     assert_eq!(records[0].status, TracePartStatus::Failed);
     assert!(records[0].result.contains("Invalid JSON arguments"));
     assert!(records[0].result.contains("github_api_request"));
+}
+
+#[tokio::test]
+async fn single_wait_agents_call_pauses_active_wall_clock_budget() {
+    let mut core = TurnEngine::default_provider().unwrap();
+    core.register_tool(BudgetPausedWaitTool);
+    let tool_call = ToolCall::function("wait-1", "wait_agents", serde_json::json!({}), None);
+    let (event_tx, _) = tokio::sync::broadcast::channel(8);
+    let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
+    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(5));
+
+    execute_tool_calls(
+        &[tool_call],
+        &mut budget,
+        &mut recorder,
+        ToolExecutionContext {
+            core: &core,
+            options: &TurnOptions::default(),
+            session_id: "turn-1",
+            workspace_root: &std::env::temp_dir(),
+            workspace_instructions: None,
+            instruction_snapshot: None,
+            active_subagent: None,
+            parent_session: std::sync::Arc::new(AgentSession::new()),
+            working_set: crate::TurnWorkingSetHandle::default(),
+            tool_cache: crate::TurnToolCacheHandle::default(),
+        },
+    )
+    .await
+    .unwrap();
+
+    assert!(budget.check_wall_clock().is_ok());
+    assert_eq!(budget.usage().wait_calls, 1);
+}
+
+#[tokio::test]
+async fn mixed_tool_batch_keeps_wait_agents_time_in_active_budget() {
+    let mut core = TurnEngine::default_provider().unwrap();
+    core.register_tool(BudgetPausedWaitTool);
+    core.register_tool(ProviderCallIdEchoTool);
+    let calls = [
+        ToolCall::function("wait-1", "wait_agents", serde_json::json!({}), None),
+        ToolCall::function(
+            "echo-1",
+            "provider_call_id_echo",
+            serde_json::json!({}),
+            None,
+        ),
+    ];
+    let (event_tx, _) = tokio::sync::broadcast::channel(8);
+    let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
+    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(5));
+
+    execute_tool_calls(
+        &calls,
+        &mut budget,
+        &mut recorder,
+        ToolExecutionContext {
+            core: &core,
+            options: &TurnOptions::default(),
+            session_id: "turn-1",
+            workspace_root: &std::env::temp_dir(),
+            workspace_instructions: None,
+            instruction_snapshot: None,
+            active_subagent: None,
+            parent_session: std::sync::Arc::new(AgentSession::new()),
+            working_set: crate::TurnWorkingSetHandle::default(),
+            tool_cache: crate::TurnToolCacheHandle::default(),
+        },
+    )
+    .await
+    .unwrap();
+
+    assert!(budget.check_wall_clock().is_err());
+    assert_eq!(budget.usage().wait_calls, 1);
 }
 
 #[tokio::test]

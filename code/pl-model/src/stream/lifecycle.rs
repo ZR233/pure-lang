@@ -306,6 +306,7 @@ impl StreamLifecycle {
                 call_id: call_id.cloned(),
                 name: None,
             });
+        let call_id_was_item_fallback = entry.call_id.as_deref() == Some(entry.item_id.as_str());
         if entry.stream_id.as_ref().is_none_or(String::is_empty)
             && let Some(stream_id) = stream_id.filter(|value| !value.is_empty())
         {
@@ -314,7 +315,7 @@ impl StreamLifecycle {
         if entry.item_id.is_empty() && !item_id.is_empty() {
             entry.item_id = item_id.to_string();
         }
-        if entry.call_id.as_ref().is_none_or(String::is_empty)
+        if (entry.call_id.as_ref().is_none_or(String::is_empty) || call_id_was_item_fallback)
             && let Some(call_id) = call_id.filter(|value| !value.is_empty())
         {
             entry.call_id = Some(call_id.clone());
@@ -339,7 +340,31 @@ impl StreamLifecycle {
         self.open_tools
             .iter()
             .find_map(|(key, tool)| tool.matches_identity(call_id, item_id).then(|| key.clone()))
+            .or_else(|| self.unique_item_fallback_key(stream_id, call_id, item_id))
             .unwrap_or(key)
+    }
+
+    fn unique_item_fallback_key(
+        &self,
+        stream_id: Option<&String>,
+        call_id: Option<&String>,
+        item_id: &str,
+    ) -> Option<String> {
+        // Some Responses-compatible streams first expose an item id, then only
+        // expose a distinct call id. Without another correlation key, upgrading
+        // is safe only while exactly one fallback-backed tool remains open.
+        if stream_id.is_some_and(|value| !value.is_empty())
+            || !call_id.is_some_and(|value| !value.is_empty() && value == item_id)
+        {
+            return None;
+        }
+
+        let mut candidates = self
+            .open_tools
+            .iter()
+            .filter(|(_, tool)| tool.uses_item_id_as_call_id());
+        let (key, _) = candidates.next()?;
+        candidates.next().is_none().then(|| key.clone())
     }
 }
 
@@ -351,6 +376,10 @@ impl OpenToolInput {
             .is_some_and(|(left, right)| left == right);
         let item_id_matches = !item_id.is_empty() && self.item_id == item_id;
         call_id_matches || item_id_matches
+    }
+
+    fn uses_item_id_as_call_id(&self) -> bool {
+        !self.item_id.is_empty() && self.call_id.as_deref() == Some(self.item_id.as_str())
     }
 }
 

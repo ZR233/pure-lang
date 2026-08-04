@@ -1,10 +1,11 @@
 use pretty_assertions::assert_eq;
 
-use crate::ToolCallPayload;
 use crate::stream::StreamCompletionAccumulator;
 use crate::stream::event::{
     ModelBlockContent, ModelBlockField, ModelBlockKind, ToolInputPayloadKind,
 };
+use crate::{CompletionTraceContext, ToolCallPayload};
+use pl_trace::{TraceEventKind, TracePartKind};
 
 use super::*;
 
@@ -797,4 +798,189 @@ fn process_responses_output_item_added_captures_tool_name() {
         }
         other => panic!("unexpected event: {other:?}"),
     }
+}
+
+#[test]
+fn responses_id_only_added_and_done_canonicalize_function_identity() {
+    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+    let mut decoder = OpenAiStreamDecoder::new(false);
+    let mut accumulator = StreamCompletionAccumulator::new(None);
+    let events = [
+        serde_json::from_value(serde_json::json!({
+            "type": "response.output_item.added",
+            "item": {
+                "type": "function_call",
+                "id": "fc_1",
+                "name": "read_file"
+            }
+        }))
+        .unwrap(),
+        serde_json::from_value(serde_json::json!({
+            "type": "response.output_item.done",
+            "item": {
+                "type": "function_call",
+                "id": "fc_1",
+                "name": "read_file",
+                "arguments": "{}"
+            }
+        }))
+        .unwrap(),
+        serde_json::from_value(serde_json::json!({
+            "type": "response.completed",
+            "response": {"id": "resp_1"}
+        }))
+        .unwrap(),
+    ];
+
+    for event in &events {
+        for stream_event in decoder.decode(event) {
+            accumulator.apply(stream_event, &event_tx).unwrap();
+        }
+    }
+    let response = accumulator.finish(&event_tx).unwrap();
+
+    assert_eq!(response.tool_calls.len(), 1);
+    assert_eq!(response.tool_calls[0].id, "fc_1");
+    assert_eq!(response.tool_calls[0].call_id.as_deref(), Some("fc_1"));
+}
+
+#[test]
+fn responses_done_upgrades_fallback_call_id_without_splitting_custom_tool() {
+    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+    let mut decoder = OpenAiStreamDecoder::new(false);
+    let mut accumulator = StreamCompletionAccumulator::new(None);
+    let events = [
+        serde_json::from_value(serde_json::json!({
+            "type": "response.output_item.added",
+            "item": {
+                "type": "custom_tool_call",
+                "id": "ctc_1",
+                "name": "apply_patch"
+            }
+        }))
+        .unwrap(),
+        serde_json::from_value(serde_json::json!({
+            "type": "response.output_item.done",
+            "item": {
+                "type": "custom_tool_call",
+                "id": "ctc_1",
+                "call_id": "call_1",
+                "name": "apply_patch",
+                "input": "*** Begin Patch\n*** End Patch"
+            }
+        }))
+        .unwrap(),
+        serde_json::from_value(serde_json::json!({
+            "type": "response.completed",
+            "response": {"id": "resp_1"}
+        }))
+        .unwrap(),
+    ];
+
+    for event in &events {
+        for stream_event in decoder.decode(event) {
+            accumulator.apply(stream_event, &event_tx).unwrap();
+        }
+    }
+    let response = accumulator.finish(&event_tx).unwrap();
+
+    assert_eq!(response.tool_calls.len(), 1);
+    assert_eq!(response.tool_calls[0].id, "ctc_1");
+    assert_eq!(response.tool_calls[0].call_id.as_deref(), Some("call_1"));
+}
+
+#[test]
+fn responses_call_id_only_delta_upgrades_fallback_without_splitting_trace() {
+    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
+    let mut decoder = OpenAiStreamDecoder::new(false);
+    let mut accumulator = StreamCompletionAccumulator::new(Some(CompletionTraceContext {
+        session_id: "session-1".to_string(),
+        turn_id: "turn-1".to_string(),
+        inference_id: "turn-1-inf-0".to_string(),
+        plan_mode: false,
+        trace_sequence_base: 0,
+    }));
+    let events = [
+        serde_json::from_value(serde_json::json!({
+            "type": "response.output_item.added",
+            "item": {
+                "type": "function_call",
+                "id": "fc_1",
+                "name": "read_file"
+            }
+        }))
+        .unwrap(),
+        serde_json::from_value(serde_json::json!({
+            "type": "response.function_call_arguments.delta",
+            "call_id": "call_1",
+            "delta": "{}"
+        }))
+        .unwrap(),
+        serde_json::from_value(serde_json::json!({
+            "type": "response.output_item.done",
+            "item": {
+                "type": "function_call",
+                "id": "fc_1",
+                "call_id": "call_1",
+                "name": "read_file",
+                "arguments": "{}"
+            }
+        }))
+        .unwrap(),
+        serde_json::from_value(serde_json::json!({
+            "type": "response.completed",
+            "response": {"id": "resp_1"}
+        }))
+        .unwrap(),
+    ];
+
+    for event in &events {
+        for stream_event in decoder.decode(event) {
+            accumulator.apply(stream_event, &event_tx).unwrap();
+        }
+    }
+    let response = accumulator.finish(&event_tx).unwrap();
+
+    assert_eq!(response.tool_calls.len(), 1);
+    assert_eq!(response.tool_calls[0].id, "fc_1");
+    assert_eq!(response.tool_calls[0].call_id.as_deref(), Some("call_1"));
+    let tool_item_ids = response
+        .trace_events
+        .iter()
+        .filter_map(|event| match &event.kind {
+            TraceEventKind::TracePartStarted { item }
+            | TraceEventKind::TracePartCompleted { item }
+                if item.kind == TracePartKind::Tool =>
+            {
+                Some(item.item_id.as_str())
+            }
+            TraceEventKind::TracePartDelta { event } if event.kind == TracePartKind::Tool => {
+                Some(event.item_id.as_str())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        tool_item_ids
+            .iter()
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>(),
+        std::collections::BTreeSet::from(["turn-1-fc_1"])
+    );
+}
+
+#[test]
+fn responses_id_only_delta_populates_call_id() {
+    let event: SseStreamEvent = serde_json::from_value(serde_json::json!({
+        "type": "response.function_call_arguments.delta",
+        "item_id": "fc_1",
+        "delta": "{}"
+    }))
+    .unwrap();
+
+    assert!(matches!(
+        single_event(&event),
+        Some(StreamEvent::ToolInputDelta { item_id, call_id: Some(call_id), .. })
+            if item_id == "fc_1" && call_id == "fc_1"
+    ));
 }

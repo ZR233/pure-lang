@@ -8,7 +8,13 @@
 
 `ToolCall.id` 是 provider 返回的工具调用 item id。Chat Completions 历史回放时，assistant 消息中的 `tool_calls[].id` 和后续 tool 消息的 `tool_call_id` 必须使用该值。
 
-`ToolCall.call_id` 是 Responses API 的调用 id。Responses 历史回放时，`function_call_output` 和 `custom_tool_call_output` 的 `call_id` 必须优先使用该值；缺失时才回退到 `ToolCall.id`。
+`ToolCall.call_id` 是 Responses API 的 canonical 调用 id。Responses 协议边界按
+`item_id = id ?? call_id`、`call_id = call_id ?? item_id` 规范化 provider 输出，因此新进入
+core 的 Responses 工具调用必须同时具有非空 `ToolCall.id` 与 `ToolCall.call_id`。provider
+后续给出区别于 fallback identity 的独立 `call_id` 时，只升级原工具调用 metadata，不改变
+最早 trace 锚点，也不创建第二个工具调用。Responses 历史回放中的
+`function_call_output` 和 `custom_tool_call_output` 只使用已经规范化的 `ToolCall.call_id`；
+历史缺失或 output mismatch 继续作为协议错误拒绝，不在回放层增加兼容分支。
 
 Core 会话中的 tool result metadata 同时保存两个字段：
 
@@ -65,6 +71,11 @@ Studio framework attach 会对活动 Task 根会话执行一次有证据门禁�
 后台 stdio 子进程（MCP server、`exec` 命令、LSP server）由运行时显式持有生命周期。正常路径必须通过 async shutdown / terminate 请求关闭 stdin、终止进程树并等待退出；Drop 只能做 best-effort 兜底。容器 backend 必须同时终止宿主 transport 进程和容器内进程组，不能只杀 Docker CLI 后留下孤儿任务。Windows GUI 进程中启动这些后台子进程和兜底终止命令时不得显示额外终端窗口。
 
 终态事件只允许出现一次。`completed` 表示工具成功执行，`failed` 表示工具实现或注册失败，`denied` 表示模式、策略或审批拒绝，`interrupted` 和 `budgetLimited` 表示 turn 控制层中断或预算限制。`approved` 可作为执行前的非终态状态展示，但不能替代最终 `completed` 或 `failed`。
+
+`Tool` 通过明确的预算计时策略声明执行期间是否计入 turn 的活跃 wall-clock，默认计时。
+`wait_agents` 声明暂停 wall-clock，但只有模型本批次恰好包含一个且该调用已通过注册、策略与
+审批并成功调度时，才从活跃预算中扣除其阻塞区间。普通工具、模型请求、混合工具批次、
+审批和 interaction 等待继续计时；该策略不改变工具终态、取消传播或 `waitCalls` 可观测计数。
 
 ## 运行时错误分类
 

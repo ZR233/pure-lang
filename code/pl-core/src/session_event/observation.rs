@@ -120,10 +120,6 @@ pub(crate) fn observation_from_agent_event(event: &AgentEvent) -> Option<TurnObs
             message: reason.clone(),
             severity: ErrorSeverity::Recoverable,
         }),
-        AgentEvent::TurnBudgetLimited { reason, .. } => Some(TurnObservation::Error {
-            message: reason.clone(),
-            severity: ErrorSeverity::Recoverable,
-        }),
         AgentEvent::Error { message, severity } => Some(TurnObservation::Error {
             message: message.clone(),
             severity: *severity,
@@ -134,6 +130,7 @@ pub(crate) fn observation_from_agent_event(event: &AgentEvent) -> Option<TurnObs
         | AgentEvent::TracePartFailed { .. }
         | AgentEvent::InteractionChanged { .. }
         | AgentEvent::SkillActivated { .. }
+        | AgentEvent::TurnBudgetLimited { .. }
         | AgentEvent::Done => None,
     }
 }
@@ -344,4 +341,22 @@ fn unix_timestamp() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |duration| duration.as_secs() as i64)
+}
+
+#[cfg(test)]
+mod tests {
+    use pl_protocol::{BudgetLimitKind, BudgetUsage};
+
+    use super::*;
+
+    #[test]
+    fn budget_limited_control_event_does_not_project_generic_error() {
+        let observation = observation_from_agent_event(&AgentEvent::TurnBudgetLimited {
+            reason: "budget reached".to_string(),
+            limit_kind: BudgetLimitKind::WallClock,
+            usage: BudgetUsage::default(),
+        });
+
+        assert!(observation.is_none());
+    }
 }

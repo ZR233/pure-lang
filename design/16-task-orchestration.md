@@ -64,6 +64,13 @@ lifecycle 仍为 `Active`。该工具只获取有界 user/assistant 文本和工
 用 `send_message` 给出具体替代方向，或用 `interrupt_agent` 终止不安全/重复失败的 turn；
 不得仅根据运行时间、普通工具活动或缺少 final 文本判定失败。
 
+Planner turn 的 30 分钟安全上限只统计活跃执行；单独成功调度的 `wait_agents` 阻塞等待不
+消耗该预算。`BudgetLimited` 与运行失败保持分离：Planner agent 回到可继续输入的
+`Active + Idle`，会话显示 interrupted，当前 Plan 保持 `Implementing`，不写
+`ImplementationFailed` 或通用 agent error。用户或 Planner 后续通过显式 `send_message`
+继续，不由 runtime 自动唤醒。该投影语义不改变下文 executor/reviewer required ending tool
+合同。
+
 应用重启后从持久事实、agent snapshots 与 pending explicit input 恢复；遗留 Running turn
 收束为 `Cancelled(runtime_restarted)`。没有 pending explicit input 的活动 Task 显示 paused，
 由用户点击继续；attach 只对账 projection，不启动 Planner。Git 状态与 `expectedHead`

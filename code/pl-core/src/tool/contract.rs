@@ -17,6 +17,15 @@ pub(super) type RegisteredToolFuture =
 pub(super) type RegisteredToolHandler =
     dyn Fn(ToolInput, ToolContext) -> RegisteredToolFuture + Send + Sync;
 
+/// 工具执行区间如何计入 turn 的活跃 wall-clock 预算。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolBudgetTiming {
+    /// 工具执行时间计入活跃预算。
+    Count,
+    /// 仅当该工具是批次中唯一成功调度的调用时暂停活跃预算。
+    PauseWhenOnlyScheduledTool,
+}
+
 /// 严格 object 输入 schema 中的字段。
 ///
 /// 产品层和共享工具都应通过 `required` / `optional` 命名构造器声明字段，
@@ -137,6 +146,10 @@ pub trait Tool: fmt::Debug + Send + Sync {
     fn supports_parallel_tool_calls(&self) -> bool {
         false
     }
+    /// 返回该工具执行时间的 turn 活跃预算计时策略。
+    fn budget_timing(&self) -> ToolBudgetTiming {
+        ToolBudgetTiming::Count
+    }
     fn effect(&self) -> Option<ToolEffect> {
         ToolEffect::for_builtin_name(self.name())
     }
@@ -189,6 +202,10 @@ where
 
     fn supports_parallel_tool_calls(&self) -> bool {
         (**self).supports_parallel_tool_calls()
+    }
+
+    fn budget_timing(&self) -> ToolBudgetTiming {
+        (**self).budget_timing()
     }
 
     fn effect(&self) -> Option<ToolEffect> {

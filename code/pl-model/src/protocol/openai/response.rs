@@ -169,10 +169,7 @@ impl ResponsesOutputItem {
     fn to_tool_call(&self) -> Result<Option<ToolCall>> {
         match self.kind.as_str() {
             "function_call" => {
-                let id = self
-                    .id
-                    .clone()
-                    .ok_or_else(|| response_protocol_error("function_call missing id"))?;
+                let (id, call_id) = self.tool_identity("function_call")?;
                 let name = self
                     .name
                     .clone()
@@ -185,15 +182,11 @@ impl ResponsesOutputItem {
                     id,
                     name,
                     arguments.to_string(),
-                    self.call_id.clone(),
+                    Some(call_id),
                 )))
             }
             "custom_tool_call" => {
-                let id = self
-                    .id
-                    .clone()
-                    .or_else(|| self.call_id.clone())
-                    .ok_or_else(|| response_protocol_error("custom_tool_call missing id"))?;
+                let (id, call_id) = self.tool_identity("custom_tool_call")?;
                 let name = self
                     .name
                     .clone()
@@ -202,12 +195,7 @@ impl ResponsesOutputItem {
                     .input
                     .clone()
                     .ok_or_else(|| response_protocol_error("custom_tool_call missing input"))?;
-                Ok(Some(ToolCall::custom(
-                    id,
-                    name,
-                    input,
-                    self.call_id.clone(),
-                )))
+                Ok(Some(ToolCall::custom(id, name, input, Some(call_id))))
             }
             "message"
             | "function_call_output"
@@ -221,6 +209,25 @@ impl ResponsesOutputItem {
             | "code_interpreter_call" => Ok(None),
             _ => Ok(None),
         }
+    }
+
+    fn tool_identity(&self, kind: &str) -> Result<(String, String)> {
+        let item_id = self
+            .id
+            .as_deref()
+            .filter(|id| !id.is_empty())
+            .or_else(|| {
+                self.call_id
+                    .as_deref()
+                    .filter(|call_id| !call_id.is_empty())
+            })
+            .ok_or_else(|| response_protocol_error(&format!("{kind} missing id and call_id")))?;
+        let call_id = self
+            .call_id
+            .as_deref()
+            .filter(|call_id| !call_id.is_empty())
+            .unwrap_or(item_id);
+        Ok((item_id.to_string(), call_id.to_string()))
     }
 
     fn to_web_search_call(&self) -> Option<HostedWebSearchCall> {

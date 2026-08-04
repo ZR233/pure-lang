@@ -19,7 +19,16 @@ Responses continuation 状态。
 
 `CompletionEventStream` 是 `pl-model` 的公开流式边界，元素类型为 `Result<CompletionStreamEvent>`。`ModelProvider::stream_events` 返回该流，供 `mai-team` 等调用方原生消费 provider 无关事件；`stream_complete` 保留为兼容 API，但必须通过同一条 public stream API 累计出 `CompletionResponse`，避免在核心层或外部仓库复刻 provider adapter。
 
-`stream` 层负责稳定工具调用 identity。OpenAI Responses 可能先发送只有 provider `item_id` 的 `output_item.added`，后续 delta 或 done 才补 `call_id`；Chat Completions 也可能只依赖 chunk index 作为 `stream_id`。同一个工具调用一旦通过 `stream_id`、`item_id` 或 `call_id` 中任一非空身份进入 accumulator，后续 late metadata 必须合并到同一个 open tool，不得因为 `call_id` 后到而拆成第二个 tool call 或第二个 trace part。trace 的 tool part id 以最早稳定的 provider item/runtime tool id 为锚，`call_id` 只作为 metadata 写入 tool snapshot，用于协议回放和 provider tool result 匹配。
+`stream` 层负责稳定工具调用 identity。OpenAI Responses 的非流式 item、SSE added/done 和 delta
+在协议边界统一规范化身份：`item_id = id ?? call_id`，`call_id = call_id ?? item_id`。兼容
+provider 只返回一个非空身份时，该身份同时成为 canonical item id 与 Responses call id；两者
+都缺失时仍是协议错误。Responses 可能先发送只有 provider `item_id` 的
+`output_item.added`，后续 delta 或 done 才补独立 `call_id`；Chat Completions 也可能只依赖
+chunk index 作为 `stream_id`。同一个工具调用一旦通过 `stream_id`、`item_id` 或 `call_id`
+中任一非空身份进入 accumulator，后续 late metadata 必须升级原 accumulator 的 fallback
+`call_id` 并合并到同一个 open tool，不得拆成第二个 tool call 或第二个 trace part。trace 的
+tool part id 以最早稳定的 provider item/runtime tool id 为锚，`call_id` 只作为 metadata 写入
+tool snapshot，用于协议回放和 provider tool result 匹配。
 
 ## 7.2 依赖
 
