@@ -17,7 +17,7 @@
 
 Task executor 只能由 `task_spawn_executor { taskName, message, ownedPaths }` 创建。
 `ownedPaths` 是强类型工具输入和 lifecycle 最终不变量，不再接受模型通过通用
-`spawn_agent.metadata` 声明；静态路径校验必须早于 Outcome、WorkUnit、worktree、session
+`spawn_agent.metadata` 声明；静态路径校验必须早于 WorkUnit、worktree、Thread
 和 agent registry 的任何副作用。
 
 ## 与既有约定的关系
@@ -119,8 +119,8 @@ released = git worktree remove + 删除分支 + 清空 durable lifecycle resourc
 ## 启用时机
 
 孤儿 GC 只在 Studio 启动恢复阶段运行，并以持久化 `TaskRun`、`WorkUnit`、
-`AgentOutcome` 为唯一所有权来源。普通 root turn、continuation turn、会话选择切换和
-`enable_worktrees` 都不得扫描或删除其他 session 的 worktree。
+`ReviewRound` 与 `BranchLease` 为唯一所有权来源。普通 root Turn、后续 Turn、Thread
+选择切换和 `enable_worktrees` 都不得扫描或删除其他 Thread 的 worktree。
 
 启动对账必须逐个 leaf registration/path/branch 精确处理，禁止递归删除
 `.pure/worktrees/<taskRunId>` 父目录：
@@ -145,7 +145,7 @@ released = git worktree remove + 删除分支 + 清空 durable lifecycle resourc
   执行；active run 只有在所属 common-directory group 对账成功后才能进入 Recovery
   continuation。任何已知 workspace（包括仅有 terminal owner 的 workspace）无法完成 Git
   identity 预检时，该 common-directory group 不执行 GC、不恢复 agent，并产生对应
-  项目/会话 issue；其他已完整识别 owner 且通过预检的安全 group 可以继续。SQLite、schema
+  项目/Thread issue；其他已完整识别 owner 且通过预检的安全 group 可以继续。SQLite、schema
   或完整 ownership snapshot 本身无法读取时才是应用致命错误。
 - inventory、registration remove、leaf remove 每一步都重新拒绝 symlink、Windows junction
   与 reparse ancestor，并证明 canonical leaf 严格位于 canonical `.pure/worktrees` root。
@@ -184,7 +184,7 @@ subagent turn（`active_subagent.is_some()`）不再 enable；其 `workspace_roo
 
 - 主路径：`close_agent` / 明确 discard / spawn 失败回滚里 async 释放。Task runtime
   shutdown 不调用 `shutdown_descendants`，而是 cancel-and-wait/quiesce agent task 并
-  保留 durable worktree、session 与 entry，供重启对账和审计。
+  保留 durable worktree、Thread 与 directory entry，供重启对账和审计。
 - spawn 失败回滚必须尝试全部独立步骤并聚合错误；单个 `git worktree remove` 失败
   不得阻止删除分支或宿主 rollback hook。
 - 兜底：进程异常退出留下的孤儿 worktree 由下次启动 GC 清理（不依赖 `Drop` await）。

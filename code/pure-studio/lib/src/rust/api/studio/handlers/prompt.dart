@@ -5,37 +5,44 @@
 
 import '../../../frb_generated.dart';
 import '../types/error.dart';
-import '../types/interaction.dart';
 import '../types/response.dart';
-import '../types/session_stream.dart';
+import '../types/thread_stream.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These functions are ignored because they are not marked as `pub`: `interaction_resolution`
 
-Future<SubmitPromptResponse> submitPrompt({
-  required String sessionId,
+Future<StartTurnResponse> startTurn({
+  required String threadId,
   required String prompt,
   required List<String> attachmentIds,
-}) => RustLib.instance.api.crateApiStudioHandlersPromptSubmitPrompt(
-  sessionId: sessionId,
+}) => RustLib.instance.api.crateApiStudioHandlersPromptStartTurn(
+  threadId: threadId,
   prompt: prompt,
   attachmentIds: attachmentIds,
 );
 
-Future<SubmitPromptResponse> resumeTask({required String sessionId}) => RustLib
-    .instance
-    .api
-    .crateApiStudioHandlersPromptResumeTask(sessionId: sessionId);
+Future<SteerTurnResponse> steerTurn({
+  required String threadId,
+  required String prompt,
+  required List<String> attachmentIds,
+}) => RustLib.instance.api.crateApiStudioHandlersPromptSteerTurn(
+  threadId: threadId,
+  prompt: prompt,
+  attachmentIds: attachmentIds,
+);
 
-Future<StopPromptResponse> stopPrompt({required String sessionId}) => RustLib
-    .instance
-    .api
-    .crateApiStudioHandlersPromptStopPrompt(sessionId: sessionId);
+Future<InterruptTurnResponse> interruptTurn({
+  required String threadId,
+  required String turnId,
+}) => RustLib.instance.api.crateApiStudioHandlersPromptInterruptTurn(
+  threadId: threadId,
+  turnId: turnId,
+);
 
-Future<ResolveInteractionResponse> resolveInteraction({
+Future<BridgeInteractionRequest> respondInteraction({
   required String interactionId,
   required BridgeInteractionResolution resolution,
-}) => RustLib.instance.api.crateApiStudioHandlersPromptResolveInteraction(
+}) => RustLib.instance.api.crateApiStudioHandlersPromptRespondInteraction(
   interactionId: interactionId,
   resolution: resolution,
 );

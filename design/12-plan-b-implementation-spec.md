@@ -1,113 +1,95 @@
 # 12 - 方案乙实施规范
 
-## 1. 目标与范围
+## 12.1 目标与范围
 
-本规范用于约束方案乙 A-G 全量改造，属于一次性破坏性升级：
+方案乙以一次原子切换统一 Studio 会话架构：
 
-- 不保留旧命令兼容层
-- 不保留旧 DTO 兼容解析
-- 不保留旧 SQLite / config 运行期双栈读取
-
-## 2. 命名与模块边界
-
-`pl-core` 固定端口-适配器边界，但不再保留只做 re-export 的分层包装模块。公开 API 由 crate root 直接导出稳定入口，内部实现按业务命名空间组织：
-
-- `interfaces`：端口 trait
-- `studio`：Studio runtime、store、事件投影和 UI-facing records
-- `core`：turn pipeline、权限和工具调度
-- `tool`、`config`、`mcp`：具体适配器与运行时能力
-
-新增端口抽象放入 `interfaces`；新增实现优先进入对应业务命名空间。不得新增 `application`、`domain`、`infrastructure` 这类只转发类型的兼容包装层；调用方应直接引用 crate root 导出的稳定类型，或在 crate 内部引用真实模块路径。
-
-Flutter/FRB 固定结构：
-
-- `pl-studio-bridge` 暴露 typed bridge command 和 event stream
-- Flutter data repository 负责 bridge 调用与 JSON/DTO 适配
-- Riverpod reducer/controller 负责归一化状态、actions 和 selectors
-- `MaterialApp.router` 只做路由、主题和顶层页面装配
-
-## 3. 端口规范
-
-新增 trait 必须：
-
-- 使用原生 RPITIT 异步签名
-- 显式 `+ Send`
-- 带文档注释说明职责和实现约束
-
-示例：
-
-```rust
-pub trait SessionRepository: Send + Sync {
-    fn list_sessions(
-        &self,
-        project_id: &str,
-    ) -> impl std::future::Future<Output = anyhow::Result<Vec<SessionRecord>>> + Send;
-}
+```text
+Thread → Turn → Item
 ```
 
-## 4. 数据迁移策略
+不保留旧命令兼容层、旧 DTO 解析门面、运行期双库、durable event journal 或长期 feature
+flag。Simple、Task、多代理、worktree、审查、冲突处理与重启恢复必须在新模型上继续工作。
 
-SQLite 是一次性破坏性双库升级：
+## 12.2 边界
 
-1. 运行期只识别 `studio_state.sqlite` schema v11 与 `studio_history.sqlite` schema v1 的匹配 generation
-2. Entity-first schema 是唯一事实源；不保留手写 base SQL、migration chain、dispatcher、backfill 或兼容读取
-3. legacy `studio_2.sqlite` v10 在连接关闭后完整归档主文件、`-wal` 和 `-shm`，随后创建新的双库，不导入旧数据
-4. 高于支持版本、generation 不匹配、损坏、锁定或归档失败都停止启动且不覆盖原文件
-5. 状态库保留强事务产品状态和可重建 runtime/UI projection；历史库保留完整 session turn/item/context checkpoint
-6. 双库提交按历史事实先行、状态 projection 后随；删除通过状态库 durable GC job 幂等清理历史，不使用跨库原子事务
+- `pl-protocol` 定义穷尽的 Thread、Turn、Item、Interaction 和 typed notification。
+- `pl-core` 提供 ThreadManager、ThreadActor、TurnFactory/TurnEngine 与协作工具控制面。
+- `pl-studio-runtime` 实现单库 repository、TaskService、产品流、归档和恢复。
+- `pl-studio-bridge` 机械映射 typed Rust/FRB DTO，不加入兼容 parser 或第二次状态分桶。
+- Flutter data/repository 把 DTO 一次转换为 domain workspace；ViewModel/reducer 管理 canonical
+  workspace 与 UI ephemeral state；Widget 只负责展示和交互。
 
-config：
+公开会话命令固定为 `listThreads`、`readThread`、`listThreadTurns`、`startTurn`、
+`steerTurn`、`interruptTurn`、`respondInteraction` 和 `subscribeThread`。
 
-1. 检测旧结构
-2. 备份旧文件
-3. 生成新结构模板
-4. 仅迁入必要字段（provider/model/token/role）
+## 12.3 身份与事实归属
 
-## 5. 安全默认
+一个 agent 固定对应一个 Thread，`ThreadId` 同时是运行时和会话身份；`agentPath` 只用于工具
+寻址。root/child 关系由 `rootThreadId`、`parentThreadId`、`role` 和 `agentPath` 表达。
 
-- 默认权限模式固定 `PermissionMode::RequestApproval`
-- 工具权限只由 `PermissionMode`、execution policy 和访问分类决定
-- Flutter/FRB 桥接层不暴露 raw provider 私有结构
-- token 不在 UI 和日志明文扩散
+事实只能有一个拥有者：
 
-## 6. 发布工程化
+- SQLite：Thread、Turn、Item、input、interaction、attachment 与 Task 产品表。
+- ThreadActor：durable input queue 内存镜像、活动 Turn、取消 identity、steer mailbox 和 live
+  Item delta。
+- TaskService：Task phase、WorkUnit、Delivery、ReviewRound、MergeRecord、BranchLease 与清理合同。
+- Flutter UI：Composer 草稿、滚动、展开状态、submission revision 和订阅 generation。
 
-新增 CI：
+TaskRun 只绑定 root Thread；WorkUnit 和 ReviewRound 直接引用 executor/reviewer Thread。Task 状态
+从产品表与 Thread/Turn 事实组成，不创建 AgentOutcome 或 runtime progress 镜像。
 
-- PR 质量门：fmt / clippy / test / Flutter analyze / Flutter test
-- RC 打包：通过 `cargo xtask build-gui` 生成当前 OS 的 Flutter 桌面构建产物
+## 12.4 存储与切换
 
-## 7. 验收口径
+Studio 只使用 `studio.sqlite` schema v1。每次 durable transition 在一个 SQLite 事务中校验
+revision 并更新相关 canonical 行；失败不更新 actor，也不广播。
 
-后端：
+首次切换按以下顺序执行：
 
-1. 高频事件 `Lagged` 不导致 drain 退出
-2. `message.updated`、`message.part.updated`、turn 和 interaction 先提交历史事实，再更新状态 projection；terminal 广播等待双 watermark barrier
-3. 新 schema 启动切换可重复执行且有备份
-4. wall-clock 预算耗尽时必须写入 `TurnBudgetLimited`，并保留观测用量
-5. 用户显式要求子代理分工时，核心提示必须要求先用 `spawn_agent` 调度子代理，再由父会话汇总
-6. `spawn_agent`、`report_progress`、`send_message`、`interrupt_agent`、`list_agents`、
-   `wait_agents`、`read_agent_session` 与 `close_agent` 形成通用协作闭环；工具层只持有
-   `AgentRuntimeHandle`。`AgentRuntime` 只管理 registry、容量与 spawn/close saga，每个
-   `AgentLoop` 唯一管理自己的 queue、session、RunningTurn 与取消。Task 根的通用 spawn
-   只允许 explorer，executor/reviewer 分别由 `task_spawn_executor` /
-   `task_request_delivery_review` / `task_request_integrated_review` 创建；Studio executor
-   另有 required ending tool `report_completion`
-7. agent 状态正交拆为 lifecycle（`Active | Closing | Closed | Faulted`）与 activity（`Idle | Queued | Running | WaitingTool | WaitingInteraction | Cancelling`）；完成、失败、取消和预算限制属于 turn outcome，不污染 agent 生命周期
-8. `close_agent` 按产品层 `AgentAccessPolicy` 校验目标，并由 runtime 与 host lifecycle saga 级联收束 live descendants；普通 turn 中断、失败或预算限制不会隐式关闭仍可继续工作的 agent
-9. child durable commit 只更新 Agent Directory snapshot/watch，不抢占或自动启动父代理；
-   Planner 无其他工作时调用无 timeout 的 `wait_agents`，并由真实 progress、interaction 或
-   terminal 变化结束等待；完整树 snapshot 通过 `list_agents` 读取
-10. `Done`、turn final、agent final、terminal `message.part.updated` 作为 lossless snapshot 处理，不因普通 live delta 背压丢失
-11. 工具并行执行时，实际执行可并发，写回模型上下文的 tool result 顺序必须保持模型发出顺序
+1. 只读检查旧数据库并生成项目、Task、worktree、branch、dirty/ahead 资源清单。
+2. 将 `studio_state.sqlite`、`studio_history.sqlite`、`studio_2.sqlite`、全部 WAL/SHM、
+   attachments 与 manifest 移入时间戳归档目录。
+3. 全部移动成功后创建新库；失败时逆序回滚并停止启动。
 
-桥接：
+不导入旧会话或 Task，不删除任何外部 worktree/branch。`config.toml` 继续使用 schema 12。
 
-1. `pl-studio-bridge` 只暴露 typed command、bootstrap snapshot 和事件 stream
-2. 命令与 DTO 分层明确
+## 12.5 运行时、恢复与订阅
 
-前端：
+ThreadHandle 把普通命令直接发给目标 ThreadActor；ThreadManager 只管理 registry、spawn/close
+和 directory watch。TurnFactory 直接返回可执行 TurnEngine、request 与 policy。
 
-1. reducer 接管业务状态
-2. 顶层 app widget 显著收敛
-3. 停止路径稳定 `interrupted` 收尾
+保留稳定 mail ID、CAS revision、迟到 completion identity、取消 grace period、显式
+`wait_agents` 与事件驱动 directory watch。模型上下文从有序 Item 重建，最新
+`contextCompaction` 是基线；provider 私有 Item 不向 Flutter 暴露。
+
+重启时遗留活动 Turn/Item 收束为 `interrupted(runtimeRestarted)`，未确认消费的显式 input
+重新排队。`toolApproval` 取消，`userInput` 与 `planConfirmation` 保持 pending。attach 不自动
+启动模型；没有 pending input 的活动 Task 显示 paused，由用户显式继续。
+
+`subscribeThread` 先注册监听，再返回 authoritative snapshot。之后只发送 typed Turn、Item、
+Interaction 与 runtime notification。流式 delta 和 terminal 通知必须 lossless；普通 progress
+可以 best-effort，但丢弃前发送 `Lagged`。断流、lag 或未知 revision 一律重新订阅并用 snapshot
+替换；实时流不携带 durable cursor 或 replay journal，历史只用 opaque keyset cursor 分页。
+
+## 12.6 Flutter 状态合同
+
+Flutter canonical state 只保存 Thread directory 与 `workspacesByThread`。snapshot 直接替换目标
+workspace；旧 generation 的通知直接丢弃。Timeline 只从 ThreadItem ordinal 投影，相邻工具合并
+属于视觉层，不创建第二套 Message/Part 事实源。
+
+`selectedThreadId` 是唯一选择状态，root 由 `rootThreadId` 派生。Timeline、Todo、状态栏、
+interaction 和 Composer 作为一个 workspace 原子切换，同时保留该 Thread 的 UI ephemeral state。
+
+## 12.7 验收
+
+- 协议：serde/FRB/Dart union 穷尽映射，未知变体失败。
+- 存储：完整归档、单库建库、CAS、输入幂等、ordinal、keyset 分页和事务原子性。
+- Runtime：start/steer/FIFO、取消、迟到 completion、重启、interaction、child Thread 与无轮询等待。
+- Task：计划确认、并行 executor、delivery/review/rework、merge/conflict、stop/restart/cleanup 与 lease。
+- Flutter：Item timeline、reasoning、tool grouping、Composer revision、interaction dock、原子切换与
+  UI ephemeral state。
+- 真实应用：使用隔离数据目录运行 `cargo xtask run-gui --driver`，验证 Driver health、输入回读、
+  `studio.sqlite`、截图和零 runtime errors。
+
+最终质量门为 Rust fmt/严格 Clippy/默认并行 workspace tests、FRB 无漂移、Flutter analyze/tests
+和 `git diff --check`。

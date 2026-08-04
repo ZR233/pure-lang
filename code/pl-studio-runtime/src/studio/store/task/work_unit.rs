@@ -9,7 +9,9 @@ use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 #[cfg(test)]
 use crate::studio::task_coordinator::CreateWorkUnit;
-use crate::studio::task_coordinator::{TaskWorktreeDisposition, WorkUnitRecord, WorkUnitStatus};
+use crate::studio::task_coordinator::{
+    TaskWorktreeDisposition, ThreadExecutionStatus, WorkUnitRecord, WorkUnitStatus,
+};
 
 impl StudioStore {
     #[cfg(test)]
@@ -27,7 +29,11 @@ impl StudioStore {
                 branch: Set(input.branch),
                 worktree_disposition: Set(TaskWorktreeDisposition::Protect.as_str().to_string()),
                 attempt: Set(input.attempt as i32),
-                agent_id: Set(None),
+                executor_thread_id: Set(None),
+                requested_by_call_id: Set(String::new()),
+                execution_status: Set(ThreadExecutionStatus::Queued.as_str().to_string()),
+                execution_summary: Set(None),
+                execution_error: Set(None),
                 created_at: Set(now),
                 updated_at: Set(now),
             }
@@ -41,7 +47,7 @@ impl StudioStore {
         &self,
         work_unit_id: &str,
         status: WorkUnitStatus,
-        agent_id: Option<String>,
+        executor_thread_id: Option<String>,
     ) -> Result<WorkUnitRecord> {
         let model = entities::work_unit::Entity::find_by_id(work_unit_id.to_string())
             .one(&self.db)
@@ -49,7 +55,7 @@ impl StudioStore {
             .context("work unit not found")?;
         let mut active: entities::work_unit::ActiveModel = model.into();
         active.status = Set(status.as_str().to_string());
-        active.agent_id = Set(agent_id);
+        active.executor_thread_id = Set(executor_thread_id);
         active.updated_at = Set(unix_seconds());
         work_unit_record(active.update(&self.db).await?)
     }
@@ -97,7 +103,18 @@ pub(super) fn work_unit_record(model: entities::work_unit::Model) -> Result<Work
                 )
             })?,
         attempt: model.attempt as u32,
-        agent_id: model.agent_id,
+        executor_thread_id: model.executor_thread_id,
+        requested_by_call_id: model.requested_by_call_id,
+        execution_status: ThreadExecutionStatus::from_str(&model.execution_status).with_context(
+            || {
+                format!(
+                    "invalid Thread execution status: {}",
+                    model.execution_status
+                )
+            },
+        )?,
+        execution_summary: model.execution_summary,
+        execution_error: model.execution_error,
         created_at: model.created_at,
         updated_at: model.updated_at,
     })

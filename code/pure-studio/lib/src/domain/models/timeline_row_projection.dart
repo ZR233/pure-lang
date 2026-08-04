@@ -3,9 +3,7 @@ part of 'timeline_models.dart';
 class TimelineRow {
   const TimelineRow._({
     required this.id,
-    required this.sessionId,
-    required this.messageId,
-    required this.role,
+    required this.threadId,
     required this.type,
     required this.createdAt,
     required this.order,
@@ -18,27 +16,20 @@ class TimelineRow {
     this.agentEvent,
   });
 
-  factory TimelineRow.messagePart({
-    required String id,
-    required String sessionId,
-    required String messageId,
-    required String role,
+  factory TimelineRow.item({
+    required ThreadItemView item,
+    required TimelineEntry part,
     required TimelineRowType type,
-    required DateTime createdAt,
-    required int sequence,
-    required TimelinePart part,
   }) {
     return TimelineRow._(
-      id: id,
-      sessionId: sessionId,
-      messageId: messageId,
-      role: role,
+      id: item.id,
+      threadId: item.threadId,
       type: type,
-      createdAt: createdAt,
-      order: part.order,
-      sequence: sequence,
+      createdAt: item.createdAt,
+      order: item.ordinal,
+      sequence: item.ordinal,
       renderVersion: _timelineRowRenderVersion(part),
-      turnId: part.turnId,
+      turnId: item.turnId,
       part: part,
     );
   }
@@ -46,9 +37,7 @@ class TimelineRow {
   factory TimelineRow.agentActivity(TimelineAgentEvent event) {
     return TimelineRow._(
       id: 'agent-activity:${timelineAgentEventGroupKey(event)}',
-      sessionId: event.sessionId,
-      messageId: null,
-      role: null,
+      threadId: event.threadId,
       type: TimelineRowType.agentActivity,
       createdAt: event.createdAt,
       order: 0,
@@ -58,38 +47,28 @@ class TimelineRow {
     );
   }
 
-  factory TimelineRow.toolGroup({
-    required TimelineMessage message,
-    required TimelineToolGroup group,
-  }) {
+  factory TimelineRow.toolGroup(TimelineToolGroup group) {
     return TimelineRow._(
       id: group.id,
-      sessionId: group.sessionId,
-      messageId: message.id,
-      role: message.role,
+      threadId: group.threadId,
       type: TimelineRowType.toolGroup,
-      createdAt: group.createdAt ?? message.createdAt,
+      createdAt: group.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0),
       order: group.order,
-      sequence: group.sequence == 0 ? message.sequence : group.sequence,
+      sequence: group.sequence,
       renderVersion: group.renderVersion,
       turnId: group.turnId,
       toolGroup: group,
     );
   }
 
-  factory TimelineRow.reasoningGroup({
-    required TimelineMessage message,
-    required TimelineReasoningGroup group,
-  }) {
+  factory TimelineRow.reasoningGroup(TimelineReasoningGroup group) {
     return TimelineRow._(
       id: group.id,
-      sessionId: group.sessionId,
-      messageId: message.id,
-      role: message.role,
+      threadId: group.threadId,
       type: TimelineRowType.reasoningSummary,
-      createdAt: group.createdAt ?? message.createdAt,
+      createdAt: group.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0),
       order: group.order,
-      sequence: group.sequence == 0 ? message.sequence : group.sequence,
+      sequence: group.sequence,
       renderVersion: group.renderVersion,
       turnId: group.turnId,
       reasoningGroup: group,
@@ -97,274 +76,184 @@ class TimelineRow {
   }
 
   final String id;
-  final String sessionId;
-  final String? messageId;
-  final String? role;
+  final String threadId;
   final TimelineRowType type;
   final DateTime createdAt;
   final int order;
   final int sequence;
   final int renderVersion;
   final String? turnId;
-  final TimelinePart? part;
+  final TimelineEntry? part;
   final TimelineToolGroup? toolGroup;
   final TimelineReasoningGroup? reasoningGroup;
   final TimelineAgentEvent? agentEvent;
 }
 
-List<TimelineRow> timelineRowsFromMessages(
-  List<TimelineMessage> messages, {
-  Iterable<TimelinePart> parts = const [],
-  Iterable<TimelineAgentEvent> agentEvents = const [],
-}) {
-  final messagesById = <String, TimelineMessage>{
-    for (final message in messages)
-      if (message.id.isNotEmpty) message.id: message,
-  };
-  final sortedMessages = [...messagesById.values]..sort(_compareMessages);
-  final partsByMessage = <String, List<TimelinePart>>{};
-  for (final part in parts) {
-    if (!messagesById.containsKey(part.messageId) ||
-        part.ignored ||
-        isInternalTimelinePartType(part.type) ||
-        _isLowSignalRuntimeToolProgress(part)) {
-      continue;
-    }
-    partsByMessage.putIfAbsent(part.messageId, () => []).add(part);
-  }
-  final rows = <TimelineRow>[
-    for (final message in sortedMessages)
-      ..._timelineRowsForMessage(message, partsByMessage[message.id]),
-    for (final event in latestTimelineAgentEvents(agentEvents))
-      if (event.payload is! TimelineTodoListUpdate)
-        timelineRowFromAgentEvent(event),
-  ];
-  rows.sort(_compareRows);
-  return rows;
-}
-
-List<TimelineRow> _timelineRowsForMessage(
-  TimelineMessage message,
-  List<TimelinePart>? parts,
-) {
-  final sortedParts = [...?parts]..sort(_compareParts);
+List<TimelineRow> timelineRowsFromThreadItems(List<ThreadItemView> source) {
+  final items = [...source]
+    ..sort((left, right) {
+      final ordinal = left.ordinal.compareTo(right.ordinal);
+      return ordinal != 0 ? ordinal : left.id.compareTo(right.id);
+    });
   final rows = <TimelineRow>[];
-  final adjacentTools = <TimelinePart>[];
-  final adjacentReasoning = <TimelinePart>[];
+  final adjacentTools = <TimelineEntry>[];
+  final adjacentReasoning = <TimelineEntry>[];
 
-  void flushToolGroup() {
-    if (adjacentTools.isEmpty) {
-      return;
-    }
+  void flushTools() {
+    if (adjacentTools.isEmpty) return;
     final first = adjacentTools.first;
     rows.add(
       TimelineRow.toolGroup(
-        message: message,
-        group: TimelineToolGroup(
-          id: _adjacentToolGroupId(message, first),
-          sessionId: message.sessionId,
-          messageId: message.id,
-          turnId: _toolGroupTurnId(message, first),
-          items: adjacentTools
-              .map((part) => TimelineToolGroupItem(part: part))
-              .toList(growable: false),
+        TimelineToolGroup(
+          id: 'tool-group:${first.turnId}:${first.id}',
+          threadId: first.threadId,
+          groupId: first.turnId,
+          turnId: first.turnId,
+          items: [
+            for (final part in adjacentTools) TimelineToolGroupItem(part: part),
+          ],
         ),
       ),
     );
     adjacentTools.clear();
   }
 
-  void flushReasoningGroup() {
-    if (adjacentReasoning.isEmpty) {
-      return;
-    }
+  void flushReasoning() {
+    if (adjacentReasoning.isEmpty) return;
     final first = adjacentReasoning.first;
     rows.add(
       TimelineRow.reasoningGroup(
-        message: message,
-        group: TimelineReasoningGroup(
-          id: _adjacentReasoningGroupId(message, first),
-          sessionId: message.sessionId,
-          messageId: message.id,
-          turnId: first.turnId.isEmpty ? message.turnId : first.turnId,
-          parts: List.unmodifiable(adjacentReasoning),
+        TimelineReasoningGroup(
+          id: 'reasoning-group:${first.turnId}:${first.id}',
+          threadId: first.threadId,
+          groupId: first.turnId,
+          turnId: first.turnId,
+          parts: [...adjacentReasoning],
         ),
       ),
     );
     adjacentReasoning.clear();
   }
 
-  for (final part in sortedParts) {
-    if (message.role != 'user' && part.type == TimelinePartType.tool) {
-      flushReasoningGroup();
+  for (final item in items) {
+    if (item.kind == ThreadItemKind.file) continue;
+    final part = _timelineEntryFromThreadItem(item);
+    if (item.kind == ThreadItemKind.toolCall) {
+      flushReasoning();
+      if (adjacentTools.isNotEmpty &&
+          adjacentTools.last.turnId != item.turnId) {
+        flushTools();
+      }
       adjacentTools.add(part);
       continue;
     }
-    if (message.role != 'user' && part.type == TimelinePartType.reasoning) {
-      flushToolGroup();
+    if (item.kind == ThreadItemKind.reasoning) {
+      flushTools();
+      if (adjacentReasoning.isNotEmpty &&
+          adjacentReasoning.last.turnId != item.turnId) {
+        flushReasoning();
+      }
       adjacentReasoning.add(part);
       continue;
     }
-    flushToolGroup();
-    flushReasoningGroup();
+    flushTools();
+    flushReasoning();
     rows.add(
-      TimelineRow.messagePart(
-        id: '${message.id}:${part.id}',
-        sessionId: message.sessionId,
-        messageId: message.id,
-        role: message.role,
-        type: _timelineRowType(message, part),
-        createdAt: part.createdAt ?? message.createdAt,
-        sequence: part.sequence == 0 ? message.sequence : part.sequence,
+      TimelineRow.item(
+        item: item,
         part: part,
+        type: switch (item.kind) {
+          ThreadItemKind.userMessage => TimelineRowType.userMessage,
+          ThreadItemKind.agentMessage =>
+            item.channel == AgentMessageChannel.commentary
+                ? TimelineRowType.commentary
+                : TimelineRowType.finalAnswer,
+          ThreadItemKind.plan => TimelineRowType.plan,
+          ThreadItemKind.reasoning => TimelineRowType.reasoningSummary,
+          ThreadItemKind.toolCall => TimelineRowType.toolGroup,
+          ThreadItemKind.file => TimelineRowType.finalAnswer,
+        },
       ),
     );
   }
-  flushToolGroup();
-  flushReasoningGroup();
+  flushTools();
+  flushReasoning();
+  rows.sort(_compareRows);
   return rows;
 }
 
-String _adjacentToolGroupId(TimelineMessage message, TimelinePart part) {
-  return 'tool-group:${message.sessionId}:${message.id}:${part.id}';
-}
-
-String _adjacentReasoningGroupId(TimelineMessage message, TimelinePart part) {
-  return 'reasoning-group:${message.sessionId}:${message.id}:${part.id}';
-}
-
-String _toolGroupTurnId(TimelineMessage message, TimelinePart part) {
-  return part.turnId.isEmpty ? message.turnId : part.turnId;
-}
-
-bool _isLowSignalRuntimeToolProgress(TimelinePart part) {
-  if (part.type != TimelinePartType.text ||
-      !part.synthetic ||
-      part.textChannel != TimelineTextChannel.commentary) {
-    return false;
-  }
-  final text = part.text.trim();
-  if (RegExp(r'^模型请求调用 \d+ 个工具。$').hasMatch(text)) {
-    return true;
-  }
-  if (RegExp(r'^正在执行工具 `[^`]+`。$').hasMatch(text)) {
-    return true;
-  }
-  if (RegExp(r'^工具 `[^`]+` 已完成。$').hasMatch(text)) {
-    return true;
-  }
-  return text == '工具执行完成，准备回写结果。' || text == '工具结果已写入上下文，准备继续调用模型。';
-}
-
-int _compareMessages(TimelineMessage left, TimelineMessage right) {
-  final sequence = left.sequence.compareTo(right.sequence);
-  if (sequence != 0) {
-    return sequence;
-  }
-  final createdAt = left.createdAt.compareTo(right.createdAt);
-  if (createdAt != 0) {
-    return createdAt;
-  }
-  return left.id.compareTo(right.id);
-}
-
-int _compareParts(TimelinePart left, TimelinePart right) {
-  final order = left.order.compareTo(right.order);
-  if (order != 0) {
-    return order;
-  }
-  final sequence = left.sequence.compareTo(right.sequence);
-  if (sequence != 0) {
-    return sequence;
-  }
-  return left.id.compareTo(right.id);
+TimelineEntry _timelineEntryFromThreadItem(ThreadItemView item) {
+  final text = switch (item.kind) {
+    ThreadItemKind.reasoning => [
+      ...item.reasoningSummary,
+      ...item.reasoningContent,
+    ].where((value) => value.trim().isNotEmpty).join('\n\n'),
+    ThreadItemKind.toolCall => _toolActivityText(item.tool),
+    _ => item.text,
+  };
+  return TimelineEntry(
+    id: item.id,
+    groupId: item.turnId,
+    threadId: item.threadId,
+    turnId: item.turnId,
+    type: switch (item.kind) {
+      ThreadItemKind.userMessage ||
+      ThreadItemKind.agentMessage => TimelineEntryType.text,
+      ThreadItemKind.reasoning => TimelineEntryType.reasoning,
+      ThreadItemKind.plan => TimelineEntryType.plan,
+      ThreadItemKind.toolCall => TimelineEntryType.tool,
+      ThreadItemKind.file => TimelineEntryType.file,
+    },
+    order: item.ordinal,
+    sequence: item.ordinal,
+    revision: item.revision,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+    completedAt: item.completedAt,
+    error: item.error,
+    text: text,
+    reasoningSummary: item.reasoningSummary,
+    reasoningContent: item.reasoningContent,
+    status: item.status,
+    textChannel: switch (item.kind) {
+      ThreadItemKind.userMessage => TimelineTextChannel.user,
+      ThreadItemKind.agentMessage =>
+        item.channel == AgentMessageChannel.commentary
+            ? TimelineTextChannel.commentary
+            : TimelineTextChannel.finalAnswer,
+      _ => null,
+    },
+    tool: item.tool,
+    planContent: item.kind == ThreadItemKind.plan ? item.text : null,
+  );
 }
 
 int _compareRows(TimelineRow left, TimelineRow right) {
-  if (left.messageId != null && left.messageId == right.messageId) {
-    final order = left.order.compareTo(right.order);
-    if (order != 0) {
-      return order;
-    }
-  }
   final sequence = left.sequence.compareTo(right.sequence);
-  if (sequence != 0) {
-    return sequence;
-  }
-  final createdAt = left.createdAt.compareTo(right.createdAt);
-  if (createdAt != 0) {
-    return createdAt;
-  }
+  if (sequence != 0) return sequence;
+  final order = left.order.compareTo(right.order);
+  if (order != 0) return order;
   return left.id.compareTo(right.id);
 }
 
-int _timelineRowRenderVersion(TimelinePart part) {
+int _timelineRowRenderVersion(TimelineEntry part) {
   final tool = part.tool;
-  final agent = part.agent;
   return Object.hashAll([
-    part.sessionId,
-    part.turnId,
-    part.order,
+    part.id,
     part.revision,
-    part.sequence,
     part.status,
-    part.textChannel,
-    part.title,
     part.text,
     ...part.reasoningSummary,
     ...part.reasoningContent,
     part.planContent,
-    part.createdAt?.millisecondsSinceEpoch,
     part.updatedAt?.millisecondsSinceEpoch,
-    part.completedAt?.millisecondsSinceEpoch,
     part.error,
-    part.collapsed,
-    part.synthetic,
-    part.ignored,
-    if (tool != null) ...[
-      tool.name,
-      tool.arguments,
-      tool.result,
-      tool.exitCode,
-      tool.timedOut,
-      tool.workingDirectory,
-      tool.denialReason,
-    ],
-    if (agent != null) ...[
-      agent.id,
-      agent.path,
-      agent.parentPath,
-      agent.role,
-      agent.task,
-      agent.status,
-      agent.summary,
-      agent.depth,
-      agent.error,
-      agent.reason,
-    ],
+    tool?.arguments,
+    tool?.result,
+    tool?.exitCode,
+    tool?.timedOut,
+    tool?.denialReason,
   ]);
-}
-
-TimelineRowType _timelineRowType(TimelineMessage message, TimelinePart part) {
-  if (message.role == 'user') {
-    return TimelineRowType.userMessage;
-  }
-  return switch (part.type) {
-    TimelinePartType.tool => TimelineRowType.toolGroup,
-    TimelinePartType.reasoning => TimelineRowType.reasoningSummary,
-    TimelinePartType.plan => TimelineRowType.plan,
-    TimelinePartType.agent => TimelineRowType.agentActivity,
-    TimelinePartType.text => switch (part.textChannel) {
-      TimelineTextChannel.commentary => TimelineRowType.commentary,
-      TimelineTextChannel.user => TimelineRowType.userMessage,
-      TimelineTextChannel.finalAnswer || null => TimelineRowType.finalAnswer,
-    },
-    TimelinePartType.turn ||
-    TimelinePartType.inference ||
-    TimelinePartType.file => throw StateError(
-      'Internal timeline part type cannot be projected: ${part.type.name}',
-    ),
-  };
 }
 
 bool _isActiveToolStatus(String status) {

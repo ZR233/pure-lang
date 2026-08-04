@@ -3,14 +3,14 @@ use std::path::{Path, PathBuf};
 use crate::{PureError, Result as PureResult, WorktreeCreateSpec};
 use anyhow::{Result, bail};
 
-use super::super::{AgentOutcomeStatus, AllocateExecutor, CreateAgentOutcome, TaskCoordinator};
+use super::super::{AllocateExecutor, TaskCoordinator};
 use crate::studio::task_coordinator::owned_path::OwnedPath;
 
 /// Studio Task 产品层为一次 child spawn 固定的业务输入。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct StudioTaskSpawnRequest {
     pub(crate) agent_id: String,
-    pub(crate) session_id: String,
+    pub(crate) root_thread_id: String,
     pub(crate) task_name: String,
     pub(crate) role: String,
     pub(crate) owned_paths: Vec<String>,
@@ -75,36 +75,17 @@ impl TaskCoordinator {
         if !request.owned_paths.is_empty() {
             return Err(spawn_error("explorer must not declare ownedPaths"));
         }
-        let Some(run) = self
+        let Some(_run) = self
             .store
             .list_active_task_runs()
             .await
             .map_err(store_spawn_error)?
             .into_iter()
-            .find(|run| run.session_id == request.session_id)
+            .find(|run| run.root_thread_id == request.root_thread_id)
         else {
             return Ok(StudioTaskSpawnPreparation::without_worktree());
         };
-        let outcome = self
-            .store
-            .create_explorer_outcome(
-                &request.session_id,
-                CreateAgentOutcome {
-                    task_run_id: run.id,
-                    work_unit_id: None,
-                    agent_id: request.agent_id.clone(),
-                    owner_path: "/root".to_string(),
-                    initiated_by: "planner".to_string(),
-                    requested_by_call_id: request.requested_by_call_id.clone(),
-                    role: "explorer".to_string(),
-                    status: AgentOutcomeStatus::Queued,
-                    attempt: 1,
-                },
-            )
-            .await
-            .map_err(store_spawn_error)?
-            .ok_or_else(|| spawn_error("active task run disappeared"))?;
-        Ok(StudioTaskSpawnPreparation::with_token(outcome.id))
+        Ok(StudioTaskSpawnPreparation::without_worktree())
     }
 
     async fn prepare_executor_spawn(
@@ -117,7 +98,7 @@ impl TaskCoordinator {
         let _allocation_guard = self.allocation_lock.lock().await;
         let run = self
             .store
-            .read_active_task_run_for_session(&request.session_id)
+            .read_active_task_run_for_root_thread(&request.root_thread_id)
             .await
             .map_err(store_spawn_error)?;
         reject_bare_existing_directories(Path::new(&run.workspace_root), &owned_paths)
@@ -127,16 +108,18 @@ impl TaskCoordinator {
         let allocation = self
             .store
             .allocate_executor(AllocateExecutor {
-                session_id: request.session_id.clone(),
+                thread_id: request.root_thread_id.clone(),
                 title: request.task_name.clone(),
                 owned_paths,
                 agent_id: request.agent_id.clone(),
-                owner_path: "/root".to_string(),
                 requested_by_call_id: request.requested_by_call_id.clone(),
             })
             .await
             .map_err(store_spawn_error)?;
-        debug_assert_eq!(allocation.outcome.agent_id, request.agent_id);
+        debug_assert_eq!(
+            allocation.work_unit.executor_thread_id.as_deref(),
+            Some(request.agent_id.as_str())
+        );
         let work_unit_id = allocation.work_unit.id.clone();
         Ok(StudioTaskSpawnPreparation::with_worktree_and_token(
             WorktreeCreateSpec {
@@ -156,16 +139,16 @@ impl TaskCoordinator {
         if !request.owned_paths.is_empty() {
             return Err(spawn_error("reviewer must not declare ownedPaths"));
         }
-        let (_, outcome) = self
+        let round = self
             .store
             .authorize_reviewer_spawn(
-                &request.session_id,
+                &request.root_thread_id,
                 &request.requested_by_call_id,
                 &request.agent_id,
             )
             .await
             .map_err(store_spawn_error)?;
-        Ok(StudioTaskSpawnPreparation::with_token(outcome.id))
+        Ok(StudioTaskSpawnPreparation::with_token(round.id))
     }
 
     pub(crate) async fn activate_agent_spawn(
@@ -183,15 +166,11 @@ impl TaskCoordinator {
                     .await
                     .map_err(store_spawn_error)?;
             }
-            "explorer" | "reviewer" => {
+            "explorer" => {}
+            "reviewer" => {
                 if let Some(token) = preparation.lifecycle_token() {
                     self.store
-                        .update_spawned_outcome(
-                            token,
-                            &request.agent_id,
-                            AgentOutcomeStatus::Running,
-                            None,
-                        )
+                        .activate_reviewer(token, &request.agent_id)
                         .await
                         .map_err(store_spawn_error)?;
                 }
@@ -221,23 +200,11 @@ impl TaskCoordinator {
                     .await
                     .map_err(store_spawn_error)?;
             }
-            "explorer" => {
-                if let Some(token) = preparation.lifecycle_token() {
-                    self.store
-                        .update_spawned_outcome(
-                            token,
-                            &request.agent_id,
-                            AgentOutcomeStatus::Failed,
-                            Some(error.to_string()),
-                        )
-                        .await
-                        .map_err(store_spawn_error)?;
-                }
-            }
+            "explorer" => {}
             "reviewer" => {
                 self.store
                     .fail_reviewer_spawn(
-                        &request.session_id,
+                        &request.root_thread_id,
                         Some(&request.agent_id),
                         &request.requested_by_call_id,
                         error,
@@ -266,7 +233,7 @@ impl TaskCoordinator {
             .lifecycle_token()
             .ok_or_else(|| spawn_error("task executor close requires an exact lifecycle token"))?;
         self.store
-            .settle_executor_close(&request.session_id, token, &request.agent_id)
+            .settle_executor_close(&request.root_thread_id, token, &request.agent_id)
             .await
             .map_err(store_spawn_error)
     }
@@ -283,7 +250,7 @@ impl TaskCoordinator {
             .lifecycle_token()
             .ok_or_else(|| spawn_error("task executor close requires an exact lifecycle token"))?;
         self.store
-            .preflight_executor_close(&request.session_id, token, &request.agent_id)
+            .preflight_executor_close(&request.root_thread_id, token, &request.agent_id)
             .await
             .map_err(store_spawn_error)
     }

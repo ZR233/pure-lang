@@ -1,80 +1,98 @@
-use anyhow::Result;
+use anyhow::{Context, Result, bail};
+use pl_protocol::{ThreadItem, ThreadTurnHistory, ThreadTurnPage, Turn, TurnPhase, TurnState};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 
-use crate::studio::entity::{session_history_item, session_history_turn};
-use crate::studio::records::{
-    SessionHistoryItemRecord, SessionHistoryPageRecord, SessionHistoryTurnRecord,
-};
+use crate::studio::entity::{item, turn};
 use crate::studio::store::StudioStore;
 
 impl StudioStore {
-    pub(crate) async fn load_session_history_page(
+    pub(crate) async fn list_thread_turns(
         &self,
-        session_id: &str,
-        before_turn_sequence: Option<i64>,
+        thread_id: &str,
+        cursor: Option<&str>,
         limit: usize,
-    ) -> Result<SessionHistoryPageRecord> {
+    ) -> Result<ThreadTurnPage> {
         let limit = limit.clamp(1, 200);
-        let mut query = session_history_turn::Entity::find()
-            .filter(session_history_turn::Column::SessionId.eq(session_id))
-            .order_by_desc(session_history_turn::Column::TurnSequence);
-        if let Some(before_turn_sequence) = before_turn_sequence {
-            query =
-                query.filter(session_history_turn::Column::TurnSequence.lt(before_turn_sequence));
+        let before_ordinal = cursor.map(parse_cursor).transpose()?;
+        let mut query = turn::Entity::find()
+            .filter(turn::Column::ThreadId.eq(thread_id))
+            .order_by_desc(turn::Column::Ordinal);
+        if let Some(before_ordinal) = before_ordinal {
+            query = query.filter(turn::Column::Ordinal.lt(before_ordinal));
         }
-        let mut turns = query
+        let mut models = query
             .limit(u64::try_from(limit.saturating_add(1))?)
-            .all(&self.history_db)
+            .all(&self.db)
             .await?;
-        let has_more = turns.len() > limit;
+        let has_more = models.len() > limit;
         if has_more {
-            turns.pop();
+            models.pop();
         }
 
-        let mut records = Vec::with_capacity(turns.len());
-        for turn in turns {
-            let items = session_history_item::Entity::find()
-                .filter(session_history_item::Column::SessionId.eq(session_id))
-                .filter(session_history_item::Column::TurnId.eq(turn.turn_id.clone()))
-                .order_by_asc(session_history_item::Column::Sequence)
-                .all(&self.history_db)
+        let mut turns = Vec::with_capacity(models.len());
+        for model in &models {
+            let items = item::Entity::find()
+                .filter(item::Column::ThreadId.eq(thread_id))
+                .filter(item::Column::TurnId.eq(model.id.clone()))
+                .order_by_asc(item::Column::Ordinal)
+                .all(&self.db)
                 .await?
                 .into_iter()
-                .map(|item| {
-                    Ok(SessionHistoryItemRecord {
-                        sequence: item.sequence,
-                        item_id: item.item_id,
-                        turn_id: item.turn_id,
-                        item_kind: item.item_kind,
-                        payload: serde_json::from_str(&item.payload_json)?,
-                        created_at: item.created_at,
-                    })
-                })
-                .collect::<Result<Vec<_>>>()?;
-            records.push(SessionHistoryTurnRecord {
-                turn_sequence: turn.turn_sequence,
-                turn_id: turn.turn_id,
-                status: turn.status,
-                model: turn
-                    .model_json
-                    .map(|model| serde_json::from_str(&model))
-                    .transpose()?,
-                error: turn
-                    .error_json
-                    .map(|error| serde_json::from_str(&error))
-                    .transpose()?,
-                started_at: turn.started_at,
-                completed_at: turn.completed_at,
+                .map(|item| serde_json::from_str::<ThreadItem>(&item.payload_json))
+                .collect::<Result<Vec<_>, _>>()?;
+            turns.push(ThreadTurnHistory {
+                turn: turn_record(model)?,
                 items,
             });
         }
-        let next_before_turn_sequence = has_more
-            .then(|| records.last().map(|turn| turn.turn_sequence))
+        let next_cursor = has_more
+            .then(|| models.last().map(|turn| encode_cursor(turn.ordinal)))
             .flatten();
-        Ok(SessionHistoryPageRecord {
-            turns: records,
-            next_before_turn_sequence,
-            has_more,
-        })
+        Ok(ThreadTurnPage { turns, next_cursor })
     }
+}
+
+fn encode_cursor(ordinal: i64) -> String {
+    format!("v1:{ordinal:x}")
+}
+
+fn parse_cursor(cursor: &str) -> Result<i64> {
+    let value = cursor
+        .strip_prefix("v1:")
+        .context("invalid Thread cursor")?;
+    i64::from_str_radix(value, 16).context("invalid Thread cursor")
+}
+
+fn turn_record(model: &turn::Model) -> Result<Turn> {
+    let state = match model.status.as_str() {
+        "queued" => TurnState::Queued,
+        "inProgress" => TurnState::InProgress {
+            phase: match model.phase.as_deref().unwrap_or("preparing") {
+                "preparing" => TurnPhase::Preparing,
+                "thinking" => TurnPhase::Thinking,
+                "responding" => TurnPhase::Responding,
+                "planning" => TurnPhase::Planning,
+                "runningTool" => TurnPhase::RunningTool,
+                "waitingInteraction" => TurnPhase::WaitingInteraction,
+                "persisting" => TurnPhase::Persisting,
+                phase => bail!("unknown Turn phase {phase}"),
+            },
+        },
+        "completed" => TurnState::Completed,
+        "failed" => TurnState::Failed {
+            reason: model.reason.clone().unwrap_or_default(),
+        },
+        "interrupted" => TurnState::Interrupted {
+            reason: model.reason.clone().unwrap_or_default(),
+        },
+        status => bail!("unknown Turn status {status}"),
+    };
+    Ok(Turn {
+        id: model.id.clone(),
+        thread_id: model.thread_id.clone(),
+        state,
+        started_at: model.started_at,
+        updated_at: model.updated_at,
+        completed_at: model.completed_at,
+    })
 }

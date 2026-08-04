@@ -7,7 +7,7 @@ import 'studio_controller.dart';
 part 'studio_selectors.g.dart';
 
 typedef WorkspaceLayoutView = ({
-  String sessionId,
+  String threadId,
   bool isLoading,
   TimelineTodoListUpdate? todo,
 });
@@ -75,7 +75,7 @@ AsyncValue<WorkspaceLayoutView?> selectedWorkspaceLayout(Ref ref) {
           return null;
         }
         return (
-          sessionId: workspace.sessionId,
+          threadId: workspace.threadId,
           isLoading: workspace.isLoading,
           todo: workspace.todo,
         );
@@ -113,18 +113,18 @@ AsyncValue<StatusBarView?> statusBar(Ref ref) {
 }
 
 @riverpod
-AsyncValue<TimelinePaneView?> agentTimeline(Ref ref, String sessionId) {
+AsyncValue<TimelinePaneView?> agentTimeline(Ref ref, String threadId) {
   return ref.watch(
     studioControllerProvider.select(
       (state) => state.whenData((state) {
-        if (state.selectedAgentSessionId != sessionId) {
+        if (state.selectedThreadId != threadId) {
           return null;
         }
         final workspace = state.selectedAgentWorkspace;
         if (workspace == null) {
           return null;
         }
-        final history = state.historyPagingBySession[sessionId];
+        final history = state.workspaceUiByThread[threadId]?.history;
         return (
           rows: workspace.timelineRows,
           turn: workspace.turn,
@@ -138,11 +138,11 @@ AsyncValue<TimelinePaneView?> agentTimeline(Ref ref, String sessionId) {
 }
 
 @riverpod
-AsyncValue<AgentWorkspaceView?> agentWorkspace(Ref ref, String sessionId) {
+AsyncValue<AgentWorkspaceView?> agentWorkspace(Ref ref, String threadId) {
   return ref.watch(
     studioControllerProvider.select(
       (state) => state.whenData((state) {
-        if (state.selectedAgentSessionId != sessionId) {
+        if (state.selectedThreadId != threadId) {
           return null;
         }
         return state.selectedAgentWorkspace;

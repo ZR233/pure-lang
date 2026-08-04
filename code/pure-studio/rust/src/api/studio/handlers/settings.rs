@@ -9,8 +9,9 @@ use crate::api::studio::types::{
     BridgeWebSearchSettingsDto, InstructionsSettingsInput, McpSettingsInput, ProviderSettingsInput,
     SkillsSettingsInput, WebSearchSettingsInput,
 };
+use anyhow::Context;
 use pl_studio_runtime::{
-    BuiltinMcpServerState, McpServerConfig, McpServerTransport, PermissionMode,
+    BuiltinMcpServerState, McpServerConfig, McpServerTransport, PermissionMode, StudioRole,
     is_builtin_mcp_server_id,
 };
 // ── Settings ──
@@ -158,4 +159,33 @@ pub async fn save_general_settings(
         .save_setting("flutterSettings:general", &normalized)
         .await?;
     Ok(studio_snapshot_inner(bridge, None, None).await?)
+}
+
+pub async fn set_model_role(
+    role_key: String,
+    provider_id: String,
+    model: String,
+    effort: Option<String>,
+    selected_thread_id: Option<String>,
+) -> Result<BridgeStudioSnapshotResponse, BridgeError> {
+    let bridge = active_bridge().await?;
+    let role = StudioRole::from_key(role_key.trim())
+        .with_context(|| format!("unsupported model role: {role_key}"))?;
+    bridge
+        .studio
+        .set_model_role(role, &provider_id, &model, effort.as_deref())?;
+    let selected_thread_id = selected_thread_id.filter(|value| !value.trim().is_empty());
+    let selected_project_id = match selected_thread_id.as_deref() {
+        Some(thread_id) => Some(
+            bridge
+                .studio
+                .store()
+                .read_thread(thread_id)
+                .await?
+                .context("selected Thread not found")?
+                .project_id,
+        ),
+        None => None,
+    };
+    Ok(studio_snapshot_inner(bridge, selected_project_id, selected_thread_id).await?)
 }

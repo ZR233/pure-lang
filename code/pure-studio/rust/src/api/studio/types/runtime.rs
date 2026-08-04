@@ -25,7 +25,7 @@ pub enum BridgeRuntimeStatus {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct BridgeActiveTurn {
-    pub session_id: String,
+    pub thread_id: String,
     pub turn_id: String,
 }
 
@@ -34,7 +34,7 @@ pub struct BridgeActiveTurn {
 pub enum BridgeRecoveryIssueScope {
     Application,
     Project,
-    Session,
+    Thread,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -52,7 +52,7 @@ pub enum BridgeRecoveryIssueCategory {
 #[serde(rename_all = "camelCase")]
 pub enum BridgeRecoveryIssueAction {
     Retry,
-    CleanupSession,
+    CleanupThread,
     RemoveProject,
 }
 
@@ -64,7 +64,7 @@ pub struct BridgeStudioRecoveryIssueDto {
     pub category: BridgeRecoveryIssueCategory,
     pub available_actions: Vec<BridgeRecoveryIssueAction>,
     pub project_id: Option<String>,
-    pub session_id: Option<String>,
+    pub thread_id: Option<String>,
     pub task_run_id: Option<String>,
     pub detail: String,
 }
@@ -100,7 +100,7 @@ pub struct BridgeRecoveryCleanupPreviewDto {
     pub expected_revision: String,
     pub scope: BridgeRecoveryIssueScope,
     pub project_id: Option<String>,
-    pub session_id: Option<String>,
+    pub thread_id: Option<String>,
     pub detail: String,
     pub resources: Vec<BridgeRecoveryCleanupResourceDto>,
 }
@@ -117,7 +117,6 @@ pub struct BridgeTaskRuntimeDto {
     pub stop_requested_reason: Option<String>,
     pub task_generation: u64,
     pub work_units: Vec<BridgeTaskWorkUnitDto>,
-    pub agents: Vec<BridgeTaskAgentDto>,
     pub completions: Vec<BridgeTaskCompletionDto>,
     pub merges: Vec<BridgeTaskMergeDto>,
     pub reviews: Vec<BridgeTaskReviewDto>,
@@ -136,24 +135,6 @@ pub struct BridgeTaskWorkUnitDto {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct BridgeTaskAgentDto {
-    pub agent_id: String,
-    pub role: String,
-    pub status: String,
-    pub initiated_by: String,
-    pub requested_by_call_id: String,
-    pub summary: Option<String>,
-    pub error: Option<String>,
-    pub head_commit: Option<String>,
-    pub lifecycle: Option<String>,
-    pub activity: Option<String>,
-    pub progress: Option<BridgeAgentProgressDto>,
-    pub updated_at: i64,
-    pub summary_age_seconds: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
 pub struct BridgeAgentProgressDto {
     pub stage: String,
     pub summary: String,
@@ -166,8 +147,8 @@ pub struct BridgeAgentProgressDto {
 #[serde(rename_all = "camelCase")]
 pub struct BridgeAgentDirectoryEntryDto {
     pub id: String,
-    pub session_id: String,
-    pub root_session_id: String,
+    pub thread_id: String,
+    pub root_thread_id: String,
     pub path: String,
     pub parent_path: Option<String>,
     pub role: String,

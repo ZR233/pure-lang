@@ -7,13 +7,12 @@ use crate::studio::entity as entities;
 use crate::studio::ids::unix_seconds;
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    AgentOutcomeStatus, ExecutorCloseDisposition, TaskRunPhase, TaskStopOrigin,
-    TaskWorktreeDisposition, WorkUnitStatus,
+    ExecutorCloseDisposition, TaskRunPhase, TaskStopOrigin, TaskWorktreeDisposition,
+    ThreadExecutionStatus, WorkUnitStatus,
 };
 
 struct ExecutorCloseScope {
     work_unit: entities::work_unit::Model,
-    outcome: entities::agent_outcome::Model,
 }
 
 #[derive(Clone, Copy)]
@@ -82,15 +81,15 @@ impl StudioStore {
 
     pub(crate) async fn settle_executor_close(
         &self,
-        session_id: &str,
+        thread_id: &str,
         work_unit_id: &str,
         agent_id: &str,
     ) -> Result<ExecutorCloseDisposition> {
         let tx = self.db.begin().await?;
         let result = async {
-            let ExecutorCloseScope { work_unit, outcome } =
-                load_executor_close_scope(&tx, session_id, work_unit_id, agent_id).await?;
-            let plan = plan_executor_close(&work_unit, &outcome)?;
+            let ExecutorCloseScope { work_unit } =
+                load_executor_close_scope(&tx, thread_id, work_unit_id, agent_id).await?;
+            let plan = plan_executor_close(&work_unit)?;
             if plan.disposition == ExecutorCloseDisposition::PreserveForMerge {
                 return Ok(plan.disposition);
             }
@@ -99,6 +98,10 @@ impl StudioStore {
             let mut active_work_unit: entities::work_unit::ActiveModel = work_unit.into();
             if plan.cancel_active {
                 active_work_unit.status = Set(WorkUnitStatus::Cancelled.as_str().to_string());
+                active_work_unit.execution_status =
+                    Set(ThreadExecutionStatus::Cancelled.as_str().to_string());
+                active_work_unit.execution_error =
+                    Set(Some("executor discarded by planner".to_string()));
             }
             active_work_unit.worktree_disposition = Set(TaskWorktreeDisposition::CleanupRequested
                 .as_str()
@@ -106,13 +109,6 @@ impl StudioStore {
             active_work_unit.updated_at = Set(now);
             active_work_unit.update(&tx).await?;
 
-            if plan.cancel_active {
-                let mut active_outcome: entities::agent_outcome::ActiveModel = outcome.into();
-                active_outcome.status = Set(AgentOutcomeStatus::Cancelled.as_str().to_string());
-                active_outcome.error = Set(Some("executor discarded by planner".to_string()));
-                active_outcome.updated_at = Set(now);
-                active_outcome.update(&tx).await?;
-            }
             Ok(plan.disposition)
         }
         .await;
@@ -121,14 +117,14 @@ impl StudioStore {
 
     pub(crate) async fn preflight_executor_close(
         &self,
-        session_id: &str,
+        thread_id: &str,
         work_unit_id: &str,
         agent_id: &str,
     ) -> Result<ExecutorCloseDisposition> {
         let tx = self.db.begin().await?;
         let result = async {
-            let scope = load_executor_close_scope(&tx, session_id, work_unit_id, agent_id).await?;
-            Ok(plan_executor_close(&scope.work_unit, &scope.outcome)?.disposition)
+            let scope = load_executor_close_scope(&tx, thread_id, work_unit_id, agent_id).await?;
+            Ok(plan_executor_close(&scope.work_unit)?.disposition)
         }
         .await;
         finish_transaction(tx, result).await
@@ -137,44 +133,41 @@ impl StudioStore {
 
 async fn load_executor_close_scope(
     tx: &sea_orm::DatabaseTransaction,
-    session_id: &str,
+    thread_id: &str,
     work_unit_id: &str,
     agent_id: &str,
 ) -> Result<ExecutorCloseScope> {
     let work_unit = entities::work_unit::Entity::find_by_id(work_unit_id.to_string())
+        .filter(entities::work_unit::Column::ExecutorThreadId.eq(agent_id.to_string()))
         .one(tx)
         .await?
         .context("executor work unit not found")?;
-    let outcome = entities::agent_outcome::Entity::find()
-        .filter(entities::agent_outcome::Column::WorkUnitId.eq(Some(work_unit_id.to_string())))
-        .filter(entities::agent_outcome::Column::AgentId.eq(agent_id.to_string()))
-        .one(tx)
-        .await?
-        .context("executor outcome not found")?;
     let run = entities::task_run::Entity::find_by_id(work_unit.task_run_id.clone())
         .one(tx)
         .await?
         .context("executor task run not found")?;
-    if run.session_id != session_id
-        || outcome.task_run_id != run.id
-        || outcome.work_unit_id.as_deref() != Some(work_unit.id.as_str())
-        || work_unit.agent_id.as_deref() != Some(agent_id)
-        || outcome.role != "executor"
+    if run.root_thread_id != thread_id
+        || work_unit.task_run_id != run.id
+        || work_unit.executor_thread_id.as_deref() != Some(agent_id)
     {
         bail!("executor close lifecycle identity does not match durable assignment");
     }
-    Ok(ExecutorCloseScope { work_unit, outcome })
+    Ok(ExecutorCloseScope { work_unit })
 }
 
-fn plan_executor_close(
-    work_unit: &entities::work_unit::Model,
-    outcome: &entities::agent_outcome::Model,
-) -> Result<ExecutorClosePlan> {
+fn plan_executor_close(work_unit: &entities::work_unit::Model) -> Result<ExecutorClosePlan> {
     let work_status = WorkUnitStatus::from_str(&work_unit.status)
         .with_context(|| format!("invalid work unit status: {}", work_unit.status))?;
-    let outcome_status = AgentOutcomeStatus::from_str(&outcome.status)
-        .with_context(|| format!("invalid agent outcome status: {}", outcome.status))?;
-    if work_status == WorkUnitStatus::Approved && outcome_status == AgentOutcomeStatus::Completed {
+    let execution_status = ThreadExecutionStatus::from_str(&work_unit.execution_status)
+        .with_context(|| {
+            format!(
+                "invalid Thread execution status: {}",
+                work_unit.execution_status
+            )
+        })?;
+    if work_status == WorkUnitStatus::Approved
+        && execution_status == ThreadExecutionStatus::Completed
+    {
         return Ok(ExecutorClosePlan {
             disposition: ExecutorCloseDisposition::PreserveForMerge,
             cancel_active: false,
@@ -191,26 +184,26 @@ fn plan_executor_close(
     }
 
     let terminal_pair = matches!(
-        (work_status, outcome_status),
-        (WorkUnitStatus::Merged, AgentOutcomeStatus::Completed)
-            | (WorkUnitStatus::NoDelivery, AgentOutcomeStatus::Completed)
-            | (WorkUnitStatus::Failed, AgentOutcomeStatus::Failed)
-            | (WorkUnitStatus::Cancelled, AgentOutcomeStatus::Cancelled)
+        (work_status, execution_status),
+        (WorkUnitStatus::Merged, ThreadExecutionStatus::Completed)
+            | (WorkUnitStatus::NoDelivery, ThreadExecutionStatus::Completed)
+            | (WorkUnitStatus::Failed, ThreadExecutionStatus::Failed)
+            | (WorkUnitStatus::Cancelled, ThreadExecutionStatus::Cancelled)
     );
     let active_pair = matches!(
-        (work_status, outcome_status),
-        (WorkUnitStatus::Pending, AgentOutcomeStatus::Queued)
-            | (WorkUnitStatus::Running, AgentOutcomeStatus::Running)
+        (work_status, execution_status),
+        (WorkUnitStatus::Pending, ThreadExecutionStatus::Queued)
+            | (WorkUnitStatus::Running, ThreadExecutionStatus::Running)
             | (
                 WorkUnitStatus::AwaitingCompletion,
-                AgentOutcomeStatus::Completed
+                ThreadExecutionStatus::Completed
             )
     );
     if !active_pair && !terminal_pair {
         bail!(
-            "executor close lifecycle state mismatch: workUnit={}, outcome={}",
+            "executor close lifecycle state mismatch: workUnit={}, execution={}",
             work_unit.status,
-            outcome.status
+            work_unit.execution_status
         );
     }
     Ok(ExecutorClosePlan {

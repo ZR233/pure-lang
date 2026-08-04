@@ -1,404 +1,497 @@
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use crate::{ModelContextItem, PureError};
 use pl_core::{
-    AgentActivityState, AgentCommitOutcome, AgentDurableState, AgentSession, AgentSessionState,
-    AgentStateRepository, PendingAgentInput, RestoredAgentRuntime, RestoredSessionProjection,
-    SessionHistoryCommit, SessionId, TurnOutcomeKind,
+    AgentActivityState, AgentIdentity, AgentLifecycleState, AgentRoleId, AgentSession,
+    AgentSnapshot, AgentTurnOutcome, DurableMailboxEnvelope, MailboxDeliveryState,
+    MailboxPresentation, RestoredAgentRuntime, RestoredThreadSnapshot, ThreadActorState,
+    ThreadCommit, ThreadCommitOutcome, ThreadContextMutation, ThreadContextState, ThreadId,
+    ThreadRepository, TurnId, TurnOutcomeKind,
+};
+use pl_protocol::{
+    InteractionKind, InteractionStatus, Thread as ThreadRecord, ThreadItem, ThreadItemContent,
+    ThreadItemStatus, ThreadMode, ThreadNotification, ThreadSnapshot, ThreadStatus, Turn,
+    TurnPhase, TurnState,
 };
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
-    QueryOrder, QuerySelect, TransactionTrait,
+    QueryOrder, TransactionTrait,
 };
 
-use super::persistence::AgentPersistenceWriter;
 use crate::studio::StudioStore;
-use crate::studio::entity::{
-    agent_active_input, agent_pending_input, agent_runtime_session, agent_runtime_state,
-    agent_turn, session_history_item, session_view_snapshot,
-};
+use crate::studio::entity::{interaction, item, thread, thread_input, turn};
+use crate::{ModelContextItem, PureError};
 
-/// Studio SQLite 对 PL canonical runtime state 的 CAS repository。
+/// Studio 单库对 canonical Thread 状态的 CAS repository。
 #[derive(Clone)]
 pub(in crate::studio) struct StudioAgentRepository {
     store: StudioStore,
-    writer: AgentPersistenceWriter,
 }
 
 impl StudioAgentRepository {
-    pub(super) fn new(store: StudioStore) -> Self {
-        let writer = AgentPersistenceWriter::spawn(store.clone());
-        Self { store, writer }
+    pub(in crate::studio) fn new(store: StudioStore) -> Self {
+        Self { store }
     }
-}
 
-impl AgentStateRepository for StudioAgentRepository {
-    type Error = PureError;
-
-    async fn restore_runtime(&self) -> Result<Vec<RestoredAgentRuntime>, Self::Error> {
-        let states = agent_runtime_state::Entity::find()
-            .order_by_asc(agent_runtime_state::Column::AgentId)
+    async fn restore_inputs(
+        &self,
+        thread_id: &str,
+    ) -> Result<
+        (
+            VecDeque<DurableMailboxEnvelope>,
+            Option<DurableMailboxEnvelope>,
+        ),
+        PureError,
+    > {
+        let rows = thread_input::Entity::find()
+            .filter(thread_input::Column::ThreadId.eq(thread_id))
+            .filter(thread_input::Column::State.ne("consumed"))
+            .order_by_asc(thread_input::Column::QueueOrdinal)
             .all(self.store.database())
             .await
             .map_err(store_error)?;
-        let mut restored = Vec::with_capacity(states.len());
-        for state in states {
-            let agent_id = state.agent_id;
-            let snapshot: pl_core::AgentSnapshot = serde_json::from_str(&state.snapshot_json)?;
-            if snapshot.revision != u64_from_i64(state.revision)? {
-                return Err(store_error(format!(
-                    "agent {agent_id} snapshot revision does not match its CAS revision"
-                )));
+        let mut pending = VecDeque::new();
+        let mut active = None;
+        for row in rows {
+            let input = input_from_model(row.clone())?;
+            if row.state == "active" {
+                if active.replace(input).is_some() {
+                    return Err(store_error(format!(
+                        "Thread {thread_id} has more than one active input"
+                    )));
+                }
+            } else {
+                pending.push_back(input);
             }
-            self.writer
-                .seed_revision(&agent_id, snapshot.revision)
-                .await;
-            let session = self.restore_session(&agent_id).await?;
-            let pending_inputs = self.restore_pending_inputs(&agent_id).await?;
-            let active_input = self.restore_active_input(&agent_id).await?;
-            let session_projection = self.restore_session_projection(&agent_id).await?;
+        }
+        Ok((pending, active))
+    }
+
+    async fn restore_session(
+        &self,
+        model: &thread::Model,
+    ) -> Result<ThreadContextState, PureError> {
+        let context = item::Entity::find()
+            .filter(item::Column::ThreadId.eq(model.id.clone()))
+            .filter(item::Column::ItemKind.eq("contextCompaction"))
+            .order_by_desc(item::Column::Ordinal)
+            .one(self.store.database())
+            .await
+            .map_err(store_error)?
+            .and_then(|row| row.provider_private_payload)
+            .map(|payload| serde_json::from_slice::<Vec<ModelContextItem>>(&payload))
+            .transpose()?;
+        Ok(ThreadContextState {
+            metadata: serde_json::from_str(&model.metadata_json)?,
+            session: AgentSession::from_items(context.unwrap_or_default()),
+            usage: serde_json::from_str(&model.usage_json)?,
+            last_context_tokens: model.last_context_tokens.map(u64_from_i64).transpose()?,
+            trace_sequence: u64_from_i64(model.trace_sequence)?,
+            thread_revision: u64_from_i64(model.revision)?,
+        })
+    }
+
+    async fn restore_thread_snapshot(
+        &self,
+        model: thread::Model,
+    ) -> Result<RestoredThreadSnapshot, PureError> {
+        let thread_id = model.id.clone();
+        let items = item::Entity::find()
+            .filter(item::Column::ThreadId.eq(thread_id.clone()))
+            .order_by_asc(item::Column::Ordinal)
+            .all(self.store.database())
+            .await
+            .map_err(store_error)?
+            .into_iter()
+            .map(|row| serde_json::from_str(&row.payload_json).map_err(Into::into))
+            .collect::<Result<Vec<_>, PureError>>()?;
+        let active_turn = turn::Entity::find()
+            .filter(turn::Column::ThreadId.eq(thread_id.clone()))
+            .filter(turn::Column::Status.is_in(["queued", "inProgress"]))
+            .order_by_desc(turn::Column::Ordinal)
+            .one(self.store.database())
+            .await
+            .map_err(store_error)?
+            .map(turn_from_model)
+            .transpose()?;
+        let interactions = interaction::Entity::find()
+            .filter(interaction::Column::ThreadId.eq(thread_id))
+            .filter(interaction::Column::Status.eq("pending"))
+            .order_by_asc(interaction::Column::CreatedAt)
+            .all(self.store.database())
+            .await
+            .map_err(store_error)?
+            .into_iter()
+            .map(|row| {
+                crate::studio::mappers::interaction_record(row)
+                    .map_err(|error| store_error(error.to_string()))
+            })
+            .collect::<Result<Vec<_>, PureError>>()?;
+        Ok(RestoredThreadSnapshot {
+            snapshot: ThreadSnapshot {
+                schema_version: pl_protocol::THREAD_SCHEMA_VERSION,
+                revision: u64_from_i64(model.revision)?,
+                thread: thread_from_model(model)?,
+                active_turn,
+                items,
+                interactions,
+                runtime: None,
+            },
+        })
+    }
+}
+
+impl ThreadRepository for StudioAgentRepository {
+    type Error = PureError;
+
+    async fn restore_runtime(&self) -> Result<Vec<RestoredAgentRuntime>, Self::Error> {
+        let models = thread::Entity::find()
+            .filter(thread::Column::RuntimeRevision.is_not_null())
+            .order_by_asc(thread::Column::CreatedAt)
+            .order_by_asc(thread::Column::Id)
+            .all(self.store.database())
+            .await
+            .map_err(store_error)?;
+        let parents = models
+            .iter()
+            .map(|model| (model.id.clone(), model.parent_thread_id.clone()))
+            .collect::<BTreeMap<_, _>>();
+        let mut restored = Vec::with_capacity(models.len());
+        for model in models {
+            let thread_id = ThreadId::new(model.id.clone())?;
+            let (pending_inputs, active_input) = self.restore_inputs(thread_id.as_str()).await?;
+            let active_turn = latest_turn(&self.store, thread_id.as_str(), true).await?;
+            let last_turn = latest_turn(&self.store, thread_id.as_str(), false)
+                .await?
+                .map(turn_outcome_from_model)
+                .transpose()?;
+            let snapshot = AgentSnapshot {
+                identity: AgentIdentity {
+                    id: thread_id,
+                    parent_id: model
+                        .parent_thread_id
+                        .as_ref()
+                        .map(|id| ThreadId::new(id.clone()))
+                        .transpose()?,
+                    role: AgentRoleId::new(model.role.clone())?,
+                    depth: thread_depth(&model.id, &parents)?,
+                },
+                lifecycle: lifecycle_from_status(&model.status)?,
+                activity: restored_activity(&model.status, active_turn.as_ref(), &pending_inputs),
+                active_turn_id: active_turn
+                    .as_ref()
+                    .map(|row| TurnId::new(row.id.clone()))
+                    .transpose()?,
+                pending_inputs: pending_inputs.len(),
+                progress: None,
+                last_turn,
+                revision: u64_from_i64(model.runtime_revision.ok_or_else(|| {
+                    store_error(format!("Thread {} actor is not registered", model.id))
+                })?)?,
+                event_sequence: u64_from_i64(model.event_sequence)?,
+                updated_at: model.updated_at,
+            };
+            let session = self.restore_session(&model).await?;
+            let thread_snapshot = self.restore_thread_snapshot(model).await?;
             restored.push(RestoredAgentRuntime {
-                state: AgentDurableState {
+                state: ThreadActorState {
                     snapshot,
                     session,
                     pending_inputs,
                     active_input,
                 },
-                session_projection,
+                thread_snapshot: Some(thread_snapshot),
             });
         }
         Ok(restored)
     }
 
-    async fn commit(
-        &self,
-        commit: SessionHistoryCommit,
-    ) -> Result<AgentCommitOutcome, Self::Error> {
-        self.writer.submit(commit).await
-    }
-
-    async fn barrier(&self) -> Result<(), Self::Error> {
-        self.writer.barrier().await
+    async fn commit(&self, commit: ThreadCommit) -> Result<ThreadCommitOutcome, Self::Error> {
+        persist_state_commit(&self.store, &commit).await
     }
 }
 
 pub(super) async fn persist_state_commit(
     store: &StudioStore,
-    commit: &SessionHistoryCommit,
-) -> Result<AgentCommitOutcome, PureError> {
-    let agent_id = commit.agent_id.to_string();
+    commit: &ThreadCommit,
+) -> Result<ThreadCommitOutcome, PureError> {
+    let thread_id = commit.agent_id.to_string();
     let tx = store.database().begin().await.map_err(store_error)?;
-    let existing_state = agent_runtime_state::Entity::find_by_id(agent_id.clone())
+    let Some(existing) = thread::Entity::find_by_id(thread_id.clone())
         .one(&tx)
         .await
-        .map_err(store_error)?;
-    let actual_revision = existing_state
-        .as_ref()
-        .map(|state| u64_from_i64(state.revision))
-        .transpose()?;
+        .map_err(store_error)?
+    else {
+        tx.rollback().await.map_err(store_error)?;
+        return Err(store_error(format!(
+            "Thread {thread_id} must exist before runtime registration"
+        )));
+    };
+    let actual_revision = existing.runtime_revision.map(u64_from_i64).transpose()?;
     if actual_revision != commit.expected_revision {
         tx.rollback().await.map_err(store_error)?;
-        return Ok(AgentCommitOutcome::RevisionConflict { actual_revision });
+        return Ok(ThreadCommitOutcome::RevisionConflict { actual_revision });
     }
 
-    let next_state = agent_runtime_state::ActiveModel {
-        agent_id: Set(agent_id.clone()),
-        revision: Set(i64_from_u64(commit.next_state.snapshot.revision)?),
-        snapshot_json: Set(serde_json::to_string(&commit.next_state.snapshot)?),
-        updated_at: Set(commit.next_state.snapshot.updated_at),
-    };
-    match existing_state {
-        Some(_) => next_state.update(&tx).await.map_err(store_error)?,
-        None => next_state.insert(&tx).await.map_err(store_error)?,
-    };
-    upsert_session(&tx, &agent_id, &commit.next_state).await?;
-    replace_pending_inputs(&tx, &agent_id, &commit.next_state).await?;
-    replace_active_input(&tx, &agent_id, &commit.next_state).await?;
-    upsert_turns(&tx, &agent_id, &commit.next_state).await?;
-    if let Some(snapshot) = &commit.facts.projection_snapshot {
-        persist_session_projection(&tx, snapshot, &commit.facts.items).await?;
-    }
+    let mut active = existing.into_active_model();
+    active.parent_thread_id = Set(commit
+        .next_state
+        .snapshot
+        .identity
+        .parent_id
+        .as_ref()
+        .map(ToString::to_string));
+    active.role = Set(commit.next_state.snapshot.identity.role.to_string());
+    active.status = Set(thread_status_label(&commit.next_state).to_string());
+    active.revision = Set(i64_from_u64(commit.next_state.session.thread_revision)?);
+    active.runtime_revision = Set(Some(i64_from_u64(commit.next_state.snapshot.revision)?));
+    active.event_sequence = Set(i64_from_u64(commit.next_state.snapshot.event_sequence)?);
+    active.metadata_json = Set(serde_json::to_string(&commit.next_state.session.metadata)?);
+    active.usage_json = Set(serde_json::to_string(&commit.next_state.session.usage)?);
+    active.last_context_tokens = Set(commit
+        .next_state
+        .session
+        .last_context_tokens
+        .map(i64_from_u64)
+        .transpose()?);
+    active.trace_sequence = Set(i64_from_u64(commit.next_state.session.trace_sequence)?);
+    active.updated_at = Set(commit.next_state.snapshot.updated_at);
+    active.update(&tx).await.map_err(store_error)?;
+
+    persist_inputs(&tx, &commit.next_state).await?;
+    persist_state_turns(&tx, &commit.next_state).await?;
+    persist_thread_notifications(&tx, commit).await?;
+    persist_context_baseline(&tx, commit).await?;
     tx.commit().await.map_err(store_error)?;
-    Ok(AgentCommitOutcome::Applied)
+    Ok(ThreadCommitOutcome::Applied)
 }
 
-impl StudioAgentRepository {
-    async fn restore_session(&self, agent_id: &str) -> Result<AgentSessionState, PureError> {
-        agent_runtime_session::Entity::find_by_id(agent_id.to_string())
-            .one(self.store.database())
-            .await
-            .map_err(store_error)?
-            .ok_or_else(|| store_error(format!("agent {agent_id} has no canonical session")))
-            .and_then(|session| {
-                let id = SessionId::new(session.session_id)?;
-                let items: Vec<ModelContextItem> = serde_json::from_str(&session.context_json)?;
-                let last_context_tokens = session
-                    .last_context_tokens
-                    .map(u64::try_from)
-                    .transpose()
-                    .map_err(|error| store_error(error.to_string()))?;
-                Ok(AgentSessionState {
-                    id,
-                    metadata: serde_json::from_str(&session.metadata_json)?,
-                    session: AgentSession::from_items(items),
-                    usage: serde_json::from_str(&session.usage_json)?,
-                    last_context_tokens,
-                    trace_sequence: u64_from_i64(session.trace_sequence)?,
-                    session_event_sequence: u64_from_i64(session.session_event_sequence)?,
-                })
-            })
-    }
-
-    async fn restore_session_projection(
-        &self,
-        agent_id: &str,
-    ) -> Result<Option<RestoredSessionProjection>, PureError> {
-        let runtime_session = agent_runtime_session::Entity::find_by_id(agent_id.to_string())
-            .one(self.store.database())
-            .await
-            .map_err(store_error)?;
-        let Some(runtime_session) = runtime_session else {
-            return Ok(None);
-        };
-        let session_id = runtime_session.session_id;
-        let projection = session_view_snapshot::Entity::find_by_id(session_id.clone())
-            .one(self.store.database())
-            .await
-            .map_err(store_error)?;
-        let mut snapshot = projection
-            .map(|projection| serde_json::from_str(&projection.snapshot_json))
-            .transpose()?
-            .unwrap_or_else(|| pl_protocol::SessionViewSnapshot::empty(session_id.clone()));
-        let suffix = session_history_item::Entity::find()
-            .filter(session_history_item::Column::SessionId.eq(session_id.clone()))
-            .filter(
-                session_history_item::Column::Sequence.gt(i64_from_u64(snapshot.through_sequence)?),
-            )
-            .order_by_asc(session_history_item::Column::Sequence)
-            .all(self.store.history_database())
-            .await
-            .map_err(store_error)?
-            .into_iter()
-            .map(|item| serde_json::from_str(&item.payload_json).map_err(Into::into))
-            .collect::<Result<Vec<_>, PureError>>()?;
-        snapshot =
-            pl_core::replay_session_history_suffix(snapshot, &suffix).map_err(store_error)?;
-        let mut retained_durable_events = session_history_item::Entity::find()
-            .filter(session_history_item::Column::SessionId.eq(session_id))
-            .order_by_desc(session_history_item::Column::Sequence)
-            .limit(4096)
-            .all(self.store.history_database())
-            .await
-            .map_err(store_error)?
-            .into_iter()
-            .map(|item| serde_json::from_str(&item.payload_json).map_err(Into::into))
-            .collect::<Result<Vec<_>, PureError>>()?;
-        retained_durable_events.reverse();
-        Ok(Some(RestoredSessionProjection {
-            snapshot,
-            retained_durable_events,
-        }))
-    }
-
-    async fn restore_pending_inputs(
-        &self,
-        agent_id: &str,
-    ) -> Result<VecDeque<PendingAgentInput>, PureError> {
-        agent_pending_input::Entity::find()
-            .filter(agent_pending_input::Column::AgentId.eq(agent_id))
-            .order_by_asc(agent_pending_input::Column::QueuePosition)
-            .all(self.store.database())
-            .await
-            .map_err(store_error)?
-            .into_iter()
-            .map(|input| serde_json::from_str(&input.input_json).map_err(Into::into))
-            .collect()
-    }
-
-    async fn restore_active_input(
-        &self,
-        agent_id: &str,
-    ) -> Result<Option<PendingAgentInput>, PureError> {
-        agent_active_input::Entity::find_by_id(agent_id.to_string())
-            .one(self.store.database())
-            .await
-            .map_err(store_error)?
-            .map(|input| serde_json::from_str(&input.input_json).map_err(Into::into))
-            .transpose()
-    }
-}
-
-async fn persist_session_projection(
+async fn persist_inputs(
     tx: &sea_orm::DatabaseTransaction,
-    snapshot: &pl_protocol::SessionViewSnapshot,
-    items: &[pl_protocol::SessionEventEnvelope],
+    state: &ThreadActorState,
 ) -> Result<(), PureError> {
-    let session_id = snapshot.session_id.clone();
-    let active = session_view_snapshot::ActiveModel {
-        session_id: Set(session_id.clone()),
-        through_sequence: Set(i64_from_u64(snapshot.through_sequence)?),
-        snapshot_json: Set(serde_json::to_string(snapshot)?),
-        updated_at: Set(items.last().map_or(0, |event| event.emitted_at)),
-    };
-    if session_view_snapshot::Entity::find_by_id(session_id)
-        .one(tx)
-        .await
-        .map_err(store_error)?
-        .is_some()
-    {
-        active.update(tx).await.map_err(store_error)?;
-    } else {
-        active.insert(tx).await.map_err(store_error)?;
-    }
-    Ok(())
-}
-
-async fn upsert_session(
-    tx: &sea_orm::DatabaseTransaction,
-    agent_id: &str,
-    state: &AgentDurableState,
-) -> Result<(), PureError> {
-    let session = &state.session;
-    let active = agent_runtime_session::ActiveModel {
-        agent_id: Set(agent_id.to_string()),
-        session_id: Set(session.id.to_string()),
-        metadata_json: Set(serde_json::to_string(&session.metadata)?),
-        context_json: Set(serde_json::to_string(session.session.items())?),
-        usage_json: Set(serde_json::to_string(&session.usage)?),
-        last_context_tokens: Set(session.last_context_tokens.map(i64_from_u64).transpose()?),
-        trace_sequence: Set(i64_from_u64(session.trace_sequence)?),
-        session_event_sequence: Set(i64_from_u64(session.session_event_sequence)?),
-        updated_at: Set(state.snapshot.updated_at),
-    };
-    if agent_runtime_session::Entity::find_by_id(agent_id.to_string())
-        .one(tx)
-        .await
-        .map_err(store_error)?
-        .is_some()
-    {
-        active.update(tx).await.map_err(store_error)?;
-    } else {
-        active.insert(tx).await.map_err(store_error)?;
-    }
-    Ok(())
-}
-
-async fn replace_pending_inputs(
-    tx: &sea_orm::DatabaseTransaction,
-    agent_id: &str,
-    state: &AgentDurableState,
-) -> Result<(), PureError> {
-    agent_pending_input::Entity::delete_many()
-        .filter(agent_pending_input::Column::AgentId.eq(agent_id))
-        .exec(tx)
+    let thread_id = state.snapshot.identity.id.to_string();
+    let existing = thread_input::Entity::find()
+        .filter(thread_input::Column::ThreadId.eq(thread_id.clone()))
+        .all(tx)
         .await
         .map_err(store_error)?;
-    if !state.pending_inputs.is_empty() {
-        let inputs = state
-            .pending_inputs
-            .iter()
-            .enumerate()
-            .map(|(position, input)| {
-                Ok(agent_pending_input::ActiveModel {
-                    agent_id: Set(agent_id.to_string()),
-                    queue_position: Set(i64::try_from(position).map_err(store_error)?),
-                    input_json: Set(serde_json::to_string(input)?),
-                })
-            })
-            .collect::<Result<Vec<_>, PureError>>()?;
-        agent_pending_input::Entity::insert_many(inputs)
-            .exec(tx)
-            .await
-            .map_err(store_error)?;
-    }
-    Ok(())
-}
-
-async fn replace_active_input(
-    tx: &sea_orm::DatabaseTransaction,
-    agent_id: &str,
-    state: &AgentDurableState,
-) -> Result<(), PureError> {
-    match &state.active_input {
-        Some(input) => {
-            let active = agent_active_input::ActiveModel {
-                agent_id: Set(agent_id.to_string()),
-                input_json: Set(serde_json::to_string(input)?),
-                updated_at: Set(state.snapshot.updated_at),
-            };
-            if agent_active_input::Entity::find_by_id(agent_id.to_string())
-                .one(tx)
-                .await
-                .map_err(store_error)?
-                .is_some()
-            {
-                active.update(tx).await.map_err(store_error)?;
-            } else {
-                active.insert(tx).await.map_err(store_error)?;
-            }
-        }
-        None => {
-            agent_active_input::Entity::delete_by_id(agent_id.to_string())
-                .exec(tx)
-                .await
-                .map_err(store_error)?;
-        }
-    }
-    Ok(())
-}
-
-async fn upsert_turns(
-    tx: &sea_orm::DatabaseTransaction,
-    agent_id: &str,
-    state: &AgentDurableState,
-) -> Result<(), PureError> {
+    let mut live = BTreeSet::new();
     for input in &state.pending_inputs {
-        upsert_turn(
+        live.insert(input.mail_id.clone());
+        upsert_input(tx, &thread_id, input, false, state.snapshot.updated_at).await?;
+    }
+    if let Some(input) = &state.active_input {
+        live.insert(input.mail_id.clone());
+        upsert_input(tx, &thread_id, input, true, state.snapshot.updated_at).await?;
+    }
+    for row in existing {
+        if live.contains(&row.mail_id) || row.state == "consumed" {
+            continue;
+        }
+        let mut active = row.into_active_model();
+        active.state = Set("consumed".to_string());
+        active.consumed_at = Set(Some(state.snapshot.updated_at));
+        active.update(tx).await.map_err(store_error)?;
+    }
+    Ok(())
+}
+
+async fn upsert_input(
+    tx: &sea_orm::DatabaseTransaction,
+    thread_id: &str,
+    input: &DurableMailboxEnvelope,
+    is_active: bool,
+    updated_at: i64,
+) -> Result<(), PureError> {
+    let existing = thread_input::Entity::find_by_id(input.mail_id.clone())
+        .one(tx)
+        .await
+        .map_err(store_error)?;
+    if let Some(existing) = existing.as_ref()
+        && existing.thread_id != thread_id
+    {
+        return Err(store_error(format!(
+            "mail id {} belongs to another Thread",
+            input.mail_id
+        )));
+    }
+    let ordinal = match existing.as_ref() {
+        Some(existing) => existing.queue_ordinal,
+        None => next_input_ordinal(tx, thread_id).await?,
+    };
+    let (delivery_state, claimed_turn_id, checkpoint_seq) = if is_active {
+        let (turn_id, sequence) =
+            delivery_identity(&input.delivery_state).unwrap_or_else(|| (input.turn_id.clone(), 0));
+        (
+            "active",
+            Some(turn_id.to_string()),
+            Some(i64_from_u64(sequence)?),
+        )
+    } else {
+        match &input.delivery_state {
+            MailboxDeliveryState::Pending => ("queued", None, None),
+            MailboxDeliveryState::Claimed {
+                turn_id,
+                checkpoint_seq,
+            } => (
+                "claimed",
+                Some(turn_id.to_string()),
+                Some(i64_from_u64(*checkpoint_seq)?),
+            ),
+            MailboxDeliveryState::Consumed {
+                turn_id,
+                checkpoint_seq,
+            } => (
+                "consumed",
+                Some(turn_id.to_string()),
+                Some(i64_from_u64(*checkpoint_seq)?),
+            ),
+        }
+    };
+    let active = thread_input::ActiveModel {
+        id: Set(input.mail_id.clone()),
+        thread_id: Set(thread_id.to_string()),
+        mail_id: Set(input.mail_id.clone()),
+        turn_id: Set(input.turn_id.to_string()),
+        content: Set(input.message.clone()),
+        metadata_json: Set(serde_json::to_string(&input.metadata)?),
+        presentation: Set(presentation_label(input.presentation.clone()).to_string()),
+        state: Set(delivery_state.to_string()),
+        claimed_turn_id: Set(claimed_turn_id),
+        checkpoint_seq: Set(checkpoint_seq),
+        queue_ordinal: Set(ordinal),
+        queued_at: Set(existing
+            .as_ref()
+            .map_or(input.queued_at, |row| row.queued_at)),
+        claimed_at: Set((delivery_state != "queued").then_some(updated_at)),
+        consumed_at: Set((delivery_state == "consumed").then_some(updated_at)),
+    };
+    match existing {
+        Some(_) => active.update(tx).await.map_err(store_error)?,
+        None => active.insert(tx).await.map_err(store_error)?,
+    };
+    Ok(())
+}
+
+async fn next_input_ordinal(
+    tx: &sea_orm::DatabaseTransaction,
+    thread_id: &str,
+) -> Result<i64, PureError> {
+    Ok(thread_input::Entity::find()
+        .filter(thread_input::Column::ThreadId.eq(thread_id))
+        .order_by_desc(thread_input::Column::QueueOrdinal)
+        .one(tx)
+        .await
+        .map_err(store_error)?
+        .map_or(0, |row| row.queue_ordinal.saturating_add(1)))
+}
+
+fn input_from_model(model: thread_input::Model) -> Result<DurableMailboxEnvelope, PureError> {
+    let delivery_state = match model.state.as_str() {
+        "queued" => MailboxDeliveryState::Pending,
+        "claimed" | "active" => MailboxDeliveryState::Claimed {
+            turn_id: TurnId::new(
+                model
+                    .claimed_turn_id
+                    .clone()
+                    .unwrap_or_else(|| model.turn_id.clone()),
+            )?,
+            checkpoint_seq: model
+                .checkpoint_seq
+                .map(u64_from_i64)
+                .transpose()?
+                .unwrap_or(0),
+        },
+        other => return Err(store_error(format!("cannot restore input state {other}"))),
+    };
+    Ok(DurableMailboxEnvelope {
+        mail_id: model.mail_id,
+        turn_id: TurnId::new(model.turn_id)?,
+        thread_id: ThreadId::new(model.thread_id)?,
+        message: model.content,
+        presentation: presentation_from_label(&model.presentation)?,
+        metadata: serde_json::from_str(&model.metadata_json)?,
+        delivery_state,
+        queued_at: model.queued_at,
+    })
+}
+
+fn delivery_identity(state: &MailboxDeliveryState) -> Option<(TurnId, u64)> {
+    match state {
+        MailboxDeliveryState::Claimed {
+            turn_id,
+            checkpoint_seq,
+        }
+        | MailboxDeliveryState::Consumed {
+            turn_id,
+            checkpoint_seq,
+        } => Some((turn_id.clone(), *checkpoint_seq)),
+        MailboxDeliveryState::Pending => None,
+    }
+}
+
+async fn persist_state_turns(
+    tx: &sea_orm::DatabaseTransaction,
+    state: &ThreadActorState,
+) -> Result<(), PureError> {
+    let thread_id = state.snapshot.identity.id.as_str();
+    for input in &state.pending_inputs {
+        persist_turn_projection(
             tx,
             TurnProjection {
-                agent_id,
-                turn_id: input.turn_id.as_str(),
-                session_id: input.session_id.as_str(),
+                id: input.turn_id.as_str(),
+                thread_id,
                 status: "queued",
+                phase: None,
                 reason: None,
                 usage: &pl_model::TokenUsage::default(),
+                failure: None,
                 metadata: Some(&input.metadata),
                 started_at: None,
-                finished_at: None,
+                completed_at: None,
+                updated_at: input.queued_at,
+                revision: state.session.thread_revision,
             },
         )
         .await?;
     }
     if let Some(turn_id) = state.snapshot.active_turn_id.as_ref() {
-        upsert_turn(
+        persist_turn_projection(
             tx,
             TurnProjection {
-                agent_id,
-                turn_id: turn_id.as_str(),
-                session_id: state.session.id.as_str(),
-                status: activity_label(state.snapshot.activity),
+                id: turn_id.as_str(),
+                thread_id,
+                status: "inProgress",
+                phase: Some(activity_phase(state.snapshot.activity)),
                 reason: None,
                 usage: &pl_model::TokenUsage::default(),
+                failure: None,
                 metadata: None,
                 started_at: Some(state.snapshot.updated_at),
-                finished_at: None,
+                completed_at: None,
+                updated_at: state.snapshot.updated_at,
+                revision: state.session.thread_revision,
             },
         )
         .await?;
     }
     if let Some(outcome) = &state.snapshot.last_turn {
-        upsert_turn(
+        let (status, reason) = outcome_columns(outcome);
+        persist_turn_projection(
             tx,
             TurnProjection {
-                agent_id,
-                turn_id: outcome.turn_id.as_str(),
-                session_id: outcome.session_id.as_str(),
-                status: outcome_label(outcome.kind),
-                reason: outcome.reason.as_deref(),
+                id: outcome.turn_id.as_str(),
+                thread_id,
+                status,
+                phase: None,
+                reason,
                 usage: &outcome.usage,
+                failure: outcome.failure.as_ref(),
                 metadata: None,
                 started_at: None,
-                finished_at: Some(outcome.finished_at),
+                completed_at: Some(outcome.finished_at),
+                updated_at: outcome.finished_at,
+                revision: state.session.thread_revision,
             },
         )
         .await?;
@@ -407,75 +500,540 @@ async fn upsert_turns(
 }
 
 struct TurnProjection<'a> {
-    agent_id: &'a str,
-    turn_id: &'a str,
-    session_id: &'a str,
+    id: &'a str,
+    thread_id: &'a str,
     status: &'a str,
+    phase: Option<&'a str>,
     reason: Option<&'a str>,
     usage: &'a pl_model::TokenUsage,
+    failure: Option<&'a pl_protocol::TurnFailure>,
     metadata: Option<&'a serde_json::Value>,
     started_at: Option<i64>,
-    finished_at: Option<i64>,
+    completed_at: Option<i64>,
+    updated_at: i64,
+    revision: u64,
 }
 
-async fn upsert_turn(
+async fn persist_turn_projection(
     tx: &sea_orm::DatabaseTransaction,
-    turn: TurnProjection<'_>,
+    projection: TurnProjection<'_>,
 ) -> Result<(), PureError> {
-    let existing =
-        agent_turn::Entity::find_by_id((turn.agent_id.to_string(), turn.turn_id.to_string()))
-            .one(tx)
-            .await
-            .map_err(store_error)?;
-    let metadata_json = turn.metadata.map(serde_json::to_string).transpose()?;
-    let usage_json = serde_json::to_string(turn.usage)?;
-    if let Some(existing) = existing {
-        let preserved_metadata = existing.metadata_json.clone().or(metadata_json);
-        let preserved_started_at = existing.started_at.or(turn.started_at);
-        let mut active = existing.into_active_model();
-        active.status = Set(turn.status.to_string());
-        active.reason = Set(turn.reason.map(str::to_string));
-        active.usage_json = Set(usage_json);
-        active.metadata_json = Set(preserved_metadata);
-        active.started_at = Set(preserved_started_at);
-        active.finished_at = Set(turn.finished_at);
-        active.update(tx).await.map_err(store_error)?;
-    } else {
-        agent_turn::ActiveModel {
-            agent_id: Set(turn.agent_id.to_string()),
-            turn_id: Set(turn.turn_id.to_string()),
-            session_id: Set(turn.session_id.to_string()),
-            status: Set(turn.status.to_string()),
-            reason: Set(turn.reason.map(str::to_string)),
-            usage_json: Set(usage_json),
-            metadata_json: Set(metadata_json),
-            started_at: Set(turn.started_at),
-            finished_at: Set(turn.finished_at),
-        }
-        .insert(tx)
+    let existing = turn::Entity::find_by_id(projection.id.to_string())
+        .one(tx)
         .await
         .map_err(store_error)?;
+    if let Some(existing) = existing.as_ref()
+        && existing.thread_id != projection.thread_id
+    {
+        return Err(store_error(format!(
+            "Turn {} belongs to another Thread",
+            projection.id
+        )));
+    }
+    let ordinal = match existing.as_ref() {
+        Some(existing) => existing.ordinal,
+        None => next_turn_ordinal(tx, projection.thread_id).await?,
+    };
+    let active = turn::ActiveModel {
+        id: Set(projection.id.to_string()),
+        thread_id: Set(projection.thread_id.to_string()),
+        ordinal: Set(ordinal),
+        revision: Set(i64_from_u64(projection.revision)?),
+        status: Set(projection.status.to_string()),
+        phase: Set(projection.phase.map(str::to_string)),
+        reason: Set(projection.reason.map(str::to_string)),
+        model_json: Set(existing.as_ref().and_then(|row| row.model_json.clone())),
+        usage_json: Set(serde_json::to_string(projection.usage)?),
+        failure_json: Set(projection.failure.map(serde_json::to_string).transpose()?),
+        metadata_json: Set(match (existing.as_ref(), projection.metadata) {
+            (Some(row), None) => row.metadata_json.clone(),
+            (_, metadata) => metadata.map(serde_json::to_string).transpose()?,
+        }),
+        started_at: Set(existing
+            .as_ref()
+            .and_then(|row| row.started_at)
+            .or(projection.started_at)),
+        updated_at: Set(projection.updated_at),
+        completed_at: Set(projection.completed_at),
+    };
+    match existing {
+        Some(_) => active.update(tx).await.map_err(store_error)?,
+        None => active.insert(tx).await.map_err(store_error)?,
+    };
+    Ok(())
+}
+
+async fn persist_thread_notifications(
+    tx: &sea_orm::DatabaseTransaction,
+    commit: &ThreadCommit,
+) -> Result<(), PureError> {
+    for envelope in &commit.facts.notifications {
+        match &envelope.notification {
+            ThreadNotification::TurnStarted { turn: value }
+            | ThreadNotification::TurnUpdated { turn: value }
+            | ThreadNotification::TurnCompleted { turn: value } => {
+                persist_turn(tx, value, envelope.revision).await?;
+            }
+            ThreadNotification::ItemStarted { item: value }
+            | ThreadNotification::ItemCompleted { item: value } => {
+                persist_item(tx, value, None).await?;
+            }
+            ThreadNotification::InteractionChanged { interaction: value } => {
+                persist_interaction(tx, value).await?;
+            }
+            ThreadNotification::ItemDelta { .. }
+            | ThreadNotification::ThreadRuntimeUpdated { .. }
+            | ThreadNotification::Lagged { .. } => {}
+        }
     }
     Ok(())
 }
 
-fn activity_label(activity: AgentActivityState) -> &'static str {
-    match activity {
-        AgentActivityState::Idle => "idle",
-        AgentActivityState::Queued => "queued",
-        AgentActivityState::Running => "running",
-        AgentActivityState::WaitingTool => "waiting_tool",
-        AgentActivityState::WaitingInteraction => "waiting_interaction",
-        AgentActivityState::Cancelling => "cancelling",
+async fn persist_turn(
+    tx: &sea_orm::DatabaseTransaction,
+    value: &Turn,
+    revision: u64,
+) -> Result<(), PureError> {
+    let (status, phase, reason) = turn_state_columns(&value.state);
+    persist_turn_projection(
+        tx,
+        TurnProjection {
+            id: &value.id,
+            thread_id: &value.thread_id,
+            status,
+            phase,
+            reason,
+            usage: &pl_model::TokenUsage::default(),
+            failure: None,
+            metadata: None,
+            started_at: value.started_at,
+            completed_at: value.completed_at,
+            updated_at: value.updated_at,
+            revision,
+        },
+    )
+    .await
+}
+
+async fn persist_context_baseline(
+    tx: &sea_orm::DatabaseTransaction,
+    commit: &ThreadCommit,
+) -> Result<(), PureError> {
+    let Some(mutation) = commit.facts.context.as_ref() else {
+        return Ok(());
+    };
+    let context = match mutation {
+        ThreadContextMutation::Append { items } | ThreadContextMutation::Replace { items } => items,
+    };
+    let Some(turn_id) = commit.facts.turn_id.as_ref() else {
+        return Err(store_error("context mutation requires a Turn id"));
+    };
+    let thread_id = commit.agent_id.to_string();
+    let now = commit.next_state.snapshot.updated_at;
+    let baseline = ThreadItem {
+        id: format!("context:{thread_id}:{}", commit.facts.through_revision),
+        thread_id,
+        turn_id: turn_id.to_string(),
+        ordinal: 0,
+        revision: 1,
+        status: ThreadItemStatus::Completed,
+        created_at: now,
+        updated_at: now,
+        completed_at: Some(now),
+        error: None,
+        content: ThreadItemContent::ContextCompaction {
+            before_tokens: 0,
+            after_tokens: commit.next_state.session.last_context_tokens.unwrap_or(0),
+            compacted_at: now,
+        },
+        usage: None,
+    };
+    persist_item(tx, &baseline, Some(serde_json::to_vec(context)?)).await
+}
+
+async fn persist_item(
+    tx: &sea_orm::DatabaseTransaction,
+    value: &ThreadItem,
+    private_payload: Option<Vec<u8>>,
+) -> Result<(), PureError> {
+    let existing = item::Entity::find_by_id(value.id.clone())
+        .one(tx)
+        .await
+        .map_err(store_error)?;
+    if let Some(existing) = existing.as_ref()
+        && (existing.thread_id != value.thread_id || existing.turn_id != value.turn_id)
+    {
+        return Err(store_error(format!(
+            "Item {} immutable identity changed",
+            value.id
+        )));
+    }
+    let ordinal = match existing.as_ref() {
+        Some(existing) => existing.ordinal,
+        None if value.ordinal > 0 => i64_from_u64(value.ordinal)?,
+        None => next_item_ordinal(tx, &value.thread_id).await?,
+    };
+    let mut persisted = value.clone();
+    persisted.ordinal = u64_from_i64(ordinal)?;
+    let active = item::ActiveModel {
+        id: Set(value.id.clone()),
+        thread_id: Set(value.thread_id.clone()),
+        turn_id: Set(value.turn_id.clone()),
+        ordinal: Set(ordinal),
+        revision: Set(i64_from_u64(value.revision)?),
+        item_kind: Set(item_kind_label(&value.content).to_string()),
+        status: Set(item_status_label(value.status).to_string()),
+        payload_json: Set(serde_json::to_string(&persisted)?),
+        provider_private_payload: Set(private_payload.or_else(|| {
+            existing
+                .as_ref()
+                .and_then(|row| row.provider_private_payload.clone())
+        })),
+        created_at: Set(existing
+            .as_ref()
+            .map_or(value.created_at, |row| row.created_at)),
+        updated_at: Set(value.updated_at),
+        completed_at: Set(value.completed_at),
+    };
+    match existing {
+        Some(_) => active.update(tx).await.map_err(store_error)?,
+        None => active.insert(tx).await.map_err(store_error)?,
+    };
+    Ok(())
+}
+
+async fn persist_interaction(
+    tx: &sea_orm::DatabaseTransaction,
+    value: &pl_protocol::InteractionRequest,
+) -> Result<(), PureError> {
+    let existing = interaction::Entity::find_by_id(value.interaction_id.clone())
+        .one(tx)
+        .await
+        .map_err(store_error)?;
+    let active = interaction::ActiveModel {
+        id: Set(value.interaction_id.clone()),
+        thread_id: Set(value.scope.thread_id.clone()),
+        turn_id: Set(value.scope.turn_id.clone()),
+        item_id: Set(value.scope.item_id.clone()),
+        tool_id: Set(value.scope.tool_id.clone()),
+        agent_path: Set(value.scope.agent_path.clone()),
+        kind: Set(interaction_kind_label(value.kind.clone()).to_string()),
+        status: Set(interaction_status_label(value.status.clone()).to_string()),
+        payload_json: Set(serde_json::to_string(&value.payload)?),
+        resolution_json: Set(existing
+            .as_ref()
+            .and_then(|row| row.resolution_json.clone())),
+        created_at: Set(existing
+            .as_ref()
+            .map_or(value.created_at, |row| row.created_at)),
+        updated_at: Set(value.updated_at),
+        resolved_at: Set(value.resolved_at),
+    };
+    match existing {
+        Some(_) => active.update(tx).await.map_err(store_error)?,
+        None => active.insert(tx).await.map_err(store_error)?,
+    };
+    Ok(())
+}
+
+async fn latest_turn(
+    store: &StudioStore,
+    thread_id: &str,
+    active: bool,
+) -> Result<Option<turn::Model>, PureError> {
+    let query = turn::Entity::find().filter(turn::Column::ThreadId.eq(thread_id));
+    let query = if active {
+        query.filter(turn::Column::Status.is_in(["queued", "inProgress"]))
+    } else {
+        query.filter(turn::Column::Status.is_in(["completed", "failed", "interrupted"]))
+    };
+    query
+        .order_by_desc(turn::Column::Ordinal)
+        .one(store.database())
+        .await
+        .map_err(store_error)
+}
+
+async fn next_turn_ordinal(
+    tx: &sea_orm::DatabaseTransaction,
+    thread_id: &str,
+) -> Result<i64, PureError> {
+    Ok(turn::Entity::find()
+        .filter(turn::Column::ThreadId.eq(thread_id))
+        .order_by_desc(turn::Column::Ordinal)
+        .one(tx)
+        .await
+        .map_err(store_error)?
+        .map_or(0, |row| row.ordinal.saturating_add(1)))
+}
+
+async fn next_item_ordinal(
+    tx: &sea_orm::DatabaseTransaction,
+    thread_id: &str,
+) -> Result<i64, PureError> {
+    Ok(item::Entity::find()
+        .filter(item::Column::ThreadId.eq(thread_id))
+        .order_by_desc(item::Column::Ordinal)
+        .one(tx)
+        .await
+        .map_err(store_error)?
+        .map_or(0, |row| row.ordinal.saturating_add(1)))
+}
+
+fn thread_depth(id: &str, parents: &BTreeMap<String, Option<String>>) -> Result<u32, PureError> {
+    let mut current = id;
+    let mut depth = 0_u32;
+    let mut remaining = parents.len();
+    while let Some(parent) = parents.get(current).and_then(Option::as_deref) {
+        if remaining == 0 {
+            return Err(store_error("Thread parent graph contains a cycle"));
+        }
+        if !parents.contains_key(parent) {
+            return Err(store_error(format!("Thread parent {parent} is missing")));
+        }
+        remaining -= 1;
+        depth = depth.saturating_add(1);
+        current = parent;
+    }
+    Ok(depth)
+}
+
+fn lifecycle_from_status(status: &str) -> Result<AgentLifecycleState, PureError> {
+    match status {
+        "closed" => Ok(AgentLifecycleState::Closed),
+        "failed" => Ok(AgentLifecycleState::Faulted),
+        "idle" | "running" | "waiting" | "completed" => Ok(AgentLifecycleState::Active),
+        other => Err(store_error(format!("unknown Thread status {other}"))),
     }
 }
 
-fn outcome_label(outcome: TurnOutcomeKind) -> &'static str {
-    match outcome {
-        TurnOutcomeKind::Completed => "completed",
-        TurnOutcomeKind::Cancelled => "cancelled",
-        TurnOutcomeKind::Failed => "failed",
-        TurnOutcomeKind::BudgetLimited => "budget_limited",
+fn restored_activity(
+    status: &str,
+    active_turn: Option<&turn::Model>,
+    pending: &VecDeque<DurableMailboxEnvelope>,
+) -> AgentActivityState {
+    if status == "closed" || status == "failed" {
+        return AgentActivityState::Idle;
+    }
+    match active_turn {
+        Some(turn) if turn.status == "queued" => AgentActivityState::Queued,
+        Some(turn) => match turn.phase.as_deref() {
+            Some("runningTool") => AgentActivityState::WaitingTool,
+            Some("waitingInteraction") => AgentActivityState::WaitingInteraction,
+            _ => AgentActivityState::Running,
+        },
+        None if !pending.is_empty() => AgentActivityState::Queued,
+        None => AgentActivityState::Idle,
+    }
+}
+
+fn turn_outcome_from_model(model: turn::Model) -> Result<AgentTurnOutcome, PureError> {
+    let kind = match model.status.as_str() {
+        "completed" => TurnOutcomeKind::Completed,
+        "failed" => TurnOutcomeKind::Failed,
+        "interrupted" if model.reason.as_deref() == Some("budgetLimited") => {
+            TurnOutcomeKind::BudgetLimited
+        }
+        "interrupted" => TurnOutcomeKind::Cancelled,
+        other => return Err(store_error(format!("Turn {other} is not terminal"))),
+    };
+    Ok(AgentTurnOutcome {
+        turn_id: TurnId::new(model.id)?,
+        thread_id: ThreadId::new(model.thread_id)?,
+        kind,
+        reason: model.reason,
+        failure: model
+            .failure_json
+            .map(|value| serde_json::from_str(&value))
+            .transpose()?,
+        usage: serde_json::from_str(&model.usage_json)?,
+        finished_at: model.completed_at.unwrap_or(model.updated_at),
+    })
+}
+
+fn thread_from_model(model: thread::Model) -> Result<ThreadRecord, PureError> {
+    Ok(ThreadRecord {
+        id: model.id,
+        project_id: model.project_id,
+        title: model.title,
+        mode: match model.mode.as_str() {
+            "task" => ThreadMode::Task,
+            "simple" => ThreadMode::Simple,
+            other => return Err(store_error(format!("unknown Thread mode {other}"))),
+        },
+        root_thread_id: model.root_thread_id,
+        parent_thread_id: model.parent_thread_id,
+        role: model.role,
+        agent_path: model.agent_path,
+        status: thread_status_from_label(&model.status)?,
+        created_at: model.created_at,
+        updated_at: model.updated_at,
+        archived: model.archived != 0,
+    })
+}
+
+fn turn_from_model(model: turn::Model) -> Result<Turn, PureError> {
+    let state = match model.status.as_str() {
+        "queued" => TurnState::Queued,
+        "inProgress" => TurnState::InProgress {
+            phase: turn_phase_from_label(model.phase.as_deref().unwrap_or("preparing"))?,
+        },
+        "completed" => TurnState::Completed,
+        "failed" => TurnState::Failed {
+            reason: model.reason.clone().unwrap_or_default(),
+        },
+        "interrupted" => TurnState::Interrupted {
+            reason: model.reason.clone().unwrap_or_default(),
+        },
+        other => return Err(store_error(format!("unknown Turn status {other}"))),
+    };
+    Ok(Turn {
+        id: model.id,
+        thread_id: model.thread_id,
+        state,
+        started_at: model.started_at,
+        updated_at: model.updated_at,
+        completed_at: model.completed_at,
+    })
+}
+
+fn thread_status_label(state: &ThreadActorState) -> &'static str {
+    match state.snapshot.lifecycle {
+        AgentLifecycleState::Closing | AgentLifecycleState::Closed => "closed",
+        AgentLifecycleState::Faulted => "failed",
+        AgentLifecycleState::Active => match state.snapshot.activity {
+            AgentActivityState::Idle => "idle",
+            AgentActivityState::Queued
+            | AgentActivityState::Running
+            | AgentActivityState::Cancelling => "running",
+            AgentActivityState::WaitingTool | AgentActivityState::WaitingInteraction => "waiting",
+        },
+    }
+}
+
+fn thread_status_from_label(label: &str) -> Result<ThreadStatus, PureError> {
+    match label {
+        "idle" => Ok(ThreadStatus::Idle),
+        "running" => Ok(ThreadStatus::Running),
+        "waiting" => Ok(ThreadStatus::Waiting),
+        "completed" => Ok(ThreadStatus::Completed),
+        "failed" => Ok(ThreadStatus::Failed),
+        "closed" => Ok(ThreadStatus::Closed),
+        other => Err(store_error(format!("unknown Thread status {other}"))),
+    }
+}
+
+fn turn_state_columns(state: &TurnState) -> (&'static str, Option<&'static str>, Option<&str>) {
+    match state {
+        TurnState::Queued => ("queued", None, None),
+        TurnState::InProgress { phase } => ("inProgress", Some(turn_phase_label(*phase)), None),
+        TurnState::Completed => ("completed", None, None),
+        TurnState::Failed { reason } => ("failed", None, Some(reason.as_str())),
+        TurnState::Interrupted { reason } => ("interrupted", None, Some(reason.as_str())),
+    }
+}
+
+fn activity_phase(activity: AgentActivityState) -> &'static str {
+    match activity {
+        AgentActivityState::WaitingTool => "runningTool",
+        AgentActivityState::WaitingInteraction => "waitingInteraction",
+        AgentActivityState::Queued => "preparing",
+        AgentActivityState::Running | AgentActivityState::Cancelling | AgentActivityState::Idle => {
+            "responding"
+        }
+    }
+}
+
+fn turn_phase_label(phase: TurnPhase) -> &'static str {
+    match phase {
+        TurnPhase::Preparing => "preparing",
+        TurnPhase::Thinking => "thinking",
+        TurnPhase::Responding => "responding",
+        TurnPhase::Planning => "planning",
+        TurnPhase::RunningTool => "runningTool",
+        TurnPhase::WaitingInteraction => "waitingInteraction",
+        TurnPhase::Persisting => "persisting",
+    }
+}
+
+fn turn_phase_from_label(label: &str) -> Result<TurnPhase, PureError> {
+    match label {
+        "preparing" => Ok(TurnPhase::Preparing),
+        "thinking" => Ok(TurnPhase::Thinking),
+        "responding" => Ok(TurnPhase::Responding),
+        "planning" => Ok(TurnPhase::Planning),
+        "runningTool" => Ok(TurnPhase::RunningTool),
+        "waitingInteraction" => Ok(TurnPhase::WaitingInteraction),
+        "persisting" => Ok(TurnPhase::Persisting),
+        other => Err(store_error(format!("unknown Turn phase {other}"))),
+    }
+}
+
+fn outcome_columns(outcome: &AgentTurnOutcome) -> (&'static str, Option<&str>) {
+    match outcome.kind {
+        TurnOutcomeKind::Completed => ("completed", outcome.reason.as_deref()),
+        TurnOutcomeKind::Failed => ("failed", outcome.reason.as_deref()),
+        TurnOutcomeKind::Cancelled => ("interrupted", outcome.reason.as_deref()),
+        TurnOutcomeKind::BudgetLimited => ("interrupted", Some("budgetLimited")),
+    }
+}
+
+fn item_kind_label(content: &ThreadItemContent) -> &'static str {
+    match content {
+        ThreadItemContent::UserMessage { .. } => "userMessage",
+        ThreadItemContent::AgentMessage { .. } => "agentMessage",
+        ThreadItemContent::Reasoning { .. } => "reasoning",
+        ThreadItemContent::Plan { .. } => "plan",
+        ThreadItemContent::ToolCall { .. } => "toolCall",
+        ThreadItemContent::File { .. } => "file",
+        ThreadItemContent::ContextCompaction { .. } => "contextCompaction",
+    }
+}
+
+fn item_status_label(status: ThreadItemStatus) -> &'static str {
+    match status {
+        ThreadItemStatus::Started => "started",
+        ThreadItemStatus::Streaming => "streaming",
+        ThreadItemStatus::AwaitingApproval => "awaitingApproval",
+        ThreadItemStatus::Approved => "approved",
+        ThreadItemStatus::Denied => "denied",
+        ThreadItemStatus::Running => "running",
+        ThreadItemStatus::Completed => "completed",
+        ThreadItemStatus::Failed => "failed",
+        ThreadItemStatus::Interrupted => "interrupted",
+        ThreadItemStatus::BudgetLimited => "budgetLimited",
+    }
+}
+
+fn presentation_label(value: MailboxPresentation) -> &'static str {
+    match value {
+        MailboxPresentation::User => "user",
+        MailboxPresentation::Hidden => "hidden",
+    }
+}
+
+fn presentation_from_label(value: &str) -> Result<MailboxPresentation, PureError> {
+    match value {
+        "user" => Ok(MailboxPresentation::User),
+        "hidden" => Ok(MailboxPresentation::Hidden),
+        other => Err(store_error(format!("unknown input presentation {other}"))),
+    }
+}
+
+fn interaction_kind_label(value: InteractionKind) -> &'static str {
+    match value {
+        InteractionKind::UserInput => "userInput",
+        InteractionKind::ToolApproval => "toolApproval",
+        InteractionKind::PlanConfirmation => "planConfirmation",
+    }
+}
+
+fn interaction_status_label(value: InteractionStatus) -> &'static str {
+    match value {
+        InteractionStatus::Pending => "pending",
+        InteractionStatus::Resolved => "resolved",
+        InteractionStatus::Cancelled => "cancelled",
+        InteractionStatus::Expired => "expired",
     }
 }
 
@@ -489,204 +1047,4 @@ fn i64_from_u64(value: u64) -> Result<i64, PureError> {
 
 fn store_error(error: impl std::fmt::Display) -> PureError {
     PureError::MemoryError(error.to_string())
-}
-
-#[cfg(test)]
-mod tests {
-    use pl_protocol::{
-        SessionEventEnvelope, SessionEventKind, SessionEventPosition, SessionMessage,
-        SessionMessageRole, SessionMessageStatus,
-    };
-    use pretty_assertions::assert_eq;
-
-    use super::*;
-
-    #[tokio::test]
-    async fn active_mailbox_input_is_restored_and_removed_with_runtime_state() {
-        let store = StudioStore::open_memory().await.unwrap();
-        let repository = StudioAgentRepository::new(store);
-        let agent_id = pl_core::AgentId::new("agent-active-mailbox").unwrap();
-        let turn_id = pl_core::TurnId::new("turn-active-mailbox").unwrap();
-        let session_id = pl_core::SessionId::new("session-active-mailbox").unwrap();
-        let active_input = pl_core::DurableMailboxEnvelope {
-            mail_id: "mail-active-1".to_string(),
-            turn_id: turn_id.clone(),
-            session_id: session_id.clone(),
-            message: "durable active input".to_string(),
-            metadata: serde_json::json!({"source": "test"}),
-            presentation: pl_core::MailboxPresentation::User,
-            delivery_state: pl_core::MailboxDeliveryState::Consumed {
-                turn_id,
-                checkpoint_seq: 3,
-            },
-            queued_at: 10,
-        };
-        let state = AgentDurableState {
-            snapshot: pl_core::AgentSnapshot {
-                identity: pl_core::AgentIdentity {
-                    id: agent_id.clone(),
-                    parent_id: None,
-                    role: pl_core::AgentRoleId::new("executor").unwrap(),
-                    depth: 0,
-                },
-                lifecycle: pl_core::AgentLifecycleState::Active,
-                activity: AgentActivityState::Running,
-                active_turn_id: Some(active_input.turn_id.clone()),
-                pending_inputs: 0,
-                progress: None,
-                last_turn: None,
-                revision: 1,
-                event_sequence: 0,
-                updated_at: 10,
-            },
-            session: AgentSessionState::empty(session_id),
-            pending_inputs: VecDeque::new(),
-            active_input: Some(active_input.clone()),
-        };
-
-        assert_eq!(
-            repository
-                .commit(SessionHistoryCommit {
-                    agent_id: agent_id.clone(),
-                    expected_revision: None,
-                    next_state: state.clone(),
-                    facts: pl_core::DurableCommitFacts::from_state(
-                        &state,
-                        Vec::new(),
-                        Vec::new(),
-                        None,
-                        None,
-                    ),
-                    mutation: pl_core::AgentStateMutation::SnapshotAndQueue,
-                })
-                .await
-                .unwrap(),
-            AgentCommitOutcome::Applied
-        );
-        let restored = repository.restore_runtime().await.unwrap();
-        assert_eq!(restored[0].state.active_input, Some(active_input));
-
-        let mut cleared = restored[0].state.clone();
-        cleared.snapshot.revision = 2;
-        cleared.active_input = None;
-        assert_eq!(
-            repository
-                .commit(SessionHistoryCommit {
-                    agent_id: agent_id.clone(),
-                    expected_revision: Some(1),
-                    next_state: cleared.clone(),
-                    facts: pl_core::DurableCommitFacts::from_state(
-                        &cleared,
-                        Vec::new(),
-                        Vec::new(),
-                        None,
-                        None,
-                    ),
-                    mutation: pl_core::AgentStateMutation::SnapshotAndQueue,
-                })
-                .await
-                .unwrap(),
-            AgentCommitOutcome::Applied
-        );
-        assert_eq!(
-            repository.restore_runtime().await.unwrap()[0]
-                .state
-                .active_input,
-            None
-        );
-    }
-
-    #[tokio::test]
-    async fn restore_replays_history_suffix_when_projection_is_missing() {
-        let store = StudioStore::open_memory().await.unwrap();
-        let repository = StudioAgentRepository::new(store.clone());
-        let agent_id = pl_core::AgentId::new("agent-history-recovery").unwrap();
-        let session_id = pl_core::SessionId::new("session-history-recovery").unwrap();
-        let turn_id = pl_core::TurnId::new("turn-history-recovery").unwrap();
-        let mut state = AgentDurableState {
-            snapshot: pl_core::AgentSnapshot {
-                identity: pl_core::AgentIdentity {
-                    id: agent_id.clone(),
-                    parent_id: None,
-                    role: pl_core::AgentRoleId::new("planner").unwrap(),
-                    depth: 0,
-                },
-                lifecycle: pl_core::AgentLifecycleState::Active,
-                activity: AgentActivityState::Idle,
-                active_turn_id: None,
-                pending_inputs: 0,
-                progress: None,
-                last_turn: None,
-                revision: 1,
-                event_sequence: 0,
-                updated_at: 20,
-            },
-            session: AgentSessionState::empty(session_id.clone()),
-            pending_inputs: VecDeque::new(),
-            active_input: None,
-        };
-        state.session.session_event_sequence = 1;
-        let event = SessionEventEnvelope {
-            event_id: "history-event-1".to_string(),
-            session_id: session_id.to_string(),
-            source_agent_id: Some(agent_id.to_string()),
-            turn_id: Some(turn_id.to_string()),
-            emitted_at: 20,
-            position: SessionEventPosition::Durable { sequence: 1 },
-            kind: SessionEventKind::MessageChanged {
-                message: Box::new(SessionMessage {
-                    message_id: "history-message-1".to_string(),
-                    session_id: session_id.to_string(),
-                    turn_id: turn_id.to_string(),
-                    role: SessionMessageRole::Assistant,
-                    status: SessionMessageStatus::Completed,
-                    created_at: 10,
-                    updated_at: 20,
-                    completed_at: Some(20),
-                    error: None,
-                    metadata: serde_json::json!({}),
-                }),
-            },
-        };
-        assert_eq!(
-            repository
-                .commit(SessionHistoryCommit {
-                    agent_id: agent_id.clone(),
-                    expected_revision: None,
-                    next_state: state.clone(),
-                    facts: pl_core::DurableCommitFacts {
-                        session_id: session_id.clone(),
-                        turn_id: Some(turn_id),
-                        through_sequence: 1,
-                        revision: 1,
-                        items: vec![event.clone()],
-                        turn_transition: None,
-                        context: None,
-                        projection_snapshot: None,
-                        runtime_events: Vec::new(),
-                        trace_events: Vec::new(),
-                    },
-                    mutation: pl_core::AgentStateMutation::SnapshotAndQueue,
-                })
-                .await
-                .unwrap(),
-            AgentCommitOutcome::Applied
-        );
-        repository.barrier().await.unwrap();
-
-        let restored = StudioAgentRepository::new(store)
-            .restore_runtime()
-            .await
-            .unwrap();
-        let projection = restored[0]
-            .session_projection
-            .as_ref()
-            .expect("history suffix should rebuild a missing projection");
-        assert_eq!(projection.snapshot.through_sequence, 1);
-        assert_eq!(
-            projection.snapshot.messages[0].message_id,
-            "history-message-1"
-        );
-        assert_eq!(projection.retained_durable_events, vec![event]);
-    }
 }

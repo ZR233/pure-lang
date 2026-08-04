@@ -21,7 +21,7 @@ pub(crate) struct StudioSpawnIntent {
     #[serde(default)]
     pub(crate) spawn_kind: Option<StudioSpawnKind>,
     #[serde(default)]
-    pub(crate) studio_session_id: Option<String>,
+    pub(crate) studio_thread_id: Option<String>,
     #[serde(default)]
     pub(crate) task_name: Option<String>,
     #[serde(default)]
@@ -38,7 +38,7 @@ pub(crate) struct StudioSpawnIntent {
 
 impl StudioSpawnIntent {
     pub(crate) fn task_executor(
-        session_id: impl Into<String>,
+        thread_id: impl Into<String>,
         task_name: impl Into<String>,
         owned_paths: Vec<String>,
         requesting_tool_call_id: impl Into<String>,
@@ -47,7 +47,7 @@ impl StudioSpawnIntent {
     ) -> Self {
         Self {
             spawn_kind: Some(StudioSpawnKind::TaskExecutor),
-            studio_session_id: Some(session_id.into()),
+            studio_thread_id: Some(thread_id.into()),
             task_name: Some(task_name.into()),
             owned_paths,
             requesting_tool_call_id: Some(requesting_tool_call_id.into()),
@@ -58,7 +58,7 @@ impl StudioSpawnIntent {
     }
 
     pub(crate) fn task_reviewer(
-        session_id: impl Into<String>,
+        thread_id: impl Into<String>,
         task_name: impl Into<String>,
         requesting_tool_call_id: impl Into<String>,
         workspace_root: PathBuf,
@@ -66,7 +66,7 @@ impl StudioSpawnIntent {
     ) -> Self {
         Self {
             spawn_kind: Some(StudioSpawnKind::TaskReviewer),
-            studio_session_id: Some(session_id.into()),
+            studio_thread_id: Some(thread_id.into()),
             task_name: Some(task_name.into()),
             requesting_tool_call_id: Some(requesting_tool_call_id.into()),
             workspace_root: Some(workspace_root),
@@ -97,7 +97,7 @@ impl StudioSpawnIntent {
         }
         match role {
             "executor" | "reviewer" => {
-                require_non_empty(self.studio_session_id.as_deref(), "Studio session id")?;
+                require_non_empty(self.studio_thread_id.as_deref(), "Studio Thread id")?;
                 require_non_empty(self.task_name.as_deref(), "task name")?;
                 require_non_empty(
                     self.requesting_tool_call_id.as_deref(),

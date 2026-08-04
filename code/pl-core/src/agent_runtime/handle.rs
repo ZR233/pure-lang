@@ -3,19 +3,20 @@ use std::fmt;
 
 use tokio::sync::{mpsc, oneshot};
 
-use pl_protocol::{SessionSubscriptionRequest, SessionViewSnapshot};
+use pl_protocol::{ThreadSnapshot, ThreadSubscriptionRequest};
 
-use super::coordinator::CoordinatorCommand;
+use super::agent_loop::{AgentLoopCommand, AgentLoopHandle};
+use super::coordinator::{AgentRegistry, CoordinatorCommand};
 use super::directory::{AgentDirectoryHandle, AgentDirectorySnapshot, AgentDirectorySubscription};
 use super::{
     AgentActivityState, AgentCurrentSessionSubmitRequest, AgentDirectoryWaitReason,
     AgentDirectoryWaitResult, AgentId, AgentLifecycleState, AgentProgressCheckpoint,
     AgentProgressStage, AgentRegistration, AgentRuntimeResult, AgentSessionDigest, AgentSnapshot,
     AgentSpawnRequest, AgentSpawnResult, AgentSubmitRequest, AgentTurnCheckpoint, AgentWaitResult,
-    SessionId, TurnId,
+    ThreadId, TurnId,
 };
 use crate::agent_runtime::state::AgentRuntimeError;
-use crate::{SessionEventHubHandle, SessionEventSubscription};
+use crate::{ThreadEventBusHandle, ThreadEventSubscription};
 
 /// 不包含 host 泛型的 cloneable runtime 命令句柄。
 ///
@@ -23,19 +24,22 @@ use crate::{SessionEventHubHandle, SessionEventSubscription};
 #[derive(Clone)]
 pub struct AgentRuntimeHandle {
     pub(crate) sender: mpsc::Sender<CoordinatorCommand>,
-    pub(crate) session_events: SessionEventHubHandle,
+    pub(crate) actors: AgentRegistry,
+    pub(crate) thread_events: ThreadEventBusHandle,
     pub(crate) directory: AgentDirectoryHandle,
 }
 
 impl AgentRuntimeHandle {
     pub(crate) fn new(
         sender: mpsc::Sender<CoordinatorCommand>,
-        session_events: SessionEventHubHandle,
+        actors: AgentRegistry,
+        thread_events: ThreadEventBusHandle,
         directory: AgentDirectoryHandle,
     ) -> Self {
         Self {
             sender,
-            session_events,
+            actors,
+            thread_events,
             directory,
         }
     }
@@ -61,12 +65,8 @@ impl AgentRuntimeHandle {
         request: AgentSubmitRequest,
     ) -> AgentRuntimeResult<TurnId> {
         let (reply, receiver) = oneshot::channel();
-        self.send(CoordinatorCommand::Submit {
-            agent_id,
-            request,
-            reply,
-        })
-        .await?;
+        self.send_to_actor(&agent_id, AgentLoopCommand::Submit { request, reply })
+            .await?;
         receive(receiver).await?
     }
 
@@ -77,11 +77,15 @@ impl AgentRuntimeHandle {
         request: AgentCurrentSessionSubmitRequest,
     ) -> AgentRuntimeResult<TurnId> {
         let (reply, receiver) = oneshot::channel();
-        self.send(CoordinatorCommand::SubmitCurrentSession {
-            agent_id,
-            request,
-            reply,
-        })
+        let root_agent_id = root_agent_id_for(&self.directory.directory_snapshot(), &agent_id)?;
+        self.send_to_actor(
+            &agent_id,
+            AgentLoopCommand::SubmitCurrentSession {
+                root_agent_id,
+                request,
+                reply,
+            },
+        )
         .await?;
         receive(receiver).await?
     }
@@ -97,12 +101,8 @@ impl AgentRuntimeHandle {
     /// 中断与 id 精确匹配的活动 turn。
     pub async fn cancel_turn(&self, agent_id: AgentId, turn_id: TurnId) -> AgentRuntimeResult<()> {
         let (reply, receiver) = oneshot::channel();
-        self.send(CoordinatorCommand::CancelTurn {
-            agent_id,
-            turn_id,
-            reply,
-        })
-        .await?;
+        self.send_to_actor(&agent_id, AgentLoopCommand::CancelTurn { turn_id, reply })
+            .await?;
         receive(receiver).await?
     }
 
@@ -113,12 +113,14 @@ impl AgentRuntimeHandle {
         activity: AgentActivityState,
     ) -> AgentRuntimeResult<()> {
         let (reply, receiver) = oneshot::channel();
-        self.send(CoordinatorCommand::SetActivity {
-            agent_id,
-            turn_id,
-            activity,
-            reply,
-        })
+        self.send_to_actor(
+            &agent_id,
+            AgentLoopCommand::SetActivity {
+                turn_id,
+                activity,
+                reply,
+            },
+        )
         .await?;
         receive(receiver).await?
     }
@@ -129,29 +131,30 @@ impl AgentRuntimeHandle {
         checkpoint: AgentTurnCheckpoint,
     ) -> AgentRuntimeResult<()> {
         let (reply, receiver) = oneshot::channel();
-        self.send(CoordinatorCommand::Checkpoint {
-            agent_id,
-            checkpoint,
-            reply,
-        })
+        self.send_to_actor(
+            &agent_id,
+            AgentLoopCommand::Checkpoint { checkpoint, reply },
+        )
         .await?;
         receive(receiver).await?
     }
 
     /// 将产品关联出的公共事实交给目标 agent 串行持久化和投影。
-    pub async fn record_session_facts(
+    pub async fn record_thread_facts(
         &self,
         agent_id: AgentId,
-        session_id: SessionId,
-        facts: Vec<crate::SessionEventFact>,
+        thread_id: ThreadId,
+        facts: Vec<crate::ThreadNotificationFact>,
     ) -> AgentRuntimeResult<()> {
         let (reply, receiver) = oneshot::channel();
-        self.send(CoordinatorCommand::RecordSessionFacts {
-            agent_id,
-            session_id,
-            facts,
-            reply,
-        })
+        self.send_to_actor(
+            &agent_id,
+            AgentLoopCommand::RecordThreadFacts {
+                thread_id,
+                facts,
+                reply,
+            },
+        )
         .await?;
         receive(receiver).await?
     }
@@ -165,13 +168,15 @@ impl AgentRuntimeHandle {
         next_step: String,
     ) -> AgentRuntimeResult<AgentProgressCheckpoint> {
         let (reply, receiver) = oneshot::channel();
-        self.send(CoordinatorCommand::ReportProgress {
-            agent_id,
-            stage,
-            summary,
-            next_step,
-            reply,
-        })
+        self.send_to_actor(
+            &agent_id,
+            AgentLoopCommand::ReportProgress {
+                stage,
+                summary,
+                next_step,
+                reply,
+            },
+        )
         .await?;
         receive(receiver).await?
     }
@@ -182,7 +187,7 @@ impl AgentRuntimeHandle {
         agent_id: AgentId,
     ) -> AgentRuntimeResult<AgentSessionDigest> {
         let (reply, receiver) = oneshot::channel();
-        self.send(CoordinatorCommand::ReadSession { agent_id, reply })
+        self.send_to_actor(&agent_id, AgentLoopCommand::ReadSession { reply })
             .await?;
         receive(receiver).await?
     }
@@ -198,7 +203,7 @@ impl AgentRuntimeHandle {
     /// 读取 agent latest snapshot。
     pub async fn snapshot(&self, agent_id: AgentId) -> AgentRuntimeResult<AgentSnapshot> {
         let (reply, receiver) = oneshot::channel();
-        self.send(CoordinatorCommand::Snapshot { agent_id, reply })
+        self.send_to_actor(&agent_id, AgentLoopCommand::Snapshot { reply })
             .await?;
         receive(receiver).await?
     }
@@ -262,24 +267,21 @@ impl AgentRuntimeHandle {
         }
     }
 
-    /// 订阅指定 session；首帧为 snapshot/replay，随后进入独立实时 channel。
-    pub fn subscribe_session(
+    /// 订阅指定 Thread；首帧是 authoritative snapshot，随后进入实时通知 channel。
+    pub fn subscribe_thread(
         &self,
-        request: SessionSubscriptionRequest,
-    ) -> AgentRuntimeResult<SessionEventSubscription> {
-        self.session_events
+        request: ThreadSubscriptionRequest,
+    ) -> AgentRuntimeResult<ThreadEventSubscription> {
+        self.thread_events
             .subscribe(request)
-            .map_err(|error| AgentRuntimeError::SessionEvents(error.to_string()))
+            .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))
     }
 
-    /// 读取包含当前 transient overlay 的 authoritative session projection。
-    pub fn session_snapshot(
-        &self,
-        session_id: &SessionId,
-    ) -> AgentRuntimeResult<SessionViewSnapshot> {
-        self.session_events
-            .snapshot(session_id.as_str())
-            .map_err(|error| AgentRuntimeError::SessionEvents(error.to_string()))
+    /// 读取包含当前 transient overlay 的 authoritative Thread snapshot。
+    pub fn thread_snapshot(&self, thread_id: &ThreadId) -> AgentRuntimeResult<ThreadSnapshot> {
+        self.thread_events
+            .snapshot(thread_id.as_str())
+            .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))
     }
 
     /// host 完成外部资源恢复后，一次性放行启动时暂停的 durable FIFO。
@@ -302,6 +304,24 @@ impl AgentRuntimeHandle {
             .send(command)
             .await
             .map_err(|_| AgentRuntimeError::ChannelClosed)
+    }
+
+    async fn send_to_actor(
+        &self,
+        agent_id: &AgentId,
+        command: AgentLoopCommand,
+    ) -> AgentRuntimeResult<()> {
+        let actor = self.actor(agent_id).await?;
+        actor.send(command).await
+    }
+
+    async fn actor(&self, agent_id: &AgentId) -> AgentRuntimeResult<AgentLoopHandle> {
+        self.actors
+            .read()
+            .await
+            .get(agent_id)
+            .cloned()
+            .ok_or_else(|| AgentRuntimeError::NotFound(agent_id.clone()))
     }
 }
 
@@ -407,4 +427,41 @@ fn changed_wait_result(
 
 async fn receive<T>(receiver: oneshot::Receiver<T>) -> AgentRuntimeResult<T> {
     receiver.await.map_err(|_| AgentRuntimeError::ChannelClosed)
+}
+
+fn root_agent_id_for(
+    directory: &AgentDirectorySnapshot,
+    agent_id: &AgentId,
+) -> AgentRuntimeResult<AgentId> {
+    let parents = directory
+        .agents
+        .iter()
+        .map(|snapshot| {
+            (
+                snapshot.identity.id.clone(),
+                snapshot.identity.parent_id.clone(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    if !parents.contains_key(agent_id) {
+        return Err(AgentRuntimeError::NotFound(agent_id.clone()));
+    }
+    let mut current = agent_id.clone();
+    let mut remaining = parents.len();
+    while let Some(parent) = parents.get(&current).cloned().flatten() {
+        if remaining == 0 {
+            return Err(AgentRuntimeError::Lifecycle(
+                "agent parent graph contains a cycle".to_string(),
+            ));
+        }
+        remaining -= 1;
+        current = parent;
+        if !parents.contains_key(&current) {
+            return Err(AgentRuntimeError::Lifecycle(format!(
+                "agent parent {} is missing while resolving root for {agent_id}",
+                current.as_str()
+            )));
+        }
+    }
+    Ok(current)
 }

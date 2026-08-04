@@ -12,7 +12,6 @@ pub struct StudioTaskRuntime {
     pub stop_requested_reason: Option<String>,
     pub task_generation: u64,
     pub work_units: Vec<StudioTaskWorkUnitRuntime>,
-    pub agents: Vec<StudioTaskAgentRuntime>,
     pub completions: Vec<StudioTaskCompletionRuntime>,
     pub merges: Vec<StudioTaskMergeRuntime>,
     pub reviews: Vec<StudioTaskReviewRuntime>,
@@ -31,24 +30,6 @@ pub struct StudioTaskWorkUnitRuntime {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct StudioTaskAgentRuntime {
-    pub agent_id: String,
-    pub role: String,
-    pub status: String,
-    pub initiated_by: String,
-    pub requested_by_call_id: String,
-    pub summary: Option<String>,
-    pub error: Option<String>,
-    pub head_commit: Option<String>,
-    pub lifecycle: Option<String>,
-    pub activity: Option<String>,
-    pub progress: Option<StudioAgentProgressRuntime>,
-    pub updated_at: i64,
-    pub summary_age_seconds: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
 pub struct StudioAgentProgressRuntime {
     pub stage: String,
     pub summary: String,
@@ -61,8 +42,8 @@ pub struct StudioAgentProgressRuntime {
 #[serde(rename_all = "camelCase")]
 pub struct StudioAgentDirectoryEntry {
     pub id: String,
-    pub session_id: String,
-    pub root_session_id: String,
+    pub thread_id: String,
+    pub root_thread_id: String,
     pub path: String,
     pub parent_path: Option<String>,
     pub role: String,
@@ -145,45 +126,6 @@ pub struct StudioTaskReviewFindingRuntime {
     pub path: Option<String>,
     pub line: Option<u32>,
     pub design_references: Vec<StudioTaskDesignReferenceRuntime>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct StudioSessionHandoff {
-    pub origin_session_id: String,
-    pub target_session_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub target_session: Option<StudioSessionSummary>,
-    pub kind: String,
-    pub status: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub plan_id: Option<String>,
-    pub updated_at: i64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct StudioSessionSummary {
-    pub id: String,
-    pub project_id: String,
-    pub title: String,
-    pub mode: String,
-    pub created_at: i64,
-    pub updated_at: i64,
-    pub visibility: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parent_session_id: Option<String>,
-    pub root_session_id: String,
-    pub session_kind: String,
-    pub owner_agent_id: String,
-    pub owner_role: String,
-    pub agent_status: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub agent_summary: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub agent_error: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub agent_updated_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

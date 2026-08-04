@@ -567,7 +567,7 @@ async fn tool_set_builder_registers_host_mcp_tools() {
         .expect("mcp tool")
         .execute(
             crate::tool::ToolInput {
-                arguments: serde_json::json!({ "query": "agent kernel" }),
+                arguments: serde_json::json!({ "query": "turn engine" }),
                 session_id: "session_mcp".to_string(),
                 tool_id: "call_mcp".to_string(),
                 revision_base: 0,
@@ -581,26 +581,25 @@ async fn tool_set_builder_registers_host_mcp_tools() {
         serde_json::from_str::<serde_json::Value>(&output.description).expect("json output"),
         serde_json::json!({
             "tool": "mcp__docs__lookup",
-            "arguments": { "query": "agent kernel" },
+            "arguments": { "query": "turn engine" },
         })
     );
 
-    let kernel = AgentKernel::builder(
-        TurnEngineBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None)).unwrap(),
-    )
-    .with_profile(CoreAgentProfile::host_provided(std::env::temp_dir()))
-    .with_tool_set(
-        ToolSetBuilder::from_capabilities(crate::config::ToolCapabilityConfig {
-            mcp: true,
-            ..Default::default()
-        })
-        .with_allowed_tools(["mcp__docs__lookup"])
-        .with_mcp_tools(vec![schema], std::sync::Arc::new(FakeMcpToolBackend)),
-    )
-    .build()
+    let workspace_root = std::env::temp_dir();
+    let mut core = TurnEngineBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None))
+        .unwrap()
+        .with_runtime_profile(CoreRuntimeProfile::host_provided(workspace_root.clone()))
+        .build();
+    ToolSetBuilder::from_capabilities(crate::config::ToolCapabilityConfig {
+        mcp: true,
+        ..Default::default()
+    })
+    .with_allowed_tools(["mcp__docs__lookup"])
+    .with_mcp_tools(vec![schema], std::sync::Arc::new(FakeMcpToolBackend))
+    .register(&mut core, workspace_root, None)
     .await;
 
-    assert!(kernel.tool("mcp__docs__lookup").is_some());
+    assert!(core.has_tool("mcp__docs__lookup"));
 }
 
 #[tokio::test]

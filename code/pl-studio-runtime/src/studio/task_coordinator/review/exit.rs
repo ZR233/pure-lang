@@ -28,11 +28,11 @@ struct ReviewExitInput {
 impl TaskCoordinator {
     pub(crate) fn review_exit_tool(
         self: &Arc<Self>,
-        session_id: impl Into<String>,
+        thread_id: impl Into<String>,
         runtime: Option<AgentRuntimeHandle>,
     ) -> RegisteredTool {
         let coordinator = self.clone();
-        let session_id = session_id.into();
+        let thread_id = thread_id.into();
         let _runtime = runtime;
         RegisteredTool::from_typed_fallible_execution_result(
             "review_exit",
@@ -40,9 +40,9 @@ impl TaskCoordinator {
             review_exit_schema(),
             move |input: ReviewExitInput, context| {
                 let coordinator = coordinator.clone();
-                let session_id = session_id.clone();
+                let thread_id = thread_id.clone();
                 async move {
-                    let root_agent_id = crate::studio::agent_host::root_agent_id(&session_id);
+                    let root_agent_id = crate::studio::agent_host::root_agent_id(&thread_id);
                     let reviewer = context
                         .active_subagent
                         .as_ref()
@@ -58,12 +58,12 @@ impl TaskCoordinator {
                     let review = validate_review_exit(input, &trace.read_design)?;
                     let run = coordinator
                         .store
-                        .read_active_task_run_for_session(&session_id)
+                        .read_active_task_run_for_root_thread(&thread_id)
                         .await?;
                     validate_review_repository(&run).await?;
                     let round = coordinator
                         .store
-                        .complete_task_review(&session_id, &reviewer.id, review)
+                        .complete_task_review(&thread_id, &reviewer.id, review)
                         .await?;
                     let mut output = ToolExecutionResult::<serde_json::Value>::json(round)
                         .map_err(anyhow::Error::from)?;

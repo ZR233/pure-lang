@@ -16,7 +16,7 @@ use crate::studio::task_coordinator::{
 impl TaskCoordinator {
     pub(crate) async fn continue_active_conflict(
         &self,
-        session_id: &str,
+        thread_id: &str,
         merge_id: &str,
         resolution_summary: &str,
         runtime: Option<&AgentRuntimeHandle>,
@@ -27,9 +27,7 @@ impl TaskCoordinator {
         let (scope, output) = {
             let guard = self.lock_branch_mutation().await;
             self.ensure_branch_mutation_guard(&guard)?;
-            let (scope, unmerged) = self
-                .load_active_conflict_scope(session_id, merge_id)
-                .await?;
+            let (scope, unmerged) = self.load_active_conflict_scope(thread_id, merge_id).await?;
             if !unmerged.is_empty() {
                 bail!("merge_continue requires zero unresolved conflict entries");
             }
@@ -127,7 +125,7 @@ impl TaskCoordinator {
                 status: MergeStatus::Merged,
                 previous_head: scope.run.expected_head.clone(),
                 new_head: Some(merge_commit),
-                agent_id: scope.outcome.agent_id.clone(),
+                agent_id: scope.completion.executor_agent_id.clone(),
                 source_commit: scope.delivery.head_commit.clone(),
                 changed_files: scope.delivery.changed_files.clone(),
                 verification: verification.steps.clone(),
@@ -142,7 +140,7 @@ impl TaskCoordinator {
 
     pub(crate) async fn abort_active_conflict(
         &self,
-        session_id: &str,
+        thread_id: &str,
         merge_id: &str,
         reason: &str,
     ) -> Result<MergeRecord> {
@@ -151,9 +149,7 @@ impl TaskCoordinator {
         }
         let guard = self.lock_branch_mutation().await;
         self.ensure_branch_mutation_guard(&guard)?;
-        let (scope, _) = self
-            .load_active_conflict_scope(session_id, merge_id)
-            .await?;
+        let (scope, _) = self.load_active_conflict_scope(thread_id, merge_id).await?;
         abort_conflict_scope(self, &scope, reason).await
     }
 

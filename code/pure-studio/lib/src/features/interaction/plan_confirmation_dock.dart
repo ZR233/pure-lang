@@ -12,12 +12,12 @@ import 'interaction_widgets.dart';
 
 class PlanConfirmationDock extends ConsumerStatefulWidget {
   const PlanConfirmationDock({
-    required this.sessionId,
+    required this.threadId,
     this.trailing,
     super.key,
   });
 
-  final String sessionId;
+  final String threadId;
   final Widget? trailing;
 
   @override
@@ -123,7 +123,7 @@ class _PlanConfirmationDockState extends ConsumerState<PlanConfirmationDock> {
     try {
       await ref
           .read(studioControllerProvider.notifier)
-          .resolveActiveInteraction(widget.sessionId, resolution);
+          .resolveActiveInteraction(widget.threadId, resolution);
     } catch (error) {
       if (mounted) {
         setState(() => _error = error.toString());

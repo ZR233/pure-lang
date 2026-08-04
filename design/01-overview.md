@@ -2,82 +2,68 @@
 
 ## 1.1 系统定位
 
-Pure-Lang 是一个自然语言编译器。它把用户的自然语言需求整理为可执行导向的编译计划、代码生成意图和后续动作建议。
+Pure-Lang 是一个自然语言编译器。Pure Studio 是当前唯一桌面产品入口，由 Flutter UI、
+flutter_rust_bridge、Studio 产品运行时和产品无关的 Thread runtime 组成。
 
-当前架构收束为核心层与 Flutter 桌面前端。Flutter + flutter_rust_bridge v2 是唯一桌面入口，调用 `pl-studio-runtime` 组合的 `pl-core` agent runtime、双库 SQLite adapter 和公共协议。
+系统只使用四个会话概念：
+
+- `Thread`：一个 agent 独占的对话、模型上下文和输入队列；root Thread 是用户可见会话，
+  child Thread 是子代理自己的会话。
+- `Turn`：Thread 中一次由明确输入启动的执行，状态为 queued、inProgress、completed、
+  failed 或 interrupted。
+- `Item`：Turn 内按固定顺序出现的用户消息、agent 消息、reasoning、plan、tool call、file
+  或内部 context compaction。
+- `Interaction`：等待用户回答的 user input、tool approval 或 plan confirmation；它不是普通
+ 聊天 Item。
+
+## 1.2 运行路径
 
 ```text
-pure-studio
-  │  Flutter Windows 桌面应用：Material 3、Riverpod、按会话订阅事件流
-  ▼
-pl-studio-bridge
-  │  flutter_rust_bridge v2：FRB API、Stream<BridgeEventEnvelope> typed payload
-  ▼
-pl-core
+Flutter ThreadWorkspace
+        ↕ typed FRB
+StudioRuntime ── TaskService
+        ↓
+ThreadManager → ThreadActor → TurnEngine
+        ↓              ↓ typed live notifications
+       studio.sqlite
 ```
 
-## 1.2 核心概念
+- `ThreadManager` 维护 Thread registry、父子关系和 spawn/close。
+- 每个 `ThreadActor` 串行拥有一个 Thread 的输入队列、活动 Turn、取消句柄和 live Item overlay。
+- `TurnEngine` 只负责模型采样、工具调用、interaction 等待和上下文压缩。
+- `TaskService` 管理 TaskRun、worktree、delivery、review、merge、branch lease 与恢复，不修改
+  Thread 状态机。
+- `studio.sqlite` 是所有 durable Thread/Turn/Item/Interaction 与 Studio 产品事实的唯一数据库。
 
-| 概念 | 说明 |
+## 1.3 唯一事实源
+
+| 事实 | 唯一拥有者 |
 | --- | --- |
-| `pure-studio` | Pure-Lang 的 Flutter 桌面前端，首版只承诺 Windows，使用 Riverpod store 和会话级事件订阅 |
-| `pl-studio-bridge` | Flutter Rust Bridge v2 桥接 crate，把 Flutter API 转为 `pl-core` Studio runtime 调用，并把 Rust event stream 映射为 Dart stream |
-| `pl-core` | 产品无关核心逻辑层，组合会话、单轮请求、工具审批、模型调用、runtime 状态机和结果整理，不依赖 SeaORM 或 Studio 路径 |
-| `pl-studio-runtime` | Pure Studio 产品宿主，拥有 config、双库 SQLite schema、Task/worktree、历史 writer 与 UI projection |
-| `pl-model` | LLM provider 层，负责外部模型 API 适配 |
-| `pl-lsp` | LSP 客户端层，负责语言服务器进程、JSON-RPC framing 和代码智能查询 |
-| `pl-protocol` | 公共协议层，定义消息、Studio wire DTO、错误、权限和状态等共享类型 |
-| `pl-trace` | 内部 trace 协议层，定义 `AgentEvent`、`TraceEvent` 和 `TracePart`，进入 Studio 前必须映射为 message/part 事件 |
+| Thread、Turn、Item、输入、Interaction | `studio.sqlite` |
+| 活动 Turn、流式增量、steer、取消 identity | `ThreadActor` |
+| Task/worktree/review/merge/lease | `TaskService` 对应表 |
+| Composer、滚动、展开、订阅 generation | Flutter `WorkspaceUiState` |
 
-## 1.3 设计原则
+不存在第二套 session/message/part projection、durable event journal、snapshot JSON 或双库
+watermark。UI snapshot 由 canonical 表与活动 actor overlay 组成；历史只按 Turn keyset 分页。
 
-- `pl-protocol` 不依赖内部 crate，是协议和类型边界。
-- `pl-model` 只依赖 `pl-protocol` 与 `pl-trace`，不承担核心流程编排。
-- `pl-lsp` 只依赖 LSP 协议与异步运行时，不依赖 `pl-core`。
-- `pl-core` 可以依赖 `pl-model`、`pl-lsp`、`pl-protocol` 和 `pl-trace`，负责组合产品无关核心逻辑；Studio 配置和 SQLite 持久化归 `pl-studio-runtime`。
-- `pure-studio` 保持薄入口层，Flutter UI 不直接持久化业务状态，只通过 `pl-studio-bridge` 调用 `pl-core` 并消费稳定的 Studio event envelope。
-- `pl-studio-bridge` 不拥有业务规则。实时 stream 和 stale backfill 的 `BridgeEventEnvelope` 使用 typed FRB payload union，Dart 边界层归一为 `StudioBridgeEventPayload` 后交给 Riverpod reducer；snapshot 和命令响应使用 typed DTO。完整 config/general settings 与工具参数这类开放 JSON 标量只能停留在 FRB adapter 边界，不能扩散到 UI store；interaction payload 与 agent timeline payload 必须作为 typed DTO/union 传递。桥接层避免直接暴露 `serde_json::Value`，未知协议不得静默降级。
-- 当前版本没有独立沙箱层；Studio 运行路径默认使用 `PermissionMode::RequestApproval`。workspace 内访问按本地策略直接放行，workspace 外访问按权限模式请求用户审批、AI reviewer 审批或在 `full-access` 下放行。
+## 1.4 Crate 边界
 
-## 1.4 桌面编译路径
+- `pl-protocol`：Thread/Turn/Item、Interaction、runtime 与 product wire 类型。
+- `pl-trace`：模型和工具内部诊断事件，不作为 UI 协议或持久化事实源。
+- `pl-model`：provider 与 transport 适配。
+- `pl-core`：ThreadManager、ThreadActor、TurnEngine、通用工具与 agent control plane。
+- `pl-studio-runtime`：单库 StudioStore、项目、Task、worktree、配置与产品事件。
+- `pl-studio-bridge`：protocol 到 FRB DTO 的机械映射。
+- `pure-studio`：ThreadWorkspace reducer、timeline、interaction、状态栏和设置 UI。
 
-```text
-用户选择项目和会话
-  → pure-studio 调用 pl-core Studio API
-  → pl-studio-runtime 读取 ~/.pure/studio/studio_state.sqlite 与 studio_history.sqlite
-  → pl-studio-runtime 读取 ~/.pure/config.toml
-  → pl-core 确认 Studio runtime 状态为 Ready
-  → pl-core 构造 TurnRequest 和 TurnOptions
-  → pl-core 读取项目 Agents.md 并运行 turn
-  → pl-model 推送 pl-trace AgentEvent
-  → pl-core 将内部 trace 映射为 Studio message/part snapshot 与 live delta
-  → pure-studio 通过 FRB Stream<BridgeEventEnvelope> 只监听当前会话高频事件
-  → pl-studio-runtime 异步批量写完整历史，再提交状态 projection 和广播 durable event
-```
+模块默认私有；产品层不能反写 Thread turn 状态，Flutter 不能从 Item、Interaction 或 Task
+本地推断 canonical Turn 状态。
 
-双库的 schema、提交顺序、恢复、分页、GC 和日志合同见
-`19-studio-storage-and-diagnostics.md`。
+## 1.5 恢复原则
 
-Studio runtime 对 UI 暴露明确状态机：
+进程重启不能恢复物理模型连接。启动事务把遗留 inProgress Turn/Item 收束为
+`interrupted(runtimeRestarted)`，重新排队未确认消费的明确输入，取消 tool approval，保留
+user input 与 plan confirmation。活动 Task 没有 pending input 时保持 paused，由用户显式继续。
 
-```text
-Uninitialized -> Initializing -> Ready -> ShuttingDown -> Stopped
-                         │                         │
-                         └──────────────► Failed ◄──┘
-```
-
-`initializeRuntime()` 只完成配置、store、projection 恢复和未完成 turn 收敛；`startRuntime()` 启动后台 MCP/LSP health、事件桥接和可取消 turn 运行；`shutdownRuntime()` 取消活动 turn、关闭后台任务并进入 `Stopped` 或 `Failed`。每个会话拥有独立 active turn 与 cancellation handle；打开哪个会话，Flutter 端才订阅哪个会话的高频事件。
-
-Studio 事件分为两类订阅：
-
-- 会话订阅：`subscribe_session(sessionId)` 只包含该会话 timeline、turn、interaction、session runtime、agent 和高频 `messagePartDelta`。
-- 全局订阅：`subscribe_global()` 包含项目、配置、Provider usage、MCP/LSP health 等低频全局变化。
-
-## 1.5 依赖规则
-
-```text
-pl-protocol  ←  pl-trace  ←  pl-model  ←  pl-core  ←  pl-studio-bridge  ←  pure-studio
-                              pl-lsp    ←  pl-core
-```
-
-`pl-core` 也直接依赖 `pl-protocol`、`pl-trace`、`pl-model` 与 `pl-lsp`，分别用于公共 wire/status 类型、内部运行 trace、模型 provider 和 LSP 查询能力。
+恢复、清理和归档永不猜测资源所有权，也不自动删除旧 Task worktree 或用户工作区。

@@ -16,9 +16,9 @@ import '../../shared/studio_chrome.dart';
 import '../../shared/studio_driver_keys.dart';
 import '../update/studio_update_controller.dart';
 import '../interaction/composer_dock.dart';
-import '../status/session_status_bar.dart';
+import '../status/thread_status_bar.dart';
 import '../timeline/timeline_view.dart';
-import '../todo/session_todo_panel.dart';
+import '../todo/todo_panel.dart';
 
 part 'studio_sidebar.dart';
 part 'recovery_cleanup_dialog.dart';

@@ -166,7 +166,7 @@ fn snapshot_for_event(kind: &AgentRuntimeEventKind) -> AgentSnapshot {
         | AgentRuntimeEventKind::StateChanged { snapshot }
         | AgentRuntimeEventKind::TurnQueued { snapshot, .. }
         | AgentRuntimeEventKind::TurnStarted { snapshot, .. }
-        | AgentRuntimeEventKind::SessionOpened { snapshot, .. }
+        | AgentRuntimeEventKind::ThreadOpened { snapshot, .. }
         | AgentRuntimeEventKind::TurnFinished { snapshot, .. }
         | AgentRuntimeEventKind::RecoveryCancelledTurn { snapshot, .. }
         | AgentRuntimeEventKind::Faulted { snapshot, .. } => snapshot.clone(),

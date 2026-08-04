@@ -15,48 +15,38 @@ Duration? _disableStudioRetry(int retryCount, Object error) => null;
 @Riverpod(keepAlive: true, retry: _disableStudioRetry)
 class StudioController extends _$StudioController {
   late ProductStreamCoordinator _productCoordinator;
-  late SessionStreamCoordinator _sessionCoordinator;
-  late PartDeltaBatcher _partDeltaBatcher;
+  late ThreadStreamCoordinator _threadCoordinator;
 
   StudioApi get _api => ref.read(studioApiProvider);
 
   @override
   Future<StudioState> build() async {
-    _productCoordinator = ProductStreamCoordinator(_api, _handleEvent);
-    _sessionCoordinator = SessionStreamCoordinator(
+    _productCoordinator = ProductStreamCoordinator(_api, _handleProductEvent);
+    _threadCoordinator = ThreadStreamCoordinator(
       _api,
-      _handleSessionFrame,
-      _resubscribeSnapshot,
+      _handleThreadFrame,
+      _markThreadDisconnected,
     );
-    _partDeltaBatcher = PartDeltaBatcher(_applyPartDeltaBatch);
     ref.onDispose(() {
-      _partDeltaBatcher.dispose();
       unawaited(_productCoordinator.dispose());
-      unawaited(_sessionCoordinator.dispose());
+      unawaited(_threadCoordinator.dispose());
     });
     final catalog = await _api.loadProviderCatalog();
-    var bootstrapped = _attachProviderCatalog(await _api.bootstrap(), catalog);
-    final sessionId = bootstrapped.selectedSessionId;
-    if (sessionId != null) {
-      final page = await _api.loadSessionHistoryPage(sessionId);
-      bootstrapped = _withHistoryPaging(
-        mergeSessionHistoryPage(bootstrapped, sessionId, page),
-        sessionId,
-        SessionHistoryPagingState(
-          nextBeforeTurnSequence: page.nextBeforeTurnSequence,
-          hasMore: page.hasMore,
-          isLoading: false,
-          isLoaded: true,
-        ),
-      );
-    }
-    await _subscribe(sessionId, forceSnapshot: true);
+    final bootstrapped = _attachProviderCatalog(
+      await _api.bootstrap(),
+      catalog,
+    );
+    _productCoordinator.start();
+    unawaited(
+      Future<void>.microtask(
+        () => _subscribeThread(bootstrapped.selectedThreadId),
+      ),
+    );
     return bootstrapped;
   }
 
   Future<void> openProject(String path) async {
-    final next = await _api.openProject(path);
-    await _adoptState(next);
+    await _adoptProductState(await _api.openProject(path));
   }
 
   Future<void> selectProject(String projectId) async {
@@ -66,23 +56,21 @@ class StudioController extends _$StudioController {
         current.recoveryIssueForProject(projectId) != null) {
       return;
     }
-    final next = await _api.selectProject(projectId);
-    await _adoptState(next);
+    await _adoptProductState(await _api.selectProject(projectId));
   }
 
   Future<void> archiveProject(String projectId) async {
     final current = state.value;
-    if (current == null) {
+    if (current == null ||
+        (current.isBusy && current.selectedProjectId == projectId)) {
       return;
     }
-    if (current.isBusy && current.selectedProjectId == projectId) {
-      return;
-    }
-    final next = await _api.archiveProject(
-      projectId,
-      selectedProjectId: current.selectedProjectId,
+    await _adoptProductState(
+      await _api.archiveProject(
+        projectId,
+        selectedProjectId: current.selectedProjectId,
+      ),
     );
-    await _adoptState(next);
   }
 
   Future<RecoveryCleanupPreview> previewProjectCleanup(String projectId) {
@@ -91,345 +79,262 @@ class StudioController extends _$StudioController {
 
   Future<void> cleanupProject(String projectId, String expectedRevision) async {
     final current = state.value;
-    if (current == null) {
-      return;
-    }
-    final next = await _api.cleanupProject(
-      projectId,
-      expectedRevision,
-      selectedProjectId: current.selectedProjectId,
-    );
-    await _adoptState(next);
-  }
-
-  Future<void> createSession() async {
-    final current = state.value;
-    final projectId = current?.selectedProjectId;
-    if (projectId == null) {
-      return;
-    }
-    final next = await _api.createSession(projectId);
-    await _adoptState(next);
-  }
-
-  Future<void> archiveSession(String sessionId) async {
-    final current = state.value;
-    if (current == null ||
-        (current.isBusy && current.selectedRootSession?.id == sessionId)) {
-      return;
-    }
-    final next = await _api.archiveSession(
-      sessionId,
-      selectedSessionId: current.selectedSessionId,
-    );
-    await _adoptState(next);
-  }
-
-  Future<void> _subscribe(
-    String? sessionId, {
-    bool forceSnapshot = false,
-  }) async {
-    _partDeltaBatcher.flush();
-    _productCoordinator.start();
-    final afterSequence = forceSnapshot || sessionId == null
-        ? null
-        : state.value?.eventCursorsBySession[sessionId];
-    await _sessionCoordinator.switchSession(
-      sessionId,
-      afterSequence: afterSequence,
-    );
-  }
-
-  Future<void> selectSession(String sessionId) async {
-    final current = state.value;
-    if (current == null ||
-        current.selectedSessionId == sessionId ||
-        current.recoveryIssueForSession(sessionId) != null) {
-      return;
-    }
-    final session = current.sessions
-        .where((session) => session.id == sessionId)
-        .firstOrNull;
-    final syncStates = _workspaceSyncAfterSelecting(current, sessionId);
-    state = AsyncData(
-      current.copyWith(
-        selectedRootSessionId: session?.effectiveRootSessionId ?? sessionId,
-        selectedSessionId: sessionId,
-        workspaceSyncBySession: syncStates,
+    if (current == null) return;
+    await _adoptProductState(
+      await _api.cleanupProject(
+        projectId,
+        expectedRevision,
+        selectedProjectId: current.selectedProjectId,
       ),
     );
-    await loadOlderHistory(sessionId);
-    await _subscribe(sessionId, forceSnapshot: true);
   }
 
-  Future<void> selectAgentSession(String sessionId) async {
+  Future<void> selectThread(String threadId) => _selectThread(threadId);
+
+  Future<void> selectAgentThread(String threadId) async {
     final current = state.value;
-    if (current == null || current.selectedSessionId == sessionId) {
-      return;
-    }
-    final target = current.sessions
-        .where((session) => session.id == sessionId)
+    if (current == null || current.selectedThreadId == threadId) return;
+    final target = current.threads
+        .where((thread) => thread.id == threadId)
         .firstOrNull;
-    if (target == null) {
+    if (target == null || current.recoveryIssueForThread(threadId) != null) {
       return;
     }
-    if (current.recoveryIssueForSession(sessionId) != null) {
-      return;
-    }
-    final selectedRoot = current.selectedRootSession;
-    if (selectedRoot != null &&
-        target.effectiveRootSessionId != selectedRoot.id) {
-      return;
-    }
-    final syncStates = _workspaceSyncAfterSelecting(current, target.id);
-    state = AsyncData(
-      current.copyWith(
-        selectedRootSessionId: target.effectiveRootSessionId,
-        selectedSessionId: target.id,
-        workspaceSyncBySession: syncStates,
-      ),
-    );
-    await loadOlderHistory(target.id);
-    await _subscribe(target.id, forceSnapshot: true);
+    final root = current.selectedRootThread;
+    if (root != null && target.effectiveRootThreadId != root.id) return;
+    await _selectThread(threadId);
   }
 
-  Future<void> loadOlderHistory(String sessionId) async {
+  Future<void> _selectThread(String threadId) async {
     final current = state.value;
     if (current == null ||
-        !current.sessions.any((session) => session.id == sessionId)) {
+        current.selectedThreadId == threadId ||
+        !current.threads.any((thread) => thread.id == threadId) ||
+        current.recoveryIssueForThread(threadId) != null) {
       return;
     }
-    final paging =
-        current.historyPagingBySession[sessionId] ??
-        const SessionHistoryPagingState.initial();
-    if (paging.isLoading || (paging.isLoaded && !paging.hasMore)) {
-      return;
-    }
-    final requestCursor = paging.isLoaded
-        ? paging.nextBeforeTurnSequence
-        : null;
     state = AsyncData(
-      _withHistoryPaging(
+      _withWorkspaceUi(
+        current.copyWith(selectedThreadId: threadId),
+        threadId,
+        (ui) => ui.copyWith(syncState: AgentWorkspaceSyncState.loading),
+      ),
+    );
+    await _subscribeThread(threadId);
+  }
+
+  Future<void> _subscribeThread(String? threadId) async {
+    final generation = _threadCoordinator.switchThread(threadId);
+    if (!ref.mounted || threadId == null) return;
+    final current = state.value;
+    if (current == null || current.selectedThreadId != threadId) return;
+    state = AsyncData(
+      _withWorkspaceUi(
         current,
-        sessionId,
-        SessionHistoryPagingState(
-          nextBeforeTurnSequence: paging.nextBeforeTurnSequence,
-          hasMore: paging.hasMore,
-          isLoading: true,
-          isLoaded: paging.isLoaded,
+        threadId,
+        (ui) => ui.copyWith(subscriptionGeneration: generation),
+      ),
+    );
+  }
+
+  Future<void> loadOlderHistory(String threadId) async {
+    final current = state.value;
+    if (current == null || current.workspacesByThread[threadId] == null) return;
+    final paging = _workspaceUi(current, threadId).history;
+    if (paging.isLoading || (paging.isLoaded && !paging.hasMore)) return;
+    state = AsyncData(
+      _withWorkspaceUi(
+        current,
+        threadId,
+        (ui) => ui.copyWith(
+          history: ThreadHistoryPagingState(
+            nextCursor: paging.nextCursor,
+            hasMore: paging.hasMore,
+            isLoading: true,
+            isLoaded: paging.isLoaded,
+          ),
         ),
       ),
     );
     try {
-      final page = await _api.loadSessionHistoryPage(
-        sessionId,
-        beforeTurnSequence: requestCursor,
+      final page = await _api.listThreadTurns(
+        threadId,
+        cursor: paging.isLoaded ? paging.nextCursor : null,
       );
-      if (!ref.mounted) {
-        return;
-      }
+      if (!ref.mounted) return;
       final latest = state.value;
-      if (latest == null) {
-        return;
-      }
+      if (latest == null) return;
       state = AsyncData(
-        _withHistoryPaging(
-          mergeSessionHistoryPage(latest, sessionId, page),
-          sessionId,
-          SessionHistoryPagingState(
-            nextBeforeTurnSequence: page.nextBeforeTurnSequence,
-            hasMore: page.hasMore,
-            isLoading: false,
-            isLoaded: true,
+        _withWorkspaceUi(
+          mergeThreadHistoryPage(latest, threadId, page),
+          threadId,
+          (ui) => ui.copyWith(
+            history: ThreadHistoryPagingState(
+              nextCursor: page.nextCursor,
+              hasMore: page.nextCursor != null,
+              isLoading: false,
+              isLoaded: true,
+            ),
           ),
         ),
       );
     } catch (error) {
-      if (!ref.mounted) {
-        return;
-      }
+      if (!ref.mounted) return;
       final latest = state.value;
-      if (latest == null) {
-        return;
-      }
-      final active =
-          latest.historyPagingBySession[sessionId] ??
-          const SessionHistoryPagingState.initial();
+      if (latest == null) return;
+      final active = _workspaceUi(latest, threadId).history;
       state = AsyncData(
-        _withHistoryPaging(
+        _withWorkspaceUi(
           latest,
-          sessionId,
-          SessionHistoryPagingState(
-            nextBeforeTurnSequence: active.nextBeforeTurnSequence,
-            hasMore: active.hasMore,
-            isLoading: false,
-            isLoaded: active.isLoaded,
-            errorMessage: error.toString(),
+          threadId,
+          (ui) => ui.copyWith(
+            history: ThreadHistoryPagingState(
+              nextCursor: active.nextCursor,
+              hasMore: active.hasMore,
+              isLoading: false,
+              isLoaded: active.isLoaded,
+              errorMessage: error.toString(),
+            ),
           ),
         ),
       );
     }
   }
 
-  void updateComposer(String sessionId, String value) {
+  void updateComposer(String threadId, String value) {
     final current = state.value;
-    if (current == null || current.selectedAgentSessionId != sessionId) {
-      return;
-    }
-    final composer =
-        current.composersBySession[sessionId] ??
-        const ComposerSessionState.idle();
+    if (current == null || current.selectedThreadId != threadId) return;
     state = AsyncData(
-      _withComposer(current, sessionId, composer.updateDraft(value)),
+      _withWorkspaceUi(
+        current,
+        threadId,
+        (ui) => ui.copyWith(composer: ui.composer.updateDraft(value)),
+      ),
     );
   }
 
-  Future<void> submitComposer(String sessionId) async {
+  Future<void> submitComposer(String threadId) async {
     final current = state.value;
-    final composer =
-        current?.composersBySession[sessionId] ??
-        const ComposerSessionState.idle();
+    final composer = current == null
+        ? const ComposerThreadState.idle()
+        : _workspaceUi(current, threadId).composer;
     final prompt = composer.draft.trim();
     if (current == null ||
-        current.selectedAgentSessionId != sessionId ||
+        current.selectedThreadId != threadId ||
         prompt.isEmpty ||
         composer.isSubmissionPending) {
       return;
     }
-    final submitting = composer.beginSubmission();
-    await _submitSessionInput(
+    final workspace = current.workspacesByThread[threadId];
+    final submit = workspace?.activeTurn?.state.isBusy == true
+        ? () => _api.steerTurn(threadId, prompt, const [])
+        : () => _api.startTurn(threadId, prompt, const []);
+    await _submitThreadInput(
       current,
-      sessionId,
-      submitting,
-      () => _api.submitPrompt(sessionId, prompt, const []),
+      threadId,
+      composer.beginSubmission(),
+      submit,
     );
   }
 
-  Future<void> resumeTask(String sessionId) async {
+  Future<void> resumeTask(String threadId) async {
     final current = state.value;
-    final composer =
-        current?.composersBySession[sessionId] ??
-        const ComposerSessionState.idle();
+    final composer = current == null
+        ? const ComposerThreadState.idle()
+        : _workspaceUi(current, threadId).composer;
     if (current == null ||
-        current.selectedAgentSessionId != sessionId ||
+        current.selectedThreadId != threadId ||
         current.selectedAgentWorkspace?.isTaskPaused != true ||
         composer.isSubmissionPending) {
       return;
     }
-    final submitting = composer.beginCommandSubmission();
-    await _submitSessionInput(
+    await _submitThreadInput(
       current,
-      sessionId,
-      submitting,
-      () => _api.resumeTask(sessionId),
+      threadId,
+      composer.beginCommandSubmission(),
+      () => _api.startTurn(threadId, '继续任务', const []),
     );
   }
 
-  Future<void> _submitSessionInput(
+  Future<void> _submitThreadInput(
     StudioState current,
-    String sessionId,
-    ComposerSessionState submitting,
+    String threadId,
+    ComposerThreadState submitting,
     Future<SubmitPromptReceipt> Function() submit,
   ) async {
     final submissionRevision = submitting.submissionRevision;
-    state = AsyncData(_withComposer(current, sessionId, submitting));
+    state = AsyncData(
+      _withWorkspaceUi(
+        current,
+        threadId,
+        (ui) => ui.copyWith(composer: submitting),
+      ),
+    );
     final SubmitPromptReceipt receipt;
     try {
       receipt = await submit();
     } catch (error) {
-      if (!ref.mounted) {
-        return;
-      }
+      if (!ref.mounted) return;
       final latest = state.value;
-      final active = latest?.composersBySession[sessionId];
-      if (latest == null || active == null) {
-        return;
-      }
+      if (latest == null) return;
+      final active = _workspaceUi(latest, threadId).composer;
       final failed = active.fail(error, submissionRevision: submissionRevision);
-      if (!identical(failed, active)) {
-        state = AsyncData(_withComposer(latest, sessionId, failed));
-      }
+      state = AsyncData(
+        _withWorkspaceUi(
+          latest,
+          threadId,
+          (ui) => ui.copyWith(composer: failed),
+        ),
+      );
       return;
     }
-    if (!ref.mounted) {
-      return;
-    }
+    if (!ref.mounted) return;
     final latest = state.value;
-    final active = latest?.composersBySession[sessionId];
-    if (latest == null || active == null) {
-      return;
-    }
-    if (receipt.sessionId != sessionId) {
+    if (latest == null) return;
+    final active = _workspaceUi(latest, threadId).composer;
+    if (receipt.threadId != threadId) {
       final failed = active.fail(
         StateError(
-          'submit receipt session ${receipt.sessionId} does not match $sessionId',
+          'submit receipt thread ${receipt.threadId} does not match $threadId',
         ),
         submissionRevision: submissionRevision,
       );
-      if (!identical(failed, active)) {
-        state = AsyncData(_withComposer(latest, sessionId, failed));
-      }
+      state = AsyncData(
+        _withWorkspaceUi(
+          latest,
+          threadId,
+          (ui) => ui.copyWith(composer: failed),
+        ),
+      );
       return;
     }
-    final accepted = active
-        .accept(receipt, submissionRevision: submissionRevision)
-        .observeTurn(latest.turnsBySession[sessionId]);
-    if (identical(accepted, active)) {
-      return;
-    }
-    state = AsyncData(_withComposer(latest, sessionId, accepted));
-    if (state.value?.selectedSessionId == sessionId) {
-      await _subscribe(sessionId, forceSnapshot: true);
-    }
+    final accepted = active.accept(
+      receipt,
+      submissionRevision: submissionRevision,
+    );
+    state = AsyncData(
+      _withWorkspaceUi(
+        latest,
+        threadId,
+        (ui) => ui.copyWith(composer: accepted),
+      ),
+    );
   }
 
-  Future<void> stop(String sessionId) async {
+  Future<void> stop(String threadId) async {
     final current = state.value;
-    if (current == null || current.selectedAgentSessionId != sessionId) {
+    final turn = current?.workspacesByThread[threadId]?.activeTurn;
+    if (current == null ||
+        current.selectedThreadId != threadId ||
+        turn == null ||
+        !turn.state.isBusy) {
       return;
     }
-    await _api.stopPrompt(sessionId);
+    await _api.interruptTurn(threadId, turn.turnId);
   }
 
   Future<void> setPermissionMode(PermissionMode mode) async {
-    final current = state.value;
-    if (current == null) {
-      return;
-    }
-    final next = await _api.saveRuntimePermissionMode(mode);
-    final latest = state.value;
-    if (latest != null) {
-      state = AsyncData(mergeStudioConfigState(latest, next));
-    }
-  }
-
-  Future<void> setSessionMode(StudioMode mode) async {
-    final current = state.value;
-    final sessionId = current?.selectedSessionId;
-    if (current == null ||
-        sessionId == null ||
-        current.isBusy ||
-        current.runtime.hasActiveTask ||
-        current.sessions
-                .where((session) => session.id == sessionId)
-                .firstOrNull
-                ?.mode ==
-            mode) {
-      return;
-    }
-    final updated = await _api.setSessionMode(sessionId, mode);
-    final latest = state.value;
-    if (latest == null) {
-      return;
-    }
-    state = AsyncData(
-      latest.copyWith(
-        sessions: [
-          for (final session in latest.sessions)
-            session.id == updated.id ? updated : session,
-        ],
-      ),
-    );
+    await _saveConfigSettings(() => _api.saveRuntimePermissionMode(mode));
   }
 
   Future<void> setModelRole({
@@ -439,9 +344,7 @@ class StudioController extends _$StudioController {
     String? effort,
   }) async {
     final current = state.value;
-    if (current == null) {
-      return;
-    }
+    if (current == null) return;
     final role = current.role(roleKey);
     if (role != null &&
         role.providerId == providerId &&
@@ -449,33 +352,19 @@ class StudioController extends _$StudioController {
         (effort == null || role.effort == effort)) {
       return;
     }
-    final nextEffort =
-        effort ?? defaultEffortForModel(current, providerId, model);
     final next = await _api.setModelRole(
       roleKey: roleKey,
       providerId: providerId,
       model: model,
-      effort: nextEffort,
-      selectedSessionId: current.selectedSessionId,
+      effort: effort ?? defaultEffortForModel(current, providerId, model),
+      selectedThreadId: current.selectedThreadId,
     );
     final latest = state.value;
-    if (latest == null) {
-      return;
-    }
-    state = AsyncData(mergeStudioConfigState(latest, next));
+    if (latest != null) state = AsyncData(mergeStudioConfigState(latest, next));
   }
 
   Future<void> saveProviderSettings(ProviderSettingsCommand command) async {
-    final current = state.value;
-    if (current == null) {
-      return;
-    }
-    final next = await _api.saveProviderSettings(command);
-    final latest = state.value;
-    if (latest == null) {
-      return;
-    }
-    state = AsyncData(mergeStudioConfigState(latest, next));
+    await _saveConfigSettings(() => _api.saveProviderSettings(command));
   }
 
   Future<void> saveInstructionsSettings(
@@ -503,37 +392,25 @@ class StudioController extends _$StudioController {
   Future<void> _saveConfigSettings(
     Future<StudioState> Function() request,
   ) async {
-    final current = state.value;
-    if (current == null) {
-      return;
-    }
+    if (state.value == null) return;
     final next = await request();
     final latest = state.value;
-    if (latest == null) {
-      return;
-    }
-    state = AsyncData(mergeStudioConfigState(latest, next));
+    if (latest != null) state = AsyncData(mergeStudioConfigState(latest, next));
   }
 
   Future<void> refreshProviderUsages() async {
     final current = state.value;
-    if (current == null) {
-      return;
-    }
+    if (current == null) return;
     final usages = await _api.loadProviderUsages();
     final latest = state.value;
-    if (latest == null) {
-      return;
+    if (latest != null) {
+      state = AsyncData(latest.copyWith(providerUsages: usages));
     }
-    state = AsyncData(latest.copyWith(providerUsages: usages));
   }
 
   Future<List<String>> listDiscoveredSkills() async {
     final projectId = state.value?.selectedProjectId;
-    if (projectId == null) {
-      return const [];
-    }
-    return _api.listDiscoveredSkills(projectId);
+    return projectId == null ? const [] : _api.listDiscoveredSkills(projectId);
   }
 
   Future<RecoveryCleanupPreview> previewRecoveryIssueCleanup(String issueId) {
@@ -545,268 +422,195 @@ class StudioController extends _$StudioController {
     String expectedRevision,
   ) async {
     final current = state.value;
-    if (current == null) {
-      return;
-    }
-    final next = await _api.cleanupRecoveryIssue(
-      issueId,
-      expectedRevision,
-      selectedProjectId: current.selectedProjectId,
-      selectedSessionId: current.selectedSessionId,
+    if (current == null) return;
+    await _adoptProductState(
+      await _api.cleanupRecoveryIssue(
+        issueId,
+        expectedRevision,
+        selectedProjectId: current.selectedProjectId,
+        selectedThreadId: current.selectedThreadId,
+      ),
     );
-    await _adoptState(next);
   }
 
-  void retryInitialization() {
-    ref.invalidateSelf();
-  }
+  void retryInitialization() => ref.invalidateSelf();
 
   Future<void> resolveActiveInteraction(
-    String sessionId,
+    String threadId,
     InteractionResolutionCommand resolution,
   ) async {
     final current = state.value;
+    final workspace = current?.workspacesByThread[threadId];
     final interaction = current?.activeInteraction;
     if (current == null ||
-        current.selectedAgentSessionId != sessionId ||
+        current.selectedThreadId != threadId ||
+        workspace == null ||
         interaction == null) {
       return;
     }
-    final shouldContinuePlanning =
-        resolution is PlanConfirmationResolutionCommand &&
-        resolution.decision == PlanConfirmationDecision.continuePlanning;
-    final followUpPrompt = planFollowUpPrompt(interaction, resolution);
-    final result = await _api.resolveInteraction(interaction.id, resolution);
-    final latest = state.value ?? current;
+    await _api.respondInteraction(interaction.id, resolution);
+    if (!ref.mounted) return;
+    final latest = state.value;
+    final active = latest?.workspacesByThread[threadId];
+    if (latest == null || active == null) return;
     state = AsyncData(
       latest.copyWith(
-        sessions: result.sessions.isEmpty ? latest.sessions : result.sessions,
-        pendingInteractions: result.isResolved
-            ? latest.pendingInteractions
-                  .where((candidate) => candidate.id != result.interactionId)
-                  .toList()
-            : latest.pendingInteractions,
+        workspacesByThread: {
+          ...latest.workspacesByThread,
+          threadId: active.copyWith(
+            interactions: active.interactions
+                .where((candidate) => candidate.id != interaction.id)
+                .toList(),
+          ),
+        },
       ),
     );
-    if (shouldContinuePlanning &&
-        followUpPrompt.isNotEmpty &&
-        interaction.sessionId.isNotEmpty) {
-      await _api.submitPrompt(interaction.sessionId, followUpPrompt, const []);
-    }
-    if (result.isResolved &&
-        interaction.sessionId.isNotEmpty &&
-        state.value?.selectedAgentSessionId == interaction.sessionId) {
-      await _subscribe(interaction.sessionId, forceSnapshot: true);
-    }
   }
 
-  void _handleEvent(Object event) {
+  void _handleProductEvent(Object event) {
     final current = state.value;
-    if (current == null || event is! StudioBridgeEvent) {
-      return;
-    }
-    if (event.payload is MessagePartDeltaPayload) {
-      _queuePartDelta(current, event);
-      return;
-    }
-    _partDeltaBatcher.flush();
-    final latest = state.value;
-    if (latest == null) {
-      return;
-    }
+    if (current == null || event is! StudioBridgeEvent) return;
     if (event.payload is StalePayload) {
-      final sessionId = event.sessionId ?? latest.selectedSessionId;
-      if (sessionId != null) {
-        _resubscribeSnapshot(sessionId, _sessionCoordinator.generation);
-      }
+      unawaited(_reloadProductState());
       return;
     }
-    if (!targetsSelectedSession(latest, event) ||
-        isDuplicateDurableEvent(latest, event)) {
-      return;
+    final previousThreadId = current.selectedThreadId;
+    final next = reduceStudioEvent(current, event).state;
+    state = AsyncData(next);
+    if (previousThreadId != next.selectedThreadId) {
+      unawaited(_subscribeThread(next.selectedThreadId));
     }
-    state = AsyncData(_reduceEventWithCursor(latest, event));
   }
 
-  void _handleSessionFrame(
-    SessionStreamFrame frame,
-    String sessionId,
+  Future<void> _reloadProductState() async {
+    try {
+      await _adoptProductState(await _api.bootstrap());
+    } on Object {
+      // Product stream will retry on the next explicit action or app reload.
+    }
+  }
+
+  void _handleThreadFrame(
+    ThreadStreamFrame frame,
+    String threadId,
     int generation,
   ) {
-    if (generation != _sessionCoordinator.generation ||
-        state.value?.selectedSessionId != sessionId) {
+    final current = state.value;
+    if (current == null ||
+        generation != _threadCoordinator.generation ||
+        current.selectedThreadId != threadId ||
+        _workspaceUi(current, threadId).subscriptionGeneration != generation) {
       return;
     }
     switch (frame) {
-      case SessionSnapshotFrame(:final snapshot):
-        _partDeltaBatcher.flush();
-        final current = state.value;
-        if (current != null) {
-          state = AsyncData(
-            _reconcileComposerTurns(
-              applyCanonicalSessionSnapshot(current, snapshot),
-            ),
-          );
+      case ThreadSnapshotFrame(:final workspace):
+        final next = _reconcileComposer(
+          applyThreadSnapshot(current, workspace),
+          threadId,
+        );
+        state = AsyncData(next);
+        if (!_workspaceUi(next, threadId).history.isLoaded) {
+          unawaited(loadOlderHistory(threadId));
         }
-      case SessionEventFrame(:final event):
-        final eventSessionId = studioEventSessionId(event);
-        if (eventSessionId == null || eventSessionId == sessionId) {
-          _handleEvent(event);
+      case ThreadNotificationFrame(:final revision, :final update):
+        final reduced = applyThreadUpdate(
+          current,
+          threadId: threadId,
+          revision: revision,
+          update: update,
+        );
+        if (reduced.resyncThreadId != null) {
+          _markThreadDisconnected(threadId, generation);
+          return;
         }
-      case SessionResyncRequiredFrame():
-        _resubscribeSnapshot(sessionId, generation);
+        state = AsyncData(_reconcileComposer(reduced.state, threadId));
+      case ThreadResyncRequiredFrame():
+        _markThreadDisconnected(threadId, generation);
     }
   }
 
-  void _resubscribeSnapshot(String sessionId, int generation) {
-    if (generation != _sessionCoordinator.generation ||
-        state.value?.selectedSessionId != sessionId) {
+  void _markThreadDisconnected(String threadId, int generation) {
+    final current = state.value;
+    if (current == null ||
+        generation != _threadCoordinator.generation ||
+        current.selectedThreadId != threadId) {
       return;
     }
-    final current = state.value;
-    if (current != null) {
-      state = AsyncData(
-        current.copyWith(
-          workspaceSyncBySession: {
-            ...current.workspaceSyncBySession,
-            sessionId: AgentWorkspaceSyncState.reconnecting,
-          },
-        ),
-      );
-    }
-    _sessionCoordinator.scheduleResync(
-      sessionId: sessionId,
+    state = AsyncData(
+      _withWorkspaceUi(
+        current,
+        threadId,
+        (ui) => ui.copyWith(syncState: AgentWorkspaceSyncState.reconnecting),
+      ),
+    );
+    _threadCoordinator.scheduleResubscribe(
+      threadId: threadId,
       generation: generation,
-      isCurrent: () => state.value?.selectedSessionId == sessionId,
+      isCurrent: () => state.value?.selectedThreadId == threadId,
+      resubscribe: () => unawaited(_subscribeThread(threadId)),
     );
   }
 
-  void _queuePartDelta(StudioState current, StudioBridgeEvent event) {
-    if (!targetsSelectedSession(current, event)) {
-      return;
-    }
-    _partDeltaBatcher.add(event);
-  }
-
-  void _applyPartDeltaBatch(List<StudioBridgeEvent> events) {
+  Future<void> _adoptProductState(StudioState incoming) async {
     final current = state.value;
-    if (current == null) {
-      return;
-    }
-    var latest = current;
-    for (final event in events) {
-      if (!targetsSelectedSession(latest, event)) {
-        continue;
-      }
-      latest = _reduceEventState(latest, event);
-    }
-    state = AsyncData(latest);
-  }
-
-  Future<void> _adoptState(StudioState next) async {
-    final current = state.value;
-    final previousSessionId = current?.selectedSessionId;
-    final catalog = current?.providerCatalog;
-    if (catalog != null) {
-      next = _attachProviderCatalog(next, catalog);
-    }
+    final previousThreadId = current?.selectedThreadId;
+    var next = incoming;
     if (current != null) {
-      final turns = {...current.turnsBySession, ...next.turnsBySession};
-      final runtimes = {
-        ...current.runtimesBySession,
-        ...next.runtimesBySession,
-      };
+      next = _attachProviderCatalog(next, current.providerCatalog);
+      final knownIds = next.threads.map((thread) => thread.id).toSet();
+      final tasks = Map<String, TaskRuntimeView>.from(
+        current.tasksByRootThread,
+      );
+      final selectedRootThreadId = next.selectedRootThread?.id;
+      if (selectedRootThreadId != null) {
+        tasks.remove(selectedRootThreadId);
+      }
+      tasks.addAll(next.tasksByRootThread);
       next = next.copyWith(
-        composersBySession: current.composersBySession,
-        turnsBySession: turns,
-        runtimesBySession: runtimes,
-        workspaceSyncBySession: {
-          ...current.workspaceSyncBySession,
-          ...next.workspaceSyncBySession,
+        workspacesByThread: {
+          for (final entry in current.workspacesByThread.entries)
+            if (knownIds.contains(entry.key)) entry.key: entry.value,
         },
+        workspaceUiByThread: {
+          for (final entry in current.workspaceUiByThread.entries)
+            if (knownIds.contains(entry.key)) entry.key: entry.value,
+        },
+        tasksByRootThread: tasks,
       );
     }
-    final selected = next.selectedAgentSession;
-    next = next.copyWith(
-      selectedRootSessionId:
-          selected?.effectiveRootSessionId ?? next.rootSessions.firstOrNull?.id,
-    );
-    next = _reconcileComposerTurns(next);
     state = AsyncData(next);
-    if (previousSessionId != next.selectedSessionId) {
-      final sessionId = next.selectedSessionId;
-      if (sessionId != null) {
-        await loadOlderHistory(sessionId);
-      }
-      await _subscribe(next.selectedSessionId, forceSnapshot: true);
+    if (previousThreadId != next.selectedThreadId) {
+      await _subscribeThread(next.selectedThreadId);
     }
-  }
-
-  StudioState _reduceEventWithCursor(
-    StudioState current,
-    StudioBridgeEvent event,
-  ) {
-    return withStudioEventCursor(_reduceEventState(current, event), event);
-  }
-
-  StudioState _reduceEventState(StudioState current, StudioBridgeEvent event) {
-    final reduced = reduceStudioEvent(current, event);
-    final staleSessionId = reduced.staleSessionId;
-    if (staleSessionId != null) {
-      _resubscribeSnapshot(staleSessionId, _sessionCoordinator.generation);
-    }
-    return _reconcileComposerTurns(reduced.state);
   }
 }
 
-StudioState _reconcileComposerTurns(StudioState state) {
-  final updates = <String, ComposerSessionState>{};
-  for (final entry in state.composersBySession.entries) {
-    final reconciled = entry.value.observeTurn(state.turnsBySession[entry.key]);
-    if (!identical(reconciled, entry.value)) {
-      updates[entry.key] = reconciled;
-    }
-  }
-  if (updates.isEmpty) {
-    return state;
-  }
-  return state.copyWith(
-    composersBySession: {...state.composersBySession, ...updates},
+StudioState _reconcileComposer(StudioState state, String threadId) {
+  final workspace = state.workspacesByThread[threadId];
+  if (workspace == null) return state;
+  return _withWorkspaceUi(
+    state,
+    threadId,
+    (ui) =>
+        ui.copyWith(composer: ui.composer.observeTurn(workspace.activeTurn)),
   );
 }
 
-StudioState _withComposer(
-  StudioState state,
-  String sessionId,
-  ComposerSessionState composer,
-) {
-  return state.copyWith(
-    composersBySession: {...state.composersBySession, sessionId: composer},
-  );
+WorkspaceUiState _workspaceUi(StudioState state, String threadId) {
+  return state.workspaceUiByThread[threadId] ?? const WorkspaceUiState();
 }
 
-StudioState _withHistoryPaging(
+StudioState _withWorkspaceUi(
   StudioState state,
-  String sessionId,
-  SessionHistoryPagingState paging,
+  String threadId,
+  WorkspaceUiState Function(WorkspaceUiState ui) update,
 ) {
   return state.copyWith(
-    historyPagingBySession: {
-      ...state.historyPagingBySession,
-      sessionId: paging,
+    workspaceUiByThread: {
+      ...state.workspaceUiByThread,
+      threadId: update(_workspaceUi(state, threadId)),
     },
   );
-}
-
-Map<String, AgentWorkspaceSyncState> _workspaceSyncAfterSelecting(
-  StudioState state,
-  String sessionId,
-) {
-  final existing = state.workspaceSyncBySession[sessionId];
-  return {
-    ...state.workspaceSyncBySession,
-    sessionId: existing ?? AgentWorkspaceSyncState.loading,
-  };
 }
 
 StudioState _attachProviderCatalog(

@@ -161,7 +161,7 @@ impl TaskCoordinator {
 
     pub(crate) async fn start_confirmed_task(
         &self,
-        session_id: &str,
+        root_thread_id: &str,
         plan: &str,
         repository: impl AsRef<Path>,
     ) -> Result<TaskRunRecord> {
@@ -176,7 +176,7 @@ impl TaskCoordinator {
         let result = self
             .store
             .create_task_run_with_lease(CreateTaskRun {
-                session_id: session_id.to_string(),
+                root_thread_id: root_thread_id.to_string(),
                 phase: TaskRunPhase::DesignUpdating,
                 plan: plan.trim().to_string(),
                 workspace_root: snapshot.workspace_root.to_string_lossy().to_string(),
@@ -212,9 +212,9 @@ impl TaskCoordinator {
                 self.push_recovery_issue(
                     &mut report,
                     &run,
-                    StudioRecoveryIssueScope::Session,
+                    StudioRecoveryIssueScope::Thread,
                     StudioRecoveryIssueCategory::ProcessLease,
-                    StudioRecoveryIssueAction::CleanupSession,
+                    StudioRecoveryIssueAction::CleanupThread,
                     message,
                 )
                 .await?;
@@ -234,9 +234,9 @@ impl TaskCoordinator {
                 self.push_recovery_issue(
                     &mut report,
                     &run,
-                    StudioRecoveryIssueScope::Session,
+                    StudioRecoveryIssueScope::Thread,
                     StudioRecoveryIssueCategory::AgentState,
-                    StudioRecoveryIssueAction::CleanupSession,
+                    StudioRecoveryIssueAction::CleanupThread,
                     message,
                 )
                 .await?;
@@ -263,9 +263,9 @@ impl TaskCoordinator {
                     self.push_recovery_issue(
                         &mut report,
                         &run,
-                        StudioRecoveryIssueScope::Session,
+                        StudioRecoveryIssueScope::Thread,
                         StudioRecoveryIssueCategory::AgentState,
-                        StudioRecoveryIssueAction::CleanupSession,
+                        StudioRecoveryIssueAction::CleanupThread,
                         message,
                     )
                     .await?;
@@ -324,9 +324,9 @@ impl TaskCoordinator {
                     self.push_recovery_issue(
                         &mut report,
                         &owner.run,
-                        StudioRecoveryIssueScope::Session,
+                        StudioRecoveryIssueScope::Thread,
                         StudioRecoveryIssueCategory::Worktree,
-                        StudioRecoveryIssueAction::CleanupSession,
+                        StudioRecoveryIssueAction::CleanupThread,
                         message.clone(),
                     )
                     .await?;
@@ -355,9 +355,9 @@ impl TaskCoordinator {
                         self.push_recovery_issue(
                             &mut report,
                             &run,
-                            StudioRecoveryIssueScope::Session,
+                            StudioRecoveryIssueScope::Thread,
                             StudioRecoveryIssueCategory::Merge,
-                            StudioRecoveryIssueAction::CleanupSession,
+                            StudioRecoveryIssueAction::CleanupThread,
                             "merge recovery blocked the task".to_string(),
                         )
                         .await?;
@@ -368,9 +368,9 @@ impl TaskCoordinator {
                         self.push_recovery_issue(
                             &mut report,
                             &run,
-                            StudioRecoveryIssueScope::Session,
+                            StudioRecoveryIssueScope::Thread,
                             StudioRecoveryIssueCategory::Merge,
-                            StudioRecoveryIssueAction::CleanupSession,
+                            StudioRecoveryIssueAction::CleanupThread,
                             message,
                         )
                         .await?;
@@ -427,9 +427,9 @@ impl TaskCoordinator {
                     self.push_recovery_issue(
                         &mut report,
                         &run,
-                        StudioRecoveryIssueScope::Session,
+                        StudioRecoveryIssueScope::Thread,
                         StudioRecoveryIssueCategory::AgentState,
-                        StudioRecoveryIssueAction::CleanupSession,
+                        StudioRecoveryIssueAction::CleanupThread,
                         message,
                     )
                     .await?;
@@ -457,9 +457,9 @@ impl TaskCoordinator {
                     self.push_recovery_issue(
                         &mut report,
                         &run,
-                        StudioRecoveryIssueScope::Session,
+                        StudioRecoveryIssueScope::Thread,
                         StudioRecoveryIssueCategory::Conflict,
-                        StudioRecoveryIssueAction::CleanupSession,
+                        StudioRecoveryIssueAction::CleanupThread,
                         message,
                     )
                     .await?;
@@ -480,7 +480,7 @@ impl TaskCoordinator {
         action: StudioRecoveryIssueAction,
         message: String,
     ) -> Result<()> {
-        let session = self.store.read_session(&run.session_id).await?;
+        let session = self.store.read_thread(&run.root_thread_id).await?;
         let project_id = session.as_ref().map(|session| session.project_id.clone());
         let category_key = match category {
             StudioRecoveryIssueCategory::ProcessLease => "process-lease",
@@ -500,7 +500,7 @@ impl TaskCoordinator {
             category,
             action,
             project_id,
-            session_id: Some(run.session_id.clone()),
+            thread_id: Some(run.root_thread_id.clone()),
             task_run_id: Some(run.id.clone()),
             message,
         });
@@ -513,7 +513,7 @@ impl TaskCoordinator {
     ) -> Result<StudioRecoveryCleanupPreview> {
         if !matches!(
             issue.action,
-            StudioRecoveryIssueAction::CleanupSession | StudioRecoveryIssueAction::RemoveProject
+            StudioRecoveryIssueAction::CleanupThread | StudioRecoveryIssueAction::RemoveProject
         ) {
             bail!("recovery issue does not authorize destructive cleanup");
         }
@@ -536,7 +536,7 @@ impl TaskCoordinator {
             category: StudioRecoveryIssueCategory::Worktree,
             action: StudioRecoveryIssueAction::RemoveProject,
             project_id: Some(project.id),
-            session_id: None,
+            thread_id: None,
             task_run_id: None,
             message: format!(
                 "Remove {} from Studio and discard its Pure-owned task worktrees.",
@@ -575,7 +575,7 @@ impl TaskCoordinator {
     ) -> Result<()> {
         if !matches!(
             issue.action,
-            StudioRecoveryIssueAction::CleanupSession | StudioRecoveryIssueAction::RemoveProject
+            StudioRecoveryIssueAction::CleanupThread | StudioRecoveryIssueAction::RemoveProject
         ) {
             bail!("recovery issue does not authorize destructive cleanup");
         }
@@ -645,7 +645,7 @@ impl TaskCoordinator {
         issue: &StudioRecoveryIssue,
     ) -> Result<RecoveryCleanupScope> {
         let (project_updated_at, runs) = match issue.action {
-            StudioRecoveryIssueAction::CleanupSession => {
+            StudioRecoveryIssueAction::CleanupThread => {
                 let task_run_id = issue
                     .task_run_id
                     .as_deref()
@@ -701,7 +701,7 @@ impl TaskCoordinator {
             expected_revision,
             scope: issue.scope,
             project_id: issue.project_id.clone(),
-            session_id: issue.session_id.clone(),
+            thread_id: issue.thread_id.clone(),
             message: issue.message.clone(),
             resources,
         })
@@ -953,7 +953,7 @@ fn recovery_cleanup_scope_matches(
         .map(|cleanup| {
             (
                 cleanup.run.id.as_str(),
-                cleanup.run.session_id.as_str(),
+                cleanup.run.root_thread_id.as_str(),
                 cleanup.run.workspace_root.as_str(),
             )
         })
@@ -964,7 +964,7 @@ fn recovery_cleanup_scope_matches(
         .map(|cleanup| {
             (
                 cleanup.run.id.as_str(),
-                cleanup.run.session_id.as_str(),
+                cleanup.run.root_thread_id.as_str(),
                 cleanup.run.workspace_root.as_str(),
             )
         })

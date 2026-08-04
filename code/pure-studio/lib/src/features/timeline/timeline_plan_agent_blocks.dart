@@ -3,7 +3,7 @@ part of 'timeline_view.dart';
 class _PlanPart extends StatelessWidget {
   const _PlanPart({required this.part, super.key});
 
-  final TimelinePart part;
+  final TimelineEntry part;
 
   @override
   Widget build(BuildContext context) {
@@ -172,27 +172,6 @@ class _TodoItemRow extends StatelessWidget {
           const SizedBox(width: 8),
           Expanded(child: Text(item.step, style: textStyle)),
         ],
-      ),
-    );
-  }
-}
-
-class _AgentSnapshotPart extends StatelessWidget {
-  const _AgentSnapshotPart({required this.part, super.key});
-
-  final TimelinePart part;
-
-  @override
-  Widget build(BuildContext context) {
-    final agent = part.agent;
-    return _TimelinePanel(
-      child: _TimelineMetaRow(
-        icon: Icons.account_tree_outlined,
-        title: agent?.role.isNotEmpty == true
-            ? agent!.role
-            : (part.title ?? context.l10n.timelineAgentFallback),
-        subtitle: part.text,
-        trailing: _StatusPill(label: part.status),
       ),
     );
   }

@@ -5,20 +5,23 @@ use anyhow::{Context, Result};
 use crate::config::CONFIG_DIR_NAME;
 
 const STUDIO_DIR_NAME: &str = "studio";
-const STATE_DB_FILE_NAME: &str = "studio_state.sqlite";
-const HISTORY_DB_FILE_NAME: &str = "studio_history.sqlite";
-const LEGACY_DB_FILE_NAME: &str = "studio_2.sqlite";
+const DATABASE_FILE_NAME: &str = "studio.sqlite";
+const LEGACY_DATABASE_FILE_NAMES: &[&str] = &[
+    "studio_state.sqlite",
+    "studio_history.sqlite",
+    "studio_2.sqlite",
+];
 
-pub fn default_state_db_path() -> Result<PathBuf> {
-    Ok(studio_dir()?.join(STATE_DB_FILE_NAME))
+pub fn default_db_path() -> Result<PathBuf> {
+    Ok(studio_dir()?.join(DATABASE_FILE_NAME))
 }
 
-pub fn default_history_db_path() -> Result<PathBuf> {
-    Ok(studio_dir()?.join(HISTORY_DB_FILE_NAME))
-}
-
-pub fn legacy_db_path() -> Result<PathBuf> {
-    Ok(studio_dir()?.join(LEGACY_DB_FILE_NAME))
+pub fn legacy_db_paths() -> Result<Vec<PathBuf>> {
+    let studio_dir = studio_dir()?;
+    Ok(LEGACY_DATABASE_FILE_NAMES
+        .iter()
+        .map(|name| studio_dir.join(name))
+        .collect())
 }
 
 pub fn default_attachments_dir() -> Result<PathBuf> {

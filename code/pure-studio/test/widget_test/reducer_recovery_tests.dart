@@ -1,349 +1,160 @@
 part of '../widget_test.dart';
 
 void registerReducerRecoveryTests() {
-  test('studio state copyWith can explicitly clear nullable fields', () {
-    final state = _stateWithPlannerModels().copyWith(
-      defaultProviderId: 'deepseek',
+  test('snapshot replaces the complete workspace but keeps UI state', () {
+    final current = _emptyState().copyWith(
+      workspaceUiByThread: const {
+        'session-1': WorkspaceUiState(
+          syncState: AgentWorkspaceSyncState.reconnecting,
+          subscriptionGeneration: 7,
+          composer: ComposerThreadState.idle(draft: 'local draft'),
+        ),
+      },
+    );
+    final incoming = current.selectedWorkspace!.copyWith(
+      revision: 9,
+      items: [
+        _threadItemFixture(
+          id: 'canonical',
+          threadId: 'session-1',
+          turnId: 'turn-1',
+          ordinal: 0,
+          text: 'canonical',
+        ),
+      ],
     );
 
-    final cleared = state.copyWith(
-      defaultProviderId: null,
-      selectedProjectId: null,
-      selectedSessionId: null,
-    );
+    final next = applyThreadSnapshot(current, incoming);
 
-    expect(cleared.defaultProviderId, isNull);
-    expect(cleared.selectedProjectId, isNull);
-    expect(cleared.selectedSessionId, isNull);
-    expect(cleared.projects, state.projects);
-    expect(cleared.sessions, state.sessions);
+    expect(next.selectedWorkspace!.items.single.text, 'canonical');
+    expect(next.selectedWorkspace!.revision, 9);
+    expect(next.selectedWorkspaceUi.composer.draft, 'local draft');
+    expect(next.selectedWorkspaceUi.subscriptionGeneration, 7);
+    expect(next.selectedWorkspaceUi.syncState, AgentWorkspaceSyncState.ready);
   });
 
-  test(
-    'timeline delta revision gaps clear overlay and recover session',
-    () async {
-      final recovered = _emptyState().copyWith(
-        messagesBySession: {
-          'session-1': [
-            TimelineMessage(
-              id: 'turn-1:assistant',
-              sessionId: 'session-1',
-              role: 'assistant',
-              createdAt: DateTime.fromMillisecondsSinceEpoch(1),
-              sequence: 1,
-            ),
-          ],
-        },
-        partSnapshotsBySession: {
-          'session-1': {
-            'part-1': TimelinePartSnapshot(
-              id: 'part-1',
-              messageId: 'turn-1:assistant',
-              sessionId: 'session-1',
-              turnId: 'turn-1',
-              type: TimelinePartType.text,
-              order: 0,
-              revision: 3,
-              sequence: 2,
-              text: 'restored',
-              status: 'streaming',
-              createdAt: DateTime.fromMillisecondsSinceEpoch(1),
-              updatedAt: DateTime.fromMillisecondsSinceEpoch(2),
-              textChannel: TimelineTextChannel.finalAnswer,
-            ),
-          },
-        },
-      );
-      final api = _FakeStudioApi(_emptyState());
-      api.sessionStates['session-1'] = recovered;
-      final container = ProviderContainer(
-        overrides: [studioApiProvider.overrideWithValue(api)],
-      );
-      addTearDown(container.dispose);
-
-      await container.read(studioControllerProvider.future);
-      api.emitSession(
-        _messageUpdatedEvent(
-          sessionId: 'session-1',
-          message: _timelineMessageFixture(
-            id: 'turn-1:assistant',
-            sessionId: 'session-1',
-            turnId: 'turn-1',
-            status: 'streaming',
-          ),
-        ),
-      );
-      api.emitSession(
-        _partUpdatedEvent(
-          sessionId: 'session-1',
-          part: _timelinePartFixture(
-            id: 'part-1',
-            messageId: 'turn-1:assistant',
-            sessionId: 'session-1',
-            turnId: 'turn-1',
-            type: TimelinePartType.text,
-            status: 'streaming',
-            textChannel: TimelineTextChannel.finalAnswer,
-          ),
-        ),
-      );
-      api.emitSession(
-        _partDeltaEvent(
-          sessionId: 'session-1',
-          delta: _timelineDeltaFixture(
-            partId: 'part-1',
-            revision: 2,
-            field: 'text',
-            delta: 'skipped',
-          ),
-        ),
-      );
-      await _pumpFrameBatch();
-      await pumpEventQueue();
-
-      expect(api.sessionSubscriptions.last, (
-        sessionId: 'session-1',
-        afterSequence: null,
-      ));
-      api.emitSessionFrame(_sessionSnapshotFrame(recovered));
-      await pumpEventQueue();
-      final state = container.read(studioControllerProvider).requireValue;
-      expect(api.loadedSessionIds, isEmpty);
-      expect(state.partOverlaysBySession['session-1'], isEmpty);
-      expect(state.selectedTimelineRows.single.part!.text, 'restored');
-    },
-  );
-
-  test('part snapshots reject identity and terminal regressions', () async {
-    final recovered = _emptyState().copyWith(
-      messagesBySession: {
-        'session-1': [
-          TimelineMessage(
-            id: 'turn-1:assistant',
-            sessionId: 'session-1',
-            role: 'assistant',
-            createdAt: DateTime.fromMillisecondsSinceEpoch(1),
-            sequence: 1,
-          ),
-        ],
-      },
-      partSnapshotsBySession: {
-        'session-1': {
-          'part-1': TimelinePartSnapshot(
-            id: 'part-1',
-            messageId: 'turn-1:assistant',
-            sessionId: 'session-1',
-            turnId: 'turn-1',
-            type: TimelinePartType.text,
-            order: 0,
-            revision: 3,
-            sequence: 2,
-            text: 'recovered',
-            status: 'completed',
-            createdAt: DateTime.fromMillisecondsSinceEpoch(1),
-            updatedAt: DateTime.fromMillisecondsSinceEpoch(3),
-            completedAt: DateTime.fromMillisecondsSinceEpoch(3),
-            textChannel: TimelineTextChannel.finalAnswer,
-          ),
-        },
-      },
+  test('workspace revision gap requests resubscription', () {
+    final current = _emptyState();
+    final item = _threadItemFixture(
+      id: 'item-1',
+      threadId: 'session-1',
+      turnId: 'turn-1',
+      ordinal: 0,
+      status: 'streaming',
     );
-    final api = _FakeStudioApi(_emptyState());
-    final container = ProviderContainer(
-      overrides: [studioApiProvider.overrideWithValue(api)],
+    final withItem = applyThreadSnapshot(
+      current,
+      current.selectedWorkspace!.copyWith(revision: 2, items: [item]),
     );
-    addTearDown(container.dispose);
 
-    await container.read(studioControllerProvider.future);
-    api.emitSession(
-      _messageUpdatedEvent(
-        sessionId: 'session-1',
-        message: _timelineMessageFixture(
-          id: 'turn-1:assistant',
-          sessionId: 'session-1',
-          turnId: 'turn-1',
-          status: 'streaming',
-        ),
-      ),
-    );
-    api.emitSession(
-      _partUpdatedEvent(
-        sessionId: 'session-1',
-        part: _timelinePartFixture(
-          id: 'part-1',
-          messageId: 'turn-1:assistant',
-          sessionId: 'session-1',
-          turnId: 'turn-1',
-          type: TimelinePartType.text,
-          revision: 2,
-          updatedAt: 2,
-          completedAt: 2,
-          textChannel: TimelineTextChannel.finalAnswer,
-          text: 'stable',
-        ),
-      ),
-    );
-    await pumpEventQueue();
-
-    api.emitSession(
-      _partUpdatedEvent(
-        sessionId: 'session-1',
-        part: _timelinePartFixture(
-          id: 'part-1',
-          messageId: 'turn-1:assistant',
-          sessionId: 'session-1',
-          turnId: 'turn-1',
-          type: TimelinePartType.text,
-          order: 9,
-          revision: 2,
-          updatedAt: 2,
-          completedAt: 2,
-          textChannel: TimelineTextChannel.finalAnswer,
-          text: 'wrong order',
-        ),
-      ),
-    );
-    api.emitSession(
-      _partUpdatedEvent(
-        sessionId: 'session-1',
-        part: _timelinePartFixture(
-          id: 'part-1',
-          messageId: 'turn-1:assistant',
-          sessionId: 'session-1',
-          turnId: 'turn-1',
-          type: TimelinePartType.text,
+    final result = applyThreadUpdate(
+      withItem,
+      threadId: 'session-1',
+      revision: 4,
+      update: ThreadItemDeltaUpdate(
+        const ThreadItemDeltaView(
+          itemId: 'item-1',
           revision: 1,
-          updatedAt: 2,
-          completedAt: 2,
-          textChannel: TimelineTextChannel.finalAnswer,
-          text: 'low revision',
+          field: 'text',
+          delta: 'gap',
         ),
       ),
     );
-    api.emitSession(
-      _partUpdatedEvent(
-        sessionId: 'session-1',
-        part: _timelinePartFixture(
-          id: 'part-1',
-          messageId: 'turn-1:assistant',
-          sessionId: 'session-1',
-          turnId: 'turn-1',
-          type: TimelinePartType.text,
-          revision: 2,
-          updatedAt: 2,
-          completedAt: 2,
-          textChannel: TimelineTextChannel.finalAnswer,
-          text: 'changed terminal',
-        ),
-      ),
-    );
-    await pumpEventQueue();
 
-    final state = container.read(studioControllerProvider).requireValue;
-    expect(state.selectedTimelineRows.single.part!.text, 'stable');
-    expect(state.partSnapshotsBySession['session-1']!['part-1']!.order, 0);
-    expect(api.sessionSubscriptions.last, (
-      sessionId: 'session-1',
-      afterSequence: null,
-    ));
-    api.emitSessionFrame(_sessionSnapshotFrame(recovered));
-    await pumpEventQueue();
-    final recoveredState = container
-        .read(studioControllerProvider)
-        .requireValue;
-    expect(recoveredState.selectedTimelineRows.single.part!.text, 'recovered');
+    expect(result.resyncThreadId, 'session-1');
+    expect(result.state.selectedWorkspace!.revision, 2);
   });
 
-  test('message snapshots keep original createdAt', () async {
-    final api = _FakeStudioApi(_emptyState());
-    final container = ProviderContainer(
-      overrides: [studioApiProvider.overrideWithValue(api)],
+  test('old workspace and Item revisions are ignored', () {
+    final item = _threadItemFixture(
+      id: 'item-1',
+      threadId: 'session-1',
+      turnId: 'turn-1',
+      ordinal: 0,
+      revision: 2,
+      status: 'streaming',
+      text: 'new',
     );
-    addTearDown(container.dispose);
+    final current = applyThreadSnapshot(
+      _emptyState(),
+      _emptyState().selectedWorkspace!.copyWith(revision: 5, items: [item]),
+    );
 
-    await container.read(studioControllerProvider.future);
-    api.emitSession(
-      _messageUpdatedEvent(
-        sessionId: 'session-1',
-        sequence: BigInt.one,
-        message: _timelineMessageFixture(
-          id: 'turn-1:assistant',
-          sessionId: 'session-1',
-          turnId: 'turn-1',
-          status: 'streaming',
-          createdAt: 10,
-        ),
-      ),
+    final oldWorkspace = applyThreadUpdate(
+      current,
+      threadId: 'session-1',
+      revision: 5,
+      update: ThreadItemUpsert(item.copyWith(text: 'old')),
     );
-    api.emitSession(
-      _messageUpdatedEvent(
-        sessionId: 'session-1',
-        sequence: BigInt.two,
-        message: _timelineMessageFixture(
-          id: 'turn-1:assistant',
-          sessionId: 'session-1',
-          turnId: 'turn-1',
-          createdAt: 20,
-          completedAt: 20,
-        ),
-      ),
-    );
-    api.emitSession(
-      _partUpdatedEvent(
-        sessionId: 'session-1',
-        part: _timelinePartFixture(
-          id: 'part-1',
-          messageId: 'turn-1:assistant',
-          sessionId: 'session-1',
-          turnId: 'turn-1',
-          type: TimelinePartType.text,
-          status: 'streaming',
-          createdAt: 10,
-          textChannel: TimelineTextChannel.finalAnswer,
-          text: 'still streaming',
-        ),
-      ),
-    );
-    await pumpEventQueue();
 
-    final state = container.read(studioControllerProvider).requireValue;
-    final message = state.selectedMessages.single;
-    expect(message.createdAt, DateTime.fromMillisecondsSinceEpoch(10000));
-    expect(message.updatedAt, DateTime.fromMillisecondsSinceEpoch(20000));
-    expect(message.completedAt, DateTime.fromMillisecondsSinceEpoch(20000));
-    expect(message.status, 'completed');
-    expect(message.turnId, 'turn-1');
-    expect(message.sequence, 2);
-    expect(state.selectedTimelineRows.single.part!.status, 'streaming');
+    expect(oldWorkspace.resyncThreadId, isNull);
+    expect(oldWorkspace.state.selectedWorkspace!.items.single.text, 'new');
   });
 
-  test('timeline drops orphan part snapshots', () async {
-    final api = _FakeStudioApi(_emptyState());
-    final container = ProviderContainer(
-      overrides: [studioApiProvider.overrideWithValue(api)],
+  test('Item ordinal and identity cannot change after first insertion', () {
+    final item = _threadItemFixture(
+      id: 'item-1',
+      threadId: 'session-1',
+      turnId: 'turn-1',
+      ordinal: 3,
+      revision: 0,
     );
-    addTearDown(container.dispose);
+    final current = applyThreadSnapshot(
+      _emptyState(),
+      _emptyState().selectedWorkspace!.copyWith(revision: 1, items: [item]),
+    );
+    final changedOrdinal = ThreadItemView(
+      id: item.id,
+      threadId: item.threadId,
+      turnId: item.turnId,
+      ordinal: 4,
+      revision: 1,
+      status: item.status,
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt,
+      kind: item.kind,
+      text: item.text,
+      channel: item.channel,
+    );
 
-    await container.read(studioControllerProvider.future);
-    api.emitSession(
-      _partUpdatedEvent(
-        sessionId: 'session-1',
-        part: _timelinePartFixture(
-          id: 'part-orphan',
-          messageId: 'missing-message',
-          sessionId: 'session-1',
-          turnId: 'turn-1',
-          type: TimelinePartType.text,
-          status: 'streaming',
-          text: 'orphan',
+    final result = applyThreadUpdate(
+      current,
+      threadId: 'session-1',
+      revision: 2,
+      update: ThreadItemUpsert(changedOrdinal),
+    );
+
+    expect(result.resyncThreadId, 'session-1');
+    expect(result.state.selectedWorkspace!.items.single.ordinal, 3);
+  });
+
+  test('terminal Item rejects late delta', () {
+    final item = _threadItemFixture(
+      id: 'item-1',
+      threadId: 'session-1',
+      turnId: 'turn-1',
+      ordinal: 0,
+      status: 'completed',
+    );
+    final current = applyThreadSnapshot(
+      _emptyState(),
+      _emptyState().selectedWorkspace!.copyWith(revision: 1, items: [item]),
+    );
+
+    final result = applyThreadUpdate(
+      current,
+      threadId: 'session-1',
+      revision: 2,
+      update: const ThreadItemDeltaUpdate(
+        ThreadItemDeltaView(
+          itemId: 'item-1',
+          revision: 1,
+          field: 'text',
+          delta: 'late',
         ),
       ),
     );
-    await pumpEventQueue();
 
-    final state = container.read(studioControllerProvider).requireValue;
-    expect(state.selectedMessages, isEmpty);
-    expect(state.partSnapshotsBySession['session-1'], isNull);
-    expect(state.selectedTimelineRows, isEmpty);
+    expect(result.resyncThreadId, 'session-1');
   });
 }

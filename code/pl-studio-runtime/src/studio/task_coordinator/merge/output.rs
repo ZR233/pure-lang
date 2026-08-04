@@ -44,7 +44,7 @@ pub(super) fn merged_output(scope: &TaskMergeScope) -> Result<TaskMergeAgentOutp
         status: MergeStatus::Merged,
         previous_head: scope.merge.expected_head.clone(),
         new_head: Some(merge_commit),
-        agent_id: scope.outcome.agent_id.clone(),
+        agent_id: scope.completion.executor_agent_id.clone(),
         source_commit: scope.delivery.head_commit.clone(),
         changed_files: evidence.changed_files.clone(),
         verification: evidence.verification_steps.clone(),

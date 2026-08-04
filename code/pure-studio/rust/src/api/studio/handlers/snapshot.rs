@@ -1,6 +1,7 @@
-use crate::api::studio::convert::records::{project_dto, session_dto};
+use crate::api::studio::convert::records::{project_dto, thread_from_record};
 use crate::api::studio::convert::runtime::{bridge_recovery_issue, bridge_task_runtime};
 use crate::api::studio::convert::settings::studio_settings_dto;
+use crate::api::studio::convert::thread_stream::bridge_thread;
 use crate::api::studio::runtime::BridgeRuntime;
 use crate::api::studio::types::{BridgeGeneralSettingsDto, BridgeStudioSnapshotResponse};
 use anyhow::{Context, Result};
@@ -18,23 +19,18 @@ pub(super) async fn bootstrap_studio_inner(
 pub(super) async fn studio_snapshot_inner(
     bridge: &'static BridgeRuntime,
     requested_project_id: Option<String>,
-    requested_session_id: Option<String>,
+    requested_thread_id: Option<String>,
 ) -> Result<BridgeStudioSnapshotResponse> {
     let projects = bridge.studio.list_projects().await?;
-    studio_snapshot_from_projects_inner(
-        bridge,
-        projects,
-        requested_project_id,
-        requested_session_id,
-    )
-    .await
+    studio_snapshot_from_projects_inner(bridge, projects, requested_project_id, requested_thread_id)
+        .await
 }
 
 pub(super) async fn studio_snapshot_from_projects_inner(
     bridge: &'static BridgeRuntime,
     projects: Vec<pl_studio_runtime::ProjectRecord>,
     requested_project_id: Option<String>,
-    requested_session_id: Option<String>,
+    requested_thread_id: Option<String>,
 ) -> Result<BridgeStudioSnapshotResponse> {
     let recovery_issues = bridge.studio.runtime_snapshot().recovery_issues;
     let blocked_project_ids = recovery_issues
@@ -43,10 +39,10 @@ pub(super) async fn studio_snapshot_from_projects_inner(
         .filter_map(|issue| issue.project_id.as_deref())
         .map(ToOwned::to_owned)
         .collect::<HashSet<_>>();
-    let blocked_session_ids = recovery_issues
+    let blocked_thread_ids = recovery_issues
         .iter()
-        .filter(|issue| issue.scope == pl_studio_runtime::StudioRecoveryIssueScope::Session)
-        .filter_map(|issue| issue.session_id.as_deref())
+        .filter(|issue| issue.scope == pl_studio_runtime::StudioRecoveryIssueScope::Thread)
+        .filter_map(|issue| issue.thread_id.as_deref())
         .collect::<std::collections::HashSet<_>>();
     let selected_project = select_available_project(
         &projects,
@@ -54,41 +50,41 @@ pub(super) async fn studio_snapshot_from_projects_inner(
         &blocked_project_ids,
     );
     let selected_project_id = selected_project.as_ref().map(|project| project.id.clone());
-    let mut sessions = Vec::new();
-    let mut selected_session_id = None;
+    let mut threads = Vec::new();
+    let mut selected_thread_id = None;
 
     if let Some(project) = selected_project {
         bridge
             .studio
             .reconcile_lsp_runtime_for_project(&project.id)
             .await?;
-        let roots = bridge.studio.ensure_project_sessions(&project.id).await?;
-        sessions = bridge.studio.store().list_all_sessions(&project.id).await?;
-        selected_session_id = requested_session_id
-            .filter(|session_id| {
-                !blocked_session_ids.contains(session_id.as_str())
-                    && sessions.iter().any(|session| session.id == *session_id)
+        let roots = bridge.studio.ensure_project_threads(&project.id).await?;
+        threads = bridge.studio.store().list_threads(&project.id).await?;
+        selected_thread_id = requested_thread_id
+            .filter(|thread_id| {
+                !blocked_thread_ids.contains(thread_id.as_str())
+                    && threads.iter().any(|thread| thread.id == *thread_id)
             })
             .or_else(|| {
                 roots
                     .iter()
-                    .find(|session| !blocked_session_ids.contains(session.id.as_str()))
-                    .map(|session| session.id.clone())
+                    .find(|thread| !blocked_thread_ids.contains(thread.id.as_str()))
+                    .map(|thread| thread.id.clone())
             });
     }
-    let selected_session_task = match selected_session_id.as_deref() {
-        Some(session_id) => bridge
+    let selected_thread_task = match selected_thread_id.as_deref() {
+        Some(thread_id) => bridge
             .studio
-            .session_task_view(session_id)
+            .thread_task_view(thread_id)
             .await?
             .map(bridge_task_runtime),
         None => None,
     };
     let config = bridge.studio.config_store().load_or_default()?;
-    let web_search_role = selected_session_id
+    let web_search_role = selected_thread_id
         .as_deref()
-        .and_then(|session_id| sessions.iter().find(|session| session.id == session_id))
-        .map(|session| pl_studio_runtime::StudioMode::from_label(&session.mode))
+        .and_then(|thread_id| threads.iter().find(|thread| thread.id == thread_id))
+        .map(|thread| pl_studio_runtime::StudioMode::from_label(&thread.mode))
         .map_or(pl_studio_runtime::StudioRole::Executor, |mode| match mode {
             pl_studio_runtime::StudioMode::Simple => pl_studio_runtime::StudioRole::Executor,
             pl_studio_runtime::StudioMode::Task => pl_studio_runtime::StudioRole::Planner,
@@ -109,9 +105,13 @@ pub(super) async fn studio_snapshot_from_projects_inner(
     Ok(BridgeStudioSnapshotResponse {
         projects: projects.into_iter().map(project_dto).collect(),
         selected_project_id,
-        sessions: sessions.into_iter().map(session_dto).collect(),
-        selected_session_id,
-        selected_session_task,
+        threads: threads
+            .into_iter()
+            .map(thread_from_record)
+            .map(bridge_thread)
+            .collect(),
+        selected_thread_id,
+        selected_thread_task,
         recovery_issues: recovery_issues
             .into_iter()
             .map(bridge_recovery_issue)

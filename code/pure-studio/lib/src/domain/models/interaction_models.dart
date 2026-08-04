@@ -1,4 +1,4 @@
-import 'session_models.dart';
+import 'thread_directory_models.dart';
 import 'studio_enums.dart';
 
 sealed class InteractionPayload {
@@ -70,7 +70,7 @@ class UserQuestionOptionView {
 class PendingInteraction {
   const PendingInteraction({
     required this.id,
-    required this.sessionId,
+    required this.threadId,
     required this.kind,
     required this.title,
     required this.body,
@@ -78,7 +78,7 @@ class PendingInteraction {
   });
 
   final String id;
-  final String sessionId;
+  final String threadId;
   final InteractionKind kind;
   final String title;
   final String body;
@@ -87,16 +87,16 @@ class PendingInteraction {
 
 class InteractionResolutionResult {
   const InteractionResolutionResult({
-    required this.sessionId,
+    required this.threadId,
     required this.interactionId,
     required this.status,
-    required this.sessions,
+    required this.threads,
   });
 
-  final String sessionId;
+  final String threadId;
   final String interactionId;
   final String status;
-  final List<StudioSession> sessions;
+  final List<StudioThread> threads;
 
   bool get isResolved => status != 'pending';
 }

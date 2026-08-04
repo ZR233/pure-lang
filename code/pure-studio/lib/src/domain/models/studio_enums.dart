@@ -2,28 +2,6 @@ enum PermissionMode { requestApproval, autoReview, fullAccess }
 
 enum StudioMode { simple, task }
 
-enum TimelinePartType {
-  text,
-  reasoning,
-  tool,
-  plan,
-  agent,
-  turn,
-  inference,
-  file,
-}
-
-bool isInternalTimelinePartType(TimelinePartType type) {
-  return switch (type) {
-    TimelinePartType.turn ||
-    TimelinePartType.inference ||
-    TimelinePartType.file => true,
-    TimelinePartType.text ||
-    TimelinePartType.reasoning ||
-    TimelinePartType.tool ||
-    TimelinePartType.plan ||
-    TimelinePartType.agent => false,
-  };
-}
+enum TimelineEntryType { text, reasoning, tool, plan, file }
 
 enum InteractionKind { toolApproval, userInput, planConfirmation }

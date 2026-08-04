@@ -6,31 +6,21 @@ mod error;
 pub(in crate::studio) mod history;
 mod interaction;
 mod project;
-mod session;
 mod settings;
 mod task;
+mod thread;
 
 #[derive(Clone)]
 pub struct StudioStore {
     db: DatabaseConnection,
-    history_db: DatabaseConnection,
-    history_writer_db: DatabaseConnection,
 }
 
 pub(in crate::studio) use agent_framework::RecoverablePlan;
 pub use error::StudioDatabaseError;
-pub(in crate::studio) use session::AgentSessionSpec;
+pub(in crate::studio) use thread::ChildThreadSpec;
 impl StudioStore {
     pub(crate) fn database(&self) -> &DatabaseConnection {
         &self.db
-    }
-
-    pub(crate) fn history_database(&self) -> &DatabaseConnection {
-        &self.history_db
-    }
-
-    pub(crate) fn history_writer_database(&self) -> &DatabaseConnection {
-        &self.history_writer_db
     }
 
     #[cfg(test)]

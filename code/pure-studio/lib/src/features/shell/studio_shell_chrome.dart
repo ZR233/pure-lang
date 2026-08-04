@@ -7,7 +7,7 @@ class _Header extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final session = state.selectedRootSession;
+    final thread = state.selectedRootThread;
     final project = state.selectedProject;
     final projectLabel = project?.name.trim() ?? '';
     final taskPhase = state.runtime.task?.phase;
@@ -25,7 +25,7 @@ class _Header extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  session?.title ?? context.l10n.shellNoSession,
+                  thread?.title ?? context.l10n.shellNoSession,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
@@ -69,7 +69,7 @@ class _Header extends StatelessWidget {
                         ),
                       ),
                     const Spacer(),
-                    if (state.agentSessions.isNotEmpty)
+                    if (state.workspaceThreads.isNotEmpty)
                       _AgentSwitcher(state: state),
                   ],
                 ),
@@ -103,8 +103,8 @@ class _AgentSwitcherState extends ConsumerState<_AgentSwitcher> {
 
   @override
   Widget build(BuildContext context) {
-    final sessions = widget.state.agentSessions;
-    final aggregateColor = _aggregateAgentColor(widget.state, sessions);
+    final threads = widget.state.workspaceThreads;
+    final aggregateColor = _aggregateAgentColor(widget.state, threads);
     final viewport = MediaQuery.sizeOf(context);
     final availableWidth = (viewport.width - 24)
         .clamp(0.0, double.infinity)
@@ -128,27 +128,25 @@ class _AgentSwitcherState extends ConsumerState<_AgentSwitcher> {
       ),
       alignmentOffset: const Offset(0, 6),
       menuChildren: [
-        for (final session in sessions)
+        for (final thread in threads)
           MenuItemButton(
-            key: StudioDriverKeys.agentRow(session.id),
+            key: StudioDriverKeys.agentRow(thread.id),
             leadingIcon: Padding(
-              padding: EdgeInsets.only(
-                left: _agentDepth(session, sessions) * 12,
-              ),
+              padding: EdgeInsets.only(left: _agentDepth(thread, threads) * 12),
               child: Icon(
                 Icons.circle,
                 size: 9,
-                color: _agentStatusColor(widget.state, session),
+                color: _statusColor(widget.state, thread),
               ),
             ),
-            trailingIcon: session.id == widget.state.selectedAgentSessionId
+            trailingIcon: thread.id == widget.state.selectedThreadId
                 ? const Icon(Icons.check, size: 18)
                 : null,
             onPressed: () {
               _menuController.close();
               ref
                   .read(studioControllerProvider.notifier)
-                  .selectAgentSession(session.id);
+                  .selectAgentThread(thread.id);
             },
             child: SizedBox(
               width: contentWidth,
@@ -160,13 +158,13 @@ class _AgentSwitcherState extends ConsumerState<_AgentSwitcher> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          _agentDisplayName(session),
+                          _agentDisplayName(thread),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
-                        if (session.ownerRole.trim().isNotEmpty)
+                        if (thread.role.trim().isNotEmpty)
                           Text(
-                            session.ownerRole,
+                            thread.role,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: Theme.of(context).textTheme.labelSmall
@@ -177,7 +175,7 @@ class _AgentSwitcherState extends ConsumerState<_AgentSwitcher> {
                   ),
                   const SizedBox(width: 12),
                   Text(
-                    _agentShortStatus(session),
+                    _agentShortStatus(thread),
                     style: Theme.of(context).textTheme.labelSmall?.copyWith(
                       color: context.studioInkSoft,
                     ),
@@ -207,8 +205,8 @@ class _AgentSwitcherState extends ConsumerState<_AgentSwitcher> {
             child: ActionChip(
               key: StudioDriverKeys.agentSwitcher,
               avatar: Icon(Icons.hub_outlined, size: 16, color: aggregateColor),
-              label: Text(context.l10n.statusAgentsCount(sessions.length)),
-              tooltip: context.l10n.statusAgentsCount(sessions.length),
+              label: Text(context.l10n.statusAgentsCount(threads.length)),
+              tooltip: context.l10n.statusAgentsCount(threads.length),
               onPressed: () => _menuController.isOpen
                   ? _menuController.close()
                   : _menuController.open(),
@@ -220,49 +218,48 @@ class _AgentSwitcherState extends ConsumerState<_AgentSwitcher> {
   }
 }
 
-int _agentDepth(StudioSession session, List<StudioSession> sessions) {
+int _agentDepth(StudioThread thread, List<StudioThread> threads) {
   var depth = 0;
-  var parentId = session.parentSessionId;
-  final visited = <String>{session.id};
+  var parentId = thread.parentThreadId;
+  final visited = <String>{thread.id};
   while (parentId != null && visited.add(parentId)) {
-    final parent = sessions
+    final parent = threads
         .where((candidate) => candidate.id == parentId)
         .firstOrNull;
     if (parent == null) {
       break;
     }
     depth += 1;
-    parentId = parent.parentSessionId;
+    parentId = parent.parentThreadId;
   }
   return depth;
 }
 
-Color _aggregateAgentColor(HeaderView state, List<StudioSession> sessions) {
-  if (sessions.any((session) => _isFaultedAgentStatus(session.agentStatus))) {
+Color _aggregateAgentColor(HeaderView state, List<StudioThread> threads) {
+  if (threads.any((thread) => _isFaultedAgentStatus(thread.status))) {
     return StudioColors.rose;
   }
   if (state.pendingInteractions.any(
-    (interaction) =>
-        sessions.any((session) => session.id == interaction.sessionId),
+    (interaction) => threads.any((thread) => thread.id == interaction.threadId),
   )) {
     return StudioColors.ochre;
   }
-  if (sessions.any((session) => _isRunningAgentStatus(session.agentStatus))) {
+  if (threads.any((thread) => _isRunningAgentStatus(thread.status))) {
     return StudioColors.clay;
   }
   return StudioColors.sage;
 }
 
-Color _agentStatusColor(HeaderView state, StudioSession session) {
-  if (_isFaultedAgentStatus(session.agentStatus)) {
+Color _statusColor(HeaderView state, StudioThread thread) {
+  if (_isFaultedAgentStatus(thread.status)) {
     return StudioColors.rose;
   }
   if (state.pendingInteractions.any(
-    (interaction) => interaction.sessionId == session.id,
+    (interaction) => interaction.threadId == thread.id,
   )) {
     return StudioColors.ochre;
   }
-  if (_isRunningAgentStatus(session.agentStatus)) {
+  if (_isRunningAgentStatus(thread.status)) {
     return StudioColors.clay;
   }
   return StudioColors.sage;
@@ -274,26 +271,26 @@ bool _isRunningAgentStatus(String status) =>
 bool _isFaultedAgentStatus(String status) =>
     const {'faulted', 'failed', 'errored', 'error'}.contains(status);
 
-String _agentShortStatus(StudioSession session) {
-  final status = session.agentStatus.trim();
+String _agentShortStatus(StudioThread thread) {
+  final status = thread.status.trim();
   return status.isEmpty ? 'idle' : status;
 }
 
-String _agentDisplayName(StudioSession session) {
-  if (!session.isRoot && session.title.trim().isNotEmpty) {
-    return session.title.trim();
+String _agentDisplayName(StudioThread thread) {
+  if (!thread.isRoot && thread.title.trim().isNotEmpty) {
+    return thread.title.trim();
   }
-  final role = session.ownerRole.trim();
+  final role = thread.role.trim();
   if (role.isEmpty) {
-    return session.isRoot ? 'Agent' : session.id;
+    return thread.isRoot ? 'Agent' : thread.id;
   }
   return '${role[0].toUpperCase()}${role.substring(1)}';
 }
 
-String _sessionSubtitle(BuildContext context, StudioSession session) {
-  final mode = context.compileModeLabel(session.mode);
-  final hour = session.updatedAt.hour.toString().padLeft(2, '0');
-  final minute = session.updatedAt.minute.toString().padLeft(2, '0');
+String _threadSubtitle(BuildContext context, StudioThread thread) {
+  final mode = context.compileModeLabel(thread.mode);
+  final hour = thread.updatedAt.hour.toString().padLeft(2, '0');
+  final minute = thread.updatedAt.minute.toString().padLeft(2, '0');
   return context.l10n.shellSessionUpdated(mode, '$hour:$minute');
 }
 
@@ -348,7 +345,7 @@ class _StatusBarHost extends ConsumerWidget {
         if (status == null) {
           return const SizedBox.shrink();
         }
-        return SessionStatusBar(
+        return ThreadStatusBar(
           view: status,
           showTodo: showTodo,
           todoExpanded: todoExpanded,

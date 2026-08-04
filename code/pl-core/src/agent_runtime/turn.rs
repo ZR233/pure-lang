@@ -1,19 +1,18 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use pl_protocol::{
-    McpHealthSnapshot, SessionRuntimeSnapshot, SessionRuntimeUsage, SessionViewSnapshot,
-};
+use pl_protocol::{McpHealthSnapshot, ThreadRuntimeSnapshot, ThreadRuntimeUsage, ThreadSnapshot};
 use tokio::sync::{Mutex, mpsc};
 use tokio_util::sync::CancellationToken;
 
-use crate::{AgentKernel, AgentSession, TurnOptions, TurnRequest};
+use crate::{AgentSession, TurnEngine, TurnOptions, TurnRequest};
 
 use super::{
-    AgentExecutionPolicy, AgentRuntimeHandle, AgentSnapshot, PendingAgentInput, SessionId, TurnId,
+    AgentExecutionPolicy, AgentRuntimeHandle, AgentSnapshot, DurableMailboxEnvelope, ThreadId,
+    TurnId,
 };
 
-/// turn 完成后对 canonical session 的提交策略。
+/// turn 完成后对 canonical Thread 的提交策略。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum AgentSessionCommitPolicy {
     /// 提交本轮产生的用户、模型和工具上下文。
@@ -28,9 +27,9 @@ pub enum AgentSessionCommitPolicy {
 pub struct AgentTurnPreparationContext {
     pub snapshot: AgentSnapshot,
     pub turn_id: TurnId,
-    pub session_id: SessionId,
-    pub input: PendingAgentInput,
-    pub leading_inputs: Vec<PendingAgentInput>,
+    pub thread_id: ThreadId,
+    pub input: DurableMailboxEnvelope,
+    pub leading_inputs: Vec<DurableMailboxEnvelope>,
     pub session: AgentSession,
     pub trace_sequence: u64,
     pub runtime: AgentRuntimeHandle,
@@ -39,7 +38,7 @@ pub struct AgentTurnPreparationContext {
 }
 
 struct AgentTurnMailboxState {
-    receiver: mpsc::UnboundedReceiver<PendingAgentInput>,
+    receiver: mpsc::UnboundedReceiver<DurableMailboxEnvelope>,
     unacknowledged_mail_ids: Vec<String>,
 }
 
@@ -51,7 +50,7 @@ pub(crate) struct AgentTurnMailboxHandle {
 
 impl AgentTurnMailboxHandle {
     pub(crate) fn new(
-        receiver: mpsc::UnboundedReceiver<PendingAgentInput>,
+        receiver: mpsc::UnboundedReceiver<DurableMailboxEnvelope>,
         initial_mail_ids: Vec<String>,
     ) -> Self {
         Self {
@@ -62,7 +61,7 @@ impl AgentTurnMailboxHandle {
         }
     }
 
-    pub(crate) async fn drain(&self) -> Vec<PendingAgentInput> {
+    pub(crate) async fn drain(&self) -> Vec<DurableMailboxEnvelope> {
         let mut state = self.state.lock().await;
         let mut inputs = Vec::new();
         while let Ok(input) = state.receiver.try_recv() {
@@ -105,7 +104,7 @@ impl std::fmt::Debug for AgentTurnMailboxHandle {
 /// 宿主为 runtime 准备好的可执行 turn。
 #[derive(Debug)]
 pub struct PreparedAgentTurn {
-    pub(crate) kernel: AgentKernel,
+    pub(crate) engine: TurnEngine,
     pub(crate) request: TurnRequest,
     pub(crate) options: TurnOptions,
     pub(crate) policy: AgentExecutionPolicy,
@@ -117,13 +116,13 @@ pub struct PreparedAgentTurn {
 impl PreparedAgentTurn {
     /// 创建 prepared turn；runtime 会覆盖 turn id 与 cancellation token。
     pub fn new(
-        kernel: AgentKernel,
+        engine: TurnEngine,
         request: TurnRequest,
         options: TurnOptions,
         policy: AgentExecutionPolicy,
     ) -> Self {
         Self {
-            kernel,
+            engine,
             request,
             options,
             policy,
@@ -221,12 +220,12 @@ impl PreparedSessionRuntime {
 
     pub(crate) fn merge_with(
         &self,
-        session_id: &SessionId,
-        current: &SessionViewSnapshot,
+        thread_id: &ThreadId,
+        current: &ThreadSnapshot,
         updated_at: i64,
-    ) -> SessionRuntimeSnapshot {
+    ) -> ThreadRuntimeSnapshot {
         let usage = current.runtime.as_ref().map_or_else(
-            || SessionRuntimeUsage {
+            || ThreadRuntimeUsage {
                 model: self.model.clone(),
                 context_window: self.context_window,
                 latest_context_tokens: 0,
@@ -247,25 +246,24 @@ impl PreparedSessionRuntime {
                 usage
             },
         );
-        let mut active_skills = current
+        let active_skills = current
             .runtime
             .as_ref()
             .map_or_else(Vec::new, |value| value.active_skills.clone());
-        for activation in &current.activated_skills {
-            if !active_skills.contains(&activation.name) {
-                active_skills.push(activation.name.clone());
-            }
-        }
-        SessionRuntimeSnapshot {
-            session_id: session_id.to_string(),
+        ThreadRuntimeSnapshot {
+            thread_id: thread_id.to_string(),
             usage,
+            todo: current
+                .runtime
+                .as_ref()
+                .and_then(|value| value.todo.clone()),
             active_skills,
             active_mcp_servers: self.active_mcp_servers.clone(),
             active_lsp_servers: self.active_lsp_servers.clone(),
-            agent_count: self
-                .agent_count
-                .max(current.agents.len().try_into().unwrap_or(u32::MAX))
-                .max(1),
+            progress: current
+                .runtime
+                .as_ref()
+                .and_then(|value| value.progress.clone()),
             mcp_health: self.mcp_health.clone(),
             updated_at,
         }
@@ -274,17 +272,17 @@ impl PreparedSessionRuntime {
 
 #[cfg(test)]
 mod prepared_session_runtime_tests {
-    use pl_protocol::{SessionRuntimeSnapshot, SessionRuntimeUsage, SessionViewSnapshot};
+    use pl_protocol::{ThreadRuntimeSnapshot, ThreadRuntimeUsage, ThreadSnapshot};
     use pretty_assertions::assert_eq;
 
     use super::*;
 
     #[test]
     fn prepared_runtime_replaces_resources_without_resetting_cumulative_usage() {
-        let mut current = SessionViewSnapshot::empty("session");
-        current.runtime = Some(SessionRuntimeSnapshot {
-            session_id: "session".to_string(),
-            usage: SessionRuntimeUsage {
+        let mut current = ThreadSnapshot::empty("session");
+        current.runtime = Some(ThreadRuntimeSnapshot {
+            thread_id: "session".to_string(),
+            usage: ThreadRuntimeUsage {
                 model: "old-model".to_string(),
                 context_window: Some(10),
                 latest_context_tokens: 7,
@@ -300,7 +298,8 @@ mod prepared_session_runtime_tests {
             active_skills: vec!["review".to_string()],
             active_mcp_servers: vec!["old-mcp".to_string()],
             active_lsp_servers: vec!["old-lsp".to_string()],
-            agent_count: 1,
+            todo: None,
+            progress: None,
             mcp_health: None,
             updated_at: 1,
         });
@@ -310,7 +309,7 @@ mod prepared_session_runtime_tests {
             .with_lsp(vec!["rust-analyzer".to_string()])
             .with_agent_count(2);
 
-        let merged = prepared.merge_with(&SessionId::new("session").unwrap(), &current, 9);
+        let merged = prepared.merge_with(&ThreadId::new("session").unwrap(), &current, 9);
 
         assert_eq!(merged.usage.model, "new-model");
         assert_eq!(merged.usage.context_window, Some(128_000));
@@ -318,12 +317,11 @@ mod prepared_session_runtime_tests {
         assert_eq!(merged.active_skills, vec!["review".to_string()]);
         assert_eq!(merged.active_mcp_servers, vec!["search".to_string()]);
         assert_eq!(merged.active_lsp_servers, vec!["rust-analyzer".to_string()]);
-        assert_eq!(merged.agent_count, 2);
         assert_eq!(merged.updated_at, 9);
     }
 }
 
-/// mid-turn durable session checkpoint 的触发原因。
+/// mid-turn durable Thread checkpoint 的触发原因。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TurnCheckpointReason {
     WorkingSetChanged,
@@ -333,11 +331,11 @@ pub enum TurnCheckpointReason {
     Terminal,
 }
 
-/// worker 交给 actor 做 active-turn 与 sequence 校验的 session checkpoint。
+/// worker 交给 actor 做 active-turn 与 sequence 校验的 Thread checkpoint。
 #[derive(Debug, Clone)]
 pub struct AgentTurnCheckpoint {
     pub turn_id: TurnId,
-    pub session_id: SessionId,
+    pub thread_id: ThreadId,
     pub sequence: u64,
     pub session: AgentSession,
     pub reason: TurnCheckpointReason,
@@ -350,7 +348,7 @@ pub struct AgentTurnCheckpointHandle {
     runtime: AgentRuntimeHandle,
     agent_id: super::AgentId,
     turn_id: TurnId,
-    session_id: SessionId,
+    thread_id: ThreadId,
     sequence: Arc<AtomicU64>,
 }
 
@@ -359,13 +357,13 @@ impl AgentTurnCheckpointHandle {
         runtime: AgentRuntimeHandle,
         agent_id: super::AgentId,
         turn_id: TurnId,
-        session_id: SessionId,
+        thread_id: ThreadId,
     ) -> Self {
         Self {
             runtime,
             agent_id,
             turn_id,
-            session_id,
+            thread_id,
             sequence: Arc::new(AtomicU64::new(0)),
         }
     }
@@ -393,7 +391,7 @@ impl AgentTurnCheckpointHandle {
                 self.agent_id.clone(),
                 AgentTurnCheckpoint {
                     turn_id: self.turn_id.clone(),
-                    session_id: self.session_id.clone(),
+                    thread_id: self.thread_id.clone(),
                     sequence,
                     session,
                     reason,
@@ -410,7 +408,7 @@ impl std::fmt::Debug for AgentTurnCheckpointHandle {
             .debug_struct("AgentTurnCheckpointHandle")
             .field("agent_id", &self.agent_id)
             .field("turn_id", &self.turn_id)
-            .field("session_id", &self.session_id)
+            .field("thread_id", &self.thread_id)
             .finish_non_exhaustive()
     }
 }

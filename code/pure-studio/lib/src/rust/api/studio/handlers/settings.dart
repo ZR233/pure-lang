@@ -8,6 +8,7 @@ import '../types/error.dart';
 import '../types/response.dart';
 import '../types/runtime.dart';
 import '../types/settings.dart';
+import '../types/thread_stream.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 Future<BridgeProviderCatalogSnapshot> loadProviderCatalog() =>
@@ -54,4 +55,18 @@ Future<BridgeStudioSnapshotResponse> saveGeneralSettings({
   required GeneralSettingsInput input,
 }) => RustLib.instance.api.crateApiStudioHandlersSettingsSaveGeneralSettings(
   input: input,
+);
+
+Future<BridgeStudioSnapshotResponse> setModelRole({
+  required String roleKey,
+  required String providerId,
+  required String model,
+  String? effort,
+  String? selectedThreadId,
+}) => RustLib.instance.api.crateApiStudioHandlersSettingsSetModelRole(
+  roleKey: roleKey,
+  providerId: providerId,
+  model: model,
+  effort: effort,
+  selectedThreadId: selectedThreadId,
 );

@@ -12,7 +12,7 @@ class _AgentWorkspacePaneState extends ConsumerState<AgentWorkspacePane> {
   static const _minimumTimelineWidth = 560.0;
 
   final _scaffoldKey = GlobalKey<ScaffoldState>();
-  final Map<String, bool> _todoExpandedBySession = {};
+  final Map<String, bool> _todoExpandedByThread = {};
   final Set<String> _todoAutoOpened = {};
 
   @override
@@ -28,26 +28,23 @@ class _AgentWorkspacePaneState extends ConsumerState<AgentWorkspacePane> {
         return LayoutBuilder(
           builder: (context, constraints) {
             final todo = layout.todo;
-            final sessionId = layout.sessionId;
+            final threadId = layout.threadId;
             final todoInDrawer =
                 constraints.maxWidth < _todoPanelWidth + _minimumTimelineWidth;
-            final todoExpanded = _todoExpandedBySession[sessionId] ?? false;
+            final todoExpanded = _todoExpandedByThread[threadId] ?? false;
             if (todo != null &&
                 todo.items.any((item) => item.status != 'completed') &&
-                _todoAutoOpened.add(sessionId)) {
+                _todoAutoOpened.add(threadId)) {
               WidgetsBinding.instance.addPostFrameCallback((_) {
                 if (!mounted ||
-                    ref
-                            .read(selectedWorkspaceLayoutProvider)
-                            .value
-                            ?.sessionId !=
-                        sessionId) {
+                    ref.read(selectedWorkspaceLayoutProvider).value?.threadId !=
+                        threadId) {
                   return;
                 }
                 if (todoInDrawer) {
                   _scaffoldKey.currentState?.openEndDrawer();
                 } else {
-                  setState(() => _todoExpandedBySession[sessionId] = true);
+                  setState(() => _todoExpandedByThread[threadId] = true);
                 }
               });
             }
@@ -59,7 +56,7 @@ class _AgentWorkspacePaneState extends ConsumerState<AgentWorkspacePane> {
                   ? Drawer(
                       width: 328,
                       backgroundColor: context.studioPaper2,
-                      child: SessionTodoPanel(
+                      child: TodoPanel(
                         key: const ValueKey('todo-drawer-panel'),
                         todo: todo,
                         inDrawer: true,
@@ -77,7 +74,7 @@ class _AgentWorkspacePaneState extends ConsumerState<AgentWorkspacePane> {
                           child: Stack(
                             children: [
                               Positioned.fill(
-                                child: _AgentTimelineHost(sessionId: sessionId),
+                                child: _AgentTimelineHost(threadId: threadId),
                               ),
                               if (layout.isLoading)
                                 const Positioned.fill(
@@ -92,11 +89,11 @@ class _AgentWorkspacePaneState extends ConsumerState<AgentWorkspacePane> {
                         if (!todoInDrawer && todo != null && todoExpanded)
                           SizedBox(
                             width: _todoPanelWidth,
-                            child: SessionTodoPanel(
+                            child: TodoPanel(
                               key: const ValueKey('todo-side-panel'),
                               todo: todo,
                               onClose: () => setState(
-                                () => _todoExpandedBySession[sessionId] = false,
+                                () => _todoExpandedByThread[threadId] = false,
                               ),
                             ),
                           ),
@@ -113,7 +110,7 @@ class _AgentWorkspacePaneState extends ConsumerState<AgentWorkspacePane> {
                               _scaffoldKey.currentState?.openEndDrawer();
                             } else {
                               setState(
-                                () => _todoExpandedBySession[sessionId] =
+                                () => _todoExpandedByThread[threadId] =
                                     !todoExpanded,
                               );
                             }
@@ -130,13 +127,13 @@ class _AgentWorkspacePaneState extends ConsumerState<AgentWorkspacePane> {
 }
 
 class _AgentTimelineHost extends ConsumerWidget {
-  const _AgentTimelineHost({required this.sessionId});
+  const _AgentTimelineHost({required this.threadId});
 
-  final String sessionId;
+  final String threadId;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final asyncTimeline = ref.watch(agentTimelineProvider(sessionId));
+    final asyncTimeline = ref.watch(agentTimelineProvider(threadId));
     return asyncTimeline.when(
       loading: () => const SizedBox.shrink(),
       error: (error, stackTrace) => Center(child: Text(error.toString())),
@@ -145,7 +142,7 @@ class _AgentTimelineHost extends ConsumerWidget {
           return const SizedBox.shrink();
         }
         return TimelineView(
-          sessionId: sessionId,
+          threadId: threadId,
           rows: timeline.isLoading ? const [] : timeline.rows,
           turn: timeline.turn,
           isLoadingOlder: timeline.isLoadingOlderHistory,
@@ -153,7 +150,7 @@ class _AgentTimelineHost extends ConsumerWidget {
               ? () => unawaited(
                   ref
                       .read(studioControllerProvider.notifier)
-                      .loadOlderHistory(sessionId),
+                      .loadOlderHistory(threadId),
                 )
               : null,
         );

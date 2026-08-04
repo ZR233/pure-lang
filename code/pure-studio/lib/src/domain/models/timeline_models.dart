@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'studio_enums.dart';
+import 'thread_models.dart';
 
 part 'timeline_agent_events.dart';
 part 'timeline_row_projection.dart';
@@ -64,7 +65,7 @@ class TimelineToolPart {
 class TimelineToolGroupItem {
   const TimelineToolGroupItem({required this.part});
 
-  final TimelinePart part;
+  final TimelineEntry part;
 
   TimelineToolPart? get tool => part.tool;
 
@@ -82,15 +83,15 @@ class TimelineToolGroupItem {
 class TimelineToolGroup {
   const TimelineToolGroup({
     required this.id,
-    required this.sessionId,
-    required this.messageId,
+    required this.threadId,
+    required this.groupId,
     required this.turnId,
     required this.items,
   });
 
   final String id;
-  final String sessionId;
-  final String messageId;
+  final String threadId;
+  final String groupId;
   final String turnId;
   final List<TimelineToolGroupItem> items;
 
@@ -154,8 +155,8 @@ class TimelineToolGroup {
 
   int get renderVersion => Object.hashAll([
     id,
-    sessionId,
-    messageId,
+    threadId,
+    groupId,
     turnId,
     status,
     count,
@@ -168,17 +169,17 @@ class TimelineToolGroup {
 class TimelineReasoningGroup {
   const TimelineReasoningGroup({
     required this.id,
-    required this.sessionId,
-    required this.messageId,
+    required this.threadId,
+    required this.groupId,
     required this.turnId,
     required this.parts,
   });
 
   final String id;
-  final String sessionId;
-  final String messageId;
+  final String threadId;
+  final String groupId;
   final String turnId;
-  final List<TimelinePart> parts;
+  final List<TimelineEntry> parts;
 
   int get count => parts.length;
 
@@ -241,8 +242,8 @@ class TimelineReasoningGroup {
 
   int get renderVersion => Object.hashAll([
     id,
-    sessionId,
-    messageId,
+    threadId,
+    groupId,
     turnId,
     status,
     count,
@@ -250,134 +251,15 @@ class TimelineReasoningGroup {
   ]);
 }
 
-class TimelineAgentPart {
-  const TimelineAgentPart({
+class TimelineEntry {
+  const TimelineEntry({
     required this.id,
-    required this.path,
-    required this.role,
-    required this.task,
-    required this.status,
-    this.parentPath,
-    this.summary,
-    this.depth = 0,
-    this.error,
-    this.reason,
-  });
-
-  final String id;
-  final String path;
-  final String? parentPath;
-  final String role;
-  final String task;
-  final String status;
-  final String? summary;
-  final int depth;
-  final String? error;
-  final String? reason;
-}
-
-class TimelinePartSnapshot {
-  const TimelinePartSnapshot({
-    required this.id,
-    required this.messageId,
-    required this.sessionId,
-    required this.turnId,
-    required this.type,
-    required this.order,
-    required this.revision,
-    this.sequence = 0,
-    required this.text,
-    this.reasoningSummary = const [],
-    this.reasoningContent = const [],
-    required this.status,
-    required this.createdAt,
-    required this.updatedAt,
-    this.completedAt,
-    this.error,
-    this.textChannel,
-    this.tool,
-    this.agent,
-    this.planContent,
-    this.synthetic = false,
-    this.ignored = false,
-  });
-
-  final String id;
-  final String messageId;
-  final String sessionId;
-  final String turnId;
-  final TimelinePartType type;
-  final int order;
-  final int revision;
-  final int sequence;
-  final String text;
-  final List<String> reasoningSummary;
-  final List<String> reasoningContent;
-  final String status;
-  final DateTime createdAt;
-  final DateTime updatedAt;
-  final DateTime? completedAt;
-  final String? error;
-  final TimelineTextChannel? textChannel;
-  final TimelineToolPart? tool;
-  final TimelineAgentPart? agent;
-  final String? planContent;
-  final bool synthetic;
-  final bool ignored;
-}
-
-class TimelinePartDelta {
-  const TimelinePartDelta({
-    required this.partId,
-    required this.revision,
-    required this.field,
-    required this.delta,
-    this.chunkIndex,
-  });
-
-  final String partId;
-  final int revision;
-  final String field;
-  final String delta;
-  final int? chunkIndex;
-}
-
-class TimelinePartOverlay {
-  const TimelinePartOverlay({
-    this.values = const {},
-    this.lastRevisions = const {},
-    this.lastChunkIndexes = const {},
-  });
-
-  final Map<String, String> values;
-  final Map<String, int> lastRevisions;
-  final Map<String, int> lastChunkIndexes;
-
-  TimelinePartOverlay append({
-    required String field,
-    required String value,
-    required int revision,
-    int? chunkIndex,
-  }) {
-    return TimelinePartOverlay(
-      values: {...values, field: value},
-      lastRevisions: {...lastRevisions, field: revision},
-      lastChunkIndexes: chunkIndex == null
-          ? lastChunkIndexes
-          : {...lastChunkIndexes, field: chunkIndex},
-    );
-  }
-}
-
-class TimelinePart {
-  const TimelinePart({
-    required this.id,
-    required this.messageId,
+    required this.groupId,
     required this.type,
     required this.text,
     this.reasoningSummary = const [],
     this.reasoningContent = const [],
-    this.sessionId = '',
+    this.threadId = '',
     this.turnId = '',
     this.order = 0,
     this.sequence = 0,
@@ -390,18 +272,14 @@ class TimelinePart {
     this.title,
     this.textChannel,
     this.tool,
-    this.agent,
     this.planContent,
-    this.collapsed = false,
-    this.synthetic = false,
-    this.ignored = false,
   });
 
   final String id;
-  final String messageId;
-  final String sessionId;
+  final String groupId;
+  final String threadId;
   final String turnId;
-  final TimelinePartType type;
+  final TimelineEntryType type;
   final int order;
   final int sequence;
   final String text;
@@ -416,117 +294,7 @@ class TimelinePart {
   final String? error;
   final TimelineTextChannel? textChannel;
   final TimelineToolPart? tool;
-  final TimelineAgentPart? agent;
   final String? planContent;
-  final bool collapsed;
-  final bool synthetic;
-  final bool ignored;
-}
-
-TimelinePart timelinePartFromSnapshot(
-  TimelinePartSnapshot snapshot, {
-  TimelinePartOverlay? overlay,
-}) {
-  final text = snapshot.type == TimelinePartType.reasoning
-      ? _reasoningText(snapshot, overlay)
-      : overlay?.values['text'] ?? snapshot.text;
-  final planContent = overlay?.values['planContent'] ?? snapshot.planContent;
-  final snapshotTool = snapshot.tool;
-  final tool = snapshotTool?.copyWith(
-    arguments: overlay?.values['tool.arguments'] ?? snapshotTool.arguments,
-    result: overlay?.values['tool.result'] ?? snapshotTool.result,
-  );
-  final visibleText = switch (snapshot.type) {
-    TimelinePartType.plan =>
-      planContent?.isNotEmpty == true ? planContent! : text,
-    TimelinePartType.tool => _toolActivityText(tool),
-    TimelinePartType.agent =>
-      snapshot.agent?.summary ?? snapshot.agent?.task ?? text,
-    TimelinePartType.reasoning => text,
-    TimelinePartType.text => text,
-    TimelinePartType.turn ||
-    TimelinePartType.inference ||
-    TimelinePartType.file => '',
-  };
-  return TimelinePart(
-    id: snapshot.id,
-    messageId: snapshot.messageId,
-    sessionId: snapshot.sessionId,
-    turnId: snapshot.turnId,
-    type: snapshot.type,
-    order: snapshot.order,
-    sequence: snapshot.sequence,
-    revision: snapshot.revision,
-    createdAt: snapshot.createdAt,
-    updatedAt: snapshot.updatedAt,
-    completedAt: snapshot.completedAt,
-    error: snapshot.error,
-    title: _partTitleFromSnapshot(snapshot),
-    text: visibleText,
-    reasoningSummary: _reasoningSummary(snapshot, overlay),
-    reasoningContent: _reasoningContent(snapshot, overlay),
-    status: snapshot.status,
-    textChannel: snapshot.textChannel,
-    tool: tool,
-    agent: snapshot.agent,
-    planContent: planContent,
-    collapsed: snapshot.type == TimelinePartType.reasoning,
-    synthetic: snapshot.synthetic,
-    ignored: snapshot.ignored,
-  );
-}
-
-String _reasoningText(
-  TimelinePartSnapshot snapshot,
-  TimelinePartOverlay? overlay,
-) {
-  final liveSummary = overlay?.values['reasoning.summary']?.trim();
-  if (liveSummary != null && liveSummary.isNotEmpty) {
-    return liveSummary;
-  }
-  final liveContent = overlay?.values['reasoning.content']?.trim();
-  if (liveContent != null && liveContent.isNotEmpty) {
-    return liveContent;
-  }
-  final summary = snapshot.reasoningSummary
-      .where((value) => value.trim().isNotEmpty)
-      .join('\n\n');
-  if (summary.isNotEmpty) {
-    return summary;
-  }
-  final content = snapshot.reasoningContent
-      .where((value) => value.trim().isNotEmpty)
-      .join('\n\n');
-  return content.isNotEmpty ? content : snapshot.text;
-}
-
-List<String> _reasoningSummary(
-  TimelinePartSnapshot snapshot,
-  TimelinePartOverlay? overlay,
-) {
-  final live = overlay?.values['reasoning.summary']?.trim();
-  return live != null && live.isNotEmpty ? [live] : snapshot.reasoningSummary;
-}
-
-List<String> _reasoningContent(
-  TimelinePartSnapshot snapshot,
-  TimelinePartOverlay? overlay,
-) {
-  final live = overlay?.values['reasoning.content']?.trim();
-  return live != null && live.isNotEmpty ? [live] : snapshot.reasoningContent;
-}
-
-String _partTitleFromSnapshot(TimelinePartSnapshot snapshot) {
-  return switch (snapshot.type) {
-    TimelinePartType.tool => snapshot.tool?.name ?? 'Tool',
-    TimelinePartType.plan => '',
-    TimelinePartType.agent => snapshot.agent?.role ?? 'Agent',
-    TimelinePartType.reasoning => '',
-    TimelinePartType.text => '',
-    TimelinePartType.turn => 'Turn',
-    TimelinePartType.inference => 'Inference',
-    TimelinePartType.file => 'File',
-  };
 }
 
 String _toolActivityText(TimelineToolPart? tool) {
@@ -558,7 +326,7 @@ String? _commandSummary(String arguments) {
   return value == null || value.isEmpty ? null : value;
 }
 
-String? _reasoningPartSummary(TimelinePart part) {
+String? _reasoningPartSummary(TimelineEntry part) {
   final title = _plainReasoningSummary(part.title ?? '');
   if (title != null) {
     return title;
@@ -626,54 +394,4 @@ String? _stringValue(Object? value) {
     return null;
   }
   return value.toString();
-}
-
-class TimelineMessage {
-  const TimelineMessage({
-    required this.id,
-    required this.sessionId,
-    required this.role,
-    required this.createdAt,
-    this.turnId = '',
-    this.status = 'completed',
-    DateTime? updatedAt,
-    this.completedAt,
-    this.error,
-    this.sequence = 0,
-  }) : updatedAt = updatedAt ?? createdAt;
-
-  final String id;
-  final String sessionId;
-  final String turnId;
-  final String role;
-  final String status;
-  final DateTime createdAt;
-  final DateTime updatedAt;
-  final DateTime? completedAt;
-  final String? error;
-  final int sequence;
-
-  TimelineMessage copyWith({
-    String? turnId,
-    String? role,
-    String? status,
-    DateTime? createdAt,
-    DateTime? updatedAt,
-    DateTime? completedAt,
-    String? error,
-    int? sequence,
-  }) {
-    return TimelineMessage(
-      id: id,
-      sessionId: sessionId,
-      turnId: turnId ?? this.turnId,
-      role: role ?? this.role,
-      status: status ?? this.status,
-      createdAt: createdAt ?? this.createdAt,
-      updatedAt: updatedAt ?? this.updatedAt,
-      completedAt: completedAt ?? this.completedAt,
-      error: error ?? this.error,
-      sequence: sequence ?? this.sequence,
-    );
-  }
 }

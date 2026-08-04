@@ -28,7 +28,7 @@ async fn run_offline_task_flow() -> Result<()> {
     fixture
         .runtime
         .submit_prompt(StudioSubmitPromptRequest {
-            session_id: fixture.session_id.clone(),
+            thread_id: fixture.thread_id.clone(),
             prompt: format!(
                 "Create the offline task integration fixture and carry it through review. \
                  Unique parent marker: {PARENT_HISTORY_MARKER}"
@@ -65,19 +65,22 @@ async fn run_offline_task_flow() -> Result<()> {
     assert!(work_unit.agent_id.is_some());
     assert!(!Path::new(&work_unit.worktree_path).exists());
 
-    let executor = task
-        .agents
+    let executor_id = work_unit
+        .agent_id
+        .as_deref()
+        .context("work unit has no executor thread")?;
+    let executor_completion = task
+        .completions
         .iter()
-        .find(|agent| agent.role == "executor")
-        .context("executor outcome is absent")?;
-    assert_eq!(executor.status, "completed");
-    assert!(executor.head_commit.is_some());
+        .find(|completion| completion.executor_agent_id == executor_id)
+        .context("executor completion is absent")?;
+    assert!(executor_completion.head_commit.is_some());
     let reviewer = task
-        .agents
+        .reviews
         .iter()
-        .find(|agent| agent.role == "reviewer")
-        .context("reviewer outcome is absent")?;
-    assert_eq!(reviewer.status, "completed");
+        .find(|review| review.reviewer_agent_id.is_some())
+        .context("review round is absent")?;
+    assert_eq!(reviewer.verdict, "pass");
 
     assert_eq!(task.merges.len(), 1);
     let merge = &task.merges[0];
@@ -138,7 +141,7 @@ async fn run_offline_task_flow() -> Result<()> {
     assert!(
         fixture
             .store
-            .list_pending_interactions(&fixture.session_id)
+            .list_pending_interactions(&fixture.thread_id)
             .await?
             .is_empty()
     );
@@ -146,11 +149,11 @@ async fn run_offline_task_flow() -> Result<()> {
 
     fixture
         .runtime
-        .set_session_mode(&fixture.session_id, StudioMode::Simple)
+        .set_thread_mode(&fixture.thread_id, StudioMode::Simple)
         .await?;
     let session = fixture
         .store
-        .read_session(&fixture.session_id)
+        .read_thread(&fixture.thread_id)
         .await?
         .context("task session disappeared")?;
     assert_eq!(session.mode, StudioMode::Simple.label());

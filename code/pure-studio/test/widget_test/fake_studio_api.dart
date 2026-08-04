@@ -11,26 +11,21 @@ class _FakeStudioApi implements StudioApi {
   final List<ProviderUsageView> providerUsages;
   final ProviderCatalogView providerCatalog;
   final _global = StreamController<Object>.broadcast();
-  StreamController<SessionStreamFrame> _session =
-      StreamController<SessionStreamFrame>.broadcast();
+  StreamController<ThreadStreamFrame> _thread =
+      StreamController<ThreadStreamFrame>.broadcast();
   final Map<String, StudioState> sessionStates = {};
   final Map<String, StudioState> selectProjectStates = {};
   final Map<String, StudioState> archiveProjectStates = {};
   final List<String> loadedSessionIds = [];
-  final List<({String sessionId, int? afterSequence})> sessionSubscriptions =
-      [];
-  final List<({String sessionId, int? beforeTurnSequence})> historyRequests =
-      [];
-  final Map<String, Map<int?, SessionHistoryPage>> historyPagesBySession = {};
-  int createSessionCount = 0;
+  final List<String> threadSubscriptions = [];
+  final List<({String threadId, String? cursor})> historyRequests = [];
+  final Map<String, Map<String?, ThreadHistoryPage>> historyPagesByThread = {};
   int bootstrapCount = 0;
   Object? bootstrapError;
   String? openedProjectPath;
   String? selectedProjectRequest;
   String? archivedProjectId;
   String? archiveSelectedProjectId;
-  String? archivedSessionId;
-  StudioMode? sessionModeUpdate;
   _RoleUpdate? roleUpdate;
   Map<String, Object?>? savedProviderSettings;
   Map<String, Object?>? savedInstructionsSettings;
@@ -47,9 +42,9 @@ class _FakeStudioApi implements StudioApi {
   List<String> discoveredSkills = const [];
   int loadProviderUsagesCount = 0;
   Completer<List<ProviderUsageView>>? blockedProviderUsageLoad;
-  Completer<void>? blockedSessionCancellation;
+  Completer<void>? blockedThreadCancellation;
   int submitPromptCount = 0;
-  final List<({String sessionId, String prompt})> submittedPrompts = [];
+  final List<({String threadId, String prompt})> submittedPrompts = [];
   Completer<SubmitPromptReceipt>? blockedPromptSubmit;
   Exception? submitPromptError;
   int resumeTaskCount = 0;
@@ -58,6 +53,7 @@ class _FakeStudioApi implements StudioApi {
   Exception? resumeTaskError;
   String? submitReceiptSessionId;
   String submitTurnId = 'turn-1';
+  ({String threadId, String turnId})? interruptedTurn;
   final Map<String, RecoveryCleanupPreview> recoveryPreviews = {};
   final Map<String, RecoveryCleanupPreview> projectCleanupPreviews = {};
   int previewProjectCleanupCount = 0;
@@ -75,14 +71,11 @@ class _FakeStudioApi implements StudioApi {
 
   void emitGlobal(StudioBridgeEvent event) => _global.add(event);
 
-  void emitSession(StudioBridgeEvent event) =>
-      _session.add(SessionEventFrame(event: event));
+  void emitThreadFrame(ThreadStreamFrame frame) => _thread.add(frame);
 
-  void emitSessionFrame(SessionStreamFrame frame) => _session.add(frame);
-
-  Future<void> closeSessionStream() async {
-    final closed = _session;
-    _session = StreamController<SessionStreamFrame>.broadcast();
+  Future<void> closeThreadStream() async {
+    final closed = _thread;
+    _thread = StreamController<ThreadStreamFrame>.broadcast();
     await closed.close();
   }
 
@@ -152,21 +145,6 @@ class _FakeStudioApi implements StudioApi {
   }
 
   @override
-  Future<StudioState> createSession(String projectId, {String? title}) async {
-    createSessionCount += 1;
-    return initialState;
-  }
-
-  @override
-  Future<StudioState> archiveSession(
-    String sessionId, {
-    String? selectedSessionId,
-  }) async {
-    archivedSessionId = sessionId;
-    return initialState;
-  }
-
-  @override
   Future<RecoveryCleanupPreview> previewRecoveryIssueCleanup(
     String issueId,
   ) async {
@@ -178,7 +156,7 @@ class _FakeStudioApi implements StudioApi {
         RecoveryCleanupPreview(
           issueId: issueId,
           expectedRevision: 'revision-$issueId',
-          scope: RecoveryIssueScope.session,
+          scope: RecoveryIssueScope.thread,
           detail: 'Recovery cleanup preview',
           resources: const [],
         );
@@ -189,7 +167,7 @@ class _FakeStudioApi implements StudioApi {
     String issueId,
     String expectedRevision, {
     String? selectedProjectId,
-    String? selectedSessionId,
+    String? selectedThreadId,
   }) async {
     if (recoveryCleanupError case final error?) {
       throw error;
@@ -200,23 +178,12 @@ class _FakeStudioApi implements StudioApi {
   }
 
   @override
-  Future<StudioSession> setSessionMode(
-    String sessionId,
-    StudioMode mode,
-  ) async {
-    sessionModeUpdate = mode;
-    return initialState.sessions
-        .firstWhere((session) => session.id == sessionId)
-        .copyWith(mode: mode);
-  }
-
-  @override
   Future<StudioState> setModelRole({
     required String roleKey,
     required String providerId,
     required String model,
     String? effort,
-    String? selectedSessionId,
+    String? selectedThreadId,
   }) async {
     roleUpdate = _RoleUpdate(
       roleKey: roleKey,
@@ -240,7 +207,7 @@ class _FakeStudioApi implements StudioApi {
   }
 
   @override
-  Future<InteractionResolutionResult> resolveInteraction(
+  Future<PendingInteraction> respondInteraction(
     String interactionId,
     InteractionResolutionCommand resolution,
   ) async {
@@ -250,49 +217,30 @@ class _FakeStudioApi implements StudioApi {
     }
     resolvedInteractionId = interactionId;
     resolvedInteraction = _interactionResolutionJson(resolution);
-    final sessions =
-        resolution is PlanConfirmationResolutionCommand &&
-            resolution.decision ==
-                PlanConfirmationDecision.implementFreshContext
-        ? [
-            for (final session in initialState.sessions)
-              session.id == initialState.selectedSessionId
-                  ? session.copyWith(mode: StudioMode.task)
-                  : session,
-          ]
-        : initialState.sessions;
-    return InteractionResolutionResult(
-      sessionId: initialState.selectedSessionId ?? '',
-      interactionId: interactionId,
-      status: 'resolved',
-      sessions: sessions,
+    return PendingInteraction(
+      id: interactionId,
+      threadId: initialState.selectedThreadId ?? '',
+      kind: InteractionKind.userInput,
+      title: '',
+      body: '',
     );
   }
-
-  @override
-  Future<void> stopPrompt(String sessionId) async {}
 
   @override
   Stream<Object> subscribeProductEvents() => _global.stream;
 
   @override
-  Stream<SessionStreamFrame> subscribeSessionEvents(
-    String sessionId, {
-    int? afterSequence,
-  }) {
-    sessionSubscriptions.add((
-      sessionId: sessionId,
-      afterSequence: afterSequence,
-    ));
-    final blockedCancellation = blockedSessionCancellation;
+  Stream<ThreadStreamFrame> subscribeThread(String threadId) {
+    threadSubscriptions.add(threadId);
+    final blockedCancellation = blockedThreadCancellation;
     if (blockedCancellation == null) {
-      return _session.stream;
+      return _thread.stream;
     }
-    late final StreamController<SessionStreamFrame> controller;
-    StreamSubscription<SessionStreamFrame>? forwarding;
-    controller = StreamController<SessionStreamFrame>(
+    late final StreamController<ThreadStreamFrame> controller;
+    StreamSubscription<ThreadStreamFrame>? forwarding;
+    controller = StreamController<ThreadStreamFrame>(
       onListen: () {
-        forwarding = _session.stream.listen(
+        forwarding = _thread.stream.listen(
           controller.add,
           onError: controller.addError,
           onDone: controller.close,
@@ -307,31 +255,36 @@ class _FakeStudioApi implements StudioApi {
   }
 
   @override
-  Future<SessionHistoryPage> loadSessionHistoryPage(
-    String sessionId, {
-    int? beforeTurnSequence,
+  Future<ThreadHistoryPage> listThreadTurns(
+    String threadId, {
+    String? cursor,
     int limit = 50,
   }) async {
-    historyRequests.add((
-      sessionId: sessionId,
-      beforeTurnSequence: beforeTurnSequence,
-    ));
-    return historyPagesBySession[sessionId]?[beforeTurnSequence] ??
-        const SessionHistoryPage(
-          turns: [],
-          nextBeforeTurnSequence: null,
-          hasMore: false,
-        );
+    historyRequests.add((threadId: threadId, cursor: cursor));
+    return historyPagesByThread[threadId]?[cursor] ??
+        const ThreadHistoryPage(items: [], nextCursor: null);
   }
 
   @override
-  Future<SubmitPromptReceipt> submitPrompt(
-    String sessionId,
+  Future<SubmitPromptReceipt> startTurn(
+    String threadId,
     String prompt,
     List<String> attachmentIds,
+  ) => _submitTurn(threadId, prompt);
+
+  @override
+  Future<SubmitPromptReceipt> steerTurn(
+    String threadId,
+    String prompt,
+    List<String> attachmentIds,
+  ) => _submitTurn(threadId, prompt);
+
+  Future<SubmitPromptReceipt> _submitTurn(
+    String threadId,
+    String prompt,
   ) async {
     submitPromptCount += 1;
-    submittedPrompts.add((sessionId: sessionId, prompt: prompt));
+    submittedPrompts.add((threadId: threadId, prompt: prompt));
     if (submitPromptError case final error?) {
       throw error;
     }
@@ -340,28 +293,15 @@ class _FakeStudioApi implements StudioApi {
       return blocked.future;
     }
     return SubmitPromptReceipt(
-      sessionId: submitReceiptSessionId ?? sessionId,
+      threadId: submitReceiptSessionId ?? threadId,
       turnId: submitTurnId,
       cursor: submitPromptCount,
     );
   }
 
   @override
-  Future<SubmitPromptReceipt> resumeTask(String sessionId) async {
-    resumeTaskCount += 1;
-    resumedTaskSessionIds.add(sessionId);
-    if (resumeTaskError case final error?) {
-      throw error;
-    }
-    final blocked = blockedTaskResume;
-    if (blocked != null) {
-      return blocked.future;
-    }
-    return SubmitPromptReceipt(
-      sessionId: submitReceiptSessionId ?? sessionId,
-      turnId: submitTurnId,
-      cursor: resumeTaskCount,
-    );
+  Future<void> interruptTurn(String threadId, String turnId) async {
+    interruptedTurn = (threadId: threadId, turnId: turnId);
   }
 
   @override

@@ -2,7 +2,7 @@ use super::super::{AgentActivityState, AgentRuntimeEventKind, AgentRuntimeHost};
 use super::AgentLoop;
 use super::running_turn::{TurnCompletion, add_usage, turn_outcome};
 use crate::agent_runtime::state::unix_timestamp;
-use crate::session_event::compaction_observation;
+use crate::thread_event::compaction_observation;
 
 impl<H> AgentLoop<H>
 where
@@ -48,7 +48,7 @@ where
         let finalized_with_tool = completion.finalized_with_tool;
         let (outcome, _, result) = turn_outcome(
             active.turn_id.clone(),
-            active.session_id.clone(),
+            active.thread_id.clone(),
             completion.result,
             cancelled,
         );

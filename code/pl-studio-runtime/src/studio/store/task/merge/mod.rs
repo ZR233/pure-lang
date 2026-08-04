@@ -5,13 +5,11 @@ mod record;
 pub(super) use record::{merge_record, parse_required_evidence};
 
 use anyhow::{Context, Result, bail};
-use pl_core::{AgentLifecycleState, AgentSnapshot};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
     TransactionTrait,
 };
 
-use super::outcome::agent_outcome_record;
 use super::work_completion::{delivery_from_completion, work_completion_record};
 use super::work_unit::work_unit_record;
 use super::{branch_lease_record, task_run_record};
@@ -20,8 +18,8 @@ use crate::studio::entity as entities;
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    AgentOutcomeStatus, BeginTaskMerge, CompleteTaskMerge, ConflictTaskMerge, FailTaskMerge,
-    MergeEvidence, MergeRecord, MergeStatus, TaskMergeScope, TaskRunPhase, TaskRunRecord,
+    BeginTaskMerge, CompleteTaskMerge, ConflictTaskMerge, FailTaskMerge, MergeEvidence,
+    MergeRecord, MergeStatus, TaskMergeScope, TaskRunPhase, TaskRunRecord, ThreadExecutionStatus,
     WorkCompletionStatus, WorkUnitStatus,
 };
 
@@ -30,7 +28,7 @@ impl StudioStore {
         let tx = self.db.begin().await?;
         let result = async {
             let runs = entities::task_run::Entity::find()
-                .filter(entities::task_run::Column::SessionId.eq(input.session_id.clone()))
+                .filter(entities::task_run::Column::RootThreadId.eq(input.thread_id.clone()))
                 .filter(entities::task_run::Column::Phase.is_not_in([
                     TaskRunPhase::Completed.as_str(),
                     TaskRunPhase::Blocked.as_str(),
@@ -81,52 +79,32 @@ impl StudioStore {
                 bail!("task run already has an active merge");
             }
 
-            let outcomes = entities::agent_outcome::Entity::find()
-                .filter(entities::agent_outcome::Column::TaskRunId.eq(run_model.id.clone()))
-                .filter(entities::agent_outcome::Column::AgentId.eq(input.agent_id.clone()))
+            let work_units = entities::work_unit::Entity::find()
+                .filter(entities::work_unit::Column::TaskRunId.eq(run_model.id.clone()))
+                .filter(entities::work_unit::Column::ExecutorThreadId.eq(input.agent_id.clone()))
                 .all(&tx)
                 .await?;
-            let outcome_model = match outcomes.as_slice() {
-                [outcome] => outcome.clone(),
-                [] => bail!("approved executor outcome not found for agent"),
-                _ => bail!("ambiguous executor outcome for agent"),
+            let work_unit_model = match work_units.as_slice() {
+                [work_unit] => work_unit.clone(),
+                [] => bail!("approved executor work unit not found for Thread"),
+                _ => bail!("ambiguous executor work unit for Thread"),
             };
-            if outcome_model.role != "executor"
-                || outcome_model.initiated_by != "planner"
-                || outcome_model.owner_path != "/root"
-                || outcome_model.status != AgentOutcomeStatus::Completed.as_str()
-            {
-                bail!("agent outcome is not a planner-owned completed executor delivery");
-            }
-            let runtime_state =
-                entities::agent_runtime_state::Entity::find_by_id(input.agent_id.clone())
-                    .one(&tx)
-                    .await?
-                    .context("executor canonical runtime snapshot not found")?;
-            let snapshot: AgentSnapshot = serde_json::from_str(&runtime_state.snapshot_json)
-                .context("executor canonical runtime snapshot is invalid")?;
-            if snapshot.identity.id.as_str() != input.agent_id
-                || snapshot.identity.role.as_str() != "executor"
-                || snapshot.lifecycle != AgentLifecycleState::Closed
-            {
-                bail!("executor must be canonically closed before merge");
-            }
-            let work_unit_id = outcome_model
-                .work_unit_id
-                .clone()
-                .context("executor outcome has no work unit")?;
-            let work_unit_model = entities::work_unit::Entity::find_by_id(work_unit_id.clone())
+            let executor = entities::thread::Entity::find_by_id(input.agent_id.clone())
                 .one(&tx)
                 .await?
-                .context("executor work unit not found")?;
+                .context("executor canonical Thread not found")?;
+            if executor.role != "executor" || executor.status != "closed" {
+                bail!("executor must be canonically closed before merge");
+            }
             if work_unit_model.task_run_id != run_model.id
-                || work_unit_model.agent_id.as_deref() != Some(input.agent_id.as_str())
+                || work_unit_model.executor_thread_id.as_deref() != Some(input.agent_id.as_str())
                 || work_unit_model.status != WorkUnitStatus::Approved.as_str()
-                || work_unit_model.attempt != outcome_model.attempt
+                || work_unit_model.execution_status != ThreadExecutionStatus::Completed.as_str()
                 || work_unit_model.attempt <= 0
             {
                 bail!("work unit does not match an approved executor completion");
             }
+            let work_unit_id = work_unit_model.id.clone();
             let completion_model = entities::work_completion::Entity::find()
                 .filter(
                     entities::work_completion::Column::WorkUnitId.eq(work_unit_model.id.clone()),
@@ -163,7 +141,6 @@ impl StudioStore {
                 version: 1,
                 origin_phase,
                 work_unit_id: work_unit_id.clone(),
-                outcome_id: outcome_model.id.clone(),
                 completion_id: completion.id.clone(),
                 completion_revision: completion.revision,
                 delivery_head: delivery.head_commit.clone(),
@@ -208,7 +185,6 @@ impl StudioStore {
                 run: task_run_record(run_model)?,
                 lease: branch_lease_record(lease_model),
                 work_unit: work_unit_record(work_unit_model)?,
-                outcome: agent_outcome_record(outcome_model)?,
                 completion,
                 delivery,
                 merge: merge_record(merge_model)?,
@@ -345,22 +321,15 @@ impl StudioStore {
                 .one(&tx)
                 .await?
                 .context("merge work unit not found")?;
-            let outcome = entities::agent_outcome::Entity::find_by_id(evidence.outcome_id.clone())
-                .one(&tx)
-                .await?
-                .context("merge agent outcome not found")?;
             let completion =
                 entities::work_completion::Entity::find_by_id(evidence.completion_id.clone())
                     .one(&tx)
                     .await?
                     .context("merge work completion not found")?;
             if work_unit.task_run_id != run.id
-                || work_unit.agent_id.as_deref() != Some(merge.agent_id.as_str())
+                || work_unit.executor_thread_id.as_deref() != Some(merge.agent_id.as_str())
                 || work_unit.status != WorkUnitStatus::Merging.as_str()
-                || outcome.task_run_id != run.id
-                || outcome.work_unit_id.as_deref() != Some(work_unit.id.as_str())
-                || outcome.agent_id != merge.agent_id
-                || outcome.status != AgentOutcomeStatus::Completed.as_str()
+                || work_unit.execution_status != ThreadExecutionStatus::Completed.as_str()
                 || completion.task_run_id != run.id
                 || completion.work_unit_id != work_unit.id
                 || completion.executor_agent_id != merge.agent_id

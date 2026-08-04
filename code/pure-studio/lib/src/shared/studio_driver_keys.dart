@@ -38,8 +38,14 @@ abstract final class StudioDriverKeys {
   static ValueKey<String> projectRow(String id) =>
       ValueKey<String>('project-row-$id');
 
-  static ValueKey<String> sessionRow(String id) =>
-      ValueKey<String>('session-row-$id');
+  static ValueKey<String> threadRow(String id) =>
+      ValueKey<String>('thread-row-$id');
+
+  static ValueKey<String> turnActivity(String id) =>
+      ValueKey<String>('turn-activity-$id');
+
+  static ValueKey<String> timelineBlock(String id) =>
+      ValueKey<String>('timeline-block-$id');
 
   static ValueKey<String> sessionModeOption(String mode) =>
       ValueKey<String>('session-mode-$mode');
@@ -65,7 +71,7 @@ abstract final class StudioDriverKeys {
       ValueKey<String>('user-input-option-$questionId-$optionIndex');
 
   static ValueKey<String> agentRow(String id) =>
-      ValueKey<String>('agent-session-$id');
+      ValueKey<String>('agent-thread-$id');
 
   static ValueKey<String> taskAgent(String id) =>
       ValueKey<String>('task-agent-$id');

@@ -8,22 +8,18 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 import 'types/error.dart';
 import 'types/event.dart';
-import 'types/response.dart';
 import 'types/runtime.dart';
-import 'types/session_stream.dart';
+import 'types/thread_stream.dart';
 part 'subscription.freezed.dart';
 
 // These functions are ignored because they are not marked as `pub`: `cancel_all`, `cancel_and_wait`, `new`, `next_id`, `register`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `BridgeSubscriptionInner`, `BridgeSubscriptionKind`, `BridgeTaskRegistry`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `drop`, `fmt`, `fmt`, `fmt`
 
-Future<BridgeEventSubscription> createSessionSubscription({
-  required String sessionId,
-  BigInt? afterSequence,
-}) => RustLib.instance.api.crateApiStudioSubscriptionCreateSessionSubscription(
-  sessionId: sessionId,
-  afterSequence: afterSequence,
-);
+Future<BridgeEventSubscription> subscribeThread({required String threadId}) =>
+    RustLib.instance.api.crateApiStudioSubscriptionSubscribeThread(
+      threadId: threadId,
+    );
 
 Future<BridgeEventSubscription> createProductSubscription() =>
     RustLib.instance.api.crateApiStudioSubscriptionCreateProductSubscription();
@@ -34,7 +30,7 @@ abstract class BridgeEventSubscription implements RustOpaqueInterface {
 
   Stream<BridgeProductStreamEnvelope> productStream();
 
-  Stream<BridgeSessionStreamEnvelope> sessionStream();
+  Stream<BridgeThreadStreamEnvelope> threadStream();
 }
 
 @freezed
@@ -52,15 +48,15 @@ sealed class BridgeProductStreamEnvelope with _$BridgeProductStreamEnvelope {
 }
 
 @freezed
-sealed class BridgeSessionStreamEnvelope with _$BridgeSessionStreamEnvelope {
-  const BridgeSessionStreamEnvelope._();
+sealed class BridgeThreadStreamEnvelope with _$BridgeThreadStreamEnvelope {
+  const BridgeThreadStreamEnvelope._();
 
-  const factory BridgeSessionStreamEnvelope.data({
-    required BridgeSessionStreamFrame frame,
-  }) = BridgeSessionStreamEnvelope_Data;
-  const factory BridgeSessionStreamEnvelope.failure({
+  const factory BridgeThreadStreamEnvelope.data({
+    required BridgeThreadSubscriptionUpdate update,
+  }) = BridgeThreadStreamEnvelope_Data;
+  const factory BridgeThreadStreamEnvelope.failure({
     required BridgeError error,
-  }) = BridgeSessionStreamEnvelope_Failure;
-  const factory BridgeSessionStreamEnvelope.closed() =
-      BridgeSessionStreamEnvelope_Closed;
+  }) = BridgeThreadStreamEnvelope_Failure;
+  const factory BridgeThreadStreamEnvelope.closed() =
+      BridgeThreadStreamEnvelope_Closed;
 }

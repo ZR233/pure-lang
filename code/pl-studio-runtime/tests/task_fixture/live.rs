@@ -19,7 +19,7 @@ pub struct LiveTaskFixture {
     pub runtime: StudioRuntime,
     pub store: StudioStore,
     pub workspace: PathBuf,
-    pub session_id: String,
+    pub thread_id: String,
     route_diagnostics: String,
     node_version: String,
     installed_config: InstalledConfigGuard,
@@ -65,10 +65,10 @@ impl LiveTaskFixture {
         let runtime = StudioRuntime::new(store.clone(), installed_config.store.clone());
         let project = runtime.open_project(&workspace).await?;
         let session = runtime
-            .create_session(&project.id, "Live headless shooter task")
+            .create_thread(&project.id, "Live headless shooter task")
             .await?;
         runtime
-            .set_session_mode(&session.id, StudioMode::Task)
+            .set_thread_mode(&session.id, StudioMode::Task)
             .await?;
         runtime.start_runtime().await?;
 
@@ -79,7 +79,7 @@ impl LiveTaskFixture {
             runtime,
             store,
             workspace,
-            session_id: session.id,
+            thread_id: session.id,
             route_diagnostics,
             node_version,
             installed_config,
@@ -92,7 +92,7 @@ impl LiveTaskFixture {
         loop {
             let pending = self
                 .store
-                .list_pending_interactions(&self.session_id)
+                .list_pending_interactions(&self.thread_id)
                 .await?;
             if let Some(unexpected) = pending
                 .iter()
@@ -110,7 +110,7 @@ impl LiveTaskFixture {
             {
                 return Ok(confirmation);
             }
-            if let Some(task) = self.runtime.session_task_view(&self.session_id).await?
+            if let Some(task) = self.runtime.thread_task_view(&self.thread_id).await?
                 && is_failed_phase(&task.phase)
             {
                 bail!(
@@ -140,7 +140,7 @@ impl LiveTaskFixture {
         loop {
             let pending = self
                 .store
-                .list_pending_interactions(&self.session_id)
+                .list_pending_interactions(&self.thread_id)
                 .await?;
             if let Some(interaction) = pending.first() {
                 bail!(
@@ -151,7 +151,7 @@ impl LiveTaskFixture {
             }
 
             let mut child_is_active = false;
-            if let Some(task) = self.runtime.session_task_view(&self.session_id).await? {
+            if let Some(task) = self.runtime.thread_task_view(&self.thread_id).await? {
                 if task.phase == "completed" {
                     return Ok(task);
                 }
@@ -203,18 +203,15 @@ impl LiveTaskFixture {
     }
 
     pub async fn successful_executor_owned_paths(&self) -> Result<Vec<Vec<String>>> {
-        let snapshot = self
-            .runtime
-            .session_event_snapshot(&self.session_id)
-            .await?;
+        let snapshot = self.runtime.thread_snapshot(&self.thread_id).await?;
         snapshot
-            .parts
+            .items
             .into_iter()
-            .filter_map(|part| match part.content {
-                pl_studio_runtime::SessionPartContent::Tool { tool }
-                    if tool.name == "task_spawn_executor" && tool.result.is_some() =>
+            .filter_map(|item| match item.content {
+                pl_protocol::ThreadItemContent::ToolCall { tool }
+                    if tool.name == "task_spawn_executor" =>
                 {
-                    Some((tool.arguments, tool.result.expect("checked above")))
+                    tool.result.map(|result| (tool.arguments, result))
                 }
                 _ => None,
             })
@@ -248,43 +245,39 @@ impl LiveTaskFixture {
     pub async fn diagnostics(&self) -> String {
         let task = self
             .runtime
-            .session_task_view(&self.session_id)
+            .thread_task_view(&self.thread_id)
             .await
             .map(|task| format!("{task:#?}"))
             .unwrap_or_else(|error| format!("task projection failed: {error:#}"));
         let interactions = self
             .store
-            .list_pending_interactions(&self.session_id)
+            .list_pending_interactions(&self.thread_id)
             .await
             .map(|interactions| format!("{interactions:#?}"))
             .unwrap_or_else(|error| format!("pending interaction query failed: {error:#}"));
-        let snapshot = self.runtime.session_event_snapshot(&self.session_id).await;
-        let events = snapshot
+        let snapshot = self.runtime.thread_snapshot(&self.thread_id).await;
+        let snapshot_summary = snapshot
+            .as_ref()
+            .map(|snapshot| {
+                format!(
+                    "revision={} active_turn={:#?}",
+                    snapshot.revision, snapshot.active_turn
+                )
+            })
+            .unwrap_or_else(|error| format!("thread snapshot query failed: {error:#}"));
+        let items = snapshot
             .as_ref()
             .map(|snapshot| {
                 snapshot
-                    .timeline_events
+                    .items
                     .iter()
                     .rev()
                     .take(20)
-                    .map(|event| format!("{event:#?}"))
+                    .map(compact_item_diagnostic)
                     .collect::<Vec<_>>()
                     .join("\n")
             })
-            .unwrap_or_else(|error| format!("session event query failed: {error:#}"));
-        let parts = snapshot
-            .as_ref()
-            .map(|snapshot| {
-                snapshot
-                    .parts
-                    .iter()
-                    .rev()
-                    .take(20)
-                    .map(compact_part_diagnostic)
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            })
-            .unwrap_or_else(|error| format!("session projection query failed: {error:#}"));
+            .unwrap_or_else(|error| format!("thread item query failed: {error:#}"));
         let runtime = format!("{:#?}", self.runtime.runtime_snapshot());
         let git = if self.workspace.join(".git").exists() {
             git_output(&self.workspace, &["status", "--porcelain"])
@@ -295,7 +288,7 @@ impl LiveTaskFixture {
         format!(
             "model routes:\n{}\nNode.js: {}\ntask projection:\n{task}\n\
              pending interactions:\n{interactions}\nruntime snapshot:\n{runtime}\n\
-             recent events:\n{events}\nrecent session parts:\n{parts}\ngit status:\n{git}",
+             thread snapshot:\n{snapshot_summary}\nrecent items:\n{items}\ngit status:\n{git}",
             self.route_diagnostics, self.node_version
         )
     }
@@ -398,15 +391,15 @@ fn is_failed_phase(phase: &str) -> bool {
     matches!(phase, "blocked" | "failed" | "cancelled")
 }
 
-fn compact_part_diagnostic(part: &pl_studio_runtime::SessionPart) -> String {
-    let content = match &part.content {
-        pl_studio_runtime::SessionPartContent::Tool { tool } => format!(
+fn compact_item_diagnostic(item: &pl_protocol::ThreadItem) -> String {
+    let content = match &item.content {
+        pl_protocol::ThreadItemContent::ToolCall { tool } => format!(
             "tool={} arguments={} result={}",
             tool.name,
             truncate_diagnostic(&tool.arguments, 800),
             truncate_diagnostic(tool.result.as_deref().unwrap_or(""), 1_200)
         ),
-        pl_studio_runtime::SessionPartContent::Text { channel, text, .. } => {
+        pl_protocol::ThreadItemContent::AgentMessage { channel, text } => {
             format!(
                 "text channel={channel:?} value={}",
                 truncate_diagnostic(text, 1_200)
@@ -415,8 +408,8 @@ fn compact_part_diagnostic(part: &pl_studio_runtime::SessionPart) -> String {
         content => truncate_diagnostic(&format!("{content:?}"), 1_200),
     };
     format!(
-        "part={} turn={} status={:?} error={:?} {content}",
-        part.part_id, part.turn_id, part.status, part.error
+        "item={} turn={} status={:?} error={:?} {content}",
+        item.id, item.turn_id, item.status, item.error
     )
 }
 

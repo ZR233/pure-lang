@@ -7,9 +7,8 @@ use serde::Deserialize;
 use super::git::{changed_files_between, inspect_repository, is_ancestor, resolve_commit_oid};
 use super::owned_path::OwnedPath;
 use super::{
-    AgentDelivery, AgentOutcomeStatus, AgentWorktreeDelivery, DeliveryScope,
-    DeliveryScopeResolution, TaskCoordinator, WorkCompletionKind, WorkCompletionRecord,
-    WorkUnitStatus,
+    AgentDelivery, AgentWorktreeDelivery, DeliveryScope, TaskCoordinator, ThreadExecutionStatus,
+    WorkCompletionKind, WorkCompletionRecord, WorkUnitStatus,
 };
 use crate::tool::{
     RegisteredTool, SubagentContext, ToolExecutionResult, ToolInputSchemaField,
@@ -60,23 +59,23 @@ impl TaskCoordinator {
     pub(crate) fn install_tools(
         self: &Arc<Self>,
         core: &mut TurnEngine,
-        session_id: &str,
+        thread_id: &str,
         runtime: AgentRuntimeHandle,
         snapshot: &AgentSnapshot,
     ) {
         if snapshot.identity.parent_id.is_none() {
-            core.register_tool(self.task_send_message_tool(session_id, runtime.clone()));
-            core.register_tool(self.task_spawn_executor_tool(session_id, runtime.clone()));
-            core.register_tool(self.task_update_design_tool(session_id));
-            core.register_tool(self.task_merge_agent_tool(session_id, runtime.clone()));
-            core.register_tool(self.task_request_delivery_review_tool(session_id, runtime.clone()));
+            core.register_tool(self.task_send_message_tool(thread_id, runtime.clone()));
+            core.register_tool(self.task_spawn_executor_tool(thread_id, runtime.clone()));
+            core.register_tool(self.task_update_design_tool(thread_id));
+            core.register_tool(self.task_merge_agent_tool(thread_id, runtime.clone()));
+            core.register_tool(self.task_request_delivery_review_tool(thread_id, runtime.clone()));
             core.register_tool(
-                self.task_request_integrated_review_tool(session_id, runtime.clone()),
+                self.task_request_integrated_review_tool(thread_id, runtime.clone()),
             );
-            core.register_tool(self.task_status_tool(session_id));
-            core.register_tool(self.task_complete_tool(session_id));
-            core.register_tool(self.task_stop_tool(session_id, runtime.clone()));
-            self.register_conflict_tools(core, session_id, runtime);
+            core.register_tool(self.task_status_tool(thread_id));
+            core.register_tool(self.task_complete_tool(thread_id));
+            core.register_tool(self.task_stop_tool(thread_id, runtime.clone()));
+            self.register_conflict_tools(core, thread_id, runtime);
             return;
         }
         match snapshot.identity.role.as_str() {
@@ -84,7 +83,7 @@ impl TaskCoordinator {
                 core.register_tool(self.report_completion_tool(runtime));
             }
             "reviewer" => {
-                core.register_tool(self.review_exit_tool(session_id, None));
+                core.register_tool(self.review_exit_tool(thread_id, None));
             }
             "explorer" | "planner" => {}
             _ => {}
@@ -93,11 +92,11 @@ impl TaskCoordinator {
 
     fn task_send_message_tool(
         self: &Arc<Self>,
-        session_id: &str,
+        thread_id: &str,
         runtime: AgentRuntimeHandle,
     ) -> RegisteredTool {
         let coordinator = self.clone();
-        let session_id = session_id.to_string();
+        let thread_id = thread_id.to_string();
         RegisteredTool::from_typed_fallible_execution_result(
             "send_message",
             "Send a message to a direct Task child when its durable work state accepts input.",
@@ -107,7 +106,7 @@ impl TaskCoordinator {
             ]),
             move |input: TaskSendMessageInput, _context| {
                 let coordinator = coordinator.clone();
-                let session_id = session_id.clone();
+                let thread_id = thread_id.clone();
                 let runtime = runtime.clone();
                 async move {
                     let target = pl_core::AgentId::new(input.target)?;
@@ -115,14 +114,14 @@ impl TaskCoordinator {
                         .snapshot(target.clone())
                         .await
                         .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-                    let root = crate::studio::agent_host::root_agent_id(&session_id);
+                    let root = crate::studio::agent_host::root_agent_id(&thread_id);
                     if snapshot.identity.parent_id.as_ref() != Some(&root) {
                         bail!("send_message target is not a direct child of this Task planner");
                     }
                     if snapshot.identity.role.as_str() == "executor" {
                         coordinator
                             .store
-                            .authorize_executor_message(&session_id, target.as_str())
+                            .authorize_executor_message(&thread_id, target.as_str())
                             .await?;
                     }
                     let turn_id = runtime
@@ -232,7 +231,7 @@ impl TaskCoordinator {
         let repository = inspect_repository(caller_workspace, true).await?;
         let canonical_caller = std::fs::canonicalize(caller_workspace)
             .context("failed to resolve caller workspace path")?;
-        let resolution = self
+        let scope = self
             .store
             .resolve_active_completion_scope(
                 &subagent.id,
@@ -241,12 +240,6 @@ impl TaskCoordinator {
             )
             .await?
             .context("active completion scope not found for this executor worktree")?;
-        let scope = match resolution {
-            DeliveryScopeResolution::Resolved(scope) => *scope,
-            DeliveryScopeResolution::MissingWorkUnit(_) => {
-                bail!("executor outcome has no work unit")
-            }
-        };
         ensure_completion_scope_is_open(&scope)?;
         match result {
             CompletionResultInput::Delivery {
@@ -266,7 +259,6 @@ impl TaskCoordinator {
                     .await?;
                 self.store
                     .create_work_completion(
-                        &scope.outcome.id,
                         &scope.work_unit.id,
                         WorkCompletionKind::Delivery,
                         Some(&delivery),
@@ -291,7 +283,6 @@ impl TaskCoordinator {
                 }
                 self.store
                     .create_work_completion(
-                        &scope.outcome.id,
                         &scope.work_unit.id,
                         WorkCompletionKind::NoDelivery,
                         None,
@@ -351,15 +342,12 @@ fn validate_common<'a>(
         caller_workspace,
         verification_summary,
     } = validation;
-    if subagent.role != "executor" || scope.outcome.role != "executor" {
+    if subagent.role != "executor" {
         bail!("report_completion may only be called by the assigned executor");
     }
-    if !is_direct_task_child(subagent, &scope.run.session_id)
-        || scope.outcome.owner_path != "/root"
-        || scope.outcome.initiated_by != "planner"
-        || scope.outcome.task_run_id != scope.run.id
+    if !is_direct_task_child(subagent, &scope.run.root_thread_id)
         || scope.work_unit.task_run_id != scope.run.id
-        || scope.work_unit.agent_id.as_deref() != Some(subagent.id.as_str())
+        || scope.work_unit.executor_thread_id.as_deref() != Some(subagent.id.as_str())
     {
         bail!("executor does not own this work unit");
     }
@@ -378,13 +366,13 @@ fn validate_common<'a>(
     Ok(verification_summary)
 }
 
-fn is_direct_task_child(subagent: &SubagentContext, root_session_id: &str) -> bool {
-    let root_agent_id = crate::studio::agent_host::root_agent_id(root_session_id);
+fn is_direct_task_child(subagent: &SubagentContext, root_thread_id: &str) -> bool {
+    let root_agent_id = crate::studio::agent_host::root_agent_id(root_thread_id);
     subagent.depth == 1 && subagent.parent_id.as_deref() == Some(root_agent_id.as_str())
 }
 
 fn ensure_completion_scope_is_open(scope: &DeliveryScope) -> Result<()> {
-    if scope.outcome.status != AgentOutcomeStatus::Running
+    if scope.work_unit.execution_status != ThreadExecutionStatus::Running
         || !matches!(
             scope.work_unit.status,
             WorkUnitStatus::Running

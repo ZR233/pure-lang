@@ -10,7 +10,7 @@ pub mod task_run {
     pub struct Model {
         #[sea_orm(primary_key, auto_increment = false)]
         pub id: String,
-        pub session_id: String,
+        pub root_thread_id: String,
         pub phase: String,
         pub plan: String,
         pub workspace_root: String,
@@ -33,12 +33,12 @@ pub mod task_run {
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
     pub enum Relation {
         #[sea_orm(
-            belongs_to = "crate::studio::entity::session::Entity",
-            from = "Column::SessionId",
-            to = "crate::studio::entity::session::Column::Id",
+            belongs_to = "crate::studio::entity::thread::Entity",
+            from = "Column::RootThreadId",
+            to = "crate::studio::entity::thread::Column::Id",
             on_delete = "Cascade"
         )]
-        Session,
+        RootThread,
     }
 
     impl ActiveModelBehavior for ActiveModel {}
@@ -61,7 +61,11 @@ pub mod work_unit {
         pub branch: String,
         pub worktree_disposition: String,
         pub attempt: i32,
-        pub agent_id: Option<String>,
+        pub executor_thread_id: Option<String>,
+        pub requested_by_call_id: String,
+        pub execution_status: String,
+        pub execution_summary: Option<String>,
+        pub execution_error: Option<String>,
         pub created_at: i64,
         pub updated_at: i64,
     }
@@ -125,50 +129,6 @@ pub mod work_completion {
     impl ActiveModelBehavior for ActiveModel {}
 }
 
-pub mod agent_outcome {
-    use super::*;
-
-    #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
-    #[sea_orm(table_name = "agent_outcomes")]
-    pub struct Model {
-        #[sea_orm(primary_key, auto_increment = false)]
-        pub id: String,
-        pub task_run_id: String,
-        pub work_unit_id: Option<String>,
-        pub agent_id: String,
-        pub owner_path: String,
-        pub initiated_by: String,
-        pub requested_by_call_id: String,
-        pub role: String,
-        pub status: String,
-        pub attempt: i32,
-        pub summary: Option<String>,
-        pub error: Option<String>,
-        pub created_at: i64,
-        pub updated_at: i64,
-    }
-
-    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-    pub enum Relation {
-        #[sea_orm(
-            belongs_to = "super::task_run::Entity",
-            from = "Column::TaskRunId",
-            to = "super::task_run::Column::Id",
-            on_delete = "Cascade"
-        )]
-        TaskRun,
-        #[sea_orm(
-            belongs_to = "super::work_unit::Entity",
-            from = "Column::WorkUnitId",
-            to = "super::work_unit::Column::Id",
-            on_delete = "SetNull"
-        )]
-        WorkUnit,
-    }
-
-    impl ActiveModelBehavior for ActiveModel {}
-}
-
 pub mod review_round {
     use super::*;
 
@@ -186,7 +146,9 @@ pub mod review_round {
         pub reviewed_head: String,
         pub status: String,
         pub requested_by_call_id: String,
-        pub reviewer_agent_id: Option<String>,
+        pub reviewer_thread_id: Option<String>,
+        pub reviewer_status: String,
+        pub reviewer_error: Option<String>,
         pub summary: Option<String>,
         pub design_references_json: String,
         pub findings_json: String,

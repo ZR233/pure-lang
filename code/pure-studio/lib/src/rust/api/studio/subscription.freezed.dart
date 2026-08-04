@@ -342,7 +342,7 @@ String toString() {
 
 
 /// @nodoc
-mixin _$BridgeSessionStreamEnvelope {
+mixin _$BridgeThreadStreamEnvelope {
 
 
 
@@ -350,7 +350,7 @@ mixin _$BridgeSessionStreamEnvelope {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeSessionStreamEnvelope);
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeThreadStreamEnvelope);
 }
 
 
@@ -359,20 +359,20 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'BridgeSessionStreamEnvelope()';
+  return 'BridgeThreadStreamEnvelope()';
 }
 
 
 }
 
 /// @nodoc
-class $BridgeSessionStreamEnvelopeCopyWith<$Res>  {
-$BridgeSessionStreamEnvelopeCopyWith(BridgeSessionStreamEnvelope _, $Res Function(BridgeSessionStreamEnvelope) __);
+class $BridgeThreadStreamEnvelopeCopyWith<$Res>  {
+$BridgeThreadStreamEnvelopeCopyWith(BridgeThreadStreamEnvelope _, $Res Function(BridgeThreadStreamEnvelope) __);
 }
 
 
-/// Adds pattern-matching-related methods to [BridgeSessionStreamEnvelope].
-extension BridgeSessionStreamEnvelopePatterns on BridgeSessionStreamEnvelope {
+/// Adds pattern-matching-related methods to [BridgeThreadStreamEnvelope].
+extension BridgeThreadStreamEnvelopePatterns on BridgeThreadStreamEnvelope {
 /// A variant of `map` that fallback to returning `orElse`.
 ///
 /// It is equivalent to doing:
@@ -385,12 +385,12 @@ extension BridgeSessionStreamEnvelopePatterns on BridgeSessionStreamEnvelope {
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( BridgeSessionStreamEnvelope_Data value)?  data,TResult Function( BridgeSessionStreamEnvelope_Failure value)?  failure,TResult Function( BridgeSessionStreamEnvelope_Closed value)?  closed,required TResult orElse(),}){
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( BridgeThreadStreamEnvelope_Data value)?  data,TResult Function( BridgeThreadStreamEnvelope_Failure value)?  failure,TResult Function( BridgeThreadStreamEnvelope_Closed value)?  closed,required TResult orElse(),}){
 final _that = this;
 switch (_that) {
-case BridgeSessionStreamEnvelope_Data() when data != null:
-return data(_that);case BridgeSessionStreamEnvelope_Failure() when failure != null:
-return failure(_that);case BridgeSessionStreamEnvelope_Closed() when closed != null:
+case BridgeThreadStreamEnvelope_Data() when data != null:
+return data(_that);case BridgeThreadStreamEnvelope_Failure() when failure != null:
+return failure(_that);case BridgeThreadStreamEnvelope_Closed() when closed != null:
 return closed(_that);case _:
   return orElse();
 
@@ -409,12 +409,12 @@ return closed(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( BridgeSessionStreamEnvelope_Data value)  data,required TResult Function( BridgeSessionStreamEnvelope_Failure value)  failure,required TResult Function( BridgeSessionStreamEnvelope_Closed value)  closed,}){
+@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( BridgeThreadStreamEnvelope_Data value)  data,required TResult Function( BridgeThreadStreamEnvelope_Failure value)  failure,required TResult Function( BridgeThreadStreamEnvelope_Closed value)  closed,}){
 final _that = this;
 switch (_that) {
-case BridgeSessionStreamEnvelope_Data():
-return data(_that);case BridgeSessionStreamEnvelope_Failure():
-return failure(_that);case BridgeSessionStreamEnvelope_Closed():
+case BridgeThreadStreamEnvelope_Data():
+return data(_that);case BridgeThreadStreamEnvelope_Failure():
+return failure(_that);case BridgeThreadStreamEnvelope_Closed():
 return closed(_that);}
 }
 /// A variant of `map` that fallback to returning `null`.
@@ -429,12 +429,12 @@ return closed(_that);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( BridgeSessionStreamEnvelope_Data value)?  data,TResult? Function( BridgeSessionStreamEnvelope_Failure value)?  failure,TResult? Function( BridgeSessionStreamEnvelope_Closed value)?  closed,}){
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( BridgeThreadStreamEnvelope_Data value)?  data,TResult? Function( BridgeThreadStreamEnvelope_Failure value)?  failure,TResult? Function( BridgeThreadStreamEnvelope_Closed value)?  closed,}){
 final _that = this;
 switch (_that) {
-case BridgeSessionStreamEnvelope_Data() when data != null:
-return data(_that);case BridgeSessionStreamEnvelope_Failure() when failure != null:
-return failure(_that);case BridgeSessionStreamEnvelope_Closed() when closed != null:
+case BridgeThreadStreamEnvelope_Data() when data != null:
+return data(_that);case BridgeThreadStreamEnvelope_Failure() when failure != null:
+return failure(_that);case BridgeThreadStreamEnvelope_Closed() when closed != null:
 return closed(_that);case _:
   return null;
 
@@ -452,11 +452,11 @@ return closed(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( BridgeSessionStreamFrame frame)?  data,TResult Function( BridgeError error)?  failure,TResult Function()?  closed,required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( BridgeThreadSubscriptionUpdate update)?  data,TResult Function( BridgeError error)?  failure,TResult Function()?  closed,required TResult orElse(),}) {final _that = this;
 switch (_that) {
-case BridgeSessionStreamEnvelope_Data() when data != null:
-return data(_that.frame);case BridgeSessionStreamEnvelope_Failure() when failure != null:
-return failure(_that.error);case BridgeSessionStreamEnvelope_Closed() when closed != null:
+case BridgeThreadStreamEnvelope_Data() when data != null:
+return data(_that.update);case BridgeThreadStreamEnvelope_Failure() when failure != null:
+return failure(_that.error);case BridgeThreadStreamEnvelope_Closed() when closed != null:
 return closed();case _:
   return orElse();
 
@@ -475,11 +475,11 @@ return closed();case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( BridgeSessionStreamFrame frame)  data,required TResult Function( BridgeError error)  failure,required TResult Function()  closed,}) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( BridgeThreadSubscriptionUpdate update)  data,required TResult Function( BridgeError error)  failure,required TResult Function()  closed,}) {final _that = this;
 switch (_that) {
-case BridgeSessionStreamEnvelope_Data():
-return data(_that.frame);case BridgeSessionStreamEnvelope_Failure():
-return failure(_that.error);case BridgeSessionStreamEnvelope_Closed():
+case BridgeThreadStreamEnvelope_Data():
+return data(_that.update);case BridgeThreadStreamEnvelope_Failure():
+return failure(_that.error);case BridgeThreadStreamEnvelope_Closed():
 return closed();}
 }
 /// A variant of `when` that fallback to returning `null`
@@ -494,11 +494,11 @@ return closed();}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( BridgeSessionStreamFrame frame)?  data,TResult? Function( BridgeError error)?  failure,TResult? Function()?  closed,}) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( BridgeThreadSubscriptionUpdate update)?  data,TResult? Function( BridgeError error)?  failure,TResult? Function()?  closed,}) {final _that = this;
 switch (_that) {
-case BridgeSessionStreamEnvelope_Data() when data != null:
-return data(_that.frame);case BridgeSessionStreamEnvelope_Failure() when failure != null:
-return failure(_that.error);case BridgeSessionStreamEnvelope_Closed() when closed != null:
+case BridgeThreadStreamEnvelope_Data() when data != null:
+return data(_that.update);case BridgeThreadStreamEnvelope_Failure() when failure != null:
+return failure(_that.error);case BridgeThreadStreamEnvelope_Closed() when closed != null:
 return closed();case _:
   return null;
 
@@ -510,74 +510,74 @@ return closed();case _:
 /// @nodoc
 
 
-class BridgeSessionStreamEnvelope_Data extends BridgeSessionStreamEnvelope {
-  const BridgeSessionStreamEnvelope_Data({required this.frame}): super._();
+class BridgeThreadStreamEnvelope_Data extends BridgeThreadStreamEnvelope {
+  const BridgeThreadStreamEnvelope_Data({required this.update}): super._();
 
 
- final  BridgeSessionStreamFrame frame;
+ final  BridgeThreadSubscriptionUpdate update;
 
-/// Create a copy of BridgeSessionStreamEnvelope
+/// Create a copy of BridgeThreadStreamEnvelope
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
 @pragma('vm:prefer-inline')
-$BridgeSessionStreamEnvelope_DataCopyWith<BridgeSessionStreamEnvelope_Data> get copyWith => _$BridgeSessionStreamEnvelope_DataCopyWithImpl<BridgeSessionStreamEnvelope_Data>(this, _$identity);
+$BridgeThreadStreamEnvelope_DataCopyWith<BridgeThreadStreamEnvelope_Data> get copyWith => _$BridgeThreadStreamEnvelope_DataCopyWithImpl<BridgeThreadStreamEnvelope_Data>(this, _$identity);
 
 
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeSessionStreamEnvelope_Data&&(identical(other.frame, frame) || other.frame == frame));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeThreadStreamEnvelope_Data&&(identical(other.update, update) || other.update == update));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,frame);
+int get hashCode => Object.hash(runtimeType,update);
 
 @override
 String toString() {
-  return 'BridgeSessionStreamEnvelope.data(frame: $frame)';
+  return 'BridgeThreadStreamEnvelope.data(update: $update)';
 }
 
 
 }
 
 /// @nodoc
-abstract mixin class $BridgeSessionStreamEnvelope_DataCopyWith<$Res> implements $BridgeSessionStreamEnvelopeCopyWith<$Res> {
-  factory $BridgeSessionStreamEnvelope_DataCopyWith(BridgeSessionStreamEnvelope_Data value, $Res Function(BridgeSessionStreamEnvelope_Data) _then) = _$BridgeSessionStreamEnvelope_DataCopyWithImpl;
+abstract mixin class $BridgeThreadStreamEnvelope_DataCopyWith<$Res> implements $BridgeThreadStreamEnvelopeCopyWith<$Res> {
+  factory $BridgeThreadStreamEnvelope_DataCopyWith(BridgeThreadStreamEnvelope_Data value, $Res Function(BridgeThreadStreamEnvelope_Data) _then) = _$BridgeThreadStreamEnvelope_DataCopyWithImpl;
 @useResult
 $Res call({
- BridgeSessionStreamFrame frame
+ BridgeThreadSubscriptionUpdate update
 });
 
 
-$BridgeSessionStreamFrameCopyWith<$Res> get frame;
+$BridgeThreadSubscriptionUpdateCopyWith<$Res> get update;
 
 }
 /// @nodoc
-class _$BridgeSessionStreamEnvelope_DataCopyWithImpl<$Res>
-    implements $BridgeSessionStreamEnvelope_DataCopyWith<$Res> {
-  _$BridgeSessionStreamEnvelope_DataCopyWithImpl(this._self, this._then);
+class _$BridgeThreadStreamEnvelope_DataCopyWithImpl<$Res>
+    implements $BridgeThreadStreamEnvelope_DataCopyWith<$Res> {
+  _$BridgeThreadStreamEnvelope_DataCopyWithImpl(this._self, this._then);
 
-  final BridgeSessionStreamEnvelope_Data _self;
-  final $Res Function(BridgeSessionStreamEnvelope_Data) _then;
+  final BridgeThreadStreamEnvelope_Data _self;
+  final $Res Function(BridgeThreadStreamEnvelope_Data) _then;
 
-/// Create a copy of BridgeSessionStreamEnvelope
+/// Create a copy of BridgeThreadStreamEnvelope
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') $Res call({Object? frame = null,}) {
-  return _then(BridgeSessionStreamEnvelope_Data(
-frame: null == frame ? _self.frame : frame // ignore: cast_nullable_to_non_nullable
-as BridgeSessionStreamFrame,
+@pragma('vm:prefer-inline') $Res call({Object? update = null,}) {
+  return _then(BridgeThreadStreamEnvelope_Data(
+update: null == update ? _self.update : update // ignore: cast_nullable_to_non_nullable
+as BridgeThreadSubscriptionUpdate,
   ));
 }
 
-/// Create a copy of BridgeSessionStreamEnvelope
+/// Create a copy of BridgeThreadStreamEnvelope
 /// with the given fields replaced by the non-null parameter values.
 @override
 @pragma('vm:prefer-inline')
-$BridgeSessionStreamFrameCopyWith<$Res> get frame {
+$BridgeThreadSubscriptionUpdateCopyWith<$Res> get update {
 
-  return $BridgeSessionStreamFrameCopyWith<$Res>(_self.frame, (value) {
-    return _then(_self.copyWith(frame: value));
+  return $BridgeThreadSubscriptionUpdateCopyWith<$Res>(_self.update, (value) {
+    return _then(_self.copyWith(update: value));
   });
 }
 }
@@ -585,23 +585,23 @@ $BridgeSessionStreamFrameCopyWith<$Res> get frame {
 /// @nodoc
 
 
-class BridgeSessionStreamEnvelope_Failure extends BridgeSessionStreamEnvelope {
-  const BridgeSessionStreamEnvelope_Failure({required this.error}): super._();
+class BridgeThreadStreamEnvelope_Failure extends BridgeThreadStreamEnvelope {
+  const BridgeThreadStreamEnvelope_Failure({required this.error}): super._();
 
 
  final  BridgeError error;
 
-/// Create a copy of BridgeSessionStreamEnvelope
+/// Create a copy of BridgeThreadStreamEnvelope
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
 @pragma('vm:prefer-inline')
-$BridgeSessionStreamEnvelope_FailureCopyWith<BridgeSessionStreamEnvelope_Failure> get copyWith => _$BridgeSessionStreamEnvelope_FailureCopyWithImpl<BridgeSessionStreamEnvelope_Failure>(this, _$identity);
+$BridgeThreadStreamEnvelope_FailureCopyWith<BridgeThreadStreamEnvelope_Failure> get copyWith => _$BridgeThreadStreamEnvelope_FailureCopyWithImpl<BridgeThreadStreamEnvelope_Failure>(this, _$identity);
 
 
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeSessionStreamEnvelope_Failure&&(identical(other.error, error) || other.error == error));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeThreadStreamEnvelope_Failure&&(identical(other.error, error) || other.error == error));
 }
 
 
@@ -610,15 +610,15 @@ int get hashCode => Object.hash(runtimeType,error);
 
 @override
 String toString() {
-  return 'BridgeSessionStreamEnvelope.failure(error: $error)';
+  return 'BridgeThreadStreamEnvelope.failure(error: $error)';
 }
 
 
 }
 
 /// @nodoc
-abstract mixin class $BridgeSessionStreamEnvelope_FailureCopyWith<$Res> implements $BridgeSessionStreamEnvelopeCopyWith<$Res> {
-  factory $BridgeSessionStreamEnvelope_FailureCopyWith(BridgeSessionStreamEnvelope_Failure value, $Res Function(BridgeSessionStreamEnvelope_Failure) _then) = _$BridgeSessionStreamEnvelope_FailureCopyWithImpl;
+abstract mixin class $BridgeThreadStreamEnvelope_FailureCopyWith<$Res> implements $BridgeThreadStreamEnvelopeCopyWith<$Res> {
+  factory $BridgeThreadStreamEnvelope_FailureCopyWith(BridgeThreadStreamEnvelope_Failure value, $Res Function(BridgeThreadStreamEnvelope_Failure) _then) = _$BridgeThreadStreamEnvelope_FailureCopyWithImpl;
 @useResult
 $Res call({
  BridgeError error
@@ -629,17 +629,17 @@ $Res call({
 
 }
 /// @nodoc
-class _$BridgeSessionStreamEnvelope_FailureCopyWithImpl<$Res>
-    implements $BridgeSessionStreamEnvelope_FailureCopyWith<$Res> {
-  _$BridgeSessionStreamEnvelope_FailureCopyWithImpl(this._self, this._then);
+class _$BridgeThreadStreamEnvelope_FailureCopyWithImpl<$Res>
+    implements $BridgeThreadStreamEnvelope_FailureCopyWith<$Res> {
+  _$BridgeThreadStreamEnvelope_FailureCopyWithImpl(this._self, this._then);
 
-  final BridgeSessionStreamEnvelope_Failure _self;
-  final $Res Function(BridgeSessionStreamEnvelope_Failure) _then;
+  final BridgeThreadStreamEnvelope_Failure _self;
+  final $Res Function(BridgeThreadStreamEnvelope_Failure) _then;
 
-/// Create a copy of BridgeSessionStreamEnvelope
+/// Create a copy of BridgeThreadStreamEnvelope
 /// with the given fields replaced by the non-null parameter values.
 @pragma('vm:prefer-inline') $Res call({Object? error = null,}) {
-  return _then(BridgeSessionStreamEnvelope_Failure(
+  return _then(BridgeThreadStreamEnvelope_Failure(
 error: null == error ? _self.error : error // ignore: cast_nullable_to_non_nullable
 as BridgeError,
   ));
@@ -651,8 +651,8 @@ as BridgeError,
 /// @nodoc
 
 
-class BridgeSessionStreamEnvelope_Closed extends BridgeSessionStreamEnvelope {
-  const BridgeSessionStreamEnvelope_Closed(): super._();
+class BridgeThreadStreamEnvelope_Closed extends BridgeThreadStreamEnvelope {
+  const BridgeThreadStreamEnvelope_Closed(): super._();
 
 
 
@@ -662,7 +662,7 @@ class BridgeSessionStreamEnvelope_Closed extends BridgeSessionStreamEnvelope {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeSessionStreamEnvelope_Closed);
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeThreadStreamEnvelope_Closed);
 }
 
 
@@ -671,7 +671,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'BridgeSessionStreamEnvelope.closed()';
+  return 'BridgeThreadStreamEnvelope.closed()';
 }
 
 

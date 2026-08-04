@@ -3,14 +3,14 @@ part of 'timeline_models.dart';
 class TimelineAgentEvent {
   const TimelineAgentEvent({
     required this.eventId,
-    required this.sessionId,
+    required this.threadId,
     required this.sequence,
     required this.payload,
     required this.createdAt,
   });
 
   final String eventId;
-  final String sessionId;
+  final String threadId;
   final int sequence;
   final TimelineAgentEventPayload payload;
   final DateTime createdAt;
@@ -154,7 +154,7 @@ List<TimelineAgentEvent> latestTimelineAgentEvents(
 ) {
   final latestByGroup = <String, TimelineAgentEvent>{};
   for (final event in events) {
-    if (event.eventId.isEmpty || event.sessionId.isEmpty) {
+    if (event.eventId.isEmpty || event.threadId.isEmpty) {
       continue;
     }
     final key = timelineAgentEventGroupKey(event);

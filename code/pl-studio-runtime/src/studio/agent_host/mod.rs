@@ -1,6 +1,5 @@
 mod events;
 mod lifecycle;
-mod persistence;
 mod plan_confirmation;
 mod policy;
 mod repository;
@@ -21,7 +20,7 @@ use crate::studio::{
 use events::StudioAgentCommitObserver;
 use lifecycle::StudioAgentLifecycle;
 use plan_confirmation::StudioPlanConfirmationProjector;
-use repository::StudioAgentRepository;
+pub(in crate::studio) use repository::StudioAgentRepository;
 pub(super) use resources::{StudioAgentResources, root_agent_id};
 use turn_factory::StudioAgentTurnFactory;
 

@@ -21,7 +21,7 @@ async fn design_patch_commits_and_atomically_opens_executor_gate() {
 
     let denied = fixture
         .store
-        .allocate_executor(allocation(&fixture.session_id, "before-design"))
+        .allocate_executor(allocation(&fixture.thread_id, "before-design"))
         .await;
     let denied = match denied {
         Ok(_) => panic!("executor allocation must remain gated before durable design"),
@@ -64,7 +64,7 @@ async fn design_patch_commits_and_atomically_opens_executor_gate() {
 
     fixture
         .store
-        .allocate_executor(allocation(&fixture.session_id, "after-design"))
+        .allocate_executor(allocation(&fixture.thread_id, "after-design"))
         .await
         .expect("executor allocation should open immediately after durable design");
     fixture.cleanup().await;
@@ -94,13 +94,13 @@ async fn concurrent_identical_calls_serialize_to_one_commit_and_one_cas() {
     let mut calls = Vec::new();
     for _ in 0..2 {
         let coordinator = fixture.coordinator.clone();
-        let session_id = fixture.session_id.clone();
+        let thread_id = fixture.thread_id.clone();
         let repository = fixture.repository.clone();
         let start = start.clone();
         calls.push(tokio::spawn(async move {
             start.wait().await;
             coordinator
-                .update_design(&session_id, &repository, DESIGN_PATCH)
+                .update_design(&thread_id, &repository, DESIGN_PATCH)
                 .await
         }));
     }
@@ -136,11 +136,11 @@ async fn unsafe_sqlite_compensation_blocks_without_overwriting_external_change()
         .coordinator
         .set_design_after_commit_barrier(barrier.clone());
     let coordinator = fixture.coordinator.clone();
-    let session_id = fixture.session_id.clone();
+    let thread_id = fixture.thread_id.clone();
     let repository = fixture.repository.clone();
     let update = tokio::spawn(async move {
         coordinator
-            .update_design(&session_id, &repository, DESIGN_PATCH)
+            .update_design(&thread_id, &repository, DESIGN_PATCH)
             .await
     });
     tokio::time::timeout(
@@ -290,7 +290,7 @@ struct DesignFixture {
     repository: PathBuf,
     store: StudioStore,
     coordinator: Arc<TaskCoordinator>,
-    session_id: String,
+    thread_id: String,
     run: TaskRunRecord,
 }
 
@@ -309,7 +309,7 @@ impl DesignFixture {
         let store = StudioStore::open_memory().await.unwrap();
         let project = store.upsert_project(&repository).await.unwrap();
         let session = store
-            .create_session(&project.id, "Task", StudioMode::Task)
+            .create_thread(&project.id, "Task", StudioMode::Task)
             .await
             .unwrap();
         let coordinator = Arc::new(TaskCoordinator::new(store.clone()));
@@ -321,14 +321,14 @@ impl DesignFixture {
             repository,
             store,
             coordinator,
-            session_id: session.id,
+            thread_id: session.id,
             run,
         }
     }
 
     async fn update(&self, patch: &str) -> anyhow::Result<DesignUpdateOutput> {
         self.coordinator
-            .update_design(&self.session_id, &self.repository, patch)
+            .update_design(&self.thread_id, &self.repository, patch)
             .await
     }
 
@@ -353,13 +353,12 @@ impl DesignFixture {
     }
 }
 
-fn allocation(session_id: &str, suffix: &str) -> AllocateExecutor {
+fn allocation(thread_id: &str, suffix: &str) -> AllocateExecutor {
     AllocateExecutor {
-        session_id: session_id.to_string(),
+        thread_id: thread_id.to_string(),
         title: suffix.to_string(),
         owned_paths: vec![format!("src/{suffix}.rs")],
         agent_id: format!("agent-{suffix}"),
-        owner_path: "/root".to_string(),
         requested_by_call_id: format!("call-{suffix}"),
     }
 }

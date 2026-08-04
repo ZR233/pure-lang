@@ -213,7 +213,7 @@ fn user_input_interaction(
         kind: InteractionKind::UserInput,
         status: InteractionStatus::Pending,
         scope: InteractionScope {
-            session_id: String::new(),
+            thread_id: String::new(),
             turn_id: turn_id.to_string(),
             item_id: Some(request.tool_id.clone()),
             tool_id: Some(request.tool_id.clone()),
@@ -333,7 +333,7 @@ mod tests {
         assert_eq!(
             interaction.scope,
             InteractionScope {
-                session_id: String::new(),
+                thread_id: String::new(),
                 turn_id: "session-1".to_string(),
                 item_id: Some("call-1".to_string()),
                 tool_id: Some("call-1".to_string()),

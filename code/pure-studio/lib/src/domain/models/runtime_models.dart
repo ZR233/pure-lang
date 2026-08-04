@@ -1,7 +1,7 @@
-import 'agent_models.dart';
+import 'package:flutter/foundation.dart' show listEquals;
 
-class SessionRuntimeView {
-  const SessionRuntimeView({
+class ThreadRuntimeView {
+  const ThreadRuntimeView({
     required this.model,
     required this.contextTokens,
     required this.contextWindow,
@@ -27,7 +27,37 @@ class SessionRuntimeView {
 
   bool get hasActiveTask => task?.isActive ?? false;
 
-  SessionRuntimeView copyWith({
+  @override
+  bool operator ==(Object other) {
+    return identical(this, other) ||
+        other is ThreadRuntimeView &&
+            model == other.model &&
+            contextTokens == other.contextTokens &&
+            contextWindow == other.contextWindow &&
+            totalTokens == other.totalTokens &&
+            costLabel == other.costLabel &&
+            listEquals(activeSkills, other.activeSkills) &&
+            listEquals(activeMcpServers, other.activeMcpServers) &&
+            listEquals(activeLspServers, other.activeLspServers) &&
+            agentCount == other.agentCount &&
+            task == other.task;
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    model,
+    contextTokens,
+    contextWindow,
+    totalTokens,
+    costLabel,
+    Object.hashAll(activeSkills),
+    Object.hashAll(activeMcpServers),
+    Object.hashAll(activeLspServers),
+    agentCount,
+    task,
+  );
+
+  ThreadRuntimeView copyWith({
     String? model,
     int? contextTokens,
     int? contextWindow,
@@ -39,7 +69,7 @@ class SessionRuntimeView {
     int? agentCount,
     TaskRuntimeView? task,
   }) {
-    return SessionRuntimeView(
+    return ThreadRuntimeView(
       model: model ?? this.model,
       contextTokens: contextTokens ?? this.contextTokens,
       contextWindow: contextWindow ?? this.contextWindow,
@@ -65,7 +95,6 @@ class TaskRuntimeView {
     required this.stopRequestedReason,
     required this.taskGeneration,
     required this.workUnits,
-    required this.agents,
     required this.completions,
     required this.merges,
     required this.reviews,
@@ -80,7 +109,6 @@ class TaskRuntimeView {
   final String? stopRequestedReason;
   final int taskGeneration;
   final List<TaskWorkUnitView> workUnits;
-  final List<TaskAgentOutcomeView> agents;
   final List<TaskCompletionView> completions;
   final List<TaskMergeView> merges;
   final List<TaskReviewView> reviews;
@@ -105,38 +133,6 @@ class TaskWorkUnitView {
   final String worktreePath;
   final String branch;
   final String? agentId;
-}
-
-class TaskAgentOutcomeView {
-  const TaskAgentOutcomeView({
-    required this.agentId,
-    required this.role,
-    required this.status,
-    required this.initiatedBy,
-    required this.requestedByCallId,
-    required this.summary,
-    required this.error,
-    required this.headCommit,
-    required this.lifecycle,
-    required this.activity,
-    required this.progress,
-    required this.updatedAt,
-    required this.summaryAgeSeconds,
-  });
-
-  final String agentId;
-  final String role;
-  final String status;
-  final String initiatedBy;
-  final String requestedByCallId;
-  final String? summary;
-  final String? error;
-  final String? headCommit;
-  final String? lifecycle;
-  final String? activity;
-  final AgentProgressView? progress;
-  final DateTime updatedAt;
-  final int summaryAgeSeconds;
 }
 
 class TaskCompletionView {

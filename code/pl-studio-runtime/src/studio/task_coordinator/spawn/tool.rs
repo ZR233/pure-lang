@@ -9,7 +9,7 @@ use crate::tool::{
     RegisteredTool, ToolExecutionResult, ToolInputSchemaField, strict_tool_input_schema,
 };
 use crate::{
-    AgentRoleId, AgentRuntimeHandle, AgentSessionState, AgentSpawnRequest, SessionId, ToolEffect,
+    AgentRoleId, AgentRuntimeHandle, AgentSpawnRequest, ThreadContextState, ThreadId, ToolEffect,
 };
 
 const MAX_EXECUTOR_CONSTRAINT_BYTES: usize = 16 * 1024;
@@ -26,7 +26,7 @@ struct TaskSpawnExecutorInput {
 #[serde(rename_all = "camelCase")]
 struct TaskSpawnExecutorOutput {
     agent_id: String,
-    session_id: String,
+    thread_id: String,
     turn_id: String,
     owned_paths: Vec<String>,
 }
@@ -34,10 +34,10 @@ struct TaskSpawnExecutorOutput {
 impl TaskCoordinator {
     pub(crate) fn task_spawn_executor_tool(
         self: &Arc<Self>,
-        session_id: impl Into<String>,
+        thread_id: impl Into<String>,
         runtime: AgentRuntimeHandle,
     ) -> RegisteredTool {
-        let session_id = session_id.into();
+        let thread_id = thread_id.into();
         RegisteredTool::from_typed_fallible_execution_result(
             "task_spawn_executor",
             "Spawn one Task executor with a fresh session and an enforced owned-path scope.",
@@ -66,7 +66,7 @@ impl TaskCoordinator {
             ]),
             move |arguments: TaskSpawnExecutorInput, context| {
                 let runtime = runtime.clone();
-                let session_id = session_id.clone();
+                let thread_id = thread_id.clone();
                 async move {
                     let task_name = arguments.task_name.trim();
                     if task_name.is_empty() {
@@ -82,9 +82,9 @@ impl TaskCoordinator {
                         .as_deref()
                         .context("task_spawn_executor requires a provider call id")?
                         .to_string();
-                    let child_session_id = SessionId::generate();
+                    let child_thread_id = ThreadId::generate();
                     let intent = StudioSpawnIntent::task_executor(
-                        &session_id,
+                        &thread_id,
                         task_name,
                         owned_paths.clone(),
                         call_id,
@@ -93,10 +93,11 @@ impl TaskCoordinator {
                     );
                     let result = runtime
                         .spawn(AgentSpawnRequest {
-                            parent_id: crate::studio::agent_host::root_agent_id(&session_id),
+                            thread_id: child_thread_id.clone(),
+                            parent_id: crate::studio::agent_host::root_agent_id(&thread_id),
                             role: AgentRoleId::new("executor")
                                 .map_err(|error| anyhow::anyhow!(error.to_string()))?,
-                            session: AgentSessionState::empty(child_session_id.clone()),
+                            session: ThreadContextState::empty(),
                             initial_message: Some(arguments.message),
                             metadata: serde_json::to_value(intent)?,
                         })
@@ -107,7 +108,7 @@ impl TaskCoordinator {
                         .context("task executor spawn did not create an initial turn")?;
                     ToolExecutionResult::<serde_json::Value>::json(TaskSpawnExecutorOutput {
                         agent_id: result.snapshot.identity.id.to_string(),
-                        session_id: child_session_id.to_string(),
+                        thread_id: child_thread_id.to_string(),
                         turn_id: turn_id.to_string(),
                         owned_paths,
                     })

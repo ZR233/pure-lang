@@ -116,7 +116,7 @@ class _AgentTreeCardState extends State<AgentTreeCard> {
   @override
   Widget build(BuildContext context) {
     final agent = widget.agent;
-    final style = _agentStatusStyle(context, agent.status);
+    final style = _statusStyle(context, agent.status);
     final indent = (agent.depth.clamp(0, 6)) * 22.0;
     final hasDetails =
         (agent.summary?.isNotEmpty ?? false) ||
@@ -428,7 +428,7 @@ bool _isAgentActive(String status) {
   return const {'queued', 'running', 'waiting'}.contains(status);
 }
 
-_AgentStatusStyle _agentStatusStyle(BuildContext context, String status) {
+_AgentStatusStyle _statusStyle(BuildContext context, String status) {
   final l10n = context.l10n;
   return switch (status) {
     'running' => _AgentStatusStyle(

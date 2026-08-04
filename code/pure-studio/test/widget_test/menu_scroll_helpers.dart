@@ -21,8 +21,8 @@ Future<void> _expectMenuOpensAboveTrigger({
   await tester.pumpAndSettle();
 }
 
-List<_ProjectedMessageFixture> _scrollMessages(
-  String sessionId,
+List<ThreadItemView> _scrollItems(
+  String threadId,
   int count, {
   bool expandedLast = false,
   int startIndex = 0,
@@ -30,26 +30,24 @@ List<_ProjectedMessageFixture> _scrollMessages(
   final now = DateTime.fromMillisecondsSinceEpoch(0);
   return [
     for (var index = startIndex; index < startIndex + count; index++)
-      _ProjectedMessageFixture(
-        message: TimelineMessage(
-          id: '$sessionId-message-$index',
-          sessionId: sessionId,
-          role: index.isEven ? 'assistant' : 'user',
-          createdAt: now.add(Duration(seconds: index)),
-        ),
-        parts: [
-          TimelinePart(
-            id: '$sessionId-part-$index',
-            messageId: '$sessionId-message-$index',
-            type: TimelinePartType.text,
-            status: index == startIndex + count - 1 && expandedLast
-                ? 'streaming'
-                : 'completed',
-            text:
-                'message $index for $sessionId\n\n'
-                '${expandedLast && index == startIndex + count - 1 ? _streamingGrowthText : _singleBlockText}',
-          ),
-        ],
+      ThreadItemView(
+        id: '$threadId-item-$index',
+        threadId: threadId,
+        turnId: '$threadId-turn-$index',
+        ordinal: index,
+        revision: 0,
+        status: index == startIndex + count - 1 && expandedLast
+            ? 'streaming'
+            : 'completed',
+        createdAt: now.add(Duration(seconds: index)),
+        updatedAt: now.add(Duration(seconds: index)),
+        kind: index.isEven
+            ? ThreadItemKind.agentMessage
+            : ThreadItemKind.userMessage,
+        channel: index.isEven ? AgentMessageChannel.finalAnswer : null,
+        text:
+            'message $index for $threadId\n\n'
+            '${expandedLast && index == startIndex + count - 1 ? _streamingGrowthText : _singleBlockText}',
       ),
   ];
 }

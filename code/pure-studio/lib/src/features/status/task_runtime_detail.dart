@@ -48,15 +48,6 @@ class TaskRuntimeDetail extends StatelessWidget {
                 ),
               ],
             ),
-            if (task.agents.isNotEmpty) ...[
-              const _SectionDivider(),
-              StatusDetailPanel(
-                title: context.l10n.statusTaskAgents,
-                children: [
-                  for (final agent in task.agents) _AgentDetail(agent: agent),
-                ],
-              ),
-            ],
             if (task.workUnits.isNotEmpty) ...[
               const _SectionDivider(),
               StatusDetailPanel(
@@ -98,76 +89,6 @@ class TaskRuntimeDetail extends StatelessWidget {
             ],
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _AgentDetail extends StatelessWidget {
-  const _AgentDetail({required this.agent});
-
-  final TaskAgentOutcomeView agent;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      key: StudioDriverKeys.taskAgent(agent.agentId),
-      padding: const EdgeInsets.only(bottom: 9),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _ItemHeading(
-            title: '${agent.role} · ${agent.agentId}',
-            status: context.taskStatusLabel(agent.status),
-            statusKey: StudioDriverKeys.taskAgentStatus(agent.agentId),
-          ),
-          StatusDetailRow(
-            label: context.l10n.statusTaskSource,
-            value: agent.initiatedBy,
-          ),
-          StatusDetailRow(
-            label: context.l10n.statusTaskRequest,
-            value: agent.requestedByCallId,
-          ),
-          if (agent.progress case final progress?) ...[
-            StatusDetailRow(
-              label: context.l10n.statusTaskStage,
-              value: progress.stage,
-            ),
-            StatusDetailRow(
-              label: context.l10n.statusTaskSummary,
-              value: progress.summary,
-              valueMaxLines: 3,
-            ),
-            StatusDetailRow(
-              label: context.l10n.statusTaskNextStep,
-              value: progress.nextStep,
-              valueMaxLines: 3,
-            ),
-          ],
-          StatusDetailRow(
-            key: StudioDriverKeys.taskAgentSummaryAge(agent.agentId),
-            label: context.l10n.statusTaskSummaryAge,
-            value: '${agent.summaryAgeSeconds}s',
-          ),
-          if (agent.summary case final summary?)
-            StatusDetailRow(
-              label: context.l10n.statusTaskSummary,
-              value: summary,
-              valueMaxLines: 3,
-            ),
-          if (agent.error case final error?)
-            StatusDetailRow(
-              label: context.l10n.statusTaskError,
-              value: error,
-              valueMaxLines: 3,
-            ),
-          if (agent.headCommit case final commit?)
-            StatusDetailRow(
-              label: context.l10n.statusTaskCommit,
-              value: _shortCommit(commit),
-            ),
-        ],
       ),
     );
   }
@@ -224,9 +145,9 @@ class _WorkUnitDetail extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final outcome = task.agents
-        .where((agent) => agent.agentId == unit.agentId)
-        .firstOrNull;
+    final completion = task.completions
+        .where((completion) => completion.workUnitId == unit.id)
+        .lastOrNull;
     return Padding(
       padding: const EdgeInsets.only(bottom: 9),
       child: Column(
@@ -238,16 +159,14 @@ class _WorkUnitDetail extends StatelessWidget {
           ),
           StatusDetailRow(
             label: context.l10n.statusTaskSource,
-            value: outcome == null
-                ? (unit.agentId ?? '-')
-                : '${outcome.role} · ${outcome.initiatedBy}',
+            value: unit.agentId ?? '-',
           ),
           StatusDetailRow(
             label: context.l10n.statusTaskWorktree,
             value: unit.worktreePath,
             valueMaxLines: 2,
           ),
-          if (outcome?.headCommit case final commit?)
+          if (completion?.headCommit case final commit?)
             StatusDetailRow(
               label: context.l10n.statusTaskCommit,
               value: _shortCommit(commit),

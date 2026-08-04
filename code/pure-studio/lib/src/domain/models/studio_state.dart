@@ -6,9 +6,10 @@ import 'interaction_models.dart';
 import 'provider_models.dart';
 import 'recovery_models.dart';
 import 'runtime_models.dart';
-import 'session_models.dart';
+import 'thread_directory_models.dart';
 import 'settings_models.dart';
 import 'studio_enums.dart';
+import 'thread_models.dart';
 import 'timeline_models.dart';
 import 'turn_models.dart';
 
@@ -17,7 +18,7 @@ class _StudioStateUnset {
 }
 
 const _studioStateUnset = _StudioStateUnset();
-const _emptySessionRuntime = SessionRuntimeView(
+const _emptySessionRuntime = ThreadRuntimeView(
   model: '',
   contextTokens: 0,
   contextWindow: 0,
@@ -32,12 +33,10 @@ const _emptySessionRuntime = SessionRuntimeView(
 class StudioState {
   StudioState({
     required this.projects,
-    required this.sessions,
-    required this.messagesBySession,
-    this.partSnapshotsBySession = const {},
-    this.partOverlaysBySession = const {},
-    this.agentTimelineEventsBySession = const {},
-    this.agentsBySession = const {},
+    required this.threads,
+    this.workspacesByThread = const {},
+    this.workspaceUiByThread = const {},
+    this.tasksByRootThread = const {},
     required this.providers,
     this.providerCatalog = const ProviderCatalogView.empty(),
     this.defaultProviderId,
@@ -49,34 +48,16 @@ class StudioState {
     this.general = const GeneralSettingsView(),
     this.webSearch = const WebSearchSettingsView(),
     required this.selectedProjectId,
-    required this.selectedSessionId,
-    this.selectedRootSessionId,
+    required this.selectedThreadId,
     required this.permissionMode,
-    this.turnsBySession = const {},
-    this.runtimesBySession = const {},
-    Map<String, AgentWorkspaceSyncState> workspaceSyncBySession = const {},
-    required this.pendingInteractions,
     this.recoveryIssues = const [],
-    this.eventCursorsBySession = const {},
-    this.composersBySession = const {},
-    this.historyPagingBySession = const {},
-  }) : workspaceSyncBySession = _withInitialWorkspaceSync(
-         workspaceSyncBySession,
-         selectedSessionId,
-         selectedSessionId != null &&
-             (turnsBySession.containsKey(selectedSessionId) ||
-                 runtimesBySession.containsKey(selectedSessionId) ||
-                 composersBySession.containsKey(selectedSessionId)),
-       );
+  });
 
   final List<StudioProject> projects;
-  final List<StudioSession> sessions;
-  final Map<String, List<TimelineMessage>> messagesBySession;
-  final Map<String, Map<String, TimelinePartSnapshot>> partSnapshotsBySession;
-  final Map<String, Map<String, TimelinePartOverlay>> partOverlaysBySession;
-  final Map<String, Map<String, TimelineAgentEvent>>
-  agentTimelineEventsBySession;
-  final Map<String, Map<String, StudioAgentView>> agentsBySession;
+  final List<StudioThread> threads;
+  final Map<String, ThreadWorkspace> workspacesByThread;
+  final Map<String, WorkspaceUiState> workspaceUiByThread;
+  final Map<String, TaskRuntimeView> tasksByRootThread;
   final List<ProviderSettingsView> providers;
   final ProviderCatalogView providerCatalog;
   final String? defaultProviderId;
@@ -88,19 +69,156 @@ class StudioState {
   final GeneralSettingsView general;
   final WebSearchSettingsView webSearch;
   final String? selectedProjectId;
-  final String? selectedSessionId;
-  final String? selectedRootSessionId;
+  final String? selectedThreadId;
   final PermissionMode permissionMode;
-  final Map<String, StudioTurnView> turnsBySession;
-  final Map<String, SessionRuntimeView> runtimesBySession;
-  final Map<String, AgentWorkspaceSyncState> workspaceSyncBySession;
-  final List<PendingInteraction> pendingInteractions;
   final List<StudioRecoveryIssue> recoveryIssues;
-  final Map<String, int> eventCursorsBySession;
-  final Map<String, ComposerSessionState> composersBySession;
-  final Map<String, SessionHistoryPagingState> historyPagingBySession;
 
-  String? get selectedAgentSessionId => selectedSessionId;
+  ThreadWorkspace? get selectedWorkspace {
+    final id = selectedThreadId;
+    return id == null ? null : workspacesByThread[id];
+  }
+
+  WorkspaceUiState get selectedWorkspaceUi {
+    final id = selectedThreadId;
+    return id == null
+        ? const WorkspaceUiState()
+        : workspaceUiByThread[id] ?? const WorkspaceUiState();
+  }
+
+  StudioTurnView? get turn => selectedWorkspace?.activeTurn;
+
+  ThreadRuntimeView get runtime {
+    final selected = selectedThread;
+    final canonical = selectedWorkspace?.runtime ?? _emptySessionRuntime;
+    final task = selected == null
+        ? null
+        : tasksByRootThread[selected.effectiveRootThreadId];
+    return canonical.copyWith(
+      task: task,
+      agentCount: threadsForSelectedRoot.length,
+    );
+  }
+
+  ComposerThreadState get composer => selectedWorkspaceUi.composer;
+
+  List<StudioThread> get rootThreads =>
+      threads.where((thread) => thread.isRoot).toList();
+
+  StudioThread? get selectedThread {
+    final id = selectedThreadId;
+    return id == null
+        ? null
+        : threads.where((thread) => thread.id == id).firstOrNull;
+  }
+
+  StudioThread? get selectedRootThread {
+    final selected = selectedThread;
+    if (selected == null) return null;
+    final rootId = selected.effectiveRootThreadId;
+    return threads
+        .where((thread) => thread.id == rootId && thread.isRoot)
+        .firstOrNull;
+  }
+
+  List<StudioThread> get threadsForSelectedRoot {
+    final root = selectedRootThread;
+    if (root == null) return const [];
+    final scoped = threads
+        .where((thread) => thread.effectiveRootThreadId == root.id)
+        .toList();
+    final children = <String?, List<StudioThread>>{};
+    for (final thread in scoped) {
+      children.putIfAbsent(thread.parentThreadId, () => []).add(thread);
+    }
+    for (final siblings in children.values) {
+      siblings.sort((left, right) {
+        final created = left.effectiveCreatedAt.compareTo(
+          right.effectiveCreatedAt,
+        );
+        return created != 0 ? created : left.id.compareTo(right.id);
+      });
+    }
+    final ordered = <StudioThread>[];
+    final visited = <String>{};
+    void append(StudioThread thread) {
+      if (!visited.add(thread.id)) return;
+      ordered.add(thread);
+      for (final child in children[thread.id] ?? const <StudioThread>[]) {
+        append(child);
+      }
+    }
+
+    append(root);
+    for (final thread in scoped) {
+      append(thread);
+    }
+    return ordered;
+  }
+
+  List<TimelineRow> get selectedTimelineRows =>
+      timelineRowsFromThreadItems(selectedWorkspace?.items ?? const []);
+
+  TimelineTodoListUpdate? get selectedTodoList => selectedWorkspace?.todo;
+
+  List<PendingInteraction> get pendingInteractions => [
+    for (final workspace in workspacesByThread.values)
+      ...workspace.interactions,
+  ];
+
+  PendingInteraction? get activeInteraction {
+    final interactions = [...(selectedWorkspace?.interactions ?? const [])]
+      ..sort(
+        (left, right) => interactionPriority(
+          left.kind,
+        ).compareTo(interactionPriority(right.kind)),
+      );
+    return interactions.firstOrNull;
+  }
+
+  List<StudioAgentView> get selectedAgents {
+    return threadsForSelectedRoot
+        .map(
+          (thread) => StudioAgentView(
+            id: thread.id,
+            threadId: thread.id,
+            path: thread.agentPath.isEmpty ? thread.id : thread.agentPath,
+            parentPath: thread.parentThreadId,
+            role: thread.role,
+            task: thread.title,
+            status: thread.status,
+            summary: null,
+            depth: thread.isRoot ? 0 : 1,
+            error: null,
+            reason: null,
+            updatedAt: thread.updatedAt,
+          ),
+        )
+        .toList();
+  }
+
+  AgentWorkspaceView? get selectedAgentWorkspace {
+    final thread = selectedThread;
+    final root = selectedRootThread;
+    if (thread == null || root == null) return null;
+    return AgentWorkspaceView(
+      thread: thread,
+      rootThread: root,
+      syncState: selectedWorkspaceUi.syncState,
+      timelineRows: selectedTimelineRows,
+      todo: selectedTodoList,
+      runtime: runtime,
+      turn: turn,
+      activeInteraction: activeInteraction,
+      composer: composer,
+      composerMode: thread.isAgent
+          ? AgentComposerMode.runtimeDriven
+          : AgentComposerMode.editable,
+      permissionMode: permissionMode,
+      providers: providers,
+      roles: roles,
+      agents: selectedAgents,
+    );
+  }
 
   List<StudioRecoveryIssue> get applicationRecoveryIssues => recoveryIssues
       .where((issue) => issue.scope == RecoveryIssueScope.application)
@@ -116,225 +234,27 @@ class StudioState {
         .firstOrNull;
   }
 
-  StudioRecoveryIssue? recoveryIssueForSession(String sessionId) {
+  StudioRecoveryIssue? recoveryIssueForThread(String threadId) {
     return recoveryIssues
         .where(
           (issue) =>
-              issue.scope == RecoveryIssueScope.session &&
-              issue.sessionId == sessionId,
+              issue.scope == RecoveryIssueScope.thread &&
+              issue.threadId == threadId,
         )
         .firstOrNull;
   }
 
-  StudioTurnView? get turn {
-    final sessionId = selectedSessionId;
-    return sessionId == null ? null : turnsBySession[sessionId];
-  }
+  RoleSettingsView? role(String key) =>
+      roles.where((role) => role.key == key).firstOrNull;
 
-  SessionRuntimeView get runtime {
-    final sessionId = selectedSessionId;
-    return sessionId == null
-        ? _emptySessionRuntime
-        : runtimesBySession[sessionId] ?? _emptySessionRuntime;
-  }
-
-  ComposerSessionState get composer {
-    final sessionId = selectedSessionId;
-    return sessionId == null
-        ? const ComposerSessionState.idle()
-        : composersBySession[sessionId] ?? const ComposerSessionState.idle();
-  }
-
-  List<StudioSession> get rootSessions =>
-      sessions.where((session) => session.isRoot).toList();
-
-  StudioSession? get selectedAgentSession {
-    final sessionId = selectedSessionId;
-    if (sessionId == null) {
-      return null;
-    }
-    return sessions.where((session) => session.id == sessionId).firstOrNull;
-  }
-
-  StudioSession? get selectedRootSession {
-    final explicitRootId = selectedRootSessionId;
-    if (explicitRootId != null) {
-      final explicit = sessions
-          .where((session) => session.id == explicitRootId && session.isRoot)
-          .firstOrNull;
-      if (explicit != null) {
-        return explicit;
-      }
-    }
-    final selected = selectedAgentSession;
-    final rootId = selected?.effectiveRootSessionId;
-    if (rootId != null) {
-      return sessions
-          .where((session) => session.id == rootId && session.isRoot)
-          .firstOrNull;
-    }
-    return null;
-  }
-
-  String? get selectedTimelineSessionId => selectedAgentSession?.id;
-
-  List<StudioSession> get agentSessionsForSelectedRoot {
-    final root = selectedRootSession;
-    if (root == null) {
-      return const [];
-    }
-    final scoped = sessions
-        .where((session) => session.effectiveRootSessionId == root.id)
-        .toList();
-    final children = <String?, List<StudioSession>>{};
-    for (final session in scoped) {
-      children.putIfAbsent(session.parentSessionId, () => []).add(session);
-    }
-    for (final siblings in children.values) {
-      siblings.sort((left, right) {
-        final created = left.effectiveCreatedAt.compareTo(
-          right.effectiveCreatedAt,
-        );
-        return created != 0 ? created : left.id.compareTo(right.id);
-      });
-    }
-    final ordered = <StudioSession>[];
-    final visited = <String>{};
-    void appendBranch(StudioSession session) {
-      if (!visited.add(session.id)) {
-        return;
-      }
-      ordered.add(session);
-      for (final child in children[session.id] ?? const <StudioSession>[]) {
-        appendBranch(child);
-      }
-    }
-
-    appendBranch(root);
-    for (final session in scoped) {
-      appendBranch(session);
-    }
-    return ordered;
-  }
-
-  List<TimelineMessage> get selectedMessages {
-    final sessionId = selectedTimelineSessionId;
-    if (sessionId == null) {
-      return const [];
-    }
-    return [...(messagesBySession[sessionId] ?? const [])]
-      ..sort(_compareTimelineMessages);
-  }
-
-  List<TimelineRow> get selectedTimelineRows {
-    final sessionId = selectedTimelineSessionId;
-    if (sessionId == null) {
-      return const [];
-    }
-    final snapshots = partSnapshotsBySession[sessionId] ?? const {};
-    final overlays = partOverlaysBySession[sessionId] ?? const {};
-    return timelineRowsFromMessages(
-      selectedMessages,
-      parts: [
-        for (final snapshot in snapshots.values)
-          timelinePartFromSnapshot(snapshot, overlay: overlays[snapshot.id]),
-      ],
-      agentEvents: agentTimelineEventsBySession[sessionId]?.values ?? const [],
-    );
-  }
-
-  TimelineTodoListUpdate? get selectedTodoList {
-    final sessionId = selectedTimelineSessionId;
-    if (sessionId == null) {
-      return null;
-    }
-    final updates =
-        (agentTimelineEventsBySession[sessionId]?.values ?? const [])
-            .where((event) => event.payload is TimelineTodoListUpdate)
-            .toList()
-          ..sort(compareTimelineAgentEvents);
-    return updates.isEmpty
-        ? null
-        : updates.last.payload as TimelineTodoListUpdate;
-  }
-
-  PendingInteraction? get activeInteraction {
-    final sessionId = selectedSessionId;
-    if (sessionId == null) {
-      return null;
-    }
-    final scoped = pendingInteractions
-        .where((interaction) => interaction.sessionId == sessionId)
-        .toList();
-    scoped.sort(
-      (a, b) =>
-          interactionPriority(a.kind).compareTo(interactionPriority(b.kind)),
-    );
-    return scoped.firstOrNull;
-  }
-
-  List<StudioAgentView> get selectedAgents {
-    final sessionId = selectedSessionId;
-    if (sessionId == null) {
-      return const [];
-    }
-    final agents = [
-      ...(agentsBySession[sessionId]?.values ??
-          const Iterable<StudioAgentView>.empty()),
-    ];
-    agents.sort((left, right) {
-      final path = left.path.compareTo(right.path);
-      if (path != 0) {
-        return path;
-      }
-      return left.id.compareTo(right.id);
-    });
-    return agents;
-  }
-
-  AgentWorkspaceView? get selectedAgentWorkspace {
-    final session = selectedAgentSession;
-    final rootSession = selectedRootSession;
-    if (session == null || rootSession == null) {
-      return null;
-    }
-    return AgentWorkspaceView(
-      session: session,
-      rootSession: rootSession,
-      syncState:
-          workspaceSyncBySession[session.id] ?? AgentWorkspaceSyncState.loading,
-      timelineRows: selectedTimelineRows,
-      todo: selectedTodoList,
-      runtime: runtime,
-      turn: turn,
-      activeInteraction: activeInteraction,
-      composer: composer,
-      composerMode: session.isAgent
-          ? AgentComposerMode.runtimeDriven
-          : AgentComposerMode.editable,
-      permissionMode: permissionMode,
-      providers: providers,
-      roles: roles,
-      agents: selectedAgents,
-    );
-  }
-
-  RoleSettingsView? role(String key) {
-    return roles.where((role) => role.key == key).firstOrNull;
-  }
-
-  bool get isBusy {
-    return turn?.state.isBusy ?? false;
-  }
+  bool get isBusy => turn?.state.isBusy ?? false;
 
   StudioState copyWith({
     List<StudioProject>? projects,
-    List<StudioSession>? sessions,
-    Map<String, List<TimelineMessage>>? messagesBySession,
-    Map<String, Map<String, TimelinePartSnapshot>>? partSnapshotsBySession,
-    Map<String, Map<String, TimelinePartOverlay>>? partOverlaysBySession,
-    Map<String, Map<String, TimelineAgentEvent>>? agentTimelineEventsBySession,
-    Map<String, Map<String, StudioAgentView>>? agentsBySession,
+    List<StudioThread>? threads,
+    Map<String, ThreadWorkspace>? workspacesByThread,
+    Map<String, WorkspaceUiState>? workspaceUiByThread,
+    Map<String, TaskRuntimeView>? tasksByRootThread,
     List<ProviderSettingsView>? providers,
     ProviderCatalogView? providerCatalog,
     Object? defaultProviderId = _studioStateUnset,
@@ -346,44 +266,16 @@ class StudioState {
     GeneralSettingsView? general,
     WebSearchSettingsView? webSearch,
     Object? selectedProjectId = _studioStateUnset,
-    Object? selectedSessionId = _studioStateUnset,
-    Object? selectedRootSessionId = _studioStateUnset,
+    Object? selectedThreadId = _studioStateUnset,
     PermissionMode? permissionMode,
-    Map<String, StudioTurnView>? turnsBySession,
-    Set<String> removeTurnSessionIds = const {},
-    Map<String, SessionRuntimeView>? runtimesBySession,
-    Map<String, AgentWorkspaceSyncState>? workspaceSyncBySession,
-    List<PendingInteraction>? pendingInteractions,
     List<StudioRecoveryIssue>? recoveryIssues,
-    Map<String, int>? eventCursorsBySession,
-    Map<String, ComposerSessionState>? composersBySession,
-    Map<String, SessionHistoryPagingState>? historyPagingBySession,
   }) {
-    final nextSelectedSessionId =
-        identical(selectedSessionId, _studioStateUnset)
-        ? this.selectedSessionId
-        : selectedSessionId as String?;
-    final nextTurns = {...this.turnsBySession, ...?turnsBySession};
-    for (final sessionId in removeTurnSessionIds) {
-      nextTurns.remove(sessionId);
-    }
-    final nextRuntimes = {...this.runtimesBySession, ...?runtimesBySession};
-    final nextWorkspaceSync = {
-      ...this.workspaceSyncBySession,
-      ...?workspaceSyncBySession,
-    };
-    final nextComposers = {...this.composersBySession, ...?composersBySession};
     return StudioState(
       projects: projects ?? this.projects,
-      sessions: sessions ?? this.sessions,
-      messagesBySession: messagesBySession ?? this.messagesBySession,
-      partSnapshotsBySession:
-          partSnapshotsBySession ?? this.partSnapshotsBySession,
-      partOverlaysBySession:
-          partOverlaysBySession ?? this.partOverlaysBySession,
-      agentTimelineEventsBySession:
-          agentTimelineEventsBySession ?? this.agentTimelineEventsBySession,
-      agentsBySession: agentsBySession ?? this.agentsBySession,
+      threads: threads ?? this.threads,
+      workspacesByThread: workspacesByThread ?? this.workspacesByThread,
+      workspaceUiByThread: workspaceUiByThread ?? this.workspaceUiByThread,
+      tasksByRootThread: tasksByRootThread ?? this.tasksByRootThread,
       providers: providers ?? this.providers,
       providerCatalog: providerCatalog ?? this.providerCatalog,
       defaultProviderId: identical(defaultProviderId, _studioStateUnset)
@@ -399,46 +291,11 @@ class StudioState {
       selectedProjectId: identical(selectedProjectId, _studioStateUnset)
           ? this.selectedProjectId
           : selectedProjectId as String?,
-      selectedSessionId: nextSelectedSessionId,
-      selectedRootSessionId: identical(selectedRootSessionId, _studioStateUnset)
-          ? this.selectedRootSessionId
-          : selectedRootSessionId as String?,
+      selectedThreadId: identical(selectedThreadId, _studioStateUnset)
+          ? this.selectedThreadId
+          : selectedThreadId as String?,
       permissionMode: permissionMode ?? this.permissionMode,
-      turnsBySession: nextTurns,
-      runtimesBySession: nextRuntimes,
-      workspaceSyncBySession: nextWorkspaceSync,
-      pendingInteractions: pendingInteractions ?? this.pendingInteractions,
       recoveryIssues: recoveryIssues ?? this.recoveryIssues,
-      eventCursorsBySession:
-          eventCursorsBySession ?? this.eventCursorsBySession,
-      composersBySession: nextComposers,
-      historyPagingBySession:
-          historyPagingBySession ?? this.historyPagingBySession,
     );
   }
-}
-
-Map<String, AgentWorkspaceSyncState> _withInitialWorkspaceSync(
-  Map<String, AgentWorkspaceSyncState> values,
-  String? selectedSessionId,
-  bool hasSelectedWorkspace,
-) {
-  if (selectedSessionId == null ||
-      !hasSelectedWorkspace ||
-      values.containsKey(selectedSessionId)) {
-    return values;
-  }
-  return {...values, selectedSessionId: AgentWorkspaceSyncState.ready};
-}
-
-int _compareTimelineMessages(TimelineMessage left, TimelineMessage right) {
-  final sequence = left.sequence.compareTo(right.sequence);
-  if (sequence != 0) {
-    return sequence;
-  }
-  final createdAt = left.createdAt.compareTo(right.createdAt);
-  if (createdAt != 0) {
-    return createdAt;
-  }
-  return left.id.compareTo(right.id);
 }

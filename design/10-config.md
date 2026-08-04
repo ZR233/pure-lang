@@ -14,14 +14,17 @@ Windows 下对应：
 %USERPROFILE%\.pure\config.toml
 ```
 
-`pure-studio` 的桌面端状态与完整历史分别保存在：
+`pure-studio` 的桌面端产品状态与 Thread 历史统一保存在：
 
 ```text
-~/.pure/studio/studio_state.sqlite
-~/.pure/studio/studio_history.sqlite
+~/.pure/studio/studio.sqlite
 ```
 
-状态库保存项目、会话、Task、统一 interaction、agent latest state 与 UI projection；历史库保存完整 append-only 会话 items、turn 索引和模型 context checkpoint。两库由 `pl-studio-runtime` 通过 SeaORM 2.0 纯异步访问，配对、版本和恢复合同见 `19-studio-storage-and-diagnostics.md`。`pl-core` 的正常依赖树不包含 SeaORM。provider/model/role 配置仍只由 `~/.pure/config.toml` 表达。
+单库保存项目、Thread、Turn、Item、input、interaction、attachment 与 Task 产品表。Flutter
+临时 UI 状态不入库，实时流也不保存 replay journal。数据库由 `pl-studio-runtime` 通过
+SeaORM 2.0 异步访问；schema v1 与归档合同见 `19-studio-storage-and-diagnostics.md`。
+`pl-core` 的正常依赖树不包含 SeaORM。provider/model/role 配置仍只由
+`~/.pure/config.toml` schema 12 表达。
 
 普通对话运行时读取配置；当配置文件不存在时，`pure-studio` 设置页展示默认配置。设置页不提供全局保存或重载操作，普通设置项在用户修改后即时写入配置。独立新增/编辑页面保留本地草稿，必须点击页面内保存按钮才写入配置，取消则丢弃草稿。当前格式为 schema 12；任何非 schema 12、无法解析或无法校验的配置都先完整写入拒绝备份，再用 schema 12 默认配置重建。系统不迁移 schema 5–11，不接受旧字段 alias，也不复制数据库、会话或其他旧配置状态。重建时只按当前 bundled preset ID 恢复已有的 `bearer_token` 与 `bearer_token_env`，避免破坏性重建静默覆盖用户凭据；未知或自定义 provider 仍只保留在拒绝备份中。
 
@@ -40,7 +43,7 @@ Windows 下对应：
 - `StudioConfig` 与 schema version 12。
 - `~/.pure/config.toml` 路径、serde TOML 解析、原子保存和默认值。
 - Studio instructions、skills、MCP、runtime 和 UI 配置。
-- 生成 session 级 instruction snapshot。
+- 生成 Thread 首轮固定的 instruction snapshot。
 
 `pl-model` 只消费已经解析好的 provider 和模型信息，不负责文件 IO 或路径定位。
 
@@ -243,7 +246,9 @@ Bundled 模型只读，`additional_models` 只能添加新的 slug，冲突直�
 - `project_doc_max_bytes`：AGENTS 项目文档总读取上限，默认 `65536`，设为 `0` 表示禁用项目文档注入。
 - `project_doc_fallback_filenames`：除 `AGENTS.override.md`、`AGENTS.md`、`Agents.md` 外额外尝试的项目文档文件名。
 
-运行时会在 session 首轮保存 `instruction_snapshot_json`：base/system、developer blocks、user context blocks 以及 AGENTS source paths 都固定在该快照中。已有 session 后续不会因为配置或项目文档变化自动改变提示词；新 session 才使用新配置。
+运行时会在 Thread 首轮固定 base/system、developer blocks、user context blocks 与 AGENTS
+source paths。已有 Thread 后续不会因为配置或项目文档变化自动改变提示词；新 Thread 才使用
+新配置。
 
 ## 10.7 运行态声明
 
@@ -253,7 +258,7 @@ Bundled 模型只读，`additional_models` 只能添加新的 slug，冲突直�
 - `active_skills`
 - `active_mcp_servers`
 
-`permission_mode` 是会话 turn 的默认权限模式，缺失时按 `request-approval` 处理。可选值：
+`permission_mode` 是 Thread Turn 的默认权限模式，缺失时按 `request-approval` 处理。可选值：
 
 - `request-approval`
 - `auto-review`
@@ -263,7 +268,7 @@ Pure v1 的权限模式是策略层，不是 OS 沙箱。`request-approval` 和 
 
 `active_skills` 只声明启动时预选项，不作为真实 skills 发现来源。`active_mcp_servers` 只声明启动时预选项，MCP server 的用户启用意图来源为 `[mcp.servers.<id>].enabled`；真实可用性由进程内 MCP registry 探测，不写回配置。
 
-真实 skills 能力由 `[skills]` 配置和项目目录驱动。`active_skills` 不作为启停来源，不影响模型可见的 skills 列表，也不作为当前会话状态栏 Skills 的来源。Studio 当前会话的 `activeSkills` 由后端持久化的会话级 skill activation 记录派生；只有成功执行过 `skill_view`、且后端写入 `SkillActivated` 的 skill 才计入。
+真实 skills 能力由 `[skills]` 配置和项目目录驱动。`active_skills` 不作为启停来源，不影响模型可见的 skills 列表，也不作为当前 Thread 状态栏 Skills 的来源。Studio 当前 Thread 的 `activeSkills` 由后端持久化的 Thread 级 skill activation 记录派生；只有成功执行过 `skill_view`、且后端写入 `SkillActivated` 的 skill 才计入。
 
 ## 10.8 MCP 配置
 
@@ -408,7 +413,10 @@ cargo xtask run-gui
 
 widget test 只用于布局和状态回归，最终应用行为仍以 Flutter Windows 运行结果为准。
 
-聊天界面的 agent 目录属于大会话级轻量状态，信息来自 Studio session directory 与独立的全局刷新流。标题区唯一的 `n agents` Material 3 菜单只展示 owner、父子关系、角色、状态、最近摘要或错误，不携带 timeline、Todo、interaction、context，也不展示子代理完整推理流。选择条目后再订阅对应 agent session；底部状态栏不再维护第二套 agent 活动面板。
+聊天界面的 agent 目录属于 root Thread 的轻量产品状态，信息来自 Thread directory 的 product
+stream。标题区唯一的 `n agents` 菜单只展示 owner、父子关系、角色和状态，不携带 timeline、
+Todo、interaction 或 context。选择条目后再订阅对应 Thread；底部状态栏不维护第二套 agent
+活动面板。
 
 Studio 交互状态统一保存在 SQLite `interactions` 表。工具审批、`request_user_input` 和 Plan 实施确认都通过该表与 `InteractionChanged` 事件恢复；旧 `tool_approvals` 不再作为读写路径或 UI pending 状态来源。破坏性 schema 版本不迁移旧 pending 审批、询问或计划确认。
 

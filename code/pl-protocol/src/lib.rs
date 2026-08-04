@@ -6,10 +6,8 @@ mod message;
 mod model_context;
 mod permission;
 mod provider_catalog;
-mod session;
+mod thread;
 mod turn_failure;
-#[cfg(feature = "typescript")]
-mod typescript;
 
 pub use error::{PureError, Result};
 pub use event::{
@@ -43,15 +41,11 @@ pub use provider_catalog::{
     ProviderServiceCapabilitiesDescriptor, ProviderTransportDescriptor,
     WebSearchProviderCapabilitiesDescriptor, WebSearchResolutionDescriptor,
 };
-pub use session::{
-    SESSION_EVENT_SCHEMA_VERSION, SessionAgentPart, SessionAgentSnapshot, SessionAttachment,
-    SessionContextCompaction, SessionEventEnvelope, SessionEventKind, SessionEventPosition,
-    SessionMessage, SessionMessageRole, SessionMessageStatus, SessionOwnerSnapshot, SessionPart,
-    SessionPartContent, SessionPartDelta, SessionPartDeltaField, SessionPartStatus,
-    SessionResyncReason, SessionRuntimeSnapshot, SessionRuntimeUsage, SessionStreamFrame,
-    SessionSubscriptionRequest, SessionTextChannel, SessionTimelineEvent, SessionTimelineEventKind,
-    SessionToolPart, SessionTurn, SessionTurnActivity, SessionTurnState, SessionViewSnapshot,
+pub use thread::{
+    AgentMessageChannel, THREAD_SCHEMA_VERSION, Thread, ThreadAttachment, ThreadItem,
+    ThreadItemContent, ThreadItemDelta, ThreadItemDeltaField, ThreadItemStatus, ThreadMode,
+    ThreadNotification, ThreadNotificationEnvelope, ThreadRuntimeSnapshot, ThreadRuntimeUsage,
+    ThreadSnapshot, ThreadStatus, ThreadSubscriptionRequest, ThreadSubscriptionUpdate,
+    ThreadToolCall, ThreadTurnHistory, ThreadTurnPage, Turn, TurnPhase, TurnState,
 };
 pub use turn_failure::{RetryDisposition, TurnFailure, TurnFailureCategory};
-#[cfg(feature = "typescript")]
-pub use typescript::session_events_typescript;

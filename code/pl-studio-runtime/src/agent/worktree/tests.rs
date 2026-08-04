@@ -176,8 +176,13 @@ async fn fallback_delete_revalidates_after_registration_remove_race() {
     let manager = WorktreeManager::local(repo.clone());
     let orphan = task_worktree_spec(&repo, "run-race", "agent-race");
     manager.create_from_spec(orphan.clone()).await.unwrap();
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
     let external = std::env::temp_dir().join(format!(
-        "pure-worktree-race-external-{}",
+        "pure-worktree-race-external-{}-{stamp}-{}",
+        std::process::id(),
         REPO_COUNTER.fetch_add(1, Ordering::Relaxed)
     ));
     let external_leaf = external.join("agent-race");
@@ -205,7 +210,11 @@ async fn fallback_delete_revalidates_after_registration_remove_race() {
         .unwrap()
         .expect_err("fallback delete must revalidate");
 
-    assert!(error.to_string().contains("link") || error.to_string().contains("reparse"));
+    let error = format!("{error:#}");
+    assert!(
+        error.contains("link") || error.contains("reparse"),
+        "unexpected fallback safety error: {error}"
+    );
     assert_eq!(
         fs::read_to_string(external_leaf.join("keep.txt")).unwrap(),
         "keep"

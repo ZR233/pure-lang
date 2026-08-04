@@ -181,7 +181,7 @@ impl std::ops::Deref for TaskStopReason {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct TaskRunRecord {
     pub(crate) id: String,
-    pub(crate) session_id: String,
+    pub(crate) root_thread_id: String,
     pub(crate) phase: TaskRunPhase,
     pub(crate) plan: String,
     pub(crate) workspace_root: String,
@@ -216,7 +216,7 @@ pub(crate) struct BranchLeaseRecord {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct RestartAgentReconciliation {
     pub(crate) cancelled_work_units: usize,
-    pub(crate) cancelled_outcomes: usize,
+    pub(crate) cancelled_thread_executions: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -242,7 +242,6 @@ pub(crate) enum TaskWorktreeCleanupState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TaskWorktreeOwnerResource {
     pub(crate) work_unit: WorkUnitRecord,
-    pub(crate) outcome: Option<AgentOutcomeRecord>,
     pub(crate) completion: Option<WorkCompletionRecord>,
     pub(crate) creation_state: TaskWorktreeCreationState,
     pub(crate) cleanup_state: TaskWorktreeCleanupState,
@@ -266,7 +265,7 @@ pub(crate) struct DesignCancellationRevert {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CreateTaskRun {
-    pub(crate) session_id: String,
+    pub(crate) root_thread_id: String,
     pub(crate) phase: TaskRunPhase,
     pub(crate) plan: String,
     pub(crate) workspace_root: String,
@@ -331,7 +330,7 @@ impl WorkUnitStatus {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) enum AgentOutcomeStatus {
+pub(crate) enum ThreadExecutionStatus {
     Queued,
     Running,
     Completed,
@@ -345,7 +344,7 @@ pub(crate) enum ExecutorCloseDisposition {
     Discard,
 }
 
-impl AgentOutcomeStatus {
+impl ThreadExecutionStatus {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Queued => "queued",
@@ -590,26 +589,11 @@ pub(crate) struct WorkUnitRecord {
     pub(crate) branch: String,
     pub(crate) worktree_disposition: TaskWorktreeDisposition,
     pub(crate) attempt: u32,
-    pub(crate) agent_id: Option<String>,
-    pub(crate) created_at: i64,
-    pub(crate) updated_at: i64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct AgentOutcomeRecord {
-    pub(crate) id: String,
-    pub(crate) task_run_id: String,
-    pub(crate) work_unit_id: Option<String>,
-    pub(crate) agent_id: String,
-    pub(crate) owner_path: String,
-    pub(crate) initiated_by: String,
+    pub(crate) executor_thread_id: Option<String>,
     pub(crate) requested_by_call_id: String,
-    pub(crate) role: String,
-    pub(crate) status: AgentOutcomeStatus,
-    pub(crate) attempt: u32,
-    pub(crate) summary: Option<String>,
-    pub(crate) error: Option<String>,
+    pub(crate) execution_status: ThreadExecutionStatus,
+    pub(crate) execution_summary: Option<String>,
+    pub(crate) execution_error: Option<String>,
     pub(crate) created_at: i64,
     pub(crate) updated_at: i64,
 }
@@ -618,11 +602,4 @@ pub(crate) struct AgentOutcomeRecord {
 pub(crate) struct DeliveryScope {
     pub(crate) run: TaskRunRecord,
     pub(crate) work_unit: WorkUnitRecord,
-    pub(crate) outcome: AgentOutcomeRecord,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum DeliveryScopeResolution {
-    Resolved(Box<DeliveryScope>),
-    MissingWorkUnit(Box<AgentOutcomeRecord>),
 }

@@ -79,7 +79,7 @@ class _RuntimeDrivenAgentDock extends StatelessWidget {
               ).textTheme.bodyMedium?.copyWith(color: context.studioInkSoft),
             ),
           ),
-          if (workspace.isBusy) _StopButton(sessionId: workspace.sessionId),
+          if (workspace.isBusy) _StopButton(threadId: workspace.threadId),
         ],
       ),
     );
@@ -138,7 +138,7 @@ class _TaskResumeDock extends ConsumerWidget {
                     : () => unawaited(
                         ref
                             .read(studioControllerProvider.notifier)
-                            .resumeTask(workspace.sessionId),
+                            .resumeTask(workspace.threadId),
                       ),
                 icon: composer.isSubmissionPending
                     ? const SizedBox.square(
@@ -242,13 +242,13 @@ class _PromptComposerState extends ConsumerState<_PromptComposer> {
             ),
             onChanged: (value) => ref
                 .read(studioControllerProvider.notifier)
-                .updateComposer(widget.workspace.sessionId, value),
+                .updateComposer(widget.workspace.threadId, value),
             onSubmitted: (_) {
               if (canSubmit) {
                 unawaited(
                   ref
                       .read(studioControllerProvider.notifier)
-                      .submitComposer(widget.workspace.sessionId),
+                      .submitComposer(widget.workspace.threadId),
                 );
               }
             },
@@ -278,7 +278,7 @@ class _PromptComposerState extends ConsumerState<_PromptComposer> {
                   icon: const Icon(Icons.stop),
                   onPressed: () => ref
                       .read(studioControllerProvider.notifier)
-                      .stop(widget.workspace.sessionId),
+                      .stop(widget.workspace.threadId),
                 )
               else
                 IconButton.filled(
@@ -299,7 +299,7 @@ class _PromptComposerState extends ConsumerState<_PromptComposer> {
                       ? () => unawaited(
                           ref
                               .read(studioControllerProvider.notifier)
-                              .submitComposer(widget.workspace.sessionId),
+                              .submitComposer(widget.workspace.threadId),
                         )
                       : null,
                 ),
@@ -399,22 +399,22 @@ class _InteractionDock extends StatelessWidget {
   Widget build(BuildContext context) {
     final payload = InteractionPayloadSnapshot.from(interaction);
     final trailing = workspace.isBusy
-        ? _StopButton(sessionId: workspace.sessionId)
+        ? _StopButton(threadId: workspace.threadId)
         : null;
     return switch (interaction.kind) {
       InteractionKind.toolApproval => ToolApprovalDock(
-        sessionId: workspace.sessionId,
+        threadId: workspace.threadId,
         payload: payload,
         trailing: trailing,
       ),
       InteractionKind.userInput => UserInputDock(
-        sessionId: workspace.sessionId,
+        threadId: workspace.threadId,
         interactionId: interaction.id,
         payload: payload,
         trailing: trailing,
       ),
       InteractionKind.planConfirmation => PlanConfirmationDock(
-        sessionId: workspace.sessionId,
+        threadId: workspace.threadId,
         trailing: trailing,
       ),
     };
@@ -422,9 +422,9 @@ class _InteractionDock extends StatelessWidget {
 }
 
 class _StopButton extends ConsumerWidget {
-  const _StopButton({required this.sessionId});
+  const _StopButton({required this.threadId});
 
-  final String sessionId;
+  final String threadId;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -432,7 +432,7 @@ class _StopButton extends ConsumerWidget {
       tooltip: context.l10n.composerStop,
       icon: const Icon(Icons.stop),
       onPressed: () =>
-          ref.read(studioControllerProvider.notifier).stop(sessionId),
+          ref.read(studioControllerProvider.notifier).stop(threadId),
     );
   }
 }

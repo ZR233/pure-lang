@@ -142,13 +142,6 @@ impl TaskCoordinator {
             .read_work_unit(&evidence.work_unit_id)
             .await?
             .context("merge work unit not found")?;
-        let outcome = self
-            .store
-            .list_agent_outcomes(&run.id)
-            .await?
-            .into_iter()
-            .find(|outcome| outcome.id == evidence.outcome_id)
-            .context("merge outcome not found")?;
         let completion = self
             .store
             .read_approved_work_completion(&evidence.work_unit_id)
@@ -163,7 +156,6 @@ impl TaskCoordinator {
             run: run.clone(),
             lease,
             work_unit,
-            outcome,
             completion,
             delivery,
             merge: record.clone(),

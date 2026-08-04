@@ -9,7 +9,7 @@ use crate::studio::ids::unix_seconds;
 /// Studio runtime 对 UI 暴露的生命周期状态。
 ///
 /// 状态机只描述 runtime 服务自身是否可接受请求；单个 turn 的运行阶段由公共
-/// session 事件表达。
+/// Thread 事件表达。
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum StudioRuntimeStatus {
@@ -50,11 +50,11 @@ impl StudioRuntimeStatus {
 
 /// Studio runtime 当前活动 turn。
 ///
-/// 每个会话同一时间最多暴露一个活动 turn；更细的 phase 由 turn event 表达。
+/// 每个 Thread 同一时间最多暴露一个活动 turn；更细的 phase 由 turn event 表达。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct StudioActiveTurn {
-    pub session_id: String,
+    pub thread_id: String,
     pub turn_id: String,
 }
 
@@ -64,7 +64,7 @@ pub struct StudioActiveTurn {
 pub enum StudioRecoveryIssueScope {
     Application,
     Project,
-    Session,
+    Thread,
 }
 
 /// 恢复问题的稳定类别。
@@ -84,11 +84,11 @@ pub enum StudioRecoveryIssueCategory {
 #[serde(rename_all = "camelCase")]
 pub enum StudioRecoveryIssueAction {
     Retry,
-    CleanupSession,
+    CleanupThread,
     RemoveProject,
 }
 
-/// 单个项目或会话的可隔离恢复问题。
+/// 单个项目或 Thread 的可隔离恢复问题。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct StudioRecoveryIssue {
@@ -97,7 +97,7 @@ pub struct StudioRecoveryIssue {
     pub category: StudioRecoveryIssueCategory,
     pub action: StudioRecoveryIssueAction,
     pub project_id: Option<String>,
-    pub session_id: Option<String>,
+    pub thread_id: Option<String>,
     pub task_run_id: Option<String>,
     pub message: String,
 }
@@ -133,7 +133,7 @@ pub struct StudioRecoveryCleanupPreview {
     pub expected_revision: String,
     pub scope: StudioRecoveryIssueScope,
     pub project_id: Option<String>,
-    pub session_id: Option<String>,
+    pub thread_id: Option<String>,
     pub message: String,
     pub resources: Vec<StudioRecoveryCleanupResource>,
 }
@@ -220,9 +220,9 @@ impl StudioRuntimeState {
         Ok(snapshot_from_inner(&inner))
     }
 
-    pub fn mark_active_turn(&self, session_id: String, turn_id: String) -> StudioRuntimeSnapshot {
+    pub fn mark_active_turn(&self, thread_id: String, turn_id: String) -> StudioRuntimeSnapshot {
         let mut inner = self.inner.lock().expect("runtime state mutex poisoned");
-        inner.active_turns.insert(session_id, turn_id);
+        inner.active_turns.insert(thread_id, turn_id);
         inner.updated_at = unix_seconds();
         snapshot_from_inner(&inner)
     }
@@ -263,14 +263,14 @@ impl StudioRuntimeState {
         snapshot_from_inner(&inner)
     }
 
-    pub fn clear_active_turn(&self, session_id: &str, turn_id: &str) -> StudioRuntimeSnapshot {
+    pub fn clear_active_turn(&self, thread_id: &str, turn_id: &str) -> StudioRuntimeSnapshot {
         let mut inner = self.inner.lock().expect("runtime state mutex poisoned");
         if inner
             .active_turns
-            .get(session_id)
+            .get(thread_id)
             .is_some_and(|active_turn_id| active_turn_id == turn_id)
         {
-            inner.active_turns.remove(session_id);
+            inner.active_turns.remove(thread_id);
         }
         inner.updated_at = unix_seconds();
         snapshot_from_inner(&inner)
@@ -289,8 +289,8 @@ fn snapshot_from_inner(inner: &StudioRuntimeStateInner) -> StudioRuntimeSnapshot
         active_turns: inner
             .active_turns
             .iter()
-            .map(|(session_id, turn_id)| StudioActiveTurn {
-                session_id: session_id.clone(),
+            .map(|(thread_id, turn_id)| StudioActiveTurn {
+                thread_id: thread_id.clone(),
                 turn_id: turn_id.clone(),
             })
             .collect(),

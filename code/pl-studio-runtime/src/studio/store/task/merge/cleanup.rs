@@ -3,7 +3,6 @@ use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait,
 };
 
-use super::super::outcome::agent_outcome_record;
 use super::super::work_completion::{delivery_from_completion, work_completion_record};
 use super::super::work_unit::work_unit_record;
 use super::super::{branch_lease_record, task_run_record};
@@ -13,18 +12,18 @@ use crate::studio::ids::unix_seconds;
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
     MergeCleanupEvidence, MergeRecord, MergeStatus, TaskMergeScope, TaskRunPhase,
-    WorkCompletionStatus, WorkUnitStatus,
+    ThreadExecutionStatus, WorkCompletionStatus, WorkUnitStatus,
 };
 
 impl StudioStore {
     pub(crate) async fn find_accepted_merge_scope(
         &self,
-        session_id: &str,
+        thread_id: &str,
         agent_id: &str,
         expected_head: &str,
     ) -> Result<Option<TaskMergeScope>> {
         let Some(run) = entities::task_run::Entity::find()
-            .filter(entities::task_run::Column::SessionId.eq(session_id.to_string()))
+            .filter(entities::task_run::Column::RootThreadId.eq(thread_id.to_string()))
             .filter(entities::task_run::Column::Phase.is_in([
                 TaskRunPhase::Implementing.as_str(),
                 TaskRunPhase::Reworking.as_str(),
@@ -89,20 +88,14 @@ impl StudioStore {
             .one(&self.db)
             .await?
             .context("accepted merge work unit not found")?;
-        let outcome = entities::agent_outcome::Entity::find_by_id(evidence.outcome_id)
-            .one(&self.db)
-            .await?
-            .context("accepted merge outcome not found")?;
         let completion =
             entities::work_completion::Entity::find_by_id(evidence.completion_id.clone())
                 .one(&self.db)
                 .await?
                 .context("accepted merge completion not found")?;
         if work_unit.task_run_id != run.id
-            || outcome.task_run_id != run.id
-            || outcome.work_unit_id.as_deref() != Some(work_unit.id.as_str())
-            || outcome.agent_id != merge.agent_id
-            || work_unit.agent_id.as_deref() != Some(merge.agent_id.as_str())
+            || work_unit.executor_thread_id.as_deref() != Some(merge.agent_id.as_str())
+            || work_unit.execution_status != ThreadExecutionStatus::Completed.as_str()
             || work_unit.status != WorkUnitStatus::Merged.as_str()
             || completion.task_run_id != run.id
             || completion.work_unit_id != work_unit.id
@@ -110,7 +103,7 @@ impl StudioStore {
             || completion.revision != i32::try_from(evidence.completion_revision)?
             || completion.status != WorkCompletionStatus::Approved.as_str()
         {
-            bail!("accepted merge work unit, outcome, and completion identity drifted");
+            bail!("accepted merge work unit and completion identity drifted");
         }
         let completion = work_completion_record(completion)?;
         let delivery = delivery_from_completion(&completion)?;
@@ -121,7 +114,6 @@ impl StudioStore {
             run: task_run_record(run)?,
             lease: branch_lease_record(lease),
             work_unit: work_unit_record(work_unit)?,
-            outcome: agent_outcome_record(outcome)?,
             completion,
             delivery,
             merge: merge_record(merge)?,

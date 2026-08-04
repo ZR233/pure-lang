@@ -55,18 +55,13 @@ void registerMarkdownRenderTests() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    final now = DateTime.fromMillisecondsSinceEpoch(0);
-    final message = TimelineMessage(
-      id: 'message-1',
-      sessionId: 'session-1',
-      role: 'assistant',
-      createdAt: now,
-    );
-    const parts = [
-      TimelinePart(
+    final items = [
+      _threadItemFixture(
         id: 'text-1',
-        messageId: 'message-1',
-        type: TimelinePartType.text,
+        threadId: 'session-1',
+        turnId: 'turn-1',
+        ordinal: 0,
+        channel: AgentMessageChannel.commentary,
         text:
             '# Build result\n'
             '- **Compile** runtime\n'
@@ -80,19 +75,25 @@ void registerMarkdownRenderTests() {
             '}',
         status: 'streaming',
       ),
-      TimelinePart(
+      _threadItemFixture(
         id: 'reasoning-1',
-        messageId: 'message-1',
-        type: TimelinePartType.reasoning,
-        title: 'Reasoning',
-        text: '> hidden raw reasoning\n\n- keep this out of timeline',
-        collapsed: true,
+        threadId: 'session-1',
+        turnId: 'turn-1',
+        ordinal: 1,
+        kind: ThreadItemKind.reasoning,
+        channel: null,
+        reasoningSummary: const ['Reasoning'],
+        reasoningContent: const [
+          '> hidden raw reasoning\n\n- keep this out of timeline',
+        ],
       ),
-      TimelinePart(
+      _threadItemFixture(
         id: 'plan-1',
-        messageId: 'message-1',
-        type: TimelinePartType.plan,
-        title: 'Plan',
+        threadId: 'session-1',
+        turnId: 'turn-1',
+        ordinal: 2,
+        kind: ThreadItemKind.plan,
+        channel: null,
         text: '## Next steps\n1. Analyze\n2. Ship',
       ),
     ];
@@ -105,9 +106,9 @@ void registerMarkdownRenderTests() {
             width: 980,
             height: 820,
             child: TimelineView(
-              sessionId: 'session-1',
+              threadId: 'session-1',
               turn: null,
-              rows: timelineRowsFromMessages([message], parts: parts),
+              rows: timelineRowsFromThreadItems(items),
             ),
           ),
         ),
@@ -139,24 +140,18 @@ void registerMarkdownRenderTests() {
   testWidgets('timeline renders all agent text without bubble decoration', (
     tester,
   ) async {
-    final message = TimelineMessage(
-      id: 'message-agent-text',
-      sessionId: 'session-1',
-      role: 'assistant',
-      createdAt: DateTime.fromMillisecondsSinceEpoch(0),
-    );
     const parts = [
-      TimelinePart(
+      TimelineEntry(
         id: 'commentary-text',
-        messageId: 'message-agent-text',
-        type: TimelinePartType.text,
+        groupId: 'message-agent-text',
+        type: TimelineEntryType.text,
         textChannel: TimelineTextChannel.commentary,
         text: '过程输出',
       ),
-      TimelinePart(
+      TimelineEntry(
         id: 'final-text',
-        messageId: 'message-agent-text',
-        type: TimelinePartType.text,
+        groupId: 'message-agent-text',
+        type: TimelineEntryType.text,
         textChannel: TimelineTextChannel.finalAnswer,
         text: '最终输出',
       ),
@@ -166,9 +161,9 @@ void registerMarkdownRenderTests() {
       _localizedApp(
         home: Scaffold(
           body: TimelineView(
-            sessionId: 'session-1',
+            threadId: 'session-1',
             turn: null,
-            rows: timelineRowsFromMessages([message], parts: parts),
+            rows: timelineRowsFromFixtureParts(parts),
           ),
         ),
       ),
@@ -191,7 +186,7 @@ void registerMarkdownRenderTests() {
     }
   });
 
-  testWidgets('timeline groups consecutive synthetic commentary rows', (
+  testWidgets('timeline renders typed commentary Items without filtering', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(1280, 900);
@@ -199,77 +194,27 @@ void registerMarkdownRenderTests() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    final now = DateTime.fromMillisecondsSinceEpoch(0);
-    final message = TimelineMessage(
-      id: 'message-progress',
-      sessionId: 'session-1',
-      role: 'assistant',
-      createdAt: now,
-    );
-    const parts = [
-      TimelinePart(
-        id: 'progress-1',
-        messageId: 'message-progress',
-        sessionId: 'session-1',
-        turnId: 'turn-1',
-        type: TimelinePartType.text,
-        order: 0,
-        textChannel: TimelineTextChannel.commentary,
-        text: '已接收请求，正在准备上下文。',
-        synthetic: true,
-      ),
-      TimelinePart(
-        id: 'progress-2',
-        messageId: 'message-progress',
-        sessionId: 'session-1',
-        turnId: 'turn-1',
-        type: TimelinePartType.text,
-        order: 1,
-        textChannel: TimelineTextChannel.commentary,
-        text: '上下文已整理，准备调用模型。',
-        synthetic: true,
-      ),
-      TimelinePart(
-        id: 'tool-progress-1',
-        messageId: 'message-progress',
-        sessionId: 'session-1',
-        turnId: 'turn-1',
-        type: TimelinePartType.text,
-        order: 2,
-        textChannel: TimelineTextChannel.commentary,
-        text: '模型请求调用 3 个工具。',
-        synthetic: true,
-      ),
-      TimelinePart(
-        id: 'tool-progress-2',
-        messageId: 'message-progress',
-        sessionId: 'session-1',
-        turnId: 'turn-1',
-        type: TimelinePartType.text,
-        order: 3,
-        textChannel: TimelineTextChannel.commentary,
-        text: '正在执行工具 `exec`。',
-        synthetic: true,
-      ),
-      TimelinePart(
-        id: 'tool-progress-3',
-        messageId: 'message-progress',
-        sessionId: 'session-1',
-        turnId: 'turn-1',
-        type: TimelinePartType.text,
-        order: 4,
-        textChannel: TimelineTextChannel.commentary,
-        text: '工具 `exec` 已完成。',
-        synthetic: true,
-      ),
-      TimelinePart(
+    final items = [
+      for (final (index, text) in [
+        '已接收请求，正在准备上下文。',
+        '上下文已整理，准备调用模型。',
+        '模型请求调用 3 个工具。',
+        '正在执行工具 `exec`。',
+        '工具 `exec` 已完成。',
+      ].indexed)
+        _threadItemFixture(
+          id: 'commentary-$index',
+          threadId: 'session-1',
+          turnId: 'turn-1',
+          ordinal: index,
+          channel: AgentMessageChannel.commentary,
+          text: text,
+        ),
+      _threadItemFixture(
         id: 'final-1',
-        messageId: 'message-progress',
-        sessionId: 'session-1',
+        threadId: 'session-1',
         turnId: 'turn-1',
-        type: TimelinePartType.text,
-        order: 5,
-        textChannel: TimelineTextChannel.finalAnswer,
+        ordinal: 5,
         text: '最终答复保持独立。',
       ),
     ];
@@ -281,9 +226,9 @@ void registerMarkdownRenderTests() {
             width: 980,
             height: 820,
             child: TimelineView(
-              sessionId: 'session-1',
+              threadId: 'session-1',
               turn: null,
-              rows: timelineRowsFromMessages([message], parts: parts),
+              rows: timelineRowsFromThreadItems(items),
             ),
           ),
         ),
@@ -291,20 +236,12 @@ void registerMarkdownRenderTests() {
     );
     await tester.pump();
 
-    expect(find.text('上下文已整理，准备调用模型。'), findsOneWidget);
-    expect(find.text('已接收请求，正在准备上下文。'), findsNothing);
-    expect(find.text('模型请求调用 3 个工具。'), findsNothing);
-    expect(find.text('正在执行工具 `exec`。'), findsNothing);
-    expect(find.text('工具 `exec` 已完成。'), findsNothing);
-    expect(find.text('最终答复保持独立。'), findsOneWidget);
-
-    await tester.tap(find.text('上下文已整理，准备调用模型。'));
-    await tester.pump();
-
     expect(find.text('已接收请求，正在准备上下文。'), findsOneWidget);
-    expect(find.text('模型请求调用 3 个工具。'), findsNothing);
-    expect(find.text('正在执行工具 `exec`。'), findsNothing);
-    expect(find.text('工具 `exec` 已完成。'), findsNothing);
+    expect(find.text('上下文已整理，准备调用模型。'), findsOneWidget);
+    expect(find.text('模型请求调用 3 个工具。'), findsOneWidget);
+    expect(find.textContaining('正在执行工具'), findsOneWidget);
+    expect(find.textContaining('已完成'), findsOneWidget);
+    expect(find.text('最终答复保持独立。'), findsOneWidget);
   });
 
   testWidgets(
@@ -315,35 +252,28 @@ void registerMarkdownRenderTests() {
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
 
-      final now = DateTime.fromMillisecondsSinceEpoch(0);
-      final message = TimelineMessage(
-        id: 'message-reasoning-identity',
-        sessionId: 'session-1',
-        role: 'assistant',
-        createdAt: now,
-      );
-
-      TimelinePart reasoningPart({
+      ThreadItemView reasoningItem({
         required String id,
         required String title,
         required String text,
         required int order,
+        String threadId = 'session-1',
       }) {
-        return TimelinePart(
+        return _threadItemFixture(
           id: id,
-          messageId: message.id,
-          type: TimelinePartType.reasoning,
-          order: order,
-          title: title,
-          status: 'completed',
-          text: text,
-          collapsed: true,
+          threadId: threadId,
+          turnId: 'turn-reasoning-identity',
+          ordinal: order,
+          kind: ThreadItemKind.reasoning,
+          channel: null,
+          reasoningSummary: [title],
+          reasoningContent: [text],
         );
       }
 
       Widget timelineFor({
-        String sessionId = 'session-1',
-        required List<TimelinePart> parts,
+        String threadId = 'session-1',
+        required List<ThreadItemView> items,
       }) {
         return _timelineApp(
           home: Scaffold(
@@ -351,16 +281,9 @@ void registerMarkdownRenderTests() {
               width: 980,
               height: 820,
               child: TimelineView(
-                sessionId: sessionId,
+                threadId: threadId,
                 turn: null,
-                rows: timelineRowsFromMessages([
-                  TimelineMessage(
-                    id: message.id,
-                    sessionId: sessionId,
-                    role: message.role,
-                    createdAt: message.createdAt,
-                  ),
-                ], parts: parts),
+                rows: timelineRowsFromThreadItems(items),
               ),
             ),
           ),
@@ -369,14 +292,14 @@ void registerMarkdownRenderTests() {
 
       await tester.pumpWidget(
         timelineFor(
-          parts: [
-            reasoningPart(
+          items: [
+            reasoningItem(
               id: 'reasoning-a',
               title: 'Reasoning A',
               text: 'reasoning-text-a',
               order: 0,
             ),
-            reasoningPart(
+            reasoningItem(
               id: 'reasoning-b',
               title: 'Reasoning B',
               text: 'reasoning-text-b',
@@ -401,20 +324,20 @@ void registerMarkdownRenderTests() {
 
       await tester.pumpWidget(
         timelineFor(
-          parts: [
-            reasoningPart(
+          items: [
+            reasoningItem(
               id: 'reasoning-a',
               title: 'Reasoning A',
               text: 'reasoning-text-a',
               order: 0,
             ),
-            reasoningPart(
+            reasoningItem(
               id: 'reasoning-b',
               title: 'Reasoning B',
               text: 'reasoning-text-b',
               order: 1,
             ),
-            reasoningPart(
+            reasoningItem(
               id: 'reasoning-c',
               title: 'Reasoning C',
               text: 'reasoning-text-c',
@@ -435,13 +358,14 @@ void registerMarkdownRenderTests() {
 
       await tester.pumpWidget(
         timelineFor(
-          sessionId: 'session-2',
-          parts: [
-            reasoningPart(
+          threadId: 'session-2',
+          items: [
+            reasoningItem(
               id: 'reasoning-a',
               title: 'Reasoning A',
               text: 'reasoning-text-a-session-2',
               order: 0,
+              threadId: 'session-2',
             ),
           ],
         ),
@@ -461,28 +385,20 @@ void registerMarkdownRenderTests() {
     addTearDown(tester.view.resetDevicePixelRatio);
 
     final now = DateTime.fromMillisecondsSinceEpoch(0);
-    final message = TimelineMessage(
-      id: 'message-reasoning-active',
-      sessionId: 'session-1',
-      role: 'assistant',
+    final part = TimelineEntry(
+      id: 'reasoning-active',
+      groupId: 'reasoning-active',
+      threadId: 'session-1',
+      turnId: 'turn-1',
+      type: TimelineEntryType.reasoning,
+      order: 0,
+      revision: 0,
+      text: '## 分析调用结果',
+      reasoningSummary: const ['## 分析调用结果'],
+      reasoningContent: const ['正在分析调用结果。'],
+      status: 'streaming',
       createdAt: now,
-    );
-    final part = timelinePartFromSnapshot(
-      TimelinePartSnapshot(
-        id: 'reasoning-active',
-        messageId: message.id,
-        sessionId: 'session-1',
-        turnId: 'turn-1',
-        type: TimelinePartType.reasoning,
-        order: 0,
-        revision: 0,
-        text: '',
-        reasoningSummary: const ['## 分析调用结果'],
-        reasoningContent: const ['正在分析调用结果。'],
-        status: 'streaming',
-        createdAt: now,
-        updatedAt: now,
-      ),
+      updatedAt: now,
     );
 
     await tester.pumpWidget(
@@ -493,15 +409,15 @@ void registerMarkdownRenderTests() {
             width: 980,
             height: 520,
             child: TimelineView(
-              sessionId: 'session-1',
+              threadId: 'session-1',
               turn: _testTurn(
-                sessionId: 'session-1',
+                threadId: 'session-1',
                 turnId: 'turn-1',
                 state: const StudioTurnState.inProgress(
                   StudioTurnActivity.thinking,
                 ),
               ),
-              rows: timelineRowsFromMessages([message], parts: [part]),
+              rows: timelineRowsFromFixtureParts([part]),
             ),
           ),
         ),
@@ -527,30 +443,19 @@ void registerMarkdownRenderTests() {
       addTearDown(tester.view.resetDevicePixelRatio);
 
       final now = DateTime.fromMillisecondsSinceEpoch(0);
-      final message = TimelineMessage(
-        id: 'message-reasoning-delta',
-        sessionId: 'session-1',
-        role: 'assistant',
+      final part = TimelineEntry(
+        id: 'reasoning-delta',
+        groupId: 'reasoning-delta',
+        threadId: 'session-1',
+        turnId: 'turn-1',
+        type: TimelineEntryType.reasoning,
+        order: 0,
+        revision: 1,
+        text: '正在核对角色设置、状态类型与测试夹具。',
+        reasoningSummary: const ['正在核对角色设置、状态类型与测试夹具。'],
+        status: 'streaming',
         createdAt: now,
-      );
-      final part = timelinePartFromSnapshot(
-        TimelinePartSnapshot(
-          id: 'reasoning-delta',
-          messageId: message.id,
-          sessionId: 'session-1',
-          turnId: 'turn-1',
-          type: TimelinePartType.reasoning,
-          order: 0,
-          revision: 0,
-          text: '',
-          status: 'streaming',
-          createdAt: now,
-          updatedAt: now,
-        ),
-        overlay: const TimelinePartOverlay(
-          values: {'reasoning.summary': '正在核对角色设置、状态类型与测试夹具。'},
-          lastRevisions: {'reasoning.summary': 1},
-        ),
+        updatedAt: now,
       );
 
       await tester.pumpWidget(
@@ -561,15 +466,15 @@ void registerMarkdownRenderTests() {
               width: 980,
               height: 520,
               child: TimelineView(
-                sessionId: 'session-1',
+                threadId: 'session-1',
                 turn: _testTurn(
-                  sessionId: 'session-1',
+                  threadId: 'session-1',
                   turnId: 'turn-1',
                   state: const StudioTurnState.inProgress(
                     StudioTurnActivity.thinking,
                   ),
                 ),
-                rows: timelineRowsFromMessages([message], parts: [part]),
+                rows: timelineRowsFromFixtureParts([part]),
               ),
             ),
           ),
@@ -590,34 +495,31 @@ void registerMarkdownRenderTests() {
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
 
-      final message = TimelineMessage(
-        id: 'message-reasoning-stream',
-        sessionId: 'session-1',
-        turnId: 'turn-1',
-        role: 'assistant',
-        createdAt: DateTime.fromMillisecondsSinceEpoch(0),
-      );
+      const threadId = 'session-1';
+      const turnId = 'turn-1';
 
-      TimelinePart reasoning({
+      ThreadItemView reasoning({
         required String id,
         required int order,
         required String text,
         required String status,
       }) {
-        return TimelinePart(
+        final sections = text.split('\n\n');
+        return _threadItemFixture(
           id: id,
-          messageId: message.id,
-          sessionId: message.sessionId,
-          turnId: message.turnId,
-          type: TimelinePartType.reasoning,
-          order: order,
-          text: text,
+          threadId: threadId,
+          turnId: turnId,
+          ordinal: order,
           status: status,
+          kind: ThreadItemKind.reasoning,
+          channel: null,
+          reasoningSummary: [sections.first],
+          reasoningContent: [sections.skip(1).join('\n\n')],
         );
       }
 
       Widget timelineFor({
-        required List<TimelinePart> parts,
+        required List<ThreadItemView> items,
         required StudioTurnState? turnState,
       }) {
         return _timelineApp(
@@ -626,13 +528,13 @@ void registerMarkdownRenderTests() {
               width: 980,
               height: 520,
               child: TimelineView(
-                sessionId: message.sessionId,
-                rows: timelineRowsFromMessages([message], parts: parts),
+                threadId: threadId,
+                rows: timelineRowsFromThreadItems(items),
                 turn: turnState == null
                     ? null
                     : _testTurn(
-                        sessionId: message.sessionId,
-                        turnId: message.turnId,
+                        threadId: threadId,
+                        turnId: turnId,
                         state: turnState,
                       ),
               ),
@@ -655,7 +557,7 @@ void registerMarkdownRenderTests() {
       );
       await tester.pumpWidget(
         timelineFor(
-          parts: [first, latest],
+          items: [first, latest],
           turnState: const StudioTurnState.inProgress(
             StudioTurnActivity.thinking,
           ),
@@ -679,7 +581,7 @@ void registerMarkdownRenderTests() {
       );
       await tester.pumpWidget(
         timelineFor(
-          parts: [first, latest],
+          items: [first, latest],
           turnState: const StudioTurnState.inProgress(
             StudioTurnActivity.thinking,
           ),
@@ -701,7 +603,7 @@ void registerMarkdownRenderTests() {
         status: 'completed',
       );
       await tester.pumpWidget(
-        timelineFor(parts: [first, completed], turnState: null),
+        timelineFor(items: [first, completed], turnState: null),
       );
       await tester.pumpAndSettle();
 
@@ -723,21 +625,17 @@ void registerMarkdownRenderTests() {
   testWidgets('timeline reasoning history summarizes three sections', (
     tester,
   ) async {
-    final message = TimelineMessage(
-      id: 'message-reasoning-summary',
-      sessionId: 'session-1',
-      role: 'assistant',
-      createdAt: DateTime.fromMillisecondsSinceEpoch(0),
-    );
-    final parts = [
+    const threadId = 'session-1';
+    final items = [
       for (var index = 0; index < 4; index++)
-        TimelinePart(
+        _threadItemFixture(
           id: 'reasoning-$index',
-          messageId: message.id,
-          sessionId: message.sessionId,
-          type: TimelinePartType.reasoning,
-          order: index,
-          text: '## Section ${index + 1}',
+          threadId: threadId,
+          turnId: 'turn-reasoning-summary',
+          ordinal: index,
+          kind: ThreadItemKind.reasoning,
+          channel: null,
+          reasoningSummary: ['## Section ${index + 1}'],
         ),
     ];
 
@@ -748,8 +646,8 @@ void registerMarkdownRenderTests() {
             width: 980,
             height: 520,
             child: TimelineView(
-              sessionId: message.sessionId,
-              rows: timelineRowsFromMessages([message], parts: parts),
+              threadId: threadId,
+              rows: timelineRowsFromThreadItems(items),
               turn: null,
             ),
           ),

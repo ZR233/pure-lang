@@ -39,7 +39,7 @@ pub(crate) fn initialize() {
     INITIALIZE.call_once(initialize_once);
 }
 
-/// Flushes asynchronous diagnostics after the Studio storage barriers complete.
+/// Flushes asynchronous diagnostics after Studio runtime shutdown completes.
 pub(crate) fn shutdown() {
     tracing::info!(
         application = "Pure Studio",
@@ -110,7 +110,7 @@ fn initialize_once() {
     tracing::info!(
         application = "Pure Studio",
         app_version = env!("CARGO_PKG_VERSION"),
-        protocol_version = pl_protocol::SESSION_EVENT_SCHEMA_VERSION,
+        protocol_version = pl_protocol::THREAD_SCHEMA_VERSION,
         "Studio diagnostics initialized"
     );
 }
@@ -149,7 +149,7 @@ fn install_panic_hook(crash_dir: PathBuf) {
         persist_panic(&crash_dir, info);
         tracing::error!(
             app_version = env!("CARGO_PKG_VERSION"),
-            protocol_version = pl_protocol::SESSION_EVENT_SCHEMA_VERSION,
+            protocol_version = pl_protocol::THREAD_SCHEMA_VERSION,
             panic = %info,
             "Rust panic"
         );
@@ -176,7 +176,7 @@ fn persist_panic(crash_dir: &Path, info: &std::panic::PanicHookInfo<'_>) {
             file,
             "appVersion={}\nprotocolVersion={}\nthread={:?}\npanic={info}\nbacktrace={}",
             env!("CARGO_PKG_VERSION"),
-            pl_protocol::SESSION_EVENT_SCHEMA_VERSION,
+            pl_protocol::THREAD_SCHEMA_VERSION,
             std::thread::current().name(),
             Backtrace::force_capture()
         )?;

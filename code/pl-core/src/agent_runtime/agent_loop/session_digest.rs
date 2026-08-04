@@ -4,7 +4,7 @@ use pl_protocol::{MessageContent, MessageRole, TOOL_CALLS_METADATA_KEY, ToolResu
 
 use super::super::{
     AgentRuntimeHost, AgentRuntimeResult, AgentSessionDigest, AgentSessionDigestMessage,
-    AgentSessionDigestRole, AgentSessionState,
+    AgentSessionDigestRole, ThreadContextState,
 };
 use super::AgentLoop;
 
@@ -17,7 +17,7 @@ where
     }
 }
 
-fn session_digest(session: &AgentSessionState) -> AgentSessionDigest {
+fn session_digest(session: &ThreadContextState) -> AgentSessionDigest {
     const MAX_MESSAGES: usize = 12;
     const MAX_TEXT_CHARS: usize = 6_000;
 
@@ -77,7 +77,7 @@ fn session_digest(session: &AgentSessionState) -> AgentSessionDigest {
     }
     messages.reverse();
     AgentSessionDigest {
-        through_sequence: session.session_event_sequence,
+        through_sequence: session.thread_revision,
         truncated,
         messages,
         tool_names: tool_names.into_iter().collect(),

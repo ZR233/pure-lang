@@ -3,11 +3,11 @@ use std::sync::Arc;
 
 use crate::{ContentPart, ImageSource, MessageContent, PureError, Result};
 use pl_core::{
-    AgentCollaborationTools, AgentIdentity, AgentKernel, AgentTurnFactory,
-    AgentTurnPreparationContext, CoreAgentProfile, ExecutionInstructionProfile,
-    InstructionAssembler, InstructionAssemblyRequest, PreparedAgentTurn, PreparedSessionRuntime,
-    SubagentContext, ToolVisibilitySet, TurnEngineBuilder, TurnOptions, TurnRequest,
-    load_workspace_instructions, plan_web_search,
+    AgentCollaborationTools, AgentIdentity, AgentTurnFactory, AgentTurnPreparationContext,
+    CoreRuntimeProfile, ExecutionInstructionProfile, InstructionAssembler,
+    InstructionAssemblyRequest, PreparedAgentTurn, PreparedSessionRuntime, SubagentContext,
+    ToolVisibilitySet, TurnEngineBuilder, TurnOptions, TurnRequest, load_workspace_instructions,
+    plan_web_search,
 };
 use pl_model::create_provider_with_catalog;
 
@@ -61,20 +61,20 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         &self,
         context: AgentTurnPreparationContext,
     ) -> Result<PreparedAgentTurn> {
-        let studio_session_id = self
+        let thread_id = self
             .resources
-            .studio_session_id(&context.snapshot.identity.id)
+            .thread_id(&context.snapshot.identity.id)
             .await
-            .ok_or_else(|| turn_error("agent has no Studio session boundary"))?;
-        let session_record = self
+            .ok_or_else(|| turn_error("agent has no Studio Thread boundary"))?;
+        let thread_record = self
             .store
-            .read_session(&studio_session_id)
+            .read_thread(&thread_id)
             .await
             .map_err(anyhow_error)?
-            .ok_or_else(|| turn_error("selected Studio session not found"))?;
+            .ok_or_else(|| turn_error("selected Studio Thread not found"))?;
         let project = self
             .store
-            .read_project(&session_record.project_id)
+            .read_project(&thread_record.project_id)
             .await
             .map_err(anyhow_error)?
             .ok_or_else(|| turn_error("selected Studio project not found"))?;
@@ -89,10 +89,10 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         let workspace_instructions =
             load_workspace_instructions(&workspace_root).map_err(anyhow_error)?;
         let config = self.config_store.load_or_default()?;
-        let mode = StudioMode::from_label(&session_record.mode);
+        let mode = StudioMode::from_label(&thread_record.mode);
         let active_task_run = if mode == StudioMode::Task {
             self.store
-                .find_active_task_run_for_session(&session_record.root_session_id)
+                .find_active_task_run_for_root_thread(&thread_record.root_thread_id)
                 .await
                 .map_err(anyhow_error)?
         } else {
@@ -129,7 +129,7 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         if let Some(effort) = route.effort {
             builder = builder.with_effort(effort);
         }
-        let profile = CoreAgentProfile::local_workspace(workspace_root.clone())
+        let profile = CoreRuntimeProfile::local_workspace(workspace_root.clone())
             .with_workspace_instructions(workspace_instructions.clone());
         let task_name = self
             .resources
@@ -138,18 +138,18 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             .map(|resource| resource.task_name)
             .unwrap_or_else(|| context.snapshot.identity.role.to_string());
         let subagent_context = runtime_subagent_context(&context.snapshot.identity, task_name);
-        let kernel_builder = AgentKernel::builder(builder).with_profile(profile);
-        let mut kernel = match subagent_context {
-            Some(subagent) => kernel_builder.with_subagent_context(subagent).build().await,
-            None => kernel_builder.build().await,
-        };
+        let mut engine = builder.with_runtime_profile(profile).build();
+        if let Some(subagent) = subagent_context {
+            engine = engine.with_subagent_context(subagent);
+        }
+        engine.register_profile_tools().await;
 
-        web_search.install(kernel.core_mut(), &config.web_search)?;
+        web_search.install(&mut engine, &config.web_search)?;
 
         if mode == StudioMode::Task {
             self.coordinator.install_tools(
-                kernel.core_mut(),
-                &session_record.root_session_id,
+                &mut engine,
+                &thread_record.root_thread_id,
                 context.runtime.clone(),
                 &context.snapshot,
             );
@@ -162,12 +162,12 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         let active_mcp_servers = mcp_lease.server_ids().to_vec();
         let mcp_health = self.mcp_runtime.health_snapshot().await?;
         let active_lsp_servers = self.lsp_runtime.active_server_names().await;
-        mcp_lease.install(kernel.core_mut())?;
+        mcp_lease.install(&mut engine)?;
 
         let mut policy = studio_execution_policy(
             &context.snapshot,
             StudioPolicyContext { mode, task_phase },
-            ToolVisibilitySet::from_tool_names(kernel.tool_names()),
+            ToolVisibilitySet::from_tool_names(engine.tool_names()),
         );
         policy.visible_tools = web_search.constrain_visibility(policy.visible_tools);
         let collaboration = AgentCollaborationTools::new(
@@ -182,7 +182,7 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
                 collaboration.tools()
             };
         for tool in collaboration_tools {
-            kernel.core_mut().register_tool(tool);
+            engine.register_tool(tool);
         }
 
         let attachment_ids = context
@@ -197,12 +197,12 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             .collect::<Vec<_>>();
         let attachments = self
             .store
-            .load_attachments(&studio_session_id, &attachment_ids)
+            .load_attachments(&thread_id, &attachment_ids)
             .await
             .map_err(anyhow_error)?;
         let materialized = self
             .store
-            .materialize_session_attachments(&studio_session_id)
+            .materialize_thread_attachments(&thread_id)
             .await
             .map_err(anyhow_error)?;
         let user_content = prompt_content(&input_message, &attachments);
@@ -232,10 +232,10 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             .with_instruction_snapshot(instruction_snapshot);
         let emitter = interaction_emitter(
             context.runtime,
-            studio_session_id.clone(),
+            thread_id.clone(),
             context.snapshot.identity.id.to_string(),
         );
-        let interaction_callback = self.interactions.callback(studio_session_id, emitter);
+        let interaction_callback = self.interactions.callback(thread_id, emitter);
         let options = TurnOptions::default()
             .with_permission_mode(config.runtime.permission_mode)
             .with_interaction_callback(interaction_callback);
@@ -246,7 +246,7 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         if let Some(context_window) = route.model.resolved_context_window() {
             session_runtime = session_runtime.with_context_window(context_window);
         }
-        let prepared = PreparedAgentTurn::new(kernel, request, options, policy)
+        let prepared = PreparedAgentTurn::new(engine, request, options, policy)
             .with_session_runtime(session_runtime);
         if context
             .input
@@ -310,26 +310,23 @@ fn prompt_content(prompt: &str, attachments: &[crate::studio::AttachmentRecord])
 
 fn interaction_emitter(
     runtime: pl_core::AgentRuntimeHandle,
-    session_id: String,
-    owner_agent_id: String,
+    thread_id: String,
+    agent_path: String,
 ) -> crate::studio::InteractionEmitter {
     Arc::new(move |interaction| {
         let runtime = runtime.clone();
-        let session_id = session_id.clone();
-        let owner_agent_id = owner_agent_id.clone();
+        let thread_id = thread_id.clone();
+        let agent_path = agent_path.clone();
         Box::pin(async move {
-            let turn_id = interaction.scope.turn_id.clone();
             let emitted_at = interaction.updated_at;
             runtime
-                .record_session_facts(
-                    pl_core::AgentId::new(owner_agent_id.clone())?,
-                    pl_core::SessionId::new(session_id)?,
-                    vec![pl_core::SessionEventFact::durable(
-                        Some(owner_agent_id),
-                        Some(turn_id),
+                .record_thread_facts(
+                    pl_core::AgentId::new(agent_path.clone())?,
+                    pl_core::ThreadId::new(thread_id)?,
+                    vec![pl_core::ThreadNotificationFact::durable(
                         emitted_at,
-                        crate::SessionEventKind::InteractionChanged {
-                            event: Box::new(crate::InteractionChangedEvent { interaction }),
+                        pl_protocol::ThreadNotification::InteractionChanged {
+                            interaction: Box::new(interaction),
                         },
                     )],
                 )
@@ -382,7 +379,7 @@ mod tests {
     fn stopped_run() -> TaskRunRecord {
         TaskRunRecord {
             id: "task-run".to_string(),
-            session_id: "session".to_string(),
+            root_thread_id: "session".to_string(),
             phase: TaskRunPhase::Implementing,
             plan: "plan".to_string(),
             workspace_root: "C:/workspace".to_string(),

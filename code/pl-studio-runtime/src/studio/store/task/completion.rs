@@ -8,8 +8,8 @@ use crate::studio::entity as entities;
 use crate::studio::ids::unix_seconds;
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    AgentOutcomeStatus, MergeStatus, ReviewScope, ReviewVerdict, TaskRunPhase, TaskRunRecord,
-    TaskStopOrigin, TaskStopReason, TaskWorktreeDisposition, WorkUnitStatus,
+    MergeStatus, ReviewScope, ReviewVerdict, TaskRunPhase, TaskRunRecord, TaskStopOrigin,
+    TaskStopReason, TaskWorktreeDisposition, ThreadExecutionStatus, WorkUnitStatus,
 };
 
 impl StudioStore {
@@ -137,13 +137,13 @@ impl StudioStore {
 
     pub(crate) async fn complete_reviewed_task(
         &self,
-        session_id: &str,
+        thread_id: &str,
         expected_head: &str,
         verification_summary: &str,
     ) -> Result<TaskRunRecord> {
         let tx = self.db.begin().await?;
         let result = async {
-            let run = active_run_for_session(&tx, session_id).await?;
+            let run = active_run_for_session(&tx, thread_id).await?;
             if run.phase != TaskRunPhase::Reviewing.as_str()
                 || run.expected_head != expected_head
                 || run.design_commit.as_deref() != Some(expected_head)
@@ -189,7 +189,6 @@ impl StudioStore {
                 bail!("task stop generation changed before settling agents");
             }
             let now = unix_seconds();
-            let mut cancelled_work_units = std::collections::HashSet::new();
             for unit in entities::work_unit::Entity::find()
                 .filter(entities::work_unit::Column::TaskRunId.eq(task_run_id.to_string()))
                 .all(&tx)
@@ -209,11 +208,12 @@ impl StudioStore {
                 );
                 let authorize_cleanup = status != WorkUnitStatus::Merged;
                 if cancel || authorize_cleanup {
-                    let work_unit_id = unit.id.clone();
                     let mut active: entities::work_unit::ActiveModel = unit.into();
                     if cancel {
-                        cancelled_work_units.insert(work_unit_id);
                         active.status = Set(WorkUnitStatus::Cancelled.as_str().to_string());
+                        active.execution_status =
+                            Set(ThreadExecutionStatus::Cancelled.as_str().to_string());
+                        active.execution_error = Set(Some(reason.to_string()));
                     }
                     if authorize_cleanup {
                         active.worktree_disposition =
@@ -225,30 +225,6 @@ impl StudioStore {
                     active.update(&tx).await?;
                 }
             }
-            for outcome in entities::agent_outcome::Entity::find()
-                .filter(entities::agent_outcome::Column::TaskRunId.eq(task_run_id.to_string()))
-                .all(&tx)
-                .await?
-            {
-                let status = AgentOutcomeStatus::from_str(&outcome.status)
-                    .with_context(|| format!("invalid agent outcome status: {}", outcome.status))?;
-                let executor_cancelled = outcome
-                    .work_unit_id
-                    .as_ref()
-                    .is_some_and(|work_unit_id| cancelled_work_units.contains(work_unit_id));
-                let mut active: entities::agent_outcome::ActiveModel = outcome.into();
-                if executor_cancelled
-                    || matches!(
-                        status,
-                        AgentOutcomeStatus::Queued | AgentOutcomeStatus::Running
-                    )
-                {
-                    active.status = Set(AgentOutcomeStatus::Cancelled.as_str().to_string());
-                    active.error = Set(Some(reason.to_string()));
-                }
-                active.updated_at = Set(now);
-                active.update(&tx).await?;
-            }
             for round in entities::review_round::Entity::find()
                 .filter(entities::review_round::Column::TaskRunId.eq(task_run_id.to_string()))
                 .filter(entities::review_round::Column::Status.eq(ReviewVerdict::Pending.as_str()))
@@ -257,6 +233,8 @@ impl StudioStore {
             {
                 let mut active: entities::review_round::ActiveModel = round.into();
                 active.status = Set(ReviewVerdict::Failed.as_str().to_string());
+                active.reviewer_status = Set(ThreadExecutionStatus::Cancelled.as_str().to_string());
+                active.reviewer_error = Set(Some(reason.to_string()));
                 active.summary = Set(Some(reason.to_string()));
                 active.updated_at = Set(now);
                 active.update(&tx).await?;
@@ -356,14 +334,10 @@ async fn validate_completion_children(
     }) {
         bail!("all executor deliveries must be terminal and consumed before completion");
     }
-    let outcomes = entities::agent_outcome::Entity::find()
-        .filter(entities::agent_outcome::Column::TaskRunId.eq(run.id.clone()))
-        .all(tx)
-        .await?;
-    if outcomes.iter().any(|outcome| {
+    if units.iter().any(|unit| {
         matches!(
-            AgentOutcomeStatus::from_str(&outcome.status),
-            Some(AgentOutcomeStatus::Queued | AgentOutcomeStatus::Running)
+            ThreadExecutionStatus::from_str(&unit.execution_status),
+            Some(ThreadExecutionStatus::Queued | ThreadExecutionStatus::Running)
         )
     }) {
         bail!("all task agents must be terminal before completion");
@@ -385,10 +359,10 @@ async fn validate_completion_children(
 
 async fn active_run_for_session(
     tx: &sea_orm::DatabaseTransaction,
-    session_id: &str,
+    thread_id: &str,
 ) -> Result<entities::task_run::Model> {
     let runs = entities::task_run::Entity::find()
-        .filter(entities::task_run::Column::SessionId.eq(session_id.to_string()))
+        .filter(entities::task_run::Column::RootThreadId.eq(thread_id.to_string()))
         .filter(entities::task_run::Column::Phase.eq(TaskRunPhase::Reviewing.as_str()))
         .all(tx)
         .await?;

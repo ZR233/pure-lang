@@ -16,16 +16,14 @@ use crate::tool::{
 impl TaskCoordinator {
     pub(crate) async fn resolve_active_conflict(
         &self,
-        session_id: &str,
+        thread_id: &str,
         merge_id: &str,
         path: &str,
         choice: ConflictResolutionChoice,
     ) -> Result<ConflictResolveOutput> {
         let guard = self.lock_branch_mutation().await;
         self.ensure_branch_mutation_guard(&guard)?;
-        let (scope, unmerged) = self
-            .load_active_conflict_scope(session_id, merge_id)
-            .await?;
+        let (scope, unmerged) = self.load_active_conflict_scope(thread_id, merge_id).await?;
         let entry = conflict_entry(&scope, path)?.clone();
         if !unmerged.contains_key(path) {
             bail!("conflict path is already resolved");

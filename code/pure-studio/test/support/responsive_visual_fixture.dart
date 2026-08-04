@@ -197,121 +197,101 @@ StudioState responsiveVisualState() {
     name: 'pure-lang-responsive-workspace',
     path: r'C:\workspace\pure-lang\responsive-visual-regression',
   );
-  final session = StudioSession(
+  final session = StudioThread(
     id: 'session-1',
     projectId: project.id,
     title: responsiveVisualSessionTitle,
     mode: StudioMode.simple,
-    ownerAgentId: 'agent-planner',
-    ownerRole: 'planner',
-    agentStatus: 'idle',
+    agentPath: 'agent-planner',
+    role: 'planner',
+    status: 'idle',
     updatedAt: timestamp,
   );
   final agentSessions = [
-    StudioSession(
+    StudioThread(
       id: 'session-reviewer',
       projectId: project.id,
       title: 'Responsive reviewer',
       mode: StudioMode.simple,
       createdAt: timestamp.add(const Duration(seconds: 1)),
       updatedAt: timestamp.add(const Duration(seconds: 1)),
-      parentSessionId: session.id,
-      rootSessionId: session.id,
-      sessionKind: StudioSessionKind.agent,
-      ownerAgentId: 'agent-reviewer',
-      ownerRole: 'reviewer',
-      agentStatus: 'running',
+      parentThreadId: session.id,
+      rootThreadId: session.id,
+      agentPath: 'agent-reviewer',
+      role: 'reviewer',
+      status: 'running',
     ),
-    StudioSession(
+    StudioThread(
       id: 'session-worker',
       projectId: project.id,
       title: 'Capture worker',
       mode: StudioMode.simple,
       createdAt: timestamp.add(const Duration(seconds: 2)),
       updatedAt: timestamp.add(const Duration(seconds: 2)),
-      parentSessionId: session.id,
-      rootSessionId: session.id,
-      sessionKind: StudioSessionKind.agent,
-      ownerAgentId: 'agent-worker',
-      ownerRole: 'worker',
-      agentStatus: 'completed',
+      parentThreadId: session.id,
+      rootThreadId: session.id,
+      agentPath: 'agent-worker',
+      role: 'worker',
+      status: 'completed',
     ),
   ];
-  final messages = [
-    TimelineMessage(
-      id: 'message-user',
-      sessionId: session.id,
-      role: 'user',
-      createdAt: timestamp,
-      sequence: 0,
-    ),
-    TimelineMessage(
-      id: 'message-assistant',
-      sessionId: session.id,
-      role: 'assistant',
-      createdAt: timestamp,
-      sequence: 1,
-    ),
-  ];
-  final parts = [
-    TimelinePartSnapshot(
-      id: 'part-user',
-      messageId: messages.first.id,
-      sessionId: session.id,
+  final items = [
+    ThreadItemView(
+      id: 'item-user',
+      threadId: session.id,
       turnId: 'turn-1',
-      type: TimelinePartType.text,
-      order: 0,
+      kind: ThreadItemKind.userMessage,
+      ordinal: 0,
       revision: 0,
-      sequence: 0,
       text:
           'Check the chat, activity summary, and provider settings at every '
           'target viewport.',
       status: 'completed',
       createdAt: timestamp,
       updatedAt: timestamp,
-      textChannel: TimelineTextChannel.user,
     ),
-    TimelinePartSnapshot(
-      id: 'part-reasoning-1',
-      messageId: messages.last.id,
-      sessionId: session.id,
+    ThreadItemView(
+      id: 'item-reasoning-1',
+      threadId: session.id,
       turnId: 'turn-1',
-      type: TimelinePartType.reasoning,
-      order: 0,
+      kind: ThreadItemKind.reasoning,
+      ordinal: 1,
       revision: 0,
-      sequence: 1,
       text:
           '## Inspecting the timeline\n\n'
           'Checking how compact activity rows preserve conversation order.',
+      reasoningSummary: const ['Inspecting the timeline'],
+      reasoningContent: const [
+        'Checking how compact activity rows preserve conversation order.',
+      ],
       status: 'completed',
       createdAt: timestamp,
       updatedAt: timestamp,
     ),
-    TimelinePartSnapshot(
-      id: 'part-reasoning-2',
-      messageId: messages.last.id,
-      sessionId: session.id,
+    ThreadItemView(
+      id: 'item-reasoning-2',
+      threadId: session.id,
       turnId: 'turn-1',
-      type: TimelinePartType.reasoning,
-      order: 1,
+      kind: ThreadItemKind.reasoning,
+      ordinal: 2,
       revision: 0,
-      sequence: 2,
       text:
           '## Verifying responsive behavior\n\n'
           'Comparing wide and narrow timeline layouts.',
+      reasoningSummary: const ['Verifying responsive behavior'],
+      reasoningContent: const ['Comparing wide and narrow timeline layouts.'],
       status: 'completed',
       createdAt: timestamp,
       updatedAt: timestamp,
     ),
-    TimelinePartSnapshot(
-      id: 'part-assistant',
-      messageId: messages.last.id,
-      sessionId: session.id,
+    ThreadItemView(
+      id: 'item-assistant',
+      threadId: session.id,
       turnId: 'turn-1',
-      type: TimelinePartType.text,
-      order: 2,
+      kind: ThreadItemKind.agentMessage,
+      channel: AgentMessageChannel.finalAnswer,
+      ordinal: 3,
       revision: 0,
-      sequence: 3,
       text:
           '### Responsive verification\n\n'
           '- Conversation content remains readable.\n'
@@ -320,38 +300,34 @@ StudioState responsiveVisualState() {
       status: 'completed',
       createdAt: timestamp,
       updatedAt: timestamp,
-      textChannel: TimelineTextChannel.finalAnswer,
     ),
   ];
   return StudioState(
     projects: const [project],
-    sessions: [session, ...agentSessions],
-    messagesBySession: {session.id: messages},
-    partSnapshotsBySession: {
-      session.id: {for (final part in parts) part.id: part},
+    threads: [session, ...agentSessions],
+    workspacesByThread: {
+      session.id: ThreadWorkspace(
+        thread: session,
+        revision: 1,
+        items: items,
+        interactions: const [],
+        runtime: const ThreadRuntimeView(
+          model: 'deepseek-reasoner',
+          contextTokens: 42000,
+          contextWindow: 100000,
+          totalTokens: 128000,
+          costLabel: 'CNY 12.34',
+          activeSkills: ['flutter-ui'],
+          activeMcpServers: ['dart'],
+          activeLspServers: ['rust-analyzer'],
+          agentCount: 2,
+        ),
+      ),
     },
-    agentsBySession: {
-      session.id: {
-        'agent-reviewer': StudioAgentView(
-          id: 'agent-reviewer',
-          sessionId: session.id,
-          path: 'root/reviewer',
-          role: 'reviewer',
-          task: 'Audit responsive layout and visual geometry',
-          status: 'running',
-          summary: 'Checking the activity popover against its trigger.',
-          updatedAt: timestamp,
-        ),
-        'agent-worker': StudioAgentView(
-          id: 'agent-worker',
-          sessionId: session.id,
-          path: 'root/worker',
-          role: 'worker',
-          task: 'Capture responsive screenshots',
-          status: 'completed',
-          updatedAt: timestamp,
-        ),
-      },
+    workspaceUiByThread: {
+      session.id: const WorkspaceUiState(
+        syncState: AgentWorkspaceSyncState.ready,
+      ),
     },
     providers: responsiveVisualProviders,
     defaultProviderId: 'deepseek',
@@ -372,60 +348,38 @@ StudioState responsiveVisualState() {
     ],
     mcpServers: const [],
     selectedProjectId: project.id,
-    selectedSessionId: session.id,
+    selectedThreadId: session.id,
     permissionMode: PermissionMode.requestApproval,
-    runtimesBySession: {
-      session.id: const SessionRuntimeView(
-        model: 'deepseek-reasoner',
-        contextTokens: 42000,
-        contextWindow: 100000,
-        totalTokens: 128000,
-        costLabel: 'CNY 12.34',
-        activeSkills: ['flutter-ui'],
-        activeMcpServers: ['dart'],
-        activeLspServers: ['rust-analyzer'],
-        agentCount: 2,
-      ),
-    },
-    pendingInteractions: const [],
   );
 }
 
 StudioState responsiveVisualReasoningState() {
   final state = responsiveVisualState();
-  final sessionId = state.selectedSessionId!;
-  final snapshots = {...state.partSnapshotsBySession[sessionId]!}
-    ..remove('part-assistant');
-  final current = snapshots['part-reasoning-2']!;
-  snapshots[current.id] = TimelinePartSnapshot(
-    id: current.id,
-    messageId: current.messageId,
-    sessionId: current.sessionId,
-    turnId: current.turnId,
-    type: current.type,
-    order: current.order,
+  final threadId = state.selectedThreadId!;
+  final workspace = state.workspacesByThread[threadId]!;
+  final items = [...workspace.items]
+    ..removeWhere((item) => item.id == 'part-assistant');
+  final index = items.indexWhere((item) => item.id == 'part-reasoning-2');
+  final current = items[index];
+  items[index] = current.copyWith(
     revision: current.revision + 1,
-    sequence: current.sequence,
-    text: '',
     reasoningSummary: const ['## Updating the active reasoning summary'],
     reasoningContent: const [
       'The latest section replaces the same compact activity line.',
     ],
     status: 'streaming',
-    createdAt: current.createdAt,
-    updatedAt: current.updatedAt,
   );
   return state.copyWith(
-    partSnapshotsBySession: {
-      ...state.partSnapshotsBySession,
-      sessionId: snapshots,
-    },
-    turnsBySession: {
-      sessionId: StudioTurnView(
-        turnId: current.turnId,
-        sessionId: sessionId,
-        state: const StudioTurnState.inProgress(StudioTurnActivity.thinking),
-        updatedAt: current.updatedAt,
+    workspacesByThread: {
+      ...state.workspacesByThread,
+      threadId: workspace.copyWith(
+        items: items,
+        activeTurn: StudioTurnView(
+          turnId: current.turnId,
+          threadId: threadId,
+          state: const StudioTurnState.inProgress(StudioTurnActivity.thinking),
+          updatedAt: current.updatedAt,
+        ),
       ),
     },
   );
@@ -433,42 +387,44 @@ StudioState responsiveVisualReasoningState() {
 
 StudioState responsiveVisualToolState() {
   final state = responsiveVisualState();
-  final sessionId = state.selectedSessionId!;
-  final snapshots = {...state.partSnapshotsBySession[sessionId]!}
-    ..remove('part-assistant');
-  final reasoning = snapshots['part-reasoning-2']!;
-  snapshots['part-tool-active'] = TimelinePartSnapshot(
-    id: 'part-tool-active',
-    messageId: reasoning.messageId,
-    sessionId: sessionId,
-    turnId: reasoning.turnId,
-    type: TimelinePartType.tool,
-    order: 2,
-    revision: 0,
-    sequence: 3,
-    text: '',
-    status: 'running',
-    createdAt: reasoning.createdAt,
-    updatedAt: reasoning.updatedAt,
-    tool: const TimelineToolPart(
-      toolCallId: 'tool-call-active',
-      name: 'exec',
-      arguments:
-          '{"command":"flutter test test/widget_test.dart",'
-          '"workingDirectory":"code/pure-studio"}',
+  final threadId = state.selectedThreadId!;
+  final workspace = state.workspacesByThread[threadId]!;
+  final items = [...workspace.items]
+    ..removeWhere((item) => item.id == 'part-assistant');
+  final reasoning = items.firstWhere((item) => item.id == 'part-reasoning-2');
+  items.add(
+    ThreadItemView(
+      id: 'part-tool-active',
+      threadId: threadId,
+      turnId: reasoning.turnId,
+      ordinal: 3,
+      revision: 0,
+      status: 'running',
+      createdAt: reasoning.createdAt,
+      updatedAt: reasoning.updatedAt,
+      kind: ThreadItemKind.toolCall,
+      tool: const TimelineToolPart(
+        toolCallId: 'tool-call-active',
+        name: 'exec',
+        arguments:
+            '{"command":"flutter test test/widget_test.dart",'
+            '"workingDirectory":"code/pure-studio"}',
+      ),
     ),
   );
   return state.copyWith(
-    partSnapshotsBySession: {
-      ...state.partSnapshotsBySession,
-      sessionId: snapshots,
-    },
-    turnsBySession: {
-      sessionId: StudioTurnView(
-        turnId: reasoning.turnId,
-        sessionId: sessionId,
-        state: const StudioTurnState.inProgress(StudioTurnActivity.runningTool),
-        updatedAt: reasoning.updatedAt,
+    workspacesByThread: {
+      ...state.workspacesByThread,
+      threadId: workspace.copyWith(
+        items: items,
+        activeTurn: StudioTurnView(
+          turnId: reasoning.turnId,
+          threadId: threadId,
+          state: const StudioTurnState.inProgress(
+            StudioTurnActivity.runningTool,
+          ),
+          updatedAt: reasoning.updatedAt,
+        ),
       ),
     },
   );

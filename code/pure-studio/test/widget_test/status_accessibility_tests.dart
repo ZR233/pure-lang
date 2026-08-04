@@ -191,7 +191,7 @@ Future<Finder> _pumpContextWithNextFocus(WidgetTester tester) async {
 
 const _contextFocusTargetKey = ValueKey('context-focus-target');
 
-const _contextRuntime = SessionRuntimeView(
+const _contextRuntime = ThreadRuntimeView(
   model: 'planner/local',
   contextTokens: 42,
   contextWindow: 100,

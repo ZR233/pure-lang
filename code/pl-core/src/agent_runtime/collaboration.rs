@@ -7,8 +7,8 @@ use serde_json::{Value, json};
 use super::state::unix_timestamp;
 use super::{
     AgentAccessPolicy, AgentActivityState, AgentId, AgentLifecycleState, AgentProgressStage,
-    AgentRuntimeHandle, AgentSessionState, AgentSnapshot, AgentSpawnRequest, AgentTargetSelector,
-    SessionId,
+    AgentRuntimeHandle, AgentSnapshot, AgentSpawnRequest, AgentTargetSelector, ThreadContextState,
+    ThreadId,
 };
 use crate::tool::ToolBudgetTiming;
 use crate::{AgentRoleId, Tool, ToolContext, ToolEffect, ToolInput, ToolOutput};
@@ -47,7 +47,7 @@ impl AgentCollaborationTools {
         }
     }
 
-    /// 返回可直接注册到 `AgentKernelBuilder` 的协作工具。
+    /// 返回可直接注册到 `TurnEngine` 的协作工具。
     pub fn tools(&self) -> Vec<Arc<dyn Tool>> {
         self.tools_matching(|_| true)
     }
@@ -237,15 +237,14 @@ impl CollaborationTool {
                 format!("role `{role}` is not allowed for this turn"),
             ));
         }
-        let session_id = SessionId::generate();
-        let session = AgentSessionState {
-            id: session_id.clone(),
+        let thread_id = ThreadId::generate();
+        let session = ThreadContextState {
             metadata: serde_json::Value::Null,
             session: fork_session(&context.parent_session, args.fork_turns)?,
             usage: pl_model::TokenUsage::default(),
             last_context_tokens: None,
             trace_sequence: 0,
-            session_event_sequence: 0,
+            thread_revision: 0,
         };
         let mut metadata = match args.metadata {
             Value::Object(metadata) => metadata,
@@ -268,6 +267,7 @@ impl CollaborationTool {
         let result = self
             .runtime
             .spawn(AgentSpawnRequest {
+                thread_id: thread_id.clone(),
                 parent_id: self.caller.clone(),
                 role,
                 session,
@@ -278,7 +278,7 @@ impl CollaborationTool {
             .map_err(|error| tool_error(TOOL_SPAWN_AGENT, error.to_string()))?;
         json_output(json!({
             "agentId": result.snapshot.identity.id,
-            "sessionId": session_id,
+            "threadId": thread_id,
             "turnId": result.initial_turn_id,
         }))
     }

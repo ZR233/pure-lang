@@ -45,7 +45,7 @@ impl InteractionStatus {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct InteractionScope {
-    pub session_id: String,
+    pub thread_id: String,
     pub turn_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub item_id: Option<String>,

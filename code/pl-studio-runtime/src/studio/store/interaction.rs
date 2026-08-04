@@ -34,7 +34,7 @@ impl StudioStore {
             .await?
         {
             let mut active: interaction::ActiveModel = existing.into();
-            active.session_id = Set(interaction.scope.session_id.clone());
+            active.thread_id = Set(interaction.scope.thread_id.clone());
             active.turn_id = Set(interaction.scope.turn_id.clone());
             active.item_id = Set(interaction.scope.item_id.clone());
             active.tool_id = Set(interaction.scope.tool_id.clone());
@@ -49,7 +49,7 @@ impl StudioStore {
         } else {
             interaction::ActiveModel {
                 id: Set(interaction.interaction_id.clone()),
-                session_id: Set(interaction.scope.session_id.clone()),
+                thread_id: Set(interaction.scope.thread_id.clone()),
                 turn_id: Set(interaction.scope.turn_id.clone()),
                 item_id: Set(interaction.scope.item_id.clone()),
                 tool_id: Set(interaction.scope.tool_id.clone()),
@@ -82,11 +82,11 @@ impl StudioStore {
 
     pub async fn list_pending_interactions(
         &self,
-        session_id: &str,
+        thread_id: &str,
     ) -> Result<Vec<InteractionRequest>> {
         use entities::interaction;
         interaction::Entity::find()
-            .filter(interaction::Column::SessionId.eq(session_id.to_string()))
+            .filter(interaction::Column::ThreadId.eq(thread_id.to_string()))
             .filter(interaction::Column::Status.eq("pending"))
             .order_by_desc(interaction::Column::UpdatedAt)
             .order_by_desc(interaction::Column::Id)
@@ -97,68 +97,68 @@ impl StudioStore {
             .collect()
     }
 
-    pub async fn list_sessions_with_transient_pending_interactions(&self) -> Result<Vec<String>> {
+    pub async fn list_threads_with_transient_pending_interactions(&self) -> Result<Vec<String>> {
         use entities::interaction;
         let rows = interaction::Entity::find()
             .filter(interaction::Column::Status.eq(InteractionStatus::Pending.as_str()))
             .filter(interaction::Column::Kind.is_in([
                 InteractionKind::UserInput.as_str(),
                 InteractionKind::ToolApproval.as_str(),
+                InteractionKind::PlanConfirmation.as_str(),
             ]))
             .all(&self.db)
             .await?;
-        let mut session_ids = rows
+        let mut thread_ids = rows
             .into_iter()
-            .map(|row| row.session_id)
+            .map(|row| row.thread_id)
             .collect::<Vec<_>>();
-        session_ids.sort();
-        session_ids.dedup();
-        Ok(session_ids)
+        thread_ids.sort();
+        thread_ids.dedup();
+        Ok(thread_ids)
     }
 
     pub(in crate::studio) async fn list_restart_recoverable_user_inputs(
         &self,
     ) -> Result<Vec<InteractionRequest>> {
-        use entities::{agent_turn, interaction, session};
-        let active_sessions = session::Entity::find()
-            .filter(session::Column::Archived.eq(0))
-            .filter(session::Column::Visibility.eq("active"))
+        use entities::{interaction, thread, turn};
+        let active_threads = thread::Entity::find()
+            .filter(thread::Column::Archived.eq(0))
             .all(&self.db)
             .await?
             .into_iter()
-            .map(|session| session.id)
+            .map(|thread| thread.id)
             .collect::<BTreeSet<_>>();
-        let pending_sessions = interaction::Entity::find()
+        let pending_threads = interaction::Entity::find()
             .filter(interaction::Column::Kind.eq(InteractionKind::UserInput.as_str()))
             .filter(interaction::Column::Status.eq(InteractionStatus::Pending.as_str()))
             .all(&self.db)
             .await?
             .into_iter()
-            .map(|interaction| interaction.session_id)
+            .map(|interaction| interaction.thread_id)
             .collect::<BTreeSet<_>>();
-        let restarted_turns = agent_turn::Entity::find()
-            .filter(agent_turn::Column::Status.eq("cancelled"))
-            .filter(agent_turn::Column::Reason.eq("runtime_restarted"))
+        let restarted_turns = turn::Entity::find()
+            .filter(turn::Column::Status.eq("interrupted"))
+            .filter(turn::Column::Reason.eq("runtime_restarted"))
             .all(&self.db)
             .await?
             .into_iter()
-            .map(|turn| (turn.session_id, turn.turn_id))
+            .map(|turn| (turn.thread_id, turn.id))
             .collect::<BTreeSet<_>>();
         let rows = interaction::Entity::find()
             .filter(interaction::Column::Kind.eq(InteractionKind::UserInput.as_str()))
             .filter(interaction::Column::Status.eq(InteractionStatus::Cancelled.as_str()))
-            .order_by_asc(interaction::Column::SessionId)
+            .order_by_asc(interaction::Column::ThreadId)
             .order_by_desc(interaction::Column::UpdatedAt)
             .order_by_desc(interaction::Column::Id)
             .all(&self.db)
             .await?;
-        let mut seen_sessions = BTreeSet::new();
+        let mut seen_threads = BTreeSet::new();
         let mut recoverable = Vec::new();
         for row in rows {
-            if !active_sessions.contains(&row.session_id)
-                || pending_sessions.contains(&row.session_id)
-                || !restarted_turns.contains(&(row.session_id.clone(), row.turn_id.clone()))
-                || !seen_sessions.insert(row.session_id.clone())
+            if !active_threads.contains(&row.thread_id)
+                || pending_threads.contains(&row.thread_id)
+                || !restarted_turns.contains(&(row.thread_id.clone(), row.turn_id.clone()))
+                || !seen_threads.insert(row.thread_id.clone())
             {
                 continue;
             }
@@ -175,19 +175,17 @@ impl StudioStore {
         &self,
         interaction: &InteractionRequest,
     ) -> Result<()> {
-        use entities::agent_turn;
+        use entities::turn;
         let tx = self.db.begin().await?;
-        let rows = agent_turn::Entity::find()
-            .filter(agent_turn::Column::SessionId.eq(interaction.scope.session_id.clone()))
-            .filter(agent_turn::Column::TurnId.eq(interaction.scope.turn_id.clone()))
-            .order_by_asc(agent_turn::Column::AgentId)
-            .all(&tx)
+        let row = turn::Entity::find_by_id(interaction.scope.turn_id.clone())
+            .filter(turn::Column::ThreadId.eq(interaction.scope.thread_id.clone()))
+            .one(&tx)
             .await?;
         let receipt = serde_json::to_value(RestartUserInputRecoveryReceipt {
             interaction_id: interaction.interaction_id.clone(),
             recovered_at: unix_seconds(),
         })?;
-        for row in rows {
+        if let Some(row) = row {
             let mut metadata = row
                 .metadata_json
                 .as_deref()
@@ -210,14 +208,12 @@ impl StudioStore {
         &self,
         interaction: &InteractionRequest,
     ) -> Result<bool> {
-        use entities::agent_turn;
-        let rows = agent_turn::Entity::find()
-            .filter(agent_turn::Column::SessionId.eq(interaction.scope.session_id.clone()))
-            .filter(agent_turn::Column::TurnId.eq(interaction.scope.turn_id.clone()))
-            .order_by_asc(agent_turn::Column::AgentId)
-            .all(&self.db)
+        use entities::turn;
+        let row = turn::Entity::find_by_id(interaction.scope.turn_id.clone())
+            .filter(turn::Column::ThreadId.eq(interaction.scope.thread_id.clone()))
+            .one(&self.db)
             .await?;
-        for row in rows {
+        if let Some(row) = row {
             let receipt = row
                 .metadata_json
                 .as_deref()
@@ -251,7 +247,7 @@ mod tests {
         let store = StudioStore::open_memory().await.unwrap();
         let project = store.upsert_project(path).await.unwrap();
         let session = store
-            .create_session(&project.id, "Restart interaction", StudioMode::Task)
+            .create_thread(&project.id, "Restart interaction", StudioMode::Task)
             .await
             .unwrap();
         (store, session.id)
@@ -268,7 +264,7 @@ mod tests {
             kind: InteractionKind::UserInput,
             status: InteractionStatus::Cancelled,
             scope: InteractionScope {
-                session_id: session_id.to_string(),
+                thread_id: session_id.to_string(),
                 turn_id: turn_id.to_string(),
                 item_id: Some(interaction_id.to_string()),
                 tool_id: Some(interaction_id.to_string()),
@@ -288,7 +284,6 @@ mod tests {
 
     async fn insert_cancelled_turn(
         store: &StudioStore,
-        agent_id: &str,
         session_id: &str,
         turn_id: &str,
         metadata: Option<serde_json::Value>,
@@ -297,12 +292,13 @@ mod tests {
             .database()
             .execute_raw(Statement::from_sql_and_values(
                 DatabaseBackend::Sqlite,
-                "INSERT INTO agent_turns (
-                     agent_id, turn_id, session_id, status, reason, usage_json,
-                     metadata_json, started_at, finished_at
-                 ) VALUES (?, ?, ?, 'cancelled', 'runtime_restarted', '{}', ?, 1, 2)",
+                "INSERT INTO turns (
+                     id, thread_id, ordinal, revision, status, phase, reason,
+                     model_json, usage_json, failure_json, metadata_json,
+                     started_at, updated_at, completed_at
+                 ) VALUES (?, ?, 1, 0, 'interrupted', NULL, 'runtime_restarted',
+                           NULL, '{}', NULL, ?, 1, 2, 2)",
                 [
-                    agent_id.to_string().into(),
                     turn_id.to_string().into(),
                     session_id.to_string().into(),
                     metadata.map(|value| value.to_string()).into(),
@@ -313,25 +309,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn restart_recovery_receipt_on_any_owner_prevents_recovery() {
-        let (store, session_id) = store_with_session("C:/work/restart-owner").await;
+    async fn restart_recovery_receipt_on_thread_prevents_duplicate_recovery() {
+        let (store, session_id) = store_with_session("C:/work/restart-receipt").await;
         let interaction = cancelled_user_input("ask-receipted", &session_id, "turn-receipted", 1);
         store.upsert_interaction(&interaction).await.unwrap();
         insert_cancelled_turn(
             &store,
-            "agent-a",
-            &session_id,
-            "turn-receipted",
-            Some(serde_json::json!({"owner": "a"})),
-        )
-        .await;
-        insert_cancelled_turn(
-            &store,
-            "agent-b",
             &session_id,
             "turn-receipted",
             Some(serde_json::json!({
-                "owner": "b",
                 "recoveredInteraction": {
                     "interactionId": interaction.interaction_id,
                     "recoveredAt": 10

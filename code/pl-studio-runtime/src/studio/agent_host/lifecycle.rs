@@ -9,7 +9,7 @@ use crate::studio::task_coordinator::TaskCoordinator;
 use crate::studio::task_coordinator::{
     ExecutorCloseDisposition, StudioSpawnIntent, StudioTaskSpawnPreparation, StudioTaskSpawnRequest,
 };
-use crate::studio::{AgentSessionSpec, StudioStore};
+use crate::studio::{ChildThreadSpec, StudioStore};
 
 use super::resources::{StudioAgentResource, StudioAgentResources};
 
@@ -57,31 +57,31 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
         intent
             .validate_role(role)
             .map_err(|error| lifecycle_error(error.to_string()))?;
-        let parent_session_id = self
+        let parent_thread_id = self
             .resources
-            .studio_session_id(&request.parent.identity.id)
+            .thread_id(&request.parent.identity.id)
             .await
-            .or_else(|| intent.studio_session_id.clone())
-            .ok_or_else(|| lifecycle_error("spawn has no Studio session boundary"))?;
-        let parent_session = self
+            .or_else(|| intent.studio_thread_id.clone())
+            .ok_or_else(|| lifecycle_error("spawn has no Studio Thread boundary"))?;
+        let parent_thread = self
             .store
-            .read_session(&parent_session_id)
+            .read_thread(&parent_thread_id)
             .await
             .map_err(|error| lifecycle_error(error.to_string()))?
-            .ok_or_else(|| lifecycle_error("spawn parent Studio session does not exist"))?;
-        let root_session_id = parent_session.root_session_id.clone();
+            .ok_or_else(|| lifecycle_error("spawn parent Studio Thread does not exist"))?;
+        let root_thread_id = parent_thread.root_thread_id.clone();
         if intent.spawn_kind.is_some()
-            && intent.studio_session_id.as_deref() != Some(root_session_id.as_str())
+            && intent.studio_thread_id.as_deref() != Some(root_thread_id.as_str())
         {
             return Err(lifecycle_error(
-                "Task spawn intent does not match the parent Studio session",
+                "Task spawn intent does not match the parent Studio Thread",
             ));
         }
-        let child_session_id = request.child_session_id.to_string();
+        let child_thread_id = request.child_thread_id.to_string();
         let task_name = intent.task_name(role);
         let studio_request = StudioTaskSpawnRequest {
             agent_id: request.child.identity.id.to_string(),
-            session_id: root_session_id.clone(),
+            root_thread_id: root_thread_id.clone(),
             task_name: task_name.clone(),
             role: role.to_string(),
             owned_paths: intent.owned_paths.clone(),
@@ -110,11 +110,11 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
             .unwrap_or_else(|| intent.workspace_root.clone().unwrap_or_default());
         if let Err(error) = self
             .store
-            .create_agent_session(AgentSessionSpec {
-                id: child_session_id.clone(),
-                parent_session_id,
-                owner_agent_id: request.child.identity.id.to_string(),
-                owner_role: request.child.identity.role.to_string(),
+            .create_child_thread(ChildThreadSpec {
+                id: child_thread_id.clone(),
+                parent_thread_id,
+                agent_path: request.child.identity.id.to_string(),
+                role: request.child.identity.role.to_string(),
                 title: task_name.clone(),
             })
             .await
@@ -124,14 +124,14 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
                 &studio_request,
                 &preparation,
                 worktree.as_ref(),
-                format!("failed to create Studio child session: {error}"),
+                format!("failed to create Studio child Thread: {error}"),
             )
             .await);
         }
         Ok(StudioSpawnLease {
             agent_id: request.child.identity.id,
             resource: StudioAgentResource {
-                studio_session_id: child_session_id,
+                thread_id: child_thread_id,
                 workspace_root,
                 task_name,
                 request: studio_request,
@@ -172,9 +172,9 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
         }
         if failures.is_empty() {
             self.store
-                .update_agent_session_status(
-                    &lease.resource.studio_session_id,
-                    "faulted",
+                .update_thread_status(
+                    &lease.resource.thread_id,
+                    "failed",
                     None,
                     Some("framework spawn rolled back".to_string()),
                     crate::studio::ids::unix_seconds(),

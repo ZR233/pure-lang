@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use pl_model::TokenUsage;
-use pl_protocol::SessionEventKind;
+use pl_protocol::ThreadNotification;
 use pl_trace::{AgentEvent, TraceEvent, TraceEventKind, TracePartKind};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::AbortHandle;
@@ -14,15 +14,15 @@ use super::super::{
     AgentActivityState, AgentExecutionPolicy, AgentRuntimeEventKind, AgentRuntimeHost,
     AgentRuntimeResult, AgentSessionCommitPolicy, AgentTurnCheckpointHandle,
     AgentTurnMailboxHandle, AgentTurnOutcome, AgentTurnPreparationContext, MailboxDeliveryState,
-    SessionId, TurnFinalizationPolicy, TurnId, TurnOutcomeKind,
+    ThreadId, TurnFinalizationPolicy, TurnId, TurnOutcomeKind,
 };
 use super::{AgentLoop, AgentLoopCommand};
-use crate::session_event::{ObservedTurnEvent, observation_from_agent_event};
+use crate::thread_event::{ObservedTurnEvent, observation_from_agent_event};
 use crate::{AgentSession, TraceRecorder, TurnResult, TurnResultStatus};
 
 pub(super) struct RunningTurn {
     pub(super) turn_id: TurnId,
-    pub(super) session_id: SessionId,
+    pub(super) thread_id: ThreadId,
     pub(super) identity: std::sync::Arc<()>,
     pub(super) start_revision: u64,
     pub(super) cancellation: CancellationToken,
@@ -30,7 +30,7 @@ pub(super) struct RunningTurn {
     pub(super) settled: oneshot::Receiver<()>,
     pub(super) cancelling: bool,
     pub(super) checkpoint_sequence: u64,
-    pub(super) steer_sender: mpsc::UnboundedSender<super::super::PendingAgentInput>,
+    pub(super) steer_sender: mpsc::UnboundedSender<super::super::DurableMailboxEnvelope>,
 }
 
 impl<H> AgentLoop<H>
@@ -49,13 +49,13 @@ where
             .state
             .pending_inputs
             .front()
-            .is_some_and(|input| input.session_id != self.state.session.id)
+            .is_some_and(|input| input.thread_id != self.state.snapshot.identity.id)
         {
             self.fault_in_memory(
-                AgentRuntimeError::SessionMismatch {
+                AgentRuntimeError::ThreadMismatch {
                     agent_id: self.state.snapshot.identity.id.clone(),
-                    expected: self.state.session.id.clone(),
-                    actual: self.state.pending_inputs[0].session_id.clone(),
+                    expected: self.state.snapshot.identity.id.clone(),
+                    actual: self.state.pending_inputs[0].thread_id.clone(),
                 }
                 .to_string(),
             );
@@ -74,24 +74,28 @@ where
             .commit_transition(next, Vec::new(), |snapshot| {
                 AgentRuntimeEventKind::TurnStarted {
                     turn_id: input.turn_id.clone(),
-                    session_id: input.session_id.clone(),
+                    thread_id: input.thread_id.clone(),
                     claimed_inputs: Vec::new(),
                     snapshot,
                 }
             })
             .await;
-        if committed.is_err() {
+        if let Err(error) = committed {
+            // The durable state still owns the queued input, but the in-memory
+            // fault should identify the turn whose start transition failed.
+            self.state.snapshot.active_turn_id = Some(input.turn_id.clone());
+            self.fault_in_memory(error.to_string());
             return;
         }
 
         let cancellation = CancellationToken::new();
         let (steer_sender, steer_receiver) = mpsc::unbounded_channel();
         let mailbox = AgentTurnMailboxHandle::new(steer_receiver, Vec::new());
-        let session_id = self.state.session.id.clone();
+        let thread_id = self.state.snapshot.identity.id.clone();
         let context = AgentTurnPreparationContext {
             snapshot: self.state.snapshot.clone(),
             turn_id: input.turn_id.clone(),
-            session_id: input.session_id.clone(),
+            thread_id: input.thread_id.clone(),
             input,
             leading_inputs: Vec::new(),
             session: self.state.session.session.clone(),
@@ -156,7 +160,7 @@ where
                 .active_turn_id
                 .clone()
                 .expect("started turn must have an id"),
-            session_id,
+            thread_id,
             identity,
             start_revision,
             cancellation,
@@ -206,7 +210,7 @@ where
             .expect("running turn must remain until cancellation is committed");
         let (outcome, _, _) = turn_outcome(
             active.turn_id.clone(),
-            active.session_id,
+            active.thread_id,
             Err(reason.to_string()),
             true,
         );
@@ -273,8 +277,8 @@ where
     }
     let turn_id = context.turn_id.clone();
     let start_revision = context.snapshot.revision;
-    let framework_session_id = context.session_id.clone();
-    let trace_session_id = context.session_id.to_string();
+    let framework_thread_id = context.thread_id.clone();
+    let trace_thread_id = context.thread_id.to_string();
     let initial_trace_sequence = context.trace_sequence;
     let activity_runtime = context.runtime.clone();
     let activity_agent_id = context.snapshot.identity.id.clone();
@@ -282,7 +286,7 @@ where
         context.runtime.clone(),
         context.snapshot.identity.id.clone(),
         context.turn_id.clone(),
-        context.session_id.clone(),
+        context.thread_id.clone(),
     );
     let mailbox = context.mailbox.clone();
     let mut session = context.session.clone();
@@ -300,20 +304,18 @@ where
             let policy = prepared.policy.clone();
             let session_commit = prepared.session_commit;
             let session_runtime_result = if let Some(runtime) = &prepared.session_runtime {
-                match activity_runtime.session_snapshot(&framework_session_id) {
+                match activity_runtime.thread_snapshot(&framework_thread_id) {
                     Ok(current) => {
                         let updated_at = unix_timestamp();
                         let snapshot =
-                            runtime.merge_with(&framework_session_id, &current, updated_at);
+                            runtime.merge_with(&framework_thread_id, &current, updated_at);
                         activity_runtime
-                            .record_session_facts(
+                            .record_thread_facts(
                                 activity_agent_id.clone(),
-                                framework_session_id.clone(),
-                                vec![crate::SessionEventFact::durable(
-                                    Some(activity_agent_id.to_string()),
-                                    Some(turn_id.to_string()),
+                                framework_thread_id.clone(),
+                                vec![crate::ThreadNotificationFact::durable(
                                     updated_at,
-                                    SessionEventKind::RuntimeChanged {
+                                    ThreadNotification::ThreadRuntimeUpdated {
                                         runtime: Box::new(snapshot),
                                     },
                                 )],
@@ -332,7 +334,7 @@ where
                 let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(128);
                 let activity_turn_id = turn_id.clone();
                 let observation_turn_id = turn_id.to_string();
-                let observation_session_id = trace_session_id.clone();
+                let observation_thread_id = trace_thread_id.clone();
                 let event_task = tokio::spawn(async move {
                     loop {
                         match event_rx.recv().await {
@@ -340,7 +342,7 @@ where
                                 if let Some(observation) = observation_from_agent_event(&event) {
                                     let _ = observation_tx.send(ObservedTurnEvent {
                                         turn_id: observation_turn_id.clone(),
-                                        session_id: observation_session_id.clone(),
+                                        thread_id: observation_thread_id.clone(),
                                         observation,
                                     });
                                 }
@@ -360,7 +362,7 @@ where
                     }
                 });
                 let mut recorder = TraceRecorder::streaming(
-                    trace_session_id,
+                    trace_thread_id,
                     event_tx,
                     initial_trace_sequence,
                     durable_trace_tx,
@@ -374,7 +376,7 @@ where
                     );
                 }
                 let result = prepared
-                    .kernel
+                    .engine
                     .run_turn_with_trace(
                         &mut session,
                         prepared.request,
@@ -450,7 +452,7 @@ fn activity_for_event(event: &AgentEvent) -> Option<AgentActivityState> {
 
 pub(crate) fn turn_outcome(
     turn_id: TurnId,
-    session_id: SessionId,
+    thread_id: ThreadId,
     result: std::result::Result<TurnResult, String>,
     cancelled: bool,
 ) -> (AgentTurnOutcome, Vec<TraceEvent>, Option<TurnResult>) {
@@ -509,7 +511,7 @@ pub(crate) fn turn_outcome(
     (
         AgentTurnOutcome {
             turn_id,
-            session_id,
+            thread_id,
             kind,
             reason,
             failure,

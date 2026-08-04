@@ -126,7 +126,7 @@ const _testProviderCatalog = ProviderCatalogView(
 
 StudioState _emptyState() {
   const project = StudioProject(id: 'project-1', name: 'project', path: '.');
-  final session = StudioSession(
+  final session = StudioThread(
     id: 'session-1',
     projectId: project.id,
     title: 'Session',
@@ -135,74 +135,40 @@ StudioState _emptyState() {
   );
   return StudioState(
     projects: const [project],
-    sessions: [session],
-    messagesBySession: const {'session-1': []},
+    threads: [session],
+    workspacesByThread: {
+      session.id: ThreadWorkspace(
+        thread: session,
+        revision: 0,
+        items: const [],
+        interactions: const [],
+        runtime: _testRuntime(),
+      ),
+    },
+    workspaceUiByThread: {
+      session.id: const WorkspaceUiState(
+        syncState: AgentWorkspaceSyncState.ready,
+      ),
+    },
     providers: const [],
     roles: const [],
     mcpServers: const [],
     selectedProjectId: project.id,
-    selectedSessionId: session.id,
+    selectedThreadId: session.id,
     permissionMode: PermissionMode.requestApproval,
-    runtimesBySession: {
-      session.id: const SessionRuntimeView(
-        model: '',
-        contextTokens: 0,
-        contextWindow: 0,
-        totalTokens: 0,
-        costLabel: '',
-        activeSkills: [],
-        activeMcpServers: [],
-        activeLspServers: [],
-        agentCount: 0,
-      ),
-    },
-    pendingInteractions: const [],
-  );
-}
-
-StudioState _pausedTaskState() {
-  final state = _emptyState();
-  final session = state.sessions.single.copyWith(
-    mode: StudioMode.task,
-    agentStatus: 'interrupted',
-  );
-  final runtime = state.runtimesBySession[session.id]!;
-  return state.copyWith(
-    sessions: [session],
-    runtimesBySession: {
-      session.id: runtime.copyWith(
-        task: const TaskRuntimeView(
-          runId: 'task-run-1',
-          phase: 'implementing',
-          branch: 'codex/task-1',
-          expectedHead: '0123456789abcdef',
-          statusMessage: null,
-          stopRequestedOrigin: null,
-          stopRequestedReason: null,
-          taskGeneration: 1,
-          workUnits: [],
-          agents: [],
-          completions: [],
-          merges: [],
-          reviews: [],
-        ),
-      ),
-    },
   );
 }
 
 StudioState _noProjectState() {
   return StudioState(
     projects: [],
-    sessions: [],
-    messagesBySession: {},
+    threads: [],
     providers: [],
     roles: [],
     mcpServers: [],
     selectedProjectId: null,
-    selectedSessionId: null,
+    selectedThreadId: null,
     permissionMode: PermissionMode.requestApproval,
-    pendingInteractions: [],
   );
 }
 
@@ -214,9 +180,9 @@ StudioState _twoProjectState({
   ],
   StudioTurnState? turnState,
 }) {
-  final sessions = [
+  final threads = [
     if (projects.any((project) => project.id == 'project-a'))
-      StudioSession(
+      StudioThread(
         id: 'session-a',
         projectId: 'project-a',
         title: 'Session A',
@@ -224,7 +190,7 @@ StudioState _twoProjectState({
         updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
       ),
     if (projects.any((project) => project.id == 'project-b'))
-      StudioSession(
+      StudioThread(
         id: 'session-b',
         projectId: 'project-b',
         title: 'Session B',
@@ -232,106 +198,45 @@ StudioState _twoProjectState({
         updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
       ),
   ];
-  final selectedSessionId = selectedProjectId == 'project-b'
+  final selectedThreadId = selectedProjectId == 'project-b'
       ? 'session-b'
       : 'session-a';
   return _emptyState().copyWith(
     projects: projects,
-    sessions: sessions,
-    messagesBySession: {for (final session in sessions) session.id: const []},
-    selectedProjectId: selectedProjectId,
-    selectedSessionId: selectedSessionId,
-    turnsBySession: turnState == null
-        ? const {}
-        : {
-            selectedSessionId: _testTurn(
-              sessionId: selectedSessionId,
-              state: turnState,
-            ),
-          },
-  );
-}
-
-StudioState _sessionHistoryState({
-  required String projectId,
-  required String sessionId,
-  required String text,
-  int eventCursor = 42,
-  int messageSequence = 0,
-  int partSequence = 0,
-}) {
-  final session = StudioSession(
-    id: sessionId,
-    projectId: projectId,
-    title: 'Loaded $sessionId',
-    mode: StudioMode.simple,
-    updatedAt: DateTime.fromMillisecondsSinceEpoch(1),
-  );
-  return _emptyState().copyWith(
-    projects: [StudioProject(id: projectId, name: projectId, path: projectId)],
-    sessions: [session],
-    selectedProjectId: projectId,
-    selectedSessionId: sessionId,
-    messagesBySession: {
-      sessionId: [
-        TimelineMessage(
-          id: '$sessionId-message-history',
-          sessionId: sessionId,
-          role: 'assistant',
-          createdAt: DateTime.fromMillisecondsSinceEpoch(1),
-          sequence: messageSequence,
-        ),
-      ],
-    },
-    partSnapshotsBySession: {
-      sessionId: {
-        '$sessionId-part-history': TimelinePartSnapshot(
-          id: '$sessionId-part-history',
-          messageId: '$sessionId-message-history',
-          sessionId: sessionId,
-          turnId: '$sessionId-turn-history',
-          type: TimelinePartType.text,
-          order: 0,
+    threads: threads,
+    workspacesByThread: {
+      for (final session in threads)
+        session.id: ThreadWorkspace(
+          thread: session,
           revision: 0,
-          sequence: partSequence,
-          text: text,
-          status: 'completed',
-          createdAt: DateTime.fromMillisecondsSinceEpoch(1),
-          updatedAt: DateTime.fromMillisecondsSinceEpoch(1),
+          items: const [],
+          interactions: const [],
+          runtime: _testRuntime(),
+          activeTurn: session.id == selectedThreadId && turnState != null
+              ? _testTurn(threadId: session.id, state: turnState)
+              : null,
         ),
-      },
     },
-    eventCursorsBySession: {sessionId: eventCursor},
-  );
-}
-
-SessionSnapshotFrame _sessionSnapshotFrame(StudioState state) {
-  final sessionId = state.selectedSessionId!;
-  final runtime = state.runtime;
-  return SessionSnapshotFrame(
-    snapshot: StudioSessionSnapshot(
-      sessionId: sessionId,
-      throughSequence: state.eventCursorsBySession[sessionId] ?? 0,
-      messages: state.messagesBySession[sessionId] ?? const [],
-      parts: state.partSnapshotsBySession[sessionId] ?? const {},
-      interactions: const [],
-      agents: const {},
-      timelineEvents: const {},
-      runtime: runtime,
-      turn: null,
-    ),
+    workspaceUiByThread: {
+      for (final session in threads)
+        session.id: const WorkspaceUiState(
+          syncState: AgentWorkspaceSyncState.ready,
+        ),
+    },
+    selectedProjectId: selectedProjectId,
+    selectedThreadId: selectedThreadId,
   );
 }
 
 StudioTurnView _testTurn({
-  required String sessionId,
+  required String threadId,
   required StudioTurnState state,
   String turnId = 'turn-1',
   int updatedAt = 1,
 }) {
   return StudioTurnView(
     turnId: turnId,
-    sessionId: sessionId,
+    threadId: threadId,
     state: state,
     updatedAt: DateTime.fromMillisecondsSinceEpoch(updatedAt),
   );
@@ -376,9 +281,91 @@ StudioState _stateWithPlannerModels() {
         effort: 'high',
       ),
     ],
-    runtimesBySession: {
-      state.selectedAgentSessionId!: state.runtime.copyWith(
-        model: 'deepseek-v4-flash',
+    workspacesByThread: {
+      state.selectedThreadId!: state.selectedWorkspace!.copyWith(
+        runtime: state.runtime.copyWith(model: 'deepseek-v4-flash'),
+      ),
+    },
+  );
+}
+
+ThreadRuntimeView _testRuntime() => const ThreadRuntimeView(
+  model: '',
+  contextTokens: 0,
+  contextWindow: 0,
+  totalTokens: 0,
+  costLabel: '',
+  activeSkills: [],
+  activeMcpServers: [],
+  activeLspServers: [],
+  agentCount: 0,
+);
+
+ThreadItemView _threadItemFixture({
+  required String id,
+  required String threadId,
+  required String turnId,
+  required int ordinal,
+  String text = '',
+  ThreadItemKind kind = ThreadItemKind.agentMessage,
+  AgentMessageChannel? channel = AgentMessageChannel.finalAnswer,
+  int revision = 0,
+  String status = 'completed',
+  int createdAt = 1,
+  TimelineToolPart? tool,
+  List<String> reasoningSummary = const [],
+  List<String> reasoningContent = const [],
+}) {
+  final timestamp = _fixtureDate(createdAt);
+  return ThreadItemView(
+    id: id,
+    threadId: threadId,
+    turnId: turnId,
+    ordinal: ordinal,
+    revision: revision,
+    status: status,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    completedAt: status == 'completed' ? timestamp : null,
+    kind: kind,
+    channel: channel,
+    text: text,
+    tool: tool,
+    reasoningSummary: reasoningSummary,
+    reasoningContent: reasoningContent,
+  );
+}
+
+StudioState _withSelectedRuntime(StudioState state, ThreadRuntimeView runtime) {
+  final threadId = state.selectedThreadId!;
+  return state.copyWith(
+    workspacesByThread: {
+      ...state.workspacesByThread,
+      threadId: state.workspacesByThread[threadId]!.copyWith(runtime: runtime),
+    },
+  );
+}
+
+StudioState _withSelectedTurn(StudioState state, StudioTurnView? turn) {
+  final threadId = state.selectedThreadId!;
+  return state.copyWith(
+    workspacesByThread: {
+      ...state.workspacesByThread,
+      threadId: state.workspacesByThread[threadId]!.copyWith(activeTurn: turn),
+    },
+  );
+}
+
+StudioState _withSelectedInteractions(
+  StudioState state,
+  List<PendingInteraction> interactions,
+) {
+  final threadId = state.selectedThreadId!;
+  return state.copyWith(
+    workspacesByThread: {
+      ...state.workspacesByThread,
+      threadId: state.workspacesByThread[threadId]!.copyWith(
+        interactions: interactions,
       ),
     },
   );

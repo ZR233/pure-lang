@@ -50,7 +50,7 @@ pub(crate) async fn cleanup_accepted_delivery(
         Err(error) => return cleanup_failure(error.to_string()),
     }
     if let Some(runtime) = runtime {
-        let agent_id = match AgentId::new(scope.outcome.agent_id.clone()) {
+        let agent_id = match AgentId::new(scope.completion.executor_agent_id.clone()) {
             Ok(agent_id) => agent_id,
             Err(error) => return cleanup_failure(error.to_string()),
         };

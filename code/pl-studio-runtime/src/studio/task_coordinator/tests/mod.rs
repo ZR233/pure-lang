@@ -3,8 +3,6 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
-
 use super::merge::{MergeCommitTestBarrier, MergeVerifier};
 use super::*;
 use crate::tool::{SubagentContext, Tool, ToolContext, ToolInput, WorkspaceAccess};
@@ -21,12 +19,12 @@ async fn reviewer_harness_authorization_is_one_shot_and_has_no_work_unit() {
     let fixture = ReviewFixture::new("review-harness-authorization").await;
     let round = fixture
         .store
-        .begin_integrated_review(&fixture.session_id, "call-review")
+        .begin_integrated_review(&fixture.root_thread_id, "call-review")
         .await
         .unwrap();
     let request = StudioTaskSpawnRequest {
         agent_id: "agent-reviewer".to_string(),
-        session_id: fixture.session_id.clone(),
+        root_thread_id: fixture.root_thread_id.clone(),
         task_name: "review_round_1".to_string(),
         role: "reviewer".to_string(),
         owned_paths: Vec::new(),
@@ -58,16 +56,6 @@ async fn reviewer_harness_authorization_is_one_shot_and_has_no_work_unit() {
             .unwrap()
             .is_empty()
     );
-    let outcomes = fixture
-        .store
-        .list_agent_outcomes(&fixture.run_id)
-        .await
-        .unwrap();
-    assert_eq!(outcomes.len(), 1);
-    assert_eq!(outcomes[0].role, "reviewer");
-    assert_eq!(outcomes[0].owner_path, "/root");
-    assert_eq!(outcomes[0].requested_by_call_id, "call-review");
-    assert_eq!(outcomes[0].status, AgentOutcomeStatus::Running);
     let rounds = fixture
         .store
         .list_review_rounds(&fixture.run_id)
@@ -75,9 +63,11 @@ async fn reviewer_harness_authorization_is_one_shot_and_has_no_work_unit() {
         .unwrap();
     assert_eq!(rounds[0].id, round.id);
     assert_eq!(
-        rounds[0].reviewer_agent_id.as_deref(),
+        rounds[0].reviewer_thread_id.as_deref(),
         Some("agent-reviewer")
     );
+    assert_eq!(rounds[0].requested_by_call_id, "call-review");
+    assert_eq!(rounds[0].reviewer_status, ThreadExecutionStatus::Running);
     fixture.cleanup();
 }
 
@@ -86,13 +76,13 @@ async fn reviewer_terminal_without_review_exit_fails_round_and_restores_phase() 
     let fixture = ReviewFixture::new("reviewer-terminal-without-exit").await;
     fixture
         .store
-        .begin_integrated_review(&fixture.session_id, "call-review-terminal")
+        .begin_integrated_review(&fixture.root_thread_id, "call-review-terminal")
         .await
         .unwrap();
-    let (_, outcome) = fixture
+    let round = fixture
         .store
         .authorize_reviewer_spawn(
-            &fixture.session_id,
+            &fixture.root_thread_id,
             "call-review-terminal",
             "agent-reviewer-terminal",
         )
@@ -100,12 +90,7 @@ async fn reviewer_terminal_without_review_exit_fails_round_and_restores_phase() 
         .unwrap();
     fixture
         .store
-        .update_spawned_outcome(
-            &outcome.id,
-            "agent-reviewer-terminal",
-            AgentOutcomeStatus::Running,
-            None,
-        )
+        .activate_reviewer(&round.id, "agent-reviewer-terminal")
         .await
         .unwrap();
 
@@ -134,17 +119,10 @@ async fn reviewer_terminal_without_review_exit_fails_round_and_restores_phase() 
         .pop()
         .unwrap();
     assert_eq!(round.verdict, ReviewVerdict::Failed);
-    let outcome = fixture
-        .store
-        .list_agent_outcomes(&fixture.run_id)
-        .await
-        .unwrap()
-        .pop()
-        .unwrap();
-    assert_eq!(outcome.status, AgentOutcomeStatus::Failed);
+    assert_eq!(round.reviewer_status, ThreadExecutionStatus::Failed);
     let retry = fixture
         .store
-        .begin_integrated_review(&fixture.session_id, "call-review-retry")
+        .begin_integrated_review(&fixture.root_thread_id, "call-review-retry")
         .await
         .unwrap();
     assert_eq!(retry.round, 2);
@@ -157,13 +135,13 @@ async fn review_exit_requires_real_design_trace_and_persists_matching_pass() {
     let fixture = ReviewFixture::new("review-exit-trace").await;
     fixture
         .store
-        .begin_integrated_review(&fixture.session_id, "call-review-exit")
+        .begin_integrated_review(&fixture.root_thread_id, "call-review-exit")
         .await
         .unwrap();
-    let (_, outcome) = fixture
+    let round = fixture
         .store
         .authorize_reviewer_spawn(
-            &fixture.session_id,
+            &fixture.root_thread_id,
             "call-review-exit",
             "agent-reviewer-exit",
         )
@@ -171,12 +149,7 @@ async fn review_exit_requires_real_design_trace_and_persists_matching_pass() {
         .unwrap();
     fixture
         .store
-        .update_spawned_outcome(
-            &outcome.id,
-            "agent-reviewer-exit",
-            AgentOutcomeStatus::Running,
-            None,
-        )
+        .activate_reviewer(&round.id, "agent-reviewer-exit")
         .await
         .unwrap();
     let history = AgentSession::from_messages(vec![
@@ -195,7 +168,7 @@ async fn review_exit_requires_real_design_trace_and_persists_matching_pass() {
     ]);
     let tool = fixture
         .coordinator
-        .review_exit_tool(fixture.session_id.clone(), None);
+        .review_exit_tool(fixture.root_thread_id.clone(), None);
     let (event_tx, _) = tokio::sync::broadcast::channel(16);
     let output = tool
         .execute(
@@ -221,7 +194,8 @@ async fn review_exit_requires_real_design_trace_and_persists_matching_pass() {
                 active_subagent: Some(SubagentContext {
                     id: "agent-reviewer-exit".to_string(),
                     parent_id: Some(
-                        crate::studio::agent_host::root_agent_id(&fixture.session_id).to_string(),
+                        crate::studio::agent_host::root_agent_id(&fixture.root_thread_id)
+                            .to_string(),
                     ),
                     agent_path: Some("/root/review_round_1".to_string()),
                     role: "reviewer".to_string(),
@@ -244,12 +218,7 @@ async fn review_exit_requires_real_design_trace_and_persists_matching_pass() {
         .unwrap();
     assert_eq!(rounds[0].verdict, ReviewVerdict::Pass);
     assert_eq!(rounds[0].design_references[0].path, "design/guide.md");
-    let outcomes = fixture
-        .store
-        .list_agent_outcomes(&fixture.run_id)
-        .await
-        .unwrap();
-    assert_eq!(outcomes[0].status, AgentOutcomeStatus::Completed);
+    assert_eq!(rounds[0].reviewer_status, ThreadExecutionStatus::Completed);
     fixture.cleanup();
 }
 
@@ -264,7 +233,7 @@ async fn completion_requires_current_design_and_pass_then_atomically_releases_le
         .unwrap();
     let error = fixture
         .store
-        .complete_reviewed_task(&fixture.session_id, &run.expected_head, "verified")
+        .complete_reviewed_task(&fixture.root_thread_id, &run.expected_head, "verified")
         .await
         .unwrap_err();
     assert!(error.to_string().contains("reviewing task run"));
@@ -275,13 +244,13 @@ async fn completion_requires_current_design_and_pass_then_atomically_releases_le
         .unwrap();
     fixture
         .store
-        .begin_integrated_review(&fixture.session_id, "call-complete-review")
+        .begin_integrated_review(&fixture.root_thread_id, "call-complete-review")
         .await
         .unwrap();
-    let (_, outcome) = fixture
+    let round = fixture
         .store
         .authorize_reviewer_spawn(
-            &fixture.session_id,
+            &fixture.root_thread_id,
             "call-complete-review",
             "agent-complete-review",
         )
@@ -289,18 +258,13 @@ async fn completion_requires_current_design_and_pass_then_atomically_releases_le
         .unwrap();
     fixture
         .store
-        .update_spawned_outcome(
-            &outcome.id,
-            "agent-complete-review",
-            AgentOutcomeStatus::Running,
-            None,
-        )
+        .activate_reviewer(&round.id, "agent-complete-review")
         .await
         .unwrap();
     fixture
         .store
         .complete_task_review(
-            &fixture.session_id,
+            &fixture.root_thread_id,
             "agent-complete-review",
             AgentReview {
                 verdict: ReviewVerdict::Pass,
@@ -317,7 +281,7 @@ async fn completion_requires_current_design_and_pass_then_atomically_releases_le
 
     let completed = fixture
         .store
-        .complete_reviewed_task(&fixture.session_id, &run.expected_head, "verified")
+        .complete_reviewed_task(&fixture.root_thread_id, &run.expected_head, "verified")
         .await
         .unwrap();
 
@@ -495,7 +459,7 @@ async fn clean_delivery_merges_with_metadata_atomic_head_cas_and_worktree_cleanu
     let output = fixture
         .coordinator
         .merge_agent_with_verifier(
-            &fixture.session_id,
+            &fixture.root_thread_id,
             &fixture.subagent.id,
             &run.expected_head,
             &supervisor,
@@ -556,8 +520,8 @@ async fn clean_delivery_merges_with_metadata_atomic_head_cas_and_worktree_cleanu
     assert_eq!(durable_lease.expected_head, merge_head);
     assert_eq!(fixture.work_unit().await.status, WorkUnitStatus::Merged);
     assert_eq!(
-        fixture.outcome().await.status,
-        AgentOutcomeStatus::Completed
+        fixture.work_unit().await.execution_status,
+        ThreadExecutionStatus::Completed
     );
     assert!(!fixture.worktree.exists());
     assert_eq!(output.cleanup.status, "discarded");
@@ -580,7 +544,7 @@ async fn verifier_failure_aborts_to_exact_prestate_blocks_and_preserves_delivery
     let error = fixture
         .coordinator
         .merge_agent_with_verifier(
-            &fixture.session_id,
+            &fixture.root_thread_id,
             &fixture.subagent.id,
             &run.expected_head,
             &TestRuntimeMarker,
@@ -623,8 +587,8 @@ async fn verifier_failure_aborts_to_exact_prestate_blocks_and_preserves_delivery
     );
     assert_eq!(fixture.work_unit().await.status, WorkUnitStatus::Merging);
     assert_eq!(
-        fixture.outcome().await.status,
-        AgentOutcomeStatus::Completed
+        fixture.work_unit().await.execution_status,
+        ThreadExecutionStatus::Completed
     );
     assert!(fixture.worktree.exists());
     let merges = fixture
@@ -669,7 +633,7 @@ async fn durable_merge_cas_failure_compensates_exact_clean_merge_commit() {
     let error = fixture
         .coordinator
         .merge_agent_with_verifier(
-            &fixture.session_id,
+            &fixture.root_thread_id,
             &fixture.subagent.id,
             &run.expected_head,
             &TestRuntimeMarker,
@@ -745,7 +709,7 @@ async fn two_deliveries_from_same_base_merge_incrementally_and_are_consumed_once
     let first_output = fixture
         .coordinator
         .merge_agent_with_verifier(
-            &fixture.session_id,
+            &fixture.root_thread_id,
             &first.agent_id,
             &initial_head,
             &TestRuntimeMarker,
@@ -759,7 +723,7 @@ async fn two_deliveries_from_same_base_merge_incrementally_and_are_consumed_once
     let second_output = fixture
         .coordinator
         .merge_agent_with_verifier(
-            &fixture.session_id,
+            &fixture.root_thread_id,
             &second.agent_id,
             &first_head,
             &TestRuntimeMarker,
@@ -815,7 +779,7 @@ async fn two_deliveries_from_same_base_merge_incrementally_and_are_consumed_once
         fixture
             .coordinator
             .merge_agent_with_verifier(
-                &fixture.session_id,
+                &fixture.root_thread_id,
                 &first.agent_id,
                 &second_head,
                 &TestRuntimeMarker,
@@ -841,7 +805,7 @@ async fn text_conflict_persists_stage_manifest_keeps_merge_state_and_queues_once
     let output = fixture
         .coordinator
         .merge_agent_with_verifier(
-            &fixture.session_id,
+            &fixture.root_thread_id,
             &fixture.agent_id,
             &fixture.expected_head,
             &TestRuntimeMarker,
@@ -907,7 +871,7 @@ async fn planner_conflict_tools_resolve_verify_continue_and_cleanup_delivery() {
     let output = fixture
         .coordinator
         .merge_agent_with_verifier(
-            &fixture.session_id,
+            &fixture.root_thread_id,
             &fixture.agent_id,
             &fixture.expected_head,
             &TestRuntimeMarker,
@@ -920,14 +884,14 @@ async fn planner_conflict_tools_resolve_verify_continue_and_cleanup_delivery() {
 
     let conflicts = fixture
         .coordinator
-        .list_active_conflicts(&fixture.session_id, &output.merge_id)
+        .list_active_conflicts(&fixture.root_thread_id, &output.merge_id)
         .await
         .unwrap();
     assert_eq!(conflicts.len(), 1);
     assert!(!conflicts[0].resolved);
     let read = fixture
         .coordinator
-        .read_active_conflict(&fixture.session_id, &output.merge_id, "src/shared.txt")
+        .read_active_conflict(&fixture.root_thread_id, &output.merge_id, "src/shared.txt")
         .await
         .unwrap();
     assert_eq!(read.base.content.as_deref(), Some("base\n"));
@@ -937,7 +901,7 @@ async fn planner_conflict_tools_resolve_verify_continue_and_cleanup_delivery() {
     let resolved = fixture
         .coordinator
         .resolve_active_conflict(
-            &fixture.session_id,
+            &fixture.root_thread_id,
             &output.merge_id,
             "src/shared.txt",
             super::merge::conflict_tools::ConflictResolutionChoice::Ours,
@@ -947,7 +911,7 @@ async fn planner_conflict_tools_resolve_verify_continue_and_cleanup_delivery() {
     assert!(resolved.unresolved_paths.is_empty());
     let verification = fixture
         .coordinator
-        .verify_active_conflict(&fixture.session_id, &output.merge_id)
+        .verify_active_conflict(&fixture.root_thread_id, &output.merge_id)
         .await
         .unwrap();
     assert!(verification.success);
@@ -956,7 +920,7 @@ async fn planner_conflict_tools_resolve_verify_continue_and_cleanup_delivery() {
     let completed = fixture
         .coordinator
         .continue_active_conflict(
-            &fixture.session_id,
+            &fixture.root_thread_id,
             &output.merge_id,
             "kept the planner branch content",
             None,
@@ -983,7 +947,7 @@ async fn conflict_resolution_rejects_path_escape_and_explicit_abort_restores_pre
     let output = fixture
         .coordinator
         .merge_agent_with_verifier(
-            &fixture.session_id,
+            &fixture.root_thread_id,
             &fixture.agent_id,
             &fixture.expected_head,
             &TestRuntimeMarker,
@@ -996,7 +960,7 @@ async fn conflict_resolution_rejects_path_escape_and_explicit_abort_restores_pre
     let error = fixture
         .coordinator
         .resolve_active_conflict(
-            &fixture.session_id,
+            &fixture.root_thread_id,
             &output.merge_id,
             "../outside.txt",
             super::merge::conflict_tools::ConflictResolutionChoice::Ours,
@@ -1008,7 +972,7 @@ async fn conflict_resolution_rejects_path_escape_and_explicit_abort_restores_pre
     let aborted = fixture
         .coordinator
         .abort_active_conflict(
-            &fixture.session_id,
+            &fixture.root_thread_id,
             &output.merge_id,
             "planner cannot resolve this conflict safely",
         )
@@ -1049,7 +1013,7 @@ async fn restart_recovery_aborts_exact_verifying_merge_and_blocks_with_evidence(
     let scope = fixture
         .store
         .begin_task_merge(BeginTaskMerge {
-            session_id: fixture.session_id.clone(),
+            thread_id: fixture.root_thread_id.clone(),
             agent_id: delivered.agent_id,
             expected_head: run.expected_head.clone(),
             pre_index_tree,
@@ -1134,7 +1098,7 @@ async fn restart_recovery_releases_unstarted_pending_merge_for_exact_delivery_re
     let pending = fixture
         .store
         .begin_task_merge(BeginTaskMerge {
-            session_id: fixture.session_id.clone(),
+            thread_id: fixture.root_thread_id.clone(),
             agent_id: delivered.agent_id.clone(),
             expected_head: fixture.run.expected_head.clone(),
             pre_index_tree,
@@ -1161,7 +1125,7 @@ async fn restart_recovery_releases_unstarted_pending_merge_for_exact_delivery_re
     let (event_tx, _) = tokio::sync::broadcast::channel(16);
     let merged = recovered
         .merge_agent_with_verifier(
-            &fixture.session_id,
+            &fixture.root_thread_id,
             &delivered.agent_id,
             &fixture.run.expected_head,
             &TestRuntimeMarker,
@@ -1219,7 +1183,7 @@ async fn stale_expected_head_and_dirty_main_are_rejected_before_merge_side_effec
             fixture
                 .coordinator
                 .merge_agent_with_verifier(
-                    &fixture.session_id,
+                    &fixture.root_thread_id,
                     &fixture.subagent.id,
                     caller_head,
                     &TestRuntimeMarker,
@@ -1276,7 +1240,7 @@ async fn merge_and_design_update_serialize_through_the_same_branch_mutation_guar
         merge_fixture
             .coordinator
             .merge_agent_with_verifier(
-                &merge_fixture.session_id,
+                &merge_fixture.root_thread_id,
                 &delivery.agent_id,
                 &expected_head,
                 &TestRuntimeMarker,
@@ -1292,7 +1256,7 @@ async fn merge_and_design_update_serialize_through_the_same_branch_mutation_guar
         design_fixture
             .coordinator
             .update_design(
-                &design_fixture.session_id,
+                &design_fixture.root_thread_id,
                 &design_fixture.repository,
                 "*** Begin Patch\n*** Update File: design/spec.md\n@@\n-before\n+after\n*** End Patch",
             )
@@ -1343,8 +1307,8 @@ async fn merged_work_unit_is_not_downgraded_by_late_terminal_event() {
 
     assert_eq!(fixture.work_unit().await.status, WorkUnitStatus::Merged);
     assert_eq!(
-        fixture.outcome().await.status,
-        AgentOutcomeStatus::Completed
+        fixture.work_unit().await.execution_status,
+        ThreadExecutionStatus::Completed
     );
     fixture.cleanup();
 }
@@ -1367,10 +1331,10 @@ async fn budget_limited_executor_keeps_awaiting_completion_contract() {
         fixture.work_unit().await.status,
         WorkUnitStatus::AwaitingCompletion
     );
-    let outcome = fixture.outcome().await;
-    assert_eq!(outcome.status, AgentOutcomeStatus::Failed);
+    let work_unit = fixture.work_unit().await;
+    assert_eq!(work_unit.execution_status, ThreadExecutionStatus::Failed);
     assert_eq!(
-        outcome.error.as_deref(),
+        work_unit.execution_error.as_deref(),
         Some("active wall-clock budget reached")
     );
     fixture.cleanup();
@@ -1379,10 +1343,9 @@ async fn budget_limited_executor_keeps_awaiting_completion_contract() {
 struct DeliveryFixture {
     coordinator: Arc<TaskCoordinator>,
     store: StudioStore,
-    session_id: String,
+    root_thread_id: String,
     task_run_id: String,
     work_unit_id: String,
-    outcome_id: String,
     repository: PathBuf,
     worktree: PathBuf,
     branch: String,
@@ -1399,7 +1362,7 @@ struct IncrementalMergeFixture {
     repository: PathBuf,
     store: StudioStore,
     coordinator: Arc<TaskCoordinator>,
-    session_id: String,
+    root_thread_id: String,
     run: TaskRunRecord,
 }
 
@@ -1426,7 +1389,7 @@ impl IncrementalMergeFixture {
             repository,
             store,
             coordinator,
-            session_id: session.id,
+            root_thread_id: session.id,
             run,
         }
     }
@@ -1472,7 +1435,8 @@ impl IncrementalMergeFixture {
             })
             .await
             .unwrap();
-        self.store
+        let work_unit = self
+            .store
             .update_work_unit(
                 &work_unit.id,
                 WorkUnitStatus::Running,
@@ -1480,19 +1444,8 @@ impl IncrementalMergeFixture {
             )
             .await
             .unwrap();
-        let outcome = self
-            .store
-            .create_agent_outcome(CreateAgentOutcome {
-                task_run_id: self.run.id.clone(),
-                work_unit_id: Some(work_unit.id.clone()),
-                agent_id: agent_id.to_string(),
-                owner_path: "/root".to_string(),
-                initiated_by: "planner".to_string(),
-                requested_by_call_id: format!("call-{agent_id}"),
-                role: "executor".to_string(),
-                status: AgentOutcomeStatus::Running,
-                attempt: 1,
-            })
+        self.store
+            .activate_executor(&work_unit.id, agent_id)
             .await
             .unwrap();
         let path = worktree.join(relative_path);
@@ -1503,9 +1456,8 @@ impl IncrementalMergeFixture {
         let head = git_output(&worktree, &["rev-parse", "HEAD"]);
         approve_delivery(
             &self.store,
-            &self.session_id,
+            &self.root_thread_id,
             &work_unit,
-            &outcome,
             AgentDelivery {
                 worktree: AgentWorktreeDelivery {
                     path: std::fs::canonicalize(&worktree)
@@ -1538,7 +1490,7 @@ struct ReviewFixture {
     repository: PathBuf,
     store: StudioStore,
     coordinator: Arc<TaskCoordinator>,
-    session_id: String,
+    root_thread_id: String,
     run_id: String,
 }
 
@@ -1564,7 +1516,7 @@ impl ReviewFixture {
             repository,
             store,
             coordinator,
-            session_id: session.id,
+            root_thread_id: session.id,
             run_id: run.id,
         }
     }
@@ -1580,7 +1532,7 @@ struct ConflictMergeFixture {
     worktree: PathBuf,
     store: StudioStore,
     coordinator: Arc<TaskCoordinator>,
-    session_id: String,
+    root_thread_id: String,
     task_run_id: String,
     agent_id: String,
     expected_head: String,
@@ -1646,7 +1598,7 @@ impl ConflictMergeFixture {
             })
             .await
             .unwrap();
-        store
+        let work_unit = store
             .update_work_unit(
                 &work_unit.id,
                 WorkUnitStatus::Running,
@@ -1654,18 +1606,8 @@ impl ConflictMergeFixture {
             )
             .await
             .unwrap();
-        let outcome = store
-            .create_agent_outcome(CreateAgentOutcome {
-                task_run_id: run.id.clone(),
-                work_unit_id: Some(work_unit.id.clone()),
-                agent_id: agent_id.clone(),
-                owner_path: "/root".to_string(),
-                initiated_by: "planner".to_string(),
-                requested_by_call_id: "call-conflict".to_string(),
-                role: "executor".to_string(),
-                status: AgentOutcomeStatus::Running,
-                attempt: 1,
-            })
+        store
+            .activate_executor(&work_unit.id, &agent_id)
             .await
             .unwrap();
         std::fs::write(worktree.join("src/shared.txt"), "executor\n").unwrap();
@@ -1680,7 +1622,6 @@ impl ConflictMergeFixture {
             &store,
             &session.id,
             &work_unit,
-            &outcome,
             AgentDelivery {
                 worktree: AgentWorktreeDelivery {
                     path: std::fs::canonicalize(&worktree)
@@ -1712,7 +1653,7 @@ impl ConflictMergeFixture {
             worktree,
             store,
             coordinator,
-            session_id: session.id,
+            root_thread_id: session.id,
             task_run_id: run.id,
             agent_id,
             expected_head,
@@ -1740,7 +1681,7 @@ impl DeliveryFixture {
         name: &str,
         owned_paths: Vec<&str>,
         attempt: u32,
-        link_work_unit: bool,
+        _link_work_unit: bool,
     ) -> Self {
         let repository = init_repository(name);
         let worktree = repository.with_extension("executor-worktree");
@@ -1801,27 +1742,16 @@ impl DeliveryFixture {
             depth: 1,
         };
         let task_run_id = run.id.clone();
-        let outcome = store
-            .create_agent_outcome(CreateAgentOutcome {
-                task_run_id: run.id,
-                work_unit_id: link_work_unit.then(|| work_unit.id.clone()),
-                agent_id: subagent.id.clone(),
-                owner_path: "/root".to_string(),
-                initiated_by: "planner".to_string(),
-                requested_by_call_id: "call-spawn".to_string(),
-                role: subagent.role.clone(),
-                status: AgentOutcomeStatus::Running,
-                attempt,
-            })
+        store
+            .activate_executor(&work_unit.id, &subagent.id)
             .await
             .unwrap();
         Self {
             coordinator,
             store,
-            session_id: session.id,
+            root_thread_id: session.id,
             task_run_id,
             work_unit_id: work_unit.id,
-            outcome_id: outcome.id,
             repository,
             worktree,
             branch,
@@ -1847,7 +1777,6 @@ impl DeliveryFixture {
         let changed_files =
             super::git::changed_files_between(&self.worktree, &self.base_commit, &resolved).await?;
         let work_unit = self.work_unit().await;
-        let outcome = self.outcome().await;
         let delivery = AgentDelivery {
             worktree: AgentWorktreeDelivery {
                 path: std::fs::canonicalize(&self.worktree)?
@@ -1860,24 +1789,7 @@ impl DeliveryFixture {
             changed_files,
             verification_summary: "cargo test passed".to_string(),
         };
-        approve_delivery(
-            &self.store,
-            &self.session_id,
-            &work_unit,
-            &outcome,
-            delivery,
-        )
-        .await
-    }
-
-    async fn outcome(&self) -> AgentOutcomeRecord {
-        self.store
-            .list_agent_outcomes(&self.task_run_id)
-            .await
-            .unwrap()
-            .into_iter()
-            .find(|outcome| outcome.id == self.outcome_id)
-            .unwrap()
+        approve_delivery(&self.store, &self.root_thread_id, &work_unit, delivery).await
     }
 
     async fn work_unit(&self) -> WorkUnitRecord {
@@ -1903,14 +1815,12 @@ impl DeliveryFixture {
 
 async fn approve_delivery(
     store: &StudioStore,
-    session_id: &str,
+    root_thread_id: &str,
     work_unit: &WorkUnitRecord,
-    outcome: &AgentOutcomeRecord,
     delivery: AgentDelivery,
 ) -> anyhow::Result<AgentDelivery> {
     let completion = store
         .create_work_completion(
-            &outcome.id,
             &work_unit.id,
             WorkCompletionKind::Delivery,
             Some(&delivery),
@@ -1918,24 +1828,23 @@ async fn approve_delivery(
         )
         .await?;
     let requested_by_call_id = format!("review-{}", completion.id);
+    let executor_thread_id = work_unit
+        .executor_thread_id
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("work unit has no executor Thread"))?;
     store
-        .begin_delivery_review(session_id, &outcome.agent_id, &requested_by_call_id)
+        .begin_delivery_review(root_thread_id, executor_thread_id, &requested_by_call_id)
         .await?;
     let reviewer_agent_id = format!("reviewer-{}", completion.id);
-    let (_, reviewer_outcome) = store
-        .authorize_reviewer_spawn(session_id, &requested_by_call_id, &reviewer_agent_id)
+    let reviewer_round = store
+        .authorize_reviewer_spawn(root_thread_id, &requested_by_call_id, &reviewer_agent_id)
         .await?;
     store
-        .update_spawned_outcome(
-            &reviewer_outcome.id,
-            &reviewer_agent_id,
-            AgentOutcomeStatus::Running,
-            None,
-        )
+        .activate_reviewer(&reviewer_round.id, &reviewer_agent_id)
         .await?;
     store
         .complete_task_review(
-            session_id,
+            root_thread_id,
             &reviewer_agent_id,
             AgentReview {
                 verdict: ReviewVerdict::Pass,
@@ -1945,8 +1854,37 @@ async fn approve_delivery(
             },
         )
         .await?;
-    persist_closed_executor_snapshot(store, outcome).await?;
+    store
+        .settle_executor_turn_finished(executor_thread_id, crate::TurnOutcomeKind::Completed, None)
+        .await?;
+    persist_closed_executor_thread(store, root_thread_id, executor_thread_id).await?;
     Ok(delivery)
+}
+
+async fn persist_closed_executor_thread(
+    store: &StudioStore,
+    root_thread_id: &str,
+    executor_thread_id: &str,
+) -> anyhow::Result<()> {
+    store
+        .create_child_thread(crate::studio::ChildThreadSpec {
+            id: executor_thread_id.to_string(),
+            parent_thread_id: root_thread_id.to_string(),
+            agent_path: executor_thread_id.to_string(),
+            role: "executor".to_string(),
+            title: executor_thread_id.to_string(),
+        })
+        .await?;
+    store
+        .update_thread_status(
+            executor_thread_id,
+            "closed",
+            None,
+            None,
+            crate::studio::ids::unix_seconds(),
+        )
+        .await?;
+    Ok(())
 }
 
 async fn approved_delivery_for_work_unit(
@@ -1975,44 +1913,6 @@ async fn approved_delivery_for_work_unit(
     }
 }
 
-async fn persist_closed_executor_snapshot(
-    store: &StudioStore,
-    outcome: &AgentOutcomeRecord,
-) -> anyhow::Result<()> {
-    let snapshot = pl_core::AgentSnapshot {
-        identity: pl_core::AgentIdentity {
-            id: pl_core::AgentId::new(outcome.agent_id.clone())?,
-            parent_id: Some(pl_core::AgentId::new("root")?),
-            role: pl_core::AgentRoleId::new("executor")?,
-            depth: 1,
-        },
-        lifecycle: pl_core::AgentLifecycleState::Closed,
-        activity: pl_core::AgentActivityState::Idle,
-        active_turn_id: None,
-        pending_inputs: 0,
-        progress: None,
-        last_turn: None,
-        revision: 1,
-        event_sequence: 1,
-        updated_at: 1,
-    };
-    store
-        .database()
-        .execute_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Sqlite,
-            "INSERT INTO agent_runtime_states (agent_id, revision, snapshot_json, updated_at)
-             VALUES (?, ?, ?, ?)",
-            [
-                outcome.agent_id.clone().into(),
-                1_i64.into(),
-                serde_json::to_string(&snapshot)?.into(),
-                1_i64.into(),
-            ],
-        ))
-        .await?;
-    Ok(())
-}
-
 #[tokio::test]
 async fn task_start_initializes_non_repository_and_preserves_the_baseline_on_lease_failure() {
     let project = temporary_project("start-initializes-files");
@@ -2022,7 +1922,7 @@ async fn task_start_initializes_non_repository_and_preserves_the_baseline_on_lea
     let store = task_store(&project).await;
     let session = task_session(&store, &project).await;
     let competing_session = store
-        .create_session(&session.project_id, "Competing task", StudioMode::Task)
+        .create_thread(&session.project_id, "Competing task", StudioMode::Task)
         .await
         .unwrap();
     let coordinator = TaskCoordinator::new(store.clone());
@@ -2106,83 +2006,6 @@ async fn coordinator_recovers_active_task_after_restart() {
 }
 
 #[tokio::test]
-async fn recovery_blocks_run_before_continuation_when_agent_pairs_are_invalid() {
-    let repository = init_repository("recovery-agent-mismatch");
-    let store = task_store(&repository).await;
-    let session = task_session(&store, &repository).await;
-    let run = {
-        let coordinator = TaskCoordinator::new(store.clone());
-        coordinator
-            .start_confirmed_task(&session.id, "plan", &repository)
-            .await
-            .unwrap()
-    };
-    let unit = store
-        .create_work_unit(CreateWorkUnit {
-            task_run_id: run.id.clone(),
-            title: "mismatch".to_string(),
-            owned_paths: vec!["code/**".to_string()],
-            base_commit: run.base_commit.clone(),
-            worktree_path: repository
-                .join(".pure/worktrees/run/agent-a")
-                .to_string_lossy()
-                .to_string(),
-            branch: "pure-task-run-agent-a".to_string(),
-            attempt: 1,
-        })
-        .await
-        .unwrap();
-    store
-        .update_work_unit(
-            &unit.id,
-            WorkUnitStatus::Running,
-            Some("agent-a".to_string()),
-        )
-        .await
-        .unwrap();
-    store
-        .create_agent_outcome(CreateAgentOutcome {
-            task_run_id: run.id.clone(),
-            work_unit_id: Some(unit.id.clone()),
-            agent_id: "agent-b".to_string(),
-            owner_path: "/root".to_string(),
-            initiated_by: "planner".to_string(),
-            requested_by_call_id: "call".to_string(),
-            role: "executor".to_string(),
-            status: AgentOutcomeStatus::Running,
-            attempt: 1,
-        })
-        .await
-        .unwrap();
-
-    let recovered = TaskCoordinator::new(store.clone())
-        .recover_active_tasks()
-        .await
-        .unwrap();
-    let blocked = store.read_task_run(&run.id).await.unwrap().unwrap();
-
-    assert!(recovered.is_empty());
-    assert_eq!(blocked.phase, TaskRunPhase::Blocked);
-    assert!(
-        blocked
-            .status_message
-            .as_deref()
-            .unwrap_or_default()
-            .contains("agent restart reconciliation failed")
-    );
-    assert_eq!(
-        store
-            .read_work_unit(&unit.id)
-            .await
-            .unwrap()
-            .unwrap()
-            .status,
-        WorkUnitStatus::Running
-    );
-    remove_repository(repository);
-}
-
-#[tokio::test]
 async fn recovery_preflight_failure_reports_issues_and_preserves_affected_group() {
     let repository = init_repository("recovery-common-directory-preflight");
     std::fs::write(repository.join(".gitignore"), ".pure/\n").unwrap();
@@ -2203,13 +2026,13 @@ async fn recovery_preflight_failure_reports_issues_and_preserves_affected_group(
     ));
     let missing_project = store.upsert_project(&missing_workspace).await.unwrap();
     let missing_session = store
-        .create_session(&missing_project.id, "Blocked", StudioMode::Task)
+        .create_thread(&missing_project.id, "Blocked", StudioMode::Task)
         .await
         .unwrap();
     let git_common_dir = std::fs::canonicalize(repository.join(".git")).unwrap();
     let blocked_run = store
         .create_task_run_with_lease(CreateTaskRun {
-            session_id: missing_session.id,
+            root_thread_id: missing_session.id,
             phase: TaskRunPhase::Blocked,
             plan: "blocked plan".to_string(),
             workspace_root: missing_workspace.to_string_lossy().to_string(),
@@ -2258,17 +2081,7 @@ async fn recovery_preflight_failure_reports_issues_and_preserves_affected_group(
         .await
         .unwrap();
     store
-        .create_agent_outcome(CreateAgentOutcome {
-            task_run_id: blocked_run.id,
-            work_unit_id: Some(unit.id),
-            agent_id: "blocked-owned".to_string(),
-            owner_path: "/root".to_string(),
-            initiated_by: "planner".to_string(),
-            requested_by_call_id: "call-blocked-owned".to_string(),
-            role: "executor".to_string(),
-            status: AgentOutcomeStatus::Running,
-            attempt: 1,
-        })
+        .activate_executor(&unit.id, "blocked-owned")
         .await
         .unwrap();
     let orphan_path = repository.join(".pure/worktrees/orphan-run/preflight-orphan");
@@ -2358,10 +2171,10 @@ async fn task_store(repository: &Path) -> StudioStore {
     store
 }
 
-async fn task_session(store: &StudioStore, repository: &Path) -> crate::studio::SessionRecord {
+async fn task_session(store: &StudioStore, repository: &Path) -> crate::studio::ThreadRecord {
     let project = store.upsert_project(repository).await.unwrap();
     store
-        .create_session(&project.id, "Task", StudioMode::Task)
+        .create_thread(&project.id, "Task", StudioMode::Task)
         .await
         .unwrap()
 }
@@ -2404,20 +2217,7 @@ async fn create_running_recovery_worktree(
         )
         .await
         .unwrap();
-    store
-        .create_agent_outcome(CreateAgentOutcome {
-            task_run_id: run.id.clone(),
-            work_unit_id: Some(unit.id),
-            agent_id: agent_id.to_string(),
-            owner_path: "/root".to_string(),
-            initiated_by: "planner".to_string(),
-            requested_by_call_id: format!("call-{agent_id}"),
-            role: "executor".to_string(),
-            status: AgentOutcomeStatus::Running,
-            attempt: 1,
-        })
-        .await
-        .unwrap();
+    store.activate_executor(&unit.id, agent_id).await.unwrap();
     worktree
 }
 

@@ -2,16 +2,16 @@ use std::collections::VecDeque;
 use std::time::Duration;
 
 use super::coordinator::spawn_coordinator;
-use super::host::{AgentCommitObserver, AgentStateRepository};
+use super::host::{AgentCommitObserver, ThreadRepository};
 use super::state::{AgentRuntimeError, unix_timestamp};
 use super::{
-    AgentActivityState, AgentCommitOutcome, AgentCommittedEvent, AgentLifecycleState,
-    AgentRuntimeEvent, AgentRuntimeEventKind, AgentRuntimeHandle, AgentRuntimeHost,
-    AgentRuntimeResult, AgentTurnOutcome, MailboxDeliveryState, RestoredAgentRuntime, SessionId,
+    AgentActivityState, AgentCommittedEvent, AgentLifecycleState, AgentRuntimeEvent,
+    AgentRuntimeEventKind, AgentRuntimeHandle, AgentRuntimeHost, AgentRuntimeResult,
+    AgentTurnOutcome, MailboxDeliveryState, RestoredAgentRuntime, ThreadCommitOutcome, ThreadId,
     TurnId, TurnOutcomeKind,
 };
-use crate::session_event::{project_runtime_event, runtime_event_session_id};
-use crate::{SessionEventHub, SessionEventHubHandle, SessionEventOptions};
+use crate::thread_event::{project_runtime_event, runtime_event_thread_id};
+use crate::{ThreadEventBus, ThreadEventBusHandle, ThreadEventOptions};
 
 /// runtime 启动时如何处理 repository 恢复出的 pending inputs。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -29,7 +29,7 @@ pub struct AgentRuntimeOptions {
     pub command_capacity: usize,
     pub cancel_grace: Duration,
     pub restored_inputs: RestoredInputPolicy,
-    pub session_events: SessionEventOptions,
+    pub thread_events: ThreadEventOptions,
 }
 
 impl Default for AgentRuntimeOptions {
@@ -38,7 +38,7 @@ impl Default for AgentRuntimeOptions {
             command_capacity: 128,
             cancel_grace: Duration::from_millis(500),
             restored_inputs: RestoredInputPolicy::Start,
-            session_events: SessionEventOptions::default(),
+            thread_events: ThreadEventOptions::default(),
         }
     }
 }
@@ -66,42 +66,46 @@ where
             .restore_runtime()
             .await
             .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
-        let session_events = SessionEventHub::new(options.session_events);
-        let session_event_handle = session_events.handle();
+        let thread_events = ThreadEventBus::new(options.thread_events);
+        let thread_event_handle = thread_events.handle();
         for agent in &mut restored {
-            if let Some(projection) = &agent.session_projection {
-                session_event_handle
-                    .replace_snapshot(
-                        projection.snapshot.clone(),
-                        projection.retained_durable_events.clone(),
-                    )
-                    .map_err(|error| AgentRuntimeError::SessionEvents(error.to_string()))?;
-                let session_id = SessionId::new(projection.snapshot.session_id.clone())
-                    .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
-                if agent.state.session.id != session_id {
-                    return Err(AgentRuntimeError::SessionMismatch {
-                        agent_id: agent.state.snapshot.identity.id.clone(),
-                        expected: agent.state.session.id.clone(),
-                        actual: session_id,
-                    });
-                }
-                if agent.state.session.session_event_sequence
-                    != projection.snapshot.through_sequence
-                {
-                    tracing::warn!(
-                        agent_id = %agent.state.snapshot.identity.id,
-                        session_id = %agent.state.session.id,
-                        checkpoint = agent.state.session.session_event_sequence,
-                        canonical = projection.snapshot.through_sequence,
-                        "repairing stale session event checkpoint during restore"
+            let snapshot = agent
+                .thread_snapshot
+                .take()
+                .map(|restored| restored.snapshot)
+                .unwrap_or_else(|| {
+                    let mut snapshot = pl_protocol::ThreadSnapshot::empty(
+                        agent.state.snapshot.identity.id.as_str(),
                     );
-                    agent.state.session.session_event_sequence =
-                        projection.snapshot.through_sequence;
-                }
+                    snapshot.revision = agent.state.session.thread_revision;
+                    snapshot
+                });
+            let thread_id = ThreadId::new(snapshot.thread.id.clone())
+                .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
+            if agent.state.snapshot.identity.id != thread_id {
+                return Err(AgentRuntimeError::ThreadMismatch {
+                    agent_id: agent.state.snapshot.identity.id.clone(),
+                    expected: agent.state.snapshot.identity.id.clone(),
+                    actual: thread_id,
+                });
             }
+            if agent.state.session.thread_revision != snapshot.revision {
+                tracing::warn!(
+                    agent_id = %agent.state.snapshot.identity.id,
+                    thread_id = %agent.state.snapshot.identity.id,
+                    checkpoint = agent.state.session.thread_revision,
+                    canonical = snapshot.revision,
+                    "repairing stale thread revision during restore"
+                );
+                agent.state.session.thread_revision = snapshot.revision;
+            }
+            thread_event_handle
+                .replace_snapshot(snapshot.clone())
+                .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
+            agent.thread_snapshot = Some(super::RestoredThreadSnapshot { snapshot });
         }
-        let restored = recover_interrupted_turns(&host, &session_event_handle, restored).await?;
-        let handle = spawn_coordinator(host.clone(), restored, options, session_events)?;
+        let restored = recover_interrupted_turns(&host, &thread_event_handle, restored).await?;
+        let handle = spawn_coordinator(host.clone(), restored, options, thread_events)?;
         Ok(Self { host, handle })
     }
 
@@ -117,18 +121,13 @@ where
 
     /// 停止 runtime。
     pub async fn shutdown(&self) -> AgentRuntimeResult<()> {
-        self.handle.shutdown().await?;
-        self.host
-            .repository()
-            .barrier()
-            .await
-            .map_err(|error| AgentRuntimeError::Repository(error.to_string()))
+        self.handle.shutdown().await
     }
 }
 
 async fn recover_interrupted_turns<H>(
     host: &H,
-    session_events: &SessionEventHubHandle,
+    thread_events: &ThreadEventBusHandle,
     restored: Vec<RestoredAgentRuntime>,
 ) -> AgentRuntimeResult<Vec<RestoredAgentRuntime>>
 where
@@ -177,10 +176,10 @@ where
             .active_turn_id
             .clone()
             .unwrap_or_else(TurnId::generate);
-        let session_id = agent.state.session.id.clone();
+        let thread_id = agent.state.snapshot.identity.id.clone();
         let outcome = AgentTurnOutcome {
             turn_id,
-            session_id,
+            thread_id,
             kind: TurnOutcomeKind::Cancelled,
             reason: Some("runtime_restarted".to_string()),
             failure: None,
@@ -211,34 +210,34 @@ where
                 snapshot: agent.state.snapshot.clone(),
             },
         };
-        let session_id = runtime_event_session_id(&event)
-            .expect("recovery cancellation always belongs to a session")
+        let thread_id = runtime_event_thread_id(&event)
+            .expect("recovery cancellation always belongs to a thread")
             .to_string();
-        let session_key = SessionId::new(session_id.clone())
+        let thread_key = ThreadId::new(thread_id.clone())
             .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
-        let sequence = session_events
-            .snapshot(&session_id)
-            .map_err(|error| AgentRuntimeError::SessionEvents(error.to_string()))?
-            .through_sequence;
+        let sequence = thread_events
+            .snapshot(&thread_id)
+            .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?
+            .revision;
         let projected = project_runtime_event(&event, sequence);
-        let durable_session_events = projected.durable_events();
-        let projection = super::SessionProjectionCommit {
-            snapshot: session_events
-                .project_durable(&session_id, &durable_session_events)
-                .map_err(|error| AgentRuntimeError::SessionEvents(error.to_string()))?,
-            durable_events: durable_session_events,
+        let thread_notifications = projected.notifications.clone();
+        let projection = super::ThreadProjectionCommit {
+            snapshot: thread_events
+                .project(&thread_id, &thread_notifications)
+                .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?,
+            notifications: thread_notifications,
         };
-        if agent.state.session.id != session_key {
-            return Err(AgentRuntimeError::SessionMismatch {
+        if agent.state.snapshot.identity.id != thread_key {
+            return Err(AgentRuntimeError::ThreadMismatch {
                 agent_id: agent.state.snapshot.identity.id.clone(),
-                expected: agent.state.session.id.clone(),
-                actual: session_key,
+                expected: agent.state.snapshot.identity.id.clone(),
+                actual: thread_key,
             });
         }
-        agent.state.session.session_event_sequence = projected.through_sequence;
+        agent.state.session.thread_revision = projected.through_revision;
         let commit_outcome = host
             .repository()
-            .commit(super::SessionHistoryCommit {
+            .commit(super::ThreadCommit {
                 agent_id: agent.state.snapshot.identity.id.clone(),
                 expected_revision: Some(expected_revision),
                 next_state: agent.state.clone(),
@@ -249,50 +248,61 @@ where
                     Some(projection.clone()),
                     None,
                 ),
-                mutation: super::AgentStateMutation::SnapshotAndQueue,
+                mutation: super::ThreadMutation::SnapshotAndQueue,
             })
             .await
             .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
         match commit_outcome {
-            AgentCommitOutcome::Applied => {
+            ThreadCommitOutcome::Applied => {
                 // 恢复事件与普通 actor commit 使用同一个 parent subscription 事实源。
-                session_events
-                    .publish_batch(projected.events.clone())
-                    .map_err(|error| AgentRuntimeError::SessionEvents(error.to_string()))?;
+                thread_events
+                    .publish_batch(projected.notifications.clone())
+                    .await
+                    .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
                 host.observer()
                     .publish(AgentCommittedEvent {
                         agent_id: event.agent_id.clone(),
-                        session_id: Some(session_key),
+                        thread_id: Some(thread_key),
                         turn_id: projected
-                            .events
+                            .notifications
                             .first()
-                            .and_then(|session_event| session_event.turn_id.clone())
+                            .and_then(notification_turn_id)
                             .and_then(|value| TurnId::new(value).ok()),
                         runtime_events: vec![event],
                         trace_events: Vec::new(),
-                        session_events: projected.events,
+                        thread_notifications: projected.notifications,
                     })
                     .await
             }
-            AgentCommitOutcome::RevisionConflict { actual_revision } => {
+            ThreadCommitOutcome::RevisionConflict { actual_revision } => {
                 return Err(AgentRuntimeError::RevisionConflict {
                     expected: Some(expected_revision),
                     actual: actual_revision,
                 });
             }
         }
-        if let Some(restored_projection) = agent.session_projection.as_mut() {
-            restored_projection.snapshot = projection.snapshot;
-            restored_projection
-                .retained_durable_events
-                .extend(projection.durable_events);
+        if let Some(restored_thread) = agent.thread_snapshot.as_mut() {
+            restored_thread.snapshot = projection.snapshot;
         } else {
-            agent.session_projection = Some(super::RestoredSessionProjection {
+            agent.thread_snapshot = Some(super::RestoredThreadSnapshot {
                 snapshot: projection.snapshot,
-                retained_durable_events: projection.durable_events,
             });
         }
         recovered.push(agent);
     }
     Ok(recovered)
+}
+
+fn notification_turn_id(notification: &pl_protocol::ThreadNotificationEnvelope) -> Option<String> {
+    match &notification.notification {
+        pl_protocol::ThreadNotification::TurnStarted { turn }
+        | pl_protocol::ThreadNotification::TurnUpdated { turn }
+        | pl_protocol::ThreadNotification::TurnCompleted { turn } => Some(turn.id.clone()),
+        pl_protocol::ThreadNotification::ItemStarted { item }
+        | pl_protocol::ThreadNotification::ItemCompleted { item } => Some(item.turn_id.clone()),
+        pl_protocol::ThreadNotification::ItemDelta { .. }
+        | pl_protocol::ThreadNotification::InteractionChanged { .. }
+        | pl_protocol::ThreadNotification::ThreadRuntimeUpdated { .. }
+        | pl_protocol::ThreadNotification::Lagged { .. } => None,
+    }
 }

@@ -185,7 +185,7 @@ fn pending_interaction(
         kind,
         status: InteractionStatus::Pending,
         scope: InteractionScope {
-            session_id: session_id.to_string(),
+            thread_id: session_id.to_string(),
             turn_id: "turn-recovered".to_string(),
             item_id: Some(id.to_string()),
             tool_id: Some(id.to_string()),

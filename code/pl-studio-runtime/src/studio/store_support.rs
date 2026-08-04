@@ -1,80 +1,31 @@
 use anyhow::Result;
 use sea_orm::sea_query::{Expr, ExprTrait, Index, IndexCreateStatement, IndexOrder};
-use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ConditionalStatement, ConnectionTrait, DatabaseConnection,
-};
+use sea_orm::{ConditionalStatement, ConnectionTrait, DatabaseConnection};
 
 use crate::studio::entity;
 
-pub(super) const STATE_DATABASE_SCHEMA_VERSION: i64 = 11;
-pub(super) const HISTORY_DATABASE_SCHEMA_VERSION: i64 = 1;
-pub(super) const STATE_DATABASE_KIND: &str = "state";
-pub(super) const HISTORY_DATABASE_KIND: &str = "history";
-const STORAGE_METADATA_ID: &str = "primary";
+pub(super) const STUDIO_DATABASE_SCHEMA_VERSION: i64 = 1;
 
-pub(super) async fn initialize_state_schema(
-    db: &DatabaseConnection,
-    storage_generation_id: &str,
-    created_at: i64,
-) -> Result<()> {
+pub(super) async fn initialize_studio_schema(db: &DatabaseConnection) -> Result<()> {
     db.get_schema_builder()
-        .register(entity::storage_metadata::Entity)
-        .register(entity::history_gc_job::Entity)
         .register(entity::app_setting::Entity)
         .register(entity::project::Entity)
-        .register(entity::session::Entity)
         .register(entity::attachment::Entity)
         .register(entity::interaction::Entity)
         .register(entity::task_run::Entity)
         .register(entity::work_unit::Entity)
         .register(entity::work_completion::Entity)
-        .register(entity::agent_outcome::Entity)
         .register(entity::review_round::Entity)
         .register(entity::merge_record::Entity)
         .register(entity::branch_lease::Entity)
-        .register(entity::agent_runtime_state::Entity)
-        .register(entity::agent_runtime_session::Entity)
-        .register(entity::agent_pending_input::Entity)
-        .register(entity::agent_active_input::Entity)
-        .register(entity::agent_turn::Entity)
-        .register(entity::session_view_snapshot::Entity)
+        .register(entity::thread::Entity)
+        .register(entity::thread_input::Entity)
+        .register(entity::turn::Entity)
+        .register(entity::item::Entity)
         .apply(db)
         .await?;
     create_state_indexes(db).await?;
-    write_storage_metadata(
-        db,
-        STATE_DATABASE_KIND,
-        STATE_DATABASE_SCHEMA_VERSION,
-        storage_generation_id,
-        created_at,
-    )
-    .await?;
-    set_schema_version(db, STATE_DATABASE_SCHEMA_VERSION).await?;
-    Ok(())
-}
-
-pub(super) async fn initialize_history_schema(
-    db: &DatabaseConnection,
-    storage_generation_id: &str,
-    created_at: i64,
-) -> Result<()> {
-    db.get_schema_builder()
-        .register(entity::storage_metadata::Entity)
-        .register(entity::session_history_turn::Entity)
-        .register(entity::session_history_item::Entity)
-        .register(entity::session_history_checkpoint::Entity)
-        .apply(db)
-        .await?;
-    create_history_indexes(db).await?;
-    write_storage_metadata(
-        db,
-        HISTORY_DATABASE_KIND,
-        HISTORY_DATABASE_SCHEMA_VERSION,
-        storage_generation_id,
-        created_at,
-    )
-    .await?;
-    set_schema_version(db, HISTORY_DATABASE_SCHEMA_VERSION).await?;
+    set_schema_version(db, STUDIO_DATABASE_SCHEMA_VERSION).await?;
     Ok(())
 }
 
@@ -87,25 +38,6 @@ pub(super) fn non_empty_title(title: &str) -> String {
     }
 }
 
-async fn write_storage_metadata(
-    db: &DatabaseConnection,
-    database_kind: &str,
-    schema_version: i64,
-    storage_generation_id: &str,
-    created_at: i64,
-) -> Result<()> {
-    entity::storage_metadata::ActiveModel {
-        id: Set(STORAGE_METADATA_ID.to_string()),
-        database_kind: Set(database_kind.to_string()),
-        schema_version: Set(schema_version),
-        storage_generation_id: Set(storage_generation_id.to_string()),
-        created_at: Set(created_at),
-    }
-    .insert(db)
-    .await?;
-    Ok(())
-}
-
 async fn set_schema_version(db: &DatabaseConnection, version: i64) -> Result<()> {
     db.execute_unprepared(&format!("PRAGMA user_version = {version}"))
         .await?;
@@ -115,30 +47,14 @@ async fn set_schema_version(db: &DatabaseConnection, version: i64) -> Result<()>
 async fn create_state_indexes(db: &DatabaseConnection) -> Result<()> {
     let indexes = [
         Index::create()
-            .name("idx_agent_outcomes_run_agent_attempt")
-            .table(entity::agent_outcome::Entity)
-            .col(entity::agent_outcome::Column::TaskRunId)
-            .col(entity::agent_outcome::Column::AgentId)
-            .col(entity::agent_outcome::Column::Attempt)
-            .unique()
-            .to_owned(),
-        Index::create()
-            .name("idx_agent_outcomes_run_status")
-            .table(entity::agent_outcome::Entity)
-            .col(entity::agent_outcome::Column::TaskRunId)
-            .col(entity::agent_outcome::Column::Status)
-            .col((entity::agent_outcome::Column::UpdatedAt, IndexOrder::Desc))
-            .col((entity::agent_outcome::Column::Id, IndexOrder::Desc))
-            .to_owned(),
-        Index::create()
-            .name("idx_attachments_message_id")
+            .name("idx_attachments_item_id")
             .table(entity::attachment::Entity)
-            .col(entity::attachment::Column::MessageId)
+            .col(entity::attachment::Column::ItemId)
             .to_owned(),
         Index::create()
-            .name("idx_attachments_session_id")
+            .name("idx_attachments_thread_id")
             .table(entity::attachment::Entity)
-            .col(entity::attachment::Column::SessionId)
+            .col(entity::attachment::Column::ThreadId)
             .to_owned(),
         Index::create()
             .name("idx_branch_leases_common_branch")
@@ -148,16 +64,16 @@ async fn create_state_indexes(db: &DatabaseConnection) -> Result<()> {
             .unique()
             .to_owned(),
         Index::create()
-            .name("idx_interactions_session_status_updated")
+            .name("idx_interactions_thread_status_updated")
             .table(entity::interaction::Entity)
-            .col(entity::interaction::Column::SessionId)
+            .col(entity::interaction::Column::ThreadId)
             .col(entity::interaction::Column::Status)
             .col((entity::interaction::Column::UpdatedAt, IndexOrder::Desc))
             .to_owned(),
         Index::create()
-            .name("idx_interactions_session_turn")
+            .name("idx_interactions_thread_turn")
             .table(entity::interaction::Entity)
-            .col(entity::interaction::Column::SessionId)
+            .col(entity::interaction::Column::ThreadId)
             .col(entity::interaction::Column::TurnId)
             .to_owned(),
         Index::create()
@@ -190,26 +106,6 @@ async fn create_state_indexes(db: &DatabaseConnection) -> Result<()> {
             .unique()
             .to_owned(),
         Index::create()
-            .name("idx_sessions_parent_session")
-            .table(entity::session::Entity)
-            .col(entity::session::Column::ParentSessionId)
-            .to_owned(),
-        Index::create()
-            .name("idx_sessions_root_session")
-            .table(entity::session::Entity)
-            .col(entity::session::Column::RootSessionId)
-            .col(entity::session::Column::CreatedAt)
-            .col(entity::session::Column::Id)
-            .to_owned(),
-        Index::create()
-            .name("idx_sessions_project_updated_at")
-            .table(entity::session::Entity)
-            .col(entity::session::Column::ProjectId)
-            .col(entity::session::Column::Archived)
-            .col((entity::session::Column::UpdatedAt, IndexOrder::Desc))
-            .col((entity::session::Column::Id, IndexOrder::Desc))
-            .to_owned(),
-        Index::create()
             .name("idx_task_runs_phase_updated")
             .table(entity::task_run::Entity)
             .col(entity::task_run::Column::Phase)
@@ -217,11 +113,54 @@ async fn create_state_indexes(db: &DatabaseConnection) -> Result<()> {
             .col((entity::task_run::Column::Id, IndexOrder::Desc))
             .to_owned(),
         Index::create()
-            .name("idx_task_runs_session_updated")
+            .name("idx_task_runs_root_thread_updated")
             .table(entity::task_run::Entity)
-            .col(entity::task_run::Column::SessionId)
+            .col(entity::task_run::Column::RootThreadId)
             .col((entity::task_run::Column::UpdatedAt, IndexOrder::Desc))
             .col((entity::task_run::Column::Id, IndexOrder::Desc))
+            .to_owned(),
+        Index::create()
+            .name("idx_threads_project_updated")
+            .table(entity::thread::Entity)
+            .col(entity::thread::Column::ProjectId)
+            .col(entity::thread::Column::Archived)
+            .col((entity::thread::Column::UpdatedAt, IndexOrder::Desc))
+            .col((entity::thread::Column::Id, IndexOrder::Desc))
+            .to_owned(),
+        Index::create()
+            .name("idx_threads_root_parent")
+            .table(entity::thread::Entity)
+            .col(entity::thread::Column::RootThreadId)
+            .col(entity::thread::Column::ParentThreadId)
+            .col(entity::thread::Column::CreatedAt)
+            .to_owned(),
+        Index::create()
+            .name("idx_thread_inputs_queue")
+            .table(entity::thread_input::Entity)
+            .col(entity::thread_input::Column::ThreadId)
+            .col(entity::thread_input::Column::State)
+            .col(entity::thread_input::Column::QueueOrdinal)
+            .unique()
+            .to_owned(),
+        Index::create()
+            .name("idx_turns_thread_ordinal")
+            .table(entity::turn::Entity)
+            .col(entity::turn::Column::ThreadId)
+            .col(entity::turn::Column::Ordinal)
+            .unique()
+            .to_owned(),
+        Index::create()
+            .name("idx_items_thread_ordinal")
+            .table(entity::item::Entity)
+            .col(entity::item::Column::ThreadId)
+            .col(entity::item::Column::Ordinal)
+            .unique()
+            .to_owned(),
+        Index::create()
+            .name("idx_items_turn_ordinal")
+            .table(entity::item::Entity)
+            .col(entity::item::Column::TurnId)
+            .col(entity::item::Column::Ordinal)
             .to_owned(),
         Index::create()
             .name("idx_work_units_run_status")
@@ -237,13 +176,6 @@ async fn create_state_indexes(db: &DatabaseConnection) -> Result<()> {
             .col(entity::work_completion::Column::WorkUnitId)
             .col(entity::work_completion::Column::Revision)
             .unique()
-            .to_owned(),
-        Index::create()
-            .name("idx_agent_turns_session_started")
-            .table(entity::agent_turn::Entity)
-            .col(entity::agent_turn::Column::SessionId)
-            .col((entity::agent_turn::Column::StartedAt, IndexOrder::Desc))
-            .col((entity::agent_turn::Column::TurnId, IndexOrder::Desc))
             .to_owned(),
     ];
     for index in indexes {
@@ -274,30 +206,6 @@ async fn create_state_indexes(db: &DatabaseConnection) -> Result<()> {
             .to_owned(),
     )
     .await?;
-    Ok(())
-}
-
-async fn create_history_indexes(db: &DatabaseConnection) -> Result<()> {
-    for index in [
-        Index::create()
-            .name("idx_history_items_turn_sequence")
-            .table(entity::session_history_item::Entity)
-            .col(entity::session_history_item::Column::SessionId)
-            .col(entity::session_history_item::Column::TurnId)
-            .col(entity::session_history_item::Column::Sequence)
-            .to_owned(),
-        Index::create()
-            .name("idx_history_checkpoints_through_sequence")
-            .table(entity::session_history_checkpoint::Entity)
-            .col(entity::session_history_checkpoint::Column::SessionId)
-            .col((
-                entity::session_history_checkpoint::Column::ThroughSequence,
-                IndexOrder::Desc,
-            ))
-            .to_owned(),
-    ] {
-        execute_index(db, index).await?;
-    }
     Ok(())
 }
 

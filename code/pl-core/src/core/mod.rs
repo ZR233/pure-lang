@@ -35,7 +35,6 @@ use crate::turn::{
 };
 use progress::{ProgressEmitter, ProgressVerbosity};
 
-mod kernel;
 mod model_turn;
 mod permission;
 mod profile;
@@ -45,10 +44,6 @@ mod tool_set;
 mod turn_loop;
 mod turn_result;
 
-pub use kernel::{
-    AgentKernel, AgentKernelBuilder, AgentKernelToolRequest, AgentKernelToolSet, CoreAgentProfile,
-    NoAgentKernelToolSet,
-};
 pub use model_turn::{
     CoreModelTurnClient, CoreModelTurnOptions, CoreModelTurnRequest,
     stream_history_completion_message_text, stream_session_completion_message_text,
@@ -165,6 +160,11 @@ impl TurnEngine {
     /// 注册一个工具。
     pub fn register_tool(&mut self, tool: impl crate::tool::Tool + 'static) {
         self.tools.register(tool);
+    }
+
+    /// 返回当前 Turn 可见的已注册工具名。
+    pub fn tool_names(&self) -> Vec<String> {
+        self.tools.names().into_iter().map(str::to_string).collect()
     }
 
     pub(crate) fn has_tool(&self, name: &str) -> bool {

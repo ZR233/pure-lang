@@ -1,6 +1,6 @@
 //! Pure Studio 产品运行时。
 //!
-//! 本 crate 负责 Studio 配置、SQLite projection、project/session/task 编排与 bridge DTO；
+//! 本 crate 负责 Studio 配置、SQLite projection、project/thread/task 编排与 bridge DTO；
 //! 通用模型循环、agent actor、工具和协议基础类型由 `pl-core` 提供。
 
 pub use pl_core::*;

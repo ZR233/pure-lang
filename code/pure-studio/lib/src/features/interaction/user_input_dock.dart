@@ -11,14 +11,14 @@ import 'interaction_widgets.dart';
 
 class UserInputDock extends ConsumerStatefulWidget {
   const UserInputDock({
-    required this.sessionId,
+    required this.threadId,
     required this.interactionId,
     required this.payload,
     this.trailing,
     super.key,
   });
 
-  final String sessionId;
+  final String threadId;
   final String interactionId;
   final InteractionPayloadSnapshot payload;
   final Widget? trailing;
@@ -213,7 +213,7 @@ class _UserInputDockState extends ConsumerState<UserInputDock> {
     ref
         .read(studioControllerProvider.notifier)
         .resolveActiveInteraction(
-          widget.sessionId,
+          widget.threadId,
           UserInputResolutionCommand(
             answers: [
               UserInputAnswerCommand(questionId: 'answer', answers: [text]),
@@ -226,7 +226,7 @@ class _UserInputDockState extends ConsumerState<UserInputDock> {
     ref
         .read(studioControllerProvider.notifier)
         .resolveActiveInteraction(
-          widget.sessionId,
+          widget.threadId,
           UserInputResolutionCommand(answers: _answers()),
         );
   }

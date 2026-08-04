@@ -94,15 +94,6 @@ impl StudioRuntime {
         if let Some(runtime) = framework.as_ref() {
             return Ok(runtime.clone());
         }
-        for agent_id in self.store.reconcile_runtime_session_ownership().await? {
-            tracing::warn!(
-                agent_id,
-                "removed runtime registration that no longer owns its claimed Studio sessions"
-            );
-        }
-        self.agent_resources
-            .restore_bindings(self.store.list_active_agent_sessions().await?)
-            .await;
         let host = StudioAgentHost::new(
             self.store.clone(),
             self.config_store.clone(),
@@ -129,28 +120,23 @@ impl StudioRuntime {
         Ok(runtime)
     }
 
-    /// 订阅 PL canonical session stream；首帧由 framework 决定为 snapshot 或 replay。
-    pub async fn subscribe_session_events(
+    /// 订阅 PL canonical Thread stream；首帧固定为 authoritative snapshot。
+    pub async fn subscribe_thread(
         &self,
-        request: pl_protocol::SessionSubscriptionRequest,
-    ) -> Result<pl_core::SessionEventSubscription> {
-        let framework = self.agent_framework().await?;
-        framework
-            .handle()
-            .subscribe_session(request)
+        request: pl_protocol::ThreadSubscriptionRequest,
+    ) -> Result<pl_core::ThreadEventSubscription> {
+        let (handle, _) = self.ensure_thread_agent(&request.thread_id).await?;
+        handle
+            .subscribe_thread(request)
             .map_err(|error| anyhow::anyhow!(error))
     }
 
-    /// 读取包含尚未终态化 delta overlay 的 authoritative session snapshot。
-    pub async fn session_event_snapshot(
-        &self,
-        session_id: &str,
-    ) -> Result<pl_protocol::SessionViewSnapshot> {
-        let framework = self.agent_framework().await?;
-        let session_id = pl_core::SessionId::new(session_id.to_string())?;
-        framework
-            .handle()
-            .session_snapshot(&session_id)
+    /// 读取包含尚未终态化 delta overlay 的 authoritative Thread snapshot。
+    pub async fn thread_snapshot(&self, thread_id: &str) -> Result<pl_protocol::ThreadSnapshot> {
+        let (handle, _) = self.ensure_thread_agent(thread_id).await?;
+        let thread_id = pl_core::ThreadId::new(thread_id.to_string())?;
+        handle
+            .thread_snapshot(&thread_id)
             .map_err(|error| anyhow::anyhow!(error))
     }
 
@@ -287,7 +273,7 @@ impl StudioRuntime {
                 category: StudioRecoveryIssueCategory::Repository,
                 action: StudioRecoveryIssueAction::RemoveProject,
                 project_id: Some(project.id),
-                session_id: None,
+                thread_id: None,
                 task_run_id: None,
                 message: format!("Project workspace is unavailable: {error}"),
             });
