@@ -2,10 +2,10 @@
 
 ## minisign-verify
 
-Pure Studio vendors `minisign-verify` 0.2.5 from
-https://github.com/jedisct1/rust-minisign-verify for offline, pinned verification of Minisign
-signatures. It is licensed under the MIT License; the license text is retained at
-`third_party/minisign-verify/LICENSE`.
+Pure Studio depends on the official `minisign-verify` 0.2.5 crate from
+https://crates.io/crates/minisign-verify for streaming verification of Minisign signatures.
+Source and license information are published at
+https://github.com/jedisct1/rust-minisign-verify.
 
 ## opencode
 
