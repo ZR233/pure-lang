@@ -68,7 +68,7 @@ impl TaskCoordinator {
             status: MergeStatus::Conflicted,
             previous_head: scope.run.expected_head.clone(),
             new_head: None,
-            agent_id: scope.outcome.agent_id.clone(),
+            agent_id: scope.completion.executor_agent_id.clone(),
             source_commit: scope.delivery.head_commit.clone(),
             changed_files: scope.delivery.changed_files.clone(),
             verification: Vec::new(),

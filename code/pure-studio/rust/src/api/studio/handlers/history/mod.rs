@@ -1,63 +1,65 @@
-use anyhow::Context;
-
-use crate::api::studio::convert::session_stream::session_event;
+use crate::api::studio::convert::records::thread_from_record;
+use crate::api::studio::convert::thread_stream::{
+    bridge_thread, bridge_thread_item, bridge_thread_snapshot, bridge_turn,
+};
 use crate::api::studio::runtime::active_bridge;
 use crate::api::studio::types::{
-    BridgeError, BridgeSessionHistoryItem, BridgeSessionHistoryTurn, LoadSessionHistoryPageRequest,
-    LoadSessionHistoryPageResponse,
+    BridgeError, BridgeThread, BridgeThreadSnapshot, BridgeThreadTurnHistory, BridgeThreadTurnPage,
+    ListThreadTurnsRequest,
 };
 
-pub async fn load_session_history_page(
-    request: LoadSessionHistoryPageRequest,
-) -> Result<LoadSessionHistoryPageResponse, BridgeError> {
+pub async fn list_threads(project_id: String) -> Result<Vec<BridgeThread>, BridgeError> {
     let bridge = active_bridge().await?;
-    bridge
+    Ok(bridge
         .studio
         .store()
-        .read_session(&request.session_id)
+        .list_threads(&project_id)
         .await?
-        .context("selected session not found")?;
+        .into_iter()
+        .map(thread_from_record)
+        .map(bridge_thread)
+        .collect())
+}
+
+pub async fn read_thread(thread_id: String) -> Result<BridgeThreadSnapshot, BridgeError> {
+    let bridge = active_bridge().await?;
+    Ok(bridge_thread_snapshot(
+        bridge.studio.thread_snapshot(&thread_id).await?,
+    )?)
+}
+
+pub async fn list_thread_turns(
+    request: ListThreadTurnsRequest,
+) -> Result<BridgeThreadTurnPage, BridgeError> {
+    let bridge = active_bridge().await?;
     let page = bridge
         .studio
-        .load_session_history_page(
-            &request.session_id,
-            request.before_turn_sequence,
+        .list_thread_turns(
+            &request.thread_id,
+            request.cursor.as_deref(),
             usize::try_from(request.limit).map_err(anyhow::Error::from)?,
         )
         .await?;
     let turns = page
         .turns
         .into_iter()
-        .map(|turn| {
-            let items = turn
+        .map(|history| {
+            let items = history
                 .items
                 .into_iter()
-                .map(|item| {
-                    Ok(BridgeSessionHistoryItem {
-                        sequence: item.sequence,
-                        item_id: item.item_id,
-                        turn_id: item.turn_id,
-                        item_kind: item.item_kind,
-                        payload: session_event(item.payload)?,
-                        created_at: item.created_at,
-                    })
-                })
-                .collect::<anyhow::Result<Vec<_>>>()?;
-            Ok(BridgeSessionHistoryTurn {
-                turn_sequence: turn.turn_sequence,
-                turn_id: turn.turn_id,
-                status: turn.status,
-                model_json: turn.model.map(|model| model.to_string()),
-                error_json: turn.error.map(|error| error.to_string()),
-                started_at: turn.started_at,
-                completed_at: turn.completed_at,
+                .map(bridge_thread_item)
+                .collect::<anyhow::Result<Vec<_>>>()?
+                .into_iter()
+                .flatten()
+                .collect();
+            Ok(BridgeThreadTurnHistory {
+                turn: bridge_turn(history.turn),
                 items,
             })
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
-    Ok(LoadSessionHistoryPageResponse {
+    Ok(BridgeThreadTurnPage {
         turns,
-        next_before_turn_sequence: page.next_before_turn_sequence,
-        has_more: page.has_more,
+        next_cursor: page.next_cursor,
     })
 }

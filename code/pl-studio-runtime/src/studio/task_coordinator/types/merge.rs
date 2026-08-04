@@ -24,7 +24,6 @@ pub(crate) struct MergeEvidence {
     pub(crate) version: u32,
     pub(crate) origin_phase: TaskRunPhase,
     pub(crate) work_unit_id: String,
-    pub(crate) outcome_id: String,
     pub(crate) completion_id: String,
     pub(crate) completion_revision: u32,
     pub(crate) delivery_head: String,
@@ -113,7 +112,7 @@ pub(crate) struct MergeIndexEntry {
 }
 
 pub(crate) struct BeginTaskMerge {
-    pub(crate) session_id: String,
+    pub(crate) thread_id: String,
     pub(crate) agent_id: String,
     pub(crate) expected_head: String,
     pub(crate) pre_index_tree: String,
@@ -124,7 +123,6 @@ pub(crate) struct TaskMergeScope {
     pub(crate) run: TaskRunRecord,
     pub(crate) lease: BranchLeaseRecord,
     pub(crate) work_unit: WorkUnitRecord,
-    pub(crate) outcome: AgentOutcomeRecord,
     pub(crate) completion: WorkCompletionRecord,
     pub(crate) delivery: AgentDelivery,
     pub(crate) merge: MergeRecord,
@@ -183,7 +181,9 @@ pub(crate) struct ReviewRoundRecord {
     pub(crate) reviewed_head: String,
     pub(crate) verdict: ReviewVerdict,
     pub(crate) requested_by_call_id: String,
-    pub(crate) reviewer_agent_id: Option<String>,
+    pub(crate) reviewer_thread_id: Option<String>,
+    pub(crate) reviewer_status: ThreadExecutionStatus,
+    pub(crate) reviewer_error: Option<String>,
     pub(crate) summary: Option<String>,
     pub(crate) design_references: Vec<ReviewDesignReference>,
     pub(crate) findings: Vec<ReviewFinding>,
@@ -226,31 +226,17 @@ pub(crate) struct CreateWorkUnit {
     pub(crate) attempt: u32,
 }
 
-pub(crate) struct CreateAgentOutcome {
-    pub(crate) task_run_id: String,
-    pub(crate) work_unit_id: Option<String>,
-    pub(crate) agent_id: String,
-    pub(crate) owner_path: String,
-    pub(crate) initiated_by: String,
-    pub(crate) requested_by_call_id: String,
-    pub(crate) role: String,
-    pub(crate) status: AgentOutcomeStatus,
-    pub(crate) attempt: u32,
-}
-
 pub(crate) struct AllocateExecutor {
-    pub(crate) session_id: String,
+    pub(crate) thread_id: String,
     pub(crate) title: String,
     pub(crate) owned_paths: Vec<String>,
     pub(crate) agent_id: String,
-    pub(crate) owner_path: String,
     pub(crate) requested_by_call_id: String,
 }
 
 pub(crate) struct ExecutorAllocation {
     pub(crate) run: TaskRunRecord,
     pub(crate) work_unit: WorkUnitRecord,
-    pub(crate) outcome: AgentOutcomeRecord,
 }
 
 #[cfg(test)]
@@ -260,13 +246,6 @@ pub(crate) struct CreateMergeRecord {
     pub(crate) expected_head: String,
     pub(crate) source_commit: String,
     pub(crate) conflict_files: Vec<String>,
-}
-
-#[cfg(test)]
-pub(crate) struct UpdateAgentOutcome {
-    pub(crate) status: AgentOutcomeStatus,
-    pub(crate) summary: Option<String>,
-    pub(crate) error: Option<String>,
 }
 
 #[cfg(test)]

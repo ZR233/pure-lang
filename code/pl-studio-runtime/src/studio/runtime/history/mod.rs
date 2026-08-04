@@ -1,16 +1,15 @@
 use anyhow::Result;
+use pl_protocol::ThreadTurnPage;
 
-use crate::studio::{SessionHistoryPageRecord, StudioRuntime};
+use crate::studio::StudioRuntime;
 
 impl StudioRuntime {
-    pub async fn load_session_history_page(
+    pub async fn list_thread_turns(
         &self,
-        session_id: &str,
-        before_turn_sequence: Option<i64>,
+        thread_id: &str,
+        cursor: Option<&str>,
         limit: usize,
-    ) -> Result<SessionHistoryPageRecord> {
-        self.store
-            .load_session_history_page(session_id, before_turn_sequence, limit)
-            .await
+    ) -> Result<ThreadTurnPage> {
+        self.store.list_thread_turns(thread_id, cursor, limit).await
     }
 }

@@ -295,7 +295,7 @@ final class SelectedWorkspaceLayoutProvider
 }
 
 String _$selectedWorkspaceLayoutHash() =>
-    r'8ca5a38fe708d889db75edf9752674dddaa84acb';
+    r'8a8390f4bcedc50a4e3e5348b32566471f7c4dd7';
 
 @ProviderFor(selectedWorkspaceControls)
 final selectedWorkspaceControlsProvider = SelectedWorkspaceControlsProvider._();
@@ -459,7 +459,7 @@ final class AgentTimelineProvider
   }
 }
 
-String _$agentTimelineHash() => r'c896ef39bb8756698c9821c6f606168f1b87fc1b';
+String _$agentTimelineHash() => r'b1313ab17eacbca28b80775b81f21e93f6306b51';
 
 final class AgentTimelineFamily extends $Family
     with $FunctionalFamilyOverride<AsyncValue<TimelinePaneView?>, String> {
@@ -472,8 +472,8 @@ final class AgentTimelineFamily extends $Family
         isAutoDispose: true,
       );
 
-  AgentTimelineProvider call(String sessionId) =>
-      AgentTimelineProvider._(argument: sessionId, from: this);
+  AgentTimelineProvider call(String threadId) =>
+      AgentTimelineProvider._(argument: threadId, from: this);
 
   @override
   String toString() => r'agentTimelineProvider';
@@ -544,7 +544,7 @@ final class AgentWorkspaceProvider
   }
 }
 
-String _$agentWorkspaceHash() => r'92def08b7290378392e885d694b05e51d9450637';
+String _$agentWorkspaceHash() => r'77052c77ae069f40f5e25b712dfadb0dbe1cb1b9';
 
 final class AgentWorkspaceFamily extends $Family
     with $FunctionalFamilyOverride<AsyncValue<AgentWorkspaceView?>, String> {
@@ -557,8 +557,8 @@ final class AgentWorkspaceFamily extends $Family
         isAutoDispose: true,
       );
 
-  AgentWorkspaceProvider call(String sessionId) =>
-      AgentWorkspaceProvider._(argument: sessionId, from: this);
+  AgentWorkspaceProvider call(String threadId) =>
+      AgentWorkspaceProvider._(argument: threadId, from: this);
 
   @override
   String toString() => r'agentWorkspaceProvider';

@@ -1,6 +1,6 @@
 use super::*;
 use crate::studio::task_coordinator::TaskRunPhase;
-use pl_protocol::SessionTurnState;
+use pl_protocol::ThreadItemContent;
 use pretty_assertions::assert_eq;
 use sea_orm::ConnectionTrait;
 
@@ -52,7 +52,7 @@ async fn active_task_locks_session_mode_and_projects_coordinator_runtime() {
     let runtime = StudioRuntime::new(store.clone(), config_store);
     let project = runtime.open_project(&workspace).await.unwrap();
     let session = store
-        .create_session(&project.id, "Task runtime", StudioMode::Task)
+        .create_thread(&project.id, "Task runtime", StudioMode::Task)
         .await
         .unwrap();
     let run = runtime
@@ -62,11 +62,11 @@ async fn active_task_locks_session_mode_and_projects_coordinator_runtime() {
         .unwrap();
 
     let error = runtime
-        .set_session_mode(&session.id, StudioMode::Simple)
+        .set_thread_mode(&session.id, StudioMode::Simple)
         .await
         .unwrap_err();
     let task = runtime
-        .session_task_view(&session.id)
+        .thread_task_view(&session.id)
         .await
         .unwrap()
         .unwrap();
@@ -100,13 +100,13 @@ async fn ui_submit_and_stop_are_core_runtime_apis() {
     let runtime = StudioRuntime::new(store.clone(), config_store);
     let project = runtime.open_project(&workspace).await.unwrap();
     let session = store
-        .create_session(&project.id, "UI runtime", StudioMode::Simple)
+        .create_thread(&project.id, "UI runtime", StudioMode::Simple)
         .await
         .unwrap();
 
     let submitted = runtime
         .submit_prompt(StudioSubmitPromptRequest {
-            session_id: session.id.clone(),
+            thread_id: session.id.clone(),
             prompt: "wait until stopped".to_string(),
             attachment_ids: Vec::new(),
             options: StudioSubmitPromptOptions::default(),
@@ -114,7 +114,7 @@ async fn ui_submit_and_stop_are_core_runtime_apis() {
         .await
         .unwrap();
 
-    assert_eq!(submitted.session_id, session.id);
+    assert_eq!(submitted.thread_id, session.id);
     assert_eq!(runtime.runtime_snapshot().active_turns.len(), 1);
     tokio::time::timeout(TEST_RUNTIME_TIMEOUT, accepted_rx)
         .await
@@ -122,7 +122,7 @@ async fn ui_submit_and_stop_are_core_runtime_apis() {
         .unwrap();
     let stopped = runtime.stop_prompt(session.id.clone()).await.unwrap();
 
-    assert_eq!(stopped.session_id, session.id);
+    assert_eq!(stopped.thread_id, session.id);
     assert!(stopped.stopped);
     let _ = release_tx.send(());
     wait_for_no_active_turn(&runtime).await;
@@ -175,7 +175,7 @@ async fn paused_task_resume_submits_one_hidden_durable_input() {
     let runtime = StudioRuntime::new(store.clone(), config_store);
     let project = runtime.open_project(&workspace).await.unwrap();
     let session = store
-        .create_session(&project.id, "Paused Task", StudioMode::Task)
+        .create_thread(&project.id, "Paused Task", StudioMode::Task)
         .await
         .unwrap();
     let run = runtime
@@ -184,9 +184,9 @@ async fn paused_task_resume_submits_one_hidden_durable_input() {
         .await
         .unwrap();
     store
-        .update_agent_session_status(
+        .update_thread_status(
             &session.id,
-            "interrupted",
+            "idle",
             None,
             None,
             crate::studio::ids::unix_seconds(),
@@ -195,7 +195,7 @@ async fn paused_task_resume_submits_one_hidden_durable_input() {
         .unwrap();
 
     let resumed = runtime.resume_task(session.id.clone()).await.unwrap();
-    assert_eq!(resumed.session_id, session.id);
+    assert_eq!(resumed.thread_id, session.id);
     tokio::time::timeout(TEST_RUNTIME_TIMEOUT, accepted_rx)
         .await
         .unwrap()
@@ -206,37 +206,41 @@ async fn paused_task_resume_submits_one_hidden_durable_input() {
         .database()
         .query_one_raw(sea_orm::Statement::from_sql_and_values(
             sea_orm::DatabaseBackend::Sqlite,
-            "SELECT input_json FROM agent_active_inputs WHERE agent_id = ?",
+            "SELECT mail_id, content, metadata_json, presentation
+             FROM thread_inputs WHERE thread_id = ? AND state = 'active'",
             [owner.to_string().into()],
         ))
         .await
         .unwrap()
         .unwrap();
-    let input_json = input.try_get::<String>("", "input_json").unwrap();
-    let input: serde_json::Value = serde_json::from_str(&input_json).unwrap();
     assert!(
-        input["mailId"]
-            .as_str()
+        input
+            .try_get::<String>("", "mail_id")
             .unwrap()
             .starts_with(&format!("task-resume:{}:", run.id))
     );
-    assert_eq!(input["presentation"]["type"], "hidden");
-    assert_eq!(input["metadata"]["kind"], "taskResume");
-    assert_eq!(input["metadata"]["taskRunId"], run.id);
+    assert_eq!(
+        input.try_get::<String>("", "presentation").unwrap(),
+        "hidden"
+    );
+    let metadata: serde_json::Value =
+        serde_json::from_str(&input.try_get::<String>("", "metadata_json").unwrap()).unwrap();
+    assert_eq!(metadata["kind"], "taskResume");
+    assert_eq!(metadata["taskRunId"], run.id);
     assert!(
-        input["message"]
-            .as_str()
+        input
+            .try_get::<String>("", "content")
             .unwrap()
             .contains("Read task_status and list_agents")
     );
     assert!(
         runtime
-            .session_event_snapshot(&session.id)
+            .thread_snapshot(&session.id)
             .await
             .unwrap()
-            .messages
+            .items
             .iter()
-            .all(|message| message.role != crate::SessionMessageRole::User)
+            .all(|item| !matches!(&item.content, ThreadItemContent::UserMessage { .. }))
     );
     runtime
         .resume_task(session.id.clone())
@@ -246,7 +250,8 @@ async fn paused_task_resume_submits_one_hidden_durable_input() {
         .database()
         .query_one_raw(sea_orm::Statement::from_sql_and_values(
             sea_orm::DatabaseBackend::Sqlite,
-            "SELECT COUNT(*) AS count FROM agent_active_inputs WHERE agent_id = ?",
+            "SELECT COUNT(*) AS count FROM thread_inputs
+             WHERE thread_id = ? AND state = 'active'",
             [owner.to_string().into()],
         ))
         .await
@@ -285,13 +290,13 @@ async fn project_cleanup_closes_active_root_and_quarantines_project() {
     let runtime = StudioRuntime::new(store.clone(), config_store);
     let project = runtime.open_project(&workspace).await.unwrap();
     let session = store
-        .create_session(&project.id, "Project cleanup", StudioMode::Simple)
+        .create_thread(&project.id, "Project cleanup", StudioMode::Simple)
         .await
         .unwrap();
 
     runtime
         .submit_prompt(StudioSubmitPromptRequest {
-            session_id: session.id.clone(),
+            thread_id: session.id.clone(),
             prompt: "stay active until project cleanup".to_string(),
             attachment_ids: Vec::new(),
             options: StudioSubmitPromptOptions::default(),
@@ -367,13 +372,13 @@ async fn ui_submit_retries_http_overload_and_completes_session() {
     let runtime = StudioRuntime::new(store.clone(), config_store);
     let project = runtime.open_project(&workspace).await.unwrap();
     let session = store
-        .create_session(&project.id, "UI overload retry", StudioMode::Simple)
+        .create_thread(&project.id, "UI overload retry", StudioMode::Simple)
         .await
         .unwrap();
 
     runtime
         .submit_prompt(StudioSubmitPromptRequest {
-            session_id: session.id.clone(),
+            thread_id: session.id.clone(),
             prompt: "complete after overload".to_string(),
             attachment_ids: Vec::new(),
             options: StudioSubmitPromptOptions::default(),
@@ -382,15 +387,17 @@ async fn ui_submit_retries_http_overload_and_completes_session() {
         .unwrap();
 
     wait_for_no_active_turn(&runtime).await;
-    let snapshot = runtime.session_event_snapshot(&session.id).await.unwrap();
+    let snapshot = runtime.thread_snapshot(&session.id).await.unwrap();
     let request_count = handle.await.unwrap();
 
     assert_eq!(request_count, 2);
-    assert_eq!(
-        snapshot.turn.as_ref().map(|turn| turn.state.clone()),
-        Some(SessionTurnState::Completed),
-        "{snapshot:#?}"
-    );
+    assert!(snapshot.active_turn.is_none(), "{snapshot:#?}");
+    assert!(snapshot.items.iter().any(|item| {
+        matches!(
+            &item.content,
+            ThreadItemContent::AgentMessage { text, .. } if text == "done"
+        )
+    }));
     let _ = tokio::fs::remove_dir_all(home).await;
     let _ = tokio::fs::remove_dir_all(workspace).await;
 }

@@ -55,14 +55,14 @@ extension BridgeProductEventPayloadPatterns on BridgeProductEventPayload {
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( BridgeProductEventPayload_SessionListChanged value)?  sessionListChanged,TResult Function( BridgeProductEventPayload_McpHealthChanged value)?  mcpHealthChanged,TResult Function( BridgeProductEventPayload_LspHealthChanged value)?  lspHealthChanged,TResult Function( BridgeProductEventPayload_SessionTaskChanged value)?  sessionTaskChanged,TResult Function( BridgeProductEventPayload_AgentDirectoryChanged value)?  agentDirectoryChanged,TResult Function( BridgeProductEventPayload_Stale value)?  stale,required TResult orElse(),}){
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( BridgeProductEventPayload_ThreadDirectoryChanged value)?  threadDirectoryChanged,TResult Function( BridgeProductEventPayload_McpHealthChanged value)?  mcpHealthChanged,TResult Function( BridgeProductEventPayload_LspHealthChanged value)?  lspHealthChanged,TResult Function( BridgeProductEventPayload_TaskChanged value)?  taskChanged,TResult Function( BridgeProductEventPayload_AgentDirectoryChanged value)?  agentDirectoryChanged,TResult Function( BridgeProductEventPayload_Stale value)?  stale,required TResult orElse(),}){
 final _that = this;
 switch (_that) {
-case BridgeProductEventPayload_SessionListChanged() when sessionListChanged != null:
-return sessionListChanged(_that);case BridgeProductEventPayload_McpHealthChanged() when mcpHealthChanged != null:
+case BridgeProductEventPayload_ThreadDirectoryChanged() when threadDirectoryChanged != null:
+return threadDirectoryChanged(_that);case BridgeProductEventPayload_McpHealthChanged() when mcpHealthChanged != null:
 return mcpHealthChanged(_that);case BridgeProductEventPayload_LspHealthChanged() when lspHealthChanged != null:
-return lspHealthChanged(_that);case BridgeProductEventPayload_SessionTaskChanged() when sessionTaskChanged != null:
-return sessionTaskChanged(_that);case BridgeProductEventPayload_AgentDirectoryChanged() when agentDirectoryChanged != null:
+return lspHealthChanged(_that);case BridgeProductEventPayload_TaskChanged() when taskChanged != null:
+return taskChanged(_that);case BridgeProductEventPayload_AgentDirectoryChanged() when agentDirectoryChanged != null:
 return agentDirectoryChanged(_that);case BridgeProductEventPayload_Stale() when stale != null:
 return stale(_that);case _:
   return orElse();
@@ -82,14 +82,14 @@ return stale(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( BridgeProductEventPayload_SessionListChanged value)  sessionListChanged,required TResult Function( BridgeProductEventPayload_McpHealthChanged value)  mcpHealthChanged,required TResult Function( BridgeProductEventPayload_LspHealthChanged value)  lspHealthChanged,required TResult Function( BridgeProductEventPayload_SessionTaskChanged value)  sessionTaskChanged,required TResult Function( BridgeProductEventPayload_AgentDirectoryChanged value)  agentDirectoryChanged,required TResult Function( BridgeProductEventPayload_Stale value)  stale,}){
+@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( BridgeProductEventPayload_ThreadDirectoryChanged value)  threadDirectoryChanged,required TResult Function( BridgeProductEventPayload_McpHealthChanged value)  mcpHealthChanged,required TResult Function( BridgeProductEventPayload_LspHealthChanged value)  lspHealthChanged,required TResult Function( BridgeProductEventPayload_TaskChanged value)  taskChanged,required TResult Function( BridgeProductEventPayload_AgentDirectoryChanged value)  agentDirectoryChanged,required TResult Function( BridgeProductEventPayload_Stale value)  stale,}){
 final _that = this;
 switch (_that) {
-case BridgeProductEventPayload_SessionListChanged():
-return sessionListChanged(_that);case BridgeProductEventPayload_McpHealthChanged():
+case BridgeProductEventPayload_ThreadDirectoryChanged():
+return threadDirectoryChanged(_that);case BridgeProductEventPayload_McpHealthChanged():
 return mcpHealthChanged(_that);case BridgeProductEventPayload_LspHealthChanged():
-return lspHealthChanged(_that);case BridgeProductEventPayload_SessionTaskChanged():
-return sessionTaskChanged(_that);case BridgeProductEventPayload_AgentDirectoryChanged():
+return lspHealthChanged(_that);case BridgeProductEventPayload_TaskChanged():
+return taskChanged(_that);case BridgeProductEventPayload_AgentDirectoryChanged():
 return agentDirectoryChanged(_that);case BridgeProductEventPayload_Stale():
 return stale(_that);}
 }
@@ -105,14 +105,14 @@ return stale(_that);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( BridgeProductEventPayload_SessionListChanged value)?  sessionListChanged,TResult? Function( BridgeProductEventPayload_McpHealthChanged value)?  mcpHealthChanged,TResult? Function( BridgeProductEventPayload_LspHealthChanged value)?  lspHealthChanged,TResult? Function( BridgeProductEventPayload_SessionTaskChanged value)?  sessionTaskChanged,TResult? Function( BridgeProductEventPayload_AgentDirectoryChanged value)?  agentDirectoryChanged,TResult? Function( BridgeProductEventPayload_Stale value)?  stale,}){
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( BridgeProductEventPayload_ThreadDirectoryChanged value)?  threadDirectoryChanged,TResult? Function( BridgeProductEventPayload_McpHealthChanged value)?  mcpHealthChanged,TResult? Function( BridgeProductEventPayload_LspHealthChanged value)?  lspHealthChanged,TResult? Function( BridgeProductEventPayload_TaskChanged value)?  taskChanged,TResult? Function( BridgeProductEventPayload_AgentDirectoryChanged value)?  agentDirectoryChanged,TResult? Function( BridgeProductEventPayload_Stale value)?  stale,}){
 final _that = this;
 switch (_that) {
-case BridgeProductEventPayload_SessionListChanged() when sessionListChanged != null:
-return sessionListChanged(_that);case BridgeProductEventPayload_McpHealthChanged() when mcpHealthChanged != null:
+case BridgeProductEventPayload_ThreadDirectoryChanged() when threadDirectoryChanged != null:
+return threadDirectoryChanged(_that);case BridgeProductEventPayload_McpHealthChanged() when mcpHealthChanged != null:
 return mcpHealthChanged(_that);case BridgeProductEventPayload_LspHealthChanged() when lspHealthChanged != null:
-return lspHealthChanged(_that);case BridgeProductEventPayload_SessionTaskChanged() when sessionTaskChanged != null:
-return sessionTaskChanged(_that);case BridgeProductEventPayload_AgentDirectoryChanged() when agentDirectoryChanged != null:
+return lspHealthChanged(_that);case BridgeProductEventPayload_TaskChanged() when taskChanged != null:
+return taskChanged(_that);case BridgeProductEventPayload_AgentDirectoryChanged() when agentDirectoryChanged != null:
 return agentDirectoryChanged(_that);case BridgeProductEventPayload_Stale() when stale != null:
 return stale(_that);case _:
   return null;
@@ -131,14 +131,14 @@ return stale(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( String projectId,  List<SessionDto> sessions)?  sessionListChanged,TResult Function( BridgeMcpHealthDto health)?  mcpHealthChanged,TResult Function( BridgeLspHealthDto health)?  lspHealthChanged,TResult Function( String sessionId,  BridgeTaskRuntimeDto? task)?  sessionTaskChanged,TResult Function( String rootSessionId,  BridgeAgentDirectoryEntryDto agent)?  agentDirectoryChanged,TResult Function( BigInt laggedEvents)?  stale,required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( String projectId,  List<BridgeThread> threads)?  threadDirectoryChanged,TResult Function( BridgeMcpHealthDto health)?  mcpHealthChanged,TResult Function( BridgeLspHealthDto health)?  lspHealthChanged,TResult Function( String rootThreadId,  BridgeTaskRuntimeDto? task)?  taskChanged,TResult Function( String rootThreadId,  BridgeAgentDirectoryEntryDto agent)?  agentDirectoryChanged,TResult Function( BigInt laggedEvents)?  stale,required TResult orElse(),}) {final _that = this;
 switch (_that) {
-case BridgeProductEventPayload_SessionListChanged() when sessionListChanged != null:
-return sessionListChanged(_that.projectId,_that.sessions);case BridgeProductEventPayload_McpHealthChanged() when mcpHealthChanged != null:
+case BridgeProductEventPayload_ThreadDirectoryChanged() when threadDirectoryChanged != null:
+return threadDirectoryChanged(_that.projectId,_that.threads);case BridgeProductEventPayload_McpHealthChanged() when mcpHealthChanged != null:
 return mcpHealthChanged(_that.health);case BridgeProductEventPayload_LspHealthChanged() when lspHealthChanged != null:
-return lspHealthChanged(_that.health);case BridgeProductEventPayload_SessionTaskChanged() when sessionTaskChanged != null:
-return sessionTaskChanged(_that.sessionId,_that.task);case BridgeProductEventPayload_AgentDirectoryChanged() when agentDirectoryChanged != null:
-return agentDirectoryChanged(_that.rootSessionId,_that.agent);case BridgeProductEventPayload_Stale() when stale != null:
+return lspHealthChanged(_that.health);case BridgeProductEventPayload_TaskChanged() when taskChanged != null:
+return taskChanged(_that.rootThreadId,_that.task);case BridgeProductEventPayload_AgentDirectoryChanged() when agentDirectoryChanged != null:
+return agentDirectoryChanged(_that.rootThreadId,_that.agent);case BridgeProductEventPayload_Stale() when stale != null:
 return stale(_that.laggedEvents);case _:
   return orElse();
 
@@ -157,14 +157,14 @@ return stale(_that.laggedEvents);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( String projectId,  List<SessionDto> sessions)  sessionListChanged,required TResult Function( BridgeMcpHealthDto health)  mcpHealthChanged,required TResult Function( BridgeLspHealthDto health)  lspHealthChanged,required TResult Function( String sessionId,  BridgeTaskRuntimeDto? task)  sessionTaskChanged,required TResult Function( String rootSessionId,  BridgeAgentDirectoryEntryDto agent)  agentDirectoryChanged,required TResult Function( BigInt laggedEvents)  stale,}) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( String projectId,  List<BridgeThread> threads)  threadDirectoryChanged,required TResult Function( BridgeMcpHealthDto health)  mcpHealthChanged,required TResult Function( BridgeLspHealthDto health)  lspHealthChanged,required TResult Function( String rootThreadId,  BridgeTaskRuntimeDto? task)  taskChanged,required TResult Function( String rootThreadId,  BridgeAgentDirectoryEntryDto agent)  agentDirectoryChanged,required TResult Function( BigInt laggedEvents)  stale,}) {final _that = this;
 switch (_that) {
-case BridgeProductEventPayload_SessionListChanged():
-return sessionListChanged(_that.projectId,_that.sessions);case BridgeProductEventPayload_McpHealthChanged():
+case BridgeProductEventPayload_ThreadDirectoryChanged():
+return threadDirectoryChanged(_that.projectId,_that.threads);case BridgeProductEventPayload_McpHealthChanged():
 return mcpHealthChanged(_that.health);case BridgeProductEventPayload_LspHealthChanged():
-return lspHealthChanged(_that.health);case BridgeProductEventPayload_SessionTaskChanged():
-return sessionTaskChanged(_that.sessionId,_that.task);case BridgeProductEventPayload_AgentDirectoryChanged():
-return agentDirectoryChanged(_that.rootSessionId,_that.agent);case BridgeProductEventPayload_Stale():
+return lspHealthChanged(_that.health);case BridgeProductEventPayload_TaskChanged():
+return taskChanged(_that.rootThreadId,_that.task);case BridgeProductEventPayload_AgentDirectoryChanged():
+return agentDirectoryChanged(_that.rootThreadId,_that.agent);case BridgeProductEventPayload_Stale():
 return stale(_that.laggedEvents);}
 }
 /// A variant of `when` that fallback to returning `null`
@@ -179,14 +179,14 @@ return stale(_that.laggedEvents);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( String projectId,  List<SessionDto> sessions)?  sessionListChanged,TResult? Function( BridgeMcpHealthDto health)?  mcpHealthChanged,TResult? Function( BridgeLspHealthDto health)?  lspHealthChanged,TResult? Function( String sessionId,  BridgeTaskRuntimeDto? task)?  sessionTaskChanged,TResult? Function( String rootSessionId,  BridgeAgentDirectoryEntryDto agent)?  agentDirectoryChanged,TResult? Function( BigInt laggedEvents)?  stale,}) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( String projectId,  List<BridgeThread> threads)?  threadDirectoryChanged,TResult? Function( BridgeMcpHealthDto health)?  mcpHealthChanged,TResult? Function( BridgeLspHealthDto health)?  lspHealthChanged,TResult? Function( String rootThreadId,  BridgeTaskRuntimeDto? task)?  taskChanged,TResult? Function( String rootThreadId,  BridgeAgentDirectoryEntryDto agent)?  agentDirectoryChanged,TResult? Function( BigInt laggedEvents)?  stale,}) {final _that = this;
 switch (_that) {
-case BridgeProductEventPayload_SessionListChanged() when sessionListChanged != null:
-return sessionListChanged(_that.projectId,_that.sessions);case BridgeProductEventPayload_McpHealthChanged() when mcpHealthChanged != null:
+case BridgeProductEventPayload_ThreadDirectoryChanged() when threadDirectoryChanged != null:
+return threadDirectoryChanged(_that.projectId,_that.threads);case BridgeProductEventPayload_McpHealthChanged() when mcpHealthChanged != null:
 return mcpHealthChanged(_that.health);case BridgeProductEventPayload_LspHealthChanged() when lspHealthChanged != null:
-return lspHealthChanged(_that.health);case BridgeProductEventPayload_SessionTaskChanged() when sessionTaskChanged != null:
-return sessionTaskChanged(_that.sessionId,_that.task);case BridgeProductEventPayload_AgentDirectoryChanged() when agentDirectoryChanged != null:
-return agentDirectoryChanged(_that.rootSessionId,_that.agent);case BridgeProductEventPayload_Stale() when stale != null:
+return lspHealthChanged(_that.health);case BridgeProductEventPayload_TaskChanged() when taskChanged != null:
+return taskChanged(_that.rootThreadId,_that.task);case BridgeProductEventPayload_AgentDirectoryChanged() when agentDirectoryChanged != null:
+return agentDirectoryChanged(_that.rootThreadId,_that.agent);case BridgeProductEventPayload_Stale() when stale != null:
 return stale(_that.laggedEvents);case _:
   return null;
 
@@ -198,16 +198,16 @@ return stale(_that.laggedEvents);case _:
 /// @nodoc
 
 
-class BridgeProductEventPayload_SessionListChanged extends BridgeProductEventPayload {
-  const BridgeProductEventPayload_SessionListChanged({required this.projectId, required final  List<SessionDto> sessions}): _sessions = sessions,super._();
+class BridgeProductEventPayload_ThreadDirectoryChanged extends BridgeProductEventPayload {
+  const BridgeProductEventPayload_ThreadDirectoryChanged({required this.projectId, required final  List<BridgeThread> threads}): _threads = threads,super._();
 
 
  final  String projectId;
- final  List<SessionDto> _sessions;
- List<SessionDto> get sessions {
-  if (_sessions is EqualUnmodifiableListView) return _sessions;
+ final  List<BridgeThread> _threads;
+ List<BridgeThread> get threads {
+  if (_threads is EqualUnmodifiableListView) return _threads;
   // ignore: implicit_dynamic_type
-  return EqualUnmodifiableListView(_sessions);
+  return EqualUnmodifiableListView(_threads);
 }
 
 
@@ -215,33 +215,33 @@ class BridgeProductEventPayload_SessionListChanged extends BridgeProductEventPay
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
 @pragma('vm:prefer-inline')
-$BridgeProductEventPayload_SessionListChangedCopyWith<BridgeProductEventPayload_SessionListChanged> get copyWith => _$BridgeProductEventPayload_SessionListChangedCopyWithImpl<BridgeProductEventPayload_SessionListChanged>(this, _$identity);
+$BridgeProductEventPayload_ThreadDirectoryChangedCopyWith<BridgeProductEventPayload_ThreadDirectoryChanged> get copyWith => _$BridgeProductEventPayload_ThreadDirectoryChangedCopyWithImpl<BridgeProductEventPayload_ThreadDirectoryChanged>(this, _$identity);
 
 
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_SessionListChanged&&(identical(other.projectId, projectId) || other.projectId == projectId)&&const DeepCollectionEquality().equals(other._sessions, _sessions));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_ThreadDirectoryChanged&&(identical(other.projectId, projectId) || other.projectId == projectId)&&const DeepCollectionEquality().equals(other._threads, _threads));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,projectId,const DeepCollectionEquality().hash(_sessions));
+int get hashCode => Object.hash(runtimeType,projectId,const DeepCollectionEquality().hash(_threads));
 
 @override
 String toString() {
-  return 'BridgeProductEventPayload.sessionListChanged(projectId: $projectId, sessions: $sessions)';
+  return 'BridgeProductEventPayload.threadDirectoryChanged(projectId: $projectId, threads: $threads)';
 }
 
 
 }
 
 /// @nodoc
-abstract mixin class $BridgeProductEventPayload_SessionListChangedCopyWith<$Res> implements $BridgeProductEventPayloadCopyWith<$Res> {
-  factory $BridgeProductEventPayload_SessionListChangedCopyWith(BridgeProductEventPayload_SessionListChanged value, $Res Function(BridgeProductEventPayload_SessionListChanged) _then) = _$BridgeProductEventPayload_SessionListChangedCopyWithImpl;
+abstract mixin class $BridgeProductEventPayload_ThreadDirectoryChangedCopyWith<$Res> implements $BridgeProductEventPayloadCopyWith<$Res> {
+  factory $BridgeProductEventPayload_ThreadDirectoryChangedCopyWith(BridgeProductEventPayload_ThreadDirectoryChanged value, $Res Function(BridgeProductEventPayload_ThreadDirectoryChanged) _then) = _$BridgeProductEventPayload_ThreadDirectoryChangedCopyWithImpl;
 @useResult
 $Res call({
- String projectId, List<SessionDto> sessions
+ String projectId, List<BridgeThread> threads
 });
 
 
@@ -249,20 +249,20 @@ $Res call({
 
 }
 /// @nodoc
-class _$BridgeProductEventPayload_SessionListChangedCopyWithImpl<$Res>
-    implements $BridgeProductEventPayload_SessionListChangedCopyWith<$Res> {
-  _$BridgeProductEventPayload_SessionListChangedCopyWithImpl(this._self, this._then);
+class _$BridgeProductEventPayload_ThreadDirectoryChangedCopyWithImpl<$Res>
+    implements $BridgeProductEventPayload_ThreadDirectoryChangedCopyWith<$Res> {
+  _$BridgeProductEventPayload_ThreadDirectoryChangedCopyWithImpl(this._self, this._then);
 
-  final BridgeProductEventPayload_SessionListChanged _self;
-  final $Res Function(BridgeProductEventPayload_SessionListChanged) _then;
+  final BridgeProductEventPayload_ThreadDirectoryChanged _self;
+  final $Res Function(BridgeProductEventPayload_ThreadDirectoryChanged) _then;
 
 /// Create a copy of BridgeProductEventPayload
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') $Res call({Object? projectId = null,Object? sessions = null,}) {
-  return _then(BridgeProductEventPayload_SessionListChanged(
+@pragma('vm:prefer-inline') $Res call({Object? projectId = null,Object? threads = null,}) {
+  return _then(BridgeProductEventPayload_ThreadDirectoryChanged(
 projectId: null == projectId ? _self.projectId : projectId // ignore: cast_nullable_to_non_nullable
-as String,sessions: null == sessions ? _self._sessions : sessions // ignore: cast_nullable_to_non_nullable
-as List<SessionDto>,
+as String,threads: null == threads ? _self._threads : threads // ignore: cast_nullable_to_non_nullable
+as List<BridgeThread>,
   ));
 }
 
@@ -404,44 +404,44 @@ as BridgeLspHealthDto,
 /// @nodoc
 
 
-class BridgeProductEventPayload_SessionTaskChanged extends BridgeProductEventPayload {
-  const BridgeProductEventPayload_SessionTaskChanged({required this.sessionId, this.task}): super._();
+class BridgeProductEventPayload_TaskChanged extends BridgeProductEventPayload {
+  const BridgeProductEventPayload_TaskChanged({required this.rootThreadId, this.task}): super._();
 
 
- final  String sessionId;
+ final  String rootThreadId;
  final  BridgeTaskRuntimeDto? task;
 
 /// Create a copy of BridgeProductEventPayload
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
 @pragma('vm:prefer-inline')
-$BridgeProductEventPayload_SessionTaskChangedCopyWith<BridgeProductEventPayload_SessionTaskChanged> get copyWith => _$BridgeProductEventPayload_SessionTaskChangedCopyWithImpl<BridgeProductEventPayload_SessionTaskChanged>(this, _$identity);
+$BridgeProductEventPayload_TaskChangedCopyWith<BridgeProductEventPayload_TaskChanged> get copyWith => _$BridgeProductEventPayload_TaskChangedCopyWithImpl<BridgeProductEventPayload_TaskChanged>(this, _$identity);
 
 
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_SessionTaskChanged&&(identical(other.sessionId, sessionId) || other.sessionId == sessionId)&&(identical(other.task, task) || other.task == task));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_TaskChanged&&(identical(other.rootThreadId, rootThreadId) || other.rootThreadId == rootThreadId)&&(identical(other.task, task) || other.task == task));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,sessionId,task);
+int get hashCode => Object.hash(runtimeType,rootThreadId,task);
 
 @override
 String toString() {
-  return 'BridgeProductEventPayload.sessionTaskChanged(sessionId: $sessionId, task: $task)';
+  return 'BridgeProductEventPayload.taskChanged(rootThreadId: $rootThreadId, task: $task)';
 }
 
 
 }
 
 /// @nodoc
-abstract mixin class $BridgeProductEventPayload_SessionTaskChangedCopyWith<$Res> implements $BridgeProductEventPayloadCopyWith<$Res> {
-  factory $BridgeProductEventPayload_SessionTaskChangedCopyWith(BridgeProductEventPayload_SessionTaskChanged value, $Res Function(BridgeProductEventPayload_SessionTaskChanged) _then) = _$BridgeProductEventPayload_SessionTaskChangedCopyWithImpl;
+abstract mixin class $BridgeProductEventPayload_TaskChangedCopyWith<$Res> implements $BridgeProductEventPayloadCopyWith<$Res> {
+  factory $BridgeProductEventPayload_TaskChangedCopyWith(BridgeProductEventPayload_TaskChanged value, $Res Function(BridgeProductEventPayload_TaskChanged) _then) = _$BridgeProductEventPayload_TaskChangedCopyWithImpl;
 @useResult
 $Res call({
- String sessionId, BridgeTaskRuntimeDto? task
+ String rootThreadId, BridgeTaskRuntimeDto? task
 });
 
 
@@ -449,18 +449,18 @@ $Res call({
 
 }
 /// @nodoc
-class _$BridgeProductEventPayload_SessionTaskChangedCopyWithImpl<$Res>
-    implements $BridgeProductEventPayload_SessionTaskChangedCopyWith<$Res> {
-  _$BridgeProductEventPayload_SessionTaskChangedCopyWithImpl(this._self, this._then);
+class _$BridgeProductEventPayload_TaskChangedCopyWithImpl<$Res>
+    implements $BridgeProductEventPayload_TaskChangedCopyWith<$Res> {
+  _$BridgeProductEventPayload_TaskChangedCopyWithImpl(this._self, this._then);
 
-  final BridgeProductEventPayload_SessionTaskChanged _self;
-  final $Res Function(BridgeProductEventPayload_SessionTaskChanged) _then;
+  final BridgeProductEventPayload_TaskChanged _self;
+  final $Res Function(BridgeProductEventPayload_TaskChanged) _then;
 
 /// Create a copy of BridgeProductEventPayload
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') $Res call({Object? sessionId = null,Object? task = freezed,}) {
-  return _then(BridgeProductEventPayload_SessionTaskChanged(
-sessionId: null == sessionId ? _self.sessionId : sessionId // ignore: cast_nullable_to_non_nullable
+@pragma('vm:prefer-inline') $Res call({Object? rootThreadId = null,Object? task = freezed,}) {
+  return _then(BridgeProductEventPayload_TaskChanged(
+rootThreadId: null == rootThreadId ? _self.rootThreadId : rootThreadId // ignore: cast_nullable_to_non_nullable
 as String,task: freezed == task ? _self.task : task // ignore: cast_nullable_to_non_nullable
 as BridgeTaskRuntimeDto?,
   ));
@@ -473,10 +473,10 @@ as BridgeTaskRuntimeDto?,
 
 
 class BridgeProductEventPayload_AgentDirectoryChanged extends BridgeProductEventPayload {
-  const BridgeProductEventPayload_AgentDirectoryChanged({required this.rootSessionId, required this.agent}): super._();
+  const BridgeProductEventPayload_AgentDirectoryChanged({required this.rootThreadId, required this.agent}): super._();
 
 
- final  String rootSessionId;
+ final  String rootThreadId;
  final  BridgeAgentDirectoryEntryDto agent;
 
 /// Create a copy of BridgeProductEventPayload
@@ -489,16 +489,16 @@ $BridgeProductEventPayload_AgentDirectoryChangedCopyWith<BridgeProductEventPaylo
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_AgentDirectoryChanged&&(identical(other.rootSessionId, rootSessionId) || other.rootSessionId == rootSessionId)&&(identical(other.agent, agent) || other.agent == agent));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_AgentDirectoryChanged&&(identical(other.rootThreadId, rootThreadId) || other.rootThreadId == rootThreadId)&&(identical(other.agent, agent) || other.agent == agent));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,rootSessionId,agent);
+int get hashCode => Object.hash(runtimeType,rootThreadId,agent);
 
 @override
 String toString() {
-  return 'BridgeProductEventPayload.agentDirectoryChanged(rootSessionId: $rootSessionId, agent: $agent)';
+  return 'BridgeProductEventPayload.agentDirectoryChanged(rootThreadId: $rootThreadId, agent: $agent)';
 }
 
 
@@ -509,7 +509,7 @@ abstract mixin class $BridgeProductEventPayload_AgentDirectoryChangedCopyWith<$R
   factory $BridgeProductEventPayload_AgentDirectoryChangedCopyWith(BridgeProductEventPayload_AgentDirectoryChanged value, $Res Function(BridgeProductEventPayload_AgentDirectoryChanged) _then) = _$BridgeProductEventPayload_AgentDirectoryChangedCopyWithImpl;
 @useResult
 $Res call({
- String rootSessionId, BridgeAgentDirectoryEntryDto agent
+ String rootThreadId, BridgeAgentDirectoryEntryDto agent
 });
 
 
@@ -526,9 +526,9 @@ class _$BridgeProductEventPayload_AgentDirectoryChangedCopyWithImpl<$Res>
 
 /// Create a copy of BridgeProductEventPayload
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') $Res call({Object? rootSessionId = null,Object? agent = null,}) {
+@pragma('vm:prefer-inline') $Res call({Object? rootThreadId = null,Object? agent = null,}) {
   return _then(BridgeProductEventPayload_AgentDirectoryChanged(
-rootSessionId: null == rootSessionId ? _self.rootSessionId : rootSessionId // ignore: cast_nullable_to_non_nullable
+rootThreadId: null == rootThreadId ? _self.rootThreadId : rootThreadId // ignore: cast_nullable_to_non_nullable
 as String,agent: null == agent ? _self.agent : agent // ignore: cast_nullable_to_non_nullable
 as BridgeAgentDirectoryEntryDto,
   ));

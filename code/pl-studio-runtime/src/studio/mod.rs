@@ -17,10 +17,7 @@ pub use interaction_runtime::{
     InteractionEmitter, InteractionEmitterFuture, InteractionRuntime, resolution_matches_kind,
 };
 pub use product_event_runtime::StudioProductEventRuntime;
-pub use records::{
-    AttachmentRecord, ProjectRecord, SessionHistoryItemRecord, SessionHistoryPageRecord,
-    SessionHistoryTurnRecord, SessionKind, SessionRecord, SessionVisibility,
-};
+pub use records::{AttachmentRecord, ProjectRecord, ThreadKind, ThreadRecord, ThreadVisibility};
 pub use runtime::{
     StudioPlanImplementationLifecycle, StudioResolveInteractionResponse, StudioRuntime,
     StudioStopPromptResponse, StudioSubmitPromptOptions, StudioSubmitPromptRequest,
@@ -32,5 +29,5 @@ pub use runtime_state::{
     StudioRecoveryIssueScope, StudioRecoveryResourcePresence, StudioRuntimeSnapshot,
     StudioRuntimeState, StudioRuntimeStatus,
 };
-pub(in crate::studio) use store::AgentSessionSpec;
+pub(in crate::studio) use store::ChildThreadSpec;
 pub use store::{StudioDatabaseError, StudioStore};

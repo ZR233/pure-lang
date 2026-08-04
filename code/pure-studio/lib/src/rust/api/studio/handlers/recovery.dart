@@ -8,6 +8,7 @@ import '../types/error.dart';
 import '../types/response.dart';
 import '../types/runtime.dart';
 import '../types/settings.dart';
+import '../types/thread_stream.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 Future<BridgeRecoveryCleanupPreviewDto> previewRecoveryIssueCleanup({
@@ -27,12 +28,12 @@ Future<BridgeStudioSnapshotResponse> cleanupRecoveryIssue({
   required String issueId,
   required String expectedRevision,
   String? selectedProjectId,
-  String? selectedSessionId,
+  String? selectedThreadId,
 }) => RustLib.instance.api.crateApiStudioHandlersRecoveryCleanupRecoveryIssue(
   issueId: issueId,
   expectedRevision: expectedRevision,
   selectedProjectId: selectedProjectId,
-  selectedSessionId: selectedSessionId,
+  selectedThreadId: selectedThreadId,
 );
 
 Future<BridgeStudioSnapshotResponse> cleanupProject({

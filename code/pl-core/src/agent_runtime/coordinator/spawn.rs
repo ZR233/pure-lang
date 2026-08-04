@@ -1,4 +1,4 @@
-use super::super::{AgentActivityState, AgentDurableState, AgentIdentity, AgentLifecycleState};
+use super::super::{AgentActivityState, AgentIdentity, AgentLifecycleState, ThreadActorState};
 use super::*;
 
 enum SpawnCompensation {
@@ -9,7 +9,7 @@ enum SpawnCompensation {
 pub(super) async fn register_agent<H>(
     host: &H,
     runtime: &AgentRuntimeHandle,
-    actors: &mut BTreeMap<AgentId, AgentLoopHandle>,
+    actors: &AgentRegistry,
     registration: AgentRegistration,
     options: AgentRuntimeOptions,
 ) -> AgentRuntimeResult<AgentSnapshot>
@@ -17,7 +17,7 @@ where
     H: AgentRuntimeHost,
 {
     let id = registration.identity.id.clone();
-    if actors.contains_key(&id) {
+    if actors.read().await.contains_key(&id) {
         return Err(AgentRuntimeError::AlreadyExists(id));
     }
     let state = registration.into_durable_state();
@@ -31,7 +31,7 @@ where
     };
     let outcome = host
         .repository()
-        .commit(SessionHistoryCommit {
+        .commit(ThreadCommit {
             agent_id: id.clone(),
             expected_revision: None,
             next_state: state.clone(),
@@ -42,41 +42,43 @@ where
                 None,
                 None,
             ),
-            mutation: super::super::AgentStateMutation::SnapshotAndQueue,
+            mutation: super::super::ThreadMutation::SnapshotAndQueue,
         })
         .await
         .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
     match outcome {
-        AgentCommitOutcome::Applied => {}
-        AgentCommitOutcome::RevisionConflict { actual_revision } => {
+        ThreadCommitOutcome::Applied => {}
+        ThreadCommitOutcome::RevisionConflict { actual_revision } => {
             return Err(AgentRuntimeError::RevisionConflict {
                 expected: None,
                 actual: actual_revision,
             });
         }
     }
+    runtime
+        .thread_events
+        .replace_snapshot(pl_protocol::ThreadSnapshot::empty(id.as_str()))
+        .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
     runtime.directory.publish_runtime_event(&event);
     host.observer()
         .publish(AgentCommittedEvent::runtime(event))
         .await;
-    actors.insert(
-        id,
-        spawn_agent_loop(
-            host.clone(),
-            state.clone(),
-            runtime.clone(),
-            options.cancel_grace,
-            true,
-            options.command_capacity,
-        ),
+    let actor = spawn_agent_loop(
+        host.clone(),
+        state.clone(),
+        runtime.clone(),
+        options.cancel_grace,
+        true,
+        options.command_capacity,
     );
+    actors.write().await.insert(id, actor);
     Ok(state.snapshot)
 }
 
 pub(super) async fn spawn_child_agent<H>(
     host: &H,
     runtime: &AgentRuntimeHandle,
-    actors: &mut BTreeMap<AgentId, AgentLoopHandle>,
+    actors: &AgentRegistry,
     request: AgentSpawnRequest,
     options: AgentRuntimeOptions,
 ) -> AgentRuntimeResult<AgentSpawnResult>
@@ -90,7 +92,10 @@ where
             parent.lifecycle,
         ));
     }
-    let child_id = AgentId::generate();
+    let child_id = request.thread_id.clone();
+    if actors.read().await.contains_key(&child_id) {
+        return Err(AgentRuntimeError::AlreadyExists(child_id));
+    }
     let identity = AgentIdentity {
         id: child_id.clone(),
         parent_id: Some(parent.identity.id.clone()),
@@ -102,14 +107,14 @@ where
         session: request.session.clone(),
     }
     .into_durable_state();
-    let child_session_id = request.session.id.clone();
+    let child_thread_id = child_id.clone();
     let metadata = request.metadata.clone();
     let initial_turn_id = request.initial_message.map(|message| {
         let turn_id = TurnId::generate();
-        state.pending_inputs.push_back(PendingAgentInput {
+        state.pending_inputs.push_back(DurableMailboxEnvelope {
             mail_id: format!("mail:{turn_id}"),
             turn_id: turn_id.clone(),
-            session_id: child_session_id.clone(),
+            thread_id: child_thread_id.clone(),
             message,
             presentation: super::super::MailboxPresentation::Hidden,
             metadata: request.metadata,
@@ -125,7 +130,7 @@ where
         .prepare_spawn(SpawnLifecycleRequest {
             parent,
             child: state.snapshot.clone(),
-            child_session_id,
+            child_thread_id,
             metadata,
         })
         .await
@@ -140,7 +145,7 @@ where
     };
     let persisted = host
         .repository()
-        .commit(SessionHistoryCommit {
+        .commit(ThreadCommit {
             agent_id: child_id.clone(),
             expected_revision: None,
             next_state: state.clone(),
@@ -151,7 +156,7 @@ where
                 None,
                 None,
             ),
-            mutation: super::super::AgentStateMutation::SnapshotAndQueue,
+            mutation: super::super::ThreadMutation::SnapshotAndQueue,
         })
         .await;
     let outcome = match persisted {
@@ -165,7 +170,7 @@ where
             };
         }
     };
-    if let AgentCommitOutcome::RevisionConflict { actual_revision } = outcome {
+    if let ThreadCommitOutcome::RevisionConflict { actual_revision } = outcome {
         let conflict = AgentRuntimeError::RevisionConflict {
             expected: None,
             actual: actual_revision,
@@ -177,6 +182,10 @@ where
             ))),
         };
     }
+    runtime
+        .thread_events
+        .replace_snapshot(pl_protocol::ThreadSnapshot::empty(child_id.as_str()))
+        .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
     if let Err(error) = host.lifecycle().activate_spawn(&lease).await {
         let rollback = host.lifecycle().rollback_spawn(lease).await;
         let (reason, compensation) = match rollback {
@@ -187,34 +196,30 @@ where
             }
         };
         let compensated = persist_spawn_compensation(host, runtime, state, compensation).await?;
-        actors.insert(
-            child_id,
-            spawn_agent_loop(
-                host.clone(),
-                compensated,
-                runtime.clone(),
-                options.cancel_grace,
-                true,
-                options.command_capacity,
-            ),
+        let actor = spawn_agent_loop(
+            host.clone(),
+            compensated,
+            runtime.clone(),
+            options.cancel_grace,
+            true,
+            options.command_capacity,
         );
+        actors.write().await.insert(child_id, actor);
         return Err(AgentRuntimeError::Lifecycle(reason));
     }
     runtime.directory.publish_runtime_event(&event);
     host.observer()
         .publish(AgentCommittedEvent::runtime(event))
         .await;
-    actors.insert(
-        child_id,
-        spawn_agent_loop(
-            host.clone(),
-            state.clone(),
-            runtime.clone(),
-            options.cancel_grace,
-            true,
-            options.command_capacity,
-        ),
+    let actor = spawn_agent_loop(
+        host.clone(),
+        state.clone(),
+        runtime.clone(),
+        options.cancel_grace,
+        true,
+        options.command_capacity,
     );
+    actors.write().await.insert(child_id, actor);
     Ok(AgentSpawnResult {
         snapshot: state.snapshot,
         initial_turn_id,
@@ -224,9 +229,9 @@ where
 async fn persist_spawn_compensation<H>(
     host: &H,
     runtime: &AgentRuntimeHandle,
-    mut state: AgentDurableState,
+    mut state: ThreadActorState,
     compensation: SpawnCompensation,
-) -> AgentRuntimeResult<AgentDurableState>
+) -> AgentRuntimeResult<ThreadActorState>
 where
     H: AgentRuntimeHost,
 {
@@ -263,7 +268,7 @@ where
     };
     let outcome = host
         .repository()
-        .commit(SessionHistoryCommit {
+        .commit(ThreadCommit {
             agent_id: state.snapshot.identity.id.clone(),
             expected_revision: Some(expected_revision),
             next_state: state.clone(),
@@ -274,19 +279,19 @@ where
                 None,
                 None,
             ),
-            mutation: super::super::AgentStateMutation::SnapshotAndQueue,
+            mutation: super::super::ThreadMutation::SnapshotAndQueue,
         })
         .await
         .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
     match outcome {
-        AgentCommitOutcome::Applied => {
+        ThreadCommitOutcome::Applied => {
             runtime.directory.store_snapshot(state.snapshot.clone());
             host.observer()
                 .publish(AgentCommittedEvent::runtime(event))
                 .await;
             Ok(state)
         }
-        AgentCommitOutcome::RevisionConflict { actual_revision } => {
+        ThreadCommitOutcome::RevisionConflict { actual_revision } => {
             Err(AgentRuntimeError::RevisionConflict {
                 expected: Some(expected_revision),
                 actual: actual_revision,

@@ -51,13 +51,13 @@ impl InteractionRuntime {
         }
     }
 
-    pub fn callback(&self, session_id: String, emitter: InteractionEmitter) -> InteractionCallback {
+    pub fn callback(&self, thread_id: String, emitter: InteractionEmitter) -> InteractionCallback {
         let runtime = self.clone();
         Arc::new(move |request: InteractionRequest| {
             let runtime = runtime.clone();
             let emitter = emitter.clone();
-            let session_id = session_id.clone();
-            Box::pin(async move { runtime.ask(session_id, request, emitter).await })
+            let thread_id = thread_id.clone();
+            Box::pin(async move { runtime.ask(thread_id, request, emitter).await })
         })
     }
 
@@ -120,24 +120,24 @@ impl InteractionRuntime {
         Ok(interaction)
     }
 
-    pub async fn cancel_session(
+    pub async fn cancel_thread(
         &self,
-        session_id: &str,
+        thread_id: &str,
         reason: &str,
         emitter: InteractionEmitter,
     ) -> Result<()> {
-        self.cancel_pending_interactions(session_id, reason, emitter, InteractionCancelScope::All)
+        self.cancel_pending_interactions(thread_id, reason, emitter, InteractionCancelScope::All)
             .await
     }
 
     pub async fn cancel_recovered_tool_approvals(
         &self,
-        session_id: &str,
+        thread_id: &str,
         reason: &str,
         emitter: InteractionEmitter,
     ) -> Result<()> {
         self.cancel_pending_interactions(
-            session_id,
+            thread_id,
             reason,
             emitter,
             InteractionCancelScope::ToolApprovalOnly,
@@ -147,12 +147,12 @@ impl InteractionRuntime {
 
     async fn cancel_pending_interactions(
         &self,
-        session_id: &str,
+        thread_id: &str,
         reason: &str,
         emitter: InteractionEmitter,
         scope: InteractionCancelScope,
     ) -> Result<()> {
-        let pending = self.store.list_pending_interactions(session_id).await?;
+        let pending = self.store.list_pending_interactions(thread_id).await?;
         for mut interaction in pending {
             if !scope.includes(&interaction) {
                 continue;
@@ -179,11 +179,11 @@ impl InteractionRuntime {
 
     async fn ask(
         &self,
-        session_id: String,
+        thread_id: String,
         mut request: InteractionRequest,
         emitter: InteractionEmitter,
     ) -> InteractionResolution {
-        request.scope.session_id = session_id;
+        request.scope.thread_id = thread_id;
         if request.scope.turn_id.trim().is_empty() {
             request.scope.turn_id = request.interaction_id.clone();
         }
@@ -273,7 +273,7 @@ mod tests {
         let store = StudioStore::open_memory().await.unwrap();
         let project = store.upsert_project("C:/work/interactions").await.unwrap();
         let session = store
-            .create_session(&project.id, "Interaction test", StudioMode::Simple)
+            .create_thread(&project.id, "Interaction test", StudioMode::Simple)
             .await
             .unwrap();
         (store, session.id)
@@ -320,7 +320,7 @@ mod tests {
             kind: InteractionKind::UserInput,
             status: InteractionStatus::Pending,
             scope: InteractionScope {
-                session_id: String::new(),
+                thread_id: String::new(),
                 turn_id: "turn-1".to_string(),
                 item_id: Some("tool-1".to_string()),
                 tool_id: Some("tool-1".to_string()),
@@ -342,7 +342,7 @@ mod tests {
             kind: InteractionKind::ToolApproval,
             status: InteractionStatus::Pending,
             scope: InteractionScope {
-                session_id: session_id.to_string(),
+                thread_id: session_id.to_string(),
                 turn_id: "turn-1".to_string(),
                 item_id: Some(id.to_string()),
                 tool_id: Some(id.to_string()),
@@ -371,7 +371,7 @@ mod tests {
 
         let pending = wait_pending(&store, &session_id).await;
         assert_eq!(pending.len(), 1);
-        assert_eq!(pending[0].scope.session_id, session_id);
+        assert_eq!(pending[0].scope.thread_id, session_id);
         assert_eq!(pending[0].scope.agent_path.as_deref(), Some("/root/child"));
         assert_eq!(wait_event_count(&events, 1).await, 1);
 
@@ -401,7 +401,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cancel_session_marks_pending_and_releases_waiters() {
+    async fn cancel_thread_marks_pending_and_releases_waiters() {
         let (store, session_id) = store_with_session().await;
         let runtime = InteractionRuntime::new(store.clone());
         let events = Arc::new(Mutex::new(Vec::new()));
@@ -410,7 +410,7 @@ mod tests {
         assert_eq!(wait_pending(&store, &session_id).await.len(), 1);
 
         runtime
-            .cancel_session(&session_id, "interrupted by test", emitter(events.clone()))
+            .cancel_thread(&session_id, "interrupted by test", emitter(events.clone()))
             .await
             .unwrap();
         let resolution = waiter.await.unwrap();
@@ -441,10 +441,10 @@ mod tests {
         let runtime = InteractionRuntime::new(store.clone());
         let events = Arc::new(Mutex::new(Vec::new()));
         let mut user_input = user_input_interaction("ask-1");
-        user_input.scope.session_id = session_id.clone();
+        user_input.scope.thread_id = session_id.clone();
         let mut plan = user_input_interaction("plan-1");
         plan.kind = InteractionKind::PlanConfirmation;
-        plan.scope.session_id = session_id.clone();
+        plan.scope.thread_id = session_id.clone();
         plan.payload = InteractionPayload::PlanConfirmation {
             plan_id: "turn-1-plan".to_string(),
             content: "1. Inspect\n2. Implement".to_string(),

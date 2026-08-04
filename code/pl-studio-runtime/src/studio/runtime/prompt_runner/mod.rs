@@ -1,18 +1,14 @@
 use std::sync::Arc;
 
-use crate::{
-    InteractionChangedEvent, InteractionKind, InteractionResolution, InteractionStatus,
-    PlanLifecycleEvent, PlanLifecycleState,
-};
+use crate::{InteractionKind, InteractionResolution, InteractionStatus, PlanLifecycleState};
 use anyhow::{Context, Result, bail};
 
 use crate::StudioMode;
 use crate::config::StudioRole;
 use crate::studio::agent_host::root_agent_id;
-use crate::studio::ids::unix_seconds;
 use crate::studio::task_coordinator::{TaskStopOrigin, TaskStopReason};
 use crate::studio::{InteractionEmitter, resolution_matches_kind};
-use crate::studio::{SessionKind, SessionRecord};
+use crate::studio::{ThreadKind, ThreadRecord};
 
 use super::{
     StudioResolveInteractionResponse, StudioRuntime, StudioStopPromptResponse,
@@ -27,7 +23,7 @@ impl StudioRuntime {
         request: StudioSubmitPromptRequest,
     ) -> Result<StudioSubmitPromptResponse> {
         let StudioSubmitPromptRequest {
-            session_id,
+            thread_id,
             prompt,
             attachment_ids,
             options,
@@ -43,25 +39,26 @@ impl StudioRuntime {
         ) {
             bail!("Studio runtime is not ready");
         }
-        let (handle, agent_id) = self.ensure_session_agent(&session_id).await?;
-        let session = pl_core::SessionId::new(session_id.clone())?;
+        let (handle, agent_id) = self.ensure_thread_agent(&thread_id).await?;
+        let thread = pl_core::ThreadId::new(thread_id.clone())?;
         let metadata = submit_metadata(&attachment_ids, &options);
         let presentation = options.presentation.clone();
         let turn_id = handle
             .submit(
                 agent_id.clone(),
-                pl_core::AgentSubmitRequest::start(session.clone(), prompt.clone())
+                pl_core::AgentSubmitRequest::start(thread.clone(), prompt.clone())
                     .with_presentation(presentation)
-                    .with_metadata(metadata),
+                    .with_metadata(metadata)
+                    .with_turn_policy(options.turn_policy),
             )
             .await
             .map_err(|error| anyhow::anyhow!(error))?;
         let cursor = handle
-            .session_snapshot(&session)
+            .thread_snapshot(&thread)
             .map_err(|error| anyhow::anyhow!(error))?
-            .through_sequence;
+            .revision;
         Ok(StudioSubmitPromptResponse {
-            session_id,
+            thread_id,
             turn_id: turn_id.into_string(),
             cursor,
         })
@@ -69,7 +66,7 @@ impl StudioRuntime {
 
     /// Resumes a paused Task after an explicit user action without projecting a
     /// synthetic user message into the Planner timeline.
-    pub async fn resume_task(&self, session_id: String) -> Result<StudioSubmitPromptResponse> {
+    pub async fn resume_task(&self, thread_id: String) -> Result<StudioSubmitPromptResponse> {
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
         if !matches!(
             self.runtime_snapshot().status,
@@ -77,23 +74,23 @@ impl StudioRuntime {
         ) {
             bail!("Studio runtime is not ready");
         }
-        let session_record = self
+        let thread_record = self
             .store
-            .read_session(&session_id)
+            .read_thread(&thread_id)
             .await?
-            .context("resume Task session not found")?;
-        if session_record.session_kind != SessionKind::Root {
-            bail!("only a root Task session can be resumed");
+            .context("resume Task Thread not found")?;
+        if thread_record.thread_kind != ThreadKind::Root {
+            bail!("only a root Task Thread can be resumed");
         }
-        if session_record.agent_status != "interrupted" {
-            bail!("Task session is not paused");
+        if thread_record.status != "idle" {
+            bail!("Task Thread is not paused");
         }
         let run = self
             .store
-            .find_active_task_run_for_session(&session_id)
+            .find_active_task_run_for_root_thread(&thread_id)
             .await?
             .context("active Task run not found")?;
-        let (handle, agent_id) = self.ensure_session_agent(&session_id).await?;
+        let (handle, agent_id) = self.ensure_thread_agent(&thread_id).await?;
         let snapshot = handle
             .snapshot(agent_id.clone())
             .await
@@ -105,10 +102,10 @@ impl StudioRuntime {
             bail!("Task Planner is already active or has pending input");
         }
 
-        let session = pl_core::SessionId::new(session_id.clone())?;
-        let resume_revision = session_record
-            .agent_updated_at
-            .unwrap_or(session_record.updated_at);
+        let thread = pl_core::ThreadId::new(thread_id.clone())?;
+        let resume_revision = thread_record
+            .runtime_updated_at
+            .unwrap_or(thread_record.updated_at);
         let mail_id = format!("task-resume:{}:{resume_revision}", run.id);
         let metadata = serde_json::json!({
             "kind": "taskResume",
@@ -118,7 +115,7 @@ impl StudioRuntime {
         let turn_id = handle
             .submit(
                 agent_id,
-                pl_core::AgentSubmitRequest::start(session.clone(), TASK_RESUME_MESSAGE)
+                pl_core::AgentSubmitRequest::start(thread.clone(), TASK_RESUME_MESSAGE)
                     .with_presentation(pl_core::MailboxPresentation::Hidden)
                     .with_metadata(metadata)
                     .with_mail_id(mail_id),
@@ -126,45 +123,45 @@ impl StudioRuntime {
             .await
             .map_err(|error| anyhow::anyhow!(error))?;
         let cursor = handle
-            .session_snapshot(&session)
+            .thread_snapshot(&thread)
             .map_err(|error| anyhow::anyhow!(error))?
-            .through_sequence;
+            .revision;
         Ok(StudioSubmitPromptResponse {
-            session_id,
+            thread_id,
             turn_id: turn_id.into_string(),
             cursor,
         })
     }
 
-    pub async fn stop_prompt(&self, session_id: String) -> Result<StudioStopPromptResponse> {
+    pub async fn stop_prompt(&self, thread_id: String) -> Result<StudioStopPromptResponse> {
         let framework = self.agent_framework().await?;
         let handle = framework.handle();
         if self
             .store
-            .find_active_task_run_for_session(&session_id)
+            .find_active_task_run_for_root_thread(&thread_id)
             .await?
             .is_some()
         {
             let reason = TaskStopReason::new("用户在 Studio 中请求停止任务")
                 .expect("fixed user stop reason must not be empty");
             self.task_coordinator
-                .stop_task(&session_id, &handle, TaskStopOrigin::UserRequest, reason)
+                .stop_task(&thread_id, &handle, TaskStopOrigin::UserRequest, reason)
                 .await?;
-            let emitter = self.interaction_emitter(session_id.clone());
+            let emitter = self.interaction_emitter(thread_id.clone());
             self.interactions
-                .cancel_session(&session_id, "interrupted by user", emitter)
+                .cancel_thread(&thread_id, "interrupted by user", emitter)
                 .await?;
             return Ok(StudioStopPromptResponse {
-                session_id,
+                thread_id,
                 stopped: true,
             });
         }
-        let agent_id = self.session_owner_agent_id(&session_id).await?;
+        let agent_id = self.thread_agent_path(&thread_id).await?;
         let snapshot = match handle.snapshot(agent_id.clone()).await {
             Ok(snapshot) => snapshot,
             Err(pl_core::AgentRuntimeError::NotFound(_)) => {
                 return Ok(StudioStopPromptResponse {
-                    session_id,
+                    thread_id,
                     stopped: false,
                 });
             }
@@ -172,7 +169,7 @@ impl StudioRuntime {
         };
         let Some(turn_id) = snapshot.active_turn_id else {
             return Ok(StudioStopPromptResponse {
-                session_id,
+                thread_id,
                 stopped: false,
             });
         };
@@ -181,50 +178,50 @@ impl StudioRuntime {
             Err(pl_core::AgentRuntimeError::NoActiveTurn(_))
             | Err(pl_core::AgentRuntimeError::TurnMismatch { .. }) => {
                 return Ok(StudioStopPromptResponse {
-                    session_id,
+                    thread_id,
                     stopped: false,
                 });
             }
             Err(error) => return Err(anyhow::anyhow!(error)),
         }
-        let emitter = self.interaction_emitter(session_id.clone());
+        let emitter = self.interaction_emitter(thread_id.clone());
         self.interactions
-            .cancel_session(&session_id, "interrupted by user", emitter)
+            .cancel_thread(&thread_id, "interrupted by user", emitter)
             .await?;
         Ok(StudioStopPromptResponse {
-            session_id,
+            thread_id,
             stopped: true,
         })
     }
 
-    async fn ensure_session_agent(
+    pub(super) async fn ensure_thread_agent(
         &self,
-        studio_session_id: &str,
+        thread_id: &str,
     ) -> Result<(pl_core::AgentRuntimeHandle, pl_core::AgentId)> {
         let framework = self.agent_framework().await?;
         let handle = framework.handle();
-        let target = self.read_owned_session(studio_session_id).await?;
-        let target_agent_id = pl_core::AgentId::new(target.owner_agent_id.clone())?;
+        let target = self.read_owned_thread(thread_id).await?;
+        let target_agent_id = pl_core::AgentId::new(target.agent_path.clone())?;
         let mut missing = Vec::new();
         let mut current = target;
         loop {
-            let owner_agent_id = pl_core::AgentId::new(current.owner_agent_id.clone())?;
-            match handle.snapshot(owner_agent_id).await {
+            let agent_path = pl_core::AgentId::new(current.agent_path.clone())?;
+            match handle.snapshot(agent_path).await {
                 Ok(_) => break,
                 Err(pl_core::AgentRuntimeError::NotFound(_)) => {}
                 Err(error) => return Err(anyhow::anyhow!(error)),
             }
-            let parent_session_id = current.parent_session_id.clone();
+            let parent_thread_id = current.parent_thread_id.clone();
             missing.push(current);
-            let Some(parent_session_id) = parent_session_id else {
+            let Some(parent_thread_id) = parent_thread_id else {
                 break;
             };
-            current = self.read_owned_session(&parent_session_id).await?;
+            current = self.read_owned_thread(&parent_thread_id).await?;
         }
 
-        for session_record in missing.into_iter().rev() {
+        for thread_record in missing.into_iter().rev() {
             let registration = self
-                .session_agent_registration(&handle, session_record)
+                .thread_agent_registration(&handle, thread_record)
                 .await?;
             match handle.register(registration).await {
                 Ok(_) | Err(pl_core::AgentRuntimeError::AlreadyExists(_)) => {}
@@ -238,48 +235,47 @@ impl StudioRuntime {
         Ok((handle, target_agent_id))
     }
 
-    async fn session_agent_registration(
+    async fn thread_agent_registration(
         &self,
         handle: &pl_core::AgentRuntimeHandle,
-        session_record: SessionRecord,
+        thread_record: ThreadRecord,
     ) -> Result<pl_core::AgentRegistration> {
-        let agent_id = pl_core::AgentId::new(session_record.owner_agent_id.clone())?;
-        let (parent_id, role, depth) = match session_record.session_kind {
-            SessionKind::Root => {
+        let agent_id = pl_core::AgentId::new(thread_record.agent_path.clone())?;
+        let (parent_id, role, depth) = match thread_record.thread_kind {
+            ThreadKind::Root => {
                 anyhow::ensure!(
-                    session_record.parent_session_id.is_none()
-                        && agent_id == root_agent_id(&session_record.id),
-                    "root Studio session {} has invalid canonical owner",
-                    session_record.id
+                    thread_record.parent_thread_id.is_none()
+                        && agent_id == root_agent_id(&thread_record.id),
+                    "root Studio Thread {} has invalid canonical owner",
+                    thread_record.id
                 );
-                let role = match StudioMode::from_label(&session_record.mode) {
+                let role = match StudioMode::from_label(&thread_record.mode) {
                     StudioMode::Simple => StudioRole::Executor,
                     StudioMode::Task => StudioRole::Planner,
                 };
                 (None, role, 0)
             }
-            SessionKind::Agent => {
+            ThreadKind::Agent => {
                 anyhow::ensure!(
-                    agent_id != root_agent_id(&session_record.id),
-                    "child Studio session {} cannot use a root agent identity",
-                    session_record.id
+                    agent_id != root_agent_id(&thread_record.id),
+                    "child Studio Thread {} cannot use a root agent identity",
+                    thread_record.id
                 );
-                let parent_session_id = session_record
-                    .parent_session_id
+                let parent_thread_id = thread_record
+                    .parent_thread_id
                     .as_deref()
-                    .context("child Studio session has no parent session")?;
-                let parent = self.read_owned_session(parent_session_id).await?;
-                let parent_id = pl_core::AgentId::new(parent.owner_agent_id)?;
+                    .context("child Studio Thread has no parent Thread")?;
+                let parent = self.read_owned_thread(parent_thread_id).await?;
+                let parent_id = pl_core::AgentId::new(parent.agent_path)?;
                 let parent_snapshot = handle
                     .snapshot(parent_id.clone())
                     .await
                     .map_err(|error| anyhow::anyhow!(error))?;
-                let role = StudioRole::from_key(&session_record.owner_role)
-                    .context("child Studio session has an unsupported owner role")?;
+                let role = StudioRole::from_key(&thread_record.role)
+                    .context("child Studio Thread has an unsupported owner role")?;
                 (Some(parent_id), role, parent_snapshot.identity.depth + 1)
             }
         };
-        let session_id = pl_core::SessionId::new(session_record.id.clone())?;
         let registration = pl_core::AgentRegistration {
             identity: pl_core::AgentIdentity {
                 id: agent_id,
@@ -287,32 +283,31 @@ impl StudioRuntime {
                 role: role.id(),
                 depth,
             },
-            session: pl_core::AgentSessionState {
-                id: session_id,
+            session: pl_core::ThreadContextState {
                 metadata: serde_json::json!({
-                    "projectId": session_record.project_id,
-                    "title": session_record.title,
+                    "projectId": thread_record.project_id,
+                    "title": thread_record.title,
                 }),
                 session: pl_core::AgentSession::new(),
                 usage: pl_model::TokenUsage::default(),
                 last_context_tokens: None,
                 trace_sequence: 0,
-                session_event_sequence: 0,
+                thread_revision: 0,
             },
         };
         Ok(registration)
     }
 
-    async fn read_owned_session(&self, session_id: &str) -> Result<SessionRecord> {
+    async fn read_owned_thread(&self, thread_id: &str) -> Result<ThreadRecord> {
         self.store
-            .read_session(session_id)
+            .read_thread(thread_id)
             .await?
-            .context("selected session not found")
+            .context("selected Thread not found")
     }
 
-    async fn session_owner_agent_id(&self, session_id: &str) -> Result<pl_core::AgentId> {
-        let session = self.read_owned_session(session_id).await?;
-        pl_core::AgentId::new(session.owner_agent_id).map_err(Into::into)
+    async fn thread_agent_path(&self, thread_id: &str) -> Result<pl_core::AgentId> {
+        let thread = self.read_owned_thread(thread_id).await?;
+        pl_core::AgentId::new(thread.agent_path).map_err(Into::into)
     }
 
     pub async fn resolve_interaction(
@@ -325,11 +320,11 @@ impl StudioRuntime {
             .read_interaction(&interaction_id)
             .await?
             .context("interaction not found")?;
-        let session_id = current.scope.session_id.clone();
+        let thread_id = current.scope.thread_id.clone();
         if !resolution_matches_kind(&current.kind, &resolution) {
             bail!("interaction resolution kind does not match interaction");
         }
-        let emitter = self.interaction_emitter(session_id.clone());
+        let emitter = self.interaction_emitter(thread_id.clone());
 
         if current.kind == InteractionKind::PlanConfirmation {
             return self
@@ -339,29 +334,29 @@ impl StudioRuntime {
 
         if current.status != InteractionStatus::Pending {
             return Ok(StudioResolveInteractionResponse {
-                session_id,
+                thread_id,
                 interaction: current,
-                sessions: Vec::new(),
+                threads: Vec::new(),
             });
         }
         let detached_user_input_owner = if current.kind == InteractionKind::UserInput {
-            let (handle, owner_agent_id) = self.ensure_session_agent(&session_id).await?;
+            let (handle, agent_path) = self.ensure_thread_agent(&thread_id).await?;
             let snapshot = handle
-                .snapshot(owner_agent_id.clone())
+                .snapshot(agent_path.clone())
                 .await
                 .map_err(|error| anyhow::anyhow!(error))?;
             let origin_turn_is_active = snapshot
                 .active_turn_id
                 .as_ref()
                 .is_some_and(|turn_id| turn_id.as_str() == current.scope.turn_id.as_str());
-            (!origin_turn_is_active).then_some(owner_agent_id)
+            (!origin_turn_is_active).then_some(agent_path)
         } else {
             None
         };
-        let resolved = if let Some(owner_agent_id) = detached_user_input_owner {
-            let (handle, canonical_owner) = self.ensure_session_agent(&session_id).await?;
+        let resolved = if let Some(agent_path) = detached_user_input_owner {
+            let (handle, canonical_owner) = self.ensure_thread_agent(&thread_id).await?;
             anyhow::ensure!(
-                canonical_owner == owner_agent_id,
+                canonical_owner == agent_path,
                 "interaction answer resolved to a different canonical owner"
             );
             let mail_id = format!("interaction-resolution:{interaction_id}");
@@ -395,74 +390,55 @@ impl StudioRuntime {
                 .await?
         };
         Ok(StudioResolveInteractionResponse {
-            session_id,
+            thread_id,
             interaction: resolved,
-            sessions: Vec::new(),
+            threads: Vec::new(),
         })
     }
 
     pub(super) async fn append_plan_lifecycle_event(
         &self,
-        session_id: &str,
+        thread_id: &str,
         plan_id: &str,
         state: PlanLifecycleState,
         turn_id: Option<String>,
         reason: Option<String>,
     ) -> Result<()> {
-        let updated_at = unix_seconds();
-        self.record_session_facts(
-            session_id,
-            vec![pl_core::SessionEventFact::durable(
-                None,
-                turn_id.clone(),
-                updated_at,
-                crate::SessionEventKind::PlanChanged {
-                    event: PlanLifecycleEvent {
-                        plan_id: plan_id.to_string(),
-                        state,
-                        turn_id,
-                        reason,
-                        updated_at,
-                    },
-                },
-            )],
-        )
-        .await?;
+        // Plan 内容由 ThreadItem 持久化；生命周期由 interaction 与 Task 产品表表达。
+        let _ = (thread_id, plan_id, state, turn_id, reason);
         Ok(())
     }
 
-    pub(super) async fn record_session_facts(
+    pub(super) async fn record_thread_facts(
         &self,
-        session_id: &str,
-        facts: Vec<pl_core::SessionEventFact>,
+        thread_id: &str,
+        facts: Vec<pl_core::ThreadNotificationFact>,
     ) -> Result<()> {
         let runtime = self.agent_framework().await?.handle();
-        let owner_agent_id = self.session_owner_agent_id(session_id).await?;
+        let agent_path = self.thread_agent_path(thread_id).await?;
         runtime
-            .record_session_facts(
-                owner_agent_id,
-                pl_core::SessionId::new(session_id.to_string())?,
+            .record_thread_facts(
+                agent_path,
+                pl_core::ThreadId::new(thread_id.to_string())?,
                 facts,
             )
             .await
             .map_err(Into::into)
     }
 
-    pub(super) fn interaction_emitter(&self, session_id: String) -> InteractionEmitter {
+    pub(super) fn interaction_emitter(&self, thread_id: String) -> InteractionEmitter {
         let runtime = self.clone();
         Arc::new(move |interaction| {
             let runtime = runtime.clone();
-            let session_id = session_id.clone();
+            let thread_id = thread_id.clone();
             Box::pin(async move {
                 runtime
-                    .record_session_facts(
-                        &session_id,
-                        vec![pl_core::SessionEventFact::durable(
-                            None,
-                            Some(interaction.scope.turn_id.clone()),
+                    .record_thread_facts(
+                        &thread_id,
+                        vec![pl_core::ThreadNotificationFact::durable(
                             interaction.updated_at,
-                            crate::SessionEventKind::InteractionChanged {
-                                event: Box::new(InteractionChangedEvent { interaction }),
+                            pl_protocol::ThreadNotification::InteractionChanged {
+                                interaction: Box::new(interaction),
                             },
                         )],
                     )
@@ -474,9 +450,9 @@ impl StudioRuntime {
 
     pub(super) async fn recover_interactions_after_restart(&self) -> Result<()> {
         for interaction in self.store.list_restart_recoverable_user_inputs().await? {
-            let session_id = interaction.scope.session_id.clone();
-            let _ = self.ensure_session_agent(&session_id).await?;
-            let emitter = self.interaction_emitter(session_id);
+            let thread_id = interaction.scope.thread_id.clone();
+            let _ = self.ensure_thread_agent(&thread_id).await?;
+            let emitter = self.interaction_emitter(thread_id);
             let recovered = self
                 .interactions
                 .recover_user_input(interaction, emitter)
@@ -486,20 +462,34 @@ impl StudioRuntime {
                 .await?;
         }
 
-        let mut session_ids = self
+        let mut thread_ids = self
             .store
-            .list_sessions_with_transient_pending_interactions()
+            .list_threads_with_transient_pending_interactions()
             .await?;
-        session_ids.sort();
-        session_ids.dedup();
-        for session_id in session_ids {
+        thread_ids.sort();
+        thread_ids.dedup();
+        for thread_id in thread_ids {
             // pending interaction 可能先于 framework registration 持久化。
             // 先恢复 canonical owner，事件仍由 PL actor 分配序列、持久化并广播。
-            let _ = self.ensure_session_agent(&session_id).await?;
-            let emitter = self.interaction_emitter(session_id.clone());
+            let (handle, _) = self.ensure_thread_agent(&thread_id).await?;
+            let canonical = handle
+                .thread_snapshot(&pl_core::ThreadId::new(thread_id.clone())?)
+                .map_err(|error| anyhow::anyhow!(error))?;
+            let emitter = self.interaction_emitter(thread_id.clone());
+            for interaction in self.store.list_pending_interactions(&thread_id).await? {
+                if interaction.kind == InteractionKind::ToolApproval
+                    || canonical
+                        .interactions
+                        .iter()
+                        .any(|candidate| candidate.interaction_id == interaction.interaction_id)
+                {
+                    continue;
+                }
+                emitter(interaction).await?;
+            }
             self.interactions
                 .cancel_recovered_tool_approvals(
-                    &session_id,
+                    &thread_id,
                     "application restarted before approval completed",
                     emitter,
                 )
@@ -515,7 +505,7 @@ fn submit_metadata(
 ) -> serde_json::Value {
     let lifecycle = options.lifecycle.as_ref().map(|lifecycle| {
         serde_json::json!({
-            "sessionId": lifecycle.session_id,
+            "threadId": lifecycle.thread_id,
             "planId": lifecycle.plan_id,
         })
     });

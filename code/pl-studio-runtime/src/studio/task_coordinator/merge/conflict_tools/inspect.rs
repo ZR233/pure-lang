@@ -13,14 +13,12 @@ use crate::studio::task_coordinator::{
 impl TaskCoordinator {
     pub(crate) async fn list_active_conflicts(
         &self,
-        session_id: &str,
+        thread_id: &str,
         merge_id: &str,
     ) -> Result<Vec<ConflictListItem>> {
         let guard = self.lock_branch_mutation().await;
         self.ensure_branch_mutation_guard(&guard)?;
-        let (scope, unmerged) = self
-            .load_active_conflict_scope(session_id, merge_id)
-            .await?;
+        let (scope, unmerged) = self.load_active_conflict_scope(thread_id, merge_id).await?;
         let manifest = scope
             .merge
             .evidence
@@ -44,15 +42,13 @@ impl TaskCoordinator {
 
     pub(crate) async fn read_active_conflict(
         &self,
-        session_id: &str,
+        thread_id: &str,
         merge_id: &str,
         path: &str,
     ) -> Result<ConflictReadOutput> {
         let guard = self.lock_branch_mutation().await;
         self.ensure_branch_mutation_guard(&guard)?;
-        let (scope, _) = self
-            .load_active_conflict_scope(session_id, merge_id)
-            .await?;
+        let (scope, _) = self.load_active_conflict_scope(thread_id, merge_id).await?;
         let entry = conflict_entry(&scope, path)?;
         let workspace = Path::new(&scope.run.workspace_root);
         let combined = run_git(

@@ -54,7 +54,7 @@ struct TaskMergeAgentInput {
 }
 
 struct MergeAgentRequest<'a> {
-    session_id: &'a str,
+    thread_id: &'a str,
     agent_id: &'a str,
     expected_head: &'a str,
 }
@@ -62,11 +62,11 @@ struct MergeAgentRequest<'a> {
 impl TaskCoordinator {
     pub(crate) fn task_merge_agent_tool(
         self: &Arc<Self>,
-        session_id: impl Into<String>,
+        thread_id: impl Into<String>,
         runtime: AgentRuntimeHandle,
     ) -> RegisteredTool {
         let coordinator = self.clone();
-        let session_id = session_id.into();
+        let thread_id = thread_id.into();
         RegisteredTool::from_typed_fallible_execution_result(
             "task_merge_agent",
             "Merge one validated executor delivery into the task branch.",
@@ -79,13 +79,13 @@ impl TaskCoordinator {
             ]),
             move |arguments: TaskMergeAgentInput, _context| {
                 let coordinator = coordinator.clone();
-                let session_id = session_id.clone();
+                let thread_id = thread_id.clone();
                 let runtime = runtime.clone();
                 async move {
                     let output = coordinator
                         .merge_agent(
                             MergeAgentRequest {
-                                session_id: &session_id,
+                                thread_id: &thread_id,
                                 agent_id: &arguments.agent_id,
                                 expected_head: &arguments.expected_head_commit,
                             },
@@ -114,7 +114,7 @@ impl TaskCoordinator {
         }
         if let Some(scope) = self
             .store
-            .find_accepted_merge_scope(request.session_id, agent_id, caller_expected_head)
+            .find_accepted_merge_scope(request.thread_id, agent_id, caller_expected_head)
             .await?
         {
             self.ensure_process_lease_owned(&scope.run)?;
@@ -129,7 +129,7 @@ impl TaskCoordinator {
             let guard = self.lock_branch_mutation().await;
             self.ensure_branch_mutation_guard(&guard)?;
             let scope = self
-                .load_merge_preflight_scope(request.session_id, agent_id)
+                .load_merge_preflight_scope(request.thread_id, agent_id)
                 .await?;
             self.ensure_process_lease_owned(&scope.run)?;
             let preflight = validate_merge_preflight(
@@ -143,7 +143,7 @@ impl TaskCoordinator {
             let scope = self
                 .store
                 .begin_task_merge(BeginTaskMerge {
-                    session_id: request.session_id.to_string(),
+                    thread_id: request.thread_id.to_string(),
                     agent_id: agent_id.to_string(),
                     expected_head: caller_expected_head.to_string(),
                     pre_index_tree: preflight.pre_index_tree,
@@ -170,7 +170,7 @@ impl TaskCoordinator {
     )]
     pub(crate) async fn merge_agent_with_verifier<V: MergeVerifier, R>(
         &self,
-        session_id: &str,
+        thread_id: &str,
         agent_id: &str,
         caller_expected_head: &str,
         _runtime_marker: &R,
@@ -180,7 +180,7 @@ impl TaskCoordinator {
     ) -> Result<TaskMergeAgentOutput> {
         self.merge_agent(
             MergeAgentRequest {
-                session_id,
+                thread_id,
                 agent_id,
                 expected_head: caller_expected_head,
             },
@@ -394,7 +394,7 @@ impl TaskCoordinator {
             status: MergeStatus::Merged,
             previous_head: scope.run.expected_head.clone(),
             new_head: Some(merge_commit),
-            agent_id: scope.outcome.agent_id.clone(),
+            agent_id: scope.completion.executor_agent_id.clone(),
             source_commit: scope.delivery.head_commit.clone(),
             changed_files: scope.delivery.changed_files.clone(),
             verification,

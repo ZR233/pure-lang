@@ -1,14 +1,12 @@
+use pl_protocol::Thread;
 use serde::{Deserialize, Serialize};
 
-use super::{
-    StudioAgentDirectoryEntry, StudioLspHealth, StudioMcpHealth, StudioSessionSummary,
-    StudioTaskRuntime,
-};
+use super::{StudioAgentDirectoryEntry, StudioLspHealth, StudioMcpHealth, StudioTaskRuntime};
 
 /// Studio 产品级事件信封。
 ///
-/// 会话、turn、消息、工具与 interaction 事件统一由 `pl-protocol` 的
-/// `SessionEventEnvelope` 表达；这里仅保留不属于单一会话的低频产品状态。
+/// Thread、Turn、Item 与 interaction 事件统一由 Thread subscription 表达；这里仅
+/// 保留不属于单一 Thread 的低频产品状态。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct StudioProductEventEnvelope {
@@ -28,9 +26,9 @@ pub struct StudioProductEventEnvelope {
     tag = "type"
 )]
 pub enum StudioProductEventKind {
-    SessionListChanged {
+    ThreadDirectoryChanged {
         project_id: String,
-        sessions: Vec<StudioSessionSummary>,
+        threads: Vec<Thread>,
     },
     McpHealthChanged {
         health: StudioMcpHealth,
@@ -38,12 +36,12 @@ pub enum StudioProductEventKind {
     LspHealthChanged {
         health: StudioLspHealth,
     },
-    SessionTaskChanged {
-        session_id: String,
+    TaskChanged {
+        root_thread_id: String,
         task: Option<Box<StudioTaskRuntime>>,
     },
     AgentDirectoryChanged {
-        root_session_id: String,
+        root_thread_id: String,
         agent: Box<StudioAgentDirectoryEntry>,
     },
 }

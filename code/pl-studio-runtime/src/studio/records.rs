@@ -9,33 +9,61 @@ pub struct ProjectRecord {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SessionRecord {
+pub struct ThreadRecord {
     pub id: String,
     pub project_id: String,
     pub title: String,
     pub mode: String,
     pub created_at: i64,
     pub updated_at: i64,
-    pub visibility: SessionVisibility,
-    pub parent_session_id: Option<String>,
-    pub root_session_id: String,
-    pub session_kind: SessionKind,
-    pub owner_agent_id: String,
-    pub owner_role: String,
-    pub agent_status: String,
-    pub agent_summary: Option<String>,
-    pub agent_error: Option<String>,
-    pub agent_updated_at: Option<i64>,
-    pub instruction_snapshot: Option<crate::InstructionSnapshot>,
+    pub visibility: ThreadVisibility,
+    pub parent_thread_id: Option<String>,
+    pub root_thread_id: String,
+    pub thread_kind: ThreadKind,
+    pub agent_path: String,
+    pub role: String,
+    pub status: String,
+    pub summary: Option<String>,
+    pub error: Option<String>,
+    pub runtime_updated_at: Option<i64>,
+}
+
+impl From<ThreadRecord> for pl_protocol::Thread {
+    fn from(value: ThreadRecord) -> Self {
+        Self {
+            id: value.id,
+            project_id: value.project_id,
+            title: value.title,
+            mode: match crate::StudioMode::from_label(&value.mode) {
+                crate::StudioMode::Simple => pl_protocol::ThreadMode::Simple,
+                crate::StudioMode::Task => pl_protocol::ThreadMode::Task,
+            },
+            root_thread_id: value.root_thread_id,
+            parent_thread_id: value.parent_thread_id,
+            role: value.role,
+            agent_path: value.agent_path,
+            status: match value.status.as_str() {
+                "running" => pl_protocol::ThreadStatus::Running,
+                "waiting" => pl_protocol::ThreadStatus::Waiting,
+                "completed" => pl_protocol::ThreadStatus::Completed,
+                "failed" => pl_protocol::ThreadStatus::Failed,
+                "closed" => pl_protocol::ThreadStatus::Closed,
+                _ => pl_protocol::ThreadStatus::Idle,
+            },
+            created_at: value.created_at,
+            updated_at: value.updated_at,
+            archived: value.visibility == ThreadVisibility::Archived,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SessionKind {
+pub enum ThreadKind {
     Root,
     Agent,
 }
 
-impl SessionKind {
+impl ThreadKind {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Root => "root",
@@ -45,12 +73,12 @@ impl SessionKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SessionVisibility {
+pub enum ThreadVisibility {
     Active,
     Archived,
 }
 
-impl SessionVisibility {
+impl ThreadVisibility {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Active => "active",
@@ -62,8 +90,8 @@ impl SessionVisibility {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AttachmentRecord {
     pub id: String,
-    pub session_id: String,
-    pub message_id: Option<String>,
+    pub thread_id: String,
+    pub item_id: Option<String>,
     pub media_type: String,
     pub filename: Option<String>,
     pub storage_path: String,
@@ -71,33 +99,4 @@ pub struct AttachmentRecord {
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub created_at: i64,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct SessionHistoryItemRecord {
-    pub sequence: i64,
-    pub item_id: String,
-    pub turn_id: String,
-    pub item_kind: String,
-    pub payload: crate::SessionEventEnvelope,
-    pub created_at: i64,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct SessionHistoryTurnRecord {
-    pub turn_sequence: i64,
-    pub turn_id: String,
-    pub status: String,
-    pub model: Option<serde_json::Value>,
-    pub error: Option<serde_json::Value>,
-    pub started_at: i64,
-    pub completed_at: Option<i64>,
-    pub items: Vec<SessionHistoryItemRecord>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct SessionHistoryPageRecord {
-    pub turns: Vec<SessionHistoryTurnRecord>,
-    pub next_before_turn_sequence: Option<i64>,
-    pub has_more: bool,
 }

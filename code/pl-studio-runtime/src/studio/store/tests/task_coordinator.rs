@@ -1,9 +1,9 @@
 use super::*;
 use crate::studio::task_coordinator::*;
 
-fn create_input(session_id: &str, phase: TaskRunPhase) -> CreateTaskRun {
+fn create_input(root_thread_id: &str, phase: TaskRunPhase) -> CreateTaskRun {
     CreateTaskRun {
-        session_id: session_id.to_string(),
+        root_thread_id: root_thread_id.to_string(),
         phase,
         plan: "# Plan\n\nImplement it".to_string(),
         workspace_root: "C:/work/task".to_string(),
@@ -18,11 +18,11 @@ async fn task_run_and_branch_lease_are_created_atomically() {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project("C:/work/task").await.unwrap();
     let session = store
-        .create_session(&project.id, "Task", StudioMode::Task)
+        .create_thread(&project.id, "Task", StudioMode::Task)
         .await
         .unwrap();
     let competing_session = store
-        .create_session(&project.id, "Other task", StudioMode::Task)
+        .create_thread(&project.id, "Other task", StudioMode::Task)
         .await
         .unwrap();
 
@@ -49,7 +49,7 @@ async fn task_stop_gate_is_durable_and_keeps_lease_for_terminalization() {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project("C:/work/task-stop").await.unwrap();
     let session = store
-        .create_session(&project.id, "Task", StudioMode::Task)
+        .create_thread(&project.id, "Task", StudioMode::Task)
         .await
         .unwrap();
     let mut input = create_input(&session.id, TaskRunPhase::Implementing);
@@ -71,11 +71,10 @@ async fn task_stop_gate_is_durable_and_keeps_lease_for_terminalization() {
     assert!(store.read_branch_lease(&run.id).await.unwrap().is_some());
     let allocation = store
         .allocate_executor(AllocateExecutor {
-            session_id: session.id.clone(),
+            thread_id: session.id.clone(),
             title: "must not start after request".to_string(),
             owned_paths: vec!["src/**".to_string()],
             agent_id: "agent-after-request".to_string(),
-            owner_path: "/root".to_string(),
             requested_by_call_id: "call-after-request".to_string(),
         })
         .await;
@@ -131,7 +130,6 @@ async fn completion_review_rework_loop_keeps_every_revision_immutable() {
         let completion = fixture
             .store
             .create_work_completion(
-                &fixture.outcome.id,
                 &fixture.work_unit.id,
                 WorkCompletionKind::Delivery,
                 Some(&fixture.delivery(&head)),
@@ -172,13 +170,15 @@ async fn completion_review_rework_loop_keeps_every_revision_immutable() {
             .mark_executor_turn_started(&fixture.agent_id)
             .await
             .unwrap();
-        assert_eq!(fixture.outcome().await.status, AgentOutcomeStatus::Running);
+        assert_eq!(
+            fixture.work_unit().await.execution_status,
+            ThreadExecutionStatus::Running
+        );
     }
 
     let final_completion = fixture
         .store
         .create_work_completion(
-            &fixture.outcome.id,
             &fixture.work_unit.id,
             WorkCompletionKind::Delivery,
             Some(&fixture.delivery("9222222")),
@@ -221,7 +221,6 @@ async fn restart_reconciliation_fails_delivery_reviewer_and_reopens_exact_comple
     let completion = fixture
         .store
         .create_work_completion(
-            &fixture.outcome.id,
             &fixture.work_unit.id,
             WorkCompletionKind::Delivery,
             Some(&fixture.delivery("2222222")),
@@ -232,16 +231,16 @@ async fn restart_reconciliation_fails_delivery_reviewer_and_reopens_exact_comple
     let round = fixture
         .store
         .begin_delivery_review(
-            &fixture.run.session_id,
+            &fixture.run.root_thread_id,
             &fixture.agent_id,
             "restart-delivery-review-call",
         )
         .await
         .unwrap();
-    let (_, reviewer) = fixture
+    let reviewer = fixture
         .store
         .authorize_reviewer_spawn(
-            &fixture.run.session_id,
+            &fixture.run.root_thread_id,
             "restart-delivery-review-call",
             "restart-delivery-reviewer",
         )
@@ -249,14 +248,7 @@ async fn restart_reconciliation_fails_delivery_reviewer_and_reopens_exact_comple
         .unwrap();
     fixture
         .store
-        .update_agent_outcome(
-            &reviewer.id,
-            UpdateAgentOutcome {
-                status: AgentOutcomeStatus::Running,
-                summary: None,
-                error: None,
-            },
-        )
+        .activate_reviewer(&reviewer.id, "restart-delivery-reviewer")
         .await
         .unwrap();
 
@@ -271,8 +263,8 @@ async fn restart_reconciliation_fails_delivery_reviewer_and_reopens_exact_comple
         .await
         .unwrap();
 
-    assert_eq!(first.cancelled_outcomes, 1);
-    assert_eq!(second.cancelled_outcomes, 0);
+    assert_eq!(first.cancelled_thread_executions, 1);
+    assert_eq!(second.cancelled_thread_executions, 0);
     assert_eq!(
         fixture.work_unit().await.status,
         WorkUnitStatus::ReadyForReview
@@ -302,15 +294,10 @@ async fn restart_reconciliation_fails_delivery_reviewer_and_reopens_exact_comple
         stored_round.summary.as_deref(),
         Some("reviewer interrupted by application restart before review_exit")
     );
-    let reviewer = fixture
-        .store
-        .list_agent_outcomes(&fixture.run.id)
-        .await
-        .unwrap()
-        .into_iter()
-        .find(|outcome| outcome.agent_id == "restart-delivery-reviewer")
-        .unwrap();
-    assert_eq!(reviewer.status, AgentOutcomeStatus::Cancelled);
+    assert_eq!(
+        stored_round.reviewer_status,
+        ThreadExecutionStatus::Cancelled
+    );
 }
 
 #[tokio::test]
@@ -318,7 +305,7 @@ async fn concurrent_task_phase_transition_rejects_the_stale_writer() {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project("C:/work/task-cas").await.unwrap();
     let session = store
-        .create_session(&project.id, "Task", StudioMode::Task)
+        .create_thread(&project.id, "Task", StudioMode::Task)
         .await
         .unwrap();
     let (run, _) = store
@@ -359,7 +346,6 @@ struct ExecutorFixture {
     store: StudioStore,
     run: TaskRunRecord,
     work_unit: WorkUnitRecord,
-    outcome: AgentOutcomeRecord,
     agent_id: String,
 }
 
@@ -371,7 +357,7 @@ impl ExecutorFixture {
             .await
             .unwrap();
         let session = store
-            .create_session(&project.id, "Task", StudioMode::Task)
+            .create_thread(&project.id, "Task", StudioMode::Task)
             .await
             .unwrap();
         let mut input = create_input(&session.id, TaskRunPhase::Implementing);
@@ -399,25 +385,14 @@ impl ExecutorFixture {
             )
             .await
             .unwrap();
-        let outcome = store
-            .create_agent_outcome(CreateAgentOutcome {
-                task_run_id: run.id.clone(),
-                work_unit_id: Some(work_unit.id.clone()),
-                agent_id: agent_id.clone(),
-                owner_path: "/root".to_string(),
-                initiated_by: "planner".to_string(),
-                requested_by_call_id: "spawn-call".to_string(),
-                role: "executor".to_string(),
-                status: AgentOutcomeStatus::Running,
-                attempt: 1,
-            })
+        store
+            .activate_executor(&work_unit.id, &agent_id)
             .await
             .unwrap();
         Self {
             store,
             run,
             work_unit,
-            outcome,
             agent_id,
         }
     }
@@ -443,32 +418,29 @@ impl ExecutorFixture {
     ) -> ReviewRoundRecord {
         let round = self
             .store
-            .begin_delivery_review(&self.run.session_id, &self.agent_id, requested_by_call_id)
+            .begin_delivery_review(
+                &self.run.root_thread_id,
+                &self.agent_id,
+                requested_by_call_id,
+            )
             .await
             .unwrap();
         assert_eq!(round.scope, ReviewScope::Delivery);
-        let (_, reviewer) = self
+        let reviewer = self
             .store
             .authorize_reviewer_spawn(
-                &self.run.session_id,
+                &self.run.root_thread_id,
                 requested_by_call_id,
                 reviewer_agent_id,
             )
             .await
             .unwrap();
         self.store
-            .update_agent_outcome(
-                &reviewer.id,
-                UpdateAgentOutcome {
-                    status: AgentOutcomeStatus::Running,
-                    summary: None,
-                    error: None,
-                },
-            )
+            .activate_reviewer(&reviewer.id, reviewer_agent_id)
             .await
             .unwrap();
         self.store
-            .complete_task_review(&self.run.session_id, reviewer_agent_id, review)
+            .complete_task_review(&self.run.root_thread_id, reviewer_agent_id, review)
             .await
             .unwrap()
     }
@@ -478,16 +450,6 @@ impl ExecutorFixture {
             .read_work_unit(&self.work_unit.id)
             .await
             .unwrap()
-            .unwrap()
-    }
-
-    async fn outcome(&self) -> AgentOutcomeRecord {
-        self.store
-            .list_agent_outcomes(&self.run.id)
-            .await
-            .unwrap()
-            .into_iter()
-            .find(|outcome| outcome.id == self.outcome.id)
             .unwrap()
     }
 }

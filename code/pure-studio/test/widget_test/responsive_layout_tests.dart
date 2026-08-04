@@ -120,7 +120,7 @@ void registerResponsiveLayoutTests() {
           expect(find.text('Responsive reviewer'), findsOneWidget);
           expect(find.text('Capture worker'), findsOneWidget);
           final reviewerItem = find.byKey(
-            const ValueKey('agent-session-session-reviewer'),
+            const ValueKey('agent-thread-session-reviewer'),
           );
           expect(reviewerItem, findsOneWidget);
           final stableTriggerRect = tester.getRect(trigger);
@@ -286,7 +286,7 @@ void registerResponsiveLayoutTests() {
         await tester.tapAt(Offset(triggerRect.left + 8, triggerRect.center.dy));
         await tester.pumpAndSettle();
         final firstAgent = find.byKey(
-          const ValueKey('agent-session-stress-session-1'),
+          const ValueKey('agent-thread-stress-session-1'),
         );
         expect(firstAgent, findsOneWidget);
         final menuScrollable = find.ancestor(
@@ -342,32 +342,24 @@ List<RenderParagraph> _renderParagraphs(Finder finder) {
 StudioState _responsiveActivityStressState() {
   final state = responsiveVisualState();
   final updatedAt = DateTime.fromMillisecondsSinceEpoch(1735689600000);
-  final root = state.selectedRootSession!;
+  final root = state.selectedRootThread!;
   final agentSessions = [
     for (var index = 0; index < 15; index++)
-      StudioSession(
+      StudioThread(
         id: 'stress-session-${index + 1}',
         projectId: root.projectId,
         title: 'reviewer ${index + 1}',
         mode: root.mode,
         createdAt: updatedAt.add(Duration(seconds: index + 1)),
         updatedAt: updatedAt.add(Duration(seconds: index + 1)),
-        parentSessionId: root.id,
-        rootSessionId: root.id,
-        sessionKind: StudioSessionKind.agent,
-        ownerAgentId: 'stress-agent-${index + 1}',
-        ownerRole: index.isEven ? 'reviewer' : 'worker',
-        agentStatus: index.isEven ? 'running' : 'completed',
+        parentThreadId: root.id,
+        rootThreadId: root.id,
+        agentPath: 'stress-agent-${index + 1}',
+        role: index.isEven ? 'reviewer' : 'worker',
+        status: index.isEven ? 'running' : 'completed',
       ),
   ];
-  return state.copyWith(
-    sessions: [root, ...agentSessions],
-    runtimesBySession: {
-      state.selectedAgentSessionId!: state.runtime.copyWith(
-        agentCount: agentSessions.length,
-      ),
-    },
-  );
+  return state.copyWith(threads: [root, ...agentSessions]);
 }
 
 bool _rectFitsViewport(Rect rect, {double inset = 0}) {

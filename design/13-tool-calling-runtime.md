@@ -2,7 +2,9 @@
 
 ## 目标
 
-工具调用运行时负责把模型返回的 tool call 转换为本地工具执行、审批、Studio message/part 事件和下一轮模型输入。它必须保证同一个工具调用身份稳定、终态 snapshot 唯一、失败结果可回传给模型，并在 Studio 中保留用户可读的错误原因。
+工具调用运行时负责把模型返回的 tool call 转换为本地工具执行、审批、Studio toolCall Item
+与下一轮模型输入。它必须保证同一个工具调用身份稳定、终态唯一、失败结果可回传给模型，
+并在 Studio 中保留用户可读的错误原因。
 
 ## 身份字段
 
@@ -25,7 +27,11 @@ Core 会话中的 tool result metadata 同时保存两个字段：
 
 这些 metadata 必须通过 typed helper 写入和读取，不允许在 `pl-core`、`pl-model` 之间散落字符串 key。新增会话消息缺少 `tool_call_kind`、`tool_call_id` 或 Responses `call_id` 时，provider request 构造一律返回协议错误——运行期不保留任何缺字段兼容路径。unknown `tool_call_kind` 或缺失 `tool_call_kind` 都是协议错误，不能静默回退到 function。
 
-Studio 工具 trace item id 使用最早稳定的 provider item id 或 runtime tool id 作为相关性锚点，再按 turn 做命名空间隔离；如果 provider 没有 item id，才回退到 `ToolCall.call_id` 或本地 fallback id。后续 delta/done 才补 `call_id` 或 provider item id 时，运行时必须把新身份作为同一工具调用的 correlation alias，继续更新原 trace item，不能把同一个工具调用拆成第二个 trace item。`StudioPart.partId` 不再透传该 trace id，而是在 trace part 首次进入 Studio runtime 时由 turn timeline actor 分配；`StudioToolPart.toolCallId` 表示 runtime 工具展示/执行 id，provider item id 使用 `StudioToolPart.providerItemId`，Responses call id 使用 `StudioToolPart.callId`。core trace 中的 `TracePart` 来自内部 `pl-trace` crate，只允许作为诊断输入，经 Studio runtime 转换为 actor-owned `message.part.updated` / `message.part.delta` 后才能进入 UI。
+Studio toolCall Item id 使用最早稳定的 provider item id 或 runtime tool id 作为相关性锚点，
+再按 Turn 做命名空间隔离；provider 没有 item id 时才回退到 `ToolCall.call_id` 或本地 id。
+后续才出现的新身份只作为 correlation alias，继续更新同一个 Item。core `TracePart` 只作为运行时
+诊断输入，由 ThreadActor 转换成 typed `ItemStarted`、`ItemDelta` 和 `ItemCompleted`；它不是
+Studio 的第二套持久化模型。
 
 ## 模型流完成语义
 
@@ -35,14 +41,14 @@ Chat Completions provider 如果没有 Responses 风格的 completed event，pro
 
 ## 生命周期
 
-每个工具调用先广播并持久化一个 `message.part.updated` 工具 snapshot，表示模型已请求该工具。随后运行时执行以下流程：
+每个工具调用先建立一个稳定的 toolCall Item，并发送 `ItemStarted`。随后运行时执行：
 
 1. 检查当前模式是否允许该工具。
 2. 查找工具注册表。
 3. 对声明路径语义的工具输入执行统一路径解析和访问分类。
 4. 计算权限策略，必要时请求用户审批或 reviewer 审批。
 5. 对批准的工具执行本地实现；对禁用、未知或拒绝的工具直接生成工具结果。
-6. 在统一收尾阶段写入唯一终态 `message.part.updated` snapshot。
+6. 在统一收尾阶段写入完整 authoritative payload，并发送唯一 `ItemCompleted`。
 
 路径类工具不要求模型提供绝对路径。运行时把相对路径按 `workspaceRoot` 解析，规范化为绝对路径后再进入权限判断和实际执行；文件工具、`apply_patch`、`exec.cwd`、`lsp_query_*` 的 `filePath` 和权限 precheck 必须复用同一个 resolver，避免审批看到 workspace 内而执行时解析到 workspace 外。`WorkspaceOnly` 模式拒绝 `..`、Windows drive-relative、越界绝对路径、越界 UNC / verbatim 路径和符号链接越界；`full-access` 允许本地 backend 解析 workspace 外路径，但宿主注入的容器或远程 backend 可以保持更严格的隔离边界。
 
@@ -62,11 +68,16 @@ reviewer 只暴露 effect 策略明确允许的动态工具，未知 effect 默�
 
 内置 Zhipu Coding Plan MCP server 优先复用 Zhipu Coding Plan provider 的 `bearer_token`，并兼容回退到普通 Zhipu provider 的 `bearer_token`。缺少 token 时内置 server 处于 `missingCredential`，不参与后台探测，也不应导致普通 turn 或 subagent 启动失败；检测到 token 后进入后台探测流程，只有探测成功的 server 会被主会话和 subagent runner 注册。HTTP 内置 server 在 transport 层直接发送 bearer token；stdio Vision server 在启动进程时注入 `Z_AI_API_KEY` 和 `Z_AI_MODE=ZHIPU`。
 
-每个 turn 开始时，运行时会把经过当前模式过滤后实际暴露给模型的工具名快照保留为 core 内部 `TracePart`，并在需要时通过 typed Studio part snapshot 展示。该记录只包含 turn id、模式和工具名列表，用于诊断工具可见性，不进入模型上下文；旧 `timeline_events` 表及其 migration、运行期读写路径均已删除。
+每个 Turn 开始时，运行时把实际暴露给模型的工具名保留为内部诊断 trace。它只包含 Turn id、
+模式和工具名，不进入模型上下文，也不创建可见 Item；旧 `timeline_events` 表已删除。
 
-`plan_exit` 是 Task planning 阶段专用的内置协调工具，schema 只包含 `content: string`。它表示“计划已完成，请 Studio 发起确认交互”，不是执行工具；确认实施后会话保持 Task，由 coordinator 通过显式 durable 输入推进后续阶段。`<proposed_plan>` 不再是协议入口。`plan_exit` 生成 durable plan lifecycle 与确认 interaction。
+`plan_exit` 是 Task planning 阶段专用的内置协调工具，schema 只包含 `content: string`。它表示
+“计划已完成，请 Studio 发起确认交互”，不是执行工具；确认后 root Thread 保持 Task，由
+TaskService 通过显式 durable input 推进。`<proposed_plan>` 不再是协议入口。
 
-Studio framework attach 会对活动 Task 根会话执行一次有证据门禁的投影修复：只读取每个会话最新的完整 `TracePartCompleted(Plan)`，并在没有对应 interaction、没有活动 TaskRun、且该 plan 未进入实施或终态时补建确认。重复 attach 必须幂等，不能复活旧计划或制造多个 pending confirmation。
+Studio attach 会对活动 Task root Thread 执行一次有证据门禁的检查：只读取最新完整 plan Item，
+并在没有对应 interaction、没有活动 TaskRun、且 plan 未进入实施或终态时补建确认。重复 attach
+必须幂等，不能复活旧计划或制造多个 pending confirmation。
 
 后台 stdio 子进程（MCP server、`exec` 命令、LSP server）由运行时显式持有生命周期。正常路径必须通过 async shutdown / terminate 请求关闭 stdin、终止进程树并等待退出；Drop 只能做 best-effort 兜底。容器 backend 必须同时终止宿主 transport 进程和容器内进程组，不能只杀 Docker CLI 后留下孤儿任务。Windows GUI 进程中启动这些后台子进程和兜底终止命令时不得显示额外终端窗口。
 
@@ -109,7 +120,8 @@ provider 输出的 function tool arguments 必须是合法 JSON，并由 `pl-mod
 - 策略或用户拒绝：`Tool execution denied: {reason}`
 - 本地执行错误：`Tool execution error: {error}`
 
-这些结果必须作为 tool result 写入会话历史，即使工具被禁用、未知或拒绝。后续模型可以据此恢复、改用其他工具或向用户解释失败原因。
+这些结果必须写入模型上下文对应的 toolCall Item，即使工具被禁用、未知或拒绝。后续模型可以
+据此恢复、改用其他工具或解释失败原因。
 
 `apply_patch` 的解析或上下文匹配失败属于本地执行错误，仍使用 `Tool execution error: {error}` 前缀写回模型上下文。错误文本应包含可恢复提示：不要重复同一个失败 patch；先重新读取目标文件当前内容，再生成更小、更精确的 Codex 风格 patch 重试。失败前已经应用到工作区的 hunk 必须在错误文本中列出 applied changes，不能使用会被误解为 Git commit 的 committed 表述，方便后续模型只处理仍未应用的改动。
 
@@ -125,9 +137,15 @@ provider 输出的 function tool arguments 必须是合法 JSON，并由 `pl-mod
 
 当 `exec` 在 `yieldTimeMs` 内未完成时，result 使用 `running` 状态并带 `processId`。后续模型必须用 `write_stdin` 携带该 `processId` 发送输入或传空 `chars` 轮询，不应重复执行同一条 `exec` 命令。命令管理器只有在子进程退出且 stdout/stderr 管道都已读到 EOF、完整输出文件已写入 workspace 后，才返回 `completed`、`failed`、`timedOut` 或 `interrupted` 终态并释放 `processId`；如果子进程已退出但尾部输出仍在排空，结果仍保持 `running` 并提示继续轮询。需要完整输出时，模型应使用文件读取工具读取 `outputFile`，不要要求命令工具把大输出完整塞回上下文。`write_stdin` 找不到 live process、进程数量达到上限、stdin 写入失败或后台命令已被终止时，应返回可恢复错误，让模型等待、轮询或解释当前状态。
 
-Studio 实时展示层可以在 `exec` 子进程仍运行时看到 stdout/stderr chunk。命令管理器读取管道后先更新内存截断缓冲并分配输出 revision，再通过 trace delta 把 chunk 投影到原 `exec` tool part 的 `tool.result` live overlay，同时异步追加完整输出文件；delta revision 从该 part 已有 revision 继续递增，终态 JSON snapshot 的 revision 不低于最后一个输出 chunk。`write_stdin` 负责写入或轮询后台进程，返回自己的紧凑 JSON 结果；后台进程新增输出仍归属最初启动它的 `exec` tool part，不在父 timeline 中复制成新的工具输出正文。
+Studio 可在 `exec` 子进程仍运行时看到 stdout/stderr chunk。命令管理器更新内存截断缓冲并
+递增 Item revision，再把 chunk 作为原 `exec` toolCall Item 的 `tool.result` delta 发布，同时
+异步追加完整输出文件。terminal payload 的 revision 不低于最后一个 chunk。后台进程新增输出
+始终归属最初启动它的 Item，不在父 Timeline 复制正文。
 
-Studio runtime 的 live-only event 通道只允许发送 `MessagePartDelta` 和 `Stale`。turn、message、part snapshot、agent snapshot、interaction、runtime usage 等 durable 事件必须先通过 store transaction 校验、分配 durable sequence、写入 projection 并持久化后再广播，不能误用 live-only 通道，否则前端 durable cursor 与历史回放会分叉。
+Studio Thread stream 只发送 typed Turn/Item/Interaction/runtime notification。Item delta 驻留
+ThreadActor 内存；Turn/Item terminal 和 Interaction 变化必须在单库事务提交后广播。发生 lag
+发送 `Lagged`，客户端重新订阅并以 authoritative snapshot 覆盖；不存在 durable cursor 或
+replay journal。
 
 Windows 本地 backend 上 `exec.command` 的默认宿主 shell 是 PowerShell：运行时先查找 `pwsh.exe`，再查找 `powershell.exe`，都不可用时才使用 `cmd.exe /C`。PowerShell 命令以 `-NoProfile -Command` 执行，并注入 UTF-8 输出设置；这只影响命令字符串的宿主 shell，不改变 `exec` / `write_stdin` 的公开 schema、审批策略或 JSON 结果字段。
 
@@ -135,29 +153,32 @@ Windows 本地 backend 上 `exec.command` 的默认宿主 shell 是 PowerShell�
 `wait_agents`、`read_agent_session` 和 `close_agent` 的模型可见输出必须由 pl-core
 collaboration adapter 从 runtime typed snapshot 构造；宿主只通过 lifecycle、repository 与
 event sink 提供产品资源和持久化事实，不手写共享状态形状。协作工具不接受 sessionId；
-runtime 从目标 agent 的唯一 canonical session 解析并验证同一大会话树、权限与 lifecycle。
+runtime 从目标 agent 的唯一 ThreadId 解析并验证同一 Thread 树、权限与 lifecycle。
 `send_message` 永不取消：运行中作为 steer，空闲时启动明确的新 turn；`interrupt_agent`
 只取消当前 turn。`wait_agents` 先订阅 Agent Directory watch 再读取 canonical snapshot，
 没有 timeout 或轮询，只由目标 progress、interaction、terminal 或调用方取消结束。Studio
-把 owner lifecycle/progress 投影到大会话级 Agent Directory；每个 agent session 的
-`SubAgentActivity` 只记录该 owner 主动执行的协作事实，`TodoListUpdated` 作为完整
-replacement 保存在该 session 的 canonical snapshot 中。
+把 owner lifecycle/progress 投影到 root Thread 的 Agent Directory；每个 child Thread 只记录
+该 owner 主动执行的协作 Item，Todo 作为 `ThreadRuntimeSnapshot` 的完整 replacement，不伪装成
+Timeline Item。
 
 产品 harness 的 spawn 契约不扩展通用 `spawn_agent` schema。Task 的
 `task_spawn_executor` 以 required `taskName/message/ownedPaths` 建模安全和交付不变量，
 在 runtime spawn 前完成路径静态校验，并将可信内部 intent 交给 Studio lifecycle；
 `task_request_delivery_review` 与 `task_request_integrated_review` 分别固定 completion
-revision 和 Task HEAD 的 reviewer intent。这些工具都创建只属于新 agent 的 canonical
-`AgentSession`，不使用 `spawn_agent.forkTurns`，但仍复用 `AgentRuntime` 的容量、
-repository、lifecycle saga、turn 启动与失败补偿。
+revision 和 Task HEAD 的 reviewer intent。这些工具都创建只属于新 agent 的 child Thread，
+不使用 `spawn_agent.forkTurns`，但仍复用 AgentRuntime 的容量、repository、lifecycle saga、
+Turn 启动与失败补偿。
 
-`update_todo_list` 是 Codex `update_plan` 风格的内置 checklist 工具，root agent 与 subagent 都可用，且不代表 Plan Mode 的 `plan` part。工具输入是完整快照：`explanation?: string` 与 `items: [{ step, status }]`，其中 `status` 只允许 `pending | inProgress | completed`，且同一快照最多一个 `inProgress`。工具成功后只返回紧凑 `{ status: "updated" }` 给模型，同时提交 `TodoListUpdated` durable replacement；canonical session snapshot 保留最新 replacement，Flutter Todo selector 只展示最新值，不按 patch 增量合并，也不把历次更新渲染为 timeline row。
+`update_todo_list` 是 Codex `update_plan` 风格的内置 checklist 工具，root agent 与 subagent 都可用，
+且不代表 Plan Item。工具输入是完整快照：`explanation?: string` 与
+`items: [{ step, status }]`，其中 `status` 只允许 `pending | inProgress | completed`，且最多一个
+`inProgress`。成功后只返回 `{ status: "updated" }` 给模型，并替换 Thread runtime todo；
+Flutter 只展示最新值，不按 patch 合并，也不渲染为 Timeline Item。
 
-会话笔记是独立于模型历史和 pinned context 的持久化文本。它作为隐藏的
-`ModelContextItem` 随 canonical session 保存，在 session 删除时一并删除；正文不进入
+Thread 笔记是独立于模型历史和 pinned context 的持久化文本。它作为内部
+`ModelContextItem` 随 Thread 保存，在 Thread 删除时一并删除；正文不进入
 provider request、token 估算、附件物化或 compaction 输入。每个 turn 只注入一段有界提示，
-说明当前 revision、字节数、行数和可用笔记工具。child agent fork 创建独立 session，
-不继承父 session 的笔记。
+说明当前 revision、字节数、行数和可用笔记工具。child Thread 使用独立笔记，不继承父 Thread。
 
 会话笔记工具由 `read_session_note`、`search_session_note`、`write_session_note` 和
 `apply_session_note_patch` 四个内置工具组成。读取按一基行号和有界行数返回，调用方可在取得
@@ -175,15 +196,20 @@ MCP tool 成功结果写回紧凑字符串。文本内容按 MCP content 顺序�
 
 ## Studio 展示
 
-Studio timeline 以 message/part projection 派生的 ordered conversation item 为准。后端不创建聚合工具 part；每个工具调用仍作为独立 `StudioPartType::Tool` snapshot/delta 持久化。`partId` 首次出现时固定身份、类型、order 与位置，后续更新只替换可变内容和状态。工具 part 不携带分组 id。Flutter 对排序后的可见 item 单次扫描，只合并相邻 tool part；text、commentary、final、reasoning、plan、agent row 和 message 边界立即结束工具组，隐藏 inference 不制造视觉断点。工具组详情必须显示工具名称、状态、关键路径或命令摘要。非失败组默认折叠；失败、拒绝、中断和预算受限时必须在组摘要和详情中展示结构化原因，避免用户只看到“工具调用失败”而无法定位原因。
+Studio Timeline 直接按 ThreadItem ordinal 投影。每个工具调用是一个独立 toolCall Item；
+Item 首次插入时固定 id、类型、ordinal 和位置，后续只更新 revision、内容与状态。Flutter 对排序后的
+Item 单次扫描，只在视觉层合并相邻 toolCall；任何非工具 Item 立即结束分组。工具组详情显示工具名、
+状态、关键路径或命令摘要；失败、拒绝、中断和预算限制必须显示结构化原因。
 
-工具、命令、文件修改和子代理协作活动的用户可读文本由前端 projection 根据结构化 `StudioPart.tool`、`StudioPart.agent` 与 agent timeline typed payload 生成；Todo replacement 由独立侧栏按结构化 item 渲染。后端不新增 `activityText` 之类的本地化文案字段；如果展示层缺少必要事实，应补充结构化字段而不是补一段后端写死文本。固定标签和状态说明由 Flutter i18n 负责，工具名、agent path、工作目录、路径、命令摘要和模型名按原始领域值展示。工具运行时的单工具 start/end/approval/review commentary 属于 verbose/debug 诊断信息，普通模式只保留 turn 级工具批次 commentary，避免 timeline 在已有工具组之外重复出现每个工具的进展文本。
+工具、命令、文件修改和子代理协作活动的用户可读文本由 Flutter 根据结构化 Item 生成；Todo
+由独立侧栏读取 runtime snapshot。后端不新增本地化 `activityText`。固定标签和状态说明由 Flutter
+i18n 负责，工具名、agent path、工作目录、路径、命令摘要和模型名保持原始领域值。
 
 父 timeline 默认只展示 Planner 自己执行的子代理高层协作事实，例如 spawn、send、
 interrupt、list、read、wait 和 close。子代理协作活动可按 `callId` 合并 begin/end 状态；
-Todo replacement 只进入执行该调用的 agent session 的最新 Todo 侧栏。子代理内部普通工具
-trace 不自动灌入父 timeline，这些细节保留在 child 自己的 session。owner lifecycle/status/
-progress 只更新大会话级 Agent Directory，不作为单 agent timeline row。
+Todo replacement 只进入执行该调用的 Thread runtime snapshot。子代理内部普通工具 Item 不自动
+灌入父 Timeline，细节保留在 child Thread。owner lifecycle/status/progress 只更新 Agent
+Directory，不作为 Timeline Item。
 
 ## Web 搜索工具规划
 

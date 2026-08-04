@@ -1,6 +1,6 @@
-use super::interaction::BridgeInteractionChangedDto;
 use super::runtime::{BridgeStudioRecoveryIssueDto, BridgeTaskRuntimeDto};
 use super::settings::BridgeStudioSettingsDto;
+use super::thread_stream::BridgeThread;
 use serde::{Deserialize, Serialize};
 // ── Response types ──
 
@@ -9,9 +9,9 @@ use serde::{Deserialize, Serialize};
 pub struct BridgeStudioSnapshotResponse {
     pub projects: Vec<ProjectDto>,
     pub selected_project_id: Option<String>,
-    pub sessions: Vec<SessionDto>,
-    pub selected_session_id: Option<String>,
-    pub selected_session_task: Option<BridgeTaskRuntimeDto>,
+    pub threads: Vec<BridgeThread>,
+    pub selected_thread_id: Option<String>,
+    pub selected_thread_task: Option<BridgeTaskRuntimeDto>,
     pub recovery_issues: Vec<BridgeStudioRecoveryIssueDto>,
     pub settings: BridgeStudioSettingsDto,
 }
@@ -27,46 +27,26 @@ pub struct ProjectDto {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct SessionDto {
-    pub id: String,
-    pub project_id: String,
-    pub title: String,
-    pub mode: String,
-    pub created_at: i64,
-    pub updated_at: i64,
-    pub visibility: String,
-    pub parent_session_id: Option<String>,
-    pub root_session_id: String,
-    pub session_kind: String,
-    pub owner_agent_id: String,
-    pub owner_role: String,
-    pub agent_status: String,
-    pub agent_summary: Option<String>,
-    pub agent_error: Option<String>,
-    pub agent_updated_at: Option<i64>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct SubmitPromptResponse {
-    pub session_id: String,
+pub struct StartTurnResponse {
+    pub thread_id: String,
     pub turn_id: String,
-    pub cursor: u64,
+    pub revision: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct StopPromptResponse {
-    pub session_id: String,
-    pub stopped: bool,
+pub struct InterruptTurnResponse {
+    pub thread_id: String,
+    pub turn_id: String,
+    pub interrupted: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct ResolveInteractionResponse {
-    pub session_id: String,
-    pub interaction: BridgeInteractionChangedDto,
-    pub sessions: Vec<SessionDto>,
+pub struct SteerTurnResponse {
+    pub thread_id: String,
+    pub turn_id: String,
+    pub revision: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

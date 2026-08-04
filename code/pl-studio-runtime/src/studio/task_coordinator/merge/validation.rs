@@ -5,8 +5,8 @@ use anyhow::{Context, Result, bail};
 use super::git::{checked_git, run_git};
 use crate::agent::worktree::same_worktree_path;
 use crate::studio::task_coordinator::{
-    AgentDelivery, AgentOutcomeRecord, AgentOutcomeStatus, BranchLeaseRecord, TaskRunRecord,
-    WorkCompletionKind, WorkCompletionRecord, WorkCompletionStatus, WorkUnitRecord, WorkUnitStatus,
+    AgentDelivery, BranchLeaseRecord, TaskRunRecord, ThreadExecutionStatus, WorkCompletionKind,
+    WorkCompletionRecord, WorkCompletionStatus, WorkUnitRecord, WorkUnitStatus,
 };
 
 pub(super) struct MergePreflight {
@@ -18,32 +18,22 @@ pub(super) fn ensure_preflight_delivery_identity(
     task_run_id: &str,
     agent_id: &str,
     work_unit: &WorkUnitRecord,
-    outcome: &AgentOutcomeRecord,
     completion: &WorkCompletionRecord,
     delivery: &AgentDelivery,
 ) -> Result<()> {
     let mut mismatches = Vec::new();
-    if outcome.task_run_id != task_run_id || work_unit.task_run_id != task_run_id {
+    if work_unit.task_run_id != task_run_id {
         mismatches.push("taskRunId");
     }
-    if outcome.agent_id != agent_id || work_unit.agent_id.as_deref() != Some(agent_id) {
+    if work_unit.executor_thread_id.as_deref() != Some(agent_id) {
         mismatches.push("agentId");
     }
-    if outcome.owner_path != "/root" || outcome.initiated_by != "planner" {
-        mismatches.push("planner ownership");
-    }
-    if outcome.role != "executor" {
-        mismatches.push("role");
-    }
-    if outcome.status != AgentOutcomeStatus::Completed
+    if work_unit.execution_status != ThreadExecutionStatus::Completed
         || work_unit.status != WorkUnitStatus::Approved
     {
         mismatches.push("delivery status");
     }
-    if outcome.work_unit_id.as_deref() != Some(work_unit.id.as_str()) {
-        mismatches.push("workUnitId");
-    }
-    if work_unit.attempt != outcome.attempt || work_unit.attempt == 0 {
+    if work_unit.attempt == 0 {
         mismatches.push("attempt");
     }
     if completion.task_run_id != task_run_id

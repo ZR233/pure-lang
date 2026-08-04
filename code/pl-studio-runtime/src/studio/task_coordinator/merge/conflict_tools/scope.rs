@@ -13,7 +13,7 @@ use crate::studio::task_coordinator::{
 impl TaskCoordinator {
     pub(super) async fn load_active_conflict_scope(
         &self,
-        session_id: &str,
+        thread_id: &str,
         merge_id: &str,
     ) -> Result<(TaskMergeScope, BTreeMap<String, Vec<MergeIndexStage>>)> {
         if merge_id.is_empty() {
@@ -21,7 +21,7 @@ impl TaskCoordinator {
         }
         let run = self
             .store
-            .read_active_task_run_for_session(session_id)
+            .read_active_task_run_for_root_thread(thread_id)
             .await?;
         if run.phase != TaskRunPhase::ResolvingConflict {
             bail!("conflict tools require phase resolvingConflict");
@@ -82,13 +82,6 @@ impl TaskCoordinator {
             .read_work_unit(&evidence.work_unit_id)
             .await?
             .context("merge work unit not found")?;
-        let outcome = self
-            .store
-            .list_agent_outcomes(&run.id)
-            .await?
-            .into_iter()
-            .find(|outcome| outcome.id == evidence.outcome_id)
-            .context("merge outcome not found")?;
         let completion = self
             .store
             .read_approved_work_completion(&evidence.work_unit_id)
@@ -104,7 +97,6 @@ impl TaskCoordinator {
                 run,
                 lease,
                 work_unit,
-                outcome,
                 completion,
                 delivery,
                 merge,

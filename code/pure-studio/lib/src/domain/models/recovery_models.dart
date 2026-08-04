@@ -1,4 +1,4 @@
-enum RecoveryIssueScope { application, project, session }
+enum RecoveryIssueScope { application, project, thread }
 
 enum RecoveryIssueCategory {
   processLease,
@@ -9,7 +9,7 @@ enum RecoveryIssueCategory {
   conflict,
 }
 
-enum RecoveryIssueAction { retry, cleanupSession, removeProject }
+enum RecoveryIssueAction { retry, cleanupThread, removeProject }
 
 class StudioRecoveryIssue {
   const StudioRecoveryIssue({
@@ -19,7 +19,7 @@ class StudioRecoveryIssue {
     required this.availableActions,
     required this.detail,
     this.projectId,
-    this.sessionId,
+    this.threadId,
     this.taskRunId,
   });
 
@@ -28,12 +28,12 @@ class StudioRecoveryIssue {
   final RecoveryIssueCategory category;
   final List<RecoveryIssueAction> availableActions;
   final String? projectId;
-  final String? sessionId;
+  final String? threadId;
   final String? taskRunId;
   final String detail;
 
   bool get canCleanup =>
-      availableActions.contains(RecoveryIssueAction.cleanupSession) ||
+      availableActions.contains(RecoveryIssueAction.cleanupThread) ||
       availableActions.contains(RecoveryIssueAction.removeProject);
 }
 
@@ -77,14 +77,14 @@ class RecoveryCleanupPreview {
     required this.detail,
     required this.resources,
     this.projectId,
-    this.sessionId,
+    this.threadId,
   });
 
   final String issueId;
   final String expectedRevision;
   final RecoveryIssueScope scope;
   final String? projectId;
-  final String? sessionId;
+  final String? threadId;
   final String detail;
   final List<RecoveryCleanupResource> resources;
 

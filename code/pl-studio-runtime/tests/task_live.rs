@@ -46,7 +46,7 @@ async fn run_live_task_flow(fixture: &LiveTaskFixture) -> Result<()> {
     fixture
         .runtime
         .submit_prompt(StudioSubmitPromptRequest {
-            session_id: fixture.session_id.clone(),
+            thread_id: fixture.thread_id.clone(),
             prompt: live_task_prompt(),
             attachment_ids: Vec::new(),
             options: StudioSubmitPromptOptions::default(),
@@ -177,7 +177,7 @@ async fn assert_task_invariants(
 
     if !fixture
         .store
-        .list_pending_interactions(&fixture.session_id)
+        .list_pending_interactions(&fixture.thread_id)
         .await?
         .is_empty()
     {

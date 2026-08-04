@@ -83,8 +83,9 @@ void registerProviderLifecycleTests() {
     controllerSubscription.close();
   });
 
-  test('part delta only notifies the selected timeline projection', () async {
-    final api = _FakeStudioApi(_emptyState());
+  test('Item delta only notifies the selected timeline projection', () async {
+    final initial = _emptyState();
+    final api = _FakeStudioApi(initial);
     final container = ProviderContainer.test(
       overrides: [studioApiProvider.overrideWithValue(api)],
     );
@@ -93,29 +94,23 @@ void registerProviderLifecycleTests() {
       (_, _) {},
     );
     await container.read(studioControllerProvider.future);
-
-    api.emitSession(
-      _messageUpdatedEvent(
-        sessionId: 'session-1',
-        message: _timelineMessageFixture(
-          id: 'turn-1:assistant',
-          sessionId: 'session-1',
-          turnId: 'turn-1',
-          status: 'streaming',
-        ),
+    await container.pump();
+    api.emitThreadFrame(
+      ThreadSnapshotFrame(
+        workspace: initial.selectedWorkspace!.copyWith(revision: 1),
       ),
     );
-    api.emitSession(
-      _partUpdatedEvent(
-        sessionId: 'session-1',
-        part: _timelinePartFixture(
-          id: 'part-1',
-          messageId: 'turn-1:assistant',
-          sessionId: 'session-1',
+    api.emitThreadFrame(
+      _threadItemFrame(
+        threadId: 'session-1',
+        workspaceRevision: 2,
+        item: _threadItemFixture(
+          id: 'item-1',
+          threadId: 'session-1',
           turnId: 'turn-1',
-          type: TimelinePartType.text,
+          ordinal: 0,
           status: 'streaming',
-          textChannel: TimelineTextChannel.finalAnswer,
+          text: '',
         ),
       ),
     );
@@ -156,15 +151,14 @@ void registerProviderLifecycleTests() {
       ),
     ];
 
-    api.emitSession(
-      _partDeltaEvent(
-        sessionId: 'session-1',
-        delta: _timelineDeltaFixture(
-          partId: 'part-1',
-          revision: 1,
-          field: 'text',
-          delta: 'partial',
-        ),
+    api.emitThreadFrame(
+      _threadDeltaFrame(
+        threadId: 'session-1',
+        workspaceRevision: 3,
+        itemId: 'item-1',
+        itemRevision: 1,
+        field: 'text',
+        delta: 'partial',
       ),
     );
     await _pumpFrameBatch();

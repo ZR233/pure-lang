@@ -18,7 +18,7 @@ use crate::studio::store::StudioStore;
 impl StudioStore {
     pub async fn create_image_attachment(
         &self,
-        session_id: &str,
+        thread_id: &str,
         data_url: &str,
         filename: Option<String>,
     ) -> Result<AttachmentRecord> {
@@ -28,7 +28,7 @@ impl StudioStore {
         let normalized = normalize_image_attachment(media_type, bytes, decoded_image)?;
         let attachment_id = new_id("attachment");
         let extension = extension_for_media_type(normalized.media_type)?;
-        let dir = default_attachments_dir()?.join(session_id);
+        let dir = default_attachments_dir()?.join(thread_id);
         tokio::fs::create_dir_all(&dir).await?;
         let storage_path = dir.join(format!("{attachment_id}.{extension}"));
         tokio::fs::write(&storage_path, &normalized.bytes).await?;
@@ -37,8 +37,8 @@ impl StudioStore {
         let now = unix_seconds();
         let row = attachment::ActiveModel {
             id: Set(attachment_id),
-            session_id: Set(session_id.to_string()),
-            message_id: Set(None),
+            thread_id: Set(thread_id.to_string()),
+            item_id: Set(None),
             media_type: Set(normalized.media_type.to_string()),
             filename: Set(filename.filter(|name| !name.trim().is_empty())),
             storage_path: Set(storage_path.to_string_lossy().to_string()),
@@ -52,13 +52,10 @@ impl StudioStore {
         Ok(attachment_record(row))
     }
 
-    pub async fn list_session_attachments(
-        &self,
-        session_id: &str,
-    ) -> Result<Vec<AttachmentRecord>> {
+    pub async fn list_thread_attachments(&self, thread_id: &str) -> Result<Vec<AttachmentRecord>> {
         use entities::attachment;
         let rows = attachment::Entity::find()
-            .filter(attachment::Column::SessionId.eq(session_id.to_string()))
+            .filter(attachment::Column::ThreadId.eq(thread_id.to_string()))
             .order_by_asc(attachment::Column::CreatedAt)
             .order_by_asc(attachment::Column::Id)
             .all(&self.db)
@@ -68,7 +65,7 @@ impl StudioStore {
 
     pub async fn load_attachments(
         &self,
-        session_id: &str,
+        thread_id: &str,
         attachment_ids: &[String],
     ) -> Result<Vec<AttachmentRecord>> {
         if attachment_ids.is_empty() {
@@ -76,27 +73,27 @@ impl StudioStore {
         }
         use entities::attachment;
         let rows = attachment::Entity::find()
-            .filter(attachment::Column::SessionId.eq(session_id.to_string()))
+            .filter(attachment::Column::ThreadId.eq(thread_id.to_string()))
             .filter(attachment::Column::Id.is_in(attachment_ids.iter().cloned()))
             .all(&self.db)
             .await?;
         Ok(rows.into_iter().map(attachment_record).collect())
     }
 
-    pub async fn materialize_session_attachments(
+    pub async fn materialize_thread_attachments(
         &self,
-        session_id: &str,
+        thread_id: &str,
     ) -> Result<Vec<MaterializedAttachment>> {
-        let records = self.list_session_attachments(session_id).await?;
+        let records = self.list_thread_attachments(thread_id).await?;
         materialize_attachments(records).await
     }
 
     pub async fn materialize_attachments(
         &self,
-        session_id: &str,
+        thread_id: &str,
         attachment_ids: &[String],
     ) -> Result<Vec<MaterializedAttachment>> {
-        let records = self.load_attachments(session_id, attachment_ids).await?;
+        let records = self.load_attachments(thread_id, attachment_ids).await?;
         materialize_attachments(records).await
     }
 }

@@ -15,12 +15,11 @@ import 'markdown_repair.dart';
 part 'timeline_blocks.dart';
 part 'timeline_markdown_blocks.dart';
 part 'timeline_plan_agent_blocks.dart';
-part 'timeline_runtime_progress_blocks.dart';
 part 'timeline_tool_blocks.dart';
 
 class TimelineView extends StatefulWidget {
   const TimelineView({
-    required this.sessionId,
+    required this.threadId,
     required this.rows,
     required this.turn,
     this.onLoadOlder,
@@ -28,7 +27,7 @@ class TimelineView extends StatefulWidget {
     super.key,
   });
 
-  final String? sessionId;
+  final String? threadId;
   final List<TimelineRow> rows;
   final StudioTurnView? turn;
   final VoidCallback? onLoadOlder;
@@ -43,7 +42,7 @@ class _TimelineViewState extends State<TimelineView> {
   static const _scrollDuration = Duration(milliseconds: 180);
 
   final ScrollController _controller = ScrollController();
-  final Map<String, _TimelineScrollSnapshot> _sessionScroll = {};
+  final Map<String, _TimelineScrollSnapshot> _threadScroll = {};
   final Set<String> _expandedReasoningGroups = {};
   bool _followingBottom = true;
   bool _detachedByUser = false;
@@ -59,7 +58,7 @@ class _TimelineViewState extends State<TimelineView> {
   void initState() {
     super.initState();
     _contentVersion = _timelineContentVersion(widget.rows, widget.turn);
-    _restoreSessionState();
+    _restoreThreadState();
     _controller.addListener(_handleScrollPositionChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
@@ -71,11 +70,11 @@ class _TimelineViewState extends State<TimelineView> {
   @override
   void didUpdateWidget(covariant TimelineView oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final sessionChanged = widget.sessionId != oldWidget.sessionId;
-    if (sessionChanged) {
-      _saveSessionState(oldWidget.sessionId);
+    final threadChanged = widget.threadId != oldWidget.threadId;
+    if (threadChanged) {
+      _saveThreadState(oldWidget.threadId);
       _expandedReasoningGroups.clear();
-      _restoreSessionState();
+      _restoreThreadState();
       _contentVersion = _timelineContentVersion(widget.rows, widget.turn);
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
@@ -127,7 +126,7 @@ class _TimelineViewState extends State<TimelineView> {
         } finally {
           _programmaticScroll = false;
         }
-        _saveSessionState(widget.sessionId);
+        _saveThreadState(widget.threadId);
       });
       return;
     }
@@ -150,7 +149,7 @@ class _TimelineViewState extends State<TimelineView> {
 
   @override
   void dispose() {
-    _saveSessionState(widget.sessionId);
+    _saveThreadState(widget.threadId);
     _controller.removeListener(_handleScrollPositionChanged);
     _controller.dispose();
     super.dispose();
@@ -186,18 +185,23 @@ class _TimelineViewState extends State<TimelineView> {
                   return null;
                 }
                 if (activeTurn != null &&
-                    key.value == _turnActivityId(activeTurn)) {
+                    key ==
+                        StudioDriverKeys.turnActivity(
+                          _turnActivityId(activeTurn),
+                        )) {
                   return blocks.length;
                 }
                 final index = blocks.indexWhere(
-                  (block) => block.id == key.value,
+                  (block) => StudioDriverKeys.timelineBlock(block.id) == key,
                 );
                 return index == -1 ? null : index;
               },
               itemBuilder: (context, index) {
                 if (activeTurn != null && index == blocks.length) {
                   return _TurnActivityBlock(
-                    key: ValueKey(_turnActivityId(activeTurn)),
+                    key: StudioDriverKeys.turnActivity(
+                      _turnActivityId(activeTurn),
+                    ),
                     turn: activeTurn,
                     reasoningGroup: currentActivityRow?.reasoningGroup,
                     toolGroup: currentActivityRow?.toolGroup,
@@ -216,20 +220,15 @@ class _TimelineViewState extends State<TimelineView> {
                   return const SizedBox(height: 24);
                 }
                 final block = blocks[index];
-                return block.isRuntimeProgressGroup
-                    ? _TimelineProgressGroupBlock(
-                        key: ValueKey(block.id),
-                        block: block,
-                      )
-                    : _TimelineRowBlock(
-                        key: ValueKey(block.id),
-                        row: block.rows.single,
-                        isCurrentActivity: block.isCurrentActivity,
-                        isReasoningExpanded: _expandedReasoningGroups.contains(
-                          block.rows.single.reasoningGroup?.id,
-                        ),
-                        onToggleReasoning: _toggleReasoning,
-                      );
+                return _TimelineRowBlock(
+                  key: StudioDriverKeys.timelineBlock(block.id),
+                  row: block.rows.single,
+                  isCurrentActivity: block.isCurrentActivity,
+                  isReasoningExpanded: _expandedReasoningGroups.contains(
+                    block.rows.single.reasoningGroup?.id,
+                  ),
+                  onToggleReasoning: _toggleReasoning,
+                );
               },
             ),
           ),
@@ -303,7 +302,7 @@ class _TimelineViewState extends State<TimelineView> {
         _detachedByUser = true;
       });
     }
-    _saveSessionState(widget.sessionId);
+    _saveThreadState(widget.threadId);
     if (_controller.position.extentBefore <= _bottomThreshold &&
         widget.onLoadOlder != null &&
         !widget.isLoadingOlder &&
@@ -359,7 +358,7 @@ class _TimelineViewState extends State<TimelineView> {
       _detachedByUser = false;
       _pendingNewEvents = 0;
     });
-    _saveSessionState(widget.sessionId);
+    _saveThreadState(widget.threadId);
   }
 
   void _jumpToLatest() {
@@ -374,9 +373,9 @@ class _TimelineViewState extends State<TimelineView> {
     });
   }
 
-  void _restoreSessionState() {
-    final sessionId = widget.sessionId;
-    final snapshot = sessionId == null ? null : _sessionScroll[sessionId];
+  void _restoreThreadState() {
+    final threadId = widget.threadId;
+    final snapshot = threadId == null ? null : _threadScroll[threadId];
     if (snapshot == null) {
       _followingBottom = true;
       _detachedByUser = false;
@@ -412,15 +411,15 @@ class _TimelineViewState extends State<TimelineView> {
         } finally {
           _programmaticScroll = false;
         }
-        _saveSessionState(widget.sessionId);
+        _saveThreadState(widget.threadId);
     }
   }
 
-  void _saveSessionState(String? sessionId) {
-    if (sessionId == null || !_controller.hasClients) {
+  void _saveThreadState(String? threadId) {
+    if (threadId == null || !_controller.hasClients) {
       return;
     }
-    _sessionScroll[sessionId] = _TimelineScrollSnapshot(
+    _threadScroll[threadId] = _TimelineScrollSnapshot(
       pixels: _controller.position.pixels,
       followingBottom: _followingBottom && _isNearBottom(),
       detachedByUser: _detachedByUser || !_isNearBottom(),
@@ -463,7 +462,7 @@ int _timelineContentVersion(List<TimelineRow> rows, StudioTurnView? turn) {
   return Object.hashAll([
     turn,
     rows.length,
-    for (final row in rows) ...[row.id, row.role, row.type, row.renderVersion],
+    for (final row in rows) ...[row.id, row.type, row.renderVersion],
   ]);
 }
 
@@ -478,18 +477,9 @@ class _TimelineDisplayBlock {
     return _TimelineDisplayBlock._([row], id: row.id);
   }
 
-  factory _TimelineDisplayBlock.runtimeProgress(List<TimelineRow> rows) {
-    return _TimelineDisplayBlock._(
-      List.unmodifiable(rows),
-      id: 'runtime-progress:${rows.first.id}',
-    );
-  }
-
   final List<TimelineRow> rows;
   final String id;
   final bool isCurrentActivity;
-
-  bool get isRuntimeProgressGroup => rows.length > 1;
 
   _TimelineDisplayBlock asCurrentActivity() {
     return _TimelineDisplayBlock._(rows, id: id, isCurrentActivity: true);
@@ -500,34 +490,7 @@ List<_TimelineDisplayBlock> _timelineDisplayBlocks(
   List<TimelineRow> rows, {
   String? currentActivityRowId,
 }) {
-  final blocks = <_TimelineDisplayBlock>[];
-  final pendingProgress = <TimelineRow>[];
-
-  void flushProgress() {
-    if (pendingProgress.isEmpty) {
-      return;
-    }
-    if (pendingProgress.length == 1) {
-      blocks.add(_TimelineDisplayBlock.single(pendingProgress.single));
-    } else {
-      blocks.add(_TimelineDisplayBlock.runtimeProgress(pendingProgress));
-    }
-    pendingProgress.clear();
-  }
-
-  for (final row in rows) {
-    if (_isRuntimeProgressRow(row)) {
-      final previous = pendingProgress.lastOrNull;
-      if (previous != null && !_sameRuntimeProgressGroup(previous, row)) {
-        flushProgress();
-      }
-      pendingProgress.add(row);
-      continue;
-    }
-    flushProgress();
-    blocks.add(_TimelineDisplayBlock.single(row));
-  }
-  flushProgress();
+  final blocks = rows.map(_TimelineDisplayBlock.single).toList();
 
   if (currentActivityRowId != null) {
     final activityIndex = blocks.indexWhere(
@@ -539,16 +502,6 @@ List<_TimelineDisplayBlock> _timelineDisplayBlocks(
   }
 
   return blocks;
-}
-
-bool _isRuntimeProgressRow(TimelineRow row) {
-  return row.type == TimelineRowType.commentary && row.part?.synthetic == true;
-}
-
-bool _sameRuntimeProgressGroup(TimelineRow left, TimelineRow right) {
-  return left.sessionId == right.sessionId &&
-      left.messageId == right.messageId &&
-      left.turnId == right.turnId;
 }
 
 TimelineRow? _currentActivityRow(List<TimelineRow> rows, StudioTurnView? turn) {
@@ -615,5 +568,5 @@ String? _timelineActivityIdentity(
 }
 
 String _turnActivityId(StudioTurnView turn) {
-  return 'turn-activity:${turn.sessionId}:${turn.turnId}';
+  return 'turn-activity:${turn.threadId}:${turn.turnId}';
 }

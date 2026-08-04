@@ -31,14 +31,14 @@ pub async fn cleanup_recovery_issue(
     issue_id: String,
     expected_revision: String,
     selected_project_id: Option<String>,
-    selected_session_id: Option<String>,
+    selected_thread_id: Option<String>,
 ) -> Result<BridgeStudioSnapshotResponse, BridgeError> {
     let bridge = active_bridge().await?;
     bridge
         .studio
         .cleanup_recovery_issue(&issue_id, &expected_revision)
         .await?;
-    Ok(studio_snapshot_inner(bridge, selected_project_id, selected_session_id).await?)
+    Ok(studio_snapshot_inner(bridge, selected_project_id, selected_thread_id).await?)
 }
 
 pub async fn cleanup_project(

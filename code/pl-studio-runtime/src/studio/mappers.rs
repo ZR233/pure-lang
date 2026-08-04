@@ -6,7 +6,7 @@ use anyhow::{Context, Result, bail};
 
 use crate::studio::entity as entities;
 use crate::studio::records::{
-    AttachmentRecord, ProjectRecord, SessionKind, SessionRecord, SessionVisibility,
+    AttachmentRecord, ProjectRecord, ThreadKind, ThreadRecord, ThreadVisibility,
 };
 
 pub fn project_record(model: entities::project::Model) -> ProjectRecord {
@@ -18,52 +18,40 @@ pub fn project_record(model: entities::project::Model) -> ProjectRecord {
     }
 }
 
-pub fn session_record(model: entities::session::Model) -> SessionRecord {
-    let instruction_snapshot = model
-        .instruction_snapshot_json
-        .as_deref()
-        .and_then(|json| serde_json::from_str(json).ok());
-    SessionRecord {
-        id: model.id,
+pub fn thread_record(model: entities::thread::Model) -> ThreadRecord {
+    ThreadRecord {
+        id: model.id.clone(),
         project_id: model.project_id,
         title: model.title,
         mode: model.mode,
         created_at: model.created_at,
         updated_at: model.updated_at,
-        visibility: session_visibility_from_label(&model.visibility),
-        parent_session_id: model.parent_session_id,
-        root_session_id: model.root_session_id,
-        session_kind: session_kind_from_label(&model.session_kind),
-        owner_agent_id: model.owner_agent_id,
-        owner_role: model.owner_role,
-        agent_status: model.agent_status,
-        agent_summary: model.agent_summary,
-        agent_error: model.agent_error,
-        agent_updated_at: model.agent_updated_at,
-        instruction_snapshot,
-    }
-}
-
-fn session_kind_from_label(label: &str) -> SessionKind {
-    match label {
-        "agent" => SessionKind::Agent,
-        _ => SessionKind::Root,
-    }
-}
-
-fn session_visibility_from_label(label: &str) -> SessionVisibility {
-    match label {
-        "active" => SessionVisibility::Active,
-        "archived" => SessionVisibility::Archived,
-        _ => SessionVisibility::Archived,
+        visibility: if model.archived == 0 {
+            ThreadVisibility::Active
+        } else {
+            ThreadVisibility::Archived
+        },
+        parent_thread_id: model.parent_thread_id.clone(),
+        root_thread_id: model.root_thread_id,
+        thread_kind: if model.parent_thread_id.is_some() {
+            ThreadKind::Agent
+        } else {
+            ThreadKind::Root
+        },
+        agent_path: model.id,
+        role: model.role,
+        status: model.status,
+        summary: None,
+        error: None,
+        runtime_updated_at: Some(model.updated_at),
     }
 }
 
 pub fn attachment_record(model: entities::attachment::Model) -> AttachmentRecord {
     AttachmentRecord {
         id: model.id,
-        session_id: model.session_id,
-        message_id: model.message_id,
+        thread_id: model.thread_id,
+        item_id: model.item_id,
         media_type: model.media_type,
         filename: model.filename,
         storage_path: model.storage_path,
@@ -94,7 +82,7 @@ pub fn interaction_record(model: entities::interaction::Model) -> Result<Interac
         kind: interaction_kind_from_label(&model.kind)?,
         status: interaction_status_from_label(&model.status)?,
         scope: InteractionScope {
-            session_id: model.session_id,
+            thread_id: model.thread_id,
             turn_id: model.turn_id,
             item_id: model.item_id,
             tool_id: model.tool_id,

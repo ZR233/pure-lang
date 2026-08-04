@@ -39,7 +39,7 @@ class _TurnActivityBlock extends StatelessWidget {
       return Padding(
         padding: const EdgeInsets.only(bottom: 12),
         child: _ReasoningPart(
-          sessionId: turn.sessionId,
+          threadId: turn.threadId,
           group: reasoning,
           isCurrentActivity: true,
           expanded: reasoningExpanded,
@@ -253,8 +253,8 @@ class _RowCard extends StatelessWidget {
         isUser: false,
       ),
       TimelineRowType.reasoningSummary => _ReasoningPart(
-        key: ValueKey('${row.sessionId}:${row.reasoningGroup!.id}'),
-        sessionId: row.sessionId,
+        key: ValueKey('${row.threadId}:${row.reasoningGroup!.id}'),
+        threadId: row.threadId,
         group: row.reasoningGroup!,
         isCurrentActivity: isCurrentActivity,
         expanded: isReasoningExpanded,
@@ -269,13 +269,10 @@ class _RowCard extends StatelessWidget {
         key: ValueKey(row.part!.id),
         part: row.part!,
       ),
-      TimelineRowType.agentActivity =>
-        row.agentEvent == null
-            ? _AgentSnapshotPart(key: ValueKey(row.part!.id), part: row.part!)
-            : _AgentPart(
-                key: ValueKey(row.agentEvent!.eventId),
-                event: row.agentEvent!,
-              ),
+      TimelineRowType.agentActivity => _AgentPart(
+        key: ValueKey(row.agentEvent!.eventId),
+        event: row.agentEvent!,
+      ),
     };
   }
 }
@@ -283,7 +280,7 @@ class _RowCard extends StatelessWidget {
 class _MarkdownBubble extends StatelessWidget {
   const _MarkdownBubble({required this.part, required this.isUser, super.key});
 
-  final TimelinePart part;
+  final TimelineEntry part;
   final bool isUser;
 
   @override
@@ -331,7 +328,7 @@ class _MarkdownBubble extends StatelessWidget {
 
 class _ReasoningPart extends StatelessWidget {
   const _ReasoningPart({
-    required this.sessionId,
+    required this.threadId,
     required this.group,
     required this.isCurrentActivity,
     required this.expanded,
@@ -339,7 +336,7 @@ class _ReasoningPart extends StatelessWidget {
     super.key,
   });
 
-  final String sessionId;
+  final String threadId;
   final TimelineReasoningGroup group;
   final bool isCurrentActivity;
   final bool expanded;
@@ -361,7 +358,7 @@ class _ReasoningPart extends StatelessWidget {
           onTap: onToggle,
           excludeSemantics: true,
           child: Material(
-            key: ValueKey('reasoning:$sessionId:${group.id}:$expanded'),
+            key: ValueKey('reasoning:$threadId:${group.id}:$expanded'),
             color: Colors.transparent,
             child: InkWell(
               borderRadius: BorderRadius.circular(StudioRadii.xs),
@@ -528,13 +525,11 @@ class _TimelineMetaRow extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.subtitle,
-    this.trailing,
   });
 
   final IconData icon;
   final String title;
   final String subtitle;
-  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -570,7 +565,6 @@ class _TimelineMetaRow extends StatelessWidget {
               ],
             ),
           ),
-          if (trailing != null) ...[const SizedBox(width: 10), trailing!],
         ],
       ),
     );

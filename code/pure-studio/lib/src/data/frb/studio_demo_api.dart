@@ -4,6 +4,12 @@ class DemoStudioApi implements StudioApi {
   DemoStudioApi({this._providerCatalog = demoProviderCatalogFixture});
 
   final ProviderCatalogView _providerCatalog;
+  final _productEvents = StreamController<Object>.broadcast();
+  final _threadEvents = StreamController<ThreadStreamFrame>.broadcast();
+  final Map<String, ThreadWorkspace> _workspaces = {};
+  final Map<String, int> _promptGenerations = {};
+  final Set<String> _archivedProjectIds = {};
+
   List<ProviderSettingsView>? _providers;
   List<RoleSettingsView>? _roles;
   InstructionsSettingsView _instructions = const InstructionsSettingsView();
@@ -16,12 +22,8 @@ class DemoStudioApi implements StudioApi {
     model: 'gpt-5',
   );
   PermissionMode _permissionMode = PermissionMode.requestApproval;
-  StudioMode _sessionMode = StudioMode.simple;
-  final Set<String> _archivedProjectIds = <String>{};
-  final _globalEvents = StreamController<Object>.broadcast();
-  final _sessionEvents = StreamController<SessionStreamFrame>.broadcast();
-  final Map<String, int> _promptGenerations = {};
-  int _eventSequence = 0;
+  final StudioMode _threadMode = StudioMode.simple;
+  int _turnSequence = 0;
 
   Duration get promptStartDelay => const Duration(milliseconds: 120);
 
@@ -31,181 +33,9 @@ class DemoStudioApi implements StudioApi {
 
   @override
   Future<StudioState> bootstrap() async {
-    final now = DateTime.now();
-    const project = StudioProject(
-      id: 'project-local',
-      name: 'pure-lang',
-      path: r'C:\Users\zhoudongsheng\.codex\worktrees\3bc1\pure-lang',
-    );
-    final session = StudioSession(
-      id: 'session-main',
-      projectId: project.id,
-      title: 'Flutter + FRB 重构',
-      mode: _sessionMode,
-      updatedAt: now,
-    );
-    final alternateSession = StudioSession(
-      id: 'session-alt',
-      projectId: project.id,
-      title: 'Riverpod selector audit',
-      mode: _sessionMode,
-      createdAt: now.subtract(const Duration(minutes: 3)),
-      updatedAt: now.subtract(const Duration(minutes: 3)),
-    );
-    final agentSession = StudioSession(
-      id: 'session-agent-reviewer',
-      projectId: project.id,
-      title: 'Driver reviewer',
-      mode: _sessionMode,
-      createdAt: now.subtract(const Duration(minutes: 7)),
-      updatedAt: now.subtract(const Duration(minutes: 7)),
-      parentSessionId: session.id,
-      rootSessionId: session.id,
-      sessionKind: StudioSessionKind.agent,
-      ownerAgentId: 'driver-reviewer',
-      ownerRole: 'reviewer',
-      agentStatus: 'waiting',
-      agentSummary: 'Verifying Driver session switching.',
-      agentUpdatedAt: now.subtract(const Duration(minutes: 7)),
-    );
-    final userCreatedAt = now.subtract(const Duration(minutes: 9));
-    final assistantCreatedAt = now.subtract(const Duration(minutes: 8));
-    final alternateCreatedAt = now.subtract(const Duration(minutes: 2));
-    final agentCreatedAt = now.subtract(const Duration(minutes: 6));
-    final demoParts = [
-      TimelinePartSnapshot(
-        id: 'turn-demo:user-text',
-        messageId: 'turn-demo:user',
-        sessionId: session.id,
-        turnId: 'turn-demo',
-        type: TimelinePartType.text,
-        order: 0,
-        revision: 0,
-        text:
-            '用 Flutter 重构 Pure Studio。\n\n'
-            '- timeline 要像 Web 版一样即时渲染 Markdown\n'
-            '- streaming 中的代码块和表格不要抖动',
-        status: 'completed',
-        createdAt: userCreatedAt,
-        updatedAt: userCreatedAt,
-        textChannel: TimelineTextChannel.user,
-      ),
-      TimelinePartSnapshot(
-        id: 'turn-demo:reasoning-1',
-        messageId: 'turn-demo:assistant',
-        sessionId: session.id,
-        turnId: 'turn-demo',
-        type: TimelinePartType.reasoning,
-        order: 0,
-        revision: 0,
-        text:
-            '## 判断\n\n'
-            '> UI 只消费当前会话的高频事件，后台会话不应该继续推 delta。\n\n'
-            '- `messagePartDelta` 只作为 live overlay\n'
-            '- terminal snapshot 到达后覆盖未完成文本',
-        status: 'completed',
-        createdAt: assistantCreatedAt,
-        updatedAt: assistantCreatedAt,
-      ),
-      TimelinePartSnapshot(
-        id: 'turn-demo:tool-1',
-        messageId: 'turn-demo:assistant',
-        sessionId: session.id,
-        turnId: 'turn-demo',
-        type: TimelinePartType.tool,
-        order: 1,
-        revision: 0,
-        text: '',
-        status: 'completed',
-        createdAt: assistantCreatedAt,
-        updatedAt: assistantCreatedAt,
-        tool: const TimelineToolPart(
-          toolCallId: 'turn-demo:tool-call-1',
-          name: 'cargo test -p pl-studio-bridge',
-          result: '1 passed; bridge envelope uses typed payload.',
-        ),
-      ),
-      TimelinePartSnapshot(
-        id: 'turn-demo:plan-1',
-        messageId: 'turn-demo:assistant',
-        sessionId: session.id,
-        turnId: 'turn-demo',
-        type: TimelinePartType.plan,
-        order: 2,
-        revision: 0,
-        text: '',
-        status: 'completed',
-        createdAt: assistantCreatedAt,
-        updatedAt: assistantCreatedAt,
-        planContent:
-            '## Implementation checklist\n\n'
-            '1. Keep the Flutter shell aligned with runtime contracts.\n'
-            '2. Use Riverpod selectors for derived views.\n'
-            '3. Subscribe only the selected session stream.\n'
-            '4. Verify Markdown in streaming mode.\n\n'
-            '| Area | Status |\n'
-            '| --- | --- |\n'
-            '| FRB runtime | ready |\n'
-            '| Timeline Markdown | streaming |\n\n'
-            '```text\n'
-            'WeatherDay>```\n\n'
-            '## Inline fence recovery\n\n'
-            '| Renderer | Result |\n'
-            '| --- | --- |\n'
-            '| Timeline | headings and tables stay live |',
-      ),
-      TimelinePartSnapshot(
-        id: 'turn-demo:final-1',
-        messageId: 'turn-demo:assistant',
-        sessionId: session.id,
-        turnId: 'turn-demo',
-        type: TimelinePartType.text,
-        order: 3,
-        revision: 0,
-        text:
-            '### Streaming Markdown preview\n\n'
-            '正文、**加粗**、`inline code` 和链接都应该按 GFM 渲染。\n\n'
-            '- text / plan / reasoning 走同一个 renderer\n'
-            '- fenced code block 即使还没收到结束 fence，也应该显示成代码块\n\n'
-            '```dart\n'
-            'final stream = subscribeSessionEvents(sessionId);\n'
-            'await for (final event in stream) {\n'
-            '  reducer.apply(event);\n'
-            '}',
-        status: 'completed',
-        createdAt: assistantCreatedAt,
-        updatedAt: assistantCreatedAt,
-        textChannel: TimelineTextChannel.finalAnswer,
-      ),
-    ];
-    final alternatePart = TimelinePartSnapshot(
-      id: 'turn-alt:text',
-      messageId: 'turn-alt:assistant',
-      sessionId: alternateSession.id,
-      turnId: 'turn-alt',
-      type: TimelinePartType.text,
-      order: 0,
-      revision: 0,
-      text: 'Riverpod selector boundary is isolated.',
-      status: 'completed',
-      createdAt: alternateCreatedAt,
-      updatedAt: alternateCreatedAt,
-      textChannel: TimelineTextChannel.finalAnswer,
-    );
-    final agentPart = TimelinePartSnapshot(
-      id: 'turn-agent:text',
-      messageId: 'turn-agent:assistant',
-      sessionId: agentSession.id,
-      turnId: 'turn-agent',
-      type: TimelinePartType.text,
-      order: 0,
-      revision: 0,
-      text: 'Driver agent workspace selected.',
-      status: 'completed',
-      createdAt: agentCreatedAt,
-      updatedAt: agentCreatedAt,
-      textChannel: TimelineTextChannel.finalAnswer,
-    );
+    final fixture = _ensureWorkspaceFixture();
+    final project = fixture.project;
+    final threads = fixture.threads;
     final preset = _providerCatalog.presets.first;
     final defaultModels = _providerCatalog.modelsFor(preset.modelCatalogId);
     final defaultProvider = preset
@@ -223,138 +53,32 @@ class DemoStudioApi implements StudioApi {
                   ?.reasoningEfforts
                   .firstOrNull ??
               '';
-    final state = StudioState(
-      projects: const [project],
-      sessions: [session, agentSession, alternateSession],
-      selectedProjectId: project.id,
-      selectedSessionId: session.id,
-      permissionMode: _permissionMode,
-      runtimesBySession: {
-        session.id: const SessionRuntimeView(
-          model: 'planner/local-responses',
-          contextTokens: 18342,
-          contextWindow: 128000,
-          totalTokens: 26320,
-          costLabel: 'CNY 0.16',
-          activeSkills: [
-            'flutter-apply-architecture-best-practices',
-            'verification-before-completion',
-          ],
-          activeMcpServers: ['dart'],
-          activeLspServers: ['rust-analyzer'],
-          agentCount: 4,
-        ),
-        alternateSession.id: const SessionRuntimeView(
-          model: 'future-model',
-          contextTokens: 640,
-          contextWindow: 128000,
-          totalTokens: 1024,
-          costLabel: 'CNY 0.01',
-          activeSkills: ['riverpod-audit'],
-          activeMcpServers: ['dart'],
-          activeLspServers: [],
-          agentCount: 1,
-        ),
-        agentSession.id: const SessionRuntimeView(
-          model: 'reviewer/model',
-          contextTokens: 320,
-          contextWindow: 128000,
-          totalTokens: 512,
-          costLabel: 'CNY 0.01',
-          activeSkills: ['driver-verification'],
-          activeMcpServers: ['dart'],
-          activeLspServers: [],
-          agentCount: 0,
-        ),
-      },
-      messagesBySession: {
-        session.id: [
-          TimelineMessage(
-            id: 'turn-demo:user',
-            sessionId: session.id,
-            role: 'user',
-            createdAt: userCreatedAt,
+    if (_archivedProjectIds.contains(project.id)) {
+      return StudioState(
+        projects: const [],
+        threads: const [],
+        providers: _providers ?? [defaultProvider],
+        providerCatalog: _providerCatalog,
+        roles: _roles ?? const [],
+        mcpServers: const [],
+        instructions: _instructions,
+        skills: _skills,
+        general: _general,
+        webSearch: _webSearch,
+        selectedProjectId: null,
+        selectedThreadId: null,
+        permissionMode: _permissionMode,
+      );
+    }
+    return StudioState(
+      projects: [project],
+      threads: threads,
+      workspacesByThread: Map.unmodifiable(_workspaces),
+      workspaceUiByThread: {
+        for (final thread in threads)
+          thread.id: const WorkspaceUiState(
+            syncState: AgentWorkspaceSyncState.ready,
           ),
-          TimelineMessage(
-            id: 'turn-demo:assistant',
-            sessionId: session.id,
-            role: 'assistant',
-            createdAt: assistantCreatedAt,
-          ),
-        ],
-        alternateSession.id: [
-          TimelineMessage(
-            id: 'turn-alt:assistant',
-            sessionId: alternateSession.id,
-            role: 'assistant',
-            createdAt: alternateCreatedAt,
-          ),
-        ],
-        agentSession.id: [
-          TimelineMessage(
-            id: 'turn-agent:assistant',
-            sessionId: agentSession.id,
-            role: 'assistant',
-            createdAt: agentCreatedAt,
-          ),
-        ],
-      },
-      partSnapshotsBySession: {
-        session.id: {for (final part in demoParts) part.id: part},
-        alternateSession.id: {alternatePart.id: alternatePart},
-        agentSession.id: {agentPart.id: agentPart},
-      },
-      workspaceSyncBySession: {
-        session.id: AgentWorkspaceSyncState.ready,
-        alternateSession.id: AgentWorkspaceSyncState.ready,
-        agentSession.id: AgentWorkspaceSyncState.ready,
-      },
-      agentsBySession: {
-        session.id: {
-          'agent-reviewer': StudioAgentView(
-            id: 'agent-reviewer',
-            sessionId: session.id,
-            path: 'root/reviewer',
-            role: 'reviewer',
-            task: 'Audit timeline projection',
-            status: 'running',
-            summary: '已审阅 2 个文件，正在核对 row projection 排序逻辑',
-            updatedAt: assistantCreatedAt,
-          ),
-          'agent-reviewer-lint': StudioAgentView(
-            id: 'agent-reviewer-lint',
-            sessionId: session.id,
-            path: 'root/reviewer/lint',
-            parentPath: 'root/reviewer',
-            role: 'lint',
-            task: 'Run clippy on pl-core',
-            status: 'queued',
-            depth: 1,
-            updatedAt: assistantCreatedAt,
-          ),
-          'agent-worker': StudioAgentView(
-            id: 'agent-worker',
-            sessionId: session.id,
-            path: 'root/worker',
-            role: 'worker',
-            task: 'Implement visible progress',
-            status: 'completed',
-            summary: 'Patched Flutter projection，timeline 行已按 sequence 排序',
-            updatedAt: assistantCreatedAt,
-          ),
-          'agent-worker-test': StudioAgentView(
-            id: 'agent-worker-test',
-            sessionId: session.id,
-            path: 'root/worker/test',
-            parentPath: 'root/worker',
-            role: 'test',
-            task: 'Run cargo test -p pl-core',
-            status: 'errored',
-            depth: 1,
-            error: '3 tests failed: timeline projection ordering mismatch',
-            updatedAt: assistantCreatedAt,
-          ),
-        },
       },
       providers: _providers ?? [defaultProvider],
       providerCatalog: _providerCatalog,
@@ -379,30 +103,201 @@ class DemoStudioApi implements StudioApi {
       skills: _skills,
       general: _general,
       webSearch: _webSearch,
-      pendingInteractions: const [],
+      selectedProjectId: project.id,
+      selectedThreadId: threads.first.id,
+      permissionMode: _permissionMode,
     );
-    if (_archivedProjectIds.contains(project.id)) {
-      return StudioState(
-        projects: const [],
-        sessions: const [],
-        messagesBySession: const {},
-        agentsBySession: const {},
-        providers: state.providers,
-        providerCatalog: _providerCatalog,
-        roles: state.roles,
-        mcpServers: state.mcpServers,
-        instructions: state.instructions,
-        skills: state.skills,
-        general: state.general,
-        webSearch: state.webSearch,
-        selectedProjectId: null,
-        selectedSessionId: null,
-        permissionMode: state.permissionMode,
-        pendingInteractions: const [],
-      );
-    }
-    return state;
   }
+
+  ({StudioProject project, List<StudioThread> threads})
+  _ensureWorkspaceFixture() {
+    final now = DateTime.now();
+    const project = StudioProject(
+      id: 'project-local',
+      name: 'pure-lang',
+      path: r'C:\Users\zhoudongsheng\.codex\worktrees\3bc1\pure-lang',
+    );
+    final root = StudioThread(
+      id: 'thread-main',
+      projectId: project.id,
+      title: 'Flutter + FRB 重构',
+      mode: _threadMode,
+      createdAt: now.subtract(const Duration(minutes: 10)),
+      updatedAt: now,
+      agentPath: 'root',
+    );
+    final reviewer = StudioThread(
+      id: 'thread-reviewer',
+      projectId: project.id,
+      title: 'Driver reviewer',
+      mode: _threadMode,
+      createdAt: now.subtract(const Duration(minutes: 7)),
+      updatedAt: now.subtract(const Duration(minutes: 7)),
+      parentThreadId: root.id,
+      rootThreadId: root.id,
+      agentPath: 'root/reviewer',
+      role: 'reviewer',
+      status: 'waiting',
+    );
+    final alternate = StudioThread(
+      id: 'thread-alt',
+      projectId: project.id,
+      title: 'Riverpod selector audit',
+      mode: _threadMode,
+      createdAt: now.subtract(const Duration(minutes: 3)),
+      updatedAt: now.subtract(const Duration(minutes: 3)),
+      agentPath: 'root-alt',
+    );
+    _workspaces.putIfAbsent(root.id, () => _rootWorkspace(root, now));
+    _workspaces.putIfAbsent(
+      reviewer.id,
+      () => _singleMessageWorkspace(
+        reviewer,
+        'Driver agent workspace selected.',
+        'reviewer/model',
+        now.subtract(const Duration(minutes: 6)),
+      ),
+    );
+    _workspaces.putIfAbsent(
+      alternate.id,
+      () => _singleMessageWorkspace(
+        alternate,
+        'Riverpod selector boundary is isolated.',
+        'future-model',
+        now.subtract(const Duration(minutes: 2)),
+      ),
+    );
+    return (project: project, threads: [root, reviewer, alternate]);
+  }
+
+  ThreadWorkspace _rootWorkspace(StudioThread thread, DateTime now) {
+    final userCreatedAt = now.subtract(const Duration(minutes: 9));
+    final agentCreatedAt = now.subtract(const Duration(minutes: 8));
+    return ThreadWorkspace(
+      thread: thread,
+      revision: 1,
+      items: [
+        _messageItem(
+          id: 'turn-demo:user',
+          threadId: thread.id,
+          turnId: 'turn-demo',
+          ordinal: 0,
+          kind: ThreadItemKind.userMessage,
+          text:
+              '用 Flutter 重构 Pure Studio。\n\n'
+              '- timeline 要像 Web 版一样即时渲染 Markdown\n'
+              '- streaming 中的代码块和表格不要抖动',
+          createdAt: userCreatedAt,
+        ),
+        ThreadItemView(
+          id: 'turn-demo:reasoning',
+          threadId: thread.id,
+          turnId: 'turn-demo',
+          ordinal: 1,
+          revision: 0,
+          status: 'completed',
+          createdAt: agentCreatedAt,
+          updatedAt: agentCreatedAt,
+          completedAt: agentCreatedAt,
+          kind: ThreadItemKind.reasoning,
+          reasoningSummary: const ['## 判断\n\nUI 只消费当前 Thread 的高频通知。'],
+        ),
+        ThreadItemView(
+          id: 'turn-demo:tool',
+          threadId: thread.id,
+          turnId: 'turn-demo',
+          ordinal: 2,
+          revision: 0,
+          status: 'completed',
+          createdAt: agentCreatedAt,
+          updatedAt: agentCreatedAt,
+          completedAt: agentCreatedAt,
+          kind: ThreadItemKind.toolCall,
+          tool: const TimelineToolPart(
+            toolCallId: 'turn-demo:tool-call',
+            name: 'cargo test -p pl-studio-bridge',
+            result: '1 passed; bridge envelope uses typed payload.',
+          ),
+        ),
+        _messageItem(
+          id: 'turn-demo:plan',
+          threadId: thread.id,
+          turnId: 'turn-demo',
+          ordinal: 3,
+          kind: ThreadItemKind.plan,
+          text:
+              '## Implementation checklist\n\n'
+              '1. Keep the Flutter shell aligned with runtime contracts.\n'
+              '2. Subscribe only the selected Thread stream.\n\n'
+              '| Area | Status |\n| --- | --- |\n| FRB runtime | ready |',
+          createdAt: agentCreatedAt,
+        ),
+        _messageItem(
+          id: 'turn-demo:final',
+          threadId: thread.id,
+          turnId: 'turn-demo',
+          ordinal: 4,
+          kind: ThreadItemKind.agentMessage,
+          channel: AgentMessageChannel.finalAnswer,
+          text:
+              '### Streaming Markdown preview\n\n'
+              '正文、**加粗**、`inline code` 和链接都按 GFM 渲染。',
+          createdAt: agentCreatedAt,
+        ),
+      ],
+      interactions: const [],
+      runtime: const ThreadRuntimeView(
+        model: 'planner/local-responses',
+        contextTokens: 18342,
+        contextWindow: 128000,
+        totalTokens: 26320,
+        costLabel: 'CNY 0.16',
+        activeSkills: ['flutter-apply-architecture-best-practices'],
+        activeMcpServers: ['dart'],
+        activeLspServers: ['rust-analyzer'],
+        agentCount: 1,
+      ),
+    );
+  }
+
+  ThreadWorkspace _singleMessageWorkspace(
+    StudioThread thread,
+    String text,
+    String model,
+    DateTime createdAt,
+  ) {
+    return ThreadWorkspace(
+      thread: thread,
+      revision: 1,
+      items: [
+        _messageItem(
+          id: '${thread.id}:final',
+          threadId: thread.id,
+          turnId: '${thread.id}:turn',
+          ordinal: 0,
+          kind: ThreadItemKind.agentMessage,
+          channel: AgentMessageChannel.finalAnswer,
+          text: text,
+          createdAt: createdAt,
+        ),
+      ],
+      interactions: const [],
+      runtime: ThreadRuntimeView(
+        model: model,
+        contextTokens: 320,
+        contextWindow: 128000,
+        totalTokens: 512,
+        costLabel: 'CNY 0.01',
+        activeSkills: const [],
+        activeMcpServers: const ['dart'],
+        activeLspServers: const [],
+        agentCount: 0,
+      ),
+    );
+  }
+
+  @override
+  Future<ProviderCatalogView> loadProviderCatalog() async => _providerCatalog;
 
   @override
   Future<StudioState> openProject(String path) {
@@ -445,23 +340,13 @@ class DemoStudioApi implements StudioApi {
   }
 
   @override
-  Future<StudioState> createSession(String projectId, {String? title}) =>
-      bootstrap();
-
-  @override
-  Future<StudioState> archiveSession(
-    String sessionId, {
-    String? selectedSessionId,
-  }) => bootstrap();
-
-  @override
   Future<RecoveryCleanupPreview> previewRecoveryIssueCleanup(
     String issueId,
   ) async {
     return RecoveryCleanupPreview(
       issueId: issueId,
       expectedRevision: 'demo',
-      scope: RecoveryIssueScope.session,
+      scope: RecoveryIssueScope.thread,
       detail: 'Demo recovery issue',
       resources: const [],
     );
@@ -472,18 +357,8 @@ class DemoStudioApi implements StudioApi {
     String issueId,
     String expectedRevision, {
     String? selectedProjectId,
-    String? selectedSessionId,
+    String? selectedThreadId,
   }) => bootstrap();
-
-  @override
-  Future<StudioSession> setSessionMode(
-    String sessionId,
-    StudioMode mode,
-  ) async {
-    _sessionMode = mode;
-    final state = await bootstrap();
-    return state.sessions.firstWhere((session) => session.id == sessionId);
-  }
 
   @override
   Future<StudioState> setModelRole({
@@ -491,11 +366,11 @@ class DemoStudioApi implements StudioApi {
     required String providerId,
     required String model,
     String? effort,
-    String? selectedSessionId,
+    String? selectedThreadId,
   }) async {
-    final state = await bootstrap();
-    final roles = [
-      for (final role in state.roles)
+    final current = await bootstrap();
+    _roles = [
+      for (final role in current.roles)
         role.key == roleKey
             ? RoleSettingsView(
                 key: role.key,
@@ -505,292 +380,175 @@ class DemoStudioApi implements StudioApi {
               )
             : role,
     ];
-    return state.copyWith(roles: roles);
+    return bootstrap();
   }
 
   @override
-  Future<InteractionResolutionResult> resolveInteraction(
-    String interactionId,
-    InteractionResolutionCommand resolution,
-  ) async {
-    if (resolution is PlanConfirmationResolutionCommand &&
-        resolution.decision == PlanConfirmationDecision.implementFreshContext) {
-      _sessionMode = StudioMode.task;
+  Stream<Object> subscribeProductEvents() => _productEvents.stream;
+
+  @override
+  Stream<ThreadStreamFrame> subscribeThread(String threadId) async* {
+    final snapshot = (await bootstrap()).workspacesByThread[threadId];
+    if (snapshot == null) {
+      throw StateError('unknown demo thread $threadId');
     }
-    final state = await bootstrap();
-    return InteractionResolutionResult(
-      sessionId: state.selectedSessionId ?? '',
-      interactionId: interactionId,
-      status: 'resolved',
-      sessions: state.sessions,
+    yield ThreadSnapshotFrame(workspace: snapshot);
+    yield* _threadEvents.stream.where(
+      (frame) => switch (frame) {
+        ThreadSnapshotFrame(:final workspace) =>
+          workspace.thread.id == threadId,
+        ThreadNotificationFrame(threadId: final id) => id == threadId,
+        ThreadResyncRequiredFrame(threadId: final id) => id == threadId,
+      },
     );
   }
 
   @override
-  Future<void> stopPrompt(String sessionId) async {
-    _promptGenerations.update(
-      sessionId,
-      (value) => value + 1,
-      ifAbsent: () => 1,
-    );
-    final now = DateTime.now();
-    _emitSessionEvent(
-      sessionId: sessionId,
-      payload: TurnChangedPayload(
-        turn: StudioTurnView(
-          turnId: 'demo-turn-$_eventSequence',
-          sessionId: sessionId,
-          state: const StudioTurnState.cancelled('Stopped in demo mode'),
-          updatedAt: now,
-        ),
-      ),
-    );
+  Future<ThreadHistoryPage> listThreadTurns(
+    String threadId, {
+    String? cursor,
+    int limit = 50,
+  }) async {
+    return const ThreadHistoryPage(items: [], nextCursor: null);
   }
 
   @override
-  Stream<Object> subscribeProductEvents() => _globalEvents.stream;
-
-  @override
-  Stream<SessionStreamFrame> subscribeSessionEvents(
-    String sessionId, {
-    int? afterSequence,
-  }) => _sessionEvents.stream;
-
-  @override
-  Future<SubmitPromptReceipt> resumeTask(String sessionId) async {
-    _promptGenerations.update(
-      sessionId,
-      (value) => value + 1,
-      ifAbsent: () => 1,
-    );
-    final now = DateTime.now();
-    final turnId = 'demo-turn-$_eventSequence';
-    final receipt = SubmitPromptReceipt(
-      sessionId: sessionId,
-      turnId: turnId,
-      cursor: _eventSequence,
-    );
-    _emitSessionEvent(
-      sessionId: sessionId,
-      payload: TurnChangedPayload(
-        turn: StudioTurnView(
-          turnId: turnId,
-          sessionId: sessionId,
-          state: const StudioTurnState.inProgress(StudioTurnActivity.preparing),
-          updatedAt: now,
-        ),
-      ),
-    );
-    return receipt;
-  }
-
-  @override
-  Future<SubmitPromptReceipt> submitPrompt(
-    String sessionId,
+  Future<SubmitPromptReceipt> startTurn(
+    String threadId,
     String prompt,
     List<String> attachmentIds,
+  ) => _submitPrompt(threadId, prompt);
+
+  @override
+  Future<SubmitPromptReceipt> steerTurn(
+    String threadId,
+    String prompt,
+    List<String> attachmentIds,
+  ) => _submitPrompt(threadId, prompt);
+
+  Future<SubmitPromptReceipt> _submitPrompt(
+    String threadId,
+    String prompt,
   ) async {
     final trimmed = prompt.trim();
-    if (trimmed.isEmpty) {
-      throw Exception('prompt is empty');
-    }
-    final promptGeneration = _promptGenerations.update(
-      sessionId,
+    if (trimmed.isEmpty) throw ArgumentError.value(prompt, 'prompt', 'empty');
+    final workspace = _workspaces[threadId];
+    if (workspace == null) throw StateError('unknown demo thread $threadId');
+    final generation = _promptGenerations.update(
+      threadId,
       (value) => value + 1,
       ifAbsent: () => 1,
     );
-    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-    final turnId = 'demo-turn-$_eventSequence';
+    final turnId = 'demo-turn-${++_turnSequence}';
+    final now = DateTime.now();
     final receipt = SubmitPromptReceipt(
-      sessionId: sessionId,
+      threadId: threadId,
       turnId: turnId,
-      cursor: _eventSequence,
+      cursor: workspace.revision + 1,
     );
-    final userMessageId = 'demo-user-$_eventSequence';
-    _emitSessionEvent(
-      sessionId: sessionId,
-      payload: MessageUpdatedPayload(
-        message: _demoTimelineMessage(
-          id: userMessageId,
-          sessionId: sessionId,
+    _emitThreadUpdate(
+      threadId,
+      ThreadItemUpsert(
+        _messageItem(
+          id: '$turnId:user',
+          threadId: threadId,
           turnId: turnId,
-          role: 'user',
-          createdAt: now,
-        ),
-      ),
-    );
-    _emitSessionEvent(
-      sessionId: sessionId,
-      payload: MessagePartUpdatedPayload(
-        part: _demoTimelinePart(
-          id: '$userMessageId:text',
-          messageId: userMessageId,
-          sessionId: sessionId,
-          turnId: turnId,
-          type: TimelinePartType.text,
-          order: 0,
-          revision: 0,
-          status: 'completed',
-          createdAt: now,
-          textChannel: TimelineTextChannel.user,
+          ordinal: _nextOrdinal(threadId),
+          kind: ThreadItemKind.userMessage,
           text: trimmed,
+          createdAt: now,
         ),
       ),
     );
-    _emitSessionEvent(
-      sessionId: sessionId,
-      payload: TurnChangedPayload(
-        turn: StudioTurnView(
+    _emitThreadUpdate(
+      threadId,
+      ThreadTurnUpdate(
+        StudioTurnView(
           turnId: turnId,
-          sessionId: sessionId,
+          threadId: threadId,
           state: const StudioTurnState.inProgress(StudioTurnActivity.thinking),
-          updatedAt: DateTime.fromMillisecondsSinceEpoch(now * 1000),
+          updatedAt: now,
         ),
       ),
     );
     await Future<void>.delayed(promptStartDelay);
-    if (_promptGenerations[sessionId] != promptGeneration) {
-      return receipt;
-    }
-    final assistantMessageId = 'demo-assistant-$_eventSequence';
-    _emitSessionEvent(
-      sessionId: sessionId,
-      payload: MessageUpdatedPayload(
-        message: _demoTimelineMessage(
-          id: assistantMessageId,
-          sessionId: sessionId,
+    if (_promptGenerations[threadId] != generation) return receipt;
+    final reasoningId = '$turnId:reasoning';
+    _emitThreadUpdate(
+      threadId,
+      ThreadItemUpsert(
+        ThreadItemView(
+          id: reasoningId,
+          threadId: threadId,
           turnId: turnId,
-          role: 'assistant',
-          createdAt: now + 1,
-        ),
-      ),
-    );
-    _emitSessionEvent(
-      sessionId: sessionId,
-      payload: MessagePartUpdatedPayload(
-        part: _demoTimelinePart(
-          id: '$assistantMessageId:reasoning-1',
-          messageId: assistantMessageId,
-          sessionId: sessionId,
-          turnId: turnId,
-          type: TimelinePartType.reasoning,
-          order: 0,
+          ordinal: _nextOrdinal(threadId),
           revision: 0,
           status: 'streaming',
-          createdAt: now + 1,
+          createdAt: now,
+          updatedAt: now,
+          kind: ThreadItemKind.reasoning,
           reasoningSummary: const ['## Inspecting the request'],
         ),
       ),
     );
     await Future<void>.delayed(promptActivityDelay);
-    if (_promptGenerations[sessionId] != promptGeneration) {
-      return receipt;
-    }
-    _emitSessionEvent(
-      sessionId: sessionId,
-      payload: MessagePartDeltaPayload(
-        delta: TimelinePartDelta(
-          partId: '$assistantMessageId:reasoning-1',
+    if (_promptGenerations[threadId] != generation) return receipt;
+    _emitThreadUpdate(
+      threadId,
+      ThreadItemDeltaUpdate(
+        ThreadItemDeltaView(
+          itemId: reasoningId,
           revision: 1,
           field: 'reasoning.summary',
-          delta: '\n\nChecking the live timeline projection.',
-          chunkIndex: 0,
+          delta: '\n\nChecking the live ThreadItem projection.',
         ),
       ),
     );
     await Future<void>.delayed(promptActivityDelay);
-    if (_promptGenerations[sessionId] != promptGeneration) {
-      return receipt;
-    }
-    _emitSessionEvent(
-      sessionId: sessionId,
-      payload: MessagePartUpdatedPayload(
-        part: _demoTimelinePart(
-          id: '$assistantMessageId:reasoning-1',
-          messageId: assistantMessageId,
-          sessionId: sessionId,
-          turnId: turnId,
-          type: TimelinePartType.reasoning,
-          order: 0,
+    if (_promptGenerations[threadId] != generation) return receipt;
+    final liveReasoning = _workspaces[threadId]!.items.firstWhere(
+      (item) => item.id == reasoningId,
+    );
+    _emitThreadUpdate(
+      threadId,
+      ThreadItemUpsert(
+        liveReasoning.copyWith(
           revision: 2,
           status: 'completed',
-          createdAt: now + 1,
-          reasoningSummary: const [
-            '## Inspecting the request',
-            'Checking the live timeline projection.',
-          ],
+          updatedAt: DateTime.now(),
+          completedAt: DateTime.now(),
         ),
       ),
     );
-    _emitSessionEvent(
-      sessionId: sessionId,
-      payload: MessagePartUpdatedPayload(
-        part: _demoTimelinePart(
-          id: '$assistantMessageId:reasoning-2',
-          messageId: assistantMessageId,
-          sessionId: sessionId,
+    _emitThreadUpdate(
+      threadId,
+      ThreadTurnUpdate(
+        StudioTurnView(
           turnId: turnId,
-          type: TimelinePartType.reasoning,
-          order: 1,
-          revision: 0,
-          status: 'streaming',
-          createdAt: now + 1,
-          reasoningContent: const ['## Preparing the tool call'],
-        ),
-      ),
-    );
-    await Future<void>.delayed(promptActivityDelay);
-    if (_promptGenerations[sessionId] != promptGeneration) {
-      return receipt;
-    }
-    _emitSessionEvent(
-      sessionId: sessionId,
-      payload: MessagePartUpdatedPayload(
-        part: _demoTimelinePart(
-          id: '$assistantMessageId:reasoning-2',
-          messageId: assistantMessageId,
-          sessionId: sessionId,
-          turnId: turnId,
-          type: TimelinePartType.reasoning,
-          order: 1,
-          revision: 1,
-          status: 'completed',
-          createdAt: now + 1,
-          reasoningSummary: const [
-            '## Preparing the tool call',
-            'Selecting the smallest verification command.',
-          ],
-        ),
-      ),
-    );
-    _emitSessionEvent(
-      sessionId: sessionId,
-      payload: TurnChangedPayload(
-        turn: StudioTurnView(
-          turnId: turnId,
-          sessionId: sessionId,
+          threadId: threadId,
           state: const StudioTurnState.inProgress(
             StudioTurnActivity.runningTool,
           ),
-          updatedAt: DateTime.fromMillisecondsSinceEpoch(now * 1000),
+          updatedAt: DateTime.now(),
         ),
       ),
     );
-    _emitSessionEvent(
-      sessionId: sessionId,
-      payload: MessagePartUpdatedPayload(
-        part: _demoTimelinePart(
-          id: '$assistantMessageId:tool',
-          messageId: assistantMessageId,
-          sessionId: sessionId,
+    final toolId = '$turnId:tool';
+    _emitThreadUpdate(
+      threadId,
+      ThreadItemUpsert(
+        ThreadItemView(
+          id: toolId,
+          threadId: threadId,
           turnId: turnId,
-          type: TimelinePartType.tool,
-          order: 2,
+          ordinal: _nextOrdinal(threadId),
           revision: 0,
           status: 'running',
-          createdAt: now + 1,
+          createdAt: now,
+          updatedAt: now,
+          kind: ThreadItemKind.toolCall,
           tool: TimelineToolPart(
-            toolCallId: '$assistantMessageId:tool-call',
+            toolCallId: '$turnId:tool-call',
             name: 'exec',
             arguments: jsonEncode({
               'command': 'flutter test test/widget_test.dart',
@@ -800,83 +558,97 @@ class DemoStudioApi implements StudioApi {
       ),
     );
     await Future<void>.delayed(promptToolDelay);
-    if (_promptGenerations[sessionId] != promptGeneration) {
-      return receipt;
-    }
-    unawaited(
-      Future<void>.delayed(Duration.zero, () {
-        _emitSessionEvent(
-          sessionId: sessionId,
-          payload: MessagePartUpdatedPayload(
-            part: _demoTimelinePart(
-              id: '$assistantMessageId:tool',
-              messageId: assistantMessageId,
-              sessionId: sessionId,
-              turnId: turnId,
-              type: TimelinePartType.tool,
-              order: 2,
-              revision: 1,
-              status: 'completed',
-              createdAt: now + 1,
-              tool: TimelineToolPart(
-                toolCallId: '$assistantMessageId:tool-call',
-                name: 'exec',
-                arguments: jsonEncode({
-                  'command': 'flutter test test/widget_test.dart',
-                }),
-                result: 'All widget tests passed.',
-              ),
-            ),
-          ),
-        );
-        _emitSessionEvent(
-          sessionId: sessionId,
-          payload: TurnChangedPayload(
-            turn: StudioTurnView(
-              turnId: turnId,
-              sessionId: sessionId,
-              state: const StudioTurnState.inProgress(
-                StudioTurnActivity.responding,
-              ),
-              updatedAt: DateTime.fromMillisecondsSinceEpoch(now * 1000),
-            ),
-          ),
-        );
-        _emitSessionEvent(
-          sessionId: sessionId,
-          payload: MessagePartUpdatedPayload(
-            part: _demoTimelinePart(
-              id: '$assistantMessageId:text',
-              messageId: assistantMessageId,
-              sessionId: sessionId,
-              turnId: turnId,
-              type: TimelinePartType.text,
-              order: 3,
-              revision: 0,
-              status: 'completed',
-              createdAt: now + 1,
-              textChannel: TimelineTextChannel.finalAnswer,
-              text:
-                  'Demo response for: **$trimmed**\n\n'
-                  '- Reasoning summaries update in one activity row\n'
-                  '- Tool activity takes over without duplicating history',
-            ),
-          ),
-        );
-        _emitSessionEvent(
-          sessionId: sessionId,
-          payload: TurnChangedPayload(
-            turn: StudioTurnView(
-              turnId: turnId,
-              sessionId: sessionId,
-              state: const StudioTurnState.completed(),
-              updatedAt: DateTime.fromMillisecondsSinceEpoch(now * 1000),
-            ),
-          ),
-        );
-      }),
+    if (_promptGenerations[threadId] != generation) return receipt;
+    final runningTool = _workspaces[threadId]!.items.firstWhere(
+      (item) => item.id == toolId,
+    );
+    _emitThreadUpdate(
+      threadId,
+      ThreadItemUpsert(
+        runningTool.copyWith(
+          revision: 1,
+          status: 'completed',
+          updatedAt: DateTime.now(),
+          completedAt: DateTime.now(),
+          tool: runningTool.tool?.copyWith(result: 'All widget tests passed.'),
+        ),
+      ),
+    );
+    _emitThreadUpdate(
+      threadId,
+      ThreadItemUpsert(
+        _messageItem(
+          id: '$turnId:final',
+          threadId: threadId,
+          turnId: turnId,
+          ordinal: _nextOrdinal(threadId),
+          kind: ThreadItemKind.agentMessage,
+          channel: AgentMessageChannel.finalAnswer,
+          text:
+              'Demo response for: **$trimmed**\n\n'
+              '- reasoning 与 tool 都直接来自 ThreadItem',
+          createdAt: DateTime.now(),
+        ),
+      ),
+    );
+    _emitThreadUpdate(
+      threadId,
+      ThreadTurnUpdate(
+        StudioTurnView(
+          turnId: turnId,
+          threadId: threadId,
+          state: const StudioTurnState.completed(),
+          updatedAt: DateTime.now(),
+        ),
+      ),
     );
     return receipt;
+  }
+
+  @override
+  Future<void> interruptTurn(String threadId, String turnId) async {
+    _promptGenerations.update(
+      threadId,
+      (value) => value + 1,
+      ifAbsent: () => 1,
+    );
+    _emitThreadUpdate(
+      threadId,
+      ThreadTurnUpdate(
+        StudioTurnView(
+          turnId: turnId,
+          threadId: threadId,
+          state: const StudioTurnState.cancelled('Stopped in demo mode'),
+          updatedAt: DateTime.now(),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Future<PendingInteraction> respondInteraction(
+    String interactionId,
+    InteractionResolutionCommand resolution,
+  ) async {
+    const threadId = 'thread-main';
+    final workspace = _workspaces[threadId];
+    final interaction = workspace?.interactions
+        .where((item) => item.id == interactionId)
+        .firstOrNull;
+    final resolved =
+        interaction ??
+        PendingInteraction(
+          id: interactionId,
+          threadId: threadId,
+          kind: InteractionKind.userInput,
+          title: '',
+          body: '',
+        );
+    _emitThreadUpdate(
+      threadId,
+      ThreadInteractionUpdate(interaction: resolved, pending: false),
+    );
+    return resolved;
   }
 
   @override
@@ -884,9 +656,6 @@ class DemoStudioApi implements StudioApi {
     _permissionMode = mode;
     return bootstrap();
   }
-
-  @override
-  Future<ProviderCatalogView> loadProviderCatalog() async => _providerCatalog;
 
   @override
   Future<StudioState> saveProviderSettings(
@@ -917,9 +686,8 @@ class DemoStudioApi implements StudioApi {
   }
 
   @override
-  Future<StudioState> saveMcpSettings(McpSettingsCommand command) async {
-    return bootstrap();
-  }
+  Future<StudioState> saveMcpSettings(McpSettingsCommand command) =>
+      bootstrap();
 
   @override
   Future<StudioState> saveGeneralSettings(
@@ -955,110 +723,145 @@ class DemoStudioApi implements StudioApi {
 
   @override
   Future<List<ProviderUsageView>> loadProviderUsages() async {
-    final state = await bootstrap();
+    final current = await bootstrap();
     return [
-      for (final provider in state.providers) _demoProviderUsage(provider),
+      for (final provider in current.providers) _demoProviderUsage(provider),
     ];
   }
 
   @override
-  Future<SessionHistoryPage> loadSessionHistoryPage(
-    String sessionId, {
-    int? beforeTurnSequence,
-    int limit = 50,
-  }) async {
-    return const SessionHistoryPage(
-      turns: [],
-      nextBeforeTurnSequence: null,
-      hasMore: false,
-    );
-  }
-
-  @override
   Future<List<String>> listDiscoveredSkills(String projectId) async {
-    if (_archivedProjectIds.contains(projectId)) {
-      return const [];
-    }
-    return const ['flutter-ui-polish', 'runtime-review', 'studio-settings'];
+    return _archivedProjectIds.contains(projectId)
+        ? const []
+        : const ['flutter-ui-polish', 'runtime-review', 'studio-settings'];
   }
 
-  void _emitSessionEvent({
-    required String sessionId,
-    required StudioBridgeEventPayload payload,
-  }) {
-    _eventSequence += 1;
-    _sessionEvents.add(
-      SessionEventFrame(
-        event: StudioBridgeEvent(
-          payload: payload,
-          sessionId: sessionId,
-          sequence: BigInt.from(_eventSequence),
-          createdAt: DateTime.now(),
-        ),
+  void _emitThreadUpdate(String threadId, ThreadWorkspaceUpdate update) {
+    final workspace = _workspaces[threadId];
+    if (workspace == null) return;
+    final revision = workspace.revision + 1;
+    final updated = switch (update) {
+      ThreadTurnUpdate(:final turn) => workspace.copyWith(
+        revision: revision,
+        activeTurn: turn.state.isBusy ? turn : null,
+      ),
+      ThreadItemUpsert(:final item) => _demoUpsertItem(
+        workspace,
+        revision,
+        item,
+      ),
+      ThreadItemDeltaUpdate(:final delta) => _demoAppendDelta(
+        workspace,
+        revision,
+        delta,
+      ),
+      ThreadInteractionUpdate(:final interaction, :final pending) =>
+        _demoUpdateInteraction(workspace, revision, interaction, pending),
+      ThreadRuntimeUpdate(:final runtime, :final todo) => workspace.copyWith(
+        revision: revision,
+        runtime: runtime,
+        todo: todo,
+      ),
+    };
+    _workspaces[threadId] = updated;
+    _threadEvents.add(
+      ThreadNotificationFrame(
+        threadId: threadId,
+        revision: revision,
+        update: update,
       ),
     );
   }
+
+  int _nextOrdinal(String threadId) {
+    final items = _workspaces[threadId]?.items ?? const <ThreadItemView>[];
+    return items.isEmpty
+        ? 0
+        : items
+                  .map((item) => item.ordinal)
+                  .reduce((left, right) => left > right ? left : right) +
+              1;
+  }
 }
 
-TimelineMessage _demoTimelineMessage({
+ThreadItemView _messageItem({
   required String id,
-  required String sessionId,
+  required String threadId,
   required String turnId,
-  required String role,
-  required int createdAt,
+  required int ordinal,
+  required ThreadItemKind kind,
+  required String text,
+  required DateTime createdAt,
+  AgentMessageChannel? channel,
 }) {
-  final timestamp = DateTime.fromMillisecondsSinceEpoch(createdAt * 1000);
-  return TimelineMessage(
+  return ThreadItemView(
     id: id,
-    sessionId: sessionId,
+    threadId: threadId,
     turnId: turnId,
-    role: role,
-    createdAt: timestamp,
-    updatedAt: timestamp,
-  );
-}
-
-TimelinePartSnapshot _demoTimelinePart({
-  required String id,
-  required String messageId,
-  required String sessionId,
-  required String turnId,
-  required TimelinePartType type,
-  required int order,
-  required int revision,
-  required String status,
-  required int createdAt,
-  String text = '',
-  List<String> reasoningSummary = const [],
-  List<String> reasoningContent = const [],
-  TimelineTextChannel? textChannel,
-  TimelineToolPart? tool,
-}) {
-  final timestamp = DateTime.fromMillisecondsSinceEpoch(createdAt * 1000);
-  return TimelinePartSnapshot(
-    id: id,
-    messageId: messageId,
-    sessionId: sessionId,
-    turnId: turnId,
-    type: type,
-    order: order,
-    revision: revision,
+    ordinal: ordinal,
+    revision: 0,
+    status: 'completed',
+    createdAt: createdAt,
+    updatedAt: createdAt,
+    completedAt: createdAt,
+    kind: kind,
     text: text,
-    reasoningSummary: reasoningSummary,
-    reasoningContent: reasoningContent,
-    status: status,
-    createdAt: timestamp,
-    updatedAt: timestamp,
-    textChannel: textChannel,
-    tool: tool,
+    channel: channel,
   );
+}
+
+ThreadWorkspace _demoUpsertItem(
+  ThreadWorkspace workspace,
+  int revision,
+  ThreadItemView incoming,
+) {
+  final items = [...workspace.items];
+  final index = items.indexWhere((item) => item.id == incoming.id);
+  if (index < 0) {
+    items.add(incoming);
+  } else {
+    items[index] = incoming;
+  }
+  items.sort(_compareThreadItems);
+  return workspace.copyWith(revision: revision, items: items);
+}
+
+ThreadWorkspace _demoAppendDelta(
+  ThreadWorkspace workspace,
+  int revision,
+  ThreadItemDeltaView delta,
+) {
+  final items = [...workspace.items];
+  final index = items.indexWhere((item) => item.id == delta.itemId);
+  if (index >= 0) {
+    items[index] = items[index].appendDelta(
+      field: delta.field,
+      delta: delta.delta,
+      nextRevision: delta.revision,
+    );
+  }
+  return workspace.copyWith(revision: revision, items: items);
+}
+
+ThreadWorkspace _demoUpdateInteraction(
+  ThreadWorkspace workspace,
+  int revision,
+  PendingInteraction interaction,
+  bool pending,
+) {
+  final interactions = [...workspace.interactions];
+  final index = interactions.indexWhere((item) => item.id == interaction.id);
+  if (!pending) {
+    if (index >= 0) interactions.removeAt(index);
+  } else if (index < 0) {
+    interactions.add(interaction);
+  } else {
+    interactions[index] = interaction;
+  }
+  return workspace.copyWith(revision: revision, interactions: interactions);
 }
 
 /// Deterministic demo fixture exposed only by the dedicated Driver build.
-///
-/// `cargo xtask run-gui --demo --driver` enables this fixture through the
-/// `PURE_STUDIO_DRIVER` compile-time define. Production and release entrypoints
-/// never set that define.
 class DriverDemoStudioApi extends DemoStudioApi {
   @override
   Duration get promptActivityDelay => const Duration(seconds: 3);
@@ -1069,50 +872,58 @@ class DriverDemoStudioApi extends DemoStudioApi {
   @override
   Future<StudioState> bootstrap() async {
     final state = await super.bootstrap();
+    const threadId = 'thread-main';
+    final workspace = state.workspacesByThread[threadId];
+    if (workspace == null) return state;
     return state.copyWith(
-      pendingInteractions: const [
-        PendingInteraction(
-          id: 'driver-tool',
-          sessionId: 'session-main',
-          kind: InteractionKind.toolApproval,
-          title: 'Approve demo tool',
-          body: 'Run a deterministic demo command.',
-          payload: ToolApprovalInteractionPayload(
-            toolName: 'demo_tool',
-            workingDirectory: r'C:\demo',
-          ),
-        ),
-        PendingInteraction(
-          id: 'driver-input',
-          sessionId: 'session-main',
-          kind: InteractionKind.userInput,
-          title: 'Demo question',
-          body: 'Choose a deterministic answer.',
-          payload: UserInputInteractionPayload(
-            questions: [
-              UserQuestionView(
-                id: 'driver-question',
-                header: 'Driver',
-                question: 'Continue?',
-                isOther: false,
-                isSecret: false,
-                options: [],
+      workspacesByThread: {
+        ...state.workspacesByThread,
+        threadId: workspace.copyWith(
+          interactions: const [
+            PendingInteraction(
+              id: 'driver-tool',
+              threadId: threadId,
+              kind: InteractionKind.toolApproval,
+              title: 'Approve demo tool',
+              body: 'Run a deterministic demo command.',
+              payload: ToolApprovalInteractionPayload(
+                toolName: 'demo_tool',
+                workingDirectory: r'C:\demo',
               ),
-            ],
-          ),
+            ),
+            PendingInteraction(
+              id: 'driver-input',
+              threadId: threadId,
+              kind: InteractionKind.userInput,
+              title: 'Demo question',
+              body: 'Choose a deterministic answer.',
+              payload: UserInputInteractionPayload(
+                questions: [
+                  UserQuestionView(
+                    id: 'driver-question',
+                    header: 'Driver',
+                    question: 'Continue?',
+                    isOther: false,
+                    isSecret: false,
+                    options: [],
+                  ),
+                ],
+              ),
+            ),
+            PendingInteraction(
+              id: 'driver-plan',
+              threadId: threadId,
+              kind: InteractionKind.planConfirmation,
+              title: 'Confirm demo plan',
+              body: 'Implement the deterministic demo plan.',
+              payload: PlanConfirmationInteractionPayload(
+                planId: 'driver-plan',
+                content: '1. Verify stable Driver keys.',
+              ),
+            ),
+          ],
         ),
-        PendingInteraction(
-          id: 'driver-plan',
-          sessionId: 'session-main',
-          kind: InteractionKind.planConfirmation,
-          title: 'Confirm demo plan',
-          body: 'Implement the deterministic demo plan.',
-          payload: PlanConfirmationInteractionPayload(
-            planId: 'driver-plan',
-            content: '1. Verify stable Driver keys.',
-          ),
-        ),
-      ],
+      },
     );
   }
 }

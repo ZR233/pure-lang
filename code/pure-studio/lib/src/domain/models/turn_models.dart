@@ -54,13 +54,13 @@ class StudioTurnState {
 class StudioTurnView {
   const StudioTurnView({
     required this.turnId,
-    required this.sessionId,
+    required this.threadId,
     required this.state,
     required this.updatedAt,
   });
 
   final String turnId;
-  final String sessionId;
+  final String threadId;
   final StudioTurnState state;
   final DateTime updatedAt;
 
@@ -68,11 +68,11 @@ class StudioTurnView {
   bool operator ==(Object other) {
     return other is StudioTurnView &&
         other.turnId == turnId &&
-        other.sessionId == sessionId &&
+        other.threadId == threadId &&
         other.state == state &&
         other.updatedAt == updatedAt;
   }
 
   @override
-  int get hashCode => Object.hash(turnId, sessionId, state, updatedAt);
+  int get hashCode => Object.hash(turnId, threadId, state, updatedAt);
 }

@@ -7,17 +7,17 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::api::studio::convert::event::bridge_product_event;
-use crate::api::studio::convert::session_stream::bridge_session_frame;
+use crate::api::studio::convert::thread_stream::bridge_thread_update;
 use crate::api::studio::runtime::active_bridge;
 use crate::api::studio::types::{
-    BridgeError, BridgeProductEventEnvelope, BridgeSessionStreamFrame,
+    BridgeError, BridgeProductEventEnvelope, BridgeThreadSubscriptionUpdate,
 };
 use crate::frb_generated::StreamSink;
 
 #[derive(Debug, Clone)]
-pub enum BridgeSessionStreamEnvelope {
+pub enum BridgeThreadStreamEnvelope {
     Data {
-        frame: Box<BridgeSessionStreamFrame>,
+        update: Box<BridgeThreadSubscriptionUpdate>,
     },
     Failure {
         error: BridgeError,
@@ -42,13 +42,13 @@ struct BridgeSubscriptionInner {
     cancel: CancellationToken,
     producer_task: Mutex<Option<JoinHandle<()>>>,
     sink_task: Mutex<Option<JoinHandle<()>>>,
-    session_receiver: Mutex<Option<mpsc::Receiver<BridgeSessionStreamEnvelope>>>,
+    thread_receiver: Mutex<Option<mpsc::Receiver<BridgeThreadStreamEnvelope>>>,
     product_receiver: Mutex<Option<mpsc::Receiver<BridgeProductStreamEnvelope>>>,
 }
 
 #[derive(Debug, Clone)]
 enum BridgeSubscriptionKind {
-    Session { session_id: String },
+    Thread { thread_id: String },
     Product,
 }
 
@@ -57,23 +57,23 @@ impl BridgeEventSubscription {
         self.inner.cancel_and_wait().await;
     }
 
-    pub async fn session_stream(
+    pub async fn thread_stream(
         &self,
-        sink: StreamSink<BridgeSessionStreamEnvelope>,
+        sink: StreamSink<BridgeThreadStreamEnvelope>,
     ) -> Result<(), BridgeError> {
-        if !matches!(self.inner.kind, BridgeSubscriptionKind::Session { .. }) {
+        if !matches!(self.inner.kind, BridgeSubscriptionKind::Thread { .. }) {
             return Err(BridgeError::invalid_argument(
-                "product subscription cannot open a session stream",
+                "product subscription cannot open a Thread stream",
             ));
         }
         let mut receiver = self
             .inner
-            .session_receiver
+            .thread_receiver
             .lock()
             .await
             .take()
             .ok_or_else(|| {
-                BridgeError::invalid_argument("session stream can only be opened once")
+                BridgeError::invalid_argument("Thread stream can only be opened once")
             })?;
         let cancel = self.inner.cancel.clone();
         let task = tokio::spawn(async move {
@@ -102,7 +102,7 @@ impl BridgeEventSubscription {
     ) -> Result<(), BridgeError> {
         if !matches!(self.inner.kind, BridgeSubscriptionKind::Product) {
             return Err(BridgeError::invalid_argument(
-                "session subscription cannot open a product stream",
+                "Thread subscription cannot open a product stream",
             ));
         }
         let mut receiver = self
@@ -145,8 +145,8 @@ impl Drop for BridgeEventSubscription {
 impl BridgeSubscriptionInner {
     async fn cancel_and_wait(&self) {
         match &self.kind {
-            BridgeSubscriptionKind::Session { session_id } => {
-                tracing::trace!(subscription_id = self.id, %session_id, "cancelling Studio session subscription");
+            BridgeSubscriptionKind::Thread { thread_id } => {
+                tracing::trace!(subscription_id = self.id, %thread_id, "cancelling Studio Thread subscription");
             }
             BridgeSubscriptionKind::Product => {
                 tracing::trace!(
@@ -202,16 +202,12 @@ impl BridgeTaskRegistry {
     }
 }
 
-pub async fn create_session_subscription(
-    session_id: String,
-    after_sequence: Option<u64>,
-) -> Result<BridgeEventSubscription, BridgeError> {
+pub async fn subscribe_thread(thread_id: String) -> Result<BridgeEventSubscription, BridgeError> {
     let bridge = active_bridge().await?;
     let mut events = bridge
         .studio
-        .subscribe_session_events(pl_protocol::SessionSubscriptionRequest {
-            session_id: session_id.clone(),
-            after_sequence,
+        .subscribe_thread(pl_protocol::ThreadSubscriptionRequest {
+            thread_id: thread_id.clone(),
         })
         .await?;
     let cancel = bridge.shutdown.child_token();
@@ -225,11 +221,11 @@ pub async fn create_session_subscription(
                     let Some(frame) = frame else {
                         break;
                     };
-                    match bridge_session_frame(frame) {
-                        Ok(frame) => {
+                    match bridge_thread_update(frame) {
+                        Ok(Some(update)) => {
                             if sender
-                                .send(BridgeSessionStreamEnvelope::Data {
-                                    frame: Box::new(frame),
+                                .send(BridgeThreadStreamEnvelope::Data {
+                                    update: Box::new(update),
                                 })
                                 .await
                                 .is_err()
@@ -237,9 +233,10 @@ pub async fn create_session_subscription(
                                 break;
                             }
                         }
+                        Ok(None) => {}
                         Err(error) => {
                             let _ = sender
-                                .send(BridgeSessionStreamEnvelope::Failure {
+                                .send(BridgeThreadStreamEnvelope::Failure {
                                     error: BridgeError::from(error),
                                 })
                                 .await;
@@ -249,15 +246,15 @@ pub async fn create_session_subscription(
                 }
             }
         }
-        let _ = sender.send(BridgeSessionStreamEnvelope::Closed).await;
+        let _ = sender.send(BridgeThreadStreamEnvelope::Closed).await;
     });
     let inner = Arc::new(BridgeSubscriptionInner {
         id: bridge.subscriptions.next_id(),
-        kind: BridgeSubscriptionKind::Session { session_id },
+        kind: BridgeSubscriptionKind::Thread { thread_id },
         cancel,
         producer_task: Mutex::new(Some(producer_task)),
         sink_task: Mutex::new(None),
-        session_receiver: Mutex::new(Some(receiver)),
+        thread_receiver: Mutex::new(Some(receiver)),
         product_receiver: Mutex::new(None),
     });
     bridge.subscriptions.register(&inner).await;
@@ -298,7 +295,7 @@ pub async fn create_product_subscription() -> Result<BridgeEventSubscription, Br
         cancel,
         producer_task: Mutex::new(Some(producer_task)),
         sink_task: Mutex::new(None),
-        session_receiver: Mutex::new(None),
+        thread_receiver: Mutex::new(None),
         product_receiver: Mutex::new(Some(receiver)),
     });
     bridge.subscriptions.register(&inner).await;
@@ -316,13 +313,13 @@ mod tests {
         let cancel = CancellationToken::new();
         let inner = Arc::new(BridgeSubscriptionInner {
             id: 1,
-            kind: BridgeSubscriptionKind::Session {
-                session_id: "session-1".to_string(),
+            kind: BridgeSubscriptionKind::Thread {
+                thread_id: "thread-1".to_string(),
             },
             cancel: cancel.clone(),
             producer_task: Mutex::new(None),
             sink_task: Mutex::new(None),
-            session_receiver: Mutex::new(None),
+            thread_receiver: Mutex::new(None),
             product_receiver: Mutex::new(None),
         });
 
@@ -348,7 +345,7 @@ mod tests {
             cancel: cancel.clone(),
             producer_task: Mutex::new(Some(producer_task)),
             sink_task: Mutex::new(None),
-            session_receiver: Mutex::new(None),
+            thread_receiver: Mutex::new(None),
             product_receiver: Mutex::new(None),
         });
         registry.register(&inner).await;

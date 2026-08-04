@@ -15,44 +15,39 @@ abstract class StudioApi {
     String expectedRevision, {
     String? selectedProjectId,
   });
-  Future<StudioState> createSession(String projectId, {String? title});
-  Future<StudioState> archiveSession(
-    String sessionId, {
-    String? selectedSessionId,
-  });
   Future<RecoveryCleanupPreview> previewRecoveryIssueCleanup(String issueId);
   Future<StudioState> cleanupRecoveryIssue(
     String issueId,
     String expectedRevision, {
     String? selectedProjectId,
-    String? selectedSessionId,
+    String? selectedThreadId,
   });
-  Future<StudioSession> setSessionMode(String sessionId, StudioMode mode);
   Future<StudioState> setModelRole({
     required String roleKey,
     required String providerId,
     required String model,
     String? effort,
-    String? selectedSessionId,
+    String? selectedThreadId,
   });
   Stream<Object> subscribeProductEvents();
-  Stream<SessionStreamFrame> subscribeSessionEvents(
-    String sessionId, {
-    int? afterSequence,
-  });
-  Future<SessionHistoryPage> loadSessionHistoryPage(
-    String sessionId, {
-    int? beforeTurnSequence,
+  Stream<ThreadStreamFrame> subscribeThread(String threadId);
+  Future<ThreadHistoryPage> listThreadTurns(
+    String threadId, {
+    String? cursor,
     int limit = 50,
   });
-  Future<SubmitPromptReceipt> submitPrompt(
-    String sessionId,
+  Future<SubmitPromptReceipt> startTurn(
+    String threadId,
     String prompt,
     List<String> attachmentIds,
   );
-  Future<SubmitPromptReceipt> resumeTask(String sessionId);
-  Future<void> stopPrompt(String sessionId);
-  Future<InteractionResolutionResult> resolveInteraction(
+  Future<SubmitPromptReceipt> steerTurn(
+    String threadId,
+    String prompt,
+    List<String> attachmentIds,
+  );
+  Future<void> interruptTurn(String threadId, String turnId);
+  Future<PendingInteraction> respondInteraction(
     String interactionId,
     InteractionResolutionCommand resolution,
   );
@@ -208,32 +203,6 @@ class FrbStudioApi implements StudioApi {
   }
 
   @override
-  Future<StudioState> createSession(String projectId, {String? title}) async {
-    await _ensureReady();
-    return studioStateFromFrbSnapshot(
-      await _bridgeCall(
-        () => frb.createSession(projectId: projectId, title: title),
-      ),
-    );
-  }
-
-  @override
-  Future<StudioState> archiveSession(
-    String sessionId, {
-    String? selectedSessionId,
-  }) async {
-    await _ensureReady();
-    return studioStateFromFrbSnapshot(
-      await _bridgeCall(
-        () => frb.archiveSession(
-          sessionId: sessionId,
-          selectedSessionId: selectedSessionId,
-        ),
-      ),
-    );
-  }
-
-  @override
   Future<RecoveryCleanupPreview> previewRecoveryIssueCleanup(
     String issueId,
   ) async {
@@ -250,7 +219,7 @@ class FrbStudioApi implements StudioApi {
     String issueId,
     String expectedRevision, {
     String? selectedProjectId,
-    String? selectedSessionId,
+    String? selectedThreadId,
   }) async {
     await _ensureReady();
     return studioStateFromFrbSnapshot(
@@ -259,23 +228,7 @@ class FrbStudioApi implements StudioApi {
           issueId: issueId,
           expectedRevision: expectedRevision,
           selectedProjectId: selectedProjectId,
-          selectedSessionId: selectedSessionId,
-        ),
-      ),
-    );
-  }
-
-  @override
-  Future<StudioSession> setSessionMode(
-    String sessionId,
-    StudioMode mode,
-  ) async {
-    await _ensureReady();
-    return _sessionFromFrb(
-      await _bridgeCall(
-        () => frb.setSessionMode(
-          sessionId: sessionId,
-          mode: _compileModeLabel(mode),
+          selectedThreadId: selectedThreadId,
         ),
       ),
     );
@@ -287,7 +240,7 @@ class FrbStudioApi implements StudioApi {
     required String providerId,
     required String model,
     String? effort,
-    String? selectedSessionId,
+    String? selectedThreadId,
   }) async {
     await _ensureReady();
     return studioStateFromFrbSnapshot(
@@ -297,30 +250,25 @@ class FrbStudioApi implements StudioApi {
           providerId: providerId,
           model: model,
           effort: effort,
-          selectedSessionId: selectedSessionId,
+          selectedThreadId: selectedThreadId,
         ),
       ),
     );
   }
 
   @override
-  Future<InteractionResolutionResult> resolveInteraction(
+  Future<PendingInteraction> respondInteraction(
     String interactionId,
     InteractionResolutionCommand resolution,
   ) async {
     await _ensureReady();
     final response = await _bridgeCall(
-      () => frb.resolveInteraction(
+      () => frb.respondInteraction(
         interactionId: interactionId,
         resolution: _interactionResolutionFromDomain(resolution),
       ),
     );
-    return InteractionResolutionResult(
-      sessionId: response.sessionId,
-      interactionId: response.interaction.interactionId,
-      status: response.interaction.status,
-      sessions: response.sessions.map(_sessionFromFrb).toList(),
-    );
+    return _interactionFromFrb(response);
   }
 
   static Future<T> _bridgeCall<T>(Future<T> Function() call) async {
@@ -332,9 +280,11 @@ class FrbStudioApi implements StudioApi {
   }
 
   @override
-  Future<void> stopPrompt(String sessionId) async {
+  Future<void> interruptTurn(String threadId, String turnId) async {
     await _ensureReady();
-    await _bridgeCall(() => frb.stopPrompt(sessionId: sessionId));
+    await _bridgeCall(
+      () => frb.interruptTurn(threadId: threadId, turnId: turnId),
+    );
   }
 
   @override
@@ -387,25 +337,17 @@ class FrbStudioApi implements StudioApi {
   }
 
   @override
-  Stream<SessionStreamFrame> subscribeSessionEvents(
-    String sessionId, {
-    int? afterSequence,
-  }) {
-    late final StreamController<SessionStreamFrame> controller;
+  Stream<ThreadStreamFrame> subscribeThread(String threadId) {
+    late final StreamController<ThreadStreamFrame> controller;
     frb.BridgeEventSubscription? handle;
-    StreamSubscription<frb.BridgeSessionStreamEnvelope>? subscription;
+    StreamSubscription<frb.BridgeThreadStreamEnvelope>? subscription;
     var cancelled = false;
 
     Future<void> start() async {
       try {
         await _ensureReady();
         final created = await _bridgeCall(
-          () => frb.createSessionSubscription(
-            sessionId: sessionId,
-            afterSequence: afterSequence == null
-                ? null
-                : BigInt.from(afterSequence),
-          ),
+          () => frb.subscribeThread(threadId: threadId),
         );
         if (cancelled) {
           await created.cancel();
@@ -413,9 +355,9 @@ class FrbStudioApi implements StudioApi {
           return;
         }
         handle = created;
-        subscription = created.sessionStream().listen(
+        subscription = created.threadStream().listen(
           (envelope) => envelope.when(
-            data: (frame) => controller.add(SessionStreamFrame.fromFrb(frame)),
+            data: (update) => controller.add(ThreadStreamFrame.fromFrb(update)),
             failure: (error) => controller.addError(_studioFailure(error)),
             closed: controller.close,
           ),
@@ -429,7 +371,7 @@ class FrbStudioApi implements StudioApi {
       }
     }
 
-    controller = StreamController<SessionStreamFrame>(
+    controller = StreamController<ThreadStreamFrame>(
       onListen: () => unawaited(start()),
       onCancel: () async {
         cancelled = true;
@@ -445,83 +387,67 @@ class FrbStudioApi implements StudioApi {
   }
 
   @override
-  Future<SessionHistoryPage> loadSessionHistoryPage(
-    String sessionId, {
-    int? beforeTurnSequence,
+  Future<ThreadHistoryPage> listThreadTurns(
+    String threadId, {
+    String? cursor,
     int limit = 50,
   }) async {
     await _ensureReady();
     final response = await _bridgeCall(
-      () => frb.loadSessionHistoryPage(
-        request: frb.LoadSessionHistoryPageRequest(
-          sessionId: sessionId,
-          beforeTurnSequence: beforeTurnSequence,
+      () => frb.listThreadTurns(
+        request: frb.ListThreadTurnsRequest(
+          threadId: threadId,
+          cursor: cursor,
           limit: limit.clamp(1, 200),
         ),
       ),
     );
-    return SessionHistoryPage(
-      turns: [
-        for (final turn in response.turns)
-          SessionHistoryTurn(
-            turnSequence: turn.turnSequence.toInt(),
-            turnId: turn.turnId,
-            status: turn.status,
-            modelJson: turn.modelJson,
-            errorJson: turn.errorJson,
-            startedAt: _dateFromUnix(turn.startedAt),
-            completedAt: turn.completedAt == null
-                ? null
-                : _dateFromUnix(turn.completedAt!),
-            items: [
-              for (final item in turn.items)
-                SessionHistoryItem(
-                  sequence: item.sequence.toInt(),
-                  itemId: item.itemId,
-                  turnId: item.turnId,
-                  itemKind: item.itemKind,
-                  event: _sessionEventFromFrb(item.payload),
-                  createdAt: _dateFromUnix(item.createdAt),
-                ),
-            ],
-          ),
-      ],
-      nextBeforeTurnSequence: response.nextBeforeTurnSequence?.toInt(),
-      hasMore: response.hasMore,
-    );
+    final items = [
+      for (final turn in response.turns)
+        for (final item in turn.items) _threadItemFromFrb(item),
+    ]..sort(_compareThreadItems);
+    return ThreadHistoryPage(items: items, nextCursor: response.nextCursor);
   }
 
   @override
-  Future<SubmitPromptReceipt> submitPrompt(
-    String sessionId,
+  Future<SubmitPromptReceipt> startTurn(
+    String threadId,
     String prompt,
     List<String> attachmentIds,
   ) async {
     await _ensureReady();
     final response = await _bridgeCall(
-      () => frb.submitPrompt(
-        sessionId: sessionId,
+      () => frb.startTurn(
+        threadId: threadId,
         prompt: prompt,
         attachmentIds: attachmentIds,
       ),
     );
     return SubmitPromptReceipt(
-      sessionId: response.sessionId,
+      threadId: response.threadId,
       turnId: response.turnId,
-      cursor: response.cursor.toInt(),
+      cursor: response.revision.toInt(),
     );
   }
 
   @override
-  Future<SubmitPromptReceipt> resumeTask(String sessionId) async {
+  Future<SubmitPromptReceipt> steerTurn(
+    String threadId,
+    String prompt,
+    List<String> attachmentIds,
+  ) async {
     await _ensureReady();
     final response = await _bridgeCall(
-      () => frb.resumeTask(sessionId: sessionId),
+      () => frb.steerTurn(
+        threadId: threadId,
+        prompt: prompt,
+        attachmentIds: attachmentIds,
+      ),
     );
     return SubmitPromptReceipt(
-      sessionId: response.sessionId,
+      threadId: response.threadId,
       turnId: response.turnId,
-      cursor: response.cursor.toInt(),
+      cursor: response.revision.toInt(),
     );
   }
 

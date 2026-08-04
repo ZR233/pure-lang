@@ -10,9 +10,9 @@ use crate::studio::entity as entities;
 use crate::studio::ids::unix_seconds;
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    AbortConflictMerge, AgentOutcomeStatus, CompleteConflictMerge, ConflictVerificationEvidence,
-    MergeRecord, MergeStatus, RecordConflictVerification, TaskRunPhase, WorkCompletionStatus,
-    WorkUnitStatus,
+    AbortConflictMerge, CompleteConflictMerge, ConflictVerificationEvidence, MergeRecord,
+    MergeStatus, RecordConflictVerification, TaskRunPhase, ThreadExecutionStatus,
+    WorkCompletionStatus, WorkUnitStatus,
 };
 
 impl StudioStore {
@@ -173,21 +173,14 @@ async fn complete_conflict_merge_transaction(
         .one(tx)
         .await?
         .context("merge work unit not found")?;
-    let outcome = entities::agent_outcome::Entity::find_by_id(evidence.outcome_id.clone())
-        .one(tx)
-        .await?
-        .context("merge outcome not found")?;
     let completion = entities::work_completion::Entity::find_by_id(evidence.completion_id.clone())
         .one(tx)
         .await?
         .context("merge completion not found")?;
     if work_unit.task_run_id != run.id
-        || work_unit.agent_id.as_deref() != Some(merge.agent_id.as_str())
+        || work_unit.executor_thread_id.as_deref() != Some(merge.agent_id.as_str())
         || work_unit.status != WorkUnitStatus::Merging.as_str()
-        || outcome.task_run_id != run.id
-        || outcome.work_unit_id.as_deref() != Some(work_unit.id.as_str())
-        || outcome.agent_id != merge.agent_id
-        || outcome.status != AgentOutcomeStatus::Completed.as_str()
+        || work_unit.execution_status != ThreadExecutionStatus::Completed.as_str()
         || completion.task_run_id != run.id
         || completion.work_unit_id != work_unit.id
         || completion.executor_agent_id != merge.agent_id

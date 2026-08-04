@@ -22,7 +22,7 @@ pub struct TaskFlowFixture {
     pub runtime: StudioRuntime,
     pub store: StudioStore,
     pub workspace: PathBuf,
-    pub session_id: String,
+    pub thread_id: String,
     root: PathBuf,
     server: ScriptedModelServer,
 }
@@ -45,10 +45,10 @@ impl TaskFlowFixture {
         let runtime = StudioRuntime::new(store.clone(), config_store);
         let project = runtime.open_project(&workspace).await?;
         let session = runtime
-            .create_session(&project.id, "Offline task orchestration")
+            .create_thread(&project.id, "Offline task orchestration")
             .await?;
         runtime
-            .set_session_mode(&session.id, StudioMode::Task)
+            .set_thread_mode(&session.id, StudioMode::Task)
             .await?;
         runtime.start_runtime().await?;
         let server = ScriptedModelServer::start(listener, runtime.clone(), session.id.clone());
@@ -57,7 +57,7 @@ impl TaskFlowFixture {
             runtime,
             store,
             workspace,
-            session_id: session.id,
+            thread_id: session.id,
             root,
             server,
         })
@@ -68,7 +68,7 @@ impl TaskFlowFixture {
         loop {
             if let Some(interaction) = self
                 .store
-                .list_pending_interactions(&self.session_id)
+                .list_pending_interactions(&self.thread_id)
                 .await?
                 .into_iter()
                 .find(|interaction| interaction.kind == InteractionKind::PlanConfirmation)
@@ -104,7 +104,7 @@ impl TaskFlowFixture {
     pub async fn wait_for_completed_task(&self) -> Result<StudioTaskRuntime> {
         let deadline = Instant::now() + TEST_TIMEOUT;
         loop {
-            if let Some(task) = self.runtime.session_task_view(&self.session_id).await?
+            if let Some(task) = self.runtime.thread_task_view(&self.thread_id).await?
                 && task.phase == "completed"
             {
                 return Ok(task);
@@ -131,46 +131,31 @@ impl TaskFlowFixture {
     async fn diagnostics(&self) -> String {
         let task = self
             .runtime
-            .session_task_view(&self.session_id)
+            .thread_task_view(&self.thread_id)
             .await
             .map(|task| format!("{task:#?}"))
             .unwrap_or_else(|error| format!("task projection failed: {error:#}"));
         let interactions = self
             .store
-            .list_pending_interactions(&self.session_id)
+            .list_pending_interactions(&self.thread_id)
             .await
             .map(|interactions| format!("{interactions:#?}"))
             .unwrap_or_else(|error| format!("pending interaction query failed: {error:#}"));
-        let events = self
+        let items = self
             .runtime
-            .session_event_snapshot(&self.session_id)
+            .thread_snapshot(&self.thread_id)
             .await
             .map(|snapshot| {
                 snapshot
-                    .timeline_events
-                    .into_iter()
-                    .rev()
-                    .take(12)
-                    .map(|event| format!("{event:#?}"))
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            })
-            .unwrap_or_else(|error| format!("session event query failed: {error:#}"));
-        let session_parts = self
-            .runtime
-            .session_event_snapshot(&self.session_id)
-            .await
-            .map(|snapshot| {
-                snapshot
-                    .parts
+                    .items
                     .into_iter()
                     .rev()
                     .take(20)
-                    .map(|part| format!("{part:#?}"))
+                    .map(|item| format!("{item:#?}"))
                     .collect::<Vec<_>>()
                     .join("\n")
             })
-            .unwrap_or_else(|error| format!("session projection query failed: {error:#}"));
+            .unwrap_or_else(|error| format!("Thread snapshot query failed: {error:#}"));
         let git = if self.workspace.join(".git").exists() {
             git_output(&self.workspace, &["status", "--porcelain"])
                 .unwrap_or_else(|error| format!("git status failed: {error:#}"))
@@ -179,7 +164,7 @@ impl TaskFlowFixture {
         };
         let server = self.server.diagnostics().await;
         format!(
-            "task projection:\n{task}\npending interactions:\n{interactions}\nrecent events:\n{events}\nrecent session parts:\n{session_parts}\ngit status:\n{git}\n{server}"
+            "task projection:\n{task}\npending interactions:\n{interactions}\nrecent Thread Items:\n{items}\ngit status:\n{git}\n{server}"
         )
     }
 }

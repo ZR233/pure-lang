@@ -10,7 +10,7 @@ import 'status_detail_popover.dart';
 class ContextUsageReadout extends StatefulWidget {
   const ContextUsageReadout({required this.runtime, super.key});
 
-  final SessionRuntimeView runtime;
+  final ThreadRuntimeView runtime;
 
   @override
   State<ContextUsageReadout> createState() => _ContextUsageReadoutState();
@@ -88,7 +88,7 @@ class _ContextDetail extends StatelessWidget {
     required this.progressColor,
   });
 
-  final SessionRuntimeView runtime;
+  final ThreadRuntimeView runtime;
   final double progress;
   final Color progressColor;
 

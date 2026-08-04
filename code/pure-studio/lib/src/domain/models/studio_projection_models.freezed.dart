@@ -277,7 +277,7 @@ as List<StudioRecoveryIssue>,
 /// @nodoc
 mixin _$SidebarView {
 
- List<StudioProject> get projects; List<StudioSession> get rootSessions; String? get selectedProjectId; String? get selectedRootSessionId; bool get isBusy; List<StudioRecoveryIssue> get recoveryIssues;
+ List<StudioProject> get projects; List<StudioThread> get rootThreads; String? get selectedProjectId; String? get selectedRootThreadId; bool get isBusy; List<StudioRecoveryIssue> get recoveryIssues;
 /// Create a copy of SidebarView
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -288,16 +288,16 @@ $SidebarViewCopyWith<SidebarView> get copyWith => _$SidebarViewCopyWithImpl<Side
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is SidebarView&&const DeepCollectionEquality().equals(other.projects, projects)&&const DeepCollectionEquality().equals(other.rootSessions, rootSessions)&&(identical(other.selectedProjectId, selectedProjectId) || other.selectedProjectId == selectedProjectId)&&(identical(other.selectedRootSessionId, selectedRootSessionId) || other.selectedRootSessionId == selectedRootSessionId)&&(identical(other.isBusy, isBusy) || other.isBusy == isBusy)&&const DeepCollectionEquality().equals(other.recoveryIssues, recoveryIssues));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is SidebarView&&const DeepCollectionEquality().equals(other.projects, projects)&&const DeepCollectionEquality().equals(other.rootThreads, rootThreads)&&(identical(other.selectedProjectId, selectedProjectId) || other.selectedProjectId == selectedProjectId)&&(identical(other.selectedRootThreadId, selectedRootThreadId) || other.selectedRootThreadId == selectedRootThreadId)&&(identical(other.isBusy, isBusy) || other.isBusy == isBusy)&&const DeepCollectionEquality().equals(other.recoveryIssues, recoveryIssues));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(projects),const DeepCollectionEquality().hash(rootSessions),selectedProjectId,selectedRootSessionId,isBusy,const DeepCollectionEquality().hash(recoveryIssues));
+int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(projects),const DeepCollectionEquality().hash(rootThreads),selectedProjectId,selectedRootThreadId,isBusy,const DeepCollectionEquality().hash(recoveryIssues));
 
 @override
 String toString() {
-  return 'SidebarView(projects: $projects, rootSessions: $rootSessions, selectedProjectId: $selectedProjectId, selectedRootSessionId: $selectedRootSessionId, isBusy: $isBusy, recoveryIssues: $recoveryIssues)';
+  return 'SidebarView(projects: $projects, rootThreads: $rootThreads, selectedProjectId: $selectedProjectId, selectedRootThreadId: $selectedRootThreadId, isBusy: $isBusy, recoveryIssues: $recoveryIssues)';
 }
 
 
@@ -308,7 +308,7 @@ abstract mixin class $SidebarViewCopyWith<$Res>  {
   factory $SidebarViewCopyWith(SidebarView value, $Res Function(SidebarView) _then) = _$SidebarViewCopyWithImpl;
 @useResult
 $Res call({
- List<StudioProject> projects, List<StudioSession> rootSessions, String? selectedProjectId, String? selectedRootSessionId, bool isBusy, List<StudioRecoveryIssue> recoveryIssues
+ List<StudioProject> projects, List<StudioThread> rootThreads, String? selectedProjectId, String? selectedRootThreadId, bool isBusy, List<StudioRecoveryIssue> recoveryIssues
 });
 
 
@@ -325,12 +325,12 @@ class _$SidebarViewCopyWithImpl<$Res>
 
 /// Create a copy of SidebarView
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? projects = null,Object? rootSessions = null,Object? selectedProjectId = freezed,Object? selectedRootSessionId = freezed,Object? isBusy = null,Object? recoveryIssues = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? projects = null,Object? rootThreads = null,Object? selectedProjectId = freezed,Object? selectedRootThreadId = freezed,Object? isBusy = null,Object? recoveryIssues = null,}) {
   return _then(_self.copyWith(
 projects: null == projects ? _self.projects : projects // ignore: cast_nullable_to_non_nullable
-as List<StudioProject>,rootSessions: null == rootSessions ? _self.rootSessions : rootSessions // ignore: cast_nullable_to_non_nullable
-as List<StudioSession>,selectedProjectId: freezed == selectedProjectId ? _self.selectedProjectId : selectedProjectId // ignore: cast_nullable_to_non_nullable
-as String?,selectedRootSessionId: freezed == selectedRootSessionId ? _self.selectedRootSessionId : selectedRootSessionId // ignore: cast_nullable_to_non_nullable
+as List<StudioProject>,rootThreads: null == rootThreads ? _self.rootThreads : rootThreads // ignore: cast_nullable_to_non_nullable
+as List<StudioThread>,selectedProjectId: freezed == selectedProjectId ? _self.selectedProjectId : selectedProjectId // ignore: cast_nullable_to_non_nullable
+as String?,selectedRootThreadId: freezed == selectedRootThreadId ? _self.selectedRootThreadId : selectedRootThreadId // ignore: cast_nullable_to_non_nullable
 as String?,isBusy: null == isBusy ? _self.isBusy : isBusy // ignore: cast_nullable_to_non_nullable
 as bool,recoveryIssues: null == recoveryIssues ? _self.recoveryIssues : recoveryIssues // ignore: cast_nullable_to_non_nullable
 as List<StudioRecoveryIssue>,
@@ -418,10 +418,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( List<StudioProject> projects,  List<StudioSession> rootSessions,  String? selectedProjectId,  String? selectedRootSessionId,  bool isBusy,  List<StudioRecoveryIssue> recoveryIssues)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( List<StudioProject> projects,  List<StudioThread> rootThreads,  String? selectedProjectId,  String? selectedRootThreadId,  bool isBusy,  List<StudioRecoveryIssue> recoveryIssues)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _SidebarView() when $default != null:
-return $default(_that.projects,_that.rootSessions,_that.selectedProjectId,_that.selectedRootSessionId,_that.isBusy,_that.recoveryIssues);case _:
+return $default(_that.projects,_that.rootThreads,_that.selectedProjectId,_that.selectedRootThreadId,_that.isBusy,_that.recoveryIssues);case _:
   return orElse();
 
 }
@@ -439,10 +439,10 @@ return $default(_that.projects,_that.rootSessions,_that.selectedProjectId,_that.
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( List<StudioProject> projects,  List<StudioSession> rootSessions,  String? selectedProjectId,  String? selectedRootSessionId,  bool isBusy,  List<StudioRecoveryIssue> recoveryIssues)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( List<StudioProject> projects,  List<StudioThread> rootThreads,  String? selectedProjectId,  String? selectedRootThreadId,  bool isBusy,  List<StudioRecoveryIssue> recoveryIssues)  $default,) {final _that = this;
 switch (_that) {
 case _SidebarView():
-return $default(_that.projects,_that.rootSessions,_that.selectedProjectId,_that.selectedRootSessionId,_that.isBusy,_that.recoveryIssues);case _:
+return $default(_that.projects,_that.rootThreads,_that.selectedProjectId,_that.selectedRootThreadId,_that.isBusy,_that.recoveryIssues);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -459,10 +459,10 @@ return $default(_that.projects,_that.rootSessions,_that.selectedProjectId,_that.
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( List<StudioProject> projects,  List<StudioSession> rootSessions,  String? selectedProjectId,  String? selectedRootSessionId,  bool isBusy,  List<StudioRecoveryIssue> recoveryIssues)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( List<StudioProject> projects,  List<StudioThread> rootThreads,  String? selectedProjectId,  String? selectedRootThreadId,  bool isBusy,  List<StudioRecoveryIssue> recoveryIssues)?  $default,) {final _that = this;
 switch (_that) {
 case _SidebarView() when $default != null:
-return $default(_that.projects,_that.rootSessions,_that.selectedProjectId,_that.selectedRootSessionId,_that.isBusy,_that.recoveryIssues);case _:
+return $default(_that.projects,_that.rootThreads,_that.selectedProjectId,_that.selectedRootThreadId,_that.isBusy,_that.recoveryIssues);case _:
   return null;
 
 }
@@ -474,7 +474,7 @@ return $default(_that.projects,_that.rootSessions,_that.selectedProjectId,_that.
 
 
 class _SidebarView extends SidebarView {
-  const _SidebarView({required final  List<StudioProject> projects, required final  List<StudioSession> rootSessions, required this.selectedProjectId, required this.selectedRootSessionId, required this.isBusy, required final  List<StudioRecoveryIssue> recoveryIssues}): _projects = projects,_rootSessions = rootSessions,_recoveryIssues = recoveryIssues,super._();
+  const _SidebarView({required final  List<StudioProject> projects, required final  List<StudioThread> rootThreads, required this.selectedProjectId, required this.selectedRootThreadId, required this.isBusy, required final  List<StudioRecoveryIssue> recoveryIssues}): _projects = projects,_rootThreads = rootThreads,_recoveryIssues = recoveryIssues,super._();
 
 
  final  List<StudioProject> _projects;
@@ -484,15 +484,15 @@ class _SidebarView extends SidebarView {
   return EqualUnmodifiableListView(_projects);
 }
 
- final  List<StudioSession> _rootSessions;
-@override List<StudioSession> get rootSessions {
-  if (_rootSessions is EqualUnmodifiableListView) return _rootSessions;
+ final  List<StudioThread> _rootThreads;
+@override List<StudioThread> get rootThreads {
+  if (_rootThreads is EqualUnmodifiableListView) return _rootThreads;
   // ignore: implicit_dynamic_type
-  return EqualUnmodifiableListView(_rootSessions);
+  return EqualUnmodifiableListView(_rootThreads);
 }
 
 @override final  String? selectedProjectId;
-@override final  String? selectedRootSessionId;
+@override final  String? selectedRootThreadId;
 @override final  bool isBusy;
  final  List<StudioRecoveryIssue> _recoveryIssues;
 @override List<StudioRecoveryIssue> get recoveryIssues {
@@ -512,16 +512,16 @@ _$SidebarViewCopyWith<_SidebarView> get copyWith => __$SidebarViewCopyWithImpl<_
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _SidebarView&&const DeepCollectionEquality().equals(other._projects, _projects)&&const DeepCollectionEquality().equals(other._rootSessions, _rootSessions)&&(identical(other.selectedProjectId, selectedProjectId) || other.selectedProjectId == selectedProjectId)&&(identical(other.selectedRootSessionId, selectedRootSessionId) || other.selectedRootSessionId == selectedRootSessionId)&&(identical(other.isBusy, isBusy) || other.isBusy == isBusy)&&const DeepCollectionEquality().equals(other._recoveryIssues, _recoveryIssues));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _SidebarView&&const DeepCollectionEquality().equals(other._projects, _projects)&&const DeepCollectionEquality().equals(other._rootThreads, _rootThreads)&&(identical(other.selectedProjectId, selectedProjectId) || other.selectedProjectId == selectedProjectId)&&(identical(other.selectedRootThreadId, selectedRootThreadId) || other.selectedRootThreadId == selectedRootThreadId)&&(identical(other.isBusy, isBusy) || other.isBusy == isBusy)&&const DeepCollectionEquality().equals(other._recoveryIssues, _recoveryIssues));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(_projects),const DeepCollectionEquality().hash(_rootSessions),selectedProjectId,selectedRootSessionId,isBusy,const DeepCollectionEquality().hash(_recoveryIssues));
+int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(_projects),const DeepCollectionEquality().hash(_rootThreads),selectedProjectId,selectedRootThreadId,isBusy,const DeepCollectionEquality().hash(_recoveryIssues));
 
 @override
 String toString() {
-  return 'SidebarView(projects: $projects, rootSessions: $rootSessions, selectedProjectId: $selectedProjectId, selectedRootSessionId: $selectedRootSessionId, isBusy: $isBusy, recoveryIssues: $recoveryIssues)';
+  return 'SidebarView(projects: $projects, rootThreads: $rootThreads, selectedProjectId: $selectedProjectId, selectedRootThreadId: $selectedRootThreadId, isBusy: $isBusy, recoveryIssues: $recoveryIssues)';
 }
 
 
@@ -532,7 +532,7 @@ abstract mixin class _$SidebarViewCopyWith<$Res> implements $SidebarViewCopyWith
   factory _$SidebarViewCopyWith(_SidebarView value, $Res Function(_SidebarView) _then) = __$SidebarViewCopyWithImpl;
 @override @useResult
 $Res call({
- List<StudioProject> projects, List<StudioSession> rootSessions, String? selectedProjectId, String? selectedRootSessionId, bool isBusy, List<StudioRecoveryIssue> recoveryIssues
+ List<StudioProject> projects, List<StudioThread> rootThreads, String? selectedProjectId, String? selectedRootThreadId, bool isBusy, List<StudioRecoveryIssue> recoveryIssues
 });
 
 
@@ -549,12 +549,12 @@ class __$SidebarViewCopyWithImpl<$Res>
 
 /// Create a copy of SidebarView
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? projects = null,Object? rootSessions = null,Object? selectedProjectId = freezed,Object? selectedRootSessionId = freezed,Object? isBusy = null,Object? recoveryIssues = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? projects = null,Object? rootThreads = null,Object? selectedProjectId = freezed,Object? selectedRootThreadId = freezed,Object? isBusy = null,Object? recoveryIssues = null,}) {
   return _then(_SidebarView(
 projects: null == projects ? _self._projects : projects // ignore: cast_nullable_to_non_nullable
-as List<StudioProject>,rootSessions: null == rootSessions ? _self._rootSessions : rootSessions // ignore: cast_nullable_to_non_nullable
-as List<StudioSession>,selectedProjectId: freezed == selectedProjectId ? _self.selectedProjectId : selectedProjectId // ignore: cast_nullable_to_non_nullable
-as String?,selectedRootSessionId: freezed == selectedRootSessionId ? _self.selectedRootSessionId : selectedRootSessionId // ignore: cast_nullable_to_non_nullable
+as List<StudioProject>,rootThreads: null == rootThreads ? _self._rootThreads : rootThreads // ignore: cast_nullable_to_non_nullable
+as List<StudioThread>,selectedProjectId: freezed == selectedProjectId ? _self.selectedProjectId : selectedProjectId // ignore: cast_nullable_to_non_nullable
+as String?,selectedRootThreadId: freezed == selectedRootThreadId ? _self.selectedRootThreadId : selectedRootThreadId // ignore: cast_nullable_to_non_nullable
 as String?,isBusy: null == isBusy ? _self.isBusy : isBusy // ignore: cast_nullable_to_non_nullable
 as bool,recoveryIssues: null == recoveryIssues ? _self._recoveryIssues : recoveryIssues // ignore: cast_nullable_to_non_nullable
 as List<StudioRecoveryIssue>,
@@ -567,7 +567,7 @@ as List<StudioRecoveryIssue>,
 /// @nodoc
 mixin _$HeaderView {
 
- StudioSession? get selectedRootSession; StudioProject? get selectedProject; String? get selectedProjectId; List<StudioSession> get agentSessions; String? get selectedAgentSessionId; SessionRuntimeView get runtime; List<PendingInteraction> get pendingInteractions;
+ StudioThread? get selectedRootThread; StudioProject? get selectedProject; String? get selectedProjectId; List<StudioThread> get workspaceThreads; String? get selectedThreadId; ThreadRuntimeView get runtime; List<PendingInteraction> get pendingInteractions;
 /// Create a copy of HeaderView
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -578,16 +578,16 @@ $HeaderViewCopyWith<HeaderView> get copyWith => _$HeaderViewCopyWithImpl<HeaderV
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is HeaderView&&(identical(other.selectedRootSession, selectedRootSession) || other.selectedRootSession == selectedRootSession)&&(identical(other.selectedProject, selectedProject) || other.selectedProject == selectedProject)&&(identical(other.selectedProjectId, selectedProjectId) || other.selectedProjectId == selectedProjectId)&&const DeepCollectionEquality().equals(other.agentSessions, agentSessions)&&(identical(other.selectedAgentSessionId, selectedAgentSessionId) || other.selectedAgentSessionId == selectedAgentSessionId)&&(identical(other.runtime, runtime) || other.runtime == runtime)&&const DeepCollectionEquality().equals(other.pendingInteractions, pendingInteractions));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is HeaderView&&(identical(other.selectedRootThread, selectedRootThread) || other.selectedRootThread == selectedRootThread)&&(identical(other.selectedProject, selectedProject) || other.selectedProject == selectedProject)&&(identical(other.selectedProjectId, selectedProjectId) || other.selectedProjectId == selectedProjectId)&&const DeepCollectionEquality().equals(other.workspaceThreads, workspaceThreads)&&(identical(other.selectedThreadId, selectedThreadId) || other.selectedThreadId == selectedThreadId)&&(identical(other.runtime, runtime) || other.runtime == runtime)&&const DeepCollectionEquality().equals(other.pendingInteractions, pendingInteractions));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,selectedRootSession,selectedProject,selectedProjectId,const DeepCollectionEquality().hash(agentSessions),selectedAgentSessionId,runtime,const DeepCollectionEquality().hash(pendingInteractions));
+int get hashCode => Object.hash(runtimeType,selectedRootThread,selectedProject,selectedProjectId,const DeepCollectionEquality().hash(workspaceThreads),selectedThreadId,runtime,const DeepCollectionEquality().hash(pendingInteractions));
 
 @override
 String toString() {
-  return 'HeaderView(selectedRootSession: $selectedRootSession, selectedProject: $selectedProject, selectedProjectId: $selectedProjectId, agentSessions: $agentSessions, selectedAgentSessionId: $selectedAgentSessionId, runtime: $runtime, pendingInteractions: $pendingInteractions)';
+  return 'HeaderView(selectedRootThread: $selectedRootThread, selectedProject: $selectedProject, selectedProjectId: $selectedProjectId, workspaceThreads: $workspaceThreads, selectedThreadId: $selectedThreadId, runtime: $runtime, pendingInteractions: $pendingInteractions)';
 }
 
 
@@ -598,7 +598,7 @@ abstract mixin class $HeaderViewCopyWith<$Res>  {
   factory $HeaderViewCopyWith(HeaderView value, $Res Function(HeaderView) _then) = _$HeaderViewCopyWithImpl;
 @useResult
 $Res call({
- StudioSession? selectedRootSession, StudioProject? selectedProject, String? selectedProjectId, List<StudioSession> agentSessions, String? selectedAgentSessionId, SessionRuntimeView runtime, List<PendingInteraction> pendingInteractions
+ StudioThread? selectedRootThread, StudioProject? selectedProject, String? selectedProjectId, List<StudioThread> workspaceThreads, String? selectedThreadId, ThreadRuntimeView runtime, List<PendingInteraction> pendingInteractions
 });
 
 
@@ -615,15 +615,15 @@ class _$HeaderViewCopyWithImpl<$Res>
 
 /// Create a copy of HeaderView
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? selectedRootSession = freezed,Object? selectedProject = freezed,Object? selectedProjectId = freezed,Object? agentSessions = null,Object? selectedAgentSessionId = freezed,Object? runtime = null,Object? pendingInteractions = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? selectedRootThread = freezed,Object? selectedProject = freezed,Object? selectedProjectId = freezed,Object? workspaceThreads = null,Object? selectedThreadId = freezed,Object? runtime = null,Object? pendingInteractions = null,}) {
   return _then(_self.copyWith(
-selectedRootSession: freezed == selectedRootSession ? _self.selectedRootSession : selectedRootSession // ignore: cast_nullable_to_non_nullable
-as StudioSession?,selectedProject: freezed == selectedProject ? _self.selectedProject : selectedProject // ignore: cast_nullable_to_non_nullable
+selectedRootThread: freezed == selectedRootThread ? _self.selectedRootThread : selectedRootThread // ignore: cast_nullable_to_non_nullable
+as StudioThread?,selectedProject: freezed == selectedProject ? _self.selectedProject : selectedProject // ignore: cast_nullable_to_non_nullable
 as StudioProject?,selectedProjectId: freezed == selectedProjectId ? _self.selectedProjectId : selectedProjectId // ignore: cast_nullable_to_non_nullable
-as String?,agentSessions: null == agentSessions ? _self.agentSessions : agentSessions // ignore: cast_nullable_to_non_nullable
-as List<StudioSession>,selectedAgentSessionId: freezed == selectedAgentSessionId ? _self.selectedAgentSessionId : selectedAgentSessionId // ignore: cast_nullable_to_non_nullable
+as String?,workspaceThreads: null == workspaceThreads ? _self.workspaceThreads : workspaceThreads // ignore: cast_nullable_to_non_nullable
+as List<StudioThread>,selectedThreadId: freezed == selectedThreadId ? _self.selectedThreadId : selectedThreadId // ignore: cast_nullable_to_non_nullable
 as String?,runtime: null == runtime ? _self.runtime : runtime // ignore: cast_nullable_to_non_nullable
-as SessionRuntimeView,pendingInteractions: null == pendingInteractions ? _self.pendingInteractions : pendingInteractions // ignore: cast_nullable_to_non_nullable
+as ThreadRuntimeView,pendingInteractions: null == pendingInteractions ? _self.pendingInteractions : pendingInteractions // ignore: cast_nullable_to_non_nullable
 as List<PendingInteraction>,
   ));
 }
@@ -709,10 +709,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( StudioSession? selectedRootSession,  StudioProject? selectedProject,  String? selectedProjectId,  List<StudioSession> agentSessions,  String? selectedAgentSessionId,  SessionRuntimeView runtime,  List<PendingInteraction> pendingInteractions)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( StudioThread? selectedRootThread,  StudioProject? selectedProject,  String? selectedProjectId,  List<StudioThread> workspaceThreads,  String? selectedThreadId,  ThreadRuntimeView runtime,  List<PendingInteraction> pendingInteractions)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _HeaderView() when $default != null:
-return $default(_that.selectedRootSession,_that.selectedProject,_that.selectedProjectId,_that.agentSessions,_that.selectedAgentSessionId,_that.runtime,_that.pendingInteractions);case _:
+return $default(_that.selectedRootThread,_that.selectedProject,_that.selectedProjectId,_that.workspaceThreads,_that.selectedThreadId,_that.runtime,_that.pendingInteractions);case _:
   return orElse();
 
 }
@@ -730,10 +730,10 @@ return $default(_that.selectedRootSession,_that.selectedProject,_that.selectedPr
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( StudioSession? selectedRootSession,  StudioProject? selectedProject,  String? selectedProjectId,  List<StudioSession> agentSessions,  String? selectedAgentSessionId,  SessionRuntimeView runtime,  List<PendingInteraction> pendingInteractions)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( StudioThread? selectedRootThread,  StudioProject? selectedProject,  String? selectedProjectId,  List<StudioThread> workspaceThreads,  String? selectedThreadId,  ThreadRuntimeView runtime,  List<PendingInteraction> pendingInteractions)  $default,) {final _that = this;
 switch (_that) {
 case _HeaderView():
-return $default(_that.selectedRootSession,_that.selectedProject,_that.selectedProjectId,_that.agentSessions,_that.selectedAgentSessionId,_that.runtime,_that.pendingInteractions);case _:
+return $default(_that.selectedRootThread,_that.selectedProject,_that.selectedProjectId,_that.workspaceThreads,_that.selectedThreadId,_that.runtime,_that.pendingInteractions);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -750,10 +750,10 @@ return $default(_that.selectedRootSession,_that.selectedProject,_that.selectedPr
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( StudioSession? selectedRootSession,  StudioProject? selectedProject,  String? selectedProjectId,  List<StudioSession> agentSessions,  String? selectedAgentSessionId,  SessionRuntimeView runtime,  List<PendingInteraction> pendingInteractions)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( StudioThread? selectedRootThread,  StudioProject? selectedProject,  String? selectedProjectId,  List<StudioThread> workspaceThreads,  String? selectedThreadId,  ThreadRuntimeView runtime,  List<PendingInteraction> pendingInteractions)?  $default,) {final _that = this;
 switch (_that) {
 case _HeaderView() when $default != null:
-return $default(_that.selectedRootSession,_that.selectedProject,_that.selectedProjectId,_that.agentSessions,_that.selectedAgentSessionId,_that.runtime,_that.pendingInteractions);case _:
+return $default(_that.selectedRootThread,_that.selectedProject,_that.selectedProjectId,_that.workspaceThreads,_that.selectedThreadId,_that.runtime,_that.pendingInteractions);case _:
   return null;
 
 }
@@ -765,21 +765,21 @@ return $default(_that.selectedRootSession,_that.selectedProject,_that.selectedPr
 
 
 class _HeaderView implements HeaderView {
-  const _HeaderView({required this.selectedRootSession, required this.selectedProject, required this.selectedProjectId, required final  List<StudioSession> agentSessions, required this.selectedAgentSessionId, required this.runtime, required final  List<PendingInteraction> pendingInteractions}): _agentSessions = agentSessions,_pendingInteractions = pendingInteractions;
+  const _HeaderView({required this.selectedRootThread, required this.selectedProject, required this.selectedProjectId, required final  List<StudioThread> workspaceThreads, required this.selectedThreadId, required this.runtime, required final  List<PendingInteraction> pendingInteractions}): _workspaceThreads = workspaceThreads,_pendingInteractions = pendingInteractions;
 
 
-@override final  StudioSession? selectedRootSession;
+@override final  StudioThread? selectedRootThread;
 @override final  StudioProject? selectedProject;
 @override final  String? selectedProjectId;
- final  List<StudioSession> _agentSessions;
-@override List<StudioSession> get agentSessions {
-  if (_agentSessions is EqualUnmodifiableListView) return _agentSessions;
+ final  List<StudioThread> _workspaceThreads;
+@override List<StudioThread> get workspaceThreads {
+  if (_workspaceThreads is EqualUnmodifiableListView) return _workspaceThreads;
   // ignore: implicit_dynamic_type
-  return EqualUnmodifiableListView(_agentSessions);
+  return EqualUnmodifiableListView(_workspaceThreads);
 }
 
-@override final  String? selectedAgentSessionId;
-@override final  SessionRuntimeView runtime;
+@override final  String? selectedThreadId;
+@override final  ThreadRuntimeView runtime;
  final  List<PendingInteraction> _pendingInteractions;
 @override List<PendingInteraction> get pendingInteractions {
   if (_pendingInteractions is EqualUnmodifiableListView) return _pendingInteractions;
@@ -798,16 +798,16 @@ _$HeaderViewCopyWith<_HeaderView> get copyWith => __$HeaderViewCopyWithImpl<_Hea
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _HeaderView&&(identical(other.selectedRootSession, selectedRootSession) || other.selectedRootSession == selectedRootSession)&&(identical(other.selectedProject, selectedProject) || other.selectedProject == selectedProject)&&(identical(other.selectedProjectId, selectedProjectId) || other.selectedProjectId == selectedProjectId)&&const DeepCollectionEquality().equals(other._agentSessions, _agentSessions)&&(identical(other.selectedAgentSessionId, selectedAgentSessionId) || other.selectedAgentSessionId == selectedAgentSessionId)&&(identical(other.runtime, runtime) || other.runtime == runtime)&&const DeepCollectionEquality().equals(other._pendingInteractions, _pendingInteractions));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _HeaderView&&(identical(other.selectedRootThread, selectedRootThread) || other.selectedRootThread == selectedRootThread)&&(identical(other.selectedProject, selectedProject) || other.selectedProject == selectedProject)&&(identical(other.selectedProjectId, selectedProjectId) || other.selectedProjectId == selectedProjectId)&&const DeepCollectionEquality().equals(other._workspaceThreads, _workspaceThreads)&&(identical(other.selectedThreadId, selectedThreadId) || other.selectedThreadId == selectedThreadId)&&(identical(other.runtime, runtime) || other.runtime == runtime)&&const DeepCollectionEquality().equals(other._pendingInteractions, _pendingInteractions));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,selectedRootSession,selectedProject,selectedProjectId,const DeepCollectionEquality().hash(_agentSessions),selectedAgentSessionId,runtime,const DeepCollectionEquality().hash(_pendingInteractions));
+int get hashCode => Object.hash(runtimeType,selectedRootThread,selectedProject,selectedProjectId,const DeepCollectionEquality().hash(_workspaceThreads),selectedThreadId,runtime,const DeepCollectionEquality().hash(_pendingInteractions));
 
 @override
 String toString() {
-  return 'HeaderView(selectedRootSession: $selectedRootSession, selectedProject: $selectedProject, selectedProjectId: $selectedProjectId, agentSessions: $agentSessions, selectedAgentSessionId: $selectedAgentSessionId, runtime: $runtime, pendingInteractions: $pendingInteractions)';
+  return 'HeaderView(selectedRootThread: $selectedRootThread, selectedProject: $selectedProject, selectedProjectId: $selectedProjectId, workspaceThreads: $workspaceThreads, selectedThreadId: $selectedThreadId, runtime: $runtime, pendingInteractions: $pendingInteractions)';
 }
 
 
@@ -818,7 +818,7 @@ abstract mixin class _$HeaderViewCopyWith<$Res> implements $HeaderViewCopyWith<$
   factory _$HeaderViewCopyWith(_HeaderView value, $Res Function(_HeaderView) _then) = __$HeaderViewCopyWithImpl;
 @override @useResult
 $Res call({
- StudioSession? selectedRootSession, StudioProject? selectedProject, String? selectedProjectId, List<StudioSession> agentSessions, String? selectedAgentSessionId, SessionRuntimeView runtime, List<PendingInteraction> pendingInteractions
+ StudioThread? selectedRootThread, StudioProject? selectedProject, String? selectedProjectId, List<StudioThread> workspaceThreads, String? selectedThreadId, ThreadRuntimeView runtime, List<PendingInteraction> pendingInteractions
 });
 
 
@@ -835,15 +835,15 @@ class __$HeaderViewCopyWithImpl<$Res>
 
 /// Create a copy of HeaderView
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? selectedRootSession = freezed,Object? selectedProject = freezed,Object? selectedProjectId = freezed,Object? agentSessions = null,Object? selectedAgentSessionId = freezed,Object? runtime = null,Object? pendingInteractions = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? selectedRootThread = freezed,Object? selectedProject = freezed,Object? selectedProjectId = freezed,Object? workspaceThreads = null,Object? selectedThreadId = freezed,Object? runtime = null,Object? pendingInteractions = null,}) {
   return _then(_HeaderView(
-selectedRootSession: freezed == selectedRootSession ? _self.selectedRootSession : selectedRootSession // ignore: cast_nullable_to_non_nullable
-as StudioSession?,selectedProject: freezed == selectedProject ? _self.selectedProject : selectedProject // ignore: cast_nullable_to_non_nullable
+selectedRootThread: freezed == selectedRootThread ? _self.selectedRootThread : selectedRootThread // ignore: cast_nullable_to_non_nullable
+as StudioThread?,selectedProject: freezed == selectedProject ? _self.selectedProject : selectedProject // ignore: cast_nullable_to_non_nullable
 as StudioProject?,selectedProjectId: freezed == selectedProjectId ? _self.selectedProjectId : selectedProjectId // ignore: cast_nullable_to_non_nullable
-as String?,agentSessions: null == agentSessions ? _self._agentSessions : agentSessions // ignore: cast_nullable_to_non_nullable
-as List<StudioSession>,selectedAgentSessionId: freezed == selectedAgentSessionId ? _self.selectedAgentSessionId : selectedAgentSessionId // ignore: cast_nullable_to_non_nullable
+as String?,workspaceThreads: null == workspaceThreads ? _self._workspaceThreads : workspaceThreads // ignore: cast_nullable_to_non_nullable
+as List<StudioThread>,selectedThreadId: freezed == selectedThreadId ? _self.selectedThreadId : selectedThreadId // ignore: cast_nullable_to_non_nullable
 as String?,runtime: null == runtime ? _self.runtime : runtime // ignore: cast_nullable_to_non_nullable
-as SessionRuntimeView,pendingInteractions: null == pendingInteractions ? _self._pendingInteractions : pendingInteractions // ignore: cast_nullable_to_non_nullable
+as ThreadRuntimeView,pendingInteractions: null == pendingInteractions ? _self._pendingInteractions : pendingInteractions // ignore: cast_nullable_to_non_nullable
 as List<PendingInteraction>,
   ));
 }
@@ -1171,7 +1171,7 @@ as bool,
 /// @nodoc
 mixin _$StatusBarView {
 
- StudioSession get session; SessionRuntimeView get runtime; PermissionMode get permissionMode; List<ProviderSettingsView> get providers; List<RoleSettingsView> get roles; bool get isBusy;
+ StudioThread get thread; ThreadRuntimeView get runtime; PermissionMode get permissionMode; List<ProviderSettingsView> get providers; List<RoleSettingsView> get roles; bool get isBusy;
 /// Create a copy of StatusBarView
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -1182,16 +1182,16 @@ $StatusBarViewCopyWith<StatusBarView> get copyWith => _$StatusBarViewCopyWithImp
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is StatusBarView&&(identical(other.session, session) || other.session == session)&&(identical(other.runtime, runtime) || other.runtime == runtime)&&(identical(other.permissionMode, permissionMode) || other.permissionMode == permissionMode)&&const DeepCollectionEquality().equals(other.providers, providers)&&const DeepCollectionEquality().equals(other.roles, roles)&&(identical(other.isBusy, isBusy) || other.isBusy == isBusy));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is StatusBarView&&(identical(other.thread, thread) || other.thread == thread)&&(identical(other.runtime, runtime) || other.runtime == runtime)&&(identical(other.permissionMode, permissionMode) || other.permissionMode == permissionMode)&&const DeepCollectionEquality().equals(other.providers, providers)&&const DeepCollectionEquality().equals(other.roles, roles)&&(identical(other.isBusy, isBusy) || other.isBusy == isBusy));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,session,runtime,permissionMode,const DeepCollectionEquality().hash(providers),const DeepCollectionEquality().hash(roles),isBusy);
+int get hashCode => Object.hash(runtimeType,thread,runtime,permissionMode,const DeepCollectionEquality().hash(providers),const DeepCollectionEquality().hash(roles),isBusy);
 
 @override
 String toString() {
-  return 'StatusBarView(session: $session, runtime: $runtime, permissionMode: $permissionMode, providers: $providers, roles: $roles, isBusy: $isBusy)';
+  return 'StatusBarView(thread: $thread, runtime: $runtime, permissionMode: $permissionMode, providers: $providers, roles: $roles, isBusy: $isBusy)';
 }
 
 
@@ -1202,7 +1202,7 @@ abstract mixin class $StatusBarViewCopyWith<$Res>  {
   factory $StatusBarViewCopyWith(StatusBarView value, $Res Function(StatusBarView) _then) = _$StatusBarViewCopyWithImpl;
 @useResult
 $Res call({
- StudioSession session, SessionRuntimeView runtime, PermissionMode permissionMode, List<ProviderSettingsView> providers, List<RoleSettingsView> roles, bool isBusy
+ StudioThread thread, ThreadRuntimeView runtime, PermissionMode permissionMode, List<ProviderSettingsView> providers, List<RoleSettingsView> roles, bool isBusy
 });
 
 
@@ -1219,11 +1219,11 @@ class _$StatusBarViewCopyWithImpl<$Res>
 
 /// Create a copy of StatusBarView
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? session = null,Object? runtime = null,Object? permissionMode = null,Object? providers = null,Object? roles = null,Object? isBusy = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? thread = null,Object? runtime = null,Object? permissionMode = null,Object? providers = null,Object? roles = null,Object? isBusy = null,}) {
   return _then(_self.copyWith(
-session: null == session ? _self.session : session // ignore: cast_nullable_to_non_nullable
-as StudioSession,runtime: null == runtime ? _self.runtime : runtime // ignore: cast_nullable_to_non_nullable
-as SessionRuntimeView,permissionMode: null == permissionMode ? _self.permissionMode : permissionMode // ignore: cast_nullable_to_non_nullable
+thread: null == thread ? _self.thread : thread // ignore: cast_nullable_to_non_nullable
+as StudioThread,runtime: null == runtime ? _self.runtime : runtime // ignore: cast_nullable_to_non_nullable
+as ThreadRuntimeView,permissionMode: null == permissionMode ? _self.permissionMode : permissionMode // ignore: cast_nullable_to_non_nullable
 as PermissionMode,providers: null == providers ? _self.providers : providers // ignore: cast_nullable_to_non_nullable
 as List<ProviderSettingsView>,roles: null == roles ? _self.roles : roles // ignore: cast_nullable_to_non_nullable
 as List<RoleSettingsView>,isBusy: null == isBusy ? _self.isBusy : isBusy // ignore: cast_nullable_to_non_nullable
@@ -1312,10 +1312,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( StudioSession session,  SessionRuntimeView runtime,  PermissionMode permissionMode,  List<ProviderSettingsView> providers,  List<RoleSettingsView> roles,  bool isBusy)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( StudioThread thread,  ThreadRuntimeView runtime,  PermissionMode permissionMode,  List<ProviderSettingsView> providers,  List<RoleSettingsView> roles,  bool isBusy)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _StatusBarView() when $default != null:
-return $default(_that.session,_that.runtime,_that.permissionMode,_that.providers,_that.roles,_that.isBusy);case _:
+return $default(_that.thread,_that.runtime,_that.permissionMode,_that.providers,_that.roles,_that.isBusy);case _:
   return orElse();
 
 }
@@ -1333,10 +1333,10 @@ return $default(_that.session,_that.runtime,_that.permissionMode,_that.providers
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( StudioSession session,  SessionRuntimeView runtime,  PermissionMode permissionMode,  List<ProviderSettingsView> providers,  List<RoleSettingsView> roles,  bool isBusy)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( StudioThread thread,  ThreadRuntimeView runtime,  PermissionMode permissionMode,  List<ProviderSettingsView> providers,  List<RoleSettingsView> roles,  bool isBusy)  $default,) {final _that = this;
 switch (_that) {
 case _StatusBarView():
-return $default(_that.session,_that.runtime,_that.permissionMode,_that.providers,_that.roles,_that.isBusy);case _:
+return $default(_that.thread,_that.runtime,_that.permissionMode,_that.providers,_that.roles,_that.isBusy);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -1353,10 +1353,10 @@ return $default(_that.session,_that.runtime,_that.permissionMode,_that.providers
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( StudioSession session,  SessionRuntimeView runtime,  PermissionMode permissionMode,  List<ProviderSettingsView> providers,  List<RoleSettingsView> roles,  bool isBusy)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( StudioThread thread,  ThreadRuntimeView runtime,  PermissionMode permissionMode,  List<ProviderSettingsView> providers,  List<RoleSettingsView> roles,  bool isBusy)?  $default,) {final _that = this;
 switch (_that) {
 case _StatusBarView() when $default != null:
-return $default(_that.session,_that.runtime,_that.permissionMode,_that.providers,_that.roles,_that.isBusy);case _:
+return $default(_that.thread,_that.runtime,_that.permissionMode,_that.providers,_that.roles,_that.isBusy);case _:
   return null;
 
 }
@@ -1368,11 +1368,11 @@ return $default(_that.session,_that.runtime,_that.permissionMode,_that.providers
 
 
 class _StatusBarView extends StatusBarView {
-  const _StatusBarView({required this.session, required this.runtime, required this.permissionMode, required final  List<ProviderSettingsView> providers, required final  List<RoleSettingsView> roles, required this.isBusy}): _providers = providers,_roles = roles,super._();
+  const _StatusBarView({required this.thread, required this.runtime, required this.permissionMode, required final  List<ProviderSettingsView> providers, required final  List<RoleSettingsView> roles, required this.isBusy}): _providers = providers,_roles = roles,super._();
 
 
-@override final  StudioSession session;
-@override final  SessionRuntimeView runtime;
+@override final  StudioThread thread;
+@override final  ThreadRuntimeView runtime;
 @override final  PermissionMode permissionMode;
  final  List<ProviderSettingsView> _providers;
 @override List<ProviderSettingsView> get providers {
@@ -1400,16 +1400,16 @@ _$StatusBarViewCopyWith<_StatusBarView> get copyWith => __$StatusBarViewCopyWith
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _StatusBarView&&(identical(other.session, session) || other.session == session)&&(identical(other.runtime, runtime) || other.runtime == runtime)&&(identical(other.permissionMode, permissionMode) || other.permissionMode == permissionMode)&&const DeepCollectionEquality().equals(other._providers, _providers)&&const DeepCollectionEquality().equals(other._roles, _roles)&&(identical(other.isBusy, isBusy) || other.isBusy == isBusy));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _StatusBarView&&(identical(other.thread, thread) || other.thread == thread)&&(identical(other.runtime, runtime) || other.runtime == runtime)&&(identical(other.permissionMode, permissionMode) || other.permissionMode == permissionMode)&&const DeepCollectionEquality().equals(other._providers, _providers)&&const DeepCollectionEquality().equals(other._roles, _roles)&&(identical(other.isBusy, isBusy) || other.isBusy == isBusy));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,session,runtime,permissionMode,const DeepCollectionEquality().hash(_providers),const DeepCollectionEquality().hash(_roles),isBusy);
+int get hashCode => Object.hash(runtimeType,thread,runtime,permissionMode,const DeepCollectionEquality().hash(_providers),const DeepCollectionEquality().hash(_roles),isBusy);
 
 @override
 String toString() {
-  return 'StatusBarView(session: $session, runtime: $runtime, permissionMode: $permissionMode, providers: $providers, roles: $roles, isBusy: $isBusy)';
+  return 'StatusBarView(thread: $thread, runtime: $runtime, permissionMode: $permissionMode, providers: $providers, roles: $roles, isBusy: $isBusy)';
 }
 
 
@@ -1420,7 +1420,7 @@ abstract mixin class _$StatusBarViewCopyWith<$Res> implements $StatusBarViewCopy
   factory _$StatusBarViewCopyWith(_StatusBarView value, $Res Function(_StatusBarView) _then) = __$StatusBarViewCopyWithImpl;
 @override @useResult
 $Res call({
- StudioSession session, SessionRuntimeView runtime, PermissionMode permissionMode, List<ProviderSettingsView> providers, List<RoleSettingsView> roles, bool isBusy
+ StudioThread thread, ThreadRuntimeView runtime, PermissionMode permissionMode, List<ProviderSettingsView> providers, List<RoleSettingsView> roles, bool isBusy
 });
 
 
@@ -1437,11 +1437,11 @@ class __$StatusBarViewCopyWithImpl<$Res>
 
 /// Create a copy of StatusBarView
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? session = null,Object? runtime = null,Object? permissionMode = null,Object? providers = null,Object? roles = null,Object? isBusy = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? thread = null,Object? runtime = null,Object? permissionMode = null,Object? providers = null,Object? roles = null,Object? isBusy = null,}) {
   return _then(_StatusBarView(
-session: null == session ? _self.session : session // ignore: cast_nullable_to_non_nullable
-as StudioSession,runtime: null == runtime ? _self.runtime : runtime // ignore: cast_nullable_to_non_nullable
-as SessionRuntimeView,permissionMode: null == permissionMode ? _self.permissionMode : permissionMode // ignore: cast_nullable_to_non_nullable
+thread: null == thread ? _self.thread : thread // ignore: cast_nullable_to_non_nullable
+as StudioThread,runtime: null == runtime ? _self.runtime : runtime // ignore: cast_nullable_to_non_nullable
+as ThreadRuntimeView,permissionMode: null == permissionMode ? _self.permissionMode : permissionMode // ignore: cast_nullable_to_non_nullable
 as PermissionMode,providers: null == providers ? _self._providers : providers // ignore: cast_nullable_to_non_nullable
 as List<ProviderSettingsView>,roles: null == roles ? _self._roles : roles // ignore: cast_nullable_to_non_nullable
 as List<RoleSettingsView>,isBusy: null == isBusy ? _self.isBusy : isBusy // ignore: cast_nullable_to_non_nullable

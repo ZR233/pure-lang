@@ -6,7 +6,7 @@ use anyhow::Result;
 use crate::McpRuntimeHandle;
 use crate::config::ConfigStore;
 use crate::studio::agent_host::{StudioAgentResources, StudioAgentRuntime, root_agent_id};
-use crate::studio::records::SessionRecord;
+use crate::studio::records::ThreadRecord;
 use crate::studio::task_coordinator::TaskCoordinator;
 use crate::studio::{
     InteractionRuntime, StudioProductEventRuntime, StudioRecoveryCleanupPreview,
@@ -18,14 +18,14 @@ mod lifecycle;
 mod mcp_health;
 mod plan_confirmation;
 mod prompt_runner;
-mod session_service;
+mod thread_service;
 
 /// Studio UI 提交 prompt 的请求。
 ///
-/// runtime 只负责产品投影；turn ID、FIFO、取消与 canonical session 全部由
+/// runtime 只负责产品投影；Turn ID、FIFO、取消与 canonical Thread 全部由
 /// `pl_core::AgentRuntime` 管理。
 pub struct StudioSubmitPromptRequest {
-    pub session_id: String,
+    pub thread_id: String,
     pub prompt: String,
     pub attachment_ids: Vec<String>,
     pub options: StudioSubmitPromptOptions,
@@ -36,36 +36,37 @@ pub struct StudioSubmitPromptRequest {
 pub struct StudioSubmitPromptOptions {
     pub presentation: pl_core::MailboxPresentation,
     pub lifecycle: Option<StudioPlanImplementationLifecycle>,
+    pub turn_policy: pl_core::AgentTurnSubmitPolicy,
 }
 
 /// 计划实施 turn 的生命周期关联。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StudioPlanImplementationLifecycle {
-    pub session_id: String,
+    pub thread_id: String,
     pub plan_id: String,
 }
 
 /// Studio UI 提交 prompt 后得到的 framework turn 信息。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StudioSubmitPromptResponse {
-    pub session_id: String,
+    pub thread_id: String,
     pub turn_id: String,
     pub cursor: u64,
 }
 
-/// Studio UI 请求停止当前会话 turn 后的结果。
+/// Studio UI 请求停止当前 Thread Turn 后的结果。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StudioStopPromptResponse {
-    pub session_id: String,
+    pub thread_id: String,
     pub stopped: bool,
 }
 
 /// Studio UI resolve interaction 后的核心响应。
 #[derive(Debug, Clone, PartialEq)]
 pub struct StudioResolveInteractionResponse {
-    pub session_id: String,
+    pub thread_id: String,
     pub interaction: InteractionRequest,
-    pub sessions: Vec<SessionRecord>,
+    pub threads: Vec<ThreadRecord>,
 }
 
 #[derive(Clone)]
@@ -95,11 +96,11 @@ impl StudioRuntime {
         Ok(!self.store.list_active_task_runs().await?.is_empty())
     }
 
-    pub async fn session_task_view(
+    pub async fn thread_task_view(
         &self,
-        session_id: &str,
+        thread_id: &str,
     ) -> Result<Option<crate::StudioTaskRuntime>> {
-        super::task_projection::load_task_runtime(&self.store, session_id).await
+        super::task_projection::load_task_runtime(&self.store, thread_id).await
     }
 
     pub async fn preview_recovery_issue_cleanup(
@@ -146,10 +147,10 @@ impl StudioRuntime {
         if issue.action == StudioRecoveryIssueAction::RemoveProject {
             return self.cleanup_project_issue(issue, expected_revision).await;
         }
-        if let Some(session_id) = issue.session_id.as_deref()
-            && self.session_is_busy(session_id).await?
+        if let Some(thread_id) = issue.thread_id.as_deref()
+            && self.thread_is_busy(thread_id).await?
         {
-            anyhow::bail!("recovery cleanup requires an idle session");
+            anyhow::bail!("recovery cleanup requires an idle Thread");
         }
         self.task_coordinator
             .cleanup_recovery_issue(&issue, expected_revision)
@@ -171,18 +172,18 @@ impl StudioRuntime {
             .task_coordinator
             .validate_recovery_cleanup(&issue, expected_revision)
             .await?;
-        let mut session_ids = self.store.list_project_session_ids(project_id).await?;
-        session_ids.sort();
-        session_ids.dedup();
-        let root_session_ids = session_ids.iter().cloned().collect::<BTreeSet<_>>();
+        let mut thread_ids = self.store.list_project_thread_ids(project_id).await?;
+        thread_ids.sort();
+        thread_ids.dedup();
+        let root_thread_ids = thread_ids.iter().cloned().collect::<BTreeSet<_>>();
         self.agent_resources
-            .begin_cleanup_takeover(&root_session_ids)
+            .begin_cleanup_takeover(&root_thread_ids)
             .await;
-        self.close_project_agent_trees(&session_ids).await?;
-        for session_id in &session_ids {
-            let emitter = self.interaction_emitter(session_id.clone());
+        self.close_project_agent_trees(&thread_ids).await?;
+        for thread_id in &thread_ids {
+            let emitter = self.interaction_emitter(thread_id.clone());
             self.interactions
-                .cancel_session(session_id, "project cleaned up", emitter)
+                .cancel_thread(thread_id, "project cleaned up", emitter)
                 .await?;
         }
         self.task_coordinator
@@ -190,18 +191,18 @@ impl StudioRuntime {
             .await?;
         self.store.quarantine_project(project_id).await?;
         self.agent_resources
-            .complete_cleanup_takeover(&root_session_ids)
+            .complete_cleanup_takeover(&root_thread_ids)
             .await;
         Ok(self
             .runtime_state
             .remove_project_recovery_issues(project_id))
     }
 
-    async fn close_project_agent_trees(&self, session_ids: &[String]) -> Result<()> {
+    async fn close_project_agent_trees(&self, thread_ids: &[String]) -> Result<()> {
         let runtime = self.agent_framework().await?.handle();
-        let root_agent_ids = session_ids
+        let root_agent_ids = thread_ids
             .iter()
-            .map(|session_id| root_agent_id(session_id))
+            .map(|thread_id| root_agent_id(thread_id))
             .collect::<BTreeSet<_>>();
         for root_agent_id in &root_agent_ids {
             close_agent_if_present(&runtime, root_agent_id.clone()).await?;

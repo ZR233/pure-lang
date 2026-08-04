@@ -8,15 +8,9 @@ void registerTimelineToolTests() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    final message = TimelineMessage(
-      id: 'message-web-search',
-      sessionId: 'session-1',
-      role: 'assistant',
-      createdAt: DateTime.fromMillisecondsSinceEpoch(0),
-    );
     final part = _toolTimelinePart(
       id: 'web-search-1',
-      messageId: message.id,
+      groupId: 'message-web-search',
       turnId: 'turn-web-search',
       name: 'web_search',
       status: 'streaming',
@@ -45,9 +39,9 @@ void registerTimelineToolTests() {
             width: 720,
             height: 480,
             child: TimelineView(
-              sessionId: 'session-1',
+              threadId: 'session-1',
               turn: null,
-              rows: timelineRowsFromMessages([message], parts: [part]),
+              rows: timelineRowsFromFixtureParts([part]),
             ),
           ),
         ),
@@ -103,7 +97,7 @@ void registerTimelineToolTests() {
           body: SizedBox(
             width: 304,
             height: 480,
-            child: const SessionTodoPanel(todo: todo),
+            child: const TodoPanel(todo: todo),
           ),
         ),
       ),
@@ -132,38 +126,28 @@ void registerTimelineToolTests() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    final part = timelinePartFromSnapshot(
-      TimelinePartSnapshot(
-        id: 'tool-part-1',
-        messageId: 'message-tool',
-        sessionId: 'session-1',
-        turnId: 'turn-tool',
-        type: TimelinePartType.tool,
-        order: 0,
-        revision: 0,
-        text: '',
-        status: 'completed',
-        createdAt: DateTime.fromMillisecondsSinceEpoch(0),
-        updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
-        tool: TimelineToolPart(
-          toolCallId: 'tool-call-1',
-          name: 'exec',
-          arguments: jsonEncode({
-            'command': 'cargo test -p pl-model\ncargo test -p pl-core',
-          }),
-          workingDirectory: 'D:/work/project',
-          result: 'ok',
-        ),
+    final part = TimelineEntry(
+      id: 'tool-part-1',
+      groupId: 'message-tool',
+      threadId: 'session-1',
+      turnId: 'turn-tool',
+      type: TimelineEntryType.tool,
+      order: 0,
+      revision: 0,
+      text: '',
+      status: 'completed',
+      createdAt: DateTime.fromMillisecondsSinceEpoch(0),
+      updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
+      tool: TimelineToolPart(
+        toolCallId: 'tool-call-1',
+        name: 'exec',
+        arguments: jsonEncode({
+          'command': 'cargo test -p pl-model\ncargo test -p pl-core',
+        }),
+        workingDirectory: 'D:/work/project',
+        result: 'ok',
       ),
     );
-    final messages = [
-      TimelineMessage(
-        id: 'message-tool',
-        sessionId: 'session-1',
-        role: 'assistant',
-        createdAt: DateTime.fromMillisecondsSinceEpoch(0),
-      ),
-    ];
 
     await tester.pumpWidget(
       _timelineApp(
@@ -172,9 +156,9 @@ void registerTimelineToolTests() {
             width: 980,
             height: 520,
             child: TimelineView(
-              sessionId: 'session-1',
+              threadId: 'session-1',
               turn: null,
-              rows: timelineRowsFromMessages(messages, parts: [part]),
+              rows: timelineRowsFromFixtureParts([part]),
             ),
           ),
         ),
@@ -233,23 +217,17 @@ void registerTimelineToolTests() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    final message = TimelineMessage(
-      id: 'message-mixed-tools',
-      sessionId: 'session-1',
-      role: 'assistant',
-      createdAt: DateTime.fromMillisecondsSinceEpoch(0),
-    );
     final parts = [
       _toolTimelinePart(
         id: 'tool-edit',
-        messageId: message.id,
+        groupId: 'message-mixed-tools',
         turnId: 'turn-mixed-tools',
         name: 'edit_file',
         arguments: jsonEncode({'path': 'lib/timeline.dart'}),
       ),
       _toolTimelinePart(
         id: 'tool-read',
-        messageId: message.id,
+        groupId: 'message-mixed-tools',
         turnId: 'turn-mixed-tools',
         order: 1,
         name: 'read_file',
@@ -257,7 +235,7 @@ void registerTimelineToolTests() {
       ),
       _toolTimelinePart(
         id: 'tool-exec',
-        messageId: message.id,
+        groupId: 'message-mixed-tools',
         turnId: 'turn-mixed-tools',
         order: 2,
         name: 'exec',
@@ -265,7 +243,7 @@ void registerTimelineToolTests() {
         workingDirectory: 'code/pure-studio',
       ),
     ];
-    final rows = timelineRowsFromMessages([message], parts: parts);
+    final rows = timelineRowsFromFixtureParts(parts);
 
     expect(rows, hasLength(1));
     expect(rows.single.type, TimelineRowType.toolGroup);
@@ -280,7 +258,7 @@ void registerTimelineToolTests() {
           body: SizedBox(
             width: 980,
             height: 520,
-            child: TimelineView(sessionId: 'session-1', rows: rows, turn: null),
+            child: TimelineView(threadId: 'session-1', rows: rows, turn: null),
           ),
         ),
       ),
@@ -324,28 +302,20 @@ void registerTimelineToolTests() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    final now = DateTime.fromMillisecondsSinceEpoch(0);
-    final message = TimelineMessage(
-      id: 'turn-1:assistant',
-      sessionId: 'session-1',
-      turnId: 'turn-1',
-      role: 'assistant',
-      createdAt: now,
-    );
     final parts = [
-      TimelinePart(
+      TimelineEntry(
         id: 'text-before',
-        messageId: message.id,
-        sessionId: 'session-1',
+        groupId: 'turn-1:assistant',
+        threadId: 'session-1',
         turnId: 'turn-1',
-        type: TimelinePartType.text,
+        type: TimelineEntryType.text,
         text: '先读取相关文件。',
         textChannel: TimelineTextChannel.commentary,
         order: 0,
       ),
       _toolTimelinePart(
         id: 'tool-a',
-        messageId: message.id,
+        groupId: 'turn-1:assistant',
         turnId: 'turn-1',
         order: 1,
         name: 'read_file',
@@ -353,25 +323,25 @@ void registerTimelineToolTests() {
       ),
       _toolTimelinePart(
         id: 'tool-b',
-        messageId: message.id,
+        groupId: 'turn-1:assistant',
         turnId: 'turn-1',
         order: 2,
         name: 'search_files',
         arguments: jsonEncode({'query': 'TimelineToolGroup'}),
       ),
-      TimelinePart(
+      TimelineEntry(
         id: 'text-middle',
-        messageId: message.id,
-        sessionId: 'session-1',
+        groupId: 'turn-1:assistant',
+        threadId: 'session-1',
         turnId: 'turn-1',
-        type: TimelinePartType.text,
+        type: TimelineEntryType.text,
         text: '再跑一下测试。',
         textChannel: TimelineTextChannel.commentary,
         order: 3,
       ),
       _toolTimelinePart(
         id: 'tool-c',
-        messageId: message.id,
+        groupId: 'turn-1:assistant',
         turnId: 'turn-1',
         order: 4,
         name: 'exec',
@@ -386,9 +356,9 @@ void registerTimelineToolTests() {
             width: 980,
             height: 620,
             child: TimelineView(
-              sessionId: 'session-1',
+              threadId: 'session-1',
               turn: null,
-              rows: timelineRowsFromMessages([message], parts: parts),
+              rows: timelineRowsFromFixtureParts(parts),
             ),
           ),
         ),
@@ -431,16 +401,10 @@ void registerTimelineToolTests() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    final message = TimelineMessage(
-      id: 'message-tool',
-      sessionId: 'session-1',
-      role: 'assistant',
-      createdAt: DateTime.fromMillisecondsSinceEpoch(0),
-    );
     final parts = [
       _toolTimelinePart(
         id: 'tool-awaiting',
-        messageId: message.id,
+        groupId: 'message-tool',
         turnId: 'turn-tool',
         status: 'awaitingApproval',
         name: 'exec',
@@ -448,7 +412,7 @@ void registerTimelineToolTests() {
       ),
       _toolTimelinePart(
         id: 'tool-failed',
-        messageId: message.id,
+        groupId: 'message-tool',
         turnId: 'turn-tool',
         order: 1,
         status: 'failed',
@@ -459,7 +423,7 @@ void registerTimelineToolTests() {
       ),
       _toolTimelinePart(
         id: 'tool-running',
-        messageId: message.id,
+        groupId: 'message-tool',
         turnId: 'turn-tool',
         order: 2,
         status: 'running',
@@ -475,9 +439,9 @@ void registerTimelineToolTests() {
             width: 980,
             height: 520,
             child: TimelineView(
-              sessionId: 'session-1',
+              threadId: 'session-1',
               turn: null,
-              rows: timelineRowsFromMessages([message], parts: parts),
+              rows: timelineRowsFromFixtureParts(parts),
             ),
           ),
         ),
@@ -521,18 +485,11 @@ void registerTimelineToolTests() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    final now = DateTime.fromMillisecondsSinceEpoch(0);
-    final message = TimelineMessage(
-      id: 'message-inline-fence',
-      sessionId: 'session-1',
-      role: 'assistant',
-      createdAt: now,
-    );
     const parts = [
-      TimelinePart(
+      TimelineEntry(
         id: 'plan-inline-fence',
-        messageId: 'message-inline-fence',
-        type: TimelinePartType.plan,
+        groupId: 'message-inline-fence',
+        type: TimelineEntryType.plan,
         title: 'Plan',
         text:
             '```text\n'
@@ -551,9 +508,9 @@ void registerTimelineToolTests() {
             width: 980,
             height: 820,
             child: TimelineView(
-              sessionId: 'session-1',
+              threadId: 'session-1',
               turn: null,
-              rows: timelineRowsFromMessages([message], parts: parts),
+              rows: timelineRowsFromFixtureParts(parts),
             ),
           ),
         ),
@@ -577,18 +534,11 @@ void registerTimelineToolTests() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    final now = DateTime.fromMillisecondsSinceEpoch(0);
-    final message = TimelineMessage(
-      id: 'message-markdown-chrome',
-      sessionId: 'session-1',
-      role: 'assistant',
-      createdAt: now,
-    );
     const parts = [
-      TimelinePart(
+      TimelineEntry(
         id: 'text-markdown-chrome',
-        messageId: 'message-markdown-chrome',
-        type: TimelinePartType.text,
+        groupId: 'message-markdown-chrome',
+        type: TimelineEntryType.text,
         text:
             '项目使用 `std::env::args()` 读取参数。\n\n'
             '> 这是一段引用\n'
@@ -603,9 +553,9 @@ void registerTimelineToolTests() {
             width: 980,
             height: 820,
             child: TimelineView(
-              sessionId: 'session-1',
+              threadId: 'session-1',
               turn: null,
-              rows: timelineRowsFromMessages([message], parts: parts),
+              rows: timelineRowsFromFixtureParts(parts),
             ),
           ),
         ),
@@ -636,18 +586,11 @@ void registerTimelineToolTests() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    final now = DateTime.fromMillisecondsSinceEpoch(0);
-    final message = TimelineMessage(
-      id: 'message-agent-markdown',
-      sessionId: 'session-1',
-      role: 'assistant',
-      createdAt: now,
-    );
     const parts = [
-      TimelinePart(
+      TimelineEntry(
         id: 'plan-agent-markdown',
-        messageId: 'message-agent-markdown',
-        type: TimelinePartType.plan,
+        groupId: 'message-agent-markdown',
+        type: TimelineEntryType.plan,
         title: 'Plan',
         text:
             'glm-intro.html代码结构单文件 HTML（~850行），GLM产品介绍落地页。\n\n'
@@ -670,9 +613,9 @@ void registerTimelineToolTests() {
             width: 980,
             height: 820,
             child: TimelineView(
-              sessionId: 'session-1',
+              threadId: 'session-1',
               turn: null,
-              rows: timelineRowsFromMessages([message], parts: parts),
+              rows: timelineRowsFromFixtureParts(parts),
             ),
           ),
         ),
@@ -696,39 +639,51 @@ void registerTimelineToolTests() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    final message = TimelineMessage(
-      id: 'message-current-tool',
-      sessionId: 'session-1',
-      turnId: 'turn-1',
-      role: 'assistant',
-      createdAt: DateTime.fromMillisecondsSinceEpoch(0),
-    );
-    final reasoning = TimelinePart(
+    const threadId = 'session-1';
+    const turnId = 'turn-1';
+    final reasoning = _threadItemFixture(
       id: 'reasoning-current',
-      messageId: message.id,
-      sessionId: message.sessionId,
-      turnId: message.turnId,
-      type: TimelinePartType.reasoning,
-      order: 0,
-      text: '## Inspecting the implementation',
+      threadId: threadId,
+      turnId: turnId,
+      ordinal: 0,
+      kind: ThreadItemKind.reasoning,
+      channel: null,
+      reasoningSummary: const ['## Inspecting the implementation'],
       status: 'streaming',
     );
 
-    Widget timelineFor(TimelinePart tool, StudioTurnActivity activity) {
+    ThreadItemView toolItem({required String status, String? result}) {
+      return _threadItemFixture(
+        id: 'tool-current',
+        threadId: threadId,
+        turnId: turnId,
+        ordinal: 1,
+        kind: ThreadItemKind.toolCall,
+        channel: null,
+        status: status,
+        tool: TimelineToolPart(
+          toolCallId: 'tool-current',
+          name: 'exec',
+          arguments: jsonEncode({
+            'command': 'flutter test test/widget_test.dart',
+          }),
+          result: result,
+        ),
+      );
+    }
+
+    Widget timelineFor(ThreadItemView tool, StudioTurnActivity activity) {
       return _timelineApp(
         home: Scaffold(
           body: SizedBox(
             width: 980,
             height: 520,
             child: TimelineView(
-              sessionId: message.sessionId,
-              rows: timelineRowsFromMessages(
-                [message],
-                parts: [reasoning, tool],
-              ),
+              threadId: threadId,
+              rows: timelineRowsFromThreadItems([reasoning, tool]),
               turn: _testTurn(
-                sessionId: message.sessionId,
-                turnId: message.turnId,
+                threadId: threadId,
+                turnId: turnId,
                 state: StudioTurnState.inProgress(activity),
               ),
             ),
@@ -737,15 +692,7 @@ void registerTimelineToolTests() {
       );
     }
 
-    final runningTool = _toolTimelinePart(
-      id: 'tool-current',
-      messageId: message.id,
-      turnId: message.turnId,
-      order: 1,
-      name: 'exec',
-      status: 'running',
-      arguments: jsonEncode({'command': 'flutter test test/widget_test.dart'}),
-    );
+    final runningTool = toolItem(status: 'running');
     await tester.pumpWidget(
       timelineFor(runningTool, StudioTurnActivity.runningTool),
     );
@@ -764,16 +711,7 @@ void registerTimelineToolTests() {
     );
     expect(find.text('Inspecting the implementation'), findsOneWidget);
 
-    final completedTool = _toolTimelinePart(
-      id: 'tool-current',
-      messageId: message.id,
-      turnId: message.turnId,
-      order: 1,
-      name: 'exec',
-      status: 'completed',
-      arguments: jsonEncode({'command': 'flutter test test/widget_test.dart'}),
-      result: 'passed',
-    );
+    final completedTool = toolItem(status: 'completed', result: 'passed');
     await tester.pumpWidget(
       timelineFor(completedTool, StudioTurnActivity.thinking),
     );

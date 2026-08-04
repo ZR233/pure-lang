@@ -6,39 +6,36 @@ pub mod types;
 
 // Re-exports from submodules
 pub use self::handlers::{
-    BridgeStudioUpdateOperation, archive_project, archive_session, bootstrap_studio,
-    check_studio_update, cleanup_project, cleanup_recovery_issue, create_session, init_app,
-    initialize_runtime, install_studio_update, list_discovered_skills, load_provider_catalog,
-    load_provider_usages, load_session_history_page, load_web_search_settings, open_project,
-    preview_project_cleanup, preview_recovery_issue_cleanup, resolve_interaction, resume_task,
-    save_general_settings, save_instructions_settings, save_mcp_settings, save_provider_settings,
+    BridgeStudioUpdateOperation, archive_project, bootstrap_studio, check_studio_update,
+    cleanup_project, cleanup_recovery_issue, init_app, initialize_runtime, install_studio_update,
+    interrupt_turn, list_discovered_skills, list_thread_turns, list_threads, load_provider_catalog,
+    load_provider_usages, load_web_search_settings, open_project, preview_project_cleanup,
+    preview_recovery_issue_cleanup, read_thread, respond_interaction, save_general_settings,
+    save_instructions_settings, save_mcp_settings, save_provider_settings,
     save_runtime_permission_mode, save_skills_settings, save_web_search_settings, select_project,
-    set_model_role, set_session_mode, shutdown_runtime, start_runtime, stop_prompt, submit_prompt,
+    set_model_role, shutdown_runtime, start_runtime, start_turn, steer_turn,
 };
 pub use self::subscription::{
-    BridgeEventSubscription, BridgeProductStreamEnvelope, BridgeSessionStreamEnvelope,
-    create_product_subscription, create_session_subscription,
+    BridgeEventSubscription, BridgeProductStreamEnvelope, BridgeThreadStreamEnvelope,
+    create_product_subscription, subscribe_thread,
 };
 pub use self::types::{
-    BridgeActiveTurn, BridgeError, BridgeErrorCode, BridgeInteractionChangedDto,
-    BridgeInteractionPayloadDto, BridgeLspHealthDto, BridgeMcpHealthDto, BridgeMcpServerDto,
-    BridgeModelCapabilities, BridgeModelCatalogDescriptor, BridgeModelDescriptor,
-    BridgeModelPricing, BridgeModelReasoningDescriptor, BridgeProductEventEnvelope,
-    BridgeProductEventPayload, BridgeProviderCatalogSnapshot,
+    BridgeActiveTurn, BridgeError, BridgeErrorCode, BridgeLspHealthDto, BridgeMcpHealthDto,
+    BridgeMcpServerDto, BridgeModelCapabilities, BridgeModelCatalogDescriptor,
+    BridgeModelDescriptor, BridgeModelPricing, BridgeModelReasoningDescriptor,
+    BridgeProductEventEnvelope, BridgeProductEventPayload, BridgeProviderCatalogSnapshot,
     BridgeProviderConnectionModeDescriptor, BridgeProviderPresetDescriptor,
     BridgeProviderServiceCapabilitiesDescriptor, BridgeRecoveryCleanupPreviewDto,
     BridgeRecoveryCleanupResourceDto, BridgeRecoveryIssueAction, BridgeRecoveryIssueCategory,
     BridgeRecoveryIssueScope, BridgeRecoveryResourcePresence, BridgeRuntimeStatus,
-    BridgeSessionHistoryItem, BridgeSessionHistoryTurn, BridgeSessionStreamFrame,
     BridgeStudioRecoveryIssueDto, BridgeStudioSnapshotResponse, BridgeStudioUpdateCheckDto,
-    BridgeStudioUpdateDto, BridgeStudioUpdateEventDto, BridgeUserQuestionDto,
-    BridgeUserQuestionOptionDto, BridgeWebSearchProviderCapabilitiesDescriptor,
+    BridgeStudioUpdateDto, BridgeStudioUpdateEventDto, BridgeThreadSubscriptionUpdate,
+    BridgeThreadTurnPage, BridgeWebSearchProviderCapabilitiesDescriptor,
     BridgeWebSearchSettingsDto, DeepSeekBalanceDto, DeepSeekBalanceInfoDto, GeneralSettingsInput,
-    InstructionsSettingsInput, LoadSessionHistoryPageRequest, LoadSessionHistoryPageResponse,
-    McpServerInput, McpSettingsInput, ProjectDto, ProviderInput, ProviderModelInput,
-    ProviderSecretInput, ProviderSettingsInput, ProviderUsageDto, ProviderUsagesResponse,
-    ResolveInteractionResponse, RoleInput, RuntimeSnapshot, SessionDto, SkillSummaryDto,
-    SkillsResponse, SkillsSettingsInput, StopPromptResponse, SubmitPromptResponse,
+    InstructionsSettingsInput, InterruptTurnResponse, ListThreadTurnsRequest, McpServerInput,
+    McpSettingsInput, ProjectDto, ProviderInput, ProviderModelInput, ProviderSecretInput,
+    ProviderSettingsInput, ProviderUsageDto, ProviderUsagesResponse, RoleInput, RuntimeSnapshot,
+    SkillSummaryDto, SkillsResponse, SkillsSettingsInput, StartTurnResponse, SteerTurnResponse,
     WebSearchSettingsInput, ZhipuCodingPlanUsageDto, ZhipuQuotaLimitDto, ZhipuToolUsageDetailDto,
 };
 
@@ -57,9 +54,9 @@ mod tests {
             project_id: None,
             sequence: 7,
             created_at: 10,
-            kind: StudioProductEventKind::SessionListChanged {
+            kind: StudioProductEventKind::ThreadDirectoryChanged {
                 project_id: "project-1".to_string(),
-                sessions: Vec::new(),
+                threads: Vec::new(),
             },
         };
 
@@ -68,9 +65,9 @@ mod tests {
         assert_eq!(envelope.sequence, 7);
         assert_eq!(
             envelope.payload,
-            BridgeProductEventPayload::SessionListChanged {
+            BridgeProductEventPayload::ThreadDirectoryChanged {
                 project_id: "project-1".to_string(),
-                sessions: Vec::new(),
+                threads: Vec::new(),
             }
         );
     }

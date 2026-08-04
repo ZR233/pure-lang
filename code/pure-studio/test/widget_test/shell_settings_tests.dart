@@ -1,7 +1,9 @@
 part of '../widget_test.dart';
 
 void registerShellSettingsTests() {
-  testWidgets('sidebar session actions call Studio API', (tester) async {
+  testWidgets('sidebar exposes fixed root threads without mutation actions', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(1280, 800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -16,14 +18,9 @@ void registerShellSettingsTests() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.byKey(StudioDriverKeys.newSession), findsOneWidget);
-    await tester.tap(find.byKey(StudioDriverKeys.newSession));
-    await tester.pump();
-    expect(api.createSessionCount, 1);
-
-    await tester.tap(find.byTooltip('Archive session'));
-    await tester.pump();
-    expect(api.archivedSessionId, 'session-1');
+    expect(find.byKey(StudioDriverKeys.threadRow('session-1')), findsOneWidget);
+    expect(find.byKey(StudioDriverKeys.newSession), findsNothing);
+    expect(find.byTooltip('Archive session'), findsNothing);
   });
 
   testWidgets('driver project path dialog opens the entered project', (
@@ -69,52 +66,6 @@ void registerShellSettingsTests() {
     expect(find.byKey(StudioDriverKeys.projectPathDialog), findsNothing);
   });
 
-  testWidgets('busy session does not block creating another session', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(1280, 800);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-
-    final api = _FakeStudioApi(
-      _emptyState().copyWith(
-        turnsBySession: {
-          'session-1': _testTurn(
-            sessionId: 'session-1',
-            state: const StudioTurnState.inProgress(
-              StudioTurnActivity.waitingForUserInput,
-            ),
-          ),
-        },
-      ),
-    );
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [studioApiProvider.overrideWithValue(api)],
-        child: _localizedApp(home: const StudioShell()),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    final newSession = tester.widget<IconButton>(
-      find.descendant(
-        of: find.byKey(StudioDriverKeys.newSession),
-        matching: find.byType(IconButton),
-      ),
-    );
-    expect(newSession.onPressed, isNotNull);
-
-    await tester.tap(find.byKey(StudioDriverKeys.newSession));
-    await tester.pump();
-    expect(api.createSessionCount, 1);
-
-    final archiveSession = tester.widget<IconButton>(
-      find.widgetWithIcon(IconButton, Icons.archive_outlined),
-    );
-    expect(archiveSession.onPressed, isNull);
-  });
-
   testWidgets('sidebar footer uses aligned icon actions in zh Hans', (
     tester,
   ) async {
@@ -136,10 +87,6 @@ void registerShellSettingsTests() {
     await tester.pumpAndSettle();
 
     final sidebar = find.byKey(const ValueKey('studio-sidebar'));
-    final newSession = find.widgetWithIcon(
-      IconButton,
-      Icons.add_comment_outlined,
-    );
     final openProject = find.widgetWithIcon(
       IconButton,
       Icons.create_new_folder,
@@ -148,16 +95,13 @@ void registerShellSettingsTests() {
 
     expect(sidebar, findsOneWidget);
     expect(find.byKey(StudioDriverKeys.openProject), findsOneWidget);
-    expect(find.byTooltip('新建会话'), findsOneWidget);
+    expect(find.byTooltip('新建会话'), findsNothing);
     expect(find.byTooltip('打开项目'), findsOneWidget);
     expect(find.byTooltip('设置'), findsOneWidget);
-    expect(newSession, findsOneWidget);
     expect(openProject, findsOneWidget);
     expect(settings, findsOneWidget);
-    expect(tester.getSize(newSession), const Size.square(40));
     expect(tester.getSize(openProject), const Size.square(40));
     expect(tester.getSize(settings), const Size.square(40));
-    expect(tester.getCenter(newSession).dy, tester.getCenter(openProject).dy);
     expect(tester.getCenter(openProject).dy, tester.getCenter(settings).dy);
     expect(
       find.descendant(of: sidebar, matching: find.byType(OutlinedButton)),
@@ -215,7 +159,7 @@ void registerShellSettingsTests() {
     },
   );
 
-  testWidgets('status bar routes model controls by session mode', (
+  testWidgets('status bar routes model controls by Thread mode', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(1280, 800);
@@ -223,46 +167,20 @@ void registerShellSettingsTests() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    final updatedAt = DateTime.fromMillisecondsSinceEpoch(1);
     final api = _FakeStudioApi(
-      _stateWithPlannerModels().copyWith(
-        runtimesBySession: {
-          'session-1': SessionRuntimeView(
-            model: 'planner/local',
-            contextTokens: 42,
-            contextWindow: 100,
-            totalTokens: 128,
-            costLabel: 'CNY 0.16',
-            activeSkills: ['flutter-ui'],
-            activeMcpServers: ['dart'],
-            activeLspServers: ['rust-analyzer'],
-            agentCount: 2,
-          ),
-        },
-        agentsBySession: {
-          'session-1': {
-            'agent-reviewer': StudioAgentView(
-              id: 'agent-reviewer',
-              sessionId: 'session-1',
-              path: 'root/reviewer',
-              role: 'reviewer',
-              task: 'Audit timeline projection',
-              status: 'running',
-              summary: 'Checking status projection',
-              updatedAt: updatedAt,
-            ),
-            'agent-worker': StudioAgentView(
-              id: 'agent-worker',
-              sessionId: 'session-1',
-              path: 'root/worker',
-              role: 'worker',
-              task: 'Patch Flutter status bar',
-              status: 'completed',
-              depth: 1,
-              updatedAt: updatedAt,
-            ),
-          },
-        },
+      _withSelectedRuntime(
+        _stateWithPlannerModels(),
+        const ThreadRuntimeView(
+          model: 'planner/local',
+          contextTokens: 42,
+          contextWindow: 100,
+          totalTokens: 128,
+          costLabel: 'CNY 0.16',
+          activeSkills: ['flutter-ui'],
+          activeMcpServers: ['dart'],
+          activeLspServers: ['rust-analyzer'],
+          agentCount: 0,
+        ),
       ),
     );
     await tester.pumpWidget(
@@ -274,18 +192,10 @@ void registerShellSettingsTests() {
     await tester.pumpAndSettle();
 
     expect(find.byTooltip('Session mode'), findsOneWidget);
-    expect(find.byKey(StudioDriverKeys.sessionMode), findsOneWidget);
-    await tester.tap(find.byKey(StudioDriverKeys.sessionMode));
-    await tester.pumpAndSettle();
-    expect(
-      find.byKey(StudioDriverKeys.sessionModeOption('task')),
-      findsOneWidget,
-    );
-    await tester.tap(find.byKey(StudioDriverKeys.sessionModeOption('task')));
-    await tester.pumpAndSettle();
-    expect(api.sessionModeUpdate, StudioMode.task);
-    expect(find.byTooltip('Executor model'), findsNothing);
-    expect(find.byTooltip('Planner model'), findsOneWidget);
+    expect(find.byKey(StudioDriverKeys.sessionMode), findsNothing);
+    expect(find.text('Simple'), findsOneWidget);
+    expect(find.byTooltip('Executor model'), findsOneWidget);
+    expect(find.byTooltip('Planner model'), findsNothing);
     expect(find.byTooltip('Reasoning effort'), findsOneWidget);
     expect(find.byKey(StudioDriverKeys.reasoningEffort), findsOneWidget);
     expect(find.byType(StatusBarItem), findsWidgets);
@@ -336,16 +246,11 @@ void registerShellSettingsTests() {
     await tester.tapAt(Offset.zero);
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('Session mode'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Task').last);
-    await tester.pumpAndSettle();
-    expect(api.sessionModeUpdate, StudioMode.task);
     api.emitGlobal(
-      _sessionListChangedEvent(
+      _threadDirectoryChangedEvent(
         projectId: 'project-1',
-        sessions: [
-          StudioSession(
+        threads: [
+          StudioThread(
             id: 'session-1',
             projectId: 'project-1',
             title: 'Session',
@@ -366,6 +271,22 @@ void registerShellSettingsTests() {
     expect(api.roleUpdate?.roleKey, 'planner');
     expect(api.roleUpdate?.providerId, 'deepseek');
     expect(api.roleUpdate?.model, 'deepseek-reasoner');
+
+    api.emitGlobal(
+      _threadDirectoryChangedEvent(
+        projectId: 'project-1',
+        threads: [
+          StudioThread(
+            id: 'session-1',
+            projectId: 'project-1',
+            title: 'Session',
+            mode: StudioMode.task,
+            updatedAt: DateTime.fromMillisecondsSinceEpoch(2000),
+          ),
+        ],
+      ),
+    );
+    await tester.pumpAndSettle();
 
     await tester.tap(find.byTooltip('Reasoning effort'));
     await tester.pumpAndSettle();
@@ -389,28 +310,27 @@ void registerShellSettingsTests() {
       ProviderScope(
         child: _localizedApp(
           locale: const Locale('en'),
-          home: SessionStatusBar(
-            workspace: _emptyState()
-                .copyWith(
-                  turnsBySession: {
-                    'session-1': _testTurn(
-                      sessionId: 'session-1',
-                      state: const StudioTurnState.inProgress(
-                        StudioTurnActivity.waitingForUserInput,
-                      ),
-                    ),
-                  },
-                  pendingInteractions: const [
-                    PendingInteraction(
-                      id: 'interaction-1',
-                      sessionId: 'session-1',
-                      kind: InteractionKind.userInput,
-                      title: 'Pending',
-                      body: 'Pending interaction',
-                    ),
-                  ],
-                )
-                .selectedAgentWorkspace!,
+          home: ThreadStatusBar(
+            workspace: _withSelectedInteractions(
+              _withSelectedTurn(
+                _emptyState(),
+                _testTurn(
+                  threadId: 'session-1',
+                  state: const StudioTurnState.inProgress(
+                    StudioTurnActivity.waitingForUserInput,
+                  ),
+                ),
+              ),
+              const [
+                PendingInteraction(
+                  id: 'interaction-1',
+                  threadId: 'session-1',
+                  kind: InteractionKind.userInput,
+                  title: 'Pending',
+                  body: 'Pending interaction',
+                ),
+              ],
+            ).selectedAgentWorkspace!,
           ),
         ),
       ),
@@ -430,33 +350,19 @@ void registerShellSettingsTests() {
     addTearDown(tester.view.resetDevicePixelRatio);
 
     final api = _FakeStudioApi(
-      _stateWithPlannerModels().copyWith(
-        runtimesBySession: {
-          'session-1': SessionRuntimeView(
-            model: 'planner/local',
-            contextTokens: 42000,
-            contextWindow: 100000,
-            totalTokens: 128000,
-            costLabel: 'CNY 12.34',
-            activeSkills: ['flutter-ui'],
-            activeMcpServers: ['dart'],
-            activeLspServers: ['rust-analyzer'],
-            agentCount: 1,
-          ),
-        },
-        agentsBySession: {
-          'session-1': {
-            'agent-reviewer': StudioAgentView(
-              id: 'agent-reviewer',
-              sessionId: 'session-1',
-              path: 'root/reviewer',
-              role: 'reviewer',
-              task: 'Audit compact status layout',
-              status: 'running',
-              updatedAt: DateTime.fromMillisecondsSinceEpoch(1),
-            ),
-          },
-        },
+      _withSelectedRuntime(
+        _stateWithPlannerModels(),
+        const ThreadRuntimeView(
+          model: 'planner/local',
+          contextTokens: 42000,
+          contextWindow: 100000,
+          totalTokens: 128000,
+          costLabel: 'CNY 12.34',
+          activeSkills: ['flutter-ui'],
+          activeMcpServers: ['dart'],
+          activeLspServers: ['rust-analyzer'],
+          agentCount: 0,
+        ),
       ),
     );
     await tester.pumpWidget(
@@ -482,159 +388,41 @@ void registerShellSettingsTests() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
+    final state = _stateWithPlannerModels();
+    final thread = state.selectedThread!.copyWith(mode: StudioMode.task);
     final api = _FakeStudioApi(
-      _stateWithPlannerModels().copyWith(
-        runtimesBySession: {
-          'session-1': SessionRuntimeView(
-            model: 'planner/local',
-            contextTokens: 1200,
-            contextWindow: 100000,
-            totalTokens: 1800,
-            costLabel: '',
-            activeSkills: [],
-            activeMcpServers: [],
-            activeLspServers: [],
-            agentCount: 1,
-            task: TaskRuntimeView(
-              runId: 'task-run-1',
-              phase: 'implementing',
-              branch: 'codex/task-mode',
-              expectedHead: '1234567890abcdef',
-              statusMessage: 'Executor delivery ready',
-              stopRequestedOrigin: null,
-              stopRequestedReason: null,
-              taskGeneration: 0,
-              workUnits: [
-                TaskWorkUnitView(
-                  id: 'unit-1',
-                  title: 'Implement coordinator UI',
-                  status: 'readyForReview',
-                  worktreePath: '.pure/worktrees/task-run-1/agent-1',
-                  branch: 'pure-task-run-1-agent-1',
-                  agentId: 'agent-1',
-                ),
-              ],
-              agents: [
-                TaskAgentOutcomeView(
-                  agentId: 'agent-1',
-                  role: 'executor',
-                  status: 'completed',
-                  initiatedBy: 'planner',
-                  requestedByCallId: 'call-spawn-1',
-                  summary: 'Implemented UI',
-                  error: null,
-                  headCommit: 'abcdef1234567890',
-                  lifecycle: 'active',
-                  activity: 'idle',
-                  progress: AgentProgressView(
-                    stage: 'readyForReview',
-                    summary: 'Implementation is ready for review',
-                    nextStep: 'Wait for the delivery reviewer',
-                    revision: 3,
-                    updatedAt: DateTime.fromMillisecondsSinceEpoch(
-                      1000,
-                      isUtc: true,
-                    ),
-                  ),
-                  updatedAt: DateTime.fromMillisecondsSinceEpoch(
-                    1000,
-                    isUtc: true,
-                  ),
-                  summaryAgeSeconds: 5,
-                ),
-                TaskAgentOutcomeView(
-                  agentId: 'agent-explorer',
-                  role: 'explorer',
-                  status: 'running',
-                  initiatedBy: 'planner',
-                  requestedByCallId: 'call-explore-1',
-                  summary: 'Inspecting design constraints',
-                  error: null,
-                  headCommit: null,
-                  lifecycle: 'active',
-                  activity: 'running',
-                  progress: null,
-                  updatedAt: DateTime.fromMillisecondsSinceEpoch(
-                    1000,
-                    isUtc: true,
-                  ),
-                  summaryAgeSeconds: 5,
-                ),
-              ],
-              completions: [
-                TaskCompletionView(
-                  id: 'completion-1',
-                  workUnitId: 'unit-1',
-                  executorAgentId: 'agent-1',
-                  revision: 2,
-                  kind: 'delivery',
-                  status: 'readyForReview',
-                  baseCommit: '1234567890abcdef',
-                  headCommit: 'abcdef1234567890',
-                  changedFiles: const ['lib/status.dart'],
-                  verificationSummary: 'flutter test passed',
-                  worktreePath: '.pure/worktrees/task-run-1/agent-1',
-                  branch: 'pure-task-run-1-agent-1',
-                  createdAt: DateTime.fromMillisecondsSinceEpoch(
-                    1000,
-                    isUtc: true,
-                  ),
-                  updatedAt: DateTime.fromMillisecondsSinceEpoch(
-                    1000,
-                    isUtc: true,
-                  ),
-                ),
-              ],
-              merges: [
-                TaskMergeView(
-                  id: 'merge-1',
-                  agentId: 'agent-1',
-                  status: 'conflicted',
-                  mergeCommit: null,
-                  conflictFiles: ['lib/status.dart'],
-                  resolutionSummary: null,
-                ),
-              ],
-              reviews: [
-                TaskReviewView(
-                  id: 'review-1',
-                  round: 1,
-                  scope: 'delivery',
-                  workUnitId: 'unit-1',
-                  completionId: 'completion-1',
-                  completionRevision: 2,
-                  reviewedHead: '1234567890abcdef',
-                  verdict: 'changesRequired',
-                  requestedByCallId: 'call-review-1',
-                  reviewerAgentId: 'reviewer-1',
-                  summary: 'One issue remains',
-                  designReferences: const [
-                    TaskDesignReferenceView(
-                      path: 'design/16-task-orchestration.md',
-                      section: 'UI 与兼容性',
-                    ),
-                  ],
-                  findings: const [
-                    TaskReviewFindingView(
-                      severity: 'major',
-                      title: 'Missing projection',
-                      body: 'Project the completion revision.',
-                      path: 'lib/status.dart',
-                      line: 42,
-                      designReferences: [],
-                    ),
-                  ],
-                  createdAt: DateTime.fromMillisecondsSinceEpoch(
-                    1000,
-                    isUtc: true,
-                  ),
-                  updatedAt: DateTime.fromMillisecondsSinceEpoch(
-                    1000,
-                    isUtc: true,
-                  ),
-                ),
-              ],
+      state.copyWith(
+        threads: [thread],
+        workspacesByThread: {
+          thread.id: state.selectedWorkspace!.copyWith(
+            thread: thread,
+            runtime: const ThreadRuntimeView(
+              model: 'planner/local',
+              contextTokens: 1200,
+              contextWindow: 100000,
+              totalTokens: 1800,
+              costLabel: '',
+              activeSkills: [],
+              activeMcpServers: [],
+              activeLspServers: [],
+              agentCount: 1,
             ),
+          ),
+        },
+        tasksByRootThread: const {
+          'session-1': TaskRuntimeView(
+            runId: 'task-run-1',
+            phase: 'implementing',
+            branch: 'codex/task-mode',
+            expectedHead: '1234567890abcdef',
+            statusMessage: 'Executor delivery ready',
+            stopRequestedOrigin: null,
+            stopRequestedReason: null,
+            taskGeneration: 0,
+            workUnits: [],
+            completions: [],
+            merges: [],
+            reviews: [],
           ),
         },
       ),
@@ -649,20 +437,19 @@ void registerShellSettingsTests() {
 
     expect(
       find.descendant(
-        of: find.byType(SessionStatusBar),
+        of: find.byType(ThreadStatusBar),
         matching: find.text('Implementing'),
       ),
       findsNothing,
     );
     expect(tester.takeException(), isNull);
-    await tester.tap(find.byTooltip('Session mode'));
-    await tester.pumpAndSettle();
-    expect(find.text('Task'), findsNothing);
-    expect(api.sessionModeUpdate, isNull);
+    expect(find.byTooltip('Session mode'), findsOneWidget);
+    expect(find.text('Task'), findsOneWidget);
+    expect(find.byKey(StudioDriverKeys.sessionMode), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('zh Hans localizes session and permission mode labels', (
+  testWidgets('zh Hans localizes Thread and permission mode labels', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(1280, 800);
@@ -670,17 +457,14 @@ void registerShellSettingsTests() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
+    final state = _stateWithPlannerModels();
+    final taskThread = state.selectedThread!.copyWith(mode: StudioMode.task);
     final api = _FakeStudioApi(
-      _stateWithPlannerModels().copyWith(
-        sessions: [
-          StudioSession(
-            id: 'session-1',
-            projectId: 'project-1',
-            title: 'Session',
-            mode: StudioMode.task,
-            updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
-          ),
-        ],
+      state.copyWith(
+        threads: [taskThread],
+        workspacesByThread: {
+          taskThread.id: state.selectedWorkspace!.copyWith(thread: taskThread),
+        },
         permissionMode: PermissionMode.fullAccess,
       ),
     );
@@ -701,17 +485,24 @@ void registerShellSettingsTests() {
     expect(find.text('Plan'), findsNothing);
     expect(find.text('Full'), findsNothing);
 
-    await tester.tap(find.byTooltip('会话模式'));
-    await tester.pumpAndSettle();
-    expect(find.text('简洁'), findsOneWidget);
-    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-    await tester.pumpAndSettle();
-
     await tester.tap(find.byTooltip('权限模式'));
     await tester.pumpAndSettle();
     expect(find.text('请求'), findsOneWidget);
     expect(find.text('审查'), findsOneWidget);
     expect(find.text('完全'), findsWidgets);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        key: const ValueKey('simple-thread-provider-scope'),
+        overrides: [studioApiProvider.overrideWithValue(_FakeStudioApi(state))],
+        child: _localizedApp(
+          locale: const Locale('zh', 'Hans'),
+          home: const StudioShell(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('简洁'), findsOneWidget);
   });
 
   testWidgets('select menus open upward and stay clear of their triggers', (
@@ -731,11 +522,6 @@ void registerShellSettingsTests() {
     );
     await tester.pumpAndSettle();
 
-    await _expectMenuOpensAboveTrigger(
-      tester: tester,
-      triggerTooltip: 'Session mode',
-      menuText: 'Task',
-    );
     await _expectMenuOpensAboveTrigger(
       tester: tester,
       triggerTooltip: 'Executor model',
@@ -1346,12 +1132,12 @@ void registerShellSettingsTests() {
       _configureSettingsTestView(tester);
       final base = _stateWithPlannerModels();
       final api = _FakeStudioApi(
-        base.copyWith(
-          runtimesBySession: {
-            base.selectedAgentSessionId!: base.runtime.copyWith(
-              activeSkills: ['flutter-ui-polish', 'rust-review'],
-            ),
-          },
+        _withSelectedRuntime(
+          base,
+          base.runtime.copyWith(
+            activeSkills: ['flutter-ui-polish', 'rust-review'],
+          ),
+        ).copyWith(
           skills: const SkillsSettingsView(disabled: []),
           mcpServers: const [
             McpServerSettingsView(
@@ -1403,12 +1189,12 @@ void registerShellSettingsTests() {
       addTearDown(tester.view.resetDevicePixelRatio);
 
       final api = _FakeStudioApi(
-        _stateWithPlannerModels().copyWith(
-          runtimesBySession: {
-            'session-1': _stateWithPlannerModels().runtime.copyWith(
-              activeSkills: ['flutter-ui-polish'],
-            ),
-          },
+        _withSelectedRuntime(
+          _stateWithPlannerModels(),
+          _stateWithPlannerModels().runtime.copyWith(
+            activeSkills: ['flutter-ui-polish'],
+          ),
+        ).copyWith(
           skills: const SkillsSettingsView(disabled: []),
           mcpServers: const [
             McpServerSettingsView(

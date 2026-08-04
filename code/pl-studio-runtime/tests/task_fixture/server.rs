@@ -58,7 +58,7 @@ struct ScriptProgress {
 
 struct ScriptState {
     runtime: StudioRuntime,
-    session_id: String,
+    thread_id: String,
     progress: Mutex<ScriptProgress>,
 }
 
@@ -68,10 +68,10 @@ pub(super) struct ScriptedModelServer {
 }
 
 impl ScriptedModelServer {
-    pub(super) fn start(listener: TcpListener, runtime: StudioRuntime, session_id: String) -> Self {
+    pub(super) fn start(listener: TcpListener, runtime: StudioRuntime, thread_id: String) -> Self {
         let state = Arc::new(ScriptState {
             runtime,
-            session_id,
+            thread_id,
             progress: Mutex::new(ScriptProgress::default()),
         });
         let server_state = state.clone();
@@ -479,7 +479,7 @@ fn reviewer_response(step: usize) -> Result<(&'static str, String)> {
 async fn current_task(state: &ScriptState) -> Result<StudioTaskRuntime> {
     state
         .runtime
-        .session_task_view(&state.session_id)
+        .thread_task_view(&state.thread_id)
         .await?
         .context("task projection is not available")
 }
@@ -487,10 +487,9 @@ async fn current_task(state: &ScriptState) -> Result<StudioTaskRuntime> {
 async fn executor_agent_id(state: &ScriptState) -> Result<String> {
     current_task(state)
         .await?
-        .agents
+        .work_units
         .into_iter()
-        .find(|agent| agent.role == "executor")
-        .map(|agent| agent.agent_id)
+        .find_map(|unit| unit.agent_id)
         .context("executor is absent from task projection")
 }
 

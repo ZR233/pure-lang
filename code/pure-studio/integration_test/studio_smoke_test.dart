@@ -79,31 +79,29 @@ void main() {
     expect(find.byKey(StudioDriverKeys.composerInput), findsOneWidget);
 
     expect(
-      find.byKey(StudioDriverKeys.sessionRow('session-alt')),
+      find.byKey(StudioDriverKeys.threadRow('thread-alt')),
       findsOneWidget,
     );
-    await tester.tap(find.byKey(StudioDriverKeys.sessionRow('session-alt')));
+    await tester.tap(find.byKey(StudioDriverKeys.threadRow('thread-alt')));
     await tester.pumpAndSettle();
     expect(
       find.text('Riverpod selector boundary is isolated.'),
       findsOneWidget,
     );
 
-    await tester.tap(find.byKey(StudioDriverKeys.sessionRow('session-main')));
+    await tester.tap(find.byKey(StudioDriverKeys.threadRow('thread-main')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(StudioDriverKeys.agentSwitcher));
     await tester.pumpAndSettle();
     expect(
-      find.byKey(StudioDriverKeys.agentRow('session-agent-reviewer')),
+      find.byKey(StudioDriverKeys.agentRow('thread-reviewer')),
       findsOneWidget,
     );
-    await tester.tap(
-      find.byKey(StudioDriverKeys.agentRow('session-agent-reviewer')),
-    );
+    await tester.tap(find.byKey(StudioDriverKeys.agentRow('thread-reviewer')));
     await tester.pumpAndSettle();
     expect(find.text('Driver agent workspace selected.'), findsOneWidget);
 
-    await tester.tap(find.byKey(StudioDriverKeys.sessionRow('session-main')));
+    await tester.tap(find.byKey(StudioDriverKeys.threadRow('thread-main')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(StudioDriverKeys.settingsOpen));
     await tester.pumpAndSettle();

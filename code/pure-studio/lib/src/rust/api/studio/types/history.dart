@@ -5,142 +5,66 @@
 
 import '../../../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
-import 'session_stream.dart';
+import 'thread_stream.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`
 
-class BridgeSessionHistoryItem {
-  final PlatformInt64 sequence;
-  final String itemId;
-  final String turnId;
-  final String itemKind;
-  final BridgeSessionEventEnvelope payload;
-  final PlatformInt64 createdAt;
+class BridgeThreadTurnHistory {
+  final BridgeTurn turn;
+  final List<BridgeThreadItem> items;
 
-  const BridgeSessionHistoryItem({
-    required this.sequence,
-    required this.itemId,
-    required this.turnId,
-    required this.itemKind,
-    required this.payload,
-    required this.createdAt,
-  });
+  const BridgeThreadTurnHistory({required this.turn, required this.items});
 
   @override
-  int get hashCode =>
-      sequence.hashCode ^
-      itemId.hashCode ^
-      turnId.hashCode ^
-      itemKind.hashCode ^
-      payload.hashCode ^
-      createdAt.hashCode;
+  int get hashCode => turn.hashCode ^ items.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is BridgeSessionHistoryItem &&
+      other is BridgeThreadTurnHistory &&
           runtimeType == other.runtimeType &&
-          sequence == other.sequence &&
-          itemId == other.itemId &&
-          turnId == other.turnId &&
-          itemKind == other.itemKind &&
-          payload == other.payload &&
-          createdAt == other.createdAt;
-}
-
-class BridgeSessionHistoryTurn {
-  final PlatformInt64 turnSequence;
-  final String turnId;
-  final String status;
-  final String? modelJson;
-  final String? errorJson;
-  final PlatformInt64 startedAt;
-  final PlatformInt64? completedAt;
-  final List<BridgeSessionHistoryItem> items;
-
-  const BridgeSessionHistoryTurn({
-    required this.turnSequence,
-    required this.turnId,
-    required this.status,
-    this.modelJson,
-    this.errorJson,
-    required this.startedAt,
-    this.completedAt,
-    required this.items,
-  });
-
-  @override
-  int get hashCode =>
-      turnSequence.hashCode ^
-      turnId.hashCode ^
-      status.hashCode ^
-      modelJson.hashCode ^
-      errorJson.hashCode ^
-      startedAt.hashCode ^
-      completedAt.hashCode ^
-      items.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeSessionHistoryTurn &&
-          runtimeType == other.runtimeType &&
-          turnSequence == other.turnSequence &&
-          turnId == other.turnId &&
-          status == other.status &&
-          modelJson == other.modelJson &&
-          errorJson == other.errorJson &&
-          startedAt == other.startedAt &&
-          completedAt == other.completedAt &&
+          turn == other.turn &&
           items == other.items;
 }
 
-class LoadSessionHistoryPageRequest {
-  final String sessionId;
-  final PlatformInt64? beforeTurnSequence;
+class BridgeThreadTurnPage {
+  final List<BridgeThreadTurnHistory> turns;
+  final String? nextCursor;
+
+  const BridgeThreadTurnPage({required this.turns, this.nextCursor});
+
+  @override
+  int get hashCode => turns.hashCode ^ nextCursor.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeThreadTurnPage &&
+          runtimeType == other.runtimeType &&
+          turns == other.turns &&
+          nextCursor == other.nextCursor;
+}
+
+class ListThreadTurnsRequest {
+  final String threadId;
+  final String? cursor;
   final int limit;
 
-  const LoadSessionHistoryPageRequest({
-    required this.sessionId,
-    this.beforeTurnSequence,
+  const ListThreadTurnsRequest({
+    required this.threadId,
+    this.cursor,
     required this.limit,
   });
 
   @override
-  int get hashCode =>
-      sessionId.hashCode ^ beforeTurnSequence.hashCode ^ limit.hashCode;
+  int get hashCode => threadId.hashCode ^ cursor.hashCode ^ limit.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is LoadSessionHistoryPageRequest &&
+      other is ListThreadTurnsRequest &&
           runtimeType == other.runtimeType &&
-          sessionId == other.sessionId &&
-          beforeTurnSequence == other.beforeTurnSequence &&
+          threadId == other.threadId &&
+          cursor == other.cursor &&
           limit == other.limit;
-}
-
-class LoadSessionHistoryPageResponse {
-  final List<BridgeSessionHistoryTurn> turns;
-  final PlatformInt64? nextBeforeTurnSequence;
-  final bool hasMore;
-
-  const LoadSessionHistoryPageResponse({
-    required this.turns,
-    this.nextBeforeTurnSequence,
-    required this.hasMore,
-  });
-
-  @override
-  int get hashCode =>
-      turns.hashCode ^ nextBeforeTurnSequence.hashCode ^ hasMore.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is LoadSessionHistoryPageResponse &&
-          runtimeType == other.runtimeType &&
-          turns == other.turns &&
-          nextBeforeTurnSequence == other.nextBeforeTurnSequence &&
-          hasMore == other.hasMore;
 }

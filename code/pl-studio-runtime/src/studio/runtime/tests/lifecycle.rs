@@ -31,7 +31,7 @@ async fn initialize_runtime_isolates_unavailable_registered_project() {
     assert_eq!(issue.category, StudioRecoveryIssueCategory::Repository);
     assert_eq!(issue.action, StudioRecoveryIssueAction::RemoveProject);
     assert_eq!(issue.project_id.as_deref(), Some(project.id.as_str()));
-    assert_eq!(issue.session_id, None);
+    assert_eq!(issue.thread_id, None);
     assert_eq!(issue.task_run_id, None);
     assert!(issue.message.contains("Project workspace is unavailable"));
     assert!(
@@ -91,6 +91,56 @@ async fn open_project_validates_path_before_persisting() {
 }
 
 #[tokio::test]
+async fn archive_project_refuses_a_durable_active_task() {
+    use crate::studio::task_coordinator::{CreateTaskRun, TaskRunPhase};
+
+    let store = StudioStore::open_memory().await.unwrap();
+    let project = store
+        .upsert_project("C:/work/archive-active-task")
+        .await
+        .unwrap();
+    let thread = store
+        .create_thread(&project.id, "Active task", StudioMode::Task)
+        .await
+        .unwrap();
+    store
+        .create_task_run_with_lease(CreateTaskRun {
+            root_thread_id: thread.id.clone(),
+            phase: TaskRunPhase::Planning,
+            plan: "# Plan".to_string(),
+            workspace_root: "C:/work/archive-active-task".to_string(),
+            git_common_dir: "C:/work/archive-active-task/.git".to_string(),
+            branch: "main".to_string(),
+            head_commit: "1111111".to_string(),
+        })
+        .await
+        .unwrap();
+    let home = std::env::temp_dir().join(format!(
+        "pure-archive-active-task-home-{}",
+        std::process::id()
+    ));
+    let runtime = StudioRuntime::new(
+        store.clone(),
+        ConfigStore::new(crate::config::ConfigPaths::from_home(&home)),
+    );
+
+    let error = runtime.archive_project(&project.id).await.unwrap_err();
+
+    assert!(error.to_string().contains("project has an active task"));
+    assert_eq!(store.list_projects().await.unwrap(), vec![project]);
+    assert_eq!(
+        store
+            .read_thread(&thread.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .visibility,
+        crate::studio::records::ThreadVisibility::Active
+    );
+    let _ = tokio::fs::remove_dir_all(home).await;
+}
+
+#[tokio::test]
 async fn update_shutdown_refuses_active_task_and_stops_idle_runtime() {
     use crate::studio::task_coordinator::{CreateTaskRun, TaskRunPhase};
 
@@ -104,12 +154,12 @@ async fn update_shutdown_refuses_active_task_and_stops_idle_runtime() {
         .await
         .unwrap();
     let session = busy_store
-        .create_session(&project.id, "Update busy", StudioMode::Task)
+        .create_thread(&project.id, "Update busy", StudioMode::Task)
         .await
         .unwrap();
     busy_store
         .create_task_run_with_lease(CreateTaskRun {
-            session_id: session.id,
+            root_thread_id: session.id,
             phase: TaskRunPhase::Planning,
             plan: "# Plan".to_string(),
             workspace_root: "C:/work/update-busy".to_string(),
@@ -200,7 +250,7 @@ async fn assert_failed_task_preflight_keeps_confirmation_pending(
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project(&repository).await.unwrap();
     let session = store
-        .create_session(&project.id, "Task", StudioMode::Task)
+        .create_thread(&project.id, "Task", StudioMode::Task)
         .await
         .unwrap();
     let interaction = pending_interaction(
@@ -250,7 +300,7 @@ async fn initialize_runtime_recovers_user_input_and_cancels_tool_approval() {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project("C:/work/recovered").await.unwrap();
     let session = store
-        .create_session(&project.id, "Recovered", StudioMode::Simple)
+        .create_thread(&project.id, "Recovered", StudioMode::Simple)
         .await
         .unwrap();
     store
@@ -323,29 +373,14 @@ async fn initialize_runtime_recovers_user_input_and_cancels_tool_approval() {
     assert_eq!(ask.status, InteractionStatus::Pending);
     assert_eq!(approval.status, InteractionStatus::Cancelled);
     assert_eq!(plan.status, InteractionStatus::Pending);
-    let canonical = runtime.session_event_snapshot(&session.id).await.unwrap();
-    let mut subscription = runtime
-        .subscribe_session_events(pl_protocol::SessionSubscriptionRequest {
-            session_id: session.id.clone(),
-            after_sequence: Some(0),
-        })
-        .await
-        .unwrap();
-    let mut cancelled_interactions = 0;
-    for _ in 0..canonical.through_sequence {
-        let Some(pl_protocol::SessionStreamFrame::Event { event }) = subscription.recv().await
-        else {
-            continue;
-        };
-        if matches!(
-            &event.kind,
-            pl_protocol::SessionEventKind::InteractionChanged { event }
-                if event.interaction.status == InteractionStatus::Cancelled
-        ) {
-            cancelled_interactions += 1;
-        }
-    }
-    assert_eq!(cancelled_interactions, 1);
+    let canonical = runtime.thread_snapshot(&session.id).await.unwrap();
+    assert_eq!(canonical.interactions.len(), 2);
+    assert!(canonical.interactions.iter().all(|interaction| {
+        matches!(
+            interaction.kind,
+            InteractionKind::UserInput | InteractionKind::PlanConfirmation
+        ) && interaction.status == InteractionStatus::Pending
+    }));
     let _ = tokio::fs::remove_dir_all(home).await;
 }
 
@@ -365,7 +400,7 @@ async fn detached_user_input_resolution_queues_one_hidden_explicit_input() {
     let runtime = StudioRuntime::new(store.clone(), config_store);
     let project = runtime.open_project(&workspace).await.unwrap();
     let session = store
-        .create_session(&project.id, "Detached input", StudioMode::Simple)
+        .create_thread(&project.id, "Detached input", StudioMode::Simple)
         .await
         .unwrap();
     let interaction = pending_interaction(
@@ -407,25 +442,26 @@ async fn detached_user_input_resolution_queues_one_hidden_explicit_input() {
         .database()
         .query_one_raw(Statement::from_sql_and_values(
             DatabaseBackend::Sqlite,
-            "SELECT input_json FROM agent_active_inputs WHERE agent_id = ?",
+            "SELECT mail_id, content, metadata_json, presentation
+             FROM thread_inputs WHERE thread_id = ? AND state = 'active'",
             [owner.to_string().into()],
         ))
         .await
         .unwrap()
         .expect("hidden explicit input should be active");
-    let input_json: String = row.try_get("", "input_json").unwrap();
-    let input: serde_json::Value = serde_json::from_str(&input_json).unwrap();
     assert_eq!(
-        input["mailId"],
+        row.try_get::<String>("", "mail_id").unwrap(),
         format!("interaction-resolution:{}", interaction.interaction_id)
     );
-    assert_eq!(input["presentation"]["type"], "hidden");
+    assert_eq!(row.try_get::<String>("", "presentation").unwrap(), "hidden");
+    let metadata: serde_json::Value =
+        serde_json::from_str(&row.try_get::<String>("", "metadata_json").unwrap()).unwrap();
     assert_eq!(
-        input["metadata"]["interactionResolutionId"],
+        metadata["interactionResolutionId"],
         interaction.interaction_id
     );
     let message: serde_json::Value =
-        serde_json::from_str(input["message"].as_str().unwrap()).unwrap();
+        serde_json::from_str(&row.try_get::<String>("", "content").unwrap()).unwrap();
     assert_eq!(message["type"], "studioInteractionResolution");
     assert_eq!(message["interactionId"], interaction.interaction_id);
     assert_eq!(message["originTurnId"], interaction.scope.turn_id);
@@ -435,12 +471,15 @@ async fn detached_user_input_resolution_queues_one_hidden_explicit_input() {
     );
     assert!(
         runtime
-            .session_event_snapshot(&session.id)
+            .thread_snapshot(&session.id)
             .await
             .unwrap()
-            .messages
+            .items
             .iter()
-            .all(|message| message.role != crate::SessionMessageRole::User)
+            .all(|item| !matches!(
+                &item.content,
+                pl_protocol::ThreadItemContent::UserMessage { .. }
+            ))
     );
 
     runtime
@@ -451,7 +490,8 @@ async fn detached_user_input_resolution_queues_one_hidden_explicit_input() {
         .database()
         .query_one_raw(Statement::from_sql_and_values(
             DatabaseBackend::Sqlite,
-            "SELECT COUNT(*) AS count FROM agent_active_inputs WHERE agent_id = ?",
+            "SELECT COUNT(*) AS count FROM thread_inputs
+             WHERE thread_id = ? AND state = 'active'",
             [owner.to_string().into()],
         ))
         .await

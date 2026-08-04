@@ -2,7 +2,7 @@ use super::super::state::{AgentRuntimeError, unix_timestamp};
 use super::super::{
     AgentActivityState, AgentCurrentSessionSubmitRequest, AgentLifecycleState,
     AgentRuntimeEventKind, AgentRuntimeHost, AgentRuntimeResult, AgentSubmitRequest,
-    MailboxDeliveryState, PendingAgentInput, TurnId,
+    AgentTurnSubmitPolicy, DurableMailboxEnvelope, MailboxDeliveryState, TurnId,
 };
 use super::AgentLoop;
 
@@ -20,11 +20,11 @@ where
                 self.state.snapshot.lifecycle,
             ));
         }
-        if self.state.session.id != request.session_id {
-            return Err(AgentRuntimeError::SessionMismatch {
+        if self.state.snapshot.identity.id != request.thread_id {
+            return Err(AgentRuntimeError::ThreadMismatch {
                 agent_id: self.state.snapshot.identity.id.clone(),
-                expected: self.state.session.id.clone(),
-                actual: request.session_id,
+                expected: self.state.snapshot.identity.id.clone(),
+                actual: request.thread_id,
             });
         }
         if let Some(existing) = request.mail_id.as_deref().and_then(|mail_id| {
@@ -38,9 +38,24 @@ where
             return Ok(existing);
         }
         let live_turn = self.active.as_ref().and_then(|active| {
-            (!active.cancelling && active.session_id == request.session_id)
+            (!active.cancelling && active.thread_id == request.thread_id)
                 .then(|| (active.turn_id.clone(), active.steer_sender.clone()))
         });
+        match request.turn_policy {
+            AgentTurnSubmitPolicy::StartOnly if self.active.is_some() => {
+                return Err(AgentRuntimeError::InvalidInput(
+                    "startTurn requires an idle Thread".to_string(),
+                ));
+            }
+            AgentTurnSubmitPolicy::SteerOnly if live_turn.is_none() => {
+                return Err(AgentRuntimeError::InvalidInput(
+                    "steerTurn requires an active Turn".to_string(),
+                ));
+            }
+            AgentTurnSubmitPolicy::StartOrSteer
+            | AgentTurnSubmitPolicy::StartOnly
+            | AgentTurnSubmitPolicy::SteerOnly => {}
+        }
         let turn_id = live_turn
             .as_ref()
             .map_or_else(TurnId::generate, |(turn_id, _)| turn_id.clone());
@@ -48,10 +63,10 @@ where
             .mail_id
             .unwrap_or_else(|| format!("mail:{}", TurnId::generate()));
         let mut next = self.state.clone();
-        let mut input = PendingAgentInput {
+        let mut input = DurableMailboxEnvelope {
             mail_id,
             turn_id: turn_id.clone(),
-            session_id: request.session_id,
+            thread_id: request.thread_id,
             message: request.message,
             presentation: request.presentation,
             metadata: request.metadata,
@@ -126,11 +141,12 @@ where
                 || self.state.snapshot.identity.depth > 0
         );
         self.submit(AgentSubmitRequest {
-            session_id: self.state.session.id.clone(),
+            thread_id: self.state.snapshot.identity.id.clone(),
             message: request.message,
             presentation: request.presentation,
             metadata: request.metadata,
             mail_id: request.mail_id,
+            turn_policy: AgentTurnSubmitPolicy::StartOrSteer,
         })
         .await
     }

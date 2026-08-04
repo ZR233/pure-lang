@@ -1,7 +1,7 @@
 class StudioAgentView {
   const StudioAgentView({
     required this.id,
-    required this.sessionId,
+    required this.threadId,
     required this.path,
     required this.role,
     required this.task,
@@ -12,7 +12,7 @@ class StudioAgentView {
     this.depth = 0,
     this.error,
     this.reason,
-    this.rootSessionId,
+    this.rootThreadId,
     this.lifecycle,
     this.activity,
     this.progress,
@@ -20,7 +20,7 @@ class StudioAgentView {
   });
 
   final String id;
-  final String sessionId;
+  final String threadId;
   final String path;
   final String? parentPath;
   final String role;
@@ -30,7 +30,7 @@ class StudioAgentView {
   final int depth;
   final String? error;
   final String? reason;
-  final String? rootSessionId;
+  final String? rootThreadId;
   final String? lifecycle;
   final String? activity;
   final AgentProgressView? progress;

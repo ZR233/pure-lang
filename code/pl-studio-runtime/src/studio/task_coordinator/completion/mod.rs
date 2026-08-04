@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 use super::git::changed_files_between;
 use super::merge::{ProductionMergeVerifier, select_merge_verification_commands};
 use super::{
-    AgentOutcomeStatus, MergeStatus, TaskCoordinator, TaskRunPhase, TaskRunRecord, TaskStopOrigin,
-    TaskStopReason,
+    MergeStatus, TaskCoordinator, TaskRunPhase, TaskRunRecord, TaskStopOrigin, TaskStopReason,
+    ThreadExecutionStatus,
 };
 use crate::tool::{
     RegisteredTool, ToolExecutionResult, ToolInputSchemaField, strict_tool_input_schema,
@@ -43,19 +43,19 @@ pub(crate) struct TaskStopOutput {
 impl TaskCoordinator {
     pub(crate) fn task_complete_tool(
         self: &Arc<Self>,
-        session_id: impl Into<String>,
+        thread_id: impl Into<String>,
     ) -> RegisteredTool {
         let coordinator = self.clone();
-        let session_id = session_id.into();
+        let thread_id = thread_id.into();
         RegisteredTool::from_typed_fallible_execution_result(
             "task_complete",
             "Complete a fully merged, design-consistent and reviewer-approved task.",
             strict_tool_input_schema([]),
             move |_: CompleteTaskInput, _context| {
                 let coordinator = coordinator.clone();
-                let session_id = session_id.clone();
+                let thread_id = thread_id.clone();
                 async move {
-                    let output = coordinator.complete_task(&session_id).await?;
+                    let output = coordinator.complete_task(&thread_id).await?;
                     ToolExecutionResult::<serde_json::Value>::json(output)
                         .map(ToolExecutionResult::ending_turn)
                         .map_err(anyhow::Error::from)
@@ -67,11 +67,11 @@ impl TaskCoordinator {
 
     pub(crate) fn task_stop_tool(
         self: &Arc<Self>,
-        session_id: impl Into<String>,
+        thread_id: impl Into<String>,
         runtime: AgentRuntimeHandle,
     ) -> RegisteredTool {
         let coordinator = self.clone();
-        let session_id = session_id.into();
+        let thread_id = thread_id.into();
         RegisteredTool::from_typed_fallible_execution_result(
             "task_stop",
             "Stop the current task after safely settling agents and branch state.",
@@ -81,7 +81,7 @@ impl TaskCoordinator {
             )]),
             move |input: StopTaskInput, _context| {
                 let coordinator = coordinator.clone();
-                let session_id = session_id.clone();
+                let thread_id = thread_id.clone();
                 let runtime = runtime.clone();
                 async move {
                     let Some(reason) = TaskStopReason::new(input.reason) else {
@@ -89,7 +89,7 @@ impl TaskCoordinator {
                     };
                     let output = coordinator
                         .stop_task(
-                            &session_id,
+                            &thread_id,
                             &runtime,
                             TaskStopOrigin::PlannerDecision,
                             reason,
@@ -106,7 +106,7 @@ impl TaskCoordinator {
 
     pub(crate) async fn stop_task(
         &self,
-        session_id: &str,
+        thread_id: &str,
         runtime: &AgentRuntimeHandle,
         origin: TaskStopOrigin,
         reason: TaskStopReason,
@@ -117,24 +117,24 @@ impl TaskCoordinator {
             self.ensure_branch_mutation_guard(&branch_guard)?;
             let _allocation_guard = self.allocation_lock.lock().await;
             let run = self
-                .preflight_task_stop_request_locked(session_id, &branch_guard)
+                .preflight_task_stop_request_locked(thread_id, &branch_guard)
                 .await?;
             self.store
                 .request_task_stop(&run.id, &run.expected_head, origin, &reason)
                 .await?
         };
-        interrupt_task_agents(runtime, session_id, origin).await?;
+        interrupt_task_agents(runtime, thread_id, origin).await?;
         wait_for_terminal_outcomes(self, &requested.id, &mut terminal_facts).await?;
         let run = self
             .store
             .read_task_run(&requested.id)
             .await?
             .context("task run disappeared after stop request")?;
-        if let Some(outcome) = self.awaiting_completion_outcome(&run).await? {
+        if let Some(executor_thread_id) = self.awaiting_completion_executor(&run).await? {
             return Ok(TaskStopOutput {
                 status: "deferred",
                 run,
-                deferred_agent_id: Some(outcome.agent_id),
+                deferred_agent_id: Some(executor_thread_id),
             });
         }
         let run = {
@@ -142,7 +142,7 @@ impl TaskCoordinator {
             self.ensure_branch_mutation_guard(&branch_guard)?;
             let _allocation_guard = self.allocation_lock.lock().await;
             let run = self
-                .preflight_task_stop_locked(session_id, &branch_guard)
+                .preflight_task_stop_locked(thread_id, &branch_guard)
                 .await?;
             self.store
                 .begin_task_stop(&run.id, &run.expected_head, requested.task_generation)
@@ -151,7 +151,7 @@ impl TaskCoordinator {
         self.store
             .settle_agents_for_task_stop(&run.id, requested.task_generation, reason.as_str())
             .await?;
-        close_task_children(runtime, session_id).await?;
+        close_task_children(runtime, thread_id).await?;
         let branch_guard = self.lock_branch_mutation().await;
         let stopped = self
             .stop_task_locked(
@@ -168,12 +168,12 @@ impl TaskCoordinator {
         })
     }
 
-    async fn complete_task(&self, session_id: &str) -> Result<TaskCompletionOutput> {
+    async fn complete_task(&self, thread_id: &str) -> Result<TaskCompletionOutput> {
         let guard = self.lock_branch_mutation().await;
         self.ensure_branch_mutation_guard(&guard)?;
         let run = self
             .store
-            .read_active_task_run_for_session(session_id)
+            .read_active_task_run_for_root_thread(thread_id)
             .await?;
         if run.phase != TaskRunPhase::Reviewing {
             bail!("task_complete requires reviewing phase");
@@ -205,7 +205,7 @@ impl TaskCoordinator {
         };
         let completed = self
             .store
-            .complete_reviewed_task(session_id, &run.expected_head, &summary)
+            .complete_reviewed_task(thread_id, &run.expected_head, &summary)
             .await?;
         self.release_owned_process_lease(&run.id);
         Ok(TaskCompletionOutput {
@@ -216,20 +216,20 @@ impl TaskCoordinator {
 
     pub(super) async fn preflight_task_stop_locked(
         &self,
-        session_id: &str,
+        thread_id: &str,
         guard: &super::BranchMutationGuard<'_>,
     ) -> Result<TaskRunRecord> {
         self.ensure_branch_mutation_guard(guard)?;
         let run = self
             .store
-            .read_active_task_run_for_session(session_id)
+            .read_active_task_run_for_root_thread(thread_id)
             .await?;
         self.validate_stop_request(&run).await?;
-        if let Some(outcome) = self.awaiting_completion_outcome(&run).await? {
+        if let Some(executor_thread_id) = self.awaiting_completion_executor(&run).await? {
             bail!(
                 "task_stop deferred: executor {} finished without report_completion; \
                  request an explicit completion before stopping the task",
-                outcome.agent_id
+                executor_thread_id
             );
         }
         Ok(run)
@@ -237,13 +237,13 @@ impl TaskCoordinator {
 
     async fn preflight_task_stop_request_locked(
         &self,
-        session_id: &str,
+        thread_id: &str,
         guard: &super::BranchMutationGuard<'_>,
     ) -> Result<TaskRunRecord> {
         self.ensure_branch_mutation_guard(guard)?;
         let run = self
             .store
-            .read_active_task_run_for_session(session_id)
+            .read_active_task_run_for_root_thread(thread_id)
             .await?;
         self.validate_stop_request(&run).await?;
         Ok(run)
@@ -263,10 +263,10 @@ impl TaskCoordinator {
             .await?
             .context("task run not found while stopping")?;
         self.validate_stop_request(&run).await?;
-        if let Some(outcome) = self.awaiting_completion_outcome(&run).await? {
+        if let Some(executor_thread_id) = self.awaiting_completion_executor(&run).await? {
             bail!(
                 "task_stop deferred: executor {} still requires report_completion",
-                outcome.agent_id
+                executor_thread_id
             );
         }
         let has_source_merge = self
@@ -298,10 +298,7 @@ impl TaskCoordinator {
         Ok(cancelled)
     }
 
-    async fn awaiting_completion_outcome(
-        &self,
-        run: &TaskRunRecord,
-    ) -> Result<Option<super::AgentOutcomeRecord>> {
+    async fn awaiting_completion_executor(&self, run: &TaskRunRecord) -> Result<Option<String>> {
         let work_unit = self
             .store
             .list_work_units(&run.id)
@@ -311,15 +308,7 @@ impl TaskCoordinator {
         let Some(work_unit) = work_unit else {
             return Ok(None);
         };
-        Ok(self
-            .store
-            .list_agent_outcomes(&run.id)
-            .await?
-            .into_iter()
-            .find(|outcome| {
-                outcome.role == "executor"
-                    && outcome.work_unit_id.as_deref() == Some(work_unit.id.as_str())
-            }))
+        Ok(work_unit.executor_thread_id)
     }
 
     async fn validate_stop_request(&self, run: &TaskRunRecord) -> Result<()> {
@@ -353,10 +342,10 @@ impl TaskCoordinator {
 
 async fn interrupt_task_agents(
     runtime: &AgentRuntimeHandle,
-    session_id: &str,
+    thread_id: &str,
     origin: TaskStopOrigin,
 ) -> Result<()> {
-    let root = crate::studio::agent_host::root_agent_id(session_id);
+    let root = crate::studio::agent_host::root_agent_id(thread_id);
     let children = runtime
         .list()
         .await
@@ -391,17 +380,29 @@ async fn wait_for_terminal_outcomes(
 ) -> Result<()> {
     tokio::time::timeout(std::time::Duration::from_secs(10), async {
         loop {
-            let active = coordinator
+            let active_executor = coordinator
                 .store
-                .list_agent_outcomes(task_run_id)
+                .list_work_units(task_run_id)
                 .await?
                 .into_iter()
-                .any(|outcome| {
+                .any(|unit| {
                     matches!(
-                        outcome.status,
-                        AgentOutcomeStatus::Queued | AgentOutcomeStatus::Running
+                        unit.execution_status,
+                        ThreadExecutionStatus::Queued | ThreadExecutionStatus::Running
                     )
                 });
+            let active_reviewer = coordinator
+                .store
+                .list_review_rounds(task_run_id)
+                .await?
+                .into_iter()
+                .any(|round| {
+                    matches!(
+                        round.reviewer_status,
+                        ThreadExecutionStatus::Queued | ThreadExecutionStatus::Running
+                    )
+                });
+            let active = active_executor || active_reviewer;
             if !active {
                 return Ok::<(), anyhow::Error>(());
             }
@@ -419,8 +420,8 @@ async fn wait_for_terminal_outcomes(
     Ok(())
 }
 
-async fn close_task_children(runtime: &AgentRuntimeHandle, session_id: &str) -> Result<()> {
-    let root = crate::studio::agent_host::root_agent_id(session_id);
+async fn close_task_children(runtime: &AgentRuntimeHandle, thread_id: &str) -> Result<()> {
+    let root = crate::studio::agent_host::root_agent_id(thread_id);
     let children = runtime
         .list()
         .await

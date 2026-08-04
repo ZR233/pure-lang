@@ -3,9 +3,9 @@ use crate::api::studio::types::{
     BridgeMcpHealthDto, BridgeMcpServerDto, BridgeRecoveryCleanupPreviewDto,
     BridgeRecoveryCleanupResourceDto, BridgeRecoveryIssueAction, BridgeRecoveryIssueCategory,
     BridgeRecoveryIssueScope, BridgeRecoveryResourcePresence, BridgeRuntimeStatus,
-    BridgeStudioRecoveryIssueDto, BridgeTaskAgentDto, BridgeTaskCompletionDto,
-    BridgeTaskDesignReferenceDto, BridgeTaskMergeDto, BridgeTaskReviewDto,
-    BridgeTaskReviewFindingDto, BridgeTaskRuntimeDto, BridgeTaskWorkUnitDto, RuntimeSnapshot,
+    BridgeStudioRecoveryIssueDto, BridgeTaskCompletionDto, BridgeTaskDesignReferenceDto,
+    BridgeTaskMergeDto, BridgeTaskReviewDto, BridgeTaskReviewFindingDto, BridgeTaskRuntimeDto,
+    BridgeTaskWorkUnitDto, RuntimeSnapshot,
 };
 use pl_studio_runtime::{
     StudioAgentDirectoryEntry, StudioLspHealth, StudioMcpHealth, StudioRecoveryCleanupPreview,
@@ -33,7 +33,7 @@ pub(crate) fn runtime_snapshot(snapshot: CoreRuntimeSnapshot) -> RuntimeSnapshot
             .active_turns
             .into_iter()
             .map(|turn| BridgeActiveTurn {
-                session_id: turn.session_id,
+                thread_id: turn.thread_id,
                 turn_id: turn.turn_id,
             })
             .collect(),
@@ -73,15 +73,15 @@ pub(crate) fn bridge_recovery_issue(issue: StudioRecoveryIssue) -> BridgeStudioR
         },
         available_actions: vec![match issue.action {
             pl_studio_runtime::StudioRecoveryIssueAction::Retry => BridgeRecoveryIssueAction::Retry,
-            pl_studio_runtime::StudioRecoveryIssueAction::CleanupSession => {
-                BridgeRecoveryIssueAction::CleanupSession
+            pl_studio_runtime::StudioRecoveryIssueAction::CleanupThread => {
+                BridgeRecoveryIssueAction::CleanupThread
             }
             pl_studio_runtime::StudioRecoveryIssueAction::RemoveProject => {
                 BridgeRecoveryIssueAction::RemoveProject
             }
         }],
         project_id: issue.project_id,
-        session_id: issue.session_id,
+        thread_id: issue.thread_id,
         task_run_id: issue.task_run_id,
         detail: issue.message,
     }
@@ -95,7 +95,7 @@ pub(crate) fn bridge_recovery_cleanup_preview(
         expected_revision: preview.expected_revision,
         scope: bridge_recovery_issue_scope(preview.scope),
         project_id: preview.project_id,
-        session_id: preview.session_id,
+        thread_id: preview.thread_id,
         detail: preview.message,
         resources: preview
             .resources
@@ -135,7 +135,7 @@ fn bridge_recovery_issue_scope(
             BridgeRecoveryIssueScope::Application
         }
         pl_studio_runtime::StudioRecoveryIssueScope::Project => BridgeRecoveryIssueScope::Project,
-        pl_studio_runtime::StudioRecoveryIssueScope::Session => BridgeRecoveryIssueScope::Session,
+        pl_studio_runtime::StudioRecoveryIssueScope::Thread => BridgeRecoveryIssueScope::Thread,
     }
 }
 
@@ -161,31 +161,6 @@ pub(crate) fn bridge_task_runtime(
                 worktree_path: unit.worktree_path,
                 branch: unit.branch,
                 agent_id: unit.agent_id,
-            })
-            .collect(),
-        agents: task
-            .agents
-            .into_iter()
-            .map(|agent| BridgeTaskAgentDto {
-                agent_id: agent.agent_id,
-                role: agent.role,
-                status: agent.status,
-                initiated_by: agent.initiated_by,
-                requested_by_call_id: agent.requested_by_call_id,
-                summary: agent.summary,
-                error: agent.error,
-                head_commit: agent.head_commit,
-                lifecycle: agent.lifecycle,
-                activity: agent.activity,
-                progress: agent.progress.map(|progress| BridgeAgentProgressDto {
-                    stage: progress.stage,
-                    summary: progress.summary,
-                    next_step: progress.next_step,
-                    revision: progress.revision,
-                    updated_at: progress.updated_at,
-                }),
-                updated_at: agent.updated_at,
-                summary_age_seconds: agent.summary_age_seconds,
             })
             .collect(),
         completions: task
@@ -274,8 +249,8 @@ pub(crate) fn bridge_agent_directory_entry(
 ) -> BridgeAgentDirectoryEntryDto {
     BridgeAgentDirectoryEntryDto {
         id: agent.id,
-        session_id: agent.session_id,
-        root_session_id: agent.root_session_id,
+        thread_id: agent.thread_id,
+        root_thread_id: agent.root_thread_id,
         path: agent.path,
         parent_path: agent.parent_path,
         role: agent.role,

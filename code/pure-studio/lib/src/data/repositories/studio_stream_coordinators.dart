@@ -1,7 +1,5 @@
 import 'dart:async';
 
-import 'package:flutter/scheduler.dart';
-
 import '../frb/studio_api.dart';
 
 class ProductStreamCoordinator {
@@ -22,19 +20,15 @@ class ProductStreamCoordinator {
   }
 }
 
-class SessionStreamCoordinator {
-  SessionStreamCoordinator(this._api, this._onFrame, this._onDisconnected);
+class ThreadStreamCoordinator {
+  ThreadStreamCoordinator(this._api, this._onFrame, this._onDisconnected);
 
   final StudioApi _api;
-  final void Function(
-    SessionStreamFrame frame,
-    String sessionId,
-    int generation,
-  )
+  final void Function(ThreadStreamFrame frame, String threadId, int generation)
   _onFrame;
-  final void Function(String sessionId, int generation) _onDisconnected;
+  final void Function(String threadId, int generation) _onDisconnected;
 
-  StreamSubscription<SessionStreamFrame>? _subscription;
+  StreamSubscription<ThreadStreamFrame>? _subscription;
   Timer? _resubscribeTimer;
   Future<void> _switchBarrier = Future<void>.value();
   int _generation = 0;
@@ -42,7 +36,7 @@ class SessionStreamCoordinator {
 
   int get generation => _generation;
 
-  Future<void> switchSession(String? sessionId, {int? afterSequence}) {
+  int switchThread(String? threadId) {
     _resubscribeTimer?.cancel();
     _resubscribeTimer = null;
     final generation = ++_generation;
@@ -50,35 +44,30 @@ class SessionStreamCoordinator {
       final oldSubscription = _subscription;
       _subscription = null;
       unawaited(oldSubscription?.cancel());
-      if (_disposed || generation != _generation || sessionId == null) {
-        return;
-      }
+      if (_disposed || generation != _generation || threadId == null) return;
       _subscription = _api
-          .subscribeSessionEvents(sessionId, afterSequence: afterSequence)
+          .subscribeThread(threadId)
           .listen(
-            (frame) => _onFrame(frame, sessionId, generation),
-            onError: (_, _) => _onDisconnected(sessionId, generation),
-            onDone: () => _onDisconnected(sessionId, generation),
+            (frame) => _onFrame(frame, threadId, generation),
+            onError: (_, _) => _onDisconnected(threadId, generation),
+            onDone: () => _onDisconnected(threadId, generation),
           );
     });
     _switchBarrier = operation.then<void>((_) {}, onError: (_, _) {});
-    return operation;
+    return generation;
   }
 
-  void scheduleResync({
-    required String sessionId,
+  void scheduleResubscribe({
+    required String threadId,
     required int generation,
     required bool Function() isCurrent,
+    required void Function() resubscribe,
   }) {
-    if (_disposed || generation != _generation || !isCurrent()) {
-      return;
-    }
+    if (_disposed || generation != _generation || !isCurrent()) return;
     _resubscribeTimer?.cancel();
     _resubscribeTimer = Timer(const Duration(milliseconds: 150), () {
-      if (_disposed || generation != _generation || !isCurrent()) {
-        return;
-      }
-      unawaited(switchSession(sessionId));
+      if (_disposed || generation != _generation || !isCurrent()) return;
+      resubscribe();
     });
   }
 
@@ -91,46 +80,5 @@ class SessionStreamCoordinator {
     final subscription = _subscription;
     _subscription = null;
     await subscription?.cancel();
-  }
-}
-
-class PartDeltaBatcher {
-  PartDeltaBatcher(
-    this._onFlush, {
-    void Function(FrameCallback callback)? scheduleFrame,
-  }) : _scheduleFrame =
-           scheduleFrame ?? SchedulerBinding.instance.scheduleFrameCallback;
-
-  final void Function(List<StudioBridgeEvent> events) _onFlush;
-  final void Function(FrameCallback callback) _scheduleFrame;
-  final List<StudioBridgeEvent> _pending = [];
-  bool _frameScheduled = false;
-
-  void add(StudioBridgeEvent event) {
-    _pending.add(event);
-    if (_frameScheduled) {
-      return;
-    }
-    _frameScheduled = true;
-    _scheduleFrame((_) {
-      _frameScheduled = false;
-      flush();
-    });
-  }
-
-  void flush() {
-    if (_pending.isEmpty) {
-      _frameScheduled = false;
-      return;
-    }
-    final events = List<StudioBridgeEvent>.of(_pending);
-    _pending.clear();
-    _frameScheduled = false;
-    _onFlush(events);
-  }
-
-  void dispose() {
-    _pending.clear();
-    _frameScheduled = false;
   }
 }

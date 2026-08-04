@@ -13,14 +13,12 @@ use crate::studio::task_coordinator::{
 impl TaskCoordinator {
     pub(crate) async fn verify_active_conflict(
         &self,
-        session_id: &str,
+        thread_id: &str,
         merge_id: &str,
     ) -> Result<ConflictVerificationOutput> {
         let guard = self.lock_branch_mutation().await;
         self.ensure_branch_mutation_guard(&guard)?;
-        let (scope, unmerged) = self
-            .load_active_conflict_scope(session_id, merge_id)
-            .await?;
+        let (scope, unmerged) = self.load_active_conflict_scope(thread_id, merge_id).await?;
         let manifest = scope
             .merge
             .evidence

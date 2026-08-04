@@ -2,7 +2,6 @@ mod allocation;
 mod completion;
 mod discard;
 mod merge;
-mod outcome;
 mod recovery;
 mod review;
 mod work_completion;
@@ -27,11 +26,11 @@ impl StudioStore {
         input: CreateTaskRun,
     ) -> Result<(TaskRunRecord, BranchLeaseRecord)> {
         validate_create_task_run(&input)?;
-        let Some(session) = self.read_session(&input.session_id).await? else {
-            bail!("task session not found or uses a legacy mode");
+        let Some(root_thread) = self.read_thread(&input.root_thread_id).await? else {
+            bail!("task root Thread not found or uses a legacy mode");
         };
-        if session.mode != "task" {
-            bail!("task coordinator requires a task mode session");
+        if root_thread.mode != "task" {
+            bail!("task coordinator requires a task mode root Thread");
         }
 
         let tx = self.db.begin().await?;
@@ -39,7 +38,7 @@ impl StudioStore {
         let task_run_id = new_id("task-run");
         let task_model = entities::task_run::ActiveModel {
             id: Set(task_run_id.clone()),
-            session_id: Set(input.session_id),
+            root_thread_id: Set(input.root_thread_id),
             phase: Set(input.phase.as_str().to_string()),
             plan: Set(input.plan),
             workspace_root: Set(input.workspace_root),
@@ -107,12 +106,12 @@ impl StudioStore {
         &self,
         project_id: &str,
     ) -> Result<Vec<TaskRunRecord>> {
-        let session_ids = self.list_project_session_ids(project_id).await?;
-        if session_ids.is_empty() {
+        let thread_ids = self.list_project_thread_ids(project_id).await?;
+        if thread_ids.is_empty() {
             return Ok(Vec::new());
         }
         let models = entities::task_run::Entity::find()
-            .filter(entities::task_run::Column::SessionId.is_in(session_ids))
+            .filter(entities::task_run::Column::RootThreadId.is_in(thread_ids))
             .order_by_asc(entities::task_run::Column::CreatedAt)
             .order_by_asc(entities::task_run::Column::Id)
             .all(&self.db)
@@ -120,21 +119,21 @@ impl StudioStore {
         models.into_iter().map(task_run_record).collect()
     }
 
-    pub(crate) async fn read_active_task_run_for_session(
+    pub(crate) async fn read_active_task_run_for_root_thread(
         &self,
-        session_id: &str,
+        root_thread_id: &str,
     ) -> Result<TaskRunRecord> {
-        self.find_active_task_run_for_session(session_id)
+        self.find_active_task_run_for_root_thread(root_thread_id)
             .await?
-            .context("active task run not found for this session")
+            .context("active task run not found for this root Thread")
     }
 
-    pub(crate) async fn find_latest_task_run_for_session(
+    pub(crate) async fn find_latest_task_run_for_root_thread(
         &self,
-        session_id: &str,
+        root_thread_id: &str,
     ) -> Result<Option<TaskRunRecord>> {
         entities::task_run::Entity::find()
-            .filter(entities::task_run::Column::SessionId.eq(session_id.to_string()))
+            .filter(entities::task_run::Column::RootThreadId.eq(root_thread_id.to_string()))
             .order_by_desc(entities::task_run::Column::CreatedAt)
             .order_by_desc(entities::task_run::Column::Id)
             .one(&self.db)
@@ -143,12 +142,12 @@ impl StudioStore {
             .transpose()
     }
 
-    pub(crate) async fn find_active_task_run_for_session(
+    pub(crate) async fn find_active_task_run_for_root_thread(
         &self,
-        session_id: &str,
+        root_thread_id: &str,
     ) -> Result<Option<TaskRunRecord>> {
         let models = entities::task_run::Entity::find()
-            .filter(entities::task_run::Column::SessionId.eq(session_id.to_string()))
+            .filter(entities::task_run::Column::RootThreadId.eq(root_thread_id.to_string()))
             .filter(entities::task_run::Column::Phase.is_not_in([
                 TaskRunPhase::Completed.as_str(),
                 TaskRunPhase::Blocked.as_str(),
@@ -162,7 +161,7 @@ impl StudioStore {
         match models.as_slice() {
             [] => Ok(None),
             [model] => task_run_record(model.clone()).map(Some),
-            _ => bail!("multiple active task runs found for this session"),
+            _ => bail!("multiple active task runs found for this root Thread"),
         }
     }
 
@@ -355,7 +354,7 @@ impl StudioStore {
 
 fn validate_create_task_run(input: &CreateTaskRun) -> Result<()> {
     for (label, value) in [
-        ("sessionId", input.session_id.as_str()),
+        ("rootThreadId", input.root_thread_id.as_str()),
         ("plan", input.plan.as_str()),
         ("workspaceRoot", input.workspace_root.as_str()),
         ("gitCommonDir", input.git_common_dir.as_str()),
@@ -388,7 +387,7 @@ pub(super) fn task_run_record(model: entities::task_run::Model) -> Result<TaskRu
         .context("stored terminal generation must not be negative")?;
     Ok(TaskRunRecord {
         id: model.id,
-        session_id: model.session_id,
+        root_thread_id: model.root_thread_id,
         phase,
         plan: model.plan,
         workspace_root: model.workspace_root,

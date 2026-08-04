@@ -81,6 +81,9 @@ macro_rules! runtime_id {
     };
 }
 
-runtime_id!(AgentId, "agent id", "agent");
-runtime_id!(SessionId, "session id", "session");
+runtime_id!(ThreadId, "thread id", "thread");
+
+/// Runtime actor 的身份就是它唯一拥有的 Thread 身份。
+pub type AgentId = ThreadId;
+
 runtime_id!(TurnId, "turn id", "turn");

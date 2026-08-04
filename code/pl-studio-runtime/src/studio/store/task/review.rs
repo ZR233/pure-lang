@@ -8,27 +8,27 @@ use crate::studio::entity as entities;
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    AgentOutcomeRecord, AgentOutcomeStatus, AgentReview, ReviewRoundRecord, ReviewScope,
-    ReviewVerdict, TaskRunPhase, WorkCompletionKind, WorkCompletionStatus, WorkUnitStatus,
+    AgentReview, ReviewRoundRecord, ReviewScope, ReviewVerdict, TaskRunPhase,
+    ThreadExecutionStatus, WorkCompletionKind, WorkCompletionStatus, WorkUnitStatus,
 };
 use pl_core::TurnOutcomeKind;
-
-use super::outcome::agent_outcome_record;
 
 impl StudioStore {
     pub(crate) async fn begin_delivery_review(
         &self,
-        session_id: &str,
+        thread_id: &str,
         executor_agent_id: &str,
         requested_by_call_id: &str,
     ) -> Result<ReviewRoundRecord> {
         let tx = self.db.begin().await?;
         let result = async {
-            let run = active_implementation_run(&tx, session_id).await?;
+            let run = active_implementation_run(&tx, thread_id).await?;
             ensure_review_call_unused(&tx, &run.id, requested_by_call_id).await?;
             let units = entities::work_unit::Entity::find()
                 .filter(entities::work_unit::Column::TaskRunId.eq(run.id.clone()))
-                .filter(entities::work_unit::Column::AgentId.eq(executor_agent_id.to_string()))
+                .filter(
+                    entities::work_unit::Column::ExecutorThreadId.eq(executor_agent_id.to_string()),
+                )
                 .all(&tx)
                 .await?;
             let work_unit = match units.as_slice() {
@@ -78,12 +78,12 @@ impl StudioStore {
 
     pub(crate) async fn begin_integrated_review(
         &self,
-        session_id: &str,
+        thread_id: &str,
         requested_by_call_id: &str,
     ) -> Result<ReviewRoundRecord> {
         let tx = self.db.begin().await?;
         let result = async {
-            let run = active_implementation_run(&tx, session_id).await?;
+            let run = active_implementation_run(&tx, thread_id).await?;
             ensure_review_call_unused(&tx, &run.id, requested_by_call_id).await?;
             let work_units = entities::work_unit::Entity::find()
                 .filter(entities::work_unit::Column::TaskRunId.eq(run.id.clone()))
@@ -124,78 +124,74 @@ impl StudioStore {
 
     pub(crate) async fn authorize_reviewer_spawn(
         &self,
-        session_id: &str,
+        thread_id: &str,
         requested_by_call_id: &str,
         agent_id: &str,
-    ) -> Result<(ReviewRoundRecord, AgentOutcomeRecord)> {
+    ) -> Result<ReviewRoundRecord> {
         let tx = self.db.begin().await?;
         let result = async {
-            let run = active_nonterminal_run(&tx, session_id).await?;
+            let run = active_nonterminal_run(&tx, thread_id).await?;
             let round = pending_review_by_call(&tx, &run.id, requested_by_call_id).await?;
-            if round.reviewer_agent_id.is_some() {
+            if round.reviewer_thread_id.is_some() {
                 bail!("reviewer spawn authorization is already consumed");
             }
             let now = unix_seconds();
-            let outcome = entities::agent_outcome::ActiveModel {
-                id: Set(new_id("outcome")),
-                task_run_id: Set(run.id),
-                work_unit_id: Set(round.work_unit_id.clone()),
-                agent_id: Set(agent_id.to_string()),
-                owner_path: Set("/root".to_string()),
-                initiated_by: Set("planner".to_string()),
-                requested_by_call_id: Set(requested_by_call_id.to_string()),
-                role: Set("reviewer".to_string()),
-                status: Set(AgentOutcomeStatus::Queued.as_str().to_string()),
-                attempt: Set(round.round),
-                summary: Set(None),
-                error: Set(None),
-                created_at: Set(now),
-                updated_at: Set(now),
-            }
-            .insert(&tx)
-            .await?;
             let mut round_active: entities::review_round::ActiveModel = round.into();
-            round_active.reviewer_agent_id = Set(Some(agent_id.to_string()));
+            round_active.reviewer_thread_id = Set(Some(agent_id.to_string()));
+            round_active.reviewer_status = Set(ThreadExecutionStatus::Queued.as_str().to_string());
+            round_active.reviewer_error = Set(None);
             round_active.updated_at = Set(now);
             let round = round_active.update(&tx).await?;
-            Ok((review_round_record(round)?, agent_outcome_record(outcome)?))
+            review_round_record(round)
         }
         .await;
         finish_transaction(tx, result).await
     }
 
+    pub(crate) async fn activate_reviewer(
+        &self,
+        review_round_id: &str,
+        reviewer_thread_id: &str,
+    ) -> Result<()> {
+        let round = entities::review_round::Entity::find_by_id(review_round_id.to_string())
+            .one(&self.db)
+            .await?
+            .context("review round not found")?;
+        if round.reviewer_thread_id.as_deref() != Some(reviewer_thread_id)
+            || round.status != ReviewVerdict::Pending.as_str()
+            || round.reviewer_status != ThreadExecutionStatus::Queued.as_str()
+        {
+            bail!("reviewer activation does not match the pending review round");
+        }
+        let mut active: entities::review_round::ActiveModel = round.into();
+        active.reviewer_status = Set(ThreadExecutionStatus::Running.as_str().to_string());
+        active.reviewer_error = Set(None);
+        active.updated_at = Set(unix_seconds());
+        active.update(&self.db).await?;
+        Ok(())
+    }
+
     pub(crate) async fn fail_reviewer_spawn(
         &self,
-        session_id: &str,
+        thread_id: &str,
         agent_id: Option<&str>,
         requested_by_call_id: &str,
         error: &str,
     ) -> Result<()> {
         let tx = self.db.begin().await?;
         let result = async {
-            let run = active_nonterminal_run(&tx, session_id).await?;
+            let run = active_nonterminal_run(&tx, thread_id).await?;
             let round = pending_review_by_call(&tx, &run.id, requested_by_call_id).await?;
             if let Some(agent_id) = agent_id
-                && round.reviewer_agent_id.as_deref() != Some(agent_id)
+                && round.reviewer_thread_id.as_deref() != Some(agent_id)
             {
                 bail!("review spawn failure does not match reviewer authorization");
             }
             let now = unix_seconds();
-            if let Some(agent_id) = agent_id {
-                let outcomes = entities::agent_outcome::Entity::find()
-                    .filter(entities::agent_outcome::Column::AgentId.eq(agent_id.to_string()))
-                    .all(&tx)
-                    .await?;
-                if let [outcome] = outcomes.as_slice() {
-                    let mut active: entities::agent_outcome::ActiveModel = outcome.clone().into();
-                    active.status = Set(AgentOutcomeStatus::Failed.as_str().to_string());
-                    active.error = Set(Some(error.to_string()));
-                    active.updated_at = Set(now);
-                    active.update(&tx).await?;
-                }
-            }
             let mut round_active: entities::review_round::ActiveModel = round.clone().into();
             round_active.status = Set(ReviewVerdict::Failed.as_str().to_string());
+            round_active.reviewer_status = Set(ThreadExecutionStatus::Failed.as_str().to_string());
+            round_active.reviewer_error = Set(Some(error.to_string()));
             round_active.summary = Set(Some(error.to_string()));
             round_active.updated_at = Set(now);
             round_active.update(&tx).await?;
@@ -231,17 +227,17 @@ impl StudioStore {
 
     pub(crate) async fn complete_task_review(
         &self,
-        session_id: &str,
+        thread_id: &str,
         reviewer_agent_id: &str,
         review: AgentReview,
     ) -> Result<ReviewRoundRecord> {
         let tx = self.db.begin().await?;
         let result = async {
-            let run = active_nonterminal_run(&tx, session_id).await?;
+            let run = active_nonterminal_run(&tx, thread_id).await?;
             let rounds = entities::review_round::Entity::find()
                 .filter(entities::review_round::Column::TaskRunId.eq(run.id.clone()))
                 .filter(
-                    entities::review_round::Column::ReviewerAgentId
+                    entities::review_round::Column::ReviewerThreadId
                         .eq(reviewer_agent_id.to_string()),
                 )
                 .filter(entities::review_round::Column::Status.eq(ReviewVerdict::Pending.as_str()))
@@ -252,25 +248,11 @@ impl StudioStore {
                 [] => bail!("pending review not found for reviewer"),
                 _ => bail!("reviewer owns multiple pending reviews"),
             };
-            let outcomes = entities::agent_outcome::Entity::find()
-                .filter(entities::agent_outcome::Column::AgentId.eq(reviewer_agent_id.to_string()))
-                .filter(entities::agent_outcome::Column::TaskRunId.eq(run.id.clone()))
-                .filter(entities::agent_outcome::Column::Role.eq("reviewer"))
-                .all(&tx)
-                .await?;
-            let outcome = match outcomes.as_slice() {
-                [outcome]
-                    if outcome.status == AgentOutcomeStatus::Running.as_str()
-                        && outcome.work_unit_id == round.work_unit_id
-                        && outcome.attempt == round.round
-                        && outcome.requested_by_call_id == round.requested_by_call_id =>
-                {
-                    outcome.clone()
-                }
-                [_] => bail!("reviewer outcome does not match the pending review"),
-                [] => bail!("reviewer outcome not found"),
-                _ => bail!("reviewer owns multiple outcomes"),
-            };
+            if round.reviewer_status != ThreadExecutionStatus::Running.as_str()
+                || round.reviewer_thread_id.as_deref() != Some(reviewer_agent_id)
+            {
+                bail!("reviewer Thread does not match the pending review");
+            }
             let now = unix_seconds();
             match ReviewScope::from_str(&round.scope).context("invalid stored review scope")? {
                 ReviewScope::Delivery => {
@@ -323,6 +305,14 @@ impl StudioStore {
                     Expr::value(Some(review.summary.clone())),
                 )
                 .col_expr(
+                    entities::review_round::Column::ReviewerStatus,
+                    Expr::value(ThreadExecutionStatus::Completed.as_str()),
+                )
+                .col_expr(
+                    entities::review_round::Column::ReviewerError,
+                    Expr::value(Option::<String>::None),
+                )
+                .col_expr(
                     entities::review_round::Column::DesignReferencesJson,
                     Expr::value(serde_json::to_string(&review.design_references)?),
                 )
@@ -337,26 +327,6 @@ impl StudioStore {
                 .await?;
             if updated_round.rows_affected != 1 {
                 bail!("review result is stale or was already settled");
-            }
-            let updated_outcome = entities::agent_outcome::Entity::update_many()
-                .col_expr(
-                    entities::agent_outcome::Column::Status,
-                    Expr::value(AgentOutcomeStatus::Completed.as_str()),
-                )
-                .col_expr(
-                    entities::agent_outcome::Column::Summary,
-                    Expr::value(Some(review.summary)),
-                )
-                .col_expr(entities::agent_outcome::Column::UpdatedAt, Expr::value(now))
-                .filter(entities::agent_outcome::Column::Id.eq(outcome.id))
-                .filter(
-                    entities::agent_outcome::Column::Status
-                        .eq(AgentOutcomeStatus::Running.as_str()),
-                )
-                .exec(&tx)
-                .await?;
-            if updated_outcome.rows_affected != 1 {
-                bail!("reviewer outcome is stale or was already settled");
             }
             let round = entities::review_round::Entity::find_by_id(round.id)
                 .one(&tx)
@@ -390,19 +360,9 @@ impl StudioStore {
     ) -> Result<()> {
         let tx = self.db.begin().await?;
         let result = async {
-            let outcomes = entities::agent_outcome::Entity::find()
-                .filter(entities::agent_outcome::Column::AgentId.eq(reviewer_agent_id.to_string()))
-                .filter(entities::agent_outcome::Column::Role.eq("reviewer"))
-                .all(&tx)
-                .await?;
-            let outcome = match outcomes.as_slice() {
-                [outcome] => outcome.clone(),
-                [] => return Ok(()),
-                _ => bail!("reviewer owns multiple outcomes"),
-            };
             let rounds = entities::review_round::Entity::find()
                 .filter(
-                    entities::review_round::Column::ReviewerAgentId
+                    entities::review_round::Column::ReviewerThreadId
                         .eq(reviewer_agent_id.to_string()),
                 )
                 .filter(entities::review_round::Column::Status.eq(ReviewVerdict::Pending.as_str()))
@@ -417,6 +377,12 @@ impl StudioStore {
                 .map(str::to_string)
                 .unwrap_or_else(|| "reviewer ended without a successful review_exit".to_string());
             let now = unix_seconds();
+            let outcome_status = match outcome_kind {
+                TurnOutcomeKind::Cancelled => ThreadExecutionStatus::Cancelled,
+                TurnOutcomeKind::Completed
+                | TurnOutcomeKind::Failed
+                | TurnOutcomeKind::BudgetLimited => ThreadExecutionStatus::Failed,
+            };
 
             let updated_round = entities::review_round::Entity::update_many()
                 .col_expr(
@@ -427,6 +393,14 @@ impl StudioStore {
                     entities::review_round::Column::Summary,
                     Expr::value(Some(detail.clone())),
                 )
+                .col_expr(
+                    entities::review_round::Column::ReviewerStatus,
+                    Expr::value(outcome_status.as_str()),
+                )
+                .col_expr(
+                    entities::review_round::Column::ReviewerError,
+                    Expr::value(Some(detail.clone())),
+                )
                 .col_expr(entities::review_round::Column::UpdatedAt, Expr::value(now))
                 .filter(entities::review_round::Column::Id.eq(round.id.clone()))
                 .filter(entities::review_round::Column::Status.eq(ReviewVerdict::Pending.as_str()))
@@ -434,33 +408,6 @@ impl StudioStore {
                 .await?;
             if updated_round.rows_affected == 0 {
                 return Ok(());
-            }
-
-            let outcome_status = match outcome_kind {
-                TurnOutcomeKind::Cancelled => AgentOutcomeStatus::Cancelled,
-                TurnOutcomeKind::Completed
-                | TurnOutcomeKind::Failed
-                | TurnOutcomeKind::BudgetLimited => AgentOutcomeStatus::Failed,
-            };
-            let updated_outcome = entities::agent_outcome::Entity::update_many()
-                .col_expr(
-                    entities::agent_outcome::Column::Status,
-                    Expr::value(outcome_status.as_str()),
-                )
-                .col_expr(
-                    entities::agent_outcome::Column::Error,
-                    Expr::value(Some(detail.clone())),
-                )
-                .col_expr(entities::agent_outcome::Column::UpdatedAt, Expr::value(now))
-                .filter(entities::agent_outcome::Column::Id.eq(outcome.id))
-                .filter(entities::agent_outcome::Column::Status.is_in([
-                    AgentOutcomeStatus::Queued.as_str(),
-                    AgentOutcomeStatus::Running.as_str(),
-                ]))
-                .exec(&tx)
-                .await?;
-            if updated_outcome.rows_affected != 1 {
-                bail!("reviewer terminal outcome is stale or was already settled");
             }
 
             match ReviewScope::from_str(&round.scope).context("invalid stored review scope")? {
@@ -650,7 +597,9 @@ async fn insert_review_round(
             reviewed_head: Set(reviewed_head.to_string()),
             status: Set(ReviewVerdict::Pending.as_str().to_string()),
             requested_by_call_id: Set(request.requested_by_call_id.to_string()),
-            reviewer_agent_id: Set(None),
+            reviewer_thread_id: Set(None),
+            reviewer_status: Set(ThreadExecutionStatus::Queued.as_str().to_string()),
+            reviewer_error: Set(None),
             summary: Set(None),
             design_references_json: Set("[]".to_string()),
             findings_json: Set("[]".to_string()),
@@ -682,7 +631,11 @@ pub(super) fn review_round_record(
         verdict: ReviewVerdict::from_str(&model.status)
             .with_context(|| format!("invalid review verdict: {}", model.status))?,
         requested_by_call_id: model.requested_by_call_id,
-        reviewer_agent_id: model.reviewer_agent_id,
+        reviewer_thread_id: model.reviewer_thread_id,
+        reviewer_status: ThreadExecutionStatus::from_str(&model.reviewer_status).with_context(
+            || format!("invalid reviewer Thread status: {}", model.reviewer_status),
+        )?,
+        reviewer_error: model.reviewer_error,
         summary: model.summary,
         design_references: serde_json::from_str(&model.design_references_json)?,
         findings: serde_json::from_str(&model.findings_json)?,
@@ -693,9 +646,9 @@ pub(super) fn review_round_record(
 
 async fn active_implementation_run(
     tx: &sea_orm::DatabaseTransaction,
-    session_id: &str,
+    thread_id: &str,
 ) -> Result<entities::task_run::Model> {
-    let run = active_nonterminal_run(tx, session_id).await?;
+    let run = active_nonterminal_run(tx, thread_id).await?;
     if !matches!(
         TaskRunPhase::from_str(&run.phase),
         Some(TaskRunPhase::Implementing | TaskRunPhase::Reworking)
@@ -708,10 +661,10 @@ async fn active_implementation_run(
 
 async fn active_nonterminal_run(
     tx: &sea_orm::DatabaseTransaction,
-    session_id: &str,
+    thread_id: &str,
 ) -> Result<entities::task_run::Model> {
     let runs = entities::task_run::Entity::find()
-        .filter(entities::task_run::Column::SessionId.eq(session_id.to_string()))
+        .filter(entities::task_run::Column::RootThreadId.eq(thread_id.to_string()))
         .filter(entities::task_run::Column::Phase.is_not_in([
             TaskRunPhase::Completed.as_str(),
             TaskRunPhase::Blocked.as_str(),

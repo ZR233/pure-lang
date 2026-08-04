@@ -12,12 +12,12 @@ use crate::studio::task_coordinator::{
 impl TaskCoordinator {
     pub(super) async fn load_merge_preflight_scope(
         &self,
-        session_id: &str,
+        thread_id: &str,
         agent_id: &str,
     ) -> Result<TaskMergeScope> {
         let run = self
             .store
-            .read_active_task_run_for_session(session_id)
+            .read_active_task_run_for_root_thread(thread_id)
             .await?;
         if !matches!(
             run.phase,
@@ -30,45 +30,28 @@ impl TaskCoordinator {
             .read_branch_lease(&run.id)
             .await?
             .context("task branch lease not found")?;
-        let outcomes = self
+        let work_units = self
             .store
-            .list_agent_outcomes(&run.id)
+            .list_work_units(&run.id)
             .await?
             .into_iter()
-            .filter(|outcome| outcome.agent_id == agent_id)
+            .filter(|work_unit| work_unit.executor_thread_id.as_deref() == Some(agent_id))
             .collect::<Vec<_>>();
-        let outcome = match outcomes.as_slice() {
-            [outcome] => outcome.clone(),
-            [] => bail!("approved executor outcome not found for agent"),
-            _ => bail!("ambiguous executor outcome for agent"),
+        let work_unit = match work_units.as_slice() {
+            [work_unit] => work_unit.clone(),
+            [] => bail!("approved executor work unit not found for Thread"),
+            _ => bail!("ambiguous executor work unit for Thread"),
         };
-        let work_unit_id = outcome
-            .work_unit_id
-            .as_deref()
-            .context("executor outcome has no work unit")?;
-        let work_unit = self
-            .store
-            .read_work_unit(work_unit_id)
-            .await?
-            .context("executor work unit not found")?;
         let completion = self
             .store
-            .read_approved_work_completion(work_unit_id)
+            .read_approved_work_completion(&work_unit.id)
             .await?;
         let delivery = delivery_from_completion(&completion)?;
-        ensure_preflight_delivery_identity(
-            &run.id,
-            agent_id,
-            &work_unit,
-            &outcome,
-            &completion,
-            &delivery,
-        )?;
+        ensure_preflight_delivery_identity(&run.id, agent_id, &work_unit, &completion, &delivery)?;
         Ok(TaskMergeScope {
             run,
             lease,
             work_unit,
-            outcome,
             completion,
             delivery,
             merge: empty_preflight_merge(),

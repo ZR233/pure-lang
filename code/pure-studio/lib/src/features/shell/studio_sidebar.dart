@@ -75,15 +75,12 @@ class _Sidebar extends ConsumerWidget {
                     _SidebarSectionLabel(label: context.l10n.sidebarSessions),
                     const SizedBox(height: 4),
                   ],
-                  for (final session in state.rootSessions)
-                    _SessionTile(
-                      session: session,
-                      selected: session.id == state.selectedRootSessionId,
+                  for (final thread in state.rootThreads)
+                    _ThreadTile(
+                      thread: thread,
+                      selected: thread.id == state.selectedRootThreadId,
                       compact: compact,
-                      recoveryIssue: state.recoveryIssueForSession(session.id),
-                      canArchive:
-                          session.id != state.selectedRootSessionId ||
-                          !state.isBusy,
+                      recoveryIssue: state.recoveryIssueForThread(thread.id),
                     ),
                 ],
               ),
@@ -212,55 +209,43 @@ class _ProjectTile extends ConsumerWidget {
   }
 }
 
-class _SessionTile extends ConsumerWidget {
-  const _SessionTile({
-    required this.session,
+class _ThreadTile extends ConsumerWidget {
+  const _ThreadTile({
+    required this.thread,
     required this.selected,
     required this.compact,
     required this.recoveryIssue,
-    required this.canArchive,
   });
 
-  final StudioSession session;
+  final StudioThread thread;
   final bool selected;
   final bool compact;
   final StudioRecoveryIssue? recoveryIssue;
-  final bool canArchive;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final modeIcon = session.mode == StudioMode.task
+    final modeIcon = thread.mode == StudioMode.task
         ? Icons.route
         : Icons.flash_on;
     final colors = Theme.of(context).colorScheme;
     final issue = recoveryIssue;
     if (compact) {
       return KeyedSubtree(
-        key: StudioDriverKeys.sessionRow(session.id),
+        key: StudioDriverKeys.threadRow(thread.id),
         child: _CompactSidebarTile(
           selected: selected,
-          tooltip: issue?.detail ?? session.title,
+          tooltip: issue?.detail ?? thread.title,
           icon: issue == null ? modeIcon : Icons.error_outline,
           iconColor: issue == null ? null : colors.error,
           onTap: issue == null
               ? () => ref
                     .read(studioControllerProvider.notifier)
-                    .selectSession(session.id)
+                    .selectThread(thread.id)
               : null,
-          actionTooltip: issue == null
-              ? context.l10n.sidebarArchiveSession
-              : context.l10n.recoveryCleanupTooltip,
-          actionIcon: issue == null
-              ? Icons.archive_outlined
-              : Icons.delete_sweep_outlined,
-          onAction: issue != null
-              ? issue.canCleanup
-                    ? () => _showRecoveryCleanupDialog(context, ref, issue)
-                    : null
-              : canArchive
-              ? () => ref
-                    .read(studioControllerProvider.notifier)
-                    .archiveSession(session.id)
+          actionTooltip: context.l10n.recoveryCleanupTooltip,
+          actionIcon: Icons.delete_sweep_outlined,
+          onAction: issue?.canCleanup == true
+              ? () => _showRecoveryCleanupDialog(context, ref, issue!)
               : null,
         ),
       );
@@ -268,8 +253,8 @@ class _SessionTile extends ConsumerWidget {
     final tile = _SidebarTile(
       selected: selected,
       icon: issue == null ? modeIcon : Icons.error_outline,
-      title: session.title,
-      subtitle: _sessionSubtitle(context, session),
+      title: thread.title,
+      subtitle: _threadSubtitle(context, thread),
       dense: true,
       iconColor: issue != null
           ? colors.error
@@ -278,39 +263,30 @@ class _SessionTile extends ConsumerWidget {
           : colors.onSurfaceVariant,
       markerColor: issue != null
           ? null
-          : session.mode == StudioMode.task
+          : thread.mode == StudioMode.task
           ? StudioColors.clay
           : StudioColors.sage,
       onTap: issue == null
           ? () => ref
                 .read(studioControllerProvider.notifier)
-                .selectSession(session.id)
+                .selectThread(thread.id)
           : null,
-      trailing: IconButton(
-        tooltip: issue == null
-            ? context.l10n.sidebarArchiveSession
-            : context.l10n.recoveryCleanupTooltip,
-        style: IconButton.styleFrom(
-          minimumSize: const Size.square(30),
-          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        ),
-        icon: Icon(
-          issue == null ? Icons.archive_outlined : Icons.delete_sweep_outlined,
-          size: 18,
-        ),
-        onPressed: issue != null
-            ? issue.canCleanup
+      trailing: issue == null
+          ? const SizedBox.shrink()
+          : IconButton(
+              tooltip: context.l10n.recoveryCleanupTooltip,
+              style: IconButton.styleFrom(
+                minimumSize: const Size.square(30),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              icon: const Icon(Icons.delete_sweep_outlined, size: 18),
+              onPressed: issue.canCleanup
                   ? () => _showRecoveryCleanupDialog(context, ref, issue)
-                  : null
-            : canArchive
-            ? () => ref
-                  .read(studioControllerProvider.notifier)
-                  .archiveSession(session.id)
-            : null,
-      ),
+                  : null,
+            ),
     );
     return KeyedSubtree(
-      key: StudioDriverKeys.sessionRow(session.id),
+      key: StudioDriverKeys.threadRow(thread.id),
       child: issue == null ? tile : Tooltip(message: issue.detail, child: tile),
     );
   }
@@ -346,7 +322,8 @@ class _CompactSidebarTileState extends State<_CompactSidebarTile> {
 
   @override
   Widget build(BuildContext context) {
-    final actionVisible = widget.selected || _hovering;
+    final actionVisible =
+        widget.onAction != null && (widget.selected || _hovering);
     return MouseRegion(
       onEnter: (_) => setState(() => _hovering = true),
       onExit: (_) => setState(() => _hovering = false),
@@ -365,28 +342,29 @@ class _CompactSidebarTileState extends State<_CompactSidebarTile> {
                 ),
               ),
             ),
-            Positioned(
-              right: 0,
-              bottom: 0,
-              child: IgnorePointer(
-                ignoring: !actionVisible,
-                child: AnimatedOpacity(
-                  opacity: actionVisible ? 1 : 0,
-                  duration: const Duration(milliseconds: 120),
-                  child: IconButton(
-                    tooltip: widget.actionTooltip,
-                    style: IconButton.styleFrom(
-                      minimumSize: const Size.square(20),
-                      maximumSize: const Size.square(20),
-                      padding: EdgeInsets.zero,
-                      backgroundColor: context.studioPaper,
+            if (widget.onAction != null)
+              Positioned(
+                right: 0,
+                bottom: 0,
+                child: IgnorePointer(
+                  ignoring: !actionVisible,
+                  child: AnimatedOpacity(
+                    opacity: actionVisible ? 1 : 0,
+                    duration: const Duration(milliseconds: 120),
+                    child: IconButton(
+                      tooltip: widget.actionTooltip,
+                      style: IconButton.styleFrom(
+                        minimumSize: const Size.square(20),
+                        maximumSize: const Size.square(20),
+                        padding: EdgeInsets.zero,
+                        backgroundColor: context.studioPaper,
+                      ),
+                      icon: Icon(widget.actionIcon, size: 12),
+                      onPressed: widget.onAction,
                     ),
-                    icon: Icon(widget.actionIcon, size: 12),
-                    onPressed: widget.onAction,
                   ),
                 ),
               ),
-            ),
           ],
         ),
       ),
@@ -554,17 +532,6 @@ class _SidebarActions extends ConsumerWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 _SidebarActionButton(
-                  key: StudioDriverKeys.newSession,
-                  tooltip: context.l10n.sidebarNewSession,
-                  icon: Icons.add_comment_outlined,
-                  onPressed: state.selectedProjectId == null
-                      ? null
-                      : ref
-                            .read(studioControllerProvider.notifier)
-                            .createSession,
-                ),
-                const SizedBox(height: 4),
-                _SidebarActionButton(
                   key: StudioDriverKeys.openProject,
                   tooltip: context.l10n.sidebarOpenProject,
                   icon: Icons.create_new_folder,
@@ -582,17 +549,6 @@ class _SidebarActions extends ConsumerWidget {
             )
           : Row(
               children: [
-                _SidebarActionButton(
-                  key: StudioDriverKeys.newSession,
-                  icon: Icons.add_comment_outlined,
-                  tooltip: context.l10n.sidebarNewSession,
-                  onPressed: state.selectedProjectId == null
-                      ? null
-                      : ref
-                            .read(studioControllerProvider.notifier)
-                            .createSession,
-                ),
-                const SizedBox(width: 4),
                 _SidebarActionButton(
                   key: StudioDriverKeys.openProject,
                   icon: Icons.create_new_folder,

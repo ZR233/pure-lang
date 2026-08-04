@@ -35,7 +35,7 @@ Widget agentWorkspaceLoadingPreview() {
 Widget _agentWorkspacePreview(StudioState state) {
   return ProviderScope(
     key: ValueKey(
-      'agent-workspace-preview-${state.selectedSessionId}-'
+      'agent-workspace-preview-${state.selectedThreadId}-'
       '${state.selectedAgentWorkspace?.syncState.name}',
     ),
     overrides: [
@@ -74,53 +74,47 @@ StudioState _agentWorkspacePreviewState({
     path: '.',
   );
   final timestamp = DateTime.fromMillisecondsSinceEpoch(1000);
-  final root = StudioSession(
+  final root = StudioThread(
     id: 'preview-root',
     projectId: project.id,
     title: 'Planner workspace',
     mode: StudioMode.task,
     createdAt: timestamp,
     updatedAt: timestamp,
-    rootSessionId: 'preview-root',
-    ownerRole: 'planner',
+    rootThreadId: 'preview-root',
+    role: 'planner',
   );
-  final child = StudioSession(
+  final child = StudioThread(
     id: 'preview-child',
     projectId: project.id,
     title: 'Reviewer workspace',
     mode: StudioMode.task,
     createdAt: timestamp.add(const Duration(seconds: 1)),
     updatedAt: timestamp.add(const Duration(seconds: 1)),
-    parentSessionId: root.id,
-    rootSessionId: root.id,
-    sessionKind: StudioSessionKind.agent,
-    ownerAgentId: 'preview-reviewer',
-    ownerRole: 'reviewer',
-    agentStatus: 'running',
+    parentThreadId: root.id,
+    rootThreadId: root.id,
+    agentPath: 'preview-reviewer',
+    role: 'reviewer',
+    status: 'running',
   );
   final selected = selectChild ? child : root;
-  final message = TimelineMessage(
-    id: '${selected.id}-message',
-    sessionId: selected.id,
-    role: 'assistant',
-    createdAt: timestamp,
-  );
-  final part = TimelinePartSnapshot(
-    id: '${selected.id}-part',
-    messageId: message.id,
-    sessionId: selected.id,
+  final item = ThreadItemView(
+    id: '${selected.id}-item',
+    threadId: selected.id,
     turnId: '${selected.id}-turn',
-    type: TimelinePartType.text,
-    order: 0,
+    ordinal: 0,
     revision: 0,
-    text: selectChild
-        ? 'Reviewer is checking the workspace boundary.'
-        : 'Planner owns this root workspace and its editable composer.',
     status: 'completed',
     createdAt: timestamp,
     updatedAt: timestamp,
+    completedAt: timestamp,
+    kind: ThreadItemKind.agentMessage,
+    channel: AgentMessageChannel.finalAnswer,
+    text: selectChild
+        ? 'Reviewer is checking the workspace boundary.'
+        : 'Planner owns this root workspace and its editable composer.',
   );
-  final runtime = SessionRuntimeView(
+  final runtime = ThreadRuntimeView(
     model: selectChild ? 'reviewer/model' : 'planner/model',
     contextTokens: selectChild ? 4800 : 12800,
     contextWindow: 128000,
@@ -133,39 +127,50 @@ StudioState _agentWorkspacePreviewState({
   );
   return StudioState(
     projects: const [project],
-    sessions: [root, child],
-    messagesBySession: childLoading
+    threads: [root, child],
+    workspacesByThread: childLoading
         ? const {}
         : {
-            selected.id: [message],
-          },
-    partSnapshotsBySession: childLoading
-        ? const {}
-        : {
-            selected.id: {part.id: part},
-          },
-    agentTimelineEventsBySession: childLoading
-        ? const {}
-        : {
-            selected.id: {
-              '${selected.id}-todo': TimelineAgentEvent(
-                eventId: '${selected.id}-todo',
-                sessionId: selected.id,
-                sequence: 1,
-                createdAt: timestamp,
-                payload: const TimelineTodoListUpdate(
-                  callId: 'preview-todo',
-                  explanation: 'Workspace checklist',
-                  items: [
-                    TimelineTodoItem(
-                      step: 'Keep every panel on one session',
-                      status: 'inProgress',
+            selected.id: ThreadWorkspace(
+              thread: selected,
+              revision: 1,
+              items: [item],
+              interactions: const [],
+              runtime: runtime,
+              activeTurn: !selectChild
+                  ? null
+                  : StudioTurnView(
+                      turnId: '${selected.id}-turn',
+                      threadId: selected.id,
+                      state: const StudioTurnState.inProgress(
+                        StudioTurnActivity.responding,
+                      ),
+                      updatedAt: timestamp,
                     ),
-                  ],
-                ),
+              todo: const TimelineTodoListUpdate(
+                callId: 'preview-todo',
+                explanation: 'Workspace checklist',
+                items: [
+                  TimelineTodoItem(
+                    step: 'Keep every panel on one Thread',
+                    status: 'inProgress',
+                  ),
+                ],
               ),
-            },
+            ),
           },
+    workspaceUiByThread: {
+      selected.id: WorkspaceUiState(
+        syncState: childLoading
+            ? AgentWorkspaceSyncState.loading
+            : AgentWorkspaceSyncState.ready,
+        composer: selectChild
+            ? const ComposerThreadState.idle()
+            : const ComposerThreadState.idle(
+                draft: 'Refine the implementation plan',
+              ),
+      ),
+    },
     providers: const [
       ProviderSettingsView(
         id: 'preview-provider',
@@ -200,34 +205,7 @@ StudioState _agentWorkspacePreviewState({
     ],
     mcpServers: const [],
     selectedProjectId: project.id,
-    selectedSessionId: selected.id,
-    selectedRootSessionId: root.id,
+    selectedThreadId: selected.id,
     permissionMode: PermissionMode.requestApproval,
-    turnsBySession: childLoading || !selectChild
-        ? const {}
-        : {
-            selected.id: StudioTurnView(
-              turnId: '${selected.id}-turn',
-              sessionId: selected.id,
-              state: const StudioTurnState.inProgress(
-                StudioTurnActivity.responding,
-              ),
-              updatedAt: timestamp,
-            ),
-          },
-    runtimesBySession: childLoading ? const {} : {selected.id: runtime},
-    workspaceSyncBySession: {
-      selected.id: childLoading
-          ? AgentWorkspaceSyncState.loading
-          : AgentWorkspaceSyncState.ready,
-    },
-    pendingInteractions: const [],
-    composersBySession: selectChild
-        ? const {}
-        : {
-            root.id: const ComposerSessionState.idle(
-              draft: 'Refine the implementation plan',
-            ),
-          },
   );
 }

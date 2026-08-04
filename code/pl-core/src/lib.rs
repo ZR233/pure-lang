@@ -15,8 +15,8 @@ mod process;
 mod provider_error;
 pub mod runtime_usage;
 mod session;
-mod session_event;
 pub mod skill;
+mod thread_event;
 pub mod tool;
 mod trace;
 pub mod turn;
@@ -26,21 +26,21 @@ mod workspace;
 
 pub use agent_runtime::{
     AgentAccessPolicy, AgentActivityState, AgentCollaborationTools, AgentCommitObserver,
-    AgentCommitOutcome, AgentCommittedEvent, AgentCurrentSessionSubmitRequest,
-    AgentDirectorySnapshot, AgentDirectorySubscription, AgentDirectoryWaitReason,
-    AgentDirectoryWaitResult, AgentDurableState, AgentExecutionPolicy, AgentId, AgentIdentity,
-    AgentLifecycleAdapter, AgentLifecycleState, AgentProgressCheckpoint, AgentProgressStage,
-    AgentRegistration, AgentRuntime, AgentRuntimeError, AgentRuntimeEvent, AgentRuntimeEventKind,
-    AgentRuntimeHandle, AgentRuntimeHost, AgentRuntimeOptions, AgentRuntimeResult,
-    AgentSessionCommitPolicy, AgentSessionDigest, AgentSessionDigestMessage,
-    AgentSessionDigestRole, AgentSessionState, AgentSnapshot, AgentSpawnRequest, AgentSpawnResult,
-    AgentStateMutation, AgentStateRepository, AgentSubmitRequest, AgentTargetSelector,
+    AgentCommittedEvent, AgentCurrentSessionSubmitRequest, AgentDirectorySnapshot,
+    AgentDirectorySubscription, AgentDirectoryWaitReason, AgentDirectoryWaitResult,
+    AgentExecutionPolicy, AgentId, AgentIdentity, AgentLifecycleAdapter, AgentLifecycleState,
+    AgentProgressCheckpoint, AgentProgressStage, AgentRegistration, AgentRuntime,
+    AgentRuntimeError, AgentRuntimeEvent, AgentRuntimeEventKind, AgentRuntimeHandle,
+    AgentRuntimeHost, AgentRuntimeOptions, AgentRuntimeResult, AgentSessionCommitPolicy,
+    AgentSessionDigest, AgentSessionDigestMessage, AgentSessionDigestRole, AgentSnapshot,
+    AgentSpawnRequest, AgentSpawnResult, AgentSubmitRequest, AgentTargetSelector,
     AgentTurnCheckpoint, AgentTurnCheckpointHandle, AgentTurnFactory, AgentTurnOutcome,
-    AgentTurnPreparationContext, AgentWaitResult, CloseLifecycleRequest, DurableCommitFacts,
-    DurableMailboxEnvelope, MailboxDeliveryState, MailboxPresentation, PendingAgentInput,
+    AgentTurnPreparationContext, AgentTurnSubmitPolicy, AgentWaitResult, CloseLifecycleRequest,
+    DurableCommitFacts, DurableMailboxEnvelope, MailboxDeliveryState, MailboxPresentation,
     PreparedAgentTurn, PreparedSessionRuntime, RestoredAgentRuntime, RestoredInputPolicy,
-    RestoredSessionProjection, SessionContextMutation, SessionHistoryCommit, SessionId,
-    SessionProjectionCommit, SpawnLifecycleRequest, ToolEffectSet, TurnCheckpointReason,
+    RestoredThreadSnapshot, SpawnLifecycleRequest, ThreadActorState, ThreadCommit,
+    ThreadCommitOutcome, ThreadContextMutation, ThreadContextState, ThreadId, ThreadMutation,
+    ThreadProjectionCommit, ThreadRepository, ToolEffectSet, TurnCheckpointReason,
     TurnFinalizationPolicy, TurnId, TurnOutcomeKind,
 };
 pub use attachment::MaterializedAttachment;
@@ -59,12 +59,11 @@ pub use context_compaction::{
     ManualContextCompactionRequest, RecentInteractionTailConfig,
 };
 pub use core::{
-    AgentKernel, AgentKernelBuilder, AgentKernelToolRequest, AgentKernelToolSet, CoreAgentProfile,
     CoreModelTurnClient, CoreModelTurnOptions, CoreModelTurnRequest, CoreRuntimeOptions,
-    CoreRuntimeProfile, NoAgentKernelToolSet, SharedToolSchemaOptions, ToolProfile, ToolSetBuilder,
-    ToolVisibilitySet, TurnEngine, TurnEngineBuilder, WorkspaceProfile, shared_tool_names,
-    shared_tool_schemas, stream_history_completion_message_text,
-    stream_session_completion_message_text, stream_session_completion_response,
+    CoreRuntimeProfile, SharedToolSchemaOptions, ToolProfile, ToolSetBuilder, ToolVisibilitySet,
+    TurnEngine, TurnEngineBuilder, WorkspaceProfile, shared_tool_names, shared_tool_schemas,
+    stream_history_completion_message_text, stream_session_completion_message_text,
+    stream_session_completion_response,
 };
 pub use instruction::{
     ExecutionInstructionProfile, InstructionAssembler, InstructionAssemblyRequest,
@@ -125,12 +124,11 @@ pub use session::{
     AgentSession, AgentSessionForkPolicy, repair_incomplete_tool_history,
     tool_call_history_message, tool_result_history_message,
 };
-pub use session_event::{
-    SessionEventError, SessionEventFact, SessionEventFactPosition, SessionEventHub,
-    SessionEventHubHandle, SessionEventOptions, SessionEventSubscription,
-    replay_session_history_suffix,
-};
 pub use skill::{SkillCatalog, SkillMetadata, SkillSourceKind};
+pub use thread_event::{
+    ThreadEventBus, ThreadEventBusHandle, ThreadEventError, ThreadEventOptions,
+    ThreadEventSubscription, ThreadNotificationFact,
+};
 #[cfg(feature = "docker-tools")]
 pub use tool::DockerCliContainerBackend;
 pub use tool::{

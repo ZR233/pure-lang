@@ -4,28 +4,28 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import '../../../frb_generated.dart';
-import 'interaction.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'runtime.dart';
 import 'settings.dart';
+import 'thread_stream.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 class BridgeStudioSnapshotResponse {
   final List<ProjectDto> projects;
   final String? selectedProjectId;
-  final List<SessionDto> sessions;
-  final String? selectedSessionId;
-  final BridgeTaskRuntimeDto? selectedSessionTask;
+  final List<BridgeThread> threads;
+  final String? selectedThreadId;
+  final BridgeTaskRuntimeDto? selectedThreadTask;
   final List<BridgeStudioRecoveryIssueDto> recoveryIssues;
   final BridgeStudioSettingsDto settings;
 
   const BridgeStudioSnapshotResponse({
     required this.projects,
     this.selectedProjectId,
-    required this.sessions,
-    this.selectedSessionId,
-    this.selectedSessionTask,
+    required this.threads,
+    this.selectedThreadId,
+    this.selectedThreadTask,
     required this.recoveryIssues,
     required this.settings,
   });
@@ -34,9 +34,9 @@ class BridgeStudioSnapshotResponse {
   int get hashCode =>
       projects.hashCode ^
       selectedProjectId.hashCode ^
-      sessions.hashCode ^
-      selectedSessionId.hashCode ^
-      selectedSessionTask.hashCode ^
+      threads.hashCode ^
+      selectedThreadId.hashCode ^
+      selectedThreadTask.hashCode ^
       recoveryIssues.hashCode ^
       settings.hashCode;
 
@@ -47,9 +47,9 @@ class BridgeStudioSnapshotResponse {
           runtimeType == other.runtimeType &&
           projects == other.projects &&
           selectedProjectId == other.selectedProjectId &&
-          sessions == other.sessions &&
-          selectedSessionId == other.selectedSessionId &&
-          selectedSessionTask == other.selectedSessionTask &&
+          threads == other.threads &&
+          selectedThreadId == other.selectedThreadId &&
+          selectedThreadTask == other.selectedThreadTask &&
           recoveryIssues == other.recoveryIssues &&
           settings == other.settings;
 }
@@ -101,6 +101,31 @@ class DeepSeekBalanceInfoDto {
           totalBalance == other.totalBalance &&
           grantedBalance == other.grantedBalance &&
           toppedUpBalance == other.toppedUpBalance;
+}
+
+class InterruptTurnResponse {
+  final String threadId;
+  final String turnId;
+  final bool interrupted;
+
+  const InterruptTurnResponse({
+    required this.threadId,
+    required this.turnId,
+    required this.interrupted,
+  });
+
+  @override
+  int get hashCode =>
+      threadId.hashCode ^ turnId.hashCode ^ interrupted.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is InterruptTurnResponse &&
+          runtimeType == other.runtimeType &&
+          threadId == other.threadId &&
+          turnId == other.turnId &&
+          interrupted == other.interrupted;
 }
 
 class ProjectDto {
@@ -190,110 +215,6 @@ class ProviderUsagesResponse {
           usages == other.usages;
 }
 
-class ResolveInteractionResponse {
-  final String sessionId;
-  final BridgeInteractionChangedDto interaction;
-  final List<SessionDto> sessions;
-
-  const ResolveInteractionResponse({
-    required this.sessionId,
-    required this.interaction,
-    required this.sessions,
-  });
-
-  @override
-  int get hashCode =>
-      sessionId.hashCode ^ interaction.hashCode ^ sessions.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is ResolveInteractionResponse &&
-          runtimeType == other.runtimeType &&
-          sessionId == other.sessionId &&
-          interaction == other.interaction &&
-          sessions == other.sessions;
-}
-
-class SessionDto {
-  final String id;
-  final String projectId;
-  final String title;
-  final String mode;
-  final PlatformInt64 createdAt;
-  final PlatformInt64 updatedAt;
-  final String visibility;
-  final String? parentSessionId;
-  final String rootSessionId;
-  final String sessionKind;
-  final String ownerAgentId;
-  final String ownerRole;
-  final String agentStatus;
-  final String? agentSummary;
-  final String? agentError;
-  final PlatformInt64? agentUpdatedAt;
-
-  const SessionDto({
-    required this.id,
-    required this.projectId,
-    required this.title,
-    required this.mode,
-    required this.createdAt,
-    required this.updatedAt,
-    required this.visibility,
-    this.parentSessionId,
-    required this.rootSessionId,
-    required this.sessionKind,
-    required this.ownerAgentId,
-    required this.ownerRole,
-    required this.agentStatus,
-    this.agentSummary,
-    this.agentError,
-    this.agentUpdatedAt,
-  });
-
-  @override
-  int get hashCode =>
-      id.hashCode ^
-      projectId.hashCode ^
-      title.hashCode ^
-      mode.hashCode ^
-      createdAt.hashCode ^
-      updatedAt.hashCode ^
-      visibility.hashCode ^
-      parentSessionId.hashCode ^
-      rootSessionId.hashCode ^
-      sessionKind.hashCode ^
-      ownerAgentId.hashCode ^
-      ownerRole.hashCode ^
-      agentStatus.hashCode ^
-      agentSummary.hashCode ^
-      agentError.hashCode ^
-      agentUpdatedAt.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is SessionDto &&
-          runtimeType == other.runtimeType &&
-          id == other.id &&
-          projectId == other.projectId &&
-          title == other.title &&
-          mode == other.mode &&
-          createdAt == other.createdAt &&
-          updatedAt == other.updatedAt &&
-          visibility == other.visibility &&
-          parentSessionId == other.parentSessionId &&
-          rootSessionId == other.rootSessionId &&
-          sessionKind == other.sessionKind &&
-          ownerAgentId == other.ownerAgentId &&
-          ownerRole == other.ownerRole &&
-          agentStatus == other.agentStatus &&
-          agentSummary == other.agentSummary &&
-          agentError == other.agentError &&
-          agentUpdatedAt == other.agentUpdatedAt;
-}
-
 class SkillSummaryDto {
   final String name;
 
@@ -326,46 +247,52 @@ class SkillsResponse {
           skills == other.skills;
 }
 
-class StopPromptResponse {
-  final String sessionId;
-  final bool stopped;
-
-  const StopPromptResponse({required this.sessionId, required this.stopped});
-
-  @override
-  int get hashCode => sessionId.hashCode ^ stopped.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is StopPromptResponse &&
-          runtimeType == other.runtimeType &&
-          sessionId == other.sessionId &&
-          stopped == other.stopped;
-}
-
-class SubmitPromptResponse {
-  final String sessionId;
+class StartTurnResponse {
+  final String threadId;
   final String turnId;
-  final BigInt cursor;
+  final BigInt revision;
 
-  const SubmitPromptResponse({
-    required this.sessionId,
+  const StartTurnResponse({
+    required this.threadId,
     required this.turnId,
-    required this.cursor,
+    required this.revision,
   });
 
   @override
-  int get hashCode => sessionId.hashCode ^ turnId.hashCode ^ cursor.hashCode;
+  int get hashCode => threadId.hashCode ^ turnId.hashCode ^ revision.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is SubmitPromptResponse &&
+      other is StartTurnResponse &&
           runtimeType == other.runtimeType &&
-          sessionId == other.sessionId &&
+          threadId == other.threadId &&
           turnId == other.turnId &&
-          cursor == other.cursor;
+          revision == other.revision;
+}
+
+class SteerTurnResponse {
+  final String threadId;
+  final String turnId;
+  final BigInt revision;
+
+  const SteerTurnResponse({
+    required this.threadId,
+    required this.turnId,
+    required this.revision,
+  });
+
+  @override
+  int get hashCode => threadId.hashCode ^ turnId.hashCode ^ revision.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is SteerTurnResponse &&
+          runtimeType == other.runtimeType &&
+          threadId == other.threadId &&
+          turnId == other.turnId &&
+          revision == other.revision;
 }
 
 class ZhipuCodingPlanUsageDto {

@@ -109,9 +109,9 @@ pub(super) fn merge_commit_message(
         .join(", ");
     format!(
         "Merge executor {}\n\nPure-Task-Run: {}\nPure-Source-Agent: {}\nPure-Previous-Head: {}\nPure-Source-Commit: {}\nPure-Verification: {}",
-        scope.outcome.agent_id,
+        scope.completion.executor_agent_id,
         scope.run.id,
-        scope.outcome.agent_id,
+        scope.completion.executor_agent_id,
         scope.run.expected_head,
         scope.delivery.head_commit,
         verification

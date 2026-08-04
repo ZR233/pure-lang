@@ -4,13 +4,13 @@ StudioBridgeEventPayload _productPayloadFromFrb(
   frb.BridgeProductEventPayload payload,
 ) {
   return switch (payload) {
-    frb.BridgeProductEventPayload_SessionListChanged(
+    frb.BridgeProductEventPayload_ThreadDirectoryChanged(
       :final projectId,
-      :final sessions,
+      :final threads,
     ) =>
-      SessionListChangedPayload(
+      ThreadDirectoryChangedPayload(
         projectId: _emptyToNull(projectId),
-        sessions: sessions.map(_sessionFromFrb).toList(),
+        threads: threads.map(_threadFromFrb).toList(),
       ),
     frb.BridgeProductEventPayload_McpHealthChanged(:final health) =>
       McpHealthChangedPayload(
@@ -19,20 +19,20 @@ StudioBridgeEventPayload _productPayloadFromFrb(
       ),
     frb.BridgeProductEventPayload_LspHealthChanged(:final health) =>
       LspHealthChangedPayload(activeLspServers: health.activeLspServers),
-    frb.BridgeProductEventPayload_SessionTaskChanged(
-      :final sessionId,
+    frb.BridgeProductEventPayload_TaskChanged(
+      :final rootThreadId,
       :final task,
     ) =>
-      SessionTaskChangedPayload(
-        sessionId: sessionId,
+      TaskChangedPayload(
+        rootThreadId: rootThreadId,
         task: task == null ? null : _taskRuntimeFromFrb(task),
       ),
     frb.BridgeProductEventPayload_AgentDirectoryChanged(
-      :final rootSessionId,
+      :final rootThreadId,
       :final agent,
     ) =>
       AgentDirectoryChangedPayload(
-        rootSessionId: rootSessionId,
+        rootThreadId: rootThreadId,
         agent: _agentDirectoryEntryFromFrb(agent),
       ),
     frb.BridgeProductEventPayload_Stale(:final laggedEvents) => StalePayload(
@@ -60,24 +60,6 @@ TaskRuntimeView _taskRuntimeFromFrb(frb.BridgeTaskRuntimeDto task) {
           worktreePath: unit.worktreePath,
           branch: unit.branch,
           agentId: unit.agentId,
-        ),
-    ],
-    agents: [
-      for (final agent in task.agents)
-        TaskAgentOutcomeView(
-          agentId: agent.agentId,
-          role: agent.role,
-          status: agent.status,
-          initiatedBy: agent.initiatedBy,
-          requestedByCallId: agent.requestedByCallId,
-          summary: agent.summary,
-          error: agent.error,
-          headCommit: agent.headCommit,
-          lifecycle: agent.lifecycle,
-          activity: agent.activity,
-          progress: _agentProgressFromFrb(agent.progress),
-          updatedAt: _dateFromUnix(agent.updatedAt),
-          summaryAgeSeconds: agent.summaryAgeSeconds.toInt(),
         ),
     ],
     completions: [
@@ -160,8 +142,8 @@ StudioAgentView _agentDirectoryEntryFromFrb(
 ) {
   return StudioAgentView(
     id: agent.id,
-    sessionId: agent.sessionId,
-    rootSessionId: agent.rootSessionId,
+    threadId: agent.threadId,
+    rootThreadId: agent.rootThreadId,
     path: agent.path,
     parentPath: agent.parentPath,
     role: agent.role,
@@ -196,31 +178,6 @@ StudioProject _projectFromFrb(frb.ProjectDto project) {
   return StudioProject(id: project.id, name: project.name, path: project.path);
 }
 
-StudioSession _sessionFromFrb(frb.SessionDto session) {
-  return StudioSession(
-    id: session.id,
-    projectId: session.projectId,
-    title: session.title,
-    mode: _compileMode(session.mode),
-    createdAt: _dateFromUnix(session.createdAt),
-    updatedAt: _dateFromUnix(session.updatedAt),
-    visibility: session.visibility,
-    parentSessionId: session.parentSessionId,
-    rootSessionId: session.rootSessionId,
-    sessionKind: session.sessionKind == 'agent'
-        ? StudioSessionKind.agent
-        : StudioSessionKind.root,
-    ownerAgentId: session.ownerAgentId,
-    ownerRole: session.ownerRole,
-    agentStatus: session.agentStatus,
-    agentSummary: session.agentSummary,
-    agentError: session.agentError,
-    agentUpdatedAt: session.agentUpdatedAt == null
-        ? null
-        : _dateFromUnix(session.agentUpdatedAt!),
-  );
-}
-
 McpServerSettingsView _mcpServerFromFrb(frb.BridgeMcpServerDto server) {
   return McpServerSettingsView(
     id: server.id,
@@ -241,37 +198,17 @@ String? _emptyToNull(String value) {
   return value.isEmpty ? null : value;
 }
 
-Map<String, Map<String, StudioAgentView>> _agentsFromTyped(
-  Iterable<StudioAgentView> agents,
-) {
-  final bySession = <String, Map<String, StudioAgentView>>{};
-  for (final agent in agents) {
-    if (agent.id.isEmpty || agent.sessionId.isEmpty) {
-      continue;
-    }
-    bySession.putIfAbsent(agent.sessionId, () => {})[agent.id] = agent;
-  }
-  return bySession;
-}
-
 StudioState studioStateFromFrbSnapshot(frb.BridgeStudioSnapshotResponse value) {
   return _stateFromTypedSnapshot(
     projects: value.projects.map(_projectFromFrb).toList(),
-    sessions: value.sessions.map(_sessionFromFrb).toList(),
+    threads: value.threads.map(_threadFromFrb).toList(),
     selectedProjectId: value.selectedProjectId,
-    selectedSessionId: value.selectedSessionId,
-    messages: const [],
-    parts: const [],
-    agents: const [],
-    interactions: const [],
+    selectedThreadId: value.selectedThreadId,
     recoveryIssues: value.recoveryIssues.map(_recoveryIssueFromFrb).toList(),
-    runtime: _emptyRuntimeView().copyWith(
-      task: value.selectedSessionTask == null
-          ? null
-          : _taskRuntimeFromFrb(value.selectedSessionTask!),
-    ),
+    selectedTask: value.selectedThreadTask == null
+        ? null
+        : _taskRuntimeFromFrb(value.selectedThreadTask!),
     settings: value.settings,
-    eventNextSequence: 0,
   );
 }
 
@@ -284,7 +221,7 @@ StudioRecoveryIssue _recoveryIssueFromFrb(
       frb.BridgeRecoveryIssueScope.application =>
         RecoveryIssueScope.application,
       frb.BridgeRecoveryIssueScope.project => RecoveryIssueScope.project,
-      frb.BridgeRecoveryIssueScope.session => RecoveryIssueScope.session,
+      frb.BridgeRecoveryIssueScope.thread => RecoveryIssueScope.thread,
     },
     category: switch (issue.category) {
       frb.BridgeRecoveryIssueCategory.processLease =>
@@ -303,14 +240,14 @@ StudioRecoveryIssue _recoveryIssueFromFrb(
       for (final action in issue.availableActions)
         switch (action) {
           frb.BridgeRecoveryIssueAction.retry => RecoveryIssueAction.retry,
-          frb.BridgeRecoveryIssueAction.cleanupSession =>
-            RecoveryIssueAction.cleanupSession,
+          frb.BridgeRecoveryIssueAction.cleanupThread =>
+            RecoveryIssueAction.cleanupThread,
           frb.BridgeRecoveryIssueAction.removeProject =>
             RecoveryIssueAction.removeProject,
         },
     ],
     projectId: issue.projectId,
-    sessionId: issue.sessionId,
+    threadId: issue.threadId,
     taskRunId: issue.taskRunId,
     detail: issue.detail,
   );
@@ -326,10 +263,10 @@ RecoveryCleanupPreview _recoveryCleanupPreviewFromFrb(
       frb.BridgeRecoveryIssueScope.application =>
         RecoveryIssueScope.application,
       frb.BridgeRecoveryIssueScope.project => RecoveryIssueScope.project,
-      frb.BridgeRecoveryIssueScope.session => RecoveryIssueScope.session,
+      frb.BridgeRecoveryIssueScope.thread => RecoveryIssueScope.thread,
     },
     projectId: preview.projectId,
-    sessionId: preview.sessionId,
+    threadId: preview.threadId,
     detail: preview.detail,
     resources: [
       for (final resource in preview.resources)

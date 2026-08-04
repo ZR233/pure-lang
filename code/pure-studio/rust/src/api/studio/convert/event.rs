@@ -1,7 +1,7 @@
-use super::records::session_summary_dto;
 use super::runtime::{
     bridge_agent_directory_entry, bridge_lsp_health, bridge_mcp_health, bridge_task_runtime,
 };
+use super::thread_stream::bridge_thread;
 use crate::api::studio::types::{BridgeProductEventEnvelope, BridgeProductEventPayload};
 use pl_studio_runtime::{StudioProductEventEnvelope, StudioProductEventKind};
 
@@ -14,12 +14,12 @@ pub(crate) fn bridge_product_event(
         sequence: event.sequence,
         created_at: event.created_at,
         payload: match event.kind {
-            StudioProductEventKind::SessionListChanged {
+            StudioProductEventKind::ThreadDirectoryChanged {
                 project_id,
-                sessions,
-            } => BridgeProductEventPayload::SessionListChanged {
+                threads,
+            } => BridgeProductEventPayload::ThreadDirectoryChanged {
                 project_id,
-                sessions: sessions.into_iter().map(session_summary_dto).collect(),
+                threads: threads.into_iter().map(bridge_thread).collect(),
             },
             StudioProductEventKind::McpHealthChanged { health } => {
                 BridgeProductEventPayload::McpHealthChanged {
@@ -31,17 +31,18 @@ pub(crate) fn bridge_product_event(
                     health: bridge_lsp_health(health),
                 }
             }
-            StudioProductEventKind::SessionTaskChanged { session_id, task } => {
-                BridgeProductEventPayload::SessionTaskChanged {
-                    session_id,
-                    task: task.map(|task| Box::new(bridge_task_runtime(*task))),
-                }
-            }
+            StudioProductEventKind::TaskChanged {
+                root_thread_id,
+                task,
+            } => BridgeProductEventPayload::TaskChanged {
+                root_thread_id,
+                task: task.map(|task| Box::new(bridge_task_runtime(*task))),
+            },
             StudioProductEventKind::AgentDirectoryChanged {
-                root_session_id,
+                root_thread_id,
                 agent,
             } => BridgeProductEventPayload::AgentDirectoryChanged {
-                root_session_id,
+                root_thread_id,
                 agent: Box::new(bridge_agent_directory_entry(*agent)),
             },
         },

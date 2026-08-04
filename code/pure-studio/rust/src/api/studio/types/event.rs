@@ -1,12 +1,12 @@
-use super::response::SessionDto;
 use super::runtime::{
     BridgeAgentDirectoryEntryDto, BridgeLspHealthDto, BridgeMcpHealthDto, BridgeTaskRuntimeDto,
 };
+use super::thread_stream::BridgeThread;
 use serde::{Deserialize, Serialize};
 
 /// Flutter Bridge 的 Studio 产品事件信封。
 ///
-/// session 事件通过 `BridgeSessionStreamFrame` 透明传输，不得加入此类型。
+/// Thread 高频事件通过 Thread subscription 传输，不得加入此类型。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct BridgeProductEventEnvelope {
@@ -20,9 +20,9 @@ pub struct BridgeProductEventEnvelope {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub enum BridgeProductEventPayload {
-    SessionListChanged {
+    ThreadDirectoryChanged {
         project_id: String,
-        sessions: Vec<SessionDto>,
+        threads: Vec<BridgeThread>,
     },
     McpHealthChanged {
         health: BridgeMcpHealthDto,
@@ -30,12 +30,12 @@ pub enum BridgeProductEventPayload {
     LspHealthChanged {
         health: BridgeLspHealthDto,
     },
-    SessionTaskChanged {
-        session_id: String,
+    TaskChanged {
+        root_thread_id: String,
         task: Option<Box<BridgeTaskRuntimeDto>>,
     },
     AgentDirectoryChanged {
-        root_session_id: String,
+        root_thread_id: String,
         agent: Box<BridgeAgentDirectoryEntryDto>,
     },
     Stale {

@@ -7,8 +7,6 @@ use pretty_assertions::assert_eq;
 use tokio::sync::Notify;
 
 use super::*;
-use crate::AgentSession;
-
 #[derive(Debug, Clone)]
 struct TestError(String);
 
@@ -28,13 +26,14 @@ enum FactoryMode {
 
 #[derive(Clone)]
 struct TestRepository {
-    states: Arc<Mutex<BTreeMap<AgentId, AgentDurableState>>>,
-    mutations: Arc<Mutex<Vec<AgentStateMutation>>>,
+    states: Arc<Mutex<BTreeMap<AgentId, ThreadActorState>>>,
+    mutations: Arc<Mutex<Vec<ThreadMutation>>>,
     fail_trace: Arc<Mutex<bool>>,
     fail_terminal: Arc<Mutex<bool>>,
     fail_registration: Arc<Mutex<bool>>,
     fail_lifecycle: Arc<Mutex<Option<AgentLifecycleState>>>,
     fail_turn_queue: Arc<Mutex<bool>>,
+    fail_turn_started: Arc<Mutex<bool>>,
 }
 
 impl TestRepository {
@@ -47,10 +46,11 @@ impl TestRepository {
             fail_registration: Arc::new(Mutex::new(false)),
             fail_lifecycle: Arc::new(Mutex::new(None)),
             fail_turn_queue: Arc::new(Mutex::new(false)),
+            fail_turn_started: Arc::new(Mutex::new(false)),
         }
     }
 
-    fn with_state(state: AgentDurableState) -> Self {
+    fn with_state(state: ThreadActorState) -> Self {
         let repository = Self::empty();
         repository
             .states
@@ -72,12 +72,16 @@ impl TestRepository {
         *self.fail_lifecycle.lock().unwrap() = Some(lifecycle);
     }
 
-    fn state(&self, id: &AgentId) -> AgentDurableState {
+    fn fail_next_turn_started_commit(&self) {
+        *self.fail_turn_started.lock().unwrap() = true;
+    }
+
+    fn state(&self, id: &AgentId) -> ThreadActorState {
         self.states.lock().unwrap()[id].clone()
     }
 }
 
-impl AgentStateRepository for TestRepository {
+impl ThreadRepository for TestRepository {
     type Error = TestError;
 
     async fn restore_runtime(&self) -> std::result::Result<Vec<RestoredAgentRuntime>, Self::Error> {
@@ -89,15 +93,15 @@ impl AgentStateRepository for TestRepository {
             .cloned()
             .map(|state| RestoredAgentRuntime {
                 state,
-                session_projection: None,
+                thread_snapshot: None,
             })
             .collect())
     }
 
     async fn commit(
         &self,
-        commit: SessionHistoryCommit,
-    ) -> std::result::Result<AgentCommitOutcome, Self::Error> {
+        commit: ThreadCommit,
+    ) -> std::result::Result<ThreadCommitOutcome, Self::Error> {
         if commit.expected_revision.is_none()
             && std::mem::take(&mut *self.fail_registration.lock().unwrap())
         {
@@ -135,22 +139,27 @@ impl AgentStateRepository for TestRepository {
         {
             return Err(TestError("turn queue commit failed".to_string()));
         }
+        if commit
+            .facts
+            .runtime_events
+            .iter()
+            .any(|event| matches!(event.kind, AgentRuntimeEventKind::TurnStarted { .. }))
+            && std::mem::take(&mut *self.fail_turn_started.lock().unwrap())
+        {
+            return Err(TestError("turn started commit failed".to_string()));
+        }
         let mut states = self.states.lock().unwrap();
         let actual = states
             .get(&commit.agent_id)
             .map(|state| state.snapshot.revision);
         if actual != commit.expected_revision {
-            return Ok(AgentCommitOutcome::RevisionConflict {
+            return Ok(ThreadCommitOutcome::RevisionConflict {
                 actual_revision: actual,
             });
         }
         self.mutations.lock().unwrap().push(commit.mutation.clone());
         states.insert(commit.agent_id, commit.next_state);
-        Ok(AgentCommitOutcome::Applied)
-    }
-
-    async fn barrier(&self) -> std::result::Result<(), Self::Error> {
-        Ok(())
+        Ok(ThreadCommitOutcome::Applied)
     }
 }
 
@@ -386,8 +395,8 @@ fn identity(id: &str) -> AgentIdentity {
     }
 }
 
-fn registration(id: &str, session: &str) -> AgentRegistration {
-    AgentRegistration::with_session(identity(id), SessionId::new(session).unwrap())
+fn registration(id: &str, _former_session: &str) -> AgentRegistration {
+    AgentRegistration::new(identity(id))
 }
 
 fn test_options() -> AgentRuntimeOptions {
@@ -395,15 +404,16 @@ fn test_options() -> AgentRuntimeOptions {
         command_capacity: 32,
         cancel_grace: Duration::from_millis(10),
         restored_inputs: RestoredInputPolicy::Start,
-        session_events: crate::SessionEventOptions::default(),
+        thread_events: crate::ThreadEventOptions::default(),
     }
 }
 
 fn child_spawn_request(parent_id: AgentId) -> AgentSpawnRequest {
     AgentSpawnRequest {
+        thread_id: ThreadId::new("child-chat").unwrap(),
         parent_id,
         role: crate::AgentRoleId::new("worker").unwrap(),
-        session: AgentSessionState::empty(SessionId::new("child-chat").unwrap()),
+        session: ThreadContextState::empty(),
         initial_message: None,
         metadata: serde_json::Value::Null,
     }
@@ -443,7 +453,7 @@ async fn failed_turn_returns_agent_to_active_idle_and_commits_snapshot() {
     handle
         .submit(
             agent_id.clone(),
-            AgentSubmitRequest::start(SessionId::new("chat").unwrap(), "hello"),
+            AgentSubmitRequest::start(ThreadId::new("root").unwrap(), "hello"),
         )
         .await
         .unwrap();
@@ -469,7 +479,7 @@ async fn wait_agents_observes_turn_that_finished_before_subscription() {
     handle
         .submit(
             agent_id.clone(),
-            AgentSubmitRequest::start(SessionId::new("chat").unwrap(), "hello"),
+            AgentSubmitRequest::start(ThreadId::new("root").unwrap(), "hello"),
         )
         .await
         .unwrap();
@@ -501,7 +511,7 @@ async fn submit_rejects_session_not_owned_by_target_agent() {
     let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
     let handle = runtime.handle();
     let agent_id = AgentId::new("root").unwrap();
-    let unknown_session = SessionId::new("child-session").unwrap();
+    let unknown_session = ThreadId::new("child-session").unwrap();
 
     handle.register(registration("root", "chat")).await.unwrap();
     let error = handle
@@ -514,15 +524,15 @@ async fn submit_rejects_session_not_owned_by_target_agent() {
 
     assert_eq!(
         error,
-        AgentRuntimeError::SessionMismatch {
+        AgentRuntimeError::ThreadMismatch {
             agent_id: agent_id.clone(),
-            expected: SessionId::new("chat").unwrap(),
+            expected: ThreadId::new("root").unwrap(),
             actual: unknown_session,
         }
     );
     assert_eq!(
-        repository.state(&agent_id).session.id,
-        SessionId::new("chat").unwrap()
+        repository.state(&agent_id).snapshot.identity.id,
+        ThreadId::new("root").unwrap()
     );
     runtime.shutdown().await.unwrap();
 }
@@ -534,7 +544,7 @@ async fn current_session_submit_resolves_the_single_owned_session() {
     let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
     let handle = runtime.handle();
     let agent_id = AgentId::new("root").unwrap();
-    let session_id = SessionId::new("chat").unwrap();
+    let session_id = ThreadId::new("root").unwrap();
 
     handle.register(registration("root", "chat")).await.unwrap();
     handle
@@ -552,7 +562,7 @@ async fn current_session_submit_resolves_the_single_owned_session() {
             .snapshot
             .last_turn
             .as_ref()
-            .map(|turn| &turn.session_id),
+            .map(|turn| &turn.thread_id),
         Some(&session_id)
     );
     runtime.shutdown().await.unwrap();
@@ -570,10 +580,7 @@ async fn current_session_submit_rejects_a_missing_parent_graph() {
     child_identity.depth = 1;
 
     handle
-        .register(AgentRegistration::with_session(
-            child_identity,
-            SessionId::new("child-chat").unwrap(),
-        ))
+        .register(AgentRegistration::new(child_identity))
         .await
         .unwrap();
     let error = handle
@@ -602,7 +609,7 @@ async fn concurrent_submits_are_serialized_without_losing_inputs() {
         .unwrap();
     let handle = runtime.handle();
     let agent_id = AgentId::new("root").unwrap();
-    let session_id = SessionId::new("chat").unwrap();
+    let session_id = ThreadId::new("root").unwrap();
     handle.register(registration("root", "chat")).await.unwrap();
 
     let submits = (0..16).map(|index| {
@@ -633,182 +640,56 @@ async fn concurrent_submits_are_serialized_without_losing_inputs() {
 }
 
 #[tokio::test]
-async fn activity_updates_are_durable_and_stale_turn_updates_are_ignored() {
-    let repository = TestRepository::empty();
-    let host = TestHost::new(repository.clone(), FactoryMode::Block);
-    let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
-    let handle = runtime.handle();
-    let agent_id = AgentId::new("root").unwrap();
-    handle.register(registration("root", "chat")).await.unwrap();
-    let turn_id = handle
-        .submit(
-            agent_id.clone(),
-            AgentSubmitRequest::start(SessionId::new("chat").unwrap(), "block"),
-        )
-        .await
-        .unwrap();
-
-    handle
-        .set_activity(
-            agent_id.clone(),
-            turn_id.clone(),
-            AgentActivityState::WaitingTool,
-        )
-        .await
-        .unwrap();
-    assert_eq!(
-        repository.state(&agent_id).snapshot.activity,
-        AgentActivityState::WaitingTool
-    );
-    handle
-        .set_activity(
-            agent_id.clone(),
-            turn_id.clone(),
-            AgentActivityState::WaitingInteraction,
-        )
-        .await
-        .unwrap();
-    assert_eq!(
-        repository.state(&agent_id).snapshot.activity,
-        AgentActivityState::WaitingInteraction
-    );
-
-    handle
-        .cancel_turn(agent_id.clone(), turn_id.clone())
-        .await
-        .unwrap();
-    wait_for_idle(&handle, agent_id.clone()).await;
-    let terminal_revision = repository.state(&agent_id).snapshot.revision;
-    handle
-        .set_activity(agent_id.clone(), turn_id, AgentActivityState::Running)
-        .await
-        .unwrap();
-
-    assert_eq!(
-        repository.state(&agent_id).snapshot.revision,
-        terminal_revision
-    );
-    runtime.shutdown().await.unwrap();
-}
-
-#[tokio::test]
-async fn checkpoint_survives_cancel_and_stale_sequences_are_ignored() {
-    let repository = TestRepository::empty();
-    let host = TestHost::new(repository.clone(), FactoryMode::Block);
+async fn concurrent_start_only_submits_allow_one_turn_and_steer_is_atomic() {
+    let host = TestHost::new(TestRepository::empty(), FactoryMode::Block);
     let runtime = AgentRuntime::start(host.clone(), test_options())
         .await
         .unwrap();
     let handle = runtime.handle();
     let agent_id = AgentId::new("root").unwrap();
-    let session_id = SessionId::new("chat").unwrap();
+    let thread_id = ThreadId::new("root").unwrap();
     handle.register(registration("root", "chat")).await.unwrap();
-    let turn_id = handle
-        .submit(
-            agent_id.clone(),
-            AgentSubmitRequest::start(session_id.clone(), "block"),
-        )
-        .await
-        .unwrap();
+
+    let submits = ["first", "second"].map(|message| {
+        let handle = handle.clone();
+        let agent_id = agent_id.clone();
+        let thread_id = thread_id.clone();
+        tokio::spawn(async move {
+            handle
+                .submit(
+                    agent_id,
+                    AgentSubmitRequest::start(thread_id, message)
+                        .with_turn_policy(AgentTurnSubmitPolicy::StartOnly),
+                )
+                .await
+        })
+    });
+    let mut started_turn = None;
+    let mut rejected = 0;
+    for submit in submits {
+        match submit.await.unwrap() {
+            Ok(turn_id) => started_turn = Some(turn_id),
+            Err(AgentRuntimeError::InvalidInput(reason)) => {
+                assert_eq!(reason, "startTurn requires an idle Thread");
+                rejected += 1;
+            }
+            Err(error) => panic!("unexpected concurrent start result: {error}"),
+        }
+    }
+    let started_turn = started_turn.expect("one concurrent start must win");
+    assert_eq!(rejected, 1);
     wait_for_prepared_messages(&host.turn_factory, 1).await;
 
-    let content = "review manifest at the selected head";
-    let section = pl_protocol::PinnedContextSection {
-        id: pl_protocol::ContextSectionId::new(crate::REVIEW_MANIFEST_SECTION_ID).unwrap(),
-        revision: 1,
-        title: "Review manifest".to_string(),
-        content: content.to_string(),
-        content_hash: crate::canonical_content_hash(content.as_bytes()),
-        updated_at: 1,
-    };
-    let mut checkpoint_session = AgentSession::new();
-    checkpoint_session.upsert_pinned_context(section.clone());
-    let note = pl_protocol::SessionNote {
-        revision: 1,
-        content: "durable session note".to_string(),
-        content_hash: crate::canonical_content_hash(b"durable session note"),
-        updated_at: 1,
-    };
-    checkpoint_session.replace_session_note(note.clone());
-    handle
-        .checkpoint_turn(
+    let steered_turn = handle
+        .submit(
             agent_id.clone(),
-            AgentTurnCheckpoint {
-                turn_id: turn_id.clone(),
-                session_id: session_id.clone(),
-                sequence: 1,
-                session: checkpoint_session,
-                reason: TurnCheckpointReason::WorkingSetChanged,
-                consumed_mail_ids: Vec::new(),
-            },
+            AgentSubmitRequest::start(thread_id, "steer")
+                .with_turn_policy(AgentTurnSubmitPolicy::SteerOnly),
         )
         .await
         .unwrap();
-    let checkpoint_revision = repository.state(&agent_id).snapshot.revision;
+    assert_eq!(steered_turn, started_turn);
 
-    handle
-        .checkpoint_turn(
-            agent_id.clone(),
-            AgentTurnCheckpoint {
-                turn_id: turn_id.clone(),
-                session_id: session_id.clone(),
-                sequence: 1,
-                session: AgentSession::new(),
-                reason: TurnCheckpointReason::BeforeInference,
-                consumed_mail_ids: Vec::new(),
-            },
-        )
-        .await
-        .unwrap();
-    assert_eq!(
-        repository.state(&agent_id).snapshot.revision,
-        checkpoint_revision
-    );
-
-    handle
-        .cancel_turn(agent_id.clone(), turn_id.clone())
-        .await
-        .unwrap();
-    wait_for_idle(&handle, agent_id.clone()).await;
-    let terminal_state = repository.state(&agent_id);
-    assert_eq!(
-        terminal_state
-            .session
-            .session
-            .pinned_context_sections()
-            .cloned()
-            .collect::<Vec<_>>(),
-        vec![section]
-    );
-    assert_eq!(terminal_state.session.session.session_note(), Some(&note));
-    let terminal_revision = terminal_state.snapshot.revision;
-
-    handle
-        .checkpoint_turn(
-            agent_id.clone(),
-            AgentTurnCheckpoint {
-                turn_id,
-                session_id: session_id.clone(),
-                sequence: 2,
-                session: AgentSession::new(),
-                reason: TurnCheckpointReason::Terminal,
-                consumed_mail_ids: Vec::new(),
-            },
-        )
-        .await
-        .unwrap();
-    assert_eq!(
-        repository.state(&agent_id).snapshot.revision,
-        terminal_revision
-    );
-    assert!(
-        repository
-            .mutations
-            .lock()
-            .unwrap()
-            .contains(&AgentStateMutation::ReplaceSession {
-                session_id: session_id.clone(),
-            })
-    );
     runtime.shutdown().await.unwrap();
 }
 
@@ -828,7 +709,7 @@ async fn cancellation_aborts_blocked_turn_after_grace_and_records_cancelled_outc
     let turn_id = handle
         .submit(
             agent_id.clone(),
-            AgentSubmitRequest::start(SessionId::new("chat").unwrap(), "block"),
+            AgentSubmitRequest::start(ThreadId::new("root").unwrap(), "block"),
         )
         .await
         .unwrap();
@@ -860,7 +741,7 @@ async fn shutdown_durably_cancels_running_turn_before_actor_exit() {
     handle
         .submit(
             agent_id.clone(),
-            AgentSubmitRequest::start(SessionId::new("chat").unwrap(), "block"),
+            AgentSubmitRequest::start(ThreadId::new("root").unwrap(), "block"),
         )
         .await
         .unwrap();
@@ -887,7 +768,7 @@ async fn terminal_repository_failure_faults_actor_and_rejects_new_input() {
     handle
         .submit(
             agent_id.clone(),
-            AgentSubmitRequest::start(SessionId::new("chat").unwrap(), "fail terminal"),
+            AgentSubmitRequest::start(ThreadId::new("root").unwrap(), "fail terminal"),
         )
         .await
         .unwrap();
@@ -909,7 +790,7 @@ async fn terminal_repository_failure_faults_actor_and_rejects_new_input() {
     let error = handle
         .submit(
             agent_id.clone(),
-            AgentSubmitRequest::start(SessionId::new("chat").unwrap(), "again"),
+            AgentSubmitRequest::start(ThreadId::new("root").unwrap(), "again"),
         )
         .await
         .unwrap_err();
@@ -918,6 +799,65 @@ async fn terminal_repository_failure_faults_actor_and_rejects_new_input() {
         AgentRuntimeError::NotActive(agent_id, AgentLifecycleState::Faulted)
     );
     runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn turn_started_repository_failure_faults_only_the_in_memory_actor() {
+    let repository = TestRepository::empty();
+    repository.fail_next_turn_started_commit();
+    let host = TestHost::new(repository.clone(), FactoryMode::Fail);
+    let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
+    let handle = runtime.handle();
+    let agent_id = AgentId::new("root").unwrap();
+    handle.register(registration("root", "chat")).await.unwrap();
+    handle
+        .submit(
+            agent_id.clone(),
+            AgentSubmitRequest::start(ThreadId::new("root").unwrap(), "fail turn start"),
+        )
+        .await
+        .unwrap();
+
+    let waited = wait_for_idle(&handle, agent_id.clone()).await;
+    assert_eq!(waited.snapshot.lifecycle, AgentLifecycleState::Faulted);
+    assert_eq!(waited.snapshot.activity, AgentActivityState::Idle);
+    assert_eq!(waited.snapshot.active_turn_id, None);
+    let failed_turn = waited.last_turn.expect("failed turn should be visible");
+    assert_eq!(failed_turn.kind, TurnOutcomeKind::Failed);
+    assert!(
+        failed_turn
+            .reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("turn started commit failed"))
+    );
+
+    let durable = repository.state(&agent_id).snapshot;
+    assert_eq!(durable.lifecycle, AgentLifecycleState::Active);
+    assert_eq!(durable.activity, AgentActivityState::Queued);
+    assert_eq!(durable.active_turn_id, None);
+    assert_eq!(durable.pending_inputs, 1);
+    assert_eq!(durable.last_turn, None);
+    runtime.shutdown().await.unwrap();
+
+    let restarted_host = TestHost::new(repository.clone(), FactoryMode::Fail);
+    let restarted = AgentRuntime::start(restarted_host.clone(), test_options())
+        .await
+        .unwrap();
+    let recovered = wait_for_idle(&restarted.handle(), agent_id.clone()).await;
+    assert_eq!(recovered.snapshot.lifecycle, AgentLifecycleState::Active);
+    assert_eq!(recovered.snapshot.activity, AgentActivityState::Idle);
+    assert_eq!(recovered.snapshot.pending_inputs, 0);
+    assert_eq!(
+        restarted_host
+            .turn_factory
+            .prepared_messages
+            .lock()
+            .unwrap()
+            .as_slice(),
+        ["fail turn start"]
+    );
+    assert_eq!(repository.state(&agent_id).snapshot, recovered.snapshot);
+    restarted.shutdown().await.unwrap();
 }
 
 #[tokio::test]
@@ -956,13 +896,13 @@ async fn restart_recovery_cancels_running_turn_before_actor_registration() {
 #[tokio::test]
 async fn restart_recovery_replays_pending_inputs_in_fifo_order() {
     let agent_id = AgentId::new("root").unwrap();
-    let session_id = SessionId::new("chat").unwrap();
+    let session_id = ThreadId::new("root").unwrap();
     let mut state = registration("root", "chat").into_durable_state();
     for (index, message) in ["first", "second"].into_iter().enumerate() {
-        state.pending_inputs.push_back(PendingAgentInput {
+        state.pending_inputs.push_back(DurableMailboxEnvelope {
             mail_id: format!("mail:turn-{index}"),
             turn_id: TurnId::new(format!("turn-{index}")).unwrap(),
-            session_id: session_id.clone(),
+            thread_id: session_id.clone(),
             message: message.to_string(),
             metadata: serde_json::Value::Null,
             presentation: MailboxPresentation::User,
@@ -995,12 +935,12 @@ async fn restart_recovery_replays_pending_inputs_in_fifo_order() {
 #[tokio::test]
 async fn restored_inputs_wait_for_host_resource_activation() {
     let agent_id = AgentId::new("root").unwrap();
-    let session_id = SessionId::new("chat").unwrap();
+    let session_id = ThreadId::new("root").unwrap();
     let mut state = registration("root", "chat").into_durable_state();
-    state.pending_inputs.push_back(PendingAgentInput {
+    state.pending_inputs.push_back(DurableMailboxEnvelope {
         mail_id: "mail:restored-turn".to_string(),
         turn_id: TurnId::new("restored-turn").unwrap(),
-        session_id,
+        thread_id: session_id,
         message: "after-resources-ready".to_string(),
         metadata: serde_json::Value::Null,
         presentation: MailboxPresentation::User,
@@ -1050,9 +990,10 @@ async fn close_closes_descendants_from_deepest_to_root() {
         .unwrap();
     let child = handle
         .spawn(AgentSpawnRequest {
+            thread_id: ThreadId::new("child-chat").unwrap(),
             parent_id: root.clone(),
             role: crate::AgentRoleId::new("worker").unwrap(),
-            session: AgentSessionState::empty(SessionId::new("child-chat").unwrap()),
+            session: ThreadContextState::empty(),
             initial_message: None,
             metadata: serde_json::Value::Null,
         })
@@ -1063,9 +1004,10 @@ async fn close_closes_descendants_from_deepest_to_root() {
         .id;
     let grandchild = handle
         .spawn(AgentSpawnRequest {
+            thread_id: ThreadId::new("grandchild-chat").unwrap(),
             parent_id: child.clone(),
             role: crate::AgentRoleId::new("worker").unwrap(),
-            session: AgentSessionState::empty(SessionId::new("grandchild-chat").unwrap()),
+            session: ThreadContextState::empty(),
             initial_message: None,
             metadata: serde_json::Value::Null,
         })
@@ -1369,7 +1311,7 @@ async fn closing_running_agent_durably_records_cancelled_outcome() {
     handle
         .submit(
             root.clone(),
-            AgentSubmitRequest::start(SessionId::new("chat").unwrap(), "block"),
+            AgentSubmitRequest::start(ThreadId::new("root").unwrap(), "block"),
         )
         .await
         .unwrap();

@@ -4,7 +4,6 @@ use sea_orm::{
     TransactionTrait,
 };
 
-use super::outcome::agent_outcome_record;
 use super::task_run_record;
 use super::work_unit::work_unit_record;
 use crate::agent::worktree::git_compatible_path;
@@ -12,8 +11,8 @@ use crate::studio::entity as entities;
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    AgentOutcomeStatus, AllocateExecutor, ExecutorAllocation, TaskRunPhase,
-    TaskWorktreeDisposition, WorkUnitStatus, owned_paths_overlap,
+    AllocateExecutor, ExecutorAllocation, TaskRunPhase, TaskWorktreeDisposition,
+    ThreadExecutionStatus, WorkUnitStatus, owned_paths_overlap,
 };
 
 const MAX_ACTIVE_EXECUTORS: usize = 4;
@@ -25,7 +24,7 @@ impl StudioStore {
     ) -> Result<ExecutorAllocation> {
         let tx = self.db.begin().await?;
         let run_model = entities::task_run::Entity::find()
-            .filter(entities::task_run::Column::SessionId.eq(input.session_id))
+            .filter(entities::task_run::Column::RootThreadId.eq(input.thread_id))
             .filter(entities::task_run::Column::Phase.is_not_in([
                 TaskRunPhase::Completed.as_str(),
                 TaskRunPhase::Blocked.as_str(),
@@ -100,27 +99,11 @@ impl StudioStore {
                 branch: Set(branch),
                 worktree_disposition: Set(TaskWorktreeDisposition::Protect.as_str().to_string()),
                 attempt: Set(attempt_i32),
-                agent_id: Set(Some(input.agent_id.clone())),
-                created_at: Set(now),
-                updated_at: Set(now),
-            }
-            .insert(&tx)
-            .await?,
-        )?;
-        let outcome = agent_outcome_record(
-            entities::agent_outcome::ActiveModel {
-                id: Set(new_id("agent-outcome")),
-                task_run_id: Set(run.id.clone()),
-                work_unit_id: Set(Some(work_unit_id.clone())),
-                agent_id: Set(input.agent_id),
-                owner_path: Set(input.owner_path),
-                initiated_by: Set("planner".to_string()),
+                executor_thread_id: Set(Some(input.agent_id)),
                 requested_by_call_id: Set(input.requested_by_call_id),
-                role: Set("executor".to_string()),
-                status: Set(AgentOutcomeStatus::Queued.as_str().to_string()),
-                attempt: Set(attempt_i32),
-                summary: Set(None),
-                error: Set(None),
+                execution_status: Set(ThreadExecutionStatus::Queued.as_str().to_string()),
+                execution_summary: Set(None),
+                execution_error: Set(None),
                 created_at: Set(now),
                 updated_at: Set(now),
             }
@@ -128,11 +111,7 @@ impl StudioStore {
             .await?,
         )?;
         tx.commit().await?;
-        Ok(ExecutorAllocation {
-            run,
-            work_unit,
-            outcome,
-        })
+        Ok(ExecutorAllocation { run, work_unit })
     }
 
     pub(crate) async fn activate_executor(&self, work_unit_id: &str, agent_id: &str) -> Result<()> {
@@ -140,7 +119,7 @@ impl StudioStore {
             work_unit_id,
             agent_id,
             WorkUnitStatus::Running,
-            AgentOutcomeStatus::Running,
+            ThreadExecutionStatus::Running,
             None,
         )
         .await
@@ -156,7 +135,7 @@ impl StudioStore {
             work_unit_id,
             agent_id,
             WorkUnitStatus::Failed,
-            AgentOutcomeStatus::Failed,
+            ThreadExecutionStatus::Failed,
             Some(error.to_string()),
         )
         .await
@@ -167,34 +146,22 @@ impl StudioStore {
         work_unit_id: &str,
         agent_id: &str,
         work_unit_status: WorkUnitStatus,
-        outcome_status: AgentOutcomeStatus,
+        execution_status: ThreadExecutionStatus,
         error: Option<String>,
     ) -> Result<()> {
         let tx = self.db.begin().await?;
-        let outcome = entities::agent_outcome::Entity::find()
-            .filter(entities::agent_outcome::Column::AgentId.eq(agent_id.to_string()))
-            .filter(entities::agent_outcome::Column::WorkUnitId.eq(Some(work_unit_id.to_string())))
-            .one(&tx)
-            .await?
-            .context("executor outcome not found")?;
-        let stored_work_unit_id = outcome
-            .work_unit_id
-            .clone()
-            .context("executor outcome has no work unit")?;
-        let work_unit = entities::work_unit::Entity::find_by_id(stored_work_unit_id)
+        let work_unit = entities::work_unit::Entity::find_by_id(work_unit_id.to_string())
+            .filter(entities::work_unit::Column::ExecutorThreadId.eq(agent_id.to_string()))
             .one(&tx)
             .await?
             .context("executor work unit not found")?;
         let now = unix_seconds();
         let mut active_work_unit: entities::work_unit::ActiveModel = work_unit.into();
         active_work_unit.status = Set(work_unit_status.as_str().to_string());
+        active_work_unit.execution_status = Set(execution_status.as_str().to_string());
+        active_work_unit.execution_error = Set(error);
         active_work_unit.updated_at = Set(now);
         active_work_unit.update(&tx).await?;
-        let mut active_outcome: entities::agent_outcome::ActiveModel = outcome.into();
-        active_outcome.status = Set(outcome_status.as_str().to_string());
-        active_outcome.error = Set(error);
-        active_outcome.updated_at = Set(now);
-        active_outcome.update(&tx).await?;
         tx.commit().await?;
         Ok(())
     }

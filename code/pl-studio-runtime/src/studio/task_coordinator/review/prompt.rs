@@ -83,13 +83,13 @@ pub(crate) async fn build_review_prompt(
             )
             .await?;
             let completions = coordinator.store.list_work_completions(&run.id).await?;
-            let outcomes = coordinator.store.list_agent_outcomes(&run.id).await?;
+            let work_units = coordinator.store.list_work_units(&run.id).await?;
             format!(
-                "## Scope\nIntegrated\n\n## Task HEAD\n{}\n\n## Integrated diff\n```diff\n{}\n```\n\n## Work completions\n```json\n{}\n```\n\n## Agent outcomes\n```json\n{}\n```",
+                "## Scope\nIntegrated\n\n## Task HEAD\n{}\n\n## Integrated diff\n```diff\n{}\n```\n\n## Work completions\n```json\n{}\n```\n\n## WorkUnit execution state\n```json\n{}\n```",
                 run.expected_head,
                 diff,
                 serde_json::to_string_pretty(&completions)?,
-                serde_json::to_string_pretty(&outcomes)?
+                serde_json::to_string_pretty(&work_units)?
             )
         }
     };

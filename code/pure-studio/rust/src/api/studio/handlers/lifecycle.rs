@@ -147,7 +147,7 @@ pub async fn open_project(path: String) -> Result<BridgeStudioSnapshotResponse, 
         .studio
         .reconcile_lsp_runtime_for_project(&project.id)
         .await?;
-    let _ = bridge.studio.ensure_project_sessions(&project.id).await?;
+    let _ = bridge.studio.ensure_project_threads(&project.id).await?;
     Ok(studio_snapshot_inner(bridge, Some(project.id), None).await?)
 }
 

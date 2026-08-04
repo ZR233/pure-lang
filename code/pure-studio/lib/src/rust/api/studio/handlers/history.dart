@@ -6,11 +6,21 @@
 import '../../../frb_generated.dart';
 import '../types/error.dart';
 import '../types/history.dart';
-import '../types/session_stream.dart';
+import '../types/thread_stream.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-Future<LoadSessionHistoryPageResponse> loadSessionHistoryPage({
-  required LoadSessionHistoryPageRequest request,
-}) => RustLib.instance.api.crateApiStudioHandlersHistoryLoadSessionHistoryPage(
+Future<List<BridgeThread>> listThreads({required String projectId}) => RustLib
+    .instance
+    .api
+    .crateApiStudioHandlersHistoryListThreads(projectId: projectId);
+
+Future<BridgeThreadSnapshot> readThread({required String threadId}) => RustLib
+    .instance
+    .api
+    .crateApiStudioHandlersHistoryReadThread(threadId: threadId);
+
+Future<BridgeThreadTurnPage> listThreadTurns({
+  required ListThreadTurnsRequest request,
+}) => RustLib.instance.api.crateApiStudioHandlersHistoryListThreadTurns(
   request: request,
 );

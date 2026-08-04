@@ -86,10 +86,10 @@ impl TaskCoordinator {
 
     pub(crate) fn task_update_design_tool(
         self: &Arc<Self>,
-        studio_session_id: impl Into<String>,
+        root_thread_id: impl Into<String>,
     ) -> RegisteredTool {
         let coordinator = self.clone();
-        let studio_session_id = studio_session_id.into();
+        let root_thread_id = root_thread_id.into();
         RegisteredTool::from_fallible_execution_result(
             "task_update_design",
             "Apply and commit one design-only Codex patch for the current Task run. The patch argument must contain exactly one complete block: one `*** Begin Patch` wrapper, one matching `*** End Patch` wrapper, and nothing outside them. Do not prepend a template, append another block, use Markdown fences, or include any previous failed attempt. The patch itself declares the changed design files; plan prose is reading context only. Use `*** Add File: design/<path>` for a new file and prefix every content line with `+`, without an `@@` hunk. Use `*** Update File:` only for an existing file. After failure, follow the reported cause, reread stale targets when needed, then replace the entire argument with one corrected block. Applied hunks from a failed call are rolled back. Never use `*** New File`.",
@@ -102,13 +102,13 @@ impl TaskCoordinator {
             )]),
             move |input, context| {
                 let coordinator = coordinator.clone();
-                let studio_session_id = studio_session_id.clone();
+                let root_thread_id = root_thread_id.clone();
                 async move {
                     let arguments: TaskUpdateDesignInput = serde_json::from_value(input.arguments)
                         .context("invalid task_update_design input")?;
                     let output = coordinator
                         .update_design(
-                            &studio_session_id,
+                            &root_thread_id,
                             &context.workspace_root,
                             &arguments.patch,
                         )
@@ -124,13 +124,13 @@ impl TaskCoordinator {
 
     pub(crate) async fn update_design(
         &self,
-        studio_session_id: &str,
+        root_thread_id: &str,
         caller_workspace: &Path,
         patch: &str,
     ) -> Result<DesignUpdateOutput> {
         let _mutation_guard = self.lock_branch_mutation().await;
         let (run, _lease) = self
-            .load_mutation_scope(studio_session_id, caller_workspace)
+            .load_mutation_scope(root_thread_id, caller_workspace)
             .await?;
         ensure_design_phase(run.phase)?;
         let validated = validate_design_patch(caller_workspace, patch).await?;
@@ -140,12 +140,12 @@ impl TaskCoordinator {
     }
     async fn load_mutation_scope(
         &self,
-        studio_session_id: &str,
+        root_thread_id: &str,
         caller_workspace: &Path,
     ) -> Result<(TaskRunRecord, BranchLeaseRecord)> {
         let run = self
             .store
-            .read_active_task_run_for_session(studio_session_id)
+            .read_active_task_run_for_root_thread(root_thread_id)
             .await?;
         let lease = self
             .store

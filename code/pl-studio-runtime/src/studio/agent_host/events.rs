@@ -1,12 +1,8 @@
 use crate::config::StudioRole;
-use crate::{
-    PlanLifecycleEvent, PlanLifecycleState, SessionEventFact, SessionEventKind,
-    StudioAgentDirectoryEntry, StudioAgentProgressRuntime,
-};
+use crate::{PlanLifecycleState, StudioAgentDirectoryEntry, StudioAgentProgressRuntime};
 use pl_core::{
     AgentActivityState, AgentCommitObserver, AgentCommittedEvent, AgentId, AgentLifecycleState,
-    AgentProgressStage, AgentRuntimeEventKind, AgentRuntimeHandle, AgentSnapshot, SessionId,
-    TurnOutcomeKind,
+    AgentProgressStage, AgentRuntimeEventKind, AgentRuntimeHandle, AgentSnapshot, TurnOutcomeKind,
 };
 use pl_trace::{TraceEvent, TraceEventKind, TracePartKind};
 use tokio::sync::{mpsc, watch};
@@ -129,17 +125,17 @@ impl StudioAgentCommitObserver {
             match &event.kind {
                 AgentRuntimeEventKind::TurnQueued { input, .. } => {
                     self.runtime_state
-                        .mark_active_turn(input.session_id.to_string(), input.turn_id.to_string());
+                        .mark_active_turn(input.thread_id.to_string(), input.turn_id.to_string());
                 }
                 AgentRuntimeEventKind::TurnFinished { outcome, .. }
                 | AgentRuntimeEventKind::RecoveryCancelledTurn { outcome, .. } => {
                     self.runtime_state
-                        .clear_active_turn(outcome.session_id.as_str(), outcome.turn_id.as_str());
+                        .clear_active_turn(outcome.thread_id.as_str(), outcome.turn_id.as_str());
                 }
                 AgentRuntimeEventKind::Registered { .. }
                 | AgentRuntimeEventKind::StateChanged { .. }
                 | AgentRuntimeEventKind::TurnStarted { .. }
-                | AgentRuntimeEventKind::SessionOpened { .. }
+                | AgentRuntimeEventKind::ThreadOpened { .. }
                 | AgentRuntimeEventKind::Faulted { .. } => {}
             }
         }
@@ -157,29 +153,28 @@ impl StudioAgentEventProjector {
             trace_events,
             ..
         } = committed;
-        let studio_session_id = self.resources.studio_session_id(&agent_id).await;
-        if let Some(session_id) = studio_session_id.as_deref()
+        let thread_id = self.resources.thread_id(&agent_id).await;
+        if let Some(thread_id) = thread_id.as_deref()
             && !trace_events.is_empty()
         {
-            self.project_traces(agent_id.as_str(), session_id, trace_events)
+            self.project_traces(agent_id.as_str(), thread_id, trace_events)
                 .await
                 .at("traceEvents")?;
         }
         for event in runtime_events {
-            self.project_runtime_event(event, &studio_session_id)
-                .await?;
+            self.project_runtime_event(event, &thread_id).await?;
         }
-        if let Some(session_id) = studio_session_id
-            && let Some(session) = self
+        if let Some(thread_id) = thread_id
+            && let Some(thread) = self
                 .store
-                .read_session(&session_id)
+                .read_thread(&thread_id)
                 .await
-                .at("readSessionForTaskRefresh")?
+                .at("readThreadForTaskRefresh")?
         {
             self.product_events
-                .refresh_session_task(&session.root_session_id)
+                .refresh_task(&thread.root_thread_id)
                 .await
-                .at("refreshSessionTask")?;
+                .at("refreshThreadTask")?;
         }
         Ok(())
     }
@@ -187,20 +182,20 @@ impl StudioAgentEventProjector {
     async fn project_runtime_event(
         &self,
         event: pl_core::AgentRuntimeEvent,
-        studio_session_id: &Option<String>,
+        thread_id: &Option<String>,
     ) -> Result<(), StudioAgentProjectionFailure> {
         match event.kind {
             AgentRuntimeEventKind::Registered { snapshot }
             | AgentRuntimeEventKind::StateChanged { snapshot }
-            | AgentRuntimeEventKind::SessionOpened { snapshot, .. }
+            | AgentRuntimeEventKind::ThreadOpened { snapshot, .. }
             | AgentRuntimeEventKind::Faulted { snapshot, .. } => {
-                self.emit_agent_snapshot(studio_session_id.as_deref(), snapshot)
+                self.emit_agent_snapshot(thread_id.as_deref(), snapshot)
                     .await?;
             }
             AgentRuntimeEventKind::TurnQueued {
                 input: _, snapshot, ..
             } => {
-                self.emit_agent_snapshot(studio_session_id.as_deref(), snapshot)
+                self.emit_agent_snapshot(thread_id.as_deref(), snapshot)
                     .await?;
             }
             AgentRuntimeEventKind::TurnStarted { snapshot, .. } => {
@@ -213,7 +208,7 @@ impl StudioAgentEventProjector {
                         .await
                         .at("markExecutorTurnStarted")?;
                 }
-                self.emit_agent_snapshot(studio_session_id.as_deref(), snapshot)
+                self.emit_agent_snapshot(thread_id.as_deref(), snapshot)
                     .await?;
             }
             AgentRuntimeEventKind::TurnFinished {
@@ -244,10 +239,10 @@ impl StudioAgentEventProjector {
                         .await
                         .at("settleReviewerTurnFinished")?;
                 }
-                if let Some(session_id) = studio_session_id.as_deref() {
+                if let Some(thread_id) = thread_id.as_deref() {
                     self.project_plan_lifecycle(
                         event.agent_id.as_str(),
-                        session_id,
+                        thread_id,
                         outcome.turn_id.as_str(),
                         outcome.kind,
                         outcome.reason.clone(),
@@ -255,7 +250,7 @@ impl StudioAgentEventProjector {
                     .await
                     .at("projectPlanLifecycle")?;
                 }
-                self.emit_agent_snapshot(studio_session_id.as_deref(), snapshot)
+                self.emit_agent_snapshot(thread_id.as_deref(), snapshot)
                     .await?;
                 if is_reviewer {
                     let runtime = wait_for_runtime(self.runtime.clone())
@@ -273,14 +268,14 @@ impl StudioAgentEventProjector {
     async fn project_traces(
         &self,
         agent_id: &str,
-        studio_session_id: &str,
+        thread_id: &str,
         traces: Vec<TraceEvent>,
     ) -> anyhow::Result<()> {
         for trace in traces {
             match trace.kind {
                 TraceEventKind::TracePartCompleted { item } if item.kind == TracePartKind::Plan => {
                     self.plan_confirmations
-                        .project(agent_id, studio_session_id, &item)
+                        .project(agent_id, thread_id, &item)
                         .await?;
                 }
                 TraceEventKind::TracePartStarted { .. }
@@ -299,7 +294,7 @@ impl StudioAgentEventProjector {
     async fn project_plan_lifecycle(
         &self,
         agent_id: &str,
-        studio_session_id: &str,
+        thread_id: &str,
         turn_id: &str,
         outcome: TurnOutcomeKind,
         reason: Option<String>,
@@ -318,50 +313,39 @@ impl StudioAgentEventProjector {
         let Some((state, reason)) = plan_terminal_projection(outcome, reason) else {
             return Ok(());
         };
-        let updated_at = crate::studio::ids::unix_seconds();
-        self.record_facts(
-            agent_id,
-            studio_session_id,
-            vec![SessionEventFact::durable(
-                Some(agent_id.to_string()),
-                Some(turn_id.to_string()),
-                updated_at,
-                SessionEventKind::PlanChanged {
-                    event: PlanLifecycleEvent {
-                        plan_id: plan_id.to_string(),
-                        state,
-                        turn_id: Some(turn_id.to_string()),
-                        reason,
-                        updated_at,
-                    },
-                },
-            )],
-        )
-        .await?;
+        // Plan 本身已经由 Trace 投影为 ThreadItem；终态属于 Task 产品状态，
+        // 不再复制成第二条会话事实。
+        let _ = (agent_id, thread_id, turn_id, plan_id, state, reason);
         Ok(())
     }
 
     async fn emit_agent_snapshot(
         &self,
-        studio_session_id: Option<&str>,
+        thread_id: Option<&str>,
         snapshot: AgentSnapshot,
     ) -> Result<(), StudioAgentProjectionFailure> {
-        let Some(session_id) = studio_session_id else {
+        let Some(thread_id) = thread_id else {
             return Ok(());
         };
         let resource = self.resources.get(&snapshot.identity.id).await;
-        let status = agent_status_label(&snapshot);
-        let error = agent_error(&snapshot);
+        let status = status_label(&snapshot);
+        let snapshot_error = error(&snapshot);
         let summary = resource.as_ref().map(|resource| resource.task_name.clone());
         self.store
-            .update_agent_session_status(session_id, status, summary, error, snapshot.updated_at)
+            .update_thread_status(
+                thread_id,
+                status,
+                summary,
+                snapshot_error.clone(),
+                snapshot.updated_at,
+            )
             .await
-            .at("updateAgentSessionStatus")?;
-        if let Some(session) = self
+            .at("updateAgentThreadStatus")?;
+        if let Some(thread) = self
             .store
-            .read_session(session_id)
+            .read_thread(thread_id)
             .await
-            .at("readSessionForAgentDirectory")?
+            .at("readThreadForAgentDirectory")?
         {
             let progress = snapshot
                 .progress
@@ -385,11 +369,11 @@ impl StudioAgentEventProjector {
             )
             .unwrap_or_default();
             self.product_events.emit_agent_directory(
-                &session.project_id,
+                &thread.project_id,
                 StudioAgentDirectoryEntry {
                     id: snapshot.identity.id.to_string(),
-                    session_id: session.id.clone(),
-                    root_session_id: session.root_session_id.clone(),
+                    thread_id: thread.id.clone(),
+                    root_thread_id: thread.root_thread_id.clone(),
                     path: snapshot.identity.id.to_string(),
                     parent_path: snapshot
                         .identity
@@ -398,7 +382,7 @@ impl StudioAgentEventProjector {
                         .map(ToString::to_string),
                     role: snapshot.identity.role.to_string(),
                     task: resource.as_ref().map_or_else(
-                        || session.title.clone(),
+                        || thread.title.clone(),
                         |resource| resource.task_name.clone(),
                     ),
                     status: status.to_string(),
@@ -407,7 +391,7 @@ impl StudioAgentEventProjector {
                         .as_ref()
                         .map(|progress| progress.summary.clone()),
                     depth: snapshot.identity.depth,
-                    error: agent_error(&snapshot),
+                    error: snapshot_error,
                     reason: snapshot
                         .last_turn
                         .as_ref()
@@ -420,9 +404,9 @@ impl StudioAgentEventProjector {
                 },
             );
             self.product_events
-                .emit_session_list(&session.project_id)
+                .emit_thread_directory(&thread.project_id)
                 .await
-                .at("emitSessionList")?;
+                .at("emitThreadDirectory")?;
         }
         if snapshot.lifecycle == AgentLifecycleState::Closed {
             self.resources
@@ -431,46 +415,24 @@ impl StudioAgentEventProjector {
         }
         Ok(())
     }
-
-    async fn record_facts(
-        &self,
-        agent_id: &str,
-        session_id: &str,
-        facts: Vec<SessionEventFact>,
-    ) -> anyhow::Result<()> {
-        let runtime = wait_for_runtime(self.runtime.clone()).await?;
-        runtime
-            .record_session_facts(
-                pl_core::AgentId::new(agent_id.to_string())?,
-                SessionId::new(session_id.to_string())?,
-                facts,
-            )
-            .await
-            .map_err(Into::into)
-    }
 }
 
-fn agent_status_label(snapshot: &AgentSnapshot) -> &'static str {
+fn status_label(snapshot: &AgentSnapshot) -> &'static str {
     match snapshot.lifecycle {
-        AgentLifecycleState::Closing | AgentLifecycleState::Closed => "shutdown",
-        AgentLifecycleState::Faulted => "errored",
+        AgentLifecycleState::Closing | AgentLifecycleState::Closed => "closed",
+        AgentLifecycleState::Faulted => "failed",
         AgentLifecycleState::Active => match snapshot.activity {
-            AgentActivityState::Queued => "queued",
+            AgentActivityState::Queued => "running",
             AgentActivityState::Running => "running",
             AgentActivityState::WaitingTool
             | AgentActivityState::WaitingInteraction
             | AgentActivityState::Cancelling => "waiting",
-            AgentActivityState::Idle => match snapshot.last_turn.as_ref().map(|turn| turn.kind) {
-                Some(TurnOutcomeKind::Completed) => "completed",
-                Some(TurnOutcomeKind::Cancelled | TurnOutcomeKind::BudgetLimited) => "interrupted",
-                Some(TurnOutcomeKind::Failed) => "errored",
-                None => "idle",
-            },
+            AgentActivityState::Idle => "idle",
         },
     }
 }
 
-fn agent_error(snapshot: &AgentSnapshot) -> Option<String> {
+fn error(snapshot: &AgentSnapshot) -> Option<String> {
     snapshot
         .last_turn
         .as_ref()
@@ -529,11 +491,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn budget_limited_agent_is_interrupted_without_agent_error() {
+    fn budget_limited_turn_leaves_thread_idle_without_error() {
         let snapshot = snapshot_with_outcome(TurnOutcomeKind::BudgetLimited);
 
-        assert_eq!(agent_status_label(&snapshot), "interrupted");
-        assert_eq!(agent_error(&snapshot), None);
+        assert_eq!(status_label(&snapshot), "idle");
+        assert_eq!(error(&snapshot), None);
     }
 
     #[test]
@@ -569,7 +531,7 @@ mod tests {
             progress: None,
             last_turn: Some(AgentTurnOutcome {
                 turn_id: TurnId::new("turn-1").expect("turn id"),
-                session_id: SessionId::new("session-1").expect("session id"),
+                thread_id: pl_core::ThreadId::new("session-1").expect("thread id"),
                 kind,
                 reason: Some("budget reached".to_string()),
                 failure: None,

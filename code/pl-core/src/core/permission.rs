@@ -186,7 +186,7 @@ fn tool_approval_interaction(request: &ToolApprovalRequest, turn_id: &str) -> In
         kind: InteractionKind::ToolApproval,
         status: InteractionStatus::Pending,
         scope: InteractionScope {
-            session_id: String::new(),
+            thread_id: String::new(),
             turn_id: turn_id.to_string(),
             item_id: Some(request.id.clone()),
             tool_id: Some(request.id.clone()),

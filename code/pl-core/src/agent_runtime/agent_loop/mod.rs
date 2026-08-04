@@ -1,20 +1,21 @@
 use std::time::Duration;
 
+use pl_protocol::{ThreadNotification, ThreadNotificationEnvelope};
 use pl_trace::TraceEvent;
 use tokio::sync::{mpsc, oneshot};
 
-use super::host::{AgentCommitObserver, AgentStateRepository, SessionProjectionCommit};
+use super::host::{AgentCommitObserver, ThreadProjectionCommit, ThreadRepository};
 use super::state::{AgentRuntimeError, unix_timestamp};
 use super::{
-    AgentActivityState, AgentCommitOutcome, AgentCommittedEvent, AgentCurrentSessionSubmitRequest,
-    AgentDurableState, AgentLifecycleState, AgentProgressCheckpoint, AgentProgressStage,
-    AgentRuntimeEvent, AgentRuntimeEventKind, AgentRuntimeHandle, AgentRuntimeHost,
-    AgentRuntimeResult, AgentSessionDigest, AgentSnapshot, AgentSubmitRequest, DurableCommitFacts,
-    SessionHistoryCommit, SessionId, TurnId,
+    AgentActivityState, AgentCommittedEvent, AgentCurrentSessionSubmitRequest, AgentLifecycleState,
+    AgentProgressCheckpoint, AgentProgressStage, AgentRuntimeEvent, AgentRuntimeEventKind,
+    AgentRuntimeHandle, AgentRuntimeHost, AgentRuntimeResult, AgentSessionDigest, AgentSnapshot,
+    AgentSubmitRequest, DurableCommitFacts, ThreadActorState, ThreadCommit, ThreadCommitOutcome,
+    ThreadId, TurnId,
 };
-use crate::session_event::{
+use crate::thread_event::{
     ObservedTurnEvent, TurnObservation, project_observation, project_runtime_event,
-    project_trace_events, runtime_event_session_id,
+    project_trace_events, runtime_event_thread_id,
 };
 use running_turn::{RunningTurn, TurnCompletion, turn_outcome};
 
@@ -48,9 +49,9 @@ pub(crate) enum AgentLoopCommand {
         checkpoint: super::AgentTurnCheckpoint,
         reply: oneshot::Sender<AgentRuntimeResult<()>>,
     },
-    RecordSessionFacts {
-        session_id: SessionId,
-        facts: Vec<crate::SessionEventFact>,
+    RecordThreadFacts {
+        thread_id: ThreadId,
+        facts: Vec<crate::ThreadNotificationFact>,
         reply: oneshot::Sender<AgentRuntimeResult<()>>,
     },
     Snapshot {
@@ -96,7 +97,7 @@ where
     H: AgentRuntimeHost,
 {
     host: H,
-    state: AgentDurableState,
+    state: ThreadActorState,
     runtime: AgentRuntimeHandle,
     sender: mpsc::Sender<AgentLoopCommand>,
     receiver: mpsc::Receiver<AgentLoopCommand>,
@@ -111,7 +112,7 @@ where
 
 pub(crate) fn spawn_agent_loop<H>(
     host: H,
-    state: AgentDurableState,
+    state: ThreadActorState,
     runtime: AgentRuntimeHandle,
     cancel_grace: Duration,
     start_pending_inputs: bool,
@@ -197,12 +198,12 @@ where
                             }
                             let _ = reply.send(result);
                         }
-                        AgentLoopCommand::RecordSessionFacts {
-                            session_id,
+                        AgentLoopCommand::RecordThreadFacts {
+                            thread_id,
                             facts,
                             reply,
                         } => {
-                            let result = self.record_session_facts(session_id, facts).await;
+                            let result = self.record_thread_facts(thread_id, facts).await;
                             if let Err(error) = &result {
                                 self.fault_in_memory(error.to_string());
                             }
@@ -309,7 +310,7 @@ where
         };
         self.persist_observation(ObservedTurnEvent {
             turn_id: active.turn_id.to_string(),
-            session_id: active.session_id.to_string(),
+            thread_id: active.thread_id.to_string(),
             observation,
         })
         .await
@@ -320,44 +321,42 @@ where
             return Ok(());
         };
         if active.turn_id.as_str() != observed.turn_id
-            || active.session_id.as_str() != observed.session_id
+            || active.thread_id.as_str() != observed.thread_id
             || active.cancelling
         {
             return Ok(());
         }
-        let session_id = active.session_id.clone();
+        let thread_id = active.thread_id.clone();
         let turn_id = active.turn_id.clone();
         let expected_revision = self.state.snapshot.revision;
         let current = self
             .runtime
-            .session_events
-            .snapshot(session_id.as_str())
-            .map_err(|error| AgentRuntimeError::SessionEvents(error.to_string()))?;
+            .thread_events
+            .snapshot(thread_id.as_str())
+            .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
         let projected = project_observation(
-            self.state.snapshot.identity.id.as_str(),
-            session_id.as_str(),
+            thread_id.as_str(),
             turn_id.as_str(),
-            current.through_sequence,
+            current.revision,
             &current,
             observed.observation,
         );
-        let durable_events = projected.durable_events();
-        let projection = SessionProjectionCommit {
+        let projection = ThreadProjectionCommit {
             snapshot: self
                 .runtime
-                .session_events
-                .project_durable(session_id.as_str(), &durable_events)
-                .map_err(|error| AgentRuntimeError::SessionEvents(error.to_string()))?,
-            durable_events,
+                .thread_events
+                .project(thread_id.as_str(), &projected.notifications)
+                .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?,
+            notifications: projected.notifications.clone(),
         };
         let mut next = self.state.clone();
         next.snapshot.revision = expected_revision.saturating_add(1);
         next.snapshot.updated_at = unix_timestamp();
-        next.session.session_event_sequence = projected.through_sequence;
+        next.session.thread_revision = projected.through_revision;
         let outcome = self
             .host
             .repository()
-            .commit(SessionHistoryCommit {
+            .commit(ThreadCommit {
                 agent_id: next.snapshot.identity.id.clone(),
                 expected_revision: Some(expected_revision),
                 next_state: next.clone(),
@@ -368,36 +367,37 @@ where
                     Some(projection),
                     None,
                 ),
-                mutation: super::AgentStateMutation::AppendSessionEvents {
-                    session_id: session_id.clone(),
+                mutation: super::ThreadMutation::AppendThreadNotifications {
+                    thread_id: thread_id.clone(),
                 },
             })
             .await
             .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
         match outcome {
-            AgentCommitOutcome::Applied => {
+            ThreadCommitOutcome::Applied => {
                 self.state = next;
                 self.runtime
                     .directory
                     .store_snapshot(self.state.snapshot.clone());
                 self.runtime
-                    .session_events
-                    .publish_batch(projected.events.clone())
-                    .map_err(|error| AgentRuntimeError::SessionEvents(error.to_string()))?;
+                    .thread_events
+                    .publish_batch(projected.notifications.clone())
+                    .await
+                    .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
                 self.host
                     .observer()
                     .publish(AgentCommittedEvent {
                         agent_id: self.state.snapshot.identity.id.clone(),
-                        session_id: Some(session_id),
+                        thread_id: Some(thread_id),
                         turn_id: Some(turn_id),
                         runtime_events: Vec::new(),
                         trace_events: Vec::new(),
-                        session_events: projected.events,
+                        thread_notifications: projected.notifications,
                     })
                     .await;
                 Ok(())
             }
-            AgentCommitOutcome::RevisionConflict { actual_revision } => {
+            ThreadCommitOutcome::RevisionConflict { actual_revision } => {
                 Err(AgentRuntimeError::RevisionConflict {
                     expected: Some(expected_revision),
                     actual: actual_revision,
@@ -416,11 +416,11 @@ where
         let Some(active) = &self.active else {
             return Ok(());
         };
-        let session_id = active.session_id.clone();
+        let thread_id = active.thread_id.clone();
         let turn_id = active.turn_id.clone();
         if trace_events
             .iter()
-            .any(|trace| trace.session_id != session_id.as_str())
+            .any(|trace| trace.session_id != thread_id.as_str())
         {
             return Err(AgentRuntimeError::Repository(format!(
                 "trace session mismatch for agent {}",
@@ -438,42 +438,36 @@ where
             .map(|trace| trace.sequence.saturating_add(1))
             .unwrap_or(current_sequence);
         let expected_revision = self.state.snapshot.revision;
-        let session_event_sequence = self
+        let thread_revision = self
             .runtime
-            .session_events
-            .snapshot(session_id.as_str())
-            .map_err(|error| AgentRuntimeError::SessionEvents(error.to_string()))?
-            .through_sequence;
-        let projected = project_trace_events(
-            self.state.snapshot.identity.id.as_str(),
-            session_id.as_str(),
-            session_event_sequence,
-            &trace_events,
-        );
-        let durable_session_events = projected.durable_events();
-        let session_projection = if durable_session_events.is_empty() {
+            .thread_events
+            .snapshot(thread_id.as_str())
+            .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?
+            .revision;
+        let projected = project_trace_events(thread_id.as_str(), thread_revision, &trace_events);
+        let session_projection = if projected.notifications.is_empty() {
             None
         } else {
-            Some(SessionProjectionCommit {
+            Some(ThreadProjectionCommit {
                 snapshot: self
                     .runtime
-                    .session_events
-                    .project_durable(session_id.as_str(), &durable_session_events)
-                    .map_err(|error| AgentRuntimeError::SessionEvents(error.to_string()))?,
-                durable_events: durable_session_events,
+                    .thread_events
+                    .project(thread_id.as_str(), &projected.notifications)
+                    .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?,
+                notifications: projected.notifications.clone(),
             })
         };
         let mut next = self.state.clone();
         next.snapshot.revision = expected_revision.saturating_add(1);
         next.snapshot.updated_at = unix_timestamp();
         next.session.trace_sequence = next_trace_sequence;
-        next.session.session_event_sequence = projected.through_sequence;
+        next.session.thread_revision = projected.through_revision;
         let committed_trace_events = trace_events.clone();
-        let committed_session_events = projected.events.clone();
+        let committed_thread_events = projected.notifications.clone();
         let result = self
             .host
             .repository()
-            .commit(SessionHistoryCommit {
+            .commit(ThreadCommit {
                 agent_id: next.snapshot.identity.id.clone(),
                 expected_revision: Some(expected_revision),
                 next_state: next.clone(),
@@ -484,35 +478,36 @@ where
                     session_projection,
                     None,
                 ),
-                mutation: super::AgentStateMutation::AppendTrace,
+                mutation: super::ThreadMutation::AppendTrace,
             })
             .await
             .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
         match result {
-            AgentCommitOutcome::Applied => {
+            ThreadCommitOutcome::Applied => {
                 let agent_id = next.snapshot.identity.id.clone();
                 self.state = next;
                 self.runtime
                     .directory
                     .store_snapshot(self.state.snapshot.clone());
                 self.runtime
-                    .session_events
-                    .publish_batch(committed_session_events.clone())
-                    .map_err(|error| AgentRuntimeError::SessionEvents(error.to_string()))?;
+                    .thread_events
+                    .publish_batch(committed_thread_events.clone())
+                    .await
+                    .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
                 self.host
                     .observer()
                     .publish(AgentCommittedEvent {
                         agent_id,
-                        session_id: Some(session_id),
+                        thread_id: Some(thread_id),
                         turn_id: Some(turn_id),
                         runtime_events: Vec::new(),
                         trace_events: committed_trace_events,
-                        session_events: committed_session_events,
+                        thread_notifications: committed_thread_events,
                     })
                     .await;
                 Ok(())
             }
-            AgentCommitOutcome::RevisionConflict { actual_revision } => {
+            ThreadCommitOutcome::RevisionConflict { actual_revision } => {
                 Err(AgentRuntimeError::RevisionConflict {
                     expected: Some(expected_revision),
                     actual: actual_revision,
@@ -523,7 +518,7 @@ where
 
     async fn commit_transition<F>(
         &mut self,
-        mut next: AgentDurableState,
+        mut next: ThreadActorState,
         trace_events: Vec<TraceEvent>,
         event_kind: F,
     ) -> AgentRuntimeResult<()>
@@ -540,50 +535,49 @@ where
             created_at: next.snapshot.updated_at,
             kind: event_kind(next.snapshot.clone()),
         };
-        let session_id = runtime_event_session_id(&event).map(str::to_string);
-        let current_session_event_sequence = match session_id.as_deref() {
-            Some(session_id) => {
+        let thread_id = runtime_event_thread_id(&event).map(str::to_string);
+        let current_thread_revision = match thread_id.as_deref() {
+            Some(thread_id) => {
                 self.runtime
-                    .session_events
-                    .snapshot(session_id)
-                    .map_err(|error| AgentRuntimeError::SessionEvents(error.to_string()))?
-                    .through_sequence
+                    .thread_events
+                    .snapshot(thread_id)
+                    .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?
+                    .revision
             }
             None => 0,
         };
-        let projected = project_runtime_event(&event, current_session_event_sequence);
-        let durable_session_events = projected.durable_events();
-        let session_projection = match session_id.as_deref() {
-            Some(session_id) if !durable_session_events.is_empty() => {
-                Some(SessionProjectionCommit {
+        let projected = project_runtime_event(&event, current_thread_revision);
+        let thread_projection = match thread_id.as_deref() {
+            Some(thread_id) if !projected.notifications.is_empty() => {
+                Some(ThreadProjectionCommit {
                     snapshot: self
                         .runtime
-                        .session_events
-                        .project_durable(session_id, &durable_session_events)
-                        .map_err(|error| AgentRuntimeError::SessionEvents(error.to_string()))?,
-                    durable_events: durable_session_events,
+                        .thread_events
+                        .project(thread_id, &projected.notifications)
+                        .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?,
+                    notifications: projected.notifications.clone(),
                 })
             }
             Some(_) | None => None,
         };
-        if let Some(session_id) = session_id.as_ref() {
-            let session_id = SessionId::new(session_id.clone())
+        if let Some(thread_id) = thread_id.as_ref() {
+            let thread_id = ThreadId::new(thread_id.clone())
                 .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
-            if next.session.id != session_id {
-                return Err(AgentRuntimeError::SessionMismatch {
+            if next.snapshot.identity.id != thread_id {
+                return Err(AgentRuntimeError::ThreadMismatch {
                     agent_id: next.snapshot.identity.id.clone(),
-                    expected: next.session.id.clone(),
-                    actual: session_id,
+                    expected: next.snapshot.identity.id.clone(),
+                    actual: thread_id,
                 });
             }
-            next.session.session_event_sequence = projected.through_sequence;
+            next.session.thread_revision = projected.through_revision;
         }
         let committed_trace_events = trace_events.clone();
-        let committed_session_events = projected.events.clone();
+        let committed_thread_events = projected.notifications.clone();
         let result = self
             .host
             .repository()
-            .commit(SessionHistoryCommit {
+            .commit(ThreadCommit {
                 agent_id: next.snapshot.identity.id.clone(),
                 expected_revision: Some(expected_revision),
                 next_state: next.clone(),
@@ -591,39 +585,40 @@ where
                     &next,
                     vec![event.clone()],
                     trace_events,
-                    session_projection,
+                    thread_projection,
                     None,
                 ),
-                mutation: super::AgentStateMutation::SnapshotAndQueue,
+                mutation: super::ThreadMutation::SnapshotAndQueue,
             })
             .await
             .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
         match result {
-            AgentCommitOutcome::Applied => {
+            ThreadCommitOutcome::Applied => {
                 self.state = next;
                 self.runtime.directory.publish_runtime_event(&event);
                 self.runtime
-                    .session_events
-                    .publish_batch(committed_session_events.clone())
-                    .map_err(|error| AgentRuntimeError::SessionEvents(error.to_string()))?;
+                    .thread_events
+                    .publish_batch(committed_thread_events.clone())
+                    .await
+                    .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
                 self.host
                     .observer()
                     .publish(AgentCommittedEvent {
                         agent_id: event.agent_id.clone(),
-                        session_id: session_id.and_then(|value| SessionId::new(value).ok()),
+                        thread_id: thread_id.and_then(|value| ThreadId::new(value).ok()),
                         turn_id: projected
-                            .events
+                            .notifications
                             .first()
-                            .and_then(|event| event.turn_id.clone())
-                            .and_then(|value| TurnId::new(value).ok()),
+                            .and_then(notification_turn_id)
+                            .and_then(|value| TurnId::new(value.to_string()).ok()),
                         runtime_events: vec![event],
                         trace_events: committed_trace_events,
-                        session_events: committed_session_events,
+                        thread_notifications: committed_thread_events,
                     })
                     .await;
                 Ok(())
             }
-            AgentCommitOutcome::RevisionConflict { actual_revision } => {
+            ThreadCommitOutcome::RevisionConflict { actual_revision } => {
                 Err(AgentRuntimeError::RevisionConflict {
                     expected: Some(expected_revision),
                     actual: actual_revision,
@@ -645,21 +640,25 @@ where
             .as_ref()
             .map(|active| active.turn_id.clone())
             .or_else(|| self.state.snapshot.active_turn_id.clone());
-        let session_id = self
+        let thread_id = self
             .active
             .as_ref()
-            .map(|active| active.session_id.clone())
-            .or_else(|| turn_id.as_ref().map(|_| self.state.session.id.clone()));
+            .map(|active| active.thread_id.clone())
+            .or_else(|| {
+                turn_id
+                    .as_ref()
+                    .map(|_| self.state.snapshot.identity.id.clone())
+            });
         let fault_outcome = turn_id
             .clone()
-            .zip(session_id.clone())
-            .map(|(turn_id, session_id)| {
-                turn_outcome(turn_id, session_id, Err(reason.clone()), false).0
+            .zip(thread_id.clone())
+            .map(|(turn_id, thread_id)| {
+                turn_outcome(turn_id, thread_id, Err(reason.clone()), false).0
             });
         tracing::error!(
             agent_id = %self.state.snapshot.identity.id,
             turn_id = turn_id.as_ref().map(TurnId::as_str),
-            session_id = session_id.as_ref().map(SessionId::as_str),
+            thread_id = thread_id.as_ref().map(ThreadId::as_str),
             reason_bytes = reason.len(),
             "agent runtime entered an in-memory faulted state"
         );
@@ -674,5 +673,22 @@ where
         self.runtime
             .directory
             .store_snapshot(self.state.snapshot.clone());
+    }
+}
+
+fn notification_turn_id(notification: &ThreadNotificationEnvelope) -> Option<&str> {
+    match &notification.notification {
+        ThreadNotification::TurnStarted { turn }
+        | ThreadNotification::TurnUpdated { turn }
+        | ThreadNotification::TurnCompleted { turn } => Some(turn.id.as_str()),
+        ThreadNotification::ItemStarted { item } | ThreadNotification::ItemCompleted { item } => {
+            Some(item.turn_id.as_str())
+        }
+        ThreadNotification::InteractionChanged { interaction } => {
+            Some(interaction.scope.turn_id.as_str())
+        }
+        ThreadNotification::ItemDelta { .. }
+        | ThreadNotification::ThreadRuntimeUpdated { .. }
+        | ThreadNotification::Lagged { .. } => None,
     }
 }

@@ -6,15 +6,15 @@
 import '../../../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
-import 'response.dart';
 import 'runtime.dart';
+import 'thread_stream.dart';
 part 'event.freezed.dart';
 
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `eq`, `eq`, `fmt`, `fmt`
 
 /// Flutter Bridge 的 Studio 产品事件信封。
 ///
-/// session 事件通过 `BridgeSessionStreamFrame` 透明传输，不得加入此类型。
+/// Thread 高频事件通过 Thread subscription 传输，不得加入此类型。
 class BridgeProductEventEnvelope {
   final String eventId;
   final String? projectId;
@@ -61,22 +61,22 @@ class BridgeProductEventEnvelope {
 sealed class BridgeProductEventPayload with _$BridgeProductEventPayload {
   const BridgeProductEventPayload._();
 
-  const factory BridgeProductEventPayload.sessionListChanged({
+  const factory BridgeProductEventPayload.threadDirectoryChanged({
     required String projectId,
-    required List<SessionDto> sessions,
-  }) = BridgeProductEventPayload_SessionListChanged;
+    required List<BridgeThread> threads,
+  }) = BridgeProductEventPayload_ThreadDirectoryChanged;
   const factory BridgeProductEventPayload.mcpHealthChanged({
     required BridgeMcpHealthDto health,
   }) = BridgeProductEventPayload_McpHealthChanged;
   const factory BridgeProductEventPayload.lspHealthChanged({
     required BridgeLspHealthDto health,
   }) = BridgeProductEventPayload_LspHealthChanged;
-  const factory BridgeProductEventPayload.sessionTaskChanged({
-    required String sessionId,
+  const factory BridgeProductEventPayload.taskChanged({
+    required String rootThreadId,
     BridgeTaskRuntimeDto? task,
-  }) = BridgeProductEventPayload_SessionTaskChanged;
+  }) = BridgeProductEventPayload_TaskChanged;
   const factory BridgeProductEventPayload.agentDirectoryChanged({
-    required String rootSessionId,
+    required String rootThreadId,
     required BridgeAgentDirectoryEntryDto agent,
   }) = BridgeProductEventPayload_AgentDirectoryChanged;
   const factory BridgeProductEventPayload.stale({

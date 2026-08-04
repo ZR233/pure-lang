@@ -8,7 +8,7 @@ import '../../rust/api/studio.dart' as frb;
 import '../../rust/frb_generated.dart';
 
 part 'studio_bridge_event.dart';
-part 'studio_session_stream.dart';
+part 'studio_thread_stream.dart';
 part 'studio_api_contract.dart';
 part 'studio_frb_converters.dart';
 part 'studio_state_converters.dart';
@@ -16,25 +16,6 @@ part 'studio_settings_converters.dart';
 part 'studio_provider_catalog_converters.dart';
 part 'studio_demo_api.dart';
 part 'studio_demo_settings.dart';
-
-bool _isIgnoredTimelinePartType(TimelinePartType type) {
-  return isInternalTimelinePartType(type);
-}
-
-StudioMode _compileMode(Object? value) {
-  return switch (_string(value)) {
-    'simple' => StudioMode.simple,
-    'task' => StudioMode.task,
-    final label => throw FormatException('Unknown Studio mode: $label'),
-  };
-}
-
-String _compileModeLabel(StudioMode mode) {
-  return switch (mode) {
-    StudioMode.simple => 'simple',
-    StudioMode.task => 'task',
-  };
-}
 
 PermissionMode _permissionMode(Object? value) {
   return switch (_string(value)) {
@@ -96,8 +77,8 @@ DateTime _dateFromUnix(Object seconds) {
   return DateTime.fromMillisecondsSinceEpoch(_frbInt(seconds) * 1000);
 }
 
-SessionRuntimeView _emptyRuntimeView() {
-  return const SessionRuntimeView(
+ThreadRuntimeView _emptyRuntimeView() {
+  return const ThreadRuntimeView(
     model: '',
     contextTokens: 0,
     contextWindow: 0,

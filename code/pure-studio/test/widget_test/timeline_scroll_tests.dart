@@ -11,8 +11,8 @@ void registerTimelineScrollTests() {
 
     await tester.pumpWidget(
       _timelineHarness(
-        sessionId: 'session-scroll',
-        messages: _scrollMessages('session-scroll', 18),
+        threadId: 'session-scroll',
+        items: _scrollItems('session-scroll', 18),
       ),
     );
     await tester.pumpAndSettle();
@@ -20,8 +20,8 @@ void registerTimelineScrollTests() {
 
     await tester.pumpWidget(
       _timelineHarness(
-        sessionId: 'session-scroll',
-        messages: _scrollMessages('session-scroll', 19),
+        threadId: 'session-scroll',
+        items: _scrollItems('session-scroll', 19),
       ),
     );
     await tester.pumpAndSettle();
@@ -40,8 +40,8 @@ void registerTimelineScrollTests() {
 
     await tester.pumpWidget(
       _timelineHarness(
-        sessionId: 'session-detached',
-        messages: _scrollMessages('session-detached', 24),
+        threadId: 'session-detached',
+        items: _scrollItems('session-detached', 24),
       ),
     );
     await tester.pumpAndSettle();
@@ -53,8 +53,8 @@ void registerTimelineScrollTests() {
 
     await tester.pumpWidget(
       _timelineHarness(
-        sessionId: 'session-detached',
-        messages: _scrollMessages('session-detached', 25),
+        threadId: 'session-detached',
+        items: _scrollItems('session-detached', 25),
       ),
     );
     await tester.pumpAndSettle();
@@ -73,8 +73,8 @@ void registerTimelineScrollTests() {
 
     await tester.pumpWidget(
       _timelineHarness(
-        sessionId: 'session-jump',
-        messages: _scrollMessages('session-jump', 24),
+        threadId: 'session-jump',
+        items: _scrollItems('session-jump', 24),
       ),
     );
     await tester.pumpAndSettle();
@@ -83,8 +83,8 @@ void registerTimelineScrollTests() {
     await tester.pumpAndSettle();
     await tester.pumpWidget(
       _timelineHarness(
-        sessionId: 'session-jump',
-        messages: _scrollMessages('session-jump', 25),
+        threadId: 'session-jump',
+        items: _scrollItems('session-jump', 25),
       ),
     );
     await tester.pumpAndSettle();
@@ -106,16 +106,16 @@ void registerTimelineScrollTests() {
 
     await tester.pumpWidget(
       _timelineHarness(
-        sessionId: 'session-streaming',
-        messages: _scrollMessages('session-streaming', 12),
+        threadId: 'session-streaming',
+        items: _scrollItems('session-streaming', 12),
       ),
     );
     await tester.pumpAndSettle();
 
     await tester.pumpWidget(
       _timelineHarness(
-        sessionId: 'session-streaming',
-        messages: _scrollMessages('session-streaming', 12, expandedLast: true),
+        threadId: 'session-streaming',
+        items: _scrollItems('session-streaming', 12, expandedLast: true),
       ),
     );
     await tester.pumpAndSettle();
@@ -133,8 +133,8 @@ void registerTimelineScrollTests() {
 
     await tester.pumpWidget(
       _timelineHarness(
-        sessionId: 'session-stream-count',
-        messages: _scrollMessages('session-stream-count', 24),
+        threadId: 'session-stream-count',
+        items: _scrollItems('session-stream-count', 24),
       ),
     );
     await tester.pumpAndSettle();
@@ -147,12 +147,8 @@ void registerTimelineScrollTests() {
 
     await tester.pumpWidget(
       _timelineHarness(
-        sessionId: 'session-stream-count',
-        messages: _scrollMessages(
-          'session-stream-count',
-          24,
-          expandedLast: true,
-        ),
+        threadId: 'session-stream-count',
+        items: _scrollItems('session-stream-count', 24, expandedLast: true),
       ),
     );
     await tester.pumpAndSettle();
@@ -163,8 +159,8 @@ void registerTimelineScrollTests() {
 
     await tester.pumpWidget(
       _timelineHarness(
-        sessionId: 'session-stream-count',
-        messages: _scrollMessages('session-stream-count', 25),
+        threadId: 'session-stream-count',
+        items: _scrollItems('session-stream-count', 25),
       ),
     );
     await tester.pumpAndSettle();
@@ -184,8 +180,8 @@ void registerTimelineScrollTests() {
 
     await tester.pumpWidget(
       _timelineHarness(
-        sessionId: 'session-a',
-        messages: _scrollMessages('session-a', 24),
+        threadId: 'session-a',
+        items: _scrollItems('session-a', 24),
       ),
     );
     await tester.pumpAndSettle();
@@ -196,8 +192,8 @@ void registerTimelineScrollTests() {
 
     await tester.pumpWidget(
       _timelineHarness(
-        sessionId: 'session-b',
-        messages: _scrollMessages('session-b', 20),
+        threadId: 'session-b',
+        items: _scrollItems('session-b', 20),
       ),
     );
     await tester.pumpAndSettle();
@@ -205,8 +201,8 @@ void registerTimelineScrollTests() {
 
     await tester.pumpWidget(
       _timelineHarness(
-        sessionId: 'session-a',
-        messages: _scrollMessages('session-a', 24),
+        threadId: 'session-a',
+        items: _scrollItems('session-a', 24),
       ),
     );
     await tester.pumpAndSettle();
@@ -223,13 +219,13 @@ void registerTimelineScrollTests() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    const sessionId = 'session-history';
+    const threadId = 'session-history';
     var loadCount = 0;
-    final recentMessages = _scrollMessages(sessionId, 24, startIndex: 8);
+    final recentItems = _scrollItems(threadId, 24, startIndex: 8);
     await tester.pumpWidget(
       _timelineHarness(
-        sessionId: sessionId,
-        messages: recentMessages,
+        threadId: threadId,
+        items: recentItems,
         onLoadOlder: () => loadCount += 1,
       ),
     );
@@ -238,13 +234,13 @@ void registerTimelineScrollTests() {
     await tester.drag(find.byType(ListView), const Offset(0, 5000));
     await tester.pumpAndSettle();
     expect(loadCount, 1);
-    final anchor = find.textContaining('message 8 for $sessionId');
+    final anchor = find.textContaining('message 8 for $threadId');
     final anchorTopBeforeLoad = tester.getTopLeft(anchor).dy;
 
     await tester.pumpWidget(
       _timelineHarness(
-        sessionId: sessionId,
-        messages: recentMessages,
+        threadId: threadId,
+        items: recentItems,
         onLoadOlder: () => loadCount += 1,
         isLoadingOlder: true,
       ),
@@ -257,8 +253,8 @@ void registerTimelineScrollTests() {
 
     await tester.pumpWidget(
       _timelineHarness(
-        sessionId: sessionId,
-        messages: [..._scrollMessages(sessionId, 8), ...recentMessages],
+        threadId: threadId,
+        items: [..._scrollItems(threadId, 8), ...recentItems],
         onLoadOlder: () => loadCount += 1,
       ),
     );

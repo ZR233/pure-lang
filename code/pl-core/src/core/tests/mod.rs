@@ -141,7 +141,6 @@ fn runtime_progress_texts(
     progress_texts
 }
 
-mod agent_kernel;
 mod approval;
 mod default_tools;
 mod errors;

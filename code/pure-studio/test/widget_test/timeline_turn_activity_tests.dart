@@ -39,9 +39,9 @@ void registerTimelineTurnActivityTests() {
           locale: const Locale('zh', 'Hans'),
           home: Scaffold(
             body: TimelineView(
-              sessionId: 'session-1',
+              threadId: 'session-1',
               rows: const [],
-              turn: _testTurn(sessionId: 'session-1', state: state),
+              turn: _testTurn(threadId: 'session-1', state: state),
             ),
           ),
         ),
@@ -65,9 +65,9 @@ void registerTimelineTurnActivityTests() {
         _timelineApp(
           home: Scaffold(
             body: TimelineView(
-              sessionId: 'session-1',
+              threadId: 'session-1',
               rows: const [],
-              turn: _testTurn(sessionId: 'session-1', state: state),
+              turn: _testTurn(threadId: 'session-1', state: state),
             ),
           ),
         ),
@@ -84,30 +84,20 @@ void registerTimelineTurnActivityTests() {
     tester,
   ) async {
     final now = DateTime.fromMillisecondsSinceEpoch(1);
-    final message = TimelineMessage(
-      id: 'turn-1:assistant',
-      sessionId: 'session-1',
+    final reasoning = TimelineEntry(
+      id: 'reasoning-1',
+      groupId: 'turn-1:assistant',
+      threadId: 'session-1',
       turnId: 'turn-1',
-      role: 'assistant',
+      type: TimelineEntryType.reasoning,
+      order: 0,
+      revision: 2,
+      text: '核对状态机',
+      reasoningSummary: const ['核对状态机'],
+      reasoningContent: const ['raw reasoning detail'],
       status: 'streaming',
       createdAt: now,
-    );
-    final reasoning = timelinePartFromSnapshot(
-      TimelinePartSnapshot(
-        id: 'reasoning-1',
-        messageId: message.id,
-        sessionId: message.sessionId,
-        turnId: message.turnId,
-        type: TimelinePartType.reasoning,
-        order: 0,
-        revision: 2,
-        text: '',
-        reasoningSummary: const ['核对状态机'],
-        reasoningContent: const ['raw reasoning detail'],
-        status: 'streaming',
-        createdAt: now,
-        updatedAt: now,
-      ),
+      updatedAt: now,
     );
 
     await tester.pumpWidget(
@@ -115,11 +105,11 @@ void registerTimelineTurnActivityTests() {
         locale: const Locale('zh', 'Hans'),
         home: Scaffold(
           body: TimelineView(
-            sessionId: message.sessionId,
-            rows: timelineRowsFromMessages([message], parts: [reasoning]),
+            threadId: 'session-1',
+            rows: timelineRowsFromFixtureParts([reasoning]),
             turn: _testTurn(
-              sessionId: message.sessionId,
-              turnId: message.turnId,
+              threadId: 'session-1',
+              turnId: 'turn-1',
               state: const StudioTurnState.inProgress(
                 StudioTurnActivity.thinking,
               ),
@@ -148,20 +138,12 @@ void registerTimelineTurnActivityTests() {
   testWidgets('responding keeps growing text beside its lightweight status', (
     tester,
   ) async {
-    final message = TimelineMessage(
-      id: 'turn-1:assistant',
-      sessionId: 'session-1',
-      turnId: 'turn-1',
-      role: 'assistant',
-      status: 'streaming',
-      createdAt: DateTime.fromMillisecondsSinceEpoch(1),
-    );
-    const part = TimelinePart(
+    const part = TimelineEntry(
       id: 'response-1',
-      messageId: 'turn-1:assistant',
-      sessionId: 'session-1',
+      groupId: 'turn-1:assistant',
+      threadId: 'session-1',
       turnId: 'turn-1',
-      type: TimelinePartType.text,
+      type: TimelineEntryType.text,
       textChannel: TimelineTextChannel.finalAnswer,
       text: '正在增长的正文',
       status: 'streaming',
@@ -172,11 +154,11 @@ void registerTimelineTurnActivityTests() {
         locale: const Locale('zh', 'Hans'),
         home: Scaffold(
           body: TimelineView(
-            sessionId: message.sessionId,
-            rows: timelineRowsFromMessages([message], parts: const [part]),
+            threadId: 'session-1',
+            rows: timelineRowsFromFixtureParts(const [part]),
             turn: _testTurn(
-              sessionId: message.sessionId,
-              turnId: message.turnId,
+              threadId: 'session-1',
+              turnId: 'turn-1',
               state: const StudioTurnState.inProgress(
                 StudioTurnActivity.responding,
               ),
@@ -198,18 +180,10 @@ void registerTimelineTurnActivityTests() {
   testWidgets(
     'interaction waiting replaces the active tool with one typed row',
     (tester) async {
-      final message = TimelineMessage(
-        id: 'turn-1:assistant',
-        sessionId: 'session-1',
-        turnId: 'turn-1',
-        role: 'assistant',
-        status: 'streaming',
-        createdAt: DateTime.fromMillisecondsSinceEpoch(1),
-      );
       final tool = _toolTimelinePart(
         id: 'tool-current',
-        messageId: message.id,
-        turnId: message.turnId,
+        groupId: 'turn-1:assistant',
+        turnId: 'turn-1',
         name: 'request_user_input',
         status: 'running',
       );
@@ -225,11 +199,11 @@ void registerTimelineTurnActivityTests() {
             locale: const Locale('zh', 'Hans'),
             home: Scaffold(
               body: TimelineView(
-                sessionId: message.sessionId,
-                rows: timelineRowsFromMessages([message], parts: [tool]),
+                threadId: 'session-1',
+                rows: timelineRowsFromFixtureParts([tool]),
                 turn: _testTurn(
-                  sessionId: message.sessionId,
-                  turnId: message.turnId,
+                  threadId: 'session-1',
+                  turnId: 'turn-1',
                   state: StudioTurnState.inProgress(activity),
                 ),
               ),
@@ -251,21 +225,12 @@ void registerTimelineTurnActivityTests() {
   testWidgets(
     'non-user rows have no generic avatar and terminal errors persist',
     (tester) async {
-      final message = TimelineMessage(
-        id: 'turn-1:assistant',
-        sessionId: 'session-1',
-        turnId: 'turn-1',
-        role: 'assistant',
-        status: 'failed',
-        error: 'provider failed',
-        createdAt: DateTime.fromMillisecondsSinceEpoch(1),
-      );
-      const failure = TimelinePart(
+      const failure = TimelineEntry(
         id: 'turn-1:terminal-result',
-        messageId: 'turn-1:assistant',
-        sessionId: 'session-1',
+        groupId: 'turn-1:assistant',
+        threadId: 'session-1',
         turnId: 'turn-1',
-        type: TimelinePartType.text,
+        type: TimelineEntryType.text,
         textChannel: TimelineTextChannel.finalAnswer,
         text: 'provider failed',
         status: 'failed',
@@ -276,11 +241,11 @@ void registerTimelineTurnActivityTests() {
         _timelineApp(
           home: Scaffold(
             body: TimelineView(
-              sessionId: message.sessionId,
-              rows: timelineRowsFromMessages([message], parts: const [failure]),
+              threadId: 'session-1',
+              rows: timelineRowsFromFixtureParts(const [failure]),
               turn: _testTurn(
-                sessionId: message.sessionId,
-                turnId: message.turnId,
+                threadId: 'session-1',
+                turnId: 'turn-1',
                 state: const StudioTurnState.failed('provider failed'),
               ),
             ),

@@ -19,12 +19,12 @@ pub use collaboration::AgentCollaborationTools;
 pub use directory::{AgentDirectorySnapshot, AgentDirectorySubscription};
 pub use handle::AgentRuntimeHandle;
 pub use host::{
-    AgentCommitObserver, AgentCommitOutcome, AgentCommittedEvent, AgentLifecycleAdapter,
-    AgentRuntimeHost, AgentStateMutation, AgentStateRepository, AgentTurnFactory,
-    CloseLifecycleRequest, DurableCommitFacts, RestoredAgentRuntime, RestoredSessionProjection,
-    SessionContextMutation, SessionHistoryCommit, SessionProjectionCommit, SpawnLifecycleRequest,
+    AgentCommitObserver, AgentCommittedEvent, AgentLifecycleAdapter, AgentRuntimeHost,
+    AgentTurnFactory, CloseLifecycleRequest, DurableCommitFacts, RestoredAgentRuntime,
+    RestoredThreadSnapshot, SpawnLifecycleRequest, ThreadCommit, ThreadCommitOutcome,
+    ThreadContextMutation, ThreadMutation, ThreadProjectionCommit, ThreadRepository,
 };
-pub use id::{AgentId, SessionId, TurnId};
+pub use id::{AgentId, ThreadId, TurnId};
 pub use policy::{
     AgentAccessPolicy, AgentExecutionPolicy, AgentTargetSelector, ToolEffectSet,
     TurnFinalizationPolicy,
@@ -32,12 +32,12 @@ pub use policy::{
 pub use runtime::{AgentRuntime, AgentRuntimeOptions, RestoredInputPolicy};
 pub use state::{
     AgentActivityState, AgentCurrentSessionSubmitRequest, AgentDirectoryWaitReason,
-    AgentDirectoryWaitResult, AgentDurableState, AgentIdentity, AgentLifecycleState,
-    AgentProgressCheckpoint, AgentProgressStage, AgentRegistration, AgentRuntimeError,
-    AgentRuntimeEvent, AgentRuntimeEventKind, AgentRuntimeResult, AgentSessionDigest,
-    AgentSessionDigestMessage, AgentSessionDigestRole, AgentSessionState, AgentSnapshot,
-    AgentSpawnRequest, AgentSpawnResult, AgentSubmitRequest, AgentTurnOutcome, AgentWaitResult,
-    DurableMailboxEnvelope, MailboxDeliveryState, MailboxPresentation, PendingAgentInput,
+    AgentDirectoryWaitResult, AgentIdentity, AgentLifecycleState, AgentProgressCheckpoint,
+    AgentProgressStage, AgentRegistration, AgentRuntimeError, AgentRuntimeEvent,
+    AgentRuntimeEventKind, AgentRuntimeResult, AgentSessionDigest, AgentSessionDigestMessage,
+    AgentSessionDigestRole, AgentSnapshot, AgentSpawnRequest, AgentSpawnResult, AgentSubmitRequest,
+    AgentTurnOutcome, AgentTurnSubmitPolicy, AgentWaitResult, DurableMailboxEnvelope,
+    MailboxDeliveryState, MailboxPresentation, ThreadActorState, ThreadContextState,
     TurnOutcomeKind,
 };
 pub(crate) use turn::AgentTurnMailboxHandle;

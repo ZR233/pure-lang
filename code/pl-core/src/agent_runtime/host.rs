@@ -1,89 +1,87 @@
 use std::error::Error;
 use std::future::Future;
 
-use pl_protocol::{SessionEventEnvelope, SessionViewSnapshot};
+use pl_protocol::{ThreadNotification, ThreadNotificationEnvelope, ThreadSnapshot, Turn};
 use pl_trace::TraceEvent;
 
 use crate::ModelContextItem;
 
 use super::{
-    AgentDurableState, AgentId, AgentRuntimeEvent, AgentSnapshot, AgentTurnPreparationContext,
-    PreparedAgentTurn,
+    AgentId, AgentRuntimeEvent, AgentSnapshot, AgentTurnPreparationContext, PreparedAgentTurn,
+    ThreadActorState,
 };
 
 /// runtime 启动时由 repository 返回的 durable agent。
 #[derive(Debug, Clone)]
 pub struct RestoredAgentRuntime {
-    pub state: AgentDurableState,
-    pub session_projection: Option<RestoredSessionProjection>,
+    pub state: ThreadActorState,
+    pub thread_snapshot: Option<RestoredThreadSnapshot>,
 }
 
-/// 进程恢复时用于重建 session hub 的已提交 projection 与有界 journal。
+/// 进程恢复时用于初始化 Thread 订阅的 authoritative snapshot。
 #[derive(Debug, Clone)]
-pub struct RestoredSessionProjection {
-    pub snapshot: SessionViewSnapshot,
-    pub retained_durable_events: Vec<SessionEventEnvelope>,
+pub struct RestoredThreadSnapshot {
+    pub snapshot: ThreadSnapshot,
 }
 
-/// 一次会话历史事实与其可重建状态投影的完整提交。
+/// ThreadActor 的一次原子提交。
 ///
-/// 实现必须先持久化 `facts`，再校验 revision 并写入 snapshot、canonical session、turn、queue
-/// 和 projection。只有返回 `Applied` 后 runtime 才更新内存状态和广播事件。
+/// 实现必须在单个事务内校验 revision 并写入涉及的 Thread、Turn、Item、Input、Interaction
+/// 与模型上下文。只有返回 `Applied` 后 runtime 才更新内存状态和广播事件。
 #[derive(Debug, Clone)]
-pub struct SessionHistoryCommit {
+pub struct ThreadCommit {
     pub agent_id: AgentId,
     pub expected_revision: Option<u64>,
-    pub next_state: AgentDurableState,
+    pub next_state: ThreadActorState,
     pub facts: DurableCommitFacts,
-    pub mutation: AgentStateMutation,
+    pub mutation: ThreadMutation,
 }
 
-/// 一次提交中需要先于状态投影持久化的 typed durable facts。
+/// 一次提交中需要原子持久化的 typed Thread 变更。
 #[derive(Debug, Clone)]
 pub struct DurableCommitFacts {
-    pub session_id: super::SessionId,
+    pub thread_id: super::ThreadId,
     pub turn_id: Option<super::TurnId>,
-    pub through_sequence: u64,
+    pub through_revision: u64,
     pub revision: u64,
-    pub items: Vec<SessionEventEnvelope>,
-    pub turn_transition: Option<pl_protocol::SessionTurn>,
-    pub context: Option<SessionContextMutation>,
-    pub projection_snapshot: Option<SessionViewSnapshot>,
+    pub notifications: Vec<ThreadNotificationEnvelope>,
+    pub turn_transition: Option<Turn>,
+    pub context: Option<ThreadContextMutation>,
+    pub projection_snapshot: Option<ThreadSnapshot>,
     pub runtime_events: Vec<AgentRuntimeEvent>,
     pub trace_events: Vec<TraceEvent>,
 }
 
 impl DurableCommitFacts {
     pub fn from_state(
-        state: &AgentDurableState,
+        state: &ThreadActorState,
         runtime_events: Vec<AgentRuntimeEvent>,
         trace_events: Vec<TraceEvent>,
-        projection: Option<SessionProjectionCommit>,
-        context: Option<SessionContextMutation>,
+        projection: Option<ThreadProjectionCommit>,
+        context: Option<ThreadContextMutation>,
     ) -> Self {
-        let items = projection
+        let notifications = projection
             .as_ref()
-            .map(|projection| projection.durable_events.clone())
+            .map(|projection| projection.notifications.clone())
             .unwrap_or_default();
-        let turn_transition = items.iter().rev().find_map(|event| match &event.kind {
-            pl_protocol::SessionEventKind::TurnChanged { turn } => Some(turn.clone()),
-            pl_protocol::SessionEventKind::MessageChanged { .. }
-            | pl_protocol::SessionEventKind::MessageRemoved { .. }
-            | pl_protocol::SessionEventKind::PartChanged { .. }
-            | pl_protocol::SessionEventKind::PartRemoved { .. }
-            | pl_protocol::SessionEventKind::PartDelta { .. }
-            | pl_protocol::SessionEventKind::InteractionChanged { .. }
-            | pl_protocol::SessionEventKind::AgentChanged { .. }
-            | pl_protocol::SessionEventKind::TimelineEventAppended { .. }
-            | pl_protocol::SessionEventKind::RuntimeChanged { .. }
-            | pl_protocol::SessionEventKind::SkillActivated { .. }
-            | pl_protocol::SessionEventKind::PlanChanged { .. }
-            | pl_protocol::SessionEventKind::ContextCompacted { .. }
-            | pl_protocol::SessionEventKind::ErrorOccurred { .. } => None,
-        });
+        let turn_transition =
+            notifications
+                .iter()
+                .rev()
+                .find_map(|event| match &event.notification {
+                    ThreadNotification::TurnStarted { turn }
+                    | ThreadNotification::TurnUpdated { turn }
+                    | ThreadNotification::TurnCompleted { turn } => Some(turn.clone()),
+                    ThreadNotification::ItemStarted { .. }
+                    | ThreadNotification::ItemDelta { .. }
+                    | ThreadNotification::ItemCompleted { .. }
+                    | ThreadNotification::InteractionChanged { .. }
+                    | ThreadNotification::ThreadRuntimeUpdated { .. }
+                    | ThreadNotification::Lagged { .. } => None,
+                });
         let turn_id = turn_transition
             .as_ref()
-            .and_then(|turn| super::TurnId::new(turn.turn_id.clone()).ok())
+            .and_then(|turn| super::TurnId::new(turn.id.clone()).ok())
             .or_else(|| state.snapshot.active_turn_id.clone())
             .or_else(|| {
                 state
@@ -93,11 +91,11 @@ impl DurableCommitFacts {
                     .map(|outcome| outcome.turn_id.clone())
             });
         Self {
-            session_id: state.session.id.clone(),
+            thread_id: state.snapshot.identity.id.clone(),
             turn_id,
-            through_sequence: state.session.session_event_sequence,
+            through_revision: state.session.thread_revision,
             revision: state.snapshot.revision,
-            items,
+            notifications,
             turn_transition,
             context,
             projection_snapshot: projection.map(|projection| projection.snapshot),
@@ -109,62 +107,62 @@ impl DurableCommitFacts {
 
 /// checkpoint 对完整模型上下文的单调变更。
 #[derive(Debug, Clone)]
-pub enum SessionContextMutation {
+pub enum ThreadContextMutation {
     Append { items: Vec<ModelContextItem> },
     Replace { items: Vec<ModelContextItem> },
 }
 
-/// repository 与 session hub 共享的 canonical session 投影提交。
+/// Thread snapshot 与同一 revision 的实时通知。
 #[derive(Debug, Clone)]
-pub struct SessionProjectionCommit {
-    pub snapshot: SessionViewSnapshot,
-    pub durable_events: Vec<SessionEventEnvelope>,
+pub struct ThreadProjectionCommit {
+    pub snapshot: ThreadSnapshot,
+    pub notifications: Vec<ThreadNotificationEnvelope>,
 }
 
 /// repository 可据此只更新真正变化的 durable aggregate 部分。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AgentStateMutation {
+pub enum ThreadMutation {
     SnapshotAndQueue,
-    ReplaceSession { session_id: super::SessionId },
+    ReplaceThread { thread_id: super::ThreadId },
     AppendTrace,
-    AppendSessionEvents { session_id: super::SessionId },
+    AppendThreadNotifications { thread_id: super::ThreadId },
 }
 
 /// repository CAS 提交结果。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AgentCommitOutcome {
+pub enum ThreadCommitOutcome {
     Applied,
     RevisionConflict { actual_revision: Option<u64> },
 }
 
-/// repository 已原子提交、可安全交给产品投影层的事件批次。
+/// repository 已原子提交、可安全发布的事件批次。
 #[derive(Debug, Clone)]
 pub struct AgentCommittedEvent {
     pub agent_id: AgentId,
-    pub session_id: Option<super::SessionId>,
+    pub thread_id: Option<super::ThreadId>,
     pub turn_id: Option<super::TurnId>,
     pub runtime_events: Vec<AgentRuntimeEvent>,
     pub trace_events: Vec<TraceEvent>,
-    pub session_events: Vec<SessionEventEnvelope>,
+    pub thread_notifications: Vec<ThreadNotificationEnvelope>,
 }
 
 impl AgentCommittedEvent {
     pub(crate) fn runtime(event: AgentRuntimeEvent) -> Self {
         Self {
             agent_id: event.agent_id.clone(),
-            session_id: None,
+            thread_id: None,
             turn_id: None,
             runtime_events: vec![event],
             trace_events: Vec::new(),
-            session_events: Vec::new(),
+            thread_notifications: Vec::new(),
         }
     }
 }
 
-/// agent durable state 的产品存储端口。
+/// ThreadActor 使用的 canonical 存储端口。
 ///
 /// 实现者负责事务和 expected revision CAS，不得在返回 `Applied` 前广播事件。
-pub trait AgentStateRepository: Clone + Send + Sync + 'static {
+pub trait ThreadRepository: Clone + Send + Sync + 'static {
     type Error: Error + Send + Sync + 'static;
 
     fn restore_runtime(
@@ -173,11 +171,8 @@ pub trait AgentStateRepository: Clone + Send + Sync + 'static {
 
     fn commit(
         &self,
-        commit: SessionHistoryCommit,
-    ) -> impl Future<Output = std::result::Result<AgentCommitOutcome, Self::Error>> + Send;
-
-    /// 等待此前接受的历史事实和状态投影全部达到 durable watermark。
-    fn barrier(&self) -> impl Future<Output = std::result::Result<(), Self::Error>> + Send;
+        commit: ThreadCommit,
+    ) -> impl Future<Output = std::result::Result<ThreadCommitOutcome, Self::Error>> + Send;
 }
 
 /// 宿主为一次 turn 构造模型、instructions、工具和产品策略的端口。
@@ -197,7 +192,7 @@ pub trait AgentTurnFactory: Clone + Send + Sync + 'static {
 pub struct SpawnLifecycleRequest {
     pub parent: AgentSnapshot,
     pub child: AgentSnapshot,
-    pub child_session_id: super::SessionId,
+    pub child_thread_id: super::ThreadId,
     pub metadata: serde_json::Value,
 }
 
@@ -257,7 +252,7 @@ pub trait AgentCommitObserver: Clone + Send + Sync + 'static {
 /// 产品接入 agent runtime 的 host bundle。
 pub trait AgentRuntimeHost: Clone + Send + Sync + 'static {
     type Error: Error + Send + Sync + 'static;
-    type Repository: AgentStateRepository<Error = Self::Error>;
+    type Repository: ThreadRepository<Error = Self::Error>;
     type TurnFactory: AgentTurnFactory<Error = Self::Error>;
     type Lifecycle: AgentLifecycleAdapter<Error = Self::Error>;
     type Observer: AgentCommitObserver;

@@ -1,13 +1,12 @@
-//! SeaORM entities for the Studio state and history databases.
+//! SeaORM entities for the canonical Studio database.
 
-mod history;
 mod metadata;
 mod product;
-mod runtime;
 mod task;
+#[path = "thread/mod.rs"]
+mod thread_entities;
 
-pub use history::*;
 pub use metadata::*;
 pub use product::*;
-pub use runtime::*;
 pub use task::*;
+pub use thread_entities::*;

@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use anyhow::{Context, Result, bail};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, TransactionTrait,
@@ -9,14 +7,14 @@ use crate::studio::entity as entities;
 use crate::studio::ids::unix_seconds;
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    AgentOutcomeStatus, RestartAgentReconciliation, ReviewScope, ReviewVerdict, TaskRunPhase,
-    TaskWorktreeCleanupState, TaskWorktreeCreationState, TaskWorktreeOwnerResource,
-    TaskWorktreeOwnerSnapshot, WorkCompletionStatus, WorkUnitStatus,
+    RestartAgentReconciliation, ReviewScope, ReviewVerdict, TaskRunPhase, TaskWorktreeCleanupState,
+    TaskWorktreeCreationState, TaskWorktreeOwnerResource, TaskWorktreeOwnerSnapshot,
+    ThreadExecutionStatus, WorkCompletionStatus, WorkUnitStatus,
 };
 
 use super::{
-    merge::parse_required_evidence, outcome::agent_outcome_record, task_run_record,
-    work_completion::work_completion_record, work_unit::work_unit_record,
+    merge::parse_required_evidence, task_run_record, work_completion::work_completion_record,
+    work_unit::work_unit_record,
 };
 
 const RESTART_DIAGNOSTIC: &str = "agent interrupted by application restart";
@@ -71,13 +69,6 @@ impl StudioStore {
                 .into_iter()
                 .map(work_unit_record)
                 .collect::<Result<Vec<_>>>()?;
-            let outcomes = entities::agent_outcome::Entity::find()
-                .filter(entities::agent_outcome::Column::TaskRunId.eq(run.id.clone()))
-                .all(&self.db)
-                .await?
-                .into_iter()
-                .map(agent_outcome_record)
-                .collect::<Result<Vec<_>>>()?;
             let merges = entities::merge_record::Entity::find()
                 .filter(entities::merge_record::Column::TaskRunId.eq(run.id.clone()))
                 .all(&self.db)
@@ -89,15 +80,9 @@ impl StudioStore {
             let resources = work_units
                 .into_iter()
                 .map(|work_unit| -> Result<_> {
-                    let outcome = outcomes
-                        .iter()
-                        .find(|outcome| {
-                            outcome.work_unit_id.as_deref() == Some(work_unit.id.as_str())
-                        })
-                        .cloned();
-                    let creation_state = if outcome.as_ref().is_some_and(|outcome| {
-                        outcome.error.as_deref() == Some(RESTART_BEFORE_CREATE_DIAGNOSTIC)
-                    }) {
+                    let creation_state = if work_unit.execution_error.as_deref()
+                        == Some(RESTART_BEFORE_CREATE_DIAGNOSTIC)
+                    {
                         TaskWorktreeCreationState::UncreatedBeforeRestart
                     } else {
                         TaskWorktreeCreationState::MustExist
@@ -112,7 +97,6 @@ impl StudioStore {
                     let cleanup_state = merge_cleanup_state(&work_unit, &merges)?;
                     Ok(TaskWorktreeOwnerResource {
                         work_unit,
-                        outcome,
                         completion,
                         creation_state,
                         cleanup_state,
@@ -141,62 +125,54 @@ impl StudioStore {
                 .filter(entities::work_unit::Column::TaskRunId.eq(task_run_id.to_string()))
                 .all(&tx)
                 .await?;
-            let outcomes = entities::agent_outcome::Entity::find()
-                .filter(entities::agent_outcome::Column::TaskRunId.eq(task_run_id.to_string()))
-                .all(&tx)
-                .await?;
-
-            validate_pairs(task_run_id, &work_units, &outcomes)?;
+            validate_work_units(task_run_id, &work_units)?;
 
             let now = unix_seconds();
-            reconcile_pending_reviews_after_restart(&tx, &run, &work_units, &outcomes, now).await?;
-            let pending_work_units = work_units
-                .iter()
-                .filter(|unit| unit.status == WorkUnitStatus::Pending.as_str())
-                .map(|unit| unit.id.clone())
-                .collect::<std::collections::HashSet<_>>();
-            let mut summary = RestartAgentReconciliation::default();
+            let cancelled_reviewers =
+                reconcile_pending_reviews_after_restart(&tx, &run, &work_units, now).await?;
+            let mut summary = RestartAgentReconciliation {
+                cancelled_thread_executions: cancelled_reviewers,
+                ..RestartAgentReconciliation::default()
+            };
             for work_unit in work_units {
                 let status = WorkUnitStatus::from_str(&work_unit.status)
                     .with_context(|| format!("invalid work unit status: {}", work_unit.status))?;
+                let execution_status = ThreadExecutionStatus::from_str(&work_unit.execution_status)
+                    .with_context(|| {
+                        format!(
+                            "invalid WorkUnit Thread execution status: {}",
+                            work_unit.execution_status
+                        )
+                    })?;
+                let transient_execution = is_transient_execution(execution_status);
                 if status == WorkUnitStatus::Pending {
                     let mut active: entities::work_unit::ActiveModel = work_unit.into();
                     active.status = Set(WorkUnitStatus::Cancelled.as_str().to_string());
+                    active.execution_status =
+                        Set(ThreadExecutionStatus::Cancelled.as_str().to_string());
+                    active.execution_error =
+                        Set(Some(RESTART_BEFORE_CREATE_DIAGNOSTIC.to_string()));
                     active.updated_at = Set(now);
                     active.update(&tx).await?;
                     summary.cancelled_work_units += 1;
                 } else if status == WorkUnitStatus::Running {
                     let mut active: entities::work_unit::ActiveModel = work_unit.into();
                     active.status = Set(WorkUnitStatus::AwaitingCompletion.as_str().to_string());
+                    active.execution_status =
+                        Set(ThreadExecutionStatus::Cancelled.as_str().to_string());
+                    active.execution_error = Set(Some(RESTART_DIAGNOSTIC.to_string()));
+                    active.updated_at = Set(now);
+                    active.update(&tx).await?;
+                } else if transient_execution {
+                    let mut active: entities::work_unit::ActiveModel = work_unit.into();
+                    active.execution_status =
+                        Set(ThreadExecutionStatus::Cancelled.as_str().to_string());
+                    active.execution_error = Set(Some(RESTART_DIAGNOSTIC.to_string()));
                     active.updated_at = Set(now);
                     active.update(&tx).await?;
                 }
-            }
-            for outcome in outcomes {
-                let status = AgentOutcomeStatus::from_str(&outcome.status)
-                    .with_context(|| format!("invalid agent outcome status: {}", outcome.status))?;
-                let cancel = is_transient_outcome(status);
-                if cancel {
-                    let before_create = outcome
-                        .work_unit_id
-                        .as_deref()
-                        .is_some_and(|id| pending_work_units.contains(id))
-                        && status == AgentOutcomeStatus::Queued;
-                    let mut active: entities::agent_outcome::ActiveModel = outcome.into();
-                    if cancel {
-                        active.status = Set(AgentOutcomeStatus::Cancelled.as_str().to_string());
-                        active.error = Set(Some(
-                            if before_create {
-                                RESTART_BEFORE_CREATE_DIAGNOSTIC
-                            } else {
-                                RESTART_DIAGNOSTIC
-                            }
-                            .to_string(),
-                        ));
-                        summary.cancelled_outcomes += 1;
-                    }
-                    active.updated_at = Set(now);
-                    active.update(&tx).await?;
+                if transient_execution {
+                    summary.cancelled_thread_executions += 1;
                 }
             }
             Ok(summary)
@@ -219,16 +195,24 @@ async fn reconcile_pending_reviews_after_restart(
     tx: &sea_orm::DatabaseTransaction,
     run: &entities::task_run::Model,
     work_units: &[entities::work_unit::Model],
-    outcomes: &[entities::agent_outcome::Model],
     now: i64,
-) -> Result<()> {
+) -> Result<usize> {
     let rounds = entities::review_round::Entity::find()
         .filter(entities::review_round::Column::TaskRunId.eq(run.id.clone()))
         .filter(entities::review_round::Column::Status.eq(ReviewVerdict::Pending.as_str()))
         .all(tx)
         .await?;
+    let mut cancelled_reviewers = 0;
     for round in rounds {
-        validate_restart_reviewer(&round, outcomes)?;
+        validate_restart_reviewer(&round)?;
+        if round.reviewer_thread_id.is_some()
+            && matches!(
+                ThreadExecutionStatus::from_str(&round.reviewer_status),
+                Some(ThreadExecutionStatus::Queued | ThreadExecutionStatus::Running)
+            )
+        {
+            cancelled_reviewers += 1;
+        }
         match ReviewScope::from_str(&round.scope).context("invalid stored review scope")? {
             ReviewScope::Delivery => {
                 restore_delivery_review_after_restart(tx, &round, work_units, now).await?;
@@ -251,42 +235,24 @@ async fn reconcile_pending_reviews_after_restart(
         }
         let mut active: entities::review_round::ActiveModel = round.into();
         active.status = Set(ReviewVerdict::Failed.as_str().to_string());
+        active.reviewer_status = Set(ThreadExecutionStatus::Cancelled.as_str().to_string());
+        active.reviewer_error = Set(Some(REVIEW_RESTART_DIAGNOSTIC.to_string()));
         active.summary = Set(Some(REVIEW_RESTART_DIAGNOSTIC.to_string()));
         active.updated_at = Set(now);
         active.update(tx).await?;
     }
-    Ok(())
+    Ok(cancelled_reviewers)
 }
 
-fn validate_restart_reviewer(
-    round: &entities::review_round::Model,
-    outcomes: &[entities::agent_outcome::Model],
-) -> Result<()> {
-    let Some(reviewer_agent_id) = round.reviewer_agent_id.as_deref() else {
+fn validate_restart_reviewer(round: &entities::review_round::Model) -> Result<()> {
+    let Some(_reviewer_thread_id) = round.reviewer_thread_id.as_deref() else {
         return Ok(());
     };
-    let matching = outcomes
-        .iter()
-        .filter(|outcome| outcome.agent_id == reviewer_agent_id)
-        .collect::<Vec<_>>();
-    let outcome = match matching.as_slice() {
-        [outcome] => *outcome,
-        [] => bail!("pending review has no reviewer outcome"),
-        _ => bail!("pending review has multiple reviewer outcomes"),
-    };
-    if outcome.task_run_id != round.task_run_id
-        || outcome.work_unit_id != round.work_unit_id
-        || outcome.role != "reviewer"
-        || outcome.owner_path != "/root"
-        || outcome.initiated_by != "planner"
-        || outcome.requested_by_call_id != round.requested_by_call_id
-        || outcome.attempt != round.round
-        || !matches!(
-            AgentOutcomeStatus::from_str(&outcome.status),
-            Some(AgentOutcomeStatus::Queued | AgentOutcomeStatus::Running)
-        )
-    {
-        bail!("pending review and reviewer outcome do not match");
+    if !matches!(
+        ThreadExecutionStatus::from_str(&round.reviewer_status),
+        Some(ThreadExecutionStatus::Queued | ThreadExecutionStatus::Running)
+    ) {
+        bail!("pending review has an invalid reviewer Thread status");
     }
     Ok(())
 }
@@ -372,104 +338,70 @@ fn merge_cleanup_state(
     }
 }
 
-fn validate_pairs(
-    task_run_id: &str,
-    work_units: &[entities::work_unit::Model],
-    outcomes: &[entities::agent_outcome::Model],
-) -> Result<()> {
-    let units_by_id = work_units
-        .iter()
-        .map(|unit| (unit.id.as_str(), unit))
-        .collect::<HashMap<_, _>>();
-    let mut outcomes_by_unit = HashMap::new();
-    for outcome in outcomes {
-        if outcome.task_run_id != task_run_id {
-            bail!("agent outcome belongs to another task run");
-        }
-        let Some(work_unit_id) = outcome.work_unit_id.as_deref() else {
-            if outcome.role == "executor" {
-                bail!("executor outcome has no work unit");
-            }
-            continue;
-        };
-        if outcome.role != "executor" {
-            continue;
-        }
-        let unit = units_by_id
-            .get(work_unit_id)
-            .context("agent outcome work unit does not exist")?;
-        if unit.task_run_id != task_run_id
-            || unit.agent_id.as_deref() != Some(outcome.agent_id.as_str())
-            || unit.attempt != outcome.attempt
-            || outcome.role != "executor"
-        {
-            bail!("agent outcome and work unit do not match");
-        }
-        if outcomes_by_unit.insert(work_unit_id, outcome).is_some() {
-            bail!("work unit has multiple agent outcomes");
-        }
-        validate_status_pair(unit, outcome)?;
-    }
+fn validate_work_units(task_run_id: &str, work_units: &[entities::work_unit::Model]) -> Result<()> {
     for unit in work_units {
         if unit.task_run_id != task_run_id {
             bail!("work unit belongs to another task run");
         }
-        if unit.agent_id.is_none() || !outcomes_by_unit.contains_key(unit.id.as_str()) {
-            bail!("work unit and agent outcome do not match");
+        if unit.executor_thread_id.is_none() || unit.attempt <= 0 {
+            bail!("work unit has no valid executor Thread identity");
         }
+        validate_status_pair(unit)?;
     }
     Ok(())
 }
 
-fn validate_status_pair(
-    unit: &entities::work_unit::Model,
-    outcome: &entities::agent_outcome::Model,
-) -> Result<()> {
+fn validate_status_pair(unit: &entities::work_unit::Model) -> Result<()> {
     let unit_status = WorkUnitStatus::from_str(&unit.status)
         .with_context(|| format!("invalid work unit status: {}", unit.status))?;
-    let outcome_status = AgentOutcomeStatus::from_str(&outcome.status)
-        .with_context(|| format!("invalid agent outcome status: {}", outcome.status))?;
+    let execution_status =
+        ThreadExecutionStatus::from_str(&unit.execution_status).with_context(|| {
+            format!(
+                "invalid WorkUnit Thread execution status: {}",
+                unit.execution_status
+            )
+        })?;
     let valid = matches!(
-        (unit_status, outcome_status),
-        (WorkUnitStatus::Pending, AgentOutcomeStatus::Queued)
-            | (WorkUnitStatus::Running, AgentOutcomeStatus::Running)
+        (unit_status, execution_status),
+        (WorkUnitStatus::Pending, ThreadExecutionStatus::Queued)
+            | (WorkUnitStatus::Running, ThreadExecutionStatus::Running)
             | (
                 WorkUnitStatus::AwaitingCompletion,
-                AgentOutcomeStatus::Completed
+                ThreadExecutionStatus::Completed
             )
             | (
                 WorkUnitStatus::AwaitingCompletion,
-                AgentOutcomeStatus::Failed
+                ThreadExecutionStatus::Failed
             )
             | (
                 WorkUnitStatus::AwaitingCompletion,
-                AgentOutcomeStatus::Cancelled
+                ThreadExecutionStatus::Cancelled
             )
             | (
                 WorkUnitStatus::ReadyForReview,
-                AgentOutcomeStatus::Completed
+                ThreadExecutionStatus::Completed
             )
-            | (WorkUnitStatus::Reviewing, AgentOutcomeStatus::Completed)
+            | (WorkUnitStatus::Reviewing, ThreadExecutionStatus::Completed)
             | (
                 WorkUnitStatus::ChangesRequested,
-                AgentOutcomeStatus::Completed
+                ThreadExecutionStatus::Completed
             )
-            | (WorkUnitStatus::Approved, AgentOutcomeStatus::Completed)
-            | (WorkUnitStatus::Merging, AgentOutcomeStatus::Completed)
-            | (WorkUnitStatus::Merged, AgentOutcomeStatus::Completed)
-            | (WorkUnitStatus::NoDelivery, AgentOutcomeStatus::Completed)
-            | (WorkUnitStatus::Failed, AgentOutcomeStatus::Failed)
-            | (WorkUnitStatus::Cancelled, AgentOutcomeStatus::Cancelled)
+            | (WorkUnitStatus::Approved, ThreadExecutionStatus::Completed)
+            | (WorkUnitStatus::Merging, ThreadExecutionStatus::Completed)
+            | (WorkUnitStatus::Merged, ThreadExecutionStatus::Completed)
+            | (WorkUnitStatus::NoDelivery, ThreadExecutionStatus::Completed)
+            | (WorkUnitStatus::Failed, ThreadExecutionStatus::Failed)
+            | (WorkUnitStatus::Cancelled, ThreadExecutionStatus::Cancelled)
     );
     if !valid {
-        bail!("agent outcome and work unit statuses do not match");
+        bail!("WorkUnit status and Thread execution status do not match");
     }
     Ok(())
 }
 
-fn is_transient_outcome(status: AgentOutcomeStatus) -> bool {
+fn is_transient_execution(status: ThreadExecutionStatus) -> bool {
     matches!(
         status,
-        AgentOutcomeStatus::Queued | AgentOutcomeStatus::Running
+        ThreadExecutionStatus::Queued | ThreadExecutionStatus::Running
     )
 }

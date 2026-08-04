@@ -11,7 +11,7 @@ use super::{
     StudioSubmitPromptOptions, StudioSubmitPromptRequest,
 };
 
-const IMPLEMENT_PLAN_CURRENT_SESSION_PREFIX: &str = "A previous agent produced the plan below to accomplish the user's task. Implement the plan in the current session. Treat the plan as the source of user intent, re-read files as needed, and carry the work through implementation and verification.";
+const IMPLEMENT_PLAN_CURRENT_THREAD_PREFIX: &str = "A previous agent produced the plan below to accomplish the user's task. Implement the plan in the current Thread. Treat the plan as the source of user intent, re-read files as needed, and carry the work through implementation and verification.";
 
 impl StudioRuntime {
     pub(super) async fn resolve_plan_confirmation(
@@ -21,7 +21,7 @@ impl StudioRuntime {
         resolution: InteractionResolution,
         emitter: InteractionEmitter,
     ) -> Result<StudioResolveInteractionResponse> {
-        let session_id = current.scope.session_id.clone();
+        let thread_id = current.scope.thread_id.clone();
         let InteractionPayload::PlanConfirmation { plan_id, content } = &current.payload else {
             unreachable!("plan confirmation resolution was validated before resolving");
         };
@@ -36,9 +36,9 @@ impl StudioRuntime {
 
         if current.status != InteractionStatus::Pending {
             return Ok(StudioResolveInteractionResponse {
-                session_id,
+                thread_id,
                 interaction: current,
-                sessions: Vec::new(),
+                threads: Vec::new(),
             });
         }
 
@@ -53,22 +53,22 @@ impl StudioRuntime {
                 if plan_content.is_empty() {
                     bail!("plan content is empty");
                 }
-                let session = self
+                let thread = self
                     .store
-                    .read_session(&session_id)
+                    .read_thread(&thread_id)
                     .await?
-                    .context("task session not found")?;
-                if session.mode != StudioMode::Task.label() {
-                    bail!("plan implementation requires a Task mode session");
+                    .context("Task Thread not found")?;
+                if thread.mode != StudioMode::Task.label() {
+                    bail!("plan implementation requires a Task mode Thread");
                 }
                 let project = self
                     .store
-                    .read_project(&session.project_id)
+                    .read_project(&thread.project_id)
                     .await?
                     .context("task project not found")?;
                 let run = self
                     .task_coordinator
-                    .start_confirmed_task(&session_id, &plan_content, &project.path)
+                    .start_confirmed_task(&thread_id, &plan_content, &project.path)
                     .await?;
                 let started = async {
                     let resolved = self
@@ -84,7 +84,7 @@ impl StudioRuntime {
                         )
                         .await?;
                     self.append_plan_lifecycle_event(
-                        &session_id,
+                        &thread_id,
                         plan_id,
                         PlanLifecycleState::Accepted,
                         None,
@@ -92,7 +92,7 @@ impl StudioRuntime {
                     )
                     .await?;
                     self.append_plan_lifecycle_event(
-                        &session_id,
+                        &thread_id,
                         plan_id,
                         PlanLifecycleState::Implementing,
                         None,
@@ -100,18 +100,19 @@ impl StudioRuntime {
                     )
                     .await?;
                     let prompt =
-                        format!("{IMPLEMENT_PLAN_CURRENT_SESSION_PREFIX}\n\n{plan_content}");
+                        format!("{IMPLEMENT_PLAN_CURRENT_THREAD_PREFIX}\n\n{plan_content}");
                     let _ = self
                         .submit_prompt(StudioSubmitPromptRequest {
-                            session_id: session_id.clone(),
+                            thread_id: thread_id.clone(),
                             prompt,
                             attachment_ids: Vec::new(),
                             options: StudioSubmitPromptOptions {
                                 presentation: pl_core::MailboxPresentation::Hidden,
                                 lifecycle: Some(StudioPlanImplementationLifecycle {
-                                    session_id: session_id.clone(),
+                                    thread_id: thread_id.clone(),
                                     plan_id: plan_id.clone(),
                                 }),
+                                ..StudioSubmitPromptOptions::default()
                             },
                         })
                         .await?;
@@ -145,7 +146,7 @@ impl StudioRuntime {
                     )
                     .await?;
                 self.append_plan_lifecycle_event(
-                    &session_id,
+                    &thread_id,
                     plan_id,
                     PlanLifecycleState::ContinuedPlanning,
                     None,
@@ -168,7 +169,7 @@ impl StudioRuntime {
                     )
                     .await?;
                 self.append_plan_lifecycle_event(
-                    &session_id,
+                    &thread_id,
                     plan_id,
                     PlanLifecycleState::Dismissed,
                     None,
@@ -179,16 +180,16 @@ impl StudioRuntime {
             }
         };
 
-        let sessions = if let Some(session) = self.store.read_session(&session_id).await? {
-            self.store.list_sessions(&session.project_id).await?
+        let threads = if let Some(thread) = self.store.read_thread(&thread_id).await? {
+            self.store.list_root_threads(&thread.project_id).await?
         } else {
             Vec::new()
         };
 
         Ok(StudioResolveInteractionResponse {
-            session_id,
+            thread_id,
             interaction: resolved,
-            sessions,
+            threads,
         })
     }
 }

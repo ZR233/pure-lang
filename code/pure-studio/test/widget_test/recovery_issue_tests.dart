@@ -42,10 +42,10 @@ void registerRecoveryIssueTests() {
       await tester.pump();
       expect(api.selectedProjectRequest, isNull);
 
-      final subscriptionCount = api.sessionSubscriptions.length;
+      final subscriptionCount = api.threadSubscriptions.length;
       await tester.tap(find.text('Broken Session'));
       await tester.pump();
-      expect(api.sessionSubscriptions.length, subscriptionCount);
+      expect(api.threadSubscriptions.length, subscriptionCount);
 
       await tester.tap(find.text('Project Other'));
       await tester.pump();
@@ -150,9 +150,9 @@ void registerRecoveryIssueTests() {
     api.recoveryPreviews['issue-session'] = const RecoveryCleanupPreview(
       issueId: 'issue-session',
       expectedRevision: 'revision-1',
-      scope: RecoveryIssueScope.session,
+      scope: RecoveryIssueScope.thread,
       projectId: 'project-current',
-      sessionId: 'session-broken',
+      threadId: 'session-broken',
       detail: 'Worktree ownership is incomplete.',
       resources: [
         RecoveryCleanupResource(
@@ -335,9 +335,9 @@ void registerRecoveryIssueTests() {
       ..recoveryPreviews['issue-session'] = const RecoveryCleanupPreview(
         issueId: 'issue-session',
         expectedRevision: 'revision-refreshed',
-        scope: RecoveryIssueScope.session,
+        scope: RecoveryIssueScope.thread,
         projectId: 'project-current',
-        sessionId: 'session-broken',
+        threadId: 'session-broken',
         detail: 'Refreshed recovery cleanup preview',
         resources: [],
       );
@@ -408,14 +408,14 @@ StudioState _recoveryIssueState({
   bool includeApplicationIssue = false,
   bool sessionIssueOnly = false,
 }) {
-  final healthySession = StudioSession(
+  final healthySession = StudioThread(
     id: 'session-healthy',
     projectId: 'project-current',
     title: 'Healthy Session',
     mode: StudioMode.simple,
     updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
   );
-  final brokenSession = StudioSession(
+  final brokenSession = StudioThread(
     id: 'session-broken',
     projectId: 'project-current',
     title: 'Broken Session',
@@ -440,13 +440,24 @@ StudioState _recoveryIssueState({
         path: r'C:\other',
       ),
     ],
-    sessions: [healthySession, brokenSession],
+    threads: [healthySession, brokenSession],
     selectedProjectId: 'project-current',
-    selectedSessionId: healthySession.id,
-    selectedRootSessionId: healthySession.id,
-    messagesBySession: {
-      healthySession.id: const [],
-      brokenSession.id: const [],
+    selectedThreadId: healthySession.id,
+    workspacesByThread: {
+      for (final thread in [healthySession, brokenSession])
+        thread.id: ThreadWorkspace(
+          thread: thread,
+          revision: 0,
+          items: const [],
+          interactions: const [],
+          runtime: _testRuntime(),
+        ),
+    },
+    workspaceUiByThread: {
+      for (final thread in [healthySession, brokenSession])
+        thread.id: const WorkspaceUiState(
+          syncState: AgentWorkspaceSyncState.ready,
+        ),
     },
     recoveryIssues: [
       if (!sessionIssueOnly)
@@ -461,11 +472,11 @@ StudioState _recoveryIssueState({
         ),
       const StudioRecoveryIssue(
         id: 'issue-session',
-        scope: RecoveryIssueScope.session,
+        scope: RecoveryIssueScope.thread,
         category: RecoveryIssueCategory.worktree,
-        availableActions: [RecoveryIssueAction.cleanupSession],
+        availableActions: [RecoveryIssueAction.cleanupThread],
         projectId: 'project-current',
-        sessionId: 'session-broken',
+        threadId: 'session-broken',
         taskRunId: 'task-session',
         detail: 'Worktree ownership is incomplete.',
       ),

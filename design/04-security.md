@@ -68,10 +68,12 @@ Flutter 桌面端的安全边界集中在本地工具策略、配置凭据和 Fl
 
 ## 4.6 数据切换安全
 
-破坏性升级已完成，运行期不再保留迁移与兼容读取路径：
+Studio 运行期只读写 `studio.sqlite` schema v1，配置继续使用 `config.toml` schema 12。
+首次切换时，旧 SQLite、WAL/SHM 与 attachments 必须在创建新库前整体归档：
 
-1. 当前版本只识别新 SQLite（`studio_2.sqlite`）与新 config（v2）
-2. v1→v2 检测/备份/重建逻辑已删除；旧库文件直接忽略
-3. 不做旧结构运行期兼容读取
+1. 先以只读方式检查旧库并生成项目、Task、worktree、branch、dirty/ahead 资源清单。
+2. 只移动旧文件，不删除清单中的任何外部 worktree 或 branch。
+3. 全部移动成功后才创建 `studio.sqlite`；锁定、损坏或任一步失败都停止启动。
+4. 移动中途失败时逆序回滚，保留原文件；不导入旧会话或 Task，不运行双栈迁移器。
 
-恢复路径只通过用户在升级前生成的时间戳备份手动回滚，不通过应用内双栈兼容。
+归档和恢复的完整合同见 `19-studio-storage-and-diagnostics.md`。

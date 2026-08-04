@@ -1,197 +1,58 @@
-# 08 - 统一会话流事件
+# 08 - Thread 实时流
 
-## 8.1 事实源与协议边界
+## 8.1 帧模型
 
-`pl-core` 是 agent/session/turn UI 事件的唯一生产者和投影者。`pl-trace` 只保存模型、
-工具和运行时的内部诊断 trace，不再导出供产品 UI 订阅的 `AgentEvent` broadcast。
+`subscribeThread(threadId)` 返回 `ThreadStreamFrame`：
 
-跨产品 wire 类型统一位于 `pl-protocol`：
+- `snapshot`：订阅首帧，包含 Thread、当前/最近 Turn、完整 Item、pending Interaction、runtime、
+  Todo 与 child directory。
+- `notification`：后续 typed 变化。
+- `lagged`：只表示 best-effort 事件发生丢弃，客户端必须重新订阅。
+- `closed`：Thread 或 runtime 已关闭。
 
-- `SessionEventEnvelope`：一条 session 事件。
-- `SessionEventPosition`：`Durable { sequence }` 或 `Transient { revision }`。
-- `SessionEventKind`：turn、message、part、interaction、agent、Todo、usage、context、
-  capability、skill 和 plan 的结构化变化。
-- `SessionViewSnapshot`：指定 durable sequence 时的完整、可归约单 agent session
-  projection，并携带唯一 owner 身份。
-- `SessionStreamFrame`：`Snapshot | Event | ResyncRequired`。
+订阅实现先注册 receiver，再读取数据库并合并 ThreadActor live overlay，最后发送 snapshot，避免
+snapshot 与 live 之间漏事件。实时流没有 durable cursor、journal replay 或 ResyncRequired
+补丁协议；恢复永远重新取得 authoritative snapshot。旧历史通过 `listThreadTurns` 的 opaque
+keyset cursor 读取。
 
-Studio 与 Mai 不定义第二套 message/part/turn 事件。产品可以拥有 project、task、review、
-provider、settings 等低频 product event，但这些事件不得混入 session stream。
+## 8.2 Notification
 
-大会话与 agent session 是两层身份。大会话 root session 负责 project、标题、模式、task
-与 agent 目录；root agent 和每个 child agent 都有自己的 `SessionId`。一个 `SessionId`
-只能属于一个 owner agent，`SessionEventEnvelope.sessionId` 必须等于 owner 当前 session，
-非空 `sourceAgentId` 必须等于 owner。跨 agent 输入的内部 envelope 必须同时携带 source/
-target agent 与 session；模型侧只提供 target，由 resolver 生成强类型
-`ResolvedAgentSessionTarget`，其中包含 root、agent、current session 和 owner revision。
-不存在 caller-session fallback。repository、actor 与 reducer 都要拒绝跨 root、历史 session、
-未知 session 和 owner 不匹配，不能隐式创建空 session，也不能把 child event 重新绑定到 root
-session。
+通知穷尽为：
 
-## 8.2 Message/Part 模型
+- `turnStarted`
+- `turnUpdated`
+- `turnCompleted`
+- `itemStarted`
+- `itemDelta`
+- `itemCompleted`
+- `interactionChanged`
+- `threadRuntimeUpdated`
 
-每个 message snapshot 携带 `messageId/sessionId/turnId/role/status/createdAt/updatedAt`。
-每个 part snapshot 携带 `partId/messageId/sessionId/turnId/type/order/revision/status` 和
-对应内容。消息与 part 首次创建后身份字段和展示顺序不可改变，终态不可回退。
-展示层只把排序后相邻的可见 tool part 合并；任何其他可见 part 或 message 边界都会切断
-工具组，协议不携带第二套分组身份。
+Item delta 只携带 threadId、turnId、itemId、field、revision、delta 和可选 chunkIndex。field
+固定为 agent message text、reasoning summary/content、plan text、tool arguments/output。
+terminal Item 携带完整 authoritative payload并清除 UI overlay。
 
-part 类型固定为：
+## 8.3 背压
 
-- `text`
-- `reasoning`
-- `tool`
-- `agent`
-- `turn`
-- `inference`
-- `plan`
-- `file`
+每个订阅使用有界 mpsc：
 
-text channel 固定为 `user | commentary | final`。用户输入使用 `{turnId}:user` 与
-`{turnId}:user-text` 的稳定 identity；内部 trace 中重复出现的用户输入不得再次投影。
+- transcript delta、Item terminal、Turn terminal 与 Interaction request 必须 lossless，发送方
+  等待通道容量。
+- 普通 progress/runtime 刷新是 best-effort，可用 try_send；丢弃数量在下一条 lossless 通知前
+  以 `lagged` 发送。
+- 不能丢弃需要客户端回答的 request；无法交付时后端取消 request，不能永久等待。
 
-`PartDelta` 只携带目标 part、field、delta、revision 和可选 chunk index。revision 必须相对
-当前可见 revision 严格 `+1`；孤儿、重复、倒序、跳号或终态后的 delta 一律触发 resync，
-不能静默拼接。
+## 8.4 Flutter reducer
 
-## 8.3 Durable 与 transient
+Flutter 为每个 Thread 保存 canonical `ThreadWorkspace`，为本地交互保存独立
+`WorkspaceUiState`。snapshot 直接替换 canonical workspace；旧 Turn/Item/runtime 不与新
+snapshot 混合。Composer、滚动、展开和 submission revision 不属于 canonical snapshot。
 
-稳定状态变化必须 durable：
+切换 Thread 时增加 generation、立即创建新订阅并取消旧订阅；旧 generation 的 frame、error
+和 done 全部丢弃。Item delta 只允许命中当前未终态 Item且 revision 严格递增；缺口、未知变体
+或 lagged 统一重新订阅。
 
-- turn/message/part start、完成、失败、取消与审批状态。
-- interaction、agent state、subagent activity、Todo replacement。
-- usage/context、active skills、MCP/LSP capability、plan lifecycle 与 compaction。
+## 8.5 Product stream
 
-文本、reasoning、plan、tool arguments/result 的中间增量是 transient。transient delta：
-
-- 不占 durable sequence。
-- 不进入 session event journal。
-- 由 actor 校验 active turn 和 revision 后进入 live channel。
-- 同时更新 `SessionEventHub` 的 live overlay，使重连 snapshot 能包含当前可见内容。
-
-terminal snapshot 必须包含最终完整内容，并在 durable transaction 成功后清除 live overlay。
-因此丢失 transient delta 不影响最终恢复。
-
-## 8.4 SessionEventHub
-
-`pl-core::SessionEventHub` 按 `SessionId` 懒创建独立的 Tokio broadcast channel，默认容量
-1024。`AgentRuntimeHandle::subscribe_session` 接收 `SessionSubscriptionRequest`：
-
-1. 先注册 receiver。
-2. 再读取 snapshot 或 durable replay。
-3. 返回 bootstrap frame 后进入 live。
-
-这个顺序消除“读取 snapshot 时漏掉新事件”的窗口。session durable sequence 独立递增；
-`eventId` 只用于诊断和去重，cursor 只使用 durable sequence。
-
-Hub canonical projection 的 `throughSequence` 是 durable cursor 的唯一权威。所有 durable
-生产路径都必须在同一个 owner-validated projection transaction 中从该 cursor 分配 sequence，
-持久化成功后才安装 committed projection 并广播。actor/repository 的 sequence 字段仅是
-checkpoint 镜像；恢复时允许按 canonical cursor 修复落后镜像，禁止用镜像分配下一 sequence。
-
-无 cursor、cursor 早于 journal 下界、缺口超过 1000 条或 reducer 不变量失败时返回完整
-snapshot。每个 session 默认保留最近 4096 条 durable event；更早的读取自动回到 snapshot。
-receiver lag 时发送 `ResyncRequired` 并终止当前订阅，由调用方重新建立无 cursor 订阅。
-
-Hub 的发布成本必须与当前 batch 规模相关，而不能与全部历史长度相关。journal 使用有界
-增量 ring buffer，只追加当前 durable batch；repository 提交的 canonical projection 直接
-移交给 hub，禁止 observer/hub 再复制完整 4096 条 journal。实现需记录 batch 大小、
-messages/parts/journal 数量、投影耗时、广播积压与 resync 次数；snapshot 可共享只读所有权，
-广播只复制引用。
-
-## 8.5 提交与广播顺序
-
-`SessionEventProjector` 在 PL 内把 runtime facts、trace 和 working-set checkpoint 映射为
-canonical projection mutation 与事件。`AgentCommit` 在同一个 CAS transaction 内写入：
-
-- agent snapshot、queue、session 与 usage。
-- session projection 和 durable event journal。
-- turn 与 raw trace。
-
-成功顺序固定为：
-
-1. repository transaction 返回 `Applied`。
-2. `SessionEventHub` 广播 durable session events。
-3. `AgentCommitObserver` 更新产品 read model 和 product event。
-
-repository 失败或 revision conflict 时不得广播。产品 observer 无失败返回，不能反向回滚
-framework transaction。transient delta 不进入 repository，但必须由 actor 完成 turn/revision
-校验后广播。
-
-Todo、context、interaction 和 skill activation 不得只发送 turn-local signal。工具或 pipeline
-更新 working set 后必须先完成 actor checkpoint；durable ack 后才对 UI 可见。
-
-## 8.6 UI reducer
-
-UI 同时维护 `selectedRootSessionId`、`selectedAgentSessionId`、轻量
-`AgentDirectoryProjection` 和当前 `AgentWorkspaceProjection`。Agent Directory 通过 product
-stream 持续刷新，不携带 timeline、Todo 或 context；UI 只对当前可见 agent session 建立高频
-订阅。切换 agent session 时：
-
-1. 增加本地 generation 并关闭旧 stream。
-2. 有缓存时原子切换到目标 workspace，无缓存时切换为空的 loading workspace，不能继续展示旧 agent。
-3. 建立新 subscription，并原子应用 snapshot 或 replay。
-4. 归约 generation 匹配的 live event。
-
-durable event sequence 不大于本地 cursor 时忽略。transient delta 按 frame 合批；同一 frame
-有完整 snapshot 时，以 snapshot 为准并丢弃旧 delta。发现 revision 缺口、channel lag 或未知的
-必要状态变体时立即 resync，不读取产品侧的另一套 timeline。
-
-Studio Flutter 保留现有 generation、frame batching 和 Riverpod reducer 结构；Mai Web 使用同一
-协议与 reducer 不变量。两端只能在视觉组件层做不同呈现。
-
-child agent 的 lifecycle/status 变化只更新 Agent Directory，绝不修改
-`selectedAgentSessionId`。当前工作区的 timeline、Todo、runtime/context、skills、
-interaction、状态栏和 Composer 必须从同一个 agent snapshot/cursor 原子替换；迟到 frame
-直接按 generation 丢弃。
-
-FRB stream 的 `onError`、`onDone`、lagged 与 `ResyncRequired` 使用同一恢复路径：按短退避
-建立无 cursor subscription 并先请求 authoritative snapshot。旧 generation 的 error/done
-不得影响新 workspace；只有 reconnecting、stale 或 resync 时 UI 才显示 freshness 提示。
-
-Studio session 切换必须按固定顺序执行：
-
-1. flush 当前 pending delta batch；
-2. 增加 generation；
-3. cancel 并 await 旧 opaque subscription；
-4. 创建新 subscription handle；
-5. 应用首个 snapshot 或 resync frame；
-6. 只接收同 generation 的 live event。
-
-FRB stream item 使用 `Data(T)/Failure(BridgeErrorDto)/Closed` typed envelope。可恢复的业务失败
-必须通过 `Failure` 发送稳定 code；只有 FFI transport failure 或 panic 才表现为 Dart stream
-exception。Dart StreamController 的 `onCancel` 负责关闭底层 Dart subscription、await Rust
-handle cancellation 并 dispose opaque handle；Rust handle Drop 与 runtime shutdown 也会触发
-取消，因此静默 session 不会留下永久 task。
-
-## 8.7 产品事件
-
-session stream 之外保留独立低频 product stream：
-
-- Studio：project/session list、task orchestration、handoff、settings 等。
-- Mai：environment、project、task、review、provider、settings、resource 等。
-
-product stream 有自己的全局 sequence 和 replay，不承载 message/tool/Todo/context delta，也不能
-以“收到任意事件后重拉整个详情”代替 session reducer。
-Flutter 必须保留事件来源；product sequence 只用于 product stream 自身排序，绝不能推进
-任一 session durable cursor，也不能参与 session event 的重复判定。
-
-Studio 的 session list 同时承担 `AgentDirectorySnapshot/Event`：每项只包含
-`rootSessionId/sessionId/parentSessionId/ownerAgentId/ownerRole/displayName`、稳定创建顺序、
-lifecycle/status、最近活动、错误和 attention 状态。目录不得携带其他 agent 的 timeline、
-Todo、interaction 内容或 context，也不得再通过单 session 的 `AgentChanged` 聚合 agent tree。
-
-## 8.8 Transport
-
-Flutter Rust Bridge 与 Mai HTTP SSE 都传输 `SessionStreamFrame`：
-
-- FRB 把 canonical Rust 类型穷尽映射为 bridge-local typed DTO/union，不直接暴露外部 crate
-  类型或 `serde_json::Value`。
-- SSE 首帧为 snapshot 或 replay；只有 durable event 设置 SSE `id`。
-- SSE 重连读取 `Last-Event-ID`；无法 replay 时发送 snapshot。
-- keepalive、HTTP disconnect 或浏览器重连不能改变 PL session event 语义。
-
-SSE 与 FRB 共享 canonical 语义，不要求共享传输实现：SSE 保持 canonical JSON wire，FRB
-使用 generated typed union。HTTP 与 FRB 必须使用同一 canonical fixture 做契约测试；动态
-metadata、tool arguments 和 artifacts 只允许作为命名 `*_json` 叶子跨 FRB，并按 JSON 结构
-相等测试，不依赖 object key 顺序。
+项目、root/child Thread directory、Task、设置、Provider usage 和 MCP/LSP health 使用独立低频
+product stream。product stream 不携带 Turn/Item delta，也不改变任何 Thread workspace。

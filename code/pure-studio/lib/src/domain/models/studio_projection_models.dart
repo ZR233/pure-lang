@@ -5,7 +5,7 @@ import 'interaction_models.dart';
 import 'provider_models.dart';
 import 'recovery_models.dart';
 import 'runtime_models.dart';
-import 'session_models.dart';
+import 'thread_directory_models.dart';
 import 'settings_models.dart';
 import 'studio_enums.dart';
 import 'studio_state.dart';
@@ -31,9 +31,9 @@ abstract class SidebarView with _$SidebarView {
 
   const factory SidebarView({
     required List<StudioProject> projects,
-    required List<StudioSession> rootSessions,
+    required List<StudioThread> rootThreads,
     required String? selectedProjectId,
-    required String? selectedRootSessionId,
+    required String? selectedRootThreadId,
     required bool isBusy,
     required List<StudioRecoveryIssue> recoveryIssues,
   }) = _SidebarView;
@@ -41,9 +41,9 @@ abstract class SidebarView with _$SidebarView {
   factory SidebarView.fromState(StudioState state) {
     return SidebarView(
       projects: state.projects,
-      rootSessions: state.rootSessions,
+      rootThreads: state.rootThreads,
       selectedProjectId: state.selectedProjectId,
-      selectedRootSessionId: state.selectedRootSession?.id,
+      selectedRootThreadId: state.selectedRootThread?.id,
       isBusy: state.isBusy,
       recoveryIssues: state.recoveryIssues,
     );
@@ -59,10 +59,10 @@ abstract class SidebarView with _$SidebarView {
     return null;
   }
 
-  StudioRecoveryIssue? recoveryIssueForSession(String sessionId) {
+  StudioRecoveryIssue? recoveryIssueForThread(String threadId) {
     for (final issue in recoveryIssues) {
-      if (issue.scope == RecoveryIssueScope.session &&
-          issue.sessionId == sessionId) {
+      if (issue.scope == RecoveryIssueScope.thread &&
+          issue.threadId == threadId) {
         return issue;
       }
     }
@@ -73,17 +73,17 @@ abstract class SidebarView with _$SidebarView {
 @freezed
 abstract class HeaderView with _$HeaderView {
   const factory HeaderView({
-    required StudioSession? selectedRootSession,
+    required StudioThread? selectedRootThread,
     required StudioProject? selectedProject,
     required String? selectedProjectId,
-    required List<StudioSession> agentSessions,
-    required String? selectedAgentSessionId,
-    required SessionRuntimeView runtime,
+    required List<StudioThread> workspaceThreads,
+    required String? selectedThreadId,
+    required ThreadRuntimeView runtime,
     required List<PendingInteraction> pendingInteractions,
   }) = _HeaderView;
 
   factory HeaderView.fromState(StudioState state) {
-    final root = state.selectedRootSession;
+    final root = state.selectedRootThread;
     final projectId = root?.projectId ?? state.selectedProjectId;
     StudioProject? selectedProject;
     for (final project in state.projects) {
@@ -93,11 +93,11 @@ abstract class HeaderView with _$HeaderView {
       }
     }
     return HeaderView(
-      selectedRootSession: root,
+      selectedRootThread: root,
       selectedProject: selectedProject,
       selectedProjectId: state.selectedProjectId,
-      agentSessions: state.agentSessionsForSelectedRoot,
-      selectedAgentSessionId: state.selectedAgentSessionId,
+      workspaceThreads: state.threadsForSelectedRoot,
+      selectedThreadId: state.selectedThreadId,
       runtime: state.runtime,
       pendingInteractions: state.pendingInteractions,
     );
@@ -146,8 +146,8 @@ abstract class StatusBarView with _$StatusBarView {
   const StatusBarView._();
 
   const factory StatusBarView({
-    required StudioSession session,
-    required SessionRuntimeView runtime,
+    required StudioThread thread,
+    required ThreadRuntimeView runtime,
     required PermissionMode permissionMode,
     required List<ProviderSettingsView> providers,
     required List<RoleSettingsView> roles,
@@ -156,7 +156,7 @@ abstract class StatusBarView with _$StatusBarView {
 
   factory StatusBarView.fromWorkspace(AgentWorkspaceView workspace) {
     return StatusBarView(
-      session: workspace.session,
+      thread: workspace.thread,
       runtime: workspace.runtime,
       permissionMode: workspace.permissionMode,
       providers: workspace.providers,

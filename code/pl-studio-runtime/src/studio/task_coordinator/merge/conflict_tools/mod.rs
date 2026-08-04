@@ -58,33 +58,30 @@ impl TaskCoordinator {
     pub(crate) fn register_conflict_tools(
         self: &Arc<Self>,
         core: &mut TurnEngine,
-        session_id: &str,
+        thread_id: &str,
         runtime: AgentRuntimeHandle,
     ) {
-        core.register_tool(self.merge_list_conflicts_tool(session_id));
-        core.register_tool(self.merge_read_conflict_tool(session_id));
-        core.register_tool(self.merge_resolve_file_tool(session_id));
-        core.register_tool(self.merge_verify_tool(session_id));
-        core.register_tool(self.merge_continue_tool(session_id, runtime));
-        core.register_tool(self.merge_abort_tool(session_id));
+        core.register_tool(self.merge_list_conflicts_tool(thread_id));
+        core.register_tool(self.merge_read_conflict_tool(thread_id));
+        core.register_tool(self.merge_resolve_file_tool(thread_id));
+        core.register_tool(self.merge_verify_tool(thread_id));
+        core.register_tool(self.merge_continue_tool(thread_id, runtime));
+        core.register_tool(self.merge_abort_tool(thread_id));
     }
 
-    fn merge_list_conflicts_tool(
-        self: &Arc<Self>,
-        session_id: impl Into<String>,
-    ) -> RegisteredTool {
+    fn merge_list_conflicts_tool(self: &Arc<Self>, thread_id: impl Into<String>) -> RegisteredTool {
         let coordinator = self.clone();
-        let session_id = session_id.into();
+        let thread_id = thread_id.into();
         RegisteredTool::from_typed_fallible_execution_result(
             "merge_list_conflicts",
             "List the exact active task merge conflicts and their resolution state.",
             merge_id_schema(),
             move |input: MergeIdInput, _context| {
                 let coordinator = coordinator.clone();
-                let session_id = session_id.clone();
+                let thread_id = thread_id.clone();
                 async move {
                     let output = coordinator
-                        .list_active_conflicts(&session_id, input.merge_id.trim())
+                        .list_active_conflicts(&thread_id, input.merge_id.trim())
                         .await?;
                     ToolExecutionResult::<serde_json::Value>::json(output)
                         .map_err(anyhow::Error::from)
@@ -94,9 +91,9 @@ impl TaskCoordinator {
         .with_effect(ToolEffect::ConflictWrite)
     }
 
-    fn merge_read_conflict_tool(self: &Arc<Self>, session_id: impl Into<String>) -> RegisteredTool {
+    fn merge_read_conflict_tool(self: &Arc<Self>, thread_id: impl Into<String>) -> RegisteredTool {
         let coordinator = self.clone();
-        let session_id = session_id.into();
+        let thread_id = thread_id.into();
         RegisteredTool::from_typed_fallible_execution_result(
             "merge_read_conflict",
             "Read the durable base, ours, theirs and combined diff for one conflict.",
@@ -106,10 +103,10 @@ impl TaskCoordinator {
             ]),
             move |input: ReadConflictInput, _context| {
                 let coordinator = coordinator.clone();
-                let session_id = session_id.clone();
+                let thread_id = thread_id.clone();
                 async move {
                     let output = coordinator
-                        .read_active_conflict(&session_id, input.merge_id.trim(), input.path.trim())
+                        .read_active_conflict(&thread_id, input.merge_id.trim(), input.path.trim())
                         .await?;
                     ToolExecutionResult::<serde_json::Value>::json(output)
                         .map_err(anyhow::Error::from)
@@ -119,9 +116,9 @@ impl TaskCoordinator {
         .with_effect(ToolEffect::ConflictWrite)
     }
 
-    fn merge_resolve_file_tool(self: &Arc<Self>, session_id: impl Into<String>) -> RegisteredTool {
+    fn merge_resolve_file_tool(self: &Arc<Self>, thread_id: impl Into<String>) -> RegisteredTool {
         let coordinator = self.clone();
-        let session_id = session_id.into();
+        let thread_id = thread_id.into();
         RegisteredTool::from_typed_fallible_execution_result(
             "merge_resolve_file",
             "Resolve exactly one durable conflict with patch, ours, theirs, or delete.",
@@ -135,13 +132,13 @@ impl TaskCoordinator {
             ]),
             move |input: ResolveConflictInput, _context| {
                 let coordinator = coordinator.clone();
-                let session_id = session_id.clone();
+                let thread_id = thread_id.clone();
                 async move {
                     let merge_id = input.merge_id.trim().to_string();
                     let path = input.path.trim().to_string();
                     let choice = ConflictResolutionChoice::from_input(input)?;
                     let output = coordinator
-                        .resolve_active_conflict(&session_id, &merge_id, &path, choice)
+                        .resolve_active_conflict(&thread_id, &merge_id, &path, choice)
                         .await?;
                     ToolExecutionResult::<serde_json::Value>::json(output)
                         .map_err(anyhow::Error::from)
@@ -151,19 +148,19 @@ impl TaskCoordinator {
         .with_effect(ToolEffect::ConflictWrite)
     }
 
-    fn merge_verify_tool(self: &Arc<Self>, session_id: impl Into<String>) -> RegisteredTool {
+    fn merge_verify_tool(self: &Arc<Self>, thread_id: impl Into<String>) -> RegisteredTool {
         let coordinator = self.clone();
-        let session_id = session_id.into();
+        let thread_id = thread_id.into();
         RegisteredTool::from_typed_fallible_execution_result(
             "merge_verify",
             "Verify the fully resolved active conflict and persist the resolution attempt.",
             merge_id_schema(),
             move |input: MergeIdInput, _context| {
                 let coordinator = coordinator.clone();
-                let session_id = session_id.clone();
+                let thread_id = thread_id.clone();
                 async move {
                     let output = coordinator
-                        .verify_active_conflict(&session_id, input.merge_id.trim())
+                        .verify_active_conflict(&thread_id, input.merge_id.trim())
                         .await?;
                     ToolExecutionResult::<serde_json::Value>::json(output)
                         .map_err(anyhow::Error::from)
@@ -175,11 +172,11 @@ impl TaskCoordinator {
 
     fn merge_continue_tool(
         self: &Arc<Self>,
-        session_id: impl Into<String>,
+        thread_id: impl Into<String>,
         runtime: AgentRuntimeHandle,
     ) -> RegisteredTool {
         let coordinator = self.clone();
-        let session_id = session_id.into();
+        let thread_id = thread_id.into();
         RegisteredTool::from_typed_fallible_execution_result(
             "merge_continue",
             "Commit a verified conflict resolution and atomically accept the executor delivery.",
@@ -192,12 +189,12 @@ impl TaskCoordinator {
             ]),
             move |input: ContinueConflictInput, _context| {
                 let coordinator = coordinator.clone();
-                let session_id = session_id.clone();
+                let thread_id = thread_id.clone();
                 let runtime = runtime.clone();
                 async move {
                     let output = coordinator
                         .continue_active_conflict(
-                            &session_id,
+                            &thread_id,
                             input.merge_id.trim(),
                             input.resolution_summary.trim(),
                             Some(&runtime),
@@ -211,9 +208,9 @@ impl TaskCoordinator {
         .with_effect(ToolEffect::ConflictWrite)
     }
 
-    fn merge_abort_tool(self: &Arc<Self>, session_id: impl Into<String>) -> RegisteredTool {
+    fn merge_abort_tool(self: &Arc<Self>, thread_id: impl Into<String>) -> RegisteredTool {
         let coordinator = self.clone();
-        let session_id = session_id.into();
+        let thread_id = thread_id.into();
         RegisteredTool::from_typed_fallible_execution_result(
             "merge_abort",
             "Abort the exact active conflict, prove restoration, and block the task.",
@@ -223,11 +220,11 @@ impl TaskCoordinator {
             ]),
             move |input: AbortConflictInput, _context| {
                 let coordinator = coordinator.clone();
-                let session_id = session_id.clone();
+                let thread_id = thread_id.clone();
                 async move {
                     let output = coordinator
                         .abort_active_conflict(
-                            &session_id,
+                            &thread_id,
                             input.merge_id.trim(),
                             input.reason.trim(),
                         )

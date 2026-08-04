@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{AgentRoleId, AgentSession};
 
-use super::{AgentId, SessionId, TurnId};
+use super::{AgentId, ThreadId, TurnId};
 
 /// agent 资源仍可执行工作的生命周期状态。
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -77,7 +77,7 @@ pub struct AgentIdentity {
 #[serde(rename_all = "camelCase")]
 pub struct AgentTurnOutcome {
     pub turn_id: TurnId,
-    pub session_id: SessionId,
+    pub thread_id: ThreadId,
     pub kind: TurnOutcomeKind,
     pub reason: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -171,8 +171,7 @@ pub struct AgentSnapshot {
 
 /// runtime 持有的 canonical session 及其统计。
 #[derive(Debug, Clone)]
-pub struct AgentSessionState {
-    pub id: SessionId,
+pub struct ThreadContextState {
     /// 产品可持久化的 session 元数据，例如标题和展示属性；框架不解释其内容。
     pub metadata: serde_json::Value,
     pub session: AgentSession,
@@ -181,20 +180,19 @@ pub struct AgentSessionState {
     /// 当前 session 下一条 durable trace 的 sequence。
     pub trace_sequence: u64,
     /// 当前 session 已提交的 canonical UI event sequence。
-    pub session_event_sequence: u64,
+    pub thread_revision: u64,
 }
 
-impl AgentSessionState {
+impl ThreadContextState {
     /// 创建空 session 状态。
-    pub fn empty(id: SessionId) -> Self {
+    pub fn empty() -> Self {
         Self {
-            id,
             metadata: serde_json::Value::Null,
             session: AgentSession::new(),
             usage: TokenUsage::default(),
             last_context_tokens: None,
             trace_sequence: 0,
-            session_event_sequence: 0,
+            thread_revision: 0,
         }
     }
 }
@@ -219,7 +217,7 @@ pub struct DurableMailboxEnvelope {
     #[serde(default)]
     pub mail_id: String,
     pub turn_id: TurnId,
-    pub session_id: SessionId,
+    pub thread_id: ThreadId,
     pub message: String,
     #[serde(default)]
     pub presentation: MailboxPresentation,
@@ -229,9 +227,6 @@ pub struct DurableMailboxEnvelope {
     pub delivery_state: MailboxDeliveryState,
     pub queued_at: i64,
 }
-
-/// 兼容既有 runtime/repository API 的 mailbox envelope 别名。
-pub type PendingAgentInput = DurableMailboxEnvelope;
 
 impl DurableMailboxEnvelope {
     pub(crate) fn claim(&mut self, turn_id: TurnId) {
@@ -252,22 +247,33 @@ impl DurableMailboxEnvelope {
 /// 产品提交给 runtime 的输入请求。
 #[derive(Debug, Clone, PartialEq)]
 pub struct AgentSubmitRequest {
-    pub session_id: SessionId,
+    pub thread_id: ThreadId,
     pub message: String,
     pub presentation: MailboxPresentation,
     pub metadata: serde_json::Value,
     pub mail_id: Option<String>,
+    pub turn_policy: AgentTurnSubmitPolicy,
+}
+
+/// 限定一次输入必须启动新 Turn、steer 活动 Turn，或由 actor 自动选择。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum AgentTurnSubmitPolicy {
+    #[default]
+    StartOrSteer,
+    StartOnly,
+    SteerOnly,
 }
 
 impl AgentSubmitRequest {
     /// 创建可立即启动或排队的普通输入。
-    pub fn start(session_id: SessionId, message: impl Into<String>) -> Self {
+    pub fn start(thread_id: ThreadId, message: impl Into<String>) -> Self {
         Self {
-            session_id,
+            thread_id,
             message: message.into(),
             presentation: MailboxPresentation::User,
             metadata: serde_json::Value::Null,
             mail_id: None,
+            turn_policy: AgentTurnSubmitPolicy::StartOrSteer,
         }
     }
 
@@ -286,6 +292,12 @@ impl AgentSubmitRequest {
     /// 指定传输重试使用的稳定 mailbox id；不会被模型看到。
     pub fn with_mail_id(mut self, mail_id: impl Into<String>) -> Self {
         self.mail_id = Some(mail_id.into());
+        self
+    }
+
+    /// 要求 actor 以指定 Turn 语义原子接收输入。
+    pub fn with_turn_policy(mut self, turn_policy: AgentTurnSubmitPolicy) -> Self {
+        self.turn_policy = turn_policy;
         self
     }
 }
@@ -331,14 +343,14 @@ impl AgentCurrentSessionSubmitRequest {
 
 /// repository 原子提交和恢复使用的 agent 全量 durable state。
 #[derive(Debug, Clone)]
-pub struct AgentDurableState {
+pub struct ThreadActorState {
     pub snapshot: AgentSnapshot,
-    pub session: AgentSessionState,
-    pub pending_inputs: VecDeque<PendingAgentInput>,
+    pub session: ThreadContextState,
+    pub pending_inputs: VecDeque<DurableMailboxEnvelope>,
     pub active_input: Option<DurableMailboxEnvelope>,
 }
 
-impl AgentDurableState {
+impl ThreadActorState {
     pub(crate) fn has_triggering_input(&self) -> bool {
         self.triggering_input_position().is_some()
     }
@@ -358,15 +370,16 @@ impl AgentDurableState {
 #[derive(Debug, Clone)]
 pub struct AgentRegistration {
     pub identity: AgentIdentity,
-    pub session: AgentSessionState,
+    pub session: ThreadContextState,
 }
 
 /// runtime 负责 lifecycle saga 的 child agent 创建请求。
 #[derive(Debug, Clone)]
 pub struct AgentSpawnRequest {
+    pub thread_id: ThreadId,
     pub parent_id: AgentId,
     pub role: AgentRoleId,
-    pub session: AgentSessionState,
+    pub session: ThreadContextState,
     pub initial_message: Option<String>,
     pub metadata: serde_json::Value,
 }
@@ -379,17 +392,17 @@ pub struct AgentSpawnResult {
 }
 
 impl AgentRegistration {
-    /// 创建带一个空 session 的 agent 注册。
-    pub fn with_session(identity: AgentIdentity, session_id: SessionId) -> Self {
+    /// 为 identity 对应的 Thread 创建空运行上下文。
+    pub fn new(identity: AgentIdentity) -> Self {
         Self {
             identity,
-            session: AgentSessionState::empty(session_id),
+            session: ThreadContextState::empty(),
         }
     }
 
-    pub(crate) fn into_durable_state(self) -> AgentDurableState {
+    pub(crate) fn into_durable_state(self) -> ThreadActorState {
         let now = unix_timestamp();
-        AgentDurableState {
+        ThreadActorState {
             snapshot: AgentSnapshot {
                 identity: self.identity,
                 lifecycle: AgentLifecycleState::Active,
@@ -434,18 +447,18 @@ pub enum AgentRuntimeEventKind {
         snapshot: AgentSnapshot,
     },
     TurnQueued {
-        input: PendingAgentInput,
+        input: DurableMailboxEnvelope,
         snapshot: AgentSnapshot,
     },
     TurnStarted {
         turn_id: TurnId,
-        session_id: SessionId,
+        thread_id: ThreadId,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        claimed_inputs: Vec<PendingAgentInput>,
+        claimed_inputs: Vec<DurableMailboxEnvelope>,
         snapshot: AgentSnapshot,
     },
-    SessionOpened {
-        session_id: SessionId,
+    ThreadOpened {
+        thread_id: ThreadId,
         snapshot: AgentSnapshot,
     },
     TurnFinished {
@@ -482,10 +495,10 @@ pub enum AgentRuntimeError {
         expected: TurnId,
         actual: TurnId,
     },
-    SessionMismatch {
+    ThreadMismatch {
         agent_id: AgentId,
-        expected: SessionId,
-        actual: SessionId,
+        expected: ThreadId,
+        actual: ThreadId,
     },
     InvalidInput(String),
     Repository(String),
@@ -494,7 +507,7 @@ pub enum AgentRuntimeError {
         actual: Option<u64>,
     },
     Lifecycle(String),
-    SessionEvents(String),
+    ThreadEvents(String),
     ChannelClosed,
     TimedOut,
 }
@@ -514,13 +527,13 @@ impl fmt::Display for AgentRuntimeError {
                     "active turn mismatch: expected {expected}, got {actual}"
                 )
             }
-            Self::SessionMismatch {
+            Self::ThreadMismatch {
                 agent_id,
                 expected,
                 actual,
             } => write!(
                 formatter,
-                "agent {agent_id} canonical session mismatch: expected {expected}, got {actual}"
+                "agent {agent_id} canonical thread mismatch: expected {expected}, got {actual}"
             ),
             Self::InvalidInput(reason) => write!(formatter, "invalid agent input: {reason}"),
             Self::Repository(error) => write!(formatter, "agent repository failed: {error}"),
@@ -529,7 +542,7 @@ impl fmt::Display for AgentRuntimeError {
                 "agent revision conflict: expected {expected:?}, actual {actual:?}"
             ),
             Self::Lifecycle(error) => write!(formatter, "agent lifecycle failed: {error}"),
-            Self::SessionEvents(error) => write!(formatter, "session events failed: {error}"),
+            Self::ThreadEvents(error) => write!(formatter, "thread events failed: {error}"),
             Self::ChannelClosed => formatter.write_str("agent runtime channel closed"),
             Self::TimedOut => formatter.write_str("agent wait timed out"),
         }

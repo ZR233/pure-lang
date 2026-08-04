@@ -6,30 +6,30 @@
 import '../../../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 class BridgeActiveTurn {
-  final String sessionId;
+  final String threadId;
   final String turnId;
 
-  const BridgeActiveTurn({required this.sessionId, required this.turnId});
+  const BridgeActiveTurn({required this.threadId, required this.turnId});
 
   @override
-  int get hashCode => sessionId.hashCode ^ turnId.hashCode;
+  int get hashCode => threadId.hashCode ^ turnId.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is BridgeActiveTurn &&
           runtimeType == other.runtimeType &&
-          sessionId == other.sessionId &&
+          threadId == other.threadId &&
           turnId == other.turnId;
 }
 
 class BridgeAgentDirectoryEntryDto {
   final String id;
-  final String sessionId;
-  final String rootSessionId;
+  final String threadId;
+  final String rootThreadId;
   final String path;
   final String? parentPath;
   final String role;
@@ -47,8 +47,8 @@ class BridgeAgentDirectoryEntryDto {
 
   const BridgeAgentDirectoryEntryDto({
     required this.id,
-    required this.sessionId,
-    required this.rootSessionId,
+    required this.threadId,
+    required this.rootThreadId,
     required this.path,
     this.parentPath,
     required this.role,
@@ -68,8 +68,8 @@ class BridgeAgentDirectoryEntryDto {
   @override
   int get hashCode =>
       id.hashCode ^
-      sessionId.hashCode ^
-      rootSessionId.hashCode ^
+      threadId.hashCode ^
+      rootThreadId.hashCode ^
       path.hashCode ^
       parentPath.hashCode ^
       role.hashCode ^
@@ -91,8 +91,8 @@ class BridgeAgentDirectoryEntryDto {
       other is BridgeAgentDirectoryEntryDto &&
           runtimeType == other.runtimeType &&
           id == other.id &&
-          sessionId == other.sessionId &&
-          rootSessionId == other.rootSessionId &&
+          threadId == other.threadId &&
+          rootThreadId == other.rootThreadId &&
           path == other.path &&
           parentPath == other.parentPath &&
           role == other.role &&
@@ -241,7 +241,7 @@ class BridgeRecoveryCleanupPreviewDto {
   final String expectedRevision;
   final BridgeRecoveryIssueScope scope;
   final String? projectId;
-  final String? sessionId;
+  final String? threadId;
   final String detail;
   final List<BridgeRecoveryCleanupResourceDto> resources;
 
@@ -250,7 +250,7 @@ class BridgeRecoveryCleanupPreviewDto {
     required this.expectedRevision,
     required this.scope,
     this.projectId,
-    this.sessionId,
+    this.threadId,
     required this.detail,
     required this.resources,
   });
@@ -261,7 +261,7 @@ class BridgeRecoveryCleanupPreviewDto {
       expectedRevision.hashCode ^
       scope.hashCode ^
       projectId.hashCode ^
-      sessionId.hashCode ^
+      threadId.hashCode ^
       detail.hashCode ^
       resources.hashCode;
 
@@ -274,7 +274,7 @@ class BridgeRecoveryCleanupPreviewDto {
           expectedRevision == other.expectedRevision &&
           scope == other.scope &&
           projectId == other.projectId &&
-          sessionId == other.sessionId &&
+          threadId == other.threadId &&
           detail == other.detail &&
           resources == other.resources;
 }
@@ -338,7 +338,7 @@ class BridgeRecoveryCleanupResourceDto {
           changedFileCount == other.changedFileCount;
 }
 
-enum BridgeRecoveryIssueAction { retry, cleanupSession, removeProject }
+enum BridgeRecoveryIssueAction { retry, cleanupThread, removeProject }
 
 enum BridgeRecoveryIssueCategory {
   processLease,
@@ -349,7 +349,7 @@ enum BridgeRecoveryIssueCategory {
   conflict,
 }
 
-enum BridgeRecoveryIssueScope { application, project, session }
+enum BridgeRecoveryIssueScope { application, project, thread }
 
 enum BridgeRecoveryResourcePresence { absent, complete, partial }
 
@@ -368,7 +368,7 @@ class BridgeStudioRecoveryIssueDto {
   final BridgeRecoveryIssueCategory category;
   final List<BridgeRecoveryIssueAction> availableActions;
   final String? projectId;
-  final String? sessionId;
+  final String? threadId;
   final String? taskRunId;
   final String detail;
 
@@ -378,7 +378,7 @@ class BridgeStudioRecoveryIssueDto {
     required this.category,
     required this.availableActions,
     this.projectId,
-    this.sessionId,
+    this.threadId,
     this.taskRunId,
     required this.detail,
   });
@@ -390,7 +390,7 @@ class BridgeStudioRecoveryIssueDto {
       category.hashCode ^
       availableActions.hashCode ^
       projectId.hashCode ^
-      sessionId.hashCode ^
+      threadId.hashCode ^
       taskRunId.hashCode ^
       detail.hashCode;
 
@@ -404,76 +404,9 @@ class BridgeStudioRecoveryIssueDto {
           category == other.category &&
           availableActions == other.availableActions &&
           projectId == other.projectId &&
-          sessionId == other.sessionId &&
+          threadId == other.threadId &&
           taskRunId == other.taskRunId &&
           detail == other.detail;
-}
-
-class BridgeTaskAgentDto {
-  final String agentId;
-  final String role;
-  final String status;
-  final String initiatedBy;
-  final String requestedByCallId;
-  final String? summary;
-  final String? error;
-  final String? headCommit;
-  final String? lifecycle;
-  final String? activity;
-  final BridgeAgentProgressDto? progress;
-  final PlatformInt64 updatedAt;
-  final BigInt summaryAgeSeconds;
-
-  const BridgeTaskAgentDto({
-    required this.agentId,
-    required this.role,
-    required this.status,
-    required this.initiatedBy,
-    required this.requestedByCallId,
-    this.summary,
-    this.error,
-    this.headCommit,
-    this.lifecycle,
-    this.activity,
-    this.progress,
-    required this.updatedAt,
-    required this.summaryAgeSeconds,
-  });
-
-  @override
-  int get hashCode =>
-      agentId.hashCode ^
-      role.hashCode ^
-      status.hashCode ^
-      initiatedBy.hashCode ^
-      requestedByCallId.hashCode ^
-      summary.hashCode ^
-      error.hashCode ^
-      headCommit.hashCode ^
-      lifecycle.hashCode ^
-      activity.hashCode ^
-      progress.hashCode ^
-      updatedAt.hashCode ^
-      summaryAgeSeconds.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeTaskAgentDto &&
-          runtimeType == other.runtimeType &&
-          agentId == other.agentId &&
-          role == other.role &&
-          status == other.status &&
-          initiatedBy == other.initiatedBy &&
-          requestedByCallId == other.requestedByCallId &&
-          summary == other.summary &&
-          error == other.error &&
-          headCommit == other.headCommit &&
-          lifecycle == other.lifecycle &&
-          activity == other.activity &&
-          progress == other.progress &&
-          updatedAt == other.updatedAt &&
-          summaryAgeSeconds == other.summaryAgeSeconds;
 }
 
 class BridgeTaskCompletionDto {
@@ -731,7 +664,6 @@ class BridgeTaskRuntimeDto {
   final String? stopRequestedReason;
   final BigInt taskGeneration;
   final List<BridgeTaskWorkUnitDto> workUnits;
-  final List<BridgeTaskAgentDto> agents;
   final List<BridgeTaskCompletionDto> completions;
   final List<BridgeTaskMergeDto> merges;
   final List<BridgeTaskReviewDto> reviews;
@@ -746,7 +678,6 @@ class BridgeTaskRuntimeDto {
     this.stopRequestedReason,
     required this.taskGeneration,
     required this.workUnits,
-    required this.agents,
     required this.completions,
     required this.merges,
     required this.reviews,
@@ -763,7 +694,6 @@ class BridgeTaskRuntimeDto {
       stopRequestedReason.hashCode ^
       taskGeneration.hashCode ^
       workUnits.hashCode ^
-      agents.hashCode ^
       completions.hashCode ^
       merges.hashCode ^
       reviews.hashCode;
@@ -782,7 +712,6 @@ class BridgeTaskRuntimeDto {
           stopRequestedReason == other.stopRequestedReason &&
           taskGeneration == other.taskGeneration &&
           workUnits == other.workUnits &&
-          agents == other.agents &&
           completions == other.completions &&
           merges == other.merges &&
           reviews == other.reviews;

@@ -23,18 +23,8 @@ void registerTaskRuntimeDetailTests() {
     expect(find.text('Stop · generation 3'), findsOneWidget);
     expect(find.text('UserRequest: 用户点击停止'), findsOneWidget);
     expect(find.textContaining('PlannerDecision'), findsNothing);
-    expect(
-      find.byKey(StudioDriverKeys.taskAgent('executor-1')),
-      findsOneWidget,
-    );
-    expect(
-      find.byKey(StudioDriverKeys.taskAgentStatus('executor-1')),
-      findsOneWidget,
-    );
-    expect(
-      find.byKey(StudioDriverKeys.taskAgentSummaryAge('executor-1')),
-      findsOneWidget,
-    );
+    expect(find.text('executor-1'), findsWidgets);
+    expect(find.text('abcdef1234'), findsWidgets);
     expect(
       find.byKey(StudioDriverKeys.taskCompletion('completion-1')),
       findsOneWidget,
@@ -103,28 +93,14 @@ TaskRuntimeView _stoppedTask({
   stopRequestedOrigin: origin,
   stopRequestedReason: reason,
   taskGeneration: generation,
-  workUnits: const [],
-  agents: [
-    TaskAgentOutcomeView(
+  workUnits: const [
+    TaskWorkUnitView(
+      id: 'unit-1',
+      title: '实现任务',
+      status: 'readyForReview',
+      worktreePath: '.pure/worktrees/unit-1',
+      branch: 'pure-task-unit-1',
       agentId: 'executor-1',
-      role: 'executor',
-      status: 'completed',
-      initiatedBy: 'planner',
-      requestedByCallId: 'spawn-1',
-      summary: null,
-      error: null,
-      headCommit: 'abcdef123456',
-      lifecycle: 'active',
-      activity: 'idle',
-      progress: AgentProgressView(
-        stage: 'readyForReview',
-        summary: '实现完成',
-        nextStep: '等待审查',
-        revision: 2,
-        updatedAt: DateTime.fromMillisecondsSinceEpoch(1000, isUtc: true),
-      ),
-      updatedAt: DateTime.fromMillisecondsSinceEpoch(1000, isUtc: true),
-      summaryAgeSeconds: 12,
     ),
   ],
   completions: [
