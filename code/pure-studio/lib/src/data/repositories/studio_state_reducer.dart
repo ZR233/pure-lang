@@ -106,6 +106,95 @@ StudioReduceResult reduceStudioEvent(
   };
 }
 
+/// 合并历史页中可回放的 durable timeline 事实，不触碰当前 turn/runtime/interaction。
+StudioState mergeSessionHistoryPage(
+  StudioState current,
+  String sessionId,
+  SessionHistoryPage page,
+) {
+  final items = [for (final turn in page.turns) ...turn.items]
+    ..sort((left, right) => left.sequence.compareTo(right.sequence));
+  var merged = current;
+  for (final item in items) {
+    final event = item.event;
+    if (studioEventSessionId(event) != sessionId) {
+      continue;
+    }
+    merged = switch (event.payload) {
+      MessageUpdatedPayload(:final message) => _upsertMessageSnapshot(
+        merged,
+        message,
+      ),
+      MessageRemovedPayload(:final messageId) => _removeHistoricalMessage(
+        merged,
+        sessionId,
+        messageId,
+        item.sequence,
+      ),
+      MessagePartUpdatedPayload(:final part) => _upsertPartSnapshot(
+        merged,
+        part,
+        recoverOnInvalid: false,
+      ).state,
+      MessagePartRemovedPayload(:final messageId, :final partId) =>
+        _removeHistoricalPart(
+          merged,
+          sessionId,
+          messageId,
+          partId,
+          item.sequence,
+        ),
+      AgentTimelineChangedPayload(:final event) => _withAgentTimelineEvent(
+        merged,
+        event,
+      ),
+      TurnChangedPayload() ||
+      InteractionChangedPayload() ||
+      SessionRuntimeChangedPayload() ||
+      SessionListChangedPayload() ||
+      SessionTaskChangedPayload() ||
+      AgentChangedPayload() ||
+      AgentDirectoryChangedPayload() ||
+      SkillActivatedPayload() ||
+      McpHealthChangedPayload() ||
+      LspHealthChangedPayload() ||
+      PlanLifecycleChangedPayload() ||
+      MessagePartDeltaPayload() ||
+      StalePayload() ||
+      IgnoredBridgeEventPayload() ||
+      SettingsDraftSavedPayload() => merged,
+    };
+  }
+  return merged;
+}
+
+StudioState _removeHistoricalMessage(
+  StudioState current,
+  String sessionId,
+  String messageId,
+  int removeSequence,
+) {
+  final existing = current.messagesBySession[sessionId]
+      ?.where((message) => message.id == messageId)
+      .firstOrNull;
+  return existing != null && existing.sequence > removeSequence
+      ? current
+      : _removeMessage(current, sessionId, messageId);
+}
+
+StudioState _removeHistoricalPart(
+  StudioState current,
+  String sessionId,
+  String messageId,
+  String partId,
+  int removeSequence,
+) {
+  final existing = current.partSnapshotsBySession[sessionId]?[partId];
+  return existing != null && existing.sequence > removeSequence
+      ? current
+      : _removePart(current, sessionId, messageId, partId);
+}
+
 StudioState mergeStudioSessionState(
   StudioState current,
   StudioState sessionState,

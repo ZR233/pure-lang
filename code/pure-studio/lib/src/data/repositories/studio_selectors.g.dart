@@ -459,7 +459,7 @@ final class AgentTimelineProvider
   }
 }
 
-String _$agentTimelineHash() => r'f1b8d70953569eda8abf64507d2f776c394aca8e';
+String _$agentTimelineHash() => r'c896ef39bb8756698c9821c6f606168f1b87fc1b';
 
 final class AgentTimelineFamily extends $Family
     with $FunctionalFamilyOverride<AsyncValue<TimelinePaneView?>, String> {

@@ -1,4 +1,4 @@
-use crate::cli::{BridgeConfiguration, BuildGuiOptions, RunGuiOptions, VerifyGuiOptions};
+use crate::cli::{BridgeConfiguration, BuildGuiOptions, LogLevel, RunGuiOptions, VerifyGuiOptions};
 use crate::paths;
 use crate::process;
 use crate::pubspec_lock::{self, LockfileChange};
@@ -51,6 +51,7 @@ struct FlutterInvocation<'a> {
     demo_mode: DemoMode,
     process_mode: FlutterProcessMode,
     bridge_artifacts: Option<&'a RustBridgeArtifacts>,
+    log_level: Option<LogLevel>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -436,6 +437,7 @@ pub(crate) fn run_gui(options: RunGuiOptions) -> Result<()> {
             demo_mode,
             process_mode,
             bridge_artifacts: bridge_artifacts.as_ref(),
+            log_level: options.log_level,
         },
     )
 }
@@ -501,6 +503,7 @@ fn build_gui_with_version(options: BuildGuiOptions, release_version: Option<&str
             demo_mode,
             process_mode: FlutterProcessMode::Batch,
             bridge_artifacts: bridge_artifacts.as_ref(),
+            log_level: None,
         },
     )?;
 
@@ -669,6 +672,7 @@ fn run_flutter(
             demo_mode,
             process_mode: FlutterProcessMode::Batch,
             bridge_artifacts: None,
+            log_level: None,
         },
     )
 }
@@ -706,6 +710,14 @@ fn configure_flutter_environment(command: &mut Command, invocation: FlutterInvoc
         }
         DemoMode::Demo => {
             command.env("PURE_STUDIO_DEMO", "true");
+        }
+    }
+    match invocation.log_level {
+        Some(log_level) => {
+            command.env("PURE_STUDIO_LOG_LEVEL", log_level.as_str());
+        }
+        None => {
+            command.env_remove("PURE_STUDIO_LOG_LEVEL");
         }
     }
     if let Some(artifacts) = invocation.bridge_artifacts {
@@ -897,6 +909,7 @@ mod tests {
                 demo_mode: DemoMode::Native,
                 process_mode: FlutterProcessMode::Batch,
                 bridge_artifacts: Some(&artifacts),
+                log_level: Some(LogLevel::Debug),
             },
         );
 
@@ -909,6 +922,10 @@ mod tests {
             Some(Some(OsString::from(r"C:\artifacts\pl_studio_bridge.pdb")))
         );
         assert_eq!(command_env(&command, "PURE_STUDIO_DEMO"), Some(None));
+        assert_eq!(
+            command_env(&command, "PURE_STUDIO_LOG_LEVEL"),
+            Some(Some(OsString::from("debug")))
+        );
     }
 
     #[test]
@@ -921,6 +938,7 @@ mod tests {
                 demo_mode: DemoMode::Demo,
                 process_mode: FlutterProcessMode::ResidentDriver,
                 bridge_artifacts: None,
+                log_level: None,
             },
         );
 
@@ -930,6 +948,7 @@ mod tests {
             command_env(&command, "PURE_STUDIO_DEMO"),
             Some(Some(OsString::from("true")))
         );
+        assert_eq!(command_env(&command, "PURE_STUDIO_LOG_LEVEL"), Some(None));
     }
 
     fn command_env(command: &Command, name: &str) -> Option<Option<OsString>> {

@@ -197,7 +197,7 @@ fn tool_execution_record_from_envelope(
     let cache_hit = runtime_events
         .iter()
         .any(|event| matches!(event, ToolRuntimeEvent::CacheHit { .. }));
-    tracing::info!(
+    tracing::trace!(
         target: "pl_core::tool_metrics",
         tool = %tool_name,
         raw_bytes,

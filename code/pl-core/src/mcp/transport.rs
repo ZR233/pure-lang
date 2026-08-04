@@ -127,15 +127,12 @@ impl StdioMcpClient {
             tokio::spawn(async move {
                 let mut lines = BufReader::new(stderr).lines();
                 while let Ok(Some(line)) = lines.next_line().await {
-                    match classify_mcp_stderr_line(&line) {
-                        McpStderrSeverity::Info => {}
-                        McpStderrSeverity::Warning => {
-                            tracing::warn!(message = %line, "MCP server stderr");
-                        }
-                        McpStderrSeverity::Error => {
-                            tracing::error!(message = %line, "MCP server stderr");
-                        }
-                    }
+                    let severity = classify_mcp_stderr_line(&line);
+                    tracing::trace!(
+                        severity = severity.as_str(),
+                        message_bytes = line.len(),
+                        "MCP server stderr summary"
+                    );
                 }
             });
         }
@@ -257,7 +254,7 @@ async fn read_stdio_responses<R>(
         let Ok(response) = serde_json::from_str::<JsonRpcResponse>(&line) else {
             tracing::warn!(
                 server_id,
-                response = %line,
+                response_bytes = line.len(),
                 "MCP server returned invalid JSON"
             );
             continue;
@@ -292,6 +289,16 @@ pub(super) enum McpStderrSeverity {
     Info,
     Warning,
     Error,
+}
+
+impl McpStderrSeverity {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Info => "info",
+            Self::Warning => "warning",
+            Self::Error => "error",
+        }
+    }
 }
 
 pub(super) fn classify_mcp_stderr_line(line: &str) -> McpStderrSeverity {

@@ -8,7 +8,7 @@ use super::outcome::agent_outcome_record;
 use super::task_run_record;
 use super::work_unit::work_unit_record;
 use crate::agent::worktree::git_compatible_path;
-use crate::studio::entities;
+use crate::studio::entity as entities;
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{

@@ -23,12 +23,16 @@ class TimelineView extends StatefulWidget {
     required this.sessionId,
     required this.rows,
     required this.turn,
+    this.onLoadOlder,
+    this.isLoadingOlder = false,
     super.key,
   });
 
   final String? sessionId;
   final List<TimelineRow> rows;
   final StudioTurnView? turn;
+  final VoidCallback? onLoadOlder;
+  final bool isLoadingOlder;
 
   @override
   State<TimelineView> createState() => _TimelineViewState();
@@ -45,6 +49,7 @@ class _TimelineViewState extends State<TimelineView> {
   bool _detachedByUser = false;
   bool _programmaticScroll = false;
   bool _bottomScrollScheduled = false;
+  bool _olderLoadRequested = false;
   int _pendingNewEvents = 0;
   int _contentVersion = 0;
   _BottomScrollIntent _scheduledBottomIntent = _BottomScrollIntent.jump;
@@ -79,6 +84,9 @@ class _TimelineViewState extends State<TimelineView> {
       });
       return;
     }
+    if (oldWidget.isLoadingOlder && !widget.isLoadingOlder) {
+      _olderLoadRequested = false;
+    }
 
     final nextContentVersion = _timelineContentVersion(
       widget.rows,
@@ -88,8 +96,41 @@ class _TimelineViewState extends State<TimelineView> {
       return;
     }
     final wasNearBottom = _isNearBottom();
+    final prepended = _hasPrependedTimelineRows(oldWidget.rows, widget.rows);
+    final previousExtent = _controller.hasClients
+        ? _controller.position.maxScrollExtent
+        : 0.0;
+    final previousPixels = _controller.hasClients
+        ? _controller.position.pixels
+        : 0.0;
     final hasNewEvent = _hasNewTimelineEvent(oldWidget, widget);
     _contentVersion = nextContentVersion;
+
+    if (prepended && _controller.hasClients && !wasNearBottom) {
+      _followingBottom = false;
+      _detachedByUser = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_controller.hasClients) {
+          return;
+        }
+        final insertedExtent =
+            _controller.position.maxScrollExtent - previousExtent;
+        final target = (previousPixels + insertedExtent)
+            .clamp(
+              _controller.position.minScrollExtent,
+              _controller.position.maxScrollExtent,
+            )
+            .toDouble();
+        _programmaticScroll = true;
+        try {
+          _controller.jumpTo(target);
+        } finally {
+          _programmaticScroll = false;
+        }
+        _saveSessionState(widget.sessionId);
+      });
+      return;
+    }
 
     if (!_detachedByUser && (_followingBottom || wasNearBottom)) {
       _followingBottom = true;
@@ -214,6 +255,19 @@ class _TimelineViewState extends State<TimelineView> {
               ),
             ),
           ),
+        if (widget.isLoadingOlder)
+          const Positioned(
+            top: 8,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: SizedBox.square(
+                key: ValueKey('timeline-history-loading'),
+                dimension: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
+          ),
       ],
     );
   }
@@ -250,6 +304,13 @@ class _TimelineViewState extends State<TimelineView> {
       });
     }
     _saveSessionState(widget.sessionId);
+    if (_controller.position.extentBefore <= _bottomThreshold &&
+        widget.onLoadOlder != null &&
+        !widget.isLoadingOlder &&
+        !_olderLoadRequested) {
+      _olderLoadRequested = true;
+      widget.onLoadOlder!();
+    }
   }
 
   void _scheduleBottomScroll(_BottomScrollIntent intent) {
@@ -527,6 +588,16 @@ bool _hasNewTimelineEvent(TimelineView oldWidget, TimelineView newWidget) {
     newWidget.turn,
   );
   return nextActivity != null && nextActivity != previousActivity;
+}
+
+bool _hasPrependedTimelineRows(
+  List<TimelineRow> previous,
+  List<TimelineRow> next,
+) {
+  if (previous.isEmpty || next.length <= previous.length) {
+    return false;
+  }
+  return next.indexWhere((row) => row.id == previous.first.id) > 0;
 }
 
 String? _timelineActivityIdentity(

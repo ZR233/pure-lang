@@ -35,6 +35,28 @@ struct StudioAgentEventProjector {
     runtime: watch::Receiver<Option<AgentRuntimeHandle>>,
 }
 
+struct StudioAgentProjectionFailure {
+    stage: &'static str,
+    source: anyhow::Error,
+}
+
+/// Adds a non-sensitive stage label while preserving the original projection error.
+trait ProjectionResultExt<T> {
+    fn at(self, stage: &'static str) -> Result<T, StudioAgentProjectionFailure>;
+}
+
+impl<T, E> ProjectionResultExt<T> for Result<T, E>
+where
+    E: Into<anyhow::Error>,
+{
+    fn at(self, stage: &'static str) -> Result<T, StudioAgentProjectionFailure> {
+        self.map_err(|source| StudioAgentProjectionFailure {
+            stage,
+            source: source.into(),
+        })
+    }
+}
+
 impl StudioAgentCommitObserver {
     pub(super) fn new(
         store: StudioStore,
@@ -61,7 +83,11 @@ impl StudioAgentCommitObserver {
         tokio::spawn(async move {
             while let Some(committed) = receiver.recv().await {
                 if let Err(error) = projector.project(committed).await {
-                    tracing::warn!("failed to project durable Studio agent event: {error:#}");
+                    tracing::warn!(
+                        stage = error.stage,
+                        error_bytes = error.source.to_string().len(),
+                        "failed to project durable Studio agent event"
+                    );
                 }
             }
         });
@@ -76,7 +102,10 @@ impl StudioAgentCommitObserver {
     pub(super) async fn attach_runtime(&self, runtime: AgentRuntimeHandle) {
         self.runtime.send_replace(Some(runtime));
         if let Err(error) = self.plan_confirmations.recover_missing().await {
-            tracing::warn!("failed to recover pending plan confirmations: {error:#}");
+            tracing::warn!(
+                error_bytes = error.to_string().len(),
+                "failed to recover pending plan confirmations"
+            );
         }
     }
 
@@ -118,7 +147,10 @@ impl StudioAgentCommitObserver {
 }
 
 impl StudioAgentEventProjector {
-    async fn project(&self, committed: AgentCommittedEvent) -> anyhow::Result<()> {
+    async fn project(
+        &self,
+        committed: AgentCommittedEvent,
+    ) -> Result<(), StudioAgentProjectionFailure> {
         let AgentCommittedEvent {
             agent_id,
             runtime_events,
@@ -130,18 +162,24 @@ impl StudioAgentEventProjector {
             && !trace_events.is_empty()
         {
             self.project_traces(agent_id.as_str(), session_id, trace_events)
-                .await?;
+                .await
+                .at("traceEvents")?;
         }
         for event in runtime_events {
             self.project_runtime_event(event, &studio_session_id)
                 .await?;
         }
         if let Some(session_id) = studio_session_id
-            && let Some(session) = self.store.read_session(&session_id).await?
+            && let Some(session) = self
+                .store
+                .read_session(&session_id)
+                .await
+                .at("readSessionForTaskRefresh")?
         {
             self.product_events
                 .refresh_session_task(&session.root_session_id)
-                .await?;
+                .await
+                .at("refreshSessionTask")?;
         }
         Ok(())
     }
@@ -150,7 +188,7 @@ impl StudioAgentEventProjector {
         &self,
         event: pl_core::AgentRuntimeEvent,
         studio_session_id: &Option<String>,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), StudioAgentProjectionFailure> {
         match event.kind {
             AgentRuntimeEventKind::Registered { snapshot }
             | AgentRuntimeEventKind::StateChanged { snapshot }
@@ -166,10 +204,14 @@ impl StudioAgentEventProjector {
                     .await?;
             }
             AgentRuntimeEventKind::TurnStarted { snapshot, .. } => {
-                if snapshot.identity.role.as_str() == StudioRole::Executor.key() {
+                let is_task_executor = snapshot.identity.role.as_str()
+                    == StudioRole::Executor.key()
+                    && self.resources.get(&snapshot.identity.id).await.is_some();
+                if is_task_executor {
                     self.store
                         .mark_executor_turn_started(event.agent_id.as_str())
-                        .await?;
+                        .await
+                        .at("markExecutorTurnStarted")?;
                 }
                 self.emit_agent_snapshot(studio_session_id.as_deref(), snapshot)
                     .await?;
@@ -178,8 +220,11 @@ impl StudioAgentEventProjector {
                 outcome, snapshot, ..
             }
             | AgentRuntimeEventKind::RecoveryCancelledTurn { outcome, snapshot } => {
-                let is_executor = snapshot.identity.role.as_str() == StudioRole::Executor.key();
-                let is_reviewer = snapshot.identity.role.as_str() == StudioRole::Reviewer.key();
+                let is_task_agent = self.resources.get(&snapshot.identity.id).await.is_some();
+                let is_executor =
+                    is_task_agent && snapshot.identity.role.as_str() == StudioRole::Executor.key();
+                let is_reviewer =
+                    is_task_agent && snapshot.identity.role.as_str() == StudioRole::Reviewer.key();
                 if is_executor {
                     self.store
                         .settle_executor_turn_finished(
@@ -187,7 +232,8 @@ impl StudioAgentEventProjector {
                             outcome.kind,
                             outcome.reason.as_deref(),
                         )
-                        .await?;
+                        .await
+                        .at("settleExecutorTurnFinished")?;
                 } else if is_reviewer {
                     self.store
                         .settle_reviewer_turn_finished(
@@ -195,7 +241,8 @@ impl StudioAgentEventProjector {
                             outcome.kind,
                             outcome.reason.as_deref(),
                         )
-                        .await?;
+                        .await
+                        .at("settleReviewerTurnFinished")?;
                 }
                 if let Some(session_id) = studio_session_id.as_deref() {
                     self.project_plan_lifecycle(
@@ -205,15 +252,18 @@ impl StudioAgentEventProjector {
                         outcome.kind,
                         outcome.reason.clone(),
                     )
-                    .await?;
+                    .await
+                    .at("projectPlanLifecycle")?;
                 }
                 self.emit_agent_snapshot(studio_session_id.as_deref(), snapshot)
                     .await?;
                 if is_reviewer {
-                    let runtime = wait_for_runtime(self.runtime.clone()).await?;
-                    runtime
-                        .close(AgentId::new(event.agent_id.to_string())?)
-                        .await?;
+                    let runtime = wait_for_runtime(self.runtime.clone())
+                        .await
+                        .at("waitForRuntimeToCloseReviewer")?;
+                    let reviewer_id =
+                        AgentId::new(event.agent_id.to_string()).at("parseReviewerAgentId")?;
+                    runtime.close(reviewer_id).await.at("closeReviewer")?;
                 }
             }
         }
@@ -295,7 +345,7 @@ impl StudioAgentEventProjector {
         &self,
         studio_session_id: Option<&str>,
         snapshot: AgentSnapshot,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), StudioAgentProjectionFailure> {
         let Some(session_id) = studio_session_id else {
             return Ok(());
         };
@@ -305,8 +355,14 @@ impl StudioAgentEventProjector {
         let summary = resource.as_ref().map(|resource| resource.task_name.clone());
         self.store
             .update_agent_session_status(session_id, status, summary, error, snapshot.updated_at)
-            .await?;
-        if let Some(session) = self.store.read_session(session_id).await? {
+            .await
+            .at("updateAgentSessionStatus")?;
+        if let Some(session) = self
+            .store
+            .read_session(session_id)
+            .await
+            .at("readSessionForAgentDirectory")?
+        {
             let progress = snapshot
                 .progress
                 .as_ref()
@@ -365,7 +421,8 @@ impl StudioAgentEventProjector {
             );
             self.product_events
                 .emit_session_list(&session.project_id)
-                .await?;
+                .await
+                .at("emitSessionList")?;
         }
         if snapshot.lifecycle == AgentLifecycleState::Closed {
             self.resources

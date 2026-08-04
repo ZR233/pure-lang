@@ -5,7 +5,7 @@ use super::coordinator::spawn_coordinator;
 use super::host::{AgentCommitObserver, AgentStateRepository};
 use super::state::{AgentRuntimeError, unix_timestamp};
 use super::{
-    AgentActivityState, AgentCommit, AgentCommitOutcome, AgentCommittedEvent, AgentLifecycleState,
+    AgentActivityState, AgentCommitOutcome, AgentCommittedEvent, AgentLifecycleState,
     AgentRuntimeEvent, AgentRuntimeEventKind, AgentRuntimeHandle, AgentRuntimeHost,
     AgentRuntimeResult, AgentTurnOutcome, MailboxDeliveryState, RestoredAgentRuntime, SessionId,
     TurnId, TurnOutcomeKind,
@@ -73,7 +73,7 @@ where
                 session_event_handle
                     .replace_snapshot(
                         projection.snapshot.clone(),
-                        projection.durable_events.clone(),
+                        projection.retained_durable_events.clone(),
                     )
                     .map_err(|error| AgentRuntimeError::SessionEvents(error.to_string()))?;
                 let session_id = SessionId::new(projection.snapshot.session_id.clone())
@@ -117,7 +117,12 @@ where
 
     /// 停止 runtime。
     pub async fn shutdown(&self) -> AgentRuntimeResult<()> {
-        self.handle.shutdown().await
+        self.handle.shutdown().await?;
+        self.host
+            .repository()
+            .barrier()
+            .await
+            .map_err(|error| AgentRuntimeError::Repository(error.to_string()))
     }
 }
 
@@ -233,13 +238,17 @@ where
         agent.state.session.session_event_sequence = projected.through_sequence;
         let commit_outcome = host
             .repository()
-            .commit(AgentCommit {
+            .commit(super::SessionHistoryCommit {
                 agent_id: agent.state.snapshot.identity.id.clone(),
                 expected_revision: Some(expected_revision),
                 next_state: agent.state.clone(),
-                events: vec![event.clone()],
-                trace_events: Vec::new(),
-                session_projection: Some(projection.clone()),
+                facts: super::DurableCommitFacts::from_state(
+                    &agent.state,
+                    vec![event.clone()],
+                    Vec::new(),
+                    Some(projection.clone()),
+                    None,
+                ),
                 mutation: super::AgentStateMutation::SnapshotAndQueue,
             })
             .await
@@ -275,12 +284,12 @@ where
         if let Some(restored_projection) = agent.session_projection.as_mut() {
             restored_projection.snapshot = projection.snapshot;
             restored_projection
-                .durable_events
+                .retained_durable_events
                 .extend(projection.durable_events);
         } else {
             agent.session_projection = Some(super::RestoredSessionProjection {
                 snapshot: projection.snapshot,
-                durable_events: projection.durable_events,
+                retained_durable_events: projection.durable_events,
             });
         }
         recovered.push(agent);

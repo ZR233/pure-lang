@@ -6,6 +6,7 @@
 // Static analysis wrongly picks the IO variant, thus ignore this
 // ignore_for_file: argument_type_not_assignable
 
+import 'api/studio/handlers/history.dart';
 import 'api/studio/handlers/lifecycle.dart';
 import 'api/studio/handlers/prompt.dart';
 import 'api/studio/handlers/providers.dart';
@@ -16,6 +17,7 @@ import 'api/studio/handlers/updater.dart';
 import 'api/studio/subscription.dart';
 import 'api/studio/types/error.dart';
 import 'api/studio/types/event.dart';
+import 'api/studio/types/history.dart';
 import 'api/studio/types/interaction.dart';
 import 'api/studio/types/response.dart';
 import 'api/studio/types/runtime.dart';
@@ -268,6 +270,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   InstructionsSettingsInput dco_decode_box_autoadd_instructions_settings_input(
     dynamic raw,
   );
+
+  @protected
+  LoadSessionHistoryPageRequest
+  dco_decode_box_autoadd_load_session_history_page_request(dynamic raw);
 
   @protected
   McpSettingsInput dco_decode_box_autoadd_mcp_settings_input(dynamic raw);
@@ -529,6 +535,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeSessionEventPosition dco_decode_bridge_session_event_position(
     dynamic raw,
   );
+
+  @protected
+  BridgeSessionHistoryItem dco_decode_bridge_session_history_item(dynamic raw);
+
+  @protected
+  BridgeSessionHistoryTurn dco_decode_bridge_session_history_turn(dynamic raw);
 
   @protected
   BridgeSessionMcpAvailabilityDescriptor
@@ -838,6 +850,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  List<BridgeSessionHistoryItem> dco_decode_list_bridge_session_history_item(
+    dynamic raw,
+  );
+
+  @protected
+  List<BridgeSessionHistoryTurn> dco_decode_list_bridge_session_history_turn(
+    dynamic raw,
+  );
+
+  @protected
   List<BridgeSessionMcpAvailabilityDescriptor>
   dco_decode_list_bridge_session_mcp_availability_descriptor(dynamic raw);
 
@@ -951,6 +973,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<ZhipuToolUsageDetailDto> dco_decode_list_zhipu_tool_usage_detail_dto(
+    dynamic raw,
+  );
+
+  @protected
+  LoadSessionHistoryPageRequest dco_decode_load_session_history_page_request(
+    dynamic raw,
+  );
+
+  @protected
+  LoadSessionHistoryPageResponse dco_decode_load_session_history_page_response(
     dynamic raw,
   );
 
@@ -1410,6 +1442,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  LoadSessionHistoryPageRequest
+  sse_decode_box_autoadd_load_session_history_page_request(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   McpSettingsInput sse_decode_box_autoadd_mcp_settings_input(
     SseDeserializer deserializer,
   );
@@ -1729,6 +1767,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeSessionEventPosition sse_decode_bridge_session_event_position(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeSessionHistoryItem sse_decode_bridge_session_history_item(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeSessionHistoryTurn sse_decode_bridge_session_history_turn(
     SseDeserializer deserializer,
   );
 
@@ -2118,6 +2166,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  List<BridgeSessionHistoryItem> sse_decode_list_bridge_session_history_item(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<BridgeSessionHistoryTurn> sse_decode_list_bridge_session_history_turn(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<BridgeSessionMcpAvailabilityDescriptor>
   sse_decode_list_bridge_session_mcp_availability_descriptor(
     SseDeserializer deserializer,
@@ -2261,6 +2319,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<ZhipuToolUsageDetailDto> sse_decode_list_zhipu_tool_usage_detail_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  LoadSessionHistoryPageRequest sse_decode_load_session_history_page_request(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  LoadSessionHistoryPageResponse sse_decode_load_session_history_page_response(
     SseDeserializer deserializer,
   );
 
@@ -2803,6 +2871,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_load_session_history_page_request(
+    LoadSessionHistoryPageRequest self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_mcp_settings_input(
     McpSettingsInput self,
     SseSerializer serializer,
@@ -3192,6 +3266,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_bridge_session_event_position(
     BridgeSessionEventPosition self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_session_history_item(
+    BridgeSessionHistoryItem self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_session_history_turn(
+    BridgeSessionHistoryTurn self,
     SseSerializer serializer,
   );
 
@@ -3658,6 +3744,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_bridge_session_history_item(
+    List<BridgeSessionHistoryItem> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_bridge_session_history_turn(
+    List<BridgeSessionHistoryTurn> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_bridge_session_mcp_availability_descriptor(
     List<BridgeSessionMcpAvailabilityDescriptor> self,
     SseSerializer serializer,
@@ -3840,6 +3938,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_zhipu_tool_usage_detail_dto(
     List<ZhipuToolUsageDetailDto> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_load_session_history_page_request(
+    LoadSessionHistoryPageRequest self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_load_session_history_page_response(
+    LoadSessionHistoryPageResponse self,
     SseSerializer serializer,
   );
 

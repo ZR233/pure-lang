@@ -100,7 +100,7 @@ Uninitialized -> Initializing -> Ready -> ShuttingDown -> Stopped
 3. 构造 `TurnRequest` 与 `TurnOptions`
 4. `StudioHost::prepare_turn` 组装 `AgentKernel`、`TurnEngine` 与 execution policy
 5. `AgentRuntime` 注入 turn identity/cancellation/trace 后执行 turn
-6. 运行中每个可见对话 lifecycle 先进入 `StudioEventRuntime`。用户、assistant、commentary、reasoning、plan 和 tool 均规范化为 opencode 式 `StudioMessage` / `StudioPart`。`messageUpdated` 与 `messagePartUpdated` 是 durable snapshot，由 store 在同一个事务中分配 `StudioEventEnvelope.sequence`、写入 `studio_events` 与 `studio_messages/message_parts` projection，再广播同一份 envelope 给 Studio；`messagePartDelta` 只进入实时通道，是 live overlay，不写入 `studio_events`、不推进 durable cursor。
+6. 运行中每个可见对话 lifecycle 先进入 `StudioEventRuntime`。用户、assistant、commentary、reasoning、plan 和 tool 均规范化为 opencode 式 `StudioMessage` / `StudioPart`。`messageUpdated` 与 `messagePartUpdated` 是 durable snapshot：history writer 先把事实批量写入历史库，再把 projection mutation 写入状态库；只有 history ack 后才能广播 durable envelope，terminal 还必须等待两个库的 watermark barrier。`messagePartDelta` 只进入实时通道，是 live overlay，不写入历史库、不推进 durable cursor。
 7. turn 收尾只负责消息、最终 runtime snapshot 与生命周期终态校准；不得要求前端等待最终响应才能看到过程
 
 前端提交普通 prompt 或 Plan 实施时调用同一套后台 turn 提交流程。Flutter `submitPrompt(sessionId, prompt, attachmentIds)` 只创建 turn、注册 cancellation token、写入 canonical `turnChanged`、必要的用户 `messageUpdated` 和用户 `messagePartUpdated`，随后在后台执行 run，并立即返回 `{ sessionId, turnId, cursor }`。turn 状态使用 tagged `SessionTurnState`：`queued | inProgress { activity } | completed | failed { reason } | cancelled { reason }`；`SessionTurnActivity` 固定为 `preparing | thinking | responding | planning | runningTool | waitingForApproval | waitingForUserInput | waitingForPlanConfirmation | persisting`。没有当前 turn 就表示 session 空闲，不再发送 `idle`、`waitingForModel`、`streaming` 或通用 `waitingForInteraction`。
@@ -195,11 +195,11 @@ prompt 提交、停止、外部 session fact 和重启后的 transient interacti
 session，且其全部 session claim 均已由其他 owner 持有。只要同一 agent 同时存在有效与冲突
 claim，恢复必须拒绝并保留诊断，不能猜测或删除共享 session projection。
 
-持久化原则：
+持久化原则（详细合同见 `19-studio-storage-and-diagnostics.md`）：
 
 - 消息和内部 `pl-trace` 诊断事件采用事务批量写入，避免逐条写放大；旧 `timeline_events` 表的 entity、运行期写入、读取和清理路径均已删除，迁移历史按 append-only 保留（不再有运行期代码读写该表）
-- `studio_events` 是 Studio UI 的唯一 durable 重放事实流。每个 durable 事件带 `sessionId`、会话内单调 `sequence`、`createdAt` 和类型化 `kind`；前端通过 cursor 补拉缺失事件，而不是依赖命令最终响应补状态。广播 payload 必须与持久化 payload 完全一致，禁止 projection 重写一份、实时广播另一份。高频 `messagePartDelta` 是实时 overlay，不写入 durable log，必须能被后续 `messagePartUpdated` 完全覆盖。
-- `SessionEventHub` canonical snapshot 的 `throughSequence` 是下一 durable sequence 的唯一依据。observation、trace、runtime event 和外部 session fact 必须走同一 owner-validated projection transaction；`agent_runtime_sessions.session_event_sequence` 只保存提交后 checkpoint，恢复时若仅落后则按 snapshot/journal cursor 自动修复，绝不能据此分配 sequence。
+- `session_history_items` 是 Studio UI 与模型恢复的唯一完整 durable 事实流。每个 durable item 带 `sessionId`、会话内单调 `sequence`、`createdAt` 和类型化 payload；广播 payload 必须与持久化 payload完全一致。高频 `messagePartDelta` 是实时 overlay，不写入 durable history，必须能被后续 `messagePartUpdated` 完全覆盖。
+- `SessionEventHub` canonical snapshot 的 `throughSequence` 是下一 durable sequence 的唯一依据。observation、trace、runtime event 和外部 session fact 走同一 owner validation，但物理提交按“历史库事实 -> 状态库 projection”排序，不声称跨库原子。`agent_runtime_sessions.session_event_sequence` 只保存提交后可重建 checkpoint，恢复时按历史 watermark 修复，绝不能据此分配 sequence。
 - `turns` 表保存当前与历史 turn 的 tagged `SessionTurnState`。`queued` 与 `inProgress { activity }` 属于非终态；`completed`、`failed { reason }`、`cancelled { reason }` 属于终态。启动时所有非终态 turn 必须收敛为带明确原因的 `cancelled`
 - `studio_messages`、`message_parts`、`agent_events`、`interactions`、`session_skills` 是 `StudioEventRuntime` 的 projection 表。message/part projection 保存 latest snapshot，live delta 只作为前端 overlay；除一次性迁移和启动恢复外，运行期不得由前端推断直接写入。Plan lifecycle 也必须先写 `StudioEventKind::PlanLifecycleChanged`，再由 projection 更新查询表。旧 `session_handoffs` projection 已通过后续迁移从当前 schema 清理，不再参与运行期读写。
 - `message_parts.part_order` 在 part 首次 durable snapshot 时由 `StudioEventEnvelope.sequence` 固化；后续同 part snapshot 即使携带旧 order，也必须保留既有 order，禁止终态 snapshot 或 backfill 改变首次展示位置。
@@ -239,7 +239,7 @@ Studio runtime 在启动、保存 Provider 设置和保存 MCP 设置后都必�
 
 `StudioRuntime` 保持 use case 门面边界：公开入口仍由 `StudioRuntime` 暴露；runtime 初始化/启动/关闭放入 lifecycle 子模块；项目、会话、配置角色、provider usage 与 skill catalog 查询放入 session-service 子模块；agent/runtime usage 的展示快照映射放入 projection 子模块；skills 自学习触发、阈值统计和后台 reviewer turn 放入 self-learning 子模块。子模块不得直接替代 runtime 发事件或写 store，只返回确定性 projection、执行门面方法对应的持久化动作，或启动明确的后台 review 任务。
 
-`messagePartDelta` 只用于 live overlay。即使底层为了诊断保留了 delta 事件，也不得写入 `studio_events`。`stale` 也是 live-only 补拉提示，不占用 durable sequence，不参与历史重放。`load_session_state` 从 `studio_messages/message_parts` projection record 恢复终态，每条 record 必须携带来源 event sequence 供前端建立新旧 guard，并附带非 message/part durable 状态事件；`load_studio_events` 只回放 durable snapshot 与状态事件，历史恢复不得依赖 delta。旧 `timeline_events` 表的实体、写入、读取与 cursor API 均已从运行期删除；其 drop/创建语句作为 append-only 迁移历史保留，但运行期不再有代码读写该表。
+`messagePartDelta` 只用于 live overlay，不得写入历史库。`stale` 也是 live-only 补拉提示，不占用 durable sequence，不参与历史重放。`load_session_state` 从状态库 projection 恢复当前终态；`load_session_history_page` 从历史库按 turn keyset 加载完整旧历史。两条读取路径按 sequence 合并，历史恢复不得依赖 delta。
 
 `Done`、turn final、agent final 属于 lossless 事件：转发层必须确保它们不会因为普通 delta 的背压被丢弃。
 
@@ -273,6 +273,7 @@ Flutter/FRB 输出使用同一语义，桥接层统一包成：
 - `RuntimeSnapshot`：runtime 状态、活动会话/turn、更新时间与可展示错误
 - `BridgeEventEnvelope`：`eventId/sessionId/turnId/sequence/createdAt/payload`
 - `BridgeStudioEventsResponse`：`sessionId/events/nextSequence`，其中 `events[]` 与实时 stream 共用 typed `BridgeEventEnvelope`
+- `BridgeSessionHistoryPageResponse`：`sessionId/turns/nextBeforeTurnSequence/hasMore`，用于重启恢复和向上分页
 - `BridgeStudioSnapshotResponse`、`BridgeSessionStateResponse`、`ProviderUsagesResponse`、`SkillsResponse`、`SubmitPromptResponse`、`StopPromptResponse`、`ResolveInteractionResponse`、`SettingsDraftResponse`、`ConfigSavedResponse`：FRB typed DTO。Studio snapshot 通过单一 `BridgeStudioSettingsDto` 携带 provider、role、runtime、instructions、skills、MCP、General 与 Web Search 的 canonical typed view；不得携带 `configJson`、`generalSettingsJson` 或 raw map。
 
 Dart FRB adapter 从 `BridgeEventPayload` sealed union 归一出 app 内部 typed `StudioBridgeEventPayload`；Riverpod reducer 只按 payload 类型更新 store，不再读取 `event.payload[...]` Map。实时 stream 与 `loadStudioEvents` backfill 必须共用这套 typed envelope。命令、snapshot 与配置返回不使用 `JsonResponse` 外壳，也不在 Dart adapter 解配置 JSON；只有工具参数、开放 provider payload 等本来就动态的协议标量可以保留 JSON。agent timeline 在 FRB 边界使用 typed payload union；Flutter 不解析历史 `payloadJson` agent event 记录，持久层必须在进入 Flutter 前投影为 typed `BridgeAgentTimelineEventDto`。

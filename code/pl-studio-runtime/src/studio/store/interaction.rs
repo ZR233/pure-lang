@@ -3,12 +3,12 @@ use std::collections::BTreeSet;
 use crate::{InteractionKind, InteractionRequest, InteractionStatus};
 use anyhow::Result;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait,
-    QueryFilter, QueryOrder, Statement, TransactionTrait,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
+    QueryOrder, TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
 
-use crate::studio::entities;
+use crate::studio::entity as entities;
 use crate::studio::ids::unix_seconds;
 use crate::studio::mappers::interaction_record;
 use crate::studio::store::StudioStore;
@@ -119,51 +119,54 @@ impl StudioStore {
     pub(in crate::studio) async fn list_restart_recoverable_user_inputs(
         &self,
     ) -> Result<Vec<InteractionRequest>> {
-        let rows = self
-            .db
-            .query_all(Statement::from_string(
-                DatabaseBackend::Sqlite,
-                "SELECT interaction.id AS interaction_id,
-                        interaction.session_id AS session_id
-                 FROM interactions interaction
-                 INNER JOIN sessions session ON session.id = interaction.session_id
-                 WHERE interaction.kind = 'userInput'
-                   AND interaction.status = 'cancelled'
-                   AND session.archived = 0
-                   AND session.visibility = 'active'
-                   AND EXISTS (
-                       SELECT 1 FROM agent_turns turn
-                       WHERE turn.session_id = interaction.session_id
-                         AND turn.turn_id = interaction.turn_id
-                         AND turn.status = 'cancelled'
-                         AND turn.reason = 'runtime_restarted'
-                   )
-                   AND NOT EXISTS (
-                       SELECT 1 FROM interactions pending
-                       WHERE pending.session_id = interaction.session_id
-                         AND pending.kind = 'userInput'
-                         AND pending.status = 'pending'
-                   )
-                 ORDER BY interaction.session_id,
-                          interaction.updated_at DESC,
-                          interaction.id DESC"
-                    .to_string(),
-            ))
+        use entities::{agent_turn, interaction, session};
+        let active_sessions = session::Entity::find()
+            .filter(session::Column::Archived.eq(0))
+            .filter(session::Column::Visibility.eq("active"))
+            .all(&self.db)
+            .await?
+            .into_iter()
+            .map(|session| session.id)
+            .collect::<BTreeSet<_>>();
+        let pending_sessions = interaction::Entity::find()
+            .filter(interaction::Column::Kind.eq(InteractionKind::UserInput.as_str()))
+            .filter(interaction::Column::Status.eq(InteractionStatus::Pending.as_str()))
+            .all(&self.db)
+            .await?
+            .into_iter()
+            .map(|interaction| interaction.session_id)
+            .collect::<BTreeSet<_>>();
+        let restarted_turns = agent_turn::Entity::find()
+            .filter(agent_turn::Column::Status.eq("cancelled"))
+            .filter(agent_turn::Column::Reason.eq("runtime_restarted"))
+            .all(&self.db)
+            .await?
+            .into_iter()
+            .map(|turn| (turn.session_id, turn.turn_id))
+            .collect::<BTreeSet<_>>();
+        let rows = interaction::Entity::find()
+            .filter(interaction::Column::Kind.eq(InteractionKind::UserInput.as_str()))
+            .filter(interaction::Column::Status.eq(InteractionStatus::Cancelled.as_str()))
+            .order_by_asc(interaction::Column::SessionId)
+            .order_by_desc(interaction::Column::UpdatedAt)
+            .order_by_desc(interaction::Column::Id)
+            .all(&self.db)
             .await?;
         let mut seen_sessions = BTreeSet::new();
         let mut recoverable = Vec::new();
         for row in rows {
-            let session_id: String = row.try_get("", "session_id")?;
-            if !seen_sessions.insert(session_id) {
+            if !active_sessions.contains(&row.session_id)
+                || pending_sessions.contains(&row.session_id)
+                || !restarted_turns.contains(&(row.session_id.clone(), row.turn_id.clone()))
+                || !seen_sessions.insert(row.session_id.clone())
+            {
                 continue;
             }
-            let interaction_id: String = row.try_get("", "interaction_id")?;
-            if let Some(interaction) = self.read_interaction(&interaction_id).await? {
-                if self.restart_user_input_was_recovered(&interaction).await? {
-                    continue;
-                }
-                recoverable.push(interaction);
+            let interaction = interaction_record(row)?;
+            if self.restart_user_input_was_recovered(&interaction).await? {
+                continue;
             }
+            recoverable.push(interaction);
         }
         Ok(recoverable)
     }
@@ -172,28 +175,21 @@ impl StudioStore {
         &self,
         interaction: &InteractionRequest,
     ) -> Result<()> {
+        use entities::agent_turn;
         let tx = self.db.begin().await?;
-        let rows = tx
-            .query_all(Statement::from_sql_and_values(
-                DatabaseBackend::Sqlite,
-                "SELECT agent_id, metadata_json
-                 FROM agent_turns
-                 WHERE session_id = ? AND turn_id = ?
-                 ORDER BY agent_id",
-                [
-                    interaction.scope.session_id.clone().into(),
-                    interaction.scope.turn_id.clone().into(),
-                ],
-            ))
+        let rows = agent_turn::Entity::find()
+            .filter(agent_turn::Column::SessionId.eq(interaction.scope.session_id.clone()))
+            .filter(agent_turn::Column::TurnId.eq(interaction.scope.turn_id.clone()))
+            .order_by_asc(agent_turn::Column::AgentId)
+            .all(&tx)
             .await?;
         let receipt = serde_json::to_value(RestartUserInputRecoveryReceipt {
             interaction_id: interaction.interaction_id.clone(),
             recovered_at: unix_seconds(),
         })?;
         for row in rows {
-            let agent_id: String = row.try_get("", "agent_id")?;
-            let metadata_json: Option<String> = row.try_get("", "metadata_json")?;
-            let mut metadata = metadata_json
+            let mut metadata = row
+                .metadata_json
                 .as_deref()
                 .map(serde_json::from_str)
                 .transpose()?
@@ -202,18 +198,9 @@ impl StudioStore {
                 .as_object_mut()
                 .ok_or_else(|| anyhow::anyhow!("agent turn metadata must be a JSON object"))?;
             metadata.insert("recoveredInteraction".to_string(), receipt.clone());
-            tx.execute(Statement::from_sql_and_values(
-                DatabaseBackend::Sqlite,
-                "UPDATE agent_turns
-                     SET metadata_json = ?
-                     WHERE agent_id = ? AND turn_id = ?",
-                [
-                    serde_json::to_string(metadata)?.into(),
-                    agent_id.into(),
-                    interaction.scope.turn_id.clone().into(),
-                ],
-            ))
-            .await?;
+            let mut active = row.into_active_model();
+            active.metadata_json = Set(Some(serde_json::to_string(metadata)?));
+            active.update(&tx).await?;
         }
         tx.commit().await?;
         Ok(())
@@ -223,23 +210,16 @@ impl StudioStore {
         &self,
         interaction: &InteractionRequest,
     ) -> Result<bool> {
-        let rows = self
-            .db
-            .query_all(Statement::from_sql_and_values(
-                DatabaseBackend::Sqlite,
-                "SELECT metadata_json
-                 FROM agent_turns
-                 WHERE session_id = ? AND turn_id = ?
-                 ORDER BY agent_id",
-                [
-                    interaction.scope.session_id.clone().into(),
-                    interaction.scope.turn_id.clone().into(),
-                ],
-            ))
+        use entities::agent_turn;
+        let rows = agent_turn::Entity::find()
+            .filter(agent_turn::Column::SessionId.eq(interaction.scope.session_id.clone()))
+            .filter(agent_turn::Column::TurnId.eq(interaction.scope.turn_id.clone()))
+            .order_by_asc(agent_turn::Column::AgentId)
+            .all(&self.db)
             .await?;
         for row in rows {
-            let metadata_json: Option<String> = row.try_get("", "metadata_json")?;
-            let receipt = metadata_json
+            let receipt = row
+                .metadata_json
                 .as_deref()
                 .map(serde_json::from_str::<serde_json::Value>)
                 .transpose()?
@@ -315,7 +295,7 @@ mod tests {
     ) {
         store
             .database()
-            .execute(Statement::from_sql_and_values(
+            .execute_raw(Statement::from_sql_and_values(
                 DatabaseBackend::Sqlite,
                 "INSERT INTO agent_turns (
                      agent_id, turn_id, session_id, status, reason, usage_json,

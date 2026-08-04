@@ -146,10 +146,10 @@ impl BridgeSubscriptionInner {
     async fn cancel_and_wait(&self) {
         match &self.kind {
             BridgeSubscriptionKind::Session { session_id } => {
-                tracing::debug!(subscription_id = self.id, %session_id, "cancelling Studio session subscription");
+                tracing::trace!(subscription_id = self.id, %session_id, "cancelling Studio session subscription");
             }
             BridgeSubscriptionKind::Product => {
-                tracing::debug!(
+                tracing::trace!(
                     subscription_id = self.id,
                     "cancelling Studio product subscription"
                 );

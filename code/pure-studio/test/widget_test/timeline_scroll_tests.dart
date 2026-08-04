@@ -214,4 +214,57 @@ void registerTimelineScrollTests() {
     expect(_timelinePixels(tester), closeTo(sessionAOffset, 1));
     expect(find.byTooltip('Jump to latest'), findsOneWidget);
   });
+
+  testWidgets('loading older history preserves the visible timeline anchor', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(980, 520);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    const sessionId = 'session-history';
+    var loadCount = 0;
+    final recentMessages = _scrollMessages(sessionId, 24, startIndex: 8);
+    await tester.pumpWidget(
+      _timelineHarness(
+        sessionId: sessionId,
+        messages: recentMessages,
+        onLoadOlder: () => loadCount += 1,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.drag(find.byType(ListView), const Offset(0, 5000));
+    await tester.pumpAndSettle();
+    expect(loadCount, 1);
+    final anchor = find.textContaining('message 8 for $sessionId');
+    final anchorTopBeforeLoad = tester.getTopLeft(anchor).dy;
+
+    await tester.pumpWidget(
+      _timelineHarness(
+        sessionId: sessionId,
+        messages: recentMessages,
+        onLoadOlder: () => loadCount += 1,
+        isLoadingOlder: true,
+      ),
+    );
+    await tester.pump();
+    expect(
+      find.byKey(const ValueKey('timeline-history-loading')),
+      findsOneWidget,
+    );
+
+    await tester.pumpWidget(
+      _timelineHarness(
+        sessionId: sessionId,
+        messages: [..._scrollMessages(sessionId, 8), ...recentMessages],
+        onLoadOlder: () => loadCount += 1,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(loadCount, 1);
+    expect(tester.getTopLeft(anchor).dy, closeTo(anchorTopBeforeLoad, 1));
+  });
 }

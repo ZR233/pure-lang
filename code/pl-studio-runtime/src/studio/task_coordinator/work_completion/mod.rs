@@ -208,7 +208,8 @@ impl TaskCoordinator {
                             agent_id = %subagent.id,
                             completion_id = %completion.id,
                             completion_revision = completion.revision,
-                            "completion was committed but its directory progress projection failed: {error}"
+                            error_bytes = error.to_string().len(),
+                            "completion was committed but its directory progress projection failed"
                         );
                     }
                     let mut output =

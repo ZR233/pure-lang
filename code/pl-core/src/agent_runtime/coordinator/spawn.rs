@@ -31,13 +31,17 @@ where
     };
     let outcome = host
         .repository()
-        .commit(AgentCommit {
+        .commit(SessionHistoryCommit {
             agent_id: id.clone(),
             expected_revision: None,
             next_state: state.clone(),
-            events: vec![event.clone()],
-            trace_events: Vec::new(),
-            session_projection: None,
+            facts: DurableCommitFacts::from_state(
+                &state,
+                vec![event.clone()],
+                Vec::new(),
+                None,
+                None,
+            ),
             mutation: super::super::AgentStateMutation::SnapshotAndQueue,
         })
         .await
@@ -136,13 +140,17 @@ where
     };
     let persisted = host
         .repository()
-        .commit(AgentCommit {
+        .commit(SessionHistoryCommit {
             agent_id: child_id.clone(),
             expected_revision: None,
             next_state: state.clone(),
-            events: vec![event.clone()],
-            trace_events: Vec::new(),
-            session_projection: None,
+            facts: DurableCommitFacts::from_state(
+                &state,
+                vec![event.clone()],
+                Vec::new(),
+                None,
+                None,
+            ),
             mutation: super::super::AgentStateMutation::SnapshotAndQueue,
         })
         .await;
@@ -255,13 +263,17 @@ where
     };
     let outcome = host
         .repository()
-        .commit(AgentCommit {
+        .commit(SessionHistoryCommit {
             agent_id: state.snapshot.identity.id.clone(),
             expected_revision: Some(expected_revision),
             next_state: state.clone(),
-            events: vec![event.clone()],
-            trace_events: Vec::new(),
-            session_projection: None,
+            facts: DurableCommitFacts::from_state(
+                &state,
+                vec![event.clone()],
+                Vec::new(),
+                None,
+                None,
+            ),
             mutation: super::super::AgentStateMutation::SnapshotAndQueue,
         })
         .await

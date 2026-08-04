@@ -1,5 +1,6 @@
 pub mod error;
 pub mod event;
+pub mod history;
 pub mod interaction;
 pub mod response;
 pub mod runtime;
@@ -9,6 +10,7 @@ pub mod updater;
 
 pub use error::{BridgeError, BridgeErrorCode};
 pub use event::{BridgeProductEventEnvelope, BridgeProductEventPayload};
+pub use history::*;
 pub use interaction::{
     BridgeInteractionChangedDto, BridgeInteractionPayloadDto, BridgeUserQuestionDto,
     BridgeUserQuestionOptionDto,

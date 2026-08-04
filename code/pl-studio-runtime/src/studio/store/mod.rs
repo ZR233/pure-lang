@@ -3,6 +3,7 @@ use sea_orm::DatabaseConnection;
 mod agent_framework;
 pub(super) mod attachment;
 mod error;
+pub(in crate::studio) mod history;
 mod interaction;
 mod project;
 mod session;
@@ -12,8 +13,11 @@ mod task;
 #[derive(Clone)]
 pub struct StudioStore {
     db: DatabaseConnection,
+    history_db: DatabaseConnection,
+    history_writer_db: DatabaseConnection,
 }
 
+pub(in crate::studio) use agent_framework::RecoverablePlan;
 pub use error::StudioDatabaseError;
 pub(in crate::studio) use session::AgentSessionSpec;
 impl StudioStore {
@@ -21,12 +25,20 @@ impl StudioStore {
         &self.db
     }
 
+    pub(crate) fn history_database(&self) -> &DatabaseConnection {
+        &self.history_db
+    }
+
+    pub(crate) fn history_writer_database(&self) -> &DatabaseConnection {
+        &self.history_writer_db
+    }
+
     #[cfg(test)]
     pub(crate) async fn execute_test_sql(&self, sql: &str) {
         use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
 
         self.db
-            .execute(Statement::from_string(
+            .execute_raw(Statement::from_string(
                 DatabaseBackend::Sqlite,
                 sql.to_string(),
             ))

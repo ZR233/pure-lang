@@ -4,7 +4,7 @@ use crate::{
 };
 use anyhow::{Context, Result, bail};
 
-use crate::studio::entities;
+use crate::studio::entity as entities;
 use crate::studio::records::{
     AttachmentRecord, ProjectRecord, SessionKind, SessionRecord, SessionVisibility,
 };

@@ -2,6 +2,29 @@ import 'studio_enums.dart';
 
 enum StudioSessionKind { root, agent }
 
+class SessionHistoryPagingState {
+  const SessionHistoryPagingState({
+    required this.nextBeforeTurnSequence,
+    required this.hasMore,
+    required this.isLoading,
+    required this.isLoaded,
+    this.errorMessage,
+  });
+
+  const SessionHistoryPagingState.initial()
+    : nextBeforeTurnSequence = null,
+      hasMore = true,
+      isLoading = false,
+      isLoaded = false,
+      errorMessage = null;
+
+  final int? nextBeforeTurnSequence;
+  final bool hasMore;
+  final bool isLoading;
+  final bool isLoaded;
+  final String? errorMessage;
+}
+
 class StudioProject {
   const StudioProject({
     required this.id,

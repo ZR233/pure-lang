@@ -47,16 +47,14 @@ pub trait SessionRepository: Send + Sync {
 
 ## 4. 数据迁移策略
 
-SQLite 是一次性破坏性 schema v10：
+SQLite 是一次性破坏性双库升级：
 
-1. 运行期只识别 `studio_2.sqlite` 与精确 `PRAGMA user_version = 10`
-2. `0001_base.sql` 是唯一 schema；不保留 0002+ migration、dispatcher、backfill 或兼容读取
-3. v1-v9 或未版本化用户库在连接关闭后完整归档主文件、`-wal` 和 `-shm`，随后创建新 v10
-4. 高于 v10 的库拒绝打开；损坏、锁定或归档失败停止启动且不覆盖原文件
-5. v10 保留 canonical session/agent/input/turn/trace journal、TaskRun/WorkUnit/Outcome/
-   Merge/Review/Lease、project/config/interaction/projection 和 progress checkpoint
-6. v10 不包含 wake receipt、continuation outbox、notification bookkeeping、delivery recovery
-   claim 或多 session agent 映射
+1. 运行期只识别 `studio_state.sqlite` schema v11 与 `studio_history.sqlite` schema v1 的匹配 generation
+2. Entity-first schema 是唯一事实源；不保留手写 base SQL、migration chain、dispatcher、backfill 或兼容读取
+3. legacy `studio_2.sqlite` v10 在连接关闭后完整归档主文件、`-wal` 和 `-shm`，随后创建新的双库，不导入旧数据
+4. 高于支持版本、generation 不匹配、损坏、锁定或归档失败都停止启动且不覆盖原文件
+5. 状态库保留强事务产品状态和可重建 runtime/UI projection；历史库保留完整 session turn/item/context checkpoint
+6. 双库提交按历史事实先行、状态 projection 后随；删除通过状态库 durable GC job 幂等清理历史，不使用跨库原子事务
 
 config：
 
@@ -84,7 +82,7 @@ config：
 后端：
 
 1. 高频事件 `Lagged` 不导致 drain 退出
-2. `message.updated`、`message.part.updated`、turn 和 interaction snapshot 采用同一事务写入 `studio_events` 并更新 projection
+2. `message.updated`、`message.part.updated`、turn 和 interaction 先提交历史事实，再更新状态 projection；terminal 广播等待双 watermark barrier
 3. 新 schema 启动切换可重复执行且有备份
 4. wall-clock 预算耗尽时必须写入 `TurnBudgetLimited`，并保留观测用量
 5. 用户显式要求子代理分工时，核心提示必须要求先用 `spawn_agent` 调度子代理，再由父会话汇总

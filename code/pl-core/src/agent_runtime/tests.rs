@@ -96,14 +96,15 @@ impl AgentStateRepository for TestRepository {
 
     async fn commit(
         &self,
-        commit: AgentCommit,
+        commit: SessionHistoryCommit,
     ) -> std::result::Result<AgentCommitOutcome, Self::Error> {
         if commit.expected_revision.is_none()
             && std::mem::take(&mut *self.fail_registration.lock().unwrap())
         {
             return Err(TestError("registration commit failed".to_string()));
         }
-        if !commit.trace_events.is_empty() && std::mem::take(&mut *self.fail_trace.lock().unwrap())
+        if !commit.facts.trace_events.is_empty()
+            && std::mem::take(&mut *self.fail_trace.lock().unwrap())
         {
             return Err(TestError("trace commit failed".to_string()));
         }
@@ -118,14 +119,16 @@ impl AgentStateRepository for TestRepository {
         }
         if *self.fail_terminal.lock().unwrap()
             && commit
-                .events
+                .facts
+                .runtime_events
                 .iter()
                 .any(|event| matches!(event.kind, AgentRuntimeEventKind::TurnFinished { .. }))
         {
             return Err(TestError("terminal commit failed".to_string()));
         }
         if commit
-            .events
+            .facts
+            .runtime_events
             .iter()
             .any(|event| matches!(event.kind, AgentRuntimeEventKind::TurnQueued { .. }))
             && std::mem::take(&mut *self.fail_turn_queue.lock().unwrap())
@@ -144,6 +147,10 @@ impl AgentStateRepository for TestRepository {
         self.mutations.lock().unwrap().push(commit.mutation.clone());
         states.insert(commit.agent_id, commit.next_state);
         Ok(AgentCommitOutcome::Applied)
+    }
+
+    async fn barrier(&self) -> std::result::Result<(), Self::Error> {
+        Ok(())
     }
 }
 

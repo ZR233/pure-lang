@@ -1,5 +1,6 @@
 // Public Studio bridge surface generated from the Rust API.
 
+export 'studio/handlers/history.dart';
 export 'studio/handlers/lifecycle.dart';
 export 'studio/handlers/prompt.dart';
 export 'studio/handlers/providers.dart';
@@ -10,6 +11,7 @@ export 'studio/handlers/updater.dart';
 export 'studio/subscription.dart';
 export 'studio/types/event.dart';
 export 'studio/types/error.dart';
+export 'studio/types/history.dart';
 export 'studio/types/interaction.dart';
 export 'studio/types/response.dart';
 export 'studio/types/runtime.dart';

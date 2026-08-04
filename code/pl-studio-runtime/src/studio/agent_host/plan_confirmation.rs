@@ -8,6 +8,7 @@ use pl_trace::TracePart;
 use tokio::sync::watch;
 
 use super::wait_for_runtime;
+use crate::studio::store::RecoverablePlan;
 
 #[derive(Clone)]
 pub(super) struct StudioPlanConfirmationProjector {
@@ -38,10 +39,28 @@ impl StudioPlanConfirmationProjector {
         studio_session_id: &str,
         plan: &TracePart,
     ) -> anyhow::Result<bool> {
-        if plan.content.trim().is_empty() {
+        self.project_plan(
+            agent_id,
+            studio_session_id,
+            &plan.turn_id,
+            &plan.item_id,
+            &plan.content,
+        )
+        .await
+    }
+
+    async fn project_plan(
+        &self,
+        agent_id: &str,
+        studio_session_id: &str,
+        turn_id: &str,
+        plan_id: &str,
+        content: &str,
+    ) -> anyhow::Result<bool> {
+        if content.trim().is_empty() {
             return Ok(false);
         }
-        let interaction_id = format!("plan-confirmation-{}", plan.item_id);
+        let interaction_id = format!("plan-confirmation-{plan_id}");
         if self
             .store
             .read_interaction(&interaction_id)
@@ -56,13 +75,13 @@ impl StudioPlanConfirmationProjector {
             studio_session_id,
             vec![SessionEventFact::durable(
                 Some(agent_id.to_string()),
-                Some(plan.turn_id.clone()),
+                Some(turn_id.to_string()),
                 now,
                 SessionEventKind::PlanChanged {
                     event: PlanLifecycleEvent {
-                        plan_id: plan.item_id.clone(),
+                        plan_id: plan_id.to_string(),
                         state: PlanLifecycleState::PendingConfirmation,
-                        turn_id: Some(plan.turn_id.clone()),
+                        turn_id: Some(turn_id.to_string()),
                         reason: None,
                         updated_at: now,
                     },
@@ -76,14 +95,14 @@ impl StudioPlanConfirmationProjector {
             status: InteractionStatus::Pending,
             scope: InteractionScope {
                 session_id: studio_session_id.to_string(),
-                turn_id: plan.turn_id.clone(),
-                item_id: Some(plan.item_id.clone()),
+                turn_id: turn_id.to_string(),
+                item_id: Some(plan_id.to_string()),
                 tool_id: None,
                 agent_path: None,
             },
             payload: InteractionPayload::PlanConfirmation {
-                plan_id: plan.item_id.clone(),
-                content: plan.content.clone(),
+                plan_id: plan_id.to_string(),
+                content: content.to_string(),
             },
             created_at: now,
             updated_at: now,
@@ -131,7 +150,8 @@ impl StudioPlanConfirmationProjector {
                 tracing::warn!(
                     session_id = %candidate.session_id,
                     plan_id = %candidate.plan.item_id,
-                    "failed to recover pending plan confirmation: {error:#}"
+                    error_bytes = error.to_string().len(),
+                    "failed to recover pending plan confirmation"
                 );
             }
         }
@@ -142,7 +162,7 @@ impl StudioPlanConfirmationProjector {
         &self,
         agent_id: &str,
         session_id: &str,
-        plan: &TracePart,
+        plan: &RecoverablePlan,
     ) -> anyhow::Result<()> {
         let runtime = wait_for_runtime(self.runtime.clone()).await?;
         let snapshot = runtime
@@ -184,7 +204,16 @@ impl StudioPlanConfirmationProjector {
         {
             return Ok(());
         }
-        if !self.project(agent_id, session_id, plan).await? {
+        if !self
+            .project_plan(
+                agent_id,
+                session_id,
+                &plan.turn_id,
+                &plan.item_id,
+                &plan.content,
+            )
+            .await?
+        {
             return Ok(());
         }
         if let Some(session) = self.store.read_session(session_id).await? {
@@ -230,9 +259,7 @@ mod tests {
     use crate::config::{ConfigPaths, ConfigStore};
     use crate::studio::{StudioRuntime, StudioStore};
     use pl_core::{AgentIdentity, AgentRegistration, AgentRoleId, AgentSessionState};
-    use pl_trace::{
-        TraceEvent, TraceEventKind, TracePart, TracePartKind, TracePartSource, TracePartStatus,
-    };
+    use pl_protocol::{SessionEventKind, SessionPart, SessionPartContent, SessionPartStatus};
 
     use super::*;
     use crate::studio::agent_host::root_agent_id;
@@ -271,35 +298,30 @@ mod tests {
             })
             .await
             .unwrap();
-        let plan = TracePart {
-            turn_id: "turn-plan".to_string(),
-            item_id: "plan-item".to_string(),
-            started_sequence: 1,
-            revision: 1,
-            kind: TracePartKind::Plan,
-            status: TracePartStatus::Completed,
-            created_at: 1,
-            updated_at: 2,
-            source: TracePartSource::Model,
-            text_channel: None,
-            content: "# Plan\n\nImplement the fix.".to_string(),
-            attachments: Vec::new(),
-            thinking_chunks: Vec::new(),
-            reasoning_content_chunks: Vec::new(),
-            tool: None,
-            agent: None,
-            inference: None,
-            usage: None,
-        };
-        let trace = TraceEvent {
-            session_id: session.id.clone(),
-            sequence: 2,
-            timestamp: 2,
-            kind: TraceEventKind::TracePartCompleted { item: plan },
+        let plan_item = SessionEventKind::PartChanged {
+            part: Box::new(SessionPart {
+                part_id: "plan-item".to_string(),
+                message_id: "turn-plan:assistant".to_string(),
+                session_id: session.id.clone(),
+                turn_id: "turn-plan".to_string(),
+                order: 1,
+                revision: 1,
+                status: SessionPartStatus::Completed,
+                created_at: 1,
+                updated_at: 2,
+                completed_at: Some(2),
+                error: None,
+                content: SessionPartContent::Plan {
+                    content: "# Plan\n\nImplement the fix.".to_string(),
+                },
+                usage: None,
+                synthetic: false,
+                ignored: false,
+            }),
         };
         store
             .database()
-            .execute(Statement::from_sql_and_values(
+            .execute_raw(Statement::from_sql_and_values(
                 DatabaseBackend::Sqlite,
                 "INSERT INTO agent_turns
                  (agent_id, turn_id, session_id, status, reason, usage_json, metadata_json,
@@ -323,21 +345,17 @@ mod tests {
             ))
             .await
             .unwrap();
-        store
-            .database()
-            .execute(Statement::from_sql_and_values(
-                DatabaseBackend::Sqlite,
-                "INSERT INTO agent_runtime_traces
-                 (agent_id, session_id, sequence, payload_json, created_at)
-                 VALUES (?, ?, ?, ?, ?)",
-                [
-                    agent_id.to_string().into(),
-                    session.id.clone().into(),
-                    2_i64.into(),
-                    serde_json::to_string(&trace).unwrap().into(),
-                    2_i64.into(),
-                ],
-            ))
+        handle
+            .record_session_facts(
+                agent_id.clone(),
+                SessionId::new(session.id.clone()).unwrap(),
+                vec![SessionEventFact::durable(
+                    Some(agent_id.to_string()),
+                    Some("turn-plan".to_string()),
+                    2,
+                    plan_item,
+                )],
+            )
             .await
             .unwrap();
         assert_eq!(

@@ -25,10 +25,11 @@ List<_ProjectedMessageFixture> _scrollMessages(
   String sessionId,
   int count, {
   bool expandedLast = false,
+  int startIndex = 0,
 }) {
   final now = DateTime.fromMillisecondsSinceEpoch(0);
   return [
-    for (var index = 0; index < count; index++)
+    for (var index = startIndex; index < startIndex + count; index++)
       _ProjectedMessageFixture(
         message: TimelineMessage(
           id: '$sessionId-message-$index',
@@ -41,12 +42,12 @@ List<_ProjectedMessageFixture> _scrollMessages(
             id: '$sessionId-part-$index',
             messageId: '$sessionId-message-$index',
             type: TimelinePartType.text,
-            status: index == count - 1 && expandedLast
+            status: index == startIndex + count - 1 && expandedLast
                 ? 'streaming'
                 : 'completed',
             text:
                 'message $index for $sessionId\n\n'
-                '${expandedLast && index == count - 1 ? _streamingGrowthText : _singleBlockText}',
+                '${expandedLast && index == startIndex + count - 1 ? _streamingGrowthText : _singleBlockText}',
           ),
         ],
       ),

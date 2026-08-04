@@ -30,14 +30,14 @@ void _recordDartError(Object error, StackTrace? stack) {
         : Directory('$localAppData${Platform.pathSeparator}Pure Studio');
     final logs = Directory('${root.path}${Platform.pathSeparator}logs')
       ..createSync(recursive: true);
-    final file = File('${logs.path}${Platform.pathSeparator}dart-errors.log');
-    if (file.existsSync() && file.lengthSync() > 2 * 1024 * 1024) {
-      final previous = File('${file.path}.1');
-      if (previous.existsSync()) {
-        previous.deleteSync();
-      }
-      file.renameSync(previous.path);
-    }
+    final now = DateTime.now();
+    final date =
+        '${now.year.toString().padLeft(4, '0')}-'
+        '${now.month.toString().padLeft(2, '0')}-'
+        '${now.day.toString().padLeft(2, '0')}';
+    final file = File(
+      '${logs.path}${Platform.pathSeparator}dart-error-$date.log',
+    );
     file.writeAsStringSync(
       '${DateTime.now().toUtc().toIso8601String()} $error\n'
       '${stack ?? StackTrace.current}\n\n',

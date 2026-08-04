@@ -141,7 +141,9 @@ impl BridgeError {
         let bridge_error = Self::new(code, message, retryable);
         tracing::error!(
             correlation_id = %bridge_error.correlation_id,
-            error = %diagnostic,
+            bridge_code = ?bridge_error.code,
+            retryable = bridge_error.retryable,
+            diagnostic_bytes = diagnostic.len(),
             "Studio bridge operation failed"
         );
         bridge_error
@@ -206,7 +208,9 @@ impl From<pl_studio_runtime::StudioUpdateError> for BridgeError {
         );
         tracing::error!(
             correlation_id = %bridge_error.correlation_id,
-            error = %error,
+            bridge_code = ?bridge_error.code,
+            retryable = bridge_error.retryable,
+            diagnostic_bytes = error.to_string().len(),
             update_code = code.as_str(),
             "Studio update operation failed"
         );

@@ -4,7 +4,7 @@ use sea_orm::{
     TransactionTrait,
 };
 
-use crate::studio::entities;
+use crate::studio::entity as entities;
 use crate::studio::ids::unix_seconds;
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{

@@ -1998,7 +1998,7 @@ async fn persist_closed_executor_snapshot(
     };
     store
         .database()
-        .execute(Statement::from_sql_and_values(
+        .execute_raw(Statement::from_sql_and_values(
             DatabaseBackend::Sqlite,
             "INSERT INTO agent_runtime_states (agent_id, revision, snapshot_json, updated_at)
              VALUES (?, ?, ?, ?)",

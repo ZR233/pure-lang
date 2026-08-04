@@ -6,11 +6,11 @@ use tokio::sync::{mpsc, oneshot};
 use super::host::{AgentCommitObserver, AgentStateRepository, SessionProjectionCommit};
 use super::state::{AgentRuntimeError, unix_timestamp};
 use super::{
-    AgentActivityState, AgentCommit, AgentCommitOutcome, AgentCommittedEvent,
-    AgentCurrentSessionSubmitRequest, AgentDurableState, AgentLifecycleState,
-    AgentProgressCheckpoint, AgentProgressStage, AgentRuntimeEvent, AgentRuntimeEventKind,
-    AgentRuntimeHandle, AgentRuntimeHost, AgentRuntimeResult, AgentSessionDigest, AgentSnapshot,
-    AgentSubmitRequest, SessionId, TurnId,
+    AgentActivityState, AgentCommitOutcome, AgentCommittedEvent, AgentCurrentSessionSubmitRequest,
+    AgentDurableState, AgentLifecycleState, AgentProgressCheckpoint, AgentProgressStage,
+    AgentRuntimeEvent, AgentRuntimeEventKind, AgentRuntimeHandle, AgentRuntimeHost,
+    AgentRuntimeResult, AgentSessionDigest, AgentSnapshot, AgentSubmitRequest, DurableCommitFacts,
+    SessionHistoryCommit, SessionId, TurnId,
 };
 use crate::session_event::{
     ObservedTurnEvent, TurnObservation, project_observation, project_runtime_event,
@@ -357,13 +357,17 @@ where
         let outcome = self
             .host
             .repository()
-            .commit(AgentCommit {
+            .commit(SessionHistoryCommit {
                 agent_id: next.snapshot.identity.id.clone(),
                 expected_revision: Some(expected_revision),
                 next_state: next.clone(),
-                events: Vec::new(),
-                trace_events: Vec::new(),
-                session_projection: Some(projection),
+                facts: DurableCommitFacts::from_state(
+                    &next,
+                    Vec::new(),
+                    Vec::new(),
+                    Some(projection),
+                    None,
+                ),
                 mutation: super::AgentStateMutation::AppendSessionEvents {
                     session_id: session_id.clone(),
                 },
@@ -469,13 +473,17 @@ where
         let result = self
             .host
             .repository()
-            .commit(AgentCommit {
+            .commit(SessionHistoryCommit {
                 agent_id: next.snapshot.identity.id.clone(),
                 expected_revision: Some(expected_revision),
                 next_state: next.clone(),
-                events: Vec::new(),
-                trace_events,
-                session_projection,
+                facts: DurableCommitFacts::from_state(
+                    &next,
+                    Vec::new(),
+                    trace_events,
+                    session_projection,
+                    None,
+                ),
                 mutation: super::AgentStateMutation::AppendTrace,
             })
             .await
@@ -575,13 +583,17 @@ where
         let result = self
             .host
             .repository()
-            .commit(AgentCommit {
+            .commit(SessionHistoryCommit {
                 agent_id: next.snapshot.identity.id.clone(),
                 expected_revision: Some(expected_revision),
                 next_state: next.clone(),
-                events: vec![event.clone()],
-                trace_events,
-                session_projection,
+                facts: DurableCommitFacts::from_state(
+                    &next,
+                    vec![event.clone()],
+                    trace_events,
+                    session_projection,
+                    None,
+                ),
                 mutation: super::AgentStateMutation::SnapshotAndQueue,
             })
             .await
@@ -648,7 +660,7 @@ where
             agent_id = %self.state.snapshot.identity.id,
             turn_id = turn_id.as_ref().map(TurnId::as_str),
             session_id = session_id.as_ref().map(SessionId::as_str),
-            reason,
+            reason_bytes = reason.len(),
             "agent runtime entered an in-memory faulted state"
         );
         self.stop_active_turn();

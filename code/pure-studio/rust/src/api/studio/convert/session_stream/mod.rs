@@ -27,7 +27,7 @@ pub(crate) fn bridge_session_frame(frame: SessionStreamFrame) -> Result<BridgeSe
     })
 }
 
-fn session_event(event: SessionEventEnvelope) -> Result<BridgeSessionEventEnvelope> {
+pub(crate) fn session_event(event: SessionEventEnvelope) -> Result<BridgeSessionEventEnvelope> {
     Ok(BridgeSessionEventEnvelope {
         event_id: event.event_id,
         session_id: event.session_id,

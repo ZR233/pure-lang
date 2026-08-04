@@ -8,7 +8,7 @@ use super::super::work_completion::{delivery_from_completion, work_completion_re
 use super::super::work_unit::work_unit_record;
 use super::super::{branch_lease_record, task_run_record};
 use super::{merge_record, parse_required_evidence};
-use crate::studio::entities;
+use crate::studio::entity as entities;
 use crate::studio::ids::unix_seconds;
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{

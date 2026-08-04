@@ -1,14 +1,26 @@
-use std::collections::BTreeSet;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
-use sea_orm::{ConnectionTrait, DatabaseBackend, Statement, TransactionTrait};
+use pl_protocol::{SessionEventEnvelope, SessionEventKind, SessionPartContent, SessionPartStatus};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, TransactionTrait};
 
 use crate::studio::StudioStore;
+use crate::studio::entity::{
+    agent_active_input, agent_outcome, agent_pending_input, agent_runtime_session,
+    agent_runtime_state, agent_turn, session, session_history_item, session_view_snapshot,
+    work_unit,
+};
+
+pub(in crate::studio) struct RecoverablePlan {
+    pub turn_id: String,
+    pub item_id: String,
+    pub content: String,
+}
 
 pub(in crate::studio) struct RecoverableTaskPlan {
     pub agent_id: String,
     pub session_id: String,
-    pub plan: pl_trace::TracePart,
+    pub plan: RecoverablePlan,
 }
 
 impl StudioStore {
@@ -16,26 +28,23 @@ impl StudioStore {
         &self,
         task_run_id: &str,
     ) -> Result<Vec<pl_core::AgentSnapshot>> {
-        self.db
-            .query_all(Statement::from_sql_and_values(
-                DatabaseBackend::Sqlite,
-                "SELECT state.snapshot_json AS snapshot_json
-                 FROM agent_runtime_states state
-                 WHERE EXISTS (
-                     SELECT 1
-                     FROM agent_outcomes outcome
-                     WHERE outcome.task_run_id = ?
-                       AND outcome.agent_id = state.agent_id
-                 )
-                 ORDER BY state.agent_id",
-                [task_run_id.to_string().into()],
-            ))
+        let agent_ids = agent_outcome::Entity::find()
+            .filter(agent_outcome::Column::TaskRunId.eq(task_run_id))
+            .all(&self.db)
             .await?
             .into_iter()
-            .map(|row| {
-                let snapshot_json: String = row.try_get("", "snapshot_json")?;
-                serde_json::from_str(&snapshot_json).map_err(Into::into)
-            })
+            .map(|outcome| outcome.agent_id)
+            .collect::<HashSet<_>>();
+        if agent_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        agent_runtime_state::Entity::find()
+            .filter(agent_runtime_state::Column::AgentId.is_in(agent_ids))
+            .order_by_asc(agent_runtime_state::Column::AgentId)
+            .all(&self.db)
+            .await?
+            .into_iter()
+            .map(|state| serde_json::from_str(&state.snapshot_json).map_err(Into::into))
             .collect()
     }
 
@@ -46,122 +55,131 @@ impl StudioStore {
         &self,
     ) -> Result<Vec<String>> {
         let tx = self.db.begin().await?;
-        let rows = tx
-            .query_all(Statement::from_string(
-                DatabaseBackend::Sqlite,
-                "SELECT state.agent_id AS agent_id
-                 FROM agent_runtime_states state
-                 WHERE NOT EXISTS (
-                     SELECT 1 FROM sessions owned
-                     WHERE owned.owner_agent_id = state.agent_id
-                 )
-                   AND NOT EXISTS (
-                     SELECT 1 FROM agent_outcomes outcome
-                     WHERE outcome.agent_id = state.agent_id
-                 )
-                   AND NOT EXISTS (
-                     SELECT 1 FROM work_units unit
-                     WHERE unit.agent_id = state.agent_id
-                 )
-                   AND EXISTS (
-                     SELECT 1
-                     FROM agent_runtime_sessions claim
-                     INNER JOIN sessions canonical ON canonical.id = claim.session_id
-                     WHERE claim.agent_id = state.agent_id
-                       AND canonical.owner_agent_id <> state.agent_id
-                 )
-                   AND NOT EXISTS (
-                     SELECT 1
-                     FROM agent_runtime_sessions claim
-                     LEFT JOIN sessions canonical ON canonical.id = claim.session_id
-                     WHERE claim.agent_id = state.agent_id
-                       AND (
-                           canonical.id IS NULL
-                           OR canonical.owner_agent_id = state.agent_id
-                       )
-                 )
-                 ORDER BY state.agent_id"
-                    .to_string(),
-            ))
+        let states = agent_runtime_state::Entity::find()
+            .order_by_asc(agent_runtime_state::Column::AgentId)
+            .all(&tx)
             .await?;
-        let agent_ids = rows
+        let sessions = session::Entity::find().all(&tx).await?;
+        let sessions_by_id = sessions
+            .iter()
+            .map(|session| (session.id.clone(), session.owner_agent_id.clone()))
+            .collect::<HashMap<_, _>>();
+        let session_owners = sessions
             .into_iter()
-            .map(|row| row.try_get("", "agent_id"))
-            .collect::<std::result::Result<Vec<String>, _>>()?;
+            .map(|session| session.owner_agent_id)
+            .collect::<HashSet<_>>();
+        let outcome_agents = agent_outcome::Entity::find()
+            .all(&tx)
+            .await?
+            .into_iter()
+            .map(|outcome| outcome.agent_id)
+            .collect::<HashSet<_>>();
+        let work_unit_agents = work_unit::Entity::find()
+            .all(&tx)
+            .await?
+            .into_iter()
+            .filter_map(|unit| unit.agent_id)
+            .collect::<HashSet<_>>();
+        let claims = agent_runtime_session::Entity::find()
+            .all(&tx)
+            .await?
+            .into_iter()
+            .map(|claim| (claim.agent_id, claim.session_id))
+            .collect::<HashMap<_, _>>();
+        let agent_ids = states
+            .into_iter()
+            .map(|state| state.agent_id)
+            .filter(|agent_id| {
+                !session_owners.contains(agent_id)
+                    && !outcome_agents.contains(agent_id)
+                    && !work_unit_agents.contains(agent_id)
+                    && claims.get(agent_id).is_some_and(|session_id| {
+                        sessions_by_id
+                            .get(session_id)
+                            .is_some_and(|owner_agent_id| owner_agent_id != agent_id)
+                    })
+            })
+            .collect::<Vec<_>>();
 
         for agent_id in &agent_ids {
-            for sql in [
-                "DELETE FROM agent_active_inputs WHERE agent_id = ?",
-                "DELETE FROM agent_pending_inputs WHERE agent_id = ?",
-                "DELETE FROM agent_framework_events WHERE agent_id = ?",
-                "DELETE FROM agent_turns WHERE agent_id = ?",
-                "DELETE FROM agent_runtime_traces WHERE agent_id = ?",
-                "DELETE FROM agent_runtime_sessions WHERE agent_id = ?",
-                "DELETE FROM agent_runtime_states WHERE agent_id = ?",
-            ] {
-                tx.execute(Statement::from_sql_and_values(
-                    DatabaseBackend::Sqlite,
-                    sql,
-                    [agent_id.clone().into()],
-                ))
+            agent_active_input::Entity::delete_by_id(agent_id.clone())
+                .exec(&tx)
                 .await?;
-            }
+            agent_pending_input::Entity::delete_many()
+                .filter(agent_pending_input::Column::AgentId.eq(agent_id))
+                .exec(&tx)
+                .await?;
+            agent_turn::Entity::delete_many()
+                .filter(agent_turn::Column::AgentId.eq(agent_id))
+                .exec(&tx)
+                .await?;
+            agent_runtime_session::Entity::delete_by_id(agent_id.clone())
+                .exec(&tx)
+                .await?;
+            agent_runtime_state::Entity::delete_by_id(agent_id.clone())
+                .exec(&tx)
+                .await?;
         }
         tx.commit().await?;
         Ok(agent_ids)
     }
 
-    /// 返回每个活动 Task 根会话最新的完整 Plan trace，供启动时修复缺失的确认投影。
+    /// 返回每个活动 Task 根会话最新的完整 Plan，供启动时修复缺失的确认投影。
     pub(in crate::studio) async fn list_latest_task_plan_traces(
         &self,
     ) -> Result<Vec<RecoverableTaskPlan>> {
-        let rows = self
-            .db
-            .query_all(Statement::from_string(
-                DatabaseBackend::Sqlite,
-                "SELECT session.id AS session_id, session.owner_agent_id AS agent_id,
-                        trace.payload_json AS payload_json
-                 FROM sessions session
-                 INNER JOIN agent_runtime_traces trace ON trace.session_id = session.id
-                 WHERE session.mode = 'task'
-                   AND session.archived = 0
-                   AND session.visibility = 'active'
-                   AND session.session_kind = 'root'
-                 ORDER BY session.id, trace.sequence DESC"
-                    .to_string(),
-            ))
+        let sessions = session::Entity::find()
+            .filter(session::Column::Mode.eq("task"))
+            .filter(session::Column::Archived.eq(0))
+            .filter(session::Column::Visibility.eq("active"))
+            .filter(session::Column::SessionKind.eq("root"))
+            .order_by_asc(session::Column::Id)
+            .all(&self.db)
             .await?;
-        let mut recovered_sessions = BTreeSet::new();
         let mut plans = Vec::new();
-        for row in rows {
-            let session_id: String = row.try_get("", "session_id")?;
-            if recovered_sessions.contains(&session_id) {
-                continue;
-            }
-            let payload: String = row.try_get("", "payload_json")?;
-            let trace: pl_trace::TraceEvent = match serde_json::from_str(&payload) {
-                Ok(trace) => trace,
-                Err(error) => {
-                    tracing::warn!(
-                        session_id,
-                        %error,
-                        "skipping malformed historical agent trace during plan recovery"
-                    );
-                    continue;
+        for session in sessions {
+            let session_id = session.id;
+            let history = session_history_item::Entity::find()
+                .filter(session_history_item::Column::SessionId.eq(session_id.clone()))
+                .filter(session_history_item::Column::ItemKind.eq("partChanged"))
+                .order_by_desc(session_history_item::Column::Sequence)
+                .all(&self.history_db)
+                .await?;
+            let plan = history.into_iter().find_map(|item| {
+                let event: SessionEventEnvelope = match serde_json::from_str(&item.payload_json) {
+                    Ok(event) => event,
+                    Err(error) => {
+                        tracing::warn!(
+                            session_id = %session_id,
+                            sequence = item.sequence,
+                            error_bytes = error.to_string().len(),
+                            "skipping malformed history item during plan recovery"
+                        );
+                        return None;
+                    }
+                };
+                let SessionEventKind::PartChanged { part } = event.kind else {
+                    return None;
+                };
+                let SessionPartContent::Plan { content } = part.content else {
+                    return None;
+                };
+                if part.status != SessionPartStatus::Completed || content.trim().is_empty() {
+                    return None;
                 }
-            };
-            let pl_trace::TraceEventKind::TracePartCompleted { item } = trace.kind else {
+                Some(RecoverablePlan {
+                    turn_id: part.turn_id,
+                    item_id: part.part_id,
+                    content,
+                })
+            });
+            let Some(plan) = plan else {
                 continue;
             };
-            if item.kind != pl_trace::TracePartKind::Plan || item.content.trim().is_empty() {
-                continue;
-            }
-            let agent_id = row.try_get("", "agent_id")?;
-            recovered_sessions.insert(session_id.clone());
             plans.push(RecoverableTaskPlan {
-                agent_id,
+                agent_id: session.owner_agent_id,
                 session_id,
-                plan: item,
+                plan,
             });
         }
         Ok(plans)
@@ -171,17 +189,10 @@ impl StudioStore {
         &self,
         session_id: &str,
     ) -> Result<Option<pl_protocol::SessionViewSnapshot>> {
-        self.db
-            .query_one(Statement::from_sql_and_values(
-                DatabaseBackend::Sqlite,
-                "SELECT snapshot_json FROM session_view_snapshots WHERE session_id = ?",
-                [session_id.to_string().into()],
-            ))
+        session_view_snapshot::Entity::find_by_id(session_id.to_string())
+            .one(&self.db)
             .await?
-            .map(|row| {
-                serde_json::from_str(&row.try_get::<String>("", "snapshot_json")?)
-                    .map_err(Into::into)
-            })
+            .map(|snapshot| serde_json::from_str(&snapshot.snapshot_json).map_err(Into::into))
             .transpose()
     }
 
@@ -191,23 +202,16 @@ impl StudioStore {
         agent_id: &str,
         turn_id: &str,
     ) -> Result<Option<serde_json::Value>> {
-        let row = self
-            .db
-            .query_one(Statement::from_sql_and_values(
-                DatabaseBackend::Sqlite,
-                "SELECT metadata_json FROM agent_turns
-                 WHERE agent_id = ? AND turn_id = ?",
-                [agent_id.to_string().into(), turn_id.to_string().into()],
-            ))
-            .await?;
-        row.map(|row| {
-            let metadata: Option<String> = row.try_get("", "metadata_json")?;
-            metadata
-                .map(|metadata| serde_json::from_str(&metadata))
-                .transpose()
-                .map_err(Into::into)
-        })
-        .transpose()
-        .map(Option::flatten)
+        agent_turn::Entity::find_by_id((agent_id.to_string(), turn_id.to_string()))
+            .one(&self.db)
+            .await?
+            .map(|turn| {
+                turn.metadata_json
+                    .map(|metadata| serde_json::from_str(&metadata))
+                    .transpose()
+                    .map_err(Into::into)
+            })
+            .transpose()
+            .map(Option::flatten)
     }
 }

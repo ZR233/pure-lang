@@ -59,6 +59,7 @@ class StudioState {
     this.recoveryIssues = const [],
     this.eventCursorsBySession = const {},
     this.composersBySession = const {},
+    this.historyPagingBySession = const {},
   }) : workspaceSyncBySession = _withInitialWorkspaceSync(
          workspaceSyncBySession,
          selectedSessionId,
@@ -97,6 +98,7 @@ class StudioState {
   final List<StudioRecoveryIssue> recoveryIssues;
   final Map<String, int> eventCursorsBySession;
   final Map<String, ComposerSessionState> composersBySession;
+  final Map<String, SessionHistoryPagingState> historyPagingBySession;
 
   String? get selectedAgentSessionId => selectedSessionId;
 
@@ -355,6 +357,7 @@ class StudioState {
     List<StudioRecoveryIssue>? recoveryIssues,
     Map<String, int>? eventCursorsBySession,
     Map<String, ComposerSessionState>? composersBySession,
+    Map<String, SessionHistoryPagingState>? historyPagingBySession,
   }) {
     final nextSelectedSessionId =
         identical(selectedSessionId, _studioStateUnset)
@@ -409,6 +412,8 @@ class StudioState {
       eventCursorsBySession:
           eventCursorsBySession ?? this.eventCursorsBySession,
       composersBySession: nextComposers,
+      historyPagingBySession:
+          historyPagingBySession ?? this.historyPagingBySession,
     );
   }
 }

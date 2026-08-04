@@ -7,8 +7,8 @@ pub(super) use record::{merge_record, parse_required_evidence};
 use anyhow::{Context, Result, bail};
 use pl_core::{AgentLifecycleState, AgentSnapshot};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait,
-    QueryFilter, QueryOrder, Statement, TransactionTrait,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
+    TransactionTrait,
 };
 
 use super::outcome::agent_outcome_record;
@@ -16,7 +16,7 @@ use super::work_completion::{delivery_from_completion, work_completion_record};
 use super::work_unit::work_unit_record;
 use super::{branch_lease_record, task_run_record};
 use crate::agent::worktree::same_worktree_path;
-use crate::studio::entities;
+use crate::studio::entity as entities;
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
@@ -98,17 +98,13 @@ impl StudioStore {
             {
                 bail!("agent outcome is not a planner-owned completed executor delivery");
             }
-            let runtime_row = tx
-                .query_one(Statement::from_sql_and_values(
-                    DatabaseBackend::Sqlite,
-                    "SELECT snapshot_json FROM agent_runtime_states WHERE agent_id = ?",
-                    [input.agent_id.clone().into()],
-                ))
-                .await?
-                .context("executor canonical runtime snapshot not found")?;
-            let snapshot: AgentSnapshot =
-                serde_json::from_str(&runtime_row.try_get::<String>("", "snapshot_json")?)
-                    .context("executor canonical runtime snapshot is invalid")?;
+            let runtime_state =
+                entities::agent_runtime_state::Entity::find_by_id(input.agent_id.clone())
+                    .one(&tx)
+                    .await?
+                    .context("executor canonical runtime snapshot not found")?;
+            let snapshot: AgentSnapshot = serde_json::from_str(&runtime_state.snapshot_json)
+                .context("executor canonical runtime snapshot is invalid")?;
             if snapshot.identity.id.as_str() != input.agent_id
                 || snapshot.identity.role.as_str() != "executor"
                 || snapshot.lifecycle != AgentLifecycleState::Closed

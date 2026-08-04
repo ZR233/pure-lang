@@ -5,13 +5,20 @@ use anyhow::{Context, Result};
 use crate::config::CONFIG_DIR_NAME;
 
 const STUDIO_DIR_NAME: &str = "studio";
-const STUDIO_DB_FILE_NAME: &str = "studio_2.sqlite";
+const STATE_DB_FILE_NAME: &str = "studio_state.sqlite";
+const HISTORY_DB_FILE_NAME: &str = "studio_history.sqlite";
+const LEGACY_DB_FILE_NAME: &str = "studio_2.sqlite";
 
-pub fn default_db_path() -> Result<PathBuf> {
-    Ok(user_home_dir()?
-        .join(CONFIG_DIR_NAME)
-        .join(STUDIO_DIR_NAME)
-        .join(STUDIO_DB_FILE_NAME))
+pub fn default_state_db_path() -> Result<PathBuf> {
+    Ok(studio_dir()?.join(STATE_DB_FILE_NAME))
+}
+
+pub fn default_history_db_path() -> Result<PathBuf> {
+    Ok(studio_dir()?.join(HISTORY_DB_FILE_NAME))
+}
+
+pub fn legacy_db_path() -> Result<PathBuf> {
+    Ok(studio_dir()?.join(LEGACY_DB_FILE_NAME))
 }
 
 pub fn default_attachments_dir() -> Result<PathBuf> {
@@ -33,6 +40,10 @@ fn user_home_dir() -> Result<PathBuf> {
         .map(PathBuf::from)
         .find(|path| !path.as_os_str().is_empty())
         .context("could not resolve user home directory")
+}
+
+fn studio_dir() -> Result<PathBuf> {
+    Ok(user_home_dir()?.join(CONFIG_DIR_NAME).join(STUDIO_DIR_NAME))
 }
 
 pub fn sqlite_url(path: &Path) -> String {

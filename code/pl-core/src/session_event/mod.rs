@@ -379,6 +379,28 @@ impl SessionEventHubHandle {
     }
 }
 
+/// 从 durable history suffix 重建可能落后的 session 快速投影。
+pub fn replay_session_history_suffix(
+    mut snapshot: SessionViewSnapshot,
+    events: &[SessionEventEnvelope],
+) -> Result<SessionViewSnapshot, SessionEventError> {
+    for event in events {
+        let Some(sequence) = event.position.durable_sequence() else {
+            return Err(SessionEventError::ExpectedDurable);
+        };
+        let expected = snapshot.through_sequence.saturating_add(1);
+        if sequence != expected {
+            return Err(SessionEventError::SequenceGap {
+                expected,
+                actual: sequence,
+            });
+        }
+        apply_session_event(&mut snapshot, event)?;
+        snapshot.through_sequence = sequence;
+    }
+    Ok(snapshot)
+}
+
 pub struct SessionEventSubscription {
     session_id: String,
     bootstrap: VecDeque<SessionStreamFrame>,

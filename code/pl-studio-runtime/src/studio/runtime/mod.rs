@@ -13,6 +13,7 @@ use crate::studio::{
     StudioRecoveryIssueAction, StudioRuntimeSnapshot, StudioRuntimeState, StudioStore,
 };
 
+mod history;
 mod lifecycle;
 mod mcp_health;
 mod plan_confirmation;

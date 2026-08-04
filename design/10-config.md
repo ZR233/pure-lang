@@ -14,13 +14,14 @@ Windows 下对应：
 %USERPROFILE%\.pure\config.toml
 ```
 
-`pure-studio` 的桌面端状态单独保存在：
+`pure-studio` 的桌面端状态与完整历史分别保存在：
 
 ```text
-~/.pure/studio/studio_2.sqlite
+~/.pure/studio/studio_state.sqlite
+~/.pure/studio/studio_history.sqlite
 ```
 
-SQLite 只保存 Studio 状态，例如项目、会话、消息、统一 interaction、agent 状态事件和应用设置，并由 `pl-studio-runtime` 通过 SeaORM 纯异步访问。`pl-core` 的正常依赖树不包含 SeaORM。provider/model/role 配置仍只由 `~/.pure/config.toml` 表达。
+状态库保存项目、会话、Task、统一 interaction、agent latest state 与 UI projection；历史库保存完整 append-only 会话 items、turn 索引和模型 context checkpoint。两库由 `pl-studio-runtime` 通过 SeaORM 2.0 纯异步访问，配对、版本和恢复合同见 `19-studio-storage-and-diagnostics.md`。`pl-core` 的正常依赖树不包含 SeaORM。provider/model/role 配置仍只由 `~/.pure/config.toml` 表达。
 
 普通对话运行时读取配置；当配置文件不存在时，`pure-studio` 设置页展示默认配置。设置页不提供全局保存或重载操作，普通设置项在用户修改后即时写入配置。独立新增/编辑页面保留本地草稿，必须点击页面内保存按钮才写入配置，取消则丢弃草稿。当前格式为 schema 12；任何非 schema 12、无法解析或无法校验的配置都先完整写入拒绝备份，再用 schema 12 默认配置重建。系统不迁移 schema 5–11，不接受旧字段 alias，也不复制数据库、会话或其他旧配置状态。重建时只按当前 bundled preset ID 恢复已有的 `bearer_token` 与 `bearer_token_env`，避免破坏性重建静默覆盖用户凭据；未知或自定义 provider 仍只保留在拒绝备份中。
 

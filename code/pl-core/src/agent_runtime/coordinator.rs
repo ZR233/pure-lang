@@ -8,11 +8,12 @@ use super::host::{AgentCommitObserver, AgentLifecycleAdapter, AgentStateReposito
 use super::runtime::{AgentRuntimeOptions, RestoredInputPolicy};
 use super::state::{AgentRuntimeError, unix_timestamp};
 use super::{
-    AgentCommit, AgentCommitOutcome, AgentCommittedEvent, AgentCurrentSessionSubmitRequest,
-    AgentId, AgentProgressCheckpoint, AgentProgressStage, AgentRegistration, AgentRuntimeEvent,
+    AgentCommitOutcome, AgentCommittedEvent, AgentCurrentSessionSubmitRequest, AgentId,
+    AgentProgressCheckpoint, AgentProgressStage, AgentRegistration, AgentRuntimeEvent,
     AgentRuntimeEventKind, AgentRuntimeHandle, AgentRuntimeHost, AgentRuntimeResult,
     AgentSessionDigest, AgentSnapshot, AgentSpawnRequest, AgentSpawnResult, AgentSubmitRequest,
-    PendingAgentInput, RestoredAgentRuntime, SpawnLifecycleRequest, TurnId,
+    DurableCommitFacts, PendingAgentInput, RestoredAgentRuntime, SessionHistoryCommit,
+    SpawnLifecycleRequest, TurnId,
 };
 use crate::SessionEventHub;
 

@@ -204,7 +204,7 @@ async fn paused_task_resume_submits_one_hidden_durable_input() {
     let owner = crate::studio::agent_host::root_agent_id(&session.id);
     let input = store
         .database()
-        .query_one(sea_orm::Statement::from_sql_and_values(
+        .query_one_raw(sea_orm::Statement::from_sql_and_values(
             sea_orm::DatabaseBackend::Sqlite,
             "SELECT input_json FROM agent_active_inputs WHERE agent_id = ?",
             [owner.to_string().into()],
@@ -244,7 +244,7 @@ async fn paused_task_resume_submits_one_hidden_durable_input() {
         .expect_err("a running or no-longer-paused Planner must reject duplicate resume");
     let active_input_count = store
         .database()
-        .query_one(sea_orm::Statement::from_sql_and_values(
+        .query_one_raw(sea_orm::Statement::from_sql_and_values(
             sea_orm::DatabaseBackend::Sqlite,
             "SELECT COUNT(*) AS count FROM agent_active_inputs WHERE agent_id = ?",
             [owner.to_string().into()],

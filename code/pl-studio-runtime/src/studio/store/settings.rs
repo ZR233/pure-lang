@@ -1,7 +1,7 @@
 use anyhow::Result;
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
 
-use crate::studio::entities;
+use crate::studio::entity as entities;
 use crate::studio::ids::unix_seconds;
 use crate::studio::store::StudioStore;
 

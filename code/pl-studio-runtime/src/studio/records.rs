@@ -72,3 +72,32 @@ pub struct AttachmentRecord {
     pub height: Option<u32>,
     pub created_at: i64,
 }
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SessionHistoryItemRecord {
+    pub sequence: i64,
+    pub item_id: String,
+    pub turn_id: String,
+    pub item_kind: String,
+    pub payload: crate::SessionEventEnvelope,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SessionHistoryTurnRecord {
+    pub turn_sequence: i64,
+    pub turn_id: String,
+    pub status: String,
+    pub model: Option<serde_json::Value>,
+    pub error: Option<serde_json::Value>,
+    pub started_at: i64,
+    pub completed_at: Option<i64>,
+    pub items: Vec<SessionHistoryItemRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SessionHistoryPageRecord {
+    pub turns: Vec<SessionHistoryTurnRecord>,
+    pub next_before_turn_sequence: Option<i64>,
+    pub has_more: bool,
+}

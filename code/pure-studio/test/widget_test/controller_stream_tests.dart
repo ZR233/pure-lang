@@ -736,6 +736,183 @@ void registerControllerStreamTests() {
     ));
   });
 
+  test(
+    'history paging merges durable rows without replacing live state',
+    () async {
+      final initial = _emptyState().copyWith(
+        turnsBySession: {
+          'session-1': _testTurn(
+            sessionId: 'session-1',
+            turnId: 'turn-current',
+            state: const StudioTurnState.inProgress(
+              StudioTurnActivity.thinking,
+            ),
+          ),
+        },
+        runtimesBySession: const {
+          'session-1': SessionRuntimeView(
+            model: 'current-model',
+            contextTokens: 10,
+            contextWindow: 100,
+            totalTokens: 20,
+            costLabel: '',
+            activeSkills: [],
+            activeMcpServers: [],
+            activeLspServers: [],
+            agentCount: 1,
+          ),
+        },
+      );
+      final api = _FakeStudioApi(initial);
+      api.historyPagesBySession['session-1'] = {
+        null: SessionHistoryPage(
+          turns: [
+            SessionHistoryTurn(
+              turnSequence: 2,
+              turnId: 'turn-history-2',
+              status: 'completed',
+              modelJson: null,
+              errorJson: null,
+              startedAt: _fixtureDate(2),
+              completedAt: _fixtureDate(3),
+              items: [
+                _historyItem(
+                  3,
+                  _messageUpdatedEvent(
+                    sessionId: 'session-1',
+                    sequence: BigInt.from(3),
+                    message: _timelineMessageFixture(
+                      id: 'history-message-2',
+                      sessionId: 'session-1',
+                      turnId: 'turn-history-2',
+                      sequence: 3,
+                    ),
+                  ),
+                ),
+                _historyItem(
+                  4,
+                  _partUpdatedEvent(
+                    sessionId: 'session-1',
+                    sequence: BigInt.from(4),
+                    part: _timelinePartFixture(
+                      id: 'history-part-2',
+                      messageId: 'history-message-2',
+                      sessionId: 'session-1',
+                      turnId: 'turn-history-2',
+                      type: TimelinePartType.text,
+                      sequence: 4,
+                      text: 'persisted answer',
+                      textChannel: TimelineTextChannel.finalAnswer,
+                    ),
+                  ),
+                ),
+                _historyItem(
+                  5,
+                  _turnChangedEvent(
+                    sessionId: 'session-1',
+                    state: const StudioTurnState.completed(),
+                  ),
+                ),
+                _historyItem(
+                  6,
+                  _sessionRuntimeChangedEvent(
+                    sessionId: 'session-1',
+                    runtime: const SessionRuntimeView(
+                      model: 'historical-model',
+                      contextTokens: 1,
+                      contextWindow: 1,
+                      totalTokens: 1,
+                      costLabel: '',
+                      activeSkills: [],
+                      activeMcpServers: [],
+                      activeLspServers: [],
+                      agentCount: 0,
+                    ),
+                  ),
+                ),
+                _historyItem(
+                  7,
+                  _messageUpdatedEvent(
+                    sessionId: 'session-2',
+                    sequence: BigInt.from(7),
+                    message: _timelineMessageFixture(
+                      id: 'foreign-message',
+                      sessionId: 'session-2',
+                    ),
+                  ),
+                  sessionId: 'session-2',
+                ),
+              ],
+            ),
+          ],
+          nextBeforeTurnSequence: 2,
+          hasMore: true,
+        ),
+        2: SessionHistoryPage(
+          turns: [
+            SessionHistoryTurn(
+              turnSequence: 1,
+              turnId: 'turn-history-1',
+              status: 'completed',
+              modelJson: null,
+              errorJson: null,
+              startedAt: _fixtureDate(1),
+              completedAt: _fixtureDate(2),
+              items: [
+                _historyItem(
+                  1,
+                  _messageUpdatedEvent(
+                    sessionId: 'session-1',
+                    sequence: BigInt.one,
+                    message: _timelineMessageFixture(
+                      id: 'history-message-1',
+                      sessionId: 'session-1',
+                      turnId: 'turn-history-1',
+                      sequence: 1,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+          nextBeforeTurnSequence: null,
+          hasMore: false,
+        ),
+      };
+      final container = ProviderContainer(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+      );
+      addTearDown(container.dispose);
+
+      var state = await container.read(studioControllerProvider.future);
+      expect(state.selectedMessages.map((message) => message.id), [
+        'history-message-2',
+      ]);
+      expect(state.turn!.turnId, 'turn-current');
+      expect(state.runtime.model, 'current-model');
+      expect(state.messagesBySession['session-2'], isNull);
+      expect(state.historyPagingBySession['session-1']!.hasMore, isTrue);
+
+      await container
+          .read(studioControllerProvider.notifier)
+          .loadOlderHistory('session-1');
+      await container
+          .read(studioControllerProvider.notifier)
+          .loadOlderHistory('session-1');
+
+      state = container.read(studioControllerProvider).requireValue;
+      expect(state.selectedMessages.map((message) => message.id), [
+        'history-message-1',
+        'history-message-2',
+      ]);
+      expect(api.historyRequests, [
+        (sessionId: 'session-1', beforeTurnSequence: null),
+        (sessionId: 'session-1', beforeTurnSequence: 2),
+      ]);
+      expect(state.historyPagingBySession['session-1']!.hasMore, isFalse);
+    },
+  );
+
   test('session switch does not wait for old transport teardown', () async {
     final cancellation = Completer<void>();
     final api = _FakeStudioApi(_emptyState())
@@ -756,4 +933,19 @@ void registerControllerStreamTests() {
     expect(api.sessionSubscriptions.last.sessionId, 'session-2');
     cancellation.complete();
   });
+}
+
+SessionHistoryItem _historyItem(
+  int sequence,
+  StudioBridgeEvent event, {
+  String sessionId = 'session-1',
+}) {
+  return SessionHistoryItem(
+    sequence: sequence,
+    itemId: 'history-item-$sequence-$sessionId',
+    turnId: event.turnId ?? 'turn-history',
+    itemKind: event.payload.runtimeType.toString(),
+    event: event,
+    createdAt: _fixtureDate(sequence),
+  );
 }

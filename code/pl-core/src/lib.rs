@@ -25,8 +25,8 @@ mod working_set;
 mod workspace;
 
 pub use agent_runtime::{
-    AgentAccessPolicy, AgentActivityState, AgentCollaborationTools, AgentCommit,
-    AgentCommitObserver, AgentCommitOutcome, AgentCommittedEvent, AgentCurrentSessionSubmitRequest,
+    AgentAccessPolicy, AgentActivityState, AgentCollaborationTools, AgentCommitObserver,
+    AgentCommitOutcome, AgentCommittedEvent, AgentCurrentSessionSubmitRequest,
     AgentDirectorySnapshot, AgentDirectorySubscription, AgentDirectoryWaitReason,
     AgentDirectoryWaitResult, AgentDurableState, AgentExecutionPolicy, AgentId, AgentIdentity,
     AgentLifecycleAdapter, AgentLifecycleState, AgentProgressCheckpoint, AgentProgressStage,
@@ -36,10 +36,11 @@ pub use agent_runtime::{
     AgentSessionDigestRole, AgentSessionState, AgentSnapshot, AgentSpawnRequest, AgentSpawnResult,
     AgentStateMutation, AgentStateRepository, AgentSubmitRequest, AgentTargetSelector,
     AgentTurnCheckpoint, AgentTurnCheckpointHandle, AgentTurnFactory, AgentTurnOutcome,
-    AgentTurnPreparationContext, AgentWaitResult, CloseLifecycleRequest, DurableMailboxEnvelope,
-    MailboxDeliveryState, MailboxPresentation, PendingAgentInput, PreparedAgentTurn,
-    PreparedSessionRuntime, RestoredAgentRuntime, RestoredInputPolicy, RestoredSessionProjection,
-    SessionId, SessionProjectionCommit, SpawnLifecycleRequest, ToolEffectSet, TurnCheckpointReason,
+    AgentTurnPreparationContext, AgentWaitResult, CloseLifecycleRequest, DurableCommitFacts,
+    DurableMailboxEnvelope, MailboxDeliveryState, MailboxPresentation, PendingAgentInput,
+    PreparedAgentTurn, PreparedSessionRuntime, RestoredAgentRuntime, RestoredInputPolicy,
+    RestoredSessionProjection, SessionContextMutation, SessionHistoryCommit, SessionId,
+    SessionProjectionCommit, SpawnLifecycleRequest, ToolEffectSet, TurnCheckpointReason,
     TurnFinalizationPolicy, TurnId, TurnOutcomeKind,
 };
 pub use attachment::MaterializedAttachment;
@@ -127,6 +128,7 @@ pub use session::{
 pub use session_event::{
     SessionEventError, SessionEventFact, SessionEventFactPosition, SessionEventHub,
     SessionEventHubHandle, SessionEventOptions, SessionEventSubscription,
+    replay_session_history_suffix,
 };
 pub use skill::{SkillCatalog, SkillMetadata, SkillSourceKind};
 #[cfg(feature = "docker-tools")]

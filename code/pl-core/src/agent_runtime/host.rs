@@ -4,6 +4,8 @@ use std::future::Future;
 use pl_protocol::{SessionEventEnvelope, SessionViewSnapshot};
 use pl_trace::TraceEvent;
 
+use crate::ModelContextItem;
+
 use super::{
     AgentDurableState, AgentId, AgentRuntimeEvent, AgentSnapshot, AgentTurnPreparationContext,
     PreparedAgentTurn,
@@ -20,22 +22,96 @@ pub struct RestoredAgentRuntime {
 #[derive(Debug, Clone)]
 pub struct RestoredSessionProjection {
     pub snapshot: SessionViewSnapshot,
-    pub durable_events: Vec<SessionEventEnvelope>,
+    pub retained_durable_events: Vec<SessionEventEnvelope>,
 }
 
-/// repository 一次原子提交的完整输入。
+/// 一次会话历史事实与其可重建状态投影的完整提交。
 ///
-/// 实现必须在同一个事务中校验 revision，并写入 snapshot、canonical session、turn、queue、
-/// durable events 与 traces。只有返回 `Applied` 后 runtime 才更新内存状态和广播事件。
+/// 实现必须先持久化 `facts`，再校验 revision 并写入 snapshot、canonical session、turn、queue
+/// 和 projection。只有返回 `Applied` 后 runtime 才更新内存状态和广播事件。
 #[derive(Debug, Clone)]
-pub struct AgentCommit {
+pub struct SessionHistoryCommit {
     pub agent_id: AgentId,
     pub expected_revision: Option<u64>,
     pub next_state: AgentDurableState,
-    pub events: Vec<AgentRuntimeEvent>,
-    pub trace_events: Vec<TraceEvent>,
-    pub session_projection: Option<SessionProjectionCommit>,
+    pub facts: DurableCommitFacts,
     pub mutation: AgentStateMutation,
+}
+
+/// 一次提交中需要先于状态投影持久化的 typed durable facts。
+#[derive(Debug, Clone)]
+pub struct DurableCommitFacts {
+    pub session_id: super::SessionId,
+    pub turn_id: Option<super::TurnId>,
+    pub through_sequence: u64,
+    pub revision: u64,
+    pub items: Vec<SessionEventEnvelope>,
+    pub turn_transition: Option<pl_protocol::SessionTurn>,
+    pub context: Option<SessionContextMutation>,
+    pub projection_snapshot: Option<SessionViewSnapshot>,
+    pub runtime_events: Vec<AgentRuntimeEvent>,
+    pub trace_events: Vec<TraceEvent>,
+}
+
+impl DurableCommitFacts {
+    pub fn from_state(
+        state: &AgentDurableState,
+        runtime_events: Vec<AgentRuntimeEvent>,
+        trace_events: Vec<TraceEvent>,
+        projection: Option<SessionProjectionCommit>,
+        context: Option<SessionContextMutation>,
+    ) -> Self {
+        let items = projection
+            .as_ref()
+            .map(|projection| projection.durable_events.clone())
+            .unwrap_or_default();
+        let turn_transition = items.iter().rev().find_map(|event| match &event.kind {
+            pl_protocol::SessionEventKind::TurnChanged { turn } => Some(turn.clone()),
+            pl_protocol::SessionEventKind::MessageChanged { .. }
+            | pl_protocol::SessionEventKind::MessageRemoved { .. }
+            | pl_protocol::SessionEventKind::PartChanged { .. }
+            | pl_protocol::SessionEventKind::PartRemoved { .. }
+            | pl_protocol::SessionEventKind::PartDelta { .. }
+            | pl_protocol::SessionEventKind::InteractionChanged { .. }
+            | pl_protocol::SessionEventKind::AgentChanged { .. }
+            | pl_protocol::SessionEventKind::TimelineEventAppended { .. }
+            | pl_protocol::SessionEventKind::RuntimeChanged { .. }
+            | pl_protocol::SessionEventKind::SkillActivated { .. }
+            | pl_protocol::SessionEventKind::PlanChanged { .. }
+            | pl_protocol::SessionEventKind::ContextCompacted { .. }
+            | pl_protocol::SessionEventKind::ErrorOccurred { .. } => None,
+        });
+        let turn_id = turn_transition
+            .as_ref()
+            .and_then(|turn| super::TurnId::new(turn.turn_id.clone()).ok())
+            .or_else(|| state.snapshot.active_turn_id.clone())
+            .or_else(|| {
+                state
+                    .snapshot
+                    .last_turn
+                    .as_ref()
+                    .map(|outcome| outcome.turn_id.clone())
+            });
+        Self {
+            session_id: state.session.id.clone(),
+            turn_id,
+            through_sequence: state.session.session_event_sequence,
+            revision: state.snapshot.revision,
+            items,
+            turn_transition,
+            context,
+            projection_snapshot: projection.map(|projection| projection.snapshot),
+            runtime_events,
+            trace_events,
+        }
+    }
+}
+
+/// checkpoint 对完整模型上下文的单调变更。
+#[derive(Debug, Clone)]
+pub enum SessionContextMutation {
+    Append { items: Vec<ModelContextItem> },
+    Replace { items: Vec<ModelContextItem> },
 }
 
 /// repository 与 session hub 共享的 canonical session 投影提交。
@@ -97,8 +173,11 @@ pub trait AgentStateRepository: Clone + Send + Sync + 'static {
 
     fn commit(
         &self,
-        commit: AgentCommit,
+        commit: SessionHistoryCommit,
     ) -> impl Future<Output = std::result::Result<AgentCommitOutcome, Self::Error>> + Send;
+
+    /// 等待此前接受的历史事实和状态投影全部达到 durable watermark。
+    fn barrier(&self) -> impl Future<Output = std::result::Result<(), Self::Error>> + Send;
 }
 
 /// 宿主为一次 turn 构造模型、instructions、工具和产品策略的端口。

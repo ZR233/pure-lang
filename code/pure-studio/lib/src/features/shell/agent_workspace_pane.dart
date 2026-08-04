@@ -148,6 +148,14 @@ class _AgentTimelineHost extends ConsumerWidget {
           sessionId: sessionId,
           rows: timeline.isLoading ? const [] : timeline.rows,
           turn: timeline.turn,
+          isLoadingOlder: timeline.isLoadingOlderHistory,
+          onLoadOlder: timeline.hasOlderHistory
+              ? () => unawaited(
+                  ref
+                      .read(studioControllerProvider.notifier)
+                      .loadOlderHistory(sessionId),
+                )
+              : null,
         );
       },
     );

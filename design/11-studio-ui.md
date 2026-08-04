@@ -63,6 +63,11 @@ snapshot、durable replay 和 live event 都进入同一个 event reducer。`sub
 原子初始化 projection 或推进 durable cursor；不再通过 `load_studio_events` 建立第二条补拉路径。
 前端不得恢复旧 `TimelineItem`、`ConversationEntry` 或 raw trace/agent event 入口。
 
+完整历史由独立 typed `loadSessionHistoryPage` 按 turn keyset 分页。首次选择或重启先加载最近
+50 个 turn，再建立无 cursor subscription；向上滚动时使用 `beforeTurnSequence` 加载更旧页。
+历史页只能补充旧 sequence，不能覆盖 subscription snapshot 或更高 sequence 的 live state。
+服务端把单页 limit 限制在 1 到 200；Flutter 不使用 OFFSET 或按本地时间猜测下一页。
+
 Flutter 解析层必须接受 Studio 协议内的所有 part type。当前不直接渲染的 lifecycle/internal/file part 可以进入 normalized snapshot 后由 row projection 过滤，或在 bridge payload 层忽略，但不能把协议内类型当未知类型抛出导致 timeline 白屏。真正未知的 part type 仍应 fail fast。
 
 切换或恢复选中 session 时先增加 generation、请求取消旧 stream，并立即订阅目标

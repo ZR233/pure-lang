@@ -204,7 +204,7 @@ impl InteractionRuntime {
             self.waiters.lock().await.remove(&interaction_id);
             tracing::error!(
                 interaction_id,
-                %error,
+                error_bytes = error.to_string().len(),
                 "failed to persist Studio interaction"
             );
             return cancelled_resolution(&request.kind, "interaction persistence failed");

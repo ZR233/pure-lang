@@ -73,6 +73,15 @@ pub async fn shutdown_runtime() -> Result<RuntimeSnapshot, BridgeError> {
     cancel_all_update_operations().await;
     bridge.subscriptions.cancel_all().await;
     let shutdown_result = bridge.studio.shutdown_runtime().await;
+    if let Err(error) = &shutdown_result {
+        tracing::error!(
+            error_bytes = error.to_string().len(),
+            "Studio runtime shutdown failed"
+        );
+    } else {
+        tracing::info!("Studio runtime shutdown completed");
+    }
+    crate::diagnostics::shutdown();
     *bridge.lifecycle.lock().await = BridgeLifecycle::Stopped;
     bridge.shutdown_complete.notify_waiters();
     Ok(runtime_snapshot(shutdown_result?))
@@ -107,6 +116,8 @@ pub(super) async fn shutdown_runtime_for_update(
             bridge.shutdown.cancel();
             *bridge.lifecycle.lock().await = BridgeLifecycle::Stopped;
             bridge.shutdown_complete.notify_waiters();
+            tracing::info!("Studio runtime shutdown completed for update");
+            crate::diagnostics::shutdown();
             Ok(true)
         }
         Ok(None) => {

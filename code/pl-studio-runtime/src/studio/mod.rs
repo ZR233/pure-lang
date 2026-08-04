@@ -1,5 +1,5 @@
 mod agent_host;
-pub mod entities;
+pub(crate) mod entity;
 mod ids;
 mod interaction_runtime;
 mod mappers;
@@ -17,7 +17,10 @@ pub use interaction_runtime::{
     InteractionEmitter, InteractionEmitterFuture, InteractionRuntime, resolution_matches_kind,
 };
 pub use product_event_runtime::StudioProductEventRuntime;
-pub use records::{AttachmentRecord, ProjectRecord, SessionKind, SessionRecord, SessionVisibility};
+pub use records::{
+    AttachmentRecord, ProjectRecord, SessionHistoryItemRecord, SessionHistoryPageRecord,
+    SessionHistoryTurnRecord, SessionKind, SessionRecord, SessionVisibility,
+};
 pub use runtime::{
     StudioPlanImplementationLifecycle, StudioResolveInteractionResponse, StudioRuntime,
     StudioStopPromptResponse, StudioSubmitPromptOptions, StudioSubmitPromptRequest,

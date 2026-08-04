@@ -4,6 +4,8 @@ Widget _timelineHarness({
   required String sessionId,
   required List<_ProjectedMessageFixture> messages,
   StudioTurnState turnState = const StudioTurnState.completed(),
+  VoidCallback? onLoadOlder,
+  bool isLoadingOlder = false,
 }) {
   return _timelineApp(
     home: Scaffold(
@@ -14,6 +16,8 @@ Widget _timelineHarness({
           sessionId: sessionId,
           rows: _rowsFromProjectedMessages(messages),
           turn: _testTurn(sessionId: sessionId, state: turnState),
+          onLoadOlder: onLoadOlder,
+          isLoadingOlder: isLoadingOlder,
         ),
       ),
     ),

@@ -19,6 +19,9 @@ class _FakeStudioApi implements StudioApi {
   final List<String> loadedSessionIds = [];
   final List<({String sessionId, int? afterSequence})> sessionSubscriptions =
       [];
+  final List<({String sessionId, int? beforeTurnSequence})> historyRequests =
+      [];
+  final Map<String, Map<int?, SessionHistoryPage>> historyPagesBySession = {};
   int createSessionCount = 0;
   int bootstrapCount = 0;
   Object? bootstrapError;
@@ -301,6 +304,24 @@ class _FakeStudioApi implements StudioApi {
       },
     );
     return controller.stream;
+  }
+
+  @override
+  Future<SessionHistoryPage> loadSessionHistoryPage(
+    String sessionId, {
+    int? beforeTurnSequence,
+    int limit = 50,
+  }) async {
+    historyRequests.add((
+      sessionId: sessionId,
+      beforeTurnSequence: beforeTurnSequence,
+    ));
+    return historyPagesBySession[sessionId]?[beforeTurnSequence] ??
+        const SessionHistoryPage(
+          turns: [],
+          nextBeforeTurnSequence: null,
+          hasMore: false,
+        );
   }
 
   @override

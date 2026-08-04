@@ -2,23 +2,33 @@ use std::collections::VecDeque;
 
 use crate::{ModelContextItem, PureError};
 use pl_core::{
-    AgentActivityState, AgentCommit, AgentCommitOutcome, AgentDurableState, AgentSession,
-    AgentSessionState, AgentStateRepository, PendingAgentInput, RestoredAgentRuntime,
-    RestoredSessionProjection, SessionId, SessionProjectionCommit, TurnOutcomeKind,
+    AgentActivityState, AgentCommitOutcome, AgentDurableState, AgentSession, AgentSessionState,
+    AgentStateRepository, PendingAgentInput, RestoredAgentRuntime, RestoredSessionProjection,
+    SessionHistoryCommit, SessionId, TurnOutcomeKind,
 };
-use sea_orm::{ConnectionTrait, DatabaseBackend, QueryResult, Statement, TransactionTrait};
+use sea_orm::{
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
+    QueryOrder, QuerySelect, TransactionTrait,
+};
 
+use super::persistence::AgentPersistenceWriter;
 use crate::studio::StudioStore;
+use crate::studio::entity::{
+    agent_active_input, agent_pending_input, agent_runtime_session, agent_runtime_state,
+    agent_turn, session_history_item, session_view_snapshot,
+};
 
 /// Studio SQLite 对 PL canonical runtime state 的 CAS repository。
 #[derive(Clone)]
 pub(in crate::studio) struct StudioAgentRepository {
     store: StudioStore,
+    writer: AgentPersistenceWriter,
 }
 
 impl StudioAgentRepository {
     pub(super) fn new(store: StudioStore) -> Self {
-        Self { store }
+        let writer = AgentPersistenceWriter::spawn(store.clone());
+        Self { store, writer }
     }
 }
 
@@ -26,19 +36,23 @@ impl AgentStateRepository for StudioAgentRepository {
     type Error = PureError;
 
     async fn restore_runtime(&self) -> Result<Vec<RestoredAgentRuntime>, Self::Error> {
-        let states = self
-            .store
-            .database()
-            .query_all(statement(
-                "SELECT agent_id, snapshot_json FROM agent_runtime_states ORDER BY agent_id",
-                [],
-            ))
+        let states = agent_runtime_state::Entity::find()
+            .order_by_asc(agent_runtime_state::Column::AgentId)
+            .all(self.store.database())
             .await
             .map_err(store_error)?;
         let mut restored = Vec::with_capacity(states.len());
-        for row in states {
-            let agent_id = text(&row, "agent_id")?;
-            let snapshot = serde_json::from_str(&text(&row, "snapshot_json")?)?;
+        for state in states {
+            let agent_id = state.agent_id;
+            let snapshot: pl_core::AgentSnapshot = serde_json::from_str(&state.snapshot_json)?;
+            if snapshot.revision != u64_from_i64(state.revision)? {
+                return Err(store_error(format!(
+                    "agent {agent_id} snapshot revision does not match its CAS revision"
+                )));
+            }
+            self.writer
+                .seed_revision(&agent_id, snapshot.revision)
+                .await;
             let session = self.restore_session(&agent_id).await?;
             let pending_inputs = self.restore_pending_inputs(&agent_id).await?;
             let active_input = self.restore_active_input(&agent_id).await?;
@@ -56,112 +70,81 @@ impl AgentStateRepository for StudioAgentRepository {
         Ok(restored)
     }
 
-    async fn commit(&self, commit: AgentCommit) -> Result<AgentCommitOutcome, Self::Error> {
-        let agent_id = commit.agent_id.to_string();
-        let tx = self.store.database().begin().await.map_err(store_error)?;
-        let actual_revision = tx
-            .query_one(statement(
-                "SELECT revision FROM agent_runtime_states WHERE agent_id = ?",
-                [agent_id.clone().into()],
-            ))
-            .await
-            .map_err(store_error)?
-            .map(|row| integer_u64(&row, "revision"))
-            .transpose()?;
-        if actual_revision != commit.expected_revision {
-            tx.rollback().await.map_err(store_error)?;
-            return Ok(AgentCommitOutcome::RevisionConflict { actual_revision });
-        }
+    async fn commit(
+        &self,
+        commit: SessionHistoryCommit,
+    ) -> Result<AgentCommitOutcome, Self::Error> {
+        self.writer.submit(commit).await
+    }
 
-        let snapshot_json = serde_json::to_string(&commit.next_state.snapshot)?;
-        tx.execute(statement(
-            "INSERT INTO agent_runtime_states (agent_id, revision, snapshot_json, updated_at)
-             VALUES (?, ?, ?, ?)
-             ON CONFLICT(agent_id) DO UPDATE SET
-               revision = excluded.revision,
-               snapshot_json = excluded.snapshot_json,
-               updated_at = excluded.updated_at",
-            [
-                agent_id.clone().into(),
-                i64_from_u64(commit.next_state.snapshot.revision)?.into(),
-                snapshot_json.into(),
-                commit.next_state.snapshot.updated_at.into(),
-            ],
-        ))
+    async fn barrier(&self) -> Result<(), Self::Error> {
+        self.writer.barrier().await
+    }
+}
+
+pub(super) async fn persist_state_commit(
+    store: &StudioStore,
+    commit: &SessionHistoryCommit,
+) -> Result<AgentCommitOutcome, PureError> {
+    let agent_id = commit.agent_id.to_string();
+    let tx = store.database().begin().await.map_err(store_error)?;
+    let existing_state = agent_runtime_state::Entity::find_by_id(agent_id.clone())
+        .one(&tx)
         .await
         .map_err(store_error)?;
-
-        upsert_session(&tx, &agent_id, &commit.next_state).await?;
-        replace_pending_inputs(&tx, &agent_id, &commit.next_state).await?;
-        replace_active_input(&tx, &agent_id, &commit.next_state).await?;
-        upsert_turns(&tx, &agent_id, &commit.next_state).await?;
-        for event in &commit.events {
-            tx.execute(statement(
-                "INSERT OR REPLACE INTO agent_framework_events
-                 (agent_id, sequence, payload_json, created_at) VALUES (?, ?, ?, ?)",
-                [
-                    agent_id.clone().into(),
-                    i64_from_u64(event.sequence)?.into(),
-                    serde_json::to_string(event)?.into(),
-                    event.created_at.into(),
-                ],
-            ))
-            .await
-            .map_err(store_error)?;
-        }
-        for trace in &commit.trace_events {
-            tx.execute(statement(
-                "INSERT OR REPLACE INTO agent_runtime_traces
-                 (agent_id, session_id, sequence, payload_json, created_at)
-                 VALUES (?, ?, ?, ?, ?)",
-                [
-                    agent_id.clone().into(),
-                    trace.session_id.clone().into(),
-                    i64_from_u64(trace.sequence)?.into(),
-                    serde_json::to_string(trace)?.into(),
-                    trace.timestamp.into(),
-                ],
-            ))
-            .await
-            .map_err(store_error)?;
-        }
-        if let Some(projection) = &commit.session_projection {
-            persist_session_projection(&tx, projection).await?;
-        }
-        tx.commit().await.map_err(store_error)?;
-        Ok(AgentCommitOutcome::Applied)
+    let actual_revision = existing_state
+        .as_ref()
+        .map(|state| u64_from_i64(state.revision))
+        .transpose()?;
+    if actual_revision != commit.expected_revision {
+        tx.rollback().await.map_err(store_error)?;
+        return Ok(AgentCommitOutcome::RevisionConflict { actual_revision });
     }
+
+    let next_state = agent_runtime_state::ActiveModel {
+        agent_id: Set(agent_id.clone()),
+        revision: Set(i64_from_u64(commit.next_state.snapshot.revision)?),
+        snapshot_json: Set(serde_json::to_string(&commit.next_state.snapshot)?),
+        updated_at: Set(commit.next_state.snapshot.updated_at),
+    };
+    match existing_state {
+        Some(_) => next_state.update(&tx).await.map_err(store_error)?,
+        None => next_state.insert(&tx).await.map_err(store_error)?,
+    };
+    upsert_session(&tx, &agent_id, &commit.next_state).await?;
+    replace_pending_inputs(&tx, &agent_id, &commit.next_state).await?;
+    replace_active_input(&tx, &agent_id, &commit.next_state).await?;
+    upsert_turns(&tx, &agent_id, &commit.next_state).await?;
+    if let Some(snapshot) = &commit.facts.projection_snapshot {
+        persist_session_projection(&tx, snapshot, &commit.facts.items).await?;
+    }
+    tx.commit().await.map_err(store_error)?;
+    Ok(AgentCommitOutcome::Applied)
 }
 
 impl StudioAgentRepository {
     async fn restore_session(&self, agent_id: &str) -> Result<AgentSessionState, PureError> {
-        self.store
-            .database()
-            .query_one(statement(
-                "SELECT session_id, metadata_json, context_json, usage_json, last_context_tokens,
-                        trace_sequence, session_event_sequence
-                 FROM agent_runtime_sessions WHERE agent_id = ?",
-                [agent_id.to_string().into()],
-            ))
+        agent_runtime_session::Entity::find_by_id(agent_id.to_string())
+            .one(self.store.database())
             .await
             .map_err(store_error)?
             .ok_or_else(|| store_error(format!("agent {agent_id} has no canonical session")))
-            .and_then(|row| {
-                let id = SessionId::new(text(&row, "session_id")?)?;
-                let items: Vec<ModelContextItem> =
-                    serde_json::from_str(&text(&row, "context_json")?)?;
-                let last_context_tokens = optional_i64(&row, "last_context_tokens")?
+            .and_then(|session| {
+                let id = SessionId::new(session.session_id)?;
+                let items: Vec<ModelContextItem> = serde_json::from_str(&session.context_json)?;
+                let last_context_tokens = session
+                    .last_context_tokens
                     .map(u64::try_from)
                     .transpose()
                     .map_err(|error| store_error(error.to_string()))?;
                 Ok(AgentSessionState {
                     id,
-                    metadata: serde_json::from_str(&text(&row, "metadata_json")?)?,
+                    metadata: serde_json::from_str(&session.metadata_json)?,
                     session: AgentSession::from_items(items),
-                    usage: serde_json::from_str(&text(&row, "usage_json")?)?,
+                    usage: serde_json::from_str(&session.usage_json)?,
                     last_context_tokens,
-                    trace_sequence: integer_u64(&row, "trace_sequence")?,
-                    session_event_sequence: integer_u64(&row, "session_event_sequence")?,
+                    trace_sequence: u64_from_i64(session.trace_sequence)?,
+                    session_event_sequence: u64_from_i64(session.session_event_sequence)?,
                 })
             })
     }
@@ -170,40 +153,50 @@ impl StudioAgentRepository {
         &self,
         agent_id: &str,
     ) -> Result<Option<RestoredSessionProjection>, PureError> {
-        let row = self
-            .store
-            .database()
-            .query_one(statement(
-                "SELECT projection.session_id, projection.snapshot_json
-                 FROM session_view_snapshots projection
-                 INNER JOIN agent_runtime_sessions runtime_session
-                   ON runtime_session.session_id = projection.session_id
-                 WHERE runtime_session.agent_id = ?",
-                [agent_id.to_string().into()],
-            ))
+        let runtime_session = agent_runtime_session::Entity::find_by_id(agent_id.to_string())
+            .one(self.store.database())
             .await
             .map_err(store_error)?;
-        let Some(row) = row else {
+        let Some(runtime_session) = runtime_session else {
             return Ok(None);
         };
-        let session_id = text(&row, "session_id")?;
-        let snapshot = serde_json::from_str(&text(&row, "snapshot_json")?)?;
-        let durable_events = self
-            .store
-            .database()
-            .query_all(statement(
-                "SELECT event_json FROM session_event_journal
-                 WHERE session_id = ? ORDER BY sequence",
-                [session_id.into()],
-            ))
+        let session_id = runtime_session.session_id;
+        let projection = session_view_snapshot::Entity::find_by_id(session_id.clone())
+            .one(self.store.database())
+            .await
+            .map_err(store_error)?;
+        let mut snapshot = projection
+            .map(|projection| serde_json::from_str(&projection.snapshot_json))
+            .transpose()?
+            .unwrap_or_else(|| pl_protocol::SessionViewSnapshot::empty(session_id.clone()));
+        let suffix = session_history_item::Entity::find()
+            .filter(session_history_item::Column::SessionId.eq(session_id.clone()))
+            .filter(
+                session_history_item::Column::Sequence.gt(i64_from_u64(snapshot.through_sequence)?),
+            )
+            .order_by_asc(session_history_item::Column::Sequence)
+            .all(self.store.history_database())
             .await
             .map_err(store_error)?
             .into_iter()
-            .map(|event| serde_json::from_str(&text(&event, "event_json")?).map_err(Into::into))
-            .collect::<Result<_, PureError>>()?;
+            .map(|item| serde_json::from_str(&item.payload_json).map_err(Into::into))
+            .collect::<Result<Vec<_>, PureError>>()?;
+        snapshot =
+            pl_core::replay_session_history_suffix(snapshot, &suffix).map_err(store_error)?;
+        let mut retained_durable_events = session_history_item::Entity::find()
+            .filter(session_history_item::Column::SessionId.eq(session_id))
+            .order_by_desc(session_history_item::Column::Sequence)
+            .limit(4096)
+            .all(self.store.history_database())
+            .await
+            .map_err(store_error)?
+            .into_iter()
+            .map(|item| serde_json::from_str(&item.payload_json).map_err(Into::into))
+            .collect::<Result<Vec<_>, PureError>>()?;
+        retained_durable_events.reverse();
         Ok(Some(RestoredSessionProjection {
             snapshot,
-            durable_events,
+            retained_durable_events,
         }))
     }
 
@@ -211,17 +204,14 @@ impl StudioAgentRepository {
         &self,
         agent_id: &str,
     ) -> Result<VecDeque<PendingAgentInput>, PureError> {
-        self.store
-            .database()
-            .query_all(statement(
-                "SELECT input_json FROM agent_pending_inputs
-                 WHERE agent_id = ? ORDER BY queue_position",
-                [agent_id.to_string().into()],
-            ))
+        agent_pending_input::Entity::find()
+            .filter(agent_pending_input::Column::AgentId.eq(agent_id))
+            .order_by_asc(agent_pending_input::Column::QueuePosition)
+            .all(self.store.database())
             .await
             .map_err(store_error)?
             .into_iter()
-            .map(|row| serde_json::from_str(&text(&row, "input_json")?).map_err(Into::into))
+            .map(|input| serde_json::from_str(&input.input_json).map_err(Into::into))
             .collect()
     }
 
@@ -229,69 +219,37 @@ impl StudioAgentRepository {
         &self,
         agent_id: &str,
     ) -> Result<Option<PendingAgentInput>, PureError> {
-        self.store
-            .database()
-            .query_one(statement(
-                "SELECT input_json FROM agent_active_inputs WHERE agent_id = ?",
-                [agent_id.to_string().into()],
-            ))
+        agent_active_input::Entity::find_by_id(agent_id.to_string())
+            .one(self.store.database())
             .await
             .map_err(store_error)?
-            .map(|row| serde_json::from_str(&text(&row, "input_json")?).map_err(Into::into))
+            .map(|input| serde_json::from_str(&input.input_json).map_err(Into::into))
             .transpose()
     }
 }
 
 async fn persist_session_projection(
     tx: &sea_orm::DatabaseTransaction,
-    projection: &SessionProjectionCommit,
+    snapshot: &pl_protocol::SessionViewSnapshot,
+    items: &[pl_protocol::SessionEventEnvelope],
 ) -> Result<(), PureError> {
-    let session_id = projection.snapshot.session_id.clone();
-    tx.execute(statement(
-        "INSERT INTO session_view_snapshots
-         (session_id, through_sequence, snapshot_json, updated_at)
-         VALUES (?, ?, ?, ?)
-         ON CONFLICT(session_id) DO UPDATE SET
-           through_sequence = excluded.through_sequence,
-           snapshot_json = excluded.snapshot_json,
-           updated_at = excluded.updated_at",
-        [
-            session_id.clone().into(),
-            i64_from_u64(projection.snapshot.through_sequence)?.into(),
-            serde_json::to_string(&projection.snapshot)?.into(),
-            projection
-                .durable_events
-                .last()
-                .map_or(0, |event| event.emitted_at)
-                .into(),
-        ],
-    ))
-    .await
-    .map_err(store_error)?;
-    for event in &projection.durable_events {
-        let sequence = event.position.durable_sequence().ok_or_else(|| {
-            store_error("session projection commit contains transient event".to_string())
-        })?;
-        tx.execute(statement(
-            "INSERT OR REPLACE INTO session_event_journal
-             (session_id, sequence, event_json, emitted_at) VALUES (?, ?, ?, ?)",
-            [
-                session_id.clone().into(),
-                i64_from_u64(sequence)?.into(),
-                serde_json::to_string(event)?.into(),
-                event.emitted_at.into(),
-            ],
-        ))
+    let session_id = snapshot.session_id.clone();
+    let active = session_view_snapshot::ActiveModel {
+        session_id: Set(session_id.clone()),
+        through_sequence: Set(i64_from_u64(snapshot.through_sequence)?),
+        snapshot_json: Set(serde_json::to_string(snapshot)?),
+        updated_at: Set(items.last().map_or(0, |event| event.emitted_at)),
+    };
+    if session_view_snapshot::Entity::find_by_id(session_id)
+        .one(tx)
         .await
-        .map_err(store_error)?;
+        .map_err(store_error)?
+        .is_some()
+    {
+        active.update(tx).await.map_err(store_error)?;
+    } else {
+        active.insert(tx).await.map_err(store_error)?;
     }
-    let retain_after = projection.snapshot.through_sequence.saturating_sub(4096);
-    tx.execute(statement(
-        "DELETE FROM session_event_journal WHERE session_id = ? AND sequence <= ?",
-        [session_id.into(), i64_from_u64(retain_after)?.into()],
-    ))
-    .await
-    .map_err(store_error)?;
     Ok(())
 }
 
@@ -301,38 +259,27 @@ async fn upsert_session(
     state: &AgentDurableState,
 ) -> Result<(), PureError> {
     let session = &state.session;
-    tx.execute(statement(
-        "INSERT INTO agent_runtime_sessions
-         (agent_id, session_id, metadata_json, context_json, usage_json,
-          last_context_tokens, trace_sequence, session_event_sequence, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(agent_id) DO UPDATE SET
-           session_id = excluded.session_id,
-           metadata_json = excluded.metadata_json,
-           context_json = excluded.context_json,
-           usage_json = excluded.usage_json,
-           last_context_tokens = excluded.last_context_tokens,
-           trace_sequence = excluded.trace_sequence,
-           session_event_sequence = excluded.session_event_sequence,
-           updated_at = excluded.updated_at",
-        [
-            agent_id.to_string().into(),
-            session.id.to_string().into(),
-            serde_json::to_string(&session.metadata)?.into(),
-            serde_json::to_string(session.session.items())?.into(),
-            serde_json::to_string(&session.usage)?.into(),
-            session
-                .last_context_tokens
-                .map(i64_from_u64)
-                .transpose()?
-                .into(),
-            i64_from_u64(session.trace_sequence)?.into(),
-            i64_from_u64(session.session_event_sequence)?.into(),
-            state.snapshot.updated_at.into(),
-        ],
-    ))
-    .await
-    .map_err(store_error)?;
+    let active = agent_runtime_session::ActiveModel {
+        agent_id: Set(agent_id.to_string()),
+        session_id: Set(session.id.to_string()),
+        metadata_json: Set(serde_json::to_string(&session.metadata)?),
+        context_json: Set(serde_json::to_string(session.session.items())?),
+        usage_json: Set(serde_json::to_string(&session.usage)?),
+        last_context_tokens: Set(session.last_context_tokens.map(i64_from_u64).transpose()?),
+        trace_sequence: Set(i64_from_u64(session.trace_sequence)?),
+        session_event_sequence: Set(i64_from_u64(session.session_event_sequence)?),
+        updated_at: Set(state.snapshot.updated_at),
+    };
+    if agent_runtime_session::Entity::find_by_id(agent_id.to_string())
+        .one(tx)
+        .await
+        .map_err(store_error)?
+        .is_some()
+    {
+        active.update(tx).await.map_err(store_error)?;
+    } else {
+        active.insert(tx).await.map_err(store_error)?;
+    }
     Ok(())
 }
 
@@ -341,26 +288,28 @@ async fn replace_pending_inputs(
     agent_id: &str,
     state: &AgentDurableState,
 ) -> Result<(), PureError> {
-    tx.execute(statement(
-        "DELETE FROM agent_pending_inputs WHERE agent_id = ?",
-        [agent_id.to_string().into()],
-    ))
-    .await
-    .map_err(store_error)?;
-    for (position, input) in state.pending_inputs.iter().enumerate() {
-        tx.execute(statement(
-            "INSERT INTO agent_pending_inputs (agent_id, queue_position, input_json)
-             VALUES (?, ?, ?)",
-            [
-                agent_id.to_string().into(),
-                i64::try_from(position)
-                    .map_err(|error| store_error(error.to_string()))?
-                    .into(),
-                serde_json::to_string(input)?.into(),
-            ],
-        ))
+    agent_pending_input::Entity::delete_many()
+        .filter(agent_pending_input::Column::AgentId.eq(agent_id))
+        .exec(tx)
         .await
         .map_err(store_error)?;
+    if !state.pending_inputs.is_empty() {
+        let inputs = state
+            .pending_inputs
+            .iter()
+            .enumerate()
+            .map(|(position, input)| {
+                Ok(agent_pending_input::ActiveModel {
+                    agent_id: Set(agent_id.to_string()),
+                    queue_position: Set(i64::try_from(position).map_err(store_error)?),
+                    input_json: Set(serde_json::to_string(input)?),
+                })
+            })
+            .collect::<Result<Vec<_>, PureError>>()?;
+        agent_pending_input::Entity::insert_many(inputs)
+            .exec(tx)
+            .await
+            .map_err(store_error)?;
     }
     Ok(())
 }
@@ -372,28 +321,27 @@ async fn replace_active_input(
 ) -> Result<(), PureError> {
     match &state.active_input {
         Some(input) => {
-            tx.execute(statement(
-                "INSERT INTO agent_active_inputs (agent_id, input_json, updated_at)
-                 VALUES (?, ?, ?)
-                 ON CONFLICT(agent_id) DO UPDATE SET
-                   input_json = excluded.input_json,
-                   updated_at = excluded.updated_at",
-                [
-                    agent_id.to_string().into(),
-                    serde_json::to_string(input)?.into(),
-                    state.snapshot.updated_at.into(),
-                ],
-            ))
-            .await
-            .map_err(store_error)?;
+            let active = agent_active_input::ActiveModel {
+                agent_id: Set(agent_id.to_string()),
+                input_json: Set(serde_json::to_string(input)?),
+                updated_at: Set(state.snapshot.updated_at),
+            };
+            if agent_active_input::Entity::find_by_id(agent_id.to_string())
+                .one(tx)
+                .await
+                .map_err(store_error)?
+                .is_some()
+            {
+                active.update(tx).await.map_err(store_error)?;
+            } else {
+                active.insert(tx).await.map_err(store_error)?;
+            }
         }
         None => {
-            tx.execute(statement(
-                "DELETE FROM agent_active_inputs WHERE agent_id = ?",
-                [agent_id.to_string().into()],
-            ))
-            .await
-            .map_err(store_error)?;
+            agent_active_input::Entity::delete_by_id(agent_id.to_string())
+                .exec(tx)
+                .await
+                .map_err(store_error)?;
         }
     }
     Ok(())
@@ -407,90 +355,107 @@ async fn upsert_turns(
     for input in &state.pending_inputs {
         upsert_turn(
             tx,
-            agent_id,
-            input.turn_id.as_str(),
-            input.session_id.as_str(),
-            "queued",
-            None,
-            &pl_model::TokenUsage::default(),
-            Some(&input.metadata),
-            None,
-            None,
+            TurnProjection {
+                agent_id,
+                turn_id: input.turn_id.as_str(),
+                session_id: input.session_id.as_str(),
+                status: "queued",
+                reason: None,
+                usage: &pl_model::TokenUsage::default(),
+                metadata: Some(&input.metadata),
+                started_at: None,
+                finished_at: None,
+            },
         )
         .await?;
     }
     if let Some(turn_id) = state.snapshot.active_turn_id.as_ref() {
         upsert_turn(
             tx,
-            agent_id,
-            turn_id.as_str(),
-            state.session.id.as_str(),
-            activity_label(state.snapshot.activity),
-            None,
-            &pl_model::TokenUsage::default(),
-            None,
-            Some(state.snapshot.updated_at),
-            None,
+            TurnProjection {
+                agent_id,
+                turn_id: turn_id.as_str(),
+                session_id: state.session.id.as_str(),
+                status: activity_label(state.snapshot.activity),
+                reason: None,
+                usage: &pl_model::TokenUsage::default(),
+                metadata: None,
+                started_at: Some(state.snapshot.updated_at),
+                finished_at: None,
+            },
         )
         .await?;
     }
     if let Some(outcome) = &state.snapshot.last_turn {
         upsert_turn(
             tx,
-            agent_id,
-            outcome.turn_id.as_str(),
-            outcome.session_id.as_str(),
-            outcome_label(outcome.kind),
-            outcome.reason.as_deref(),
-            &outcome.usage,
-            None,
-            None,
-            Some(outcome.finished_at),
+            TurnProjection {
+                agent_id,
+                turn_id: outcome.turn_id.as_str(),
+                session_id: outcome.session_id.as_str(),
+                status: outcome_label(outcome.kind),
+                reason: outcome.reason.as_deref(),
+                usage: &outcome.usage,
+                metadata: None,
+                started_at: None,
+                finished_at: Some(outcome.finished_at),
+            },
         )
         .await?;
     }
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn upsert_turn(
-    tx: &sea_orm::DatabaseTransaction,
-    agent_id: &str,
-    turn_id: &str,
-    session_id: &str,
-    status: &str,
-    reason: Option<&str>,
-    usage: &pl_model::TokenUsage,
-    metadata: Option<&serde_json::Value>,
+struct TurnProjection<'a> {
+    agent_id: &'a str,
+    turn_id: &'a str,
+    session_id: &'a str,
+    status: &'a str,
+    reason: Option<&'a str>,
+    usage: &'a pl_model::TokenUsage,
+    metadata: Option<&'a serde_json::Value>,
     started_at: Option<i64>,
     finished_at: Option<i64>,
+}
+
+async fn upsert_turn(
+    tx: &sea_orm::DatabaseTransaction,
+    turn: TurnProjection<'_>,
 ) -> Result<(), PureError> {
-    tx.execute(statement(
-        "INSERT INTO agent_turns
-         (agent_id, turn_id, session_id, status, reason, usage_json, metadata_json,
-          started_at, finished_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(agent_id, turn_id) DO UPDATE SET
-           status = excluded.status,
-           reason = excluded.reason,
-           usage_json = excluded.usage_json,
-           metadata_json = COALESCE(agent_turns.metadata_json, excluded.metadata_json),
-           started_at = COALESCE(agent_turns.started_at, excluded.started_at),
-           finished_at = excluded.finished_at",
-        [
-            agent_id.to_string().into(),
-            turn_id.to_string().into(),
-            session_id.to_string().into(),
-            status.to_string().into(),
-            reason.map(str::to_string).into(),
-            serde_json::to_string(usage)?.into(),
-            metadata.map(serde_json::to_string).transpose()?.into(),
-            started_at.into(),
-            finished_at.into(),
-        ],
-    ))
-    .await
-    .map_err(store_error)?;
+    let existing =
+        agent_turn::Entity::find_by_id((turn.agent_id.to_string(), turn.turn_id.to_string()))
+            .one(tx)
+            .await
+            .map_err(store_error)?;
+    let metadata_json = turn.metadata.map(serde_json::to_string).transpose()?;
+    let usage_json = serde_json::to_string(turn.usage)?;
+    if let Some(existing) = existing {
+        let preserved_metadata = existing.metadata_json.clone().or(metadata_json);
+        let preserved_started_at = existing.started_at.or(turn.started_at);
+        let mut active = existing.into_active_model();
+        active.status = Set(turn.status.to_string());
+        active.reason = Set(turn.reason.map(str::to_string));
+        active.usage_json = Set(usage_json);
+        active.metadata_json = Set(preserved_metadata);
+        active.started_at = Set(preserved_started_at);
+        active.finished_at = Set(turn.finished_at);
+        active.update(tx).await.map_err(store_error)?;
+    } else {
+        agent_turn::ActiveModel {
+            agent_id: Set(turn.agent_id.to_string()),
+            turn_id: Set(turn.turn_id.to_string()),
+            session_id: Set(turn.session_id.to_string()),
+            status: Set(turn.status.to_string()),
+            reason: Set(turn.reason.map(str::to_string)),
+            usage_json: Set(usage_json),
+            metadata_json: Set(metadata_json),
+            started_at: Set(turn.started_at),
+            finished_at: Set(turn.finished_at),
+        }
+        .insert(tx)
+        .await
+        .map_err(store_error)?;
+    }
     Ok(())
 }
 
@@ -514,21 +479,8 @@ fn outcome_label(outcome: TurnOutcomeKind) -> &'static str {
     }
 }
 
-fn statement<const N: usize>(sql: &str, values: [sea_orm::Value; N]) -> Statement {
-    Statement::from_sql_and_values(DatabaseBackend::Sqlite, sql, values)
-}
-
-fn text(row: &QueryResult, column: &str) -> Result<String, PureError> {
-    row.try_get("", column).map_err(store_error)
-}
-
-fn integer_u64(row: &QueryResult, column: &str) -> Result<u64, PureError> {
-    let value: i64 = row.try_get("", column).map_err(store_error)?;
+fn u64_from_i64(value: i64) -> Result<u64, PureError> {
     u64::try_from(value).map_err(|error| store_error(error.to_string()))
-}
-
-fn optional_i64(row: &QueryResult, column: &str) -> Result<Option<i64>, PureError> {
-    row.try_get("", column).map_err(store_error)
 }
 
 fn i64_from_u64(value: u64) -> Result<i64, PureError> {
@@ -541,6 +493,10 @@ fn store_error(error: impl std::fmt::Display) -> PureError {
 
 #[cfg(test)]
 mod tests {
+    use pl_protocol::{
+        SessionEventEnvelope, SessionEventKind, SessionEventPosition, SessionMessage,
+        SessionMessageRole, SessionMessageStatus,
+    };
     use pretty_assertions::assert_eq;
 
     use super::*;
@@ -590,13 +546,17 @@ mod tests {
 
         assert_eq!(
             repository
-                .commit(AgentCommit {
+                .commit(SessionHistoryCommit {
                     agent_id: agent_id.clone(),
                     expected_revision: None,
-                    next_state: state,
-                    events: Vec::new(),
-                    trace_events: Vec::new(),
-                    session_projection: None,
+                    next_state: state.clone(),
+                    facts: pl_core::DurableCommitFacts::from_state(
+                        &state,
+                        Vec::new(),
+                        Vec::new(),
+                        None,
+                        None,
+                    ),
                     mutation: pl_core::AgentStateMutation::SnapshotAndQueue,
                 })
                 .await
@@ -611,13 +571,17 @@ mod tests {
         cleared.active_input = None;
         assert_eq!(
             repository
-                .commit(AgentCommit {
+                .commit(SessionHistoryCommit {
                     agent_id: agent_id.clone(),
                     expected_revision: Some(1),
-                    next_state: cleared,
-                    events: Vec::new(),
-                    trace_events: Vec::new(),
-                    session_projection: None,
+                    next_state: cleared.clone(),
+                    facts: pl_core::DurableCommitFacts::from_state(
+                        &cleared,
+                        Vec::new(),
+                        Vec::new(),
+                        None,
+                        None,
+                    ),
                     mutation: pl_core::AgentStateMutation::SnapshotAndQueue,
                 })
                 .await
@@ -630,5 +594,99 @@ mod tests {
                 .active_input,
             None
         );
+    }
+
+    #[tokio::test]
+    async fn restore_replays_history_suffix_when_projection_is_missing() {
+        let store = StudioStore::open_memory().await.unwrap();
+        let repository = StudioAgentRepository::new(store.clone());
+        let agent_id = pl_core::AgentId::new("agent-history-recovery").unwrap();
+        let session_id = pl_core::SessionId::new("session-history-recovery").unwrap();
+        let turn_id = pl_core::TurnId::new("turn-history-recovery").unwrap();
+        let mut state = AgentDurableState {
+            snapshot: pl_core::AgentSnapshot {
+                identity: pl_core::AgentIdentity {
+                    id: agent_id.clone(),
+                    parent_id: None,
+                    role: pl_core::AgentRoleId::new("planner").unwrap(),
+                    depth: 0,
+                },
+                lifecycle: pl_core::AgentLifecycleState::Active,
+                activity: AgentActivityState::Idle,
+                active_turn_id: None,
+                pending_inputs: 0,
+                progress: None,
+                last_turn: None,
+                revision: 1,
+                event_sequence: 0,
+                updated_at: 20,
+            },
+            session: AgentSessionState::empty(session_id.clone()),
+            pending_inputs: VecDeque::new(),
+            active_input: None,
+        };
+        state.session.session_event_sequence = 1;
+        let event = SessionEventEnvelope {
+            event_id: "history-event-1".to_string(),
+            session_id: session_id.to_string(),
+            source_agent_id: Some(agent_id.to_string()),
+            turn_id: Some(turn_id.to_string()),
+            emitted_at: 20,
+            position: SessionEventPosition::Durable { sequence: 1 },
+            kind: SessionEventKind::MessageChanged {
+                message: Box::new(SessionMessage {
+                    message_id: "history-message-1".to_string(),
+                    session_id: session_id.to_string(),
+                    turn_id: turn_id.to_string(),
+                    role: SessionMessageRole::Assistant,
+                    status: SessionMessageStatus::Completed,
+                    created_at: 10,
+                    updated_at: 20,
+                    completed_at: Some(20),
+                    error: None,
+                    metadata: serde_json::json!({}),
+                }),
+            },
+        };
+        assert_eq!(
+            repository
+                .commit(SessionHistoryCommit {
+                    agent_id: agent_id.clone(),
+                    expected_revision: None,
+                    next_state: state.clone(),
+                    facts: pl_core::DurableCommitFacts {
+                        session_id: session_id.clone(),
+                        turn_id: Some(turn_id),
+                        through_sequence: 1,
+                        revision: 1,
+                        items: vec![event.clone()],
+                        turn_transition: None,
+                        context: None,
+                        projection_snapshot: None,
+                        runtime_events: Vec::new(),
+                        trace_events: Vec::new(),
+                    },
+                    mutation: pl_core::AgentStateMutation::SnapshotAndQueue,
+                })
+                .await
+                .unwrap(),
+            AgentCommitOutcome::Applied
+        );
+        repository.barrier().await.unwrap();
+
+        let restored = StudioAgentRepository::new(store)
+            .restore_runtime()
+            .await
+            .unwrap();
+        let projection = restored[0]
+            .session_projection
+            .as_ref()
+            .expect("history suffix should rebuild a missing projection");
+        assert_eq!(projection.snapshot.through_sequence, 1);
+        assert_eq!(
+            projection.snapshot.messages[0].message_id,
+            "history-message-1"
+        );
+        assert_eq!(projection.retained_durable_events, vec![event]);
     }
 }

@@ -1,5 +1,6 @@
 mod events;
 mod lifecycle;
+mod persistence;
 mod plan_confirmation;
 mod policy;
 mod repository;

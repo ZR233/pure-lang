@@ -962,6 +962,19 @@ class DemoStudioApi implements StudioApi {
   }
 
   @override
+  Future<SessionHistoryPage> loadSessionHistoryPage(
+    String sessionId, {
+    int? beforeTurnSequence,
+    int limit = 50,
+  }) async {
+    return const SessionHistoryPage(
+      turns: [],
+      nextBeforeTurnSequence: null,
+      hasMore: false,
+    );
+  }
+
+  @override
   Future<List<String>> listDiscoveredSkills(String projectId) async {
     if (_archivedProjectIds.contains(projectId)) {
       return const [];

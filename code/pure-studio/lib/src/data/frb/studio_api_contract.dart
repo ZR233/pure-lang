@@ -40,6 +40,11 @@ abstract class StudioApi {
     String sessionId, {
     int? afterSequence,
   });
+  Future<SessionHistoryPage> loadSessionHistoryPage(
+    String sessionId, {
+    int? beforeTurnSequence,
+    int limit = 50,
+  });
   Future<SubmitPromptReceipt> submitPrompt(
     String sessionId,
     String prompt,
@@ -437,6 +442,53 @@ class FrbStudioApi implements StudioApi {
       },
     );
     return controller.stream;
+  }
+
+  @override
+  Future<SessionHistoryPage> loadSessionHistoryPage(
+    String sessionId, {
+    int? beforeTurnSequence,
+    int limit = 50,
+  }) async {
+    await _ensureReady();
+    final response = await _bridgeCall(
+      () => frb.loadSessionHistoryPage(
+        request: frb.LoadSessionHistoryPageRequest(
+          sessionId: sessionId,
+          beforeTurnSequence: beforeTurnSequence,
+          limit: limit.clamp(1, 200),
+        ),
+      ),
+    );
+    return SessionHistoryPage(
+      turns: [
+        for (final turn in response.turns)
+          SessionHistoryTurn(
+            turnSequence: turn.turnSequence.toInt(),
+            turnId: turn.turnId,
+            status: turn.status,
+            modelJson: turn.modelJson,
+            errorJson: turn.errorJson,
+            startedAt: _dateFromUnix(turn.startedAt),
+            completedAt: turn.completedAt == null
+                ? null
+                : _dateFromUnix(turn.completedAt!),
+            items: [
+              for (final item in turn.items)
+                SessionHistoryItem(
+                  sequence: item.sequence.toInt(),
+                  itemId: item.itemId,
+                  turnId: item.turnId,
+                  itemKind: item.itemKind,
+                  event: _sessionEventFromFrb(item.payload),
+                  createdAt: _dateFromUnix(item.createdAt),
+                ),
+            ],
+          ),
+      ],
+      nextBeforeTurnSequence: response.nextBeforeTurnSequence?.toInt(),
+      hasMore: response.hasMore,
+    );
   }
 
   @override

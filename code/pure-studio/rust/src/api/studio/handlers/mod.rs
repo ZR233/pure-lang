@@ -1,3 +1,4 @@
+pub mod history;
 pub mod lifecycle;
 pub mod prompt;
 pub mod providers;
@@ -7,6 +8,7 @@ pub mod settings;
 mod snapshot;
 pub mod updater;
 
+pub use history::load_session_history_page;
 pub use lifecycle::{
     archive_project, bootstrap_studio, init_app, initialize_runtime, open_project, select_project,
     shutdown_runtime, start_runtime,

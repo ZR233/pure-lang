@@ -8,7 +8,7 @@ use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
 };
 
-use crate::studio::entities;
+use crate::studio::entity as entities;
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::mappers::attachment_record;
 use crate::studio::paths::default_attachments_dir;

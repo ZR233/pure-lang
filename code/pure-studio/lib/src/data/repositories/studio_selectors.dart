@@ -16,6 +16,8 @@ typedef TimelinePaneView = ({
   List<TimelineRow> rows,
   StudioTurnView? turn,
   bool isLoading,
+  bool hasOlderHistory,
+  bool isLoadingOlderHistory,
 });
 
 @riverpod
@@ -122,10 +124,13 @@ AsyncValue<TimelinePaneView?> agentTimeline(Ref ref, String sessionId) {
         if (workspace == null) {
           return null;
         }
+        final history = state.historyPagingBySession[sessionId];
         return (
           rows: workspace.timelineRows,
           turn: workspace.turn,
           isLoading: workspace.isLoading,
+          hasOlderHistory: history?.hasMore ?? false,
+          isLoadingOlderHistory: history?.isLoading ?? false,
         );
       }),
     ),

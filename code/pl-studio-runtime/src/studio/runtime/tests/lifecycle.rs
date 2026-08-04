@@ -405,7 +405,7 @@ async fn detached_user_input_resolution_queues_one_hidden_explicit_input() {
     let owner = crate::studio::agent_host::root_agent_id(&session.id);
     let row = store
         .database()
-        .query_one(Statement::from_sql_and_values(
+        .query_one_raw(Statement::from_sql_and_values(
             DatabaseBackend::Sqlite,
             "SELECT input_json FROM agent_active_inputs WHERE agent_id = ?",
             [owner.to_string().into()],
@@ -449,7 +449,7 @@ async fn detached_user_input_resolution_queues_one_hidden_explicit_input() {
         .unwrap();
     let active_input_count = store
         .database()
-        .query_one(Statement::from_sql_and_values(
+        .query_one_raw(Statement::from_sql_and_values(
             DatabaseBackend::Sqlite,
             "SELECT COUNT(*) AS count FROM agent_active_inputs WHERE agent_id = ?",
             [owner.to_string().into()],

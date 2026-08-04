@@ -19,10 +19,10 @@ pub use collaboration::AgentCollaborationTools;
 pub use directory::{AgentDirectorySnapshot, AgentDirectorySubscription};
 pub use handle::AgentRuntimeHandle;
 pub use host::{
-    AgentCommit, AgentCommitObserver, AgentCommitOutcome, AgentCommittedEvent,
-    AgentLifecycleAdapter, AgentRuntimeHost, AgentStateMutation, AgentStateRepository,
-    AgentTurnFactory, CloseLifecycleRequest, RestoredAgentRuntime, RestoredSessionProjection,
-    SessionProjectionCommit, SpawnLifecycleRequest,
+    AgentCommitObserver, AgentCommitOutcome, AgentCommittedEvent, AgentLifecycleAdapter,
+    AgentRuntimeHost, AgentStateMutation, AgentStateRepository, AgentTurnFactory,
+    CloseLifecycleRequest, DurableCommitFacts, RestoredAgentRuntime, RestoredSessionProjection,
+    SessionContextMutation, SessionHistoryCommit, SessionProjectionCommit, SpawnLifecycleRequest,
 };
 pub use id::{AgentId, SessionId, TurnId};
 pub use policy::{

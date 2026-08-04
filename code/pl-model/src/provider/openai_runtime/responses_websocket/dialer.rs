@@ -23,7 +23,7 @@ pub(super) async fn connect(
         .await
         .map_err(WebSocketError::Io)?;
     if let Ok(remote_address) = stream.peer_addr() {
-        tracing::debug!(
+        tracing::trace!(
             address_family = address_family(remote_address),
             %remote_address,
             "Responses WebSocket TCP connection selected"
@@ -85,7 +85,7 @@ where
     }
 
     let mut attempts = FuturesUnordered::new();
-    tracing::debug!(
+    tracing::trace!(
         address_family = address_family(first_address),
         remote_address = %first_address,
         "attempting Responses WebSocket TCP connection"
@@ -99,10 +99,10 @@ where
             match attempts.next().await {
                 Some((_, Ok(stream))) => return Ok(stream),
                 Some((address, Err(error))) => {
-                    tracing::debug!(
+                    tracing::trace!(
                         address_family = address_family(address),
                         remote_address = %address,
-                        %error,
+                        error_kind = ?error.kind(),
                         "Responses WebSocket TCP connection failed"
                     );
                     if attempts.is_empty() {
@@ -124,15 +124,15 @@ where
                 match result {
                     Some((_, Ok(stream))) => return Ok(stream),
                     Some((address, Err(error))) => {
-                        tracing::debug!(
+                        tracing::trace!(
                             address_family = address_family(address),
                             remote_address = %address,
-                            %error,
+                            error_kind = ?error.kind(),
                             "Responses WebSocket TCP connection failed"
                         );
                         last_error = Some(error);
                         let address = take_next_address(&mut addresses)?;
-                        tracing::debug!(
+                        tracing::trace!(
                             address_family = address_family(address),
                             remote_address = %address,
                             "attempting Responses WebSocket TCP connection"
@@ -142,7 +142,7 @@ where
                     }
                     None => {
                         let address = take_next_address(&mut addresses)?;
-                        tracing::debug!(
+                        tracing::trace!(
                             address_family = address_family(address),
                             remote_address = %address,
                             "attempting Responses WebSocket TCP connection"
@@ -154,7 +154,7 @@ where
             }
             _ = sleep_until(next_attempt_at) => {
                 let address = take_next_address(&mut addresses)?;
-                tracing::debug!(
+                tracing::trace!(
                     address_family = address_family(address),
                     remote_address = %address,
                     "attempting alternate Responses WebSocket TCP connection"

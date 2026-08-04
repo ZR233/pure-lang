@@ -13,6 +13,58 @@ sealed class SessionStreamFrame {
   }
 }
 
+class SessionHistoryPage {
+  const SessionHistoryPage({
+    required this.turns,
+    required this.nextBeforeTurnSequence,
+    required this.hasMore,
+  });
+
+  final List<SessionHistoryTurn> turns;
+  final int? nextBeforeTurnSequence;
+  final bool hasMore;
+}
+
+class SessionHistoryTurn {
+  const SessionHistoryTurn({
+    required this.turnSequence,
+    required this.turnId,
+    required this.status,
+    required this.modelJson,
+    required this.errorJson,
+    required this.startedAt,
+    required this.completedAt,
+    required this.items,
+  });
+
+  final int turnSequence;
+  final String turnId;
+  final String status;
+  final String? modelJson;
+  final String? errorJson;
+  final DateTime startedAt;
+  final DateTime? completedAt;
+  final List<SessionHistoryItem> items;
+}
+
+class SessionHistoryItem {
+  const SessionHistoryItem({
+    required this.sequence,
+    required this.itemId,
+    required this.turnId,
+    required this.itemKind,
+    required this.event,
+    required this.createdAt,
+  });
+
+  final int sequence;
+  final String itemId;
+  final String turnId;
+  final String itemKind;
+  final StudioBridgeEvent event;
+  final DateTime createdAt;
+}
+
 final class SessionSnapshotFrame extends SessionStreamFrame {
   const SessionSnapshotFrame({required this.snapshot});
 

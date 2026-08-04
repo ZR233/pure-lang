@@ -138,13 +138,17 @@ impl OpenAiProvider {
             } else {
                 "HTTP"
             };
+            let (provider_code, http_status) =
+                error.transient_model_metadata().unwrap_or((None, None));
             tracing::warn!(
                 provider = %self.info.name,
                 transport,
                 retry_number,
                 max_retries,
                 delay_ms = delay.as_millis(),
-                error = %error,
+                provider_code,
+                http_status,
+                error_bytes = error.to_string().len(),
                 "模型请求遇到瞬态 provider 错误，将在同一连接模式下重放完整请求"
             );
             tokio::time::sleep(delay).await;

@@ -128,10 +128,12 @@ FRB 只公开 typed DTO 和事件：`checkStudioUpdate(currentVersion)`、
 
 ## 5. 生产诊断与后台进程
 
-Studio 在 LocalAppData 的 `Pure Studio/logs` 写入滚动 Rust 与 Dart 错误日志，panic marker
-和 native dump 写入 `Pure Studio/crashes`。启动日志至少记录应用版本与 session protocol
-版本；session/runtime 日志记录 root/agent 身份、最后 cursor、运行阶段、snapshot
-messages/parts/journal 规模和最近 runtime 操作。Windows runner 为当前 exe 配置 WER
+Studio 在 LocalAppData 的 `Pure Studio/logs` 写入按日滚动 Rust 与 Dart error 日志，panic marker
+和 native dump 写入 `Pure Studio/crashes`。默认 Rust filter 为 `warn`，CLI `--log-level` 优先于
+`RUST_LOG`；启动、每小时与正常关闭清理最后修改时间超过 48 小时的自有日志和 crash 文件。
+完整 prompt、context 和工具结果不进入 tracing；日志只记录 root/agent/session 身份、cursor、
+运行阶段、条目规模、耗时和 outcome。panic 与 error 使用同步兜底持久化，正常关闭显式 flush。
+详细合同见 `19-studio-storage-and-diagnostics.md`。Windows runner 为当前 exe 配置 WER
 LocalDumps，并保留 in-process unhandled exception minidump 兜底；`0xc0000409/BEX64`
 在没有匹配 dump/PDB 时只能报告现象，不能宣称唯一根因。
 

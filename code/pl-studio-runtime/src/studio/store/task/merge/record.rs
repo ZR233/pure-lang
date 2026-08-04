@@ -3,7 +3,7 @@ use anyhow::{Context, Result};
 use sea_orm::{ActiveModelTrait, ActiveValue::Set};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 
-use crate::studio::entities;
+use crate::studio::entity as entities;
 #[cfg(test)]
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;

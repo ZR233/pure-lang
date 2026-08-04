@@ -3,10 +3,10 @@ use std::collections::BTreeSet;
 use super::super::host::{AgentCommitObserver, AgentStateRepository, SessionProjectionCommit};
 use super::super::state::{AgentRuntimeError, unix_timestamp};
 use super::super::{
-    AgentActivityState, AgentCommit, AgentCommitOutcome, AgentCommittedEvent, AgentLifecycleState,
+    AgentActivityState, AgentCommitOutcome, AgentCommittedEvent, AgentLifecycleState,
     AgentProgressCheckpoint, AgentProgressStage, AgentRuntimeEventKind, AgentRuntimeHost,
-    AgentRuntimeResult, AgentStateMutation, AgentTurnCheckpoint, MailboxDeliveryState, SessionId,
-    TurnId,
+    AgentRuntimeResult, AgentStateMutation, AgentTurnCheckpoint, DurableCommitFacts,
+    MailboxDeliveryState, SessionContextMutation, SessionHistoryCommit, SessionId, TurnId,
 };
 use super::AgentLoop;
 
@@ -85,16 +85,23 @@ where
             });
         }
         next.session.session = checkpoint.session;
+        let context = SessionContextMutation::Replace {
+            items: next.session.session.items().to_vec(),
+        };
         let result = self
             .host
             .repository()
-            .commit(AgentCommit {
+            .commit(SessionHistoryCommit {
                 agent_id: next.snapshot.identity.id.clone(),
                 expected_revision: Some(expected_revision),
                 next_state: next.clone(),
-                events: Vec::new(),
-                trace_events: Vec::new(),
-                session_projection: None,
+                facts: DurableCommitFacts::from_state(
+                    &next,
+                    Vec::new(),
+                    Vec::new(),
+                    None,
+                    Some(context),
+                ),
                 mutation: AgentStateMutation::ReplaceSession {
                     session_id: checkpoint.session_id.clone(),
                 },
@@ -103,7 +110,7 @@ where
             .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
         match result {
             AgentCommitOutcome::Applied => {
-                tracing::debug!(
+                tracing::trace!(
                     agent_id = %next.snapshot.identity.id,
                     turn_id = %checkpoint.turn_id,
                     sequence = checkpoint.sequence,
@@ -188,13 +195,17 @@ where
         let outcome = self
             .host
             .repository()
-            .commit(AgentCommit {
+            .commit(SessionHistoryCommit {
                 agent_id: next.snapshot.identity.id.clone(),
                 expected_revision: Some(expected_revision),
                 next_state: next.clone(),
-                events: Vec::new(),
-                trace_events: Vec::new(),
-                session_projection: Some(projection),
+                facts: DurableCommitFacts::from_state(
+                    &next,
+                    Vec::new(),
+                    Vec::new(),
+                    Some(projection),
+                    None,
+                ),
                 mutation: AgentStateMutation::AppendSessionEvents {
                     session_id: session_id.clone(),
                 },

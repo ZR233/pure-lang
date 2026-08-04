@@ -2,78 +2,180 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use sea_orm::sea_query::OnConflict;
+use sea_orm::sqlx::sqlite::{SqliteJournalMode, SqliteSynchronous};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectOptions, ConnectionTrait, Database,
     DatabaseBackend, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Statement,
     TransactionTrait,
 };
+use tokio::io::AsyncReadExt;
 
-use crate::studio::entities;
+use crate::studio::entity as entities;
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::mappers::project_record;
-use crate::studio::paths::{default_db_path, project_name, sqlite_url};
+use crate::studio::paths::{
+    default_history_db_path, default_state_db_path, legacy_db_path, project_name, sqlite_url,
+};
 use crate::studio::records::ProjectRecord;
 use crate::studio::store::{StudioDatabaseError, StudioStore};
 use crate::studio::store_support::{
-    STUDIO_DATABASE_SCHEMA_VERSION, configure_sqlite, initialize_schema,
+    HISTORY_DATABASE_KIND, HISTORY_DATABASE_SCHEMA_VERSION, STATE_DATABASE_KIND,
+    STATE_DATABASE_SCHEMA_VERSION, initialize_history_schema, initialize_state_schema,
 };
 
 impl StudioStore {
     pub async fn default_app() -> Result<Self> {
-        let db_path = default_db_path()?;
-        Self::open(db_path).await
+        Self::open_pair(
+            default_state_db_path()?,
+            default_history_db_path()?,
+            Some(legacy_db_path()?),
+        )
+        .await
     }
 
     pub async fn open(path: impl AsRef<Path>) -> Result<Self> {
-        let path = path.as_ref();
-        if let Some(parent) = path.parent() {
-            tokio::fs::create_dir_all(parent).await?;
-        }
-        let existed = tokio::fs::try_exists(path).await?;
-        let url = sqlite_url(path);
-        let mut db = connect_sqlite(&url).await?;
-        configure_sqlite(&db).await?;
-
-        let requires_initialization = if existed {
-            let version = database_schema_version(&db).await?;
-            if version == STUDIO_DATABASE_SCHEMA_VERSION {
-                false
-            } else if version > STUDIO_DATABASE_SCHEMA_VERSION {
-                db.close().await?;
-                return Err(StudioDatabaseError::UnsupportedSchema {
-                    found: version,
-                    supported: STUDIO_DATABASE_SCHEMA_VERSION,
-                }
-                .into());
-            } else if version == 0 && !database_has_user_tables(&db).await? {
-                true
-            } else {
-                checkpoint_sqlite(&db).await?;
-                db.close().await?;
-                let backup = archive_database(path, version).await?;
-                tracing::warn!(
-                    backup = %backup.display(),
-                    version,
-                    "检测到旧版 Studio 数据库，已完整归档并重建 schema v10"
-                );
-                db = connect_sqlite(&url).await?;
-                configure_sqlite(&db).await?;
-                true
-            }
-        } else {
-            true
-        };
-        if requires_initialization {
-            initialize_schema(&db).await?;
-        }
-        Ok(Self { db })
+        let state_path = path.as_ref().to_path_buf();
+        let history_path = derived_history_path(&state_path);
+        Self::open_pair(&state_path, history_path, Some(state_path.clone())).await
     }
 
     pub async fn open_memory() -> Result<Self> {
-        let db = connect_sqlite("sqlite::memory:").await?;
-        configure_sqlite(&db).await?;
-        initialize_schema(&db).await?;
-        Ok(Self { db })
+        let db = connect_sqlite(
+            "sqlite::memory:",
+            SqliteSynchronous::Normal,
+            /* max_connections */ 1,
+        )
+        .await?;
+        let history_db = connect_sqlite(
+            "sqlite::memory:",
+            SqliteSynchronous::Full,
+            /* max_connections */ 1,
+        )
+        .await?;
+        let history_writer_db = history_db.clone();
+        let generation = new_id("storage-generation");
+        let created_at = unix_seconds();
+        initialize_state_schema(&db, &generation, created_at).await?;
+        initialize_history_schema(&history_db, &generation, created_at).await?;
+        let store = Self {
+            db,
+            history_db,
+            history_writer_db,
+        };
+        store.spawn_history_gc();
+        Ok(store)
+    }
+
+    async fn open_pair(
+        state_path: impl AsRef<Path>,
+        history_path: impl AsRef<Path>,
+        legacy_path: Option<PathBuf>,
+    ) -> Result<Self> {
+        let state_path = state_path.as_ref();
+        let history_path = history_path.as_ref();
+        if let Some(parent) = state_path.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+        if let Some(parent) = history_path.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+
+        let mut state_exists = tokio::fs::try_exists(state_path).await?;
+        let history_exists = tokio::fs::try_exists(history_path).await?;
+        if let Some(legacy_path) = legacy_path.as_deref() {
+            let legacy_exists = tokio::fs::try_exists(legacy_path).await?;
+            let legacy_is_state = legacy_path == state_path;
+            if legacy_exists
+                && ((!state_exists && !history_exists) || (legacy_is_state && !history_exists))
+            {
+                let version = read_sqlite_user_version(legacy_path).await?;
+                if version > 10 {
+                    if legacy_is_state && version > STATE_DATABASE_SCHEMA_VERSION {
+                        return Err(StudioDatabaseError::UnsupportedSchema {
+                            found: version,
+                            supported: STATE_DATABASE_SCHEMA_VERSION,
+                        }
+                        .into());
+                    }
+                    if !legacy_is_state {
+                        return Err(StudioDatabaseError::UnsupportedSchema {
+                            found: version,
+                            supported: 10,
+                        }
+                        .into());
+                    }
+                } else {
+                    let archive = archive_legacy_database(legacy_path, version).await?;
+                    tracing::info!(
+                        archive_name = archive
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .unwrap_or("storage-v10-archive"),
+                        version,
+                        "archived legacy Studio database before creating the dual-store generation"
+                    );
+                    state_exists = tokio::fs::try_exists(state_path).await?;
+                }
+            }
+        }
+
+        let history_exists = tokio::fs::try_exists(history_path).await?;
+        if state_exists != history_exists {
+            return Err(StudioDatabaseError::IncompleteDatabasePair {
+                state_exists,
+                history_exists,
+            }
+            .into());
+        }
+
+        let db = connect_sqlite(
+            &sqlite_url(state_path),
+            SqliteSynchronous::Normal,
+            /* max_connections */ 4,
+        )
+        .await?;
+        let history_db = connect_sqlite(
+            &sqlite_url(history_path),
+            SqliteSynchronous::Full,
+            /* max_connections */ 3,
+        )
+        .await?;
+        let history_writer_db = connect_sqlite(
+            &sqlite_url(history_path),
+            SqliteSynchronous::Full,
+            /* max_connections */ 1,
+        )
+        .await?;
+        if !state_exists {
+            let generation = new_id("storage-generation");
+            let created_at = unix_seconds();
+            initialize_state_schema(&db, &generation, created_at).await?;
+            initialize_history_schema(&history_writer_db, &generation, created_at).await?;
+        } else {
+            let state_generation =
+                validate_database(&db, STATE_DATABASE_KIND, STATE_DATABASE_SCHEMA_VERSION).await?;
+            let history_generation = validate_database(
+                &history_db,
+                HISTORY_DATABASE_KIND,
+                HISTORY_DATABASE_SCHEMA_VERSION,
+            )
+            .await?;
+            if state_generation != history_generation {
+                return Err(StudioDatabaseError::GenerationMismatch {
+                    state_generation,
+                    history_generation,
+                }
+                .into());
+            }
+        }
+        let store = Self {
+            db,
+            history_db,
+            history_writer_db,
+        };
+        store.spawn_history_gc();
+        Ok(store)
     }
 
     pub async fn upsert_project(&self, path: impl AsRef<Path>) -> Result<ProjectRecord> {
@@ -147,7 +249,11 @@ impl StudioStore {
     }
 
     pub async fn archive_project(&self, project_id: &str) -> Result<Option<ProjectRecord>> {
-        use entities::{attachment, interaction, project, session, tool_approval};
+        use entities::{
+            agent_active_input, agent_pending_input, agent_runtime_session, agent_runtime_state,
+            agent_turn, attachment, history_gc_job, interaction, project, session,
+            session_view_snapshot,
+        };
         let Some(project) = project::Entity::find_by_id(project_id.to_string())
             .one(&self.db)
             .await?
@@ -165,49 +271,58 @@ impl StudioStore {
 
         for session_id in &session_ids {
             let session_id = session_id.to_string();
+            history_gc_job::Entity::insert(history_gc_job::ActiveModel {
+                id: Set(new_id("history-gc")),
+                session_id: Set(session_id.clone()),
+                requested_at: Set(unix_seconds()),
+            })
+            .on_conflict(
+                OnConflict::column(history_gc_job::Column::SessionId)
+                    .do_nothing()
+                    .to_owned(),
+            )
+            .exec(&tx)
+            .await?;
             attachment::Entity::delete_many()
                 .filter(attachment::Column::SessionId.eq(session_id.clone()))
-                .exec(&tx)
-                .await?;
-            tool_approval::Entity::delete_many()
-                .filter(tool_approval::Column::SessionId.eq(session_id.clone()))
                 .exec(&tx)
                 .await?;
             interaction::Entity::delete_many()
                 .filter(interaction::Column::SessionId.eq(session_id.clone()))
                 .exec(&tx)
                 .await?;
-
-            for sql in [
-                "DELETE FROM agent_active_inputs
-                 WHERE agent_id IN (
-                     SELECT agent_id FROM agent_runtime_sessions WHERE session_id = ?
-                 )",
-                "DELETE FROM agent_pending_inputs
-                 WHERE agent_id IN (
-                     SELECT agent_id FROM agent_runtime_sessions WHERE session_id = ?
-                 )",
-                "DELETE FROM agent_framework_events
-                 WHERE agent_id IN (
-                     SELECT agent_id FROM agent_runtime_sessions WHERE session_id = ?
-                 )",
-                "DELETE FROM agent_runtime_states
-                 WHERE agent_id IN (
-                     SELECT agent_id FROM agent_runtime_sessions WHERE session_id = ?
-                 )",
-                "DELETE FROM agent_turns WHERE session_id = ?",
-                "DELETE FROM agent_runtime_traces WHERE session_id = ?",
-                "DELETE FROM session_event_journal WHERE session_id = ?",
-                "DELETE FROM session_view_snapshots WHERE session_id = ?",
-                "DELETE FROM agent_runtime_sessions WHERE session_id = ?",
-            ] {
-                tx.execute(Statement::from_sql_and_values(
-                    DatabaseBackend::Sqlite,
-                    sql,
-                    [session_id.clone().into()],
-                ))
-                .await?;
+            let agent_ids = agent_runtime_session::Entity::find()
+                .filter(agent_runtime_session::Column::SessionId.eq(session_id.clone()))
+                .all(&tx)
+                .await?
+                .into_iter()
+                .map(|claim| claim.agent_id)
+                .collect::<Vec<_>>();
+            if !agent_ids.is_empty() {
+                agent_active_input::Entity::delete_many()
+                    .filter(agent_active_input::Column::AgentId.is_in(agent_ids.clone()))
+                    .exec(&tx)
+                    .await?;
+                agent_pending_input::Entity::delete_many()
+                    .filter(agent_pending_input::Column::AgentId.is_in(agent_ids.clone()))
+                    .exec(&tx)
+                    .await?;
+                agent_runtime_state::Entity::delete_many()
+                    .filter(agent_runtime_state::Column::AgentId.is_in(agent_ids))
+                    .exec(&tx)
+                    .await?;
             }
+            agent_turn::Entity::delete_many()
+                .filter(agent_turn::Column::SessionId.eq(session_id.clone()))
+                .exec(&tx)
+                .await?;
+            session_view_snapshot::Entity::delete_by_id(session_id.clone())
+                .exec(&tx)
+                .await?;
+            agent_runtime_session::Entity::delete_many()
+                .filter(agent_runtime_session::Column::SessionId.eq(session_id))
+                .exec(&tx)
+                .await?;
         }
         session::Entity::delete_many()
             .filter(session::Column::ProjectId.eq(project_id.to_string()))
@@ -219,6 +334,7 @@ impl StudioStore {
         active.closed = Set(1);
         let model = active.update(&tx).await?;
         tx.commit().await?;
+        self.spawn_history_gc();
         Ok(Some(project_record(model)))
     }
 
@@ -267,20 +383,51 @@ impl StudioStore {
     }
 }
 
-async fn connect_sqlite(url: &str) -> Result<DatabaseConnection> {
+async fn connect_sqlite(
+    url: &str,
+    synchronous: SqliteSynchronous,
+    max_connections: u32,
+) -> Result<DatabaseConnection> {
     let mut options = ConnectOptions::new(url.to_string());
     options
-        .max_connections(1)
+        .max_connections(max_connections)
         .min_connections(1)
         .connect_timeout(Duration::from_secs(8))
         .acquire_timeout(Duration::from_secs(8))
+        .map_sqlx_sqlite_opts(move |options| {
+            options
+                .journal_mode(SqliteJournalMode::Wal)
+                .synchronous(synchronous)
+                .busy_timeout(Duration::from_secs(5))
+                .foreign_keys(true)
+        })
         .sqlx_logging(false);
     Ok(Database::connect(options).await?)
 }
 
+async fn read_sqlite_user_version(path: &Path) -> Result<i64> {
+    const SQLITE_HEADER_LEN: usize = 64;
+    const SQLITE_MAGIC: &[u8; 16] = b"SQLite format 3\0";
+
+    let mut file = tokio::fs::File::open(path).await?;
+    let mut header = [0_u8; SQLITE_HEADER_LEN];
+    file.read_exact(&mut header)
+        .await
+        .with_context(|| format!("无法读取 Studio SQLite header：{}", path.display()))?;
+    if &header[..SQLITE_MAGIC.len()] != SQLITE_MAGIC {
+        anyhow::bail!(
+            "Studio 数据库 header 损坏，已保留原文件：{}",
+            path.display()
+        );
+    }
+    Ok(i64::from(u32::from_be_bytes([
+        header[60], header[61], header[62], header[63],
+    ])))
+}
+
 async fn database_schema_version(db: &DatabaseConnection) -> Result<i64> {
     let row = db
-        .query_one(Statement::from_string(
+        .query_one_raw(Statement::from_string(
             DatabaseBackend::Sqlite,
             "PRAGMA user_version".to_string(),
         ))
@@ -289,41 +436,51 @@ async fn database_schema_version(db: &DatabaseConnection) -> Result<i64> {
     Ok(row.try_get("", "user_version")?)
 }
 
-async fn database_has_user_tables(db: &DatabaseConnection) -> Result<bool> {
-    let row = db
-        .query_one(Statement::from_string(
-            DatabaseBackend::Sqlite,
-            "SELECT EXISTS(
-                 SELECT 1
-                 FROM sqlite_schema
-                 WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
-             ) AS has_user_tables"
-                .to_string(),
-        ))
+async fn validate_database(
+    db: &DatabaseConnection,
+    expected_kind: &str,
+    supported_version: i64,
+) -> Result<String> {
+    let version = database_schema_version(db).await?;
+    if version != supported_version {
+        return Err(StudioDatabaseError::UnsupportedSchema {
+            found: version,
+            supported: supported_version,
+        }
+        .into());
+    }
+    let metadata = entities::storage_metadata::Entity::find_by_id("primary".to_string())
+        .one(db)
         .await?
-        .ok_or_else(|| anyhow::anyhow!("SQLite 未返回用户表检查结果"))?;
-    Ok(row.try_get::<i64>("", "has_user_tables")? != 0)
+        .ok_or(StudioDatabaseError::MissingStorageMetadata)?;
+    if metadata.database_kind != expected_kind || metadata.schema_version != supported_version {
+        return Err(StudioDatabaseError::StorageMetadataMismatch {
+            expected_kind: expected_kind.to_string(),
+            found_kind: metadata.database_kind,
+            expected_version: supported_version,
+            found_version: metadata.schema_version,
+        }
+        .into());
+    }
+    Ok(metadata.storage_generation_id)
 }
 
-async fn checkpoint_sqlite(db: &DatabaseConnection) -> Result<()> {
-    db.execute(Statement::from_string(
-        DatabaseBackend::Sqlite,
-        "PRAGMA wal_checkpoint(TRUNCATE)".to_string(),
-    ))
-    .await?;
-    Ok(())
-}
-
-async fn archive_database(path: &Path, version: i64) -> Result<PathBuf> {
-    let backup = next_legacy_backup_path(path, version).await?;
-    let mut files = vec![(path.to_path_buf(), backup.clone())];
+async fn archive_legacy_database(path: &Path, version: i64) -> Result<PathBuf> {
+    let archive_dir = next_legacy_archive_dir(path, version).await?;
+    tokio::fs::create_dir_all(&archive_dir).await?;
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| anyhow::anyhow!("legacy Studio database path has no file name"))?;
+    let mut files = vec![(path.to_path_buf(), archive_dir.join(file_name))];
     for suffix in ["-wal", "-shm"] {
         let source = PathBuf::from(format!("{}{suffix}", path.display()));
         if tokio::fs::try_exists(&source).await? {
-            files.push((
-                source,
-                PathBuf::from(format!("{}{suffix}", backup.display())),
-            ));
+            let destination = archive_dir.join(
+                source
+                    .file_name()
+                    .ok_or_else(|| anyhow::anyhow!("legacy sidecar path has no file name"))?,
+            );
+            files.push((source, destination));
         }
     }
     if files.iter().any(|(_, destination)| destination.exists()) {
@@ -354,23 +511,35 @@ async fn archive_database(path: &Path, version: i64) -> Result<PathBuf> {
         }
         moved.push((source, destination));
     }
-    Ok(backup)
+    Ok(archive_dir)
 }
 
-async fn next_legacy_backup_path(path: &Path, version: i64) -> Result<PathBuf> {
-    let base = PathBuf::from(format!("{}.legacy-v{version}.bak", path.display()));
+async fn next_legacy_archive_dir(path: &Path, version: i64) -> Result<PathBuf> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("legacy Studio database path has no parent"))?;
+    let base = parent
+        .join("archive")
+        .join(format!("storage-v{version}-{}", unix_seconds()));
     if !tokio::fs::try_exists(&base).await? {
         return Ok(base);
     }
 
     for sequence in 1_u32.. {
-        let candidate = PathBuf::from(format!(
-            "{}.legacy-v{version}.{sequence}.bak",
-            path.display()
-        ));
+        let candidate = parent
+            .join("archive")
+            .join(format!("storage-v{version}-{}-{sequence}", unix_seconds()));
         if !tokio::fs::try_exists(&candidate).await? {
             return Ok(candidate);
         }
     }
     unreachable!("u32 backup sequence space must not be exhausted")
+}
+
+fn derived_history_path(state_path: &Path) -> PathBuf {
+    let stem = state_path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("studio_state");
+    state_path.with_file_name(format!("{stem}.history.sqlite"))
 }

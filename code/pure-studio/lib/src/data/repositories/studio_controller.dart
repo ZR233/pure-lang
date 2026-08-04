@@ -4,7 +4,6 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../domain/models/studio_models.dart';
 import '../frb/studio_api.dart';
-import 'studio_action_service.dart';
 import 'studio_api_provider.dart';
 import 'studio_state_reducer.dart';
 import 'studio_stream_coordinators.dart';
@@ -15,7 +14,6 @@ Duration? _disableStudioRetry(int retryCount, Object error) => null;
 
 @Riverpod(keepAlive: true, retry: _disableStudioRetry)
 class StudioController extends _$StudioController {
-  late StudioActionService _actions;
   late ProductStreamCoordinator _productCoordinator;
   late SessionStreamCoordinator _sessionCoordinator;
   late PartDeltaBatcher _partDeltaBatcher;
@@ -24,7 +22,6 @@ class StudioController extends _$StudioController {
 
   @override
   Future<StudioState> build() async {
-    _actions = StudioActionService(_api);
     _productCoordinator = ProductStreamCoordinator(_api, _handleEvent);
     _sessionCoordinator = SessionStreamCoordinator(
       _api,
@@ -37,18 +34,28 @@ class StudioController extends _$StudioController {
       unawaited(_productCoordinator.dispose());
       unawaited(_sessionCoordinator.dispose());
     });
-    final catalog = await _actions.loadProviderCatalog();
-    final bootstrapped = _attachProviderCatalog(
-      await _actions.bootstrap(),
-      catalog,
-    );
+    final catalog = await _api.loadProviderCatalog();
+    var bootstrapped = _attachProviderCatalog(await _api.bootstrap(), catalog);
     final sessionId = bootstrapped.selectedSessionId;
+    if (sessionId != null) {
+      final page = await _api.loadSessionHistoryPage(sessionId);
+      bootstrapped = _withHistoryPaging(
+        mergeSessionHistoryPage(bootstrapped, sessionId, page),
+        sessionId,
+        SessionHistoryPagingState(
+          nextBeforeTurnSequence: page.nextBeforeTurnSequence,
+          hasMore: page.hasMore,
+          isLoading: false,
+          isLoaded: true,
+        ),
+      );
+    }
     await _subscribe(sessionId, forceSnapshot: true);
     return bootstrapped;
   }
 
   Future<void> openProject(String path) async {
-    final next = await _actions.openProject(path);
+    final next = await _api.openProject(path);
     await _adoptState(next);
   }
 
@@ -59,7 +66,7 @@ class StudioController extends _$StudioController {
         current.recoveryIssueForProject(projectId) != null) {
       return;
     }
-    final next = await _actions.selectProject(projectId);
+    final next = await _api.selectProject(projectId);
     await _adoptState(next);
   }
 
@@ -71,7 +78,7 @@ class StudioController extends _$StudioController {
     if (current.isBusy && current.selectedProjectId == projectId) {
       return;
     }
-    final next = await _actions.archiveProject(
+    final next = await _api.archiveProject(
       projectId,
       selectedProjectId: current.selectedProjectId,
     );
@@ -79,7 +86,7 @@ class StudioController extends _$StudioController {
   }
 
   Future<RecoveryCleanupPreview> previewProjectCleanup(String projectId) {
-    return _actions.previewProjectCleanup(projectId);
+    return _api.previewProjectCleanup(projectId);
   }
 
   Future<void> cleanupProject(String projectId, String expectedRevision) async {
@@ -87,7 +94,7 @@ class StudioController extends _$StudioController {
     if (current == null) {
       return;
     }
-    final next = await _actions.cleanupProject(
+    final next = await _api.cleanupProject(
       projectId,
       expectedRevision,
       selectedProjectId: current.selectedProjectId,
@@ -101,7 +108,7 @@ class StudioController extends _$StudioController {
     if (projectId == null) {
       return;
     }
-    final next = await _actions.createSession(projectId);
+    final next = await _api.createSession(projectId);
     await _adoptState(next);
   }
 
@@ -111,7 +118,7 @@ class StudioController extends _$StudioController {
         (current.isBusy && current.selectedRootSession?.id == sessionId)) {
       return;
     }
-    final next = await _actions.archiveSession(
+    final next = await _api.archiveSession(
       sessionId,
       selectedSessionId: current.selectedSessionId,
     );
@@ -151,6 +158,7 @@ class StudioController extends _$StudioController {
         workspaceSyncBySession: syncStates,
       ),
     );
+    await loadOlderHistory(sessionId);
     await _subscribe(sessionId, forceSnapshot: true);
   }
 
@@ -181,7 +189,86 @@ class StudioController extends _$StudioController {
         workspaceSyncBySession: syncStates,
       ),
     );
+    await loadOlderHistory(target.id);
     await _subscribe(target.id, forceSnapshot: true);
+  }
+
+  Future<void> loadOlderHistory(String sessionId) async {
+    final current = state.value;
+    if (current == null ||
+        !current.sessions.any((session) => session.id == sessionId)) {
+      return;
+    }
+    final paging =
+        current.historyPagingBySession[sessionId] ??
+        const SessionHistoryPagingState.initial();
+    if (paging.isLoading || (paging.isLoaded && !paging.hasMore)) {
+      return;
+    }
+    final requestCursor = paging.isLoaded
+        ? paging.nextBeforeTurnSequence
+        : null;
+    state = AsyncData(
+      _withHistoryPaging(
+        current,
+        sessionId,
+        SessionHistoryPagingState(
+          nextBeforeTurnSequence: paging.nextBeforeTurnSequence,
+          hasMore: paging.hasMore,
+          isLoading: true,
+          isLoaded: paging.isLoaded,
+        ),
+      ),
+    );
+    try {
+      final page = await _api.loadSessionHistoryPage(
+        sessionId,
+        beforeTurnSequence: requestCursor,
+      );
+      if (!ref.mounted) {
+        return;
+      }
+      final latest = state.value;
+      if (latest == null) {
+        return;
+      }
+      state = AsyncData(
+        _withHistoryPaging(
+          mergeSessionHistoryPage(latest, sessionId, page),
+          sessionId,
+          SessionHistoryPagingState(
+            nextBeforeTurnSequence: page.nextBeforeTurnSequence,
+            hasMore: page.hasMore,
+            isLoading: false,
+            isLoaded: true,
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!ref.mounted) {
+        return;
+      }
+      final latest = state.value;
+      if (latest == null) {
+        return;
+      }
+      final active =
+          latest.historyPagingBySession[sessionId] ??
+          const SessionHistoryPagingState.initial();
+      state = AsyncData(
+        _withHistoryPaging(
+          latest,
+          sessionId,
+          SessionHistoryPagingState(
+            nextBeforeTurnSequence: active.nextBeforeTurnSequence,
+            hasMore: active.hasMore,
+            isLoading: false,
+            isLoaded: active.isLoaded,
+            errorMessage: error.toString(),
+          ),
+        ),
+      );
+    }
   }
 
   void updateComposer(String sessionId, String value) {
@@ -214,7 +301,7 @@ class StudioController extends _$StudioController {
       current,
       sessionId,
       submitting,
-      () => _actions.submitPrompt(sessionId, prompt),
+      () => _api.submitPrompt(sessionId, prompt, const []),
     );
   }
 
@@ -234,7 +321,7 @@ class StudioController extends _$StudioController {
       current,
       sessionId,
       submitting,
-      () => _actions.resumeTask(sessionId),
+      () => _api.resumeTask(sessionId),
     );
   }
 
@@ -301,7 +388,7 @@ class StudioController extends _$StudioController {
     if (current == null || current.selectedAgentSessionId != sessionId) {
       return;
     }
-    await _actions.stopPrompt(sessionId);
+    await _api.stopPrompt(sessionId);
   }
 
   Future<void> setPermissionMode(PermissionMode mode) async {
@@ -309,7 +396,7 @@ class StudioController extends _$StudioController {
     if (current == null) {
       return;
     }
-    final next = await _actions.saveRuntimePermissionMode(mode);
+    final next = await _api.saveRuntimePermissionMode(mode);
     final latest = state.value;
     if (latest != null) {
       state = AsyncData(mergeStudioConfigState(latest, next));
@@ -330,7 +417,7 @@ class StudioController extends _$StudioController {
             mode) {
       return;
     }
-    final updated = await _actions.setSessionMode(sessionId, mode);
+    final updated = await _api.setSessionMode(sessionId, mode);
     final latest = state.value;
     if (latest == null) {
       return;
@@ -364,7 +451,7 @@ class StudioController extends _$StudioController {
     }
     final nextEffort =
         effort ?? defaultEffortForModel(current, providerId, model);
-    final next = await _actions.setModelRole(
+    final next = await _api.setModelRole(
       roleKey: roleKey,
       providerId: providerId,
       model: model,
@@ -383,7 +470,7 @@ class StudioController extends _$StudioController {
     if (current == null) {
       return;
     }
-    final next = await _actions.saveProviderSettings(command);
+    final next = await _api.saveProviderSettings(command);
     final latest = state.value;
     if (latest == null) {
       return;
@@ -394,23 +481,23 @@ class StudioController extends _$StudioController {
   Future<void> saveInstructionsSettings(
     InstructionsSettingsCommand command,
   ) async {
-    await _saveConfigSettings(() => _actions.saveInstructionsSettings(command));
+    await _saveConfigSettings(() => _api.saveInstructionsSettings(command));
   }
 
   Future<void> saveSkillsSettings(SkillsSettingsCommand command) async {
-    await _saveConfigSettings(() => _actions.saveSkillsSettings(command));
+    await _saveConfigSettings(() => _api.saveSkillsSettings(command));
   }
 
   Future<void> saveMcpSettings(McpSettingsCommand command) async {
-    await _saveConfigSettings(() => _actions.saveMcpSettings(command));
+    await _saveConfigSettings(() => _api.saveMcpSettings(command));
   }
 
   Future<void> saveGeneralSettings(GeneralSettingsCommand command) async {
-    await _saveConfigSettings(() => _actions.saveGeneralSettings(command));
+    await _saveConfigSettings(() => _api.saveGeneralSettings(command));
   }
 
   Future<void> saveWebSearchSettings(WebSearchSettingsCommand command) async {
-    await _saveConfigSettings(() => _actions.saveWebSearchSettings(command));
+    await _saveConfigSettings(() => _api.saveWebSearchSettings(command));
   }
 
   Future<void> _saveConfigSettings(
@@ -433,7 +520,7 @@ class StudioController extends _$StudioController {
     if (current == null) {
       return;
     }
-    final usages = await _actions.loadProviderUsages();
+    final usages = await _api.loadProviderUsages();
     final latest = state.value;
     if (latest == null) {
       return;
@@ -446,11 +533,11 @@ class StudioController extends _$StudioController {
     if (projectId == null) {
       return const [];
     }
-    return _actions.listDiscoveredSkills(projectId);
+    return _api.listDiscoveredSkills(projectId);
   }
 
   Future<RecoveryCleanupPreview> previewRecoveryIssueCleanup(String issueId) {
-    return _actions.previewRecoveryIssueCleanup(issueId);
+    return _api.previewRecoveryIssueCleanup(issueId);
   }
 
   Future<void> cleanupRecoveryIssue(
@@ -461,7 +548,7 @@ class StudioController extends _$StudioController {
     if (current == null) {
       return;
     }
-    final next = await _actions.cleanupRecoveryIssue(
+    final next = await _api.cleanupRecoveryIssue(
       issueId,
       expectedRevision,
       selectedProjectId: current.selectedProjectId,
@@ -489,10 +576,7 @@ class StudioController extends _$StudioController {
         resolution is PlanConfirmationResolutionCommand &&
         resolution.decision == PlanConfirmationDecision.continuePlanning;
     final followUpPrompt = planFollowUpPrompt(interaction, resolution);
-    final result = await _actions.resolveInteraction(
-      interaction.id,
-      resolution,
-    );
+    final result = await _api.resolveInteraction(interaction.id, resolution);
     final latest = state.value ?? current;
     state = AsyncData(
       latest.copyWith(
@@ -507,7 +591,7 @@ class StudioController extends _$StudioController {
     if (shouldContinuePlanning &&
         followUpPrompt.isNotEmpty &&
         interaction.sessionId.isNotEmpty) {
-      await _actions.submitPrompt(interaction.sessionId, followUpPrompt);
+      await _api.submitPrompt(interaction.sessionId, followUpPrompt, const []);
     }
     if (result.isResolved &&
         interaction.sessionId.isNotEmpty &&
@@ -650,7 +734,11 @@ class StudioController extends _$StudioController {
     next = _reconcileComposerTurns(next);
     state = AsyncData(next);
     if (previousSessionId != next.selectedSessionId) {
-      await _subscribe(next.selectedSessionId);
+      final sessionId = next.selectedSessionId;
+      if (sessionId != null) {
+        await loadOlderHistory(sessionId);
+      }
+      await _subscribe(next.selectedSessionId, forceSnapshot: true);
     }
   }
 
@@ -694,6 +782,19 @@ StudioState _withComposer(
 ) {
   return state.copyWith(
     composersBySession: {...state.composersBySession, sessionId: composer},
+  );
+}
+
+StudioState _withHistoryPaging(
+  StudioState state,
+  String sessionId,
+  SessionHistoryPagingState paging,
+) {
+  return state.copyWith(
+    historyPagingBySession: {
+      ...state.historyPagingBySession,
+      sessionId: paging,
+    },
   );
 }
 

@@ -38,13 +38,17 @@ AgentControl
 
 `AgentRuntimeHost` 组合三个窄端口：
 
-- `AgentStateRepository`：以 expected revision CAS 原子提交 agent、session、input queue、
-  turn、usage、trace、session projection 和 durable event journal。
+- `AgentStateRepository`：以 expected revision CAS 提交 agent、session、input queue、turn 与
+  usage；产品宿主先 durable 写历史事实，再提交可重建 state projection。端口的 Applied 仍表示
+  对应 durability barrier 已满足，不表示 SQLite 跨库原子事务。
 - `AgentTurnFactory`：根据产品上下文准备 `PreparedAgentTurn`，不启动任务或修改状态。
 - `AgentLifecycleAdapter`：以可回滚 lease 实现 spawn/close 外部资源 saga。
 
 durable commit 完成后可以调用 product event sink 更新 read model，但 sink 不得反写 turn
 状态、提交输入或启动新 turn。异步端口使用原生 RPITIT 并显式返回 `impl Future + Send`。
+Studio 的 Task lifecycle sink 必须同时验证产品资源绑定和 runtime role；role 只决定模型行为，
+不能单独证明 agent 拥有 Task work unit。simple 根 agent 即使复用 executor role，也不得触发
+executor outcome/work unit 的开始或结算投影。
 
 ## 17.4 状态与命令
 
@@ -187,13 +191,15 @@ receipt 后再标记 interaction resolved。崩溃恢复只按 mailbox/turn rece
 Simple/Task policy 和 UI-facing records。TaskRun、WorkUnit、AgentOutcome、MergeRecord、
 ReviewRound 与 BranchLease 是产品合同，不进入 TurnEngine。
 
-Studio 数据库只接受当前精确 schema。低版本或未版本化用户库在完整归档 DB、`-wal` 和
-`-shm` 后重建；更高版本拒绝打开。运行期不保留 migration chain、backfill 或旧 DTO 双栈。
+Studio 使用 `studio_state.sqlite` v11 与 `studio_history.sqlite` v1；两库只接受当前精确 schema
+和相同 storage generation。legacy v10 主库在完整归档 DB、`-wal` 和 `-shm` 后重建双库；
+更高版本拒绝打开。运行期不保留 migration chain、backfill 或旧 DTO 双栈。完整合同见
+`19-studio-storage-and-diagnostics.md`。
 
 ## 17.9 Session 与 UI 不变量
 
 - 一个 session 使用独立 durable sequence 和 bounded broadcast channel。
-- durable event 只有在 repository transaction applied 后才广播。
+- durable event 只有在历史库 commit ack 后才广播；turn terminal 还要等待状态 projection watermark。
 - transient delta 只在当前 turn identity 与 part revision 仍有效时广播。
 - AgentDirectory 使用单一 watch revision；watch lag 不需要事件重放，读取者直接读最新 snapshot。
 - SessionEventHub 的 channel lag、cursor 越界或 delta revision 缺口仍返回 resync。

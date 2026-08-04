@@ -40,7 +40,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.12.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 2001191076;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 727154878;
 
 // Section: executor
 
@@ -859,6 +859,49 @@ fn wire__crate__api__studio__handlers__providers__load_provider_usages_impl(
                     (move || async move {
                         let output_ok =
                             crate::api::studio::handlers::providers::load_provider_usages().await?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__studio__handlers__history__load_session_history_page_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "load_session_history_page",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_request =
+                <crate::api::studio::types::history::LoadSessionHistoryPageRequest>::sse_decode(
+                    &mut deserializer,
+                );
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, crate::api::studio::types::error::BridgeError>(
+                    (move || async move {
+                        let output_ok =
+                            crate::api::studio::handlers::history::load_session_history_page(
+                                api_request,
+                            )
+                            .await?;
                         Ok(output_ok)
                     })()
                     .await,
@@ -3129,6 +3172,56 @@ impl SseDecode for crate::api::studio::types::session_stream::BridgeSessionEvent
     }
 }
 
+impl SseDecode for crate::api::studio::types::history::BridgeSessionHistoryItem {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_sequence = <i64>::sse_decode(deserializer);
+        let mut var_itemId = <String>::sse_decode(deserializer);
+        let mut var_turnId = <String>::sse_decode(deserializer);
+        let mut var_itemKind = <String>::sse_decode(deserializer);
+        let mut var_payload =
+            <crate::api::studio::types::session_stream::BridgeSessionEventEnvelope>::sse_decode(
+                deserializer,
+            );
+        let mut var_createdAt = <i64>::sse_decode(deserializer);
+        return crate::api::studio::types::history::BridgeSessionHistoryItem {
+            sequence: var_sequence,
+            item_id: var_itemId,
+            turn_id: var_turnId,
+            item_kind: var_itemKind,
+            payload: var_payload,
+            created_at: var_createdAt,
+        };
+    }
+}
+
+impl SseDecode for crate::api::studio::types::history::BridgeSessionHistoryTurn {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_turnSequence = <i64>::sse_decode(deserializer);
+        let mut var_turnId = <String>::sse_decode(deserializer);
+        let mut var_status = <String>::sse_decode(deserializer);
+        let mut var_modelJson = <Option<String>>::sse_decode(deserializer);
+        let mut var_errorJson = <Option<String>>::sse_decode(deserializer);
+        let mut var_startedAt = <i64>::sse_decode(deserializer);
+        let mut var_completedAt = <Option<i64>>::sse_decode(deserializer);
+        let mut var_items =
+            <Vec<crate::api::studio::types::history::BridgeSessionHistoryItem>>::sse_decode(
+                deserializer,
+            );
+        return crate::api::studio::types::history::BridgeSessionHistoryTurn {
+            turn_sequence: var_turnSequence,
+            turn_id: var_turnId,
+            status: var_status,
+            model_json: var_modelJson,
+            error_json: var_errorJson,
+            started_at: var_startedAt,
+            completed_at: var_completedAt,
+            items: var_items,
+        };
+    }
+}
+
 impl SseDecode
     for crate::api::studio::types::session_stream::BridgeSessionMcpAvailabilityDescriptor
 {
@@ -4854,6 +4947,38 @@ impl SseDecode for Vec<crate::api::studio::types::session_stream::BridgeSessionA
     }
 }
 
+impl SseDecode for Vec<crate::api::studio::types::history::BridgeSessionHistoryItem> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(
+                <crate::api::studio::types::history::BridgeSessionHistoryItem>::sse_decode(
+                    deserializer,
+                ),
+            );
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::api::studio::types::history::BridgeSessionHistoryTurn> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(
+                <crate::api::studio::types::history::BridgeSessionHistoryTurn>::sse_decode(
+                    deserializer,
+                ),
+            );
+        }
+        return ans_;
+    }
+}
+
 impl SseDecode
     for Vec<crate::api::studio::types::session_stream::BridgeSessionMcpAvailabilityDescriptor>
 {
@@ -5311,6 +5436,37 @@ impl SseDecode for Vec<crate::api::studio::types::response::ZhipuToolUsageDetail
             );
         }
         return ans_;
+    }
+}
+
+impl SseDecode for crate::api::studio::types::history::LoadSessionHistoryPageRequest {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_sessionId = <String>::sse_decode(deserializer);
+        let mut var_beforeTurnSequence = <Option<i64>>::sse_decode(deserializer);
+        let mut var_limit = <u32>::sse_decode(deserializer);
+        return crate::api::studio::types::history::LoadSessionHistoryPageRequest {
+            session_id: var_sessionId,
+            before_turn_sequence: var_beforeTurnSequence,
+            limit: var_limit,
+        };
+    }
+}
+
+impl SseDecode for crate::api::studio::types::history::LoadSessionHistoryPageResponse {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_turns =
+            <Vec<crate::api::studio::types::history::BridgeSessionHistoryTurn>>::sse_decode(
+                deserializer,
+            );
+        let mut var_nextBeforeTurnSequence = <Option<i64>>::sse_decode(deserializer);
+        let mut var_hasMore = <bool>::sse_decode(deserializer);
+        return crate::api::studio::types::history::LoadSessionHistoryPageResponse {
+            turns: var_turns,
+            next_before_turn_sequence: var_nextBeforeTurnSequence,
+            has_more: var_hasMore,
+        };
     }
 }
 
@@ -6139,26 +6295,27 @@ fn pde_ffi_dispatcher_primary_impl(
 20 => wire__crate__api__studio__handlers__providers__list_discovered_skills_impl(port, ptr, rust_vec_len, data_len),
 21 => wire__crate__api__studio__handlers__settings__load_provider_catalog_impl(port, ptr, rust_vec_len, data_len),
 22 => wire__crate__api__studio__handlers__providers__load_provider_usages_impl(port, ptr, rust_vec_len, data_len),
-23 => wire__crate__api__studio__handlers__settings__load_web_search_settings_impl(port, ptr, rust_vec_len, data_len),
-24 => wire__crate__api__studio__handlers__lifecycle__open_project_impl(port, ptr, rust_vec_len, data_len),
-25 => wire__crate__api__studio__handlers__recovery__preview_project_cleanup_impl(port, ptr, rust_vec_len, data_len),
-26 => wire__crate__api__studio__handlers__recovery__preview_recovery_issue_cleanup_impl(port, ptr, rust_vec_len, data_len),
-27 => wire__crate__api__studio__handlers__prompt__resolve_interaction_impl(port, ptr, rust_vec_len, data_len),
-28 => wire__crate__api__studio__handlers__prompt__resume_task_impl(port, ptr, rust_vec_len, data_len),
-29 => wire__crate__api__studio__handlers__settings__save_general_settings_impl(port, ptr, rust_vec_len, data_len),
-30 => wire__crate__api__studio__handlers__settings__save_instructions_settings_impl(port, ptr, rust_vec_len, data_len),
-31 => wire__crate__api__studio__handlers__settings__save_mcp_settings_impl(port, ptr, rust_vec_len, data_len),
-32 => wire__crate__api__studio__handlers__settings__save_provider_settings_impl(port, ptr, rust_vec_len, data_len),
-33 => wire__crate__api__studio__handlers__settings__save_runtime_permission_mode_impl(port, ptr, rust_vec_len, data_len),
-34 => wire__crate__api__studio__handlers__settings__save_skills_settings_impl(port, ptr, rust_vec_len, data_len),
-35 => wire__crate__api__studio__handlers__settings__save_web_search_settings_impl(port, ptr, rust_vec_len, data_len),
-36 => wire__crate__api__studio__handlers__lifecycle__select_project_impl(port, ptr, rust_vec_len, data_len),
-37 => wire__crate__api__studio__handlers__session__set_model_role_impl(port, ptr, rust_vec_len, data_len),
-38 => wire__crate__api__studio__handlers__session__set_session_mode_impl(port, ptr, rust_vec_len, data_len),
-39 => wire__crate__api__studio__handlers__lifecycle__shutdown_runtime_impl(port, ptr, rust_vec_len, data_len),
-40 => wire__crate__api__studio__handlers__lifecycle__start_runtime_impl(port, ptr, rust_vec_len, data_len),
-41 => wire__crate__api__studio__handlers__prompt__stop_prompt_impl(port, ptr, rust_vec_len, data_len),
-42 => wire__crate__api__studio__handlers__prompt__submit_prompt_impl(port, ptr, rust_vec_len, data_len),
+23 => wire__crate__api__studio__handlers__history__load_session_history_page_impl(port, ptr, rust_vec_len, data_len),
+24 => wire__crate__api__studio__handlers__settings__load_web_search_settings_impl(port, ptr, rust_vec_len, data_len),
+25 => wire__crate__api__studio__handlers__lifecycle__open_project_impl(port, ptr, rust_vec_len, data_len),
+26 => wire__crate__api__studio__handlers__recovery__preview_project_cleanup_impl(port, ptr, rust_vec_len, data_len),
+27 => wire__crate__api__studio__handlers__recovery__preview_recovery_issue_cleanup_impl(port, ptr, rust_vec_len, data_len),
+28 => wire__crate__api__studio__handlers__prompt__resolve_interaction_impl(port, ptr, rust_vec_len, data_len),
+29 => wire__crate__api__studio__handlers__prompt__resume_task_impl(port, ptr, rust_vec_len, data_len),
+30 => wire__crate__api__studio__handlers__settings__save_general_settings_impl(port, ptr, rust_vec_len, data_len),
+31 => wire__crate__api__studio__handlers__settings__save_instructions_settings_impl(port, ptr, rust_vec_len, data_len),
+32 => wire__crate__api__studio__handlers__settings__save_mcp_settings_impl(port, ptr, rust_vec_len, data_len),
+33 => wire__crate__api__studio__handlers__settings__save_provider_settings_impl(port, ptr, rust_vec_len, data_len),
+34 => wire__crate__api__studio__handlers__settings__save_runtime_permission_mode_impl(port, ptr, rust_vec_len, data_len),
+35 => wire__crate__api__studio__handlers__settings__save_skills_settings_impl(port, ptr, rust_vec_len, data_len),
+36 => wire__crate__api__studio__handlers__settings__save_web_search_settings_impl(port, ptr, rust_vec_len, data_len),
+37 => wire__crate__api__studio__handlers__lifecycle__select_project_impl(port, ptr, rust_vec_len, data_len),
+38 => wire__crate__api__studio__handlers__session__set_model_role_impl(port, ptr, rust_vec_len, data_len),
+39 => wire__crate__api__studio__handlers__session__set_session_mode_impl(port, ptr, rust_vec_len, data_len),
+40 => wire__crate__api__studio__handlers__lifecycle__shutdown_runtime_impl(port, ptr, rust_vec_len, data_len),
+41 => wire__crate__api__studio__handlers__lifecycle__start_runtime_impl(port, ptr, rust_vec_len, data_len),
+42 => wire__crate__api__studio__handlers__prompt__stop_prompt_impl(port, ptr, rust_vec_len, data_len),
+43 => wire__crate__api__studio__handlers__prompt__submit_prompt_impl(port, ptr, rust_vec_len, data_len),
                         _ => unreachable!(),
                     }
 }
@@ -7872,6 +8029,62 @@ impl
     fn into_into_dart(
         self,
     ) -> crate::api::studio::types::session_stream::BridgeSessionEventPosition {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart
+    for crate::api::studio::types::history::BridgeSessionHistoryItem
+{
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.sequence.into_into_dart().into_dart(),
+            self.item_id.into_into_dart().into_dart(),
+            self.turn_id.into_into_dart().into_dart(),
+            self.item_kind.into_into_dart().into_dart(),
+            self.payload.into_into_dart().into_dart(),
+            self.created_at.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::history::BridgeSessionHistoryItem
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::history::BridgeSessionHistoryItem>
+    for crate::api::studio::types::history::BridgeSessionHistoryItem
+{
+    fn into_into_dart(self) -> crate::api::studio::types::history::BridgeSessionHistoryItem {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart
+    for crate::api::studio::types::history::BridgeSessionHistoryTurn
+{
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.turn_sequence.into_into_dart().into_dart(),
+            self.turn_id.into_into_dart().into_dart(),
+            self.status.into_into_dart().into_dart(),
+            self.model_json.into_into_dart().into_dart(),
+            self.error_json.into_into_dart().into_dart(),
+            self.started_at.into_into_dart().into_dart(),
+            self.completed_at.into_into_dart().into_dart(),
+            self.items.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::history::BridgeSessionHistoryTurn
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::history::BridgeSessionHistoryTurn>
+    for crate::api::studio::types::history::BridgeSessionHistoryTurn
+{
+    fn into_into_dart(self) -> crate::api::studio::types::history::BridgeSessionHistoryTurn {
         self
     }
 }
@@ -9647,6 +9860,58 @@ impl
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart
+    for crate::api::studio::types::history::LoadSessionHistoryPageRequest
+{
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.session_id.into_into_dart().into_dart(),
+            self.before_turn_sequence.into_into_dart().into_dart(),
+            self.limit.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::history::LoadSessionHistoryPageRequest
+{
+}
+impl
+    flutter_rust_bridge::IntoIntoDart<
+        crate::api::studio::types::history::LoadSessionHistoryPageRequest,
+    > for crate::api::studio::types::history::LoadSessionHistoryPageRequest
+{
+    fn into_into_dart(self) -> crate::api::studio::types::history::LoadSessionHistoryPageRequest {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart
+    for crate::api::studio::types::history::LoadSessionHistoryPageResponse
+{
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.turns.into_into_dart().into_dart(),
+            self.next_before_turn_sequence.into_into_dart().into_dart(),
+            self.has_more.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::history::LoadSessionHistoryPageResponse
+{
+}
+impl
+    flutter_rust_bridge::IntoIntoDart<
+        crate::api::studio::types::history::LoadSessionHistoryPageResponse,
+    > for crate::api::studio::types::history::LoadSessionHistoryPageResponse
+{
+    fn into_into_dart(self) -> crate::api::studio::types::history::LoadSessionHistoryPageResponse {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::studio::types::settings::McpServerInput {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -11234,6 +11499,37 @@ impl SseEncode for crate::api::studio::types::session_stream::BridgeSessionEvent
     }
 }
 
+impl SseEncode for crate::api::studio::types::history::BridgeSessionHistoryItem {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i64>::sse_encode(self.sequence, serializer);
+        <String>::sse_encode(self.item_id, serializer);
+        <String>::sse_encode(self.turn_id, serializer);
+        <String>::sse_encode(self.item_kind, serializer);
+        <crate::api::studio::types::session_stream::BridgeSessionEventEnvelope>::sse_encode(
+            self.payload,
+            serializer,
+        );
+        <i64>::sse_encode(self.created_at, serializer);
+    }
+}
+
+impl SseEncode for crate::api::studio::types::history::BridgeSessionHistoryTurn {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i64>::sse_encode(self.turn_sequence, serializer);
+        <String>::sse_encode(self.turn_id, serializer);
+        <String>::sse_encode(self.status, serializer);
+        <Option<String>>::sse_encode(self.model_json, serializer);
+        <Option<String>>::sse_encode(self.error_json, serializer);
+        <i64>::sse_encode(self.started_at, serializer);
+        <Option<i64>>::sse_encode(self.completed_at, serializer);
+        <Vec<crate::api::studio::types::history::BridgeSessionHistoryItem>>::sse_encode(
+            self.items, serializer,
+        );
+    }
+}
+
 impl SseEncode
     for crate::api::studio::types::session_stream::BridgeSessionMcpAvailabilityDescriptor
 {
@@ -12490,6 +12786,30 @@ impl SseEncode for Vec<crate::api::studio::types::session_stream::BridgeSessionA
     }
 }
 
+impl SseEncode for Vec<crate::api::studio::types::history::BridgeSessionHistoryItem> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::studio::types::history::BridgeSessionHistoryItem>::sse_encode(
+                item, serializer,
+            );
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::api::studio::types::history::BridgeSessionHistoryTurn> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::studio::types::history::BridgeSessionHistoryTurn>::sse_encode(
+                item, serializer,
+            );
+        }
+    }
+}
+
 impl SseEncode
     for Vec<crate::api::studio::types::session_stream::BridgeSessionMcpAvailabilityDescriptor>
 {
@@ -12833,6 +13153,26 @@ impl SseEncode for Vec<crate::api::studio::types::response::ZhipuToolUsageDetail
                 item, serializer,
             );
         }
+    }
+}
+
+impl SseEncode for crate::api::studio::types::history::LoadSessionHistoryPageRequest {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.session_id, serializer);
+        <Option<i64>>::sse_encode(self.before_turn_sequence, serializer);
+        <u32>::sse_encode(self.limit, serializer);
+    }
+}
+
+impl SseEncode for crate::api::studio::types::history::LoadSessionHistoryPageResponse {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <Vec<crate::api::studio::types::history::BridgeSessionHistoryTurn>>::sse_encode(
+            self.turns, serializer,
+        );
+        <Option<i64>>::sse_encode(self.next_before_turn_sequence, serializer);
+        <bool>::sse_encode(self.has_more, serializer);
     }
 }
 
