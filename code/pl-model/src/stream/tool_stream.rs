@@ -30,7 +30,7 @@ impl ToolStream {
         let acc = self.get_or_insert_accumulator(&key, call_id, &item_id, || {
             ToolCallPayloadAccumulator::FunctionArguments(String::new())
         });
-        acc.merge_metadata(&key, &item_id, call_id, name);
+        acc.merge_metadata(&item_id, call_id, name);
         let delta_text = payload_delta.text().to_string();
         acc.push_delta(payload_delta);
         ToolInputSnapshot {
@@ -51,7 +51,7 @@ impl ToolStream {
         let acc = self.get_or_insert_accumulator(&key, call_id, &item_id, || {
             ToolCallPayloadAccumulator::from_payload(payload)
         });
-        acc.merge_metadata(&key, &item_id, call_id, name);
+        acc.merge_metadata(&item_id, call_id, name);
         ToolInputSnapshot {
             tool: acc.snapshot(),
             delta: String::new(),
@@ -75,7 +75,7 @@ impl ToolStream {
                 ToolCallPayloadAccumulator::FunctionArguments(String::new()),
             )
         });
-        acc.merge_metadata(&key, item_id, call_id, name);
+        acc.merge_metadata(item_id, call_id, name);
         if let Some(payload) = payload {
             acc.replace_payload(payload);
         }
@@ -94,7 +94,7 @@ impl ToolStream {
         let acc = self.get_or_insert_accumulator(&key, call_id, item_id, || {
             ToolCallPayloadAccumulator::FunctionArguments(String::new())
         });
-        acc.merge_metadata(&key, item_id, call_id, name);
+        acc.merge_metadata(item_id, call_id, name);
         if let Some(payload) = payload {
             acc.replace_payload(payload);
         }
@@ -133,7 +133,31 @@ impl ToolStream {
                     .matches_identity(call_id, item_id)
                     .then(|| key.clone())
             })
+            .or_else(|| self.unique_item_fallback_key(stream_id, call_id, item_id))
             .unwrap_or(key)
+    }
+
+    fn unique_item_fallback_key(
+        &self,
+        stream_id: Option<&String>,
+        call_id: Option<&String>,
+        item_id: &str,
+    ) -> Option<String> {
+        // Some Responses-compatible streams first expose an item id, then only
+        // expose a distinct call id. Without another correlation key, upgrading
+        // is safe only while exactly one fallback-backed tool remains open.
+        if stream_id.is_some_and(|stream_id| !stream_id.is_empty())
+            || !call_id.is_some_and(|call_id| !call_id.is_empty() && call_id == item_id)
+        {
+            return None;
+        }
+
+        let mut candidates = self
+            .accumulators
+            .iter()
+            .filter(|(_, accumulator)| accumulator.uses_item_id_as_call_id());
+        let (key, _) = candidates.next()?;
+        candidates.next().is_none().then(|| key.clone())
     }
 
     fn remove_accumulator(&mut self, key: &str) -> Option<ToolCallAccumulator> {
@@ -210,18 +234,17 @@ impl ToolCallAccumulator {
                 .is_some_and(|(left, right)| left == right)
     }
 
-    fn merge_metadata(
-        &mut self,
-        key: &str,
-        item_id: &str,
-        call_id: Option<&String>,
-        name: Option<String>,
-    ) {
-        if !item_id.is_empty() && (self.id.is_empty() || self.id == key) {
+    fn uses_item_id_as_call_id(&self) -> bool {
+        self.has_stable_id && self.call_id.as_deref() == Some(self.id.as_str())
+    }
+
+    fn merge_metadata(&mut self, item_id: &str, call_id: Option<&String>, name: Option<String>) {
+        let call_id_was_item_fallback = self.call_id.as_deref() == Some(self.id.as_str());
+        if !item_id.is_empty() && !self.has_stable_id {
             self.id = item_id.to_string();
             self.has_stable_id = true;
         }
-        if self.call_id.is_none()
+        if (self.call_id.is_none() || call_id_was_item_fallback)
             && let Some(call_id) = call_id.filter(|call_id| !call_id.is_empty())
         {
             self.call_id = Some(call_id.clone());
@@ -447,5 +470,93 @@ mod tests {
                 .unwrap()
                 .contains("read_file")
         );
+    }
+
+    #[test]
+    fn explicit_call_id_replaces_item_identity_fallback() {
+        let mut stream = ToolStream::new();
+        let fallback_call_id = "fc_1".to_string();
+        let explicit_call_id = "call_1".to_string();
+
+        stream.start_input(
+            None,
+            "fc_1".to_string(),
+            Some(&fallback_call_id),
+            Some("read_file".to_string()),
+            ToolInputDeltaPayload::FunctionArguments(String::new()),
+        );
+        let call = stream
+            .finish_ready(
+                None,
+                Some(&explicit_call_id),
+                "fc_1",
+                None,
+                Some(ToolInputDeltaPayload::FunctionArguments("{}".to_string())),
+            )
+            .unwrap()
+            .expect("ready tool call");
+
+        assert_eq!(call.id, "fc_1");
+        assert_eq!(call.call_id.as_deref(), Some("call_1"));
+    }
+
+    #[test]
+    fn call_id_only_metadata_upgrades_unique_item_fallback() {
+        let mut stream = ToolStream::new();
+        let fallback_call_id = "fc_1".to_string();
+        let explicit_call_id = "call_1".to_string();
+
+        let started = stream.start_input(
+            None,
+            "fc_1".to_string(),
+            Some(&fallback_call_id),
+            Some("read_file".to_string()),
+            ToolInputDeltaPayload::FunctionArguments(String::new()),
+        );
+        let delta = stream.append_delta(
+            None,
+            explicit_call_id.clone(),
+            Some(&explicit_call_id),
+            None,
+            ToolInputDeltaPayload::FunctionArguments("{}".to_string()),
+        );
+        let call = stream
+            .finish_ready(None, Some(&explicit_call_id), "fc_1", None, None)
+            .unwrap()
+            .expect("ready tool call");
+
+        assert_eq!(started.tool.trace_id, "fc_1");
+        assert_eq!(delta.tool.id, "fc_1");
+        assert_eq!(delta.tool.trace_id, "fc_1");
+        assert_eq!(delta.tool.call_id.as_deref(), Some("call_1"));
+        assert_eq!(call.id, "fc_1");
+        assert_eq!(call.call_id.as_deref(), Some("call_1"));
+    }
+
+    #[test]
+    fn call_id_only_metadata_does_not_guess_between_item_fallbacks() {
+        let mut stream = ToolStream::new();
+        for item_id in ["fc_1", "fc_2"] {
+            let fallback_call_id = item_id.to_string();
+            stream.start_input(
+                None,
+                item_id.to_string(),
+                Some(&fallback_call_id),
+                Some("read_file".to_string()),
+                ToolInputDeltaPayload::FunctionArguments(String::new()),
+            );
+        }
+        let explicit_call_id = "call_1".to_string();
+
+        let delta = stream.append_delta(
+            None,
+            explicit_call_id.clone(),
+            Some(&explicit_call_id),
+            None,
+            ToolInputDeltaPayload::FunctionArguments("{}".to_string()),
+        );
+
+        assert_eq!(delta.tool.id, "call_1");
+        assert_eq!(delta.tool.trace_id, "call_1");
     }
 }

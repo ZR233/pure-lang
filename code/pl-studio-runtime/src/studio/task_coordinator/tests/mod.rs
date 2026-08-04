@@ -1349,6 +1349,33 @@ async fn merged_work_unit_is_not_downgraded_by_late_terminal_event() {
     fixture.cleanup();
 }
 
+#[tokio::test]
+async fn budget_limited_executor_keeps_awaiting_completion_contract() {
+    let fixture = DeliveryFixture::new("budget-awaiting-completion", vec!["src/**"]).await;
+
+    fixture
+        .store
+        .settle_executor_turn_finished(
+            &fixture.subagent.id,
+            crate::TurnOutcomeKind::BudgetLimited,
+            Some("active wall-clock budget reached"),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        fixture.work_unit().await.status,
+        WorkUnitStatus::AwaitingCompletion
+    );
+    let outcome = fixture.outcome().await;
+    assert_eq!(outcome.status, AgentOutcomeStatus::Failed);
+    assert_eq!(
+        outcome.error.as_deref(),
+        Some("active wall-clock budget reached")
+    );
+    fixture.cleanup();
+}
+
 struct DeliveryFixture {
     coordinator: Arc<TaskCoordinator>,
     store: StudioStore,

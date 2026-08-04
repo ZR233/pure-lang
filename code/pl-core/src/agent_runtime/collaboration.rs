@@ -10,6 +10,7 @@ use super::{
     AgentRuntimeHandle, AgentSessionState, AgentSnapshot, AgentSpawnRequest, AgentTargetSelector,
     SessionId,
 };
+use crate::tool::ToolBudgetTiming;
 use crate::{AgentRoleId, Tool, ToolContext, ToolEffect, ToolInput, ToolOutput};
 
 const TOOL_SPAWN_AGENT: &str = "spawn_agent";
@@ -132,6 +133,19 @@ impl CollaborationToolKind {
             Self::Close => "Close an accessible child agent and its product resources.",
         }
     }
+
+    fn budget_timing(self) -> ToolBudgetTiming {
+        match self {
+            Self::Wait => ToolBudgetTiming::PauseWhenOnlyScheduledTool,
+            Self::Spawn
+            | Self::ReportProgress
+            | Self::SendMessage
+            | Self::Interrupt
+            | Self::List
+            | Self::ReadSession
+            | Self::Close => ToolBudgetTiming::Count,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -180,6 +194,10 @@ impl Tool for CollaborationTool {
                 | CollaborationToolKind::List
                 | CollaborationToolKind::ReadSession
         )
+    }
+
+    fn budget_timing(&self) -> ToolBudgetTiming {
+        self.kind.budget_timing()
     }
 
     fn effect(&self) -> Option<ToolEffect> {
@@ -625,5 +643,17 @@ mod tests {
             AgentLifecycleState::Closed,
             AgentActivityState::Idle,
         ));
+    }
+
+    #[test]
+    fn only_wait_agents_pauses_active_wall_clock() {
+        for kind in CollaborationToolKind::ALL {
+            let expected = if matches!(kind, CollaborationToolKind::Wait) {
+                ToolBudgetTiming::PauseWhenOnlyScheduledTool
+            } else {
+                ToolBudgetTiming::Count
+            };
+            assert_eq!(kind.budget_timing(), expected);
+        }
     }
 }

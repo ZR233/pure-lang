@@ -54,6 +54,15 @@ durable commit 完成后可以调用 product event sink 更新 read model，但 
 - activity：`Idle | Queued | Running | WaitingTool | WaitingInteraction | Cancelling`
 - turn outcome：`Completed | Cancelled | Failed | BudgetLimited`
 
+默认 30 分钟 turn 安全上限统计活跃 wall-clock，而不是从 turn 开始连续累计的绝对经过时间。
+模型请求、普通工具、混合工具批次、审批与 interaction 等待均属于活跃时间；只有单独成功调度
+的 `wait_agents` 阻塞区间暂停累计。达到上限产生独立的 `BudgetLimited` outcome，而不是
+`Failed`：agent lifecycle 保持 `Active`，activity 回到 `Idle`，后续显式 `send_message`
+可以启动新 turn。Session turn/message 投影为 cancelled/interrupted，terminal part 保留
+`budgetLimited`，不生成通用 error；Studio agent 展示 interrupted，Plan 保持 Implementing。
+产品层 required ending tool 的 durable 合同不因此放宽：executor 未成功
+`report_completion`、reviewer 未成功 `review_exit` 时仍按各自既有可恢复失败合同收束。
+
 AgentLoop 只处理：
 
 - `SubmitMessage`

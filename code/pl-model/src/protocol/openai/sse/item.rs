@@ -14,16 +14,7 @@ pub(super) fn cached_tokens_from_details(details: &Value) -> Option<u64> {
 
 pub(super) fn output_item_tool_started(item: &Value) -> Option<ModelStreamEvent> {
     let kind = item.get("type")?.as_str()?;
-    let item_id = item
-        .get("id")
-        .and_then(Value::as_str)
-        .or_else(|| item.get("call_id").and_then(Value::as_str))
-        .unwrap_or_default()
-        .to_string();
-    let call_id = item
-        .get("call_id")
-        .and_then(Value::as_str)
-        .map(String::from);
+    let (item_id, call_id) = responses_tool_identity(item);
     let name = item.get("name").and_then(Value::as_str).map(String::from);
 
     match kind {
@@ -51,16 +42,7 @@ pub(super) fn output_item_tool_started(item: &Value) -> Option<ModelStreamEvent>
 
 pub(super) fn output_item_tool_completed(item: &Value) -> Option<Vec<ModelStreamEvent>> {
     let kind = item.get("type")?.as_str()?;
-    let item_id = item
-        .get("id")
-        .and_then(Value::as_str)
-        .or_else(|| item.get("call_id").and_then(Value::as_str))
-        .unwrap_or_default()
-        .to_string();
-    let call_id = item
-        .get("call_id")
-        .and_then(Value::as_str)
-        .map(String::from);
+    let (item_id, call_id) = responses_tool_identity(item);
     let name = item.get("name").and_then(Value::as_str).map(String::from);
     match kind {
         "function_call" => {
@@ -112,6 +94,27 @@ pub(super) fn output_item_tool_completed(item: &Value) -> Option<Vec<ModelStream
         }]),
         _ => None,
     }
+}
+
+fn responses_tool_identity(item: &Value) -> (String, Option<String>) {
+    let item_id = item
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|id| !id.is_empty())
+        .or_else(|| {
+            item.get("call_id")
+                .and_then(Value::as_str)
+                .filter(|call_id| !call_id.is_empty())
+        })
+        .unwrap_or_default()
+        .to_string();
+    let call_id = item
+        .get("call_id")
+        .and_then(Value::as_str)
+        .filter(|call_id| !call_id.is_empty())
+        .map(String::from)
+        .or_else(|| (!item_id.is_empty()).then(|| item_id.clone()));
+    (item_id, call_id)
 }
 
 pub(super) fn web_search_lifecycle_event(

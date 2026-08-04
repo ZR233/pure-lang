@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use pl_protocol::{
-    ErrorSeverity, SessionEventEnvelope, SessionEventKind, SessionEventPosition, SessionMessage,
+    SessionEventEnvelope, SessionEventKind, SessionEventPosition, SessionMessage,
     SessionMessageRole, SessionMessageStatus, SessionPart, SessionPartContent, SessionPartDelta,
     SessionPartDeltaField, SessionPartStatus, SessionTextChannel, SessionTurn, SessionTurnActivity,
     SessionTurnState,
@@ -205,7 +205,7 @@ pub(crate) fn project_runtime_event(
                     SessionMessageStatus::Cancelled,
                     Some(SessionPartStatus::Interrupted),
                 ),
-                TurnOutcomeKind::Failed | TurnOutcomeKind::BudgetLimited => (
+                TurnOutcomeKind::Failed => (
                     SessionTurnState::Failed {
                         reason: outcome
                             .reason
@@ -213,11 +213,17 @@ pub(crate) fn project_runtime_event(
                             .unwrap_or_else(|| "turn failed".to_string()),
                     },
                     SessionMessageStatus::Failed,
-                    Some(if outcome.kind == TurnOutcomeKind::BudgetLimited {
-                        SessionPartStatus::BudgetLimited
-                    } else {
-                        SessionPartStatus::Failed
-                    }),
+                    Some(SessionPartStatus::Failed),
+                ),
+                TurnOutcomeKind::BudgetLimited => (
+                    SessionTurnState::Cancelled {
+                        reason: outcome
+                            .reason
+                            .clone()
+                            .unwrap_or_else(|| "turn budget limited".to_string()),
+                    },
+                    SessionMessageStatus::Cancelled,
+                    Some(SessionPartStatus::BudgetLimited),
                 ),
             };
             projector.turn_activity(turn_id, SessionTurnActivity::Persisting, event.created_at);
@@ -284,19 +290,6 @@ pub(crate) fn project_runtime_event(
                     },
                 },
             );
-            if outcome.kind == TurnOutcomeKind::BudgetLimited {
-                projector.durable(
-                    Some(turn_id.to_string()),
-                    event.created_at,
-                    SessionEventKind::ErrorOccurred {
-                        message: outcome
-                            .reason
-                            .clone()
-                            .unwrap_or_else(|| "turn budget limited".to_string()),
-                        severity: ErrorSeverity::Recoverable,
-                    },
-                );
-            }
         }
         AgentRuntimeEventKind::Registered { .. }
         | AgentRuntimeEventKind::StateChanged { .. }
@@ -784,6 +777,69 @@ mod tests {
                         reason: "provider failed".to_string(),
                     }
         ));
+    }
+
+    #[test]
+    fn budget_limited_turn_projects_cancelled_state_without_generic_error() {
+        let outcome = AgentTurnOutcome {
+            turn_id: TurnId::new("turn").expect("turn id"),
+            session_id: SessionId::new("session").expect("session id"),
+            kind: TurnOutcomeKind::BudgetLimited,
+            reason: Some("active wall-clock budget reached".to_string()),
+            failure: None,
+            usage: Default::default(),
+            finished_at: 9,
+        };
+        let snapshot = AgentRegistration::with_session(
+            AgentIdentity {
+                id: AgentId::new("agent").expect("agent id"),
+                parent_id: None,
+                role: crate::AgentRoleId::new("planner").expect("role id"),
+                depth: 0,
+            },
+            SessionId::new("session").expect("session id"),
+        )
+        .into_durable_state()
+        .snapshot;
+        let batch = project_runtime_event(
+            &AgentRuntimeEvent {
+                agent_id: snapshot.identity.id.clone(),
+                sequence: 1,
+                created_at: 9,
+                kind: AgentRuntimeEventKind::TurnFinished {
+                    outcome,
+                    snapshot,
+                    finalized_with_tool: None,
+                },
+            },
+            0,
+        );
+
+        assert_eq!(batch.events.len(), 4);
+        assert!(matches!(
+            &batch.events[1].kind,
+            SessionEventKind::MessageChanged { message }
+                if message.status == SessionMessageStatus::Cancelled
+        ));
+        assert!(matches!(
+            &batch.events[2].kind,
+            SessionEventKind::PartChanged { part }
+                if part.status == SessionPartStatus::BudgetLimited
+                    && part.error.as_deref() == Some("active wall-clock budget reached")
+        ));
+        assert!(matches!(
+            &batch.events[3].kind,
+            SessionEventKind::TurnChanged { turn }
+                if turn.state == SessionTurnState::Cancelled {
+                    reason: "active wall-clock budget reached".to_string(),
+                }
+        ));
+        assert!(
+            !batch
+                .events
+                .iter()
+                .any(|event| matches!(&event.kind, SessionEventKind::ErrorOccurred { .. }))
+        );
     }
 
     fn interaction_trace(

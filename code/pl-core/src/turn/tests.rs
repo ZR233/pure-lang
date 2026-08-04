@@ -28,12 +28,12 @@ fn budget_tracker_records_observability() {
 
     tracker.record_model_step();
     tracker.record_tool_call("exec");
-    tracker.record_tool_call("list_agents");
+    tracker.record_tool_call("wait_agents");
 
     let usage = tracker.usage();
     assert_eq!(usage.model_steps, 1);
     assert_eq!(usage.tool_calls, 2);
-    assert_eq!(usage.wait_calls, 0);
+    assert_eq!(usage.wait_calls, 1);
 }
 
 #[test]
@@ -50,4 +50,11 @@ fn budget_tracker_only_enforces_wall_clock() {
     let usage = tracker.usage();
     assert_eq!(usage.model_steps, 200);
     assert_eq!(usage.tool_calls, 200);
+}
+
+#[test]
+fn budget_tracker_stops_when_active_wall_clock_reaches_limit() {
+    let tracker = BudgetTracker::new(TurnBudget::new(0));
+
+    assert!(tracker.check_wall_clock().is_err());
 }

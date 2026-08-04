@@ -620,10 +620,11 @@ fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEventBatch> {
         }
 
         "response.function_call_arguments.delta" => {
+            let (item_id, call_id) = responses_tool_identity(event);
             Some(StreamEventBatch::Single(StreamEvent::ToolInputDelta {
                 stream_id: None,
-                item_id: event.item_id.clone().unwrap_or_default(),
-                call_id: event.call_id.clone(),
+                item_id,
+                call_id,
                 name: None,
                 payload_delta: ToolCallDeltaPayload::FunctionArguments(
                     event.delta.clone().unwrap_or_default(),
@@ -632,14 +633,11 @@ fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEventBatch> {
         }
 
         "response.custom_tool_call_input.delta" => {
+            let (item_id, call_id) = responses_tool_identity(event);
             Some(StreamEventBatch::Single(StreamEvent::ToolInputDelta {
                 stream_id: None,
-                item_id: event
-                    .item_id
-                    .clone()
-                    .or_else(|| event.call_id.clone())
-                    .unwrap_or_default(),
-                call_id: event.call_id.clone(),
+                item_id,
+                call_id,
                 name: None,
                 payload_delta: ToolCallDeltaPayload::CustomInput(
                     event.delta.clone().unwrap_or_default(),
@@ -720,6 +718,28 @@ fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEventBatch> {
 
         _ => None,
     }
+}
+
+fn responses_tool_identity(event: &SseStreamEvent) -> (String, Option<String>) {
+    let item_id = event
+        .item_id
+        .as_deref()
+        .filter(|item_id| !item_id.is_empty())
+        .or_else(|| {
+            event
+                .call_id
+                .as_deref()
+                .filter(|call_id| !call_id.is_empty())
+        })
+        .unwrap_or_default()
+        .to_string();
+    let call_id = event
+        .call_id
+        .as_deref()
+        .filter(|call_id| !call_id.is_empty())
+        .map(String::from)
+        .or_else(|| (!item_id.is_empty()).then(|| item_id.clone()));
+    (item_id, call_id)
 }
 
 #[cfg(test)]
