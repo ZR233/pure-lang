@@ -108,30 +108,7 @@ pub(crate) struct TaskCoordinator {
     #[cfg(test)]
     pub(super) design_after_commit_barrier: Mutex<Option<super::design::DesignCommitTestBarrier>>,
     #[cfg(test)]
-    pub(super) design_before_head_persist_barrier:
-        Mutex<Option<super::design::DesignCommitTestBarrier>>,
-    #[cfg(test)]
-    pub(super) design_after_head_persist_barrier:
-        Mutex<Option<super::design::DesignCommitTestBarrier>>,
-    #[cfg(test)]
-    pub(super) design_before_rollback_barrier:
-        Mutex<Option<super::design::DesignCommitTestBarrier>>,
-    #[cfg(test)]
-    pub(super) fail_design_compensation: std::sync::atomic::AtomicBool,
-    #[cfg(test)]
-    pub(super) merge_cleanup_barrier: Mutex<Option<super::merge::MergeCleanupTestBarrier>>,
-    #[cfg(test)]
     pub(super) merge_after_commit_barrier: Mutex<Option<super::merge::MergeCommitTestBarrier>>,
-    #[cfg(test)]
-    pub(super) merge_before_proof_barrier: Mutex<Option<super::merge::MergeCommitTestBarrier>>,
-    #[cfg(test)]
-    pub(super) merge_after_acceptance_barrier: Mutex<Option<super::merge::MergeCommitTestBarrier>>,
-    #[cfg(test)]
-    pub(super) merge_after_abort_barrier: Mutex<Option<super::merge::MergeCommitTestBarrier>>,
-    #[cfg(test)]
-    pub(super) fail_merge_post_accept_read: std::sync::atomic::AtomicBool,
-    #[cfg(test)]
-    pub(super) merge_failure_point: Mutex<Option<super::merge::MergeFailureTestPoint>>,
 }
 
 /// 持有期间串行化任务分支变更，并阻止 executor 基于中间 HEAD 分配。
@@ -153,27 +130,7 @@ impl TaskCoordinator {
             #[cfg(test)]
             design_after_commit_barrier: Mutex::new(None),
             #[cfg(test)]
-            design_before_head_persist_barrier: Mutex::new(None),
-            #[cfg(test)]
-            design_after_head_persist_barrier: Mutex::new(None),
-            #[cfg(test)]
-            design_before_rollback_barrier: Mutex::new(None),
-            #[cfg(test)]
-            fail_design_compensation: std::sync::atomic::AtomicBool::new(false),
-            #[cfg(test)]
-            merge_cleanup_barrier: Mutex::new(None),
-            #[cfg(test)]
             merge_after_commit_barrier: Mutex::new(None),
-            #[cfg(test)]
-            merge_before_proof_barrier: Mutex::new(None),
-            #[cfg(test)]
-            merge_after_acceptance_barrier: Mutex::new(None),
-            #[cfg(test)]
-            merge_after_abort_barrier: Mutex::new(None),
-            #[cfg(test)]
-            fail_merge_post_accept_read: std::sync::atomic::AtomicBool::new(false),
-            #[cfg(test)]
-            merge_failure_point: Mutex::new(None),
         }
     }
 

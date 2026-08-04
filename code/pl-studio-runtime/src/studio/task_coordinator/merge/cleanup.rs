@@ -40,36 +40,6 @@ impl TaskCoordinator {
     }
 }
 
-#[cfg(test)]
-#[derive(Clone)]
-pub(crate) struct MergeCleanupTestBarrier {
-    entered: std::sync::Arc<tokio::sync::Barrier>,
-    release: std::sync::Arc<tokio::sync::Barrier>,
-}
-
-#[cfg(test)]
-impl MergeCleanupTestBarrier {
-    pub(crate) fn new() -> Self {
-        Self {
-            entered: std::sync::Arc::new(tokio::sync::Barrier::new(2)),
-            release: std::sync::Arc::new(tokio::sync::Barrier::new(2)),
-        }
-    }
-
-    pub(crate) async fn pause(&self) {
-        self.entered.wait().await;
-        self.release.wait().await;
-    }
-
-    pub(crate) async fn wait_until_entered(&self) {
-        self.entered.wait().await;
-    }
-
-    pub(crate) async fn release(&self) {
-        self.release.wait().await;
-    }
-}
-
 pub(crate) async fn cleanup_accepted_delivery(
     scope: &TaskMergeScope,
     runtime: Option<&AgentRuntimeHandle>,

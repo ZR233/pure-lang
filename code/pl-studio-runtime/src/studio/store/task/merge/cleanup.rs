@@ -118,9 +118,6 @@ impl StudioStore {
             bail!("accepted merge delivery head drifted");
         }
         Ok(TaskMergeScope {
-            #[cfg(test)]
-            origin_phase: TaskRunPhase::from_str(&run.phase)
-                .context("accepted merge run has invalid phase")?,
             run: task_run_record(run)?,
             lease: branch_lease_record(lease),
             work_unit: work_unit_record(work_unit)?,

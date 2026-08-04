@@ -65,8 +65,6 @@ impl TaskCoordinator {
             &delivery,
         )?;
         Ok(TaskMergeScope {
-            #[cfg(test)]
-            origin_phase: run.phase,
             run,
             lease,
             work_unit,
@@ -96,7 +94,6 @@ impl TaskCoordinator {
         self.store
             .record_merge_cleanup_attempting(&scope.merge.id)
             .await?;
-        self.pause_before_merge_cleanup().await;
         let cleanup = cleanup_accepted_delivery(scope, runtime).await;
         self.store
             .record_merge_cleanup(&scope.merge.id, cleanup.clone())

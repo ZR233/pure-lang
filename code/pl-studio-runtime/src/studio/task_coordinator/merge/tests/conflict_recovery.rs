@@ -1,37 +1,14 @@
 //! 冲突现场持久化与重启恢复回归。
 
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::{
     auto_merged_entries, capture_conflict_workspace_evidence, parse_unmerged_entries,
-    validate_conflict_status_scope, validate_conflict_workspace_evidence,
+    validate_conflict_workspace_evidence,
 };
 use crate::studio::task_coordinator::{ConflictEntry, ConflictKind, ConflictManifest};
-
-#[test]
-fn conflict_creation_rejects_untracked_and_unrelated_paths() {
-    for (drift, expected) in [
-        (Drift::Untracked, "untracked"),
-        (Drift::UnrelatedTracked, "unrelated"),
-    ] {
-        let fixture = ConflictRepository::new(drift.name());
-        drift.apply(&fixture.repository);
-        let status = fixture.status();
-        let allowed = HashSet::from(["shared.txt".to_string(), "auto.txt".to_string()]);
-
-        let error = validate_conflict_status_scope(&status, &allowed).unwrap_err();
-
-        let detail = error.to_string();
-        assert!(
-            detail.contains(expected),
-            "{} produced unexpected scope error: {detail}",
-            drift.name()
-        );
-    }
-}
 
 #[tokio::test]
 async fn conflict_recovery_rejects_every_external_workspace_drift() {

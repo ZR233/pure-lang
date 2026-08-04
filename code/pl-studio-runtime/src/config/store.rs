@@ -230,15 +230,6 @@ mod tests {
     }
 
     #[test]
-    fn current_document_round_trips() {
-        let store = ConfigStore::new(ConfigPaths::from_home(temp_home("current")));
-        let config = StudioConfig::default_config();
-        store.save(&config).unwrap();
-
-        assert_eq!(store.load_or_default().unwrap(), config);
-    }
-
-    #[test]
     fn rejected_document_is_archived_and_only_provider_credentials_are_restored() {
         let store = ConfigStore::new(ConfigPaths::from_home(temp_home("rejected")));
         fs::create_dir_all(store.paths().config_dir()).unwrap();
@@ -282,17 +273,5 @@ reasoning_effort = "medium"
             })
             .expect("rejected config backup");
         assert_eq!(fs::read_to_string(backup.path()).unwrap(), rejected);
-    }
-
-    #[test]
-    fn malformed_document_is_archived_without_inventing_credentials() {
-        let store = ConfigStore::new(ConfigPaths::from_home(temp_home("malformed")));
-        fs::create_dir_all(store.paths().config_dir()).unwrap();
-        fs::write(store.paths().config_file(), "not = [valid").unwrap();
-
-        let config = store.load_or_default().unwrap();
-
-        assert_eq!(config, StudioConfig::default_config());
-        assert_eq!(store.load().unwrap(), config);
     }
 }

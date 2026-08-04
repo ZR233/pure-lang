@@ -24,10 +24,6 @@ use std::sync::Arc;
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
-#[cfg(test)]
-pub(super) use barriers::MergeFailureTestPoint;
-#[cfg(test)]
-pub(crate) use cleanup::MergeCleanupTestBarrier;
 pub(crate) use verifier::MergeVerifier;
 pub(crate) use verifier::{ProductionMergeVerifier, select_merge_verification_commands};
 
@@ -335,7 +331,6 @@ impl TaskCoordinator {
             commit: merge_commit.clone(),
             expected_tree,
         };
-        self.pause_before_merge_proof().await;
         if let Err(error) = verify_created_merge_commit(scope, workspace, &proof).await {
             return self
                 .handle_merge_stage_failure(
@@ -372,7 +367,6 @@ impl TaskCoordinator {
                 )
                 .await;
         }
-        self.pause_after_merge_acceptance().await;
         let durable_run = match self.read_accepted_task_run(&scope.run.id).await {
             Ok(Some(run)) => run,
             Ok(None) => {

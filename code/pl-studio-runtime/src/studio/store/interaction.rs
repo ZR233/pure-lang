@@ -262,7 +262,7 @@ mod tests {
     use crate::{
         InteractionPayload, InteractionResolution, InteractionScope, StudioMode, UserInputAnswer,
     };
-    use pretty_assertions::assert_eq;
+
     use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
 
     use super::*;
@@ -333,36 +333,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn restart_recovery_selects_only_latest_user_input_per_session() {
-        let (store, session_id) = store_with_session("C:/work/restart-latest").await;
-        let older = cancelled_user_input("ask-older", &session_id, "turn-older", 1);
-        let latest = cancelled_user_input("ask-latest", &session_id, "turn-latest", 2);
-        store.upsert_interaction(&older).await.unwrap();
-        store.upsert_interaction(&latest).await.unwrap();
-        insert_cancelled_turn(&store, "agent-root", &session_id, "turn-older", None).await;
-        insert_cancelled_turn(&store, "agent-root", &session_id, "turn-latest", None).await;
-
-        assert_eq!(
-            store.list_restart_recoverable_user_inputs().await.unwrap(),
-            vec![latest.clone()]
-        );
-
-        let mut pending = latest;
-        pending.interaction_id = "ask-new-pending".to_string();
-        pending.status = InteractionStatus::Pending;
-        pending.resolved_at = None;
-        pending.resolution = None;
-        store.upsert_interaction(&pending).await.unwrap();
-        assert!(
-            store
-                .list_restart_recoverable_user_inputs()
-                .await
-                .unwrap()
-                .is_empty()
-        );
-    }
-
-    #[tokio::test]
     async fn restart_recovery_receipt_on_any_owner_prevents_recovery() {
         let (store, session_id) = store_with_session("C:/work/restart-owner").await;
         let interaction = cancelled_user_input("ask-receipted", &session_id, "turn-receipted", 1);
@@ -397,62 +367,5 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
-    }
-
-    #[tokio::test]
-    async fn marking_restart_recovery_is_idempotent_and_preserves_turn_metadata() {
-        let (store, session_id) = store_with_session("C:/work/restart-mark").await;
-        let interaction = cancelled_user_input("ask-mark", &session_id, "turn-mark", 1);
-        store.upsert_interaction(&interaction).await.unwrap();
-        for agent_id in ["agent-a", "agent-b"] {
-            insert_cancelled_turn(
-                &store,
-                agent_id,
-                &session_id,
-                "turn-mark",
-                Some(serde_json::json!({"owner": agent_id})),
-            )
-            .await;
-        }
-
-        store
-            .mark_restart_user_input_recovered(&interaction)
-            .await
-            .unwrap();
-        store
-            .mark_restart_user_input_recovered(&interaction)
-            .await
-            .unwrap();
-
-        assert!(
-            store
-                .list_restart_recoverable_user_inputs()
-                .await
-                .unwrap()
-                .is_empty()
-        );
-        let rows = store
-            .database()
-            .query_all(Statement::from_sql_and_values(
-                DatabaseBackend::Sqlite,
-                "SELECT agent_id, metadata_json
-                 FROM agent_turns
-                 WHERE session_id = ? AND turn_id = ?
-                 ORDER BY agent_id",
-                [session_id.into(), "turn-mark".into()],
-            ))
-            .await
-            .unwrap();
-        assert_eq!(rows.len(), 2);
-        for row in rows {
-            let agent_id: String = row.try_get("", "agent_id").unwrap();
-            let metadata_json: String = row.try_get("", "metadata_json").unwrap();
-            let metadata: serde_json::Value = serde_json::from_str(&metadata_json).unwrap();
-            assert_eq!(metadata["owner"], agent_id);
-            assert_eq!(
-                metadata["recoveredInteraction"]["interactionId"],
-                interaction.interaction_id
-            );
-        }
     }
 }

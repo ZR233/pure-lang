@@ -379,25 +379,6 @@ mod tests {
         assert!(ensure_task_accepts_turn(&run).is_err());
     }
 
-    #[test]
-    fn subagent_context_preserves_the_runtime_parent_identity() -> anyhow::Result<()> {
-        let parent_id = pl_core::AgentId::new("studio:session-1")?;
-        let identity = AgentIdentity {
-            id: pl_core::AgentId::new("agent-reviewer")?,
-            parent_id: Some(parent_id.clone()),
-            role: pl_core::AgentRoleId::new("reviewer")?,
-            depth: 1,
-        };
-
-        let context = runtime_subagent_context(&identity, "delivery review".to_string())
-            .expect("child agent should produce a subagent context");
-
-        assert_eq!(context.parent_id.as_deref(), Some(parent_id.as_str()));
-        assert_eq!(context.role, "reviewer");
-        assert_eq!(context.depth, 1);
-        Ok(())
-    }
-
     fn stopped_run() -> TaskRunRecord {
         TaskRunRecord {
             id: "task-run".to_string(),

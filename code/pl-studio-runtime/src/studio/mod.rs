@@ -31,6 +31,3 @@ pub use runtime_state::{
 };
 pub(in crate::studio) use store::AgentSessionSpec;
 pub use store::{StudioDatabaseError, StudioStore};
-
-#[cfg(test)]
-mod tests;

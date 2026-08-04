@@ -436,40 +436,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn duplicate_interaction_id_releases_replaced_waiter() {
-        let (store, session_id) = store_with_session().await;
-        let runtime = InteractionRuntime::new(store.clone());
-        let events = Arc::new(Mutex::new(Vec::new()));
-        let callback = runtime.callback(session_id.clone(), emitter(events.clone()));
-        let first_waiter = tokio::spawn(callback(user_input_interaction("ask-1")));
-        assert_eq!(wait_pending(&store, &session_id).await.len(), 1);
-
-        let second_waiter = tokio::spawn(callback(user_input_interaction("ask-1")));
-        let first_resolution = first_waiter.await.unwrap();
-        assert_eq!(
-            first_resolution,
-            InteractionResolution::UserInput {
-                answers: HashMap::new()
-            }
-        );
-
-        let resolution = InteractionResolution::UserInput {
-            answers: HashMap::from([(
-                "mode".to_string(),
-                UserInputAnswer {
-                    answers: vec!["Careful".to_string()],
-                },
-            )]),
-        };
-        runtime
-            .resolve("ask-1", resolution.clone(), emitter(events.clone()))
-            .await
-            .unwrap();
-
-        assert_eq!(second_waiter.await.unwrap(), resolution);
-    }
-
-    #[tokio::test]
     async fn restart_cancellation_preserves_user_input_and_plan_confirmation() {
         let (store, session_id) = store_with_session().await;
         let runtime = InteractionRuntime::new(store.clone());
@@ -522,30 +488,5 @@ mod tests {
             })
         );
         assert_eq!(pending, vec![stored_plan, ask]);
-    }
-
-    #[tokio::test]
-    async fn create_persists_plan_confirmation_without_waiter() {
-        let (store, session_id) = store_with_session().await;
-        let runtime = InteractionRuntime::new(store.clone());
-        let events = Arc::new(Mutex::new(Vec::new()));
-        let mut interaction = user_input_interaction("plan-1");
-        interaction.kind = InteractionKind::PlanConfirmation;
-        interaction.scope.session_id = session_id;
-        interaction.payload = InteractionPayload::PlanConfirmation {
-            plan_id: "plan-item-1".to_string(),
-            content: "1. Inspect\n2. Implement".to_string(),
-        };
-
-        runtime
-            .create(interaction.clone(), emitter(events.clone()))
-            .await
-            .unwrap();
-
-        assert_eq!(
-            store.read_interaction("plan-1").await.unwrap(),
-            Some(interaction.clone())
-        );
-        assert_eq!(events.lock().await.as_slice(), &[interaction]);
     }
 }

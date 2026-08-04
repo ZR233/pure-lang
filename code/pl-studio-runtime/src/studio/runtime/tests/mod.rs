@@ -36,10 +36,6 @@ impl TestHttpResponse {
     }
 }
 
-async fn serve_sse_once(sse_body: String) -> (String, tokio::task::JoinHandle<usize>) {
-    serve_http_sequence(vec![TestHttpResponse::sse(sse_body)]).await
-}
-
 async fn serve_http_sequence(
     responses: Vec<TestHttpResponse>,
 ) -> (String, tokio::task::JoinHandle<usize>) {
