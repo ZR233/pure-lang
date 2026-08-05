@@ -6,10 +6,11 @@ pub mod types;
 
 // Re-exports from submodules
 pub use self::handlers::{
-    BridgeStudioUpdateOperation, archive_project, bootstrap_studio, check_studio_update,
-    cleanup_project, cleanup_recovery_issue, init_app, initialize_runtime, install_studio_update,
-    interrupt_turn, list_discovered_skills, list_thread_turns, list_threads, load_provider_catalog,
-    load_provider_usages, load_web_search_settings, open_project, preview_project_cleanup,
+    BridgeStudioUpdateOperation, archive_project, archive_thread, bootstrap_studio,
+    check_studio_update, cleanup_project, cleanup_recovery_issue, create_thread, init_app,
+    initialize_runtime, install_studio_update, interrupt_turn, list_discovered_skills,
+    list_thread_turns, list_threads, load_provider_catalog, load_provider_usages,
+    load_web_search_settings, open_project, preview_project_cleanup,
     preview_recovery_issue_cleanup, read_thread, respond_interaction, save_general_settings,
     save_instructions_settings, save_mcp_settings, save_provider_settings,
     save_runtime_permission_mode, save_skills_settings, save_web_search_settings, select_project,

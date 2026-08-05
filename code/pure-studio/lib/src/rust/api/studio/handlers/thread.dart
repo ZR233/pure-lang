@@ -11,6 +11,32 @@ import '../types/settings.dart';
 import '../types/thread_stream.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
+/// Creates and selects a Simple-mode root Thread for a Project.
+///
+/// # Errors
+///
+/// Returns an error when the Project does not exist or the canonical snapshot cannot be read.
+Future<BridgeStudioSnapshotResponse> createThread({
+  required String projectId,
+  String? title,
+}) => RustLib.instance.api.crateApiStudioHandlersThreadCreateThread(
+  projectId: projectId,
+  title: title,
+);
+
+/// Archives a root Thread and selects the next available Thread.
+///
+/// # Errors
+///
+/// Returns an error when the Thread does not exist, is a child Thread, or its tree is active.
+Future<BridgeStudioSnapshotResponse> archiveThread({
+  required String threadId,
+  String? selectedThreadId,
+}) => RustLib.instance.api.crateApiStudioHandlersThreadArchiveThread(
+  threadId: threadId,
+  selectedThreadId: selectedThreadId,
+);
+
 /// Changes the selected root Thread between Simple and Task mode.
 ///
 /// # Errors

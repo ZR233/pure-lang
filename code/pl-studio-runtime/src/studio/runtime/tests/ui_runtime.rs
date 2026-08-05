@@ -72,6 +72,61 @@ async fn mode_switch_refreshes_authoritative_thread_snapshot() {
 }
 
 #[tokio::test]
+async fn archive_thread_rejects_child_and_cascades_from_idle_root() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let workspace = std::env::temp_dir().join(format!("pure-thread-archive-{unique}"));
+    std::fs::create_dir_all(&workspace).unwrap();
+    let store = StudioStore::open_memory().await.unwrap();
+    let runtime = StudioRuntime::new(
+        store.clone(),
+        ConfigStore::new(crate::config::ConfigPaths::from_home(&workspace)),
+    );
+    let project = runtime.open_project(&workspace).await.unwrap();
+    let root = runtime
+        .create_thread(&project.id, "Archive root")
+        .await
+        .unwrap();
+    let child_id = format!("{}-child", root.id);
+    let child = store
+        .create_child_thread(crate::studio::ChildThreadSpec {
+            id: child_id.clone(),
+            parent_thread_id: root.id.clone(),
+            agent_path: child_id,
+            role: "executor".to_string(),
+            title: "Archive child".to_string(),
+        })
+        .await
+        .unwrap();
+
+    let error = runtime
+        .archive_thread(child.id)
+        .await
+        .expect_err("a child Thread must not be archived directly");
+    assert!(error.to_string().contains("root Thread"));
+    assert_eq!(store.list_threads(&project.id).await.unwrap().len(), 2);
+
+    let archived = runtime
+        .archive_thread(root.id.clone())
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(archived.id, root.id);
+    assert!(store.list_threads(&project.id).await.unwrap().is_empty());
+    assert!(
+        store
+            .list_root_threads(&project.id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    let _ = std::fs::remove_dir_all(workspace);
+}
+
+#[tokio::test]
 async fn active_task_locks_session_mode_and_projects_coordinator_runtime() {
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -132,6 +187,10 @@ async fn active_task_locks_session_mode_and_projects_coordinator_runtime() {
         .set_thread_mode(&session.id, StudioMode::Simple)
         .await
         .unwrap_err();
+    let archive_error = runtime
+        .archive_thread(session.id.clone())
+        .await
+        .expect_err("an active Task must prevent Thread archival");
     let task = runtime
         .thread_task_view(&session.id)
         .await
@@ -139,6 +198,7 @@ async fn active_task_locks_session_mode_and_projects_coordinator_runtime() {
         .unwrap();
 
     assert!(error.to_string().contains("task is active"));
+    assert!(archive_error.to_string().contains("task is active"));
     assert_eq!(task.run_id, run.id);
     assert_eq!(task.phase, "designUpdating");
     assert_eq!(task.branch, run.branch);
@@ -149,6 +209,56 @@ async fn active_task_locks_session_mode_and_projects_coordinator_runtime() {
         .unwrap();
     let _ = std::fs::remove_dir_all(home);
     let _ = std::fs::remove_dir_all(workspace);
+}
+
+#[tokio::test]
+async fn active_turn_prevents_thread_archival() {
+    let (base_url, handle, accepted_rx, release_tx) = serve_delayed_sse().await;
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let home = std::env::temp_dir().join(format!("pure-thread-archive-home-{unique}"));
+    let workspace = std::env::temp_dir().join(format!("pure-thread-archive-workspace-{unique}"));
+    tokio::fs::create_dir_all(&workspace).await.unwrap();
+    let config_store = ConfigStore::new(crate::config::ConfigPaths::from_home(&home));
+    config_store.save(&test_config(base_url)).unwrap();
+    let store = StudioStore::open_memory().await.unwrap();
+    let runtime = StudioRuntime::new(store.clone(), config_store);
+    let project = runtime.open_project(&workspace).await.unwrap();
+    let thread = runtime
+        .create_thread(&project.id, "Active archive")
+        .await
+        .unwrap();
+
+    runtime
+        .submit_prompt(StudioSubmitPromptRequest {
+            thread_id: thread.id.clone(),
+            prompt: "stay active while archive is attempted".to_string(),
+            attachment_ids: Vec::new(),
+            options: StudioSubmitPromptOptions::default(),
+        })
+        .await
+        .unwrap();
+    tokio::time::timeout(TEST_RUNTIME_TIMEOUT, accepted_rx)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let error = runtime
+        .archive_thread(thread.id.clone())
+        .await
+        .expect_err("an active Turn must prevent Thread archival");
+
+    assert!(error.to_string().contains("active turn or pending input"));
+    assert_eq!(store.list_root_threads(&project.id).await.unwrap().len(), 1);
+    runtime.stop_prompt(thread.id).await.unwrap();
+    let _ = release_tx.send(());
+    wait_for_no_active_turn(&runtime).await;
+    handle.await.unwrap();
+    runtime.shutdown().await;
+    let _ = tokio::fs::remove_dir_all(home).await;
+    let _ = tokio::fs::remove_dir_all(workspace).await;
 }
 
 #[tokio::test]

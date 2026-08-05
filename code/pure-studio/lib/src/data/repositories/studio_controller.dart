@@ -59,6 +59,36 @@ class StudioController extends _$StudioController {
     await _adoptProductState(await _api.selectProject(projectId));
   }
 
+  Future<void> createThread() async {
+    final current = state.value;
+    final projectId = current?.selectedProjectId;
+    if (current == null ||
+        projectId == null ||
+        current.recoveryIssueForProject(projectId) != null) {
+      return;
+    }
+    await _adoptProductState(await _api.createThread(projectId));
+  }
+
+  Future<void> archiveThread(String threadId) async {
+    final current = state.value;
+    final thread = current?.threads
+        .where((candidate) => candidate.id == threadId && candidate.isRoot)
+        .firstOrNull;
+    if (current == null ||
+        thread == null ||
+        current.recoveryIssueForThread(threadId) != null ||
+        (current.isBusy && current.selectedRootThread?.id == threadId)) {
+      return;
+    }
+    await _adoptProductState(
+      await _api.archiveThread(
+        threadId,
+        selectedThreadId: current.selectedThreadId,
+      ),
+    );
+  }
+
   Future<void> archiveProject(String projectId) async {
     final current = state.value;
     if (current == null ||

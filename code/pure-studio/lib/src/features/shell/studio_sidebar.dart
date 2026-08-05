@@ -81,6 +81,9 @@ class _Sidebar extends ConsumerWidget {
                       selected: thread.id == state.selectedRootThreadId,
                       compact: compact,
                       recoveryIssue: state.recoveryIssueForThread(thread.id),
+                      canArchive:
+                          thread.id != state.selectedRootThreadId ||
+                          !state.isBusy,
                     ),
                 ],
               ),
@@ -215,12 +218,14 @@ class _ThreadTile extends ConsumerWidget {
     required this.selected,
     required this.compact,
     required this.recoveryIssue,
+    required this.canArchive,
   });
 
   final StudioThread thread;
   final bool selected;
   final bool compact;
   final StudioRecoveryIssue? recoveryIssue;
+  final bool canArchive;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -242,10 +247,23 @@ class _ThreadTile extends ConsumerWidget {
                     .read(studioControllerProvider.notifier)
                     .selectThread(thread.id)
               : null,
-          actionTooltip: context.l10n.recoveryCleanupTooltip,
-          actionIcon: Icons.delete_sweep_outlined,
-          onAction: issue?.canCleanup == true
-              ? () => _showRecoveryCleanupDialog(context, ref, issue!)
+          actionKey: issue == null
+              ? StudioDriverKeys.archiveThread(thread.id)
+              : null,
+          actionTooltip: issue == null
+              ? context.l10n.sidebarArchiveSession
+              : context.l10n.recoveryCleanupTooltip,
+          actionIcon: issue == null
+              ? Icons.archive_outlined
+              : Icons.delete_sweep_outlined,
+          onAction: issue != null
+              ? issue.canCleanup
+                    ? () => _showRecoveryCleanupDialog(context, ref, issue)
+                    : null
+              : canArchive
+              ? () => ref
+                    .read(studioControllerProvider.notifier)
+                    .archiveThread(thread.id)
               : null,
         ),
       );
@@ -271,19 +289,29 @@ class _ThreadTile extends ConsumerWidget {
                 .read(studioControllerProvider.notifier)
                 .selectThread(thread.id)
           : null,
-      trailing: issue == null
-          ? const SizedBox.shrink()
-          : IconButton(
-              tooltip: context.l10n.recoveryCleanupTooltip,
-              style: IconButton.styleFrom(
-                minimumSize: const Size.square(30),
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              icon: const Icon(Icons.delete_sweep_outlined, size: 18),
-              onPressed: issue.canCleanup
+      trailing: IconButton(
+        key: issue == null ? StudioDriverKeys.archiveThread(thread.id) : null,
+        tooltip: issue == null
+            ? context.l10n.sidebarArchiveSession
+            : context.l10n.recoveryCleanupTooltip,
+        style: IconButton.styleFrom(
+          minimumSize: const Size.square(30),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        ),
+        icon: Icon(
+          issue == null ? Icons.archive_outlined : Icons.delete_sweep_outlined,
+          size: 18,
+        ),
+        onPressed: issue != null
+            ? issue.canCleanup
                   ? () => _showRecoveryCleanupDialog(context, ref, issue)
-                  : null,
-            ),
+                  : null
+            : canArchive
+            ? () => ref
+                  .read(studioControllerProvider.notifier)
+                  .archiveThread(thread.id)
+            : null,
+      ),
     );
     return KeyedSubtree(
       key: StudioDriverKeys.threadRow(thread.id),
@@ -302,6 +330,7 @@ class _CompactSidebarTile extends StatefulWidget {
     required this.actionIcon,
     required this.onAction,
     this.iconColor,
+    this.actionKey,
   });
 
   final bool selected;
@@ -312,6 +341,7 @@ class _CompactSidebarTile extends StatefulWidget {
   final String actionTooltip;
   final IconData actionIcon;
   final VoidCallback? onAction;
+  final Key? actionKey;
 
   @override
   State<_CompactSidebarTile> createState() => _CompactSidebarTileState();
@@ -352,6 +382,7 @@ class _CompactSidebarTileState extends State<_CompactSidebarTile> {
                     opacity: actionVisible ? 1 : 0,
                     duration: const Duration(milliseconds: 120),
                     child: IconButton(
+                      key: widget.actionKey,
                       tooltip: widget.actionTooltip,
                       style: IconButton.styleFrom(
                         minimumSize: const Size.square(20),
@@ -517,6 +548,10 @@ class _SidebarActions extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final horizontalPadding = compact ? 8.0 : 14.0;
+    final selectedProjectId = state.selectedProjectId;
+    final canCreateThread =
+        selectedProjectId != null &&
+        state.recoveryIssueForProject(selectedProjectId) == null;
     final hasUpdate = ref.watch(
       studioUpdateControllerProvider.select((state) => state.hasUpdate),
     );
@@ -531,6 +566,15 @@ class _SidebarActions extends ConsumerWidget {
           ? Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                _SidebarActionButton(
+                  key: StudioDriverKeys.newSession,
+                  tooltip: context.l10n.sidebarNewSession,
+                  icon: Icons.add_comment_outlined,
+                  onPressed: canCreateThread
+                      ? ref.read(studioControllerProvider.notifier).createThread
+                      : null,
+                ),
+                const SizedBox(height: 4),
                 _SidebarActionButton(
                   key: StudioDriverKeys.openProject,
                   tooltip: context.l10n.sidebarOpenProject,
@@ -549,6 +593,15 @@ class _SidebarActions extends ConsumerWidget {
             )
           : Row(
               children: [
+                _SidebarActionButton(
+                  key: StudioDriverKeys.newSession,
+                  icon: Icons.add_comment_outlined,
+                  tooltip: context.l10n.sidebarNewSession,
+                  onPressed: canCreateThread
+                      ? ref.read(studioControllerProvider.notifier).createThread
+                      : null,
+                ),
+                const SizedBox(width: 4),
                 _SidebarActionButton(
                   key: StudioDriverKeys.openProject,
                   icon: Icons.create_new_folder,

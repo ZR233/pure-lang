@@ -10,6 +10,8 @@ class DemoStudioApi implements StudioApi {
   final Map<String, int> _promptGenerations = {};
   final Map<String, StudioMode> _threadModes = {};
   final Set<String> _archivedProjectIds = {};
+  final Set<String> _archivedThreadIds = {};
+  final List<StudioThread> _createdRootThreads = [];
 
   List<ProviderSettingsView>? _providers;
   List<RoleSettingsView>? _roles;
@@ -24,6 +26,8 @@ class DemoStudioApi implements StudioApi {
   );
   PermissionMode _permissionMode = PermissionMode.requestApproval;
   int _turnSequence = 0;
+  int _threadSequence = 0;
+  String? _selectedThreadId;
 
   Duration get promptStartDelay => const Duration(milliseconds: 120);
 
@@ -70,6 +74,12 @@ class DemoStudioApi implements StudioApi {
         permissionMode: _permissionMode,
       );
     }
+    final selectedThreadId =
+        threads
+            .where((thread) => thread.id == _selectedThreadId)
+            .firstOrNull
+            ?.id ??
+        threads.firstOrNull?.id;
     return StudioState(
       projects: [project],
       threads: threads,
@@ -104,7 +114,7 @@ class DemoStudioApi implements StudioApi {
       general: _general,
       webSearch: _webSearch,
       selectedProjectId: project.id,
-      selectedThreadId: threads.first.id,
+      selectedThreadId: selectedThreadId,
       permissionMode: _permissionMode,
     );
   }
@@ -179,7 +189,26 @@ class DemoStudioApi implements StudioApi {
     _workspaces[alternate.id] = _workspaces[alternate.id]!.copyWith(
       thread: alternate,
     );
-    return (project: project, threads: [root, reviewer, alternate]);
+    final threads = [root, reviewer, alternate, ..._createdRootThreads]
+        .where(
+          (thread) =>
+              !_archivedThreadIds.contains(thread.id) &&
+              !_archivedThreadIds.contains(thread.effectiveRootThreadId),
+        )
+        .toList();
+    for (final thread in _createdRootThreads) {
+      _workspaces.putIfAbsent(
+        thread.id,
+        () => ThreadWorkspace(
+          thread: thread,
+          revision: 0,
+          items: const [],
+          interactions: const [],
+          runtime: _emptyRuntimeView(),
+        ),
+      );
+    }
+    return (project: project, threads: threads);
   }
 
   ThreadWorkspace _rootWorkspace(StudioThread thread, DateTime now) {
@@ -319,6 +348,48 @@ class DemoStudioApi implements StudioApi {
 
   @override
   Future<StudioState> selectProject(String projectId) => bootstrap();
+
+  @override
+  Future<StudioState> createThread(String projectId, {String? title}) async {
+    final current = await bootstrap();
+    if (!current.projects.any((project) => project.id == projectId)) {
+      throw StateError('unknown demo project $projectId');
+    }
+    final now = DateTime.now();
+    final thread = StudioThread(
+      id: 'thread-created-${++_threadSequence}',
+      projectId: projectId,
+      title: title?.trim().isNotEmpty == true ? title!.trim() : 'New Session',
+      mode: StudioMode.simple,
+      role: 'executor',
+      createdAt: now,
+      updatedAt: now,
+    );
+    _createdRootThreads.add(thread);
+    _selectedThreadId = thread.id;
+    return bootstrap();
+  }
+
+  @override
+  Future<StudioState> archiveThread(
+    String threadId, {
+    String? selectedThreadId,
+  }) async {
+    final current = await bootstrap();
+    final thread = current.threads
+        .where((candidate) => candidate.id == threadId)
+        .firstOrNull;
+    if (thread == null || !thread.isRoot) {
+      throw StateError('only a root Thread can be archived');
+    }
+    final workspace = current.workspacesByThread[threadId];
+    if (workspace?.activeTurn?.state.isBusy ?? false) {
+      throw StateError('thread tree has an active turn or pending input');
+    }
+    _archivedThreadIds.add(threadId);
+    _selectedThreadId = selectedThreadId;
+    return bootstrap();
+  }
 
   @override
   Future<StudioState> archiveProject(

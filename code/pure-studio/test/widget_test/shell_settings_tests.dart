@@ -1,9 +1,7 @@
 part of '../widget_test.dart';
 
 void registerShellSettingsTests() {
-  testWidgets('sidebar exposes fixed root threads without mutation actions', (
-    tester,
-  ) async {
+  testWidgets('sidebar creates and selects a new root Thread', (tester) async {
     tester.view.physicalSize = const Size(1280, 800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -19,8 +17,117 @@ void registerShellSettingsTests() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(StudioDriverKeys.threadRow('session-1')), findsOneWidget);
-    expect(find.byKey(StudioDriverKeys.newSession), findsNothing);
-    expect(find.byTooltip('Archive session'), findsNothing);
+    expect(find.byKey(StudioDriverKeys.newSession), findsOneWidget);
+    expect(
+      find.byKey(StudioDriverKeys.archiveThread('session-1')),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.byKey(StudioDriverKeys.newSession));
+    await tester.pumpAndSettle();
+
+    expect(api.createdThreadProjectId, 'project-1');
+    expect(
+      find.byKey(StudioDriverKeys.threadRow('session-created')),
+      findsOneWidget,
+    );
+    expect(api.threadSubscriptions.last, 'session-created');
+  });
+
+  testWidgets('sidebar archives a root Thread and adopts canonical fallback', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final initial = _emptyState();
+    final first = initial.threads.single;
+    final second = StudioThread(
+      id: 'session-2',
+      projectId: first.projectId,
+      title: 'Session 2',
+      mode: StudioMode.simple,
+      updatedAt: DateTime.fromMillisecondsSinceEpoch(1),
+    );
+    final state = initial.copyWith(threads: [first, second]);
+    final api = _FakeStudioApi(state)
+      ..archiveThreadState = state.copyWith(
+        threads: [second],
+        selectedThreadId: second.id,
+      );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(StudioDriverKeys.archiveThread(first.id)));
+    await tester.pumpAndSettle();
+
+    expect(api.archivedThreadId, first.id);
+    expect(api.archiveSelectedThreadId, first.id);
+    expect(find.byKey(StudioDriverKeys.threadRow(first.id)), findsNothing);
+    expect(find.byKey(StudioDriverKeys.threadRow(second.id)), findsOneWidget);
+    expect(api.threadSubscriptions.last, second.id);
+  });
+
+  testWidgets('compact rail keeps new and archive Thread actions', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(800, 700);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _FakeStudioApi(_emptyState());
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(StudioDriverKeys.newSession), findsOneWidget);
+    expect(
+      find.byKey(StudioDriverKeys.archiveThread('session-1')),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(StudioDriverKeys.newSession));
+    await tester.pumpAndSettle();
+    expect(api.createdThreadProjectId, 'project-1');
+  });
+
+  testWidgets('selected busy root Thread cannot be archived', (tester) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final state = _withSelectedTurn(
+      _emptyState(),
+      _testTurn(
+        threadId: 'session-1',
+        state: const StudioTurnState.inProgress(StudioTurnActivity.responding),
+      ),
+    );
+    final api = _FakeStudioApi(state);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final button = tester.widget<IconButton>(
+      find.byKey(StudioDriverKeys.archiveThread('session-1')),
+    );
+    expect(button.onPressed, isNull);
   });
 
   testWidgets('driver project path dialog opens the entered project', (
@@ -87,6 +194,10 @@ void registerShellSettingsTests() {
     await tester.pumpAndSettle();
 
     final sidebar = find.byKey(const ValueKey('studio-sidebar'));
+    final newSession = find.widgetWithIcon(
+      IconButton,
+      Icons.add_comment_outlined,
+    );
     final openProject = find.widgetWithIcon(
       IconButton,
       Icons.create_new_folder,
@@ -95,13 +206,16 @@ void registerShellSettingsTests() {
 
     expect(sidebar, findsOneWidget);
     expect(find.byKey(StudioDriverKeys.openProject), findsOneWidget);
-    expect(find.byTooltip('新建会话'), findsNothing);
+    expect(find.byTooltip('新建会话'), findsOneWidget);
     expect(find.byTooltip('打开项目'), findsOneWidget);
     expect(find.byTooltip('设置'), findsOneWidget);
+    expect(newSession, findsOneWidget);
     expect(openProject, findsOneWidget);
     expect(settings, findsOneWidget);
+    expect(tester.getSize(newSession), const Size.square(40));
     expect(tester.getSize(openProject), const Size.square(40));
     expect(tester.getSize(settings), const Size.square(40));
+    expect(tester.getCenter(newSession).dy, tester.getCenter(openProject).dy);
     expect(tester.getCenter(openProject).dy, tester.getCenter(settings).dy);
     expect(
       find.descendant(of: sidebar, matching: find.byType(OutlinedButton)),

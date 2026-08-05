@@ -24,6 +24,11 @@ class _FakeStudioApi implements StudioApi {
   Object? bootstrapError;
   String? openedProjectPath;
   String? selectedProjectRequest;
+  String? createdThreadProjectId;
+  String? archivedThreadId;
+  String? archiveSelectedThreadId;
+  StudioState? createThreadState;
+  StudioState? archiveThreadState;
   String? archivedProjectId;
   String? archiveSelectedProjectId;
   ({String threadId, StudioMode mode})? modeUpdate;
@@ -102,6 +107,48 @@ class _FakeStudioApi implements StudioApi {
   Future<StudioState> selectProject(String projectId) async {
     selectedProjectRequest = projectId;
     return selectProjectStates[projectId] ?? initialState;
+  }
+
+  @override
+  Future<StudioState> createThread(String projectId, {String? title}) async {
+    createdThreadProjectId = projectId;
+    if (createThreadState case final next?) return next;
+    final now = DateTime.fromMillisecondsSinceEpoch(1);
+    final thread = StudioThread(
+      id: 'session-created',
+      projectId: projectId,
+      title: title ?? 'New Session',
+      mode: StudioMode.simple,
+      role: 'executor',
+      createdAt: now,
+      updatedAt: now,
+    );
+    return initialState.copyWith(
+      threads: [...initialState.threads, thread],
+      selectedProjectId: projectId,
+      selectedThreadId: thread.id,
+    );
+  }
+
+  @override
+  Future<StudioState> archiveThread(
+    String threadId, {
+    String? selectedThreadId,
+  }) async {
+    archivedThreadId = threadId;
+    archiveSelectedThreadId = selectedThreadId;
+    if (archiveThreadState case final next?) return next;
+    final threads = initialState.threads
+        .where((thread) => thread.effectiveRootThreadId != threadId)
+        .toList();
+    final remainingIds = threads.map((thread) => thread.id).toSet();
+    final nextSelected = remainingIds.contains(selectedThreadId)
+        ? selectedThreadId
+        : threads.where((thread) => thread.isRoot).firstOrNull?.id;
+    return initialState.copyWith(
+      threads: threads,
+      selectedThreadId: nextSelected,
+    );
   }
 
   @override

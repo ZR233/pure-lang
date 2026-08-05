@@ -137,9 +137,18 @@ secret 使用 preserve/replace/clear enum，不解析错误消息或 raw JSON �
 icon rail。普通 agent 正文无卡片背景，plan 使用轻边框，reasoning/tool 默认折叠。Composer、
 状态栏和阅读流同宽。设置页替换整个聊天页，不作为悬浮层。
 
+侧栏底部在宽布局和 icon rail 中都提供“新会话”操作；只有选中了无阻断恢复问题的 Project 时
+可用。该命令创建一个 Simple 模式 root Thread，并采用 Bridge 返回的 canonical product snapshot
+原子选择新 Thread。每个健康 root Thread 都提供“归档会话”操作；目标 root Thread 或其 child
+Thread 存在活动 Turn、pending input 或活动 Task 时必须拒绝归档。归档保留完整 Turn/Item 历史，
+同时归档该 root Thread 的 child Thread；Bridge 在同一 canonical snapshot 中回退到仍可用的 root
+Thread，没有剩余 root Thread 时按产品默认规则创建并选择空会话。故障 Thread 的同一 trailing
+位置继续展示恢复清理操作，不能绕过 recovery issue 门禁。
+
 ## 11.9 验收
 
 - Item timeline、reasoning、tool grouping、Composer revision 和 interaction dock 有 widget test；
+- 新建 root Thread、归档 root Thread、活动会话禁用以及宽侧栏/icon rail 操作有 widget test；
 - root/child 切换时 canonical workspace 与 UI ephemeral 状态均正确隔离；
 - lag、断流和旧 generation 不污染当前 workspace；
 - Flutter analyze、widget/integration tests 通过；

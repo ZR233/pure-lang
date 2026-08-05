@@ -45,13 +45,38 @@ impl StudioRuntime {
     }
 
     pub async fn archive_thread(&self, thread_id: String) -> Result<Option<ThreadRecord>> {
-        if self.thread_is_busy(&thread_id).await? {
-            bail!("thread has an active turn");
+        let Some(thread) = self.store.read_thread(&thread_id).await? else {
+            return Ok(None);
+        };
+        if thread.parent_thread_id.is_some() {
+            bail!("only a root Thread can be archived");
         }
-        let emitter = self.interaction_emitter(thread_id.clone());
-        self.interactions
-            .cancel_thread(&thread_id, "thread archived", emitter)
-            .await?;
+        if self
+            .store
+            .find_active_task_run_for_root_thread(&thread_id)
+            .await?
+            .is_some()
+        {
+            bail!("thread cannot be archived while a task is active");
+        }
+        let thread_tree = self
+            .store
+            .list_threads(&thread.project_id)
+            .await?
+            .into_iter()
+            .filter(|candidate| candidate.root_thread_id == thread_id)
+            .collect::<Vec<_>>();
+        for candidate in &thread_tree {
+            if self.thread_is_busy(&candidate.id).await? {
+                bail!("thread tree has an active turn or pending input");
+            }
+        }
+        for candidate in &thread_tree {
+            let emitter = self.interaction_emitter(candidate.id.clone());
+            self.interactions
+                .cancel_thread(&candidate.id, "thread archived", emitter)
+                .await?;
+        }
         let archived = self.store.archive_thread(&thread_id).await?;
         if let Some(thread) = &archived {
             self.product_events

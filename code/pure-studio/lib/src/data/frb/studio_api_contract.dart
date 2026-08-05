@@ -5,6 +5,11 @@ abstract class StudioApi {
   Future<StudioState> bootstrap();
   Future<StudioState> openProject(String path);
   Future<StudioState> selectProject(String projectId);
+  Future<StudioState> createThread(String projectId, {String? title});
+  Future<StudioState> archiveThread(
+    String threadId, {
+    String? selectedThreadId,
+  });
   Future<StudioState> archiveProject(
     String projectId, {
     String? selectedProjectId,
@@ -161,6 +166,32 @@ class FrbStudioApi implements StudioApi {
     await _ensureReady();
     return studioStateFromFrbSnapshot(
       await _bridgeCall(() => frb.selectProject(projectId: projectId)),
+    );
+  }
+
+  @override
+  Future<StudioState> createThread(String projectId, {String? title}) async {
+    await _ensureReady();
+    return studioStateFromFrbSnapshot(
+      await _bridgeCall(
+        () => frb.createThread(projectId: projectId, title: title),
+      ),
+    );
+  }
+
+  @override
+  Future<StudioState> archiveThread(
+    String threadId, {
+    String? selectedThreadId,
+  }) async {
+    await _ensureReady();
+    return studioStateFromFrbSnapshot(
+      await _bridgeCall(
+        () => frb.archiveThread(
+          threadId: threadId,
+          selectedThreadId: selectedThreadId,
+        ),
+      ),
     );
   }
 

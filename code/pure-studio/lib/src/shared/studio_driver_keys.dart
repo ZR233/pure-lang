@@ -41,6 +41,9 @@ abstract final class StudioDriverKeys {
   static ValueKey<String> threadRow(String id) =>
       ValueKey<String>('thread-row-$id');
 
+  static ValueKey<String> archiveThread(String id) =>
+      ValueKey<String>('thread-archive-$id');
+
   static ValueKey<String> turnActivity(String id) =>
       ValueKey<String>('turn-activity-$id');
 
