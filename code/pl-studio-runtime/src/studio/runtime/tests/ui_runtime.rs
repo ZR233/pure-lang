@@ -5,6 +5,73 @@ use pretty_assertions::assert_eq;
 use sea_orm::ConnectionTrait;
 
 #[tokio::test]
+async fn mode_switch_refreshes_authoritative_thread_snapshot() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let workspace = std::env::temp_dir().join(format!("pure-mode-switch-{unique}"));
+    std::fs::create_dir_all(&workspace).unwrap();
+    let store = StudioStore::open_memory().await.unwrap();
+    let runtime = StudioRuntime::new(
+        store,
+        ConfigStore::new(crate::config::ConfigPaths::from_home(&workspace)),
+    );
+    let project = runtime.open_project(&workspace).await.unwrap();
+    let thread = runtime
+        .create_thread(&project.id, "Mode switch")
+        .await
+        .unwrap();
+
+    let initial = runtime.thread_snapshot(&thread.id).await.unwrap();
+    assert_eq!(initial.thread.mode, pl_protocol::ThreadMode::Simple);
+
+    runtime
+        .set_thread_mode(&thread.id, StudioMode::Task)
+        .await
+        .unwrap();
+    let changed = runtime.thread_snapshot(&thread.id).await.unwrap();
+
+    assert_eq!(changed.thread.mode, pl_protocol::ThreadMode::Task);
+    assert_eq!(changed.thread.role, "planner");
+    let mut subscription = runtime
+        .subscribe_thread(pl_protocol::ThreadSubscriptionRequest {
+            thread_id: thread.id.clone(),
+        })
+        .await
+        .unwrap();
+    assert!(matches!(
+        subscription.recv().await,
+        Some(pl_protocol::ThreadSubscriptionUpdate::Snapshot { snapshot })
+            if snapshot.thread.mode == pl_protocol::ThreadMode::Task
+                && snapshot.thread.role == "planner"
+    ));
+    let child_id = format!("{}-child", thread.id);
+    let child = runtime
+        .store
+        .create_child_thread(crate::studio::ChildThreadSpec {
+            id: child_id.clone(),
+            parent_thread_id: thread.id,
+            agent_path: child_id,
+            role: "reviewer".to_string(),
+            title: "Mode switch child".to_string(),
+        })
+        .await
+        .unwrap();
+
+    let error = runtime
+        .set_thread_mode(&child.id, StudioMode::Simple)
+        .await
+        .unwrap_err();
+    let unchanged_child = runtime.store.read_thread(&child.id).await.unwrap().unwrap();
+
+    assert!(error.to_string().contains("root Thread"));
+    assert_eq!(unchanged_child.mode, "task");
+    assert_eq!(unchanged_child.role, "reviewer");
+    let _ = std::fs::remove_dir_all(workspace);
+}
+
+#[tokio::test]
 async fn active_task_locks_session_mode_and_projects_coordinator_runtime() {
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

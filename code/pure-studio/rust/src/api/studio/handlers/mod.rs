@@ -5,6 +5,7 @@ pub mod providers;
 pub mod recovery;
 pub mod settings;
 mod snapshot;
+pub mod thread;
 pub mod updater;
 
 pub use history::{list_thread_turns, list_threads, read_thread};
@@ -23,4 +24,5 @@ pub use settings::{
     save_instructions_settings, save_mcp_settings, save_provider_settings,
     save_runtime_permission_mode, save_skills_settings, save_web_search_settings, set_model_role,
 };
+pub use thread::set_thread_mode;
 pub use updater::{BridgeStudioUpdateOperation, check_studio_update, install_studio_update};

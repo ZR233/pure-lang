@@ -43,16 +43,20 @@ StudioState applyThreadSnapshot(
 ) {
   final threadId = workspace.thread.id;
   if (threadId.isEmpty) return current;
-  final workspaces = Map<String, ThreadWorkspace>.from(
-    current.workspacesByThread,
-  )..[threadId] = _sortedWorkspace(workspace);
+  final directoryThread = current.threads
+      .where((thread) => thread.id == threadId)
+      .firstOrNull;
+  final workspaces =
+      Map<String, ThreadWorkspace>.from(current.workspacesByThread)
+        ..[threadId] = _sortedWorkspace(
+          workspace.copyWith(thread: directoryThread ?? workspace.thread),
+        );
   final workspaceUi = Map<String, WorkspaceUiState>.from(
     current.workspaceUiByThread,
   );
   workspaceUi[threadId] = (workspaceUi[threadId] ?? const WorkspaceUiState())
       .copyWith(syncState: AgentWorkspaceSyncState.ready);
   return current.copyWith(
-    threads: _upsertThread(current.threads, workspace.thread),
     workspacesByThread: workspaces,
     workspaceUiByThread: workspaceUi,
   );
@@ -157,6 +161,30 @@ StudioState mergeStudioConfigState(StudioState current, StudioState next) {
     webSearch: next.webSearch,
     permissionMode: next.permissionMode,
     recoveryIssues: next.recoveryIssues,
+  );
+}
+
+StudioState mergeStudioThreadState(
+  StudioState current,
+  StudioState next,
+  String threadId,
+) {
+  final thread = next.threads
+      .where((candidate) => candidate.id == threadId)
+      .firstOrNull;
+  if (thread == null) return current;
+  final workspace = current.workspacesByThread[threadId];
+  return current.copyWith(
+    threads: [
+      for (final candidate in current.threads)
+        candidate.id == threadId ? thread : candidate,
+    ],
+    workspacesByThread: workspace == null
+        ? current.workspacesByThread
+        : {
+            ...current.workspacesByThread,
+            threadId: workspace.copyWith(thread: thread),
+          },
   );
 }
 
@@ -283,6 +311,7 @@ StudioState _replaceThreadDirectory(
           ...incoming,
         ];
   final knownIds = threads.map((thread) => thread.id).toSet();
+  final threadsById = {for (final thread in threads) thread.id: thread};
   var selectedThreadId = current.selectedThreadId;
   if (selectedThreadId != null && !knownIds.contains(selectedThreadId)) {
     selectedThreadId = threads
@@ -294,9 +323,11 @@ StudioState _replaceThreadDirectory(
         .firstOrNull
         ?.id;
   }
-  final workspaces = Map<String, ThreadWorkspace>.from(
-    current.workspacesByThread,
-  )..removeWhere((id, _) => !knownIds.contains(id));
+  final workspaces = {
+    for (final entry in current.workspacesByThread.entries)
+      if (knownIds.contains(entry.key))
+        entry.key: entry.value.copyWith(thread: threadsById[entry.key]),
+  };
   final workspaceUi = Map<String, WorkspaceUiState>.from(
     current.workspaceUiByThread,
   )..removeWhere((id, _) => !knownIds.contains(id));
@@ -336,21 +367,17 @@ StudioState _withThreadDirectoryEntry(
     role: agent.role,
     status: agent.status,
   );
-  return current.copyWith(threads: threads);
-}
-
-List<StudioThread> _upsertThread(
-  List<StudioThread> current,
-  StudioThread incoming,
-) {
-  final threads = [...current];
-  final index = threads.indexWhere((thread) => thread.id == incoming.id);
-  if (index < 0) {
-    threads.add(incoming);
-  } else {
-    threads[index] = incoming;
-  }
-  return threads;
+  final canonical = threads[index];
+  final workspace = current.workspacesByThread[canonical.id];
+  return current.copyWith(
+    threads: threads,
+    workspacesByThread: workspace == null
+        ? current.workspacesByThread
+        : {
+            ...current.workspacesByThread,
+            canonical.id: workspace.copyWith(thread: canonical),
+          },
+  );
 }
 
 bool _sameItemIdentity(ThreadItemView left, ThreadItemView right) {

@@ -29,6 +29,10 @@ abstract class StudioApi {
     String? effort,
     String? selectedThreadId,
   });
+  Future<StudioState> setThreadMode({
+    required String threadId,
+    required StudioMode mode,
+  });
   Stream<Object> subscribeProductEvents();
   Stream<ThreadStreamFrame> subscribeThread(String threadId);
   Future<ThreadHistoryPage> listThreadTurns(
@@ -251,6 +255,25 @@ class FrbStudioApi implements StudioApi {
           model: model,
           effort: effort,
           selectedThreadId: selectedThreadId,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Future<StudioState> setThreadMode({
+    required String threadId,
+    required StudioMode mode,
+  }) async {
+    await _ensureReady();
+    return studioStateFromFrbSnapshot(
+      await _bridgeCall(
+        () => frb.setThreadMode(
+          threadId: threadId,
+          mode: switch (mode) {
+            StudioMode.simple => frb.BridgeThreadMode.simple,
+            StudioMode.task => frb.BridgeThreadMode.task,
+          },
         ),
       ),
     );

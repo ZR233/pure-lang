@@ -126,18 +126,34 @@ impl StudioRuntime {
         request: pl_protocol::ThreadSubscriptionRequest,
     ) -> Result<pl_core::ThreadEventSubscription> {
         let (handle, _) = self.ensure_thread_agent(&request.thread_id).await?;
-        handle
+        let thread_id = request.thread_id.clone();
+        let mut subscription = handle
             .subscribe_thread(request)
-            .map_err(|error| anyhow::anyhow!(error))
+            .map_err(|error| anyhow::anyhow!(error))?;
+        subscription
+            .replace_bootstrap_thread(self.read_protocol_thread(&thread_id).await?)
+            .map_err(|error| anyhow::anyhow!(error))?;
+        Ok(subscription)
     }
 
     /// 读取包含尚未终态化 delta overlay 的 authoritative Thread snapshot。
     pub async fn thread_snapshot(&self, thread_id: &str) -> Result<pl_protocol::ThreadSnapshot> {
         let (handle, _) = self.ensure_thread_agent(thread_id).await?;
-        let thread_id = pl_core::ThreadId::new(thread_id.to_string())?;
-        handle
-            .thread_snapshot(&thread_id)
-            .map_err(|error| anyhow::anyhow!(error))
+        let core_thread_id = pl_core::ThreadId::new(thread_id.to_string())?;
+        let mut snapshot = handle
+            .thread_snapshot(&core_thread_id)
+            .map_err(|error| anyhow::anyhow!(error))?;
+        snapshot.thread = self.read_protocol_thread(thread_id).await?;
+        Ok(snapshot)
+    }
+
+    async fn read_protocol_thread(&self, thread_id: &str) -> Result<pl_protocol::Thread> {
+        Ok(self
+            .store
+            .read_thread(thread_id)
+            .await?
+            .context("selected Thread not found")?
+            .into())
     }
 
     async fn shutdown_agent_framework(&self) -> Result<()> {

@@ -8,6 +8,7 @@ class DemoStudioApi implements StudioApi {
   final _threadEvents = StreamController<ThreadStreamFrame>.broadcast();
   final Map<String, ThreadWorkspace> _workspaces = {};
   final Map<String, int> _promptGenerations = {};
+  final Map<String, StudioMode> _threadModes = {};
   final Set<String> _archivedProjectIds = {};
 
   List<ProviderSettingsView>? _providers;
@@ -22,7 +23,6 @@ class DemoStudioApi implements StudioApi {
     model: 'gpt-5',
   );
   PermissionMode _permissionMode = PermissionMode.requestApproval;
-  final StudioMode _threadMode = StudioMode.simple;
   int _turnSequence = 0;
 
   Duration get promptStartDelay => const Duration(milliseconds: 120);
@@ -117,11 +117,15 @@ class DemoStudioApi implements StudioApi {
       name: 'pure-lang',
       path: r'C:\Users\zhoudongsheng\.codex\worktrees\3bc1\pure-lang',
     );
+    final rootMode = _threadModes['thread-main'] ?? StudioMode.simple;
+    final reviewerMode = _threadModes['thread-reviewer'] ?? StudioMode.simple;
+    final alternateMode = _threadModes['thread-alt'] ?? StudioMode.simple;
     final root = StudioThread(
       id: 'thread-main',
       projectId: project.id,
       title: 'Flutter + FRB 重构',
-      mode: _threadMode,
+      mode: rootMode,
+      role: rootMode == StudioMode.task ? 'planner' : 'executor',
       createdAt: now.subtract(const Duration(minutes: 10)),
       updatedAt: now,
       agentPath: 'root',
@@ -130,7 +134,7 @@ class DemoStudioApi implements StudioApi {
       id: 'thread-reviewer',
       projectId: project.id,
       title: 'Driver reviewer',
-      mode: _threadMode,
+      mode: reviewerMode,
       createdAt: now.subtract(const Duration(minutes: 7)),
       updatedAt: now.subtract(const Duration(minutes: 7)),
       parentThreadId: root.id,
@@ -143,7 +147,8 @@ class DemoStudioApi implements StudioApi {
       id: 'thread-alt',
       projectId: project.id,
       title: 'Riverpod selector audit',
-      mode: _threadMode,
+      mode: alternateMode,
+      role: alternateMode == StudioMode.task ? 'planner' : 'executor',
       createdAt: now.subtract(const Duration(minutes: 3)),
       updatedAt: now.subtract(const Duration(minutes: 3)),
       agentPath: 'root-alt',
@@ -166,6 +171,13 @@ class DemoStudioApi implements StudioApi {
         'future-model',
         now.subtract(const Duration(minutes: 2)),
       ),
+    );
+    _workspaces[root.id] = _workspaces[root.id]!.copyWith(thread: root);
+    _workspaces[reviewer.id] = _workspaces[reviewer.id]!.copyWith(
+      thread: reviewer,
+    );
+    _workspaces[alternate.id] = _workspaces[alternate.id]!.copyWith(
+      thread: alternate,
     );
     return (project: project, threads: [root, reviewer, alternate]);
   }
@@ -380,6 +392,40 @@ class DemoStudioApi implements StudioApi {
               )
             : role,
     ];
+    return bootstrap();
+  }
+
+  @override
+  Future<StudioState> setThreadMode({
+    required String threadId,
+    required StudioMode mode,
+  }) async {
+    final current = await bootstrap();
+    final thread = current.threads
+        .where((candidate) => candidate.id == threadId)
+        .firstOrNull;
+    if (thread == null) {
+      throw StateError('unknown demo thread $threadId');
+    }
+    if (!thread.isRoot) {
+      throw StateError('only a root Thread can change mode');
+    }
+    if (current.tasksByRootThread[threadId]?.isActive ?? false) {
+      throw StateError('thread mode cannot change while a task is active');
+    }
+    _threadModes[threadId] = mode;
+    final workspace = _workspaces[threadId];
+    if (workspace != null) {
+      final thread = workspace.thread;
+      _workspaces[threadId] = workspace.copyWith(
+        thread: thread.copyWith(
+          mode: mode,
+          role: thread.isRoot
+              ? (mode == StudioMode.task ? 'planner' : 'executor')
+              : thread.role,
+        ),
+      );
+    }
     return bootstrap();
   }
 

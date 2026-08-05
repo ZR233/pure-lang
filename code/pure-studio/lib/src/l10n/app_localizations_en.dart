@@ -197,6 +197,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get statusSessionMode => 'Session mode';
 
   @override
+  String get statusSessionModeLocked =>
+      'Session mode cannot change while a Task is active';
+
+  @override
   String get statusPlannerModel => 'Planner model';
 
   @override

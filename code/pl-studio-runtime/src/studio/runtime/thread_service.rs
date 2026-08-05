@@ -93,6 +93,14 @@ impl StudioRuntime {
     }
 
     pub async fn set_thread_mode(&self, thread_id: &str, mode: StudioMode) -> Result<()> {
+        let thread = self
+            .store
+            .read_thread(thread_id)
+            .await?
+            .context("selected Thread not found")?;
+        if thread.parent_thread_id.is_some() {
+            bail!("only a root Thread can change mode");
+        }
         if self
             .store
             .find_active_task_run_for_root_thread(thread_id)
@@ -102,9 +110,6 @@ impl StudioRuntime {
             bail!("thread mode cannot change while a task is active");
         }
         self.store.set_thread_mode(thread_id, mode).await?;
-        let Some(thread) = self.store.read_thread(thread_id).await? else {
-            return Ok(());
-        };
         self.product_events
             .emit_thread_directory(&thread.project_id)
             .await?;

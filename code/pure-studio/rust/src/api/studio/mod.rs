@@ -13,7 +13,7 @@ pub use self::handlers::{
     preview_recovery_issue_cleanup, read_thread, respond_interaction, save_general_settings,
     save_instructions_settings, save_mcp_settings, save_provider_settings,
     save_runtime_permission_mode, save_skills_settings, save_web_search_settings, select_project,
-    set_model_role, shutdown_runtime, start_runtime, start_turn, steer_turn,
+    set_model_role, set_thread_mode, shutdown_runtime, start_runtime, start_turn, steer_turn,
 };
 pub use self::subscription::{
     BridgeEventSubscription, BridgeProductStreamEnvelope, BridgeThreadStreamEnvelope,

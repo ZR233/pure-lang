@@ -26,6 +26,7 @@ class _FakeStudioApi implements StudioApi {
   String? selectedProjectRequest;
   String? archivedProjectId;
   String? archiveSelectedProjectId;
+  ({String threadId, StudioMode mode})? modeUpdate;
   _RoleUpdate? roleUpdate;
   Map<String, Object?>? savedProviderSettings;
   Map<String, Object?>? savedInstructionsSettings;
@@ -203,6 +204,43 @@ class _FakeStudioApi implements StudioApi {
                 )
               : role,
       ],
+    );
+  }
+
+  @override
+  Future<StudioState> setThreadMode({
+    required String threadId,
+    required StudioMode mode,
+  }) async {
+    final thread = initialState.threads
+        .where((candidate) => candidate.id == threadId)
+        .firstOrNull;
+    if (thread == null) {
+      throw StateError('unknown fake thread $threadId');
+    }
+    if (!thread.isRoot) {
+      throw StateError('only a root Thread can change mode');
+    }
+    if (initialState.tasksByRootThread[threadId]?.isActive ?? false) {
+      throw StateError('thread mode cannot change while a task is active');
+    }
+    modeUpdate = (threadId: threadId, mode: mode);
+    final updated = thread.copyWith(
+      mode: mode,
+      role: mode == StudioMode.task ? 'planner' : 'executor',
+    );
+    final workspace = initialState.workspacesByThread[threadId];
+    return initialState.copyWith(
+      threads: [
+        for (final candidate in initialState.threads)
+          candidate.id == threadId ? updated : candidate,
+      ],
+      workspacesByThread: workspace == null
+          ? initialState.workspacesByThread
+          : {
+              ...initialState.workspacesByThread,
+              threadId: workspace.copyWith(thread: updated),
+            },
     );
   }
 

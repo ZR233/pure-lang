@@ -4,9 +4,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 use pl_protocol::{
-    InteractionStatus, ThreadItem, ThreadItemContent, ThreadItemDelta, ThreadItemDeltaField,
-    ThreadNotification, ThreadNotificationEnvelope, ThreadSnapshot, ThreadSubscriptionRequest,
-    ThreadSubscriptionUpdate,
+    InteractionStatus, Thread, ThreadItem, ThreadItemContent, ThreadItemDelta,
+    ThreadItemDeltaField, ThreadNotification, ThreadNotificationEnvelope, ThreadSnapshot,
+    ThreadSubscriptionRequest, ThreadSubscriptionUpdate,
 };
 use tokio::sync::{Mutex as AsyncMutex, mpsc};
 
@@ -435,6 +435,34 @@ pub struct ThreadEventSubscription {
 impl ThreadEventSubscription {
     pub fn thread_id(&self) -> &str {
         &self.thread_id
+    }
+
+    /// Rebinds the undelivered bootstrap snapshot to product-owned Thread metadata.
+    ///
+    /// Product adapters call this after the listener has been registered and after
+    /// reading their durable Thread directory. Timeline and runtime projection state
+    /// remains owned by this subscription snapshot.
+    pub fn replace_bootstrap_thread(&mut self, thread: Thread) -> Result<(), ThreadEventError> {
+        if thread.id != self.thread_id {
+            return Err(ThreadEventError::ThreadMismatch {
+                expected: self.thread_id.clone(),
+                actual: thread.id,
+            });
+        }
+        let snapshot = self
+            .bootstrap
+            .iter_mut()
+            .find_map(|update| match update {
+                ThreadSubscriptionUpdate::Snapshot { snapshot } => Some(snapshot),
+                ThreadSubscriptionUpdate::Notification { .. } => None,
+            })
+            .ok_or_else(|| {
+                ThreadEventError::ProjectionInvariant(
+                    "thread subscription bootstrap snapshot was already consumed".to_string(),
+                )
+            })?;
+        snapshot.thread = thread;
+        Ok(())
     }
 
     pub async fn recv(&mut self) -> Option<ThreadSubscriptionUpdate> {
