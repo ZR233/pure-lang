@@ -11,8 +11,8 @@ flutter_rust_bridge、Studio 产品运行时和产品无关的 Thread runtime �
   child Thread 是子代理自己的会话。
 - `Turn`：Thread 中一次由明确输入启动的执行，状态为 queued、inProgress、completed、
   failed 或 interrupted。
-- `Item`：Turn 内按固定顺序出现的用户消息、agent 消息、reasoning、plan、tool call、file
-  或内部 context compaction。
+- `Item`：Turn 内按固定顺序出现的用户消息、agent 消息、reasoning、plan、tool call、file，
+  以及内部 context patch / context compaction。
 - `Interaction`：等待用户回答的 user input、tool approval 或 plan confirmation；它不是普通
  聊天 Item。
 
@@ -40,7 +40,7 @@ ThreadManager → ThreadActor → TurnEngine
 | 事实 | 唯一拥有者 |
 | --- | --- |
 | Thread、Turn、Item、输入、Interaction | `studio.sqlite` |
-| 活动 Turn、流式增量、steer、取消 identity | `ThreadActor` |
+| 活动 Turn、流式增量、steer、取消 identity、prompt generation | `ThreadActor` |
 | Task/worktree/review/merge/lease | `TaskService` 对应表 |
 | Composer、滚动、展开、订阅 generation | Flutter `WorkspaceUiState` |
 

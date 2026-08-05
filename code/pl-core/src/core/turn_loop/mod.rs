@@ -17,13 +17,16 @@ use crate::context_compaction::{
     ensure_provider_can_consume_session, maybe_compact_session,
 };
 use crate::instruction::{InstructionAssembler, InstructionAssemblyRequest};
-use crate::runtime_usage::{agent_runtime_delta, identity_for_subagent, token_usage_snapshot};
+use crate::runtime_usage::{
+    agent_runtime_delta, identity_for_subagent, inference_billing_record, token_usage_snapshot,
+};
 use crate::session::AgentSession;
 use crate::trace::TraceRecorder;
 use crate::turn::{
     BudgetLimit, BudgetTracker, TurnOptions, TurnRequest, TurnResult, TurnResultStatus,
 };
 use crate::working_set::{TurnWorkingSetChange, TurnWorkingSetHandle, canonical_content_hash};
+use crate::{AgentInferenceCommit, PromptCacheInput, prepare_prompt_context, stable_tool_schemas};
 
 use super::TurnEngine;
 use super::permission::cancellation_reason;
@@ -53,10 +56,10 @@ pub(super) async fn run_turn_with_trace(
     let workspace_instructions = core.workspace_instructions.clone();
     let active_subagent = core.active_subagent.clone();
     let cancellation_token = options.cancellation_token.clone();
-    let tool_schemas = match options.execution_policy.as_ref() {
+    let tool_schemas = stable_tool_schemas(match options.execution_policy.as_ref() {
         Some(policy) => core.tools.schemas_for_policy(policy),
         None => core.tools.schemas(),
-    };
+    });
     let mut budget_tracker = BudgetTracker::new(request.budget);
     let mut budget_limit: Option<BudgetLimit> = None;
 
@@ -166,13 +169,43 @@ pub(super) async fn run_turn_with_trace(
         let iteration_tools = tool_schemas.clone();
         let iteration_snapshot = turn_instruction_snapshot.clone();
         let instruction_bundle = iteration_snapshot.to_bundle();
+        let model_capabilities = provider.effective_model_capabilities(&model);
+        let parallel_tool_calls = should_request_parallel_tool_calls(model_capabilities, &options);
+        if prepare_prompt_context(
+            session,
+            PromptCacheInput {
+                scope: &options.prompt_scope,
+                turn_id: &turn_id,
+                provider: provider.info(),
+                model: &model,
+                instructions: &instruction_bundle.instructions,
+                prelude_messages: &instruction_bundle.prelude_messages,
+                tools: &iteration_tools,
+                tool_choice: "auto",
+                parallel_tool_calls,
+                reasoning: reasoning.as_ref(),
+                output_schema: None,
+                service_tier: None,
+                compacted: false,
+                updated_at: unix_seconds(),
+            },
+        )?
+        .is_some()
+        {
+            persist_checkpoint(
+                &options,
+                session,
+                crate::TurnCheckpointReason::WorkingSetChanged,
+            )
+            .await?;
+            safe_message_count = session.len();
+            session_message_count = safe_message_count;
+        }
         let mut assembled_context = ContextAssembler::assemble(
             &instruction_bundle.instructions,
             &instruction_bundle.prelude_messages,
             session.items(),
         )?;
-        let model_capabilities = provider.effective_model_capabilities(&model);
-        let parallel_tool_calls = should_request_parallel_tool_calls(model_capabilities, &options);
 
         let compaction_trigger = provider_prompt_tokens_for_compaction.take().map_or(
             crate::context_compaction::CompactionTrigger::EstimatedTokens,
@@ -211,36 +244,70 @@ pub(super) async fn run_turn_with_trace(
                     last_compacted_state = Some((session.revision(), session.len()));
                     safe_message_count = session.len();
                     session_message_count = safe_message_count;
-                    if let Some(usage) = usage {
+                    let compaction_inference = usage.map(|usage| {
                         total_usage.prompt_tokens += usage.prompt_tokens;
                         total_usage.completion_tokens += usage.completion_tokens;
                         total_usage.cached_prompt_tokens += usage.cached_prompt_tokens;
                         total_usage.reasoning_tokens += usage.reasoning_tokens;
                         let usage_snapshot = token_usage_snapshot(&usage);
                         let model_info = provider.model_info(&model);
-                        recorder.broadcast(AgentEvent::AgentRuntimeUpdated {
-                            delta: agent_runtime_delta(
-                                format!("{turn_id}-compact-{iteration}"),
+                        let inference_id = format!("{turn_id}-compact-{iteration}");
+                        let recorded_at = unix_seconds();
+                        AgentInferenceCommit {
+                            billing: inference_billing_record(
+                                inference_id.clone(),
+                                provider.info().name.clone(),
+                                model.clone(),
+                                &usage,
+                                &model_info,
+                                recorded_at,
+                            ),
+                            runtime_delta: agent_runtime_delta(
+                                inference_id,
                                 identity_for_subagent(active_subagent.as_ref()),
                                 &model_info,
                                 usage_snapshot,
-                                unix_seconds(),
+                                recorded_at,
                             ),
-                        });
-                    }
+                        }
+                    });
                     context_compactions.push(snapshot);
                     working_set.sync_session(session)?;
+                    prepare_prompt_context(
+                        session,
+                        PromptCacheInput {
+                            scope: &options.prompt_scope,
+                            turn_id: &turn_id,
+                            provider: provider.info(),
+                            model: &model,
+                            instructions: &instruction_bundle.instructions,
+                            prelude_messages: &instruction_bundle.prelude_messages,
+                            tools: &iteration_tools,
+                            tool_choice: "auto",
+                            parallel_tool_calls,
+                            reasoning: reasoning.as_ref(),
+                            output_schema: None,
+                            service_tier: None,
+                            compacted: true,
+                            updated_at: unix_seconds(),
+                        },
+                    )?;
                     assembled_context = ContextAssembler::assemble(
                         &instruction_bundle.instructions,
                         &instruction_bundle.prelude_messages,
                         session.items(),
                     )?;
-                    persist_checkpoint(
-                        &options,
-                        session,
-                        crate::TurnCheckpointReason::ContextCompacted,
-                    )
-                    .await?;
+                    if let Some(inference) = compaction_inference {
+                        commit_and_publish_inference(&options, session, recorder, inference)
+                            .await?;
+                    } else {
+                        persist_checkpoint(
+                            &options,
+                            session,
+                            crate::TurnCheckpointReason::ContextCompacted,
+                        )
+                        .await?;
+                    }
                 }
                 Err(error) => {
                     let (error, severity, failure) =
@@ -271,6 +338,8 @@ pub(super) async fn run_turn_with_trace(
             crate::TurnCheckpointReason::BeforeInference,
         )
         .await?;
+        safe_message_count = session.len();
+        session_message_count = safe_message_count;
         let history_items = materialize_context_items(
             &assembled_context.history,
             &request.materialized_attachments,
@@ -390,6 +459,24 @@ pub(super) async fn run_turn_with_trace(
         let usage_snapshot = token_usage_snapshot(&response.usage);
         recorder.complete_inference_item(inference_item, usage_snapshot.clone());
         let model_info = provider.model_info(&actual_model);
+        let recorded_at = unix_seconds();
+        let inference_commit = AgentInferenceCommit {
+            billing: inference_billing_record(
+                inference_id.clone(),
+                provider.info().name.clone(),
+                actual_model.clone(),
+                &response.usage,
+                &model_info,
+                recorded_at,
+            ),
+            runtime_delta: agent_runtime_delta(
+                inference_id,
+                identity_for_subagent(active_subagent.as_ref()),
+                &model_info,
+                usage_snapshot,
+                recorded_at,
+            ),
+        };
         let response_prompt_tokens = response.usage.prompt_tokens;
         let response_total_tokens = response
             .usage
@@ -399,16 +486,6 @@ pub(super) async fn run_turn_with_trace(
         let response_reached_auto_compact_limit = model_info
             .resolved_auto_compact_limit()
             .is_some_and(|limit| response_prompt_tokens >= limit || response_total_tokens >= limit);
-        recorder.broadcast(AgentEvent::AgentRuntimeUpdated {
-            delta: agent_runtime_delta(
-                inference_id.clone(),
-                identity_for_subagent(active_subagent.as_ref()),
-                &model_info,
-                usage_snapshot,
-                unix_seconds(),
-            ),
-        });
-
         let content = response.content.unwrap_or_default();
         let reasoning_content = response.reasoning_content.clone();
         let tool_calls = response.tool_calls;
@@ -423,6 +500,7 @@ pub(super) async fn run_turn_with_trace(
         if tool_calls.is_empty() {
             progress.milestone("模型已完成正文生成。");
             if looks_like_unexecuted_tool_call_text(&content) {
+                commit_and_publish_inference(&options, session, recorder, inference_commit).await?;
                 return Ok(failed_turn_result(
                     recorder,
                     &turn_id,
@@ -444,6 +522,7 @@ pub(super) async fn run_turn_with_trace(
             last_reasoning_content = reasoning_content;
             session_message_count = session.len();
             safe_message_count = session_message_count;
+            commit_and_publish_inference(&options, session, recorder, inference_commit).await?;
             if finish_mailbox_window(&options, session, recorder, &turn_id).await? {
                 safe_message_count = session.len();
                 session_message_count = safe_message_count;
@@ -469,6 +548,7 @@ pub(super) async fn run_turn_with_trace(
         if reasoning_content.is_some() {
             last_reasoning_content = reasoning_content;
         }
+        commit_and_publish_inference(&options, session, recorder, inference_commit).await?;
         if response_reached_auto_compact_limit {
             provider_prompt_tokens_for_compaction = Some(response_total_tokens);
         }
@@ -677,6 +757,32 @@ async fn persist_checkpoint(
     };
     checkpoint
         .checkpoint_mailbox(session.clone(), reason, consumed_mail_ids.clone())
+        .await
+        .map_err(|error| pl_protocol::PureError::MemoryError(error.to_string()))?;
+    if let Some(mailbox) = &options.mailbox {
+        mailbox.acknowledge(&consumed_mail_ids).await;
+    }
+    Ok(())
+}
+
+async fn commit_and_publish_inference(
+    options: &TurnOptions,
+    session: &AgentSession,
+    recorder: &mut TraceRecorder,
+    inference: AgentInferenceCommit,
+) -> Result<()> {
+    let Some(checkpoint) = &options.checkpoint else {
+        recorder.broadcast(AgentEvent::AgentRuntimeUpdated {
+            delta: inference.runtime_delta,
+        });
+        return Ok(());
+    };
+    let consumed_mail_ids = match &options.mailbox {
+        Some(mailbox) => mailbox.pending_acknowledgements().await,
+        None => Vec::new(),
+    };
+    checkpoint
+        .checkpoint_inference_mailbox(session.clone(), inference, consumed_mail_ids.clone())
         .await
         .map_err(|error| pl_protocol::PureError::MemoryError(error.to_string()))?;
     if let Some(mailbox) = &options.mailbox {

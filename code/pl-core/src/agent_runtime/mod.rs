@@ -42,6 +42,6 @@ pub use state::{
 };
 pub(crate) use turn::AgentTurnMailboxHandle;
 pub use turn::{
-    AgentSessionCommitPolicy, AgentTurnCheckpoint, AgentTurnCheckpointHandle,
+    AgentInferenceCommit, AgentSessionCommitPolicy, AgentTurnCheckpoint, AgentTurnCheckpointHandle,
     AgentTurnPreparationContext, PreparedAgentTurn, PreparedSessionRuntime, TurnCheckpointReason,
 };

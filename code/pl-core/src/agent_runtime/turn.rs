@@ -1,7 +1,10 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use pl_protocol::{McpHealthSnapshot, ThreadRuntimeSnapshot, ThreadRuntimeUsage, ThreadSnapshot};
+use pl_protocol::{
+    AgentRuntimeDelta, InferenceBillingRecord, McpHealthSnapshot, ThreadRuntimeSnapshot,
+    ThreadRuntimeUsage, ThreadSnapshot,
+};
 use tokio::sync::{Mutex, mpsc};
 use tokio_util::sync::CancellationToken;
 
@@ -326,9 +329,17 @@ mod prepared_session_runtime_tests {
 pub enum TurnCheckpointReason {
     WorkingSetChanged,
     BeforeInference,
+    InferenceCompleted,
     ContextCompacted,
     MailboxInputConsumed,
     Terminal,
+}
+
+/// 一次模型调用完成后必须与上下文原子提交的计费与 runtime 增量。
+#[derive(Debug, Clone, PartialEq)]
+pub struct AgentInferenceCommit {
+    pub billing: InferenceBillingRecord,
+    pub runtime_delta: AgentRuntimeDelta,
 }
 
 /// worker 交给 actor 做 active-turn 与 sequence 校验的 Thread checkpoint。
@@ -340,6 +351,7 @@ pub struct AgentTurnCheckpoint {
     pub session: AgentSession,
     pub reason: TurnCheckpointReason,
     pub consumed_mail_ids: Vec<String>,
+    pub inference: Option<AgentInferenceCommit>,
 }
 
 /// TurnEngine 使用的 durable checkpoint 命令句柄。
@@ -376,11 +388,47 @@ impl AgentTurnCheckpointHandle {
         self.checkpoint_mailbox(session, reason, Vec::new()).await
     }
 
+    /// 等待 inference 的上下文、usage、价格快照与 runtime 投影完成 durable 提交。
+    pub async fn commit_inference(
+        &self,
+        session: AgentSession,
+        inference: AgentInferenceCommit,
+    ) -> super::AgentRuntimeResult<()> {
+        self.checkpoint_inference_mailbox(session, inference, Vec::new())
+            .await
+    }
+
     pub(crate) async fn checkpoint_mailbox(
         &self,
         session: AgentSession,
         reason: TurnCheckpointReason,
         consumed_mail_ids: Vec<String>,
+    ) -> super::AgentRuntimeResult<()> {
+        self.checkpoint_with(session, reason, consumed_mail_ids, None)
+            .await
+    }
+
+    pub(crate) async fn checkpoint_inference_mailbox(
+        &self,
+        session: AgentSession,
+        inference: AgentInferenceCommit,
+        consumed_mail_ids: Vec<String>,
+    ) -> super::AgentRuntimeResult<()> {
+        self.checkpoint_with(
+            session,
+            TurnCheckpointReason::InferenceCompleted,
+            consumed_mail_ids,
+            Some(inference),
+        )
+        .await
+    }
+
+    async fn checkpoint_with(
+        &self,
+        session: AgentSession,
+        reason: TurnCheckpointReason,
+        consumed_mail_ids: Vec<String>,
+        inference: Option<AgentInferenceCommit>,
     ) -> super::AgentRuntimeResult<()> {
         let sequence = self
             .sequence
@@ -396,6 +444,7 @@ impl AgentTurnCheckpointHandle {
                     session,
                     reason,
                     consumed_mail_ids,
+                    inference,
                 },
             )
             .await

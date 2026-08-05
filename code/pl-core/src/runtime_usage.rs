@@ -1,5 +1,8 @@
 use pl_model::{ModelInfo, TokenUsage};
-use pl_protocol::{AgentRuntimeDelta, RuntimeCostAmount, RuntimeUsageSnapshot, TokenUsageSnapshot};
+use pl_protocol::{
+    AgentRuntimeDelta, InferenceBillingRecord, InferenceTokenUsage, ModelPricingSnapshot,
+    RuntimeCostAmount, RuntimeUsageSnapshot, TokenUsageSnapshot,
+};
 
 use crate::tool::SubagentContext;
 
@@ -38,11 +41,52 @@ pub(crate) fn identity_for_subagent(
 }
 
 pub fn token_usage_snapshot(usage: &TokenUsage) -> TokenUsageSnapshot {
+    let cached_prompt_tokens = usage.cached_prompt_tokens.min(usage.prompt_tokens);
     TokenUsageSnapshot {
         prompt_tokens: usage.prompt_tokens,
         completion_tokens: usage.completion_tokens,
+        cached_prompt_tokens,
+        total_tokens: usage
+            .total_tokens
+            .max(usage.prompt_tokens.saturating_add(usage.completion_tokens)),
+    }
+}
+
+pub(crate) fn inference_billing_record(
+    inference_id: String,
+    provider: String,
+    model: String,
+    usage: &TokenUsage,
+    model_info: &ModelInfo,
+    recorded_at: i64,
+) -> InferenceBillingRecord {
+    let reported_usage = InferenceTokenUsage {
+        prompt_tokens: usage.prompt_tokens,
         cached_prompt_tokens: usage.cached_prompt_tokens,
-        total_tokens: usage.prompt_tokens + usage.completion_tokens,
+        completion_tokens: usage.completion_tokens,
+        reasoning_tokens: usage.reasoning_tokens,
+        total_tokens: usage.total_tokens,
+    };
+    let normalized_usage = reported_usage.normalized();
+    let pricing = ModelPricingSnapshot {
+        currency: model_info.currency.clone(),
+        input_per_mtok: model_info.input_price_per_mtok,
+        output_per_mtok: model_info.output_price_per_mtok,
+        cache_read_per_mtok: model_info.cache_read_price_per_mtok,
+    };
+    let (estimated_costs, has_unpriced_usage) =
+        cost_for_usage(&normalized_usage.public_snapshot(), Some(model_info));
+    InferenceBillingRecord {
+        inference_id,
+        provider,
+        model,
+        context_window: model_info.resolved_context_window(),
+        reported_usage,
+        normalized_usage,
+        pricing,
+        estimated_costs,
+        has_unpriced_usage,
+        recorded_at,
     }
 }
 
@@ -212,17 +256,24 @@ pub(crate) fn estimate_cost(
     output_price_per_mtok: Option<f64>,
     cache_read_price_per_mtok: Option<f64>,
 ) -> Option<f64> {
-    let input_price = input_price_per_mtok?;
-    let output_price = output_price_per_mtok?;
-    let cache_price = cache_read_price_per_mtok?;
     let cached = cached_prompt_tokens.min(prompt_tokens);
     let uncached_input = prompt_tokens.saturating_sub(cached);
-    Some(
-        (uncached_input as f64 * input_price
-            + completion_tokens as f64 * output_price
-            + cached as f64 * cache_price)
-            / 1_000_000.0,
-    )
+    let input_cost = if uncached_input == 0 {
+        0.0
+    } else {
+        uncached_input as f64 * input_price_per_mtok?
+    };
+    let output_cost = if completion_tokens == 0 {
+        0.0
+    } else {
+        completion_tokens as f64 * output_price_per_mtok?
+    };
+    let cache_cost = if cached == 0 {
+        0.0
+    } else {
+        cached as f64 * cache_read_price_per_mtok?
+    };
+    Some((input_cost + output_cost + cache_cost) / 1_000_000.0)
 }
 
 #[cfg(test)]
@@ -250,5 +301,28 @@ mod tests {
                 total_tokens: 13,
             }
         );
+    }
+
+    #[test]
+    fn token_usage_snapshot_clamps_cache_and_preserves_provider_total() {
+        let snapshot = token_usage_snapshot(&TokenUsage {
+            prompt_tokens: 10,
+            cached_prompt_tokens: 20,
+            completion_tokens: 3,
+            reasoning_tokens: 2,
+            total_tokens: 15,
+        });
+
+        assert_eq!(snapshot.cached_prompt_tokens, 10);
+        assert_eq!(snapshot.total_tokens, 15);
+    }
+
+    #[test]
+    fn cost_only_requires_prices_for_non_zero_token_classes() {
+        assert_eq!(
+            estimate_cost(10, 0, 0, Some(1.0), None, None),
+            Some(0.000_01)
+        );
+        assert_eq!(estimate_cost(10, 0, 5, Some(1.0), None, None), None);
     }
 }

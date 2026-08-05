@@ -46,7 +46,7 @@ pub(crate) enum AgentLoopCommand {
         reply: oneshot::Sender<AgentRuntimeResult<()>>,
     },
     Checkpoint {
-        checkpoint: super::AgentTurnCheckpoint,
+        checkpoint: Box<super::AgentTurnCheckpoint>,
         reply: oneshot::Sender<AgentRuntimeResult<()>>,
     },
     RecordThreadFacts {
@@ -192,7 +192,7 @@ where
                             let _ = reply.send(result);
                         }
                         AgentLoopCommand::Checkpoint { checkpoint, reply } => {
-                            let result = self.checkpoint(checkpoint).await;
+                            let result = self.checkpoint(*checkpoint).await;
                             if let Err(error) = &result {
                                 self.fault_in_memory(error.to_string());
                             }

@@ -269,7 +269,24 @@ pub struct ModelPricing {
 
 `pl-model` 内置四个预设：`openai_family`、`deepseek_family`、`zhipu_text_family`、`zhipu_vision_family`。原 `openai_capabilities` / `deepseek_capabilities` / `zhipu_capabilities` 三个能力构造函数的能力矩阵直接编入对应 family，消除重复。`zhipu_text_family` 与 `zhipu_vision_family` 的差异仅在 capabilities 的输入模态（是否含 `image`）和 effort 候选值域。
 
-## 7.9 Web 搜索 Provider 边界
+## 7.10 Prompt 缓存
+
+核心层按 prompt generation 组装请求：固定 instructions、固定用户/项目/Skill/MCP 前置指令，
+再接 durable model history。同一 generation 内，model、instructions、tools、tool choice、
+reasoning、输出 schema 和 service tier 不得变化；历史只追加 assistant、tool、user 与内部
+contextPatch。模型相关运行状态变化在采样前渲染为最小 contextPatch，先持久化再发送，不能
+作为下一轮消失的临时尾部。
+
+工具按模型可见名称排序，JSON Schema 递归使用确定性字段顺序。模式、provider、model、固定
+指令、工具 schema 或 compaction 改变时提升 generation，并把首个请求视为冷缓存。缓存能力按
+provider、wire protocol 与 model 联合判断：DeepSeek Chat 只使用隐式共同前缀，不发送
+prompt_cache_key；其他协议只在自身明确支持时发送 cache key、breakpoint 或 cached-content
+引用。cache key 只是路由提示，不能代替请求前缀相等。
+
+缓存诊断只记录 generation、固定前缀/工具/contextPatch 的 hash、token 数和变化原因；不得记录
+prompt、工具参数或结果、header、凭据和配置正文。
+
+## 7.11 Web 搜索 Provider 边界
 
 Web 搜索只把 `ProviderTransportSelection::Preset { preset: "openai", .. }` 且 `resolved_bearer_token()` 非空的 provider 实例视为可用 OpenAI 账户。实例 id、显示名或 base URL 可以修改而不改变 preset 身份；普通 custom Responses-compatible provider 即使协议和模型名称相同，也不能获得 OpenAI hosted 或 `/alpha/search` 能力。
 

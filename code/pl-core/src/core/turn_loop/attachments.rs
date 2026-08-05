@@ -20,6 +20,11 @@ pub(super) fn materialize_context_items(
                     receipt: receipt.clone(),
                 })
             }
+            ModelContextItem::ContextPatch { patch } => {
+                let mut patch = patch.clone();
+                patch.message.content = materialize_content(&patch.message.content, attachments)?;
+                Ok(ModelContextItem::ContextPatch { patch })
+            }
             ModelContextItem::PinnedContext { .. }
             | ModelContextItem::SessionNote { .. }
             | ModelContextItem::Compaction { .. } => Ok(item.clone()),

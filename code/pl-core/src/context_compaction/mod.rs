@@ -71,6 +71,7 @@ fn compact_old_tool_results_for_request(input: &mut [ModelContextItem]) {
             }
             ModelContextItem::Message { .. }
             | ModelContextItem::ToolResult { .. }
+            | ModelContextItem::ContextPatch { .. }
             | ModelContextItem::PinnedContext { .. }
             | ModelContextItem::SessionNote { .. }
             | ModelContextItem::Compaction { .. } => {}
@@ -425,6 +426,9 @@ fn estimate_context_request_tokens(
                 ModelContextItem::Message { message }
                 | ModelContextItem::ToolResult { message, .. } => {
                     history::estimate_message_tokens(message)
+                }
+                ModelContextItem::ContextPatch { patch } => {
+                    history::estimate_message_tokens(&patch.message)
                 }
                 ModelContextItem::PinnedContext { .. } | ModelContextItem::SessionNote { .. } => 0,
                 ModelContextItem::Compaction { encrypted_content } => {

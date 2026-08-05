@@ -144,10 +144,14 @@ async fn run_turn_persists_only_final_text_to_session_history() {
 
     assert_eq!(result.status, TurnResultStatus::Completed);
     assert_eq!(result.content, "Done");
-    assert_eq!(session.messages().len(), 2);
-    assert_eq!(session.messages()[1].role, MessageRole::Assistant);
+    let assistant_messages = session
+        .messages()
+        .iter()
+        .filter(|message| message.role == MessageRole::Assistant)
+        .collect::<Vec<_>>();
+    assert_eq!(assistant_messages.len(), 1);
     assert_eq!(
-        session.messages()[1].content,
+        assistant_messages[0].content,
         MessageContent::Text("Done".to_string())
     );
 }
@@ -698,6 +702,7 @@ async fn large_tool_artifact_does_not_break_tool_history_or_evidence() {
             pl_protocol::ModelContextItem::Message { .. }
             | pl_protocol::ModelContextItem::PinnedContext { .. }
             | pl_protocol::ModelContextItem::SessionNote { .. }
+            | pl_protocol::ModelContextItem::ContextPatch { .. }
             | pl_protocol::ModelContextItem::Compaction { .. } => None,
         })
         .expect("tool receipt");

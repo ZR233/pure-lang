@@ -50,6 +50,7 @@ pub struct DurableCommitFacts {
     pub projection_snapshot: Option<ThreadSnapshot>,
     pub runtime_events: Vec<AgentRuntimeEvent>,
     pub trace_events: Vec<TraceEvent>,
+    pub inference: Option<super::AgentInferenceCommit>,
 }
 
 impl DurableCommitFacts {
@@ -101,6 +102,7 @@ impl DurableCommitFacts {
             projection_snapshot: projection.map(|projection| projection.snapshot),
             runtime_events,
             trace_events,
+            inference: None,
         }
     }
 }

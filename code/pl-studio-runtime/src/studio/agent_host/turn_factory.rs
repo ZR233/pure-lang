@@ -238,6 +238,11 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         let interaction_callback = self.interactions.callback(thread_id, emitter);
         let options = TurnOptions::default()
             .with_permission_mode(config.runtime.permission_mode)
+            .with_prompt_scope(format!(
+                "{}:{}",
+                mode.label(),
+                context.snapshot.identity.role
+            ))
             .with_interaction_callback(interaction_callback);
         let mut session_runtime = PreparedSessionRuntime::new(route.model.slug.clone())
             .with_mcp_servers(active_mcp_servers)

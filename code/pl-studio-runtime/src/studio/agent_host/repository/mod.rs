@@ -4,8 +4,8 @@ use pl_core::{
     AgentActivityState, AgentIdentity, AgentLifecycleState, AgentRoleId, AgentSession,
     AgentSnapshot, AgentTurnOutcome, DurableMailboxEnvelope, MailboxDeliveryState,
     MailboxPresentation, RestoredAgentRuntime, RestoredThreadSnapshot, ThreadActorState,
-    ThreadCommit, ThreadCommitOutcome, ThreadContextMutation, ThreadContextState, ThreadId,
-    ThreadRepository, TurnId, TurnOutcomeKind,
+    ThreadCommit, ThreadCommitOutcome, ThreadContextState, ThreadId, ThreadRepository, TurnId,
+    TurnOutcomeKind,
 };
 use pl_protocol::{
     InteractionKind, InteractionStatus, Thread as ThreadRecord, ThreadItem, ThreadItemContent,
@@ -17,9 +17,18 @@ use sea_orm::{
     QueryOrder, TransactionTrait,
 };
 
+use crate::PureError;
 use crate::studio::StudioStore;
 use crate::studio::entity::{interaction, item, thread, thread_input, turn};
-use crate::{ModelContextItem, PureError};
+
+mod billing;
+mod context;
+
+use billing::{
+    aggregate_billing_usage, authoritative_turn_usage, persist_inference_billing, restore_billing,
+    runtime_from_context,
+};
+use context::{metadata_with_prompt_snapshot, persist_context_baseline, restore_context_items};
 
 /// Studio 单库对 canonical Thread 状态的 CAS repository。
 #[derive(Clone)]
@@ -70,20 +79,18 @@ impl StudioAgentRepository {
         &self,
         model: &thread::Model,
     ) -> Result<ThreadContextState, PureError> {
-        let context = item::Entity::find()
-            .filter(item::Column::ThreadId.eq(model.id.clone()))
-            .filter(item::Column::ItemKind.eq("contextCompaction"))
-            .order_by_desc(item::Column::Ordinal)
-            .one(self.store.database())
-            .await
-            .map_err(store_error)?
-            .and_then(|row| row.provider_private_payload)
-            .map(|payload| serde_json::from_slice::<Vec<ModelContextItem>>(&payload))
-            .transpose()?;
+        let context = restore_context_items(&self.store, &model.id).await?;
+        let billing_by_turn = restore_billing(&self.store, &model.id).await?;
+        let usage = if billing_by_turn.is_empty() {
+            serde_json::from_str(&model.usage_json)?
+        } else {
+            aggregate_billing_usage(billing_by_turn.values())
+        };
         Ok(ThreadContextState {
             metadata: serde_json::from_str(&model.metadata_json)?,
             session: AgentSession::from_items(context.unwrap_or_default()),
-            usage: serde_json::from_str(&model.usage_json)?,
+            usage,
+            billing_by_turn,
             last_context_tokens: model.last_context_tokens.map(u64_from_i64).transpose()?,
             trace_sequence: u64_from_i64(model.trace_sequence)?,
             thread_revision: u64_from_i64(model.revision)?,
@@ -93,6 +100,7 @@ impl StudioAgentRepository {
     async fn restore_thread_snapshot(
         &self,
         model: thread::Model,
+        context: &ThreadContextState,
     ) -> Result<RestoredThreadSnapshot, PureError> {
         let thread_id = model.id.clone();
         let items = item::Entity::find()
@@ -103,7 +111,16 @@ impl StudioAgentRepository {
             .map_err(store_error)?
             .into_iter()
             .map(|row| serde_json::from_str(&row.payload_json).map_err(Into::into))
-            .collect::<Result<Vec<_>, PureError>>()?;
+            .collect::<Result<Vec<ThreadItem>, PureError>>()?
+            .into_iter()
+            .filter(|item| {
+                !matches!(
+                    item.content,
+                    ThreadItemContent::ContextPatch { .. }
+                        | ThreadItemContent::ContextCompaction { .. }
+                )
+            })
+            .collect();
         let active_turn = turn::Entity::find()
             .filter(turn::Column::ThreadId.eq(thread_id.clone()))
             .filter(turn::Column::Status.is_in(["queued", "inProgress"]))
@@ -114,7 +131,7 @@ impl StudioAgentRepository {
             .map(turn_from_model)
             .transpose()?;
         let interactions = interaction::Entity::find()
-            .filter(interaction::Column::ThreadId.eq(thread_id))
+            .filter(interaction::Column::ThreadId.eq(thread_id.clone()))
             .filter(interaction::Column::Status.eq("pending"))
             .order_by_asc(interaction::Column::CreatedAt)
             .all(self.store.database())
@@ -134,7 +151,7 @@ impl StudioAgentRepository {
                 active_turn,
                 items,
                 interactions,
-                runtime: None,
+                runtime: runtime_from_context(&thread_id, context),
             },
         })
     }
@@ -191,7 +208,7 @@ impl ThreadRepository for StudioAgentRepository {
                 updated_at: model.updated_at,
             };
             let session = self.restore_session(&model).await?;
-            let thread_snapshot = self.restore_thread_snapshot(model).await?;
+            let thread_snapshot = self.restore_thread_snapshot(model, &session).await?;
             restored.push(RestoredAgentRuntime {
                 state: ThreadActorState {
                     snapshot,
@@ -245,7 +262,10 @@ pub(super) async fn persist_state_commit(
     active.revision = Set(i64_from_u64(commit.next_state.session.thread_revision)?);
     active.runtime_revision = Set(Some(i64_from_u64(commit.next_state.snapshot.revision)?));
     active.event_sequence = Set(i64_from_u64(commit.next_state.snapshot.event_sequence)?);
-    active.metadata_json = Set(serde_json::to_string(&commit.next_state.session.metadata)?);
+    active.metadata_json = Set(metadata_with_prompt_snapshot(
+        &commit.next_state.session.metadata,
+        &commit.next_state.session.session,
+    )?);
     active.usage_json = Set(serde_json::to_string(&commit.next_state.session.usage)?);
     active.last_context_tokens = Set(commit
         .next_state
@@ -261,6 +281,7 @@ pub(super) async fn persist_state_commit(
     persist_state_turns(&tx, &commit.next_state).await?;
     persist_thread_notifications(&tx, commit).await?;
     persist_context_baseline(&tx, commit).await?;
+    persist_inference_billing(&tx, commit).await?;
     tx.commit().await.map_err(store_error)?;
     Ok(ThreadCommitOutcome::Applied)
 }
@@ -444,7 +465,7 @@ async fn persist_state_turns(
                 status: "queued",
                 phase: None,
                 reason: None,
-                usage: &pl_model::TokenUsage::default(),
+                usage: None,
                 failure: None,
                 metadata: Some(&input.metadata),
                 started_at: None,
@@ -464,7 +485,7 @@ async fn persist_state_turns(
                 status: "inProgress",
                 phase: Some(activity_phase(state.snapshot.activity)),
                 reason: None,
-                usage: &pl_model::TokenUsage::default(),
+                usage: None,
                 failure: None,
                 metadata: None,
                 started_at: Some(state.snapshot.updated_at),
@@ -485,7 +506,7 @@ async fn persist_state_turns(
                 status,
                 phase: None,
                 reason,
-                usage: &outcome.usage,
+                usage: Some(&outcome.usage),
                 failure: outcome.failure.as_ref(),
                 metadata: None,
                 started_at: None,
@@ -505,7 +526,7 @@ struct TurnProjection<'a> {
     status: &'a str,
     phase: Option<&'a str>,
     reason: Option<&'a str>,
-    usage: &'a pl_model::TokenUsage,
+    usage: Option<&'a pl_model::TokenUsage>,
     failure: Option<&'a pl_protocol::TurnFailure>,
     metadata: Option<&'a serde_json::Value>,
     started_at: Option<i64>,
@@ -534,6 +555,7 @@ async fn persist_turn_projection(
         Some(existing) => existing.ordinal,
         None => next_turn_ordinal(tx, projection.thread_id).await?,
     };
+    let usage = authoritative_turn_usage(existing.as_ref(), projection.usage)?;
     let active = turn::ActiveModel {
         id: Set(projection.id.to_string()),
         thread_id: Set(projection.thread_id.to_string()),
@@ -543,7 +565,7 @@ async fn persist_turn_projection(
         phase: Set(projection.phase.map(str::to_string)),
         reason: Set(projection.reason.map(str::to_string)),
         model_json: Set(existing.as_ref().and_then(|row| row.model_json.clone())),
-        usage_json: Set(serde_json::to_string(projection.usage)?),
+        usage_json: Set(serde_json::to_string(&usage)?),
         failure_json: Set(projection.failure.map(serde_json::to_string).transpose()?),
         metadata_json: Set(match (existing.as_ref(), projection.metadata) {
             (Some(row), None) => row.metadata_json.clone(),
@@ -603,7 +625,7 @@ async fn persist_turn(
             status,
             phase,
             reason,
-            usage: &pl_model::TokenUsage::default(),
+            usage: None,
             failure: None,
             metadata: None,
             started_at: value.started_at,
@@ -613,42 +635,6 @@ async fn persist_turn(
         },
     )
     .await
-}
-
-async fn persist_context_baseline(
-    tx: &sea_orm::DatabaseTransaction,
-    commit: &ThreadCommit,
-) -> Result<(), PureError> {
-    let Some(mutation) = commit.facts.context.as_ref() else {
-        return Ok(());
-    };
-    let context = match mutation {
-        ThreadContextMutation::Append { items } | ThreadContextMutation::Replace { items } => items,
-    };
-    let Some(turn_id) = commit.facts.turn_id.as_ref() else {
-        return Err(store_error("context mutation requires a Turn id"));
-    };
-    let thread_id = commit.agent_id.to_string();
-    let now = commit.next_state.snapshot.updated_at;
-    let baseline = ThreadItem {
-        id: format!("context:{thread_id}:{}", commit.facts.through_revision),
-        thread_id,
-        turn_id: turn_id.to_string(),
-        ordinal: 0,
-        revision: 1,
-        status: ThreadItemStatus::Completed,
-        created_at: now,
-        updated_at: now,
-        completed_at: Some(now),
-        error: None,
-        content: ThreadItemContent::ContextCompaction {
-            before_tokens: 0,
-            after_tokens: commit.next_state.session.last_context_tokens.unwrap_or(0),
-            compacted_at: now,
-        },
-        usage: None,
-    };
-    persist_item(tx, &baseline, Some(serde_json::to_vec(context)?)).await
 }
 
 async fn persist_item(
@@ -986,6 +972,7 @@ fn item_kind_label(content: &ThreadItemContent) -> &'static str {
         ThreadItemContent::Plan { .. } => "plan",
         ThreadItemContent::ToolCall { .. } => "toolCall",
         ThreadItemContent::File { .. } => "file",
+        ThreadItemContent::ContextPatch { .. } => "contextPatch",
         ThreadItemContent::ContextCompaction { .. } => "contextCompaction",
     }
 }

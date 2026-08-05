@@ -12,7 +12,8 @@ ThreadManager 管理 registry、容量和 spawn/close。ThreadHandle 查表后�
 snapshot 和 progress 命令直接发给目标 ThreadActor。只有 spawn/close 修改全局目录。
 
 ThreadActor 唯一拥有 Thread revision、durable input queue 的内存镜像、活动 RunningTurn、取消
-identity 和 live Item overlay。它不缓存完整历史，也不拥有 Task/worktree。
+identity、live Item overlay 和当前 prompt generation/context baseline。它不缓存完整历史，也不
+拥有 Task/worktree；context baseline 只用于生成模型输入差量，不能成为 runtime 事实源。
 
 ## 17.2 Host 端口
 

@@ -3,12 +3,14 @@ use std::num::NonZeroUsize;
 
 use pl_model::{CompletionResponse, ModelTransportSession, ToolCall};
 use pl_protocol::{
-    Message, MessageContent, MessageRole, ModelContextItem, PinnedContextSection, SessionNote,
-    TOOL_CALLS_METADATA_KEY, ToolCallHistoryMetadata, ToolCallKind, ToolResultMetadata,
-    ToolResultReceipt,
+    Message, MessageContent, MessageRole, ModelContextItem, ModelContextPatch,
+    PinnedContextSection, SessionNote, TOOL_CALLS_METADATA_KEY, ToolCallHistoryMetadata,
+    ToolCallKind, ToolResultMetadata, ToolResultReceipt,
 };
 
 use crate::working_set::canonical_content_hash;
+
+pub(crate) const CONTEXT_PATCH_METADATA_KEY: &str = "pure.contextPatch";
 
 /// 核心编译会话。
 ///
@@ -91,16 +93,13 @@ impl AgentSession {
     }
 
     pub fn replace_messages(&mut self, messages: Vec<Message>) {
-        let note = self.session_note().cloned();
+        let retained = retained_context(&self.items);
         self.items = messages
             .iter()
             .cloned()
             .map(ModelContextItem::from)
             .collect();
-        self.items.extend(
-            note.into_iter()
-                .map(|note| ModelContextItem::SessionNote { note }),
-        );
+        self.items.extend(retained);
         self.messages = messages;
         self.revision = self.revision.saturating_add(1);
     }
@@ -113,15 +112,10 @@ impl AgentSession {
 
     /// 只替换可压缩的时间线，保留当前所有 pinned working context 和会话笔记。
     pub fn replace_compactable_items(&mut self, items: Vec<ModelContextItem>) {
-        let retained = self
-            .items
-            .iter()
-            .filter(|item| is_durable_context(item))
-            .cloned()
-            .collect::<Vec<_>>();
+        let retained = retained_context(&self.items);
         self.items = items
             .into_iter()
-            .filter(|item| !is_durable_context(item))
+            .filter(|item| !is_durable_context(item) && item.as_context_patch().is_none())
             .chain(retained)
             .collect();
         self.messages = messages_from_items(&self.items);
@@ -168,6 +162,26 @@ impl AgentSession {
         self.items
             .iter()
             .find_map(ModelContextItem::as_session_note)
+    }
+
+    pub fn latest_context_patch(&self) -> Option<&ModelContextPatch> {
+        self.items
+            .iter()
+            .rev()
+            .find_map(ModelContextItem::as_context_patch)
+    }
+
+    pub fn push_context_patch(&mut self, patch: ModelContextPatch) {
+        let message = patch.message.clone();
+        let insertion = self
+            .items
+            .iter()
+            .position(is_durable_context)
+            .unwrap_or(self.items.len());
+        self.items
+            .insert(insertion, ModelContextItem::ContextPatch { patch });
+        self.messages.push(message);
+        self.revision = self.revision.saturating_add(1);
     }
 
     /// 原子替换隐藏会话笔记；返回 canonical session 是否发生变化。
@@ -380,9 +394,24 @@ fn is_durable_context(item: &ModelContextItem) -> bool {
     item.is_pinned_context() || item.is_session_note()
 }
 
+fn retained_context(items: &[ModelContextItem]) -> Vec<ModelContextItem> {
+    let latest_patch = items
+        .iter()
+        .rev()
+        .find(|item| item.as_context_patch().is_some())
+        .cloned();
+    items
+        .iter()
+        .filter(|item| is_durable_context(item))
+        .cloned()
+        .chain(latest_patch)
+        .collect()
+}
+
 fn forkable_messages(messages: &[Message]) -> Vec<Message> {
     messages
         .iter()
+        .filter(|message| !message.metadata.contains_key(CONTEXT_PATCH_METADATA_KEY))
         .filter(|message| match message.role {
             MessageRole::System | MessageRole::User => true,
             MessageRole::Assistant => !message.metadata.contains_key(TOOL_CALLS_METADATA_KEY),

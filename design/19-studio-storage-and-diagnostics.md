@@ -30,8 +30,14 @@ Item start 分配不可变 ordinal；delta 不写库；terminal 更新同一 Ite
 shutdown 和 Interaction resolution 都等待事务完成。历史查询按 `(thread_id, turn_sequence)`
 keyset 分页，不使用 OFFSET。
 
-模型上下文直接从有序 Item 重建；contextCompaction 重置基线。内部 provider Item 带 visibility
-标记，Bridge 查询永不返回 internal Item。
+模型上下文直接从有序 Item 重建；contextPatch 保存一次采样前模型可见的运行上下文差量，
+contextCompaction 重置基线。两者都属于内部 Item，Bridge 查询永不返回。contextPatch 只用于
+模型输入重建和审计，不能代替 ThreadRuntimeSnapshot 中的当前事实。
+
+每次模型 inference 的 usage、provider/model、价格快照和费用明细保存在对应 Turn 的
+`model_json`；`usage_json` 保存同一事务重算的 Turn 聚合。完整 usage 必须先持久化成功，再发布
+runtime usage 通知。相同 inference ID 的相同记录幂等，内容冲突拒绝事务；历史费用始终使用
+当时保存的价格和币种，不能按当前 catalog 重新计算。
 
 ## 19.3 归档重建
 

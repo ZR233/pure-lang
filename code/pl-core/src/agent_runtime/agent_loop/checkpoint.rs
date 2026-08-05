@@ -3,13 +3,16 @@ use std::collections::BTreeSet;
 use super::super::host::{AgentCommitObserver, ThreadProjectionCommit, ThreadRepository};
 use super::super::state::{AgentRuntimeError, unix_timestamp};
 use super::super::{
-    AgentActivityState, AgentCommittedEvent, AgentLifecycleState, AgentProgressCheckpoint,
-    AgentProgressStage, AgentRuntimeEventKind, AgentRuntimeHost, AgentRuntimeResult,
-    AgentTurnCheckpoint, DurableCommitFacts, MailboxDeliveryState, ThreadCommit,
-    ThreadCommitOutcome, ThreadContextMutation, ThreadId, ThreadMutation, TurnId,
+    AgentActivityState, AgentCommittedEvent, AgentInferenceCommit, AgentLifecycleState,
+    AgentProgressCheckpoint, AgentProgressStage, AgentRuntimeEventKind, AgentRuntimeHost,
+    AgentRuntimeResult, AgentTurnCheckpoint, DurableCommitFacts, MailboxDeliveryState,
+    ThreadCommit, ThreadCommitOutcome, ThreadContextMutation, ThreadId, ThreadMutation, TurnId,
 };
 use super::AgentLoop;
-use crate::{ThreadNotificationFact, thread_event::project_thread_facts};
+use crate::{
+    ThreadNotificationFact,
+    thread_event::{TurnObservation, project_observation, project_thread_facts},
+};
 
 impl<H> AgentLoop<H>
 where
@@ -49,8 +52,22 @@ where
             || active.thread_id != checkpoint.thread_id
             || active.cancelling
             || active.cancellation.is_cancelled()
-            || checkpoint.sequence <= active.checkpoint_sequence
         {
+            return Ok(());
+        }
+        if let Some(inference) = checkpoint.inference.as_ref()
+            && let Some(existing) = find_inference(&self.state, &inference.billing.inference_id)
+        {
+            return if existing == &inference.billing {
+                Ok(())
+            } else {
+                Err(AgentRuntimeError::InvalidInput(format!(
+                    "inference {} conflicts with the active Thread billing record",
+                    inference.billing.inference_id
+                )))
+            };
+        }
+        if checkpoint.sequence <= active.checkpoint_sequence {
             return Ok(());
         }
         let expected_revision = self.state.snapshot.revision;
@@ -86,9 +103,43 @@ where
             });
         }
         next.session.session = checkpoint.session;
+        let projection = if let Some(inference) = checkpoint.inference.as_ref() {
+            append_inference(&mut next, &checkpoint.turn_id, inference)?;
+            let current = self
+                .runtime
+                .thread_events
+                .snapshot(checkpoint.thread_id.as_str())
+                .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
+            let projected = project_observation(
+                checkpoint.thread_id.as_str(),
+                checkpoint.turn_id.as_str(),
+                current.revision,
+                &current,
+                TurnObservation::RuntimeDelta(inference.runtime_delta.clone()),
+            );
+            next.session.thread_revision = projected.through_revision;
+            Some(ThreadProjectionCommit {
+                snapshot: self
+                    .runtime
+                    .thread_events
+                    .project(checkpoint.thread_id.as_str(), &projected.notifications)
+                    .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?,
+                notifications: projected.notifications,
+            })
+        } else {
+            None
+        };
         let context = ThreadContextMutation::Replace {
             items: next.session.session.items().to_vec(),
         };
+        let mut facts = DurableCommitFacts::from_state(
+            &next,
+            Vec::new(),
+            Vec::new(),
+            projection.clone(),
+            Some(context),
+        );
+        facts.inference = checkpoint.inference.clone();
         let result = self
             .host
             .repository()
@@ -96,13 +147,7 @@ where
                 agent_id: next.snapshot.identity.id.clone(),
                 expected_revision: Some(expected_revision),
                 next_state: next.clone(),
-                facts: DurableCommitFacts::from_state(
-                    &next,
-                    Vec::new(),
-                    Vec::new(),
-                    None,
-                    Some(context),
-                ),
+                facts,
                 mutation: ThreadMutation::ReplaceThread {
                     thread_id: checkpoint.thread_id.clone(),
                 },
@@ -121,6 +166,24 @@ where
                 self.state = next;
                 if let Some(active) = &mut self.active {
                     active.checkpoint_sequence = checkpoint.sequence;
+                }
+                if let Some(projection) = projection {
+                    self.runtime
+                        .thread_events
+                        .publish_batch(projection.notifications.clone())
+                        .await
+                        .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
+                    self.host
+                        .observer()
+                        .publish(AgentCommittedEvent {
+                            agent_id: self.state.snapshot.identity.id.clone(),
+                            thread_id: Some(checkpoint.thread_id),
+                            turn_id: Some(checkpoint.turn_id),
+                            runtime_events: Vec::new(),
+                            trace_events: Vec::new(),
+                            thread_notifications: projection.notifications,
+                        })
+                        .await;
                 }
                 Ok(())
             }
@@ -258,6 +321,52 @@ where
         .await?;
         Ok(checkpoint)
     }
+}
+
+fn find_inference<'a>(
+    state: &'a super::super::ThreadActorState,
+    inference_id: &str,
+) -> Option<&'a pl_protocol::InferenceBillingRecord> {
+    state
+        .session
+        .billing_by_turn
+        .values()
+        .flat_map(|billing| billing.inferences.iter())
+        .find(|inference| inference.inference_id == inference_id)
+}
+
+fn append_inference(
+    state: &mut super::super::ThreadActorState,
+    turn_id: &TurnId,
+    inference: &AgentInferenceCommit,
+) -> AgentRuntimeResult<()> {
+    state
+        .session
+        .billing_by_turn
+        .entry(turn_id.to_string())
+        .or_default()
+        .append(inference.billing.clone())
+        .map_err(AgentRuntimeError::InvalidInput)?;
+    state.session.usage = state.session.billing_by_turn.values().fold(
+        pl_model::TokenUsage::default(),
+        |mut aggregate, billing| {
+            let usage = billing.aggregate_usage();
+            aggregate.prompt_tokens = aggregate.prompt_tokens.saturating_add(usage.prompt_tokens);
+            aggregate.cached_prompt_tokens = aggregate
+                .cached_prompt_tokens
+                .saturating_add(usage.cached_prompt_tokens);
+            aggregate.completion_tokens = aggregate
+                .completion_tokens
+                .saturating_add(usage.completion_tokens);
+            aggregate.reasoning_tokens = aggregate
+                .reasoning_tokens
+                .saturating_add(usage.reasoning_tokens);
+            aggregate.total_tokens = aggregate.total_tokens.saturating_add(usage.total_tokens);
+            aggregate
+        },
+    );
+    state.session.last_context_tokens = Some(inference.billing.normalized_usage.total_tokens);
+    Ok(())
 }
 
 fn bounded_required_text(

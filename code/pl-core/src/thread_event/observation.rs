@@ -157,12 +157,19 @@ fn runtime_snapshot(
     delta: pl_protocol::AgentRuntimeDelta,
 ) -> ThreadRuntimeSnapshot {
     let prior = current.runtime.as_ref().map(|runtime| &runtime.usage);
-    let prompt_tokens = prior.map_or(0, |usage| usage.prompt_tokens) + delta.usage.prompt_tokens;
-    let cached_prompt_tokens =
-        prior.map_or(0, |usage| usage.cached_prompt_tokens) + delta.usage.cached_prompt_tokens;
-    let completion_tokens =
-        prior.map_or(0, |usage| usage.completion_tokens) + delta.usage.completion_tokens;
-    let total_tokens = prior.map_or(0, |usage| usage.total_tokens) + delta.usage.total_tokens;
+    let prompt_tokens = prior
+        .map_or(0, |usage| usage.prompt_tokens)
+        .saturating_add(delta.usage.prompt_tokens);
+    let cached_prompt_tokens = prior
+        .map_or(0, |usage| usage.cached_prompt_tokens)
+        .saturating_add(delta.usage.cached_prompt_tokens)
+        .min(prompt_tokens);
+    let completion_tokens = prior
+        .map_or(0, |usage| usage.completion_tokens)
+        .saturating_add(delta.usage.completion_tokens);
+    let total_tokens = prior
+        .map_or(0, |usage| usage.total_tokens)
+        .saturating_add(delta.usage.total_tokens);
     let previous = current.runtime.as_ref();
     ThreadRuntimeSnapshot {
         thread_id: thread_id.to_string(),
@@ -175,7 +182,7 @@ fn runtime_snapshot(
             cached_prompt_tokens,
             total_tokens,
             cache_hit_rate: (prompt_tokens > 0)
-                .then_some(cached_prompt_tokens as f64 / prompt_tokens as f64),
+                .then_some((cached_prompt_tokens as f64 / prompt_tokens as f64).clamp(0.0, 1.0)),
             estimated_costs: merge_costs(
                 prior.map_or(&[], |usage| usage.estimated_costs.as_slice()),
                 &delta.estimated_costs,
