@@ -9,6 +9,7 @@ import 'api/studio/handlers/prompt.dart';
 import 'api/studio/handlers/providers.dart';
 import 'api/studio/handlers/recovery.dart';
 import 'api/studio/handlers/settings.dart';
+import 'api/studio/handlers/thread.dart';
 import 'api/studio/handlers/updater.dart';
 import 'api/studio/subscription.dart';
 import 'api/studio/types/error.dart';
@@ -81,7 +82,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.12.0';
 
   @override
-  int get rustContentHash => -816048056;
+  int get rustContentHash => 1790045449;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -259,6 +260,12 @@ abstract class RustLibApi extends BaseApi {
     required String model,
     String? effort,
     String? selectedThreadId,
+  });
+
+  Future<BridgeStudioSnapshotResponse>
+  crateApiStudioHandlersThreadSetThreadMode({
+    required String threadId,
+    required BridgeThreadMode mode,
   });
 
   Future<RuntimeSnapshot> crateApiStudioHandlersLifecycleShutdownRuntime();
@@ -1619,6 +1626,42 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<BridgeStudioSnapshotResponse>
+  crateApiStudioHandlersThreadSetThreadMode({
+    required String threadId,
+    required BridgeThreadMode mode,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(threadId, serializer);
+          sse_encode_bridge_thread_mode(mode, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 38,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_bridge_studio_snapshot_response,
+          decodeErrorData: sse_decode_bridge_error,
+        ),
+        constMeta: kCrateApiStudioHandlersThreadSetThreadModeConstMeta,
+        argValues: [threadId, mode],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiStudioHandlersThreadSetThreadModeConstMeta =>
+      const TaskConstMeta(
+        debugName: "set_thread_mode",
+        argNames: ["threadId", "mode"],
+      );
+
+  @override
   Future<RuntimeSnapshot> crateApiStudioHandlersLifecycleShutdownRuntime() {
     return handler.executeNormal(
       NormalTask(
@@ -1627,7 +1670,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 38,
+            funcId: 39,
             port: port_,
           );
         },
@@ -1654,7 +1697,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 39,
+            funcId: 40,
             port: port_,
           );
         },
@@ -1688,7 +1731,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 40,
+            funcId: 41,
             port: port_,
           );
         },
@@ -1725,7 +1768,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 41,
+            funcId: 42,
             port: port_,
           );
         },
@@ -1758,7 +1801,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 42,
+            funcId: 43,
             port: port_,
           );
         },

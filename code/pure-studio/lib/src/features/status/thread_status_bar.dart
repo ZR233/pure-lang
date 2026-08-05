@@ -92,14 +92,7 @@ class ThreadStatusBar extends ConsumerWidget {
                       maxWidth: 96,
                     ),
                     if (thread.isRoot)
-                      _StatusReadout(
-                        icon: thread.mode == StudioMode.task
-                            ? Icons.route_outlined
-                            : Icons.flash_on,
-                        label: context.compileModeLabel(thread.mode),
-                        tooltip: context.l10n.statusSessionMode,
-                        maxWidth: 96,
-                      ),
+                      _ThreadModeSelector(workspace: workspace),
                     if (showModel &&
                         thread.isRoot &&
                         workspace.providers.isNotEmpty)
@@ -258,6 +251,55 @@ class _StatusOverflow extends StatelessWidget {
 }
 
 enum _StatusOverflowAction { cost, capabilities }
+
+class _ThreadModeSelector extends ConsumerWidget {
+  const _ThreadModeSelector({required this.workspace});
+
+  final StatusBarView workspace;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final mode = workspace.thread.mode;
+    final enabled = !workspace.runtime.hasActiveTask;
+    return UpwardPopupMenu<StudioMode>(
+      key: StudioDriverKeys.sessionMode,
+      tooltip: enabled
+          ? context.l10n.statusSessionMode
+          : context.l10n.statusSessionModeLocked,
+      initialValue: mode,
+      enabled: enabled,
+      onSelected: (selected) {
+        ref.read(studioControllerProvider.notifier).setThreadMode(selected);
+      },
+      itemBuilder: (context) => [
+        for (final option in StudioMode.values)
+          PopupMenuItem<StudioMode>(
+            key: StudioDriverKeys.sessionModeOption(option.name),
+            value: option,
+            child: Row(
+              children: [
+                Icon(
+                  option == StudioMode.task
+                      ? Icons.route_outlined
+                      : Icons.flash_on,
+                  size: 18,
+                ),
+                const SizedBox(width: 10),
+                Text(context.compileModeLabel(option)),
+              ],
+            ),
+          ),
+      ],
+      child: StatusBarItem(
+        icon: mode == StudioMode.task ? Icons.route_outlined : Icons.flash_on,
+        label: context.compileModeLabel(mode),
+        enabled: enabled,
+        trailingIcon: enabled ? Icons.keyboard_arrow_down : Icons.lock_outline,
+        maxWidth: 96,
+      ),
+    );
+  }
+}
 
 class _ModeModelSelector extends ConsumerWidget {
   const _ModeModelSelector({required this.workspace, required this.mode});

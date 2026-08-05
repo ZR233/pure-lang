@@ -111,6 +111,28 @@ async fn assert_task_invariants(
                 unit.worktree_path
             );
         }
+        let executor_thread_id = unit
+            .agent_id
+            .as_deref()
+            .context("merged work unit does not reference an executor Thread")?;
+        let executor = fixture
+            .store
+            .read_thread(executor_thread_id)
+            .await?
+            .context("merged work unit references a missing executor Thread")?;
+        if executor.status != "completed" {
+            bail!(
+                "executor Thread `{executor_thread_id}` finished with status `{}`",
+                executor.status
+            );
+        }
+        if !task
+            .merges
+            .iter()
+            .any(|merge| merge.agent_id == executor_thread_id && merge.status == "merged")
+        {
+            bail!("executor Thread `{executor_thread_id}` has no merged delivery");
+        }
     }
 
     let owned_paths = fixture.successful_executor_owned_paths().await?;
@@ -123,26 +145,6 @@ async fn assert_task_invariants(
         }
     }
 
-    let completed_executors = task
-        .agents
-        .iter()
-        .filter(|agent| agent.role == "executor" && agent.status == "completed")
-        .collect::<Vec<_>>();
-    if completed_executors.is_empty() {
-        bail!("Task has no completed executor");
-    }
-    for executor in completed_executors {
-        if !task
-            .merges
-            .iter()
-            .any(|merge| merge.agent_id == executor.agent_id && merge.status == "merged")
-        {
-            bail!(
-                "completed executor `{}` has no merged delivery",
-                executor.agent_id
-            );
-        }
-    }
     if task.merges.iter().any(|merge| merge.status != "merged") {
         bail!("Task contains an unmerged delivery: {:#?}", task.merges);
     }

@@ -69,6 +69,23 @@ void registerAgentWorkspaceTests() {
     expect(next.workspaceUiByThread['child-1']!.composer.draft, 'child draft');
   });
 
+  test('thread snapshot cannot overwrite product-owned directory metadata', () {
+    final base = _emptyState();
+    final canonical = base.selectedThread!.copyWith(
+      mode: StudioMode.task,
+      role: 'planner',
+      updatedAt: DateTime.fromMillisecondsSinceEpoch(2000),
+    );
+    final current = base.copyWith(threads: [canonical]);
+
+    final next = applyThreadSnapshot(current, base.selectedWorkspace!);
+
+    expect(next.selectedThread!.mode, StudioMode.task);
+    expect(next.selectedThread!.role, 'planner');
+    expect(next.selectedWorkspace!.thread.mode, StudioMode.task);
+    expect(next.selectedWorkspace!.thread.role, 'planner');
+  });
+
   test(
     'root is derived from rootThreadId without a second selected root id',
     () {

@@ -194,6 +194,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get statusSessionMode => '会话模式';
 
   @override
+  String get statusSessionModeLocked => '任务执行期间无法切换会话模式';
+
+  @override
   String get statusPlannerModel => 'Planner 模型';
 
   @override
@@ -1511,6 +1514,9 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get statusSessionMode => '会话模式';
+
+  @override
+  String get statusSessionModeLocked => '任务执行期间无法切换会话模式';
 
   @override
   String get statusPlannerModel => 'Planner 模型';

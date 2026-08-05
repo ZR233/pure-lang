@@ -337,6 +337,26 @@ class StudioController extends _$StudioController {
     await _saveConfigSettings(() => _api.saveRuntimePermissionMode(mode));
   }
 
+  Future<void> setThreadMode(StudioMode mode) async {
+    final current = state.value;
+    final thread = current?.selectedThread;
+    if (current == null ||
+        thread == null ||
+        !thread.isRoot ||
+        thread.mode == mode ||
+        current.runtime.hasActiveTask) {
+      return;
+    }
+    final next = await _api.setThreadMode(threadId: thread.id, mode: mode);
+    if (!ref.mounted) return;
+    final latest = state.value;
+    if (latest == null) return;
+    state = AsyncData(mergeStudioThreadState(latest, next, thread.id));
+    if (latest.selectedThreadId == thread.id) {
+      await _subscribeThread(thread.id);
+    }
+  }
+
   Future<void> setModelRole({
     required String roleKey,
     required String providerId,
@@ -558,6 +578,9 @@ class StudioController extends _$StudioController {
     if (current != null) {
       next = _attachProviderCatalog(next, current.providerCatalog);
       final knownIds = next.threads.map((thread) => thread.id).toSet();
+      final threadsById = {
+        for (final thread in next.threads) thread.id: thread,
+      };
       final tasks = Map<String, TaskRuntimeView>.from(
         current.tasksByRootThread,
       );
@@ -569,7 +592,8 @@ class StudioController extends _$StudioController {
       next = next.copyWith(
         workspacesByThread: {
           for (final entry in current.workspacesByThread.entries)
-            if (knownIds.contains(entry.key)) entry.key: entry.value,
+            if (knownIds.contains(entry.key))
+              entry.key: entry.value.copyWith(thread: threadsById[entry.key]),
         },
         workspaceUiByThread: {
           for (final entry in current.workspaceUiByThread.entries)

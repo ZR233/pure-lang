@@ -15,6 +15,11 @@ snapshot 与 live 之间漏事件。实时流没有 durable cursor、journal rep
 补丁协议；恢复永远重新取得 authoritative snapshot。旧历史通过 `listThreadTurns` 的 opaque
 keyset cursor 读取。
 
+ThreadEventBus 只拥有 Turn、Item、Interaction、runtime 与 live overlay 的实时投影，不拥有
+Thread directory 元数据。订阅注册完成后，StudioRuntime 必须用同一 `studio.sqlite` 中读取的
+Thread 行重绑尚未发送的首帧；不得把 EventBus 中为投影保留的 Thread 副本当成 mode、role、
+title 或 status 的事实源。
+
 ## 8.2 Notification
 
 通知穷尽为：
@@ -48,6 +53,10 @@ Flutter 为每个 Thread 保存 canonical `ThreadWorkspace`，为本地交互保
 `WorkspaceUiState`。snapshot 直接替换 canonical workspace；旧 Turn/Item/runtime 不与新
 snapshot 混合。Composer、滚动、展开和 submission revision 不属于 canonical snapshot。
 
+Thread directory 是 Thread 元数据的唯一 canonical cache。snapshot 中携带的 Thread 只用于
+校验身份并重绑到当前 directory entry，不能反向覆盖 directory。这样 product stream 与 thread
+stream 即使并发到达，也不会用旧 workspace snapshot 回滚刚确认的 mode/role。
+
 切换 Thread 时增加 generation、立即创建新订阅并取消旧订阅；旧 generation 的 frame、error
 和 done 全部丢弃。Item delta 只允许命中当前未终态 Item且 revision 严格递增；缺口、未知变体
 或 lagged 统一重新订阅。
@@ -55,4 +64,5 @@ snapshot 混合。Composer、滚动、展开和 submission revision 不属于 ca
 ## 8.5 Product stream
 
 项目、root/child Thread directory、Task、设置、Provider usage 和 MCP/LSP health 使用独立低频
-product stream。product stream 不携带 Turn/Item delta，也不改变任何 Thread workspace。
+product stream。product stream 不携带 Turn/Item delta；Thread directory 变化只重绑 workspace
+中的 Thread 元数据引用，不改变 Turn、Item、Interaction 或 runtime 内容。

@@ -29,6 +29,10 @@ projects / tasks / settings / health
 `ThreadRuntimeSnapshot`。authoritative snapshot 总是整体替换一个 workspace；不得把 snapshot
 与旧 runtime、旧 Turn 或旧 Item overlay 混合。
 
+Thread directory 唯一拥有 mode、role、title、关系、status 与 updatedAt。`ThreadWorkspace`
+中的 Thread 是归一化后的 directory 引用，不是第二份事实源：thread snapshot 只能替换 Turn、
+Item、Interaction 和 runtime，并把该引用重绑到当前 directory entry，不能覆盖 directory。
+
 以下都是 UI 本地状态，放入按 Thread 隔离的 `WorkspaceUiState`：
 
 - Composer draft、提交阶段和 submission revision；
@@ -51,9 +55,10 @@ authoritative `ThreadSnapshot`，随后发送：
 - `ThreadRuntimeUpdated`
 - `Lagged`
 
-snapshot 直接覆盖对应 workspace。只接收相同 ThreadId 和 generation 的通知；旧订阅迟到内容
-直接丢弃。Item/Turn terminal 与 transcript delta 是 lossless；收到 `Lagged`、断流或未知
-revision 后重新订阅取 snapshot，不维护 durable cursor 或 replay journal。
+snapshot 直接覆盖对应 workspace 的实时内容，但保留 product stream 已确认的 Thread directory
+元数据。只接收相同 ThreadId 和 generation 的通知；旧订阅迟到内容直接丢弃。Item/Turn terminal
+与 transcript delta 是 lossless；收到 `Lagged`、断流或未知 revision 后重新订阅取 snapshot，
+不维护 durable cursor 或 replay journal。
 
 历史通过 opaque keyset cursor 调用 `listThreadTurns` 向前分页。历史页只补充更旧的 Turn，
 不能覆盖 live snapshot 中相同身份的新 revision。
@@ -99,8 +104,9 @@ plan confirmation 可以在 `busy=false` 时继续阻塞普通 Composer。
 ## 11.6 状态栏与 agent directory
 
 状态栏只读取当前 workspace 的 owner、模型、context/token/cost、skills、MCP、LSP 和 Todo。
-root 额外显示 Simple/Task 模式与角色模型；活动 Task 期间禁止切换模式。child 只读展示实际
-运行模型。
+root 通过 typed mode selector 切换 Simple/Task，并展示对应角色模型；Bridge 返回的 canonical
+Thread 状态确认切换结果。活动 Task 期间 selector 保持可见但禁用。child 只读展示实际运行模型。
+root-only 和活动 Task 锁定同时由 StudioRuntime 校验，不能只依赖 Widget 或 Controller 拦截。
 
 agent directory 只在 header 的单一菜单中展示 root/child 层级、role、status 和 attention。
 child 的 timeline 不复制到 root，父 Thread 的 agent control tool 只作为自己的 toolCall Item。
@@ -111,7 +117,8 @@ runningTool、waitingInteraction、persisting。终态后移除活动块；失�
 ## 11.7 Product stream 与恢复
 
 product stream 只负责 Project、Thread directory、Task、settings 和 health。选中 Thread 的高频
-内容只来自 thread stream，两种 stream 不共享 sequence。
+内容只来自 thread stream，两种 stream 不共享 sequence，也不能按到达顺序互相覆盖。directory
+更新可重绑 workspace 的 Thread 引用，但不能改写 workspace 的 Turn、Item、Interaction 或 runtime。
 
 SQLite/schema/Bridge 无法提供 canonical snapshot 是应用级致命错误，显示可重试错误页。单个
 Project、Task 或 worktree 故障是 typed recovery issue：健康内容继续可用，故障项显示错误与

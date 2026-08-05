@@ -192,7 +192,7 @@ void registerShellSettingsTests() {
     await tester.pumpAndSettle();
 
     expect(find.byTooltip('Session mode'), findsOneWidget);
-    expect(find.byKey(StudioDriverKeys.sessionMode), findsNothing);
+    expect(find.byKey(StudioDriverKeys.sessionMode), findsOneWidget);
     expect(find.text('Simple'), findsOneWidget);
     expect(find.byTooltip('Executor model'), findsOneWidget);
     expect(find.byTooltip('Planner model'), findsNothing);
@@ -246,21 +246,18 @@ void registerShellSettingsTests() {
     await tester.tapAt(Offset.zero);
     await tester.pumpAndSettle();
 
-    api.emitGlobal(
-      _threadDirectoryChangedEvent(
-        projectId: 'project-1',
-        threads: [
-          StudioThread(
-            id: 'session-1',
-            projectId: 'project-1',
-            title: 'Session',
-            mode: StudioMode.task,
-            updatedAt: DateTime.fromMillisecondsSinceEpoch(1000),
-          ),
-        ],
-      ),
+    await tester.tap(find.byKey(StudioDriverKeys.sessionMode));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(StudioDriverKeys.sessionModeOption(StudioMode.task.name)),
     );
     await tester.pumpAndSettle();
+    expect(api.modeUpdate?.threadId, 'session-1');
+    expect(api.modeUpdate?.mode, StudioMode.task);
+    expect(
+      api.threadSubscriptions.where((threadId) => threadId == 'session-1'),
+      hasLength(2),
+    );
     expect(find.text('Task'), findsOneWidget);
     expect(find.byTooltip('Planner model'), findsOneWidget);
 
@@ -443,9 +440,19 @@ void registerShellSettingsTests() {
       findsNothing,
     );
     expect(tester.takeException(), isNull);
-    expect(find.byTooltip('Session mode'), findsOneWidget);
+    expect(
+      find.byTooltip('Session mode cannot change while a Task is active'),
+      findsOneWidget,
+    );
     expect(find.text('Task'), findsOneWidget);
-    expect(find.byKey(StudioDriverKeys.sessionMode), findsNothing);
+    expect(find.byKey(StudioDriverKeys.sessionMode), findsOneWidget);
+    await tester.tap(find.byKey(StudioDriverKeys.sessionMode));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(StudioDriverKeys.sessionModeOption(StudioMode.simple.name)),
+      findsNothing,
+    );
+    expect(api.modeUpdate, isNull);
     expect(tester.takeException(), isNull);
   });
 

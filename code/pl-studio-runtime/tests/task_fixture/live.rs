@@ -20,6 +20,7 @@ pub struct LiveTaskFixture {
     pub store: StudioStore,
     pub workspace: PathBuf,
     pub thread_id: String,
+    project_id: String,
     route_diagnostics: String,
     node_version: String,
     installed_config: InstalledConfigGuard,
@@ -80,6 +81,7 @@ impl LiveTaskFixture {
             store,
             workspace,
             thread_id: session.id,
+            project_id: project.id,
             route_diagnostics,
             node_version,
             installed_config,
@@ -150,7 +152,6 @@ impl LiveTaskFixture {
                 );
             }
 
-            let mut child_is_active = false;
             if let Some(task) = self.runtime.thread_task_view(&self.thread_id).await? {
                 if task.phase == "completed" {
                     return Ok(task);
@@ -165,11 +166,17 @@ impl LiveTaskFixture {
                         self.diagnostics().await
                     );
                 }
-                child_is_active = task
-                    .agents
-                    .iter()
-                    .any(|agent| matches!(agent.status.as_str(), "queued" | "running"));
             }
+            let child_is_active =
+                self.store
+                    .list_threads(&self.project_id)
+                    .await?
+                    .iter()
+                    .any(|thread| {
+                        thread.root_thread_id == self.thread_id
+                            && thread.parent_thread_id.is_some()
+                            && matches!(thread.status.as_str(), "queued" | "running" | "waiting")
+                    });
 
             if self.runtime.runtime_snapshot().active_turns.is_empty() && !child_is_active {
                 let idle_started = idle_since.get_or_insert_with(Instant::now);

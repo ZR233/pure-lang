@@ -32,6 +32,34 @@ async fn subscription_registers_before_returning_snapshot() {
     ));
 }
 
+#[tokio::test]
+async fn product_metadata_rebinds_only_the_subscription_bootstrap() {
+    let bus = ThreadEventBus::default();
+    bus.replace_snapshot(ThreadSnapshot::empty("thread-1"))
+        .unwrap();
+    let mut subscription = bus
+        .subscribe(ThreadSubscriptionRequest {
+            thread_id: "thread-1".to_string(),
+        })
+        .unwrap();
+    let mut thread = pl_protocol::Thread::placeholder("thread-1");
+    thread.mode = pl_protocol::ThreadMode::Task;
+    thread.role = "planner".to_string();
+
+    subscription.replace_bootstrap_thread(thread).unwrap();
+
+    assert!(matches!(
+        subscription.recv().await,
+        Some(ThreadSubscriptionUpdate::Snapshot { snapshot })
+            if snapshot.thread.mode == pl_protocol::ThreadMode::Task
+                && snapshot.thread.role == "planner"
+    ));
+    assert_eq!(
+        bus.snapshot("thread-1").unwrap().thread.mode,
+        pl_protocol::ThreadMode::Simple
+    );
+}
+
 #[test]
 fn unknown_thread_cannot_be_read_or_subscribed() {
     let bus = ThreadEventBus::default();
