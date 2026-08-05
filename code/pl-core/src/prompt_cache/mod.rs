@@ -1,0 +1,881 @@
+use std::collections::{BTreeMap, HashMap};
+
+use pl_model::{ProviderInfo, ReasoningConfig, ToolSchema};
+use pl_protocol::{
+    Message, MessageContent, MessageRole, ModelContextPatch, ModelContextSectionSnapshot,
+    ModelContextSnapshot, PromptPrefixChangedReason, PureError, ThreadPromptSnapshot,
+};
+
+use crate::session::CONTEXT_PATCH_METADATA_KEY;
+use crate::{AgentSession, canonical_json_hash};
+
+/// 计算 prompt generation 所需的固定请求属性。
+pub(crate) struct PromptCacheInput<'a> {
+    pub scope: &'a str,
+    pub turn_id: &'a str,
+    pub provider: &'a ProviderInfo,
+    pub model: &'a str,
+    pub instructions: &'a str,
+    pub prelude_messages: &'a [Message],
+    pub tools: &'a [ToolSchema],
+    pub tool_choice: &'a str,
+    pub parallel_tool_calls: bool,
+    pub reasoning: Option<&'a ReasoningConfig>,
+    pub output_schema: Option<&'a serde_json::Value>,
+    pub service_tier: Option<&'a str>,
+    pub compacted: bool,
+    pub updated_at: i64,
+}
+
+/// 以稳定名称和 canonical JSON 顺序冻结一次 Turn 的模型可见工具集合。
+pub(crate) fn stable_tool_schemas(mut tools: Vec<ToolSchema>) -> Vec<ToolSchema> {
+    for tool in &mut tools {
+        if let ToolSchema::Function { input_schema, .. } = tool {
+            canonicalize_json(input_schema);
+        }
+    }
+    tools.sort_by(|left, right| {
+        left.name().cmp(right.name()).then_with(|| {
+            canonical_schema(left)
+                .unwrap_or_default()
+                .cmp(&canonical_schema(right).unwrap_or_default())
+        })
+    });
+    tools
+}
+
+/// 在请求历史末尾追加本次模型可见的最小运行上下文变化。
+pub(crate) fn prepare_prompt_context(
+    session: &mut AgentSession,
+    input: PromptCacheInput<'_>,
+) -> Result<Option<ThreadPromptSnapshot>, PureError> {
+    let context = current_context(session);
+    let context_hash = canonical_json_hash(&serde_json::to_value(&context)?);
+    let stable_tools = stable_tool_schemas(input.tools.to_vec());
+    let tool_schema_hash = canonical_json_hash(&serde_json::to_value(&stable_tools)?);
+    let provider_hash = provider_hash(input.provider)?;
+    let fixed_prefix_hash = fixed_prefix_hash(&input, &provider_hash)?;
+    let previous_patch = session.latest_context_patch().cloned();
+    let previous_context = previous_patch
+        .as_ref()
+        .map(|patch| &patch.resulting_context);
+    let previous_prompt = previous_patch
+        .as_ref()
+        .and_then(|patch| patch.prompt_snapshots.get(input.scope));
+    let previous_active_scope = previous_patch
+        .as_ref()
+        .map(|patch| patch.prompt.scope.as_str());
+    let previous_generation = previous_patch
+        .as_ref()
+        .map_or(0, |patch| patch.prompt.generation);
+
+    let reason = changed_reason(
+        previous_prompt,
+        previous_active_scope,
+        &context_hash,
+        &provider_hash,
+        &fixed_prefix_hash,
+        &tool_schema_hash,
+        &input,
+    );
+    let Some(reason) = reason else {
+        return Ok(None);
+    };
+    let generation = if matches!(reason, PromptPrefixChangedReason::ContextAppended) {
+        previous_prompt.map_or(previous_generation.max(1), |previous| previous.generation)
+    } else {
+        previous_generation.saturating_add(1).max(1)
+    };
+    let prompt = ThreadPromptSnapshot {
+        scope: input.scope.to_string(),
+        generation,
+        provider: input.provider.name.clone(),
+        provider_hash,
+        model: input.model.to_string(),
+        fixed_prefix_hash,
+        tool_schema_hash,
+        context_hash,
+        prefix_changed_reason: reason,
+        updated_at: input.updated_at,
+    };
+    let force_full =
+        previous_context.is_none() || !matches!(reason, PromptPrefixChangedReason::ContextAppended);
+    let (message_text, changed_section_ids) =
+        render_context_patch(previous_context, &context, force_full, reason);
+    let mut prompt_snapshots = previous_patch
+        .map(|patch| patch.prompt_snapshots)
+        .unwrap_or_default();
+    prompt_snapshots.insert(input.scope.to_string(), prompt.clone());
+    let mut metadata = HashMap::new();
+    metadata.insert(CONTEXT_PATCH_METADATA_KEY.to_string(), "true".to_string());
+    let patch = ModelContextPatch {
+        id: format!(
+            "{}:context-patch:{}",
+            input.turn_id,
+            session.revision().saturating_add(1)
+        ),
+        message: Message {
+            role: MessageRole::System,
+            content: MessageContent::Text(message_text),
+            reasoning_content: None,
+            metadata,
+        },
+        resulting_context: context,
+        prompt: prompt.clone(),
+        prompt_snapshots,
+        changed_section_ids,
+    };
+    session.push_context_patch(patch);
+    Ok(Some(prompt))
+}
+
+fn changed_reason(
+    previous: Option<&ThreadPromptSnapshot>,
+    previous_active_scope: Option<&str>,
+    context_hash: &str,
+    provider_hash: &str,
+    fixed_prefix_hash: &str,
+    tool_schema_hash: &str,
+    input: &PromptCacheInput<'_>,
+) -> Option<PromptPrefixChangedReason> {
+    if previous_active_scope.is_none() {
+        return Some(PromptPrefixChangedReason::Initial);
+    }
+    if input.compacted {
+        return Some(PromptPrefixChangedReason::ContextCompacted);
+    }
+    if previous_active_scope != Some(input.scope) {
+        return Some(PromptPrefixChangedReason::PromptScopeChanged);
+    }
+    let Some(previous) = previous else {
+        return Some(PromptPrefixChangedReason::Initial);
+    };
+    if previous.provider != input.provider.name || previous.provider_hash != provider_hash {
+        return Some(PromptPrefixChangedReason::ProviderChanged);
+    }
+    if previous.model != input.model {
+        return Some(PromptPrefixChangedReason::ModelChanged);
+    }
+    if previous.tool_schema_hash != tool_schema_hash {
+        return Some(PromptPrefixChangedReason::ToolSchemaChanged);
+    }
+    if previous.fixed_prefix_hash != fixed_prefix_hash {
+        return Some(PromptPrefixChangedReason::FixedPrefixChanged);
+    }
+    (previous.context_hash != context_hash).then_some(PromptPrefixChangedReason::ContextAppended)
+}
+
+fn current_context(session: &AgentSession) -> ModelContextSnapshot {
+    let mut sections = session
+        .pinned_context_sections()
+        .map(|section| ModelContextSectionSnapshot {
+            id: section.id.clone(),
+            title: section.title.clone(),
+            content: section.content.clone(),
+            content_hash: section.content_hash.clone(),
+        })
+        .collect::<Vec<_>>();
+    sections.sort_by(|left, right| left.id.cmp(&right.id));
+    ModelContextSnapshot {
+        sections,
+        session_note_available: session
+            .session_note()
+            .is_some_and(|note| !note.content.is_empty()),
+    }
+}
+
+fn provider_hash(provider: &ProviderInfo) -> Result<String, PureError> {
+    let value = serde_json::json!({
+        "name": provider.name,
+        "baseUrl": provider.base_url,
+        "protocol": provider.protocol,
+        "connectionMode": provider.connection_mode,
+        "toolWirePolicy": provider.tool_wire_policy,
+        "applyPatchToolType": provider.apply_patch_tool_type,
+        "serviceCapabilities": provider.service_capabilities,
+    });
+    Ok(canonical_json_hash(&value))
+}
+
+fn fixed_prefix_hash(
+    input: &PromptCacheInput<'_>,
+    provider_hash: &str,
+) -> Result<String, PureError> {
+    let value = serde_json::json!({
+        "scope": input.scope,
+        "providerHash": provider_hash,
+        "model": input.model,
+        "instructions": input.instructions,
+        "preludeMessages": input.prelude_messages,
+        "toolChoice": input.tool_choice,
+        "parallelToolCalls": input.parallel_tool_calls,
+        "reasoning": input.reasoning,
+        "outputSchema": input.output_schema,
+        "serviceTier": input.service_tier,
+        "store": false,
+    });
+    Ok(canonical_json_hash(&value))
+}
+
+fn render_context_patch(
+    previous: Option<&ModelContextSnapshot>,
+    current: &ModelContextSnapshot,
+    force_full: bool,
+    reason: PromptPrefixChangedReason,
+) -> (String, Vec<String>) {
+    let previous_sections = previous
+        .map(|snapshot| {
+            snapshot
+                .sections
+                .iter()
+                .map(|section| (section.id.as_str(), section))
+                .collect::<BTreeMap<_, _>>()
+        })
+        .unwrap_or_default();
+    let current_sections = current
+        .sections
+        .iter()
+        .map(|section| (section.id.as_str(), section))
+        .collect::<BTreeMap<_, _>>();
+    let mut changed = current_sections
+        .iter()
+        .filter(|(id, section)| force_full || previous_sections.get(**id) != Some(section))
+        .map(|(_, section)| (*section).clone())
+        .collect::<Vec<_>>();
+    let removed = previous_sections
+        .keys()
+        .filter(|id| !current_sections.contains_key(**id))
+        .map(|id| (*id).to_string())
+        .collect::<Vec<_>>();
+    let mut changed_ids = changed
+        .iter()
+        .map(|section| section.id.to_string())
+        .chain(removed.iter().cloned())
+        .collect::<Vec<_>>();
+    changed_ids.sort();
+
+    let mut rendered = if force_full {
+        String::from(
+            "# Current working context\nThis is the current model-visible runtime context.",
+        )
+    } else {
+        String::from("# Working context update\nApply these changes to the prior working context.")
+    };
+    changed.sort_by(|left, right| left.id.cmp(&right.id));
+    for section in changed {
+        rendered.push_str(&format!(
+            "\n\n## {} [{}]\n{}",
+            section.title, section.id, section.content
+        ));
+    }
+    if !removed.is_empty() {
+        rendered.push_str("\n\n## Removed sections\n");
+        rendered.push_str(&removed.join("\n"));
+    }
+    let note_changed = force_full
+        || previous.is_none_or(|snapshot| {
+            snapshot.session_note_available != current.session_note_available
+        });
+    if note_changed {
+        rendered.push_str(if current.session_note_available {
+            "\n\nA persistent session note is available. Use search_session_note and read_session_note when relevant."
+        } else {
+            "\n\nNo persistent session note is currently available."
+        });
+    }
+    if changed_ids.is_empty() && !note_changed {
+        rendered.push_str(&format!(
+            "\n\nPrompt generation changed: {}.",
+            reason_label(reason)
+        ));
+    }
+    (rendered, changed_ids)
+}
+
+fn reason_label(reason: PromptPrefixChangedReason) -> &'static str {
+    match reason {
+        PromptPrefixChangedReason::Initial => "initial",
+        PromptPrefixChangedReason::PromptScopeChanged => "prompt scope changed",
+        PromptPrefixChangedReason::ProviderChanged => "provider changed",
+        PromptPrefixChangedReason::ModelChanged => "model changed",
+        PromptPrefixChangedReason::FixedPrefixChanged => "fixed prefix changed",
+        PromptPrefixChangedReason::ToolSchemaChanged => "tool schema changed",
+        PromptPrefixChangedReason::ContextCompacted => "context compacted",
+        PromptPrefixChangedReason::ContextAppended => "context appended",
+    }
+}
+
+fn canonical_schema(schema: &ToolSchema) -> Result<String, serde_json::Error> {
+    serde_json::to_value(schema).map(|value| canonical_json_hash(&value))
+}
+
+fn canonicalize_json(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(object) => {
+            let mut sorted = object
+                .iter_mut()
+                .map(|(key, value)| {
+                    canonicalize_json(value);
+                    (key.clone(), value.clone())
+                })
+                .collect::<BTreeMap<_, _>>();
+            object.clear();
+            object.extend(
+                sorted
+                    .iter_mut()
+                    .map(|(key, value)| (key.clone(), value.take())),
+            );
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                canonicalize_json(item);
+            }
+        }
+        serde_json::Value::Null
+        | serde_json::Value::Bool(_)
+        | serde_json::Value::Number(_)
+        | serde_json::Value::String(_) => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use pl_model::{ProviderInfo, ProviderWireProtocol, ReasoningSummary, ToolWirePolicy};
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+    use crate::context_section;
+
+    fn input<'a>(
+        scope: &'a str,
+        provider: &'a ProviderInfo,
+        model: &'a str,
+        instructions: &'a str,
+        tools: &'a [ToolSchema],
+        compacted: bool,
+    ) -> PromptCacheInput<'a> {
+        PromptCacheInput {
+            scope,
+            turn_id: "turn-1",
+            provider,
+            model,
+            instructions,
+            prelude_messages: &[],
+            tools,
+            tool_choice: "auto",
+            parallel_tool_calls: false,
+            reasoning: None,
+            output_schema: None,
+            service_tier: None,
+            compacted,
+            updated_at: 1,
+        }
+    }
+
+    #[test]
+    fn context_changes_append_without_incrementing_generation() {
+        let provider = ProviderInfo::deepseek(None);
+        let tools = Vec::new();
+        let mut session = AgentSession::new();
+        session.upsert_pinned_context(context_section("todo", 1, "Todo", "first").unwrap());
+        let first = prepare_prompt_context(
+            &mut session,
+            input(
+                "simple:root",
+                &provider,
+                "deepseek-v4-flash",
+                "fixed",
+                &tools,
+                false,
+            ),
+        )
+        .unwrap()
+        .unwrap();
+        session.push_assistant_response("done".to_string(), None);
+        session.upsert_pinned_context(context_section("todo", 2, "Todo", "second").unwrap());
+        let second = prepare_prompt_context(
+            &mut session,
+            input(
+                "simple:root",
+                &provider,
+                "deepseek-v4-flash",
+                "fixed",
+                &tools,
+                false,
+            ),
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(first.generation, second.generation);
+        assert_eq!(
+            second.prefix_changed_reason,
+            PromptPrefixChangedReason::ContextAppended
+        );
+        let messages = session.messages();
+        assert_eq!(messages[0].role, MessageRole::System);
+        assert_eq!(messages[1].role, MessageRole::Assistant);
+        assert_eq!(messages[2].role, MessageRole::System);
+    }
+
+    #[test]
+    fn compaction_creates_a_new_generation() {
+        let provider = ProviderInfo::deepseek(None);
+        let tools = Vec::new();
+        let mut session = AgentSession::new();
+        let first = prepare_prompt_context(
+            &mut session,
+            input(
+                "simple:root",
+                &provider,
+                "deepseek-v4-flash",
+                "fixed",
+                &tools,
+                false,
+            ),
+        )
+        .unwrap()
+        .unwrap();
+        let second = prepare_prompt_context(
+            &mut session,
+            input(
+                "simple:root",
+                &provider,
+                "deepseek-v4-flash",
+                "fixed",
+                &tools,
+                true,
+            ),
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(second.generation, first.generation + 1);
+        assert_eq!(
+            second.prefix_changed_reason,
+            PromptPrefixChangedReason::ContextCompacted
+        );
+    }
+
+    #[test]
+    fn tools_are_sorted_by_model_visible_name() {
+        let tools = stable_tool_schemas(vec![
+            ToolSchema::function("zeta", "", serde_json::json!({"b": 2, "a": 1})),
+            ToolSchema::function("alpha", "", serde_json::json!({})),
+        ]);
+
+        assert_eq!(
+            tools.iter().map(ToolSchema::name).collect::<Vec<_>>(),
+            vec!["alpha", "zeta"]
+        );
+    }
+
+    #[test]
+    fn unsorted_tools_do_not_change_the_prompt_generation() {
+        let provider = ProviderInfo::deepseek(None);
+        let first_tools = vec![
+            ToolSchema::function("zeta", "", serde_json::json!({"b": 2, "a": 1})),
+            ToolSchema::function("alpha", "", serde_json::json!({})),
+        ];
+        let second_tools = vec![
+            ToolSchema::function("alpha", "", serde_json::json!({})),
+            ToolSchema::function("zeta", "", serde_json::json!({"a": 1, "b": 2})),
+        ];
+        let mut session = AgentSession::new();
+        prepare_prompt_context(
+            &mut session,
+            input(
+                "simple:executor",
+                &provider,
+                "deepseek-v4-flash",
+                "fixed",
+                &first_tools,
+                false,
+            ),
+        )
+        .unwrap();
+
+        assert!(
+            prepare_prompt_context(
+                &mut session,
+                input(
+                    "simple:executor",
+                    &provider,
+                    "deepseek-v4-flash",
+                    "fixed",
+                    &second_tools,
+                    false,
+                ),
+            )
+            .unwrap()
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn scope_switches_are_explicit_global_generation_boundaries() {
+        let provider = ProviderInfo::deepseek(None);
+        let tools = Vec::new();
+        let mut session = AgentSession::new();
+        let first = prepare_prompt_context(
+            &mut session,
+            input(
+                "simple:executor",
+                &provider,
+                "deepseek-v4-flash",
+                "fixed",
+                &tools,
+                false,
+            ),
+        )
+        .unwrap()
+        .unwrap();
+        let task = prepare_prompt_context(
+            &mut session,
+            input(
+                "task:planner",
+                &provider,
+                "deepseek-v4-flash",
+                "fixed",
+                &tools,
+                false,
+            ),
+        )
+        .unwrap()
+        .unwrap();
+        let simple = prepare_prompt_context(
+            &mut session,
+            input(
+                "simple:executor",
+                &provider,
+                "deepseek-v4-flash",
+                "fixed",
+                &tools,
+                false,
+            ),
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(
+            first.prefix_changed_reason,
+            PromptPrefixChangedReason::Initial
+        );
+        assert_eq!(
+            task.prefix_changed_reason,
+            PromptPrefixChangedReason::PromptScopeChanged
+        );
+        assert_eq!(
+            simple.prefix_changed_reason,
+            PromptPrefixChangedReason::PromptScopeChanged
+        );
+        assert_eq!(task.generation, first.generation + 1);
+        assert_eq!(simple.generation, task.generation + 1);
+    }
+
+    #[test]
+    fn fixed_provider_model_and_tool_changes_have_precise_reasons() {
+        let provider = ProviderInfo::deepseek(None);
+        let tools = Vec::new();
+        let mut session = AgentSession::new();
+        prepare_prompt_context(
+            &mut session,
+            input(
+                "simple:executor",
+                &provider,
+                "deepseek-v4-flash",
+                "fixed",
+                &tools,
+                false,
+            ),
+        )
+        .unwrap();
+
+        let fixed = prepare_prompt_context(
+            &mut session,
+            input(
+                "simple:executor",
+                &provider,
+                "deepseek-v4-flash",
+                "changed",
+                &tools,
+                false,
+            ),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            fixed.prefix_changed_reason,
+            PromptPrefixChangedReason::FixedPrefixChanged
+        );
+
+        let mut renamed_provider = provider.clone();
+        renamed_provider.name = "DeepSeek mirror".to_string();
+        let provider_changed = prepare_prompt_context(
+            &mut session,
+            input(
+                "simple:executor",
+                &renamed_provider,
+                "deepseek-v4-flash",
+                "changed",
+                &tools,
+                false,
+            ),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            provider_changed.prefix_changed_reason,
+            PromptPrefixChangedReason::ProviderChanged
+        );
+
+        let model_changed = prepare_prompt_context(
+            &mut session,
+            input(
+                "simple:executor",
+                &renamed_provider,
+                "deepseek-v4-pro",
+                "changed",
+                &tools,
+                false,
+            ),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            model_changed.prefix_changed_reason,
+            PromptPrefixChangedReason::ModelChanged
+        );
+
+        let changed_tools = vec![ToolSchema::function(
+            "lookup",
+            "lookup",
+            serde_json::json!({"type": "object"}),
+        )];
+        let tools_changed = prepare_prompt_context(
+            &mut session,
+            input(
+                "simple:executor",
+                &renamed_provider,
+                "deepseek-v4-pro",
+                "changed",
+                &changed_tools,
+                false,
+            ),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            tools_changed.prefix_changed_reason,
+            PromptPrefixChangedReason::ToolSchemaChanged
+        );
+    }
+
+    #[test]
+    fn provider_route_and_wire_policy_changes_have_provider_reason() {
+        let provider = ProviderInfo::deepseek(None);
+        let tools = Vec::new();
+        let mut session = AgentSession::new();
+        prepare_prompt_context(
+            &mut session,
+            input(
+                "simple:executor",
+                &provider,
+                "deepseek-v4-flash",
+                "fixed",
+                &tools,
+                false,
+            ),
+        )
+        .unwrap();
+
+        let mut routed = provider.clone();
+        routed.base_url = "https://deepseek.example/v1".to_string();
+        let route_changed = prepare_prompt_context(
+            &mut session,
+            input(
+                "simple:executor",
+                &routed,
+                "deepseek-v4-flash",
+                "fixed",
+                &tools,
+                false,
+            ),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            route_changed.prefix_changed_reason,
+            PromptPrefixChangedReason::ProviderChanged
+        );
+
+        routed.protocol = ProviderWireProtocol::Responses;
+        routed.tool_wire_policy = ToolWirePolicy::NativeCustomTools;
+        let wire_changed = prepare_prompt_context(
+            &mut session,
+            input(
+                "simple:executor",
+                &routed,
+                "deepseek-v4-flash",
+                "fixed",
+                &tools,
+                false,
+            ),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            wire_changed.prefix_changed_reason,
+            PromptPrefixChangedReason::ProviderChanged
+        );
+    }
+
+    #[test]
+    fn every_fixed_request_attribute_changes_the_generation() {
+        let provider = ProviderInfo::deepseek(None);
+        let tools = Vec::new();
+        let output_schema = serde_json::json!({"type": "object"});
+        let reasoning = ReasoningConfig {
+            effort: Some("high".to_string()),
+            summary: Some(ReasoningSummary::Enabled),
+        };
+        let mut session = AgentSession::new();
+        prepare_prompt_context(
+            &mut session,
+            input(
+                "simple:executor",
+                &provider,
+                "deepseek-v4-flash",
+                "fixed",
+                &tools,
+                false,
+            ),
+        )
+        .unwrap();
+
+        let mut inputs = Vec::new();
+        let mut tool_choice = input(
+            "simple:executor",
+            &provider,
+            "deepseek-v4-flash",
+            "fixed",
+            &tools,
+            false,
+        );
+        tool_choice.tool_choice = "required";
+        inputs.push(tool_choice);
+        let mut parallel = input(
+            "simple:executor",
+            &provider,
+            "deepseek-v4-flash",
+            "fixed",
+            &tools,
+            false,
+        );
+        parallel.parallel_tool_calls = true;
+        inputs.push(parallel);
+        let mut with_reasoning = input(
+            "simple:executor",
+            &provider,
+            "deepseek-v4-flash",
+            "fixed",
+            &tools,
+            false,
+        );
+        with_reasoning.reasoning = Some(&reasoning);
+        inputs.push(with_reasoning);
+        let mut with_output_schema = input(
+            "simple:executor",
+            &provider,
+            "deepseek-v4-flash",
+            "fixed",
+            &tools,
+            false,
+        );
+        with_output_schema.output_schema = Some(&output_schema);
+        inputs.push(with_output_schema);
+        let mut with_service_tier = input(
+            "simple:executor",
+            &provider,
+            "deepseek-v4-flash",
+            "fixed",
+            &tools,
+            false,
+        );
+        with_service_tier.service_tier = Some("priority");
+        inputs.push(with_service_tier);
+
+        let mut previous_generation = 1;
+        for changed in inputs {
+            let snapshot = prepare_prompt_context(&mut session, changed)
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                snapshot.prefix_changed_reason,
+                PromptPrefixChangedReason::FixedPrefixChanged
+            );
+            assert!(snapshot.generation > previous_generation);
+            previous_generation = snapshot.generation;
+        }
+    }
+
+    #[test]
+    fn recursive_schema_key_order_does_not_change_the_prompt_generation() {
+        let provider = ProviderInfo::deepseek(None);
+        let first_tools = stable_tool_schemas(vec![ToolSchema::function(
+            "lookup",
+            "lookup",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "query"},
+                    "limit": {"maximum": 10, "type": "integer"}
+                }
+            }),
+        )]);
+        let second_tools = stable_tool_schemas(vec![ToolSchema::function(
+            "lookup",
+            "lookup",
+            serde_json::json!({
+                "properties": {
+                    "limit": {"type": "integer", "maximum": 10},
+                    "query": {"description": "query", "type": "string"}
+                },
+                "type": "object"
+            }),
+        )]);
+        assert_eq!(
+            serde_json::to_vec(&first_tools).unwrap(),
+            serde_json::to_vec(&second_tools).unwrap()
+        );
+
+        let mut session = AgentSession::new();
+        prepare_prompt_context(
+            &mut session,
+            input(
+                "simple:executor",
+                &provider,
+                "deepseek-v4-flash",
+                "fixed",
+                &first_tools,
+                false,
+            ),
+        )
+        .unwrap();
+        assert!(
+            prepare_prompt_context(
+                &mut session,
+                input(
+                    "simple:executor",
+                    &provider,
+                    "deepseek-v4-flash",
+                    "fixed",
+                    &second_tools,
+                    false,
+                ),
+            )
+            .unwrap()
+            .is_none()
+        );
+    }
+}

@@ -212,7 +212,9 @@ fn item_content(value: ThreadItemContent) -> Result<Option<BridgeThreadItemConte
         ThreadItemContent::File { path, media_type } => {
             Some(BridgeThreadItemContent::File { path, media_type })
         }
-        ThreadItemContent::ContextCompaction { .. } => None,
+        ThreadItemContent::ContextPatch { .. } | ThreadItemContent::ContextCompaction { .. } => {
+            None
+        }
     })
 }
 
@@ -376,5 +378,77 @@ fn mcp_server(value: McpServerDescriptor) -> BridgeThreadMcpServerDescriptor {
         transport: value.transport,
         endpoint: value.endpoint,
         built_in: value.built_in,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use pl_protocol::PromptPrefixChangedReason;
+
+    use super::*;
+
+    #[test]
+    fn internal_context_items_never_cross_the_bridge_boundary() {
+        let context_patch = item(ThreadItemContent::ContextPatch {
+            generation: 2,
+            fixed_prefix_hash: "fixed".to_string(),
+            tool_schema_hash: "tools".to_string(),
+            context_hash: "context".to_string(),
+            changed_section_ids: vec!["todo".to_string()],
+            prefix_changed_reason: PromptPrefixChangedReason::ContextAppended,
+        });
+        let context_compaction = item(ThreadItemContent::ContextCompaction {
+            before_tokens: 100,
+            after_tokens: 25,
+            compacted_at: 1,
+        });
+
+        assert!(bridge_thread_item(context_patch.clone()).unwrap().is_none());
+        assert!(
+            bridge_thread_item(context_compaction.clone())
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            thread_notification(ThreadNotificationEnvelope {
+                thread_id: "thread-1".to_string(),
+                revision: 1,
+                emitted_at: 1,
+                notification: ThreadNotification::ItemCompleted {
+                    item: Box::new(context_patch.clone()),
+                },
+            })
+            .unwrap()
+            .is_none()
+        );
+
+        let mut snapshot = ThreadSnapshot::empty("thread-1");
+        snapshot.items = vec![
+            context_patch,
+            context_compaction,
+            item(ThreadItemContent::UserMessage {
+                text: "visible".to_string(),
+                attachments: Vec::new(),
+            }),
+        ];
+        let bridged = bridge_thread_snapshot(snapshot).unwrap();
+        assert_eq!(bridged.items.len(), 1);
+    }
+
+    fn item(content: ThreadItemContent) -> ThreadItem {
+        ThreadItem {
+            id: "item-1".to_string(),
+            thread_id: "thread-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            ordinal: 1,
+            revision: 1,
+            status: ThreadItemStatus::Completed,
+            created_at: 1,
+            updated_at: 1,
+            completed_at: Some(1),
+            error: None,
+            content,
+            usage: None,
+        }
     }
 }

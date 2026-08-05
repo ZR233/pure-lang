@@ -1,8 +1,86 @@
+use std::collections::BTreeMap;
 use std::fmt;
 
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::Message;
+
+/// 不含 revision、时间戳等易变元数据的模型可见工作上下文段。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelContextSectionSnapshot {
+    pub id: ContextSectionId,
+    pub title: String,
+    pub content: String,
+    pub content_hash: String,
+}
+
+/// 一次采样时模型应看到的完整工作上下文。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelContextSnapshot {
+    #[serde(default)]
+    pub sections: Vec<ModelContextSectionSnapshot>,
+    #[serde(default)]
+    pub session_note_available: bool,
+}
+
+/// prompt generation 发生冷启动的原因。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PromptPrefixChangedReason {
+    Initial,
+    PromptScopeChanged,
+    ProviderChanged,
+    ModelChanged,
+    FixedPrefixChanged,
+    ToolSchemaChanged,
+    ContextCompacted,
+    ContextAppended,
+}
+
+/// Thread 当前 prompt generation 的脱敏诊断快照。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadPromptSnapshot {
+    pub scope: String,
+    pub generation: u64,
+    pub provider: String,
+    #[serde(default)]
+    pub provider_hash: String,
+    pub model: String,
+    pub fixed_prefix_hash: String,
+    pub tool_schema_hash: String,
+    pub context_hash: String,
+    pub prefix_changed_reason: PromptPrefixChangedReason,
+    pub updated_at: i64,
+}
+
+/// `threads.metadata_json` 中按产品模式/agent role 保存的 prompt generation。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadPromptMetadata {
+    pub active_scope: String,
+    #[serde(default)]
+    pub slots: BTreeMap<String, ThreadPromptSnapshot>,
+}
+
+/// 模型上下文的一次 append-only 差量。
+///
+/// `message` 是真正发送给模型的最小差量；`resulting_context` 只用于重启恢复和
+/// 下一次差量计算，Bridge 不得暴露。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelContextPatch {
+    pub id: String,
+    pub message: Message,
+    pub resulting_context: ModelContextSnapshot,
+    pub prompt: ThreadPromptSnapshot,
+    #[serde(default)]
+    pub prompt_snapshots: BTreeMap<String, ThreadPromptSnapshot>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub changed_section_ids: Vec<String>,
+}
 
 /// 独立于可压缩时间线的上下文段标识。
 ///
@@ -120,6 +198,9 @@ pub enum ModelContextItem {
     SessionNote {
         note: SessionNote,
     },
+    ContextPatch {
+        patch: ModelContextPatch,
+    },
     Compaction {
         #[serde(rename = "encryptedContent")]
         encrypted_content: String,
@@ -131,6 +212,7 @@ impl ModelContextItem {
         match self {
             Self::Message { message } => Some(message),
             Self::ToolResult { message, .. } => Some(message),
+            Self::ContextPatch { patch } => Some(&patch.message),
             Self::PinnedContext { .. } | Self::SessionNote { .. } | Self::Compaction { .. } => None,
         }
     }
@@ -139,6 +221,7 @@ impl ModelContextItem {
         match self {
             Self::Message { message } => Some(message),
             Self::ToolResult { message, .. } => Some(message),
+            Self::ContextPatch { patch } => Some(patch.message),
             Self::PinnedContext { .. } | Self::SessionNote { .. } | Self::Compaction { .. } => None,
         }
     }
@@ -152,6 +235,7 @@ impl ModelContextItem {
             Self::PinnedContext { section } => Some(section),
             Self::Message { .. }
             | Self::ToolResult { .. }
+            | Self::ContextPatch { .. }
             | Self::SessionNote { .. }
             | Self::Compaction { .. } => None,
         }
@@ -163,6 +247,7 @@ impl ModelContextItem {
             Self::Message { .. }
             | Self::ToolResult { .. }
             | Self::PinnedContext { .. }
+            | Self::ContextPatch { .. }
             | Self::Compaction { .. } => None,
         }
     }
@@ -172,6 +257,7 @@ impl ModelContextItem {
             Self::ToolResult { receipt, .. } => Some(receipt),
             Self::Message { .. }
             | Self::PinnedContext { .. }
+            | Self::ContextPatch { .. }
             | Self::SessionNote { .. }
             | Self::Compaction { .. } => None,
         }
@@ -183,6 +269,17 @@ impl ModelContextItem {
 
     pub fn is_session_note(&self) -> bool {
         matches!(self, Self::SessionNote { .. })
+    }
+
+    pub fn as_context_patch(&self) -> Option<&ModelContextPatch> {
+        match self {
+            Self::ContextPatch { patch } => Some(patch),
+            Self::Message { .. }
+            | Self::ToolResult { .. }
+            | Self::PinnedContext { .. }
+            | Self::SessionNote { .. }
+            | Self::Compaction { .. } => None,
+        }
     }
 }
 

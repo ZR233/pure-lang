@@ -290,6 +290,7 @@ impl StudioRuntime {
                 }),
                 session: pl_core::AgentSession::new(),
                 usage: pl_model::TokenUsage::default(),
+                billing_by_turn: std::collections::BTreeMap::new(),
                 last_context_tokens: None,
                 trace_sequence: 0,
                 thread_revision: 0,

@@ -133,7 +133,10 @@ impl AgentRuntimeHandle {
         let (reply, receiver) = oneshot::channel();
         self.send_to_actor(
             &agent_id,
-            AgentLoopCommand::Checkpoint { checkpoint, reply },
+            AgentLoopCommand::Checkpoint {
+                checkpoint: Box::new(checkpoint),
+                reply,
+            },
         )
         .await?;
         receive(receiver).await?

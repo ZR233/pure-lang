@@ -102,6 +102,7 @@ pub struct TurnOptions {
     pub cancellation_token: Option<CancellationToken>,
     pub tool_execution_mode: ToolExecutionMode,
     pub prompt_cache_key: Option<String>,
+    pub prompt_scope: String,
     pub user_input_mode: UserInputMode,
     pub execution_policy: Option<crate::AgentExecutionPolicy>,
     pub(crate) checkpoint: Option<crate::AgentTurnCheckpointHandle>,
@@ -121,6 +122,11 @@ impl TurnOptions {
 
     pub fn with_prompt_cache_key(mut self, prompt_cache_key: impl Into<String>) -> Self {
         self.prompt_cache_key = Some(prompt_cache_key.into());
+        self
+    }
+
+    pub fn with_prompt_scope(mut self, prompt_scope: impl Into<String>) -> Self {
+        self.prompt_scope = prompt_scope.into();
         self
     }
 
@@ -162,6 +168,7 @@ impl Default for TurnOptions {
             cancellation_token: None,
             tool_execution_mode: ToolExecutionMode::ModelDefault,
             prompt_cache_key: None,
+            prompt_scope: "default".to_string(),
             user_input_mode: UserInputMode::AwaitResponse,
             execution_policy: None,
             checkpoint: None,
@@ -184,6 +191,7 @@ impl std::fmt::Debug for TurnOptions {
             )
             .field("tool_execution_mode", &self.tool_execution_mode)
             .field("prompt_cache_key", &self.prompt_cache_key)
+            .field("prompt_scope", &self.prompt_scope)
             .field("user_input_mode", &self.user_input_mode)
             .field("execution_policy", &self.execution_policy)
             .field("checkpoint", &self.checkpoint)

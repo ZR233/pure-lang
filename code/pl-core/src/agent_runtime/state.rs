@@ -1,9 +1,9 @@
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use pl_model::TokenUsage;
-use pl_protocol::TurnFailure;
+use pl_protocol::{TurnBillingRecord, TurnFailure};
 use serde::{Deserialize, Serialize};
 
 use crate::{AgentRoleId, AgentSession};
@@ -176,6 +176,8 @@ pub struct ThreadContextState {
     pub metadata: serde_json::Value,
     pub session: AgentSession,
     pub usage: TokenUsage,
+    /// 按 Turn 保存的 inference 计费快照；durable truth 位于 `turns.model_json`。
+    pub billing_by_turn: BTreeMap<String, TurnBillingRecord>,
     pub last_context_tokens: Option<u64>,
     /// 当前 session 下一条 durable trace 的 sequence。
     pub trace_sequence: u64,
@@ -190,6 +192,7 @@ impl ThreadContextState {
             metadata: serde_json::Value::Null,
             session: AgentSession::new(),
             usage: TokenUsage::default(),
+            billing_by_turn: BTreeMap::new(),
             last_context_tokens: None,
             trace_sequence: 0,
             thread_revision: 0,

@@ -552,29 +552,40 @@ fn chat_parse_response_reads_reasoning_content() {
 }
 
 #[test]
-fn chat_parse_response_reads_cached_prompt_tokens() {
-    let response = OpenAiProtocol::chat()
-        .parse_response(serde_json::json!({
-            "model": "deepseek-v4-flash",
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": "ok"
-                },
-                "finish_reason": "stop"
-            }],
-            "usage": {
-                "prompt_tokens": 100,
-                "completion_tokens": 20,
-                "total_tokens": 120,
-                "prompt_tokens_details": {
-                    "cached_tokens": 40
-                }
-            }
-        }))
-        .unwrap();
+fn chat_parse_response_reads_deepseek_cached_token_aliases() {
+    for cached_usage in [
+        serde_json::json!({"prompt_cache_hit_tokens": 40}),
+        serde_json::json!({"cached_prompt_tokens": 40}),
+        serde_json::json!({"prompt_tokens_details": {"cached_tokens": 40}}),
+    ] {
+        let mut usage = serde_json::json!({
+            "prompt_tokens": 100,
+            "completion_tokens": 20,
+            "total_tokens": 120
+        });
+        usage.as_object_mut().unwrap().extend(
+            cached_usage
+                .as_object()
+                .unwrap()
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone())),
+        );
+        let response = OpenAiProtocol::chat()
+            .parse_response(serde_json::json!({
+                "model": "deepseek-v4-flash",
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "content": "ok"
+                    },
+                    "finish_reason": "stop"
+                }],
+                "usage": usage
+            }))
+            .unwrap();
 
-    assert_eq!(response.usage.cached_prompt_tokens, 40);
+        assert_eq!(response.usage.cached_prompt_tokens, 40);
+    }
 }
 
 #[test]

@@ -12,6 +12,7 @@ mod model_config;
 pub mod path_safety;
 mod permission;
 mod process;
+mod prompt_cache;
 mod provider_error;
 pub mod runtime_usage;
 mod session;
@@ -28,9 +29,9 @@ pub use agent_runtime::{
     AgentAccessPolicy, AgentActivityState, AgentCollaborationTools, AgentCommitObserver,
     AgentCommittedEvent, AgentCurrentSessionSubmitRequest, AgentDirectorySnapshot,
     AgentDirectorySubscription, AgentDirectoryWaitReason, AgentDirectoryWaitResult,
-    AgentExecutionPolicy, AgentId, AgentIdentity, AgentLifecycleAdapter, AgentLifecycleState,
-    AgentProgressCheckpoint, AgentProgressStage, AgentRegistration, AgentRuntime,
-    AgentRuntimeError, AgentRuntimeEvent, AgentRuntimeEventKind, AgentRuntimeHandle,
+    AgentExecutionPolicy, AgentId, AgentIdentity, AgentInferenceCommit, AgentLifecycleAdapter,
+    AgentLifecycleState, AgentProgressCheckpoint, AgentProgressStage, AgentRegistration,
+    AgentRuntime, AgentRuntimeError, AgentRuntimeEvent, AgentRuntimeEventKind, AgentRuntimeHandle,
     AgentRuntimeHost, AgentRuntimeOptions, AgentRuntimeResult, AgentSessionCommitPolicy,
     AgentSessionDigest, AgentSessionDigestMessage, AgentSessionDigestRole, AgentSnapshot,
     AgentSpawnRequest, AgentSpawnResult, AgentSubmitRequest, AgentTargetSelector,
@@ -118,6 +119,7 @@ pub use pl_protocol::{
     ToolApprovalResolution, ToolResultReceipt, TurnFailure, TurnFailureCategory, UserInputAnswer,
     UserInputRequest, UserInputResponse, UserQuestion, UserQuestionOption,
 };
+pub(crate) use prompt_cache::{PromptCacheInput, prepare_prompt_context, stable_tool_schemas};
 pub use provider_error::is_retryable_model_error;
 pub use runtime_usage::ModelTokenUsageSnapshot;
 pub use session::{

@@ -64,8 +64,16 @@ where
             next.session.session = completed_session;
         }
         if let Some(result) = &result {
-            add_usage(&mut next.session.usage, &result.usage);
-            next.session.last_context_tokens = result.last_context_tokens;
+            if !next
+                .session
+                .billing_by_turn
+                .contains_key(active.turn_id.as_str())
+            {
+                add_usage(&mut next.session.usage, &result.usage);
+            }
+            if result.last_context_tokens.is_some() {
+                next.session.last_context_tokens = result.last_context_tokens;
+            }
         }
         next.snapshot.active_turn_id = None;
         for input in &mut next.pending_inputs {

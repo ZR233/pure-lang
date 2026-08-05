@@ -175,6 +175,7 @@ fn trim_tool_outputs_to_context_window(
         let (message, receipt) = match &input[index] {
             ModelContextItem::Message { message } => (message, None),
             ModelContextItem::ToolResult { message, receipt } => (message, Some(receipt.clone())),
+            ModelContextItem::ContextPatch { .. } => continue,
             ModelContextItem::PinnedContext { .. }
             | ModelContextItem::SessionNote { .. }
             | ModelContextItem::Compaction { .. } => {
@@ -207,6 +208,7 @@ fn estimate_input_tokens(instructions: &str, input: &[ModelContextItem]) -> u64 
             .map(|item| match item {
                 ModelContextItem::Message { message }
                 | ModelContextItem::ToolResult { message, .. } => estimate_message_tokens(message),
+                ModelContextItem::ContextPatch { patch } => estimate_message_tokens(&patch.message),
                 ModelContextItem::PinnedContext { .. } | ModelContextItem::SessionNote { .. } => 0,
                 ModelContextItem::Compaction { encrypted_content } => {
                     estimate_text_tokens(encrypted_content)

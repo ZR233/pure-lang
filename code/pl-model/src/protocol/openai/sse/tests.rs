@@ -83,31 +83,42 @@ fn process_chat_reasoning_and_content_from_same_chunk() {
 }
 
 #[test]
-fn process_chat_completed_reads_cached_prompt_tokens() {
-    let event: SseStreamEvent = serde_json::from_value(serde_json::json!({
-        "choices": [{
-            "delta": {},
-            "finish_reason": "stop"
-        }],
-        "usage": {
+fn process_chat_completed_reads_deepseek_cached_token_aliases() {
+    for cached_usage in [
+        serde_json::json!({"prompt_cache_hit_tokens": 35}),
+        serde_json::json!({"cached_prompt_tokens": 35}),
+        serde_json::json!({"prompt_tokens_details": {"cached_tokens": 35}}),
+    ] {
+        let mut usage = serde_json::json!({
             "prompt_tokens": 100,
             "completion_tokens": 20,
-            "total_tokens": 120,
-            "prompt_tokens_details": {
-                "cached_tokens": 35
-            }
-        }
-    }))
-    .unwrap();
+            "total_tokens": 120
+        });
+        usage.as_object_mut().unwrap().extend(
+            cached_usage
+                .as_object()
+                .unwrap()
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone())),
+        );
+        let event: SseStreamEvent = serde_json::from_value(serde_json::json!({
+            "choices": [{
+                "delta": {},
+                "finish_reason": "stop"
+            }],
+            "usage": usage
+        }))
+        .unwrap();
 
-    match process_sse_events(&event).as_slice() {
-        [
-            StreamEvent::Usage(usage),
-            StreamEvent::Completed { response_id: None },
-        ] => {
-            assert_eq!(usage.cached_prompt_tokens, 35);
+        match process_sse_events(&event).as_slice() {
+            [
+                StreamEvent::Usage(usage),
+                StreamEvent::Completed { response_id: None },
+            ] => {
+                assert_eq!(usage.cached_prompt_tokens, 35);
+            }
+            other => panic!("unexpected event: {other:?}"),
         }
-        other => panic!("unexpected event: {other:?}"),
     }
 }
 

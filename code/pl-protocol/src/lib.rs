@@ -1,3 +1,4 @@
+mod billing;
 mod error;
 mod event;
 mod interaction;
@@ -9,6 +10,10 @@ mod provider_catalog;
 mod thread;
 mod turn_failure;
 
+pub use billing::{
+    InferenceBillingAppend, InferenceBillingRecord, InferenceTokenUsage, ModelPricingSnapshot,
+    TurnBillingRecord,
+};
 pub use error::{PureError, Result};
 pub use event::{
     AgentRuntimeDelta, AgentStatus, BudgetLimitKind, BudgetUsage, ErrorSeverity, OutputStream,
@@ -30,7 +35,9 @@ pub use message::{
     ToolCallHistoryMetadata, ToolCallKind, ToolResultMetadata,
 };
 pub use model_context::{
-    ContextSectionId, ContextSectionIdError, ModelContextItem, PinnedContextSection, SessionNote,
+    ContextSectionId, ContextSectionIdError, ModelContextItem, ModelContextPatch,
+    ModelContextSectionSnapshot, ModelContextSnapshot, PinnedContextSection,
+    PromptPrefixChangedReason, SessionNote, ThreadPromptMetadata, ThreadPromptSnapshot,
     ToolResultReceipt,
 };
 pub use permission::PermissionLevel;

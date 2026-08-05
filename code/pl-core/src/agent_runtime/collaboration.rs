@@ -242,6 +242,7 @@ impl CollaborationTool {
             metadata: serde_json::Value::Null,
             session: fork_session(&context.parent_session, args.fork_turns)?,
             usage: pl_model::TokenUsage::default(),
+            billing_by_turn: std::collections::BTreeMap::new(),
             last_context_tokens: None,
             trace_sequence: 0,
             thread_revision: 0,
