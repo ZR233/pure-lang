@@ -84,11 +84,8 @@ async fn run_offline_task_flow() -> Result<()> {
 
     assert_eq!(task.merges.len(), 1);
     let merge = &task.merges[0];
-    assert_eq!(merge.status, "merged");
-    let merge_commit = merge
-        .merge_commit
-        .as_deref()
-        .context("accepted merge has no merge commit")?;
+    assert_eq!(merge.method, "merge");
+    let merge_commit = merge.resulting_head.as_str();
     assert_eq!(
         git_output(
             &fixture.workspace,

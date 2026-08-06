@@ -6,7 +6,6 @@ pub enum ToolEffect {
     Process,
     AgentControl,
     BranchControl,
-    ConflictWrite,
 }
 
 impl ToolEffect {
@@ -49,20 +48,37 @@ impl ToolEffect {
             | "git_branch"
             | "git_commit"
             | "report_completion"
-            | "task_merge_agent"
+            | "task_record_merge"
             | "task_update_design"
             | "task_request_delivery_review"
             | "task_request_integrated_review"
             | "task_complete"
             | "task_stop" => Some(Self::BranchControl),
             "review_exit" => Some(Self::Read),
-            "merge_list_conflicts"
-            | "merge_read_conflict"
-            | "merge_resolve_file"
-            | "merge_verify"
-            | "merge_continue"
-            | "merge_abort" => Some(Self::ConflictWrite),
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ToolEffect;
+
+    #[test]
+    fn removed_merge_tools_have_no_builtin_effect() {
+        for name in [
+            "merge_list_conflicts",
+            "merge_read_conflict",
+            "merge_resolve_file",
+            "merge_verify",
+            "merge_continue",
+            "merge_abort",
+        ] {
+            assert_eq!(ToolEffect::for_builtin_name(name), None, "{name}");
+        }
+        assert_eq!(
+            ToolEffect::for_builtin_name("task_record_merge"),
+            Some(ToolEffect::BranchControl)
+        );
     }
 }

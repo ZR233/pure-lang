@@ -41,6 +41,13 @@ void registerTaskRuntimeDetailTests() {
       find.byKey(StudioDriverKeys.taskCompletionRevision('completion-1', 2)),
       findsOneWidget,
     );
+    expect(find.text('MERGE RECORDS'), findsOneWidget);
+    expect(find.text('merge'), findsOneWidget);
+    expect(find.text('merge summary'), findsOneWidget);
+    expect(find.text('alreadyAbsent'), findsOneWidget);
+    expect(find.text('1111111111'), findsOneWidget);
+    expect(find.text('2222222222'), findsOneWidget);
+    expect(find.text('3333333333'), findsOneWidget);
     expect(find.byKey(StudioDriverKeys.taskReview('review-1')), findsOneWidget);
     expect(
       find.byKey(StudioDriverKeys.taskReviewReviewer('review-1')),
@@ -121,7 +128,24 @@ TaskRuntimeView _stoppedTask({
       updatedAt: DateTime.fromMillisecondsSinceEpoch(1000, isUtc: true),
     ),
   ],
-  merges: const [],
+  merges: [
+    TaskMergeView(
+      id: 'merge-1',
+      workUnitId: 'unit-1',
+      completionId: 'completion-1',
+      completionRevision: 2,
+      executorAgentId: 'executor-1',
+      expectedPreviousHead: '1111111111abcdef',
+      resultingHead: '3333333333abcdef',
+      deliveryHead: '2222222222abcdef',
+      method: 'merge',
+      summary: 'merge summary',
+      cleanupStatus: 'alreadyAbsent',
+      cleanupDetail: null,
+      createdAt: DateTime.fromMillisecondsSinceEpoch(1000, isUtc: true),
+      updatedAt: DateTime.fromMillisecondsSinceEpoch(1000, isUtc: true),
+    ),
+  ],
   reviews: [
     TaskReviewView(
       id: 'review-1',

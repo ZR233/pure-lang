@@ -640,7 +640,7 @@ mod tests {
             event_tx,
             options: crate::turn::TurnOptions::default(),
             workspace_access: crate::tool::WorkspaceAccess::WorkspaceOnly,
-            workspace_root: std::env::temp_dir(),
+            workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
             workspace_instructions: None,
             instruction_snapshot: None,
             provider_call_id: None,

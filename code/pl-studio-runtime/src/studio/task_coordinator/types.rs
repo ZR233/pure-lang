@@ -1,7 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-use super::conflict_types::ConflictVerificationEvidence;
-
 mod merge;
 pub(crate) use merge::*;
 
@@ -13,7 +11,6 @@ pub(crate) enum TaskRunPhase {
     DesignUpdating,
     Implementing,
     Merging,
-    ResolvingConflict,
     Reviewing,
     Reworking,
     Stopping,
@@ -31,7 +28,6 @@ impl TaskRunPhase {
             Self::DesignUpdating => "designUpdating",
             Self::Implementing => "implementing",
             Self::Merging => "merging",
-            Self::ResolvingConflict => "resolvingConflict",
             Self::Reviewing => "reviewing",
             Self::Reworking => "reworking",
             Self::Stopping => "stopping",
@@ -49,7 +45,6 @@ impl TaskRunPhase {
             "designUpdating" => Some(Self::DesignUpdating),
             "implementing" => Some(Self::Implementing),
             "merging" => Some(Self::Merging),
-            "resolvingConflict" => Some(Self::ResolvingConflict),
             "reviewing" => Some(Self::Reviewing),
             "reworking" => Some(Self::Reworking),
             "stopping" => Some(Self::Stopping),
@@ -93,15 +88,8 @@ impl TaskRunPhase {
             ),
             Self::Merging => matches!(
                 next,
-                Self::Implementing
-                    | Self::ResolvingConflict
-                    | Self::Reviewing
-                    | Self::Blocked
-                    | Self::Failed
+                Self::Implementing | Self::Reviewing | Self::Blocked | Self::Failed
             ),
-            Self::ResolvingConflict => {
-                matches!(next, Self::Merging | Self::Blocked | Self::Failed)
-            }
             Self::Reviewing => {
                 matches!(
                     next,
@@ -284,7 +272,6 @@ pub(crate) enum WorkUnitStatus {
     Reviewing,
     ChangesRequested,
     Approved,
-    Merging,
     Merged,
     NoDelivery,
     Failed,
@@ -301,7 +288,6 @@ impl WorkUnitStatus {
             Self::Reviewing => "reviewing",
             Self::ChangesRequested => "changesRequested",
             Self::Approved => "approved",
-            Self::Merging => "merging",
             Self::Merged => "merged",
             Self::NoDelivery => "noDelivery",
             Self::Failed => "failed",
@@ -318,7 +304,6 @@ impl WorkUnitStatus {
             "reviewing" => Some(Self::Reviewing),
             "changesRequested" => Some(Self::ChangesRequested),
             "approved" => Some(Self::Approved),
-            "merging" => Some(Self::Merging),
             "merged" => Some(Self::Merged),
             "noDelivery" => Some(Self::NoDelivery),
             "failed" => Some(Self::Failed),
@@ -362,42 +347,6 @@ impl ThreadExecutionStatus {
             "completed" => Some(Self::Completed),
             "failed" => Some(Self::Failed),
             "cancelled" => Some(Self::Cancelled),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) enum MergeStatus {
-    Pending,
-    Conflicted,
-    Verifying,
-    Merged,
-    Aborted,
-    Failed,
-}
-
-impl MergeStatus {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Pending => "pending",
-            Self::Conflicted => "conflicted",
-            Self::Verifying => "verifying",
-            Self::Merged => "merged",
-            Self::Aborted => "aborted",
-            Self::Failed => "failed",
-        }
-    }
-
-    pub(crate) fn from_str(value: &str) -> Option<Self> {
-        match value {
-            "pending" => Some(Self::Pending),
-            "conflicted" => Some(Self::Conflicted),
-            "verifying" => Some(Self::Verifying),
-            "merged" => Some(Self::Merged),
-            "aborted" => Some(Self::Aborted),
-            "failed" => Some(Self::Failed),
             _ => None,
         }
     }
@@ -583,7 +532,7 @@ pub(crate) struct WorkUnitRecord {
     pub(crate) task_run_id: String,
     pub(crate) title: String,
     pub(crate) status: WorkUnitStatus,
-    pub(crate) owned_paths: Vec<String>,
+    pub(crate) scope_hints: Vec<String>,
     pub(crate) base_commit: String,
     pub(crate) worktree_path: String,
     pub(crate) branch: String,

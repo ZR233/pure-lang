@@ -44,7 +44,7 @@ pub(super) fn tool_error(tool: &str, error: impl std::fmt::Display) -> PureError
 
 pub(super) async fn workspace(context: &ToolContext) -> Result<WorkspacePaths, PureError> {
     WorkspacePaths::new(
-        context.workspace_root.clone(),
+        context.workspace.root().to_path_buf(),
         context.allows_workspace_escape(),
     )
     .await

@@ -74,6 +74,11 @@ class _FakeStudioApi implements StudioApi {
   Object? recoveryCleanupError;
   String? cleanedRecoveryIssueId;
   String? cleanupExpectedRevision;
+  StudioState? recoveryRetryState;
+  Object? recoveryRetryError;
+  String? retriedRecoveryIssueId;
+  String? retrySelectedProjectId;
+  String? retrySelectedThreadId;
 
   void emitGlobal(StudioBridgeEvent event) => _global.add(event);
 
@@ -223,6 +228,21 @@ class _FakeStudioApi implements StudioApi {
     cleanedRecoveryIssueId = issueId;
     cleanupExpectedRevision = expectedRevision;
     return recoveryCleanupState ?? initialState;
+  }
+
+  @override
+  Future<StudioState> retryRecoveryIssue(
+    String issueId, {
+    String? selectedProjectId,
+    String? selectedThreadId,
+  }) async {
+    if (recoveryRetryError case final error?) {
+      throw error;
+    }
+    retriedRecoveryIssueId = issueId;
+    retrySelectedProjectId = selectedProjectId;
+    retrySelectedThreadId = selectedThreadId;
+    return recoveryRetryState ?? initialState;
   }
 
   @override

@@ -483,6 +483,22 @@ class StudioController extends _$StudioController {
     );
   }
 
+  Future<void> retryRecoveryIssue(String issueId) async {
+    final current = state.value;
+    if (current == null) return;
+    final issue = current.recoveryIssues
+        .where((candidate) => candidate.id == issueId)
+        .firstOrNull;
+    if (issue == null || !issue.canRetry) return;
+    await _adoptProductState(
+      await _api.retryRecoveryIssue(
+        issueId,
+        selectedProjectId: issue.projectId ?? current.selectedProjectId,
+        selectedThreadId: issue.threadId ?? current.selectedThreadId,
+      ),
+    );
+  }
+
   void retryInitialization() => ref.invalidateSelf();
 
   Future<void> resolveActiveInteraction(

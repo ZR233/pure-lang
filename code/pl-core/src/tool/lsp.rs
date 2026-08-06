@@ -48,12 +48,14 @@ impl Tool for LspQueryTool {
                 }
             })?;
             let query = resolve_query_path(query, &context, self.name())?;
-            let result = self.registry.query(query).await.map_err(|error| {
-                PureError::ToolExecutionFailed {
+            let result = self
+                .registry
+                .query_in_workspace(context.workspace.root(), query)
+                .await
+                .map_err(|error| PureError::ToolExecutionFailed {
                     tool: self.name().to_string(),
                     error: error.to_string(),
-                }
-            })?;
+                })?;
             let description = serde_json::to_string_pretty(&result).map_err(|error| {
                 PureError::ToolExecutionFailed {
                     tool: self.name().to_string(),
@@ -129,7 +131,7 @@ fn resolve_query_path(
         return Ok(query);
     };
     let policy = ToolPathPolicy::new(
-        context.workspace_root.clone(),
+        context.workspace.root().to_path_buf(),
         context.allows_workspace_escape(),
         tool_name,
     )?;
@@ -219,12 +221,14 @@ impl Tool for LspLanguageTool {
             })?;
             query.language_id = Some(self.language_id.clone());
             let query = resolve_query_path(query, &context, self.name())?;
-            let result = self.registry.query(query).await.map_err(|error| {
-                PureError::ToolExecutionFailed {
+            let result = self
+                .registry
+                .query_in_workspace(context.workspace.root(), query)
+                .await
+                .map_err(|error| PureError::ToolExecutionFailed {
                     tool: self.name().to_string(),
                     error: error.to_string(),
-                }
-            })?;
+                })?;
             let description = serde_json::to_string_pretty(&result).map_err(|error| {
                 PureError::ToolExecutionFailed {
                     tool: self.name().to_string(),
@@ -284,7 +288,7 @@ mod tests {
             event_tx,
             options: TurnOptions::default(),
             workspace_access,
-            workspace_root,
+            workspace: crate::tool::AgentWorkspace::local(workspace_root),
             workspace_instructions: None,
             instruction_snapshot: None,
             provider_call_id: None,

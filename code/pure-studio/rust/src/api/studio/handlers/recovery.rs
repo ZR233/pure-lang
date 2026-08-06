@@ -41,6 +41,16 @@ pub async fn cleanup_recovery_issue(
     Ok(studio_snapshot_inner(bridge, selected_project_id, selected_thread_id).await?)
 }
 
+pub async fn retry_recovery_issue(
+    issue_id: String,
+    selected_project_id: Option<String>,
+    selected_thread_id: Option<String>,
+) -> Result<BridgeStudioSnapshotResponse, BridgeError> {
+    let bridge = active_bridge().await?;
+    bridge.studio.retry_recovery_issue(&issue_id).await?;
+    Ok(studio_snapshot_inner(bridge, selected_project_id, selected_thread_id).await?)
+}
+
 pub async fn cleanup_project(
     project_id: String,
     expected_revision: String,

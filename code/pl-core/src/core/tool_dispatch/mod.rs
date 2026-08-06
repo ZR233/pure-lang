@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -13,7 +12,7 @@ use tokio::sync::RwLock;
 use crate::permission::{PermissionDecision, decide_tool_permission};
 use crate::session::AgentSession;
 use crate::tool::{
-    SubagentContext, ToolBudgetTiming, ToolContext, ToolInput, ToolRuntimeEvent,
+    AgentWorkspace, SubagentContext, ToolBudgetTiming, ToolContext, ToolInput, ToolRuntimeEvent,
     ToolRuntimeLockPolicy, WorkspaceAccess,
 };
 use crate::turn::{BudgetTracker, ToolApprovalDecision, ToolExecutionMode, TurnOptions};
@@ -81,7 +80,7 @@ pub(super) struct ToolExecutionContext<'a> {
     pub(super) core: &'a TurnEngine,
     pub(super) options: &'a TurnOptions,
     pub(super) session_id: &'a str,
-    pub(super) workspace_root: &'a Path,
+    pub(super) workspace: AgentWorkspace,
     pub(super) workspace_instructions: Option<String>,
     pub(super) instruction_snapshot: Option<crate::instruction::InstructionSnapshot>,
     pub(super) active_subagent: Option<SubagentContext>,
@@ -231,7 +230,7 @@ pub(super) async fn execute_tool_calls(
             event_tx: recorder.sender().clone(),
             options: context.options.clone(),
             workspace_access: WorkspaceAccess::WorkspaceOnly,
-            workspace_root: context.workspace_root.to_path_buf(),
+            workspace: context.workspace.clone(),
             workspace_instructions: context.workspace_instructions.clone(),
             instruction_snapshot: context.instruction_snapshot.clone(),
             provider_call_id: Some(tool_call.stable_call_id().to_string()),
@@ -243,7 +242,7 @@ pub(super) async fn execute_tool_calls(
         };
         let mut approval_request = approval_request(tool_call, &tool_context);
         approval_request.id = trace_part_id.clone();
-        let requested_access = requested_workspace_access(tool_call, context.workspace_root);
+        let requested_access = requested_workspace_access(tool_call, context.workspace.root());
         let mut execution_workspace_access = WorkspaceAccess::WorkspaceOnly;
         let decision =
             match decide_tool_permission(context.options, &approval_request, requested_access) {
@@ -343,7 +342,7 @@ pub(super) async fn execute_tool_calls(
                 let tool_context = invocation.context;
                 let cache = context.tool_cache.clone();
                 let cache_arguments = tool_input.arguments.clone();
-                let cache_workspace_root = context.workspace_root.to_path_buf();
+                let cache_workspace_root = context.workspace.root().to_path_buf();
                 let cache_call_id = tool_call.stable_call_id().to_string();
                 let tool_effect = effect;
                 let budget_timing = tool.budget_timing();

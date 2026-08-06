@@ -15,7 +15,7 @@ flag。Simple、Task、多代理、worktree、审查、冲突处理与重启恢�
 
 - `pl-protocol` 定义穷尽的 Thread、Turn、Item、Interaction 和 typed notification。
 - `pl-core` 提供 ThreadManager、ThreadActor、TurnFactory/TurnEngine 与协作工具控制面。
-- `pl-studio-runtime` 实现单库 repository、TaskService、产品流、归档和恢复。
+- `pl-studio-runtime` 实现单库 repository、TaskService、产品流、破坏性 schema 重建和恢复。
 - `pl-studio-bridge` 机械映射 typed Rust/FRB DTO，不加入兼容 parser 或第二次状态分桶。
 - Flutter data/repository 把 DTO 一次转换为 domain workspace；ViewModel/reducer 管理 canonical
   workspace 与 UI ephemeral state；Widget 只负责展示和交互。
@@ -41,17 +41,12 @@ TaskRun 只绑定 root Thread；WorkUnit 和 ReviewRound 直接引用 executor/r
 
 ## 12.4 存储与切换
 
-Studio 只使用 `studio.sqlite` schema v1。每次 durable transition 在一个 SQLite 事务中校验
+Studio 只使用 `studio.sqlite` schema v2。每次 durable transition 在一个 SQLite 事务中校验
 revision 并更新相关 canonical 行；失败不更新 actor，也不广播。
 
-首次切换按以下顺序执行：
-
-1. 只读检查旧数据库并生成项目、Task、worktree、branch、dirty/ahead 资源清单。
-2. 将 `studio_state.sqlite`、`studio_history.sqlite`、`studio_2.sqlite`、全部 WAL/SHM、
-   attachments 与 manifest 移入时间戳归档目录。
-3. 全部移动成功后创建新库；失败时逆序回滚并停止启动。
-
-不导入旧会话或 Task，不删除任何外部 worktree/branch。`config.toml` 继续使用 schema 12。
+启动发现 canonical 库版本、结构或完整性不兼容时，关闭检查连接，精确删除该数据库与
+`-wal/-shm` 后创建空 schema；不迁移、不备份、不导入旧会话或 Task。该流程不触碰其他旧库、
+attachments、Project、worktree 或 branch。`config.toml` 继续使用 schema 12。
 
 ## 12.5 运行时、恢复与订阅
 
@@ -83,9 +78,10 @@ interaction 和 Composer 作为一个 workspace 原子切换，同时保留该 T
 ## 12.7 验收
 
 - 协议：serde/FRB/Dart union 穷尽映射，未知变体失败。
-- 存储：完整归档、单库建库、CAS、输入幂等、ordinal、keyset 分页和事务原子性。
+- 存储：不兼容库精确删除重建、单库建库、CAS、输入幂等、ordinal、keyset 分页和事务原子性。
 - Runtime：start/steer/FIFO、取消、迟到 completion、重启、interaction、child Thread 与无轮询等待。
-- Task：计划确认、并行 executor、delivery/review/rework、merge/conflict、stop/restart/cleanup 与 lease。
+- Task：计划确认、并行 executor、delivery/review/rework、Planner 自主 Git、merge 记账、
+  stop/restart/cleanup 与 lease。
 - Flutter：Item timeline、reasoning、tool grouping、Composer revision、interaction dock、原子切换与
   UI ephemeral state。
 - 真实应用：使用隔离数据目录运行 `cargo xtask run-gui --driver`，验证 Driver health、输入回读、

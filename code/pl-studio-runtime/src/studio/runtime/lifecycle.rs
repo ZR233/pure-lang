@@ -105,6 +105,13 @@ impl StudioRuntime {
             self.agent_resources.clone(),
             self.product_events.clone(),
         );
+        let repaired_roles = self.store.repair_root_thread_roles().await?;
+        if repaired_roles > 0 {
+            tracing::warn!(
+                repaired_roles,
+                "repaired root Thread roles before restoring Studio actors"
+            );
+        }
         let runtime = std::sync::Arc::new(
             StudioAgentRuntime::start(host, runtime_options())
                 .await

@@ -83,6 +83,17 @@ impl ToolRegistry {
         self.sync_lsp_language_tools(registry, available)
     }
 
+    pub async fn register_lsp_languages_for_workspace(
+        &mut self,
+        registry: &pl_lsp::LspRuntimeRegistry,
+        workspace_root: impl AsRef<std::path::Path>,
+    ) -> Vec<String> {
+        let available = registry
+            .available_languages_for_workspace(workspace_root)
+            .await;
+        self.sync_lsp_language_tools(registry, available)
+    }
+
     pub(super) fn sync_lsp_language_tools(
         &mut self,
         registry: &pl_lsp::LspRuntimeRegistry,

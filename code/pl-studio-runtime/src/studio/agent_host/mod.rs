@@ -5,6 +5,7 @@ mod policy;
 mod repository;
 mod resources;
 mod turn_factory;
+mod workspace_resolver;
 
 use std::sync::Arc;
 

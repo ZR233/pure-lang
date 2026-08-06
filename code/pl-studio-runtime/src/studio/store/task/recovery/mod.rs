@@ -13,8 +13,7 @@ use crate::studio::task_coordinator::{
 };
 
 use super::{
-    merge::parse_required_evidence, task_run_record, work_completion::work_completion_record,
-    work_unit::work_unit_record,
+    task_run_record, work_completion::work_completion_record, work_unit::work_unit_record,
 };
 
 const RESTART_DIAGNOSTIC: &str = "agent interrupted by application restart";
@@ -311,30 +310,22 @@ fn merge_cleanup_state(
     }
     let mut matches = Vec::new();
     for merge in merges {
-        if merge.status != crate::studio::task_coordinator::MergeStatus::Merged.as_str() {
-            continue;
-        }
-        let evidence = parse_required_evidence(merge.verification_json.as_deref())?;
-        if evidence.work_unit_id == work_unit.id {
-            matches.push((merge, evidence));
+        if merge.work_unit_id == work_unit.id {
+            matches.push(merge);
         }
     }
-    let (merge, evidence) = match matches.as_slice() {
-        [(merge, evidence)] => (*merge, evidence),
+    let merge = match matches.as_slice() {
+        [merge] => *merge,
         [] => bail!("merged work unit has no accepted merge evidence"),
         _ => bail!("merged work unit has ambiguous accepted merge evidence"),
     };
-    match evidence
-        .cleanup
-        .as_ref()
-        .map(|cleanup| cleanup.status.as_str())
-    {
-        Some("discarded" | "alreadyAbsent") => Ok(TaskWorktreeCleanupState::Cleanup),
-        None | Some("attempting") => Ok(TaskWorktreeCleanupState::Replay {
+    match merge.cleanup_status.as_str() {
+        "discarded" | "alreadyAbsent" => Ok(TaskWorktreeCleanupState::Cleanup),
+        "pending" | "attempting" => Ok(TaskWorktreeCleanupState::Replay {
             merge_id: merge.id.clone(),
         }),
-        Some("failed" | "deferred") => Ok(TaskWorktreeCleanupState::Protect),
-        Some(status) => bail!("accepted merge has unknown cleanup status `{status}`"),
+        "failed" | "deferred" => Ok(TaskWorktreeCleanupState::Protect),
+        status => bail!("accepted merge has unknown cleanup status `{status}`"),
     }
 }
 
@@ -387,7 +378,6 @@ fn validate_status_pair(unit: &entities::work_unit::Model) -> Result<()> {
                 ThreadExecutionStatus::Completed
             )
             | (WorkUnitStatus::Approved, ThreadExecutionStatus::Completed)
-            | (WorkUnitStatus::Merging, ThreadExecutionStatus::Completed)
             | (WorkUnitStatus::Merged, ThreadExecutionStatus::Completed)
             | (WorkUnitStatus::NoDelivery, ThreadExecutionStatus::Completed)
             | (WorkUnitStatus::Failed, ThreadExecutionStatus::Failed)

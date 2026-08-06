@@ -5,11 +5,11 @@ use std::sync::{Mutex, OnceLock};
 use anyhow::{Context, Result, bail};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct RepositorySnapshot {
-    pub(super) workspace_root: PathBuf,
-    pub(super) git_common_dir: PathBuf,
-    pub(super) branch: String,
-    pub(super) head: String,
+pub(crate) struct RepositorySnapshot {
+    pub(crate) workspace_root: PathBuf,
+    pub(crate) git_common_dir: PathBuf,
+    pub(crate) branch: String,
+    pub(crate) head: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,7 +40,7 @@ pub(super) async fn prepare_repository_for_task(
     .context("git repository preparation task failed")?
 }
 
-pub(super) async fn inspect_repository(
+pub(crate) async fn inspect_repository(
     path: impl AsRef<Path>,
     require_clean: bool,
 ) -> Result<RepositorySnapshot> {
@@ -48,6 +48,13 @@ pub(super) async fn inspect_repository(
     tokio::task::spawn_blocking(move || inspect_repository_blocking(&path, require_clean))
         .await
         .context("git repository inspection task failed")?
+}
+
+pub(crate) async fn ensure_no_git_operation(path: impl AsRef<Path>) -> Result<()> {
+    let path = path.as_ref().to_path_buf();
+    tokio::task::spawn_blocking(move || ensure_no_git_operation_blocking(&path))
+        .await
+        .context("Git operation inspection task failed")?
 }
 
 pub(super) async fn changed_files_between(
@@ -347,10 +354,18 @@ fn create_initial_commit(workspace_root: &Path) -> Result<()> {
 }
 
 fn ensure_no_task_start_git_operation(workspace_root: &Path) -> Result<()> {
+    ensure_no_git_operation_blocking(workspace_root)
+        .context("task mode cannot start while a Git operation is in progress")
+}
+
+fn ensure_no_git_operation_blocking(workspace_root: &Path) -> Result<()> {
     for (name, marker) in [
         ("merge", "MERGE_HEAD"),
         ("rebase", "rebase-merge"),
         ("rebase", "rebase-apply"),
+        ("cherry-pick", "CHERRY_PICK_HEAD"),
+        ("revert", "REVERT_HEAD"),
+        ("sequencer", "sequencer"),
     ] {
         let marker_path = PathBuf::from(git_output(
             workspace_root,
@@ -362,7 +377,7 @@ fn ensure_no_task_start_git_operation(workspace_root: &Path) -> Result<()> {
             workspace_root.join(marker_path)
         };
         if marker_path.exists() {
-            bail!("task mode cannot start while a Git {name} is in progress");
+            bail!("unfinished Git {name} operation");
         }
     }
     Ok(())

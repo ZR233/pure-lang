@@ -33,10 +33,9 @@ use super::permission::cancellation_reason;
 use super::progress::{ProgressEmitter, ProgressVerbosity};
 use super::tool_dispatch::{ToolExecutionContext, ToolExecutionError, execute_tool_calls};
 use super::turn_result::{
-    budget_limited_turn_result, default_workspace_root, failed_turn_result,
-    failed_turn_result_with_abort_reason, interrupted_turn_result, is_cancelled,
-    looks_like_unexecuted_tool_call_text, normalize_provider_error,
-    should_request_parallel_tool_calls, unix_seconds,
+    budget_limited_turn_result, failed_turn_result, failed_turn_result_with_abort_reason,
+    interrupted_turn_result, is_cancelled, looks_like_unexecuted_tool_call_text,
+    normalize_provider_error, should_request_parallel_tool_calls, unix_seconds,
 };
 
 pub(super) async fn run_turn_with_trace(
@@ -49,10 +48,10 @@ pub(super) async fn run_turn_with_trace(
     let provider = core.provider.clone();
     ensure_provider_can_consume_session(provider.info().protocol, session)?;
     let effort = core.effort.clone();
-    let workspace_root = core
-        .workspace_root
-        .clone()
-        .unwrap_or_else(default_workspace_root);
+    let workspace = core.workspace.clone().unwrap_or_else(|| {
+        crate::tool::AgentWorkspace::local(super::turn_result::default_workspace_root())
+    });
+    let workspace_root = workspace.root().to_path_buf();
     let workspace_instructions = core.workspace_instructions.clone();
     let active_subagent = core.active_subagent.clone();
     let cancellation_token = options.cancellation_token.clone();
@@ -563,7 +562,7 @@ pub(super) async fn run_turn_with_trace(
                 core,
                 options: &options,
                 session_id: &turn_id,
-                workspace_root: &workspace_root,
+                workspace: workspace.clone(),
                 workspace_instructions: workspace_instructions.clone(),
                 active_subagent: active_subagent.clone(),
                 instruction_snapshot: Some(instruction_snapshot.clone()),

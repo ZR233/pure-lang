@@ -125,6 +125,9 @@ impl Tool for LocalWorkspaceFileTool {
         context: ToolContext,
     ) -> BoxFuture<'a, Result<ToolOutput>> {
         Box::pin(async move {
+            if matches!(self.kind, WorkspaceFileToolKind::ApplyPatch) {
+                context.ensure_workspace_writable()?;
+            }
             let _write_guard = if matches!(self.kind, WorkspaceFileToolKind::ApplyPatch) {
                 Some(context.workspace_write_lock().await)
             } else {

@@ -16,15 +16,6 @@ use super::error::WorktreeError;
 /// lifecycle adapter 经 `Arc` 持有。
 pub(super) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
-/// `git merge` 结果。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MergeOutcome {
-    /// 合并成功。
-    Merged,
-    /// 合并冲突，worktree 不应释放。
-    Conflict,
-}
-
 /// worktree create 失败是否可能拥有本次 spec 创建的资源。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CreateFailureDisposition {
@@ -83,7 +74,7 @@ impl std::error::Error for WorktreeCreateFailure {
 
 /// worktree 底层执行端口。
 ///
-/// 封装 `git worktree add/remove`、兜底提交与合并。默认实现
+/// 封装 `git worktree add/remove` 与 branch cleanup。默认实现
 /// [`LocalWorktreeBackend`] 复用 pl-core 的 [`LocalExecutionBackend`] shell out
 /// `git`。需要自定义执行环境（如容器内 git）的宿主可注入自己的实现。
 pub trait WorktreeBackend: fmt::Debug + Send + Sync {
@@ -113,20 +104,6 @@ pub trait WorktreeBackend: fmt::Debug + Send + Sync {
         repo_root: &'a Path,
         branch: &'a str,
     ) -> BoxFuture<'a, Result<(), WorktreeError>>;
-
-    /// 兜底提交 worktree 内全部改动。无改动时返回 `Ok(())`。
-    fn commit_all<'a>(
-        &'a self,
-        worktree_path: &'a Path,
-        message: &'a str,
-    ) -> BoxFuture<'a, Result<(), WorktreeError>>;
-
-    /// 把 `branch` merge 到 `main_workspace` 当前分支。
-    fn merge_branch<'a>(
-        &'a self,
-        main_workspace: &'a Path,
-        branch: &'a str,
-    ) -> BoxFuture<'a, Result<MergeOutcome, WorktreeError>>;
 }
 
 /// worktree git 命令超时。
@@ -315,62 +292,6 @@ impl WorktreeBackend for LocalWorktreeBackend {
                 vec!["branch".to_string(), "-D".to_string(), branch.to_string()];
             self.run_git(repo_root, &args).await?;
             Ok(())
-        })
-    }
-
-    fn commit_all<'a>(
-        &'a self,
-        worktree_path: &'a Path,
-        message: &'a str,
-    ) -> BoxFuture<'a, Result<(), WorktreeError>> {
-        Box::pin(async move {
-            let add_args: Vec<String> = vec!["add".to_string(), "-A".to_string()];
-            self.run_git(worktree_path, &add_args).await?;
-            // 仅在确有改动时提交，避免 `nothing to commit` 退出码非零被当作错误。
-            let status_args: Vec<String> = vec!["status".to_string(), "--porcelain".to_string()];
-            let status = self.run_git_output(worktree_path, &status_args).await?;
-            if status.stdout.trim().is_empty() {
-                return Ok(());
-            }
-            let commit_args: Vec<String> =
-                vec!["commit".to_string(), "-m".to_string(), message.to_string()];
-            self.run_git(worktree_path, &commit_args).await?;
-            Ok(())
-        })
-    }
-
-    fn merge_branch<'a>(
-        &'a self,
-        main_workspace: &'a Path,
-        branch: &'a str,
-    ) -> BoxFuture<'a, Result<MergeOutcome, WorktreeError>> {
-        Box::pin(async move {
-            self.policy
-                .validate_branch(branch)
-                .map_err(|_| WorktreeError::UnsafeBranch(branch.to_string()))?;
-            let args: Vec<String> = vec![
-                "merge".to_string(),
-                "--no-ff".to_string(),
-                "-m".to_string(),
-                format!("Merge subagent branch {branch}"),
-                branch.to_string(),
-            ];
-            let output = self.run_git_output(main_workspace, &args).await?;
-            if output.status == 0 {
-                return Ok(MergeOutcome::Merged);
-            }
-            // 退出码非零：先尝试回退，再按是否为冲突分类。
-            let abort_args: Vec<String> = vec!["merge".to_string(), "--abort".to_string()];
-            let _ = self.run_git(main_workspace, &abort_args).await;
-            let combined = format!("{} {}", output.stdout, output.stderr).to_lowercase();
-            if combined.contains("conflict") {
-                Ok(MergeOutcome::Conflict)
-            } else {
-                Err(WorktreeError::GitCommand {
-                    args: "merge".to_string(),
-                    stderr: output.stderr,
-                })
-            }
         })
     }
 }

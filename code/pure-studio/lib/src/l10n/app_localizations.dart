@@ -171,6 +171,18 @@ abstract class AppLocalizations {
   /// **'Review safe cleanup'**
   String get recoveryCleanupTooltip;
 
+  /// No description provided for @recoveryRetryTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Continue merge recovery'**
+  String get recoveryRetryTooltip;
+
+  /// No description provided for @recoveryRetryFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Recovery retry failed: {error}'**
+  String recoveryRetryFailed(String error);
+
   /// No description provided for @recoveryCleanupTitle.
   ///
   /// In en, this message translates to:
@@ -641,7 +653,7 @@ abstract class AppLocalizations {
   /// No description provided for @statusTaskMerges.
   ///
   /// In en, this message translates to:
-  /// **'Merges and conflicts'**
+  /// **'Merge records'**
   String get statusTaskMerges;
 
   /// No description provided for @statusTaskReviews.
@@ -668,11 +680,29 @@ abstract class AppLocalizations {
   /// **'Source'**
   String get statusTaskSource;
 
-  /// No description provided for @statusTaskConflicts.
+  /// No description provided for @statusTaskPreviousHead.
   ///
   /// In en, this message translates to:
-  /// **'Conflicts'**
-  String get statusTaskConflicts;
+  /// **'Previous HEAD'**
+  String get statusTaskPreviousHead;
+
+  /// No description provided for @statusTaskDeliveryHead.
+  ///
+  /// In en, this message translates to:
+  /// **'Delivery HEAD'**
+  String get statusTaskDeliveryHead;
+
+  /// No description provided for @statusTaskResultingHead.
+  ///
+  /// In en, this message translates to:
+  /// **'Resulting HEAD'**
+  String get statusTaskResultingHead;
+
+  /// No description provided for @statusTaskCleanup.
+  ///
+  /// In en, this message translates to:
+  /// **'Cleanup'**
+  String get statusTaskCleanup;
 
   /// No description provided for @statusTaskRequest.
   ///
@@ -764,12 +794,6 @@ abstract class AppLocalizations {
   /// **'Merging'**
   String get statusTaskPhaseMerging;
 
-  /// No description provided for @statusTaskPhaseResolvingConflict.
-  ///
-  /// In en, this message translates to:
-  /// **'Resolving conflicts'**
-  String get statusTaskPhaseResolvingConflict;
-
   /// No description provided for @statusTaskPhaseReviewing.
   ///
   /// In en, this message translates to:
@@ -860,12 +884,6 @@ abstract class AppLocalizations {
   /// **'Approved'**
   String get statusTaskStatusApproved;
 
-  /// No description provided for @statusTaskStatusMerging.
-  ///
-  /// In en, this message translates to:
-  /// **'Merging'**
-  String get statusTaskStatusMerging;
-
   /// No description provided for @statusTaskStatusMerged.
   ///
   /// In en, this message translates to:
@@ -895,24 +913,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Cancelled'**
   String get statusTaskStatusCancelled;
-
-  /// No description provided for @statusTaskStatusConflicted.
-  ///
-  /// In en, this message translates to:
-  /// **'Conflicted'**
-  String get statusTaskStatusConflicted;
-
-  /// No description provided for @statusTaskStatusVerifying.
-  ///
-  /// In en, this message translates to:
-  /// **'Verifying'**
-  String get statusTaskStatusVerifying;
-
-  /// No description provided for @statusTaskStatusAborted.
-  ///
-  /// In en, this message translates to:
-  /// **'Aborted'**
-  String get statusTaskStatusAborted;
 
   /// No description provided for @statusTaskStatusPass.
   ///

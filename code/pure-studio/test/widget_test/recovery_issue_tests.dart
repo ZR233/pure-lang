@@ -354,6 +354,67 @@ void registerRecoveryIssueTests() {
     expect(find.byIcon(Icons.error_outline), findsNothing);
   });
 
+  testWidgets(
+    'merge recovery retry preserves failure then reopens the affected session',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final initial = _recoveryIssueState(sessionIssueOnly: true).copyWith(
+        recoveryIssues: const [
+          StudioRecoveryIssue(
+            id: 'issue-merge',
+            scope: RecoveryIssueScope.thread,
+            category: RecoveryIssueCategory.merge,
+            availableActions: [RecoveryIssueAction.retry],
+            projectId: 'project-current',
+            threadId: 'session-broken',
+            taskRunId: 'task-session',
+            detail: 'Planner Git integration needs reconciliation.',
+          ),
+        ],
+      );
+      final api = _FakeStudioApi(initial)
+        ..recoveryRetryError = StateError('branch identity changed');
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [studioApiProvider.overrideWithValue(api)],
+          child: _localizedApp(home: const StudioShell()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final retry = find.byKey(
+        StudioDriverKeys.retryRecoveryIssue('issue-merge'),
+      );
+      expect(find.byTooltip('Continue merge recovery'), findsOneWidget);
+      await tester.tap(retry);
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('branch identity changed'), findsOneWidget);
+      expect(find.byIcon(Icons.error_outline), findsOneWidget);
+      expect(api.retriedRecoveryIssueId, isNull);
+
+      api
+        ..recoveryRetryError = null
+        ..recoveryRetryState = initial.copyWith(
+          recoveryIssues: const [],
+          selectedThreadId: 'session-broken',
+        );
+      await tester.tap(retry);
+      await tester.pumpAndSettle();
+
+      expect(api.retriedRecoveryIssueId, 'issue-merge');
+      expect(api.retrySelectedProjectId, 'project-current');
+      expect(api.retrySelectedThreadId, 'session-broken');
+      expect(api.threadSubscriptions.last, 'session-broken');
+      expect(find.byIcon(Icons.error_outline), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('compact rail keeps recovery warning and cleanup entry', (
     tester,
   ) async {

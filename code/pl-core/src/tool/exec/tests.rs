@@ -164,7 +164,7 @@ fn test_context_with_sender(event_tx: pl_trace::AgentEventSender) -> ToolContext
         event_tx,
         options: crate::turn::TurnOptions::default(),
         workspace_access: crate::tool::WorkspaceAccess::WorkspaceOnly,
-        workspace_root: std::env::temp_dir(),
+        workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
         workspace_instructions: None,
         instruction_snapshot: None,
         provider_call_id: None,
@@ -519,6 +519,25 @@ async fn full_access_allows_working_directory_outside_workspace() {
     assert_eq!(output.exit_code, Some(0));
     let _ = tokio::fs::remove_file(&output.output_file).await;
     let _ = tokio::fs::remove_dir_all(output.output_file.parent().unwrap().parent().unwrap()).await;
+}
+
+#[tokio::test]
+async fn exec_rejects_read_only_workspace() {
+    let (tool, root) = test_tool_with_root();
+    let mut context = test_context();
+    context.workspace = crate::tool::AgentWorkspace::confined(
+        root.clone(),
+        crate::tool::WorkspaceMutability::ReadOnly,
+    );
+
+    let error = tool
+        .execute(tool_input("echo denied", "read-only", "exec"), context)
+        .await
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("read-only"), "{error}");
+    let _ = tokio::fs::remove_dir_all(root).await;
 }
 
 #[tokio::test]

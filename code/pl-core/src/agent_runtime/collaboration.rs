@@ -263,7 +263,7 @@ impl CollaborationTool {
         );
         metadata.insert(
             "workspaceRoot".to_string(),
-            Value::String(context.workspace_root.to_string_lossy().to_string()),
+            Value::String(context.workspace.root().to_string_lossy().to_string()),
         );
         let result = self
             .runtime

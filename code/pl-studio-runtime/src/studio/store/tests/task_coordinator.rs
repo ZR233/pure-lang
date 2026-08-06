@@ -45,6 +45,61 @@ async fn task_run_and_branch_lease_are_created_atomically() {
 }
 
 #[tokio::test]
+async fn blocked_merge_retry_atomically_restores_phase_generation_and_lease() {
+    let store = StudioStore::open_memory().await.unwrap();
+    let project = store.upsert_project("C:/work/retry-merge").await.unwrap();
+    let session = store
+        .create_thread(&project.id, "Retry merge", StudioMode::Task)
+        .await
+        .unwrap();
+    let mut input = create_input(&session.id, TaskRunPhase::Merging);
+    input.workspace_root = "C:/work/retry-merge".to_string();
+    input.git_common_dir = "C:/work/retry-merge/.git".to_string();
+    let (run, _) = store.create_task_run_with_lease(input).await.unwrap();
+
+    let reason = format!("{MERGE_RECOVERY_BLOCK_PREFIX} HEAD changed before task_record_merge");
+    let blocked = store
+        .block_task_and_release_lease(&run.id, &reason)
+        .await
+        .unwrap();
+    assert_eq!(blocked.phase, TaskRunPhase::Blocked);
+    assert_eq!(blocked.terminal_generation, Some(blocked.task_generation));
+    assert!(store.read_branch_lease(&run.id).await.unwrap().is_none());
+    assert_eq!(
+        store
+            .list_retryable_blocked_merge_task_runs()
+            .await
+            .unwrap(),
+        vec![blocked.clone()]
+    );
+
+    let retried = store.retry_blocked_merge_task(&blocked).await.unwrap();
+    assert_eq!(retried.phase, TaskRunPhase::Merging);
+    assert_eq!(retried.task_generation, blocked.task_generation + 1);
+    assert_eq!(retried.terminal_generation, None);
+    assert_eq!(retried.status_message, None);
+    let lease = store.read_branch_lease(&run.id).await.unwrap().unwrap();
+    assert_eq!(lease.git_common_dir, retried.git_common_dir);
+    assert_eq!(lease.branch, retried.branch);
+    assert_eq!(lease.expected_head, retried.expected_head);
+    assert!(
+        store
+            .list_retryable_blocked_merge_task_runs()
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        store
+            .retry_blocked_merge_task(&blocked)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("state changed")
+    );
+}
+
+#[tokio::test]
 async fn task_stop_gate_is_durable_and_keeps_lease_for_terminalization() {
     let store = StudioStore::open_memory().await.unwrap();
     let project = store.upsert_project("C:/work/task-stop").await.unwrap();
@@ -73,7 +128,7 @@ async fn task_stop_gate_is_durable_and_keeps_lease_for_terminalization() {
         .allocate_executor(AllocateExecutor {
             thread_id: session.id.clone(),
             title: "must not start after request".to_string(),
-            owned_paths: vec!["src/**".to_string()],
+            scope_hints: vec!["src".to_string()],
             agent_id: "agent-after-request".to_string(),
             requested_by_call_id: "call-after-request".to_string(),
         })
@@ -369,7 +424,7 @@ impl ExecutorFixture {
             .create_work_unit(CreateWorkUnit {
                 task_run_id: run.id.clone(),
                 title: "Implement core".to_string(),
-                owned_paths: vec!["src/**".to_string()],
+                scope_hints: vec!["src".to_string()],
                 base_commit: run.base_commit.clone(),
                 worktree_path: format!("C:/work/{name}/.pure/worktrees/{}", run.id),
                 branch: format!("pure-task-{}-{name}", run.id),

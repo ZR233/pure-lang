@@ -149,6 +149,37 @@ async fn read_file_rejects_workspace_escape() {
 }
 
 #[tokio::test]
+async fn confined_workspace_rejects_escape_even_with_full_access() {
+    let root = unique_temp_dir("confined-full-access");
+    let outside = unique_temp_dir("confined-full-access-outside");
+    tokio::fs::create_dir_all(&root).await.unwrap();
+    tokio::fs::create_dir_all(&outside).await.unwrap();
+    let outside_file = outside.join("outside.txt");
+    tokio::fs::write(&outside_file, "outside").await.unwrap();
+    let mut tool_context = context(&root).await;
+    tool_context.workspace = crate::tool::AgentWorkspace::confined(
+        root.clone(),
+        crate::tool::WorkspaceMutability::ReadWrite,
+    );
+    tool_context.options = tool_context
+        .options
+        .with_permission_mode(crate::turn::PermissionMode::FullAccess);
+
+    let error = read_file_tool()
+        .execute(
+            input(serde_json::json!({ "path": outside_file })),
+            tool_context,
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("outside trusted root"), "{error}");
+    let _ = tokio::fs::remove_dir_all(root).await;
+    let _ = tokio::fs::remove_dir_all(outside).await;
+}
+
+#[tokio::test]
 async fn read_file_default_reads_whole_file() {
     let root = unique_temp_dir("default-read");
     let tool = read_file_tool();

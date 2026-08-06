@@ -17,13 +17,12 @@ const COLLABORATION_CONTROL_TOOLS: [&str; 7] = [
     "read_agent_session",
     "close_agent",
 ];
-const CONFLICT_TOOLS: [&str; 6] = [
-    "merge_status",
-    "merge_conflict_files",
-    "merge_resolve",
-    "merge_verify",
-    "merge_continue",
-    "merge_abort",
+const PLANNER_GIT_MUTATION_TOOLS: [&str; 5] = [
+    "git_fetch",
+    "git_push",
+    "git_sync_default_branch",
+    "git_branch",
+    "git_commit",
 ];
 
 #[derive(Debug, Clone, Copy)]
@@ -55,8 +54,11 @@ pub(super) fn studio_execution_policy(
         visible_tools = without_tools(visible_tools, &COLLABORATION_CONTROL_TOOLS);
         visible_tools.extend_tool_names(["report_progress"]);
     }
-    if context.task_phase != Some(TaskRunPhase::ResolvingConflict) {
-        visible_tools = without_tools(visible_tools, &CONFLICT_TOOLS);
+    if is_root
+        && context.mode == StudioMode::Task
+        && context.task_phase != Some(TaskRunPhase::Merging)
+    {
+        visible_tools = without_tools(visible_tools, &PLANNER_GIT_MUTATION_TOOLS);
     }
     AgentExecutionPolicy {
         visible_tools,
@@ -105,8 +107,9 @@ fn allowed_effects(snapshot: &AgentSnapshot, context: StudioPolicyContext) -> Ve
                     ToolEffect::AgentControl,
                     ToolEffect::BranchControl,
                 ];
-                if context.task_phase == Some(TaskRunPhase::ResolvingConflict) {
-                    effects.push(ToolEffect::ConflictWrite);
+                if context.task_phase == Some(TaskRunPhase::Merging) {
+                    effects.push(ToolEffect::WorkspaceWrite);
+                    effects.push(ToolEffect::Process);
                 }
                 effects
             }
@@ -147,7 +150,6 @@ fn finalization(snapshot: &AgentSnapshot, context: StudioPolicyContext) -> TurnF
             TaskRunPhase::DesignUpdating
             | TaskRunPhase::Implementing
             | TaskRunPhase::Merging
-            | TaskRunPhase::ResolvingConflict
             | TaskRunPhase::Reworking
             | TaskRunPhase::Stopping
             | TaskRunPhase::Completed

@@ -62,7 +62,7 @@ impl LiveTaskFixture {
         )
         .await?;
 
-        let store = StudioStore::open_memory().await?;
+        let store = StudioStore::open(root.path.join("studio.sqlite")).await?;
         let runtime = StudioRuntime::new(store.clone(), installed_config.store.clone());
         let project = runtime.open_project(&workspace).await?;
         let session = runtime
@@ -209,7 +209,7 @@ impl LiveTaskFixture {
         }
     }
 
-    pub async fn successful_executor_owned_paths(&self) -> Result<Vec<Vec<String>>> {
+    pub async fn successful_executor_scope_hints(&self) -> Result<Vec<Vec<String>>> {
         let snapshot = self.runtime.thread_snapshot(&self.thread_id).await?;
         snapshot
             .items
@@ -234,17 +234,47 @@ impl LiveTaskFixture {
                 }
                 let arguments: serde_json::Value = serde_json::from_str(&arguments)
                     .context("task_spawn_executor arguments are not JSON")?;
-                arguments
-                    .get("ownedPaths")
-                    .and_then(serde_json::Value::as_array)
-                    .context("task_spawn_executor arguments do not contain ownedPaths")?
+                let Some(scope_hints) = arguments.get("scopeHints") else {
+                    return Ok(Vec::new());
+                };
+                scope_hints
+                    .as_array()
+                    .context("task_spawn_executor scopeHints is not an array")?
                     .iter()
                     .map(|path| {
                         path.as_str()
                             .map(ToOwned::to_owned)
-                            .context("task_spawn_executor ownedPaths contains a non-string value")
+                            .context("task_spawn_executor scopeHints contains a non-string value")
                     })
                     .collect::<Result<Vec<_>>>()
+            })
+            .collect()
+    }
+
+    pub async fn successful_task_record_merge_arguments(&self) -> Result<Vec<serde_json::Value>> {
+        let snapshot = self.runtime.thread_snapshot(&self.thread_id).await?;
+        snapshot
+            .items
+            .into_iter()
+            .filter_map(|item| match item.content {
+                pl_protocol::ThreadItemContent::ToolCall { tool }
+                    if tool.name == "task_record_merge" =>
+                {
+                    tool.result.map(|result| (tool.arguments, result))
+                }
+                _ => None,
+            })
+            .map(|(arguments, result)| {
+                let result: serde_json::Value = serde_json::from_str(&result)
+                    .context("successful task_record_merge result is not JSON")?;
+                if result
+                    .get("id")
+                    .and_then(serde_json::Value::as_str)
+                    .is_none()
+                {
+                    bail!("task_record_merge result does not contain a merge record id");
+                }
+                serde_json::from_str(&arguments).context("task_record_merge arguments are not JSON")
             })
             .collect()
     }

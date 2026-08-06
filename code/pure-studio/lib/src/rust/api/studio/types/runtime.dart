@@ -503,29 +503,53 @@ class BridgeTaskDesignReferenceDto {
 
 class BridgeTaskMergeDto {
   final String id;
-  final String agentId;
-  final String status;
-  final String? mergeCommit;
-  final List<String> conflictFiles;
-  final String? resolutionSummary;
+  final String workUnitId;
+  final String completionId;
+  final int completionRevision;
+  final String executorAgentId;
+  final String expectedPreviousHead;
+  final String resultingHead;
+  final String deliveryHead;
+  final String method;
+  final String summary;
+  final String cleanupStatus;
+  final String? cleanupDetail;
+  final PlatformInt64 createdAt;
+  final PlatformInt64 updatedAt;
 
   const BridgeTaskMergeDto({
     required this.id,
-    required this.agentId,
-    required this.status,
-    this.mergeCommit,
-    required this.conflictFiles,
-    this.resolutionSummary,
+    required this.workUnitId,
+    required this.completionId,
+    required this.completionRevision,
+    required this.executorAgentId,
+    required this.expectedPreviousHead,
+    required this.resultingHead,
+    required this.deliveryHead,
+    required this.method,
+    required this.summary,
+    required this.cleanupStatus,
+    this.cleanupDetail,
+    required this.createdAt,
+    required this.updatedAt,
   });
 
   @override
   int get hashCode =>
       id.hashCode ^
-      agentId.hashCode ^
-      status.hashCode ^
-      mergeCommit.hashCode ^
-      conflictFiles.hashCode ^
-      resolutionSummary.hashCode;
+      workUnitId.hashCode ^
+      completionId.hashCode ^
+      completionRevision.hashCode ^
+      executorAgentId.hashCode ^
+      expectedPreviousHead.hashCode ^
+      resultingHead.hashCode ^
+      deliveryHead.hashCode ^
+      method.hashCode ^
+      summary.hashCode ^
+      cleanupStatus.hashCode ^
+      cleanupDetail.hashCode ^
+      createdAt.hashCode ^
+      updatedAt.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -533,11 +557,19 @@ class BridgeTaskMergeDto {
       other is BridgeTaskMergeDto &&
           runtimeType == other.runtimeType &&
           id == other.id &&
-          agentId == other.agentId &&
-          status == other.status &&
-          mergeCommit == other.mergeCommit &&
-          conflictFiles == other.conflictFiles &&
-          resolutionSummary == other.resolutionSummary;
+          workUnitId == other.workUnitId &&
+          completionId == other.completionId &&
+          completionRevision == other.completionRevision &&
+          executorAgentId == other.executorAgentId &&
+          expectedPreviousHead == other.expectedPreviousHead &&
+          resultingHead == other.resultingHead &&
+          deliveryHead == other.deliveryHead &&
+          method == other.method &&
+          summary == other.summary &&
+          cleanupStatus == other.cleanupStatus &&
+          cleanupDetail == other.cleanupDetail &&
+          createdAt == other.createdAt &&
+          updatedAt == other.updatedAt;
 }
 
 class BridgeTaskReviewDto {

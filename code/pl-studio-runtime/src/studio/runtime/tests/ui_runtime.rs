@@ -2,7 +2,7 @@ use super::*;
 use crate::studio::task_coordinator::TaskRunPhase;
 use pl_protocol::ThreadItemContent;
 use pretty_assertions::assert_eq;
-use sea_orm::ConnectionTrait;
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, ConnectionTrait, EntityTrait};
 
 #[tokio::test]
 async fn mode_switch_refreshes_authoritative_thread_snapshot() {
@@ -34,6 +34,13 @@ async fn mode_switch_refreshes_authoritative_thread_snapshot() {
 
     assert_eq!(changed.thread.mode, pl_protocol::ThreadMode::Task);
     assert_eq!(changed.thread.role, "planner");
+    let framework = runtime.agent_framework().await.unwrap();
+    let actor = framework
+        .handle()
+        .snapshot(crate::studio::agent_host::root_agent_id(&changed.thread.id))
+        .await
+        .unwrap();
+    assert_eq!(actor.identity.role, StudioRole::Planner.id());
     let mut subscription = runtime
         .subscribe_thread(pl_protocol::ThreadSubscriptionRequest {
             thread_id: thread.id.clone(),
@@ -68,6 +75,50 @@ async fn mode_switch_refreshes_authoritative_thread_snapshot() {
     assert!(error.to_string().contains("root Thread"));
     assert_eq!(unchanged_child.mode, "task");
     assert_eq!(unchanged_child.role, "reviewer");
+    let _ = std::fs::remove_dir_all(workspace);
+}
+
+#[tokio::test]
+async fn restored_task_root_repairs_legacy_executor_role_before_registration() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let workspace = std::env::temp_dir().join(format!("pure-role-repair-{unique}"));
+    std::fs::create_dir_all(&workspace).unwrap();
+    let store = StudioStore::open_memory().await.unwrap();
+    let runtime = StudioRuntime::new(
+        store.clone(),
+        ConfigStore::new(crate::config::ConfigPaths::from_home(&workspace)),
+    );
+    let project = runtime.open_project(&workspace).await.unwrap();
+    let thread = runtime
+        .create_thread(&project.id, "Legacy task root")
+        .await
+        .unwrap();
+    let row = crate::studio::entity::thread::Entity::find_by_id(thread.id.clone())
+        .one(store.database())
+        .await
+        .unwrap()
+        .unwrap();
+    let mut active: crate::studio::entity::thread::ActiveModel = row.into();
+    active.mode = Set("task".to_string());
+    active.role = Set("executor".to_string());
+    active.update(store.database()).await.unwrap();
+
+    let snapshot = runtime.thread_snapshot(&thread.id).await.unwrap();
+    let framework = runtime.agent_framework().await.unwrap();
+    let actor = framework
+        .handle()
+        .snapshot(crate::studio::agent_host::root_agent_id(&thread.id))
+        .await
+        .unwrap();
+    let stored = store.read_thread(&thread.id).await.unwrap().unwrap();
+
+    assert_eq!(snapshot.thread.mode, pl_protocol::ThreadMode::Task);
+    assert_eq!(snapshot.thread.role, "planner");
+    assert_eq!(stored.role, "planner");
+    assert_eq!(actor.identity.role, StudioRole::Planner.id());
     let _ = std::fs::remove_dir_all(workspace);
 }
 

@@ -178,9 +178,8 @@ fn plan_executor_close(work_unit: &entities::work_unit::Model) -> Result<Executo
         WorkUnitStatus::ReadyForReview
             | WorkUnitStatus::Reviewing
             | WorkUnitStatus::ChangesRequested
-            | WorkUnitStatus::Merging
     ) {
-        bail!("executor cannot close while its completion or merge is active");
+        bail!("executor cannot close while its completion review is active");
     }
 
     let terminal_pair = matches!(

@@ -13,7 +13,7 @@ fn test_tool_context(event_tx: AgentEventSender) -> ToolContext {
         event_tx,
         options: TurnOptions::default(),
         workspace_access: WorkspaceAccess::WorkspaceOnly,
-        workspace_root: std::env::temp_dir(),
+        workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
         workspace_instructions: None,
         instruction_snapshot: None,
         provider_call_id: None,

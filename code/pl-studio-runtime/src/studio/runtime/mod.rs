@@ -158,6 +158,19 @@ impl StudioRuntime {
         Ok(self.runtime_state.remove_recovery_issue(issue_id))
     }
 
+    pub async fn retry_recovery_issue(&self, issue_id: &str) -> Result<StudioRuntimeSnapshot> {
+        let _lifecycle_guard = self.lifecycle_lock.lock().await;
+        let issue = self
+            .runtime_state
+            .recovery_issue(issue_id)
+            .ok_or_else(|| anyhow::anyhow!("recovery issue is no longer active"))?;
+        if issue.action != StudioRecoveryIssueAction::Retry {
+            anyhow::bail!("recovery issue does not authorize retry");
+        }
+        self.task_coordinator.retry_recovery_issue(&issue).await?;
+        Ok(self.runtime_state.remove_recovery_issue(issue_id))
+    }
+
     async fn cleanup_project_issue(
         &self,
         issue: crate::StudioRecoveryIssue,

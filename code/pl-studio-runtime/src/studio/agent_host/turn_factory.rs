@@ -14,10 +14,11 @@ use pl_model::create_provider_with_catalog;
 use crate::config::ConfigStore;
 use crate::studio::task_coordinator::TaskCoordinator;
 use crate::studio::{InteractionRuntime, StudioStore};
-use crate::{McpRuntimeHandle, StudioMode, resolve_workspace_root};
+use crate::{McpRuntimeHandle, StudioMode};
 
 use super::policy::{StudioPolicyContext, studio_execution_policy};
 use super::resources::StudioAgentResources;
+use super::workspace_resolver::AgentWorkspaceResolver;
 
 /// 使用 Studio 配置、project/session 和产品工具准备一次 framework turn。
 #[derive(Clone)]
@@ -78,18 +79,9 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             .await
             .map_err(anyhow_error)?
             .ok_or_else(|| turn_error("selected Studio project not found"))?;
-        let project_root =
-            resolve_workspace_root(Path::new(&project.path)).map_err(anyhow_error)?;
-        let workspace_root = self
-            .resources
-            .workspace_root(&context.snapshot.identity.id)
-            .await
-            .filter(|path| !path.as_os_str().is_empty())
-            .unwrap_or(project_root);
-        let workspace_instructions =
-            load_workspace_instructions(&workspace_root).map_err(anyhow_error)?;
         let config = self.config_store.load_or_default()?;
         let mode = StudioMode::from_label(&thread_record.mode);
+        ensure_root_role_matches_mode(&context.snapshot.identity, mode)?;
         let active_task_run = if mode == StudioMode::Task {
             self.store
                 .find_active_task_run_for_root_thread(&thread_record.root_thread_id)
@@ -102,7 +94,20 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         if let Some(run) = active_task_run.as_ref() {
             ensure_task_accepts_turn(run)?;
         }
+        let workspace = AgentWorkspaceResolver::new(self.store.clone())
+            .resolve(
+                &context.snapshot.identity,
+                &thread_record,
+                &project,
+                active_task_run.as_ref(),
+            )
+            .await
+            .map_err(anyhow_error)?;
+        let workspace_root = workspace.root().to_path_buf();
+        let workspace_instructions =
+            load_workspace_instructions(&workspace_root).map_err(anyhow_error)?;
         if mode == StudioMode::Task
+            && context.snapshot.identity.parent_id.is_some()
             && context.snapshot.identity.role.as_str() == crate::config::StudioRole::Executor.key()
         {
             self.store
@@ -129,7 +134,7 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         if let Some(effort) = route.effort {
             builder = builder.with_effort(effort);
         }
-        let profile = CoreRuntimeProfile::local_workspace(workspace_root.clone())
+        let profile = CoreRuntimeProfile::local_agent_workspace(workspace.clone())
             .with_workspace_instructions(workspace_instructions.clone());
         let task_name = self
             .resources
@@ -142,6 +147,7 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         if let Some(subagent) = subagent_context {
             engine = engine.with_subagent_context(subagent);
         }
+        self.lsp_runtime.reconcile_workspace(&workspace_root).await;
         engine.register_profile_tools().await;
 
         web_search.install(&mut engine, &config.web_search)?;
@@ -157,11 +163,13 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         self.mcp_runtime
             .reconcile(crate::config::effective_mcp_servers(&config))
             .await?;
-        self.lsp_runtime.reconcile_workspace(&workspace_root).await;
         let mcp_lease = self.mcp_runtime.acquire_turn_lease().await?;
         let active_mcp_servers = mcp_lease.server_ids().to_vec();
         let mcp_health = self.mcp_runtime.health_snapshot().await?;
-        let active_lsp_servers = self.lsp_runtime.active_server_names().await;
+        let active_lsp_servers = self
+            .lsp_runtime
+            .active_server_names_for_workspace(&workspace_root)
+            .await;
         mcp_lease.install(&mut engine)?;
 
         let mut policy = studio_execution_policy(
@@ -215,7 +223,6 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             &route.model,
             mode,
             &workspace_root,
-            Path::new(&project.path),
             &workspace_instructions,
             context
                 .input
@@ -272,12 +279,9 @@ fn instruction_snapshot(
     model: &pl_model::ModelInfo,
     mode: StudioMode,
     workspace_root: &Path,
-    project_path: &Path,
     workspace_instructions: &str,
     subagent_constraint: Option<&str>,
 ) -> Result<pl_core::InstructionSnapshot> {
-    let current_dir =
-        std::fs::canonicalize(project_path).unwrap_or_else(|_| workspace_root.to_path_buf());
     InstructionAssembler::assemble(InstructionAssemblyRequest {
         instructions: Some(&config.instructions),
         skills: Some(&config.skills),
@@ -287,7 +291,7 @@ fn instruction_snapshot(
         }),
         model,
         workspace_root,
-        current_dir: &current_dir,
+        current_dir: workspace_root,
         workspace_instructions: Some(workspace_instructions),
         subagent_constraint,
     })
@@ -364,6 +368,25 @@ fn ensure_task_accepts_turn(run: &crate::studio::task_coordinator::TaskRunRecord
     Ok(())
 }
 
+fn ensure_root_role_matches_mode(identity: &AgentIdentity, mode: StudioMode) -> Result<()> {
+    if identity.parent_id.is_some() {
+        return Ok(());
+    }
+    let expected = match mode {
+        StudioMode::Simple => crate::config::StudioRole::Executor,
+        StudioMode::Task => crate::config::StudioRole::Planner,
+    };
+    if identity.role != expected.id() {
+        return Err(turn_error(format!(
+            "root Studio Thread role {} does not match {} mode role {}",
+            identity.role,
+            mode.label(),
+            expected.key()
+        )));
+    }
+    Ok(())
+}
+
 fn anyhow_error(error: impl std::fmt::Display) -> PureError {
     PureError::MemoryError(error.to_string())
 }
@@ -379,6 +402,24 @@ mod tests {
     fn stop_requested_task_rejects_every_new_turn() {
         let run = stopped_run();
         assert!(ensure_task_accepts_turn(&run).is_err());
+    }
+
+    #[test]
+    fn task_root_rejects_stale_executor_identity() {
+        let identity = AgentIdentity {
+            id: pl_core::AgentId::new("root").unwrap(),
+            parent_id: None,
+            role: crate::config::StudioRole::Executor.id(),
+            depth: 0,
+        };
+
+        let error = ensure_root_role_matches_mode(&identity, StudioMode::Task).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("does not match task mode role planner")
+        );
     }
 
     fn stopped_run() -> TaskRunRecord {

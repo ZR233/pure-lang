@@ -30,7 +30,7 @@ impl LocalWorkspaceFileBackend {
 
     pub async fn from_context(context: &ToolContext) -> Result<Self> {
         let mut backend = Self::new(
-            context.workspace_root.clone(),
+            context.workspace.root().to_path_buf(),
             context.allows_workspace_escape(),
         )
         .await?;

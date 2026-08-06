@@ -25,6 +25,10 @@ selectedThreadId
 projects / tasks / settings / health
 ```
 
+Flutter canonical state 不保存 authoritative `AgentWorkspace`、绝对 worktree path、workspace
+boundary 或 mutability。它们是 Rust turn/runtime 根据 durable owner 解析的执行边界；UI 只消费
+Task DTO 中经过脱敏的相对 locator 和可展示状态，不能缓存后参与工具路由。
+
 `ThreadWorkspace` 包含 Thread、最近 Turn 与有序 Item、pending Interaction 和
 `ThreadRuntimeSnapshot`。authoritative snapshot 总是整体替换一个 workspace；不得把 snapshot
 与旧 runtime、旧 Turn 或旧 Item overlay 混合。
@@ -107,6 +111,8 @@ plan confirmation 可以在 `busy=false` 时继续阻塞普通 Composer。
 root 通过 typed mode selector 切换 Simple/Task，并展示对应角色模型；Bridge 返回的 canonical
 Thread 状态确认切换结果。活动 Task 期间 selector 保持可见但禁用。child 只读展示实际运行模型。
 root-only 和活动 Task 锁定同时由 StudioRuntime 校验，不能只依赖 Widget 或 Controller 拦截。
+模式切换只允许 actor idle 且没有 pending input；StudioRuntime 必须先持久更新 ThreadActor role，
+再提交 mode/role 目录记录，任一步失败时补偿回旧 role，不能留下数据库与进程内身份分叉。
 
 agent directory 只在 header 的单一菜单中展示 root/child 层级、role、status 和 attention。
 child 的 timeline 不复制到 root，父 Thread 的 agent control tool 只作为自己的 toolCall Item。
@@ -120,9 +126,11 @@ product stream 只负责 Project、Thread directory、Task、settings 和 health
 内容只来自 thread stream，两种 stream 不共享 sequence，也不能按到达顺序互相覆盖。directory
 更新可重绑 workspace 的 Thread 引用，但不能改写 workspace 的 Turn、Item、Interaction 或 runtime。
 
-SQLite/schema/Bridge 无法提供 canonical snapshot 是应用级致命错误，显示可重试错误页。单个
-Project、Task 或 worktree 故障是 typed recovery issue：健康内容继续可用，故障项显示错误与
-安全清理入口。
+启动发现 SQLite 版本、结构或 fingerprint 不兼容时，store 先关闭检查连接，精确删除配置的
+数据库/WAL/SHM 并创建空 canonical schema。重建成功后 Bridge 返回正常空 snapshot，GUI 直接
+进入可用空状态；只有数据库文件被占用、删除/初始化失败，或 SQLite/Bridge 仍无法提供 canonical
+snapshot 时才是应用级致命错误并显示可重试错误页。单个 Project、Task 或 worktree 故障是
+typed recovery issue：健康内容继续可用，故障项显示错误与安全清理入口。
 
 清理必须 preview → 用户确认 → 执行时重新验证。UI 展示 path、branch、dirty、ahead、变更
 数量和 expected revision；不得在确认前写入，也不得允许清理用户主工作区。

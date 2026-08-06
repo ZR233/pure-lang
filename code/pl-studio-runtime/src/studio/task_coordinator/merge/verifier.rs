@@ -1,17 +1,6 @@
 use std::path::Path;
 
-use anyhow::{Result, bail};
-
-use super::git::run_git;
-use crate::studio::task_coordinator::{MergeVerificationRequest, MergeVerificationStep};
-
-/// 验证 coordinator 已应用但尚未提交的 merge；实现者不得修改 workspace。
-pub(crate) trait MergeVerifier: Send + Sync {
-    fn verify(
-        &self,
-        request: MergeVerificationRequest,
-    ) -> impl std::future::Future<Output = Result<Vec<MergeVerificationStep>>> + Send;
-}
+use crate::studio::task_coordinator::MergeVerificationStep;
 
 pub(crate) struct ProductionMergeVerifier;
 
@@ -35,19 +24,6 @@ impl ProductionMergeVerifier {
             }
         }
         steps
-    }
-}
-
-impl MergeVerifier for ProductionMergeVerifier {
-    async fn verify(
-        &self,
-        request: MergeVerificationRequest,
-    ) -> Result<Vec<MergeVerificationStep>> {
-        let commands = select_merge_verification_commands(
-            Path::new(&request.workspace_root),
-            &request.changed_files,
-        );
-        Ok(Self::verify_commands(commands).await)
     }
 }
 
@@ -112,14 +88,5 @@ async fn run_check(selected: MergeVerificationCommand) -> MergeVerificationStep 
             success: false,
             output: format!("{error:#}"),
         },
-    }
-}
-
-pub(super) async fn abort_merge(workspace: &Path) -> Result<()> {
-    let output = run_git(workspace, vec!["merge".into(), "--abort".into()]).await?;
-    if output.success {
-        Ok(())
-    } else {
-        bail!("git merge --abort failed: {}", output.stderr_lossy())
     }
 }

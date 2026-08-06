@@ -12,7 +12,7 @@ use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
     AllocateExecutor, ExecutorAllocation, TaskRunPhase, TaskWorktreeDisposition,
-    ThreadExecutionStatus, WorkUnitStatus, owned_paths_overlap,
+    ThreadExecutionStatus, WorkUnitStatus,
 };
 
 const MAX_ACTIVE_EXECUTORS: usize = 4;
@@ -57,16 +57,10 @@ impl StudioStore {
         if active.len() >= MAX_ACTIVE_EXECUTORS {
             bail!("task executor concurrency limit reached: at most 4 active executors");
         }
-        for unit in &active {
-            let active_paths = serde_json::from_str::<Vec<String>>(&unit.owned_paths_json)?;
-            if owned_paths_overlap(&input.owned_paths, &active_paths)? {
-                bail!("ownedPaths overlap active work unit {}", unit.id);
-            }
-        }
-        let owned_paths_json = serde_json::to_string(&input.owned_paths)?;
+        let scope_hints_json = serde_json::to_string(&input.scope_hints)?;
         let attempt = existing
             .iter()
-            .filter(|unit| unit.owned_paths_json == owned_paths_json)
+            .filter(|unit| unit.scope_hints_json == scope_hints_json)
             .map(|unit| unit.attempt.max(0) as u32)
             .max()
             .unwrap_or(0)
@@ -93,7 +87,7 @@ impl StudioStore {
                 task_run_id: Set(run.id.clone()),
                 title: Set(input.title),
                 status: Set(WorkUnitStatus::Pending.as_str().to_string()),
-                owned_paths_json: Set(owned_paths_json),
+                scope_hints_json: Set(scope_hints_json),
                 base_commit: Set(run.expected_head.clone()),
                 worktree_path: Set(worktree_path),
                 branch: Set(branch),
@@ -178,7 +172,6 @@ fn is_active_work_unit(status: &str) -> bool {
                 | WorkUnitStatus::Reviewing
                 | WorkUnitStatus::ChangesRequested
                 | WorkUnitStatus::Approved
-                | WorkUnitStatus::Merging
         )
     )
 }

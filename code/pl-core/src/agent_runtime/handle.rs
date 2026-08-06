@@ -16,7 +16,7 @@ use super::{
     ThreadId, TurnId,
 };
 use crate::agent_runtime::state::AgentRuntimeError;
-use crate::{ThreadEventBusHandle, ThreadEventSubscription};
+use crate::{AgentRoleId, ThreadEventBusHandle, ThreadEventSubscription};
 
 /// 不包含 host 泛型的 cloneable runtime 命令句柄。
 ///
@@ -85,6 +85,25 @@ impl AgentRuntimeHandle {
                 request,
                 reply,
             },
+        )
+        .await?;
+        receive(receiver).await?
+    }
+
+    /// Reconfigures the role of an active, idle agent with an empty input queue.
+    ///
+    /// Product hosts use this narrow transition when a durable root Thread
+    /// changes execution mode. Running turns and queued input keep the role
+    /// that they were created with and therefore reject reconfiguration.
+    pub async fn reconfigure_idle_role(
+        &self,
+        agent_id: AgentId,
+        role: AgentRoleId,
+    ) -> AgentRuntimeResult<AgentSnapshot> {
+        let (reply, receiver) = oneshot::channel();
+        self.send_to_actor(
+            &agent_id,
+            AgentLoopCommand::ReconfigureIdleRole { role, reply },
         )
         .await?;
         receive(receiver).await?

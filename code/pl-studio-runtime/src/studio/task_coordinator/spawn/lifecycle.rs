@@ -1,10 +1,10 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::{PureError, Result as PureResult, WorktreeCreateSpec};
-use anyhow::{Result, bail};
+use anyhow::Result;
 
 use super::super::{AllocateExecutor, TaskCoordinator};
-use crate::studio::task_coordinator::owned_path::OwnedPath;
+use crate::studio::task_coordinator::scope_hint::ScopeHint;
 
 /// Studio Task 产品层为一次 child spawn 固定的业务输入。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -13,8 +13,9 @@ pub(crate) struct StudioTaskSpawnRequest {
     pub(crate) root_thread_id: String,
     pub(crate) task_name: String,
     pub(crate) role: String,
-    pub(crate) owned_paths: Vec<String>,
+    pub(crate) scope_hints: Vec<String>,
     pub(crate) requested_by_call_id: String,
+    pub(crate) review_round_id: Option<String>,
 }
 
 /// Studio Task 在 framework saga prepare 阶段预留的资源事实。
@@ -72,8 +73,8 @@ impl TaskCoordinator {
         &self,
         request: &StudioTaskSpawnRequest,
     ) -> PureResult<StudioTaskSpawnPreparation> {
-        if !request.owned_paths.is_empty() {
-            return Err(spawn_error("explorer must not declare ownedPaths"));
+        if !request.scope_hints.is_empty() {
+            return Err(spawn_error("explorer must not declare scopeHints"));
         }
         let Some(_run) = self
             .store
@@ -92,7 +93,7 @@ impl TaskCoordinator {
         &self,
         request: &StudioTaskSpawnRequest,
     ) -> PureResult<StudioTaskSpawnPreparation> {
-        let owned_paths = normalize_owned_paths(&request.owned_paths)
+        let scope_hints = normalize_scope_hints(&request.scope_hints)
             .map_err(|error| spawn_error(error.to_string()))?;
         let _mutation_guard = self.lock_branch_mutation().await;
         let _allocation_guard = self.allocation_lock.lock().await;
@@ -101,8 +102,6 @@ impl TaskCoordinator {
             .read_active_task_run_for_root_thread(&request.root_thread_id)
             .await
             .map_err(store_spawn_error)?;
-        reject_bare_existing_directories(Path::new(&run.workspace_root), &owned_paths)
-            .map_err(|error| spawn_error(error.to_string()))?;
         self.ensure_executor_design_contract(&run)
             .map_err(store_spawn_error)?;
         let allocation = self
@@ -110,7 +109,7 @@ impl TaskCoordinator {
             .allocate_executor(AllocateExecutor {
                 thread_id: request.root_thread_id.clone(),
                 title: request.task_name.clone(),
-                owned_paths,
+                scope_hints,
                 agent_id: request.agent_id.clone(),
                 requested_by_call_id: request.requested_by_call_id.clone(),
             })
@@ -136,8 +135,8 @@ impl TaskCoordinator {
         &self,
         request: &StudioTaskSpawnRequest,
     ) -> PureResult<StudioTaskSpawnPreparation> {
-        if !request.owned_paths.is_empty() {
-            return Err(spawn_error("reviewer must not declare ownedPaths"));
+        if !request.scope_hints.is_empty() {
+            return Err(spawn_error("reviewer must not declare scopeHints"));
         }
         let round = self
             .store
@@ -148,6 +147,11 @@ impl TaskCoordinator {
             )
             .await
             .map_err(store_spawn_error)?;
+        if request.review_round_id.as_deref() != Some(round.id.as_str()) {
+            return Err(spawn_error(
+                "reviewer spawn intent does not match its durable ReviewRound",
+            ));
+        }
         Ok(StudioTaskSpawnPreparation::with_token(round.id))
     }
 
@@ -256,53 +260,18 @@ impl TaskCoordinator {
     }
 }
 
-pub(crate) fn owned_paths_overlap(left: &[String], right: &[String]) -> Result<bool> {
-    let left = left
+pub(crate) fn normalize_scope_hints(paths: &[String]) -> Result<Vec<String>> {
+    let mut canonical = paths
         .iter()
-        .map(|path| OwnedPath::parse(path))
+        .map(|path| ScopeHint::parse(path))
         .collect::<Result<Vec<_>>>()?;
-    let right = right
-        .iter()
-        .map(|path| OwnedPath::parse(path))
-        .collect::<Result<Vec<_>>>()?;
-    Ok(left
-        .iter()
-        .any(|left| right.iter().any(|right| left.overlaps(right))))
-}
-
-pub(crate) fn normalize_owned_paths(paths: &[String]) -> Result<Vec<String>> {
-    if paths.is_empty() {
-        bail!("Task executor ownedPaths must not be empty");
-    }
-    let normalized = paths
-        .iter()
-        .map(|path| OwnedPath::parse(path))
-        .collect::<Result<Vec<_>>>()?;
-    for (index, path) in normalized.iter().enumerate() {
-        if normalized[index + 1..]
-            .iter()
-            .any(|other| path.overlaps(other))
-        {
-            bail!("ownedPaths entries must not overlap");
-        }
-    }
-    let mut canonical = normalized
-        .into_iter()
-        .map(OwnedPath::into_canonical)
+    let mut canonical = canonical
+        .drain(..)
+        .map(ScopeHint::into_canonical)
         .collect::<Vec<_>>();
     canonical.sort();
+    canonical.dedup();
     Ok(canonical)
-}
-
-fn reject_bare_existing_directories(workspace_root: &Path, owned_paths: &[String]) -> Result<()> {
-    for owned_path in owned_paths {
-        if !owned_path.ends_with("/**") && workspace_root.join(owned_path).is_dir() {
-            bail!(
-                "owned path `{owned_path}` names an existing directory; use `{owned_path}/**` to own its descendants"
-            );
-        }
-    }
-    Ok(())
 }
 
 fn store_spawn_error(error: impl std::fmt::Display) -> PureError {
@@ -318,21 +287,17 @@ fn spawn_error(error: impl Into<String>) -> PureError {
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_owned_paths;
+    use super::normalize_scope_hints;
 
     #[test]
-    fn executor_owned_paths_are_validated_and_canonicalized_before_spawn() {
+    fn executor_scope_hints_are_optional_and_canonicalized_before_spawn() {
+        assert!(normalize_scope_hints(&[]).unwrap().is_empty());
         assert_eq!(
-            normalize_owned_paths(&["tests\\case.rs".into(), "src/**".into()]).unwrap(),
-            vec!["src/**", "tests/case.rs"]
+            normalize_scope_hints(&["tests\\case.rs".into(), "src".into(), "src".into()]).unwrap(),
+            vec!["src", "tests/case.rs"]
         );
-        for paths in [
-            Vec::<String>::new(),
-            vec!["../src".into()],
-            vec!["src/*".into()],
-            vec!["src/**".into(), "src/lib.rs".into()],
-        ] {
-            assert!(normalize_owned_paths(&paths).is_err(), "{paths:?}");
+        for paths in [vec!["../src".into()], vec!["src/*".into()]] {
+            assert!(normalize_scope_hints(&paths).is_err(), "{paths:?}");
         }
     }
 }

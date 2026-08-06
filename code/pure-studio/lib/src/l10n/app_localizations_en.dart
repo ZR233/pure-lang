@@ -47,6 +47,14 @@ class AppLocalizationsEn extends AppLocalizations {
   String get recoveryCleanupTooltip => 'Review safe cleanup';
 
   @override
+  String get recoveryRetryTooltip => 'Continue merge recovery';
+
+  @override
+  String recoveryRetryFailed(String error) {
+    return 'Recovery retry failed: $error';
+  }
+
+  @override
   String get recoveryCleanupTitle => 'Clean up recovery issue?';
 
   @override
@@ -326,7 +334,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get statusTaskCompletions => 'Completions';
 
   @override
-  String get statusTaskMerges => 'Merges and conflicts';
+  String get statusTaskMerges => 'Merge records';
 
   @override
   String get statusTaskReviews => 'Reviews';
@@ -341,7 +349,16 @@ class AppLocalizationsEn extends AppLocalizations {
   String get statusTaskSource => 'Source';
 
   @override
-  String get statusTaskConflicts => 'Conflicts';
+  String get statusTaskPreviousHead => 'Previous HEAD';
+
+  @override
+  String get statusTaskDeliveryHead => 'Delivery HEAD';
+
+  @override
+  String get statusTaskResultingHead => 'Resulting HEAD';
+
+  @override
+  String get statusTaskCleanup => 'Cleanup';
 
   @override
   String get statusTaskRequest => 'Request';
@@ -389,9 +406,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get statusTaskPhaseMerging => 'Merging';
 
   @override
-  String get statusTaskPhaseResolvingConflict => 'Resolving conflicts';
-
-  @override
   String get statusTaskPhaseReviewing => 'Reviewing';
 
   @override
@@ -437,9 +451,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get statusTaskStatusApproved => 'Approved';
 
   @override
-  String get statusTaskStatusMerging => 'Merging';
-
-  @override
   String get statusTaskStatusMerged => 'Merged';
 
   @override
@@ -453,15 +464,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get statusTaskStatusCancelled => 'Cancelled';
-
-  @override
-  String get statusTaskStatusConflicted => 'Conflicted';
-
-  @override
-  String get statusTaskStatusVerifying => 'Verifying';
-
-  @override
-  String get statusTaskStatusAborted => 'Aborted';
 
   @override
   String get statusTaskStatusPass => 'Passed';

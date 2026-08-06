@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use pl_core::AgentId;
@@ -11,7 +10,6 @@ use crate::{WorktreeHandle, WorktreeManager};
 #[derive(Clone)]
 pub(super) struct StudioAgentResource {
     pub(super) thread_id: String,
-    pub(super) workspace_root: PathBuf,
     pub(super) task_name: String,
     pub(super) request: StudioTaskSpawnRequest,
     pub(super) preparation: StudioTaskSpawnPreparation,
@@ -81,10 +79,6 @@ impl StudioAgentResources {
 
     pub(super) async fn thread_id(&self, id: &AgentId) -> Option<String> {
         Some(id.to_string())
-    }
-
-    pub(super) async fn workspace_root(&self, id: &AgentId) -> Option<PathBuf> {
-        self.get(id).await.map(|resource| resource.workspace_root)
     }
 }
 

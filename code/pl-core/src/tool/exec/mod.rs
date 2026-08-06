@@ -252,6 +252,7 @@ where
         context: ToolContext,
     ) -> super::BoxFuture<'a, Result<ToolOutput, PureError>> {
         Box::pin(async move {
+            context.ensure_workspace_writable()?;
             let exec_input = Self::parse_input(input.arguments, self.name())?;
             let timeout = exec_input
                 .timeout_seconds

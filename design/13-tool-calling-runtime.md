@@ -50,7 +50,12 @@ Chat Completions provider 如果没有 Responses 风格的 completed event，pro
 5. 对批准的工具执行本地实现；对禁用、未知或拒绝的工具直接生成工具结果。
 6. 在统一收尾阶段写入完整 authoritative payload，并发送唯一 `ItemCompleted`。
 
-路径类工具不要求模型提供绝对路径。运行时把相对路径按 `workspaceRoot` 解析，规范化为绝对路径后再进入权限判断和实际执行；文件工具、`apply_patch`、`exec.cwd`、`lsp_query_*` 的 `filePath` 和权限 precheck 必须复用同一个 resolver，避免审批看到 workspace 内而执行时解析到 workspace 外。`WorkspaceOnly` 模式拒绝 `..`、Windows drive-relative、越界绝对路径、越界 UNC / verbatim 路径和符号链接越界；`full-access` 允许本地 backend 解析 workspace 外路径，但宿主注入的容器或远程 backend 可以保持更严格的隔离边界。
+路径类工具不要求模型提供绝对路径。运行时把相对路径按 typed `AgentWorkspace.root` 解析，
+规范化为绝对路径后再进入权限判断和实际执行；文件工具、`apply_patch`、`exec.cwd`、
+`lsp_query_*` 的 `filePath` 和权限 precheck 必须复用同一个 resolver。`boundary=confined`
+拒绝 `..`、Windows drive-relative、越界绝对路径、越界 UNC / verbatim 路径和符号链接越界，
+即使会话权限是 `full-access` 也不能逃逸。只有 `boundary=hostPermitted` 且权限策略明确放行时，
+本地 backend 才能解析 workspace 外路径。
 
 模型只看到环境无关的 `exec`、`write_stdin`、`read_file`、`search_files` 和 `apply_patch`。`ToolSetBuilder` 分别接收 `CommandBackend` 与 `WorkspaceFileBackend`；Studio 注入本地实现，Mai 等宿主注入容器或远程实现。PL 统一拥有 schema、权限、进程表、stdin、超时、取消、输出截断和 turn 清理，backend 只负责 cwd 映射、启动/终止进程、发布完整输出和生成宿主 artifact。低层容器复制能力只服务文件 backend 与输出同步，不注册为模型工具。命令工具唯一名称是 `exec`，不注册或运行期改写其他命令工具别名。
 
@@ -162,8 +167,9 @@ runtime 从目标 agent 的唯一 ThreadId 解析并验证同一 Thread 树、�
 Timeline Item。
 
 产品 harness 的 spawn 契约不扩展通用 `spawn_agent` schema。Task 的
-`task_spawn_executor` 以 required `taskName/message/ownedPaths` 建模安全和交付不变量，
-在 runtime spawn 前完成路径静态校验，并将可信内部 intent 交给 Studio lifecycle；
+`task_spawn_executor` 接收 required `taskName/message` 与 optional `scopeHints`；hint 只描述
+关注路径，不限制 worktree 内合法修改，也不阻止并发或 completion。runtime spawn 前只校验
+hint 是规范仓库相对路径，并将可信内部 intent 交给 Studio lifecycle；
 `task_request_delivery_review` 与 `task_request_integrated_review` 分别固定 completion
 revision 和 Task HEAD 的 reviewer intent。这些工具都创建只属于新 agent 的 child Thread，
 不使用 `spawn_agent.forkTurns`，但仍复用 AgentRuntime 的容量、repository、lifecycle saga、

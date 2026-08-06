@@ -172,19 +172,35 @@ class TaskCompletionView {
 class TaskMergeView {
   const TaskMergeView({
     required this.id,
-    required this.agentId,
-    required this.status,
-    required this.mergeCommit,
-    required this.conflictFiles,
-    required this.resolutionSummary,
+    required this.workUnitId,
+    required this.completionId,
+    required this.completionRevision,
+    required this.executorAgentId,
+    required this.expectedPreviousHead,
+    required this.resultingHead,
+    required this.deliveryHead,
+    required this.method,
+    required this.summary,
+    required this.cleanupStatus,
+    required this.cleanupDetail,
+    required this.createdAt,
+    required this.updatedAt,
   });
 
   final String id;
-  final String agentId;
-  final String status;
-  final String? mergeCommit;
-  final List<String> conflictFiles;
-  final String? resolutionSummary;
+  final String workUnitId;
+  final String completionId;
+  final int completionRevision;
+  final String executorAgentId;
+  final String expectedPreviousHead;
+  final String resultingHead;
+  final String deliveryHead;
+  final String method;
+  final String summary;
+  final String cleanupStatus;
+  final String? cleanupDetail;
+  final DateTime createdAt;
+  final DateTime updatedAt;
 }
 
 class TaskReviewView {

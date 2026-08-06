@@ -235,6 +235,30 @@ impl StudioStore {
         }
         Ok(())
     }
+
+    pub(in crate::studio) async fn repair_root_thread_roles(&self) -> Result<usize> {
+        use entities::thread;
+        let roots = thread::Entity::find()
+            .filter(thread::Column::ParentThreadId.is_null())
+            .filter(thread::Column::Mode.is_in(["simple", "task"]))
+            .all(&self.db)
+            .await?;
+        let mut repaired = 0;
+        for root in roots {
+            let expected_role = match StudioMode::from_label(&root.mode) {
+                StudioMode::Simple => "executor",
+                StudioMode::Task => "planner",
+            };
+            if root.role == expected_role {
+                continue;
+            }
+            let mut active: thread::ActiveModel = root.into();
+            active.role = Set(expected_role.to_string());
+            active.update(&self.db).await?;
+            repaired += 1;
+        }
+        Ok(repaired)
+    }
 }
 
 #[derive(Debug, Clone)]

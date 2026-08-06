@@ -36,6 +36,10 @@ pub(crate) enum AgentLoopCommand {
         request: AgentCurrentSessionSubmitRequest,
         reply: oneshot::Sender<AgentRuntimeResult<TurnId>>,
     },
+    ReconfigureIdleRole {
+        role: crate::AgentRoleId,
+        reply: oneshot::Sender<AgentRuntimeResult<AgentSnapshot>>,
+    },
     CancelTurn {
         turn_id: TurnId,
         reply: oneshot::Sender<AgentRuntimeResult<()>>,
@@ -177,6 +181,10 @@ where
                         } => {
                             let result =
                                 self.submit_current_session(root_agent_id, request).await;
+                            let _ = reply.send(result);
+                        }
+                        AgentLoopCommand::ReconfigureIdleRole { role, reply } => {
+                            let result = self.reconfigure_idle_role(role).await;
                             let _ = reply.send(result);
                         }
                         AgentLoopCommand::CancelTurn { turn_id, reply } => {

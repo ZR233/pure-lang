@@ -1,5 +1,5 @@
 use std::collections::BTreeSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
@@ -59,6 +59,7 @@ struct ScriptProgress {
 struct ScriptState {
     runtime: StudioRuntime,
     thread_id: String,
+    workspace: PathBuf,
     progress: Mutex<ScriptProgress>,
 }
 
@@ -68,10 +69,16 @@ pub(super) struct ScriptedModelServer {
 }
 
 impl ScriptedModelServer {
-    pub(super) fn start(listener: TcpListener, runtime: StudioRuntime, thread_id: String) -> Self {
+    pub(super) fn start(
+        listener: TcpListener,
+        runtime: StudioRuntime,
+        thread_id: String,
+        workspace: PathBuf,
+    ) -> Self {
         let state = Arc::new(ScriptState {
             runtime,
             thread_id,
+            workspace,
             progress: Mutex::new(ScriptProgress::default()),
         });
         let server_state = state.clone();
@@ -94,7 +101,7 @@ impl ScriptedModelServer {
         if !progress.errors.is_empty() {
             bail!("scripted model errors:\n{}", progress.errors.join("\n"));
         }
-        let expected = (22, 7, 6);
+        let expected = (21, 7, 6);
         if (progress.planner, progress.executor, progress.reviewer) != expected {
             bail!(
                 "scripted model stopped at planner={}, executor={}, reviewer={}; expected {expected:?}\n{}",
@@ -210,7 +217,7 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 serde_json::json!({
                     "taskName": "offline_executor",
                     "message": "Create src/feature.txt with the exact required content, commit it, verify it, and report the completion for review.",
-                    "ownedPaths": ["src/**"]
+                    "scopeHints": ["design"]
                 }),
             ),
         ),
@@ -244,22 +251,11 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 ),
             )
         }
-        11 => {
-            let reviewer_id = latest_reviewer_agent_id(state).await?;
-            (
-                "wait_agents(delivery-reviewer)",
-                tool_call(
-                    "wait-delivery-reviewer",
-                    "wait_agents",
-                    serde_json::json!({"targets": [reviewer_id]}),
-                ),
-            )
-        }
-        12 => (
+        11 => (
             "list_agents(delivery-review)",
             tool_call("list-delivery-review", "list_agents", serde_json::json!({})),
         ),
-        13 => (
+        12 => (
             "task_status(delivery-review)",
             tool_call(
                 "status-delivery-review",
@@ -267,7 +263,7 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 serde_json::json!({}),
             ),
         ),
-        14 => {
+        13 => {
             let executor_id = executor_agent_id(state).await?;
             (
                 "close_agent(executor)",
@@ -278,21 +274,53 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 ),
             )
         }
-        15 => {
+        14 => {
             let task = current_task(state).await?;
-            let executor_id = executor_agent_id(state).await?;
+            let work_unit = task
+                .work_units
+                .iter()
+                .find(|unit| unit.agent_id.is_some())
+                .context("executor work unit is absent before planner Git integration")?;
             (
-                "task_merge_agent",
+                "exec(planner git merge)",
                 tool_call(
                     "merge-executor",
-                    "task_merge_agent",
+                    "exec",
                     serde_json::json!({
-                        "agentId": executor_id,
-                        "expectedHeadCommit": task.expected_head
+                        "command": format!(
+                            "git -c user.name=\"Pure Studio\" -c user.email=pure-studio@local merge --no-ff {} -m \"test: integrate offline task fixture\"",
+                            work_unit.branch
+                        )
                     }),
                 ),
             )
         }
+        15 => ("task_record_merge", {
+            let task = current_task(state).await?;
+            let executor_id = executor_agent_id(state).await?;
+            let completion = task
+                .completions
+                .iter()
+                .filter(|completion| completion.executor_agent_id == executor_id)
+                .max_by_key(|completion| completion.revision)
+                .context("approved executor completion is absent before merge accounting")?;
+            let resulting_head = git_output(&state.workspace, &["rev-parse", "HEAD"])?;
+            if resulting_head == task.expected_head {
+                bail!("planner Git merge did not advance the main workspace HEAD");
+            }
+            tool_call(
+                "record-executor-merge",
+                "task_record_merge",
+                serde_json::json!({
+                    "executorAgentId": executor_id,
+                    "completionRevision": completion.revision,
+                    "expectedPreviousHead": task.expected_head,
+                    "resultingHead": resulting_head,
+                    "method": "merge",
+                    "summary": "Planner merged the approved offline executor branch with ordinary Git."
+                }),
+            )
+        }),
         16 => (
             "task_update_design(consistency)",
             tool_call(
@@ -309,18 +337,7 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 serde_json::json!({}),
             ),
         ),
-        18 => {
-            let reviewer_id = latest_reviewer_agent_id(state).await?;
-            (
-                "wait_agents(integrated-reviewer)",
-                tool_call(
-                    "wait-integrated-reviewer",
-                    "wait_agents",
-                    serde_json::json!({"targets": [reviewer_id]}),
-                ),
-            )
-        }
-        19 => (
+        18 => (
             "list_agents(integrated-review)",
             tool_call(
                 "list-integrated-review",
@@ -328,7 +345,7 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 serde_json::json!({}),
             ),
         ),
-        20 => (
+        19 => (
             "task_status(integrated-review)",
             tool_call(
                 "status-integrated-review",
@@ -336,7 +353,7 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 serde_json::json!({}),
             ),
         ),
-        21 => (
+        20 => (
             "task_complete",
             tool_call("complete-task", "task_complete", serde_json::json!({})),
         ),
@@ -354,7 +371,7 @@ async fn executor_response(state: &ScriptState, step: usize) -> Result<(&'static
                 "report_progress",
                 serde_json::json!({
                     "stage": "exploring",
-                    "summary": "Located the owned path and design contract.",
+                    "summary": "Located the canonical worktree and design contract.",
                     "nextStep": "Create the required feature file."
                 }),
             ),
@@ -404,7 +421,7 @@ async fn executor_response(state: &ScriptState, step: usize) -> Result<(&'static
                 "report_progress",
                 serde_json::json!({
                     "stage": "verifying",
-                    "summary": "Committed the exact owned-path change.",
+                    "summary": "Committed the exact worktree change outside the review-focus hint.",
                     "nextStep": "Report the verified completion for review."
                 }),
             ),
@@ -493,16 +510,6 @@ async fn executor_agent_id(state: &ScriptState) -> Result<String> {
         .context("executor is absent from task projection")
 }
 
-async fn latest_reviewer_agent_id(state: &ScriptState) -> Result<String> {
-    current_task(state)
-        .await?
-        .reviews
-        .into_iter()
-        .rev()
-        .find_map(|review| review.reviewer_agent_id)
-        .context("reviewer is absent from task projection")
-}
-
 async fn next_step(state: &ScriptState, role: ScriptRole) -> usize {
     let mut progress = state.progress.lock().await;
     let next = match role {
@@ -552,8 +559,11 @@ fn request_role(request: &serde_json::Value) -> Result<ScriptRole> {
 fn validate_request_step(request: &serde_json::Value, role: ScriptRole, step: usize) -> Result<()> {
     if role == ScriptRole::Executor && step == 0 {
         let request_text = request.to_string();
-        if !request_text.contains("src/**") || !request_text.contains("ownedPaths") {
-            bail!("executor instructions do not contain the normalized ownedPaths scope");
+        if !request_text.contains("design") || !request_text.contains("scopeHints") {
+            bail!("executor instructions do not contain the normalized scopeHints focus");
+        }
+        if request_text.contains("ownedPaths") {
+            bail!("executor instructions still expose legacy ownedPaths");
         }
     }
     Ok(())
@@ -578,11 +588,14 @@ fn validate_planner_spawn_contract(tools: &[serde_json::Value]) -> Result<()> {
         .iter()
         .filter_map(serde_json::Value::as_str)
         .collect::<BTreeSet<_>>();
-    if required != BTreeSet::from(["message", "ownedPaths", "taskName"]) {
+    if required != BTreeSet::from(["message", "taskName"]) {
         bail!("task_spawn_executor has unexpected required fields: {required:?}");
     }
-    if executor_schema["properties"]["ownedPaths"]["minItems"] != 1 {
-        bail!("task_spawn_executor ownedPaths must require at least one item");
+    if executor_schema["properties"].get("scopeHints").is_none() {
+        bail!("task_spawn_executor schema does not expose optional scopeHints");
+    }
+    if executor_schema["properties"].get("ownedPaths").is_some() {
+        bail!("task_spawn_executor schema still exposes legacy ownedPaths");
     }
 
     let generic =

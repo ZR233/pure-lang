@@ -1,11 +1,8 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 
-use crate::{
-    AgentId, AgentLifecycleState, AgentRuntimeHandle, CloseDisposition, WorktreeHandle,
-    WorktreeManager,
-};
+use crate::{AgentId, AgentLifecycleState, AgentRuntimeHandle, WorktreeHandle, WorktreeManager};
 
 use super::git::{checked_git, run_git};
 use super::validation::validate_final_head;
@@ -17,18 +14,12 @@ impl TaskCoordinator {
         scope: &TaskMergeScope,
     ) -> Result<()> {
         validate_final_head(&scope.run, &scope.run.expected_head).await?;
-        let merge_commit = scope
-            .merge
-            .evidence
-            .as_ref()
-            .and_then(|evidence| evidence.merge_commit.as_deref())
-            .context("accepted cleanup replay has no merge commit")?;
         let ancestor = run_git(
             &scope.run.workspace_root,
             vec![
                 "merge-base".into(),
                 "--is-ancestor".into(),
-                merge_commit.to_string(),
+                scope.merge.resulting_head.clone(),
                 scope.run.expected_head.clone(),
             ],
         )
@@ -78,8 +69,8 @@ pub(crate) async fn cleanup_accepted_delivery(
         path: PathBuf::from(&scope.work_unit.worktree_path),
         branch: scope.work_unit.branch.clone(),
     };
-    let cleanup = match manager.close(&handle, CloseDisposition::Discard).await {
-        Ok(_) => cleanup_success("discarded"),
+    let cleanup = match manager.discard(&handle).await {
+        Ok(()) => cleanup_success("discarded"),
         Err(error)
             if cleanup_is_already_absent(&scope.work_unit.worktree_path, &error.to_string()) =>
         {

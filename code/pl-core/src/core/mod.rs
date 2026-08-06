@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+#[cfg(test)]
 use std::path::PathBuf;
 
 use pl_model::{
@@ -78,7 +79,7 @@ pub struct TurnEngine {
     effort: Option<ReasoningEffort>,
     skills: Option<SkillsConfig>,
     lsp_runtime: Option<pl_lsp::LspRuntimeRegistry>,
-    workspace_root: Option<PathBuf>,
+    workspace: Option<crate::tool::AgentWorkspace>,
     workspace_instructions: Option<String>,
     instruction_profile: Option<crate::instruction::InstructionProfile>,
     tool_profile: ToolProfile,
@@ -96,7 +97,7 @@ impl TurnEngine {
             effort: None,
             skills: None,
             lsp_runtime: None,
-            workspace_root: None,
+            workspace: None,
             workspace_instructions: None,
             instruction_profile: None,
             tool_profile: ToolProfile::Minimal,
@@ -114,7 +115,7 @@ impl TurnEngine {
             effort: Some(effort),
             skills: None,
             lsp_runtime: None,
-            workspace_root: None,
+            workspace: None,
             workspace_instructions: None,
             instruction_profile: None,
             tool_profile: ToolProfile::Minimal,
@@ -147,11 +148,17 @@ impl TurnEngine {
     pub async fn register_profile_tools(&mut self) {
         match self.tool_profile {
             ToolProfile::LocalWorkspace => {
-                let workspace_root = self.workspace_root.clone().unwrap_or_else(|| {
-                    std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+                let workspace = self.workspace.clone().unwrap_or_else(|| {
+                    crate::tool::AgentWorkspace::local(
+                        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+                    )
                 });
-                self.register_default_tools(workspace_root, self.workspace_instructions.clone())
-                    .await;
+                self.register_agent_workspace_tools(
+                    workspace,
+                    self.workspace_instructions.clone(),
+                    self.tool_capabilities.clone(),
+                )
+                .await;
             }
             ToolProfile::HostProvided | ToolProfile::Minimal => {}
         }
@@ -195,9 +202,23 @@ impl TurnEngine {
         workspace_instructions: Option<String>,
         capabilities: ToolCapabilityConfig,
     ) {
+        self.register_agent_workspace_tools(
+            crate::tool::AgentWorkspace::local(workspace_root),
+            workspace_instructions,
+            capabilities,
+        )
+        .await;
+    }
+
+    pub async fn register_agent_workspace_tools(
+        &mut self,
+        workspace: crate::tool::AgentWorkspace,
+        workspace_instructions: Option<String>,
+        capabilities: ToolCapabilityConfig,
+    ) {
         self.tool_capabilities = capabilities.clone();
         ToolSetBuilder::from_capabilities(capabilities)
-            .register(self, workspace_root, workspace_instructions)
+            .register_agent_workspace(self, workspace, workspace_instructions)
             .await;
     }
 
@@ -230,16 +251,13 @@ impl TurnEngine {
         workspace_root: impl Into<std::path::PathBuf>,
         workspace_instructions: Option<String>,
     ) {
-        self.register_skill_tools_for_workspace(workspace_root.into(), workspace_instructions);
+        let workspace_root = workspace_root.into();
+        self.workspace = Some(crate::tool::AgentWorkspace::local(workspace_root.clone()));
+        self.workspace_instructions = workspace_instructions;
+        self.register_skill_tools_for_workspace(workspace_root);
     }
 
-    fn register_skill_tools_for_workspace(
-        &mut self,
-        workspace_root: std::path::PathBuf,
-        workspace_instructions: Option<String>,
-    ) {
-        self.workspace_root = Some(workspace_root);
-        self.workspace_instructions = workspace_instructions;
+    fn register_skill_tools_for_workspace(&mut self, _workspace_root: std::path::PathBuf) {
         let Some(config) = self.skills.clone() else {
             return;
         };
@@ -269,7 +287,7 @@ impl TurnEngine {
             "parentAgentId": &request.parent_agent_id,
             "permissionMode": context.options.permission_mode.label(),
             "workspaceAccess": format!("{:?}", context.workspace_access),
-            "workspaceRoot": context.workspace_root.display().to_string(),
+            "workspaceRoot": context.workspace.root().display().to_string(),
             "riskSummary": permission::permission_risk_summary(&request.name),
         });
         let message = Message {
@@ -385,8 +403,9 @@ impl TurnEngine {
         let model = self.provider.default_model().to_string();
         let model_info = self.provider.model_info(&model);
         let workspace_root = self
-            .workspace_root
-            .clone()
+            .workspace
+            .as_ref()
+            .map(|workspace| workspace.root().to_path_buf())
             .unwrap_or_else(turn_result::default_workspace_root);
         let snapshot = match request.instruction_snapshot {
             Some(snapshot) => snapshot,

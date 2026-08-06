@@ -256,7 +256,7 @@ impl StudioStore {
             let now = unix_seconds();
             match ReviewScope::from_str(&round.scope).context("invalid stored review scope")? {
                 ReviewScope::Delivery => {
-                    complete_delivery_review(&tx, &round, &review, now).await?;
+                    complete_delivery_review(&tx, &run, &round, &review, now).await?;
                 }
                 ReviewScope::Integrated => {
                     if round.reviewed_head != run.expected_head
@@ -350,6 +350,23 @@ impl StudioStore {
             .into_iter()
             .map(review_round_record)
             .collect()
+    }
+
+    pub(crate) async fn find_review_round_for_reviewer(
+        &self,
+        reviewer_agent_id: &str,
+    ) -> Result<Option<ReviewRoundRecord>> {
+        let rounds = entities::review_round::Entity::find()
+            .filter(
+                entities::review_round::Column::ReviewerThreadId.eq(reviewer_agent_id.to_string()),
+            )
+            .all(&self.db)
+            .await?;
+        match rounds.as_slice() {
+            [] => Ok(None),
+            [round] => review_round_record(round.clone()).map(Some),
+            _ => bail!("reviewer Thread owns multiple review rounds"),
+        }
     }
 
     pub(crate) async fn settle_reviewer_turn_finished(
@@ -450,6 +467,7 @@ impl StudioStore {
 
 async fn complete_delivery_review(
     tx: &sea_orm::DatabaseTransaction,
+    run: &entities::task_run::Model,
     round: &entities::review_round::Model,
     review: &AgentReview,
     now: i64,
@@ -513,7 +531,7 @@ async fn complete_delivery_review(
             entities::work_completion::Column::UpdatedAt,
             Expr::value(now),
         )
-        .filter(entities::work_completion::Column::Id.eq(completion.id))
+        .filter(entities::work_completion::Column::Id.eq(completion.id.clone()))
         .filter(entities::work_completion::Column::Revision.eq(completion_revision))
         .filter(
             entities::work_completion::Column::Status
@@ -536,6 +554,30 @@ async fn complete_delivery_review(
         .await?;
     if updated_unit.rows_affected != 1 {
         bail!("delivery review work unit is stale or was already settled");
+    }
+    if completion_status == WorkCompletionStatus::Approved
+        && WorkCompletionKind::from_str(&completion.kind) == Some(WorkCompletionKind::Delivery)
+    {
+        let updated_run = entities::task_run::Entity::update_many()
+            .col_expr(
+                entities::task_run::Column::Phase,
+                Expr::value(TaskRunPhase::Merging.as_str()),
+            )
+            .col_expr(
+                entities::task_run::Column::StatusMessage,
+                Expr::value(Some(format!(
+                    "approved Completion {} is ready for planner Git integration",
+                    completion.id
+                ))),
+            )
+            .col_expr(entities::task_run::Column::UpdatedAt, Expr::value(now))
+            .filter(entities::task_run::Column::Id.eq(run.id.clone()))
+            .filter(entities::task_run::Column::Phase.eq(run.phase.clone()))
+            .exec(tx)
+            .await?;
+        if updated_run.rows_affected != 1 {
+            bail!("TaskRun changed before entering planner merge phase");
+        }
     }
     Ok(())
 }

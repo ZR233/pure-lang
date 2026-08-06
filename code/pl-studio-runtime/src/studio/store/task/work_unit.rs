@@ -23,7 +23,7 @@ impl StudioStore {
                 task_run_id: Set(input.task_run_id),
                 title: Set(input.title),
                 status: Set(WorkUnitStatus::Pending.as_str().to_string()),
-                owned_paths_json: Set(serde_json::to_string(&input.owned_paths)?),
+                scope_hints_json: Set(serde_json::to_string(&input.scope_hints)?),
                 base_commit: Set(input.base_commit),
                 worktree_path: Set(input.worktree_path),
                 branch: Set(input.branch),
@@ -60,6 +60,7 @@ impl StudioStore {
         work_unit_record(active.update(&self.db).await?)
     }
 
+    #[cfg(test)]
     pub(crate) async fn read_work_unit(
         &self,
         work_unit_id: &str,
@@ -82,6 +83,21 @@ impl StudioStore {
             .map(work_unit_record)
             .collect()
     }
+
+    pub(crate) async fn find_work_unit_for_executor(
+        &self,
+        executor_agent_id: &str,
+    ) -> Result<Option<WorkUnitRecord>> {
+        let work_units = entities::work_unit::Entity::find()
+            .filter(entities::work_unit::Column::ExecutorThreadId.eq(executor_agent_id.to_string()))
+            .all(&self.db)
+            .await?;
+        match work_units.as_slice() {
+            [] => Ok(None),
+            [work_unit] => work_unit_record(work_unit.clone()).map(Some),
+            _ => anyhow::bail!("executor Thread owns multiple work units"),
+        }
+    }
 }
 
 pub(super) fn work_unit_record(model: entities::work_unit::Model) -> Result<WorkUnitRecord> {
@@ -91,7 +107,7 @@ pub(super) fn work_unit_record(model: entities::work_unit::Model) -> Result<Work
         title: model.title,
         status: WorkUnitStatus::from_str(&model.status)
             .with_context(|| format!("invalid work unit status: {}", model.status))?,
-        owned_paths: serde_json::from_str(&model.owned_paths_json)?,
+        scope_hints: serde_json::from_str(&model.scope_hints_json)?,
         base_commit: model.base_commit,
         worktree_path: model.worktree_path,
         branch: model.branch,

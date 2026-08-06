@@ -5,11 +5,11 @@ use sea_orm::{
 };
 
 use crate::studio::entity as entities;
-use crate::studio::ids::unix_seconds;
+use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    MergeStatus, ReviewScope, ReviewVerdict, TaskRunPhase, TaskRunRecord, TaskStopOrigin,
-    TaskStopReason, TaskWorktreeDisposition, ThreadExecutionStatus, WorkUnitStatus,
+    ReviewScope, ReviewVerdict, TaskRunPhase, TaskRunRecord, TaskStopOrigin, TaskStopReason,
+    TaskWorktreeDisposition, ThreadExecutionStatus, WorkUnitStatus,
 };
 
 impl StudioStore {
@@ -130,6 +130,60 @@ impl StudioStore {
             .await?;
             super::delete_blocked_branch_lease(&tx, task_run_id).await?;
             super::task_run_record(blocked)
+        }
+        .await;
+        finish_transaction(tx, result).await
+    }
+
+    pub(crate) async fn retry_blocked_merge_task(
+        &self,
+        expected: &TaskRunRecord,
+    ) -> Result<TaskRunRecord> {
+        let tx = self.db.begin().await?;
+        let result = async {
+            let run = entities::task_run::Entity::find_by_id(expected.id.clone())
+                .one(&tx)
+                .await?
+                .context("blocked merge task run not found while retrying recovery")?;
+            let phase = TaskRunPhase::from_str(&run.phase)
+                .with_context(|| format!("invalid task phase: {}", run.phase))?;
+            if phase != TaskRunPhase::Blocked
+                || run.terminal_generation != Some(run.task_generation)
+                || run.task_generation != i64::try_from(expected.task_generation)?
+                || run.updated_at != expected.updated_at
+                || run.workspace_root != expected.workspace_root
+                || run.git_common_dir != expected.git_common_dir
+                || run.branch != expected.branch
+                || run.expected_head != expected.expected_head
+                || run.status_message != expected.status_message
+            {
+                bail!("merge recovery state changed before retry");
+            }
+            let now = unix_seconds();
+            let next_generation = run
+                .task_generation
+                .checked_add(1)
+                .context("task generation overflow while retrying merge recovery")?;
+            entities::branch_lease::ActiveModel {
+                id: Set(new_id("branch-lease")),
+                task_run_id: Set(run.id.clone()),
+                git_common_dir: Set(run.git_common_dir.clone()),
+                branch: Set(run.branch.clone()),
+                expected_head: Set(run.expected_head.clone()),
+                acquired_at: Set(now),
+                updated_at: Set(now),
+            }
+            .insert(&tx)
+            .await
+            .context("merge recovery could not reacquire the durable branch lease")?;
+
+            let mut active: entities::task_run::ActiveModel = run.into();
+            active.phase = Set(TaskRunPhase::Merging.as_str().to_string());
+            active.status_message = Set(None);
+            active.task_generation = Set(next_generation);
+            active.terminal_generation = Set(None);
+            active.updated_at = Set(now);
+            super::task_run_record(active.update(&tx).await?)
         }
         .await;
         finish_transaction(tx, result).await
@@ -278,18 +332,6 @@ impl StudioStore {
                 bail!("task stop generation changed before cancellation");
             }
             validate_lease(&tx, &run, expected_head).await?;
-            let merges = entities::merge_record::Entity::find()
-                .filter(entities::merge_record::Column::TaskRunId.eq(task_run_id.to_string()))
-                .all(&tx)
-                .await?;
-            if merges.iter().any(|merge| {
-                matches!(
-                    MergeStatus::from_str(&merge.status),
-                    Some(MergeStatus::Pending | MergeStatus::Verifying | MergeStatus::Conflicted)
-                )
-            }) {
-                bail!("task stop requires all merge state to be settled");
-            }
             let cancelled = super::write_task_terminal_fact(
                 &tx,
                 run,
@@ -341,18 +383,6 @@ async fn validate_completion_children(
         )
     }) {
         bail!("all task agents must be terminal before completion");
-    }
-    let merges = entities::merge_record::Entity::find()
-        .filter(entities::merge_record::Column::TaskRunId.eq(run.id.clone()))
-        .all(tx)
-        .await?;
-    if merges.iter().any(|merge| {
-        matches!(
-            MergeStatus::from_str(&merge.status),
-            Some(MergeStatus::Pending | MergeStatus::Verifying | MergeStatus::Conflicted)
-        )
-    }) {
-        bail!("active merge must finish before completion");
     }
     Ok(())
 }

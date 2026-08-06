@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use super::git::changed_files_between;
 use super::merge::{ProductionMergeVerifier, select_merge_verification_commands};
 use super::{
-    MergeStatus, TaskCoordinator, TaskRunPhase, TaskRunRecord, TaskStopOrigin, TaskStopReason,
+    TaskCoordinator, TaskRunPhase, TaskRunRecord, TaskStopOrigin, TaskStopReason,
     ThreadExecutionStatus,
 };
 use crate::tool::{
@@ -269,12 +269,7 @@ impl TaskCoordinator {
                 executor_thread_id
             );
         }
-        let has_source_merge = self
-            .store
-            .list_merge_records(&run.id)
-            .await?
-            .iter()
-            .any(|record| record.status == MergeStatus::Merged);
+        let has_source_merge = !self.store.list_merge_records(&run.id).await?.is_empty();
         if !has_source_merge {
             if run.design_commit.is_some() {
                 self.revert_design_for_no_source_cancel_locked(&run.id, guard)
@@ -313,27 +308,12 @@ impl TaskCoordinator {
 
     async fn validate_stop_request(&self, run: &TaskRunRecord) -> Result<()> {
         self.ensure_process_lease_owned(run)?;
-        if matches!(
-            run.phase,
-            TaskRunPhase::Merging | TaskRunPhase::ResolvingConflict
-        ) {
-            bail!("task_stop requires the active merge or conflict to be aborted first");
+        if run.phase == TaskRunPhase::Merging {
+            bail!("task_stop requires Planner Git integration to be recorded first");
         }
         super::review::validate_review_repository(run).await?;
         let merges = self.store.list_merge_records(&run.id).await?;
-        if merges.iter().any(|record| {
-            matches!(
-                record.status,
-                MergeStatus::Pending | MergeStatus::Verifying | MergeStatus::Conflicted
-            )
-        }) {
-            bail!("task_stop requires all merge state to be settled");
-        }
-        if merges
-            .iter()
-            .any(|record| record.status == MergeStatus::Merged)
-            && run.design_commit.as_deref() != Some(run.expected_head.as_str())
-        {
+        if !merges.is_empty() && run.design_commit.as_deref() != Some(run.expected_head.as_str()) {
             bail!("task_stop requires a final design consistency update after source merges");
         }
         Ok(())

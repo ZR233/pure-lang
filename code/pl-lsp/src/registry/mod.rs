@@ -7,6 +7,7 @@ use tokio::sync::{Mutex, broadcast};
 use crate::client::LspClient;
 use crate::formatting::{format_diagnostics, format_lsp_result};
 use crate::server_definition::LspServerDefinition;
+use crate::status::LspClientRuntimeStatus;
 use crate::types::{
     LanguageToolInfo, LspActivityKind, LspAvailabilityKind, LspDiagnostic, LspQuery,
     LspQueryOperation, LspQueryResult, LspResult, LspServerSnapshot,
@@ -29,7 +30,6 @@ use crate::server_definition::RUST_ANALYZER_ID;
 #[derive(Clone)]
 pub struct LspRuntimeRegistry {
     state: Arc<Mutex<LspRuntimeState>>,
-    diagnostics: Arc<Mutex<HashMap<String, Vec<LspDiagnostic>>>>,
     updates: broadcast::Sender<()>,
 }
 
@@ -50,7 +50,6 @@ impl LspRuntimeRegistry {
         let (updates, _) = broadcast::channel(64);
         Self {
             state: Arc::new(Mutex::new(LspRuntimeState::default())),
-            diagnostics: Arc::new(Mutex::new(HashMap::new())),
             updates,
         }
     }
@@ -65,11 +64,31 @@ impl LspRuntimeRegistry {
     }
 
     pub async fn active_server_names(&self) -> Vec<String> {
+        let state = self.state.lock().await;
+        let mut names = state
+            .workspaces
+            .values()
+            .flat_map(|workspace| workspace.servers.iter())
+            .filter(|(_, server)| server.availability_kind == LspAvailabilityKind::Available)
+            .map(|(id, _)| id.clone())
+            .collect::<Vec<_>>();
+        names.sort();
+        names.dedup();
+        names
+    }
+
+    pub async fn active_server_names_for_workspace(
+        &self,
+        workspace_root: impl AsRef<Path>,
+    ) -> Vec<String> {
+        let workspace_root = canonical_workspace_root(workspace_root.as_ref());
         self.state
             .lock()
             .await
-            .servers
-            .iter()
+            .workspaces
+            .get(&workspace_root)
+            .into_iter()
+            .flat_map(|workspace| workspace.servers.iter())
             .filter(|(_, server)| server.availability_kind == LspAvailabilityKind::Available)
             .map(|(id, _)| id.clone())
             .collect()
@@ -82,60 +101,116 @@ impl LspRuntimeRegistry {
     pub async fn available_languages(&self) -> Vec<LanguageToolInfo> {
         let state = self.state.lock().await;
         let mut result = Vec::new();
-        for server in state.servers.values() {
-            if server.availability_kind != LspAvailabilityKind::Available {
-                continue;
-            }
-            for language_id in &server.definition.language_ids {
-                result.push(LanguageToolInfo {
-                    language_id: language_id.clone(),
-                    server_id: server.definition.id.clone(),
-                    display_name: server.definition.display_name.clone(),
-                    extensions: extensions_for_language(&server.definition, language_id),
-                });
-            }
+        for workspace in state.workspaces.values() {
+            append_available_languages(&mut result, workspace);
+        }
+        result.sort_by(|left, right| {
+            left.language_id
+                .cmp(&right.language_id)
+                .then(left.server_id.cmp(&right.server_id))
+        });
+        result.dedup_by(|left, right| {
+            left.language_id == right.language_id && left.server_id == right.server_id
+        });
+        result
+    }
+
+    pub async fn available_languages_for_workspace(
+        &self,
+        workspace_root: impl AsRef<Path>,
+    ) -> Vec<LanguageToolInfo> {
+        let workspace_root = canonical_workspace_root(workspace_root.as_ref());
+        let state = self.state.lock().await;
+        let mut result = Vec::new();
+        if let Some(workspace) = state.workspaces.get(&workspace_root) {
+            append_available_languages(&mut result, workspace);
         }
         result
     }
 
-    pub async fn snapshots(&self) -> Vec<LspServerSnapshot> {
-        let diagnostics = self.diagnostics.lock().await;
+    pub async fn snapshots_for_workspace(
+        &self,
+        workspace_root: impl AsRef<Path>,
+    ) -> Vec<LspServerSnapshot> {
+        let workspace_root = canonical_workspace_root(workspace_root.as_ref());
+        let workspace = {
+            let state = self.state.lock().await;
+            state.workspaces.get(&workspace_root).map(|workspace| {
+                (
+                    workspace.diagnostics.clone(),
+                    workspace
+                        .servers
+                        .values()
+                        .map(|server| (server.definition.id.clone(), server.client.clone()))
+                        .collect::<Vec<_>>(),
+                )
+            })
+        };
+        let Some((diagnostics, clients)) = workspace else {
+            return Vec::new();
+        };
+        let diagnostics = diagnostics.lock().await;
         let diagnostic_counts = diagnostic_counts(&diagnostics);
         drop(diagnostics);
-        let snapshots = self
-            .state
-            .lock()
-            .await
+        let state = self.state.lock().await;
+        let Some(workspace) = state.workspaces.get(&workspace_root) else {
+            return Vec::new();
+        };
+        let mut snapshots = workspace
             .servers
             .values()
             .map(|server| {
-                (
-                    server.snapshot(*diagnostic_counts.get(&server.definition.id).unwrap_or(&0)),
-                    server.client.clone(),
-                )
+                server.snapshot(*diagnostic_counts.get(&server.definition.id).unwrap_or(&0))
             })
             .collect::<Vec<_>>();
-        let mut output = Vec::with_capacity(snapshots.len());
-        for (mut snapshot, client) in snapshots {
+        drop(state);
+        for snapshot in &mut snapshots {
+            let client = clients
+                .iter()
+                .find(|(server_id, _)| server_id == &snapshot.id)
+                .and_then(|(_, client)| client.clone());
             if let Some(client) = client {
-                let status = client.runtime_status().await;
-                snapshot.activity_kind = status.activity_kind;
-                snapshot.activity_title = status.activity_title;
-                snapshot.activity_message = status.activity_message;
-                snapshot.activity_percentage = status.activity_percentage;
-                snapshot.last_error = status.last_error;
-                snapshot.last_error_at = status.last_error_at;
+                apply_client_status(snapshot, client.runtime_status().await);
             }
-            output.push(snapshot);
+        }
+        snapshots
+    }
+
+    pub async fn snapshots(&self) -> Vec<LspServerSnapshot> {
+        let workspace_roots = self
+            .state
+            .lock()
+            .await
+            .workspaces
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut output = Vec::new();
+        for workspace_root in workspace_roots {
+            output.extend(self.snapshots_for_workspace(workspace_root).await);
         }
         output
     }
 
     pub async fn query(&self, query: LspQuery) -> LspResult<LspQueryResult> {
+        let workspace_root = self.workspace_root_for_query(&query).await?;
+        self.query_in_workspace(workspace_root, query).await
+    }
+
+    pub async fn query_in_workspace(
+        &self,
+        workspace_root: impl AsRef<Path>,
+        query: LspQuery,
+    ) -> LspResult<LspQueryResult> {
+        let workspace_root = canonical_workspace_root(workspace_root.as_ref());
         if query.operation == LspQueryOperation::Diagnostics {
-            return self.query_diagnostics(query).await;
+            return self
+                .query_diagnostics_in_workspace(&workspace_root, query)
+                .await;
         }
-        let (server_id, definition, client) = self.client_for_query(&query).await?;
+        let (server_id, definition, client) = self
+            .client_for_query_in_workspace(&workspace_root, &query)
+            .await?;
         if let Some(path) = query.file_path.as_deref() {
             let uri = path_to_file_uri(path);
             let _ = client.open_document(path, &uri).await;
@@ -154,7 +229,7 @@ impl LspRuntimeRegistry {
 
     pub async fn notify_file_changed(&self, path: impl AsRef<Path>) {
         let path = path.as_ref();
-        for client in self.open_clients().await {
+        for client in self.open_clients_for_path(path).await {
             let _ = client.file_changed(path).await;
         }
         let Some(client) = self.open_client_for_path(path).await else {
@@ -169,7 +244,7 @@ impl LspRuntimeRegistry {
 
     pub async fn notify_file_deleted(&self, path: impl AsRef<Path>) {
         let path = path.as_ref();
-        for client in self.open_clients().await {
+        for client in self.open_clients_for_path(path).await {
             let _ = client.file_deleted(path).await;
         }
         if let Some(client) = self.open_client_for_path(path).await {
@@ -180,16 +255,15 @@ impl LspRuntimeRegistry {
     pub async fn shutdown(&self) {
         let clients = {
             let mut state = self.state.lock().await;
-            state.workspace_root = None;
             let clients = state
-                .servers
+                .workspaces
                 .values_mut()
+                .flat_map(|workspace| workspace.servers.values_mut())
                 .filter_map(|server| server.client.take())
                 .collect::<Vec<_>>();
-            state.servers.clear();
+            state.workspaces.clear();
             clients
         };
-        self.diagnostics.lock().await.clear();
         for client in clients {
             client.shutdown().await;
         }
@@ -197,31 +271,10 @@ impl LspRuntimeRegistry {
     }
 
     async fn reconcile_workspace_with_command(&self, workspace_root: &Path, command: &str) {
-        let workspace_root =
-            std::fs::canonicalize(workspace_root).unwrap_or_else(|_| workspace_root.to_path_buf());
-        let old_clients = {
-            let mut state = self.state.lock().await;
-            let workspace_changed = state.workspace_root.as_ref() != Some(&workspace_root);
-            if workspace_changed {
-                let clients = state
-                    .servers
-                    .values()
-                    .filter_map(|server| server.client.clone())
-                    .collect::<Vec<_>>();
-                state.servers.clear();
-                self.diagnostics.lock().await.clear();
-                state.workspace_root = Some(workspace_root.clone());
-                clients
-            } else {
-                Vec::new()
-            }
-        };
-        for client in old_clients {
-            client.shutdown().await;
-        }
+        let workspace_root = canonical_workspace_root(workspace_root);
 
         let definition = rust_analyzer_definition(&workspace_root, command);
-        let next = if !workspace_root.join("Cargo.toml").exists() {
+        let mut next = if !workspace_root.join("Cargo.toml").exists() {
             LspRuntimeServerState::new(
                 definition,
                 LspAvailabilityKind::Disabled,
@@ -258,16 +311,28 @@ impl LspRuntimeRegistry {
         };
         {
             let mut state = self.state.lock().await;
-            state.servers.insert(RUST_ANALYZER_ID.to_string(), next);
+            let workspace = state.workspaces.entry(workspace_root).or_default();
+            next.client = workspace
+                .servers
+                .get(RUST_ANALYZER_ID)
+                .and_then(|server| server.client.clone());
+            workspace.servers.insert(RUST_ANALYZER_ID.to_string(), next);
         }
         self.emit_update();
     }
 
-    async fn query_diagnostics(&self, query: LspQuery) -> LspResult<LspQueryResult> {
+    async fn query_diagnostics_in_workspace(
+        &self,
+        workspace_root: &Path,
+        query: LspQuery,
+    ) -> LspResult<LspQueryResult> {
         let max_results = query.max_results.unwrap_or(100);
-        let mut diagnostics = self.all_diagnostics().await;
+        let mut diagnostics = self.all_diagnostics_for_workspace(workspace_root).await;
         let server_id = if query.language_id.is_some() {
-            Some(self.server_id_for_query(&query).await?)
+            Some(
+                self.server_id_for_query_in_workspace(workspace_root, &query)
+                    .await?,
+            )
         } else {
             None
         };
@@ -295,9 +360,18 @@ impl LspRuntimeRegistry {
         })
     }
 
-    async fn all_diagnostics(&self) -> Vec<LspDiagnostic> {
-        let mut diagnostics = self
-            .diagnostics
+    async fn all_diagnostics_for_workspace(&self, workspace_root: &Path) -> Vec<LspDiagnostic> {
+        let diagnostics = self
+            .state
+            .lock()
+            .await
+            .workspaces
+            .get(workspace_root)
+            .map(|workspace| workspace.diagnostics.clone());
+        let Some(diagnostics) = diagnostics else {
+            return Vec::new();
+        };
+        let mut diagnostics = diagnostics
             .lock()
             .await
             .values()
@@ -317,10 +391,44 @@ impl LspRuntimeRegistry {
     }
 }
 
+fn append_available_languages(result: &mut Vec<LanguageToolInfo>, workspace: &LspWorkspaceState) {
+    for server in workspace.servers.values() {
+        if server.availability_kind != LspAvailabilityKind::Available {
+            continue;
+        }
+        for language_id in &server.definition.language_ids {
+            result.push(LanguageToolInfo {
+                language_id: language_id.clone(),
+                server_id: server.definition.id.clone(),
+                display_name: server.definition.display_name.clone(),
+                extensions: extensions_for_language(&server.definition, language_id),
+            });
+        }
+    }
+}
+
+fn apply_client_status(snapshot: &mut LspServerSnapshot, status: LspClientRuntimeStatus) {
+    snapshot.activity_kind = status.activity_kind;
+    snapshot.activity_title = status.activity_title;
+    snapshot.activity_message = status.activity_message;
+    snapshot.activity_percentage = status.activity_percentage;
+    snapshot.last_error = status.last_error;
+    snapshot.last_error_at = status.last_error_at;
+}
+
+fn canonical_workspace_root(workspace_root: &Path) -> PathBuf {
+    std::fs::canonicalize(workspace_root).unwrap_or_else(|_| workspace_root.to_path_buf())
+}
+
 #[derive(Default)]
 struct LspRuntimeState {
-    workspace_root: Option<PathBuf>,
+    workspaces: BTreeMap<PathBuf, LspWorkspaceState>,
+}
+
+#[derive(Default)]
+struct LspWorkspaceState {
     servers: BTreeMap<String, LspRuntimeServerState>,
+    diagnostics: Arc<Mutex<HashMap<String, Vec<LspDiagnostic>>>>,
 }
 
 struct LspRuntimeServerState {
@@ -375,6 +483,7 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::*;
+    use crate::types::LspRuntimeError;
 
     fn temp_dir(name: &str) -> PathBuf {
         let stamp = SystemTime::now()
@@ -385,18 +494,23 @@ mod tests {
     }
 
     async fn register_available_rust(registry: &LspRuntimeRegistry, workspace_root: &Path) {
-        let definition = rust_analyzer_definition(workspace_root, RUST_ANALYZER_COMMAND);
+        let workspace_root = canonical_workspace_root(workspace_root);
+        let definition = rust_analyzer_definition(&workspace_root, RUST_ANALYZER_COMMAND);
         let mut state = registry.state.lock().await;
-        state.workspace_root = Some(workspace_root.to_path_buf());
-        state.servers.insert(
-            RUST_ANALYZER_ID.to_string(),
-            LspRuntimeServerState::new(
-                definition,
-                LspAvailabilityKind::Available,
-                Some("rust-analyzer test".to_string()),
-                Some(1),
-            ),
-        );
+        state
+            .workspaces
+            .entry(workspace_root)
+            .or_default()
+            .servers
+            .insert(
+                RUST_ANALYZER_ID.to_string(),
+                LspRuntimeServerState::new(
+                    definition,
+                    LspAvailabilityKind::Available,
+                    Some("rust-analyzer test".to_string()),
+                    Some(1),
+                ),
+            );
     }
 
     #[tokio::test]
@@ -515,6 +629,68 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn multiple_workspaces_keep_independent_language_servers_and_route_by_file() {
+        let first = temp_dir("workspace-pool-first");
+        let second = temp_dir("workspace-pool-second");
+        fs::create_dir_all(&first).unwrap();
+        fs::create_dir_all(&second).unwrap();
+        let first_file = first.join("src/lib.rs");
+        let second_file = second.join("src/lib.rs");
+        fs::create_dir_all(first_file.parent().unwrap()).unwrap();
+        fs::create_dir_all(second_file.parent().unwrap()).unwrap();
+        fs::write(&first_file, "pub fn first() {}\n").unwrap();
+        fs::write(&second_file, "pub fn second() {}\n").unwrap();
+        let registry = LspRuntimeRegistry::new();
+        register_available_rust(&registry, &first).await;
+        register_available_rust(&registry, &second).await;
+
+        assert_eq!(registry.state.lock().await.workspaces.len(), 2);
+        assert_eq!(
+            registry
+                .available_languages_for_workspace(&first)
+                .await
+                .len(),
+            1
+        );
+        assert_eq!(
+            registry
+                .available_languages_for_workspace(&second)
+                .await
+                .len(),
+            1
+        );
+        let first_root = registry
+            .workspace_root_for_query(&LspQuery {
+                operation: LspQueryOperation::DocumentSymbol,
+                file_path: Some(first_file),
+                line: None,
+                character: None,
+                query: None,
+                max_results: None,
+                language_id: Some("rust".to_string()),
+            })
+            .await
+            .unwrap();
+        let second_root = registry
+            .workspace_root_for_query(&LspQuery {
+                operation: LspQueryOperation::DocumentSymbol,
+                file_path: Some(second_file),
+                line: None,
+                character: None,
+                query: None,
+                max_results: None,
+                language_id: Some("rust".to_string()),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(first_root, canonical_workspace_root(&first));
+        assert_eq!(second_root, canonical_workspace_root(&second));
+        fs::remove_dir_all(first).unwrap();
+        fs::remove_dir_all(second).unwrap();
+    }
+
+    #[tokio::test]
     async fn server_id_for_query_prefers_language_id() {
         let dir = temp_dir("language-route");
         fs::create_dir_all(&dir).unwrap();
@@ -559,5 +735,90 @@ mod tests {
         assert!(result.success);
         assert_eq!(result.server_id.as_deref(), Some(RUST_ANALYZER_ID));
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn multiple_workspaces_require_a_file_path_and_do_not_switch_roots() {
+        let first = temp_dir("multi-root-required-first");
+        let second = temp_dir("multi-root-required-second");
+        fs::create_dir_all(&first).unwrap();
+        fs::create_dir_all(&second).unwrap();
+        let registry = LspRuntimeRegistry::new();
+        register_available_rust(&registry, &first).await;
+        register_available_rust(&registry, &second).await;
+
+        let error = registry
+            .workspace_root_for_query(&LspQuery {
+                operation: LspQueryOperation::WorkspaceSymbol,
+                file_path: None,
+                line: None,
+                character: None,
+                query: Some("symbol".to_string()),
+                max_results: None,
+                language_id: Some("rust".to_string()),
+            })
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, LspRuntimeError::InvalidQuery(_)));
+        fs::remove_dir_all(first).unwrap();
+        fs::remove_dir_all(second).unwrap();
+    }
+
+    #[tokio::test]
+    async fn nested_workspaces_route_to_the_longest_canonical_root() {
+        let outer = temp_dir("nested-root-outer");
+        let inner = outer.join("nested");
+        fs::create_dir_all(&inner).unwrap();
+        let file = inner.join("src/lib.rs");
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(&file, "fn nested() {}\n").unwrap();
+        let registry = LspRuntimeRegistry::new();
+        register_available_rust(&registry, &outer).await;
+        register_available_rust(&registry, &inner).await;
+
+        let root = registry
+            .workspace_root_for_query(&LspQuery {
+                operation: LspQueryOperation::DocumentSymbol,
+                file_path: Some(file),
+                line: None,
+                character: None,
+                query: None,
+                max_results: None,
+                language_id: Some("rust".to_string()),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(root, canonical_workspace_root(&inner));
+        fs::remove_dir_all(outer).unwrap();
+    }
+
+    #[tokio::test]
+    async fn file_outside_registered_workspaces_is_unavailable() {
+        let workspace = temp_dir("outside-route-workspace");
+        let outside = temp_dir("outside-route-file").join("lib.rs");
+        fs::create_dir_all(&workspace).unwrap();
+        fs::create_dir_all(outside.parent().unwrap()).unwrap();
+        fs::write(&outside, "fn outside() {}\n").unwrap();
+        let registry = LspRuntimeRegistry::new();
+        register_available_rust(&registry, &workspace).await;
+
+        let error = registry
+            .workspace_root_for_query(&LspQuery {
+                operation: LspQueryOperation::DocumentSymbol,
+                file_path: Some(outside.clone()),
+                line: None,
+                character: None,
+                query: None,
+                max_results: None,
+                language_id: Some("rust".to_string()),
+            })
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, LspRuntimeError::Unavailable(_)));
+        fs::remove_dir_all(workspace).unwrap();
+        fs::remove_dir_all(outside.parent().unwrap()).unwrap();
     }
 }

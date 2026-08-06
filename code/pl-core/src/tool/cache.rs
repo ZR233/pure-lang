@@ -183,12 +183,7 @@ impl TurnToolCacheHandle {
         }
         if matches!(
             effect,
-            Some(
-                ToolEffect::WorkspaceWrite
-                    | ToolEffect::Process
-                    | ToolEffect::BranchControl
-                    | ToolEffect::ConflictWrite
-            )
+            Some(ToolEffect::WorkspaceWrite | ToolEffect::Process | ToolEffect::BranchControl)
         ) {
             let mut state = self
                 .inner

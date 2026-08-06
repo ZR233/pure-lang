@@ -1,8 +1,8 @@
 //! Studio task agent worktree 隔离执行支持。
 //!
-//! 为每个 subagent 分配独立 git worktree，使其文件修改物理隔离；subagent 关闭时
-//! 由调用方选择把产物 `merge` 回主工作区或 `discard` 丢弃，worktree 随 subagent
-//! 释放。详见 `design/15-agent-worktrees.md`。
+//! 为每个 subagent 分配独立 git worktree，使其文件修改物理隔离；Planner 使用普通 Git
+//! 自主整合，manager 只在 durable cleanup 授权后丢弃 worktree。详见
+//! `design/15-agent-worktrees.md`。
 
 mod backend;
 mod error;
@@ -11,13 +11,10 @@ mod reconcile;
 #[cfg(test)]
 mod tests;
 
-pub use backend::{LocalWorktreeBackend, MergeOutcome, WorktreeBackend, WorktreeCreateFailure};
+pub use backend::{LocalWorktreeBackend, WorktreeBackend, WorktreeCreateFailure};
 pub use error::WorktreeError;
 pub use manager::git_compatible_path;
-pub use manager::{
-    CloseDisposition, CloseOutcome, WorktreeCreateSpec, WorktreeHandle, WorktreeManager,
-    WorktreeRef,
-};
+pub use manager::{WorktreeCreateSpec, WorktreeHandle, WorktreeManager, WorktreeRef};
 pub use reconcile::{
     DurableWorktreeDisposition, DurableWorktreeInspection, DurableWorktreePresence,
     DurableWorktreeResource, DurableWorktreeResourcePresence, WorktreeReconciliation,

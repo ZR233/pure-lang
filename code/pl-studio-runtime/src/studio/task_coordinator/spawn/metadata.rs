@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
@@ -27,11 +25,11 @@ pub(crate) struct StudioSpawnIntent {
     #[serde(default)]
     pub(crate) name: Option<String>,
     #[serde(default)]
-    pub(crate) owned_paths: Vec<String>,
+    pub(crate) scope_hints: Vec<String>,
     #[serde(default)]
     pub(crate) requesting_tool_call_id: Option<String>,
     #[serde(default)]
-    pub(crate) workspace_root: Option<PathBuf>,
+    pub(crate) review_round_id: Option<String>,
     #[serde(default)]
     pub(crate) subagent_constraint: Option<String>,
 }
@@ -40,18 +38,16 @@ impl StudioSpawnIntent {
     pub(crate) fn task_executor(
         thread_id: impl Into<String>,
         task_name: impl Into<String>,
-        owned_paths: Vec<String>,
+        scope_hints: Vec<String>,
         requesting_tool_call_id: impl Into<String>,
-        workspace_root: PathBuf,
         subagent_constraint: impl Into<String>,
     ) -> Self {
         Self {
             spawn_kind: Some(StudioSpawnKind::TaskExecutor),
             studio_thread_id: Some(thread_id.into()),
             task_name: Some(task_name.into()),
-            owned_paths,
+            scope_hints,
             requesting_tool_call_id: Some(requesting_tool_call_id.into()),
-            workspace_root: Some(workspace_root),
             subagent_constraint: Some(subagent_constraint.into()),
             ..Self::default()
         }
@@ -61,7 +57,7 @@ impl StudioSpawnIntent {
         thread_id: impl Into<String>,
         task_name: impl Into<String>,
         requesting_tool_call_id: impl Into<String>,
-        workspace_root: PathBuf,
+        review_round_id: impl Into<String>,
         subagent_constraint: impl Into<String>,
     ) -> Self {
         Self {
@@ -69,7 +65,7 @@ impl StudioSpawnIntent {
             studio_thread_id: Some(thread_id.into()),
             task_name: Some(task_name.into()),
             requesting_tool_call_id: Some(requesting_tool_call_id.into()),
-            workspace_root: Some(workspace_root),
+            review_round_id: Some(review_round_id.into()),
             subagent_constraint: Some(subagent_constraint.into()),
             ..Self::default()
         }
@@ -104,20 +100,14 @@ impl StudioSpawnIntent {
                     "requesting tool call id",
                 )?;
                 require_non_empty(self.subagent_constraint.as_deref(), "subagent constraint")?;
-                if self.workspace_root.is_none() {
-                    bail!("Task {role} spawn intent has no workspace root");
-                }
             }
             _ => {}
         }
-        match role {
-            "executor" if self.owned_paths.is_empty() => {
-                bail!("Task executor ownedPaths must not be empty")
-            }
-            "explorer" | "reviewer" if !self.owned_paths.is_empty() => {
-                bail!("{role} must not declare ownedPaths")
-            }
-            _ => {}
+        if role != "executor" && !self.scope_hints.is_empty() {
+            bail!("{role} must not declare scopeHints");
+        }
+        if role == "reviewer" {
+            require_non_empty(self.review_round_id.as_deref(), "review round id")?;
         }
         Ok(())
     }

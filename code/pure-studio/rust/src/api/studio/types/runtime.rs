@@ -188,11 +188,19 @@ pub struct BridgeTaskCompletionDto {
 #[serde(rename_all = "camelCase")]
 pub struct BridgeTaskMergeDto {
     pub id: String,
-    pub agent_id: String,
-    pub status: String,
-    pub merge_commit: Option<String>,
-    pub conflict_files: Vec<String>,
-    pub resolution_summary: Option<String>,
+    pub work_unit_id: String,
+    pub completion_id: String,
+    pub completion_revision: u32,
+    pub executor_agent_id: String,
+    pub expected_previous_head: String,
+    pub resulting_head: String,
+    pub delivery_head: String,
+    pub method: String,
+    pub summary: String,
+    pub cleanup_status: String,
+    pub cleanup_detail: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

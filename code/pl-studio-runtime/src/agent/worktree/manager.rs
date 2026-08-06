@@ -6,9 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use pl_core::path_safety::remove_dir_all_no_follow_async;
 use serde::{Deserialize, Serialize};
 
-use super::backend::{
-    CreateFailureDisposition, LocalWorktreeBackend, MergeOutcome, WorktreeBackend,
-};
+use super::backend::{CreateFailureDisposition, LocalWorktreeBackend, WorktreeBackend};
 use super::error::WorktreeError;
 
 /// Studio worktree 目录在 repo 根下的相对位置。
@@ -50,34 +48,9 @@ impl From<&WorktreeHandle> for WorktreeRef {
     }
 }
 
-/// close 时的产物处置方式。
-///
-/// worktree 生命周期严格等于 agent 生命周期：`close_agent` 是唯一释放点，
-/// 且必须指明是把产物 merge 回主工作区还是直接丢弃。默认丢弃。
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub enum CloseDisposition {
-    /// 把 subagent 分支 merge 回主工作区当前分支，成功后释放 worktree。
-    ///
-    /// `target_branch` 预留用于将来指定 merge 目标分支；当前实现在主工作区
-    /// 当前分支上执行 `git merge`。
-    Merge { target_branch: Option<String> },
-    /// 放弃修改，直接释放 worktree。
-    #[default]
-    Discard,
-}
-
-/// close 的结果。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CloseOutcome {
-    /// 产物已 merge 回主工作区，worktree 已释放。
-    Merged,
-    /// 产物已丢弃，worktree 已释放。
-    Discarded,
-}
-
 /// per-subagent worktree 管理器。
 ///
-/// 持有 repo_root 与 [`WorktreeBackend`]，负责路径分配、创建 / 合并 / 释放编排，
+/// 持有 repo_root 与 [`WorktreeBackend`]，负责路径分配、创建和释放编排，
 /// 以及孤儿 worktree 的启动 GC。默认 [`WorktreeManager::disabled`] 为 no-op，
 /// 保持既有「subagent 共享 `workspace_root`」行为；显式启用后才分配 worktree。
 #[derive(Debug, Clone)]
@@ -217,50 +190,8 @@ impl WorktreeManager {
         Ok(handle)
     }
 
-    /// 按 disposition 释放 worktree；merge 冲突时不释放并返回错误。
-    pub async fn close(
-        &self,
-        handle: &WorktreeHandle,
-        disposition: CloseDisposition,
-    ) -> Result<CloseOutcome, WorktreeError> {
-        match disposition {
-            CloseDisposition::Merge { target_branch } => {
-                match self.merge(handle, target_branch.as_deref()).await? {
-                    MergeOutcome::Merged => {
-                        self.discard(handle).await?;
-                        Ok(CloseOutcome::Merged)
-                    }
-                    MergeOutcome::Conflict => Err(WorktreeError::MergeConflict {
-                        branch: handle.branch.clone(),
-                        detail: String::new(),
-                    }),
-                }
-            }
-            CloseDisposition::Discard => {
-                self.discard(handle).await?;
-                Ok(CloseOutcome::Discarded)
-            }
-        }
-    }
-
-    async fn merge(
-        &self,
-        handle: &WorktreeHandle,
-        _target_branch: Option<&str>,
-    ) -> Result<MergeOutcome, WorktreeError> {
-        let repo_root = self.require_repo_root()?;
-        self.inner
-            .backend
-            .commit_all(&handle.path, "subagent worktree changes")
-            .await?;
-        self.inner
-            .backend
-            .merge_branch(&repo_root, &handle.branch)
-            .await
-    }
-
-    /// 删除 worktree 与其分支，并聚合所有失败的清理步骤。
-    async fn discard(&self, handle: &WorktreeHandle) -> Result<(), WorktreeError> {
+    /// 明确丢弃并删除 worktree 与其分支，聚合所有失败的清理步骤。
+    pub async fn discard(&self, handle: &WorktreeHandle) -> Result<(), WorktreeError> {
         let repo_root = self.require_repo_root()?;
         let mut failures = Vec::new();
         if let Err(error) = self

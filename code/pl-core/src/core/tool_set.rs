@@ -220,14 +220,25 @@ where
         workspace_root: impl Into<PathBuf>,
         workspace_instructions: Option<String>,
     ) {
-        let workspace_root = workspace_root.into();
-        core.workspace_root = Some(workspace_root.clone());
+        self.register_agent_workspace(
+            core,
+            crate::tool::AgentWorkspace::local(workspace_root),
+            workspace_instructions,
+        )
+        .await;
+    }
+
+    pub async fn register_agent_workspace(
+        &self,
+        core: &mut TurnEngine,
+        workspace: crate::tool::AgentWorkspace,
+        workspace_instructions: Option<String>,
+    ) {
+        let workspace_root = workspace.root().to_path_buf();
+        core.workspace = Some(workspace);
         core.workspace_instructions = workspace_instructions.clone();
         if self.capabilities.skills {
-            core.register_skill_tools_for_workspace(
-                workspace_root.clone(),
-                workspace_instructions.clone(),
-            );
+            core.register_skill_tools_for_workspace(workspace_root.clone());
         }
         if self.capabilities.exec && self.local_backends {
             let (exec, write_stdin) = local_command_tool_pair(workspace_root.clone());
@@ -254,7 +265,9 @@ where
         if self.capabilities.lsp
             && let Some(registry) = core.lsp_runtime.clone()
         {
-            core.tools.register_lsp_languages(&registry).await;
+            core.tools
+                .register_lsp_languages_for_workspace(&registry, &workspace_root)
+                .await;
         }
         if self.capabilities.ask_user {
             register_if_allowed(core, AskUserTool, |name| self.tool_allowed(name));

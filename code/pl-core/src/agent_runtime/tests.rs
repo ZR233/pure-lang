@@ -468,6 +468,67 @@ async fn failed_turn_returns_agent_to_active_idle_and_commits_snapshot() {
 }
 
 #[tokio::test]
+async fn idle_agent_role_reconfiguration_is_durable_and_updates_directory() {
+    let repository = TestRepository::empty();
+    let host = TestHost::new(repository.clone(), FactoryMode::Fail);
+    let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
+    let handle = runtime.handle();
+    let agent_id = AgentId::new("root").unwrap();
+    let planner = crate::AgentRoleId::new("planner").unwrap();
+
+    handle.register(registration("root", "chat")).await.unwrap();
+    let changed = handle
+        .reconfigure_idle_role(agent_id.clone(), planner.clone())
+        .await
+        .unwrap();
+
+    assert_eq!(changed.identity.role, planner);
+    assert_eq!(repository.state(&agent_id).snapshot, changed);
+    assert_eq!(
+        handle.directory_snapshot().agents[0].identity.role,
+        crate::AgentRoleId::new("planner").unwrap()
+    );
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn running_agent_rejects_role_reconfiguration() {
+    let repository = TestRepository::empty();
+    let host = TestHost::new(repository.clone(), FactoryMode::Block);
+    let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
+    let handle = runtime.handle();
+    let agent_id = AgentId::new("root").unwrap();
+
+    handle.register(registration("root", "chat")).await.unwrap();
+    handle
+        .submit(
+            agent_id.clone(),
+            AgentSubmitRequest::start(ThreadId::new("root").unwrap(), "block"),
+        )
+        .await
+        .unwrap();
+    let error = handle
+        .reconfigure_idle_role(
+            agent_id.clone(),
+            crate::AgentRoleId::new("planner").unwrap(),
+        )
+        .await
+        .unwrap_err();
+
+    assert!(
+        error
+            .to_string()
+            .contains("only change while the Thread is idle")
+    );
+    assert_eq!(
+        repository.state(&agent_id).snapshot.identity.role,
+        crate::AgentRoleId::new("executor").unwrap()
+    );
+    handle.close(agent_id).await.unwrap();
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn wait_agents_observes_turn_that_finished_before_subscription() {
     let repository = TestRepository::empty();
     let host = TestHost::new(repository, FactoryMode::Fail);

@@ -33,7 +33,6 @@ impl TaskCoordinator {
     ) -> RegisteredTool {
         let coordinator = self.clone();
         let thread_id = thread_id.into();
-        let _runtime = runtime;
         RegisteredTool::from_typed_fallible_execution_result(
             "review_exit",
             "Submit trace-validated read-only review findings and end the reviewer turn.",
@@ -41,6 +40,7 @@ impl TaskCoordinator {
             move |input: ReviewExitInput, context| {
                 let coordinator = coordinator.clone();
                 let thread_id = thread_id.clone();
+                let runtime = runtime.clone();
                 async move {
                     let root_agent_id = crate::studio::agent_host::root_agent_id(&thread_id);
                     let reviewer = context
@@ -53,7 +53,7 @@ impl TaskCoordinator {
                         })
                         .context("review_exit requires the harness-owned depth-1 reviewer")?;
                     let trace =
-                        validate_review_trace(&context.parent_session, &context.workspace_root)
+                        validate_review_trace(&context.parent_session, context.workspace.root())
                             .await?;
                     let review = validate_review_exit(input, &trace.read_design)?;
                     let run = coordinator
@@ -65,6 +65,19 @@ impl TaskCoordinator {
                         .store
                         .complete_task_review(&thread_id, &reviewer.id, review)
                         .await?;
+                    if let Some(runtime) = runtime
+                        && let Err(error) =
+                            resume_planner_after_review(&runtime, &thread_id, &round).await
+                    {
+                        let message = format!(
+                            "planner continuation after review {} failed: {error}",
+                            round.id
+                        );
+                        coordinator
+                            .block_continuation_failure(&round.task_run_id, message)
+                            .await?;
+                        return Err(error);
+                    }
                     let mut output = ToolExecutionResult::<serde_json::Value>::json(round)
                         .map_err(anyhow::Error::from)?;
                     output.ends_turn = true;
@@ -73,6 +86,46 @@ impl TaskCoordinator {
             },
         )
         .with_effect(ToolEffect::Read)
+    }
+}
+
+async fn resume_planner_after_review(
+    runtime: &AgentRuntimeHandle,
+    thread_id: &str,
+    round: &super::super::ReviewRoundRecord,
+) -> Result<()> {
+    let root_agent_id = crate::studio::agent_host::root_agent_id(thread_id);
+    runtime
+        .wait_until_idle(root_agent_id.clone())
+        .await
+        .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+    let thread = pl_core::ThreadId::new(thread_id.to_string())?;
+    let request = pl_core::AgentSubmitRequest::start(
+        thread,
+        format!(
+            "Review round {} completed. Read task_status and list_agents, then continue from the canonical Task phase.",
+            round.id
+        ),
+    )
+    .with_presentation(pl_core::MailboxPresentation::Hidden)
+    .with_metadata(serde_json::json!({
+        "kind": "taskReviewContinuation",
+        "taskRunId": round.task_run_id,
+        "reviewRoundId": round.id,
+        "scope": round.scope,
+    }))
+    .with_mail_id(format!("task-review-continuation:{}", round.id))
+    .with_turn_policy(pl_core::AgentTurnSubmitPolicy::StartOnly);
+    match runtime.submit(root_agent_id, request).await {
+        Ok(_) => Ok(()),
+        Err(pl_core::AgentRuntimeError::InvalidInput(reason))
+            if reason == "startTurn requires an idle Thread" =>
+        {
+            // Another input won the idle-to-start race after the review transaction committed.
+            // That turn is already prepared from the new canonical Task phase.
+            Ok(())
+        }
+        Err(error) => Err(anyhow::anyhow!(error.to_string())),
     }
 }
 

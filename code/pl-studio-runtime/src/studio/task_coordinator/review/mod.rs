@@ -2,6 +2,7 @@ mod exit;
 pub(crate) mod prompt;
 mod trace;
 
+use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
@@ -9,8 +10,9 @@ use serde::{Deserialize, Serialize};
 
 use super::design::design_commit_is_current;
 use super::{
-    MergeRecord, ReviewRoundRecord, ReviewScope, StudioSpawnIntent, TaskCoordinator, TaskRunPhase,
-    TaskRunRecord, WorkCompletionRecord, WorkUnitRecord,
+    MergeCandidate, MergeRecord, ReviewRoundRecord, ReviewScope, StudioSpawnIntent,
+    TaskCoordinator, TaskRunPhase, TaskRunRecord, TaskWorktreeDisposition, ThreadExecutionStatus,
+    WorkCompletionKind, WorkCompletionRecord, WorkCompletionStatus, WorkUnitRecord, WorkUnitStatus,
 };
 use crate::tool::{
     RegisteredTool, ToolExecutionResult, ToolInputSchemaField, strict_tool_input_schema,
@@ -19,7 +21,7 @@ use crate::{
     AgentRoleId, AgentRuntimeHandle, AgentSpawnRequest, ThreadContextState, ThreadId, ToolEffect,
 };
 
-const REVIEWER_CONSTRAINT: &str = "你是只读代码审查者。审查目标由 prompt 中的 scope、精确 completion revision 或 Task HEAD 唯一绑定。先检查 plan、目标 diff、ownedPaths、验证摘要和受影响代码。delivery scope 的 verdict 与 findings 只能针对当前 completion diff 和目标 WorkUnit ownedPaths；其他 WorkUnit 仅是延后集成的 ownership 上下文，不得把尚未合并的 sibling 文件、跨 WorkUnit 交互或任务整体完整性归责给当前 executor，这些内容由 integrated review 审查。在读取 design 正文前必须先调用 search_files 或 list_files 定位文档，再用 read_file 阅读。design 正文必须以 path=design/... 且省略 cwd 或 cwd=. 的 workspace-root 相对形式读取；completion worktree 的 cwd 只用于读取目标 source。最终必须成功调用 review_exit；pass 的 findings 必须为空，changesRequired/blocked 必须提供具体 finding。只能调用只读工具与 review_exit；禁止修改、派生代理、修复、合并或宣布 Task 完成。";
+const REVIEWER_CONSTRAINT: &str = "你是只读代码审查者。审查目标由 prompt 中的 scope、精确 completion revision 或 Task HEAD 唯一绑定。先检查 plan、目标 diff、scopeHints、验证摘要和受影响代码。scopeHints 只用于聚焦，不是文件授权边界；delivery scope 的 verdict 与 findings 必须覆盖完整 completion diff。其他 WorkUnit 仅是延后集成的上下文，不得把尚未合并的 sibling 文件、跨 WorkUnit 交互或任务整体完整性归责给当前 executor，这些内容由 integrated review 审查。在读取 design 正文前必须先调用 search_files 或 list_files 定位文档，再用 read_file 阅读。所有相对路径都基于当前 reviewer workspace。最终必须成功调用 review_exit；pass 的 findings 必须为空，changesRequired/blocked 必须提供具体 finding。只能调用只读工具与 review_exit；禁止修改、派生代理、修复、合并或宣布 Task 完成。";
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -51,10 +53,53 @@ struct RequestReviewOutput {
 #[serde(rename_all = "camelCase")]
 struct TaskStatusOutput {
     run: TaskRunRecord,
-    work_units: Vec<WorkUnitRecord>,
-    completions: Vec<WorkCompletionRecord>,
+    work_units: Vec<ModelWorkUnit>,
+    completions: Vec<ModelCompletion>,
+    merge_candidates: Vec<MergeCandidate>,
     merges: Vec<MergeRecord>,
     reviews: Vec<ReviewRoundRecord>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct ModelWorkUnit {
+    id: String,
+    task_run_id: String,
+    title: String,
+    status: WorkUnitStatus,
+    scope_hints: Vec<String>,
+    base_commit: String,
+    relative_worktree_path: Option<String>,
+    branch: String,
+    worktree_disposition: TaskWorktreeDisposition,
+    attempt: u32,
+    executor_thread_id: Option<String>,
+    requested_by_call_id: String,
+    execution_status: ThreadExecutionStatus,
+    execution_summary: Option<String>,
+    execution_error: Option<String>,
+    created_at: i64,
+    updated_at: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct ModelCompletion {
+    id: String,
+    task_run_id: String,
+    work_unit_id: String,
+    executor_agent_id: String,
+    revision: u32,
+    kind: WorkCompletionKind,
+    status: WorkCompletionStatus,
+    base_commit: String,
+    head_commit: Option<String>,
+    changed_files: Vec<String>,
+    verification_summary: String,
+    relative_worktree_path: Option<String>,
+    branch: String,
+    created_at: i64,
+    updated_at: i64,
 }
 
 impl TaskCoordinator {
@@ -86,13 +131,7 @@ impl TaskCoordinator {
                         .begin_delivery_review(&thread_id, input.executor_agent_id.trim(), &call_id)
                         .await?;
                     coordinator
-                        .spawn_reviewer(
-                            &thread_id,
-                            round,
-                            &call_id,
-                            &runtime,
-                            context.workspace_root,
-                        )
+                        .spawn_reviewer(&thread_id, round, &call_id, &runtime)
                         .await
                 }
             },
@@ -131,13 +170,7 @@ impl TaskCoordinator {
                     drop(guard);
                     debug_assert_eq!(round.reviewed_head, run.expected_head);
                     coordinator
-                        .spawn_reviewer(
-                            &thread_id,
-                            round,
-                            &call_id,
-                            &runtime,
-                            context.workspace_root,
-                        )
+                        .spawn_reviewer(&thread_id, round, &call_id, &runtime)
                         .await
                 }
             },
@@ -153,7 +186,7 @@ impl TaskCoordinator {
         let thread_id = thread_id.into();
         RegisteredTool::from_typed_fallible_execution_result(
             "task_status",
-            "Read the canonical durable Task state, completions, reviews, merges, and findings.",
+            "Read the canonical durable Task state, merge candidates, completions, reviews, merges, and findings.",
             strict_tool_input_schema([]),
             move |_: TaskStatusInput, _| {
                 let coordinator = coordinator.clone();
@@ -163,10 +196,23 @@ impl TaskCoordinator {
                         .store
                         .read_active_task_run_for_root_thread(&thread_id)
                         .await?;
+                    let work_units = coordinator.store.list_work_units(&run.id).await?;
+                    let completions = coordinator.store.list_work_completions(&run.id).await?;
+                    let merges = coordinator.store.list_merge_records(&run.id).await?;
+                    let merge_candidates = coordinator
+                        .merge_candidates(&run, &work_units, &completions, &merges)
+                        .await?;
                     let output = TaskStatusOutput {
-                        work_units: coordinator.store.list_work_units(&run.id).await?,
-                        completions: coordinator.store.list_work_completions(&run.id).await?,
-                        merges: coordinator.store.list_merge_records(&run.id).await?,
+                        work_units: work_units
+                            .iter()
+                            .map(|work_unit| ModelWorkUnit::new(&run, work_unit))
+                            .collect(),
+                        completions: completions
+                            .iter()
+                            .map(|completion| ModelCompletion::new(&run, completion))
+                            .collect(),
+                        merge_candidates,
+                        merges,
                         reviews: coordinator.store.list_review_rounds(&run.id).await?,
                         run,
                     };
@@ -184,7 +230,6 @@ impl TaskCoordinator {
         round: ReviewRoundRecord,
         call_id: &str,
         runtime: &AgentRuntimeHandle,
-        workspace_root: std::path::PathBuf,
     ) -> Result<ToolExecutionResult> {
         let prompt = match prompt::build_review_prompt(self, &round).await {
             Ok(prompt) => prompt,
@@ -200,7 +245,7 @@ impl TaskCoordinator {
             thread_id,
             format!("{}_review_round_{}", round.scope.as_str(), round.round),
             call_id,
-            workspace_root,
+            round.id.clone(),
             REVIEWER_CONSTRAINT,
         );
         let spawn = runtime
@@ -223,7 +268,7 @@ impl TaskCoordinator {
                 return Err(anyhow::anyhow!(error.to_string()));
             }
         };
-        ToolExecutionResult::<serde_json::Value>::json(RequestReviewOutput {
+        let mut output = ToolExecutionResult::<serde_json::Value>::json(RequestReviewOutput {
             review_round_id: round.id,
             reviewer_agent_id: handle.snapshot.identity.id.to_string(),
             scope: round.scope,
@@ -232,7 +277,11 @@ impl TaskCoordinator {
             completion_revision: round.completion_revision,
             round: round.round,
         })
-        .map_err(anyhow::Error::from)
+        .map_err(anyhow::Error::from)?;
+        // Reviewer completion can change the Planner workspace mutability and tool policy.
+        // End this turn so the product-owned continuation prepares a fresh canonical workspace.
+        output.ends_turn = true;
+        Ok(output)
     }
 
     pub(super) async fn preflight_integrated_review_locked(
@@ -258,6 +307,165 @@ impl TaskCoordinator {
         }
         Ok(run)
     }
+
+    async fn merge_candidates(
+        &self,
+        run: &TaskRunRecord,
+        work_units: &[WorkUnitRecord],
+        completions: &[WorkCompletionRecord],
+        merges: &[MergeRecord],
+    ) -> Result<Vec<MergeCandidate>> {
+        if run.phase != TaskRunPhase::Merging {
+            return Ok(Vec::new());
+        }
+        let mut candidates = Vec::new();
+        for work_unit in work_units {
+            if work_unit.status != WorkUnitStatus::Approved
+                || work_unit.execution_status != ThreadExecutionStatus::Completed
+            {
+                continue;
+            }
+            let Some(executor_agent_id) = work_unit.executor_thread_id.as_deref() else {
+                continue;
+            };
+            let executor = self
+                .store
+                .read_thread(executor_agent_id)
+                .await?
+                .context("approved executor canonical Thread not found")?;
+            if executor.role != "executor" || executor.status != "closed" {
+                continue;
+            }
+            let Some(completion) = completions
+                .iter()
+                .filter(|completion| completion.work_unit_id == work_unit.id)
+                .max_by_key(|completion| completion.revision)
+            else {
+                continue;
+            };
+            if completion.kind != WorkCompletionKind::Delivery
+                || completion.status != WorkCompletionStatus::Approved
+            {
+                continue;
+            }
+            let already_recorded = merges.iter().any(|merge| {
+                merge.executor_agent_id == executor_agent_id
+                    || (merge.completion_id == completion.id
+                        && merge.completion_revision == completion.revision)
+            });
+            if already_recorded {
+                continue;
+            }
+            let head_commit = completion
+                .head_commit
+                .clone()
+                .context("approved delivery Completion has no head commit")?;
+            candidates.push(MergeCandidate {
+                executor_agent_id: executor_agent_id.to_string(),
+                completion_revision: completion.revision,
+                relative_worktree_path: relative_worktree_locator(
+                    &run.workspace_root,
+                    &work_unit.worktree_path,
+                )?,
+                branch: work_unit.branch.clone(),
+                base_commit: completion.base_commit.clone(),
+                head_commit,
+                expected_task_head: run.expected_head.clone(),
+            });
+        }
+        Ok(candidates)
+    }
+}
+
+impl ModelWorkUnit {
+    pub(super) fn new(run: &TaskRunRecord, work_unit: &WorkUnitRecord) -> Self {
+        Self {
+            id: work_unit.id.clone(),
+            task_run_id: work_unit.task_run_id.clone(),
+            title: work_unit.title.clone(),
+            status: work_unit.status,
+            scope_hints: work_unit.scope_hints.clone(),
+            base_commit: work_unit.base_commit.clone(),
+            relative_worktree_path: model_worktree_locator(
+                &run.workspace_root,
+                &work_unit.worktree_path,
+            ),
+            branch: work_unit.branch.clone(),
+            worktree_disposition: work_unit.worktree_disposition,
+            attempt: work_unit.attempt,
+            executor_thread_id: work_unit.executor_thread_id.clone(),
+            requested_by_call_id: work_unit.requested_by_call_id.clone(),
+            execution_status: work_unit.execution_status,
+            execution_summary: work_unit.execution_summary.clone(),
+            execution_error: work_unit.execution_error.clone(),
+            created_at: work_unit.created_at,
+            updated_at: work_unit.updated_at,
+        }
+    }
+}
+
+impl ModelCompletion {
+    pub(super) fn new(run: &TaskRunRecord, completion: &WorkCompletionRecord) -> Self {
+        Self {
+            id: completion.id.clone(),
+            task_run_id: completion.task_run_id.clone(),
+            work_unit_id: completion.work_unit_id.clone(),
+            executor_agent_id: completion.executor_agent_id.clone(),
+            revision: completion.revision,
+            kind: completion.kind,
+            status: completion.status,
+            base_commit: completion.base_commit.clone(),
+            head_commit: completion.head_commit.clone(),
+            changed_files: completion.changed_files.clone(),
+            verification_summary: completion.verification_summary.clone(),
+            relative_worktree_path: model_worktree_locator(
+                &run.workspace_root,
+                &completion.worktree_path,
+            ),
+            branch: completion.branch.clone(),
+            created_at: completion.created_at,
+            updated_at: completion.updated_at,
+        }
+    }
+}
+
+fn relative_worktree_locator(workspace_root: &str, worktree_path: &str) -> Result<String> {
+    let workspace_root = std::fs::canonicalize(workspace_root)
+        .context("failed to resolve Task workspace for merge candidate")?;
+    let worktree_path = std::fs::canonicalize(worktree_path)
+        .context("failed to resolve executor worktree for merge candidate")?;
+    let relative = worktree_path
+        .strip_prefix(&workspace_root)
+        .context("executor worktree is outside the Task workspace")?;
+    let components = relative
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy().to_string())
+        .collect::<Vec<_>>();
+    if components.len() != 4
+        || components[0] != ".pure"
+        || components[1] != "worktrees"
+        || components.last().is_some_and(String::is_empty)
+    {
+        bail!("executor worktree is not a canonical .pure/worktrees leaf");
+    }
+    Ok(components.join("/"))
+}
+
+fn model_worktree_locator(workspace_root: &str, worktree_path: &str) -> Option<String> {
+    let relative = Path::new(worktree_path)
+        .strip_prefix(Path::new(workspace_root))
+        .ok()?;
+    let components = relative
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy().to_string())
+        .collect::<Vec<_>>();
+    (components.len() == 4
+        && components[0] == ".pure"
+        && components[1] == "worktrees"
+        && components[2..]
+            .iter()
+            .all(|component| !component.is_empty() && component != "." && component != ".."))
+    .then(|| components.join("/"))
 }
 
 fn provider_call_id(value: Option<&str>, tool: &str) -> Result<String> {

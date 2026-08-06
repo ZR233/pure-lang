@@ -5,6 +5,7 @@ use super::super::{
     AgentRuntimeResult, AgentSnapshot, CloseLifecycleRequest,
 };
 use super::AgentLoop;
+use crate::AgentRoleId;
 
 enum CloseCompensation {
     Restored,
@@ -15,6 +16,40 @@ impl<H> AgentLoop<H>
 where
     H: AgentRuntimeHost,
 {
+    pub(super) async fn reconfigure_idle_role(
+        &mut self,
+        role: AgentRoleId,
+    ) -> AgentRuntimeResult<AgentSnapshot> {
+        if self.state.snapshot.identity.role == role {
+            return Ok(self.state.snapshot.clone());
+        }
+        if self.state.snapshot.lifecycle != AgentLifecycleState::Active {
+            return Err(AgentRuntimeError::NotActive(
+                self.state.snapshot.identity.id.clone(),
+                self.state.snapshot.lifecycle,
+            ));
+        }
+        if self.active.is_some()
+            || self.state.snapshot.activity != AgentActivityState::Idle
+            || self.state.snapshot.active_turn_id.is_some()
+            || self.state.active_input.is_some()
+            || !self.state.pending_inputs.is_empty()
+        {
+            return Err(AgentRuntimeError::InvalidInput(
+                "agent role can only change while the Thread is idle with no pending input"
+                    .to_string(),
+            ));
+        }
+
+        let mut next = self.state.clone();
+        next.snapshot.identity.role = role;
+        self.commit_transition(next, Vec::new(), |snapshot| {
+            AgentRuntimeEventKind::StateChanged { snapshot }
+        })
+        .await?;
+        Ok(self.state.snapshot.clone())
+    }
+
     pub(super) async fn close(&mut self) -> AgentRuntimeResult<AgentSnapshot> {
         if self.state.snapshot.lifecycle == AgentLifecycleState::Closed {
             return Ok(self.state.snapshot.clone());

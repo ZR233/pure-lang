@@ -187,7 +187,7 @@ impl Tool for SkillsListTool {
     ) -> super::BoxFuture<'a, Result<ToolOutput, PureError>> {
         Box::pin(async move {
             let input: SkillsListInput = parse_input(input.arguments, self.name())?;
-            let catalog = SkillCatalog::discover(&context.workspace_root, &self.config)
+            let catalog = SkillCatalog::discover(context.workspace.root(), &self.config)
                 .map_err(|error| tool_error(self.name(), error))?;
             let skills = catalog
                 .skills
@@ -249,7 +249,7 @@ impl Tool for SkillViewTool {
             let turn_id = input.session_id.clone();
             let tool_id = input.tool_id.clone();
             let input: SkillViewInput = parse_input(input.arguments, self.name())?;
-            let catalog = SkillCatalog::discover(&context.workspace_root, &self.config)
+            let catalog = SkillCatalog::discover(context.workspace.root(), &self.config)
                 .map_err(|error| tool_error(self.name(), error))?;
             let skill = catalog.find(&input.name).ok_or_else(|| {
                 let name = &input.name;
@@ -329,8 +329,9 @@ impl Tool for SkillManageTool {
         context: ToolContext,
     ) -> super::BoxFuture<'a, Result<ToolOutput, PureError>> {
         Box::pin(async move {
+            context.ensure_workspace_writable()?;
             let input: SkillManageInput = parse_input(input.arguments, self.name())?;
-            let catalog = SkillCatalog::discover(&context.workspace_root, &self.config)
+            let catalog = SkillCatalog::discover(context.workspace.root(), &self.config)
                 .map_err(|error| tool_error(self.name(), error))?;
             match input.action {
                 SkillManageAction::Create => create_skill(self.name(), &catalog, input),

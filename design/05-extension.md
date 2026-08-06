@@ -63,7 +63,12 @@ flutter_rust_bridge。桌面端状态和配置均由 `pl-studio-runtime` 持久�
 
 命令执行、文件编辑、工具系统和沙箱能力必须以独立策略接入，并通过权限模型和事件流暴露给核心流程。
 
-桌面端允许注册 `exec`、完整 agent 协作工具和文件工具。当前 Studio 运行路径默认使用 `PermissionMode::RequestApproval`：workspace 内访问按工具策略直接放行，workspace 外访问请求用户审批；`auto-review` 会把 workspace 外访问交给 reviewer，`full-access` 在策略层放行已暴露工具。审批和交互结果通过统一 `Interaction` 与 Studio event/projection 记录，拒绝时将拒绝原因作为 tool result 写回会话。
+桌面端允许注册 `exec`、完整 agent 协作工具和文件工具。每个 turn 都携带 typed
+`AgentWorkspace { root, boundary, mutability }`；文件、命令 cwd、Git、LSP 与项目 skills
+必须消费同一个 root。`boundary=confined` 是宿主资源边界，不能被 `full-access` 放宽；
+`PermissionMode` 只决定边界允许的访问是否直接执行、请求用户审批或请求 reviewer 审批。
+审批和交互结果通过统一 `Interaction` 与 Studio event/projection 记录，拒绝时将拒绝原因作为
+tool result 写回会话。
 
 文件工具作为 `pl-core` 工具系统的一部分注册，当前不新增独立 `pl-tool` crate。文件工具包括读取、写入、列目录、搜索、stat、建目录、删除、复制、移动和 `apply_patch`。工具 schema 不强制模型提供绝对路径；workspace-relative 路径按 `workspaceRoot` 解析，执行层统一转换为规范化绝对路径后再校验、审批和执行。只读工具仍受工作区路径边界限制；修改工具进入现有工具审批流程。
 
@@ -93,9 +98,10 @@ Skills 工具同样挂在 `pl-core` 默认工具集中。`skills_list` 和 `skil
 的 agent 展示继续以 durable snapshot 和 append-only timeline 为准。
 
 通用协作工具不承载 Studio 的任务分配协议。Task harness 另外注册
-`task_spawn_executor { taskName, message, ownedPaths }`、
+`task_spawn_executor { taskName, message, scopeHints? }`、
 `task_request_delivery_review { executorAgentId }` 与
 `task_request_integrated_review {}`，把强类型输入转换为内部 spawn intent 后调用同一个
-`AgentRuntimeHandle`。Task 根的通用
-`spawn_agent` 只公开 explorer，避免模型通过自由 metadata 绕过 worktree、路径所有权和审查
-授权。
+`AgentRuntimeHandle`。`scopeHints` 只是可选的仓库相对关注路径，不承担授权、并发锁或 completion
+门禁。Delivery reviewer 由 durable ReviewRound 绑定目标 executor completion，并直接使用同一
+worktree；Integrated reviewer 使用 TaskRun 主 workspace。Task 根的通用 `spawn_agent` 只公开
+explorer，避免模型通过自由 metadata 绕过 worktree 与审查授权。

@@ -41,7 +41,7 @@ impl TaskFlowFixture {
         let config_store = ConfigStore::new(ConfigPaths::from_home(&home));
         config_store.save(&task_test_config(base_url))?;
 
-        let store = StudioStore::open_memory().await?;
+        let store = StudioStore::open(home.join("studio.sqlite")).await?;
         let runtime = StudioRuntime::new(store.clone(), config_store);
         let project = runtime.open_project(&workspace).await?;
         let session = runtime
@@ -51,7 +51,12 @@ impl TaskFlowFixture {
             .set_thread_mode(&session.id, StudioMode::Task)
             .await?;
         runtime.start_runtime().await?;
-        let server = ScriptedModelServer::start(listener, runtime.clone(), session.id.clone());
+        let server = ScriptedModelServer::start(
+            listener,
+            runtime.clone(),
+            session.id.clone(),
+            workspace.clone(),
+        );
 
         Ok(Self {
             runtime,

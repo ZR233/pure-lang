@@ -2,9 +2,10 @@
 
 ## 19.1 数据库
 
-Studio 只使用 `~/.pure/studio/studio.sqlite`，schema v1。数据库启用 WAL、foreign keys、五秒
-busy timeout 和 synchronous=FULL；连接池最多四个连接，mutation 通过 SQLite 单 writer
-事务串行化，snapshot、分页和设置查询共用同一连接池。
+Studio 默认只使用 `~/.pure/studio/studio.sqlite`，schema v2；测试和隔离验收可通过绝对路径
+`PURE_STUDIO_HOME` 改写整个 Studio 数据根。数据库启用 WAL、foreign keys、五秒
+busy timeout 和 synchronous=FULL；应用数据库连接池固定一个连接，mutation 通过 SQLite
+单 writer 事务串行化，snapshot、分页和设置查询共用该连接。
 
 核心表：
 
@@ -16,7 +17,7 @@ busy timeout 和 synchronous=FULL；连接池最多四个连接，mutation 通�
 - interactions
 - attachments
 - app_settings
-- task_runs、work_units、deliveries、review_rounds、merge_records、branch_leases
+- task_runs、work_units、work_completions、review_rounds、merge_records、branch_leases
 
 不存在 history 数据库、storage generation pair、history_gc_jobs、session snapshot JSON、agent
 runtime snapshot、agent outcome 或 durable event journal。
@@ -39,20 +40,20 @@ contextCompaction 重置基线。两者都属于内部 Item，Bridge 查询永�
 runtime usage 通知。相同 inference ID 的相同记录幂等，内容冲突拒绝事务；历史费用始终使用
 当时保存的价格和币种，不能按当前 catalog 重新计算。
 
-## 19.3 归档重建
+## 19.3 不兼容库重建
 
-首次启动新 schema 时，若存在旧 `studio_state.sqlite`、`studio_history.sqlite`、`studio_2.sqlite`
-或 attachments：
+启动先只读检查 canonical `studio.sqlite` 的 `user_version`、`quick_check` 与必需表/列
+fingerprint。版本、结构或完整性不兼容时不迁移、不归档、不导入：
 
-1. 确认没有活动数据库连接。
-2. 只读提取项目、Task、Pure worktree、branch、dirty/ahead 等可得资源信息，写
-   `manifest.json`。
-3. 把三个旧数据库及 `-wal/-shm`、attachments 与 manifest 一起移入
-   `archive/thread-schema-v1-{unixSeconds}`。
-4. 全部移动成功后创建新的 `studio.sqlite`；任一步失败则逆序回滚移动并停止启动。
+1. 关闭本次检查创建的全部数据库连接。
+2. 再次证明目标是配置解析得到的精确 canonical Studio 数据库文件。
+3. 精确删除 `studio.sqlite`、`studio.sqlite-wal` 与 `studio.sqlite-shm`；不使用 glob，不删除目录。
+4. 创建空 schema v2 并完成 fingerprint 校验后才向 Runtime 提供 store。
 
-不导入旧会话或 Task，不自动删除 manifest 中的 worktree/branch。未来 schema、损坏或锁定的
-新库拒绝打开并保留现场。
+删除或重建失败属于应用级致命错误，由错误页重试；不得在半初始化数据库上继续。重建只处理
+Studio 数据库文件，不扫描、删除或修改 Project、worktree、branch、attachments 或其他 legacy
+数据库。旧会话、Task 与 ownership 元数据直接丢弃；因此失去 owner 的磁盘 worktree 也不能被
+自动 GC。
 
 ## 19.4 归档与附件
 

@@ -4,7 +4,7 @@ use sea_orm::{ConditionalStatement, ConnectionTrait, DatabaseConnection};
 
 use crate::studio::entity;
 
-pub(super) const STUDIO_DATABASE_SCHEMA_VERSION: i64 = 1;
+pub(super) const STUDIO_DATABASE_SCHEMA_VERSION: i64 = 2;
 
 pub(super) async fn initialize_studio_schema(db: &DatabaseConnection) -> Result<()> {
     db.get_schema_builder()

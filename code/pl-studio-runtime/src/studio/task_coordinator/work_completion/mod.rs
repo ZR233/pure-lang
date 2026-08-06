@@ -5,7 +5,6 @@ use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
 use super::git::{changed_files_between, inspect_repository, is_ancestor, resolve_commit_oid};
-use super::owned_path::OwnedPath;
 use super::{
     AgentDelivery, AgentWorktreeDelivery, DeliveryScope, TaskCoordinator, ThreadExecutionStatus,
     WorkCompletionKind, WorkCompletionRecord, WorkUnitStatus,
@@ -67,7 +66,7 @@ impl TaskCoordinator {
             core.register_tool(self.task_send_message_tool(thread_id, runtime.clone()));
             core.register_tool(self.task_spawn_executor_tool(thread_id, runtime.clone()));
             core.register_tool(self.task_update_design_tool(thread_id));
-            core.register_tool(self.task_merge_agent_tool(thread_id, runtime.clone()));
+            core.register_tool(self.task_record_merge_tool(thread_id, runtime.clone()));
             core.register_tool(self.task_request_delivery_review_tool(thread_id, runtime.clone()));
             core.register_tool(
                 self.task_request_integrated_review_tool(thread_id, runtime.clone()),
@@ -75,7 +74,6 @@ impl TaskCoordinator {
             core.register_tool(self.task_status_tool(thread_id));
             core.register_tool(self.task_complete_tool(thread_id));
             core.register_tool(self.task_stop_tool(thread_id, runtime.clone()));
-            self.register_conflict_tools(core, thread_id, runtime);
             return;
         }
         match snapshot.identity.role.as_str() {
@@ -83,7 +81,7 @@ impl TaskCoordinator {
                 core.register_tool(self.report_completion_tool(runtime));
             }
             "reviewer" => {
-                core.register_tool(self.review_exit_tool(thread_id, None));
+                core.register_tool(self.review_exit_tool(thread_id, Some(runtime)));
             }
             "explorer" | "planner" => {}
             _ => {}
@@ -189,7 +187,7 @@ impl TaskCoordinator {
                         .as_ref()
                         .context("report_completion requires an active executor")?;
                     let completion = coordinator
-                        .report_completion(subagent, &context.workspace_root, input.result)
+                        .report_completion(subagent, context.workspace.root(), input.result)
                         .await?;
                     if let Err(error) = runtime
                         .report_progress(
@@ -318,7 +316,6 @@ impl TaskCoordinator {
         }
         let changed_files =
             changed_files_between(&snapshot.workspace_root, base_commit, &snapshot.head).await?;
-        validate_owned_paths(&validation.scope.work_unit.owned_paths, &changed_files)?;
         Ok(AgentDelivery {
             worktree: AgentWorktreeDelivery {
                 path: snapshot.workspace_root.to_string_lossy().to_string(),
@@ -381,19 +378,6 @@ fn ensure_completion_scope_is_open(scope: &DeliveryScope) -> Result<()> {
         )
     {
         bail!("work unit is not accepting a completion");
-    }
-    Ok(())
-}
-
-fn validate_owned_paths(owned_paths: &[String], changed_files: &[String]) -> Result<()> {
-    let owned_paths = owned_paths
-        .iter()
-        .map(|path| OwnedPath::parse(path))
-        .collect::<Result<Vec<_>>>()?;
-    for changed_file in changed_files {
-        if !owned_paths.iter().any(|owned| owned.matches(changed_file)) {
-            bail!("changed file `{changed_file}` is outside ownedPaths");
-        }
     }
     Ok(())
 }

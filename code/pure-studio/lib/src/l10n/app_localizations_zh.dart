@@ -47,6 +47,14 @@ class AppLocalizationsZh extends AppLocalizations {
   String get recoveryCleanupTooltip => '查看安全清理';
 
   @override
+  String get recoveryRetryTooltip => '继续合并恢复';
+
+  @override
+  String recoveryRetryFailed(String error) {
+    return '恢复重试失败：$error';
+  }
+
+  @override
   String get recoveryCleanupTitle => '清理恢复问题？';
 
   @override
@@ -307,7 +315,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get statusTaskCompletions => '完成报告';
 
   @override
-  String get statusTaskMerges => '合并与冲突';
+  String get statusTaskMerges => '合并记录';
 
   @override
   String get statusTaskReviews => '代码审查';
@@ -322,7 +330,16 @@ class AppLocalizationsZh extends AppLocalizations {
   String get statusTaskSource => '来源';
 
   @override
-  String get statusTaskConflicts => '冲突';
+  String get statusTaskPreviousHead => '合并前 HEAD';
+
+  @override
+  String get statusTaskDeliveryHead => '交付 HEAD';
+
+  @override
+  String get statusTaskResultingHead => '合并后 HEAD';
+
+  @override
+  String get statusTaskCleanup => '资源清理';
 
   @override
   String get statusTaskRequest => '调用请求';
@@ -370,9 +387,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get statusTaskPhaseMerging => '合并中';
 
   @override
-  String get statusTaskPhaseResolvingConflict => '解决冲突';
-
-  @override
   String get statusTaskPhaseReviewing => '审查中';
 
   @override
@@ -418,9 +432,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get statusTaskStatusApproved => '已批准';
 
   @override
-  String get statusTaskStatusMerging => '合并中';
-
-  @override
   String get statusTaskStatusMerged => '已合并';
 
   @override
@@ -434,15 +445,6 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get statusTaskStatusCancelled => '已取消';
-
-  @override
-  String get statusTaskStatusConflicted => '存在冲突';
-
-  @override
-  String get statusTaskStatusVerifying => '验证中';
-
-  @override
-  String get statusTaskStatusAborted => '已中止';
 
   @override
   String get statusTaskStatusPass => '已通过';
@@ -1369,6 +1371,14 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String get recoveryCleanupTooltip => '查看安全清理';
 
   @override
+  String get recoveryRetryTooltip => '继续合并恢复';
+
+  @override
+  String recoveryRetryFailed(String error) {
+    return '恢复重试失败：$error';
+  }
+
+  @override
   String get recoveryCleanupTitle => '清理恢复问题？';
 
   @override
@@ -1629,7 +1639,7 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String get statusTaskCompletions => '完成报告';
 
   @override
-  String get statusTaskMerges => '合并与冲突';
+  String get statusTaskMerges => '合并记录';
 
   @override
   String get statusTaskReviews => '代码审查';
@@ -1644,7 +1654,16 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String get statusTaskSource => '来源';
 
   @override
-  String get statusTaskConflicts => '冲突';
+  String get statusTaskPreviousHead => '合并前 HEAD';
+
+  @override
+  String get statusTaskDeliveryHead => '交付 HEAD';
+
+  @override
+  String get statusTaskResultingHead => '合并后 HEAD';
+
+  @override
+  String get statusTaskCleanup => '资源清理';
 
   @override
   String get statusTaskRequest => '调用请求';
@@ -1692,9 +1711,6 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String get statusTaskPhaseMerging => '合并中';
 
   @override
-  String get statusTaskPhaseResolvingConflict => '解决冲突';
-
-  @override
   String get statusTaskPhaseReviewing => '审查中';
 
   @override
@@ -1740,9 +1756,6 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String get statusTaskStatusApproved => '已批准';
 
   @override
-  String get statusTaskStatusMerging => '合并中';
-
-  @override
   String get statusTaskStatusMerged => '已合并';
 
   @override
@@ -1756,15 +1769,6 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get statusTaskStatusCancelled => '已取消';
-
-  @override
-  String get statusTaskStatusConflicted => '存在冲突';
-
-  @override
-  String get statusTaskStatusVerifying => '验证中';
-
-  @override
-  String get statusTaskStatusAborted => '已中止';
 
   @override
   String get statusTaskStatusPass => '已通过';

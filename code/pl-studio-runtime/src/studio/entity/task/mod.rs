@@ -55,7 +55,7 @@ pub mod work_unit {
         pub task_run_id: String,
         pub title: String,
         pub status: String,
-        pub owned_paths_json: String,
+        pub scope_hints_json: String,
         pub base_commit: String,
         pub worktree_path: String,
         pub branch: String,
@@ -193,14 +193,17 @@ pub mod merge_record {
         #[sea_orm(primary_key, auto_increment = false)]
         pub id: String,
         pub task_run_id: String,
-        pub agent_id: String,
-        pub status: String,
-        pub expected_head: String,
-        pub source_commit: String,
-        pub conflict_files_json: String,
-        pub resolution_summary: Option<String>,
-        pub verification_json: Option<String>,
-        pub attempt: i32,
+        pub work_unit_id: String,
+        pub completion_id: String,
+        pub completion_revision: i32,
+        pub executor_agent_id: String,
+        pub expected_previous_head: String,
+        pub resulting_head: String,
+        pub delivery_head: String,
+        pub method: String,
+        pub summary: String,
+        pub cleanup_status: String,
+        pub cleanup_detail: Option<String>,
         pub created_at: i64,
         pub updated_at: i64,
     }
@@ -214,6 +217,20 @@ pub mod merge_record {
             on_delete = "Cascade"
         )]
         TaskRun,
+        #[sea_orm(
+            belongs_to = "super::work_unit::Entity",
+            from = "Column::WorkUnitId",
+            to = "super::work_unit::Column::Id",
+            on_delete = "Cascade"
+        )]
+        WorkUnit,
+        #[sea_orm(
+            belongs_to = "super::work_completion::Entity",
+            from = "Column::CompletionId",
+            to = "super::work_completion::Column::Id",
+            on_delete = "Cascade"
+        )]
+        Completion,
     }
 
     impl ActiveModelBehavior for ActiveModel {}

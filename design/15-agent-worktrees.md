@@ -12,13 +12,14 @@
 
 本设计为每个 subagent 分配独立的 git worktree，使其修改物理隔离。Task executor
 必须通过 `report_completion` 创建不可变 completion；delivery reviewer 通过后，planner
-显式关闭 executor 并 merge。worktree 在交付被合并、明确丢弃或任务终结后释放，不再与
+显式关闭 executor，使用普通 Git 整合并调用 `task_record_merge` 记账。worktree 在交付被记录、
+明确丢弃或任务终结后释放，不再与
 单次 agent turn 终态绑定。
 
-Task executor 只能由 `task_spawn_executor { taskName, message, ownedPaths }` 创建。
-`ownedPaths` 是强类型工具输入和 lifecycle 最终不变量，不再接受模型通过通用
-`spawn_agent.metadata` 声明；静态路径校验必须早于 WorkUnit、worktree、Thread
-和 agent registry 的任何副作用。
+Task executor 只能由 `task_spawn_executor { taskName, message, scopeHints? }` 创建。
+`scopeHints` 是可选的仓库相对关注路径，只帮助 Planner 拆分任务、review 聚焦和提示已知冲突；
+它不是文件授权、并发互斥或 completion 门禁。executor 可以修改自身 worktree 内任意仓库文件，
+真正不变量是 canonical worktree、Git identity、clean delivery 与完整 base-to-HEAD diff。
 
 ## 与既有约定的关系
 
@@ -27,8 +28,8 @@ Task executor 只能由 `task_spawn_executor { taskName, message, ownedPaths }` 
 
 - `03-pipeline.md`：child turn「复用同一套工具边界」。本设计把 subagent 的工具边界
   改为 **agent-scoped `workspace_root`**——同一套工具，不同 `workspace_root` 实参。
-  实现上由 Studio turn factory 从 lifecycle resource lease 解析本轮 `workspace_root`，
-  单个工具无需改动。
+  实现上由 Studio turn factory 使用 durable WorkUnit/ReviewRound/Completion/TaskRun owner
+  解析本轮 `AgentWorkspace`，单个工具无需理解 Studio Task 类型。
 - `05-extension.md`：进程内 workspace 写锁共享。写锁以规范化后的 `workspace_root`
   路径为键，因此每个 subagent 独有的 worktree 路径会自动获得独立写锁，锁语义无需
   调整，sibling subagent 之间不竞争。
@@ -41,17 +42,18 @@ merge 在既有文档中零提及（`merge` 一词此前全部指 snapshot / con
 Studio 产品层的 `pl-studio-runtime::agent::worktree` 模块按端口-适配器组织：
 
 - `WorktreeBackend`（端口，RPITIT + `Send`，遵循仓库禁止 `async_trait` 的约定）：
-  封装 `git worktree add/remove`、兜底 `git commit`、`git merge` 的底层执行。
+  只封装 `git worktree add/remove` 与 branch cleanup；TaskService 不实现 Git merge。
 - `LocalWorktreeBackend`（默认实现）：复用 `tool::git::LocalExecutionBackend` shell
   out `git`，复用 `GitPolicy::validate_branch` 校验分支名，复用
   `git_shell_command` 的 `core.hooksPath=/dev/null` / `safe.directory` 安全注入。
   **不引入 `git2` / `tempfile` 依赖**，与仓库现有 git 工具风格一致。
 - `WorktreeManager`：持有 `Arc<dyn WorktreeBackend>` 与 repo_root，负责路径分配、
-  创建 / 提交 / 合并 / 释放编排；独立的 typed reconciler 在 Studio 启动恢复阶段根据
+  创建和释放编排；提交由 executor 使用普通 Git 完成，整合由 Planner 自主完成。独立的 typed reconciler 在 Studio 启动恢复阶段根据
   durable owner inventory 对账孤儿 worktree。
 
-`StudioHost` 的 lifecycle adapter 在 spawn prepare 阶段创建可回滚的 worktree lease，
-在 activate/rollback/close 阶段完成资源提交或补偿。`WorktreeManager::disabled()` 为 no-op；
+`StudioHost` 的 lifecycle adapter 在 spawn prepare 阶段创建可回滚的临时 worktree handle，
+在 durable WorkUnit owner 落盘后 activate，并在 rollback/close 阶段完成补偿或授权清理。
+该 handle 不是 workspace 的事实源。`WorktreeManager::disabled()` 为 no-op；
 Studio Task policy 显式提供 repo root 时才为 subagent 分配 worktree。创建过程只绑定主
 `workspace_root` 解析出的 repo root，不扫描或清理磁盘；孤儿对账只属于 Studio 启动恢复。
 
@@ -65,12 +67,12 @@ WorkUnit 已经 Failed/Cancelled，也必须幂等记录这次明确授权。
 
 - `WorktreeHandle { path: PathBuf, branch: String }`：存入 Studio lifecycle resource lease，
   随 agent 产品资源同生共死；root agent 为 `None`。
-- `WorktreeRef { path: String, branch: String }`：worktree 的模型可见出口。默认
-  工具路径通过 runtime snapshot 的产品资源投影暴露给 task coordinator；通用
-  `AgentRuntimeHandle` 不携带 Studio worktree 类型，避免框架层反向依赖产品资源。
-- `CloseDisposition::Discard` 只负责放弃未采纳产物；Task merge 由 coordinator 的
-  `task_merge_agent` 负责，不通过 `close_agent` 隐式合并。
-- `MergeOutcome { Merged, Conflict }`：merge 结果，`Conflict` 时不释放 worktree。
+- `AgentWorkspace { root, boundary, mutability }`：`pl-core` 的通用 turn/tool 边界，不携带
+  Studio Task 类型。Studio 用 durable owner 解析实例；Task child 一律 `confined`。
+- `WorktreeRef { relativePath, branch, baseCommit, headCommit }`：只向 Planner 暴露相对
+  locator 与 Git identity；reviewer 不需要物理 locator，因为其 canonical root 已是目标 worktree。
+- `CloseDisposition::Discard` 只负责放弃未采纳产物；Planner 使用普通 Git 自主整合，随后由
+  `task_record_merge` 记录结果。`close_agent` 不隐式合并。
 - `WorktreeError`：`manager` 内部错误类型，向 `PureError::ToolExecutionFailed`
   `{ tool: "worktree", error }` 映射，不跨 crate 新增枚举变体。
 
@@ -83,7 +85,7 @@ spawn -> running -> awaitingCompletion -> readyForReview
                     +---- changesRequested
                                          |
                                          v
-                                   approved -> close(preserve) -> planner merge -> released
+                                   approved -> close(preserve) -> planner Git -> record -> released
                                          \-> noDelivery -> close(discard) -> released
 
 released = git worktree remove + 删除分支 + 清空 durable lifecycle resource
@@ -93,11 +95,11 @@ released = git worktree remove + 删除分支 + 清空 durable lifecycle resourc
 
 - 单次 turn 完成不释放 worktree（agent 可经 `send_message` 多轮），与既有
   「turn 完成 ≠ agent 释放」语义一致。approved executor 关闭后进入
-  `PreserveForMerge`，由成功 merge 清理；noDelivery、明确 discard 与已合并资源才允许
+  `PreserveForMerge`，由成功 merge record 清理；noDelivery、明确 discard 与已记录资源才允许
   走 cleanup。
 - runtime 不兜底 `git add -A` 或 commit。executor 必须自行提交并用
   `report_completion` 报告干净 worktree 与验证摘要；delivery reviewer 通过后 planner
-  才能关闭 executor 并交给 task coordinator 合并。
+  才能关闭 executor、执行普通 Git，并用 `task_record_merge` 记账。
 - `close(Discard)` 或级联关闭：`git worktree remove --force` + 删除 subagent 分支。
 - spawn 失败回滚（包括 worktree 创建部分成功、持久化激活失败或
   `start_agent_turn` 失败）必须同步尝试移除 worktree、删除分支并撤销宿主生命周期
@@ -173,10 +175,17 @@ subagent turn（`active_subagent.is_some()`）不再 enable；其 `workspace_roo
 
 ## 隔离
 
-`runner.rs` 注册 subagent 工具时，`workspace_root` = 其 worktree 路径。
-`register_tools(..., workspace_root, ...)` 是唯一入口，所有工具（git 的
-`GitWorkspaceConfig.worktree`、file 工具、lsp root）自动隔离到 worktree，无需改动
-单个工具。进程内写锁以 `workspace_root` 路径为键，每个 worktree 独立锁。
+TurnFactory 从 durable owner 解析 typed Agent workspace：executor 使用 WorkUnit worktree，
+Delivery reviewer 使用该 executor 最新 Completion 的同一 worktree，Integrated reviewer 使用
+TaskRun 主 workspace，root/explorer 使用 Project workspace。工具注册只消费该 workspace；file、
+apply_patch、exec cwd、Git、project skills 和 LSP 都从同一 root 构造。LSP runtime 按 canonical
+root 池化，同一 delivery reviewer 与 executor 复用实例，不同 worktree 不互相关闭或替换。
+进程内写锁仍以 canonical root 为键。
+
+`StudioAgentResources` 只保存 worktree handle、cleanup takeover 与进程 lease。恢复后即使该表为空，
+TurnFactory 仍必须从 WorkUnit/ReviewRound/Completion/TaskRun 解析 workspace；Task child 无法解析时
+形成 scoped issue，禁止回退 Project root。共享 MCP lease 是显式例外，不声明 per-agent root；
+Task child 的仓库文件访问必须使用内置工具。
 
 ## 资源释放策略
 

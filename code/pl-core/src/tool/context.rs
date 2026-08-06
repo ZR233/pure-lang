@@ -7,6 +7,69 @@ use tokio::sync::{Mutex, OwnedMutexGuard};
 
 use crate::turn::TurnOptions;
 
+/// Agent workspace 是否允许宿主权限策略访问 root 之外的路径。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum WorkspaceBoundary {
+    #[default]
+    Confined,
+    HostPermitted,
+}
+
+impl WorkspaceBoundary {
+    fn allows_host_paths(self) -> bool {
+        matches!(self, Self::HostPermitted)
+    }
+}
+
+/// Agent workspace 的修改能力。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum WorkspaceMutability {
+    ReadOnly,
+    #[default]
+    ReadWrite,
+}
+
+/// 单个 Agent 的 canonical workspace 边界。
+///
+/// 宿主负责根据 durable owner 构造该值；所有内置路径工具、命令 cwd、Git、LSP 与项目
+/// skills 必须消费同一个 root。`Confined` 不会被 turn 的 `full-access` 权限放宽。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AgentWorkspace {
+    root: PathBuf,
+    boundary: WorkspaceBoundary,
+    mutability: WorkspaceMutability,
+}
+
+impl AgentWorkspace {
+    pub fn local(root: impl Into<PathBuf>) -> Self {
+        Self {
+            root: root.into(),
+            boundary: WorkspaceBoundary::HostPermitted,
+            mutability: WorkspaceMutability::ReadWrite,
+        }
+    }
+
+    pub fn confined(root: impl Into<PathBuf>, mutability: WorkspaceMutability) -> Self {
+        Self {
+            root: root.into(),
+            boundary: WorkspaceBoundary::Confined,
+            mutability,
+        }
+    }
+
+    pub fn root(&self) -> &std::path::Path {
+        &self.root
+    }
+
+    pub fn boundary(&self) -> WorkspaceBoundary {
+        self.boundary
+    }
+
+    pub fn mutability(&self) -> WorkspaceMutability {
+        self.mutability
+    }
+}
+
 /// Runtime coordination policy for tools within one model response.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolRuntimeLockPolicy {
@@ -24,7 +87,7 @@ pub struct ToolContext {
     pub event_tx: AgentEventSender,
     pub options: TurnOptions,
     pub workspace_access: WorkspaceAccess,
-    pub workspace_root: PathBuf,
+    pub workspace: AgentWorkspace,
     pub workspace_instructions: Option<String>,
     pub instruction_snapshot: Option<crate::instruction::InstructionSnapshot>,
     pub provider_call_id: Option<String>,
@@ -63,7 +126,7 @@ pub struct SubagentContext {
 impl fmt::Debug for ToolContext {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ToolContext")
-            .field("workspace_root", &self.workspace_root)
+            .field("workspace", &self.workspace)
             .field("permission_mode", &self.options.permission_mode)
             .field("workspace_access", &self.workspace_access)
             .field("provider_call_id", &self.provider_call_id)
@@ -77,12 +140,25 @@ impl fmt::Debug for ToolContext {
 
 impl ToolContext {
     pub(crate) fn allows_workspace_escape(&self) -> bool {
-        self.options.permission_mode.allows_workspace_escape()
-            || self.workspace_access.allows_external()
+        self.workspace.boundary.allows_host_paths()
+            && (self.options.permission_mode.allows_workspace_escape()
+                || self.workspace_access.allows_external())
+    }
+
+    pub(crate) fn ensure_workspace_writable(&self) -> crate::Result<()> {
+        if self.workspace.mutability == WorkspaceMutability::ReadOnly {
+            return Err(crate::PureError::ToolExecutionFailed {
+                tool: "workspace".to_string(),
+                error: "agent workspace is read-only".to_string(),
+            });
+        }
+        Ok(())
     }
 
     pub(crate) async fn workspace_write_lock(&self) -> WorkspaceWriteGuard {
-        workspace_write_locks().lock_for(&self.workspace_root).await
+        workspace_write_locks()
+            .lock_for(self.workspace.root())
+            .await
     }
 }
 

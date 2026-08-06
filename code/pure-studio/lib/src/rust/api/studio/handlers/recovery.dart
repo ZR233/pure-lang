@@ -36,6 +36,16 @@ Future<BridgeStudioSnapshotResponse> cleanupRecoveryIssue({
   selectedThreadId: selectedThreadId,
 );
 
+Future<BridgeStudioSnapshotResponse> retryRecoveryIssue({
+  required String issueId,
+  String? selectedProjectId,
+  String? selectedThreadId,
+}) => RustLib.instance.api.crateApiStudioHandlersRecoveryRetryRecoveryIssue(
+  issueId: issueId,
+  selectedProjectId: selectedProjectId,
+  selectedThreadId: selectedThreadId,
+);
+
 Future<BridgeStudioSnapshotResponse> cleanupProject({
   required String projectId,
   required String expectedRevision,

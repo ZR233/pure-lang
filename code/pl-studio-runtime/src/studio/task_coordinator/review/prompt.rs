@@ -9,14 +9,15 @@ use serde::Serialize;
 use super::super::{
     ReviewRoundRecord, ReviewScope, TaskCoordinator, WorkUnitRecord, WorkUnitStatus,
 };
+use super::{ModelCompletion, ModelWorkUnit};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ReviewOwnership {
+struct ReviewFocus {
     work_unit_id: String,
     title: String,
     status: WorkUnitStatus,
-    owned_paths: Vec<String>,
+    scope_hints: Vec<String>,
 }
 
 pub(crate) async fn build_review_prompt(
@@ -48,11 +49,11 @@ pub(crate) async fn build_review_prompt(
                 .iter()
                 .find(|work_unit| work_unit.id == completion.work_unit_id)
                 .context("delivery review work unit not found")?;
-            let target_ownership = ReviewOwnership::from(target_work_unit);
-            let sibling_ownership = work_units
+            let target_focus = ReviewFocus::from(target_work_unit);
+            let sibling_focus = work_units
                 .iter()
                 .filter(|work_unit| work_unit.id != completion.work_unit_id)
-                .map(ReviewOwnership::from)
+                .map(ReviewFocus::from)
                 .collect::<Vec<_>>();
             let diff = match completion.head_commit.as_deref() {
                 Some(head) => {
@@ -67,10 +68,10 @@ pub(crate) async fn build_review_prompt(
                 None => String::new(),
             };
             format!(
-                "## Scope\nDelivery\n\n## Delivery review boundary\nOnly the exact completion diff and the target WorkUnit ownedPaths are review scope. Sibling WorkUnits are deferred integration context only: do not report their unmerged or missing files, cross-WorkUnit integration, or task-wide completeness as delivery findings. Those concerns belong to the integrated review after merge.\n\n## Target WorkUnit ownership\n```json\n{}\n```\n\n## Sibling WorkUnit ownership (deferred integration context only)\n```json\n{}\n```\n\n## Completion\n```json\n{}\n```\n\n## Exact completion diff\n```diff\n{}\n```",
-                serde_json::to_string_pretty(&target_ownership)?,
-                serde_json::to_string_pretty(&sibling_ownership)?,
-                serde_json::to_string_pretty(&completion)?,
+                "## Scope\nDelivery\n\n## Delivery review boundary\nReview the complete exact Completion diff. scopeHints are planning and review-focus hints only; files outside them remain in scope. Sibling WorkUnits are deferred integration context only: do not report their unmerged or missing files, cross-WorkUnit integration, or task-wide completeness as delivery findings. Those concerns belong to the integrated review after merge.\n\n## Target WorkUnit focus\n```json\n{}\n```\n\n## Sibling WorkUnit focus (deferred integration context only)\n```json\n{}\n```\n\n## Completion\n```json\n{}\n```\n\n## Exact completion diff\n```diff\n{}\n```",
+                serde_json::to_string_pretty(&target_focus)?,
+                serde_json::to_string_pretty(&sibling_focus)?,
+                serde_json::to_string_pretty(&ModelCompletion::new(&run, &completion))?,
                 diff
             )
         }
@@ -82,8 +83,20 @@ pub(crate) async fn build_review_prompt(
                 true,
             )
             .await?;
-            let completions = coordinator.store.list_work_completions(&run.id).await?;
-            let work_units = coordinator.store.list_work_units(&run.id).await?;
+            let completions = coordinator
+                .store
+                .list_work_completions(&run.id)
+                .await?
+                .iter()
+                .map(|completion| ModelCompletion::new(&run, completion))
+                .collect::<Vec<_>>();
+            let work_units = coordinator
+                .store
+                .list_work_units(&run.id)
+                .await?
+                .iter()
+                .map(|work_unit| ModelWorkUnit::new(&run, work_unit))
+                .collect::<Vec<_>>();
             format!(
                 "## Scope\nIntegrated\n\n## Task HEAD\n{}\n\n## Integrated diff\n```diff\n{}\n```\n\n## Work completions\n```json\n{}\n```\n\n## WorkUnit execution state\n```json\n{}\n```",
                 run.expected_head,
@@ -106,13 +119,13 @@ pub(crate) async fn build_review_prompt(
     ))
 }
 
-impl From<&WorkUnitRecord> for ReviewOwnership {
+impl From<&WorkUnitRecord> for ReviewFocus {
     fn from(work_unit: &WorkUnitRecord) -> Self {
         Self {
             work_unit_id: work_unit.id.clone(),
             title: work_unit.title.clone(),
             status: work_unit.status,
-            owned_paths: work_unit.owned_paths.clone(),
+            scope_hints: work_unit.scope_hints.clone(),
         }
     }
 }

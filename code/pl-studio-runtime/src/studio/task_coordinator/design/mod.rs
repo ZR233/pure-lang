@@ -109,7 +109,7 @@ impl TaskCoordinator {
                     let output = coordinator
                         .update_design(
                             &root_thread_id,
-                            &context.workspace_root,
+                                    context.workspace.root(),
                             &arguments.patch,
                         )
                         .await

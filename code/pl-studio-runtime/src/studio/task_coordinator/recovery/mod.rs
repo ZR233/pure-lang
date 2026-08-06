@@ -11,6 +11,14 @@ use crate::agent::worktree::{
     WorktreeReconciliation, reconcile_task_worktree_group,
 };
 
+mod merge;
+#[cfg(test)]
+pub(crate) use merge::MERGE_RECOVERY_BLOCK_PREFIX;
+pub(crate) use merge::{
+    MergingRecovery, inspect_merging_recovery, is_retryable_merge_recovery_message,
+    validate_snapshot_owner,
+};
+
 impl TaskCoordinator {
     pub(super) async fn reconcile_durable_worktrees(
         &self,

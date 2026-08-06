@@ -135,14 +135,95 @@ async fn assert_task_invariants(
         }
     }
 
-    let owned_paths = fixture.successful_executor_owned_paths().await?;
-    if owned_paths.is_empty() {
+    let scope_hints = fixture.successful_executor_scope_hints().await?;
+    if scope_hints.is_empty() {
         bail!("no successful task_spawn_executor call was recorded");
     }
-    for paths in &owned_paths {
-        if paths.is_empty() || paths.iter().any(|path| path.trim().is_empty()) {
-            bail!("task_spawn_executor recorded empty ownedPaths: {paths:?}");
+    for hints in &scope_hints {
+        if hints.iter().any(|path| path.trim().is_empty()) {
+            bail!("task_spawn_executor recorded an invalid scopeHints entry: {hints:?}");
         }
+    }
+    if !scope_hints
+        .iter()
+        .any(|hints| hints.as_slice() == ["game-core.mjs"])
+    {
+        bail!("Task did not preserve the requested focused scopeHints: {scope_hints:?}");
+    }
+    if !task.completions.iter().any(|completion| {
+        completion
+            .changed_files
+            .iter()
+            .any(|path| path != "game-core.mjs" && !path.starts_with("design/"))
+    }) {
+        bail!("executor completion did not prove that scopeHints are non-authoritative");
+    }
+
+    let recorded_merges = fixture.successful_task_record_merge_arguments().await?;
+    if recorded_merges.len() != task.merges.len() {
+        bail!(
+            "task_record_merge call count {} does not match durable merge count {}",
+            recorded_merges.len(),
+            task.merges.len()
+        );
+    }
+    for arguments in &recorded_merges {
+        let executor_agent_id = arguments["executorAgentId"]
+            .as_str()
+            .context("task_record_merge has no executorAgentId")?;
+        let completion_revision = arguments["completionRevision"]
+            .as_u64()
+            .context("task_record_merge has no completionRevision")?;
+        let expected_previous_head = arguments["expectedPreviousHead"]
+            .as_str()
+            .context("task_record_merge has no expectedPreviousHead")?;
+        let resulting_head = arguments["resultingHead"]
+            .as_str()
+            .context("task_record_merge has no resultingHead")?;
+        let method = arguments["method"]
+            .as_str()
+            .context("task_record_merge has no method")?;
+        let summary = arguments["summary"]
+            .as_str()
+            .context("task_record_merge has no summary")?;
+        if expected_previous_head == resulting_head || summary.trim().is_empty() {
+            bail!("task_record_merge did not describe a real Git integration");
+        }
+        if !matches!(
+            method,
+            "merge" | "cherryPick" | "squash" | "rebase" | "manual"
+        ) {
+            bail!("task_record_merge used unsupported method `{method}`");
+        }
+        if !task.completions.iter().any(|completion| {
+            completion.executor_agent_id == executor_agent_id
+                && u64::from(completion.revision) == completion_revision
+        }) {
+            bail!("task_record_merge does not match a durable Completion revision");
+        }
+        if !task.merges.iter().any(|merge| {
+            merge.executor_agent_id == executor_agent_id && merge.resulting_head == resulting_head
+        }) {
+            bail!("task_record_merge does not match the durable MergeRecord projection");
+        }
+        git_output(
+            &fixture.workspace,
+            &[
+                "merge-base",
+                "--is-ancestor",
+                expected_previous_head,
+                resulting_head,
+            ],
+        )?;
+        git_output(
+            &fixture.workspace,
+            &[
+                "merge-base",
+                "--is-ancestor",
+                resulting_head,
+                &task.expected_head,
+            ],
+        )?;
     }
 
     if task.merges.iter().any(|merge| merge.status != "merged") {
@@ -273,6 +354,6 @@ Keep deterministic gameplay rules in game-core.mjs so verify.mjs can import them
 verify.mjs must use node:assert to verify movement boundaries, shooting, collision, scoring, and restart, then print exactly this success marker on its own line:
 {LIVE_VERIFY_MARKER}
 
-In Task mode, update and commit design/shooter.md, spawn at least one executor with explicit non-empty ownedPaths, merge every successful delivery, request review against the current design and HEAD, repair any review failures through the normal Task workflow, and only call task_complete after the reviewer passes. The final Git worktree must be clean."#
+In Task mode, update and commit design/shooter.md, then spawn at least one executor with scopeHints exactly ["game-core.mjs"]. scopeHints are planning and review-focus hints only, not write authorization: that executor must deliver all required non-design files, including files outside the hint. Review every completion, close each approved executor, integrate it with ordinary Git in the Planner workspace, and call task_record_merge with the exact Completion revision and before/after HEADs. Request integrated review against the current design and HEAD, repair any review failures through the normal Task workflow, and only call task_complete after the reviewer passes. The final Git worktree must be clean."#
     )
 }

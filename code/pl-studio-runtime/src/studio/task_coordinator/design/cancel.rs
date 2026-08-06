@@ -7,7 +7,7 @@ use super::git::*;
 use super::patch::ensure_only_validated_design_changes;
 use super::{TaskCoordinator, design_commit_is_current};
 use crate::studio::task_coordinator::git::changed_files_between;
-use crate::studio::task_coordinator::{BranchMutationGuard, DesignCancellationRevert, MergeStatus};
+use crate::studio::task_coordinator::{BranchMutationGuard, DesignCancellationRevert};
 
 impl TaskCoordinator {
     #[cfg(test)]
@@ -41,13 +41,7 @@ impl TaskCoordinator {
         if !design_commit_is_current(&run) {
             bail!("task branch contains commits after the accepted design commit");
         }
-        if self
-            .store
-            .list_merge_records(&run.id)
-            .await?
-            .iter()
-            .any(|record| record.status == MergeStatus::Merged)
-        {
+        if !self.store.list_merge_records(&run.id).await?.is_empty() {
             bail!("task run already has an accepted source merge");
         }
         let lease = self

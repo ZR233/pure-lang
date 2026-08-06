@@ -53,6 +53,7 @@ impl Tool for WriteFileTool {
         context: ToolContext,
     ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
         Box::pin(async move {
+            context.ensure_workspace_writable()?;
             let _write_guard = context.workspace_write_lock().await;
             let input: WriteFileInput = parse_input(input.arguments, self.name())?;
             let paths = workspace(&context).await?;
@@ -111,6 +112,7 @@ impl Tool for CreateDirectoryTool {
         context: ToolContext,
     ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
         Box::pin(async move {
+            context.ensure_workspace_writable()?;
             let _write_guard = context.workspace_write_lock().await;
             let input: PathInput = parse_input(input.arguments, self.name())?;
             let paths = workspace(&context).await?;
@@ -154,6 +156,7 @@ impl Tool for DeletePathTool {
         context: ToolContext,
     ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
         Box::pin(async move {
+            context.ensure_workspace_writable()?;
             let _write_guard = context.workspace_write_lock().await;
             let input: DeletePathInput = parse_input(input.arguments, self.name())?;
             let paths = workspace(&context).await?;
@@ -208,6 +211,7 @@ impl Tool for CopyPathTool {
         context: ToolContext,
     ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
         Box::pin(async move {
+            context.ensure_workspace_writable()?;
             let _write_guard = context.workspace_write_lock().await;
             let input: CopyMoveInput = parse_input(input.arguments, self.name())?;
             let paths = workspace(&context).await?;
@@ -252,6 +256,7 @@ impl Tool for MovePathTool {
         context: ToolContext,
     ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
         Box::pin(async move {
+            context.ensure_workspace_writable()?;
             let _write_guard = context.workspace_write_lock().await;
             let input: CopyMoveInput = parse_input(input.arguments, self.name())?;
             let paths = workspace(&context).await?;

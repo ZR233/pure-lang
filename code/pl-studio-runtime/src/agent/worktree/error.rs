@@ -17,8 +17,6 @@ pub enum WorktreeError {
     Io(String),
     /// worktree 支持未启用。
     Disabled,
-    /// merge 冲突，worktree 未释放。
-    MergeConflict { branch: String, detail: String },
     /// 一个资源操作失败，且其补偿清理也失败。
     OperationFailedWithCleanup {
         operation: Box<WorktreeError>,
@@ -46,14 +44,6 @@ impl fmt::Display for WorktreeError {
             }
             Self::Io(msg) => write!(f, "worktree io error: {msg}"),
             Self::Disabled => write!(f, "worktree support is disabled"),
-            Self::MergeConflict { branch, detail } => {
-                let detail = detail.trim();
-                if detail.is_empty() {
-                    write!(f, "merge conflict on branch `{branch}`")
-                } else {
-                    write!(f, "merge conflict on branch `{branch}`: {detail}")
-                }
-            }
             Self::OperationFailedWithCleanup { operation, cleanup } => {
                 write!(f, "{operation}; rollback failed: {cleanup}")
             }

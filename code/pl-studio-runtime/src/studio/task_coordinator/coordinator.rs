@@ -9,6 +9,10 @@ use tokio::sync::{MutexGuard, broadcast};
 use super::git::{
     RepositorySnapshot, inspect_repository, inspect_worktree_changes, prepare_repository_for_task,
 };
+use super::recovery::{
+    MergingRecovery, inspect_merging_recovery, is_retryable_merge_recovery_message,
+    validate_snapshot_owner,
+};
 use super::{
     CreateTaskRun, TaskRunPhase, TaskRunRecord, TaskWorktreeOwnerSnapshot, WorkUnitRecord,
 };
@@ -107,8 +111,6 @@ pub(crate) struct TaskCoordinator {
     terminal_fact_tx: broadcast::Sender<String>,
     #[cfg(test)]
     pub(super) design_after_commit_barrier: Mutex<Option<super::design::DesignCommitTestBarrier>>,
-    #[cfg(test)]
-    pub(super) merge_after_commit_barrier: Mutex<Option<super::merge::MergeCommitTestBarrier>>,
 }
 
 /// 持有期间串行化任务分支变更，并阻止 executor 基于中间 HEAD 分配。
@@ -129,8 +131,6 @@ impl TaskCoordinator {
             terminal_fact_tx,
             #[cfg(test)]
             design_after_commit_barrier: Mutex::new(None),
-            #[cfg(test)]
-            merge_after_commit_barrier: Mutex::new(None),
         }
     }
 
@@ -347,30 +347,16 @@ impl TaskCoordinator {
                 continue;
             }
             if run.phase == TaskRunPhase::Merging {
-                match self.recover_merging_run(&run).await {
-                    Ok(super::merge::MergeRestartRecovery::Resume(recovered_run)) => {
-                        report.recovered_runs.push(*recovered_run);
-                    }
-                    Ok(super::merge::MergeRestartRecovery::Blocked) => {
-                        self.push_recovery_issue(
-                            &mut report,
-                            &run,
-                            StudioRecoveryIssueScope::Thread,
-                            StudioRecoveryIssueCategory::Merge,
-                            StudioRecoveryIssueAction::CleanupThread,
-                            "merge recovery blocked the task".to_string(),
-                        )
-                        .await?;
-                    }
-                    Err(error) => {
-                        let message = format!("merge recovery failed: {error}");
+                match inspect_merging_recovery(&run).await {
+                    MergingRecovery::Resume => report.recovered_runs.push(run),
+                    MergingRecovery::Retry(message) => {
                         self.block_run(&run, message.clone()).await?;
                         self.push_recovery_issue(
                             &mut report,
                             &run,
                             StudioRecoveryIssueScope::Thread,
                             StudioRecoveryIssueCategory::Merge,
-                            StudioRecoveryIssueAction::CleanupThread,
+                            StudioRecoveryIssueAction::Retry,
                             message,
                         )
                         .await?;
@@ -378,9 +364,7 @@ impl TaskCoordinator {
                 }
                 continue;
             }
-            let resolving_conflict = run.phase == TaskRunPhase::ResolvingConflict;
-            let snapshot = match inspect_repository(&run.workspace_root, !resolving_conflict).await
-            {
+            let snapshot = match inspect_repository(&run.workspace_root, true).await {
                 Ok(snapshot) => snapshot,
                 Err(error) => {
                     let message = format!("repository recovery failed: {error}");
@@ -436,39 +420,71 @@ impl TaskCoordinator {
                 }
                 continue;
             }
-            if resolving_conflict {
-                let records = self.store.list_merge_records(&run.id).await?;
-                let conflicted = records
-                    .iter()
-                    .filter(|record| record.status == super::MergeStatus::Conflicted)
-                    .collect::<Vec<_>>();
-                let result = match conflicted.as_slice() {
-                    [record] => super::merge::validate_conflict_recovery(&run, record).await,
-                    [] => Err(anyhow::anyhow!(
-                        "resolving-conflict run has no conflicted merge record"
-                    )),
-                    _ => Err(anyhow::anyhow!(
-                        "resolving-conflict run has multiple conflicted merge records"
-                    )),
-                };
-                if let Err(error) = result {
-                    let message = format!("conflict recovery failed: {error}");
-                    self.block_run(&run, message.clone()).await?;
-                    self.push_recovery_issue(
-                        &mut report,
-                        &run,
-                        StudioRecoveryIssueScope::Thread,
-                        StudioRecoveryIssueCategory::Conflict,
-                        StudioRecoveryIssueAction::CleanupThread,
-                        message,
-                    )
-                    .await?;
-                    continue;
-                }
-            }
             report.recovered_runs.push(run);
         }
+        for run in self.store.list_retryable_blocked_merge_task_runs().await? {
+            let message = run
+                .status_message
+                .clone()
+                .context("retryable merge recovery task is missing its diagnostic")?;
+            self.push_recovery_issue(
+                &mut report,
+                &run,
+                StudioRecoveryIssueScope::Thread,
+                StudioRecoveryIssueCategory::Merge,
+                StudioRecoveryIssueAction::Retry,
+                message,
+            )
+            .await?;
+        }
         Ok(report)
+    }
+
+    pub(crate) async fn retry_recovery_issue(
+        &self,
+        issue: &StudioRecoveryIssue,
+    ) -> Result<TaskRunRecord> {
+        if issue.action != StudioRecoveryIssueAction::Retry
+            || issue.category != StudioRecoveryIssueCategory::Merge
+        {
+            bail!("recovery issue does not authorize merge reconciliation");
+        }
+        let task_run_id = issue
+            .task_run_id
+            .as_deref()
+            .context("merge recovery issue has no task run")?;
+        let run = self
+            .store
+            .read_task_run(task_run_id)
+            .await?
+            .context("merge recovery task run not found")?;
+        if run.phase != TaskRunPhase::Blocked
+            || run.root_thread_id != issue.thread_id.as_deref().unwrap_or_default()
+            || run.status_message.as_deref() != Some(issue.message.as_str())
+            || run.terminal_generation != Some(run.task_generation)
+            || !is_retryable_merge_recovery_message(&issue.message)
+        {
+            bail!("merge recovery state changed before retry");
+        }
+        let snapshot = inspect_repository(&run.workspace_root, false)
+            .await
+            .context("merge recovery could not inspect the canonical repository")?;
+        validate_snapshot_owner(&run, &snapshot)?;
+
+        let key = BranchKey::new(Path::new(&run.git_common_dir), &run.branch);
+        acquire_process_lease(&key, &run.id)?;
+        let retried = match self.store.retry_blocked_merge_task(&run).await {
+            Ok(retried) => retried,
+            Err(error) => {
+                release_process_lease(&key, &run.id);
+                return Err(error);
+            }
+        };
+        self.owned_process_leases
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(key, retried.id.clone());
+        Ok(retried)
     }
 
     async fn push_recovery_issue(
@@ -863,19 +879,6 @@ impl TaskCoordinator {
         Ok(())
     }
 
-    pub(super) async fn finish_blocked_transition(
-        &self,
-        task_run_id: &str,
-    ) -> Result<TaskRunRecord> {
-        let blocked = self
-            .store
-            .read_task_run(task_run_id)
-            .await?
-            .context("blocked task run not found after durable terminal commit")?;
-        self.publish_blocked_terminal(&blocked)?;
-        Ok(blocked)
-    }
-
     fn publish_blocked_terminal(&self, run: &TaskRunRecord) -> Result<()> {
         if run.phase != TaskRunPhase::Blocked
             || run.terminal_generation != Some(run.task_generation)
@@ -908,15 +911,6 @@ impl TaskCoordinator {
             bail!("task process branch lease is not owned by this coordinator");
         }
         Ok(())
-    }
-
-    #[cfg(test)]
-    pub(crate) fn process_lease_is_held(&self, run: &TaskRunRecord) -> bool {
-        process_leases()
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .get(&BranchKey::new(Path::new(&run.git_common_dir), &run.branch))
-            .is_some_and(|owner| owner == &run.id)
     }
 
     pub(super) fn release_owned_process_lease(&self, task_run_id: &str) {
@@ -1042,11 +1036,7 @@ fn recovery_cleanup_revision(
 }
 
 fn validate_snapshot(run: &TaskRunRecord, snapshot: &RepositorySnapshot) -> Result<()> {
-    let expected_key = BranchKey::new(Path::new(&run.git_common_dir), &run.branch);
-    let actual_key = BranchKey::new(&snapshot.git_common_dir, &snapshot.branch);
-    if expected_key != actual_key {
-        bail!("task branch changed outside the coordinator");
-    }
+    validate_snapshot_owner(run, snapshot)?;
     if snapshot.head != run.expected_head {
         bail!(
             "task HEAD drifted: expected {}, actual {}",

@@ -27,6 +27,11 @@ abstract class StudioApi {
     String? selectedProjectId,
     String? selectedThreadId,
   });
+  Future<StudioState> retryRecoveryIssue(
+    String issueId, {
+    String? selectedProjectId,
+    String? selectedThreadId,
+  });
   Future<StudioState> setModelRole({
     required String roleKey,
     required String providerId,
@@ -262,6 +267,24 @@ class FrbStudioApi implements StudioApi {
         () => frb.cleanupRecoveryIssue(
           issueId: issueId,
           expectedRevision: expectedRevision,
+          selectedProjectId: selectedProjectId,
+          selectedThreadId: selectedThreadId,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Future<StudioState> retryRecoveryIssue(
+    String issueId, {
+    String? selectedProjectId,
+    String? selectedThreadId,
+  }) async {
+    await _ensureReady();
+    return studioStateFromFrbSnapshot(
+      await _bridgeCall(
+        () => frb.retryRecoveryIssue(
+          issueId: issueId,
           selectedProjectId: selectedProjectId,
           selectedThreadId: selectedThreadId,
         ),

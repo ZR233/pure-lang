@@ -22,7 +22,8 @@ Windows 下对应：
 
 单库保存项目、Thread、Turn、Item、input、interaction、attachment 与 Task 产品表。Flutter
 临时 UI 状态不入库，实时流也不保存 replay journal。数据库由 `pl-studio-runtime` 通过
-SeaORM 2.0 异步访问；schema v1 与归档合同见 `19-studio-storage-and-diagnostics.md`。
+SeaORM 2.0 异步访问；schema v2 与不兼容库直接重建合同见
+`19-studio-storage-and-diagnostics.md`。
 `pl-core` 的正常依赖树不包含 SeaORM。provider/model/role 配置仍只由
 `~/.pure/config.toml` schema 12 表达。
 

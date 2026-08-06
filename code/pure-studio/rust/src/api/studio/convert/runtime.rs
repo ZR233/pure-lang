@@ -188,11 +188,19 @@ pub(crate) fn bridge_task_runtime(
             .into_iter()
             .map(|merge| BridgeTaskMergeDto {
                 id: merge.id,
-                agent_id: merge.agent_id,
-                status: merge.status,
-                merge_commit: merge.merge_commit,
-                conflict_files: merge.conflict_files,
-                resolution_summary: merge.resolution_summary,
+                work_unit_id: merge.work_unit_id,
+                completion_id: merge.completion_id,
+                completion_revision: merge.completion_revision,
+                executor_agent_id: merge.executor_agent_id,
+                expected_previous_head: merge.expected_previous_head,
+                resulting_head: merge.resulting_head,
+                delivery_head: merge.delivery_head,
+                method: merge.method,
+                summary: merge.summary,
+                cleanup_status: merge.cleanup_status,
+                cleanup_detail: merge.cleanup_detail,
+                created_at: merge.created_at,
+                updated_at: merge.updated_at,
             })
             .collect(),
         reviews: task

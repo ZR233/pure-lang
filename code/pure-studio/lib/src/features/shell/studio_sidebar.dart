@@ -159,12 +159,11 @@ class _ProjectTile extends ConsumerWidget {
               : null,
           actionTooltip: issue == null
               ? context.l10n.sidebarCloseProject
-              : context.l10n.recoveryCleanupTooltip,
-          actionIcon: issue == null ? Icons.close : Icons.delete_sweep_outlined,
+              : _recoveryActionTooltip(context, issue),
+          actionIcon: issue == null ? Icons.close : _recoveryActionIcon(issue),
+          actionKey: issue == null ? null : _recoveryActionKey(issue),
           onAction: issue != null
-              ? issue.canCleanup
-                    ? () => _showRecoveryCleanupDialog(context, ref, issue)
-                    : null
+              ? _recoveryAction(context, ref, issue)
               : () => _showProjectCleanupDialog(context, ref, project),
         ),
       );
@@ -186,22 +185,22 @@ class _ProjectTile extends ConsumerWidget {
           : colors.onSurfaceVariant,
       onTap: issue == null ? () => controller.selectProject(project.id) : null,
       trailing: IconButton(
-        key: ValueKey('project-cleanup-${project.id}'),
+        key: issue == null
+            ? ValueKey('project-cleanup-${project.id}')
+            : _recoveryActionKey(issue),
         tooltip: issue == null
             ? context.l10n.sidebarCloseProject
-            : context.l10n.recoveryCleanupTooltip,
+            : _recoveryActionTooltip(context, issue),
         style: IconButton.styleFrom(
           minimumSize: const Size.square(30),
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         ),
         icon: Icon(
-          issue == null ? Icons.close : Icons.delete_sweep_outlined,
+          issue == null ? Icons.close : _recoveryActionIcon(issue),
           size: 17,
         ),
         onPressed: issue != null
-            ? issue.canCleanup
-                  ? () => _showRecoveryCleanupDialog(context, ref, issue)
-                  : null
+            ? _recoveryAction(context, ref, issue)
             : () => _showProjectCleanupDialog(context, ref, project),
       ),
     );
@@ -249,17 +248,15 @@ class _ThreadTile extends ConsumerWidget {
               : null,
           actionKey: issue == null
               ? StudioDriverKeys.archiveThread(thread.id)
-              : null,
+              : _recoveryActionKey(issue),
           actionTooltip: issue == null
               ? context.l10n.sidebarArchiveSession
-              : context.l10n.recoveryCleanupTooltip,
+              : _recoveryActionTooltip(context, issue),
           actionIcon: issue == null
               ? Icons.archive_outlined
-              : Icons.delete_sweep_outlined,
+              : _recoveryActionIcon(issue),
           onAction: issue != null
-              ? issue.canCleanup
-                    ? () => _showRecoveryCleanupDialog(context, ref, issue)
-                    : null
+              ? _recoveryAction(context, ref, issue)
               : canArchive
               ? () => ref
                     .read(studioControllerProvider.notifier)
@@ -290,22 +287,22 @@ class _ThreadTile extends ConsumerWidget {
                 .selectThread(thread.id)
           : null,
       trailing: IconButton(
-        key: issue == null ? StudioDriverKeys.archiveThread(thread.id) : null,
+        key: issue == null
+            ? StudioDriverKeys.archiveThread(thread.id)
+            : _recoveryActionKey(issue),
         tooltip: issue == null
             ? context.l10n.sidebarArchiveSession
-            : context.l10n.recoveryCleanupTooltip,
+            : _recoveryActionTooltip(context, issue),
         style: IconButton.styleFrom(
           minimumSize: const Size.square(30),
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         ),
         icon: Icon(
-          issue == null ? Icons.archive_outlined : Icons.delete_sweep_outlined,
+          issue == null ? Icons.archive_outlined : _recoveryActionIcon(issue),
           size: 18,
         ),
         onPressed: issue != null
-            ? issue.canCleanup
-                  ? () => _showRecoveryCleanupDialog(context, ref, issue)
-                  : null
+            ? _recoveryAction(context, ref, issue)
             : canArchive
             ? () => ref
                   .read(studioControllerProvider.notifier)
@@ -316,6 +313,62 @@ class _ThreadTile extends ConsumerWidget {
     return KeyedSubtree(
       key: StudioDriverKeys.threadRow(thread.id),
       child: issue == null ? tile : Tooltip(message: issue.detail, child: tile),
+    );
+  }
+}
+
+Key? _recoveryActionKey(StudioRecoveryIssue issue) {
+  if (issue.canRetry) {
+    return StudioDriverKeys.retryRecoveryIssue(issue.id);
+  }
+  if (issue.availableActions.contains(RecoveryIssueAction.removeProject)) {
+    final projectId = issue.projectId;
+    if (projectId != null) {
+      return ValueKey('project-cleanup-$projectId');
+    }
+  }
+  return issue.canCleanup ? ValueKey('recovery-cleanup-${issue.id}') : null;
+}
+
+String _recoveryActionTooltip(BuildContext context, StudioRecoveryIssue issue) {
+  return issue.canRetry
+      ? context.l10n.recoveryRetryTooltip
+      : context.l10n.recoveryCleanupTooltip;
+}
+
+IconData _recoveryActionIcon(StudioRecoveryIssue issue) {
+  return issue.canRetry ? Icons.refresh : Icons.delete_sweep_outlined;
+}
+
+VoidCallback? _recoveryAction(
+  BuildContext context,
+  WidgetRef ref,
+  StudioRecoveryIssue issue,
+) {
+  if (issue.canRetry) {
+    return () => unawaited(_retryRecoveryIssue(context, ref, issue));
+  }
+  if (issue.canCleanup) {
+    return () => _showRecoveryCleanupDialog(context, ref, issue);
+  }
+  return null;
+}
+
+Future<void> _retryRecoveryIssue(
+  BuildContext context,
+  WidgetRef ref,
+  StudioRecoveryIssue issue,
+) async {
+  try {
+    await ref
+        .read(studioControllerProvider.notifier)
+        .retryRecoveryIssue(issue.id);
+  } catch (error) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(context.l10n.recoveryRetryFailed(error.toString())),
+      ),
     );
   }
 }

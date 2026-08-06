@@ -24,7 +24,7 @@ fn tool_context(workspace_root: PathBuf) -> ToolContext {
         event_tx,
         options: TurnOptions::default(),
         workspace_access: super::super::WorkspaceAccess::WorkspaceOnly,
-        workspace_root,
+        workspace: crate::tool::AgentWorkspace::local(workspace_root),
         workspace_instructions: None,
         instruction_snapshot: None,
         provider_call_id: None,

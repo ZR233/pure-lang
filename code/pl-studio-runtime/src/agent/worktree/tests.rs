@@ -7,11 +7,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Barrier};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use super::{CloseDisposition, CloseOutcome, WorktreeCreateSpec, WorktreeError, WorktreeManager};
 use super::{
     DurableWorktreeDisposition, DurableWorktreePresence, DurableWorktreeResource,
     reconcile_task_worktrees, set_after_registration_remove_barrier,
 };
+use super::{WorktreeCreateSpec, WorktreeManager};
 
 /// 临时仓库目录序号，避免并发测试因时间戳碰撞命中同一目录。
 static REPO_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -90,10 +90,7 @@ async fn create_from_spec_uses_exact_path_branch_and_base_commit() {
         base_commit
     );
     assert!(!handle.path.join("later.txt").exists());
-    manager
-        .close(&handle, CloseDisposition::Discard)
-        .await
-        .unwrap();
+    manager.discard(&handle).await.unwrap();
     fs::remove_dir_all(repo).ok();
 }
 
@@ -272,59 +269,12 @@ async fn create_failure_preserves_preexisting_branch() {
 }
 
 #[tokio::test]
-async fn close_discard_removes_worktree_and_branch() {
+async fn discard_removes_worktree_and_branch() {
     let repo = temp_git_repo();
     let manager = WorktreeManager::local(repo.clone());
     let handle = manager.create("agent-1").await.unwrap();
-    manager
-        .close(&handle, CloseDisposition::Discard)
-        .await
-        .unwrap();
+    manager.discard(&handle).await.unwrap();
     assert!(!handle.path.exists());
-    fs::remove_dir_all(repo).ok();
-}
-
-#[tokio::test]
-async fn close_merge_merges_into_main_workspace() {
-    let repo = temp_git_repo();
-    let manager = WorktreeManager::local(repo.clone());
-    let handle = manager.create("agent-1").await.unwrap();
-    fs::write(handle.path.join("feature.txt"), "new feature\n").unwrap();
-    let outcome = manager
-        .close(
-            &handle,
-            CloseDisposition::Merge {
-                target_branch: None,
-            },
-        )
-        .await
-        .unwrap();
-    assert!(matches!(outcome, CloseOutcome::Merged));
-    assert!(repo.join("feature.txt").exists());
-    fs::remove_dir_all(repo).ok();
-}
-
-#[tokio::test]
-async fn close_merge_conflict_keeps_worktree() {
-    let repo = temp_git_repo();
-    let manager = WorktreeManager::local(repo.clone());
-    let handle = manager.create("agent-1").await.unwrap();
-    // worktree 与主仓库分别改同一文件，制造 merge 冲突。
-    fs::write(handle.path.join("README.md"), "worktree change\n").unwrap();
-    fs::write(repo.join("README.md"), "main change\n").unwrap();
-    run_git(&repo, &["add", "-A"]);
-    run_git(&repo, &["commit", "-m", "main change"]);
-    let result = manager
-        .close(
-            &handle,
-            CloseDisposition::Merge {
-                target_branch: None,
-            },
-        )
-        .await;
-    assert!(matches!(result, Err(WorktreeError::MergeConflict { .. })));
-    // 冲突时 worktree 保留，调用方可重试或改 discard。
-    assert!(handle.path.exists());
     fs::remove_dir_all(repo).ok();
 }
 

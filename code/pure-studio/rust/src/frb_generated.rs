@@ -40,7 +40,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.12.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1038626854;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1916488449;
 
 // Section: executor
 
@@ -1173,6 +1173,50 @@ fn wire__crate__api__studio__handlers__prompt__respond_interaction_impl(
                             api_resolution,
                         )
                         .await?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__studio__handlers__recovery__retry_recovery_issue_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "retry_recovery_issue",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_issue_id = <String>::sse_decode(&mut deserializer);
+            let api_selected_project_id = <Option<String>>::sse_decode(&mut deserializer);
+            let api_selected_thread_id = <Option<String>>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, crate::api::studio::types::error::BridgeError>(
+                    (move || async move {
+                        let output_ok =
+                            crate::api::studio::handlers::recovery::retry_recovery_issue(
+                                api_issue_id,
+                                api_selected_project_id,
+                                api_selected_thread_id,
+                            )
+                            .await?;
                         Ok(output_ok)
                     })()
                     .await,
@@ -3166,18 +3210,34 @@ impl SseDecode for crate::api::studio::types::runtime::BridgeTaskMergeDto {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_id = <String>::sse_decode(deserializer);
-        let mut var_agentId = <String>::sse_decode(deserializer);
-        let mut var_status = <String>::sse_decode(deserializer);
-        let mut var_mergeCommit = <Option<String>>::sse_decode(deserializer);
-        let mut var_conflictFiles = <Vec<String>>::sse_decode(deserializer);
-        let mut var_resolutionSummary = <Option<String>>::sse_decode(deserializer);
+        let mut var_workUnitId = <String>::sse_decode(deserializer);
+        let mut var_completionId = <String>::sse_decode(deserializer);
+        let mut var_completionRevision = <u32>::sse_decode(deserializer);
+        let mut var_executorAgentId = <String>::sse_decode(deserializer);
+        let mut var_expectedPreviousHead = <String>::sse_decode(deserializer);
+        let mut var_resultingHead = <String>::sse_decode(deserializer);
+        let mut var_deliveryHead = <String>::sse_decode(deserializer);
+        let mut var_method = <String>::sse_decode(deserializer);
+        let mut var_summary = <String>::sse_decode(deserializer);
+        let mut var_cleanupStatus = <String>::sse_decode(deserializer);
+        let mut var_cleanupDetail = <Option<String>>::sse_decode(deserializer);
+        let mut var_createdAt = <i64>::sse_decode(deserializer);
+        let mut var_updatedAt = <i64>::sse_decode(deserializer);
         return crate::api::studio::types::runtime::BridgeTaskMergeDto {
             id: var_id,
-            agent_id: var_agentId,
-            status: var_status,
-            merge_commit: var_mergeCommit,
-            conflict_files: var_conflictFiles,
-            resolution_summary: var_resolutionSummary,
+            work_unit_id: var_workUnitId,
+            completion_id: var_completionId,
+            completion_revision: var_completionRevision,
+            executor_agent_id: var_executorAgentId,
+            expected_previous_head: var_expectedPreviousHead,
+            resulting_head: var_resultingHead,
+            delivery_head: var_deliveryHead,
+            method: var_method,
+            summary: var_summary,
+            cleanup_status: var_cleanupStatus,
+            cleanup_detail: var_cleanupDetail,
+            created_at: var_createdAt,
+            updated_at: var_updatedAt,
         };
     }
 }
@@ -5573,21 +5633,22 @@ fn pde_ffi_dispatcher_primary_impl(
 28 => wire__crate__api__studio__handlers__recovery__preview_recovery_issue_cleanup_impl(port, ptr, rust_vec_len, data_len),
 29 => wire__crate__api__studio__handlers__history__read_thread_impl(port, ptr, rust_vec_len, data_len),
 30 => wire__crate__api__studio__handlers__prompt__respond_interaction_impl(port, ptr, rust_vec_len, data_len),
-31 => wire__crate__api__studio__handlers__settings__save_general_settings_impl(port, ptr, rust_vec_len, data_len),
-32 => wire__crate__api__studio__handlers__settings__save_instructions_settings_impl(port, ptr, rust_vec_len, data_len),
-33 => wire__crate__api__studio__handlers__settings__save_mcp_settings_impl(port, ptr, rust_vec_len, data_len),
-34 => wire__crate__api__studio__handlers__settings__save_provider_settings_impl(port, ptr, rust_vec_len, data_len),
-35 => wire__crate__api__studio__handlers__settings__save_runtime_permission_mode_impl(port, ptr, rust_vec_len, data_len),
-36 => wire__crate__api__studio__handlers__settings__save_skills_settings_impl(port, ptr, rust_vec_len, data_len),
-37 => wire__crate__api__studio__handlers__settings__save_web_search_settings_impl(port, ptr, rust_vec_len, data_len),
-38 => wire__crate__api__studio__handlers__lifecycle__select_project_impl(port, ptr, rust_vec_len, data_len),
-39 => wire__crate__api__studio__handlers__settings__set_model_role_impl(port, ptr, rust_vec_len, data_len),
-40 => wire__crate__api__studio__handlers__thread__set_thread_mode_impl(port, ptr, rust_vec_len, data_len),
-41 => wire__crate__api__studio__handlers__lifecycle__shutdown_runtime_impl(port, ptr, rust_vec_len, data_len),
-42 => wire__crate__api__studio__handlers__lifecycle__start_runtime_impl(port, ptr, rust_vec_len, data_len),
-43 => wire__crate__api__studio__handlers__prompt__start_turn_impl(port, ptr, rust_vec_len, data_len),
-44 => wire__crate__api__studio__handlers__prompt__steer_turn_impl(port, ptr, rust_vec_len, data_len),
-45 => wire__crate__api__studio__subscription__subscribe_thread_impl(port, ptr, rust_vec_len, data_len),
+31 => wire__crate__api__studio__handlers__recovery__retry_recovery_issue_impl(port, ptr, rust_vec_len, data_len),
+32 => wire__crate__api__studio__handlers__settings__save_general_settings_impl(port, ptr, rust_vec_len, data_len),
+33 => wire__crate__api__studio__handlers__settings__save_instructions_settings_impl(port, ptr, rust_vec_len, data_len),
+34 => wire__crate__api__studio__handlers__settings__save_mcp_settings_impl(port, ptr, rust_vec_len, data_len),
+35 => wire__crate__api__studio__handlers__settings__save_provider_settings_impl(port, ptr, rust_vec_len, data_len),
+36 => wire__crate__api__studio__handlers__settings__save_runtime_permission_mode_impl(port, ptr, rust_vec_len, data_len),
+37 => wire__crate__api__studio__handlers__settings__save_skills_settings_impl(port, ptr, rust_vec_len, data_len),
+38 => wire__crate__api__studio__handlers__settings__save_web_search_settings_impl(port, ptr, rust_vec_len, data_len),
+39 => wire__crate__api__studio__handlers__lifecycle__select_project_impl(port, ptr, rust_vec_len, data_len),
+40 => wire__crate__api__studio__handlers__settings__set_model_role_impl(port, ptr, rust_vec_len, data_len),
+41 => wire__crate__api__studio__handlers__thread__set_thread_mode_impl(port, ptr, rust_vec_len, data_len),
+42 => wire__crate__api__studio__handlers__lifecycle__shutdown_runtime_impl(port, ptr, rust_vec_len, data_len),
+43 => wire__crate__api__studio__handlers__lifecycle__start_runtime_impl(port, ptr, rust_vec_len, data_len),
+44 => wire__crate__api__studio__handlers__prompt__start_turn_impl(port, ptr, rust_vec_len, data_len),
+45 => wire__crate__api__studio__handlers__prompt__steer_turn_impl(port, ptr, rust_vec_len, data_len),
+46 => wire__crate__api__studio__subscription__subscribe_thread_impl(port, ptr, rust_vec_len, data_len),
                         _ => unreachable!(),
                     }
 }
@@ -7139,11 +7200,19 @@ impl flutter_rust_bridge::IntoDart for crate::api::studio::types::runtime::Bridg
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
             self.id.into_into_dart().into_dart(),
-            self.agent_id.into_into_dart().into_dart(),
-            self.status.into_into_dart().into_dart(),
-            self.merge_commit.into_into_dart().into_dart(),
-            self.conflict_files.into_into_dart().into_dart(),
-            self.resolution_summary.into_into_dart().into_dart(),
+            self.work_unit_id.into_into_dart().into_dart(),
+            self.completion_id.into_into_dart().into_dart(),
+            self.completion_revision.into_into_dart().into_dart(),
+            self.executor_agent_id.into_into_dart().into_dart(),
+            self.expected_previous_head.into_into_dart().into_dart(),
+            self.resulting_head.into_into_dart().into_dart(),
+            self.delivery_head.into_into_dart().into_dart(),
+            self.method.into_into_dart().into_dart(),
+            self.summary.into_into_dart().into_dart(),
+            self.cleanup_status.into_into_dart().into_dart(),
+            self.cleanup_detail.into_into_dart().into_dart(),
+            self.created_at.into_into_dart().into_dart(),
+            self.updated_at.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -9938,11 +10007,19 @@ impl SseEncode for crate::api::studio::types::runtime::BridgeTaskMergeDto {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <String>::sse_encode(self.id, serializer);
-        <String>::sse_encode(self.agent_id, serializer);
-        <String>::sse_encode(self.status, serializer);
-        <Option<String>>::sse_encode(self.merge_commit, serializer);
-        <Vec<String>>::sse_encode(self.conflict_files, serializer);
-        <Option<String>>::sse_encode(self.resolution_summary, serializer);
+        <String>::sse_encode(self.work_unit_id, serializer);
+        <String>::sse_encode(self.completion_id, serializer);
+        <u32>::sse_encode(self.completion_revision, serializer);
+        <String>::sse_encode(self.executor_agent_id, serializer);
+        <String>::sse_encode(self.expected_previous_head, serializer);
+        <String>::sse_encode(self.resulting_head, serializer);
+        <String>::sse_encode(self.delivery_head, serializer);
+        <String>::sse_encode(self.method, serializer);
+        <String>::sse_encode(self.summary, serializer);
+        <String>::sse_encode(self.cleanup_status, serializer);
+        <Option<String>>::sse_encode(self.cleanup_detail, serializer);
+        <i64>::sse_encode(self.created_at, serializer);
+        <i64>::sse_encode(self.updated_at, serializer);
     }
 }
 

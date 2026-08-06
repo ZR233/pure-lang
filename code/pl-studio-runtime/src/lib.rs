@@ -17,10 +17,10 @@ mod studio;
 mod updater;
 
 pub use agent::{
-    CloseDisposition, CloseOutcome, DurableWorktreeDisposition, DurableWorktreePresence,
-    DurableWorktreeResource, LocalWorktreeBackend, MergeOutcome, WorktreeBackend,
-    WorktreeCreateFailure, WorktreeCreateSpec, WorktreeError, WorktreeHandle, WorktreeManager,
-    WorktreeReconciliation, WorktreeRef, reconcile_task_worktree_group, same_worktree_path,
+    DurableWorktreeDisposition, DurableWorktreePresence, DurableWorktreeResource,
+    LocalWorktreeBackend, WorktreeBackend, WorktreeCreateFailure, WorktreeCreateSpec,
+    WorktreeError, WorktreeHandle, WorktreeManager, WorktreeReconciliation, WorktreeRef,
+    reconcile_task_worktree_group, same_worktree_path,
 };
 pub use config::{
     ConfigPaths, ConfigStore, STUDIO_CONFIG_SCHEMA_VERSION, StudioConfig, StudioInstructionsConfig,

@@ -86,14 +86,19 @@ fn studio_task_runtime(
             .into_iter()
             .map(|merge| StudioTaskMergeRuntime {
                 id: merge.id,
-                agent_id: merge.agent_id,
-                status: merge.status.as_str().to_string(),
-                merge_commit: merge
-                    .evidence
-                    .as_ref()
-                    .and_then(|evidence| evidence.merge_commit.clone()),
-                conflict_files: merge.conflict_files,
-                resolution_summary: merge.resolution_summary,
+                work_unit_id: merge.work_unit_id,
+                completion_id: merge.completion_id,
+                completion_revision: merge.completion_revision,
+                executor_agent_id: merge.executor_agent_id,
+                expected_previous_head: merge.expected_previous_head,
+                resulting_head: merge.resulting_head,
+                delivery_head: merge.delivery_head,
+                method: merge.method.as_str().to_string(),
+                summary: merge.summary,
+                cleanup_status: merge.cleanup.status,
+                cleanup_detail: merge.cleanup.detail,
+                created_at: merge.created_at,
+                updated_at: merge.updated_at,
             })
             .collect(),
         reviews: reviews

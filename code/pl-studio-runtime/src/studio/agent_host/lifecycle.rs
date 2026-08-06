@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use pl_core::{AgentLifecycleAdapter, CloseLifecycleRequest, SpawnLifecycleRequest};
 
-use crate::{CloseDisposition, PureError, Result, WorktreeHandle, WorktreeManager};
+use crate::{PureError, Result, WorktreeHandle, WorktreeManager};
 
 use crate::studio::task_coordinator::TaskCoordinator;
 use crate::studio::task_coordinator::{
@@ -84,8 +84,9 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
             root_thread_id: root_thread_id.clone(),
             task_name: task_name.clone(),
             role: role.to_string(),
-            owned_paths: intent.owned_paths.clone(),
+            scope_hints: intent.scope_hints.clone(),
             requested_by_call_id: intent.requesting_tool_call_id(),
+            review_round_id: intent.review_round_id.clone(),
         };
         let preparation = self
             .coordinator
@@ -104,10 +105,6 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
                 .await);
             }
         };
-        let workspace_root = worktree
-            .as_ref()
-            .map(|(_, handle)| handle.path.clone())
-            .unwrap_or_else(|| intent.workspace_root.clone().unwrap_or_default());
         if let Err(error) = self
             .store
             .create_child_thread(ChildThreadSpec {
@@ -132,7 +129,6 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
             agent_id: request.child.identity.id,
             resource: StudioAgentResource {
                 thread_id: child_thread_id,
-                workspace_root,
                 task_name,
                 request: studio_request,
                 preparation,
@@ -166,7 +162,7 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
             failures.push(error.to_string());
         }
         if let Some((manager, handle)) = &lease.resource.worktree
-            && let Err(error) = manager.close(handle, CloseDisposition::Discard).await
+            && let Err(error) = manager.discard(handle).await
         {
             failures.push(error.to_string());
         }
@@ -226,7 +222,7 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
             && let Some((manager, handle)) = &resource.worktree
         {
             manager
-                .close(handle, CloseDisposition::Discard)
+                .discard(handle)
                 .await
                 .map_err(|error| lifecycle_error(error.to_string()))?;
         }
@@ -258,7 +254,7 @@ async fn rollback_prepared_spawn(
         failures.push(format!("spawn allocation rollback failed: {error}"));
     }
     if let Some((manager, handle)) = worktree
-        && let Err(error) = manager.close(handle, CloseDisposition::Discard).await
+        && let Err(error) = manager.discard(handle).await
     {
         failures.push(format!("worktree cleanup failed: {error}"));
     }

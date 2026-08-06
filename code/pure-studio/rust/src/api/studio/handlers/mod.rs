@@ -17,7 +17,7 @@ pub use prompt::{interrupt_turn, respond_interaction, start_turn, steer_turn};
 pub use providers::{list_discovered_skills, load_provider_usages};
 pub use recovery::{
     cleanup_project, cleanup_recovery_issue, preview_project_cleanup,
-    preview_recovery_issue_cleanup,
+    preview_recovery_issue_cleanup, retry_recovery_issue,
 };
 pub use settings::{
     load_provider_catalog, load_web_search_settings, save_general_settings,

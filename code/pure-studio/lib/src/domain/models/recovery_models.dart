@@ -35,6 +35,8 @@ class StudioRecoveryIssue {
   bool get canCleanup =>
       availableActions.contains(RecoveryIssueAction.cleanupThread) ||
       availableActions.contains(RecoveryIssueAction.removeProject);
+
+  bool get canRetry => availableActions.contains(RecoveryIssueAction.retry);
 }
 
 enum RecoveryResourcePresence { absent, complete, partial }

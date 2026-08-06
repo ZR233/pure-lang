@@ -3,7 +3,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
-use super::{StudioSpawnIntent, normalize_owned_paths};
+use super::{StudioSpawnIntent, normalize_scope_hints};
 use crate::studio::task_coordinator::TaskCoordinator;
 use crate::tool::{
     RegisteredTool, ToolExecutionResult, ToolInputSchemaField, strict_tool_input_schema,
@@ -19,7 +19,8 @@ const MAX_EXECUTOR_CONSTRAINT_BYTES: usize = 16 * 1024;
 struct TaskSpawnExecutorInput {
     task_name: String,
     message: String,
-    owned_paths: Vec<String>,
+    #[serde(default)]
+    scope_hints: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -28,7 +29,7 @@ struct TaskSpawnExecutorOutput {
     agent_id: String,
     thread_id: String,
     turn_id: String,
-    owned_paths: Vec<String>,
+    scope_hints: Vec<String>,
 }
 
 impl TaskCoordinator {
@@ -40,7 +41,7 @@ impl TaskCoordinator {
         let thread_id = thread_id.into();
         RegisteredTool::from_typed_fallible_execution_result(
             "task_spawn_executor",
-            "Spawn one Task executor with a fresh session and an enforced owned-path scope.",
+            "Spawn one Task executor with a fresh session and optional repository-relative scope hints.",
             strict_tool_input_schema([
                 ToolInputSchemaField::required(
                     "taskName",
@@ -50,16 +51,15 @@ impl TaskCoordinator {
                     "message",
                     serde_json::json!({ "type": "string", "minLength": 1 }),
                 ),
-                ToolInputSchemaField::required(
-                    "ownedPaths",
+                ToolInputSchemaField::optional(
+                    "scopeHints",
                     serde_json::json!({
                         "type": "array",
-                        "minItems": 1,
-                        "description": "Non-overlapping relative ownership scopes. A file path is exact; every directory scope must end with `/**`, for example `code/pl-core/**`. A bare directory name does not include descendants.",
+                        "description": "Optional repository-relative path prefixes used only for task decomposition, review focus, and potential-conflict hints. They do not restrict workspace writes; directories do not require `/**`.",
                         "items": {
                             "type": "string",
                             "minLength": 1,
-                            "description": "An exact relative file path or a relative directory path ending in `/**`."
+                            "description": "A normalized repository-relative path prefix."
                         }
                     }),
                 ),
@@ -75,8 +75,8 @@ impl TaskCoordinator {
                     if arguments.message.trim().is_empty() {
                         bail!("message must not be empty");
                     }
-                    let owned_paths = normalize_owned_paths(&arguments.owned_paths)?;
-                    let constraint = executor_constraint(&owned_paths)?;
+                    let scope_hints = normalize_scope_hints(&arguments.scope_hints)?;
+                    let constraint = executor_constraint(&scope_hints)?;
                     let call_id = context
                         .provider_call_id
                         .as_deref()
@@ -86,9 +86,8 @@ impl TaskCoordinator {
                     let intent = StudioSpawnIntent::task_executor(
                         &thread_id,
                         task_name,
-                        owned_paths.clone(),
+                        scope_hints.clone(),
                         call_id,
-                        context.workspace_root,
                         constraint,
                     );
                     let result = runtime
@@ -110,7 +109,7 @@ impl TaskCoordinator {
                         agent_id: result.snapshot.identity.id.to_string(),
                         thread_id: child_thread_id.to_string(),
                         turn_id: turn_id.to_string(),
-                        owned_paths,
+                        scope_hints,
                     })
                     .map_err(anyhow::Error::from)
                 }
@@ -120,16 +119,21 @@ impl TaskCoordinator {
     }
 }
 
-fn executor_constraint(owned_paths: &[String]) -> Result<String> {
-    let paths = owned_paths
+fn executor_constraint(scope_hints: &[String]) -> Result<String> {
+    let paths = scope_hints
         .iter()
         .map(|path| format!("- {path}"))
         .collect::<Vec<_>>()
         .join("\n");
+    let paths = if paths.is_empty() {
+        "- （未提供；以完整任务说明为准）".to_string()
+    } else {
+        paths
+    };
     let constraint = format!(
         "你是 Task executor，只能在系统分配给你的独立 worktree 中工作。\
-\n你只能修改以下 ownedPaths 覆盖的文件：\n{paths}\
-\n不得修改范围外文件。完成定位、开始实现、开始验证、遇到阻塞和准备提交完成报告时，调用 \
+\n以下 scopeHints 仅用于理解任务拆分和审查重点，不是文件写入边界；worktree 内的必要修改均允许：\n{paths}\
+\n完成定位、开始实现、开始验证、遇到阻塞和准备提交完成报告时，调用 \
 report_progress 记录准确摘要与下一步；它不是心跳。准备提交时使用 readyForCompletion，\
 该 checkpoint 不表示已完成或可审查。完成后必须自行验证、提交所有变更，并调用 \
 report_completion 提交实际 HEAD 与验证摘要；只有该工具成功才产生 readyForReview，普通文本回复不算完成。\
@@ -138,7 +142,7 @@ report_completion 提交实际 HEAD 与验证摘要；只有该工具成功才�
 也不得自行把提交合入任务分支。"
     );
     if constraint.len() > MAX_EXECUTOR_CONSTRAINT_BYTES {
-        bail!("ownedPaths are too large for executor instructions");
+        bail!("scopeHints are too large for executor instructions");
     }
     Ok(constraint)
 }

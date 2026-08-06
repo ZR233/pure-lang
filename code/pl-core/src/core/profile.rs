@@ -6,6 +6,7 @@ use pl_protocol::Result;
 use crate::config::{ReasoningEffort, SkillsConfig, ToolCapabilityConfig};
 use crate::context_compaction::ContextCompactionConfig;
 use crate::instruction::InstructionProfile;
+use crate::tool::AgentWorkspace;
 use crate::turn::TurnOptions;
 
 use super::TurnEngine;
@@ -25,14 +26,21 @@ pub enum ToolProfile {
 /// workspace 运行边界配置。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct WorkspaceProfile {
-    pub root: Option<PathBuf>,
+    pub workspace: Option<AgentWorkspace>,
     pub instructions: Option<String>,
 }
 
 impl WorkspaceProfile {
     pub fn new(root: impl Into<PathBuf>) -> Self {
         Self {
-            root: Some(root.into()),
+            workspace: Some(AgentWorkspace::local(root)),
+            instructions: None,
+        }
+    }
+
+    pub fn from_agent_workspace(workspace: AgentWorkspace) -> Self {
+        Self {
+            workspace: Some(workspace),
             instructions: None,
         }
     }
@@ -81,6 +89,16 @@ impl CoreRuntimeProfile {
     pub fn local_workspace(root: impl Into<PathBuf>) -> Self {
         Self {
             workspace_profile: WorkspaceProfile::new(root),
+            tool_profile: ToolProfile::LocalWorkspace,
+            instruction_profile: None,
+            runtime_options: CoreRuntimeOptions::default(),
+            context_compaction: ContextCompactionConfig::default(),
+        }
+    }
+
+    pub fn local_agent_workspace(workspace: AgentWorkspace) -> Self {
+        Self {
+            workspace_profile: WorkspaceProfile::from_agent_workspace(workspace),
             tool_profile: ToolProfile::LocalWorkspace,
             instruction_profile: None,
             runtime_options: CoreRuntimeOptions::default(),
@@ -203,7 +221,7 @@ impl TurnEngineBuilder {
             effort: self.effort,
             skills: self.skills,
             lsp_runtime: self.lsp_runtime,
-            workspace_root: workspace_profile.root,
+            workspace: workspace_profile.workspace,
             workspace_instructions: workspace_profile.instructions,
             instruction_profile,
             tool_profile,

@@ -44,6 +44,9 @@ abstract final class StudioDriverKeys {
   static ValueKey<String> archiveThread(String id) =>
       ValueKey<String>('thread-archive-$id');
 
+  static ValueKey<String> retryRecoveryIssue(String id) =>
+      ValueKey<String>('recovery-retry-$id');
+
   static ValueKey<String> turnActivity(String id) =>
       ValueKey<String>('turn-activity-$id');
 

@@ -18,6 +18,7 @@ use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
     BranchLeaseRecord, CreateTaskRun, TaskRunPhase, TaskRunRecord, TaskStopOrigin, TaskStopReason,
+    is_retryable_merge_recovery_message,
 };
 
 impl StudioStore {
@@ -100,6 +101,27 @@ impl StudioStore {
             .all(&self.db)
             .await?;
         models.into_iter().map(task_run_record).collect()
+    }
+
+    pub(crate) async fn list_retryable_blocked_merge_task_runs(
+        &self,
+    ) -> Result<Vec<TaskRunRecord>> {
+        let models = entities::task_run::Entity::find()
+            .filter(entities::task_run::Column::Phase.eq(TaskRunPhase::Blocked.as_str()))
+            .order_by_asc(entities::task_run::Column::CreatedAt)
+            .order_by_asc(entities::task_run::Column::Id)
+            .all(&self.db)
+            .await?;
+        models
+            .into_iter()
+            .filter(|model| {
+                model
+                    .status_message
+                    .as_deref()
+                    .is_some_and(is_retryable_merge_recovery_message)
+            })
+            .map(task_run_record)
+            .collect()
     }
 
     pub(crate) async fn list_task_runs_for_project(
@@ -296,7 +318,6 @@ impl StudioStore {
             TaskRunPhase::Planning
             | TaskRunPhase::PendingConfirmation
             | TaskRunPhase::Merging
-            | TaskRunPhase::ResolvingConflict
             | TaskRunPhase::Reviewing
             | TaskRunPhase::Stopping
             | TaskRunPhase::Completed

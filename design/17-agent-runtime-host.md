@@ -15,6 +15,10 @@ ThreadActor 唯一拥有 Thread revision、durable input queue 的内存镜像�
 identity、live Item overlay 和当前 prompt generation/context baseline。它不缓存完整历史，也不
 拥有 Task/worktree；context baseline 只用于生成模型输入差量，不能成为 runtime 事实源。
 
+产品可通过受限命令重配置 idle ThreadActor 的 role。该命令要求 lifecycle Active、没有活动 Turn、
+active input 或 pending input，并通过 repository CAS 持久化 identity 与发布 directory revision；
+运行中或排队中的 Turn 继续绑定创建时的 role，不允许热切换。
+
 ## 17.2 Host 端口
 
 pl-core 只保留三个窄端口：
@@ -26,6 +30,12 @@ pl-core 只保留三个窄端口：
 
 通知由 pl-core 在 repository 事务成功后直接发布，不经过额外 durable projection 或 replay
 journal。Task tool 自己事务性写 TaskService；core 不携带 product mutation。
+
+TurnFactory 为每次 turn 提供 typed `AgentWorkspace { root, boundary, mutability }`。Studio 通过
+durable owner 解析 workspace：root/explorer 绑定 Project，executor 绑定 WorkUnit worktree，
+Delivery reviewer 绑定目标 Completion worktree，Integrated reviewer 绑定 TaskRun 主 workspace。
+child owner、Git identity 或路径无法精确解析时必须 fail closed；禁止因为进程内资源表缺失而
+回退 Project root。进程内 lifecycle resource 只保存 handle/lease，不是 workspace 事实源。
 
 ## 17.3 取消与恢复
 

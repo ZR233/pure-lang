@@ -189,27 +189,33 @@ class _MergeDetail extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _ItemHeading(
-            title: merge.agentId,
-            status: context.taskStatusLabel(merge.status),
+          _ItemHeading(title: merge.executorAgentId, status: merge.method),
+          StatusDetailRow(
+            label: context.l10n.statusTaskCompletionRevision,
+            value: '${merge.completionRevision}',
           ),
-          if (merge.mergeCommit case final commit?)
-            StatusDetailRow(
-              label: context.l10n.statusTaskCommit,
-              value: _shortCommit(commit),
-            ),
-          if (merge.conflictFiles.isNotEmpty)
-            StatusDetailRow(
-              label: context.l10n.statusTaskConflicts,
-              value: merge.conflictFiles.join(', '),
-              valueMaxLines: 3,
-            ),
-          if (merge.resolutionSummary case final summary?)
-            StatusDetailRow(
-              label: context.taskPhaseLabel('resolvingConflict'),
-              value: summary,
-              valueMaxLines: 2,
-            ),
+          StatusDetailRow(
+            label: context.l10n.statusTaskPreviousHead,
+            value: _shortCommit(merge.expectedPreviousHead),
+          ),
+          StatusDetailRow(
+            label: context.l10n.statusTaskDeliveryHead,
+            value: _shortCommit(merge.deliveryHead),
+          ),
+          StatusDetailRow(
+            label: context.l10n.statusTaskResultingHead,
+            value: _shortCommit(merge.resultingHead),
+          ),
+          StatusDetailRow(
+            label: context.l10n.statusTaskSummary,
+            value: merge.summary,
+            valueMaxLines: 3,
+          ),
+          StatusDetailRow(
+            label: context.l10n.statusTaskCleanup,
+            value: [merge.cleanupStatus, ?merge.cleanupDetail].join(' · '),
+            valueMaxLines: 2,
+          ),
         ],
       ),
     );

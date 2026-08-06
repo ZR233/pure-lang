@@ -22,7 +22,7 @@ async fn context(root: &Path) -> ToolContext {
         event_tx,
         options: TurnOptions::default(),
         workspace_access: crate::tool::WorkspaceAccess::WorkspaceOnly,
-        workspace_root: root.to_path_buf(),
+        workspace: crate::tool::AgentWorkspace::local(root.to_path_buf()),
         workspace_instructions: None,
         instruction_snapshot: None,
         provider_call_id: None,

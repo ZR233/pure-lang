@@ -444,6 +444,13 @@ class DemoStudioApi implements StudioApi {
   }) => bootstrap();
 
   @override
+  Future<StudioState> retryRecoveryIssue(
+    String issueId, {
+    String? selectedProjectId,
+    String? selectedThreadId,
+  }) => bootstrap();
+
+  @override
   Future<StudioState> setModelRole({
     required String roleKey,
     required String providerId,

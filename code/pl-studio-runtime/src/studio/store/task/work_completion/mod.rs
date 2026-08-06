@@ -250,7 +250,6 @@ impl StudioStore {
                 WorkUnitStatus::ReadyForReview
                     | WorkUnitStatus::Reviewing
                     | WorkUnitStatus::Approved
-                    | WorkUnitStatus::Merging
                     | WorkUnitStatus::Merged
                     | WorkUnitStatus::NoDelivery
                     | WorkUnitStatus::Failed
@@ -306,20 +305,15 @@ impl StudioStore {
             .collect()
     }
 
-    pub(crate) async fn read_approved_work_completion(
+    pub(crate) async fn read_work_completion(
         &self,
-        work_unit_id: &str,
-    ) -> Result<WorkCompletionRecord> {
-        let completion = entities::work_completion::Entity::find()
-            .filter(entities::work_completion::Column::WorkUnitId.eq(work_unit_id.to_string()))
-            .order_by_desc(entities::work_completion::Column::Revision)
+        completion_id: &str,
+    ) -> Result<Option<WorkCompletionRecord>> {
+        entities::work_completion::Entity::find_by_id(completion_id.to_string())
             .one(&self.db)
             .await?
-            .context("executor work unit has no completion")?;
-        if completion.status != WorkCompletionStatus::Approved.as_str() {
-            bail!("latest executor completion is not approved");
-        }
-        work_completion_record(completion)
+            .map(work_completion_record)
+            .transpose()
     }
 }
 

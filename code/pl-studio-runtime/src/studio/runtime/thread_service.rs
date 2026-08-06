@@ -134,7 +134,34 @@ impl StudioRuntime {
         {
             bail!("thread mode cannot change while a task is active");
         }
-        self.store.set_thread_mode(thread_id, mode).await?;
+        let desired_role = match mode {
+            StudioMode::Simple => StudioRole::Executor.id(),
+            StudioMode::Task => StudioRole::Planner.id(),
+        };
+        let (handle, agent_id) = self.ensure_thread_agent(thread_id).await?;
+        let snapshot = handle
+            .snapshot(agent_id.clone())
+            .await
+            .map_err(|error| anyhow::anyhow!(error))?;
+        let previous_role = snapshot.identity.role;
+        let role_changed = previous_role != desired_role;
+        if role_changed {
+            handle
+                .reconfigure_idle_role(agent_id.clone(), desired_role)
+                .await
+                .map_err(|error| anyhow::anyhow!(error))?;
+        }
+        if let Err(error) = self.store.set_thread_mode(thread_id, mode).await {
+            if role_changed
+                && let Err(rollback_error) =
+                    handle.reconfigure_idle_role(agent_id, previous_role).await
+            {
+                bail!(
+                    "failed to persist Thread mode: {error}; actor role rollback failed: {rollback_error}"
+                );
+            }
+            return Err(error);
+        }
         self.product_events
             .emit_thread_directory(&thread.project_id)
             .await?;

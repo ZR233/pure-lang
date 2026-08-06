@@ -6,9 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use pretty_assertions::assert_eq;
 
 use super::*;
-use crate::studio::task_coordinator::{
-    AllocateExecutor, CreateMergeRecord, MergeStatus, UpdateMergeRecord,
-};
+use crate::studio::task_coordinator::AllocateExecutor;
 use crate::{StudioMode, StudioStore};
 
 const DESIGN_PATCH: &str =
@@ -235,28 +233,9 @@ async fn accepted_source_merge_requires_a_final_design_consistency_commit() {
             .await
             .unwrap()
     );
-    let merge = fixture
-        .store
-        .create_merge_record(CreateMergeRecord {
-            task_run_id: fixture.run.id.clone(),
-            agent_id: "agent-source".to_string(),
-            expected_head: design.design_commit,
-            source_commit: merged_head.clone(),
-            conflict_files: Vec::new(),
-        })
-        .await
-        .unwrap();
     fixture
         .store
-        .update_merge_record(
-            &merge.id,
-            UpdateMergeRecord {
-                status: MergeStatus::Merged,
-                resolution_summary: Some("accepted".to_string()),
-                verification: Some(vec!["cargo test".to_string()]),
-                attempt: 1,
-            },
-        )
+        .create_test_merge_record(&fixture.run.id, &design.design_commit, &merged_head)
         .await
         .unwrap();
 
@@ -357,7 +336,7 @@ fn allocation(thread_id: &str, suffix: &str) -> AllocateExecutor {
     AllocateExecutor {
         thread_id: thread_id.to_string(),
         title: suffix.to_string(),
-        owned_paths: vec![format!("src/{suffix}.rs")],
+        scope_hints: vec![format!("src/{suffix}.rs")],
         agent_id: format!("agent-{suffix}"),
         requested_by_call_id: format!("call-{suffix}"),
     }
