@@ -555,11 +555,11 @@ async fn wait_agents_observes_turn_that_finished_before_subscription() {
     .unwrap();
 
     assert_eq!(result.reason, AgentDirectoryWaitReason::Terminal);
-    assert_eq!(result.agents.len(), 1);
-    assert_eq!(result.agents[0].identity.id, agent_id);
-    assert_eq!(result.agents[0].lifecycle, AgentLifecycleState::Active);
+    assert_eq!(result.messages.len(), 1);
+    assert_eq!(result.messages[0].identity.id, agent_id);
+    assert_eq!(result.messages[0].lifecycle, AgentLifecycleState::Active);
     assert_eq!(
-        result.agents[0].last_turn.as_ref().map(|turn| turn.kind),
+        result.messages[0].turn_outcome,
         Some(TurnOutcomeKind::Failed)
     );
     runtime.shutdown().await.unwrap();

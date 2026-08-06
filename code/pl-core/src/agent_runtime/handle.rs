@@ -9,11 +9,11 @@ use super::agent_loop::{AgentLoopCommand, AgentLoopHandle};
 use super::coordinator::{AgentRegistry, CoordinatorCommand};
 use super::directory::{AgentDirectoryHandle, AgentDirectorySnapshot, AgentDirectorySubscription};
 use super::{
-    AgentActivityState, AgentCurrentSessionSubmitRequest, AgentDirectoryWaitReason,
-    AgentDirectoryWaitResult, AgentId, AgentLifecycleState, AgentProgressCheckpoint,
-    AgentProgressStage, AgentRegistration, AgentRuntimeResult, AgentSessionDigest, AgentSnapshot,
-    AgentSpawnRequest, AgentSpawnResult, AgentSubmitRequest, AgentTurnCheckpoint, AgentWaitResult,
-    ThreadId, TurnId,
+    AgentActivityState, AgentCurrentSessionSubmitRequest, AgentDirectoryWaitMessage,
+    AgentDirectoryWaitReason, AgentDirectoryWaitResult, AgentId, AgentLifecycleState,
+    AgentProgressCheckpoint, AgentProgressStage, AgentRegistration, AgentRuntimeResult,
+    AgentSessionDigest, AgentSnapshot, AgentSpawnRequest, AgentSpawnResult, AgentSubmitRequest,
+    AgentTurnCheckpoint, AgentWaitResult, ThreadId, TurnId,
 };
 use crate::agent_runtime::state::AgentRuntimeError;
 use crate::{AgentRoleId, ThreadEventBusHandle, ThreadEventSubscription};
@@ -247,7 +247,7 @@ impl AgentRuntimeHandle {
         self.directory.subscribe()
     }
 
-    /// 等待任一目标出现新 progress、interaction 或 terminal 事实。
+    /// 等待任一目标出现新 progress、interaction 或 terminal 事实，并返回最新增量消息。
     pub async fn wait_agents(
         &self,
         targets: Vec<AgentId>,
@@ -393,7 +393,7 @@ fn current_wait_result<'a>(
     if !terminal.is_empty() {
         return Some(AgentDirectoryWaitResult {
             reason: AgentDirectoryWaitReason::Terminal,
-            agents: terminal,
+            messages: terminal.into_iter().map(wait_message).collect(),
         });
     }
     let interactions = snapshots
@@ -402,7 +402,7 @@ fn current_wait_result<'a>(
         .collect::<Vec<_>>();
     (!interactions.is_empty()).then_some(AgentDirectoryWaitResult {
         reason: AgentDirectoryWaitReason::Interaction,
-        agents: interactions,
+        messages: interactions.into_iter().map(wait_message).collect(),
     })
 }
 
@@ -440,11 +440,29 @@ fn changed_wait_result(
         })?;
     Some(AgentDirectoryWaitResult {
         reason,
-        agents: changed
+        messages: changed
             .into_iter()
             .filter_map(|(candidate, snapshot)| (candidate == reason).then_some(snapshot))
+            .map(wait_message)
             .collect(),
     })
+}
+
+fn wait_message(snapshot: AgentSnapshot) -> AgentDirectoryWaitMessage {
+    let turn_outcome = if snapshot.lifecycle != AgentLifecycleState::Active
+        || snapshot.activity == AgentActivityState::Idle
+    {
+        snapshot.last_turn.map(|outcome| outcome.kind)
+    } else {
+        None
+    };
+    AgentDirectoryWaitMessage {
+        identity: snapshot.identity,
+        lifecycle: snapshot.lifecycle,
+        activity: snapshot.activity,
+        message: snapshot.progress,
+        turn_outcome,
+    }
 }
 
 async fn receive<T>(receiver: oneshot::Receiver<T>) -> AgentRuntimeResult<T> {

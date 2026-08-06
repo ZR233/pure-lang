@@ -94,8 +94,9 @@ Skills 工具同样挂在 `pl-core` 默认工具集中。`skills_list` 和 `skil
 `list_agents`、`wait_agents`、`read_agent_session` 和 `close_agent` 暴露，并只持有非泛型
 `AgentRuntimeHandle`。未关闭 agent 可连续接收输入，不存在 `resume_agent`。`send_message`
 在目标运行时 steer、空闲时启动明确的新 turn；`interrupt_agent` 只取消当前 turn。等待由
-`wait_agents` 订阅 Agent Directory watch，不使用 inactivity timer、轮询或后台续轮。Studio
-的 agent 展示继续以 durable snapshot 和 append-only timeline 为准。
+`wait_agents` 订阅 Agent Directory watch，不使用 inactivity timer、轮询或后台续轮，并只返回
+本次变化 agent 的最新 progress message；`list_agents` 才返回完整可见目录，wait 后不重复调用。
+Studio 的 agent 展示继续以 durable snapshot 和 append-only timeline 为准。
 
 通用协作工具不承载 Studio 的任务分配协议。Task harness 另外注册
 `task_spawn_executor { taskName, message, scopeHints? }`、

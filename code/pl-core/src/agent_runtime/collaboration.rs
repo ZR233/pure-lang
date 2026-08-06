@@ -6,9 +6,9 @@ use serde_json::{Value, json};
 
 use super::state::unix_timestamp;
 use super::{
-    AgentAccessPolicy, AgentActivityState, AgentId, AgentLifecycleState, AgentProgressStage,
-    AgentRuntimeHandle, AgentSnapshot, AgentSpawnRequest, AgentTargetSelector, ThreadContextState,
-    ThreadId,
+    AgentAccessPolicy, AgentActivityState, AgentDirectoryWaitMessage, AgentId, AgentLifecycleState,
+    AgentProgressStage, AgentRuntimeHandle, AgentSnapshot, AgentSpawnRequest, AgentTargetSelector,
+    ThreadContextState, ThreadId,
 };
 use crate::tool::ToolBudgetTiming;
 use crate::{AgentRoleId, Tool, ToolContext, ToolEffect, ToolInput, ToolOutput};
@@ -123,9 +123,11 @@ impl CollaborationToolKind {
                 "Send a message to an accessible agent without interrupting its active turn."
             }
             Self::Interrupt => "Interrupt an accessible agent's current turn.",
-            Self::List => "List compact canonical snapshots for visible agents.",
+            Self::List => {
+                "List full compact canonical snapshots for visible agents when discovering targets, reconciling after restart, or diagnosing stalled work."
+            }
             Self::Wait => {
-                "Wait until a target reports progress, requests interaction, or finishes a turn."
+                "Wait until a target reports progress, requests interaction, or finishes a turn, then return only the latest changed agent messages. Consume this delta directly instead of calling list_agents to refresh."
             }
             Self::ReadSession => {
                 "Read a bounded filtered digest for a terminal or potentially stuck agent."
@@ -423,12 +425,12 @@ impl CollaborationTool {
             None => wait.await,
         }
         .map_err(|error| tool_error(TOOL_WAIT_AGENTS, error.to_string()))?;
-        let agents = result
-            .agents
+        let messages = result
+            .messages
             .iter()
-            .map(|snapshot| compact_agent(snapshot, &snapshots))
+            .map(|message| compact_wait_message(message, &snapshots))
             .collect::<Vec<_>>();
-        json_output(json!({ "reason": result.reason, "agents": agents }))
+        json_output(json!({ "reason": result.reason, "messages": messages }))
     }
 
     async fn read_session(&self, input: ToolInput) -> Result<ToolOutput, PureError> {
@@ -512,6 +514,27 @@ fn compact_agent(snapshot: &AgentSnapshot, all: &[AgentSnapshot]) -> Value {
         "progress": snapshot.progress,
         "updatedAt": snapshot.updated_at,
         "summaryAgeSeconds": summary_age_seconds(snapshot),
+    })
+}
+
+fn compact_wait_message(message: &AgentDirectoryWaitMessage, all: &[AgentSnapshot]) -> Value {
+    let progress = message.message.as_ref().map(|progress| {
+        json!({
+            "stage": progress.stage,
+            "summary": progress.summary,
+            "nextStep": progress.next_step,
+        })
+    });
+    json!({
+        "agentId": message.identity.id,
+        "path": agent_path(&message.identity.id, all),
+        "role": message.identity.role,
+        "message": progress,
+        "state": {
+            "lifecycle": message.lifecycle,
+            "activity": message.activity,
+            "turnOutcome": message.turn_outcome,
+        },
     })
 }
 
@@ -627,6 +650,50 @@ mod tests {
     }
 
     #[test]
+    fn wait_message_projection_contains_only_latest_delta() {
+        let agent_id = AgentId::new("executor").unwrap();
+        let message = AgentDirectoryWaitMessage {
+            identity: super::super::AgentIdentity {
+                id: agent_id,
+                parent_id: None,
+                role: AgentRoleId::new("executor").unwrap(),
+                depth: 0,
+            },
+            lifecycle: AgentLifecycleState::Active,
+            activity: AgentActivityState::Running,
+            message: Some(super::super::AgentProgressCheckpoint {
+                stage: AgentProgressStage::Verifying,
+                summary: "验证完成".to_string(),
+                next_step: "等待审查".to_string(),
+                revision: 3,
+                updated_at: 123,
+            }),
+            turn_outcome: None,
+        };
+
+        let output = compact_wait_message(&message, &[]);
+
+        assert_eq!(output["agentId"], "executor");
+        assert_eq!(output["path"], serde_json::json!(["executor"]));
+        assert_eq!(output["message"]["stage"], "verifying");
+        assert_eq!(output["message"]["summary"], "验证完成");
+        assert!(output["message"].get("revision").is_none());
+        assert!(output.get("agents").is_none());
+        assert!(output["state"]["turnOutcome"].is_null());
+
+        let terminal = AgentDirectoryWaitMessage {
+            identity: message.identity,
+            lifecycle: AgentLifecycleState::Closed,
+            activity: AgentActivityState::Idle,
+            message: None,
+            turn_outcome: Some(super::super::TurnOutcomeKind::Failed),
+        };
+        let terminal_output = compact_wait_message(&terminal, &[]);
+        assert!(terminal_output["message"].is_null());
+        assert_eq!(terminal_output["state"]["turnOutcome"], "failed");
+    }
+
+    #[test]
     fn read_session_age_gate_only_applies_while_agent_has_active_work() {
         assert!(session_read_requires_age_gate(
             AgentLifecycleState::Active,
@@ -656,5 +723,15 @@ mod tests {
             };
             assert_eq!(kind.budget_timing(), expected);
         }
+        assert!(
+            CollaborationToolKind::Wait
+                .description()
+                .contains("latest changed agent messages")
+        );
+        assert!(
+            CollaborationToolKind::List
+                .description()
+                .contains("discovering targets")
+        );
     }
 }

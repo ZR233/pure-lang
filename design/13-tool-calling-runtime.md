@@ -161,10 +161,16 @@ event sink 提供产品资源和持久化事实，不手写共享状态形状。
 runtime 从目标 agent 的唯一 ThreadId 解析并验证同一 Thread 树、权限与 lifecycle。
 `send_message` 永不取消：运行中作为 steer，空闲时启动明确的新 turn；`interrupt_agent`
 只取消当前 turn。`wait_agents` 先订阅 Agent Directory watch 再读取 canonical snapshot，
-没有 timeout 或轮询，只由目标 progress、interaction、terminal 或调用方取消结束。Studio
+没有 timeout 或轮询，只由目标 progress、interaction、terminal 或调用方取消结束，并以
+`{ reason, messages }` 返回本次变化 agent 的最新 progress message 和精简状态，不重复完整
+directory。`list_agents` 保留完整 canonical 目录查询，仅用于目标发现、重启对账或诊断；wait
+返回后不要求再次 list。Studio
 把 owner lifecycle/progress 投影到 root Thread 的 Agent Directory；每个 child Thread 只记录
 该 owner 主动执行的协作 Item，Todo 作为 `ThreadRuntimeSnapshot` 的完整 replacement，不伪装成
 Timeline Item。
+
+`wait_agents` 的 `messages` 是破坏性新协议；旧模型历史、工具结果和派生缓存不做迁移或兼容
+转换，协议切换后由产品重建新会话和相关 fixture。
 
 产品 harness 的 spawn 契约不扩展通用 `spawn_agent` schema。Task 的
 `task_spawn_executor` 接收 required `taskName/message` 与 optional `scopeHints`；hint 只描述

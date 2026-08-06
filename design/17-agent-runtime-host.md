@@ -53,4 +53,6 @@ read_agent_session 和 close_agent；它们以 agentPath 解析 ThreadId。Threa
 root/parent/role/path/status/progress，不保存第二份 timeline 或 last turn outcome。
 
 `wait_agents` 订阅 directory watch 后重读 snapshot，只因 progress、interaction 或 terminal
-变化返回；没有 timer、轮询或自动续轮。child 内部 Item 只进入 child Thread。
+变化返回，并只返回本次变化 agent 的最新 progress message 和精简状态；没有 timer、轮询或
+自动续轮。`list_agents` 保留完整目录查询，不作为 wait 后的重复刷新。child 内部 Item 只
+进入 child Thread。

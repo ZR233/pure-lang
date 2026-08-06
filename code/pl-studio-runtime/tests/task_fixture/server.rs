@@ -101,7 +101,7 @@ impl ScriptedModelServer {
         if !progress.errors.is_empty() {
             bail!("scripted model errors:\n{}", progress.errors.join("\n"));
         }
-        let expected = (21, 7, 6);
+        let expected = (20, 7, 6);
         if (progress.planner, progress.executor, progress.reviewer) != expected {
             bail!(
                 "scripted model stopped at planner={}, executor={}, reviewer={}; expected {expected:?}\n{}",
@@ -111,6 +111,13 @@ impl ScriptedModelServer {
                 progress.requests.join("\n")
             );
         }
+        assert!(
+            !progress
+                .requests
+                .iter()
+                .any(|request| request.contains("list_agents(executor)")),
+            "executor wait delta should not be followed by list_agents refresh"
+        );
         Ok(())
     }
 
@@ -233,14 +240,10 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
             )
         }
         8 => (
-            "list_agents(executor)",
-            tool_call("list-executor", "list_agents", serde_json::json!({})),
-        ),
-        9 => (
             "task_status(completion)",
             tool_call("status-completion", "task_status", serde_json::json!({})),
         ),
-        10 => {
+        9 => {
             let executor_id = executor_agent_id(state).await?;
             (
                 "task_request_delivery_review",
@@ -251,11 +254,11 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 ),
             )
         }
-        11 => (
+        10 => (
             "list_agents(delivery-review)",
             tool_call("list-delivery-review", "list_agents", serde_json::json!({})),
         ),
-        12 => (
+        11 => (
             "task_status(delivery-review)",
             tool_call(
                 "status-delivery-review",
@@ -263,7 +266,7 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 serde_json::json!({}),
             ),
         ),
-        13 => {
+        12 => {
             let executor_id = executor_agent_id(state).await?;
             (
                 "close_agent(executor)",
@@ -274,7 +277,7 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 ),
             )
         }
-        14 => {
+        13 => {
             let task = current_task(state).await?;
             let work_unit = task
                 .work_units
@@ -295,7 +298,7 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 ),
             )
         }
-        15 => ("task_record_merge", {
+        14 => ("task_record_merge", {
             let task = current_task(state).await?;
             let executor_id = executor_agent_id(state).await?;
             let completion = task
@@ -321,7 +324,7 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 }),
             )
         }),
-        16 => (
+        15 => (
             "task_update_design(consistency)",
             tool_call(
                 "design-consistency",
@@ -329,7 +332,7 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 serde_json::json!({"patch": CONSISTENCY_DESIGN_PATCH}),
             ),
         ),
-        17 => (
+        16 => (
             "task_request_integrated_review",
             tool_call(
                 "request-integrated-review",
@@ -337,7 +340,7 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 serde_json::json!({}),
             ),
         ),
-        18 => (
+        17 => (
             "list_agents(integrated-review)",
             tool_call(
                 "list-integrated-review",
@@ -345,7 +348,7 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 serde_json::json!({}),
             ),
         ),
-        19 => (
+        18 => (
             "task_status(integrated-review)",
             tool_call(
                 "status-integrated-review",
@@ -353,7 +356,7 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
                 serde_json::json!({}),
             ),
         ),
-        20 => (
+        19 => (
             "task_complete",
             tool_call("complete-task", "task_complete", serde_json::json!({})),
         ),

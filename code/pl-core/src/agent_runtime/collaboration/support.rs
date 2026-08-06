@@ -165,7 +165,7 @@ pub(super) fn wait_schema(selector: &AgentTargetSelector) -> Value {
             "type": "array",
             "items": target_property_schema(
                 selector,
-                Some("Agent id whose next directory change should end the wait.")
+                Some("Agent id whose next progress, interaction, or terminal change should end the wait.")
             ),
             "minItems": 1,
             "uniqueItems": true

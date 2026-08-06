@@ -55,8 +55,11 @@ Task root 只允许 planner 创建 explorer；executor 通过 `task_spawn_execut
 通过 delivery/integrated review 工具创建。executor/reviewer depth 固定为 1。
 
 `wait_agents` 订阅 Thread directory watch 后读取 snapshot，只因 progress、interaction 或
-terminal 变化返回。没有轮询、自动续轮或超时中断。五分钟仅允许 planner 读取有界 child
-Thread 诊断，不是失败判据。
+terminal 变化返回，并以 `messages` 返回本次最新增量；planner 直接消费该结果，不在 wait
+之后调用 `list_agents` 重复刷新完整目录。没有轮询、自动续轮或超时中断。五分钟仅允许
+planner 读取有界 child Thread 诊断，不是失败判据。
+
+该 wait 输出协议不迁移旧历史；旧会话或 fixture 不兼容时直接重建。
 
 review request 成功创建 reviewer 后必须结束当前 planner Turn。reviewer 提交 durable verdict 后，
 Runtime 等待 root Thread idle，再以稳定 mail ID 提交一次隐藏 continuation；新的 planner Turn 从

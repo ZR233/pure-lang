@@ -12,8 +12,9 @@ Use this skill when the user asks for subagents, parallel exploration, multi-cra
 
 Use `spawn_agent` for managed asynchronous work. Children report meaningful checkpoints with
 `report_progress`; the runtime never wakes the parent, starts a continuation, or infers failure from
-silence. Use `list_agents` to read canonical summaries and `wait_agents` when the parent has no other
-work.
+silence. Use `list_agents` to discover targets or inspect the full canonical directory, and use
+`wait_agents` when the parent has no other work. `wait_agents` returns only the latest changed
+agent messages; consume that delta directly instead of refreshing it with `list_agents`.
 
 Avoid subagents when the task is small, strongly sequential, or requires one shared edit context.
 
@@ -43,9 +44,11 @@ The parent owns coordination:
 1. Spawn only the agents needed.
 2. Continue independent parent work while children run.
 3. When no executable parent work remains, call `wait_agents`; do not poll `list_agents`.
-4. After a wait returns, call `list_agents` or a product status tool to read canonical state.
-5. If a child has not updated its progress for five minutes, use `read_agent_session` only as bounded
-   evidence before deciding whether to `send_message` with a concrete alternative or
+4. After a wait returns, consume its latest messages directly. Call `list_agents` only when you
+   need target discovery, restart reconciliation, or a full diagnostic directory snapshot.
+5. If a child has not updated its progress for five minutes, use `list_agents` for the current
+   directory age and `read_agent_session` only as bounded evidence before deciding whether to
+   `send_message` with a concrete alternative or
    `interrupt_agent`.
 6. Reconcile conflicts in child findings.
 7. Close agents only when their work is no longer needed; in Task mode, follow the product review and

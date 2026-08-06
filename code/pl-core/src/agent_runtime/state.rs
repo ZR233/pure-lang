@@ -144,12 +144,26 @@ pub enum AgentDirectoryWaitReason {
     Terminal,
 }
 
-/// `wait_agents` 的 canonical 结果。
+/// `wait_agents` 返回的单个最新增量消息。
+///
+/// 该类型只保留模型处理本次 directory 变化所需的字段，不复制完整的
+/// [`AgentSnapshot`]。历史工具结果不做兼容转换；协议变化时由调用方建立新会话。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentDirectoryWaitMessage {
+    pub identity: AgentIdentity,
+    pub lifecycle: AgentLifecycleState,
+    pub activity: AgentActivityState,
+    pub message: Option<AgentProgressCheckpoint>,
+    pub turn_outcome: Option<TurnOutcomeKind>,
+}
+
+/// `wait_agents` 的 canonical 增量结果。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentDirectoryWaitResult {
     pub reason: AgentDirectoryWaitReason,
-    pub agents: Vec<AgentSnapshot>,
+    pub messages: Vec<AgentDirectoryWaitMessage>,
 }
 
 /// 可直接投影到产品协议的 agent latest snapshot。
