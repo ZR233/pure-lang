@@ -136,6 +136,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   dco_decode_box_autoadd_bridge_product_event_envelope(dynamic raw);
 
   @protected
+  BridgePromptPrefixChangedReason
+  dco_decode_box_autoadd_bridge_prompt_prefix_changed_reason(dynamic raw);
+
+  @protected
   BridgeStudioUpdateDto dco_decode_box_autoadd_bridge_studio_update_dto(
     dynamic raw,
   );
@@ -353,6 +357,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeProductStreamEnvelope dco_decode_bridge_product_stream_envelope(
     dynamic raw,
   );
+
+  @protected
+  BridgePromptPrefixChangedReason
+  dco_decode_bridge_prompt_prefix_changed_reason(dynamic raw);
 
   @protected
   BridgeProviderCatalogSnapshot dco_decode_bridge_provider_catalog_snapshot(
@@ -817,6 +825,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   dco_decode_opt_box_autoadd_bridge_model_reasoning_descriptor(dynamic raw);
 
   @protected
+  BridgePromptPrefixChangedReason?
+  dco_decode_opt_box_autoadd_bridge_prompt_prefix_changed_reason(dynamic raw);
+
+  @protected
   BridgeTaskRuntimeDto? dco_decode_opt_box_autoadd_bridge_task_runtime_dto(
     dynamic raw,
   );
@@ -1047,6 +1059,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   BridgeProductEventEnvelope
   sse_decode_box_autoadd_bridge_product_event_envelope(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgePromptPrefixChangedReason
+  sse_decode_box_autoadd_bridge_prompt_prefix_changed_reason(
     SseDeserializer deserializer,
   );
 
@@ -1314,6 +1332,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeProductStreamEnvelope sse_decode_bridge_product_stream_envelope(
     SseDeserializer deserializer,
   );
+
+  @protected
+  BridgePromptPrefixChangedReason
+  sse_decode_bridge_prompt_prefix_changed_reason(SseDeserializer deserializer);
 
   @protected
   BridgeProviderCatalogSnapshot sse_decode_bridge_provider_catalog_snapshot(
@@ -1900,6 +1922,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgePromptPrefixChangedReason?
+  sse_decode_opt_box_autoadd_bridge_prompt_prefix_changed_reason(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeTaskRuntimeDto? sse_decode_opt_box_autoadd_bridge_task_runtime_dto(
     SseDeserializer deserializer,
   );
@@ -2181,6 +2209,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_bridge_product_event_envelope(
     BridgeProductEventEnvelope self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_bridge_prompt_prefix_changed_reason(
+    BridgePromptPrefixChangedReason self,
     SseSerializer serializer,
   );
 
@@ -2502,6 +2536,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_bridge_product_stream_envelope(
     BridgeProductStreamEnvelope self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_prompt_prefix_changed_reason(
+    BridgePromptPrefixChangedReason self,
     SseSerializer serializer,
   );
 
@@ -3219,6 +3259,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_bridge_model_reasoning_descriptor(
     BridgeModelReasoningDescriptor? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_bridge_prompt_prefix_changed_reason(
+    BridgePromptPrefixChangedReason? self,
     SseSerializer serializer,
   );
 

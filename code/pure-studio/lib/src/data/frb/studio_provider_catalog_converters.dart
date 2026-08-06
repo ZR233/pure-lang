@@ -29,6 +29,7 @@ ProviderCatalogView providerCatalogFromFrb(
           hostedWebSearch: preset.serviceCapabilities.webSearch.hostedResponses,
           standaloneWebSearch:
               preset.serviceCapabilities.webSearch.standalone ?? '',
+          promptCacheDialect: preset.serviceCapabilities.promptCacheDialect,
           iconKey: preset.iconKey,
         ),
     ],
@@ -70,5 +71,6 @@ ProviderModelView _providerModelFromCatalog(frb.BridgeModelDescriptor model) {
     inputPricePerMTok: pricing?.inputPerMtok,
     outputPricePerMTok: pricing?.outputPerMtok,
     cacheReadPricePerMTok: pricing?.cacheReadPerMtok,
+    cacheWritePricePerMTok: pricing?.cacheWritePerMtok,
   );
 }

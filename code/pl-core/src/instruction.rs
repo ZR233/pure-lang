@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
 use pl_model::ModelInfo;
@@ -40,6 +40,7 @@ pub struct ExecutionInstructionProfile<'a> {
 pub struct InstructionBundle {
     pub instructions: String,
     pub prelude_messages: Vec<Message>,
+    pub prefix_section_hashes: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -283,21 +284,81 @@ impl InstructionSnapshot {
 
     pub fn to_bundle(&self) -> InstructionBundle {
         let mut prelude_messages = Vec::new();
-        if !self.developer.is_empty() {
-            prelude_messages.push(text_message(
-                MessageRole::System,
-                format_blocks("# Developer Instructions", &self.developer),
-            ));
-        }
-        if !self.user.is_empty() {
-            prelude_messages.push(text_message(
-                MessageRole::User,
-                format_blocks("# User Context", &self.user),
-            ));
-        }
+        let mut prefix_section_hashes = BTreeMap::from([(
+            "base".to_string(),
+            crate::canonical_content_hash(self.base.content.as_bytes()),
+        )]);
+        push_instruction_group(
+            &mut prelude_messages,
+            &mut prefix_section_hashes,
+            "globalDeveloper",
+            MessageRole::System,
+            "# Global Developer Instructions",
+            select_blocks(
+                &self.developer,
+                &[
+                    InstructionSourceKind::Platform,
+                    InstructionSourceKind::ConfigDeveloper,
+                    InstructionSourceKind::ProfileDeveloper,
+                ],
+            ),
+        );
+        push_instruction_group(
+            &mut prelude_messages,
+            &mut prefix_section_hashes,
+            "globalUser",
+            MessageRole::User,
+            "# Global User Context",
+            select_blocks(
+                &self.user,
+                &[
+                    InstructionSourceKind::ConfigUser,
+                    InstructionSourceKind::ProfileUser,
+                ],
+            ),
+        );
+        push_instruction_group(
+            &mut prelude_messages,
+            &mut prefix_section_hashes,
+            "modeRole",
+            MessageRole::System,
+            "# Mode and Role Instructions",
+            select_blocks(
+                &self.developer,
+                &[
+                    InstructionSourceKind::ExecutionProfile,
+                    InstructionSourceKind::SubagentConstraint,
+                    InstructionSourceKind::SubagentForce,
+                ],
+            ),
+        );
+        push_instruction_group(
+            &mut prelude_messages,
+            &mut prefix_section_hashes,
+            "skills",
+            MessageRole::System,
+            "# Skill Instructions",
+            select_blocks(&self.developer, &[InstructionSourceKind::Skills]),
+        );
+        push_instruction_group(
+            &mut prelude_messages,
+            &mut prefix_section_hashes,
+            "workspace",
+            MessageRole::User,
+            "# Workspace Context",
+            select_blocks(
+                &self.user,
+                &[
+                    InstructionSourceKind::ProjectDoc,
+                    InstructionSourceKind::WorkspaceFallback,
+                    InstructionSourceKind::ProfileWorkspace,
+                ],
+            ),
+        );
         InstructionBundle {
             instructions: self.base.content.clone(),
             prelude_messages,
+            prefix_section_hashes,
         }
     }
 
@@ -493,6 +554,36 @@ fn format_blocks(title: &str, blocks: &[InstructionBlock]) -> String {
         output.push_str(&block.content);
     }
     output
+}
+
+fn select_blocks(
+    blocks: &[InstructionBlock],
+    kinds: &[InstructionSourceKind],
+) -> Vec<InstructionBlock> {
+    blocks
+        .iter()
+        .filter(|block| kinds.contains(&block.source.kind))
+        .cloned()
+        .collect()
+}
+
+fn push_instruction_group(
+    messages: &mut Vec<Message>,
+    hashes: &mut BTreeMap<String, String>,
+    id: &str,
+    role: MessageRole,
+    title: &str,
+    blocks: Vec<InstructionBlock>,
+) {
+    if blocks.is_empty() {
+        return;
+    }
+    let content = format_blocks(title, &blocks);
+    hashes.insert(
+        id.to_string(),
+        crate::canonical_content_hash(content.as_bytes()),
+    );
+    messages.push(text_message(role, content));
 }
 
 fn text_message(role: MessageRole, content: String) -> Message {
@@ -745,28 +836,73 @@ mod tests {
     }
 
     #[test]
-    fn bundle_maps_developer_to_system_and_user_context_to_user() {
+    fn bundle_orders_fixed_layers_from_global_to_workspace() {
         let snapshot = InstructionSnapshot {
             base: InstructionBlock {
                 source: InstructionSource::new(InstructionSourceKind::BuiltInBase, "base"),
                 content: "base".to_string(),
             },
-            developer: vec![InstructionBlock {
-                source: InstructionSource::new(InstructionSourceKind::ExecutionProfile, "mode"),
-                content: "dev".to_string(),
-            }],
-            user: vec![InstructionBlock {
-                source: InstructionSource::new(InstructionSourceKind::ConfigUser, "user"),
-                content: "ctx".to_string(),
-            }],
+            developer: vec![
+                InstructionBlock {
+                    source: InstructionSource::new(InstructionSourceKind::Platform, "platform"),
+                    content: "platform".to_string(),
+                },
+                InstructionBlock {
+                    source: InstructionSource::new(InstructionSourceKind::ExecutionProfile, "mode"),
+                    content: "mode".to_string(),
+                },
+                InstructionBlock {
+                    source: InstructionSource::new(InstructionSourceKind::Skills, "skills"),
+                    content: "skills".to_string(),
+                },
+            ],
+            user: vec![
+                InstructionBlock {
+                    source: InstructionSource::new(InstructionSourceKind::ConfigUser, "user"),
+                    content: "global user".to_string(),
+                },
+                InstructionBlock {
+                    source: InstructionSource::new(InstructionSourceKind::ProjectDoc, "project"),
+                    content: "workspace".to_string(),
+                },
+            ],
         };
 
         let bundle = snapshot.to_bundle();
 
         assert_eq!(bundle.instructions, "base");
-        assert_eq!(bundle.prelude_messages.len(), 2);
-        assert_eq!(bundle.prelude_messages[0].role, MessageRole::System);
-        assert_eq!(bundle.prelude_messages[1].role, MessageRole::User);
+        assert_eq!(bundle.prelude_messages.len(), 5);
+        assert_eq!(
+            bundle
+                .prelude_messages
+                .iter()
+                .map(|message| message.role)
+                .collect::<Vec<_>>(),
+            vec![
+                MessageRole::System,
+                MessageRole::User,
+                MessageRole::System,
+                MessageRole::System,
+                MessageRole::User,
+            ]
+        );
+        assert_eq!(
+            bundle
+                .prelude_messages
+                .iter()
+                .map(|message| match &message.content {
+                    MessageContent::Text(text) => text.lines().next().unwrap_or_default(),
+                    _ => panic!("fixed instruction groups must use text messages"),
+                })
+                .collect::<Vec<_>>(),
+            vec![
+                "# Global Developer Instructions",
+                "# Global User Context",
+                "# Mode and Role Instructions",
+                "# Skill Instructions",
+                "# Workspace Context",
+            ]
+        );
     }
 
     #[test]

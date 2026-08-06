@@ -196,6 +196,7 @@ async fn run_turn_exposes_context_compaction_snapshot() {
         .run_turn_with_trace(
             &mut session,
             TurnRequest::new("continue".to_string())
+                .with_turn_id("turn-compaction")
                 .with_budget(crate::turn::TurnBudget::new(60_000)),
             &mut recorder,
             TurnOptions::default(),
@@ -211,6 +212,20 @@ async fn run_turn_exposes_context_compaction_snapshot() {
     assert_eq!(compaction.trigger.as_str(), "estimatedTokens");
     assert_eq!(compaction.provider_prompt_tokens, None);
     assert_eq!(compaction.auto_compact_limit, 1);
+    let usage = result
+        .trace_events
+        .iter()
+        .find_map(|event| match &event.kind {
+            TraceEventKind::TracePartCompleted { item }
+                if item.item_id == "turn-compaction-turn" =>
+            {
+                item.usage.as_ref()
+            }
+            _ => None,
+        })
+        .expect("completed turn usage");
+    assert_eq!(usage.inference_count, 2);
+    assert_eq!(usage.total_tokens, 15);
     assert!(
         compaction
             .replacement_tokens

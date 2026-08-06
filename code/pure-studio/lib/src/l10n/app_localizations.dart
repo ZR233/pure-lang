@@ -489,6 +489,54 @@ abstract class AppLocalizations {
   /// **'Context'**
   String get statusContextLabel;
 
+  /// No description provided for @statusCacheLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Cache'**
+  String get statusCacheLabel;
+
+  /// No description provided for @statusCacheHitTokensLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Cache read'**
+  String get statusCacheHitTokensLabel;
+
+  /// No description provided for @statusCacheMissTokensLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Cache miss'**
+  String get statusCacheMissTokensLabel;
+
+  /// No description provided for @statusCacheWriteTokensLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Cache write'**
+  String get statusCacheWriteTokensLabel;
+
+  /// No description provided for @statusReasoningTokensLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Reasoning tokens'**
+  String get statusReasoningTokensLabel;
+
+  /// No description provided for @statusInferenceCountLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Inferences'**
+  String get statusInferenceCountLabel;
+
+  /// No description provided for @statusCacheSavingsLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Cache savings'**
+  String get statusCacheSavingsLabel;
+
+  /// No description provided for @statusUnpricedUsageLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Partially unpriced'**
+  String get statusUnpricedUsageLabel;
+
   /// No description provided for @statusTurnQueued.
   ///
   /// In en, this message translates to:

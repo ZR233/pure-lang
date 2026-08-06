@@ -10,8 +10,8 @@ use serde_json::Map;
 use serde_json::Value;
 
 use crate::capabilities::{
-    ModelCapabilities, ModelModality, ReasoningInterleaved, ReasoningInterleavedField,
-    ToolCapabilities,
+    ModelCapabilities, ModelModality, PromptCacheModelCapabilities, ReasoningInterleaved,
+    ReasoningInterleavedField, ToolCapabilities,
 };
 use crate::model_family::{ModelFamily, ModelPricing};
 use crate::model_info::{MaxTokensField, ModelInfo, ModelRequestProfile, TruncationMode};
@@ -78,6 +78,7 @@ pub fn default_models() -> Vec<ModelInfo> {
                 input_per_mtok: Some(1.0),
                 output_per_mtok: Some(2.0),
                 cache_read_per_mtok: Some(0.02),
+                cache_write_per_mtok: None,
             },
         ),
         deepseek.instantiate(
@@ -92,6 +93,7 @@ pub fn default_models() -> Vec<ModelInfo> {
                 input_per_mtok: Some(3.0),
                 output_per_mtok: Some(6.0),
                 cache_read_per_mtok: Some(0.025),
+                cache_write_per_mtok: None,
             },
         ),
         // OpenAI
@@ -383,9 +385,13 @@ fn openai_gpt56_family(default_effort: &str) -> ModelFamily {
         }
     }
 
+    let mut capabilities = openai_capabilities();
+    capabilities.prompt_cache = PromptCacheModelCapabilities {
+        cache_write_tokens: true,
+    };
     ModelFamily {
         id: "openai-gpt56-reasoning",
-        capabilities: openai_capabilities(),
+        capabilities,
         truncation_mode: TruncationMode::Tokens,
         truncation_limit: 10_000,
         parameters: vec![openai_effort_parameter(&candidates)],
@@ -623,6 +629,7 @@ fn openai_capabilities() -> ModelCapabilities {
             freeform_tools: true,
         },
         interleaved: None,
+        prompt_cache: PromptCacheModelCapabilities::default(),
     }
 }
 
@@ -643,6 +650,7 @@ fn deepseek_capabilities() -> ModelCapabilities {
         interleaved: Some(ReasoningInterleaved {
             field: ReasoningInterleavedField::ReasoningContent,
         }),
+        prompt_cache: PromptCacheModelCapabilities::default(),
     }
 }
 
@@ -667,6 +675,7 @@ fn mimo_capabilities(vision: bool) -> ModelCapabilities {
         interleaved: Some(ReasoningInterleaved {
             field: ReasoningInterleavedField::ReasoningContent,
         }),
+        prompt_cache: PromptCacheModelCapabilities::default(),
     }
 }
 
@@ -691,6 +700,7 @@ fn zhipu_capabilities(vision: bool) -> ModelCapabilities {
         interleaved: Some(ReasoningInterleaved {
             field: ReasoningInterleavedField::ReasoningContent,
         }),
+        prompt_cache: PromptCacheModelCapabilities::default(),
     }
 }
 

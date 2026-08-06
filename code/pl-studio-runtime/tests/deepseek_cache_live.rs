@@ -29,6 +29,8 @@ async fn installed_config_deepseek_cache_tools_and_billing_survive_restart() -> 
         .context("installed-config DeepSeek live test exceeded 30 minutes")
         .and_then(|result| result);
     let unchanged = installed.assert_unchanged();
+    let cleanup = root.cleanup();
+    cleanup?;
     result?;
     unchanged
 }
@@ -79,23 +81,47 @@ async fn run_live_flow(installed: &InstalledConfigGuard, root: &Path) -> Result<
         .await?;
     runtime.start_runtime().await?;
 
-    let prompts = [
-        "Execute this exact verification flow: call skill_view for cache-live; call read_file for README.md; call one read-only tool whose name begins mcp__zhipu_search__; call apply_patch to create live-cache-result.txt containing exactly installed cache verified; then give a final response.",
-        "Confirm the installed cache verification result. Keep the same model, instructions, and tool set.",
-        "Confirm it once more without changing the prompt structure or tool set.",
-    ];
+    let prompts = std::iter::once(
+        "Execute this exact verification flow: call skill_view for cache-live; call read_file for README.md; call one read-only tool whose name begins mcp__zhipu_search__; call apply_patch to create live-cache-result.txt containing exactly installed cache verified; then give a final response.".to_string(),
+    )
+    .chain((2..=15).map(|round| {
+        format!(
+            "Confirm the installed cache verification result for round {round}. Keep the same model, instructions, and tool set."
+        )
+    }));
     let mut generations = Vec::new();
-    for prompt in prompts {
+    let mut cached_rounds = 0_u64;
+    for (index, prompt) in prompts.enumerate() {
+        let round = index + 1;
         let submitted = runtime
             .submit_prompt(StudioSubmitPromptRequest {
                 thread_id: thread.id.clone(),
-                prompt: prompt.to_string(),
+                prompt,
                 attachment_ids: Vec::new(),
                 options: StudioSubmitPromptOptions::default(),
             })
             .await?;
         wait_for_completed_turn(&runtime, &thread.id, &submitted.turn_id).await?;
         generations.push(read_prompt_generation(&database_path, &thread.id).await?);
+        let turn_billing = read_turn_billing(&database_path, &submitted.turn_id).await?;
+        let turn_usage = turn_billing.aggregate_usage();
+        if turn_usage.cached_prompt_tokens > 0 {
+            cached_rounds += 1;
+        }
+        let round_snapshot = runtime.thread_snapshot(&thread.id).await?;
+        let cumulative = &round_snapshot
+            .runtime
+            .context("live Thread runtime usage missing during cache report")?
+            .usage;
+        eprintln!(
+            "DeepSeek cache round {round:02}: input={} cached={} hit={:.2}% cumulative_input={} cumulative_cached={} cumulative_hit={:.2}%",
+            turn_usage.prompt_tokens,
+            turn_usage.cached_prompt_tokens,
+            cache_hit_percent(turn_usage.cached_prompt_tokens, turn_usage.prompt_tokens),
+            cumulative.prompt_tokens,
+            cumulative.cached_prompt_tokens,
+            cache_hit_percent(cumulative.cached_prompt_tokens, cumulative.prompt_tokens),
+        );
     }
 
     ensure!(
@@ -111,7 +137,11 @@ async fn run_live_flow(installed: &InstalledConfigGuard, root: &Path) -> Result<
         .clone();
     ensure!(
         usage.cached_prompt_tokens > 0,
-        "DeepSeek reported no cached prompt tokens across three append-only turns"
+        "DeepSeek reported no cached prompt tokens across fifteen append-only turns"
+    );
+    ensure!(
+        cached_rounds > 0,
+        "DeepSeek reported no cache hit in any individual live Turn"
     );
     ensure!(
         !usage.estimated_costs.is_empty() && !usage.has_unpriced_usage,
@@ -130,7 +160,7 @@ async fn run_live_flow(installed: &InstalledConfigGuard, root: &Path) -> Result<
                 } if !text.trim().is_empty()
             ))
             .count()
-            >= 3,
+            >= 15,
         "live model did not complete every Turn with a final response"
     );
     ensure!(
@@ -164,7 +194,7 @@ async fn run_live_flow(installed: &InstalledConfigGuard, root: &Path) -> Result<
     let (context_patches, billing) = read_durable_diagnostics(&database_path, &thread.id).await?;
     ensure!(context_patches >= 1, "no durable contextPatch was restored");
     ensure!(
-        billing.len() >= 3 && billing.iter().all(|turn| !turn.inferences.is_empty()),
+        billing.len() == 15 && billing.iter().all(|turn| !turn.inferences.is_empty()),
         "live turns did not retain per-inference billing snapshots"
     );
     reopened.shutdown_runtime().await?;
@@ -343,6 +373,29 @@ async fn read_durable_diagnostics(
     Ok((u64::try_from(context_patches)?, billing))
 }
 
+async fn read_turn_billing(database_path: &Path, turn_id: &str) -> Result<TurnBillingRecord> {
+    let database = Database::connect(sqlite_url(database_path)).await?;
+    let row = database
+        .query_one_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Sqlite,
+            "SELECT model_json FROM turns WHERE id = ?",
+            [turn_id.to_string().into()],
+        ))
+        .await?
+        .context("live Turn billing row missing")?;
+    let model_json: String = row.try_get("", "model_json")?;
+    database.close().await?;
+    serde_json::from_str(&model_json).map_err(Into::into)
+}
+
+fn cache_hit_percent(cached_tokens: u64, prompt_tokens: u64) -> f64 {
+    if prompt_tokens == 0 {
+        0.0
+    } else {
+        cached_tokens as f64 * 100.0 / prompt_tokens as f64
+    }
+}
+
 fn sqlite_url(path: &Path) -> String {
     format!(
         "sqlite://{}?mode=rwc",
@@ -416,6 +469,24 @@ impl TempRoot {
         let path = std::env::temp_dir().join(format!("{label}-{}-{stamp}", std::process::id()));
         std::fs::create_dir_all(&path)?;
         Ok(Self { path })
+    }
+
+    fn cleanup(&self) -> Result<()> {
+        let temp_dir = std::env::temp_dir();
+        ensure!(
+            self.path.starts_with(&temp_dir),
+            "refusing to clean live-test path outside `{}`",
+            temp_dir.display()
+        );
+        if self.path.exists() {
+            std::fs::remove_dir_all(&self.path).with_context(|| {
+                format!(
+                    "failed to remove temporary live configuration `{}`",
+                    self.path.display()
+                )
+            })?;
+        }
+        Ok(())
     }
 }
 

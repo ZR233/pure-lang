@@ -101,11 +101,12 @@ pub use pl_lsp::{
 };
 pub use pl_model::{
     DeepSeekBalanceInfo, DeepSeekBalanceUsage, ModelCapabilities, ModelInfo, ModelModality,
-    ModelParameter, ModelRequestProfile, OpenAiCompactionMode, ProviderConnectionMode,
-    ProviderServiceCapabilities, ProviderWireProtocol, ReasoningInterleaved,
-    ReasoningInterleavedField, StandaloneWebSearchDialect, ToolCapabilities, ToolWirePolicy,
-    TruncationMode, WebSearchProviderCapabilities, ZhipuCodingPlanUsage, ZhipuQuotaLimit,
-    ZhipuQuotaWindow, ZhipuToolUsageDetail,
+    ModelParameter, ModelRequestProfile, OpenAiCompactionMode, PromptCacheDialect,
+    PromptCacheProviderCapabilities, ProviderConnectionMode, ProviderServiceCapabilities,
+    ProviderWireProtocol, ReasoningInterleaved, ReasoningInterleavedField,
+    StandaloneWebSearchDialect, ToolCapabilities, ToolWirePolicy, TruncationMode,
+    WebSearchProviderCapabilities, ZhipuCodingPlanUsage, ZhipuQuotaLimit, ZhipuQuotaWindow,
+    ZhipuToolUsageDetail,
 };
 pub use pl_protocol::{
     AgentRuntimeDelta, BudgetLimitKind, BudgetUsage, ContentPart, ContextSectionId, ErrorSeverity,
@@ -119,7 +120,9 @@ pub use pl_protocol::{
     ToolApprovalResolution, ToolResultReceipt, TurnFailure, TurnFailureCategory, UserInputAnswer,
     UserInputRequest, UserInputResponse, UserQuestion, UserQuestionOption,
 };
-pub(crate) use prompt_cache::{PromptCacheInput, prepare_prompt_context, stable_tool_schemas};
+pub(crate) use prompt_cache::{
+    PromptCacheInput, derive_prompt_cache_key, prepare_prompt_context, stable_tool_schemas,
+};
 pub use provider_error::is_retryable_model_error;
 pub use runtime_usage::ModelTokenUsageSnapshot;
 pub use session::{

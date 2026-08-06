@@ -389,6 +389,30 @@ ThreadRuntimeView _threadRuntimeFromFrb(frb.BridgeThreadRuntimeSnapshot value) {
     contextTokens: usage.latestContextTokens.toInt(),
     contextWindow: usage.contextWindow?.toInt() ?? 0,
     totalTokens: usage.totalTokens.toInt(),
+    promptTokens: usage.promptTokens.toInt(),
+    completionTokens: usage.completionTokens.toInt(),
+    cachedPromptTokens: usage.cachedPromptTokens.toInt(),
+    cacheWriteTokens: usage.cacheWriteTokens.toInt(),
+    cacheMissTokens: usage.cacheMissTokens.toInt(),
+    reasoningTokens: usage.reasoningTokens.toInt(),
+    inferenceCount: usage.inferenceCount.toInt(),
+    cacheHitRate: usage.cacheHitRate,
+    estimatedCosts: usage.estimatedCosts
+        .map(
+          (cost) =>
+              RuntimeCostView(currency: cost.currency, amount: cost.amount),
+        )
+        .toList(growable: false),
+    estimatedCacheSavings: usage.estimatedCacheSavings
+        .map(
+          (cost) =>
+              RuntimeCostView(currency: cost.currency, amount: cost.amount),
+        )
+        .toList(growable: false),
+    hasUnpricedUsage: usage.hasUnpricedUsage,
+    promptGeneration: usage.promptGeneration?.toInt(),
+    promptCachePolicy: usage.promptCachePolicy,
+    prefixChangedReason: usage.prefixChangedReason?.name,
     costLabel: costLabel.isEmpty && usage.hasUnpricedUsage
         ? 'unpriced usage'
         : costLabel,

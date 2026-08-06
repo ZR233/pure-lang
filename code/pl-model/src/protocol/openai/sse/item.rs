@@ -12,6 +12,10 @@ pub(super) fn cached_tokens_from_details(details: &Value) -> Option<u64> {
         .and_then(Value::as_u64)
 }
 
+pub(super) fn cache_write_tokens_from_details(details: &Value) -> Option<u64> {
+    details.get("cache_write_tokens").and_then(Value::as_u64)
+}
+
 pub(super) fn output_item_tool_started(item: &Value) -> Option<ModelStreamEvent> {
     let kind = item.get("type")?.as_str()?;
     let (item_id, call_id) = responses_tool_identity(item);

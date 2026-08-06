@@ -217,6 +217,30 @@ class AppLocalizationsZh extends AppLocalizations {
   String get statusContextLabel => '上下文';
 
   @override
+  String get statusCacheLabel => '缓存';
+
+  @override
+  String get statusCacheHitTokensLabel => '缓存命中';
+
+  @override
+  String get statusCacheMissTokensLabel => '缓存未命中';
+
+  @override
+  String get statusCacheWriteTokensLabel => '缓存写入';
+
+  @override
+  String get statusReasoningTokensLabel => '推理 token';
+
+  @override
+  String get statusInferenceCountLabel => '推理次数';
+
+  @override
+  String get statusCacheSavingsLabel => '缓存节省';
+
+  @override
+  String get statusUnpricedUsageLabel => '部分费用未定价';
+
+  @override
   String get statusTurnQueued => '排队中';
 
   @override
@@ -1539,6 +1563,30 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get statusContextLabel => '上下文';
+
+  @override
+  String get statusCacheLabel => '缓存';
+
+  @override
+  String get statusCacheHitTokensLabel => '缓存命中';
+
+  @override
+  String get statusCacheMissTokensLabel => '缓存未命中';
+
+  @override
+  String get statusCacheWriteTokensLabel => '缓存写入';
+
+  @override
+  String get statusReasoningTokensLabel => '推理 token';
+
+  @override
+  String get statusInferenceCountLabel => '推理次数';
+
+  @override
+  String get statusCacheSavingsLabel => '缓存节省';
+
+  @override
+  String get statusUnpricedUsageLabel => '部分费用未定价';
 
   @override
   String get statusTurnQueued => '排队中';

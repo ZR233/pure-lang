@@ -380,6 +380,7 @@ impl ModelProvider for FakeCompactionProvider {
                 completion_tokens: 2,
                 total_tokens: 3,
                 cached_prompt_tokens: 0,
+                cache_write_tokens: 0,
                 reasoning_tokens: 0,
             },
             finish_reason: FinishReason::Stop,

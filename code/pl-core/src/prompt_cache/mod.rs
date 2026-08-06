@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 
-use pl_model::{ProviderInfo, ReasoningConfig, ToolSchema};
+use pl_model::{EffectivePromptCachePolicy, ProviderInfo, ReasoningConfig, ToolSchema};
 use pl_protocol::{
     Message, MessageContent, MessageRole, ModelContextPatch, ModelContextSectionSnapshot,
     ModelContextSnapshot, PromptPrefixChangedReason, PureError, ThreadPromptSnapshot,
@@ -17,6 +17,7 @@ pub(crate) struct PromptCacheInput<'a> {
     pub model: &'a str,
     pub instructions: &'a str,
     pub prelude_messages: &'a [Message],
+    pub fixed_prefix_section_hashes: BTreeMap<String, String>,
     pub tools: &'a [ToolSchema],
     pub tool_choice: &'a str,
     pub parallel_tool_calls: bool,
@@ -24,7 +25,16 @@ pub(crate) struct PromptCacheInput<'a> {
     pub output_schema: Option<&'a serde_json::Value>,
     pub service_tier: Option<&'a str>,
     pub compacted: bool,
+    pub prompt_cache_policy: EffectivePromptCachePolicy,
     pub updated_at: i64,
+}
+
+struct PromptHashes<'a> {
+    context: &'a str,
+    provider: &'a str,
+    fixed_prefix: &'a str,
+    request_properties: &'a str,
+    tool_schema: &'a str,
 }
 
 /// 以稳定名称和 canonical JSON 顺序冻结一次 Turn 的模型可见工具集合。
@@ -54,6 +64,7 @@ pub(crate) fn prepare_prompt_context(
     let stable_tools = stable_tool_schemas(input.tools.to_vec());
     let tool_schema_hash = canonical_json_hash(&serde_json::to_value(&stable_tools)?);
     let provider_hash = provider_hash(input.provider)?;
+    let request_properties_hash = request_properties_hash(&input, &provider_hash)?;
     let fixed_prefix_hash = fixed_prefix_hash(&input, &provider_hash)?;
     let previous_patch = session.latest_context_patch().cloned();
     let previous_context = previous_patch
@@ -72,10 +83,13 @@ pub(crate) fn prepare_prompt_context(
     let reason = changed_reason(
         previous_prompt,
         previous_active_scope,
-        &context_hash,
-        &provider_hash,
-        &fixed_prefix_hash,
-        &tool_schema_hash,
+        PromptHashes {
+            context: &context_hash,
+            provider: &provider_hash,
+            fixed_prefix: &fixed_prefix_hash,
+            request_properties: &request_properties_hash,
+            tool_schema: &tool_schema_hash,
+        },
         &input,
     );
     let Some(reason) = reason else {
@@ -93,8 +107,11 @@ pub(crate) fn prepare_prompt_context(
         provider_hash,
         model: input.model.to_string(),
         fixed_prefix_hash,
+        fixed_prefix_section_hashes: input.fixed_prefix_section_hashes.clone(),
+        request_properties_hash,
         tool_schema_hash,
         context_hash,
+        prompt_cache_policy: input.prompt_cache_policy.label().to_string(),
         prefix_changed_reason: reason,
         updated_at: input.updated_at,
     };
@@ -129,13 +146,23 @@ pub(crate) fn prepare_prompt_context(
     Ok(Some(prompt))
 }
 
+/// 为 OpenAI Responses 派生不暴露 Thread identity 的 generation-scoped cache key。
+pub(crate) fn derive_prompt_cache_key(
+    namespace: &str,
+    prompt: &ThreadPromptSnapshot,
+) -> Result<String, PureError> {
+    let value = serde_json::json!({
+        "namespace": namespace,
+        "scope": prompt.scope,
+        "generation": prompt.generation,
+    });
+    Ok(format!("pl:{}", canonical_json_hash(&value)))
+}
+
 fn changed_reason(
     previous: Option<&ThreadPromptSnapshot>,
     previous_active_scope: Option<&str>,
-    context_hash: &str,
-    provider_hash: &str,
-    fixed_prefix_hash: &str,
-    tool_schema_hash: &str,
+    hashes: PromptHashes<'_>,
     input: &PromptCacheInput<'_>,
 ) -> Option<PromptPrefixChangedReason> {
     if previous_active_scope.is_none() {
@@ -150,19 +177,56 @@ fn changed_reason(
     let Some(previous) = previous else {
         return Some(PromptPrefixChangedReason::Initial);
     };
-    if previous.provider != input.provider.name || previous.provider_hash != provider_hash {
+    if previous.provider != input.provider.name || previous.provider_hash != hashes.provider {
         return Some(PromptPrefixChangedReason::ProviderChanged);
     }
     if previous.model != input.model {
         return Some(PromptPrefixChangedReason::ModelChanged);
     }
-    if previous.tool_schema_hash != tool_schema_hash {
+    if previous.tool_schema_hash != hashes.tool_schema {
         return Some(PromptPrefixChangedReason::ToolSchemaChanged);
     }
-    if previous.fixed_prefix_hash != fixed_prefix_hash {
+    if previous.fixed_prefix_section_hashes != input.fixed_prefix_section_hashes {
+        return Some(changed_instruction_section(
+            &previous.fixed_prefix_section_hashes,
+            &input.fixed_prefix_section_hashes,
+        ));
+    }
+    if previous.request_properties_hash != hashes.request_properties {
+        return Some(PromptPrefixChangedReason::RequestPropertiesChanged);
+    }
+    if previous.fixed_prefix_hash != hashes.fixed_prefix {
         return Some(PromptPrefixChangedReason::FixedPrefixChanged);
     }
-    (previous.context_hash != context_hash).then_some(PromptPrefixChangedReason::ContextAppended)
+    (previous.context_hash != hashes.context).then_some(PromptPrefixChangedReason::ContextAppended)
+}
+
+fn changed_instruction_section(
+    previous: &BTreeMap<String, String>,
+    current: &BTreeMap<String, String>,
+) -> PromptPrefixChangedReason {
+    for (id, reason) in [
+        ("base", PromptPrefixChangedReason::BaseInstructionsChanged),
+        (
+            "globalDeveloper",
+            PromptPrefixChangedReason::GlobalInstructionsChanged,
+        ),
+        (
+            "globalUser",
+            PromptPrefixChangedReason::GlobalInstructionsChanged,
+        ),
+        ("modeRole", PromptPrefixChangedReason::ModeRoleChanged),
+        ("skills", PromptPrefixChangedReason::SkillCatalogChanged),
+        (
+            "workspace",
+            PromptPrefixChangedReason::WorkspaceInstructionsChanged,
+        ),
+    ] {
+        if previous.get(id) != current.get(id) {
+            return reason;
+        }
+    }
+    PromptPrefixChangedReason::FixedPrefixChanged
 }
 
 fn current_context(session: &AgentSession) -> ModelContextSnapshot {
@@ -213,6 +277,25 @@ fn fixed_prefix_hash(
         "outputSchema": input.output_schema,
         "serviceTier": input.service_tier,
         "store": false,
+    });
+    Ok(canonical_json_hash(&value))
+}
+
+fn request_properties_hash(
+    input: &PromptCacheInput<'_>,
+    provider_hash: &str,
+) -> Result<String, PureError> {
+    let value = serde_json::json!({
+        "scope": input.scope,
+        "providerHash": provider_hash,
+        "model": input.model,
+        "toolChoice": input.tool_choice,
+        "parallelToolCalls": input.parallel_tool_calls,
+        "reasoning": input.reasoning,
+        "outputSchema": input.output_schema,
+        "serviceTier": input.service_tier,
+        "store": false,
+        "promptCachePolicy": input.prompt_cache_policy,
     });
     Ok(canonical_json_hash(&value))
 }
@@ -298,6 +381,12 @@ fn reason_label(reason: PromptPrefixChangedReason) -> &'static str {
         PromptPrefixChangedReason::PromptScopeChanged => "prompt scope changed",
         PromptPrefixChangedReason::ProviderChanged => "provider changed",
         PromptPrefixChangedReason::ModelChanged => "model changed",
+        PromptPrefixChangedReason::BaseInstructionsChanged => "base instructions changed",
+        PromptPrefixChangedReason::GlobalInstructionsChanged => "global instructions changed",
+        PromptPrefixChangedReason::ModeRoleChanged => "mode or role changed",
+        PromptPrefixChangedReason::SkillCatalogChanged => "skill catalog changed",
+        PromptPrefixChangedReason::WorkspaceInstructionsChanged => "workspace instructions changed",
+        PromptPrefixChangedReason::RequestPropertiesChanged => "request properties changed",
         PromptPrefixChangedReason::FixedPrefixChanged => "fixed prefix changed",
         PromptPrefixChangedReason::ToolSchemaChanged => "tool schema changed",
         PromptPrefixChangedReason::ContextCompacted => "context compacted",
@@ -361,6 +450,7 @@ mod tests {
             model,
             instructions,
             prelude_messages: &[],
+            fixed_prefix_section_hashes: BTreeMap::new(),
             tools,
             tool_choice: "auto",
             parallel_tool_calls: false,
@@ -368,6 +458,8 @@ mod tests {
             output_schema: None,
             service_tier: None,
             compacted,
+            prompt_cache_policy: provider
+                .effective_prompt_cache_policy(&pl_model::ModelInfo::fallback(model)),
             updated_at: 1,
         }
     }
@@ -812,11 +904,107 @@ mod tests {
                 .unwrap();
             assert_eq!(
                 snapshot.prefix_changed_reason,
-                PromptPrefixChangedReason::FixedPrefixChanged
+                PromptPrefixChangedReason::RequestPropertiesChanged
             );
             assert!(snapshot.generation > previous_generation);
             previous_generation = snapshot.generation;
         }
+    }
+
+    #[test]
+    fn every_fixed_instruction_layer_has_a_precise_change_reason() {
+        let provider = ProviderInfo::deepseek(None);
+        let tools = Vec::new();
+        let sections = BTreeMap::from([
+            ("base".to_string(), "v1".to_string()),
+            ("globalDeveloper".to_string(), "v1".to_string()),
+            ("globalUser".to_string(), "v1".to_string()),
+            ("modeRole".to_string(), "v1".to_string()),
+            ("skills".to_string(), "v1".to_string()),
+            ("workspace".to_string(), "v1".to_string()),
+        ]);
+
+        for (section, expected) in [
+            ("base", PromptPrefixChangedReason::BaseInstructionsChanged),
+            (
+                "globalDeveloper",
+                PromptPrefixChangedReason::GlobalInstructionsChanged,
+            ),
+            (
+                "globalUser",
+                PromptPrefixChangedReason::GlobalInstructionsChanged,
+            ),
+            ("modeRole", PromptPrefixChangedReason::ModeRoleChanged),
+            ("skills", PromptPrefixChangedReason::SkillCatalogChanged),
+            (
+                "workspace",
+                PromptPrefixChangedReason::WorkspaceInstructionsChanged,
+            ),
+        ] {
+            let mut session = AgentSession::new();
+            let mut baseline = input(
+                "simple:executor",
+                &provider,
+                "deepseek-v4-flash",
+                "fixed",
+                &tools,
+                false,
+            );
+            baseline.fixed_prefix_section_hashes = sections.clone();
+            let first = prepare_prompt_context(&mut session, baseline)
+                .unwrap()
+                .unwrap();
+            let mut changed_sections = sections.clone();
+            changed_sections.insert(section.to_string(), "v2".to_string());
+            let mut changed = input(
+                "simple:executor",
+                &provider,
+                "deepseek-v4-flash",
+                "fixed",
+                &tools,
+                false,
+            );
+            changed.fixed_prefix_section_hashes = changed_sections;
+
+            let snapshot = prepare_prompt_context(&mut session, changed)
+                .unwrap()
+                .unwrap();
+
+            assert_eq!(snapshot.prefix_changed_reason, expected, "{section}");
+            assert_eq!(snapshot.generation, first.generation + 1, "{section}");
+        }
+    }
+
+    #[test]
+    fn openai_cache_key_is_stable_within_generation_and_rotates_at_boundary() {
+        let provider = ProviderInfo::openai(None);
+        let tools = Vec::new();
+        let mut session = AgentSession::new();
+        let prompt = prepare_prompt_context(
+            &mut session,
+            input(
+                "simple:root",
+                &provider,
+                "gpt-5.6-sol",
+                "fixed",
+                &tools,
+                false,
+            ),
+        )
+        .unwrap()
+        .unwrap();
+        let same_generation = derive_prompt_cache_key("thread-1", &prompt).unwrap();
+        let repeated = derive_prompt_cache_key("thread-1", &prompt).unwrap();
+        let mut next_generation = prompt.clone();
+        next_generation.generation += 1;
+        let rotated = derive_prompt_cache_key("thread-1", &next_generation).unwrap();
+
+        assert_eq!(same_generation, repeated);
+        assert_ne!(same_generation, rotated);
+        assert_ne!(
+            same_generation,
+            derive_prompt_cache_key("thread-2", &prompt).unwrap()
+        );
     }
 
     #[test]

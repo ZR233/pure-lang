@@ -1,5 +1,23 @@
 import 'package:flutter/foundation.dart' show listEquals;
 
+class RuntimeCostView {
+  const RuntimeCostView({required this.currency, required this.amount});
+
+  final String currency;
+  final double amount;
+
+  @override
+  bool operator ==(Object other) {
+    return identical(this, other) ||
+        other is RuntimeCostView &&
+            currency == other.currency &&
+            amount == other.amount;
+  }
+
+  @override
+  int get hashCode => Object.hash(currency, amount);
+}
+
 class ThreadRuntimeView {
   const ThreadRuntimeView({
     required this.model,
@@ -11,6 +29,20 @@ class ThreadRuntimeView {
     required this.activeMcpServers,
     required this.activeLspServers,
     required this.agentCount,
+    this.promptTokens = 0,
+    this.completionTokens = 0,
+    this.cachedPromptTokens = 0,
+    this.cacheWriteTokens = 0,
+    this.cacheMissTokens = 0,
+    this.reasoningTokens = 0,
+    this.inferenceCount = 0,
+    this.cacheHitRate,
+    this.estimatedCosts = const [],
+    this.estimatedCacheSavings = const [],
+    this.hasUnpricedUsage = false,
+    this.promptGeneration,
+    this.promptCachePolicy,
+    this.prefixChangedReason,
     this.task,
   });
 
@@ -23,9 +55,33 @@ class ThreadRuntimeView {
   final List<String> activeMcpServers;
   final List<String> activeLspServers;
   final int agentCount;
+  final int promptTokens;
+  final int completionTokens;
+  final int cachedPromptTokens;
+  final int cacheWriteTokens;
+  final int cacheMissTokens;
+  final int reasoningTokens;
+  final int inferenceCount;
+  final double? cacheHitRate;
+  final List<RuntimeCostView> estimatedCosts;
+  final List<RuntimeCostView> estimatedCacheSavings;
+  final bool hasUnpricedUsage;
+  final int? promptGeneration;
+  final String? promptCachePolicy;
+  final String? prefixChangedReason;
   final TaskRuntimeView? task;
 
   bool get hasActiveTask => task?.isActive ?? false;
+  bool get hasUsage =>
+      inferenceCount > 0 || promptTokens > 0 || completionTokens > 0;
+
+  double? get effectiveCacheHitRate {
+    if (!hasUsage) return null;
+    final reported = cacheHitRate;
+    if (reported != null) return reported.clamp(0.0, 1.0);
+    if (promptTokens <= 0) return null;
+    return (cachedPromptTokens / promptTokens).clamp(0.0, 1.0);
+  }
 
   @override
   bool operator ==(Object other) {
@@ -40,11 +96,25 @@ class ThreadRuntimeView {
             listEquals(activeMcpServers, other.activeMcpServers) &&
             listEquals(activeLspServers, other.activeLspServers) &&
             agentCount == other.agentCount &&
+            promptTokens == other.promptTokens &&
+            completionTokens == other.completionTokens &&
+            cachedPromptTokens == other.cachedPromptTokens &&
+            cacheWriteTokens == other.cacheWriteTokens &&
+            cacheMissTokens == other.cacheMissTokens &&
+            reasoningTokens == other.reasoningTokens &&
+            inferenceCount == other.inferenceCount &&
+            cacheHitRate == other.cacheHitRate &&
+            listEquals(estimatedCosts, other.estimatedCosts) &&
+            listEquals(estimatedCacheSavings, other.estimatedCacheSavings) &&
+            hasUnpricedUsage == other.hasUnpricedUsage &&
+            promptGeneration == other.promptGeneration &&
+            promptCachePolicy == other.promptCachePolicy &&
+            prefixChangedReason == other.prefixChangedReason &&
             task == other.task;
   }
 
   @override
-  int get hashCode => Object.hash(
+  int get hashCode => Object.hashAll([
     model,
     contextTokens,
     contextWindow,
@@ -54,8 +124,22 @@ class ThreadRuntimeView {
     Object.hashAll(activeMcpServers),
     Object.hashAll(activeLspServers),
     agentCount,
+    promptTokens,
+    completionTokens,
+    cachedPromptTokens,
+    cacheWriteTokens,
+    cacheMissTokens,
+    reasoningTokens,
+    inferenceCount,
+    cacheHitRate,
+    Object.hashAll(estimatedCosts),
+    Object.hashAll(estimatedCacheSavings),
+    hasUnpricedUsage,
+    promptGeneration,
+    promptCachePolicy,
+    prefixChangedReason,
     task,
-  );
+  ]);
 
   ThreadRuntimeView copyWith({
     String? model,
@@ -67,6 +151,20 @@ class ThreadRuntimeView {
     List<String>? activeMcpServers,
     List<String>? activeLspServers,
     int? agentCount,
+    int? promptTokens,
+    int? completionTokens,
+    int? cachedPromptTokens,
+    int? cacheWriteTokens,
+    int? cacheMissTokens,
+    int? reasoningTokens,
+    int? inferenceCount,
+    double? cacheHitRate,
+    List<RuntimeCostView>? estimatedCosts,
+    List<RuntimeCostView>? estimatedCacheSavings,
+    bool? hasUnpricedUsage,
+    int? promptGeneration,
+    String? promptCachePolicy,
+    String? prefixChangedReason,
     TaskRuntimeView? task,
   }) {
     return ThreadRuntimeView(
@@ -79,6 +177,21 @@ class ThreadRuntimeView {
       activeMcpServers: activeMcpServers ?? this.activeMcpServers,
       activeLspServers: activeLspServers ?? this.activeLspServers,
       agentCount: agentCount ?? this.agentCount,
+      promptTokens: promptTokens ?? this.promptTokens,
+      completionTokens: completionTokens ?? this.completionTokens,
+      cachedPromptTokens: cachedPromptTokens ?? this.cachedPromptTokens,
+      cacheWriteTokens: cacheWriteTokens ?? this.cacheWriteTokens,
+      cacheMissTokens: cacheMissTokens ?? this.cacheMissTokens,
+      reasoningTokens: reasoningTokens ?? this.reasoningTokens,
+      inferenceCount: inferenceCount ?? this.inferenceCount,
+      cacheHitRate: cacheHitRate ?? this.cacheHitRate,
+      estimatedCosts: estimatedCosts ?? this.estimatedCosts,
+      estimatedCacheSavings:
+          estimatedCacheSavings ?? this.estimatedCacheSavings,
+      hasUnpricedUsage: hasUnpricedUsage ?? this.hasUnpricedUsage,
+      promptGeneration: promptGeneration ?? this.promptGeneration,
+      promptCachePolicy: promptCachePolicy ?? this.promptCachePolicy,
+      prefixChangedReason: prefixChangedReason ?? this.prefixChangedReason,
       task: task ?? this.task,
     );
   }

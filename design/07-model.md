@@ -60,6 +60,11 @@ provider 适配实现可以依赖 `async-openai`、`reqwest`、`tokio-tungstenit
 
 `pl-core` 只读取这些 provider 无关能力来做本地校验和 UI 展示：图片输入必须要求模型声明 `input = ["image"]`，工具调用必须匹配工具能力，推理请求必须匹配 `reasoning = true`。provider 私有差异不扩散到 `pl-core`。
 
+提示词缓存不是由模型 slug 隐式推断的基础能力。`ProviderServiceCapabilities.prompt_cache`
+声明 endpoint 的缓存 dialect，模型目录声明该模型是否报告缓存写入 token；核心层把 provider
+声明、wire protocol 与模型声明合成为穷尽的 `EffectivePromptCachePolicy`。未声明能力的自定义
+Responses/Chat endpoint 默认不发送任何缓存专属字段。
+
 模型级 provider override 使用 `ModelRequestProfile` 表达，包括 `api_model`、`headers`、`body`、`options`、`max_tokens_field` 和 `responses_max_tokens_field`。`body` 作为 base body 注入请求体（如 DeepSeek 固定的 `thinking.type = enabled`）；其余可变字段（如 effort 透传的 `reasoning_effort`、GLM `thinking.clear_thinking`）由 `ModelInfo.parameters` 声明驱动（见 7.8）。这些字段只由 `pl-model` 的 provider adapter 消费；核心编排层不得读取或拼接这些私有字段。Chat Completions 的最大输出 token 字段默认写入 `max_tokens`；OpenAI-compatible provider 若要求新字段（如 MiMo 的 `max_completion_tokens`）可在模型 profile 中声明。Responses endpoint 默认不发送最大输出 token 字段，以匹配 Codex 常规 Responses 请求；Responses-like 代理若要求限制字段，可在模型 profile 中把 `responses_max_tokens_field` 设置为 `max_output_tokens`、`max_tokens` 或 `max_completion_tokens`。
 
 ## 7.4 Provider 抽象
@@ -271,17 +276,29 @@ pub struct ModelPricing {
 
 ## 7.10 Prompt 缓存
 
-核心层按 prompt generation 组装请求：固定 instructions、固定用户/项目/Skill/MCP 前置指令，
-再接 durable model history。同一 generation 内，model、instructions、tools、tool choice、
-reasoning、输出 schema 和 service tier 不得变化；历史只追加 assistant、tool、user 与内部
-contextPatch。模型相关运行状态变化在采样前渲染为最小 contextPatch，先持久化再发送，不能
-作为下一轮消失的临时尾部。
+核心层按 prompt generation 组装请求，唯一顺序是：模型基础指令、平台与全局配置、模式与
+角色、Skill、Workspace/项目文档、durable model history。同一 generation 内，model、
+instructions、tools、tool choice、reasoning、输出 schema 和 service tier 不得变化；历史只追加
+assistant、tool、user 与内部 contextPatch。模型相关运行状态变化在采样前渲染为最小
+contextPatch，先持久化再发送，不能作为下一轮消失的临时尾部。
 
-工具按模型可见名称排序，JSON Schema 递归使用确定性字段顺序。模式、provider、model、固定
-指令、工具 schema 或 compaction 改变时提升 generation，并把首个请求视为冷缓存。缓存能力按
-provider、wire protocol 与 model 联合判断：DeepSeek Chat 只使用隐式共同前缀，不发送
-prompt_cache_key；其他协议只在自身明确支持时发送 cache key、breakpoint 或 cached-content
-引用。cache key 只是路由提示，不能代替请求前缀相等。
+每个指令层分别计算内容 hash；基础、模式角色、Skill、Workspace、工具 schema、provider、
+model 或 compaction 变化都给出精确 `PromptPrefixChangedReason` 并提升 generation。工具按模型
+可见名称排序，JSON Schema 递归使用确定性字段顺序。MCP lease 与工具 schema 在 Turn 内冻结，
+不能为了复用缓存跨 Thread、worktree、Task policy 或权限边界共享。
+
+DeepSeek Chat 使用隐式共同前缀，不发送 `prompt_cache_key`、breakpoint 或 OpenAI options。
+内建 OpenAI Responses HTTP/WS 使用 `OpenAiPromptCacheKey` policy：core 用
+`ThreadId + prompt scope + generation` 的不可逆 hash 派生稳定 key，同一 generation 复用，
+generation 变化立即切换。手工 key override 优先于自动 key。当前实现跟随 Codex，仅发送 key，
+不发送显式 breakpoint；自定义兼容 endpoint 只有显式声明能力才可启用。cache key 只是路由
+提示，不能代替请求前缀相等。
+
+provider usage 必须分别报告缓存读取和缓存写入。OpenAI GPT-5.6 及以后模型的
+`cache_write_tokens` 按当次价格快照计费；目录未给出显式写入价时，只有有效策略为
+`openAiPromptCacheKey` 且模型声明写入 token 能力，才按普通输入价的 `1.25 ×` 冻结写入价，
+不得仅凭模型名推断。旧模型或未声明写入能力的 provider 不得制造写入 token。DeepSeek
+继续按命中/未命中输入分类计费。
 
 缓存诊断只记录 generation、固定前缀/工具/contextPatch 的 hash、token 数和变化原因；不得记录
 prompt、工具参数或结果、header、凭据和配置正文。

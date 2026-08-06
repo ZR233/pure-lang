@@ -105,6 +105,7 @@ fn public_stream_events_accumulate_completion_response() {
                 completion_tokens: 5,
                 total_tokens: 8,
                 cached_prompt_tokens: 2,
+                cache_write_tokens: 0,
                 reasoning_tokens: 0,
             }),
             &event_tx,

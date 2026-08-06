@@ -252,9 +252,19 @@ pub struct RuntimeUsageSnapshot {
     pub prompt_tokens: u64,
     pub completion_tokens: u64,
     pub cached_prompt_tokens: u64,
+    #[serde(default)]
+    pub cache_write_tokens: u64,
+    #[serde(default)]
+    pub cache_miss_tokens: u64,
+    #[serde(default)]
+    pub reasoning_tokens: u64,
+    #[serde(default)]
+    pub inference_count: u64,
     pub total_tokens: u64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub estimated_costs: Vec<RuntimeCostAmount>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub estimated_cache_savings: Vec<RuntimeCostAmount>,
     #[serde(default)]
     pub has_unpriced_usage: bool,
     pub updated_at: i64,
@@ -279,8 +289,16 @@ pub struct AgentRuntimeDelta {
     pub usage: TokenUsageSnapshot,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub estimated_costs: Vec<RuntimeCostAmount>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub estimated_cache_savings: Vec<RuntimeCostAmount>,
     #[serde(default)]
     pub has_unpriced_usage: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_generation: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_cache_policy: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prefix_changed_reason: Option<crate::PromptPrefixChangedReason>,
     pub updated_at: i64,
 }
 
@@ -311,6 +329,14 @@ pub struct TokenUsageSnapshot {
     pub prompt_tokens: u64,
     pub completion_tokens: u64,
     pub cached_prompt_tokens: u64,
+    #[serde(default)]
+    pub cache_write_tokens: u64,
+    #[serde(default)]
+    pub cache_miss_tokens: u64,
+    #[serde(default)]
+    pub reasoning_tokens: u64,
+    #[serde(default)]
+    pub inference_count: u64,
     pub total_tokens: u64,
 }
 

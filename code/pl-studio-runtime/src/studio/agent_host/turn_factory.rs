@@ -243,8 +243,10 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             context.snapshot.identity.id.to_string(),
         );
         let interaction_callback = self.interactions.callback(thread_id, emitter);
+        let prompt_cache_namespace = context.snapshot.identity.id.to_string();
         let options = TurnOptions::default()
             .with_permission_mode(config.runtime.permission_mode)
+            .with_prompt_cache_namespace(prompt_cache_namespace)
             .with_prompt_scope(format!(
                 "{}:{}",
                 mode.label(),

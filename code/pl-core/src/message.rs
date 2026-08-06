@@ -516,6 +516,7 @@ mod tests {
             usage: pl_model::TokenUsage {
                 prompt_tokens: 10,
                 cached_prompt_tokens: 4,
+                cache_write_tokens: 1,
                 completion_tokens: 3,
                 reasoning_tokens: 2,
                 total_tokens: 13,

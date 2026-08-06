@@ -48,12 +48,25 @@ impl ProviderTokenUsage {
             .unwrap_or(0)
     }
 
+    fn cache_write_tokens(&self) -> u64 {
+        self.input_tokens_details
+            .as_ref()
+            .and_then(TokenUsageDetails::cache_write)
+            .or_else(|| {
+                self.prompt_tokens_details
+                    .as_ref()
+                    .and_then(TokenUsageDetails::cache_write)
+            })
+            .unwrap_or(0)
+    }
+
     fn to_responses_usage(&self) -> Option<TokenUsage> {
         Some(TokenUsage {
             prompt_tokens: self.input_tokens?,
             completion_tokens: self.output_tokens?,
             total_tokens: self.total_tokens.unwrap_or(0),
             cached_prompt_tokens: self.cached_prompt_tokens(),
+            cache_write_tokens: self.cache_write_tokens(),
             reasoning_tokens: self.reasoning_tokens(),
         })
     }
@@ -64,6 +77,7 @@ impl ProviderTokenUsage {
             completion_tokens: self.completion_tokens?,
             total_tokens: self.total_tokens.unwrap_or(0),
             cached_prompt_tokens: self.cached_prompt_tokens(),
+            cache_write_tokens: self.cache_write_tokens(),
             reasoning_tokens: self.reasoning_tokens(),
         })
     }
@@ -74,6 +88,7 @@ struct TokenUsageDetails {
     cached_tokens: Option<u64>,
     cache_read_tokens: Option<u64>,
     cached_input_tokens: Option<u64>,
+    cache_write_tokens: Option<u64>,
     reasoning_tokens: Option<u64>,
 }
 
@@ -86,6 +101,10 @@ impl TokenUsageDetails {
 
     fn reasoning(&self) -> Option<u64> {
         self.reasoning_tokens
+    }
+
+    fn cache_write(&self) -> Option<u64> {
+        self.cache_write_tokens
     }
 }
 

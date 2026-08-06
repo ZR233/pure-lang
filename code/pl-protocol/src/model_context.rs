@@ -33,6 +33,12 @@ pub enum PromptPrefixChangedReason {
     PromptScopeChanged,
     ProviderChanged,
     ModelChanged,
+    BaseInstructionsChanged,
+    GlobalInstructionsChanged,
+    ModeRoleChanged,
+    SkillCatalogChanged,
+    WorkspaceInstructionsChanged,
+    RequestPropertiesChanged,
     FixedPrefixChanged,
     ToolSchemaChanged,
     ContextCompacted,
@@ -50,8 +56,14 @@ pub struct ThreadPromptSnapshot {
     pub provider_hash: String,
     pub model: String,
     pub fixed_prefix_hash: String,
+    #[serde(default)]
+    pub fixed_prefix_section_hashes: BTreeMap<String, String>,
+    #[serde(default)]
+    pub request_properties_hash: String,
     pub tool_schema_hash: String,
     pub context_hash: String,
+    #[serde(default)]
+    pub prompt_cache_policy: String,
     pub prefix_changed_reason: PromptPrefixChangedReason,
     pub updated_at: i64,
 }

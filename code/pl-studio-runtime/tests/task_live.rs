@@ -126,11 +126,9 @@ async fn assert_task_invariants(
                 executor.status
             );
         }
-        if !task
-            .merges
-            .iter()
-            .any(|merge| merge.agent_id == executor_thread_id && merge.status == "merged")
-        {
+        if !task.merges.iter().any(|merge| {
+            merge.work_unit_id == unit.id && merge.executor_agent_id == executor_thread_id
+        }) {
             bail!("executor Thread `{executor_thread_id}` has no merged delivery");
         }
     }
@@ -226,8 +224,15 @@ async fn assert_task_invariants(
         )?;
     }
 
-    if task.merges.iter().any(|merge| merge.status != "merged") {
-        bail!("Task contains an unmerged delivery: {:#?}", task.merges);
+    if task.completions.iter().any(|completion| {
+        completion.kind == "delivery"
+            && completion.status == "approved"
+            && !task.merges.iter().any(|merge| {
+                merge.completion_id == completion.id
+                    && merge.completion_revision == completion.revision
+            })
+    }) {
+        bail!("Task contains an approved but unmerged delivery");
     }
 
     let review = task.reviews.last().context("Task has no reviewer result")?;

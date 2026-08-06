@@ -8,7 +8,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'thread_stream.freezed.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 enum BridgeAgentMessageChannel { commentary, final_ }
 
@@ -143,6 +143,23 @@ enum BridgePlanConfirmationResolution {
   implementFreshContext,
   continuePlanning,
   dismiss,
+}
+
+enum BridgePromptPrefixChangedReason {
+  initial,
+  promptScopeChanged,
+  providerChanged,
+  modelChanged,
+  baseInstructionsChanged,
+  globalInstructionsChanged,
+  modeRoleChanged,
+  skillCatalogChanged,
+  workspaceInstructionsChanged,
+  requestPropertiesChanged,
+  fixedPrefixChanged,
+  toolSchemaChanged,
+  contextCompacted,
+  contextAppended,
 }
 
 class BridgeRuntimeCostAmount {
@@ -630,10 +647,18 @@ class BridgeThreadRuntimeUsage {
   final BigInt promptTokens;
   final BigInt completionTokens;
   final BigInt cachedPromptTokens;
+  final BigInt cacheWriteTokens;
+  final BigInt cacheMissTokens;
+  final BigInt reasoningTokens;
+  final BigInt inferenceCount;
   final BigInt totalTokens;
   final double? cacheHitRate;
   final List<BridgeRuntimeCostAmount> estimatedCosts;
+  final List<BridgeRuntimeCostAmount> estimatedCacheSavings;
   final bool hasUnpricedUsage;
+  final BigInt? promptGeneration;
+  final String? promptCachePolicy;
+  final BridgePromptPrefixChangedReason? prefixChangedReason;
   final PlatformInt64 updatedAt;
 
   const BridgeThreadRuntimeUsage({
@@ -643,10 +668,18 @@ class BridgeThreadRuntimeUsage {
     required this.promptTokens,
     required this.completionTokens,
     required this.cachedPromptTokens,
+    required this.cacheWriteTokens,
+    required this.cacheMissTokens,
+    required this.reasoningTokens,
+    required this.inferenceCount,
     required this.totalTokens,
     this.cacheHitRate,
     required this.estimatedCosts,
+    required this.estimatedCacheSavings,
     required this.hasUnpricedUsage,
+    this.promptGeneration,
+    this.promptCachePolicy,
+    this.prefixChangedReason,
     required this.updatedAt,
   });
 
@@ -658,10 +691,18 @@ class BridgeThreadRuntimeUsage {
       promptTokens.hashCode ^
       completionTokens.hashCode ^
       cachedPromptTokens.hashCode ^
+      cacheWriteTokens.hashCode ^
+      cacheMissTokens.hashCode ^
+      reasoningTokens.hashCode ^
+      inferenceCount.hashCode ^
       totalTokens.hashCode ^
       cacheHitRate.hashCode ^
       estimatedCosts.hashCode ^
+      estimatedCacheSavings.hashCode ^
       hasUnpricedUsage.hashCode ^
+      promptGeneration.hashCode ^
+      promptCachePolicy.hashCode ^
+      prefixChangedReason.hashCode ^
       updatedAt.hashCode;
 
   @override
@@ -675,10 +716,18 @@ class BridgeThreadRuntimeUsage {
           promptTokens == other.promptTokens &&
           completionTokens == other.completionTokens &&
           cachedPromptTokens == other.cachedPromptTokens &&
+          cacheWriteTokens == other.cacheWriteTokens &&
+          cacheMissTokens == other.cacheMissTokens &&
+          reasoningTokens == other.reasoningTokens &&
+          inferenceCount == other.inferenceCount &&
           totalTokens == other.totalTokens &&
           cacheHitRate == other.cacheHitRate &&
           estimatedCosts == other.estimatedCosts &&
+          estimatedCacheSavings == other.estimatedCacheSavings &&
           hasUnpricedUsage == other.hasUnpricedUsage &&
+          promptGeneration == other.promptGeneration &&
+          promptCachePolicy == other.promptCachePolicy &&
+          prefixChangedReason == other.prefixChangedReason &&
           updatedAt == other.updatedAt;
 }
 

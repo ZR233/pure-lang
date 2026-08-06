@@ -20,6 +20,7 @@ const demoProviderCatalogFixture = ProviderCatalogView(
       suggestedModel: 'future-model',
       hostedWebSearch: true,
       standaloneWebSearch: 'future_search_dialect',
+      promptCacheDialect: 'implicit_prefix',
     ),
   ],
   modelCatalogs: {
@@ -116,6 +117,7 @@ List<ProviderSettingsView> _providersFromSettingsCommand(
       hostedWebSearch: provider.hostedWebSearch,
       standaloneWebSearch:
           provider.standaloneWebSearch ?? template.standaloneWebSearch,
+      promptCacheDialect: provider.promptCacheDialect,
       iconKey: template.iconKey,
     );
   }).toList();

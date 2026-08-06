@@ -370,6 +370,10 @@ impl AgentSession {
         self.prompt_cache_key = Some(key);
     }
 
+    pub fn replace_prompt_cache_key(&mut self, key: Option<String>) {
+        self.prompt_cache_key = key;
+    }
+
     pub fn prompt_cache_key(&self) -> Option<&str> {
         self.prompt_cache_key.as_deref()
     }

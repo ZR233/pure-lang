@@ -20,6 +20,7 @@ ProviderSettingsView _providerFromSettings(Object? value) {
     ],
     status: 'ready',
     usageLabel: '1 models',
+    promptCacheDialect: json['promptCacheDialect'] as String? ?? 'none',
   );
 }
 

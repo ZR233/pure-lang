@@ -27,10 +27,15 @@ class _ContextUsageReadoutState extends State<ContextUsageReadout> {
         ? 0.0
         : (runtime.contextTokens / runtime.contextWindow).clamp(0.0, 1.0);
     final percent = (progress * 100).round();
+    final cachePercent = runtime.effectiveCacheHitRate == null
+        ? null
+        : (runtime.effectiveCacheHitRate! * 100).round();
     return StatusDetailPopover(
-      width: 314,
+      width: 360,
       semanticsLabel: context.l10n.statusContextLabel,
-      semanticsValue: '$percent%',
+      semanticsValue: cachePercent == null
+          ? '$percent%'
+          : '$percent%, ${context.l10n.statusCacheLabel} $cachePercent%',
       onFocusChange: (focused) => setState(() => _focused = focused),
       detailBuilder: (context) => _ContextDetail(
         runtime: runtime,
@@ -52,17 +57,32 @@ class _ContextUsageReadoutState extends State<ContextUsageReadout> {
                   : Colors.transparent,
               borderRadius: BorderRadius.circular(StudioRadii.xs),
             ),
-            child: SizedBox.square(
-              dimension: 16,
-              child: CustomPaint(
-                painter: _ContextUsagePainter(
-                  progress: progress,
-                  trackColor: context.studioLine,
-                  progressColor: _progressColor(progress),
-                  strokeWidth: 2.2,
-                  radiusInset: 1.8,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox.square(
+                  dimension: 16,
+                  child: CustomPaint(
+                    painter: _ContextUsagePainter(
+                      progress: progress,
+                      trackColor: context.studioLine,
+                      progressColor: _progressColor(progress),
+                      strokeWidth: 2.2,
+                      radiusInset: 1.8,
+                    ),
+                  ),
                 ),
-              ),
+                if (cachePercent != null) ...[
+                  const SizedBox(width: 6),
+                  Text(
+                    '${context.l10n.statusCacheLabel} $cachePercent%',
+                    style: context.text.labelSmall?.copyWith(
+                      color: context.studioInkSoft,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
         ),
@@ -95,6 +115,14 @@ class _ContextDetail extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final percent = (progress * 100).round();
+    final cacheRate = runtime.effectiveCacheHitRate;
+    final cost = runtime.estimatedCosts.isEmpty
+        ? runtime.costLabel
+        : _formatCosts(runtime.estimatedCosts);
+    final costWithPricingStatus = [
+      if (cost.isNotEmpty) cost,
+      if (runtime.hasUnpricedUsage) context.l10n.statusUnpricedUsageLabel,
+    ].join(' · ');
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -137,6 +165,46 @@ class _ContextDetail extends StatelessWidget {
                 label: context.l10n.statusTotalTokensLabel,
                 value: _formatCount(runtime.totalTokens),
               ),
+              if (cacheRate != null)
+                StatusDetailRow(
+                  label: context.l10n.statusCacheLabel,
+                  value: '${(cacheRate * 100).round()}%',
+                ),
+              if (runtime.hasUsage)
+                StatusDetailRow(
+                  label: context.l10n.statusCacheHitTokensLabel,
+                  value: _formatCount(runtime.cachedPromptTokens),
+                ),
+              if (runtime.hasUsage)
+                StatusDetailRow(
+                  label: context.l10n.statusCacheMissTokensLabel,
+                  value: _formatCount(runtime.cacheMissTokens),
+                ),
+              if (runtime.hasUsage)
+                StatusDetailRow(
+                  label: context.l10n.statusCacheWriteTokensLabel,
+                  value: _formatCount(runtime.cacheWriteTokens),
+                ),
+              if (runtime.hasUsage)
+                StatusDetailRow(
+                  label: context.l10n.statusReasoningTokensLabel,
+                  value: _formatCount(runtime.reasoningTokens),
+                ),
+              if (runtime.hasUsage)
+                StatusDetailRow(
+                  label: context.l10n.statusInferenceCountLabel,
+                  value: _formatCount(runtime.inferenceCount),
+                ),
+              if (costWithPricingStatus.isNotEmpty)
+                StatusDetailRow(
+                  label: context.l10n.statusCost,
+                  value: costWithPricingStatus,
+                ),
+              if (runtime.estimatedCacheSavings.isNotEmpty)
+                StatusDetailRow(
+                  label: context.l10n.statusCacheSavingsLabel,
+                  value: _formatCosts(runtime.estimatedCacheSavings),
+                ),
               if (runtime.model.isNotEmpty)
                 StatusDetailRow(
                   label: context.l10n.statusModelLabel,
@@ -214,4 +282,16 @@ String _formatCount(int value) {
     buffer.write(text[index]);
   }
   return buffer.toString();
+}
+
+String _formatCosts(List<RuntimeCostView> costs) {
+  return costs
+      .map((cost) => '${cost.currency} ${_formatAmount(cost.amount)}'.trim())
+      .join(', ');
+}
+
+String _formatAmount(double amount) {
+  final fixed = amount.toStringAsFixed(6);
+  final compact = fixed.replaceFirst(RegExp(r'\.?0+$'), '');
+  return compact == '-0' || compact.isEmpty ? '0' : compact;
 }

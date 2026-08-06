@@ -257,11 +257,37 @@ pub struct BridgeThreadRuntimeUsage {
     pub prompt_tokens: u64,
     pub completion_tokens: u64,
     pub cached_prompt_tokens: u64,
+    pub cache_write_tokens: u64,
+    pub cache_miss_tokens: u64,
+    pub reasoning_tokens: u64,
+    pub inference_count: u64,
     pub total_tokens: u64,
     pub cache_hit_rate: Option<f64>,
     pub estimated_costs: Vec<BridgeRuntimeCostAmount>,
+    pub estimated_cache_savings: Vec<BridgeRuntimeCostAmount>,
     pub has_unpriced_usage: bool,
+    pub prompt_generation: Option<u64>,
+    pub prompt_cache_policy: Option<String>,
+    pub prefix_changed_reason: Option<BridgePromptPrefixChangedReason>,
     pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BridgePromptPrefixChangedReason {
+    Initial,
+    PromptScopeChanged,
+    ProviderChanged,
+    ModelChanged,
+    BaseInstructionsChanged,
+    GlobalInstructionsChanged,
+    ModeRoleChanged,
+    SkillCatalogChanged,
+    WorkspaceInstructionsChanged,
+    RequestPropertiesChanged,
+    FixedPrefixChanged,
+    ToolSchemaChanged,
+    ContextCompacted,
+    ContextAppended,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

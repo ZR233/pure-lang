@@ -19,6 +19,8 @@ pub struct ModelCapabilities {
     pub tools: ToolCapabilities,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interleaved: Option<ReasoningInterleaved>,
+    #[serde(default)]
+    pub prompt_cache: PromptCacheModelCapabilities,
 }
 
 impl Default for ModelCapabilities {
@@ -43,6 +45,7 @@ impl ModelCapabilities {
                 freeform_tools: false,
             },
             interleaved: None,
+            prompt_cache: PromptCacheModelCapabilities::default(),
         }
     }
 
@@ -109,6 +112,13 @@ impl ModelCapabilities {
         }
         self
     }
+}
+
+/// 模型可报告的提示词缓存 usage 能力。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PromptCacheModelCapabilities {
+    #[serde(default)]
+    pub cache_write_tokens: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

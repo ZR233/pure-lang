@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{RuntimeCostAmount, TokenUsageSnapshot};
+use crate::{PromptPrefixChangedReason, RuntimeCostAmount, TokenUsageSnapshot};
 
 /// 向一个 Turn 追加 inference 计费记录的结果。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,6 +23,8 @@ pub struct ModelPricingSnapshot {
     pub output_per_mtok: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_read_per_mtok: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_write_per_mtok: Option<f64>,
 }
 
 /// 单次模型调用的 provider 原始 token 分类。
@@ -31,6 +33,8 @@ pub struct ModelPricingSnapshot {
 pub struct InferenceTokenUsage {
     pub prompt_tokens: u64,
     pub cached_prompt_tokens: u64,
+    #[serde(default)]
+    pub cache_write_tokens: u64,
     pub completion_tokens: u64,
     pub reasoning_tokens: u64,
     pub total_tokens: u64,
@@ -39,9 +43,13 @@ pub struct InferenceTokenUsage {
 impl InferenceTokenUsage {
     pub fn normalized(&self) -> Self {
         let cached_prompt_tokens = self.cached_prompt_tokens.min(self.prompt_tokens);
+        let cache_write_tokens = self
+            .cache_write_tokens
+            .min(self.prompt_tokens.saturating_sub(cached_prompt_tokens));
         Self {
             prompt_tokens: self.prompt_tokens,
             cached_prompt_tokens,
+            cache_write_tokens,
             completion_tokens: self.completion_tokens,
             reasoning_tokens: self.reasoning_tokens,
             total_tokens: self
@@ -56,6 +64,12 @@ impl InferenceTokenUsage {
             prompt_tokens: normalized.prompt_tokens,
             completion_tokens: normalized.completion_tokens,
             cached_prompt_tokens: normalized.cached_prompt_tokens,
+            cache_write_tokens: normalized.cache_write_tokens,
+            cache_miss_tokens: normalized
+                .prompt_tokens
+                .saturating_sub(normalized.cached_prompt_tokens),
+            reasoning_tokens: normalized.reasoning_tokens,
+            inference_count: 1,
             total_tokens: normalized.total_tokens,
         }
     }
@@ -75,8 +89,16 @@ pub struct InferenceBillingRecord {
     pub pricing: ModelPricingSnapshot,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub estimated_costs: Vec<RuntimeCostAmount>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub estimated_cache_savings: Vec<RuntimeCostAmount>,
     #[serde(default)]
     pub has_unpriced_usage: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_generation: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_cache_policy: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prefix_changed_reason: Option<PromptPrefixChangedReason>,
     pub recorded_at: i64,
 }
 
@@ -91,7 +113,7 @@ pub struct TurnBillingRecord {
 }
 
 impl TurnBillingRecord {
-    pub const VERSION: u32 = 1;
+    pub const VERSION: u32 = 2;
 
     pub fn new() -> Self {
         Self {
@@ -110,6 +132,9 @@ impl TurnBillingRecord {
                 aggregate.cached_prompt_tokens = aggregate
                     .cached_prompt_tokens
                     .saturating_add(usage.cached_prompt_tokens);
+                aggregate.cache_write_tokens = aggregate
+                    .cache_write_tokens
+                    .saturating_add(usage.cache_write_tokens);
                 aggregate.completion_tokens = aggregate
                     .completion_tokens
                     .saturating_add(usage.completion_tokens);
@@ -155,6 +180,7 @@ mod tests {
         let usage = InferenceTokenUsage {
             prompt_tokens: 10,
             cached_prompt_tokens: 20,
+            cache_write_tokens: 3,
             completion_tokens: 3,
             reasoning_tokens: 2,
             total_tokens: 0,
@@ -162,6 +188,7 @@ mod tests {
         .normalized();
 
         assert_eq!(usage.cached_prompt_tokens, 10);
+        assert_eq!(usage.cache_write_tokens, 0);
         assert_eq!(usage.total_tokens, 13);
     }
 
@@ -175,6 +202,7 @@ mod tests {
             reported_usage: InferenceTokenUsage {
                 prompt_tokens: 10,
                 cached_prompt_tokens: 4,
+                cache_write_tokens: 2,
                 completion_tokens: 3,
                 reasoning_tokens: 2,
                 total_tokens: 13,
@@ -182,13 +210,18 @@ mod tests {
             normalized_usage: InferenceTokenUsage {
                 prompt_tokens: 10,
                 cached_prompt_tokens: 4,
+                cache_write_tokens: 2,
                 completion_tokens: 3,
                 reasoning_tokens: 2,
                 total_tokens: 13,
             },
             pricing: ModelPricingSnapshot::default(),
             estimated_costs: Vec::new(),
+            estimated_cache_savings: Vec::new(),
             has_unpriced_usage: true,
+            prompt_generation: Some(1),
+            prompt_cache_policy: Some("implicitPrefix".to_string()),
+            prefix_changed_reason: Some(PromptPrefixChangedReason::Initial),
             recorded_at: 1,
         };
         let mut billing = TurnBillingRecord::new();
@@ -206,5 +239,48 @@ mod tests {
         conflicting.normalized_usage.completion_tokens = 4;
         assert!(billing.append(conflicting).is_err());
         assert_eq!(billing.inferences.len(), 1);
+    }
+
+    #[test]
+    fn version_one_json_defaults_version_two_fields() {
+        let billing: TurnBillingRecord = serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "inferences": [{
+                "inferenceId": "inference-1",
+                "provider": "DeepSeek",
+                "model": "deepseek-v4-flash",
+                "reportedUsage": {
+                    "promptTokens": 10,
+                    "cachedPromptTokens": 4,
+                    "completionTokens": 3,
+                    "reasoningTokens": 0,
+                    "totalTokens": 13
+                },
+                "normalizedUsage": {
+                    "promptTokens": 10,
+                    "cachedPromptTokens": 4,
+                    "completionTokens": 3,
+                    "reasoningTokens": 0,
+                    "totalTokens": 13
+                },
+                "pricing": {
+                    "currency": "CNY",
+                    "inputPerMtok": 1.0,
+                    "outputPerMtok": 2.0,
+                    "cacheReadPerMtok": 0.02
+                },
+                "estimatedCosts": [{"currency": "CNY", "amount": 0.0001}],
+                "hasUnpricedUsage": false,
+                "recordedAt": 1
+            }]
+        }))
+        .unwrap();
+
+        assert_eq!(billing.version, 1);
+        assert_eq!(billing.inferences[0].reported_usage.cache_write_tokens, 0);
+        assert_eq!(billing.inferences[0].pricing.cache_write_per_mtok, None);
+        assert!(billing.inferences[0].estimated_cache_savings.is_empty());
+        assert_eq!(billing.inferences[0].prompt_generation, None);
+        assert_eq!(billing.aggregate_usage().total_tokens, 13);
     }
 }

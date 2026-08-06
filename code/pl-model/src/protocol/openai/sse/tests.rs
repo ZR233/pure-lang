@@ -134,7 +134,8 @@ fn process_chat_completed_reads_responses_style_token_usage() {
             "output_tokens": 20,
             "total_tokens": 120,
             "input_tokens_details": {
-                "cached_tokens": 35
+                "cached_tokens": 35,
+                "cache_write_tokens": 11
             },
             "output_tokens_details": {
                 "reasoning_tokens": 8
@@ -152,9 +153,42 @@ fn process_chat_completed_reads_responses_style_token_usage() {
             assert_eq!(usage.completion_tokens, 20);
             assert_eq!(usage.total_tokens, 120);
             assert_eq!(usage.cached_prompt_tokens, 35);
+            assert_eq!(usage.cache_write_tokens, 11);
             assert_eq!(usage.reasoning_tokens, 8);
         }
         other => panic!("unexpected event: {other:?}"),
+    }
+}
+
+#[test]
+fn process_responses_completed_reads_cache_write_tokens() {
+    let event: SseStreamEvent = serde_json::from_value(serde_json::json!({
+        "type": "response.completed",
+        "response": {
+            "id": "resp_1",
+            "usage": {
+                "input_tokens": 100,
+                "output_tokens": 20,
+                "total_tokens": 120,
+                "input_tokens_details": {
+                    "cached_tokens": 40,
+                    "cache_write_tokens": 15
+                }
+            }
+        }
+    }))
+    .unwrap();
+
+    match process_sse_events(&event).as_slice() {
+        [
+            StreamEvent::Usage(usage),
+            StreamEvent::Completed { response_id },
+        ] => {
+            assert_eq!(usage.cached_prompt_tokens, 40);
+            assert_eq!(usage.cache_write_tokens, 15);
+            assert_eq!(response_id.as_deref(), Some("resp_1"));
+        }
+        other => panic!("unexpected events: {other:?}"),
     }
 }
 
