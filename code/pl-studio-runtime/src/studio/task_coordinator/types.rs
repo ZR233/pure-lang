@@ -274,6 +274,7 @@ pub(crate) enum WorkUnitStatus {
     Approved,
     Merged,
     NoDelivery,
+    NeedsAttention,
     Failed,
     Cancelled,
 }
@@ -290,6 +291,7 @@ impl WorkUnitStatus {
             Self::Approved => "approved",
             Self::Merged => "merged",
             Self::NoDelivery => "noDelivery",
+            Self::NeedsAttention => "needsAttention",
             Self::Failed => "failed",
             Self::Cancelled => "cancelled",
         }
@@ -306,6 +308,7 @@ impl WorkUnitStatus {
             "approved" => Some(Self::Approved),
             "merged" => Some(Self::Merged),
             "noDelivery" => Some(Self::NoDelivery),
+            "needsAttention" => Some(Self::NeedsAttention),
             "failed" => Some(Self::Failed),
             "cancelled" => Some(Self::Cancelled),
             _ => None,
@@ -319,6 +322,7 @@ pub(crate) enum ThreadExecutionStatus {
     Queued,
     Running,
     Completed,
+    BudgetLimited,
     Failed,
     Cancelled,
 }
@@ -335,6 +339,7 @@ impl ThreadExecutionStatus {
             Self::Queued => "queued",
             Self::Running => "running",
             Self::Completed => "completed",
+            Self::BudgetLimited => "budgetLimited",
             Self::Failed => "failed",
             Self::Cancelled => "cancelled",
         }
@@ -345,8 +350,59 @@ impl ThreadExecutionStatus {
             "queued" => Some(Self::Queued),
             "running" => Some(Self::Running),
             "completed" => Some(Self::Completed),
+            "budgetLimited" => Some(Self::BudgetLimited),
             "failed" => Some(Self::Failed),
             "cancelled" => Some(Self::Cancelled),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum ExecutorContinuationState {
+    #[default]
+    None,
+    Compacting,
+    PendingStart,
+    NeedsAttention,
+}
+
+pub(crate) const MAX_EXECUTOR_BUDGET_SLICES: u32 = 4;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ExecutorContinuationRequest {
+    pub(crate) agent_id: String,
+    pub(crate) work_unit_id: String,
+    pub(crate) source_turn_id: String,
+    pub(crate) slice_count: u32,
+}
+
+impl ExecutorContinuationRequest {
+    pub(crate) fn mail_id(&self) -> String {
+        format!(
+            "task-executor-continuation:{}:{}",
+            self.work_unit_id, self.source_turn_id
+        )
+    }
+}
+
+impl ExecutorContinuationState {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Compacting => "compacting",
+            Self::PendingStart => "pendingStart",
+            Self::NeedsAttention => "needsAttention",
+        }
+    }
+
+    pub(crate) fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "none" => Some(Self::None),
+            "compacting" => Some(Self::Compacting),
+            "pendingStart" => Some(Self::PendingStart),
+            "needsAttention" => Some(Self::NeedsAttention),
             _ => None,
         }
     }
@@ -543,6 +599,11 @@ pub(crate) struct WorkUnitRecord {
     pub(crate) execution_status: ThreadExecutionStatus,
     pub(crate) execution_summary: Option<String>,
     pub(crate) execution_error: Option<String>,
+    pub(crate) budget_limit: Option<pl_protocol::BudgetLimitSnapshot>,
+    pub(crate) budget_slice_count: u32,
+    pub(crate) continuation_state: ExecutorContinuationState,
+    pub(crate) continuation_source_turn_id: Option<String>,
+    pub(crate) continuation_revision: u64,
     pub(crate) created_at: i64,
     pub(crate) updated_at: i64,
 }

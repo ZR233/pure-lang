@@ -66,6 +66,11 @@ pub mod work_unit {
         pub execution_status: String,
         pub execution_summary: Option<String>,
         pub execution_error: Option<String>,
+        pub budget_limit_json: Option<String>,
+        pub budget_slice_count: i32,
+        pub continuation_state: String,
+        pub continuation_source_turn_id: Option<String>,
+        pub continuation_revision: i64,
         pub created_at: i64,
         pub updated_at: i64,
     }

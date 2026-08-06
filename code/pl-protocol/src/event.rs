@@ -226,6 +226,14 @@ pub struct BudgetUsage {
     pub elapsed_ms: u64,
 }
 
+/// 一次 budget 终止的类型化用量快照。
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BudgetLimitSnapshot {
+    pub kind: BudgetLimitKind,
+    pub usage: BudgetUsage,
+}
+
 /// Estimated runtime cost in a single currency.
 ///
 /// Costs are local estimates derived from configured per-million-token prices.

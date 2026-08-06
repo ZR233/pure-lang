@@ -9,8 +9,8 @@ use crate::studio::paths::{sqlite_read_only_url, sqlite_url};
 use crate::studio::store_support::STUDIO_DATABASE_SCHEMA_VERSION;
 
 #[tokio::test]
-async fn creates_canonical_schema_v2_with_scope_hints() {
-    let root = unique_test_root("schema-v2");
+async fn creates_canonical_schema_v3_with_segmented_context() {
+    let root = unique_test_root("schema-v3");
     let database_path = root.join("studio.sqlite");
     let store = StudioStore::open(&database_path).await.unwrap();
 
@@ -24,6 +24,8 @@ async fn creates_canonical_schema_v2_with_scope_hints() {
         "thread_inputs",
         "turns",
         "items",
+        "thread_context_segments",
+        "thread_session_state",
         "interactions",
         "attachments",
         "app_settings",
@@ -42,6 +44,34 @@ async fn creates_canonical_schema_v2_with_scope_hints() {
     let work_unit_columns = table_columns(store.database(), "work_units").await;
     assert!(work_unit_columns.contains(&"scope_hints_json".to_string()));
     assert!(!work_unit_columns.contains(&"owned_paths_json".to_string()));
+    let item_columns = table_columns(store.database(), "items").await;
+    assert!(!item_columns.contains(&"provider_private_payload".to_string()));
+    let turn_columns = table_columns(store.database(), "turns").await;
+    for column in [
+        "budget_limit_json",
+        "rollover_compacted",
+        "rollover_compaction_error",
+    ] {
+        assert!(
+            turn_columns.contains(&column.to_string()),
+            "missing turns.{column}"
+        );
+    }
+    let segment_columns = table_columns(store.database(), "thread_context_segments").await;
+    for column in [
+        "thread_id",
+        "ordinal",
+        "revision",
+        "kind",
+        "payload_json",
+        "payload_hash",
+        "resulting_hash",
+    ] {
+        assert!(
+            segment_columns.contains(&column.to_string()),
+            "missing thread_context_segments.{column}"
+        );
+    }
     let merge_columns = table_columns(store.database(), "merge_records").await;
     for column in [
         "work_unit_id",

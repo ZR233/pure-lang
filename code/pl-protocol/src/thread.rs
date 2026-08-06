@@ -160,17 +160,7 @@ pub enum ThreadItemContent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         media_type: Option<String>,
     },
-    /// 模型输入审计记录；Bridge 不得向 Flutter 暴露。
-    ContextPatch {
-        generation: u64,
-        fixed_prefix_hash: String,
-        tool_schema_hash: String,
-        context_hash: String,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        changed_section_ids: Vec<String>,
-        prefix_changed_reason: crate::PromptPrefixChangedReason,
-    },
-    /// 仅供模型上下文重建，Bridge 不得向 Flutter 暴露。
+    /// 无正文的内部压缩审计记录；Bridge 不得向 Flutter 暴露。
     ContextCompaction {
         before_tokens: u64,
         after_tokens: u64,

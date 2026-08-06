@@ -1,9 +1,9 @@
 use anyhow::Result;
 
 use crate::{
-    StudioTaskCompletionRuntime, StudioTaskDesignReferenceRuntime, StudioTaskMergeRuntime,
-    StudioTaskReviewFindingRuntime, StudioTaskReviewRuntime, StudioTaskRuntime,
-    StudioTaskWorkUnitRuntime,
+    StudioBudgetLimitRuntime, StudioBudgetUsageRuntime, StudioTaskCompletionRuntime,
+    StudioTaskDesignReferenceRuntime, StudioTaskMergeRuntime, StudioTaskReviewFindingRuntime,
+    StudioTaskReviewRuntime, StudioTaskRuntime, StudioTaskWorkUnitRuntime,
 };
 
 use super::{
@@ -61,6 +61,22 @@ fn studio_task_runtime(
                 worktree_path: unit.worktree_path.clone(),
                 branch: unit.branch.clone(),
                 agent_id: unit.executor_thread_id.clone(),
+                execution_status: unit.execution_status.as_str().to_string(),
+                execution_error: unit.execution_error.clone(),
+                budget_limit: unit.budget_limit.map(|limit| StudioBudgetLimitRuntime {
+                    kind: limit.kind.as_str().to_string(),
+                    usage: StudioBudgetUsageRuntime {
+                        model_steps: limit.usage.model_steps,
+                        tool_calls: limit.usage.tool_calls,
+                        wait_calls: limit.usage.wait_calls,
+                        elapsed_ms: limit.usage.elapsed_ms,
+                    },
+                }),
+                budget_slice_count: unit.budget_slice_count,
+                budget_slice_limit: crate::studio::task_coordinator::MAX_EXECUTOR_BUDGET_SLICES,
+                continuation_state: unit.continuation_state.as_str().to_string(),
+                continuation_source_turn_id: unit.continuation_source_turn_id.clone(),
+                continuation_revision: unit.continuation_revision,
             })
             .collect(),
         completions: completions

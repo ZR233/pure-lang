@@ -7,8 +7,8 @@ use pl_model::{
     SharedModelProvider, create_provider,
 };
 #[cfg(test)]
-use pl_protocol::{ErrorSeverity, PureError};
-use pl_protocol::{Message, MessageContent, MessageRole, Result};
+use pl_protocol::ErrorSeverity;
+use pl_protocol::{Message, MessageContent, MessageRole, PureError, Result};
 use pl_trace::AgentEventSender;
 #[cfg(test)]
 use pl_trace::{AgentEvent, TraceEvent, TracePartStatus};
@@ -16,8 +16,8 @@ use pl_trace::{AgentEvent, TraceEvent, TracePartStatus};
 use crate::config::{ReasoningEffort, SkillsConfig, ToolCapabilityConfig};
 use crate::context_compaction::{
     CompactionOutcome, CompactionTrigger, ContextCompactionConfig, ContextCompactionPhase,
-    ContextCompactionRequest, ContextCompactionSnapshot, ManualContextCompactionRequest,
-    maybe_compact_session,
+    ContextCompactionRequest, ContextCompactionSnapshot, ContextCompactionTrigger,
+    ManualContextCompactionRequest, maybe_compact_session,
 };
 use crate::instruction::{InstructionAssembler, InstructionAssemblyRequest};
 use crate::permission::parse_reviewer_decision;
@@ -400,6 +400,7 @@ impl TurnEngine {
         request: ManualContextCompactionRequest,
         recorder: &mut TraceRecorder,
     ) -> Result<Option<ContextCompactionSnapshot>> {
+        let requested_trigger = request.trigger;
         let model = self.provider.default_model().to_string();
         let model_info = self.provider.model_info(&model);
         let workspace_root = self
@@ -443,6 +444,17 @@ impl TurnEngine {
                 ReasoningSummary::Enabled
             }),
         });
+        let compaction_trigger = match requested_trigger {
+            ContextCompactionTrigger::Manual => CompactionTrigger::Manual,
+            ContextCompactionTrigger::WallClockRollover => CompactionTrigger::WallClockRollover,
+            ContextCompactionTrigger::EstimatedTokens
+            | ContextCompactionTrigger::ProviderPromptTokens => {
+                return Err(PureError::ConfigError(
+                    "standalone compaction only accepts manual or wall-clock rollover triggers"
+                        .to_string(),
+                ));
+            }
+        };
         let turn_id = request.turn_id.unwrap_or_else(generate_turn_id);
         let mut progress = ProgressEmitter::new(
             recorder.sender().clone(),
@@ -457,11 +469,18 @@ impl TurnEngine {
                 config: &self.context_compaction,
                 request_instructions: &bundle.instructions,
                 request_messages: &bundle.prelude_messages,
+                working_context_tail: crate::context_assembler::ContextAssembler::assemble(
+                    &bundle.instructions,
+                    &bundle.prelude_messages,
+                    session.items(),
+                    &session.working_context_snapshot(),
+                )?
+                .working_context_tail,
                 tools: &tools,
                 parallel_tool_calls,
                 reasoning,
                 prompt_cache_key: session.prompt_cache_key().map(ToString::to_string),
-                trigger: CompactionTrigger::Manual,
+                trigger: compaction_trigger,
                 phase: ContextCompactionPhase::Standalone,
                 event_tx: recorder.sender().clone(),
                 progress: Some(&mut progress),

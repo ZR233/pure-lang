@@ -60,6 +60,24 @@ TaskRuntimeView _taskRuntimeFromFrb(frb.BridgeTaskRuntimeDto task) {
           worktreePath: unit.worktreePath,
           branch: unit.branch,
           agentId: unit.agentId,
+          executionStatus: unit.executionStatus,
+          executionError: unit.executionError,
+          budgetLimit: unit.budgetLimit == null
+              ? null
+              : TaskBudgetLimitView(
+                  kind: unit.budgetLimit!.kind,
+                  usage: TaskBudgetUsageView(
+                    modelSteps: unit.budgetLimit!.usage.modelSteps,
+                    toolCalls: unit.budgetLimit!.usage.toolCalls,
+                    waitCalls: unit.budgetLimit!.usage.waitCalls,
+                    elapsedMs: unit.budgetLimit!.usage.elapsedMs,
+                  ),
+                ),
+          budgetSliceCount: unit.budgetSliceCount,
+          budgetSliceLimit: unit.budgetSliceLimit,
+          continuationState: unit.continuationState,
+          continuationSourceTurnId: unit.continuationSourceTurnId,
+          continuationRevision: unit.continuationRevision,
         ),
     ],
     completions: [

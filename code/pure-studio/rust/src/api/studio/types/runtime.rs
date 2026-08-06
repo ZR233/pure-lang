@@ -131,6 +131,30 @@ pub struct BridgeTaskWorkUnitDto {
     pub worktree_path: String,
     pub branch: String,
     pub agent_id: Option<String>,
+    pub execution_status: String,
+    pub execution_error: Option<String>,
+    pub budget_limit: Option<BridgeBudgetLimitDto>,
+    pub budget_slice_count: u32,
+    pub budget_slice_limit: u32,
+    pub continuation_state: String,
+    pub continuation_source_turn_id: Option<String>,
+    pub continuation_revision: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeBudgetLimitDto {
+    pub kind: String,
+    pub usage: BridgeBudgetUsageDto,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeBudgetUsageDto {
+    pub model_steps: u32,
+    pub tool_calls: u32,
+    pub wait_calls: u32,
+    pub elapsed_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

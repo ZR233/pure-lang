@@ -396,6 +396,66 @@ class AppLocalizationsZh extends AppLocalizations {
   String get statusTaskError => '错误';
 
   @override
+  String get statusTaskExecution => '执行状态';
+
+  @override
+  String get statusTaskBudget => '预算限制';
+
+  @override
+  String get statusTaskBudgetSlice => '预算切片';
+
+  @override
+  String statusTaskBudgetSliceValue(int current, int limit) {
+    return '$current/$limit';
+  }
+
+  @override
+  String statusTaskBudgetUsage(
+    int modelSteps,
+    int toolCalls,
+    int waitCalls,
+    String elapsedMs,
+  ) {
+    return '$modelSteps 次模型 · $toolCalls 次工具 · $waitCalls 次等待 · $elapsedMs 毫秒';
+  }
+
+  @override
+  String get statusTaskContinuation => '自动续轮';
+
+  @override
+  String get statusTaskBudgetModelStep => '模型步数上限';
+
+  @override
+  String get statusTaskBudgetToolCall => '工具调用上限';
+
+  @override
+  String get statusTaskBudgetWait => '等待调用上限';
+
+  @override
+  String get statusTaskBudgetWallClock => '运行时长上限';
+
+  @override
+  String get statusTaskBudgetAgentCount => 'Agent 数量上限';
+
+  @override
+  String get statusTaskBudgetAgentDepth => 'Agent 深度上限';
+
+  @override
+  String get statusTaskBudgetFinalization => '收尾预算上限';
+
+  @override
+  String get statusTaskContinuationNone => '无';
+
+  @override
+  String get statusTaskContinuationCompacting => '正在压缩上下文';
+
+  @override
+  String get statusTaskContinuationPendingStart => '正在启动下一切片';
+
+  @override
+  String get statusTaskContinuationNeedsAttention => '需要处理';
+
+  @override
   String get statusTaskPhasePlanning => '规划中';
 
   @override
@@ -463,6 +523,12 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get statusTaskStatusCompleted => '已完成';
+
+  @override
+  String get statusTaskStatusBudgetLimited => '已达预算限制';
+
+  @override
+  String get statusTaskStatusNeedsAttention => '需要处理';
 
   @override
   String get statusTaskStatusFailed => '失败';
@@ -1744,6 +1810,66 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String get statusTaskError => '错误';
 
   @override
+  String get statusTaskExecution => '执行状态';
+
+  @override
+  String get statusTaskBudget => '预算限制';
+
+  @override
+  String get statusTaskBudgetSlice => '预算切片';
+
+  @override
+  String statusTaskBudgetSliceValue(int current, int limit) {
+    return '$current/$limit';
+  }
+
+  @override
+  String statusTaskBudgetUsage(
+    int modelSteps,
+    int toolCalls,
+    int waitCalls,
+    String elapsedMs,
+  ) {
+    return '$modelSteps 次模型 · $toolCalls 次工具 · $waitCalls 次等待 · $elapsedMs 毫秒';
+  }
+
+  @override
+  String get statusTaskContinuation => '自动续轮';
+
+  @override
+  String get statusTaskBudgetModelStep => '模型步数上限';
+
+  @override
+  String get statusTaskBudgetToolCall => '工具调用上限';
+
+  @override
+  String get statusTaskBudgetWait => '等待调用上限';
+
+  @override
+  String get statusTaskBudgetWallClock => '运行时长上限';
+
+  @override
+  String get statusTaskBudgetAgentCount => 'Agent 数量上限';
+
+  @override
+  String get statusTaskBudgetAgentDepth => 'Agent 深度上限';
+
+  @override
+  String get statusTaskBudgetFinalization => '收尾预算上限';
+
+  @override
+  String get statusTaskContinuationNone => '无';
+
+  @override
+  String get statusTaskContinuationCompacting => '正在压缩上下文';
+
+  @override
+  String get statusTaskContinuationPendingStart => '正在启动下一切片';
+
+  @override
+  String get statusTaskContinuationNeedsAttention => '需要处理';
+
+  @override
   String get statusTaskPhasePlanning => '规划中';
 
   @override
@@ -1811,6 +1937,12 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get statusTaskStatusCompleted => '已完成';
+
+  @override
+  String get statusTaskStatusBudgetLimited => '已达预算限制';
+
+  @override
+  String get statusTaskStatusNeedsAttention => '需要处理';
 
   @override
   String get statusTaskStatusFailed => '失败';

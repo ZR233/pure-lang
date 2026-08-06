@@ -10,7 +10,8 @@ use crate::studio::store::StudioStore;
 #[cfg(test)]
 use crate::studio::task_coordinator::CreateWorkUnit;
 use crate::studio::task_coordinator::{
-    TaskWorktreeDisposition, ThreadExecutionStatus, WorkUnitRecord, WorkUnitStatus,
+    ExecutorContinuationRequest, ExecutorContinuationState, TaskWorktreeDisposition,
+    ThreadExecutionStatus, WorkUnitRecord, WorkUnitStatus,
 };
 
 impl StudioStore {
@@ -34,6 +35,11 @@ impl StudioStore {
                 execution_status: Set(ThreadExecutionStatus::Queued.as_str().to_string()),
                 execution_summary: Set(None),
                 execution_error: Set(None),
+                budget_limit_json: Set(None),
+                budget_slice_count: Set(1),
+                continuation_state: Set(ExecutorContinuationState::None.as_str().to_string()),
+                continuation_source_turn_id: Set(None),
+                continuation_revision: Set(0),
                 created_at: Set(now),
                 updated_at: Set(now),
             }
@@ -98,6 +104,68 @@ impl StudioStore {
             _ => anyhow::bail!("executor Thread owns multiple work units"),
         }
     }
+
+    pub(crate) async fn list_pending_executor_continuations(
+        &self,
+    ) -> Result<Vec<ExecutorContinuationRequest>> {
+        entities::work_unit::Entity::find()
+            .filter(
+                entities::work_unit::Column::ContinuationState
+                    .eq(ExecutorContinuationState::PendingStart.as_str()),
+            )
+            .order_by_asc(entities::work_unit::Column::UpdatedAt)
+            .order_by_asc(entities::work_unit::Column::Id)
+            .all(&self.db)
+            .await?
+            .into_iter()
+            .map(|unit| {
+                Ok(ExecutorContinuationRequest {
+                    agent_id: unit
+                        .executor_thread_id
+                        .context("pending executor continuation has no executor Thread")?,
+                    work_unit_id: unit.id,
+                    source_turn_id: unit
+                        .continuation_source_turn_id
+                        .context("pending executor continuation has no source Turn")?,
+                    slice_count: u32::try_from(unit.budget_slice_count)
+                        .context("pending executor continuation has invalid slice count")?,
+                })
+            })
+            .collect()
+    }
+
+    pub(crate) async fn executor_continuation_turn_id(
+        &self,
+        continuation: &ExecutorContinuationRequest,
+    ) -> Result<Option<String>> {
+        let Some(unit) = entities::work_unit::Entity::find_by_id(&continuation.work_unit_id)
+            .one(&self.db)
+            .await?
+        else {
+            return Ok(None);
+        };
+        if unit.executor_thread_id.as_deref() != Some(continuation.agent_id.as_str())
+            || unit.continuation_source_turn_id.as_deref()
+                != Some(continuation.source_turn_id.as_str())
+            || unit.continuation_state != ExecutorContinuationState::PendingStart.as_str()
+        {
+            return Ok(None);
+        }
+        let Some(input) = entities::thread_input::Entity::find_by_id(continuation.mail_id())
+            .one(&self.db)
+            .await?
+        else {
+            return Ok(None);
+        };
+        if input.thread_id != continuation.agent_id {
+            anyhow::bail!("executor continuation mail belongs to another Thread");
+        }
+        match input.state.as_str() {
+            "queued" => Ok(None),
+            "claimed" | "active" | "consumed" => Ok(input.claimed_turn_id.or(Some(input.turn_id))),
+            state => anyhow::bail!("executor continuation mail has unknown state {state}"),
+        }
+    }
 }
 
 pub(super) fn work_unit_record(model: entities::work_unit::Model) -> Result<WorkUnitRecord> {
@@ -131,6 +199,22 @@ pub(super) fn work_unit_record(model: entities::work_unit::Model) -> Result<Work
         )?,
         execution_summary: model.execution_summary,
         execution_error: model.execution_error,
+        budget_limit: model
+            .budget_limit_json
+            .map(|value| serde_json::from_str(&value))
+            .transpose()?,
+        budget_slice_count: u32::try_from(model.budget_slice_count)
+            .context("budget slice count is negative")?,
+        continuation_state: ExecutorContinuationState::from_str(&model.continuation_state)
+            .with_context(|| {
+                format!(
+                    "invalid executor continuation state: {}",
+                    model.continuation_state
+                )
+            })?,
+        continuation_source_turn_id: model.continuation_source_turn_id,
+        continuation_revision: u64::try_from(model.continuation_revision)
+            .context("continuation revision is negative")?,
         created_at: model.created_at,
         updated_at: model.updated_at,
     })

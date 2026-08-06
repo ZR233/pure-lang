@@ -2,7 +2,7 @@
 
 ## 19.1 数据库
 
-Studio 默认只使用 `~/.pure/studio/studio.sqlite`，schema v2；测试和隔离验收可通过绝对路径
+Studio 默认只使用 `~/.pure/studio/studio.sqlite`，schema v3；测试和隔离验收可通过绝对路径
 `PURE_STUDIO_HOME` 改写整个 Studio 数据根。数据库启用 WAL、foreign keys、五秒
 busy timeout 和 synchronous=FULL；应用数据库连接池固定一个连接，mutation 通过 SQLite
 单 writer 事务串行化，snapshot、分页和设置查询共用该连接。
@@ -18,6 +18,7 @@ busy timeout 和 synchronous=FULL；应用数据库连接池固定一个连接�
 - attachments
 - app_settings
 - task_runs、work_units、work_completions、review_rounds、merge_records、branch_leases
+- thread_context_segments、thread_session_state
 
 不存在 history 数据库、storage generation pair、history_gc_jobs、session snapshot JSON、agent
 runtime snapshot、agent outcome 或 durable event journal。
@@ -31,9 +32,16 @@ Item start 分配不可变 ordinal；delta 不写库；terminal 更新同一 Ite
 shutdown 和 Interaction resolution 都等待事务完成。历史查询按 `(thread_id, turn_sequence)`
 keyset 分页，不使用 OFFSET。
 
-模型上下文直接从有序 Item 重建；contextPatch 保存一次采样前模型可见的运行上下文差量，
-contextCompaction 重置基线。两者都属于内部 Item，Bridge 查询永不返回。contextPatch 只用于
-模型输入重建和审计，不能代替 ThreadRuntimeSnapshot 中的当前事实。
+模型 transcript 与 Studio Timeline 分开持久化。`thread_context_segments` 按 Thread revision 保存
+`append | replace`：普通 checkpoint 只追加新增 `ModelContextItem` suffix；compaction、回滚或截断
+在同一事务删除旧 segment 并写入新的 replacement baseline。恢复时按 revision fold segment，
+拒绝断层、非法首段或损坏 payload。
+
+`thread_session_state` 每个 Thread 只有一行，replacement 保存 pinned working context、session note
+与 prompt generation 状态。Evidence Ledger 更新只覆盖这行的有界 working state，不复制完整
+transcript。`items` 不再包含 `contextPatch`，也不再保存 `provider_private_payload`；
+`contextCompaction` 可作为无正文内部审计 Item 保留，Bridge 查询永不返回。transcript replacement
+不删除 Studio Timeline，working state 也不能代替 `ThreadRuntimeSnapshot` 的当前产品事实。
 
 每次模型 inference 的 usage、provider/model、价格快照和费用明细保存在对应 Turn 的
 `model_json`；`usage_json` 保存同一事务重算的 Turn 聚合。完整 usage 必须先持久化成功，再发布
@@ -57,7 +65,7 @@ fingerprint。版本、结构或完整性不兼容时不迁移、不归档、不
 1. 关闭本次检查创建的全部数据库连接。
 2. 再次证明目标是配置解析得到的精确 canonical Studio 数据库文件。
 3. 精确删除 `studio.sqlite`、`studio.sqlite-wal` 与 `studio.sqlite-shm`；不使用 glob，不删除目录。
-4. 创建空 schema v2 并完成 fingerprint 校验后才向 Runtime 提供 store。
+4. 创建空 schema v3 并完成 fingerprint 校验后才向 Runtime 提供 store。
 
 删除或重建失败属于应用级致命错误，由错误页重试；不得在半初始化数据库上继续。重建只处理
 Studio 数据库文件，不扫描、删除或修改 Project、worktree、branch、attachments 或其他 legacy
@@ -80,4 +88,4 @@ Rust 使用 tracing，只记录稳定 ID、kind、数量、字节数、事务耗
 缓存诊断只记录 provider/wire/model、prompt generation、有效缓存策略、前缀变化原因、各固定层
 hash、token 分类、费用与缓存节省。cache key、prompt、配置正文、header、凭据、工具参数和结果
 均不得进入日志。Bridge 只暴露 generation、策略、变化原因与聚合 usage；内部 hash、逐 inference
-billing 和 contextPatch 不进入 Flutter timeline。
+billing 和 working-context 内容不进入 Flutter timeline。

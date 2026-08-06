@@ -19,7 +19,7 @@ use crate::config::{
     StudioRole,
 };
 use crate::studio::StudioStore;
-use crate::studio::entity::{item, thread, turn};
+use crate::studio::entity::{thread, thread_context_segment, turn};
 
 const MODEL: &str = "deepseek-v4-flash";
 const EXPECTED_MODEL_REQUESTS: usize = 7;
@@ -82,7 +82,23 @@ async fn run_tool_failure_fixture(root: &Path) -> Result<()> {
             options: StudioSubmitPromptOptions::default(),
         })
         .await?;
-    wait_for_turn(&store, &submitted.turn_id).await?;
+    if let Err(error) = wait_for_turn(&store, &submitted.turn_id).await {
+        let request_count = model_server.requests().await.len();
+        let accepted_count = model_server.accepted.load(Ordering::Relaxed);
+        let server_errors = model_server.errors().await;
+        let agent = match runtime.ensure_thread_agent(&thread.id).await {
+            Ok((handle, agent_id)) => handle
+                .snapshot(agent_id)
+                .await
+                .map_err(|error| error.to_string()),
+            Err(error) => Err(error.to_string()),
+        };
+        let thread_snapshot = runtime.thread_snapshot(&thread.id).await;
+        bail!(
+            "{error:#}; model requests={request_count}; accepted={accepted_count}; \
+             server errors={server_errors:?}; agent={agent:#?}; Thread={thread_snapshot:#?}"
+        );
+    }
     model_server.wait_complete().await?;
 
     let requests = model_server.requests().await;
@@ -241,10 +257,12 @@ async fn run_fixture(root: &Path) -> Result<()> {
     );
 
     let public = runtime.thread_snapshot(&thread.id).await?;
-    assert!(public.items.iter().all(|item| !matches!(
-        item.content,
-        ThreadItemContent::ContextPatch { .. } | ThreadItemContent::ContextCompaction { .. }
-    )));
+    assert!(
+        public
+            .items
+            .iter()
+            .all(|item| !matches!(item.content, ThreadItemContent::ContextCompaction { .. }))
+    );
     let runtime_usage = public
         .runtime
         .as_ref()
@@ -258,12 +276,11 @@ async fn run_fixture(root: &Path) -> Result<()> {
     );
 
     assert_persisted_billing(&store, &thread.id).await?;
-    let context_patch_count = item::Entity::find()
-        .filter(item::Column::ThreadId.eq(thread.id.clone()))
-        .filter(item::Column::ItemKind.eq("contextPatch"))
+    let context_segment_count = thread_context_segment::Entity::find()
+        .filter(thread_context_segment::Column::ThreadId.eq(thread.id.clone()))
         .count(store.database())
         .await?;
-    assert!(context_patch_count >= 2);
+    assert!(context_segment_count >= 2);
 
     runtime.shutdown_runtime().await?;
     drop(runtime);
@@ -289,10 +306,12 @@ async fn run_fixture(root: &Path) -> Result<()> {
         restored_usage.usage.estimated_costs,
         runtime_usage.usage.estimated_costs
     );
-    assert!(restored.items.iter().all(|item| !matches!(
-        item.content,
-        ThreadItemContent::ContextPatch { .. } | ThreadItemContent::ContextCompaction { .. }
-    )));
+    assert!(
+        restored
+            .items
+            .iter()
+            .all(|item| !matches!(item.content, ThreadItemContent::ContextCompaction { .. }))
+    );
     let restored_thread = thread::Entity::find_by_id(thread.id.clone())
         .one(reopened_store.database())
         .await?
@@ -385,20 +404,41 @@ fn assert_stable_append_only_requests(requests: &[Value]) -> Result<()> {
         assert!(request.get("prompt_cache_key").is_none());
     }
     for pair in requests.windows(2) {
-        let previous = pair[0]["messages"]
-            .as_array()
-            .context("previous request messages missing")?;
-        let current = pair[1]["messages"]
-            .as_array()
-            .context("current request messages missing")?;
+        let previous = transcript_messages(&pair[0])?;
+        let current = transcript_messages(&pair[1])?;
         if current.len() < previous.len() || current[..previous.len()] != previous[..] {
-            bail!("DeepSeek request history is not a strict append-only prefix");
+            bail!("DeepSeek transcript is not a strict append-only prefix");
         }
     }
     let serialized = serde_json::to_string(requests)?;
-    assert!(serialized.contains("# Working context update"));
+    assert!(serialized.contains("# Current working context"));
     assert!(serialized.contains("cache fixture lookup ok"));
     Ok(())
+}
+
+fn transcript_messages(request: &Value) -> Result<Vec<Value>> {
+    let messages = request["messages"]
+        .as_array()
+        .context("request messages missing")?;
+    let tail_count = messages
+        .iter()
+        .filter(|message| is_working_context_tail(message))
+        .count();
+    if tail_count > 1 {
+        bail!("model request contains {tail_count} working-context tails");
+    }
+    Ok(messages
+        .iter()
+        .filter(|message| !is_working_context_tail(message))
+        .cloned()
+        .collect())
+}
+
+fn is_working_context_tail(message: &Value) -> bool {
+    message["role"] == "system"
+        && message["content"]
+            .as_str()
+            .is_some_and(|content| content.starts_with("# Current working context"))
 }
 
 fn tool_names(request: &Value) -> Vec<String> {
@@ -708,16 +748,12 @@ fn scripted_response(step: usize, action: ChatAction) -> Result<String> {
 }
 
 fn assert_request_is_append_only(previous: &Value, current: &Value) -> Result<()> {
-    let previous_messages = previous["messages"]
-        .as_array()
-        .context("previous request messages missing")?;
-    let current_messages = current["messages"]
-        .as_array()
-        .context("current request messages missing")?;
+    let previous_messages = transcript_messages(previous)?;
+    let current_messages = transcript_messages(current)?;
     if current_messages.len() < previous_messages.len()
         || current_messages[..previous_messages.len()] != previous_messages[..]
     {
-        bail!("DeepSeek request history is not a strict append-only prefix");
+        bail!("DeepSeek transcript is not a strict append-only prefix");
     }
     assert_eq!(previous["tools"], current["tools"]);
     Ok(())

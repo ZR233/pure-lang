@@ -149,6 +149,8 @@ pub(super) fn interrupted_turn_result(
         failure: None,
         budget_limit_kind: None,
         budget_usage: None,
+        rollover_compacted: false,
+        rollover_compaction_error: None,
         trace_events: recorder.drain(),
     }
 }
@@ -220,6 +222,8 @@ pub(super) fn failed_turn_result_with_abort_reason(
         failure: Some(failure),
         budget_limit_kind: None,
         budget_usage: None,
+        rollover_compacted: false,
+        rollover_compaction_error: None,
         trace_events: recorder.drain(),
     }
 }
@@ -263,6 +267,8 @@ pub(super) fn budget_limited_turn_result(
         failure: None,
         budget_limit_kind: Some(limit_kind),
         budget_usage: Some(budget_usage),
+        rollover_compacted: false,
+        rollover_compaction_error: None,
         trace_events: recorder.drain(),
     }
 }

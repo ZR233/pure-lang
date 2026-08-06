@@ -149,6 +149,7 @@ class _WorkUnitDetail extends StatelessWidget {
         .where((completion) => completion.workUnitId == unit.id)
         .lastOrNull;
     return Padding(
+      key: StudioDriverKeys.taskWorkUnit(unit.id),
       padding: const EdgeInsets.only(bottom: 9),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -161,6 +162,38 @@ class _WorkUnitDetail extends StatelessWidget {
             label: context.l10n.statusTaskSource,
             value: unit.agentId ?? '-',
           ),
+          StatusDetailRow(
+            key: StudioDriverKeys.taskWorkUnitExecution(unit.id),
+            label: context.l10n.statusTaskExecution,
+            value: context.taskStatusLabel(unit.executionStatus),
+          ),
+          StatusDetailRow(
+            key: StudioDriverKeys.taskWorkUnitBudgetSlice(unit.id),
+            label: context.l10n.statusTaskBudgetSlice,
+            value: context.l10n.statusTaskBudgetSliceValue(
+              unit.budgetSliceCount,
+              unit.budgetSliceLimit,
+            ),
+          ),
+          if (unit.budgetLimit case final budgetLimit?)
+            StatusDetailRow(
+              label: context.l10n.statusTaskBudget,
+              value:
+                  '${context.taskBudgetKindLabel(budgetLimit.kind)} · '
+                  '${context.l10n.statusTaskBudgetUsage(budgetLimit.usage.modelSteps, budgetLimit.usage.toolCalls, budgetLimit.usage.waitCalls, budgetLimit.usage.elapsedMs.toString())}',
+              valueMaxLines: 2,
+            ),
+          StatusDetailRow(
+            key: StudioDriverKeys.taskWorkUnitContinuation(unit.id),
+            label: context.l10n.statusTaskContinuation,
+            value: context.taskContinuationStateLabel(unit.continuationState),
+          ),
+          if (unit.executionError case final error?)
+            StatusDetailRow(
+              label: context.l10n.statusTaskError,
+              value: error,
+              valueMaxLines: 3,
+            ),
           StatusDetailRow(
             label: context.l10n.statusTaskWorktree,
             value: unit.worktreePath,

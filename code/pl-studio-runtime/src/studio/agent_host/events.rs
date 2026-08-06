@@ -2,7 +2,8 @@ use crate::config::StudioRole;
 use crate::{PlanLifecycleState, StudioAgentDirectoryEntry, StudioAgentProgressRuntime};
 use pl_core::{
     AgentActivityState, AgentCommitObserver, AgentCommittedEvent, AgentId, AgentLifecycleState,
-    AgentProgressStage, AgentRuntimeEventKind, AgentRuntimeHandle, AgentSnapshot, TurnOutcomeKind,
+    AgentProgressStage, AgentRuntimeEventKind, AgentRuntimeHandle, AgentSnapshot,
+    AgentSubmitRequest, AgentTurnSubmitPolicy, MailboxPresentation, ThreadId, TurnOutcomeKind,
 };
 use pl_trace::{TraceEvent, TraceEventKind, TracePartKind};
 use tokio::sync::{mpsc, watch};
@@ -19,6 +20,7 @@ use super::{StudioPlanConfirmationProjector, wait_for_runtime};
 pub(in crate::studio) struct StudioAgentCommitObserver {
     sender: mpsc::UnboundedSender<AgentCommittedEvent>,
     runtime: watch::Sender<Option<AgentRuntimeHandle>>,
+    store: StudioStore,
     plan_confirmations: StudioPlanConfirmationProjector,
     runtime_state: StudioRuntimeState,
 }
@@ -70,7 +72,7 @@ impl StudioAgentCommitObserver {
             runtime_receiver.clone(),
         );
         let projector = StudioAgentEventProjector {
-            store,
+            store: store.clone(),
             resources,
             product_events,
             plan_confirmations: plan_confirmations.clone(),
@@ -90,13 +92,36 @@ impl StudioAgentCommitObserver {
         Self {
             sender,
             runtime,
+            store,
             plan_confirmations,
             runtime_state,
         }
     }
 
     pub(super) async fn attach_runtime(&self, runtime: AgentRuntimeHandle) {
-        self.runtime.send_replace(Some(runtime));
+        self.runtime.send_replace(Some(runtime.clone()));
+        match self.store.list_pending_executor_continuations().await {
+            Ok(continuations) => {
+                for continuation in continuations {
+                    if let Err(error) =
+                        recover_executor_continuation(&runtime, &self.store, &continuation).await
+                        && let Err(store_error) = self
+                            .store
+                            .fail_executor_continuation(&continuation, &error.to_string())
+                            .await
+                    {
+                        tracing::warn!(
+                            error_bytes = store_error.to_string().len(),
+                            "failed to persist executor continuation recovery failure"
+                        );
+                    }
+                }
+            }
+            Err(error) => tracing::warn!(
+                error_bytes = error.to_string().len(),
+                "failed to list pending executor continuations"
+            ),
+        }
         if let Err(error) = self.plan_confirmations.recover_missing().await {
             tracing::warn!(
                 error_bytes = error.to_string().len(),
@@ -221,14 +246,25 @@ impl StudioAgentEventProjector {
                 let is_reviewer =
                     is_task_agent && snapshot.identity.role.as_str() == StudioRole::Reviewer.key();
                 if is_executor {
-                    self.store
-                        .settle_executor_turn_finished(
-                            event.agent_id.as_str(),
-                            outcome.kind,
-                            outcome.reason.as_deref(),
-                        )
+                    let continuation = self
+                        .store
+                        .settle_executor_turn_finished(event.agent_id.as_str(), &outcome)
                         .await
                         .at("settleExecutorTurnFinished")?;
+                    if let Some(continuation) = continuation
+                        && let Err(error) = submit_executor_continuation(
+                            &wait_for_runtime(self.runtime.clone())
+                                .await
+                                .at("waitForRuntimeToContinueExecutor")?,
+                            &continuation,
+                        )
+                        .await
+                    {
+                        self.store
+                            .fail_executor_continuation(&continuation, &error.to_string())
+                            .await
+                            .at("failExecutorContinuation")?;
+                    }
                 } else if is_reviewer {
                     self.store
                         .settle_reviewer_turn_finished(
@@ -417,6 +453,67 @@ impl StudioAgentEventProjector {
     }
 }
 
+async fn submit_executor_continuation(
+    runtime: &AgentRuntimeHandle,
+    continuation: &crate::studio::task_coordinator::ExecutorContinuationRequest,
+) -> anyhow::Result<()> {
+    let agent_id = AgentId::new(continuation.agent_id.clone())?;
+    let thread_id = ThreadId::new(continuation.agent_id.clone())?;
+    let request = AgentSubmitRequest::start(
+        thread_id,
+        "Continue the assigned task from the compacted canonical session. Re-read current task status, finish the remaining work, verify it, and report completion.",
+    )
+    .with_presentation(MailboxPresentation::Hidden)
+    .with_metadata(serde_json::json!({
+        "kind": "executorBudgetContinuation",
+        "workUnitId": continuation.work_unit_id,
+        "sourceTurnId": continuation.source_turn_id,
+        "slice": continuation.slice_count,
+    }))
+    .with_mail_id(continuation.mail_id())
+    .with_turn_policy(AgentTurnSubmitPolicy::StartOnly);
+    runtime
+        .submit(agent_id, request)
+        .await
+        .map(|_| ())
+        .map_err(|error| anyhow::anyhow!(error.to_string()))
+}
+
+async fn recover_executor_continuation(
+    runtime: &AgentRuntimeHandle,
+    store: &StudioStore,
+    continuation: &crate::studio::task_coordinator::ExecutorContinuationRequest,
+) -> anyhow::Result<()> {
+    if let Some(turn_id) = store.executor_continuation_turn_id(continuation).await? {
+        let agent_id = AgentId::new(continuation.agent_id.clone())?;
+        let snapshot = runtime.snapshot(agent_id).await?;
+        if snapshot
+            .active_turn_id
+            .as_ref()
+            .is_some_and(|active| active.as_str() == turn_id)
+        {
+            store
+                .mark_executor_turn_started(&continuation.agent_id)
+                .await?;
+            return Ok(());
+        }
+        if let Some(outcome) = snapshot
+            .last_turn
+            .as_ref()
+            .filter(|outcome| outcome.turn_id.as_str() == turn_id)
+        {
+            if let Some(next) = store
+                .settle_executor_turn_finished(&continuation.agent_id, outcome)
+                .await?
+            {
+                submit_executor_continuation(runtime, &next).await?;
+            }
+            return Ok(());
+        }
+    }
+    submit_executor_continuation(runtime, continuation).await
+}
+
 fn status_label(snapshot: &AgentSnapshot) -> &'static str {
     match snapshot.lifecycle {
         AgentLifecycleState::Closing | AgentLifecycleState::Closed => "closed",
@@ -535,6 +632,9 @@ mod tests {
                 kind,
                 reason: Some("budget reached".to_string()),
                 failure: None,
+                budget_limit: None,
+                rollover_compacted: false,
+                rollover_compaction_error: None,
                 usage: Default::default(),
                 finished_at: 7,
             }),

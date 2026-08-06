@@ -25,6 +25,23 @@ void registerTaskRuntimeDetailTests() {
     expect(find.textContaining('PlannerDecision'), findsNothing);
     expect(find.text('executor-1'), findsWidgets);
     expect(find.text('abcdef1234'), findsWidgets);
+    expect(find.byKey(StudioDriverKeys.taskWorkUnit('unit-1')), findsOneWidget);
+    expect(
+      find.byKey(StudioDriverKeys.taskWorkUnitExecution('unit-1')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(StudioDriverKeys.taskWorkUnitBudgetSlice('unit-1')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(StudioDriverKeys.taskWorkUnitContinuation('unit-1')),
+      findsOneWidget,
+    );
+    expect(find.text('4/4'), findsOneWidget);
+    expect(find.textContaining('Wall-clock limit'), findsOneWidget);
+    expect(find.text('Needs attention'), findsWidgets);
+    expect(find.text('rollover compaction failed'), findsOneWidget);
     expect(
       find.byKey(StudioDriverKeys.taskCompletion('completion-1')),
       findsOneWidget,
@@ -100,14 +117,30 @@ TaskRuntimeView _stoppedTask({
   stopRequestedOrigin: origin,
   stopRequestedReason: reason,
   taskGeneration: generation,
-  workUnits: const [
+  workUnits: [
     TaskWorkUnitView(
       id: 'unit-1',
       title: '实现任务',
-      status: 'readyForReview',
+      status: 'needsAttention',
       worktreePath: '.pure/worktrees/unit-1',
       branch: 'pure-task-unit-1',
       agentId: 'executor-1',
+      executionStatus: 'budgetLimited',
+      executionError: 'rollover compaction failed',
+      budgetLimit: TaskBudgetLimitView(
+        kind: 'wallClock',
+        usage: TaskBudgetUsageView(
+          modelSteps: 12,
+          toolCalls: 34,
+          waitCalls: 2,
+          elapsedMs: BigInt.from(1800000),
+        ),
+      ),
+      budgetSliceCount: 4,
+      budgetSliceLimit: 4,
+      continuationState: 'needsAttention',
+      continuationSourceTurnId: 'turn-4',
+      continuationRevision: BigInt.from(7),
     ),
   ],
   completions: [

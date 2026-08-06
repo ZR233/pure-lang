@@ -1,11 +1,11 @@
 use crate::api::studio::types::{
-    BridgeActiveTurn, BridgeAgentDirectoryEntryDto, BridgeAgentProgressDto, BridgeLspHealthDto,
-    BridgeMcpHealthDto, BridgeMcpServerDto, BridgeRecoveryCleanupPreviewDto,
-    BridgeRecoveryCleanupResourceDto, BridgeRecoveryIssueAction, BridgeRecoveryIssueCategory,
-    BridgeRecoveryIssueScope, BridgeRecoveryResourcePresence, BridgeRuntimeStatus,
-    BridgeStudioRecoveryIssueDto, BridgeTaskCompletionDto, BridgeTaskDesignReferenceDto,
-    BridgeTaskMergeDto, BridgeTaskReviewDto, BridgeTaskReviewFindingDto, BridgeTaskRuntimeDto,
-    BridgeTaskWorkUnitDto, RuntimeSnapshot,
+    BridgeActiveTurn, BridgeAgentDirectoryEntryDto, BridgeAgentProgressDto, BridgeBudgetLimitDto,
+    BridgeBudgetUsageDto, BridgeLspHealthDto, BridgeMcpHealthDto, BridgeMcpServerDto,
+    BridgeRecoveryCleanupPreviewDto, BridgeRecoveryCleanupResourceDto, BridgeRecoveryIssueAction,
+    BridgeRecoveryIssueCategory, BridgeRecoveryIssueScope, BridgeRecoveryResourcePresence,
+    BridgeRuntimeStatus, BridgeStudioRecoveryIssueDto, BridgeTaskCompletionDto,
+    BridgeTaskDesignReferenceDto, BridgeTaskMergeDto, BridgeTaskReviewDto,
+    BridgeTaskReviewFindingDto, BridgeTaskRuntimeDto, BridgeTaskWorkUnitDto, RuntimeSnapshot,
 };
 use pl_studio_runtime::{
     StudioAgentDirectoryEntry, StudioLspHealth, StudioMcpHealth, StudioRecoveryCleanupPreview,
@@ -161,6 +161,22 @@ pub(crate) fn bridge_task_runtime(
                 worktree_path: unit.worktree_path,
                 branch: unit.branch,
                 agent_id: unit.agent_id,
+                execution_status: unit.execution_status,
+                execution_error: unit.execution_error,
+                budget_limit: unit.budget_limit.map(|limit| BridgeBudgetLimitDto {
+                    kind: limit.kind,
+                    usage: BridgeBudgetUsageDto {
+                        model_steps: limit.usage.model_steps,
+                        tool_calls: limit.usage.tool_calls,
+                        wait_calls: limit.usage.wait_calls,
+                        elapsed_ms: limit.usage.elapsed_ms,
+                    },
+                }),
+                budget_slice_count: unit.budget_slice_count,
+                budget_slice_limit: unit.budget_slice_limit,
+                continuation_state: unit.continuation_state,
+                continuation_source_turn_id: unit.continuation_source_turn_id,
+                continuation_revision: unit.continuation_revision,
             })
             .collect(),
         completions: task

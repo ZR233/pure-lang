@@ -430,8 +430,7 @@ async fn merged_work_unit_is_not_downgraded_by_late_terminal_event() {
         .store
         .settle_executor_turn_finished(
             &fixture.subagent.id,
-            crate::TurnOutcomeKind::Failed,
-            Some("late executor error"),
+            &executor_outcome(crate::TurnOutcomeKind::Failed, Some("late executor error")),
         )
         .await
         .unwrap();
@@ -445,30 +444,143 @@ async fn merged_work_unit_is_not_downgraded_by_late_terminal_event() {
 }
 
 #[tokio::test]
-async fn budget_limited_executor_keeps_awaiting_completion_contract() {
+async fn wall_clock_budget_rolls_executor_into_the_next_slice() {
     let fixture = DeliveryFixture::new("budget-awaiting-completion", vec!["src"]).await;
+
+    let continuation = fixture
+        .store
+        .settle_executor_turn_finished(&fixture.subagent.id, &wall_clock_outcome("turn-budget-1"))
+        .await
+        .unwrap()
+        .expect("continuation request");
+
+    let work_unit = fixture.work_unit().await;
+    assert_eq!(work_unit.status, WorkUnitStatus::Running);
+    assert_eq!(
+        work_unit.execution_status,
+        ThreadExecutionStatus::BudgetLimited
+    );
+    assert_eq!(work_unit.execution_error, None);
+    assert_eq!(work_unit.budget_slice_count, 2);
+    assert_eq!(
+        work_unit.continuation_state,
+        ExecutorContinuationState::PendingStart
+    );
+    assert_eq!(continuation.work_unit_id, fixture.work_unit_id);
+    assert_eq!(continuation.source_turn_id, "turn-budget-1");
+    assert_eq!(continuation.slice_count, 2);
+
+    let duplicate = fixture
+        .store
+        .settle_executor_turn_finished(&fixture.subagent.id, &wall_clock_outcome("turn-budget-1"))
+        .await
+        .unwrap()
+        .expect("idempotent continuation request");
+    assert_eq!(duplicate, continuation);
+    assert_eq!(fixture.work_unit().await.budget_slice_count, 2);
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn fourth_wall_clock_slice_needs_attention_and_planner_message_starts_new_tranche() {
+    let fixture = DeliveryFixture::new("budget-four-slices", vec!["src"]).await;
+
+    for source_slice in 1..4 {
+        let turn_id = format!("turn-budget-{source_slice}");
+        let continuation = fixture
+            .store
+            .settle_executor_turn_finished(&fixture.subagent.id, &wall_clock_outcome(&turn_id))
+            .await
+            .unwrap()
+            .expect("continuation before fourth slice");
+        assert_eq!(continuation.slice_count, source_slice + 1);
+        fixture
+            .store
+            .mark_executor_turn_started(&fixture.subagent.id)
+            .await
+            .unwrap();
+    }
+
+    assert!(
+        fixture
+            .store
+            .settle_executor_turn_finished(
+                &fixture.subagent.id,
+                &wall_clock_outcome("turn-budget-4"),
+            )
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let exhausted = fixture.work_unit().await;
+    assert_eq!(exhausted.status, WorkUnitStatus::NeedsAttention);
+    assert_eq!(exhausted.budget_slice_count, 4);
+    assert_eq!(
+        exhausted.continuation_state,
+        ExecutorContinuationState::NeedsAttention
+    );
 
     fixture
         .store
-        .settle_executor_turn_finished(
-            &fixture.subagent.id,
-            crate::TurnOutcomeKind::BudgetLimited,
-            Some("active wall-clock budget reached"),
-        )
+        .authorize_executor_message(&fixture.root_thread_id, &fixture.subagent.id)
         .await
         .unwrap();
-
+    let restarted = fixture.work_unit().await;
+    assert_eq!(restarted.status, WorkUnitStatus::Running);
+    assert_eq!(restarted.execution_status, ThreadExecutionStatus::Queued);
+    assert_eq!(restarted.budget_slice_count, 1);
+    assert_eq!(restarted.budget_limit, None);
     assert_eq!(
-        fixture.work_unit().await.status,
-        WorkUnitStatus::AwaitingCompletion
+        restarted.continuation_state,
+        ExecutorContinuationState::None
     );
-    let work_unit = fixture.work_unit().await;
-    assert_eq!(work_unit.execution_status, ThreadExecutionStatus::Failed);
-    assert_eq!(
-        work_unit.execution_error.as_deref(),
-        Some("active wall-clock budget reached")
-    );
+    assert_eq!(restarted.continuation_source_turn_id, None);
     fixture.cleanup();
+}
+
+#[tokio::test]
+async fn non_wall_clock_and_rollover_failure_do_not_auto_continue() {
+    for (slug, outcome, expected_error) in [
+        (
+            "budget-tool-call",
+            budget_outcome(
+                "turn-tool-call",
+                crate::BudgetLimitKind::ToolCall,
+                true,
+                None,
+            ),
+            "tool budget reached",
+        ),
+        (
+            "budget-compaction-failed",
+            budget_outcome(
+                "turn-compaction-failed",
+                crate::BudgetLimitKind::WallClock,
+                false,
+                Some("rollover compaction failed"),
+            ),
+            "rollover compaction failed",
+        ),
+    ] {
+        let fixture = DeliveryFixture::new(slug, vec!["src"]).await;
+        assert!(
+            fixture
+                .store
+                .settle_executor_turn_finished(&fixture.subagent.id, &outcome)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        let work_unit = fixture.work_unit().await;
+        assert_eq!(work_unit.status, WorkUnitStatus::NeedsAttention);
+        assert_eq!(work_unit.budget_slice_count, 1);
+        assert_eq!(
+            work_unit.continuation_state,
+            ExecutorContinuationState::NeedsAttention
+        );
+        assert_eq!(work_unit.execution_error.as_deref(), Some(expected_error));
+        fixture.cleanup();
+    }
 }
 
 #[tokio::test]
@@ -1001,10 +1113,64 @@ async fn approve_delivery(
         )
         .await?;
     store
-        .settle_executor_turn_finished(executor_thread_id, crate::TurnOutcomeKind::Completed, None)
+        .settle_executor_turn_finished(
+            executor_thread_id,
+            &executor_outcome(crate::TurnOutcomeKind::Completed, None),
+        )
         .await?;
     persist_closed_executor_thread(store, root_thread_id, executor_thread_id).await?;
     Ok(delivery)
+}
+
+fn executor_outcome(kind: crate::TurnOutcomeKind, reason: Option<&str>) -> crate::AgentTurnOutcome {
+    crate::AgentTurnOutcome {
+        turn_id: crate::TurnId::new(format!("turn-{kind:?}")).expect("turn id"),
+        thread_id: crate::ThreadId::new("executor-thread").expect("thread id"),
+        kind,
+        reason: reason.map(str::to_string),
+        failure: None,
+        budget_limit: None,
+        rollover_compacted: false,
+        rollover_compaction_error: None,
+        usage: Default::default(),
+        finished_at: 1,
+    }
+}
+
+fn wall_clock_outcome(turn_id: &str) -> crate::AgentTurnOutcome {
+    budget_outcome(turn_id, crate::BudgetLimitKind::WallClock, true, None)
+}
+
+fn budget_outcome(
+    turn_id: &str,
+    kind: crate::BudgetLimitKind,
+    rollover_compacted: bool,
+    rollover_compaction_error: Option<&str>,
+) -> crate::AgentTurnOutcome {
+    crate::AgentTurnOutcome {
+        turn_id: crate::TurnId::new(turn_id).expect("turn id"),
+        thread_id: crate::ThreadId::new("executor-thread").expect("thread id"),
+        kind: crate::TurnOutcomeKind::BudgetLimited,
+        reason: Some(if kind == crate::BudgetLimitKind::ToolCall {
+            "tool budget reached".to_string()
+        } else {
+            "active wall-clock budget reached".to_string()
+        }),
+        failure: None,
+        budget_limit: Some(crate::BudgetLimitSnapshot {
+            kind,
+            usage: crate::BudgetUsage {
+                model_steps: 3,
+                tool_calls: 5,
+                wait_calls: 1,
+                elapsed_ms: 1_800_000,
+            },
+        }),
+        rollover_compacted,
+        rollover_compaction_error: rollover_compaction_error.map(str::to_string),
+        usage: Default::default(),
+        finished_at: 1,
+    }
 }
 
 async fn persist_closed_executor_thread(

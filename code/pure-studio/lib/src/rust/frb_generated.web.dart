@@ -107,6 +107,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeBudgetLimitDto dco_decode_box_autoadd_bridge_budget_limit_dto(
+    dynamic raw,
+  );
+
+  @protected
   BridgeError dco_decode_box_autoadd_bridge_error(dynamic raw);
 
   @protected
@@ -271,6 +276,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeAgentProgressDto dco_decode_bridge_agent_progress_dto(dynamic raw);
+
+  @protected
+  BridgeBudgetLimitDto dco_decode_bridge_budget_limit_dto(dynamic raw);
+
+  @protected
+  BridgeBudgetUsageDto dco_decode_bridge_budget_usage_dto(dynamic raw);
 
   @protected
   BridgeError dco_decode_bridge_error(dynamic raw);
@@ -812,6 +823,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeBudgetLimitDto? dco_decode_opt_box_autoadd_bridge_budget_limit_dto(
+    dynamic raw,
+  );
+
+  @protected
   BridgeInteractionResolution?
   dco_decode_opt_box_autoadd_bridge_interaction_resolution(dynamic raw);
 
@@ -1022,6 +1038,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeBudgetLimitDto sse_decode_box_autoadd_bridge_budget_limit_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeError sse_decode_box_autoadd_bridge_error(SseDeserializer deserializer);
 
   @protected
@@ -1220,6 +1241,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeAgentProgressDto sse_decode_bridge_agent_progress_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeBudgetLimitDto sse_decode_bridge_budget_limit_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeBudgetUsageDto sse_decode_bridge_budget_usage_dto(
     SseDeserializer deserializer,
   );
 
@@ -1905,6 +1936,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeBudgetLimitDto? sse_decode_opt_box_autoadd_bridge_budget_limit_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeInteractionResolution?
   sse_decode_opt_box_autoadd_bridge_interaction_resolution(
     SseDeserializer deserializer,
@@ -2165,6 +2201,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_bridge_budget_limit_dto(
+    BridgeBudgetLimitDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_bridge_error(
     BridgeError self,
     SseSerializer serializer,
@@ -2401,6 +2443,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_bridge_agent_progress_dto(
     BridgeAgentProgressDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_budget_limit_dto(
+    BridgeBudgetLimitDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_budget_usage_dto(
+    BridgeBudgetUsageDto self,
     SseSerializer serializer,
   );
 
@@ -3241,6 +3295,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_bridge_agent_progress_dto(
     BridgeAgentProgressDto? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_bridge_budget_limit_dto(
+    BridgeBudgetLimitDto? self,
     SseSerializer serializer,
   );
 

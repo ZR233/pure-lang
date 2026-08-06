@@ -255,8 +255,9 @@ mod tests {
                 DatabaseBackend::Sqlite,
                 "INSERT INTO turns
                  (id, thread_id, ordinal, revision, status, phase, reason, model_json,
-                  usage_json, failure_json, metadata_json, started_at, updated_at, completed_at)
-                 VALUES (?, ?, 1, 1, ?, NULL, ?, NULL, ?, NULL, ?, ?, ?, ?)",
+                  usage_json, failure_json, budget_limit_json, rollover_compacted,
+                  rollover_compaction_error, metadata_json, started_at, updated_at, completed_at)
+                 VALUES (?, ?, 1, 1, ?, NULL, ?, NULL, ?, NULL, NULL, 0, NULL, ?, ?, ?, ?)",
                 [
                     "turn-plan".to_string().into(),
                     session.id.clone().into(),

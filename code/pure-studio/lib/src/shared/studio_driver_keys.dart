@@ -100,6 +100,18 @@ abstract final class StudioDriverKeys {
   static ValueKey<String> taskCompletionRevision(String id, int revision) =>
       ValueKey<String>('task-completion-$id-revision-$revision');
 
+  static ValueKey<String> taskWorkUnit(String id) =>
+      ValueKey<String>('task-work-unit-$id');
+
+  static ValueKey<String> taskWorkUnitExecution(String id) =>
+      ValueKey<String>('task-work-unit-$id-execution');
+
+  static ValueKey<String> taskWorkUnitBudgetSlice(String id) =>
+      ValueKey<String>('task-work-unit-$id-budget-slice');
+
+  static ValueKey<String> taskWorkUnitContinuation(String id) =>
+      ValueKey<String>('task-work-unit-$id-continuation');
+
   static ValueKey<String> taskReview(String id) =>
       ValueKey<String>('task-review-$id');
 

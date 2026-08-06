@@ -7,9 +7,9 @@ use crate::studio::entity as entities;
 use crate::studio::ids::unix_seconds;
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    RestartAgentReconciliation, ReviewScope, ReviewVerdict, TaskRunPhase, TaskWorktreeCleanupState,
-    TaskWorktreeCreationState, TaskWorktreeOwnerResource, TaskWorktreeOwnerSnapshot,
-    ThreadExecutionStatus, WorkCompletionStatus, WorkUnitStatus,
+    ExecutorContinuationState, RestartAgentReconciliation, ReviewScope, ReviewVerdict,
+    TaskRunPhase, TaskWorktreeCleanupState, TaskWorktreeCreationState, TaskWorktreeOwnerResource,
+    TaskWorktreeOwnerSnapshot, ThreadExecutionStatus, WorkCompletionStatus, WorkUnitStatus,
 };
 
 use super::{
@@ -144,6 +144,14 @@ impl StudioStore {
                         )
                     })?;
                 let transient_execution = is_transient_execution(execution_status);
+                let continuation_state =
+                    ExecutorContinuationState::from_str(&work_unit.continuation_state)
+                        .with_context(|| {
+                            format!(
+                                "invalid executor continuation state: {}",
+                                work_unit.continuation_state
+                            )
+                        })?;
                 if status == WorkUnitStatus::Pending {
                     let mut active: entities::work_unit::ActiveModel = work_unit.into();
                     active.status = Set(WorkUnitStatus::Cancelled.as_str().to_string());
@@ -154,7 +162,9 @@ impl StudioStore {
                     active.updated_at = Set(now);
                     active.update(&tx).await?;
                     summary.cancelled_work_units += 1;
-                } else if status == WorkUnitStatus::Running {
+                } else if status == WorkUnitStatus::Running
+                    && continuation_state != ExecutorContinuationState::PendingStart
+                {
                     let mut active: entities::work_unit::ActiveModel = work_unit.into();
                     active.status = Set(WorkUnitStatus::AwaitingCompletion.as_str().to_string());
                     active.execution_status =
@@ -357,6 +367,10 @@ fn validate_status_pair(unit: &entities::work_unit::Model) -> Result<()> {
         (WorkUnitStatus::Pending, ThreadExecutionStatus::Queued)
             | (WorkUnitStatus::Running, ThreadExecutionStatus::Running)
             | (
+                WorkUnitStatus::Running,
+                ThreadExecutionStatus::BudgetLimited
+            )
+            | (
                 WorkUnitStatus::AwaitingCompletion,
                 ThreadExecutionStatus::Completed
             )
@@ -380,6 +394,10 @@ fn validate_status_pair(unit: &entities::work_unit::Model) -> Result<()> {
             | (WorkUnitStatus::Approved, ThreadExecutionStatus::Completed)
             | (WorkUnitStatus::Merged, ThreadExecutionStatus::Completed)
             | (WorkUnitStatus::NoDelivery, ThreadExecutionStatus::Completed)
+            | (
+                WorkUnitStatus::NeedsAttention,
+                ThreadExecutionStatus::BudgetLimited
+            )
             | (WorkUnitStatus::Failed, ThreadExecutionStatus::Failed)
             | (WorkUnitStatus::Cancelled, ThreadExecutionStatus::Cancelled)
     );

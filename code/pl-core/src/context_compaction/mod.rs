@@ -71,9 +71,6 @@ fn compact_old_tool_results_for_request(input: &mut [ModelContextItem]) {
             }
             ModelContextItem::Message { .. }
             | ModelContextItem::ToolResult { .. }
-            | ModelContextItem::ContextPatch { .. }
-            | ModelContextItem::PinnedContext { .. }
-            | ModelContextItem::SessionNote { .. }
             | ModelContextItem::Compaction { .. } => {}
         }
     }
@@ -163,6 +160,7 @@ pub enum ContextCompactionTrigger {
     EstimatedTokens,
     ProviderPromptTokens,
     Manual,
+    WallClockRollover,
 }
 
 impl ContextCompactionTrigger {
@@ -171,6 +169,7 @@ impl ContextCompactionTrigger {
             Self::EstimatedTokens => "estimatedTokens",
             Self::ProviderPromptTokens => "providerPromptTokens",
             Self::Manual => "manual",
+            Self::WallClockRollover => "wallClockRollover",
         }
     }
 }
@@ -209,6 +208,7 @@ pub struct ManualContextCompactionRequest {
     pub workspace_instructions: Option<String>,
     pub instruction_snapshot: Option<InstructionSnapshot>,
     pub execution_policy: Option<AgentExecutionPolicy>,
+    pub trigger: ContextCompactionTrigger,
 }
 
 impl ManualContextCompactionRequest {
@@ -218,6 +218,7 @@ impl ManualContextCompactionRequest {
             workspace_instructions: None,
             instruction_snapshot: None,
             execution_policy: None,
+            trigger: ContextCompactionTrigger::Manual,
         }
     }
 }
@@ -233,6 +234,7 @@ pub(crate) enum CompactionTrigger {
     EstimatedTokens,
     ProviderPromptTokens(u64),
     Manual,
+    WallClockRollover,
 }
 
 #[derive(Debug, Clone)]
@@ -250,6 +252,7 @@ pub(crate) struct ContextCompactionRequest<'a, P: ModelProvider + ?Sized> {
     pub config: &'a ContextCompactionConfig,
     pub request_instructions: &'a str,
     pub request_messages: &'a [Message],
+    pub working_context_tail: Option<Message>,
     pub tools: &'a [ToolSchema],
     pub parallel_tool_calls: bool,
     pub reasoning: Option<ReasoningConfig>,
@@ -270,6 +273,7 @@ pub(crate) async fn maybe_compact_session(
         config,
         request_instructions,
         request_messages,
+        working_context_tail,
         tools,
         parallel_tool_calls,
         reasoning,
@@ -285,7 +289,9 @@ pub(crate) async fn maybe_compact_session(
     ensure_provider_can_consume_session(provider.info().protocol, session)?;
     let model_info = provider.model_info(model);
     let limit = match (trigger, model_info.resolved_auto_compact_limit()) {
-        (CompactionTrigger::Manual, limit) => limit.unwrap_or_default(),
+        (CompactionTrigger::Manual | CompactionTrigger::WallClockRollover, limit) => {
+            limit.unwrap_or_default()
+        }
         (_, Some(limit)) => limit,
         (_, None) => return Ok(CompactionOutcome::Skipped),
     };
@@ -293,6 +299,7 @@ pub(crate) async fn maybe_compact_session(
         request_instructions,
         request_messages,
         session.items(),
+        working_context_tail.as_ref(),
         tools,
     );
     let should_compact = match trigger {
@@ -300,7 +307,7 @@ pub(crate) async fn maybe_compact_session(
         CompactionTrigger::ProviderPromptTokens(prompt_tokens) => {
             prompt_tokens >= limit || estimated_tokens >= limit
         }
-        CompactionTrigger::Manual => true,
+        CompactionTrigger::Manual | CompactionTrigger::WallClockRollover => true,
     };
     if !should_compact {
         return Ok(CompactionOutcome::Skipped);
@@ -320,6 +327,7 @@ pub(crate) async fn maybe_compact_session(
                 config,
                 request_instructions,
                 request_messages,
+                working_context_tail: working_context_tail.clone(),
                 tools,
                 parallel_tool_calls,
                 reasoning,
@@ -340,6 +348,7 @@ pub(crate) async fn maybe_compact_session(
             request_instructions,
             request_messages,
             session.items(),
+            working_context_tail.as_ref(),
             event_tx,
             &mut progress,
             model_info.max_output_tokens,
@@ -349,6 +358,7 @@ pub(crate) async fn maybe_compact_session(
             request_instructions,
             request_messages,
             &replacement,
+            working_context_tail.as_ref(),
             tools,
         ));
         (
@@ -384,13 +394,16 @@ fn public_trigger(trigger: CompactionTrigger) -> ContextCompactionTrigger {
             ContextCompactionTrigger::ProviderPromptTokens
         }
         CompactionTrigger::Manual => ContextCompactionTrigger::Manual,
+        CompactionTrigger::WallClockRollover => ContextCompactionTrigger::WallClockRollover,
     }
 }
 
 fn provider_prompt_tokens(trigger: CompactionTrigger) -> Option<u64> {
     match trigger {
         CompactionTrigger::ProviderPromptTokens(tokens) => Some(tokens),
-        CompactionTrigger::EstimatedTokens | CompactionTrigger::Manual => None,
+        CompactionTrigger::EstimatedTokens
+        | CompactionTrigger::Manual
+        | CompactionTrigger::WallClockRollover => None,
     }
 }
 
@@ -413,6 +426,7 @@ fn estimate_context_request_tokens(
     instructions: &str,
     request_messages: &[Message],
     session_items: &[ModelContextItem],
+    working_context_tail: Option<&Message>,
     tools: &[ToolSchema],
 ) -> u64 {
     estimate_text_tokens(instructions)
@@ -427,15 +441,12 @@ fn estimate_context_request_tokens(
                 | ModelContextItem::ToolResult { message, .. } => {
                     history::estimate_message_tokens(message)
                 }
-                ModelContextItem::ContextPatch { patch } => {
-                    history::estimate_message_tokens(&patch.message)
-                }
-                ModelContextItem::PinnedContext { .. } | ModelContextItem::SessionNote { .. } => 0,
                 ModelContextItem::Compaction { encrypted_content } => {
                     estimate_text_tokens(encrypted_content)
                 }
             })
             .sum::<u64>()
+        + working_context_tail.map_or(0, history::estimate_message_tokens)
         + tools
             .iter()
             .map(|tool| {

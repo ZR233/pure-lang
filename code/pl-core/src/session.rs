@@ -3,14 +3,13 @@ use std::num::NonZeroUsize;
 
 use pl_model::{CompletionResponse, ModelTransportSession, ToolCall};
 use pl_protocol::{
-    Message, MessageContent, MessageRole, ModelContextItem, ModelContextPatch,
-    PinnedContextSection, SessionNote, TOOL_CALLS_METADATA_KEY, ToolCallHistoryMetadata,
+    AgentSessionSnapshot, AgentWorkingState, Message, MessageContent, MessageRole,
+    ModelContextItem, ModelContextSectionSnapshot, ModelContextSnapshot, PinnedContextSection,
+    SessionNote, TOOL_CALLS_METADATA_KEY, ThreadPromptMetadata, ToolCallHistoryMetadata,
     ToolCallKind, ToolResultMetadata, ToolResultReceipt,
 };
 
 use crate::working_set::canonical_content_hash;
-
-pub(crate) const CONTEXT_PATCH_METADATA_KEY: &str = "pure.contextPatch";
 
 /// 核心编译会话。
 ///
@@ -19,6 +18,7 @@ pub(crate) const CONTEXT_PATCH_METADATA_KEY: &str = "pure.contextPatch";
 pub struct AgentSession {
     items: Vec<ModelContextItem>,
     messages: Vec<Message>,
+    working_state: AgentWorkingState,
     revision: u64,
     prompt_cache_key: Option<String>,
     transport_session: ModelTransportSession,
@@ -63,6 +63,7 @@ impl AgentSession {
                 .map(ModelContextItem::from)
                 .collect(),
             messages,
+            working_state: AgentWorkingState::default(),
             revision: 0,
             prompt_cache_key: None,
             transport_session: ModelTransportSession::default(),
@@ -74,9 +75,29 @@ impl AgentSession {
         Self {
             items,
             messages,
+            working_state: AgentWorkingState::default(),
             revision: 0,
             prompt_cache_key: None,
             transport_session: ModelTransportSession::default(),
+        }
+    }
+
+    pub fn from_snapshot(snapshot: AgentSessionSnapshot) -> Self {
+        let messages = messages_from_items(&snapshot.transcript);
+        Self {
+            items: snapshot.transcript,
+            messages,
+            working_state: snapshot.working_state,
+            revision: 0,
+            prompt_cache_key: None,
+            transport_session: ModelTransportSession::default(),
+        }
+    }
+
+    pub fn snapshot(&self) -> AgentSessionSnapshot {
+        AgentSessionSnapshot {
+            transcript: self.items.clone(),
+            working_state: self.working_state.clone(),
         }
     }
 
@@ -93,13 +114,11 @@ impl AgentSession {
     }
 
     pub fn replace_messages(&mut self, messages: Vec<Message>) {
-        let retained = retained_context(&self.items);
         self.items = messages
             .iter()
             .cloned()
             .map(ModelContextItem::from)
             .collect();
-        self.items.extend(retained);
         self.messages = messages;
         self.revision = self.revision.saturating_add(1);
     }
@@ -112,12 +131,7 @@ impl AgentSession {
 
     /// 只替换可压缩的时间线，保留当前所有 pinned working context 和会话笔记。
     pub fn replace_compactable_items(&mut self, items: Vec<ModelContextItem>) {
-        let retained = retained_context(&self.items);
-        self.items = items
-            .into_iter()
-            .filter(|item| !is_durable_context(item) && item.as_context_patch().is_none())
-            .chain(retained)
-            .collect();
+        self.items = items;
         self.messages = messages_from_items(&self.items);
         self.revision = self.revision.saturating_add(1);
     }
@@ -128,16 +142,12 @@ impl AgentSession {
         mut sections: Vec<PinnedContextSection>,
     ) -> bool {
         sections.sort_by(|left, right| left.id.cmp(&right.id));
-        let current = self.pinned_context_sections().cloned().collect::<Vec<_>>();
+        let current = self.working_state.sections.clone();
         if current == sections {
             return false;
         }
-        self.items.retain(|item| !item.is_pinned_context());
-        self.items.extend(
-            sections
-                .into_iter()
-                .map(|section| ModelContextItem::PinnedContext { section }),
-        );
+        self.working_state.sections = sections;
+        self.working_state.revision = self.working_state.revision.saturating_add(1);
         self.revision = self.revision.saturating_add(1);
         true
     }
@@ -153,63 +163,59 @@ impl AgentSession {
     }
 
     pub fn pinned_context_sections(&self) -> impl Iterator<Item = &PinnedContextSection> {
-        self.items
-            .iter()
-            .filter_map(ModelContextItem::as_pinned_context)
+        self.working_state.sections.iter()
     }
 
     pub fn session_note(&self) -> Option<&SessionNote> {
-        self.items
-            .iter()
-            .find_map(ModelContextItem::as_session_note)
+        self.working_state.session_note.as_ref()
     }
 
-    pub fn latest_context_patch(&self) -> Option<&ModelContextPatch> {
-        self.items
-            .iter()
-            .rev()
-            .find_map(ModelContextItem::as_context_patch)
+    pub fn prompt_metadata(&self) -> &ThreadPromptMetadata {
+        &self.working_state.prompt
     }
 
-    pub fn push_context_patch(&mut self, patch: ModelContextPatch) {
-        let message = patch.message.clone();
-        let insertion = self
-            .items
-            .iter()
-            .position(is_durable_context)
-            .unwrap_or(self.items.len());
-        self.items
-            .insert(insertion, ModelContextItem::ContextPatch { patch });
-        self.messages.push(message);
+    pub fn replace_prompt_metadata(&mut self, prompt: ThreadPromptMetadata) -> bool {
+        if self.working_state.prompt == prompt {
+            return false;
+        }
+        self.working_state.prompt = prompt;
+        self.working_state.revision = self.working_state.revision.saturating_add(1);
         self.revision = self.revision.saturating_add(1);
+        true
+    }
+
+    pub fn working_context_snapshot(&self) -> ModelContextSnapshot {
+        let mut sections = self
+            .working_state
+            .sections
+            .iter()
+            .map(|section| ModelContextSectionSnapshot {
+                id: section.id.clone(),
+                title: section.title.clone(),
+                content: section.content.clone(),
+                content_hash: section.content_hash.clone(),
+            })
+            .collect::<Vec<_>>();
+        sections.sort_by(|left, right| left.id.cmp(&right.id));
+        ModelContextSnapshot {
+            sections,
+            session_note_available: self.working_state.session_note.is_some(),
+        }
     }
 
     /// 原子替换隐藏会话笔记；返回 canonical session 是否发生变化。
     pub fn replace_session_note(&mut self, note: SessionNote) -> bool {
-        if self.session_note() == Some(&note) {
+        if self.working_state.session_note.as_ref() == Some(&note) {
             return false;
         }
-        self.items.retain(|item| !item.is_session_note());
-        self.items.push(ModelContextItem::SessionNote { note });
+        self.working_state.session_note = Some(note);
+        self.working_state.revision = self.working_state.revision.saturating_add(1);
         self.revision = self.revision.saturating_add(1);
         true
     }
 
     pub(crate) fn truncate_messages(&mut self, len: usize) {
-        let mut chronological = self
-            .items
-            .iter()
-            .filter(|item| !is_durable_context(item))
-            .take(len)
-            .cloned()
-            .collect::<Vec<_>>();
-        chronological.extend(
-            self.items
-                .iter()
-                .filter(|item| is_durable_context(item))
-                .cloned(),
-        );
-        self.items = chronological;
+        self.items.truncate(len);
         self.messages = messages_from_items(&self.items);
         self.revision = self.revision.saturating_add(1);
     }
@@ -340,26 +346,15 @@ impl AgentSession {
             reasoning_content: None,
             metadata,
         };
-        let insertion = self
-            .items
-            .iter()
-            .position(is_durable_context)
-            .unwrap_or(self.items.len());
-        self.items.insert(
-            insertion,
-            ModelContextItem::ToolResult {
-                message: message.clone(),
-                receipt,
-            },
-        );
+        self.items.push(ModelContextItem::ToolResult {
+            message: message.clone(),
+            receipt,
+        });
         self.messages.push(message);
     }
 
     pub fn len(&self) -> usize {
-        self.items
-            .iter()
-            .filter(|item| !is_durable_context(item))
-            .count()
+        self.items.len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -383,39 +378,14 @@ impl AgentSession {
     }
 
     fn push_message(&mut self, message: Message) {
-        let insertion = self
-            .items
-            .iter()
-            .position(is_durable_context)
-            .unwrap_or(self.items.len());
-        self.items
-            .insert(insertion, ModelContextItem::from(message.clone()));
+        self.items.push(ModelContextItem::from(message.clone()));
         self.messages.push(message);
     }
-}
-
-fn is_durable_context(item: &ModelContextItem) -> bool {
-    item.is_pinned_context() || item.is_session_note()
-}
-
-fn retained_context(items: &[ModelContextItem]) -> Vec<ModelContextItem> {
-    let latest_patch = items
-        .iter()
-        .rev()
-        .find(|item| item.as_context_patch().is_some())
-        .cloned();
-    items
-        .iter()
-        .filter(|item| is_durable_context(item))
-        .cloned()
-        .chain(latest_patch)
-        .collect()
 }
 
 fn forkable_messages(messages: &[Message]) -> Vec<Message> {
     messages
         .iter()
-        .filter(|message| !message.metadata.contains_key(CONTEXT_PATCH_METADATA_KEY))
         .filter(|message| match message.role {
             MessageRole::System | MessageRole::User => true,
             MessageRole::Assistant => !message.metadata.contains_key(TOOL_CALLS_METADATA_KEY),

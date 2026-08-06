@@ -415,6 +415,66 @@ class AppLocalizationsEn extends AppLocalizations {
   String get statusTaskError => 'Error';
 
   @override
+  String get statusTaskExecution => 'Execution';
+
+  @override
+  String get statusTaskBudget => 'Budget limit';
+
+  @override
+  String get statusTaskBudgetSlice => 'Budget slice';
+
+  @override
+  String statusTaskBudgetSliceValue(int current, int limit) {
+    return '$current/$limit';
+  }
+
+  @override
+  String statusTaskBudgetUsage(
+    int modelSteps,
+    int toolCalls,
+    int waitCalls,
+    String elapsedMs,
+  ) {
+    return '$modelSteps model · $toolCalls tools · $waitCalls waits · $elapsedMs ms';
+  }
+
+  @override
+  String get statusTaskContinuation => 'Continuation';
+
+  @override
+  String get statusTaskBudgetModelStep => 'Model-step limit';
+
+  @override
+  String get statusTaskBudgetToolCall => 'Tool-call limit';
+
+  @override
+  String get statusTaskBudgetWait => 'Wait-call limit';
+
+  @override
+  String get statusTaskBudgetWallClock => 'Wall-clock limit';
+
+  @override
+  String get statusTaskBudgetAgentCount => 'Agent-count limit';
+
+  @override
+  String get statusTaskBudgetAgentDepth => 'Agent-depth limit';
+
+  @override
+  String get statusTaskBudgetFinalization => 'Finalization limit';
+
+  @override
+  String get statusTaskContinuationNone => 'None';
+
+  @override
+  String get statusTaskContinuationCompacting => 'Compacting context';
+
+  @override
+  String get statusTaskContinuationPendingStart => 'Starting next slice';
+
+  @override
+  String get statusTaskContinuationNeedsAttention => 'Needs attention';
+
+  @override
   String get statusTaskPhasePlanning => 'Planning';
 
   @override
@@ -482,6 +542,12 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get statusTaskStatusCompleted => 'Completed';
+
+  @override
+  String get statusTaskStatusBudgetLimited => 'Budget limited';
+
+  @override
+  String get statusTaskStatusNeedsAttention => 'Needs attention';
 
   @override
   String get statusTaskStatusFailed => 'Failed';

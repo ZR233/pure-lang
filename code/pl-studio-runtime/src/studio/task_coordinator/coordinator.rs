@@ -50,6 +50,7 @@ struct RecoveryCleanupRun {
 
 struct RecoveryCleanupScope {
     project_updated_at: Option<i64>,
+    thread_updated_at: Option<i64>,
     runs: Vec<RecoveryCleanupRun>,
 }
 
@@ -584,23 +585,6 @@ impl TaskCoordinator {
         Ok(RecoveryCleanupAuthorization { preview, scope })
     }
 
-    pub(crate) async fn cleanup_recovery_issue(
-        &self,
-        issue: &StudioRecoveryIssue,
-        expected_revision: &str,
-    ) -> Result<()> {
-        if !matches!(
-            issue.action,
-            StudioRecoveryIssueAction::CleanupThread | StudioRecoveryIssueAction::RemoveProject
-        ) {
-            bail!("recovery issue does not authorize destructive cleanup");
-        }
-        let authorization = self
-            .validate_recovery_cleanup(issue, expected_revision)
-            .await?;
-        self.execute_recovery_cleanup(issue, &authorization).await
-    }
-
     pub(crate) async fn execute_recovery_cleanup(
         &self,
         issue: &StudioRecoveryIssue,
@@ -660,18 +644,28 @@ impl TaskCoordinator {
         &self,
         issue: &StudioRecoveryIssue,
     ) -> Result<RecoveryCleanupScope> {
-        let (project_updated_at, runs) = match issue.action {
+        let (project_updated_at, thread_updated_at, runs) = match issue.action {
             StudioRecoveryIssueAction::CleanupThread => {
-                let task_run_id = issue
-                    .task_run_id
+                let thread_id = issue
+                    .thread_id
                     .as_deref()
-                    .context("recovery issue has no task run")?;
-                let run = self
+                    .context("recovery issue has no Thread")?;
+                let thread = self
                     .store
-                    .read_task_run(task_run_id)
+                    .read_thread(thread_id)
                     .await?
-                    .context("recovery cleanup task run not found")?;
-                (None, vec![run])
+                    .context("recovery cleanup Thread not found")?;
+                let runs = if let Some(task_run_id) = issue.task_run_id.as_deref() {
+                    vec![
+                        self.store
+                            .read_task_run(task_run_id)
+                            .await?
+                            .context("recovery cleanup task run not found")?,
+                    ]
+                } else {
+                    Vec::new()
+                };
+                (None, Some(thread.updated_at), runs)
             }
             StudioRecoveryIssueAction::RemoveProject => {
                 let project_id = issue
@@ -685,6 +679,7 @@ impl TaskCoordinator {
                     .context("project recovery cleanup target not found")?;
                 (
                     Some(project.updated_at),
+                    None,
                     self.store.list_task_runs_for_project(project_id).await?,
                 )
             }
@@ -699,6 +694,7 @@ impl TaskCoordinator {
         }
         Ok(RecoveryCleanupScope {
             project_updated_at,
+            thread_updated_at,
             runs: cleanup_runs,
         })
     }
@@ -938,7 +934,9 @@ fn recovery_cleanup_scope_matches(
     authorized: &RecoveryCleanupScope,
     current: &RecoveryCleanupScope,
 ) -> bool {
-    if authorized.project_updated_at != current.project_updated_at {
+    if authorized.project_updated_at != current.project_updated_at
+        || authorized.thread_updated_at != current.thread_updated_at
+    {
         return false;
     }
     let authorized_runs = authorized
@@ -1005,6 +1003,7 @@ fn recovery_cleanup_revision(
     let mut digest = Sha256::new();
     digest.update(issue.id.as_bytes());
     digest.update(scope.project_updated_at.unwrap_or_default().to_le_bytes());
+    digest.update(scope.thread_updated_at.unwrap_or_default().to_le_bytes());
     let mut resource_index = 0;
     for cleanup in &scope.runs {
         digest.update(cleanup.run.id.as_bytes());

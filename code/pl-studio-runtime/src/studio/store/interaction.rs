@@ -294,10 +294,11 @@ mod tests {
                 DatabaseBackend::Sqlite,
                 "INSERT INTO turns (
                      id, thread_id, ordinal, revision, status, phase, reason,
-                     model_json, usage_json, failure_json, metadata_json,
-                     started_at, updated_at, completed_at
+                     model_json, usage_json, failure_json, budget_limit_json,
+                     rollover_compacted, rollover_compaction_error, metadata_json, started_at,
+                     updated_at, completed_at
                  ) VALUES (?, ?, 1, 0, 'interrupted', NULL, 'runtime_restarted',
-                           NULL, '{}', NULL, ?, 1, 2, 2)",
+                           NULL, '{}', NULL, NULL, 0, NULL, ?, 1, 2, 2)",
                 [
                     turn_id.to_string().into(),
                     session_id.to_string().into(),

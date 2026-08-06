@@ -21,7 +21,7 @@ pub(super) fn has_compactable_history(
         .filter(|message| !is_compaction_summary(message))
         .count();
     match trigger {
-        CompactionTrigger::Manual => raw_messages > 0,
+        CompactionTrigger::Manual | CompactionTrigger::WallClockRollover => raw_messages > 0,
         CompactionTrigger::EstimatedTokens | CompactionTrigger::ProviderPromptTokens(_) => {
             raw_messages > 1
         }

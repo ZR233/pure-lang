@@ -99,6 +99,18 @@ Studio attach 会对活动 Task root Thread 执行一次有证据门禁的检查
 审批并成功调度时，才从活跃预算中扣除其阻塞区间。普通工具、模型请求、混合工具批次、
 审批和 interaction 等待继续计时；该策略不改变工具终态、取消传播或 `waitCalls` 可观测计数。
 
+工具批次完成后，canonical tool result 先进入 transcript，再把全部 receipt 一次性提交到
+`AgentWorkingState` 的 Evidence Ledger。Ledger 仍最多保存 64 条、模型可见正文最多 16 KiB；
+下一次 inference 只渲染一份最新 working-context tail，旧 Ledger 版本不得作为 system message
+累积在 transcript 中。
+
+Task executor 达到 30 分钟 `WallClock` 预算时，预算事实仍作为当前 Turn 的 typed terminal 保存，
+但 WorkUnit 不立即失败。Task coordinator 对同一 executor、Thread 和 worktree 强制执行一次
+`WallClockRollover` compaction，并用确定性 hidden input 开启下一 Turn。一个 tranche 最多四个
+30 分钟切片；第四次耗尽后 WorkUnit 进入 `needsAttention`，由 Planner 停止、拆分或通过
+`task_send_message` 显式开启新 tranche。非 wall-clock budget、用户停止、Task 取消和压缩失败
+都不自动续轮。pending continuation 必须持久化并使用 WorkUnit/来源 Turn 组成的幂等键恢复。
+
 ## 运行时错误分类
 
 模型与 turn 边界使用结构化 `TurnFailure` 保存失败事实。失败包含稳定类别、

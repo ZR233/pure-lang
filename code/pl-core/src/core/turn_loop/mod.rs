@@ -182,7 +182,6 @@ pub(super) async fn run_turn_with_trace(
             session,
             PromptCacheInput {
                 scope: &options.prompt_scope,
-                turn_id: &turn_id,
                 provider: provider.info(),
                 model: &model,
                 instructions: &instruction_bundle.instructions,
@@ -215,6 +214,7 @@ pub(super) async fn run_turn_with_trace(
             &instruction_bundle.instructions,
             &instruction_bundle.prelude_messages,
             session.items(),
+            &session.working_context_snapshot(),
         )?;
 
         let compaction_trigger = provider_prompt_tokens_for_compaction.take().map_or(
@@ -233,6 +233,7 @@ pub(super) async fn run_turn_with_trace(
                     config: &core.context_compaction,
                     request_instructions: &assembled_context.instructions,
                     request_messages: &assembled_context.prelude_messages,
+                    working_context_tail: assembled_context.working_context_tail.clone(),
                     tools: &iteration_tools,
                     parallel_tool_calls,
                     reasoning: reasoning.clone(),
@@ -291,7 +292,6 @@ pub(super) async fn run_turn_with_trace(
                         session,
                         PromptCacheInput {
                             scope: &options.prompt_scope,
-                            turn_id: &turn_id,
                             provider: provider.info(),
                             model: &model,
                             instructions: &instruction_bundle.instructions,
@@ -315,6 +315,7 @@ pub(super) async fn run_turn_with_trace(
                         &instruction_bundle.instructions,
                         &instruction_bundle.prelude_messages,
                         session.items(),
+                        &session.working_context_snapshot(),
                     )?;
                     if let Some(inference) = compaction_inference {
                         commit_and_publish_inference(&options, session, recorder, inference)
@@ -773,6 +774,8 @@ pub(super) async fn run_turn_with_trace(
         failure: None,
         budget_limit_kind: None,
         budget_usage: None,
+        rollover_compacted: false,
+        rollover_compaction_error: None,
         trace_events: recorder.drain(),
     })
 }
@@ -789,9 +792,7 @@ fn sync_prompt_cache_key(
         policy.uses_prompt_cache_key(),
         options.prompt_cache_namespace.as_deref(),
     ) {
-        (true, Some(namespace)) => session
-            .latest_context_patch()
-            .and_then(|patch| patch.prompt_snapshots.get(&options.prompt_scope))
+        (true, Some(namespace)) => current_prompt_snapshot(session, &options.prompt_scope)
             .map(|prompt| derive_prompt_cache_key(namespace, prompt))
             .transpose()?,
         _ => None,
@@ -804,9 +805,7 @@ fn current_prompt_snapshot<'a>(
     session: &'a AgentSession,
     scope: &str,
 ) -> Option<&'a pl_protocol::ThreadPromptSnapshot> {
-    session
-        .latest_context_patch()
-        .and_then(|patch| patch.prompt_snapshots.get(scope))
+    session.prompt_metadata().slots.get(scope)
 }
 
 async fn persist_checkpoint(

@@ -2083,6 +2083,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeBudgetLimitDto dco_decode_box_autoadd_bridge_budget_limit_dto(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_bridge_budget_limit_dto(raw);
+  }
+
+  @protected
   BridgeError dco_decode_box_autoadd_bridge_error(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_bridge_error(raw);
@@ -2409,6 +2417,32 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       nextStep: dco_decode_String(arr[2]),
       revision: dco_decode_u_64(arr[3]),
       updatedAt: dco_decode_i_64(arr[4]),
+    );
+  }
+
+  @protected
+  BridgeBudgetLimitDto dco_decode_bridge_budget_limit_dto(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return BridgeBudgetLimitDto(
+      kind: dco_decode_String(arr[0]),
+      usage: dco_decode_bridge_budget_usage_dto(arr[1]),
+    );
+  }
+
+  @protected
+  BridgeBudgetUsageDto dco_decode_bridge_budget_usage_dto(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    return BridgeBudgetUsageDto(
+      modelSteps: dco_decode_u_32(arr[0]),
+      toolCalls: dco_decode_u_32(arr[1]),
+      waitCalls: dco_decode_u_32(arr[2]),
+      elapsedMs: dco_decode_u_64(arr[3]),
     );
   }
 
@@ -3309,8 +3343,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeTaskWorkUnitDto dco_decode_bridge_task_work_unit_dto(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 6)
-      throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
+    if (arr.length != 14)
+      throw Exception('unexpected arr length: expect 14 but see ${arr.length}');
     return BridgeTaskWorkUnitDto(
       id: dco_decode_String(arr[0]),
       title: dco_decode_String(arr[1]),
@@ -3318,6 +3352,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       worktreePath: dco_decode_String(arr[3]),
       branch: dco_decode_String(arr[4]),
       agentId: dco_decode_opt_String(arr[5]),
+      executionStatus: dco_decode_String(arr[6]),
+      executionError: dco_decode_opt_String(arr[7]),
+      budgetLimit: dco_decode_opt_box_autoadd_bridge_budget_limit_dto(arr[8]),
+      budgetSliceCount: dco_decode_u_32(arr[9]),
+      budgetSliceLimit: dco_decode_u_32(arr[10]),
+      continuationState: dco_decode_String(arr[11]),
+      continuationSourceTurnId: dco_decode_opt_String(arr[12]),
+      continuationRevision: dco_decode_u_64(arr[13]),
     );
   }
 
@@ -4396,6 +4438,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeBudgetLimitDto? dco_decode_opt_box_autoadd_bridge_budget_limit_dto(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null
+        ? null
+        : dco_decode_box_autoadd_bridge_budget_limit_dto(raw);
+  }
+
+  @protected
   BridgeInteractionResolution?
   dco_decode_opt_box_autoadd_bridge_interaction_resolution(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
@@ -4971,6 +5023,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeBudgetLimitDto sse_decode_box_autoadd_bridge_budget_limit_dto(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_bridge_budget_limit_dto(deserializer));
+  }
+
+  @protected
   BridgeError sse_decode_box_autoadd_bridge_error(
     SseDeserializer deserializer,
   ) {
@@ -5348,6 +5408,33 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       nextStep: var_nextStep,
       revision: var_revision,
       updatedAt: var_updatedAt,
+    );
+  }
+
+  @protected
+  BridgeBudgetLimitDto sse_decode_bridge_budget_limit_dto(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_kind = sse_decode_String(deserializer);
+    var var_usage = sse_decode_bridge_budget_usage_dto(deserializer);
+    return BridgeBudgetLimitDto(kind: var_kind, usage: var_usage);
+  }
+
+  @protected
+  BridgeBudgetUsageDto sse_decode_bridge_budget_usage_dto(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_modelSteps = sse_decode_u_32(deserializer);
+    var var_toolCalls = sse_decode_u_32(deserializer);
+    var var_waitCalls = sse_decode_u_32(deserializer);
+    var var_elapsedMs = sse_decode_u_64(deserializer);
+    return BridgeBudgetUsageDto(
+      modelSteps: var_modelSteps,
+      toolCalls: var_toolCalls,
+      waitCalls: var_waitCalls,
+      elapsedMs: var_elapsedMs,
     );
   }
 
@@ -6533,6 +6620,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_worktreePath = sse_decode_String(deserializer);
     var var_branch = sse_decode_String(deserializer);
     var var_agentId = sse_decode_opt_String(deserializer);
+    var var_executionStatus = sse_decode_String(deserializer);
+    var var_executionError = sse_decode_opt_String(deserializer);
+    var var_budgetLimit = sse_decode_opt_box_autoadd_bridge_budget_limit_dto(
+      deserializer,
+    );
+    var var_budgetSliceCount = sse_decode_u_32(deserializer);
+    var var_budgetSliceLimit = sse_decode_u_32(deserializer);
+    var var_continuationState = sse_decode_String(deserializer);
+    var var_continuationSourceTurnId = sse_decode_opt_String(deserializer);
+    var var_continuationRevision = sse_decode_u_64(deserializer);
     return BridgeTaskWorkUnitDto(
       id: var_id,
       title: var_title,
@@ -6540,6 +6637,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       worktreePath: var_worktreePath,
       branch: var_branch,
       agentId: var_agentId,
+      executionStatus: var_executionStatus,
+      executionError: var_executionError,
+      budgetLimit: var_budgetLimit,
+      budgetSliceCount: var_budgetSliceCount,
+      budgetSliceLimit: var_budgetSliceLimit,
+      continuationState: var_continuationState,
+      continuationSourceTurnId: var_continuationSourceTurnId,
+      continuationRevision: var_continuationRevision,
     );
   }
 
@@ -8014,6 +8119,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeBudgetLimitDto? sse_decode_opt_box_autoadd_bridge_budget_limit_dto(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_bridge_budget_limit_dto(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
   BridgeInteractionResolution?
   sse_decode_opt_box_autoadd_bridge_interaction_resolution(
     SseDeserializer deserializer,
@@ -8779,6 +8897,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_box_autoadd_bridge_budget_limit_dto(
+    BridgeBudgetLimitDto self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bridge_budget_limit_dto(self, serializer);
+  }
+
+  @protected
   void sse_encode_box_autoadd_bridge_error(
     BridgeError self,
     SseSerializer serializer,
@@ -9166,6 +9293,28 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.nextStep, serializer);
     sse_encode_u_64(self.revision, serializer);
     sse_encode_i_64(self.updatedAt, serializer);
+  }
+
+  @protected
+  void sse_encode_bridge_budget_limit_dto(
+    BridgeBudgetLimitDto self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.kind, serializer);
+    sse_encode_bridge_budget_usage_dto(self.usage, serializer);
+  }
+
+  @protected
+  void sse_encode_bridge_budget_usage_dto(
+    BridgeBudgetUsageDto self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_u_32(self.modelSteps, serializer);
+    sse_encode_u_32(self.toolCalls, serializer);
+    sse_encode_u_32(self.waitCalls, serializer);
+    sse_encode_u_64(self.elapsedMs, serializer);
   }
 
   @protected
@@ -10022,6 +10171,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.worktreePath, serializer);
     sse_encode_String(self.branch, serializer);
     sse_encode_opt_String(self.agentId, serializer);
+    sse_encode_String(self.executionStatus, serializer);
+    sse_encode_opt_String(self.executionError, serializer);
+    sse_encode_opt_box_autoadd_bridge_budget_limit_dto(
+      self.budgetLimit,
+      serializer,
+    );
+    sse_encode_u_32(self.budgetSliceCount, serializer);
+    sse_encode_u_32(self.budgetSliceLimit, serializer);
+    sse_encode_String(self.continuationState, serializer);
+    sse_encode_opt_String(self.continuationSourceTurnId, serializer);
+    sse_encode_u_64(self.continuationRevision, serializer);
   }
 
   @protected
@@ -11205,6 +11365,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self != null, serializer);
     if (self != null) {
       sse_encode_box_autoadd_bridge_agent_progress_dto(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_bridge_budget_limit_dto(
+    BridgeBudgetLimitDto? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_bridge_budget_limit_dto(self, serializer);
     }
   }
 

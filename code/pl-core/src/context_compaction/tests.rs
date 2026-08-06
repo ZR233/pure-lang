@@ -253,6 +253,7 @@ fn compaction_request<'a>(
         config,
         request_instructions: "",
         request_messages: &[],
+        working_context_tail: None,
         tools: &[],
         parallel_tool_calls: false,
         reasoning: None,

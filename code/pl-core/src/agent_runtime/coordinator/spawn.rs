@@ -55,9 +55,11 @@ where
             });
         }
     }
+    let mut thread_snapshot = pl_protocol::ThreadSnapshot::empty(id.as_str());
+    thread_snapshot.revision = state.session.thread_revision;
     runtime
         .thread_events
-        .replace_snapshot(pl_protocol::ThreadSnapshot::empty(id.as_str()))
+        .replace_snapshot(thread_snapshot)
         .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
     runtime.directory.publish_runtime_event(&event);
     host.observer()
@@ -105,6 +107,8 @@ where
     let mut state = AgentRegistration {
         identity,
         session: request.session.clone(),
+        runtime_revision: 1,
+        event_sequence: 1,
     }
     .into_durable_state();
     let child_thread_id = child_id.clone();
@@ -182,9 +186,11 @@ where
             ))),
         };
     }
+    let mut thread_snapshot = pl_protocol::ThreadSnapshot::empty(child_id.as_str());
+    thread_snapshot.revision = state.session.thread_revision;
     runtime
         .thread_events
-        .replace_snapshot(pl_protocol::ThreadSnapshot::empty(child_id.as_str()))
+        .replace_snapshot(thread_snapshot)
         .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
     if let Err(error) = host.lifecycle().activate_spawn(&lease).await {
         let rollback = host.lifecycle().rollback_spawn(lease).await;

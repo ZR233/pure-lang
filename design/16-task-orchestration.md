@@ -44,7 +44,9 @@ worktree、branch、状态、summary/error 和 cleanup disposition。ReviewRound
 reviewerThreadId、scope、目标 completion/HEAD、verdict 和 findings。
 
 WorkUnit 状态为 Pending、Running、AwaitingCompletion、ReadyForReview、Reviewing、
-ChangesRequested、Approved、Merged、NoDelivery、Failed、Cancelled。
+ChangesRequested、Approved、Merged、NoDelivery、NeedsAttention、Failed、Cancelled。
+WorkUnit 额外持久化当前 tranche 的 budget slice count、typed continuation state、来源 Turn 与
+continuation revision；这些字段是重启恢复和幂等续轮的 canonical owner，不能从 Timeline 文本推断。
 
 每次 durable transition 在一个 SQLite 事务中更新所有相关产品记录。Task phase 不复制进
 Thread runtime snapshot，Thread 状态也不缓存进 Task 表。
@@ -90,6 +92,14 @@ base-to-HEAD changed files；worktree 内变更不受 scopeHints 限制。成功
 WorkCompletion 并将 WorkUnit 置为 ReadyForReview。普通文本
 结束、工具错误或预算中止不会伪造交付，WorkUnit 保持 AwaitingCompletion，可由 planner 向同一
 Thread 发送明确 follow-up。
+
+executor 的单个 Turn 保持 30 分钟 wall-clock 上限。前三个 `WallClock` budget terminal 不把
+executor 或 WorkUnit 标记为失败：runtime 先对同一 Thread 强制执行 `WallClockRollover`
+compaction，再以 `workUnitId + sourceTurnId` 生成确定性 hidden continuation input，在同一
+worktree 开启下一切片。一个 tranche 最多四个切片；第四次 wall-clock 耗尽进入
+NeedsAttention 并保留 executor/worktree，等待 Planner 停止、拆分或用 `task_send_message`
+显式开启新 tranche。非 wall-clock budget、用户停止、Task 取消和 rollover compaction 失败都不
+自动续轮；pending continuation 在重启时按幂等键对账已有 active/terminal Turn，禁止重复增加切片。
 
 WorkUnit 在 ReadyForReview 之后以 `executorAgentId` 创建 fresh Delivery reviewer。ReviewRound
 事务固定最新 Completion revision，reviewer canonical workspace 直接绑定同一 worktree，不接受

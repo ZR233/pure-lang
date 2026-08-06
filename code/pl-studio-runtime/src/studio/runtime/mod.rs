@@ -140,6 +140,7 @@ impl StudioRuntime {
         issue_id: &str,
         expected_revision: &str,
     ) -> Result<StudioRuntimeSnapshot> {
+        let _lifecycle_guard = self.lifecycle_lock.lock().await;
         let issue = self
             .runtime_state
             .recovery_issue(issue_id)
@@ -152,9 +153,22 @@ impl StudioRuntime {
         {
             anyhow::bail!("recovery cleanup requires an idle Thread");
         }
-        self.task_coordinator
-            .cleanup_recovery_issue(&issue, expected_revision)
+        let authorization = self
+            .task_coordinator
+            .validate_recovery_cleanup(&issue, expected_revision)
             .await?;
+        self.task_coordinator
+            .execute_recovery_cleanup(&issue, &authorization)
+            .await?;
+        if let Some(thread_id) = issue.thread_id.as_deref() {
+            self.close_project_agent_trees(&[thread_id.to_string()])
+                .await?;
+            let emitter = self.interaction_emitter(thread_id.to_string());
+            self.interactions
+                .cancel_thread(thread_id, "recovery context reset", emitter)
+                .await?;
+            self.store.reset_agent_sessions_for_root(thread_id).await?;
+        }
         Ok(self.runtime_state.remove_recovery_issue(issue_id))
     }
 

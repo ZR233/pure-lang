@@ -6,7 +6,7 @@
 import '../../../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 class BridgeActiveTurn {
   final String threadId;
@@ -142,6 +142,55 @@ class BridgeAgentProgressDto {
           nextStep == other.nextStep &&
           revision == other.revision &&
           updatedAt == other.updatedAt;
+}
+
+class BridgeBudgetLimitDto {
+  final String kind;
+  final BridgeBudgetUsageDto usage;
+
+  const BridgeBudgetLimitDto({required this.kind, required this.usage});
+
+  @override
+  int get hashCode => kind.hashCode ^ usage.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeBudgetLimitDto &&
+          runtimeType == other.runtimeType &&
+          kind == other.kind &&
+          usage == other.usage;
+}
+
+class BridgeBudgetUsageDto {
+  final int modelSteps;
+  final int toolCalls;
+  final int waitCalls;
+  final BigInt elapsedMs;
+
+  const BridgeBudgetUsageDto({
+    required this.modelSteps,
+    required this.toolCalls,
+    required this.waitCalls,
+    required this.elapsedMs,
+  });
+
+  @override
+  int get hashCode =>
+      modelSteps.hashCode ^
+      toolCalls.hashCode ^
+      waitCalls.hashCode ^
+      elapsedMs.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeBudgetUsageDto &&
+          runtimeType == other.runtimeType &&
+          modelSteps == other.modelSteps &&
+          toolCalls == other.toolCalls &&
+          waitCalls == other.waitCalls &&
+          elapsedMs == other.elapsedMs;
 }
 
 class BridgeLspHealthDto {
@@ -756,6 +805,14 @@ class BridgeTaskWorkUnitDto {
   final String worktreePath;
   final String branch;
   final String? agentId;
+  final String executionStatus;
+  final String? executionError;
+  final BridgeBudgetLimitDto? budgetLimit;
+  final int budgetSliceCount;
+  final int budgetSliceLimit;
+  final String continuationState;
+  final String? continuationSourceTurnId;
+  final BigInt continuationRevision;
 
   const BridgeTaskWorkUnitDto({
     required this.id,
@@ -764,6 +821,14 @@ class BridgeTaskWorkUnitDto {
     required this.worktreePath,
     required this.branch,
     this.agentId,
+    required this.executionStatus,
+    this.executionError,
+    this.budgetLimit,
+    required this.budgetSliceCount,
+    required this.budgetSliceLimit,
+    required this.continuationState,
+    this.continuationSourceTurnId,
+    required this.continuationRevision,
   });
 
   @override
@@ -773,7 +838,15 @@ class BridgeTaskWorkUnitDto {
       status.hashCode ^
       worktreePath.hashCode ^
       branch.hashCode ^
-      agentId.hashCode;
+      agentId.hashCode ^
+      executionStatus.hashCode ^
+      executionError.hashCode ^
+      budgetLimit.hashCode ^
+      budgetSliceCount.hashCode ^
+      budgetSliceLimit.hashCode ^
+      continuationState.hashCode ^
+      continuationSourceTurnId.hashCode ^
+      continuationRevision.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -785,7 +858,15 @@ class BridgeTaskWorkUnitDto {
           status == other.status &&
           worktreePath == other.worktreePath &&
           branch == other.branch &&
-          agentId == other.agentId;
+          agentId == other.agentId &&
+          executionStatus == other.executionStatus &&
+          executionError == other.executionError &&
+          budgetLimit == other.budgetLimit &&
+          budgetSliceCount == other.budgetSliceCount &&
+          budgetSliceLimit == other.budgetSliceLimit &&
+          continuationState == other.continuationState &&
+          continuationSourceTurnId == other.continuationSourceTurnId &&
+          continuationRevision == other.continuationRevision;
 }
 
 class RuntimeSnapshot {

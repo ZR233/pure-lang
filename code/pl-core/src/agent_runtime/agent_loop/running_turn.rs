@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use pl_model::TokenUsage;
-use pl_protocol::ThreadNotification;
+use pl_protocol::{BudgetLimitKind, ThreadNotification};
 use pl_trace::{AgentEvent, TraceEvent, TraceEventKind, TracePartKind};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::AbortHandle;
@@ -18,7 +18,10 @@ use super::super::{
 };
 use super::{AgentLoop, AgentLoopCommand};
 use crate::thread_event::{ObservedTurnEvent, observation_from_agent_event};
-use crate::{AgentSession, TraceRecorder, TurnResult, TurnResultStatus};
+use crate::{
+    AgentSession, ContextCompactionTrigger, ManualContextCompactionRequest, TraceRecorder,
+    TurnResult, TurnResultStatus,
+};
 
 pub(super) struct RunningTurn {
     pub(super) turn_id: TurnId,
@@ -375,7 +378,7 @@ where
                         Vec::new(),
                     );
                 }
-                let result = prepared
+                let mut result = prepared
                     .engine
                     .run_turn_with_trace(
                         &mut session,
@@ -385,6 +388,33 @@ where
                     )
                     .await
                     .map_err(|error| error.to_string());
+                if let Ok(turn_result) = &mut result
+                    && turn_result.budget_limit_kind == Some(BudgetLimitKind::WallClock)
+                {
+                    let rollover = prepared
+                        .engine
+                        .compact_session_with_trace(
+                            &mut session,
+                            ManualContextCompactionRequest {
+                                turn_id: Some(format!("{turn_id}-rollover")),
+                                execution_policy: Some(policy.clone()),
+                                trigger: ContextCompactionTrigger::WallClockRollover,
+                                ..ManualContextCompactionRequest::default()
+                            },
+                            &mut recorder,
+                        )
+                        .await;
+                    match rollover {
+                        Ok(snapshot) => {
+                            turn_result.rollover_compacted = true;
+                            turn_result.context_compactions.extend(snapshot);
+                        }
+                        Err(error) => {
+                            turn_result.rollover_compaction_error = Some(error.to_string());
+                        }
+                    }
+                    turn_result.trace_events.extend(recorder.drain());
+                }
                 drop(recorder);
                 let _ = event_task.await;
                 break 'execute result;
@@ -508,6 +538,21 @@ pub(crate) fn turn_outcome(
             None,
         ),
     };
+    let budget_limit = (kind == TurnOutcomeKind::BudgetLimited)
+        .then(|| {
+            let result = result.as_ref()?;
+            Some(pl_protocol::BudgetLimitSnapshot {
+                kind: result.budget_limit_kind?,
+                usage: result.budget_usage?,
+            })
+        })
+        .flatten();
+    let rollover_compacted = result
+        .as_ref()
+        .is_some_and(|result| result.rollover_compacted);
+    let rollover_compaction_error = result
+        .as_ref()
+        .and_then(|result| result.rollover_compaction_error.clone());
     (
         AgentTurnOutcome {
             turn_id,
@@ -515,6 +560,9 @@ pub(crate) fn turn_outcome(
             kind,
             reason,
             failure,
+            budget_limit,
+            rollover_compacted,
+            rollover_compaction_error,
             usage,
             finished_at: unix_timestamp(),
         },
@@ -752,6 +800,8 @@ mod tests {
             failure: None,
             budget_limit_kind: None,
             budget_usage: None,
+            rollover_compacted: false,
+            rollover_compaction_error: None,
             trace_events,
         }
     }

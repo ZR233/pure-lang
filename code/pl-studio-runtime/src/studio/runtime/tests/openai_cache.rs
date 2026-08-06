@@ -20,7 +20,7 @@ use crate::config::{
     StudioRole,
 };
 use crate::studio::StudioStore;
-use crate::studio::entity::{item, thread, turn};
+use crate::studio::entity::{thread, thread_context_segment, turn};
 
 const MODEL: &str = "gpt-5.6-sol";
 const EXPECTED_MODEL_REQUESTS: usize = 7;
@@ -91,10 +91,12 @@ async fn run_fixture(root: &Path) -> Result<()> {
     );
 
     let public = runtime.thread_snapshot(&thread.id).await?;
-    assert!(public.items.iter().all(|item| !matches!(
-        item.content,
-        ThreadItemContent::ContextPatch { .. } | ThreadItemContent::ContextCompaction { .. }
-    )));
+    assert!(
+        public
+            .items
+            .iter()
+            .all(|item| !matches!(item.content, ThreadItemContent::ContextCompaction { .. }))
+    );
     let runtime_usage = &public
         .runtime
         .as_ref()
@@ -109,12 +111,11 @@ async fn run_fixture(root: &Path) -> Result<()> {
     );
 
     assert_persisted_billing(&store, &thread.id).await?;
-    let context_patch_count = item::Entity::find()
-        .filter(item::Column::ThreadId.eq(thread.id.clone()))
-        .filter(item::Column::ItemKind.eq("contextPatch"))
+    let context_segment_count = thread_context_segment::Entity::find()
+        .filter(thread_context_segment::Column::ThreadId.eq(thread.id.clone()))
         .count(store.database())
         .await?;
-    assert!(context_patch_count >= 2);
+    assert!(context_segment_count >= 2);
 
     let usage_before_restart = runtime_usage.clone();
     runtime.shutdown_runtime().await?;
@@ -131,10 +132,12 @@ async fn run_fixture(root: &Path) -> Result<()> {
         .context("restored runtime usage missing")?
         .usage;
     assert_eq!(restored_usage, &usage_before_restart);
-    assert!(restored.items.iter().all(|item| !matches!(
-        item.content,
-        ThreadItemContent::ContextPatch { .. } | ThreadItemContent::ContextCompaction { .. }
-    )));
+    assert!(
+        restored
+            .items
+            .iter()
+            .all(|item| !matches!(item.content, ThreadItemContent::ContextCompaction { .. }))
+    );
     let restored_thread = thread::Entity::find_by_id(thread.id.clone())
         .one(reopened_store.database())
         .await?
@@ -238,20 +241,45 @@ fn assert_stable_append_only_requests(requests: &[Value]) -> Result<()> {
         assert!(request.get("prompt_cache_options").is_none());
     }
     for pair in requests.windows(2) {
-        let previous = pair[0]["input"]
-            .as_array()
-            .context("previous Responses request input missing")?;
-        let current = pair[1]["input"]
-            .as_array()
-            .context("current Responses request input missing")?;
+        let previous = transcript_input(&pair[0])?;
+        let current = transcript_input(&pair[1])?;
         if current.len() < previous.len() || current[..previous.len()] != previous[..] {
-            bail!("OpenAI Responses input is not a strict append-only prefix");
+            bail!("OpenAI Responses transcript is not a strict append-only prefix");
         }
     }
     let serialized = serde_json::to_string(requests)?;
-    assert!(serialized.contains("# Working context update"));
+    assert!(serialized.contains("# Current working context"));
     assert!(serialized.contains("cache fixture lookup ok"));
     Ok(())
+}
+
+fn transcript_input(request: &Value) -> Result<Vec<Value>> {
+    let input = request["input"]
+        .as_array()
+        .context("Responses request input missing")?;
+    let tail_count = input
+        .iter()
+        .filter(|item| is_working_context_tail(item))
+        .count();
+    if tail_count > 1 {
+        bail!("Responses request contains {tail_count} working-context tails");
+    }
+    Ok(input
+        .iter()
+        .filter(|item| !is_working_context_tail(item))
+        .cloned()
+        .collect())
+}
+
+fn is_working_context_tail(item: &Value) -> bool {
+    item["role"] == "developer"
+        && item["content"].as_array().is_some_and(|parts| {
+            parts.iter().any(|part| {
+                part["text"]
+                    .as_str()
+                    .is_some_and(|text| text.starts_with("# Current working context"))
+            })
+        })
 }
 
 fn tool_names(request: &Value) -> Vec<String> {

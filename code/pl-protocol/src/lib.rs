@@ -16,11 +16,11 @@ pub use billing::{
 };
 pub use error::{PureError, Result};
 pub use event::{
-    AgentRuntimeDelta, AgentStatus, BudgetLimitKind, BudgetUsage, ErrorSeverity, OutputStream,
-    PipelineStage, PlanLifecycleEvent, PlanLifecycleState, RuntimeCostAmount, RuntimeUsageSnapshot,
-    SkillActivation, SubAgentActivityKind, TodoItem, TodoListSnapshot, TodoStatus,
-    TokenUsageSnapshot, UserInputAnswer, UserInputRequest, UserInputResponse, UserQuestion,
-    UserQuestionOption,
+    AgentRuntimeDelta, AgentStatus, BudgetLimitKind, BudgetLimitSnapshot, BudgetUsage,
+    ErrorSeverity, OutputStream, PipelineStage, PlanLifecycleEvent, PlanLifecycleState,
+    RuntimeCostAmount, RuntimeUsageSnapshot, SkillActivation, SubAgentActivityKind, TodoItem,
+    TodoListSnapshot, TodoStatus, TokenUsageSnapshot, UserInputAnswer, UserInputRequest,
+    UserInputResponse, UserQuestion, UserQuestionOption,
 };
 pub use interaction::{
     InteractionChangedEvent, InteractionKind, InteractionPayload, InteractionRequest,
@@ -35,8 +35,8 @@ pub use message::{
     ToolCallHistoryMetadata, ToolCallKind, ToolResultMetadata,
 };
 pub use model_context::{
-    ContextSectionId, ContextSectionIdError, ModelContextItem, ModelContextPatch,
-    ModelContextSectionSnapshot, ModelContextSnapshot, PinnedContextSection,
+    AgentSessionSnapshot, AgentWorkingState, ContextSectionId, ContextSectionIdError,
+    ModelContextItem, ModelContextSectionSnapshot, ModelContextSnapshot, PinnedContextSection,
     PromptPrefixChangedReason, SessionNote, ThreadPromptMetadata, ThreadPromptSnapshot,
     ToolResultReceipt,
 };

@@ -211,6 +211,48 @@ void registerTimelineScrollTests() {
     expect(find.byTooltip('Jump to latest'), findsOneWidget);
   });
 
+  testWidgets('timeline repairs an out-of-range offset after metrics shrink', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1600, 520);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    const threadId = 'session-metrics-shrink';
+    final rows = timelineRowsFromThreadItems(_scrollItems(threadId, 24));
+    Widget harness(double width) {
+      return _timelineApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: width,
+            height: 520,
+            child: TimelineView(
+              threadId: threadId,
+              rows: rows,
+              turn: _testTurn(
+                threadId: threadId,
+                state: const StudioTurnState.completed(),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    await tester.pumpWidget(harness(520));
+    await tester.pumpAndSettle();
+    final previousExtent = _timelinePosition(tester).maxScrollExtent;
+
+    await tester.pumpWidget(harness(1500));
+    await tester.pumpAndSettle();
+
+    final position = _timelinePosition(tester);
+    expect(position.maxScrollExtent, lessThan(previousExtent));
+    expect(position.pixels, lessThanOrEqualTo(position.maxScrollExtent));
+    expect(position.extentAfter, lessThanOrEqualTo(80));
+  });
+
   testWidgets('loading older history preserves the visible timeline anchor', (
     tester,
   ) async {

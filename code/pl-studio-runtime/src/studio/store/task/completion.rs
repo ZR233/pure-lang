@@ -8,8 +8,8 @@ use crate::studio::entity as entities;
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    ReviewScope, ReviewVerdict, TaskRunPhase, TaskRunRecord, TaskStopOrigin, TaskStopReason,
-    TaskWorktreeDisposition, ThreadExecutionStatus, WorkUnitStatus,
+    ExecutorContinuationState, ReviewScope, ReviewVerdict, TaskRunPhase, TaskRunRecord,
+    TaskStopOrigin, TaskStopReason, TaskWorktreeDisposition, ThreadExecutionStatus, WorkUnitStatus,
 };
 
 impl StudioStore {
@@ -259,15 +259,21 @@ impl StudioStore {
                         | WorkUnitStatus::Reviewing
                         | WorkUnitStatus::ChangesRequested
                         | WorkUnitStatus::Approved
+                        | WorkUnitStatus::NeedsAttention
                 );
                 let authorize_cleanup = status != WorkUnitStatus::Merged;
                 if cancel || authorize_cleanup {
+                    let continuation_revision = unit.continuation_revision.saturating_add(1);
                     let mut active: entities::work_unit::ActiveModel = unit.into();
                     if cancel {
                         active.status = Set(WorkUnitStatus::Cancelled.as_str().to_string());
                         active.execution_status =
                             Set(ThreadExecutionStatus::Cancelled.as_str().to_string());
                         active.execution_error = Set(Some(reason.to_string()));
+                        active.continuation_state =
+                            Set(ExecutorContinuationState::None.as_str().to_string());
+                        active.continuation_source_turn_id = Set(None);
+                        active.continuation_revision = Set(continuation_revision);
                     }
                     if authorize_cleanup {
                         active.worktree_disposition =

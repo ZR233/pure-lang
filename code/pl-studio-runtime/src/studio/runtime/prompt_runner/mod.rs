@@ -276,6 +276,7 @@ impl StudioRuntime {
                 (Some(parent_id), role, parent_snapshot.identity.depth + 1)
             }
         };
+        let seed = self.store.thread_runtime_seed(&thread_record.id).await?;
         let registration = pl_core::AgentRegistration {
             identity: pl_core::AgentIdentity {
                 id: agent_id,
@@ -293,8 +294,10 @@ impl StudioRuntime {
                 billing_by_turn: std::collections::BTreeMap::new(),
                 last_context_tokens: None,
                 trace_sequence: 0,
-                thread_revision: 0,
+                thread_revision: seed.thread_revision,
             },
+            runtime_revision: seed.runtime_revision,
+            event_sequence: seed.event_sequence,
         };
         Ok(registration)
     }

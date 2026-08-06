@@ -20,6 +20,7 @@ pub(super) struct RemoteCompactionRequest<'a, P: ModelProvider + ?Sized> {
     pub config: &'a ContextCompactionConfig,
     pub request_instructions: &'a str,
     pub request_messages: &'a [Message],
+    pub working_context_tail: Option<Message>,
     pub tools: &'a [ToolSchema],
     pub parallel_tool_calls: bool,
     pub reasoning: Option<ReasoningConfig>,
@@ -36,6 +37,7 @@ pub(super) async fn compact_remote(
         config,
         request_instructions,
         request_messages,
+        working_context_tail,
         tools,
         parallel_tool_calls,
         reasoning,
@@ -45,14 +47,11 @@ pub(super) async fn compact_remote(
         .iter()
         .cloned()
         .map(ModelContextItem::from)
-        .chain(
-            session
-                .items()
-                .iter()
-                .filter(|item| !item.is_pinned_context() && !item.is_session_note())
-                .cloned(),
-        )
+        .chain(session.items().iter().cloned())
         .collect::<Vec<_>>();
+    if let Some(tail) = working_context_tail {
+        input.push(ModelContextItem::from(tail));
+    }
     super::compact_old_tool_results_for_request(&mut input);
     trim_tool_outputs_to_context_window(
         &mut input,
@@ -175,10 +174,7 @@ fn trim_tool_outputs_to_context_window(
         let (message, receipt) = match &input[index] {
             ModelContextItem::Message { message } => (message, None),
             ModelContextItem::ToolResult { message, receipt } => (message, Some(receipt.clone())),
-            ModelContextItem::ContextPatch { .. } => continue,
-            ModelContextItem::PinnedContext { .. }
-            | ModelContextItem::SessionNote { .. }
-            | ModelContextItem::Compaction { .. } => {
+            ModelContextItem::Compaction { .. } => {
                 continue;
             }
         };
@@ -208,8 +204,6 @@ fn estimate_input_tokens(instructions: &str, input: &[ModelContextItem]) -> u64 
             .map(|item| match item {
                 ModelContextItem::Message { message }
                 | ModelContextItem::ToolResult { message, .. } => estimate_message_tokens(message),
-                ModelContextItem::ContextPatch { patch } => estimate_message_tokens(&patch.message),
-                ModelContextItem::PinnedContext { .. } | ModelContextItem::SessionNote { .. } => 0,
                 ModelContextItem::Compaction { encrypted_content } => {
                     estimate_text_tokens(encrypted_content)
                 }

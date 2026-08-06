@@ -205,6 +205,15 @@ impl StudioStore {
             execution_status: Set(ThreadExecutionStatus::Completed.as_str().to_string()),
             execution_summary: Set(Some("test delivery".to_string())),
             execution_error: Set(None),
+            budget_limit_json: Set(None),
+            budget_slice_count: Set(1),
+            continuation_state: Set(
+                crate::studio::task_coordinator::ExecutorContinuationState::None
+                    .as_str()
+                    .to_string(),
+            ),
+            continuation_source_turn_id: Set(None),
+            continuation_revision: Set(0),
             created_at: Set(now),
             updated_at: Set(now),
         }

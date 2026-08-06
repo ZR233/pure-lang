@@ -25,6 +25,33 @@ pub struct ModelContextSnapshot {
     pub session_note_available: bool,
 }
 
+/// 独立于 append-only transcript 的可替换 Agent 工作状态。
+///
+/// pinned sections、会话笔记和 prompt generation 状态都通过 replacement
+/// 持久化；它们不得作为历史消息重复进入模型上下文。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentWorkingState {
+    #[serde(default)]
+    pub sections: Vec<PinnedContextSection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_note: Option<SessionNote>,
+    #[serde(default)]
+    pub prompt: ThreadPromptMetadata,
+    #[serde(default)]
+    pub revision: u64,
+}
+
+/// 可由产品 repository 原子保存和恢复的 Agent session 快照。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSessionSnapshot {
+    #[serde(default)]
+    pub transcript: Vec<ModelContextItem>,
+    #[serde(default)]
+    pub working_state: AgentWorkingState,
+}
+
 /// prompt generation 发生冷启动的原因。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -75,23 +102,6 @@ pub struct ThreadPromptMetadata {
     pub active_scope: String,
     #[serde(default)]
     pub slots: BTreeMap<String, ThreadPromptSnapshot>,
-}
-
-/// 模型上下文的一次 append-only 差量。
-///
-/// `message` 是真正发送给模型的最小差量；`resulting_context` 只用于重启恢复和
-/// 下一次差量计算，Bridge 不得暴露。
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ModelContextPatch {
-    pub id: String,
-    pub message: Message,
-    pub resulting_context: ModelContextSnapshot,
-    pub prompt: ThreadPromptSnapshot,
-    #[serde(default)]
-    pub prompt_snapshots: BTreeMap<String, ThreadPromptSnapshot>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub changed_section_ids: Vec<String>,
 }
 
 /// 独立于可压缩时间线的上下文段标识。
@@ -204,15 +214,6 @@ pub enum ModelContextItem {
         message: Message,
         receipt: ToolResultReceipt,
     },
-    PinnedContext {
-        section: PinnedContextSection,
-    },
-    SessionNote {
-        note: SessionNote,
-    },
-    ContextPatch {
-        patch: ModelContextPatch,
-    },
     Compaction {
         #[serde(rename = "encryptedContent")]
         encrypted_content: String,
@@ -224,8 +225,7 @@ impl ModelContextItem {
         match self {
             Self::Message { message } => Some(message),
             Self::ToolResult { message, .. } => Some(message),
-            Self::ContextPatch { patch } => Some(&patch.message),
-            Self::PinnedContext { .. } | Self::SessionNote { .. } | Self::Compaction { .. } => None,
+            Self::Compaction { .. } => None,
         }
     }
 
@@ -233,8 +233,7 @@ impl ModelContextItem {
         match self {
             Self::Message { message } => Some(message),
             Self::ToolResult { message, .. } => Some(message),
-            Self::ContextPatch { patch } => Some(patch.message),
-            Self::PinnedContext { .. } | Self::SessionNote { .. } | Self::Compaction { .. } => None,
+            Self::Compaction { .. } => None,
         }
     }
 
@@ -242,55 +241,10 @@ impl ModelContextItem {
         matches!(self, Self::Compaction { .. })
     }
 
-    pub fn as_pinned_context(&self) -> Option<&PinnedContextSection> {
-        match self {
-            Self::PinnedContext { section } => Some(section),
-            Self::Message { .. }
-            | Self::ToolResult { .. }
-            | Self::ContextPatch { .. }
-            | Self::SessionNote { .. }
-            | Self::Compaction { .. } => None,
-        }
-    }
-
-    pub fn as_session_note(&self) -> Option<&SessionNote> {
-        match self {
-            Self::SessionNote { note } => Some(note),
-            Self::Message { .. }
-            | Self::ToolResult { .. }
-            | Self::PinnedContext { .. }
-            | Self::ContextPatch { .. }
-            | Self::Compaction { .. } => None,
-        }
-    }
-
     pub fn as_tool_result_receipt(&self) -> Option<&ToolResultReceipt> {
         match self {
             Self::ToolResult { receipt, .. } => Some(receipt),
-            Self::Message { .. }
-            | Self::PinnedContext { .. }
-            | Self::ContextPatch { .. }
-            | Self::SessionNote { .. }
-            | Self::Compaction { .. } => None,
-        }
-    }
-
-    pub fn is_pinned_context(&self) -> bool {
-        matches!(self, Self::PinnedContext { .. })
-    }
-
-    pub fn is_session_note(&self) -> bool {
-        matches!(self, Self::SessionNote { .. })
-    }
-
-    pub fn as_context_patch(&self) -> Option<&ModelContextPatch> {
-        match self {
-            Self::ContextPatch { patch } => Some(patch),
-            Self::Message { .. }
-            | Self::ToolResult { .. }
-            | Self::PinnedContext { .. }
-            | Self::SessionNote { .. }
-            | Self::Compaction { .. } => None,
+            Self::Message { .. } | Self::Compaction { .. } => None,
         }
     }
 }

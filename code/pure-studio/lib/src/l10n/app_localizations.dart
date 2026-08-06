@@ -812,6 +812,113 @@ abstract class AppLocalizations {
   /// **'Error'**
   String get statusTaskError;
 
+  /// No description provided for @statusTaskExecution.
+  ///
+  /// In en, this message translates to:
+  /// **'Execution'**
+  String get statusTaskExecution;
+
+  /// No description provided for @statusTaskBudget.
+  ///
+  /// In en, this message translates to:
+  /// **'Budget limit'**
+  String get statusTaskBudget;
+
+  /// No description provided for @statusTaskBudgetSlice.
+  ///
+  /// In en, this message translates to:
+  /// **'Budget slice'**
+  String get statusTaskBudgetSlice;
+
+  /// No description provided for @statusTaskBudgetSliceValue.
+  ///
+  /// In en, this message translates to:
+  /// **'{current}/{limit}'**
+  String statusTaskBudgetSliceValue(int current, int limit);
+
+  /// No description provided for @statusTaskBudgetUsage.
+  ///
+  /// In en, this message translates to:
+  /// **'{modelSteps} model · {toolCalls} tools · {waitCalls} waits · {elapsedMs} ms'**
+  String statusTaskBudgetUsage(
+    int modelSteps,
+    int toolCalls,
+    int waitCalls,
+    String elapsedMs,
+  );
+
+  /// No description provided for @statusTaskContinuation.
+  ///
+  /// In en, this message translates to:
+  /// **'Continuation'**
+  String get statusTaskContinuation;
+
+  /// No description provided for @statusTaskBudgetModelStep.
+  ///
+  /// In en, this message translates to:
+  /// **'Model-step limit'**
+  String get statusTaskBudgetModelStep;
+
+  /// No description provided for @statusTaskBudgetToolCall.
+  ///
+  /// In en, this message translates to:
+  /// **'Tool-call limit'**
+  String get statusTaskBudgetToolCall;
+
+  /// No description provided for @statusTaskBudgetWait.
+  ///
+  /// In en, this message translates to:
+  /// **'Wait-call limit'**
+  String get statusTaskBudgetWait;
+
+  /// No description provided for @statusTaskBudgetWallClock.
+  ///
+  /// In en, this message translates to:
+  /// **'Wall-clock limit'**
+  String get statusTaskBudgetWallClock;
+
+  /// No description provided for @statusTaskBudgetAgentCount.
+  ///
+  /// In en, this message translates to:
+  /// **'Agent-count limit'**
+  String get statusTaskBudgetAgentCount;
+
+  /// No description provided for @statusTaskBudgetAgentDepth.
+  ///
+  /// In en, this message translates to:
+  /// **'Agent-depth limit'**
+  String get statusTaskBudgetAgentDepth;
+
+  /// No description provided for @statusTaskBudgetFinalization.
+  ///
+  /// In en, this message translates to:
+  /// **'Finalization limit'**
+  String get statusTaskBudgetFinalization;
+
+  /// No description provided for @statusTaskContinuationNone.
+  ///
+  /// In en, this message translates to:
+  /// **'None'**
+  String get statusTaskContinuationNone;
+
+  /// No description provided for @statusTaskContinuationCompacting.
+  ///
+  /// In en, this message translates to:
+  /// **'Compacting context'**
+  String get statusTaskContinuationCompacting;
+
+  /// No description provided for @statusTaskContinuationPendingStart.
+  ///
+  /// In en, this message translates to:
+  /// **'Starting next slice'**
+  String get statusTaskContinuationPendingStart;
+
+  /// No description provided for @statusTaskContinuationNeedsAttention.
+  ///
+  /// In en, this message translates to:
+  /// **'Needs attention'**
+  String get statusTaskContinuationNeedsAttention;
+
   /// No description provided for @statusTaskPhasePlanning.
   ///
   /// In en, this message translates to:
@@ -949,6 +1056,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Completed'**
   String get statusTaskStatusCompleted;
+
+  /// No description provided for @statusTaskStatusBudgetLimited.
+  ///
+  /// In en, this message translates to:
+  /// **'Budget limited'**
+  String get statusTaskStatusBudgetLimited;
+
+  /// No description provided for @statusTaskStatusNeedsAttention.
+  ///
+  /// In en, this message translates to:
+  /// **'Needs attention'**
+  String get statusTaskStatusNeedsAttention;
 
   /// No description provided for @statusTaskStatusFailed.
   ///

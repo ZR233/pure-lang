@@ -103,6 +103,9 @@ pub mod turn {
         pub model_json: Option<String>,
         pub usage_json: String,
         pub failure_json: Option<String>,
+        pub budget_limit_json: Option<String>,
+        pub rollover_compacted: i32,
+        pub rollover_compaction_error: Option<String>,
         pub metadata_json: Option<String>,
         pub started_at: Option<i64>,
         pub updated_at: i64,
@@ -138,7 +141,6 @@ pub mod item {
         pub item_kind: String,
         pub status: String,
         pub payload_json: String,
-        pub provider_private_payload: Option<Vec<u8>>,
         pub created_at: i64,
         pub updated_at: i64,
         pub completed_at: Option<i64>,
@@ -160,6 +162,66 @@ pub mod item {
             on_delete = "Cascade"
         )]
         Turn,
+    }
+
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+pub mod thread_context_segment {
+    use super::*;
+
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
+    #[sea_orm(table_name = "thread_context_segments")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: String,
+        pub thread_id: String,
+        pub ordinal: i64,
+        pub revision: i64,
+        pub kind: String,
+        pub payload_json: String,
+        pub payload_hash: String,
+        pub resulting_hash: String,
+        pub created_at: i64,
+    }
+
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {
+        #[sea_orm(
+            belongs_to = "super::thread::Entity",
+            from = "Column::ThreadId",
+            to = "super::thread::Column::Id",
+            on_delete = "Cascade"
+        )]
+        Thread,
+    }
+
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+pub mod thread_session_state {
+    use super::*;
+
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
+    #[sea_orm(table_name = "thread_session_state")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub thread_id: String,
+        pub revision: i64,
+        pub state_json: String,
+        pub state_hash: String,
+        pub updated_at: i64,
+    }
+
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {
+        #[sea_orm(
+            belongs_to = "super::thread::Entity",
+            from = "Column::ThreadId",
+            to = "super::thread::Column::Id",
+            on_delete = "Cascade"
+        )]
+        Thread,
     }
 
     impl ActiveModelBehavior for ActiveModel {}

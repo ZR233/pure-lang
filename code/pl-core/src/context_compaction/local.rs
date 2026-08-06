@@ -16,6 +16,7 @@ pub(super) async fn compact_local(
     request_instructions: &str,
     request_messages: &[Message],
     session_items: &[ModelContextItem],
+    working_context_tail: Option<&Message>,
     event_tx: AgentEventSender,
     progress: &mut Option<&mut ProgressEmitter>,
     max_output_tokens: Option<u64>,
@@ -26,6 +27,9 @@ pub(super) async fn compact_local(
         .map(ModelContextItem::from)
         .chain(session_items.iter().cloned())
         .collect::<Vec<_>>();
+    if let Some(tail) = working_context_tail {
+        input.push(ModelContextItem::from(tail.clone()));
+    }
     super::compact_old_tool_results_for_request(&mut input);
     input.push(ModelContextItem::from(Message {
         role: MessageRole::User,

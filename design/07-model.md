@@ -277,10 +277,22 @@ pub struct ModelPricing {
 ## 7.10 Prompt 缓存
 
 核心层按 prompt generation 组装请求，唯一顺序是：模型基础指令、平台与全局配置、模式与
-角色、Skill、Workspace/项目文档、durable model history。同一 generation 内，model、
-instructions、tools、tool choice、reasoning、输出 schema 和 service tier 不得变化；历史只追加
-assistant、tool、user 与内部 contextPatch。模型相关运行状态变化在采样前渲染为最小
-contextPatch，先持久化再发送，不能作为下一轮消失的临时尾部。
+角色、Skill、Workspace/项目文档组成的固定 instructions 与 prelude，随后是 durable model
+transcript，最后附加至多一条当前 working-context message。同一 generation 内，model、
+instructions、tools、tool choice、reasoning、输出 schema 和 service tier 不得变化；
+transcript 只包含 user、assistant、tool result 与 provider compaction checkpoint。pinned sections、
+Evidence Ledger、session note 和 prompt generation 状态属于可替换 `AgentWorkingState`，不得作为
+append-only `ModelContextItem` 写入 transcript。
+
+每次 inference 都从 `AgentWorkingState` 渲染完整、当前的 working-context tail；旧版本不进入
+历史、压缩输入、token 估算或 Bridge。working context 内容变化只更新 context hash，不提升
+prompt generation；provider、model、固定指令、工具 schema 或 compaction 变化才提升 generation。
+这样固定前缀与 transcript 仍可复用 provider prompt cache，同时单份 working context 的大小继续
+受 pinned section 总预算约束。
+
+上下文压缩采用 Codex 风格的版本化 replacement：采样前估算完整物化请求，达到 90% 自动阈值
+时 replace transcript，再把当前 working context 注入新窗口一次。provider 报告 token 达到阈值时，
+下一次采样前执行同样 replacement；压缩不得丢失 tool call/output 配对或当前用户任务。
 
 每个指令层分别计算内容 hash；基础、模式角色、Skill、Workspace、工具 schema、provider、
 model 或 compaction 变化都给出精确 `PromptPrefixChangedReason` 并提升 generation。工具按模型
@@ -300,7 +312,7 @@ provider usage 必须分别报告缓存读取和缓存写入。OpenAI GPT-5.6 �
 不得仅凭模型名推断。旧模型或未声明写入能力的 provider 不得制造写入 token。DeepSeek
 继续按命中/未命中输入分类计费。
 
-缓存诊断只记录 generation、固定前缀/工具/contextPatch 的 hash、token 数和变化原因；不得记录
+缓存诊断只记录 generation、固定前缀/工具/working context 的 hash、token 数和变化原因；不得记录
 prompt、工具参数或结果、header、凭据和配置正文。
 
 ## 7.11 Web 搜索 Provider 边界

@@ -107,10 +107,12 @@ impl DurableCommitFacts {
     }
 }
 
-/// checkpoint 对完整模型上下文的单调变更。
+/// checkpoint 对 append-only transcript 的单调变更。
 #[derive(Debug, Clone)]
 pub enum ThreadContextMutation {
+    /// `items` 只包含相对于已持久 transcript 的新 suffix。
     Append { items: Vec<ModelContextItem> },
+    /// `items` 是压缩、回滚或截断后的完整新 transcript。
     Replace { items: Vec<ModelContextItem> },
 }
 

@@ -28,7 +28,10 @@ use billing::{
     aggregate_billing_usage, authoritative_turn_usage, persist_inference_billing, restore_billing,
     runtime_from_context,
 };
-use context::{metadata_with_prompt_snapshot, persist_context_baseline, restore_context_items};
+use context::{
+    SessionSnapshotAuditError, audit_session_snapshot, persist_session_snapshot,
+    restore_session_snapshot, serialize_thread_metadata,
+};
 
 /// Studio 单库对 canonical Thread 状态的 CAS repository。
 #[derive(Clone)]
@@ -36,9 +39,52 @@ pub(in crate::studio) struct StudioAgentRepository {
     store: StudioStore,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::studio) struct StudioSessionRecoveryFailure {
+    pub project_id: String,
+    pub root_thread_id: String,
+    pub agent_thread_id: String,
+    pub detail: String,
+}
+
 impl StudioAgentRepository {
     pub(in crate::studio) fn new(store: StudioStore) -> Self {
         Self { store }
+    }
+
+    pub(in crate::studio) async fn audit_registered_sessions(
+        &self,
+    ) -> Result<Vec<StudioSessionRecoveryFailure>, PureError> {
+        let models = thread::Entity::find()
+            .filter(thread::Column::RuntimeRevision.is_not_null())
+            .order_by_asc(thread::Column::CreatedAt)
+            .order_by_asc(thread::Column::Id)
+            .all(self.store.database())
+            .await
+            .map_err(store_error)?;
+        self.session_recovery_failures(&models).await
+    }
+
+    async fn session_recovery_failures(
+        &self,
+        models: &[thread::Model],
+    ) -> Result<Vec<StudioSessionRecoveryFailure>, PureError> {
+        let mut failures = Vec::new();
+        for model in models {
+            match audit_session_snapshot(&self.store, &model.id).await {
+                Ok(()) => {}
+                Err(SessionSnapshotAuditError::Fatal(error)) => return Err(error),
+                Err(SessionSnapshotAuditError::Corrupt(error)) => {
+                    failures.push(StudioSessionRecoveryFailure {
+                        project_id: model.project_id.clone(),
+                        root_thread_id: model.root_thread_id.clone(),
+                        agent_thread_id: model.id.clone(),
+                        detail: error.to_string(),
+                    });
+                }
+            }
+        }
+        Ok(failures)
     }
 
     async fn restore_inputs(
@@ -79,7 +125,7 @@ impl StudioAgentRepository {
         &self,
         model: &thread::Model,
     ) -> Result<ThreadContextState, PureError> {
-        let context = restore_context_items(&self.store, &model.id).await?;
+        let session = restore_session_snapshot(&self.store, &model.id).await?;
         let billing_by_turn = restore_billing(&self.store, &model.id).await?;
         let usage = if billing_by_turn.is_empty() {
             serde_json::from_str(&model.usage_json)?
@@ -88,7 +134,7 @@ impl StudioAgentRepository {
         };
         Ok(ThreadContextState {
             metadata: serde_json::from_str(&model.metadata_json)?,
-            session: AgentSession::from_items(context.unwrap_or_default()),
+            session: AgentSession::from_snapshot(session),
             usage,
             billing_by_turn,
             last_context_tokens: model.last_context_tokens.map(u64_from_i64).transpose()?,
@@ -113,13 +159,7 @@ impl StudioAgentRepository {
             .map(|row| serde_json::from_str(&row.payload_json).map_err(Into::into))
             .collect::<Result<Vec<ThreadItem>, PureError>>()?
             .into_iter()
-            .filter(|item| {
-                !matches!(
-                    item.content,
-                    ThreadItemContent::ContextPatch { .. }
-                        | ThreadItemContent::ContextCompaction { .. }
-                )
-            })
+            .filter(|item| !matches!(item.content, ThreadItemContent::ContextCompaction { .. }))
             .collect();
         let active_turn = turn::Entity::find()
             .filter(turn::Column::ThreadId.eq(thread_id.clone()))
@@ -172,8 +212,22 @@ impl ThreadRepository for StudioAgentRepository {
             .iter()
             .map(|model| (model.id.clone(), model.parent_thread_id.clone()))
             .collect::<BTreeMap<_, _>>();
+        let blocked_roots = self
+            .session_recovery_failures(&models)
+            .await?
+            .into_iter()
+            .map(|failure| failure.root_thread_id)
+            .collect::<BTreeSet<_>>();
         let mut restored = Vec::with_capacity(models.len());
         for model in models {
+            if blocked_roots.contains(&model.root_thread_id) {
+                tracing::warn!(
+                    root_thread_id = %model.root_thread_id,
+                    agent_thread_id = %model.id,
+                    "skipping agent tree with an invalid durable session snapshot"
+                );
+                continue;
+            }
             let thread_id = ThreadId::new(model.id.clone())?;
             let (pending_inputs, active_input) = self.restore_inputs(thread_id.as_str()).await?;
             let active_turn = latest_turn(&self.store, thread_id.as_str(), true).await?;
@@ -262,7 +316,7 @@ pub(super) async fn persist_state_commit(
     active.revision = Set(i64_from_u64(commit.next_state.session.thread_revision)?);
     active.runtime_revision = Set(Some(i64_from_u64(commit.next_state.snapshot.revision)?));
     active.event_sequence = Set(i64_from_u64(commit.next_state.snapshot.event_sequence)?);
-    active.metadata_json = Set(metadata_with_prompt_snapshot(
+    active.metadata_json = Set(serialize_thread_metadata(
         &commit.next_state.session.metadata,
         &commit.next_state.session.session,
     )?);
@@ -280,7 +334,7 @@ pub(super) async fn persist_state_commit(
     persist_inputs(&tx, &commit.next_state).await?;
     persist_state_turns(&tx, &commit.next_state).await?;
     persist_thread_notifications(&tx, commit).await?;
-    persist_context_baseline(&tx, commit).await?;
+    persist_session_snapshot(&tx, commit).await?;
     persist_inference_billing(&tx, commit).await?;
     tx.commit().await.map_err(store_error)?;
     Ok(ThreadCommitOutcome::Applied)
@@ -467,6 +521,9 @@ async fn persist_state_turns(
                 reason: None,
                 usage: None,
                 failure: None,
+                budget_limit: None,
+                rollover_compacted: None,
+                rollover_compaction_error: None,
                 metadata: Some(&input.metadata),
                 started_at: None,
                 completed_at: None,
@@ -487,6 +544,9 @@ async fn persist_state_turns(
                 reason: None,
                 usage: None,
                 failure: None,
+                budget_limit: None,
+                rollover_compacted: None,
+                rollover_compaction_error: None,
                 metadata: None,
                 started_at: Some(state.snapshot.updated_at),
                 completed_at: None,
@@ -508,6 +568,9 @@ async fn persist_state_turns(
                 reason,
                 usage: Some(&outcome.usage),
                 failure: outcome.failure.as_ref(),
+                budget_limit: outcome.budget_limit.as_ref(),
+                rollover_compacted: Some(outcome.rollover_compacted),
+                rollover_compaction_error: outcome.rollover_compaction_error.as_deref(),
                 metadata: None,
                 started_at: None,
                 completed_at: Some(outcome.finished_at),
@@ -528,6 +591,9 @@ struct TurnProjection<'a> {
     reason: Option<&'a str>,
     usage: Option<&'a pl_model::TokenUsage>,
     failure: Option<&'a pl_protocol::TurnFailure>,
+    budget_limit: Option<&'a pl_protocol::BudgetLimitSnapshot>,
+    rollover_compacted: Option<bool>,
+    rollover_compaction_error: Option<&'a str>,
     metadata: Option<&'a serde_json::Value>,
     started_at: Option<i64>,
     completed_at: Option<i64>,
@@ -567,6 +633,22 @@ async fn persist_turn_projection(
         model_json: Set(existing.as_ref().and_then(|row| row.model_json.clone())),
         usage_json: Set(serde_json::to_string(&usage)?),
         failure_json: Set(projection.failure.map(serde_json::to_string).transpose()?),
+        budget_limit_json: Set(match (projection.budget_limit, existing.as_ref()) {
+            (Some(limit), _) => Some(serde_json::to_string(limit)?),
+            (None, Some(row)) => row.budget_limit_json.clone(),
+            (None, None) => None,
+        }),
+        rollover_compacted: Set(projection.rollover_compacted.map_or_else(
+            || existing.as_ref().map_or(0, |row| row.rollover_compacted),
+            |compacted| if compacted { 1 } else { 0 },
+        )),
+        rollover_compaction_error: Set(
+            match (projection.rollover_compaction_error, existing.as_ref()) {
+                (Some(error), _) => Some(error.to_string()),
+                (None, Some(row)) => row.rollover_compaction_error.clone(),
+                (None, None) => None,
+            },
+        ),
         metadata_json: Set(match (existing.as_ref(), projection.metadata) {
             (Some(row), None) => row.metadata_json.clone(),
             (_, metadata) => metadata.map(serde_json::to_string).transpose()?,
@@ -598,7 +680,7 @@ async fn persist_thread_notifications(
             }
             ThreadNotification::ItemStarted { item: value }
             | ThreadNotification::ItemCompleted { item: value } => {
-                persist_item(tx, value, None).await?;
+                persist_item(tx, value).await?;
             }
             ThreadNotification::InteractionChanged { interaction: value } => {
                 persist_interaction(tx, value).await?;
@@ -627,6 +709,9 @@ async fn persist_turn(
             reason,
             usage: None,
             failure: None,
+            budget_limit: None,
+            rollover_compacted: None,
+            rollover_compaction_error: None,
             metadata: None,
             started_at: value.started_at,
             completed_at: value.completed_at,
@@ -640,7 +725,6 @@ async fn persist_turn(
 async fn persist_item(
     tx: &sea_orm::DatabaseTransaction,
     value: &ThreadItem,
-    private_payload: Option<Vec<u8>>,
 ) -> Result<(), PureError> {
     let existing = item::Entity::find_by_id(value.id.clone())
         .one(tx)
@@ -670,11 +754,6 @@ async fn persist_item(
         item_kind: Set(item_kind_label(&value.content).to_string()),
         status: Set(item_status_label(value.status).to_string()),
         payload_json: Set(serde_json::to_string(&persisted)?),
-        provider_private_payload: Set(private_payload.or_else(|| {
-            existing
-                .as_ref()
-                .and_then(|row| row.provider_private_payload.clone())
-        })),
         created_at: Set(existing
             .as_ref()
             .map_or(value.created_at, |row| row.created_at)),
@@ -814,12 +893,15 @@ fn restored_activity(
 }
 
 fn turn_outcome_from_model(model: turn::Model) -> Result<AgentTurnOutcome, PureError> {
+    let budget_limit = model
+        .budget_limit_json
+        .as_deref()
+        .map(serde_json::from_str)
+        .transpose()?;
     let kind = match model.status.as_str() {
         "completed" => TurnOutcomeKind::Completed,
         "failed" => TurnOutcomeKind::Failed,
-        "interrupted" if model.reason.as_deref() == Some("budgetLimited") => {
-            TurnOutcomeKind::BudgetLimited
-        }
+        "interrupted" if budget_limit.is_some() => TurnOutcomeKind::BudgetLimited,
         "interrupted" => TurnOutcomeKind::Cancelled,
         other => return Err(store_error(format!("Turn {other} is not terminal"))),
     };
@@ -832,6 +914,9 @@ fn turn_outcome_from_model(model: turn::Model) -> Result<AgentTurnOutcome, PureE
             .failure_json
             .map(|value| serde_json::from_str(&value))
             .transpose()?,
+        budget_limit,
+        rollover_compacted: model.rollover_compacted != 0,
+        rollover_compaction_error: model.rollover_compaction_error,
         usage: serde_json::from_str(&model.usage_json)?,
         finished_at: model.completed_at.unwrap_or(model.updated_at),
     })
@@ -960,7 +1045,10 @@ fn outcome_columns(outcome: &AgentTurnOutcome) -> (&'static str, Option<&str>) {
         TurnOutcomeKind::Completed => ("completed", outcome.reason.as_deref()),
         TurnOutcomeKind::Failed => ("failed", outcome.reason.as_deref()),
         TurnOutcomeKind::Cancelled => ("interrupted", outcome.reason.as_deref()),
-        TurnOutcomeKind::BudgetLimited => ("interrupted", Some("budgetLimited")),
+        TurnOutcomeKind::BudgetLimited => (
+            "interrupted",
+            outcome.reason.as_deref().or(Some("budgetLimited")),
+        ),
     }
 }
 
@@ -972,7 +1060,6 @@ fn item_kind_label(content: &ThreadItemContent) -> &'static str {
         ThreadItemContent::Plan { .. } => "plan",
         ThreadItemContent::ToolCall { .. } => "toolCall",
         ThreadItemContent::File { .. } => "file",
-        ThreadItemContent::ContextPatch { .. } => "contextPatch",
         ThreadItemContent::ContextCompaction { .. } => "contextCompaction",
     }
 }
@@ -1034,4 +1121,50 @@ fn i64_from_u64(value: u64) -> Result<i64, PureError> {
 
 fn store_error(error: impl std::fmt::Display) -> PureError {
     PureError::MemoryError(error.to_string())
+}
+
+#[cfg(test)]
+mod outcome_tests {
+    use super::*;
+
+    #[test]
+    fn budget_limited_turn_restores_typed_rollover_state() {
+        let limit = pl_protocol::BudgetLimitSnapshot {
+            kind: pl_protocol::BudgetLimitKind::WallClock,
+            usage: pl_protocol::BudgetUsage {
+                model_steps: 4,
+                tool_calls: 8,
+                wait_calls: 2,
+                elapsed_ms: 1_800_000,
+            },
+        };
+        let outcome = turn_outcome_from_model(turn::Model {
+            id: "turn-budget".to_string(),
+            thread_id: "thread-budget".to_string(),
+            ordinal: 0,
+            revision: 1,
+            status: "interrupted".to_string(),
+            phase: None,
+            reason: Some("active wall-clock budget reached".to_string()),
+            model_json: None,
+            usage_json: serde_json::to_string(&pl_model::TokenUsage::default()).unwrap(),
+            failure_json: None,
+            budget_limit_json: Some(serde_json::to_string(&limit).unwrap()),
+            rollover_compacted: 1,
+            rollover_compaction_error: None,
+            metadata_json: None,
+            started_at: Some(1),
+            updated_at: 2,
+            completed_at: Some(2),
+        })
+        .unwrap();
+
+        assert_eq!(outcome.kind, TurnOutcomeKind::BudgetLimited);
+        assert_eq!(outcome.budget_limit, Some(limit));
+        assert!(outcome.rollover_compacted);
+        assert_eq!(
+            outcome.reason.as_deref(),
+            Some("active wall-clock budget reached")
+        );
+    }
 }

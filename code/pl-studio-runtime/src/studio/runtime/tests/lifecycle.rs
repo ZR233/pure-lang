@@ -1,7 +1,14 @@
 use super::*;
 use crate::{StudioProductEventKind, StudioRecoveryIssueCategory, StudioRecoveryIssueScope};
+use pl_core::canonical_content_hash;
+use pl_protocol::{AgentWorkingState, ThreadItem, ThreadItemContent, ThreadItemStatus};
 use pretty_assertions::assert_eq;
-use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
+use sea_orm::{
+    ActiveModelTrait, ActiveValue::Set, ConnectionTrait, DatabaseBackend, EntityTrait,
+    IntoActiveModel, Statement,
+};
+
+use crate::studio::entity::{item, thread, thread_session_state, turn};
 
 #[tokio::test]
 async fn initialize_runtime_isolates_unavailable_registered_project() {
@@ -45,6 +52,203 @@ async fn initialize_runtime_isolates_unavailable_registered_project() {
     );
     let _ = tokio::fs::remove_dir_all(healthy_workspace).await;
     let _ = tokio::fs::remove_dir_all(home).await;
+}
+
+#[tokio::test]
+async fn corrupt_registered_session_is_scoped_and_cleanup_preserves_timeline() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("pure-corrupt-session-{unique}"));
+    let workspace = root.join("workspace");
+    let home = root.join("home");
+    tokio::fs::create_dir_all(&workspace).await.unwrap();
+    let store = StudioStore::open_memory().await.unwrap();
+    let project = store.upsert_project(&workspace).await.unwrap();
+    let broken = store
+        .create_thread(&project.id, "Broken session", StudioMode::Simple)
+        .await
+        .unwrap();
+    let healthy = store
+        .create_thread(&project.id, "Healthy session", StudioMode::Simple)
+        .await
+        .unwrap();
+    persist_registered_session_state(&store, &broken.id, Some("sha256:corrupt")).await;
+    persist_registered_session_state(&store, &healthy.id, None).await;
+    persist_completed_user_message(&store, &broken.id).await;
+    let runtime = StudioRuntime::with_runtime_state(
+        store.clone(),
+        ConfigStore::new(crate::config::ConfigPaths::from_home(&home)),
+        StudioRuntimeState::new(),
+    );
+
+    let snapshot = runtime.initialize_runtime().await.unwrap();
+
+    assert_eq!(snapshot.status, StudioRuntimeStatus::Ready);
+    assert_eq!(snapshot.recovery_issues.len(), 1);
+    let issue = &snapshot.recovery_issues[0];
+    assert_eq!(issue.scope, StudioRecoveryIssueScope::Thread);
+    assert_eq!(issue.category, StudioRecoveryIssueCategory::AgentState);
+    assert_eq!(issue.action, StudioRecoveryIssueAction::CleanupThread);
+    assert_eq!(issue.project_id.as_deref(), Some(project.id.as_str()));
+    assert_eq!(issue.thread_id.as_deref(), Some(broken.id.as_str()));
+    assert_eq!(issue.task_run_id, None);
+    assert!(issue.message.contains("hash mismatch"));
+    assert!(runtime.thread_snapshot(&healthy.id).await.is_ok());
+
+    let preview = runtime
+        .preview_recovery_issue_cleanup(&issue.id)
+        .await
+        .unwrap();
+    assert_eq!(preview.thread_id.as_deref(), Some(broken.id.as_str()));
+    assert!(preview.resources.is_empty());
+    let cleaned = runtime
+        .cleanup_recovery_issue(&issue.id, &preview.expected_revision)
+        .await
+        .unwrap();
+
+    assert_eq!(cleaned.status, StudioRuntimeStatus::Ready);
+    assert!(cleaned.recovery_issues.is_empty());
+    let reset_thread = thread::Entity::find_by_id(&broken.id)
+        .one(store.database())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(reset_thread.runtime_revision, None);
+    assert_eq!(reset_thread.status, "idle");
+    let reset_state = thread_session_state::Entity::find_by_id(&broken.id)
+        .one(store.database())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(reset_state.revision, 0);
+    assert_eq!(
+        reset_state.state_hash,
+        canonical_content_hash(reset_state.state_json.as_bytes())
+    );
+    let history = runtime
+        .list_thread_turns(&broken.id, None, 10)
+        .await
+        .unwrap();
+    assert!(
+        history
+            .turns
+            .iter()
+            .flat_map(|turn| &turn.items)
+            .any(|item| {
+                matches!(
+                    &item.content,
+                    ThreadItemContent::UserMessage { text, .. } if text == "preserve this history"
+                )
+            })
+    );
+    store
+        .reset_agent_sessions_for_root(&broken.id)
+        .await
+        .unwrap();
+
+    let restarted = StudioRuntime::with_runtime_state(
+        store,
+        ConfigStore::new(crate::config::ConfigPaths::from_home(&home)),
+        StudioRuntimeState::new(),
+    )
+    .initialize_runtime()
+    .await
+    .unwrap();
+    assert_eq!(restarted.status, StudioRuntimeStatus::Ready);
+    assert!(restarted.recovery_issues.is_empty());
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+async fn persist_registered_session_state(
+    store: &StudioStore,
+    thread_id: &str,
+    hash_override: Option<&str>,
+) {
+    let state = AgentWorkingState::default();
+    let state_json = serde_json::to_string(&state).unwrap();
+    thread_session_state::ActiveModel {
+        thread_id: Set(thread_id.to_string()),
+        revision: Set(0),
+        state_hash: Set(hash_override.map_or_else(
+            || canonical_content_hash(state_json.as_bytes()),
+            str::to_string,
+        )),
+        state_json: Set(state_json),
+        updated_at: Set(1),
+    }
+    .insert(store.database())
+    .await
+    .unwrap();
+    let model = thread::Entity::find_by_id(thread_id)
+        .one(store.database())
+        .await
+        .unwrap()
+        .unwrap();
+    let mut active = model.into_active_model();
+    active.runtime_revision = Set(Some(1));
+    active.update(store.database()).await.unwrap();
+}
+
+async fn persist_completed_user_message(store: &StudioStore, thread_id: &str) {
+    let turn_id = format!("turn-history-{thread_id}");
+    turn::ActiveModel {
+        id: Set(turn_id.clone()),
+        thread_id: Set(thread_id.to_string()),
+        ordinal: Set(1),
+        revision: Set(1),
+        status: Set("completed".to_string()),
+        phase: Set(None),
+        reason: Set(None),
+        model_json: Set(None),
+        usage_json: Set(serde_json::to_string(&pl_model::TokenUsage::default()).unwrap()),
+        failure_json: Set(None),
+        budget_limit_json: Set(None),
+        rollover_compacted: Set(0),
+        rollover_compaction_error: Set(None),
+        metadata_json: Set(None),
+        started_at: Set(Some(1)),
+        updated_at: Set(1),
+        completed_at: Set(Some(1)),
+    }
+    .insert(store.database())
+    .await
+    .unwrap();
+    let item_id = format!("item-history-{thread_id}");
+    let value = ThreadItem {
+        id: item_id.clone(),
+        thread_id: thread_id.to_string(),
+        turn_id: turn_id.clone(),
+        ordinal: 1,
+        revision: 1,
+        status: ThreadItemStatus::Completed,
+        created_at: 1,
+        updated_at: 1,
+        completed_at: Some(1),
+        error: None,
+        content: ThreadItemContent::UserMessage {
+            text: "preserve this history".to_string(),
+            attachments: Vec::new(),
+        },
+        usage: None,
+    };
+    item::ActiveModel {
+        id: Set(item_id),
+        thread_id: Set(thread_id.to_string()),
+        turn_id: Set(turn_id),
+        ordinal: Set(1),
+        revision: Set(1),
+        item_kind: Set("userMessage".to_string()),
+        status: Set("completed".to_string()),
+        payload_json: Set(serde_json::to_string(&value).unwrap()),
+        created_at: Set(1),
+        updated_at: Set(1),
+        completed_at: Set(Some(1)),
+    }
+    .insert(store.database())
+    .await
+    .unwrap();
 }
 
 #[tokio::test]

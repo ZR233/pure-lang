@@ -11,8 +11,8 @@ use crate::studio::entity as entities;
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    AllocateExecutor, ExecutorAllocation, TaskRunPhase, TaskWorktreeDisposition,
-    ThreadExecutionStatus, WorkUnitStatus,
+    AllocateExecutor, ExecutorAllocation, ExecutorContinuationState, TaskRunPhase,
+    TaskWorktreeDisposition, ThreadExecutionStatus, WorkUnitStatus,
 };
 
 const MAX_ACTIVE_EXECUTORS: usize = 4;
@@ -98,6 +98,11 @@ impl StudioStore {
                 execution_status: Set(ThreadExecutionStatus::Queued.as_str().to_string()),
                 execution_summary: Set(None),
                 execution_error: Set(None),
+                budget_limit_json: Set(None),
+                budget_slice_count: Set(1),
+                continuation_state: Set(ExecutorContinuationState::None.as_str().to_string()),
+                continuation_source_turn_id: Set(None),
+                continuation_revision: Set(0),
                 created_at: Set(now),
                 updated_at: Set(now),
             }

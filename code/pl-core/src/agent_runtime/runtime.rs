@@ -183,6 +183,9 @@ where
             kind: TurnOutcomeKind::Cancelled,
             reason: Some("runtime_restarted".to_string()),
             failure: None,
+            budget_limit: None,
+            rollover_compacted: false,
+            rollover_compaction_error: None,
             usage: pl_model::TokenUsage::default(),
             finished_at: unix_timestamp(),
         };

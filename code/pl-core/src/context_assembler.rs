@@ -1,4 +1,8 @@
-use pl_protocol::{Message, ModelContextItem, PureError};
+use std::collections::HashMap;
+
+use pl_protocol::{
+    Message, MessageContent, MessageRole, ModelContextItem, ModelContextSnapshot, PureError,
+};
 
 /// provider 无关的 inference 上下文组装结果。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -6,9 +10,11 @@ pub struct AssembledModelContext {
     pub instructions: String,
     pub prelude_messages: Vec<Message>,
     pub history: Vec<ModelContextItem>,
+    pub working_context_tail: Option<Message>,
 }
 
-/// 每次 inference 从 canonical session 重建固定 instructions 与 append-only 历史。
+/// 每次 inference 从 canonical session 重建固定前缀、append-only transcript
+/// 与唯一的 working-context tail。
 #[derive(Debug, Default)]
 pub struct ContextAssembler;
 
@@ -17,24 +23,48 @@ impl ContextAssembler {
         base_instructions: &str,
         prelude_messages: &[Message],
         items: &[ModelContextItem],
+        working_context: &ModelContextSnapshot,
     ) -> Result<AssembledModelContext, PureError> {
         let instructions = base_instructions.trim_end().to_string();
-        let history = items
-            .iter()
-            .filter(|item| !item.is_pinned_context() && !item.is_session_note())
-            .cloned()
-            .collect();
+        let working_context_tail = render_working_context_message(working_context);
+        let mut history = items.to_vec();
+        if let Some(tail) = working_context_tail.clone() {
+            history.push(ModelContextItem::from(tail));
+        }
         Ok(AssembledModelContext {
             instructions,
             prelude_messages: prelude_messages.to_vec(),
             history,
+            working_context_tail,
         })
     }
 }
 
+fn render_working_context_message(context: &ModelContextSnapshot) -> Option<Message> {
+    if context.sections.is_empty() {
+        return None;
+    }
+    let mut rendered = String::from(
+        "# Current working context\nThis is the current model-visible runtime context.",
+    );
+    for section in &context.sections {
+        rendered.push_str(&format!(
+            "\n\n## {} [{}]\n{}",
+            section.title, section.id, section.content
+        ));
+    }
+    Some(Message {
+        role: MessageRole::System,
+        content: MessageContent::Text(rendered),
+        reasoning_content: None,
+        metadata: HashMap::new(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use pl_protocol::SessionNote;
+    use pl_model::{ToolCall, ToolCallKind};
+    use pl_protocol::{SessionNote, ToolResultReceipt};
     use pretty_assertions::assert_eq;
 
     use super::*;
@@ -44,22 +74,28 @@ mod tests {
     fn pinned_sections_do_not_change_the_fixed_instruction_prefix() {
         let pinned = context_section("mai.review_manifest", 1, "Review", "base=abc").unwrap();
         let user = crate::user_text_message("review");
+        let mut session = crate::AgentSession::from_messages(vec![user.clone()]);
+        session.upsert_pinned_context(pinned);
         let assembled = ContextAssembler::assemble(
             "system",
             &[],
-            &[
-                ModelContextItem::from(user.clone()),
-                ModelContextItem::PinnedContext { section: pinned },
-            ],
+            session.items(),
+            &session.working_context_snapshot(),
         )
         .unwrap();
 
         assert_eq!(assembled.instructions, "system");
-        assert_eq!(assembled.history, vec![ModelContextItem::from(user)]);
+        assert_eq!(assembled.history.len(), 2);
+        assert_eq!(assembled.history[0], ModelContextItem::from(user));
+        assert!(
+            assembled.history[1]
+                .as_message()
+                .is_some_and(|message| message.role == MessageRole::System)
+        );
     }
 
     #[test]
-    fn context_patch_remains_in_append_only_history() {
+    fn repeated_assembly_materializes_exactly_one_working_context_tail() {
         let mut session = crate::AgentSession::new();
         session.upsert_pinned_context(
             context_section(
@@ -70,35 +106,15 @@ mod tests {
             )
             .unwrap(),
         );
-        let provider = pl_model::ProviderInfo::deepseek(None);
-        crate::prepare_prompt_context(
-            &mut session,
-            crate::PromptCacheInput {
-                scope: "simple:root",
-                turn_id: "turn-1",
-                provider: &provider,
-                model: "deepseek-v4-flash",
-                instructions: "system",
-                prelude_messages: &[],
-                fixed_prefix_section_hashes: Default::default(),
-                tools: &[],
-                tool_choice: "auto",
-                parallel_tool_calls: false,
-                reasoning: None,
-                output_schema: None,
-                service_tier: None,
-                compacted: false,
-                prompt_cache_policy: pl_model::EffectivePromptCachePolicy::ImplicitPrefix,
-                updated_at: 1,
-            },
-        )
-        .unwrap();
-
-        let assembled = ContextAssembler::assemble("system", &[], session.items()).unwrap();
+        let snapshot = session.working_context_snapshot();
+        let assembled =
+            ContextAssembler::assemble("system", &[], session.items(), &snapshot).unwrap();
+        let second = ContextAssembler::assemble("system", &[], session.items(), &snapshot).unwrap();
 
         assert_eq!(assembled.instructions, "system");
         assert_eq!(assembled.history.len(), 1);
-        assert!(assembled.history[0].as_context_patch().is_some());
+        assert_eq!(assembled, second);
+        assert!(session.items().is_empty());
     }
 
     #[test]
@@ -110,12 +126,108 @@ mod tests {
             content_hash: crate::canonical_content_hash(format!("first\n{secret}").as_bytes()),
             updated_at: 1,
         };
-        let assembled =
-            ContextAssembler::assemble("system", &[], &[ModelContextItem::SessionNote { note }])
-                .unwrap();
+        let mut session = crate::AgentSession::new();
+        session.replace_session_note(note);
+        let assembled = ContextAssembler::assemble(
+            "system",
+            &[],
+            session.items(),
+            &session.working_context_snapshot(),
+        )
+        .unwrap();
 
         assert!(assembled.history.is_empty());
         assert_eq!(assembled.instructions, "system");
         assert!(!assembled.instructions.contains(secret));
+    }
+
+    #[test]
+    fn one_hundred_tool_batches_keep_one_bounded_working_context_tail() {
+        let mut session = crate::AgentSession::new();
+        let working_set = crate::TurnWorkingSetHandle::default();
+
+        for index in 0..100 {
+            let call_id = format!("call-{index}");
+            session.push_assistant_tool_calls(
+                None,
+                vec![ToolCall::function(
+                    call_id.clone(),
+                    "read_file",
+                    serde_json::json!({"path": format!("file-{index}.rs")}),
+                    Some(call_id.clone()),
+                )],
+                None,
+            );
+            session.push_tool_result(
+                call_id.clone(),
+                Some(call_id.clone()),
+                "read_file".to_string(),
+                ToolCallKind::Function,
+                format!("result-{index}"),
+                format!(r#"{{"path":"file-{index}.rs"}}"#),
+            );
+            working_set
+                .apply(crate::TurnWorkingSetChange::AppendEvidence(
+                    ToolResultReceipt {
+                        call_id,
+                        tool_name: "read_file".to_string(),
+                        arguments_hash: format!("sha256:args-{index}"),
+                        result_hash: format!("sha256:result-{index}"),
+                        total_bytes: 10,
+                        visible_bytes: 10,
+                        truncated: false,
+                        artifacts: Vec::new(),
+                        continuation: None,
+                        reused_from_call_id: None,
+                    },
+                ))
+                .unwrap();
+            working_set.sync_session(&mut session).unwrap();
+
+            let assembled = ContextAssembler::assemble(
+                "system",
+                &[],
+                session.items(),
+                &session.working_context_snapshot(),
+            )
+            .unwrap();
+            assert_eq!(working_context_tail_count(&assembled.history), 1);
+        }
+
+        assert_eq!(session.items().len(), 200);
+        assert!(session.items().chunks_exact(2).all(|pair| {
+            pair[0]
+                .as_message()
+                .is_some_and(|message| message.role == MessageRole::Assistant)
+                && pair[1]
+                    .as_message()
+                    .is_some_and(|message| message.role == MessageRole::Tool)
+        }));
+        let ledger = session
+            .pinned_context_sections()
+            .find(|section| section.id.as_str() == crate::EVIDENCE_LEDGER_SECTION_ID)
+            .expect("evidence ledger");
+        let ledger_json: serde_json::Value = serde_json::from_str(&ledger.content).unwrap();
+        assert!(ledger.content.len() <= 16 * 1024);
+        assert!(
+            ledger_json["recent"]
+                .as_array()
+                .is_some_and(|recent| recent.len() <= 64)
+        );
+    }
+
+    fn working_context_tail_count(items: &[ModelContextItem]) -> usize {
+        items
+            .iter()
+            .filter_map(ModelContextItem::as_message)
+            .filter(|message| {
+                message.role == MessageRole::System
+                    && matches!(
+                        &message.content,
+                        MessageContent::Text(content)
+                            if content.starts_with("# Current working context")
+                    )
+            })
+            .count()
     }
 }

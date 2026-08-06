@@ -48,6 +48,7 @@ class _TimelineViewState extends State<TimelineView> {
   bool _detachedByUser = false;
   bool _programmaticScroll = false;
   bool _bottomScrollScheduled = false;
+  bool _scrollBoundsCorrectionScheduled = false;
   bool _olderLoadRequested = false;
   int _pendingNewEvents = 0;
   int _contentVersion = 0;
@@ -175,61 +176,64 @@ class _TimelineViewState extends State<TimelineView> {
             constraints: const BoxConstraints(
               maxWidth: StudioLayout.conversationWidth,
             ),
-            child: ListView.builder(
-              key: StudioDriverKeys.timeline,
-              controller: _controller,
-              padding: const EdgeInsets.fromLTRB(24, 28, 24, 38),
-              itemCount: blocks.length + activityCount + 1,
-              findChildIndexCallback: (key) {
-                if (key is! ValueKey<String>) {
-                  return null;
-                }
-                if (activeTurn != null &&
-                    key ==
-                        StudioDriverKeys.turnActivity(
-                          _turnActivityId(activeTurn),
-                        )) {
-                  return blocks.length;
-                }
-                final index = blocks.indexWhere(
-                  (block) => StudioDriverKeys.timelineBlock(block.id) == key,
-                );
-                return index == -1 ? null : index;
-              },
-              itemBuilder: (context, index) {
-                if (activeTurn != null && index == blocks.length) {
-                  return _TurnActivityBlock(
-                    key: StudioDriverKeys.turnActivity(
-                      _turnActivityId(activeTurn),
-                    ),
-                    turn: activeTurn,
-                    reasoningGroup: currentActivityRow?.reasoningGroup,
-                    toolGroup: currentActivityRow?.toolGroup,
-                    reasoningExpanded: _expandedReasoningGroups.contains(
-                      currentActivityRow?.reasoningGroup?.id,
-                    ),
-                    onToggleReasoning: () {
-                      final group = currentActivityRow?.reasoningGroup;
-                      if (group != null) {
-                        _toggleReasoning(group.id);
-                      }
-                    },
+            child: NotificationListener<ScrollMetricsNotification>(
+              onNotification: _handleScrollMetricsChanged,
+              child: ListView.builder(
+                key: StudioDriverKeys.timeline,
+                controller: _controller,
+                padding: const EdgeInsets.fromLTRB(24, 28, 24, 38),
+                itemCount: blocks.length + activityCount + 1,
+                findChildIndexCallback: (key) {
+                  if (key is! ValueKey<String>) {
+                    return null;
+                  }
+                  if (activeTurn != null &&
+                      key ==
+                          StudioDriverKeys.turnActivity(
+                            _turnActivityId(activeTurn),
+                          )) {
+                    return blocks.length;
+                  }
+                  final index = blocks.indexWhere(
+                    (block) => StudioDriverKeys.timelineBlock(block.id) == key,
                   );
-                }
-                if (index == blocks.length + activityCount) {
-                  return const SizedBox(height: 24);
-                }
-                final block = blocks[index];
-                return _TimelineRowBlock(
-                  key: StudioDriverKeys.timelineBlock(block.id),
-                  row: block.rows.single,
-                  isCurrentActivity: block.isCurrentActivity,
-                  isReasoningExpanded: _expandedReasoningGroups.contains(
-                    block.rows.single.reasoningGroup?.id,
-                  ),
-                  onToggleReasoning: _toggleReasoning,
-                );
-              },
+                  return index == -1 ? null : index;
+                },
+                itemBuilder: (context, index) {
+                  if (activeTurn != null && index == blocks.length) {
+                    return _TurnActivityBlock(
+                      key: StudioDriverKeys.turnActivity(
+                        _turnActivityId(activeTurn),
+                      ),
+                      turn: activeTurn,
+                      reasoningGroup: currentActivityRow?.reasoningGroup,
+                      toolGroup: currentActivityRow?.toolGroup,
+                      reasoningExpanded: _expandedReasoningGroups.contains(
+                        currentActivityRow?.reasoningGroup?.id,
+                      ),
+                      onToggleReasoning: () {
+                        final group = currentActivityRow?.reasoningGroup;
+                        if (group != null) {
+                          _toggleReasoning(group.id);
+                        }
+                      },
+                    );
+                  }
+                  if (index == blocks.length + activityCount) {
+                    return const SizedBox(height: 24);
+                  }
+                  final block = blocks[index];
+                  return _TimelineRowBlock(
+                    key: StudioDriverKeys.timelineBlock(block.id),
+                    row: block.rows.single,
+                    isCurrentActivity: block.isCurrentActivity,
+                    isReasoningExpanded: _expandedReasoningGroups.contains(
+                      block.rows.single.reasoningGroup?.id,
+                    ),
+                    onToggleReasoning: _toggleReasoning,
+                  );
+                },
+              ),
             ),
           ),
         ),
@@ -310,6 +314,43 @@ class _TimelineViewState extends State<TimelineView> {
       _olderLoadRequested = true;
       widget.onLoadOlder!();
     }
+  }
+
+  bool _handleScrollMetricsChanged(ScrollMetricsNotification notification) {
+    final metrics = notification.metrics;
+    if (metrics.axis != Axis.vertical ||
+        (metrics.pixels >= metrics.minScrollExtent &&
+            metrics.pixels <= metrics.maxScrollExtent) ||
+        _scrollBoundsCorrectionScheduled) {
+      return false;
+    }
+    _scrollBoundsCorrectionScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollBoundsCorrectionScheduled = false;
+      if (!mounted || !_controller.hasClients) {
+        return;
+      }
+      final position = _controller.position;
+      final target =
+          (_followingBottom && !_detachedByUser
+                  ? position.maxScrollExtent
+                  : position.pixels.clamp(
+                      position.minScrollExtent,
+                      position.maxScrollExtent,
+                    ))
+              .toDouble();
+      if ((position.pixels - target).abs() <= 0.5) {
+        return;
+      }
+      _programmaticScroll = true;
+      try {
+        _controller.jumpTo(target);
+      } finally {
+        _programmaticScroll = false;
+      }
+      _saveThreadState(widget.threadId);
+    });
+    return false;
   }
 
   void _scheduleBottomScroll(_BottomScrollIntent intent) {

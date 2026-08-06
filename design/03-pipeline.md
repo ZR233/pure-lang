@@ -31,16 +31,17 @@ Item 使用固定 ordinal，首次创建后 `threadId/turnId/kind/ordinal/create
 - `plan`
 - `toolCall`
 - `file`
-- 内部 `contextPatch`
 - 内部 `contextCompaction`
 
 Item start 持久化 inProgress 行；delta 只更新 ThreadActor live overlay；terminal Item 在单库事务中
 写入完整 payload。进程崩溃只会丢失 transient delta，恢复时把未终态 Item 收束为 interrupted。
 
 commentary 只进入可见历史，不写成模型 assistant final；final agentMessage 才进入下一次模型
-请求的普通 assistant 历史。contextPatch 记录一次采样前模型实际看到的最小运行上下文变化，
-contextCompaction 重置模型上下文基线；二者都不向 Flutter 暴露。当前 Todo、usage、progress
-等事实仍只由 ThreadRuntimeSnapshot 拥有，contextPatch 不能反向驱动 runtime 状态。
+请求的普通 assistant 历史。模型 transcript 通过 `thread_context_segments` 增量持久化，
+`AgentWorkingState` 独立保存 pinned sections、Evidence Ledger、session note 与 prompt 状态；每次
+inference 只在 transcript 末尾物化一份最新 working-context tail，不创建 Item，也不向 Flutter
+暴露。`contextCompaction` 只保留为无正文内部审计 Item，并标记 transcript replacement。当前 Todo、
+usage、progress 等产品事实仍只由 `ThreadRuntimeSnapshot` 拥有，working state 不能反向驱动产品状态。
 
 ## 3.3 Interaction
 

@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -5,7 +6,8 @@ use anyhow::{Context, Result};
 use crate::config::ConfigStore;
 use crate::resolve_workspace_root;
 use crate::studio::agent_host::{
-    StudioAgentHost, StudioAgentResources, StudioAgentRuntime, runtime_options,
+    StudioAgentHost, StudioAgentRepository, StudioAgentResources, StudioAgentRuntime,
+    runtime_options,
 };
 use crate::studio::task_coordinator::TaskCoordinator;
 use crate::studio::{
@@ -190,6 +192,8 @@ impl StudioRuntime {
         let initialization = async {
             self.recover_interactions_after_restart().await?;
             let mut report = self.task_coordinator.recover_active_tasks().await?;
+            self.append_session_recovery_issues(&mut report.issues)
+                .await?;
             self.append_unavailable_project_recovery_issues(&mut report.issues)
                 .await?;
             Ok::<_, anyhow::Error>(report)
@@ -299,6 +303,51 @@ impl StudioRuntime {
                 thread_id: None,
                 task_run_id: None,
                 message: format!("Project workspace is unavailable: {error}"),
+            });
+        }
+        Ok(())
+    }
+
+    async fn append_session_recovery_issues(
+        &self,
+        recovery_issues: &mut Vec<StudioRecoveryIssue>,
+    ) -> Result<()> {
+        let failures = StudioAgentRepository::new(self.store.clone())
+            .audit_registered_sessions()
+            .await?;
+        let mut failures_by_root = BTreeMap::<(String, String), Vec<_>>::new();
+        for failure in failures {
+            failures_by_root
+                .entry((failure.project_id.clone(), failure.root_thread_id.clone()))
+                .or_default()
+                .push(failure);
+        }
+        for ((project_id, root_thread_id), failures) in failures_by_root {
+            let task_run_id = self
+                .store
+                .find_active_task_run_for_root_thread(&root_thread_id)
+                .await?
+                .map(|run| run.id);
+            let affected = failures
+                .iter()
+                .map(|failure| failure.agent_thread_id.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let detail = failures
+                .first()
+                .map(|failure| failure.detail.as_str())
+                .unwrap_or("invalid durable session snapshot");
+            recovery_issues.push(StudioRecoveryIssue {
+                id: format!("session-context-{root_thread_id}"),
+                scope: StudioRecoveryIssueScope::Thread,
+                category: StudioRecoveryIssueCategory::AgentState,
+                action: StudioRecoveryIssueAction::CleanupThread,
+                project_id: Some(project_id),
+                thread_id: Some(root_thread_id),
+                task_run_id,
+                message: format!(
+                    "Durable Agent session context is invalid for {affected}: {detail}"
+                ),
             });
         }
         Ok(())

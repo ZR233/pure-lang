@@ -102,6 +102,10 @@ where
                 actual: checkpoint.thread_id,
             });
         }
+        let context = transcript_mutation(
+            self.state.session.session.items(),
+            checkpoint.session.items(),
+        );
         next.session.session = checkpoint.session;
         let projection = if let Some(inference) = checkpoint.inference.as_ref() {
             append_inference(&mut next, &checkpoint.turn_id, inference)?;
@@ -129,15 +133,12 @@ where
         } else {
             None
         };
-        let context = ThreadContextMutation::Replace {
-            items: next.session.session.items().to_vec(),
-        };
         let mut facts = DurableCommitFacts::from_state(
             &next,
             Vec::new(),
             Vec::new(),
             projection.clone(),
-            Some(context),
+            context,
         );
         facts.inference = checkpoint.inference.clone();
         let result = self
@@ -323,6 +324,23 @@ where
     }
 }
 
+fn transcript_mutation(
+    previous: &[crate::ModelContextItem],
+    next: &[crate::ModelContextItem],
+) -> Option<ThreadContextMutation> {
+    if previous == next {
+        return None;
+    }
+    if let Some(suffix) = next.strip_prefix(previous) {
+        return Some(ThreadContextMutation::Append {
+            items: suffix.to_vec(),
+        });
+    }
+    Some(ThreadContextMutation::Replace {
+        items: next.to_vec(),
+    })
+}
+
 fn find_inference<'a>(
     state: &'a super::super::ThreadActorState,
     inference_id: &str,
@@ -386,4 +404,45 @@ fn bounded_required_text(
         )));
     }
     Ok(value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn transcript_mutation_skips_unchanged_checkpoints() {
+        let items = vec![item("first")];
+
+        assert!(transcript_mutation(&items, &items).is_none());
+    }
+
+    #[test]
+    fn transcript_mutation_appends_only_the_new_suffix() {
+        let previous = vec![item("first")];
+        let suffix = item("second");
+        let next = vec![previous[0].clone(), suffix.clone()];
+
+        let Some(ThreadContextMutation::Append { items }) = transcript_mutation(&previous, &next)
+        else {
+            panic!("expected append mutation");
+        };
+        assert_eq!(items, vec![suffix]);
+    }
+
+    #[test]
+    fn transcript_mutation_replaces_compacted_or_rolled_back_history() {
+        let previous = vec![item("first"), item("second")];
+        let next = vec![item("compacted")];
+
+        let Some(ThreadContextMutation::Replace { items }) = transcript_mutation(&previous, &next)
+        else {
+            panic!("expected replace mutation");
+        };
+        assert_eq!(items, next);
+    }
+
+    fn item(content: &str) -> crate::ModelContextItem {
+        crate::ModelContextItem::from(crate::user_text_message(content))
+    }
 }

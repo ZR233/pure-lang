@@ -82,6 +82,12 @@ pub struct AgentTurnOutcome {
     pub reason: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failure: Option<TurnFailure>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget_limit: Option<pl_protocol::BudgetLimitSnapshot>,
+    #[serde(default)]
+    pub rollover_compacted: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rollover_compaction_error: Option<String>,
     pub usage: TokenUsage,
     pub finished_at: i64,
 }
@@ -388,6 +394,8 @@ impl ThreadActorState {
 pub struct AgentRegistration {
     pub identity: AgentIdentity,
     pub session: ThreadContextState,
+    pub runtime_revision: u64,
+    pub event_sequence: u64,
 }
 
 /// runtime 负责 lifecycle saga 的 child agent 创建请求。
@@ -414,6 +422,8 @@ impl AgentRegistration {
         Self {
             identity,
             session: ThreadContextState::empty(),
+            runtime_revision: 1,
+            event_sequence: 1,
         }
     }
 
@@ -428,8 +438,8 @@ impl AgentRegistration {
                 pending_inputs: 0,
                 progress: None,
                 last_turn: None,
-                revision: 1,
-                event_sequence: 1,
+                revision: self.runtime_revision,
+                event_sequence: self.event_sequence,
                 updated_at: now,
             },
             session: self.session,

@@ -80,12 +80,37 @@ extension StudioLocalizationsX on BuildContext {
       'merged' => l10n.statusTaskStatusMerged,
       'noDelivery' => l10n.statusTaskStatusNoDelivery,
       'completed' => l10n.statusTaskStatusCompleted,
+      'budgetLimited' => l10n.statusTaskStatusBudgetLimited,
+      'needsAttention' => l10n.statusTaskStatusNeedsAttention,
       'failed' => l10n.statusTaskStatusFailed,
       'cancelled' => l10n.statusTaskStatusCancelled,
       'pass' => l10n.statusTaskStatusPass,
       'changesRequired' => l10n.statusTaskStatusChangesRequired,
       'blocked' => l10n.statusTaskStatusBlocked,
       _ => status,
+    };
+  }
+
+  String taskBudgetKindLabel(String kind) {
+    return switch (kind) {
+      'modelStep' => l10n.statusTaskBudgetModelStep,
+      'toolCall' => l10n.statusTaskBudgetToolCall,
+      'wait' => l10n.statusTaskBudgetWait,
+      'wallClock' => l10n.statusTaskBudgetWallClock,
+      'agentCount' => l10n.statusTaskBudgetAgentCount,
+      'agentDepth' => l10n.statusTaskBudgetAgentDepth,
+      'finalization' => l10n.statusTaskBudgetFinalization,
+      _ => kind,
+    };
+  }
+
+  String taskContinuationStateLabel(String state) {
+    return switch (state) {
+      'none' => l10n.statusTaskContinuationNone,
+      'compacting' => l10n.statusTaskContinuationCompacting,
+      'pendingStart' => l10n.statusTaskContinuationPendingStart,
+      'needsAttention' => l10n.statusTaskContinuationNeedsAttention,
+      _ => state,
     };
   }
 }

@@ -2094,6 +2094,35 @@ impl SseDecode for crate::api::studio::types::runtime::BridgeAgentProgressDto {
     }
 }
 
+impl SseDecode for crate::api::studio::types::runtime::BridgeBudgetLimitDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_kind = <String>::sse_decode(deserializer);
+        let mut var_usage =
+            <crate::api::studio::types::runtime::BridgeBudgetUsageDto>::sse_decode(deserializer);
+        return crate::api::studio::types::runtime::BridgeBudgetLimitDto {
+            kind: var_kind,
+            usage: var_usage,
+        };
+    }
+}
+
+impl SseDecode for crate::api::studio::types::runtime::BridgeBudgetUsageDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_modelSteps = <u32>::sse_decode(deserializer);
+        let mut var_toolCalls = <u32>::sse_decode(deserializer);
+        let mut var_waitCalls = <u32>::sse_decode(deserializer);
+        let mut var_elapsedMs = <u64>::sse_decode(deserializer);
+        return crate::api::studio::types::runtime::BridgeBudgetUsageDto {
+            model_steps: var_modelSteps,
+            tool_calls: var_toolCalls,
+            wait_calls: var_waitCalls,
+            elapsed_ms: var_elapsedMs,
+        };
+    }
+}
+
 impl SseDecode for crate::api::studio::types::error::BridgeError {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -3390,6 +3419,17 @@ impl SseDecode for crate::api::studio::types::runtime::BridgeTaskWorkUnitDto {
         let mut var_worktreePath = <String>::sse_decode(deserializer);
         let mut var_branch = <String>::sse_decode(deserializer);
         let mut var_agentId = <Option<String>>::sse_decode(deserializer);
+        let mut var_executionStatus = <String>::sse_decode(deserializer);
+        let mut var_executionError = <Option<String>>::sse_decode(deserializer);
+        let mut var_budgetLimit =
+            <Option<crate::api::studio::types::runtime::BridgeBudgetLimitDto>>::sse_decode(
+                deserializer,
+            );
+        let mut var_budgetSliceCount = <u32>::sse_decode(deserializer);
+        let mut var_budgetSliceLimit = <u32>::sse_decode(deserializer);
+        let mut var_continuationState = <String>::sse_decode(deserializer);
+        let mut var_continuationSourceTurnId = <Option<String>>::sse_decode(deserializer);
+        let mut var_continuationRevision = <u64>::sse_decode(deserializer);
         return crate::api::studio::types::runtime::BridgeTaskWorkUnitDto {
             id: var_id,
             title: var_title,
@@ -3397,6 +3437,14 @@ impl SseDecode for crate::api::studio::types::runtime::BridgeTaskWorkUnitDto {
             worktree_path: var_worktreePath,
             branch: var_branch,
             agent_id: var_agentId,
+            execution_status: var_executionStatus,
+            execution_error: var_executionError,
+            budget_limit: var_budgetLimit,
+            budget_slice_count: var_budgetSliceCount,
+            budget_slice_limit: var_budgetSliceLimit,
+            continuation_state: var_continuationState,
+            continuation_source_turn_id: var_continuationSourceTurnId,
+            continuation_revision: var_continuationRevision,
         };
     }
 }
@@ -5045,6 +5093,21 @@ impl SseDecode for Option<crate::api::studio::types::runtime::BridgeAgentProgres
     }
 }
 
+impl SseDecode for Option<crate::api::studio::types::runtime::BridgeBudgetLimitDto> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(
+                <crate::api::studio::types::runtime::BridgeBudgetLimitDto>::sse_decode(
+                    deserializer,
+                ),
+            );
+        } else {
+            return None;
+        }
+    }
+}
+
 impl SseDecode for Option<crate::api::studio::types::thread_stream::BridgeInteractionResolution> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -5881,6 +5944,50 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::runtime::Bridg
     for crate::api::studio::types::runtime::BridgeAgentProgressDto
 {
     fn into_into_dart(self) -> crate::api::studio::types::runtime::BridgeAgentProgressDto {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::studio::types::runtime::BridgeBudgetLimitDto {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.kind.into_into_dart().into_dart(),
+            self.usage.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::runtime::BridgeBudgetLimitDto
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::runtime::BridgeBudgetLimitDto>
+    for crate::api::studio::types::runtime::BridgeBudgetLimitDto
+{
+    fn into_into_dart(self) -> crate::api::studio::types::runtime::BridgeBudgetLimitDto {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::studio::types::runtime::BridgeBudgetUsageDto {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.model_steps.into_into_dart().into_dart(),
+            self.tool_calls.into_into_dart().into_dart(),
+            self.wait_calls.into_into_dart().into_dart(),
+            self.elapsed_ms.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::runtime::BridgeBudgetUsageDto
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::runtime::BridgeBudgetUsageDto>
+    for crate::api::studio::types::runtime::BridgeBudgetUsageDto
+{
+    fn into_into_dart(self) -> crate::api::studio::types::runtime::BridgeBudgetUsageDto {
         self
     }
 }
@@ -7447,6 +7554,16 @@ impl flutter_rust_bridge::IntoDart for crate::api::studio::types::runtime::Bridg
             self.worktree_path.into_into_dart().into_dart(),
             self.branch.into_into_dart().into_dart(),
             self.agent_id.into_into_dart().into_dart(),
+            self.execution_status.into_into_dart().into_dart(),
+            self.execution_error.into_into_dart().into_dart(),
+            self.budget_limit.into_into_dart().into_dart(),
+            self.budget_slice_count.into_into_dart().into_dart(),
+            self.budget_slice_limit.into_into_dart().into_dart(),
+            self.continuation_state.into_into_dart().into_dart(),
+            self.continuation_source_turn_id
+                .into_into_dart()
+                .into_dart(),
+            self.continuation_revision.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -9329,6 +9446,26 @@ impl SseEncode for crate::api::studio::types::runtime::BridgeAgentProgressDto {
     }
 }
 
+impl SseEncode for crate::api::studio::types::runtime::BridgeBudgetLimitDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.kind, serializer);
+        <crate::api::studio::types::runtime::BridgeBudgetUsageDto>::sse_encode(
+            self.usage, serializer,
+        );
+    }
+}
+
+impl SseEncode for crate::api::studio::types::runtime::BridgeBudgetUsageDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <u32>::sse_encode(self.model_steps, serializer);
+        <u32>::sse_encode(self.tool_calls, serializer);
+        <u32>::sse_encode(self.wait_calls, serializer);
+        <u64>::sse_encode(self.elapsed_ms, serializer);
+    }
+}
+
 impl SseEncode for crate::api::studio::types::error::BridgeError {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -10253,6 +10390,17 @@ impl SseEncode for crate::api::studio::types::runtime::BridgeTaskWorkUnitDto {
         <String>::sse_encode(self.worktree_path, serializer);
         <String>::sse_encode(self.branch, serializer);
         <Option<String>>::sse_encode(self.agent_id, serializer);
+        <String>::sse_encode(self.execution_status, serializer);
+        <Option<String>>::sse_encode(self.execution_error, serializer);
+        <Option<crate::api::studio::types::runtime::BridgeBudgetLimitDto>>::sse_encode(
+            self.budget_limit,
+            serializer,
+        );
+        <u32>::sse_encode(self.budget_slice_count, serializer);
+        <u32>::sse_encode(self.budget_slice_limit, serializer);
+        <String>::sse_encode(self.continuation_state, serializer);
+        <Option<String>>::sse_encode(self.continuation_source_turn_id, serializer);
+        <u64>::sse_encode(self.continuation_revision, serializer);
     }
 }
 
@@ -11447,6 +11595,18 @@ impl SseEncode for Option<crate::api::studio::types::runtime::BridgeAgentProgres
         <bool>::sse_encode(self.is_some(), serializer);
         if let Some(value) = self {
             <crate::api::studio::types::runtime::BridgeAgentProgressDto>::sse_encode(
+                value, serializer,
+            );
+        }
+    }
+}
+
+impl SseEncode for Option<crate::api::studio::types::runtime::BridgeBudgetLimitDto> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::studio::types::runtime::BridgeBudgetLimitDto>::sse_encode(
                 value, serializer,
             );
         }

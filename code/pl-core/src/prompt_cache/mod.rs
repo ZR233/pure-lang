@@ -1,18 +1,13 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 use pl_model::{EffectivePromptCachePolicy, ProviderInfo, ReasoningConfig, ToolSchema};
-use pl_protocol::{
-    Message, MessageContent, MessageRole, ModelContextPatch, ModelContextSectionSnapshot,
-    ModelContextSnapshot, PromptPrefixChangedReason, PureError, ThreadPromptSnapshot,
-};
+use pl_protocol::{Message, PromptPrefixChangedReason, PureError, ThreadPromptSnapshot};
 
-use crate::session::CONTEXT_PATCH_METADATA_KEY;
 use crate::{AgentSession, canonical_json_hash};
 
 /// 计算 prompt generation 所需的固定请求属性。
 pub(crate) struct PromptCacheInput<'a> {
     pub scope: &'a str,
-    pub turn_id: &'a str,
     pub provider: &'a ProviderInfo,
     pub model: &'a str,
     pub instructions: &'a str,
@@ -54,31 +49,28 @@ pub(crate) fn stable_tool_schemas(mut tools: Vec<ToolSchema>) -> Vec<ToolSchema>
     tools
 }
 
-/// 在请求历史末尾追加本次模型可见的最小运行上下文变化。
+/// 更新请求缓存诊断所需的 working-context 快照。
 pub(crate) fn prepare_prompt_context(
     session: &mut AgentSession,
     input: PromptCacheInput<'_>,
 ) -> Result<Option<ThreadPromptSnapshot>, PureError> {
-    let context = current_context(session);
+    let context = session.working_context_snapshot();
     let context_hash = canonical_json_hash(&serde_json::to_value(&context)?);
     let stable_tools = stable_tool_schemas(input.tools.to_vec());
     let tool_schema_hash = canonical_json_hash(&serde_json::to_value(&stable_tools)?);
     let provider_hash = provider_hash(input.provider)?;
     let request_properties_hash = request_properties_hash(&input, &provider_hash)?;
     let fixed_prefix_hash = fixed_prefix_hash(&input, &provider_hash)?;
-    let previous_patch = session.latest_context_patch().cloned();
-    let previous_context = previous_patch
-        .as_ref()
-        .map(|patch| &patch.resulting_context);
-    let previous_prompt = previous_patch
-        .as_ref()
-        .and_then(|patch| patch.prompt_snapshots.get(input.scope));
-    let previous_active_scope = previous_patch
-        .as_ref()
-        .map(|patch| patch.prompt.scope.as_str());
-    let previous_generation = previous_patch
-        .as_ref()
-        .map_or(0, |patch| patch.prompt.generation);
+    let previous_metadata = session.prompt_metadata();
+    let previous_prompt = previous_metadata.slots.get(input.scope);
+    let previous_active_scope = (!previous_metadata.active_scope.is_empty())
+        .then_some(previous_metadata.active_scope.as_str());
+    let previous_generation = previous_metadata
+        .slots
+        .values()
+        .map(|snapshot| snapshot.generation)
+        .max()
+        .unwrap_or_default();
 
     let reason = changed_reason(
         previous_prompt,
@@ -115,34 +107,12 @@ pub(crate) fn prepare_prompt_context(
         prefix_changed_reason: reason,
         updated_at: input.updated_at,
     };
-    let force_full =
-        previous_context.is_none() || !matches!(reason, PromptPrefixChangedReason::ContextAppended);
-    let (message_text, changed_section_ids) =
-        render_context_patch(previous_context, &context, force_full, reason);
-    let mut prompt_snapshots = previous_patch
-        .map(|patch| patch.prompt_snapshots)
-        .unwrap_or_default();
-    prompt_snapshots.insert(input.scope.to_string(), prompt.clone());
-    let mut metadata = HashMap::new();
-    metadata.insert(CONTEXT_PATCH_METADATA_KEY.to_string(), "true".to_string());
-    let patch = ModelContextPatch {
-        id: format!(
-            "{}:context-patch:{}",
-            input.turn_id,
-            session.revision().saturating_add(1)
-        ),
-        message: Message {
-            role: MessageRole::System,
-            content: MessageContent::Text(message_text),
-            reasoning_content: None,
-            metadata,
-        },
-        resulting_context: context,
-        prompt: prompt.clone(),
-        prompt_snapshots,
-        changed_section_ids,
-    };
-    session.push_context_patch(patch);
+    let mut prompt_metadata = previous_metadata.clone();
+    prompt_metadata.active_scope = input.scope.to_string();
+    prompt_metadata
+        .slots
+        .insert(input.scope.to_string(), prompt.clone());
+    session.replace_prompt_metadata(prompt_metadata);
     Ok(Some(prompt))
 }
 
@@ -229,25 +199,6 @@ fn changed_instruction_section(
     PromptPrefixChangedReason::FixedPrefixChanged
 }
 
-fn current_context(session: &AgentSession) -> ModelContextSnapshot {
-    let mut sections = session
-        .pinned_context_sections()
-        .map(|section| ModelContextSectionSnapshot {
-            id: section.id.clone(),
-            title: section.title.clone(),
-            content: section.content.clone(),
-            content_hash: section.content_hash.clone(),
-        })
-        .collect::<Vec<_>>();
-    sections.sort_by(|left, right| left.id.cmp(&right.id));
-    ModelContextSnapshot {
-        sections,
-        session_note_available: session
-            .session_note()
-            .is_some_and(|note| !note.content.is_empty()),
-    }
-}
-
 fn provider_hash(provider: &ProviderInfo) -> Result<String, PureError> {
     let value = serde_json::json!({
         "name": provider.name,
@@ -299,101 +250,6 @@ fn request_properties_hash(
     });
     Ok(canonical_json_hash(&value))
 }
-
-fn render_context_patch(
-    previous: Option<&ModelContextSnapshot>,
-    current: &ModelContextSnapshot,
-    force_full: bool,
-    reason: PromptPrefixChangedReason,
-) -> (String, Vec<String>) {
-    let previous_sections = previous
-        .map(|snapshot| {
-            snapshot
-                .sections
-                .iter()
-                .map(|section| (section.id.as_str(), section))
-                .collect::<BTreeMap<_, _>>()
-        })
-        .unwrap_or_default();
-    let current_sections = current
-        .sections
-        .iter()
-        .map(|section| (section.id.as_str(), section))
-        .collect::<BTreeMap<_, _>>();
-    let mut changed = current_sections
-        .iter()
-        .filter(|(id, section)| force_full || previous_sections.get(**id) != Some(section))
-        .map(|(_, section)| (*section).clone())
-        .collect::<Vec<_>>();
-    let removed = previous_sections
-        .keys()
-        .filter(|id| !current_sections.contains_key(**id))
-        .map(|id| (*id).to_string())
-        .collect::<Vec<_>>();
-    let mut changed_ids = changed
-        .iter()
-        .map(|section| section.id.to_string())
-        .chain(removed.iter().cloned())
-        .collect::<Vec<_>>();
-    changed_ids.sort();
-
-    let mut rendered = if force_full {
-        String::from(
-            "# Current working context\nThis is the current model-visible runtime context.",
-        )
-    } else {
-        String::from("# Working context update\nApply these changes to the prior working context.")
-    };
-    changed.sort_by(|left, right| left.id.cmp(&right.id));
-    for section in changed {
-        rendered.push_str(&format!(
-            "\n\n## {} [{}]\n{}",
-            section.title, section.id, section.content
-        ));
-    }
-    if !removed.is_empty() {
-        rendered.push_str("\n\n## Removed sections\n");
-        rendered.push_str(&removed.join("\n"));
-    }
-    let note_changed = force_full
-        || previous.is_none_or(|snapshot| {
-            snapshot.session_note_available != current.session_note_available
-        });
-    if note_changed {
-        rendered.push_str(if current.session_note_available {
-            "\n\nA persistent session note is available. Use search_session_note and read_session_note when relevant."
-        } else {
-            "\n\nNo persistent session note is currently available."
-        });
-    }
-    if changed_ids.is_empty() && !note_changed {
-        rendered.push_str(&format!(
-            "\n\nPrompt generation changed: {}.",
-            reason_label(reason)
-        ));
-    }
-    (rendered, changed_ids)
-}
-
-fn reason_label(reason: PromptPrefixChangedReason) -> &'static str {
-    match reason {
-        PromptPrefixChangedReason::Initial => "initial",
-        PromptPrefixChangedReason::PromptScopeChanged => "prompt scope changed",
-        PromptPrefixChangedReason::ProviderChanged => "provider changed",
-        PromptPrefixChangedReason::ModelChanged => "model changed",
-        PromptPrefixChangedReason::BaseInstructionsChanged => "base instructions changed",
-        PromptPrefixChangedReason::GlobalInstructionsChanged => "global instructions changed",
-        PromptPrefixChangedReason::ModeRoleChanged => "mode or role changed",
-        PromptPrefixChangedReason::SkillCatalogChanged => "skill catalog changed",
-        PromptPrefixChangedReason::WorkspaceInstructionsChanged => "workspace instructions changed",
-        PromptPrefixChangedReason::RequestPropertiesChanged => "request properties changed",
-        PromptPrefixChangedReason::FixedPrefixChanged => "fixed prefix changed",
-        PromptPrefixChangedReason::ToolSchemaChanged => "tool schema changed",
-        PromptPrefixChangedReason::ContextCompacted => "context compacted",
-        PromptPrefixChangedReason::ContextAppended => "context appended",
-    }
-}
-
 fn canonical_schema(schema: &ToolSchema) -> Result<String, serde_json::Error> {
     serde_json::to_value(schema).map(|value| canonical_json_hash(&value))
 }
@@ -430,6 +286,7 @@ fn canonicalize_json(value: &mut serde_json::Value) {
 #[cfg(test)]
 mod tests {
     use pl_model::{ProviderInfo, ProviderWireProtocol, ReasoningSummary, ToolWirePolicy};
+    use pl_protocol::MessageRole;
     use pretty_assertions::assert_eq;
 
     use super::*;
@@ -445,7 +302,6 @@ mod tests {
     ) -> PromptCacheInput<'a> {
         PromptCacheInput {
             scope,
-            turn_id: "turn-1",
             provider,
             model,
             instructions,
@@ -504,10 +360,8 @@ mod tests {
             second.prefix_changed_reason,
             PromptPrefixChangedReason::ContextAppended
         );
-        let messages = session.messages();
-        assert_eq!(messages[0].role, MessageRole::System);
-        assert_eq!(messages[1].role, MessageRole::Assistant);
-        assert_eq!(messages[2].role, MessageRole::System);
+        assert_eq!(session.items().len(), 1);
+        assert_eq!(session.messages()[0].role, MessageRole::Assistant);
     }
 
     #[test]

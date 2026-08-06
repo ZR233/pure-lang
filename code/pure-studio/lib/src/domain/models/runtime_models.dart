@@ -238,6 +238,14 @@ class TaskWorkUnitView {
     required this.worktreePath,
     required this.branch,
     required this.agentId,
+    required this.executionStatus,
+    required this.executionError,
+    required this.budgetLimit,
+    required this.budgetSliceCount,
+    required this.budgetSliceLimit,
+    required this.continuationState,
+    required this.continuationSourceTurnId,
+    required this.continuationRevision,
   });
 
   final String id;
@@ -246,6 +254,35 @@ class TaskWorkUnitView {
   final String worktreePath;
   final String branch;
   final String? agentId;
+  final String executionStatus;
+  final String? executionError;
+  final TaskBudgetLimitView? budgetLimit;
+  final int budgetSliceCount;
+  final int budgetSliceLimit;
+  final String continuationState;
+  final String? continuationSourceTurnId;
+  final BigInt continuationRevision;
+}
+
+class TaskBudgetLimitView {
+  const TaskBudgetLimitView({required this.kind, required this.usage});
+
+  final String kind;
+  final TaskBudgetUsageView usage;
+}
+
+class TaskBudgetUsageView {
+  const TaskBudgetUsageView({
+    required this.modelSteps,
+    required this.toolCalls,
+    required this.waitCalls,
+    required this.elapsedMs,
+  });
+
+  final int modelSteps;
+  final int toolCalls;
+  final int waitCalls;
+  final BigInt elapsedMs;
 }
 
 class TaskCompletionView {

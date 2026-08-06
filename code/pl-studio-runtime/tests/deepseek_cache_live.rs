@@ -191,8 +191,11 @@ async fn run_live_flow(installed: &InstalledConfigGuard, root: &Path) -> Result<
             && restored_usage.estimated_costs == usage.estimated_costs,
         "restart did not restore the authoritative usage and cost snapshot"
     );
-    let (context_patches, billing) = read_durable_diagnostics(&database_path, &thread.id).await?;
-    ensure!(context_patches >= 1, "no durable contextPatch was restored");
+    let (context_segments, billing) = read_durable_diagnostics(&database_path, &thread.id).await?;
+    ensure!(
+        context_segments >= 1,
+        "no durable context segment was restored"
+    );
     ensure!(
         billing.len() == 15 && billing.iter().all(|turn| !turn.inferences.is_empty()),
         "live turns did not retain per-inference billing snapshots"
@@ -324,15 +327,15 @@ async fn read_prompt_generation(database_path: &Path, thread_id: &str) -> Result
     let row = database
         .query_one_raw(Statement::from_sql_and_values(
             DatabaseBackend::Sqlite,
-            "SELECT metadata_json FROM threads WHERE id = ?",
+            "SELECT state_json FROM thread_session_state WHERE thread_id = ?",
             [thread_id.to_string().into()],
         ))
         .await?
-        .context("live Thread metadata row missing")?;
-    let metadata_json: String = row.try_get("", "metadata_json")?;
+        .context("live Thread session state row missing")?;
+    let state_json: String = row.try_get("", "state_json")?;
     database.close().await?;
-    let metadata: serde_json::Value = serde_json::from_str(&metadata_json)?;
-    let prompt = &metadata["threadPromptSnapshot"];
+    let state: serde_json::Value = serde_json::from_str(&state_json)?;
+    let prompt = &state["prompt"];
     let scope = prompt["activeScope"]
         .as_str()
         .context("active prompt scope missing")?;
@@ -349,12 +352,12 @@ async fn read_durable_diagnostics(
     let context_row = database
         .query_one_raw(Statement::from_sql_and_values(
             DatabaseBackend::Sqlite,
-            "SELECT COUNT(*) AS count FROM items WHERE thread_id = ? AND item_kind = 'contextPatch'",
+            "SELECT COUNT(*) AS count FROM thread_context_segments WHERE thread_id = ?",
             [thread_id.to_string().into()],
         ))
         .await?
-        .context("contextPatch count query returned no row")?;
-    let context_patches: i64 = context_row.try_get("", "count")?;
+        .context("context segment count query returned no row")?;
+    let context_segments: i64 = context_row.try_get("", "count")?;
     let rows = database
         .query_all_raw(Statement::from_sql_and_values(
             DatabaseBackend::Sqlite,
@@ -370,7 +373,7 @@ async fn read_durable_diagnostics(
         })
         .collect::<Result<Vec<_>>>()?;
     database.close().await?;
-    Ok((u64::try_from(context_patches)?, billing))
+    Ok((u64::try_from(context_segments)?, billing))
 }
 
 async fn read_turn_billing(database_path: &Path, turn_id: &str) -> Result<TurnBillingRecord> {

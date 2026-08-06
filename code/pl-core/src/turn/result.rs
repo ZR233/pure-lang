@@ -50,6 +50,8 @@ pub struct TurnResult {
     pub failure: Option<TurnFailure>,
     pub budget_limit_kind: Option<BudgetLimitKind>,
     pub budget_usage: Option<BudgetUsage>,
+    pub rollover_compacted: bool,
+    pub rollover_compaction_error: Option<String>,
     /// Structured trace events recorded during this turn (if tracing was enabled).
     pub trace_events: Vec<TraceEvent>,
 }

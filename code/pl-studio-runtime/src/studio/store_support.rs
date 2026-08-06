@@ -4,7 +4,7 @@ use sea_orm::{ConditionalStatement, ConnectionTrait, DatabaseConnection};
 
 use crate::studio::entity;
 
-pub(super) const STUDIO_DATABASE_SCHEMA_VERSION: i64 = 2;
+pub(super) const STUDIO_DATABASE_SCHEMA_VERSION: i64 = 3;
 
 pub(super) async fn initialize_studio_schema(db: &DatabaseConnection) -> Result<()> {
     db.get_schema_builder()
@@ -22,6 +22,8 @@ pub(super) async fn initialize_studio_schema(db: &DatabaseConnection) -> Result<
         .register(entity::thread_input::Entity)
         .register(entity::turn::Entity)
         .register(entity::item::Entity)
+        .register(entity::thread_context_segment::Entity)
+        .register(entity::thread_session_state::Entity)
         .apply(db)
         .await?;
     create_state_indexes(db).await?;
@@ -161,6 +163,20 @@ async fn create_state_indexes(db: &DatabaseConnection) -> Result<()> {
             .table(entity::item::Entity)
             .col(entity::item::Column::TurnId)
             .col(entity::item::Column::Ordinal)
+            .to_owned(),
+        Index::create()
+            .name("idx_thread_context_segments_thread_ordinal")
+            .table(entity::thread_context_segment::Entity)
+            .col(entity::thread_context_segment::Column::ThreadId)
+            .col(entity::thread_context_segment::Column::Ordinal)
+            .unique()
+            .to_owned(),
+        Index::create()
+            .name("idx_thread_context_segments_thread_revision")
+            .table(entity::thread_context_segment::Entity)
+            .col(entity::thread_context_segment::Column::ThreadId)
+            .col(entity::thread_context_segment::Column::Revision)
+            .unique()
             .to_owned(),
         Index::create()
             .name("idx_work_units_run_status")

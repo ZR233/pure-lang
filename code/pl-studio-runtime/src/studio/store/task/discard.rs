@@ -7,8 +7,8 @@ use crate::studio::entity as entities;
 use crate::studio::ids::unix_seconds;
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    ExecutorCloseDisposition, TaskRunPhase, TaskStopOrigin, TaskWorktreeDisposition,
-    ThreadExecutionStatus, WorkUnitStatus,
+    ExecutorCloseDisposition, ExecutorContinuationState, TaskRunPhase, TaskStopOrigin,
+    TaskWorktreeDisposition, ThreadExecutionStatus, WorkUnitStatus,
 };
 
 struct ExecutorCloseScope {
@@ -95,6 +95,7 @@ impl StudioStore {
             }
 
             let now = unix_seconds();
+            let continuation_revision = work_unit.continuation_revision.saturating_add(1);
             let mut active_work_unit: entities::work_unit::ActiveModel = work_unit.into();
             if plan.cancel_active {
                 active_work_unit.status = Set(WorkUnitStatus::Cancelled.as_str().to_string());
@@ -102,6 +103,10 @@ impl StudioStore {
                     Set(ThreadExecutionStatus::Cancelled.as_str().to_string());
                 active_work_unit.execution_error =
                     Set(Some("executor discarded by planner".to_string()));
+                active_work_unit.continuation_state =
+                    Set(ExecutorContinuationState::None.as_str().to_string());
+                active_work_unit.continuation_source_turn_id = Set(None);
+                active_work_unit.continuation_revision = Set(continuation_revision);
             }
             active_work_unit.worktree_disposition = Set(TaskWorktreeDisposition::CleanupRequested
                 .as_str()
@@ -193,6 +198,14 @@ fn plan_executor_close(work_unit: &entities::work_unit::Model) -> Result<Executo
         (work_status, execution_status),
         (WorkUnitStatus::Pending, ThreadExecutionStatus::Queued)
             | (WorkUnitStatus::Running, ThreadExecutionStatus::Running)
+            | (
+                WorkUnitStatus::Running,
+                ThreadExecutionStatus::BudgetLimited
+            )
+            | (
+                WorkUnitStatus::NeedsAttention,
+                ThreadExecutionStatus::BudgetLimited
+            )
             | (
                 WorkUnitStatus::AwaitingCompletion,
                 ThreadExecutionStatus::Completed
