@@ -246,12 +246,14 @@ class BridgeModelPricing {
   final double? inputPerMtok;
   final double? outputPerMtok;
   final double? cacheReadPerMtok;
+  final double? cacheWritePerMtok;
 
   const BridgeModelPricing({
     required this.currency,
     this.inputPerMtok,
     this.outputPerMtok,
     this.cacheReadPerMtok,
+    this.cacheWritePerMtok,
   });
 
   @override
@@ -259,7 +261,8 @@ class BridgeModelPricing {
       currency.hashCode ^
       inputPerMtok.hashCode ^
       outputPerMtok.hashCode ^
-      cacheReadPerMtok.hashCode;
+      cacheReadPerMtok.hashCode ^
+      cacheWritePerMtok.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -269,7 +272,8 @@ class BridgeModelPricing {
           currency == other.currency &&
           inputPerMtok == other.inputPerMtok &&
           outputPerMtok == other.outputPerMtok &&
-          cacheReadPerMtok == other.cacheReadPerMtok;
+          cacheReadPerMtok == other.cacheReadPerMtok &&
+          cacheWritePerMtok == other.cacheWritePerMtok;
 }
 
 class BridgeModelReasoningDescriptor {
@@ -366,6 +370,7 @@ class BridgeProviderModelSettingsDto {
   final double? inputPricePerMTok;
   final double? outputPricePerMTok;
   final double? cacheReadPricePerMTok;
+  final double? cacheWritePricePerMTok;
   final List<String> reasoningEfforts;
   final String baseInstructions;
 
@@ -379,6 +384,7 @@ class BridgeProviderModelSettingsDto {
     this.inputPricePerMTok,
     this.outputPricePerMTok,
     this.cacheReadPricePerMTok,
+    this.cacheWritePricePerMTok,
     required this.reasoningEfforts,
     required this.baseInstructions,
   });
@@ -394,6 +400,7 @@ class BridgeProviderModelSettingsDto {
       inputPricePerMTok.hashCode ^
       outputPricePerMTok.hashCode ^
       cacheReadPricePerMTok.hashCode ^
+      cacheWritePricePerMTok.hashCode ^
       reasoningEfforts.hashCode ^
       baseInstructions.hashCode;
 
@@ -411,6 +418,7 @@ class BridgeProviderModelSettingsDto {
           inputPricePerMTok == other.inputPricePerMTok &&
           outputPricePerMTok == other.outputPricePerMTok &&
           cacheReadPricePerMTok == other.cacheReadPricePerMTok &&
+          cacheWritePricePerMTok == other.cacheWritePricePerMTok &&
           reasoningEfforts == other.reasoningEfforts &&
           baseInstructions == other.baseInstructions;
 }
@@ -476,18 +484,23 @@ class BridgeProviderPresetDescriptor {
 
 class BridgeProviderServiceCapabilitiesDescriptor {
   final BridgeWebSearchProviderCapabilitiesDescriptor webSearch;
+  final String promptCacheDialect;
 
-  const BridgeProviderServiceCapabilitiesDescriptor({required this.webSearch});
+  const BridgeProviderServiceCapabilitiesDescriptor({
+    required this.webSearch,
+    required this.promptCacheDialect,
+  });
 
   @override
-  int get hashCode => webSearch.hashCode;
+  int get hashCode => webSearch.hashCode ^ promptCacheDialect.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is BridgeProviderServiceCapabilitiesDescriptor &&
           runtimeType == other.runtimeType &&
-          webSearch == other.webSearch;
+          webSearch == other.webSearch &&
+          promptCacheDialect == other.promptCacheDialect;
 }
 
 /// 不含 secret 的 Provider canonical 设置视图。
@@ -502,6 +515,7 @@ class BridgeProviderSettingsDto {
   final String capabilitySource;
   final bool hostedWebSearch;
   final String? standaloneWebSearch;
+  final String promptCacheDialect;
   final String defaultModel;
   final List<BridgeProviderModelSettingsDto> models;
   final List<BridgeProviderModelSettingsDto> customModels;
@@ -518,6 +532,7 @@ class BridgeProviderSettingsDto {
     required this.capabilitySource,
     required this.hostedWebSearch,
     this.standaloneWebSearch,
+    required this.promptCacheDialect,
     required this.defaultModel,
     required this.models,
     required this.customModels,
@@ -536,6 +551,7 @@ class BridgeProviderSettingsDto {
       capabilitySource.hashCode ^
       hostedWebSearch.hashCode ^
       standaloneWebSearch.hashCode ^
+      promptCacheDialect.hashCode ^
       defaultModel.hashCode ^
       models.hashCode ^
       customModels.hashCode ^
@@ -556,6 +572,7 @@ class BridgeProviderSettingsDto {
           capabilitySource == other.capabilitySource &&
           hostedWebSearch == other.hostedWebSearch &&
           standaloneWebSearch == other.standaloneWebSearch &&
+          promptCacheDialect == other.promptCacheDialect &&
           defaultModel == other.defaultModel &&
           models == other.models &&
           customModels == other.customModels &&
@@ -917,6 +934,7 @@ class ProviderInput {
   final String capabilitySource;
   final bool hostedWebSearch;
   final String? standaloneWebSearch;
+  final String promptCacheDialect;
   final String defaultModel;
   final List<ProviderModelInput> customModels;
 
@@ -932,6 +950,7 @@ class ProviderInput {
     required this.capabilitySource,
     required this.hostedWebSearch,
     this.standaloneWebSearch,
+    required this.promptCacheDialect,
     required this.defaultModel,
     required this.customModels,
   });
@@ -949,6 +968,7 @@ class ProviderInput {
       capabilitySource.hashCode ^
       hostedWebSearch.hashCode ^
       standaloneWebSearch.hashCode ^
+      promptCacheDialect.hashCode ^
       defaultModel.hashCode ^
       customModels.hashCode;
 
@@ -968,6 +988,7 @@ class ProviderInput {
           capabilitySource == other.capabilitySource &&
           hostedWebSearch == other.hostedWebSearch &&
           standaloneWebSearch == other.standaloneWebSearch &&
+          promptCacheDialect == other.promptCacheDialect &&
           defaultModel == other.defaultModel &&
           customModels == other.customModels;
 }

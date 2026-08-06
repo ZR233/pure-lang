@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// Provider/模型目录跨产品传输协议版本。
-pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 4;
+pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 5;
 
 /// 无敏感信息、可供 Web 与桌面端直接渲染的 Provider 目录快照。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -33,6 +33,8 @@ pub struct ProviderPresetDescriptor {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProviderServiceCapabilitiesDescriptor {
     pub web_search: WebSearchProviderCapabilitiesDescriptor,
+    #[serde(default)]
+    pub prompt_cache_dialect: String,
 }
 
 /// UI 可直接渲染的 Web Search 服务能力。
@@ -126,4 +128,5 @@ pub struct ModelPricingDto {
     pub input_per_mtok: Option<f64>,
     pub output_per_mtok: Option<f64>,
     pub cache_read_per_mtok: Option<f64>,
+    pub cache_write_per_mtok: Option<f64>,
 }

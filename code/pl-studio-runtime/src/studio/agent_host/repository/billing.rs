@@ -61,6 +61,9 @@ pub(super) fn aggregate_billing_usage<'a>(
             aggregate.cached_prompt_tokens = aggregate
                 .cached_prompt_tokens
                 .saturating_add(usage.cached_prompt_tokens);
+            aggregate.cache_write_tokens = aggregate
+                .cache_write_tokens
+                .saturating_add(usage.cache_write_tokens);
             aggregate.completion_tokens = aggregate
                 .completion_tokens
                 .saturating_add(usage.completion_tokens);
@@ -87,9 +90,13 @@ pub(super) fn runtime_from_context(
             .then_with(|| left.inference_id.cmp(&right.inference_id))
     })?;
     let mut costs = BTreeMap::<String, f64>::new();
+    let mut cache_savings = BTreeMap::<String, f64>::new();
     for inference in &inferences {
         for cost in &inference.estimated_costs {
             *costs.entry(cost.currency.clone()).or_default() += cost.amount;
+        }
+        for saving in &inference.estimated_cache_savings {
+            *cache_savings.entry(saving.currency.clone()).or_default() += saving.amount;
         }
     }
     let prompt_tokens = context.usage.prompt_tokens;
@@ -107,15 +114,29 @@ pub(super) fn runtime_from_context(
             prompt_tokens,
             completion_tokens: context.usage.completion_tokens,
             cached_prompt_tokens,
+            cache_write_tokens: context
+                .usage
+                .cache_write_tokens
+                .min(prompt_tokens.saturating_sub(cached_prompt_tokens)),
+            cache_miss_tokens: prompt_tokens.saturating_sub(cached_prompt_tokens),
+            reasoning_tokens: context.usage.reasoning_tokens,
+            inference_count: inferences.len() as u64,
             total_tokens: context.usage.total_tokens,
             cache_hit_rate,
             estimated_costs: costs
                 .into_iter()
                 .map(|(currency, amount)| RuntimeCostAmount { currency, amount })
                 .collect(),
+            estimated_cache_savings: cache_savings
+                .into_iter()
+                .map(|(currency, amount)| RuntimeCostAmount { currency, amount })
+                .collect(),
             has_unpriced_usage: inferences
                 .iter()
                 .any(|inference| inference.has_unpriced_usage),
+            prompt_generation: latest.prompt_generation,
+            prompt_cache_policy: latest.prompt_cache_policy.clone(),
+            prefix_changed_reason: latest.prefix_changed_reason,
             updated_at: latest.recorded_at,
         },
         todo: None,
@@ -327,6 +348,7 @@ mod tests {
             completion_tokens: 999,
             total_tokens: 1_998,
             cached_prompt_tokens: 0,
+            cache_write_tokens: 0,
             reasoning_tokens: 0,
         };
 
@@ -344,10 +366,18 @@ mod tests {
             currency: "CNY".to_string(),
             amount: 0.5,
         }];
+        cny.estimated_cache_savings = vec![RuntimeCostAmount {
+            currency: "CNY".to_string(),
+            amount: 0.2,
+        }];
         let mut usd = billing_record("usd", 20, 5, 4);
         usd.estimated_costs = vec![RuntimeCostAmount {
             currency: "USD".to_string(),
             amount: 0.25,
+        }];
+        usd.estimated_cache_savings = vec![RuntimeCostAmount {
+            currency: "USD".to_string(),
+            amount: -0.05,
         }];
         usd.has_unpriced_usage = true;
         usd.recorded_at = 2;
@@ -394,6 +424,19 @@ mod tests {
             ]
         );
         assert!(runtime.usage.has_unpriced_usage);
+        assert_eq!(
+            runtime.usage.estimated_cache_savings,
+            vec![
+                RuntimeCostAmount {
+                    currency: "CNY".to_string(),
+                    amount: 0.2,
+                },
+                RuntimeCostAmount {
+                    currency: "USD".to_string(),
+                    amount: -0.05,
+                },
+            ]
+        );
         assert_eq!(runtime.usage.latest_context_tokens, 11);
         assert!(
             runtime
@@ -449,7 +492,11 @@ mod tests {
             context_window: billing.context_window,
             usage: billing.normalized_usage.public_snapshot(),
             estimated_costs: billing.estimated_costs.clone(),
+            estimated_cache_savings: billing.estimated_cache_savings.clone(),
             has_unpriced_usage: billing.has_unpriced_usage,
+            prompt_generation: billing.prompt_generation,
+            prompt_cache_policy: billing.prompt_cache_policy.clone(),
+            prefix_changed_reason: billing.prefix_changed_reason,
             updated_at: billing.recorded_at,
         };
         ThreadCommit {
@@ -485,6 +532,7 @@ mod tests {
         let reported_usage = InferenceTokenUsage {
             prompt_tokens,
             cached_prompt_tokens,
+            cache_write_tokens: 0,
             completion_tokens,
             reasoning_tokens: 0,
             total_tokens: prompt_tokens + completion_tokens,
@@ -502,12 +550,17 @@ mod tests {
                 input_per_mtok: Some(1.0),
                 output_per_mtok: Some(2.0),
                 cache_read_per_mtok: Some(0.02),
+                cache_write_per_mtok: None,
             },
             estimated_costs: vec![RuntimeCostAmount {
                 currency: "CNY".to_string(),
                 amount: 0.000_1,
             }],
+            estimated_cache_savings: Vec::new(),
             has_unpriced_usage: false,
+            prompt_generation: None,
+            prompt_cache_policy: None,
+            prefix_changed_reason: None,
             recorded_at: 1,
         }
     }

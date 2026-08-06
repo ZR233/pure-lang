@@ -2469,11 +2469,13 @@ impl SseDecode for crate::api::studio::types::settings::BridgeModelPricing {
         let mut var_inputPerMtok = <Option<f64>>::sse_decode(deserializer);
         let mut var_outputPerMtok = <Option<f64>>::sse_decode(deserializer);
         let mut var_cacheReadPerMtok = <Option<f64>>::sse_decode(deserializer);
+        let mut var_cacheWritePerMtok = <Option<f64>>::sse_decode(deserializer);
         return crate::api::studio::types::settings::BridgeModelPricing {
             currency: var_currency,
             input_per_mtok: var_inputPerMtok,
             output_per_mtok: var_outputPerMtok,
             cache_read_per_mtok: var_cacheReadPerMtok,
+            cache_write_per_mtok: var_cacheWritePerMtok,
         };
     }
 }
@@ -2614,6 +2616,30 @@ impl SseDecode for crate::api::studio::subscription::BridgeProductStreamEnvelope
     }
 }
 
+impl SseDecode for crate::api::studio::types::thread_stream::BridgePromptPrefixChangedReason {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::api::studio::types::thread_stream::BridgePromptPrefixChangedReason::Initial,
+1 => crate::api::studio::types::thread_stream::BridgePromptPrefixChangedReason::PromptScopeChanged,
+2 => crate::api::studio::types::thread_stream::BridgePromptPrefixChangedReason::ProviderChanged,
+3 => crate::api::studio::types::thread_stream::BridgePromptPrefixChangedReason::ModelChanged,
+4 => crate::api::studio::types::thread_stream::BridgePromptPrefixChangedReason::BaseInstructionsChanged,
+5 => crate::api::studio::types::thread_stream::BridgePromptPrefixChangedReason::GlobalInstructionsChanged,
+6 => crate::api::studio::types::thread_stream::BridgePromptPrefixChangedReason::ModeRoleChanged,
+7 => crate::api::studio::types::thread_stream::BridgePromptPrefixChangedReason::SkillCatalogChanged,
+8 => crate::api::studio::types::thread_stream::BridgePromptPrefixChangedReason::WorkspaceInstructionsChanged,
+9 => crate::api::studio::types::thread_stream::BridgePromptPrefixChangedReason::RequestPropertiesChanged,
+10 => crate::api::studio::types::thread_stream::BridgePromptPrefixChangedReason::FixedPrefixChanged,
+11 => crate::api::studio::types::thread_stream::BridgePromptPrefixChangedReason::ToolSchemaChanged,
+12 => crate::api::studio::types::thread_stream::BridgePromptPrefixChangedReason::ContextCompacted,
+13 => crate::api::studio::types::thread_stream::BridgePromptPrefixChangedReason::ContextAppended,
+            _ => unreachable!("Invalid variant for BridgePromptPrefixChangedReason: {}", inner),
+        };
+    }
+}
+
 impl SseDecode for crate::api::studio::types::settings::BridgeProviderCatalogSnapshot {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -2658,6 +2684,7 @@ impl SseDecode for crate::api::studio::types::settings::BridgeProviderModelSetti
         let mut var_inputPricePerMTok = <Option<f64>>::sse_decode(deserializer);
         let mut var_outputPricePerMTok = <Option<f64>>::sse_decode(deserializer);
         let mut var_cacheReadPricePerMTok = <Option<f64>>::sse_decode(deserializer);
+        let mut var_cacheWritePricePerMTok = <Option<f64>>::sse_decode(deserializer);
         let mut var_reasoningEfforts = <Vec<String>>::sse_decode(deserializer);
         let mut var_baseInstructions = <String>::sse_decode(deserializer);
         return crate::api::studio::types::settings::BridgeProviderModelSettingsDto {
@@ -2670,6 +2697,7 @@ impl SseDecode for crate::api::studio::types::settings::BridgeProviderModelSetti
             input_price_per_m_tok: var_inputPricePerMTok,
             output_price_per_m_tok: var_outputPricePerMTok,
             cache_read_price_per_m_tok: var_cacheReadPricePerMTok,
+            cache_write_price_per_m_tok: var_cacheWritePricePerMTok,
             reasoning_efforts: var_reasoningEfforts,
             base_instructions: var_baseInstructions,
         };
@@ -2715,8 +2743,10 @@ impl SseDecode
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_webSearch = <crate::api::studio::types::settings::BridgeWebSearchProviderCapabilitiesDescriptor>::sse_decode(deserializer);
+        let mut var_promptCacheDialect = <String>::sse_decode(deserializer);
         return crate::api::studio::types::settings::BridgeProviderServiceCapabilitiesDescriptor {
             web_search: var_webSearch,
+            prompt_cache_dialect: var_promptCacheDialect,
         };
     }
 }
@@ -2734,6 +2764,7 @@ impl SseDecode for crate::api::studio::types::settings::BridgeProviderSettingsDt
         let mut var_capabilitySource = <String>::sse_decode(deserializer);
         let mut var_hostedWebSearch = <bool>::sse_decode(deserializer);
         let mut var_standaloneWebSearch = <Option<String>>::sse_decode(deserializer);
+        let mut var_promptCacheDialect = <String>::sse_decode(deserializer);
         let mut var_defaultModel = <String>::sse_decode(deserializer);
         let mut var_models = <Vec<
             crate::api::studio::types::settings::BridgeProviderModelSettingsDto,
@@ -2753,6 +2784,7 @@ impl SseDecode for crate::api::studio::types::settings::BridgeProviderSettingsDt
             capability_source: var_capabilitySource,
             hosted_web_search: var_hostedWebSearch,
             standalone_web_search: var_standaloneWebSearch,
+            prompt_cache_dialect: var_promptCacheDialect,
             default_model: var_defaultModel,
             models: var_models,
             custom_models: var_customModels,
@@ -3767,12 +3799,24 @@ impl SseDecode for crate::api::studio::types::thread_stream::BridgeThreadRuntime
         let mut var_promptTokens = <u64>::sse_decode(deserializer);
         let mut var_completionTokens = <u64>::sse_decode(deserializer);
         let mut var_cachedPromptTokens = <u64>::sse_decode(deserializer);
+        let mut var_cacheWriteTokens = <u64>::sse_decode(deserializer);
+        let mut var_cacheMissTokens = <u64>::sse_decode(deserializer);
+        let mut var_reasoningTokens = <u64>::sse_decode(deserializer);
+        let mut var_inferenceCount = <u64>::sse_decode(deserializer);
         let mut var_totalTokens = <u64>::sse_decode(deserializer);
         let mut var_cacheHitRate = <Option<f64>>::sse_decode(deserializer);
         let mut var_estimatedCosts = <Vec<
             crate::api::studio::types::thread_stream::BridgeRuntimeCostAmount,
         >>::sse_decode(deserializer);
+        let mut var_estimatedCacheSavings = <Vec<
+            crate::api::studio::types::thread_stream::BridgeRuntimeCostAmount,
+        >>::sse_decode(deserializer);
         let mut var_hasUnpricedUsage = <bool>::sse_decode(deserializer);
+        let mut var_promptGeneration = <Option<u64>>::sse_decode(deserializer);
+        let mut var_promptCachePolicy = <Option<String>>::sse_decode(deserializer);
+        let mut var_prefixChangedReason = <Option<
+            crate::api::studio::types::thread_stream::BridgePromptPrefixChangedReason,
+        >>::sse_decode(deserializer);
         let mut var_updatedAt = <i64>::sse_decode(deserializer);
         return crate::api::studio::types::thread_stream::BridgeThreadRuntimeUsage {
             model: var_model,
@@ -3781,10 +3825,18 @@ impl SseDecode for crate::api::studio::types::thread_stream::BridgeThreadRuntime
             prompt_tokens: var_promptTokens,
             completion_tokens: var_completionTokens,
             cached_prompt_tokens: var_cachedPromptTokens,
+            cache_write_tokens: var_cacheWriteTokens,
+            cache_miss_tokens: var_cacheMissTokens,
+            reasoning_tokens: var_reasoningTokens,
+            inference_count: var_inferenceCount,
             total_tokens: var_totalTokens,
             cache_hit_rate: var_cacheHitRate,
             estimated_costs: var_estimatedCosts,
+            estimated_cache_savings: var_estimatedCacheSavings,
             has_unpriced_usage: var_hasUnpricedUsage,
+            prompt_generation: var_promptGeneration,
+            prompt_cache_policy: var_promptCachePolicy,
+            prefix_changed_reason: var_prefixChangedReason,
             updated_at: var_updatedAt,
         };
     }
@@ -5036,6 +5088,19 @@ impl SseDecode for Option<crate::api::studio::types::settings::BridgeModelReason
     }
 }
 
+impl SseDecode
+    for Option<crate::api::studio::types::thread_stream::BridgePromptPrefixChangedReason>
+{
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::api::studio::types::thread_stream::BridgePromptPrefixChangedReason>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
 impl SseDecode for Option<crate::api::studio::types::runtime::BridgeTaskRuntimeDto> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -5260,6 +5325,7 @@ impl SseDecode for crate::api::studio::types::settings::ProviderInput {
         let mut var_capabilitySource = <String>::sse_decode(deserializer);
         let mut var_hostedWebSearch = <bool>::sse_decode(deserializer);
         let mut var_standaloneWebSearch = <Option<String>>::sse_decode(deserializer);
+        let mut var_promptCacheDialect = <String>::sse_decode(deserializer);
         let mut var_defaultModel = <String>::sse_decode(deserializer);
         let mut var_customModels =
             <Vec<crate::api::studio::types::settings::ProviderModelInput>>::sse_decode(
@@ -5277,6 +5343,7 @@ impl SseDecode for crate::api::studio::types::settings::ProviderInput {
             capability_source: var_capabilitySource,
             hosted_web_search: var_hostedWebSearch,
             standalone_web_search: var_standaloneWebSearch,
+            prompt_cache_dialect: var_promptCacheDialect,
             default_model: var_defaultModel,
             custom_models: var_customModels,
         };
@@ -6294,6 +6361,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::studio::types::settings::Brid
             self.input_per_mtok.into_into_dart().into_dart(),
             self.output_per_mtok.into_into_dart().into_dart(),
             self.cache_read_per_mtok.into_into_dart().into_dart(),
+            self.cache_write_per_mtok.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -6457,6 +6525,45 @@ impl
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart
+    for crate::api::studio::types::thread_stream::BridgePromptPrefixChangedReason
+{
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            Self::Initial => 0.into_dart(),
+            Self::PromptScopeChanged => 1.into_dart(),
+            Self::ProviderChanged => 2.into_dart(),
+            Self::ModelChanged => 3.into_dart(),
+            Self::BaseInstructionsChanged => 4.into_dart(),
+            Self::GlobalInstructionsChanged => 5.into_dart(),
+            Self::ModeRoleChanged => 6.into_dart(),
+            Self::SkillCatalogChanged => 7.into_dart(),
+            Self::WorkspaceInstructionsChanged => 8.into_dart(),
+            Self::RequestPropertiesChanged => 9.into_dart(),
+            Self::FixedPrefixChanged => 10.into_dart(),
+            Self::ToolSchemaChanged => 11.into_dart(),
+            Self::ContextCompacted => 12.into_dart(),
+            Self::ContextAppended => 13.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::thread_stream::BridgePromptPrefixChangedReason
+{
+}
+impl
+    flutter_rust_bridge::IntoIntoDart<
+        crate::api::studio::types::thread_stream::BridgePromptPrefixChangedReason,
+    > for crate::api::studio::types::thread_stream::BridgePromptPrefixChangedReason
+{
+    fn into_into_dart(
+        self,
+    ) -> crate::api::studio::types::thread_stream::BridgePromptPrefixChangedReason {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart
     for crate::api::studio::types::settings::BridgeProviderCatalogSnapshot
 {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
@@ -6524,6 +6631,9 @@ impl flutter_rust_bridge::IntoDart
             self.input_price_per_m_tok.into_into_dart().into_dart(),
             self.output_price_per_m_tok.into_into_dart().into_dart(),
             self.cache_read_price_per_m_tok.into_into_dart().into_dart(),
+            self.cache_write_price_per_m_tok
+                .into_into_dart()
+                .into_dart(),
             self.reasoning_efforts.into_into_dart().into_dart(),
             self.base_instructions.into_into_dart().into_dart(),
         ]
@@ -6582,7 +6692,11 @@ impl flutter_rust_bridge::IntoDart
     for crate::api::studio::types::settings::BridgeProviderServiceCapabilitiesDescriptor
 {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
-        [self.web_search.into_into_dart().into_dart()].into_dart()
+        [
+            self.web_search.into_into_dart().into_dart(),
+            self.prompt_cache_dialect.into_into_dart().into_dart(),
+        ]
+        .into_dart()
     }
 }
 impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
@@ -6616,6 +6730,7 @@ impl flutter_rust_bridge::IntoDart
             self.capability_source.into_into_dart().into_dart(),
             self.hosted_web_search.into_into_dart().into_dart(),
             self.standalone_web_search.into_into_dart().into_dart(),
+            self.prompt_cache_dialect.into_into_dart().into_dart(),
             self.default_model.into_into_dart().into_dart(),
             self.models.into_into_dart().into_dart(),
             self.custom_models.into_into_dart().into_dart(),
@@ -7820,10 +7935,18 @@ impl flutter_rust_bridge::IntoDart
             self.prompt_tokens.into_into_dart().into_dart(),
             self.completion_tokens.into_into_dart().into_dart(),
             self.cached_prompt_tokens.into_into_dart().into_dart(),
+            self.cache_write_tokens.into_into_dart().into_dart(),
+            self.cache_miss_tokens.into_into_dart().into_dart(),
+            self.reasoning_tokens.into_into_dart().into_dart(),
+            self.inference_count.into_into_dart().into_dart(),
             self.total_tokens.into_into_dart().into_dart(),
             self.cache_hit_rate.into_into_dart().into_dart(),
             self.estimated_costs.into_into_dart().into_dart(),
+            self.estimated_cache_savings.into_into_dart().into_dart(),
             self.has_unpriced_usage.into_into_dart().into_dart(),
+            self.prompt_generation.into_into_dart().into_dart(),
+            self.prompt_cache_policy.into_into_dart().into_dart(),
+            self.prefix_changed_reason.into_into_dart().into_dart(),
             self.updated_at.into_into_dart().into_dart(),
         ]
         .into_dart()
@@ -8603,6 +8726,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::studio::types::settings::Prov
             self.capability_source.into_into_dart().into_dart(),
             self.hosted_web_search.into_into_dart().into_dart(),
             self.standalone_web_search.into_into_dart().into_dart(),
+            self.prompt_cache_dialect.into_into_dart().into_dart(),
             self.default_model.into_into_dart().into_dart(),
             self.custom_models.into_into_dart().into_dart(),
         ]
@@ -9469,6 +9593,7 @@ impl SseEncode for crate::api::studio::types::settings::BridgeModelPricing {
         <Option<f64>>::sse_encode(self.input_per_mtok, serializer);
         <Option<f64>>::sse_encode(self.output_per_mtok, serializer);
         <Option<f64>>::sse_encode(self.cache_read_per_mtok, serializer);
+        <Option<f64>>::sse_encode(self.cache_write_per_mtok, serializer);
     }
 }
 
@@ -9552,6 +9677,27 @@ impl SseEncode for crate::api::studio::subscription::BridgeProductStreamEnvelope
     }
 }
 
+impl SseEncode for crate::api::studio::types::thread_stream::BridgePromptPrefixChangedReason {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(match self {crate::api::studio::types::thread_stream::BridgePromptPrefixChangedReason::Initial => { 0 }
+crate::api::studio::types::thread_stream::BridgePromptPrefixChangedReason::PromptScopeChanged => { 1 }
+crate::api::studio::types::thread_stream::BridgePromptPrefixChangedReason::ProviderChanged => { 2 }
+crate::api::studio::types::thread_stream::BridgePromptPrefixChangedReason::ModelChanged => { 3 }
+crate::api::studio::types::thread_stream::BridgePromptPrefixChangedReason::BaseInstructionsChanged => { 4 }
+crate::api::studio::types::thread_stream::BridgePromptPrefixChangedReason::GlobalInstructionsChanged => { 5 }
+crate::api::studio::types::thread_stream::BridgePromptPrefixChangedReason::ModeRoleChanged => { 6 }
+crate::api::studio::types::thread_stream::BridgePromptPrefixChangedReason::SkillCatalogChanged => { 7 }
+crate::api::studio::types::thread_stream::BridgePromptPrefixChangedReason::WorkspaceInstructionsChanged => { 8 }
+crate::api::studio::types::thread_stream::BridgePromptPrefixChangedReason::RequestPropertiesChanged => { 9 }
+crate::api::studio::types::thread_stream::BridgePromptPrefixChangedReason::FixedPrefixChanged => { 10 }
+crate::api::studio::types::thread_stream::BridgePromptPrefixChangedReason::ToolSchemaChanged => { 11 }
+crate::api::studio::types::thread_stream::BridgePromptPrefixChangedReason::ContextCompacted => { 12 }
+crate::api::studio::types::thread_stream::BridgePromptPrefixChangedReason::ContextAppended => { 13 }
+ _ => { unimplemented!(""); }}, serializer);
+    }
+}
+
 impl SseEncode for crate::api::studio::types::settings::BridgeProviderCatalogSnapshot {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -9588,6 +9734,7 @@ impl SseEncode for crate::api::studio::types::settings::BridgeProviderModelSetti
         <Option<f64>>::sse_encode(self.input_price_per_m_tok, serializer);
         <Option<f64>>::sse_encode(self.output_price_per_m_tok, serializer);
         <Option<f64>>::sse_encode(self.cache_read_price_per_m_tok, serializer);
+        <Option<f64>>::sse_encode(self.cache_write_price_per_m_tok, serializer);
         <Vec<String>>::sse_encode(self.reasoning_efforts, serializer);
         <String>::sse_encode(self.base_instructions, serializer);
     }
@@ -9619,6 +9766,7 @@ impl SseEncode
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <crate::api::studio::types::settings::BridgeWebSearchProviderCapabilitiesDescriptor>::sse_encode(self.web_search, serializer);
+        <String>::sse_encode(self.prompt_cache_dialect, serializer);
     }
 }
 
@@ -9635,6 +9783,7 @@ impl SseEncode for crate::api::studio::types::settings::BridgeProviderSettingsDt
         <String>::sse_encode(self.capability_source, serializer);
         <bool>::sse_encode(self.hosted_web_search, serializer);
         <Option<String>>::sse_encode(self.standalone_web_search, serializer);
+        <String>::sse_encode(self.prompt_cache_dialect, serializer);
         <String>::sse_encode(self.default_model, serializer);
         <Vec<crate::api::studio::types::settings::BridgeProviderModelSettingsDto>>::sse_encode(
             self.models,
@@ -10387,13 +10536,24 @@ impl SseEncode for crate::api::studio::types::thread_stream::BridgeThreadRuntime
         <u64>::sse_encode(self.prompt_tokens, serializer);
         <u64>::sse_encode(self.completion_tokens, serializer);
         <u64>::sse_encode(self.cached_prompt_tokens, serializer);
+        <u64>::sse_encode(self.cache_write_tokens, serializer);
+        <u64>::sse_encode(self.cache_miss_tokens, serializer);
+        <u64>::sse_encode(self.reasoning_tokens, serializer);
+        <u64>::sse_encode(self.inference_count, serializer);
         <u64>::sse_encode(self.total_tokens, serializer);
         <Option<f64>>::sse_encode(self.cache_hit_rate, serializer);
         <Vec<crate::api::studio::types::thread_stream::BridgeRuntimeCostAmount>>::sse_encode(
             self.estimated_costs,
             serializer,
         );
+        <Vec<crate::api::studio::types::thread_stream::BridgeRuntimeCostAmount>>::sse_encode(
+            self.estimated_cache_savings,
+            serializer,
+        );
         <bool>::sse_encode(self.has_unpriced_usage, serializer);
+        <Option<u64>>::sse_encode(self.prompt_generation, serializer);
+        <Option<String>>::sse_encode(self.prompt_cache_policy, serializer);
+        <Option<crate::api::studio::types::thread_stream::BridgePromptPrefixChangedReason>>::sse_encode(self.prefix_changed_reason, serializer);
         <i64>::sse_encode(self.updated_at, serializer);
     }
 }
@@ -11329,6 +11489,20 @@ impl SseEncode for Option<crate::api::studio::types::settings::BridgeModelReason
     }
 }
 
+impl SseEncode
+    for Option<crate::api::studio::types::thread_stream::BridgePromptPrefixChangedReason>
+{
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::studio::types::thread_stream::BridgePromptPrefixChangedReason>::sse_encode(
+                value, serializer,
+            );
+        }
+    }
+}
+
 impl SseEncode for Option<crate::api::studio::types::runtime::BridgeTaskRuntimeDto> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -11524,6 +11698,7 @@ impl SseEncode for crate::api::studio::types::settings::ProviderInput {
         <String>::sse_encode(self.capability_source, serializer);
         <bool>::sse_encode(self.hosted_web_search, serializer);
         <Option<String>>::sse_encode(self.standalone_web_search, serializer);
+        <String>::sse_encode(self.prompt_cache_dialect, serializer);
         <String>::sse_encode(self.default_model, serializer);
         <Vec<crate::api::studio::types::settings::ProviderModelInput>>::sse_encode(
             self.custom_models,

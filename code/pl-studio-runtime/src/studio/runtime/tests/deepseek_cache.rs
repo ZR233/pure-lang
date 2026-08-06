@@ -411,7 +411,7 @@ fn tool_names(request: &Value) -> Vec<String> {
         .collect()
 }
 
-async fn wait_for_turn(store: &StudioStore, turn_id: &str) -> Result<()> {
+pub(super) async fn wait_for_turn(store: &StudioStore, turn_id: &str) -> Result<()> {
     tokio::time::timeout(std::time::Duration::from_secs(30), async {
         loop {
             if let Some(row) = turn::Entity::find_by_id(turn_id)
@@ -753,14 +753,14 @@ fn final_action(content: &str) -> ChatAction {
     }
 }
 
-struct FixtureMcpServer {
-    url: String,
+pub(super) struct FixtureMcpServer {
+    pub(super) url: String,
     calls: Arc<Mutex<usize>>,
     handle: tokio::task::JoinHandle<Result<()>>,
 }
 
 impl FixtureMcpServer {
-    async fn start() -> Result<Self> {
+    pub(super) async fn start() -> Result<Self> {
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let url = format!("http://{}", listener.local_addr()?);
         let calls = Arc::new(Mutex::new(0));
@@ -825,11 +825,11 @@ impl FixtureMcpServer {
         Ok(Self { url, calls, handle })
     }
 
-    async fn lookup_calls(&self) -> usize {
+    pub(super) async fn lookup_calls(&self) -> usize {
         *self.calls.lock().await
     }
 
-    fn stop(&self) {
+    pub(super) fn stop(&self) {
         self.handle.abort();
     }
 }
@@ -840,7 +840,7 @@ impl Drop for FixtureMcpServer {
     }
 }
 
-async fn read_http_json(socket: &mut TcpStream) -> Result<Value> {
+pub(super) async fn read_http_json(socket: &mut TcpStream) -> Result<Value> {
     let mut buffer = Vec::new();
     let mut chunk = [0_u8; 4096];
     let (header_end, content_length) = loop {
@@ -883,7 +883,11 @@ async fn read_http_json(socket: &mut TcpStream) -> Result<Value> {
     serde_json::from_slice(&buffer[header_end..header_end + content_length]).map_err(Into::into)
 }
 
-async fn write_http_response(socket: &mut TcpStream, content_type: &str, body: &str) -> Result<()> {
+pub(super) async fn write_http_response(
+    socket: &mut TcpStream,
+    content_type: &str,
+    body: &str,
+) -> Result<()> {
     let response = format!(
         "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
@@ -893,7 +897,7 @@ async fn write_http_response(socket: &mut TcpStream, content_type: &str, body: &
     Ok(())
 }
 
-fn unique_temp_path(label: &str) -> PathBuf {
+pub(super) fn unique_temp_path(label: &str) -> PathBuf {
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()

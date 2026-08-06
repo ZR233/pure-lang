@@ -17,8 +17,8 @@ mod visible_text;
 mod web_search;
 
 pub use capabilities::{
-    ModelCapabilities, ModelModality, ProviderCapabilities, ReasoningInterleaved,
-    ReasoningInterleavedField, ToolCapabilities,
+    ModelCapabilities, ModelModality, PromptCacheModelCapabilities, ProviderCapabilities,
+    ReasoningInterleaved, ReasoningInterleavedField, ToolCapabilities,
 };
 pub use default_models::{
     deepseek_default_model_slugs, default_models, mimo_default_model_slugs,
@@ -40,8 +40,9 @@ pub use provider::{
     create_provider_with_catalog,
 };
 pub use provider_info::{
-    ApplyPatchToolType, ProviderConnectionMode, ProviderInfo, ProviderServiceCapabilities,
-    ProviderWireProtocol, StandaloneWebSearchDialect, ToolWirePolicy,
+    ApplyPatchToolType, EffectivePromptCachePolicy, PromptCacheDialect,
+    PromptCacheProviderCapabilities, ProviderConnectionMode, ProviderInfo,
+    ProviderServiceCapabilities, ProviderWireProtocol, StandaloneWebSearchDialect, ToolWirePolicy,
     WebSearchProviderCapabilities, ZHIPU_CODING_PLAN_BASE_URL, provider_transport_profile_revision,
 };
 pub use provider_usage::{

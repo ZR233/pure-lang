@@ -589,6 +589,19 @@ fn chat_parse_response_reads_deepseek_cached_token_aliases() {
 }
 
 #[test]
+fn deepseek_chat_body_never_writes_openai_cache_fields() {
+    let mut request = request_with_effort("medium");
+    request.model = "deepseek-v4-flash".to_string();
+    request.prompt_cache_key = Some("must-not-cross-chat-wire".to_string());
+
+    let body = OpenAiProtocol::chat().build_request_body(&request);
+
+    assert!(body.get("prompt_cache_key").is_none());
+    assert!(body.get("prompt_cache_breakpoint").is_none());
+    assert!(body.get("prompt_cache_options").is_none());
+}
+
+#[test]
 fn responses_parse_response_reads_cached_input_tokens() {
     let response = OpenAiProtocol::responses()
         .parse_response(serde_json::json!({
@@ -602,13 +615,15 @@ fn responses_parse_response_reads_cached_input_tokens() {
                 "output_tokens": 20,
                 "total_tokens": 120,
                 "input_tokens_details": {
-                    "cached_tokens": 55
+                    "cached_tokens": 55,
+                    "cache_write_tokens": 12
                 }
             }
         }))
         .unwrap();
 
     assert_eq!(response.usage.cached_prompt_tokens, 55);
+    assert_eq!(response.usage.cache_write_tokens, 12);
 }
 
 #[test]

@@ -108,6 +108,9 @@ plan confirmation 可以在 `busy=false` 时继续阻塞普通 Composer。
 ## 11.6 状态栏与 agent directory
 
 状态栏只读取当前 workspace 的 owner、模型、context/token/cost、skills、MCP、LSP 和 Todo。
+存在模型 usage 时，上下文读数同时显示该 Thread 的缓存命中率；详情展示缓存命中、未命中、
+写入、reasoning token、inference 数、按币种估算费用、缓存节省和部分未定价提示。读数只来自
+canonical `ThreadRuntimeSnapshot`，不在 Flutter 建立逐 inference 或计费副本。
 root 通过 typed mode selector 切换 Simple/Task，并展示对应角色模型；Bridge 返回的 canonical
 Thread 状态确认切换结果。活动 Task 期间 selector 保持可见但禁用。child 只读展示实际运行模型。
 root-only 和活动 Task 锁定同时由 StudioRuntime 校验，不能只依赖 Widget 或 Controller 拦截。

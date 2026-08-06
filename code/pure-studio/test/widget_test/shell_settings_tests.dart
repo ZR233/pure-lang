@@ -800,6 +800,7 @@ void registerShellSettingsTests() {
     expect(future['defaultModel'], 'future-model');
     expect(future['capabilitySource'], 'preset_defaults');
     expect(future['standaloneWebSearch'], 'future_search_dialect');
+    expect(future['promptCacheDialect'], 'implicit_prefix');
   });
 
   testWidgets('custom Responses provider defaults to HTTP without a preset', (
@@ -843,6 +844,7 @@ void registerShellSettingsTests() {
     expect(custom['wireProtocol'], 'responses');
     expect(custom['connectionMode'], 'http');
     expect(custom['capabilitySource'], 'explicit');
+    expect(custom['promptCacheDialect'], 'none');
   });
 
   test('provider settings save updates default provider in store', () async {
@@ -869,6 +871,7 @@ void registerShellSettingsTests() {
                 secret: ProviderSecretCommand.preserve(),
                 capabilitySource: 'preset_defaults',
                 hostedWebSearch: false,
+                promptCacheDialect: 'implicit_prefix',
                 defaultModel: 'deepseek-v4-flash',
                 customModels: [],
               ),

@@ -165,6 +165,7 @@ async fn responses_websocket_reuses_the_agent_session_connection() {
 
     let mut first_request = minimal_request("local-responses");
     first_request.store = Some(true);
+    first_request.prompt_cache_key = Some("thread-generation-key".to_string());
     first_request.transport_session = transport_session.clone();
     let first = provider
         .stream_complete(first_request, event_tx.clone())
@@ -173,6 +174,7 @@ async fn responses_websocket_reuses_the_agent_session_connection() {
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     let mut second_request = minimal_request("local-responses");
     second_request.store = Some(true);
+    second_request.prompt_cache_key = Some("thread-generation-key".to_string());
     second_request.input.extend([
         Message {
             role: MessageRole::Assistant,
@@ -202,6 +204,8 @@ async fn responses_websocket_reuses_the_agent_session_connection() {
     assert_eq!(requests[0]["tools"], serde_json::json!([]));
     assert_eq!(requests[0]["store"], false);
     assert_eq!(requests[1]["store"], false);
+    assert_eq!(requests[0]["prompt_cache_key"], "thread-generation-key");
+    assert_eq!(requests[1]["prompt_cache_key"], "thread-generation-key");
     assert_eq!(requests[1]["previous_response_id"], "resp-1");
     assert_eq!(
         requests[1]["input"],
@@ -468,10 +472,9 @@ async fn responses_websocket_retries_an_immediate_close_with_full_history() {
     let provider = OpenAiProvider::new(info, vec![model]).unwrap();
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
 
-    let response = provider
-        .stream_complete(minimal_request("local-responses"), event_tx)
-        .await
-        .unwrap();
+    let mut request = minimal_request("local-responses");
+    request.prompt_cache_key = Some("thread-generation-key".to_string());
+    let response = provider.stream_complete(request, event_tx).await.unwrap();
     let [initial, retried] = server.await.unwrap();
 
     assert_eq!(response.content.as_deref(), Some("ok"));
@@ -817,10 +820,9 @@ async fn stream_complete_uses_chat_endpoint_without_auth_when_token_missing() {
     .unwrap();
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
 
-    let response = provider
-        .stream_complete(minimal_request("local-chat"), event_tx)
-        .await
-        .unwrap();
+    let mut request = minimal_request("local-chat");
+    request.prompt_cache_key = Some("must-not-cross-chat-wire".to_string());
+    let response = provider.stream_complete(request, event_tx).await.unwrap();
     let captured = handle.await.unwrap();
 
     assert_eq!(response.content.as_deref(), Some("ok"));
@@ -828,6 +830,7 @@ async fn stream_complete_uses_chat_endpoint_without_auth_when_token_missing() {
     assert_eq!(captured.request_line, "POST /chat/completions HTTP/1.1");
     assert!(!captured.headers.contains_key("authorization"));
     assert_eq!(captured.body["stream"], serde_json::json!(true));
+    assert!(captured.body.get("prompt_cache_key").is_none());
 }
 
 #[tokio::test]

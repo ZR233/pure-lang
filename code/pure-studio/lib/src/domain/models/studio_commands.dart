@@ -46,6 +46,7 @@ class ProviderCommand {
     required this.capabilitySource,
     required this.hostedWebSearch,
     this.standaloneWebSearch,
+    required this.promptCacheDialect,
     required this.defaultModel,
     required this.customModels,
   });
@@ -61,6 +62,7 @@ class ProviderCommand {
   final String capabilitySource;
   final bool hostedWebSearch;
   final String? standaloneWebSearch;
+  final String promptCacheDialect;
   final String defaultModel;
   final List<ProviderModelCommand> customModels;
 }
@@ -164,6 +166,7 @@ abstract final class ProviderSettingsCommandBuilder {
             standaloneWebSearch: provider.standaloneWebSearch.trim().isEmpty
                 ? null
                 : provider.standaloneWebSearch.trim(),
+            promptCacheDialect: provider.promptCacheDialect,
             defaultModel: provider.defaultModel,
             customModels: [
               for (final model in provider.customModels)

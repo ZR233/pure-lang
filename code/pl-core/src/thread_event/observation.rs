@@ -167,6 +167,17 @@ fn runtime_snapshot(
     let completion_tokens = prior
         .map_or(0, |usage| usage.completion_tokens)
         .saturating_add(delta.usage.completion_tokens);
+    let cache_write_tokens = prior
+        .map_or(0, |usage| usage.cache_write_tokens)
+        .saturating_add(delta.usage.cache_write_tokens)
+        .min(prompt_tokens.saturating_sub(cached_prompt_tokens));
+    let cache_miss_tokens = prompt_tokens.saturating_sub(cached_prompt_tokens);
+    let reasoning_tokens = prior
+        .map_or(0, |usage| usage.reasoning_tokens)
+        .saturating_add(delta.usage.reasoning_tokens);
+    let inference_count = prior
+        .map_or(0, |usage| usage.inference_count)
+        .saturating_add(delta.usage.inference_count);
     let total_tokens = prior
         .map_or(0, |usage| usage.total_tokens)
         .saturating_add(delta.usage.total_tokens);
@@ -180,6 +191,10 @@ fn runtime_snapshot(
             prompt_tokens,
             completion_tokens,
             cached_prompt_tokens,
+            cache_write_tokens,
+            cache_miss_tokens,
+            reasoning_tokens,
+            inference_count,
             total_tokens,
             cache_hit_rate: (prompt_tokens > 0)
                 .then_some((cached_prompt_tokens as f64 / prompt_tokens as f64).clamp(0.0, 1.0)),
@@ -187,8 +202,21 @@ fn runtime_snapshot(
                 prior.map_or(&[], |usage| usage.estimated_costs.as_slice()),
                 &delta.estimated_costs,
             ),
+            estimated_cache_savings: merge_costs(
+                prior.map_or(&[], |usage| usage.estimated_cache_savings.as_slice()),
+                &delta.estimated_cache_savings,
+            ),
             has_unpriced_usage: prior.is_some_and(|usage| usage.has_unpriced_usage)
                 || delta.has_unpriced_usage,
+            prompt_generation: delta
+                .prompt_generation
+                .or_else(|| prior.and_then(|usage| usage.prompt_generation)),
+            prompt_cache_policy: delta
+                .prompt_cache_policy
+                .or_else(|| prior.and_then(|usage| usage.prompt_cache_policy.clone())),
+            prefix_changed_reason: delta
+                .prefix_changed_reason
+                .or_else(|| prior.and_then(|usage| usage.prefix_changed_reason)),
             updated_at: delta.updated_at,
         },
         todo: previous.and_then(|runtime| runtime.todo.clone()),
@@ -213,10 +241,18 @@ fn empty_runtime(thread_id: &str) -> ThreadRuntimeSnapshot {
             prompt_tokens: 0,
             completion_tokens: 0,
             cached_prompt_tokens: 0,
+            cache_write_tokens: 0,
+            cache_miss_tokens: 0,
+            reasoning_tokens: 0,
+            inference_count: 0,
             total_tokens: 0,
             cache_hit_rate: None,
             estimated_costs: Vec::new(),
+            estimated_cache_savings: Vec::new(),
             has_unpriced_usage: false,
+            prompt_generation: None,
+            prompt_cache_policy: None,
+            prefix_changed_reason: None,
             updated_at: 0,
         },
         todo: None,

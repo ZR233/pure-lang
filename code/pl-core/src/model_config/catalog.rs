@@ -360,6 +360,7 @@ pub fn provider_service_capabilities_descriptor(
                 .standalone
                 .map(|dialect| dialect.as_str().to_string()),
         },
+        prompt_cache_dialect: capabilities.prompt_cache.dialect.as_str().to_string(),
     }
 }
 
@@ -419,6 +420,7 @@ fn model_descriptor(model: &ModelInfo) -> ModelDescriptor {
         input_per_mtok: model.input_price_per_mtok,
         output_per_mtok: model.output_price_per_mtok,
         cache_read_per_mtok: model.cache_read_price_per_mtok,
+        cache_write_per_mtok: model.cache_write_price_per_mtok,
     });
     ModelDescriptor {
         id: model.slug.clone(),

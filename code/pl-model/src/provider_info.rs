@@ -53,6 +53,74 @@ pub struct WebSearchProviderCapabilities {
 pub struct ProviderServiceCapabilities {
     #[serde(default)]
     pub web_search: WebSearchProviderCapabilities,
+    #[serde(default)]
+    pub prompt_cache: PromptCacheProviderCapabilities,
+}
+
+/// Provider endpoint 的提示词缓存 dialect。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PromptCacheDialect {
+    #[default]
+    None,
+    ImplicitPrefix,
+    OpenAiPromptCacheKey,
+}
+
+impl PromptCacheDialect {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::ImplicitPrefix => "implicit_prefix",
+            Self::OpenAiPromptCacheKey => "open_ai_prompt_cache_key",
+        }
+    }
+}
+
+impl std::str::FromStr for PromptCacheDialect {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "none" => Ok(Self::None),
+            "implicit_prefix" => Ok(Self::ImplicitPrefix),
+            "open_ai_prompt_cache_key" => Ok(Self::OpenAiPromptCacheKey),
+            value => Err(format!("unsupported prompt cache dialect: {value}")),
+        }
+    }
+}
+
+/// Provider endpoint 可提供的提示词缓存能力。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PromptCacheProviderCapabilities {
+    #[serde(default)]
+    pub dialect: PromptCacheDialect,
+}
+
+/// 当前 provider、wire 与 model 合成后的缓存策略。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum EffectivePromptCachePolicy {
+    #[default]
+    None,
+    ImplicitPrefix,
+    OpenAiPromptCacheKey {
+        cache_write_tokens: bool,
+    },
+}
+
+impl EffectivePromptCachePolicy {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::ImplicitPrefix => "implicitPrefix",
+            Self::OpenAiPromptCacheKey { .. } => "openAiPromptCacheKey",
+        }
+    }
+
+    pub const fn uses_prompt_cache_key(self) -> bool {
+        matches!(self, Self::OpenAiPromptCacheKey { .. })
+    }
 }
 
 impl ProviderServiceCapabilities {
@@ -62,6 +130,9 @@ impl ProviderServiceCapabilities {
             web_search: WebSearchProviderCapabilities {
                 hosted_responses: true,
                 standalone: Some(StandaloneWebSearchDialect::OpenAiSearchApi),
+            },
+            prompt_cache: PromptCacheProviderCapabilities {
+                dialect: PromptCacheDialect::OpenAiPromptCacheKey,
             },
         }
     }
@@ -146,6 +217,26 @@ impl ProviderInfo {
         Self::deepseek(None)
     }
 
+    pub fn effective_prompt_cache_policy(
+        &self,
+        model: &crate::ModelInfo,
+    ) -> EffectivePromptCachePolicy {
+        match (
+            self.protocol,
+            self.service_capabilities.prompt_cache.dialect,
+        ) {
+            (ProviderWireProtocol::ChatCompletions, PromptCacheDialect::ImplicitPrefix) => {
+                EffectivePromptCachePolicy::ImplicitPrefix
+            }
+            (ProviderWireProtocol::Responses, PromptCacheDialect::OpenAiPromptCacheKey) => {
+                EffectivePromptCachePolicy::OpenAiPromptCacheKey {
+                    cache_write_tokens: model.capabilities.prompt_cache.cache_write_tokens,
+                }
+            }
+            _ => EffectivePromptCachePolicy::None,
+        }
+    }
+
     pub fn openai(base_url: Option<String>) -> Self {
         Self {
             protocol: ProviderWireProtocol::Responses,
@@ -172,7 +263,12 @@ impl ProviderInfo {
             http_headers: None,
             tool_wire_policy: ToolWirePolicy::FunctionFallback,
             apply_patch_tool_type: None,
-            service_capabilities: ProviderServiceCapabilities::default(),
+            service_capabilities: ProviderServiceCapabilities {
+                prompt_cache: PromptCacheProviderCapabilities {
+                    dialect: PromptCacheDialect::ImplicitPrefix,
+                },
+                ..ProviderServiceCapabilities::default()
+            },
         }
     }
 
@@ -369,6 +465,49 @@ mod tests {
         assert_eq!(info.connection_mode, ProviderConnectionMode::Http);
         assert_eq!(info.tool_wire_policy, ToolWirePolicy::FunctionFallback);
         assert_eq!(info.apply_patch_tool_type, None);
+    }
+
+    #[test]
+    fn effective_prompt_cache_policy_requires_provider_wire_and_model_capability() {
+        let deepseek = ProviderInfo::deepseek(None);
+        let openai = ProviderInfo::openai(None);
+        let compatible = ProviderInfo::responses_compatible(
+            "Gateway",
+            "https://gateway.example/v1",
+            "gpt-5.6-sol",
+        );
+        let chat_compatible = ProviderInfo::openai_compatible_chat(
+            "Chat Gateway",
+            "https://chat.example/v1",
+            "gpt-5.6-sol",
+        );
+        let deepseek_model = crate::default_models()
+            .into_iter()
+            .find(|model| model.slug == "deepseek-v4-flash")
+            .unwrap();
+        let openai_model = crate::default_models()
+            .into_iter()
+            .find(|model| model.slug == "gpt-5.6-sol")
+            .unwrap();
+
+        assert_eq!(
+            deepseek.effective_prompt_cache_policy(&deepseek_model),
+            EffectivePromptCachePolicy::ImplicitPrefix
+        );
+        assert_eq!(
+            openai.effective_prompt_cache_policy(&openai_model),
+            EffectivePromptCachePolicy::OpenAiPromptCacheKey {
+                cache_write_tokens: true,
+            }
+        );
+        assert_eq!(
+            compatible.effective_prompt_cache_policy(&openai_model),
+            EffectivePromptCachePolicy::None
+        );
+        assert_eq!(
+            chat_compatible.effective_prompt_cache_policy(&openai_model),
+            EffectivePromptCachePolicy::None
+        );
     }
 
     #[test]

@@ -241,6 +241,11 @@ fn token_usage(value: &Value) -> Result<TokenUsage> {
             .and_then(Value::as_u64)
             .unwrap_or(input + output),
         cached_prompt_tokens: cached,
+        cache_write_tokens: value
+            .get("input_tokens_details")
+            .and_then(|details| details.get("cache_write_tokens"))
+            .and_then(Value::as_u64)
+            .unwrap_or_default(),
         reasoning_tokens: 0,
     })
 }

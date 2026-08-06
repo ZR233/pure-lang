@@ -5,11 +5,11 @@ pub(crate) use interaction::interaction as bridge_interaction;
 use anyhow::Result;
 use pl_protocol::{
     AgentMessageChannel, McpAvailabilityDescriptor, McpHealthSnapshot, McpServerDescriptor,
-    RuntimeCostAmount, Thread, ThreadAttachment, ThreadItem, ThreadItemContent, ThreadItemDelta,
-    ThreadItemDeltaField, ThreadItemStatus, ThreadMode, ThreadNotification,
-    ThreadNotificationEnvelope, ThreadRuntimeSnapshot, ThreadRuntimeUsage, ThreadSnapshot,
-    ThreadStatus, ThreadSubscriptionUpdate, ThreadToolCall, TodoItem, TodoListSnapshot, TodoStatus,
-    TokenUsageSnapshot, Turn, TurnPhase, TurnState,
+    PromptPrefixChangedReason, RuntimeCostAmount, Thread, ThreadAttachment, ThreadItem,
+    ThreadItemContent, ThreadItemDelta, ThreadItemDeltaField, ThreadItemStatus, ThreadMode,
+    ThreadNotification, ThreadNotificationEnvelope, ThreadRuntimeSnapshot, ThreadRuntimeUsage,
+    ThreadSnapshot, ThreadStatus, ThreadSubscriptionUpdate, ThreadToolCall, TodoItem,
+    TodoListSnapshot, TodoStatus, TokenUsageSnapshot, Turn, TurnPhase, TurnState,
 };
 
 use crate::api::studio::types::*;
@@ -304,6 +304,10 @@ fn runtime_usage(value: ThreadRuntimeUsage) -> BridgeThreadRuntimeUsage {
         prompt_tokens: value.prompt_tokens,
         completion_tokens: value.completion_tokens,
         cached_prompt_tokens: value.cached_prompt_tokens,
+        cache_write_tokens: value.cache_write_tokens,
+        cache_miss_tokens: value.cache_miss_tokens,
+        reasoning_tokens: value.reasoning_tokens,
+        inference_count: value.inference_count,
         total_tokens: value.total_tokens,
         cache_hit_rate: value.cache_hit_rate,
         estimated_costs: value
@@ -311,8 +315,63 @@ fn runtime_usage(value: ThreadRuntimeUsage) -> BridgeThreadRuntimeUsage {
             .into_iter()
             .map(runtime_cost)
             .collect(),
+        estimated_cache_savings: value
+            .estimated_cache_savings
+            .into_iter()
+            .map(runtime_cost)
+            .collect(),
         has_unpriced_usage: value.has_unpriced_usage,
+        prompt_generation: value.prompt_generation,
+        prompt_cache_policy: value.prompt_cache_policy,
+        prefix_changed_reason: value
+            .prefix_changed_reason
+            .map(prompt_prefix_changed_reason),
         updated_at: value.updated_at,
+    }
+}
+
+fn prompt_prefix_changed_reason(
+    value: PromptPrefixChangedReason,
+) -> BridgePromptPrefixChangedReason {
+    match value {
+        PromptPrefixChangedReason::Initial => BridgePromptPrefixChangedReason::Initial,
+        PromptPrefixChangedReason::PromptScopeChanged => {
+            BridgePromptPrefixChangedReason::PromptScopeChanged
+        }
+        PromptPrefixChangedReason::ProviderChanged => {
+            BridgePromptPrefixChangedReason::ProviderChanged
+        }
+        PromptPrefixChangedReason::ModelChanged => BridgePromptPrefixChangedReason::ModelChanged,
+        PromptPrefixChangedReason::BaseInstructionsChanged => {
+            BridgePromptPrefixChangedReason::BaseInstructionsChanged
+        }
+        PromptPrefixChangedReason::GlobalInstructionsChanged => {
+            BridgePromptPrefixChangedReason::GlobalInstructionsChanged
+        }
+        PromptPrefixChangedReason::ModeRoleChanged => {
+            BridgePromptPrefixChangedReason::ModeRoleChanged
+        }
+        PromptPrefixChangedReason::SkillCatalogChanged => {
+            BridgePromptPrefixChangedReason::SkillCatalogChanged
+        }
+        PromptPrefixChangedReason::WorkspaceInstructionsChanged => {
+            BridgePromptPrefixChangedReason::WorkspaceInstructionsChanged
+        }
+        PromptPrefixChangedReason::RequestPropertiesChanged => {
+            BridgePromptPrefixChangedReason::RequestPropertiesChanged
+        }
+        PromptPrefixChangedReason::FixedPrefixChanged => {
+            BridgePromptPrefixChangedReason::FixedPrefixChanged
+        }
+        PromptPrefixChangedReason::ToolSchemaChanged => {
+            BridgePromptPrefixChangedReason::ToolSchemaChanged
+        }
+        PromptPrefixChangedReason::ContextCompacted => {
+            BridgePromptPrefixChangedReason::ContextCompacted
+        }
+        PromptPrefixChangedReason::ContextAppended => {
+            BridgePromptPrefixChangedReason::ContextAppended
+        }
     }
 }
 

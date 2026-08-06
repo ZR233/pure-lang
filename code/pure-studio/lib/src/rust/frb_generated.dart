@@ -2136,6 +2136,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgePromptPrefixChangedReason
+  dco_decode_box_autoadd_bridge_prompt_prefix_changed_reason(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_bridge_prompt_prefix_changed_reason(raw);
+  }
+
+  @protected
   BridgeStudioUpdateDto dco_decode_box_autoadd_bridge_studio_update_dto(
     dynamic raw,
   ) {
@@ -2673,13 +2680,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeModelPricing dco_decode_bridge_model_pricing(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 4)
-      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
     return BridgeModelPricing(
       currency: dco_decode_String(arr[0]),
       inputPerMtok: dco_decode_opt_box_autoadd_f_64(arr[1]),
       outputPerMtok: dco_decode_opt_box_autoadd_f_64(arr[2]),
       cacheReadPerMtok: dco_decode_opt_box_autoadd_f_64(arr[3]),
+      cacheWritePerMtok: dco_decode_opt_box_autoadd_f_64(arr[4]),
     );
   }
 
@@ -2783,6 +2791,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgePromptPrefixChangedReason
+  dco_decode_bridge_prompt_prefix_changed_reason(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return BridgePromptPrefixChangedReason.values[raw as int];
+  }
+
+  @protected
   BridgeProviderCatalogSnapshot dco_decode_bridge_provider_catalog_snapshot(
     dynamic raw,
   ) {
@@ -2817,8 +2832,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 11)
-      throw Exception('unexpected arr length: expect 11 but see ${arr.length}');
+    if (arr.length != 12)
+      throw Exception('unexpected arr length: expect 12 but see ${arr.length}');
     return BridgeProviderModelSettingsDto(
       slug: dco_decode_String(arr[0]),
       displayName: dco_decode_String(arr[1]),
@@ -2829,8 +2844,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       inputPricePerMTok: dco_decode_opt_box_autoadd_f_64(arr[6]),
       outputPricePerMTok: dco_decode_opt_box_autoadd_f_64(arr[7]),
       cacheReadPricePerMTok: dco_decode_opt_box_autoadd_f_64(arr[8]),
-      reasoningEfforts: dco_decode_list_String(arr[9]),
-      baseInstructions: dco_decode_String(arr[10]),
+      cacheWritePricePerMTok: dco_decode_opt_box_autoadd_f_64(arr[9]),
+      reasoningEfforts: dco_decode_list_String(arr[10]),
+      baseInstructions: dco_decode_String(arr[11]),
     );
   }
 
@@ -2863,12 +2879,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   dco_decode_bridge_provider_service_capabilities_descriptor(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 1)
-      throw Exception('unexpected arr length: expect 1 but see ${arr.length}');
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
     return BridgeProviderServiceCapabilitiesDescriptor(
       webSearch: dco_decode_bridge_web_search_provider_capabilities_descriptor(
         arr[0],
       ),
+      promptCacheDialect: dco_decode_String(arr[1]),
     );
   }
 
@@ -2878,8 +2895,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 14)
-      throw Exception('unexpected arr length: expect 14 but see ${arr.length}');
+    if (arr.length != 15)
+      throw Exception('unexpected arr length: expect 15 but see ${arr.length}');
     return BridgeProviderSettingsDto(
       id: dco_decode_String(arr[0]),
       templateKind: dco_decode_String(arr[1]),
@@ -2891,10 +2908,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       capabilitySource: dco_decode_String(arr[7]),
       hostedWebSearch: dco_decode_bool(arr[8]),
       standaloneWebSearch: dco_decode_opt_String(arr[9]),
-      defaultModel: dco_decode_String(arr[10]),
-      models: dco_decode_list_bridge_provider_model_settings_dto(arr[11]),
-      customModels: dco_decode_list_bridge_provider_model_settings_dto(arr[12]),
-      catalogId: dco_decode_opt_String(arr[13]),
+      promptCacheDialect: dco_decode_String(arr[10]),
+      defaultModel: dco_decode_String(arr[11]),
+      models: dco_decode_list_bridge_provider_model_settings_dto(arr[12]),
+      customModels: dco_decode_list_bridge_provider_model_settings_dto(arr[13]),
+      catalogId: dco_decode_opt_String(arr[14]),
     );
   }
 
@@ -3573,8 +3591,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeThreadRuntimeUsage dco_decode_bridge_thread_runtime_usage(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 11)
-      throw Exception('unexpected arr length: expect 11 but see ${arr.length}');
+    if (arr.length != 19)
+      throw Exception('unexpected arr length: expect 19 but see ${arr.length}');
     return BridgeThreadRuntimeUsage(
       model: dco_decode_String(arr[0]),
       contextWindow: dco_decode_opt_box_autoadd_u_64(arr[1]),
@@ -3582,11 +3600,24 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       promptTokens: dco_decode_u_64(arr[3]),
       completionTokens: dco_decode_u_64(arr[4]),
       cachedPromptTokens: dco_decode_u_64(arr[5]),
-      totalTokens: dco_decode_u_64(arr[6]),
-      cacheHitRate: dco_decode_opt_box_autoadd_f_64(arr[7]),
-      estimatedCosts: dco_decode_list_bridge_runtime_cost_amount(arr[8]),
-      hasUnpricedUsage: dco_decode_bool(arr[9]),
-      updatedAt: dco_decode_i_64(arr[10]),
+      cacheWriteTokens: dco_decode_u_64(arr[6]),
+      cacheMissTokens: dco_decode_u_64(arr[7]),
+      reasoningTokens: dco_decode_u_64(arr[8]),
+      inferenceCount: dco_decode_u_64(arr[9]),
+      totalTokens: dco_decode_u_64(arr[10]),
+      cacheHitRate: dco_decode_opt_box_autoadd_f_64(arr[11]),
+      estimatedCosts: dco_decode_list_bridge_runtime_cost_amount(arr[12]),
+      estimatedCacheSavings: dco_decode_list_bridge_runtime_cost_amount(
+        arr[13],
+      ),
+      hasUnpricedUsage: dco_decode_bool(arr[14]),
+      promptGeneration: dco_decode_opt_box_autoadd_u_64(arr[15]),
+      promptCachePolicy: dco_decode_opt_String(arr[16]),
+      prefixChangedReason:
+          dco_decode_opt_box_autoadd_bridge_prompt_prefix_changed_reason(
+            arr[17],
+          ),
+      updatedAt: dco_decode_i_64(arr[18]),
     );
   }
 
@@ -4393,6 +4424,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgePromptPrefixChangedReason?
+  dco_decode_opt_box_autoadd_bridge_prompt_prefix_changed_reason(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null
+        ? null
+        : dco_decode_box_autoadd_bridge_prompt_prefix_changed_reason(raw);
+  }
+
+  @protected
   BridgeTaskRuntimeDto? dco_decode_opt_box_autoadd_bridge_task_runtime_dto(
     dynamic raw,
   ) {
@@ -4529,8 +4569,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ProviderInput dco_decode_provider_input(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 13)
-      throw Exception('unexpected arr length: expect 13 but see ${arr.length}');
+    if (arr.length != 14)
+      throw Exception('unexpected arr length: expect 14 but see ${arr.length}');
     return ProviderInput(
       id: dco_decode_String(arr[0]),
       originalId: dco_decode_opt_String(arr[1]),
@@ -4543,8 +4583,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       capabilitySource: dco_decode_String(arr[8]),
       hostedWebSearch: dco_decode_bool(arr[9]),
       standaloneWebSearch: dco_decode_opt_String(arr[10]),
-      defaultModel: dco_decode_String(arr[11]),
-      customModels: dco_decode_list_provider_model_input(arr[12]),
+      promptCacheDialect: dco_decode_String(arr[11]),
+      defaultModel: dco_decode_String(arr[12]),
+      customModels: dco_decode_list_provider_model_input(arr[13]),
     );
   }
 
@@ -4994,6 +5035,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_bridge_product_event_envelope(deserializer));
+  }
+
+  @protected
+  BridgePromptPrefixChangedReason
+  sse_decode_box_autoadd_bridge_prompt_prefix_changed_reason(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_bridge_prompt_prefix_changed_reason(deserializer));
   }
 
   @protected
@@ -5648,11 +5698,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_inputPerMtok = sse_decode_opt_box_autoadd_f_64(deserializer);
     var var_outputPerMtok = sse_decode_opt_box_autoadd_f_64(deserializer);
     var var_cacheReadPerMtok = sse_decode_opt_box_autoadd_f_64(deserializer);
+    var var_cacheWritePerMtok = sse_decode_opt_box_autoadd_f_64(deserializer);
     return BridgeModelPricing(
       currency: var_currency,
       inputPerMtok: var_inputPerMtok,
       outputPerMtok: var_outputPerMtok,
       cacheReadPerMtok: var_cacheReadPerMtok,
+      cacheWritePerMtok: var_cacheWritePerMtok,
     );
   }
 
@@ -5773,6 +5825,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgePromptPrefixChangedReason
+  sse_decode_bridge_prompt_prefix_changed_reason(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_i_32(deserializer);
+    return BridgePromptPrefixChangedReason.values[inner];
+  }
+
+  @protected
   BridgeProviderCatalogSnapshot sse_decode_bridge_provider_catalog_snapshot(
     SseDeserializer deserializer,
   ) {
@@ -5823,6 +5883,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_cacheReadPricePerMTok = sse_decode_opt_box_autoadd_f_64(
       deserializer,
     );
+    var var_cacheWritePricePerMTok = sse_decode_opt_box_autoadd_f_64(
+      deserializer,
+    );
     var var_reasoningEfforts = sse_decode_list_String(deserializer);
     var var_baseInstructions = sse_decode_String(deserializer);
     return BridgeProviderModelSettingsDto(
@@ -5835,6 +5898,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       inputPricePerMTok: var_inputPricePerMTok,
       outputPricePerMTok: var_outputPricePerMTok,
       cacheReadPricePerMTok: var_cacheReadPricePerMTok,
+      cacheWritePricePerMTok: var_cacheWritePricePerMTok,
       reasoningEfforts: var_reasoningEfforts,
       baseInstructions: var_baseInstructions,
     );
@@ -5886,8 +5950,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_decode_bridge_web_search_provider_capabilities_descriptor(
           deserializer,
         );
+    var var_promptCacheDialect = sse_decode_String(deserializer);
     return BridgeProviderServiceCapabilitiesDescriptor(
       webSearch: var_webSearch,
+      promptCacheDialect: var_promptCacheDialect,
     );
   }
 
@@ -5906,6 +5972,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_capabilitySource = sse_decode_String(deserializer);
     var var_hostedWebSearch = sse_decode_bool(deserializer);
     var var_standaloneWebSearch = sse_decode_opt_String(deserializer);
+    var var_promptCacheDialect = sse_decode_String(deserializer);
     var var_defaultModel = sse_decode_String(deserializer);
     var var_models = sse_decode_list_bridge_provider_model_settings_dto(
       deserializer,
@@ -5925,6 +5992,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       capabilitySource: var_capabilitySource,
       hostedWebSearch: var_hostedWebSearch,
       standaloneWebSearch: var_standaloneWebSearch,
+      promptCacheDialect: var_promptCacheDialect,
       defaultModel: var_defaultModel,
       models: var_models,
       customModels: var_customModels,
@@ -6821,12 +6889,25 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_promptTokens = sse_decode_u_64(deserializer);
     var var_completionTokens = sse_decode_u_64(deserializer);
     var var_cachedPromptTokens = sse_decode_u_64(deserializer);
+    var var_cacheWriteTokens = sse_decode_u_64(deserializer);
+    var var_cacheMissTokens = sse_decode_u_64(deserializer);
+    var var_reasoningTokens = sse_decode_u_64(deserializer);
+    var var_inferenceCount = sse_decode_u_64(deserializer);
     var var_totalTokens = sse_decode_u_64(deserializer);
     var var_cacheHitRate = sse_decode_opt_box_autoadd_f_64(deserializer);
     var var_estimatedCosts = sse_decode_list_bridge_runtime_cost_amount(
       deserializer,
     );
+    var var_estimatedCacheSavings = sse_decode_list_bridge_runtime_cost_amount(
+      deserializer,
+    );
     var var_hasUnpricedUsage = sse_decode_bool(deserializer);
+    var var_promptGeneration = sse_decode_opt_box_autoadd_u_64(deserializer);
+    var var_promptCachePolicy = sse_decode_opt_String(deserializer);
+    var var_prefixChangedReason =
+        sse_decode_opt_box_autoadd_bridge_prompt_prefix_changed_reason(
+          deserializer,
+        );
     var var_updatedAt = sse_decode_i_64(deserializer);
     return BridgeThreadRuntimeUsage(
       model: var_model,
@@ -6835,10 +6916,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       promptTokens: var_promptTokens,
       completionTokens: var_completionTokens,
       cachedPromptTokens: var_cachedPromptTokens,
+      cacheWriteTokens: var_cacheWriteTokens,
+      cacheMissTokens: var_cacheMissTokens,
+      reasoningTokens: var_reasoningTokens,
+      inferenceCount: var_inferenceCount,
       totalTokens: var_totalTokens,
       cacheHitRate: var_cacheHitRate,
       estimatedCosts: var_estimatedCosts,
+      estimatedCacheSavings: var_estimatedCacheSavings,
       hasUnpricedUsage: var_hasUnpricedUsage,
+      promptGeneration: var_promptGeneration,
+      promptCachePolicy: var_promptCachePolicy,
+      prefixChangedReason: var_prefixChangedReason,
       updatedAt: var_updatedAt,
     );
   }
@@ -7970,6 +8059,22 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgePromptPrefixChangedReason?
+  sse_decode_opt_box_autoadd_bridge_prompt_prefix_changed_reason(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_bridge_prompt_prefix_changed_reason(
+        deserializer,
+      ));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
   BridgeTaskRuntimeDto? sse_decode_opt_box_autoadd_bridge_task_runtime_dto(
     SseDeserializer deserializer,
   ) {
@@ -8192,6 +8297,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_capabilitySource = sse_decode_String(deserializer);
     var var_hostedWebSearch = sse_decode_bool(deserializer);
     var var_standaloneWebSearch = sse_decode_opt_String(deserializer);
+    var var_promptCacheDialect = sse_decode_String(deserializer);
     var var_defaultModel = sse_decode_String(deserializer);
     var var_customModels = sse_decode_list_provider_model_input(deserializer);
     return ProviderInput(
@@ -8206,6 +8312,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       capabilitySource: var_capabilitySource,
       hostedWebSearch: var_hostedWebSearch,
       standaloneWebSearch: var_standaloneWebSearch,
+      promptCacheDialect: var_promptCacheDialect,
       defaultModel: var_defaultModel,
       customModels: var_customModels,
     );
@@ -8741,6 +8848,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_bridge_product_event_envelope(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_bridge_prompt_prefix_changed_reason(
+    BridgePromptPrefixChangedReason self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bridge_prompt_prefix_changed_reason(self, serializer);
   }
 
   @protected
@@ -9315,6 +9431,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_box_autoadd_f_64(self.inputPerMtok, serializer);
     sse_encode_opt_box_autoadd_f_64(self.outputPerMtok, serializer);
     sse_encode_opt_box_autoadd_f_64(self.cacheReadPerMtok, serializer);
+    sse_encode_opt_box_autoadd_f_64(self.cacheWritePerMtok, serializer);
   }
 
   @protected
@@ -9410,6 +9527,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_bridge_prompt_prefix_changed_reason(
+    BridgePromptPrefixChangedReason self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.index, serializer);
+  }
+
+  @protected
   void sse_encode_bridge_provider_catalog_snapshot(
     BridgeProviderCatalogSnapshot self,
     SseSerializer serializer,
@@ -9449,6 +9575,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_box_autoadd_f_64(self.inputPricePerMTok, serializer);
     sse_encode_opt_box_autoadd_f_64(self.outputPricePerMTok, serializer);
     sse_encode_opt_box_autoadd_f_64(self.cacheReadPricePerMTok, serializer);
+    sse_encode_opt_box_autoadd_f_64(self.cacheWritePricePerMTok, serializer);
     sse_encode_list_String(self.reasoningEfforts, serializer);
     sse_encode_String(self.baseInstructions, serializer);
   }
@@ -9485,6 +9612,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       self.webSearch,
       serializer,
     );
+    sse_encode_String(self.promptCacheDialect, serializer);
   }
 
   @protected
@@ -9503,6 +9631,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.capabilitySource, serializer);
     sse_encode_bool(self.hostedWebSearch, serializer);
     sse_encode_opt_String(self.standaloneWebSearch, serializer);
+    sse_encode_String(self.promptCacheDialect, serializer);
     sse_encode_String(self.defaultModel, serializer);
     sse_encode_list_bridge_provider_model_settings_dto(self.models, serializer);
     sse_encode_list_bridge_provider_model_settings_dto(
@@ -10164,10 +10293,24 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_u_64(self.promptTokens, serializer);
     sse_encode_u_64(self.completionTokens, serializer);
     sse_encode_u_64(self.cachedPromptTokens, serializer);
+    sse_encode_u_64(self.cacheWriteTokens, serializer);
+    sse_encode_u_64(self.cacheMissTokens, serializer);
+    sse_encode_u_64(self.reasoningTokens, serializer);
+    sse_encode_u_64(self.inferenceCount, serializer);
     sse_encode_u_64(self.totalTokens, serializer);
     sse_encode_opt_box_autoadd_f_64(self.cacheHitRate, serializer);
     sse_encode_list_bridge_runtime_cost_amount(self.estimatedCosts, serializer);
+    sse_encode_list_bridge_runtime_cost_amount(
+      self.estimatedCacheSavings,
+      serializer,
+    );
     sse_encode_bool(self.hasUnpricedUsage, serializer);
+    sse_encode_opt_box_autoadd_u_64(self.promptGeneration, serializer);
+    sse_encode_opt_String(self.promptCachePolicy, serializer);
+    sse_encode_opt_box_autoadd_bridge_prompt_prefix_changed_reason(
+      self.prefixChangedReason,
+      serializer,
+    );
     sse_encode_i_64(self.updatedAt, serializer);
   }
 
@@ -11108,6 +11251,22 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_opt_box_autoadd_bridge_prompt_prefix_changed_reason(
+    BridgePromptPrefixChangedReason? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_bridge_prompt_prefix_changed_reason(
+        self,
+        serializer,
+      );
+    }
+  }
+
+  @protected
   void sse_encode_opt_box_autoadd_bridge_task_runtime_dto(
     BridgeTaskRuntimeDto? self,
     SseSerializer serializer,
@@ -11316,6 +11475,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.capabilitySource, serializer);
     sse_encode_bool(self.hostedWebSearch, serializer);
     sse_encode_opt_String(self.standaloneWebSearch, serializer);
+    sse_encode_String(self.promptCacheDialect, serializer);
     sse_encode_String(self.defaultModel, serializer);
     sse_encode_list_provider_model_input(self.customModels, serializer);
   }

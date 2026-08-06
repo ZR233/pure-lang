@@ -48,6 +48,44 @@ void registerStatusAccessibilityTests() {
       expect(find.text('42 / 100'), findsOneWidget);
     });
 
+    testWidgets('cache readout exposes aggregate billing details', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _localizedApp(
+          home: const Scaffold(
+            body: Align(
+              alignment: Alignment.bottomLeft,
+              child: ContextUsageReadout(runtime: _cacheRuntime),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Cache 40%'), findsOneWidget);
+      final contextButton = find.bySemanticsLabel('Context');
+      expect(
+        tester.getSemantics(contextButton).getSemanticsData().value,
+        '42%, Cache 40%',
+      );
+
+      await tester.tap(contextButton);
+      await tester.pumpAndSettle();
+
+      for (final value in [
+        '400',
+        '600',
+        '50',
+        '75',
+        '3',
+        'USD 0.0025 · Partially unpriced',
+        'USD 0.0012',
+      ]) {
+        expect(find.text(value), findsOneWidget, reason: value);
+      }
+    });
+
     testWidgets('context detail keeps hover behavior and shared radius', (
       tester,
     ) async {
@@ -201,4 +239,30 @@ const _contextRuntime = ThreadRuntimeView(
   activeMcpServers: [],
   activeLspServers: [],
   agentCount: 0,
+);
+
+const _cacheRuntime = ThreadRuntimeView(
+  model: 'gpt-5.6-sol',
+  contextTokens: 42,
+  contextWindow: 100,
+  totalTokens: 1200,
+  costLabel: 'USD 0.0025',
+  activeSkills: [],
+  activeMcpServers: [],
+  activeLspServers: [],
+  agentCount: 0,
+  promptTokens: 1000,
+  completionTokens: 200,
+  cachedPromptTokens: 400,
+  cacheWriteTokens: 50,
+  cacheMissTokens: 600,
+  reasoningTokens: 75,
+  inferenceCount: 3,
+  cacheHitRate: 0.4,
+  estimatedCosts: [RuntimeCostView(currency: 'USD', amount: 0.0025)],
+  estimatedCacheSavings: [RuntimeCostView(currency: 'USD', amount: 0.0012)],
+  hasUnpricedUsage: true,
+  promptGeneration: 2,
+  promptCachePolicy: 'openAiPromptCacheKey',
+  prefixChangedReason: 'contextAppended',
 );

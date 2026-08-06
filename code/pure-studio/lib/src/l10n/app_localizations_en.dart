@@ -221,6 +221,30 @@ class AppLocalizationsEn extends AppLocalizations {
   String get statusContextLabel => 'Context';
 
   @override
+  String get statusCacheLabel => 'Cache';
+
+  @override
+  String get statusCacheHitTokensLabel => 'Cache read';
+
+  @override
+  String get statusCacheMissTokensLabel => 'Cache miss';
+
+  @override
+  String get statusCacheWriteTokensLabel => 'Cache write';
+
+  @override
+  String get statusReasoningTokensLabel => 'Reasoning tokens';
+
+  @override
+  String get statusInferenceCountLabel => 'Inferences';
+
+  @override
+  String get statusCacheSavingsLabel => 'Cache savings';
+
+  @override
+  String get statusUnpricedUsageLabel => 'Partially unpriced';
+
+  @override
   String get statusTurnQueued => 'Queued';
 
   @override

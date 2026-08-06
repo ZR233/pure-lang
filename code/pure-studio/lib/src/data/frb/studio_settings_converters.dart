@@ -35,6 +35,7 @@ ProviderSettingsView _providerSettingsFromFrb(
     capabilitySource: value.capabilitySource,
     hostedWebSearch: value.hostedWebSearch,
     standaloneWebSearch: value.standaloneWebSearch ?? '',
+    promptCacheDialect: value.promptCacheDialect,
   );
 }
 
@@ -51,6 +52,7 @@ ProviderModelView _providerModelSettingsFromFrb(
     inputPricePerMTok: value.inputPricePerMTok,
     outputPricePerMTok: value.outputPricePerMTok,
     cacheReadPricePerMTok: value.cacheReadPricePerMTok,
+    cacheWritePricePerMTok: value.cacheWritePricePerMTok,
     baseInstructions: value.baseInstructions,
     reasoningEfforts: value.reasoningEfforts,
   );

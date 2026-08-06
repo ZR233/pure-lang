@@ -666,6 +666,8 @@ pub struct TokenUsage {
     #[serde(default)]
     pub cached_prompt_tokens: u64,
     #[serde(default)]
+    pub cache_write_tokens: u64,
+    #[serde(default)]
     pub reasoning_tokens: u64,
 }
 
@@ -744,6 +746,7 @@ mod tests {
             input: vec![ModelModality::Text],
             output: vec![ModelModality::Text],
             tools: ToolCapabilities::default(),
+            prompt_cache: Default::default(),
             interleaved: None,
         }
     }

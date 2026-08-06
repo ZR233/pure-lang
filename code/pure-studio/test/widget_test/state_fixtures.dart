@@ -18,6 +18,7 @@ const _testProviderCatalog = ProviderCatalogView(
       credentialEnv: 'DEEPSEEK_API_KEY',
       modelCatalogId: 'deepseek',
       suggestedModel: 'deepseek-v4-flash',
+      promptCacheDialect: 'implicit_prefix',
     ),
     ProviderPresetView(
       id: 'openai',
@@ -36,6 +37,7 @@ const _testProviderCatalog = ProviderCatalogView(
       suggestedModel: 'gpt-5.6-sol',
       hostedWebSearch: true,
       standaloneWebSearch: 'open_ai_search_api',
+      promptCacheDialect: 'open_ai_prompt_cache_key',
     ),
     ProviderPresetView(
       id: 'zhipu-coding-plan',
@@ -68,6 +70,7 @@ const _testProviderCatalog = ProviderCatalogView(
       suggestedModel: 'future-model',
       hostedWebSearch: true,
       standaloneWebSearch: 'future_search_dialect',
+      promptCacheDialect: 'implicit_prefix',
     ),
   ],
   modelCatalogs: {
@@ -265,6 +268,7 @@ StudioState _stateWithPlannerModels() {
         ],
         status: 'ready',
         usageLabel: '2 models',
+        promptCacheDialect: 'implicit_prefix',
       ),
     ],
     roles: const [

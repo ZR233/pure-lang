@@ -24,6 +24,8 @@ pub struct ModelInfo {
     pub input_price_per_mtok: Option<f64>,
     pub output_price_per_mtok: Option<f64>,
     pub cache_read_price_per_mtok: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_write_price_per_mtok: Option<f64>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub parameters: Vec<ModelParameter>,
 
@@ -165,6 +167,7 @@ impl ModelInfo {
             input_price_per_mtok: None,
             output_price_per_mtok: None,
             cache_read_price_per_mtok: None,
+            cache_write_price_per_mtok: None,
             parameters: Vec::new(),
             capabilities: ModelCapabilities::text_only(),
             request_profile: ModelRequestProfile::default(),

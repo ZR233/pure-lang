@@ -35,6 +35,7 @@ pub struct ModelPricing {
     pub input_per_mtok: Option<f64>,
     pub output_per_mtok: Option<f64>,
     pub cache_read_per_mtok: Option<f64>,
+    pub cache_write_per_mtok: Option<f64>,
 }
 
 impl ModelFamily {
@@ -63,6 +64,7 @@ impl ModelFamily {
             input_price_per_mtok: pricing.input_per_mtok,
             output_price_per_mtok: pricing.output_per_mtok,
             cache_read_price_per_mtok: pricing.cache_read_per_mtok,
+            cache_write_price_per_mtok: pricing.cache_write_per_mtok,
             parameters: self.parameters.clone(),
             capabilities: self.capabilities.clone(),
             request_profile: self.request_profile.clone(),

@@ -233,6 +233,7 @@ class ProvidersTabState extends ConsumerState<ProvidersTab> {
             capabilitySource: 'explicit',
             hostedWebSearch: false,
             standaloneWebSearch: '',
+            promptCacheDialect: 'none',
             iconKey: null,
           ),
         );

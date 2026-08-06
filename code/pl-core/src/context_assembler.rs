@@ -80,6 +80,7 @@ mod tests {
                 model: "deepseek-v4-flash",
                 instructions: "system",
                 prelude_messages: &[],
+                fixed_prefix_section_hashes: Default::default(),
                 tools: &[],
                 tool_choice: "auto",
                 parallel_tool_calls: false,
@@ -87,6 +88,7 @@ mod tests {
                 output_schema: None,
                 service_tier: None,
                 compacted: false,
+                prompt_cache_policy: pl_model::EffectivePromptCachePolicy::ImplicitPrefix,
                 updated_at: 1,
             },
         )

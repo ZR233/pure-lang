@@ -24,6 +24,7 @@ pub struct ProviderInput {
     pub capability_source: String,
     pub hosted_web_search: bool,
     pub standalone_web_search: Option<String>,
+    pub prompt_cache_dialect: String,
     pub default_model: String,
     pub custom_models: Vec<ProviderModelInput>,
 }
@@ -160,6 +161,7 @@ pub struct BridgeProviderSettingsDto {
     pub capability_source: String,
     pub hosted_web_search: bool,
     pub standalone_web_search: Option<String>,
+    pub prompt_cache_dialect: String,
     pub default_model: String,
     pub models: Vec<BridgeProviderModelSettingsDto>,
     pub custom_models: Vec<BridgeProviderModelSettingsDto>,
@@ -179,6 +181,7 @@ pub struct BridgeProviderModelSettingsDto {
     pub input_price_per_m_tok: Option<f64>,
     pub output_price_per_m_tok: Option<f64>,
     pub cache_read_price_per_m_tok: Option<f64>,
+    pub cache_write_price_per_m_tok: Option<f64>,
     pub reasoning_efforts: Vec<String>,
     pub base_instructions: String,
 }
@@ -278,6 +281,7 @@ pub struct BridgeProviderPresetDescriptor {
 #[derive(Debug, Clone)]
 pub struct BridgeProviderServiceCapabilitiesDescriptor {
     pub web_search: BridgeWebSearchProviderCapabilitiesDescriptor,
+    pub prompt_cache_dialect: String,
 }
 
 #[derive(Debug, Clone)]
@@ -345,6 +349,7 @@ pub struct BridgeModelPricing {
     pub input_per_mtok: Option<f64>,
     pub output_per_mtok: Option<f64>,
     pub cache_read_per_mtok: Option<f64>,
+    pub cache_write_per_mtok: Option<f64>,
 }
 
 impl From<pl_protocol::ProviderCatalogSnapshot> for BridgeProviderCatalogSnapshot {
@@ -386,6 +391,7 @@ impl From<pl_protocol::ProviderCatalogSnapshot> for BridgeProviderCatalogSnapsho
                                 .hosted_responses,
                             standalone: preset.service_capabilities.web_search.standalone,
                         },
+                        prompt_cache_dialect: preset.service_capabilities.prompt_cache_dialect,
                     },
                 })
                 .collect(),
@@ -438,6 +444,7 @@ impl From<pl_protocol::ModelDescriptor> for BridgeModelDescriptor {
                 input_per_mtok: pricing.input_per_mtok,
                 output_per_mtok: pricing.output_per_mtok,
                 cache_read_per_mtok: pricing.cache_read_per_mtok,
+                cache_write_per_mtok: pricing.cache_write_per_mtok,
             }),
         }
     }

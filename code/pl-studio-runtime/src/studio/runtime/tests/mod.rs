@@ -215,4 +215,5 @@ async fn wait_for_no_active_turn(runtime: &StudioRuntime) {
 mod config;
 mod deepseek_cache;
 mod lifecycle;
+mod openai_cache;
 mod ui_runtime;

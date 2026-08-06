@@ -71,6 +71,12 @@ resource 入口和调用 backend。Simple executor 可以使用 available tools�
 reviewer 只暴露 effect 策略明确允许的动态工具，未知 effect 默认拒绝。内置 Zhipu 工具统一声明为
 `ToolEffect::Read`。
 
+模型请求的缓存 generation 必须覆盖本 Turn 实际可见的完整工具集合。工具按模型可见名称和
+canonical JSON Schema 确定性排序；MCP、Skill、Task 与 collaboration 工具任一 schema 变化都在
+新 Turn 创建新 generation。运行中的 lease 不允许替换工具集，也不能为了缓存命中跨 Thread、
+Workspace 或权限策略复用 lease。工具结果无论成功、失败或拒绝都只追加到 durable history，
+不得重排旧输入。
+
 内置 Zhipu Coding Plan MCP server 优先复用 Zhipu Coding Plan provider 的 `bearer_token`，并兼容回退到普通 Zhipu provider 的 `bearer_token`。缺少 token 时内置 server 处于 `missingCredential`，不参与后台探测，也不应导致普通 turn 或 subagent 启动失败；检测到 token 后进入后台探测流程，只有探测成功的 server 会被主会话和 subagent runner 注册。HTTP 内置 server 在 transport 层直接发送 bearer token；stdio Vision server 在启动进程时注入 `Z_AI_API_KEY` 和 `Z_AI_MODE=ZHIPU`。
 
 每个 Turn 开始时，运行时把实际暴露给模型的工具名保留为内部诊断 trace。它只包含 Turn id、

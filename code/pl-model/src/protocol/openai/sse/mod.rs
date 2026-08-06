@@ -9,9 +9,9 @@ use pl_trace::TraceTextChannel;
 mod item;
 
 use item::{
-    assistant_message_identity, assistant_message_text, cached_tokens_from_details,
-    output_item_tool_completed, output_item_tool_started, reasoning_item_id,
-    reasoning_summary_texts, web_search_lifecycle_event,
+    assistant_message_identity, assistant_message_text, cache_write_tokens_from_details,
+    cached_tokens_from_details, output_item_tool_completed, output_item_tool_started,
+    reasoning_item_id, reasoning_summary_texts, web_search_lifecycle_event,
 };
 
 /// SSE 流事件原始结构（从 JSON 解析）
@@ -552,6 +552,16 @@ fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEventBatch> {
                             .and_then(cached_tokens_from_details)
                     })
                     .unwrap_or(0),
+                cache_write_tokens: u
+                    .input_tokens_details
+                    .as_ref()
+                    .and_then(cache_write_tokens_from_details)
+                    .or_else(|| {
+                        u.prompt_tokens_details
+                            .as_ref()
+                            .and_then(cache_write_tokens_from_details)
+                    })
+                    .unwrap_or(0),
                 reasoning_tokens: u
                     .output_tokens_details
                     .as_ref()
@@ -672,6 +682,14 @@ fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEventBatch> {
                                     .and_then(cached_tokens_from_details)
                             })
                             .or_else(|| u.get("prompt_cache_hit_tokens").and_then(|v| v.as_u64()))
+                            .unwrap_or(0),
+                        cache_write_tokens: u
+                            .get("input_tokens_details")
+                            .and_then(cache_write_tokens_from_details)
+                            .or_else(|| {
+                                u.get("prompt_tokens_details")
+                                    .and_then(cache_write_tokens_from_details)
+                            })
                             .unwrap_or(0),
                         reasoning_tokens: u
                             .get("output_tokens_details")

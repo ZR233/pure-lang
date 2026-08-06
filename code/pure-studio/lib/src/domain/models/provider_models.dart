@@ -15,6 +15,7 @@ class ProviderModelView {
     this.inputPricePerMTok,
     this.outputPricePerMTok,
     this.cacheReadPricePerMTok,
+    this.cacheWritePricePerMTok,
     this.baseInstructions = '',
   });
 
@@ -33,6 +34,7 @@ class ProviderModelView {
   final double? inputPricePerMTok;
   final double? outputPricePerMTok;
   final double? cacheReadPricePerMTok;
+  final double? cacheWritePricePerMTok;
   final String baseInstructions;
 
   ProviderModelView copyWith({
@@ -51,6 +53,7 @@ class ProviderModelView {
     double? inputPricePerMTok,
     double? outputPricePerMTok,
     double? cacheReadPricePerMTok,
+    double? cacheWritePricePerMTok,
     String? baseInstructions,
   }) {
     return ProviderModelView(
@@ -71,6 +74,8 @@ class ProviderModelView {
       outputPricePerMTok: outputPricePerMTok ?? this.outputPricePerMTok,
       cacheReadPricePerMTok:
           cacheReadPricePerMTok ?? this.cacheReadPricePerMTok,
+      cacheWritePricePerMTok:
+          cacheWritePricePerMTok ?? this.cacheWritePricePerMTok,
       baseInstructions: baseInstructions ?? this.baseInstructions,
     );
   }
@@ -101,6 +106,7 @@ class ProviderSettingsView {
     this.capabilitySource = 'explicit',
     this.hostedWebSearch = false,
     this.standaloneWebSearch = '',
+    this.promptCacheDialect = 'none',
     this.iconKey,
   });
 
@@ -127,6 +133,7 @@ class ProviderSettingsView {
   final String capabilitySource;
   final bool hostedWebSearch;
   final String standaloneWebSearch;
+  final String promptCacheDialect;
   final String? iconKey;
 
   List<ProviderModelView> get allModels {
@@ -160,6 +167,7 @@ class ProviderSettingsView {
     String? capabilitySource,
     bool? hostedWebSearch,
     String? standaloneWebSearch,
+    String? promptCacheDialect,
     Object? iconKey = _providerSettingsUnset,
   }) {
     return ProviderSettingsView(
@@ -186,6 +194,7 @@ class ProviderSettingsView {
       capabilitySource: capabilitySource ?? this.capabilitySource,
       hostedWebSearch: hostedWebSearch ?? this.hostedWebSearch,
       standaloneWebSearch: standaloneWebSearch ?? this.standaloneWebSearch,
+      promptCacheDialect: promptCacheDialect ?? this.promptCacheDialect,
       iconKey: identical(iconKey, _providerSettingsUnset)
           ? this.iconKey
           : iconKey as String?,
@@ -241,6 +250,7 @@ class ProviderPresetView {
     required this.suggestedModel,
     this.hostedWebSearch = false,
     this.standaloneWebSearch = '',
+    this.promptCacheDialect = 'none',
     this.iconKey,
   });
 
@@ -257,6 +267,7 @@ class ProviderPresetView {
   final String suggestedModel;
   final bool hostedWebSearch;
   final String standaloneWebSearch;
+  final String promptCacheDialect;
   final String? iconKey;
 
   ProviderSettingsView createProvider(
@@ -287,6 +298,7 @@ class ProviderPresetView {
       capabilitySource: 'preset_defaults',
       hostedWebSearch: hostedWebSearch,
       standaloneWebSearch: standaloneWebSearch,
+      promptCacheDialect: promptCacheDialect,
       iconKey: iconKey,
     );
   }
@@ -323,6 +335,9 @@ ProviderSettingsView providerWithCatalogMetadata(
     standaloneWebSearch: provider.capabilitySource == 'preset_defaults'
         ? preset.standaloneWebSearch
         : provider.standaloneWebSearch,
+    promptCacheDialect: provider.capabilitySource == 'preset_defaults'
+        ? preset.promptCacheDialect
+        : provider.promptCacheDialect,
     iconKey: preset.iconKey,
     wireProtocol: preset.wireProtocol,
     connectionMode:

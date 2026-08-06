@@ -571,6 +571,7 @@ class FrbStudioApi implements StudioApi {
                   capabilitySource: provider.capabilitySource,
                   hostedWebSearch: provider.hostedWebSearch,
                   standaloneWebSearch: provider.standaloneWebSearch,
+                  promptCacheDialect: provider.promptCacheDialect,
                   defaultModel: provider.defaultModel,
                   customModels: [
                     for (final model in provider.customModels)

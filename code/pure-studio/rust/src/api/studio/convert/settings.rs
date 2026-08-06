@@ -8,10 +8,11 @@ use crate::api::studio::types::{
 };
 use anyhow::{Context, Result};
 use pl_studio_runtime::{
-    McpServerTransport, ModelInfo, ProviderCapabilitySelection, ProviderEdit,
-    ProviderModelCatalogConfig, ProviderModelEdit, ProviderPresetId, ProviderServiceCapabilities,
-    ProviderSettingsEdit, ProviderUsageData, ProviderUsageState, ProviderWireProtocol, RoleEdit,
-    StandaloneWebSearchDialect, StudioRole, WebSearchProviderCapabilities, ZhipuQuotaWindow,
+    McpServerTransport, ModelInfo, PromptCacheDialect, PromptCacheProviderCapabilities,
+    ProviderCapabilitySelection, ProviderEdit, ProviderModelCatalogConfig, ProviderModelEdit,
+    ProviderPresetId, ProviderServiceCapabilities, ProviderSettingsEdit, ProviderUsageData,
+    ProviderUsageState, ProviderWireProtocol, RoleEdit, StandaloneWebSearchDialect, StudioRole,
+    WebSearchProviderCapabilities, ZhipuQuotaWindow,
 };
 // ── Utility functions ──
 
@@ -80,6 +81,11 @@ pub(crate) fn studio_settings_dto(
                     .web_search
                     .standalone
                     .map(|dialect| dialect.as_str().to_string()),
+                prompt_cache_dialect: service_capabilities
+                    .prompt_cache
+                    .dialect
+                    .as_str()
+                    .to_string(),
                 default_model,
                 models: models.iter().map(model_settings_dto).collect(),
                 custom_models: provider
@@ -176,6 +182,7 @@ fn model_settings_dto(model: &ModelInfo) -> BridgeProviderModelSettingsDto {
         input_price_per_m_tok: model.input_price_per_mtok,
         output_price_per_m_tok: model.output_price_per_mtok,
         cache_read_price_per_m_tok: model.cache_read_price_per_mtok,
+        cache_write_price_per_m_tok: model.cache_write_price_per_mtok,
         reasoning_efforts: reasoning_efforts.to_vec(),
         base_instructions: model.base_instructions.clone(),
     }
@@ -351,6 +358,13 @@ fn provider_edit(
                     .filter(|value| !value.trim().is_empty())
                     .map(str::parse::<StandaloneWebSearchDialect>)
                     .transpose()
+                    .map_err(anyhow::Error::msg)?,
+            },
+            prompt_cache: PromptCacheProviderCapabilities {
+                dialect: input
+                    .prompt_cache_dialect
+                    .trim()
+                    .parse::<PromptCacheDialect>()
                     .map_err(anyhow::Error::msg)?,
             },
         }),
@@ -539,6 +553,7 @@ mod tests {
                 capability_source: "preset_defaults".to_string(),
                 hosted_web_search: true,
                 standalone_web_search: Some("open_ai_search_api".to_string()),
+                prompt_cache_dialect: "open_ai_prompt_cache_key".to_string(),
                 default_model: "gpt-5.6-sol".to_string(),
                 custom_models: Vec::new(),
             },

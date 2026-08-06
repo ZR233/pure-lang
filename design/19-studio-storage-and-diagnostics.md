@@ -40,6 +40,15 @@ contextCompaction 重置基线。两者都属于内部 Item，Bridge 查询永�
 runtime usage 通知。相同 inference ID 的相同记录幂等，内容冲突拒绝事务；历史费用始终使用
 当时保存的价格和币种，不能按当前 catalog 重新计算。
 
+usage 区分 prompt、缓存读取、缓存写入、completion 与 reasoning token。归一化时缓存读取与
+写入之和不得超过 prompt token，cache miss 是 prompt 减缓存读取；reasoning 已包含在 provider
+报告的 completion 时不得重复计费。OpenAI 缓存写入、普通输入和缓存读取分别按价格快照计算；
+模型声明缓存写入 token、有效策略为 OpenAI cache key 且目录缺少显式写入价时，写入价按普通
+输入价的 `1.25 ×` 冻结，
+DeepSeek 继续按未命中输入、命中输入和输出计算。每个 inference 同时保存按币种的估算费用与
+相对全未缓存输入的缓存节省；不同币种永不相加。`TurnBillingRecord` 的 JSON 版本可独立演进，
+旧字段使用 serde default 读取，不要求数据库 schema 升级。
+
 ## 19.3 不兼容库重建
 
 启动先只读检查 canonical `studio.sqlite` 的 `user_version`、`quick_check` 与必需表/列
@@ -67,3 +76,8 @@ Studio 数据库文件，不扫描、删除或修改 Project、worktree、branch
 Rust 使用 tracing，只记录稳定 ID、kind、数量、字节数、事务耗时、通道积压、lag 和 outcome，
 不记录完整 prompt、模型上下文、secret 或工具结果。数据库 mutation、恢复、订阅和 Task 操作
 都携带 correlation ID。日志保留与 crash 文件策略沿用 Studio 现有实现。
+
+缓存诊断只记录 provider/wire/model、prompt generation、有效缓存策略、前缀变化原因、各固定层
+hash、token 分类、费用与缓存节省。cache key、prompt、配置正文、header、凭据、工具参数和结果
+均不得进入日志。Bridge 只暴露 generation、策略、变化原因与聚合 usage；内部 hash、逐 inference
+billing 和 contextPatch 不进入 Flutter timeline。

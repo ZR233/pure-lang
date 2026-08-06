@@ -1,4 +1,6 @@
-use pl_model::{CompletionRequest, ModelProvider, ReasoningConfig, ReasoningSummary};
+use pl_model::{
+    CompletionRequest, EffectivePromptCachePolicy, ModelProvider, ReasoningConfig, ReasoningSummary,
+};
 use pl_protocol::{ErrorSeverity, Result, TokenUsageSnapshot, ToolResultReceipt};
 use pl_trace::{AgentEvent, TracePartStatus};
 use std::sync::Arc;
@@ -18,7 +20,8 @@ use crate::context_compaction::{
 };
 use crate::instruction::{InstructionAssembler, InstructionAssemblyRequest};
 use crate::runtime_usage::{
-    agent_runtime_delta, identity_for_subagent, inference_billing_record, token_usage_snapshot,
+    InferenceBillingInput, agent_runtime_delta, identity_for_subagent, inference_billing_record,
+    token_usage_snapshot,
 };
 use crate::session::AgentSession;
 use crate::trace::TraceRecorder;
@@ -26,7 +29,10 @@ use crate::turn::{
     BudgetLimit, BudgetTracker, TurnOptions, TurnRequest, TurnResult, TurnResultStatus,
 };
 use crate::working_set::{TurnWorkingSetChange, TurnWorkingSetHandle, canonical_content_hash};
-use crate::{AgentInferenceCommit, PromptCacheInput, prepare_prompt_context, stable_tool_schemas};
+use crate::{
+    AgentInferenceCommit, PromptCacheInput, derive_prompt_cache_key, prepare_prompt_context,
+    stable_tool_schemas,
+};
 
 use super::TurnEngine;
 use super::permission::cancellation_reason;
@@ -96,8 +102,10 @@ pub(super) async fn run_turn_with_trace(
     let mut total_usage = pl_model::TokenUsage::default();
     let mut safe_message_count = session.len();
     let mut session_message_count = safe_message_count;
+    let mut inference_count = 0_u64;
 
     let model_info = provider.model_info(&model);
+    let prompt_cache_policy = provider.info().effective_prompt_cache_policy(&model_info);
     let instruction_snapshot = match request.instruction_snapshot.clone() {
         Some(snapshot) => snapshot,
         None => {
@@ -179,6 +187,7 @@ pub(super) async fn run_turn_with_trace(
                 model: &model,
                 instructions: &instruction_bundle.instructions,
                 prelude_messages: &instruction_bundle.prelude_messages,
+                fixed_prefix_section_hashes: instruction_bundle.prefix_section_hashes.clone(),
                 tools: &iteration_tools,
                 tool_choice: "auto",
                 parallel_tool_calls,
@@ -186,6 +195,7 @@ pub(super) async fn run_turn_with_trace(
                 output_schema: None,
                 service_tier: None,
                 compacted: false,
+                prompt_cache_policy,
                 updated_at: unix_seconds(),
             },
         )?
@@ -200,6 +210,7 @@ pub(super) async fn run_turn_with_trace(
             safe_message_count = session.len();
             session_message_count = safe_message_count;
         }
+        sync_prompt_cache_key(session, &options, prompt_cache_policy)?;
         let mut assembled_context = ContextAssembler::assemble(
             &instruction_bundle.instructions,
             &instruction_bundle.prelude_messages,
@@ -247,27 +258,31 @@ pub(super) async fn run_turn_with_trace(
                         total_usage.prompt_tokens += usage.prompt_tokens;
                         total_usage.completion_tokens += usage.completion_tokens;
                         total_usage.cached_prompt_tokens += usage.cached_prompt_tokens;
+                        total_usage.cache_write_tokens += usage.cache_write_tokens;
                         total_usage.reasoning_tokens += usage.reasoning_tokens;
-                        let usage_snapshot = token_usage_snapshot(&usage);
+                        total_usage.total_tokens += usage
+                            .total_tokens
+                            .max(usage.prompt_tokens.saturating_add(usage.completion_tokens));
+                        inference_count = inference_count.saturating_add(1);
                         let model_info = provider.model_info(&model);
                         let inference_id = format!("{turn_id}-compact-{iteration}");
                         let recorded_at = unix_seconds();
+                        let billing = inference_billing_record(InferenceBillingInput {
+                            inference_id,
+                            provider: &provider.info().name,
+                            model: &model,
+                            usage: &usage,
+                            model_info: &model_info,
+                            prompt_cache_policy,
+                            prompt: current_prompt_snapshot(session, &options.prompt_scope),
+                            recorded_at,
+                        });
                         AgentInferenceCommit {
-                            billing: inference_billing_record(
-                                inference_id.clone(),
-                                provider.info().name.clone(),
-                                model.clone(),
-                                &usage,
-                                &model_info,
-                                recorded_at,
-                            ),
                             runtime_delta: agent_runtime_delta(
-                                inference_id,
                                 identity_for_subagent(active_subagent.as_ref()),
-                                &model_info,
-                                usage_snapshot,
-                                recorded_at,
+                                &billing,
                             ),
+                            billing,
                         }
                     });
                     context_compactions.push(snapshot);
@@ -281,6 +296,9 @@ pub(super) async fn run_turn_with_trace(
                             model: &model,
                             instructions: &instruction_bundle.instructions,
                             prelude_messages: &instruction_bundle.prelude_messages,
+                            fixed_prefix_section_hashes: instruction_bundle
+                                .prefix_section_hashes
+                                .clone(),
                             tools: &iteration_tools,
                             tool_choice: "auto",
                             parallel_tool_calls,
@@ -288,9 +306,11 @@ pub(super) async fn run_turn_with_trace(
                             output_schema: None,
                             service_tier: None,
                             compacted: true,
+                            prompt_cache_policy,
                             updated_at: unix_seconds(),
                         },
                     )?;
+                    sync_prompt_cache_key(session, &options, prompt_cache_policy)?;
                     assembled_context = ContextAssembler::assemble(
                         &instruction_bundle.instructions,
                         &instruction_bundle.prelude_messages,
@@ -459,22 +479,22 @@ pub(super) async fn run_turn_with_trace(
         recorder.complete_inference_item(inference_item, usage_snapshot.clone());
         let model_info = provider.model_info(&actual_model);
         let recorded_at = unix_seconds();
+        let billing = inference_billing_record(InferenceBillingInput {
+            inference_id,
+            provider: &provider.info().name,
+            model: &actual_model,
+            usage: &response.usage,
+            model_info: &model_info,
+            prompt_cache_policy,
+            prompt: current_prompt_snapshot(session, &options.prompt_scope),
+            recorded_at,
+        });
         let inference_commit = AgentInferenceCommit {
-            billing: inference_billing_record(
-                inference_id.clone(),
-                provider.info().name.clone(),
-                actual_model.clone(),
-                &response.usage,
-                &model_info,
-                recorded_at,
-            ),
             runtime_delta: agent_runtime_delta(
-                inference_id,
                 identity_for_subagent(active_subagent.as_ref()),
-                &model_info,
-                usage_snapshot,
-                recorded_at,
+                &billing,
             ),
+            billing,
         };
         let response_prompt_tokens = response.usage.prompt_tokens;
         let response_total_tokens = response
@@ -492,7 +512,15 @@ pub(super) async fn run_turn_with_trace(
         total_usage.prompt_tokens += response.usage.prompt_tokens;
         total_usage.completion_tokens += response.usage.completion_tokens;
         total_usage.cached_prompt_tokens += response.usage.cached_prompt_tokens;
+        total_usage.cache_write_tokens += response.usage.cache_write_tokens;
         total_usage.reasoning_tokens += response.usage.reasoning_tokens;
+        total_usage.total_tokens += response.usage.total_tokens.max(
+            response
+                .usage
+                .prompt_tokens
+                .saturating_add(response.usage.completion_tokens),
+        );
+        inference_count = inference_count.saturating_add(1);
 
         last_model = actual_model;
 
@@ -678,7 +706,6 @@ pub(super) async fn run_turn_with_trace(
         iteration += 1;
     }
 
-    total_usage.total_tokens = total_usage.prompt_tokens + total_usage.completion_tokens;
     if is_cancelled(&options) {
         session.truncate_messages(safe_message_count);
         return Ok(interrupted_turn_result(
@@ -715,6 +742,14 @@ pub(super) async fn run_turn_with_trace(
         prompt_tokens: total_usage.prompt_tokens,
         completion_tokens: total_usage.completion_tokens,
         cached_prompt_tokens: total_usage.cached_prompt_tokens,
+        cache_write_tokens: total_usage.cache_write_tokens,
+        cache_miss_tokens: total_usage.prompt_tokens.saturating_sub(
+            total_usage
+                .cached_prompt_tokens
+                .min(total_usage.prompt_tokens),
+        ),
+        reasoning_tokens: total_usage.reasoning_tokens,
+        inference_count,
         total_tokens: total_usage.total_tokens,
     });
     recorder.complete_item(completed_turn_item);
@@ -740,6 +775,38 @@ pub(super) async fn run_turn_with_trace(
         budget_usage: None,
         trace_events: recorder.drain(),
     })
+}
+
+fn sync_prompt_cache_key(
+    session: &mut AgentSession,
+    options: &TurnOptions,
+    policy: EffectivePromptCachePolicy,
+) -> Result<()> {
+    if options.prompt_cache_key.is_some() {
+        return Ok(());
+    }
+    let key = match (
+        policy.uses_prompt_cache_key(),
+        options.prompt_cache_namespace.as_deref(),
+    ) {
+        (true, Some(namespace)) => session
+            .latest_context_patch()
+            .and_then(|patch| patch.prompt_snapshots.get(&options.prompt_scope))
+            .map(|prompt| derive_prompt_cache_key(namespace, prompt))
+            .transpose()?,
+        _ => None,
+    };
+    session.replace_prompt_cache_key(key);
+    Ok(())
+}
+
+fn current_prompt_snapshot<'a>(
+    session: &'a AgentSession,
+    scope: &str,
+) -> Option<&'a pl_protocol::ThreadPromptSnapshot> {
+    session
+        .latest_context_patch()
+        .and_then(|patch| patch.prompt_snapshots.get(scope))
 }
 
 async fn persist_checkpoint(
