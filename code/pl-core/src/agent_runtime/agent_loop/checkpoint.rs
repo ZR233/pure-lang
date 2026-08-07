@@ -1,12 +1,14 @@
 use std::collections::BTreeSet;
 
-use super::super::host::{AgentCommitObserver, ThreadProjectionCommit, ThreadRepository};
+use super::super::host::{
+    AgentCommitObserver, ThreadProjectionCommit, ThreadRepository, transcript_mutation,
+};
 use super::super::state::{AgentRuntimeError, unix_timestamp};
 use super::super::{
     AgentActivityState, AgentCommittedEvent, AgentInferenceCommit, AgentLifecycleState,
     AgentProgressCheckpoint, AgentProgressStage, AgentRuntimeEventKind, AgentRuntimeHost,
     AgentRuntimeResult, AgentTurnCheckpoint, DurableCommitFacts, MailboxDeliveryState,
-    ThreadCommit, ThreadCommitOutcome, ThreadContextMutation, ThreadId, ThreadMutation, TurnId,
+    ThreadCommit, ThreadCommitOutcome, ThreadId, ThreadMutation, TurnId,
 };
 use super::AgentLoop;
 use crate::{
@@ -324,23 +326,6 @@ where
     }
 }
 
-fn transcript_mutation(
-    previous: &[crate::ModelContextItem],
-    next: &[crate::ModelContextItem],
-) -> Option<ThreadContextMutation> {
-    if previous == next {
-        return None;
-    }
-    if let Some(suffix) = next.strip_prefix(previous) {
-        return Some(ThreadContextMutation::Append {
-            items: suffix.to_vec(),
-        });
-    }
-    Some(ThreadContextMutation::Replace {
-        items: next.to_vec(),
-    })
-}
-
 fn find_inference<'a>(
     state: &'a super::super::ThreadActorState,
     inference_id: &str,
@@ -409,6 +394,7 @@ fn bounded_required_text(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ThreadContextMutation;
 
     #[test]
     fn transcript_mutation_skips_unchanged_checkpoints() {

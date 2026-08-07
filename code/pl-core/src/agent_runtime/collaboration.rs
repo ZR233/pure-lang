@@ -274,6 +274,7 @@ impl CollaborationTool {
                 parent_id: self.caller.clone(),
                 role,
                 session,
+                initial_turn_id: None,
                 initial_message: Some(args.message),
                 metadata: Value::Object(metadata),
             })

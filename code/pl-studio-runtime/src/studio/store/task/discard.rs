@@ -210,6 +210,10 @@ fn plan_executor_close(work_unit: &entities::work_unit::Model) -> Result<Executo
                 WorkUnitStatus::AwaitingCompletion,
                 ThreadExecutionStatus::Completed
             )
+            | (
+                WorkUnitStatus::AwaitingCompletion,
+                ThreadExecutionStatus::Cancelled
+            )
     );
     if !active_pair && !terminal_pair {
         bail!(

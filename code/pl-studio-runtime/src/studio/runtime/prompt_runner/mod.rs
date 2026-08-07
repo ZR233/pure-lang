@@ -202,6 +202,7 @@ impl StudioRuntime {
         let handle = framework.handle();
         let target = self.read_owned_thread(thread_id).await?;
         let target_agent_id = pl_core::AgentId::new(target.agent_path.clone())?;
+        let target_root_thread_id = target.root_thread_id.clone();
         let mut missing = Vec::new();
         let mut current = target;
         loop {
@@ -232,6 +233,12 @@ impl StudioRuntime {
             .snapshot(target_agent_id.clone())
             .await
             .map_err(|error| anyhow::anyhow!(error))?;
+        crate::studio::agent_host::materialize_pending_task_planner_wakes(
+            &handle,
+            &self.store,
+            Some(&target_root_thread_id),
+        )
+        .await?;
         Ok((handle, target_agent_id))
     }
 

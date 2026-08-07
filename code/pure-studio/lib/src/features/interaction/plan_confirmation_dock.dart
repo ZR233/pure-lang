@@ -8,16 +8,19 @@ import '../../data/repositories/studio_repository.dart';
 import '../../domain/models/studio_models.dart';
 import '../../l10n/studio_l10n.dart';
 import '../../shared/studio_driver_keys.dart';
+import '../../shared/studio_driver_state.dart';
 import 'interaction_widgets.dart';
 
 class PlanConfirmationDock extends ConsumerStatefulWidget {
   const PlanConfirmationDock({
     required this.threadId,
+    required this.planContent,
     this.trailing,
     super.key,
   });
 
   final String threadId;
+  final String planContent;
   final Widget? trailing;
 
   @override
@@ -44,6 +47,7 @@ class _PlanConfirmationDockState extends ConsumerState<PlanConfirmationDock> {
 
   @override
   Widget build(BuildContext context) {
+    StudioDriverState.publishPlan(widget.planContent);
     final canSubmitAdjustment = _adjustmentController.text.trim().isNotEmpty;
     return InteractionDockShell(
       kind: InteractionDockKind.plan,

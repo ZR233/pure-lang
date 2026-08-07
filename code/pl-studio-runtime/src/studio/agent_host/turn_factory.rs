@@ -106,15 +106,62 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         let workspace_root = workspace.root().to_path_buf();
         let workspace_instructions =
             load_workspace_instructions(&workspace_root).map_err(anyhow_error)?;
-        if mode == StudioMode::Task
+        let executor_handoff = if mode == StudioMode::Task
             && context.snapshot.identity.parent_id.is_some()
             && context.snapshot.identity.role.as_str() == crate::config::StudioRole::Executor.key()
         {
+            let run = active_task_run
+                .as_ref()
+                .ok_or_else(|| turn_error("Task executor has no active TaskRun"))?;
+            let work_unit = self
+                .store
+                .find_work_unit_for_executor(context.snapshot.identity.id.as_str())
+                .await
+                .map_err(anyhow_error)?
+                .ok_or_else(|| turn_error("Task executor has no durable WorkUnit"))?;
+            let section = context
+                .session
+                .pinned_context_sections()
+                .find(|section| {
+                    section.id.as_str()
+                        == crate::studio::task_coordinator::TASK_EXECUTOR_HANDOFF_SECTION_ID
+                })
+                .cloned();
+            let validated = section
+                .ok_or_else(|| anyhow::anyhow!("Task executor handoff is missing"))
+                .and_then(|section| {
+                    let handoff = crate::studio::task_coordinator::TaskExecutorHandoffV1::from_context_section(
+                        &section,
+                    )?;
+                    handoff.validate_owner(
+                        run,
+                        &work_unit,
+                        context.snapshot.identity.id.as_str(),
+                    )?;
+                    Ok(section)
+                });
+            let section = match validated {
+                Ok(section) => section,
+                Err(error) => {
+                    let message = error.to_string();
+                    self.store
+                        .mark_executor_handoff_needs_attention(
+                            context.snapshot.identity.id.as_str(),
+                            &message,
+                        )
+                        .await
+                        .map_err(anyhow_error)?;
+                    return Err(turn_error(message));
+                }
+            };
             self.store
                 .mark_executor_turn_started(context.snapshot.identity.id.as_str())
                 .await
                 .map_err(anyhow_error)?;
-        }
+            Some(section)
+        } else {
+            None
+        };
         let input_message = context.input.message.clone();
         let model_role = if context.snapshot.identity.parent_id.is_none() {
             match mode {
@@ -260,8 +307,11 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         if let Some(context_window) = route.model.resolved_context_window() {
             session_runtime = session_runtime.with_context_window(context_window);
         }
-        let prepared = PreparedAgentTurn::new(engine, request, options, policy)
+        let mut prepared = PreparedAgentTurn::new(engine, request, options, policy)
             .with_session_runtime(session_runtime);
+        if let Some(handoff) = executor_handoff {
+            prepared = prepared.with_pinned_context(handoff);
+        }
         if context
             .input
             .metadata

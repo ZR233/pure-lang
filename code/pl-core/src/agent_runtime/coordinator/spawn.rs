@@ -1,3 +1,4 @@
+use super::super::host::initial_transcript_mutation;
 use super::super::{AgentActivityState, AgentIdentity, AgentLifecycleState, ThreadActorState};
 use super::*;
 
@@ -40,7 +41,7 @@ where
                 vec![event.clone()],
                 Vec::new(),
                 None,
-                None,
+                initial_transcript_mutation(state.session.session.items()),
             ),
             mutation: super::super::ThreadMutation::SnapshotAndQueue,
         })
@@ -114,7 +115,7 @@ where
     let child_thread_id = child_id.clone();
     let metadata = request.metadata.clone();
     let initial_turn_id = request.initial_message.map(|message| {
-        let turn_id = TurnId::generate();
+        let turn_id = request.initial_turn_id.unwrap_or_else(TurnId::generate);
         state.pending_inputs.push_back(DurableMailboxEnvelope {
             mail_id: format!("mail:{turn_id}"),
             turn_id: turn_id.clone(),
@@ -122,6 +123,7 @@ where
             message,
             presentation: super::super::MailboxPresentation::Hidden,
             metadata: request.metadata,
+            queue_coalescing_key: None,
             delivery_state: Default::default(),
             queued_at: unix_timestamp(),
         });
@@ -139,6 +141,20 @@ where
         })
         .await
         .map_err(|error| AgentRuntimeError::Lifecycle(error.to_string()))?;
+    let initial_context = match host.lifecycle().initial_context(&lease) {
+        Ok(context) => context,
+        Err(error) => {
+            return match host.lifecycle().rollback_spawn(lease).await {
+                Ok(()) => Err(AgentRuntimeError::Lifecycle(error.to_string())),
+                Err(rollback_error) => Err(AgentRuntimeError::Lifecycle(format!(
+                    "spawn context preparation failed: {error}; spawn rollback failed: {rollback_error}"
+                ))),
+            };
+        }
+    };
+    for section in initial_context {
+        state.session.session.upsert_pinned_context(section);
+    }
     let event = AgentRuntimeEvent {
         agent_id: child_id.clone(),
         sequence: state.snapshot.event_sequence,
@@ -158,7 +174,7 @@ where
                 vec![event.clone()],
                 Vec::new(),
                 None,
-                None,
+                initial_transcript_mutation(state.session.session.items()),
             ),
             mutation: super::super::ThreadMutation::SnapshotAndQueue,
         })

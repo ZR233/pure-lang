@@ -14,7 +14,10 @@ pub(crate) use coordinator::*;
 #[cfg(test)]
 pub(crate) use recovery::MERGE_RECOVERY_BLOCK_PREFIX;
 pub(crate) use recovery::is_retryable_merge_recovery_message;
-pub(crate) use spawn::{StudioSpawnIntent, StudioTaskSpawnPreparation, StudioTaskSpawnRequest};
+pub(crate) use spawn::{
+    StudioSpawnIntent, StudioTaskSpawnPreparation, StudioTaskSpawnRequest,
+    TASK_EXECUTOR_HANDOFF_SECTION_ID, TaskExecutorHandoffV1,
+};
 pub(crate) use types::*;
 
 #[cfg(test)]

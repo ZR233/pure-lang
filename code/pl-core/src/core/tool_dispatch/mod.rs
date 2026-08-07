@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -12,8 +12,8 @@ use tokio::sync::RwLock;
 use crate::permission::{PermissionDecision, decide_tool_permission};
 use crate::session::AgentSession;
 use crate::tool::{
-    AgentWorkspace, SubagentContext, ToolBudgetTiming, ToolContext, ToolInput, ToolRuntimeEvent,
-    ToolRuntimeLockPolicy, WorkspaceAccess,
+    AgentWorkspace, SubagentContext, ToolBudgetTiming, ToolCachePolicy, ToolContext, ToolInput,
+    ToolRuntimeEvent, ToolRuntimeLockPolicy, WorkspaceAccess,
 };
 use crate::turn::{BudgetTracker, ToolApprovalDecision, ToolExecutionMode, TurnOptions};
 
@@ -96,7 +96,9 @@ pub(super) async fn execute_tool_calls(
     context: ToolExecutionContext<'_>,
 ) -> Result<Vec<ToolExecutionRecord>, ToolExecutionError> {
     let mut scheduled = Vec::new();
+    let mut scheduled_exact_once_calls = HashMap::<(String, String), String>::new();
     let runtime_lock = Arc::new(RwLock::new(()));
+    let tool_cache_snapshot = context.tool_cache.snapshot();
     let sid = &context.session_id;
     let mut progress = ProgressEmitter::new_scoped(
         recorder.sender().clone(),
@@ -341,17 +343,60 @@ pub(super) async fn execute_tool_calls(
                 let tool_call_for_task = tool_call.clone();
                 let tool_context = invocation.context;
                 let cache = context.tool_cache.clone();
+                let cache_snapshot = tool_cache_snapshot.clone();
                 let cache_arguments = tool_input.arguments.clone();
                 let cache_workspace_root = context.workspace.root().to_path_buf();
                 let cache_call_id = tool_call.stable_call_id().to_string();
                 let tool_effect = effect;
                 let budget_timing = tool.budget_timing();
+                let suppress_exact_arguments = cache_policy != ToolCachePolicy::Never;
+                if suppress_exact_arguments {
+                    let argument_hash = crate::working_set::canonical_content_hash(
+                        crate::working_set::canonical_json_string(&cache_arguments).as_bytes(),
+                    );
+                    let dedupe_key = (tool_name.clone(), argument_hash.clone());
+                    if let Some(original_call_id) =
+                        scheduled_exact_once_calls.get(&dedupe_key).cloned()
+                    {
+                        let duplicate_call_id = cache_call_id;
+                        tracing::info!(
+                            target: "pl_core::tool_metrics",
+                            tool = tool_name,
+                            original_call_id,
+                            duplicate_call_id,
+                            argument_hash,
+                            duplicate_suppressed = true,
+                            "suppressed identical tool call in one provider response"
+                        );
+                        let receipt = serde_json::json!({
+                            "status": "duplicateSuppressed",
+                            "reusedFromCallId": original_call_id,
+                            "argumentHash": argument_hash,
+                            "scope": "providerResponse",
+                        })
+                        .to_string();
+                        scheduled.push(ScheduledToolExecution {
+                            tool_call: tool_call.clone(),
+                            item,
+                            future: Box::pin(ready_tool_execution_record(
+                                tool_call.clone(),
+                                ToolExecutionError::RespondToModel(receipt),
+                                TracePartStatus::Completed,
+                                Some(0),
+                                false,
+                            )),
+                            budget_timing,
+                        });
+                        continue;
+                    }
+                    scheduled_exact_once_calls.insert(dedupe_key, cache_call_id.clone());
+                }
                 scheduled.push(ScheduledToolExecution {
                     tool_call: tool_call.clone(),
                     item,
                     future: Box::pin(async move {
                         let execute = || {
-                            cache.execute_or_reuse(
+                            cache_snapshot.execute_or_reuse(
                                 &tool_name,
                                 &cache_arguments,
                                 &cache_workspace_root,

@@ -320,7 +320,7 @@ where
                 "yieldTimeMs": {
                     "type": "integer",
                     "minimum": 0,
-                    "description": "How long to wait for output or process exit (default: 10000, clamped 250..30000 when non-zero)"
+                    "description": "How long to wait for process exit. Empty-input polls default to 10000 and clamp positive values to 10000..30000; stdin writes clamp positive values to 250..30000. Zero returns an immediate snapshot."
                 },
                 "maxOutputChars": {
                     "type": "integer",
@@ -340,12 +340,18 @@ where
     ) -> super::BoxFuture<'a, Result<ToolOutput, PureError>> {
         Box::pin(async move {
             let stdin_input = Self::parse_input(input.arguments, self.name())?;
+            let chars = stdin_input.chars.unwrap_or_default();
+            let yield_time = if chars.is_empty() {
+                poll_yield_duration(stdin_input.yield_time_ms)
+            } else {
+                yield_duration(stdin_input.yield_time_ms)
+            };
             let snapshot = self
                 .process_manager
                 .write_stdin(CommandWriteRequest {
                     process_id: stdin_input.process_id,
-                    chars: stdin_input.chars.unwrap_or_default(),
-                    yield_time: yield_duration(stdin_input.yield_time_ms),
+                    chars,
+                    yield_time,
                     max_output_chars: max_output_chars(
                         stdin_input.max_output_chars,
                         TruncationStrategy::default()
@@ -364,6 +370,15 @@ fn yield_duration(value: Option<u64>) -> Duration {
     let millis = match value {
         Some(0) => 0,
         Some(value) => value.clamp(MIN_YIELD_TIME_MS, MAX_YIELD_TIME_MS),
+        None => DEFAULT_YIELD_TIME_MS,
+    };
+    Duration::from_millis(millis)
+}
+
+fn poll_yield_duration(value: Option<u64>) -> Duration {
+    let millis = match value {
+        Some(0) => 0,
+        Some(value) => value.clamp(DEFAULT_YIELD_TIME_MS, MAX_YIELD_TIME_MS),
         None => DEFAULT_YIELD_TIME_MS,
     };
     Duration::from_millis(millis)

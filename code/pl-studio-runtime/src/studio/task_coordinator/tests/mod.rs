@@ -4,12 +4,85 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::merge::TaskRecordMergeInput;
+use super::spawn::TaskExecutorVerificationCommandV1;
 use super::*;
 use crate::tool::{SubagentContext, Tool, ToolContext, ToolInput, WorkspaceAccess};
 use crate::{
     AgentSession, StudioMode, StudioRecoveryIssueAction, StudioRecoveryIssueCategory, StudioStore,
     TurnOptions, TurnToolCacheHandle, TurnWorkingSetHandle,
 };
+
+#[tokio::test]
+async fn executor_spawn_call_is_idempotent_and_carries_durable_handoff() {
+    let repository = init_repository("executor-spawn-idempotent-handoff");
+    let store = task_store(&repository).await;
+    let session = task_session(&store, &repository).await;
+    let coordinator = Arc::new(TaskCoordinator::new(store.clone()));
+    let run = coordinator
+        .start_confirmed_task(&session.id, "confirmed plan", &repository)
+        .await
+        .unwrap();
+    store
+        .advance_task_design_head(&run.id, &run.expected_head, &run.expected_head)
+        .await
+        .unwrap();
+    let request = StudioTaskSpawnRequest {
+        agent_id: "thread-task-stable".to_string(),
+        root_thread_id: session.id.clone(),
+        task_name: "implement model transport".to_string(),
+        role: "executor".to_string(),
+        scope_hints: vec!["code/pl-model".to_string()],
+        requested_by_call_id: "call-stable".to_string(),
+        review_round_id: None,
+        assignment: Some("move transport selection to ModelInfo".to_string()),
+        acceptance_criteria: vec!["model-level routing is tested".to_string()],
+        dependencies: Vec::new(),
+        evidence: Vec::new(),
+        verification_commands: vec![TaskExecutorVerificationCommandV1 {
+            command: "cargo test -p pl-model".to_string(),
+            cwd: ".".to_string(),
+            purpose: "verify model transport".to_string(),
+        }],
+    };
+
+    let first = coordinator.prepare_agent_spawn(&request).await.unwrap();
+    let second = coordinator.prepare_agent_spawn(&request).await.unwrap();
+    let semantic_duplicate = coordinator
+        .reserve_executor_spawn(AllocateExecutor {
+            thread_id: session.id.clone(),
+            title: request.task_name.clone(),
+            scope_hints: request.scope_hints.clone(),
+            agent_id: "thread-task-duplicate".to_string(),
+            requested_by_call_id: "call-duplicate".to_string(),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(first.lifecycle_token(), second.lifecycle_token());
+    assert!(semantic_duplicate.reused);
+    assert_eq!(
+        semantic_duplicate.work_unit.requested_by_call_id,
+        "call-stable"
+    );
+    assert_eq!(
+        semantic_duplicate.work_unit.executor_thread_id.as_deref(),
+        Some("thread-task-stable")
+    );
+    assert_eq!(store.list_work_units(&run.id).await.unwrap().len(), 1);
+    let section = first.initial_context().first().expect("handoff section");
+    let handoff = TaskExecutorHandoffV1::from_context_section(section).unwrap();
+    assert_eq!(handoff.task_run_id, run.id);
+    assert_eq!(handoff.requesting_call_id, "call-stable");
+    assert_eq!(handoff.assignment, "move transport selection to ModelInfo");
+    assert_eq!(handoff.scope_hints, vec!["code/pl-model"]);
+    assert_eq!(
+        handoff.verification.commands[0].command,
+        "cargo test -p pl-model"
+    );
+
+    coordinator.suspend();
+    remove_repository(repository);
+}
 
 #[tokio::test]
 async fn reviewer_harness_authorization_is_one_shot_and_has_no_work_unit() {
@@ -27,6 +100,11 @@ async fn reviewer_harness_authorization_is_one_shot_and_has_no_work_unit() {
         scope_hints: Vec::new(),
         review_round_id: Some(round.id.clone()),
         requested_by_call_id: "call-review".to_string(),
+        assignment: None,
+        acceptance_criteria: Vec::new(),
+        dependencies: Vec::new(),
+        evidence: Vec::new(),
+        verification_commands: Vec::new(),
     };
     let preparation = fixture
         .coordinator
@@ -118,6 +196,19 @@ async fn reviewer_terminal_without_review_exit_fails_round_and_restores_phase() 
         .unwrap();
     assert_eq!(round.verdict, ReviewVerdict::Failed);
     assert_eq!(round.reviewer_status, ThreadExecutionStatus::Failed);
+    let wakes = fixture
+        .store
+        .list_pending_task_planner_wakes()
+        .await
+        .unwrap();
+    assert_eq!(wakes.len(), 1);
+    assert!(matches!(
+        &wakes[0].source,
+        TaskPlannerWakeSource::Review {
+            review_round_id,
+            scope: ReviewScope::Integrated,
+        } if review_round_id == &round.id
+    ));
     let retry = fixture
         .store
         .begin_integrated_review(&fixture.root_thread_id, "call-review-retry")

@@ -19,6 +19,9 @@ use crate::studio::{
 };
 
 use events::StudioAgentCommitObserver;
+pub(in crate::studio) use events::{
+    materialize_pending_task_planner_wakes, materialize_task_planner_wake,
+};
 use lifecycle::StudioAgentLifecycle;
 use plan_confirmation::StudioPlanConfirmationProjector;
 pub(in crate::studio) use repository::StudioAgentRepository;

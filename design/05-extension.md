@@ -78,6 +78,10 @@ tool result 写回会话。
 
 `list_files` 对 workspace 内尚不存在的目录返回成功的空列表，供 planner 在首次创建 `design/**` 前安全探测；本地与容器 backend 必须保持相同语义。缺失路径之外的读取错误仍显式失败，workspace 越界规则不变。
 
+`read_file` 路径解析失败仍是显式失败并保留原始错误；工具层同时附带结构化
+`candidatePaths`，最多包含五个 workspace 内的同名文件候选，候选发现失败不得覆盖原始错误。
+错误只报告事实，不携带“禁止重试”等执行策略指令；workspace 越界规则不变。
+
 文件工具输入 schema 使用明确 enum 表示危险语义。`delete_path` 的删除模式是 `mode: "file" | "emptyDirectory" | "recursiveDirectory"`；`copy_path` / `move_path` 的目标冲突策略是 `collision: "failIfExists" | "overwrite"`。旧 bool 字段 `recursive` 和 `overwrite` 的运行期兼容读取路径已删除，工具 schema 只暴露 `mode` / `collision`，历史会话或手写输入若仍使用旧字段会被校验拒绝。
 
 `exec` 是模型可调用的统一命令入口，schema 包含 `command`、`cwd`、`timeoutSeconds`、`yieldTimeMs` 和 `maxOutputChars`。PL 的通用命令管理器负责短命令、后台 `processId`、stdin、超时、取消、输出截断与 turn 清理；`write_stdin` 只能操作已经由 `exec` 启动且通过审批的 live process，不重新触发命令审批。本地 backend 在 Windows 上依次使用 PowerShell Core、Windows PowerShell 和 `cmd.exe`，Unix 上使用 `sh -c`；宿主可以注入容器或远程 backend，而不改变模型 schema 和结果。`cwd` 缺省为 Agent workspace，相对路径按该 workspace 解析，backend 必须拒绝越过自己的隔离边界。完整 stdout/stderr 写入模型可通过文件工具读取的 `target/pure/<session>/<tool>/output.log`，上下文只回传截断输出、状态、退出码、超时标记、输出文件路径和恢复提示。容器 backend 还负责将完整流投影为宿主 artifact，并在超时、取消或 Drop 时同时清理 transport 与容器内进程组。

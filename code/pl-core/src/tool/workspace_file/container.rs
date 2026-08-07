@@ -458,12 +458,24 @@ struct RgJsonSubmatch {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
     use std::process::Command;
 
     use super::*;
 
     #[test]
-    fn grep_fallback_uses_native_glob_filtering() {
+    fn grep_fallback_command_uses_native_include_glob() {
+        let request = search_request("workspace".to_string());
+        let command = grep_search_command(&request);
+
+        assert!(command.contains("--include="));
+        assert!(command.contains("*.rs"));
+        assert!(!command.contains("--glob"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn grep_fallback_filters_native_glob_in_posix_shell() {
         let root = std::env::temp_dir().join(format!(
             "pl-container-search-fallback-{}",
             std::process::id()
@@ -471,16 +483,7 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join("match.rs"), "pub static FD_TABLE: usize = 0;\n").unwrap();
         std::fs::write(root.join("match.txt"), "pub static FD_TABLE: usize = 0;\n").unwrap();
-        let request = WorkspaceFileSearchRequest {
-            query: "static FD_TABLE".to_string(),
-            path: root.to_string_lossy().into_owned(),
-            cwd: None,
-            glob: Some("*.rs".to_string()),
-            case_sensitive: true,
-            literal: true,
-            max_matches: 10,
-            context_lines: 0,
-        };
+        let request = search_request(root.to_string_lossy().into_owned());
 
         let output = Command::new("sh")
             .arg("-c")
@@ -493,5 +496,18 @@ mod tests {
         assert!(stdout.contains("match.rs"));
         assert!(!stdout.contains("match.txt"));
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    fn search_request(path: String) -> WorkspaceFileSearchRequest {
+        WorkspaceFileSearchRequest {
+            query: "static FD_TABLE".to_string(),
+            path,
+            cwd: None,
+            glob: Some("*.rs".to_string()),
+            case_sensitive: true,
+            literal: true,
+            max_matches: 10,
+            context_lines: 0,
+        }
     }
 }

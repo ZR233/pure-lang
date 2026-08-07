@@ -248,7 +248,7 @@ fn assert_stable_append_only_requests(requests: &[Value]) -> Result<()> {
         }
     }
     let serialized = serde_json::to_string(requests)?;
-    assert!(serialized.contains("# Current working context"));
+    assert!(!serialized.contains("# Current working context"));
     assert!(serialized.contains("cache fixture lookup ok"));
     Ok(())
 }

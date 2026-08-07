@@ -68,6 +68,25 @@ where
         let Some(mut input) = next.pending_inputs.pop_front() else {
             return;
         };
+        let mut leading_inputs = Vec::new();
+        if let Some(key) = input.queue_coalescing_key.clone() {
+            while next.pending_inputs.front().is_some_and(|candidate| {
+                matches!(candidate.delivery_state, MailboxDeliveryState::Pending)
+                    && candidate.queue_coalescing_key.as_deref() == Some(key.as_str())
+            }) {
+                leading_inputs.push(input);
+                input = next
+                    .pending_inputs
+                    .pop_front()
+                    .expect("matched queued input must remain available");
+            }
+        }
+        for leading in &mut leading_inputs {
+            leading.claim(input.turn_id.clone());
+        }
+        for leading in leading_inputs.iter().rev() {
+            next.pending_inputs.push_front(leading.clone());
+        }
         input.claim(input.turn_id.clone());
         next.active_input = Some(input.clone());
         next.refresh_mailbox_snapshot();
@@ -78,7 +97,7 @@ where
                 AgentRuntimeEventKind::TurnStarted {
                     turn_id: input.turn_id.clone(),
                     thread_id: input.thread_id.clone(),
-                    claimed_inputs: Vec::new(),
+                    claimed_inputs: leading_inputs.clone(),
                     snapshot,
                 }
             })
@@ -93,14 +112,20 @@ where
 
         let cancellation = CancellationToken::new();
         let (steer_sender, steer_receiver) = mpsc::unbounded_channel();
-        let mailbox = AgentTurnMailboxHandle::new(steer_receiver, Vec::new());
+        let mailbox = AgentTurnMailboxHandle::new(
+            steer_receiver,
+            leading_inputs
+                .iter()
+                .map(|input| input.mail_id.clone())
+                .collect(),
+        );
         let thread_id = self.state.snapshot.identity.id.clone();
         let context = AgentTurnPreparationContext {
             snapshot: self.state.snapshot.clone(),
             turn_id: input.turn_id.clone(),
             thread_id: input.thread_id.clone(),
             input,
-            leading_inputs: Vec::new(),
+            leading_inputs,
             session: self.state.session.session.clone(),
             trace_sequence: self.state.session.trace_sequence,
             runtime: self.runtime.clone(),

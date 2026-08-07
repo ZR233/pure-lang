@@ -110,7 +110,10 @@ interaction 和 Composer 必须从同一个 workspace 原子切换。
 - `cargo xtask run-gui [--demo] [--driver]`
 - `cargo xtask build-gui [--demo] [--no-clean]`
 
-Windows GUI 只能通过 xtask 构建和运行。FRB 生成文件提交到仓库但禁止手改。
+Windows 上 FRB 生成、GUI 构建和运行都必须通过 xtask。xtask 负责让 FRB
+2.12 的 Rust root、生成输出与 canonical crate path 使用同一种 Windows 路径表示，
+并在生成期间局部处理已锁定 Freezed 版本的兼容性。FRB 生成文件提交到仓库
+但禁止手改。
 
 ## 2.9 数据版本
 

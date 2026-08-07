@@ -9,6 +9,7 @@ import '../../domain/models/studio_models.dart';
 import '../../l10n/studio_l10n.dart';
 import '../../shared/studio_chrome.dart';
 import '../../shared/studio_driver_keys.dart';
+import '../../shared/studio_driver_state.dart';
 import '../../shared/upward_popup_menu.dart';
 import 'interaction_payload.dart';
 import 'plan_confirmation_dock.dart';
@@ -22,6 +23,7 @@ class ComposerDock extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    StudioDriverState.publishWorkspace(workspace);
     final interaction = workspace.activeInteraction;
     return SafeArea(
       top: false,
@@ -415,6 +417,7 @@ class _InteractionDock extends StatelessWidget {
       ),
       InteractionKind.planConfirmation => PlanConfirmationDock(
         threadId: workspace.threadId,
+        planContent: payload.planContent,
         trailing: trailing,
       ),
     };

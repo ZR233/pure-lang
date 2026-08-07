@@ -15,6 +15,11 @@ ThreadActor 唯一拥有 Thread revision、durable input queue 的内存镜像�
 identity、live Item overlay 和当前 prompt generation/context baseline。它不缓存完整历史，也不
 拥有 Task/worktree；context baseline 只用于生成模型输入差量，不能成为 runtime 事实源。
 
+所有改变 canonical session 的 Thread transition 都由 runtime 根据提交前后 session 自动派生
+`Append | Replace | None`，调用方不能在 transcript 已变化时省略 context mutation。child 注册若
+携带非空初始 transcript，必须写 replacement baseline；工作上下文与 child snapshot 同次提交。
+TurnFinished/rollover 提交成功之前不得发布终态或调度 continuation。
+
 产品可通过受限命令重配置 idle ThreadActor 的 role。该命令要求 lifecycle Active、没有活动 Turn、
 active input 或 pending input，并通过 repository CAS 持久化 identity 与发布 directory revision；
 运行中或排队中的 Turn 继续绑定创建时的 role，不允许热切换。
@@ -42,6 +47,13 @@ child owner、Git identity 或路径无法精确解析时必须 fail closed；�
 RunningTurn 包含 turnId、进程内 identity、CancellationToken、abort handle、done 和 steer sender。
 completion 必须同时匹配 turnId 与 Arc identity。interrupt 先触发 token，等待一秒清理，超时才
 abort；终态数据库事务成功后才能广播 turnCompleted。
+
+产品提交的 `StartOrQueue` 输入可以携带通用 queue coalescing key。Thread idle 并准备下一 Turn
+时，只合并队首连续、key 相同且仍为 pending 的输入：最后一条决定新 Turn identity，较早输入作为
+该 Turn 的 `leadingInputs` 一并进入模型上下文。所有被合并输入先以同一 Turn claim 并持久化，首个
+checkpoint 才 consume；进程在 checkpoint 前崩溃时仍可从 durable input queue 恢复。key 不相同、
+中间存在其他输入，或首条输入已经 claimed/active 时不得合并，后到事实必须保留为下一 Turn。
+coalescing key 属于 runtime envelope 元数据，不进入自然语言提示词或工具 schema。
 
 重启无法恢复物理连接。repository 在 manager 启动前收束遗留 active Turn/Item、恢复 queued
 input 和 pending Interaction；manager 只创建 idle ThreadActor。任何恢复路径都不自动执行模型。

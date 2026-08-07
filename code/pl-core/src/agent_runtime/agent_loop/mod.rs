@@ -4,7 +4,9 @@ use pl_protocol::{ThreadNotification, ThreadNotificationEnvelope};
 use pl_trace::TraceEvent;
 use tokio::sync::{mpsc, oneshot};
 
-use super::host::{AgentCommitObserver, ThreadProjectionCommit, ThreadRepository};
+use super::host::{
+    AgentCommitObserver, ThreadProjectionCommit, ThreadRepository, transcript_mutation,
+};
 use super::state::{AgentRuntimeError, unix_timestamp};
 use super::{
     AgentActivityState, AgentCommittedEvent, AgentCurrentSessionSubmitRequest, AgentLifecycleState,
@@ -534,6 +536,10 @@ where
         F: FnOnce(AgentSnapshot) -> AgentRuntimeEventKind,
     {
         let expected_revision = self.state.snapshot.revision;
+        let context = transcript_mutation(
+            self.state.session.session.items(),
+            next.session.session.items(),
+        );
         next.snapshot.revision = expected_revision.saturating_add(1);
         next.snapshot.event_sequence = self.state.snapshot.event_sequence.saturating_add(1);
         next.snapshot.updated_at = unix_timestamp();
@@ -594,7 +600,7 @@ where
                     vec![event.clone()],
                     trace_events,
                     thread_projection,
-                    None,
+                    context,
                 ),
                 mutation: super::ThreadMutation::SnapshotAndQueue,
             })

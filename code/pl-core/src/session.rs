@@ -189,6 +189,7 @@ impl AgentSession {
             .working_state
             .sections
             .iter()
+            .filter(|section| section.id.as_str() != crate::EVIDENCE_LEDGER_SECTION_ID)
             .map(|section| ModelContextSectionSnapshot {
                 id: section.id.clone(),
                 title: section.title.clone(),

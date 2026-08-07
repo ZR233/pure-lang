@@ -27,7 +27,7 @@ impl ToolPathPolicy {
     ) -> Result<Self, PureError> {
         let tool = tool.into();
         let root_canonical =
-            std::fs::canonicalize(&root).map_err(|error| PureError::ToolExecutionFailed {
+            dunce::canonicalize(&root).map_err(|error| PureError::ToolExecutionFailed {
                 tool: tool.clone(),
                 error: format!("failed to resolve workspace root: {error}"),
             })?;
@@ -56,7 +56,7 @@ impl ToolPathPolicy {
             }
             error => self.error(error.to_string()),
         })?;
-        let canonical = std::fs::canonicalize(&candidate)
+        let canonical = dunce::canonicalize(&candidate)
             .map_err(|error| self.error(format!("failed to resolve path '{original}': {error}")))?;
         self.ensure_allowed(&canonical, original)?;
         Ok(canonical)
@@ -103,7 +103,7 @@ impl ToolPathPolicy {
                 "failed to inspect parent for path '{original}': {error}"
             ))
         })?;
-        let canonical = std::fs::canonicalize(&ancestor).map_err(|error| {
+        let canonical = dunce::canonicalize(&ancestor).map_err(|error| {
             self.error(format!(
                 "failed to resolve parent for path '{original}': {error}"
             ))
@@ -140,7 +140,7 @@ impl ToolPathPolicy {
         let resolved = existing_ancestor_and_tail(&candidate)
             .ok()
             .and_then(|(ancestor, tail)| {
-                std::fs::canonicalize(ancestor).ok().map(|path| {
+                dunce::canonicalize(ancestor).ok().map(|path| {
                     if tail.as_os_str().is_empty() {
                         path
                     } else {
@@ -332,7 +332,7 @@ mod tests {
 
         let resolved = policy.resolve_existing("src/lib.rs").unwrap();
 
-        assert_eq!(resolved, std::fs::canonicalize(&file).unwrap());
+        assert_eq!(resolved, dunce::canonicalize(&file).unwrap());
         let _ = std::fs::remove_dir_all(workspace);
     }
 
@@ -346,7 +346,7 @@ mod tests {
 
         assert_eq!(
             resolved,
-            std::fs::canonicalize(&workspace)
+            dunce::canonicalize(&workspace)
                 .unwrap()
                 .join("new/child.txt")
         );
@@ -404,7 +404,7 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn absolute_drive_path_matches_verbatim_workspace_root() {
+    fn absolute_drive_path_resolves_to_native_non_verbatim_workspace_root() {
         let workspace = unique_temp_dir("path-policy-verbatim-workspace");
         std::fs::create_dir_all(&workspace).unwrap();
         let file = workspace.join("file.txt");
@@ -415,7 +415,16 @@ mod tests {
             policy
                 .resolve_existing_path(&file, &file.to_string_lossy())
                 .unwrap(),
-            std::fs::canonicalize(&file).unwrap()
+            dunce::canonicalize(&file).unwrap()
+        );
+
+        assert!(!policy.root().to_string_lossy().starts_with(r"\\?\"));
+        assert!(
+            !policy
+                .resolve_existing_path(&file, &file.to_string_lossy())
+                .unwrap()
+                .to_string_lossy()
+                .starts_with(r"\\?\")
         );
 
         std::fs::remove_dir_all(workspace).unwrap();

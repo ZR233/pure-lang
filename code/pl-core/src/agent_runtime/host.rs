@@ -116,6 +116,36 @@ pub enum ThreadContextMutation {
     Replace { items: Vec<ModelContextItem> },
 }
 
+/// 根据提交前后的 canonical transcript 派生唯一持久化 mutation。
+///
+/// 所有 Thread transition 和初始注册都必须复用该函数，避免 actor 已替换
+/// session、repository 却仍保留旧 baseline。
+pub(crate) fn transcript_mutation(
+    previous: &[ModelContextItem],
+    next: &[ModelContextItem],
+) -> Option<ThreadContextMutation> {
+    if previous == next {
+        return None;
+    }
+    if let Some(suffix) = next.strip_prefix(previous) {
+        return Some(ThreadContextMutation::Append {
+            items: suffix.to_vec(),
+        });
+    }
+    Some(ThreadContextMutation::Replace {
+        items: next.to_vec(),
+    })
+}
+
+/// 新 Thread 没有可追加的 durable baseline，非空历史必须以 replacement 起始。
+pub(crate) fn initial_transcript_mutation(
+    items: &[ModelContextItem],
+) -> Option<ThreadContextMutation> {
+    (!items.is_empty()).then(|| ThreadContextMutation::Replace {
+        items: items.to_vec(),
+    })
+}
+
 /// Thread snapshot 与同一 revision 的实时通知。
 #[derive(Debug, Clone)]
 pub struct ThreadProjectionCommit {
@@ -219,6 +249,14 @@ pub trait AgentLifecycleAdapter: Clone + Send + Sync + 'static {
         &self,
         request: SpawnLifecycleRequest,
     ) -> impl Future<Output = std::result::Result<Self::SpawnLease, Self::Error>> + Send;
+
+    /// 返回必须与 child 初始 runtime snapshot 一起持久化的产品上下文。
+    fn initial_context(
+        &self,
+        _lease: &Self::SpawnLease,
+    ) -> std::result::Result<Vec<crate::PinnedContextSection>, Self::Error> {
+        Ok(Vec::new())
+    }
 
     fn activate_spawn(
         &self,

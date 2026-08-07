@@ -13,7 +13,7 @@ use attachments::materialize_context_items;
 use enabled_tools::record_enabled_tools;
 use plan_exit::record_plan_exit_items;
 
-use crate::context_assembler::ContextAssembler;
+use crate::context_assembler::{ContextAssembler, TurnContextSnapshot};
 use crate::context_compaction::{
     CompactionOutcome, ContextCompactionPhase, ContextCompactionRequest,
     ensure_provider_can_consume_session, maybe_compact_session,
@@ -142,6 +142,8 @@ pub(super) async fn run_turn_with_trace(
     let mut iteration = 0_u32;
     let mut terminal_checkpointed = false;
     persist_mailbox_checkpoint_if_needed(&options, session).await?;
+    let mut turn_context =
+        TurnContextSnapshot::capture(session.items(), session.working_context_snapshot());
     loop {
         if drain_mailbox_inputs(&options, session, recorder, &turn_id).await? {
             safe_message_count = session.len();
@@ -186,6 +188,7 @@ pub(super) async fn run_turn_with_trace(
                 model: &model,
                 instructions: &instruction_bundle.instructions,
                 prelude_messages: &instruction_bundle.prelude_messages,
+                working_context: Some(turn_context.model_context()),
                 fixed_prefix_section_hashes: instruction_bundle.prefix_section_hashes.clone(),
                 tools: &iteration_tools,
                 tool_choice: "auto",
@@ -210,11 +213,11 @@ pub(super) async fn run_turn_with_trace(
             session_message_count = safe_message_count;
         }
         sync_prompt_cache_key(session, &options, prompt_cache_policy)?;
-        let mut assembled_context = ContextAssembler::assemble(
+        let mut assembled_context = ContextAssembler::assemble_turn(
             &instruction_bundle.instructions,
             &instruction_bundle.prelude_messages,
             session.items(),
-            &session.working_context_snapshot(),
+            &turn_context,
         )?;
 
         let compaction_trigger = provider_prompt_tokens_for_compaction.take().map_or(
@@ -296,6 +299,7 @@ pub(super) async fn run_turn_with_trace(
                             model: &model,
                             instructions: &instruction_bundle.instructions,
                             prelude_messages: &instruction_bundle.prelude_messages,
+                            working_context: Some(turn_context.model_context()),
                             fixed_prefix_section_hashes: instruction_bundle
                                 .prefix_section_hashes
                                 .clone(),
@@ -311,11 +315,12 @@ pub(super) async fn run_turn_with_trace(
                         },
                     )?;
                     sync_prompt_cache_key(session, &options, prompt_cache_policy)?;
-                    assembled_context = ContextAssembler::assemble(
+                    turn_context.rebase(session.items());
+                    assembled_context = ContextAssembler::assemble_turn(
                         &instruction_bundle.instructions,
                         &instruction_bundle.prelude_messages,
                         session.items(),
-                        &session.working_context_snapshot(),
+                        &turn_context,
                     )?;
                     if let Some(inference) = compaction_inference {
                         commit_and_publish_inference(&options, session, recorder, inference)

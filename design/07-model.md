@@ -122,9 +122,9 @@ Responses，模式顺序固定 WS、HTTP，默认 WS；选择 HTTP 时仍调用 
 catalog 返回的选项。相同 preset 可以创建多个实例，每个实例独立保存 endpoint、凭证、
 连接模式、附加模型和路由；唯一性只约束 `ProviderId`。
 
-Responses WebSocket 使用 `/responses` 握手和 `response.create` 帧，并强制发送 `store: false`；continuation 只依赖当前物理连接，不能把响应持久化到供应商侧。物理连接属于 `AgentSession` 的运行期 transport session：同一会话跨 turn 复用，不同会话绝不共享，持久化恢复后重新建立。HTTP 模式和连接重建都不能偷偷改变用户选择；握手或流错误按所选模式直接报告。`previous_response_id` continuation 只在 WebSocket 模式启用，因为该状态与物理连接绑定；HTTP/SSE 始终发送完整 canonical history，不依赖连接级 continuation。
+Responses WebSocket 使用 `/responses` 握手和 `response.create` 帧，并强制发送 `store: false`；continuation 只依赖当前物理连接，不能把响应持久化到供应商侧。物理连接属于 `AgentSession` 的运行期 transport session：同一会话跨 turn 复用，不同会话绝不共享，持久化恢复后重新建立。Provider 设置中的 WebSocket 表示首选连接模式；尚未产出 canonical 流事件的一次完整历史重放仍遇到瞬态 WS 错误时，当前 `ModelTransportSession` 必须熔断到 Responses HTTP，并在该 session 后续 turn 保持 HTTP，避免重复发送大体积完整历史。这个运行期 fallback 不修改持久化 Provider 配置，新建、fork 或持久化恢复后的 AgentSession 会重新尝试用户选择的 WebSocket。`previous_response_id` continuation 只在 WebSocket 模式启用，因为该状态与物理连接绑定；HTTP/SSE 始终发送完整 canonical history，不依赖连接级 continuation。
 
-WebSocket 建连通过系统 DNS 解析全部目标地址，并以 250ms 间隔交错竞争 IPv4/IPv6；首个成功的 TCP 连接继续使用原始域名完成 SNI、证书校验和 WebSocket 握手。单次完整握手保持 15 秒上限，超时保留 transient 分类并进入同一 WS 模式的既有重试。耗尽重试后的错误给出可操作诊断：检查 WebSocket 网络可达性，或在 Studio Provider 设置中显式切换为 HTTP；运行时不得自动回退连接模式。
+WebSocket 建连通过系统 DNS 解析全部目标地址，并以 250ms 间隔交错竞争 IPv4/IPv6；首个成功的 TCP 连接继续使用原始域名完成 SNI、证书校验和 WebSocket 握手。单次完整握手保持 15 秒上限，超时保留 transient 分类并进入同一 WS 模式的一次完整重试。无效 continuation 也必须在尚未产出 canonical 流事件时退出当前流并消费这同一个重试预算，由外层在新 WS 上发送完整历史；transport 内部不得再嵌套第二套 full replay。收到首个 canonical 流事件后，任何断线或 provider 失败都直接返回原错误，不重放请求。可重试失败采用带 0.9–1.1 稳定抖动的有界指数退避，provider `Retry-After` 优先且不加抖动。唯一 WS 重试仍失败时立即启用 session-scoped HTTP fallback，不继续制造 full replay 风暴；日志和 inference diagnostics 必须记录 fallback 原因与来源连接模式。
 
 effort 等可调参数的 wire 写入由通用透传机制驱动，协议层不再为每供应商硬编码 reasoning/thinking 映射。`build_request` 接收当前 `ModelInfo`，先序列化强类型核心字段（model、messages、stream、tools 等）为 JSON 对象，再依次注入：base body（`ModelRequestProfile.body`，如 DeepSeek 固定的 `thinking.type = enabled`），以及 parameter wire（用户选中的候选值按模型 `parameters` 声明写入或移除字段，见 7.8）。覆盖优先级为 parameter wire > base body > 协议默认字段。
 
@@ -136,13 +136,14 @@ Chat Completions wire 忽略该 Responses 专属字段。低层 `pl-model` API �
 但产品 runtime 不能依赖供应商存储来维持历史。
 `ModelTransportSession` 在相同连接和 fingerprint 下由上次完整请求前缀计算增量，在 transport
 内部克隆请求并只对 Responses WebSocket 帧设置 `previous_response_id`。断线、取消、未完整消费、配置变化或无效 continuation
-都会关闭旧连接；最多一次在新 WS 上用完整历史重试。Responses HTTP/SSE 和 Chat Completions
-始终发送完整历史。
+都会关闭旧连接；只有首个 canonical 流事件前的瞬态失败可在新 WS 上用完整历史重试一次。该重试
+仍失败时，同一 session 从当前请求开始切换到 Responses HTTP，不再创建新的 WS full replay；已经
+产出事件的请求不得切换 transport 后重放。Responses HTTP/SSE 和 Chat Completions 始终发送完整历史。
 
 `CompletionRequest.messages` 中的 `MessageRole::System` 表示本轮临时前置指令或开发者上下文。Responses endpoint 序列化为 input message role `developer`，避免发送不被部分 Responses 兼容服务接受的 `system` role；Chat Completions 仍序列化为 `system` role。
 
 provider transport 层把第三方 API 错误统一转换为 `PureError` 时必须先脱敏。错误文本中不得包含 bearer token、API key 或形如 `sk-...` 的密钥片段；鉴权失败、配额不足、模型不存在等服务端错误可以保留 status、错误类型、code 和可读原因，但密钥值必须替换为稳定占位。
-Responses HTTP/SSE 与 Chat Completions HTTP 必须和 WebSocket 一样，用 Serde typed error DTO 保留结构化 provider code、HTTP status、message 与可选 retry hint；进入控制流后不得把 DTO 降级成待解析字符串。408/409/425/429、5xx 以及 `server_is_overloaded` 等容量错误只允许在尚未开始消费流式输出时有限重放完整请求；一旦 HTTP 流已经建立，transport 不得因为后续流错误自动重放并制造重复输出。
+Responses HTTP/SSE 与 Chat Completions HTTP 必须和 WebSocket 一样，用 Serde typed error DTO 保留结构化 provider code、HTTP status、message 与可选 retry hint；进入控制流后不得把 DTO 降级成待解析字符串。408/409/425/429、5xx、建流前的瞬态网络错误以及 `server_is_overloaded` 等容量错误只允许在流对象建立前最多重试两次，并采用同一有界指数退避与抖动；一旦 HTTP 流已经建立，transport 不得因为后续流错误自动重放并制造重复输出。WS 切换 HTTP 后使用独立的 HTTP 重试预算，但不会再回到 WS；因此仅在两个 transport 都未产出流事件的最坏情况下，单次请求最多产生两次 WS 发送和三次 HTTP 发送。
 
 提示词分层由 `pl-core` 决定，`pl-model` 只消费已经组装好的 `CompletionRequest`。`CompletionRequest.instructions` 表示 base/system 层，并在 Responses 和 Chat Completions 请求中作为最前面的 system 内容发送。`messages` 可以包含核心层临时插入的 system/user 前置消息；`pl-model` 不区分它们是否来自 developer 或 user context，也不把任何提示词写回会话。
 
@@ -278,17 +279,20 @@ pub struct ModelPricing {
 
 核心层按 prompt generation 组装请求，唯一顺序是：模型基础指令、平台与全局配置、模式与
 角色、Skill、Workspace/项目文档组成的固定 instructions 与 prelude，随后是 durable model
-transcript，最后附加至多一条当前 working-context message。同一 generation 内，model、
+transcript，最后附加至多一条本 Turn 冻结的 working-context message。同一 generation 内，model、
 instructions、tools、tool choice、reasoning、输出 schema 和 service tier 不得变化；
 transcript 只包含 user、assistant、tool result 与 provider compaction checkpoint。pinned sections、
 Evidence Ledger、session note 和 prompt generation 状态属于可替换 `AgentWorkingState`，不得作为
 append-only `ModelContextItem` 写入 transcript。
 
-每次 inference 都从 `AgentWorkingState` 渲染完整、当前的 working-context tail；旧版本不进入
-历史、压缩输入、token 估算或 Bridge。working context 内容变化只更新 context hash，不提升
-prompt generation；provider、model、固定指令、工具 schema 或 compaction 变化才提升 generation。
-这样固定前缀与 transcript 仍可复用 provider prompt cache，同时单份 working context 的大小继续
-受 pinned section 总预算约束。
+每个 Turn 在首个 inference 前从 `AgentWorkingState` 冻结一次模型可见 working context；同一
+Turn 后续 inference 只追加 transcript/tool result，不因 Todo、receipt 或其他 working state 更新
+替换已发送 input。Evidence Ledger 继续有界持久化，但不进入 provider request、token 估算或
+context hash；完整工具结果已在 durable transcript 中提供模型恢复所需事实。其他 pinned section
+在下一 Turn 才以最新版本重新冻结。working context 内容变化只更新 context hash，不提升 prompt
+generation；provider、model、固定指令、工具 schema 或 compaction 变化才提升 generation。
+这样 Responses WebSocket continuation 能保持严格追加前缀，固定前缀与 transcript 也能复用
+provider prompt cache。
 
 上下文压缩采用 Codex 风格的版本化 replacement：采样前估算完整物化请求，达到 90% 自动阈值
 时 replace transcript，再把当前 working context 注入新窗口一次。provider 报告 token 达到阈值时，

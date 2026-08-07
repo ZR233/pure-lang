@@ -86,6 +86,8 @@ struct CommandProcessState {
     stderr_open: bool,
     stdout: HeadTailBuffer,
     stderr: HeadTailBuffer,
+    pending_stdout: HeadTailBuffer,
+    pending_stderr: HeadTailBuffer,
     output_revision: u64,
     error: Option<String>,
 }
@@ -418,11 +420,9 @@ impl CommandProcessEntry {
         &self,
         max_output_chars: usize,
     ) -> (CommandOutputSnapshot, CommandOutputSizes) {
-        let state = self.state.lock().await;
+        let mut state = self.state.lock().await;
         let status = status_for_state(&state);
         let process_id = (status == "running").then(|| self.process_id.clone());
-        let stdout = truncate_text(&state.stdout.display_text(), max_output_chars);
-        let stderr = truncate_text(&state.stderr.display_text(), max_output_chars);
         let message = message_for_state(
             &state,
             process_id.as_deref(),
@@ -432,6 +432,8 @@ impl CommandProcessEntry {
             stdout_bytes: state.stdout.total_bytes() as u64,
             stderr_bytes: state.stderr.total_bytes() as u64,
         };
+        let stdout = truncate_text(&state.pending_stdout.take_display_text(), max_output_chars);
+        let stderr = truncate_text(&state.pending_stderr.take_display_text(), max_output_chars);
         (
             CommandOutputSnapshot {
                 status: status.to_string(),

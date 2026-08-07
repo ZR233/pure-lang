@@ -141,10 +141,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(
-            resolved,
-            tokio::fs::canonicalize(&outside_file).await.unwrap()
-        );
+        assert_eq!(resolved, dunce::canonicalize(&outside_file).unwrap());
         let _ = tokio::fs::remove_dir_all(workspace).await;
         let _ = tokio::fs::remove_dir_all(outside).await;
     }
@@ -159,10 +156,7 @@ mod tests {
 
         assert_eq!(
             resolved,
-            tokio::fs::canonicalize(&workspace)
-                .await
-                .unwrap()
-                .join("src/new.rs")
+            dunce::canonicalize(&workspace).unwrap().join("src/new.rs")
         );
         let _ = tokio::fs::remove_dir_all(workspace).await;
     }

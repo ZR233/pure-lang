@@ -82,6 +82,15 @@ abstract final class StudioDriverKeys {
   static ValueKey<String> taskAgent(String id) =>
       ValueKey<String>('task-agent-$id');
 
+  static ValueKey<String> taskRuntime(String runId) =>
+      ValueKey<String>('task-runtime-$runId');
+
+  static ValueKey<String> taskPhase(String runId, String phase) =>
+      ValueKey<String>('task-runtime-$runId-phase-$phase');
+
+  static ValueKey<String> taskStatus(String runId, String status) =>
+      ValueKey<String>('task-runtime-$runId-status-$status');
+
   static ValueKey<String> taskAgentStatus(String id) =>
       ValueKey<String>('task-agent-$id-status');
 

@@ -23,8 +23,9 @@ mod dialer;
 mod error;
 
 use error::{
-    close_error, connection_error, continuation_id_invalid, handshake_error,
-    handshake_timeout_error, protocol_error, response_terminal_error, server_error,
+    close_error, connection_error, continuation_id_invalid, continuation_retry_error,
+    handshake_error, handshake_timeout_error, protocol_error, response_terminal_error,
+    server_error,
 };
 
 pub(super) async fn stream_responses(
@@ -46,10 +47,45 @@ pub(super) async fn stream_responses(
         guard.connection_key = Some(connection_key);
     }
 
-    let (mut wire_body, used_continuation) = incremental_request(&guard, &body)
-        .map(|body| (body, true))
-        .unwrap_or_else(|| (body.clone(), false));
+    let (mut wire_body, used_continuation, fallback_reason) =
+        match incremental_request(&guard, &body) {
+            Ok(incremental) => (incremental, true, None),
+            Err(reason) => (body.clone(), false, Some(reason)),
+        };
+    let input = body.get("input");
+    let input_items = input.and_then(Value::as_array).map_or(0, Vec::len);
+    let context_bytes = input
+        .and_then(|input| serde_json::to_vec(input).ok())
+        .map_or(0, |input| input.len());
+    let wire_input_items = wire_body
+        .get("input")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
+    let (previous_prefix_items, first_differing_index) = fallback_reason
+        .and_then(IncrementalRequestFallbackReason::prefix_mismatch)
+        .map_or((0, 0), |diagnostics| {
+            (
+                diagnostics.previous_prefix_items,
+                diagnostics.first_differing_index,
+            )
+        });
+    let request_mode = if used_continuation {
+        "incremental"
+    } else {
+        "full"
+    };
     let request_text = response_create_text(&mut wire_body)?;
+    tracing::debug!(
+        request_mode,
+        fallback_reason = fallback_reason.map_or("none", IncrementalRequestFallbackReason::as_str),
+        input_items,
+        wire_input_items,
+        context_bytes,
+        request_bytes = request_text.len(),
+        previous_prefix_items,
+        first_differing_index,
+        "Responses WebSocket request prepared"
+    );
     if let Err(error) = send_request(&mut guard, &request_text).await {
         guard.invalidate();
         return Err(error);
@@ -61,16 +97,8 @@ pub(super) async fn stream_responses(
         terminal_failure: false,
         stream_finished: false,
         used_continuation,
-        continuation_retry_available: true,
         events_emitted: false,
         full_request: body,
-        reconnect: WebSocketReconnect {
-            api_base,
-            token,
-            provider_headers: provider_headers.cloned(),
-            model_headers: model_headers.clone(),
-            connection_key,
-        },
     };
     Ok(Box::pin(futures::stream::unfold(
         state,
@@ -109,17 +137,38 @@ fn response_create_text(body: &mut Map<String, Value>) -> Result<String> {
 fn incremental_request(
     session: &ResponsesWebSocketSession,
     current: &Map<String, Value>,
-) -> Option<Map<String, Value>> {
-    let previous = session.last_request.as_ref()?;
-    let response_id = session.last_response_id.as_deref()?;
+) -> std::result::Result<Map<String, Value>, IncrementalRequestFallbackReason> {
+    let previous = session
+        .last_request
+        .as_ref()
+        .ok_or(IncrementalRequestFallbackReason::MissingPreviousRequest)?;
+    let response_id = session
+        .last_response_id
+        .as_deref()
+        .ok_or(IncrementalRequestFallbackReason::MissingPreviousResponseId)?;
     if request_properties(previous) != request_properties(current) {
-        return None;
+        return Err(IncrementalRequestFallbackReason::RequestPropertiesChanged);
     }
-    let mut previous_items = previous.get("input")?.as_array()?.clone();
+    let mut previous_items = previous
+        .get("input")
+        .and_then(Value::as_array)
+        .cloned()
+        .ok_or(IncrementalRequestFallbackReason::PreviousInputNotArray)?;
     previous_items.extend(session.last_response_items.iter().cloned());
-    let current_items = current.get("input")?.as_array()?;
+    let current_items = current
+        .get("input")
+        .and_then(Value::as_array)
+        .ok_or(IncrementalRequestFallbackReason::CurrentInputNotArray)?;
     if !current_items.starts_with(&previous_items) {
-        return None;
+        let first_differing_index = previous_items
+            .iter()
+            .zip(current_items)
+            .position(|(previous, current)| previous != current)
+            .unwrap_or_else(|| previous_items.len().min(current_items.len()));
+        return Err(IncrementalRequestFallbackReason::InputPrefixMismatch {
+            previous_prefix_items: previous_items.len(),
+            first_differing_index,
+        });
     }
     let mut incremental = current.clone();
     incremental.insert(
@@ -130,7 +179,52 @@ fn incremental_request(
         "previous_response_id".to_string(),
         Value::String(response_id.to_string()),
     );
-    Some(incremental)
+    Ok(incremental)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum IncrementalRequestFallbackReason {
+    MissingPreviousRequest,
+    MissingPreviousResponseId,
+    RequestPropertiesChanged,
+    PreviousInputNotArray,
+    CurrentInputNotArray,
+    InputPrefixMismatch {
+        previous_prefix_items: usize,
+        first_differing_index: usize,
+    },
+}
+
+impl IncrementalRequestFallbackReason {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::MissingPreviousRequest => "missingPreviousRequest",
+            Self::MissingPreviousResponseId => "missingPreviousResponseId",
+            Self::RequestPropertiesChanged => "requestPropertiesChanged",
+            Self::PreviousInputNotArray => "previousInputNotArray",
+            Self::CurrentInputNotArray => "currentInputNotArray",
+            Self::InputPrefixMismatch { .. } => "inputPrefixMismatch",
+        }
+    }
+
+    const fn prefix_mismatch(self) -> Option<InputPrefixMismatchDiagnostics> {
+        match self {
+            Self::InputPrefixMismatch {
+                previous_prefix_items,
+                first_differing_index,
+            } => Some(InputPrefixMismatchDiagnostics {
+                previous_prefix_items,
+                first_differing_index,
+            }),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct InputPrefixMismatchDiagnostics {
+    previous_prefix_items: usize,
+    first_differing_index: usize,
 }
 
 fn request_properties(body: &Map<String, Value>) -> Map<String, Value> {
@@ -237,18 +331,8 @@ struct WebSocketEventState {
     terminal_failure: bool,
     stream_finished: bool,
     used_continuation: bool,
-    continuation_retry_available: bool,
     events_emitted: bool,
     full_request: Map<String, Value>,
-    reconnect: WebSocketReconnect,
-}
-
-struct WebSocketReconnect {
-    api_base: String,
-    token: Option<String>,
-    provider_headers: Option<HashMap<String, String>>,
-    model_headers: HashMap<String, String>,
-    connection_key: u64,
 }
 
 impl WebSocketEventState {
@@ -290,8 +374,8 @@ impl WebSocketEventState {
                             && self.used_continuation
                             && continuation_id_invalid(&value)
                         {
-                            self.restart_with_full_history().await?;
-                            continue;
+                            self.guard.invalidate();
+                            return Err(continuation_retry_error());
                         }
                         self.guard.invalidate();
                         return Err(server_error(&value));
@@ -341,34 +425,6 @@ impl WebSocketEventState {
     fn invalidate_with_connection_error(&mut self, detail: impl AsRef<str>) -> PureError {
         self.guard.invalidate();
         connection_error(detail)
-    }
-
-    async fn restart_with_full_history(&mut self) -> Result<()> {
-        if !self.continuation_retry_available {
-            return Err(protocol_error(
-                "previous_response_id remained invalid after a full-history retry",
-            ));
-        }
-        self.continuation_retry_available = false;
-        self.guard.invalidate();
-        self.guard.connection = Some(
-            connect(
-                &self.reconnect.api_base,
-                self.reconnect.token.as_deref(),
-                self.reconnect.provider_headers.as_ref(),
-                &self.reconnect.model_headers,
-            )
-            .await?,
-        );
-        self.guard.connection_key = Some(self.reconnect.connection_key);
-        let mut full_request = self.full_request.clone();
-        let request_text = response_create_text(&mut full_request)?;
-        if let Err(error) = send_request(&mut self.guard, &request_text).await {
-            self.guard.invalidate();
-            return Err(error);
-        }
-        self.used_continuation = false;
-        Ok(())
     }
 
     fn commit_completed_response(&mut self, event: &SseStreamEvent) {
@@ -461,8 +517,10 @@ mod tests {
     use serde_json::{Map, Value};
 
     use super::{
-        canonical_response_history_items, normalize_websocket_request_body, responses_websocket_url,
+        IncrementalRequestFallbackReason, canonical_response_history_items, incremental_request,
+        normalize_websocket_request_body, responses_websocket_url,
     };
+    use crate::transport_session::ResponsesWebSocketSession;
 
     #[test]
     fn websocket_request_keeps_explicit_empty_tools_for_v2_schema() {
@@ -521,6 +579,131 @@ mod tests {
                 "role": "assistant",
                 "content": [{ "type": "output_text", "text": "ok" }],
             })]
+        );
+    }
+
+    #[test]
+    fn incremental_request_sends_only_the_strict_suffix() {
+        let session = ResponsesWebSocketSession {
+            last_request: Some(Map::from_iter([
+                ("model".to_string(), serde_json::json!("gpt-test")),
+                (
+                    "input".to_string(),
+                    serde_json::json!([{"role":"user","content":"a"}]),
+                ),
+            ])),
+            last_response_id: Some("response-1".to_string()),
+            last_response_items: vec![serde_json::json!({"role":"assistant","content":"b"})],
+            ..ResponsesWebSocketSession::default()
+        };
+        let current = Map::from_iter([
+            ("model".to_string(), serde_json::json!("gpt-test")),
+            (
+                "input".to_string(),
+                serde_json::json!([
+                    {"role":"user","content":"a"},
+                    {"role":"assistant","content":"b"},
+                    {"role":"user","content":"c"}
+                ]),
+            ),
+        ]);
+
+        let incremental = incremental_request(&session, &current).unwrap();
+        assert_eq!(
+            incremental["input"],
+            serde_json::json!([{"role":"user","content":"c"}])
+        );
+        assert_eq!(incremental["previous_response_id"], "response-1");
+    }
+
+    #[test]
+    fn incremental_request_reports_prefix_mismatch() {
+        let session = ResponsesWebSocketSession {
+            last_request: Some(Map::from_iter([
+                ("model".to_string(), serde_json::json!("gpt-test")),
+                ("input".to_string(), serde_json::json!(["old-tail"])),
+            ])),
+            last_response_id: Some("response-1".to_string()),
+            ..ResponsesWebSocketSession::default()
+        };
+        let current = Map::from_iter([
+            ("model".to_string(), serde_json::json!("gpt-test")),
+            ("input".to_string(), serde_json::json!(["new-tail"])),
+        ]);
+
+        assert_eq!(
+            incremental_request(&session, &current).unwrap_err(),
+            IncrementalRequestFallbackReason::InputPrefixMismatch {
+                previous_prefix_items: 1,
+                first_differing_index: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn incremental_request_requires_working_context_to_keep_its_turn_anchor() {
+        let user = serde_json::json!({
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": "implement"}],
+        });
+        let working_context = serde_json::json!({
+            "type": "message",
+            "role": "developer",
+            "content": [{"type": "input_text", "text": "# Current working context"}],
+        });
+        let tool_call = serde_json::json!({
+            "type": "function_call",
+            "name": "read_file",
+            "arguments": "{\"path\":\"src/lib.rs\"}",
+            "call_id": "call-1",
+        });
+        let tool_result = serde_json::json!({
+            "type": "function_call_output",
+            "call_id": "call-1",
+            "output": "ok",
+        });
+        let session = ResponsesWebSocketSession {
+            last_request: Some(Map::from_iter([
+                ("model".to_string(), serde_json::json!("gpt-test")),
+                (
+                    "input".to_string(),
+                    Value::Array(vec![user.clone(), working_context.clone()]),
+                ),
+            ])),
+            last_response_id: Some("response-1".to_string()),
+            last_response_items: vec![tool_call.clone()],
+            ..ResponsesWebSocketSession::default()
+        };
+        let anchored = Map::from_iter([
+            ("model".to_string(), serde_json::json!("gpt-test")),
+            (
+                "input".to_string(),
+                Value::Array(vec![
+                    user.clone(),
+                    working_context.clone(),
+                    tool_call.clone(),
+                    tool_result.clone(),
+                ]),
+            ),
+        ]);
+        let relocated = Map::from_iter([
+            ("model".to_string(), serde_json::json!("gpt-test")),
+            (
+                "input".to_string(),
+                Value::Array(vec![user, tool_call, tool_result.clone(), working_context]),
+            ),
+        ]);
+
+        let incremental = incremental_request(&session, &anchored).unwrap();
+        assert_eq!(incremental["input"], Value::Array(vec![tool_result]));
+        assert_eq!(incremental["previous_response_id"], "response-1");
+        assert_eq!(
+            incremental_request(&session, &relocated).unwrap_err(),
+            IncrementalRequestFallbackReason::InputPrefixMismatch {
+                previous_prefix_items: 3,
+                first_differing_index: 1,
+            }
         );
     }
 }

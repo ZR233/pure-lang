@@ -1,15 +1,18 @@
 //! Studio worktree 生命周期测试。
 
 use std::fs;
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Barrier};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::{
-    DurableWorktreeDisposition, DurableWorktreePresence, DurableWorktreeResource,
-    reconcile_task_worktrees, set_after_registration_remove_barrier,
+    DurableWorktreeDisposition, DurableWorktreePresence, DurableWorktreeResource, WorktreeBackend,
+    WorktreeCreateFailure, WorktreeError, reconcile_task_worktrees,
+    set_after_registration_remove_barrier,
 };
 use super::{WorktreeCreateSpec, WorktreeManager};
 
@@ -275,6 +278,87 @@ async fn discard_removes_worktree_and_branch() {
     let handle = manager.create("agent-1").await.unwrap();
     manager.discard(&handle).await.unwrap();
     assert!(!handle.path.exists());
+    fs::remove_dir_all(repo).ok();
+}
+
+#[derive(Debug)]
+struct RemoveReportsFailureAfterDeletingLeaf;
+
+impl WorktreeBackend for RemoveReportsFailureAfterDeletingLeaf {
+    fn create<'a>(
+        &'a self,
+        _repo_root: &'a Path,
+        _branch: &'a str,
+        _target_path: &'a Path,
+        _base_commit: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), WorktreeCreateFailure>> + Send + 'a>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn remove<'a>(
+        &'a self,
+        _repo_root: &'a Path,
+        target_path: &'a Path,
+        _force: bool,
+    ) -> Pin<Box<dyn Future<Output = Result<(), WorktreeError>> + Send + 'a>> {
+        Box::pin(async move {
+            tokio::fs::remove_dir_all(target_path).await.unwrap();
+            Err(WorktreeError::GitCommand {
+                args: "worktree remove --force".to_string(),
+                stderr: "Filename too long".to_string(),
+            })
+        })
+    }
+
+    fn delete_branch<'a>(
+        &'a self,
+        _repo_root: &'a Path,
+        _branch: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), WorktreeError>> + Send + 'a>> {
+        Box::pin(async { Ok(()) })
+    }
+}
+
+#[tokio::test]
+async fn discard_uses_final_resource_state_after_partial_git_remove_failure() {
+    let repo = temp_git_repo();
+    let handle = super::WorktreeHandle {
+        path: repo.join(".pure/worktrees/task-run/agent"),
+        branch: "pure-task-task-run-agent".to_string(),
+    };
+    fs::create_dir_all(&handle.path).unwrap();
+    let manager = WorktreeManager::with_backend(
+        repo.clone(),
+        Arc::new(RemoveReportsFailureAfterDeletingLeaf),
+    );
+
+    manager.discard(&handle).await.unwrap();
+
+    assert!(!handle.path.exists());
+    fs::remove_dir_all(repo).ok();
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn discard_cleans_a_worktree_containing_windows_long_paths() {
+    let repo = temp_git_repo();
+    let manager = WorktreeManager::local(repo.clone());
+    let handle = manager.create("agent-long-path").await.unwrap();
+    let component = "long-path-component-0123456789-0123456789-0123456789";
+    let nested = handle
+        .path
+        .join(component)
+        .join(component)
+        .join(component)
+        .join(component);
+    fs::create_dir_all(&nested).unwrap();
+    fs::write(nested.join("artifact.txt"), "long path fixture").unwrap();
+    assert!(nested.as_os_str().len() > 260);
+
+    manager.discard(&handle).await.unwrap();
+
+    assert!(!handle.path.exists());
+    assert!(git_output(&repo, &["branch", "--list", &handle.branch]).is_empty());
     fs::remove_dir_all(repo).ok();
 }
 

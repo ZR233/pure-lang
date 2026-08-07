@@ -193,48 +193,52 @@ impl WorktreeManager {
     /// 明确丢弃并删除 worktree 与其分支，聚合所有失败的清理步骤。
     pub async fn discard(&self, handle: &WorktreeHandle) -> Result<(), WorktreeError> {
         let repo_root = self.require_repo_root()?;
-        let mut failures = Vec::new();
-        if let Err(error) = self
+        let registration_error = self
             .inner
             .backend
             .remove(&repo_root, &handle.path, true)
             .await
-        {
-            failures.push(error);
-        }
+            .err();
 
-        match tokio::fs::symlink_metadata(&handle.path).await {
+        let leaf_error = match tokio::fs::symlink_metadata(&handle.path).await {
             Ok(_) => {
                 let worktree_root = repo_root.join(WORKTREE_DIR);
-                if let Err(error) =
-                    remove_dir_all_no_follow_async(&worktree_root, &handle.path).await
-                {
-                    failures.push(WorktreeError::Io(format!(
-                        "failed to remove {}: {error}",
-                        handle.path.display()
-                    )));
-                }
+                remove_dir_all_no_follow_async(&worktree_root, &handle.path)
+                    .await
+                    .err()
+                    .map(|error| {
+                        WorktreeError::Io(format!(
+                            "failed to remove {}: {error}",
+                            handle.path.display()
+                        ))
+                    })
             }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => {
-                failures.push(WorktreeError::Io(format!(
-                    "failed to inspect {}: {error}",
-                    handle.path.display()
-                )));
-            }
-        }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => Some(WorktreeError::Io(format!(
+                "failed to inspect {}: {error}",
+                handle.path.display()
+            ))),
+        };
 
-        if let Err(error) = self
+        let branch_error = self
             .inner
             .backend
             .delete_branch(&repo_root, &handle.branch)
             .await
-        {
-            failures.push(error);
-        }
-        if failures.is_empty() {
+            .err();
+        if leaf_error.is_none() && branch_error.is_none() {
             Ok(())
         } else {
+            let mut failures = Vec::new();
+            if let Some(error) = registration_error {
+                failures.push(error);
+            }
+            if let Some(error) = leaf_error {
+                failures.push(error);
+            }
+            if let Some(error) = branch_error {
+                failures.push(error);
+            }
             Err(WorktreeError::CleanupFailed {
                 context: format!("worktree `{}`", handle.path.display()),
                 failures,

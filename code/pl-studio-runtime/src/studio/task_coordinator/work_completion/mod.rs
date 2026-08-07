@@ -9,6 +9,7 @@ use super::{
     AgentDelivery, AgentWorktreeDelivery, DeliveryScope, TaskCoordinator, ThreadExecutionStatus,
     WorkCompletionKind, WorkCompletionRecord, WorkUnitStatus,
 };
+use crate::agent::worktree::git_compatible_path;
 use crate::tool::{
     RegisteredTool, SubagentContext, ToolExecutionResult, ToolInputSchemaField,
     strict_tool_input_schema,
@@ -227,8 +228,10 @@ impl TaskCoordinator {
         result: CompletionResultInput,
     ) -> Result<WorkCompletionRecord> {
         let repository = inspect_repository(caller_workspace, true).await?;
-        let canonical_caller = std::fs::canonicalize(caller_workspace)
-            .context("failed to resolve caller workspace path")?;
+        let canonical_caller = git_compatible_path(
+            std::fs::canonicalize(caller_workspace)
+                .context("failed to resolve caller workspace path")?,
+        );
         let scope = self
             .store
             .resolve_active_completion_scope(

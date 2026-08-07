@@ -12,6 +12,8 @@ impl CommandProcessState {
             stderr_open,
             stdout: HeadTailBuffer::new(INTERNAL_BUFFER_BYTES),
             stderr: HeadTailBuffer::new(INTERNAL_BUFFER_BYTES),
+            pending_stdout: HeadTailBuffer::new(INTERNAL_BUFFER_BYTES),
+            pending_stderr: HeadTailBuffer::new(INTERNAL_BUFFER_BYTES),
             output_revision: 0,
             error: None,
         }
@@ -19,6 +21,21 @@ impl CommandProcessState {
 
     pub(super) fn can_accept_input(&self) -> bool {
         matches!(self.phase, CommandProcessPhase::Running)
+    }
+
+    pub(super) fn record_output(&mut self, stream: StreamKind, chunk: &[u8]) -> u64 {
+        self.output_revision = self.output_revision.saturating_add(1);
+        match stream {
+            StreamKind::Stdout => {
+                self.stdout.push_chunk(chunk);
+                self.pending_stdout.push_chunk(chunk);
+            }
+            StreamKind::Stderr => {
+                self.stderr.push_chunk(chunk);
+                self.pending_stderr.push_chunk(chunk);
+            }
+        }
+        self.output_revision
     }
 
     pub(super) fn is_final(&self) -> bool {

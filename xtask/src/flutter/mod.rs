@@ -456,6 +456,7 @@ fn run_gui_args(target: DesktopTarget, version_define: &str, driver_mode: Driver
             "test_driver/driver_main.dart",
             "--dart-define=PURE_STUDIO_DRIVER=true",
             "--disable-service-auth-codes",
+            "--no-dds",
             "--verbose",
         ]);
     }
@@ -834,6 +835,17 @@ mod tests {
         );
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn frb_codegen_uses_windows_verbatim_paths_for_rust_inputs() {
+        let path = Path::new(r"C:\repo\code\pure-studio\rust");
+
+        assert_eq!(
+            codegen_rust_path(path),
+            OsString::from(r"\\?\C:\repo\code\pure-studio\rust")
+        );
+    }
+
     #[test]
     fn driver_mode_selects_dedicated_entrypoint() {
         let version_define = "--dart-define=PURE_STUDIO_VERSION=1.2.3";
@@ -850,6 +862,7 @@ mod tests {
                 "test_driver/driver_main.dart",
                 "--dart-define=PURE_STUDIO_DRIVER=true",
                 "--disable-service-auth-codes",
+                "--no-dds",
                 "--verbose",
             ]
         );
@@ -870,6 +883,7 @@ mod tests {
         assert!(!args.contains(&"test_driver/driver_main.dart"));
         assert!(!args.contains(&"--dart-define=PURE_STUDIO_DRIVER=true"));
         assert!(!args.contains(&"--disable-service-auth-codes"));
+        assert!(!args.contains(&"--no-dds"));
         assert!(!args.contains(&"--verbose"));
         assert!(!args.contains(&"-t"));
         assert!(args.contains(&"--no-pub"));

@@ -246,6 +246,9 @@ pub struct DurableMailboxEnvelope {
     pub presentation: MailboxPresentation,
     #[serde(default)]
     pub metadata: serde_json::Value,
+    /// 只合并队首连续 pending 输入的通用 key；不会进入模型提示词。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_coalescing_key: Option<String>,
     #[serde(default)]
     pub delivery_state: MailboxDeliveryState,
     pub queued_at: i64,
@@ -274,6 +277,7 @@ pub struct AgentSubmitRequest {
     pub message: String,
     pub presentation: MailboxPresentation,
     pub metadata: serde_json::Value,
+    pub queue_coalescing_key: Option<String>,
     pub mail_id: Option<String>,
     pub turn_policy: AgentTurnSubmitPolicy,
 }
@@ -283,6 +287,8 @@ pub struct AgentSubmitRequest {
 pub enum AgentTurnSubmitPolicy {
     #[default]
     StartOrSteer,
+    /// Idle 时启动新 Turn；已有活动 Turn 时持久排入下一 Turn，绝不 steer。
+    StartOrQueue,
     StartOnly,
     SteerOnly,
 }
@@ -295,6 +301,7 @@ impl AgentSubmitRequest {
             message: message.into(),
             presentation: MailboxPresentation::User,
             metadata: serde_json::Value::Null,
+            queue_coalescing_key: None,
             mail_id: None,
             turn_policy: AgentTurnSubmitPolicy::StartOrSteer,
         }
@@ -303,6 +310,12 @@ impl AgentSubmitRequest {
     /// 设置产品自定义、可持久化的输入元数据。
     pub fn with_metadata(mut self, metadata: serde_json::Value) -> Self {
         self.metadata = metadata;
+        self
+    }
+
+    /// 合并队首连续、key 相同的 queued 输入，并在同一 Turn 中按顺序消费。
+    pub fn with_queue_coalescing_key(mut self, key: impl Into<String>) -> Self {
+        self.queue_coalescing_key = Some(key.into());
         self
     }
 
@@ -405,6 +418,8 @@ pub struct AgentSpawnRequest {
     pub parent_id: AgentId,
     pub role: AgentRoleId,
     pub session: ThreadContextState,
+    /// 产品需要幂等重试时可提供稳定的首轮 id。
+    pub initial_turn_id: Option<TurnId>,
     pub initial_message: Option<String>,
     pub metadata: serde_json::Value,
 }

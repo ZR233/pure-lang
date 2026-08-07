@@ -429,7 +429,7 @@ async fn upsert_input(
         mail_id: Set(input.mail_id.clone()),
         turn_id: Set(input.turn_id.to_string()),
         content: Set(input.message.clone()),
-        metadata_json: Set(serde_json::to_string(&input.metadata)?),
+        metadata_json: Set(serialize_input_metadata(input)?),
         presentation: Set(presentation_label(input.presentation.clone()).to_string()),
         state: Set(delivery_state.to_string()),
         claimed_turn_id: Set(claimed_turn_id),
@@ -479,16 +479,55 @@ fn input_from_model(model: thread_input::Model) -> Result<DurableMailboxEnvelope
         },
         other => return Err(store_error(format!("cannot restore input state {other}"))),
     };
+    let (metadata, queue_coalescing_key) = deserialize_input_metadata(&model.metadata_json)?;
     Ok(DurableMailboxEnvelope {
         mail_id: model.mail_id,
         turn_id: TurnId::new(model.turn_id)?,
         thread_id: ThreadId::new(model.thread_id)?,
         message: model.content,
         presentation: presentation_from_label(&model.presentation)?,
-        metadata: serde_json::from_str(&model.metadata_json)?,
+        metadata,
+        queue_coalescing_key,
         delivery_state,
         queued_at: model.queued_at,
     })
+}
+
+const RUNTIME_INPUT_METADATA_KEY: &str = "$plAgentRuntime";
+const INPUT_METADATA_PAYLOAD_KEY: &str = "payload";
+
+fn serialize_input_metadata(input: &DurableMailboxEnvelope) -> Result<String, PureError> {
+    let Some(key) = input.queue_coalescing_key.as_deref() else {
+        return Ok(serde_json::to_string(&input.metadata)?);
+    };
+    let value = serde_json::json!({
+        RUNTIME_INPUT_METADATA_KEY: {
+            "queueCoalescingKey": key,
+        },
+        INPUT_METADATA_PAYLOAD_KEY: input.metadata,
+    });
+    Ok(serde_json::to_string(&value)?)
+}
+
+fn deserialize_input_metadata(
+    input: &str,
+) -> Result<(serde_json::Value, Option<String>), PureError> {
+    let mut value: serde_json::Value = serde_json::from_str(input)?;
+    let Some(object) = value.as_object_mut() else {
+        return Ok((value, None));
+    };
+    let Some(key) = object
+        .get(RUNTIME_INPUT_METADATA_KEY)
+        .and_then(|runtime| runtime.get("queueCoalescingKey"))
+        .and_then(serde_json::Value::as_str)
+        .map(ToOwned::to_owned)
+    else {
+        return Ok((value, None));
+    };
+    let payload = object
+        .remove(INPUT_METADATA_PAYLOAD_KEY)
+        .unwrap_or(serde_json::Value::Null);
+    Ok((payload, Some(key)))
 }
 
 fn delivery_identity(state: &MailboxDeliveryState) -> Option<(TurnId, u64)> {
@@ -1166,5 +1205,35 @@ mod outcome_tests {
             outcome.reason.as_deref(),
             Some("active wall-clock budget reached")
         );
+    }
+
+    #[test]
+    fn input_metadata_round_trips_queue_coalescing_key_without_changing_payload() {
+        let input = DurableMailboxEnvelope {
+            mail_id: "mail:wake".to_string(),
+            turn_id: TurnId::new("turn-wake").unwrap(),
+            thread_id: ThreadId::new("thread-wake").unwrap(),
+            message: "wake".to_string(),
+            presentation: MailboxPresentation::Hidden,
+            metadata: serde_json::json!({"kind": "taskWake"}),
+            queue_coalescing_key: Some("task-run:wakes".to_string()),
+            delivery_state: MailboxDeliveryState::Pending,
+            queued_at: 1,
+        };
+
+        let stored = serialize_input_metadata(&input).unwrap();
+        let (metadata, key) = deserialize_input_metadata(&stored).unwrap();
+
+        assert_eq!(metadata, input.metadata);
+        assert_eq!(key, input.queue_coalescing_key);
+    }
+
+    #[test]
+    fn legacy_input_metadata_remains_unwrapped() {
+        let stored = r#"{"kind":"legacy"}"#;
+        let (metadata, key) = deserialize_input_metadata(stored).unwrap();
+
+        assert_eq!(metadata, serde_json::json!({"kind": "legacy"}));
+        assert_eq!(key, None);
     }
 }

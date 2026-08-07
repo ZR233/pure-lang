@@ -813,6 +813,7 @@ class BridgeTaskWorkUnitDto {
   final String continuationState;
   final String? continuationSourceTurnId;
   final BigInt continuationRevision;
+  final BigInt executorProgressRevision;
 
   const BridgeTaskWorkUnitDto({
     required this.id,
@@ -829,6 +830,7 @@ class BridgeTaskWorkUnitDto {
     required this.continuationState,
     this.continuationSourceTurnId,
     required this.continuationRevision,
+    required this.executorProgressRevision,
   });
 
   @override
@@ -846,7 +848,8 @@ class BridgeTaskWorkUnitDto {
       budgetSliceLimit.hashCode ^
       continuationState.hashCode ^
       continuationSourceTurnId.hashCode ^
-      continuationRevision.hashCode;
+      continuationRevision.hashCode ^
+      executorProgressRevision.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -866,7 +869,8 @@ class BridgeTaskWorkUnitDto {
           budgetSliceLimit == other.budgetSliceLimit &&
           continuationState == other.continuationState &&
           continuationSourceTurnId == other.continuationSourceTurnId &&
-          continuationRevision == other.continuationRevision;
+          continuationRevision == other.continuationRevision &&
+          executorProgressRevision == other.executorProgressRevision;
 }
 
 class RuntimeSnapshot {

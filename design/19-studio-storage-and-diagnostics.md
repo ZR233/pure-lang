@@ -37,9 +37,13 @@ keyset 分页，不使用 OFFSET。
 在同一事务删除旧 segment 并写入新的 replacement baseline。恢复时按 revision fold segment，
 拒绝断层、非法首段或损坏 payload。
 
+runtime 从每次 Thread transition 的提交前后 session 自动派生 transcript mutation；TurnFinished、
+rollover 和 child 注册不得以 `context=None` 丢弃已变化 transcript。Replace、session snapshot、
+Turn terminal 与 mailbox 状态在同一 SQLite 事务中提交，失败时整体回滚且 actor 不更新内存状态。
+
 `thread_session_state` 每个 Thread 只有一行，replacement 保存 pinned working context、session note
 与 prompt generation 状态。Evidence Ledger 更新只覆盖这行的有界 working state，不复制完整
-transcript。`items` 不再包含 `contextPatch`，也不再保存 `provider_private_payload`；
+transcript，也不直接进入 provider request。`items` 不再包含 `contextPatch`，也不再保存 `provider_private_payload`；
 `contextCompaction` 可作为无正文内部审计 Item 保留，Bridge 查询永不返回。transcript replacement
 不删除 Studio Timeline，working state 也不能代替 `ThreadRuntimeSnapshot` 的当前产品事实。
 

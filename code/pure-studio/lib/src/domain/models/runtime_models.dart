@@ -246,6 +246,7 @@ class TaskWorkUnitView {
     required this.continuationState,
     required this.continuationSourceTurnId,
     required this.continuationRevision,
+    required this.executorProgressRevision,
   });
 
   final String id;
@@ -262,6 +263,7 @@ class TaskWorkUnitView {
   final String continuationState;
   final String? continuationSourceTurnId;
   final BigInt continuationRevision;
+  final BigInt executorProgressRevision;
 }
 
 class TaskBudgetLimitView {

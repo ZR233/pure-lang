@@ -3430,6 +3430,7 @@ impl SseDecode for crate::api::studio::types::runtime::BridgeTaskWorkUnitDto {
         let mut var_continuationState = <String>::sse_decode(deserializer);
         let mut var_continuationSourceTurnId = <Option<String>>::sse_decode(deserializer);
         let mut var_continuationRevision = <u64>::sse_decode(deserializer);
+        let mut var_executorProgressRevision = <u64>::sse_decode(deserializer);
         return crate::api::studio::types::runtime::BridgeTaskWorkUnitDto {
             id: var_id,
             title: var_title,
@@ -3445,6 +3446,7 @@ impl SseDecode for crate::api::studio::types::runtime::BridgeTaskWorkUnitDto {
             continuation_state: var_continuationState,
             continuation_source_turn_id: var_continuationSourceTurnId,
             continuation_revision: var_continuationRevision,
+            executor_progress_revision: var_executorProgressRevision,
         };
     }
 }
@@ -7564,6 +7566,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::studio::types::runtime::Bridg
                 .into_into_dart()
                 .into_dart(),
             self.continuation_revision.into_into_dart().into_dart(),
+            self.executor_progress_revision.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -10401,6 +10404,7 @@ impl SseEncode for crate::api::studio::types::runtime::BridgeTaskWorkUnitDto {
         <String>::sse_encode(self.continuation_state, serializer);
         <Option<String>>::sse_encode(self.continuation_source_turn_id, serializer);
         <u64>::sse_encode(self.continuation_revision, serializer);
+        <u64>::sse_encode(self.executor_progress_revision, serializer);
     }
 }
 

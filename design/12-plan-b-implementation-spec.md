@@ -84,8 +84,13 @@ interaction 和 Composer 作为一个 workspace 原子切换，同时保留该 T
   stop/restart/cleanup 与 lease。
 - Flutter：Item timeline、reasoning、tool grouping、Composer revision、interaction dock、原子切换与
   UI ephemeral state。
-- 真实应用：使用隔离数据目录运行 `cargo xtask run-gui --driver`，验证 Driver health、输入回读、
-  `studio.sqlite`、截图和零 runtime errors。
+- 真实应用：使用隔离数据目录运行 `cargo xtask run-gui --driver`。Driver 模式直接连接应用 VM
+  Service，不启动额外 DDS 中间层；验收覆盖 Driver health、输入回读、`studio.sqlite`、截图和零
+  runtime errors。最终 completed snapshot 必须逐 WorkUnit 校验 completion/merge revision 对应关系、
+  `cleanupStatus = discarded | alreadyAbsent`、worktree leaf 已缺失、integrated pass HEAD 一致，且 root
+  没有 active turn 或 pending interaction；任何 cleanup failed 不能只凭 phase=completed 通过 Driver。
+  GUI 首次 Rust/Flutter 构建使用独立的 startup timeout，不消耗 plan/task/stall timeout；启动失败也要
+  保存当时仍存活的完整构建/GUI 进程树。
 
 最终质量门为 Rust fmt/严格 Clippy/默认并行 workspace tests、FRB 无漂移、Flutter analyze/tests
 和 `git diff --check`。

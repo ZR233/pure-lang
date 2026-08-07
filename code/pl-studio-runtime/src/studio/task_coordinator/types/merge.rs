@@ -168,4 +168,5 @@ pub(crate) struct AllocateExecutor {
 pub(crate) struct ExecutorAllocation {
     pub(crate) run: TaskRunRecord,
     pub(crate) work_unit: WorkUnitRecord,
+    pub(crate) reused: bool,
 }

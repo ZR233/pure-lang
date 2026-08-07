@@ -29,13 +29,7 @@ where
                 let chunk = &buffer[..n];
                 let revision = {
                     let mut state = entry.state.lock().await;
-                    state.output_revision = state.output_revision.saturating_add(1);
-                    let revision = state.output_revision;
-                    match stream {
-                        StreamKind::Stdout => state.stdout.push_chunk(chunk),
-                        StreamKind::Stderr => state.stderr.push_chunk(chunk),
-                    }
-                    revision
+                    state.record_output(stream, chunk)
                 };
                 if let Some(observer) = &entry.output_observer {
                     observer.output_chunk(stream.into(), chunk, revision);

@@ -53,7 +53,7 @@ pub use config::{
     effective_mcp_servers, is_builtin_mcp_server_id, normalize_builtin_mcp_server_states,
     validate_builtin_mcp_server_states, validate_mcp_servers, zhipu_coding_plan_token,
 };
-pub use context_assembler::{AssembledModelContext, ContextAssembler};
+pub use context_assembler::{AssembledModelContext, ContextAssembler, TurnContextSnapshot};
 pub use context_compaction::{
     ContextCompactionConfig, ContextCompactionImplementation, ContextCompactionPhase,
     ContextCompactionReplacement, ContextCompactionSnapshot, ContextCompactionTrigger,

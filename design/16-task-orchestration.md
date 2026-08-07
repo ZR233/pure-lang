@@ -64,19 +64,52 @@ planner 读取有界 child Thread 诊断，不是失败判据。
 该 wait 输出协议不迁移旧历史；旧会话或 fixture 不兼容时直接重建。
 
 review request 成功创建 reviewer 后必须结束当前 planner Turn。reviewer 提交 durable verdict 后，
-Runtime 等待 root Thread idle，再以稳定 mail ID 提交一次隐藏 continuation；新的 planner Turn 从
-最新 Task phase 重新解析 canonical workspace 与 tool policy。这样 delivery pass 进入 Merging 后才
-授予主 workspace 写入、普通 exec 与 Git 能力，旧 Turn 的只读 snapshot 不会被阶段变化旁路。
+Runtime 以稳定 mail ID 提交一次隐藏 continuation；root Thread 已 idle 时立即启动，仍有活动 Turn 时
+只排入下一 Turn，绝不 steer 旧 Turn。新的 planner Turn 从最新 Task phase 重新解析 canonical
+workspace 与 tool policy。这样 delivery pass 进入 Merging 后才授予主 workspace 写入、普通 exec
+与 Git 能力，旧 Turn 的只读 snapshot 不会被阶段变化旁路。
 
-进程重启后不自动启动模型。活动 Task 无 pending input 时显示 paused；用户“继续任务”以稳定
-mail ID 向 root Thread 提交一次隐藏的明确输入，要求 planner 先读取 `task_status` 和
-`list_agents`。attach 只对账，不触发 Turn。
+review verdict、reviewer terminal failure 和 executor completed/failed terminal outcome 都先提交到 Task
+repository，再派生稳定 ID 的 Planner wake。executor failure 只唤醒 planner 读取 `task_status` 并
+决定是否向原 WorkUnit/Thread follow-up，不自动重跑模型、不创建第二个 WorkUnit 或 agent。wake
+投递失败不会把已提交的 Task 事实改成 Blocked；启动恢复按 durable source 与 `thread_inputs`
+对账，只补投完全缺失的 mail，queued、claimed、active 或 consumed 均视为已交付。因此可重试的
+是幂等 mailbox materialization，而不是业务执行。重复事件、恢复扫描和并发提交共享同一 mail ID，
+不产生第二次 Planner Turn。
+
+Task Planner wake 是 level-triggered 通知：同一 TaskRun 在 root Thread 中排队的 wake 共享通用
+queue coalescing key。root idle 时首个 wake 立即启动；root 活跃时，队首连续的 executor/review
+wake 在下一 Turn 启动前合并，最新 wake 决定 Turn identity，较早 mail 作为 durable leading input
+由同一 checkpoint 消费。planner 始终读取 canonical `task_status`，不按 wake 文本重放旧事实。
+已经 claimed/active 的 wake 不与后到事实合并，保证 Turn snapshot 之后发生的新变化仍能排入下一
+Turn；用户输入、交互回复和其他 mailbox 类型不参与该 key。这样 provider 重试、review verdict 与
+恢复扫描不会为已被同一 Planner Turn 覆盖的事实创建多个模型 Turn。
+
+进程重启后不为普通 paused Task 自动启动模型；但崩溃前已经 durable 形成的 pending Planner wake
+或 mailbox input 必须在资源恢复完成后继续交付。活动 Task 无 pending input 时显示 paused；用户
+“继续任务”以稳定 mail ID 向 root Thread 提交一次隐藏的明确输入，要求 planner 先读取
+`task_status` 和 `list_agents`。attach 只恢复已有 durable 工作，不为单纯 active Task 合成新工作。
 
 ## 16.5 Executor 与交付
 
 `task_spawn_executor` 必须提供 taskName、message；scopeHints 可省略或为空。TaskService 在创建
 child Thread 前只校验 hint 是规范仓库相对路径，再校验并发上限、phase 和 branch lease并准备
 专属 worktree。hint 重叠只形成提示，不拒绝并发。
+
+每次 executor allocation 同时生成 `TaskExecutorHandoffV1`。handoff 固定 TaskRun/WorkUnit、parent
+Thread、requestedByCallId、确认计划、assignment、base/design/expected HEAD、scope、验收条件、
+依赖、证据、验证契约与交付契约，并作为 `studio.task_executor_handoff` pinned section 随 fresh child session
+持久化。后续 Turn 从 durable WorkUnit 与该 section 交叉校验；缺失、损坏或 HEAD/owner 不一致时
+进入 NeedsAttention。相同 TaskRun 的相同 requestedByCallId 是强幂等键；Implementing 阶段中，
+规范化 taskName 与 scopeHints 相同且仍为 active 的 allocation 即使来自新的 provider call ID，
+也必须返回首个 WorkUnit、executor Thread 与 canonical call ID，不重复分配 worktree、BranchLease
+或 Thread。只有原 WorkUnit 已 terminal，或 TaskRun 已明确进入 Reworking，才允许创建新的 attempt。
+
+验证契约是非空的 typed command 列表，每项固定命令、仓库相对 cwd 与验证目的。
+planner 在 allocation 时必须提交已核对的项目入口；executor 每轮从 durable handoff
+读取，不得从 planner transcript 或短命 mailbox metadata 重建。TaskService 只校验字段、大小与
+cwd 的仓库相对路径边界，不根据 assignment、scope 或命令文本推断项目知识；命令语义错误作为
+普通 executor 验证失败处理，由同一 WorkUnit 修正。
 
 executor 只能写自己的 worktree，并以以下工具结束可交付工作：
 
@@ -91,7 +124,16 @@ delivery 要求 worktree clean、HEAD 相对固定 base 推进、commit 身份�
 base-to-HEAD changed files；worktree 内变更不受 scopeHints 限制。成功事务创建不可变
 WorkCompletion 并将 WorkUnit 置为 ReadyForReview。普通文本
 结束、工具错误或预算中止不会伪造交付，WorkUnit 保持 AwaitingCompletion，可由 planner 向同一
-Thread 发送明确 follow-up。
+Thread 发送明确 follow-up。follow-up 或 changes-requested rework 开启新的 executor Turn 时，
+WorkUnit 与 Thread execution 必须在同一事务中恢复为 `Running/Running`，清除旧 execution error
+并推进 continuation revision；重复的 TurnStarted 对已处于 `Running/Running` 的组合保持幂等。
+不得持久化 `AwaitingCompletion/Running` 或 `ChangesRequested/Running` 这类重启校验无法接受的
+中间组合。
+
+executor Turn 被取消后可能形成 `AwaitingCompletion/Cancelled` 的 durable 组合。planner 首次关闭
+该 executor 时必须在同一事务中归一为 `Cancelled/Cancelled` 并请求清理；后续重复关闭返回同一
+discard disposition，不再次推进 revision。ReadyForReview、Reviewing 或 ChangesRequested 的
+completion review 仍禁止关闭。
 
 executor 的单个 Turn 保持 30 分钟 wall-clock 上限。前三个 `WallClock` budget terminal 不把
 executor 或 WorkUnit 标记为失败：runtime 先对同一 Thread 强制执行 `WallClockRollover`
@@ -100,12 +142,17 @@ worktree 开启下一切片。一个 tranche 最多四个切片；第四次 wall
 NeedsAttention 并保留 executor/worktree，等待 Planner 停止、拆分或用 `task_send_message`
 显式开启新 tranche。非 wall-clock budget、用户停止、Task 取消和 rollover compaction 失败都不
 自动续轮；pending continuation 在重启时按幂等键对账已有 active/terminal Turn，禁止重复增加切片。
+rollover replacement transcript 必须先与 TurnFinished 在 repository 提交链上持久化成功，再允许
+hidden continuation 入队；提交失败时 actor 不推进内存 session，也不启动下一 Turn。
 
 WorkUnit 在 ReadyForReview 之后以 `executorAgentId` 创建 fresh Delivery reviewer。ReviewRound
 事务固定最新 Completion revision，reviewer canonical workspace 直接绑定同一 worktree，不接受
 模型提供路径。findings 使 WorkUnit 进入 ChangesRequested；
 planner 把具体 finding 发回原 executor Thread，新的 completion revision 重新审查。pass 后
-WorkUnit 进入 Approved 或 NoDelivery。
+WorkUnit 进入 Approved 或 NoDelivery。executor 在普通结束或失败时若没有形成新的
+Completion，WorkUnit 保留可 follow-up 的 durable terminal execution 状态，并生成一次 Planner
+wake；review changes-requested 后的 rework failure 也走同一路径，不能静默停在
+`AwaitingCompletion/failed`。取消由既有 stop/cancel 收束处理，不额外唤醒 Planner。
 
 ## 16.6 Planner 自主 Git、合并记账与综合审查
 
@@ -185,3 +232,15 @@ worktree/branch；失去 durable owner 的资源继续保留现场。
 
 完成事务写 completed 并删除 BranchLease。任何迟到 child completion、旧 generation 或旧 Turn
 通知都不能改变已提交的 Task 终态。
+
+Flutter Driver 验收的 stall 判据只观察 durable Task/WorkUnit 进度：phase、generation、expected
+HEAD、WorkUnit/continuation/budget slice、executor Thread 已提交的 `runtimeRevision`、Completion、
+Merge 与 Review revision。Task 产品投影把 executor 的 durable revision 发布为
+`executorProgressRevision`，因此 root Timeline 不变时，child checkpoint 和 tool result 仍可推进验收
+进度；该字段不写入 WorkUnit 表，也不改变 continuation revision 的幂等语义。Thread 的
+`thinking/runningTool/responding` 属于瞬态活动，不得刷新 stall 计时；否则重复探索会伪装成任务
+进展。总超时继续约束长任务，单次长编译是否允许超过 stall 窗口由 fixture 显式配置。
+Driver harness 只驱动与观测这些通用生命周期字段，不解析用户 prompt、项目目录、构建命令或
+review finding 的项目语义。计划、验证命令或项目判断写错属于普通 planner/executor 行为，由同一
+WorkUnit 的状态机与 follow-up 处理，不得在 harness、工具 schema、skill 或系统提示词中硬编码
+项目知识来规避。

@@ -1,5 +1,6 @@
 use async_openai::error::OpenAIError;
 use pl_protocol::PureError;
+use std::error::Error as _;
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct ProviderFailureMetadata<'a> {
@@ -40,9 +41,7 @@ pub(super) fn openai_error_to_pure(error: OpenAIError) -> PureError {
                 PureError::LlmError(detail)
             }
         }
-        OpenAIError::Reqwest(error) => {
-            PureError::HttpError(redact_secret_like_values(&error.to_string()))
-        }
+        OpenAIError::Reqwest(error) => reqwest_error_to_pure(error),
         OpenAIError::JSONDeserialize(error, content) => {
             PureError::HttpError(redact_secret_like_values(&format!("{error}: {content}")))
         }
@@ -56,8 +55,52 @@ pub(super) fn openai_error_to_pure(error: OpenAIError) -> PureError {
     }
 }
 
+fn reqwest_error_to_pure(error: reqwest::Error) -> PureError {
+    let detail = redact_secret_like_values(&error.to_string());
+    if error.is_timeout() || error.is_connect() || response_start_connection_closed(&error) {
+        return PureError::transient_model_failure(
+            detail,
+            None,
+            None,
+            error.status().map(|status| status.as_u16()),
+        );
+    }
+    PureError::HttpError(detail)
+}
+
+fn response_start_connection_closed(error: &reqwest::Error) -> bool {
+    if error.is_builder()
+        || error.is_body()
+        || error.is_decode()
+        || error.is_redirect()
+        || error.is_status()
+    {
+        return false;
+    }
+    let mut source = error.source();
+    while let Some(cause) = source {
+        if cause.downcast_ref::<std::io::Error>().is_some_and(|error| {
+            matches!(
+                error.kind(),
+                std::io::ErrorKind::ConnectionAborted
+                    | std::io::ErrorKind::ConnectionReset
+                    | std::io::ErrorKind::BrokenPipe
+                    | std::io::ErrorKind::UnexpectedEof
+            )
+        }) || cause
+            .to_string()
+            .to_ascii_lowercase()
+            .contains("connection closed before message completed")
+        {
+            return true;
+        }
+        source = cause.source();
+    }
+    false
+}
+
 pub(super) fn retryable_provider_status(status: u16) -> bool {
-    matches!(status, 408 | 409 | 425 | 429 | 500..=599)
+    matches!(status, 429 | 500..=599)
 }
 
 fn retryable_provider_code(code: &str) -> bool {
@@ -132,6 +175,28 @@ mod tests {
 
         assert!(!error.is_transient_model_transport());
         assert!(matches!(error, PureError::LlmError(_)));
+    }
+
+    #[test]
+    fn request_build_errors_remain_permanent() {
+        let request_error = reqwest::Client::new()
+            .get("://invalid-url")
+            .build()
+            .expect_err("invalid URL must fail while building the request");
+        let error = openai_error_to_pure(OpenAIError::Reqwest(request_error));
+
+        assert!(!error.is_transient_model_transport());
+        assert!(matches!(error, PureError::HttpError(_)));
+    }
+
+    #[test]
+    fn retryable_http_statuses_match_the_transport_policy() {
+        for status in [429, 500, 503, 599] {
+            assert!(retryable_provider_status(status), "status {status}");
+        }
+        for status in [400, 408, 409, 425] {
+            assert!(!retryable_provider_status(status), "status {status}");
+        }
     }
 
     fn api_error(status_code: StatusCode, code: Option<&str>) -> OpenAIError {

@@ -116,19 +116,27 @@ async fn read_file_rejects_invalid_line_bounds_instead_of_clamping() {
 async fn read_file_missing_path_suggests_workspace_discovery() {
     let root = unique_temp_dir("missing-read-path");
     let tool = read_file_tool();
+    let candidate = root.join("code/pl-model/src/request.rs");
+    tokio::fs::create_dir_all(candidate.parent().unwrap())
+        .await
+        .unwrap();
+    tokio::fs::write(&candidate, "pub struct Request;\n")
+        .await
+        .unwrap();
     let error = tool
         .execute(
-            input(serde_json::json!({"path": "missing.txt"})),
+            input(serde_json::json!({
+                "path": "code/pl-model/src/protocol/openai/request.rs"
+            })),
             context(&root).await,
         )
         .await
         .unwrap_err()
         .to_string();
 
-    assert!(
-        error.contains("verify the path with list_files or search_files"),
-        "{error}"
-    );
+    assert!(error.contains("code/pl-model/src/request.rs"), "{error}");
+    assert!(error.contains("candidatePaths"), "{error}");
+    assert!(!error.contains("Do not repeat"), "{error}");
     let _ = tokio::fs::remove_dir_all(root).await;
 }
 

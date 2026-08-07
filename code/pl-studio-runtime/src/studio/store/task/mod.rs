@@ -2,6 +2,7 @@ mod allocation;
 mod completion;
 mod discard;
 mod merge;
+mod planner_wake;
 mod recovery;
 mod review;
 mod work_completion;

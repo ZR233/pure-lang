@@ -13,6 +13,24 @@ fn create_input(root_thread_id: &str, phase: TaskRunPhase) -> CreateTaskRun {
     }
 }
 
+async fn allocation_fixture(
+    name: &str,
+    phase: TaskRunPhase,
+) -> (StudioStore, String, TaskRunRecord) {
+    let store = StudioStore::open_memory().await.unwrap();
+    let workspace_root = format!("C:/work/{name}");
+    let project = store.upsert_project(&workspace_root).await.unwrap();
+    let session = store
+        .create_thread(&project.id, "Task", StudioMode::Task)
+        .await
+        .unwrap();
+    let mut input = create_input(&session.id, phase);
+    input.workspace_root = workspace_root.clone();
+    input.git_common_dir = format!("{workspace_root}/.git");
+    let (run, _) = store.create_task_run_with_lease(input).await.unwrap();
+    (store, session.id, run)
+}
+
 #[tokio::test]
 async fn task_run_and_branch_lease_are_created_atomically() {
     let store = StudioStore::open_memory().await.unwrap();
@@ -177,6 +195,275 @@ async fn task_stop_gate_is_durable_and_keeps_lease_for_terminalization() {
 }
 
 #[tokio::test]
+async fn executor_allocation_reuses_call_id_and_active_semantic_assignment() {
+    let (store, thread_id, run) = allocation_fixture(
+        "executor-allocation-idempotency",
+        TaskRunPhase::Implementing,
+    )
+    .await;
+    let first = store
+        .allocate_executor(AllocateExecutor {
+            thread_id: thread_id.clone(),
+            title: "  implement   model transport  ".to_string(),
+            scope_hints: vec!["tests".to_string(), "src".to_string(), "src".to_string()],
+            agent_id: "agent-first".to_string(),
+            requested_by_call_id: "call-first".to_string(),
+        })
+        .await
+        .unwrap();
+    assert!(!first.reused);
+    assert_eq!(first.work_unit.title, "implement model transport");
+    assert_eq!(first.work_unit.scope_hints, vec!["src", "tests"]);
+
+    let repeated_call = store
+        .allocate_executor(AllocateExecutor {
+            thread_id: thread_id.clone(),
+            title: "implement model transport".to_string(),
+            scope_hints: vec!["src".to_string(), "tests".to_string()],
+            agent_id: "agent-first".to_string(),
+            requested_by_call_id: "call-first".to_string(),
+        })
+        .await
+        .unwrap();
+    assert!(repeated_call.reused);
+    assert_eq!(repeated_call.work_unit.id, first.work_unit.id);
+
+    let repeated_assignment = store
+        .allocate_executor(AllocateExecutor {
+            thread_id: thread_id.clone(),
+            title: "implement model transport".to_string(),
+            scope_hints: vec!["tests".to_string(), "src".to_string()],
+            agent_id: "agent-duplicate".to_string(),
+            requested_by_call_id: "call-duplicate".to_string(),
+        })
+        .await
+        .unwrap();
+    assert!(repeated_assignment.reused);
+    assert_eq!(repeated_assignment.work_unit.id, first.work_unit.id);
+    assert_eq!(
+        repeated_assignment.work_unit.executor_thread_id.as_deref(),
+        Some("agent-first")
+    );
+    assert_eq!(
+        repeated_assignment.work_unit.requested_by_call_id,
+        "call-first"
+    );
+
+    let different_title = store
+        .allocate_executor(AllocateExecutor {
+            thread_id: thread_id.clone(),
+            title: "implement studio bridge".to_string(),
+            scope_hints: vec!["src".to_string(), "tests".to_string()],
+            agent_id: "agent-title".to_string(),
+            requested_by_call_id: "call-title".to_string(),
+        })
+        .await
+        .unwrap();
+    assert!(!different_title.reused);
+    assert_ne!(different_title.work_unit.id, first.work_unit.id);
+
+    let different_scope = store
+        .allocate_executor(AllocateExecutor {
+            thread_id,
+            title: "implement model transport".to_string(),
+            scope_hints: vec!["design".to_string()],
+            agent_id: "agent-scope".to_string(),
+            requested_by_call_id: "call-scope".to_string(),
+        })
+        .await
+        .unwrap();
+    assert!(!different_scope.reused);
+    assert_ne!(different_scope.work_unit.id, first.work_unit.id);
+    assert_eq!(store.list_work_units(&run.id).await.unwrap().len(), 3);
+}
+
+#[tokio::test]
+async fn executor_allocation_creates_new_attempt_after_terminal_or_in_reworking() {
+    let (store, thread_id, _) =
+        allocation_fixture("executor-allocation-terminal", TaskRunPhase::Implementing).await;
+    let first = store
+        .allocate_executor(AllocateExecutor {
+            thread_id: thread_id.clone(),
+            title: "implement model transport".to_string(),
+            scope_hints: vec!["src".to_string()],
+            agent_id: "agent-first".to_string(),
+            requested_by_call_id: "call-first".to_string(),
+        })
+        .await
+        .unwrap();
+    store
+        .fail_executor(&first.work_unit.id, "agent-first", "terminal test")
+        .await
+        .unwrap();
+    let after_terminal = store
+        .allocate_executor(AllocateExecutor {
+            thread_id,
+            title: "implement model transport".to_string(),
+            scope_hints: vec!["src".to_string()],
+            agent_id: "agent-second".to_string(),
+            requested_by_call_id: "call-second".to_string(),
+        })
+        .await
+        .unwrap();
+    assert!(!after_terminal.reused);
+    assert_eq!(after_terminal.work_unit.attempt, 2);
+
+    let (store, thread_id, _) =
+        allocation_fixture("executor-allocation-reworking", TaskRunPhase::Reworking).await;
+    let first = store
+        .allocate_executor(AllocateExecutor {
+            thread_id: thread_id.clone(),
+            title: "implement model transport".to_string(),
+            scope_hints: vec!["src".to_string()],
+            agent_id: "agent-first".to_string(),
+            requested_by_call_id: "call-first".to_string(),
+        })
+        .await
+        .unwrap();
+    let rework = store
+        .allocate_executor(AllocateExecutor {
+            thread_id,
+            title: "implement model transport".to_string(),
+            scope_hints: vec!["src".to_string()],
+            agent_id: "agent-rework".to_string(),
+            requested_by_call_id: "call-rework".to_string(),
+        })
+        .await
+        .unwrap();
+    assert!(!rework.reused);
+    assert_ne!(rework.work_unit.id, first.work_unit.id);
+    assert_eq!(rework.work_unit.attempt, 2);
+}
+
+#[tokio::test]
+async fn executor_close_normalizes_cancelled_awaiting_completion_and_is_idempotent() {
+    let fixture = ExecutorFixture::new("close-cancelled-awaiting-completion").await;
+    fixture
+        .store
+        .execute_test_sql(&format!(
+            "UPDATE work_units SET status = 'awaitingCompletion', execution_status = 'cancelled', continuation_revision = 7 WHERE id = '{}'",
+            fixture.work_unit.id
+        ))
+        .await;
+
+    assert_eq!(
+        fixture
+            .store
+            .preflight_executor_close(
+                &fixture.run.root_thread_id,
+                &fixture.work_unit.id,
+                &fixture.agent_id,
+            )
+            .await
+            .unwrap(),
+        ExecutorCloseDisposition::Discard
+    );
+    assert_eq!(
+        fixture
+            .store
+            .settle_executor_close(
+                &fixture.run.root_thread_id,
+                &fixture.work_unit.id,
+                &fixture.agent_id,
+            )
+            .await
+            .unwrap(),
+        ExecutorCloseDisposition::Discard
+    );
+    let settled = fixture.work_unit().await;
+    assert_eq!(settled.status, WorkUnitStatus::Cancelled);
+    assert_eq!(settled.execution_status, ThreadExecutionStatus::Cancelled);
+    assert_eq!(settled.continuation_revision, 8);
+    assert_eq!(
+        settled.worktree_disposition,
+        TaskWorktreeDisposition::CleanupRequested
+    );
+
+    assert_eq!(
+        fixture
+            .store
+            .settle_executor_close(
+                &fixture.run.root_thread_id,
+                &fixture.work_unit.id,
+                &fixture.agent_id,
+            )
+            .await
+            .unwrap(),
+        ExecutorCloseDisposition::Discard
+    );
+    assert_eq!(fixture.work_unit().await.continuation_revision, 8);
+}
+
+#[tokio::test]
+async fn executor_follow_up_start_restores_a_valid_running_pair_atomically() {
+    let fixture = ExecutorFixture::new("follow-up-restores-running-pair").await;
+    fixture
+        .store
+        .execute_test_sql(&format!(
+            "UPDATE work_units SET status = 'awaitingCompletion', execution_status = 'failed', execution_error = 'transient transport failure', continuation_revision = 3 WHERE id = '{}'",
+            fixture.work_unit.id
+        ))
+        .await;
+
+    fixture
+        .store
+        .mark_executor_turn_started(&fixture.agent_id)
+        .await
+        .unwrap();
+    let started = fixture.work_unit().await;
+    assert_eq!(started.status, WorkUnitStatus::Running);
+    assert_eq!(started.execution_status, ThreadExecutionStatus::Running);
+    assert_eq!(started.execution_error, None);
+    assert_eq!(started.continuation_revision, 4);
+
+    fixture
+        .store
+        .mark_executor_turn_started(&fixture.agent_id)
+        .await
+        .unwrap();
+    assert_eq!(fixture.work_unit().await.continuation_revision, 4);
+
+    let recovery = fixture
+        .store
+        .reconcile_task_agents_after_restart(&fixture.run.id)
+        .await
+        .unwrap();
+    assert_eq!(recovery.cancelled_thread_executions, 1);
+    let recovered = fixture.work_unit().await;
+    assert_eq!(recovered.status, WorkUnitStatus::AwaitingCompletion);
+    assert_eq!(recovered.execution_status, ThreadExecutionStatus::Cancelled);
+}
+
+#[tokio::test]
+async fn executor_close_still_rejects_completion_review_states() {
+    let fixture = ExecutorFixture::new("close-review-active").await;
+    for status in [
+        WorkUnitStatus::ReadyForReview,
+        WorkUnitStatus::Reviewing,
+        WorkUnitStatus::ChangesRequested,
+    ] {
+        fixture
+            .store
+            .execute_test_sql(&format!(
+                "UPDATE work_units SET status = '{}', execution_status = 'completed' WHERE id = '{}'",
+                status.as_str(),
+                fixture.work_unit.id
+            ))
+            .await;
+        let error = fixture
+            .store
+            .preflight_executor_close(
+                &fixture.run.root_thread_id,
+                &fixture.work_unit.id,
+                &fixture.agent_id,
+            )
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("completion review is active"));
+    }
+}
+
+#[tokio::test]
 async fn completion_review_rework_loop_keeps_every_revision_immutable() {
     let fixture = ExecutorFixture::new("review-loop").await;
 
@@ -225,6 +512,7 @@ async fn completion_review_rework_loop_keeps_every_revision_immutable() {
             .mark_executor_turn_started(&fixture.agent_id)
             .await
             .unwrap();
+        assert_eq!(fixture.work_unit().await.status, WorkUnitStatus::Running);
         assert_eq!(
             fixture.work_unit().await.execution_status,
             ThreadExecutionStatus::Running
@@ -268,6 +556,153 @@ async fn completion_review_rework_loop_keeps_every_revision_immutable() {
     );
     assert_eq!(completions[4].status, WorkCompletionStatus::Approved);
     assert_eq!(fixture.work_unit().await.status, WorkUnitStatus::Approved);
+}
+
+#[tokio::test]
+async fn failed_rework_persists_one_recoverable_planner_wake_for_the_same_executor() {
+    let fixture = ExecutorFixture::new("failed-rework-planner-wake").await;
+    fixture
+        .store
+        .create_work_completion(
+            &fixture.work_unit.id,
+            WorkCompletionKind::Delivery,
+            Some(&fixture.delivery("2222222")),
+            "initial verification",
+        )
+        .await
+        .unwrap();
+    let round = fixture
+        .finish_delivery_review(
+            "reviewer-failed-rework",
+            "review-call-failed-rework",
+            AgentReview {
+                verdict: ReviewVerdict::ChangesRequired,
+                summary: "a correction is required".to_string(),
+                design_references: Vec::new(),
+                findings: vec![ReviewFinding {
+                    severity: "major".to_string(),
+                    title: "correct the implementation".to_string(),
+                    body: "apply the requested correction".to_string(),
+                    path: Some("src/lib.rs".to_string()),
+                    line: Some(1),
+                    design_references: Vec::new(),
+                }],
+            },
+        )
+        .await;
+    let review_mail_id = format!("task-review-continuation:{}", round.id);
+    fixture
+        .store
+        .execute_test_sql(&format!(
+            "INSERT INTO thread_inputs (id, thread_id, mail_id, turn_id, content, metadata_json, presentation, state, claimed_turn_id, checkpoint_seq, queue_ordinal, queued_at, claimed_at, consumed_at) VALUES ('{review_mail_id}', '{}', '{review_mail_id}', 'turn-review', 'review wake', '{{}}', 'hidden', 'consumed', 'turn-review', 1, 0, 1, 1, 1)",
+            fixture.run.root_thread_id
+        ))
+        .await;
+    fixture
+        .store
+        .mark_executor_turn_started(&fixture.agent_id)
+        .await
+        .unwrap();
+
+    let outcome = pl_core::AgentTurnOutcome {
+        turn_id: pl_core::TurnId::new("turn-rework-failed").unwrap(),
+        thread_id: pl_core::ThreadId::new(fixture.agent_id.clone()).unwrap(),
+        kind: pl_core::TurnOutcomeKind::Failed,
+        reason: Some("turn must finalize with report_completion".to_string()),
+        failure: None,
+        budget_limit: None,
+        rollover_compacted: false,
+        rollover_compaction_error: None,
+        usage: Default::default(),
+        finished_at: 2,
+    };
+    fixture
+        .store
+        .settle_executor_turn_finished(&fixture.agent_id, &outcome)
+        .await
+        .unwrap();
+
+    let failed = fixture.work_unit().await;
+    assert_eq!(failed.id, fixture.work_unit.id);
+    assert_eq!(
+        failed.executor_thread_id.as_deref(),
+        Some(fixture.agent_id.as_str())
+    );
+    assert_eq!(failed.status, WorkUnitStatus::AwaitingCompletion);
+    assert_eq!(failed.execution_status, ThreadExecutionStatus::Failed);
+    assert_eq!(
+        failed.continuation_state,
+        ExecutorContinuationState::PlannerWakePending
+    );
+    assert_eq!(
+        failed.continuation_source_turn_id.as_deref(),
+        Some("turn-rework-failed")
+    );
+
+    let wakes = fixture
+        .store
+        .list_pending_task_planner_wakes()
+        .await
+        .unwrap();
+    assert_eq!(wakes.len(), 1);
+    let wake = &wakes[0];
+    assert!(matches!(
+        &wake.source,
+        TaskPlannerWakeSource::ExecutorTerminal {
+            work_unit_id,
+            executor_thread_id,
+            source_turn_id,
+        } if work_unit_id == &fixture.work_unit.id
+            && executor_thread_id == &fixture.agent_id
+            && source_turn_id == "turn-rework-failed"
+    ));
+    assert!(
+        !fixture
+            .store
+            .task_planner_wake_was_delivered(wake)
+            .await
+            .unwrap()
+    );
+
+    fixture
+        .store
+        .settle_executor_turn_finished(&fixture.agent_id, &outcome)
+        .await
+        .unwrap();
+    let duplicate = fixture
+        .store
+        .list_pending_task_planner_wakes()
+        .await
+        .unwrap();
+    assert_eq!(duplicate, wakes);
+    assert_eq!(
+        fixture
+            .store
+            .list_work_units(&fixture.run.id)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+
+    fixture
+        .store
+        .mark_executor_turn_started(&fixture.agent_id)
+        .await
+        .unwrap();
+    let resumed = fixture.work_unit().await;
+    assert_eq!(resumed.id, fixture.work_unit.id);
+    assert_eq!(resumed.status, WorkUnitStatus::Running);
+    assert_eq!(resumed.execution_status, ThreadExecutionStatus::Running);
+    assert_eq!(resumed.continuation_state, ExecutorContinuationState::None);
+    assert!(
+        fixture
+            .store
+            .list_pending_task_planner_wakes()
+            .await
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[tokio::test]
@@ -507,4 +942,70 @@ impl ExecutorFixture {
             .unwrap()
             .unwrap()
     }
+}
+
+#[tokio::test]
+async fn task_runtime_refresh_tracks_executor_durable_revision() {
+    let fixture = ExecutorFixture::new("task-runtime-executor-progress").await;
+    fixture
+        .store
+        .create_child_thread(crate::studio::ChildThreadSpec {
+            id: fixture.agent_id.clone(),
+            parent_thread_id: fixture.run.root_thread_id.clone(),
+            agent_path: fixture.agent_id.clone(),
+            role: "executor".to_string(),
+            title: "Task executor".to_string(),
+        })
+        .await
+        .unwrap();
+    fixture
+        .store
+        .execute_test_sql(&format!(
+            "UPDATE threads SET runtime_revision = 7 WHERE id = '{}'",
+            fixture.agent_id
+        ))
+        .await;
+
+    let product_events = crate::StudioProductEventRuntime::new(fixture.store.clone());
+    let first = product_events
+        .refresh_task(&fixture.run.root_thread_id)
+        .await
+        .unwrap()
+        .unwrap();
+    let crate::StudioProductEventKind::TaskChanged {
+        task: Some(first_task),
+        ..
+    } = first.kind
+    else {
+        panic!("expected task snapshot");
+    };
+    assert_eq!(first_task.work_units[0].executor_progress_revision, 7);
+    assert!(
+        product_events
+            .refresh_task(&fixture.run.root_thread_id)
+            .await
+            .unwrap()
+            .is_none()
+    );
+
+    fixture
+        .store
+        .execute_test_sql(&format!(
+            "UPDATE threads SET runtime_revision = 8 WHERE id = '{}'",
+            fixture.agent_id
+        ))
+        .await;
+    let second = product_events
+        .refresh_task(&fixture.run.root_thread_id)
+        .await
+        .unwrap()
+        .unwrap();
+    let crate::StudioProductEventKind::TaskChanged {
+        task: Some(second_task),
+        ..
+    } = second.kind
+    else {
+        panic!("expected task snapshot after executor progress");
+    };
+    assert_eq!(second_task.work_units[0].executor_progress_revision, 8);
 }

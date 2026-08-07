@@ -182,11 +182,21 @@ impl StudioStore {
                     work_unit.status
                 );
             }
-            if work_unit.execution_status == ThreadExecutionStatus::Running.as_str() {
+            let execution_status = ThreadExecutionStatus::from_str(&work_unit.execution_status)
+                .with_context(|| {
+                    format!(
+                        "invalid WorkUnit Thread execution status: {}",
+                        work_unit.execution_status
+                    )
+                })?;
+            if work_status == WorkUnitStatus::Running
+                && execution_status == ThreadExecutionStatus::Running
+            {
                 return Ok(());
             }
             let continuation_revision = work_unit.continuation_revision.saturating_add(1);
             let mut active: entities::work_unit::ActiveModel = work_unit.into();
+            active.status = Set(WorkUnitStatus::Running.as_str().to_string());
             active.execution_status = Set(ThreadExecutionStatus::Running.as_str().to_string());
             active.execution_error = Set(None);
             active.continuation_state = Set(ExecutorContinuationState::None.as_str().to_string());
@@ -373,6 +383,7 @@ impl StudioStore {
                 TurnOutcomeKind::Cancelled => ThreadExecutionStatus::Cancelled,
                 TurnOutcomeKind::BudgetLimited => unreachable!("handled above"),
             };
+            let continuation_revision = work_unit.continuation_revision.saturating_add(1);
             let mut active: entities::work_unit::ActiveModel = work_unit.into();
             active.execution_status = Set(status.as_str().to_string());
             active.execution_error = Set(outcome.reason.clone().or_else(|| {
@@ -380,7 +391,19 @@ impl StudioStore {
                     "executor turn ended without a successful report_completion".to_string()
                 })
             }));
-            active.continuation_state = Set(ExecutorContinuationState::None.as_str().to_string());
+            if matches!(
+                outcome.kind,
+                TurnOutcomeKind::Completed | TurnOutcomeKind::Failed
+            ) {
+                active.continuation_state = Set(ExecutorContinuationState::PlannerWakePending
+                    .as_str()
+                    .to_string());
+                active.continuation_source_turn_id = Set(Some(outcome.turn_id.to_string()));
+                active.continuation_revision = Set(continuation_revision);
+            } else {
+                active.continuation_state =
+                    Set(ExecutorContinuationState::None.as_str().to_string());
+            }
             active.updated_at = Set(now);
             active.update(&tx).await?;
             Ok(None)

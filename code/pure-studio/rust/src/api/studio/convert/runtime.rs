@@ -177,6 +177,7 @@ pub(crate) fn bridge_task_runtime(
                 continuation_state: unit.continuation_state,
                 continuation_source_turn_id: unit.continuation_source_turn_id,
                 continuation_revision: unit.continuation_revision,
+                executor_progress_revision: unit.executor_progress_revision,
             })
             .collect(),
         completions: task

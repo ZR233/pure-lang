@@ -31,6 +31,69 @@ fn validate_openai_websocket_handshake(
     Ok(response)
 }
 
+async fn capture_http_request(socket: &mut tokio::net::TcpStream) -> CapturedHttpRequest {
+    let mut buffer = Vec::new();
+    let mut temp = [0_u8; 1024];
+    let (header_end, content_length) = loop {
+        let read = socket.read(&mut temp).await.unwrap();
+        assert_ne!(read, 0);
+        buffer.extend_from_slice(&temp[..read]);
+        if let Some(header_end) = find_header_end(&buffer) {
+            let headers = String::from_utf8_lossy(&buffer[..header_end]);
+            let content_length = headers
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse::<usize>().ok())?
+                })
+                .unwrap_or(0);
+            break (header_end, content_length);
+        }
+    };
+
+    while buffer.len() < header_end + 4 + content_length {
+        let read = socket.read(&mut temp).await.unwrap();
+        assert_ne!(read, 0);
+        buffer.extend_from_slice(&temp[..read]);
+    }
+
+    let request_head = String::from_utf8_lossy(&buffer[..header_end]);
+    let mut lines = request_head.lines();
+    let request_line = lines.next().unwrap_or_default().to_string();
+    let headers = lines
+        .filter_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            Some((name.to_ascii_lowercase(), value.trim().to_string()))
+        })
+        .collect::<HashMap<_, _>>();
+    let body =
+        serde_json::from_slice(&buffer[header_end + 4..header_end + 4 + content_length]).unwrap();
+
+    CapturedHttpRequest {
+        request_line,
+        headers,
+        body,
+    }
+}
+
+async fn send_responses_sse(
+    socket: &mut tokio::net::TcpStream,
+    response_id: &str,
+    message_id: &str,
+    text: &str,
+) {
+    let body = format!(
+        "data: {{\"type\":\"response.output_text.delta\",\"item_id\":\"{message_id}\",\"delta\":\"{text}\"}}\n\ndata: {{\"type\":\"response.completed\",\"response\":{{\"id\":\"{response_id}\",\"model\":\"local-responses\",\"output\":[{{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{{\"type\":\"output_text\",\"text\":\"{text}\"}}]}}],\"usage\":{{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}}}}\n\ndata: [DONE]\n\n"
+    );
+    let response = format!(
+        "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    socket.write_all(response.as_bytes()).await.unwrap();
+    socket.shutdown().await.unwrap();
+}
+
 fn openai_provider(base_url: String) -> OpenAiProvider {
     let mut model = default_models()
         .into_iter()
@@ -218,7 +281,7 @@ async fn responses_websocket_reuses_the_agent_session_connection() {
 }
 
 #[tokio::test]
-async fn responses_websocket_replays_full_request_after_partial_proxy_disconnect() {
+async fn responses_websocket_does_not_replay_after_the_stream_starts() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
@@ -253,39 +316,13 @@ async fn responses_websocket_replays_full_request_after_partial_proxy_disconnect
             .unwrap();
         drop(writer);
 
-        let (stream, _) = listener.accept().await.unwrap();
-        let websocket = accept_async(stream).await.unwrap();
-        let (mut writer, mut reader) = websocket.split();
-        let WebSocketMessage::Text(retried) = reader.next().await.unwrap().unwrap() else {
-            panic!("expected full-history retry frame");
-        };
-        for event in [
-            serde_json::json!({
-                "type": "response.output_text.delta",
-                "item_id": "final-message",
-                "delta": "ok"
-            }),
-            serde_json::json!({
-                "type": "response.completed",
-                "response": {
-                    "id": "resp-1",
-                    "model": "local-responses",
-                    "output": [{
-                        "type": "message",
-                        "role": "assistant",
-                        "content": [{"type": "output_text", "text": "ok"}]
-                    }],
-                    "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
-                }
-            }),
-        ] {
-            writer
-                .send(WebSocketMessage::Text(event.to_string().into()))
+        assert!(
+            tokio::time::timeout(Duration::from_millis(750), listener.accept())
                 .await
-                .unwrap();
-        }
-        [first, retried]
-            .map(|frame| serde_json::from_str::<serde_json::Value>(frame.as_str()).unwrap())
+                .is_err(),
+            "a request that emitted stream events must not be replayed"
+        );
+        serde_json::from_str::<serde_json::Value>(first.as_str()).unwrap()
     });
 
     let mut info = ProviderInfo::openai(Some(format!("http://{address}/v1")));
@@ -304,36 +341,21 @@ async fn responses_websocket_replays_full_request_after_partial_proxy_disconnect
         trace_sequence_base: 0,
     });
 
-    let response = provider.stream_complete(request, event_tx).await.unwrap();
-    let [initial, retried] = server.await.unwrap();
+    let error = provider
+        .stream_complete(request, event_tx)
+        .await
+        .expect_err("partial stream failure must be returned without replay");
+    let initial = server.await.unwrap();
     let events = std::iter::from_fn(|| event_rx.try_recv().ok()).collect::<Vec<_>>();
 
-    assert_eq!(response.content.as_deref(), Some("ok"));
-    assert_eq!(initial, retried);
+    assert!(error.is_transient_model_transport());
+    assert_eq!(initial["type"], "response.create");
     assert!(events.iter().any(|event| matches!(
         event,
         AgentEvent::TracePartFailed { item, error }
             if item.item_id == "turn-1-inf-0-text-final-1"
                 && error.contains("upstream websocket proxy failed")
     )));
-    assert!(response.trace_events.iter().any(|event| matches!(
-        &event.kind,
-        TraceEventKind::TracePartCompleted { item }
-            if item.item_id == "turn-1-inf-0-ws-retry-1-text-final-1"
-                && item.content == "ok"
-    )));
-    assert!(
-        !response.trace_events.iter().any(|event| match &event.kind {
-            TraceEventKind::TracePartStarted { item }
-            | TraceEventKind::TracePartCompleted { item }
-            | TraceEventKind::TracePartFailed { item, .. } => item.content.contains("partial"),
-            TraceEventKind::TracePartDelta { .. }
-            | TraceEventKind::PlanLifecycleChanged { .. }
-            | TraceEventKind::InteractionChanged { .. }
-            | TraceEventKind::SkillActivated { .. }
-            | TraceEventKind::EnabledToolsRecorded { .. } => false,
-        })
-    );
 }
 
 #[tokio::test]
@@ -483,6 +505,93 @@ async fn responses_websocket_retries_an_immediate_close_with_full_history() {
 }
 
 #[tokio::test]
+async fn responses_websocket_falls_back_to_http_after_one_full_replay() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let mut websocket_requests = Vec::new();
+        for _ in 0..=RESPONSES_WEBSOCKET_MAX_RETRIES {
+            let (stream, _) = listener.accept().await.unwrap();
+            let websocket = accept_async(stream).await.unwrap();
+            let (mut writer, mut reader) = websocket.split();
+            let WebSocketMessage::Text(request) = reader.next().await.unwrap().unwrap() else {
+                panic!("expected response.create frame");
+            };
+            websocket_requests
+                .push(serde_json::from_str::<serde_json::Value>(request.as_str()).unwrap());
+            writer
+                .send(WebSocketMessage::Close(Some(CloseFrame {
+                    code: CloseCode::Error,
+                    reason: "upstream websocket proxy failed".into(),
+                })))
+                .await
+                .unwrap();
+        }
+
+        let mut http_requests = Vec::new();
+        for (response_id, message_id, text) in [
+            ("http-response-1", "http-message-1", "http-ok-1"),
+            ("http-response-2", "http-message-2", "http-ok-2"),
+        ] {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            http_requests.push(capture_http_request(&mut socket).await);
+            send_responses_sse(&mut socket, response_id, message_id, text).await;
+        }
+
+        (websocket_requests, http_requests)
+    });
+
+    let mut info = ProviderInfo::openai(Some(format!("http://{address}/v1")));
+    info.default_model = "local-responses".to_string();
+    info.bearer_token = Some("test-token".to_string());
+    let provider = OpenAiProvider::new(info, vec![ModelInfo::fallback("local-responses")]).unwrap();
+    let transport_session = crate::ModelTransportSession::default();
+    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
+
+    let mut first_request = minimal_request("local-responses");
+    first_request.transport_session = transport_session.clone();
+    let first = provider
+        .stream_complete(first_request, event_tx.clone())
+        .await
+        .unwrap();
+    assert!(transport_session.uses_responses_http_fallback());
+
+    let mut second_request = minimal_request("local-responses");
+    second_request.input.extend([
+        Message {
+            role: MessageRole::Assistant,
+            content: MessageContent::Text("http-ok-1".to_string()),
+            reasoning_content: None,
+            metadata: HashMap::new(),
+        }
+        .into(),
+        Message {
+            role: MessageRole::User,
+            content: MessageContent::Text("again".to_string()),
+            reasoning_content: None,
+            metadata: HashMap::new(),
+        }
+        .into(),
+    ]);
+    second_request.transport_session = transport_session;
+    let second = provider
+        .stream_complete(second_request, event_tx)
+        .await
+        .unwrap();
+    let (websocket_requests, http_requests) = server.await.unwrap();
+
+    assert_eq!(first.content.as_deref(), Some("http-ok-1"));
+    assert_eq!(second.content.as_deref(), Some("http-ok-2"));
+    assert_eq!(websocket_requests.len(), 2);
+    assert_eq!(websocket_requests[0], websocket_requests[1]);
+    assert_eq!(http_requests.len(), 2);
+    assert_eq!(http_requests[0].request_line, "POST /v1/responses HTTP/1.1");
+    assert_eq!(http_requests[1].request_line, "POST /v1/responses HTTP/1.1");
+    assert_eq!(http_requests[0].body["input"].as_array().unwrap().len(), 1);
+    assert_eq!(http_requests[1].body["input"].as_array().unwrap().len(), 3);
+}
+
+#[tokio::test]
 async fn responses_websocket_retries_an_invalid_continuation_once_with_full_history() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
@@ -618,6 +727,142 @@ async fn responses_websocket_retries_an_invalid_continuation_once_with_full_hist
     assert_eq!(incremental["input"].as_array().unwrap().len(), 1);
     assert!(retried.get("previous_response_id").is_none());
     assert_eq!(retried["input"].as_array().unwrap().len(), 3);
+}
+
+#[tokio::test]
+async fn invalid_continuation_full_replay_consumes_the_websocket_retry_budget() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let websocket = accept_async(stream).await.unwrap();
+        let (mut writer, mut reader) = websocket.split();
+        let WebSocketMessage::Text(initial) = reader.next().await.unwrap().unwrap() else {
+            panic!("expected initial response.create frame");
+        };
+        for event in [
+            serde_json::json!({
+                "type": "response.output_text.delta",
+                "item_id": "message-1",
+                "delta": "ok-1"
+            }),
+            serde_json::json!({
+                "type": "response.completed",
+                "response": {
+                    "id": "resp-1",
+                    "model": "local-responses",
+                    "output": [{
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{ "type": "output_text", "text": "ok-1" }]
+                    }],
+                    "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
+                }
+            }),
+        ] {
+            writer
+                .send(WebSocketMessage::Text(event.to_string().into()))
+                .await
+                .unwrap();
+        }
+
+        let WebSocketMessage::Text(incremental) = reader.next().await.unwrap().unwrap() else {
+            panic!("expected incremental response.create frame");
+        };
+        writer
+            .send(WebSocketMessage::Text(
+                serde_json::json!({
+                    "type": "error",
+                    "error": {
+                        "code": "invalid_previous_response_id",
+                        "message": "previous_response_id is no longer valid"
+                    }
+                })
+                .to_string()
+                .into(),
+            ))
+            .await
+            .unwrap();
+        drop(writer);
+
+        let (stream, _) = listener.accept().await.unwrap();
+        let websocket = accept_async(stream).await.unwrap();
+        let (mut writer, mut reader) = websocket.split();
+        let WebSocketMessage::Text(full_replay) = reader.next().await.unwrap().unwrap() else {
+            panic!("expected the only full-history WebSocket replay");
+        };
+        writer
+            .send(WebSocketMessage::Close(Some(CloseFrame {
+                code: CloseCode::Error,
+                reason: "full replay failed".into(),
+            })))
+            .await
+            .unwrap();
+        drop(writer);
+
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let http_request = capture_http_request(&mut socket).await;
+        send_responses_sse(
+            &mut socket,
+            "http-response-2",
+            "http-message-2",
+            "http-ok-2",
+        )
+        .await;
+
+        (
+            [initial, incremental, full_replay]
+                .map(|frame| serde_json::from_str::<serde_json::Value>(frame.as_str()).unwrap()),
+            http_request,
+        )
+    });
+
+    let mut info = ProviderInfo::openai(Some(format!("http://{address}/v1")));
+    info.default_model = "local-responses".to_string();
+    info.bearer_token = Some("test-token".to_string());
+    let provider = OpenAiProvider::new(info, vec![ModelInfo::fallback("local-responses")]).unwrap();
+    let transport_session = crate::ModelTransportSession::default();
+    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
+
+    let mut first_request = minimal_request("local-responses");
+    first_request.transport_session = transport_session.clone();
+    let first = provider
+        .stream_complete(first_request, event_tx.clone())
+        .await
+        .unwrap();
+    let mut second_request = minimal_request("local-responses");
+    second_request.input.extend([
+        Message {
+            role: MessageRole::Assistant,
+            content: MessageContent::Text("ok-1".to_string()),
+            reasoning_content: None,
+            metadata: HashMap::new(),
+        }
+        .into(),
+        Message {
+            role: MessageRole::User,
+            content: MessageContent::Text("again".to_string()),
+            reasoning_content: None,
+            metadata: HashMap::new(),
+        }
+        .into(),
+    ]);
+    second_request.transport_session = transport_session.clone();
+    let second = provider
+        .stream_complete(second_request, event_tx)
+        .await
+        .unwrap();
+    let ([initial, incremental, full_replay], http_request) = server.await.unwrap();
+
+    assert_eq!(first.content.as_deref(), Some("ok-1"));
+    assert_eq!(second.content.as_deref(), Some("http-ok-2"));
+    assert!(transport_session.uses_responses_http_fallback());
+    assert!(initial.get("previous_response_id").is_none());
+    assert_eq!(incremental["previous_response_id"], "resp-1");
+    assert!(full_replay.get("previous_response_id").is_none());
+    assert_eq!(full_replay["input"].as_array().unwrap().len(), 3);
+    assert_eq!(http_request.request_line, "POST /v1/responses HTTP/1.1");
+    assert_eq!(http_request.body["input"].as_array().unwrap().len(), 3);
 }
 
 #[tokio::test]
@@ -976,4 +1221,39 @@ async fn stream_complete_sends_responses_bearer_and_custom_headers() {
         Some("present")
     );
     assert_eq!(captured.body["stream"], serde_json::json!(true));
+}
+
+#[tokio::test]
+async fn http_retries_transient_request_failures_before_the_stream_starts() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let mut requests = Vec::new();
+        for attempt in 0..=OPENAI_HTTP_MAX_RETRIES {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            requests.push(capture_http_request(&mut socket).await);
+            if attempt < OPENAI_HTTP_MAX_RETRIES {
+                socket.shutdown().await.unwrap();
+            } else {
+                send_responses_sse(&mut socket, "http-response", "http-message", "http-ok").await;
+            }
+        }
+        requests
+    });
+
+    let provider = openai_provider(format!("http://{address}/v1"));
+    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
+    let response = provider
+        .stream_complete(minimal_request("local-responses"), event_tx)
+        .await
+        .unwrap();
+    let requests = server.await.unwrap();
+
+    assert_eq!(response.content.as_deref(), Some("http-ok"));
+    assert_eq!(requests.len(), 1 + OPENAI_HTTP_MAX_RETRIES as usize);
+    assert!(
+        requests
+            .iter()
+            .all(|request| request.request_line == "POST /v1/responses HTTP/1.1")
+    );
 }

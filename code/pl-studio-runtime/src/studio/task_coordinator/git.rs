@@ -4,6 +4,8 @@ use std::sync::{Mutex, OnceLock};
 
 use anyhow::{Context, Result, bail};
 
+use crate::agent::worktree::git_compatible_path;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RepositorySnapshot {
     pub(crate) workspace_root: PathBuf,
@@ -232,8 +234,10 @@ fn inspect_repository_blocking(path: &Path, require_clean: bool) -> Result<Repos
     } else {
         workspace_root.join(common_dir)
     };
-    let workspace_root = std::fs::canonicalize(&workspace_root).unwrap_or(workspace_root);
-    let git_common_dir = std::fs::canonicalize(&common_dir).unwrap_or(common_dir);
+    let workspace_root =
+        git_compatible_path(std::fs::canonicalize(&workspace_root).unwrap_or(workspace_root));
+    let git_common_dir =
+        git_compatible_path(std::fs::canonicalize(&common_dir).unwrap_or(common_dir));
     if require_clean {
         let status = git_output(
             &workspace_root,
@@ -429,5 +433,38 @@ fn git_error(output: &Output) -> String {
         String::from_utf8_lossy(&output.stdout).trim().to_string()
     } else {
         stderr
+    }
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn repository_snapshot_paths_are_native_non_verbatim() {
+        let repository = std::env::temp_dir().join(format!(
+            "pure-task-repository-path-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&repository).unwrap();
+
+        let snapshot = prepare_repository_for_task_blocking(&repository).unwrap();
+
+        assert!(
+            !snapshot
+                .workspace_root
+                .to_string_lossy()
+                .starts_with(r"\\?\")
+        );
+        assert!(
+            !snapshot
+                .git_common_dir
+                .to_string_lossy()
+                .starts_with(r"\\?\")
+        );
+        std::fs::remove_dir_all(repository).unwrap();
     }
 }

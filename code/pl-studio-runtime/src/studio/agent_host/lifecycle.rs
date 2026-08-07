@@ -87,6 +87,11 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
             scope_hints: intent.scope_hints.clone(),
             requested_by_call_id: intent.requesting_tool_call_id(),
             review_round_id: intent.review_round_id.clone(),
+            assignment: intent.assignment.clone(),
+            acceptance_criteria: intent.acceptance_criteria.clone(),
+            dependencies: intent.dependencies.clone(),
+            evidence: intent.evidence.clone(),
+            verification_commands: intent.verification_commands.clone(),
         };
         let preparation = self
             .coordinator
@@ -135,6 +140,13 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
                 worktree,
             },
         })
+    }
+
+    fn initial_context(
+        &self,
+        lease: &Self::SpawnLease,
+    ) -> Result<Vec<pl_core::PinnedContextSection>> {
+        Ok(lease.resource.preparation.initial_context().to_vec())
     }
 
     async fn activate_spawn(&self, lease: &Self::SpawnLease) -> Result<()> {

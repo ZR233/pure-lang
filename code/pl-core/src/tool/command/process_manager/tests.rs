@@ -14,9 +14,25 @@ fn running_state() -> CommandProcessState {
         stderr_open: true,
         stdout: HeadTailBuffer::new(INTERNAL_BUFFER_BYTES),
         stderr: HeadTailBuffer::new(INTERNAL_BUFFER_BYTES),
+        pending_stdout: HeadTailBuffer::new(INTERNAL_BUFFER_BYTES),
+        pending_stderr: HeadTailBuffer::new(INTERNAL_BUFFER_BYTES),
         output_revision: 0,
         error: None,
     }
+}
+
+#[test]
+fn output_is_accumulated_for_artifacts_but_claimed_once_by_model_snapshots() {
+    let mut state = running_state();
+
+    assert_eq!(state.record_output(StreamKind::Stdout, b"first"), 1);
+    assert_eq!(state.stdout.display_text(), "first");
+    assert_eq!(state.pending_stdout.take_display_text(), "first");
+    assert_eq!(state.pending_stdout.take_display_text(), "");
+
+    assert_eq!(state.record_output(StreamKind::Stdout, b" second"), 2);
+    assert_eq!(state.stdout.display_text(), "first second");
+    assert_eq!(state.pending_stdout.take_display_text(), " second");
 }
 
 #[test]

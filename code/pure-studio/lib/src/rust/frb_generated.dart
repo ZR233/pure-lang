@@ -3343,8 +3343,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeTaskWorkUnitDto dco_decode_bridge_task_work_unit_dto(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 14)
-      throw Exception('unexpected arr length: expect 14 but see ${arr.length}');
+    if (arr.length != 15)
+      throw Exception('unexpected arr length: expect 15 but see ${arr.length}');
     return BridgeTaskWorkUnitDto(
       id: dco_decode_String(arr[0]),
       title: dco_decode_String(arr[1]),
@@ -3360,6 +3360,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       continuationState: dco_decode_String(arr[11]),
       continuationSourceTurnId: dco_decode_opt_String(arr[12]),
       continuationRevision: dco_decode_u_64(arr[13]),
+      executorProgressRevision: dco_decode_u_64(arr[14]),
     );
   }
 
@@ -6630,6 +6631,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_continuationState = sse_decode_String(deserializer);
     var var_continuationSourceTurnId = sse_decode_opt_String(deserializer);
     var var_continuationRevision = sse_decode_u_64(deserializer);
+    var var_executorProgressRevision = sse_decode_u_64(deserializer);
     return BridgeTaskWorkUnitDto(
       id: var_id,
       title: var_title,
@@ -6645,6 +6647,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       continuationState: var_continuationState,
       continuationSourceTurnId: var_continuationSourceTurnId,
       continuationRevision: var_continuationRevision,
+      executorProgressRevision: var_executorProgressRevision,
     );
   }
 
@@ -10182,6 +10185,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.continuationState, serializer);
     sse_encode_opt_String(self.continuationSourceTurnId, serializer);
     sse_encode_u_64(self.continuationRevision, serializer);
+    sse_encode_u_64(self.executorProgressRevision, serializer);
   }
 
   @protected

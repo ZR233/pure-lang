@@ -139,6 +139,7 @@ pub struct BridgeTaskWorkUnitDto {
     pub continuation_state: String,
     pub continuation_source_turn_id: Option<String>,
     pub continuation_revision: u64,
+    pub executor_progress_revision: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

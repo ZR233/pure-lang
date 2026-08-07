@@ -6,6 +6,7 @@ use std::time::Duration;
 use pretty_assertions::assert_eq;
 use tokio::sync::Notify;
 
+use super::host::ThreadContextMutation;
 use super::*;
 #[derive(Debug, Clone)]
 struct TestError(String);
@@ -28,6 +29,7 @@ enum FactoryMode {
 struct TestRepository {
     states: Arc<Mutex<BTreeMap<AgentId, ThreadActorState>>>,
     mutations: Arc<Mutex<Vec<ThreadMutation>>>,
+    contexts: Arc<Mutex<Vec<Option<ThreadContextMutation>>>>,
     fail_trace: Arc<Mutex<bool>>,
     fail_terminal: Arc<Mutex<bool>>,
     fail_registration: Arc<Mutex<bool>>,
@@ -41,6 +43,7 @@ impl TestRepository {
         Self {
             states: Arc::new(Mutex::new(BTreeMap::new())),
             mutations: Arc::new(Mutex::new(Vec::new())),
+            contexts: Arc::new(Mutex::new(Vec::new())),
             fail_trace: Arc::new(Mutex::new(false)),
             fail_terminal: Arc::new(Mutex::new(false)),
             fail_registration: Arc::new(Mutex::new(false)),
@@ -78,6 +81,10 @@ impl TestRepository {
 
     fn state(&self, id: &AgentId) -> ThreadActorState {
         self.states.lock().unwrap()[id].clone()
+    }
+
+    fn last_context(&self) -> Option<ThreadContextMutation> {
+        self.contexts.lock().unwrap().last().cloned().flatten()
     }
 }
 
@@ -158,9 +165,34 @@ impl ThreadRepository for TestRepository {
             });
         }
         self.mutations.lock().unwrap().push(commit.mutation.clone());
+        self.contexts
+            .lock()
+            .unwrap()
+            .push(commit.facts.context.clone());
         states.insert(commit.agent_id, commit.next_state);
         Ok(ThreadCommitOutcome::Applied)
     }
+}
+
+#[tokio::test]
+async fn registration_persists_non_empty_initial_transcript_as_baseline() {
+    let repository = TestRepository::empty();
+    let host = TestHost::new(repository.clone(), FactoryMode::Fail);
+    let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
+    let handle = runtime.handle();
+    let mut registration = registration("root", "root-chat");
+    registration
+        .session
+        .session
+        .push_user_prompt("seed".to_string());
+
+    handle.register(registration).await.unwrap();
+
+    assert!(matches!(
+        repository.last_context(),
+        Some(ThreadContextMutation::Replace { items }) if items.len() == 1
+    ));
+    runtime.shutdown().await.unwrap();
 }
 
 #[derive(Clone)]
@@ -414,6 +446,7 @@ fn child_spawn_request(parent_id: AgentId) -> AgentSpawnRequest {
         parent_id,
         role: crate::AgentRoleId::new("worker").unwrap(),
         session: ThreadContextState::empty(),
+        initial_turn_id: None,
         initial_message: None,
         metadata: serde_json::Value::Null,
     }
@@ -755,6 +788,130 @@ async fn concurrent_start_only_submits_allow_one_turn_and_steer_is_atomic() {
 }
 
 #[tokio::test]
+async fn start_or_queue_never_steers_an_active_turn() {
+    let repository = TestRepository::empty();
+    let host = TestHost::new(repository.clone(), FactoryMode::Block);
+    let runtime = AgentRuntime::start(host.clone(), test_options())
+        .await
+        .unwrap();
+    let handle = runtime.handle();
+    let agent_id = AgentId::new("root").unwrap();
+    let thread_id = ThreadId::new("root").unwrap();
+    handle.register(registration("root", "chat")).await.unwrap();
+
+    let active_turn = handle
+        .submit(
+            agent_id.clone(),
+            AgentSubmitRequest::start(thread_id.clone(), "active"),
+        )
+        .await
+        .unwrap();
+    wait_for_prepared_messages(&host.turn_factory, 1).await;
+
+    let queued_turn = handle
+        .submit(
+            agent_id.clone(),
+            AgentSubmitRequest::start(thread_id, "next")
+                .with_mail_id("mail:next")
+                .with_turn_policy(AgentTurnSubmitPolicy::StartOrQueue),
+        )
+        .await
+        .unwrap();
+
+    assert_ne!(queued_turn, active_turn);
+    assert_eq!(
+        handle
+            .snapshot(agent_id.clone())
+            .await
+            .unwrap()
+            .pending_inputs,
+        1
+    );
+    assert_eq!(host.turn_factory.prepared_messages.lock().unwrap().len(), 1);
+    let durable = repository.state(&agent_id);
+    assert_eq!(durable.pending_inputs.len(), 1);
+    assert!(durable.active_input.is_some());
+    assert!(durable.pending_inputs.iter().any(|input| {
+        input.mail_id == "mail:next"
+            && matches!(input.delivery_state, MailboxDeliveryState::Pending)
+    }));
+
+    host.turn_factory.blocker.notify_one();
+    wait_for_prepared_messages(&host.turn_factory, 2).await;
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn queued_inputs_with_the_same_key_share_the_latest_turn() {
+    let repository = TestRepository::empty();
+    let host = TestHost::new(repository.clone(), FactoryMode::Block);
+    let runtime = AgentRuntime::start(host.clone(), test_options())
+        .await
+        .unwrap();
+    let handle = runtime.handle();
+    let agent_id = AgentId::new("root").unwrap();
+    let thread_id = ThreadId::new("root").unwrap();
+    handle.register(registration("root", "chat")).await.unwrap();
+
+    handle
+        .submit(
+            agent_id.clone(),
+            AgentSubmitRequest::start(thread_id.clone(), "active"),
+        )
+        .await
+        .unwrap();
+    wait_for_prepared_messages(&host.turn_factory, 1).await;
+
+    let mut queued_turns = Vec::new();
+    for message in ["first wake", "second wake", "latest wake"] {
+        queued_turns.push(
+            handle
+                .submit(
+                    agent_id.clone(),
+                    AgentSubmitRequest::start(thread_id.clone(), message)
+                        .with_mail_id(format!("mail:{message}"))
+                        .with_queue_coalescing_key("task-planner-wake")
+                        .with_turn_policy(AgentTurnSubmitPolicy::StartOrQueue),
+                )
+                .await
+                .unwrap(),
+        );
+    }
+
+    host.turn_factory.blocker.notify_one();
+    wait_for_prepared_messages(&host.turn_factory, 2).await;
+
+    let durable = repository.state(&agent_id);
+    assert_eq!(
+        durable.snapshot.active_turn_id,
+        Some(queued_turns[2].clone())
+    );
+    assert_eq!(
+        durable
+            .active_input
+            .as_ref()
+            .map(|input| input.message.as_str()),
+        Some("latest wake")
+    );
+    assert_eq!(durable.pending_inputs.len(), 2);
+    assert!(durable.pending_inputs.iter().all(|input| matches!(
+        &input.delivery_state,
+        MailboxDeliveryState::Claimed { turn_id, .. } if turn_id == &queued_turns[2]
+    )));
+    assert_eq!(
+        host.turn_factory.prepared_batches.lock().unwrap()[1],
+        vec![
+            "first wake".to_string(),
+            "second wake".to_string(),
+            "latest wake".to_string(),
+        ]
+    );
+
+    host.turn_factory.blocker.notify_one();
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn cancellation_aborts_blocked_turn_after_grace_and_records_cancelled_outcome() {
     let repository = TestRepository::empty();
     let host = TestHost::new(repository.clone(), FactoryMode::Block);
@@ -966,6 +1123,7 @@ async fn restart_recovery_replays_pending_inputs_in_fifo_order() {
             thread_id: session_id.clone(),
             message: message.to_string(),
             metadata: serde_json::Value::Null,
+            queue_coalescing_key: None,
             presentation: MailboxPresentation::User,
             delivery_state: Default::default(),
             queued_at: index as i64,
@@ -1004,6 +1162,7 @@ async fn restored_inputs_wait_for_host_resource_activation() {
         thread_id: session_id,
         message: "after-resources-ready".to_string(),
         metadata: serde_json::Value::Null,
+        queue_coalescing_key: None,
         presentation: MailboxPresentation::User,
         delivery_state: Default::default(),
         queued_at: 1,
@@ -1055,6 +1214,7 @@ async fn close_closes_descendants_from_deepest_to_root() {
             parent_id: root.clone(),
             role: crate::AgentRoleId::new("worker").unwrap(),
             session: ThreadContextState::empty(),
+            initial_turn_id: None,
             initial_message: None,
             metadata: serde_json::Value::Null,
         })
@@ -1069,6 +1229,7 @@ async fn close_closes_descendants_from_deepest_to_root() {
             parent_id: child.clone(),
             role: crate::AgentRoleId::new("worker").unwrap(),
             session: ThreadContextState::empty(),
+            initial_turn_id: None,
             initial_message: None,
             metadata: serde_json::Value::Null,
         })

@@ -204,6 +204,12 @@ pub(super) fn continuation_id_invalid(value: &Value) -> bool {
             && (message.contains("not found") || message.contains("invalid")))
 }
 
+pub(super) fn continuation_retry_error() -> PureError {
+    PureError::transient_model_transport(
+        "Responses WebSocket previous_response_id is no longer valid; retrying with full history",
+    )
+}
+
 fn transient(message: String, retry_after_ms: Option<u64>) -> PureError {
     PureError::transient_model_failure(message, retry_after_ms, None, None)
 }

@@ -1,5 +1,8 @@
 use super::*;
-use crate::studio::task_coordinator::TaskRunPhase;
+use crate::studio::task_coordinator::{
+    CreateTaskRun, CreateWorkUnit, ExecutorContinuationState, TaskPlannerWakeSource, TaskRunPhase,
+    WorkUnitStatus,
+};
 use pl_protocol::ThreadItemContent;
 use pretty_assertions::assert_eq;
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, ConnectionTrait, EntityTrait};
@@ -119,6 +122,116 @@ async fn restored_task_root_repairs_legacy_executor_role_before_registration() {
     assert_eq!(snapshot.thread.role, "planner");
     assert_eq!(stored.role, "planner");
     assert_eq!(actor.identity.role, StudioRole::Planner.id());
+    let _ = std::fs::remove_dir_all(workspace);
+}
+
+#[tokio::test]
+async fn restart_thread_registration_materializes_a_missing_durable_planner_wake_once() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let workspace = std::env::temp_dir().join(format!("pure-planner-wake-{unique}"));
+    std::fs::create_dir_all(&workspace).unwrap();
+    let store = StudioStore::open_memory().await.unwrap();
+    let project = store.upsert_project(&workspace).await.unwrap();
+    let thread = store
+        .create_thread(&project.id, "Planner wake", StudioMode::Task)
+        .await
+        .unwrap();
+    let (run, _) = store
+        .create_task_run_with_lease(CreateTaskRun {
+            root_thread_id: thread.id.clone(),
+            phase: TaskRunPhase::Implementing,
+            plan: "# Plan\n\nImplement the requested change.".to_string(),
+            workspace_root: workspace.to_string_lossy().into_owned(),
+            git_common_dir: workspace.join(".git").to_string_lossy().into_owned(),
+            branch: "main".to_string(),
+            head_commit: "1111111".to_string(),
+        })
+        .await
+        .unwrap();
+    let executor_thread_id = format!("{}-executor", thread.id);
+    let unit = store
+        .create_work_unit(CreateWorkUnit {
+            task_run_id: run.id.clone(),
+            title: "Implement".to_string(),
+            scope_hints: Vec::new(),
+            base_commit: run.base_commit.clone(),
+            worktree_path: workspace.join("executor").to_string_lossy().into_owned(),
+            branch: "task-executor".to_string(),
+            attempt: 1,
+        })
+        .await
+        .unwrap();
+    store
+        .update_work_unit(
+            &unit.id,
+            WorkUnitStatus::Running,
+            Some(executor_thread_id.clone()),
+        )
+        .await
+        .unwrap();
+    store
+        .activate_executor(&unit.id, &executor_thread_id)
+        .await
+        .unwrap();
+    store
+        .settle_executor_turn_finished(
+            &executor_thread_id,
+            &pl_core::AgentTurnOutcome {
+                turn_id: pl_core::TurnId::new("turn-terminal").unwrap(),
+                thread_id: pl_core::ThreadId::new(executor_thread_id.clone()).unwrap(),
+                kind: pl_core::TurnOutcomeKind::Failed,
+                reason: Some("executor failed".to_string()),
+                failure: None,
+                budget_limit: None,
+                rollover_compacted: false,
+                rollover_compaction_error: None,
+                usage: Default::default(),
+                finished_at: 1,
+            },
+        )
+        .await
+        .unwrap();
+    let wake = store
+        .list_pending_task_planner_wakes()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|wake| {
+            matches!(
+                &wake.source,
+                TaskPlannerWakeSource::ExecutorTerminal { work_unit_id, .. }
+                    if work_unit_id == &unit.id
+            )
+        })
+        .unwrap();
+    assert_eq!(
+        store
+            .read_work_unit(&unit.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .continuation_state,
+        ExecutorContinuationState::PlannerWakePending
+    );
+    assert!(!store.task_planner_wake_was_delivered(&wake).await.unwrap());
+
+    let runtime = StudioRuntime::new(
+        store.clone(),
+        ConfigStore::new(crate::config::ConfigPaths::from_home(&workspace)),
+    );
+    runtime.thread_snapshot(&thread.id).await.unwrap();
+    assert!(store.task_planner_wake_was_delivered(&wake).await.unwrap());
+    let rows = crate::studio::entity::thread_input::Entity::find_by_id(wake.mail_id())
+        .all(store.database())
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].thread_id, thread.id);
+
+    runtime.shutdown().await;
     let _ = std::fs::remove_dir_all(workspace);
 }
 

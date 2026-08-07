@@ -6,6 +6,7 @@ import '../../domain/models/studio_models.dart';
 import '../../app/theme/studio_tokens.dart';
 import '../../l10n/studio_l10n.dart';
 import '../../shared/studio_driver_keys.dart';
+import '../../shared/studio_driver_state.dart';
 import '../../shared/upward_popup_menu.dart';
 import 'context_usage_readout.dart';
 import 'status_bar_item.dart';
@@ -31,6 +32,7 @@ class ThreadStatusBar extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final workspace = view ?? StatusBarView.fromWorkspace(this.workspace!);
     final runtime = workspace.runtime;
+    StudioDriverState.publishTask(runtime.task);
     final thread = workspace.thread;
     final capabilityLabel = _runtimeCapabilityLabel(context, runtime);
     return DecoratedBox(
@@ -116,6 +118,8 @@ class ThreadStatusBar extends ConsumerWidget {
                         workspace: workspace,
                         mode: thread.mode,
                       ),
+                    if (runtime.task case final task?)
+                      _TaskRuntimeReadout(task: task),
                     ContextUsageReadout(runtime: runtime),
                     if (showCost && runtime.costLabel.isNotEmpty)
                       _StatusReadout(
@@ -152,6 +156,34 @@ class ThreadStatusBar extends ConsumerWidget {
               },
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TaskRuntimeReadout extends StatelessWidget {
+  const _TaskRuntimeReadout({required this.task});
+
+  final TaskRuntimeView task;
+
+  @override
+  Widget build(BuildContext context) {
+    final status = task.statusMessage ?? '';
+    final tooltip = status.isEmpty
+        ? '${context.taskPhaseLabel(task.phase)} · ${task.runId}'
+        : '${context.taskPhaseLabel(task.phase)} · $status';
+    return KeyedSubtree(
+      key: StudioDriverKeys.taskRuntime(task.runId),
+      child: Semantics(
+        key: StudioDriverKeys.taskStatus(task.runId, status),
+        label: tooltip,
+        child: _StatusReadout(
+          key: StudioDriverKeys.taskPhase(task.runId, task.phase),
+          icon: Icons.route_outlined,
+          label: context.taskPhaseLabel(task.phase),
+          tooltip: tooltip,
+          maxWidth: 120,
         ),
       ),
     );
@@ -505,6 +537,7 @@ class _StatusReadout extends StatelessWidget {
     this.detailWidth = 300,
     this.maxWidth = 180,
     this.interactive = false,
+    super.key,
   });
 
   final IconData? icon;

@@ -155,6 +155,19 @@ impl StudioStore {
             .map(thread_record))
     }
 
+    pub(in crate::studio) async fn read_thread_runtime_revision(
+        &self,
+        thread_id: &str,
+    ) -> Result<u64> {
+        use entities::thread;
+        let revision = thread::Entity::find_by_id(thread_id.to_string())
+            .one(&self.db)
+            .await?
+            .and_then(|thread| thread.runtime_revision)
+            .unwrap_or_default();
+        Ok(u64::try_from(revision)?)
+    }
+
     pub async fn rename_thread(&self, thread_id: &str, title: &str) -> Result<()> {
         use entities::thread;
         if let Some(existing) = thread::Entity::find_by_id(thread_id.to_string())

@@ -3,6 +3,9 @@
 #include <dwmapi.h>
 #include <flutter_windows.h>
 
+#include <cstdio>
+#include <cstring>
+
 #include "resource.h"
 
 namespace {
@@ -28,6 +31,40 @@ constexpr const wchar_t kGetPreferredBrightnessRegValue[] = L"AppsUseLightTheme"
 
 // The number of Win32Window objects that currently exist.
 static int g_active_window_count = 0;
+
+void LogNativeLifecycle(const char* event, UINT message, WPARAM wparam,
+                        LPARAM lparam) {
+  wchar_t path[32768];
+  const DWORD length = GetEnvironmentVariableW(
+      L"PURE_STUDIO_NATIVE_LIFECYCLE_LOG", path,
+      static_cast<DWORD>(std::size(path)));
+  if (length == 0 || length >= std::size(path)) {
+    return;
+  }
+
+  HANDLE file = CreateFileW(path, FILE_APPEND_DATA,
+                            FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                            OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (file == INVALID_HANDLE_VALUE) {
+    return;
+  }
+  SYSTEMTIME timestamp;
+  GetSystemTime(&timestamp);
+  char line[256];
+  const int bytes = sprintf_s(
+      line,
+      "%04u-%02u-%02uT%02u:%02u:%02u.%03uZ pid=%lu tid=%lu event=%s "
+      "message=%u wparam=%llu lparam=%lld\r\n",
+      timestamp.wYear, timestamp.wMonth, timestamp.wDay, timestamp.wHour,
+      timestamp.wMinute, timestamp.wSecond, timestamp.wMilliseconds,
+      GetCurrentProcessId(), GetCurrentThreadId(), event, message,
+      static_cast<unsigned long long>(wparam), static_cast<long long>(lparam));
+  if (bytes > 0) {
+    DWORD written = 0;
+    WriteFile(file, line, static_cast<DWORD>(bytes), &written, nullptr);
+  }
+  CloseHandle(file);
+}
 
 using EnableNonClientDpiScaling = BOOL __stdcall(HWND hwnd);
 
@@ -166,6 +203,7 @@ LRESULT CALLBACK Win32Window::WndProc(HWND const window,
     auto that = static_cast<Win32Window*>(window_struct->lpCreateParams);
     EnableFullDpiSupportIfAvailable(window);
     that->window_handle_ = window;
+    LogNativeLifecycle("WM_NCCREATE", message, wparam, lparam);
   } else if (Win32Window* that = GetThisFromHandle(window)) {
     return that->MessageHandler(window, message, wparam, lparam);
   }
@@ -179,13 +217,26 @@ Win32Window::MessageHandler(HWND hwnd,
                             WPARAM const wparam,
                             LPARAM const lparam) noexcept {
   switch (message) {
+    case WM_CLOSE:
+      LogNativeLifecycle("WM_CLOSE", message, wparam, lparam);
+      break;
+
     case WM_DESTROY:
+      LogNativeLifecycle("WM_DESTROY", message, wparam, lparam);
       window_handle_ = nullptr;
       Destroy();
       if (quit_on_close_) {
         PostQuitMessage(0);
       }
       return 0;
+
+    case WM_QUERYENDSESSION:
+      LogNativeLifecycle("WM_QUERYENDSESSION", message, wparam, lparam);
+      break;
+
+    case WM_ENDSESSION:
+      LogNativeLifecycle("WM_ENDSESSION", message, wparam, lparam);
+      break;
 
     case WM_DPICHANGED: {
       auto newRectSize = reinterpret_cast<RECT*>(lparam);

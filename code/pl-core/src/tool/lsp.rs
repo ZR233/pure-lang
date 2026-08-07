@@ -461,7 +461,7 @@ mod tests {
 
         assert_eq!(
             resolved.file_path,
-            Some(std::fs::canonicalize(&file).unwrap())
+            Some(dunce::canonicalize(&file).unwrap())
         );
         let _ = std::fs::remove_dir_all(root);
     }

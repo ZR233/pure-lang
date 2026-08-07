@@ -46,6 +46,15 @@ fn shared_tools() -> (TestExecTool, TestWriteStdinTool) {
     command_tool_pair(test_backend())
 }
 
+#[test]
+fn empty_poll_uses_runtime_backoff_without_delaying_immediate_snapshots() {
+    assert_eq!(poll_yield_duration(None), Duration::from_secs(10));
+    assert_eq!(poll_yield_duration(Some(1_000)), Duration::from_secs(10));
+    assert_eq!(poll_yield_duration(Some(30_000)), Duration::from_secs(30));
+    assert_eq!(poll_yield_duration(Some(0)), Duration::ZERO);
+    assert_eq!(yield_duration(Some(1_000)), Duration::from_secs(1));
+}
+
 #[cfg(unix)]
 fn create_directory_link(target: &std::path::Path, link: &std::path::Path) {
     std::os::unix::fs::symlink(target, link).unwrap();
@@ -91,6 +100,19 @@ async fn local_backend_rejects_linked_working_directory() {
     remove_directory_link(&root.join("linked"));
     std::fs::remove_dir_all(root).unwrap();
     std::fs::remove_dir_all(outside).unwrap();
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn local_backend_resolves_native_non_verbatim_working_directory() {
+    let root = test_root();
+    std::fs::create_dir_all(&root).unwrap();
+    let backend = LocalCommandBackend::new(root.clone());
+
+    let resolved = backend.resolve_cwd(None, false).await.unwrap();
+
+    assert!(!resolved.to_string_lossy().starts_with(r"\\?\"));
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 impl CommandBackend for HostedContractBackend {
@@ -652,6 +674,7 @@ async fn write_stdin_sends_input_to_running_process() {
     let process_id = running_result.process_id.unwrap();
 
     let mut result = None;
+    let mut stdout = String::new();
     for attempt in 0..5 {
         let completed = stdin
             .execute(
@@ -670,6 +693,7 @@ async fn write_stdin_sends_input_to_running_process() {
             .await
             .unwrap();
         result = Some(command_json(&completed));
+        stdout.push_str(&result.as_ref().unwrap().stdout);
         if result.as_ref().unwrap().status == "completed" {
             break;
         }
@@ -677,7 +701,7 @@ async fn write_stdin_sends_input_to_running_process() {
     let result = result.unwrap();
 
     assert_eq!(result.status, "completed", "{result:?}");
-    assert!(result.stdout.contains("got:hello"));
+    assert!(stdout.contains("got:hello"), "{stdout}");
 }
 
 #[tokio::test]

@@ -7,6 +7,7 @@ use serde::Deserialize;
 
 use super::super::{
     AgentReview, ReviewDesignReference, ReviewFinding, ReviewVerdict, TaskCoordinator,
+    TaskPlannerWakeRequest, TaskPlannerWakeSource,
 };
 use super::trace::validate_review_trace;
 use super::validate_review_repository;
@@ -65,18 +66,29 @@ impl TaskCoordinator {
                         .store
                         .complete_task_review(&thread_id, &reviewer.id, review)
                         .await?;
-                    if let Some(runtime) = runtime
-                        && let Err(error) =
-                            resume_planner_after_review(&runtime, &thread_id, &round).await
-                    {
-                        let message = format!(
-                            "planner continuation after review {} failed: {error}",
-                            round.id
-                        );
-                        coordinator
-                            .block_continuation_failure(&round.task_run_id, message)
-                            .await?;
-                        return Err(error);
+                    if let Some(runtime) = runtime {
+                        let wake = TaskPlannerWakeRequest {
+                            task_run_id: round.task_run_id.clone(),
+                            root_thread_id: thread_id.clone(),
+                            source: TaskPlannerWakeSource::Review {
+                                review_round_id: round.id.clone(),
+                                scope: round.scope,
+                            },
+                        };
+                        if let Err(error) =
+                            crate::studio::agent_host::materialize_task_planner_wake(
+                                &runtime,
+                                &coordinator.store,
+                                &wake,
+                            )
+                            .await
+                        {
+                            tracing::warn!(
+                                review_round_id = %round.id,
+                                error_bytes = error.to_string().len(),
+                                "Task review committed; Planner wake remains pending"
+                            );
+                        }
                     }
                     let mut output = ToolExecutionResult::<serde_json::Value>::json(round)
                         .map_err(anyhow::Error::from)?;
@@ -86,46 +98,6 @@ impl TaskCoordinator {
             },
         )
         .with_effect(ToolEffect::Read)
-    }
-}
-
-async fn resume_planner_after_review(
-    runtime: &AgentRuntimeHandle,
-    thread_id: &str,
-    round: &super::super::ReviewRoundRecord,
-) -> Result<()> {
-    let root_agent_id = crate::studio::agent_host::root_agent_id(thread_id);
-    runtime
-        .wait_until_idle(root_agent_id.clone())
-        .await
-        .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-    let thread = pl_core::ThreadId::new(thread_id.to_string())?;
-    let request = pl_core::AgentSubmitRequest::start(
-        thread,
-        format!(
-            "Review round {} completed. Read task_status and list_agents, then continue from the canonical Task phase.",
-            round.id
-        ),
-    )
-    .with_presentation(pl_core::MailboxPresentation::Hidden)
-    .with_metadata(serde_json::json!({
-        "kind": "taskReviewContinuation",
-        "taskRunId": round.task_run_id,
-        "reviewRoundId": round.id,
-        "scope": round.scope,
-    }))
-    .with_mail_id(format!("task-review-continuation:{}", round.id))
-    .with_turn_policy(pl_core::AgentTurnSubmitPolicy::StartOnly);
-    match runtime.submit(root_agent_id, request).await {
-        Ok(_) => Ok(()),
-        Err(pl_core::AgentRuntimeError::InvalidInput(reason))
-            if reason == "startTurn requires an idle Thread" =>
-        {
-            // Another input won the idle-to-start race after the review transaction committed.
-            // That turn is already prepared from the new canonical Task phase.
-            Ok(())
-        }
-        Err(error) => Err(anyhow::anyhow!(error.to_string())),
     }
 }
 

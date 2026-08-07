@@ -1,12 +1,30 @@
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
+use super::{TaskExecutorDependencyV1, TaskExecutorEvidenceV1, TaskExecutorVerificationCommandV1};
+
 /// Studio Task harness 创建 child agent 时写入 lifecycle 的可信意图类型。
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum StudioSpawnKind {
     TaskExecutor,
     TaskReviewer,
+}
+
+/// Task executor spawn 所需的结构化产品输入。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct StudioTaskExecutorIntent {
+    pub(crate) thread_id: String,
+    pub(crate) task_name: String,
+    pub(crate) scope_hints: Vec<String>,
+    pub(crate) requesting_tool_call_id: String,
+    pub(crate) subagent_constraint: String,
+    pub(crate) assignment: String,
+    pub(crate) acceptance_criteria: Vec<String>,
+    pub(crate) dependencies: Vec<TaskExecutorDependencyV1>,
+    pub(crate) evidence: Vec<TaskExecutorEvidenceV1>,
+    pub(crate) verification_commands: Vec<TaskExecutorVerificationCommandV1>,
 }
 
 /// Studio lifecycle 从 framework spawn metadata 一次解析出的产品输入。
@@ -32,23 +50,32 @@ pub(crate) struct StudioSpawnIntent {
     pub(crate) review_round_id: Option<String>,
     #[serde(default)]
     pub(crate) subagent_constraint: Option<String>,
+    #[serde(default)]
+    pub(crate) assignment: Option<String>,
+    #[serde(default)]
+    pub(crate) acceptance_criteria: Vec<String>,
+    #[serde(default)]
+    pub(crate) dependencies: Vec<TaskExecutorDependencyV1>,
+    #[serde(default)]
+    pub(crate) evidence: Vec<TaskExecutorEvidenceV1>,
+    #[serde(default)]
+    pub(crate) verification_commands: Vec<TaskExecutorVerificationCommandV1>,
 }
 
 impl StudioSpawnIntent {
-    pub(crate) fn task_executor(
-        thread_id: impl Into<String>,
-        task_name: impl Into<String>,
-        scope_hints: Vec<String>,
-        requesting_tool_call_id: impl Into<String>,
-        subagent_constraint: impl Into<String>,
-    ) -> Self {
+    pub(crate) fn task_executor(input: StudioTaskExecutorIntent) -> Self {
         Self {
             spawn_kind: Some(StudioSpawnKind::TaskExecutor),
-            studio_thread_id: Some(thread_id.into()),
-            task_name: Some(task_name.into()),
-            scope_hints,
-            requesting_tool_call_id: Some(requesting_tool_call_id.into()),
-            subagent_constraint: Some(subagent_constraint.into()),
+            studio_thread_id: Some(input.thread_id),
+            task_name: Some(input.task_name),
+            scope_hints: input.scope_hints,
+            requesting_tool_call_id: Some(input.requesting_tool_call_id),
+            subagent_constraint: Some(input.subagent_constraint),
+            assignment: Some(input.assignment),
+            acceptance_criteria: input.acceptance_criteria,
+            dependencies: input.dependencies,
+            evidence: input.evidence,
+            verification_commands: input.verification_commands,
             ..Self::default()
         }
     }
@@ -102,6 +129,12 @@ impl StudioSpawnIntent {
                 require_non_empty(self.subagent_constraint.as_deref(), "subagent constraint")?;
             }
             _ => {}
+        }
+        if role == "executor" {
+            require_non_empty(self.assignment.as_deref(), "executor assignment")?;
+            if self.verification_commands.is_empty() {
+                bail!("Task executor must have a verification contract")
+            }
         }
         if role != "executor" && !self.scope_hints.is_empty() {
             bail!("{role} must not declare scopeHints");

@@ -22,9 +22,19 @@ impl StudioStore {
         &self,
         input: AllocateExecutor,
     ) -> Result<ExecutorAllocation> {
+        let AllocateExecutor {
+            thread_id,
+            title,
+            mut scope_hints,
+            agent_id,
+            requested_by_call_id,
+        } = input;
+        let title = normalize_executor_title(&title)?;
+        scope_hints.sort();
+        scope_hints.dedup();
         let tx = self.db.begin().await?;
         let run_model = entities::task_run::Entity::find()
-            .filter(entities::task_run::Column::RootThreadId.eq(input.thread_id))
+            .filter(entities::task_run::Column::RootThreadId.eq(thread_id))
             .filter(entities::task_run::Column::Phase.is_not_in([
                 TaskRunPhase::Completed.as_str(),
                 TaskRunPhase::Blocked.as_str(),
@@ -50,6 +60,43 @@ impl StudioStore {
             .filter(entities::work_unit::Column::TaskRunId.eq(run.id.clone()))
             .all(&tx)
             .await?;
+        let scope_hints_json = serde_json::to_string(&scope_hints)?;
+        if let Some(existing_unit) = existing
+            .iter()
+            .find(|unit| unit.requested_by_call_id == requested_by_call_id)
+        {
+            if existing_unit.executor_thread_id.as_deref() != Some(agent_id.as_str())
+                || normalize_executor_title(&existing_unit.title)? != title
+                || !stored_scope_matches(existing_unit, &scope_hints)?
+            {
+                bail!("task executor call id is already owned by a different allocation");
+            }
+            let work_unit = work_unit_record(existing_unit.clone())?;
+            tx.commit().await?;
+            return Ok(ExecutorAllocation {
+                run,
+                work_unit,
+                reused: true,
+            });
+        }
+        if run.phase == TaskRunPhase::Implementing {
+            for existing_unit in existing
+                .iter()
+                .filter(|unit| is_active_work_unit(&unit.status))
+            {
+                if normalize_executor_title(&existing_unit.title)? == title
+                    && stored_scope_matches(existing_unit, &scope_hints)?
+                {
+                    let work_unit = work_unit_record(existing_unit.clone())?;
+                    tx.commit().await?;
+                    return Ok(ExecutorAllocation {
+                        run,
+                        work_unit,
+                        reused: true,
+                    });
+                }
+            }
+        }
         let active = existing
             .iter()
             .filter(|unit| is_active_work_unit(&unit.status))
@@ -57,13 +104,13 @@ impl StudioStore {
         if active.len() >= MAX_ACTIVE_EXECUTORS {
             bail!("task executor concurrency limit reached: at most 4 active executors");
         }
-        let scope_hints_json = serde_json::to_string(&input.scope_hints)?;
-        let attempt = existing
-            .iter()
-            .filter(|unit| unit.scope_hints_json == scope_hints_json)
-            .map(|unit| unit.attempt.max(0) as u32)
-            .max()
-            .unwrap_or(0)
+        let mut previous_attempt = 0;
+        for existing_unit in &existing {
+            if stored_scope_matches(existing_unit, &scope_hints)? {
+                previous_attempt = previous_attempt.max(existing_unit.attempt.max(0) as u32);
+            }
+        }
+        let attempt = previous_attempt
             .checked_add(1)
             .context("executor attempt overflow")?;
         let attempt_i32 =
@@ -76,16 +123,16 @@ impl StudioStore {
                 .join(".pure")
                 .join("worktrees")
                 .join(&run.id)
-                .join(&input.agent_id),
+                .join(&agent_id),
         )
         .to_string_lossy()
         .to_string();
-        let branch = format!("pure-task-{}-{}", run.id, input.agent_id);
+        let branch = format!("pure-task-{}-{agent_id}", run.id);
         let work_unit = work_unit_record(
             entities::work_unit::ActiveModel {
                 id: Set(work_unit_id.clone()),
                 task_run_id: Set(run.id.clone()),
-                title: Set(input.title),
+                title: Set(title),
                 status: Set(WorkUnitStatus::Pending.as_str().to_string()),
                 scope_hints_json: Set(scope_hints_json),
                 base_commit: Set(run.expected_head.clone()),
@@ -93,8 +140,8 @@ impl StudioStore {
                 branch: Set(branch),
                 worktree_disposition: Set(TaskWorktreeDisposition::Protect.as_str().to_string()),
                 attempt: Set(attempt_i32),
-                executor_thread_id: Set(Some(input.agent_id)),
-                requested_by_call_id: Set(input.requested_by_call_id),
+                executor_thread_id: Set(Some(agent_id)),
+                requested_by_call_id: Set(requested_by_call_id),
                 execution_status: Set(ThreadExecutionStatus::Queued.as_str().to_string()),
                 execution_summary: Set(None),
                 execution_error: Set(None),
@@ -110,7 +157,11 @@ impl StudioStore {
             .await?,
         )?;
         tx.commit().await?;
-        Ok(ExecutorAllocation { run, work_unit })
+        Ok(ExecutorAllocation {
+            run,
+            work_unit,
+            reused: false,
+        })
     }
 
     pub(crate) async fn activate_executor(&self, work_unit_id: &str, agent_id: &str) -> Result<()> {
@@ -164,6 +215,25 @@ impl StudioStore {
         tx.commit().await?;
         Ok(())
     }
+}
+
+fn normalize_executor_title(title: &str) -> Result<String> {
+    let normalized = title.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.is_empty() {
+        bail!("task executor title must not be empty");
+    }
+    Ok(normalized)
+}
+
+fn stored_scope_matches(
+    work_unit: &entities::work_unit::Model,
+    expected: &[String],
+) -> Result<bool> {
+    let mut stored = serde_json::from_str::<Vec<String>>(&work_unit.scope_hints_json)
+        .context("invalid executor scope hints")?;
+    stored.sort();
+    stored.dedup();
+    Ok(stored == expected)
 }
 
 fn is_active_work_unit(status: &str) -> bool {

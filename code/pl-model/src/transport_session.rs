@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde_json::{Map, Value};
 use tokio::sync::{Mutex, OwnedMutexGuard};
@@ -15,6 +16,7 @@ pub(crate) use responses_websocket::ResponsesWebSocketConnection;
 #[derive(Clone, Default)]
 pub struct ModelTransportSession {
     responses_websocket: Arc<Mutex<ResponsesWebSocketSession>>,
+    responses_http_fallback: Arc<AtomicBool>,
 }
 
 impl std::fmt::Debug for ModelTransportSession {
@@ -26,10 +28,38 @@ impl std::fmt::Debug for ModelTransportSession {
 }
 
 impl ModelTransportSession {
+    pub(crate) fn uses_responses_http_fallback(&self) -> bool {
+        self.responses_http_fallback.load(Ordering::Relaxed)
+    }
+
+    pub(crate) async fn activate_responses_http_fallback(&self) -> bool {
+        let activated = !self.responses_http_fallback.swap(true, Ordering::Relaxed);
+        if activated {
+            self.lock_responses_websocket().await.invalidate();
+        }
+        activated
+    }
+
     pub(crate) async fn lock_responses_websocket(
         &self,
     ) -> OwnedMutexGuard<ResponsesWebSocketSession> {
         Arc::clone(&self.responses_websocket).lock_owned().await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn responses_http_fallback_is_shared_only_within_one_model_session() {
+        let session = ModelTransportSession::default();
+        let clone = session.clone();
+
+        assert!(session.activate_responses_http_fallback().await);
+        assert!(clone.uses_responses_http_fallback());
+        assert!(!clone.activate_responses_http_fallback().await);
+        assert!(!ModelTransportSession::default().uses_responses_http_fallback());
     }
 }
 

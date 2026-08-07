@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
 
 use pl_model::{EffectivePromptCachePolicy, ProviderInfo, ReasoningConfig, ToolSchema};
-use pl_protocol::{Message, PromptPrefixChangedReason, PureError, ThreadPromptSnapshot};
+use pl_protocol::{
+    Message, ModelContextSnapshot, PromptPrefixChangedReason, PureError, ThreadPromptSnapshot,
+};
 
 use crate::{AgentSession, canonical_json_hash};
 
@@ -12,6 +14,7 @@ pub(crate) struct PromptCacheInput<'a> {
     pub model: &'a str,
     pub instructions: &'a str,
     pub prelude_messages: &'a [Message],
+    pub working_context: Option<&'a ModelContextSnapshot>,
     pub fixed_prefix_section_hashes: BTreeMap<String, String>,
     pub tools: &'a [ToolSchema],
     pub tool_choice: &'a str,
@@ -54,8 +57,15 @@ pub(crate) fn prepare_prompt_context(
     session: &mut AgentSession,
     input: PromptCacheInput<'_>,
 ) -> Result<Option<ThreadPromptSnapshot>, PureError> {
-    let context = session.working_context_snapshot();
-    let context_hash = canonical_json_hash(&serde_json::to_value(&context)?);
+    let current_context;
+    let context = match input.working_context {
+        Some(context) => context,
+        None => {
+            current_context = session.working_context_snapshot();
+            &current_context
+        }
+    };
+    let context_hash = canonical_json_hash(&serde_json::to_value(context)?);
     let stable_tools = stable_tool_schemas(input.tools.to_vec());
     let tool_schema_hash = canonical_json_hash(&serde_json::to_value(&stable_tools)?);
     let provider_hash = provider_hash(input.provider)?;
@@ -306,6 +316,7 @@ mod tests {
             model,
             instructions,
             prelude_messages: &[],
+            working_context: None,
             fixed_prefix_section_hashes: BTreeMap::new(),
             tools,
             tool_choice: "auto",

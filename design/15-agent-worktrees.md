@@ -117,6 +117,10 @@ released = git worktree remove + 删除分支 + 清空 durable lifecycle resourc
 - 命名：`<repo_root>/.pure/worktrees/<task_run_id>/<agent_id>/`。
 - 分支：`pure-task-<task_run_id>-<agent_id>`，经 `GitPolicy::validate_branch` 校验。
 - **`.gitignore` 必须忽略 `.pure/`**，否则 worktree 会污染主仓库索引；启用时检测并提示。
+- Windows 上持久化的 repository、Git common directory 与 worktree 路径统一使用 native
+  non-verbatim absolute representation；canonical 安全校验可以临时产生 extended path，但跨
+  Task/工具/子进程边界前必须移除 `\\?\` / `\\?\UNC\` 前缀，避免同一目录因两种表示导致
+  `strip_prefix`、Git 或依赖 cwd 的生成工具失配。
 
 ## 启用时机
 
@@ -196,6 +200,10 @@ Task child 的仓库文件访问必须使用内置工具。
   保留 durable worktree、Thread 与 directory entry，供重启对账和审计。
 - spawn 失败回滚必须尝试全部独立步骤并聚合错误；单个 `git worktree remove` 失败
   不得阻止删除分支或宿主 rollback hook。
+- `git worktree remove` 的非零退出可能已经移除 registration，只在删除物理 leaf 时失败。
+  manager 必须继续执行经过 path-safety 复核的精确 leaf fallback 与分支删除；若最终 leaf 已缺失且
+  分支删除成功，则以最终资源不变量为准报告 cleanup 成功。只有最终仍有 leaf/registration/branch
+  或任一步安全证明失败时，才聚合原始 Git 错误与后续失败并报告 cleanup failed。
 - 兜底：进程异常退出留下的孤儿 worktree 由下次启动 GC 清理（不依赖 `Drop` await）。
 
 通用 `shutdown_descendants` 级联关闭后代时仍默认走 `Discard`，但它不属于 Task

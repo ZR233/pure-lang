@@ -13,6 +13,36 @@ pub struct AssembledModelContext {
     pub working_context_tail: Option<Message>,
 }
 
+/// 冻结单个 Turn 的模型可见 working context 及其 transcript 锚点。
+///
+/// Turn 内新增的 assistant/tool history 必须出现在该锚点之后，确保模型输入
+/// 保持 append-only。上下文压缩替换 transcript 后，调用方需要显式 rebase。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TurnContextSnapshot {
+    working_context: ModelContextSnapshot,
+    history_anchor: usize,
+}
+
+impl TurnContextSnapshot {
+    /// 在当前 transcript 尾部建立 Turn 级 working-context 锚点。
+    pub fn capture(items: &[ModelContextItem], working_context: ModelContextSnapshot) -> Self {
+        Self {
+            working_context,
+            history_anchor: items.len(),
+        }
+    }
+
+    /// 返回该 Turn 冻结的模型可见 working context。
+    pub fn model_context(&self) -> &ModelContextSnapshot {
+        &self.working_context
+    }
+
+    /// transcript 被压缩或替换后，把锚点移动到新的 canonical 尾部。
+    pub fn rebase(&mut self, items: &[ModelContextItem]) {
+        self.history_anchor = items.len();
+    }
+}
+
 /// 每次 inference 从 canonical session 重建固定前缀、append-only transcript
 /// 与唯一的 working-context tail。
 #[derive(Debug, Default)]
@@ -25,12 +55,37 @@ impl ContextAssembler {
         items: &[ModelContextItem],
         working_context: &ModelContextSnapshot,
     ) -> Result<AssembledModelContext, PureError> {
+        let snapshot = TurnContextSnapshot::capture(items, working_context.clone());
+        Self::assemble_turn(base_instructions, prelude_messages, items, &snapshot)
+    }
+
+    /// 使用冻结的 Turn 快照组装 append-only 模型输入。
+    ///
+    /// # Errors
+    ///
+    /// transcript 已被替换而调用方尚未 rebase 时返回配置错误。
+    pub fn assemble_turn(
+        base_instructions: &str,
+        prelude_messages: &[Message],
+        items: &[ModelContextItem],
+        snapshot: &TurnContextSnapshot,
+    ) -> Result<AssembledModelContext, PureError> {
+        if snapshot.history_anchor > items.len() {
+            return Err(PureError::ConfigError(format!(
+                "turn context anchor {} exceeds transcript length {}; rebase after replacement",
+                snapshot.history_anchor,
+                items.len()
+            )));
+        }
         let instructions = base_instructions.trim_end().to_string();
-        let working_context_tail = render_working_context_message(working_context);
-        let mut history = items.to_vec();
+        let working_context_tail = render_working_context_message(snapshot.model_context());
+        let mut history =
+            Vec::with_capacity(items.len() + usize::from(working_context_tail.is_some()));
+        history.extend_from_slice(&items[..snapshot.history_anchor]);
         if let Some(tail) = working_context_tail.clone() {
             history.push(ModelContextItem::from(tail));
         }
+        history.extend_from_slice(&items[snapshot.history_anchor..]);
         Ok(AssembledModelContext {
             instructions,
             prelude_messages: prelude_messages.to_vec(),
@@ -118,6 +173,61 @@ mod tests {
     }
 
     #[test]
+    fn frozen_turn_context_stays_in_prefix_when_history_appends() {
+        let mut session = crate::AgentSession::from_messages(vec![crate::user_text_message("run")]);
+        session.upsert_pinned_context(
+            context_section(
+                "studio.task_executor_handoff",
+                1,
+                "Task handoff",
+                "scope=pl-model",
+            )
+            .unwrap(),
+        );
+        let snapshot =
+            TurnContextSnapshot::capture(session.items(), session.working_context_snapshot());
+        let first =
+            ContextAssembler::assemble_turn("system", &[], session.items(), &snapshot).unwrap();
+
+        session.push_assistant_response("checking".to_string(), None);
+        let second =
+            ContextAssembler::assemble_turn("system", &[], session.items(), &snapshot).unwrap();
+
+        assert!(second.history.starts_with(&first.history));
+        assert_eq!(working_context_tail_count(&second.history), 1);
+        assert_eq!(second.history.len(), first.history.len() + 1);
+    }
+
+    #[test]
+    fn turn_context_requires_rebase_after_transcript_replacement() {
+        let mut session = crate::AgentSession::from_messages(vec![
+            crate::user_text_message("one"),
+            crate::assistant_text_message("two"),
+        ]);
+        session.upsert_pinned_context(
+            context_section(
+                "studio.task_executor_handoff",
+                1,
+                "Task handoff",
+                "scope=core",
+            )
+            .unwrap(),
+        );
+        let mut snapshot =
+            TurnContextSnapshot::capture(session.items(), session.working_context_snapshot());
+        session.replace_messages(vec![crate::user_text_message("summary")]);
+
+        let error =
+            ContextAssembler::assemble_turn("system", &[], session.items(), &snapshot).unwrap_err();
+        assert!(error.to_string().contains("rebase after replacement"));
+
+        snapshot.rebase(session.items());
+        let assembled =
+            ContextAssembler::assemble_turn("system", &[], session.items(), &snapshot).unwrap();
+        assert_eq!(working_context_tail_count(&assembled.history), 1);
+    }
+
+    #[test]
     fn session_note_body_and_dynamic_metadata_do_not_change_instructions() {
         let secret = "do-not-send-note-body";
         let note = SessionNote {
@@ -142,7 +252,7 @@ mod tests {
     }
 
     #[test]
-    fn one_hundred_tool_batches_keep_one_bounded_working_context_tail() {
+    fn evidence_ledger_stays_durable_without_entering_model_context() {
         let mut session = crate::AgentSession::new();
         let working_set = crate::TurnWorkingSetHandle::default();
 
@@ -191,7 +301,7 @@ mod tests {
                 &session.working_context_snapshot(),
             )
             .unwrap();
-            assert_eq!(working_context_tail_count(&assembled.history), 1);
+            assert_eq!(working_context_tail_count(&assembled.history), 0);
         }
 
         assert_eq!(session.items().len(), 200);

@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
-#[cfg(test)]
-use sea_orm::{ActiveModelTrait, ActiveValue::Set};
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+use sea_orm::{
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
+};
 
 use crate::studio::entity as entities;
 #[cfg(test)]
@@ -103,6 +103,28 @@ impl StudioStore {
             [work_unit] => work_unit_record(work_unit.clone()).map(Some),
             _ => anyhow::bail!("executor Thread owns multiple work units"),
         }
+    }
+
+    pub(crate) async fn mark_executor_handoff_needs_attention(
+        &self,
+        executor_agent_id: &str,
+        error: &str,
+    ) -> Result<()> {
+        let work_unit = entities::work_unit::Entity::find()
+            .filter(entities::work_unit::Column::ExecutorThreadId.eq(executor_agent_id.to_string()))
+            .one(&self.db)
+            .await?
+            .context("executor work unit not found")?;
+        let mut active: entities::work_unit::ActiveModel = work_unit.into();
+        active.status = Set(WorkUnitStatus::NeedsAttention.as_str().to_string());
+        active.execution_status = Set(ThreadExecutionStatus::Failed.as_str().to_string());
+        active.execution_error = Set(Some(error.to_string()));
+        active.continuation_state = Set(ExecutorContinuationState::NeedsAttention
+            .as_str()
+            .to_string());
+        active.updated_at = Set(crate::studio::ids::unix_seconds());
+        active.update(&self.db).await?;
+        Ok(())
     }
 
     pub(crate) async fn list_pending_executor_continuations(

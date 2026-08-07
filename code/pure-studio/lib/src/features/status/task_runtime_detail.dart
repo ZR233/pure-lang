@@ -14,6 +14,7 @@ class TaskRuntimeDetail extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ConstrainedBox(
+      key: StudioDriverKeys.taskRuntime(task.runId),
       constraints: const BoxConstraints(maxHeight: 520),
       child: SingleChildScrollView(
         child: Column(
@@ -24,8 +25,13 @@ class TaskRuntimeDetail extends StatelessWidget {
               title: context.l10n.statusTaskSection,
               children: [
                 StatusDetailRow(
+                  key: StudioDriverKeys.taskPhase(task.runId, task.phase),
                   label: context.taskPhaseLabel(task.phase),
                   value: task.statusMessage ?? task.runId,
+                  valueKey: StudioDriverKeys.taskStatus(
+                    task.runId,
+                    task.statusMessage ?? '',
+                  ),
                   valueMaxLines: 2,
                 ),
                 StatusDetailRow(label: 'Task ID', value: task.runId),

@@ -71,6 +71,11 @@ impl HeadTailBuffer {
         String::from_utf8_lossy(&bytes).to_string()
     }
 
+    pub(super) fn take_display_text(&mut self) -> String {
+        let replacement = Self::new(self.max_bytes);
+        std::mem::replace(self, replacement).display_text()
+    }
+
     pub(super) fn total_bytes(&self) -> usize {
         self.head_bytes
             .saturating_add(self.tail_bytes)
@@ -144,5 +149,17 @@ mod tests {
         assert!(text.starts_with("aaaaa"));
         assert!(text.ends_with("ccccc"));
         assert!(text.contains("bytes omitted"));
+    }
+
+    #[test]
+    fn taking_display_text_drains_only_the_current_increment() {
+        let mut buffer = HeadTailBuffer::new(10);
+        buffer.push_chunk(b"first");
+
+        assert_eq!(buffer.take_display_text(), "first");
+        assert_eq!(buffer.take_display_text(), "");
+
+        buffer.push_chunk(b"second");
+        assert_eq!(buffer.take_display_text(), "second");
     }
 }

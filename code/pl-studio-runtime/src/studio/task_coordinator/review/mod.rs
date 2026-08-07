@@ -2,7 +2,7 @@ mod exit;
 pub(crate) mod prompt;
 mod trace;
 
-use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
@@ -14,6 +14,7 @@ use super::{
     TaskCoordinator, TaskRunPhase, TaskRunRecord, TaskWorktreeDisposition, ThreadExecutionStatus,
     WorkCompletionKind, WorkCompletionRecord, WorkCompletionStatus, WorkUnitRecord, WorkUnitStatus,
 };
+use crate::agent::worktree::git_compatible_path;
 use crate::tool::{
     RegisteredTool, ToolExecutionResult, ToolInputSchemaField, strict_tool_input_schema,
 };
@@ -261,6 +262,7 @@ impl TaskCoordinator {
                 role: AgentRoleId::new("reviewer")
                     .map_err(|error| anyhow::anyhow!(error.to_string()))?,
                 session: ThreadContextState::empty(),
+                initial_turn_id: None,
                 initial_message: Some(prompt),
                 metadata: serde_json::to_value(intent)?,
             })
@@ -442,10 +444,14 @@ impl ModelCompletion {
 }
 
 fn relative_worktree_locator(workspace_root: &str, worktree_path: &str) -> Result<String> {
-    let workspace_root = std::fs::canonicalize(workspace_root)
-        .context("failed to resolve Task workspace for merge candidate")?;
-    let worktree_path = std::fs::canonicalize(worktree_path)
-        .context("failed to resolve executor worktree for merge candidate")?;
+    let workspace_root = git_compatible_path(
+        std::fs::canonicalize(workspace_root)
+            .context("failed to resolve Task workspace for merge candidate")?,
+    );
+    let worktree_path = git_compatible_path(
+        std::fs::canonicalize(worktree_path)
+            .context("failed to resolve executor worktree for merge candidate")?,
+    );
     let relative = worktree_path
         .strip_prefix(&workspace_root)
         .context("executor worktree is outside the Task workspace")?;
@@ -464,9 +470,9 @@ fn relative_worktree_locator(workspace_root: &str, worktree_path: &str) -> Resul
 }
 
 fn model_worktree_locator(workspace_root: &str, worktree_path: &str) -> Option<String> {
-    let relative = Path::new(worktree_path)
-        .strip_prefix(Path::new(workspace_root))
-        .ok()?;
+    let workspace_root = git_compatible_path(PathBuf::from(workspace_root));
+    let worktree_path = git_compatible_path(PathBuf::from(worktree_path));
+    let relative = worktree_path.strip_prefix(workspace_root).ok()?;
     let components = relative
         .components()
         .map(|component| component.as_os_str().to_string_lossy().to_string())
@@ -492,14 +498,17 @@ fn provider_call_id(value: Option<&str>, tool: &str) -> Result<String> {
 
 pub(super) async fn validate_review_repository(run: &TaskRunRecord) -> Result<()> {
     let snapshot = super::git::inspect_repository(&run.workspace_root, true).await?;
-    let common = std::fs::canonicalize(&snapshot.git_common_dir)
-        .unwrap_or(snapshot.git_common_dir)
-        .to_string_lossy()
-        .replace('\\', "/");
-    let expected_common = std::fs::canonicalize(&run.git_common_dir)
-        .unwrap_or_else(|_| std::path::PathBuf::from(&run.git_common_dir))
-        .to_string_lossy()
-        .replace('\\', "/");
+    let common = git_compatible_path(
+        std::fs::canonicalize(&snapshot.git_common_dir).unwrap_or(snapshot.git_common_dir),
+    )
+    .to_string_lossy()
+    .replace('\\', "/");
+    let expected_common = git_compatible_path(
+        std::fs::canonicalize(&run.git_common_dir)
+            .unwrap_or_else(|_| std::path::PathBuf::from(&run.git_common_dir)),
+    )
+    .to_string_lossy()
+    .replace('\\', "/");
     let equal_common = if cfg!(windows) {
         common.eq_ignore_ascii_case(&expected_common)
     } else {

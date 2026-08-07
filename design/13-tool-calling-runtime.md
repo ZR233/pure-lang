@@ -100,9 +100,38 @@ Studio attach 会对活动 Task root Thread 执行一次有证据门禁的检查
 审批和 interaction 等待继续计时；该策略不改变工具终态、取消传播或 `waitCalls` 可观测计数。
 
 工具批次完成后，canonical tool result 先进入 transcript，再把全部 receipt 一次性提交到
-`AgentWorkingState` 的 Evidence Ledger。Ledger 仍最多保存 64 条、模型可见正文最多 16 KiB；
-下一次 inference 只渲染一份最新 working-context tail，旧 Ledger 版本不得作为 system message
-累积在 transcript 中。
+`AgentWorkingState` 的 Evidence Ledger。Ledger 仍最多保存 64 条、持久化正文最多 16 KiB，
+但不直接进入 provider request；同一 Turn 的模型可见 working context 在首个 inference 前冻结，
+并锚定在该 Turn 初始 transcript 之后。后续 inference 把新 assistant/tool result 追加在该锚点
+之后，不得把 working-context message 重新移动到最新 transcript 尾部；否则 Responses WebSocket
+无法复用严格前缀。上下文压缩会显式建立新锚点并使当前 continuation 失效，压缩后的后续请求再
+恢复 append-only。旧 Ledger 版本不得作为 system message 累积在 transcript 中。
+
+确定性本地只读工具失败使用版本化 failure envelope 保存类别、首次 call id、错误 hash 和有界
+摘要。相同工具、canonical 参数、workspace 与 mutation epoch 内只执行一次，重复调用返回紧凑
+duplicate receipt；任何 WorkspaceWrite、Process 或 BranchControl 尝试都会推进 mutation epoch，
+即使调用以错误结束。权限、瞬态 transport、外部副作用和未知错误不得缓存或自动重放。
+
+每次 provider response 的工具批次在调度前冻结一次 mutation epoch，批次内所有只读缓存查询
+使用同一快照。并发完成的 Process 或写工具仍立即推进真实 epoch，但只影响下一次 provider
+response；不得让同一批次的完成时序把 canonical 相同的只读调用随机分裂到不同 cache key。
+这只固定缓存事实的批次边界，不让 shell、写工具或外部副作用工具进入自动复用。
+
+成功的本地只读结果也在 Turn 内按 canonical 参数和 mutation epoch 复用，命中时只返回首次 call、
+结果 hash、原始字节数和有界摘要，不把大结果再次注入模型。任意工具只要通过 typed
+`ToolCachePolicy` 明确声明结果可缓存，同一次 provider response 内 canonical 参数完全相同的
+后续调用就直接返回 `duplicateSuppressed` receipt；每个 provider call id 仍各自获得配对结果，
+但重复 receipt 不再复制首次输出或缓存摘要。`read_file` 额外记录实际返回的行区间；后续请求完全
+落在已读区间内时返回 `coveredReadRange` receipt，只有请求包含未读行时才重新执行。shell、写工具、
+进程控制和外部副作用工具不参与这种自动复用，工具名不同的调用也不做语义猜测。
+
+与 Codex 的 tool-call 配对语义一致，不可缓存工具的每个不同 call id 都是独立调用；即使同一
+provider response 中工具名与参数完全相同，`apply_patch`、`spawn_agent`、`exec`、动态 MCP 和其他
+副作用工具也不得由通用 dispatcher 按参数吞并。运行时只拒绝同一 call id 的冲突回放。需要幂等的
+产品操作必须在自身 durable repository 中用稳定业务键实现，例如 Task executor allocation 使用
+requested call id，并可把仍 active 的同 assignment allocation 解析为既有 WorkUnit；这类复用仍
+执行工具 handler，并为每个 provider call id 返回各自的 canonical 结果。共享 runtime 不按项目
+路径、任务内容或命令文本猜测。
 
 Task executor 达到 30 分钟 `WallClock` 预算时，预算事实仍作为当前 Turn 的 typed terminal 保存，
 但 WorkUnit 不立即失败。Task coordinator 对同一 executor、Thread 和 worktree 强制执行一次
@@ -116,13 +145,16 @@ Task executor 达到 30 分钟 `WallClock` 预算时，预算事实仍作为当�
 模型与 turn 边界使用结构化 `TurnFailure` 保存失败事实。失败包含稳定类别、
 provider code、HTTP status、用户可读消息与 `RetryDisposition`；可重试变体可附带
 `retryAfterMs`。`TurnResult` 和 `AgentTurnOutcome` 必须携带同一份结构化失败，宿主产品
-不得通过解析 `reason` 文本判断是否重试。provider 内部仅在工具副作用尚未发生时重放
-完整模型请求；重试耗尽后把原始瞬态语义交给宿主调度器。
+不得通过解析 `reason` 文本判断是否重试。provider 内部仅在模型流尚未产生可见或 canonical
+事件、且工具副作用尚未发生时重放完整模型请求；重试耗尽后把原始瞬态语义交给宿主调度器。
 
 Responses WebSocket、Responses HTTP/SSE 与 Chat Completions HTTP 的限流、连接容量、
-`server_is_overloaded`、408/409/425/429、5xx 及瞬态网络错误统一映射为可重试 provider
-failure。HTTP 仅在流建立前有限重放完整请求；鉴权、权限、输入验证和协议错误保持永久失败；
-错误正文仍用于展示和日志，但不再承担控制流协议。
+`server_is_overloaded`、429、5xx、连接/超时，以及响应开始前的 connection reset、aborted、
+broken pipe 或 EOF 错误统一映射为可重试 provider
+failure。WS 只在首个 canonical 流事件前重放一次，失败后对当前 transport session 熔断到 HTTP；
+HTTP 只在流对象建立前重放两次，两个 transport 都不得在流开始后 replay。重试使用带稳定
+0.9–1.1 抖动的 200ms 指数退避，provider `Retry-After` 优先并按 30 秒封顶；鉴权、权限、输入
+验证、请求构造、请求体和协议错误保持永久失败。错误正文仍用于展示和日志，但不再承担控制流协议。
 
 工具调度层使用轻量 runtime envelope 统一执行结果：
 
@@ -154,11 +186,22 @@ provider 输出的 function tool arguments 必须是合法 JSON，并由 `pl-mod
 - `processId`：后台进程 id；仅当命令仍可继续观察或写入时存在。
 - `exitCode`：进程已退出时的退出码，无法取得时为 `null`。
 - `timedOut`：是否因 `timeoutSeconds` 触发终止。
-- `stdout` / `stderr`：按 `maxOutputChars` 或默认 head/tail 预算截断后的文本。
+- `stdout` / `stderr`：按 `maxOutputChars` 或默认 head/tail 预算截断后的新增文本。首次
+  `exec` 快照领取启动后已产生的输出；后续 `write_stdin` 只领取前一模型快照之后的增量，
+  不重复返回累计正文。
 - `outputFile`：完整 stdout/stderr 文件路径。
 - `message`：面向模型的下一步提示。
 
 当 `exec` 在 `yieldTimeMs` 内未完成时，result 使用 `running` 状态并带 `processId`。后续模型必须用 `write_stdin` 携带该 `processId` 发送输入或传空 `chars` 轮询，不应重复执行同一条 `exec` 命令。命令管理器只有在子进程退出且 stdout/stderr 管道都已读到 EOF、完整输出文件已写入 workspace 后，才返回 `completed`、`failed`、`timedOut` 或 `interrupted` 终态并释放 `processId`；如果子进程已退出但尾部输出仍在排空，结果仍保持 `running` 并提示继续轮询。需要完整输出时，模型应使用文件读取工具读取 `outputFile`，不要要求命令工具把大输出完整塞回上下文。`write_stdin` 找不到 live process、进程数量达到上限、stdin 写入失败或后台命令已被终止时，应返回可恢复错误，让模型等待、轮询或解释当前状态。
+
+空 `chars` 的正数等待统一至少为 10 秒，并在进程终态时提前返回；显式 `0` 仍用于立即快照。
+写入非空 stdin 保留调用方请求的短等待，避免交互命令失去响应性。该退避属于通用工具运行时，
+不由提示词或验收 harness 猜测项目命令。
+
+模型快照领取增量与 stdout/stderr reader 使用同一进程状态锁；并发轮询至多由一个调用领取同一
+片段，不重复也不丢失。增量缓冲保持有界 head/tail，超过模型预算的正文只在 `outputFile` 保留。
+进程只有在 child 退出且两个输出流关闭后才进入终态，因此最后一次终态快照仍会领取尚未返回的
+尾部输出。累计字节数、output revision 和 artifact 收集继续基于完整进程输出，而不是增量片段。
 
 Studio 可在 `exec` 子进程仍运行时看到 stdout/stderr chunk。命令管理器更新内存截断缓冲并
 递增 Item revision，再把 chunk 作为原 `exec` toolCall Item 的 `tool.result` delta 发布，同时
@@ -171,6 +214,11 @@ ThreadActor 内存；Turn/Item terminal 和 Interaction 变化必须在单库事
 replay journal。
 
 Windows 本地 backend 上 `exec.command` 的默认宿主 shell 是 PowerShell：运行时先查找 `pwsh.exe`，再查找 `powershell.exe`，都不可用时才使用 `cmd.exe /C`。PowerShell 命令以 `-NoProfile -Command` 执行，并注入 UTF-8 输出设置；这只影响命令字符串的宿主 shell，不改变 `exec` / `write_stdin` 的公开 schema、审批策略或 JSON 结果字段。
+
+Windows 的安全校验可以在内部使用 canonical path，但传给本地子进程的 workspace 与 cwd 必须
+规范为 native non-verbatim 路径，不能把 `\\?\` / `\\?\UNC\` 表示泄漏给依赖当前目录的构建
+工具。规范化沿用 Codex 的 `dunce::canonicalize` 语义：保留 canonical identity，同时消除普通
+drive/UNC 路径的 extended prefix；权限判断仍在规范化前后使用同一可信 workspace 边界。
 
 `spawn_agent`、`report_progress`、`send_message`、`interrupt_agent`、`list_agents`、
 `wait_agents`、`read_agent_session` 和 `close_agent` 的模型可见输出必须由 pl-core
@@ -198,6 +246,13 @@ hint 是规范仓库相对路径，并将可信内部 intent 交给 Studio lifec
 revision 和 Task HEAD 的 reviewer intent。这些工具都创建只属于新 agent 的 child Thread，
 不使用 `spawn_agent.forkTurns`，但仍复用 AgentRuntime 的容量、repository、lifecycle saga、
 Turn 启动与失败补偿。
+
+Task executor 使用 fresh session，不复制 planner transcript。Task harness 在 allocation 后构造
+版本化 `TaskExecutorHandoffV1`，把确认后的 Task plan、assignment、WorkUnit/HEAD、scope、验收
+条件、依赖、带定位信息的证据、typed 验证命令和交付契约写入
+`studio.task_executor_handoff` pinned section；该
+section 与 child 初始 session 一起持久化。后续 Turn 必须从 durable session 和 WorkUnit 校验该
+handoff，缺失、损坏或 owner/HEAD 不匹配时 fail closed，不回退到重新读取 planner 历史。
 
 `update_todo_list` 是 Codex `update_plan` 风格的内置 checklist 工具，root agent 与 subagent 都可用，
 且不代表 Plan Item。工具输入是完整快照：`explanation?: string` 与

@@ -78,6 +78,7 @@ TaskRuntimeView _taskRuntimeFromFrb(frb.BridgeTaskRuntimeDto task) {
           continuationState: unit.continuationState,
           continuationSourceTurnId: unit.continuationSourceTurnId,
           continuationRevision: unit.continuationRevision,
+          executorProgressRevision: unit.executorProgressRevision,
         ),
     ],
     completions: [

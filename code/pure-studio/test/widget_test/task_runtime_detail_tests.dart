@@ -19,6 +19,20 @@ void registerTaskRuntimeDetailTests() {
     );
 
     expect(find.text('Task ID'), findsOneWidget);
+    expect(
+      find.byKey(StudioDriverKeys.taskRuntime('task-run-stop-origin')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(
+        StudioDriverKeys.taskPhase('task-run-stop-origin', 'stopping'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(StudioDriverKeys.taskStatus('task-run-stop-origin', '正在停止')),
+      findsOneWidget,
+    );
     expect(find.text('task-run-stop-origin'), findsOneWidget);
     expect(find.text('Stop · generation 3'), findsOneWidget);
     expect(find.text('UserRequest: 用户点击停止'), findsOneWidget);
@@ -102,6 +116,75 @@ void registerTaskRuntimeDetailTests() {
     expect(find.text('PlannerDecision: 计划无法继续'), findsOneWidget);
     expect(find.textContaining('UserRequest'), findsNothing);
   });
+
+  testWidgets('production status bar exposes durable task driver keys', (
+    tester,
+  ) async {
+    final task = _stoppedTask(
+      origin: 'runtimeFailure',
+      reason: 'continuation failed',
+      generation: 5,
+    );
+    final thread = StudioThread(
+      id: 'session-1',
+      projectId: 'project-1',
+      title: 'Session',
+      mode: StudioMode.task,
+      updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        child: _localizedApp(
+          home: Scaffold(
+            body: ThreadStatusBar(
+              view: StatusBarView(
+                thread: thread,
+                runtime: _testRuntime().copyWith(task: task),
+                permissionMode: PermissionMode.requestApproval,
+                providers: const [],
+                roles: const [],
+                isBusy: true,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(StudioDriverKeys.taskRuntime(task.runId)),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(StudioDriverKeys.taskPhase(task.runId, task.phase)),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(
+        StudioDriverKeys.taskStatus(task.runId, task.statusMessage ?? ''),
+      ),
+      findsOneWidget,
+    );
+    final snapshot =
+        jsonDecode(StudioDriverState.snapshotJson()) as Map<String, dynamic>;
+    final taskSnapshot = snapshot['task'] as Map<String, dynamic>;
+    expect(taskSnapshot['runId'], task.runId);
+    expect(taskSnapshot['phase'], task.phase);
+    expect(taskSnapshot['statusMessage'], task.statusMessage);
+    expect(taskSnapshot['workUnits'], hasLength(1));
+    final workUnitSnapshot =
+        (taskSnapshot['workUnits'] as List<dynamic>).single
+            as Map<String, dynamic>;
+    expect(workUnitSnapshot['budgetSliceCount'], 4);
+    expect(workUnitSnapshot['budgetSliceLimit'], 4);
+    expect(workUnitSnapshot['continuationRevision'], '7');
+    expect(workUnitSnapshot['budgetLimit'], isNotNull);
+    expect(taskSnapshot['completions'], hasLength(1));
+    expect(taskSnapshot['merges'], hasLength(1));
+    expect(taskSnapshot['reviews'], hasLength(1));
+  });
 }
 
 TaskRuntimeView _stoppedTask({
@@ -141,6 +224,7 @@ TaskRuntimeView _stoppedTask({
       continuationState: 'needsAttention',
       continuationSourceTurnId: 'turn-4',
       continuationRevision: BigInt.from(7),
+      executorProgressRevision: BigInt.from(42),
     ),
   ],
   completions: [

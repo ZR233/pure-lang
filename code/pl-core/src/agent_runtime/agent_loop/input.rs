@@ -38,7 +38,9 @@ where
             return Ok(existing);
         }
         let live_turn = self.active.as_ref().and_then(|active| {
-            (!active.cancelling && active.thread_id == request.thread_id)
+            (request.turn_policy != AgentTurnSubmitPolicy::StartOrQueue
+                && !active.cancelling
+                && active.thread_id == request.thread_id)
                 .then(|| (active.turn_id.clone(), active.steer_sender.clone()))
         });
         match request.turn_policy {
@@ -53,6 +55,7 @@ where
                 ));
             }
             AgentTurnSubmitPolicy::StartOrSteer
+            | AgentTurnSubmitPolicy::StartOrQueue
             | AgentTurnSubmitPolicy::StartOnly
             | AgentTurnSubmitPolicy::SteerOnly => {}
         }
@@ -70,6 +73,7 @@ where
             message: request.message,
             presentation: request.presentation,
             metadata: request.metadata,
+            queue_coalescing_key: request.queue_coalescing_key,
             delivery_state: Default::default(),
             queued_at: unix_timestamp(),
         };
@@ -145,6 +149,7 @@ where
             message: request.message,
             presentation: request.presentation,
             metadata: request.metadata,
+            queue_coalescing_key: None,
             mail_id: request.mail_id,
             turn_policy: AgentTurnSubmitPolicy::StartOrSteer,
         })

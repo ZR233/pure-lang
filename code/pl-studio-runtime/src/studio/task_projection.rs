@@ -8,9 +8,7 @@ use crate::{
 
 use super::{
     StudioStore,
-    task_coordinator::{
-        MergeRecord, ReviewRoundRecord, TaskRunRecord, WorkCompletionRecord, WorkUnitRecord,
-    },
+    task_coordinator::{MergeRecord, ReviewRoundRecord, TaskRunRecord, WorkCompletionRecord},
 };
 
 pub(crate) async fn load_task_runtime(
@@ -23,18 +21,58 @@ pub(crate) async fn load_task_runtime(
     else {
         return Ok(None);
     };
+    let work_units = store.list_work_units(&run.id).await?;
+    let mut work_unit_runtimes = Vec::with_capacity(work_units.len());
+    for unit in work_units {
+        let executor_progress_revision = if let Some(executor_thread_id) = &unit.executor_thread_id
+        {
+            store
+                .read_thread_runtime_revision(executor_thread_id)
+                .await?
+        } else {
+            0
+        };
+        work_unit_runtimes.push(StudioTaskWorkUnitRuntime {
+            id: unit.id,
+            title: unit.title,
+            status: unit.status.as_str().to_string(),
+            worktree_path: unit.worktree_path,
+            branch: unit.branch,
+            agent_id: unit.executor_thread_id,
+            execution_status: unit.execution_status.as_str().to_string(),
+            execution_error: unit.execution_error,
+            budget_limit: unit.budget_limit.map(|limit| StudioBudgetLimitRuntime {
+                kind: limit.kind.as_str().to_string(),
+                usage: StudioBudgetUsageRuntime {
+                    model_steps: limit.usage.model_steps,
+                    tool_calls: limit.usage.tool_calls,
+                    wait_calls: limit.usage.wait_calls,
+                    elapsed_ms: limit.usage.elapsed_ms,
+                },
+            }),
+            budget_slice_count: unit.budget_slice_count,
+            budget_slice_limit: crate::studio::task_coordinator::MAX_EXECUTOR_BUDGET_SLICES,
+            continuation_state: unit.continuation_state.as_str().to_string(),
+            continuation_source_turn_id: unit.continuation_source_turn_id,
+            continuation_revision: unit.continuation_revision,
+            executor_progress_revision,
+        });
+    }
+    let completions = store.list_work_completions(&run.id).await?;
+    let merges = store.list_merge_records(&run.id).await?;
+    let reviews = store.list_review_rounds(&run.id).await?;
     Ok(Some(studio_task_runtime(
-        run.clone(),
-        store.list_work_units(&run.id).await?,
-        store.list_work_completions(&run.id).await?,
-        store.list_merge_records(&run.id).await?,
-        store.list_review_rounds(&run.id).await?,
+        run,
+        work_unit_runtimes,
+        completions,
+        merges,
+        reviews,
     )))
 }
 
 fn studio_task_runtime(
     run: TaskRunRecord,
-    work_units: Vec<WorkUnitRecord>,
+    work_units: Vec<StudioTaskWorkUnitRuntime>,
     completions: Vec<WorkCompletionRecord>,
     merges: Vec<MergeRecord>,
     reviews: Vec<ReviewRoundRecord>,
@@ -52,33 +90,7 @@ fn studio_task_runtime(
             .stop_requested_reason
             .map(|reason| reason.as_str().to_string()),
         task_generation: run.task_generation,
-        work_units: work_units
-            .iter()
-            .map(|unit| StudioTaskWorkUnitRuntime {
-                id: unit.id.clone(),
-                title: unit.title.clone(),
-                status: unit.status.as_str().to_string(),
-                worktree_path: unit.worktree_path.clone(),
-                branch: unit.branch.clone(),
-                agent_id: unit.executor_thread_id.clone(),
-                execution_status: unit.execution_status.as_str().to_string(),
-                execution_error: unit.execution_error.clone(),
-                budget_limit: unit.budget_limit.map(|limit| StudioBudgetLimitRuntime {
-                    kind: limit.kind.as_str().to_string(),
-                    usage: StudioBudgetUsageRuntime {
-                        model_steps: limit.usage.model_steps,
-                        tool_calls: limit.usage.tool_calls,
-                        wait_calls: limit.usage.wait_calls,
-                        elapsed_ms: limit.usage.elapsed_ms,
-                    },
-                }),
-                budget_slice_count: unit.budget_slice_count,
-                budget_slice_limit: crate::studio::task_coordinator::MAX_EXECUTOR_BUDGET_SLICES,
-                continuation_state: unit.continuation_state.as_str().to_string(),
-                continuation_source_turn_id: unit.continuation_source_turn_id.clone(),
-                continuation_revision: unit.continuation_revision,
-            })
-            .collect(),
+        work_units,
         completions: completions
             .into_iter()
             .map(|completion| StudioTaskCompletionRuntime {

@@ -10,7 +10,7 @@ use tokio::sync::Mutex;
 
 use super::PARENT_HISTORY_MARKER;
 use super::git::git_output;
-use super::sse::{final_text, tool_call};
+use super::sse::{final_text, repeated_tool_call, tool_call};
 
 const INITIAL_DESIGN_PATCH: &str = r#"*** Begin Patch
 *** Add File: design/task-flow.md
@@ -217,14 +217,19 @@ async fn planner_response(state: &ScriptState, step: usize) -> Result<(&'static 
             ),
         ),
         3 => (
-            "task_spawn_executor",
-            tool_call(
+            "task_spawn_executor(exact duplicate)",
+            repeated_tool_call(
                 "spawn-executor",
                 "task_spawn_executor",
                 serde_json::json!({
                     "taskName": "offline_executor",
                     "message": "Create src/feature.txt with the exact required content, commit it, verify it, and report the completion for review.",
-                    "scopeHints": ["design"]
+                    "scopeHints": ["design"],
+                    "verificationCommands": [{
+                        "command": "git diff --check",
+                        "cwd": ".",
+                        "purpose": "verify the patch has no whitespace errors"
+                    }]
                 }),
             ),
         ),
@@ -560,6 +565,13 @@ fn request_role(request: &serde_json::Value) -> Result<ScriptRole> {
 }
 
 fn validate_request_step(request: &serde_json::Value, role: ScriptRole, step: usize) -> Result<()> {
+    if role == ScriptRole::Planner
+        && step == 4
+        && !latest_function_call_output(request)
+            .is_some_and(|output| output.contains("\"reused\":true"))
+    {
+        bail!("the repeated executor allocation did not resolve to the durable WorkUnit");
+    }
     if role == ScriptRole::Executor && step == 0 {
         let request_text = request.to_string();
         if !request_text.contains("design") || !request_text.contains("scopeHints") {
@@ -591,7 +603,7 @@ fn validate_planner_spawn_contract(tools: &[serde_json::Value]) -> Result<()> {
         .iter()
         .filter_map(serde_json::Value::as_str)
         .collect::<BTreeSet<_>>();
-    if required != BTreeSet::from(["message", "taskName"]) {
+    if required != BTreeSet::from(["message", "taskName", "verificationCommands"]) {
         bail!("task_spawn_executor has unexpected required fields: {required:?}");
     }
     if executor_schema["properties"].get("scopeHints").is_none() {

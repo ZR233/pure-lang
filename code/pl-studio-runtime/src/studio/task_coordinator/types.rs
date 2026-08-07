@@ -365,6 +365,7 @@ pub(crate) enum ExecutorContinuationState {
     None,
     Compacting,
     PendingStart,
+    PlannerWakePending,
     NeedsAttention,
 }
 
@@ -393,6 +394,7 @@ impl ExecutorContinuationState {
             Self::None => "none",
             Self::Compacting => "compacting",
             Self::PendingStart => "pendingStart",
+            Self::PlannerWakePending => "plannerWakePending",
             Self::NeedsAttention => "needsAttention",
         }
     }
@@ -402,8 +404,44 @@ impl ExecutorContinuationState {
             "none" => Some(Self::None),
             "compacting" => Some(Self::Compacting),
             "pendingStart" => Some(Self::PendingStart),
+            "plannerWakePending" => Some(Self::PlannerWakePending),
             "needsAttention" => Some(Self::NeedsAttention),
             _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum TaskPlannerWakeSource {
+    Review {
+        review_round_id: String,
+        scope: ReviewScope,
+    },
+    ExecutorTerminal {
+        work_unit_id: String,
+        executor_thread_id: String,
+        source_turn_id: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TaskPlannerWakeRequest {
+    pub(crate) task_run_id: String,
+    pub(crate) root_thread_id: String,
+    pub(crate) source: TaskPlannerWakeSource,
+}
+
+impl TaskPlannerWakeRequest {
+    pub(crate) fn mail_id(&self) -> String {
+        match &self.source {
+            TaskPlannerWakeSource::Review {
+                review_round_id, ..
+            } => format!("task-review-continuation:{review_round_id}"),
+            TaskPlannerWakeSource::ExecutorTerminal {
+                work_unit_id,
+                source_turn_id,
+                ..
+            } => format!("task-executor-terminal:{work_unit_id}:{source_turn_id}"),
         }
     }
 }

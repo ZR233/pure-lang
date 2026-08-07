@@ -239,12 +239,14 @@ class StatusDetailRow extends StatelessWidget {
     required this.label,
     required this.value,
     this.valueMaxLines = 1,
+    this.valueKey,
     super.key,
   });
 
   final String label;
   final String value;
   final int valueMaxLines;
+  final Key? valueKey;
 
   @override
   Widget build(BuildContext context) {
@@ -269,6 +271,7 @@ class StatusDetailRow extends StatelessWidget {
             flex: 2,
             child: Text(
               value,
+              key: valueKey,
               maxLines: valueMaxLines,
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.right,

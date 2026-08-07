@@ -167,7 +167,7 @@ void registerShellSettingsTests() {
       path,
     );
 
-    await tester.tap(find.byKey(StudioDriverKeys.projectPathSubmit));
+    await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
     expect(api.openedProjectPath, path);
     expect(find.byKey(StudioDriverKeys.projectPathDialog), findsNothing);
@@ -491,7 +491,7 @@ void registerShellSettingsTests() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('active task locks mode without a status phase readout', (
+  testWidgets('active task locks mode and exposes the status phase', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(760, 720);
@@ -551,7 +551,21 @@ void registerShellSettingsTests() {
         of: find.byType(ThreadStatusBar),
         matching: find.text('Implementing'),
       ),
-      findsNothing,
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(StudioDriverKeys.taskRuntime('task-run-1')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(StudioDriverKeys.taskPhase('task-run-1', 'implementing')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(
+        StudioDriverKeys.taskStatus('task-run-1', 'Executor delivery ready'),
+      ),
+      findsOneWidget,
     );
     expect(tester.takeException(), isNull);
     expect(

@@ -1,9 +1,12 @@
 use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use async_openai::Client;
 use async_openai::config::Config;
 use async_openai::types::stream::StreamResponse;
+use futures::StreamExt;
 use pl_protocol::{PureError, Result};
 use pl_trace::AgentEventSender;
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderName, HeaderValue};
@@ -38,6 +41,35 @@ mod provider_error;
 mod responses_websocket;
 
 use provider_error::openai_error_to_pure;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OpenAiTransport {
+    ResponsesWebSocket,
+    Http,
+}
+
+impl OpenAiTransport {
+    fn label(self) -> &'static str {
+        match self {
+            Self::ResponsesWebSocket => "WebSocket",
+            Self::Http => "HTTP",
+        }
+    }
+
+    fn trace_label(self) -> &'static str {
+        match self {
+            Self::ResponsesWebSocket => "ws",
+            Self::Http => "http",
+        }
+    }
+
+    fn max_retries(self) -> u32 {
+        match self {
+            Self::ResponsesWebSocket => RESPONSES_WEBSOCKET_MAX_RETRIES,
+            Self::Http => OPENAI_HTTP_MAX_RETRIES,
+        }
+    }
+}
 
 impl OpenAiProvider {
     pub(crate) fn new(info: ProviderInfo, models: Vec<ModelInfo>) -> Result<Self> {
@@ -86,64 +118,93 @@ impl OpenAiProvider {
         request: CompletionRequest,
         event_tx: AgentEventSender,
     ) -> Result<CompletionResponse> {
-        let websocket_retries_enabled = self.info.protocol == ProviderWireProtocol::Responses
-            && self.info.connection_mode == ProviderConnectionMode::WebSocket;
-        let max_retries = if websocket_retries_enabled {
-            RESPONSES_WEBSOCKET_MAX_RETRIES
-        } else {
-            OPENAI_HTTP_MAX_RETRIES
-        };
         let original_trace = request.trace.clone();
-        let mut retry_number = 0_u32;
+        let retry_jitter_key = original_trace
+            .as_ref()
+            .map(|trace| trace.inference_id.as_str())
+            .unwrap_or(request.model.as_str())
+            .to_string();
+        let mut attempt_number = 0_u32;
+        let mut transport_retry_number = 0_u32;
 
         loop {
+            let transport = self.active_transport(&request);
+            let max_retries = transport.max_retries();
             let mut attempt_request = request.clone();
-            if retry_number > 0
+            if attempt_number > 0
                 && let Some(trace) = attempt_request.trace.as_mut()
             {
                 let original_inference_id = original_trace
                     .as_ref()
                     .map(|trace| trace.inference_id.as_str())
                     .unwrap_or(trace.inference_id.as_str());
-                let transport = if websocket_retries_enabled {
-                    "ws"
-                } else {
-                    "http"
-                };
+                let transport = transport.trace_label();
                 trace.inference_id =
-                    format!("{original_inference_id}-{transport}-retry-{retry_number}");
+                    format!("{original_inference_id}-{transport}-retry-{attempt_number}");
             }
             let trace = attempt_request.trace.clone();
             let (result, retry_allowed) = match self.stream_events(attempt_request).await {
-                Ok(event_stream) => (
-                    collect_completion_event_stream(event_stream, &event_tx, trace).await,
-                    websocket_retries_enabled,
-                ),
+                Ok(event_stream) => {
+                    let stream_started = Arc::new(AtomicBool::new(false));
+                    let tracked_stream: CompletionEventStream = Box::pin(event_stream.inspect({
+                        let stream_started = Arc::clone(&stream_started);
+                        move |event| {
+                            if event.is_ok() {
+                                stream_started.store(true, Ordering::Release);
+                            }
+                        }
+                    }));
+                    let result =
+                        collect_completion_event_stream(tracked_stream, &event_tx, trace).await;
+                    let retry_allowed = transport == OpenAiTransport::ResponsesWebSocket
+                        && !stream_started.load(Ordering::Acquire);
+                    (result, retry_allowed)
+                }
                 Err(error) => (Err(error), true),
             };
             let Err(error) = result else {
                 return result;
             };
-            if !retry_allowed
-                || !error.is_transient_model_transport()
-                || retry_number >= max_retries
-            {
+            if !retry_allowed || !error.is_transient_model_transport() {
                 return Err(error);
             }
 
-            retry_number += 1;
-            let delay = model_request_retry_delay(retry_number, error.retry_after_ms());
-            let transport = if websocket_retries_enabled {
-                "WebSocket"
-            } else {
-                "HTTP"
-            };
+            if transport_retry_number >= max_retries {
+                if transport == OpenAiTransport::ResponsesWebSocket {
+                    let activated = request
+                        .transport_session
+                        .activate_responses_http_fallback()
+                        .await;
+                    tracing::warn!(
+                        provider = %self.info.name,
+                        from_transport = transport.label(),
+                        fallback_transport = OpenAiTransport::Http.label(),
+                        fallback_reason = "retryBudgetExhausted",
+                        fallback_activated = activated,
+                        retries = transport_retry_number,
+                        error_bytes = error.to_string().len(),
+                        "Responses WebSocket 重试预算耗尽，当前模型会话切换到 HTTP"
+                    );
+                    attempt_number += 1;
+                    transport_retry_number = 0;
+                    continue;
+                }
+                return Err(error);
+            }
+
+            transport_retry_number += 1;
+            attempt_number += 1;
+            let delay = model_request_retry_delay(
+                transport_retry_number,
+                error.retry_after_ms(),
+                &retry_jitter_key,
+            );
             let (provider_code, http_status) =
                 error.transient_model_metadata().unwrap_or((None, None));
             tracing::warn!(
                 provider = %self.info.name,
-                transport,
-                retry_number,
+                transport = transport.label(),
+                retry_number = transport_retry_number,
                 max_retries,
                 delay_ms = delay.as_millis(),
                 provider_code,
@@ -153,6 +214,16 @@ impl OpenAiProvider {
             );
             tokio::time::sleep(delay).await;
         }
+    }
+
+    fn active_transport(&self, request: &CompletionRequest) -> OpenAiTransport {
+        if self.info.protocol == ProviderWireProtocol::Responses
+            && self.info.connection_mode == ProviderConnectionMode::WebSocket
+            && !request.transport_session.uses_responses_http_fallback()
+        {
+            return OpenAiTransport::ResponsesWebSocket;
+        }
+        OpenAiTransport::Http
     }
 
     pub(crate) fn stream_events(
@@ -166,6 +237,7 @@ impl OpenAiProvider {
         let info = self.info.clone();
         let model_info = self.model_info(&request.model);
         let connection_key = self.connection_fingerprint(&request.model);
+        let transport = self.active_transport(&request);
         async move {
             let bearer = info.bearer_token.clone();
             let token = get_auth_token(bearer).await?;
@@ -183,7 +255,7 @@ impl OpenAiProvider {
                 request.model = api_model.clone();
             }
             let body = protocol.build_request(&request, &model_info)?;
-            if info.connection_mode == ProviderConnectionMode::WebSocket {
+            if transport == OpenAiTransport::ResponsesWebSocket {
                 let OpenAiRequestBody::Responses(body) = body else {
                     return Err(PureError::ConfigError(
                         "web_socket connection mode requires the Responses API".to_string(),

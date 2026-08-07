@@ -3,7 +3,8 @@ use std::path::PathBuf;
 use crate::{PureError, Result as PureResult, WorktreeCreateSpec};
 use anyhow::Result;
 
-use super::super::{AllocateExecutor, TaskCoordinator};
+use super::super::{AllocateExecutor, ExecutorAllocation, TaskCoordinator};
+use super::{TaskExecutorHandoffInput, TaskExecutorHandoffV1};
 use crate::studio::task_coordinator::scope_hint::ScopeHint;
 
 /// Studio Task 产品层为一次 child spawn 固定的业务输入。
@@ -16,6 +17,11 @@ pub(crate) struct StudioTaskSpawnRequest {
     pub(crate) scope_hints: Vec<String>,
     pub(crate) requested_by_call_id: String,
     pub(crate) review_round_id: Option<String>,
+    pub(crate) assignment: Option<String>,
+    pub(crate) acceptance_criteria: Vec<String>,
+    pub(crate) dependencies: Vec<super::TaskExecutorDependencyV1>,
+    pub(crate) evidence: Vec<super::TaskExecutorEvidenceV1>,
+    pub(crate) verification_commands: Vec<super::TaskExecutorVerificationCommandV1>,
 }
 
 /// Studio Task 在 framework saga prepare 阶段预留的资源事实。
@@ -23,6 +29,7 @@ pub(crate) struct StudioTaskSpawnRequest {
 pub(crate) struct StudioTaskSpawnPreparation {
     worktree: Option<WorktreeCreateSpec>,
     lifecycle_token: Option<String>,
+    initial_context: Vec<pl_core::PinnedContextSection>,
 }
 
 impl StudioTaskSpawnPreparation {
@@ -30,6 +37,7 @@ impl StudioTaskSpawnPreparation {
         Self {
             worktree: None,
             lifecycle_token: None,
+            initial_context: Vec::new(),
         }
     }
 
@@ -37,13 +45,19 @@ impl StudioTaskSpawnPreparation {
         Self {
             worktree: None,
             lifecycle_token: Some(token.into()),
+            initial_context: Vec::new(),
         }
     }
 
-    fn with_worktree_and_token(worktree: WorktreeCreateSpec, token: impl Into<String>) -> Self {
+    fn with_worktree_and_token(
+        worktree: WorktreeCreateSpec,
+        token: impl Into<String>,
+        initial_context: Vec<pl_core::PinnedContextSection>,
+    ) -> Self {
         Self {
             worktree: Some(worktree),
             lifecycle_token: Some(token.into()),
+            initial_context,
         }
     }
 
@@ -53,6 +67,10 @@ impl StudioTaskSpawnPreparation {
 
     pub(crate) fn lifecycle_token(&self) -> Option<&str> {
         self.lifecycle_token.as_deref()
+    }
+
+    pub(crate) fn initial_context(&self) -> &[pl_core::PinnedContextSection] {
+        &self.initial_context
     }
 }
 
@@ -95,31 +113,39 @@ impl TaskCoordinator {
     ) -> PureResult<StudioTaskSpawnPreparation> {
         let scope_hints = normalize_scope_hints(&request.scope_hints)
             .map_err(|error| spawn_error(error.to_string()))?;
-        let _mutation_guard = self.lock_branch_mutation().await;
-        let _allocation_guard = self.allocation_lock.lock().await;
-        let run = self
-            .store
-            .read_active_task_run_for_root_thread(&request.root_thread_id)
-            .await
-            .map_err(store_spawn_error)?;
-        self.ensure_executor_design_contract(&run)
-            .map_err(store_spawn_error)?;
         let allocation = self
-            .store
-            .allocate_executor(AllocateExecutor {
+            .reserve_executor_spawn(AllocateExecutor {
                 thread_id: request.root_thread_id.clone(),
                 title: request.task_name.clone(),
                 scope_hints,
                 agent_id: request.agent_id.clone(),
                 requested_by_call_id: request.requested_by_call_id.clone(),
             })
-            .await
-            .map_err(store_spawn_error)?;
-        debug_assert_eq!(
-            allocation.work_unit.executor_thread_id.as_deref(),
-            Some(request.agent_id.as_str())
-        );
+            .await?;
+        if allocation.work_unit.executor_thread_id.as_deref() != Some(request.agent_id.as_str()) {
+            return Err(spawn_error(
+                "executor spawn identity does not match the canonical active allocation",
+            ));
+        }
         let work_unit_id = allocation.work_unit.id.clone();
+        let assignment = request
+            .assignment
+            .clone()
+            .ok_or_else(|| spawn_error("executor spawn has no structured assignment"))?;
+        let handoff = TaskExecutorHandoffV1::new(
+            &allocation.run,
+            &allocation.work_unit,
+            TaskExecutorHandoffInput {
+                parent_thread_id: request.root_thread_id.clone(),
+                assignment,
+                acceptance_criteria: request.acceptance_criteria.clone(),
+                dependencies: request.dependencies.clone(),
+                evidence: request.evidence.clone(),
+                verification_commands: request.verification_commands.clone(),
+            },
+        )
+        .to_context_section()
+        .map_err(|error| spawn_error(error.to_string()))?;
         Ok(StudioTaskSpawnPreparation::with_worktree_and_token(
             WorktreeCreateSpec {
                 repo_root: PathBuf::from(&allocation.run.workspace_root),
@@ -128,7 +154,28 @@ impl TaskCoordinator {
                 base_commit: allocation.work_unit.base_commit,
             },
             work_unit_id,
+            vec![handoff],
         ))
+    }
+
+    pub(crate) async fn reserve_executor_spawn(
+        &self,
+        input: AllocateExecutor,
+    ) -> PureResult<ExecutorAllocation> {
+        let root_thread_id = input.thread_id.clone();
+        let _mutation_guard = self.lock_branch_mutation().await;
+        let _allocation_guard = self.allocation_lock.lock().await;
+        let run = self
+            .store
+            .read_active_task_run_for_root_thread(&root_thread_id)
+            .await
+            .map_err(store_spawn_error)?;
+        self.ensure_executor_design_contract(&run)
+            .map_err(store_spawn_error)?;
+        self.store
+            .allocate_executor(input)
+            .await
+            .map_err(store_spawn_error)
     }
 
     async fn prepare_reviewer_spawn(
