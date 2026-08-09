@@ -204,6 +204,35 @@ Task phase、delivery、review、merge record、worktree 和 lease 均从产品�
 任何 run、Thread、WorkUnit、review、merge、lease 或 Git 身份配对失败都只 block 精确作用域，
 不击穿其他 Project。恢复不重建物理模型连接、不启动 continuation、不删除外部资源。
 
+### 16.8.1 可续跑 Task 与对话恢复
+
+Studio 提供 `previewTaskRecovery(rootThreadId)` 与 `applyTaskRecovery(request)` 两步产品接口。
+Preview 无服务端临时状态，其 CAS token 固定 runId、task generation、phase、expectedHead、
+StopRequested、目标 Thread/runtime revision、候选 Turn/input、continuation revision、BranchLease
+与 Git/worktree fingerprint。Apply 持 branch mutation lock 重读全部事实；任何 identity、revision、
+Completion、Review、Merge 或 Git 指纹漂移都返回 stale，要求重新 Preview 或 Reconcile。
+
+系统依次建议最近 failed/interrupted 且仍可 follow-up 的 executor、最近 failed/interrupted planner、
+最近更新的 eligible executor/planner；reviewer 不进入通用对话回退。默认选择从最近失败 Turn 到
+有效尾部，用户只能选择连续末尾一至八个完整 Turn。精确 transcript 匹配失败时 Preview 显式提供
+`rebuildThread`，不得自动降级。
+
+对话恢复不回退 TaskRun、WorkUnit、attempt、budget slice、continuation、Completion、Review 或
+Merge。executor 仍由 planner 通过既有 follow-up 恢复；executor 新 `TurnStarted` 后，WorkUnit 与
+Thread execution 在同一事务恢复为 `Running/Running`。root resume input 使用稳定 mail ID
+`task-recovery:{runId}:{recoveryRevision}`，重复 recoveryId 和 mail materialization 必须幂等。
+
+恢复是可重试 saga：先提交 Thread transcript/working state/recovery marker，再在满足门禁时清除
+StopRequested，最后投递 resume mail。Stop 只能在 paused 且 phase 为 planning、
+pendingConfirmation、designUpdating、implementing 或 reworking 时撤销；merging、reviewing、
+stopping 和终态继续使用现有 Retry/Reconcile。任一步失败都保留已提交事实，使用同一 recoveryId
+重试时从 durable 状态继续，不能重复增加恢复 revision。
+
+Git fingerprint 包含 canonical worktree、Git common directory、branch、HEAD/base/expectedHead、
+未结束 Git operation、index diff、working-tree binary diff 与 untracked 内容 hash。dirty worktree
+允许恢复，但 Apply 时必须与 Preview 完全一致；恢复不得执行 reset、clean、abort、cherry-pick、
+checkout 或删除。失去 durable owner、路径缺失或 Git identity 无法 reconcile 时才允许全 Task 重跑。
+
 ## 16.9 清理安全
 
 worktree 路径和分支包含 run 与 executor Thread 身份：
@@ -244,3 +273,9 @@ Driver harness 只驱动与观测这些通用生命周期字段，不解析用�
 review finding 的项目语义。计划、验证命令或项目判断写错属于普通 planner/executor 行为，由同一
 WorkUnit 的状态机与 follow-up 处理，不得在 harness、工具 schema、skill 或系统提示词中硬编码
 项目知识来规避。
+
+真实验收使用 `new | observe | resume` 三种模式。New 要求空 DriverHome、写版本化 manifest 且只
+提交一次原始 prompt；Observe 只读取已有 run；Resume 复用 DriverHome、Studio DB、配置、manifest
+和全局 deadline，重新取得 VM URL，但不再次提交 prompt 或确认计划。每次 attempt 使用独立日志
+目录；只有成功的 Task recovery 才重置 stall 窗口。一次验收最多应用三次 conversation recovery，
+第四次直接判定恢复循环；stale preview 的重新生成不计数。

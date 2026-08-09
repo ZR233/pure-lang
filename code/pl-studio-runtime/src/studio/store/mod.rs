@@ -2,6 +2,7 @@ use sea_orm::DatabaseConnection;
 
 mod agent_framework;
 pub(super) mod attachment;
+pub(in crate::studio) mod conversation_recovery;
 mod error;
 pub(in crate::studio) mod history;
 mod interaction;

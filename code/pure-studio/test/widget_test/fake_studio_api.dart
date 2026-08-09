@@ -79,6 +79,12 @@ class _FakeStudioApi implements StudioApi {
   String? retriedRecoveryIssueId;
   String? retrySelectedProjectId;
   String? retrySelectedThreadId;
+  TaskRecoveryPreview? taskRecoveryPreview;
+  TaskRecoveryResult? taskRecoveryResult;
+  TaskRecoveryRequest? taskRecoveryRequest;
+  Object? taskRecoveryPreviewError;
+  Object? taskRecoveryApplyError;
+  Completer<TaskRecoveryResult>? blockedTaskRecoveryApply;
 
   void emitGlobal(StudioBridgeEvent event) => _global.add(event);
 
@@ -243,6 +249,25 @@ class _FakeStudioApi implements StudioApi {
     retrySelectedProjectId = selectedProjectId;
     retrySelectedThreadId = selectedThreadId;
     return recoveryRetryState ?? initialState;
+  }
+
+  @override
+  Future<TaskRecoveryPreview> previewTaskRecovery(String rootThreadId) async {
+    if (taskRecoveryPreviewError case final error?) throw error;
+    return taskRecoveryPreview ??
+        (throw StateError('Missing Task recovery preview for $rootThreadId'));
+  }
+
+  @override
+  Future<TaskRecoveryResult> applyTaskRecovery(
+    TaskRecoveryRequest request,
+  ) async {
+    taskRecoveryRequest = request;
+    if (taskRecoveryApplyError case final error?) throw error;
+    final blocked = blockedTaskRecoveryApply;
+    if (blocked != null) return blocked.future;
+    return taskRecoveryResult ??
+        (throw StateError('Missing Task recovery result'));
   }
 
   @override

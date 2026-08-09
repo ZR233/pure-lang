@@ -150,6 +150,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeTaskRecoveryRequestDto
+  dco_decode_box_autoadd_bridge_task_recovery_request_dto(dynamic raw);
+
+  @protected
   BridgeTaskRuntimeDto dco_decode_box_autoadd_bridge_task_runtime_dto(
     dynamic raw,
   );
@@ -282,6 +286,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeBudgetUsageDto dco_decode_bridge_budget_usage_dto(dynamic raw);
+
+  @protected
+  BridgeConversationRecoveryMode dco_decode_bridge_conversation_recovery_mode(
+    dynamic raw,
+  );
 
   @protected
   BridgeError dco_decode_bridge_error(dynamic raw);
@@ -478,7 +487,42 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeTaskGitFingerprintDto dco_decode_bridge_task_git_fingerprint_dto(
+    dynamic raw,
+  );
+
+  @protected
   BridgeTaskMergeDto dco_decode_bridge_task_merge_dto(dynamic raw);
+
+  @protected
+  BridgeTaskRecoveryPreviewDto dco_decode_bridge_task_recovery_preview_dto(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeTaskRecoveryRequestDto dco_decode_bridge_task_recovery_request_dto(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeTaskRecoveryResultDto dco_decode_bridge_task_recovery_result_dto(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeTaskRecoveryTargetDto dco_decode_bridge_task_recovery_target_dto(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeTaskRecoveryTargetKind dco_decode_bridge_task_recovery_target_kind(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeTaskRecoveryTurnDto dco_decode_bridge_task_recovery_turn_dto(
+    dynamic raw,
+  );
 
   @protected
   BridgeTaskReviewDto dco_decode_bridge_task_review_dto(dynamic raw);
@@ -499,6 +543,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeThreadAttachment dco_decode_bridge_thread_attachment(dynamic raw);
+
+  @protected
+  BridgeThreadContextDisposition dco_decode_bridge_thread_context_disposition(
+    dynamic raw,
+  );
 
   @protected
   BridgeThreadItem dco_decode_bridge_thread_item(dynamic raw);
@@ -648,6 +697,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<BridgeActiveTurn> dco_decode_list_bridge_active_turn(dynamic raw);
 
   @protected
+  List<BridgeConversationRecoveryMode>
+  dco_decode_list_bridge_conversation_recovery_mode(dynamic raw);
+
+  @protected
   List<BridgeInteractionRequest> dco_decode_list_bridge_interaction_request(
     dynamic raw,
   );
@@ -719,6 +772,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<BridgeTaskMergeDto> dco_decode_list_bridge_task_merge_dto(dynamic raw);
+
+  @protected
+  List<BridgeTaskRecoveryTargetDto>
+  dco_decode_list_bridge_task_recovery_target_dto(dynamic raw);
+
+  @protected
+  List<BridgeTaskRecoveryTurnDto> dco_decode_list_bridge_task_recovery_turn_dto(
+    dynamic raw,
+  );
 
   @protected
   List<BridgeTaskReviewDto> dco_decode_list_bridge_task_review_dto(dynamic raw);
@@ -1095,6 +1157,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeTaskRecoveryRequestDto
+  sse_decode_box_autoadd_bridge_task_recovery_request_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeTaskRuntimeDto sse_decode_box_autoadd_bridge_task_runtime_dto(
     SseDeserializer deserializer,
   );
@@ -1251,6 +1319,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeBudgetUsageDto sse_decode_bridge_budget_usage_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeConversationRecoveryMode sse_decode_bridge_conversation_recovery_mode(
     SseDeserializer deserializer,
   );
 
@@ -1493,7 +1566,42 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeTaskGitFingerprintDto sse_decode_bridge_task_git_fingerprint_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeTaskMergeDto sse_decode_bridge_task_merge_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeTaskRecoveryPreviewDto sse_decode_bridge_task_recovery_preview_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeTaskRecoveryRequestDto sse_decode_bridge_task_recovery_request_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeTaskRecoveryResultDto sse_decode_bridge_task_recovery_result_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeTaskRecoveryTargetDto sse_decode_bridge_task_recovery_target_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeTaskRecoveryTargetKind sse_decode_bridge_task_recovery_target_kind(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeTaskRecoveryTurnDto sse_decode_bridge_task_recovery_turn_dto(
     SseDeserializer deserializer,
   );
 
@@ -1522,6 +1630,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeThreadAttachment sse_decode_bridge_thread_attachment(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeThreadContextDisposition sse_decode_bridge_thread_context_disposition(
     SseDeserializer deserializer,
   );
 
@@ -1719,6 +1832,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  List<BridgeConversationRecoveryMode>
+  sse_decode_list_bridge_conversation_recovery_mode(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<BridgeInteractionRequest> sse_decode_list_bridge_interaction_request(
     SseDeserializer deserializer,
   );
@@ -1804,6 +1923,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<BridgeTaskMergeDto> sse_decode_list_bridge_task_merge_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<BridgeTaskRecoveryTargetDto>
+  sse_decode_list_bridge_task_recovery_target_dto(SseDeserializer deserializer);
+
+  @protected
+  List<BridgeTaskRecoveryTurnDto> sse_decode_list_bridge_task_recovery_turn_dto(
     SseDeserializer deserializer,
   );
 
@@ -2267,6 +2395,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_bridge_task_recovery_request_dto(
+    BridgeTaskRecoveryRequestDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_bridge_task_runtime_dto(
     BridgeTaskRuntimeDto self,
     SseSerializer serializer,
@@ -2455,6 +2589,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_bridge_budget_usage_dto(
     BridgeBudgetUsageDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_conversation_recovery_mode(
+    BridgeConversationRecoveryMode self,
     SseSerializer serializer,
   );
 
@@ -2750,8 +2890,50 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_bridge_task_git_fingerprint_dto(
+    BridgeTaskGitFingerprintDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_bridge_task_merge_dto(
     BridgeTaskMergeDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_task_recovery_preview_dto(
+    BridgeTaskRecoveryPreviewDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_task_recovery_request_dto(
+    BridgeTaskRecoveryRequestDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_task_recovery_result_dto(
+    BridgeTaskRecoveryResultDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_task_recovery_target_dto(
+    BridgeTaskRecoveryTargetDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_task_recovery_target_kind(
+    BridgeTaskRecoveryTargetKind self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_task_recovery_turn_dto(
+    BridgeTaskRecoveryTurnDto self,
     SseSerializer serializer,
   );
 
@@ -2785,6 +2967,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_bridge_thread_attachment(
     BridgeThreadAttachment self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_thread_context_disposition(
+    BridgeThreadContextDisposition self,
     SseSerializer serializer,
   );
 
@@ -3032,6 +3220,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_bridge_conversation_recovery_mode(
+    List<BridgeConversationRecoveryMode> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_bridge_interaction_request(
     List<BridgeInteractionRequest> self,
     SseSerializer serializer,
@@ -3130,6 +3324,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_bridge_task_merge_dto(
     List<BridgeTaskMergeDto> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_bridge_task_recovery_target_dto(
+    List<BridgeTaskRecoveryTargetDto> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_bridge_task_recovery_turn_dto(
+    List<BridgeTaskRecoveryTurnDto> self,
     SseSerializer serializer,
   );
 

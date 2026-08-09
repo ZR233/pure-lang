@@ -37,8 +37,9 @@ pub use state::{
     AgentRuntimeEvent, AgentRuntimeEventKind, AgentRuntimeResult, AgentSessionDigest,
     AgentSessionDigestMessage, AgentSessionDigestRole, AgentSnapshot, AgentSpawnRequest,
     AgentSpawnResult, AgentSubmitRequest, AgentTurnOutcome, AgentTurnSubmitPolicy, AgentWaitResult,
-    DurableMailboxEnvelope, MailboxDeliveryState, MailboxPresentation, ThreadActorState,
-    ThreadContextState, TurnOutcomeKind,
+    ConversationRecoveryPreview, ConversationRecoveryRequest, ConversationRecoveryResult,
+    ConversationRecoveryTarget, DurableMailboxEnvelope, MailboxDeliveryState, MailboxPresentation,
+    ThreadActorState, ThreadContextState, TurnOutcomeKind,
 };
 pub(crate) use turn::AgentTurnMailboxHandle;
 pub use turn::{

@@ -194,7 +194,10 @@ StudioThread _threadFromFrb(frb.BridgeThread value) {
   );
 }
 
-ThreadItemView _threadItemFromFrb(frb.BridgeThreadItem value) {
+ThreadItemView _threadItemFromFrb(
+  frb.BridgeThreadItem value, {
+  ThreadContextDisposition contextDisposition = ThreadContextDisposition.active,
+}) {
   final base = (
     id: value.id,
     threadId: value.threadId,
@@ -224,6 +227,7 @@ ThreadItemView _threadItemFromFrb(frb.BridgeThreadItem value) {
       kind: ThreadItemKind.userMessage,
       text: text,
       attachments: attachments.map(_attachmentFromFrb).toList(),
+      contextDisposition: contextDisposition,
     ),
     agentMessage: (channel, text) => ThreadItemView(
       id: base.id,
@@ -243,6 +247,7 @@ ThreadItemView _threadItemFromFrb(frb.BridgeThreadItem value) {
           AgentMessageChannel.commentary,
         frb.BridgeAgentMessageChannel.final_ => AgentMessageChannel.finalAnswer,
       },
+      contextDisposition: contextDisposition,
     ),
     reasoning: (summary, content) => ThreadItemView(
       id: base.id,
@@ -258,6 +263,7 @@ ThreadItemView _threadItemFromFrb(frb.BridgeThreadItem value) {
       kind: ThreadItemKind.reasoning,
       reasoningSummary: summary,
       reasoningContent: content,
+      contextDisposition: contextDisposition,
     ),
     plan: (content) => ThreadItemView(
       id: base.id,
@@ -272,6 +278,7 @@ ThreadItemView _threadItemFromFrb(frb.BridgeThreadItem value) {
       error: base.error,
       kind: ThreadItemKind.plan,
       text: content,
+      contextDisposition: contextDisposition,
     ),
     toolCall: (tool) => ThreadItemView(
       id: base.id,
@@ -286,6 +293,7 @@ ThreadItemView _threadItemFromFrb(frb.BridgeThreadItem value) {
       error: base.error,
       kind: ThreadItemKind.toolCall,
       tool: _toolFromFrb(tool),
+      contextDisposition: contextDisposition,
     ),
     file: (path, mediaType) => ThreadItemView(
       id: base.id,
@@ -301,6 +309,7 @@ ThreadItemView _threadItemFromFrb(frb.BridgeThreadItem value) {
       kind: ThreadItemKind.file,
       filePath: path,
       mediaType: mediaType,
+      contextDisposition: contextDisposition,
     ),
   );
 }

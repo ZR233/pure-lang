@@ -321,6 +321,221 @@ RecoveryCleanupPreview _recoveryCleanupPreviewFromFrb(
   );
 }
 
+TaskRecoveryPreview _taskRecoveryPreviewFromFrb(
+  frb.BridgeTaskRecoveryPreviewDto preview,
+) {
+  return TaskRecoveryPreview(
+    previewToken: preview.previewToken,
+    rootThreadId: preview.rootThreadId,
+    runId: preview.runId,
+    taskGeneration: preview.taskGeneration.toInt(),
+    phase: preview.phase,
+    expectedHead: preview.expectedHead,
+    stopRequested: preview.stopRequested,
+    branchLeaseId: preview.branchLeaseId,
+    branchLeaseBranch: preview.branchLeaseBranch,
+    branchLeaseGitCommonDir: preview.branchLeaseGitCommonDir,
+    branchLeaseExpectedHead: preview.branchLeaseExpectedHead,
+    recommendedThreadId: preview.recommendedThreadId,
+    targets: preview.targets.map(_taskRecoveryTargetFromFrb).toList(),
+    mainGitFingerprint: _taskGitFingerprintFromFrb(preview.mainGitFingerprint),
+    completionRevisionFingerprint: preview.completionRevisionFingerprint,
+    reviewRevisionFingerprint: preview.reviewRevisionFingerprint,
+    mergeRevisionFingerprint: preview.mergeRevisionFingerprint,
+  );
+}
+
+TaskRecoveryTarget _taskRecoveryTargetFromFrb(
+  frb.BridgeTaskRecoveryTargetDto target,
+) {
+  return TaskRecoveryTarget(
+    threadId: target.threadId,
+    kind: switch (target.kind) {
+      frb.BridgeTaskRecoveryTargetKind.planner =>
+        TaskRecoveryTargetKind.planner,
+      frb.BridgeTaskRecoveryTargetKind.executor =>
+        TaskRecoveryTargetKind.executor,
+    },
+    workUnitId: target.workUnitId,
+    attempt: target.attempt,
+    continuationRevision: target.continuationRevision?.toInt(),
+    expectedRuntimeRevision: target.expectedRuntimeRevision.toInt(),
+    expectedThreadRevision: target.expectedThreadRevision.toInt(),
+    branch: target.branch,
+    worktreePath: target.worktreePath,
+    turns: [
+      for (final turn in target.turns)
+        TaskRecoveryTurn(
+          turnId: turn.turnId,
+          status: turn.status,
+          updatedAt: _dateFromUnix(turn.updatedAt),
+          itemCount: turn.itemCount.toInt(),
+          inputCount: turn.inputCount.toInt(),
+          toolCount: turn.toolCount.toInt(),
+          toolSummaries: turn.toolSummaries,
+        ),
+    ],
+    defaultTurnIds: target.defaultTurnIds,
+    availableModes: target.availableModes
+        .map(_conversationRecoveryModeFromFrb)
+        .toList(),
+    gitFingerprint: _taskGitFingerprintFromFrb(target.gitFingerprint),
+  );
+}
+
+TaskGitFingerprint _taskGitFingerprintFromFrb(
+  frb.BridgeTaskGitFingerprintDto fingerprint,
+) {
+  return TaskGitFingerprint(
+    workspaceRoot: fingerprint.workspaceRoot,
+    gitCommonDir: fingerprint.gitCommonDir,
+    branch: fingerprint.branch,
+    head: fingerprint.head,
+    baseCommit: fingerprint.baseCommit,
+    expectedHead: fingerprint.expectedHead,
+    operation: fingerprint.operation,
+    indexDiffHash: fingerprint.indexDiffHash,
+    workingTreeDiffHash: fingerprint.workingTreeDiffHash,
+    untrackedContentHash: fingerprint.untrackedContentHash,
+  );
+}
+
+frb.BridgeTaskRecoveryRequestDto _taskRecoveryRequestToFrb(
+  TaskRecoveryRequest request,
+) {
+  return frb.BridgeTaskRecoveryRequestDto(
+    recoveryId: request.recoveryId,
+    rootThreadId: request.rootThreadId,
+    targetThreadId: request.targetThreadId,
+    mode: _conversationRecoveryModeToFrb(request.mode),
+    turnIds: request.turnIds,
+    preview: _taskRecoveryPreviewToFrb(request.preview),
+  );
+}
+
+frb.BridgeTaskRecoveryPreviewDto _taskRecoveryPreviewToFrb(
+  TaskRecoveryPreview preview,
+) {
+  return frb.BridgeTaskRecoveryPreviewDto(
+    previewToken: preview.previewToken,
+    rootThreadId: preview.rootThreadId,
+    runId: preview.runId,
+    taskGeneration: BigInt.from(preview.taskGeneration),
+    phase: preview.phase,
+    expectedHead: preview.expectedHead,
+    stopRequested: preview.stopRequested,
+    branchLeaseId: preview.branchLeaseId,
+    branchLeaseBranch: preview.branchLeaseBranch,
+    branchLeaseGitCommonDir: preview.branchLeaseGitCommonDir,
+    branchLeaseExpectedHead: preview.branchLeaseExpectedHead,
+    recommendedThreadId: preview.recommendedThreadId,
+    targets: [
+      for (final target in preview.targets)
+        frb.BridgeTaskRecoveryTargetDto(
+          threadId: target.threadId,
+          kind: switch (target.kind) {
+            TaskRecoveryTargetKind.planner =>
+              frb.BridgeTaskRecoveryTargetKind.planner,
+            TaskRecoveryTargetKind.executor =>
+              frb.BridgeTaskRecoveryTargetKind.executor,
+          },
+          workUnitId: target.workUnitId,
+          attempt: target.attempt,
+          continuationRevision: target.continuationRevision == null
+              ? null
+              : BigInt.from(target.continuationRevision!),
+          expectedRuntimeRevision: BigInt.from(target.expectedRuntimeRevision),
+          expectedThreadRevision: BigInt.from(target.expectedThreadRevision),
+          branch: target.branch,
+          worktreePath: target.worktreePath,
+          turns: [
+            for (final turn in target.turns)
+              frb.BridgeTaskRecoveryTurnDto(
+                turnId: turn.turnId,
+                status: turn.status,
+                updatedAt: turn.updatedAt.millisecondsSinceEpoch ~/ 1000,
+                itemCount: BigInt.from(turn.itemCount),
+                inputCount: BigInt.from(turn.inputCount),
+                toolCount: BigInt.from(turn.toolCount),
+                toolSummaries: turn.toolSummaries,
+              ),
+          ],
+          defaultTurnIds: target.defaultTurnIds,
+          availableModes: target.availableModes
+              .map(_conversationRecoveryModeToFrb)
+              .toList(),
+          gitFingerprint: _taskGitFingerprintToFrb(target.gitFingerprint),
+        ),
+    ],
+    mainGitFingerprint: _taskGitFingerprintToFrb(preview.mainGitFingerprint),
+    completionRevisionFingerprint: preview.completionRevisionFingerprint,
+    reviewRevisionFingerprint: preview.reviewRevisionFingerprint,
+    mergeRevisionFingerprint: preview.mergeRevisionFingerprint,
+  );
+}
+
+frb.BridgeTaskGitFingerprintDto _taskGitFingerprintToFrb(
+  TaskGitFingerprint fingerprint,
+) {
+  return frb.BridgeTaskGitFingerprintDto(
+    workspaceRoot: fingerprint.workspaceRoot,
+    gitCommonDir: fingerprint.gitCommonDir,
+    branch: fingerprint.branch,
+    head: fingerprint.head,
+    baseCommit: fingerprint.baseCommit,
+    expectedHead: fingerprint.expectedHead,
+    operation: fingerprint.operation,
+    indexDiffHash: fingerprint.indexDiffHash,
+    workingTreeDiffHash: fingerprint.workingTreeDiffHash,
+    untrackedContentHash: fingerprint.untrackedContentHash,
+  );
+}
+
+TaskRecoveryResult _taskRecoveryResultFromFrb(
+  frb.BridgeTaskRecoveryResultDto result,
+) {
+  return TaskRecoveryResult(
+    recoveryId: result.recoveryId,
+    runId: result.runId,
+    workUnitId: result.workUnitId,
+    rootThreadId: result.rootThreadId,
+    targetThreadId: result.targetThreadId,
+    mode: _conversationRecoveryModeFromFrb(result.mode),
+    recoveryRevision: result.recoveryRevision.toInt(),
+    runtimeRevision: result.runtimeRevision.toInt(),
+    threadRevision: result.threadRevision.toInt(),
+    beforeTranscriptHash: result.beforeTranscriptHash,
+    afterTranscriptHash: result.afterTranscriptHash,
+    removedItemCount: result.removedItemCount.toInt(),
+    removedInputCount: result.removedInputCount.toInt(),
+    stopCleared: result.stopCleared,
+    resumeTurnId: result.resumeTurnId,
+    gitFingerprint: _taskGitFingerprintFromFrb(result.gitFingerprint),
+  );
+}
+
+ConversationRecoveryMode _conversationRecoveryModeFromFrb(
+  frb.BridgeConversationRecoveryMode mode,
+) {
+  return switch (mode) {
+    frb.BridgeConversationRecoveryMode.rewindTail =>
+      ConversationRecoveryMode.rewindTail,
+    frb.BridgeConversationRecoveryMode.rebuildThread =>
+      ConversationRecoveryMode.rebuildThread,
+  };
+}
+
+frb.BridgeConversationRecoveryMode _conversationRecoveryModeToFrb(
+  ConversationRecoveryMode mode,
+) {
+  return switch (mode) {
+    ConversationRecoveryMode.rewindTail =>
+      frb.BridgeConversationRecoveryMode.rewindTail,
+    ConversationRecoveryMode.rebuildThread =>
+      frb.BridgeConversationRecoveryMode.rebuildThread,
+  };
+}
+
 ProviderUsageView _providerUsageFromFrb(frb.ProviderUsageDto usage) {
   return ProviderUsageView(
     providerId: usage.providerId,

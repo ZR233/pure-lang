@@ -25,6 +25,7 @@ mod checkpoint;
 mod completion;
 mod input;
 mod lifecycle;
+mod recovery;
 mod running_turn;
 mod session_digest;
 
@@ -41,6 +42,14 @@ pub(crate) enum AgentLoopCommand {
     ReconfigureIdleRole {
         role: crate::AgentRoleId,
         reply: oneshot::Sender<AgentRuntimeResult<AgentSnapshot>>,
+    },
+    PreviewConversationRecovery {
+        target: super::ConversationRecoveryTarget,
+        reply: oneshot::Sender<AgentRuntimeResult<super::ConversationRecoveryPreview>>,
+    },
+    RecoverConversation {
+        request: super::ConversationRecoveryRequest,
+        reply: oneshot::Sender<AgentRuntimeResult<super::ConversationRecoveryResult>>,
     },
     CancelTurn {
         turn_id: TurnId,
@@ -187,6 +196,13 @@ where
                         }
                         AgentLoopCommand::ReconfigureIdleRole { role, reply } => {
                             let result = self.reconfigure_idle_role(role).await;
+                            let _ = reply.send(result);
+                        }
+                        AgentLoopCommand::PreviewConversationRecovery { target, reply } => {
+                            let _ = reply.send(self.preview_conversation_recovery(target));
+                        }
+                        AgentLoopCommand::RecoverConversation { request, reply } => {
+                            let result = self.recover_conversation(request).await;
                             let _ = reply.send(result);
                         }
                         AgentLoopCommand::CancelTurn { turn_id, reply } => {

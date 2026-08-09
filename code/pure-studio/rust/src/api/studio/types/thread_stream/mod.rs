@@ -288,6 +288,7 @@ pub enum BridgePromptPrefixChangedReason {
     ToolSchemaChanged,
     ContextCompacted,
     ContextAppended,
+    ContextRecovered,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

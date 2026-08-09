@@ -3,8 +3,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
+use serde::{Deserialize, Serialize};
 
 use super::sse::{final_text, tool_call};
+
+pub(super) const RECOVERY_INTERRUPTION_ACTION: &str = "hold Planner Turn for harness interruption";
 
 const INITIAL_DESIGN_PATCH: &str = r#"*** Begin Patch
 *** Add File: design/task-flow.md
@@ -22,6 +25,12 @@ const CONSISTENCY_DESIGN_PATCH: &str = r#"*** Begin Patch
 const FEATURE_PATCH: &str = r#"*** Begin Patch
 *** Add File: src/feature.txt
 +offline integration verified
+*** End Patch"#;
+const EXPECTED_PATCH_FAILURE: &str = r#"*** Begin Patch
+*** Update File: README.md
+@@
+-# context that intentionally does not exist
++# replacement must never be applied
 *** End Patch"#;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,7 +50,7 @@ impl ScriptRole {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub(super) struct ScriptProgress {
     pub(super) planner: usize,
     pub(super) executor: usize,
@@ -92,10 +101,11 @@ pub(super) fn response(
     workspace: &Path,
     role: ScriptRole,
     step: usize,
+    exercise_recovery: bool,
 ) -> Result<(&'static str, String)> {
     match role {
-        ScriptRole::Planner => planner_response(progress, workspace, step),
-        ScriptRole::Executor => executor_response(workspace, step),
+        ScriptRole::Planner => planner_response(progress, workspace, step, exercise_recovery),
+        ScriptRole::Executor => executor_response(workspace, step, exercise_recovery),
         ScriptRole::Reviewer => reviewer_response(step),
     }
 }
@@ -103,8 +113,57 @@ pub(super) fn response(
 fn planner_response(
     progress: &mut ScriptProgress,
     workspace: &Path,
-    step: usize,
+    mut step: usize,
+    exercise_recovery: bool,
 ) -> Result<(&'static str, String)> {
+    if exercise_recovery {
+        match step {
+            6 => {
+                return Ok((
+                    "final(executor failure observed)",
+                    final_text(
+                        "executor-failure-observed",
+                        "The executor Turn failed after preserving workspace changes. Waiting for the durable Planner wake before pausing.",
+                    ),
+                ));
+            }
+            7 => {
+                return Ok((
+                    RECOVERY_INTERRUPTION_ACTION,
+                    final_text(
+                        "task-paused-for-recovery",
+                        "The failure is durably recorded. The Task is paused for explicit recovery.",
+                    ),
+                ));
+            }
+            8 => {
+                return Ok((
+                    "task_status(after recovery)",
+                    tool_call(
+                        "status-after-recovery",
+                        "task_status",
+                        serde_json::json!({}),
+                    ),
+                ));
+            }
+            9 => {
+                let executor_id = executor_id(progress)?;
+                return Ok((
+                    "send_message(recovered executor)",
+                    tool_call(
+                        "resume-recovered-executor",
+                        "send_message",
+                        serde_json::json!({
+                            "target": executor_id,
+                            "message": "Continue in the same WorkUnit and worktree. Preserve the existing file change, commit it, verify it, and report completion."
+                        }),
+                    ),
+                ));
+            }
+            10.. => step -= 5,
+            0..=5 => {}
+        }
+    }
     let response = match step {
         0 => (
             "plan_exit",
@@ -276,7 +335,11 @@ fn planner_response(
     Ok(response)
 }
 
-fn executor_response(workspace: &Path, step: usize) -> Result<(&'static str, String)> {
+fn executor_response(
+    workspace: &Path,
+    step: usize,
+    exercise_recovery: bool,
+) -> Result<(&'static str, String)> {
     let response = match step {
         0 => progress(
             "exploring",
@@ -284,6 +347,40 @@ fn executor_response(workspace: &Path, step: usize) -> Result<(&'static str, Str
             "Create the required feature file.",
         ),
         1 => (
+            "exec(expected failure)",
+            tool_call(
+                "executor-command-failure",
+                "exec",
+                serde_json::json!({
+                    "command": "git rev-parse --verify refs/heads/__pure_fixture_missing__"
+                }),
+            ),
+        ),
+        2 => (
+            "exec(corrected command)",
+            tool_call(
+                "executor-command-correction",
+                "exec",
+                serde_json::json!({"command": "git rev-parse --show-toplevel"}),
+            ),
+        ),
+        3 => (
+            "apply_patch(expected failure)",
+            tool_call(
+                "executor-patch-failure",
+                "apply_patch",
+                serde_json::json!({"input": EXPECTED_PATCH_FAILURE}),
+            ),
+        ),
+        4 => (
+            "read_file(after patch failure)",
+            tool_call(
+                "executor-read-after-patch-failure",
+                "read_file",
+                serde_json::json!({"path": "README.md"}),
+            ),
+        ),
+        5 => (
             "apply_patch",
             tool_call(
                 "executor-patch",
@@ -291,12 +388,16 @@ fn executor_response(workspace: &Path, step: usize) -> Result<(&'static str, Str
                 serde_json::json!({"input": FEATURE_PATCH}),
             ),
         ),
-        2 => progress(
+        6 if exercise_recovery => (
+            "inject executor Turn failure",
+            "data: this-is-not-json\n\n".to_string(),
+        ),
+        6 => progress(
             "implementing",
-            "Created src/feature.txt with the required content.",
+            "Corrected the command and patch failures, then created the required file.",
             "Commit and verify the change.",
         ),
-        3 => (
+        7 => (
             "exec(git add)",
             tool_call(
                 "executor-add",
@@ -304,7 +405,7 @@ fn executor_response(workspace: &Path, step: usize) -> Result<(&'static str, Str
                 serde_json::json!({"command": "git add -- src/feature.txt"}),
             ),
         ),
-        4 => (
+        8 => (
             "exec(git commit)",
             tool_call(
                 "executor-commit",
@@ -314,12 +415,12 @@ fn executor_response(workspace: &Path, step: usize) -> Result<(&'static str, Str
                 }),
             ),
         ),
-        5 => progress(
+        9 => progress(
             "verifying",
             "Committed and verified the exact worktree change.",
             "Report the completion for review.",
         ),
-        6 => {
+        10 => {
             let worktree = task_worktree(workspace)?;
             let head = git_output(&worktree.path, &["rev-parse", "HEAD"])?;
             (

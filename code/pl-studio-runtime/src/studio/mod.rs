@@ -27,7 +27,9 @@ pub use runtime_state::{
     StudioActiveTurn, StudioRecoveryCleanupPreview, StudioRecoveryCleanupResource,
     StudioRecoveryIssue, StudioRecoveryIssueAction, StudioRecoveryIssueCategory,
     StudioRecoveryIssueScope, StudioRecoveryResourcePresence, StudioRuntimeSnapshot,
-    StudioRuntimeState, StudioRuntimeStatus,
+    StudioRuntimeState, StudioRuntimeStatus, StudioTaskGitFingerprint, StudioTaskRecoveryPreview,
+    StudioTaskRecoveryRequest, StudioTaskRecoveryResult, StudioTaskRecoveryTarget,
+    StudioTaskRecoveryTargetKind, StudioTaskRecoveryTurn,
 };
 pub(in crate::studio) use store::ChildThreadSpec;
 pub use store::{StudioDatabaseError, StudioStore};

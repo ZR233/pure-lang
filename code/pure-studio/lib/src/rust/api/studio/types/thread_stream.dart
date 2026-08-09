@@ -160,6 +160,7 @@ enum BridgePromptPrefixChangedReason {
   toolSchemaChanged,
   contextCompacted,
   contextAppended,
+  contextRecovered,
 }
 
 class BridgeRuntimeCostAmount {

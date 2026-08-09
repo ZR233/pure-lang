@@ -18,6 +18,7 @@ mod lifecycle;
 mod mcp_health;
 mod plan_confirmation;
 mod prompt_runner;
+mod task_recovery;
 mod thread_service;
 
 /// Studio UI 提交 prompt 的请求。

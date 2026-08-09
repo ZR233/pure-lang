@@ -251,16 +251,7 @@ fn token_usage(value: &Value) -> Result<TokenUsage> {
 }
 
 fn is_retryable(error: &PureError) -> bool {
-    match error {
-        PureError::HttpError(_) | PureError::TransientModelTransport { .. } => true,
-        PureError::LlmError(message) => {
-            let message = message.to_ascii_lowercase();
-            ["408", "409", "429", "500", "502", "503", "504", "timeout"]
-                .iter()
-                .any(|needle| message.contains(needle))
-        }
-        _ => false,
-    }
+    error.is_transient_model_transport()
 }
 
 #[cfg(test)]
@@ -281,5 +272,21 @@ mod tests {
                 encrypted_content: "encrypted".to_string()
             })
         );
+    }
+
+    #[test]
+    fn retry_policy_uses_typed_transport_failures_only() {
+        assert!(is_retryable(&PureError::transient_model_failure(
+            "temporarily unavailable",
+            None,
+            Some("server_is_overloaded".to_string()),
+            Some(503),
+        )));
+        assert!(!is_retryable(&PureError::LlmError(
+            "timeout 429 503 is display text only".to_string(),
+        )));
+        assert!(!is_retryable(&PureError::HttpError(
+            "unclassified HTTP error".to_string(),
+        )));
     }
 }

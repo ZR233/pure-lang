@@ -3,8 +3,14 @@ use pretty_assertions::assert_eq;
 
 #[test]
 fn root_provider_429_is_transient_and_subagent_429_is_provider_capacity() {
+    let root_error = pl_protocol::PureError::transient_model_failure(
+        "API error 429 Too Many Requests",
+        None,
+        Some("rate_limit_exceeded".to_string()),
+        Some(429),
+    );
     assert!(matches!(
-        provider_error_severity(None, "API error 429 Too Many Requests"),
+        provider_error_severity(None, &root_error),
         ErrorSeverity::Transient
     ));
 
@@ -18,11 +24,16 @@ fn root_provider_429_is_transient_and_subagent_429_is_provider_capacity() {
     };
     let (error, severity, failure) = normalize_provider_error(
         Some(&subagent),
-        pl_protocol::PureError::LlmError("API error 429 Too Many Requests".to_string()),
+        pl_protocol::PureError::transient_model_failure(
+            "API error 429 Too Many Requests",
+            None,
+            Some("rate_limit_exceeded".to_string()),
+            Some(429),
+        ),
     );
     assert_eq!(
         error,
-        "provider capacity unavailable: LLM provider error: API error 429 Too Many Requests"
+        "provider capacity unavailable: transient model transport error: API error 429 Too Many Requests"
     );
     assert!(matches!(severity, ErrorSeverity::Recoverable));
     assert_eq!(
@@ -31,16 +42,33 @@ fn root_provider_429_is_transient_and_subagent_429_is_provider_capacity() {
     );
     assert!(!failure.retry.is_retryable());
     assert!(matches!(
-        provider_error_severity(None, "API error 500"),
+        provider_error_severity(
+            None,
+            &pl_protocol::PureError::LlmError("API error 500".to_string())
+        ),
         ErrorSeverity::Recoverable
     ));
     assert!(matches!(
         provider_error_severity(
             None,
-            "transient model transport error: Responses WebSocket stream failed"
+            &pl_protocol::PureError::transient_model_transport("Responses WebSocket stream failed")
         ),
         ErrorSeverity::Transient
     ));
+}
+
+#[test]
+fn provider_error_text_never_controls_retry() {
+    let (_, severity, failure) = normalize_provider_error(
+        None,
+        pl_protocol::PureError::LlmError(
+            "API error 429 and timeout are display text only".to_string(),
+        ),
+    );
+
+    assert_eq!(severity, ErrorSeverity::Recoverable);
+    assert_eq!(failure.category, pl_protocol::TurnFailureCategory::Provider);
+    assert!(!failure.retry.is_retryable());
 }
 
 #[test]

@@ -21,6 +21,15 @@ abstract final class StudioDriverKeys {
   static const composerError = ValueKey<String>('composer-error');
   static const taskPaused = ValueKey<String>('task-paused');
   static const taskResume = ValueKey<String>('task-resume');
+  static const taskRecoveryDialog = ValueKey<String>('task-recovery-dialog');
+  static const taskRecoveryTarget = ValueKey<String>('task-recovery-target');
+  static const taskRecoveryTailCount = ValueKey<String>(
+    'task-recovery-tail-count',
+  );
+  static const taskRecoveryMode = ValueKey<String>('task-recovery-mode');
+  static const taskRecoveryConfirm = ValueKey<String>('task-recovery-confirm');
+  static const taskRecoveryApply = ValueKey<String>('task-recovery-apply');
+  static const taskRecoveryError = ValueKey<String>('task-recovery-error');
   static const agentSwitcher = ValueKey<String>('agent-switcher');
   static const providerEditor = ValueKey<String>('provider-editor');
   static const providerEdit = ValueKey<String>('provider-edit');
@@ -49,6 +58,15 @@ abstract final class StudioDriverKeys {
 
   static ValueKey<String> turnActivity(String id) =>
       ValueKey<String>('turn-activity-$id');
+
+  static ValueKey<String> taskRecoveryTurn(String id) =>
+      ValueKey<String>('task-recovery-turn-$id');
+
+  static ValueKey<String> taskRecoveryModeOption(String mode) =>
+      ValueKey<String>('task-recovery-mode-$mode');
+
+  static ValueKey<String> timelineRolledBack(String id) =>
+      ValueKey<String>('timeline-rolled-back-$id');
 
   static ValueKey<String> timelineBlock(String id) =>
       ValueKey<String>('timeline-block-$id');

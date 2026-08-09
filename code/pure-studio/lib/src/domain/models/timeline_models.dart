@@ -97,6 +97,13 @@ class TimelineToolGroup {
 
   int get count => items.length;
 
+  bool get isRolledBack =>
+      items.isNotEmpty &&
+      items.every(
+        (item) =>
+            item.part.contextDisposition == ThreadContextDisposition.rolledBack,
+      );
+
   int get runningCount =>
       items.where((item) => _isActiveToolStatus(item.status)).length;
 
@@ -182,6 +189,13 @@ class TimelineReasoningGroup {
   final List<TimelineEntry> parts;
 
   int get count => parts.length;
+
+  bool get isRolledBack =>
+      parts.isNotEmpty &&
+      parts.every(
+        (part) =>
+            part.contextDisposition == ThreadContextDisposition.rolledBack,
+      );
 
   int get order => parts.isEmpty ? 0 : parts.first.order;
 
@@ -273,6 +287,7 @@ class TimelineEntry {
     this.textChannel,
     this.tool,
     this.planContent,
+    this.contextDisposition = ThreadContextDisposition.active,
   });
 
   final String id;
@@ -295,6 +310,7 @@ class TimelineEntry {
   final TimelineTextChannel? textChannel;
   final TimelineToolPart? tool;
   final String? planContent;
+  final ThreadContextDisposition contextDisposition;
 }
 
 String _toolActivityText(TimelineToolPart? tool) {

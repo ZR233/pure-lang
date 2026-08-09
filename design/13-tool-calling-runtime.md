@@ -296,6 +296,25 @@ Todo replacement 只进入执行该调用的 Thread runtime snapshot。子代理
 灌入父 Timeline，细节保留在 child Thread。owner lifecycle/status/progress 只更新 Agent
 Directory，不作为 Timeline Item。
 
+## 会话尾部恢复
+
+会话恢复只改变后续 provider 可见的 transcript，不回滚已经发生的世界状态。Turn、Item、usage、
+Completion、Review、Merge、文件修改、Git commit 与外部工具副作用保持不可变审计记录。被恢复排除
+的 Turn/Item 由查询投影标记为 `rolledBack`，仍按原 ordinal 出现在 Timeline，但不再参与后续模型
+请求或有效进度判断；usage 与费用也不因恢复扣除。
+
+`rewindTail` 只允许在 Thread idle、没有 active/pending input 和 pending Interaction 时执行。调用方
+选择连续的 Turn 后缀；runtime 根据这些 Turn 实际消费的 mailbox input，精确匹配 transcript 尾部
+user message 的 canonical hash，并从最早选中输入之前建立 replacement baseline。截断必须保留
+完整的 assistant tool call 与 tool result 配对，不得留下孤立 call/output。hash 或配对不匹配时
+必须拒绝，不能静默扩大回退范围。
+
+`rebuildThread` 用于 compaction 或历史损坏使安全前缀不可证明的情况。它清空普通 transcript，
+但保留 handoff、Evidence Ledger、session note 与其他 working state。两种模式都清空旧 Todo/进度
+投影，写入版本化 recovery pinned context，要求模型以当前 Task repository 和 workspace/Git 现场
+为事实源；同时以 `contextRecovered` 推进 prompt generation 并创建新的物理 model transport
+session。恢复本身绝不重放工具调用，也不撤销工作区副作用。
+
 ## Web 搜索工具规划
 
 `web_search` 是 `ToolEffect::Read` 且允许并行的内置函数工具。`plan_web_search()` 只读取解析后的

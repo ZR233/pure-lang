@@ -1,5 +1,11 @@
 use super::{BridgeThreadItem, BridgeTurn};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BridgeThreadContextDisposition {
+    Active,
+    RolledBack,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListThreadTurnsRequest {
     pub thread_id: String,
@@ -17,4 +23,5 @@ pub struct BridgeThreadTurnPage {
 pub struct BridgeThreadTurnHistory {
     pub turn: BridgeTurn,
     pub items: Vec<BridgeThreadItem>,
+    pub context_disposition: BridgeThreadContextDisposition,
 }

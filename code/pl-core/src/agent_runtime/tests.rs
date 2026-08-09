@@ -3,11 +3,14 @@ use std::fmt;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use pl_protocol::{ConversationRecoveryMode, TurnBillingRecord};
 use pretty_assertions::assert_eq;
 use tokio::sync::Notify;
 
 use super::host::ThreadContextMutation;
 use super::*;
+use crate::{AgentSession, Message};
+
 #[derive(Debug, Clone)]
 struct TestError(String);
 
@@ -200,6 +203,7 @@ struct TestTurnFactory {
     mode: FactoryMode,
     prepared_messages: Arc<Mutex<Vec<String>>>,
     prepared_batches: Arc<Mutex<Vec<Vec<String>>>>,
+    prepared_sessions: Arc<Mutex<Vec<Vec<Message>>>>,
     blocker: Arc<Notify>,
 }
 
@@ -209,6 +213,7 @@ impl TestTurnFactory {
             mode,
             prepared_messages: Arc::new(Mutex::new(Vec::new())),
             prepared_batches: Arc::new(Mutex::new(Vec::new())),
+            prepared_sessions: Arc::new(Mutex::new(Vec::new())),
             blocker: Arc::new(Notify::new()),
         }
     }
@@ -221,6 +226,10 @@ impl AgentTurnFactory for TestTurnFactory {
         &self,
         context: AgentTurnPreparationContext,
     ) -> std::result::Result<PreparedAgentTurn, Self::Error> {
+        self.prepared_sessions
+            .lock()
+            .unwrap()
+            .push(context.session.messages().to_vec());
         let mut batch = context
             .leading_inputs
             .iter()
@@ -497,6 +506,156 @@ async fn failed_turn_returns_agent_to_active_idle_and_commits_snapshot() {
     assert_eq!(waited.last_turn.unwrap().kind, TurnOutcomeKind::Failed);
     assert_eq!(repository.state(&agent_id).snapshot, waited.snapshot);
     assert_eq!(host.events.runtime_len(), 4);
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn conversation_recovery_excludes_rolled_back_provider_context_and_preserves_audit_usage() {
+    let repository = TestRepository::empty();
+    let host = TestHost::new(repository.clone(), FactoryMode::Fail);
+    let runtime = AgentRuntime::start(host.clone(), test_options())
+        .await
+        .unwrap();
+    let handle = runtime.handle();
+    let agent_id = AgentId::new("root").unwrap();
+    let retained_messages = vec![
+        crate::user_text_message("retained request"),
+        crate::assistant_text_message("retained answer"),
+    ];
+    let mut registration = registration("root", "chat");
+    registration.session.session = AgentSession::from_messages(vec![
+        retained_messages[0].clone(),
+        retained_messages[1].clone(),
+        crate::user_text_message("broken tail"),
+        crate::assistant_text_message("failed answer"),
+    ]);
+    let usage = pl_model::TokenUsage {
+        prompt_tokens: 120,
+        completion_tokens: 30,
+        total_tokens: 150,
+        cached_prompt_tokens: 20,
+        cache_write_tokens: 10,
+        reasoning_tokens: 5,
+    };
+    registration.session.usage = usage.clone();
+    let billing = TurnBillingRecord::new();
+    registration
+        .session
+        .billing_by_turn
+        .insert("turn-broken".to_string(), billing.clone());
+    handle.register(registration).await.unwrap();
+
+    let preview = handle
+        .preview_conversation_recovery(
+            agent_id.clone(),
+            ConversationRecoveryTarget {
+                mode: ConversationRecoveryMode::RewindTail,
+                turn_ids: vec!["turn-broken".to_string()],
+                input_hashes: vec![crate::canonical_content_hash(b"broken tail")],
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(preview.retained_item_count, 2);
+    let request = ConversationRecoveryRequest {
+        recovery_id: "recovery-usage".to_string(),
+        preview,
+    };
+    let recovered = handle
+        .recover_conversation(agent_id.clone(), request.clone())
+        .await
+        .unwrap();
+    assert_eq!(
+        handle
+            .recover_conversation(agent_id.clone(), request)
+            .await
+            .unwrap(),
+        recovered
+    );
+
+    let durable = repository.state(&agent_id);
+    assert_eq!(durable.session.session.messages(), retained_messages);
+    assert_eq!(durable.session.usage, usage);
+    assert_eq!(
+        durable.session.billing_by_turn.get("turn-broken"),
+        Some(&billing)
+    );
+    assert!(matches!(
+        repository.last_context(),
+        Some(ThreadContextMutation::Replace { items }) if items.len() == 2
+    ));
+
+    handle
+        .submit(
+            agent_id.clone(),
+            AgentSubmitRequest::start(ThreadId::new("root").unwrap(), "continue"),
+        )
+        .await
+        .unwrap();
+    wait_for_prepared_messages(&host.turn_factory, 1).await;
+    assert_eq!(
+        host.turn_factory.prepared_sessions.lock().unwrap()[0],
+        retained_messages
+    );
+    assert!(
+        host.turn_factory.prepared_sessions.lock().unwrap()[0]
+            .iter()
+            .all(|message| crate::message_content_text(&message.content) != "broken tail")
+    );
+    wait_for_idle(&handle, agent_id).await;
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn rebuild_thread_recovers_when_compaction_has_no_rewindable_prefix() {
+    let repository = TestRepository::empty();
+    let host = TestHost::new(repository.clone(), FactoryMode::Fail);
+    let runtime = AgentRuntime::start(host.clone(), test_options())
+        .await
+        .unwrap();
+    let handle = runtime.handle();
+    let agent_id = AgentId::new("root").unwrap();
+    let mut registration = registration("root", "chat");
+    registration.session.session =
+        AgentSession::from_messages(vec![crate::assistant_text_message(
+            "compacted summary without original mailbox inputs",
+        )]);
+    handle.register(registration).await.unwrap();
+
+    let preview = handle
+        .preview_conversation_recovery(
+            agent_id.clone(),
+            ConversationRecoveryTarget {
+                mode: ConversationRecoveryMode::RebuildThread,
+                turn_ids: vec!["turn-compacted".to_string()],
+                input_hashes: Vec::new(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(preview.retained_item_count, 0);
+    assert_eq!(preview.removed_item_count, 1);
+    handle
+        .recover_conversation(
+            agent_id.clone(),
+            ConversationRecoveryRequest {
+                recovery_id: "recovery-rebuild".to_string(),
+                preview,
+            },
+        )
+        .await
+        .unwrap();
+
+    handle
+        .submit(
+            agent_id.clone(),
+            AgentSubmitRequest::start(ThreadId::new("root").unwrap(), "continue from workspace"),
+        )
+        .await
+        .unwrap();
+    wait_for_prepared_messages(&host.turn_factory, 1).await;
+    assert!(host.turn_factory.prepared_sessions.lock().unwrap()[0].is_empty());
+    wait_for_idle(&handle, agent_id).await;
     runtime.shutdown().await.unwrap();
 }
 

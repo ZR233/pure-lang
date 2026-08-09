@@ -1,5 +1,8 @@
 use anyhow::{Context, Result, bail};
-use pl_protocol::{ThreadItem, ThreadTurnHistory, ThreadTurnPage, Turn, TurnPhase, TurnState};
+use pl_protocol::{
+    ThreadContextDisposition, ThreadItem, ThreadTurnHistory, ThreadTurnPage, Turn, TurnPhase,
+    TurnState,
+};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 
 use crate::studio::entity::{item, turn};
@@ -30,6 +33,12 @@ impl StudioStore {
         }
 
         let mut turns = Vec::with_capacity(models.len());
+        let recovery = self.conversation_recovery_state(thread_id).await?;
+        let rolled_back = recovery
+            .rolled_back_turn_ranges
+            .iter()
+            .flat_map(|range| range.turn_ids.iter().map(String::as_str))
+            .collect::<std::collections::BTreeSet<_>>();
         for model in &models {
             let items = item::Entity::find()
                 .filter(item::Column::ThreadId.eq(thread_id))
@@ -43,6 +52,11 @@ impl StudioStore {
             turns.push(ThreadTurnHistory {
                 turn: turn_record(model)?,
                 items,
+                context_disposition: if rolled_back.contains(model.id.as_str()) {
+                    ThreadContextDisposition::RolledBack
+                } else {
+                    ThreadContextDisposition::Active
+                },
             });
         }
         let next_cursor = has_more

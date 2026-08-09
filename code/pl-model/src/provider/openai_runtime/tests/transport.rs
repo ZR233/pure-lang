@@ -1010,30 +1010,18 @@ async fn v2_compaction_uses_responses_trigger_feature_and_completed_usage() {
 }
 
 #[tokio::test]
-async fn v2_compaction_retries_stream_close_at_most_twice() {
-    let closed = "data: [DONE]\n\n".to_string();
-    let completed = concat!(
-        "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"compaction\",\"encrypted_content\":\"retried\"}}\n\n",
-        "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
-        "data: [DONE]\n\n"
-    )
-    .to_string();
-    let (base_url, handle) = serve_sse_sequence(vec![closed.clone(), closed, completed]).await;
+async fn v2_compaction_does_not_replay_after_stream_is_established() {
+    let (base_url, handle) = serve_sse_once("data: [DONE]\n\n".to_string()).await;
     let provider = openai_provider(base_url);
 
-    let response = provider
+    let error = provider
         .compact_context(compaction_request(OpenAiCompactionMode::RemoteV2))
         .await
-        .unwrap();
+        .unwrap_err();
     let captured = handle.await.unwrap();
 
-    assert_eq!(captured.len(), 3);
-    assert_eq!(
-        response.input,
-        vec![ModelContextItem::Compaction {
-            encrypted_content: "retried".to_string()
-        }]
-    );
+    assert!(matches!(error, PureError::HttpError(_)));
+    assert_eq!(captured.request_line, "POST /responses HTTP/1.1");
 }
 
 #[tokio::test]

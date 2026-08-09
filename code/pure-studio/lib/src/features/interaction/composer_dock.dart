@@ -13,6 +13,7 @@ import '../../shared/studio_driver_state.dart';
 import '../../shared/upward_popup_menu.dart';
 import 'interaction_payload.dart';
 import 'plan_confirmation_dock.dart';
+import 'task_recovery_dialog.dart';
 import 'tool_approval_dock.dart';
 import 'user_input_dock.dart';
 
@@ -138,9 +139,7 @@ class _TaskResumeDock extends ConsumerWidget {
                 onPressed: composer.isSubmissionPending
                     ? null
                     : () => unawaited(
-                        ref
-                            .read(studioControllerProvider.notifier)
-                            .resumeTask(workspace.threadId),
+                        showTaskRecoveryDialog(context, workspace.threadId),
                       ),
                 icon: composer.isSubmissionPending
                     ? const SizedBox.square(

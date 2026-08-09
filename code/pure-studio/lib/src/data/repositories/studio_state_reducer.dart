@@ -125,7 +125,10 @@ StudioState mergeThreadHistoryPage(
   for (final item in page.items) {
     if (item.threadId != threadId) continue;
     final existing = byId[item.id];
-    if (existing == null || item.revision > existing.revision) {
+    if (existing == null ||
+        item.revision > existing.revision ||
+        (item.contextDisposition == ThreadContextDisposition.rolledBack &&
+            existing.contextDisposition == ThreadContextDisposition.active)) {
       byId[item.id] = item;
     }
   }

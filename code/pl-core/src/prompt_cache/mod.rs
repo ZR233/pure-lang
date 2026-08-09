@@ -97,7 +97,10 @@ pub(crate) fn prepare_prompt_context(
     let Some(reason) = reason else {
         return Ok(None);
     };
-    let generation = if matches!(reason, PromptPrefixChangedReason::ContextAppended) {
+    let generation = if matches!(
+        reason,
+        PromptPrefixChangedReason::ContextAppended | PromptPrefixChangedReason::ContextRecovered
+    ) {
         previous_prompt.map_or(previous_generation.max(1), |previous| previous.generation)
     } else {
         previous_generation.saturating_add(1).max(1)
@@ -157,6 +160,9 @@ fn changed_reason(
     let Some(previous) = previous else {
         return Some(PromptPrefixChangedReason::Initial);
     };
+    if previous.prefix_changed_reason == PromptPrefixChangedReason::ContextRecovered {
+        return Some(PromptPrefixChangedReason::ContextRecovered);
+    }
     if previous.provider != input.provider.name || previous.provider_hash != hashes.provider {
         return Some(PromptPrefixChangedReason::ProviderChanged);
     }

@@ -5,6 +5,7 @@ use std::sync::{Mutex, OnceLock};
 use anyhow::{Context, Result, bail};
 
 use crate::agent::worktree::git_compatible_path;
+use crate::studio::StudioTaskGitFingerprint;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RepositorySnapshot {
@@ -50,6 +51,21 @@ pub(crate) async fn inspect_repository(
     tokio::task::spawn_blocking(move || inspect_repository_blocking(&path, require_clean))
         .await
         .context("git repository inspection task failed")?
+}
+
+pub(crate) async fn fingerprint_repository(
+    path: impl AsRef<Path>,
+    base_commit: &str,
+    expected_head: &str,
+) -> Result<StudioTaskGitFingerprint> {
+    let path = path.as_ref().to_path_buf();
+    let base_commit = base_commit.to_string();
+    let expected_head = expected_head.to_string();
+    tokio::task::spawn_blocking(move || {
+        fingerprint_repository_blocking(&path, &base_commit, &expected_head)
+    })
+    .await
+    .context("Git fingerprint task failed")?
 }
 
 pub(crate) async fn ensure_no_git_operation(path: impl AsRef<Path>) -> Result<()> {
@@ -255,6 +271,51 @@ fn inspect_repository_blocking(path: &Path, require_clean: bool) -> Result<Repos
     })
 }
 
+fn fingerprint_repository_blocking(
+    path: &Path,
+    base_commit: &str,
+    expected_head: &str,
+) -> Result<StudioTaskGitFingerprint> {
+    let snapshot = inspect_repository_blocking(path, false)?;
+    let index_diff = git_output_bytes(
+        &snapshot.workspace_root,
+        &["diff", "--cached", "--binary", "--no-ext-diff", "--"],
+    )?;
+    let working_tree_diff = git_output_bytes(
+        &snapshot.workspace_root,
+        &["diff", "--binary", "--no-ext-diff", "--"],
+    )?;
+    let untracked = git_output_bytes(
+        &snapshot.workspace_root,
+        &["ls-files", "--others", "--exclude-standard", "-z"],
+    )?;
+    let mut untracked_facts = Vec::new();
+    for path_bytes in untracked
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+    {
+        let relative =
+            std::str::from_utf8(path_bytes).context("untracked Git path is not UTF-8")?;
+        let object_id = git_hash_object(&snapshot.workspace_root, relative)?;
+        untracked_facts.extend_from_slice(path_bytes);
+        untracked_facts.push(0);
+        untracked_facts.extend_from_slice(object_id.as_bytes());
+        untracked_facts.push(0);
+    }
+    Ok(StudioTaskGitFingerprint {
+        workspace_root: normalized_path(&snapshot.workspace_root),
+        git_common_dir: normalized_path(&snapshot.git_common_dir),
+        branch: snapshot.branch,
+        head: snapshot.head,
+        base_commit: base_commit.to_string(),
+        expected_head: expected_head.to_string(),
+        operation: git_operation(&snapshot.workspace_root)?,
+        index_diff_hash: pl_core::canonical_content_hash(&index_diff),
+        working_tree_diff_hash: pl_core::canonical_content_hash(&working_tree_diff),
+        untracked_content_hash: pl_core::canonical_content_hash(&untracked_facts),
+    })
+}
+
 fn prepare_repository_for_task_blocking(path: &Path) -> Result<RepositorySnapshot> {
     let metadata = std::fs::metadata(path)
         .with_context(|| format!("task project path does not exist: {}", path.display()))?;
@@ -387,6 +448,45 @@ fn ensure_no_git_operation_blocking(workspace_root: &Path) -> Result<()> {
     Ok(())
 }
 
+fn git_operation(workspace_root: &Path) -> Result<String> {
+    let mut operations = Vec::new();
+    for (name, marker) in [
+        ("merge", "MERGE_HEAD"),
+        ("rebase", "rebase-merge"),
+        ("rebase", "rebase-apply"),
+        ("cherry-pick", "CHERRY_PICK_HEAD"),
+        ("revert", "REVERT_HEAD"),
+        ("sequencer", "sequencer"),
+    ] {
+        let marker_path = PathBuf::from(git_output(
+            workspace_root,
+            &["rev-parse", "--git-path", marker],
+        )?);
+        let marker_path = if marker_path.is_absolute() {
+            marker_path
+        } else {
+            workspace_root.join(marker_path)
+        };
+        if marker_path.exists() && !operations.contains(&name) {
+            operations.push(name);
+        }
+    }
+    Ok(if operations.is_empty() {
+        "none".to_string()
+    } else {
+        operations.join(",")
+    })
+}
+
+fn normalized_path(path: &Path) -> String {
+    let value = path.to_string_lossy().replace('\\', "/");
+    if cfg!(windows) {
+        value.to_lowercase()
+    } else {
+        value
+    }
+}
+
 fn repository_preparation_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
@@ -396,6 +496,36 @@ fn git_output(path: &Path, args: &[&str]) -> Result<String> {
     let output = git_command(path, args)?;
     if !output.status.success() {
         bail!("git {} failed: {}", args.join(" "), git_error(&output));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+fn git_output_bytes(path: &Path, args: &[&str]) -> Result<Vec<u8>> {
+    let output = git_command(path, args)?;
+    if !output.status.success() {
+        bail!("git {} failed: {}", args.join(" "), git_error(&output));
+    }
+    Ok(output.stdout)
+}
+
+fn git_hash_object(path: &Path, relative: &str) -> Result<String> {
+    let mut command = Command::new("git");
+    command
+        .env("LC_ALL", "C")
+        .env("LANG", "C")
+        .arg("-C")
+        .arg(path)
+        .args(["hash-object", "--no-filters", "--"])
+        .arg(relative);
+    crate::process::configure_background_std_command(&mut command);
+    let output = command
+        .output()
+        .with_context(|| format!("failed to hash untracked path {relative}"))?;
+    if !output.status.success() {
+        bail!(
+            "git hash-object failed for untracked path {relative}: {}",
+            git_error(&output)
+        );
     }
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
@@ -440,15 +570,19 @@ fn git_error(output: &Output) -> String {
 mod tests {
     use super::*;
 
-    #[test]
-    fn repository_snapshot_paths_are_native_non_verbatim() {
-        let repository = std::env::temp_dir().join(format!(
-            "pure-task-repository-path-{}",
+    fn temporary_repository(label: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "pure-task-{label}-{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_nanos()
-        ));
+        ))
+    }
+
+    #[test]
+    fn repository_snapshot_paths_are_native_non_verbatim() {
+        let repository = temporary_repository("repository-path");
         std::fs::create_dir_all(&repository).unwrap();
 
         let snapshot = prepare_repository_for_task_blocking(&repository).unwrap();
@@ -465,6 +599,66 @@ mod tests {
                 .to_string_lossy()
                 .starts_with(r"\\?\")
         );
+        std::fs::remove_dir_all(repository).unwrap();
+    }
+
+    #[test]
+    fn repository_fingerprint_detects_dirty_index_worktree_and_untracked_drift() {
+        let repository = temporary_repository("fingerprint");
+        std::fs::create_dir_all(&repository).unwrap();
+        let snapshot = prepare_repository_for_task_blocking(&repository).unwrap();
+        let base = snapshot.head;
+        let initial = fingerprint_repository_blocking(&repository, &base, &base).unwrap();
+
+        std::fs::write(repository.join("untracked.txt"), "first").unwrap();
+        let untracked = fingerprint_repository_blocking(&repository, &base, &base).unwrap();
+        assert_ne!(
+            untracked.untracked_content_hash,
+            initial.untracked_content_hash
+        );
+        assert_eq!(untracked.index_diff_hash, initial.index_diff_hash);
+
+        git_output(&repository, &["add", "--", "untracked.txt"]).unwrap();
+        let indexed = fingerprint_repository_blocking(&repository, &base, &base).unwrap();
+        assert_ne!(indexed.index_diff_hash, initial.index_diff_hash);
+        assert_eq!(
+            indexed.untracked_content_hash,
+            initial.untracked_content_hash
+        );
+
+        std::fs::write(repository.join("untracked.txt"), "second").unwrap();
+        let worktree = fingerprint_repository_blocking(&repository, &base, &base).unwrap();
+        assert_ne!(
+            worktree.working_tree_diff_hash,
+            initial.working_tree_diff_hash
+        );
+        assert_eq!(worktree.workspace_root, initial.workspace_root);
+        assert_eq!(worktree.git_common_dir, initial.git_common_dir);
+        assert_eq!(worktree.branch, initial.branch);
+        assert_eq!(worktree.head, initial.head);
+
+        std::fs::remove_dir_all(repository).unwrap();
+    }
+
+    #[test]
+    fn repository_fingerprint_reports_an_unfinished_git_operation() {
+        let repository = temporary_repository("git-operation");
+        std::fs::create_dir_all(&repository).unwrap();
+        let snapshot = prepare_repository_for_task_blocking(&repository).unwrap();
+        let merge_head = git_output(&repository, &["rev-parse", "--git-path", "MERGE_HEAD"])
+            .map(PathBuf::from)
+            .unwrap();
+        let merge_head = if merge_head.is_absolute() {
+            merge_head
+        } else {
+            repository.join(merge_head)
+        };
+        std::fs::write(merge_head, &snapshot.head).unwrap();
+
+        let fingerprint =
+            fingerprint_repository_blocking(&repository, &snapshot.head, &snapshot.head).unwrap();
+
+        assert_eq!(fingerprint.operation, "merge");
         std::fs::remove_dir_all(repository).unwrap();
     }
 }

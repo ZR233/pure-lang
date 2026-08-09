@@ -47,6 +47,17 @@ transcript，也不直接进入 provider request。`items` 不再包含 `context
 `contextCompaction` 可作为无正文内部审计 Item 保留，Bridge 查询永不返回。transcript replacement
 不删除 Studio Timeline，working state 也不能代替 `ThreadRuntimeSnapshot` 的当前产品事实。
 
+Conversation recovery 不新增 SQLite 表、不提升 schema 版本。`AgentWorkingState` 通过 serde default
+保存版本化 `ConversationRecoveryState`：单调 recovery revision、累计 rolled-back Turn 范围、最近
+恢复记录、恢复前后 transcript hash、移除 input/item 数与固定
+`externalStatePolicy=preserved`。旧数据库缺少该字段时读取为空状态。Timeline 查询根据累计 Turn
+范围派生 `ThreadContextDisposition::RolledBack`，不得更新或删除历史 Turn/Item 行。
+
+conversation transcript、working state、recovery marker、mailbox 状态与 Thread revision 在同一
+事务写入新的 replacement baseline。重复 recoveryId 返回已提交结果；expected runtime/session
+revision 冲突不产生部分更新。Thread 局部重建保留 pinned handoff、Evidence Ledger、session note、
+Task/WorkUnit owner、usage 和全部 Git/工作区状态。
+
 每次模型 inference 的 usage、provider/model、价格快照和费用明细保存在对应 Turn 的
 `model_json`；`usage_json` 保存同一事务重算的 Turn 聚合。完整 usage 必须先持久化成功，再发布
 runtime usage 通知。相同 inference ID 的相同记录幂等，内容冲突拒绝事务；历史费用始终使用
@@ -93,3 +104,9 @@ Rust 使用 tracing，只记录稳定 ID、kind、数量、字节数、事务耗
 hash、token 分类、费用与缓存节省。cache key、prompt、配置正文、header、凭据、工具参数和结果
 均不得进入日志。Bridge 只暴露 generation、策略、变化原因与聚合 usage；内部 hash、逐 inference
 billing 和 working-context 内容不进入 Flutter timeline。
+
+诊断额外汇总 Driver reconnect、provider retry/fallback、conversation recovery mode/目标 Turn、
+transcript 前后 hash、恢复次数与失败原因，但不记录 prompt 或被移除正文。验收 manifest 固定 prompt
+hash、workspace/Git identity、runId、Task generation、初始时间、全局 deadline、恢复次数和每次
+attempt 日志目录，用于证明原始 prompt 只提交一次以及 recovery 前后 Task/WorkUnit/worktree identity
+与 Git fingerprint 保持不变。

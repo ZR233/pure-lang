@@ -36,6 +36,16 @@ class DemoStudioApi implements StudioApi {
   Duration get promptToolDelay => const Duration(milliseconds: 500);
 
   @override
+  Future<TaskRecoveryPreview> previewTaskRecovery(String rootThreadId) {
+    throw UnsupportedError('Task recovery is not available in demo mode');
+  }
+
+  @override
+  Future<TaskRecoveryResult> applyTaskRecovery(TaskRecoveryRequest request) {
+    throw UnsupportedError('Task recovery is not available in demo mode');
+  }
+
+  @override
   Future<StudioState> bootstrap() async {
     final fixture = _ensureWorkspaceFixture();
     final project = fixture.project;

@@ -4,8 +4,8 @@ use crate::api::studio::convert::thread_stream::{
 };
 use crate::api::studio::runtime::active_bridge;
 use crate::api::studio::types::{
-    BridgeError, BridgeThread, BridgeThreadSnapshot, BridgeThreadTurnHistory, BridgeThreadTurnPage,
-    ListThreadTurnsRequest,
+    BridgeError, BridgeThread, BridgeThreadContextDisposition, BridgeThreadSnapshot,
+    BridgeThreadTurnHistory, BridgeThreadTurnPage, ListThreadTurnsRequest,
 };
 
 pub async fn list_threads(project_id: String) -> Result<Vec<BridgeThread>, BridgeError> {
@@ -55,6 +55,14 @@ pub async fn list_thread_turns(
             Ok(BridgeThreadTurnHistory {
                 turn: bridge_turn(history.turn),
                 items,
+                context_disposition: match history.context_disposition {
+                    pl_protocol::ThreadContextDisposition::Active => {
+                        BridgeThreadContextDisposition::Active
+                    }
+                    pl_protocol::ThreadContextDisposition::RolledBack => {
+                        BridgeThreadContextDisposition::RolledBack
+                    }
+                },
             })
         })
         .collect::<anyhow::Result<Vec<_>>>()?;

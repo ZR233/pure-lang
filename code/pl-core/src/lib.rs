@@ -13,7 +13,6 @@ pub mod path_safety;
 mod permission;
 mod process;
 mod prompt_cache;
-mod provider_error;
 pub mod runtime_usage;
 mod session;
 pub mod skill;
@@ -37,12 +36,14 @@ pub use agent_runtime::{
     AgentSessionDigestRole, AgentSnapshot, AgentSpawnRequest, AgentSpawnResult, AgentSubmitRequest,
     AgentTargetSelector, AgentTurnCheckpoint, AgentTurnCheckpointHandle, AgentTurnFactory,
     AgentTurnOutcome, AgentTurnPreparationContext, AgentTurnSubmitPolicy, AgentWaitResult,
-    CloseLifecycleRequest, DurableCommitFacts, DurableMailboxEnvelope, MailboxDeliveryState,
-    MailboxPresentation, PreparedAgentTurn, PreparedSessionRuntime, RestoredAgentRuntime,
-    RestoredInputPolicy, RestoredThreadSnapshot, SpawnLifecycleRequest, ThreadActorState,
-    ThreadCommit, ThreadCommitOutcome, ThreadContextMutation, ThreadContextState, ThreadId,
-    ThreadMutation, ThreadProjectionCommit, ThreadRepository, ToolEffectSet, TurnCheckpointReason,
-    TurnFinalizationPolicy, TurnId, TurnOutcomeKind,
+    CloseLifecycleRequest, ConversationRecoveryPreview, ConversationRecoveryRequest,
+    ConversationRecoveryResult, ConversationRecoveryTarget, DurableCommitFacts,
+    DurableMailboxEnvelope, MailboxDeliveryState, MailboxPresentation, PreparedAgentTurn,
+    PreparedSessionRuntime, RestoredAgentRuntime, RestoredInputPolicy, RestoredThreadSnapshot,
+    SpawnLifecycleRequest, ThreadActorState, ThreadCommit, ThreadCommitOutcome,
+    ThreadContextMutation, ThreadContextState, ThreadId, ThreadMutation, ThreadProjectionCommit,
+    ThreadRepository, ToolEffectSet, TurnCheckpointReason, TurnFinalizationPolicy, TurnId,
+    TurnOutcomeKind,
 };
 pub use attachment::MaterializedAttachment;
 pub use config::{
@@ -123,7 +124,6 @@ pub use pl_protocol::{
 pub(crate) use prompt_cache::{
     PromptCacheInput, derive_prompt_cache_key, prepare_prompt_context, stable_tool_schemas,
 };
-pub use provider_error::is_retryable_model_error;
 pub use runtime_usage::ModelTokenUsageSnapshot;
 pub use session::{
     AgentSession, AgentSessionForkPolicy, repair_incomplete_tool_history,
@@ -190,9 +190,9 @@ pub use web_search::{
     WebSearchPlan, WebSearchResolution, plan_web_search,
 };
 pub use working_set::{
-    CURRENT_TODO_SECTION_ID, EVIDENCE_LEDGER_SECTION_ID, MAX_PINNED_CONTEXT_BYTES,
-    MAX_PINNED_SECTION_BYTES, MAX_SESSION_NOTE_BYTES, REVIEW_CHECKPOINT_SECTION_ID,
-    REVIEW_MANIFEST_SECTION_ID, TurnWorkingSetChange, TurnWorkingSetHandle, canonical_content_hash,
-    canonical_json_hash, context_section,
+    CONVERSATION_RECOVERY_SECTION_ID, CURRENT_TODO_SECTION_ID, EVIDENCE_LEDGER_SECTION_ID,
+    MAX_PINNED_CONTEXT_BYTES, MAX_PINNED_SECTION_BYTES, MAX_SESSION_NOTE_BYTES,
+    REVIEW_CHECKPOINT_SECTION_ID, REVIEW_MANIFEST_SECTION_ID, TurnWorkingSetChange,
+    TurnWorkingSetHandle, canonical_content_hash, canonical_json_hash, context_section,
 };
 pub use workspace::{load_workspace_instructions, resolve_workspace_root};

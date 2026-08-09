@@ -23,6 +23,77 @@ const REVIEW_RESTART_DIAGNOSTIC: &str =
     "reviewer interrupted by application restart before review_exit";
 
 impl StudioStore {
+    pub(crate) async fn clear_task_stop_for_recovery(
+        &self,
+        task_run_id: &str,
+        expected_generation: u64,
+        expected_phase: TaskRunPhase,
+        expected_head: &str,
+    ) -> Result<bool> {
+        if !matches!(
+            expected_phase,
+            TaskRunPhase::Planning
+                | TaskRunPhase::PendingConfirmation
+                | TaskRunPhase::DesignUpdating
+                | TaskRunPhase::Implementing
+                | TaskRunPhase::Reworking
+        ) {
+            bail!(
+                "Task recovery cannot clear StopRequested during phase {}",
+                expected_phase.as_str()
+            );
+        }
+        let tx = self.db.begin().await?;
+        let result = async {
+            let run = entities::task_run::Entity::find_by_id(task_run_id.to_string())
+                .one(&tx)
+                .await?
+                .context("Task recovery run not found")?;
+            let generation = u64::try_from(run.task_generation)
+                .context("Task recovery generation is negative")?;
+            if generation != expected_generation
+                || run.phase != expected_phase.as_str()
+                || run.expected_head != expected_head
+                || run.terminal_generation.is_some()
+            {
+                bail!("Task recovery facts changed before StopRequested could be cleared");
+            }
+            let lease = entities::branch_lease::Entity::find()
+                .filter(entities::branch_lease::Column::TaskRunId.eq(task_run_id.to_string()))
+                .one(&tx)
+                .await?
+                .context("Task recovery branch lease not found")?;
+            if lease.expected_head != expected_head
+                || lease.branch != run.branch
+                || lease.git_common_dir != run.git_common_dir
+            {
+                bail!("Task recovery branch lease changed before StopRequested clear");
+            }
+            if run.stop_requested == 0 {
+                return Ok(false);
+            }
+            let mut active: entities::task_run::ActiveModel = run.into();
+            active.stop_requested = Set(0);
+            active.stop_requested_origin = Set(None);
+            active.stop_requested_reason = Set(None);
+            active.stop_requested_at = Set(None);
+            active.updated_at = Set(unix_seconds());
+            active.update(&tx).await?;
+            Ok(true)
+        }
+        .await;
+        match result {
+            Ok(cleared) => {
+                tx.commit().await?;
+                Ok(cleared)
+            }
+            Err(error) => {
+                tx.rollback().await?;
+                Err(error)
+            }
+        }
+    }
+
     pub(crate) async fn list_all_task_worktree_owners(
         &self,
     ) -> Result<Vec<TaskWorktreeOwnerSnapshot>> {

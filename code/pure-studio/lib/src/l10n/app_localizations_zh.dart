@@ -743,6 +743,63 @@ class AppLocalizationsZh extends AppLocalizations {
   String get taskResumeAction => '继续任务';
 
   @override
+  String get taskRecoveryDialogTitle => '恢复并继续';
+
+  @override
+  String get taskRecoveryDialogBody =>
+      '只回退所选 Thread 的模型上下文；Task、WorkUnit、工作区、提交、用量和审计历史全部保留。';
+
+  @override
+  String get taskRecoveryTargetLabel => '恢复目标';
+
+  @override
+  String get taskRecoveryTargetPlanner => 'Planner';
+
+  @override
+  String get taskRecoveryTargetExecutor => 'Executor';
+
+  @override
+  String get taskRecoveryTurnSuffixLabel => '回退连续尾部 Turn 数';
+
+  @override
+  String get taskRecoveryModeLabel => '恢复方式';
+
+  @override
+  String get taskRecoveryModeRewind => '回退对话尾部';
+
+  @override
+  String get taskRecoveryModeRebuild => '局部重建 Thread 上下文';
+
+  @override
+  String get taskRecoveryGitPreserved =>
+      'Git 与工作区不会被回滚、清理或重置；执行恢复时指纹必须与此预览完全一致。';
+
+  @override
+  String get taskRecoveryRebuildWarning =>
+      '无法安全保留前缀时，只清空这个 Thread 的普通 transcript；handoff、证据、会话笔记和外部状态仍保留。';
+
+  @override
+  String get taskRecoveryFirstConfirm => '检查恢复影响';
+
+  @override
+  String get taskRecoveryFinalConfirm => '确认恢复并继续';
+
+  @override
+  String get taskRecoveryApplying => '正在恢复…';
+
+  @override
+  String get taskRecoveryItems => '条目';
+
+  @override
+  String get taskRecoveryInputs => '输入';
+
+  @override
+  String get taskRecoveryTools => '工具';
+
+  @override
+  String get timelineRolledBack => '已从有效上下文回退';
+
+  @override
   String get interactionSubmitEmptyAnswersHint => '提交后未答问题保留空数组。';
 
   @override
@@ -2155,6 +2212,63 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get taskResumeAction => '继续任务';
+
+  @override
+  String get taskRecoveryDialogTitle => '恢复并继续';
+
+  @override
+  String get taskRecoveryDialogBody =>
+      '只回退所选 Thread 的模型上下文；Task、WorkUnit、工作区、提交、用量和审计历史全部保留。';
+
+  @override
+  String get taskRecoveryTargetLabel => '恢复目标';
+
+  @override
+  String get taskRecoveryTargetPlanner => 'Planner';
+
+  @override
+  String get taskRecoveryTargetExecutor => 'Executor';
+
+  @override
+  String get taskRecoveryTurnSuffixLabel => '回退连续尾部 Turn 数';
+
+  @override
+  String get taskRecoveryModeLabel => '恢复方式';
+
+  @override
+  String get taskRecoveryModeRewind => '回退对话尾部';
+
+  @override
+  String get taskRecoveryModeRebuild => '局部重建 Thread 上下文';
+
+  @override
+  String get taskRecoveryGitPreserved =>
+      'Git 与工作区不会被回滚、清理或重置；执行恢复时指纹必须与此预览完全一致。';
+
+  @override
+  String get taskRecoveryRebuildWarning =>
+      '无法安全保留前缀时，只清空这个 Thread 的普通 transcript；handoff、证据、会话笔记和外部状态仍保留。';
+
+  @override
+  String get taskRecoveryFirstConfirm => '检查恢复影响';
+
+  @override
+  String get taskRecoveryFinalConfirm => '确认恢复并继续';
+
+  @override
+  String get taskRecoveryApplying => '正在恢复…';
+
+  @override
+  String get taskRecoveryItems => '条目';
+
+  @override
+  String get taskRecoveryInputs => '输入';
+
+  @override
+  String get taskRecoveryTools => '工具';
+
+  @override
+  String get timelineRolledBack => '已从有效上下文回退';
 
   @override
   String get interactionSubmitEmptyAnswersHint => '提交后未答问题保留空数组。';

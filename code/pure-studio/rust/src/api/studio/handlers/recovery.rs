@@ -1,9 +1,35 @@
 use super::snapshot::studio_snapshot_inner;
-use crate::api::studio::convert::runtime::bridge_recovery_cleanup_preview;
+use crate::api::studio::convert::runtime::{
+    bridge_recovery_cleanup_preview, bridge_task_recovery_preview, bridge_task_recovery_result,
+    task_recovery_request,
+};
 use crate::api::studio::runtime::active_bridge;
 use crate::api::studio::types::{
     BridgeError, BridgeRecoveryCleanupPreviewDto, BridgeStudioSnapshotResponse,
+    BridgeTaskRecoveryPreviewDto, BridgeTaskRecoveryRequestDto, BridgeTaskRecoveryResultDto,
 };
+
+pub async fn preview_task_recovery(
+    root_thread_id: String,
+) -> Result<BridgeTaskRecoveryPreviewDto, BridgeError> {
+    let bridge = active_bridge().await?;
+    Ok(bridge
+        .studio
+        .preview_task_recovery(&root_thread_id)
+        .await
+        .map(bridge_task_recovery_preview)?)
+}
+
+pub async fn apply_task_recovery(
+    request: BridgeTaskRecoveryRequestDto,
+) -> Result<BridgeTaskRecoveryResultDto, BridgeError> {
+    let bridge = active_bridge().await?;
+    Ok(bridge
+        .studio
+        .apply_task_recovery(task_recovery_request(request))
+        .await
+        .map(bridge_task_recovery_result)?)
+}
 
 pub async fn preview_recovery_issue_cleanup(
     issue_id: String,

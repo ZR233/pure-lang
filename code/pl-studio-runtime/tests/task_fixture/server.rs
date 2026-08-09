@@ -29,6 +29,12 @@ const FEATURE_PATCH: &str = r#"*** Begin Patch
 *** Add File: src/feature.txt
 +offline integration verified
 *** End Patch"#;
+const EXPECTED_PATCH_FAILURE: &str = r#"*** Begin Patch
+*** Update File: README.md
+@@
+-# context that intentionally does not exist
++# replacement must never be applied
+*** End Patch"#;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ScriptRole {
@@ -101,7 +107,7 @@ impl ScriptedModelServer {
         if !progress.errors.is_empty() {
             bail!("scripted model errors:\n{}", progress.errors.join("\n"));
         }
-        let expected = (20, 7, 6);
+        let expected = (20, 11, 6);
         if (progress.planner, progress.executor, progress.reviewer) != expected {
             bail!(
                 "scripted model stopped at planner={}, executor={}, reviewer={}; expected {expected:?}\n{}",
@@ -385,6 +391,40 @@ async fn executor_response(state: &ScriptState, step: usize) -> Result<(&'static
             ),
         ),
         1 => (
+            "exec(expected failure)",
+            tool_call(
+                "executor-command-failure",
+                "exec",
+                serde_json::json!({
+                    "command": "git rev-parse --verify refs/heads/__pure_fixture_missing__"
+                }),
+            ),
+        ),
+        2 => (
+            "exec(corrected command)",
+            tool_call(
+                "executor-command-correction",
+                "exec",
+                serde_json::json!({"command": "git rev-parse --show-toplevel"}),
+            ),
+        ),
+        3 => (
+            "apply_patch(expected failure)",
+            tool_call(
+                "executor-patch-failure",
+                "apply_patch",
+                serde_json::json!({"input": EXPECTED_PATCH_FAILURE}),
+            ),
+        ),
+        4 => (
+            "read_file(after patch failure)",
+            tool_call(
+                "executor-read-after-patch-failure",
+                "read_file",
+                serde_json::json!({"path": "README.md"}),
+            ),
+        ),
+        5 => (
             "apply_patch",
             tool_call(
                 "executor-patch",
@@ -392,19 +432,19 @@ async fn executor_response(state: &ScriptState, step: usize) -> Result<(&'static
                 serde_json::json!({"input": FEATURE_PATCH}),
             ),
         ),
-        2 => (
+        6 => (
             "report_progress(implementing)",
             tool_call(
                 "executor-progress-implementing",
                 "report_progress",
                 serde_json::json!({
                     "stage": "implementing",
-                    "summary": "Created src/feature.txt with the required content.",
+                    "summary": "Corrected the command and patch failures, then created the required file.",
                     "nextStep": "Commit and verify the change."
                 }),
             ),
         ),
-        3 => (
+        7 => (
             "exec(git add)",
             tool_call(
                 "executor-add",
@@ -412,7 +452,7 @@ async fn executor_response(state: &ScriptState, step: usize) -> Result<(&'static
                 serde_json::json!({"command": "git add -- src/feature.txt"}),
             ),
         ),
-        4 => (
+        8 => (
             "exec(git commit)",
             tool_call(
                 "executor-commit",
@@ -422,7 +462,7 @@ async fn executor_response(state: &ScriptState, step: usize) -> Result<(&'static
                 }),
             ),
         ),
-        5 => (
+        9 => (
             "report_progress(verifying)",
             tool_call(
                 "executor-progress-verifying",
@@ -434,7 +474,7 @@ async fn executor_response(state: &ScriptState, step: usize) -> Result<(&'static
                 }),
             ),
         ),
-        6 => {
+        10 => {
             let task = current_task(state).await?;
             let work_unit = task
                 .work_units
@@ -579,6 +619,20 @@ fn validate_request_step(request: &serde_json::Value, role: ScriptRole, step: us
         }
         if request_text.contains("ownedPaths") {
             bail!("executor instructions still expose legacy ownedPaths");
+        }
+    }
+    if role == ScriptRole::Executor && step == 2 {
+        let output = latest_function_call_output(request)
+            .context("executor command failure did not return a tool result")?;
+        if !output.contains("\"status\":\"failed\"") {
+            bail!("fixture command was expected to fail before correction: {output}");
+        }
+    }
+    if role == ScriptRole::Executor && step == 4 {
+        let output = latest_function_call_output(request)
+            .context("executor patch failure did not return a tool result")?;
+        if !output.contains("Tool execution error:") {
+            bail!("fixture patch was expected to fail before reread: {output}");
         }
     }
     Ok(())

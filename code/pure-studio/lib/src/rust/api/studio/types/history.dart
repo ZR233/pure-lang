@@ -7,16 +7,24 @@ import '../../../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'thread_stream.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`
+
+enum BridgeThreadContextDisposition { active, rolledBack }
 
 class BridgeThreadTurnHistory {
   final BridgeTurn turn;
   final List<BridgeThreadItem> items;
+  final BridgeThreadContextDisposition contextDisposition;
 
-  const BridgeThreadTurnHistory({required this.turn, required this.items});
+  const BridgeThreadTurnHistory({
+    required this.turn,
+    required this.items,
+    required this.contextDisposition,
+  });
 
   @override
-  int get hashCode => turn.hashCode ^ items.hashCode;
+  int get hashCode =>
+      turn.hashCode ^ items.hashCode ^ contextDisposition.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -24,7 +32,8 @@ class BridgeThreadTurnHistory {
       other is BridgeThreadTurnHistory &&
           runtimeType == other.runtimeType &&
           turn == other.turn &&
-          items == other.items;
+          items == other.items &&
+          contextDisposition == other.contextDisposition;
 }
 
 class BridgeThreadTurnPage {

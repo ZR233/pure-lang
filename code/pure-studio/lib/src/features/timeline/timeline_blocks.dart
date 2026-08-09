@@ -181,13 +181,39 @@ class _TimelineRowBlock extends StatelessWidget {
                     ? CrossAxisAlignment.end
                     : CrossAxisAlignment.start,
                 children: [
-                  _RowCard(
-                    key: ValueKey(row.id),
-                    row: row,
-                    isCurrentActivity: isCurrentActivity,
-                    isReasoningExpanded: isReasoningExpanded,
-                    onToggleReasoning: onToggleReasoning,
+                  Opacity(
+                    opacity: row.isRolledBack ? 0.52 : 1,
+                    child: _RowCard(
+                      key: ValueKey(row.id),
+                      row: row,
+                      isCurrentActivity: isCurrentActivity,
+                      isReasoningExpanded: isReasoningExpanded,
+                      onToggleReasoning: onToggleReasoning,
+                    ),
                   ),
+                  if (row.isRolledBack)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: DecoratedBox(
+                        key: StudioDriverKeys.timelineRolledBack(row.id),
+                        decoration: BoxDecoration(
+                          color: context.studioPaper2,
+                          border: Border.all(color: context.studioLine),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
+                          child: Text(
+                            context.l10n.timelineRolledBack,
+                            style: Theme.of(context).textTheme.labelSmall
+                                ?.copyWith(color: context.studioInkSoft),
+                          ),
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),

@@ -39,7 +39,65 @@ pub struct AgentWorkingState {
     #[serde(default)]
     pub prompt: ThreadPromptMetadata,
     #[serde(default)]
+    pub conversation_recovery: ConversationRecoveryState,
+    #[serde(default)]
     pub revision: u64,
+}
+
+/// 对话上下文恢复方式；两种方式都保留外部世界状态。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ConversationRecoveryMode {
+    RewindTail,
+    RebuildThread,
+}
+
+/// 对话恢复对工作区、Git 和产品状态采用的固定策略。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ConversationExternalStatePolicy {
+    #[default]
+    Preserved,
+}
+
+/// 一次连续 Turn 后缀回退的审计范围。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationRecoveryTurnRange {
+    #[serde(default)]
+    pub turn_ids: Vec<String>,
+}
+
+/// 最近一次已提交 conversation recovery 的不可变审计记录。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationRecoveryRecord {
+    pub recovery_id: String,
+    pub revision: u64,
+    pub mode: ConversationRecoveryMode,
+    #[serde(default)]
+    pub target_turn_ids: Vec<String>,
+    pub before_transcript_hash: String,
+    pub after_transcript_hash: String,
+    pub removed_input_count: u64,
+    pub removed_item_count: u64,
+    pub runtime_revision: u64,
+    pub thread_revision: u64,
+    pub recovered_at: i64,
+}
+
+/// 与 canonical session 一起持久化的 conversation recovery 状态。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationRecoveryState {
+    #[serde(default)]
+    pub revision: u64,
+    #[serde(default)]
+    pub rolled_back_turn_ranges: Vec<ConversationRecoveryTurnRange>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_recovery: Option<ConversationRecoveryRecord>,
+    #[serde(default)]
+    pub external_state_policy: ConversationExternalStatePolicy,
 }
 
 /// 可由产品 repository 原子保存和恢复的 Agent session 快照。
@@ -70,6 +128,7 @@ pub enum PromptPrefixChangedReason {
     ToolSchemaChanged,
     ContextCompacted,
     ContextAppended,
+    ContextRecovered,
 }
 
 /// Thread 当前 prompt generation 的脱敏诊断快照。

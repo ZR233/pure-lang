@@ -32,6 +32,8 @@ abstract class StudioApi {
     String? selectedProjectId,
     String? selectedThreadId,
   });
+  Future<TaskRecoveryPreview> previewTaskRecovery(String rootThreadId);
+  Future<TaskRecoveryResult> applyTaskRecovery(TaskRecoveryRequest request);
   Future<StudioState> setModelRole({
     required String roleKey,
     required String providerId,
@@ -293,6 +295,29 @@ class FrbStudioApi implements StudioApi {
   }
 
   @override
+  Future<TaskRecoveryPreview> previewTaskRecovery(String rootThreadId) async {
+    await _ensureReady();
+    return _taskRecoveryPreviewFromFrb(
+      await _bridgeCall(
+        () => frb.previewTaskRecovery(rootThreadId: rootThreadId),
+      ),
+    );
+  }
+
+  @override
+  Future<TaskRecoveryResult> applyTaskRecovery(
+    TaskRecoveryRequest request,
+  ) async {
+    await _ensureReady();
+    return _taskRecoveryResultFromFrb(
+      await _bridgeCall(
+        () =>
+            frb.applyTaskRecovery(request: _taskRecoveryRequestToFrb(request)),
+      ),
+    );
+  }
+
+  @override
   Future<StudioState> setModelRole({
     required String roleKey,
     required String providerId,
@@ -481,7 +506,16 @@ class FrbStudioApi implements StudioApi {
     );
     final items = [
       for (final turn in response.turns)
-        for (final item in turn.items) _threadItemFromFrb(item),
+        for (final item in turn.items)
+          _threadItemFromFrb(
+            item,
+            contextDisposition: switch (turn.contextDisposition) {
+              frb.BridgeThreadContextDisposition.active =>
+                ThreadContextDisposition.active,
+              frb.BridgeThreadContextDisposition.rolledBack =>
+                ThreadContextDisposition.rolledBack,
+            },
+          ),
     ]..sort(_compareThreadItems);
     return ThreadHistoryPage(items: items, nextCursor: response.nextCursor);
   }

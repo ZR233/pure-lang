@@ -36,7 +36,9 @@ pub use message::{
 };
 pub use model_context::{
     AgentSessionSnapshot, AgentWorkingState, ContextSectionId, ContextSectionIdError,
-    ModelContextItem, ModelContextSectionSnapshot, ModelContextSnapshot, PinnedContextSection,
+    ConversationExternalStatePolicy, ConversationRecoveryMode, ConversationRecoveryRecord,
+    ConversationRecoveryState, ConversationRecoveryTurnRange, ModelContextItem,
+    ModelContextSectionSnapshot, ModelContextSnapshot, PinnedContextSection,
     PromptPrefixChangedReason, SessionNote, ThreadPromptMetadata, ThreadPromptSnapshot,
     ToolResultReceipt,
 };
@@ -49,10 +51,11 @@ pub use provider_catalog::{
     WebSearchProviderCapabilitiesDescriptor, WebSearchResolutionDescriptor,
 };
 pub use thread::{
-    AgentMessageChannel, THREAD_SCHEMA_VERSION, Thread, ThreadAttachment, ThreadItem,
-    ThreadItemContent, ThreadItemDelta, ThreadItemDeltaField, ThreadItemStatus, ThreadMode,
-    ThreadNotification, ThreadNotificationEnvelope, ThreadRuntimeSnapshot, ThreadRuntimeUsage,
-    ThreadSnapshot, ThreadStatus, ThreadSubscriptionRequest, ThreadSubscriptionUpdate,
-    ThreadToolCall, ThreadTurnHistory, ThreadTurnPage, Turn, TurnPhase, TurnState,
+    AgentMessageChannel, THREAD_SCHEMA_VERSION, Thread, ThreadAttachment, ThreadContextDisposition,
+    ThreadItem, ThreadItemContent, ThreadItemDelta, ThreadItemDeltaField, ThreadItemStatus,
+    ThreadMode, ThreadNotification, ThreadNotificationEnvelope, ThreadRuntimeSnapshot,
+    ThreadRuntimeUsage, ThreadSnapshot, ThreadStatus, ThreadSubscriptionRequest,
+    ThreadSubscriptionUpdate, ThreadToolCall, ThreadTurnHistory, ThreadTurnPage, Turn, TurnPhase,
+    TurnState,
 };
 pub use turn_failure::{RetryDisposition, TurnFailure, TurnFailureCategory};

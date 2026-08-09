@@ -2,6 +2,7 @@ import 'composer_models.dart';
 import 'agent_workspace_view.dart';
 import 'interaction_models.dart';
 import 'runtime_models.dart';
+import 'studio_enums.dart';
 import 'thread_directory_models.dart';
 import 'timeline_models.dart';
 import 'turn_models.dart';
@@ -58,6 +59,7 @@ class ThreadItemView {
     this.tool,
     this.filePath,
     this.mediaType,
+    this.contextDisposition = ThreadContextDisposition.active,
   });
 
   final String id;
@@ -79,6 +81,7 @@ class ThreadItemView {
   final TimelineToolPart? tool;
   final String? filePath;
   final String? mediaType;
+  final ThreadContextDisposition contextDisposition;
 
   ThreadItemView appendDelta({
     required String field,
@@ -122,6 +125,7 @@ class ThreadItemView {
     List<String>? reasoningSummary,
     List<String>? reasoningContent,
     TimelineToolPart? tool,
+    ThreadContextDisposition? contextDisposition,
   }) {
     return ThreadItemView(
       id: id,
@@ -143,6 +147,7 @@ class ThreadItemView {
       tool: tool ?? this.tool,
       filePath: filePath,
       mediaType: mediaType,
+      contextDisposition: contextDisposition ?? this.contextDisposition,
     );
   }
 }

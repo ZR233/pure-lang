@@ -58,6 +58,22 @@ coalescing key 属于 runtime envelope 元数据，不进入自然语言提示�
 重启无法恢复物理连接。repository 在 manager 启动前收束遗留 active Turn/Item、恢复 queued
 input 和 pending Interaction；manager 只创建 idle ThreadActor。任何恢复路径都不自动执行模型。
 
+ThreadActor 另外提供 idle-only 的 conversation recovery 命令。Preview 读取 canonical session、
+working state、Turn 消费的 mailbox input 与 runtime/session revision，不产生 mutation；Apply 同时
+校验 expected runtime revision 与 expected session revision，并以 recoveryId 幂等。恢复时 transcript
+replacement、working state、recovery marker、Thread revision 和通知必须由同一个 `ThreadCommit`
+提交；提交冲突时 actor 不更新内存。
+
+恢复模式为 `rewindTail | rebuildThread`。前者只接受经 user-message hash 和 tool 配对证明的安全
+前缀，后者只重建普通 transcript。两者均保留 Timeline、usage、session note、Evidence Ledger 和
+产品 owner，清空旧 Todo，推进 prompt generation，并废弃旧物理 model transport session。模型
+恢复后的新 Turn 只能由显式 durable input 启动，conversation recovery 本身不自动执行模型。
+
+Flutter Driver 的观察连接不是 Thread 生命周期 owner。只读 `snapshot` 在 disposed、closed 或 reset
+时可重建连接并 health check，最多三次，退避 250ms、500ms、1s；tap、输入、prompt submit、计划
+确认、恢复确认和 shutdown 永不自动重放。动作响应丢失后只能重连读取 canonical postcondition，
+且 Driver reconnect 不刷新 Task stall 计时或 Task durable progress。
+
 ## 17.4 Agent control plane
 
 模型工具名继续使用 spawn_agent、send_message、interrupt_agent、list_agents、wait_agents、

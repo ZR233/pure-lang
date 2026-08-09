@@ -770,6 +770,64 @@ class AppLocalizationsEn extends AppLocalizations {
   String get taskResumeAction => 'Continue task';
 
   @override
+  String get taskRecoveryDialogTitle => 'Recover and continue';
+
+  @override
+  String get taskRecoveryDialogBody =>
+      'Only the selected Thread model context is rolled back. Task, WorkUnit, workspace, commits, usage, and audit history are preserved.';
+
+  @override
+  String get taskRecoveryTargetLabel => 'Recovery target';
+
+  @override
+  String get taskRecoveryTargetPlanner => 'Planner';
+
+  @override
+  String get taskRecoveryTargetExecutor => 'Executor';
+
+  @override
+  String get taskRecoveryTurnSuffixLabel =>
+      'Contiguous tail Turns to roll back';
+
+  @override
+  String get taskRecoveryModeLabel => 'Recovery mode';
+
+  @override
+  String get taskRecoveryModeRewind => 'Rewind conversation tail';
+
+  @override
+  String get taskRecoveryModeRebuild => 'Rebuild this Thread context';
+
+  @override
+  String get taskRecoveryGitPreserved =>
+      'Git and workspace state will not be reset or cleaned. Their fingerprint must exactly match this preview when recovery is applied.';
+
+  @override
+  String get taskRecoveryRebuildWarning =>
+      'When no safe prefix can be preserved, only this Thread\'s ordinary transcript is cleared. Handoff, evidence, session notes, and external state remain.';
+
+  @override
+  String get taskRecoveryFirstConfirm => 'Review recovery impact';
+
+  @override
+  String get taskRecoveryFinalConfirm => 'Confirm recovery and continue';
+
+  @override
+  String get taskRecoveryApplying => 'Recovering…';
+
+  @override
+  String get taskRecoveryItems => 'items';
+
+  @override
+  String get taskRecoveryInputs => 'inputs';
+
+  @override
+  String get taskRecoveryTools => 'tools';
+
+  @override
+  String get timelineRolledBack => 'Rolled back from active context';
+
+  @override
   String get interactionSubmitEmptyAnswersHint =>
       'Unanswered questions are submitted as empty arrays.';
 

@@ -16,12 +16,16 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
 
-use script::{ScriptProgress, next_step, observe_request, response, role};
+use script::{
+    RECOVERY_INTERRUPTION_ACTION, ScriptProgress, next_step, observe_request, response, role,
+};
 
 pub(super) struct ServerOptions {
     workspace: PathBuf,
     config_home: PathBuf,
     request_log: PathBuf,
+    state_file: PathBuf,
+    exercise_recovery: bool,
 }
 
 impl ServerOptions {
@@ -30,6 +34,8 @@ impl ServerOptions {
         let mut workspace = None;
         let mut config_home = None;
         let mut request_log = None;
+        let mut state_file = None;
+        let mut exercise_recovery = false;
         while let Some(name) = arguments.next() {
             let value = arguments
                 .next()
@@ -38,6 +44,13 @@ impl ServerOptions {
                 "--workspace" => workspace = Some(PathBuf::from(value)),
                 "--config-home" => config_home = Some(PathBuf::from(value)),
                 "--request-log" => request_log = Some(PathBuf::from(value)),
+                "--state-file" => state_file = Some(PathBuf::from(value)),
+                "--exercise-recovery" => {
+                    exercise_recovery = value
+                        .to_string_lossy()
+                        .parse::<bool>()
+                        .context("--exercise-recovery must be true or false")?;
+                }
                 unknown => bail!("unknown argument: {unknown}"),
             }
         }
@@ -45,6 +58,8 @@ impl ServerOptions {
             workspace: workspace.context("missing --workspace")?,
             config_home: config_home.context("missing --config-home")?,
             request_log: request_log.context("missing --request-log")?,
+            state_file: state_file.context("missing --state-file")?,
+            exercise_recovery,
         };
         options.validate()?;
         Ok(options)
@@ -55,6 +70,7 @@ impl ServerOptions {
             ("workspace", &self.workspace),
             ("config home", &self.config_home),
             ("request log", &self.request_log),
+            ("state file", &self.state_file),
         ] {
             if !path.is_absolute() {
                 bail!("{name} must be an absolute path: {}", path.display());
@@ -70,6 +86,8 @@ impl ServerOptions {
 struct ServerState {
     workspace: PathBuf,
     request_log: PathBuf,
+    state_file: PathBuf,
+    exercise_recovery: bool,
     progress: Mutex<ScriptProgress>,
 }
 
@@ -81,10 +99,13 @@ pub(super) async fn run(options: ServerOptions) -> Result<()> {
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let base_url = format!("http://{}", listener.local_addr()?);
     write_config(&options.config_home, base_url.clone())?;
+    let progress = load_script_progress(&options.state_file)?;
     let state = Arc::new(ServerState {
         workspace: options.workspace,
         request_log: options.request_log,
-        progress: Mutex::new(ScriptProgress::default()),
+        state_file: options.state_file,
+        exercise_recovery: options.exercise_recovery,
+        progress: Mutex::new(progress),
     });
     println!("PURE_TASK_PROVIDER_READY {base_url}");
     std::io::stdout().flush()?;
@@ -105,11 +126,21 @@ async fn serve_request(mut socket: TcpStream, state: Arc<ServerState>) {
         let role = role(&request)?;
         observe_request(&mut progress, &request);
         let step = next_step(&mut progress, role);
-        let (action, body) = response(&mut progress, &state.workspace, role, step)?;
+        let (action, body) = response(
+            &mut progress,
+            &state.workspace,
+            role,
+            step,
+            state.exercise_recovery,
+        )?;
         append_request_log(&state.request_log, role.label(), step, action, &request)?;
+        save_script_progress(&state.state_file, &progress)?;
         println!("SCRIPTED_TASK_PROVIDER {}[{step}] {action}", role.label());
         std::io::stdout().flush()?;
         drop(progress);
+        if action == RECOVERY_INTERRUPTION_ACTION {
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+        }
         write_response(&mut socket, "200 OK", "text/event-stream", &body).await
     }
     .await;
@@ -120,6 +151,26 @@ async fn serve_request(mut socket: TcpStream, state: Arc<ServerState>) {
         eprintln!("{message}");
         let _ = write_response(&mut socket, "400 Bad Request", "text/plain", &message).await;
     }
+}
+
+fn load_script_progress(path: &Path) -> Result<ScriptProgress> {
+    if !path.exists() {
+        return Ok(ScriptProgress::default());
+    }
+    let bytes = std::fs::read(path)
+        .with_context(|| format!("failed to read scripted provider state {}", path.display()))?;
+    serde_json::from_slice(&bytes)
+        .with_context(|| format!("invalid scripted provider state {}", path.display()))
+}
+
+fn save_script_progress(path: &Path, progress: &ScriptProgress) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    let bytes = serde_json::to_vec(progress)?;
+    std::fs::write(path, bytes)
+        .with_context(|| format!("failed to save scripted provider state {}", path.display()))
 }
 
 fn write_config(home: &Path, base_url: String) -> Result<()> {

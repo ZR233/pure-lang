@@ -18,12 +18,15 @@ pub use response::{
 };
 pub use runtime::{
     BridgeActiveTurn, BridgeAgentDirectoryEntryDto, BridgeAgentProgressDto, BridgeBudgetLimitDto,
-    BridgeBudgetUsageDto, BridgeLspHealthDto, BridgeMcpHealthDto, BridgeMcpServerDto,
-    BridgeRecoveryCleanupPreviewDto, BridgeRecoveryCleanupResourceDto, BridgeRecoveryIssueAction,
-    BridgeRecoveryIssueCategory, BridgeRecoveryIssueScope, BridgeRecoveryResourcePresence,
-    BridgeRuntimeStatus, BridgeStudioRecoveryIssueDto, BridgeTaskCompletionDto,
-    BridgeTaskDesignReferenceDto, BridgeTaskMergeDto, BridgeTaskReviewDto,
-    BridgeTaskReviewFindingDto, BridgeTaskRuntimeDto, BridgeTaskWorkUnitDto, RuntimeSnapshot,
+    BridgeBudgetUsageDto, BridgeConversationRecoveryMode, BridgeLspHealthDto, BridgeMcpHealthDto,
+    BridgeMcpServerDto, BridgeRecoveryCleanupPreviewDto, BridgeRecoveryCleanupResourceDto,
+    BridgeRecoveryIssueAction, BridgeRecoveryIssueCategory, BridgeRecoveryIssueScope,
+    BridgeRecoveryResourcePresence, BridgeRuntimeStatus, BridgeStudioRecoveryIssueDto,
+    BridgeTaskCompletionDto, BridgeTaskDesignReferenceDto, BridgeTaskGitFingerprintDto,
+    BridgeTaskMergeDto, BridgeTaskRecoveryPreviewDto, BridgeTaskRecoveryRequestDto,
+    BridgeTaskRecoveryResultDto, BridgeTaskRecoveryTargetDto, BridgeTaskRecoveryTargetKind,
+    BridgeTaskRecoveryTurnDto, BridgeTaskReviewDto, BridgeTaskReviewFindingDto,
+    BridgeTaskRuntimeDto, BridgeTaskWorkUnitDto, RuntimeSnapshot,
 };
 pub use settings::{
     BridgeGeneralSettingsDto, BridgeInstructionsSettingsDto, BridgeMcpServerSettingsDto,

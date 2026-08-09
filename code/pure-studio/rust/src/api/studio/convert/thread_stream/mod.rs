@@ -370,6 +370,9 @@ fn prompt_prefix_changed_reason(
         PromptPrefixChangedReason::ContextAppended => {
             BridgePromptPrefixChangedReason::ContextAppended
         }
+        PromptPrefixChangedReason::ContextRecovered => {
+            BridgePromptPrefixChangedReason::ContextRecovered
+        }
     }
 }
 

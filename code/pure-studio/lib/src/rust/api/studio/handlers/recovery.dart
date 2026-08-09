@@ -11,6 +11,18 @@ import '../types/settings.dart';
 import '../types/thread_stream.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
+Future<BridgeTaskRecoveryPreviewDto> previewTaskRecovery({
+  required String rootThreadId,
+}) => RustLib.instance.api.crateApiStudioHandlersRecoveryPreviewTaskRecovery(
+  rootThreadId: rootThreadId,
+);
+
+Future<BridgeTaskRecoveryResultDto> applyTaskRecovery({
+  required BridgeTaskRecoveryRequestDto request,
+}) => RustLib.instance.api.crateApiStudioHandlersRecoveryApplyTaskRecovery(
+  request: request,
+);
+
 Future<BridgeRecoveryCleanupPreviewDto> previewRecoveryIssueCleanup({
   required String issueId,
 }) => RustLib.instance.api

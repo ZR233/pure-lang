@@ -7,6 +7,8 @@ abstract final class StudioDriverState {
   static TaskRuntimeView? _task;
   static AgentWorkspaceView? _workspace;
   static String? _planContent;
+  static TaskRecoveryPreview? _taskRecoveryPreview;
+  static TaskRecoveryResult? _taskRecoveryResult;
 
   static void publishTask(TaskRuntimeView? task) {
     _task = task;
@@ -18,6 +20,19 @@ abstract final class StudioDriverState {
 
   static void publishPlan(String content) {
     _planContent = content;
+  }
+
+  static void clearTaskRecovery() {
+    _taskRecoveryPreview = null;
+    _taskRecoveryResult = null;
+  }
+
+  static void publishTaskRecoveryPreview(TaskRecoveryPreview preview) {
+    _taskRecoveryPreview = preview;
+  }
+
+  static void publishTaskRecoveryResult(TaskRecoveryResult result) {
+    _taskRecoveryResult = result;
   }
 
   static String snapshotJson() {
@@ -32,6 +47,7 @@ abstract final class StudioDriverState {
               'threadMode': workspace.thread.mode.name,
               'threadStatus': workspace.thread.status,
               'isBusy': workspace.isBusy,
+              'isTaskPaused': workspace.isTaskPaused,
               'activeInteraction': workspace.activeInteraction == null
                   ? null
                   : {
@@ -52,8 +68,99 @@ abstract final class StudioDriverState {
               'timelineProgress': _timelineProgress(workspace),
             },
       'task': _task == null ? null : _taskJson(_task!),
+      'taskRecovery': {
+        'preview': _taskRecoveryPreview == null
+            ? null
+            : _taskRecoveryPreviewJson(_taskRecoveryPreview!),
+        'result': _taskRecoveryResult == null
+            ? null
+            : _taskRecoveryResultJson(_taskRecoveryResult!),
+      },
     });
   }
+
+  static Map<String, Object?> _taskRecoveryPreviewJson(
+    TaskRecoveryPreview preview,
+  ) => {
+    'previewToken': preview.previewToken,
+    'runId': preview.runId,
+    'taskGeneration': preview.taskGeneration,
+    'phase': preview.phase,
+    'expectedHead': preview.expectedHead,
+    'stopRequested': preview.stopRequested,
+    'branchLeaseId': preview.branchLeaseId,
+    'branchLeaseBranch': preview.branchLeaseBranch,
+    'branchLeaseGitCommonDir': preview.branchLeaseGitCommonDir,
+    'branchLeaseExpectedHead': preview.branchLeaseExpectedHead,
+    'recommendedThreadId': preview.recommendedThreadId,
+    'mainGitFingerprint': _gitFingerprintJson(preview.mainGitFingerprint),
+    'targets': [
+      for (final target in preview.targets)
+        {
+          'threadId': target.threadId,
+          'kind': target.kind.name,
+          'workUnitId': target.workUnitId,
+          'attempt': target.attempt,
+          'continuationRevision': target.continuationRevision,
+          'expectedRuntimeRevision': target.expectedRuntimeRevision,
+          'expectedThreadRevision': target.expectedThreadRevision,
+          'branch': target.branch,
+          'worktreePath': target.worktreePath,
+          'defaultTurnIds': target.defaultTurnIds,
+          'availableModes': target.availableModes
+              .map((mode) => mode.name)
+              .toList(),
+          'turns': [
+            for (final turn in target.turns)
+              {
+                'turnId': turn.turnId,
+                'status': turn.status,
+                'itemCount': turn.itemCount,
+                'inputCount': turn.inputCount,
+                'toolCount': turn.toolCount,
+                'toolSummaries': turn.toolSummaries,
+              },
+          ],
+          'gitFingerprint': _gitFingerprintJson(target.gitFingerprint),
+        },
+    ],
+  };
+
+  static Map<String, Object?> _taskRecoveryResultJson(
+    TaskRecoveryResult result,
+  ) => {
+    'recoveryId': result.recoveryId,
+    'runId': result.runId,
+    'workUnitId': result.workUnitId,
+    'rootThreadId': result.rootThreadId,
+    'targetThreadId': result.targetThreadId,
+    'mode': result.mode.name,
+    'recoveryRevision': result.recoveryRevision,
+    'runtimeRevision': result.runtimeRevision,
+    'threadRevision': result.threadRevision,
+    'beforeTranscriptHash': result.beforeTranscriptHash,
+    'afterTranscriptHash': result.afterTranscriptHash,
+    'removedItemCount': result.removedItemCount,
+    'removedInputCount': result.removedInputCount,
+    'stopCleared': result.stopCleared,
+    'resumeTurnId': result.resumeTurnId,
+    'gitFingerprint': _gitFingerprintJson(result.gitFingerprint),
+  };
+
+  static Map<String, Object?> _gitFingerprintJson(
+    TaskGitFingerprint fingerprint,
+  ) => {
+    'workspaceRoot': fingerprint.workspaceRoot,
+    'gitCommonDir': fingerprint.gitCommonDir,
+    'branch': fingerprint.branch,
+    'head': fingerprint.head,
+    'baseCommit': fingerprint.baseCommit,
+    'expectedHead': fingerprint.expectedHead,
+    'operation': fingerprint.operation,
+    'indexDiffHash': fingerprint.indexDiffHash,
+    'workingTreeDiffHash': fingerprint.workingTreeDiffHash,
+    'untrackedContentHash': fingerprint.untrackedContentHash,
+  };
 
   static Map<String, Object?> _taskJson(TaskRuntimeView task) => {
     'runId': task.runId,

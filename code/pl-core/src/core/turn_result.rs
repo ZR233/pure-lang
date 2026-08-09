@@ -12,12 +12,9 @@ use crate::turn::{ToolExecutionMode, TurnAbortReason, TurnOptions, TurnResult, T
 
 pub(super) fn provider_error_severity(
     active_subagent: Option<&crate::tool::SubagentContext>,
-    error: &str,
+    error: &PureError,
 ) -> ErrorSeverity {
-    if active_subagent.is_none()
-        && (crate::provider_error::is_provider_429_error(error)
-            || crate::provider_error::is_retryable_model_error(error))
-    {
+    if active_subagent.is_none() && error.is_transient_model_transport() {
         ErrorSeverity::Transient
     } else {
         ErrorSeverity::Recoverable
@@ -29,7 +26,14 @@ pub(super) fn normalize_provider_error(
     error: PureError,
 ) -> (String, ErrorSeverity, TurnFailure) {
     let message = error.to_string();
-    if active_subagent.is_some() && crate::provider_error::is_provider_429_error(&message) {
+    let (code, http_status) = error
+        .transient_model_metadata()
+        .map_or((None, None), |(code, status)| {
+            (code.map(ToString::to_string), status)
+        });
+    let is_capacity = code.as_deref().is_some_and(provider_capacity_code)
+        || matches!(http_status, Some(429 | 503));
+    if active_subagent.is_some() && is_capacity {
         let message = PureError::ProviderCapacity { message }.to_string();
         return (
             message.clone(),
@@ -37,25 +41,15 @@ pub(super) fn normalize_provider_error(
             TurnFailure::permanent(TurnFailureCategory::ProviderCapacity, message),
         );
     }
-    let severity = provider_error_severity(active_subagent, &message);
-    let retry = if error.is_transient_model_transport()
-        || crate::provider_error::is_retryable_model_error(&message)
-    {
+    let severity = provider_error_severity(active_subagent, &error);
+    let retry = if error.is_transient_model_transport() {
         RetryDisposition::Retryable {
             retry_after_ms: error.retry_after_ms(),
         }
     } else {
         RetryDisposition::Permanent
     };
-    let (code, http_status) = error
-        .transient_model_metadata()
-        .map_or((None, None), |(code, status)| {
-            (code.map(ToString::to_string), status)
-        });
-    let category = if retry.is_retryable()
-        && (code.as_deref().is_some_and(provider_capacity_code)
-            || matches!(http_status, Some(429 | 503)))
-    {
+    let category = if retry.is_retryable() && is_capacity {
         TurnFailureCategory::ProviderCapacity
     } else {
         TurnFailureCategory::Provider

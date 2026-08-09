@@ -1445,6 +1445,114 @@ abstract class AppLocalizations {
   /// **'Continue task'**
   String get taskResumeAction;
 
+  /// No description provided for @taskRecoveryDialogTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Recover and continue'**
+  String get taskRecoveryDialogTitle;
+
+  /// No description provided for @taskRecoveryDialogBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Only the selected Thread model context is rolled back. Task, WorkUnit, workspace, commits, usage, and audit history are preserved.'**
+  String get taskRecoveryDialogBody;
+
+  /// No description provided for @taskRecoveryTargetLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Recovery target'**
+  String get taskRecoveryTargetLabel;
+
+  /// No description provided for @taskRecoveryTargetPlanner.
+  ///
+  /// In en, this message translates to:
+  /// **'Planner'**
+  String get taskRecoveryTargetPlanner;
+
+  /// No description provided for @taskRecoveryTargetExecutor.
+  ///
+  /// In en, this message translates to:
+  /// **'Executor'**
+  String get taskRecoveryTargetExecutor;
+
+  /// No description provided for @taskRecoveryTurnSuffixLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Contiguous tail Turns to roll back'**
+  String get taskRecoveryTurnSuffixLabel;
+
+  /// No description provided for @taskRecoveryModeLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Recovery mode'**
+  String get taskRecoveryModeLabel;
+
+  /// No description provided for @taskRecoveryModeRewind.
+  ///
+  /// In en, this message translates to:
+  /// **'Rewind conversation tail'**
+  String get taskRecoveryModeRewind;
+
+  /// No description provided for @taskRecoveryModeRebuild.
+  ///
+  /// In en, this message translates to:
+  /// **'Rebuild this Thread context'**
+  String get taskRecoveryModeRebuild;
+
+  /// No description provided for @taskRecoveryGitPreserved.
+  ///
+  /// In en, this message translates to:
+  /// **'Git and workspace state will not be reset or cleaned. Their fingerprint must exactly match this preview when recovery is applied.'**
+  String get taskRecoveryGitPreserved;
+
+  /// No description provided for @taskRecoveryRebuildWarning.
+  ///
+  /// In en, this message translates to:
+  /// **'When no safe prefix can be preserved, only this Thread\'s ordinary transcript is cleared. Handoff, evidence, session notes, and external state remain.'**
+  String get taskRecoveryRebuildWarning;
+
+  /// No description provided for @taskRecoveryFirstConfirm.
+  ///
+  /// In en, this message translates to:
+  /// **'Review recovery impact'**
+  String get taskRecoveryFirstConfirm;
+
+  /// No description provided for @taskRecoveryFinalConfirm.
+  ///
+  /// In en, this message translates to:
+  /// **'Confirm recovery and continue'**
+  String get taskRecoveryFinalConfirm;
+
+  /// No description provided for @taskRecoveryApplying.
+  ///
+  /// In en, this message translates to:
+  /// **'Recovering…'**
+  String get taskRecoveryApplying;
+
+  /// No description provided for @taskRecoveryItems.
+  ///
+  /// In en, this message translates to:
+  /// **'items'**
+  String get taskRecoveryItems;
+
+  /// No description provided for @taskRecoveryInputs.
+  ///
+  /// In en, this message translates to:
+  /// **'inputs'**
+  String get taskRecoveryInputs;
+
+  /// No description provided for @taskRecoveryTools.
+  ///
+  /// In en, this message translates to:
+  /// **'tools'**
+  String get taskRecoveryTools;
+
+  /// No description provided for @timelineRolledBack.
+  ///
+  /// In en, this message translates to:
+  /// **'Rolled back from active context'**
+  String get timelineRolledBack;
+
   /// No description provided for @interactionSubmitEmptyAnswersHint.
   ///
   /// In en, this message translates to:

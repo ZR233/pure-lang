@@ -150,7 +150,7 @@ impl TaskCoordinator {
         }
     }
 
-    pub(super) fn ensure_branch_mutation_guard(
+    pub(crate) fn ensure_branch_mutation_guard(
         &self,
         guard: &BranchMutationGuard<'_>,
     ) -> Result<()> {

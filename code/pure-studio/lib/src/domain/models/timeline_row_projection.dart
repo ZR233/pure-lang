@@ -14,6 +14,7 @@ class TimelineRow {
     this.toolGroup,
     this.reasoningGroup,
     this.agentEvent,
+    this.isRolledBack = false,
   });
 
   factory TimelineRow.item({
@@ -31,6 +32,8 @@ class TimelineRow {
       renderVersion: _timelineRowRenderVersion(part),
       turnId: item.turnId,
       part: part,
+      isRolledBack:
+          part.contextDisposition == ThreadContextDisposition.rolledBack,
     );
   }
 
@@ -58,6 +61,7 @@ class TimelineRow {
       renderVersion: group.renderVersion,
       turnId: group.turnId,
       toolGroup: group,
+      isRolledBack: group.isRolledBack,
     );
   }
 
@@ -72,6 +76,7 @@ class TimelineRow {
       renderVersion: group.renderVersion,
       turnId: group.turnId,
       reasoningGroup: group,
+      isRolledBack: group.isRolledBack,
     );
   }
 
@@ -87,6 +92,7 @@ class TimelineRow {
   final TimelineToolGroup? toolGroup;
   final TimelineReasoningGroup? reasoningGroup;
   final TimelineAgentEvent? agentEvent;
+  final bool isRolledBack;
 }
 
 List<TimelineRow> timelineRowsFromThreadItems(List<ThreadItemView> source) {
@@ -225,6 +231,7 @@ TimelineEntry _timelineEntryFromThreadItem(ThreadItemView item) {
     },
     tool: item.tool,
     planContent: item.kind == ThreadItemKind.plan ? item.text : null,
+    contextDisposition: item.contextDisposition,
   );
 }
 
@@ -246,6 +253,7 @@ int _timelineRowRenderVersion(TimelineEntry part) {
     ...part.reasoningSummary,
     ...part.reasoningContent,
     part.planContent,
+    part.contextDisposition,
     part.updatedAt?.millisecondsSinceEpoch,
     part.error,
     tool?.arguments,

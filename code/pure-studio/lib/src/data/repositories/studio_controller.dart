@@ -267,23 +267,30 @@ class StudioController extends _$StudioController {
     );
   }
 
-  Future<void> resumeTask(String threadId) async {
-    final current = state.value;
-    final composer = current == null
-        ? const ComposerThreadState.idle()
-        : _workspaceUi(current, threadId).composer;
-    if (current == null ||
-        current.selectedThreadId != threadId ||
-        current.selectedAgentWorkspace?.isTaskPaused != true ||
-        composer.isSubmissionPending) {
-      return;
+  Future<TaskRecoveryPreview> previewTaskRecovery(String rootThreadId) {
+    return _api.previewTaskRecovery(rootThreadId);
+  }
+
+  Future<TaskRecoveryResult> applyTaskRecovery(
+    TaskRecoveryRequest request,
+  ) async {
+    final result = await _api.applyTaskRecovery(request);
+    await _refreshRecoveredHistory(result.targetThreadId);
+    return result;
+  }
+
+  Future<void> _refreshRecoveredHistory(String threadId) async {
+    try {
+      final page = await _api.listThreadTurns(threadId);
+      if (!ref.mounted) return;
+      final current = state.value;
+      if (current == null || current.workspacesByThread[threadId] == null) {
+        return;
+      }
+      state = AsyncData(mergeThreadHistoryPage(current, threadId, page));
+    } on Object {
+      // Recovery is already durable; a later history load will project labels.
     }
-    await _submitThreadInput(
-      current,
-      threadId,
-      composer.beginCommandSubmission(),
-      () => _api.startTurn(threadId, '继续任务', const []),
-    );
   }
 
   Future<void> _submitThreadInput(

@@ -13,7 +13,8 @@ use super::{
     AgentDirectoryWaitReason, AgentDirectoryWaitResult, AgentId, AgentLifecycleState,
     AgentProgressCheckpoint, AgentProgressStage, AgentRegistration, AgentRuntimeResult,
     AgentSessionDigest, AgentSnapshot, AgentSpawnRequest, AgentSpawnResult, AgentSubmitRequest,
-    AgentTurnCheckpoint, AgentWaitResult, ThreadId, TurnId,
+    AgentTurnCheckpoint, AgentWaitResult, ConversationRecoveryPreview, ConversationRecoveryRequest,
+    ConversationRecoveryResult, ConversationRecoveryTarget, ThreadId, TurnId,
 };
 use crate::agent_runtime::state::AgentRuntimeError;
 use crate::{AgentRoleId, ThreadEventBusHandle, ThreadEventSubscription};
@@ -104,6 +105,36 @@ impl AgentRuntimeHandle {
         self.send_to_actor(
             &agent_id,
             AgentLoopCommand::ReconfigureIdleRole { role, reply },
+        )
+        .await?;
+        receive(receiver).await?
+    }
+
+    /// 只读预览同一 Thread 的对话尾部回退或局部重建。
+    pub async fn preview_conversation_recovery(
+        &self,
+        agent_id: AgentId,
+        target: ConversationRecoveryTarget,
+    ) -> AgentRuntimeResult<ConversationRecoveryPreview> {
+        let (reply, receiver) = oneshot::channel();
+        self.send_to_actor(
+            &agent_id,
+            AgentLoopCommand::PreviewConversationRecovery { target, reply },
+        )
+        .await?;
+        receive(receiver).await?
+    }
+
+    /// 以 recovery id 幂等提交 conversation recovery。
+    pub async fn recover_conversation(
+        &self,
+        agent_id: AgentId,
+        request: ConversationRecoveryRequest,
+    ) -> AgentRuntimeResult<ConversationRecoveryResult> {
+        let (reply, receiver) = oneshot::channel();
+        self.send_to_actor(
+            &agent_id,
+            AgentLoopCommand::RecoverConversation { request, reply },
         )
         .await?;
         receive(receiver).await?

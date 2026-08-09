@@ -3,7 +3,7 @@ use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use pl_model::TokenUsage;
-use pl_protocol::{TurnBillingRecord, TurnFailure};
+use pl_protocol::{ConversationRecoveryMode, TurnBillingRecord, TurnFailure};
 use serde::{Deserialize, Serialize};
 
 use crate::{AgentRoleId, AgentSession};
@@ -291,6 +291,56 @@ pub enum AgentTurnSubmitPolicy {
     StartOrQueue,
     StartOnly,
     SteerOnly,
+}
+
+/// 产品根据 durable Turn/input 事实构造的连续对话恢复目标。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationRecoveryTarget {
+    pub mode: ConversationRecoveryMode,
+    #[serde(default)]
+    pub turn_ids: Vec<String>,
+    /// 按 mailbox/Turn 顺序排列的 canonical user-message hash。
+    #[serde(default)]
+    pub input_hashes: Vec<String>,
+}
+
+/// 不产生服务端临时状态的 conversation recovery CAS 预览。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationRecoveryPreview {
+    pub target: ConversationRecoveryTarget,
+    pub expected_runtime_revision: u64,
+    pub expected_thread_revision: u64,
+    pub recovery_revision: u64,
+    pub before_transcript_hash: String,
+    pub after_transcript_hash: String,
+    pub retained_item_count: u64,
+    pub removed_item_count: u64,
+    pub removed_input_count: u64,
+}
+
+/// 提交 conversation recovery 的幂等请求。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationRecoveryRequest {
+    pub recovery_id: String,
+    pub preview: ConversationRecoveryPreview,
+}
+
+/// 已提交 conversation recovery 的稳定结果。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationRecoveryResult {
+    pub recovery_id: String,
+    pub mode: ConversationRecoveryMode,
+    pub recovery_revision: u64,
+    pub runtime_revision: u64,
+    pub thread_revision: u64,
+    pub before_transcript_hash: String,
+    pub after_transcript_hash: String,
+    pub removed_item_count: u64,
+    pub removed_input_count: u64,
 }
 
 impl AgentSubmitRequest {

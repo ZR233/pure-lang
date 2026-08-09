@@ -228,6 +228,27 @@ class TaskRuntimeView {
 
   bool get isActive =>
       !const {'completed', 'blocked', 'failed', 'cancelled'}.contains(phase);
+
+  bool get hasRecoverableExecutorFailure {
+    if (!const {
+      'planning',
+      'pendingConfirmation',
+      'designUpdating',
+      'implementing',
+      'reworking',
+    }.contains(phase)) {
+      return false;
+    }
+    final hasFailedExecutor = workUnits.any(
+      (unit) => const {'failed', 'interrupted'}.contains(unit.executionStatus),
+    );
+    final hasInFlightWork = workUnits.any(
+      (unit) =>
+          const {'queued', 'running'}.contains(unit.executionStatus) ||
+          const {'running', 'reviewing'}.contains(unit.status),
+    );
+    return hasFailedExecutor && !hasInFlightWork;
+  }
 }
 
 class TaskWorkUnitView {

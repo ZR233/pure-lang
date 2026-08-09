@@ -195,6 +195,87 @@ async fn task_stop_gate_is_durable_and_keeps_lease_for_terminalization() {
 }
 
 #[tokio::test]
+async fn task_recovery_clears_stop_with_cas_and_is_idempotent() {
+    let (store, _thread_id, run) =
+        allocation_fixture("task-recovery-stop", TaskRunPhase::Implementing).await;
+    let requested = store
+        .request_task_stop(
+            &run.id,
+            &run.expected_head,
+            TaskStopOrigin::UserRequest,
+            &TaskStopReason::new("pause before recovery").unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let stale_error = store
+        .clear_task_stop_for_recovery(
+            &run.id,
+            requested.task_generation + 1,
+            TaskRunPhase::Implementing,
+            &run.expected_head,
+        )
+        .await
+        .unwrap_err();
+    assert!(stale_error.to_string().contains("facts changed"));
+    assert!(
+        store
+            .read_task_run(&run.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .stop_requested
+    );
+
+    let phase_error = store
+        .clear_task_stop_for_recovery(
+            &run.id,
+            requested.task_generation,
+            TaskRunPhase::Reviewing,
+            &run.expected_head,
+        )
+        .await
+        .unwrap_err();
+    assert!(phase_error.to_string().contains("during phase reviewing"));
+    assert!(
+        store
+            .read_task_run(&run.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .stop_requested
+    );
+
+    assert!(
+        store
+            .clear_task_stop_for_recovery(
+                &run.id,
+                requested.task_generation,
+                TaskRunPhase::Implementing,
+                &run.expected_head,
+            )
+            .await
+            .unwrap()
+    );
+    let resumed = store.read_task_run(&run.id).await.unwrap().unwrap();
+    assert!(!resumed.stop_requested);
+    assert_eq!(resumed.stop_requested_origin, None);
+    assert_eq!(resumed.stop_requested_reason, None);
+    assert_eq!(resumed.stop_requested_at, None);
+    assert!(
+        !store
+            .clear_task_stop_for_recovery(
+                &run.id,
+                requested.task_generation,
+                TaskRunPhase::Implementing,
+                &run.expected_head,
+            )
+            .await
+            .unwrap()
+    );
+}
+
+#[tokio::test]
 async fn executor_allocation_reuses_call_id_and_active_semantic_assignment() {
     let (store, thread_id, run) = allocation_fixture(
         "executor-allocation-idempotency",

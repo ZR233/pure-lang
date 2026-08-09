@@ -11,6 +11,7 @@ use sha2::{Digest, Sha256};
 use crate::AgentSession;
 
 pub const CURRENT_TODO_SECTION_ID: &str = "pl.current_todo";
+pub const CONVERSATION_RECOVERY_SECTION_ID: &str = "pl.conversation_recovery";
 pub const EVIDENCE_LEDGER_SECTION_ID: &str = "pl.evidence_ledger";
 pub const REVIEW_MANIFEST_SECTION_ID: &str = "mai.review_manifest";
 pub const REVIEW_CHECKPOINT_SECTION_ID: &str = "mai.review_checkpoint";

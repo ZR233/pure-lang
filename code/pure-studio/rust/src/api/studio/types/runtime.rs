@@ -105,6 +105,119 @@ pub struct BridgeRecoveryCleanupPreviewDto {
     pub resources: Vec<BridgeRecoveryCleanupResourceDto>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum BridgeConversationRecoveryMode {
+    RewindTail,
+    RebuildThread,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum BridgeTaskRecoveryTargetKind {
+    Planner,
+    Executor,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeTaskGitFingerprintDto {
+    pub workspace_root: String,
+    pub git_common_dir: String,
+    pub branch: String,
+    pub head: String,
+    pub base_commit: String,
+    pub expected_head: String,
+    pub operation: String,
+    pub index_diff_hash: String,
+    pub working_tree_diff_hash: String,
+    pub untracked_content_hash: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeTaskRecoveryTurnDto {
+    pub turn_id: String,
+    pub status: String,
+    pub updated_at: i64,
+    pub item_count: u64,
+    pub input_count: u64,
+    pub tool_count: u64,
+    pub tool_summaries: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeTaskRecoveryTargetDto {
+    pub thread_id: String,
+    pub kind: BridgeTaskRecoveryTargetKind,
+    pub work_unit_id: Option<String>,
+    pub attempt: Option<u32>,
+    pub continuation_revision: Option<u64>,
+    pub expected_runtime_revision: u64,
+    pub expected_thread_revision: u64,
+    pub branch: String,
+    pub worktree_path: String,
+    pub turns: Vec<BridgeTaskRecoveryTurnDto>,
+    pub default_turn_ids: Vec<String>,
+    pub available_modes: Vec<BridgeConversationRecoveryMode>,
+    pub git_fingerprint: BridgeTaskGitFingerprintDto,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeTaskRecoveryPreviewDto {
+    pub preview_token: String,
+    pub root_thread_id: String,
+    pub run_id: String,
+    pub task_generation: u64,
+    pub phase: String,
+    pub expected_head: String,
+    pub stop_requested: bool,
+    pub branch_lease_id: String,
+    pub branch_lease_branch: String,
+    pub branch_lease_git_common_dir: String,
+    pub branch_lease_expected_head: String,
+    pub recommended_thread_id: String,
+    pub targets: Vec<BridgeTaskRecoveryTargetDto>,
+    pub main_git_fingerprint: BridgeTaskGitFingerprintDto,
+    pub completion_revision_fingerprint: String,
+    pub review_revision_fingerprint: String,
+    pub merge_revision_fingerprint: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeTaskRecoveryRequestDto {
+    pub recovery_id: String,
+    pub root_thread_id: String,
+    pub target_thread_id: String,
+    pub mode: BridgeConversationRecoveryMode,
+    pub turn_ids: Vec<String>,
+    pub preview: BridgeTaskRecoveryPreviewDto,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeTaskRecoveryResultDto {
+    pub recovery_id: String,
+    pub run_id: String,
+    pub work_unit_id: Option<String>,
+    pub root_thread_id: String,
+    pub target_thread_id: String,
+    pub mode: BridgeConversationRecoveryMode,
+    pub recovery_revision: u64,
+    pub runtime_revision: u64,
+    pub thread_revision: u64,
+    pub before_transcript_hash: String,
+    pub after_transcript_hash: String,
+    pub removed_item_count: u64,
+    pub removed_input_count: u64,
+    pub stop_cleared: bool,
+    pub resume_turn_id: String,
+    pub git_fingerprint: BridgeTaskGitFingerprintDto,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct BridgeTaskRuntimeDto {

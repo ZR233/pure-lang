@@ -49,8 +49,9 @@ abstract class AgentWorkspaceView with _$AgentWorkspaceView {
   bool get isTaskPaused =>
       isRoot &&
       runtime.hasActiveTask &&
-      rootThread.status == 'interrupted' &&
-      !isBusy;
+      !isBusy &&
+      (rootThread.status == 'interrupted' ||
+          runtime.task!.hasRecoverableExecutorFailure);
 
   RoleSettingsView? role(String key) {
     for (final role in roles) {

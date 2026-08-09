@@ -1,15 +1,21 @@
 use crate::api::studio::types::{
     BridgeActiveTurn, BridgeAgentDirectoryEntryDto, BridgeAgentProgressDto, BridgeBudgetLimitDto,
-    BridgeBudgetUsageDto, BridgeLspHealthDto, BridgeMcpHealthDto, BridgeMcpServerDto,
-    BridgeRecoveryCleanupPreviewDto, BridgeRecoveryCleanupResourceDto, BridgeRecoveryIssueAction,
-    BridgeRecoveryIssueCategory, BridgeRecoveryIssueScope, BridgeRecoveryResourcePresence,
-    BridgeRuntimeStatus, BridgeStudioRecoveryIssueDto, BridgeTaskCompletionDto,
-    BridgeTaskDesignReferenceDto, BridgeTaskMergeDto, BridgeTaskReviewDto,
-    BridgeTaskReviewFindingDto, BridgeTaskRuntimeDto, BridgeTaskWorkUnitDto, RuntimeSnapshot,
+    BridgeBudgetUsageDto, BridgeConversationRecoveryMode, BridgeLspHealthDto, BridgeMcpHealthDto,
+    BridgeMcpServerDto, BridgeRecoveryCleanupPreviewDto, BridgeRecoveryCleanupResourceDto,
+    BridgeRecoveryIssueAction, BridgeRecoveryIssueCategory, BridgeRecoveryIssueScope,
+    BridgeRecoveryResourcePresence, BridgeRuntimeStatus, BridgeStudioRecoveryIssueDto,
+    BridgeTaskCompletionDto, BridgeTaskDesignReferenceDto, BridgeTaskGitFingerprintDto,
+    BridgeTaskMergeDto, BridgeTaskRecoveryPreviewDto, BridgeTaskRecoveryRequestDto,
+    BridgeTaskRecoveryResultDto, BridgeTaskRecoveryTargetDto, BridgeTaskRecoveryTargetKind,
+    BridgeTaskRecoveryTurnDto, BridgeTaskReviewDto, BridgeTaskReviewFindingDto,
+    BridgeTaskRuntimeDto, BridgeTaskWorkUnitDto, RuntimeSnapshot,
 };
+use pl_protocol::ConversationRecoveryMode;
 use pl_studio_runtime::{
     StudioAgentDirectoryEntry, StudioLspHealth, StudioMcpHealth, StudioRecoveryCleanupPreview,
-    StudioRecoveryIssue, StudioRuntimeSnapshot as CoreRuntimeSnapshot,
+    StudioRecoveryIssue, StudioRuntimeSnapshot as CoreRuntimeSnapshot, StudioTaskGitFingerprint,
+    StudioTaskRecoveryPreview, StudioTaskRecoveryRequest, StudioTaskRecoveryResult,
+    StudioTaskRecoveryTarget, StudioTaskRecoveryTargetKind, StudioTaskRecoveryTurn,
 };
 // ── Core conversion functions ──
 
@@ -124,6 +130,222 @@ pub(crate) fn bridge_recovery_cleanup_preview(
                 changed_file_count: resource.changed_file_count,
             })
             .collect(),
+    }
+}
+
+pub(crate) fn bridge_task_recovery_preview(
+    preview: StudioTaskRecoveryPreview,
+) -> BridgeTaskRecoveryPreviewDto {
+    BridgeTaskRecoveryPreviewDto {
+        preview_token: preview.preview_token,
+        root_thread_id: preview.root_thread_id,
+        run_id: preview.run_id,
+        task_generation: preview.task_generation,
+        phase: preview.phase,
+        expected_head: preview.expected_head,
+        stop_requested: preview.stop_requested,
+        branch_lease_id: preview.branch_lease_id,
+        branch_lease_branch: preview.branch_lease_branch,
+        branch_lease_git_common_dir: preview.branch_lease_git_common_dir,
+        branch_lease_expected_head: preview.branch_lease_expected_head,
+        recommended_thread_id: preview.recommended_thread_id,
+        targets: preview
+            .targets
+            .into_iter()
+            .map(bridge_task_recovery_target)
+            .collect(),
+        main_git_fingerprint: bridge_task_git_fingerprint(preview.main_git_fingerprint),
+        completion_revision_fingerprint: preview.completion_revision_fingerprint,
+        review_revision_fingerprint: preview.review_revision_fingerprint,
+        merge_revision_fingerprint: preview.merge_revision_fingerprint,
+    }
+}
+
+pub(crate) fn task_recovery_request(
+    request: BridgeTaskRecoveryRequestDto,
+) -> StudioTaskRecoveryRequest {
+    StudioTaskRecoveryRequest {
+        recovery_id: request.recovery_id,
+        root_thread_id: request.root_thread_id,
+        target_thread_id: request.target_thread_id,
+        mode: conversation_recovery_mode_from_bridge(request.mode),
+        turn_ids: request.turn_ids,
+        preview: task_recovery_preview_from_bridge(request.preview),
+    }
+}
+
+pub(crate) fn bridge_task_recovery_result(
+    result: StudioTaskRecoveryResult,
+) -> BridgeTaskRecoveryResultDto {
+    BridgeTaskRecoveryResultDto {
+        recovery_id: result.recovery_id,
+        run_id: result.run_id,
+        work_unit_id: result.work_unit_id,
+        root_thread_id: result.root_thread_id,
+        target_thread_id: result.target_thread_id,
+        mode: bridge_conversation_recovery_mode(result.mode),
+        recovery_revision: result.recovery_revision,
+        runtime_revision: result.runtime_revision,
+        thread_revision: result.thread_revision,
+        before_transcript_hash: result.before_transcript_hash,
+        after_transcript_hash: result.after_transcript_hash,
+        removed_item_count: result.removed_item_count,
+        removed_input_count: result.removed_input_count,
+        stop_cleared: result.stop_cleared,
+        resume_turn_id: result.resume_turn_id,
+        git_fingerprint: bridge_task_git_fingerprint(result.git_fingerprint),
+    }
+}
+
+fn bridge_task_recovery_target(target: StudioTaskRecoveryTarget) -> BridgeTaskRecoveryTargetDto {
+    BridgeTaskRecoveryTargetDto {
+        thread_id: target.thread_id,
+        kind: match target.kind {
+            StudioTaskRecoveryTargetKind::Planner => BridgeTaskRecoveryTargetKind::Planner,
+            StudioTaskRecoveryTargetKind::Executor => BridgeTaskRecoveryTargetKind::Executor,
+        },
+        work_unit_id: target.work_unit_id,
+        attempt: target.attempt,
+        continuation_revision: target.continuation_revision,
+        expected_runtime_revision: target.expected_runtime_revision,
+        expected_thread_revision: target.expected_thread_revision,
+        branch: target.branch,
+        worktree_path: target.worktree_path,
+        turns: target
+            .turns
+            .into_iter()
+            .map(|turn| BridgeTaskRecoveryTurnDto {
+                turn_id: turn.turn_id,
+                status: turn.status,
+                updated_at: turn.updated_at,
+                item_count: turn.item_count,
+                input_count: turn.input_count,
+                tool_count: turn.tool_count,
+                tool_summaries: turn.tool_summaries,
+            })
+            .collect(),
+        default_turn_ids: target.default_turn_ids,
+        available_modes: target
+            .available_modes
+            .into_iter()
+            .map(bridge_conversation_recovery_mode)
+            .collect(),
+        git_fingerprint: bridge_task_git_fingerprint(target.git_fingerprint),
+    }
+}
+
+fn bridge_task_git_fingerprint(
+    fingerprint: StudioTaskGitFingerprint,
+) -> BridgeTaskGitFingerprintDto {
+    BridgeTaskGitFingerprintDto {
+        workspace_root: fingerprint.workspace_root,
+        git_common_dir: fingerprint.git_common_dir,
+        branch: fingerprint.branch,
+        head: fingerprint.head,
+        base_commit: fingerprint.base_commit,
+        expected_head: fingerprint.expected_head,
+        operation: fingerprint.operation,
+        index_diff_hash: fingerprint.index_diff_hash,
+        working_tree_diff_hash: fingerprint.working_tree_diff_hash,
+        untracked_content_hash: fingerprint.untracked_content_hash,
+    }
+}
+
+fn task_recovery_preview_from_bridge(
+    preview: BridgeTaskRecoveryPreviewDto,
+) -> StudioTaskRecoveryPreview {
+    StudioTaskRecoveryPreview {
+        preview_token: preview.preview_token,
+        root_thread_id: preview.root_thread_id,
+        run_id: preview.run_id,
+        task_generation: preview.task_generation,
+        phase: preview.phase,
+        expected_head: preview.expected_head,
+        stop_requested: preview.stop_requested,
+        branch_lease_id: preview.branch_lease_id,
+        branch_lease_branch: preview.branch_lease_branch,
+        branch_lease_git_common_dir: preview.branch_lease_git_common_dir,
+        branch_lease_expected_head: preview.branch_lease_expected_head,
+        recommended_thread_id: preview.recommended_thread_id,
+        targets: preview
+            .targets
+            .into_iter()
+            .map(|target| StudioTaskRecoveryTarget {
+                thread_id: target.thread_id,
+                kind: match target.kind {
+                    BridgeTaskRecoveryTargetKind::Planner => StudioTaskRecoveryTargetKind::Planner,
+                    BridgeTaskRecoveryTargetKind::Executor => {
+                        StudioTaskRecoveryTargetKind::Executor
+                    }
+                },
+                work_unit_id: target.work_unit_id,
+                attempt: target.attempt,
+                continuation_revision: target.continuation_revision,
+                expected_runtime_revision: target.expected_runtime_revision,
+                expected_thread_revision: target.expected_thread_revision,
+                branch: target.branch,
+                worktree_path: target.worktree_path,
+                turns: target
+                    .turns
+                    .into_iter()
+                    .map(|turn| StudioTaskRecoveryTurn {
+                        turn_id: turn.turn_id,
+                        status: turn.status,
+                        updated_at: turn.updated_at,
+                        item_count: turn.item_count,
+                        input_count: turn.input_count,
+                        tool_count: turn.tool_count,
+                        tool_summaries: turn.tool_summaries,
+                    })
+                    .collect(),
+                default_turn_ids: target.default_turn_ids,
+                available_modes: target
+                    .available_modes
+                    .into_iter()
+                    .map(conversation_recovery_mode_from_bridge)
+                    .collect(),
+                git_fingerprint: task_git_fingerprint_from_bridge(target.git_fingerprint),
+            })
+            .collect(),
+        main_git_fingerprint: task_git_fingerprint_from_bridge(preview.main_git_fingerprint),
+        completion_revision_fingerprint: preview.completion_revision_fingerprint,
+        review_revision_fingerprint: preview.review_revision_fingerprint,
+        merge_revision_fingerprint: preview.merge_revision_fingerprint,
+    }
+}
+
+fn task_git_fingerprint_from_bridge(
+    fingerprint: BridgeTaskGitFingerprintDto,
+) -> StudioTaskGitFingerprint {
+    StudioTaskGitFingerprint {
+        workspace_root: fingerprint.workspace_root,
+        git_common_dir: fingerprint.git_common_dir,
+        branch: fingerprint.branch,
+        head: fingerprint.head,
+        base_commit: fingerprint.base_commit,
+        expected_head: fingerprint.expected_head,
+        operation: fingerprint.operation,
+        index_diff_hash: fingerprint.index_diff_hash,
+        working_tree_diff_hash: fingerprint.working_tree_diff_hash,
+        untracked_content_hash: fingerprint.untracked_content_hash,
+    }
+}
+
+fn bridge_conversation_recovery_mode(
+    mode: ConversationRecoveryMode,
+) -> BridgeConversationRecoveryMode {
+    match mode {
+        ConversationRecoveryMode::RewindTail => BridgeConversationRecoveryMode::RewindTail,
+        ConversationRecoveryMode::RebuildThread => BridgeConversationRecoveryMode::RebuildThread,
+    }
+}
+
+fn conversation_recovery_mode_from_bridge(
+    mode: BridgeConversationRecoveryMode,
+) -> ConversationRecoveryMode {
+    match mode {
+        BridgeConversationRecoveryMode::RewindTail => ConversationRecoveryMode::RewindTail,
+        BridgeConversationRecoveryMode::RebuildThread => ConversationRecoveryMode::RebuildThread,
     }
 }
 

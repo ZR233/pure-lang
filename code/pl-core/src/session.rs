@@ -3,10 +3,11 @@ use std::num::NonZeroUsize;
 
 use pl_model::{CompletionResponse, ModelTransportSession, ToolCall};
 use pl_protocol::{
-    AgentSessionSnapshot, AgentWorkingState, Message, MessageContent, MessageRole,
-    ModelContextItem, ModelContextSectionSnapshot, ModelContextSnapshot, PinnedContextSection,
-    SessionNote, TOOL_CALLS_METADATA_KEY, ThreadPromptMetadata, ToolCallHistoryMetadata,
-    ToolCallKind, ToolResultMetadata, ToolResultReceipt,
+    AgentSessionSnapshot, AgentWorkingState, ConversationRecoveryState, Message, MessageContent,
+    MessageRole, ModelContextItem, ModelContextSectionSnapshot, ModelContextSnapshot,
+    PinnedContextSection, PromptPrefixChangedReason, SessionNote, TOOL_CALLS_METADATA_KEY,
+    ThreadPromptMetadata, ToolCallHistoryMetadata, ToolCallKind, ToolResultMetadata,
+    ToolResultReceipt,
 };
 
 use crate::working_set::canonical_content_hash;
@@ -164,6 +165,46 @@ impl AgentSession {
 
     pub fn pinned_context_sections(&self) -> impl Iterator<Item = &PinnedContextSection> {
         self.working_state.sections.iter()
+    }
+
+    /// 移除一个可替换 pinned section；不存在时保持幂等。
+    pub fn remove_pinned_context(&mut self, section_id: &str) -> bool {
+        let sections = self
+            .working_state
+            .sections
+            .iter()
+            .filter(|section| section.id.as_str() != section_id)
+            .cloned()
+            .collect::<Vec<_>>();
+        self.replace_pinned_context_sections(sections)
+    }
+
+    pub fn conversation_recovery(&self) -> &ConversationRecoveryState {
+        &self.working_state.conversation_recovery
+    }
+
+    /// 替换 typed conversation recovery 审计状态。
+    pub fn replace_conversation_recovery(&mut self, recovery: ConversationRecoveryState) -> bool {
+        if self.working_state.conversation_recovery == recovery {
+            return false;
+        }
+        self.working_state.conversation_recovery = recovery;
+        self.working_state.revision = self.working_state.revision.saturating_add(1);
+        self.revision = self.revision.saturating_add(1);
+        true
+    }
+
+    /// 将当前 prompt generation 标记为上下文恢复，并废弃 transport/cache continuation。
+    pub fn mark_context_recovered(&mut self, updated_at: i64) {
+        let mut prompt = self.working_state.prompt.clone();
+        for snapshot in prompt.slots.values_mut() {
+            snapshot.generation = snapshot.generation.saturating_add(1).max(1);
+            snapshot.prefix_changed_reason = PromptPrefixChangedReason::ContextRecovered;
+            snapshot.updated_at = updated_at;
+        }
+        let _ = self.replace_prompt_metadata(prompt);
+        self.prompt_cache_key = None;
+        self.transport_session = ModelTransportSession::default();
     }
 
     pub fn session_note(&self) -> Option<&SessionNote> {
@@ -626,6 +667,7 @@ fn tool_call_arguments(value: &serde_json::Value) -> String {
 #[cfg(test)]
 mod tests {
     use pl_model::{CompletionResponse, FinishReason, TokenUsage, ToolCall, ToolCallKind};
+    use pl_protocol::ThreadPromptSnapshot;
 
     use super::*;
     use pretty_assertions::assert_eq;
@@ -906,6 +948,47 @@ mod tests {
         assert_eq!(session.revision(), original_revision + 1);
         assert_eq!(session.prompt_cache_key(), Some("cache-1"));
         assert!(session.messages().is_empty());
+    }
+
+    #[test]
+    fn context_recovery_starts_a_new_prompt_generation_and_drops_cache_continuation() {
+        let mut session = AgentSession::from_messages(vec![text_message("retained")]);
+        session.set_prompt_cache_key("old-cache".to_string());
+        session.replace_prompt_metadata(ThreadPromptMetadata {
+            active_scope: "executor".to_string(),
+            slots: [(
+                "executor".to_string(),
+                ThreadPromptSnapshot {
+                    scope: "executor".to_string(),
+                    generation: 4,
+                    provider: "local".to_string(),
+                    provider_hash: "provider".to_string(),
+                    model: "model".to_string(),
+                    fixed_prefix_hash: "fixed".to_string(),
+                    fixed_prefix_section_hashes: Default::default(),
+                    request_properties_hash: "request".to_string(),
+                    tool_schema_hash: "tools".to_string(),
+                    context_hash: "context".to_string(),
+                    prompt_cache_policy: "session".to_string(),
+                    prefix_changed_reason: PromptPrefixChangedReason::Initial,
+                    updated_at: 1,
+                },
+            )]
+            .into_iter()
+            .collect(),
+        });
+
+        session.mark_context_recovered(9);
+
+        let prompt = &session.prompt_metadata().slots["executor"];
+        assert_eq!(prompt.generation, 5);
+        assert_eq!(
+            prompt.prefix_changed_reason,
+            PromptPrefixChangedReason::ContextRecovered
+        );
+        assert_eq!(prompt.updated_at, 9);
+        assert_eq!(session.prompt_cache_key(), None);
+        assert_eq!(session.messages(), &[text_message("retained")]);
     }
 
     #[test]

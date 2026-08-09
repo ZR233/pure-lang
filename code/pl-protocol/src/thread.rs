@@ -64,6 +64,15 @@ pub enum ThreadStatus {
     Closed,
 }
 
+/// Timeline 记录是否仍属于后续模型的有效上下文。
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ThreadContextDisposition {
+    #[default]
+    Active,
+    RolledBack,
+}
+
 /// Thread 中一次由明确输入启动的执行。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -422,4 +431,6 @@ pub struct ThreadTurnPage {
 pub struct ThreadTurnHistory {
     pub turn: Turn,
     pub items: Vec<ThreadItem>,
+    #[serde(default)]
+    pub context_disposition: ThreadContextDisposition,
 }
