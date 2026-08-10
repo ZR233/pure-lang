@@ -31,7 +31,6 @@ use crate::transport_policy::{
 pub struct OpenAiProvider {
     info: ProviderInfo,
     http_client: reqwest::Client,
-    protocol: OpenAiProtocol,
     capabilities: ProviderCapabilities,
     models: Vec<ModelInfo>,
 }
@@ -73,14 +72,12 @@ impl OpenAiTransport {
 
 impl OpenAiProvider {
     pub(crate) fn new(info: ProviderInfo, models: Vec<ModelInfo>) -> Result<Self> {
-        if info.connection_mode == ProviderConnectionMode::WebSocket
-            && info.protocol != ProviderWireProtocol::Responses
-        {
-            return Err(PureError::ConfigError(
-                "chat_completions protocol does not support web_socket connection mode".to_string(),
-            ));
+        for model in &models {
+            model
+                .transport
+                .validate(&model.slug)
+                .map_err(PureError::ConfigError)?;
         }
-        let (protocol, capabilities) = provider_profile(info.protocol);
         let http_client = reqwest::Client::builder()
             .timeout(Duration::from_secs(300))
             .build()
@@ -89,8 +86,7 @@ impl OpenAiProvider {
         Ok(Self {
             info,
             http_client,
-            protocol,
-            capabilities,
+            capabilities: ProviderCapabilities::all(),
             models,
         })
     }
@@ -189,9 +185,10 @@ impl OpenAiProvider {
 
             if transport_retry_number >= max_retries {
                 if transport == OpenAiTransport::ResponsesWebSocket {
+                    let connection_key = self.connection_fingerprint(&request.model);
                     let activated = request
                         .transport_session
-                        .activate_responses_http_fallback()
+                        .activate_responses_http_fallback(connection_key)
                         .await;
                     if activated {
                         http_fallbacks = http_fallbacks.saturating_add(1);
@@ -238,9 +235,13 @@ impl OpenAiProvider {
     }
 
     fn active_transport(&self, request: &CompletionRequest) -> OpenAiTransport {
-        if self.info.protocol == ProviderWireProtocol::Responses
-            && self.info.connection_mode == ProviderConnectionMode::WebSocket
-            && !request.transport_session.uses_responses_http_fallback()
+        let transport = &self.model_info(&request.model).transport;
+        let connection_key = self.connection_fingerprint(&request.model);
+        if transport.protocol == ProviderWireProtocol::Responses
+            && transport.default_connection_mode == ProviderConnectionMode::WebSocket
+            && !request
+                .transport_session
+                .uses_responses_http_fallback(connection_key)
         {
             return OpenAiTransport::ResponsesWebSocket;
         }
@@ -253,10 +254,10 @@ impl OpenAiProvider {
     ) -> impl std::future::Future<Output = Result<CompletionEventStream>> + Send {
         let http_client = self.http_client.clone();
         let api_base = self.resolve_base_url();
-        let protocol = self.protocol;
         let capabilities = self.capabilities;
         let info = self.info.clone();
         let model_info = self.model_info(&request.model);
+        let protocol = provider_profile(model_info.transport.protocol).0;
         let connection_key = self.connection_fingerprint(&request.model);
         let transport = self.active_transport(&request);
         async move {
@@ -354,6 +355,15 @@ impl OpenAiProvider {
         let mut hasher = DefaultHasher::new();
         self.info.connection_fingerprint().hash(&mut hasher);
         model.hash(&mut hasher);
+        model_info.transport.protocol.hash(&mut hasher);
+        model_info
+            .transport
+            .default_connection_mode
+            .hash(&mut hasher);
+        model_info
+            .transport
+            .supported_connection_modes
+            .hash(&mut hasher);
         let mut headers = model_info
             .request_profile
             .headers

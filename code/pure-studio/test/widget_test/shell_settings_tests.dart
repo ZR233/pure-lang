@@ -740,26 +740,43 @@ void registerShellSettingsTests() {
     expect(find.text('gpt-5.6-terra'), findsOneWidget);
     expect(find.text('GPT-5.6-Luna'), findsOneWidget);
     expect(find.text('gpt-5.6-luna'), findsOneWidget);
-    expect(find.text('WebSocket'), findsOneWidget);
-    expect(find.text('HTTP'), findsOneWidget);
+    expect(find.text('Responses · WS'), findsWidgets);
+    expect(find.text('WS'), findsWidgets);
+    expect(find.text('HTTP'), findsWidgets);
     expect(
-      find.byKey(StudioDriverKeys.providerConnectionMode('openai')),
+      find.byKey(
+        StudioDriverKeys.providerModelConnectionMode('openai', 'gpt-5.6-sol'),
+      ),
       findsOneWidget,
     );
     final httpMode = find.byKey(
-      StudioDriverKeys.providerConnectionModeOption('openai', 'http'),
+      StudioDriverKeys.providerModelConnectionModeOption(
+        'openai',
+        'gpt-5.6-sol',
+        'http',
+      ),
     );
+    await tester.ensureVisible(httpMode);
+    await tester.pumpAndSettle();
     expect(httpMode.hitTestable(), findsOneWidget);
     await tester.tap(httpMode);
     await tester.pumpAndSettle();
+    expect(find.text('Responses · HTTP'), findsOneWidget);
 
+    await tester.fling(find.byType(ListView).last, const Offset(0, 1000), 2000);
+    await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, 'Save'));
     await tester.pumpAndSettle();
 
     final providers = api.savedProviderSettings!['providers'] as List<Object?>;
     final openai = providers.last! as Map<String, Object?>;
-    expect(openai['connectionMode'], 'http');
-    expect(openai['wireProtocol'], 'responses');
+    final modes = openai['modelConnectionModes'] as List<Object?>;
+    expect(
+      modes.cast<Map<String, Object?>>().singleWhere(
+        (mode) => mode['slug'] == 'gpt-5.6-sol',
+      )['connectionMode'],
+      'http',
+    );
   });
 
   testWidgets('unknown provider catalog entry works without UI branches', (
@@ -840,25 +857,93 @@ void registerShellSettingsTests() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Custom provider').last);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('chat_completions').last);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('responses').last);
-    await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(OutlinedButton, 'Add model'));
     await tester.pumpAndSettle();
+    final protocolDropdown = find
+        .widgetWithText(DropdownButtonFormField<String>, 'Chat Completions')
+        .last;
+    await tester.ensureVisible(protocolDropdown);
+    await tester.pumpAndSettle();
+    await tester.tap(protocolDropdown);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Responses').last);
+    await tester.pumpAndSettle();
 
-    expect(find.text('WebSocket'), findsOneWidget);
-    expect(find.text('HTTP'), findsOneWidget);
+    expect(find.text('WS'), findsWidgets);
+    expect(find.text('HTTP'), findsWidgets);
+    await tester.fling(find.byType(ListView).last, const Offset(0, 1000), 2000);
+    await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, 'Save'));
     await tester.pumpAndSettle();
 
     final providers = api.savedProviderSettings!['providers'] as List<Object?>;
     final custom = providers.last! as Map<String, Object?>;
     expect(custom['templateKind'], '');
-    expect(custom['wireProtocol'], 'responses');
-    expect(custom['connectionMode'], 'http');
+    final customModels = custom['customModels'] as List<Object?>;
+    final customModel = customModels.single! as Map<String, Object?>;
+    expect(customModel['wireProtocol'], 'responses');
+    expect(customModel['defaultConnectionMode'], 'http');
+    expect(customModel['supportedConnectionModes'], ['web_socket', 'http']);
     expect(custom['capabilitySource'], 'explicit');
     expect(custom['promptCacheDialect'], 'none');
+  });
+
+  testWidgets('custom Chat model exposes only HTTP and persists transport', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _FakeStudioApi(_stateWithPlannerModels());
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const SettingsPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Add provider'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(DropdownButtonFormField<String>).first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Custom provider').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Add model'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Chat Completions'), findsWidgets);
+    final supportedConnections = find.byType(SegmentedButton<String>).last;
+    expect(
+      tester.widget<SegmentedButton<String>>(supportedConnections).selected,
+      {'http'},
+    );
+    final wsOption = find.descendant(
+      of: supportedConnections,
+      matching: find.text('WS'),
+    );
+    await tester.ensureVisible(wsOption);
+    await tester.pumpAndSettle();
+    await tester.tap(wsOption);
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<SegmentedButton<String>>(supportedConnections).selected,
+      {'http'},
+    );
+    await tester.fling(find.byType(ListView).last, const Offset(0, 1000), 2000);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+
+    final providers = api.savedProviderSettings!['providers'] as List<Object?>;
+    final custom = providers.last! as Map<String, Object?>;
+    final customModels = custom['customModels'] as List<Object?>;
+    final customModel = customModels.single! as Map<String, Object?>;
+    expect(customModel['wireProtocol'], 'chat_completions');
+    expect(customModel['defaultConnectionMode'], 'http');
+    expect(customModel['supportedConnectionModes'], ['http']);
   });
 
   test('provider settings save updates default provider in store', () async {
@@ -878,16 +963,17 @@ void registerShellSettingsTests() {
               ProviderCommand(
                 id: 'deepseek',
                 templateKind: 'deepseek',
-                wireProtocol: 'chat_completions',
-                connectionMode: 'http',
                 name: 'DeepSeek',
                 baseUrl: 'https://api.deepseek.com',
                 secret: ProviderSecretCommand.preserve(),
                 capabilitySource: 'preset_defaults',
                 hostedWebSearch: false,
                 promptCacheDialect: 'implicit_prefix',
+                responsesToolSearch: false,
+                responsesProgrammaticToolCalling: false,
                 defaultModel: 'deepseek-v4-flash',
                 customModels: [],
+                modelConnectionModes: [],
               ),
             ],
             roles: [],
@@ -896,6 +982,35 @@ void registerShellSettingsTests() {
 
     final state = container.read(studioControllerProvider).requireValue;
     expect(state.defaultProviderId, 'deepseek');
+  });
+
+  test('catalog metadata preserves endpoint-resolved capabilities', () {
+    const provider = ProviderSettingsView(
+      id: 'openai',
+      templateKind: 'openai',
+      name: 'Compatible OpenAI',
+      baseUrl: 'https://compatible.example/v1',
+      capabilitySource: 'preset_defaults',
+      hostedWebSearch: false,
+      promptCacheDialect: 'none',
+      responsesToolSearch: false,
+      responsesProgrammaticToolCalling: false,
+      defaultModel: 'gpt-5.6-sol',
+      models: [],
+      status: 'ready',
+      usageLabel: '',
+    );
+
+    final resolved = providerWithCatalogMetadata(
+      provider,
+      _testProviderCatalog,
+    );
+
+    expect(resolved.hostedWebSearch, isFalse);
+    expect(resolved.promptCacheDialect, 'none');
+    expect(resolved.responsesToolSearch, isFalse);
+    expect(resolved.responsesProgrammaticToolCalling, isFalse);
+    expect(resolved.credentialEnv, 'OPENAI_API_KEY');
   });
 
   testWidgets('provider editor cancel does not save local draft', (
@@ -983,12 +1098,15 @@ void registerShellSettingsTests() {
                 slug: 'gpt-5.5',
                 displayName: 'GPT-5.5',
                 reasoningEfforts: ['medium'],
+                wireProtocol: 'responses',
+                supportedConnectionModes: ['web_socket', 'http'],
+                defaultConnectionMode: 'web_socket',
+                connectionMode: 'web_socket',
               ),
             ],
             status: 'ready',
             usageLabel: '1 models',
             modelCount: '1',
-            wireProtocol: 'responses',
           ),
         ],
       ),
@@ -1018,7 +1136,10 @@ void registerShellSettingsTests() {
     final openAi = providers.last! as Map<String, Object?>;
     expect(openAi['id'], 'openai-team');
     expect(openAi['originalId'], 'openai');
-    expect(openAi['connectionMode'], 'http');
+    expect((openAi['modelConnectionModes'] as List<Object?>).single, {
+      'slug': 'gpt-5.5',
+      'connectionMode': 'web_socket',
+    });
   });
 
   testWidgets(
@@ -1377,27 +1498,40 @@ void registerShellSettingsTests() {
         find.byKey(StudioDriverKeys.settingsRoleModel('explorer')),
       );
       await tester.pumpAndSettle();
-      expect(
-        find
-            .byKey(
-              StudioDriverKeys.settingsRoleModelOption(
-                'explorer',
-                'deepseek',
-                'deepseek-reasoner',
-              ),
-            )
-            .hitTestable(),
-        findsOneWidget,
-      );
-      await tester.tap(
-        find.byKey(
-          StudioDriverKeys.settingsRoleModelOption(
-            'explorer',
-            'deepseek',
-            'deepseek-reasoner',
-          ),
+      final flashOption = find.byKey(
+        StudioDriverKeys.settingsRoleModelOption(
+          'explorer',
+          'deepseek',
+          'deepseek-v4-flash',
         ),
       );
+      expect(
+        find.descendant(
+          of: flashOption,
+          matching: find.text(
+            'DeepSeek / DeepSeek V4 Flash · Responses · HTTP',
+          ),
+        ),
+        findsOneWidget,
+      );
+      final reasonerOption = find.byKey(
+        StudioDriverKeys.settingsRoleModelOption(
+          'explorer',
+          'deepseek',
+          'deepseek-reasoner',
+        ),
+      );
+      expect(
+        find.descendant(
+          of: reasonerOption,
+          matching: find.text(
+            'DeepSeek / DeepSeek Reasoner · Chat Completions · HTTP',
+          ),
+        ),
+        findsOneWidget,
+      );
+      expect(reasonerOption.hitTestable(), findsOneWidget);
+      await tester.tap(reasonerOption);
       await tester.pumpAndSettle();
       expect(api.roleUpdate?.roleKey, 'explorer');
       expect(api.roleUpdate?.model, 'deepseek-reasoner');
@@ -1609,7 +1743,6 @@ StudioState _providerListState({bool zhipuOnly = false}) {
     status: 'ready',
     usageLabel: '1 model',
     modelCount: '1',
-    wireProtocol: 'chat_completions',
   );
   if (zhipuOnly) {
     return base.copyWith(defaultProviderId: zhipu.id, providers: const [zhipu]);
@@ -1619,7 +1752,6 @@ StudioState _providerListState({bool zhipuOnly = false}) {
     subtitle: 'DeepSeek Platform',
     hasBearerToken: true,
     modelCount: '2',
-    wireProtocol: 'chat_completions',
   );
   return base.copyWith(
     defaultProviderId: deepSeek.id,

@@ -98,6 +98,42 @@ fn provider_default_model_slugs_are_backed_by_default_models() {
 }
 
 #[test]
+fn builtin_model_transport_matrix_is_explicit_for_every_supported_slug() {
+    let models = default_models();
+    for model in &models {
+        let expected = if model.slug.starts_with("gpt-") {
+            ModelTransportProfile::responses_websocket()
+        } else if model.slug == "deepseek-v4-flash" {
+            ModelTransportProfile::responses_http()
+        } else if model.slug == "deepseek-v4-pro"
+            || model.slug.starts_with("glm-")
+            || model.slug.starts_with("mimo-")
+        {
+            ModelTransportProfile::chat_completions_http()
+        } else {
+            continue;
+        };
+        assert_eq!(
+            model.transport, expected,
+            "unexpected transport for {}",
+            model.slug
+        );
+    }
+
+    for slug in openai_default_model_slugs()
+        .iter()
+        .chain(deepseek_default_model_slugs())
+        .chain(zhipu_default_model_slugs())
+        .chain(mimo_default_model_slugs())
+    {
+        assert!(
+            models.iter().any(|model| model.slug == *slug),
+            "transport matrix did not cover {slug}"
+        );
+    }
+}
+
+#[test]
 fn bundled_chat_models_opt_in_to_parallel_wire_only_when_supported() {
     let models = default_models();
 
@@ -106,6 +142,9 @@ fn bundled_chat_models_opt_in_to_parallel_wire_only_when_supported() {
         .chain(zhipu_default_model_slugs())
     {
         let model = models.iter().find(|model| model.slug == *slug).unwrap();
+        if model.transport.protocol != crate::ProviderWireProtocol::ChatCompletions {
+            continue;
+        }
         assert!(
             model.request_profile.chat_parallel_tool_calls,
             "{slug} should opt in to the Chat parallel_tool_calls field"
@@ -269,7 +308,7 @@ fn glm52_effort_wire_links_reasoning_effort_and_thinking() {
 
 #[test]
 fn deepseek_request_includes_base_body_thinking() {
-    let profile = deepseek_request_profile();
+    let profile = deepseek_request_profile(false);
     assert_eq!(
         profile.body["thinking"]["type"],
         serde_json::json!("enabled")

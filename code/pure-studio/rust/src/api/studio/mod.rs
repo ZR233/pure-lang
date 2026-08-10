@@ -104,6 +104,10 @@ mod tests {
                 .map(|preset| (
                     preset.service_capabilities.web_search.hosted_responses,
                     preset.service_capabilities.web_search.standalone.as_deref(),
+                    preset.service_capabilities.responses_tool_search,
+                    preset
+                        .service_capabilities
+                        .responses_programmatic_tool_calling,
                 ))
                 .collect::<Vec<_>>(),
             canonical
@@ -112,36 +116,42 @@ mod tests {
                 .map(|preset| (
                     preset.service_capabilities.web_search.hosted_responses,
                     preset.service_capabilities.web_search.standalone.as_deref(),
+                    preset.service_capabilities.responses_tool_search,
+                    preset
+                        .service_capabilities
+                        .responses_programmatic_tool_calling,
                 ))
                 .collect::<Vec<_>>()
         );
         assert_eq!(
             bridge
-                .presets
+                .model_catalogs
                 .iter()
-                .map(|preset| (
-                    preset.transport.protocol.as_str(),
-                    preset
+                .flat_map(|catalog| catalog.models.iter())
+                .map(|model| (
+                    model.transport.protocol.as_str(),
+                    model
                         .transport
                         .connection_modes
                         .iter()
                         .map(|mode| mode.id.as_str())
                         .collect::<Vec<_>>(),
-                    preset.transport.default_connection_mode.as_str(),
+                    model.transport.default_connection_mode.as_str(),
                 ))
                 .collect::<Vec<_>>(),
             canonical
-                .presets
-                .iter()
-                .map(|preset| (
-                    preset.transport.protocol.as_str(),
-                    preset
+                .model_catalogs
+                .values()
+                .flat_map(|catalog| catalog.models.iter())
+                .map(|model| (
+                    model.transport.protocol.as_str(),
+                    model
                         .transport
                         .connection_modes
                         .iter()
                         .map(|mode| mode.id.as_str())
                         .collect::<Vec<_>>(),
-                    preset.transport.default_connection_mode.as_str(),
+                    model.transport.default_connection_mode.as_str(),
                 ))
                 .collect::<Vec<_>>()
         );

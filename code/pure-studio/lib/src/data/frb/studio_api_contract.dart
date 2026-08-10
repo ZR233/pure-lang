@@ -588,8 +588,6 @@ class FrbStudioApi implements StudioApi {
                   id: provider.id,
                   originalId: provider.originalId,
                   templateKind: provider.templateKind,
-                  wireProtocol: provider.wireProtocol,
-                  connectionMode: provider.connectionMode,
                   name: provider.name,
                   baseUrl: provider.baseUrl,
                   secret: switch (provider.secret.action) {
@@ -606,6 +604,9 @@ class FrbStudioApi implements StudioApi {
                   hostedWebSearch: provider.hostedWebSearch,
                   standaloneWebSearch: provider.standaloneWebSearch,
                   promptCacheDialect: provider.promptCacheDialect,
+                  responsesToolSearch: provider.responsesToolSearch,
+                  responsesProgrammaticToolCalling:
+                      provider.responsesProgrammaticToolCalling,
                   defaultModel: provider.defaultModel,
                   customModels: [
                     for (final model in provider.customModels)
@@ -614,6 +615,17 @@ class FrbStudioApi implements StudioApi {
                         displayName: model.displayName,
                         reasoningEfforts: model.reasoningEfforts,
                         baseInstructions: model.baseInstructions,
+                        wireProtocol: model.wireProtocol,
+                        supportedConnectionModes:
+                            model.supportedConnectionModes,
+                        defaultConnectionMode: model.defaultConnectionMode,
+                      ),
+                  ],
+                  modelConnectionModes: [
+                    for (final model in provider.modelConnectionModes)
+                      frb.ProviderModelConnectionInput(
+                        slug: model.slug,
+                        connectionMode: model.connectionMode,
                       ),
                   ],
                 ),

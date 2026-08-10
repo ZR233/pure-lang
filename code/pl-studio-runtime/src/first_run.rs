@@ -172,7 +172,7 @@ impl FirstRunProviderDraft {
                     .map(|model| model.config.clone())
                     .collect();
             }
-            ProviderModelCatalogConfig::Explicit { models } => {
+            ProviderModelCatalogConfig::Explicit { models, .. } => {
                 *models = self
                     .models
                     .iter()

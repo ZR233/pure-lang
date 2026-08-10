@@ -46,9 +46,9 @@ pub use model_context::{
 pub use permission::PermissionLevel;
 pub use provider_catalog::{
     CredentialDescriptorDto, ModelCapabilitiesDto, ModelCatalogDescriptor, ModelDescriptor,
-    ModelPricingDto, ModelReasoningDescriptor, PROVIDER_CATALOG_SCHEMA_VERSION,
-    ProviderCatalogSnapshot, ProviderConnectionModeDescriptor, ProviderPresetDescriptor,
-    ProviderServiceCapabilitiesDescriptor, ProviderTransportDescriptor,
+    ModelPricingDto, ModelReasoningDescriptor, ModelTransportDescriptor,
+    PROVIDER_CATALOG_SCHEMA_VERSION, ProviderCatalogSnapshot, ProviderConnectionModeDescriptor,
+    ProviderPresetDescriptor, ProviderServiceCapabilitiesDescriptor,
     WebSearchProviderCapabilitiesDescriptor, WebSearchResolutionDescriptor,
 };
 pub use thread::{

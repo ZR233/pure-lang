@@ -14,7 +14,9 @@ use crate::capabilities::{
     ReasoningInterleavedField, ToolCapabilities,
 };
 use crate::model_family::{ModelFamily, ModelPricing};
-use crate::model_info::{MaxTokensField, ModelInfo, ModelRequestProfile, TruncationMode};
+use crate::model_info::{
+    MaxTokensField, ModelInfo, ModelRequestProfile, ModelTransportProfile, TruncationMode,
+};
 use crate::parameter::{ModelParameter, ParameterWire, WireAssignment};
 
 const DEEPSEEK_DEFAULT_MODEL_SLUGS: &[&str] = &["deepseek-v4-flash", "deepseek-v4-pro"];
@@ -57,7 +59,8 @@ pub fn default_models() -> Vec<ModelInfo> {
     let openai = openai_family();
     let openai_gpt56 = openai_gpt56_family("medium");
     let openai_gpt56_sol = openai_gpt56_family("low");
-    let deepseek = deepseek_family();
+    let deepseek_flash = deepseek_family(ModelTransportProfile::responses_http(), false);
+    let deepseek_pro = deepseek_family(ModelTransportProfile::chat_completions_http(), true);
     let mimo_text = mimo_family(false);
     let mimo_vision = mimo_family(true);
     let zhipu_text = zhipu_text_family();
@@ -66,7 +69,7 @@ pub fn default_models() -> Vec<ModelInfo> {
 
     vec![
         // DeepSeek
-        deepseek.instantiate(
+        deepseek_flash.instantiate(
             "deepseek-v4-flash",
             "DeepSeek V4 Flash",
             "DeepSeek fast reasoning model with thinking mode.",
@@ -81,7 +84,7 @@ pub fn default_models() -> Vec<ModelInfo> {
                 cache_write_per_mtok: None,
             },
         ),
-        deepseek.instantiate(
+        deepseek_pro.instantiate(
             "deepseek-v4-pro",
             "DeepSeek V4 Pro",
             "DeepSeek flagship reasoning model with thinking mode.",
@@ -372,6 +375,7 @@ fn openai_family() -> ModelFamily {
         truncation_mode: TruncationMode::Tokens,
         truncation_limit: 10_000,
         parameters: vec![openai_effort_parameter(&["medium", "low", "high", "xhigh"])],
+        transport: ModelTransportProfile::responses_websocket(),
         request_profile: openai_responses_request_profile(),
         base_instructions: String::new(),
     }
@@ -395,19 +399,24 @@ fn openai_gpt56_family(default_effort: &str) -> ModelFamily {
         truncation_mode: TruncationMode::Tokens,
         truncation_limit: 10_000,
         parameters: vec![openai_effort_parameter(&candidates)],
+        transport: ModelTransportProfile::responses_websocket(),
         request_profile: openai_responses_request_profile(),
         base_instructions: String::new(),
     }
 }
 
-fn deepseek_family() -> ModelFamily {
+fn deepseek_family(
+    transport: ModelTransportProfile,
+    chat_parallel_tool_calls: bool,
+) -> ModelFamily {
     ModelFamily {
         id: "deepseek-reasoning",
         capabilities: deepseek_capabilities(),
         truncation_mode: TruncationMode::Tokens,
         truncation_limit: 10_000,
         parameters: vec![deepseek_effort_parameter()],
-        request_profile: deepseek_request_profile(),
+        transport,
+        request_profile: deepseek_request_profile(chat_parallel_tool_calls),
         base_instructions: String::new(),
     }
 }
@@ -419,6 +428,7 @@ fn zhipu_text_family() -> ModelFamily {
         truncation_mode: TruncationMode::Tokens,
         truncation_limit: 10_000,
         parameters: vec![zhipu_plain_effort_parameter()],
+        transport: ModelTransportProfile::chat_completions_http(),
         request_profile: chat_parallel_request_profile(),
         base_instructions: String::new(),
     }
@@ -431,6 +441,7 @@ fn mimo_family(vision: bool) -> ModelFamily {
         truncation_mode: TruncationMode::Tokens,
         truncation_limit: 10_000,
         parameters: vec![mimo_effort_parameter()],
+        transport: ModelTransportProfile::chat_completions_http(),
         request_profile: ModelRequestProfile {
             max_tokens_field: MaxTokensField::MaxCompletionTokens,
             ..ModelRequestProfile::default()
@@ -446,6 +457,7 @@ fn zhipu_glm52_family() -> ModelFamily {
         truncation_mode: TruncationMode::Tokens,
         truncation_limit: 10_000,
         parameters: vec![zhipu_glm52_effort_parameter()],
+        transport: ModelTransportProfile::chat_completions_http(),
         request_profile: chat_parallel_request_profile(),
         base_instructions: String::new(),
     }
@@ -458,20 +470,21 @@ fn zhipu_vision_family() -> ModelFamily {
         truncation_mode: TruncationMode::Tokens,
         truncation_limit: 10_000,
         parameters: vec![zhipu_plain_effort_parameter()],
+        transport: ModelTransportProfile::chat_completions_http(),
         request_profile: chat_parallel_request_profile(),
         base_instructions: String::new(),
     }
 }
 
 /// DeepSeek 固定 base body：`thinking.type = enabled`（DeepSeek 模型始终开启 thinking）。
-fn deepseek_request_profile() -> ModelRequestProfile {
+fn deepseek_request_profile(chat_parallel_tool_calls: bool) -> ModelRequestProfile {
     let mut thinking = Map::new();
     thinking.insert("type".to_string(), Value::String("enabled".to_string()));
     let mut body = Map::new();
     body.insert("thinking".to_string(), Value::Object(thinking));
     ModelRequestProfile {
         body,
-        chat_parallel_tool_calls: true,
+        chat_parallel_tool_calls,
         ..ModelRequestProfile::default()
     }
 }

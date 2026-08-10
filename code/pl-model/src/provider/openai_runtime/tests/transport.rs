@@ -94,17 +94,18 @@ async fn send_responses_sse(
     socket.shutdown().await.unwrap();
 }
 
-fn openai_provider(base_url: String) -> OpenAiProvider {
+fn openai_provider(base_url: String, connection_mode: ProviderConnectionMode) -> OpenAiProvider {
     let mut model = default_models()
         .into_iter()
         .find(|model| model.slug == "gpt-5.5")
         .expect("bundled reasoning model");
     model.slug = "local-responses".to_string();
     model.context_window = Some(128_000);
+    model.transport.default_connection_mode = connection_mode;
     OpenAiProvider::new(
         ProviderInfo {
             protocol: crate::provider_info::ProviderWireProtocol::Responses,
-            connection_mode: crate::provider_info::ProviderConnectionMode::Http,
+            connection_mode,
             name: "Local Responses".to_string(),
             base_url,
             bearer_token: Some("test-token".to_string()),
@@ -123,6 +124,18 @@ fn openai_provider(base_url: String) -> OpenAiProvider {
         vec![model],
     )
     .unwrap()
+}
+
+fn responses_websocket_model(slug: &str) -> ModelInfo {
+    let mut model = ModelInfo::fallback(slug);
+    model.transport = crate::ModelTransportProfile::responses_websocket();
+    model
+}
+
+fn responses_http_model(slug: &str) -> ModelInfo {
+    let mut model = ModelInfo::fallback(slug);
+    model.transport = crate::ModelTransportProfile::responses_http();
+    model
 }
 
 fn compaction_request(mode: OpenAiCompactionMode) -> ModelCompactionRequest {
@@ -148,6 +161,81 @@ fn compaction_request(mode: OpenAiCompactionMode) -> ModelCompactionRequest {
         }),
         prompt_cache_key: Some("cache-key".to_string()),
     }
+}
+
+fn responses_success_sse(text: &str) -> String {
+    format!(
+        "data: {{\"type\":\"response.output_item.added\",\"item\":{{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\"}}}}\n\ndata: {{\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"delta\":\"{text}\"}}\n\ndata: {{\"type\":\"response.output_item.done\",\"item\":{{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\",\"content\":[{{\"type\":\"output_text\",\"text\":\"{text}\"}}]}}}}\n\ndata: {{\"type\":\"response.completed\",\"response\":{{\"id\":\"resp_1\",\"usage\":{{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}}}}\n\ndata: [DONE]\n\n"
+    )
+}
+
+fn chat_success_sse(text: &str) -> String {
+    format!(
+        "data: {{\"choices\":[{{\"delta\":{{\"content\":\"<final>{text}</final>\"}},\"finish_reason\":null}}]}}\n\ndata: {{\"choices\":[{{\"delta\":{{}},\"finish_reason\":\"stop\"}}],\"usage\":{{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}}}\n\ndata: [DONE]\n\n"
+    )
+}
+
+async fn capture_model_http_request(
+    mut info: ProviderInfo,
+    model: ModelInfo,
+    sse_body: String,
+) -> CapturedHttpRequest {
+    let model_slug = model.slug.clone();
+    let (base_url, handle) = serve_sse_once(sse_body).await;
+    info.base_url = base_url;
+    info.default_model = model_slug.clone();
+    info.protocol = model.transport.protocol;
+    info.connection_mode = model.transport.default_connection_mode;
+    let provider = OpenAiProvider::new(info, vec![model]).unwrap();
+    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+
+    provider
+        .stream_complete(minimal_request(&model_slug), event_tx)
+        .await
+        .unwrap();
+    handle.await.unwrap()
+}
+
+#[tokio::test]
+async fn model_transport_matrix_selects_http_endpoint_per_model() {
+    let find_model = |slug: &str| {
+        default_models()
+            .into_iter()
+            .find(|model| model.slug == slug)
+            .unwrap()
+    };
+
+    let glm = capture_model_http_request(
+        ProviderInfo::zhipu(None),
+        find_model("glm-5.2"),
+        chat_success_sse("glm ok"),
+    )
+    .await;
+    let flash = capture_model_http_request(
+        ProviderInfo::deepseek(None),
+        find_model("deepseek-v4-flash"),
+        responses_success_sse("flash ok"),
+    )
+    .await;
+    let pro = capture_model_http_request(
+        ProviderInfo::deepseek(None),
+        find_model("deepseek-v4-pro"),
+        chat_success_sse("pro ok"),
+    )
+    .await;
+    let mut gpt_model = find_model("gpt-5.6-sol");
+    gpt_model.transport.default_connection_mode = ProviderConnectionMode::Http;
+    let gpt = capture_model_http_request(
+        ProviderInfo::openai(None),
+        gpt_model,
+        responses_success_sse("gpt ok"),
+    )
+    .await;
+
+    assert_eq!(glm.request_line, "POST /chat/completions HTTP/1.1");
+    assert_eq!(flash.request_line, "POST /responses HTTP/1.1");
+    assert_eq!(pro.request_line, "POST /chat/completions HTTP/1.1");
+    assert_eq!(gpt.request_line, "POST /responses HTTP/1.1");
 }
 
 #[tokio::test]
@@ -220,7 +308,7 @@ async fn responses_websocket_reuses_the_agent_session_connection() {
     let mut info = ProviderInfo::openai(Some(format!("http://{address}/v1")));
     info.default_model = "local-responses".to_string();
     info.bearer_token = Some("test-token".to_string());
-    let mut model = ModelInfo::fallback("local-responses");
+    let mut model = responses_websocket_model("local-responses");
     model.context_window = Some(128_000);
     let provider = OpenAiProvider::new(info, vec![model]).unwrap();
     let transport_session = crate::ModelTransportSession::default();
@@ -332,7 +420,7 @@ async fn responses_websocket_does_not_replay_after_the_stream_starts() {
     let mut info = ProviderInfo::openai(Some(format!("http://{address}/v1")));
     info.default_model = "local-responses".to_string();
     info.bearer_token = Some("test-token".to_string());
-    let mut model = ModelInfo::fallback("local-responses");
+    let mut model = responses_websocket_model("local-responses");
     model.context_window = Some(128_000);
     let provider = OpenAiProvider::new(info, vec![model]).unwrap();
     let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(64);
@@ -392,7 +480,8 @@ async fn responses_websocket_does_not_retry_invalid_request_error() {
 
     let mut info = ProviderInfo::openai(Some(format!("http://{address}/v1")));
     info.default_model = "local-responses".to_string();
-    let provider = OpenAiProvider::new(info, vec![ModelInfo::fallback("local-responses")]).unwrap();
+    let provider =
+        OpenAiProvider::new(info, vec![responses_websocket_model("local-responses")]).unwrap();
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
 
     let error = provider
@@ -425,7 +514,8 @@ async fn responses_websocket_does_not_retry_unauthorized_handshake() {
 
     let mut info = ProviderInfo::openai(Some(format!("http://{address}/v1")));
     info.default_model = "local-responses".to_string();
-    let provider = OpenAiProvider::new(info, vec![ModelInfo::fallback("local-responses")]).unwrap();
+    let provider =
+        OpenAiProvider::new(info, vec![responses_websocket_model("local-responses")]).unwrap();
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
 
     let error = provider
@@ -493,7 +583,7 @@ async fn responses_websocket_retries_an_immediate_close_with_full_history() {
     let mut info = ProviderInfo::openai(Some(format!("http://{address}/v1")));
     info.default_model = "local-responses".to_string();
     info.bearer_token = Some("test-token".to_string());
-    let mut model = ModelInfo::fallback("local-responses");
+    let mut model = responses_websocket_model("local-responses");
     model.context_window = Some(128_000);
     let provider = OpenAiProvider::new(info, vec![model]).unwrap();
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
@@ -550,7 +640,8 @@ async fn responses_websocket_falls_back_to_http_after_one_full_replay() {
     let mut info = ProviderInfo::openai(Some(format!("http://{address}/v1")));
     info.default_model = "local-responses".to_string();
     info.bearer_token = Some("test-token".to_string());
-    let provider = OpenAiProvider::new(info, vec![ModelInfo::fallback("local-responses")]).unwrap();
+    let provider =
+        OpenAiProvider::new(info, vec![responses_websocket_model("local-responses")]).unwrap();
     let transport_session = crate::ModelTransportSession::default();
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
 
@@ -560,7 +651,10 @@ async fn responses_websocket_falls_back_to_http_after_one_full_replay() {
         .stream_complete(first_request, event_tx.clone())
         .await
         .unwrap();
-    assert!(transport_session.uses_responses_http_fallback());
+    assert!(
+        transport_session
+            .uses_responses_http_fallback(provider.connection_fingerprint("local-responses"))
+    );
 
     let mut second_request = minimal_request("local-responses");
     second_request.input.extend([
@@ -599,6 +693,28 @@ async fn responses_websocket_falls_back_to_http_after_one_full_replay() {
     assert_eq!(http_requests[1].request_line, "POST /v1/responses HTTP/1.1");
     assert_eq!(http_requests[0].body["input"].as_array().unwrap().len(), 1);
     assert_eq!(http_requests[1].body["input"].as_array().unwrap().len(), 3);
+}
+
+#[tokio::test]
+async fn responses_http_fallback_isolated_by_model_transport_fingerprint() {
+    let mut info = ProviderInfo::openai(Some("http://127.0.0.1:1/v1".to_string()));
+    info.default_model = "responses-a".to_string();
+    let provider = OpenAiProvider::new(
+        info,
+        vec![
+            responses_websocket_model("responses-a"),
+            responses_websocket_model("responses-b"),
+        ],
+    )
+    .unwrap();
+    let session = crate::ModelTransportSession::default();
+    let first = provider.connection_fingerprint("responses-a");
+    let second = provider.connection_fingerprint("responses-b");
+
+    assert_ne!(first, second);
+    assert!(session.activate_responses_http_fallback(first).await);
+    assert!(session.uses_responses_http_fallback(first));
+    assert!(!session.uses_responses_http_fallback(second));
 }
 
 #[tokio::test]
@@ -694,7 +810,7 @@ async fn responses_websocket_retries_an_invalid_continuation_once_with_full_hist
     let mut info = ProviderInfo::openai(Some(format!("http://{address}/v1")));
     info.default_model = "local-responses".to_string();
     info.bearer_token = Some("test-token".to_string());
-    let mut model = ModelInfo::fallback("local-responses");
+    let mut model = responses_websocket_model("local-responses");
     model.context_window = Some(128_000);
     let provider = OpenAiProvider::new(info, vec![model]).unwrap();
     let transport_session = crate::ModelTransportSession::default();
@@ -836,7 +952,8 @@ async fn invalid_continuation_full_replay_consumes_the_websocket_retry_budget() 
     let mut info = ProviderInfo::openai(Some(format!("http://{address}/v1")));
     info.default_model = "local-responses".to_string();
     info.bearer_token = Some("test-token".to_string());
-    let provider = OpenAiProvider::new(info, vec![ModelInfo::fallback("local-responses")]).unwrap();
+    let provider =
+        OpenAiProvider::new(info, vec![responses_websocket_model("local-responses")]).unwrap();
     let transport_session = crate::ModelTransportSession::default();
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
 
@@ -876,7 +993,10 @@ async fn invalid_continuation_full_replay_consumes_the_websocket_retry_budget() 
     assert_eq!(second.orchestration.continuation_attempts, 1);
     assert_eq!(second.orchestration.continuation_invalid, 1);
     assert_eq!(second.orchestration.http_fallbacks, 1);
-    assert!(transport_session.uses_responses_http_fallback());
+    assert!(
+        transport_session
+            .uses_responses_http_fallback(provider.connection_fingerprint("local-responses"))
+    );
     assert!(initial.get("previous_response_id").is_none());
     assert_eq!(incremental["previous_response_id"], "resp-1");
     assert!(full_replay.get("previous_response_id").is_none());
@@ -955,7 +1075,8 @@ async fn responses_websocket_does_not_commit_unconsumed_completion() {
 
     let mut info = ProviderInfo::openai(Some(format!("http://{address}/v1")));
     info.default_model = "local-responses".to_string();
-    let provider = OpenAiProvider::new(info, vec![ModelInfo::fallback("local-responses")]).unwrap();
+    let provider =
+        OpenAiProvider::new(info, vec![responses_websocket_model("local-responses")]).unwrap();
     let transport_session = crate::ModelTransportSession::default();
     let mut first_request = minimal_request("local-responses");
     first_request.transport_session = transport_session.clone();
@@ -1008,7 +1129,7 @@ async fn v2_compaction_uses_responses_trigger_feature_and_completed_usage() {
     )
     .to_string();
     let (base_url, handle) = serve_sse_once(sse_body).await;
-    let provider = openai_provider(base_url);
+    let provider = openai_provider(base_url, ProviderConnectionMode::Http);
 
     let response = provider
         .compact_context(compaction_request(OpenAiCompactionMode::RemoteV2))
@@ -1032,7 +1153,7 @@ async fn v2_compaction_uses_responses_trigger_feature_and_completed_usage() {
 #[tokio::test]
 async fn v2_compaction_does_not_replay_after_stream_is_established() {
     let (base_url, handle) = serve_sse_once("data: [DONE]\n\n".to_string()).await;
-    let provider = openai_provider(base_url);
+    let provider = openai_provider(base_url, ProviderConnectionMode::Http);
 
     let error = provider
         .compact_context(compaction_request(OpenAiCompactionMode::RemoteV2))
@@ -1188,7 +1309,7 @@ async fn stream_complete_sends_responses_bearer_and_custom_headers() {
     )
     .to_string();
     let (base_url, handle) = serve_sse_once(sse_body).await;
-    let mut model = ModelInfo::fallback("local-responses");
+    let mut model = responses_http_model("local-responses");
     model.context_window = Some(128_000);
     let provider = OpenAiProvider::new(
         ProviderInfo {
@@ -1249,7 +1370,7 @@ async fn http_retries_transient_request_failures_before_the_stream_starts() {
         requests
     });
 
-    let provider = openai_provider(format!("http://{address}/v1"));
+    let provider = openai_provider(format!("http://{address}/v1"), ProviderConnectionMode::Http);
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
     let response = provider
         .stream_complete(minimal_request("local-responses"), event_tx)

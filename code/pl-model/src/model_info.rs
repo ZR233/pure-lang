@@ -7,6 +7,7 @@ use serde_json::Value;
 
 use crate::capabilities::ModelCapabilities;
 use crate::parameter::ModelParameter;
+use crate::provider_info::{ProviderConnectionMode, ProviderWireProtocol};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModelInfo {
@@ -29,6 +30,9 @@ pub struct ModelInfo {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub parameters: Vec<ModelParameter>,
 
+    /// 模型使用的 API 协议、可用连接方式及默认连接方式。
+    pub transport: ModelTransportProfile,
+
     #[serde(default)]
     pub capabilities: ModelCapabilities,
     #[serde(default)]
@@ -42,6 +46,73 @@ pub struct ModelInfo {
 
     #[serde(skip)]
     pub used_fallback: bool,
+}
+
+/// 模型拥有的 API wire 与连接策略。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelTransportProfile {
+    pub protocol: ProviderWireProtocol,
+    pub supported_connection_modes: Vec<ProviderConnectionMode>,
+    pub default_connection_mode: ProviderConnectionMode,
+}
+
+impl ModelTransportProfile {
+    pub fn responses_websocket() -> Self {
+        Self {
+            protocol: ProviderWireProtocol::Responses,
+            supported_connection_modes: vec![
+                ProviderConnectionMode::WebSocket,
+                ProviderConnectionMode::Http,
+            ],
+            default_connection_mode: ProviderConnectionMode::WebSocket,
+        }
+    }
+
+    pub fn responses_http() -> Self {
+        Self {
+            protocol: ProviderWireProtocol::Responses,
+            supported_connection_modes: vec![ProviderConnectionMode::Http],
+            default_connection_mode: ProviderConnectionMode::Http,
+        }
+    }
+
+    pub fn chat_completions_http() -> Self {
+        Self {
+            protocol: ProviderWireProtocol::ChatCompletions,
+            supported_connection_modes: vec![ProviderConnectionMode::Http],
+            default_connection_mode: ProviderConnectionMode::Http,
+        }
+    }
+
+    pub fn validate(&self, model: &str) -> Result<(), String> {
+        if self.supported_connection_modes.is_empty() {
+            return Err(format!("model {model} has no supported connection modes"));
+        }
+        if !self
+            .supported_connection_modes
+            .contains(&self.default_connection_mode)
+        {
+            return Err(format!(
+                "model {model} default connection mode is not supported"
+            ));
+        }
+        if self.protocol == ProviderWireProtocol::ChatCompletions
+            && self
+                .supported_connection_modes
+                .contains(&ProviderConnectionMode::WebSocket)
+        {
+            return Err(format!(
+                "model {model} chat_completions transport does not support web_socket"
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl Default for ModelTransportProfile {
+    fn default() -> Self {
+        Self::chat_completions_http()
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -182,6 +253,7 @@ impl ModelInfo {
             cache_read_price_per_mtok: None,
             cache_write_price_per_mtok: None,
             parameters: Vec::new(),
+            transport: ModelTransportProfile::default(),
             capabilities: ModelCapabilities::text_only(),
             request_profile: ModelRequestProfile::default(),
             truncation_policy: TruncationPolicy {

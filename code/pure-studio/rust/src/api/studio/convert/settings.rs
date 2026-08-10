@@ -2,17 +2,17 @@ use crate::api::studio::types::{
     BridgeGeneralSettingsDto, BridgeInstructionsSettingsDto, BridgeMcpServerSettingsDto,
     BridgeProviderModelSettingsDto, BridgeProviderSettingsDto, BridgeRoleSettingsDto,
     BridgeSkillsSettingsDto, BridgeStudioSettingsDto, DeepSeekBalanceDto, DeepSeekBalanceInfoDto,
-    ProviderInput, ProviderModelInput, ProviderSecretInput, ProviderSettingsInput,
-    ProviderUsageDto, RoleInput, ZhipuCodingPlanUsageDto, ZhipuQuotaLimitDto,
-    ZhipuToolUsageDetailDto,
+    ProviderInput, ProviderModelConnectionInput, ProviderModelInput, ProviderSecretInput,
+    ProviderSettingsInput, ProviderUsageDto, RoleInput, ZhipuCodingPlanUsageDto,
+    ZhipuQuotaLimitDto, ZhipuToolUsageDetailDto,
 };
 use anyhow::{Context, Result};
 use pl_studio_runtime::{
     McpServerTransport, ModelInfo, PromptCacheDialect, PromptCacheProviderCapabilities,
     ProviderCapabilitySelection, ProviderEdit, ProviderModelCatalogConfig, ProviderModelEdit,
     ProviderPresetId, ProviderServiceCapabilities, ProviderSettingsEdit, ProviderUsageData,
-    ProviderUsageState, ProviderWireProtocol, RoleEdit, StandaloneWebSearchDialect, StudioRole,
-    WebSearchProviderCapabilities, ZhipuQuotaWindow,
+    ProviderUsageState, ProviderWireProtocol, ResponsesHostedToolCapabilities, RoleEdit,
+    StandaloneWebSearchDialect, StudioRole, WebSearchProviderCapabilities, ZhipuQuotaWindow,
 };
 // ── Utility functions ──
 
@@ -46,6 +46,7 @@ pub(crate) fn studio_settings_dto(
         .providers
         .iter()
         .map(|(id, provider)| {
+            let declared_models = provider.declared_models()?;
             let models = provider.effective_models()?;
             let default_model = config
                 .models
@@ -66,8 +67,6 @@ pub(crate) fn studio_settings_dto(
                     .preset_id()
                     .map(|preset| preset.to_string())
                     .unwrap_or_default(),
-                wire_protocol: protocol_label(provider.protocol()?).to_string(),
-                connection_mode: connection_mode_label(provider.connection_mode()).to_string(),
                 name: provider.name.clone(),
                 base_url: provider.base_url.clone(),
                 has_bearer_token: provider.resolved_bearer_token().is_some(),
@@ -86,12 +85,31 @@ pub(crate) fn studio_settings_dto(
                     .dialect
                     .as_str()
                     .to_string(),
+                responses_tool_search: service_capabilities.responses_tools.tool_search,
+                responses_programmatic_tool_calling: service_capabilities
+                    .responses_tools
+                    .programmatic_tool_calling,
                 default_model,
-                models: models.iter().map(model_settings_dto).collect(),
+                models: declared_models
+                    .iter()
+                    .map(|model| {
+                        let current = models
+                            .iter()
+                            .find(|candidate| candidate.slug == model.slug)
+                            .unwrap_or(model);
+                        model_settings_dto(model, current)
+                    })
+                    .collect(),
                 custom_models: provider
                     .editable_models()
                     .iter()
-                    .map(model_settings_dto)
+                    .map(|model| {
+                        let current = models
+                            .iter()
+                            .find(|candidate| candidate.slug == model.slug)
+                            .unwrap_or(model);
+                        model_settings_dto(model, current)
+                    })
                     .collect(),
                 catalog_id,
             })
@@ -165,7 +183,7 @@ pub(crate) fn studio_settings_dto(
     })
 }
 
-fn model_settings_dto(model: &ModelInfo) -> BridgeProviderModelSettingsDto {
+fn model_settings_dto(model: &ModelInfo, current: &ModelInfo) -> BridgeProviderModelSettingsDto {
     let reasoning_efforts = model
         .parameters
         .iter()
@@ -185,6 +203,19 @@ fn model_settings_dto(model: &ModelInfo) -> BridgeProviderModelSettingsDto {
         cache_write_price_per_m_tok: model.cache_write_price_per_mtok,
         reasoning_efforts: reasoning_efforts.to_vec(),
         base_instructions: model.base_instructions.clone(),
+        wire_protocol: protocol_label(model.transport.protocol).to_string(),
+        supported_connection_modes: model
+            .transport
+            .supported_connection_modes
+            .iter()
+            .copied()
+            .map(connection_mode_label)
+            .map(str::to_string)
+            .collect(),
+        default_connection_mode: connection_mode_label(model.transport.default_connection_mode)
+            .to_string(),
+        connection_mode: connection_mode_label(current.transport.default_connection_mode)
+            .to_string(),
     }
 }
 
@@ -322,11 +353,6 @@ fn provider_edit(
         .then(|| ProviderPresetId::new(input.template_kind.trim()))
         .transpose()
         .context("invalid provider preset id")?;
-    let protocol = match input.wire_protocol.trim() {
-        "responses" => ProviderWireProtocol::Responses,
-        "chat_completions" => ProviderWireProtocol::ChatCompletions,
-        protocol => anyhow::bail!("unsupported provider wire protocol: {protocol}"),
-    };
     let current_id = input.original_id.as_deref().unwrap_or(&input.id);
     let current_token = current
         .models
@@ -367,6 +393,10 @@ fn provider_edit(
                     .parse::<PromptCacheDialect>()
                     .map_err(anyhow::Error::msg)?,
             },
+            responses_tools: ResponsesHostedToolCapabilities {
+                tool_search: input.responses_tool_search,
+                programmatic_tool_calling: input.responses_programmatic_tool_calling,
+            },
         }),
         source => anyhow::bail!("unsupported provider capability source: {source}"),
     };
@@ -374,12 +404,6 @@ fn provider_edit(
         key: input.id,
         original_key: input.original_id,
         preset,
-        protocol,
-        connection_mode: match input.connection_mode.as_str() {
-            "web_socket" => pl_studio_runtime::ProviderConnectionMode::WebSocket,
-            "http" => pl_studio_runtime::ProviderConnectionMode::Http,
-            mode => anyhow::bail!("unsupported provider connection mode: {mode}"),
-        },
         name: input.name,
         base_url: Some(input.base_url),
         bearer_token,
@@ -389,16 +413,64 @@ fn provider_edit(
             .custom_models
             .into_iter()
             .map(provider_model_edit)
-            .collect(),
+            .collect::<Result<Vec<_>>>()?,
+        model_connection_modes: model_connection_modes(input.model_connection_modes)?,
     })
 }
 
-fn provider_model_edit(input: ProviderModelInput) -> ProviderModelEdit {
-    ProviderModelEdit {
+fn provider_model_edit(input: ProviderModelInput) -> Result<ProviderModelEdit> {
+    Ok(ProviderModelEdit {
         slug: input.slug,
         display_name: input.display_name,
         efforts: input.reasoning_efforts,
         base_instructions: input.base_instructions.unwrap_or_default(),
+        protocol: parse_provider_protocol(&input.wire_protocol)?,
+        supported_connection_modes: input
+            .supported_connection_modes
+            .iter()
+            .map(|mode| parse_provider_connection_mode(mode))
+            .collect::<Result<Vec<_>>>()?,
+        default_connection_mode: parse_provider_connection_mode(&input.default_connection_mode)?,
+    })
+}
+
+fn model_connection_modes(
+    inputs: Vec<ProviderModelConnectionInput>,
+) -> Result<std::collections::BTreeMap<String, pl_studio_runtime::ProviderConnectionMode>> {
+    let mut modes = std::collections::BTreeMap::new();
+    for input in inputs {
+        let slug = input.slug.trim();
+        if slug.is_empty() {
+            anyhow::bail!("model connection slug must not be empty");
+        }
+        if modes
+            .insert(
+                slug.to_string(),
+                parse_provider_connection_mode(&input.connection_mode)?,
+            )
+            .is_some()
+        {
+            anyhow::bail!("duplicate model connection mode: {slug}");
+        }
+    }
+    Ok(modes)
+}
+
+fn parse_provider_protocol(value: &str) -> Result<ProviderWireProtocol> {
+    match value.trim() {
+        "responses" => Ok(ProviderWireProtocol::Responses),
+        "chat_completions" => Ok(ProviderWireProtocol::ChatCompletions),
+        protocol => anyhow::bail!("unsupported model wire protocol: {protocol}"),
+    }
+}
+
+fn parse_provider_connection_mode(
+    value: &str,
+) -> Result<pl_studio_runtime::ProviderConnectionMode> {
+    match value.trim() {
+        "web_socket" => Ok(pl_studio_runtime::ProviderConnectionMode::WebSocket),
+        "http" => Ok(pl_studio_runtime::ProviderConnectionMode::Http),
+        mode => anyhow::bail!("unsupported model connection mode: {mode}"),
     }
 }
 
@@ -545,8 +617,6 @@ mod tests {
                 id: "openai-team".to_string(),
                 original_id: Some("openai".to_string()),
                 template_kind: "openai".to_string(),
-                wire_protocol: "responses".to_string(),
-                connection_mode: "web_socket".to_string(),
                 name: "OpenAI Team".to_string(),
                 base_url: "https://api.openai.com/v1".to_string(),
                 secret: ProviderSecretInput::Preserve,
@@ -554,8 +624,11 @@ mod tests {
                 hosted_web_search: true,
                 standalone_web_search: Some("open_ai_search_api".to_string()),
                 prompt_cache_dialect: "open_ai_prompt_cache_key".to_string(),
+                responses_tool_search: true,
+                responses_programmatic_tool_calling: true,
                 default_model: "gpt-5.6-sol".to_string(),
                 custom_models: Vec::new(),
+                model_connection_modes: Vec::new(),
             },
             &current,
         )

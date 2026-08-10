@@ -25,9 +25,9 @@ Windows 下对应：
 SeaORM 2.0 异步访问；schema v2 与不兼容库直接重建合同见
 `19-studio-storage-and-diagnostics.md`。
 `pl-core` 的正常依赖树不包含 SeaORM。provider/model/role 配置仍只由
-`~/.pure/config.toml` schema 12 表达。
+`~/.pure/config.toml` schema 13 表达。
 
-普通对话运行时读取配置；当配置文件不存在时，`pure-studio` 设置页展示默认配置。设置页不提供全局保存或重载操作，普通设置项在用户修改后即时写入配置。独立新增/编辑页面保留本地草稿，必须点击页面内保存按钮才写入配置，取消则丢弃草稿。当前格式为 schema 12；任何非 schema 12、无法解析或无法校验的配置都先完整写入拒绝备份，再用 schema 12 默认配置重建。系统不迁移 schema 5–11，不接受旧字段 alias，也不复制数据库、会话或其他旧配置状态。重建时只按当前 bundled preset ID 恢复已有的 `bearer_token` 与 `bearer_token_env`，避免破坏性重建静默覆盖用户凭据；未知或自定义 provider 仍只保留在拒绝备份中。
+普通对话运行时读取配置；当配置文件不存在时，`pure-studio` 设置页展示默认配置。设置页不提供全局保存或重载操作，普通设置项在用户修改后即时写入配置。独立新增/编辑页面保留本地草稿，必须点击页面内保存按钮才写入配置，取消则丢弃草稿。当前格式为 schema 13。schema 12 在首次加载时迁移：内建模型改用当前 canonical 模型 transport；additional/explicit 模型继承旧 provider 的协议和连接方式；GPT 保留旧 HTTP/WS 选择，不兼容组合回退到模型默认并记录可见迁移诊断。迁移保留 provider、凭证、headers、路由、自定义模型和显式服务能力，并通过与普通保存相同的临时文件 + rename 原子写入 schema 13。schema 5–11、未知版本、无法解析或无法校验的配置仍先完整写入拒绝备份，再用 schema 13 默认配置重建；重建只按当前 bundled preset ID 恢复凭证。
 
 `pure-studio` 设置页的 typed 配置保存成功后必须返回 canonical settings/bootstrap snapshot，由 Flutter store 原子替换对应配置状态。bootstrap 与设置保存响应不得携带 `configJson`、`generalSettingsJson` 或 raw map；FRB typed DTO 是 Flutter 配置状态的唯一入口。校验失败时只展示错误并保留当前 canonical 状态，不覆盖原配置。Instructions 文本作为普通设置组展示时，在输入停止后自动写入 `~/.pure/config.toml`；Provider 新增/编辑等独立页面不自动保存。
 
@@ -41,7 +41,7 @@ SeaORM 2.0 异步访问；schema v2 与不兼容库直接重建合同见
 
 `pl-studio-runtime` 负责：
 
-- `StudioConfig` 与 schema version 12。
+- `StudioConfig`、schema version 13 与 12→13 迁移。
 - `~/.pure/config.toml` 路径、serde TOML 解析、原子保存和默认值。
 - Studio instructions、skills、MCP、runtime 和 UI 配置。
 - 生成 Thread 首轮固定的 instruction snapshot。
@@ -78,7 +78,7 @@ route 决定。旧版本、缺失必需路由或无效引用会触发 Studio 配
 本地 TOML 使用 `snake_case`，不同于 API wire 格式。
 
 ```toml
-schema_version = 12
+schema_version = 13
 
 [runtime]
 permission_mode = "request-approval"
@@ -144,10 +144,7 @@ base_url = "https://api.deepseek.com"
 bearer_token = "sk-..."
 tool_wire_policy = "function_fallback"
 
-[models.providers.deepseek.transport]
-source = "preset"
 preset = "deepseek"
-connection_mode = "http"
 
 [models.providers.deepseek.catalog]
 source = "bundled"
@@ -158,38 +155,41 @@ name = "OpenAI Work"
 base_url = "https://api.openai.com/v1"
 bearer_token_env = "OPENAI_API_KEY"
 
-[models.providers.openai-work.transport]
-source = "preset"
 preset = "openai"
-connection_mode = "web_socket"
 
 [models.providers.openai-work.catalog]
 source = "bundled"
 catalog = "openai"
+
+[models.providers.openai-work.catalog.connection_overrides]
+"gpt-5.5" = "http"
 ```
 
 ## 10.5 Provider 和 Model
 
 `models.providers` 可保存多个 provider，相同 preset 可重复使用；唯一性只约束 map key
-`ProviderId`。当前 StudioConfig schema 为 12，provider catalog snapshot schema 为 4。
+`ProviderId`。当前 StudioConfig schema 为 13，provider catalog snapshot schema 为 6。
 
 每个 provider 实例持久化：
 
-- `transport`：`Preset { preset, connection_mode }` 或
-  `Custom { protocol, connection_mode }`。
+- 可选 `preset` 身份；完全自定义 provider 不保存 preset。
 - 实例字段：`name`、`base_url`、`bearer_token`/`bearer_token_env`、`http_headers`、
   `tool_wire_policy` 与 `apply_patch_tool_type`。
-- `catalog`：`Bundled { catalog, additional_models }` 或 `Explicit { models }`。
+- `catalog`：`Bundled { catalog, additional_models, connection_overrides }` 或
+  `Explicit { models, connection_overrides }`。
 - `capabilities`：`PresetDefaults` 或显式 `ProviderServiceCapabilities`。preset 实例默认继承
   canonical preset 的服务能力；custom 实例默认显式无能力。
 
-Preset 配置不重复保存协议或默认服务能力；`AgentModelConfig::resolve()` 从 canonical registry
-解析 preset 后返回协议、连接模式、wire policy、服务能力和有效模型。Custom 配置显式保存
-`responses | chat_completions`。合法矩阵为 Responses+WS/HTTP、Chat+HTTP。
+Provider 不保存协议或连接方式。`AgentModelConfig::resolve()` 从当前 route 选择的 `ModelInfo` 和
+模型目录 override 得到协议与最终连接方式，再与 provider endpoint、凭证、wire policy 和服务
+能力组合成 runtime route。`ModelInfo.transport` 是必填字段；合法矩阵为 Responses+WS/HTTP、
+Chat+HTTP。
 
-服务能力不是模型能力的别名：provider 服务能力表示 endpoint 可以执行 hosted 或 standalone
-Web Search，`ModelCapabilities` 仍表示当前模型能否使用 native search 或 function tools。Web Search
-planner 必须同时校验两者。产品 UI 从 catalog schema 4 的无密钥 descriptor 动态渲染能力选项，
+服务能力不是模型能力的别名：provider 服务能力表示 endpoint 可以执行 Responses hosted tools、
+hosted 或 standalone Web Search，`ModelCapabilities` 仍表示当前模型能否使用 native search 或
+function tools。核心编排必须同时检查 endpoint 服务能力、模型能力与模型 request profile。官方
+OpenAI endpoint 默认开启 Responses hosted tools；覆盖自定义 `base_url` 后默认关闭，只有显式配置
+才能重新开启。产品 UI 从 catalog schema 6 的无密钥 descriptor 动态渲染能力选项，
 不得识别 OpenAI、muxai 或其他具体 id。
 
 OpenAI、MiMo API、MiMo Token Plan、DeepSeek、Zhipu 与 Zhipu Coding Plan 都只是 catalog
@@ -212,6 +212,7 @@ Anthropic 只在 `pl-model` 的 protocol 层保留占位，未实现 provider ru
 - `output_price_per_mtok`
 - `cache_read_price_per_mtok`
 - `parameters`
+- `transport`（协议、支持模式、默认模式）
 - `capabilities`
 - `request_profile`
 - `truncation_policy`
@@ -387,9 +388,9 @@ MCP 标签页使用结构化表单，不展示 raw TOML。新增和编辑用户 
 Provider 标签页必须提供结构化编辑能力：
 
 - Provider 列表页只提供一个“添加供应商”入口；点击后进入 Provider 编辑页。
-- 新增 Provider 默认使用 catalog preset 的显式 `default_connection_mode` 并自动生成唯一 provider key；编辑页的 preset 下拉完全由 catalog 生成，也提供 Custom provider。
-- 编辑 provider key、显示名、base URL、API key 和默认模型。
-- 以 provider 卡片作为主要信息载体，展示 provider key、preset/协议、连接模式、状态、当前路由模型、模型数量和额度状态等摘要信息；base URL 只在编辑页展示。
+- 新增 Provider 按 preset suggested model 的模型默认连接方式初始化并自动生成唯一 provider key；编辑页的 preset 下拉完全由 catalog 生成，也提供 Custom provider。
+- 编辑 provider key、显示名、base URL 和 API key。
+- 以 provider 卡片作为主要信息载体，展示 provider key、preset、状态、当前路由模型、模型数量和额度状态等摘要信息；base URL 只在编辑页展示。
 - Provider 列表页不直接编辑字段；点击卡片编辑按钮进入 provider 编辑页。
 - Provider 编辑页使用本地草稿，提供保存和取消按钮；保存成功后即时写入配置并返回列表，取消或返回列表不修改当前配置。
 - Provider 卡片必须提供删除按钮；删除和默认 provider 选择都即时写入配置，列表页不使用独立右侧详情面板。
@@ -397,11 +398,11 @@ Provider 标签页必须提供结构化编辑能力：
 - 展示 provider effective models；bundled 模型与附加模型的顺序由服务端统一解析。
 - 允许追加用户自定义模型，冲突 slug 直接拒绝，Flutter 不自行实现合并规则。
 - 模型列表应展示关键参数，例如上下文窗口、最大输出 token、自动压缩阈值、temperature、effort 候选值（`supported_efforts()`）、capabilities、输入模态和截断策略。
-- `wire_protocol` 决定请求格式，`connection_mode` 独立决定流连接。Responses 允许 `web_socket | http`；官方 OpenAI preset 的模式顺序为 WS、HTTP且默认 WS，HTTP 选项仍是 Responses HTTP/SSE。Chat Completions 只允许 HTTP。运行时由 `pl-model` typed protocol 层转换请求，用户配置中的 base URL 不自动改写版本路径，只去除末尾多余 `/` 后与对应 API path 拼接。Web 和 Flutter 的协议/模式/默认值必须来自 provider catalog，不得按 preset ID 分支。
+- Provider 编辑页不提供 provider 级协议或连接方式控件。每个模型行展示协议、支持模式和当前模式；只有支持多个模式的模型提供 HTTP/WS 选择，并保存为该模型的 connection override。自定义模型编辑器必须显式选择协议、支持模式与默认模式，Chat + WS 在保存前拒绝。Responses 的 HTTP 仍调用 `/responses` 并消费 SSE，Chat Completions HTTP 调用 `/chat/completions`。Web 和 Flutter 的协议/模式/默认值必须来自 model descriptor，不得按 preset ID 分支。
 - Zhipu 请求固定使用流式 `chat/completions`；effort 由模型 `parameters` 声明驱动（见 07-model.md 7.8）。默认模型 effort 候选值为 `enabled` / `none`，直接映射到 `thinking.type`，不发送 wire-level `reasoning_effort`。`glm-5.2` 候选值为 `high` / `max` / `none`，其中 `high` / `max` 会作为 `reasoning_effort` 透传给 API 并设置 `thinking.type = enabled` 与 `clear_thinking = false`，`none` 设置 `thinking.type = disabled` 并移除 `reasoning_effort`。历史回放仍通过 assistant message 的 `reasoning_content` 字段保留。
 - 写入前由 `pl-studio-runtime` 构造 `StudioConfig` 并执行完整校验；校验失败时只在 UI 中展示错误，不写入磁盘。更新 API key 时，空输入表示保留现有 secret；provider key 重命名必须携带 `originalId`，以便服务端保留 secret、headers、catalog metadata 和模型能力。
 
-Roles 标签页必须展示固定四个角色：探索者、计划者、执行者、审查者。每个角色将模型与“思考强度”作为两个独立下拉控件展示；模型选项同时表达 provider 和 model，思考强度候选值来自当前模型声明的 `supported_efforts()`。模型改变时，有候选的模型切换为其声明的默认 effort，没有显式默认时使用首个候选；无候选模型保存空选择并禁用强度控件。仅改变思考强度时必须保持当前 provider 和 model 不变。模型与思考强度变更都即时保存，但 Flutter 不进行持久 optimistic 更新，也不保存第二份 selection；成功后以 bridge 返回的 typed canonical settings snapshot 更新 store，失败时保持原 canonical 状态。`pl-studio-runtime` 统一校验后写入 `~/.pure/config.toml`。
+Roles 标签页必须展示固定四个角色：探索者、计划者、执行者、审查者。每个角色将模型与“思考强度”作为两个独立下拉控件展示；模型选项使用 `Provider / Model · Protocol · Connection`，思考强度候选值来自当前模型声明的 `supported_efforts()`。模型改变时，有候选的模型切换为其声明的默认 effort，没有显式默认时使用首个候选；无候选模型保存空选择并禁用强度控件。仅改变思考强度时必须保持当前 provider 和 model 不变。模型与思考强度变更都即时保存，但 Flutter 不进行持久 optimistic 更新，也不保存第二份 selection；成功后以 bridge 返回的 typed canonical settings snapshot 更新 store，失败时保持原 canonical 状态。`pl-studio-runtime` 统一校验后写入 `~/.pure/config.toml`。
 
 桌面窗口必须支持自由缩放。`pure-studio` 只声明首选窗口尺寸，不把 UI 绑定到固定宽高；设置页内容跟随窗口尺寸自适应。Provider 标签页在常规桌面宽度使用单栏 provider 卡片列表，卡片内部承载摘要、操作和展开编辑内容；在窄窗口下保持单栏滚动并压缩卡片元信息，避免表格和编辑区域被裁剪。聊天状态栏在窄窗口下保留左侧高频控制，并把右侧只读状态按断点收入更多菜单。
 

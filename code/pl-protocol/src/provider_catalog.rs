@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// Provider/模型目录跨产品传输协议版本。
-pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 5;
+pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 6;
 
 /// 无敏感信息、可供 Web 与桌面端直接渲染的 Provider 目录快照。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -20,7 +20,6 @@ pub struct ProviderPresetDescriptor {
     pub id: String,
     pub display_name: String,
     pub description: Option<String>,
-    pub transport: ProviderTransportDescriptor,
     pub base_url: String,
     pub credential: CredentialDescriptorDto,
     pub model_catalog_id: String,
@@ -35,6 +34,10 @@ pub struct ProviderServiceCapabilitiesDescriptor {
     pub web_search: WebSearchProviderCapabilitiesDescriptor,
     #[serde(default)]
     pub prompt_cache_dialect: String,
+    #[serde(default)]
+    pub responses_tool_search: bool,
+    #[serde(default)]
+    pub responses_programmatic_tool_calling: bool,
 }
 
 /// UI 可直接渲染的 Web Search 服务能力。
@@ -55,15 +58,7 @@ pub struct WebSearchResolutionDescriptor {
     pub model: Option<String>,
 }
 
-/// UI 可直接消费的 provider wire protocol 与连接策略。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ProviderTransportDescriptor {
-    pub protocol: String,
-    pub connection_modes: Vec<ProviderConnectionModeDescriptor>,
-    pub default_connection_mode: String,
-}
-
-/// UI 可直接渲染的 provider 连接模式选项。
+/// UI 可直接渲染的模型连接模式选项。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProviderConnectionModeDescriptor {
     pub id: String,
@@ -93,10 +88,19 @@ pub struct ModelDescriptor {
     pub context_window: Option<u64>,
     pub max_context_window: Option<u64>,
     pub max_output_tokens: Option<u64>,
+    pub transport: ModelTransportDescriptor,
     pub modalities: Vec<String>,
     pub capabilities: ModelCapabilitiesDto,
     pub reasoning: Option<ModelReasoningDescriptor>,
     pub pricing: Option<ModelPricingDto>,
+}
+
+/// UI 可直接渲染的模型 API 协议与连接策略。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ModelTransportDescriptor {
+    pub protocol: String,
+    pub connection_modes: Vec<ProviderConnectionModeDescriptor>,
+    pub default_connection_mode: String,
 }
 
 /// UI 可直接判断的模型能力摘要。

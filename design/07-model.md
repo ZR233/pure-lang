@@ -66,7 +66,7 @@ provider 适配实现可以依赖 `async-openai`、`reqwest`、`tokio-tungstenit
 声明、wire protocol 与模型声明合成为穷尽的 `EffectivePromptCachePolicy`。未声明能力的自定义
 Responses/Chat endpoint 默认不发送任何缓存专属字段。
 
-模型级 provider override 使用 `ModelRequestProfile` 表达，包括 `api_model`、`headers`、`body`、`options`、`chat_parallel_tool_calls`、`responses_tool_search`、`responses_programmatic_tool_calling`、`max_tokens_field` 和 `responses_max_tokens_field`。`body` 作为 base body 注入请求体（如 DeepSeek 固定的 `thinking.type = enabled`）；其余可变字段（如 effort 透传的 `reasoning_effort`、GLM `thinking.clear_thinking`）由 `ModelInfo.parameters` 声明驱动（见 7.8）。这些字段只由 `pl-model` 的 provider adapter 消费；核心编排层不得读取或拼接这些私有字段。Chat Completions 只有在模型 profile 显式声明 `chat_parallel_tool_calls = true` 时才发送 `parallel_tool_calls`，并把核心层本轮计算出的 `true` 或 `false` 原样写入；未声明的 OpenAI-compatible endpoint 默认省略该字段，避免把 provider 无关的模型能力误当成 wire 兼容性。Tool Search 与 Programmatic Tool Calling 同时要求模型能力和 Responses profile 显式开启；内建 OpenAI catalog 可以声明这两个开关，自定义 Responses-compatible endpoint 默认关闭并退回 eager/direct 工具。Chat Completions 的最大输出 token 字段默认写入 `max_tokens`；OpenAI-compatible provider 若要求新字段（如 MiMo 的 `max_completion_tokens`）可在模型 profile 中声明。Responses endpoint 默认不发送最大输出 token 字段，以匹配 Codex 常规 Responses 请求；Responses-like 代理若要求限制字段，可在模型 profile 中把 `responses_max_tokens_field` 设置为 `max_output_tokens`、`max_tokens` 或 `max_completion_tokens`。
+模型级 provider override 使用 `ModelRequestProfile` 表达，包括 `api_model`、`headers`、`body`、`options`、`chat_parallel_tool_calls`、`responses_tool_search`、`responses_programmatic_tool_calling`、`max_tokens_field` 和 `responses_max_tokens_field`。`body` 作为 base body 注入请求体（如 DeepSeek 固定的 `thinking.type = enabled`）；其余可变字段（如 effort 透传的 `reasoning_effort`、GLM `thinking.clear_thinking`）由 `ModelInfo.parameters` 声明驱动（见 7.8）。这些字段只由 `pl-model` 的 provider adapter 消费；核心编排层不得读取或拼接这些私有字段。Chat Completions 只有在模型 profile 显式声明 `chat_parallel_tool_calls = true` 时才发送 `parallel_tool_calls`，并把核心层本轮计算出的 `true` 或 `false` 原样写入；未声明的 OpenAI-compatible endpoint 默认省略该字段，避免把 provider 无关的模型能力误当成 wire 兼容性。Tool Search 与 Programmatic Tool Calling 同时要求模型能力、Responses profile 和官方 OpenAI Responses endpoint；OpenAI preset 覆盖自定义 `base_url` 后必须退回 eager/direct 工具，不能仅凭 OpenAI catalog 把 hosted tool type 发送给兼容代理。Chat Completions 的最大输出 token 字段默认写入 `max_tokens`；OpenAI-compatible provider 若要求新字段（如 MiMo 的 `max_completion_tokens`）可在模型 profile 中声明。Responses endpoint 默认不发送最大输出 token 字段，以匹配 Codex 常规 Responses 请求；Responses-like 代理若要求限制字段，可在模型 profile 中把 `responses_max_tokens_field` 设置为 `max_output_tokens`、`max_tokens` 或 `max_completion_tokens`。
 
 ## 7.4 Provider 抽象
 
@@ -85,20 +85,22 @@ Responses/Chat endpoint 默认不发送任何缓存专属字段。
 异步 trait 方法使用原生 RPITIT，并显式声明 `Send` bound。
 
 `SharedModelProvider` 是 `Arc<OpenAiProvider>`。这里的 `OpenAiProvider` 是 Responses / Chat
-Completions 协议执行器，不代表供应商身份。`ProviderInfo.protocol` 选择 wire API，
-`connection_mode` 选择 WS/HTTP；endpoint、模型目录与 wire policy 来自解析后的 provider 实例。
+Completions 协议执行器，不代表供应商身份。每次请求选中的 `ModelInfo.transport` 决定 wire API
+和 WS/HTTP；endpoint、凭证、模型目录、wire policy 与服务能力来自 provider 实例。
+`ProviderInfo.protocol` 和 `connection_mode` 只是在 `ResolvedModelRoute` 构造 runtime 时生成的
+最终投影，不是配置或 catalog 的事实源。
 运行路径不匹配 OpenAI、DeepSeek、Zhipu、MiMo 等 ID，也不为这些厂商建立穷尽枚举分发。
 未来若引入协议真正不同的供应商（如 Anthropic），才新增独立 typed adapter。
 
-每个 provider 实例保存 endpoint override、凭证、headers、tool wire policy、catalog binding 和
-连接方式；具体模型由角色 route 选择，不保存第二份 provider default model。reasoning/thinking/effort
+每个 provider 实例保存 preset 身份、endpoint override、凭证、headers、tool wire policy、
+服务能力和 catalog binding；具体模型由角色 route 选择，不保存第二份 provider default model。
+模型目录可以按 slug 保存当前连接方式 override。reasoning/thinking/effort
 的 wire 规则由模型 `parameters` 声明驱动（见 7.8）。模型目录通过
 `ProviderConfig::effective_models()` 解析，不从全局列表兜底。
 
-OpenAI-compatible Chat 供应商使用 `ProviderWireProtocol::ChatCompletions +
-ProviderConnectionMode::Http` 表达，不为 MiMo 等兼容供应商新增 runtime struct。Responses-compatible
-自定义供应商使用 `Responses + Http`（默认）或显式 `Responses + WebSocket`。具体 base URL、headers、
-tool wire policy 与模型能力由 `ProviderInfo` 和 `ModelInfo` 提供。
+OpenAI-compatible 自定义模型必须显式提供完整 `ModelTransportProfile`。Chat 模型只能声明
+`ChatCompletions + Http`；Responses 模型可以声明 `Responses + Http`，或同时支持 HTTP/WS 并指定
+默认模式。具体 base URL、headers、tool wire policy 与 endpoint 能力由 provider 提供。
 
 Zhipu Coding Plan 是 catalog preset，默认使用 `https://open.bigmodel.cn/api/coding/paas/v4`，
 并引用 Zhipu 模型目录；它不新增 runtime 变体。MiMo API 与 Token Plan 同样是两个 preset，
@@ -115,17 +117,22 @@ Zhipu Coding Plan 是 catalog preset，默认使用 `https://open.bigmodel.cn/ap
 
 所有当前 preset 都复用 `protocol::openai` 的两种 wire API。协议与连接模式是正交维度：
 Responses 支持 `web_socket | http`，Chat Completions 只支持 `http`。协议由模型的
-`ModelRequestProfile.wire_protocol` 声明，不再由 provider 实例统一决定。内置 OpenAI preset 的所有模型
+`ModelTransportProfile.protocol` 声明，不再由 provider 实例统一决定。内置 OpenAI preset 的所有模型
 使用 Responses，模式顺序固定 WS、HTTP，默认 WS；选择 HTTP 时仍调用 `/responses` 并消费 SSE，
 绝不切换到 Chat Completions。DeepSeek flash 使用 Responses HTTP；DeepSeek pro、MiMo、Zhipu
 使用 Chat Completions HTTP。同一 provider 实例下的不同模型可以使用不同协议。
 
-连接模式由 `ProviderConnectionMode` 表达并持久化在每个 provider 实例上，不由厂商身份隐式
-推断。preset 在 catalog 中同时声明协议、允许模式顺序和默认模式，Web 与 Flutter 只渲染
-catalog 返回的选项。相同 preset 可以创建多个实例，每个实例独立保存 endpoint、凭证、
-连接模式、附加模型和路由；唯一性只约束 `ProviderId`。
+`ModelTransportProfile` 是 `ModelInfo` 的必填字段，包含 `protocol`、
+`supported_connection_modes` 与 `default_connection_mode`。provider 的模型目录可按模型 slug 保存
+`connection_overrides`；解析后的模型把 override 投影为本次请求的最终连接方式。Chat + WS、空支持
+列表、默认模式不在支持列表，以及 override 指向未知或不支持模式的模型，都在配置加载/保存时拒绝。
+Web 与 Flutter 只渲染模型目录返回的 transport 和当前 override，不按 preset ID 推断。
 
-Responses WebSocket 使用 `/responses` 握手和 `response.create` 帧，并强制发送 `store: false`；continuation 只依赖当前物理连接，不能把响应持久化到供应商侧。物理连接属于 `AgentSession` 的运行期 transport session：同一会话跨 turn 复用，不同会话绝不共享，持久化恢复后重新建立。Provider 设置中的 WebSocket 表示首选连接模式；尚未产出 canonical 流事件的一次完整历史重放仍遇到瞬态 WS 错误时，当前 `ModelTransportSession` 必须熔断到 Responses HTTP，并在该 session 后续 turn 保持 HTTP，避免重复发送大体积完整历史。这个运行期 fallback 不修改持久化 Provider 配置，新建、fork 或持久化恢复后的 AgentSession 会重新尝试用户选择的 WebSocket。`previous_response_id` continuation 只在 WebSocket 模式启用，因为该状态与物理连接绑定；HTTP/SSE 始终发送完整 canonical history，不依赖连接级 continuation。
+内建矩阵固定为：全部 GPT 使用 Responses，支持 WS/HTTP且默认 WS；DeepSeek V4 Flash 使用
+Responses/HTTP；DeepSeek V4 Pro、全部 GLM 和全部 MiMo 使用 Chat Completions/HTTP。同一 DeepSeek
+provider 实例可以同时路由 Flash 和 Pro，runtime 必须按当前模型选择不同 endpoint path。
+
+Responses WebSocket 使用 `/responses` 握手和 `response.create` 帧，并强制发送 `store: false`；continuation 只依赖当前物理连接，不能把响应持久化到供应商侧。物理连接属于 `AgentSession` 的运行期 transport session：同一会话跨 turn 复用，不同会话绝不共享，持久化恢复后重新建立。模型目录中该模型的 WebSocket 选择表示首选连接模式；尚未产出 canonical 流事件的一次完整历史重放仍遇到瞬态 WS 错误时，当前 `ModelTransportSession` 必须熔断到 Responses HTTP，并在该 session 后续 turn 保持 HTTP，避免重复发送大体积完整历史。这个运行期 fallback 不修改持久化模型 override，新建、fork 或持久化恢复后的 AgentSession 会重新尝试用户选择的 WebSocket。WS session、HTTP fallback 与 transport fingerprint 必须同时包含模型 slug、模型协议和最终连接方式，避免同一 provider 下不同模型共享错误状态。`previous_response_id` continuation 只在 WebSocket 模式启用，因为该状态与物理连接绑定；HTTP/SSE 始终发送完整 canonical history，不依赖连接级 continuation。
 
 WebSocket 建连通过系统 DNS 解析全部目标地址，并以 250ms 间隔交错竞争 IPv4/IPv6；首个成功的 TCP 连接继续使用原始域名完成 SNI、证书校验和 WebSocket 握手。单次完整握手保持 15 秒上限，超时保留 transient 分类并进入同一 WS 模式的一次完整重试。无效 continuation 也必须在尚未产出 canonical 流事件时退出当前流并消费这同一个重试预算，由外层在新 WS 上发送完整历史；transport 内部不得再嵌套第二套 full replay。收到首个 canonical 流事件后，任何断线或 provider 失败都直接返回原错误，不重放请求。可重试失败采用带 0.9–1.1 稳定抖动的有界指数退避，provider `Retry-After` 优先且不加抖动。唯一 WS 重试仍失败时立即启用 session-scoped HTTP fallback，不继续制造 full replay 风暴；日志和 inference diagnostics 必须记录 fallback 原因与来源连接模式。
 
@@ -159,6 +166,13 @@ Git mutation、审批/交互和 agent-control 始终只能 direct 调用。结�
 `store: false`，session 必须按 provider 顺序持久化 reasoning、tool search、program、嵌套 call、
 call output 与 program output，并在 HTTP 重放、WebSocket full replay 和恢复后完整重建；Chat
 Completions 遇到这些 Responses 原生 item必须显式拒绝，不能降级成普通 assistant/tool message。
+
+Responses hosted tools 属于 endpoint 服务能力，不由 URL 字符串在运行时猜测。官方 OpenAI preset
+的 canonical `base_url` 默认声明 `tool_search` 和 `programmatic_tool_calling`；preset 实例覆盖为
+自定义 `base_url` 时默认关闭两项能力，自定义 provider 也默认关闭。只有用户在 provider 服务能力
+中显式开启后才发送对应 hosted tool type。核心编排必须同时检查模型能力、模型 request profile
+和 endpoint 服务能力，任一缺失都回退到 eager function schema。该边界保证 OpenAI-compatible
+Responses endpoint 不会因未支持的 `programmatic_tool_calling` 返回 400。
 
 provider transport 层把第三方 API 错误统一转换为 `PureError` 时必须先脱敏。错误文本中不得包含 bearer token、API key 或形如 `sk-...` 的密钥片段；鉴权失败、配额不足、模型不存在等服务端错误可以保留 status、错误类型、code 和可读原因，但密钥值必须替换为稳定占位。
 Responses HTTP/SSE 与 Chat Completions HTTP 必须和 WebSocket 一样，用 Serde typed error DTO 保留结构化 provider code、HTTP status、message 与可选 retry hint；进入控制流后不得把 DTO 降级成待解析字符串。408/409/425/429、5xx、建流前的瞬态网络错误以及 `server_is_overloaded` 等容量错误只允许在流对象建立前最多重试两次，并采用同一有界指数退避与抖动；一旦 HTTP 流已经建立，transport 不得因为后续流错误自动重放并制造重复输出。WS 切换 HTTP 后使用独立的 HTTP 重试预算，但不会再回到 WS；因此仅在两个 transport 都未产出流事件的最坏情况下，单次请求最多产生两次 WS 发送和三次 HTTP 发送。
@@ -194,7 +208,9 @@ OpenAI Responses 使用 `input_text` 与 `input_image` data URL；OpenAI Chat、
 `pl-model` 都不读取 `~/.pure/config.toml`。
 
 Bundled catalog 只读，配置只能通过 `additional_models` 追加不冲突 slug；完全自定义 provider
-使用 `Explicit { models }`。`used_fallback` 仍是运行时状态，不从配置读取。
+使用 `Explicit { models }`。附加与显式模型都必须声明 transport；模型目录的
+`connection_overrides` 只保存当前模式选择，不修改模型声明的支持矩阵。`used_fallback` 仍是运行时
+状态，不从配置读取。
 
 模型信息中的 `base_instructions` 是模型级基础提示词来源，进入 `pl-core` 的 instruction assembler；配置中的 `[instructions].base_override` 可以完整替换它。模型信息中的 `context_window`、`max_context_window` 和 `auto_compact_token_limit` 只描述模型能力与默认阈值。上下文压缩的触发判断、历史保留、原子替换和持久化都在 `pl-core` 完成，`pl-model` 不维护压缩状态。
 
@@ -351,6 +367,6 @@ full replay retry 和 HTTP fallback 的稳定原因；compaction 记录替换前
 
 ## 7.11 Web 搜索 Provider 边界
 
-Web 搜索只把 `ProviderTransportSelection::Preset { preset: "openai", .. }` 且 `resolved_bearer_token()` 非空的 provider 实例视为可用 OpenAI 账户。实例 id、显示名或 base URL 可以修改而不改变 preset 身份；普通 custom Responses-compatible provider 即使协议和模型名称相同，也不能获得 OpenAI hosted 或 `/alpha/search` 能力。
+Web 搜索只把 `ProviderConfig.preset = "openai"` 且 `resolved_bearer_token()` 非空的 provider 实例视为可用 OpenAI 账户。实例 id、显示名或 base URL 可以修改而不改变 preset 身份；普通 custom Responses-compatible provider 即使协议和模型名称相同，也不能获得 OpenAI hosted 或 `/alpha/search` 能力。
 
 Responses 原生搜索通过 `ToolSchema::WebSearch` 表达，并只允许在当前 turn 自身使用上述 OpenAI preset、Responses wire、有效凭据且模型声明 `capabilities.web_search` 时注入。跨 provider 搜索只能走普通函数工具，由该工具使用另一个已解析的 OpenAI provider 调用 `/alpha/search`；不得把 hosted tool 注入非 OpenAI provider 请求。

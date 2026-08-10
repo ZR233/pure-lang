@@ -24,13 +24,29 @@ class ProviderModelCommand {
     required this.slug,
     required this.displayName,
     required this.reasoningEfforts,
+    required this.wireProtocol,
+    required this.supportedConnectionModes,
+    required this.defaultConnectionMode,
     this.baseInstructions,
   });
 
   final String slug;
   final String displayName;
   final List<String> reasoningEfforts;
+  final String wireProtocol;
+  final List<String> supportedConnectionModes;
+  final String defaultConnectionMode;
   final String? baseInstructions;
+}
+
+class ProviderModelConnectionCommand {
+  const ProviderModelConnectionCommand({
+    required this.slug,
+    required this.connectionMode,
+  });
+
+  final String slug;
+  final String connectionMode;
 }
 
 class ProviderCommand {
@@ -38,8 +54,6 @@ class ProviderCommand {
     required this.id,
     this.originalId,
     required this.templateKind,
-    required this.wireProtocol,
-    required this.connectionMode,
     required this.name,
     required this.baseUrl,
     required this.secret,
@@ -47,15 +61,16 @@ class ProviderCommand {
     required this.hostedWebSearch,
     this.standaloneWebSearch,
     required this.promptCacheDialect,
+    required this.responsesToolSearch,
+    required this.responsesProgrammaticToolCalling,
     required this.defaultModel,
     required this.customModels,
+    required this.modelConnectionModes,
   });
 
   final String id;
   final String? originalId;
   final String templateKind;
-  final String wireProtocol;
-  final String connectionMode;
   final String name;
   final String baseUrl;
   final ProviderSecretCommand secret;
@@ -63,8 +78,11 @@ class ProviderCommand {
   final bool hostedWebSearch;
   final String? standaloneWebSearch;
   final String promptCacheDialect;
+  final bool responsesToolSearch;
+  final bool responsesProgrammaticToolCalling;
   final String defaultModel;
   final List<ProviderModelCommand> customModels;
+  final List<ProviderModelConnectionCommand> modelConnectionModes;
 }
 
 class RoleSettingsCommand {
@@ -152,8 +170,6 @@ abstract final class ProviderSettingsCommandBuilder {
             id: provider.id,
             originalId: provider.id == renamedTo ? renamedFrom : null,
             templateKind: provider.templateKind,
-            wireProtocol: provider.wireProtocol,
-            connectionMode: provider.connectionMode,
             name: provider.name,
             baseUrl: provider.baseUrl,
             secret: provider.bearerToken.trim().isNotEmpty
@@ -167,6 +183,9 @@ abstract final class ProviderSettingsCommandBuilder {
                 ? null
                 : provider.standaloneWebSearch.trim(),
             promptCacheDialect: provider.promptCacheDialect,
+            responsesToolSearch: provider.responsesToolSearch,
+            responsesProgrammaticToolCalling:
+                provider.responsesProgrammaticToolCalling,
             defaultModel: provider.defaultModel,
             customModels: [
               for (final model in provider.customModels)
@@ -174,9 +193,19 @@ abstract final class ProviderSettingsCommandBuilder {
                   slug: model.slug.trim(),
                   displayName: model.displayName.trim(),
                   reasoningEfforts: model.reasoningEfforts,
+                  wireProtocol: model.wireProtocol,
+                  supportedConnectionModes: model.supportedConnectionModes,
+                  defaultConnectionMode: model.defaultConnectionMode,
                   baseInstructions: model.baseInstructions.trim().isEmpty
                       ? null
                       : model.baseInstructions,
+                ),
+            ],
+            modelConnectionModes: [
+              for (final model in provider.allModels)
+                ProviderModelConnectionCommand(
+                  slug: model.slug.trim(),
+                  connectionMode: model.connectionMode,
                 ),
             ],
           ),

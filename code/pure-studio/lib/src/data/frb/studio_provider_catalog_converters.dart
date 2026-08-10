@@ -12,15 +12,6 @@ ProviderCatalogView providerCatalogFromFrb(
           id: preset.id,
           displayName: preset.displayName,
           description: preset.description ?? '',
-          wireProtocol: preset.transport.protocol,
-          connectionModes: [
-            for (final mode in preset.transport.connectionModes)
-              ProviderConnectionModeView(
-                id: mode.id,
-                displayName: mode.displayName,
-              ),
-          ],
-          defaultConnectionMode: preset.transport.defaultConnectionMode,
           baseUrl: preset.baseUrl,
           credentialLabel: preset.credentialLabel,
           credentialEnv: preset.credentialEnv ?? '',
@@ -30,6 +21,9 @@ ProviderCatalogView providerCatalogFromFrb(
           standaloneWebSearch:
               preset.serviceCapabilities.webSearch.standalone ?? '',
           promptCacheDialect: preset.serviceCapabilities.promptCacheDialect,
+          responsesToolSearch: preset.serviceCapabilities.responsesToolSearch,
+          responsesProgrammaticToolCalling:
+              preset.serviceCapabilities.responsesProgrammaticToolCalling,
           iconKey: preset.iconKey,
         ),
     ],
@@ -72,5 +66,11 @@ ProviderModelView _providerModelFromCatalog(frb.BridgeModelDescriptor model) {
     outputPricePerMTok: pricing?.outputPerMtok,
     cacheReadPricePerMTok: pricing?.cacheReadPerMtok,
     cacheWritePricePerMTok: pricing?.cacheWritePerMtok,
+    wireProtocol: model.transport.protocol,
+    supportedConnectionModes: [
+      for (final mode in model.transport.connectionModes) mode.id,
+    ],
+    defaultConnectionMode: model.transport.defaultConnectionMode,
+    connectionMode: model.transport.defaultConnectionMode,
   );
 }

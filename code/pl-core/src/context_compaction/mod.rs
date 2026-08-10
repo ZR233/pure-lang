@@ -287,8 +287,8 @@ pub(crate) async fn maybe_compact_session(
     if !has_compactable_history(session.items(), trigger) {
         return Ok(CompactionOutcome::Skipped);
     }
-    ensure_provider_can_consume_session(provider.info().protocol, session)?;
     let model_info = provider.model_info(model);
+    ensure_provider_can_consume_session(model_info.transport.protocol, session)?;
     let limit = match (trigger, model_info.resolved_auto_compact_limit()) {
         (CompactionTrigger::Manual | CompactionTrigger::WallClockRollover, limit) => {
             limit.unwrap_or_default()
@@ -317,7 +317,7 @@ pub(crate) async fn maybe_compact_session(
     if let Some(progress) = progress.as_mut() {
         progress.milestone("上下文接近上限，正在压缩历史。");
     }
-    let use_remote = provider.info().protocol == ProviderWireProtocol::Responses
+    let use_remote = model_info.transport.protocol == ProviderWireProtocol::Responses
         && config.openai_mode != OpenAiCompactionMode::Local;
     let (replacement, usage, summary, implementation, replacement_tokens) = if use_remote {
         let (replacement, usage) = remote::compact_remote(

@@ -1,18 +1,13 @@
 part of 'studio_api.dart';
 
 const demoProviderCatalogFixture = ProviderCatalogView(
-  schemaVersion: 4,
-  revision: 'demo-future-catalog-v4',
+  schemaVersion: 6,
+  revision: 'demo-future-catalog-v6',
   presets: [
     ProviderPresetView(
       id: 'future-provider',
       displayName: 'Future Provider',
       description: 'Injected demo provider catalog fixture',
-      wireProtocol: 'chat_completions',
-      connectionModes: [
-        ProviderConnectionModeView(id: 'http', displayName: 'HTTP'),
-      ],
-      defaultConnectionMode: 'http',
       baseUrl: 'https://future.example/v1',
       credentialLabel: 'Access Key',
       credentialEnv: 'FUTURE_PROVIDER_KEY',
@@ -21,6 +16,8 @@ const demoProviderCatalogFixture = ProviderCatalogView(
       hostedWebSearch: true,
       standaloneWebSearch: 'future_search_dialect',
       promptCacheDialect: 'implicit_prefix',
+      responsesToolSearch: false,
+      responsesProgrammaticToolCalling: false,
     ),
   ],
   modelCatalogs: {
@@ -32,6 +29,10 @@ const demoProviderCatalogFixture = ProviderCatalogView(
         defaultReasoningEffort: 'balanced',
         contextWindow: 500000,
         maxOutputTokens: 64000,
+        wireProtocol: 'chat_completions',
+        supportedConnectionModes: ['http'],
+        defaultConnectionMode: 'http',
+        connectionMode: 'http',
       ),
     ],
   },
@@ -69,14 +70,33 @@ List<ProviderSettingsView> _providersFromSettingsCommand(
             displayName: model.displayName,
             reasoningEfforts: model.reasoningEfforts,
             baseInstructions: model.baseInstructions ?? '',
+            wireProtocol: model.wireProtocol,
+            supportedConnectionModes: model.supportedConnectionModes,
+            defaultConnectionMode: model.defaultConnectionMode,
+            connectionMode: model.defaultConnectionMode,
           ),
         )
         .where((model) => model.slug.isNotEmpty)
         .toList();
     final template =
         catalog.preset(provider.templateKind) ?? catalog.presets.first;
-    final defaultModels = catalog.modelsFor(template.modelCatalogId);
-    final models = [...defaultModels, ...customModels];
+    final connectionModes = {
+      for (final model in provider.modelConnectionModes)
+        model.slug: model.connectionMode,
+    };
+    ProviderModelView withCurrentConnection(ProviderModelView model) =>
+        model.copyWith(
+          connectionMode:
+              connectionModes[model.slug] ?? model.defaultConnectionMode,
+        );
+    final defaultModels = catalog
+        .modelsFor(template.modelCatalogId)
+        .map(withCurrentConnection)
+        .toList();
+    final models = [
+      ...defaultModels,
+      ...customModels.map(withCurrentConnection),
+    ];
     final previousProvider = previous
         .where((item) => item.id == (provider.originalId ?? provider.id))
         .firstOrNull;
@@ -99,15 +119,11 @@ List<ProviderSettingsView> _providersFromSettingsCommand(
           : provider.defaultModel,
       models: models,
       defaultModels: defaultModels,
-      customModels: customModels,
+      customModels: customModels.map(withCurrentConnection).toList(),
       status: hasToken ? 'ready' : 'missingCredential',
       usageLabel: '${models.length} models',
       modelCount: '${models.length}',
       updatedAt: 'Preview',
-      wireProtocol: template.wireProtocol,
-      connectionMode: provider.connectionMode.isEmpty
-          ? template.defaultConnectionMode
-          : provider.connectionMode,
       catalogId: template.modelCatalogId,
       credentialLabel: template.credentialLabel,
       credentialEnv: template.credentialEnv,
@@ -118,6 +134,9 @@ List<ProviderSettingsView> _providersFromSettingsCommand(
       standaloneWebSearch:
           provider.standaloneWebSearch ?? template.standaloneWebSearch,
       promptCacheDialect: provider.promptCacheDialect,
+      responsesToolSearch: provider.responsesToolSearch,
+      responsesProgrammaticToolCalling:
+          provider.responsesProgrammaticToolCalling,
       iconKey: template.iconKey,
     );
   }).toList();

@@ -55,6 +55,17 @@ pub struct ProviderServiceCapabilities {
     pub web_search: WebSearchProviderCapabilities,
     #[serde(default)]
     pub prompt_cache: PromptCacheProviderCapabilities,
+    #[serde(default)]
+    pub responses_tools: ResponsesHostedToolCapabilities,
+}
+
+/// Endpoint 对 Responses hosted tool 类型的支持。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResponsesHostedToolCapabilities {
+    #[serde(default)]
+    pub tool_search: bool,
+    #[serde(default)]
+    pub programmatic_tool_calling: bool,
 }
 
 /// Provider endpoint 的提示词缓存 dialect。
@@ -133,6 +144,10 @@ impl ProviderServiceCapabilities {
             },
             prompt_cache: PromptCacheProviderCapabilities {
                 dialect: PromptCacheDialect::OpenAiPromptCacheKey,
+            },
+            responses_tools: ResponsesHostedToolCapabilities {
+                tool_search: true,
+                programmatic_tool_calling: true,
             },
         }
     }
@@ -238,6 +253,11 @@ impl ProviderInfo {
     }
 
     pub fn openai(base_url: Option<String>) -> Self {
+        let custom_endpoint = base_url.is_some();
+        let mut service_capabilities = ProviderServiceCapabilities::openai_web_search();
+        if custom_endpoint {
+            service_capabilities.responses_tools = ResponsesHostedToolCapabilities::default();
+        }
         Self {
             protocol: ProviderWireProtocol::Responses,
             connection_mode: ProviderConnectionMode::WebSocket,
@@ -248,7 +268,7 @@ impl ProviderInfo {
             http_headers: None,
             tool_wire_policy: ToolWirePolicy::NativeCustomTools,
             apply_patch_tool_type: Some(ApplyPatchToolType::Freeform),
-            service_capabilities: ProviderServiceCapabilities::openai_web_search(),
+            service_capabilities,
         }
     }
 

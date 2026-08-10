@@ -17,6 +17,10 @@ class ProviderModelView {
     this.cacheReadPricePerMTok,
     this.cacheWritePricePerMTok,
     this.baseInstructions = '',
+    this.wireProtocol = 'chat_completions',
+    this.supportedConnectionModes = const ['http'],
+    this.defaultConnectionMode = 'http',
+    this.connectionMode = 'http',
   });
 
   final String slug;
@@ -36,6 +40,10 @@ class ProviderModelView {
   final double? cacheReadPricePerMTok;
   final double? cacheWritePricePerMTok;
   final String baseInstructions;
+  final String wireProtocol;
+  final List<String> supportedConnectionModes;
+  final String defaultConnectionMode;
+  final String connectionMode;
 
   ProviderModelView copyWith({
     String? slug,
@@ -55,6 +63,10 @@ class ProviderModelView {
     double? cacheReadPricePerMTok,
     double? cacheWritePricePerMTok,
     String? baseInstructions,
+    String? wireProtocol,
+    List<String>? supportedConnectionModes,
+    String? defaultConnectionMode,
+    String? connectionMode,
   }) {
     return ProviderModelView(
       slug: slug ?? this.slug,
@@ -77,6 +89,12 @@ class ProviderModelView {
       cacheWritePricePerMTok:
           cacheWritePricePerMTok ?? this.cacheWritePricePerMTok,
       baseInstructions: baseInstructions ?? this.baseInstructions,
+      wireProtocol: wireProtocol ?? this.wireProtocol,
+      supportedConnectionModes:
+          supportedConnectionModes ?? this.supportedConnectionModes,
+      defaultConnectionMode:
+          defaultConnectionMode ?? this.defaultConnectionMode,
+      connectionMode: connectionMode ?? this.connectionMode,
     );
   }
 }
@@ -98,8 +116,6 @@ class ProviderSettingsView {
     required this.usageLabel,
     this.modelCount = '',
     this.updatedAt = '',
-    this.wireProtocol = '',
-    this.connectionMode = 'http',
     this.catalogId = '',
     this.credentialLabel = 'API Key',
     this.credentialEnv = '',
@@ -107,6 +123,8 @@ class ProviderSettingsView {
     this.hostedWebSearch = false,
     this.standaloneWebSearch = '',
     this.promptCacheDialect = 'none',
+    this.responsesToolSearch = false,
+    this.responsesProgrammaticToolCalling = false,
     this.iconKey,
   });
 
@@ -125,8 +143,6 @@ class ProviderSettingsView {
   final String usageLabel;
   final String modelCount;
   final String updatedAt;
-  final String wireProtocol;
-  final String connectionMode;
   final String catalogId;
   final String credentialLabel;
   final String credentialEnv;
@@ -134,6 +150,8 @@ class ProviderSettingsView {
   final bool hostedWebSearch;
   final String standaloneWebSearch;
   final String promptCacheDialect;
+  final bool responsesToolSearch;
+  final bool responsesProgrammaticToolCalling;
   final String? iconKey;
 
   List<ProviderModelView> get allModels {
@@ -141,6 +159,16 @@ class ProviderSettingsView {
       return models;
     }
     return [...defaultModels, ...customModels];
+  }
+
+  ProviderSettingsView withModelConnection(String slug, String mode) {
+    ProviderModelView update(ProviderModelView model) =>
+        model.slug == slug ? model.copyWith(connectionMode: mode) : model;
+    return copyWith(
+      models: models.map(update).toList(),
+      defaultModels: defaultModels.map(update).toList(),
+      customModels: customModels.map(update).toList(),
+    );
   }
 
   ProviderSettingsView copyWith({
@@ -159,8 +187,6 @@ class ProviderSettingsView {
     String? usageLabel,
     String? modelCount,
     String? updatedAt,
-    String? wireProtocol,
-    String? connectionMode,
     String? catalogId,
     String? credentialLabel,
     String? credentialEnv,
@@ -168,6 +194,8 @@ class ProviderSettingsView {
     bool? hostedWebSearch,
     String? standaloneWebSearch,
     String? promptCacheDialect,
+    bool? responsesToolSearch,
+    bool? responsesProgrammaticToolCalling,
     Object? iconKey = _providerSettingsUnset,
   }) {
     return ProviderSettingsView(
@@ -186,8 +214,6 @@ class ProviderSettingsView {
       usageLabel: usageLabel ?? this.usageLabel,
       modelCount: modelCount ?? this.modelCount,
       updatedAt: updatedAt ?? this.updatedAt,
-      wireProtocol: wireProtocol ?? this.wireProtocol,
-      connectionMode: connectionMode ?? this.connectionMode,
       catalogId: catalogId ?? this.catalogId,
       credentialLabel: credentialLabel ?? this.credentialLabel,
       credentialEnv: credentialEnv ?? this.credentialEnv,
@@ -195,6 +221,10 @@ class ProviderSettingsView {
       hostedWebSearch: hostedWebSearch ?? this.hostedWebSearch,
       standaloneWebSearch: standaloneWebSearch ?? this.standaloneWebSearch,
       promptCacheDialect: promptCacheDialect ?? this.promptCacheDialect,
+      responsesToolSearch: responsesToolSearch ?? this.responsesToolSearch,
+      responsesProgrammaticToolCalling:
+          responsesProgrammaticToolCalling ??
+          this.responsesProgrammaticToolCalling,
       iconKey: identical(iconKey, _providerSettingsUnset)
           ? this.iconKey
           : iconKey as String?,
@@ -240,9 +270,6 @@ class ProviderPresetView {
     required this.id,
     required this.displayName,
     required this.description,
-    required this.wireProtocol,
-    required this.connectionModes,
-    required this.defaultConnectionMode,
     required this.baseUrl,
     required this.credentialLabel,
     required this.credentialEnv,
@@ -251,15 +278,14 @@ class ProviderPresetView {
     this.hostedWebSearch = false,
     this.standaloneWebSearch = '',
     this.promptCacheDialect = 'none',
+    this.responsesToolSearch = false,
+    this.responsesProgrammaticToolCalling = false,
     this.iconKey,
   });
 
   final String id;
   final String displayName;
   final String description;
-  final String wireProtocol;
-  final List<ProviderConnectionModeView> connectionModes;
-  final String defaultConnectionMode;
   final String baseUrl;
   final String credentialLabel;
   final String credentialEnv;
@@ -268,6 +294,8 @@ class ProviderPresetView {
   final bool hostedWebSearch;
   final String standaloneWebSearch;
   final String promptCacheDialect;
+  final bool responsesToolSearch;
+  final bool responsesProgrammaticToolCalling;
   final String? iconKey;
 
   ProviderSettingsView createProvider(
@@ -290,8 +318,6 @@ class ProviderPresetView {
       usageLabel: '${models.length} models',
       modelCount: '${models.length}',
       updatedAt: 'Draft',
-      wireProtocol: wireProtocol,
-      connectionMode: defaultConnectionMode,
       catalogId: modelCatalogId,
       credentialLabel: credentialLabel,
       credentialEnv: credentialEnv,
@@ -299,6 +325,8 @@ class ProviderPresetView {
       hostedWebSearch: hostedWebSearch,
       standaloneWebSearch: standaloneWebSearch,
       promptCacheDialect: promptCacheDialect,
+      responsesToolSearch: responsesToolSearch,
+      responsesProgrammaticToolCalling: responsesProgrammaticToolCalling,
       iconKey: iconKey,
     );
   }
@@ -329,23 +357,11 @@ ProviderSettingsView providerWithCatalogMetadata(
     catalogId: preset.modelCatalogId,
     credentialLabel: preset.credentialLabel,
     credentialEnv: preset.credentialEnv,
-    hostedWebSearch: provider.capabilitySource == 'preset_defaults'
-        ? preset.hostedWebSearch
-        : provider.hostedWebSearch,
-    standaloneWebSearch: provider.capabilitySource == 'preset_defaults'
-        ? preset.standaloneWebSearch
-        : provider.standaloneWebSearch,
-    promptCacheDialect: provider.capabilitySource == 'preset_defaults'
-        ? preset.promptCacheDialect
-        : provider.promptCacheDialect,
     iconKey: preset.iconKey,
-    wireProtocol: preset.wireProtocol,
-    connectionMode:
-        preset.connectionModes.any((mode) => mode.id == provider.connectionMode)
-        ? provider.connectionMode
-        : preset.defaultConnectionMode,
-    defaultModels: bundledModels,
-    models: effectiveModels,
+    defaultModels: provider.defaultModels.isEmpty
+        ? bundledModels
+        : provider.defaultModels,
+    models: provider.models.isEmpty ? effectiveModels : provider.models,
   );
 }
 

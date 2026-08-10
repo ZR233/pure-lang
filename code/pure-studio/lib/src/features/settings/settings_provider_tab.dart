@@ -154,9 +154,10 @@ class ProvidersTabState extends ConsumerState<ProvidersTab> {
         provider.name,
         provider.id,
         provider.defaultModel,
-        provider.wireProtocol,
         for (final model in provider.allModels) model.slug,
         for (final model in provider.allModels) model.displayName,
+        for (final model in provider.allModels) model.wireProtocol,
+        for (final model in provider.allModels) model.connectionMode,
       ].join(' ').toLowerCase();
       return haystack.contains(query);
     }).toList();
@@ -204,26 +205,10 @@ class ProvidersTabState extends ConsumerState<ProvidersTab> {
       return;
     }
     if (templateId.isEmpty) {
-      final protocols = catalog.presets
-          .map((preset) => preset.wireProtocol)
-          .toSet();
-      final protocol = protocols.contains(current.provider.wireProtocol)
-          ? current.provider.wireProtocol
-          : protocols.firstOrNull ?? 'chat_completions';
-      final modes = catalog.presets
-          .where((preset) => preset.wireProtocol == protocol)
-          .expand((preset) => preset.connectionModes)
-          .toList();
-      final connectionMode =
-          modes.where((mode) => mode.id == 'http').firstOrNull?.id ??
-          modes.firstOrNull?.id ??
-          'http';
       setState(() {
         _draft = current.copyWith(
           provider: current.provider.copyWith(
             templateKind: '',
-            wireProtocol: protocol,
-            connectionMode: connectionMode,
             catalogId: '',
             defaultModels: const [],
             models: current.provider.customModels,
@@ -234,6 +219,8 @@ class ProvidersTabState extends ConsumerState<ProvidersTab> {
             hostedWebSearch: false,
             standaloneWebSearch: '',
             promptCacheDialect: 'none',
+            responsesToolSearch: false,
+            responsesProgrammaticToolCalling: false,
             iconKey: null,
           ),
         );
@@ -280,6 +267,10 @@ class ProvidersTabState extends ConsumerState<ProvidersTab> {
         slug: slug,
         displayName: 'Custom model',
         reasoningEfforts: const [],
+        wireProtocol: 'chat_completions',
+        supportedConnectionModes: const ['http'],
+        defaultConnectionMode: 'http',
+        connectionMode: 'http',
       );
       return provider.copyWith(
         customModels: [...provider.customModels, model],

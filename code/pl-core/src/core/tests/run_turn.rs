@@ -16,7 +16,10 @@ async fn run_turn_records_user_trace_part_before_internal_parts() {
     provider.connection_mode = pl_model::ProviderConnectionMode::Http;
     provider.bearer_token = Some("test-token".to_string());
     provider.default_model = "local-responses".to_string();
-    let core = TurnEngine::from_provider_info(provider).unwrap();
+    let core =
+        TurnEngineBuilder::from_provider_info_with_models(provider, vec![local_responses_model()])
+            .unwrap()
+            .build();
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(32);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
     let mut session = AgentSession::new();
@@ -78,7 +81,10 @@ async fn run_turn_emits_runtime_progress_commentary() {
     provider.connection_mode = pl_model::ProviderConnectionMode::Http;
     provider.bearer_token = Some("test-token".to_string());
     provider.default_model = "local-responses".to_string();
-    let core = TurnEngine::from_provider_info(provider).unwrap();
+    let core =
+        TurnEngineBuilder::from_provider_info_with_models(provider, vec![local_responses_model()])
+            .unwrap()
+            .build();
     let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(64);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
     let mut session = AgentSession::new();
@@ -125,7 +131,10 @@ async fn run_turn_persists_only_final_text_to_session_history() {
     provider.connection_mode = pl_model::ProviderConnectionMode::Http;
     provider.bearer_token = Some("test-token".to_string());
     provider.default_model = "local-responses".to_string();
-    let core = TurnEngine::from_provider_info(provider).unwrap();
+    let core =
+        TurnEngineBuilder::from_provider_info_with_models(provider, vec![local_responses_model()])
+            .unwrap()
+            .build();
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(32);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
     let mut session = AgentSession::new();
@@ -179,7 +188,7 @@ async fn run_turn_exposes_context_compaction_snapshot() {
     provider.connection_mode = pl_model::ProviderConnectionMode::Http;
     provider.bearer_token = Some("test-token".to_string());
     provider.default_model = "local-responses".to_string();
-    let mut model = pl_model::ModelInfo::fallback("local-responses");
+    let mut model = local_responses_model();
     model.auto_compact_token_limit = Some(1);
     let core = TurnEngineBuilder::from_provider_info_with_models(provider, vec![model])
         .unwrap()
@@ -248,15 +257,13 @@ async fn manual_compaction_runs_standalone_for_single_message_and_resets_history
     provider.connection_mode = pl_model::ProviderConnectionMode::Http;
     provider.bearer_token = Some("test-token".to_string());
     provider.default_model = "local-responses".to_string();
-    let core = TurnEngineBuilder::from_provider_info_with_models(
-        provider,
-        vec![pl_model::ModelInfo::fallback("local-responses")],
-    )
-    .unwrap()
-    .with_runtime_profile(CoreRuntimeProfile::minimal().with_context_compaction(
-        ContextCompactionConfig::default().with_openai_mode(OpenAiCompactionMode::Local),
-    ))
-    .build();
+    let core =
+        TurnEngineBuilder::from_provider_info_with_models(provider, vec![local_responses_model()])
+            .unwrap()
+            .with_runtime_profile(CoreRuntimeProfile::minimal().with_context_compaction(
+                ContextCompactionConfig::default().with_openai_mode(OpenAiCompactionMode::Local),
+            ))
+            .build();
     let mut session = AgentSession::from_messages(vec![Message {
         role: MessageRole::User,
         content: MessageContent::Text("only message".to_string()),
@@ -301,6 +308,34 @@ async fn enabled_tools_snapshot_remains_internal_trace_event() {
 }
 
 #[tokio::test]
+async fn custom_openai_endpoint_omits_responses_hosted_tools_by_default() {
+    let request = capture_default_tools_request(false).await;
+    let tool_types = request["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|tool| tool["type"].as_str())
+        .collect::<Vec<_>>();
+
+    assert!(!tool_types.contains(&"tool_search"));
+    assert!(!tool_types.contains(&"programmatic_tool_calling"));
+}
+
+#[tokio::test]
+async fn custom_openai_endpoint_sends_responses_hosted_tools_when_explicitly_enabled() {
+    let request = capture_default_tools_request(true).await;
+    let tool_types = request["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|tool| tool["type"].as_str())
+        .collect::<Vec<_>>();
+
+    assert!(tool_types.contains(&"tool_search"));
+    assert!(tool_types.contains(&"programmatic_tool_calling"));
+}
+
+#[tokio::test]
 async fn responses_http_uses_prompt_cache_and_full_canonical_history() {
     let first_sse = concat!(
         "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\"}}\n\n",
@@ -323,7 +358,10 @@ async fn responses_http_uses_prompt_cache_and_full_canonical_history() {
     provider.connection_mode = pl_model::ProviderConnectionMode::Http;
     provider.bearer_token = Some("test-token".to_string());
     provider.default_model = "local-responses".to_string();
-    let core = TurnEngine::from_provider_info(provider).unwrap();
+    let core =
+        TurnEngineBuilder::from_provider_info_with_models(provider, vec![local_responses_model()])
+            .unwrap()
+            .build();
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(32);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
     let mut session = AgentSession::new();
@@ -388,10 +426,11 @@ async fn run_turn_uses_runtime_profile_default_turn_options() {
         CoreRuntimeOptions::default()
             .with_turn_options(TurnOptions::default().with_prompt_cache_key("profile-cache")),
     );
-    let core = TurnEngineBuilder::from_provider_info(provider)
-        .unwrap()
-        .with_runtime_profile(runtime)
-        .build();
+    let core =
+        TurnEngineBuilder::from_provider_info_with_models(provider, vec![local_responses_model()])
+            .unwrap()
+            .with_runtime_profile(runtime)
+            .build();
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(32);
     let mut session = AgentSession::new();
 
@@ -430,7 +469,10 @@ async fn run_turn_http_sends_full_history_without_a_retry_path() {
     provider.connection_mode = pl_model::ProviderConnectionMode::Http;
     provider.bearer_token = Some("test-token".to_string());
     provider.default_model = "local-responses".to_string();
-    let core = TurnEngine::from_provider_info(provider).unwrap();
+    let core =
+        TurnEngineBuilder::from_provider_info_with_models(provider, vec![local_responses_model()])
+            .unwrap()
+            .build();
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(32);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
     let mut session = AgentSession::new();
@@ -476,7 +518,9 @@ async fn model_turn_helper_http_sends_full_history_once() {
     provider_info.connection_mode = pl_model::ProviderConnectionMode::Http;
     provider_info.bearer_token = Some("test-token".to_string());
     provider_info.default_model = "local-responses".to_string();
-    let provider = pl_model::create_provider(provider_info).unwrap();
+    let provider =
+        pl_model::create_provider_with_catalog(provider_info, vec![local_responses_model()])
+            .unwrap();
     let mut session = AgentSession::new();
     session.push_user_prompt("old prompt".to_string());
     session.push_assistant_response("old answer".to_string(), None);
@@ -516,7 +560,9 @@ async fn model_turn_text_helper_returns_assistant_message_text() {
     provider_info.connection_mode = pl_model::ProviderConnectionMode::Http;
     provider_info.bearer_token = Some("test-token".to_string());
     provider_info.default_model = "local-responses".to_string();
-    let provider = pl_model::create_provider(provider_info).unwrap();
+    let provider =
+        pl_model::create_provider_with_catalog(provider_info, vec![local_responses_model()])
+            .unwrap();
     let mut session = AgentSession::new();
     session.push_user_prompt("summarize this".to_string());
 
@@ -560,7 +606,9 @@ async fn model_turn_client_keeps_independent_http_sessions_full_history() {
     provider_info.connection_mode = pl_model::ProviderConnectionMode::Http;
     provider_info.bearer_token = Some("test-token".to_string());
     provider_info.default_model = "local-responses".to_string();
-    let provider = pl_model::create_provider(provider_info).unwrap();
+    let provider =
+        pl_model::create_provider_with_catalog(provider_info, vec![local_responses_model()])
+            .unwrap();
     let client = CoreModelTurnClient::new();
 
     let mut first_session = AgentSession::new();
@@ -620,7 +668,10 @@ async fn tool_context_keeps_full_session_history_across_responses_http_requests(
     provider.connection_mode = pl_model::ProviderConnectionMode::Http;
     provider.bearer_token = Some("test-token".to_string());
     provider.default_model = "local-responses".to_string();
-    let mut core = TurnEngine::from_provider_info(provider).unwrap();
+    let mut core =
+        TurnEngineBuilder::from_provider_info_with_models(provider, vec![local_responses_model()])
+            .unwrap()
+            .build();
     core.register_tool(HistoryMarkerTool);
     core.register_tool(ParentHistoryProbeTool);
     let (event_tx, _) = tokio::sync::broadcast::channel(32);
@@ -688,7 +739,10 @@ async fn large_tool_artifact_does_not_break_tool_history_or_evidence() {
     provider.connection_mode = pl_model::ProviderConnectionMode::Http;
     provider.bearer_token = Some("test-token".to_string());
     provider.default_model = "local-responses".to_string();
-    let mut core = TurnEngine::from_provider_info(provider).unwrap();
+    let mut core =
+        TurnEngineBuilder::from_provider_info_with_models(provider, vec![local_responses_model()])
+            .unwrap()
+            .build();
     core.register_tool(LargeArtifactTool);
     let (event_tx, _) = tokio::sync::broadcast::channel(32);
     let mut recorder = TraceRecorder::new("session-large-artifact".to_string(), event_tx, 0);
@@ -723,11 +777,106 @@ async fn large_tool_artifact_does_not_break_tool_history_or_evidence() {
     assert_eq!(receipt.artifacts[0].get("payload"), None);
 }
 
+async fn capture_default_tools_request(enable_hosted_tools: bool) -> serde_json::Value {
+    let (base_url, bodies, handle) =
+        serve_sse_sequence(vec![final_sse("hosted-tools", "ok")]).await;
+    let mut provider = ProviderInfo::openai(Some(base_url));
+    provider.connection_mode = pl_model::ProviderConnectionMode::Http;
+    provider.bearer_token = Some("test-token".to_string());
+    provider.default_model = "gpt-5.6-sol".to_string();
+    if enable_hosted_tools {
+        provider.service_capabilities.responses_tools = pl_model::ResponsesHostedToolCapabilities {
+            tool_search: true,
+            programmatic_tool_calling: true,
+        };
+    }
+    let mut model = pl_model::default_models()
+        .into_iter()
+        .find(|model| model.slug == "gpt-5.6-sol")
+        .unwrap();
+    model.transport.default_connection_mode = pl_model::ProviderConnectionMode::Http;
+    let mut core = TurnEngineBuilder::from_provider_info_with_models(provider, vec![model])
+        .unwrap()
+        .build();
+    core.register_default_tools(std::env::temp_dir(), Some("rules".to_string()))
+        .await;
+    core.register_tool(HostedToolProbe);
+    let (event_tx, _) = tokio::sync::broadcast::channel(32);
+    let mut recorder = TraceRecorder::new("session-hosted-tools".to_string(), event_tx, 0);
+    let mut session = AgentSession::new();
+
+    let result = core
+        .run_turn_with_trace(
+            &mut session,
+            TurnRequest::new("check hosted tools".to_string())
+                .with_budget(crate::turn::TurnBudget::new(60_000)),
+            &mut recorder,
+            TurnOptions::default(),
+        )
+        .await
+        .unwrap();
+    handle.await.unwrap();
+
+    assert_eq!(result.status, TurnResultStatus::Completed);
+    let request = bodies.lock().unwrap()[0].clone();
+    request
+}
+
+fn local_responses_model() -> pl_model::ModelInfo {
+    let mut model = pl_model::ModelInfo::fallback("local-responses");
+    model.transport = pl_model::ModelTransportProfile::responses_http();
+    model
+}
+
 #[derive(Debug)]
 struct HistoryMarkerTool;
 
 #[derive(Debug)]
+struct HostedToolProbe;
+
+#[derive(Debug)]
 struct LargeArtifactTool;
+
+impl Tool for HostedToolProbe {
+    fn name(&self) -> &str {
+        "git_status"
+    }
+
+    fn description(&self) -> &str {
+        "Provides a read-only hosted tool orchestration probe"
+    }
+
+    fn input_schema(&self) -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+        })
+    }
+
+    fn execute<'a>(
+        &'a self,
+        _input: ToolInput,
+        _context: ToolContext,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = std::result::Result<ToolOutput, PureError>>
+                + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async {
+            Ok(ToolOutput {
+                description: "clean".to_string(),
+                truncated: OutputTruncation::empty(),
+                output_file: std::path::PathBuf::new(),
+                exit_code: Some(0),
+                timed_out: false,
+                runtime_events: Vec::new(),
+            })
+        })
+    }
+}
 
 impl Tool for LargeArtifactTool {
     fn name(&self) -> &str {

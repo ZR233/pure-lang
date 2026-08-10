@@ -2562,6 +2562,10 @@ impl SseDecode for crate::api::studio::types::settings::BridgeModelDescriptor {
         let mut var_contextWindow = <Option<u64>>::sse_decode(deserializer);
         let mut var_maxContextWindow = <Option<u64>>::sse_decode(deserializer);
         let mut var_maxOutputTokens = <Option<u64>>::sse_decode(deserializer);
+        let mut var_transport =
+            <crate::api::studio::types::settings::BridgeModelTransportDescriptor>::sse_decode(
+                deserializer,
+            );
         let mut var_modalities = <Vec<String>>::sse_decode(deserializer);
         let mut var_capabilities =
             <crate::api::studio::types::settings::BridgeModelCapabilities>::sse_decode(
@@ -2581,6 +2585,7 @@ impl SseDecode for crate::api::studio::types::settings::BridgeModelDescriptor {
             context_window: var_contextWindow,
             max_context_window: var_maxContextWindow,
             max_output_tokens: var_maxOutputTokens,
+            transport: var_transport,
             modalities: var_modalities,
             capabilities: var_capabilities,
             reasoning: var_reasoning,
@@ -2619,6 +2624,22 @@ impl SseDecode for crate::api::studio::types::settings::BridgeModelReasoningDesc
             label: var_label,
             default_candidate: var_defaultCandidate,
             candidates: var_candidates,
+        };
+    }
+}
+
+impl SseDecode for crate::api::studio::types::settings::BridgeModelTransportDescriptor {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_protocol = <String>::sse_decode(deserializer);
+        let mut var_connectionModes = <Vec<
+            crate::api::studio::types::settings::BridgeProviderConnectionModeDescriptor,
+        >>::sse_decode(deserializer);
+        let mut var_defaultConnectionMode = <String>::sse_decode(deserializer);
+        return crate::api::studio::types::settings::BridgeModelTransportDescriptor {
+            protocol: var_protocol,
+            connection_modes: var_connectionModes,
+            default_connection_mode: var_defaultConnectionMode,
         };
     }
 }
@@ -2815,6 +2836,10 @@ impl SseDecode for crate::api::studio::types::settings::BridgeProviderModelSetti
         let mut var_cacheWritePricePerMTok = <Option<f64>>::sse_decode(deserializer);
         let mut var_reasoningEfforts = <Vec<String>>::sse_decode(deserializer);
         let mut var_baseInstructions = <String>::sse_decode(deserializer);
+        let mut var_wireProtocol = <String>::sse_decode(deserializer);
+        let mut var_supportedConnectionModes = <Vec<String>>::sse_decode(deserializer);
+        let mut var_defaultConnectionMode = <String>::sse_decode(deserializer);
+        let mut var_connectionMode = <String>::sse_decode(deserializer);
         return crate::api::studio::types::settings::BridgeProviderModelSettingsDto {
             slug: var_slug,
             display_name: var_displayName,
@@ -2828,6 +2853,10 @@ impl SseDecode for crate::api::studio::types::settings::BridgeProviderModelSetti
             cache_write_price_per_m_tok: var_cacheWritePricePerMTok,
             reasoning_efforts: var_reasoningEfforts,
             base_instructions: var_baseInstructions,
+            wire_protocol: var_wireProtocol,
+            supported_connection_modes: var_supportedConnectionModes,
+            default_connection_mode: var_defaultConnectionMode,
+            connection_mode: var_connectionMode,
         };
     }
 }
@@ -2838,10 +2867,6 @@ impl SseDecode for crate::api::studio::types::settings::BridgeProviderPresetDesc
         let mut var_id = <String>::sse_decode(deserializer);
         let mut var_displayName = <String>::sse_decode(deserializer);
         let mut var_description = <Option<String>>::sse_decode(deserializer);
-        let mut var_transport =
-            <crate::api::studio::types::settings::BridgeProviderTransportDescriptor>::sse_decode(
-                deserializer,
-            );
         let mut var_baseUrl = <String>::sse_decode(deserializer);
         let mut var_credentialLabel = <String>::sse_decode(deserializer);
         let mut var_credentialEnv = <Option<String>>::sse_decode(deserializer);
@@ -2853,7 +2878,6 @@ impl SseDecode for crate::api::studio::types::settings::BridgeProviderPresetDesc
             id: var_id,
             display_name: var_displayName,
             description: var_description,
-            transport: var_transport,
             base_url: var_baseUrl,
             credential_label: var_credentialLabel,
             credential_env: var_credentialEnv,
@@ -2872,9 +2896,13 @@ impl SseDecode
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_webSearch = <crate::api::studio::types::settings::BridgeWebSearchProviderCapabilitiesDescriptor>::sse_decode(deserializer);
         let mut var_promptCacheDialect = <String>::sse_decode(deserializer);
+        let mut var_responsesToolSearch = <bool>::sse_decode(deserializer);
+        let mut var_responsesProgrammaticToolCalling = <bool>::sse_decode(deserializer);
         return crate::api::studio::types::settings::BridgeProviderServiceCapabilitiesDescriptor {
             web_search: var_webSearch,
             prompt_cache_dialect: var_promptCacheDialect,
+            responses_tool_search: var_responsesToolSearch,
+            responses_programmatic_tool_calling: var_responsesProgrammaticToolCalling,
         };
     }
 }
@@ -2884,8 +2912,6 @@ impl SseDecode for crate::api::studio::types::settings::BridgeProviderSettingsDt
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_id = <String>::sse_decode(deserializer);
         let mut var_templateKind = <String>::sse_decode(deserializer);
-        let mut var_wireProtocol = <String>::sse_decode(deserializer);
-        let mut var_connectionMode = <String>::sse_decode(deserializer);
         let mut var_name = <String>::sse_decode(deserializer);
         let mut var_baseUrl = <String>::sse_decode(deserializer);
         let mut var_hasBearerToken = <bool>::sse_decode(deserializer);
@@ -2893,6 +2919,8 @@ impl SseDecode for crate::api::studio::types::settings::BridgeProviderSettingsDt
         let mut var_hostedWebSearch = <bool>::sse_decode(deserializer);
         let mut var_standaloneWebSearch = <Option<String>>::sse_decode(deserializer);
         let mut var_promptCacheDialect = <String>::sse_decode(deserializer);
+        let mut var_responsesToolSearch = <bool>::sse_decode(deserializer);
+        let mut var_responsesProgrammaticToolCalling = <bool>::sse_decode(deserializer);
         let mut var_defaultModel = <String>::sse_decode(deserializer);
         let mut var_models = <Vec<
             crate::api::studio::types::settings::BridgeProviderModelSettingsDto,
@@ -2904,8 +2932,6 @@ impl SseDecode for crate::api::studio::types::settings::BridgeProviderSettingsDt
         return crate::api::studio::types::settings::BridgeProviderSettingsDto {
             id: var_id,
             template_kind: var_templateKind,
-            wire_protocol: var_wireProtocol,
-            connection_mode: var_connectionMode,
             name: var_name,
             base_url: var_baseUrl,
             has_bearer_token: var_hasBearerToken,
@@ -2913,26 +2939,12 @@ impl SseDecode for crate::api::studio::types::settings::BridgeProviderSettingsDt
             hosted_web_search: var_hostedWebSearch,
             standalone_web_search: var_standaloneWebSearch,
             prompt_cache_dialect: var_promptCacheDialect,
+            responses_tool_search: var_responsesToolSearch,
+            responses_programmatic_tool_calling: var_responsesProgrammaticToolCalling,
             default_model: var_defaultModel,
             models: var_models,
             custom_models: var_customModels,
             catalog_id: var_catalogId,
-        };
-    }
-}
-
-impl SseDecode for crate::api::studio::types::settings::BridgeProviderTransportDescriptor {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut var_protocol = <String>::sse_decode(deserializer);
-        let mut var_connectionModes = <Vec<
-            crate::api::studio::types::settings::BridgeProviderConnectionModeDescriptor,
-        >>::sse_decode(deserializer);
-        let mut var_defaultConnectionMode = <String>::sse_decode(deserializer);
-        return crate::api::studio::types::settings::BridgeProviderTransportDescriptor {
-            protocol: var_protocol,
-            connection_modes: var_connectionModes,
-            default_connection_mode: var_defaultConnectionMode,
         };
     }
 }
@@ -5432,6 +5444,22 @@ impl SseDecode for Vec<crate::api::studio::types::settings::ProviderInput> {
     }
 }
 
+impl SseDecode for Vec<crate::api::studio::types::settings::ProviderModelConnectionInput> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(
+                <crate::api::studio::types::settings::ProviderModelConnectionInput>::sse_decode(
+                    deserializer,
+                ),
+            );
+        }
+        return ans_;
+    }
+}
+
 impl SseDecode for Vec<crate::api::studio::types::settings::ProviderModelInput> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -5910,8 +5938,6 @@ impl SseDecode for crate::api::studio::types::settings::ProviderInput {
         let mut var_id = <String>::sse_decode(deserializer);
         let mut var_originalId = <Option<String>>::sse_decode(deserializer);
         let mut var_templateKind = <String>::sse_decode(deserializer);
-        let mut var_wireProtocol = <String>::sse_decode(deserializer);
-        let mut var_connectionMode = <String>::sse_decode(deserializer);
         let mut var_name = <String>::sse_decode(deserializer);
         let mut var_baseUrl = <String>::sse_decode(deserializer);
         let mut var_secret =
@@ -5920,17 +5946,20 @@ impl SseDecode for crate::api::studio::types::settings::ProviderInput {
         let mut var_hostedWebSearch = <bool>::sse_decode(deserializer);
         let mut var_standaloneWebSearch = <Option<String>>::sse_decode(deserializer);
         let mut var_promptCacheDialect = <String>::sse_decode(deserializer);
+        let mut var_responsesToolSearch = <bool>::sse_decode(deserializer);
+        let mut var_responsesProgrammaticToolCalling = <bool>::sse_decode(deserializer);
         let mut var_defaultModel = <String>::sse_decode(deserializer);
         let mut var_customModels =
             <Vec<crate::api::studio::types::settings::ProviderModelInput>>::sse_decode(
                 deserializer,
             );
+        let mut var_modelConnectionModes = <Vec<
+            crate::api::studio::types::settings::ProviderModelConnectionInput,
+        >>::sse_decode(deserializer);
         return crate::api::studio::types::settings::ProviderInput {
             id: var_id,
             original_id: var_originalId,
             template_kind: var_templateKind,
-            wire_protocol: var_wireProtocol,
-            connection_mode: var_connectionMode,
             name: var_name,
             base_url: var_baseUrl,
             secret: var_secret,
@@ -5938,8 +5967,23 @@ impl SseDecode for crate::api::studio::types::settings::ProviderInput {
             hosted_web_search: var_hostedWebSearch,
             standalone_web_search: var_standaloneWebSearch,
             prompt_cache_dialect: var_promptCacheDialect,
+            responses_tool_search: var_responsesToolSearch,
+            responses_programmatic_tool_calling: var_responsesProgrammaticToolCalling,
             default_model: var_defaultModel,
             custom_models: var_customModels,
+            model_connection_modes: var_modelConnectionModes,
+        };
+    }
+}
+
+impl SseDecode for crate::api::studio::types::settings::ProviderModelConnectionInput {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_slug = <String>::sse_decode(deserializer);
+        let mut var_connectionMode = <String>::sse_decode(deserializer);
+        return crate::api::studio::types::settings::ProviderModelConnectionInput {
+            slug: var_slug,
+            connection_mode: var_connectionMode,
         };
     }
 }
@@ -5951,11 +5995,17 @@ impl SseDecode for crate::api::studio::types::settings::ProviderModelInput {
         let mut var_displayName = <String>::sse_decode(deserializer);
         let mut var_reasoningEfforts = <Vec<String>>::sse_decode(deserializer);
         let mut var_baseInstructions = <Option<String>>::sse_decode(deserializer);
+        let mut var_wireProtocol = <String>::sse_decode(deserializer);
+        let mut var_supportedConnectionModes = <Vec<String>>::sse_decode(deserializer);
+        let mut var_defaultConnectionMode = <String>::sse_decode(deserializer);
         return crate::api::studio::types::settings::ProviderModelInput {
             slug: var_slug,
             display_name: var_displayName,
             reasoning_efforts: var_reasoningEfforts,
             base_instructions: var_baseInstructions,
+            wire_protocol: var_wireProtocol,
+            supported_connection_modes: var_supportedConnectionModes,
+            default_connection_mode: var_defaultConnectionMode,
         };
     }
 }
@@ -7006,6 +7056,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::studio::types::settings::Brid
             self.context_window.into_into_dart().into_dart(),
             self.max_context_window.into_into_dart().into_dart(),
             self.max_output_tokens.into_into_dart().into_dart(),
+            self.transport.into_into_dart().into_dart(),
             self.modalities.into_into_dart().into_dart(),
             self.capabilities.into_into_dart().into_dart(),
             self.reasoning.into_into_dart().into_dart(),
@@ -7073,6 +7124,32 @@ impl
     > for crate::api::studio::types::settings::BridgeModelReasoningDescriptor
 {
     fn into_into_dart(self) -> crate::api::studio::types::settings::BridgeModelReasoningDescriptor {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart
+    for crate::api::studio::types::settings::BridgeModelTransportDescriptor
+{
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.protocol.into_into_dart().into_dart(),
+            self.connection_modes.into_into_dart().into_dart(),
+            self.default_connection_mode.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::settings::BridgeModelTransportDescriptor
+{
+}
+impl
+    flutter_rust_bridge::IntoIntoDart<
+        crate::api::studio::types::settings::BridgeModelTransportDescriptor,
+    > for crate::api::studio::types::settings::BridgeModelTransportDescriptor
+{
+    fn into_into_dart(self) -> crate::api::studio::types::settings::BridgeModelTransportDescriptor {
         self
     }
 }
@@ -7309,6 +7386,10 @@ impl flutter_rust_bridge::IntoDart
                 .into_dart(),
             self.reasoning_efforts.into_into_dart().into_dart(),
             self.base_instructions.into_into_dart().into_dart(),
+            self.wire_protocol.into_into_dart().into_dart(),
+            self.supported_connection_modes.into_into_dart().into_dart(),
+            self.default_connection_mode.into_into_dart().into_dart(),
+            self.connection_mode.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -7335,7 +7416,6 @@ impl flutter_rust_bridge::IntoDart
             self.id.into_into_dart().into_dart(),
             self.display_name.into_into_dart().into_dart(),
             self.description.into_into_dart().into_dart(),
-            self.transport.into_into_dart().into_dart(),
             self.base_url.into_into_dart().into_dart(),
             self.credential_label.into_into_dart().into_dart(),
             self.credential_env.into_into_dart().into_dart(),
@@ -7368,6 +7448,10 @@ impl flutter_rust_bridge::IntoDart
         [
             self.web_search.into_into_dart().into_dart(),
             self.prompt_cache_dialect.into_into_dart().into_dart(),
+            self.responses_tool_search.into_into_dart().into_dart(),
+            self.responses_programmatic_tool_calling
+                .into_into_dart()
+                .into_dart(),
         ]
         .into_dart()
     }
@@ -7395,8 +7479,6 @@ impl flutter_rust_bridge::IntoDart
         [
             self.id.into_into_dart().into_dart(),
             self.template_kind.into_into_dart().into_dart(),
-            self.wire_protocol.into_into_dart().into_dart(),
-            self.connection_mode.into_into_dart().into_dart(),
             self.name.into_into_dart().into_dart(),
             self.base_url.into_into_dart().into_dart(),
             self.has_bearer_token.into_into_dart().into_dart(),
@@ -7404,6 +7486,10 @@ impl flutter_rust_bridge::IntoDart
             self.hosted_web_search.into_into_dart().into_dart(),
             self.standalone_web_search.into_into_dart().into_dart(),
             self.prompt_cache_dialect.into_into_dart().into_dart(),
+            self.responses_tool_search.into_into_dart().into_dart(),
+            self.responses_programmatic_tool_calling
+                .into_into_dart()
+                .into_dart(),
             self.default_model.into_into_dart().into_dart(),
             self.models.into_into_dart().into_dart(),
             self.custom_models.into_into_dart().into_dart(),
@@ -7422,34 +7508,6 @@ impl
     > for crate::api::studio::types::settings::BridgeProviderSettingsDto
 {
     fn into_into_dart(self) -> crate::api::studio::types::settings::BridgeProviderSettingsDto {
-        self
-    }
-}
-// Codec=Dco (DartCObject based), see doc to use other codecs
-impl flutter_rust_bridge::IntoDart
-    for crate::api::studio::types::settings::BridgeProviderTransportDescriptor
-{
-    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
-        [
-            self.protocol.into_into_dart().into_dart(),
-            self.connection_modes.into_into_dart().into_dart(),
-            self.default_connection_mode.into_into_dart().into_dart(),
-        ]
-        .into_dart()
-    }
-}
-impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
-    for crate::api::studio::types::settings::BridgeProviderTransportDescriptor
-{
-}
-impl
-    flutter_rust_bridge::IntoIntoDart<
-        crate::api::studio::types::settings::BridgeProviderTransportDescriptor,
-    > for crate::api::studio::types::settings::BridgeProviderTransportDescriptor
-{
-    fn into_into_dart(
-        self,
-    ) -> crate::api::studio::types::settings::BridgeProviderTransportDescriptor {
         self
     }
 }
@@ -9733,8 +9791,6 @@ impl flutter_rust_bridge::IntoDart for crate::api::studio::types::settings::Prov
             self.id.into_into_dart().into_dart(),
             self.original_id.into_into_dart().into_dart(),
             self.template_kind.into_into_dart().into_dart(),
-            self.wire_protocol.into_into_dart().into_dart(),
-            self.connection_mode.into_into_dart().into_dart(),
             self.name.into_into_dart().into_dart(),
             self.base_url.into_into_dart().into_dart(),
             self.secret.into_into_dart().into_dart(),
@@ -9742,8 +9798,13 @@ impl flutter_rust_bridge::IntoDart for crate::api::studio::types::settings::Prov
             self.hosted_web_search.into_into_dart().into_dart(),
             self.standalone_web_search.into_into_dart().into_dart(),
             self.prompt_cache_dialect.into_into_dart().into_dart(),
+            self.responses_tool_search.into_into_dart().into_dart(),
+            self.responses_programmatic_tool_calling
+                .into_into_dart()
+                .into_dart(),
             self.default_model.into_into_dart().into_dart(),
             self.custom_models.into_into_dart().into_dart(),
+            self.model_connection_modes.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -9760,6 +9821,31 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::settings::Prov
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart
+    for crate::api::studio::types::settings::ProviderModelConnectionInput
+{
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.slug.into_into_dart().into_dart(),
+            self.connection_mode.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::settings::ProviderModelConnectionInput
+{
+}
+impl
+    flutter_rust_bridge::IntoIntoDart<
+        crate::api::studio::types::settings::ProviderModelConnectionInput,
+    > for crate::api::studio::types::settings::ProviderModelConnectionInput
+{
+    fn into_into_dart(self) -> crate::api::studio::types::settings::ProviderModelConnectionInput {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::studio::types::settings::ProviderModelInput {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -9767,6 +9853,9 @@ impl flutter_rust_bridge::IntoDart for crate::api::studio::types::settings::Prov
             self.display_name.into_into_dart().into_dart(),
             self.reasoning_efforts.into_into_dart().into_dart(),
             self.base_instructions.into_into_dart().into_dart(),
+            self.wire_protocol.into_into_dart().into_dart(),
+            self.supported_connection_modes.into_into_dart().into_dart(),
+            self.default_connection_mode.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -10614,6 +10703,10 @@ impl SseEncode for crate::api::studio::types::settings::BridgeModelDescriptor {
         <Option<u64>>::sse_encode(self.context_window, serializer);
         <Option<u64>>::sse_encode(self.max_context_window, serializer);
         <Option<u64>>::sse_encode(self.max_output_tokens, serializer);
+        <crate::api::studio::types::settings::BridgeModelTransportDescriptor>::sse_encode(
+            self.transport,
+            serializer,
+        );
         <Vec<String>>::sse_encode(self.modalities, serializer);
         <crate::api::studio::types::settings::BridgeModelCapabilities>::sse_encode(
             self.capabilities,
@@ -10648,6 +10741,15 @@ impl SseEncode for crate::api::studio::types::settings::BridgeModelReasoningDesc
         <String>::sse_encode(self.label, serializer);
         <Option<String>>::sse_encode(self.default_candidate, serializer);
         <Vec<String>>::sse_encode(self.candidates, serializer);
+    }
+}
+
+impl SseEncode for crate::api::studio::types::settings::BridgeModelTransportDescriptor {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.protocol, serializer);
+        <Vec<crate::api::studio::types::settings::BridgeProviderConnectionModeDescriptor>>::sse_encode(self.connection_modes, serializer);
+        <String>::sse_encode(self.default_connection_mode, serializer);
     }
 }
 
@@ -10782,6 +10884,10 @@ impl SseEncode for crate::api::studio::types::settings::BridgeProviderModelSetti
         <Option<f64>>::sse_encode(self.cache_write_price_per_m_tok, serializer);
         <Vec<String>>::sse_encode(self.reasoning_efforts, serializer);
         <String>::sse_encode(self.base_instructions, serializer);
+        <String>::sse_encode(self.wire_protocol, serializer);
+        <Vec<String>>::sse_encode(self.supported_connection_modes, serializer);
+        <String>::sse_encode(self.default_connection_mode, serializer);
+        <String>::sse_encode(self.connection_mode, serializer);
     }
 }
 
@@ -10791,10 +10897,6 @@ impl SseEncode for crate::api::studio::types::settings::BridgeProviderPresetDesc
         <String>::sse_encode(self.id, serializer);
         <String>::sse_encode(self.display_name, serializer);
         <Option<String>>::sse_encode(self.description, serializer);
-        <crate::api::studio::types::settings::BridgeProviderTransportDescriptor>::sse_encode(
-            self.transport,
-            serializer,
-        );
         <String>::sse_encode(self.base_url, serializer);
         <String>::sse_encode(self.credential_label, serializer);
         <Option<String>>::sse_encode(self.credential_env, serializer);
@@ -10812,6 +10914,8 @@ impl SseEncode
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <crate::api::studio::types::settings::BridgeWebSearchProviderCapabilitiesDescriptor>::sse_encode(self.web_search, serializer);
         <String>::sse_encode(self.prompt_cache_dialect, serializer);
+        <bool>::sse_encode(self.responses_tool_search, serializer);
+        <bool>::sse_encode(self.responses_programmatic_tool_calling, serializer);
     }
 }
 
@@ -10820,8 +10924,6 @@ impl SseEncode for crate::api::studio::types::settings::BridgeProviderSettingsDt
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <String>::sse_encode(self.id, serializer);
         <String>::sse_encode(self.template_kind, serializer);
-        <String>::sse_encode(self.wire_protocol, serializer);
-        <String>::sse_encode(self.connection_mode, serializer);
         <String>::sse_encode(self.name, serializer);
         <String>::sse_encode(self.base_url, serializer);
         <bool>::sse_encode(self.has_bearer_token, serializer);
@@ -10829,6 +10931,8 @@ impl SseEncode for crate::api::studio::types::settings::BridgeProviderSettingsDt
         <bool>::sse_encode(self.hosted_web_search, serializer);
         <Option<String>>::sse_encode(self.standalone_web_search, serializer);
         <String>::sse_encode(self.prompt_cache_dialect, serializer);
+        <bool>::sse_encode(self.responses_tool_search, serializer);
+        <bool>::sse_encode(self.responses_programmatic_tool_calling, serializer);
         <String>::sse_encode(self.default_model, serializer);
         <Vec<crate::api::studio::types::settings::BridgeProviderModelSettingsDto>>::sse_encode(
             self.models,
@@ -10839,15 +10943,6 @@ impl SseEncode for crate::api::studio::types::settings::BridgeProviderSettingsDt
             serializer,
         );
         <Option<String>>::sse_encode(self.catalog_id, serializer);
-    }
-}
-
-impl SseEncode for crate::api::studio::types::settings::BridgeProviderTransportDescriptor {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <String>::sse_encode(self.protocol, serializer);
-        <Vec<crate::api::studio::types::settings::BridgeProviderConnectionModeDescriptor>>::sse_encode(self.connection_modes, serializer);
-        <String>::sse_encode(self.default_connection_mode, serializer);
     }
 }
 
@@ -12659,6 +12754,18 @@ impl SseEncode for Vec<crate::api::studio::types::settings::ProviderInput> {
     }
 }
 
+impl SseEncode for Vec<crate::api::studio::types::settings::ProviderModelConnectionInput> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::studio::types::settings::ProviderModelConnectionInput>::sse_encode(
+                item, serializer,
+            );
+        }
+    }
+}
+
 impl SseEncode for Vec<crate::api::studio::types::settings::ProviderModelInput> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -13052,8 +13159,6 @@ impl SseEncode for crate::api::studio::types::settings::ProviderInput {
         <String>::sse_encode(self.id, serializer);
         <Option<String>>::sse_encode(self.original_id, serializer);
         <String>::sse_encode(self.template_kind, serializer);
-        <String>::sse_encode(self.wire_protocol, serializer);
-        <String>::sse_encode(self.connection_mode, serializer);
         <String>::sse_encode(self.name, serializer);
         <String>::sse_encode(self.base_url, serializer);
         <crate::api::studio::types::settings::ProviderSecretInput>::sse_encode(
@@ -13064,11 +13169,25 @@ impl SseEncode for crate::api::studio::types::settings::ProviderInput {
         <bool>::sse_encode(self.hosted_web_search, serializer);
         <Option<String>>::sse_encode(self.standalone_web_search, serializer);
         <String>::sse_encode(self.prompt_cache_dialect, serializer);
+        <bool>::sse_encode(self.responses_tool_search, serializer);
+        <bool>::sse_encode(self.responses_programmatic_tool_calling, serializer);
         <String>::sse_encode(self.default_model, serializer);
         <Vec<crate::api::studio::types::settings::ProviderModelInput>>::sse_encode(
             self.custom_models,
             serializer,
         );
+        <Vec<crate::api::studio::types::settings::ProviderModelConnectionInput>>::sse_encode(
+            self.model_connection_modes,
+            serializer,
+        );
+    }
+}
+
+impl SseEncode for crate::api::studio::types::settings::ProviderModelConnectionInput {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.slug, serializer);
+        <String>::sse_encode(self.connection_mode, serializer);
     }
 }
 
@@ -13079,6 +13198,9 @@ impl SseEncode for crate::api::studio::types::settings::ProviderModelInput {
         <String>::sse_encode(self.display_name, serializer);
         <Vec<String>>::sse_encode(self.reasoning_efforts, serializer);
         <Option<String>>::sse_encode(self.base_instructions, serializer);
+        <String>::sse_encode(self.wire_protocol, serializer);
+        <Vec<String>>::sse_encode(self.supported_connection_modes, serializer);
+        <String>::sse_encode(self.default_connection_mode, serializer);
     }
 }
 

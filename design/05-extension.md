@@ -7,8 +7,10 @@ Provider 扩展分为协议、preset 和实例三层：
 - 新 wire 协议才扩展 `pl-model` 的 typed request/stream adapter。
 - 使用现有 Responses 或 Chat Completions 的供应商只在 `pl-core::ProviderCatalogRegistry`
   增加 preset，并把模型元数据放入 `pl-model` canonical catalog。
-- 产品配置只保存 preset/catalog 引用、实例凭证、endpoint override、连接模式和附加模型。
-- 完全自定义 provider 使用 `ProviderTransportSelection::Custom` 与 `Explicit` 模型目录。
+- 产品配置只保存 preset/catalog 引用、实例凭证、endpoint override、逐模型连接方式 override
+  和附加模型。
+- 完全自定义 provider 使用 `Explicit` 模型目录；其中每个模型都显式声明协议、支持的连接
+  方式和默认连接方式。
 
 Provider 提供的外部服务能力与 wire 协议正交。`ProviderPreset` 通过
 `ProviderServiceCapabilities` 声明 hosted Web Search、standalone Web Search 等默认能力；preset

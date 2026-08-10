@@ -3,7 +3,8 @@ use std::collections::BTreeSet;
 
 use crate::{PureError, Result};
 use pl_model::{
-    ModelInfo, ModelParameter, ProviderConnectionMode, ProviderInfo, ProviderWireProtocol,
+    ModelInfo, ModelParameter, ModelTransportProfile, ProviderConnectionMode, ProviderInfo,
+    ProviderWireProtocol,
 };
 
 use crate::config::{
@@ -22,6 +23,9 @@ pub struct ProviderModelEdit {
     pub display_name: String,
     pub efforts: Vec<String>,
     pub base_instructions: String,
+    pub protocol: ProviderWireProtocol,
+    pub supported_connection_modes: Vec<ProviderConnectionMode>,
+    pub default_connection_mode: ProviderConnectionMode,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,14 +33,13 @@ pub struct ProviderEdit {
     pub key: String,
     pub original_key: Option<String>,
     pub preset: Option<ProviderPresetId>,
-    pub protocol: ProviderWireProtocol,
-    pub connection_mode: ProviderConnectionMode,
     pub name: String,
     pub base_url: Option<String>,
     pub bearer_token: Option<String>,
     pub capabilities: ProviderCapabilitySelection,
     pub default_model: String,
     pub custom_models: Vec<ProviderModelEdit>,
+    pub model_connection_modes: BTreeMap<String, ProviderConnectionMode>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -90,6 +93,15 @@ impl ProviderModelEdit {
             });
         }
         model.base_instructions = self.base_instructions.trim().to_string();
+        model.transport = ModelTransportProfile {
+            protocol: self.protocol,
+            supported_connection_modes: self.supported_connection_modes.clone(),
+            default_connection_mode: self.default_connection_mode,
+        };
+        model
+            .transport
+            .validate(&slug)
+            .map_err(PureError::ConfigError)?;
         Ok(model)
     }
 }
@@ -132,12 +144,6 @@ impl ProviderEdit {
                             "provider {provider_key} references unknown preset: {preset_id}"
                         ))
                     })?;
-                if preset.protocol != self.protocol {
-                    return Err(PureError::ConfigError(format!(
-                        "provider {provider_key} preset {preset_id} requires protocol {:?}",
-                        preset.protocol
-                    )));
-                }
                 let mut config = preset.provider;
                 if current.and_then(ProviderConfig::preset_id) == Some(preset_id) {
                     let current = current.expect("matching current preset is present");
@@ -167,13 +173,14 @@ impl ProviderEdit {
                         "custom provider {provider_key} must use explicit service capabilities"
                     )));
                 }
-                let current_custom = current.filter(|provider| {
-                    provider.preset_id().is_none()
-                        && provider.protocol().ok() == Some(self.protocol)
-                });
+                let current_custom = current.filter(|provider| provider.preset_id().is_none());
+                let representative_transport = custom_models
+                    .first()
+                    .map(|model| model.transport.clone())
+                    .unwrap_or_else(ModelTransportProfile::chat_completions_http);
                 let info = ProviderInfo {
-                    protocol: self.protocol,
-                    connection_mode: self.connection_mode,
+                    protocol: representative_transport.protocol,
+                    connection_mode: representative_transport.default_connection_mode,
                     name: name.clone(),
                     base_url: base_url.clone(),
                     default_model: String::new(),
@@ -194,7 +201,9 @@ impl ProviderEdit {
                 config
             }
         };
-        config.set_connection_mode(self.connection_mode);
+        for (model, mode) in &self.model_connection_modes {
+            config.set_model_connection_mode(model, *mode)?;
+        }
         config.capabilities = self.capabilities.clone();
         config.name = name;
         config.base_url = base_url;
@@ -536,14 +545,13 @@ mod tests {
             key: "openai".to_string(),
             original_key: None,
             preset: Some(ProviderPresetId::new("openai").unwrap()),
-            protocol: ProviderWireProtocol::Responses,
-            connection_mode: ProviderConnectionMode::WebSocket,
             name: "OpenAI".to_string(),
             base_url: Some("https://api.openai.com/v1".to_string()),
             bearer_token: None,
             capabilities: ProviderCapabilitySelection::PresetDefaults,
             default_model: "gpt-5.6-sol".to_string(),
             custom_models: Vec::new(),
+            model_connection_modes: BTreeMap::new(),
         }
     }
 

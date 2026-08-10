@@ -1,5 +1,7 @@
+use std::collections::HashSet;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::RwLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::{Map, Value};
 use tokio::sync::{Mutex, OwnedMutexGuard};
@@ -16,7 +18,7 @@ pub(crate) use responses_websocket::ResponsesWebSocketConnection;
 #[derive(Clone, Default)]
 pub struct ModelTransportSession {
     responses_websocket: Arc<Mutex<ResponsesWebSocketSession>>,
-    responses_http_fallback: Arc<AtomicBool>,
+    responses_http_fallback_keys: Arc<RwLock<HashSet<u64>>>,
     orchestration: Arc<TransportOrchestrationCounters>,
 }
 
@@ -75,12 +77,17 @@ impl ModelTransportSession {
             .fetch_add(1, Ordering::Relaxed);
     }
 
-    pub(crate) fn uses_responses_http_fallback(&self) -> bool {
-        self.responses_http_fallback.load(Ordering::Relaxed)
+    pub(crate) fn uses_responses_http_fallback(&self, connection_key: u64) -> bool {
+        self.responses_http_fallback_keys
+            .read()
+            .is_ok_and(|keys| keys.contains(&connection_key))
     }
 
-    pub(crate) async fn activate_responses_http_fallback(&self) -> bool {
-        let activated = !self.responses_http_fallback.swap(true, Ordering::Relaxed);
+    pub(crate) async fn activate_responses_http_fallback(&self, connection_key: u64) -> bool {
+        let activated = self
+            .responses_http_fallback_keys
+            .write()
+            .is_ok_and(|mut keys| keys.insert(connection_key));
         if activated {
             self.lock_responses_websocket().await.invalidate();
         }
@@ -103,10 +110,11 @@ mod tests {
         let session = ModelTransportSession::default();
         let clone = session.clone();
 
-        assert!(session.activate_responses_http_fallback().await);
-        assert!(clone.uses_responses_http_fallback());
-        assert!(!clone.activate_responses_http_fallback().await);
-        assert!(!ModelTransportSession::default().uses_responses_http_fallback());
+        assert!(session.activate_responses_http_fallback(11).await);
+        assert!(clone.uses_responses_http_fallback(11));
+        assert!(!clone.uses_responses_http_fallback(12));
+        assert!(!clone.activate_responses_http_fallback(11).await);
+        assert!(!ModelTransportSession::default().uses_responses_http_fallback(11));
     }
 
     #[test]

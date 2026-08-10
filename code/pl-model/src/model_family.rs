@@ -6,7 +6,9 @@
 //! `default_models` 中为每个模型重复构造完整 `ModelInfo`。
 
 use crate::capabilities::ModelCapabilities;
-use crate::model_info::{ModelInfo, ModelRequestProfile, TruncationMode, TruncationPolicy};
+use crate::model_info::{
+    ModelInfo, ModelRequestProfile, ModelTransportProfile, TruncationMode, TruncationPolicy,
+};
 use crate::parameter::ModelParameter;
 
 /// 同一 provider 内共享元数据的模型家族预设。
@@ -23,6 +25,7 @@ pub struct ModelFamily {
     pub truncation_limit: u64,
     /// 共享的可调参数声明（如 effort）。
     pub parameters: Vec<ModelParameter>,
+    pub transport: ModelTransportProfile,
     /// 共享的请求 profile（含 base body，如 DeepSeek 的 `thinking.type = enabled`）。
     pub request_profile: ModelRequestProfile,
     pub base_instructions: String,
@@ -66,6 +69,7 @@ impl ModelFamily {
             cache_read_price_per_mtok: pricing.cache_read_per_mtok,
             cache_write_price_per_mtok: pricing.cache_write_per_mtok,
             parameters: self.parameters.clone(),
+            transport: self.transport.clone(),
             capabilities: self.capabilities.clone(),
             request_profile: self.request_profile.clone(),
             truncation_policy: TruncationPolicy {

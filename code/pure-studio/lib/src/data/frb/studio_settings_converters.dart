@@ -29,13 +29,13 @@ ProviderSettingsView _providerSettingsFromFrb(
     usageLabel: models.isEmpty ? value.defaultModel : '$modelCount models',
     modelCount: '$modelCount',
     updatedAt: 'Loaded',
-    wireProtocol: value.wireProtocol,
-    connectionMode: value.connectionMode,
     catalogId: value.catalogId ?? '',
     capabilitySource: value.capabilitySource,
     hostedWebSearch: value.hostedWebSearch,
     standaloneWebSearch: value.standaloneWebSearch ?? '',
     promptCacheDialect: value.promptCacheDialect,
+    responsesToolSearch: value.responsesToolSearch,
+    responsesProgrammaticToolCalling: value.responsesProgrammaticToolCalling,
   );
 }
 
@@ -55,6 +55,10 @@ ProviderModelView _providerModelSettingsFromFrb(
     cacheWritePricePerMTok: value.cacheWritePricePerMTok,
     baseInstructions: value.baseInstructions,
     reasoningEfforts: value.reasoningEfforts,
+    wireProtocol: value.wireProtocol,
+    supportedConnectionModes: value.supportedConnectionModes,
+    defaultConnectionMode: value.defaultConnectionMode,
+    connectionMode: value.connectionMode,
   );
 }
 

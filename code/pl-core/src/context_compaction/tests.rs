@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex};
 
 use pl_model::{
     CompletionEventStream, CompletionRequest, CompletionResponse, FinishReason, ModelCapabilities,
-    ModelInfo, OpenAiCompactionMode, ProviderCapabilities, ProviderInfo, ProviderWireProtocol,
-    TokenUsage,
+    ModelInfo, ModelTransportProfile, OpenAiCompactionMode, ProviderCapabilities, ProviderInfo,
+    ProviderWireProtocol, TokenUsage,
 };
 use pl_protocol::{Message, MessageContent, MessageRole, ModelContextItem, PureError, Result};
 use pl_trace::{AgentEvent, AgentEventSender, TracePartSource};
@@ -159,8 +159,10 @@ async fn local_empty_summary_preserves_session_history_and_revision() {
 
 #[tokio::test]
 async fn remote_failure_does_not_replace_session_history_or_revision() {
-    let provider =
-        FakeCompactionProvider::new(test_model(), FakeCompactionFailure::ContextPressure);
+    let provider = FakeCompactionProvider::new(
+        responses_test_model(),
+        FakeCompactionFailure::ContextPressure,
+    );
     let mut session = test_session();
     let original_items = session.items().to_vec();
     let original_revision = session.revision();
@@ -246,6 +248,12 @@ fn test_model() -> ModelInfo {
     model.max_context_window = Some(100);
     model.auto_compact_token_limit = Some(1);
     model.max_output_tokens = Some(4096);
+    model
+}
+
+fn responses_test_model() -> ModelInfo {
+    let mut model = test_model();
+    model.transport = ModelTransportProfile::responses_http();
     model
 }
 

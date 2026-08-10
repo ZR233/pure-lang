@@ -7,6 +7,7 @@ use pl_studio_runtime::{
 
 pub(super) fn task_test_config(base_url: String) -> StudioConfig {
     let mut model = ModelInfo::fallback("local-responses");
+    model.transport = pl_model::ModelTransportProfile::responses_http();
     model.context_window = Some(128_000);
     model.parameters = vec![ModelParameter {
         name: "effort".to_string(),

@@ -159,7 +159,7 @@ pub fn plan_web_search(
         .web_search
         .hosted_responses;
     let hosted_supported = hosted_declared
-        && current.provider_info.protocol == ProviderWireProtocol::Responses
+        && current.model.transport.protocol == ProviderWireProtocol::Responses
         && current.model.capabilities.supports_web_search()
         && current_has_credential;
 

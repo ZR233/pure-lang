@@ -27,8 +27,8 @@ pub use default_models::{
 pub use manager::{DefaultModelsManager, ModelsManager};
 pub use model_family::{ModelFamily, ModelPricing};
 pub use model_info::{
-    MaxTokensField, ModelInfo, ModelRequestProfile, ResponsesMaxTokensField, TruncationMode,
-    TruncationPolicy,
+    MaxTokensField, ModelInfo, ModelRequestProfile, ModelTransportProfile, ResponsesMaxTokensField,
+    TruncationMode, TruncationPolicy,
 };
 pub use parameter::{
     MissingCandidatePolicy, ModelParameter, ModelParameterCandidateError,
@@ -42,8 +42,9 @@ pub use provider::{
 pub use provider_info::{
     ApplyPatchToolType, EffectivePromptCachePolicy, PromptCacheDialect,
     PromptCacheProviderCapabilities, ProviderConnectionMode, ProviderInfo,
-    ProviderServiceCapabilities, ProviderWireProtocol, StandaloneWebSearchDialect, ToolWirePolicy,
-    WebSearchProviderCapabilities, ZHIPU_CODING_PLAN_BASE_URL, provider_transport_profile_revision,
+    ProviderServiceCapabilities, ProviderWireProtocol, ResponsesHostedToolCapabilities,
+    StandaloneWebSearchDialect, ToolWirePolicy, WebSearchProviderCapabilities,
+    ZHIPU_CODING_PLAN_BASE_URL, provider_transport_profile_revision,
 };
 pub use provider_usage::{
     DeepSeekBalanceInfo, DeepSeekBalanceUsage, ZhipuCodingPlanUsage, ZhipuQuotaLimit,

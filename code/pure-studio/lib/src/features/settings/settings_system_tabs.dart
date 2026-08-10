@@ -130,7 +130,7 @@ class RolesTab extends ConsumerWidget {
             providerId: provider.id,
             model: model.slug,
             label:
-                '${provider.name} / ${model.displayName.isEmpty ? model.slug : model.displayName}',
+                '${provider.name} / ${model.displayName.isEmpty ? model.slug : model.displayName} · ${_roleProtocolLabel(model.wireProtocol)} · ${_roleConnectionLabel(model.connectionMode)}',
             efforts: model.reasoningEfforts,
             defaultEffort: model.defaultReasoningEffort.isNotEmpty
                 ? model.defaultReasoningEffort
@@ -142,6 +142,18 @@ class RolesTab extends ConsumerWidget {
     return options;
   }
 }
+
+String _roleProtocolLabel(String protocol) => switch (protocol) {
+  'responses' => 'Responses',
+  'chat_completions' => 'Chat Completions',
+  _ => protocol,
+};
+
+String _roleConnectionLabel(String mode) => switch (mode) {
+  'web_socket' => 'WS',
+  'http' => 'HTTP',
+  _ => mode,
+};
 
 class _RoleSettingsRow extends StatelessWidget {
   const _RoleSettingsRow({

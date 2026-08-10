@@ -26,7 +26,7 @@ async fn set_model_role_persists_planner_model_and_default_effort() {
         crate::ProviderModelCatalogConfig::Bundled {
             additional_models, ..
         } => additional_models.push(fast_model),
-        crate::ProviderModelCatalogConfig::Explicit { models } => models.push(fast_model),
+        crate::ProviderModelCatalogConfig::Explicit { models, .. } => models.push(fast_model),
     }
     config_store.save(&config).unwrap();
     let runtime = StudioRuntime::new(StudioStore::open_memory().await.unwrap(), config_store);

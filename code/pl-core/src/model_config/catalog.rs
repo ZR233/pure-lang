@@ -7,9 +7,9 @@ use pl_model::{
 };
 use pl_protocol::{
     CredentialDescriptorDto, ModelCapabilitiesDto, ModelCatalogDescriptor, ModelDescriptor,
-    ModelPricingDto, ModelReasoningDescriptor, PROVIDER_CATALOG_SCHEMA_VERSION,
-    ProviderCatalogSnapshot, ProviderConnectionModeDescriptor, ProviderPresetDescriptor,
-    ProviderServiceCapabilitiesDescriptor, ProviderTransportDescriptor, PureError, Result,
+    ModelPricingDto, ModelReasoningDescriptor, ModelTransportDescriptor,
+    PROVIDER_CATALOG_SCHEMA_VERSION, ProviderCatalogSnapshot, ProviderConnectionModeDescriptor,
+    ProviderPresetDescriptor, ProviderServiceCapabilitiesDescriptor, PureError, Result,
     WebSearchProviderCapabilitiesDescriptor,
 };
 
@@ -22,15 +22,7 @@ const MIMO_TOKEN_PLAN_BASE_URL: &str = "https://token-plan-cn.xiaomimimo.com/v1"
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModelCatalog {
     pub id: ModelCatalogId,
-    pub protocol: ProviderWireProtocol,
     pub models: Vec<ModelInfo>,
-}
-
-/// preset 支持的连接方式及创建实例时的明确默认值。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProviderConnectionPolicy {
-    pub supported_modes: Vec<ProviderConnectionMode>,
-    pub default_mode: ProviderConnectionMode,
 }
 
 /// 可由宿主直接实例化的内置 Provider 预设。
@@ -45,8 +37,6 @@ pub struct ProviderPreset {
     pub model_catalog: ModelCatalogId,
     pub suggested_model: String,
     pub icon_key: Option<String>,
-    pub protocol: ProviderWireProtocol,
-    pub connection_policy: ProviderConnectionPolicy,
     pub service_capabilities: ProviderServiceCapabilities,
 }
 
@@ -61,26 +51,10 @@ impl ProviderCatalogRegistry {
     /// 构造当前二进制内置的完整目录。
     pub fn builtin() -> Self {
         let model_catalogs = [
-            model_catalog(
-                "openai",
-                ProviderWireProtocol::Responses,
-                openai_default_model_slugs(),
-            ),
-            model_catalog(
-                "deepseek",
-                ProviderWireProtocol::ChatCompletions,
-                deepseek_default_model_slugs(),
-            ),
-            model_catalog(
-                "zhipu",
-                ProviderWireProtocol::ChatCompletions,
-                zhipu_default_model_slugs(),
-            ),
-            model_catalog(
-                "mimo",
-                ProviderWireProtocol::ChatCompletions,
-                mimo_default_model_slugs(),
-            ),
+            model_catalog("openai", openai_default_model_slugs()),
+            model_catalog("deepseek", deepseek_default_model_slugs()),
+            model_catalog("zhipu", zhipu_default_model_slugs()),
+            model_catalog("mimo", mimo_default_model_slugs()),
         ]
         .into_iter()
         .map(|catalog| (catalog.id.clone(), catalog))
@@ -170,31 +144,11 @@ impl ProviderCatalogRegistry {
                         preset.id, preset.model_catalog
                     ))
                 })?;
-            if catalog.protocol != preset.protocol {
-                return Err(PureError::ConfigError(format!(
-                    "provider preset {} protocol does not match catalog {}",
-                    preset.id, preset.model_catalog
-                )));
-            }
-            if preset.service_capabilities.web_search.hosted_responses
-                && preset.protocol != ProviderWireProtocol::Responses
-            {
-                return Err(PureError::ConfigError(format!(
-                    "provider preset {} declares hosted Responses web search for protocol {:?}",
-                    preset.id, preset.protocol
-                )));
-            }
-            if preset.connection_policy.supported_modes.is_empty()
-                || !preset
-                    .connection_policy
-                    .supported_modes
-                    .contains(&preset.connection_policy.default_mode)
-                || preset.provider.connection_mode() != preset.connection_policy.default_mode
-            {
-                return Err(PureError::ConfigError(format!(
-                    "provider preset {} has invalid connection mode defaults",
-                    preset.id
-                )));
+            for model in &catalog.models {
+                model
+                    .transport
+                    .validate(&model.slug)
+                    .map_err(PureError::ConfigError)?;
             }
             if !catalog
                 .models
@@ -240,12 +194,15 @@ impl ProviderCatalogRegistry {
         };
         let mut canonical = serde_json::to_vec(&snapshot)
             .map_err(|error| PureError::ConfigError(error.to_string()))?;
-        for preset in &self.presets {
-            for mode in &preset.connection_policy.supported_modes {
-                canonical.push(0);
-                canonical.extend_from_slice(
-                    provider_transport_profile_revision(preset.protocol, *mode).as_bytes(),
-                );
+        for catalog in self.model_catalogs.values() {
+            for model in &catalog.models {
+                for mode in &model.transport.supported_connection_modes {
+                    canonical.push(0);
+                    canonical.extend_from_slice(
+                        provider_transport_profile_revision(model.transport.protocol, *mode)
+                            .as_bytes(),
+                    );
+                }
             }
         }
         snapshot.revision = stable_revision(&canonical);
@@ -266,14 +223,13 @@ pub fn builtin_model_catalog(id: &ModelCatalogId) -> Result<ModelCatalog> {
         .ok_or_else(|| PureError::ConfigError(format!("unknown model catalog: {id}")))
 }
 
-fn model_catalog(id: &str, protocol: ProviderWireProtocol, slugs: &[&str]) -> ModelCatalog {
+fn model_catalog(id: &str, slugs: &[&str]) -> ModelCatalog {
     let models = default_models()
         .into_iter()
         .filter(|model| slugs.contains(&model.slug.as_str()))
         .collect();
     ModelCatalog {
         id: ModelCatalogId::new(id).expect("static model catalog id is valid"),
-        protocol,
         models,
     }
 }
@@ -287,8 +243,6 @@ fn preset(
     icon_key: &str,
 ) -> ProviderPreset {
     let service_capabilities = info.service_capabilities.clone();
-    let protocol = info.protocol;
-    let default_connection_mode = info.connection_mode;
     let suggested_model = info.default_model.clone();
     let display_name = info.name.clone();
     let model_catalog = ModelCatalogId::new(catalog).expect("static model catalog id is valid");
@@ -297,10 +251,6 @@ fn preset(
         ProviderConfig::from_bundled_catalog(info, model_catalog.clone(), Vec::new())
             .with_preset(preset_id.clone());
     provider.bearer_token_env = Some(credential_env.to_string());
-    let connection_policy = ProviderConnectionPolicy {
-        supported_modes: provider_connection_modes(protocol),
-        default_mode: default_connection_mode,
-    };
     ProviderPreset {
         id: preset_id.clone(),
         display_name,
@@ -311,8 +261,6 @@ fn preset(
         model_catalog,
         suggested_model,
         icon_key: Some(icon_key.to_string()),
-        protocol,
-        connection_policy,
         service_capabilities,
     }
 }
@@ -322,18 +270,6 @@ fn preset_descriptor(preset: &ProviderPreset) -> ProviderPresetDescriptor {
         id: preset.id.to_string(),
         display_name: preset.display_name.clone(),
         description: preset.description.clone(),
-        transport: ProviderTransportDescriptor {
-            protocol: protocol_label(preset.protocol).to_string(),
-            connection_modes: preset
-                .connection_policy
-                .supported_modes
-                .iter()
-                .copied()
-                .map(connection_mode_descriptor)
-                .collect(),
-            default_connection_mode: connection_mode_label(preset.connection_policy.default_mode)
-                .to_string(),
-        },
         base_url: preset.provider.base_url.clone(),
         credential: CredentialDescriptorDto {
             label: preset.credential_label.clone(),
@@ -361,28 +297,9 @@ pub fn provider_service_capabilities_descriptor(
                 .map(|dialect| dialect.as_str().to_string()),
         },
         prompt_cache_dialect: capabilities.prompt_cache.dialect.as_str().to_string(),
+        responses_tool_search: capabilities.responses_tools.tool_search,
+        responses_programmatic_tool_calling: capabilities.responses_tools.programmatic_tool_calling,
     }
-}
-
-/// 返回指定 wire protocol 支持的连接模式，顺序即 UI 展示顺序。
-pub fn provider_connection_modes(protocol: ProviderWireProtocol) -> Vec<ProviderConnectionMode> {
-    match protocol {
-        ProviderWireProtocol::Responses => vec![
-            ProviderConnectionMode::WebSocket,
-            ProviderConnectionMode::Http,
-        ],
-        ProviderWireProtocol::ChatCompletions => vec![ProviderConnectionMode::Http],
-    }
-}
-
-/// 返回指定 wire protocol 的无 secret UI 连接模式描述。
-pub fn provider_connection_mode_descriptors(
-    protocol: ProviderWireProtocol,
-) -> Vec<ProviderConnectionModeDescriptor> {
-    provider_connection_modes(protocol)
-        .into_iter()
-        .map(connection_mode_descriptor)
-        .collect()
 }
 
 fn connection_mode_descriptor(mode: ProviderConnectionMode) -> ProviderConnectionModeDescriptor {
@@ -429,6 +346,18 @@ fn model_descriptor(model: &ModelInfo) -> ModelDescriptor {
         context_window: model.context_window,
         max_context_window: model.max_context_window,
         max_output_tokens: model.max_output_tokens,
+        transport: ModelTransportDescriptor {
+            protocol: protocol_label(model.transport.protocol).to_string(),
+            connection_modes: model
+                .transport
+                .supported_connection_modes
+                .iter()
+                .copied()
+                .map(connection_mode_descriptor)
+                .collect(),
+            default_connection_mode: connection_mode_label(model.transport.default_connection_mode)
+                .to_string(),
+        },
         modalities: capabilities
             .input
             .iter()
@@ -489,29 +418,23 @@ mod tests {
 
         let openai = &snapshot.model_catalogs["openai"];
         assert!(openai.models.iter().any(|model| model.id == "gpt-5.6-sol"));
-        let openai_preset = snapshot
-            .presets
-            .iter()
-            .find(|preset| preset.id == "openai")
-            .unwrap();
-        assert_eq!(
-            openai_preset.transport.connection_modes,
-            vec![
-                ProviderConnectionModeDescriptor {
-                    id: "web_socket".to_string(),
-                    display_name: "WebSocket".to_string(),
-                },
-                ProviderConnectionModeDescriptor {
-                    id: "http".to_string(),
-                    display_name: "HTTP".to_string(),
-                },
-            ]
-        );
-        assert_eq!(openai_preset.transport.protocol, "responses");
-        assert_eq!(
-            openai_preset.transport.default_connection_mode,
-            "web_socket"
-        );
+        for model in &openai.models {
+            assert_eq!(model.transport.protocol, "responses");
+            assert_eq!(
+                model.transport.connection_modes,
+                vec![
+                    ProviderConnectionModeDescriptor {
+                        id: "web_socket".to_string(),
+                        display_name: "WebSocket".to_string(),
+                    },
+                    ProviderConnectionModeDescriptor {
+                        id: "http".to_string(),
+                        display_name: "HTTP".to_string(),
+                    },
+                ]
+            );
+            assert_eq!(model.transport.default_connection_mode, "web_socket");
+        }
         let mimo = &snapshot.model_catalogs["mimo"];
         assert_eq!(
             mimo.models
@@ -547,12 +470,14 @@ mod tests {
         let original = registry.snapshot().unwrap();
         let mut reordered = registry;
         reordered
-            .presets
-            .iter_mut()
-            .find(|preset| preset.id.as_str() == "openai")
+            .model_catalogs
+            .get_mut(&ModelCatalogId::new("openai").unwrap())
             .unwrap()
-            .connection_policy
-            .supported_modes
+            .models
+            .first_mut()
+            .unwrap()
+            .transport
+            .supported_connection_modes
             .reverse();
 
         let reordered = reordered.snapshot().unwrap();
@@ -578,7 +503,7 @@ mod tests {
     }
 
     #[test]
-    fn registry_rejects_hosted_responses_capability_on_chat_protocol() {
+    fn registry_allows_responses_capability_for_a_mixed_protocol_catalog() {
         let mut registry = ProviderCatalogRegistry::builtin();
         registry
             .presets
@@ -589,12 +514,6 @@ mod tests {
             .web_search
             .hosted_responses = true;
 
-        assert!(
-            registry
-                .validate()
-                .unwrap_err()
-                .to_string()
-                .contains("hosted Responses web search")
-        );
+        registry.validate().unwrap();
     }
 }

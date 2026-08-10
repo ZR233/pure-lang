@@ -588,8 +588,6 @@ Map<String, Object?> _providerSettingsCommandJson(
           'id': provider.id,
           'originalId': provider.originalId,
           'templateKind': provider.templateKind,
-          'wireProtocol': provider.wireProtocol,
-          'connectionMode': provider.connectionMode,
           'name': provider.name,
           'baseUrl': provider.baseUrl,
           'bearerToken': provider.secret.value ?? '',
@@ -597,6 +595,9 @@ Map<String, Object?> _providerSettingsCommandJson(
           'hostedWebSearch': provider.hostedWebSearch,
           'standaloneWebSearch': provider.standaloneWebSearch,
           'promptCacheDialect': provider.promptCacheDialect,
+          'responsesToolSearch': provider.responsesToolSearch,
+          'responsesProgrammaticToolCalling':
+              provider.responsesProgrammaticToolCalling,
           'defaultModel': provider.defaultModel,
           'customModels': [
             for (final model in provider.customModels)
@@ -605,6 +606,16 @@ Map<String, Object?> _providerSettingsCommandJson(
                 'displayName': model.displayName,
                 'reasoningEfforts': model.reasoningEfforts,
                 'baseInstructions': model.baseInstructions,
+                'wireProtocol': model.wireProtocol,
+                'supportedConnectionModes': model.supportedConnectionModes,
+                'defaultConnectionMode': model.defaultConnectionMode,
+              },
+          ],
+          'modelConnectionModes': [
+            for (final model in provider.modelConnectionModes)
+              {
+                'slug': model.slug,
+                'connectionMode': model.connectionMode,
               },
           ],
         },

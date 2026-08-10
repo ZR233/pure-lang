@@ -1,5 +1,6 @@
 use super::super::provider_error::redact_secret_like_values;
 use super::*;
+use crate::ModelTransportProfile;
 use pretty_assertions::assert_eq;
 
 #[test]
@@ -25,19 +26,24 @@ fn redacts_openai_api_keys_from_error_text() {
 }
 
 #[test]
-fn chat_completions_rejects_websocket_before_creating_a_client() {
-    let mut info = ProviderInfo::openai_compatible_chat(
+fn chat_completions_model_rejects_websocket_before_creating_a_client() {
+    let info = ProviderInfo::openai_compatible_chat(
         "Future Chat Provider",
         "http://127.0.0.1:1/v1",
         "future-model",
     );
-    info.connection_mode = ProviderConnectionMode::WebSocket;
+    let mut model = ModelInfo::fallback("future-model");
+    model.transport = ModelTransportProfile {
+        protocol: ProviderWireProtocol::ChatCompletions,
+        supported_connection_modes: vec![ProviderConnectionMode::WebSocket],
+        default_connection_mode: ProviderConnectionMode::WebSocket,
+    };
 
-    let error = OpenAiProvider::new(info, vec![ModelInfo::fallback("future-model")]).unwrap_err();
+    let error = OpenAiProvider::new(info, vec![model]).unwrap_err();
 
     assert!(
         error
             .to_string()
-            .contains("chat_completions protocol does not support web_socket")
+            .contains("chat_completions transport does not support web_socket")
     );
 }

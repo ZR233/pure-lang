@@ -16,8 +16,6 @@ pub struct ProviderInput {
     #[serde(default)]
     pub original_id: Option<String>,
     pub template_kind: String,
-    pub wire_protocol: String,
-    pub connection_mode: String,
     pub name: String,
     pub base_url: String,
     pub secret: ProviderSecretInput,
@@ -25,8 +23,11 @@ pub struct ProviderInput {
     pub hosted_web_search: bool,
     pub standalone_web_search: Option<String>,
     pub prompt_cache_dialect: String,
+    pub responses_tool_search: bool,
+    pub responses_programmatic_tool_calling: bool,
     pub default_model: String,
     pub custom_models: Vec<ProviderModelInput>,
+    pub model_connection_modes: Vec<ProviderModelConnectionInput>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -36,6 +37,16 @@ pub struct ProviderModelInput {
     pub display_name: String,
     pub reasoning_efforts: Vec<String>,
     pub base_instructions: Option<String>,
+    pub wire_protocol: String,
+    pub supported_connection_modes: Vec<String>,
+    pub default_connection_mode: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderModelConnectionInput {
+    pub slug: String,
+    pub connection_mode: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -153,8 +164,6 @@ pub struct BridgeStudioSettingsDto {
 pub struct BridgeProviderSettingsDto {
     pub id: String,
     pub template_kind: String,
-    pub wire_protocol: String,
-    pub connection_mode: String,
     pub name: String,
     pub base_url: String,
     pub has_bearer_token: bool,
@@ -162,6 +171,8 @@ pub struct BridgeProviderSettingsDto {
     pub hosted_web_search: bool,
     pub standalone_web_search: Option<String>,
     pub prompt_cache_dialect: String,
+    pub responses_tool_search: bool,
+    pub responses_programmatic_tool_calling: bool,
     pub default_model: String,
     pub models: Vec<BridgeProviderModelSettingsDto>,
     pub custom_models: Vec<BridgeProviderModelSettingsDto>,
@@ -184,6 +195,10 @@ pub struct BridgeProviderModelSettingsDto {
     pub cache_write_price_per_m_tok: Option<f64>,
     pub reasoning_efforts: Vec<String>,
     pub base_instructions: String,
+    pub wire_protocol: String,
+    pub supported_connection_modes: Vec<String>,
+    pub default_connection_mode: String,
+    pub connection_mode: String,
 }
 
 /// 角色到 provider/model/effort 的 canonical 路由。
@@ -268,7 +283,6 @@ pub struct BridgeProviderPresetDescriptor {
     pub id: String,
     pub display_name: String,
     pub description: Option<String>,
-    pub transport: BridgeProviderTransportDescriptor,
     pub base_url: String,
     pub credential_label: String,
     pub credential_env: Option<String>,
@@ -282,6 +296,8 @@ pub struct BridgeProviderPresetDescriptor {
 pub struct BridgeProviderServiceCapabilitiesDescriptor {
     pub web_search: BridgeWebSearchProviderCapabilitiesDescriptor,
     pub prompt_cache_dialect: String,
+    pub responses_tool_search: bool,
+    pub responses_programmatic_tool_calling: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -291,7 +307,7 @@ pub struct BridgeWebSearchProviderCapabilitiesDescriptor {
 }
 
 #[derive(Debug, Clone)]
-pub struct BridgeProviderTransportDescriptor {
+pub struct BridgeModelTransportDescriptor {
     pub protocol: String,
     pub connection_modes: Vec<BridgeProviderConnectionModeDescriptor>,
     pub default_connection_mode: String,
@@ -317,6 +333,7 @@ pub struct BridgeModelDescriptor {
     pub context_window: Option<u64>,
     pub max_context_window: Option<u64>,
     pub max_output_tokens: Option<u64>,
+    pub transport: BridgeModelTransportDescriptor,
     pub modalities: Vec<String>,
     pub capabilities: BridgeModelCapabilities,
     pub reasoning: Option<BridgeModelReasoningDescriptor>,
@@ -364,19 +381,6 @@ impl From<pl_protocol::ProviderCatalogSnapshot> for BridgeProviderCatalogSnapsho
                     id: preset.id,
                     display_name: preset.display_name,
                     description: preset.description,
-                    transport: BridgeProviderTransportDescriptor {
-                        protocol: preset.transport.protocol,
-                        connection_modes: preset
-                            .transport
-                            .connection_modes
-                            .into_iter()
-                            .map(|mode| BridgeProviderConnectionModeDescriptor {
-                                id: mode.id,
-                                display_name: mode.display_name,
-                            })
-                            .collect(),
-                        default_connection_mode: preset.transport.default_connection_mode,
-                    },
                     base_url: preset.base_url,
                     credential_label: preset.credential.label,
                     credential_env: preset.credential.env_var,
@@ -392,6 +396,10 @@ impl From<pl_protocol::ProviderCatalogSnapshot> for BridgeProviderCatalogSnapsho
                             standalone: preset.service_capabilities.web_search.standalone,
                         },
                         prompt_cache_dialect: preset.service_capabilities.prompt_cache_dialect,
+                        responses_tool_search: preset.service_capabilities.responses_tool_search,
+                        responses_programmatic_tool_calling: preset
+                            .service_capabilities
+                            .responses_programmatic_tool_calling,
                     },
                 })
                 .collect(),
@@ -420,6 +428,19 @@ impl From<pl_protocol::ModelDescriptor> for BridgeModelDescriptor {
             context_window: model.context_window,
             max_context_window: model.max_context_window,
             max_output_tokens: model.max_output_tokens,
+            transport: BridgeModelTransportDescriptor {
+                protocol: model.transport.protocol,
+                connection_modes: model
+                    .transport
+                    .connection_modes
+                    .into_iter()
+                    .map(|mode| BridgeProviderConnectionModeDescriptor {
+                        id: mode.id,
+                        display_name: mode.display_name,
+                    })
+                    .collect(),
+                default_connection_mode: model.transport.default_connection_mode,
+            },
             modalities: model.modalities,
             capabilities: BridgeModelCapabilities {
                 streaming: model.capabilities.streaming,

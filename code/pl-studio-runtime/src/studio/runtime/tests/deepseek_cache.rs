@@ -21,7 +21,7 @@ use crate::config::{
 use crate::studio::StudioStore;
 use crate::studio::entity::{thread, thread_context_segment, turn};
 
-const MODEL: &str = "deepseek-v4-flash";
+const MODEL: &str = "deepseek-v4-pro";
 const EXPECTED_MODEL_REQUESTS: usize = 7;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -347,8 +347,8 @@ async fn assert_persisted_billing(store: &StudioStore, thread_id: &str) -> Resul
             assert_eq!(inference.provider, "DeepSeek");
             assert_eq!(inference.model, MODEL);
             assert_eq!(inference.pricing.currency.as_deref(), Some("CNY"));
-            assert_eq!(inference.pricing.input_per_mtok, Some(1.0));
-            assert_eq!(inference.pricing.cache_read_per_mtok, Some(0.02));
+            assert_eq!(inference.pricing.input_per_mtok, Some(3.0));
+            assert_eq!(inference.pricing.cache_read_per_mtok, Some(0.025));
             assert_eq!(
                 inference.normalized_usage.cached_prompt_tokens,
                 inference

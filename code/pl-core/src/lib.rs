@@ -90,11 +90,9 @@ pub use message::{
 };
 pub use model_config::{
     AgentModelConfig, AgentRoleId, ModelCatalog, ModelCatalogId, ModelRouteConfig,
-    ProviderCapabilitySelection, ProviderCatalogRegistry, ProviderConfig, ProviderConnectionPolicy,
-    ProviderId, ProviderModelCatalogConfig, ProviderPreset, ProviderPresetId,
-    ProviderTransportSelection, ResolvedModelRoute, builtin_model_catalog,
-    builtin_provider_catalog, provider_connection_mode_descriptors, provider_connection_modes,
-    provider_service_capabilities_descriptor,
+    ProviderCapabilitySelection, ProviderCatalogRegistry, ProviderConfig, ProviderId,
+    ProviderModelCatalogConfig, ProviderPreset, ProviderPresetId, ResolvedModelRoute,
+    builtin_model_catalog, builtin_provider_catalog, provider_service_capabilities_descriptor,
 };
 pub use pl_lsp::{
     LspActivityKind, LspAvailabilityKind, LspDiagnostic, LspPosition, LspQuery, LspQueryOperation,
@@ -105,9 +103,9 @@ pub use pl_model::{
     ModelParameter, ModelRequestProfile, OpenAiCompactionMode, PromptCacheDialect,
     PromptCacheProviderCapabilities, ProviderConnectionMode, ProviderServiceCapabilities,
     ProviderWireProtocol, ReasoningInterleaved, ReasoningInterleavedField,
-    StandaloneWebSearchDialect, ToolCapabilities, ToolWirePolicy, TruncationMode,
-    WebSearchProviderCapabilities, ZhipuCodingPlanUsage, ZhipuQuotaLimit, ZhipuQuotaWindow,
-    ZhipuToolUsageDetail,
+    ResponsesHostedToolCapabilities, StandaloneWebSearchDialect, ToolCapabilities, ToolWirePolicy,
+    TruncationMode, WebSearchProviderCapabilities, ZhipuCodingPlanUsage, ZhipuQuotaLimit,
+    ZhipuQuotaWindow, ZhipuToolUsageDetail,
 };
 pub use pl_protocol::{
     AgentRuntimeDelta, BudgetLimitKind, BudgetUsage, ContentPart, ContextSectionId, ErrorSeverity,
@@ -116,10 +114,10 @@ pub use pl_protocol::{
     McpHealthSnapshot, McpServerDescriptor, Message, MessageContent, MessageRole, ModelContextItem,
     OutputStream, PermissionLevel, PinnedContextSection, PipelineStage, PlanConfirmationResolution,
     ProviderCatalogSnapshot, ProviderConnectionModeDescriptor, ProviderPresetDescriptor,
-    ProviderServiceCapabilitiesDescriptor, ProviderTransportDescriptor, PureError, Result,
-    RetryDisposition, RuntimeCostAmount, RuntimeUsageSnapshot, SkillActivation, TokenUsageSnapshot,
-    ToolApprovalResolution, ToolResultReceipt, TurnFailure, TurnFailureCategory, UserInputAnswer,
-    UserInputRequest, UserInputResponse, UserQuestion, UserQuestionOption,
+    ProviderServiceCapabilitiesDescriptor, PureError, Result, RetryDisposition, RuntimeCostAmount,
+    RuntimeUsageSnapshot, SkillActivation, TokenUsageSnapshot, ToolApprovalResolution,
+    ToolResultReceipt, TurnFailure, TurnFailureCategory, UserInputAnswer, UserInputRequest,
+    UserInputResponse, UserQuestion, UserQuestionOption,
 };
 pub(crate) use prompt_cache::{
     PromptCacheInput, derive_prompt_cache_key, prepare_prompt_context, stable_tool_schemas,

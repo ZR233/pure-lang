@@ -84,9 +84,17 @@ fn provider_runtime_info_is_created_only_after_route_selects_model() {
             .effective_models()
             .unwrap(),
     );
+    let flash = provider.to_provider_info("deepseek-v4-flash").unwrap();
     let info = provider.to_provider_info("deepseek-v4-pro").unwrap();
 
     assert_eq!(info.default_model, "deepseek-v4-pro");
+    assert_eq!(flash.protocol, pl_model::ProviderWireProtocol::Responses);
+    assert_eq!(
+        info.protocol,
+        pl_model::ProviderWireProtocol::ChatCompletions
+    );
+    assert_eq!(flash.connection_mode, ProviderConnectionMode::Http);
+    assert_eq!(info.connection_mode, ProviderConnectionMode::Http);
 }
 
 #[test]
@@ -110,17 +118,15 @@ fn bundled_catalog_rejects_additional_model_slug_conflicts() {
 }
 
 #[test]
-fn non_openai_provider_rejects_websocket_connection_mode() {
+fn model_rejects_unsupported_websocket_connection_mode() {
     let mut config = test_config();
     let provider = config.providers.values_mut().next().unwrap();
-    provider.set_connection_mode(ProviderConnectionMode::WebSocket);
-
     assert!(
-        config
-            .validate()
+        provider
+            .set_model_connection_mode("deepseek-v4-flash", ProviderConnectionMode::WebSocket,)
             .unwrap_err()
             .to_string()
-            .contains("does not support WebSocket")
+            .contains("does not support connection mode")
     );
 }
 
@@ -133,9 +139,9 @@ fn same_preset_can_back_multiple_independent_provider_instances() {
         .unwrap();
     let mut websocket = preset.provider.clone();
     websocket.bearer_token = Some("ws-secret".to_string());
-    let mut http = preset
-        .provider
-        .with_connection_mode(ProviderConnectionMode::Http);
+    let mut http = preset.provider;
+    http.set_model_connection_mode("gpt-5.6-sol", ProviderConnectionMode::Http)
+        .unwrap();
     http.bearer_token = Some("http-secret".to_string());
     let websocket_id = ProviderId::new("openai-primary").unwrap();
     let http_id = ProviderId::new("openai-proxy").unwrap();
@@ -163,11 +169,17 @@ fn same_preset_can_back_multiple_independent_provider_instances() {
 
     config.validate().unwrap();
     assert_eq!(
-        config.providers[&websocket_id].connection_mode(),
+        config.providers[&websocket_id]
+            .to_provider_info("gpt-5.6-sol")
+            .unwrap()
+            .connection_mode,
         ProviderConnectionMode::WebSocket
     );
     assert_eq!(
-        config.providers[&http_id].connection_mode(),
+        config.providers[&http_id]
+            .to_provider_info("gpt-5.6-sol")
+            .unwrap()
+            .connection_mode,
         ProviderConnectionMode::Http
     );
     assert_eq!(
@@ -177,5 +189,34 @@ fn same_preset_can_back_multiple_independent_provider_instances() {
     assert_eq!(
         config.providers[&http_id].bearer_token.as_deref(),
         Some("http-secret")
+    );
+}
+
+#[test]
+fn custom_openai_endpoint_requires_explicit_responses_hosted_tool_capabilities() {
+    let preset = builtin_provider_catalog()
+        .presets
+        .into_iter()
+        .find(|preset| preset.id.as_str() == "openai")
+        .unwrap();
+    let official_capabilities = preset.service_capabilities;
+    let mut provider = preset.provider;
+    provider.base_url = "https://responses-proxy.example/v1".to_string();
+
+    let default_capabilities = provider.service_capabilities().unwrap();
+    assert!(!default_capabilities.responses_tools.tool_search);
+    assert!(
+        !default_capabilities
+            .responses_tools
+            .programmatic_tool_calling
+    );
+
+    provider.capabilities = ProviderCapabilitySelection::Explicit(official_capabilities);
+    let explicit_capabilities = provider.service_capabilities().unwrap();
+    assert!(explicit_capabilities.responses_tools.tool_search);
+    assert!(
+        explicit_capabilities
+            .responses_tools
+            .programmatic_tool_calling
     );
 }

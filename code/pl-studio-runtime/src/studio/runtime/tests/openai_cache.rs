@@ -325,6 +325,7 @@ fn fixture_config(model_base_url: String, mcp_url: String, home: &Path) -> Studi
         .into_iter()
         .find(|model| model.slug == MODEL)
         .expect("bundled OpenAI model");
+    model.transport.default_connection_mode = ProviderConnectionMode::Http;
     model.currency = Some("USD".to_string());
     model.input_price_per_mtok = Some(2.0);
     model.output_price_per_mtok = Some(8.0);

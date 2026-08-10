@@ -167,4 +167,17 @@ abstract final class StudioDriverKeys {
     String providerId,
     String mode,
   ) => ValueKey<String>('provider-$providerId-connection-mode-$mode');
+
+  static ValueKey<String> providerModelConnectionMode(
+    String providerId,
+    String model,
+  ) => ValueKey<String>('provider-$providerId-model-$model-connection-mode');
+
+  static ValueKey<String> providerModelConnectionModeOption(
+    String providerId,
+    String model,
+    String mode,
+  ) => ValueKey<String>(
+    'provider-$providerId-model-$model-connection-mode-$mode',
+  );
 }

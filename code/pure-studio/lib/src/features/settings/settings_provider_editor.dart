@@ -85,7 +85,10 @@ class ProviderDetails extends StatelessWidget {
             SettingsInfoPill(icon: Icons.key_outlined, label: provider.status),
             SettingsInfoPill(
               icon: Icons.hub_outlined,
-              label: provider.wireProtocol,
+              label: provider.allModels
+                  .map((model) => _protocolLabel(model.wireProtocol))
+                  .toSet()
+                  .join(' / '),
             ),
             SettingsInfoPill(
               icon: Icons.memory_outlined,
@@ -168,21 +171,6 @@ class ProviderEditor extends StatelessWidget {
     final preset = presets
         .where((item) => item.id == provider.templateKind)
         .firstOrNull;
-    final modesByProtocol = <String, List<ProviderConnectionModeView>>{};
-    for (final candidate in presets) {
-      modesByProtocol.putIfAbsent(
-        candidate.wireProtocol,
-        () => candidate.connectionModes,
-      );
-    }
-    final connectionModes =
-        preset?.connectionModes ??
-        modesByProtocol[provider.wireProtocol] ??
-        const [];
-    final selectedConnectionMode =
-        connectionModes.any((mode) => mode.id == provider.connectionMode)
-        ? provider.connectionMode
-        : preset?.defaultConnectionMode ?? provider.connectionMode;
     final standaloneDialects = <String>{
       for (final candidate in presets)
         if (candidate.standaloneWebSearch.isNotEmpty)
@@ -262,90 +250,8 @@ class ProviderEditor extends StatelessWidget {
                   onChanged: (value) =>
                       onUpdate((item) => item.copyWith(name: value)),
                 ),
-                if (preset == null)
-                  DropdownButtonFormField<String>(
-                    initialValue:
-                        modesByProtocol.containsKey(provider.wireProtocol)
-                        ? provider.wireProtocol
-                        : modesByProtocol.keys.firstOrNull,
-                    decoration: InputDecoration(
-                      labelText: context.l10n.settingsProtocolType,
-                    ),
-                    items: [
-                      for (final protocol in modesByProtocol.keys)
-                        DropdownMenuItem(
-                          value: protocol,
-                          child: Text(protocol),
-                        ),
-                    ],
-                    onChanged: saving
-                        ? null
-                        : (protocol) {
-                            if (protocol == null) return;
-                            final modes = modesByProtocol[protocol] ?? const [];
-                            final mode =
-                                modes
-                                    .where(
-                                      (candidate) => candidate.id == 'http',
-                                    )
-                                    .firstOrNull
-                                    ?.id ??
-                                modes.firstOrNull?.id ??
-                                'http';
-                            onUpdate(
-                              (item) => item.copyWith(
-                                wireProtocol: protocol,
-                                connectionMode: mode,
-                              ),
-                            );
-                          },
-                  )
-                else
-                  SettingsReadonlyField(
-                    label: context.l10n.settingsProtocolType,
-                    value: provider.wireProtocol,
-                  ),
               ],
             ),
-            const SizedBox(height: 10),
-            if (connectionModes.isNotEmpty) ...[
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  context.l10n.settingsProtocolType,
-                  style: Theme.of(context).textTheme.labelLarge,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: SegmentedButton<String>(
-                  key: StudioDriverKeys.providerConnectionMode(provider.id),
-                  segments: [
-                    for (final mode in connectionModes)
-                      ButtonSegment<String>(
-                        value: mode.id,
-                        label: KeyedSubtree(
-                          key: StudioDriverKeys.providerConnectionModeOption(
-                            provider.id,
-                            mode.id,
-                          ),
-                          child: Text(mode.displayName),
-                        ),
-                      ),
-                  ],
-                  selected: {selectedConnectionMode},
-                  showSelectedIcon: false,
-                  onSelectionChanged: saving || connectionModes.length == 1
-                      ? null
-                      : (selection) => onUpdate(
-                          (item) =>
-                              item.copyWith(connectionMode: selection.single),
-                        ),
-                ),
-              ),
-              const SizedBox(height: 10),
-            ],
             SettingsTextEdit(
               label: context.l10n.settingsBaseUrl,
               value: provider.baseUrl,
@@ -428,6 +334,14 @@ class ProviderEditor extends StatelessWidget {
                           standaloneWebSearch: source == 'preset_defaults'
                               ? preset?.standaloneWebSearch ?? ''
                               : item.standaloneWebSearch,
+                          responsesToolSearch: source == 'preset_defaults'
+                              ? preset?.responsesToolSearch ?? false
+                              : item.responsesToolSearch,
+                          responsesProgrammaticToolCalling:
+                              source == 'preset_defaults'
+                              ? preset?.responsesProgrammaticToolCalling ??
+                                    false
+                              : item.responsesProgrammaticToolCalling,
                         ),
                       );
                     },
@@ -475,12 +389,63 @@ class ProviderEditor extends StatelessWidget {
                                 item.copyWith(standaloneWebSearch: value ?? ''),
                           ),
                   ),
+                  DropdownButtonFormField<bool>(
+                    initialValue: provider.responsesToolSearch,
+                    decoration: const InputDecoration(
+                      labelText: 'Responses Tool Search',
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: false, child: Text('Disabled')),
+                      DropdownMenuItem(value: true, child: Text('Enabled')),
+                    ],
+                    onChanged: saving
+                        ? null
+                        : (value) {
+                            if (value != null) {
+                              onUpdate(
+                                (item) =>
+                                    item.copyWith(responsesToolSearch: value),
+                              );
+                            }
+                          },
+                  ),
+                  DropdownButtonFormField<bool>(
+                    initialValue: provider.responsesProgrammaticToolCalling,
+                    decoration: const InputDecoration(
+                      labelText: 'Programmatic Tool Calling',
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: false, child: Text('Disabled')),
+                      DropdownMenuItem(value: true, child: Text('Enabled')),
+                    ],
+                    onChanged: saving
+                        ? null
+                        : (value) {
+                            if (value != null) {
+                              onUpdate(
+                                (item) => item.copyWith(
+                                  responsesProgrammaticToolCalling: value,
+                                ),
+                              );
+                            }
+                          },
+                  ),
                 ],
               )
             else ...[
               SettingsReadonlyField(
                 label: 'Hosted Web Search',
                 value: provider.hostedWebSearch ? 'Enabled' : 'Disabled',
+              ),
+              SettingsReadonlyField(
+                label: 'Responses Tool Search',
+                value: provider.responsesToolSearch ? 'Enabled' : 'Disabled',
+              ),
+              SettingsReadonlyField(
+                label: 'Programmatic Tool Calling',
+                value: provider.responsesProgrammaticToolCalling
+                    ? 'Enabled'
+                    : 'Disabled',
               ),
               SettingsReadonlyField(
                 label: 'Standalone Web Search',
@@ -499,7 +464,16 @@ class ProviderEditor extends StatelessWidget {
           ),
           children: [
             for (final model in provider.defaultModels)
-              _ModelReadout(model: model),
+              _ModelReadout(
+                model: model,
+                providerId: provider.id,
+                onConnectionModeChanged:
+                    saving || model.supportedConnectionModes.length <= 1
+                    ? null
+                    : (mode) => onUpdate(
+                        (item) => item.withModelConnection(model.slug, mode),
+                      ),
+              ),
           ],
         ),
         const SizedBox(height: 12),
@@ -603,6 +577,147 @@ class _CustomModelEditor extends StatelessWidget {
                   ),
                 ),
               ),
+              const SizedBox(height: 10),
+              SettingsResponsiveFieldGrid(
+                children: [
+                  DropdownButtonFormField<String>(
+                    initialValue: model.wireProtocol,
+                    decoration: InputDecoration(
+                      labelText: context.l10n.settingsProtocolType,
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'responses',
+                        child: Text('Responses'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'chat_completions',
+                        child: Text('Chat Completions'),
+                      ),
+                    ],
+                    onChanged: enabled
+                        ? (protocol) {
+                            if (protocol == null) return;
+                            if (protocol == 'chat_completions') {
+                              onChanged(
+                                model.copyWith(
+                                  wireProtocol: protocol,
+                                  supportedConnectionModes: const ['http'],
+                                  defaultConnectionMode: 'http',
+                                  connectionMode: 'http',
+                                ),
+                              );
+                            } else {
+                              onChanged(
+                                model.copyWith(
+                                  wireProtocol: protocol,
+                                  supportedConnectionModes: const [
+                                    'web_socket',
+                                    'http',
+                                  ],
+                                  defaultConnectionMode: 'http',
+                                  connectionMode: 'http',
+                                ),
+                              );
+                            }
+                          }
+                        : null,
+                  ),
+                  DropdownButtonFormField<String>(
+                    initialValue: model.defaultConnectionMode,
+                    decoration: const InputDecoration(
+                      labelText: 'Default connection',
+                    ),
+                    items: [
+                      for (final mode in model.supportedConnectionModes)
+                        DropdownMenuItem(
+                          value: mode,
+                          child: Text(_connectionLabel(mode)),
+                        ),
+                    ],
+                    onChanged: enabled
+                        ? (mode) {
+                            if (mode != null) {
+                              onChanged(
+                                model.copyWith(defaultConnectionMode: mode),
+                              );
+                            }
+                          }
+                        : null,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Supported connections',
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: SegmentedButton<String>(
+                  segments: const [
+                    ButtonSegment(value: 'web_socket', label: Text('WS')),
+                    ButtonSegment(value: 'http', label: Text('HTTP')),
+                  ],
+                  selected: model.supportedConnectionModes.toSet(),
+                  multiSelectionEnabled: true,
+                  emptySelectionAllowed: false,
+                  onSelectionChanged: !enabled
+                      ? null
+                      : (selection) {
+                          if (model.wireProtocol == 'chat_completions' &&
+                              selection.contains('web_socket')) {
+                            return;
+                          }
+                          final supported = [
+                            for (final mode in const ['web_socket', 'http'])
+                              if (selection.contains(mode)) mode,
+                          ];
+                          final defaultMode =
+                              supported.contains(model.defaultConnectionMode)
+                              ? model.defaultConnectionMode
+                              : supported.first;
+                          final currentMode =
+                              supported.contains(model.connectionMode)
+                              ? model.connectionMode
+                              : defaultMode;
+                          onChanged(
+                            model.copyWith(
+                              supportedConnectionModes: supported,
+                              defaultConnectionMode: defaultMode,
+                              connectionMode: currentMode,
+                            ),
+                          );
+                        },
+                ),
+              ),
+              if (model.supportedConnectionModes.length > 1) ...[
+                const SizedBox(height: 10),
+                DropdownButtonFormField<String>(
+                  initialValue: model.connectionMode,
+                  decoration: const InputDecoration(
+                    labelText: 'Current connection',
+                  ),
+                  items: [
+                    for (final mode in model.supportedConnectionModes)
+                      DropdownMenuItem(
+                        value: mode,
+                        child: Text(_connectionLabel(mode)),
+                      ),
+                  ],
+                  onChanged: enabled
+                      ? (mode) {
+                          if (mode != null) {
+                            onChanged(model.copyWith(connectionMode: mode));
+                          }
+                        }
+                      : null,
+                ),
+              ],
             ],
           ),
         ),
@@ -612,10 +727,17 @@ class _CustomModelEditor extends StatelessWidget {
 }
 
 class _ModelReadout extends StatelessWidget {
-  const _ModelReadout({required this.model, this.framed = false});
+  const _ModelReadout({
+    required this.model,
+    this.providerId = '',
+    this.framed = false,
+    this.onConnectionModeChanged,
+  });
 
   final ProviderModelView model;
+  final String providerId;
   final bool framed;
+  final ValueChanged<String>? onConnectionModeChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -653,6 +775,12 @@ class _ModelReadout extends StatelessWidget {
                     fontFamily: 'Consolas',
                   ),
                 ),
+                Text(
+                  '${_protocolLabel(model.wireProtocol)} · ${_connectionLabel(model.connectionMode)}',
+                  style: context.text.labelSmall?.copyWith(
+                    color: context.studioInkSoft,
+                  ),
+                ),
                 if (traits.isNotEmpty)
                   Text(
                     traits.join(' · '),
@@ -677,16 +805,67 @@ class _ModelReadout extends StatelessWidget {
         ],
       ),
     );
+    final content = Column(
+      children: [
+        row,
+        if (model.supportedConnectionModes.length > 1) ...[
+          const Divider(height: 1),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: SegmentedButton<String>(
+                key: StudioDriverKeys.providerModelConnectionMode(
+                  providerId,
+                  model.slug,
+                ),
+                segments: [
+                  for (final mode in model.supportedConnectionModes)
+                    ButtonSegment<String>(
+                      value: mode,
+                      label: KeyedSubtree(
+                        key: StudioDriverKeys.providerModelConnectionModeOption(
+                          providerId,
+                          model.slug,
+                          mode,
+                        ),
+                        child: Text(_connectionLabel(mode)),
+                      ),
+                    ),
+                ],
+                selected: {model.connectionMode},
+                showSelectedIcon: false,
+                onSelectionChanged: onConnectionModeChanged == null
+                    ? null
+                    : (selection) => onConnectionModeChanged!(selection.single),
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
     if (!framed) {
-      return row;
+      return content;
     }
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: StudioPanel(
         backgroundColor: Theme.of(context).colorScheme.surfaceContainerLowest,
         radius: StudioRadii.sm,
-        child: row,
+        child: content,
       ),
     );
   }
 }
+
+String _protocolLabel(String protocol) => switch (protocol) {
+  'responses' => 'Responses',
+  'chat_completions' => 'Chat Completions',
+  _ => protocol,
+};
+
+String _connectionLabel(String mode) => switch (mode) {
+  'web_socket' => 'WS',
+  'http' => 'HTTP',
+  _ => mode,
+};

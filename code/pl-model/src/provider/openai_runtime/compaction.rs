@@ -24,7 +24,7 @@ pub(super) async fn compact_context(
     provider: &OpenAiProvider,
     request: ModelCompactionRequest,
 ) -> Result<ModelCompactionResponse> {
-    if provider.info.protocol != ProviderWireProtocol::Responses {
+    if provider.model_info(&request.model).transport.protocol != ProviderWireProtocol::Responses {
         return Err(PureError::ConfigError(
             "remote context compaction requires the Responses protocol".to_string(),
         ));

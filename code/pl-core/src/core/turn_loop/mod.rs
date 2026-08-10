@@ -54,7 +54,9 @@ pub(super) async fn run_turn_with_trace(
     options: TurnOptions,
 ) -> Result<TurnResult> {
     let provider = core.provider.clone();
-    ensure_provider_can_consume_session(provider.info().protocol, session)?;
+    let model = provider.default_model().to_string();
+    let model_info = provider.model_info(&model);
+    ensure_provider_can_consume_session(model_info.transport.protocol, session)?;
     let effort = core.effort.clone();
     let workspace = core.workspace.clone().unwrap_or_else(|| {
         crate::tool::AgentWorkspace::local(super::turn_result::default_workspace_root())
@@ -63,20 +65,9 @@ pub(super) async fn run_turn_with_trace(
     let workspace_instructions = core.workspace_instructions.clone();
     let active_subagent = core.active_subagent.clone();
     let cancellation_token = options.cancellation_token.clone();
-    let model = provider.default_model().to_string();
-    let model_info = provider.model_info(&model);
     let model_capabilities = provider.effective_model_capabilities(&model);
-    let orchestration_options = crate::tool::ToolOrchestrationOptions {
-        tool_search: provider.info().protocol == pl_model::ProviderWireProtocol::Responses
-            && model_capabilities.supports_tool_search()
-            && model_info.request_profile.responses_tool_search,
-        programmatic_tool_calling: provider.info().protocol
-            == pl_model::ProviderWireProtocol::Responses
-            && model_capabilities.supports_programmatic_tool_calling()
-            && model_info
-                .request_profile
-                .responses_programmatic_tool_calling,
-    };
+    let orchestration_options =
+        tool_orchestration_options(provider.info(), &model_info, &model_capabilities);
     let tool_schemas = stable_tool_schemas(match options.execution_policy.as_ref() {
         Some(policy) => core
             .tools
@@ -849,6 +840,25 @@ pub(super) async fn run_turn_with_trace(
     })
 }
 
+fn tool_orchestration_options(
+    provider: &pl_model::ProviderInfo,
+    model: &pl_model::ModelInfo,
+    capabilities: &pl_model::ModelCapabilities,
+) -> crate::tool::ToolOrchestrationOptions {
+    let responses_tools = &provider.service_capabilities.responses_tools;
+    let uses_responses = model.transport.protocol == pl_model::ProviderWireProtocol::Responses;
+    crate::tool::ToolOrchestrationOptions {
+        tool_search: uses_responses
+            && responses_tools.tool_search
+            && capabilities.supports_tool_search()
+            && model.request_profile.responses_tool_search,
+        programmatic_tool_calling: uses_responses
+            && responses_tools.programmatic_tool_calling
+            && capabilities.supports_programmatic_tool_calling()
+            && model.request_profile.responses_programmatic_tool_calling,
+    }
+}
+
 fn apply_model_tool_output_batch_budget(
     tool_results: &mut [ToolExecutionRecord],
     remaining_context_tokens: Option<u64>,
@@ -1227,8 +1237,39 @@ mod receipt_tests {
 
     use super::{
         ToolExecutionRecord, apply_model_tool_output_batch_budget, compact_artifact_reference,
-        normalize_programmatic_tool_results, tool_result_receipt,
+        normalize_programmatic_tool_results, tool_orchestration_options, tool_result_receipt,
     };
+
+    #[test]
+    fn compatible_responses_proxy_uses_eager_direct_tools() {
+        let model = pl_model::default_models()
+            .into_iter()
+            .find(|model| model.slug == "gpt-5.6-sol")
+            .unwrap();
+        let capabilities = model.capabilities.clone();
+        let provider =
+            pl_model::ProviderInfo::openai(Some("https://responses-proxy.example/v1".to_string()));
+
+        let options = tool_orchestration_options(&provider, &model, &capabilities);
+
+        assert!(!options.tool_search);
+        assert!(!options.programmatic_tool_calling);
+    }
+
+    #[test]
+    fn official_openai_responses_endpoint_uses_hosted_tools() {
+        let model = pl_model::default_models()
+            .into_iter()
+            .find(|model| model.slug == "gpt-5.6-sol")
+            .unwrap();
+        let capabilities = model.capabilities.clone();
+        let provider = pl_model::ProviderInfo::openai(None);
+
+        let options = tool_orchestration_options(&provider, &model, &capabilities);
+
+        assert!(options.tool_search);
+        assert!(options.programmatic_tool_calling);
+    }
 
     fn tool_result(id: &str, result: String) -> ToolExecutionRecord {
         ToolExecutionRecord {

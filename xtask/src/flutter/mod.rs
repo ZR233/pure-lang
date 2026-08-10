@@ -443,20 +443,23 @@ pub(crate) fn run_gui(options: RunGuiOptions) -> Result<()> {
 }
 
 fn run_gui_args(target: DesktopTarget, version_define: &str, driver_mode: DriverMode) -> Vec<&str> {
-    let mut args = vec![
+    let mut args = Vec::new();
+    if matches!(driver_mode, DriverMode::Enabled) {
+        args.push("--print-dtd");
+    }
+    args.extend([
         "run",
         "-d",
         target.flutter_name(),
         version_define,
         "--no-pub",
-    ];
+    ]);
     if matches!(driver_mode, DriverMode::Enabled) {
         args.extend([
             "-t",
             "test_driver/driver_main.dart",
             "--dart-define=PURE_STUDIO_DRIVER=true",
             "--disable-service-auth-codes",
-            "--no-dds",
             "--verbose",
         ]);
     }
@@ -853,6 +856,7 @@ mod tests {
         assert_eq!(
             run_gui_args(DesktopTarget::Windows, version_define, DriverMode::Enabled),
             vec![
+                "--print-dtd",
                 "run",
                 "-d",
                 "windows",
@@ -862,7 +866,6 @@ mod tests {
                 "test_driver/driver_main.dart",
                 "--dart-define=PURE_STUDIO_DRIVER=true",
                 "--disable-service-auth-codes",
-                "--no-dds",
                 "--verbose",
             ]
         );
@@ -884,6 +887,7 @@ mod tests {
         assert!(!args.contains(&"--dart-define=PURE_STUDIO_DRIVER=true"));
         assert!(!args.contains(&"--disable-service-auth-codes"));
         assert!(!args.contains(&"--no-dds"));
+        assert!(!args.contains(&"--print-dtd"));
         assert!(!args.contains(&"--verbose"));
         assert!(!args.contains(&"-t"));
         assert!(args.contains(&"--no-pub"));

@@ -39,6 +39,9 @@ semver = { workspace = true }
 url = { workspace = true }
 minisign-verify = { workspace = true }
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true }
+
 [dev-dependencies]
 pretty_assertions = { workspace = true }
 

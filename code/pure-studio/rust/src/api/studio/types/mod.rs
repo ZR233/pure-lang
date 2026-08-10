@@ -31,15 +31,15 @@ pub use runtime::{
 pub use settings::{
     BridgeGeneralSettingsDto, BridgeInstructionsSettingsDto, BridgeMcpServerSettingsDto,
     BridgeModelCapabilities, BridgeModelCatalogDescriptor, BridgeModelDescriptor,
-    BridgeModelPricing, BridgeModelReasoningDescriptor, BridgeProviderCatalogSnapshot,
-    BridgeProviderConnectionModeDescriptor, BridgeProviderModelSettingsDto,
-    BridgeProviderPresetDescriptor, BridgeProviderServiceCapabilitiesDescriptor,
-    BridgeProviderSettingsDto, BridgeProviderTransportDescriptor, BridgeRoleSettingsDto,
+    BridgeModelPricing, BridgeModelReasoningDescriptor, BridgeModelTransportDescriptor,
+    BridgeProviderCatalogSnapshot, BridgeProviderConnectionModeDescriptor,
+    BridgeProviderModelSettingsDto, BridgeProviderPresetDescriptor,
+    BridgeProviderServiceCapabilitiesDescriptor, BridgeProviderSettingsDto, BridgeRoleSettingsDto,
     BridgeSkillsSettingsDto, BridgeStudioSettingsDto,
     BridgeWebSearchProviderCapabilitiesDescriptor, BridgeWebSearchSettingsDto,
     GeneralSettingsInput, InstructionsSettingsInput, McpServerInput, McpSettingsInput,
-    ProviderInput, ProviderModelInput, ProviderSecretInput, ProviderSettingsInput, RoleInput,
-    SkillsSettingsInput, WebSearchSettingsInput,
+    ProviderInput, ProviderModelConnectionInput, ProviderModelInput, ProviderSecretInput,
+    ProviderSettingsInput, RoleInput, SkillsSettingsInput, WebSearchSettingsInput,
 };
 pub use thread_stream::*;
 pub use updater::{BridgeStudioUpdateCheckDto, BridgeStudioUpdateDto, BridgeStudioUpdateEventDto};

@@ -373,6 +373,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeModelTransportDescriptor dco_decode_bridge_model_transport_descriptor(
+    dynamic raw,
+  );
+
+  @protected
   BridgePlanConfirmationResolution
   dco_decode_bridge_plan_confirmation_resolution(dynamic raw);
 
@@ -422,10 +427,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeProviderSettingsDto dco_decode_bridge_provider_settings_dto(
     dynamic raw,
   );
-
-  @protected
-  BridgeProviderTransportDescriptor
-  dco_decode_bridge_provider_transport_descriptor(dynamic raw);
 
   @protected
   BridgeRecoveryCleanupPreviewDto
@@ -872,6 +873,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<ProviderInput> dco_decode_list_provider_input(dynamic raw);
 
   @protected
+  List<ProviderModelConnectionInput>
+  dco_decode_list_provider_model_connection_input(dynamic raw);
+
+  @protected
   List<ProviderModelInput> dco_decode_list_provider_model_input(dynamic raw);
 
   @protected
@@ -1004,6 +1009,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ProviderInput dco_decode_provider_input(dynamic raw);
+
+  @protected
+  ProviderModelConnectionInput dco_decode_provider_model_connection_input(
+    dynamic raw,
+  );
 
   @protected
   ProviderModelInput dco_decode_provider_model_input(dynamic raw);
@@ -1472,6 +1482,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeModelTransportDescriptor sse_decode_bridge_model_transport_descriptor(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgePlanConfirmationResolution
   sse_decode_bridge_plan_confirmation_resolution(SseDeserializer deserializer);
 
@@ -1525,10 +1540,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeProviderSettingsDto sse_decode_bridge_provider_settings_dto(
     SseDeserializer deserializer,
   );
-
-  @protected
-  BridgeProviderTransportDescriptor
-  sse_decode_bridge_provider_transport_descriptor(SseDeserializer deserializer);
 
   @protected
   BridgeRecoveryCleanupPreviewDto
@@ -2085,6 +2096,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  List<ProviderModelConnectionInput>
+  sse_decode_list_provider_model_connection_input(SseDeserializer deserializer);
+
+  @protected
   List<ProviderModelInput> sse_decode_list_provider_model_input(
     SseDeserializer deserializer,
   );
@@ -2245,6 +2260,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ProviderInput sse_decode_provider_input(SseDeserializer deserializer);
+
+  @protected
+  ProviderModelConnectionInput sse_decode_provider_model_connection_input(
+    SseDeserializer deserializer,
+  );
 
   @protected
   ProviderModelInput sse_decode_provider_model_input(
@@ -2809,6 +2829,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_bridge_model_transport_descriptor(
+    BridgeModelTransportDescriptor self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_bridge_plan_confirmation_resolution(
     BridgePlanConfirmationResolution self,
     SseSerializer serializer,
@@ -2871,12 +2897,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_bridge_provider_settings_dto(
     BridgeProviderSettingsDto self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_bridge_provider_transport_descriptor(
-    BridgeProviderTransportDescriptor self,
     SseSerializer serializer,
   );
 
@@ -3559,6 +3579,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_provider_model_connection_input(
+    List<ProviderModelConnectionInput> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_provider_model_input(
     List<ProviderModelInput> self,
     SseSerializer serializer,
@@ -3749,6 +3775,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_provider_input(ProviderInput self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_provider_model_connection_input(
+    ProviderModelConnectionInput self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_provider_model_input(

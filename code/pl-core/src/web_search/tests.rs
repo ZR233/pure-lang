@@ -1,10 +1,12 @@
-use pl_model::{ModelInfo, ProviderInfo, ProviderServiceCapabilities, WebSearchConfig};
+use pl_model::{
+    ModelInfo, ModelTransportProfile, ProviderInfo, ProviderServiceCapabilities, WebSearchConfig,
+};
 use pretty_assertions::assert_eq;
 
 use super::*;
 use crate::{
     AgentRoleId, ModelRouteConfig, ProviderCapabilitySelection, ProviderConfig,
-    ProviderModelCatalogConfig, ProviderTransportSelection, ReasoningEffort,
+    ProviderModelCatalogConfig, ReasoningEffort,
 };
 
 fn provider_id(value: &str) -> ProviderId {
@@ -100,10 +102,7 @@ fn custom_capability_uses_same_standalone_planner() {
     let mut model = ModelInfo::fallback("future-model");
     model.capabilities.tools.function_calling = true;
     let provider = ProviderConfig::from_provider_info(info, vec![model.clone()]);
-    assert!(matches!(
-        provider.transport,
-        ProviderTransportSelection::Custom { .. }
-    ));
+    assert!(provider.preset.is_none());
     assert!(matches!(
         provider.catalog,
         ProviderModelCatalogConfig::Explicit { .. }
@@ -119,6 +118,7 @@ fn custom_capability_uses_same_standalone_planner() {
 #[test]
 fn hosted_path_is_exclusive_when_function_tools_are_unavailable() {
     let mut model = ModelInfo::fallback("hosted-only-model");
+    model.transport = ModelTransportProfile::responses_http();
     model.capabilities.web_search = true;
     model.capabilities.tools.function_calling = false;
     let provider = custom_responses_provider(model.clone(), Some("secret"));
