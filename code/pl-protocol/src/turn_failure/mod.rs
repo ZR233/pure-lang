@@ -1,5 +1,18 @@
 use serde::{Deserialize, Serialize};
 
+/// Provider 失败的稳定语义类别；控制流不得从 message 或 provider code 反向推断。
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ProviderFailureKind {
+    Authentication,
+    Authorization,
+    Capacity,
+    Configuration,
+    Transport,
+    Protocol,
+    Unknown,
+}
+
 /// Turn 失败所属的稳定领域类别。
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -43,6 +56,8 @@ impl RetryDisposition {
 pub struct TurnFailure {
     pub category: TurnFailureCategory,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_kind: Option<ProviderFailureKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub http_status: Option<u16>,
@@ -55,10 +70,30 @@ impl TurnFailure {
     pub fn permanent(category: TurnFailureCategory, message: impl Into<String>) -> Self {
         Self {
             category,
+            provider_kind: None,
             code: None,
             http_status: None,
             message: message.into(),
             retry: RetryDisposition::Permanent,
         }
+    }
+}
+
+/// Provider adapter 跨 crate 返回的结构化失败。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderFailure {
+    pub kind: ProviderFailureKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub http_status: Option<u16>,
+    pub message: String,
+    pub retry: RetryDisposition,
+}
+
+impl std::fmt::Display for ProviderFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
     }
 }

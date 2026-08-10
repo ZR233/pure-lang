@@ -1,6 +1,7 @@
 mod allocation;
 mod completion;
 mod discard;
+mod failure;
 mod merge;
 mod planner_wake;
 mod recovery;
@@ -56,6 +57,7 @@ impl StudioStore {
             stop_requested_at: Set(None),
             task_generation: Set(0),
             terminal_generation: Set(None),
+            terminal_failure_id: Set(None),
             created_at: Set(now),
             updated_at: Set(now),
         }
@@ -425,6 +427,7 @@ pub(super) fn task_run_record(model: entities::task_run::Model) -> Result<TaskRu
         stop_requested_at: model.stop_requested_at,
         task_generation,
         terminal_generation,
+        terminal_failure_id: model.terminal_failure_id,
         created_at: model.created_at,
         updated_at: model.updated_at,
     })

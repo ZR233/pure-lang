@@ -93,7 +93,6 @@ impl InferenceOrchestrationMetrics {
         self.tool_execution_millis
             .saturating_sub(self.tool_batch_elapsed_millis)
     }
-
     pub fn merge(&mut self, other: &Self) {
         self.tool_schema_estimated_tokens = self
             .tool_schema_estimated_tokens

@@ -1,9 +1,14 @@
 use thiserror::Error;
 
+use crate::{ProviderFailure, ProviderFailureKind, RetryDisposition};
+
 #[derive(Debug, Error)]
 pub enum PureError {
     #[error("LLM provider error: {0}")]
     LlmError(String),
+
+    #[error("LLM provider error: {0}")]
+    Provider(ProviderFailure),
 
     #[error("context window exceeded: {0} tokens")]
     ContextOverflow(usize),
@@ -56,12 +61,15 @@ pub enum PureError {
 impl PureError {
     /// 构造一个可以安全重放完整模型请求的临时传输错误。
     pub fn transient_model_transport(message: impl Into<String>) -> Self {
-        Self::TransientModelTransport {
-            message: message.into(),
-            retry_after_ms: None,
+        Self::Provider(ProviderFailure {
+            kind: ProviderFailureKind::Transport,
             code: None,
             http_status: None,
-        }
+            message: message.into(),
+            retry: RetryDisposition::Retryable {
+                retry_after_ms: None,
+            },
+        })
     }
 
     /// 构造携带供应商建议等待时间的临时传输错误。
@@ -69,12 +77,15 @@ impl PureError {
         message: impl Into<String>,
         retry_after_ms: u64,
     ) -> Self {
-        Self::TransientModelTransport {
-            message: message.into(),
-            retry_after_ms: Some(retry_after_ms),
+        Self::Provider(ProviderFailure {
+            kind: ProviderFailureKind::Transport,
             code: None,
             http_status: None,
-        }
+            message: message.into(),
+            retry: RetryDisposition::Retryable {
+                retry_after_ms: Some(retry_after_ms),
+            },
+        })
     }
 
     /// 构造保留 provider code 与 HTTP 状态的临时模型错误。
@@ -84,23 +95,37 @@ impl PureError {
         code: Option<String>,
         http_status: Option<u16>,
     ) -> Self {
-        Self::TransientModelTransport {
-            message: message.into(),
-            retry_after_ms,
+        Self::Provider(ProviderFailure {
+            kind: ProviderFailureKind::Transport,
             code,
             http_status,
-        }
+            message: message.into(),
+            retry: RetryDisposition::Retryable { retry_after_ms },
+        })
+    }
+
+    /// 构造保留分类与 provider metadata 的模型失败。
+    pub fn provider_failure(failure: ProviderFailure) -> Self {
+        Self::Provider(failure)
     }
 
     /// 返回该错误是否允许在工具尚未执行时重放完整模型请求。
     pub fn is_transient_model_transport(&self) -> bool {
-        matches!(self, Self::TransientModelTransport { .. })
+        matches!(
+            self,
+            Self::TransientModelTransport { .. }
+                | Self::Provider(ProviderFailure {
+                    retry: RetryDisposition::Retryable { .. },
+                    ..
+                })
+        )
     }
 
     /// 返回供应商建议的重试等待时间。
     pub fn retry_after_ms(&self) -> Option<u64> {
         match self {
             Self::TransientModelTransport { retry_after_ms, .. } => *retry_after_ms,
+            Self::Provider(failure) => failure.retry.retry_after_ms(),
             Self::LlmError(_)
             | Self::ContextOverflow(_)
             | Self::ToolNotFound(_)
@@ -124,6 +149,7 @@ impl PureError {
             Self::TransientModelTransport {
                 code, http_status, ..
             } => Some((code.as_deref(), *http_status)),
+            Self::Provider(failure) => Some((failure.code.as_deref(), failure.http_status)),
             Self::LlmError(_)
             | Self::ContextOverflow(_)
             | Self::ToolNotFound(_)
@@ -138,6 +164,14 @@ impl PureError {
             | Self::Io(_)
             | Self::SerdeJson(_)
             | Self::HttpError(_) => None,
+        }
+    }
+
+    /// 返回结构化 Provider failure（如果该错误来自 typed provider 边界）。
+    pub fn provider_failure_ref(&self) -> Option<&ProviderFailure> {
+        match self {
+            Self::Provider(failure) => Some(failure),
+            _ => None,
         }
     }
 }

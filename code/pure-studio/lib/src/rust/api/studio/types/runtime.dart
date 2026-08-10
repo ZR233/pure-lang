@@ -6,7 +6,7 @@
 import '../../../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 class BridgeActiveTurn {
   final String threadId;
@@ -550,6 +550,85 @@ class BridgeTaskDesignReferenceDto {
           runtimeType == other.runtimeType &&
           path == other.path &&
           section == other.section;
+}
+
+class BridgeTaskFailureDto {
+  final String id;
+  final String sourceThreadId;
+  final String sourceTurnId;
+  final String sourceAgentId;
+  final String sourceRole;
+  final String? workUnitId;
+  final String? reviewRoundId;
+  final String disposition;
+  final String category;
+  final String? providerKind;
+  final String? code;
+  final int? httpStatus;
+  final String message;
+  final bool retryable;
+  final PlatformInt64? resolvedAt;
+  final PlatformInt64 createdAt;
+
+  const BridgeTaskFailureDto({
+    required this.id,
+    required this.sourceThreadId,
+    required this.sourceTurnId,
+    required this.sourceAgentId,
+    required this.sourceRole,
+    this.workUnitId,
+    this.reviewRoundId,
+    required this.disposition,
+    required this.category,
+    this.providerKind,
+    this.code,
+    this.httpStatus,
+    required this.message,
+    required this.retryable,
+    this.resolvedAt,
+    required this.createdAt,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      sourceThreadId.hashCode ^
+      sourceTurnId.hashCode ^
+      sourceAgentId.hashCode ^
+      sourceRole.hashCode ^
+      workUnitId.hashCode ^
+      reviewRoundId.hashCode ^
+      disposition.hashCode ^
+      category.hashCode ^
+      providerKind.hashCode ^
+      code.hashCode ^
+      httpStatus.hashCode ^
+      message.hashCode ^
+      retryable.hashCode ^
+      resolvedAt.hashCode ^
+      createdAt.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeTaskFailureDto &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          sourceThreadId == other.sourceThreadId &&
+          sourceTurnId == other.sourceTurnId &&
+          sourceAgentId == other.sourceAgentId &&
+          sourceRole == other.sourceRole &&
+          workUnitId == other.workUnitId &&
+          reviewRoundId == other.reviewRoundId &&
+          disposition == other.disposition &&
+          category == other.category &&
+          providerKind == other.providerKind &&
+          code == other.code &&
+          httpStatus == other.httpStatus &&
+          message == other.message &&
+          retryable == other.retryable &&
+          resolvedAt == other.resolvedAt &&
+          createdAt == other.createdAt;
 }
 
 class BridgeTaskGitFingerprintDto {
@@ -1115,6 +1194,8 @@ class BridgeTaskRuntimeDto {
   final String? stopRequestedOrigin;
   final String? stopRequestedReason;
   final BigInt taskGeneration;
+  final List<BridgeTaskFailureDto> failures;
+  final BridgeTaskFailureDto? terminalFailure;
   final List<BridgeTaskWorkUnitDto> workUnits;
   final List<BridgeTaskCompletionDto> completions;
   final List<BridgeTaskMergeDto> merges;
@@ -1129,6 +1210,8 @@ class BridgeTaskRuntimeDto {
     this.stopRequestedOrigin,
     this.stopRequestedReason,
     required this.taskGeneration,
+    required this.failures,
+    this.terminalFailure,
     required this.workUnits,
     required this.completions,
     required this.merges,
@@ -1145,6 +1228,8 @@ class BridgeTaskRuntimeDto {
       stopRequestedOrigin.hashCode ^
       stopRequestedReason.hashCode ^
       taskGeneration.hashCode ^
+      failures.hashCode ^
+      terminalFailure.hashCode ^
       workUnits.hashCode ^
       completions.hashCode ^
       merges.hashCode ^
@@ -1163,6 +1248,8 @@ class BridgeTaskRuntimeDto {
           stopRequestedOrigin == other.stopRequestedOrigin &&
           stopRequestedReason == other.stopRequestedReason &&
           taskGeneration == other.taskGeneration &&
+          failures == other.failures &&
+          terminalFailure == other.terminalFailure &&
           workUnits == other.workUnits &&
           completions == other.completions &&
           merges == other.merges &&

@@ -20,6 +20,84 @@ pub(crate) enum TaskRunPhase {
     Cancelled,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum TaskFailureDisposition {
+    Recoverable,
+    Fatal,
+}
+
+impl TaskFailureDisposition {
+    pub(crate) fn for_turn_failure(failure: &pl_protocol::TurnFailure) -> Self {
+        use pl_protocol::{ProviderFailureKind, TurnFailureCategory};
+
+        match failure.category {
+            TurnFailureCategory::ProviderCapacity | TurnFailureCategory::Validation => {
+                Self::Recoverable
+            }
+            TurnFailureCategory::Provider
+                if failure.retry.is_retryable()
+                    || matches!(
+                        failure.provider_kind,
+                        Some(ProviderFailureKind::Capacity | ProviderFailureKind::Transport)
+                    ) =>
+            {
+                Self::Recoverable
+            }
+            TurnFailureCategory::Provider
+            | TurnFailureCategory::Tool
+            | TurnFailureCategory::Internal => Self::Fatal,
+        }
+    }
+
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Recoverable => "recoverable",
+            Self::Fatal => "fatal",
+        }
+    }
+
+    pub(crate) fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "recoverable" => Some(Self::Recoverable),
+            "fatal" => Some(Self::Fatal),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TaskFailureRecord {
+    pub(crate) id: String,
+    pub(crate) task_run_id: String,
+    pub(crate) source_thread_id: String,
+    pub(crate) source_turn_id: String,
+    pub(crate) source_agent_id: String,
+    pub(crate) source_role: String,
+    pub(crate) work_unit_id: Option<String>,
+    pub(crate) review_round_id: Option<String>,
+    pub(crate) disposition: TaskFailureDisposition,
+    pub(crate) failure: pl_protocol::TurnFailure,
+    pub(crate) resolved_at: Option<i64>,
+    pub(crate) created_at: i64,
+    pub(crate) updated_at: i64,
+}
+
+pub(crate) struct RecordTaskAgentFailure {
+    pub(crate) root_thread_id: String,
+    pub(crate) source_thread_id: String,
+    pub(crate) source_turn_id: String,
+    pub(crate) source_agent_id: String,
+    pub(crate) source_role: String,
+    pub(crate) failure: pl_protocol::TurnFailure,
+}
+
+pub(crate) struct TaskFailureSettlement {
+    pub(crate) run: TaskRunRecord,
+    pub(crate) terminalized: bool,
+}
+
 impl TaskRunPhase {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
@@ -185,6 +263,7 @@ pub(crate) struct TaskRunRecord {
     pub(crate) stop_requested_at: Option<i64>,
     pub(crate) task_generation: u64,
     pub(crate) terminal_generation: Option<u64>,
+    pub(crate) terminal_failure_id: Option<String>,
     pub(crate) created_at: i64,
     pub(crate) updated_at: i64,
 }
@@ -650,4 +729,102 @@ pub(crate) struct WorkUnitRecord {
 pub(crate) struct DeliveryScope {
     pub(crate) run: TaskRunRecord,
     pub(crate) work_unit: WorkUnitRecord,
+}
+
+#[cfg(test)]
+mod tests {
+    use pl_protocol::{ProviderFailureKind, RetryDisposition, TurnFailure, TurnFailureCategory};
+
+    use super::TaskFailureDisposition;
+
+    #[test]
+    fn task_failure_disposition_uses_typed_failure_semantics() {
+        let cases = [
+            (
+                failure(
+                    TurnFailureCategory::Provider,
+                    Some(ProviderFailureKind::Authentication),
+                    RetryDisposition::Permanent,
+                ),
+                TaskFailureDisposition::Fatal,
+            ),
+            (
+                failure(
+                    TurnFailureCategory::Provider,
+                    Some(ProviderFailureKind::Configuration),
+                    RetryDisposition::Permanent,
+                ),
+                TaskFailureDisposition::Fatal,
+            ),
+            (
+                failure(
+                    TurnFailureCategory::Provider,
+                    Some(ProviderFailureKind::Protocol),
+                    RetryDisposition::Permanent,
+                ),
+                TaskFailureDisposition::Fatal,
+            ),
+            (
+                failure(
+                    TurnFailureCategory::Provider,
+                    Some(ProviderFailureKind::Capacity),
+                    RetryDisposition::Permanent,
+                ),
+                TaskFailureDisposition::Recoverable,
+            ),
+            (
+                failure(
+                    TurnFailureCategory::Provider,
+                    Some(ProviderFailureKind::Transport),
+                    RetryDisposition::Retryable {
+                        retry_after_ms: None,
+                    },
+                ),
+                TaskFailureDisposition::Recoverable,
+            ),
+            (
+                failure(
+                    TurnFailureCategory::Validation,
+                    None,
+                    RetryDisposition::Permanent,
+                ),
+                TaskFailureDisposition::Recoverable,
+            ),
+            (
+                failure(TurnFailureCategory::Tool, None, RetryDisposition::Permanent),
+                TaskFailureDisposition::Fatal,
+            ),
+            (
+                failure(
+                    TurnFailureCategory::Internal,
+                    None,
+                    RetryDisposition::Permanent,
+                ),
+                TaskFailureDisposition::Fatal,
+            ),
+        ];
+
+        for (failure, expected) in cases {
+            assert_eq!(
+                TaskFailureDisposition::for_turn_failure(&failure),
+                expected,
+                "unexpected disposition for {failure:?}"
+            );
+        }
+    }
+
+    fn failure(
+        category: TurnFailureCategory,
+        provider_kind: Option<ProviderFailureKind>,
+        retry: RetryDisposition,
+    ) -> TurnFailure {
+        TurnFailure {
+            category,
+            provider_kind,
+            code: None,
+            http_status: None,
+            message: "failure".to_string(),
+            retry,
+        }
+    }
 }

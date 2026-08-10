@@ -983,6 +983,11 @@ fn thread_from_model(model: thread::Model) -> Result<ThreadRecord, PureError> {
 }
 
 fn turn_from_model(model: turn::Model) -> Result<Turn, PureError> {
+    let failure = model
+        .failure_json
+        .as_deref()
+        .map(serde_json::from_str)
+        .transpose()?;
     let state = match model.status.as_str() {
         "queued" => TurnState::Queued,
         "inProgress" => TurnState::InProgress {
@@ -1001,6 +1006,7 @@ fn turn_from_model(model: turn::Model) -> Result<Turn, PureError> {
         id: model.id,
         thread_id: model.thread_id,
         state,
+        failure,
         started_at: model.started_at,
         updated_at: model.updated_at,
         completed_at: model.completed_at,

@@ -169,6 +169,10 @@ provider code、HTTP status、用户可读消息与 `RetryDisposition`；可重�
 `retryAfterMs`。`TurnResult` 和 `AgentTurnOutcome` 必须携带同一份结构化失败，宿主产品
 不得通过解析 `reason` 文本判断是否重试。provider 内部仅在模型流尚未产生可见或 canonical
 事件、且工具副作用尚未发生时重放完整模型请求；重试耗尽后把原始瞬态语义交给宿主调度器。
+`RetryDisposition` 只描述当前 provider 请求的 replay 安全性；Studio 的
+`TaskFailureDisposition` 是独立产品决策。普通工具执行失败和 required finalization 验证失败必须
+作为模型可见 tool failure 返回，不能因为 Turn 使用了 required tool 就升级成 fatal tool runtime。
+只有工具 runtime invariant、join failure 或历史污染进入 fatal `TurnFailureCategory::Tool/Internal`。
 
 Responses WebSocket、Responses HTTP/SSE 与 Chat Completions HTTP 的限流、连接容量、
 `server_is_overloaded`、429、5xx、连接/超时，以及响应开始前的 connection reset、aborted、

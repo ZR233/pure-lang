@@ -636,8 +636,26 @@ pub(super) async fn run_turn_with_trace(
         .await
         {
             Ok(tool_batch) => tool_batch,
-            Err(ToolExecutionError::Fatal(error))
-            | Err(ToolExecutionError::RespondToModel(error)) => {
+            Err(ToolExecutionError::Fatal(error)) => {
+                session.truncate_messages(safe_message_count);
+                return Ok(failed_turn_result_with_abort_reason(
+                    recorder,
+                    &turn_id,
+                    last_content,
+                    last_reasoning_content,
+                    last_model,
+                    total_usage,
+                    safe_message_count,
+                    error,
+                    ErrorSeverity::Fatal,
+                    pl_protocol::TurnFailure::permanent(
+                        pl_protocol::TurnFailureCategory::Tool,
+                        "fatal tool runtime failure",
+                    ),
+                    crate::turn::TurnAbortReason::ToolError,
+                ));
+            }
+            Err(ToolExecutionError::RespondToModel(error)) => {
                 session.truncate_messages(safe_message_count);
                 commit_and_publish_inference(
                     &options,
@@ -657,8 +675,8 @@ pub(super) async fn run_turn_with_trace(
                     error,
                     ErrorSeverity::Recoverable,
                     pl_protocol::TurnFailure::permanent(
-                        pl_protocol::TurnFailureCategory::Tool,
-                        "tool execution failed",
+                        pl_protocol::TurnFailureCategory::Validation,
+                        "tool execution failed and can be corrected",
                     ),
                     crate::turn::TurnAbortReason::ToolError,
                 ));

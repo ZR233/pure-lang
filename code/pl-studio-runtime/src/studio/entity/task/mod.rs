@@ -26,6 +26,7 @@ pub mod task_run {
         pub stop_requested_at: Option<i64>,
         pub task_generation: i64,
         pub terminal_generation: Option<i64>,
+        pub terminal_failure_id: Option<String>,
         pub created_at: i64,
         pub updated_at: i64,
     }
@@ -39,6 +40,42 @@ pub mod task_run {
             on_delete = "Cascade"
         )]
         RootThread,
+    }
+
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+pub mod task_failure {
+    use super::*;
+
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
+    #[sea_orm(table_name = "task_failures")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: String,
+        pub task_run_id: String,
+        pub source_thread_id: String,
+        pub source_turn_id: String,
+        pub source_agent_id: String,
+        pub source_role: String,
+        pub work_unit_id: Option<String>,
+        pub review_round_id: Option<String>,
+        pub disposition: String,
+        pub failure_json: String,
+        pub resolved_at: Option<i64>,
+        pub created_at: i64,
+        pub updated_at: i64,
+    }
+
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {
+        #[sea_orm(
+            belongs_to = "super::task_run::Entity",
+            from = "Column::TaskRunId",
+            to = "super::task_run::Column::Id",
+            on_delete = "Cascade"
+        )]
+        TaskRun,
     }
 
     impl ActiveModelBehavior for ActiveModel {}

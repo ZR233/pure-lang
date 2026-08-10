@@ -1,6 +1,68 @@
 part of '../widget_test.dart';
 
 void registerTaskRuntimeDetailTests() {
+  testWidgets('fatal and recoverable task failures have distinct UI states', (
+    tester,
+  ) async {
+    final fatal = _taskFailure(
+      id: 'fatal-1',
+      disposition: 'fatal',
+      message: 'Invalid API key',
+    );
+    final recoverable = _taskFailure(
+      id: 'recoverable-1',
+      disposition: 'recoverable',
+      message: 'Provider capacity unavailable',
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        child: _localizedApp(
+          home: Scaffold(
+            body: Column(
+              children: [
+                ThreadStatusBar(
+                  view: StatusBarView(
+                    thread: StudioThread(
+                      id: 'session-fatal',
+                      projectId: 'project-1',
+                      title: 'Fatal session',
+                      mode: StudioMode.task,
+                      updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
+                    ),
+                    runtime: _testRuntime().copyWith(
+                      task: _failureTask(fatal, phase: 'failed'),
+                    ),
+                    permissionMode: PermissionMode.requestApproval,
+                    providers: const [],
+                    roles: const [],
+                    isBusy: false,
+                  ),
+                ),
+                TaskRuntimeDetail(task: _failureTask(fatal, phase: 'failed')),
+                TaskRuntimeDetail(
+                  task: _failureTask(recoverable, phase: 'reviewing'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byIcon(Icons.error_outline), findsOneWidget);
+    expect(find.text('Task failed'), findsWidgets);
+    expect(find.text('Invalid API key'), findsWidgets);
+    expect(find.text('Provider capacity unavailable'), findsWidgets);
+    expect(find.text('Can continue'), findsOneWidget);
+    expect(find.byKey(StudioDriverKeys.taskFailure('fatal-1')), findsOneWidget);
+    expect(
+      find.byKey(StudioDriverKeys.taskFailure('recoverable-1')),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('task stop detail renders the durable origin and generation', (
     tester,
   ) async {
@@ -186,6 +248,49 @@ void registerTaskRuntimeDetailTests() {
     expect(taskSnapshot['reviews'], hasLength(1));
   });
 }
+
+TaskFailureView _taskFailure({
+  required String id,
+  required String disposition,
+  required String message,
+}) => TaskFailureView(
+  id: id,
+  sourceThreadId: 'executor-thread-1',
+  sourceTurnId: 'turn-1',
+  sourceAgentId: 'executor-1',
+  sourceRole: 'executor',
+  workUnitId: 'work-unit-1',
+  reviewRoundId: null,
+  disposition: disposition,
+  category: 'provider',
+  providerKind: disposition == 'fatal' ? 'authentication' : 'capacity',
+  code: disposition == 'fatal' ? 'invalid_api_key' : 'server_is_overloaded',
+  httpStatus: disposition == 'fatal' ? 401 : 503,
+  message: message,
+  retryable: disposition != 'fatal',
+  resolvedAt: null,
+  createdAt: DateTime.fromMillisecondsSinceEpoch(0),
+);
+
+TaskRuntimeView _failureTask(
+  TaskFailureView failure, {
+  required String phase,
+}) => TaskRuntimeView(
+  runId: 'task-${failure.id}',
+  phase: phase,
+  branch: 'main',
+  expectedHead: '0123456789abcdef',
+  statusMessage: failure.message,
+  stopRequestedOrigin: null,
+  stopRequestedReason: null,
+  taskGeneration: 1,
+  failures: [failure],
+  terminalFailure: failure.isFatal ? failure : null,
+  workUnits: const [],
+  completions: const [],
+  merges: const [],
+  reviews: const [],
+);
 
 TaskRuntimeView _stoppedTask({
   required String origin,

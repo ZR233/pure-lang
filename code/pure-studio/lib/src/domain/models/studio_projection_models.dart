@@ -1,5 +1,6 @@
 import 'package:freezed_annotation/freezed_annotation.dart';
 
+import 'agent_models.dart';
 import 'agent_workspace_view.dart';
 import 'interaction_models.dart';
 import 'provider_models.dart';
@@ -77,6 +78,7 @@ abstract class HeaderView with _$HeaderView {
     required StudioProject? selectedProject,
     required String? selectedProjectId,
     required List<StudioThread> workspaceThreads,
+    required List<StudioAgentView> agents,
     required String? selectedThreadId,
     required ThreadRuntimeView runtime,
     required List<PendingInteraction> pendingInteractions,
@@ -97,6 +99,7 @@ abstract class HeaderView with _$HeaderView {
       selectedProject: selectedProject,
       selectedProjectId: state.selectedProjectId,
       workspaceThreads: state.threadsForSelectedRoot,
+      agents: state.selectedAgents,
       selectedThreadId: state.selectedThreadId,
       runtime: state.runtime,
       pendingInteractions: state.pendingInteractions,

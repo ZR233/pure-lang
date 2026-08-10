@@ -1,5 +1,5 @@
 use async_openai::error::OpenAIError;
-use pl_protocol::PureError;
+use pl_protocol::{ProviderFailure, ProviderFailureKind, PureError, RetryDisposition};
 use std::error::Error as _;
 
 #[derive(Debug, Clone, Copy)]
@@ -16,12 +16,25 @@ impl ProviderFailureMetadata<'_> {
     }
 
     pub fn into_transient(self, message: String) -> PureError {
-        PureError::transient_model_failure(
+        PureError::provider_failure(ProviderFailure {
+            kind: provider_failure_kind(self.code, self.http_status, true),
+            code: self.code.map(ToString::to_string),
+            http_status: self.http_status,
             message,
-            self.retry_after_ms,
-            self.code.map(ToString::to_string),
-            self.http_status,
-        )
+            retry: RetryDisposition::Retryable {
+                retry_after_ms: self.retry_after_ms,
+            },
+        })
+    }
+
+    pub fn into_permanent(self, message: String) -> PureError {
+        PureError::provider_failure(ProviderFailure {
+            kind: provider_failure_kind(self.code, self.http_status, false),
+            code: self.code.map(ToString::to_string),
+            http_status: self.http_status,
+            message,
+            retry: RetryDisposition::Permanent,
+        })
     }
 }
 
@@ -38,17 +51,17 @@ pub(super) fn openai_error_to_pure(error: OpenAIError) -> PureError {
             if metadata.is_retryable() {
                 metadata.into_transient(detail)
             } else {
-                PureError::LlmError(detail)
+                metadata.into_permanent(detail)
             }
         }
         OpenAIError::Reqwest(error) => reqwest_error_to_pure(error),
         OpenAIError::JSONDeserialize(error, content) => {
-            PureError::HttpError(redact_secret_like_values(&format!("{error}: {content}")))
+            protocol_failure(redact_secret_like_values(&format!("{error}: {content}")))
         }
         OpenAIError::StreamError(error) => {
-            PureError::HttpError(redact_secret_like_values(&error.to_string()))
+            protocol_failure(redact_secret_like_values(&error.to_string()))
         }
-        OpenAIError::InvalidArgument(message) => PureError::ConfigError(message),
+        OpenAIError::InvalidArgument(message) => configuration_failure(message),
         OpenAIError::FileSaveError(message) | OpenAIError::FileReadError(message) => {
             PureError::Io(std::io::Error::other(message))
         }
@@ -65,7 +78,39 @@ fn reqwest_error_to_pure(error: reqwest::Error) -> PureError {
             error.status().map(|status| status.as_u16()),
         );
     }
-    PureError::HttpError(detail)
+    if error.is_builder() || error.is_redirect() {
+        configuration_failure(detail)
+    } else if error.is_decode() || error.is_body() {
+        protocol_failure(detail)
+    } else {
+        PureError::provider_failure(ProviderFailure {
+            kind: ProviderFailureKind::Unknown,
+            code: None,
+            http_status: error.status().map(|status| status.as_u16()),
+            message: detail,
+            retry: RetryDisposition::Permanent,
+        })
+    }
+}
+
+fn configuration_failure(message: impl Into<String>) -> PureError {
+    PureError::provider_failure(ProviderFailure {
+        kind: ProviderFailureKind::Configuration,
+        code: None,
+        http_status: None,
+        message: message.into(),
+        retry: RetryDisposition::Permanent,
+    })
+}
+
+fn protocol_failure(message: impl Into<String>) -> PureError {
+    PureError::provider_failure(ProviderFailure {
+        kind: ProviderFailureKind::Protocol,
+        code: None,
+        http_status: None,
+        message: message.into(),
+        retry: RetryDisposition::Permanent,
+    })
 }
 
 fn response_start_connection_closed(error: &reqwest::Error) -> bool {
@@ -100,7 +145,44 @@ fn response_start_connection_closed(error: &reqwest::Error) -> bool {
 }
 
 pub(super) fn retryable_provider_status(status: u16) -> bool {
-    matches!(status, 429 | 500..=599)
+    matches!(status, 408 | 409 | 425 | 429 | 500..=599)
+}
+
+fn provider_failure_kind(
+    code: Option<&str>,
+    http_status: Option<u16>,
+    retryable: bool,
+) -> ProviderFailureKind {
+    if matches!(http_status, Some(401))
+        || code.is_some_and(|code| matches!(code, "invalid_api_key" | "authentication_error"))
+    {
+        return ProviderFailureKind::Authentication;
+    }
+    if matches!(http_status, Some(403))
+        || code.is_some_and(|code| matches!(code, "permission_denied" | "insufficient_permissions"))
+    {
+        return ProviderFailureKind::Authorization;
+    }
+    if retryable {
+        return if matches!(http_status, Some(429 | 500..=599))
+            || code.is_some_and(retryable_provider_code)
+        {
+            ProviderFailureKind::Capacity
+        } else {
+            ProviderFailureKind::Transport
+        };
+    }
+    if matches!(http_status, Some(400 | 404 | 405 | 422))
+        || code.is_some_and(|code| {
+            matches!(
+                code,
+                "model_not_found" | "invalid_request_error" | "unsupported_model"
+            )
+        })
+    {
+        return ProviderFailureKind::Configuration;
+    }
+    ProviderFailureKind::Unknown
 }
 
 fn retryable_provider_code(code: &str) -> bool {
@@ -174,7 +256,12 @@ mod tests {
             openai_error_to_pure(api_error(StatusCode::BAD_REQUEST, Some("invalid_request")));
 
         assert!(!error.is_transient_model_transport());
-        assert!(matches!(error, PureError::LlmError(_)));
+        let failure = error
+            .provider_failure_ref()
+            .expect("typed provider failure");
+        assert_eq!(failure.kind, ProviderFailureKind::Configuration);
+        assert_eq!(failure.http_status, Some(400));
+        assert!(!failure.retry.is_retryable());
     }
 
     #[test]
@@ -186,25 +273,78 @@ mod tests {
         let error = openai_error_to_pure(OpenAIError::Reqwest(request_error));
 
         assert!(!error.is_transient_model_transport());
-        assert!(matches!(error, PureError::HttpError(_)));
+        assert_eq!(
+            error.provider_failure_ref().map(|failure| failure.kind),
+            Some(ProviderFailureKind::Configuration)
+        );
     }
 
     #[test]
     fn retryable_http_statuses_match_the_transport_policy() {
-        for status in [429, 500, 503, 599] {
+        for status in [408, 409, 425, 429, 500, 503, 599] {
             assert!(retryable_provider_status(status), "status {status}");
         }
-        for status in [400, 408, 409, 425] {
+        for status in [400, 401, 403, 404, 422] {
             assert!(!retryable_provider_status(status), "status {status}");
         }
     }
 
+    #[test]
+    fn invalid_api_key_is_typed_permanent_and_redacted() {
+        let secret = "sk-super-secret-provider-key";
+        let error = openai_error_to_pure(api_error_with_message(
+            StatusCode::UNAUTHORIZED,
+            Some("invalid_api_key"),
+            &format!("Invalid API key {secret}"),
+        ));
+
+        let failure = error
+            .provider_failure_ref()
+            .expect("typed provider failure");
+        assert_eq!(failure.kind, ProviderFailureKind::Authentication);
+        assert_eq!(failure.code.as_deref(), Some("invalid_api_key"));
+        assert_eq!(failure.http_status, Some(401));
+        assert!(!failure.retry.is_retryable());
+        assert!(!failure.message.contains(secret));
+        assert!(failure.message.contains("[REDACTED_API_KEY]"));
+    }
+
+    #[test]
+    fn permission_and_missing_model_are_fatal_provider_kinds() {
+        let forbidden =
+            openai_error_to_pure(api_error(StatusCode::FORBIDDEN, Some("permission_denied")));
+        assert_eq!(
+            forbidden.provider_failure_ref().map(|failure| failure.kind),
+            Some(ProviderFailureKind::Authorization)
+        );
+
+        let missing_model =
+            openai_error_to_pure(api_error(StatusCode::NOT_FOUND, Some("model_not_found")));
+        assert_eq!(
+            missing_model
+                .provider_failure_ref()
+                .map(|failure| failure.kind),
+            Some(ProviderFailureKind::Configuration)
+        );
+    }
+
     fn api_error(status_code: StatusCode, code: Option<&str>) -> OpenAIError {
+        api_error_with_message(
+            status_code,
+            code,
+            "Our servers are currently overloaded. Please try again later.",
+        )
+    }
+
+    fn api_error_with_message(
+        status_code: StatusCode,
+        code: Option<&str>,
+        message: &str,
+    ) -> OpenAIError {
         OpenAIError::ApiError(ApiErrorResponse {
             status_code,
             api_error: ApiError {
-                message: "Our servers are currently overloaded. Please try again later."
-                    .to_string(),
+                message: message.to_string(),
                 r#type: Some("server_error".to_string()),
                 param: None,
                 code: code.map(ToString::to_string),

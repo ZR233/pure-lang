@@ -36,6 +36,49 @@ class StudioAgentView {
   final AgentProgressView? progress;
   final int? summaryAgeSeconds;
   final DateTime updatedAt;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is StudioAgentView &&
+          id == other.id &&
+          threadId == other.threadId &&
+          path == other.path &&
+          parentPath == other.parentPath &&
+          role == other.role &&
+          task == other.task &&
+          status == other.status &&
+          summary == other.summary &&
+          depth == other.depth &&
+          error == other.error &&
+          reason == other.reason &&
+          rootThreadId == other.rootThreadId &&
+          lifecycle == other.lifecycle &&
+          activity == other.activity &&
+          progress == other.progress &&
+          summaryAgeSeconds == other.summaryAgeSeconds &&
+          updatedAt == other.updatedAt;
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    threadId,
+    path,
+    parentPath,
+    role,
+    task,
+    status,
+    summary,
+    depth,
+    error,
+    reason,
+    rootThreadId,
+    lifecycle,
+    activity,
+    progress,
+    summaryAgeSeconds,
+    updatedAt,
+  );
 }
 
 class AgentProgressView {
@@ -52,4 +95,18 @@ class AgentProgressView {
   final String nextStep;
   final int revision;
   final DateTime updatedAt;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is AgentProgressView &&
+          stage == other.stage &&
+          summary == other.summary &&
+          nextStep == other.nextStep &&
+          revision == other.revision &&
+          updatedAt == other.updatedAt;
+
+  @override
+  int get hashCode =>
+      Object.hash(stage, summary, nextStep, revision, updatedAt);
 }

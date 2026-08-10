@@ -61,11 +61,16 @@ impl StudioAgentHost {
                 coordinator.clone(),
                 resources.clone(),
             ),
-            lifecycle: StudioAgentLifecycle::new(store.clone(), coordinator, resources.clone()),
+            lifecycle: StudioAgentLifecycle::new(
+                store.clone(),
+                coordinator.clone(),
+                resources.clone(),
+            ),
             observer: StudioAgentCommitObserver::new(
                 store,
                 interactions,
                 runtime_state,
+                coordinator,
                 resources,
                 product_events,
             ),

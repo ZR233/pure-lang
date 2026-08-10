@@ -9,8 +9,8 @@ use crate::studio::paths::{sqlite_read_only_url, sqlite_url};
 use crate::studio::store_support::STUDIO_DATABASE_SCHEMA_VERSION;
 
 #[tokio::test]
-async fn creates_canonical_schema_v3_with_segmented_context() {
-    let root = unique_test_root("schema-v3");
+async fn creates_canonical_schema_v4_with_typed_task_failures() {
+    let root = unique_test_root("schema-v4");
     let database_path = root.join("studio.sqlite");
     let store = StudioStore::open(&database_path).await.unwrap();
 
@@ -30,6 +30,7 @@ async fn creates_canonical_schema_v3_with_segmented_context() {
         "attachments",
         "app_settings",
         "task_runs",
+        "task_failures",
         "work_units",
         "work_completions",
         "review_rounds",
@@ -46,6 +47,26 @@ async fn creates_canonical_schema_v3_with_segmented_context() {
     assert!(!work_unit_columns.contains(&"owned_paths_json".to_string()));
     let item_columns = table_columns(store.database(), "items").await;
     assert!(!item_columns.contains(&"provider_private_payload".to_string()));
+    let task_run_columns = table_columns(store.database(), "task_runs").await;
+    assert!(task_run_columns.contains(&"terminal_failure_id".to_string()));
+    let task_failure_columns = table_columns(store.database(), "task_failures").await;
+    for column in [
+        "task_run_id",
+        "source_thread_id",
+        "source_turn_id",
+        "source_agent_id",
+        "source_role",
+        "work_unit_id",
+        "review_round_id",
+        "disposition",
+        "failure_json",
+        "resolved_at",
+    ] {
+        assert!(
+            task_failure_columns.contains(&column.to_string()),
+            "missing task_failures.{column}"
+        );
+    }
     let turn_columns = table_columns(store.database(), "turns").await;
     for column in [
         "budget_limit_json",
@@ -114,7 +135,7 @@ async fn incompatible_version_is_deleted_and_rebuilt_without_archive_or_import()
         &database_path,
         "CREATE TABLE legacy_only (id TEXT PRIMARY KEY);
          INSERT INTO legacy_only VALUES ('must-disappear');
-         PRAGMA user_version = 1;",
+         PRAGMA user_version = 3;",
     )
     .await;
     tokio::fs::write(sidecar_path(&database_path, "-wal"), b"old-wal")

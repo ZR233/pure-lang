@@ -913,6 +913,175 @@ async fn concurrent_task_phase_transition_rejects_the_stale_writer() {
     );
 }
 
+#[tokio::test]
+async fn fatal_provider_failure_terminalizes_task_and_releases_lease() {
+    let (store, root_thread_id, run) =
+        allocation_fixture("fatal-provider-failure", TaskRunPhase::Implementing).await;
+    let failure = provider_failure(
+        pl_protocol::ProviderFailureKind::Authentication,
+        pl_protocol::RetryDisposition::Permanent,
+        "Invalid API key",
+    );
+
+    let settlement = store
+        .record_task_agent_failure(RecordTaskAgentFailure {
+            root_thread_id: root_thread_id.clone(),
+            source_thread_id: root_thread_id,
+            source_turn_id: "turn-fatal".to_string(),
+            source_agent_id: "root-agent".to_string(),
+            source_role: "planner".to_string(),
+            failure,
+        })
+        .await
+        .unwrap()
+        .expect("active Task must record failure");
+
+    assert!(settlement.terminalized);
+    assert_eq!(settlement.run.phase, TaskRunPhase::Failed);
+    assert!(settlement.run.terminal_failure_id.is_some());
+    assert!(store.read_branch_lease(&run.id).await.unwrap().is_none());
+    let failures = store.list_task_failures(&run.id).await.unwrap();
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0].disposition, TaskFailureDisposition::Fatal);
+}
+
+#[tokio::test]
+async fn first_concurrent_fatal_failure_wins_terminal_identity() {
+    let (store, root_thread_id, run) =
+        allocation_fixture("concurrent-fatal-failure", TaskRunPhase::Implementing).await;
+    let first_store = store.clone();
+    let second_store = store.clone();
+    let first_root = root_thread_id.clone();
+    let second_root = root_thread_id.clone();
+
+    let (first, second) = tokio::join!(
+        first_store.record_task_agent_failure(RecordTaskAgentFailure {
+            root_thread_id: first_root.clone(),
+            source_thread_id: first_root,
+            source_turn_id: "turn-fatal-a".to_string(),
+            source_agent_id: "executor-a".to_string(),
+            source_role: "executor".to_string(),
+            failure: provider_failure(
+                pl_protocol::ProviderFailureKind::Authentication,
+                pl_protocol::RetryDisposition::Permanent,
+                "invalid key a",
+            ),
+        }),
+        second_store.record_task_agent_failure(RecordTaskAgentFailure {
+            root_thread_id: second_root.clone(),
+            source_thread_id: second_root,
+            source_turn_id: "turn-fatal-b".to_string(),
+            source_agent_id: "reviewer-b".to_string(),
+            source_role: "reviewer".to_string(),
+            failure: provider_failure(
+                pl_protocol::ProviderFailureKind::Authorization,
+                pl_protocol::RetryDisposition::Permanent,
+                "permission denied b",
+            ),
+        }),
+    );
+
+    let first = first.unwrap();
+    let second = second.unwrap();
+    assert_eq!(
+        usize::from(first.is_some()) + usize::from(second.is_some()),
+        1
+    );
+    let stored_run = store.read_task_run(&run.id).await.unwrap().unwrap();
+    assert_eq!(stored_run.phase, TaskRunPhase::Failed);
+    let failures = store.list_task_failures(&run.id).await.unwrap();
+    assert_eq!(failures.len(), 1);
+    assert_eq!(
+        stored_run.terminal_failure_id.as_deref(),
+        Some(failures[0].id.as_str())
+    );
+}
+
+#[tokio::test]
+async fn recoverable_provider_failure_keeps_task_and_lease_active() {
+    let (store, root_thread_id, run) =
+        allocation_fixture("recoverable-provider-failure", TaskRunPhase::Implementing).await;
+    let failure = provider_failure(
+        pl_protocol::ProviderFailureKind::Transport,
+        pl_protocol::RetryDisposition::Retryable {
+            retry_after_ms: Some(250),
+        },
+        "connection timed out",
+    );
+
+    let settlement = store
+        .record_task_agent_failure(RecordTaskAgentFailure {
+            root_thread_id: root_thread_id.clone(),
+            source_thread_id: root_thread_id,
+            source_turn_id: "turn-recoverable".to_string(),
+            source_agent_id: "root-agent".to_string(),
+            source_role: "planner".to_string(),
+            failure,
+        })
+        .await
+        .unwrap()
+        .expect("active Task must record failure");
+
+    assert!(!settlement.terminalized);
+    assert_eq!(settlement.run.phase, TaskRunPhase::Implementing);
+    assert!(settlement.run.terminal_failure_id.is_none());
+    assert!(store.read_branch_lease(&run.id).await.unwrap().is_some());
+    assert_eq!(
+        store.list_task_failures(&run.id).await.unwrap()[0].disposition,
+        TaskFailureDisposition::Recoverable
+    );
+}
+
+#[tokio::test]
+async fn fatal_executor_failure_preserves_worktree_for_manual_cleanup() {
+    let fixture = ExecutorFixture::new("fatal-executor-protect").await;
+
+    fixture
+        .store
+        .record_task_agent_failure(RecordTaskAgentFailure {
+            root_thread_id: fixture.run.root_thread_id.clone(),
+            source_thread_id: fixture.agent_id.clone(),
+            source_turn_id: "turn-executor-fatal".to_string(),
+            source_agent_id: fixture.agent_id.clone(),
+            source_role: "executor".to_string(),
+            failure: provider_failure(
+                pl_protocol::ProviderFailureKind::Authorization,
+                pl_protocol::RetryDisposition::Permanent,
+                "permission denied",
+            ),
+        })
+        .await
+        .unwrap();
+
+    let unit = fixture
+        .store
+        .list_work_units(&fixture.run.id)
+        .await
+        .unwrap()
+        .pop()
+        .expect("work unit remains durable");
+    assert_eq!(unit.status, WorkUnitStatus::Failed);
+    assert_eq!(unit.execution_status, ThreadExecutionStatus::Failed);
+    assert_eq!(unit.worktree_disposition, TaskWorktreeDisposition::Protect);
+    assert_eq!(unit.worktree_path, fixture.work_unit.worktree_path);
+    assert_eq!(unit.branch, fixture.work_unit.branch);
+}
+
+fn provider_failure(
+    kind: pl_protocol::ProviderFailureKind,
+    retry: pl_protocol::RetryDisposition,
+    message: &str,
+) -> pl_protocol::TurnFailure {
+    pl_protocol::TurnFailure {
+        category: pl_protocol::TurnFailureCategory::Provider,
+        provider_kind: Some(kind),
+        code: None,
+        http_status: None,
+        message: message.to_string(),
+        retry,
+    }
+}
+
 struct ExecutorFixture {
     store: StudioStore,
     run: TaskRunRecord,

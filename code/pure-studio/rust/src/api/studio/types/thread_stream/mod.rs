@@ -104,9 +104,21 @@ pub struct BridgeTurn {
     pub id: String,
     pub thread_id: String,
     pub state: BridgeTurnState,
+    pub failure: Option<BridgeTurnFailureDto>,
     pub started_at: Option<i64>,
     pub updated_at: i64,
     pub completed_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeTurnFailureDto {
+    pub category: String,
+    pub provider_kind: Option<String>,
+    pub code: Option<String>,
+    pub http_status: Option<u16>,
+    pub message: String,
+    pub retryable: bool,
+    pub retry_after_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

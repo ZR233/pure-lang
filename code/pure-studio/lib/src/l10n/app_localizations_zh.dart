@@ -396,6 +396,21 @@ class AppLocalizationsZh extends AppLocalizations {
   String get statusTaskError => '错误';
 
   @override
+  String get statusTaskFailed => '任务失败';
+
+  @override
+  String get statusTaskRecoverable => '可继续';
+
+  @override
+  String get statusTaskFailures => '任务错误';
+
+  @override
+  String get statusTaskFatalHint => '修复 Provider 或配置后，请开启新任务。';
+
+  @override
+  String get statusTaskRecoverableHint => '修复原因后可继续当前任务。';
+
+  @override
   String get statusTaskExecution => '执行状态';
 
   @override
@@ -1865,6 +1880,21 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get statusTaskError => '错误';
+
+  @override
+  String get statusTaskFailed => '任务失败';
+
+  @override
+  String get statusTaskRecoverable => '可继续';
+
+  @override
+  String get statusTaskFailures => '任务错误';
+
+  @override
+  String get statusTaskFatalHint => '修复 Provider 或配置后，请开启新任务。';
+
+  @override
+  String get statusTaskRecoverableHint => '修复原因后可继续当前任务。';
 
   @override
   String get statusTaskExecution => '执行状态';

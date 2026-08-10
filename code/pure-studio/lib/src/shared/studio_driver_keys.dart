@@ -130,6 +130,9 @@ abstract final class StudioDriverKeys {
   static ValueKey<String> taskWorkUnit(String id) =>
       ValueKey<String>('task-work-unit-$id');
 
+  static ValueKey<String> taskFailure(String id) =>
+      ValueKey<String>('task-failure-$id');
+
   static ValueKey<String> taskWorkUnitExecution(String id) =>
       ValueKey<String>('task-work-unit-$id-execution');
 

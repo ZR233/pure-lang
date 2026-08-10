@@ -134,9 +134,15 @@ class _AgentSwitcherState extends ConsumerState<_AgentSwitcher> {
             leadingIcon: Padding(
               padding: EdgeInsets.only(left: _agentDepth(thread, threads) * 12),
               child: Icon(
-                Icons.circle,
-                size: 9,
-                color: _statusColor(widget.state, thread),
+                _agentForThread(widget.state, thread.id)?.error != null
+                    ? Icons.error_outline
+                    : Icons.circle,
+                size: _agentForThread(widget.state, thread.id)?.error != null
+                    ? 16
+                    : 9,
+                color: _agentForThread(widget.state, thread.id)?.error != null
+                    ? Theme.of(context).colorScheme.error
+                    : _statusColor(widget.state, thread),
               ),
             ),
             trailingIcon: thread.id == widget.state.selectedThreadId
@@ -175,7 +181,10 @@ class _AgentSwitcherState extends ConsumerState<_AgentSwitcher> {
                   ),
                   const SizedBox(width: 12),
                   Text(
-                    _agentShortStatus(thread),
+                    _agentForThread(widget.state, thread.id)?.error ??
+                        _agentShortStatus(thread),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.labelSmall?.copyWith(
                       color: context.studioInkSoft,
                     ),
@@ -216,6 +225,13 @@ class _AgentSwitcherState extends ConsumerState<_AgentSwitcher> {
       },
     );
   }
+}
+
+StudioAgentView? _agentForThread(HeaderView state, String threadId) {
+  for (final agent in state.agents) {
+    if (agent.threadId == threadId) return agent;
+  }
+  return null;
 }
 
 int _agentDepth(StudioThread thread, List<StudioThread> threads) {

@@ -2,7 +2,7 @@
 
 ## 19.1 数据库
 
-Studio 默认只使用 `~/.pure/studio/studio.sqlite`，schema v3；测试和隔离验收可通过绝对路径
+Studio 默认只使用 `~/.pure/studio/studio.sqlite`，schema v4；测试和隔离验收可通过绝对路径
 `PURE_STUDIO_HOME` 改写整个 Studio 数据根。数据库启用 WAL、foreign keys、五秒
 busy timeout 和 synchronous=FULL；应用数据库连接池固定一个连接，mutation 通过 SQLite
 单 writer 事务串行化，snapshot、分页和设置查询共用该连接。
@@ -17,7 +17,7 @@ busy timeout 和 synchronous=FULL；应用数据库连接池固定一个连接�
 - interactions
 - attachments
 - app_settings
-- task_runs、work_units、work_completions、review_rounds、merge_records、branch_leases
+- task_runs、task_failures、work_units、work_completions、review_rounds、merge_records、branch_leases
 - thread_context_segments、thread_session_state
 
 不存在 history 数据库、storage generation pair、history_gc_jobs、session snapshot JSON、agent
@@ -58,6 +58,12 @@ conversation transcript、working state、recovery marker、mailbox 状态与 Th
 revision 冲突不产生部分更新。Thread 局部重建保留 pinned handoff、Evidence Ledger、session note、
 Task/WorkUnit owner、usage 和全部 Git/工作区状态。
 
+`task_failures` 以 `(task_run_id, source_turn_id)` 唯一保存来源 Thread/Turn/agent、WorkUnit 或
+ReviewRound、完整 `TurnFailure`、Task disposition 与 resolved 状态；`task_runs.terminal_failure_id`
+固定首个 fatal failure。Recoverable failure 只在同一来源 Thread 成功开启后续 Turn 时解决，fatal
+failure 永不被迟到 child 事件覆盖。fatal terminalization 使用 SQLite immediate 事务串行化首胜、
+Task/children/lease 更新，数据库提交后才关闭进程内 agent。
+
 每次模型 inference 的 usage、provider/model、价格快照和费用明细保存在对应 Turn 的
 `model_json`；`usage_json` 保存同一事务重算的 Turn 聚合。完整 usage 必须先持久化成功，再发布
 runtime usage 通知。相同 inference ID 的相同记录幂等，内容冲突拒绝事务；历史费用始终使用
@@ -85,7 +91,7 @@ fingerprint。版本、结构或完整性不兼容时不迁移、不归档、不
 1. 关闭本次检查创建的全部数据库连接。
 2. 再次证明目标是配置解析得到的精确 canonical Studio 数据库文件。
 3. 精确删除 `studio.sqlite`、`studio.sqlite-wal` 与 `studio.sqlite-shm`；不使用 glob，不删除目录。
-4. 创建空 schema v3 并完成 fingerprint 校验后才向 Runtime 提供 store。
+4. 创建空 schema v4 并完成 fingerprint 校验后才向 Runtime 提供 store。
 
 删除或重建失败属于应用级致命错误，由错误页重试；不得在半初始化数据库上继续。重建只处理
 Studio 数据库文件，不扫描、删除或修改 Project、worktree、branch、attachments 或其他 legacy

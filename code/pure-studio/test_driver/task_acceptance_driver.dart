@@ -85,7 +85,15 @@ Future<void> main(List<String> arguments) async {
       );
       return;
     }
-    validateTaskCompletion(finalSnapshot);
+    if (options.expectedTaskPhase == 'failed') {
+      validateFatalTaskFailure(finalSnapshot);
+      await _openFatalTaskFailureDetail(session, finalSnapshot);
+    } else {
+      validateTaskCompletion(finalSnapshot);
+    }
+    await File(
+      '${options.snapshotOutput}.png',
+    ).writeAsBytes(await session.screenshot(), flush: true);
     stdout.writeln(
       jsonEncode({
         'result': 'completed',
@@ -115,6 +123,13 @@ Future<void> main(List<String> arguments) async {
       } on Object {
         // Preserve the original Driver failure.
       }
+      try {
+        await File(
+          '${options.snapshotOutput}.failure.png',
+        ).writeAsBytes(await session.screenshot(), flush: true);
+      } on Object {
+        // Preserve the original Driver failure.
+      }
     }
     rethrow;
   } finally {
@@ -126,6 +141,37 @@ Future<void> main(List<String> arguments) async {
       }
     }
   }
+}
+
+Future<void> _openFatalTaskFailureDetail(
+  FlutterDriverSession session,
+  Map<String, dynamic> snapshot,
+) async {
+  final task = snapshot['task'] as Map<String, dynamic>;
+  final runId = task['runId'] as String;
+  final failure = task['terminalFailure'] as Map<String, dynamic>;
+  final failureId = failure['id'] as String;
+  final phaseReadout = find.byValueKey('task-runtime-$runId-phase-failed');
+
+  await _driverCommand(
+    session.waitFor(phaseReadout, timeout: const Duration(seconds: 30)),
+    'fatal Task status readout',
+  );
+  await _driverCommand(
+    session.tap(phaseReadout),
+    'open fatal Task failure detail',
+  );
+  await _driverCommand(
+    session.waitFor(
+      find.byValueKey('task-failure-$failureId'),
+      timeout: const Duration(seconds: 30),
+    ),
+    'fatal Task failure detail',
+  );
+  await _driverCommand(
+    session.waitUntilNoTransientCallbacks(timeout: const Duration(seconds: 30)),
+    'fatal Task failure detail stabilization',
+  );
 }
 
 Future<void> _startNewTask(
@@ -334,11 +380,25 @@ Future<void> _submitPrompt(
   _DriverOptions options,
   String prompt,
 ) async {
-  await _driverCommand(
-    session.tap(find.byValueKey('composer-input')),
-    'composer input tap',
+  final composerInput = find.byValueKey('composer-input');
+  final expectedPrompt = prompt.trim();
+  await _driverCommand(session.tap(composerInput), 'composer input tap');
+  await _driverCommand(session.enterText(expectedPrompt), 'prompt entry');
+  final enteredPrompt = await _driverCommand(
+    session.getText(composerInput),
+    'prompt read-back',
   );
-  await _driverCommand(session.enterText(prompt.trim()), 'prompt entry');
+  if (enteredPrompt != expectedPrompt) {
+    throw StateError(
+      'prompt read-back mismatch: expected ${expectedPrompt.length} chars, '
+      'received ${enteredPrompt.length}',
+    );
+  }
+  await _driverCommand(
+    session.waitUntilNoTransientCallbacks(timeout: const Duration(seconds: 5)),
+    'prompt input settled',
+    const Duration(seconds: 10),
+  );
   await _sideEffectOnce(
     session,
     snapshots,
@@ -415,12 +475,17 @@ Future<Map<String, dynamic>> _waitForTaskCompletion(
     final task = snapshot['task'];
     if (task is Map<String, dynamic>) {
       final phase = task['phase'] as String? ?? '';
-      if (phase == 'completed') return snapshot;
+      if (phase == options.expectedTaskPhase) return snapshot;
       if (options.stopAtRecoveryPause &&
           _hasFailedExecutorRecoveryCandidate(snapshot)) {
         return snapshot;
       }
-      if (const {'blocked', 'failed', 'cancelled'}.contains(phase)) {
+      if (const {
+        'completed',
+        'blocked',
+        'failed',
+        'cancelled',
+      }.contains(phase)) {
         throw StateError(
           'Task entered terminal failure phase $phase: ${task['statusMessage']}',
         );
@@ -583,6 +648,7 @@ class _DriverOptions {
     required this.recoveryMode,
     required this.injectSnapshotDisconnect,
     required this.stopAtRecoveryPause,
+    required this.expectedTaskPhase,
   });
 
   final AcceptanceDriverMode mode;
@@ -599,6 +665,7 @@ class _DriverOptions {
   final AcceptanceRecoveryMode recoveryMode;
   final bool injectSnapshotDisconnect;
   final bool stopAtRecoveryPause;
+  final String expectedTaskPhase;
 
   static _DriverOptions parse(List<String> arguments) {
     final values = <String, List<String>>{};
@@ -643,6 +710,12 @@ class _DriverOptions {
     final deadline = deadlineValue == null
         ? DateTime.now().add(taskTimeout)
         : DateTime.parse(deadlineValue).toUtc();
+    final expectedTaskPhase = optional('expected-task-phase') ?? 'completed';
+    if (!const {'completed', 'failed'}.contains(expectedTaskPhase)) {
+      throw ArgumentError(
+        'unsupported --expected-task-phase $expectedTaskPhase',
+      );
+    }
     return _DriverOptions(
       mode: mode,
       vmServiceUrl: required('vm-service-url'),
@@ -660,6 +733,7 @@ class _DriverOptions {
       ),
       injectSnapshotDisconnect: boolean('inject-snapshot-disconnect'),
       stopAtRecoveryPause: boolean('stop-at-recovery-pause'),
+      expectedTaskPhase: expectedTaskPhase,
     );
   }
 }

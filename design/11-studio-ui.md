@@ -157,12 +157,24 @@ Thread 存在活动 Turn、pending input 或活动 Task 时必须拒绝归档。
 Thread，没有剩余 root Thread 时按产品默认规则创建并选择空会话。故障 Thread 的同一 trailing
 位置继续展示恢复清理操作，不能绕过 recovery issue 门禁。
 
+Task failure 是 canonical runtime 的一部分。fatal failure 在根会话状态栏显示红色
+`error_outline` 与“任务失败”，Task detail 和 agent 菜单同时展示来源 role/agent、脱敏原因、
+provider kind、code 和 HTTP status；即使 assistant Item 正文为空，Timeline 也必须回退渲染
+Item error 或 Turn failure message。recoverable failure 使用警告视觉与“可继续”语义，不伪装成
+完成或自动重试。fatal Task 不提供同 Task 恢复按钮；用户修复 Provider 后新建 Task。
+
+`task_complete` 被拒绝时 tool block 展开结构化验证证据：命令、仓库相对 cwd、退出码、失败类别、
+有界输出及截断状态。任何 UI 投影都不得显示 API Key 原文；Bridge 已提供的 agent error/reason
+在 directory 增量更新和 selected agent 重建时必须保留。
+
 ## 11.9 验收
 
 - Item timeline、reasoning、tool grouping、Composer revision 和 interaction dock 有 widget test；
 - 新建 root Thread、归档 root Thread、活动会话禁用以及宽侧栏/icon rail 操作有 widget test；
 - root/child 切换时 canonical workspace 与 UI ephemeral 状态均正确隔离；
 - lag、断流和旧 generation 不污染当前 workspace；
+- 空正文 provider failure、fatal/recoverable Task 状态、agent directory 错误保留与
+  `task_complete` 结构化验证证据有 widget test；
 - Flutter analyze、widget/integration tests 通过；
 - Skills 页 active 时自动重新发现有 widget test 覆盖再次进入与快照替换；
 - Windows native Driver 使用真实 Bridge，关闭 frame sync，验证输入 read-back、SQLite 状态、

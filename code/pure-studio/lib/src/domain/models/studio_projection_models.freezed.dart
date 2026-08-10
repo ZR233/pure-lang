@@ -567,7 +567,7 @@ as List<StudioRecoveryIssue>,
 /// @nodoc
 mixin _$HeaderView {
 
- StudioThread? get selectedRootThread; StudioProject? get selectedProject; String? get selectedProjectId; List<StudioThread> get workspaceThreads; String? get selectedThreadId; ThreadRuntimeView get runtime; List<PendingInteraction> get pendingInteractions;
+ StudioThread? get selectedRootThread; StudioProject? get selectedProject; String? get selectedProjectId; List<StudioThread> get workspaceThreads; List<StudioAgentView> get agents; String? get selectedThreadId; ThreadRuntimeView get runtime; List<PendingInteraction> get pendingInteractions;
 /// Create a copy of HeaderView
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -578,16 +578,16 @@ $HeaderViewCopyWith<HeaderView> get copyWith => _$HeaderViewCopyWithImpl<HeaderV
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is HeaderView&&(identical(other.selectedRootThread, selectedRootThread) || other.selectedRootThread == selectedRootThread)&&(identical(other.selectedProject, selectedProject) || other.selectedProject == selectedProject)&&(identical(other.selectedProjectId, selectedProjectId) || other.selectedProjectId == selectedProjectId)&&const DeepCollectionEquality().equals(other.workspaceThreads, workspaceThreads)&&(identical(other.selectedThreadId, selectedThreadId) || other.selectedThreadId == selectedThreadId)&&(identical(other.runtime, runtime) || other.runtime == runtime)&&const DeepCollectionEquality().equals(other.pendingInteractions, pendingInteractions));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is HeaderView&&(identical(other.selectedRootThread, selectedRootThread) || other.selectedRootThread == selectedRootThread)&&(identical(other.selectedProject, selectedProject) || other.selectedProject == selectedProject)&&(identical(other.selectedProjectId, selectedProjectId) || other.selectedProjectId == selectedProjectId)&&const DeepCollectionEquality().equals(other.workspaceThreads, workspaceThreads)&&const DeepCollectionEquality().equals(other.agents, agents)&&(identical(other.selectedThreadId, selectedThreadId) || other.selectedThreadId == selectedThreadId)&&(identical(other.runtime, runtime) || other.runtime == runtime)&&const DeepCollectionEquality().equals(other.pendingInteractions, pendingInteractions));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,selectedRootThread,selectedProject,selectedProjectId,const DeepCollectionEquality().hash(workspaceThreads),selectedThreadId,runtime,const DeepCollectionEquality().hash(pendingInteractions));
+int get hashCode => Object.hash(runtimeType,selectedRootThread,selectedProject,selectedProjectId,const DeepCollectionEquality().hash(workspaceThreads),const DeepCollectionEquality().hash(agents),selectedThreadId,runtime,const DeepCollectionEquality().hash(pendingInteractions));
 
 @override
 String toString() {
-  return 'HeaderView(selectedRootThread: $selectedRootThread, selectedProject: $selectedProject, selectedProjectId: $selectedProjectId, workspaceThreads: $workspaceThreads, selectedThreadId: $selectedThreadId, runtime: $runtime, pendingInteractions: $pendingInteractions)';
+  return 'HeaderView(selectedRootThread: $selectedRootThread, selectedProject: $selectedProject, selectedProjectId: $selectedProjectId, workspaceThreads: $workspaceThreads, agents: $agents, selectedThreadId: $selectedThreadId, runtime: $runtime, pendingInteractions: $pendingInteractions)';
 }
 
 
@@ -598,7 +598,7 @@ abstract mixin class $HeaderViewCopyWith<$Res>  {
   factory $HeaderViewCopyWith(HeaderView value, $Res Function(HeaderView) _then) = _$HeaderViewCopyWithImpl;
 @useResult
 $Res call({
- StudioThread? selectedRootThread, StudioProject? selectedProject, String? selectedProjectId, List<StudioThread> workspaceThreads, String? selectedThreadId, ThreadRuntimeView runtime, List<PendingInteraction> pendingInteractions
+ StudioThread? selectedRootThread, StudioProject? selectedProject, String? selectedProjectId, List<StudioThread> workspaceThreads, List<StudioAgentView> agents, String? selectedThreadId, ThreadRuntimeView runtime, List<PendingInteraction> pendingInteractions
 });
 
 
@@ -615,13 +615,14 @@ class _$HeaderViewCopyWithImpl<$Res>
 
 /// Create a copy of HeaderView
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? selectedRootThread = freezed,Object? selectedProject = freezed,Object? selectedProjectId = freezed,Object? workspaceThreads = null,Object? selectedThreadId = freezed,Object? runtime = null,Object? pendingInteractions = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? selectedRootThread = freezed,Object? selectedProject = freezed,Object? selectedProjectId = freezed,Object? workspaceThreads = null,Object? agents = null,Object? selectedThreadId = freezed,Object? runtime = null,Object? pendingInteractions = null,}) {
   return _then(_self.copyWith(
 selectedRootThread: freezed == selectedRootThread ? _self.selectedRootThread : selectedRootThread // ignore: cast_nullable_to_non_nullable
 as StudioThread?,selectedProject: freezed == selectedProject ? _self.selectedProject : selectedProject // ignore: cast_nullable_to_non_nullable
 as StudioProject?,selectedProjectId: freezed == selectedProjectId ? _self.selectedProjectId : selectedProjectId // ignore: cast_nullable_to_non_nullable
 as String?,workspaceThreads: null == workspaceThreads ? _self.workspaceThreads : workspaceThreads // ignore: cast_nullable_to_non_nullable
-as List<StudioThread>,selectedThreadId: freezed == selectedThreadId ? _self.selectedThreadId : selectedThreadId // ignore: cast_nullable_to_non_nullable
+as List<StudioThread>,agents: null == agents ? _self.agents : agents // ignore: cast_nullable_to_non_nullable
+as List<StudioAgentView>,selectedThreadId: freezed == selectedThreadId ? _self.selectedThreadId : selectedThreadId // ignore: cast_nullable_to_non_nullable
 as String?,runtime: null == runtime ? _self.runtime : runtime // ignore: cast_nullable_to_non_nullable
 as ThreadRuntimeView,pendingInteractions: null == pendingInteractions ? _self.pendingInteractions : pendingInteractions // ignore: cast_nullable_to_non_nullable
 as List<PendingInteraction>,
@@ -709,10 +710,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( StudioThread? selectedRootThread,  StudioProject? selectedProject,  String? selectedProjectId,  List<StudioThread> workspaceThreads,  String? selectedThreadId,  ThreadRuntimeView runtime,  List<PendingInteraction> pendingInteractions)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( StudioThread? selectedRootThread,  StudioProject? selectedProject,  String? selectedProjectId,  List<StudioThread> workspaceThreads,  List<StudioAgentView> agents,  String? selectedThreadId,  ThreadRuntimeView runtime,  List<PendingInteraction> pendingInteractions)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _HeaderView() when $default != null:
-return $default(_that.selectedRootThread,_that.selectedProject,_that.selectedProjectId,_that.workspaceThreads,_that.selectedThreadId,_that.runtime,_that.pendingInteractions);case _:
+return $default(_that.selectedRootThread,_that.selectedProject,_that.selectedProjectId,_that.workspaceThreads,_that.agents,_that.selectedThreadId,_that.runtime,_that.pendingInteractions);case _:
   return orElse();
 
 }
@@ -730,10 +731,10 @@ return $default(_that.selectedRootThread,_that.selectedProject,_that.selectedPro
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( StudioThread? selectedRootThread,  StudioProject? selectedProject,  String? selectedProjectId,  List<StudioThread> workspaceThreads,  String? selectedThreadId,  ThreadRuntimeView runtime,  List<PendingInteraction> pendingInteractions)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( StudioThread? selectedRootThread,  StudioProject? selectedProject,  String? selectedProjectId,  List<StudioThread> workspaceThreads,  List<StudioAgentView> agents,  String? selectedThreadId,  ThreadRuntimeView runtime,  List<PendingInteraction> pendingInteractions)  $default,) {final _that = this;
 switch (_that) {
 case _HeaderView():
-return $default(_that.selectedRootThread,_that.selectedProject,_that.selectedProjectId,_that.workspaceThreads,_that.selectedThreadId,_that.runtime,_that.pendingInteractions);case _:
+return $default(_that.selectedRootThread,_that.selectedProject,_that.selectedProjectId,_that.workspaceThreads,_that.agents,_that.selectedThreadId,_that.runtime,_that.pendingInteractions);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -750,10 +751,10 @@ return $default(_that.selectedRootThread,_that.selectedProject,_that.selectedPro
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( StudioThread? selectedRootThread,  StudioProject? selectedProject,  String? selectedProjectId,  List<StudioThread> workspaceThreads,  String? selectedThreadId,  ThreadRuntimeView runtime,  List<PendingInteraction> pendingInteractions)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( StudioThread? selectedRootThread,  StudioProject? selectedProject,  String? selectedProjectId,  List<StudioThread> workspaceThreads,  List<StudioAgentView> agents,  String? selectedThreadId,  ThreadRuntimeView runtime,  List<PendingInteraction> pendingInteractions)?  $default,) {final _that = this;
 switch (_that) {
 case _HeaderView() when $default != null:
-return $default(_that.selectedRootThread,_that.selectedProject,_that.selectedProjectId,_that.workspaceThreads,_that.selectedThreadId,_that.runtime,_that.pendingInteractions);case _:
+return $default(_that.selectedRootThread,_that.selectedProject,_that.selectedProjectId,_that.workspaceThreads,_that.agents,_that.selectedThreadId,_that.runtime,_that.pendingInteractions);case _:
   return null;
 
 }
@@ -765,7 +766,7 @@ return $default(_that.selectedRootThread,_that.selectedProject,_that.selectedPro
 
 
 class _HeaderView implements HeaderView {
-  const _HeaderView({required this.selectedRootThread, required this.selectedProject, required this.selectedProjectId, required final  List<StudioThread> workspaceThreads, required this.selectedThreadId, required this.runtime, required final  List<PendingInteraction> pendingInteractions}): _workspaceThreads = workspaceThreads,_pendingInteractions = pendingInteractions;
+  const _HeaderView({required this.selectedRootThread, required this.selectedProject, required this.selectedProjectId, required final  List<StudioThread> workspaceThreads, required final  List<StudioAgentView> agents, required this.selectedThreadId, required this.runtime, required final  List<PendingInteraction> pendingInteractions}): _workspaceThreads = workspaceThreads,_agents = agents,_pendingInteractions = pendingInteractions;
 
 
 @override final  StudioThread? selectedRootThread;
@@ -776,6 +777,13 @@ class _HeaderView implements HeaderView {
   if (_workspaceThreads is EqualUnmodifiableListView) return _workspaceThreads;
   // ignore: implicit_dynamic_type
   return EqualUnmodifiableListView(_workspaceThreads);
+}
+
+ final  List<StudioAgentView> _agents;
+@override List<StudioAgentView> get agents {
+  if (_agents is EqualUnmodifiableListView) return _agents;
+  // ignore: implicit_dynamic_type
+  return EqualUnmodifiableListView(_agents);
 }
 
 @override final  String? selectedThreadId;
@@ -798,16 +806,16 @@ _$HeaderViewCopyWith<_HeaderView> get copyWith => __$HeaderViewCopyWithImpl<_Hea
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _HeaderView&&(identical(other.selectedRootThread, selectedRootThread) || other.selectedRootThread == selectedRootThread)&&(identical(other.selectedProject, selectedProject) || other.selectedProject == selectedProject)&&(identical(other.selectedProjectId, selectedProjectId) || other.selectedProjectId == selectedProjectId)&&const DeepCollectionEquality().equals(other._workspaceThreads, _workspaceThreads)&&(identical(other.selectedThreadId, selectedThreadId) || other.selectedThreadId == selectedThreadId)&&(identical(other.runtime, runtime) || other.runtime == runtime)&&const DeepCollectionEquality().equals(other._pendingInteractions, _pendingInteractions));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _HeaderView&&(identical(other.selectedRootThread, selectedRootThread) || other.selectedRootThread == selectedRootThread)&&(identical(other.selectedProject, selectedProject) || other.selectedProject == selectedProject)&&(identical(other.selectedProjectId, selectedProjectId) || other.selectedProjectId == selectedProjectId)&&const DeepCollectionEquality().equals(other._workspaceThreads, _workspaceThreads)&&const DeepCollectionEquality().equals(other._agents, _agents)&&(identical(other.selectedThreadId, selectedThreadId) || other.selectedThreadId == selectedThreadId)&&(identical(other.runtime, runtime) || other.runtime == runtime)&&const DeepCollectionEquality().equals(other._pendingInteractions, _pendingInteractions));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,selectedRootThread,selectedProject,selectedProjectId,const DeepCollectionEquality().hash(_workspaceThreads),selectedThreadId,runtime,const DeepCollectionEquality().hash(_pendingInteractions));
+int get hashCode => Object.hash(runtimeType,selectedRootThread,selectedProject,selectedProjectId,const DeepCollectionEquality().hash(_workspaceThreads),const DeepCollectionEquality().hash(_agents),selectedThreadId,runtime,const DeepCollectionEquality().hash(_pendingInteractions));
 
 @override
 String toString() {
-  return 'HeaderView(selectedRootThread: $selectedRootThread, selectedProject: $selectedProject, selectedProjectId: $selectedProjectId, workspaceThreads: $workspaceThreads, selectedThreadId: $selectedThreadId, runtime: $runtime, pendingInteractions: $pendingInteractions)';
+  return 'HeaderView(selectedRootThread: $selectedRootThread, selectedProject: $selectedProject, selectedProjectId: $selectedProjectId, workspaceThreads: $workspaceThreads, agents: $agents, selectedThreadId: $selectedThreadId, runtime: $runtime, pendingInteractions: $pendingInteractions)';
 }
 
 
@@ -818,7 +826,7 @@ abstract mixin class _$HeaderViewCopyWith<$Res> implements $HeaderViewCopyWith<$
   factory _$HeaderViewCopyWith(_HeaderView value, $Res Function(_HeaderView) _then) = __$HeaderViewCopyWithImpl;
 @override @useResult
 $Res call({
- StudioThread? selectedRootThread, StudioProject? selectedProject, String? selectedProjectId, List<StudioThread> workspaceThreads, String? selectedThreadId, ThreadRuntimeView runtime, List<PendingInteraction> pendingInteractions
+ StudioThread? selectedRootThread, StudioProject? selectedProject, String? selectedProjectId, List<StudioThread> workspaceThreads, List<StudioAgentView> agents, String? selectedThreadId, ThreadRuntimeView runtime, List<PendingInteraction> pendingInteractions
 });
 
 
@@ -835,13 +843,14 @@ class __$HeaderViewCopyWithImpl<$Res>
 
 /// Create a copy of HeaderView
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? selectedRootThread = freezed,Object? selectedProject = freezed,Object? selectedProjectId = freezed,Object? workspaceThreads = null,Object? selectedThreadId = freezed,Object? runtime = null,Object? pendingInteractions = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? selectedRootThread = freezed,Object? selectedProject = freezed,Object? selectedProjectId = freezed,Object? workspaceThreads = null,Object? agents = null,Object? selectedThreadId = freezed,Object? runtime = null,Object? pendingInteractions = null,}) {
   return _then(_HeaderView(
 selectedRootThread: freezed == selectedRootThread ? _self.selectedRootThread : selectedRootThread // ignore: cast_nullable_to_non_nullable
 as StudioThread?,selectedProject: freezed == selectedProject ? _self.selectedProject : selectedProject // ignore: cast_nullable_to_non_nullable
 as StudioProject?,selectedProjectId: freezed == selectedProjectId ? _self.selectedProjectId : selectedProjectId // ignore: cast_nullable_to_non_nullable
 as String?,workspaceThreads: null == workspaceThreads ? _self._workspaceThreads : workspaceThreads // ignore: cast_nullable_to_non_nullable
-as List<StudioThread>,selectedThreadId: freezed == selectedThreadId ? _self.selectedThreadId : selectedThreadId // ignore: cast_nullable_to_non_nullable
+as List<StudioThread>,agents: null == agents ? _self._agents : agents // ignore: cast_nullable_to_non_nullable
+as List<StudioAgentView>,selectedThreadId: freezed == selectedThreadId ? _self.selectedThreadId : selectedThreadId // ignore: cast_nullable_to_non_nullable
 as String?,runtime: null == runtime ? _self.runtime : runtime // ignore: cast_nullable_to_non_nullable
 as ThreadRuntimeView,pendingInteractions: null == pendingInteractions ? _self._pendingInteractions : pendingInteractions // ignore: cast_nullable_to_non_nullable
 as List<PendingInteraction>,

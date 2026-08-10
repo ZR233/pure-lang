@@ -14,7 +14,8 @@ use super::recovery::{
     validate_snapshot_owner,
 };
 use super::{
-    CreateTaskRun, TaskRunPhase, TaskRunRecord, TaskWorktreeOwnerSnapshot, WorkUnitRecord,
+    CreateTaskRun, RecordTaskAgentFailure, TaskRunPhase, TaskRunRecord, TaskWorktreeOwnerSnapshot,
+    WorkUnitRecord,
 };
 use crate::agent::worktree::{
     DurableWorktreeDisposition, DurableWorktreePresence, DurableWorktreeResource,
@@ -28,6 +29,7 @@ use crate::studio::runtime_state::{
     StudioRecoveryResourcePresence,
 };
 use crate::studio::store::StudioStore;
+use crate::{AgentLifecycleState, AgentRuntimeHandle};
 
 mod recovery;
 use recovery::resolve_worktree_recovery_groups;
@@ -121,6 +123,51 @@ pub(crate) struct BranchMutationGuard<'a> {
 }
 
 impl TaskCoordinator {
+    pub(in crate::studio) async fn handle_agent_turn_failure(
+        &self,
+        input: RecordTaskAgentFailure,
+        runtime: &AgentRuntimeHandle,
+    ) -> Result<bool> {
+        let root_thread_id = input.root_thread_id.clone();
+        let source_agent_id = input.source_agent_id.clone();
+        let Some(settlement) = self.store.record_task_agent_failure(input).await? else {
+            return Ok(false);
+        };
+        if !settlement.terminalized {
+            return Ok(false);
+        }
+
+        let root = crate::studio::agent_host::root_agent_id(&root_thread_id);
+        let snapshots = runtime
+            .list()
+            .await
+            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+        for snapshot in snapshots {
+            if snapshot.identity.id == root {
+                if snapshot.identity.id.as_str() != source_agent_id
+                    && let Some(turn_id) = snapshot.active_turn_id
+                {
+                    runtime
+                        .cancel_turn(snapshot.identity.id, turn_id)
+                        .await
+                        .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+                }
+            } else if snapshot.identity.parent_id.as_ref() == Some(&root)
+                && !matches!(
+                    snapshot.lifecycle,
+                    AgentLifecycleState::Closing | AgentLifecycleState::Closed
+                )
+            {
+                runtime
+                    .close(snapshot.identity.id)
+                    .await
+                    .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+            }
+        }
+        self.release_owned_process_lease(&settlement.run.id);
+        Ok(true)
+    }
+
     pub(crate) fn new(store: StudioStore) -> Self {
         let (terminal_fact_tx, _) = broadcast::channel(256);
         Self {

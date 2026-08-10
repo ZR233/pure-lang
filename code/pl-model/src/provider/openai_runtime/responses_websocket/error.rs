@@ -287,10 +287,11 @@ mod tests {
         let error = handshake_timeout_error();
 
         assert!(error.is_transient_model_transport());
-        assert_eq!(
-            error.to_string(),
-            format!("transient model transport error: {HANDSHAKE_TIMEOUT_MESSAGE}")
-        );
+        let failure = error
+            .provider_failure_ref()
+            .expect("typed provider failure");
+        assert_eq!(failure.kind, pl_protocol::ProviderFailureKind::Transport);
+        assert_eq!(failure.message, HANDSHAKE_TIMEOUT_MESSAGE);
     }
 
     #[test]

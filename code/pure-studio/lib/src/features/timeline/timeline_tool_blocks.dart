@@ -442,7 +442,7 @@ class _ToolGroupItemRow extends StatelessWidget {
       if (tool?.timedOut == true) context.l10n.timelineToolTimedOut,
       tool?.denialReason,
       item.part.error,
-      _resultDetail(item.part.status, tool?.result),
+      _resultDetail(item, tool),
     ].whereType<String>().where((value) => value.trim().isNotEmpty).toList();
     return Padding(
       padding: const EdgeInsets.only(top: 9),
@@ -496,14 +496,53 @@ class _ToolGroupItemRow extends StatelessWidget {
     );
   }
 
-  String? _resultDetail(String status, String? result) {
+  String? _resultDetail(TimelineToolGroupItem item, TimelineToolPart? tool) {
+    final result = tool?.result;
     if (result == null || result.trim().isEmpty) {
       return null;
     }
-    if (status == 'completed') {
+    if (item.name == 'task_complete') {
+      return _taskCompleteResultDetail(result);
+    }
+    if (item.part.status == 'completed') {
       return null;
     }
     return result;
+  }
+
+  String _taskCompleteResultDetail(String result) {
+    try {
+      final decoded = jsonDecode(result);
+      if (decoded is! Map) return result;
+      final message = decoded['message']?.toString();
+      final lines = <String>[if (message?.trim().isNotEmpty == true) message!];
+      final verification = decoded['verification'];
+      if (verification is List) {
+        for (final rawStep in verification) {
+          if (rawStep is! Map) continue;
+          final command = rawStep['command'];
+          final commandText = command is List
+              ? command.map((part) => part.toString()).join(' ')
+              : command?.toString() ?? '';
+          final cwd = rawStep['cwd']?.toString() ?? '.';
+          final exitCode = rawStep['exitCode'];
+          final failureKind = rawStep['failureKind']?.toString();
+          lines.add(
+            [
+              if (commandText.isNotEmpty) commandText,
+              'cwd: $cwd',
+              if (exitCode != null) 'exit: $exitCode',
+              if (failureKind?.isNotEmpty == true) failureKind!,
+            ].join(' · '),
+          );
+          final output = rawStep['output']?.toString().trim();
+          if (output?.isNotEmpty == true) lines.add(output!);
+        }
+      }
+      return lines.isEmpty ? result : lines.join('\n');
+    } catch (_) {
+      return result;
+    }
   }
 }
 

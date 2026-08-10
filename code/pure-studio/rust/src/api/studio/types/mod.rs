@@ -22,11 +22,11 @@ pub use runtime::{
     BridgeMcpServerDto, BridgeRecoveryCleanupPreviewDto, BridgeRecoveryCleanupResourceDto,
     BridgeRecoveryIssueAction, BridgeRecoveryIssueCategory, BridgeRecoveryIssueScope,
     BridgeRecoveryResourcePresence, BridgeRuntimeStatus, BridgeStudioRecoveryIssueDto,
-    BridgeTaskCompletionDto, BridgeTaskDesignReferenceDto, BridgeTaskGitFingerprintDto,
-    BridgeTaskMergeDto, BridgeTaskRecoveryPreviewDto, BridgeTaskRecoveryRequestDto,
-    BridgeTaskRecoveryResultDto, BridgeTaskRecoveryTargetDto, BridgeTaskRecoveryTargetKind,
-    BridgeTaskRecoveryTurnDto, BridgeTaskReviewDto, BridgeTaskReviewFindingDto,
-    BridgeTaskRuntimeDto, BridgeTaskWorkUnitDto, RuntimeSnapshot,
+    BridgeTaskCompletionDto, BridgeTaskDesignReferenceDto, BridgeTaskFailureDto,
+    BridgeTaskGitFingerprintDto, BridgeTaskMergeDto, BridgeTaskRecoveryPreviewDto,
+    BridgeTaskRecoveryRequestDto, BridgeTaskRecoveryResultDto, BridgeTaskRecoveryTargetDto,
+    BridgeTaskRecoveryTargetKind, BridgeTaskRecoveryTurnDto, BridgeTaskReviewDto,
+    BridgeTaskReviewFindingDto, BridgeTaskRuntimeDto, BridgeTaskWorkUnitDto, RuntimeSnapshot,
 };
 pub use settings::{
     BridgeGeneralSettingsDto, BridgeInstructionsSettingsDto, BridgeMcpServerSettingsDto,

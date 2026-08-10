@@ -186,16 +186,18 @@ pub(crate) fn project_runtime_event(
                         .unwrap_or_else(|| "turn failed".to_string()),
                 },
             };
+            let mut completed_turn = turn(
+                outcome.turn_id.as_str(),
+                thread_id,
+                state,
+                None,
+                outcome.finished_at,
+            );
+            completed_turn.failure = outcome.failure.clone();
             projector.push(
                 event.created_at,
                 ThreadNotification::TurnCompleted {
-                    turn: turn(
-                        outcome.turn_id.as_str(),
-                        thread_id,
-                        state,
-                        None,
-                        outcome.finished_at,
-                    ),
+                    turn: completed_turn,
                 },
             );
         }
@@ -276,6 +278,7 @@ fn turn(
         id: id.to_string(),
         thread_id: thread_id.to_string(),
         state,
+        failure: None,
         started_at,
         updated_at,
         completed_at,

@@ -229,10 +229,33 @@ pub struct BridgeTaskRuntimeDto {
     pub stop_requested_origin: Option<String>,
     pub stop_requested_reason: Option<String>,
     pub task_generation: u64,
+    pub failures: Vec<BridgeTaskFailureDto>,
+    pub terminal_failure: Option<BridgeTaskFailureDto>,
     pub work_units: Vec<BridgeTaskWorkUnitDto>,
     pub completions: Vec<BridgeTaskCompletionDto>,
     pub merges: Vec<BridgeTaskMergeDto>,
     pub reviews: Vec<BridgeTaskReviewDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeTaskFailureDto {
+    pub id: String,
+    pub source_thread_id: String,
+    pub source_turn_id: String,
+    pub source_agent_id: String,
+    pub source_role: String,
+    pub work_unit_id: Option<String>,
+    pub review_round_id: Option<String>,
+    pub disposition: String,
+    pub category: String,
+    pub provider_kind: Option<String>,
+    pub code: Option<String>,
+    pub http_status: Option<u16>,
+    pub message: String,
+    pub retryable: bool,
+    pub resolved_at: Option<i64>,
+    pub created_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

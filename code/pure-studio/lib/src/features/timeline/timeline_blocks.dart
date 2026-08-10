@@ -343,7 +343,7 @@ class _MarkdownBubble extends StatelessWidget {
           child: _AgentMarkdown(
             id: part.id,
             status: part.status,
-            text: part.text,
+            text: part.text.trim().isEmpty ? part.error ?? '' : part.text,
             surface: surface,
           ),
         ),

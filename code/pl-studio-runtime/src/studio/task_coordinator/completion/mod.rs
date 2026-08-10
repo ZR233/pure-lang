@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 use super::git::changed_files_between;
 use super::merge::{ProductionMergeVerifier, select_merge_verification_commands};
 use super::{
-    TaskCoordinator, TaskRunPhase, TaskRunRecord, TaskStopOrigin, TaskStopReason,
-    ThreadExecutionStatus,
+    ReviewScope, ReviewVerdict, TaskCoordinator, TaskRunPhase, TaskRunRecord, TaskStopOrigin,
+    TaskStopReason, ThreadExecutionStatus, WorkUnitStatus,
 };
 use crate::tool::{
     RegisteredTool, ToolExecutionResult, ToolInputSchemaField, strict_tool_input_schema,
@@ -30,6 +30,29 @@ struct StopTaskInput {
 struct TaskCompletionOutput {
     run: TaskRunRecord,
     verification: Vec<super::MergeVerificationStep>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase", tag = "status")]
+enum TaskCompleteOutcome {
+    Completed(Box<TaskCompletionOutput>),
+    Rejected {
+        code: &'static str,
+        recoverable: bool,
+        message: String,
+        verification: Vec<super::MergeVerificationStep>,
+    },
+}
+
+impl TaskCompleteOutcome {
+    fn rejected(code: &'static str, message: impl Into<String>) -> Self {
+        Self::Rejected {
+            code,
+            recoverable: true,
+            message: message.into(),
+            verification: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -55,10 +78,16 @@ impl TaskCoordinator {
                 let coordinator = coordinator.clone();
                 let thread_id = thread_id.clone();
                 async move {
-                    let output = coordinator.complete_task(&thread_id).await?;
-                    ToolExecutionResult::<serde_json::Value>::json(output)
-                        .map(ToolExecutionResult::ending_turn)
-                        .map_err(anyhow::Error::from)
+                    let outcome = coordinator.complete_task(&thread_id).await?;
+                    let output = serde_json::to_string(&outcome)?;
+                    Ok::<ToolExecutionResult<serde_json::Value>, anyhow::Error>(match outcome {
+                        TaskCompleteOutcome::Completed(_) => {
+                            ToolExecutionResult::<serde_json::Value>::success(output).ending_turn()
+                        }
+                        TaskCompleteOutcome::Rejected { .. } => {
+                            ToolExecutionResult::<serde_json::Value>::failure(output)
+                        }
+                    })
                 }
             },
         )
@@ -168,7 +197,7 @@ impl TaskCoordinator {
         })
     }
 
-    async fn complete_task(&self, thread_id: &str) -> Result<TaskCompletionOutput> {
+    async fn complete_task(&self, thread_id: &str) -> Result<TaskCompleteOutcome> {
         let guard = self.lock_branch_mutation().await;
         self.ensure_branch_mutation_guard(&guard)?;
         let run = self
@@ -176,13 +205,61 @@ impl TaskCoordinator {
             .read_active_task_run_for_root_thread(thread_id)
             .await?;
         if run.phase != TaskRunPhase::Reviewing {
-            bail!("task_complete requires reviewing phase");
+            return Ok(TaskCompleteOutcome::rejected(
+                "wrongPhase",
+                format!(
+                    "task_complete requires reviewing phase; current phase is {}",
+                    run.phase.as_str()
+                ),
+            ));
         }
         if run.stop_requested {
-            bail!("task_complete is unavailable after task_stop was requested");
+            return Ok(TaskCompleteOutcome::rejected(
+                "stopRequested",
+                "task_complete is unavailable after task_stop was requested",
+            ));
         }
-        self.ensure_process_lease_owned(&run)?;
-        super::review::validate_review_repository(&run).await?;
+        if run.design_commit.as_deref() != Some(run.expected_head.as_str()) {
+            return Ok(TaskCompleteOutcome::rejected(
+                "repositoryDrift",
+                "task design is not recorded at the current task HEAD",
+            ));
+        }
+        let work_units = self.store.list_work_units(&run.id).await?;
+        if work_units.iter().any(|unit| {
+            !matches!(
+                unit.status,
+                WorkUnitStatus::Merged | WorkUnitStatus::NoDelivery
+            )
+        }) {
+            return Ok(TaskCompleteOutcome::rejected(
+                "deliveriesIncomplete",
+                "all executor deliveries must be merged or recorded as no-delivery",
+            ));
+        }
+        let latest_review = self.store.list_review_rounds(&run.id).await?.pop();
+        if !latest_review.is_some_and(|review| {
+            review.scope == ReviewScope::Integrated
+                && review.reviewed_head == run.expected_head
+                && review.verdict == ReviewVerdict::Pass
+        }) {
+            return Ok(TaskCompleteOutcome::rejected(
+                "reviewMissing",
+                "latest integrated review must pass for the current task HEAD",
+            ));
+        }
+        if let Err(error) = self.ensure_process_lease_owned(&run) {
+            return Ok(TaskCompleteOutcome::rejected(
+                "repositoryDrift",
+                error.to_string(),
+            ));
+        }
+        if let Err(error) = super::review::validate_review_repository(&run).await {
+            return Ok(TaskCompleteOutcome::rejected(
+                "repositoryDrift",
+                error.to_string(),
+            ));
+        }
         let changed_files = changed_files_between(
             Path::new(&run.workspace_root),
             &run.base_commit,
@@ -193,7 +270,13 @@ impl TaskCoordinator {
             select_merge_verification_commands(Path::new(&run.workspace_root), &changed_files);
         let verification = ProductionMergeVerifier::verify_commands(commands).await;
         if verification.iter().any(|step| !step.success) {
-            bail!("task completion verification failed");
+            return Ok(TaskCompleteOutcome::Rejected {
+                code: "verificationFailed",
+                recoverable: true,
+                message: "task completion verification failed; inspect verification steps"
+                    .to_string(),
+                verification,
+            });
         }
         let summary = if verification.is_empty() {
             "task completed; no additional final checks were required".to_string()
@@ -206,12 +289,23 @@ impl TaskCoordinator {
         let completed = self
             .store
             .complete_reviewed_task(thread_id, &run.expected_head, &summary)
-            .await?;
+            .await;
+        let completed = match completed {
+            Ok(completed) => completed,
+            Err(error) => {
+                return Ok(TaskCompleteOutcome::rejected(
+                    "repositoryDrift",
+                    format!("task completion state changed before commit: {error}"),
+                ));
+            }
+        };
         self.release_owned_process_lease(&run.id);
-        Ok(TaskCompletionOutput {
-            run: completed,
-            verification,
-        })
+        Ok(TaskCompleteOutcome::Completed(Box::new(
+            TaskCompletionOutput {
+                run: completed,
+                verification,
+            },
+        )))
     }
 
     pub(super) async fn preflight_task_stop_locked(

@@ -650,18 +650,15 @@ fn enforce_finalization(
     if matches!(latest_tool, Some(Ok(()))) {
         return Some(name.clone());
     }
-    let (category, message) = latest_tool.and_then(Result::err).map_or_else(
-        || {
-            (
-                pl_protocol::TurnFailureCategory::Validation,
-                format!("turn must finalize with tool `{name}`"),
-            )
-        },
-        |error| (pl_protocol::TurnFailureCategory::Tool, error),
-    );
+    let message = latest_tool
+        .and_then(Result::err)
+        .unwrap_or_else(|| format!("turn must finalize with tool `{name}`"));
     result.status = TurnResultStatus::Errored;
     result.error = Some(message.clone());
-    result.failure = Some(pl_protocol::TurnFailure::permanent(category, message));
+    result.failure = Some(pl_protocol::TurnFailure::permanent(
+        pl_protocol::TurnFailureCategory::Validation,
+        message,
+    ));
     None
 }
 
@@ -707,7 +704,7 @@ mod tests {
         );
         assert_eq!(
             result.failure.as_ref().map(|failure| failure.category),
-            Some(TurnFailureCategory::Tool)
+            Some(TurnFailureCategory::Validation)
         );
     }
 
@@ -792,7 +789,7 @@ mod tests {
         assert_eq!(result.error.as_deref(), Some("latest completion failure"));
         assert_eq!(
             result.failure.as_ref().map(|failure| failure.category),
-            Some(TurnFailureCategory::Tool)
+            Some(TurnFailureCategory::Validation)
         );
     }
 

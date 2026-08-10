@@ -37,6 +37,7 @@ class StudioState {
     this.workspacesByThread = const {},
     this.workspaceUiByThread = const {},
     this.tasksByRootThread = const {},
+    this.agentsByThread = const {},
     required this.providers,
     this.providerCatalog = const ProviderCatalogView.empty(),
     this.defaultProviderId,
@@ -58,6 +59,7 @@ class StudioState {
   final Map<String, ThreadWorkspace> workspacesByThread;
   final Map<String, WorkspaceUiState> workspaceUiByThread;
   final Map<String, TaskRuntimeView> tasksByRootThread;
+  final Map<String, StudioAgentView> agentsByThread;
   final List<ProviderSettingsView> providers;
   final ProviderCatalogView providerCatalog;
   final String? defaultProviderId;
@@ -178,20 +180,22 @@ class StudioState {
   List<StudioAgentView> get selectedAgents {
     return threadsForSelectedRoot
         .map(
-          (thread) => StudioAgentView(
-            id: thread.id,
-            threadId: thread.id,
-            path: thread.agentPath.isEmpty ? thread.id : thread.agentPath,
-            parentPath: thread.parentThreadId,
-            role: thread.role,
-            task: thread.title,
-            status: thread.status,
-            summary: null,
-            depth: thread.isRoot ? 0 : 1,
-            error: null,
-            reason: null,
-            updatedAt: thread.updatedAt,
-          ),
+          (thread) =>
+              agentsByThread[thread.id] ??
+              StudioAgentView(
+                id: thread.id,
+                threadId: thread.id,
+                path: thread.agentPath.isEmpty ? thread.id : thread.agentPath,
+                parentPath: thread.parentThreadId,
+                role: thread.role,
+                task: thread.title,
+                status: thread.status,
+                summary: null,
+                depth: thread.isRoot ? 0 : 1,
+                error: null,
+                reason: null,
+                updatedAt: thread.updatedAt,
+              ),
         )
         .toList();
   }
@@ -255,6 +259,7 @@ class StudioState {
     Map<String, ThreadWorkspace>? workspacesByThread,
     Map<String, WorkspaceUiState>? workspaceUiByThread,
     Map<String, TaskRuntimeView>? tasksByRootThread,
+    Map<String, StudioAgentView>? agentsByThread,
     List<ProviderSettingsView>? providers,
     ProviderCatalogView? providerCatalog,
     Object? defaultProviderId = _studioStateUnset,
@@ -276,6 +281,7 @@ class StudioState {
       workspacesByThread: workspacesByThread ?? this.workspacesByThread,
       workspaceUiByThread: workspaceUiByThread ?? this.workspaceUiByThread,
       tasksByRootThread: tasksByRootThread ?? this.tasksByRootThread,
+      agentsByThread: agentsByThread ?? this.agentsByThread,
       providers: providers ?? this.providers,
       providerCatalog: providerCatalog ?? this.providerCatalog,
       defaultProviderId: identical(defaultProviderId, _studioStateUnset)

@@ -59,4 +59,6 @@ pub use thread::{
     ThreadSubscriptionUpdate, ThreadToolCall, ThreadTurnHistory, ThreadTurnPage, Turn, TurnPhase,
     TurnState,
 };
-pub use turn_failure::{RetryDisposition, TurnFailure, TurnFailureCategory};
+pub use turn_failure::{
+    ProviderFailure, ProviderFailureKind, RetryDisposition, TurnFailure, TurnFailureCategory,
+};

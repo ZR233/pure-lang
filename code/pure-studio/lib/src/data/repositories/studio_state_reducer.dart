@@ -334,11 +334,15 @@ StudioState _replaceThreadDirectory(
   final workspaceUi = Map<String, WorkspaceUiState>.from(
     current.workspaceUiByThread,
   )..removeWhere((id, _) => !knownIds.contains(id));
+  final agentsByThread = Map<String, StudioAgentView>.from(
+    current.agentsByThread,
+  )..removeWhere((id, _) => !knownIds.contains(id));
   return current.copyWith(
     threads: threads,
     selectedThreadId: selectedThreadId,
     workspacesByThread: workspaces,
     workspaceUiByThread: workspaceUi,
+    agentsByThread: agentsByThread,
   );
 }
 
@@ -360,10 +364,14 @@ StudioState _withThreadDirectoryEntry(
   StudioState current,
   StudioAgentView agent,
 ) {
+  final agentsByThread = <String, StudioAgentView>{
+    ...current.agentsByThread,
+    agent.threadId: agent,
+  };
   final index = current.threads.indexWhere(
     (thread) => thread.id == agent.threadId,
   );
-  if (index < 0) return current;
+  if (index < 0) return current.copyWith(agentsByThread: agentsByThread);
   final threads = [...current.threads];
   threads[index] = threads[index].copyWith(
     agentPath: agent.path,
@@ -374,6 +382,7 @@ StudioState _withThreadDirectoryEntry(
   final workspace = current.workspacesByThread[canonical.id];
   return current.copyWith(
     threads: threads,
+    agentsByThread: agentsByThread,
     workspacesByThread: workspace == null
         ? current.workspacesByThread
         : {

@@ -100,6 +100,21 @@ void main() {
       throwsA(isA<StateError>()),
     );
   });
+
+  test('fatal authentication failure keeps typed redacted evidence', () {
+    expect(() => validateFatalTaskFailure(_failedSnapshot()), returnsNormally);
+
+    final failure =
+        (_failedSnapshot()['task'] as Map<String, dynamic>)['terminalFailure']
+            as Map<String, dynamic>;
+    failure['message'] = 'Invalid API key sk-driver-secret';
+    expect(
+      () => validateFatalTaskFailure({
+        'task': {'phase': 'failed', 'terminalFailure': failure},
+      }),
+      throwsA(isA<StateError>()),
+    );
+  });
 }
 
 Map<String, dynamic> _snapshot({required String activity}) => {
@@ -173,5 +188,19 @@ Map<String, dynamic> _completedSnapshot() => {
         'reviewedHead': 'head-2',
       },
     ],
+  },
+};
+
+Map<String, dynamic> _failedSnapshot() => {
+  'task': {
+    'phase': 'failed',
+    'terminalFailure': {
+      'disposition': 'fatal',
+      'providerKind': 'authentication',
+      'code': 'invalid_api_key',
+      'httpStatus': 401,
+      'retryable': false,
+      'message': 'Invalid API key provided: <redacted>',
+    },
   },
 };

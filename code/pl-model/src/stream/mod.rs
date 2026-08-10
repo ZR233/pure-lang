@@ -1,7 +1,10 @@
 use async_openai::types::stream::StreamResponse;
 use futures::Stream;
 use futures::StreamExt;
-use pl_protocol::{PureError, Result};
+use pl_protocol::{
+    InferenceOrchestrationMetrics, PureError, ResponsesContextItem, ResponsesContextItemKind,
+    Result, ToolCallCaller,
+};
 use pl_trace::{AgentEventSender, TraceTextChannel};
 use std::collections::{HashMap, VecDeque};
 use std::pin::Pin;
@@ -147,8 +150,8 @@ pub struct StreamCompletionAccumulator {
     reasoning_summary_parts: Vec<String>,
     raw_reasoning_parts: Vec<String>,
     tool_calls: Vec<ToolCall>,
-    tool_call_callers: HashMap<String, pl_protocol::ToolCallCaller>,
-    responses_context_items: Vec<pl_protocol::ResponsesContextItem>,
+    tool_call_callers: HashMap<String, ToolCallCaller>,
+    responses_context_items: Vec<ResponsesContextItem>,
     hosted_web_search_calls: HashMap<String, crate::HostedWebSearchCall>,
     tool_stream: ToolStream,
     lifecycle: StreamLifecycle,
@@ -379,7 +382,13 @@ impl StreamCompletionAccumulator {
                 }
             }
             ModelStreamEvent::ToolCallCaller { item_id, caller } => {
-                self.tool_call_callers.insert(item_id, caller);
+                if let Some(call) = self.tool_calls.iter_mut().find(|call| {
+                    call.id == item_id || call.call_id.as_deref() == Some(item_id.as_str())
+                }) {
+                    call.caller = Some(caller);
+                } else {
+                    self.tool_call_callers.insert(item_id, caller);
+                }
             }
             ModelStreamEvent::ResponsesContextItem { item } => {
                 self.responses_context_items.push(item);
@@ -496,49 +505,8 @@ impl StreamCompletionAccumulator {
             .as_ref()
             .map(TraceProjection::next_sequence)
             .unwrap_or_default();
-        let tool_search_calls = self
-            .responses_context_items
-            .iter()
-            .filter(|item| item.kind == pl_protocol::ResponsesContextItemKind::ToolSearchCall)
-            .count() as u64;
-        let tool_search_loaded_tools = self
-            .responses_context_items
-            .iter()
-            .filter(|item| item.kind == pl_protocol::ResponsesContextItemKind::ToolSearchOutput)
-            .filter_map(|item| {
-                item.value
-                    .get("tools")
-                    .and_then(serde_json::Value::as_array)
-            })
-            .map(|tools| {
-                tools
-                    .iter()
-                    .map(|tool| {
-                        tool.get("tools")
-                            .and_then(serde_json::Value::as_array)
-                            .map_or(1, |nested| nested.len() as u64)
-                    })
-                    .sum::<u64>()
-            })
-            .sum();
-        let orchestration = pl_protocol::InferenceOrchestrationMetrics {
-            tool_calls: self.tool_calls.len() as u64,
-            tool_search_calls,
-            tool_search_loaded_tools,
-            program_count: self
-                .responses_context_items
-                .iter()
-                .filter(|item| item.kind == pl_protocol::ResponsesContextItemKind::Program)
-                .count() as u64,
-            program_tool_calls: self
-                .tool_calls
-                .iter()
-                .filter(|call| call.caller.is_some())
-                .count() as u64,
-            transport_attempts: 1,
-            ..pl_protocol::InferenceOrchestrationMetrics::default()
-        };
-
+        let orchestration =
+            stream_orchestration_metrics(&self.responses_context_items, &self.tool_calls);
         Ok(CompletionResponse {
             response_id: self.response_id,
             content,
@@ -749,6 +717,53 @@ impl StreamCompletionAccumulator {
                 let _ = event_tx.send(event);
             }
         }
+    }
+}
+
+fn stream_orchestration_metrics(
+    context_items: &[ResponsesContextItem],
+    tool_calls: &[ToolCall],
+) -> InferenceOrchestrationMetrics {
+    let tool_search_calls = context_items
+        .iter()
+        .filter(|item| item.kind == ResponsesContextItemKind::ToolSearchCall)
+        .count() as u64;
+    let tool_search_loaded_tools = context_items
+        .iter()
+        .filter(|item| item.kind == ResponsesContextItemKind::ToolSearchOutput)
+        .filter_map(|item| {
+            item.value
+                .get("tools")
+                .and_then(serde_json::Value::as_array)
+        })
+        .map(|tools| {
+            tools
+                .iter()
+                .map(|tool| {
+                    tool.get("tools")
+                        .and_then(serde_json::Value::as_array)
+                        .map_or(1, |nested| nested.len() as u64)
+                })
+                .sum::<u64>()
+        })
+        .sum();
+    let program_count = context_items
+        .iter()
+        .filter(|item| item.kind == ResponsesContextItemKind::Program)
+        .count() as u64;
+    let program_tool_calls = tool_calls
+        .iter()
+        .filter(|call| call.caller.is_some())
+        .count() as u64;
+
+    InferenceOrchestrationMetrics {
+        tool_calls: tool_calls.len() as u64,
+        tool_search_calls,
+        tool_search_loaded_tools,
+        program_count,
+        program_tool_calls,
+        transport_attempts: 1,
+        ..InferenceOrchestrationMetrics::default()
     }
 }
 

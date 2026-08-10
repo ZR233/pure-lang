@@ -80,6 +80,8 @@ pub struct Turn {
     pub id: String,
     pub thread_id: String,
     pub state: TurnState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure: Option<crate::TurnFailure>,
     pub started_at: Option<i64>,
     pub updated_at: i64,
     pub completed_at: Option<i64>,

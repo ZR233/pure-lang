@@ -54,6 +54,16 @@ class TaskRuntimeDetail extends StatelessWidget {
                 ),
               ],
             ),
+            if (task.failures.isNotEmpty) ...[
+              const _SectionDivider(),
+              StatusDetailPanel(
+                title: context.l10n.statusTaskFailures,
+                children: [
+                  for (final failure in task.failures)
+                    _TaskFailureDetail(failure: failure),
+                ],
+              ),
+            ],
             if (task.workUnits.isNotEmpty) ...[
               const _SectionDivider(),
               StatusDetailPanel(
@@ -95,6 +105,50 @@ class TaskRuntimeDetail extends StatelessWidget {
             ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _TaskFailureDetail extends StatelessWidget {
+  const _TaskFailureDetail({required this.failure});
+
+  final TaskFailureView failure;
+
+  @override
+  Widget build(BuildContext context) {
+    final metadata = [
+      failure.providerKind ?? failure.category,
+      ?failure.code,
+      if (failure.httpStatus case final status?) 'HTTP $status',
+    ].join(' · ');
+    return Padding(
+      key: StudioDriverKeys.taskFailure(failure.id),
+      padding: const EdgeInsets.only(bottom: 9),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _ItemHeading(
+            title: '${failure.sourceRole} · ${failure.sourceAgentId}',
+            status: failure.isFatal
+                ? context.l10n.statusTaskFailed
+                : context.l10n.statusTaskRecoverable,
+          ),
+          StatusDetailRow(
+            label: context.l10n.statusTaskError,
+            value: failure.message,
+            valueMaxLines: 4,
+          ),
+          if (metadata.isNotEmpty)
+            StatusDetailRow(label: 'Provider', value: metadata),
+          StatusDetailRow(
+            label: context.l10n.statusTaskNextStep,
+            value: failure.isFatal
+                ? context.l10n.statusTaskFatalHint
+                : context.l10n.statusTaskRecoverableHint,
+            valueMaxLines: 2,
+          ),
+        ],
       ),
     );
   }

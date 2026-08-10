@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use pl_model::ModelCapabilities;
 use pl_protocol::{
-    BudgetLimitKind, BudgetUsage, ErrorSeverity, PureError, RetryDisposition, TurnFailure,
-    TurnFailureCategory,
+    BudgetLimitKind, BudgetUsage, ErrorSeverity, ProviderFailureKind, PureError, RetryDisposition,
+    TurnFailure, TurnFailureCategory,
 };
 use pl_trace::{AgentEvent, TracePartStatus};
 
@@ -14,10 +14,15 @@ pub(super) fn provider_error_severity(
     active_subagent: Option<&crate::tool::SubagentContext>,
     error: &PureError,
 ) -> ErrorSeverity {
-    if active_subagent.is_none() && error.is_transient_model_transport() {
-        ErrorSeverity::Transient
-    } else {
-        ErrorSeverity::Recoverable
+    let Some(failure) = error.provider_failure_ref() else {
+        return ErrorSeverity::Fatal;
+    };
+    match (&failure.retry, failure.kind, active_subagent.is_some()) {
+        (RetryDisposition::Retryable { .. }, _, false) => ErrorSeverity::Transient,
+        (_, ProviderFailureKind::Capacity | ProviderFailureKind::Transport, _) => {
+            ErrorSeverity::Recoverable
+        }
+        _ => ErrorSeverity::Fatal,
     }
 }
 
@@ -26,6 +31,7 @@ pub(super) fn normalize_provider_error(
     error: PureError,
 ) -> (String, ErrorSeverity, TurnFailure) {
     let message = error.to_string();
+    let provider_failure = error.provider_failure_ref().cloned();
     let (code, http_status) = error
         .transient_model_metadata()
         .map_or((None, None), |(code, status)| {
@@ -38,17 +44,20 @@ pub(super) fn normalize_provider_error(
         return (
             message.clone(),
             ErrorSeverity::Recoverable,
-            TurnFailure::permanent(TurnFailureCategory::ProviderCapacity, message),
+            TurnFailure {
+                category: TurnFailureCategory::ProviderCapacity,
+                provider_kind: Some(ProviderFailureKind::Capacity),
+                code,
+                http_status,
+                message,
+                retry: RetryDisposition::Permanent,
+            },
         );
     }
     let severity = provider_error_severity(active_subagent, &error);
-    let retry = if error.is_transient_model_transport() {
-        RetryDisposition::Retryable {
-            retry_after_ms: error.retry_after_ms(),
-        }
-    } else {
-        RetryDisposition::Permanent
-    };
+    let retry = provider_failure
+        .as_ref()
+        .map_or(RetryDisposition::Permanent, |failure| failure.retry.clone());
     let category = if retry.is_retryable() && is_capacity {
         TurnFailureCategory::ProviderCapacity
     } else {
@@ -59,6 +68,15 @@ pub(super) fn normalize_provider_error(
         severity,
         TurnFailure {
             category,
+            provider_kind: provider_failure.map(|failure| failure.kind).or({
+                Some(match &error {
+                    PureError::ConfigError(_) => ProviderFailureKind::Configuration,
+                    PureError::LlmError(_) | PureError::HttpError(_) => {
+                        ProviderFailureKind::Protocol
+                    }
+                    _ => ProviderFailureKind::Unknown,
+                })
+            }),
             code,
             http_status,
             message,

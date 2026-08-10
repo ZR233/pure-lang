@@ -52,6 +52,8 @@ void main() {
     expect(first.closeCount, 1);
     expect(first.healthCount, 1);
     expect(second.healthCount, 1);
+    expect(first.frameSyncValues, [false]);
+    expect(second.frameSyncValues, [false]);
     expect(delays, [const Duration(milliseconds: 250)]);
     expect(events.map((event) => event.phase), ['starting', 'succeeded']);
   });
@@ -160,10 +162,16 @@ class _FakeDriverClient implements FlutterDriverClient {
   int requestCount = 0;
   int closeCount = 0;
   int tapCount = 0;
+  final frameSyncValues = <bool>[];
 
   @override
   Future<void> checkHealth() async {
     healthCount += 1;
+  }
+
+  @override
+  Future<void> setFrameSync(bool enabled) async {
+    frameSyncValues.add(enabled);
   }
 
   @override
@@ -191,7 +199,13 @@ class _FakeDriverClient implements FlutterDriverClient {
   Future<void> enterText(String text) async {}
 
   @override
+  Future<String> getText(driver.SerializableFinder finder) async => '';
+
+  @override
   Future<String> renderTree() async => '';
+
+  @override
+  Future<List<int>> screenshot() async => const [];
 
   @override
   Future<void> sendTextInputAction(

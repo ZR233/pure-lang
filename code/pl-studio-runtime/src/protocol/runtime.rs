@@ -11,10 +11,28 @@ pub struct StudioTaskRuntime {
     pub stop_requested_origin: Option<String>,
     pub stop_requested_reason: Option<String>,
     pub task_generation: u64,
+    pub failures: Vec<StudioTaskFailureRuntime>,
+    pub terminal_failure: Option<StudioTaskFailureRuntime>,
     pub work_units: Vec<StudioTaskWorkUnitRuntime>,
     pub completions: Vec<StudioTaskCompletionRuntime>,
     pub merges: Vec<StudioTaskMergeRuntime>,
     pub reviews: Vec<StudioTaskReviewRuntime>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StudioTaskFailureRuntime {
+    pub id: String,
+    pub source_thread_id: String,
+    pub source_turn_id: String,
+    pub source_agent_id: String,
+    pub source_role: String,
+    pub work_unit_id: Option<String>,
+    pub review_round_id: Option<String>,
+    pub disposition: String,
+    pub failure: pl_protocol::TurnFailure,
+    pub resolved_at: Option<i64>,
+    pub created_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

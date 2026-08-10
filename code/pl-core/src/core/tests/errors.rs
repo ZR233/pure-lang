@@ -31,10 +31,8 @@ fn root_provider_429_is_transient_and_subagent_429_is_provider_capacity() {
             Some(429),
         ),
     );
-    assert_eq!(
-        error,
-        "provider capacity unavailable: transient model transport error: API error 429 Too Many Requests"
-    );
+    assert!(error.contains("provider capacity unavailable"));
+    assert!(error.contains("API error 429 Too Many Requests"));
     assert!(matches!(severity, ErrorSeverity::Recoverable));
     assert_eq!(
         failure.category,
@@ -46,7 +44,7 @@ fn root_provider_429_is_transient_and_subagent_429_is_provider_capacity() {
             None,
             &pl_protocol::PureError::LlmError("API error 500".to_string())
         ),
-        ErrorSeverity::Recoverable
+        ErrorSeverity::Fatal
     ));
     assert!(matches!(
         provider_error_severity(
@@ -66,7 +64,7 @@ fn provider_error_text_never_controls_retry() {
         ),
     );
 
-    assert_eq!(severity, ErrorSeverity::Recoverable);
+    assert_eq!(severity, ErrorSeverity::Fatal);
     assert_eq!(failure.category, pl_protocol::TurnFailureCategory::Provider);
     assert!(!failure.retry.is_retryable());
 }

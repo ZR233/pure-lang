@@ -212,9 +212,13 @@ async fn collect_completion_event_stream_returns_idle_timeout_when_stream_stalls
     .await
     .unwrap_err();
 
+    let failure = error
+        .provider_failure_ref()
+        .expect("typed provider failure");
+    assert_eq!(failure.kind, pl_protocol::ProviderFailureKind::Transport);
     assert_eq!(
-        error.to_string(),
-        "transient model transport error: stream error: idle timeout waiting for provider event"
+        failure.message,
+        "stream error: idle timeout waiting for provider event"
     );
     assert!(error.is_transient_model_transport());
 }

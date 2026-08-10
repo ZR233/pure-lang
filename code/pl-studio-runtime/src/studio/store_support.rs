@@ -4,7 +4,7 @@ use sea_orm::{ConditionalStatement, ConnectionTrait, DatabaseConnection};
 
 use crate::studio::entity;
 
-pub(super) const STUDIO_DATABASE_SCHEMA_VERSION: i64 = 3;
+pub(super) const STUDIO_DATABASE_SCHEMA_VERSION: i64 = 4;
 
 pub(super) async fn initialize_studio_schema(db: &DatabaseConnection) -> Result<()> {
     db.get_schema_builder()
@@ -13,6 +13,7 @@ pub(super) async fn initialize_studio_schema(db: &DatabaseConnection) -> Result<
         .register(entity::attachment::Entity)
         .register(entity::interaction::Entity)
         .register(entity::task_run::Entity)
+        .register(entity::task_failure::Entity)
         .register(entity::work_unit::Entity)
         .register(entity::work_completion::Entity)
         .register(entity::review_round::Entity)
@@ -105,6 +106,20 @@ async fn create_state_indexes(db: &DatabaseConnection) -> Result<()> {
             .table(entity::review_round::Entity)
             .col(entity::review_round::Column::TaskRunId)
             .col(entity::review_round::Column::RequestedByCallId)
+            .unique()
+            .to_owned(),
+        Index::create()
+            .name("idx_task_failures_run_created")
+            .table(entity::task_failure::Entity)
+            .col(entity::task_failure::Column::TaskRunId)
+            .col((entity::task_failure::Column::CreatedAt, IndexOrder::Desc))
+            .col((entity::task_failure::Column::Id, IndexOrder::Desc))
+            .to_owned(),
+        Index::create()
+            .name("idx_task_failures_run_turn")
+            .table(entity::task_failure::Entity)
+            .col(entity::task_failure::Column::TaskRunId)
+            .col(entity::task_failure::Column::SourceTurnId)
             .unique()
             .to_owned(),
         Index::create()

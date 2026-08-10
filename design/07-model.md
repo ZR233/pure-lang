@@ -163,6 +163,13 @@ Completions 遇到这些 Responses 原生 item必须显式拒绝，不能降级�
 provider transport 层把第三方 API 错误统一转换为 `PureError` 时必须先脱敏。错误文本中不得包含 bearer token、API key 或形如 `sk-...` 的密钥片段；鉴权失败、配额不足、模型不存在等服务端错误可以保留 status、错误类型、code 和可读原因，但密钥值必须替换为稳定占位。
 Responses HTTP/SSE 与 Chat Completions HTTP 必须和 WebSocket 一样，用 Serde typed error DTO 保留结构化 provider code、HTTP status、message 与可选 retry hint；进入控制流后不得把 DTO 降级成待解析字符串。408/409/425/429、5xx、建流前的瞬态网络错误以及 `server_is_overloaded` 等容量错误只允许在流对象建立前最多重试两次，并采用同一有界指数退避与抖动；一旦 HTTP 流已经建立，transport 不得因为后续流错误自动重放并制造重复输出。WS 切换 HTTP 后使用独立的 HTTP 重试预算，但不会再回到 WS；因此仅在两个 transport 都未产出流事件的最坏情况下，单次请求最多产生两次 WS 发送和三次 HTTP 发送。
 
+`ProviderFailureKind` 固定为 authentication、authorization、capacity、configuration、transport、
+protocol 与 unknown。`RetryDisposition` 只回答同一次模型请求是否能在尚无副作用时安全重放，
+不得被宿主解释为 Task 生命周期。401/`invalid_api_key`、403、无效模型/endpoint/请求配置、
+provider 协议错误和未知永久错误均保持 permanent；408/409/425/429、5xx、连接与超时错误保持
+retryable。Studio 另行从 typed failure 派生 Task disposition，任何层都不得解析 message 或 code
+字符串来决定 Task 是否终结。
+
 提示词分层由 `pl-core` 决定，`pl-model` 只消费已经组装好的 `CompletionRequest`。`CompletionRequest.instructions` 表示 base/system 层，并在 Responses 和 Chat Completions 请求中作为最前面的 system 内容发送。`messages` 可以包含核心层临时插入的 system/user 前置消息；`pl-model` 不区分它们是否来自 developer 或 user context，也不把任何提示词写回会话。
 
 请求体不再由散落的 `serde_json::json!` 直接拼接，而是先转换为 `pl-model` 内部强类型 request，再由 serde 序列化。动态 JSON 只允许出现在 JSON Schema、工具参数、provider 返回的任意 JSON 参数和协议扩展 escape hatch。

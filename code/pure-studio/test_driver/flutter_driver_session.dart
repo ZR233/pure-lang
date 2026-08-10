@@ -12,6 +12,8 @@ typedef SnapshotReconnectObserver =
 abstract interface class FlutterDriverClient {
   Future<void> checkHealth();
 
+  Future<void> setFrameSync(bool enabled);
+
   Future<String> requestData(String message, {Duration? timeout});
 
   Future<void> waitFor(SerializableFinder finder, {Duration? timeout});
@@ -20,11 +22,15 @@ abstract interface class FlutterDriverClient {
 
   Future<void> enterText(String text);
 
+  Future<String> getText(SerializableFinder finder);
+
   Future<void> waitUntilNoTransientCallbacks({Duration? timeout});
 
   Future<void> sendTextInputAction(TextInputAction action, {Duration? timeout});
 
   Future<String> renderTree();
+
+  Future<List<int>> screenshot();
 
   Future<void> close();
 }
@@ -85,6 +91,7 @@ class FlutterDriverSession {
       vmServiceUrl,
     ).timeout(const Duration(seconds: 30));
     await client.checkHealth().timeout(const Duration(seconds: 15));
+    await client.setFrameSync(false).timeout(const Duration(seconds: 15));
     return FlutterDriverSession._(
       vmServiceUrl,
       connector,
@@ -124,6 +131,9 @@ class FlutterDriverSession {
           _vmServiceUrl,
         ).timeout(const Duration(seconds: 30));
         await replacement.checkHealth().timeout(const Duration(seconds: 15));
+        await replacement
+            .setFrameSync(false)
+            .timeout(const Duration(seconds: 15));
         _client = replacement;
         final snapshot = await _requestSnapshot();
         await _reportReconnect(
@@ -162,6 +172,8 @@ class FlutterDriverSession {
 
   Future<void> enterText(String text) => _client.enterText(text);
 
+  Future<String> getText(SerializableFinder finder) => _client.getText(finder);
+
   Future<void> waitUntilNoTransientCallbacks({Duration? timeout}) {
     return _client.waitUntilNoTransientCallbacks(timeout: timeout);
   }
@@ -174,6 +186,8 @@ class FlutterDriverSession {
   }
 
   Future<String> renderTree() => _client.renderTree();
+
+  Future<List<int>> screenshot() => _client.screenshot();
 
   Future<void> close() => _client.close();
 
@@ -243,6 +257,11 @@ class _RealFlutterDriverClient implements FlutterDriverClient {
   }
 
   @override
+  Future<void> setFrameSync(bool enabled) async {
+    await _driver.sendCommand(SetFrameSync(enabled));
+  }
+
+  @override
   Future<String> requestData(String message, {Duration? timeout}) {
     return _driver.requestData(message, timeout: timeout);
   }
@@ -257,6 +276,9 @@ class _RealFlutterDriverClient implements FlutterDriverClient {
 
   @override
   Future<void> enterText(String text) => _driver.enterText(text);
+
+  @override
+  Future<String> getText(SerializableFinder finder) => _driver.getText(finder);
 
   @override
   Future<void> waitUntilNoTransientCallbacks({Duration? timeout}) {
@@ -276,6 +298,9 @@ class _RealFlutterDriverClient implements FlutterDriverClient {
     final tree = await _driver.getRenderTree();
     return tree.tree ?? '';
   }
+
+  @override
+  Future<List<int>> screenshot() => _driver.screenshot();
 
   @override
   Future<void> close() => _driver.close();

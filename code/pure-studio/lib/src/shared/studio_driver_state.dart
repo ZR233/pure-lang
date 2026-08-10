@@ -169,6 +169,12 @@ abstract final class StudioDriverState {
     'expectedHead': task.expectedHead,
     'statusMessage': task.statusMessage,
     'taskGeneration': task.taskGeneration,
+    'failures': [
+      for (final failure in task.failures) _taskFailureJson(failure),
+    ],
+    'terminalFailure': task.terminalFailure == null
+        ? null
+        : _taskFailureJson(task.terminalFailure!),
     'workUnits': [
       for (final unit in task.workUnits)
         {
@@ -248,6 +254,25 @@ abstract final class StudioDriverState {
           'updatedAt': review.updatedAt.toUtc().toIso8601String(),
         },
     ],
+  };
+
+  static Map<String, Object?> _taskFailureJson(TaskFailureView failure) => {
+    'id': failure.id,
+    'sourceThreadId': failure.sourceThreadId,
+    'sourceTurnId': failure.sourceTurnId,
+    'sourceAgentId': failure.sourceAgentId,
+    'sourceRole': failure.sourceRole,
+    'workUnitId': failure.workUnitId,
+    'reviewRoundId': failure.reviewRoundId,
+    'disposition': failure.disposition,
+    'category': failure.category,
+    'providerKind': failure.providerKind,
+    'code': failure.code,
+    'httpStatus': failure.httpStatus,
+    'message': failure.message,
+    'retryable': failure.retryable,
+    'resolvedAt': failure.resolvedAt?.toUtc().toIso8601String(),
+    'createdAt': failure.createdAt.toUtc().toIso8601String(),
   };
 
   static Map<String, Object?> _timelineProgress(AgentWorkspaceView workspace) {

@@ -147,9 +147,24 @@ pub(crate) fn bridge_turn(value: Turn) -> BridgeTurn {
             TurnState::Failed { reason } => BridgeTurnState::Failed { reason },
             TurnState::Interrupted { reason } => BridgeTurnState::Interrupted { reason },
         },
+        failure: value.failure.map(bridge_turn_failure),
         started_at: value.started_at,
         updated_at: value.updated_at,
         completed_at: value.completed_at,
+    }
+}
+
+fn bridge_turn_failure(value: pl_protocol::TurnFailure) -> BridgeTurnFailureDto {
+    BridgeTurnFailureDto {
+        category: format!("{:?}", value.category).to_ascii_lowercase(),
+        provider_kind: value
+            .provider_kind
+            .map(|kind| format!("{kind:?}").to_ascii_lowercase()),
+        code: value.code,
+        http_status: value.http_status,
+        message: value.message,
+        retryable: value.retry.is_retryable(),
+        retry_after_ms: value.retry.retry_after_ms(),
     }
 }
 

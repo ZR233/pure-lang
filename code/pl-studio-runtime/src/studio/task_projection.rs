@@ -2,8 +2,9 @@ use anyhow::Result;
 
 use crate::{
     StudioBudgetLimitRuntime, StudioBudgetUsageRuntime, StudioTaskCompletionRuntime,
-    StudioTaskDesignReferenceRuntime, StudioTaskMergeRuntime, StudioTaskReviewFindingRuntime,
-    StudioTaskReviewRuntime, StudioTaskRuntime, StudioTaskWorkUnitRuntime,
+    StudioTaskDesignReferenceRuntime, StudioTaskFailureRuntime, StudioTaskMergeRuntime,
+    StudioTaskReviewFindingRuntime, StudioTaskReviewRuntime, StudioTaskRuntime,
+    StudioTaskWorkUnitRuntime,
 };
 
 use super::{
@@ -61,12 +62,14 @@ pub(crate) async fn load_task_runtime(
     let completions = store.list_work_completions(&run.id).await?;
     let merges = store.list_merge_records(&run.id).await?;
     let reviews = store.list_review_rounds(&run.id).await?;
+    let failures = store.list_task_failures(&run.id).await?;
     Ok(Some(studio_task_runtime(
         run,
         work_unit_runtimes,
         completions,
         merges,
         reviews,
+        failures,
     )))
 }
 
@@ -76,7 +79,33 @@ fn studio_task_runtime(
     completions: Vec<WorkCompletionRecord>,
     merges: Vec<MergeRecord>,
     reviews: Vec<ReviewRoundRecord>,
+    failures: Vec<super::task_coordinator::TaskFailureRecord>,
 ) -> StudioTaskRuntime {
+    let terminal_failure_id = run.terminal_failure_id.clone();
+    let all_failures = failures
+        .into_iter()
+        .map(|failure| StudioTaskFailureRuntime {
+            id: failure.id,
+            source_thread_id: failure.source_thread_id,
+            source_turn_id: failure.source_turn_id,
+            source_agent_id: failure.source_agent_id,
+            source_role: failure.source_role,
+            work_unit_id: failure.work_unit_id,
+            review_round_id: failure.review_round_id,
+            disposition: failure.disposition.as_str().to_string(),
+            failure: failure.failure,
+            resolved_at: failure.resolved_at,
+            created_at: failure.created_at,
+        })
+        .collect::<Vec<_>>();
+    let terminal_failure = terminal_failure_id
+        .as_deref()
+        .and_then(|id| all_failures.iter().find(|failure| failure.id == id))
+        .cloned();
+    let failures = all_failures
+        .into_iter()
+        .filter(|failure| failure.resolved_at.is_none())
+        .collect();
     StudioTaskRuntime {
         run_id: run.id,
         phase: run.phase.as_str().to_string(),
@@ -90,6 +119,8 @@ fn studio_task_runtime(
             .stop_requested_reason
             .map(|reason| reason.as_str().to_string()),
         task_generation: run.task_generation,
+        failures,
+        terminal_failure,
         work_units,
         completions: completions
             .into_iter()

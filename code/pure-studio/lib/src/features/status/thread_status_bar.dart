@@ -11,6 +11,7 @@ import '../../shared/upward_popup_menu.dart';
 import 'context_usage_readout.dart';
 import 'status_bar_item.dart';
 import 'status_detail_popover.dart';
+import 'task_runtime_detail.dart';
 
 class ThreadStatusBar extends ConsumerWidget {
   const ThreadStatusBar({
@@ -169,10 +170,12 @@ class _TaskRuntimeReadout extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final status = task.statusMessage ?? '';
+    final failure = task.terminalFailure ?? task.failures.lastOrNull;
+    final status = failure?.message ?? task.statusMessage ?? '';
+    final fatal = failure?.isFatal ?? false;
     final tooltip = status.isEmpty
         ? '${context.taskPhaseLabel(task.phase)} · ${task.runId}'
-        : '${context.taskPhaseLabel(task.phase)} · $status';
+        : '${fatal ? context.l10n.statusTaskFailed : context.taskPhaseLabel(task.phase)} · $status';
     return KeyedSubtree(
       key: StudioDriverKeys.taskRuntime(task.runId),
       child: Semantics(
@@ -180,10 +183,21 @@ class _TaskRuntimeReadout extends StatelessWidget {
         label: tooltip,
         child: _StatusReadout(
           key: StudioDriverKeys.taskPhase(task.runId, task.phase),
-          icon: Icons.route_outlined,
-          label: context.taskPhaseLabel(task.phase),
+          icon: fatal
+              ? Icons.error_outline
+              : failure == null
+              ? Icons.route_outlined
+              : Icons.warning_amber_outlined,
+          label: fatal
+              ? context.l10n.statusTaskFailed
+              : failure == null
+              ? context.taskPhaseLabel(task.phase)
+              : context.l10n.statusTaskRecoverable,
           tooltip: tooltip,
           maxWidth: 120,
+          interactive: true,
+          detailWidth: 560,
+          detailBuilder: (context) => TaskRuntimeDetail(task: task),
         ),
       ),
     );

@@ -105,6 +105,11 @@ fn turn_record(model: &turn::Model) -> Result<Turn> {
         id: model.id.clone(),
         thread_id: model.thread_id.clone(),
         state,
+        failure: model
+            .failure_json
+            .as_deref()
+            .map(serde_json::from_str)
+            .transpose()?,
         started_at: model.started_at,
         updated_at: model.updated_at,
         completed_at: model.completed_at,

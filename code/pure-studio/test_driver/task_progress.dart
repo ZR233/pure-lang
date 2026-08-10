@@ -160,6 +160,27 @@ void validateTaskCompletion(
   }
 }
 
+void validateFatalTaskFailure(Map<String, dynamic> snapshot) {
+  final task = snapshot['task'] as Map<String, dynamic>?;
+  if (task == null || task['phase'] != 'failed') {
+    throw StateError('Task snapshot is not failed');
+  }
+  final failure = task['terminalFailure'] as Map<String, dynamic>?;
+  if (failure == null || failure['disposition'] != 'fatal') {
+    throw StateError('Task snapshot has no fatal terminal failure');
+  }
+  if (failure['providerKind'] != 'authentication' ||
+      failure['code'] != 'invalid_api_key' ||
+      failure['httpStatus'] != 401 ||
+      failure['retryable'] != false) {
+    throw StateError('Task terminal failure lost typed authentication detail');
+  }
+  final message = failure['message'] as String? ?? '';
+  if (message.isEmpty || message.contains('sk-driver-secret')) {
+    throw StateError('Task terminal failure message is empty or not redacted');
+  }
+}
+
 List<Map<String, Object?>> _normalized(
   Object? value,
   Map<String, Object?> Function(Map<String, dynamic>) select,

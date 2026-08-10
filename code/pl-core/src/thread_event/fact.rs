@@ -44,6 +44,7 @@ pub(crate) fn project_thread_facts(
                                 TurnPhase::Thinking
                             },
                         },
+                        failure: None,
                         started_at: None,
                         updated_at: fact.emitted_at,
                         completed_at: None,

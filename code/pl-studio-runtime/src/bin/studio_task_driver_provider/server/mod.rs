@@ -17,8 +17,25 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
 
 use script::{
-    RECOVERY_INTERRUPTION_ACTION, ScriptProgress, next_step, observe_request, response, role,
+    RECOVERY_INTERRUPTION_ACTION, ScriptProgress, ScriptRole, next_step, observe_request, response,
+    role,
 };
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FailureMode {
+    None,
+    InvalidApiKeyPlanner,
+}
+
+impl FailureMode {
+    fn parse(value: &str) -> Result<Self> {
+        match value {
+            "none" => Ok(Self::None),
+            "invalid-api-key-planner" => Ok(Self::InvalidApiKeyPlanner),
+            _ => bail!("unsupported --failure-mode: {value}"),
+        }
+    }
+}
 
 pub(super) struct ServerOptions {
     workspace: PathBuf,
@@ -26,6 +43,7 @@ pub(super) struct ServerOptions {
     request_log: PathBuf,
     state_file: PathBuf,
     exercise_recovery: bool,
+    failure_mode: FailureMode,
 }
 
 impl ServerOptions {
@@ -36,6 +54,7 @@ impl ServerOptions {
         let mut request_log = None;
         let mut state_file = None;
         let mut exercise_recovery = false;
+        let mut failure_mode = FailureMode::None;
         while let Some(name) = arguments.next() {
             let value = arguments
                 .next()
@@ -51,6 +70,9 @@ impl ServerOptions {
                         .parse::<bool>()
                         .context("--exercise-recovery must be true or false")?;
                 }
+                "--failure-mode" => {
+                    failure_mode = FailureMode::parse(&value.to_string_lossy())?;
+                }
                 unknown => bail!("unknown argument: {unknown}"),
             }
         }
@@ -60,6 +82,7 @@ impl ServerOptions {
             request_log: request_log.context("missing --request-log")?,
             state_file: state_file.context("missing --state-file")?,
             exercise_recovery,
+            failure_mode,
         };
         options.validate()?;
         Ok(options)
@@ -88,6 +111,7 @@ struct ServerState {
     request_log: PathBuf,
     state_file: PathBuf,
     exercise_recovery: bool,
+    failure_mode: FailureMode,
     progress: Mutex<ScriptProgress>,
 }
 
@@ -105,6 +129,7 @@ pub(super) async fn run(options: ServerOptions) -> Result<()> {
         request_log: options.request_log,
         state_file: options.state_file,
         exercise_recovery: options.exercise_recovery,
+        failure_mode: options.failure_mode,
         progress: Mutex::new(progress),
     });
     println!("PURE_TASK_PROVIDER_READY {base_url}");
@@ -126,6 +151,28 @@ async fn serve_request(mut socket: TcpStream, state: Arc<ServerState>) {
         let role = role(&request)?;
         observe_request(&mut progress, &request);
         let step = next_step(&mut progress, role);
+        if state.failure_mode == FailureMode::InvalidApiKeyPlanner
+            && role == ScriptRole::Planner
+            && step == 3
+        {
+            let action = "invalid_api_key(planner)";
+            append_request_log(&state.request_log, role.label(), step, action, &request)?;
+            save_script_progress(&state.state_file, &progress)?;
+            println!("SCRIPTED_TASK_PROVIDER {}[{step}] {action}", role.label());
+            std::io::stdout().flush()?;
+            drop(progress);
+            let body = serde_json::json!({
+                "error": {
+                    "message": "Invalid API key provided: sk-driver-secret-must-be-redacted",
+                    "type": "invalid_request_error",
+                    "param": null,
+                    "code": "invalid_api_key"
+                }
+            })
+            .to_string();
+            return write_response(&mut socket, "401 Unauthorized", "application/json", &body)
+                .await;
+        }
         let (action, body) = response(
             &mut progress,
             &state.workspace,

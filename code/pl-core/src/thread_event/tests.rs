@@ -317,5 +317,6 @@ fn active_turn(phase: TurnPhase) -> Turn {
         started_at: Some(1),
         updated_at: 1,
         completed_at: None,
+        failure: None,
     }
 }

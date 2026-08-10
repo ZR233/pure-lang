@@ -415,6 +415,23 @@ class AppLocalizationsEn extends AppLocalizations {
   String get statusTaskError => 'Error';
 
   @override
+  String get statusTaskFailed => 'Task failed';
+
+  @override
+  String get statusTaskRecoverable => 'Can continue';
+
+  @override
+  String get statusTaskFailures => 'Task failures';
+
+  @override
+  String get statusTaskFatalHint =>
+      'Fix the provider or configuration, then start a new task.';
+
+  @override
+  String get statusTaskRecoverableHint =>
+      'This task can continue after the cause is corrected.';
+
+  @override
   String get statusTaskExecution => 'Execution';
 
   @override

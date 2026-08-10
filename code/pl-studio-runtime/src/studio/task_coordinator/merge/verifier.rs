@@ -2,11 +2,14 @@ use std::path::Path;
 
 use crate::studio::task_coordinator::MergeVerificationStep;
 
+const MAX_VERIFICATION_OUTPUT_BYTES: usize = 32 * 1024;
+
 pub(crate) struct ProductionMergeVerifier;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MergeVerificationCommand {
     pub(crate) working_directory: std::path::PathBuf,
+    pub(crate) relative_working_directory: String,
     pub(crate) command: Vec<String>,
 }
 
@@ -35,6 +38,7 @@ pub(crate) fn select_merge_verification_commands(
     if changed_files.iter().any(|path| path.ends_with(".rs")) {
         commands.push(MergeVerificationCommand {
             working_directory: workspace.to_path_buf(),
+            relative_working_directory: ".".to_string(),
             command: vec![
                 "cargo".to_string(),
                 "fmt".to_string(),
@@ -49,6 +53,7 @@ pub(crate) fn select_merge_verification_commands(
     {
         commands.push(MergeVerificationCommand {
             working_directory: workspace.join("code/pure-studio"),
+            relative_working_directory: "code/pure-studio".to_string(),
             command: vec![
                 "flutter".to_string(),
                 "--no-version-check".to_string(),
@@ -60,12 +65,17 @@ pub(crate) fn select_merge_verification_commands(
 }
 
 async fn run_check(selected: MergeVerificationCommand) -> MergeVerificationStep {
+    let cwd = selected.relative_working_directory;
     let command = selected.command;
     let Some((program, arguments)) = command.split_first() else {
         return MergeVerificationStep {
+            cwd,
             command,
             success: false,
+            exit_code: None,
+            failure_kind: Some(super::super::MergeVerificationFailureKind::RuntimeFailed),
             output: "merge verifier command is empty".to_string(),
+            output_truncated: false,
         };
     };
     match super::process::run_process(&selected.working_directory, program, arguments.to_vec())
@@ -77,16 +87,40 @@ async fn run_check(selected: MergeVerificationCommand) -> MergeVerificationStep 
             } else {
                 output.combined
             };
+            let (detail, output_truncated) = bounded_output(detail);
             MergeVerificationStep {
+                cwd,
                 command,
                 success: output.success,
+                exit_code: output.exit_code,
+                failure_kind: (!output.success)
+                    .then_some(super::super::MergeVerificationFailureKind::NonZeroExit),
                 output: detail,
+                output_truncated,
             }
         }
-        Err(error) => MergeVerificationStep {
-            command,
-            success: false,
-            output: format!("{error:#}"),
-        },
+        Err(error) => {
+            let (output, output_truncated) = bounded_output(error.message);
+            MergeVerificationStep {
+                cwd,
+                command,
+                success: false,
+                exit_code: None,
+                failure_kind: Some(error.kind),
+                output,
+                output_truncated,
+            }
+        }
     }
+}
+
+fn bounded_output(output: String) -> (String, bool) {
+    if output.len() <= MAX_VERIFICATION_OUTPUT_BYTES {
+        return (output, false);
+    }
+    let mut boundary = output.len() - MAX_VERIFICATION_OUTPUT_BYTES;
+    while !output.is_char_boundary(boundary) {
+        boundary += 1;
+    }
+    (output[boundary..].to_string(), true)
 }

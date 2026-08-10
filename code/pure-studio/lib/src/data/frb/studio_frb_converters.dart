@@ -51,6 +51,10 @@ TaskRuntimeView _taskRuntimeFromFrb(frb.BridgeTaskRuntimeDto task) {
     stopRequestedOrigin: task.stopRequestedOrigin,
     stopRequestedReason: task.stopRequestedReason,
     taskGeneration: task.taskGeneration.toInt(),
+    failures: task.failures.map(_taskFailureFromFrb).toList(),
+    terminalFailure: task.terminalFailure == null
+        ? null
+        : _taskFailureFromFrb(task.terminalFailure!),
     workUnits: [
       for (final unit in task.workUnits)
         TaskWorkUnitView(
@@ -161,6 +165,29 @@ TaskRuntimeView _taskRuntimeFromFrb(frb.BridgeTaskRuntimeDto task) {
           updatedAt: _dateFromUnix(review.updatedAt),
         ),
     ],
+  );
+}
+
+TaskFailureView _taskFailureFromFrb(frb.BridgeTaskFailureDto failure) {
+  return TaskFailureView(
+    id: failure.id,
+    sourceThreadId: failure.sourceThreadId,
+    sourceTurnId: failure.sourceTurnId,
+    sourceAgentId: failure.sourceAgentId,
+    sourceRole: failure.sourceRole,
+    workUnitId: failure.workUnitId,
+    reviewRoundId: failure.reviewRoundId,
+    disposition: failure.disposition,
+    category: failure.category,
+    providerKind: failure.providerKind,
+    code: failure.code,
+    httpStatus: failure.httpStatus,
+    message: failure.message,
+    retryable: failure.retryable,
+    resolvedAt: failure.resolvedAt == null
+        ? null
+        : _dateFromUnix(failure.resolvedAt!),
+    createdAt: _dateFromUnix(failure.createdAt),
   );
 }
 

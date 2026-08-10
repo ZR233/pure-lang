@@ -812,6 +812,36 @@ abstract class AppLocalizations {
   /// **'Error'**
   String get statusTaskError;
 
+  /// No description provided for @statusTaskFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Task failed'**
+  String get statusTaskFailed;
+
+  /// No description provided for @statusTaskRecoverable.
+  ///
+  /// In en, this message translates to:
+  /// **'Can continue'**
+  String get statusTaskRecoverable;
+
+  /// No description provided for @statusTaskFailures.
+  ///
+  /// In en, this message translates to:
+  /// **'Task failures'**
+  String get statusTaskFailures;
+
+  /// No description provided for @statusTaskFatalHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Fix the provider or configuration, then start a new task.'**
+  String get statusTaskFatalHint;
+
+  /// No description provided for @statusTaskRecoverableHint.
+  ///
+  /// In en, this message translates to:
+  /// **'This task can continue after the cause is corrected.'**
+  String get statusTaskRecoverableHint;
+
   /// No description provided for @statusTaskExecution.
   ///
   /// In en, this message translates to:

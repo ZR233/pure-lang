@@ -207,6 +207,8 @@ class TaskRuntimeView {
     required this.stopRequestedOrigin,
     required this.stopRequestedReason,
     required this.taskGeneration,
+    this.failures = const [],
+    this.terminalFailure,
     required this.workUnits,
     required this.completions,
     required this.merges,
@@ -221,6 +223,8 @@ class TaskRuntimeView {
   final String? stopRequestedOrigin;
   final String? stopRequestedReason;
   final int taskGeneration;
+  final List<TaskFailureView> failures;
+  final TaskFailureView? terminalFailure;
   final List<TaskWorkUnitView> workUnits;
   final List<TaskCompletionView> completions;
   final List<TaskMergeView> merges;
@@ -249,6 +253,46 @@ class TaskRuntimeView {
     );
     return hasFailedExecutor && !hasInFlightWork;
   }
+}
+
+class TaskFailureView {
+  const TaskFailureView({
+    required this.id,
+    required this.sourceThreadId,
+    required this.sourceTurnId,
+    required this.sourceAgentId,
+    required this.sourceRole,
+    required this.workUnitId,
+    required this.reviewRoundId,
+    required this.disposition,
+    required this.category,
+    required this.providerKind,
+    required this.code,
+    required this.httpStatus,
+    required this.message,
+    required this.retryable,
+    required this.resolvedAt,
+    required this.createdAt,
+  });
+
+  final String id;
+  final String sourceThreadId;
+  final String sourceTurnId;
+  final String sourceAgentId;
+  final String sourceRole;
+  final String? workUnitId;
+  final String? reviewRoundId;
+  final String disposition;
+  final String category;
+  final String? providerKind;
+  final String? code;
+  final int? httpStatus;
+  final String message;
+  final bool retryable;
+  final DateTime? resolvedAt;
+  final DateTime createdAt;
+
+  bool get isFatal => disposition == 'fatal';
 }
 
 class TaskWorkUnitView {

@@ -493,6 +493,7 @@ mod tests {
             stop_requested_at: Some(1),
             task_generation: 7,
             terminal_generation: None,
+            terminal_failure_id: None,
             created_at: 1,
             updated_at: 1,
         }

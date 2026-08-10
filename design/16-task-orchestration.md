@@ -154,6 +154,19 @@ Completion，WorkUnit 保留可 follow-up 的 durable terminal execution 状态�
 wake；review changes-requested 后的 rework failure 也走同一路径，不能静默停在
 `AwaitingCompletion/failed`。取消由既有 stop/cancel 收束处理，不额外唤醒 Planner。
 
+每个 Agent Turn 结束时，Studio 从结构化 `TurnFailure` 派生独立的
+`TaskFailureDisposition`。capacity、transport、408/409/425/429、5xx、普通验证失败和
+`task_complete` 验证不通过为 Recoverable；authentication、authorization、configuration、
+provider protocol、fatal tool runtime、internal invariant 以及未知永久 provider failure 为 Fatal。
+该判断只使用 typed category/kind/retry，不解析 message。
+
+Recoverable child failure 保留 WorkUnit/Review 可 follow-up 状态并产生一次 Planner wake；
+Recoverable root failure 保持当前 Task phase，等待用户修复配置后继续，不自动重放 Turn。Fatal
+failure 以来源 Turn ID 幂等写入 `task_failures`，首个 fatal 在同一 SQLite immediate 事务中把
+TaskRun 置为 Failed、固定 terminal failure、收束未完成 WorkUnit/Review 并删除 BranchLease。
+事务提交后才中断其余 Task agent。现有 worktree disposition 保持 Protect，branch 和物理成果不
+删除；迟到 completion、review、wake 或第二个 fatal 不能覆盖已提交终态。
+
 ## 16.6 Planner 自主 Git、合并记账与综合审查
 
 Approved 且 executor 已关闭的 delivery 由 `task_status` 投影为 `MergeCandidate`，包含 executor、
@@ -258,6 +271,13 @@ worktree/branch；失去 durable owner 的资源继续保留现场。
 - 最新 integrated review 针对当前 HEAD 且 verdict 为 pass；
 - 当前分支、workspace、TaskRun 和 BranchLease expectedHead 精确一致；
 - 最终验证通过且不存在 StopRequested。
+
+工具返回 tagged `TaskCompleteOutcome`：`completed { run, verification }` 或
+`rejected { failure, verification }`。所有门禁拒绝使用稳定 code（wrongPhase、stopRequested、
+repositoryDrift、reviewMissing、deliveriesIncomplete、verificationFailed）和用户可读说明。
+验证步骤保存命令、仓库相对 cwd、exitCode、nonZeroExit/startFailed/timedOut/runtimeFailed、32 KiB
+有界输出及 outputTruncated。rejected 通过普通 tool failure JSON 同时进入 Planner 上下文、SQLite
+Item 与 GUI；Task 保持 Reviewing，lease/review 不变，且 Planner Turn 只有成功完成时才结束。
 
 完成事务写 completed 并删除 BranchLease。任何迟到 child completion、旧 generation 或旧 Turn
 通知都不能改变已提交的 Task 终态。

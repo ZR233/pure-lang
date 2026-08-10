@@ -150,6 +150,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeTaskFailureDto dco_decode_box_autoadd_bridge_task_failure_dto(
+    dynamic raw,
+  );
+
+  @protected
   BridgeTaskRecoveryRequestDto
   dco_decode_box_autoadd_bridge_task_recovery_request_dto(dynamic raw);
 
@@ -193,6 +198,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeTurn dco_decode_box_autoadd_bridge_turn(dynamic raw);
 
   @protected
+  BridgeTurnFailureDto dco_decode_box_autoadd_bridge_turn_failure_dto(
+    dynamic raw,
+  );
+
+  @protected
   DeepSeekBalanceDto dco_decode_box_autoadd_deep_seek_balance_dto(dynamic raw);
 
   @protected
@@ -229,6 +239,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   SkillsSettingsInput dco_decode_box_autoadd_skills_settings_input(dynamic raw);
+
+  @protected
+  int dco_decode_box_autoadd_u_16(dynamic raw);
 
   @protected
   int dco_decode_box_autoadd_u_32(dynamic raw);
@@ -487,6 +500,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeTaskFailureDto dco_decode_bridge_task_failure_dto(dynamic raw);
+
+  @protected
   BridgeTaskGitFingerprintDto dco_decode_bridge_task_git_fingerprint_dto(
     dynamic raw,
   );
@@ -643,6 +659,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeTurn dco_decode_bridge_turn(dynamic raw);
 
   @protected
+  BridgeTurnFailureDto dco_decode_bridge_turn_failure_dto(dynamic raw);
+
+  @protected
   BridgeTurnPhase dco_decode_bridge_turn_phase(dynamic raw);
 
   @protected
@@ -769,6 +788,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   List<BridgeTaskDesignReferenceDto>
   dco_decode_list_bridge_task_design_reference_dto(dynamic raw);
+
+  @protected
+  List<BridgeTaskFailureDto> dco_decode_list_bridge_task_failure_dto(
+    dynamic raw,
+  );
 
   @protected
   List<BridgeTaskMergeDto> dco_decode_list_bridge_task_merge_dto(dynamic raw);
@@ -907,6 +931,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   dco_decode_opt_box_autoadd_bridge_prompt_prefix_changed_reason(dynamic raw);
 
   @protected
+  BridgeTaskFailureDto? dco_decode_opt_box_autoadd_bridge_task_failure_dto(
+    dynamic raw,
+  );
+
+  @protected
   BridgeTaskRuntimeDto? dco_decode_opt_box_autoadd_bridge_task_runtime_dto(
     dynamic raw,
   );
@@ -932,6 +961,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeTurn? dco_decode_opt_box_autoadd_bridge_turn(dynamic raw);
 
   @protected
+  BridgeTurnFailureDto? dco_decode_opt_box_autoadd_bridge_turn_failure_dto(
+    dynamic raw,
+  );
+
+  @protected
   DeepSeekBalanceDto? dco_decode_opt_box_autoadd_deep_seek_balance_dto(
     dynamic raw,
   );
@@ -944,6 +978,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   PlatformInt64? dco_decode_opt_box_autoadd_i_64(dynamic raw);
+
+  @protected
+  int? dco_decode_opt_box_autoadd_u_16(dynamic raw);
 
   @protected
   int? dco_decode_opt_box_autoadd_u_32(dynamic raw);
@@ -1003,6 +1040,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   SteerTurnResponse dco_decode_steer_turn_response(dynamic raw);
+
+  @protected
+  int dco_decode_u_16(dynamic raw);
 
   @protected
   int dco_decode_u_32(dynamic raw);
@@ -1157,6 +1197,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeTaskFailureDto sse_decode_box_autoadd_bridge_task_failure_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeTaskRecoveryRequestDto
   sse_decode_box_autoadd_bridge_task_recovery_request_dto(
     SseDeserializer deserializer,
@@ -1208,6 +1253,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeTurn sse_decode_box_autoadd_bridge_turn(SseDeserializer deserializer);
 
   @protected
+  BridgeTurnFailureDto sse_decode_box_autoadd_bridge_turn_failure_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   DeepSeekBalanceDto sse_decode_box_autoadd_deep_seek_balance_dto(
     SseDeserializer deserializer,
   );
@@ -1250,6 +1300,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   SkillsSettingsInput sse_decode_box_autoadd_skills_settings_input(
     SseDeserializer deserializer,
   );
+
+  @protected
+  int sse_decode_box_autoadd_u_16(SseDeserializer deserializer);
 
   @protected
   int sse_decode_box_autoadd_u_32(SseDeserializer deserializer);
@@ -1566,6 +1619,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeTaskFailureDto sse_decode_bridge_task_failure_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeTaskGitFingerprintDto sse_decode_bridge_task_git_fingerprint_dto(
     SseDeserializer deserializer,
   );
@@ -1758,6 +1816,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeTurn sse_decode_bridge_turn(SseDeserializer deserializer);
 
   @protected
+  BridgeTurnFailureDto sse_decode_bridge_turn_failure_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeTurnPhase sse_decode_bridge_turn_phase(SseDeserializer deserializer);
 
   @protected
@@ -1918,6 +1981,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   List<BridgeTaskDesignReferenceDto>
   sse_decode_list_bridge_task_design_reference_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<BridgeTaskFailureDto> sse_decode_list_bridge_task_failure_dto(
     SseDeserializer deserializer,
   );
 
@@ -2092,6 +2160,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeTaskFailureDto? sse_decode_opt_box_autoadd_bridge_task_failure_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeTaskRuntimeDto? sse_decode_opt_box_autoadd_bridge_task_runtime_dto(
     SseDeserializer deserializer,
   );
@@ -2125,6 +2198,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeTurnFailureDto? sse_decode_opt_box_autoadd_bridge_turn_failure_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   DeepSeekBalanceDto? sse_decode_opt_box_autoadd_deep_seek_balance_dto(
     SseDeserializer deserializer,
   );
@@ -2137,6 +2215,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   PlatformInt64? sse_decode_opt_box_autoadd_i_64(SseDeserializer deserializer);
+
+  @protected
+  int? sse_decode_opt_box_autoadd_u_16(SseDeserializer deserializer);
 
   @protected
   int? sse_decode_opt_box_autoadd_u_32(SseDeserializer deserializer);
@@ -2214,6 +2295,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   SteerTurnResponse sse_decode_steer_turn_response(
     SseDeserializer deserializer,
   );
+
+  @protected
+  int sse_decode_u_16(SseDeserializer deserializer);
 
   @protected
   int sse_decode_u_32(SseDeserializer deserializer);
@@ -2395,6 +2479,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_bridge_task_failure_dto(
+    BridgeTaskFailureDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_bridge_task_recovery_request_dto(
     BridgeTaskRecoveryRequestDto self,
     SseSerializer serializer,
@@ -2455,6 +2545,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_bridge_turn_failure_dto(
+    BridgeTurnFailureDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_deep_seek_balance_dto(
     DeepSeekBalanceDto self,
     SseSerializer serializer,
@@ -2507,6 +2603,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     SkillsSettingsInput self,
     SseSerializer serializer,
   );
+
+  @protected
+  void sse_encode_box_autoadd_u_16(int self, SseSerializer serializer);
 
   @protected
   void sse_encode_box_autoadd_u_32(int self, SseSerializer serializer);
@@ -2890,6 +2989,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_bridge_task_failure_dto(
+    BridgeTaskFailureDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_bridge_task_git_fingerprint_dto(
     BridgeTaskGitFingerprintDto self,
     SseSerializer serializer,
@@ -3130,6 +3235,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_bridge_turn(BridgeTurn self, SseSerializer serializer);
 
   @protected
+  void sse_encode_bridge_turn_failure_dto(
+    BridgeTurnFailureDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_bridge_turn_phase(
     BridgeTurnPhase self,
     SseSerializer serializer,
@@ -3318,6 +3429,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_bridge_task_design_reference_dto(
     List<BridgeTaskDesignReferenceDto> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_bridge_task_failure_dto(
+    List<BridgeTaskFailureDto> self,
     SseSerializer serializer,
   );
 
@@ -3535,6 +3652,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_opt_box_autoadd_bridge_task_failure_dto(
+    BridgeTaskFailureDto? self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_box_autoadd_bridge_task_runtime_dto(
     BridgeTaskRuntimeDto? self,
     SseSerializer serializer,
@@ -3571,6 +3694,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_opt_box_autoadd_bridge_turn_failure_dto(
+    BridgeTurnFailureDto? self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_box_autoadd_deep_seek_balance_dto(
     DeepSeekBalanceDto? self,
     SseSerializer serializer,
@@ -3587,6 +3716,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     PlatformInt64? self,
     SseSerializer serializer,
   );
+
+  @protected
+  void sse_encode_opt_box_autoadd_u_16(int? self, SseSerializer serializer);
 
   @protected
   void sse_encode_opt_box_autoadd_u_32(int? self, SseSerializer serializer);
@@ -3686,6 +3818,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     SteerTurnResponse self,
     SseSerializer serializer,
   );
+
+  @protected
+  void sse_encode_u_16(int self, SseSerializer serializer);
 
   @protected
   void sse_encode_u_32(int self, SseSerializer serializer);

@@ -373,6 +373,8 @@ pub(crate) fn bridge_task_runtime(
         stop_requested_origin: task.stop_requested_origin,
         stop_requested_reason: task.stop_requested_reason,
         task_generation: task.task_generation,
+        failures: task.failures.into_iter().map(bridge_task_failure).collect(),
+        terminal_failure: task.terminal_failure.map(bridge_task_failure),
         work_units: task
             .work_units
             .into_iter()
@@ -488,6 +490,32 @@ pub(crate) fn bridge_task_runtime(
                 updated_at: review.updated_at,
             })
             .collect(),
+    }
+}
+
+fn bridge_task_failure(
+    failure: pl_studio_runtime::StudioTaskFailureRuntime,
+) -> super::super::types::BridgeTaskFailureDto {
+    super::super::types::BridgeTaskFailureDto {
+        id: failure.id,
+        source_thread_id: failure.source_thread_id,
+        source_turn_id: failure.source_turn_id,
+        source_agent_id: failure.source_agent_id,
+        source_role: failure.source_role,
+        work_unit_id: failure.work_unit_id,
+        review_round_id: failure.review_round_id,
+        disposition: failure.disposition,
+        category: format!("{:?}", failure.failure.category).to_ascii_lowercase(),
+        provider_kind: failure
+            .failure
+            .provider_kind
+            .map(|kind| format!("{kind:?}").to_ascii_lowercase()),
+        code: failure.failure.code,
+        http_status: failure.failure.http_status,
+        message: failure.failure.message,
+        retryable: failure.failure.retry.is_retryable(),
+        resolved_at: failure.resolved_at,
+        created_at: failure.created_at,
     }
 }
 

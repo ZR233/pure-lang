@@ -8,7 +8,9 @@ use pl_core::{
 use pl_trace::{TraceEvent, TraceEventKind, TracePartKind};
 use tokio::sync::{mpsc, watch};
 
-use crate::studio::task_coordinator::{TaskPlannerWakeRequest, TaskPlannerWakeSource};
+use crate::studio::task_coordinator::{
+    RecordTaskAgentFailure, TaskPlannerWakeRequest, TaskPlannerWakeSource,
+};
 use crate::studio::{
     InteractionRuntime, StudioProductEventRuntime, StudioRuntimeState, StudioStore,
 };
@@ -31,6 +33,7 @@ struct StudioAgentEventProjector {
     resources: StudioAgentResources,
     product_events: StudioProductEventRuntime,
     plan_confirmations: StudioPlanConfirmationProjector,
+    coordinator: std::sync::Arc<crate::studio::task_coordinator::TaskCoordinator>,
     runtime: watch::Receiver<Option<AgentRuntimeHandle>>,
 }
 
@@ -61,6 +64,7 @@ impl StudioAgentCommitObserver {
         store: StudioStore,
         interactions: InteractionRuntime,
         runtime_state: StudioRuntimeState,
+        coordinator: std::sync::Arc<crate::studio::task_coordinator::TaskCoordinator>,
         resources: StudioAgentResources,
         product_events: StudioProductEventRuntime,
     ) -> Self {
@@ -77,6 +81,7 @@ impl StudioAgentCommitObserver {
             resources,
             product_events,
             plan_confirmations: plan_confirmations.clone(),
+            coordinator: coordinator.clone(),
             runtime: runtime_receiver,
         };
         tokio::spawn(async move {
@@ -233,6 +238,12 @@ impl StudioAgentEventProjector {
                     .await?;
             }
             AgentRuntimeEventKind::TurnStarted { snapshot, .. } => {
+                if let Some(thread_id) = thread_id.as_deref() {
+                    self.store
+                        .resolve_recoverable_task_failures(thread_id)
+                        .await
+                        .at("resolveRecoverableTaskFailure")?;
+                }
                 let is_task_executor = snapshot.identity.role.as_str()
                     == StudioRole::Executor.key()
                     && self.resources.get(&snapshot.identity.id).await.is_some();
@@ -249,12 +260,45 @@ impl StudioAgentEventProjector {
                 outcome, snapshot, ..
             }
             | AgentRuntimeEventKind::RecoveryCancelledTurn { outcome, snapshot } => {
+                let terminalized = if let (Some(failure), Some(thread_id)) =
+                    (outcome.failure.clone(), thread_id.as_deref())
+                {
+                    let thread = self
+                        .store
+                        .read_thread(thread_id)
+                        .await
+                        .at("readFailureThread")?;
+                    if let Some(thread) = thread {
+                        self.coordinator
+                            .handle_agent_turn_failure(
+                                RecordTaskAgentFailure {
+                                    root_thread_id: thread.root_thread_id,
+                                    source_thread_id: thread_id.to_string(),
+                                    source_turn_id: outcome.turn_id.to_string(),
+                                    source_agent_id: event.agent_id.to_string(),
+                                    source_role: snapshot.identity.role.to_string(),
+                                    failure,
+                                },
+                                &wait_for_runtime(self.runtime.clone())
+                                    .await
+                                    .at("waitForRuntimeToSettleFailure")?,
+                            )
+                            .await
+                            .at("settleTaskAgentFailure")?
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
                 let is_task_agent = self.resources.get(&snapshot.identity.id).await.is_some();
                 let is_executor =
                     is_task_agent && snapshot.identity.role.as_str() == StudioRole::Executor.key();
                 let is_reviewer =
                     is_task_agent && snapshot.identity.role.as_str() == StudioRole::Reviewer.key();
-                if is_executor {
+                if terminalized {
+                    // Fatal failure already terminalized every Task child atomically.
+                } else if is_executor {
                     let continuation = self
                         .store
                         .settle_executor_turn_finished(event.agent_id.as_str(), &outcome)
@@ -284,7 +328,7 @@ impl StudioAgentEventProjector {
                         .await
                         .at("settleReviewerTurnFinished")?;
                 }
-                if is_executor || is_reviewer {
+                if !terminalized && (is_executor || is_reviewer) {
                     materialize_pending_task_planner_wakes(
                         &wait_for_runtime(self.runtime.clone())
                             .await

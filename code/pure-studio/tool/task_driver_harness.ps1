@@ -2,6 +2,9 @@
 param(
     [switch]$Scripted,
 
+    [ValidateSet('None', 'InvalidApiKeyPlanner')]
+    [string]$ProviderFailureMode = 'None',
+
     [switch]$ExerciseRecovery,
 
     [ValidateSet('Auto', 'RewindTail', 'RebuildThread')]
@@ -551,6 +554,13 @@ $manifest = $null
 $isScripted = [bool]$Scripted
 $exerciseRecoveryEnabled = [bool]$ExerciseRecovery
 $recoveryModeValue = $RecoveryMode
+$providerFailureModeValue = $ProviderFailureMode
+if (-not $isScripted -and $providerFailureModeValue -ne 'None') {
+    throw 'ProviderFailureMode requires -Scripted'
+}
+if ($exerciseRecoveryEnabled -and $providerFailureModeValue -ne 'None') {
+    throw 'ProviderFailureMode cannot be combined with ExerciseRecovery'
+}
 if ($Mode -eq 'New' -and (Test-Path -LiteralPath $DriverHome)) {
     $existing = @(Get-ChildItem -LiteralPath $DriverHome -Force)
     if ($existing.Count -ne 0) {
@@ -572,6 +582,12 @@ elseif ($Mode -ne 'New') {
     }
     else {
         'Auto'
+    }
+    $providerFailureModeValue = if ($manifest.ContainsKey('providerFailureMode')) {
+        [string]$manifest['providerFailureMode']
+    }
+    else {
+        'None'
     }
     $deadline = [DateTime]::Parse([string]$manifest['globalDeadlineUtc']).ToUniversalTime()
     if ([DateTime]::UtcNow -ge $deadline) {
@@ -624,6 +640,7 @@ $attemptRecord = [ordered]@{
     finishedAt = $null
     status = 'running'
     recoveryMode = $recoveryModeValue
+    providerFailureMode = $providerFailureModeValue
     logDirectory = $attemptDir
     driverExitCode = $null
     recoveryApplied = $false
@@ -683,6 +700,7 @@ try {
             scripted = $isScripted
             exerciseRecovery = $exerciseRecoveryEnabled
             recoveryMode = $recoveryModeValue
+            providerFailureMode = $providerFailureModeValue
             promptFile = $PromptFile
             promptHash = $promptHash
             originalPromptSubmissionCount = 0
@@ -715,6 +733,7 @@ try {
                 '--request-log', $providerRequests,
                 '--state-file', (Join-Path $DriverHome 'provider-state.json'),
                 '--exercise-recovery', $exerciseRecoveryEnabled.ToString().ToLowerInvariant()
+                '--failure-mode', $(if ($providerFailureModeValue -eq 'InvalidApiKeyPlanner') { 'invalid-api-key-planner' } else { 'none' })
             ) `
             -WorkingDirectory $repoRoot `
             -StdoutPath $providerStdout `
@@ -783,6 +802,7 @@ try {
         '--plan-timeout-seconds', $PlanTimeoutSeconds.ToString(),
         '--task-timeout-seconds', $TaskTimeoutSeconds.ToString(),
         '--stall-timeout-seconds', $StallTimeoutSeconds.ToString()
+        '--expected-task-phase', $(if ($providerFailureModeValue -eq 'InvalidApiKeyPlanner') { 'failed' } else { 'completed' })
     )
     if ($isScripted -and $Mode -eq 'New') {
         $driverArguments += @('--inject-snapshot-disconnect', 'true')

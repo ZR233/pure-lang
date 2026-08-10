@@ -232,9 +232,9 @@ void registerTimelineTurnActivityTests() {
         turnId: 'turn-1',
         type: TimelineEntryType.text,
         textChannel: TimelineTextChannel.finalAnswer,
-        text: 'provider failed',
+        text: '',
         status: 'failed',
-        error: 'provider failed',
+        error: 'Invalid API key · invalid_api_key · HTTP 401',
       );
 
       await tester.pumpWidget(
@@ -254,13 +254,18 @@ void registerTimelineTurnActivityTests() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('provider failed'), findsOneWidget);
+      expect(
+        find.text('Invalid API key · invalid_api_key · HTTP 401'),
+        findsOneWidget,
+      );
       expect(find.byIcon(Icons.auto_awesome), findsNothing);
       expect(
         find.byKey(const ValueKey('timeline-current-activity')),
         findsNothing,
       );
-      final errorText = tester.widget<Text>(find.text('provider failed'));
+      final errorText = tester.widget<Text>(
+        find.text('Invalid API key · invalid_api_key · HTTP 401'),
+      );
       final timelineContext = tester.element(find.byType(TimelineView));
       expect(
         errorText.textSpan?.style?.color,

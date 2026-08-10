@@ -67,9 +67,22 @@ pub(crate) struct MergeCandidate {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct MergeVerificationStep {
+    pub(crate) cwd: String,
     pub(crate) command: Vec<String>,
     pub(crate) success: bool,
+    pub(crate) exit_code: Option<i32>,
+    pub(crate) failure_kind: Option<MergeVerificationFailureKind>,
     pub(crate) output: String,
+    pub(crate) output_truncated: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum MergeVerificationFailureKind {
+    NonZeroExit,
+    StartFailed,
+    TimedOut,
+    RuntimeFailed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

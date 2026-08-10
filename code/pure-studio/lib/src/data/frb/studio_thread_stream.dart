@@ -380,6 +380,17 @@ StudioTurnView _turnFromFrb(frb.BridgeTurn value) {
       failed: StudioTurnState.failed,
       interrupted: StudioTurnState.cancelled,
     ),
+    failure: value.failure == null
+        ? null
+        : StudioTurnFailureView(
+            category: value.failure!.category,
+            providerKind: value.failure!.providerKind,
+            code: value.failure!.code,
+            httpStatus: value.failure!.httpStatus,
+            message: value.failure!.message,
+            retryable: value.failure!.retryable,
+            retryAfterMs: value.failure!.retryAfterMs?.toInt(),
+          ),
     updatedAt: _dateFromUnix(value.updatedAt),
   );
 }
