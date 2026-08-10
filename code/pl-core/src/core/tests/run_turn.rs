@@ -818,8 +818,7 @@ async fn capture_default_tools_request(enable_hosted_tools: bool) -> serde_json:
     handle.await.unwrap();
 
     assert_eq!(result.status, TurnResultStatus::Completed);
-    let request = bodies.lock().unwrap()[0].clone();
-    request
+    bodies.lock().unwrap()[0].clone()
 }
 
 fn local_responses_model() -> pl_model::ModelInfo {

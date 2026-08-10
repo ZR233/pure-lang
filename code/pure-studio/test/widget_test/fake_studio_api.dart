@@ -613,10 +613,7 @@ Map<String, Object?> _providerSettingsCommandJson(
           ],
           'modelConnectionModes': [
             for (final model in provider.modelConnectionModes)
-              {
-                'slug': model.slug,
-                'connectionMode': model.connectionMode,
-              },
+              {'slug': model.slug, 'connectionMode': model.connectionMode},
           ],
         },
     ],
