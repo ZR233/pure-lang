@@ -257,7 +257,7 @@ class SkillsTabState extends ConsumerState<SkillsTab> {
       _wasTabActive = controller.index == widget.tabIndex;
       if (_wasTabActive && !_discovering) {
         _discoverSkills();
-  }
+      }
     }
   }
 

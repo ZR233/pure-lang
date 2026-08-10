@@ -45,6 +45,7 @@ class _FakeStudioApi implements StudioApi {
   Object? resolveInteractionError;
   int resolveInteractionCount = 0;
   String? discoverProjectId;
+  int discoverCallCount = 0;
   List<String> discoveredSkills = const [];
   int loadProviderUsagesCount = 0;
   Completer<List<ProviderUsageView>>? blockedProviderUsageLoad;
@@ -418,6 +419,7 @@ class _FakeStudioApi implements StudioApi {
   @override
   Future<List<String>> listDiscoveredSkills(String projectId) async {
     discoverProjectId = projectId;
+    discoverCallCount += 1;
     return discoveredSkills;
   }
 
