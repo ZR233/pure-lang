@@ -322,7 +322,7 @@ async fn completion_requires_current_design_and_pass_then_atomically_releases_le
         .unwrap();
     let error = fixture
         .store
-        .complete_reviewed_task(&fixture.root_thread_id, &run.expected_head, "verified")
+        .complete_reviewed_task(&fixture.root_thread_id, &run.expected_head)
         .await
         .unwrap_err();
     assert!(error.to_string().contains("reviewing task run"));
@@ -370,16 +370,133 @@ async fn completion_requires_current_design_and_pass_then_atomically_releases_le
 
     let completed = fixture
         .store
-        .complete_reviewed_task(&fixture.root_thread_id, &run.expected_head, "verified")
+        .complete_reviewed_task(&fixture.root_thread_id, &run.expected_head)
         .await
         .unwrap();
 
     assert_eq!(completed.phase, TaskRunPhase::Completed);
-    assert_eq!(completed.status_message.as_deref(), Some("verified"));
+    assert_eq!(completed.status_message, None);
     assert!(
         fixture
             .store
             .read_branch_lease(&fixture.run_id)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn task_complete_does_not_run_project_checks_for_flutter_changes() {
+    let fixture = DeliveryFixture::new(
+        "task-completion-with-flutter-changes",
+        vec!["code/pure-studio"],
+    )
+    .await;
+    fixture.commit_file("code/pure-studio/lib/invalid_for_analyzer.dart");
+    let delivery_head = git_output(&fixture.worktree, &["rev-parse", "HEAD"]);
+    let delivery = fixture.submit(&delivery_head).await.unwrap();
+    let run = fixture
+        .store
+        .read_task_run(&fixture.task_run_id)
+        .await
+        .unwrap()
+        .unwrap();
+    let resulting_head =
+        integrate_planner_delivery(&fixture, MergeMethod::CherryPick, &delivery.head_commit);
+    fixture
+        .coordinator
+        .record_planner_merge(
+            &fixture.root_thread_id,
+            TaskRecordMergeInput {
+                executor_agent_id: fixture.subagent.id.clone(),
+                completion_revision: 1,
+                expected_previous_head: run.expected_head,
+                resulting_head: resulting_head.clone(),
+                method: MergeMethod::CherryPick,
+                summary: "record Flutter delivery".to_string(),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+
+    std::fs::create_dir_all(fixture.repository.join("design")).unwrap();
+    std::fs::write(
+        fixture.repository.join("design/guide.md"),
+        "# Completion design\n",
+    )
+    .unwrap();
+    git(&fixture.repository, &["add", "design/guide.md"]);
+    git(
+        &fixture.repository,
+        &["commit", "-m", "document Flutter delivery"],
+    );
+    let design_head = git_output(&fixture.repository, &["rev-parse", "HEAD"]);
+    assert!(
+        fixture
+            .store
+            .advance_task_design_head(&fixture.task_run_id, &resulting_head, &design_head)
+            .await
+            .unwrap()
+    );
+
+    let round = fixture
+        .store
+        .begin_integrated_review(&fixture.root_thread_id, "call-final-review")
+        .await
+        .unwrap();
+    fixture
+        .store
+        .authorize_reviewer_spawn(
+            &fixture.root_thread_id,
+            "call-final-review",
+            "agent-final-review",
+        )
+        .await
+        .unwrap();
+    fixture
+        .store
+        .activate_reviewer(&round.id, "agent-final-review")
+        .await
+        .unwrap();
+
+    let (rejected_ends_turn, rejected_json) =
+        call_task_complete(&fixture, "call-complete-before-review").await;
+    assert!(!rejected_ends_turn);
+    assert_eq!(rejected_json["status"], "rejected");
+    assert_eq!(rejected_json["code"], "reviewMissing");
+    assert!(rejected_json.get("verification").is_none());
+
+    fixture
+        .store
+        .complete_task_review(
+            &fixture.root_thread_id,
+            "agent-final-review",
+            AgentReview {
+                verdict: ReviewVerdict::Pass,
+                summary: "integrated review passed".to_string(),
+                design_references: vec![ReviewDesignReference {
+                    path: "design/guide.md".to_string(),
+                    section: "Completion design".to_string(),
+                }],
+                findings: Vec::new(),
+            },
+        )
+        .await
+        .unwrap();
+
+    let (ends_turn, json) = call_task_complete(&fixture, "call-complete").await;
+    assert!(ends_turn);
+    assert_eq!(json["status"], "completed");
+    assert_eq!(json["run"]["phase"], "completed");
+    assert_eq!(json["run"]["statusMessage"], serde_json::Value::Null);
+    assert!(json.get("verification").is_none());
+    assert!(
+        fixture
+            .store
+            .read_branch_lease(&fixture.task_run_id)
             .await
             .unwrap()
             .is_none()
@@ -1160,6 +1277,41 @@ fn integrate_planner_delivery(
         }
     }
     git_output(&fixture.repository, &["rev-parse", "HEAD"])
+}
+
+async fn call_task_complete(fixture: &DeliveryFixture, tool_id: &str) -> (bool, serde_json::Value) {
+    let tool = fixture
+        .coordinator
+        .task_complete_tool(fixture.root_thread_id.clone());
+    let (event_tx, _) = tokio::sync::broadcast::channel(16);
+    let output = tool
+        .execute(
+            ToolInput {
+                arguments: serde_json::json!({}),
+                session_id: fixture.root_thread_id.clone(),
+                tool_id: tool_id.to_string(),
+                revision_base: 0,
+            },
+            ToolContext {
+                event_tx,
+                options: TurnOptions::default(),
+                workspace_access: WorkspaceAccess::WorkspaceOnly,
+                workspace: pl_core::AgentWorkspace::local(fixture.repository.clone()),
+                workspace_instructions: None,
+                instruction_snapshot: None,
+                provider_call_id: Some(tool_id.to_string()),
+                active_subagent: None,
+                lsp_runtime: None,
+                parent_session: Arc::new(AgentSession::from_messages(Vec::new())),
+                working_set: TurnWorkingSetHandle::default(),
+                tool_cache: TurnToolCacheHandle::default(),
+            },
+        )
+        .await
+        .unwrap();
+    let ends_turn = output.ends_turn();
+    let json = serde_json::from_str(&output.into_model_output()).unwrap();
+    (ends_turn, json)
 }
 
 async fn approve_delivery(

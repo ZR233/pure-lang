@@ -501,44 +501,25 @@ class _ToolGroupItemRow extends StatelessWidget {
     if (result == null || result.trim().isEmpty) {
       return null;
     }
-    if (item.name == 'task_complete') {
-      return _taskCompleteResultDetail(result);
-    }
     if (item.part.status == 'completed') {
       return null;
+    }
+    if (item.name == 'task_complete') {
+      return _taskCompleteRejectionDetail(result);
     }
     return result;
   }
 
-  String _taskCompleteResultDetail(String result) {
+  String _taskCompleteRejectionDetail(String result) {
     try {
       final decoded = jsonDecode(result);
       if (decoded is! Map) return result;
+      final code = decoded['code']?.toString();
       final message = decoded['message']?.toString();
-      final lines = <String>[if (message?.trim().isNotEmpty == true) message!];
-      final verification = decoded['verification'];
-      if (verification is List) {
-        for (final rawStep in verification) {
-          if (rawStep is! Map) continue;
-          final command = rawStep['command'];
-          final commandText = command is List
-              ? command.map((part) => part.toString()).join(' ')
-              : command?.toString() ?? '';
-          final cwd = rawStep['cwd']?.toString() ?? '.';
-          final exitCode = rawStep['exitCode'];
-          final failureKind = rawStep['failureKind']?.toString();
-          lines.add(
-            [
-              if (commandText.isNotEmpty) commandText,
-              'cwd: $cwd',
-              if (exitCode != null) 'exit: $exitCode',
-              if (failureKind?.isNotEmpty == true) failureKind!,
-            ].join(' · '),
-          );
-          final output = rawStep['output']?.toString().trim();
-          if (output?.isNotEmpty == true) lines.add(output!);
-        }
-      }
+      final lines = <String>[
+        if (code?.trim().isNotEmpty == true) code!,
+        if (message?.trim().isNotEmpty == true) message!,
+      ];
       return lines.isEmpty ? result : lines.join('\n');
     } catch (_) {
       return result;

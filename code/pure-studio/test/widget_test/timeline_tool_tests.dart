@@ -1,59 +1,76 @@
 part of '../widget_test.dart';
 
 void registerTimelineToolTests() {
-  testWidgets(
-    'task_complete rejection exposes structured verification detail',
-    (tester) async {
-      final part = _toolTimelinePart(
-        id: 'task-complete-1',
-        groupId: 'task-complete-group',
-        turnId: 'turn-task-complete',
-        name: 'task_complete',
-        status: 'failed',
-        result: jsonEncode({
-          'kind': 'rejected',
-          'message': 'Task completion verification failed',
-          'verification': [
-            {
-              'cwd': 'code/pure-studio',
-              'command': ['flutter', 'analyze'],
-              'exitCode': 1,
-              'failureKind': 'nonZeroExit',
-              'output': 'analyzer found one error',
-              'outputTruncated': false,
-            },
-          ],
-        }),
-      );
+  testWidgets('task_complete rejection exposes its stable code and message', (
+    tester,
+  ) async {
+    final part = _toolTimelinePart(
+      id: 'task-complete-1',
+      groupId: 'task-complete-group',
+      turnId: 'turn-task-complete',
+      name: 'task_complete',
+      status: 'failed',
+      result: jsonEncode({
+        'status': 'rejected',
+        'code': 'reviewMissing',
+        'recoverable': true,
+        'message': 'Latest integrated review must pass',
+      }),
+    );
 
-      await tester.pumpWidget(
-        _timelineApp(
-          home: Scaffold(
-            body: TimelineView(
-              threadId: 'session-1',
-              turn: null,
-              rows: timelineRowsFromFixtureParts([part]),
-            ),
+    await tester.pumpWidget(
+      _timelineApp(
+        home: Scaffold(
+          body: TimelineView(
+            threadId: 'session-1',
+            turn: null,
+            rows: timelineRowsFromFixtureParts([part]),
           ),
         ),
-      );
-      await tester.pump();
-      await tester.tap(
-        find.byKey(const ValueKey('timeline-tool-group-summary')),
-      );
-      await tester.pump();
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('timeline-tool-group-summary')));
+    await tester.pump();
 
-      expect(
-        find.textContaining('Task completion verification failed'),
-        findsWidgets,
-      );
-      expect(find.textContaining('flutter analyze'), findsOneWidget);
-      expect(find.textContaining('cwd: code/pure-studio'), findsOneWidget);
-      expect(find.textContaining('exit: 1'), findsOneWidget);
-      expect(find.textContaining('nonZeroExit'), findsOneWidget);
-      expect(find.textContaining('analyzer found one error'), findsOneWidget);
-    },
-  );
+    expect(
+      find.text('reviewMissing\nLatest integrated review must pass'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('completed task_complete hides its result payload', (
+    tester,
+  ) async {
+    final part = _toolTimelinePart(
+      id: 'task-complete-2',
+      groupId: 'task-complete-completed-group',
+      turnId: 'turn-task-completed',
+      name: 'task_complete',
+      status: 'completed',
+      result: jsonEncode({
+        'status': 'completed',
+        'run': {'id': 'task-run-hidden', 'phase': 'completed'},
+      }),
+    );
+
+    await tester.pumpWidget(
+      _timelineApp(
+        home: Scaffold(
+          body: TimelineView(
+            threadId: 'session-1',
+            turn: null,
+            rows: timelineRowsFromFixtureParts([part]),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('timeline-tool-group-summary')));
+    await tester.pump();
+
+    expect(find.textContaining('task-run-hidden'), findsNothing);
+  });
 
   testWidgets('timeline renders dedicated web search action and result links', (
     tester,

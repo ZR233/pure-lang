@@ -1,11 +1,8 @@
-use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
-use super::git::changed_files_between;
-use super::merge::{ProductionMergeVerifier, select_merge_verification_commands};
 use super::{
     ReviewScope, ReviewVerdict, TaskCoordinator, TaskRunPhase, TaskRunRecord, TaskStopOrigin,
     TaskStopReason, ThreadExecutionStatus, WorkUnitStatus,
@@ -29,7 +26,6 @@ struct StopTaskInput {
 #[serde(rename_all = "camelCase")]
 struct TaskCompletionOutput {
     run: TaskRunRecord,
-    verification: Vec<super::MergeVerificationStep>,
 }
 
 #[derive(Debug, Serialize)]
@@ -40,7 +36,6 @@ enum TaskCompleteOutcome {
         code: &'static str,
         recoverable: bool,
         message: String,
-        verification: Vec<super::MergeVerificationStep>,
     },
 }
 
@@ -50,7 +45,6 @@ impl TaskCompleteOutcome {
             code,
             recoverable: true,
             message: message.into(),
-            verification: Vec::new(),
         }
     }
 }
@@ -260,35 +254,9 @@ impl TaskCoordinator {
                 error.to_string(),
             ));
         }
-        let changed_files = changed_files_between(
-            Path::new(&run.workspace_root),
-            &run.base_commit,
-            &run.expected_head,
-        )
-        .await?;
-        let commands =
-            select_merge_verification_commands(Path::new(&run.workspace_root), &changed_files);
-        let verification = ProductionMergeVerifier::verify_commands(commands).await;
-        if verification.iter().any(|step| !step.success) {
-            return Ok(TaskCompleteOutcome::Rejected {
-                code: "verificationFailed",
-                recoverable: true,
-                message: "task completion verification failed; inspect verification steps"
-                    .to_string(),
-                verification,
-            });
-        }
-        let summary = if verification.is_empty() {
-            "task completed; no additional final checks were required".to_string()
-        } else {
-            format!(
-                "task completed after {} final verification checks",
-                verification.len()
-            )
-        };
         let completed = self
             .store
-            .complete_reviewed_task(thread_id, &run.expected_head, &summary)
+            .complete_reviewed_task(thread_id, &run.expected_head)
             .await;
         let completed = match completed {
             Ok(completed) => completed,
@@ -301,10 +269,7 @@ impl TaskCoordinator {
         };
         self.release_owned_process_lease(&run.id);
         Ok(TaskCompleteOutcome::Completed(Box::new(
-            TaskCompletionOutput {
-                run: completed,
-                verification,
-            },
+            TaskCompletionOutput { run: completed },
         )))
     }
 

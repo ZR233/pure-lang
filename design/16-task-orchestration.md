@@ -155,9 +155,9 @@ wake；review changes-requested 后的 rework failure 也走同一路径，不�
 `AwaitingCompletion/failed`。取消由既有 stop/cancel 收束处理，不额外唤醒 Planner。
 
 每个 Agent Turn 结束时，Studio 从结构化 `TurnFailure` 派生独立的
-`TaskFailureDisposition`。capacity、transport、408/409/425/429、5xx、普通验证失败和
-`task_complete` 验证不通过为 Recoverable；authentication、authorization、configuration、
-provider protocol、fatal tool runtime、internal invariant 以及未知永久 provider failure 为 Fatal。
+`TaskFailureDisposition`。capacity、transport、408/409/425/429、5xx 和普通验证失败为
+Recoverable；authentication、authorization、configuration、provider protocol、fatal tool runtime、
+internal invariant 以及未知永久 provider failure 为 Fatal。
 该判断只使用 typed category/kind/retry，不解析 message。
 
 Recoverable child failure 保留 WorkUnit/Review 可 follow-up 状态并产生一次 Planner wake；
@@ -270,14 +270,17 @@ worktree/branch；失去 durable owner 的资源继续保留现场。
 - 全部 WorkUnit 为 Merged 或 NoDelivery；
 - 最新 integrated review 针对当前 HEAD 且 verdict 为 pass；
 - 当前分支、workspace、TaskRun 和 BranchLease expectedHead 精确一致；
-- 最终验证通过且不存在 StopRequested。
+- 不存在 StopRequested。
 
-工具返回 tagged `TaskCompleteOutcome`：`completed { run, verification }` 或
-`rejected { failure, verification }`。所有门禁拒绝使用稳定 code（wrongPhase、stopRequested、
-repositoryDrift、reviewMissing、deliveriesIncomplete、verificationFailed）和用户可读说明。
-验证步骤保存命令、仓库相对 cwd、exitCode、nonZeroExit/startFailed/timedOut/runtimeFailed、32 KiB
-有界输出及 outputTruncated。rejected 通过普通 tool failure JSON 同时进入 Planner 上下文、SQLite
-Item 与 GUI；Task 保持 Reviewing，lease/review 不变，且 Planner Turn 只有成功完成时才结束。
+工具返回 tagged `TaskCompleteOutcome`：`completed { run }` 或
+`rejected { code, recoverable, message }`。所有门禁拒绝使用稳定 code（wrongPhase、stopRequested、
+repositoryDrift、reviewMissing、deliveriesIncomplete）和用户可读说明。rejected 通过普通 tool
+failure JSON 同时进入 Planner 上下文、SQLite Item 与 GUI；Task 保持 Reviewing，lease/review
+不变，且 Planner Turn 只有成功完成时才结束。
+
+`task_complete` 只提交通用 Task 生命周期事实，不选择或执行任何项目命令。项目验证由 executor
+按照 durable handoff 中的 typed command 契约完成，并通过 WorkCompletion 保存验证摘要；reviewer
+负责审查这些证据和实现结果。Task harness 不根据 changed files、目录名或语言推断额外验证。
 
 完成事务写 completed 并删除 BranchLease。任何迟到 child completion、旧 generation 或旧 Turn
 通知都不能改变已提交的 Task 终态。

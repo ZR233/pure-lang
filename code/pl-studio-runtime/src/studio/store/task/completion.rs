@@ -193,7 +193,6 @@ impl StudioStore {
         &self,
         thread_id: &str,
         expected_head: &str,
-        verification_summary: &str,
     ) -> Result<TaskRunRecord> {
         let tx = self.db.begin().await?;
         let result = async {
@@ -209,14 +208,9 @@ impl StudioStore {
             }
             validate_lease(&tx, &run, expected_head).await?;
             validate_completion_children(&tx, &run).await?;
-            let completed = super::write_task_terminal_fact(
-                &tx,
-                run,
-                TaskRunPhase::Completed,
-                Some(verification_summary.to_string()),
-                None,
-            )
-            .await?;
+            let completed =
+                super::write_task_terminal_fact(&tx, run, TaskRunPhase::Completed, None, None)
+                    .await?;
             delete_lease(&tx, &completed.id).await?;
             super::task_run_record(completed)
         }
