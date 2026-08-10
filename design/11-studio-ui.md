@@ -161,5 +161,6 @@ Thread，没有剩余 root Thread 时按产品默认规则创建并选择空会�
 - root/child 切换时 canonical workspace 与 UI ephemeral 状态均正确隔离；
 - lag、断流和旧 generation 不污染当前 workspace；
 - Flutter analyze、widget/integration tests 通过；
+- Skills 页 active 时自动重新发现有 widget test 覆盖再次进入与快照替换；
 - Windows native Driver 使用真实 Bridge，关闭 frame sync，验证输入 read-back、SQLite 状态、
   绝对路径截图和零 runtime error。
