@@ -219,11 +219,13 @@ class SkillsTab extends ConsumerStatefulWidget {
     required this.skills,
     required this.settings,
     required this.projectId,
+    required this.tabIndex,
   });
 
   final List<String> skills;
   final SkillsSettingsView settings;
   final String? projectId;
+  final int tabIndex;
 
   @override
   ConsumerState<SkillsTab> createState() => SkillsTabState();
@@ -235,11 +237,45 @@ class SkillsTabState extends ConsumerState<SkillsTab> {
   bool _discovering = false;
   String? _discoverError;
   String? _saveError;
+  TabController? _tabController;
+  bool _wasTabActive = false;
 
   @override
   void initState() {
     super.initState();
     _discoveredSkills.addAll(widget.skills);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final controller = DefaultTabController.of(context);
+    if (controller != _tabController) {
+      _tabController?.removeListener(_handleTabChanged);
+      _tabController = controller;
+      _tabController?.addListener(_handleTabChanged);
+      _wasTabActive = controller.index == widget.tabIndex;
+      if (_wasTabActive && !_discovering) {
+        _discoverSkills();
+  }
+    }
+  }
+
+  @override
+  void dispose() {
+    _tabController?.removeListener(_handleTabChanged);
+    super.dispose();
+  }
+
+  void _handleTabChanged() {
+    final controller = _tabController;
+    if (controller == null) return;
+    final isActive =
+        controller.index == widget.tabIndex && !controller.indexIsChanging;
+    if (isActive && !_wasTabActive && !_discovering) {
+      _discoverSkills();
+    }
+    _wasTabActive = isActive;
   }
 
   @override
@@ -360,13 +396,18 @@ class SkillsTabState extends ConsumerState<SkillsTab> {
       _discoverError = null;
     });
     try {
-      final skills = await ref
+      final discovered = await ref
           .read(studioControllerProvider.notifier)
           .listDiscoveredSkills();
       if (!mounted) {
         return;
       }
-      setState(() => _discoveredSkills.addAll(skills));
+      setState(() {
+        _discoveredSkills
+          ..clear()
+          ..addAll(widget.skills)
+          ..addAll(discovered);
+      });
     } catch (error) {
       if (mounted) {
         setState(() => _discoverError = error.toString());

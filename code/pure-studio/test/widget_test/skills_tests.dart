@@ -19,11 +19,8 @@ void registerSkillsTests() {
 
     await tester.tap(find.text('Skills'));
     await tester.pumpAndSettle();
-    expect(find.text('flutter-ui-polish'), findsNothing);
 
-    await tester.tap(find.widgetWithText(FilledButton, 'Discover'));
-    await tester.pumpAndSettle();
-
+    // Switching to the Skills tab auto-triggers discovery.
     expect(api.discoverProjectId, 'project-1');
     expect(find.text('flutter-ui-polish'), findsOneWidget);
     expect(find.text('runtime-review'), findsOneWidget);
