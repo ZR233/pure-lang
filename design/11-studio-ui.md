@@ -143,6 +143,7 @@ typed recovery issue：健康内容继续可用，故障项显示错误与安全
 Settings 是独立页面，覆盖 Providers、Instructions、Skills、Roles、MCP、Security、General。
 所有保存采用 typed command，并用 bridge 返回的 canonical settings snapshot 替换本地状态；
 secret 使用 preserve/replace/clear enum，不解析错误消息或 raw JSON 控制流程。
+Skills 页在每次变为 active tab 时自动重新发现项目技能列表，用最新快照替换缓存而非累加。
 
 聊天页保持低对比双栏桌面布局：左侧 Project/root Thread，右侧当前 Thread workspace；窄屏改为
 icon rail。普通 agent 正文无卡片背景，plan 使用轻边框，reasoning/tool 默认折叠。Composer、
@@ -163,5 +164,6 @@ Thread，没有剩余 root Thread 时按产品默认规则创建并选择空会�
 - root/child 切换时 canonical workspace 与 UI ephemeral 状态均正确隔离；
 - lag、断流和旧 generation 不污染当前 workspace；
 - Flutter analyze、widget/integration tests 通过；
+- Skills 页 active 时自动重新发现有 widget test 覆盖再次进入与快照替换；
 - Windows native Driver 使用真实 Bridge，关闭 frame sync，验证输入 read-back、SQLite 状态、
   绝对路径截图和零 runtime error。

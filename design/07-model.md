@@ -113,9 +113,11 @@ Zhipu Coding Plan 是 catalog preset，默认使用 `https://open.bigmodel.cn/ap
 不同 protocol API 的差异保持在 `pl-model` 内部，核心层只看到 `CompletionRequest`、`CompletionResponse` 和 provider 无关的 timeline 事件流。
 
 所有当前 preset 都复用 `protocol::openai` 的两种 wire API。协议与连接模式是正交维度：
-Responses 支持 `web_socket | http`，Chat Completions 只支持 `http`。内置 OpenAI preset 使用
-Responses，模式顺序固定 WS、HTTP，默认 WS；选择 HTTP 时仍调用 `/responses` 并消费 SSE，
-绝不切换到 Chat Completions。MiMo、DeepSeek、Zhipu 使用 Chat Completions HTTP。
+Responses 支持 `web_socket | http`，Chat Completions 只支持 `http`。协议由模型的
+`ModelRequestProfile.wire_protocol` 声明，不再由 provider 实例统一决定。内置 OpenAI preset 的所有模型
+使用 Responses，模式顺序固定 WS、HTTP，默认 WS；选择 HTTP 时仍调用 `/responses` 并消费 SSE，
+绝不切换到 Chat Completions。DeepSeek flash 使用 Responses HTTP；DeepSeek pro、MiMo、Zhipu
+使用 Chat Completions HTTP。同一 provider 实例下的不同模型可以使用不同协议。
 
 连接模式由 `ProviderConnectionMode` 表达并持久化在每个 provider 实例上，不由厂商身份隐式
 推断。preset 在 catalog 中同时声明协议、允许模式顺序和默认模式，Web 与 Flutter 只渲染

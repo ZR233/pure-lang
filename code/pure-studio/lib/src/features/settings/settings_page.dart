@@ -94,6 +94,7 @@ class _SettingsScaffold extends StatelessWidget {
         skills: {...state.activeSkills, ...state.skills.disabled}.toList(),
         settings: state.skills,
         projectId: state.selectedProjectId,
+        tabIndex: _SettingsTab.skills.index,
       ),
       RolesTab(providers: state.providers, roles: state.roles),
       McpTab(servers: state.mcpServers),
