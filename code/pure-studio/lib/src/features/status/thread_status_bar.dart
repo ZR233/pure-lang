@@ -86,9 +86,7 @@ class ThreadStatusBar extends ConsumerWidget {
                       ),
                     _StatusReadout(
                       icon: Icons.account_tree_outlined,
-                      label: thread.role.isEmpty
-                          ? (thread.isRoot ? 'planner' : 'agent')
-                          : thread.role,
+                      label: context.roleLabel(thread.role),
                       tooltip: thread.status.isEmpty
                           ? thread.title
                           : '${thread.title} · ${thread.status}',

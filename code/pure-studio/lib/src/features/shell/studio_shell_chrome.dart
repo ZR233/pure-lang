@@ -164,13 +164,13 @@ class _AgentSwitcherState extends ConsumerState<_AgentSwitcher> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          _agentDisplayName(thread),
+                          _agentDisplayName(context, thread),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
                         if (thread.role.trim().isNotEmpty)
                           Text(
-                            thread.role,
+                            context.roleLabel(thread.role),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: Theme.of(context).textTheme.labelSmall
@@ -292,15 +292,15 @@ String _agentShortStatus(StudioThread thread) {
   return status.isEmpty ? 'idle' : status;
 }
 
-String _agentDisplayName(StudioThread thread) {
+String _agentDisplayName(BuildContext context, StudioThread thread) {
   if (!thread.isRoot && thread.title.trim().isNotEmpty) {
     return thread.title.trim();
   }
   final role = thread.role.trim();
   if (role.isEmpty) {
-    return thread.isRoot ? 'Agent' : thread.id;
+    return thread.isRoot ? context.l10n.roleEmpty : thread.id;
   }
-  return '${role[0].toUpperCase()}${role.substring(1)}';
+  return context.roleLabel(role);
 }
 
 String _threadSubtitle(BuildContext context, StudioThread thread) {

@@ -647,5 +647,10 @@
   "timelineWebSearchSearching": "Searching the web",
   "timelineWebSearchOpening": "Opening a web page",
   "timelineWebSearchFinding": "Finding text on a page",
-  "timelineWebSearchResults": "Result links"
+  "timelineWebSearchResults": "Result links",
+  "roleExplorer": "Explorer",
+  "rolePlanner": "Planner",
+  "roleExecutor": "Executor",
+  "roleReviewer": "Reviewer",
+  "roleEmpty": "Agent"
 }
