@@ -1488,6 +1488,21 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get timelineWebSearchResults => '结果链接';
+
+  @override
+  String get roleExplorer => '探索者';
+
+  @override
+  String get rolePlanner => '计划者';
+
+  @override
+  String get roleExecutor => '执行者';
+
+  @override
+  String get roleReviewer => '审查者';
+
+  @override
+  String get roleEmpty => '代理';
 }
 
 /// The translations for Chinese, using the Han script (`zh_Hans`).
@@ -2974,4 +2989,19 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get timelineWebSearchResults => '结果链接';
+
+  @override
+  String get roleExplorer => '探索者';
+
+  @override
+  String get rolePlanner => '计划者';
+
+  @override
+  String get roleExecutor => '执行者';
+
+  @override
+  String get roleReviewer => '审查者';
+
+  @override
+  String get roleEmpty => '代理';
 }

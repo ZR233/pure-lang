@@ -119,6 +119,9 @@ root-only 和活动 Task 锁定同时由 StudioRuntime 校验，不能只依赖 
 
 agent directory 只在 header 的单一菜单中展示 root/child 层级、role、status 和 attention。
 child 的 timeline 不复制到 root，父 Thread 的 agent control tool 只作为自己的 toolCall Item。
+UI 展示固定 role 时按当前 locale 使用本地化名称（中文为探索者、计划者、执行者、审查者），
+但 Thread、Agent 和设置协议仍保存稳定的 role key。未知扩展 role 保留原始值作为展示回退，
+不能因本地化映射缺失而隐藏或改写身份；空 role 使用本地化的通用 Agent 名称。
 
 Turn phase 只在 timeline 尾部的一个活动块显示：preparing、thinking、responding、planning、
 runningTool、waitingInteraction、persisting。终态后移除活动块；失败和中断由 Turn 终态展示。

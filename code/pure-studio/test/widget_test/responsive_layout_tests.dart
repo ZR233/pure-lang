@@ -116,7 +116,7 @@ void registerResponsiveLayoutTests() {
           );
           await tester.pumpAndSettle();
 
-          expect(find.text('Planner'), findsOneWidget);
+          expect(find.text('Planner'), findsWidgets);
           expect(find.text('Responsive reviewer'), findsOneWidget);
           expect(find.text('Capture worker'), findsOneWidget);
           final reviewerItem = find.byKey(

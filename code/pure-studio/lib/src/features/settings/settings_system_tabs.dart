@@ -180,7 +180,7 @@ class _RoleSettingsRow extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          role,
+          context.roleLabel(role),
           style: context.text.bodyMedium?.copyWith(
             color: context.studioInk,
             fontWeight: FontWeight.w600,

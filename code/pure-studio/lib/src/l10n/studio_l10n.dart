@@ -113,4 +113,20 @@ extension StudioLocalizationsX on BuildContext {
       _ => state,
     };
   }
+
+  /// Maps a protocol role key to its localized display name.
+  ///
+  /// Fixed roles translate to the current locale; an empty role falls back to a
+  /// generic label; unknown extension roles are returned unchanged so custom
+  /// identities are never hidden or rewritten.
+  String roleLabel(String role) {
+    return switch (role.trim()) {
+      'explorer' => l10n.roleExplorer,
+      'planner' => l10n.rolePlanner,
+      'executor' => l10n.roleExecutor,
+      'reviewer' => l10n.roleReviewer,
+      '' => l10n.roleEmpty,
+      _ => role,
+    };
+  }
 }

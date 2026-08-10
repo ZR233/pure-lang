@@ -2824,6 +2824,36 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Result links'**
   String get timelineWebSearchResults;
+
+  /// No description provided for @roleExplorer.
+  ///
+  /// In en, this message translates to:
+  /// **'Explorer'**
+  String get roleExplorer;
+
+  /// No description provided for @rolePlanner.
+  ///
+  /// In en, this message translates to:
+  /// **'Planner'**
+  String get rolePlanner;
+
+  /// No description provided for @roleExecutor.
+  ///
+  /// In en, this message translates to:
+  /// **'Executor'**
+  String get roleExecutor;
+
+  /// No description provided for @roleReviewer.
+  ///
+  /// In en, this message translates to:
+  /// **'Reviewer'**
+  String get roleReviewer;
+
+  /// No description provided for @roleEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'Agent'**
+  String get roleEmpty;
 }
 
 class _AppLocalizationsDelegate

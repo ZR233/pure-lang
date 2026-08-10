@@ -1546,4 +1546,19 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get timelineWebSearchResults => 'Result links';
+
+  @override
+  String get roleExplorer => 'Explorer';
+
+  @override
+  String get rolePlanner => 'Planner';
+
+  @override
+  String get roleExecutor => 'Executor';
+
+  @override
+  String get roleReviewer => 'Reviewer';
+
+  @override
+  String get roleEmpty => 'Agent';
 }

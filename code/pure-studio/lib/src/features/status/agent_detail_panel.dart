@@ -185,7 +185,9 @@ class _AgentTreeCardState extends State<AgentTreeCard> {
                 children: [
                   Flexible(
                     child: Text(
-                      agent.role.isNotEmpty ? agent.role : agent.id,
+                      agent.role.isNotEmpty
+                          ? context.roleLabel(agent.role)
+                          : agent.id,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: context.text.labelLarge?.copyWith(
