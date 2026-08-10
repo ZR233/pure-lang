@@ -3,6 +3,8 @@ use serde_json::{Value, json};
 const TOKEN_ESTIMATE_BYTES: usize = 4;
 
 pub const DEFAULT_MODEL_TOOL_OUTPUT_TOKENS: usize = 3_000;
+pub const DEFAULT_MODEL_TOOL_OUTPUT_BATCH_TOKENS: usize = DEFAULT_MODEL_TOOL_OUTPUT_TOKENS * 2;
+pub const MIN_MODEL_TOOL_OUTPUT_BATCH_TOKENS: usize = 128;
 pub const MAX_MODEL_TOOL_OUTPUT_BYTES: usize = 12 * 1024;
 
 pub fn model_visible_tool_output(output: &str) -> String {
@@ -13,13 +15,30 @@ pub fn model_visible_tool_output_with_tokens(output: &str, max_output_tokens: us
     let max_bytes = max_output_tokens
         .saturating_mul(TOKEN_ESTIMATE_BYTES)
         .clamp(1, MAX_MODEL_TOOL_OUTPUT_BYTES);
-    if output.len() <= max_bytes {
+    project_model_visible_tool_output(output, max_bytes, MAX_MODEL_TOOL_OUTPUT_BYTES)
+}
+
+pub fn model_visible_tool_output_with_bytes(output: &str, max_output_bytes: usize) -> String {
+    if max_output_bytes == 0 {
+        return String::new();
+    }
+    let max_bytes = max_output_bytes.min(MAX_MODEL_TOOL_OUTPUT_BYTES);
+    project_model_visible_tool_output(output, max_bytes, max_bytes)
+}
+
+fn project_model_visible_tool_output(
+    output: &str,
+    projection_bytes: usize,
+    enforced_bytes: usize,
+) -> String {
+    if output.len() <= projection_bytes {
         return output.to_string();
     }
     let projected = if let Ok(value) = serde_json::from_str::<Value>(output) {
-        bounded_json_tool_output(value, max_bytes).to_string()
+        bounded_json_tool_output(value, projection_bytes).to_string()
     } else {
-        let (text, truncated, bytes_omitted, next_offset) = bounded_text(output, max_bytes, 0);
+        let (text, truncated, bytes_omitted, next_offset) =
+            bounded_text(output, projection_bytes, 0);
         json!({
             "truncated": truncated,
             "bytesReturned": text.len(),
@@ -29,7 +48,96 @@ pub fn model_visible_tool_output_with_tokens(output: &str, max_output_tokens: us
         })
         .to_string()
     };
-    enforce_model_output_limit(&projected, MAX_MODEL_TOOL_OUTPUT_BYTES)
+    enforce_model_output_limit(&projected, enforced_bytes)
+}
+
+/// 为同一模型响应产生的工具结果分配统一 token 预算。
+///
+/// 单结果沿用既有 3,000 token 上限。多结果默认合计不超过 6,000 token；
+/// 若已知压缩阈值剩余空间，则最多使用剩余量的四分之一，同时尽量为每项
+/// 保留 128 token 的最小可诊断份额。
+pub fn model_tool_output_batch_token_budget(
+    output_count: usize,
+    remaining_context_tokens: Option<u64>,
+) -> usize {
+    if output_count <= 1 {
+        return DEFAULT_MODEL_TOOL_OUTPUT_TOKENS;
+    }
+    let maximum = DEFAULT_MODEL_TOOL_OUTPUT_BATCH_TOKENS;
+    let fair_floor = MIN_MODEL_TOOL_OUTPUT_BATCH_TOKENS
+        .saturating_mul(output_count)
+        .min(maximum);
+    let contextual_budget = remaining_context_tokens.map_or(maximum, |remaining| {
+        usize::try_from(remaining / 4).unwrap_or(usize::MAX)
+    });
+    contextual_budget.clamp(fair_floor, maximum)
+}
+
+/// 在固定总预算内投影一批模型可见工具结果，保持输入顺序和结果数量。
+pub fn model_visible_tool_output_batch_with_tokens(
+    outputs: &[String],
+    max_total_tokens: usize,
+) -> Vec<String> {
+    if outputs.is_empty() {
+        return Vec::new();
+    }
+    let max_total_bytes = max_total_tokens.saturating_mul(TOKEN_ESTIMATE_BYTES);
+    let allocations = fair_output_byte_allocations(outputs, max_total_bytes);
+    outputs
+        .iter()
+        .zip(allocations)
+        .map(|(output, max_bytes)| model_visible_tool_output_with_bytes(output, max_bytes))
+        .collect()
+}
+
+fn fair_output_byte_allocations(outputs: &[String], max_total_bytes: usize) -> Vec<usize> {
+    let output_count = outputs.len();
+    let total_bytes = outputs
+        .iter()
+        .map(String::len)
+        .fold(0_usize, usize::saturating_add);
+    if total_bytes <= max_total_bytes {
+        return outputs.iter().map(String::len).collect();
+    }
+
+    let fair_share_bytes = MIN_MODEL_TOOL_OUTPUT_BATCH_TOKENS * TOKEN_ESTIMATE_BYTES;
+    let initial_share = fair_share_bytes.min(max_total_bytes / output_count);
+    let mut allocations = outputs
+        .iter()
+        .map(|output| output.len().min(initial_share))
+        .collect::<Vec<_>>();
+    let mut remaining = max_total_bytes.saturating_sub(allocations.iter().sum::<usize>());
+
+    while remaining > 0 {
+        let active = outputs
+            .iter()
+            .zip(&allocations)
+            .filter(|(output, allocated)| output.len() > **allocated)
+            .count();
+        if active == 0 {
+            break;
+        }
+        let share = remaining.div_ceil(active).max(1);
+        let mut distributed = 0_usize;
+        for (output, allocated) in outputs.iter().zip(&mut allocations) {
+            if remaining == 0 {
+                break;
+            }
+            let addition = output
+                .len()
+                .saturating_sub(*allocated)
+                .min(share)
+                .min(remaining);
+            *allocated = allocated.saturating_add(addition);
+            remaining -= addition;
+            distributed = distributed.saturating_add(addition);
+        }
+        if distributed == 0 {
+            break;
+        }
+    }
+
+    allocations
 }
 
 /// 对所有工具输出执行最终字节预算，任何工具或产品 adapter 都不能绕过。
@@ -60,7 +168,7 @@ pub fn enforce_model_output_limit(output: &str, requested_max_bytes: usize) -> S
                 return candidate;
             }
             if preview_bytes <= 1 {
-                return "{}".to_string();
+                return utf8_prefix("{}", max_bytes).to_string();
             }
             preview_bytes = (preview_bytes / 2).max(1);
         }
@@ -208,4 +316,64 @@ fn utf8_suffix(value: &str, max_bytes: usize) -> &str {
         start += 1;
     }
     &value[start..]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn batch_projection_preserves_small_results_and_order() {
+        let outputs = vec!["small".to_string(), "x".repeat(8_000), "tail".to_string()];
+
+        let projected = model_visible_tool_output_batch_with_tokens(&outputs, 512);
+
+        assert_eq!(projected.len(), outputs.len());
+        assert_eq!(projected[0], "small");
+        assert_eq!(projected[2], "tail");
+        assert!(projected.iter().map(String::len).sum::<usize>() <= 512 * 4);
+    }
+
+    #[test]
+    fn batch_projection_fairly_shares_budget_between_large_results() {
+        let outputs = vec!["甲".repeat(4_000), "乙".repeat(4_000)];
+
+        let projected = model_visible_tool_output_batch_with_tokens(&outputs, 256);
+
+        assert_eq!(projected[0].len(), projected[1].len());
+        assert!(projected.iter().map(String::len).sum::<usize>() <= 256 * 4);
+        assert!(
+            projected
+                .iter()
+                .all(|output| output.is_char_boundary(output.len()))
+        );
+    }
+
+    #[test]
+    fn batch_projection_strictly_bounds_json_results() {
+        let outputs = vec![
+            json!({ "stdout": "x".repeat(8_000) }).to_string(),
+            json!({ "items": vec!["y".repeat(2_000); 8] }).to_string(),
+        ];
+
+        let projected = model_visible_tool_output_batch_with_tokens(&outputs, 128);
+
+        assert!(projected.iter().map(String::len).sum::<usize>() <= 128 * 4);
+    }
+
+    #[test]
+    fn batch_budget_adapts_to_remaining_context_with_a_fair_floor() {
+        assert_eq!(model_tool_output_batch_token_budget(0, None), 3_000);
+        assert_eq!(model_tool_output_batch_token_budget(1, Some(1)), 3_000);
+        assert_eq!(model_tool_output_batch_token_budget(2, None), 6_000);
+        assert_eq!(model_tool_output_batch_token_budget(2, Some(20_000)), 5_000);
+        assert_eq!(model_tool_output_batch_token_budget(2, Some(100)), 256);
+    }
+
+    #[test]
+    fn byte_projection_honors_tiny_strict_limits() {
+        let projected = model_visible_tool_output_with_bytes("{\"value\":true}", 1);
+
+        assert!(projected.len() <= 1);
+    }
 }

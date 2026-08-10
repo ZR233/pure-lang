@@ -98,6 +98,30 @@ fn provider_default_model_slugs_are_backed_by_default_models() {
 }
 
 #[test]
+fn bundled_chat_models_opt_in_to_parallel_wire_only_when_supported() {
+    let models = default_models();
+
+    for slug in deepseek_default_model_slugs()
+        .iter()
+        .chain(zhipu_default_model_slugs())
+    {
+        let model = models.iter().find(|model| model.slug == *slug).unwrap();
+        assert!(
+            model.request_profile.chat_parallel_tool_calls,
+            "{slug} should opt in to the Chat parallel_tool_calls field"
+        );
+    }
+
+    for slug in mimo_default_model_slugs() {
+        let model = models.iter().find(|model| model.slug == *slug).unwrap();
+        assert!(
+            !model.request_profile.chat_parallel_tool_calls,
+            "{slug} should omit the Chat parallel_tool_calls field"
+        );
+    }
+}
+
+#[test]
 fn default_models_include_deepseek_v4_models() {
     let models = default_models();
 

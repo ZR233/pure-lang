@@ -20,6 +20,8 @@ pub(super) struct ChatRequestBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_choice: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    parallel_tool_calls: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_tokens: Option<u64>,
@@ -107,6 +109,10 @@ impl ChatRequestBody {
             stream: true,
             tools,
             tool_choice,
+            parallel_tool_calls: model
+                .request_profile
+                .chat_parallel_tool_calls
+                .then_some(request.parallel_tool_calls),
             temperature: request.temperature,
             max_tokens,
             max_completion_tokens,

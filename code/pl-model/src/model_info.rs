@@ -54,6 +54,8 @@ pub struct ModelRequestProfile {
     pub body: Map<String, Value>,
     #[serde(default, skip_serializing_if = "Map::is_empty")]
     pub options: Map<String, Value>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub chat_parallel_tool_calls: bool,
     #[serde(default, skip_serializing_if = "MaxTokensField::is_default")]
     pub max_tokens_field: MaxTokensField,
     #[serde(default, skip_serializing_if = "ResponsesMaxTokensField::is_default")]
@@ -67,6 +69,7 @@ impl ModelRequestProfile {
             && self.headers.is_empty()
             && self.body.is_empty()
             && self.options.is_empty()
+            && !self.chat_parallel_tool_calls
             && self.max_tokens_field.is_default()
             && self.responses_max_tokens_field.is_default()
     }
@@ -84,6 +87,10 @@ impl ModelRequestProfile {
             );
         }
     }
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]

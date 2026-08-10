@@ -41,6 +41,10 @@ impl Tool for McpLeaseToolAdapter {
         self.descriptor.effect
     }
 
+    fn supports_parallel_tool_calls(&self) -> bool {
+        self.descriptor.effect == Some(ToolEffect::Read)
+    }
+
     fn execute<'a>(
         &'a self,
         input: ToolInput,

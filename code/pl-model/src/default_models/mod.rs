@@ -419,7 +419,7 @@ fn zhipu_text_family() -> ModelFamily {
         truncation_mode: TruncationMode::Tokens,
         truncation_limit: 10_000,
         parameters: vec![zhipu_plain_effort_parameter()],
-        request_profile: ModelRequestProfile::default(),
+        request_profile: chat_parallel_request_profile(),
         base_instructions: String::new(),
     }
 }
@@ -446,7 +446,7 @@ fn zhipu_glm52_family() -> ModelFamily {
         truncation_mode: TruncationMode::Tokens,
         truncation_limit: 10_000,
         parameters: vec![zhipu_glm52_effort_parameter()],
-        request_profile: ModelRequestProfile::default(),
+        request_profile: chat_parallel_request_profile(),
         base_instructions: String::new(),
     }
 }
@@ -458,7 +458,7 @@ fn zhipu_vision_family() -> ModelFamily {
         truncation_mode: TruncationMode::Tokens,
         truncation_limit: 10_000,
         parameters: vec![zhipu_plain_effort_parameter()],
-        request_profile: ModelRequestProfile::default(),
+        request_profile: chat_parallel_request_profile(),
         base_instructions: String::new(),
     }
 }
@@ -471,6 +471,14 @@ fn deepseek_request_profile() -> ModelRequestProfile {
     body.insert("thinking".to_string(), Value::Object(thinking));
     ModelRequestProfile {
         body,
+        chat_parallel_tool_calls: true,
+        ..ModelRequestProfile::default()
+    }
+}
+
+fn chat_parallel_request_profile() -> ModelRequestProfile {
+    ModelRequestProfile {
+        chat_parallel_tool_calls: true,
         ..ModelRequestProfile::default()
     }
 }

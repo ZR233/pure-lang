@@ -43,6 +43,20 @@ inference 只在 transcript 末尾物化一份最新 working-context tail，不�
 暴露。`contextCompaction` 只保留为无正文内部审计 Item，并标记 transcript replacement。当前 Todo、
 usage、progress 等产品事实仍只由 `ThreadRuntimeSnapshot` 拥有，working state 不能反向驱动产品状态。
 
+### 3.2.1 工具批次执行与结果预算
+
+同一次模型响应产生的多个工具调用按 provider 顺序建立 canonical toolCall，并可在同一轮调度中
+并发执行；每个结果仍按原顺序、原 callId 与对应调用配对后，一次性进入下一次模型请求。并行只适用于
+工具自身明确声明可并行且运行时锁为共享或无锁的调用。MCP 工具只有服务器配置提供可信的
+`ToolEffect::Read` 时才能声明可并行并进入共享锁；effect 未知或可能写入的 MCP 工具保持独占，
+不从第三方 annotation 隐式提升权限。
+
+成功工具批次在写入 session 前应用统一的模型可见结果总预算。预算以上下文压缩阈值的剩余空间为
+输入，并受固定批次上限约束；分配采用稳定的公平水位算法，小结果优先完整保留，大结果共享剩余预算。
+所有 tool result 和 callId 都必须保留，顺序不得改变。批次裁剪只修改 durable history 中模型可见的
+结果及其 visibleBytes 指标；UI display result、原始字节数、原始内容哈希和 artifact 引用保持不变，
+确保模型后续输入与持久化回放一致，同时不丢失用户可见诊断信息。
+
 ## 3.3 Interaction
 
 Interaction 是独立 durable server request，带 threadId、turnId 和可选 itemId/toolId/agentPath。

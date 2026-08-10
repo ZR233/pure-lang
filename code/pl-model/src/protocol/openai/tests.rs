@@ -178,6 +178,49 @@ fn chat_maps_image_parts_to_content_array() {
     );
 }
 
+#[test]
+fn chat_omits_parallel_tool_calls_without_profile_opt_in() {
+    let request = request_with_effort("high");
+    let model = ModelInfo::fallback("chat-compatible");
+
+    let body = OpenAiProtocol::chat().build_request_body_with_model(&request, &model);
+
+    assert!(body.get("parallel_tool_calls").is_none());
+}
+
+#[test]
+fn chat_writes_enabled_parallel_tool_calls_after_profile_opt_in() {
+    let request = request_with_effort("high");
+    let mut model = ModelInfo::fallback("chat-compatible");
+    model.request_profile.chat_parallel_tool_calls = true;
+
+    let body = OpenAiProtocol::chat().build_request_body_with_model(&request, &model);
+
+    assert_eq!(body["parallel_tool_calls"], serde_json::json!(true));
+}
+
+#[test]
+fn chat_writes_disabled_parallel_tool_calls_after_profile_opt_in() {
+    let mut request = request_with_effort("high");
+    request.parallel_tool_calls = false;
+    let mut model = ModelInfo::fallback("chat-compatible");
+    model.request_profile.chat_parallel_tool_calls = true;
+
+    let body = OpenAiProtocol::chat().build_request_body_with_model(&request, &model);
+
+    assert_eq!(body["parallel_tool_calls"], serde_json::json!(false));
+}
+
+#[test]
+fn responses_parallel_tool_calls_wire_is_unchanged() {
+    let request = request_with_effort("high");
+    let model = ModelInfo::fallback("responses-compatible");
+
+    let body = OpenAiProtocol::responses().build_request_body_with_model(&request, &model);
+
+    assert_eq!(body["parallel_tool_calls"], serde_json::json!(true));
+}
+
 fn request_with_tool_history(tool_metadata: HashMap<String, String>) -> CompletionRequest {
     let calls = vec![ToolCall::custom(
         "ctc_1",

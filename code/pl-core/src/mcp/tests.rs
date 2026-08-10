@@ -11,13 +11,14 @@ use tokio::sync::{Mutex, Notify};
 use super::contract::{
     McpCallRequest, McpConnectRequest, McpRuntimeHost, McpSession, McpToolDefinition,
 };
-use super::tool_adapter::format_mcp_content;
+use super::tool_adapter::{McpLeaseToolAdapter, format_mcp_content};
 use super::transport::{HttpMcpClient, McpStderrSeverity, classify_mcp_stderr_line};
 use super::{McpAvailabilityKind, McpRuntime, is_mcp_tool_name};
 use crate::config::{
     EffectiveMcpServerConfig, McpServerConfig, McpServerMutationPolicy, McpServerSourceKind,
     McpServerStatusKind, McpServerTransport,
 };
+use crate::tool::{Tool, ToolRuntimeLockPolicy};
 use crate::turn::ToolEffect;
 
 #[derive(Clone, Default)]
@@ -256,6 +257,64 @@ fn format_mcp_content_prefers_text_parts() {
     ];
 
     assert_eq!(format_mcp_content(&content), "hello\n{\"ok\":true}");
+}
+
+#[tokio::test]
+async fn lease_tools_parallelize_only_for_trusted_read_effects() {
+    let host = FakeHost::default();
+    host.define("read", "ok", Arc::new(AtomicBool::new(false)))
+        .await;
+    host.define("unknown", "ok", Arc::new(AtomicBool::new(false)))
+        .await;
+    host.define("write", "ok", Arc::new(AtomicBool::new(false)))
+        .await;
+    let runtime = McpRuntime::new(host);
+    let handle = runtime.handle();
+    let read = effective_server(
+        "read",
+        McpServerStatusKind::Enabled,
+        McpServerSourceKind::BuiltIn,
+        "v1",
+    );
+    let unknown = effective_server(
+        "unknown",
+        McpServerStatusKind::Enabled,
+        McpServerSourceKind::User,
+        "v1",
+    );
+    let mut write = effective_server(
+        "write",
+        McpServerStatusKind::Enabled,
+        McpServerSourceKind::User,
+        "v1",
+    );
+    write.tool_effect = Some(ToolEffect::WorkspaceWrite);
+
+    handle
+        .reconcile(BTreeMap::from([
+            ("read".to_string(), read),
+            ("unknown".to_string(), unknown),
+            ("write".to_string(), write),
+        ]))
+        .await
+        .unwrap();
+    let lease = handle.acquire_turn_lease().await.unwrap();
+
+    for (server_id, supports_parallel, lock_policy) in [
+        ("read", true, ToolRuntimeLockPolicy::Shared),
+        ("unknown", false, ToolRuntimeLockPolicy::Exclusive),
+        ("write", false, ToolRuntimeLockPolicy::Exclusive),
+    ] {
+        let descriptor = lease
+            .tools()
+            .iter()
+            .find(|descriptor| descriptor.server_id == server_id)
+            .cloned()
+            .unwrap();
+        let adapter = McpLeaseToolAdapter::new(lease.clone(), descriptor);
+        assert_eq!(adapter.supports_parallel_tool_calls(), supports_parallel);
+        assert_eq!(adapter.runtime_lock_policy(), lock_policy);
+    }
 }
 
 #[test]

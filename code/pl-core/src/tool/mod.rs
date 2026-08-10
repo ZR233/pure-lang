@@ -71,8 +71,11 @@ pub use mcp_tool::{
     host_mcp_tool_schemas,
 };
 pub use model_output::{
-    DEFAULT_MODEL_TOOL_OUTPUT_TOKENS, MAX_MODEL_TOOL_OUTPUT_BYTES, enforce_model_output_limit,
-    model_visible_tool_output, model_visible_tool_output_with_tokens,
+    DEFAULT_MODEL_TOOL_OUTPUT_BATCH_TOKENS, DEFAULT_MODEL_TOOL_OUTPUT_TOKENS,
+    MAX_MODEL_TOOL_OUTPUT_BYTES, MIN_MODEL_TOOL_OUTPUT_BATCH_TOKENS, enforce_model_output_limit,
+    model_tool_output_batch_token_budget, model_visible_tool_output,
+    model_visible_tool_output_batch_with_tokens, model_visible_tool_output_with_bytes,
+    model_visible_tool_output_with_tokens,
 };
 pub use output_format::{
     MAX_TOOL_UI_PREVIEW_BYTES, SECRET_REDACTION_REPLACEMENT, SecretRedaction,

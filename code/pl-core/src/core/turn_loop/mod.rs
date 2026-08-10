@@ -37,7 +37,9 @@ use crate::{
 use super::TurnEngine;
 use super::permission::cancellation_reason;
 use super::progress::{ProgressEmitter, ProgressVerbosity};
-use super::tool_dispatch::{ToolExecutionContext, ToolExecutionError, execute_tool_calls};
+use super::tool_dispatch::{
+    ToolExecutionContext, ToolExecutionError, ToolExecutionRecord, execute_tool_calls,
+};
 use super::turn_result::{
     budget_limited_turn_result, failed_turn_result, failed_turn_result_with_abort_reason,
     interrupted_turn_result, is_cancelled, looks_like_unexecuted_tool_call_text,
@@ -588,7 +590,7 @@ pub(super) async fn run_turn_with_trace(
         let count = tool_calls.len();
         progress.tool_detail(format!("模型请求调用 {count} 个工具。"));
 
-        let tool_results = match execute_tool_calls(
+        let mut tool_results = match execute_tool_calls(
             &tool_calls,
             &mut budget_tracker,
             recorder,
@@ -648,6 +650,11 @@ pub(super) async fn run_turn_with_trace(
                 .iter()
                 .any(|event| matches!(event, crate::tool::ToolRuntimeEvent::EndTurn))
         });
+        let remaining_context_tokens = model_info
+            .resolved_auto_compact_limit()
+            .or_else(|| model_info.resolved_context_window())
+            .map(|limit| limit.saturating_sub(response_total_tokens));
+        apply_model_tool_output_batch_budget(&mut tool_results, remaining_context_tokens);
         let tool_results = tool_results
             .into_iter()
             .map(|tool_result| {
@@ -783,6 +790,72 @@ pub(super) async fn run_turn_with_trace(
         rollover_compaction_error: None,
         trace_events: recorder.drain(),
     })
+}
+
+fn apply_model_tool_output_batch_budget(
+    tool_results: &mut [ToolExecutionRecord],
+    remaining_context_tokens: Option<u64>,
+) {
+    if tool_results.len() <= 1 {
+        return;
+    }
+    let token_budget = crate::tool::model_tool_output_batch_token_budget(
+        tool_results.len(),
+        remaining_context_tokens,
+    );
+    let original_results = tool_results
+        .iter()
+        .map(|tool_result| tool_result.result.clone())
+        .collect::<Vec<_>>();
+    let projected_results =
+        crate::tool::model_visible_tool_output_batch_with_tokens(&original_results, token_budget);
+    let original_bytes = original_results.iter().map(String::len).sum::<usize>();
+    let projected_bytes = projected_results.iter().map(String::len).sum::<usize>();
+
+    for ((tool_result, original_result), projected_result) in tool_results
+        .iter_mut()
+        .zip(original_results)
+        .zip(projected_results)
+    {
+        if projected_result == original_result {
+            continue;
+        }
+        let visible_bytes = projected_result.len() as u64;
+        let mut metrics_updated = false;
+        for event in &mut tool_result.runtime_events {
+            if let crate::tool::ToolRuntimeEvent::OutputMetrics {
+                model_visible_bytes,
+                ..
+            } = event
+            {
+                *model_visible_bytes = visible_bytes;
+                metrics_updated = true;
+                break;
+            }
+        }
+        if !metrics_updated {
+            tool_result
+                .runtime_events
+                .push(crate::tool::ToolRuntimeEvent::OutputMetrics {
+                    raw_bytes: original_result.len() as u64,
+                    model_visible_bytes: visible_bytes,
+                    artifact_bytes: 0,
+                    result_hash: canonical_content_hash(original_result.as_bytes()),
+                });
+        }
+        tool_result.result = projected_result;
+    }
+
+    if projected_bytes < original_bytes {
+        tracing::info!(
+            target: "pl_core::tool_metrics",
+            tool_count = tool_results.len(),
+            token_budget,
+            original_bytes,
+            projected_bytes,
+            "applied model-visible tool output batch budget"
+        );
+    }
 }
 
 fn sync_prompt_cache_key(
@@ -1062,7 +1135,27 @@ fn tool_result_continuation(output: &str) -> Option<String> {
 mod receipt_tests {
     use pretty_assertions::assert_eq;
 
-    use super::compact_artifact_reference;
+    use super::{
+        ToolExecutionRecord, apply_model_tool_output_batch_budget, compact_artifact_reference,
+        tool_result_receipt,
+    };
+
+    fn tool_result(id: &str, result: String) -> ToolExecutionRecord {
+        ToolExecutionRecord {
+            id: id.to_string(),
+            call_id: Some(format!("call-{id}")),
+            name: "read_file".to_string(),
+            kind: pl_protocol::ToolCallKind::Function,
+            display_result: result.clone(),
+            result,
+            arguments: "{}".to_string(),
+            status: pl_trace::TracePartStatus::Completed,
+            exit_code: Some(0),
+            timed_out: false,
+            revision: None,
+            runtime_events: Vec::new(),
+        }
+    }
 
     #[test]
     fn artifact_receipt_keeps_identity_but_not_large_payload() {
@@ -1084,5 +1177,46 @@ mod receipt_tests {
                 .unwrap()
                 .starts_with("sha256:")
         );
+    }
+
+    #[test]
+    fn batch_budget_updates_receipts_without_changing_display_results() {
+        let first_result = "a".repeat(2_000);
+        let second_result = "b".repeat(2_000);
+        let mut results = vec![
+            tool_result("first", first_result.clone()),
+            tool_result("second", second_result.clone()),
+        ];
+        results[0]
+            .runtime_events
+            .push(crate::tool::ToolRuntimeEvent::OutputMetrics {
+                raw_bytes: 5_000,
+                model_visible_bytes: first_result.len() as u64,
+                artifact_bytes: 7,
+                result_hash: "sha256:original".to_string(),
+            });
+
+        apply_model_tool_output_batch_budget(&mut results, Some(100));
+
+        assert_eq!(results[0].display_result, first_result);
+        assert_eq!(results[1].display_result, second_result);
+        assert!(
+            results
+                .iter()
+                .map(|result| result.result.len())
+                .sum::<usize>()
+                <= 256 * 4
+        );
+
+        let first_receipt = tool_result_receipt(&results[0]);
+        assert_eq!(first_receipt.total_bytes, 5_000);
+        assert_eq!(first_receipt.result_hash, "sha256:original");
+        assert_eq!(first_receipt.visible_bytes, results[0].result.len() as u64);
+        assert!(first_receipt.truncated);
+
+        let second_receipt = tool_result_receipt(&results[1]);
+        assert_eq!(second_receipt.total_bytes, 2_000);
+        assert_eq!(second_receipt.visible_bytes, results[1].result.len() as u64);
+        assert!(second_receipt.truncated);
     }
 }
