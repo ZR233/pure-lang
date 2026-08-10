@@ -78,7 +78,11 @@ impl<B> McpTool<B> {
         let description = schema.description().to_string();
         let input_schema = match schema {
             ToolSchema::Function { input_schema, .. } => input_schema,
-            ToolSchema::Custom { .. } | ToolSchema::WebSearch { .. } => {
+            ToolSchema::Custom { .. }
+            | ToolSchema::Namespace { .. }
+            | ToolSchema::ToolSearch
+            | ToolSchema::ProgrammaticToolCalling
+            | ToolSchema::WebSearch { .. } => {
                 json!({ "type": "object" })
             }
         };

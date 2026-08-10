@@ -72,6 +72,11 @@ DeepSeek 继续按未命中输入、命中输入和输出计算。每个 inferen
 相对全未缓存输入的缓存节省；不同币种永不相加。`TurnBillingRecord` 的 JSON 版本可独立演进，
 旧字段使用 serde default 读取，不要求数据库 schema 升级。
 
+每个 inference billing 记录还可附带版本化 `orchestration` 指标：工具 schema/result 估算 token、
+tool call 与 Tool Search/Programmatic 计数、并行候选/实际并行、工具批次 wall-clock/关键路径、
+只读缓存命中，以及 Responses continuation/retry/fallback 分类。Turn 聚合只做可加计数、token 与
+时长汇总；比率和节省量由聚合后的原始量计算，避免平均值再平均。旧记录缺少该对象时按零值读取。
+
 ## 19.3 不兼容库重建
 
 启动先只读检查 canonical `studio.sqlite` 的 `user_version`、`quick_check` 与必需表/列
@@ -110,3 +115,7 @@ transcript 前后 hash、恢复次数与失败原因，但不记录 prompt 或�
 hash、workspace/Git identity、runId、Task generation、初始时间、全局 deadline、恢复次数和每次
 attempt 日志目录，用于证明原始 prompt 只提交一次以及 recovery 前后 Task/WorkUnit/worktree identity
 与 Git fingerprint 保持不变。
+
+工具编排诊断仅暴露与 inference/Turn 关联的聚合数值和稳定 enum；schema、工具参数、工具结果、
+program 正文、caller 原始 JSON 与 cache key 均不进入日志或 Flutter timeline。compaction 指标只保存
+替换前后 token 估算，不能保存被移除正文。

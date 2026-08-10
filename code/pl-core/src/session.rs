@@ -5,9 +5,9 @@ use pl_model::{CompletionResponse, ModelTransportSession, ToolCall};
 use pl_protocol::{
     AgentSessionSnapshot, AgentWorkingState, ConversationRecoveryState, Message, MessageContent,
     MessageRole, ModelContextItem, ModelContextSectionSnapshot, ModelContextSnapshot,
-    PinnedContextSection, PromptPrefixChangedReason, SessionNote, TOOL_CALLS_METADATA_KEY,
-    ThreadPromptMetadata, ToolCallHistoryMetadata, ToolCallKind, ToolResultMetadata,
-    ToolResultReceipt,
+    PinnedContextSection, PromptPrefixChangedReason, ResponsesContextItem, SessionNote,
+    TOOL_CALLS_METADATA_KEY, ThreadPromptMetadata, ToolCallCaller, ToolCallHistoryMetadata,
+    ToolCallKind, ToolResultMetadata, ToolResultReceipt,
 };
 
 use crate::working_set::canonical_content_hash;
@@ -311,6 +311,7 @@ impl AgentSession {
     /// assistant 文本消息，带 tool call 的响应写入带 metadata 的 assistant
     /// tool_calls 消息。协议级 continuation 状态由 transport session 独占维护。
     pub fn push_assistant_completion_response(&mut self, response: &CompletionResponse) {
+        self.push_responses_context_items(response.responses_context_items.clone());
         if response.tool_calls.is_empty() {
             self.push_assistant_response(
                 response.content.clone().unwrap_or_default(),
@@ -326,6 +327,18 @@ impl AgentSession {
                 response.reasoning_content.clone(),
             );
         }
+    }
+
+    pub fn push_responses_context_items(&mut self, items: Vec<ResponsesContextItem>) {
+        if items.is_empty() {
+            return;
+        }
+        self.items.extend(
+            items
+                .into_iter()
+                .map(|item| ModelContextItem::Responses { item }),
+        );
+        self.revision = self.revision.saturating_add(1);
     }
 
     /// 推入 tool result 消息。
@@ -373,6 +386,31 @@ impl AgentSession {
         tool_arguments: String,
         receipt: ToolResultReceipt,
     ) {
+        self.push_tool_result_with_receipt_and_caller(
+            tool_call_id,
+            tool_call_call_id,
+            tool_name,
+            tool_call_kind,
+            result,
+            tool_arguments,
+            receipt,
+            None,
+        );
+    }
+
+    /// 推入带 Programmatic caller 与 compact receipt 的 canonical tool result。
+    #[allow(clippy::too_many_arguments)]
+    pub fn push_tool_result_with_receipt_and_caller(
+        &mut self,
+        tool_call_id: String,
+        tool_call_call_id: Option<String>,
+        tool_name: String,
+        tool_call_kind: ToolCallKind,
+        result: String,
+        tool_arguments: String,
+        receipt: ToolResultReceipt,
+        caller: Option<ToolCallCaller>,
+    ) {
         let mut metadata = HashMap::new();
         ToolResultMetadata::new(
             tool_call_id,
@@ -381,6 +419,7 @@ impl AgentSession {
             tool_call_kind,
             tool_arguments,
         )
+        .with_caller(caller)
         .insert_into(&mut metadata);
         let message = Message {
             role: MessageRole::Tool,
@@ -706,6 +745,8 @@ mod tests {
             reasoning_content: Some("thinking".to_string()),
             tool_calls: Vec::new(),
             hosted_web_search_calls: Vec::new(),
+            responses_context_items: Vec::new(),
+            orchestration: Default::default(),
             trace_events: Vec::new(),
             next_sequence: 0,
             usage: TokenUsage::default(),
@@ -742,6 +783,8 @@ mod tests {
             reasoning_content: Some("thinking".to_string()),
             tool_calls: tool_calls.clone(),
             hosted_web_search_calls: Vec::new(),
+            responses_context_items: Vec::new(),
+            orchestration: Default::default(),
             trace_events: Vec::new(),
             next_sequence: 0,
             usage: TokenUsage::default(),
@@ -812,6 +855,57 @@ mod tests {
                 .get("tool_call_arguments")
                 .unwrap(),
             r#"{"command":"echo hi"}"#
+        );
+    }
+
+    #[test]
+    fn snapshot_round_trip_preserves_responses_items_and_program_caller() {
+        let mut session = AgentSession::new();
+        session.push_responses_context_items(vec![ResponsesContextItem {
+            kind: pl_protocol::ResponsesContextItemKind::Program,
+            value: serde_json::json!({"type": "program", "id": "program-1"}),
+        }]);
+        let receipt = ToolResultReceipt {
+            call_id: "call-1".to_string(),
+            tool_name: "read_file".to_string(),
+            arguments_hash: "arguments-hash".to_string(),
+            result_hash: "result-hash".to_string(),
+            total_bytes: 16,
+            visible_bytes: 16,
+            truncated: false,
+            artifacts: Vec::new(),
+            continuation: None,
+            reused_from_call_id: None,
+        };
+        session.push_tool_result_with_receipt_and_caller(
+            "fc-1".to_string(),
+            Some("call-1".to_string()),
+            "read_file".to_string(),
+            ToolCallKind::Function,
+            r#"{"content":"ok"}"#.to_string(),
+            r#"{"path":"README.md"}"#.to_string(),
+            receipt,
+            Some(ToolCallCaller::Program {
+                caller_id: "program-1".to_string(),
+            }),
+        );
+
+        let encoded = serde_json::to_string(&session.snapshot()).unwrap();
+        let snapshot = serde_json::from_str::<AgentSessionSnapshot>(&encoded).unwrap();
+        let restored = AgentSession::from_snapshot(snapshot);
+
+        assert!(matches!(
+            &restored.items()[0],
+            ModelContextItem::Responses { item }
+                if item.kind == pl_protocol::ResponsesContextItemKind::Program
+        ));
+        let metadata = ToolResultMetadata::from_metadata(&restored.messages()[0].metadata)
+            .expect("programmatic tool metadata");
+        assert_eq!(
+            metadata.tool_call_caller,
+            Some(ToolCallCaller::Program {
+                caller_id: "program-1".to_string()
+            })
         );
     }
 

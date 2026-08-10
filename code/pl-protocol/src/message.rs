@@ -9,6 +9,7 @@ pub const TOOL_CALL_CALL_ID_METADATA_KEY: &str = "tool_call_call_id";
 pub const TOOL_NAME_METADATA_KEY: &str = "tool_name";
 pub const TOOL_CALL_KIND_METADATA_KEY: &str = "tool_call_kind";
 pub const TOOL_CALL_ARGUMENTS_METADATA_KEY: &str = "tool_call_arguments";
+pub const TOOL_CALL_CALLER_METADATA_KEY: &str = "tool_call_caller";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -65,6 +66,13 @@ pub enum ToolCallKind {
     Custom,
 }
 
+/// Responses Programmatic Tool Calling 中嵌套工具调用的来源。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ToolCallCaller {
+    Program { caller_id: String },
+}
+
 impl ToolCallKind {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -111,6 +119,7 @@ pub struct ToolResultMetadata {
     pub tool_name: String,
     pub tool_call_kind: ToolCallKind,
     pub tool_call_arguments: Option<String>,
+    pub tool_call_caller: Option<ToolCallCaller>,
 }
 
 impl ToolResultMetadata {
@@ -127,7 +136,13 @@ impl ToolResultMetadata {
             tool_name,
             tool_call_kind,
             tool_call_arguments: Some(tool_call_arguments),
+            tool_call_caller: None,
         }
+    }
+
+    pub fn with_caller(mut self, caller: Option<ToolCallCaller>) -> Self {
+        self.tool_call_caller = caller;
+        self
     }
 
     pub fn insert_into(self, metadata: &mut HashMap<String, String>) {
@@ -142,6 +157,11 @@ impl ToolResultMetadata {
         );
         if let Some(arguments) = self.tool_call_arguments {
             metadata.insert(TOOL_CALL_ARGUMENTS_METADATA_KEY.to_string(), arguments);
+        }
+        if let Some(caller) = self.tool_call_caller
+            && let Ok(caller) = serde_json::to_string(&caller)
+        {
+            metadata.insert(TOOL_CALL_CALLER_METADATA_KEY.to_string(), caller);
         }
     }
 
@@ -169,6 +189,11 @@ impl ToolResultMetadata {
                 .unwrap_or_default(),
             tool_call_kind,
             tool_call_arguments: metadata.get(TOOL_CALL_ARGUMENTS_METADATA_KEY).cloned(),
+            tool_call_caller: metadata
+                .get(TOOL_CALL_CALLER_METADATA_KEY)
+                .map(|value| serde_json::from_str(value))
+                .transpose()
+                .map_err(|error| format!("invalid tool_call_caller metadata: {error}"))?,
         })
     }
 }

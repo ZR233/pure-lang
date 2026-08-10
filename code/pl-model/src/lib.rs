@@ -54,7 +54,7 @@ pub use request::{
     CompletionRequest, CompletionRequestBuilder, CompletionResponse, CompletionTraceContext,
     FinishReason, HostedWebSearchCall, InvalidToolArguments, ModelCompactionRequest,
     ModelCompactionResponse, OpenAiCompactionMode, ReasoningConfig, ReasoningSummary, TokenUsage,
-    ToolCall, ToolCallPayload, ToolFormat, ToolSchema,
+    ToolCall, ToolCallPayload, ToolCallerMode, ToolFormat, ToolSchema,
 };
 pub use stream::{
     CompletionBlockContent, CompletionBlockField, CompletionBlockKind, CompletionEventStream,

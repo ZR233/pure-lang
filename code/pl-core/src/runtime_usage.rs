@@ -26,6 +26,7 @@ pub(crate) struct InferenceBillingInput<'a> {
     pub model_info: &'a ModelInfo,
     pub prompt_cache_policy: EffectivePromptCachePolicy,
     pub prompt: Option<&'a ThreadPromptSnapshot>,
+    pub orchestration: pl_protocol::InferenceOrchestrationMetrics,
     pub recorded_at: i64,
 }
 
@@ -99,6 +100,7 @@ pub(crate) fn inference_billing_record(input: InferenceBillingInput<'_>) -> Infe
             .prompt
             .map(|snapshot| snapshot.prompt_cache_policy.clone()),
         prefix_changed_reason: input.prompt.map(|snapshot| snapshot.prefix_changed_reason),
+        orchestration: input.orchestration,
         recorded_at: input.recorded_at,
     }
 }
@@ -524,6 +526,7 @@ mod tests {
                 cache_write_tokens: true,
             },
             prompt: None,
+            orchestration: Default::default(),
             recorded_at: 1,
         });
 
@@ -559,6 +562,7 @@ mod tests {
                 cache_write_tokens: true,
             },
             prompt: Some(&prompt),
+            orchestration: Default::default(),
             recorded_at: 1,
         });
 

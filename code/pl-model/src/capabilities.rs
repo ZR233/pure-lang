@@ -43,6 +43,8 @@ impl ModelCapabilities {
                 parallel_tool_calls: false,
                 custom_tools: false,
                 freeform_tools: false,
+                tool_search: false,
+                programmatic_tool_calling: false,
             },
             interleaved: None,
             prompt_cache: PromptCacheModelCapabilities::default(),
@@ -79,6 +81,14 @@ impl ModelCapabilities {
 
     pub fn supports_freeform_tools(&self) -> bool {
         self.tools.freeform_tools
+    }
+
+    pub fn supports_tool_search(&self) -> bool {
+        self.tools.tool_search
+    }
+
+    pub fn supports_programmatic_tool_calling(&self) -> bool {
+        self.tools.programmatic_tool_calling
     }
 
     pub fn supports_input_modality(&self, modality: ModelModality) -> bool {
@@ -141,6 +151,10 @@ pub struct ToolCapabilities {
     pub custom_tools: bool,
     #[serde(default)]
     pub freeform_tools: bool,
+    #[serde(default)]
+    pub tool_search: bool,
+    #[serde(default)]
+    pub programmatic_tool_calling: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

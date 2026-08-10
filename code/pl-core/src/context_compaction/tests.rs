@@ -221,7 +221,23 @@ fn encrypted_checkpoint_rejects_chat_completions_provider() {
         ensure_provider_can_consume_session(ProviderWireProtocol::ChatCompletions, &session)
             .unwrap_err();
 
-    assert!(error.to_string().contains("继续使用 OpenAI provider"));
+    assert!(error.to_string().contains("继续使用 Responses provider"));
+}
+
+#[test]
+fn responses_native_context_rejects_chat_completions_provider() {
+    let session = AgentSession::from_items(vec![ModelContextItem::Responses {
+        item: pl_protocol::ResponsesContextItem {
+            kind: pl_protocol::ResponsesContextItemKind::Program,
+            value: serde_json::json!({"type": "program", "id": "program-1"}),
+        },
+    }]);
+
+    let error =
+        ensure_provider_can_consume_session(ProviderWireProtocol::ChatCompletions, &session)
+            .unwrap_err();
+
+    assert!(error.to_string().contains("Responses provider"));
 }
 
 fn test_model() -> ModelInfo {
@@ -374,6 +390,8 @@ impl ModelProvider for FakeCompactionProvider {
             reasoning_content: None,
             tool_calls: Vec::new(),
             hosted_web_search_calls: Vec::new(),
+            responses_context_items: Vec::new(),
+            orchestration: Default::default(),
             trace_events: Vec::new(),
             next_sequence: 0,
             usage: TokenUsage {

@@ -1,4 +1,6 @@
-use pl_protocol::{PureError, Result};
+use pl_protocol::{
+    InferenceOrchestrationMetrics, PureError, ResponsesContextItem, Result, ToolCallCaller,
+};
 use serde::Deserialize;
 
 use crate::request::{CompletionResponse, FinishReason, HostedWebSearchCall, TokenUsage, ToolCall};
@@ -128,6 +130,7 @@ struct ResponsesOutputItem {
     content: Option<Vec<ResponsesOutputContent>>,
     action: Option<serde_json::Value>,
     results: Option<Vec<serde_json::Value>>,
+    caller: Option<ToolCallCaller>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -136,6 +139,11 @@ struct ResponsesOutputContent {
 }
 
 pub(crate) fn responses_parse_response(body: serde_json::Value) -> Result<CompletionResponse> {
+    let raw_output = body
+        .get("output")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
     let body: ResponsesResponseBody = serde_json::from_value(body)?;
     let output = body.output.unwrap_or_default();
     let content = output.iter().find_map(|item| {
@@ -158,6 +166,12 @@ pub(crate) fn responses_parse_response(body: serde_json::Value) -> Result<Comple
             hosted_web_search_calls.push(search_call);
         }
     }
+    let responses_context_items = raw_output
+        .iter()
+        .cloned()
+        .filter_map(ResponsesContextItem::from_wire)
+        .collect::<Vec<_>>();
+    let orchestration = responses_orchestration_metrics(&raw_output, &tool_calls);
 
     let finish_reason = if tool_calls.is_empty() {
         FinishReason::Stop
@@ -173,6 +187,8 @@ pub(crate) fn responses_parse_response(body: serde_json::Value) -> Result<Comple
         tool_calls,
         trace_events: Vec::new(),
         hosted_web_search_calls,
+        responses_context_items,
+        orchestration,
         next_sequence: 0,
         usage: body
             .usage
@@ -197,12 +213,10 @@ impl ResponsesOutputItem {
                     .arguments
                     .as_deref()
                     .ok_or_else(|| response_protocol_error("function_call missing arguments"))?;
-                Ok(Some(function_tool_call_from_raw(
-                    id,
-                    name,
-                    arguments.to_string(),
-                    Some(call_id),
-                )))
+                Ok(Some(
+                    function_tool_call_from_raw(id, name, arguments.to_string(), Some(call_id))
+                        .with_caller(self.caller.clone()),
+                ))
             }
             "custom_tool_call" => {
                 let (id, call_id) = self.tool_identity("custom_tool_call")?;
@@ -214,7 +228,10 @@ impl ResponsesOutputItem {
                     .input
                     .clone()
                     .ok_or_else(|| response_protocol_error("custom_tool_call missing input"))?;
-                Ok(Some(ToolCall::custom(id, name, input, Some(call_id))))
+                Ok(Some(
+                    ToolCall::custom(id, name, input, Some(call_id))
+                        .with_caller(self.caller.clone()),
+                ))
             }
             "message"
             | "function_call_output"
@@ -260,6 +277,49 @@ impl ResponsesOutputItem {
             results: self.results.clone(),
         })
     }
+}
+
+fn responses_orchestration_metrics(
+    output: &[serde_json::Value],
+    tool_calls: &[ToolCall],
+) -> InferenceOrchestrationMetrics {
+    let tool_search_calls = output
+        .iter()
+        .filter(|item| {
+            item.get("type").and_then(serde_json::Value::as_str) == Some("tool_search_call")
+        })
+        .count() as u64;
+    let tool_search_loaded_tools = output
+        .iter()
+        .filter(|item| {
+            item.get("type").and_then(serde_json::Value::as_str) == Some("tool_search_output")
+        })
+        .filter_map(|item| item.get("tools").and_then(serde_json::Value::as_array))
+        .map(|tools| tools.iter().map(loaded_tool_count).sum::<u64>())
+        .sum();
+    let program_count = output
+        .iter()
+        .filter(|item| item.get("type").and_then(serde_json::Value::as_str) == Some("program"))
+        .count() as u64;
+    let program_tool_calls = tool_calls
+        .iter()
+        .filter(|call| call.caller.is_some())
+        .count() as u64;
+    InferenceOrchestrationMetrics {
+        tool_calls: tool_calls.len() as u64,
+        tool_search_calls,
+        tool_search_loaded_tools,
+        program_count,
+        program_tool_calls,
+        transport_attempts: 1,
+        ..InferenceOrchestrationMetrics::default()
+    }
+}
+
+fn loaded_tool_count(tool: &serde_json::Value) -> u64 {
+    tool.get("tools")
+        .and_then(serde_json::Value::as_array)
+        .map_or(1, |tools| tools.len() as u64)
 }
 
 fn response_web_search_action(value: Option<&serde_json::Value>) -> crate::WebSearchAction {
@@ -360,6 +420,11 @@ pub(crate) fn chat_parse_response(body: serde_json::Value) -> Result<CompletionR
         .and_then(|choice| choice.finish_reason.as_deref())
         .map(finish_reason_from_chat)
         .unwrap_or(FinishReason::Stop);
+    let orchestration = InferenceOrchestrationMetrics {
+        tool_calls: tool_calls.len() as u64,
+        transport_attempts: 1,
+        ..InferenceOrchestrationMetrics::default()
+    };
 
     Ok(CompletionResponse {
         response_id: None,
@@ -369,6 +434,8 @@ pub(crate) fn chat_parse_response(body: serde_json::Value) -> Result<CompletionR
         tool_calls,
         trace_events: Vec::new(),
         hosted_web_search_calls: Vec::new(),
+        responses_context_items: Vec::new(),
+        orchestration,
         next_sequence: 0,
         usage: body
             .usage

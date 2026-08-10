@@ -189,6 +189,7 @@ impl RegisteredTool {
                 name,
                 description,
                 input_schema,
+                ..
             } => Ok(Self::from_typed_fallible_execution_result(
                 name,
                 description,
@@ -199,10 +200,18 @@ impl RegisteredTool {
                 name,
                 description,
                 format,
+                ..
             } => {
                 let _ = (description, format);
                 Err(RegisteredToolSchemaError { name })
             }
+            ToolSchema::Namespace { name, .. } => Err(RegisteredToolSchemaError { name }),
+            ToolSchema::ToolSearch => Err(RegisteredToolSchemaError {
+                name: "tool_search".to_string(),
+            }),
+            ToolSchema::ProgrammaticToolCalling => Err(RegisteredToolSchemaError {
+                name: "programmatic_tool_calling".to_string(),
+            }),
             ToolSchema::WebSearch { .. } => Err(RegisteredToolSchemaError {
                 name: "web_search".to_string(),
             }),

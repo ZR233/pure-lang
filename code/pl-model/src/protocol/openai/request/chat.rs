@@ -48,6 +48,11 @@ impl ChatRequestBody {
                         "Chat Completions cannot consume remote compaction items",
                     ));
                 }
+                pl_protocol::ModelContextItem::Responses { .. } => {
+                    return Err(protocol_error(
+                        "Chat Completions cannot consume Responses native items",
+                    ));
+                }
             };
             match msg.role {
                 MessageRole::Assistant if msg.metadata.contains_key(TOOL_CALLS_METADATA_KEY) => {
@@ -224,6 +229,7 @@ impl ChatTool {
                 name,
                 description,
                 input_schema,
+                ..
             } => Self::Function {
                 function: ChatToolFunction {
                     name: name.clone(),
@@ -235,6 +241,7 @@ impl ChatTool {
                 name,
                 description,
                 format,
+                ..
             } => Self::Custom {
                 custom: ChatToolCustom {
                     name: name.clone(),
@@ -242,9 +249,12 @@ impl ChatTool {
                     format: ToolFormatBody::from_format(format),
                 },
             },
-            ToolSchema::WebSearch { .. } => {
+            ToolSchema::Namespace { .. }
+            | ToolSchema::ToolSearch
+            | ToolSchema::ProgrammaticToolCalling
+            | ToolSchema::WebSearch { .. } => {
                 return Err(protocol_error(
-                    "hosted web search is only supported by the Responses API",
+                    "Responses-only tools cannot be consumed by Chat Completions",
                 ));
             }
         };

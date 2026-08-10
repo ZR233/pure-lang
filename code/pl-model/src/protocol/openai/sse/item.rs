@@ -2,6 +2,7 @@ use serde_json::Value;
 
 use crate::WebSearchAction;
 use crate::stream::event::{ModelStreamEvent, ToolInputDeltaPayload, ToolInputPayloadKind};
+use pl_protocol::{ResponsesContextItem, ToolCallCaller};
 use pl_trace::TraceTextChannel;
 
 pub(super) fn cached_tokens_from_details(details: &Value) -> Option<u64> {
@@ -53,7 +54,10 @@ pub(super) fn output_item_tool_completed(item: &Value) -> Option<Vec<ModelStream
             let payload = Some(ToolInputDeltaPayload::FunctionArguments(
                 value_string(item, "arguments").unwrap_or_default(),
             ));
-            Some(vec![
+            let mut events = tool_caller_event(item, &item_id)
+                .into_iter()
+                .collect::<Vec<_>>();
+            events.extend([
                 ModelStreamEvent::ToolInputCompleted {
                     stream_id: None,
                     item_id: item_id.clone(),
@@ -68,13 +72,17 @@ pub(super) fn output_item_tool_completed(item: &Value) -> Option<Vec<ModelStream
                     name,
                     payload,
                 },
-            ])
+            ]);
+            Some(events)
         }
         "custom_tool_call" => {
             let payload = Some(ToolInputDeltaPayload::CustomInput(
                 value_string(item, "input").unwrap_or_default(),
             ));
-            Some(vec![
+            let mut events = tool_caller_event(item, &item_id)
+                .into_iter()
+                .collect::<Vec<_>>();
+            events.extend([
                 ModelStreamEvent::ToolInputCompleted {
                     stream_id: None,
                     item_id: item_id.clone(),
@@ -89,7 +97,8 @@ pub(super) fn output_item_tool_completed(item: &Value) -> Option<Vec<ModelStream
                     name,
                     payload,
                 },
-            ])
+            ]);
+            Some(events)
         }
         "web_search_call" => Some(vec![ModelStreamEvent::WebSearchCompleted {
             item_id,
@@ -98,6 +107,20 @@ pub(super) fn output_item_tool_completed(item: &Value) -> Option<Vec<ModelStream
         }]),
         _ => None,
     }
+}
+
+pub(super) fn output_item_native_context(item: &Value) -> Option<ModelStreamEvent> {
+    ResponsesContextItem::from_wire(item.clone())
+        .map(|item| ModelStreamEvent::ResponsesContextItem { item })
+}
+
+fn tool_caller_event(item: &Value, item_id: &str) -> Option<ModelStreamEvent> {
+    let caller = item.get("caller")?.clone();
+    let caller = serde_json::from_value::<ToolCallCaller>(caller).ok()?;
+    Some(ModelStreamEvent::ToolCallCaller {
+        item_id: item_id.to_string(),
+        caller,
+    })
 }
 
 fn responses_tool_identity(item: &Value) -> (String, Option<String>) {

@@ -55,7 +55,8 @@ provider 适配实现可以依赖 `async-openai`、`reqwest`、`tokio-tungstenit
 
 - 基础能力：`streaming`、`temperature`、`reasoning`、`web_search`。
 - 输入/输出模态：`input`、`output`，取值为 `text`、`image`、`audio`、`video`、`pdf`。
-- 工具能力：`function_calling`、`parallel_tool_calls`、`custom_tools`、`freeform_tools`。
+- 工具能力：`function_calling`、`parallel_tool_calls`、`custom_tools`、`freeform_tools`、
+  `tool_search`、`programmatic_tool_calling`。
 - 推理交错字段：`interleaved.field`，当前支持 `reasoning`、`reasoning_content`、`reasoning_details`。
 
 `pl-core` 只读取这些 provider 无关能力来做本地校验和 UI 展示：图片输入必须要求模型声明 `input = ["image"]`，工具调用必须匹配工具能力，推理请求必须匹配 `reasoning = true`。provider 私有差异不扩散到 `pl-core`。
@@ -65,7 +66,7 @@ provider 适配实现可以依赖 `async-openai`、`reqwest`、`tokio-tungstenit
 声明、wire protocol 与模型声明合成为穷尽的 `EffectivePromptCachePolicy`。未声明能力的自定义
 Responses/Chat endpoint 默认不发送任何缓存专属字段。
 
-模型级 provider override 使用 `ModelRequestProfile` 表达，包括 `api_model`、`headers`、`body`、`options`、`chat_parallel_tool_calls`、`max_tokens_field` 和 `responses_max_tokens_field`。`body` 作为 base body 注入请求体（如 DeepSeek 固定的 `thinking.type = enabled`）；其余可变字段（如 effort 透传的 `reasoning_effort`、GLM `thinking.clear_thinking`）由 `ModelInfo.parameters` 声明驱动（见 7.8）。这些字段只由 `pl-model` 的 provider adapter 消费；核心编排层不得读取或拼接这些私有字段。Chat Completions 只有在模型 profile 显式声明 `chat_parallel_tool_calls = true` 时才发送 `parallel_tool_calls`，并把核心层本轮计算出的 `true` 或 `false` 原样写入；未声明的 OpenAI-compatible endpoint 默认省略该字段，避免把 provider 无关的模型能力误当成 wire 兼容性。Chat Completions 的最大输出 token 字段默认写入 `max_tokens`；OpenAI-compatible provider 若要求新字段（如 MiMo 的 `max_completion_tokens`）可在模型 profile 中声明。Responses endpoint 默认不发送最大输出 token 字段，以匹配 Codex 常规 Responses 请求；Responses-like 代理若要求限制字段，可在模型 profile 中把 `responses_max_tokens_field` 设置为 `max_output_tokens`、`max_tokens` 或 `max_completion_tokens`。
+模型级 provider override 使用 `ModelRequestProfile` 表达，包括 `api_model`、`headers`、`body`、`options`、`chat_parallel_tool_calls`、`responses_tool_search`、`responses_programmatic_tool_calling`、`max_tokens_field` 和 `responses_max_tokens_field`。`body` 作为 base body 注入请求体（如 DeepSeek 固定的 `thinking.type = enabled`）；其余可变字段（如 effort 透传的 `reasoning_effort`、GLM `thinking.clear_thinking`）由 `ModelInfo.parameters` 声明驱动（见 7.8）。这些字段只由 `pl-model` 的 provider adapter 消费；核心编排层不得读取或拼接这些私有字段。Chat Completions 只有在模型 profile 显式声明 `chat_parallel_tool_calls = true` 时才发送 `parallel_tool_calls`，并把核心层本轮计算出的 `true` 或 `false` 原样写入；未声明的 OpenAI-compatible endpoint 默认省略该字段，避免把 provider 无关的模型能力误当成 wire 兼容性。Tool Search 与 Programmatic Tool Calling 同时要求模型能力和 Responses profile 显式开启；内建 OpenAI catalog 可以声明这两个开关，自定义 Responses-compatible endpoint 默认关闭并退回 eager/direct 工具。Chat Completions 的最大输出 token 字段默认写入 `max_tokens`；OpenAI-compatible provider 若要求新字段（如 MiMo 的 `max_completion_tokens`）可在模型 profile 中声明。Responses endpoint 默认不发送最大输出 token 字段，以匹配 Codex 常规 Responses 请求；Responses-like 代理若要求限制字段，可在模型 profile 中把 `responses_max_tokens_field` 设置为 `max_output_tokens`、`max_tokens` 或 `max_completion_tokens`。
 
 ## 7.4 Provider 抽象
 
@@ -143,6 +144,21 @@ Chat Completions wire 忽略该 Responses 专属字段。低层 `pl-model` API �
 产出事件的请求不得切换 transport 后重放。Responses HTTP/SSE 和 Chat Completions 始终发送完整历史。
 
 `CompletionRequest.messages` 中的 `MessageRole::System` 表示本轮临时前置指令或开发者上下文。Responses endpoint 序列化为 input message role `developer`，避免发送不被部分 Responses 兼容服务接受的 `system` role；Chat Completions 仍序列化为 `system` role。
+
+Responses Tool Search 通过 hosted `tool_search` 和标记 `defer_loading: true` 的 namespace/function
+schema 表达。初始请求只 eager 暴露高频核心工具；动态 MCP 与低频 Git/管理工具按稳定 namespace
+延迟加载。模型或 endpoint 缺少任一显式能力时，core 发送原有完整 schema，不发送 hosted
+`tool_search`，从而保持 eager fallback。Tool Search 的 hosted call/output、其后实际 function call
+以及 programmatic program 都是有序 Responses 原生 item，必须进入 canonical context；不得只投影
+成 message metadata 或在 HTTP/SSE 聚合时丢弃。
+
+Programmatic Tool Calling 通过 hosted `programmatic_tool_calling` 与工具的 `allowed_callers` 声明。
+首期只允许稳定本地读工具、LSP 查询和 effect 被可信配置明确标为 Read 的 MCP；命令、文件写入、
+Git mutation、审批/交互和 agent-control 始终只能 direct 调用。结构化 eligible 工具必须携带
+`output_schema`。嵌套 function/custom call 的 `caller` 在结果回传时原样保留。由于 runtime 固定
+`store: false`，session 必须按 provider 顺序持久化 reasoning、tool search、program、嵌套 call、
+call output 与 program output，并在 HTTP 重放、WebSocket full replay 和恢复后完整重建；Chat
+Completions 遇到这些 Responses 原生 item必须显式拒绝，不能降级成普通 assistant/tool message。
 
 provider transport 层把第三方 API 错误统一转换为 `PureError` 时必须先脱敏。错误文本中不得包含 bearer token、API key 或形如 `sk-...` 的密钥片段；鉴权失败、配额不足、模型不存在等服务端错误可以保留 status、错误类型、code 和可读原因，但密钥值必须替换为稳定占位。
 Responses HTTP/SSE 与 Chat Completions HTTP 必须和 WebSocket 一样，用 Serde typed error DTO 保留结构化 provider code、HTTP status、message 与可选 retry hint；进入控制流后不得把 DTO 降级成待解析字符串。408/409/425/429、5xx、建流前的瞬态网络错误以及 `server_is_overloaded` 等容量错误只允许在流对象建立前最多重试两次，并采用同一有界指数退避与抖动；一旦 HTTP 流已经建立，transport 不得因为后续流错误自动重放并制造重复输出。WS 切换 HTTP 后使用独立的 HTTP 重试预算，但不会再回到 WS；因此仅在两个 transport 都未产出流事件的最坏情况下，单次请求最多产生两次 WS 发送和三次 HTTP 发送。
@@ -320,6 +336,11 @@ provider usage 必须分别报告缓存读取和缓存写入。OpenAI GPT-5.6 �
 
 缓存诊断只记录 generation、固定前缀/工具/working context 的 hash、token 数和变化原因；不得记录
 prompt、工具参数或结果、header、凭据和配置正文。
+
+提示词诊断同时记录 eager 与 deferred schema 的估算 token、Tool Search 实际加载 schema 数、
+Programmatic program 数与嵌套调用数。Responses transport 记录 continuation attempted/used/invalid、
+full replay retry 和 HTTP fallback 的稳定原因；compaction 记录替换前后估算 token。这些计数附着于
+对应 inference 或 Turn，不能以无法关联的独立日志代替，也不得记录 program 正文。
 
 ## 7.11 Web 搜索 Provider 边界
 

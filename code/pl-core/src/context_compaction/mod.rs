@@ -71,7 +71,8 @@ fn compact_old_tool_results_for_request(input: &mut [ModelContextItem]) {
             }
             ModelContextItem::Message { .. }
             | ModelContextItem::ToolResult { .. }
-            | ModelContextItem::Compaction { .. } => {}
+            | ModelContextItem::Compaction { .. }
+            | ModelContextItem::Responses { .. } => {}
         }
     }
 }
@@ -412,10 +413,13 @@ pub(crate) fn ensure_provider_can_consume_session(
     session: &AgentSession,
 ) -> Result<()> {
     if protocol != ProviderWireProtocol::Responses
-        && session.items().iter().any(ModelContextItem::is_compaction)
+        && session
+            .items()
+            .iter()
+            .any(|item| item.is_compaction() || matches!(item, ModelContextItem::Responses { .. }))
     {
         return Err(PureError::ConfigError(
-            "当前会话包含仅 OpenAI 可读取的远程压缩 checkpoint；请继续使用 OpenAI provider，或新建会话后再切换 provider。"
+            "当前会话包含仅 Responses provider 可回放的原生上下文；请继续使用 Responses provider，或新建会话后再切换 provider。"
                 .to_string(),
         ));
     }
@@ -444,6 +448,8 @@ fn estimate_context_request_tokens(
                 ModelContextItem::Compaction { encrypted_content } => {
                     estimate_text_tokens(encrypted_content)
                 }
+                ModelContextItem::Responses { item } => serde_json::to_string(&item.value)
+                    .map_or(0, |value| estimate_text_tokens(&value)),
             })
             .sum::<u64>()
         + working_context_tail.map_or(0, history::estimate_message_tokens)

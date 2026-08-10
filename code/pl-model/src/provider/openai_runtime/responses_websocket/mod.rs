@@ -52,6 +52,9 @@ pub(super) async fn stream_responses(
             Ok(incremental) => (incremental, true, None),
             Err(reason) => (body.clone(), false, Some(reason)),
         };
+    if used_continuation {
+        transport_session.record_continuation_attempt();
+    }
     let input = body.get("input");
     let input_items = input.and_then(Value::as_array).map_or(0, Vec::len);
     let context_bytes = input
@@ -99,6 +102,7 @@ pub(super) async fn stream_responses(
         used_continuation,
         events_emitted: false,
         full_request: body,
+        transport_session,
     };
     Ok(Box::pin(futures::stream::unfold(
         state,
@@ -333,6 +337,7 @@ struct WebSocketEventState {
     used_continuation: bool,
     events_emitted: bool,
     full_request: Map<String, Value>,
+    transport_session: ModelTransportSession,
 }
 
 impl WebSocketEventState {
@@ -374,6 +379,7 @@ impl WebSocketEventState {
                             && self.used_continuation
                             && continuation_id_invalid(&value)
                         {
+                            self.transport_session.record_continuation_invalid();
                             self.guard.invalidate();
                             return Err(continuation_retry_error());
                         }
@@ -452,6 +458,9 @@ impl WebSocketEventState {
 
     fn finish_completed_response(&mut self, event: &SseStreamEvent) {
         self.commit_completed_response(event);
+        if self.used_continuation {
+            self.transport_session.record_continuation_used();
+        }
         self.stream_finished = true;
     }
 }

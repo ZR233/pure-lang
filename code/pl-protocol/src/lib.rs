@@ -11,8 +11,8 @@ mod thread;
 mod turn_failure;
 
 pub use billing::{
-    InferenceBillingAppend, InferenceBillingRecord, InferenceTokenUsage, ModelPricingSnapshot,
-    TurnBillingRecord,
+    InferenceBillingAppend, InferenceBillingRecord, InferenceOrchestrationMetrics,
+    InferenceTokenUsage, ModelPricingSnapshot, TurnBillingRecord,
 };
 pub use error::{PureError, Result};
 pub use event::{
@@ -30,17 +30,18 @@ pub use interaction::{
 pub use mcp::{McpAvailabilityDescriptor, McpHealthSnapshot, McpServerDescriptor};
 pub use message::{
     ContentPart, ImageSource, Message, MessageContent, MessageRole,
-    TOOL_CALL_ARGUMENTS_METADATA_KEY, TOOL_CALL_CALL_ID_METADATA_KEY, TOOL_CALL_ID_METADATA_KEY,
-    TOOL_CALL_KIND_METADATA_KEY, TOOL_CALLS_METADATA_KEY, TOOL_NAME_METADATA_KEY,
-    ToolCallHistoryMetadata, ToolCallKind, ToolResultMetadata,
+    TOOL_CALL_ARGUMENTS_METADATA_KEY, TOOL_CALL_CALL_ID_METADATA_KEY,
+    TOOL_CALL_CALLER_METADATA_KEY, TOOL_CALL_ID_METADATA_KEY, TOOL_CALL_KIND_METADATA_KEY,
+    TOOL_CALLS_METADATA_KEY, TOOL_NAME_METADATA_KEY, ToolCallCaller, ToolCallHistoryMetadata,
+    ToolCallKind, ToolResultMetadata,
 };
 pub use model_context::{
     AgentSessionSnapshot, AgentWorkingState, ContextSectionId, ContextSectionIdError,
     ConversationExternalStatePolicy, ConversationRecoveryMode, ConversationRecoveryRecord,
     ConversationRecoveryState, ConversationRecoveryTurnRange, ModelContextItem,
     ModelContextSectionSnapshot, ModelContextSnapshot, PinnedContextSection,
-    PromptPrefixChangedReason, SessionNote, ThreadPromptMetadata, ThreadPromptSnapshot,
-    ToolResultReceipt,
+    PromptPrefixChangedReason, ResponsesContextItem, ResponsesContextItemKind, SessionNote,
+    ThreadPromptMetadata, ThreadPromptSnapshot, ToolResultReceipt,
 };
 pub use permission::PermissionLevel;
 pub use provider_catalog::{

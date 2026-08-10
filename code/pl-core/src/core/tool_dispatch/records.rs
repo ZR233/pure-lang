@@ -220,6 +220,7 @@ fn tool_execution_record_from_envelope(
         timed_out,
         revision,
         runtime_events,
+        execution_millis: 0,
     }
 }
 

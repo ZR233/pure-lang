@@ -44,9 +44,15 @@ impl ResponsesRequestBody {
                 pl_protocol::ModelContextItem::Message { message }
                 | pl_protocol::ModelContextItem::ToolResult { message, .. } => message,
                 pl_protocol::ModelContextItem::Compaction { encrypted_content } => {
-                    input.push(ResponsesInputItem::Compaction {
-                        encrypted_content: encrypted_content.clone(),
-                    });
+                    input.push(ResponsesInputItem::typed(
+                        ResponsesTypedInputItem::Compaction {
+                            encrypted_content: encrypted_content.clone(),
+                        },
+                    ));
+                    continue;
+                }
+                pl_protocol::ModelContextItem::Responses { item } => {
+                    input.push(ResponsesInputItem::Native(item.value.clone()));
                     continue;
                 }
             };
@@ -77,11 +83,22 @@ impl ResponsesRequestBody {
                     let output = message_content_text(&msg.content);
                     match metadata.tool_call_kind {
                         ToolCallKind::Function => {
-                            input.push(ResponsesInputItem::FunctionCallOutput { call_id, output });
+                            input.push(ResponsesInputItem::typed(
+                                ResponsesTypedInputItem::FunctionCallOutput {
+                                    call_id,
+                                    output,
+                                    caller: metadata.tool_call_caller,
+                                },
+                            ));
                         }
                         ToolCallKind::Custom => {
-                            input
-                                .push(ResponsesInputItem::CustomToolCallOutput { call_id, output });
+                            input.push(ResponsesInputItem::typed(
+                                ResponsesTypedInputItem::CustomToolCallOutput {
+                                    call_id,
+                                    output,
+                                    caller: metadata.tool_call_caller,
+                                },
+                            ));
                         }
                     }
                 }
@@ -123,8 +140,15 @@ impl ResponsesRequestBody {
 }
 
 #[derive(Debug, Clone, Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(untagged)]
 enum ResponsesInputItem {
+    Typed(ResponsesTypedInputItem),
+    Native(serde_json::Value),
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum ResponsesTypedInputItem {
     Message {
         role: ResponsesRole,
         content: Vec<ResponsesContent>,
@@ -135,10 +159,14 @@ enum ResponsesInputItem {
         name: String,
         arguments: String,
         call_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        caller: Option<pl_protocol::ToolCallCaller>,
     },
     FunctionCallOutput {
         call_id: String,
         output: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        caller: Option<pl_protocol::ToolCallCaller>,
     },
     CustomToolCall {
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -146,10 +174,14 @@ enum ResponsesInputItem {
         name: String,
         input: String,
         call_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        caller: Option<pl_protocol::ToolCallCaller>,
     },
     CustomToolCallOutput {
         call_id: String,
         output: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        caller: Option<pl_protocol::ToolCallCaller>,
     },
     Compaction {
         encrypted_content: String,
@@ -157,27 +189,37 @@ enum ResponsesInputItem {
 }
 
 impl ResponsesInputItem {
+    fn typed(item: ResponsesTypedInputItem) -> Self {
+        Self::Typed(item)
+    }
+
     fn message(role: ResponsesRole, content: Vec<ResponsesContent>) -> Self {
-        Self::Message { role, content }
+        Self::typed(ResponsesTypedInputItem::Message { role, content })
     }
 
     fn from_tool_call(tool_call: ToolCall) -> Self {
         let invalid_arguments = tool_call.invalid_arguments;
         match tool_call.payload {
-            ToolCallPayload::Function { arguments } => Self::FunctionCall {
-                id: None,
-                name: tool_call.name,
-                arguments: invalid_arguments
-                    .map(|invalid| invalid.raw)
-                    .unwrap_or_else(|| serde_json::to_string(&arguments).unwrap_or_default()),
-                call_id: tool_call.call_id.unwrap_or(tool_call.id),
-            },
-            ToolCallPayload::Custom { input } => Self::CustomToolCall {
-                id: None,
-                name: tool_call.name,
-                input,
-                call_id: tool_call.call_id.unwrap_or(tool_call.id),
-            },
+            ToolCallPayload::Function { arguments } => {
+                Self::typed(ResponsesTypedInputItem::FunctionCall {
+                    id: None,
+                    name: tool_call.name,
+                    arguments: invalid_arguments
+                        .map(|invalid| invalid.raw)
+                        .unwrap_or_else(|| serde_json::to_string(&arguments).unwrap_or_default()),
+                    call_id: tool_call.call_id.unwrap_or(tool_call.id),
+                    caller: tool_call.caller,
+                })
+            }
+            ToolCallPayload::Custom { input } => {
+                Self::typed(ResponsesTypedInputItem::CustomToolCall {
+                    id: None,
+                    name: tool_call.name,
+                    input,
+                    call_id: tool_call.call_id.unwrap_or(tool_call.id),
+                    caller: tool_call.caller,
+                })
+            }
         }
     }
 }
@@ -217,12 +259,31 @@ enum ResponsesTool {
         name: String,
         description: String,
         parameters: serde_json::Value,
+        #[serde(skip_serializing_if = "is_false")]
+        defer_loading: bool,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        allowed_callers: Vec<crate::ToolCallerMode>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        output_schema: Option<serde_json::Value>,
     },
     Custom {
         name: String,
         description: String,
         format: ToolFormatBody,
+        #[serde(skip_serializing_if = "is_false")]
+        defer_loading: bool,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        allowed_callers: Vec<crate::ToolCallerMode>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        output_schema: Option<serde_json::Value>,
     },
+    Namespace {
+        name: String,
+        description: String,
+        tools: Vec<ResponsesTool>,
+    },
+    ToolSearch,
+    ProgrammaticToolCalling,
     WebSearch {
         external_web_access: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -245,20 +306,43 @@ impl ResponsesTool {
                 name,
                 description,
                 input_schema,
+                defer_loading,
+                allowed_callers,
+                output_schema,
             } => Self::Function {
                 name: name.clone(),
                 description: description.clone(),
                 parameters: input_schema.clone(),
+                defer_loading: *defer_loading,
+                allowed_callers: allowed_callers.clone(),
+                output_schema: output_schema.clone(),
             },
             ToolSchema::Custom {
                 name,
                 description,
                 format,
+                defer_loading,
+                allowed_callers,
+                output_schema,
             } => Self::Custom {
                 name: name.clone(),
                 description: description.clone(),
                 format: ToolFormatBody::from_format(format),
+                defer_loading: *defer_loading,
+                allowed_callers: allowed_callers.clone(),
+                output_schema: output_schema.clone(),
             },
+            ToolSchema::Namespace {
+                name,
+                description,
+                tools,
+            } => Self::Namespace {
+                name: name.clone(),
+                description: description.clone(),
+                tools: tools.iter().map(Self::from_schema).collect(),
+            },
+            ToolSchema::ToolSearch => Self::ToolSearch,
+            ToolSchema::ProgrammaticToolCalling => Self::ProgrammaticToolCalling,
             ToolSchema::WebSearch {
                 external_web_access,
                 indexed_web_access,
@@ -276,6 +360,10 @@ impl ResponsesTool {
             },
         }
     }
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 #[derive(Debug, Clone, Serialize)]

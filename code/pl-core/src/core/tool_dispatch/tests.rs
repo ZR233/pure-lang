@@ -21,6 +21,7 @@ fn completed_record(name: &str) -> ToolExecutionRecord {
         timed_out: false,
         revision: None,
         runtime_events: Vec::new(),
+        execution_millis: 0,
     }
 }
 

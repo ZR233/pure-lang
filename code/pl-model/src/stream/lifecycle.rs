@@ -251,6 +251,12 @@ impl StreamLifecycle {
                 action,
                 results,
             }],
+            ModelStreamEvent::ToolCallCaller { item_id, caller } => {
+                vec![ModelStreamEvent::ToolCallCaller { item_id, caller }]
+            }
+            ModelStreamEvent::ResponsesContextItem { item } => {
+                vec![ModelStreamEvent::ResponsesContextItem { item }]
+            }
             ModelStreamEvent::Usage(usage) => vec![ModelStreamEvent::Usage(usage)],
             ModelStreamEvent::Failed { code, message } => {
                 let mut events = self.close_open_blocks();

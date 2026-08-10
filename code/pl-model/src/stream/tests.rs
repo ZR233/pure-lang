@@ -165,6 +165,8 @@ fn tagged_text_decoder_gives_repeated_tags_distinct_blocks() {
             | ModelStreamEvent::ToolInputDelta { .. }
             | ModelStreamEvent::ToolInputCompleted { .. }
             | ModelStreamEvent::ToolCallReady { .. }
+            | ModelStreamEvent::ToolCallCaller { .. }
+            | ModelStreamEvent::ResponsesContextItem { .. }
             | ModelStreamEvent::WebSearchStarted { .. }
             | ModelStreamEvent::WebSearchCompleted { .. }
             | ModelStreamEvent::Usage(_)

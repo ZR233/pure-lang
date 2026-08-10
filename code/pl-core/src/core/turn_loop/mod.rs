@@ -38,7 +38,7 @@ use super::TurnEngine;
 use super::permission::cancellation_reason;
 use super::progress::{ProgressEmitter, ProgressVerbosity};
 use super::tool_dispatch::{
-    ToolExecutionContext, ToolExecutionError, ToolExecutionRecord, execute_tool_calls,
+    ToolExecutionContext, ToolExecutionError, ToolExecutionRecord, execute_tool_call_batch,
 };
 use super::turn_result::{
     budget_limited_turn_result, failed_turn_result, failed_turn_result_with_abort_reason,
@@ -63,9 +63,25 @@ pub(super) async fn run_turn_with_trace(
     let workspace_instructions = core.workspace_instructions.clone();
     let active_subagent = core.active_subagent.clone();
     let cancellation_token = options.cancellation_token.clone();
+    let model = provider.default_model().to_string();
+    let model_info = provider.model_info(&model);
+    let model_capabilities = provider.effective_model_capabilities(&model);
+    let orchestration_options = crate::tool::ToolOrchestrationOptions {
+        tool_search: provider.info().protocol == pl_model::ProviderWireProtocol::Responses
+            && model_capabilities.supports_tool_search()
+            && model_info.request_profile.responses_tool_search,
+        programmatic_tool_calling: provider.info().protocol
+            == pl_model::ProviderWireProtocol::Responses
+            && model_capabilities.supports_programmatic_tool_calling()
+            && model_info
+                .request_profile
+                .responses_programmatic_tool_calling,
+    };
     let tool_schemas = stable_tool_schemas(match options.execution_policy.as_ref() {
-        Some(policy) => core.tools.schemas_for_policy(policy),
-        None => core.tools.schemas(),
+        Some(policy) => core
+            .tools
+            .schemas_for_policy_with_orchestration(policy, orchestration_options),
+        None => core.tools.schemas_with_orchestration(orchestration_options),
     });
     let mut budget_tracker = BudgetTracker::new(request.budget);
     let mut budget_limit: Option<BudgetLimit> = None;
@@ -94,8 +110,6 @@ pub(super) async fn run_turn_with_trace(
         ProgressVerbosity::from_env(),
     );
     progress.milestone("已接收请求，正在准备上下文。");
-    let model = provider.default_model().to_string();
-
     let mut last_content = String::new();
     let mut last_reasoning_content = None;
     let mut last_model = model.clone();
@@ -106,7 +120,6 @@ pub(super) async fn run_turn_with_trace(
     let mut session_message_count = safe_message_count;
     let mut inference_count = 0_u64;
 
-    let model_info = provider.model_info(&model);
     let prompt_cache_policy = provider.info().effective_prompt_cache_policy(&model_info);
     let instruction_snapshot = match request.instruction_snapshot.clone() {
         Some(snapshot) => snapshot,
@@ -281,6 +294,7 @@ pub(super) async fn run_turn_with_trace(
                             model_info: &model_info,
                             prompt_cache_policy,
                             prompt: current_prompt_snapshot(session, &options.prompt_scope),
+                            orchestration: Default::default(),
                             recorded_at,
                         });
                         AgentInferenceCommit {
@@ -385,6 +399,8 @@ pub(super) async fn run_turn_with_trace(
         }
 
         let inference_id = format!("{turn_id}-inf-{iteration}");
+        let tool_schema_estimated_tokens =
+            crate::tool::estimate_tool_schema_tokens(&iteration_tools);
         let mut inference_item = recorder.inference_item(&turn_id, &inference_id, &model);
         recorder.start_item(inference_item.clone());
         let completion_request = CompletionRequest::builder(model.clone())
@@ -434,7 +450,7 @@ pub(super) async fn run_turn_with_trace(
                     .await
             }
         };
-        let response = match response_result {
+        let mut response = match response_result {
             Ok(response) => response,
             Err(_) if is_cancelled(&options) => {
                 session.truncate_messages(safe_message_count);
@@ -466,6 +482,7 @@ pub(super) async fn run_turn_with_trace(
                 ));
             }
         };
+        response.orchestration.tool_schema_estimated_tokens = tool_schema_estimated_tokens;
         if let Err(limit) = budget_tracker.check_wall_clock() {
             budget_limit = Some(limit);
             break;
@@ -487,7 +504,7 @@ pub(super) async fn run_turn_with_trace(
         recorder.complete_inference_item(inference_item, usage_snapshot.clone());
         let model_info = provider.model_info(&actual_model);
         let recorded_at = unix_seconds();
-        let billing = inference_billing_record(InferenceBillingInput {
+        let mut billing = inference_billing_record(InferenceBillingInput {
             inference_id,
             provider: &provider.info().name,
             model: &actual_model,
@@ -495,15 +512,9 @@ pub(super) async fn run_turn_with_trace(
             model_info: &model_info,
             prompt_cache_policy,
             prompt: current_prompt_snapshot(session, &options.prompt_scope),
+            orchestration: response.orchestration.clone(),
             recorded_at,
         });
-        let inference_commit = AgentInferenceCommit {
-            runtime_delta: agent_runtime_delta(
-                identity_for_subagent(active_subagent.as_ref()),
-                &billing,
-            ),
-            billing,
-        };
         let response_prompt_tokens = response.usage.prompt_tokens;
         let response_total_tokens = response
             .usage
@@ -516,6 +527,7 @@ pub(super) async fn run_turn_with_trace(
         let content = response.content.unwrap_or_default();
         let reasoning_content = response.reasoning_content.clone();
         let tool_calls = response.tool_calls;
+        session.push_responses_context_items(response.responses_context_items);
 
         total_usage.prompt_tokens += response.usage.prompt_tokens;
         total_usage.completion_tokens += response.usage.completion_tokens;
@@ -535,7 +547,13 @@ pub(super) async fn run_turn_with_trace(
         if tool_calls.is_empty() {
             progress.milestone("模型已完成正文生成。");
             if looks_like_unexecuted_tool_call_text(&content) {
-                commit_and_publish_inference(&options, session, recorder, inference_commit).await?;
+                commit_and_publish_inference(
+                    &options,
+                    session,
+                    recorder,
+                    inference_commit(active_subagent.as_ref(), billing),
+                )
+                .await?;
                 return Ok(failed_turn_result(
                     recorder,
                     &turn_id,
@@ -557,7 +575,13 @@ pub(super) async fn run_turn_with_trace(
             last_reasoning_content = reasoning_content;
             session_message_count = session.len();
             safe_message_count = session_message_count;
-            commit_and_publish_inference(&options, session, recorder, inference_commit).await?;
+            commit_and_publish_inference(
+                &options,
+                session,
+                recorder,
+                inference_commit(active_subagent.as_ref(), billing),
+            )
+            .await?;
             if finish_mailbox_window(&options, session, recorder, &turn_id).await? {
                 safe_message_count = session.len();
                 session_message_count = safe_message_count;
@@ -583,14 +607,13 @@ pub(super) async fn run_turn_with_trace(
         if reasoning_content.is_some() {
             last_reasoning_content = reasoning_content;
         }
-        commit_and_publish_inference(&options, session, recorder, inference_commit).await?;
         if response_reached_auto_compact_limit {
             provider_prompt_tokens_for_compaction = Some(response_total_tokens);
         }
         let count = tool_calls.len();
         progress.tool_detail(format!("模型请求调用 {count} 个工具。"));
 
-        let mut tool_results = match execute_tool_calls(
+        let tool_batch = match execute_tool_call_batch(
             &tool_calls,
             &mut budget_tracker,
             recorder,
@@ -612,10 +635,17 @@ pub(super) async fn run_turn_with_trace(
         )
         .await
         {
-            Ok(tool_results) => tool_results,
+            Ok(tool_batch) => tool_batch,
             Err(ToolExecutionError::Fatal(error))
             | Err(ToolExecutionError::RespondToModel(error)) => {
                 session.truncate_messages(safe_message_count);
+                commit_and_publish_inference(
+                    &options,
+                    session,
+                    recorder,
+                    inference_commit(active_subagent.as_ref(), billing),
+                )
+                .await?;
                 return Ok(failed_turn_result_with_abort_reason(
                     recorder,
                     &turn_id,
@@ -634,16 +664,10 @@ pub(super) async fn run_turn_with_trace(
                 ));
             }
         };
+        merge_tool_batch_metrics(&mut billing.orchestration, &tool_batch.orchestration);
+        let mut tool_results = tool_batch.records;
         progress.tool_detail("工具执行完成，准备回写结果。");
         record_plan_exit_items(recorder, &turn_id, &tool_results);
-        if working_set.sync_session(session)? {
-            persist_checkpoint(
-                &options,
-                session,
-                crate::TurnCheckpointReason::WorkingSetChanged,
-            )
-            .await?;
-        }
         let should_end_turn = tool_results.iter().any(|tool_result| {
             tool_result
                 .runtime_events
@@ -655,6 +679,13 @@ pub(super) async fn run_turn_with_trace(
             .or_else(|| model_info.resolved_context_window())
             .map(|limit| limit.saturating_sub(response_total_tokens));
         apply_model_tool_output_batch_budget(&mut tool_results, remaining_context_tokens);
+        normalize_programmatic_tool_results(&mut tool_results, &tool_calls);
+        billing.orchestration.tool_result_estimated_tokens =
+            crate::tool::estimate_tool_result_tokens(
+                tool_results
+                    .iter()
+                    .map(|tool_result| tool_result.result.as_str()),
+            );
         let tool_results = tool_results
             .into_iter()
             .map(|tool_result| {
@@ -665,8 +696,8 @@ pub(super) async fn run_turn_with_trace(
         // 先补齐全部 canonical tool result，再更新辅助 evidence ledger。这样即使
         // pinned working context 的大小校验或持久化失败，也不会留下只有
         // assistant tool call、没有对应 output 的不可重放 session。
-        for (tool_result, receipt) in &tool_results {
-            session.push_tool_result_with_receipt(
+        for ((tool_result, receipt), tool_call) in tool_results.iter().zip(&tool_calls) {
+            session.push_tool_result_with_receipt_and_caller(
                 tool_result.id.clone(),
                 tool_result.call_id.clone(),
                 tool_result.name.clone(),
@@ -674,8 +705,16 @@ pub(super) async fn run_turn_with_trace(
                 tool_result.result.clone(),
                 tool_result.arguments.clone(),
                 receipt.clone(),
+                tool_call.caller.clone(),
             );
         }
+        commit_and_publish_inference(
+            &options,
+            session,
+            recorder,
+            inference_commit(active_subagent.as_ref(), billing),
+        )
+        .await?;
         for (_, receipt) in tool_results {
             working_set.apply(TurnWorkingSetChange::AppendEvidence(receipt))?;
         }
@@ -855,6 +894,39 @@ fn apply_model_tool_output_batch_budget(
             projected_bytes,
             "applied model-visible tool output batch budget"
         );
+    }
+}
+
+fn normalize_programmatic_tool_results(
+    tool_results: &mut [ToolExecutionRecord],
+    tool_calls: &[pl_model::ToolCall],
+) {
+    for (tool_result, tool_call) in tool_results.iter_mut().zip(tool_calls) {
+        if tool_call.caller.is_none() {
+            continue;
+        }
+        tool_result.result = match serde_json::from_str::<serde_json::Value>(&tool_result.result) {
+            Ok(serde_json::Value::Object(_)) => tool_result.result.clone(),
+            Ok(value) => serde_json::json!({ "content": value }).to_string(),
+            Err(_) => serde_json::json!({ "content": tool_result.result }).to_string(),
+        };
+    }
+}
+
+fn merge_tool_batch_metrics(
+    orchestration: &mut pl_protocol::InferenceOrchestrationMetrics,
+    batch: &pl_protocol::InferenceOrchestrationMetrics,
+) {
+    orchestration.merge(batch);
+}
+
+fn inference_commit(
+    active_subagent: Option<&crate::tool::SubagentContext>,
+    billing: pl_protocol::InferenceBillingRecord,
+) -> AgentInferenceCommit {
+    AgentInferenceCommit {
+        runtime_delta: agent_runtime_delta(identity_for_subagent(active_subagent), &billing),
+        billing,
     }
 }
 
@@ -1137,7 +1209,7 @@ mod receipt_tests {
 
     use super::{
         ToolExecutionRecord, apply_model_tool_output_batch_budget, compact_artifact_reference,
-        tool_result_receipt,
+        normalize_programmatic_tool_results, tool_result_receipt,
     };
 
     fn tool_result(id: &str, result: String) -> ToolExecutionRecord {
@@ -1154,6 +1226,7 @@ mod receipt_tests {
             timed_out: false,
             revision: None,
             runtime_events: Vec::new(),
+            execution_millis: 0,
         }
     }
 
@@ -1218,5 +1291,38 @@ mod receipt_tests {
         assert_eq!(second_receipt.total_bytes, 2_000);
         assert_eq!(second_receipt.visible_bytes, results[1].result.len() as u64);
         assert!(second_receipt.truncated);
+    }
+
+    #[test]
+    fn programmatic_tool_results_are_json_objects() {
+        let mut results = vec![
+            tool_result("programmatic", "plain text".to_string()),
+            tool_result("direct", "plain text".to_string()),
+        ];
+        let calls = vec![
+            pl_model::ToolCall::function(
+                "programmatic",
+                "read_file",
+                serde_json::json!({}),
+                Some("call-programmatic".to_string()),
+            )
+            .with_caller(Some(pl_protocol::ToolCallCaller::Program {
+                caller_id: "program-1".to_string(),
+            })),
+            pl_model::ToolCall::function(
+                "direct",
+                "read_file",
+                serde_json::json!({}),
+                Some("call-direct".to_string()),
+            ),
+        ];
+
+        normalize_programmatic_tool_results(&mut results, &calls);
+
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&results[0].result).unwrap(),
+            serde_json::json!({"content": "plain text"})
+        );
+        assert_eq!(results[1].result, "plain text");
     }
 }

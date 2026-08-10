@@ -731,7 +731,82 @@ async fn identical_cacheable_calls_return_compact_receipts_per_provider_response
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
     let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(60_000));
 
-    let records = execute_tool_calls(
+    let batch = execute_tool_call_batch(
+        &calls,
+        &mut budget,
+        &mut recorder,
+        ToolExecutionContext {
+            core: &core,
+            options: &TurnOptions::default(),
+            session_id: "turn-1",
+            workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
+            workspace_instructions: None,
+            instruction_snapshot: None,
+            active_subagent: None,
+            parent_session: std::sync::Arc::new(AgentSession::new()),
+            working_set: crate::TurnWorkingSetHandle::default(),
+            tool_cache: crate::TurnToolCacheHandle::default(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(batch.orchestration.duplicate_suppressed, 1);
+    let records = batch.records;
+
+    assert_eq!(executions.load(Ordering::SeqCst), 2);
+    assert_eq!(records.len(), 3);
+    assert!(records[0].result.len() > 8_000);
+    let duplicate = serde_json::from_str::<serde_json::Value>(&records[1].result).unwrap();
+    assert_eq!(duplicate["status"], "duplicateSuppressed");
+    assert_eq!(duplicate["reusedFromCallId"], "read-call-1");
+    assert_eq!(duplicate["scope"], "providerResponse");
+    assert!(records[1].result.len() < 256);
+    assert!(records[2].result.len() > 8_000);
+}
+
+#[tokio::test]
+async fn tool_batch_reports_parallel_candidates_and_critical_path() {
+    let mut core = TurnEngine::default_provider().unwrap();
+    core.register_tool(
+        crate::tool::RegisteredTool::new(
+            "parallel_metric_read",
+            "Test-only parallel metric tool",
+            serde_json::json!({"type": "object"}),
+            |_input, _context| async move {
+                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+                Ok(ToolOutput {
+                    description: "ok".to_string(),
+                    truncated: OutputTruncation::empty(),
+                    output_file: PathBuf::new(),
+                    exit_code: Some(0),
+                    timed_out: false,
+                    runtime_events: Vec::new(),
+                })
+            },
+        )
+        .with_parallel_tool_calls()
+        .with_runtime_lock_policy(ToolRuntimeLockPolicy::Shared)
+        .with_effect(crate::ToolEffect::Read),
+    );
+    let calls = [
+        ToolCall::function(
+            "read-item-1",
+            "parallel_metric_read",
+            serde_json::json!({}),
+            Some("read-call-1".to_string()),
+        ),
+        ToolCall::function(
+            "read-item-2",
+            "parallel_metric_read",
+            serde_json::json!({}),
+            Some("read-call-2".to_string()),
+        ),
+    ];
+    let (event_tx, _) = tokio::sync::broadcast::channel(8);
+    let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
+    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(60_000));
+
+    let batch = execute_tool_call_batch(
         &calls,
         &mut budget,
         &mut recorder,
@@ -751,15 +826,76 @@ async fn identical_cacheable_calls_return_compact_receipts_per_provider_response
     .await
     .unwrap();
 
-    assert_eq!(executions.load(Ordering::SeqCst), 2);
-    assert_eq!(records.len(), 3);
-    assert!(records[0].result.len() > 8_000);
-    let duplicate = serde_json::from_str::<serde_json::Value>(&records[1].result).unwrap();
-    assert_eq!(duplicate["status"], "duplicateSuppressed");
-    assert_eq!(duplicate["reusedFromCallId"], "read-call-1");
-    assert_eq!(duplicate["scope"], "providerResponse");
-    assert!(records[1].result.len() < 256);
-    assert!(records[2].result.len() > 8_000);
+    assert_eq!(batch.records.len(), 2);
+    assert_eq!(batch.orchestration.parallel_candidates, 2);
+    assert_eq!(batch.orchestration.actual_parallel_calls, 2);
+    assert!(
+        batch.orchestration.tool_execution_millis >= batch.orchestration.tool_critical_path_millis
+    );
+    assert!(batch.orchestration.tool_batch_elapsed_millis >= 20);
+}
+
+#[tokio::test]
+async fn tool_batch_critical_path_includes_serialized_exclusive_calls() {
+    let mut core = TurnEngine::default_provider().unwrap();
+    core.register_tool(crate::tool::RegisteredTool::new(
+        "exclusive_metric_read",
+        "Test-only exclusive metric tool",
+        serde_json::json!({"type": "object"}),
+        |_input, _context| async move {
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+            Ok(ToolOutput {
+                description: "ok".to_string(),
+                truncated: OutputTruncation::empty(),
+                output_file: PathBuf::new(),
+                exit_code: Some(0),
+                timed_out: false,
+                runtime_events: Vec::new(),
+            })
+        },
+    ));
+    let calls = [
+        ToolCall::function(
+            "exclusive-item-1",
+            "exclusive_metric_read",
+            serde_json::json!({}),
+            Some("exclusive-call-1".to_string()),
+        ),
+        ToolCall::function(
+            "exclusive-item-2",
+            "exclusive_metric_read",
+            serde_json::json!({}),
+            Some("exclusive-call-2".to_string()),
+        ),
+    ];
+    let (event_tx, _) = tokio::sync::broadcast::channel(8);
+    let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
+    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(60_000));
+
+    let batch = execute_tool_call_batch(
+        &calls,
+        &mut budget,
+        &mut recorder,
+        ToolExecutionContext {
+            core: &core,
+            options: &TurnOptions::default(),
+            session_id: "turn-1",
+            workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
+            workspace_instructions: None,
+            instruction_snapshot: None,
+            active_subagent: None,
+            parent_session: std::sync::Arc::new(AgentSession::new()),
+            working_set: crate::TurnWorkingSetHandle::default(),
+            tool_cache: crate::TurnToolCacheHandle::default(),
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(batch.orchestration.parallel_candidates, 0);
+    assert_eq!(batch.orchestration.actual_parallel_calls, 0);
+    assert!(batch.orchestration.tool_critical_path_millis >= 40);
+    assert_eq!(batch.orchestration.parallel_saved_millis(), 0);
 }
 
 #[tokio::test]

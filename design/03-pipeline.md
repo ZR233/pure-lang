@@ -57,6 +57,12 @@ usage、progress 等产品事实仍只由 `ThreadRuntimeSnapshot` 拥有，worki
 结果及其 visibleBytes 指标；UI display result、原始字节数、原始内容哈希和 artifact 引用保持不变，
 确保模型后续输入与持久化回放一致，同时不丢失用户可见诊断信息。
 
+每次 inference 与其后工具批次保存一份可关联的编排诊断：请求的工具 schema 估算 token、模型
+返回的工具调用数、可并行候选数、实际并行数、批次 wall-clock 与并行关键路径、写回模型的批次
+结果估算 token，以及只读重复调用的缓存命中数。指标只保存计数、时长、token 估算和稳定类别，
+不保存工具参数或结果正文。一次批次并行省时定义为串行执行耗时之和减去批次 wall-clock；没有
+并行候选时该值为零，不根据调用数量推测收益。
+
 ## 3.3 Interaction
 
 Interaction 是独立 durable server request，带 threadId、turnId 和可选 itemId/toolId/agentPath。

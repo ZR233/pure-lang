@@ -263,6 +263,10 @@ async fn responses_websocket_reuses_the_agent_session_connection() {
 
     assert_eq!(first.content.as_deref(), Some("ok-1"));
     assert_eq!(second.content.as_deref(), Some("ok-2"));
+    assert_eq!(first.orchestration.continuation_attempts, 0);
+    assert_eq!(second.orchestration.continuation_attempts, 1);
+    assert_eq!(second.orchestration.continuation_used, 1);
+    assert_eq!(second.orchestration.continuation_invalid, 0);
     assert_eq!(requests[0]["type"], "response.create");
     assert_eq!(requests[0]["tools"], serde_json::json!([]));
     assert_eq!(requests[0]["store"], false);
@@ -500,6 +504,8 @@ async fn responses_websocket_retries_an_immediate_close_with_full_history() {
     let [initial, retried] = server.await.unwrap();
 
     assert_eq!(response.content.as_deref(), Some("ok"));
+    assert_eq!(response.orchestration.transport_attempts, 2);
+    assert_eq!(response.orchestration.http_fallbacks, 0);
     assert_eq!(initial, retried);
     assert_eq!(retried["tools"], serde_json::json!([]));
 }
@@ -582,6 +588,10 @@ async fn responses_websocket_falls_back_to_http_after_one_full_replay() {
 
     assert_eq!(first.content.as_deref(), Some("http-ok-1"));
     assert_eq!(second.content.as_deref(), Some("http-ok-2"));
+    assert_eq!(first.orchestration.transport_attempts, 3);
+    assert_eq!(first.orchestration.http_fallbacks, 1);
+    assert_eq!(second.orchestration.transport_attempts, 1);
+    assert_eq!(second.orchestration.http_fallbacks, 0);
     assert_eq!(websocket_requests.len(), 2);
     assert_eq!(websocket_requests[0], websocket_requests[1]);
     assert_eq!(http_requests.len(), 2);
@@ -722,6 +732,12 @@ async fn responses_websocket_retries_an_invalid_continuation_once_with_full_hist
 
     assert_eq!(first.content.as_deref(), Some("ok-1"));
     assert_eq!(second.content.as_deref(), Some("ok-2"));
+    assert_eq!(first.orchestration.transport_attempts, 1);
+    assert_eq!(second.orchestration.transport_attempts, 2);
+    assert_eq!(second.orchestration.continuation_attempts, 1);
+    assert_eq!(second.orchestration.continuation_invalid, 1);
+    assert_eq!(second.orchestration.continuation_used, 0);
+    assert_eq!(second.orchestration.http_fallbacks, 0);
     assert!(initial.get("previous_response_id").is_none());
     assert_eq!(incremental["previous_response_id"], "resp-1");
     assert_eq!(incremental["input"].as_array().unwrap().len(), 1);
@@ -856,6 +872,10 @@ async fn invalid_continuation_full_replay_consumes_the_websocket_retry_budget() 
 
     assert_eq!(first.content.as_deref(), Some("ok-1"));
     assert_eq!(second.content.as_deref(), Some("http-ok-2"));
+    assert_eq!(second.orchestration.transport_attempts, 3);
+    assert_eq!(second.orchestration.continuation_attempts, 1);
+    assert_eq!(second.orchestration.continuation_invalid, 1);
+    assert_eq!(second.orchestration.http_fallbacks, 1);
     assert!(transport_session.uses_responses_http_fallback());
     assert!(initial.get("previous_response_id").is_none());
     assert_eq!(incremental["previous_response_id"], "resp-1");

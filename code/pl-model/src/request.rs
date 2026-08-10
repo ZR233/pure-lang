@@ -6,7 +6,8 @@ use crate::{
     WebSearchFilters, WebSearchUserLocation,
 };
 use pl_protocol::{
-    ContentPart, ImageSource, Message, MessageContent, ModelContextItem, PureError, ToolCallKind,
+    ContentPart, ImageSource, Message, MessageContent, ModelContextItem, PureError,
+    ResponsesContextItem, ToolCallCaller, ToolCallKind,
 };
 use pl_trace::TraceEvent;
 
@@ -191,6 +192,10 @@ pub struct CompletionResponse {
     #[serde(default)]
     pub hosted_web_search_calls: Vec<HostedWebSearchCall>,
     #[serde(default)]
+    pub responses_context_items: Vec<ResponsesContextItem>,
+    #[serde(default)]
+    pub orchestration: pl_protocol::InferenceOrchestrationMetrics,
+    #[serde(default)]
     pub next_sequence: u64,
     pub usage: TokenUsage,
     pub finish_reason: FinishReason,
@@ -215,6 +220,8 @@ pub struct ToolCall {
     pub call_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub invalid_arguments: Option<InvalidToolArguments>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caller: Option<ToolCallCaller>,
 }
 
 /// Provider 返回的 function tool 参数无法解析为 JSON 时保留的诊断信息。
@@ -251,6 +258,7 @@ impl ToolCall {
             payload: ToolCallPayload::Function { arguments },
             call_id,
             invalid_arguments: None,
+            caller: None,
         }
     }
 
@@ -273,6 +281,7 @@ impl ToolCall {
                 raw: raw.into(),
                 error: error.into(),
             }),
+            caller: None,
         }
     }
 
@@ -290,7 +299,13 @@ impl ToolCall {
             },
             call_id,
             invalid_arguments: None,
+            caller: None,
         }
+    }
+
+    pub fn with_caller(mut self, caller: Option<ToolCallCaller>) -> Self {
+        self.caller = caller;
+        self
     }
 
     pub fn kind(&self) -> ToolCallKind {
@@ -386,12 +401,31 @@ pub enum ToolSchema {
         name: String,
         description: String,
         input_schema: serde_json::Value,
+        #[serde(default)]
+        defer_loading: bool,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        allowed_callers: Vec<ToolCallerMode>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        output_schema: Option<serde_json::Value>,
     },
     Custom {
         name: String,
         description: String,
         format: ToolFormat,
+        #[serde(default)]
+        defer_loading: bool,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        allowed_callers: Vec<ToolCallerMode>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        output_schema: Option<serde_json::Value>,
     },
+    Namespace {
+        name: String,
+        description: String,
+        tools: Vec<ToolSchema>,
+    },
+    ToolSearch,
+    ProgrammaticToolCalling,
     WebSearch {
         external_web_access: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -405,6 +439,13 @@ pub enum ToolSchema {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         search_content_types: Option<Vec<String>>,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolCallerMode {
+    Direct,
+    Programmatic,
 }
 
 /// 非流式 Responses 中解析出的 hosted Web Search 调用。
@@ -426,7 +467,58 @@ impl ToolSchema {
             name: name.into(),
             description: description.into(),
             input_schema,
+            defer_loading: false,
+            allowed_callers: Vec::new(),
+            output_schema: None,
         }
+    }
+
+    pub fn namespace(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        tools: Vec<ToolSchema>,
+    ) -> Self {
+        Self::Namespace {
+            name: name.into(),
+            description: description.into(),
+            tools,
+        }
+    }
+
+    pub fn deferred(mut self) -> Self {
+        match &mut self {
+            Self::Function { defer_loading, .. } | Self::Custom { defer_loading, .. } => {
+                *defer_loading = true;
+            }
+            Self::Namespace { .. }
+            | Self::ToolSearch
+            | Self::ProgrammaticToolCalling
+            | Self::WebSearch { .. } => {}
+        }
+        self
+    }
+
+    pub fn allow_programmatic(mut self, output_schema: serde_json::Value) -> Self {
+        match &mut self {
+            Self::Function {
+                allowed_callers,
+                output_schema: schema,
+                ..
+            }
+            | Self::Custom {
+                allowed_callers,
+                output_schema: schema,
+                ..
+            } => {
+                *allowed_callers = vec![ToolCallerMode::Direct, ToolCallerMode::Programmatic];
+                *schema = Some(output_schema);
+            }
+            Self::Namespace { .. }
+            | Self::ToolSearch
+            | Self::ProgrammaticToolCalling
+            | Self::WebSearch { .. } => {}
+        }
+        self
     }
 
     pub fn custom_grammar(
@@ -442,19 +534,30 @@ impl ToolSchema {
                 syntax: syntax.into(),
                 definition: definition.into(),
             },
+            defer_loading: false,
+            allowed_callers: Vec::new(),
+            output_schema: None,
         }
     }
 
     pub fn name(&self) -> &str {
         match self {
-            Self::Function { name, .. } | Self::Custom { name, .. } => name,
+            Self::Function { name, .. }
+            | Self::Custom { name, .. }
+            | Self::Namespace { name, .. } => name,
+            Self::ToolSearch => "tool_search",
+            Self::ProgrammaticToolCalling => "programmatic_tool_calling",
             Self::WebSearch { .. } => "web_search",
         }
     }
 
     pub fn description(&self) -> &str {
         match self {
-            Self::Function { description, .. } | Self::Custom { description, .. } => description,
+            Self::Function { description, .. }
+            | Self::Custom { description, .. }
+            | Self::Namespace { description, .. } => description,
+            Self::ToolSearch => "Load deferred tools.",
+            Self::ProgrammaticToolCalling => "Coordinate eligible read-only tools in hosted code.",
             Self::WebSearch { .. } => "Search the web.",
         }
     }
@@ -464,7 +567,22 @@ impl ToolSchema {
     }
 
     pub fn is_hosted(&self) -> bool {
+        matches!(
+            self,
+            Self::WebSearch { .. } | Self::ToolSearch | Self::ProgrammaticToolCalling
+        )
+    }
+
+    pub fn is_web_search(&self) -> bool {
         matches!(self, Self::WebSearch { .. })
+    }
+
+    pub fn is_tool_search(&self) -> bool {
+        matches!(self, Self::ToolSearch)
+    }
+
+    pub fn is_programmatic_tool_calling(&self) -> bool {
+        matches!(self, Self::ProgrammaticToolCalling)
     }
 
     pub fn provider_compatible(self, supports_custom_tools: bool) -> Self {
@@ -474,7 +592,12 @@ impl ToolSchema {
 
         match self {
             Self::Custom {
-                name, description, ..
+                name,
+                description,
+                defer_loading,
+                allowed_callers,
+                output_schema,
+                ..
             } if name == "apply_patch" => Self::function(
                 name,
                 description,
@@ -489,9 +612,15 @@ impl ToolSchema {
                     "required": ["patch"],
                     "additionalProperties": false
                 }),
-            ),
+            )
+            .with_wire_options(defer_loading, allowed_callers, output_schema),
             Self::Custom {
-                name, description, ..
+                name,
+                description,
+                defer_loading,
+                allowed_callers,
+                output_schema,
+                ..
             } => Self::function(
                 name,
                 description,
@@ -503,9 +632,42 @@ impl ToolSchema {
                     "required": ["input"],
                     "additionalProperties": false
                 }),
-            ),
+            )
+            .with_wire_options(defer_loading, allowed_callers, output_schema),
+            Self::Namespace {
+                name,
+                description,
+                tools,
+            } => Self::Namespace {
+                name,
+                description,
+                tools: tools
+                    .into_iter()
+                    .map(|tool| tool.provider_compatible(supports_custom_tools))
+                    .collect(),
+            },
             function => function,
         }
+    }
+
+    fn with_wire_options(
+        mut self,
+        defer_loading: bool,
+        allowed_callers: Vec<ToolCallerMode>,
+        output_schema: Option<serde_json::Value>,
+    ) -> Self {
+        if let Self::Function {
+            defer_loading: target_defer_loading,
+            allowed_callers: target_allowed_callers,
+            output_schema: target_output_schema,
+            ..
+        } = &mut self
+        {
+            *target_defer_loading = defer_loading;
+            *target_allowed_callers = allowed_callers;
+            *target_output_schema = output_schema;
+        }
+        self
     }
 }
 
@@ -579,7 +741,10 @@ impl CompletionRequest {
                 self.model
             )));
         }
-        let has_function_tools = self.tools.iter().any(|tool| !tool.is_hosted());
+        let has_function_tools = self
+            .tools
+            .iter()
+            .any(|tool| !tool.is_hosted() || matches!(tool, ToolSchema::Namespace { .. }));
         if has_function_tools && !capabilities.supports_function_calling() {
             return Err(PureError::ConfigError(format!(
                 "model {} does not support function calling",
@@ -595,9 +760,27 @@ impl CompletionRequest {
                 self.model
             )));
         }
-        if self.tools.iter().any(ToolSchema::is_hosted) && !capabilities.supports_web_search() {
+        if self.tools.iter().any(ToolSchema::is_web_search) && !capabilities.supports_web_search() {
             return Err(PureError::ConfigError(format!(
                 "model {} does not support hosted web search",
+                self.model
+            )));
+        }
+        if self.tools.iter().any(ToolSchema::is_tool_search) && !capabilities.supports_tool_search()
+        {
+            return Err(PureError::ConfigError(format!(
+                "model {} does not support tool search",
+                self.model
+            )));
+        }
+        if self
+            .tools
+            .iter()
+            .any(ToolSchema::is_programmatic_tool_calling)
+            && !capabilities.supports_programmatic_tool_calling()
+        {
+            return Err(PureError::ConfigError(format!(
+                "model {} does not support programmatic tool calling",
                 self.model
             )));
         }

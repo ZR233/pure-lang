@@ -5,7 +5,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result, bail};
 use pl_core::{AgentModelConfig, McpServerConfig, McpServerTransport, ProviderConfig};
 use pl_model::{ProviderConnectionMode, TokenUsage};
-use pl_protocol::{ThreadItemContent, TurnBillingRecord};
+use pl_protocol::{InferenceOrchestrationMetrics, ThreadItemContent, TurnBillingRecord};
 use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder};
 use serde_json::{Value, json};
 use tokio::net::TcpListener;
@@ -158,6 +158,7 @@ async fn assert_persisted_billing(store: &StudioStore, thread_id: &str) -> Resul
     assert_eq!(rows.len(), 3);
     let mut inference_ids = BTreeSet::new();
     let mut saw_negative_savings = false;
+    let mut orchestration = InferenceOrchestrationMetrics::default();
     for row in rows {
         let billing: TurnBillingRecord = serde_json::from_str(
             row.model_json
@@ -180,6 +181,8 @@ async fn assert_persisted_billing(store: &StudioStore, thread_id: &str) -> Resul
             );
             assert_eq!(inference.estimated_costs.len(), 1);
             assert_eq!(inference.estimated_cache_savings.len(), 1);
+            assert!(inference.orchestration.tool_schema_estimated_tokens > 0);
+            orchestration.merge(&inference.orchestration);
             saw_negative_savings |= inference.estimated_cache_savings[0].amount < 0.0;
         }
         let persisted_usage: TokenUsage = serde_json::from_str(&row.usage_json)?;
@@ -200,6 +203,12 @@ async fn assert_persisted_billing(store: &StudioStore, thread_id: &str) -> Resul
         );
     }
     assert_eq!(inference_ids.len(), EXPECTED_MODEL_REQUESTS);
+    assert_eq!(
+        orchestration.transport_attempts,
+        EXPECTED_MODEL_REQUESTS as u64
+    );
+    assert_eq!(orchestration.tool_calls, 4);
+    assert!(orchestration.tool_result_estimated_tokens > 0);
     assert!(saw_negative_savings);
     Ok(())
 }
@@ -222,9 +231,8 @@ fn assert_stable_append_only_requests(requests: &[Value]) -> Result<()> {
     if !names.iter().any(|name| name == "mcp__fixture__lookup") {
         bail!("model-visible tool set omitted fixture MCP tool: {names:?}");
     }
-    let mut sorted_names = names.clone();
-    sorted_names.sort();
-    assert_eq!(names, sorted_names);
+    let unique_names = names.iter().collect::<BTreeSet<_>>();
+    assert_eq!(unique_names.len(), names.len());
 
     let cache_key = requests[0]["prompt_cache_key"]
         .as_str()
@@ -283,13 +291,29 @@ fn is_working_context_tail(item: &Value) -> bool {
 }
 
 fn tool_names(request: &Value) -> Vec<String> {
-    request["tools"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|tool| tool["name"].as_str())
-        .map(str::to_string)
-        .collect()
+    fn collect(tools: &[Value], names: &mut Vec<String>) {
+        for tool in tools {
+            match tool["type"].as_str() {
+                Some("function" | "custom") => {
+                    if let Some(name) = tool["name"].as_str() {
+                        names.push(name.to_string());
+                    }
+                }
+                Some("namespace") => {
+                    if let Some(tools) = tool["tools"].as_array() {
+                        collect(tools, names);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let mut names = Vec::new();
+    if let Some(tools) = request["tools"].as_array() {
+        collect(tools, &mut names);
+    }
+    names
 }
 
 fn fixture_config(model_base_url: String, mcp_url: String, home: &Path) -> StudioConfig {

@@ -500,7 +500,7 @@ use permission::approval_request;
 #[cfg(test)]
 use pl_model::TokenUsage;
 #[cfg(test)]
-use tool_dispatch::{ToolExecutionContext, execute_tool_calls};
+use tool_dispatch::{ToolExecutionContext, execute_tool_call_batch, execute_tool_calls};
 #[cfg(test)]
 use turn_result::{
     failed_turn_result, looks_like_unexecuted_tool_call_text, normalize_provider_error,

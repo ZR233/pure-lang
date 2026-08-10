@@ -400,9 +400,12 @@ fn responses_decoder_tracks_reasoning_summary_lifecycle() {
                 authoritative_content: Some(ModelBlockContent::ReasoningSummary(summary)),
                 ..
             },
+            StreamEvent::ResponsesContextItem { item },
         ] => {
             assert_eq!(id, "rs_1");
             assert_eq!(summary, &vec!["最终摘要。".to_string()]);
+            assert_eq!(item.kind, pl_protocol::ResponsesContextItemKind::Reasoning);
+            assert_eq!(item.value["id"], "rs_1");
         }
         other => panic!("unexpected events: {other:?}"),
     }

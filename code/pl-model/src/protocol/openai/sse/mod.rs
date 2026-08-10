@@ -10,8 +10,9 @@ mod item;
 
 use item::{
     assistant_message_identity, assistant_message_text, cache_write_tokens_from_details,
-    cached_tokens_from_details, output_item_tool_completed, output_item_tool_started,
-    reasoning_item_id, reasoning_summary_texts, web_search_lifecycle_event,
+    cached_tokens_from_details, output_item_native_context, output_item_tool_completed,
+    output_item_tool_started, reasoning_item_id, reasoning_summary_texts,
+    web_search_lifecycle_event,
 };
 
 /// SSE 流事件原始结构（从 JSON 解析）
@@ -218,6 +219,9 @@ impl OpenAiStreamDecoder {
                         Some(item.clone()),
                         authoritative_summary,
                     ));
+                    if let Some(native) = output_item_native_context(item) {
+                        events.push(native);
+                    }
                     return events;
                 }
             }
@@ -661,11 +665,13 @@ fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEventBatch> {
             .and_then(output_item_tool_started)
             .map(StreamEventBatch::Single),
 
-        "response.output_item.done" => event
-            .item
-            .as_ref()
-            .and_then(output_item_tool_completed)
-            .map(StreamEventBatch::Many),
+        "response.output_item.done" => event.item.as_ref().and_then(|item| {
+            let mut events = output_item_tool_completed(item).unwrap_or_default();
+            if let Some(native) = output_item_native_context(item) {
+                events.push(native);
+            }
+            (!events.is_empty()).then_some(StreamEventBatch::Many(events))
+        }),
 
         "response.completed" => {
             let usage = event.response.as_ref().and_then(|r| {

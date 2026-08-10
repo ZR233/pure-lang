@@ -20,7 +20,9 @@ pub(super) fn materialize_context_items(
                     receipt: receipt.clone(),
                 })
             }
-            ModelContextItem::Compaction { .. } => Ok(item.clone()),
+            ModelContextItem::Compaction { .. } | ModelContextItem::Responses { .. } => {
+                Ok(item.clone())
+            }
         })
         .collect()
 }

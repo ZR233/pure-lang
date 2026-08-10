@@ -77,6 +77,19 @@ canonical JSON Schema 确定性排序；MCP、Skill、Task 与 collaboration 工
 Workspace 或权限策略复用 lease。工具结果无论成功、失败或拒绝都只追加到 durable history，
 不得重排旧输入。
 
+支持 Tool Search 时，generation 和 schema hash 必须同时覆盖 eager schema、deferred schema、
+namespace 描述、`allowed_callers` 与 `output_schema`；延迟加载只减少首个请求实际发送的 schema，
+不能把同一 generation 的工具定义变成可变集合。动态 MCP 按 server namespace 延迟加载，低频 Git
+与管理工具按稳定内置 namespace 延迟加载。若模型、provider profile 或 Responses wire 不支持
+Tool Search，Turn lease 中全部可见工具恢复 eager function schema，执行与权限语义不变。
+
+Programmatic eligibility 由注册表中可信的 typed contract 计算，不接受模型或第三方 annotation
+自行提升。首期白名单为 `read_file`、`list_files`、`search_files`、`stat_path`、LSP 查询、
+`git_status`、`git_diff`、`git_workspace_info`、MCP resource 读取和 effect 明确为 Read 的动态 MCP。
+WorkspaceWrite、Process、BranchControl、effect 未知 MCP、审批/交互与 agent-control 不设置
+`allowed_callers: programmatic`。program 内的每个嵌套调用仍逐个经过注册、模式、路径和权限校验；
+runtime 不因为 caller 为 program 绕过任何本地策略。Tool Search 只允许在 program 外层运行。
+
 内置 Zhipu Coding Plan MCP server 优先复用 Zhipu Coding Plan provider 的 `bearer_token`，并兼容回退到普通 Zhipu provider 的 `bearer_token`。缺少 token 时内置 server 处于 `missingCredential`，不参与后台探测，也不应导致普通 turn 或 subagent 启动失败；检测到 token 后进入后台探测流程，只有探测成功的 server 会被主会话和 subagent runner 注册。HTTP 内置 server 在 transport 层直接发送 bearer token；stdio Vision server 在启动进程时注入 `Z_AI_API_KEY` 和 `Z_AI_MODE=ZHIPU`。
 
 每个 Turn 开始时，运行时把实际暴露给模型的工具名保留为内部诊断 trace。它只包含 Turn id、
@@ -107,6 +120,11 @@ Studio attach 会对活动 Task root Thread 执行一次有证据门禁的检查
 无法复用严格前缀。上下文压缩会显式建立新锚点并使当前 continuation 失效，压缩后的后续请求再
 恢复 append-only。旧 Ledger 版本不得作为 system message 累积在 transcript 中。
 
+Programmatic program 本身不作为本地 shell 执行，也不授予命令能力；provider 只可请求 eligible
+工具，runtime 返回带原始 `caller` 的 function/custom output，provider 再产生 program output。
+原生 program、caller 与 output 的顺序是 transcript 协议事实，持久化恢复或 transport fallback
+必须原样回放，且不得重复执行已经有配对 output 的嵌套调用。
+
 确定性本地只读工具失败使用版本化 failure envelope 保存类别、首次 call id、错误 hash 和有界
 摘要。相同工具、canonical 参数、workspace 与 mutation epoch 内只执行一次，重复调用返回紧凑
 duplicate receipt；任何 WorkspaceWrite、Process 或 BranchControl 尝试都会推进 mutation epoch，
@@ -132,6 +150,10 @@ provider response 中工具名与参数完全相同，`apply_patch`、`spawn_age
 requested call id，并可把仍 active 的同 assignment allocation 解析为既有 WorkUnit；这类复用仍
 执行工具 handler，并为每个 provider call id 返回各自的 canonical 结果。共享 runtime 不按项目
 路径、任务内容或命令文本猜测。
+
+dispatcher 为每个 provider response 记录工具调用总数、可并行候选数、实际并发调用数、批次
+wall-clock、各调用执行时长之和、最长执行时长、模型可见结果估算 token、缓存命中与重复抑制数。
+这些指标只用于推导批处理节省和 token 收益，不影响调度顺序、结果预算或 retry 决策。
 
 Task executor 达到 30 分钟 `WallClock` 预算时，预算事实仍作为当前 Turn 的 typed terminal 保存，
 但 WorkUnit 不立即失败。Task coordinator 对同一 executor、Thread 和 worktree 强制执行一次

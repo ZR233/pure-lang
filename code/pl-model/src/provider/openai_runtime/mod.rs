@@ -126,6 +126,8 @@ impl OpenAiProvider {
             .to_string();
         let mut attempt_number = 0_u32;
         let mut transport_retry_number = 0_u32;
+        let transport_metrics_before = request.transport_session.orchestration_snapshot();
+        let mut http_fallbacks = 0_u64;
 
         loop {
             let transport = self.active_transport(&request);
@@ -162,8 +164,24 @@ impl OpenAiProvider {
                 }
                 Err(error) => (Err(error), true),
             };
-            let Err(error) = result else {
-                return result;
+            let error = match result {
+                Ok(mut response) => {
+                    let transport_metrics_after =
+                        request.transport_session.orchestration_snapshot();
+                    response.orchestration.transport_attempts = u64::from(attempt_number) + 1;
+                    response.orchestration.continuation_attempts = transport_metrics_after
+                        .continuation_attempts
+                        .saturating_sub(transport_metrics_before.continuation_attempts);
+                    response.orchestration.continuation_used = transport_metrics_after
+                        .continuation_used
+                        .saturating_sub(transport_metrics_before.continuation_used);
+                    response.orchestration.continuation_invalid = transport_metrics_after
+                        .continuation_invalid
+                        .saturating_sub(transport_metrics_before.continuation_invalid);
+                    response.orchestration.http_fallbacks = http_fallbacks;
+                    return Ok(response);
+                }
+                Err(error) => error,
             };
             if !retry_allowed || !error.is_transient_model_transport() {
                 return Err(error);
@@ -175,6 +193,9 @@ impl OpenAiProvider {
                         .transport_session
                         .activate_responses_http_fallback()
                         .await;
+                    if activated {
+                        http_fallbacks = http_fallbacks.saturating_add(1);
+                    }
                     tracing::warn!(
                         provider = %self.info.name,
                         from_transport = transport.label(),

@@ -5,7 +5,7 @@ use std::time::Instant;
 use futures::future::BoxFuture;
 use futures::stream::{FuturesUnordered, StreamExt};
 use pl_model::ToolCallPayload;
-use pl_protocol::ToolCallKind;
+use pl_protocol::{InferenceOrchestrationMetrics, ToolCallKind};
 use pl_trace::TracePartStatus;
 use tokio::sync::RwLock;
 
@@ -45,6 +45,7 @@ pub(super) struct ToolExecutionRecord {
     pub(super) timed_out: bool,
     pub(super) revision: Option<u64>,
     pub(super) runtime_events: Vec<ToolRuntimeEvent>,
+    pub(super) execution_millis: u64,
 }
 
 pub(super) struct ScheduledToolExecution<'a> {
@@ -52,6 +53,13 @@ pub(super) struct ScheduledToolExecution<'a> {
     pub(super) item: pl_trace::TracePart,
     pub(super) future: BoxFuture<'a, Result<ToolExecutionRecord, ToolExecutionError>>,
     pub(super) budget_timing: ToolBudgetTiming,
+    pub(super) parallel_candidate: bool,
+    pub(super) duplicate_suppressed: bool,
+}
+
+pub(super) struct ToolExecutionBatch {
+    pub(super) records: Vec<ToolExecutionRecord>,
+    pub(super) orchestration: InferenceOrchestrationMetrics,
 }
 
 #[derive(Debug, Clone)]
@@ -89,12 +97,24 @@ pub(super) struct ToolExecutionContext<'a> {
     pub(super) tool_cache: crate::TurnToolCacheHandle,
 }
 
+#[cfg(test)]
 pub(super) async fn execute_tool_calls(
     tool_calls: &[pl_model::ToolCall],
     budget_tracker: &mut BudgetTracker,
     recorder: &mut crate::trace::TraceRecorder,
     context: ToolExecutionContext<'_>,
 ) -> Result<Vec<ToolExecutionRecord>, ToolExecutionError> {
+    execute_tool_call_batch(tool_calls, budget_tracker, recorder, context)
+        .await
+        .map(|batch| batch.records)
+}
+
+pub(super) async fn execute_tool_call_batch(
+    tool_calls: &[pl_model::ToolCall],
+    budget_tracker: &mut BudgetTracker,
+    recorder: &mut crate::trace::TraceRecorder,
+    context: ToolExecutionContext<'_>,
+) -> Result<ToolExecutionBatch, ToolExecutionError> {
     let mut scheduled = Vec::new();
     let mut scheduled_exact_once_calls = HashMap::<(String, String), String>::new();
     let runtime_lock = Arc::new(RwLock::new(()));
@@ -157,6 +177,8 @@ pub(super) async fn execute_tool_calls(
                     false,
                 )),
                 budget_timing: ToolBudgetTiming::Count,
+                parallel_candidate: false,
+                duplicate_suppressed: false,
             });
             continue;
         }
@@ -188,6 +210,8 @@ pub(super) async fn execute_tool_calls(
                     false,
                 )),
                 budget_timing: ToolBudgetTiming::Count,
+                parallel_candidate: false,
+                duplicate_suppressed: false,
             });
             continue;
         }
@@ -211,6 +235,8 @@ pub(super) async fn execute_tool_calls(
                     false,
                 )),
                 budget_timing: ToolBudgetTiming::Count,
+                parallel_candidate: false,
+                duplicate_suppressed: false,
             });
             continue;
         };
@@ -228,6 +254,8 @@ pub(super) async fn execute_tool_calls(
         } else {
             ToolRuntimeLockPolicy::Exclusive
         };
+        let parallel_candidate = matches!(runtime_lock_policy, ToolRuntimeLockPolicy::None)
+            || matches!(runtime_lock_policy, ToolRuntimeLockPolicy::Shared) && supports_parallel;
         let tool_context = ToolContext {
             event_tx: recorder.sender().clone(),
             options: context.options.clone(),
@@ -312,6 +340,8 @@ pub(super) async fn execute_tool_calls(
                     false,
                 )),
                 budget_timing: ToolBudgetTiming::Count,
+                parallel_candidate: false,
+                duplicate_suppressed: false,
             });
             break;
         }
@@ -386,6 +416,8 @@ pub(super) async fn execute_tool_calls(
                                 false,
                             )),
                             budget_timing,
+                            parallel_candidate: false,
+                            duplicate_suppressed: true,
                         });
                         continue;
                     }
@@ -405,24 +437,37 @@ pub(super) async fn execute_tool_calls(
                                 || tool.execute(tool_input, tool_context),
                             )
                         };
-                        let result = match runtime_lock_policy {
+                        let (result, execution_elapsed) = match runtime_lock_policy {
                             ToolRuntimeLockPolicy::Shared if supports_parallel => {
                                 let _guard = lock.read().await;
-                                execute().await
+                                let started_at = Instant::now();
+                                let result = execute().await;
+                                (result, started_at.elapsed())
                             }
-                            ToolRuntimeLockPolicy::None => execute().await,
+                            ToolRuntimeLockPolicy::None => {
+                                let started_at = Instant::now();
+                                let result = execute().await;
+                                (result, started_at.elapsed())
+                            }
                             ToolRuntimeLockPolicy::Exclusive | ToolRuntimeLockPolicy::Shared => {
                                 let _guard = lock.write().await;
-                                execute().await
+                                let started_at = Instant::now();
+                                let result = execute().await;
+                                (result, started_at.elapsed())
                             }
                         };
                         if invalidates_cache && result.is_ok() {
                             cache.invalidate_tool(&tool_name);
                         }
                         cache.record_effect(tool_effect, result.is_ok());
-                        tool_execution_record(tool_call_for_task, tool_name, result)
+                        let mut record =
+                            tool_execution_record(tool_call_for_task, tool_name, result)?;
+                        record.execution_millis = execution_elapsed.as_millis() as u64;
+                        Ok(record)
                     }),
                     budget_timing,
+                    parallel_candidate,
+                    duplicate_suppressed: false,
                 });
             }
             ToolApprovalDecision::Denied { reason } => {
@@ -443,6 +488,8 @@ pub(super) async fn execute_tool_calls(
                         false,
                     )),
                     budget_timing: ToolBudgetTiming::Count,
+                    parallel_candidate: false,
+                    duplicate_suppressed: false,
                 });
             }
         }
@@ -524,10 +571,19 @@ async fn collect_scheduled_tools(
     recorder: &mut crate::trace::TraceRecorder,
     options: &TurnOptions,
     progress: &mut ProgressEmitter,
-) -> Result<Vec<ToolExecutionRecord>, ToolExecutionError> {
+) -> Result<ToolExecutionBatch, ToolExecutionError> {
+    let batch_started_at = Instant::now();
     let mut pending = BTreeMap::new();
     let mut futures = FuturesUnordered::new();
     let scheduled_count = scheduled.len();
+    let parallel_candidates = scheduled
+        .iter()
+        .filter(|scheduled| scheduled.parallel_candidate)
+        .count() as u64;
+    let duplicate_suppressed = scheduled
+        .iter()
+        .filter(|scheduled| scheduled.duplicate_suppressed)
+        .count() as u64;
 
     for (index, scheduled) in scheduled.into_iter().enumerate() {
         pending.insert(index, (scheduled.tool_call.clone(), scheduled.item.clone()));
@@ -540,6 +596,7 @@ async fn collect_scheduled_tools(
     let mut ordered_records = std::iter::repeat_with(|| None)
         .take(scheduled_count)
         .collect::<Vec<Option<ToolExecutionRecord>>>();
+    let mut tool_execution_millis = 0_u64;
 
     loop {
         if futures.is_empty() {
@@ -556,7 +613,13 @@ async fn collect_scheduled_tools(
                             emit_tool_progress(progress, &record);
                             ordered_records[index] = Some(record);
                         }
-                        return Ok(ordered_records.into_iter().flatten().collect());
+                        return Ok(tool_execution_batch(
+                            ordered_records.into_iter().flatten().collect(),
+                            batch_started_at,
+                            tool_execution_millis,
+                            parallel_candidates,
+                            duplicate_suppressed,
+                        ));
                     }
                 }
             }
@@ -576,12 +639,51 @@ async fn collect_scheduled_tools(
                 return Err(ToolExecutionError::Fatal(message));
             }
         };
+        tool_execution_millis = tool_execution_millis.saturating_add(record.execution_millis);
         finalize_tool_item(recorder, item, &record);
         emit_tool_progress(progress, &record);
         ordered_records[index] = Some(record);
     }
 
-    Ok(ordered_records.into_iter().flatten().collect())
+    Ok(tool_execution_batch(
+        ordered_records.into_iter().flatten().collect(),
+        batch_started_at,
+        tool_execution_millis,
+        parallel_candidates,
+        duplicate_suppressed,
+    ))
+}
+
+fn tool_execution_batch(
+    records: Vec<ToolExecutionRecord>,
+    batch_started_at: Instant,
+    tool_execution_millis: u64,
+    parallel_candidates: u64,
+    duplicate_suppressed: u64,
+) -> ToolExecutionBatch {
+    let tool_cache_hits = records
+        .iter()
+        .flat_map(|record| &record.runtime_events)
+        .filter(|event| matches!(event, ToolRuntimeEvent::CacheHit { .. }))
+        .count() as u64;
+    let tool_batch_elapsed_millis = batch_started_at.elapsed().as_millis() as u64;
+    ToolExecutionBatch {
+        records,
+        orchestration: InferenceOrchestrationMetrics {
+            parallel_candidates,
+            actual_parallel_calls: if parallel_candidates > 1 {
+                parallel_candidates
+            } else {
+                0
+            },
+            tool_batch_elapsed_millis,
+            tool_execution_millis,
+            tool_critical_path_millis: tool_execution_millis.min(tool_batch_elapsed_millis),
+            tool_cache_hits,
+            duplicate_suppressed,
+            ..InferenceOrchestrationMetrics::default()
+        },
+    }
 }
 
 #[cfg(test)]

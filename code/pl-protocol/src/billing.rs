@@ -40,6 +40,113 @@ pub struct InferenceTokenUsage {
     pub total_tokens: u64,
 }
 
+/// 单次 inference 及其直接工具批次的脱敏编排收益指标。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct InferenceOrchestrationMetrics {
+    #[serde(default)]
+    pub tool_schema_estimated_tokens: u64,
+    #[serde(default)]
+    pub tool_result_estimated_tokens: u64,
+    #[serde(default)]
+    pub tool_calls: u64,
+    #[serde(default)]
+    pub parallel_candidates: u64,
+    #[serde(default)]
+    pub actual_parallel_calls: u64,
+    #[serde(default)]
+    pub tool_batch_elapsed_millis: u64,
+    #[serde(default)]
+    pub tool_execution_millis: u64,
+    #[serde(default)]
+    pub tool_critical_path_millis: u64,
+    #[serde(default)]
+    pub tool_cache_hits: u64,
+    #[serde(default)]
+    pub duplicate_suppressed: u64,
+    #[serde(default)]
+    pub tool_search_calls: u64,
+    #[serde(default)]
+    pub tool_search_loaded_tools: u64,
+    #[serde(default)]
+    pub program_count: u64,
+    #[serde(default)]
+    pub program_tool_calls: u64,
+    #[serde(default)]
+    pub transport_attempts: u64,
+    #[serde(default)]
+    pub continuation_attempts: u64,
+    #[serde(default)]
+    pub continuation_used: u64,
+    #[serde(default)]
+    pub continuation_invalid: u64,
+    #[serde(default)]
+    pub http_fallbacks: u64,
+}
+
+impl InferenceOrchestrationMetrics {
+    pub fn is_empty(&self) -> bool {
+        self == &Self::default()
+    }
+
+    pub fn parallel_saved_millis(&self) -> u64 {
+        self.tool_execution_millis
+            .saturating_sub(self.tool_batch_elapsed_millis)
+    }
+
+    pub fn merge(&mut self, other: &Self) {
+        self.tool_schema_estimated_tokens = self
+            .tool_schema_estimated_tokens
+            .saturating_add(other.tool_schema_estimated_tokens);
+        self.tool_result_estimated_tokens = self
+            .tool_result_estimated_tokens
+            .saturating_add(other.tool_result_estimated_tokens);
+        self.tool_calls = self.tool_calls.saturating_add(other.tool_calls);
+        self.parallel_candidates = self
+            .parallel_candidates
+            .saturating_add(other.parallel_candidates);
+        self.actual_parallel_calls = self
+            .actual_parallel_calls
+            .saturating_add(other.actual_parallel_calls);
+        self.tool_batch_elapsed_millis = self
+            .tool_batch_elapsed_millis
+            .saturating_add(other.tool_batch_elapsed_millis);
+        self.tool_execution_millis = self
+            .tool_execution_millis
+            .saturating_add(other.tool_execution_millis);
+        self.tool_critical_path_millis = self
+            .tool_critical_path_millis
+            .saturating_add(other.tool_critical_path_millis);
+        self.tool_cache_hits = self.tool_cache_hits.saturating_add(other.tool_cache_hits);
+        self.duplicate_suppressed = self
+            .duplicate_suppressed
+            .saturating_add(other.duplicate_suppressed);
+        self.tool_search_calls = self
+            .tool_search_calls
+            .saturating_add(other.tool_search_calls);
+        self.tool_search_loaded_tools = self
+            .tool_search_loaded_tools
+            .saturating_add(other.tool_search_loaded_tools);
+        self.program_count = self.program_count.saturating_add(other.program_count);
+        self.program_tool_calls = self
+            .program_tool_calls
+            .saturating_add(other.program_tool_calls);
+        self.transport_attempts = self
+            .transport_attempts
+            .saturating_add(other.transport_attempts);
+        self.continuation_attempts = self
+            .continuation_attempts
+            .saturating_add(other.continuation_attempts);
+        self.continuation_used = self
+            .continuation_used
+            .saturating_add(other.continuation_used);
+        self.continuation_invalid = self
+            .continuation_invalid
+            .saturating_add(other.continuation_invalid);
+        self.http_fallbacks = self.http_fallbacks.saturating_add(other.http_fallbacks);
+    }
+}
+
 impl InferenceTokenUsage {
     pub fn normalized(&self) -> Self {
         let cached_prompt_tokens = self.cached_prompt_tokens.min(self.prompt_tokens);
@@ -99,6 +206,11 @@ pub struct InferenceBillingRecord {
     pub prompt_cache_policy: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prefix_changed_reason: Option<PromptPrefixChangedReason>,
+    #[serde(
+        default,
+        skip_serializing_if = "InferenceOrchestrationMetrics::is_empty"
+    )]
+    pub orchestration: InferenceOrchestrationMetrics,
     pub recorded_at: i64,
 }
 
@@ -113,7 +225,7 @@ pub struct TurnBillingRecord {
 }
 
 impl TurnBillingRecord {
-    pub const VERSION: u32 = 2;
+    pub const VERSION: u32 = 3;
 
     pub fn new() -> Self {
         Self {
@@ -142,6 +254,16 @@ impl TurnBillingRecord {
                     .reasoning_tokens
                     .saturating_add(usage.reasoning_tokens);
                 aggregate.total_tokens = aggregate.total_tokens.saturating_add(usage.total_tokens);
+                aggregate
+            },
+        )
+    }
+
+    pub fn aggregate_orchestration(&self) -> InferenceOrchestrationMetrics {
+        self.inferences.iter().fold(
+            InferenceOrchestrationMetrics::default(),
+            |mut aggregate, inference| {
+                aggregate.merge(&inference.orchestration);
                 aggregate
             },
         )
@@ -222,6 +344,7 @@ mod tests {
             prompt_generation: Some(1),
             prompt_cache_policy: Some("implicitPrefix".to_string()),
             prefix_changed_reason: Some(PromptPrefixChangedReason::Initial),
+            orchestration: InferenceOrchestrationMetrics::default(),
             recorded_at: 1,
         };
         let mut billing = TurnBillingRecord::new();
@@ -242,7 +365,7 @@ mod tests {
     }
 
     #[test]
-    fn version_one_json_defaults_version_two_fields() {
+    fn version_one_json_defaults_newer_fields() {
         let billing: TurnBillingRecord = serde_json::from_value(serde_json::json!({
             "version": 1,
             "inferences": [{
@@ -281,6 +404,47 @@ mod tests {
         assert_eq!(billing.inferences[0].pricing.cache_write_per_mtok, None);
         assert!(billing.inferences[0].estimated_cache_savings.is_empty());
         assert_eq!(billing.inferences[0].prompt_generation, None);
+        assert!(billing.inferences[0].orchestration.is_empty());
         assert_eq!(billing.aggregate_usage().total_tokens, 13);
+    }
+
+    #[test]
+    fn turn_billing_aggregates_orchestration_metrics() {
+        let mut first = InferenceOrchestrationMetrics {
+            tool_calls: 2,
+            tool_execution_millis: 30,
+            tool_batch_elapsed_millis: 20,
+            ..InferenceOrchestrationMetrics::default()
+        };
+        first.merge(&InferenceOrchestrationMetrics {
+            tool_cache_hits: 1,
+            ..InferenceOrchestrationMetrics::default()
+        });
+        let mut inference = InferenceBillingRecord {
+            inference_id: "inference-1".to_string(),
+            provider: "OpenAI".to_string(),
+            model: "gpt-5.6-sol".to_string(),
+            context_window: None,
+            reported_usage: InferenceTokenUsage::default(),
+            normalized_usage: InferenceTokenUsage::default(),
+            pricing: ModelPricingSnapshot::default(),
+            estimated_costs: Vec::new(),
+            estimated_cache_savings: Vec::new(),
+            has_unpriced_usage: false,
+            prompt_generation: None,
+            prompt_cache_policy: None,
+            prefix_changed_reason: None,
+            orchestration: first,
+            recorded_at: 1,
+        };
+        let mut billing = TurnBillingRecord::new();
+        billing.inferences.push(inference.clone());
+        inference.inference_id = "inference-2".to_string();
+        billing.inferences.push(inference);
+
+        let aggregate = billing.aggregate_orchestration();
+        assert_eq!(aggregate.tool_calls, 4);
+        assert_eq!(aggregate.tool_cache_hits, 2);
+        assert_eq!(aggregate.parallel_saved_millis(), 20);
     }
 }

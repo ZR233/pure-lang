@@ -567,6 +567,7 @@ mod tests {
             prompt_generation: None,
             prompt_cache_policy: None,
             prefix_changed_reason: None,
+            orchestration: Default::default(),
             recorded_at: 1,
         }
     }

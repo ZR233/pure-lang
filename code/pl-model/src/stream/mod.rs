@@ -147,6 +147,8 @@ pub struct StreamCompletionAccumulator {
     reasoning_summary_parts: Vec<String>,
     raw_reasoning_parts: Vec<String>,
     tool_calls: Vec<ToolCall>,
+    tool_call_callers: HashMap<String, pl_protocol::ToolCallCaller>,
+    responses_context_items: Vec<pl_protocol::ResponsesContextItem>,
     hosted_web_search_calls: HashMap<String, crate::HostedWebSearchCall>,
     tool_stream: ToolStream,
     lifecycle: StreamLifecycle,
@@ -165,6 +167,8 @@ impl StreamCompletionAccumulator {
             reasoning_summary_parts: Vec::new(),
             raw_reasoning_parts: Vec::new(),
             tool_calls: Vec::new(),
+            tool_call_callers: HashMap::new(),
+            responses_context_items: Vec::new(),
             hosted_web_search_calls: HashMap::new(),
             tool_stream: ToolStream::new(),
             lifecycle: StreamLifecycle::new(),
@@ -362,16 +366,23 @@ impl StreamCompletionAccumulator {
                 name,
                 payload,
             } => {
-                if let Some(call) = self.tool_stream.finish_ready(
+                if let Some(mut call) = self.tool_stream.finish_ready(
                     stream_id.as_ref(),
                     call_id.as_ref(),
                     &item_id,
                     name,
                     payload,
                 )? {
+                    self.attach_tool_caller(&mut call);
                     self.update_tool_trace(&call, event_tx);
                     self.tool_calls.push(call);
                 }
+            }
+            ModelStreamEvent::ToolCallCaller { item_id, caller } => {
+                self.tool_call_callers.insert(item_id, caller);
+            }
+            ModelStreamEvent::ResponsesContextItem { item } => {
+                self.responses_context_items.push(item);
             }
             ModelStreamEvent::WebSearchStarted { item_id, action } => {
                 self.hosted_web_search_calls
@@ -402,7 +413,8 @@ impl StreamCompletionAccumulator {
                 self.final_usage = Some(usage);
             }
             ModelStreamEvent::Completed { response_id } => {
-                for call in self.tool_stream.finish_all(&self.tool_calls)? {
+                for mut call in self.tool_stream.finish_all(&self.tool_calls)? {
+                    self.attach_tool_caller(&mut call);
                     self.update_tool_trace(&call, event_tx);
                     self.tool_calls.push(call);
                 }
@@ -433,7 +445,8 @@ impl StreamCompletionAccumulator {
             return Err(error);
         }
 
-        for call in self.tool_stream.finish_all(&self.tool_calls)? {
+        for mut call in self.tool_stream.finish_all(&self.tool_calls)? {
+            self.attach_tool_caller(&mut call);
             self.update_tool_trace(&call, event_tx);
             self.tool_calls.push(call);
         }
@@ -483,6 +496,48 @@ impl StreamCompletionAccumulator {
             .as_ref()
             .map(TraceProjection::next_sequence)
             .unwrap_or_default();
+        let tool_search_calls = self
+            .responses_context_items
+            .iter()
+            .filter(|item| item.kind == pl_protocol::ResponsesContextItemKind::ToolSearchCall)
+            .count() as u64;
+        let tool_search_loaded_tools = self
+            .responses_context_items
+            .iter()
+            .filter(|item| item.kind == pl_protocol::ResponsesContextItemKind::ToolSearchOutput)
+            .filter_map(|item| {
+                item.value
+                    .get("tools")
+                    .and_then(serde_json::Value::as_array)
+            })
+            .map(|tools| {
+                tools
+                    .iter()
+                    .map(|tool| {
+                        tool.get("tools")
+                            .and_then(serde_json::Value::as_array)
+                            .map_or(1, |nested| nested.len() as u64)
+                    })
+                    .sum::<u64>()
+            })
+            .sum();
+        let orchestration = pl_protocol::InferenceOrchestrationMetrics {
+            tool_calls: self.tool_calls.len() as u64,
+            tool_search_calls,
+            tool_search_loaded_tools,
+            program_count: self
+                .responses_context_items
+                .iter()
+                .filter(|item| item.kind == pl_protocol::ResponsesContextItemKind::Program)
+                .count() as u64,
+            program_tool_calls: self
+                .tool_calls
+                .iter()
+                .filter(|call| call.caller.is_some())
+                .count() as u64,
+            transport_attempts: 1,
+            ..pl_protocol::InferenceOrchestrationMetrics::default()
+        };
 
         Ok(CompletionResponse {
             response_id: self.response_id,
@@ -492,11 +547,21 @@ impl StreamCompletionAccumulator {
             tool_calls: self.tool_calls,
             trace_events,
             hosted_web_search_calls,
+            responses_context_items: self.responses_context_items,
+            orchestration,
             next_sequence,
             usage: self.final_usage.unwrap_or_default(),
             finish_reason,
             model: String::new(),
         })
+    }
+
+    fn attach_tool_caller(&mut self, call: &mut ToolCall) {
+        call.caller = self.tool_call_callers.remove(&call.id).or_else(|| {
+            call.call_id
+                .as_deref()
+                .and_then(|call_id| self.tool_call_callers.remove(call_id))
+        });
     }
 
     fn fail_attempt(&mut self, error: &PureError, event_tx: &AgentEventSender) {

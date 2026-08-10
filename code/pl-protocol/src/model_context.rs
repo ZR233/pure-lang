@@ -257,6 +257,51 @@ pub struct ToolResultReceipt {
     pub reused_from_call_id: Option<String>,
 }
 
+/// 必须在 `store: false` Responses 请求中按原顺序回放的 provider 原生 item 类别。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResponsesContextItemKind {
+    Reasoning,
+    ToolSearchCall,
+    ToolSearchOutput,
+    Program,
+    ProgramOutput,
+    Unknown,
+}
+
+/// 有界为已知类别、但保留完整 wire 字段的 Responses 上下文项。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResponsesContextItem {
+    pub kind: ResponsesContextItemKind,
+    pub value: serde_json::Value,
+}
+
+impl ResponsesContextItem {
+    pub fn from_wire(value: serde_json::Value) -> Option<Self> {
+        let kind = match value.get("type").and_then(serde_json::Value::as_str)? {
+            "reasoning" => ResponsesContextItemKind::Reasoning,
+            "tool_search_call" => ResponsesContextItemKind::ToolSearchCall,
+            "tool_search_output" => ResponsesContextItemKind::ToolSearchOutput,
+            "program" => ResponsesContextItemKind::Program,
+            "program_output" => ResponsesContextItemKind::ProgramOutput,
+            "message"
+            | "function_call"
+            | "custom_tool_call"
+            | "function_call_output"
+            | "custom_tool_call_output"
+            | "web_search_call"
+            | "file_search_call"
+            | "computer_call"
+            | "computer_call_output"
+            | "mcp_call"
+            | "code_interpreter_call" => return None,
+            _ => ResponsesContextItemKind::Unknown,
+        };
+        Some(Self { kind, value })
+    }
+}
+
 /// Provider 无关的模型上下文项。
 ///
 /// 普通对话通过 [`ModelContextItem::Message`] 表达；provider 返回的不可读
@@ -277,6 +322,9 @@ pub enum ModelContextItem {
         #[serde(rename = "encryptedContent")]
         encrypted_content: String,
     },
+    Responses {
+        item: ResponsesContextItem,
+    },
 }
 
 impl ModelContextItem {
@@ -284,7 +332,7 @@ impl ModelContextItem {
         match self {
             Self::Message { message } => Some(message),
             Self::ToolResult { message, .. } => Some(message),
-            Self::Compaction { .. } => None,
+            Self::Compaction { .. } | Self::Responses { .. } => None,
         }
     }
 
@@ -292,7 +340,7 @@ impl ModelContextItem {
         match self {
             Self::Message { message } => Some(message),
             Self::ToolResult { message, .. } => Some(message),
-            Self::Compaction { .. } => None,
+            Self::Compaction { .. } | Self::Responses { .. } => None,
         }
     }
 
@@ -303,7 +351,7 @@ impl ModelContextItem {
     pub fn as_tool_result_receipt(&self) -> Option<&ToolResultReceipt> {
         match self {
             Self::ToolResult { receipt, .. } => Some(receipt),
-            Self::Message { .. } | Self::Compaction { .. } => None,
+            Self::Message { .. } | Self::Compaction { .. } | Self::Responses { .. } => None,
         }
     }
 }

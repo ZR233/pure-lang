@@ -174,7 +174,7 @@ fn trim_tool_outputs_to_context_window(
         let (message, receipt) = match &input[index] {
             ModelContextItem::Message { message } => (message, None),
             ModelContextItem::ToolResult { message, receipt } => (message, Some(receipt.clone())),
-            ModelContextItem::Compaction { .. } => {
+            ModelContextItem::Compaction { .. } | ModelContextItem::Responses { .. } => {
                 continue;
             }
         };
@@ -207,6 +207,8 @@ fn estimate_input_tokens(instructions: &str, input: &[ModelContextItem]) -> u64 
                 ModelContextItem::Compaction { encrypted_content } => {
                     estimate_text_tokens(encrypted_content)
                 }
+                ModelContextItem::Responses { item } => serde_json::to_string(&item.value)
+                    .map_or(0, |value| estimate_text_tokens(&value)),
             })
             .sum::<u64>()
 }

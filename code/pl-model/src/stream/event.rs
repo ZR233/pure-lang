@@ -1,5 +1,6 @@
 use crate::WebSearchAction;
 use crate::request::TokenUsage;
+use pl_protocol::{ResponsesContextItem, ToolCallCaller};
 use pl_trace::TraceTextChannel;
 
 /// Provider 无关的模型流式事件。
@@ -61,6 +62,13 @@ pub enum ModelStreamEvent {
         call_id: Option<String>,
         name: Option<String>,
         payload: Option<ToolInputDeltaPayload>,
+    },
+    ToolCallCaller {
+        item_id: String,
+        caller: ToolCallCaller,
+    },
+    ResponsesContextItem {
+        item: ResponsesContextItem,
     },
     WebSearchStarted {
         item_id: String,

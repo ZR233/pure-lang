@@ -372,7 +372,7 @@ fn openai_family() -> ModelFamily {
         truncation_mode: TruncationMode::Tokens,
         truncation_limit: 10_000,
         parameters: vec![openai_effort_parameter(&["medium", "low", "high", "xhigh"])],
-        request_profile: ModelRequestProfile::default(),
+        request_profile: openai_responses_request_profile(),
         base_instructions: String::new(),
     }
 }
@@ -395,7 +395,7 @@ fn openai_gpt56_family(default_effort: &str) -> ModelFamily {
         truncation_mode: TruncationMode::Tokens,
         truncation_limit: 10_000,
         parameters: vec![openai_effort_parameter(&candidates)],
-        request_profile: ModelRequestProfile::default(),
+        request_profile: openai_responses_request_profile(),
         base_instructions: String::new(),
     }
 }
@@ -479,6 +479,14 @@ fn deepseek_request_profile() -> ModelRequestProfile {
 fn chat_parallel_request_profile() -> ModelRequestProfile {
     ModelRequestProfile {
         chat_parallel_tool_calls: true,
+        ..ModelRequestProfile::default()
+    }
+}
+
+fn openai_responses_request_profile() -> ModelRequestProfile {
+    ModelRequestProfile {
+        responses_tool_search: true,
+        responses_programmatic_tool_calling: true,
         ..ModelRequestProfile::default()
     }
 }
@@ -635,6 +643,8 @@ fn openai_capabilities() -> ModelCapabilities {
             parallel_tool_calls: true,
             custom_tools: true,
             freeform_tools: true,
+            tool_search: true,
+            programmatic_tool_calling: true,
         },
         interleaved: None,
         prompt_cache: PromptCacheModelCapabilities::default(),
@@ -654,6 +664,8 @@ fn deepseek_capabilities() -> ModelCapabilities {
             parallel_tool_calls: true,
             custom_tools: false,
             freeform_tools: false,
+            tool_search: false,
+            programmatic_tool_calling: false,
         },
         interleaved: Some(ReasoningInterleaved {
             field: ReasoningInterleavedField::ReasoningContent,
@@ -679,6 +691,8 @@ fn mimo_capabilities(vision: bool) -> ModelCapabilities {
             parallel_tool_calls: false,
             custom_tools: false,
             freeform_tools: false,
+            tool_search: false,
+            programmatic_tool_calling: false,
         },
         interleaved: Some(ReasoningInterleaved {
             field: ReasoningInterleavedField::ReasoningContent,
@@ -704,6 +718,8 @@ fn zhipu_capabilities(vision: bool) -> ModelCapabilities {
             parallel_tool_calls: true,
             custom_tools: false,
             freeform_tools: false,
+            tool_search: false,
+            programmatic_tool_calling: false,
         },
         interleaved: Some(ReasoningInterleaved {
             field: ReasoningInterleavedField::ReasoningContent,

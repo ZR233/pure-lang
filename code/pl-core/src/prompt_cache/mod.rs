@@ -38,10 +38,42 @@ struct PromptHashes<'a> {
 /// 以稳定名称和 canonical JSON 顺序冻结一次 Turn 的模型可见工具集合。
 pub(crate) fn stable_tool_schemas(mut tools: Vec<ToolSchema>) -> Vec<ToolSchema> {
     for tool in &mut tools {
-        if let ToolSchema::Function { input_schema, .. } = tool {
-            canonicalize_json(input_schema);
-        }
+        canonicalize_tool_schema(tool);
     }
+    sort_tool_schemas(&mut tools);
+    tools
+}
+
+fn canonicalize_tool_schema(tool: &mut ToolSchema) {
+    match tool {
+        ToolSchema::Function {
+            input_schema,
+            output_schema,
+            ..
+        } => {
+            canonicalize_json(input_schema);
+            if let Some(output_schema) = output_schema {
+                canonicalize_json(output_schema);
+            }
+        }
+        ToolSchema::Custom { output_schema, .. } => {
+            if let Some(output_schema) = output_schema {
+                canonicalize_json(output_schema);
+            }
+        }
+        ToolSchema::Namespace { tools, .. } => {
+            for tool in &mut *tools {
+                canonicalize_tool_schema(tool);
+            }
+            sort_tool_schemas(tools);
+        }
+        ToolSchema::ToolSearch
+        | ToolSchema::ProgrammaticToolCalling
+        | ToolSchema::WebSearch { .. } => {}
+    }
+}
+
+fn sort_tool_schemas(tools: &mut [ToolSchema]) {
     tools.sort_by(|left, right| {
         left.name().cmp(right.name()).then_with(|| {
             canonical_schema(left)
@@ -49,7 +81,6 @@ pub(crate) fn stable_tool_schemas(mut tools: Vec<ToolSchema>) -> Vec<ToolSchema>
                 .cmp(&canonical_schema(right).unwrap_or_default())
         })
     });
-    tools
 }
 
 /// 更新请求缓存诊断所需的 working-context 快照。
@@ -935,6 +966,53 @@ mod tests {
             )
             .unwrap()
             .is_none()
+        );
+    }
+
+    #[test]
+    fn deferred_namespace_tools_are_canonicalized_and_sorted_recursively() {
+        let first = stable_tool_schemas(vec![ToolSchema::namespace(
+            "git",
+            "Git tools",
+            vec![
+                ToolSchema::function(
+                    "git_status",
+                    "status",
+                    serde_json::json!({"type": "object", "properties": {}}),
+                ),
+                ToolSchema::function(
+                    "git_diff",
+                    "diff",
+                    serde_json::json!({
+                        "type": "object",
+                        "properties": {"path": {"type": "string", "description": "path"}}
+                    }),
+                ),
+            ],
+        )]);
+        let second = stable_tool_schemas(vec![ToolSchema::namespace(
+            "git",
+            "Git tools",
+            vec![
+                ToolSchema::function(
+                    "git_diff",
+                    "diff",
+                    serde_json::json!({
+                        "properties": {"path": {"description": "path", "type": "string"}},
+                        "type": "object"
+                    }),
+                ),
+                ToolSchema::function(
+                    "git_status",
+                    "status",
+                    serde_json::json!({"properties": {}, "type": "object"}),
+                ),
+            ],
+        )]);
+
+        assert_eq!(
+            serde_json::to_vec(&first).unwrap(),
+            serde_json::to_vec(&second).unwrap()
         );
     }
 }

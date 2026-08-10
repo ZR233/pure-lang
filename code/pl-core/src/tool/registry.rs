@@ -2,6 +2,7 @@ use std::fmt;
 
 use pl_model::ToolSchema;
 
+use super::orchestration::{ToolOrchestrationOptions, orchestrate_tool_schemas};
 use super::{Tool, lsp_tool_for_language};
 
 /// 工具注册表。
@@ -43,6 +44,15 @@ impl ToolRegistry {
         self.tools.iter().map(|t| t.to_schema()).collect()
     }
 
+    pub fn schemas_with_orchestration(&self, options: ToolOrchestrationOptions) -> Vec<ToolSchema> {
+        orchestrate_tool_schemas(
+            self.tools
+                .iter()
+                .map(|tool| (tool.to_schema(), tool.effect())),
+            options,
+        )
+    }
+
     /// 按宿主数据化策略过滤模型可见 schema。
     pub fn schemas_for_policy(&self, policy: &crate::AgentExecutionPolicy) -> Vec<ToolSchema> {
         self.tools
@@ -50,6 +60,20 @@ impl ToolRegistry {
             .filter(|tool| policy.allows_tool(tool.name(), tool.effect()))
             .map(|tool| tool.to_schema())
             .collect()
+    }
+
+    pub fn schemas_for_policy_with_orchestration(
+        &self,
+        policy: &crate::AgentExecutionPolicy,
+        options: ToolOrchestrationOptions,
+    ) -> Vec<ToolSchema> {
+        orchestrate_tool_schemas(
+            self.tools
+                .iter()
+                .filter(|tool| policy.allows_tool(tool.name(), tool.effect()))
+                .map(|tool| (tool.to_schema(), tool.effect())),
+            options,
+        )
     }
 
     pub fn len(&self) -> usize {

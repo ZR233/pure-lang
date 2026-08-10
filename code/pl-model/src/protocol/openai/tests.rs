@@ -2,6 +2,8 @@ use std::collections::HashMap;
 
 use pl_protocol::{
     ContentPart, ImageSource, Message, MessageContent, MessageRole, ModelContextItem, PureError,
+    ResponsesContextItem, ResponsesContextItemKind, ToolCallCaller, ToolCallKind,
+    ToolResultMetadata,
 };
 use pretty_assertions::assert_eq;
 
@@ -664,6 +666,184 @@ fn responses_body_writes_custom_grammar_tool() {
             "syntax": "lark",
             "definition": "start: patch"
         })
+    );
+}
+
+#[test]
+fn responses_body_writes_deferred_namespace_and_programmatic_tools() {
+    let model = bundled_model("gpt-5.6-sol");
+    let mut request = request_with_effort("xhigh");
+    request.model = model.slug.clone();
+    let read_file = ToolSchema::function(
+        "read_file",
+        "read a file",
+        serde_json::json!({"type": "object"}),
+    )
+    .allow_programmatic(serde_json::json!({
+        "type": "object",
+        "additionalProperties": true
+    }))
+    .deferred();
+    request.tools = vec![
+        ToolSchema::namespace("workspace", "workspace reads", vec![read_file]),
+        ToolSchema::ToolSearch,
+        ToolSchema::ProgrammaticToolCalling,
+    ];
+
+    let body = OpenAiProtocol::responses().build_request_body_with_model(&request, &model);
+
+    assert_eq!(body["tools"][0]["type"], "namespace");
+    assert_eq!(body["tools"][0]["name"], "workspace");
+    assert_eq!(body["tools"][0]["tools"][0]["defer_loading"], true);
+    assert_eq!(
+        body["tools"][0]["tools"][0]["allowed_callers"],
+        serde_json::json!(["direct", "programmatic"])
+    );
+    assert_eq!(
+        body["tools"][0]["tools"][0]["output_schema"]["type"],
+        "object"
+    );
+    assert_eq!(body["tools"][1]["type"], "tool_search");
+    assert_eq!(body["tools"][2]["type"], "programmatic_tool_calling");
+}
+
+#[test]
+fn responses_replays_program_caller_and_native_items_in_order() {
+    let caller = ToolCallCaller::Program {
+        caller_id: "program-1".to_string(),
+    };
+    let calls = vec![
+        ToolCall::function(
+            "fc_1",
+            "read_file",
+            serde_json::json!({"path": "README.md"}),
+            Some("call_1".to_string()),
+        )
+        .with_caller(Some(caller.clone())),
+    ];
+    let mut assistant_metadata = HashMap::new();
+    assistant_metadata.insert(
+        "tool_calls".to_string(),
+        serde_json::to_string(&calls).unwrap(),
+    );
+    let mut tool_metadata = HashMap::new();
+    ToolResultMetadata::new(
+        "fc_1".to_string(),
+        Some("call_1".to_string()),
+        "read_file".to_string(),
+        ToolCallKind::Function,
+        r#"{"path":"README.md"}"#.to_string(),
+    )
+    .with_caller(Some(caller))
+    .insert_into(&mut tool_metadata);
+    let mut request = request_with_effort("xhigh");
+    request.input = vec![
+        ModelContextItem::Responses {
+            item: ResponsesContextItem {
+                kind: ResponsesContextItemKind::Program,
+                value: serde_json::json!({"type": "program", "id": "program-1"}),
+            },
+        },
+        ModelContextItem::from(Message {
+            role: MessageRole::Assistant,
+            content: MessageContent::Text(String::new()),
+            reasoning_content: None,
+            metadata: assistant_metadata,
+        }),
+        ModelContextItem::from(Message {
+            role: MessageRole::Tool,
+            content: MessageContent::Text(r#"{"content":"ok"}"#.to_string()),
+            reasoning_content: None,
+            metadata: tool_metadata,
+        }),
+        ModelContextItem::Responses {
+            item: ResponsesContextItem {
+                kind: ResponsesContextItemKind::ProgramOutput,
+                value: serde_json::json!({
+                    "type": "program_output",
+                    "id": "program-output-1"
+                }),
+            },
+        },
+    ];
+
+    let body = OpenAiProtocol::responses().build_request_body(&request);
+
+    assert_eq!(body["input"][0]["type"], "program");
+    assert_eq!(body["input"][1]["type"], "function_call");
+    assert_eq!(body["input"][1]["caller"]["caller_id"], "program-1");
+    assert_eq!(body["input"][2]["type"], "function_call_output");
+    assert_eq!(body["input"][2]["caller"]["caller_id"], "program-1");
+    assert_eq!(body["input"][3]["type"], "program_output");
+
+    let error = OpenAiProtocol::chat()
+        .build_request(&request, &ModelInfo::fallback(&request.model))
+        .unwrap_err();
+    assert!(error.to_string().contains("Responses native items"));
+}
+
+#[test]
+fn responses_parse_response_preserves_orchestration_items_and_caller() {
+    let response = OpenAiProtocol::responses()
+        .parse_response(serde_json::json!({
+            "id": "resp-1",
+            "model": "gpt-5.6-sol",
+            "output": [
+                {"type": "tool_search_call", "id": "search-1"},
+                {
+                    "type": "tool_search_output",
+                    "id": "search-output-1",
+                    "tools": [{"namespace": "git", "tools": [{"name": "git_status"}]}]
+                },
+                {"type": "program", "id": "program-1"},
+                {
+                    "type": "function_call",
+                    "id": "fc-1",
+                    "call_id": "call-1",
+                    "name": "git_status",
+                    "arguments": "{}",
+                    "caller": {"type": "program", "caller_id": "program-1"}
+                }
+            ],
+            "usage": {"input_tokens": 10, "output_tokens": 2, "total_tokens": 12}
+        }))
+        .unwrap();
+
+    assert_eq!(response.responses_context_items.len(), 3);
+    assert_eq!(response.orchestration.tool_search_calls, 1);
+    assert_eq!(response.orchestration.tool_search_loaded_tools, 1);
+    assert_eq!(response.orchestration.program_count, 1);
+    assert_eq!(response.orchestration.program_tool_calls, 1);
+    assert_eq!(
+        response.tool_calls[0].caller,
+        Some(ToolCallCaller::Program {
+            caller_id: "program-1".to_string()
+        })
+    );
+}
+
+#[test]
+fn responses_parse_response_preserves_unknown_native_items_for_stateless_replay() {
+    let response = OpenAiProtocol::responses()
+        .parse_response(serde_json::json!({
+            "id": "resp-unknown",
+            "model": "gpt-5.6-sol",
+            "output": [
+                {"type": "future_hosted_result", "id": "future-1", "opaque": {"value": 1}},
+                {"type": "message", "id": "message-1", "content": [{"type": "output_text", "text": "done"}]}
+            ],
+            "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
+        }))
+        .unwrap();
+
+    assert_eq!(response.responses_context_items.len(), 1);
+    assert_eq!(
+        response.responses_context_items[0].kind,
+        ResponsesContextItemKind::Unknown
+    );
+    assert_eq!(
+        response.responses_context_items[0].value["type"],
+        "future_hosted_result"
     );
 }
 
