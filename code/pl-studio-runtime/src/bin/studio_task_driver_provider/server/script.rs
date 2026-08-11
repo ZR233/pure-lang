@@ -255,7 +255,15 @@ fn planner_response(
                 ),
             )
         }
-        13 => {
+        13 => (
+            "task_status(after executor close)",
+            tool_call(
+                "status-after-executor-close",
+                "task_status",
+                serde_json::json!({}),
+            ),
+        ),
+        14 => {
             let branch = task_worktree(workspace)?.branch;
             progress.expected_previous_head = Some(git_output(workspace, &["rev-parse", "HEAD"])?);
             (
@@ -271,7 +279,7 @@ fn planner_response(
                 ),
             )
         }
-        14 => {
+        15 => {
             let executor_id = executor_id(progress)?;
             let previous = progress
                 .expected_previous_head
@@ -294,7 +302,7 @@ fn planner_response(
                 ),
             )
         }
-        15 => (
+        16 => (
             "task_update_design(consistency)",
             tool_call(
                 "design-consistency",
@@ -302,7 +310,7 @@ fn planner_response(
                 serde_json::json!({"patch": CONSISTENCY_DESIGN_PATCH}),
             ),
         ),
-        16 => (
+        17 => (
             "task_request_integrated_review",
             tool_call(
                 "request-integrated-review",
@@ -310,7 +318,7 @@ fn planner_response(
                 serde_json::json!({}),
             ),
         ),
-        17 => (
+        18 => (
             "list_agents(integrated-review)",
             tool_call(
                 "list-integrated-review",
@@ -318,7 +326,7 @@ fn planner_response(
                 serde_json::json!({}),
             ),
         ),
-        18 => (
+        19 => (
             "task_status(integrated-review)",
             tool_call(
                 "status-integrated-review",
@@ -326,7 +334,7 @@ fn planner_response(
                 serde_json::json!({}),
             ),
         ),
-        19 => (
+        20 => (
             "task_complete",
             tool_call("complete-task", "task_complete", serde_json::json!({})),
         ),
@@ -507,7 +515,7 @@ fn tool_name(tool: &serde_json::Value) -> Option<&str> {
 }
 
 fn function_call_outputs(request: &serde_json::Value) -> impl Iterator<Item = &str> {
-    request
+    let responses_outputs = request
         .get("input")
         .and_then(serde_json::Value::as_array)
         .into_iter()
@@ -516,7 +524,17 @@ fn function_call_outputs(request: &serde_json::Value) -> impl Iterator<Item = &s
         .filter(|item| {
             item.get("type").and_then(serde_json::Value::as_str) == Some("function_call_output")
         })
-        .filter_map(|item| item.get("output").and_then(serde_json::Value::as_str))
+        .filter_map(|item| item.get("output").and_then(serde_json::Value::as_str));
+    let chat_completions_outputs = request
+        .get("messages")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .rev()
+        .filter(|message| message.get("role").and_then(serde_json::Value::as_str) == Some("tool"))
+        .filter_map(|message| message.get("content").and_then(serde_json::Value::as_str));
+
+    responses_outputs.chain(chat_completions_outputs)
 }
 
 fn parse_output(output: &str) -> Option<serde_json::Value> {
@@ -585,4 +603,43 @@ fn git_output(workspace: &Path, args: &[&str]) -> Result<String> {
         );
     }
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn observes_executor_id_from_responses_function_call_output() {
+        let request = serde_json::json!({
+            "input": [{
+                "type": "function_call_output",
+                "output": r#"{"agentId":"agent-responses"}"#
+            }]
+        });
+        let mut progress = ScriptProgress::default();
+
+        observe_request(&mut progress, &request);
+
+        assert_eq!(
+            progress.executor_agent_id.as_deref(),
+            Some("agent-responses")
+        );
+    }
+
+    #[test]
+    fn observes_executor_id_from_chat_completions_tool_message() {
+        let request = serde_json::json!({
+            "messages": [{
+                "role": "tool",
+                "content": r#"{"agentId":"agent-chat"}"#,
+                "tool_call_id": "spawn-executor"
+            }]
+        });
+        let mut progress = ScriptProgress::default();
+
+        observe_request(&mut progress, &request);
+
+        assert_eq!(progress.executor_agent_id.as_deref(), Some("agent-chat"));
+    }
 }

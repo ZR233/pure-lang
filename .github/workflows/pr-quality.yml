@@ -114,6 +114,8 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: read
+    env:
+      PURE_STUDIO_LIVE_CONFIG_TOML: ${{ secrets.PURE_STUDIO_LIVE_CONFIG_TOML }}
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -130,3 +132,52 @@ jobs:
 
       - name: Verify Flutter application
         run: cargo xtask verify-gui --integration
+
+      - name: Verify deterministic Studio session state with Flutter Driver
+        shell: pwsh
+        run: >-
+          & code/pure-studio/tool/demo_driver_harness.ps1
+          -ArtifactsDirectory (Join-Path $env:RUNNER_TEMP 'pure-studio-demo-driver')
+
+      - name: Verify deterministic Task workflow with Flutter Driver
+        shell: pwsh
+        run: >-
+          & code/pure-studio/tool/task_driver_harness.ps1
+          -Scripted
+          -DriverHome (Join-Path $env:RUNNER_TEMP 'pure-studio-task-driver')
+          -GuiStartupTimeoutSeconds 1200
+          -PlanTimeoutSeconds 180
+          -TaskTimeoutSeconds 1200
+          -StallTimeoutSeconds 180
+
+      - name: Verify live model Task workflow when configured
+        if: env.PURE_STUDIO_LIVE_CONFIG_TOML != ''
+        shell: pwsh
+        run: |
+          $configFile = Join-Path $env:RUNNER_TEMP 'pure-studio-live-config.toml'
+          [System.IO.File]::WriteAllText(
+            $configFile,
+            $env:PURE_STUDIO_LIVE_CONFIG_TOML,
+            [System.Text.UTF8Encoding]::new($false)
+          )
+          & code/pure-studio/tool/task_driver_harness.ps1 `
+            -Workspace $env:GITHUB_WORKSPACE `
+            -PromptFile (Join-Path $env:GITHUB_WORKSPACE 'code\pure-studio\test_driver\fixtures\task-mode.prompt') `
+            -ConfigFile $configFile `
+            -DriverHome (Join-Path $env:RUNNER_TEMP 'pure-studio-live-driver') `
+            -GuiStartupTimeoutSeconds 1200 `
+            -PlanTimeoutSeconds 300 `
+            -TaskTimeoutSeconds 3600 `
+            -StallTimeoutSeconds 300
+
+      - name: Upload Flutter Driver diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pure-studio-driver-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/pure-studio-demo-driver
+            ${{ runner.temp }}/pure-studio-task-driver
+            ${{ runner.temp }}/pure-studio-live-driver
+          if-no-files-found: ignore
+          retention-days: 7

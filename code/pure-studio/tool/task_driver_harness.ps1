@@ -663,7 +663,9 @@ try {
             'commit', '-m', 'test: initialize driver fixture'
         )
         $PromptFile = Join-Path $DriverHome 'prompt.txt'
-        [System.IO.File]::WriteAllText($PromptFile, "Execute the deterministic offline Task Driver fixture.`n")
+        Copy-Item `
+            -LiteralPath (Join-Path $appDir 'test_driver\fixtures\task-mode.prompt') `
+            -Destination $PromptFile
     }
     elseif ($Mode -eq 'New') {
         $Workspace = [System.IO.Path]::GetFullPath($Workspace)

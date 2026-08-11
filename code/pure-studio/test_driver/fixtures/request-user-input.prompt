@@ -1,0 +1,1 @@
+Call request_user_input once with a single non-secret question, wait for the answer, then acknowledge it briefly.
