@@ -160,7 +160,12 @@ impl CommandBackend for HostedContractBackend {
         _target: &CommandOutputTarget,
         _sizes: CommandOutputSizes,
     ) -> Result<Vec<serde_json::Value>, Self::Error> {
-        Ok(Vec::new())
+        Ok(vec![serde_json::json!({
+            "id": "artifact-1",
+            "call_id": "call-1",
+            "name": "stdout.txt",
+            "stream": "stdout",
+        })])
     }
 
     async fn terminate(&self, process_id: &str, host_pid: Option<u32>) {
@@ -316,6 +321,20 @@ async fn injected_backend_keeps_the_exec_result_contract() {
 
     assert_eq!(result.status, "completed");
     assert_eq!(result.output_file, "hosted/output.log");
+    assert_eq!(
+        result.output_artifacts,
+        vec![serde_json::json!({
+            "id": "artifact-1",
+            "call_id": "call-1",
+            "name": "stdout.txt",
+            "stream": "stdout",
+        })]
+    );
+    assert!(output.runtime_events.iter().any(|event| matches!(
+        event,
+        ToolRuntimeEvent::OutputArtifacts { artifacts }
+            if artifacts == &result.output_artifacts
+    )));
     assert!(result.stdout.contains("hosted"));
     assert!(backend.publish_count.load(Ordering::Relaxed) >= 1);
     let _ = tokio::fs::remove_dir_all(root).await;

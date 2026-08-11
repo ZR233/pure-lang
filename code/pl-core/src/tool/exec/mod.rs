@@ -82,6 +82,8 @@ struct CommandJsonOutput {
     stdout: String,
     stderr: String,
     output_file: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    output_artifacts: Vec<serde_json::Value>,
     message: String,
 }
 
@@ -402,6 +404,7 @@ fn tool_output_from_snapshot(
         stdout: snapshot.stdout.content.clone(),
         stderr: snapshot.stderr.content.clone(),
         output_file: snapshot.output_file.display().to_string(),
+        output_artifacts: snapshot.output_artifacts.clone(),
         message: snapshot.message,
     };
     let description =
