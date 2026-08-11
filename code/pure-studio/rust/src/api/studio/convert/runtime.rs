@@ -19,7 +19,15 @@ use pl_studio_runtime::{
 };
 // ── Core conversion functions ──
 
-pub(crate) fn runtime_snapshot(snapshot: CoreRuntimeSnapshot) -> RuntimeSnapshot {
+/// 把 runtime lifecycle 快照与恢复问题列表组装成 FRB `RuntimeSnapshot`。
+///
+/// 恢复问题不再随 lifecycle 快照下发；调用方从 `StudioRecoveryRegistry` 取出后
+/// 单独传入。该字段在 Dart 侧未被消费，保留仅为兼容既有 FRB 类型，后续重生成时
+/// 可移除。
+pub(crate) fn runtime_snapshot(
+    snapshot: CoreRuntimeSnapshot,
+    recovery_issues: Vec<StudioRecoveryIssue>,
+) -> RuntimeSnapshot {
     RuntimeSnapshot {
         status: match snapshot.status {
             pl_studio_runtime::StudioRuntimeStatus::Uninitialized => {
@@ -45,11 +53,7 @@ pub(crate) fn runtime_snapshot(snapshot: CoreRuntimeSnapshot) -> RuntimeSnapshot
             .collect(),
         updated_at: snapshot.updated_at,
         error: snapshot.error,
-        recovery_issues: snapshot
-            .recovery_issues
-            .into_iter()
-            .map(bridge_recovery_issue)
-            .collect(),
+        recovery_issues: recovery_issues.into_iter().map(bridge_recovery_issue).collect(),
     }
 }
 

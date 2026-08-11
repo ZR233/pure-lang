@@ -32,8 +32,9 @@ async fn initialize_runtime_isolates_unavailable_registered_project() {
     let snapshot = runtime.initialize_runtime().await.unwrap();
 
     assert_eq!(snapshot.status, StudioRuntimeStatus::Ready);
-    assert_eq!(snapshot.recovery_issues.len(), 1);
-    let issue = &snapshot.recovery_issues[0];
+    let recovery_issues = runtime.recovery_issues();
+    assert_eq!(recovery_issues.len(), 1);
+    let issue = &recovery_issues[0];
     assert_eq!(issue.scope, StudioRecoveryIssueScope::Project);
     assert_eq!(issue.category, StudioRecoveryIssueCategory::Repository);
     assert_eq!(issue.action, StudioRecoveryIssueAction::RemoveProject);
@@ -86,8 +87,9 @@ async fn corrupt_registered_session_is_scoped_and_cleanup_preserves_timeline() {
     let snapshot = runtime.initialize_runtime().await.unwrap();
 
     assert_eq!(snapshot.status, StudioRuntimeStatus::Ready);
-    assert_eq!(snapshot.recovery_issues.len(), 1);
-    let issue = &snapshot.recovery_issues[0];
+    let recovery_issues = runtime.recovery_issues();
+    assert_eq!(recovery_issues.len(), 1);
+    let issue = &recovery_issues[0];
     assert_eq!(issue.scope, StudioRecoveryIssueScope::Thread);
     assert_eq!(issue.category, StudioRecoveryIssueCategory::AgentState);
     assert_eq!(issue.action, StudioRecoveryIssueAction::CleanupThread);
@@ -109,7 +111,7 @@ async fn corrupt_registered_session_is_scoped_and_cleanup_preserves_timeline() {
         .unwrap();
 
     assert_eq!(cleaned.status, StudioRuntimeStatus::Ready);
-    assert!(cleaned.recovery_issues.is_empty());
+    assert!(runtime.recovery_issues().is_empty());
     let reset_thread = thread::Entity::find_by_id(&broken.id)
         .one(store.database())
         .await
@@ -152,12 +154,10 @@ async fn corrupt_registered_session_is_scoped_and_cleanup_preserves_timeline() {
         store,
         ConfigStore::new(crate::config::ConfigPaths::from_home(&home)),
         StudioRuntimeState::new(),
-    )
-    .initialize_runtime()
-    .await
-    .unwrap();
-    assert_eq!(restarted.status, StudioRuntimeStatus::Ready);
-    assert!(restarted.recovery_issues.is_empty());
+    );
+    let restarted_snapshot = restarted.initialize_runtime().await.unwrap();
+    assert_eq!(restarted_snapshot.status, StudioRuntimeStatus::Ready);
+    assert!(restarted.recovery_issues().is_empty());
     let _ = tokio::fs::remove_dir_all(root).await;
 }
 

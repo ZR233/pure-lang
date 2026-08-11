@@ -32,7 +32,7 @@ pub(super) async fn studio_snapshot_from_projects_inner(
     requested_project_id: Option<String>,
     requested_thread_id: Option<String>,
 ) -> Result<BridgeStudioSnapshotResponse> {
-    let recovery_issues = bridge.studio.runtime_snapshot().recovery_issues;
+    let recovery_issues = bridge.studio.recovery_issues();
     let blocked_project_ids = recovery_issues
         .iter()
         .filter(|issue| issue.scope == pl_studio_runtime::StudioRecoveryIssueScope::Project)
@@ -148,8 +148,7 @@ pub(super) fn ensure_project_recovery_available(
 ) -> Result<()> {
     if bridge
         .studio
-        .runtime_snapshot()
-        .recovery_issues
+        .recovery_issues()
         .iter()
         .any(|issue| {
             issue.scope == pl_studio_runtime::StudioRecoveryIssueScope::Project

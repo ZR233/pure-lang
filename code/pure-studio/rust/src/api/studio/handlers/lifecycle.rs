@@ -24,9 +24,10 @@ pub async fn initialize_runtime() -> Result<RuntimeSnapshot, BridgeError> {
         BridgeLifecycle::Stopped | BridgeLifecycle::ShuttingDown => {
             Err(BridgeError::runtime_stopped())
         }
-        BridgeLifecycle::Initialized | BridgeLifecycle::Started => {
-            Ok(runtime_snapshot(bridge.studio.initialize_runtime().await?))
-        }
+        BridgeLifecycle::Initialized | BridgeLifecycle::Started => Ok(runtime_snapshot(
+            bridge.studio.initialize_runtime().await?,
+            bridge.studio.recovery_issues(),
+        )),
     }
 }
 
@@ -38,11 +39,15 @@ pub async fn start_runtime() -> Result<RuntimeSnapshot, BridgeError> {
             Err(BridgeError::runtime_stopped())
         }
         BridgeLifecycle::Initialized => {
-            let snapshot = runtime_snapshot(bridge.studio.start_runtime().await?);
+            let snapshot =
+                runtime_snapshot(bridge.studio.start_runtime().await?, bridge.studio.recovery_issues());
             *lifecycle = BridgeLifecycle::Started;
             Ok(snapshot)
         }
-        BridgeLifecycle::Started => Ok(runtime_snapshot(bridge.studio.runtime_snapshot())),
+        BridgeLifecycle::Started => Ok(runtime_snapshot(
+            bridge.studio.runtime_snapshot(),
+            bridge.studio.recovery_issues(),
+        )),
     }
 }
 
@@ -54,7 +59,10 @@ pub async fn shutdown_runtime() -> Result<RuntimeSnapshot, BridgeError> {
             let mut lifecycle = bridge.lifecycle.lock().await;
             match *lifecycle {
                 BridgeLifecycle::Stopped => {
-                    return Ok(runtime_snapshot(bridge.studio.runtime_snapshot()));
+                    return Ok(runtime_snapshot(
+                        bridge.studio.runtime_snapshot(),
+                        bridge.studio.recovery_issues(),
+                    ));
                 }
                 BridgeLifecycle::ShuttingDown => false,
                 BridgeLifecycle::Initialized | BridgeLifecycle::Started => {
@@ -84,7 +92,10 @@ pub async fn shutdown_runtime() -> Result<RuntimeSnapshot, BridgeError> {
     crate::diagnostics::shutdown();
     *bridge.lifecycle.lock().await = BridgeLifecycle::Stopped;
     bridge.shutdown_complete.notify_waiters();
-    Ok(runtime_snapshot(shutdown_result?))
+    Ok(runtime_snapshot(
+        shutdown_result?,
+        bridge.studio.recovery_issues(),
+    ))
 }
 
 pub(super) async fn shutdown_runtime_for_update(

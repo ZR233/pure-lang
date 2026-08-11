@@ -81,6 +81,7 @@ pub struct StudioRuntime {
     interactions: InteractionRuntime,
     product_events: StudioProductEventRuntime,
     runtime_state: StudioRuntimeState,
+    recovery: crate::studio::StudioRecoveryRegistry,
     agent_framework: std::sync::Arc<tokio::sync::Mutex<Option<std::sync::Arc<StudioAgentRuntime>>>>,
     agent_resources: StudioAgentResources,
     task_coordinator: std::sync::Arc<TaskCoordinator>,
@@ -110,8 +111,8 @@ impl StudioRuntime {
         issue_id: &str,
     ) -> Result<StudioRecoveryCleanupPreview> {
         let issue = self
-            .runtime_state
-            .recovery_issue(issue_id)
+            .recovery
+            .get(issue_id)
             .ok_or_else(|| anyhow::anyhow!("recovery issue is no longer active"))?;
         self.task_coordinator.preview_recovery_cleanup(&issue).await
     }
@@ -144,8 +145,8 @@ impl StudioRuntime {
     ) -> Result<StudioRuntimeSnapshot> {
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
         let issue = self
-            .runtime_state
-            .recovery_issue(issue_id)
+            .recovery
+            .get(issue_id)
             .ok_or_else(|| anyhow::anyhow!("recovery issue is no longer active"))?;
         if issue.action == StudioRecoveryIssueAction::RemoveProject {
             return self.cleanup_project_issue(issue, expected_revision).await;
@@ -171,20 +172,22 @@ impl StudioRuntime {
                 .await?;
             self.store.reset_agent_sessions_for_root(thread_id).await?;
         }
-        Ok(self.runtime_state.remove_recovery_issue(issue_id))
+        let _ = self.recovery.remove(issue_id);
+        Ok(self.runtime_snapshot())
     }
 
     pub async fn retry_recovery_issue(&self, issue_id: &str) -> Result<StudioRuntimeSnapshot> {
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
         let issue = self
-            .runtime_state
-            .recovery_issue(issue_id)
+            .recovery
+            .get(issue_id)
             .ok_or_else(|| anyhow::anyhow!("recovery issue is no longer active"))?;
         if issue.action != StudioRecoveryIssueAction::Retry {
             anyhow::bail!("recovery issue does not authorize retry");
         }
         self.task_coordinator.retry_recovery_issue(&issue).await?;
-        Ok(self.runtime_state.remove_recovery_issue(issue_id))
+        let _ = self.recovery.remove(issue_id);
+        Ok(self.runtime_snapshot())
     }
 
     async fn cleanup_project_issue(
@@ -222,9 +225,8 @@ impl StudioRuntime {
         self.agent_resources
             .complete_cleanup_takeover(&root_thread_ids)
             .await;
-        Ok(self
-            .runtime_state
-            .remove_project_recovery_issues(project_id))
+        let _ = self.recovery.remove_for_project(project_id);
+        Ok(self.runtime_snapshot())
     }
 
     async fn close_project_agent_trees(&self, thread_ids: &[String]) -> Result<()> {

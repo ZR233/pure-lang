@@ -52,6 +52,7 @@ impl StudioRuntime {
             mcp_health_watcher: Default::default(),
             lsp_runtime: pl_lsp::LspRuntimeRegistry::new(),
             runtime_state,
+            recovery: crate::studio::StudioRecoveryRegistry::new(),
             agent_framework: Default::default(),
             agent_resources: StudioAgentResources::default(),
             task_coordinator,
@@ -83,6 +84,14 @@ impl StudioRuntime {
 
     pub fn lsp_runtime(&self) -> &pl_lsp::LspRuntimeRegistry {
         &self.lsp_runtime
+    }
+
+    /// 返回当前所有恢复问题的快照。
+    ///
+    /// 恢复问题由独立的 [`StudioRecoveryRegistry`] 持有，不混入 runtime 快照，
+    /// 避免与生命周期转换竞争同一把锁。
+    pub fn recovery_issues(&self) -> Vec<StudioRecoveryIssue> {
+        self.recovery.snapshot()
     }
 
     pub fn runtime_snapshot(&self) -> StudioRuntimeSnapshot {
@@ -201,7 +210,7 @@ impl StudioRuntime {
         .await;
         match initialization {
             Ok(report) => {
-                let _ = self.runtime_state.replace_recovery_issues(report.issues);
+                self.recovery.replace(report.issues);
                 self.runtime_state
                     .transition(StudioRuntimeStatus::Ready, None)
             }

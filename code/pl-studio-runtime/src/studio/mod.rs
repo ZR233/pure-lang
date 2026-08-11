@@ -6,6 +6,7 @@ mod mappers;
 mod paths;
 mod product_event_runtime;
 mod records;
+mod recovery_registry;
 mod runtime;
 mod runtime_state;
 mod store;
@@ -18,6 +19,7 @@ pub use interaction_runtime::{
 };
 pub use product_event_runtime::StudioProductEventRuntime;
 pub use records::{AttachmentRecord, ProjectRecord, ThreadKind, ThreadRecord, ThreadVisibility};
+pub use recovery_registry::StudioRecoveryRegistry;
 pub use runtime::{
     StudioPlanImplementationLifecycle, StudioResolveInteractionResponse, StudioRuntime,
     StudioStopPromptResponse, StudioSubmitPromptOptions, StudioSubmitPromptRequest,
