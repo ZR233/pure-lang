@@ -3,7 +3,7 @@ use std::future::Future;
 use std::sync::Arc;
 
 use pl_model::ToolSchema;
-use pl_protocol::{PureError, SkillActivation};
+use pl_protocol::{InteractionRequest, PureError, SkillActivation};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::turn::ToolEffect;
@@ -20,6 +20,10 @@ type CacheInvalidationResolver = Arc<dyn Fn(&serde_json::Value) -> bool + Send +
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", tag = "type")]
 pub enum ToolRuntimeEvent {
+    /// 持久化一个由当前 Turn 发起、需要宿主后续处理的交互。
+    InteractionRequested {
+        interaction: Box<InteractionRequest>,
+    },
     SkillActivated {
         activation: SkillActivation,
     },

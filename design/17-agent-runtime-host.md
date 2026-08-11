@@ -55,6 +55,24 @@ checkpoint 才 consume；进程在 checkpoint 前崩溃时仍可从 durable inpu
 中间存在其他输入，或首条输入已经 claimed/active 时不得合并，后到事实必须保留为下一 Turn。
 coalescing key 属于 runtime envelope 元数据，不进入自然语言提示词或工具 schema。
 
+Studio UserInput 使用专门的 durable continuation 命令。`request_user_input` 产生 typed
+`InteractionRequested` observation；ThreadActor 必须先在 repository 事务中提交 pending
+Interaction，才允许原 Turn terminal。回答时，ThreadActor 在一个 `ThreadCommit` 中同时提交
+resolved Interaction、mail ID 为 `interaction-resolution:{interactionId}` 的 hidden input 和
+`TurnQueued` runtime fact。该命令固定采用 StartOrQueue，不读取 `active_turn_id` 猜测进程内 waiter，
+不 steer 活动 Turn，也不设置 queue coalescing key。repository 失败时内存 state、Interaction
+projection 与 mailbox 都保持提交前状态；重复命令以 pending/resolved Interaction 与稳定 mail ID
+幂等收束。
+
+RunningTurn 必须把“pending Interaction 已 durable 提交”携带为显式 completion boundary。Host 的
+`RequiredTool` policy 不能把这个边界重写成 validation failure；它只在普通 Turn completion 时检查
+业务 finalization tool，fresh Turn 继续继承同一 policy。
+
+Interaction 的 `WaitingInteraction/Thinking` phase 是 active origin Turn 的派生投影，不是启动 Turn
+的依据。ThreadActor 只在 Interaction scope 的 turnId 等于 authoritative snapshot 当前 active Turn
+时生成 phase 更新；terminal origin 或无关活动 Turn 只接收 Interaction 变化，不能被 resolution
+复活或覆盖。普通 `budgetLimited` 不触发 continuation；预算续轮必须由产品状态机另行授权。
+
 重启无法恢复物理连接。repository 在 manager 启动前收束遗留 active Turn/Item、恢复 queued
 input 和 pending Interaction；manager 只创建 idle ThreadActor。任何恢复路径都不自动执行模型。
 

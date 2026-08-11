@@ -4,8 +4,8 @@ use pl_core::canonical_content_hash;
 use pl_protocol::{AgentWorkingState, ThreadItem, ThreadItemContent, ThreadItemStatus};
 use pretty_assertions::assert_eq;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ConnectionTrait, DatabaseBackend, EntityTrait,
-    IntoActiveModel, Statement,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait,
+    IntoActiveModel, QueryFilter, Statement,
 };
 
 use crate::studio::entity::{item, thread, thread_session_state, turn};
@@ -622,7 +622,15 @@ async fn detached_user_input_resolution_queues_one_hidden_explicit_input() {
             }],
         },
     );
-    store.upsert_interaction(&interaction).await.unwrap();
+    let _ = runtime.ensure_thread_agent(&session.id).await.unwrap();
+    runtime
+        .interactions
+        .create(
+            interaction.clone(),
+            runtime.interaction_emitter(session.id.clone()),
+        )
+        .await
+        .unwrap();
     let resolution = crate::InteractionResolution::UserInput {
         answers: std::collections::HashMap::from([(
             "architecture".to_string(),
@@ -673,6 +681,13 @@ async fn detached_user_input_resolution_queues_one_hidden_explicit_input() {
         message["resolution"]["answers"]["architecture"]["answers"][0],
         "typed canonical route"
     );
+    let persisted_interaction = store
+        .read_interaction(&interaction.interaction_id)
+        .await
+        .unwrap()
+        .expect("resolved interaction should remain persisted");
+    assert_eq!(persisted_interaction.status, InteractionStatus::Resolved);
+    assert_eq!(persisted_interaction.resolution, Some(resolution.clone()));
     assert!(
         runtime
             .thread_snapshot(&session.id)
@@ -686,31 +701,387 @@ async fn detached_user_input_resolution_queues_one_hidden_explicit_input() {
             ))
     );
 
+    let _ = release_tx.send(());
+    wait_for_no_active_turn(&runtime).await;
+    server.await.unwrap();
     runtime
         .resolve_interaction(interaction.interaction_id.clone(), resolution)
         .await
         .unwrap();
-    let active_input_count = store
+    let input_count = store
         .database()
         .query_one_raw(Statement::from_sql_and_values(
             DatabaseBackend::Sqlite,
             "SELECT COUNT(*) AS count FROM thread_inputs
-             WHERE thread_id = ? AND state = 'active'",
-            [owner.to_string().into()],
+             WHERE thread_id = ? AND mail_id = ?",
+            [
+                owner.to_string().into(),
+                format!("interaction-resolution:{}", interaction.interaction_id).into(),
+            ],
         ))
         .await
         .unwrap()
         .unwrap()
         .try_get::<i64>("", "count")
         .unwrap();
-    assert_eq!(active_input_count, 1);
-
-    let _ = release_tx.send(());
-    wait_for_no_active_turn(&runtime).await;
-    server.await.unwrap();
+    assert_eq!(input_count, 1);
     runtime.shutdown().await;
     let _ = tokio::fs::remove_dir_all(workspace).await;
     let _ = tokio::fs::remove_dir_all(home).await;
+}
+
+#[tokio::test]
+async fn request_user_input_ends_origin_turn_and_continues_in_fresh_turn() {
+    let question_response = responses_function_tool_sse(
+        "studio-user-input",
+        "request_user_input",
+        serde_json::json!({
+            "questions": [{
+                "id": "architecture",
+                "header": "架构",
+                "question": "选择配置边界",
+                "options": [{
+                    "label": "typed canonical route",
+                    "description": "Use the canonical typed route."
+                }]
+            }]
+        }),
+    );
+    let final_response = responses_final_text_sse(
+        "after-interaction",
+        "已在新的 Turn 中继续处理 typed canonical route",
+    );
+    let (base_url, server) = serve_http_sequence(vec![
+        TestHttpResponse::sse(question_response),
+        TestHttpResponse::sse(final_response),
+    ])
+    .await;
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("pure-user-input-turn-boundary-{unique}"));
+    let home = root.join("home");
+    let workspace = root.join("workspace");
+    tokio::fs::create_dir_all(&workspace).await.unwrap();
+    let config_store = ConfigStore::new(crate::config::ConfigPaths::from_home(&home));
+    config_store.save(&test_config(base_url)).unwrap();
+    let store = StudioStore::open_memory().await.unwrap();
+    let runtime = StudioRuntime::new(store.clone(), config_store);
+    let project = runtime.open_project(&workspace).await.unwrap();
+    let thread = runtime
+        .create_thread(&project.id, "User input Turn boundary")
+        .await
+        .unwrap();
+    let mut subscription = runtime
+        .subscribe_thread(pl_protocol::ThreadSubscriptionRequest {
+            thread_id: thread.id.clone(),
+        })
+        .await
+        .unwrap();
+    let _ = subscription.recv().await;
+
+    let submitted = runtime
+        .submit_prompt(StudioSubmitPromptRequest {
+            thread_id: thread.id.clone(),
+            prompt: "先询问架构边界，再根据答复继续".to_string(),
+            attachment_ids: Vec::new(),
+            options: StudioSubmitPromptOptions::default(),
+        })
+        .await
+        .unwrap();
+    let interaction = tokio::time::timeout(TEST_RUNTIME_TIMEOUT, async {
+        loop {
+            let Some(update) = subscription.recv().await else {
+                panic!("Thread subscription closed before InteractionChanged");
+            };
+            if let pl_protocol::ThreadSubscriptionUpdate::Notification { notification } = update
+                && let pl_protocol::ThreadNotification::InteractionChanged { interaction } =
+                    notification.notification
+                && interaction.status == InteractionStatus::Pending
+            {
+                break *interaction;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(interaction.scope.turn_id, submitted.turn_id);
+    let resolution = crate::InteractionResolution::UserInput {
+        answers: std::collections::HashMap::from([(
+            "architecture".to_string(),
+            crate::UserInputAnswer {
+                answers: vec!["typed canonical route".to_string()],
+            },
+        )]),
+    };
+
+    runtime
+        .resolve_interaction(interaction.interaction_id.clone(), resolution)
+        .await
+        .unwrap();
+    tokio::time::timeout(TEST_RUNTIME_TIMEOUT, server)
+        .await
+        .unwrap()
+        .unwrap();
+    wait_for_no_active_turn(&runtime).await;
+
+    let stored_interaction = store
+        .read_interaction(&interaction.interaction_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored_interaction.status, InteractionStatus::Resolved);
+    let origin = turn::Entity::find_by_id(&submitted.turn_id)
+        .one(store.database())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(origin.status, "completed");
+    assert_eq!(origin.budget_limit_json, None);
+    let turns = turn::Entity::find()
+        .filter(turn::Column::ThreadId.eq(&thread.id))
+        .all(store.database())
+        .await
+        .unwrap();
+    assert_eq!(turns.len(), 2);
+    assert!(turns.iter().any(|turn| turn.id != submitted.turn_id));
+    let snapshot = runtime.thread_snapshot(&thread.id).await.unwrap();
+    assert!(snapshot.items.iter().any(|item| {
+        matches!(
+            &item.content,
+            ThreadItemContent::AgentMessage { text, .. }
+                if text.contains("新的 Turn") && text.contains("typed canonical route")
+        )
+    }));
+    let owner = crate::studio::agent_host::root_agent_id(&thread.id);
+    let input = store
+        .database()
+        .query_one_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Sqlite,
+            "SELECT state, presentation FROM thread_inputs
+             WHERE thread_id = ? AND mail_id = ?",
+            [
+                owner.to_string().into(),
+                pl_core::AgentInteractionContinuationRequest::stable_mail_id(
+                    &interaction.interaction_id,
+                )
+                .into(),
+            ],
+        ))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(input.try_get::<String>("", "state").unwrap(), "consumed");
+    assert_eq!(
+        input.try_get::<String>("", "presentation").unwrap(),
+        "hidden"
+    );
+
+    runtime.shutdown().await;
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn task_root_user_input_boundary_completes_without_plan_exit() {
+    let question_response = responses_function_tool_sse(
+        "task-root-user-input",
+        "request_user_input",
+        serde_json::json!({
+            "questions": [{
+                "id": "architecture",
+                "header": "架构",
+                "question": "选择 Task 架构边界",
+                "options": [{
+                    "label": "durable fresh turn",
+                    "description": "Continue the Task in a fresh Turn after resolution."
+                }]
+            }]
+        }),
+    );
+    let (base_url, server) =
+        serve_http_sequence(vec![TestHttpResponse::sse(question_response)]).await;
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("pure-task-user-input-boundary-{unique}"));
+    let home = root.join("home");
+    let workspace = root.join("workspace");
+    tokio::fs::create_dir_all(&workspace).await.unwrap();
+    let config_store = ConfigStore::new(crate::config::ConfigPaths::from_home(&home));
+    config_store.save(&test_config(base_url)).unwrap();
+    let store = StudioStore::open_memory().await.unwrap();
+    let runtime = StudioRuntime::new(store.clone(), config_store);
+    let project = runtime.open_project(&workspace).await.unwrap();
+    let thread = runtime
+        .create_thread(&project.id, "Task user input boundary")
+        .await
+        .unwrap();
+    runtime
+        .set_thread_mode(&thread.id, StudioMode::Task)
+        .await
+        .unwrap();
+    let mut subscription = runtime
+        .subscribe_thread(pl_protocol::ThreadSubscriptionRequest {
+            thread_id: thread.id.clone(),
+        })
+        .await
+        .unwrap();
+    let _ = subscription.recv().await;
+
+    let submitted = runtime
+        .submit_prompt(StudioSubmitPromptRequest {
+            thread_id: thread.id.clone(),
+            prompt: "先询问 Task 架构边界，再继续规划".to_string(),
+            attachment_ids: Vec::new(),
+            options: StudioSubmitPromptOptions::default(),
+        })
+        .await
+        .unwrap();
+    let interaction = tokio::time::timeout(TEST_RUNTIME_TIMEOUT, async {
+        loop {
+            let Some(update) = subscription.recv().await else {
+                panic!("Thread subscription closed before InteractionChanged");
+            };
+            if let pl_protocol::ThreadSubscriptionUpdate::Notification { notification } = update
+                && let pl_protocol::ThreadNotification::InteractionChanged { interaction } =
+                    notification.notification
+                && interaction.status == InteractionStatus::Pending
+            {
+                break *interaction;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(interaction.scope.turn_id, submitted.turn_id);
+
+    tokio::time::timeout(TEST_RUNTIME_TIMEOUT, server)
+        .await
+        .unwrap()
+        .unwrap();
+    wait_for_no_active_turn(&runtime).await;
+
+    let origin = turn::Entity::find_by_id(&submitted.turn_id)
+        .one(store.database())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(origin.status, "completed");
+    assert_eq!(origin.failure_json, None);
+    assert_eq!(origin.budget_limit_json, None);
+    assert_eq!(
+        store
+            .read_interaction(&interaction.interaction_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .status,
+        InteractionStatus::Pending
+    );
+
+    runtime.shutdown().await;
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn restarted_pending_user_input_resolves_once_with_stable_mail() {
+    let (base_url, server, accepted_rx, release_tx) = serve_delayed_sse().await;
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("pure-restarted-user-input-{unique}"));
+    let home = root.join("home");
+    let workspace = root.join("workspace");
+    tokio::fs::create_dir_all(&workspace).await.unwrap();
+    let config_store = ConfigStore::new(crate::config::ConfigPaths::from_home(&home));
+    config_store.save(&test_config(base_url)).unwrap();
+    let store = StudioStore::open_memory().await.unwrap();
+    let first = StudioRuntime::new(store.clone(), config_store.clone());
+    let project = first.open_project(&workspace).await.unwrap();
+    let thread = first
+        .create_thread(&project.id, "Restarted user input")
+        .await
+        .unwrap();
+    let interaction = pending_interaction(
+        "ask-after-restart",
+        &thread.id,
+        InteractionKind::UserInput,
+        InteractionPayload::UserInput {
+            questions: Vec::new(),
+        },
+    );
+    let _ = first.ensure_thread_agent(&thread.id).await.unwrap();
+    first
+        .interactions
+        .create(
+            interaction.clone(),
+            first.interaction_emitter(thread.id.clone()),
+        )
+        .await
+        .unwrap();
+    first.shutdown().await;
+
+    let restarted = StudioRuntime::new(store.clone(), config_store);
+    restarted.initialize_runtime().await.unwrap();
+    let recovered = restarted.thread_snapshot(&thread.id).await.unwrap();
+    assert!(recovered.interactions.iter().any(|candidate| {
+        candidate.interaction_id == interaction.interaction_id
+            && candidate.status == InteractionStatus::Pending
+    }));
+    let resolution = crate::InteractionResolution::UserInput {
+        answers: Default::default(),
+    };
+    restarted
+        .resolve_interaction(interaction.interaction_id.clone(), resolution.clone())
+        .await
+        .unwrap();
+    tokio::time::timeout(TEST_RUNTIME_TIMEOUT, accepted_rx)
+        .await
+        .unwrap()
+        .unwrap();
+    let _ = release_tx.send(());
+    wait_for_no_active_turn(&restarted).await;
+    server.await.unwrap();
+
+    restarted
+        .resolve_interaction(interaction.interaction_id.clone(), resolution)
+        .await
+        .unwrap();
+    let owner = crate::studio::agent_host::root_agent_id(&thread.id);
+    let row = store
+        .database()
+        .query_one_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Sqlite,
+            "SELECT COUNT(*) AS count, MAX(state) AS state FROM thread_inputs
+             WHERE thread_id = ? AND mail_id = ?",
+            [
+                owner.to_string().into(),
+                pl_core::AgentInteractionContinuationRequest::stable_mail_id(
+                    &interaction.interaction_id,
+                )
+                .into(),
+            ],
+        ))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(row.try_get::<i64>("", "count").unwrap(), 1);
+    assert_eq!(row.try_get::<String>("", "state").unwrap(), "consumed");
+    assert_eq!(
+        store
+            .read_interaction(&interaction.interaction_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .status,
+        InteractionStatus::Resolved
+    );
+
+    restarted.shutdown().await;
+    let _ = tokio::fs::remove_dir_all(root).await;
 }
 
 #[tokio::test]

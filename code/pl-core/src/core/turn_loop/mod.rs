@@ -147,6 +147,7 @@ pub(super) async fn run_turn_with_trace(
     let mut last_compacted_state = None;
     let mut iteration = 0_u32;
     let mut terminal_checkpointed = false;
+    let mut ended_for_interaction = false;
     persist_mailbox_checkpoint_if_needed(&options, session).await?;
     let mut turn_context =
         TurnContextSnapshot::capture(session.items(), session.working_context_snapshot());
@@ -677,6 +678,14 @@ pub(super) async fn run_turn_with_trace(
         let mut tool_results = tool_batch.records;
         progress.tool_detail("工具执行完成，准备回写结果。");
         record_plan_exit_items(recorder, &turn_id, &tool_results);
+        let requested_interaction = tool_results.iter().any(|tool_result| {
+            tool_result.runtime_events.iter().any(|event| {
+                matches!(
+                    event,
+                    crate::tool::ToolRuntimeEvent::InteractionRequested { .. }
+                )
+            })
+        });
         let should_end_turn = tool_results.iter().any(|tool_result| {
             tool_result
                 .runtime_events
@@ -758,6 +767,7 @@ pub(super) async fn run_turn_with_trace(
                 iteration = iteration.saturating_add(1);
                 continue;
             }
+            ended_for_interaction = requested_interaction;
             terminal_checkpointed = true;
             break;
         }
@@ -829,6 +839,7 @@ pub(super) async fn run_turn_with_trace(
         context_compactions,
         session_message_count,
         status: TurnResultStatus::Completed,
+        ended_for_interaction,
         abort_reason: None,
         error: None,
         failure: None,
@@ -1104,7 +1115,8 @@ fn tool_result_receipt(result: &super::tool_dispatch::ToolExecutionRecord) -> To
             crate::tool::ToolRuntimeEvent::OutputArtifacts { artifacts } => {
                 Some(artifacts.as_slice())
             }
-            crate::tool::ToolRuntimeEvent::SkillActivated { .. }
+            crate::tool::ToolRuntimeEvent::InteractionRequested { .. }
+            | crate::tool::ToolRuntimeEvent::SkillActivated { .. }
             | crate::tool::ToolRuntimeEvent::ToolResultRevision { .. }
             | crate::tool::ToolRuntimeEvent::CacheHit { .. }
             | crate::tool::ToolRuntimeEvent::OutputMetrics { .. }
@@ -1119,7 +1131,8 @@ fn tool_result_receipt(result: &super::tool_dispatch::ToolExecutionRecord) -> To
             result_hash,
             total_bytes,
         } => Some((reused_from_call_id, result_hash, *total_bytes)),
-        crate::tool::ToolRuntimeEvent::SkillActivated { .. }
+        crate::tool::ToolRuntimeEvent::InteractionRequested { .. }
+        | crate::tool::ToolRuntimeEvent::SkillActivated { .. }
         | crate::tool::ToolRuntimeEvent::ToolResultRevision { .. }
         | crate::tool::ToolRuntimeEvent::OutputArtifacts { .. }
         | crate::tool::ToolRuntimeEvent::OutputMetrics { .. }
@@ -1132,7 +1145,8 @@ fn tool_result_receipt(result: &super::tool_dispatch::ToolExecutionRecord) -> To
             artifact_bytes: _,
             result_hash,
         } => Some((*raw_bytes, *model_visible_bytes, result_hash)),
-        crate::tool::ToolRuntimeEvent::SkillActivated { .. }
+        crate::tool::ToolRuntimeEvent::InteractionRequested { .. }
+        | crate::tool::ToolRuntimeEvent::SkillActivated { .. }
         | crate::tool::ToolRuntimeEvent::ToolResultRevision { .. }
         | crate::tool::ToolRuntimeEvent::OutputArtifacts { .. }
         | crate::tool::ToolRuntimeEvent::CacheHit { .. }

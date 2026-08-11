@@ -45,6 +45,8 @@ pub struct TurnResult {
     pub context_compactions: Vec<ContextCompactionSnapshot>,
     pub session_message_count: usize,
     pub status: TurnResultStatus,
+    /// 当前 Turn 是否在持久化 pending Interaction 后主动结束。
+    pub ended_for_interaction: bool,
     pub abort_reason: Option<TurnAbortReason>,
     pub error: Option<String>,
     pub failure: Option<TurnFailure>,

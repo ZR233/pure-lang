@@ -219,7 +219,6 @@ impl InteractionRuntime {
         interaction: InteractionRequest,
         emitter: InteractionEmitter,
     ) -> Result<()> {
-        self.store.upsert_interaction(&interaction).await?;
         emitter(interaction).await
     }
 }
@@ -304,10 +303,17 @@ mod tests {
         events.lock().await.len()
     }
 
-    fn emitter(events: Arc<Mutex<Vec<InteractionRequest>>>) -> InteractionEmitter {
+    fn emitter(
+        store: StudioStore,
+        events: Arc<Mutex<Vec<InteractionRequest>>>,
+    ) -> InteractionEmitter {
         Arc::new(move |interaction| {
+            let store = store.clone();
             let events = events.clone();
             Box::pin(async move {
+                // 生产 emitter 由 ThreadActor/ThreadRepository 作为 canonical writer；
+                // 这个 unit-test emitter 只模拟该提交边界。
+                store.upsert_interaction(&interaction).await?;
                 events.lock().await.push(interaction);
                 Ok(())
             })
@@ -366,7 +372,7 @@ mod tests {
         let (store, session_id) = store_with_session().await;
         let runtime = InteractionRuntime::new(store.clone());
         let events = Arc::new(Mutex::new(Vec::new()));
-        let callback = runtime.callback(session_id.clone(), emitter(events.clone()));
+        let callback = runtime.callback(session_id.clone(), emitter(store.clone(), events.clone()));
         let waiter = tokio::spawn(callback(user_input_interaction("ask-1")));
 
         let pending = wait_pending(&store, &session_id).await;
@@ -384,7 +390,11 @@ mod tests {
             )]),
         };
         let resolved = runtime
-            .resolve("ask-1", resolution.clone(), emitter(events.clone()))
+            .resolve(
+                "ask-1",
+                resolution.clone(),
+                emitter(store.clone(), events.clone()),
+            )
             .await
             .unwrap();
 
@@ -405,12 +415,16 @@ mod tests {
         let (store, session_id) = store_with_session().await;
         let runtime = InteractionRuntime::new(store.clone());
         let events = Arc::new(Mutex::new(Vec::new()));
-        let callback = runtime.callback(session_id.clone(), emitter(events.clone()));
+        let callback = runtime.callback(session_id.clone(), emitter(store.clone(), events.clone()));
         let waiter = tokio::spawn(callback(tool_approval_interaction(&session_id, "call-1")));
         assert_eq!(wait_pending(&store, &session_id).await.len(), 1);
 
         runtime
-            .cancel_thread(&session_id, "interrupted by test", emitter(events.clone()))
+            .cancel_thread(
+                &session_id,
+                "interrupted by test",
+                emitter(store.clone(), events.clone()),
+            )
             .await
             .unwrap();
         let resolution = waiter.await.unwrap();
@@ -452,22 +466,22 @@ mod tests {
         let approval = tool_approval_interaction(&session_id, "approval-1");
 
         runtime
-            .create(user_input.clone(), emitter(events.clone()))
+            .create(user_input.clone(), emitter(store.clone(), events.clone()))
             .await
             .unwrap();
         runtime
-            .create(plan.clone(), emitter(events.clone()))
+            .create(plan.clone(), emitter(store.clone(), events.clone()))
             .await
             .unwrap();
         runtime
-            .create(approval.clone(), emitter(events.clone()))
+            .create(approval.clone(), emitter(store.clone(), events.clone()))
             .await
             .unwrap();
         runtime
             .cancel_recovered_tool_approvals(
                 &session_id,
                 "application restarted",
-                emitter(events.clone()),
+                emitter(store.clone(), events.clone()),
             )
             .await
             .unwrap();

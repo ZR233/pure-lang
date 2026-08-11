@@ -1,8 +1,9 @@
 use super::super::state::{AgentRuntimeError, unix_timestamp};
 use super::super::{
-    AgentActivityState, AgentCurrentSessionSubmitRequest, AgentLifecycleState,
-    AgentRuntimeEventKind, AgentRuntimeHost, AgentRuntimeResult, AgentSubmitRequest,
-    AgentTurnSubmitPolicy, DurableMailboxEnvelope, MailboxDeliveryState, TurnId,
+    AgentActivityState, AgentCurrentSessionSubmitRequest, AgentInteractionContinuationRequest,
+    AgentLifecycleState, AgentRuntimeEventKind, AgentRuntimeHost, AgentRuntimeResult,
+    AgentSubmitRequest, AgentTurnSubmitPolicy, DurableMailboxEnvelope, MailboxDeliveryState,
+    TurnId,
 };
 use super::AgentLoop;
 
@@ -155,4 +156,148 @@ where
         })
         .await
     }
+
+    pub(super) async fn submit_interaction_continuation(
+        &mut self,
+        root_agent_id: super::super::AgentId,
+        request: AgentInteractionContinuationRequest,
+    ) -> AgentRuntimeResult<()> {
+        if self.state.snapshot.lifecycle != AgentLifecycleState::Active {
+            return Err(AgentRuntimeError::NotActive(
+                self.state.snapshot.identity.id.clone(),
+                self.state.snapshot.lifecycle,
+            ));
+        }
+        debug_assert!(
+            root_agent_id == self.state.snapshot.identity.id
+                || self.state.snapshot.identity.depth > 0
+        );
+        if request.interaction.status != pl_protocol::InteractionStatus::Resolved
+            || request.interaction.resolution.is_none()
+        {
+            return Err(AgentRuntimeError::InvalidInput(
+                "interaction continuation requires a resolved interaction".to_string(),
+            ));
+        }
+        let mail_id = request
+            .input
+            .mail_id
+            .clone()
+            .filter(|mail_id| !mail_id.trim().is_empty())
+            .ok_or_else(|| {
+                AgentRuntimeError::InvalidInput(
+                    "interaction continuation requires a stable mail id".to_string(),
+                )
+            })?;
+        let expected_mail_id = AgentInteractionContinuationRequest::stable_mail_id(
+            &request.interaction.interaction_id,
+        );
+        if mail_id != expected_mail_id {
+            return Err(AgentRuntimeError::InvalidInput(format!(
+                "interaction continuation mail id must be {expected_mail_id}"
+            )));
+        }
+        let thread_id = self.state.snapshot.identity.id.clone();
+        let canonical = self
+            .runtime
+            .thread_events
+            .snapshot(thread_id.as_str())
+            .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
+        let existing_input = self
+            .state
+            .active_input
+            .iter()
+            .chain(self.state.pending_inputs.iter())
+            .find(|input| input.mail_id == mail_id);
+        let canonical_interaction = canonical
+            .interactions
+            .iter()
+            .find(|candidate| candidate.interaction_id == request.interaction.interaction_id);
+        let Some(canonical_interaction) = canonical_interaction else {
+            if existing_input.is_some() {
+                return Ok(());
+            }
+            return Err(AgentRuntimeError::InvalidInput(
+                "interaction continuation has no canonical interaction".to_string(),
+            ));
+        };
+        validate_interaction_identity(canonical_interaction, &request.interaction)?;
+        match canonical_interaction.status {
+            pl_protocol::InteractionStatus::Resolved => {
+                if canonical_interaction.resolution == request.interaction.resolution {
+                    return Ok(());
+                }
+                return Err(AgentRuntimeError::InvalidInput(
+                    "interaction was already resolved with a different resolution".to_string(),
+                ));
+            }
+            pl_protocol::InteractionStatus::Pending => {}
+            pl_protocol::InteractionStatus::Cancelled | pl_protocol::InteractionStatus::Expired => {
+                return Err(AgentRuntimeError::InvalidInput(
+                    "interaction continuation requires a pending canonical interaction".to_string(),
+                ));
+            }
+        }
+        if existing_input.is_some() {
+            return Err(AgentRuntimeError::InvalidInput(
+                "pending interaction already has a continuation input".to_string(),
+            ));
+        }
+
+        let turn_id = TurnId::generate();
+        let input = DurableMailboxEnvelope {
+            mail_id,
+            turn_id: turn_id.clone(),
+            thread_id: thread_id.clone(),
+            message: request.input.message,
+            presentation: request.input.presentation,
+            metadata: request.input.metadata,
+            queue_coalescing_key: None,
+            delivery_state: Default::default(),
+            queued_at: unix_timestamp(),
+        };
+        let mut next = self.state.clone();
+        next.pending_inputs.push_back(input.clone());
+        next.refresh_mailbox_snapshot();
+        if self.active.is_none() && next.has_triggering_input() {
+            next.snapshot.activity = AgentActivityState::Queued;
+        }
+        let interaction = request.interaction;
+        self.commit_transition_with_thread_facts(
+            next,
+            Vec::new(),
+            vec![crate::ThreadNotificationFact::durable(
+                interaction.updated_at,
+                pl_protocol::ThreadNotification::InteractionChanged {
+                    interaction: Box::new(interaction),
+                },
+            )],
+            |snapshot| AgentRuntimeEventKind::TurnQueued {
+                input: input.clone(),
+                snapshot,
+            },
+        )
+        .await?;
+        self.dispatch_enabled = true;
+        if self.active.is_none() && self.state.has_triggering_input() {
+            self.begin_next_turn().await;
+        }
+        Ok(())
+    }
+}
+
+fn validate_interaction_identity(
+    canonical: &pl_protocol::InteractionRequest,
+    resolved: &pl_protocol::InteractionRequest,
+) -> AgentRuntimeResult<()> {
+    if canonical.kind == resolved.kind
+        && canonical.scope == resolved.scope
+        && canonical.payload == resolved.payload
+        && canonical.created_at == resolved.created_at
+    {
+        return Ok(());
+    }
+    Err(AgentRuntimeError::InvalidInput(
+        "interaction continuation does not match the canonical interaction".to_string(),
+    ))
 }

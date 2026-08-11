@@ -219,7 +219,7 @@ where
             .thread_events
             .snapshot(thread_id.as_str())
             .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
-        let projected = project_thread_facts(thread_id.as_str(), current.revision, facts);
+        let projected = project_thread_facts(thread_id.as_str(), &current, facts);
         if projected.notifications.is_empty() {
             return Ok(());
         }

@@ -291,15 +291,17 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         );
         let interaction_callback = self.interactions.callback(thread_id, emitter);
         let prompt_cache_namespace = context.snapshot.identity.id.to_string();
-        let options = TurnOptions::default()
-            .with_permission_mode(config.runtime.permission_mode)
-            .with_prompt_cache_namespace(prompt_cache_namespace)
-            .with_prompt_scope(format!(
-                "{}:{}",
-                mode.label(),
-                context.snapshot.identity.role
-            ))
-            .with_interaction_callback(interaction_callback);
+        let options = studio_turn_options(
+            TurnOptions::default()
+                .with_permission_mode(config.runtime.permission_mode)
+                .with_prompt_cache_namespace(prompt_cache_namespace)
+                .with_prompt_scope(format!(
+                    "{}:{}",
+                    mode.label(),
+                    context.snapshot.identity.role
+                ))
+                .with_interaction_callback(interaction_callback),
+        );
         let mut session_runtime = PreparedSessionRuntime::new(route.model.slug.clone())
             .with_mcp_servers(active_mcp_servers)
             .with_mcp_health(mcp_health)
@@ -324,6 +326,10 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             Ok(prepared)
         }
     }
+}
+
+fn studio_turn_options(options: TurnOptions) -> TurnOptions {
+    options.with_user_input_end_turn()
 }
 
 fn instruction_snapshot(
@@ -472,6 +478,26 @@ mod tests {
                 .to_string()
                 .contains("does not match task mode role planner")
         );
+    }
+
+    #[test]
+    fn every_studio_turn_uses_durable_user_input_boundary() {
+        let cases = [
+            (StudioMode::Simple, crate::config::StudioRole::Executor),
+            (StudioMode::Task, crate::config::StudioRole::Planner),
+            (StudioMode::Task, crate::config::StudioRole::Executor),
+        ];
+
+        for (mode, role) in cases {
+            let options = studio_turn_options(TurnOptions::default());
+            assert_eq!(
+                options.user_input_mode,
+                pl_core::UserInputMode::EmitAndEndTurn,
+                "{} {} turn must end after persisting user input",
+                mode.label(),
+                role.key()
+            );
+        }
     }
 
     fn stopped_run() -> TaskRunRecord {

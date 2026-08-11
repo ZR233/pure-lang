@@ -824,9 +824,11 @@ async fn persist_interaction(
         kind: Set(interaction_kind_label(value.kind.clone()).to_string()),
         status: Set(interaction_status_label(value.status.clone()).to_string()),
         payload_json: Set(serde_json::to_string(&value.payload)?),
-        resolution_json: Set(existing
+        resolution_json: Set(value
+            .resolution
             .as_ref()
-            .and_then(|row| row.resolution_json.clone())),
+            .map(serde_json::to_string)
+            .transpose()?),
         created_at: Set(existing
             .as_ref()
             .map_or(value.created_at, |row| row.created_at)),

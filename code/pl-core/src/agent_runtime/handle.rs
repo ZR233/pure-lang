@@ -10,11 +10,12 @@ use super::coordinator::{AgentRegistry, CoordinatorCommand};
 use super::directory::{AgentDirectoryHandle, AgentDirectorySnapshot, AgentDirectorySubscription};
 use super::{
     AgentActivityState, AgentCurrentSessionSubmitRequest, AgentDirectoryWaitMessage,
-    AgentDirectoryWaitReason, AgentDirectoryWaitResult, AgentId, AgentLifecycleState,
-    AgentProgressCheckpoint, AgentProgressStage, AgentRegistration, AgentRuntimeResult,
-    AgentSessionDigest, AgentSnapshot, AgentSpawnRequest, AgentSpawnResult, AgentSubmitRequest,
-    AgentTurnCheckpoint, AgentWaitResult, ConversationRecoveryPreview, ConversationRecoveryRequest,
-    ConversationRecoveryResult, ConversationRecoveryTarget, ThreadId, TurnId,
+    AgentDirectoryWaitReason, AgentDirectoryWaitResult, AgentId,
+    AgentInteractionContinuationRequest, AgentLifecycleState, AgentProgressCheckpoint,
+    AgentProgressStage, AgentRegistration, AgentRuntimeResult, AgentSessionDigest, AgentSnapshot,
+    AgentSpawnRequest, AgentSpawnResult, AgentSubmitRequest, AgentTurnCheckpoint, AgentWaitResult,
+    ConversationRecoveryPreview, ConversationRecoveryRequest, ConversationRecoveryResult,
+    ConversationRecoveryTarget, ThreadId, TurnId,
 };
 use crate::agent_runtime::state::AgentRuntimeError;
 use crate::{AgentRoleId, ThreadEventBusHandle, ThreadEventSubscription};
@@ -84,6 +85,26 @@ impl AgentRuntimeHandle {
             AgentLoopCommand::SubmitCurrentSession {
                 root_agent_id,
                 request,
+                reply,
+            },
+        )
+        .await?;
+        receive(receiver).await?
+    }
+
+    /// 原子提交 resolved Interaction 与不可 steer 的后续 mailbox 输入。
+    pub async fn submit_interaction_continuation(
+        &self,
+        agent_id: AgentId,
+        request: AgentInteractionContinuationRequest,
+    ) -> AgentRuntimeResult<()> {
+        let (reply, receiver) = oneshot::channel();
+        let root_agent_id = root_agent_id_for(&self.directory.directory_snapshot(), &agent_id)?;
+        self.send_to_actor(
+            &agent_id,
+            AgentLoopCommand::SubmitInteractionContinuation {
+                root_agent_id,
+                request: Box::new(request),
                 reply,
             },
         )

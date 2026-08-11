@@ -1,7 +1,7 @@
 use pl_protocol::{
     AgentMessageChannel, ThreadItem, ThreadItemContent, ThreadItemDelta, ThreadItemDeltaField,
-    ThreadItemStatus, ThreadNotification, ThreadNotificationEnvelope, ThreadToolCall, Turn,
-    TurnPhase, TurnState,
+    ThreadItemStatus, ThreadNotification, ThreadNotificationEnvelope, ThreadSnapshot,
+    ThreadToolCall, Turn, TurnPhase, TurnState,
 };
 use pl_trace::{
     TraceDelta, TraceEvent, TraceEventKind, TracePart, TracePartDeltaEvent, TracePartKind,
@@ -21,10 +21,10 @@ pub(crate) struct ThreadProjectionBatch {
 
 pub(crate) fn project_trace_events(
     thread_id: &str,
-    through_revision: u64,
+    current: &ThreadSnapshot,
     traces: &[TraceEvent],
 ) -> ThreadProjectionBatch {
-    let mut projector = Projector::new(thread_id, through_revision);
+    let mut projector = Projector::new(thread_id, current.revision);
     for trace in traces {
         match &trace.kind {
             TraceEventKind::TracePartStarted { item } => {
@@ -73,7 +73,11 @@ pub(crate) fn project_trace_events(
                 } else {
                     TurnPhase::Thinking
                 };
-                projector.turn_updated(&interaction.scope.turn_id, phase, trace.timestamp);
+                if current.active_turn.as_ref().map(|turn| turn.id.as_str())
+                    == Some(interaction.scope.turn_id.as_str())
+                {
+                    projector.turn_updated(&interaction.scope.turn_id, phase, trace.timestamp);
+                }
                 projector.push(
                     trace.timestamp,
                     ThreadNotification::InteractionChanged {
@@ -503,6 +507,12 @@ impl<'a> Projector<'a> {
 
 #[cfg(test)]
 mod tests {
+    use pl_protocol::{
+        InteractionChangedEvent, InteractionKind, InteractionPayload, InteractionRequest,
+        InteractionResolution, InteractionScope, InteractionStatus, THREAD_SCHEMA_VERSION, Thread,
+        ThreadSnapshot,
+    };
+
     use super::*;
 
     #[test]
@@ -523,7 +533,7 @@ mod tests {
                 ),
             },
         };
-        let batch = project_trace_events("thread-1", 0, &[trace]);
+        let batch = project_trace_events("thread-1", &snapshot(), &[trace]);
         assert_eq!(batch.notifications.len(), 1);
         assert!(matches!(
             &batch.notifications[0].notification,
@@ -552,9 +562,75 @@ mod tests {
         };
 
         assert!(
-            project_trace_events("thread-1", 0, &[trace])
+            project_trace_events("thread-1", &snapshot(), &[trace])
                 .notifications
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn resolved_interaction_trace_does_not_update_unrelated_active_turn() {
+        let trace = TraceEvent {
+            session_id: "thread-1".to_string(),
+            sequence: 1,
+            timestamp: 7,
+            kind: TraceEventKind::InteractionChanged {
+                event: InteractionChangedEvent {
+                    interaction: InteractionRequest {
+                        interaction_id: "ask-1".to_string(),
+                        kind: InteractionKind::UserInput,
+                        status: InteractionStatus::Resolved,
+                        scope: InteractionScope {
+                            thread_id: "thread-1".to_string(),
+                            turn_id: "turn-origin".to_string(),
+                            item_id: None,
+                            tool_id: None,
+                            agent_path: None,
+                        },
+                        payload: InteractionPayload::UserInput {
+                            questions: Vec::new(),
+                        },
+                        created_at: 1,
+                        updated_at: 7,
+                        resolved_at: Some(7),
+                        resolution: Some(InteractionResolution::UserInput {
+                            answers: Default::default(),
+                        }),
+                    },
+                },
+            },
+        };
+        let mut current = snapshot();
+        current.active_turn = Some(Turn {
+            id: "turn-unrelated".to_string(),
+            thread_id: "thread-1".to_string(),
+            state: TurnState::InProgress {
+                phase: TurnPhase::Thinking,
+            },
+            failure: None,
+            started_at: Some(1),
+            updated_at: 1,
+            completed_at: None,
+        });
+
+        let projected = project_trace_events("thread-1", &current, &[trace]);
+
+        assert_eq!(projected.notifications.len(), 1);
+        assert!(matches!(
+            projected.notifications[0].notification,
+            ThreadNotification::InteractionChanged { .. }
+        ));
+    }
+
+    fn snapshot() -> ThreadSnapshot {
+        ThreadSnapshot {
+            schema_version: THREAD_SCHEMA_VERSION,
+            revision: 0,
+            thread: Thread::placeholder("thread-1"),
+            active_turn: None,
+            items: Vec::new(),
+            interactions: Vec::new(),
+            runtime: None,
+        }
     }
 }

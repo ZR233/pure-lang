@@ -105,7 +105,7 @@ where
                     runtime.usage.updated_at = now;
                     let projected = project_thread_facts(
                         next.snapshot.identity.id.as_str(),
-                        current_thread.revision,
+                        &current_thread,
                         vec![ThreadNotificationFact::durable(
                             now,
                             ThreadNotification::ThreadRuntimeUpdated {

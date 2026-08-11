@@ -220,9 +220,8 @@ impl ToolOutput {
             .iter()
             .filter_map(|event| match event {
                 ToolRuntimeEvent::OutputArtifacts { artifacts } => Some(artifacts.as_slice()),
-                ToolRuntimeEvent::SkillActivated {
-                    activation: _activation,
-                } => None,
+                ToolRuntimeEvent::InteractionRequested { .. }
+                | ToolRuntimeEvent::SkillActivated { .. } => None,
                 ToolRuntimeEvent::ToolResultRevision {
                     revision: _revision,
                 } => None,
@@ -242,9 +241,8 @@ impl ToolOutput {
     pub fn ends_turn(&self) -> bool {
         self.runtime_events.iter().any(|event| match event {
             ToolRuntimeEvent::EndTurn => true,
-            ToolRuntimeEvent::SkillActivated {
-                activation: _activation,
-            } => false,
+            ToolRuntimeEvent::InteractionRequested { .. }
+            | ToolRuntimeEvent::SkillActivated { .. } => false,
             ToolRuntimeEvent::ToolResultRevision {
                 revision: _revision,
             } => false,

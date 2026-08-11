@@ -391,7 +391,8 @@ fn cache_entry(
         .iter()
         .find_map(|event| match event {
             ToolRuntimeEvent::OutputMetrics { result_hash, .. } => Some(result_hash.clone()),
-            ToolRuntimeEvent::SkillActivated { .. }
+            ToolRuntimeEvent::InteractionRequested { .. }
+            | ToolRuntimeEvent::SkillActivated { .. }
             | ToolRuntimeEvent::ToolResultRevision { .. }
             | ToolRuntimeEvent::OutputArtifacts { .. }
             | ToolRuntimeEvent::CacheHit { .. }
@@ -437,7 +438,8 @@ fn compact_cache_hit(entry: &ToolCacheEntry, reuse_kind: CacheReuseKind) -> Tool
                 result_hash,
                 ..
             } => Some((*artifact_bytes, result_hash.clone())),
-            ToolRuntimeEvent::SkillActivated { .. }
+            ToolRuntimeEvent::InteractionRequested { .. }
+            | ToolRuntimeEvent::SkillActivated { .. }
             | ToolRuntimeEvent::ToolResultRevision { .. }
             | ToolRuntimeEvent::OutputArtifacts { .. }
             | ToolRuntimeEvent::CacheHit { .. }

@@ -32,14 +32,15 @@ pub use policy::{
 pub use runtime::{AgentRuntime, AgentRuntimeOptions, RestoredInputPolicy};
 pub use state::{
     AgentActivityState, AgentCurrentSessionSubmitRequest, AgentDirectoryWaitMessage,
-    AgentDirectoryWaitReason, AgentDirectoryWaitResult, AgentIdentity, AgentLifecycleState,
-    AgentProgressCheckpoint, AgentProgressStage, AgentRegistration, AgentRuntimeError,
-    AgentRuntimeEvent, AgentRuntimeEventKind, AgentRuntimeResult, AgentSessionDigest,
-    AgentSessionDigestMessage, AgentSessionDigestRole, AgentSnapshot, AgentSpawnRequest,
-    AgentSpawnResult, AgentSubmitRequest, AgentTurnOutcome, AgentTurnSubmitPolicy, AgentWaitResult,
-    ConversationRecoveryPreview, ConversationRecoveryRequest, ConversationRecoveryResult,
-    ConversationRecoveryTarget, DurableMailboxEnvelope, MailboxDeliveryState, MailboxPresentation,
-    ThreadActorState, ThreadContextState, TurnOutcomeKind,
+    AgentDirectoryWaitReason, AgentDirectoryWaitResult, AgentIdentity,
+    AgentInteractionContinuationRequest, AgentLifecycleState, AgentProgressCheckpoint,
+    AgentProgressStage, AgentRegistration, AgentRuntimeError, AgentRuntimeEvent,
+    AgentRuntimeEventKind, AgentRuntimeResult, AgentSessionDigest, AgentSessionDigestMessage,
+    AgentSessionDigestRole, AgentSnapshot, AgentSpawnRequest, AgentSpawnResult, AgentSubmitRequest,
+    AgentTurnOutcome, AgentTurnSubmitPolicy, AgentWaitResult, ConversationRecoveryPreview,
+    ConversationRecoveryRequest, ConversationRecoveryResult, ConversationRecoveryTarget,
+    DurableMailboxEnvelope, MailboxDeliveryState, MailboxPresentation, ThreadActorState,
+    ThreadContextState, TurnOutcomeKind,
 };
 pub(crate) use turn::AgentTurnMailboxHandle;
 pub use turn::{

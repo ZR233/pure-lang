@@ -3,7 +3,11 @@ use std::fmt;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use pl_protocol::{ConversationRecoveryMode, TurnBillingRecord};
+use pl_protocol::{
+    ConversationRecoveryMode, InteractionKind, InteractionPayload, InteractionRequest,
+    InteractionResolution, InteractionScope, InteractionStatus, ThreadNotification,
+    TurnBillingRecord,
+};
 use pretty_assertions::assert_eq;
 use tokio::sync::Notify;
 
@@ -80,6 +84,10 @@ impl TestRepository {
 
     fn fail_next_turn_started_commit(&self) {
         *self.fail_turn_started.lock().unwrap() = true;
+    }
+
+    fn fail_next_turn_queue_commit(&self) {
+        *self.fail_turn_queue.lock().unwrap() = true;
     }
 
     fn state(&self, id: &AgentId) -> ThreadActorState {
@@ -438,6 +446,73 @@ fn identity(id: &str) -> AgentIdentity {
 
 fn registration(id: &str, _former_session: &str) -> AgentRegistration {
     AgentRegistration::new(identity(id))
+}
+
+fn pending_user_interaction(
+    interaction_id: &str,
+    thread_id: &ThreadId,
+    turn_id: &str,
+) -> InteractionRequest {
+    InteractionRequest {
+        interaction_id: interaction_id.to_string(),
+        kind: InteractionKind::UserInput,
+        status: InteractionStatus::Pending,
+        scope: InteractionScope {
+            thread_id: thread_id.to_string(),
+            turn_id: turn_id.to_string(),
+            item_id: Some(format!("{interaction_id}:item")),
+            tool_id: Some(format!("{interaction_id}:tool")),
+            agent_path: None,
+        },
+        payload: InteractionPayload::UserInput {
+            questions: Vec::new(),
+        },
+        created_at: 1,
+        updated_at: 1,
+        resolved_at: None,
+        resolution: None,
+    }
+}
+
+fn interaction_continuation(pending: &InteractionRequest) -> AgentInteractionContinuationRequest {
+    let mut resolved = pending.clone();
+    resolved.status = InteractionStatus::Resolved;
+    resolved.updated_at = 2;
+    resolved.resolved_at = Some(2);
+    resolved.resolution = Some(InteractionResolution::UserInput {
+        answers: Default::default(),
+    });
+    let mail_id = AgentInteractionContinuationRequest::stable_mail_id(&pending.interaction_id);
+    AgentInteractionContinuationRequest::new(
+        resolved,
+        AgentCurrentSessionSubmitRequest::start(format!(
+            "interaction resolution for {}",
+            pending.interaction_id
+        ))
+        .with_presentation(MailboxPresentation::Hidden)
+        .with_mail_id(mail_id),
+    )
+}
+
+async fn record_pending_interaction(
+    handle: &AgentRuntimeHandle,
+    agent_id: AgentId,
+    thread_id: ThreadId,
+    interaction: InteractionRequest,
+) {
+    handle
+        .record_thread_facts(
+            agent_id,
+            thread_id,
+            vec![crate::ThreadNotificationFact::durable(
+                interaction.updated_at,
+                ThreadNotification::InteractionChanged {
+                    interaction: Box::new(interaction),
+                },
+            )],
+        )
+        .await
+        .unwrap();
 }
 
 fn test_options() -> AgentRuntimeOptions {
@@ -997,6 +1072,149 @@ async fn start_or_queue_never_steers_an_active_turn() {
 
     host.turn_factory.blocker.notify_one();
     wait_for_prepared_messages(&host.turn_factory, 2).await;
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn interaction_continuation_starts_idle_fresh_turn_and_deduplicates_stable_mail() {
+    let repository = TestRepository::empty();
+    let host = TestHost::new(repository.clone(), FactoryMode::Block);
+    let runtime = AgentRuntime::start(host.clone(), test_options())
+        .await
+        .unwrap();
+    let handle = runtime.handle();
+    let agent_id = AgentId::new("root").unwrap();
+    let thread_id = ThreadId::new("root").unwrap();
+    handle.register(registration("root", "chat")).await.unwrap();
+    let pending = pending_user_interaction("ask-idle", &thread_id, "turn-origin");
+    record_pending_interaction(
+        &handle,
+        agent_id.clone(),
+        thread_id.clone(),
+        pending.clone(),
+    )
+    .await;
+    let continuation = interaction_continuation(&pending);
+
+    handle
+        .submit_interaction_continuation(agent_id.clone(), continuation.clone())
+        .await
+        .unwrap();
+    wait_for_prepared_messages(&host.turn_factory, 1).await;
+    let active = repository.state(&agent_id);
+    assert!(active.active_input.as_ref().is_some_and(|input| {
+        input.mail_id == AgentInteractionContinuationRequest::stable_mail_id("ask-idle")
+            && input.presentation == MailboxPresentation::Hidden
+    }));
+
+    handle
+        .submit_interaction_continuation(agent_id.clone(), continuation)
+        .await
+        .unwrap();
+    assert_eq!(host.turn_factory.prepared_messages.lock().unwrap().len(), 1);
+    assert!(repository.state(&agent_id).pending_inputs.is_empty());
+
+    host.turn_factory.blocker.notify_one();
+    handle.wait_until_idle(agent_id.clone()).await.unwrap();
+    assert_eq!(host.turn_factory.prepared_messages.lock().unwrap().len(), 1);
+    let consumed = repository.state(&agent_id);
+    assert!(consumed.active_input.is_none());
+    assert!(consumed.pending_inputs.is_empty());
+
+    assert!(
+        handle
+            .thread_snapshot(&thread_id)
+            .unwrap()
+            .interactions
+            .iter()
+            .all(|interaction| interaction.interaction_id != "ask-idle")
+    );
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn interaction_continuations_queue_without_steering_origin_or_unrelated_active_turn() {
+    let repository = TestRepository::empty();
+    let host = TestHost::new(repository.clone(), FactoryMode::Block);
+    let runtime = AgentRuntime::start(host.clone(), test_options())
+        .await
+        .unwrap();
+    let handle = runtime.handle();
+    let agent_id = AgentId::new("root").unwrap();
+    let thread_id = ThreadId::new("root").unwrap();
+    handle.register(registration("root", "chat")).await.unwrap();
+    let active_turn = handle
+        .submit(
+            agent_id.clone(),
+            AgentSubmitRequest::start(thread_id.clone(), "active"),
+        )
+        .await
+        .unwrap();
+    wait_for_prepared_messages(&host.turn_factory, 1).await;
+
+    let origin = pending_user_interaction("ask-origin", &thread_id, active_turn.as_str());
+    let unrelated = pending_user_interaction("ask-unrelated", &thread_id, "turn-completed");
+    for pending in [&origin, &unrelated] {
+        record_pending_interaction(
+            &handle,
+            agent_id.clone(),
+            thread_id.clone(),
+            pending.clone(),
+        )
+        .await;
+        handle
+            .submit_interaction_continuation(agent_id.clone(), interaction_continuation(pending))
+            .await
+            .unwrap();
+    }
+
+    assert_eq!(host.turn_factory.prepared_messages.lock().unwrap().len(), 1);
+    let durable = repository.state(&agent_id);
+    assert_eq!(durable.snapshot.active_turn_id.as_ref(), Some(&active_turn));
+    assert_eq!(durable.pending_inputs.len(), 2);
+    assert!(durable.pending_inputs.iter().all(|input| {
+        matches!(input.delivery_state, MailboxDeliveryState::Pending)
+            && input.queue_coalescing_key.is_none()
+    }));
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn interaction_continuation_repository_failure_rolls_back_resolution_and_input() {
+    let repository = TestRepository::empty();
+    let host = TestHost::new(repository.clone(), FactoryMode::Block);
+    let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
+    let handle = runtime.handle();
+    let agent_id = AgentId::new("root").unwrap();
+    let thread_id = ThreadId::new("root").unwrap();
+    handle.register(registration("root", "chat")).await.unwrap();
+    let pending = pending_user_interaction("ask-rollback", &thread_id, "turn-origin");
+    record_pending_interaction(
+        &handle,
+        agent_id.clone(),
+        thread_id.clone(),
+        pending.clone(),
+    )
+    .await;
+    repository.fail_next_turn_queue_commit();
+
+    let error = handle
+        .submit_interaction_continuation(agent_id.clone(), interaction_continuation(&pending))
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("turn queue commit failed"));
+    let durable = repository.state(&agent_id);
+    assert!(durable.pending_inputs.is_empty());
+    assert!(durable.active_input.is_none());
+    let canonical = handle.thread_snapshot(&thread_id).unwrap();
+    assert_eq!(
+        canonical
+            .interactions
+            .iter()
+            .find(|interaction| interaction.interaction_id == pending.interaction_id)
+            .map(|interaction| interaction.status.clone()),
+        Some(InteractionStatus::Pending)
+    );
     runtime.shutdown().await.unwrap();
 }
 

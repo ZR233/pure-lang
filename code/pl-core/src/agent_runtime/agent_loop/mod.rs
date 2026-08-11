@@ -9,15 +9,15 @@ use super::host::{
 };
 use super::state::{AgentRuntimeError, unix_timestamp};
 use super::{
-    AgentActivityState, AgentCommittedEvent, AgentCurrentSessionSubmitRequest, AgentLifecycleState,
-    AgentProgressCheckpoint, AgentProgressStage, AgentRuntimeEvent, AgentRuntimeEventKind,
-    AgentRuntimeHandle, AgentRuntimeHost, AgentRuntimeResult, AgentSessionDigest, AgentSnapshot,
-    AgentSubmitRequest, DurableCommitFacts, ThreadActorState, ThreadCommit, ThreadCommitOutcome,
-    ThreadId, TurnId,
+    AgentActivityState, AgentCommittedEvent, AgentCurrentSessionSubmitRequest,
+    AgentInteractionContinuationRequest, AgentLifecycleState, AgentProgressCheckpoint,
+    AgentProgressStage, AgentRuntimeEvent, AgentRuntimeEventKind, AgentRuntimeHandle,
+    AgentRuntimeHost, AgentRuntimeResult, AgentSessionDigest, AgentSnapshot, AgentSubmitRequest,
+    DurableCommitFacts, ThreadActorState, ThreadCommit, ThreadCommitOutcome, ThreadId, TurnId,
 };
 use crate::thread_event::{
-    ObservedTurnEvent, TurnObservation, project_observation, project_runtime_event,
-    project_trace_events, runtime_event_thread_id,
+    ObservedTurnEvent, ThreadNotificationFact, TurnObservation, project_observation,
+    project_runtime_event, project_thread_facts, project_trace_events, runtime_event_thread_id,
 };
 use running_turn::{RunningTurn, TurnCompletion, turn_outcome};
 
@@ -38,6 +38,11 @@ pub(crate) enum AgentLoopCommand {
         root_agent_id: super::AgentId,
         request: AgentCurrentSessionSubmitRequest,
         reply: oneshot::Sender<AgentRuntimeResult<TurnId>>,
+    },
+    SubmitInteractionContinuation {
+        root_agent_id: super::AgentId,
+        request: Box<AgentInteractionContinuationRequest>,
+        reply: oneshot::Sender<AgentRuntimeResult<()>>,
     },
     ReconfigureIdleRole {
         role: crate::AgentRoleId,
@@ -192,6 +197,16 @@ where
                         } => {
                             let result =
                                 self.submit_current_session(root_agent_id, request).await;
+                            let _ = reply.send(result);
+                        }
+                        AgentLoopCommand::SubmitInteractionContinuation {
+                            root_agent_id,
+                            request,
+                            reply,
+                        } => {
+                            let result = self
+                                .submit_interaction_continuation(root_agent_id, *request)
+                                .await;
                             let _ = reply.send(result);
                         }
                         AgentLoopCommand::ReconfigureIdleRole { role, reply } => {
@@ -464,13 +479,12 @@ where
             .map(|trace| trace.sequence.saturating_add(1))
             .unwrap_or(current_sequence);
         let expected_revision = self.state.snapshot.revision;
-        let thread_revision = self
+        let current_thread = self
             .runtime
             .thread_events
             .snapshot(thread_id.as_str())
-            .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?
-            .revision;
-        let projected = project_trace_events(thread_id.as_str(), thread_revision, &trace_events);
+            .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
+        let projected = project_trace_events(thread_id.as_str(), &current_thread, &trace_events);
         let session_projection = if projected.notifications.is_empty() {
             None
         } else {
@@ -544,8 +558,22 @@ where
 
     async fn commit_transition<F>(
         &mut self,
+        next: ThreadActorState,
+        trace_events: Vec<TraceEvent>,
+        event_kind: F,
+    ) -> AgentRuntimeResult<()>
+    where
+        F: FnOnce(AgentSnapshot) -> AgentRuntimeEventKind,
+    {
+        self.commit_transition_with_thread_facts(next, trace_events, Vec::new(), event_kind)
+            .await
+    }
+
+    async fn commit_transition_with_thread_facts<F>(
+        &mut self,
         mut next: ThreadActorState,
         trace_events: Vec<TraceEvent>,
+        thread_facts: Vec<ThreadNotificationFact>,
         event_kind: F,
     ) -> AgentRuntimeResult<()>
     where
@@ -566,17 +594,43 @@ where
             kind: event_kind(next.snapshot.clone()),
         };
         let thread_id = runtime_event_thread_id(&event).map(str::to_string);
-        let current_thread_revision = match thread_id.as_deref() {
-            Some(thread_id) => {
+        let current_thread = match thread_id.as_deref() {
+            Some(thread_id) => Some(
                 self.runtime
                     .thread_events
                     .snapshot(thread_id)
-                    .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?
-                    .revision
+                    .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?,
+            ),
+            None if thread_facts.is_empty() => None,
+            None => {
+                return Err(AgentRuntimeError::InvalidInput(
+                    "thread facts require a thread-scoped runtime event".to_string(),
+                ));
             }
-            None => 0,
         };
-        let projected = project_runtime_event(&event, current_thread_revision);
+        let current_thread_revision = current_thread
+            .as_ref()
+            .map_or(0, |snapshot| snapshot.revision);
+        let mut projected = project_runtime_event(&event, current_thread_revision);
+        if !thread_facts.is_empty() {
+            let Some(current) = current_thread.as_ref() else {
+                return Err(AgentRuntimeError::InvalidInput(
+                    "thread facts require a current thread snapshot".to_string(),
+                ));
+            };
+            let after_runtime = if projected.notifications.is_empty() {
+                current.clone()
+            } else {
+                self.runtime
+                    .thread_events
+                    .project(current.thread.id.as_str(), &projected.notifications)
+                    .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?
+            };
+            let extra =
+                project_thread_facts(current.thread.id.as_str(), &after_runtime, thread_facts);
+            projected.through_revision = extra.through_revision;
+            projected.notifications.extend(extra.notifications);
+        }
         let thread_projection = match thread_id.as_deref() {
             Some(thread_id) if !projected.notifications.is_empty() => {
                 Some(ThreadProjectionCommit {

@@ -99,6 +99,30 @@ runtime 不因为 caller 为 program 绕过任何本地策略。Tool Search 只�
 “计划已完成，请 Studio 发起确认交互”，不是执行工具；确认后 root Thread 保持 Task，由
 TaskService 通过显式 durable input 推进。`<proposed_plan>` 不再是协议入口。
 
+`request_user_input` 在 Studio 中是 durable Turn 边界，Simple root、Task root 和可执行该工具的
+child 使用相同语义。工具返回 typed `ToolRuntimeEvent::InteractionRequested`，RunningTurn 把它
+转换成 Turn observation，再由 ThreadActor/ThreadRepository 提交 pending Interaction；只有该事务
+成功后，紧随其后的 `EndTurn` 才能让原 Turn 进入 terminal。工具不得在后台 spawn 一个
+interaction callback 后立即结束，也不得依赖进程内 waiter 保存用户问题。非 Studio 宿主仍默认
+使用 `AwaitResponse`，可在原 Turn 内等待 callback，不受 Studio 语义影响。
+
+pending Interaction 是一种成功的 Turn completion boundary，不是业务 finalization。若当前 role 配置了
+`RequiredTool`（例如 Task planner 的 `plan_exit`），RunningTurn 在该边界不得把缺少 required tool
+改写为 validation failure；用户答复后的 fresh Turn 仍按原 role policy 继续，只有真正完成该阶段时
+才必须调用 required tool。
+
+Studio 回答 UserInput 时，把 resolved Interaction 与一个 hidden durable input 放入同一个
+`ThreadCommit`。mail ID 固定为 `interaction-resolution:{interactionId}`，提交策略固定为
+`StartOrQueue`：Thread idle 时开启 fresh Turn，有活动 Turn 时只排队，绝不 steer 当前 Turn；该输入
+没有 queue coalescing key，也不参与 Task Planner wake 合并。事务失败时 Interaction 与 input 都不
+落地；重复回答先按 canonical Interaction 状态、再按稳定 mail ID 幂等返回，不能创建第二个 input
+或 Turn。ToolApproval 与 PlanConfirmation 保留各自的等待、审批和 Task phase 语义，不套用该
+UserInput continuation。
+
+Interaction phase 只影响其 origin Turn。只有 origin Turn 仍是 Thread 当前 active Turn 时，pending
+可投影 `WaitingInteraction`，resolution 可投影 `Thinking`；origin 已 terminal 或当前活动的是其他
+Turn 时，只提交 Interaction 自身变化，不得复活旧 Turn、覆盖无关 Turn 或伪造 active 状态。
+
 Studio attach 会对活动 Task root Thread 执行一次有证据门禁的检查：只读取最新完整 plan Item，
 并在没有对应 interaction、没有活动 TaskRun、且 plan 未进入实施或终态时补建确认。重复 attach
 必须幂等，不能复活旧计划或制造多个 pending confirmation。
@@ -161,6 +185,9 @@ Task executor 达到 30 分钟 `WallClock` 预算时，预算事实仍作为当�
 30 分钟切片；第四次耗尽后 WorkUnit 进入 `needsAttention`，由 Planner 停止、拆分或通过
 `task_send_message` 显式开启新 tranche。非 wall-clock budget、用户停止、Task 取消和压缩失败
 都不自动续轮。pending continuation 必须持久化并使用 WorkUnit/来源 Turn 组成的幂等键恢复。
+
+一般 `budgetLimited` 不因 UserInput fresh-turn 机制获得自动续轮；只有上述 Task executor
+`WallClockRollover` 状态机可以创建预算 continuation，避免把死循环或永久预算耗尽掩盖成无界 Turn。
 
 ## 运行时错误分类
 

@@ -199,6 +199,84 @@ fn pending_interaction(
     }
 }
 
+fn responses_function_tool_sse(id: &str, name: &str, arguments: serde_json::Value) -> String {
+    let item_id = format!("fc-{id}");
+    let call_id = format!("call-{id}");
+    responses_sse(vec![
+        serde_json::json!({
+            "type": "response.output_item.added",
+            "item": {
+                "type": "function_call",
+                "id": item_id,
+                "call_id": call_id,
+                "name": name
+            }
+        }),
+        serde_json::json!({
+            "type": "response.output_item.done",
+            "item": {
+                "type": "function_call",
+                "id": item_id,
+                "call_id": call_id,
+                "name": name,
+                "arguments": serde_json::to_string(&arguments).unwrap()
+            }
+        }),
+    ])
+}
+
+fn responses_final_text_sse(id: &str, text: &str) -> String {
+    let item_id = format!("msg-{id}");
+    responses_sse(vec![
+        serde_json::json!({
+            "type": "response.output_item.added",
+            "item": {
+                "id": item_id,
+                "type": "message",
+                "role": "assistant",
+                "phase": "final_answer"
+            }
+        }),
+        serde_json::json!({
+            "type": "response.output_text.delta",
+            "item_id": item_id,
+            "delta": text
+        }),
+        serde_json::json!({
+            "type": "response.output_item.done",
+            "item": {
+                "id": item_id,
+                "type": "message",
+                "role": "assistant",
+                "phase": "final_answer",
+                "content": [{"type": "output_text", "text": text}]
+            }
+        }),
+    ])
+}
+
+fn responses_sse(mut events: Vec<serde_json::Value>) -> String {
+    events.push(serde_json::json!({
+        "type": "response.completed",
+        "response": {
+            "id": "response-test",
+            "model": "local-responses",
+            "usage": {
+                "input_tokens": 10,
+                "output_tokens": 5,
+                "total_tokens": 15,
+                "input_tokens_details": {"cached_tokens": 0},
+                "output_tokens_details": {"reasoning_tokens": 0}
+            }
+        }
+    }));
+    events
+        .into_iter()
+        .map(|event| format!("data: {}\n\n", serde_json::to_string(&event).unwrap()))
+        .chain(std::iter::once("data: [DONE]\n\n".to_string()))
+        .collect()
+}
+
 async fn wait_for_no_active_turn(runtime: &StudioRuntime) {
     tokio::time::timeout(TEST_RUNTIME_TIMEOUT, async {
         loop {

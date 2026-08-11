@@ -65,6 +65,13 @@ pub(super) fn finalize_tool_item(
     if status == TracePartStatus::Completed {
         for event in &record.runtime_events {
             match event {
+                ToolRuntimeEvent::InteractionRequested { interaction } => {
+                    recorder.broadcast(AgentEvent::InteractionChanged {
+                        event: pl_protocol::InteractionChangedEvent {
+                            interaction: interaction.as_ref().clone(),
+                        },
+                    });
+                }
                 ToolRuntimeEvent::SkillActivated { activation } => {
                     recorder.record_trace_only(TraceEventKind::SkillActivated {
                         activation: activation.clone(),
@@ -168,7 +175,8 @@ fn tool_execution_record_from_envelope(
     } = envelope;
     let revision = runtime_events.iter().find_map(|event| match event {
         ToolRuntimeEvent::ToolResultRevision { revision } => Some(*revision),
-        ToolRuntimeEvent::SkillActivated { .. }
+        ToolRuntimeEvent::InteractionRequested { .. }
+        | ToolRuntimeEvent::SkillActivated { .. }
         | ToolRuntimeEvent::OutputArtifacts { .. }
         | ToolRuntimeEvent::CacheHit { .. }
         | ToolRuntimeEvent::OutputMetrics { .. }
@@ -183,7 +191,8 @@ fn tool_execution_record_from_envelope(
                 artifact_bytes,
                 result_hash: _,
             } => Some((*raw_bytes, *model_visible_bytes, *artifact_bytes)),
-            ToolRuntimeEvent::SkillActivated { .. }
+            ToolRuntimeEvent::InteractionRequested { .. }
+            | ToolRuntimeEvent::SkillActivated { .. }
             | ToolRuntimeEvent::ToolResultRevision { .. }
             | ToolRuntimeEvent::OutputArtifacts { .. }
             | ToolRuntimeEvent::CacheHit { .. }
@@ -229,7 +238,8 @@ fn output_artifacts(runtime_events: &[ToolRuntimeEvent]) -> Vec<serde_json::Valu
         .iter()
         .filter_map(|event| match event {
             ToolRuntimeEvent::OutputArtifacts { artifacts } => Some(artifacts.as_slice()),
-            ToolRuntimeEvent::SkillActivated { .. }
+            ToolRuntimeEvent::InteractionRequested { .. }
+            | ToolRuntimeEvent::SkillActivated { .. }
             | ToolRuntimeEvent::ToolResultRevision { .. }
             | ToolRuntimeEvent::CacheHit { .. }
             | ToolRuntimeEvent::OutputMetrics { .. }
@@ -257,7 +267,8 @@ fn output_metrics(runtime_events: &[ToolRuntimeEvent]) -> Option<pl_trace::Trace
             result_hash: result_hash.clone(),
             cache_hit,
         }),
-        ToolRuntimeEvent::SkillActivated { .. }
+        ToolRuntimeEvent::InteractionRequested { .. }
+        | ToolRuntimeEvent::SkillActivated { .. }
         | ToolRuntimeEvent::ToolResultRevision { .. }
         | ToolRuntimeEvent::OutputArtifacts { .. }
         | ToolRuntimeEvent::CacheHit { .. }

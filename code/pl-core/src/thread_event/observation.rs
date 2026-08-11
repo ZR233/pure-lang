@@ -1,13 +1,15 @@
 use std::collections::BTreeMap;
 
 use pl_protocol::{
-    RuntimeCostAmount, ThreadItem, ThreadItemContent, ThreadItemStatus, ThreadNotification,
-    ThreadNotificationEnvelope, ThreadRuntimeSnapshot, ThreadRuntimeUsage, ThreadSnapshot,
+    InteractionRequest, RuntimeCostAmount, ThreadItem, ThreadItemContent, ThreadItemStatus,
+    ThreadNotification, ThreadNotificationEnvelope, ThreadRuntimeSnapshot, ThreadRuntimeUsage,
+    ThreadSnapshot,
 };
 use pl_trace::AgentEvent;
 
 use crate::ContextCompactionSnapshot;
 
+use super::fact::{ThreadNotificationFact, project_thread_facts};
 use super::projector::ThreadProjectionBatch;
 
 #[derive(Debug, Clone)]
@@ -22,6 +24,7 @@ pub(crate) enum TurnObservation {
     DirectoryChanged,
     RuntimeDelta(pl_protocol::AgentRuntimeDelta),
     TodoList(pl_protocol::TodoListSnapshot),
+    InteractionChanged(Box<InteractionRequest>),
     ContextCompacted {
         before_tokens: u64,
         after_tokens: u64,
@@ -41,6 +44,9 @@ pub(crate) fn observation_from_agent_event(event: &AgentEvent) -> Option<TurnObs
         AgentEvent::TodoListUpdated { snapshot } => {
             Some(TurnObservation::TodoList(snapshot.clone()))
         }
+        AgentEvent::InteractionChanged { event } => Some(TurnObservation::InteractionChanged(
+            Box::new(event.interaction.clone()),
+        )),
         AgentEvent::TurnInterrupted { .. } | AgentEvent::Error { .. } => {
             Some(TurnObservation::Diagnostic)
         }
@@ -48,7 +54,6 @@ pub(crate) fn observation_from_agent_event(event: &AgentEvent) -> Option<TurnObs
         | AgentEvent::TracePartDelta { .. }
         | AgentEvent::TracePartCompleted { .. }
         | AgentEvent::TracePartFailed { .. }
-        | AgentEvent::InteractionChanged { .. }
         | AgentEvent::SkillActivated { .. }
         | AgentEvent::TurnBudgetLimited { .. }
         | AgentEvent::Done => None,
@@ -75,6 +80,16 @@ pub(crate) fn project_observation(
     current: &ThreadSnapshot,
     observation: TurnObservation,
 ) -> ThreadProjectionBatch {
+    if let TurnObservation::InteractionChanged(interaction) = observation {
+        return project_thread_facts(
+            thread_id,
+            current,
+            vec![ThreadNotificationFact::durable(
+                interaction.updated_at,
+                ThreadNotification::InteractionChanged { interaction },
+            )],
+        );
+    }
     let (emitted_at, notification) = match observation {
         TurnObservation::RuntimeDelta(delta) => {
             let emitted_at = delta.updated_at;
@@ -134,6 +149,7 @@ pub(crate) fn project_observation(
             }),
         ),
         TurnObservation::DirectoryChanged | TurnObservation::Diagnostic => (unix_timestamp(), None),
+        TurnObservation::InteractionChanged(_) => unreachable!("handled before projection"),
     };
     let notifications = notification
         .map(|notification| {

@@ -103,15 +103,15 @@ impl Tool for AskUserTool {
                 tool_id: input.tool_id,
                 questions: args.questions,
             };
-            let Some(callback) = context.options.interaction_callback.clone() else {
-                return Err(PureError::ToolExecutionFailed {
-                    tool: self.name().to_string(),
-                    error: "interaction runtime is not configured".to_string(),
-                });
-            };
             let interaction = user_input_interaction(&input.session_id, &request, &context);
             let (response, runtime_events) = match context.options.user_input_mode {
                 UserInputMode::AwaitResponse => {
+                    let Some(callback) = context.options.interaction_callback.clone() else {
+                        return Err(PureError::ToolExecutionFailed {
+                            tool: self.name().to_string(),
+                            error: "interaction runtime is not configured".to_string(),
+                        });
+                    };
                     let resolution = match context.options.cancellation_token.clone() {
                         Some(token) => {
                             tokio::select! {
@@ -134,15 +134,15 @@ impl Tool for AskUserTool {
                     };
                     (response, Vec::new())
                 }
-                UserInputMode::EmitAndEndTurn => {
-                    tokio::spawn(async move {
-                        let _ = callback(interaction).await;
-                    });
-                    (
-                        UserInputResponse::default(),
-                        vec![ToolRuntimeEvent::EndTurn],
-                    )
-                }
+                UserInputMode::EmitAndEndTurn => (
+                    UserInputResponse::default(),
+                    vec![
+                        ToolRuntimeEvent::InteractionRequested {
+                            interaction: Box::new(interaction),
+                        },
+                        ToolRuntimeEvent::EndTurn,
+                    ],
+                ),
             };
             let description = serde_json::to_string(&response).map_err(|error| {
                 PureError::ToolExecutionFailed {
@@ -356,6 +356,7 @@ mod tests {
                 }],
             }
         );
+        assert!(output.runtime_events.is_empty());
     }
 
     #[tokio::test]
@@ -390,23 +391,11 @@ mod tests {
 
     #[tokio::test]
     async fn request_user_input_can_end_current_turn_after_request() {
-        let callback: crate::InteractionCallback = Arc::new(|_interaction| {
-            Box::pin(async {
-                std::future::pending::<()>().await;
-                InteractionResolution::UserInput {
-                    answers: Default::default(),
-                }
-            })
-        });
         let output = tokio::time::timeout(
             std::time::Duration::from_millis(200),
             AskUserTool.execute(
                 tool_input(),
-                context(
-                    TurnOptions::default()
-                        .with_interaction_callback(callback)
-                        .with_user_input_end_turn(),
-                ),
+                context(TurnOptions::default().with_user_input_end_turn()),
             ),
         )
         .await
@@ -417,9 +406,17 @@ mod tests {
             serde_json::from_str::<UserInputResponse>(&output.description).unwrap(),
             UserInputResponse::default()
         );
+        assert_eq!(output.runtime_events.len(), 2);
+        let crate::tool::ToolRuntimeEvent::InteractionRequested { interaction } =
+            &output.runtime_events[0]
+        else {
+            panic!("first runtime event must persist the interaction");
+        };
+        assert_eq!(interaction.interaction_id, "session-1-call-1");
+        assert_eq!(interaction.kind, InteractionKind::UserInput);
         assert_eq!(
-            output.runtime_events,
-            vec![crate::tool::ToolRuntimeEvent::EndTurn]
+            output.runtime_events[1],
+            crate::tool::ToolRuntimeEvent::EndTurn
         );
     }
 

@@ -3,7 +3,7 @@ use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use pl_model::TokenUsage;
-use pl_protocol::{ConversationRecoveryMode, TurnBillingRecord, TurnFailure};
+use pl_protocol::{ConversationRecoveryMode, InteractionRequest, TurnBillingRecord, TurnFailure};
 use serde::{Deserialize, Serialize};
 
 use crate::{AgentRoleId, AgentSession};
@@ -395,6 +395,24 @@ pub struct AgentCurrentSessionSubmitRequest {
     pub presentation: MailboxPresentation,
     pub metadata: serde_json::Value,
     pub mail_id: Option<String>,
+}
+
+/// 将 resolved Interaction 与后续 mailbox 输入作为一个原子 continuation 提交。
+#[derive(Debug, Clone, PartialEq)]
+pub struct AgentInteractionContinuationRequest {
+    pub interaction: InteractionRequest,
+    pub input: AgentCurrentSessionSubmitRequest,
+}
+
+impl AgentInteractionContinuationRequest {
+    pub fn new(interaction: InteractionRequest, input: AgentCurrentSessionSubmitRequest) -> Self {
+        Self { interaction, input }
+    }
+
+    /// 返回 Interaction resolution 使用的稳定 mailbox ID。
+    pub fn stable_mail_id(interaction_id: &str) -> String {
+        format!("interaction-resolution:{interaction_id}")
+    }
 }
 
 impl AgentCurrentSessionSubmitRequest {

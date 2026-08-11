@@ -620,6 +620,9 @@ fn enforce_finalization(
     if result.status != TurnResultStatus::Completed {
         return None;
     }
+    if result.ended_for_interaction {
+        return None;
+    }
     let TurnFinalizationPolicy::RequiredTool { name } = &policy.finalization else {
         return None;
     };
@@ -680,6 +683,21 @@ mod tests {
 
         let result = result.unwrap();
         assert_eq!(finalized.as_deref(), Some("report_completion"));
+        assert_eq!(result.status, TurnResultStatus::Completed);
+        assert_eq!(result.error, None);
+        assert_eq!(result.failure, None);
+    }
+
+    #[test]
+    fn required_tool_finalization_accepts_durable_interaction_boundary() {
+        let mut completed = completed_result(Vec::new());
+        completed.ended_for_interaction = true;
+        let mut result = Ok(completed);
+
+        let finalized = enforce_finalization(&mut result, &required_tool_policy("plan_exit"));
+
+        assert_eq!(finalized, None);
+        let result = result.unwrap();
         assert_eq!(result.status, TurnResultStatus::Completed);
         assert_eq!(result.error, None);
         assert_eq!(result.failure, None);
@@ -817,6 +835,7 @@ mod tests {
             context_compactions: Vec::new(),
             session_message_count: 0,
             status: TurnResultStatus::Completed,
+            ended_for_interaction: false,
             abort_reason: None,
             error: None,
             failure: None,

@@ -85,6 +85,20 @@ wake 在下一 Turn 启动前合并，最新 wake 决定 Turn identity，较早 
 Turn；用户输入、交互回复和其他 mailbox 类型不参与该 key。这样 provider 重试、review verdict 与
 恢复扫描不会为已被同一 Planner Turn 覆盖的事实创建多个模型 Turn。
 
+Studio 的 `request_user_input` 对 Simple、Task root 和可用 child 一律形成 durable fresh-turn
+边界：pending Interaction 先经 ThreadActor/ThreadRepository 提交，原 Turn 再结束；用户答复以
+`interaction-resolution:{interactionId}` 作为稳定 mail ID，把 resolved Interaction 与 hidden input
+在同一 Thread repository 事务提交。idle root/child 立即启动新 Turn，活动中的任何 Turn 都只令
+该 input 排队，绝不 steer；它没有 Planner wake coalescing key。重复答复按 Interaction 状态和
+稳定 mail ID 幂等，进程重启后也只能 materialize 一次。Interaction resolution 只能更新仍 active
+的 origin Turn phase，不能让 terminal origin 或无关活动 Turn 重新变成 active。ToolApproval 和
+PlanConfirmation 继续使用本章各自的 Task phase/审批流程。
+
+Task planner/executor/reviewer 的 required finalization tool 只约束业务阶段完成，不约束 durable
+UserInput 边界。原 Turn 因 pending Interaction 结束时必须保存为 completed，不能因为尚未调用
+`plan_exit`、`report_completion` 或 review exit 工具而标成 failed；fresh Turn 恢复后仍继续执行原
+finalization policy。
+
 进程重启后不为普通 paused Task 自动启动模型；但崩溃前已经 durable 形成的 pending Planner wake
 或 mailbox input 必须在资源恢复完成后继续交付。活动 Task 无 pending input 时显示 paused；用户
 “继续任务”以稳定 mail ID 向 root Thread 提交一次隐藏的明确输入，要求 planner 先读取
@@ -144,6 +158,10 @@ NeedsAttention 并保留 executor/worktree，等待 Planner 停止、拆分或�
 自动续轮；pending continuation 在重启时按幂等键对账已有 active/terminal Turn，禁止重复增加切片。
 rollover replacement transcript 必须先与 TurnFinished 在 repository 提交链上持久化成功，再允许
 hidden continuation 入队；提交失败时 actor 不推进内存 session，也不启动下一 Turn。
+
+UserInput 的 fresh-turn 边界不扩大上述预算续轮范围。普通 Planner、reviewer、Simple 或 child
+`budgetLimited` 仍是 terminal 事实，不自动合成 continuation；只有这里定义的 executor
+`WallClockRollover` 可以按 WorkUnit tranche 状态机续轮。
 
 WorkUnit 在 ReadyForReview 之后以 `executorAgentId` 创建 fresh Delivery reviewer。ReviewRound
 事务固定最新 Completion revision，reviewer canonical workspace 直接绑定同一 worktree，不接受
