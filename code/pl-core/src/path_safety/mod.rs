@@ -303,13 +303,13 @@ async fn validate_path_async(
 fn checked_descendant_components(
     root: &Path,
     candidate: &Path,
-    requirement: ExistingPathRequirement,
+    _requirement: ExistingPathRequirement,
 ) -> Result<Vec<PathBuf>, PathSafetyError> {
     match descendant_components(root, candidate) {
         Ok(components) => Ok(components),
         #[cfg(windows)]
         Err(PathSafetyError::OutsideRoot { .. }) => {
-            windows_checked_descendant_components(root, candidate, requirement)
+            windows_checked_descendant_components(root, candidate, _requirement)
         }
         Err(error) => Err(error),
     }
@@ -318,13 +318,13 @@ fn checked_descendant_components(
 async fn checked_descendant_components_async(
     root: &Path,
     candidate: &Path,
-    requirement: ExistingPathRequirement,
+    _requirement: ExistingPathRequirement,
 ) -> Result<Vec<PathBuf>, PathSafetyError> {
     match descendant_components(root, candidate) {
         Ok(components) => Ok(components),
         #[cfg(windows)]
         Err(PathSafetyError::OutsideRoot { .. }) => {
-            windows_checked_descendant_components_async(root, candidate, requirement).await
+            windows_checked_descendant_components_async(root, candidate, _requirement).await
         }
         Err(error) => Err(error),
     }
