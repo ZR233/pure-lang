@@ -986,6 +986,220 @@ async fn task_root_user_input_boundary_completes_without_plan_exit() {
 }
 
 #[tokio::test]
+async fn plan_adjustment_resolves_and_continues_in_a_fresh_planner_turn() {
+    let original_plan = "# 原计划\n\n1. 使用英文提示词。";
+    let revised_plan = "# 修订后的计划\n\n1. 所有提示词都使用中文。";
+    let initial_plan_response = responses_function_tool_sse(
+        "initial-plan",
+        "plan_exit",
+        serde_json::json!({ "content": original_plan }),
+    );
+    let initial_ack = responses_final_text_sse("initial-plan-ack", "计划已提交确认");
+    let revised_plan_response = responses_function_tool_sse(
+        "revised-plan",
+        "plan_exit",
+        serde_json::json!({ "content": revised_plan }),
+    );
+    let revised_ack = responses_final_text_sse("revised-plan-ack", "修订计划已重新提交确认");
+    let (base_url, server) = serve_http_sequence(vec![
+        TestHttpResponse::sse(initial_plan_response),
+        TestHttpResponse::sse(initial_ack),
+        TestHttpResponse::sse(revised_plan_response),
+        TestHttpResponse::sse(revised_ack),
+    ])
+    .await;
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("pure-plan-adjustment-{unique}"));
+    let home = root.join("home");
+    let workspace = root.join("workspace");
+    tokio::fs::create_dir_all(&workspace).await.unwrap();
+    let config_store = ConfigStore::new(crate::config::ConfigPaths::from_home(&home));
+    config_store.save(&test_config(base_url)).unwrap();
+    let store = StudioStore::open_memory().await.unwrap();
+    let runtime = StudioRuntime::new(store.clone(), config_store);
+    let project = runtime.open_project(&workspace).await.unwrap();
+    let thread = runtime
+        .create_thread(&project.id, "Plan adjustment continuation")
+        .await
+        .unwrap();
+    runtime
+        .set_thread_mode(&thread.id, StudioMode::Task)
+        .await
+        .unwrap();
+
+    let submitted = runtime
+        .submit_prompt(StudioSubmitPromptRequest {
+            thread_id: thread.id.clone(),
+            prompt: "先制定计划，等待确认后再实施".to_string(),
+            attachment_ids: Vec::new(),
+            options: StudioSubmitPromptOptions::default(),
+        })
+        .await
+        .unwrap();
+    let confirmation = tokio::time::timeout(TEST_RUNTIME_TIMEOUT, async {
+        loop {
+            if let Some(interaction) = store
+                .list_pending_interactions(&thread.id)
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|interaction| interaction.kind == InteractionKind::PlanConfirmation)
+            {
+                break interaction;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(matches!(
+        &confirmation.payload,
+        InteractionPayload::PlanConfirmation { content, .. } if content == original_plan
+    ));
+
+    let resolution = crate::InteractionResolution::PlanConfirmation {
+        decision: crate::PlanConfirmationResolution::ContinuePlanning,
+        content: Some("涉及的提示词都用中文".to_string()),
+        reason: Some("continue planning".to_string()),
+    };
+    let response = runtime
+        .resolve_interaction(confirmation.interaction_id.clone(), resolution.clone())
+        .await
+        .unwrap();
+    assert_eq!(response.interaction.status, InteractionStatus::Resolved);
+
+    assert_eq!(
+        tokio::time::timeout(TEST_RUNTIME_TIMEOUT, server)
+            .await
+            .unwrap()
+            .unwrap(),
+        4
+    );
+    wait_for_no_active_turn(&runtime).await;
+
+    let persisted = store
+        .read_interaction(&confirmation.interaction_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(persisted.status, InteractionStatus::Resolved);
+    assert_eq!(persisted.resolution, Some(resolution.clone()));
+    let revised_confirmation = tokio::time::timeout(TEST_RUNTIME_TIMEOUT, async {
+        loop {
+            if let Some(interaction) = store
+                .list_pending_interactions(&thread.id)
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|interaction| interaction.kind == InteractionKind::PlanConfirmation)
+            {
+                break interaction;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("revised plan should require confirmation again");
+    assert_ne!(
+        revised_confirmation.interaction_id,
+        confirmation.interaction_id
+    );
+    assert!(matches!(
+        revised_confirmation.payload,
+        InteractionPayload::PlanConfirmation { content, .. } if content == revised_plan
+    ));
+
+    let turns = turn::Entity::find()
+        .filter(turn::Column::ThreadId.eq(&thread.id))
+        .all(store.database())
+        .await
+        .unwrap();
+    assert_eq!(turns.len(), 2);
+    assert!(turns.iter().all(|turn| turn.status == "completed"));
+    assert!(turns.iter().all(|turn| turn.failure_json.is_none()));
+    assert!(turns.iter().all(|turn| turn.budget_limit_json.is_none()));
+    assert!(turns.iter().any(|turn| turn.id == submitted.turn_id));
+
+    let owner = crate::studio::agent_host::root_agent_id(&thread.id);
+    let mail_id =
+        pl_core::AgentInteractionContinuationRequest::stable_mail_id(&confirmation.interaction_id);
+    let input = store
+        .database()
+        .query_one_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Sqlite,
+            "SELECT state, content, metadata_json, presentation FROM thread_inputs
+             WHERE thread_id = ? AND mail_id = ?",
+            [owner.to_string().into(), mail_id.clone().into()],
+        ))
+        .await
+        .unwrap()
+        .expect("plan adjustment should be stored as a durable input");
+    assert_eq!(input.try_get::<String>("", "state").unwrap(), "consumed");
+    assert_eq!(
+        input.try_get::<String>("", "presentation").unwrap(),
+        "hidden"
+    );
+    let hidden_prompt = input.try_get::<String>("", "content").unwrap();
+    assert!(hidden_prompt.contains("只修订计划，不要开始实施"));
+    assert!(hidden_prompt.contains(original_plan));
+    assert!(hidden_prompt.contains("涉及的提示词都用中文"));
+    let metadata: serde_json::Value =
+        serde_json::from_str(&input.try_get::<String>("", "metadata_json").unwrap()).unwrap();
+    assert_eq!(
+        metadata["interactionResolutionId"],
+        confirmation.interaction_id
+    );
+    assert_eq!(metadata["interactionKind"], "planConfirmation");
+    assert_eq!(metadata["mailId"], mail_id);
+    let task_run_count = store
+        .database()
+        .query_one_raw(Statement::from_string(
+            DatabaseBackend::Sqlite,
+            "SELECT COUNT(*) AS count FROM task_runs".to_string(),
+        ))
+        .await
+        .unwrap()
+        .unwrap()
+        .try_get::<i64>("", "count")
+        .unwrap();
+    assert_eq!(task_run_count, 0);
+
+    runtime
+        .resolve_interaction(confirmation.interaction_id.clone(), resolution)
+        .await
+        .unwrap();
+    let repeated_input_count = store
+        .database()
+        .query_one_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Sqlite,
+            "SELECT COUNT(*) AS count FROM thread_inputs
+             WHERE thread_id = ? AND mail_id = ?",
+            [owner.to_string().into(), mail_id.into()],
+        ))
+        .await
+        .unwrap()
+        .unwrap()
+        .try_get::<i64>("", "count")
+        .unwrap();
+    assert_eq!(repeated_input_count, 1);
+    assert_eq!(
+        turn::Entity::find()
+            .filter(turn::Column::ThreadId.eq(&thread.id))
+            .all(store.database())
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
+
+    runtime.shutdown().await;
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
 async fn restarted_pending_user_input_resolves_once_with_stable_mail() {
     let (base_url, server, accepted_rx, release_tx) = serve_delayed_sse().await;
     let unique = std::time::SystemTime::now()

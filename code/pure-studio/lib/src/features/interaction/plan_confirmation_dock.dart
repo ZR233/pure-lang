@@ -261,6 +261,7 @@ class _PlanAdjustmentInput extends StatelessWidget {
       builder: (context, constraints) {
         final compact = constraints.maxWidth < 560;
         final input = TextField(
+          key: StudioDriverKeys.planAdjustmentInput,
           controller: controller,
           enabled: enabled,
           minLines: 1,

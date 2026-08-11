@@ -14,6 +14,7 @@ use crate::studio::{
 };
 
 mod history;
+mod interaction_continuation;
 mod lifecycle;
 mod mcp_health;
 mod plan_confirmation;

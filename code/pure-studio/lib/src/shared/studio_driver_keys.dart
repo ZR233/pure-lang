@@ -36,6 +36,7 @@ abstract final class StudioDriverKeys {
   static const providerSave = ValueKey<String>('provider-save');
   static const providerCancel = ValueKey<String>('provider-cancel');
   static const planImplement = ValueKey<String>('plan-implement');
+  static const planAdjustmentInput = ValueKey<String>('plan-adjustment-input');
   static const planContinue = ValueKey<String>('plan-continue');
   static const toolApprove = ValueKey<String>('tool-approve');
   static const toolDeny = ValueKey<String>('tool-deny');

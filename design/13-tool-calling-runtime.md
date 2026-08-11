@@ -116,8 +116,12 @@ Studio 回答 UserInput 时，把 resolved Interaction 与一个 hidden durable 
 `StartOrQueue`：Thread idle 时开启 fresh Turn，有活动 Turn 时只排队，绝不 steer 当前 Turn；该输入
 没有 queue coalescing key，也不参与 Task Planner wake 合并。事务失败时 Interaction 与 input 都不
 落地；重复回答先按 canonical Interaction 状态、再按稳定 mail ID 幂等返回，不能创建第二个 input
-或 Turn。ToolApproval 与 PlanConfirmation 保留各自的等待、审批和 Task phase 语义，不套用该
-UserInput continuation。
+或 Turn。ToolApproval 保留原有等待和审批语义。PlanConfirmation 的 `ContinuePlanning` 保留
+Planner/Task phase 语义，但必须复用同一 durable continuation 边界：在一个 `ThreadCommit` 中
+提交 resolved PlanConfirmation 与包含调整要求的 hidden input，mail ID 同样固定为
+`interaction-resolution:{interactionId}`，idle 时开启 fresh Planner Turn，active 时只排队且绝不
+steer。新的 Planner Turn 必须重新完成 `plan_exit`；`ImplementFreshContext` 和 `Dismiss` 继续使用
+各自的实施启动与忽略语义，不因计划调整路径而改变。
 
 Interaction phase 只影响其 origin Turn。只有 origin Turn 仍是 Thread 当前 active Turn 时，pending
 可投影 `WaitingInteraction`，resolution 可投影 `Thinking`；origin 已 terminal 或当前活动的是其他

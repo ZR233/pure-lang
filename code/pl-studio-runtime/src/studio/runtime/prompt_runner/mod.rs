@@ -6,7 +6,6 @@ use anyhow::{Context, Result, bail};
 use crate::StudioMode;
 use crate::config::StudioRole;
 use crate::studio::agent_host::root_agent_id;
-use crate::studio::ids::unix_seconds;
 use crate::studio::task_coordinator::{TaskStopOrigin, TaskStopReason};
 use crate::studio::{InteractionEmitter, resolution_matches_kind};
 use crate::studio::{ThreadKind, ThreadRecord};
@@ -352,40 +351,26 @@ impl StudioRuntime {
             });
         }
         let resolved = if current.kind == InteractionKind::UserInput {
-            let (handle, canonical_owner) = self.ensure_thread_agent(&thread_id).await?;
             let mail_id =
                 pl_core::AgentInteractionContinuationRequest::stable_mail_id(&interaction_id);
             let message = serde_json::to_string_pretty(&serde_json::json!({
                 "type": "studioInteractionResolution",
-                "interactionId": interaction_id,
+                "interactionId": interaction_id.clone(),
                 "originTurnId": current.scope.turn_id.clone(),
                 "payload": current.payload.clone(),
                 "resolution": resolution.clone(),
             }))?;
-            let now = unix_seconds();
-            let mut resolved = current.clone();
-            resolved.status = InteractionStatus::Resolved;
-            resolved.updated_at = now;
-            resolved.resolved_at = Some(now);
-            resolved.resolution = Some(resolution);
-            handle
-                .submit_interaction_continuation(
-                    canonical_owner,
-                    pl_core::AgentInteractionContinuationRequest::new(
-                        resolved.clone(),
-                        pl_core::AgentCurrentSessionSubmitRequest::start(message)
-                            .with_presentation(pl_core::MailboxPresentation::Hidden)
-                            .with_mail_id(mail_id.clone())
-                            .with_metadata(serde_json::json!({
-                                "interactionResolutionId": interaction_id,
-                                "mailId": mail_id,
-                                "attachmentIds": [],
-                            })),
-                    ),
-                )
-                .await
-                .map_err(|error| anyhow::anyhow!(error))?;
-            resolved
+            self.submit_durable_interaction_continuation(
+                &current,
+                resolution,
+                message,
+                serde_json::json!({
+                    "interactionResolutionId": interaction_id,
+                    "mailId": mail_id,
+                    "attachmentIds": [],
+                }),
+            )
+            .await?
         } else {
             self.interactions
                 .resolve(&interaction_id, resolution, emitter)
